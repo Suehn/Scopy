@@ -1,0 +1,49 @@
+name: Scopy
+options:
+  bundleIdPrefix: com.scopy
+  deploymentTarget:
+    macOS: "14.0"
+  xcodeVersion: "15.0"
+  generateEmptyDirectories: true
+
+settings:
+  base:
+    SWIFT_VERSION: "5.9"
+    MACOSX_DEPLOYMENT_TARGET: "14.0"
+    CODE_SIGN_STYLE: Automatic
+    DEVELOPMENT_TEAM: ""
+    INFOPLIST_FILE: Scopy/Info.plist
+    CODE_SIGN_ENTITLEMENTS: Scopy/Scopy.entitlements
+    PRODUCT_BUNDLE_IDENTIFIER: com.scopy.app
+
+targets:
+  Scopy:
+    type: application
+    platform: macOS
+    sources:
+      - path: Scopy
+        excludes:
+          - "**/*.md"
+    settings:
+      base:
+        PRODUCT_NAME: Scopy
+        LD_RUNPATH_SEARCH_PATHS: "@executable_path/../Frameworks"
+        GENERATE_INFOPLIST_FILE: false
+        INFOPLIST_FILE: Scopy/Info.plist
+    dependencies:
+      - sdk: libsqlite3.tbd
+
+  ScopyTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - path: ScopyTests
+    settings:
+      base:
+        PRODUCT_NAME: ScopyTests
+        PRODUCT_BUNDLE_IDENTIFIER: com.scopy.tests
+        GENERATE_INFOPLIST_FILE: true
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/Scopy.app/Contents/MacOS/Scopy"
+        BUNDLE_LOADER: "$(TEST_HOST)"
+    dependencies:
+      - target: Scopy
