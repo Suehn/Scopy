@@ -80,6 +80,11 @@ final class SearchService {
     private func searchExact(request: SearchRequest) async throws -> SearchResult {
         guard let db = db else { throw SearchError.databaseNotOpen }
 
+        // Empty query returns all items (via cache or storage)
+        if request.query.isEmpty {
+            return try await searchInCache(request: request) { _ in true }
+        }
+
         // For short queries, use in-memory cache
         if request.query.count <= 2 {
             return try await searchInCache(request: request) { item in
@@ -96,14 +101,20 @@ final class SearchService {
     private func searchFuzzy(request: SearchRequest) async throws -> SearchResult {
         guard let db = db else { throw SearchError.databaseNotOpen }
 
-        // For short queries, use in-memory cache
-        if request.query.count <= 2 {
+        // Empty query returns all items
+        if request.query.isEmpty {
+            return try await searchInCache(request: request) { _ in true }
+        }
+
+        // For short queries (<=4 chars), use in-memory cache with fuzzy matching
+        // This ensures fuzzy patterns like "hlo" -> "Hello" work correctly
+        if request.query.count <= 4 {
             return try await searchInCache(request: request) { item in
                 self.fuzzyMatch(text: item.plainText, query: request.query)
             }
         }
 
-        // FTS5 with prefix matching for fuzzy search
+        // FTS5 with prefix matching for longer fuzzy search
         let words = request.query.split(separator: " ").map { String($0) }
         let ftsQuery = words.map { "\($0)*" }.joined(separator: " ")
         return try await searchWithFTS(db: db, query: ftsQuery, request: request, useFuzzyRanking: true)
@@ -234,7 +245,7 @@ final class SearchService {
 
     private func refreshCacheIfNeeded() async throws {
         let now = Date()
-        if now.timeIntervalSince(cacheTimestamp) > cacheDuration {
+        if recentItemsCache.isEmpty || now.timeIntervalSince(cacheTimestamp) > cacheDuration {
             recentItemsCache = try storage.fetchRecent(limit: shortQueryCacheSize, offset: 0)
             cacheTimestamp = now
         }

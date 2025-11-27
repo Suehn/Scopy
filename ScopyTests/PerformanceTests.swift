@@ -295,6 +295,97 @@ final class PerformanceTests: XCTestCase {
         XCTAssertEqual(count, 100)
     }
 
+    // MARK: - v0.md SLO Aligned Tests
+
+    /// 测试首屏加载性能 (v0.md 2.2: 50-100条 <100ms)
+    func testFirstScreenLoadPerformance() async throws {
+        // Populate with data
+        for i in 0..<5000 {
+            _ = try storage.upsertItem(makeContent("First screen test item \(i)"))
+        }
+
+        var times: [Double] = []
+
+        // Run multiple load operations
+        for _ in 0..<20 {
+            let startTime = CFAbsoluteTimeGetCurrent()
+            _ = try storage.fetchRecent(limit: 50, offset: 0)
+            let elapsed = (CFAbsoluteTimeGetCurrent() - startTime) * 1000
+            times.append(elapsed)
+        }
+
+        times.sort()
+        let p95Index = Int(Double(times.count) * 0.95)
+        let p95 = times[min(p95Index, times.count - 1)]
+        let avg = times.reduce(0, +) / Double(times.count)
+
+        print("📊 First Screen Load Performance (v0.md 2.2):")
+        print("   - Average: \(String(format: "%.2f", avg))ms")
+        print("   - P95: \(String(format: "%.2f", p95))ms")
+
+        // v0.md 2.2: 首屏加载应 <100ms
+        XCTAssertLessThan(p95, 100, "First screen load P95 \(p95)ms exceeds 100ms target")
+    }
+
+    /// 测试内存稳定性 (1000次操作后内存增长合理)
+    func testMemoryStability() async throws {
+        let initialMemory = getMemoryUsage()
+
+        // Perform many operations
+        for i in 0..<500 {
+            // Insert
+            _ = try storage.upsertItem(makeContent("Stability test item \(i)"))
+
+            // Search
+            let request = SearchRequest(query: "stability", mode: .fuzzy, limit: 10, offset: 0)
+            _ = try await search.search(request: request)
+
+            // Fetch
+            _ = try storage.fetchRecent(limit: 50, offset: 0)
+        }
+
+        let finalMemory = getMemoryUsage()
+        let memoryGrowth = finalMemory - initialMemory
+        let memoryGrowthMB = Double(memoryGrowth) / (1024 * 1024)
+
+        print("📊 Memory Stability (500 iterations):")
+        print("   - Initial: \(formatBytes(initialMemory))")
+        print("   - Final: \(formatBytes(finalMemory))")
+        print("   - Growth: \(String(format: "%.1f", memoryGrowthMB)) MB")
+
+        // Memory growth should be reasonable (< 50MB for 500 operations)
+        XCTAssertLessThan(memoryGrowthMB, 50, "Memory growth \(memoryGrowthMB)MB exceeds 50MB limit")
+    }
+
+    /// 测试搜索防抖效果验证
+    func testSearchDebounceEffect() async throws {
+        // Populate
+        for i in 0..<1000 {
+            _ = try storage.upsertItem(makeContent("Debounce test item \(i)"))
+        }
+        search.invalidateCache()
+
+        // Simulate rapid queries
+        let queries = ["d", "de", "deb", "debo", "debou", "deboun", "debounc", "debounce"]
+
+        let startTime = CFAbsoluteTimeGetCurrent()
+
+        for query in queries {
+            let request = SearchRequest(query: query, mode: .fuzzy, limit: 50, offset: 0)
+            _ = try await search.search(request: request)
+        }
+
+        let elapsed = CFAbsoluteTimeGetCurrent() - startTime
+
+        print("📊 Search Debounce Effect:")
+        print("   - 8 rapid queries in \(String(format: "%.0f", elapsed * 1000))ms")
+        print("   - Average per query: \(String(format: "%.2f", (elapsed / 8) * 1000))ms")
+
+        // With debounce, UI would only execute the last query after 150ms
+        // Here we verify backend can handle rapid queries
+        XCTAssertLessThan(elapsed, 1.0, "Rapid queries took too long")
+    }
+
     // MARK: - Cleanup Performance
 
     /// 测试清理性能

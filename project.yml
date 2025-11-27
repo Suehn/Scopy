@@ -12,9 +12,11 @@ schemes:
       targets:
         Scopy: all
         ScopyTests: [test]
+        ScopyUITests: [test]
     test:
       targets:
         - ScopyTests
+        - ScopyUITests
 
 settings:
   base:
@@ -25,6 +27,8 @@ settings:
     INFOPLIST_FILE: Scopy/Info.plist
     CODE_SIGN_ENTITLEMENTS: Scopy/Scopy.entitlements
     PRODUCT_BUNDLE_IDENTIFIER: com.scopy.app
+    BUILD_DIR: $(SRCROOT)/.build
+    CONFIGURATION_BUILD_DIR: $(BUILD_DIR)/$(CONFIGURATION)
 
 targets:
   Scopy:
@@ -64,3 +68,17 @@ targets:
         # 不设置 TEST_HOST 和 BUNDLE_LOADER，使用独立测试 bundle 模式
     dependencies:
       - sdk: libsqlite3.tbd
+
+  ScopyUITests:
+    type: bundle.ui-testing
+    platform: macOS
+    sources:
+      - path: ScopyUITests
+    settings:
+      base:
+        PRODUCT_NAME: ScopyUITests
+        PRODUCT_BUNDLE_IDENTIFIER: com.scopy.uitests
+        GENERATE_INFOPLIST_FILE: true
+        TEST_TARGET_NAME: Scopy
+    dependencies:
+      - target: Scopy

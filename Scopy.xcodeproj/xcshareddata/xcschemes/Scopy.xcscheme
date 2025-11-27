@@ -35,6 +35,20 @@
                ReferencedContainer = "container:Scopy.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
+         <BuildActionEntry
+            buildForTesting = "YES"
+            buildForRunning = "NO"
+            buildForProfiling = "NO"
+            buildForArchiving = "NO"
+            buildForAnalyzing = "NO">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "339889D95358A277D7803586"
+               BuildableName = "ScopyUITests.xctest"
+               BlueprintName = "ScopyUITests"
+               ReferencedContainer = "container:Scopy.xcodeproj">
+            </BuildableReference>
+         </BuildActionEntry>
       </BuildActionEntries>
    </BuildAction>
    <TestAction
@@ -61,6 +75,17 @@
                BlueprintIdentifier = "9A0B704F71C1FBCD2F637B6F"
                BuildableName = "ScopyTests.xctest"
                BlueprintName = "ScopyTests"
+               ReferencedContainer = "container:Scopy.xcodeproj">
+            </BuildableReference>
+         </TestableReference>
+         <TestableReference
+            skipped = "NO"
+            parallelizable = "NO">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "339889D95358A277D7803586"
+               BuildableName = "ScopyUITests.xctest"
+               BlueprintName = "ScopyUITests"
                ReferencedContainer = "container:Scopy.xcodeproj">
             </BuildableReference>
          </TestableReference>

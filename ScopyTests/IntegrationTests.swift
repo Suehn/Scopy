@@ -10,6 +10,8 @@ final class IntegrationTests: XCTestCase {
 
     override func setUp() async throws {
         try await super.setUp()
+        // Clear settings before each test to ensure isolation
+        UserDefaults.standard.removeObject(forKey: "ScopySettings")
         service = ClipboardServiceFactory.createForTesting()
         try await service.start()
     }

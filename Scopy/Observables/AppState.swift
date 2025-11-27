@@ -124,7 +124,7 @@ final class AppState {
     }
 
     /// 监听剪贴板事件
-    private func startEventListener() {
+    func startEventListener() {
         eventTask = Task { [weak self] in
             guard let self = self else { return }
             for await event in self.service.eventStream {
