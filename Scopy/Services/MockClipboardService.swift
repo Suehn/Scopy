@@ -19,6 +19,18 @@ final class MockClipboardService: ClipboardServiceProtocol {
         generateMockData()
     }
 
+    // MARK: - Lifecycle
+
+    func start() async throws {
+        // Mock 服务无需启动，空实现
+    }
+
+    func stop() {
+        eventContinuation?.finish()
+    }
+
+    // MARK: - Private
+
     private func generateMockData() {
         let sampleTexts = [
             "Hello, World! This is a sample clipboard item.",

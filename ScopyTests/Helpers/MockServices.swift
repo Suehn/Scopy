@@ -44,6 +44,16 @@ final class ReusableMockClipboardService: ClipboardServiceProtocol {
         }
     }
 
+    // MARK: - Lifecycle
+
+    func start() async throws {
+        // Mock 服务无需启动，空实现
+    }
+
+    func stop() {
+        eventContinuation?.finish()
+    }
+
     // MARK: - Setup Helpers
 
     func setItems(_ items: [ClipboardItemDTO]) {

@@ -436,6 +436,18 @@ final class TestMockClipboardService: ClipboardServiceProtocol {
         }
     }
 
+    // MARK: - Lifecycle
+
+    func start() async throws {
+        // Mock 服务无需启动，空实现
+    }
+
+    func stop() {
+        eventContinuation?.finish()
+    }
+
+    // MARK: - Setup Helpers
+
     func setItemCount(_ count: Int, pinnedCount: Int = 0) {
         items = (0..<count).map { i in
             ClipboardItemDTO(

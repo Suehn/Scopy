@@ -40,6 +40,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             self?.openSettings()
         }
 
+        // 设置快捷键回调（用于解耦 SettingsView 与 AppDelegate）
+        AppState.shared.applyHotKeyHandler = { [weak self] keyCode, modifiers in
+            self?.applyHotKey(keyCode: keyCode, modifiers: modifiers)
+        }
+        AppState.shared.unregisterHotKeyHandler = { [weak self] in
+            self?.hotKeyService?.unregister()
+        }
+
         // 启动后端服务
         Task {
             await AppState.shared.start()
@@ -116,6 +124,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Settings Window
 
     /// 打开设置窗口
+    /// v0.10: 注入 AppState 到 Environment，实现完全解耦
+    @MainActor
     func openSettings() {
         if settingsWindow == nil {
             let window = NSWindow(
@@ -130,6 +140,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             let settingsView = SettingsView { [weak self] in
                 self?.settingsWindow?.close()
             }
+            .environment(AppState.shared)  // 注入 AppState 到环境
+
             window.contentView = NSHostingView(rootView: settingsView)
             window.center()
 

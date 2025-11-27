@@ -3,9 +3,12 @@ import Carbon.HIToolbox
 
 /// 设置窗口视图
 /// v0.6: 多页 TabView 结构，支持快捷键自定义、搜索模式选择、存储统计
+/// v0.10: 改用 Environment 注入 AppState，实现完全解耦
 struct SettingsView: View {
+    @Environment(AppState.self) private var appState
+
     @State private var selectedTab = 0
-    @State private var tempSettings: SettingsDTO
+    @State private var tempSettings: SettingsDTO = .default
     @State private var isSaving = false
     @State private var storageStats: StorageStatsDTO?
     @State private var isLoadingStats = false
@@ -14,7 +17,6 @@ struct SettingsView: View {
 
     init(onDismiss: (() -> Void)? = nil) {
         self.onDismiss = onDismiss
-        _tempSettings = State(initialValue: AppState.shared.settings)
     }
 
     var body: some View {
@@ -74,7 +76,7 @@ struct SettingsView: View {
         }
         .frame(width: 500, height: 420)
         .onAppear {
-            tempSettings = AppState.shared.settings
+            tempSettings = appState.settings
             refreshStats()
         }
     }
@@ -83,7 +85,7 @@ struct SettingsView: View {
         isLoadingStats = true
         Task {
             do {
-                storageStats = try await AppState.shared.service.getDetailedStorageStats()
+                storageStats = try await appState.service.getDetailedStorageStats()
             } catch {
                 print("Failed to load storage stats: \(error)")
             }
@@ -97,16 +99,16 @@ struct SettingsView: View {
         print("🔧 saveSettings: keyCode=\(tempSettings.hotkeyKeyCode), modifiers=0x\(String(tempSettings.hotkeyModifiers, radix: 16))")
 
         Task {
-            await AppState.shared.updateSettings(tempSettings)
+            await appState.updateSettings(tempSettings)
             // 更新 AppState 的搜索模式
             await MainActor.run {
-                AppState.shared.searchMode = tempSettings.defaultSearchMode
+                appState.searchMode = tempSettings.defaultSearchMode
 
-                // 立即更新全局快捷键
-                print("🔧 Updating hotkey service")
-                AppDelegate.shared?.applyHotKey(
-                    keyCode: tempSettings.hotkeyKeyCode,
-                    modifiers: tempSettings.hotkeyModifiers
+                // 通过回调更新全局快捷键（解耦 AppDelegate）
+                print("🔧 Updating hotkey via callback")
+                appState.applyHotKeyHandler?(
+                    tempSettings.hotkeyKeyCode,
+                    tempSettings.hotkeyModifiers
                 )
 
                 isSaving = false
@@ -531,11 +533,18 @@ struct FeatureRow: View {
 
 /// 快捷键录制器 - 使用 class 以便在闭包中正确更新状态
 /// v0.9.3: 使用回调方式直接更新 binding，避免 .onChange 时机问题
+/// v0.10: 完全解耦，通过注入的回调与外部通信
 class HotKeyRecorder: ObservableObject {
     @Published var isRecording = false
 
     /// 录制完成回调 - 直接更新 binding
     var onRecorded: ((UInt32, UInt32) -> Void)?
+
+    /// 注销热键回调 - 用于录制期间暂停全局热键
+    var unregisterHotKeyHandler: (() -> Void)?
+
+    /// 应用热键回调 - 用于恢复全局热键
+    var applyHotKeyHandler: ((UInt32, UInt32) -> Void)?
 
     private var eventMonitor: Any?
     private var globalEventMonitor: Any?
@@ -550,8 +559,10 @@ class HotKeyRecorder: ObservableObject {
         previousHotKey = (currentKeyCode, currentModifiers)
         print("🎹 Started hotkey recording")
 
-        // 暂停当前全局热键，避免录制同一组合时被 Carbon 拦截
-        AppDelegate.shared?.hotKeyService?.unregister()
+        // 通过注入的回调暂停当前全局热键（完全解耦）
+        Task { @MainActor in
+            unregisterHotKeyHandler?()
+        }
 
         // 尝试前置窗口，减少焦点问题；全局监听兜底
         NSApp.activate(ignoringOtherApps: true)
@@ -629,10 +640,8 @@ class HotKeyRecorder: ObservableObject {
            let previous = previousHotKey {
             print("🎹 Restoring previous hotkey keyCode=\(previous.keyCode), modifiers=0x\(String(previous.modifiers, radix: 16))")
             Task { @MainActor in
-                AppDelegate.shared?.applyHotKey(
-                    keyCode: previous.keyCode,
-                    modifiers: previous.modifiers
-                )
+                // 通过注入的回调恢复快捷键（完全解耦）
+                applyHotKeyHandler?(previous.keyCode, previous.modifiers)
             }
         }
     }
@@ -640,7 +649,10 @@ class HotKeyRecorder: ObservableObject {
 
 // MARK: - HotKey Recorder View
 
+/// v0.10: 使用 Environment 注入 AppState，完全解耦
 struct HotKeyRecorderView: View {
+    @Environment(AppState.self) private var appState
+
     @Binding var keyCode: UInt32
     @Binding var modifiers: UInt32
     @StateObject private var recorder = HotKeyRecorder()
@@ -679,29 +691,24 @@ struct HotKeyRecorderView: View {
             }
         }
         .onAppear {
-            print("🎹 HotKeyRecorderView onAppear - setting up callback")
-            print("🎹 AppDelegate.shared = \(String(describing: AppDelegate.shared))")
-            print("🎹 hotKeyService = \(String(describing: AppDelegate.shared?.hotKeyService))")
+            print("🎹 HotKeyRecorderView onAppear - setting up callbacks")
+
+            // 注入回调到 recorder（完全解耦）
+            recorder.unregisterHotKeyHandler = appState.unregisterHotKeyHandler
+            recorder.applyHotKeyHandler = appState.applyHotKeyHandler
 
             // 关键：设置回调直接更新 binding，避免 .onChange 时机问题
-            recorder.onRecorded = { newKeyCode, newModifiers in
+            recorder.onRecorded = { [weak appState] newKeyCode, newModifiers in
                 print("🎹 onRecorded callback triggered!")
                 keyCode = newKeyCode
                 modifiers = newModifiers
                 print("🎹 Direct binding update: keyCode=\(newKeyCode), modifiers=0x\(String(newModifiers, radix: 16))")
 
-                // 立即更新全局快捷键（无需等待 Save）
+                // 通过注入的回调立即更新全局快捷键（完全解耦）
                 Task { @MainActor in
-                    if AppDelegate.shared != nil {
-                        print("🎹 Calling applyHotKey on AppDelegate")
-                        AppDelegate.shared?.applyHotKey(
-                            keyCode: newKeyCode,
-                            modifiers: newModifiers
-                        )
-                        print("🎹 Hotkey immediately updated and persisted!")
-                    } else {
-                        print("🎹 ERROR: AppDelegate.shared is nil!")
-                    }
+                    print("🎹 Calling applyHotKey via callback")
+                    appState?.applyHotKeyHandler?(newKeyCode, newModifiers)
+                    print("🎹 Hotkey immediately updated and persisted!")
                 }
             }
         }
@@ -760,4 +767,5 @@ struct HotKeyRecorderView: View {
 
 #Preview {
     SettingsView()
+        .environment(AppState.shared)
 }

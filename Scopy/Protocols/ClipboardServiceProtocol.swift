@@ -162,6 +162,16 @@ struct StorageStatsDTO: Sendable {
 /// 后端只提供结构化数据和命令接口，不关心 UI
 @MainActor
 protocol ClipboardServiceProtocol: AnyObject {
+    // MARK: - Lifecycle
+
+    /// 启动服务（真实服务需要初始化数据库、启动监控；Mock 服务可空实现）
+    func start() async throws
+
+    /// 停止服务（清理资源）
+    func stop()
+
+    // MARK: - Data Access
+
     /// 获取最近的剪贴板项
     func fetchRecent(limit: Int, offset: Int) async throws -> [ClipboardItemDTO]
 

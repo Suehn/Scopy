@@ -13,7 +13,28 @@ enum SelectionSource {
 @Observable
 @MainActor
 final class AppState {
-    static let shared = AppState()
+    // MARK: - Singleton (兼容层)
+
+    /// 延迟初始化的单例，保持向后兼容
+    private static var _shared: AppState?
+    static var shared: AppState {
+        if _shared == nil {
+            _shared = AppState()
+        }
+        return _shared!
+    }
+
+    /// 工厂方法 - 创建带指定服务的实例（用于测试和依赖注入）
+    static func create(service: ClipboardServiceProtocol) -> AppState {
+        return AppState(service: service)
+    }
+
+    /// 重置单例（仅用于测试）
+    static func resetShared() {
+        _shared = nil
+    }
+
+    // MARK: - Properties
 
     // 后端服务（通过协议访问）
     var service: ClipboardServiceProtocol
@@ -65,6 +86,10 @@ final class AppState {
     var closePanelHandler: (() -> Void)?
     var openSettingsHandler: (() -> Void)?
 
+    // 快捷键回调（用于解耦 SettingsView 与 AppDelegate）
+    var applyHotKeyHandler: ((UInt32, UInt32) -> Void)?
+    var unregisterHotKeyHandler: (() -> Void)?
+
     // 事件监听任务
     private var eventTask: Task<Void, Never>?
     private var searchTask: Task<Void, Never>?
@@ -80,9 +105,12 @@ final class AppState {
         #endif
     }()
 
-    private init() {
-        // 根据配置选择服务
-        if Self.useMockService {
+    /// 初始化 - 可接受注入的服务（用于测试），默认根据配置选择
+    private init(service: ClipboardServiceProtocol? = nil) {
+        if let service = service {
+            self.service = service
+            print("📋 Using injected Clipboard Service")
+        } else if Self.useMockService {
             self.service = MockClipboardService()
             print("📋 Using Mock Clipboard Service")
         } else {
@@ -93,17 +121,15 @@ final class AppState {
 
     /// 启动应用服务
     func start() async {
-        // 如果是真实服务，需要启动
-        if let realService = service as? RealClipboardService {
-            do {
-                try await realService.start()
-                print("✅ Real Clipboard Service started")
-            } catch {
-                print("❌ Failed to start Real Clipboard Service: \(error)")
-                // 降级到 Mock 服务
-                service = MockClipboardService()
-                print("⚠️ Falling back to Mock Clipboard Service")
-            }
+        // 通过协议方法启动服务（RealClipboardService 会初始化数据库和监控，MockClipboardService 为空实现）
+        do {
+            try await service.start()
+            print("✅ Clipboard Service started")
+        } catch {
+            print("❌ Failed to start Clipboard Service: \(error)")
+            // 降级到 Mock 服务
+            service = MockClipboardService()
+            print("⚠️ Falling back to Mock Clipboard Service")
         }
 
         // 监听事件流
@@ -124,9 +150,8 @@ final class AppState {
         eventTask?.cancel()
         eventTask = nil
 
-        if let realService = service as? RealClipboardService {
-            realService.stop()
-        }
+        // 通过协议方法停止服务
+        service.stop()
     }
 
     // MARK: - Settings Management
@@ -198,13 +223,8 @@ final class AppState {
             // 刷新以获取最新状态
             await load()
         case .settingsChanged:
-            // 设置变化时刷新，并重新应用全局快捷键（兜底，避免依赖前端调用）
-            if let appDelegate = AppDelegate.shared {
-                await appDelegate.applyHotKey(
-                    keyCode: settings.hotkeyKeyCode,
-                    modifiers: settings.hotkeyModifiers
-                )
-            }
+            // 设置变化时刷新，并通过回调重新应用全局快捷键（解耦 AppDelegate）
+            applyHotKeyHandler?(settings.hotkeyKeyCode, settings.hotkeyModifiers)
             await load()
         }
     }
@@ -427,9 +447,8 @@ final class AppState {
 
 extension AppState {
     /// Create an AppState with a specific service (for testing)
+    /// 使用 create(service:) 工厂方法，确保服务在初始化时注入
     static func forTesting(service: ClipboardServiceProtocol) -> AppState {
-        let state = AppState()
-        state.service = service
-        return state
+        return create(service: service)
     }
 }

@@ -340,22 +340,20 @@ struct HistoryItemView: View, Equatable {
     private func startPreviewTimer() {
         cancelPreviewTimer()
 
+        // 通过服务层获取图片数据，不再直接访问文件系统
         Task {
             if let data = await getImageData() {
                 await MainActor.run {
                     previewImageData = data
                 }
-            } else {
-                await MainActor.run {
-                    previewImageData = loadOriginalImageData()
-                }
             }
+            // 移除 else 分支 - 服务层返回 nil 则不显示预览
         }
 
         hoverTimer = Timer.scheduledTimer(withTimeInterval: previewDelay, repeats: false) { _ in
             DispatchQueue.main.async {
-                if isHovering {
-                    showPreview = true
+                if self.isHovering && self.previewImageData != nil {
+                    self.showPreview = true
                 }
             }
         }
@@ -364,29 +362,6 @@ struct HistoryItemView: View, Equatable {
     private func cancelPreviewTimer() {
         hoverTimer?.invalidate()
         hoverTimer = nil
-    }
-
-    // MARK: - Load Image Data
-
-    private func loadOriginalImageData() -> Data? {
-        if let storageRef = item.storageRef {
-            if let data = try? Data(contentsOf: URL(fileURLWithPath: storageRef)) {
-                return data
-            }
-        }
-
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        let scopyDir = appSupport.appendingPathComponent("Scopy", isDirectory: true)
-        let contentDir = scopyDir.appendingPathComponent("content", isDirectory: true)
-
-        for ext in ["png", "dat"] {
-            let idPath = contentDir.appendingPathComponent("\(item.id.uuidString).\(ext)")
-            if let data = try? Data(contentsOf: idPath) {
-                return data
-            }
-        }
-
-        return nil
     }
 
     // MARK: - Relative Time Formatting
