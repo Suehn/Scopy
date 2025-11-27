@@ -80,7 +80,9 @@ enum TestDataFactory {
             createdAt: createdAt,
             lastUsedAt: createdAt,
             isPinned: isPinned,
-            sizeBytes: plainText.utf8.count
+            sizeBytes: plainText.utf8.count,
+            thumbnailPath: nil,
+            storageRef: nil
         )
     }
 

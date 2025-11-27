@@ -64,7 +64,9 @@ final class ReusableMockClipboardService: ClipboardServiceProtocol {
                 createdAt: item.createdAt,
                 lastUsedAt: item.lastUsedAt,
                 isPinned: true,
-                sizeBytes: item.sizeBytes
+                sizeBytes: item.sizeBytes,
+                thumbnailPath: item.thumbnailPath,
+                storageRef: item.storageRef
             )
         }
     }
@@ -158,7 +160,9 @@ final class ReusableMockClipboardService: ClipboardServiceProtocol {
                 createdAt: item.createdAt,
                 lastUsedAt: item.lastUsedAt,
                 isPinned: true,
-                sizeBytes: item.sizeBytes
+                sizeBytes: item.sizeBytes,
+                thumbnailPath: item.thumbnailPath,
+                storageRef: item.storageRef
             )
         }
     }
@@ -176,7 +180,9 @@ final class ReusableMockClipboardService: ClipboardServiceProtocol {
                 createdAt: item.createdAt,
                 lastUsedAt: item.lastUsedAt,
                 isPinned: false,
-                sizeBytes: item.sizeBytes
+                sizeBytes: item.sizeBytes,
+                thumbnailPath: item.thumbnailPath,
+                storageRef: item.storageRef
             )
         }
     }
@@ -207,6 +213,28 @@ final class ReusableMockClipboardService: ClipboardServiceProtocol {
     func getStorageStats() async throws -> (itemCount: Int, sizeBytes: Int) {
         let totalBytes = items.reduce(0) { $0 + $1.sizeBytes }
         return (items.count, totalBytes)
+    }
+
+    func getDetailedStorageStats() async throws -> StorageStatsDTO {
+        let totalBytes = items.reduce(0) { $0 + $1.sizeBytes }
+        return StorageStatsDTO(
+            itemCount: items.count,
+            databaseSizeBytes: totalBytes,
+            externalStorageSizeBytes: 0,
+            totalSizeBytes: totalBytes,
+            databasePath: "~/Library/Application Support/Scopy/"
+        )
+    }
+
+    func getImageData(itemID: UUID) async throws -> Data? {
+        // Mock 服务不存储实际图片数据
+        return nil
+    }
+
+    func getRecentApps(limit: Int) async throws -> [String] {
+        // 返回 mock 数据中的 app 列表
+        let apps = Set(items.compactMap { $0.appBundleID })
+        return Array(apps.prefix(limit))
     }
 }
 
