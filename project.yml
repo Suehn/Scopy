@@ -29,6 +29,9 @@ settings:
     PRODUCT_BUNDLE_IDENTIFIER: com.scopy.app
     BUILD_DIR: $(SRCROOT)/.build
     CONFIGURATION_BUILD_DIR: $(BUILD_DIR)/$(CONFIGURATION)
+    # 版本号配置 (v0.6)
+    MARKETING_VERSION: "0.6.0"
+    CURRENT_PROJECT_VERSION: "1"
 
 targets:
   Scopy:
