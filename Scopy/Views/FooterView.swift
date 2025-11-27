@@ -3,6 +3,7 @@ import SwiftUI
 /// 底部状态栏视图
 struct FooterView: View {
     @Environment(AppState.self) private var appState
+    @State private var showClearConfirmation = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -44,7 +45,7 @@ struct FooterView: View {
             // 操作按钮
             HStack(spacing: 12) {
                 FooterButton(title: "Clear", shortcut: "⌘⌫") {
-                    Task { await appState.clearAll() }
+                    showClearConfirmation = true
                 }
 
                 FooterButton(title: "Settings", shortcut: "⌘,") {
@@ -55,6 +56,14 @@ struct FooterView: View {
                     NSApp.terminate(nil)
                 }
             }
+        }
+        .alert("Clear All History?", isPresented: $showClearConfirmation) {
+            Button("Cancel", role: .cancel) { }
+            Button("Clear", role: .destructive) {
+                Task { await appState.clearAll() }
+            }
+        } message: {
+            Text("This will permanently delete all \(appState.totalCount) items. This action cannot be undone.")
         }
     }
 }

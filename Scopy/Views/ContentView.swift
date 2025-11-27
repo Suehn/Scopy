@@ -4,6 +4,7 @@ import SwiftUI
 struct ContentView: View {
     @State private var appState = AppState.shared
     @FocusState private var searchFocused: Bool
+    @State private var showClearConfirmation = false
 
     var body: some View {
         ZStack {
@@ -36,9 +37,29 @@ struct ContentView: View {
         .onKeyPress { keyPress in
             handleKeyPress(keyPress)
         }
+        .alert("Clear All History", isPresented: $showClearConfirmation) {
+            Button("Cancel", role: .cancel) { }
+            Button("Clear All", role: .destructive) {
+                Task { await appState.clearAll() }
+            }
+        } message: {
+            Text("This will permanently delete all clipboard history. This action cannot be undone.")
+        }
     }
 
     private func handleKeyPress(_ keyPress: KeyPress) -> KeyPress.Result {
+        // ⌥⌫ (Option+Delete) - 删除选中项
+        if keyPress.key == .delete && keyPress.modifiers.contains(.option) {
+            Task { await appState.deleteSelectedItem() }
+            return .handled
+        }
+
+        // ⌘⌫ (Command+Delete) - 清空历史（需要确认）
+        if keyPress.key == .delete && keyPress.modifiers.contains(.command) {
+            showClearConfirmation = true
+            return .handled
+        }
+
         switch keyPress.key {
         case .downArrow:
             appState.highlightNext()
