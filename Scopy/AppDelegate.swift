@@ -4,6 +4,7 @@ import SwiftUI
 class AppDelegate: NSObject, NSApplicationDelegate {
     var panel: FloatingPanel?
     private var hotKeyService: HotKeyService?
+    private var settingsWindow: NSWindow?
 
     private lazy var statusItem: NSStatusItem = {
         let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -38,6 +39,19 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         hotKeyService?.register { [weak self] in
             self?.togglePanel()
         }
+
+        // 注册 ⌘, 快捷键打开设置
+        NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            if event.modifierFlags.contains(.command),
+               !event.modifierFlags.contains(.shift),
+               !event.modifierFlags.contains(.option),
+               !event.modifierFlags.contains(.control),
+               event.charactersIgnoringModifiers == "," {
+                self?.openSettings()
+                return nil
+            }
+            return event
+        }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -48,5 +62,32 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func togglePanel() {
         panel?.toggle()
+    }
+
+    // MARK: - Settings Window
+
+    /// 打开设置窗口
+    func openSettings() {
+        if settingsWindow == nil {
+            let window = NSWindow(
+                contentRect: NSRect(x: 0, y: 0, width: 420, height: 380),
+                styleMask: [.titled, .closable],
+                backing: .buffered,
+                defer: false
+            )
+            window.title = "Scopy Settings"
+            window.isReleasedWhenClosed = false
+
+            let settingsView = SettingsView { [weak self] in
+                self?.settingsWindow?.close()
+            }
+            window.contentView = NSHostingView(rootView: settingsView)
+            window.center()
+
+            settingsWindow = window
+        }
+
+        settingsWindow?.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
     }
 }
