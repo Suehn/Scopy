@@ -15,9 +15,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        // 连接 AppState
-        AppState.shared.appDelegate = self
-
         // 创建浮动面板
         panel = FloatingPanel(
             contentRect: NSRect(x: 0, y: 0, width: 320, height: 400),
@@ -28,6 +25,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         // 显示状态栏图标
         _ = statusItem
+
+        // 设置 UI 回调
+        AppState.shared.closePanelHandler = { [weak self] in
+            self?.panel?.close()
+        }
+        AppState.shared.openSettingsHandler = { [weak self] in
+            self?.openSettings()
+        }
 
         // 启动后端服务
         Task {

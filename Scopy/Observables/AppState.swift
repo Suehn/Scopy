@@ -37,8 +37,9 @@ final class AppState {
         }
     }
 
-    // 弹窗引用（用于 AppDelegate）
-    weak var appDelegate: AppDelegate?
+    // UI 回调（用于 AppDelegate 通信，支持测试解耦）
+    var closePanelHandler: (() -> Void)?
+    var openSettingsHandler: (() -> Void)?
 
     // 事件监听任务
     private var eventTask: Task<Void, Never>?
@@ -227,7 +228,7 @@ final class AppState {
     func select(_ item: ClipboardItemDTO) async {
         do {
             try await service.copyToClipboard(itemID: item.id)
-            appDelegate?.panel?.close()
+            closePanelHandler?()
         } catch {
             print("Copy failed: \(error)")
         }

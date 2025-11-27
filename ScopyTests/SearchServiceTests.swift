@@ -14,6 +14,7 @@ final class SearchServiceTests: XCTestCase {
         storage = StorageService(databasePath: ":memory:")
         try storage.open()
         search = SearchService(storage: storage)
+        search.setDatabase(storage.database)
     }
 
     override func tearDown() async throws {

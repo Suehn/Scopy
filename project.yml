@@ -6,6 +6,16 @@ options:
   xcodeVersion: "15.0"
   generateEmptyDirectories: true
 
+schemes:
+  Scopy:
+    build:
+      targets:
+        Scopy: all
+        ScopyTests: [test]
+    test:
+      targets:
+        - ScopyTests
+
 settings:
   base:
     SWIFT_VERSION: "5.9"
@@ -38,12 +48,19 @@ targets:
     platform: macOS
     sources:
       - path: ScopyTests
+      # 独立测试 bundle 模式：直接包含应用源码，避免 SwiftUI App 生命周期冲突
+      - path: Scopy
+        excludes:
+          - "**/*.md"
+          - "main.swift"       # 排除应用入口，避免 @main 冲突
+          - "ScopyApp.swift"   # 排除 SwiftUI App，避免 NSApplication 冲突
+          - "Info.plist"
+          - "*.entitlements"
     settings:
       base:
         PRODUCT_NAME: ScopyTests
         PRODUCT_BUNDLE_IDENTIFIER: com.scopy.tests
         GENERATE_INFOPLIST_FILE: true
-        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/Scopy.app/Contents/MacOS/Scopy"
-        BUNDLE_LOADER: "$(TEST_HOST)"
+        # 不设置 TEST_HOST 和 BUNDLE_LOADER，使用独立测试 bundle 模式
     dependencies:
-      - target: Scopy
+      - sdk: libsqlite3.tbd

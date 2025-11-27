@@ -48,7 +48,7 @@ struct FooterView: View {
                 }
 
                 FooterButton(title: "Settings", shortcut: "⌘,") {
-                    appState.appDelegate?.openSettings()
+                    appState.openSettingsHandler?()
                 }
 
                 FooterButton(title: "Quit", shortcut: "⌘Q") {

@@ -1,6 +1,6 @@
 import SwiftUI
 
-@main
+// 注意：不使用 @main，改用 main.swift 来支持测试模式
 struct ScopyApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
 

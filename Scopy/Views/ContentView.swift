@@ -54,7 +54,7 @@ struct ContentView: View {
                 appState.searchQuery = ""
                 appState.search()
             } else {
-                appState.appDelegate?.panel?.close()
+                appState.closePanelHandler?()
             }
             return .handled
         default:

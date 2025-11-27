@@ -140,6 +140,51 @@ final class HotKeyService {
         }
     }
 
+    // MARK: - Testing Support
+
+    #if DEBUG
+    /// 测试模式标志
+    private static var testingMode = false
+
+    /// 启用测试模式（跳过 Carbon API 调用）
+    static func enableTestingMode() {
+        testingMode = true
+    }
+
+    /// 禁用测试模式
+    static func disableTestingMode() {
+        testingMode = false
+    }
+
+    /// 测试用：手动触发处理器（避免 Carbon API 依赖）
+    func triggerHandlerForTesting() {
+        triggerHandler()
+    }
+
+    /// 测试用：检查是否已注册（测试模式下基于 handler 存在性）
+    var isRegistered: Bool {
+        if Self.testingMode {
+            return handler != nil
+        }
+        return hotKeyRef != nil
+    }
+
+    /// 测试用：检查是否有处理器
+    var hasHandler: Bool {
+        handler != nil
+    }
+
+    /// 测试用：仅设置 handler 而不注册 Carbon 热键
+    func registerHandlerOnly(_ handler: @escaping HotKeyHandler) {
+        self.handler = handler
+    }
+
+    /// 测试用：清除 handler
+    func unregisterHandlerOnly() {
+        self.handler = nil
+    }
+    #endif
+
     // MARK: - Helpers
 
     private func fourCharCodeFrom(_ string: String) -> OSType {
