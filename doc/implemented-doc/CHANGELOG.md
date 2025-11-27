@@ -7,6 +7,37 @@
 
 ---
 
+## [v0.10.1] - 2025-11-28
+
+### 修复
+- **降级后调用 start()** - Mock 服务降级后现在正确调用 `start()`，保持生命周期一致性
+  - 降级前先调用 `service.stop()` 防止资源泄漏
+  - 降级后调用 `mockService.start()` 确保服务正常运行
+- **Settings 首帧默认值问题** - 使用可选类型 + 加载态防止首帧用默认值覆盖真实设置
+  - `tempSettings` 改为 `SettingsDTO?` 可选类型
+  - 加载态显示 ProgressView + "Loading settings..."
+- **settingsChanged 事件处理** - 先 reload 最新设置再应用热键
+  - 调用顺序: `loadSettings()` → `applyHotKeyHandler` → `load()`
+  - 无回调时记录日志便于调试
+
+### 改进
+- **ContentView 注入模式统一** - 改用 `@Environment` 注入 AppState
+  - ContentView 使用 `@Environment(AppState.self)` 替代 `@State` + `AppState.shared`
+  - FloatingPanel 添加 `.environment(AppState.shared)` 注入
+  - 与 SettingsView 保持一致的依赖注入模式
+
+### 测试
+- 新增 3 个测试用例覆盖降级和事件处理场景
+  - `testStartFallsBackToMockOnFailure()` - 测试服务降级行为
+  - `testSettingsChangedAppliesHotkey()` - 测试事件处理链
+  - `testSettingsChangedWithoutHandlerDoesNotCrash()` - 测试无回调场景
+
+### 测试状态
+- 单元测试: **133/133 passed** (1 skipped)
+- 构建: Debug ✅
+
+---
+
 ## [v0.9.4] - 2025-11-29
 
 ### 修复
