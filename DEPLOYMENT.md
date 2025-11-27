@@ -166,52 +166,52 @@ Scopy/
 ### 测试环境
 - **硬件**: MacBook Pro (Apple Silicon)
 - **系统**: macOS 14.x+
-- **测试日期**: 2025-11-27
+- **测试日期**: 2025-11-28
 - **测试框架**: XCTest (13 个性能测试用例)
 
 ### 搜索性能 (P95)
 
 | 数据量 | 目标 | 实测 | 测试用例 | 状态 |
 |--------|------|------|----------|------|
-| 5,000 items | < 50ms | **~2ms** | `testSearchPerformance5kItems` | ✅ |
-| 10,000 items | < 150ms | **~8ms** | `testSearchPerformance10kItems` | ✅ |
+| 5,000 items | < 50ms | **P95 1.77ms** | `testSearchPerformance5kItems` | ✅ |
+| 10,000 items | < 150ms | **P95 15.89ms** | `testSearchPerformance10kItems` | ✅ |
 
 ### 首屏加载性能
 
 | 场景 | 目标 | 实测 | 测试用例 | 状态 |
 |------|------|------|----------|------|
-| 50 items 加载 | P95 < 100ms | **~5ms** | `testFirstScreenLoadPerformance` | ✅ |
-| 50 items 批量读取 | < 5s (100次) | **~29ms** | `testConcurrentReadPerformance` | ✅ |
+| 50 items 加载 | P95 < 100ms | **P95 0.07ms / Avg 0.05ms** | `testFirstScreenLoadPerformance` | ✅ |
+| 50 items 批量读取 | < 5s (100次) | **5.43ms (100 次)** | `testConcurrentReadPerformance` | ✅ |
 
 ### 内存性能
 
 | 场景 | 目标 | 实测 | 测试用例 | 状态 |
 |------|------|------|----------|------|
-| 5,000 项插入后内存增长 | < 100KB/项 | **合理** | `testMemoryEfficiency` | ✅ |
-| 500 次操作后内存增长 | < 50MB | **~2MB** | `testMemoryStability` | ✅ |
+| 5,000 项插入后内存增长 | < 100KB/项 | **+2.1MB（0.4KB/项）** | `testMemoryEfficiency` | ✅ |
+| 500 次操作后内存增长 | < 50MB | **+0.4MB** | `testMemoryStability` | ✅ |
 
 ### 写入性能
 
 | 场景 | 目标 | 实测 | 测试用例 | 状态 |
 |------|------|------|----------|------|
-| 批量插入 (1000 items) | > 500/sec | **~1500/sec** | `testBulkInsertPerformance` | ✅ |
-| 去重 (200 upserts) | 正确去重 | **~5ms** | `testDeduplicationPerformance` | ✅ |
-| 清理 (900 items) | 快速完成 | **~27ms** | `testCleanupPerformance` | ✅ |
+| 批量插入 (1000 items) | > 500/sec | **23.0ms（~43k/sec）** | `testBulkInsertPerformance` | ✅ |
+| 去重 (200 upserts) | 正确去重 | **3.52ms** | `testDeduplicationPerformance` | ✅ |
+| 清理 (900 items) | 快速完成 | **2.85ms** | `testCleanupPerformance` | ✅ |
 
 ### 搜索模式比较 (3k items)
 
 | 模式 | 实测 | 目标 | 测试用例 |
 |------|------|------|----------|
-| Exact | ~2ms | < 100ms | `testSearchModeComparison` |
-| Fuzzy | ~3ms | < 100ms | `testSearchModeComparison` |
-| Regex | ~5ms | < 200ms | `testSearchModeComparison` |
+| Exact | 2.99ms | < 100ms | `testSearchModeComparison` |
+| Fuzzy | 4.48ms | < 100ms | `testSearchModeComparison` |
+| Regex | 1.58ms | < 200ms | `testSearchModeComparison` |
 
 ### 其他性能指标
 
 | 指标 | 实测 | 测试用例 |
 |------|------|----------|
-| 搜索防抖 (8 连续查询) | ~34ms | `testSearchDebounceEffect` |
-| 短词缓存加速 | 第二次更快 | `testShortQueryPerformance` |
+| 搜索防抖 (8 连续查询) | 8ms 总计（1.03ms/次） | `testSearchDebounceEffect` |
+| 短词缓存加速 | 首次 0.92ms，缓存 0.40ms | `testShortQueryPerformance` |
 
 ### 性能测试命令
 
