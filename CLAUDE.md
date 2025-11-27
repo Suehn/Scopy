@@ -2,7 +2,45 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-要求设计的时候要读dev-doc的文件，避免偏离，每次写完代码后，要提醒我：切换模型到haiku，然后完整输出精炼的本次改动的实现路线、当前状态改动、walkthrough和遗留点等doc/implemented-doc/下的文档，一个dev-doc/vx.md可以对应一个实现的implemented-doc文档，多次修改知道完全实现。方便新启动对话的时候可以直接从这个文档读到开发记录和当前状态来进行继续开发。
+---
+
+## 开发工作流 (必读)
+
+### 每次对话开始时
+1. **读取** `doc/implemented-doc/README.md` - 了解当前状态和最新版本
+2. **读取** `doc/implemented-doc/CHANGELOG.md` - 了解最近变化
+3. **参考** `doc/dev-doc/v0.md` - 设计规范和需求来源
+
+### 每次开发完成后
+必须更新以下文档:
+1. **创建/更新版本文档** `doc/implemented-doc/vX.X.md`
+2. **更新索引** `doc/implemented-doc/README.md`
+3. **更新变更日志** `doc/implemented-doc/CHANGELOG.md`
+4. **更新部署文档** `DEPLOYMENT.md` (如有性能/部署变化，必须包含具体数值)
+
+### 版本命名规范
+```
+v0.x       - 大版本 (新功能模块)
+v0.x.x     - 小版本 (功能增强/完善)
+v0.x.fix   - 修复版本 (bug fix/hotfix)
+```
+
+### 版本文档模板
+每个版本文档必须包含:
+1. 📌 **一页纸总结** - What + Why + Result
+2. 🏗️ **实现路线** - 步骤列表
+3. 📂 **核心改动** - 文件列表
+4. 🎯 **关键指标** - 测试/性能数值 (必须具体)
+5. 📊 **当前状态** - 快速检查
+6. 🔮 **遗留与后续** - 下一步工作
+
+### 性能数据要求
+DEPLOYMENT.md 中的性能测试必须包含:
+- 测试环境 (硬件/系统/日期)
+- 具体数值 (不能只写"满足")
+- 对应的测试用例名称
+
+---
 
 ## Project Overview
 
@@ -37,20 +75,38 @@ Scopy follows a **strict front-end/back-end separation** pattern to enable compo
 
 ## Development Commands
 
-### Setting Up and Building
+### 快速开始
+```bash
+cd /Users/ziyi/Documents/code/Scopy
 
-Since the project is in specification phase, no build commands are yet defined. Refer to `doc/dev-doc/v0.md` for architectural guidance before implementing.
+# 部署应用 (推荐)
+./deploy.sh release    # Release 版本
+./deploy.sh            # Debug 版本
 
-### Testing
+# 运行测试
+xcodegen generate
+xcodebuild test -scheme Scopy -destination 'platform=macOS' -only-testing:ScopyTests
+```
 
-Future testing strategy should verify:
+### 构建和部署
+```bash
+./deploy.sh              # Debug 版本
+./deploy.sh release      # Release 版本
+./deploy.sh clean        # 清理后重新编译
+./deploy.sh --no-launch  # 编译但不自动启动
+```
 
-- Backend services can be tested independently via CLI or unit tests without UI code
-- UI can run in "mock backend" mode (frontend depends only on protocols, not concrete implementations)
+### 测试命令
+```bash
+# 全部单元测试
+xcodebuild test -scheme Scopy -destination 'platform=macOS' -only-testing:ScopyTests
 
-### Running Tests
+# 性能测试
+xcodebuild test -scheme Scopy -destination 'platform=macOS' -only-testing:ScopyTests/PerformanceTests
 
-To be defined during implementation phase.
+# 查看测试结果
+# 当前: 48/48 tests passed (1 skipped)
+```
 
 ## Key Design Requirements
 

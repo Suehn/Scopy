@@ -175,6 +175,34 @@ final class IntegrationTests: XCTestCase {
         XCTAssertEqual(pasteboard.string(forType: .string), originalText)
     }
 
+    func testCopyInlineRTF() async throws {
+        let pasteboard = NSPasteboard.general
+        let rtfString = "RTF inline \(UUID())"
+        let rtfData = NSAttributedString(string: rtfString).rtf(from: NSRange(location: 0, length: rtfString.count), documentAttributes: [:])
+
+        pasteboard.clearContents()
+        if let rtfData {
+            pasteboard.setData(rtfData, forType: .rtf)
+        } else {
+            XCTFail("Failed to build RTF data")
+            return
+        }
+
+        try await Task.sleep(nanoseconds: 600_000_000)
+
+        let items = try await service.fetchRecent(limit: 10, offset: 0)
+        guard let item = items.first(where: { $0.type == .rtf }) else {
+            XCTFail("RTF item not captured")
+            return
+        }
+
+        try await service.copyToClipboard(itemID: item.id)
+        try await Task.sleep(nanoseconds: 100_000_000)
+
+        let pastedRTF = pasteboard.data(forType: .rtf)
+        XCTAssertEqual(pastedRTF, rtfData)
+    }
+
     // MARK: - Settings Tests
 
     func testSettingsIntegration() async throws {

@@ -157,6 +157,45 @@ final class SearchServiceTests: XCTestCase {
         XCTAssertEqual(result.items[0].type, .text)
     }
 
+    func testEmptyQueryWithAppFilterReturnsAll() async throws {
+        _ = try storage.upsertItem(makeContent("A1", app: "com.test.one"))
+        _ = try storage.upsertItem(makeContent("A2", app: "com.test.one"))
+        _ = try storage.upsertItem(makeContent("B1", app: "com.test.two"))
+        search.invalidateCache()
+
+        let request = SearchRequest(
+            query: "",
+            mode: .exact,
+            appFilter: "com.test.one",
+            limit: 50,
+            offset: 0
+        )
+        let result = try await search.search(request: request)
+
+        XCTAssertEqual(result.total, 2)
+        XCTAssertEqual(result.items.count, 2)
+        XCTAssertTrue(result.items.allSatisfy { $0.appBundleID == "com.test.one" })
+    }
+
+    func testFilteredPaginationHasMore() async throws {
+        for i in 0..<60 {
+            _ = try storage.upsertItem(makeContent("Item \(i)", app: "com.test.paged"))
+        }
+        search.invalidateCache()
+
+        let firstPage = try await search.search(
+            request: SearchRequest(query: "", mode: .exact, appFilter: "com.test.paged", limit: 30, offset: 0)
+        )
+        XCTAssertEqual(firstPage.items.count, 30)
+        XCTAssertTrue(firstPage.hasMore)
+
+        let secondPage = try await search.search(
+            request: SearchRequest(query: "", mode: .exact, appFilter: "com.test.paged", limit: 30, offset: 30)
+        )
+        XCTAssertGreaterThan(secondPage.items.count, 0)
+        XCTAssertEqual(secondPage.total, 60)
+    }
+
     // MARK: - Performance Tests (v0.md 4.1)
 
     func testSearchPerformance5kItems() async throws {
