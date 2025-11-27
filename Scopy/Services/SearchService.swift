@@ -32,6 +32,7 @@ final class SearchService {
 
     private let storage: StorageService
     private var db: OpaquePointer?
+    private let queue = DispatchQueue(label: "com.scopy.search", qos: .userInitiated)
 
     /// Cache for short queries (v0.md 4.2: 短词优化)
     private var recentItemsCache: [StorageService.StoredItem] = []
@@ -82,7 +83,7 @@ final class SearchService {
 
         // Empty query returns all items (via cache or storage)
         if request.query.isEmpty {
-            return try await searchInCache(request: request) { _ in true }
+            return try await searchAllWithFilters(request: request, db: db)
         }
 
         // For short queries, use in-memory cache
@@ -103,7 +104,7 @@ final class SearchService {
 
         // Empty query returns all items
         if request.query.isEmpty {
-            return try await searchInCache(request: request) { _ in true }
+            return try await searchAllWithFilters(request: request, db: db)
         }
 
         // For short queries (<=4 chars), use in-memory cache with fuzzy matching
@@ -141,109 +142,113 @@ final class SearchService {
         request: SearchRequest,
         useFuzzyRanking: Bool = false
     ) async throws -> SearchResult {
-        // Build SQL with filters
-        var sql = """
-            SELECT c.*, bm25(clipboard_fts) as rank
-            FROM clipboard_items c
-            JOIN clipboard_fts f ON c.rowid = f.rowid
-            WHERE clipboard_fts MATCH ?
-        """
+        return try await runOnQueue { [self] in
+            // Build SQL with filters
+            var sql = """
+                SELECT c.*, bm25(clipboard_fts) as rank
+                FROM clipboard_items c
+                JOIN clipboard_fts f ON c.rowid = f.rowid
+                WHERE clipboard_fts MATCH ?
+            """
 
-        var params: [Any] = [query]
+            var params: [Any] = [query]
 
-        // Apply filters (v0.md 3.3)
-        if let appFilter = request.appFilter {
-            sql += " AND c.app_bundle_id = ?"
-            params.append(appFilter)
-        }
-
-        if let typeFilter = request.typeFilter {
-            sql += " AND c.type = ?"
-            params.append(typeFilter.rawValue)
-        }
-
-        // Order by relevance and recency (v0.md 4.3)
-        if useFuzzyRanking {
-            sql += " ORDER BY rank, c.last_used_at DESC"
-        } else {
-            sql += " ORDER BY rank"
-        }
-
-        // Get total count first
-        let countSQL = "SELECT COUNT(*) FROM (\(sql))"
-        var countStmt: OpaquePointer?
-        var total = 0
-
-        if sqlite3_prepare_v2(db, countSQL, -1, &countStmt, nil) == SQLITE_OK {
-            bindParams(stmt: countStmt!, params: params)
-            if sqlite3_step(countStmt) == SQLITE_ROW {
-                total = Int(sqlite3_column_int(countStmt, 0))
+            // Apply filters (v0.md 3.3)
+            if let appFilter = request.appFilter {
+                sql += " AND c.app_bundle_id = ?"
+                params.append(appFilter)
             }
-            sqlite3_finalize(countStmt)
-        }
 
-        // Apply pagination
-        sql += " LIMIT ? OFFSET ?"
-        params.append(request.limit)
-        params.append(request.offset)
-
-        var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
-            throw SearchError.searchFailed(String(cString: sqlite3_errmsg(db)))
-        }
-        defer { sqlite3_finalize(stmt) }
-
-        bindParams(stmt: stmt!, params: params)
-
-        var items: [StorageService.StoredItem] = []
-        while sqlite3_step(stmt) == SQLITE_ROW {
-            if let item = parseItem(from: stmt!) {
-                items.append(item)
+            if let typeFilter = request.typeFilter {
+                sql += " AND c.type = ?"
+                params.append(typeFilter.rawValue)
             }
-        }
 
-        return SearchResult(
-            items: items,
-            total: total,
-            hasMore: request.offset + items.count < total,
-            searchTimeMs: 0 // Will be updated by caller
-        )
+            // Order by relevance and recency (v0.md 4.3)
+            if useFuzzyRanking {
+                sql += " ORDER BY rank, c.last_used_at DESC"
+            } else {
+                sql += " ORDER BY rank"
+            }
+
+            // Get total count first
+            let countSQL = "SELECT COUNT(*) FROM (\(sql))"
+            var countStmt: OpaquePointer?
+            var total = 0
+
+            if sqlite3_prepare_v2(db, countSQL, -1, &countStmt, nil) == SQLITE_OK {
+                self.bindParams(stmt: countStmt!, params: params)
+                if sqlite3_step(countStmt) == SQLITE_ROW {
+                    total = Int(sqlite3_column_int(countStmt, 0))
+                }
+                sqlite3_finalize(countStmt)
+            }
+
+            // Apply pagination
+            sql += " LIMIT ? OFFSET ?"
+            params.append(request.limit)
+            params.append(request.offset)
+
+            var stmt: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+                throw SearchError.searchFailed(String(cString: sqlite3_errmsg(db)))
+            }
+            defer { sqlite3_finalize(stmt) }
+
+            self.bindParams(stmt: stmt!, params: params)
+
+            var items: [StorageService.StoredItem] = []
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                if let item = self.parseItem(from: stmt!) {
+                    items.append(item)
+                }
+            }
+
+            return SearchResult(
+                items: items,
+                total: total,
+                hasMore: request.offset + items.count < total,
+                searchTimeMs: 0 // Will be updated by caller
+            )
+        }
     }
 
     // MARK: - In-Memory Cache Search (for short queries)
 
     private func searchInCache(
         request: SearchRequest,
-        filter: (StorageService.StoredItem) -> Bool
+        filter: @escaping (StorageService.StoredItem) -> Bool
     ) async throws -> SearchResult {
-        // Refresh cache if stale
-        try await refreshCacheIfNeeded()
+        return try await runOnQueue { [self] in
+            // Refresh cache if stale
+            try self.refreshCacheIfNeeded()
 
-        // Apply all filters
-        var filtered = recentItemsCache.filter(filter)
+            // Apply all filters
+            var filtered = recentItemsCache.filter(filter)
 
-        // Apply additional filters
-        if let appFilter = request.appFilter {
-            filtered = filtered.filter { $0.appBundleID == appFilter }
+            // Apply additional filters
+            if let appFilter = request.appFilter {
+                filtered = filtered.filter { $0.appBundleID == appFilter }
+            }
+            if let typeFilter = request.typeFilter {
+                filtered = filtered.filter { $0.type == typeFilter }
+            }
+
+            let total = filtered.count
+            let start = min(request.offset, total)
+            let end = min(request.offset + request.limit, total)
+            let items = Array(filtered[start..<end])
+
+            return SearchResult(
+                items: items,
+                total: total,
+                hasMore: end < total,
+                searchTimeMs: 0
+            )
         }
-        if let typeFilter = request.typeFilter {
-            filtered = filtered.filter { $0.type == typeFilter }
-        }
-
-        let total = filtered.count
-        let start = min(request.offset, total)
-        let end = min(request.offset + request.limit, total)
-        let items = Array(filtered[start..<end])
-
-        return SearchResult(
-            items: items,
-            total: total,
-            hasMore: end < total,
-            searchTimeMs: 0
-        )
     }
 
-    private func refreshCacheIfNeeded() async throws {
+    private func refreshCacheIfNeeded() throws {
         let now = Date()
         if recentItemsCache.isEmpty || now.timeIntervalSince(cacheTimestamp) > cacheDuration {
             recentItemsCache = try storage.fetchRecent(limit: shortQueryCacheSize, offset: 0)
@@ -321,6 +326,14 @@ final class SearchService {
         let sizeBytes = Int(sqlite3_column_int(stmt, 9))
         let storageRef = sqlite3_column_text(stmt, 10).map { String(cString: $0) }
 
+        // Read inline raw_data (column 11) - SearchService also needs access for file type items
+        var rawData: Data? = nil
+        let blobBytes = sqlite3_column_blob(stmt, 11)
+        let blobSize = sqlite3_column_bytes(stmt, 11)
+        if let bytes = blobBytes, blobSize > 0 {
+            rawData = Data(bytes: bytes, count: Int(blobSize))
+        }
+
         return StorageService.StoredItem(
             id: id,
             type: type,
@@ -332,8 +345,82 @@ final class SearchService {
             useCount: useCount,
             isPinned: isPinned,
             sizeBytes: sizeBytes,
-            storageRef: storageRef
+            storageRef: storageRef,
+            rawData: rawData
         )
+    }
+
+    // MARK: - Helpers
+
+    private func runOnQueue<T>(_ work: @escaping () throws -> T) async throws -> T {
+        try await withCheckedThrowingContinuation { continuation in
+            queue.async {
+                do {
+                    let value = try work()
+                    continuation.resume(returning: value)
+                } catch {
+                    continuation.resume(throwing: error)
+                }
+            }
+        }
+    }
+
+    /// 空查询 + 过滤时直接访问 SQLite，避免缓存截断历史
+    private func searchAllWithFilters(request: SearchRequest, db: OpaquePointer) async throws -> SearchResult {
+        try await runOnQueue { [self] in
+            var sql = """
+                SELECT * FROM clipboard_items
+                WHERE 1 = 1
+            """
+            var params: [Any] = []
+
+            if let appFilter = request.appFilter {
+                sql += " AND app_bundle_id = ?"
+                params.append(appFilter)
+            }
+            if let typeFilter = request.typeFilter {
+                sql += " AND type = ?"
+                params.append(typeFilter.rawValue)
+            }
+
+            sql += " ORDER BY is_pinned DESC, last_used_at DESC"
+
+            let countSQL = "SELECT COUNT(*) FROM (\(sql))"
+            var total = 0
+            var countStmt: OpaquePointer?
+            if sqlite3_prepare_v2(db, countSQL, -1, &countStmt, nil) == SQLITE_OK {
+                self.bindParams(stmt: countStmt!, params: params)
+                if sqlite3_step(countStmt) == SQLITE_ROW {
+                    total = Int(sqlite3_column_int(countStmt, 0))
+                }
+                sqlite3_finalize(countStmt)
+            }
+
+            sql += " LIMIT ? OFFSET ?"
+            params.append(request.limit)
+            params.append(request.offset)
+
+            var stmt: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+                throw SearchError.searchFailed(String(cString: sqlite3_errmsg(db)))
+            }
+            defer { sqlite3_finalize(stmt) }
+            self.bindParams(stmt: stmt!, params: params)
+
+            var items: [StorageService.StoredItem] = []
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                if let item = self.parseItem(from: stmt!) {
+                    items.append(item)
+                }
+            }
+
+            return SearchResult(
+                items: items,
+                total: total,
+                hasMore: request.offset + items.count < total,
+                searchTimeMs: 0
+            )
+        }
     }
 }
 

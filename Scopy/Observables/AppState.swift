@@ -2,6 +2,13 @@ import AppKit
 import Foundation
 import Observation
 
+/// 选中来源 - 用于区分鼠标和键盘导航
+enum SelectionSource {
+    case keyboard   // 键盘导航：应该滚动到选中项
+    case mouse      // 鼠标悬停：不应滚动
+    case programmatic // 程序设置：不滚动
+}
+
 /// 应用状态 - 符合 v0.md 的 Observable 架构
 @Observable
 @MainActor
@@ -20,6 +27,23 @@ final class AppState {
     var searchMode: SearchMode = .fuzzy
     var isLoading: Bool = false
     var selectedID: UUID?
+
+    // 过滤状态 (v0.9)
+    var appFilter: String? = nil
+    var typeFilter: ClipboardItemType? = nil
+    var recentApps: [String] = []
+
+    /// 是否有活跃的过滤条件（搜索词、app过滤、类型过滤）
+    var hasActiveFilters: Bool {
+        !searchQuery.isEmpty || appFilter != nil || typeFilter != nil
+    }
+
+    /// 选中来源 - 控制是否触发滚动
+    var lastSelectionSource: SelectionSource = .programmatic
+
+    // 滚动状态 (v0.9.3 - 快速滚动时禁用悬停高亮)
+    var isScrolling: Bool = false
+    private var scrollEndTimer: Timer?
 
     // 分页状态
     var canLoadMore: Bool = false
@@ -88,6 +112,9 @@ final class AppState {
         // 加载设置
         await loadSettings()
 
+        // 加载最近使用的 app 列表
+        await loadRecentApps()
+
         // 初始加载
         await load()
     }
@@ -111,6 +138,15 @@ final class AppState {
             settings = try await service.getSettings()
         } catch {
             print("Failed to load settings: \(error)")
+        }
+    }
+
+    /// 加载最近使用的 app 列表（用于过滤菜单）
+    func loadRecentApps() async {
+        do {
+            recentApps = try await service.getRecentApps(limit: 10)
+        } catch {
+            print("Failed to load recent apps: \(error)")
         }
     }
 
@@ -139,11 +175,22 @@ final class AppState {
     private func handleEvent(_ event: ClipboardEvent) async {
         switch event {
         case .newItem(let item):
-            // 新项目添加到顶部
-            if !items.contains(where: { $0.id == item.id }) {
-                items.insert(item, at: 0)
+            // 新项目或重复项目：移除旧位置，插入到顶部
+            let wasExisting = items.contains(where: { $0.id == item.id })
+            items.removeAll { $0.id == item.id }
+            items.insert(item, at: 0)
+            // 只有真正新增时才增加 totalCount
+            if !wasExisting {
                 totalCount += 1
             }
+            // 如果是新 app，刷新 app 列表
+            if let bundleID = item.appBundleID, !recentApps.contains(bundleID) {
+                Task { await loadRecentApps() }
+            }
+        case .itemUpdated(let item):
+            // 更新的项目：移除旧位置，插入到顶部（用于复制置顶）
+            items.removeAll { $0.id == item.id }
+            items.insert(item, at: 0)
         case .itemDeleted(let id):
             items.removeAll { $0.id == id }
             totalCount -= 1
@@ -151,7 +198,13 @@ final class AppState {
             // 刷新以获取最新状态
             await load()
         case .settingsChanged:
-            // 设置变化时刷新
+            // 设置变化时刷新，并重新应用全局快捷键（兜底，避免依赖前端调用）
+            if let appDelegate = AppDelegate.shared {
+                await appDelegate.applyHotKey(
+                    keyCode: settings.hotkeyKeyCode,
+                    modifiers: settings.hotkeyModifiers
+                )
+            }
             await load()
         }
     }
@@ -162,28 +215,61 @@ final class AppState {
         defer { isLoading = false }
 
         do {
+            let startTime = CFAbsoluteTimeGetCurrent()
+
             items = try await service.fetchRecent(limit: 50, offset: 0)
             loadedCount = items.count
             let stats = try await service.getStorageStats()
             totalCount = stats.itemCount
             storageStats = stats
             canLoadMore = loadedCount < totalCount
+
+            // 记录首屏加载性能
+            let elapsedMs = (CFAbsoluteTimeGetCurrent() - startTime) * 1000
+            await PerformanceMetrics.shared.recordLoadLatency(elapsedMs)
         } catch {
             print("Failed to load items: \(error)")
         }
     }
 
     /// 加载更多（懒加载）- 符合 v0.md 的分页设计
+    /// 滚动事件处理 - 快速滚动时禁用悬停高亮
+    func onScroll() {
+        isScrolling = true
+        scrollEndTimer?.invalidate()
+        scrollEndTimer = Timer.scheduledTimer(withTimeInterval: 0.15, repeats: false) { [weak self] _ in
+            Task { @MainActor in
+                self?.isScrolling = false
+            }
+        }
+    }
+
     func loadMore() async {
         guard canLoadMore, !isLoading else { return }
         isLoading = true
         defer { isLoading = false }
 
         do {
-            let moreItems = try await service.fetchRecent(limit: 100, offset: loadedCount)
-            items.append(contentsOf: moreItems)
-            loadedCount = items.count
-            canLoadMore = loadedCount < totalCount
+            if hasActiveFilters {
+                let request = SearchRequest(
+                    query: searchQuery,
+                    mode: searchMode,
+                    appFilter: appFilter,
+                    typeFilter: typeFilter,
+                    limit: 50,
+                    offset: loadedCount
+                )
+                let result = try await service.search(query: request)
+                items.append(contentsOf: result.items)
+                loadedCount = items.count
+                totalCount = result.total
+                canLoadMore = result.hasMore
+            } else {
+                let moreItems = try await service.fetchRecent(limit: 100, offset: loadedCount)
+                items.append(contentsOf: moreItems)
+                loadedCount = items.count
+                canLoadMore = loadedCount < totalCount
+            }
         } catch {
             print("Failed to load more: \(error)")
         }
@@ -193,7 +279,8 @@ final class AppState {
     func search() {
         searchTask?.cancel()
 
-        if searchQuery.isEmpty {
+        // 如果没有搜索词且没有过滤条件，直接加载全部
+        if searchQuery.isEmpty && appFilter == nil && typeFilter == nil {
             Task { await load() }
             return
         }
@@ -207,9 +294,13 @@ final class AppState {
             defer { isLoading = false }
 
             do {
+                let startTime = CFAbsoluteTimeGetCurrent()
+
                 let request = SearchRequest(
                     query: searchQuery,
                     mode: searchMode,
+                    appFilter: appFilter,
+                    typeFilter: typeFilter,
                     limit: 50,
                     offset: 0
                 )
@@ -218,6 +309,10 @@ final class AppState {
                 totalCount = result.total
                 loadedCount = result.items.count
                 canLoadMore = result.hasMore
+
+                // 记录搜索性能
+                let elapsedMs = (CFAbsoluteTimeGetCurrent() - startTime) * 1000
+                await PerformanceMetrics.shared.recordSearchLatency(elapsedMs)
             } catch {
                 print("Search failed: \(error)")
             }
@@ -273,6 +368,7 @@ final class AppState {
 
     func highlightNext() {
         guard !items.isEmpty else { return }
+        lastSelectionSource = .keyboard
         if let currentID = selectedID,
            let currentIndex = items.firstIndex(where: { $0.id == currentID }),
            currentIndex < items.count - 1 {
@@ -284,6 +380,7 @@ final class AppState {
 
     func highlightPrevious() {
         guard !items.isEmpty else { return }
+        lastSelectionSource = .keyboard
         if let currentID = selectedID,
            let currentIndex = items.firstIndex(where: { $0.id == currentID }),
            currentIndex > 0 {
@@ -291,6 +388,31 @@ final class AppState {
         } else {
             selectedID = items.last?.id
         }
+    }
+
+    /// 删除当前选中项
+    func deleteSelectedItem() async {
+        guard let id = selectedID else { return }
+        guard let index = items.firstIndex(where: { $0.id == id }) else { return }
+
+        // 确定下一个要选中的项
+        let nextID: UUID?
+        if index < items.count - 1 {
+            nextID = items[index + 1].id
+        } else if index > 0 {
+            nextID = items[index - 1].id
+        } else {
+            nextID = nil
+        }
+
+        // 删除当前项
+        if let item = items.first(where: { $0.id == id }) {
+            await delete(item)
+        }
+
+        // 选中下一项
+        selectedID = nextID
+        lastSelectionSource = .programmatic
     }
 
     func selectCurrent() async {
