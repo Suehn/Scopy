@@ -2,9 +2,15 @@ import AppKit
 import SwiftUI
 
 class AppDelegate: NSObject, NSApplicationDelegate {
+    /// 单例访问
+    static var shared: AppDelegate? {
+        NSApp.delegate as? AppDelegate
+    }
+
     var panel: FloatingPanel?
-    private var hotKeyService: HotKeyService?
+    private(set) var hotKeyService: HotKeyService?
     private var settingsWindow: NSWindow?
+    private let settingsKey = "ScopySettings"
 
     private lazy var statusItem: NSStatusItem = {
         let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -39,11 +45,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             await AppState.shared.start()
         }
 
-        // 注册全局快捷键 ⇧⌘C
+        // 注册全局快捷键（从设置加载或使用默认 ⇧⌘C）
         hotKeyService = HotKeyService()
-        hotKeyService?.register { [weak self] in
-            self?.togglePanel()
-        }
+        let settings = loadHotkeySettings()
+        applyHotKey(keyCode: settings.keyCode, modifiers: settings.modifiers)
 
         // 注册 ⌘, 快捷键打开设置
         NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
@@ -65,8 +70,47 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         AppState.shared.stop()
     }
 
-    @objc private func togglePanel() {
+    @objc func togglePanel() {
         panel?.toggle()
+    }
+
+    // MARK: - Hotkey Settings
+
+    /// 从 UserDefaults 加载快捷键设置
+    private func loadHotkeySettings() -> (keyCode: UInt32, modifiers: UInt32) {
+        let defaults = UserDefaults.standard
+        guard let dict = defaults.dictionary(forKey: settingsKey) else {
+            // 默认: ⇧⌘C (shiftKey | cmdKey, kVK_ANSI_C)
+            // shiftKey = 0x0200, cmdKey = 0x0100, 合计 0x0300
+            return (8, 0x0300)
+        }
+        let keyCode = (dict["hotkeyKeyCode"] as? NSNumber)?.uint32Value ?? 8
+        let modifiers = (dict["hotkeyModifiers"] as? NSNumber)?.uint32Value ?? 0x0300
+        return (keyCode, modifiers)
+    }
+
+    /// 统一应用并持久化快捷键，确保无需重启即可生效
+    @MainActor
+    func applyHotKey(keyCode: UInt32, modifiers: UInt32) {
+        if hotKeyService == nil {
+            hotKeyService = HotKeyService()
+        }
+
+        hotKeyService?.updateHotKey(
+            keyCode: keyCode,
+            modifiers: modifiers,
+            handler: { [weak self] in
+                self?.togglePanel()
+            }
+        )
+        persistHotkeySettings(keyCode: keyCode, modifiers: modifiers)
+    }
+
+    private func persistHotkeySettings(keyCode: UInt32, modifiers: UInt32) {
+        var dict = UserDefaults.standard.dictionary(forKey: settingsKey) ?? [:]
+        dict["hotkeyKeyCode"] = keyCode
+        dict["hotkeyModifiers"] = modifiers
+        UserDefaults.standard.set(dict, forKey: settingsKey)
     }
 
     // MARK: - Settings Window

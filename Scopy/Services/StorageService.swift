@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import SQLite3
 
@@ -42,6 +43,7 @@ final class StorageService {
         var isPinned: Bool
         let sizeBytes: Int
         let storageRef: String? // nil for inline, path for external
+        let rawData: Data?      // inline raw data (for small content)
     }
 
     // MARK: - Configuration
@@ -68,6 +70,9 @@ final class StorageService {
 
     /// 暴露数据库连接给 SearchService 使用
     var database: OpaquePointer? { db }
+
+    /// 数据库文件路径（用于设置窗口显示）
+    var databaseFilePath: String { dbPath }
 
     // MARK: - Initialization
 
@@ -274,7 +279,8 @@ final class StorageService {
             useCount: 1,
             isPinned: false,
             sizeBytes: content.sizeBytes,
-            storageRef: storageRef
+            storageRef: storageRef,
+            rawData: inlineData
         )
     }
 
@@ -487,6 +493,49 @@ final class StorageService {
         return totalSize
     }
 
+    /// 获取数据库文件的实际磁盘大小（包含 WAL 和 SHM 文件）
+    func getDatabaseFileSize() -> Int {
+        let fm = FileManager.default
+        var total = 0
+        // SQLite WAL 模式会创建 .db-wal 和 .db-shm 文件
+        for ext in ["", "-wal", "-shm"] {
+            let path = dbPath + ext
+            if let attrs = try? fm.attributesOfItem(atPath: path),
+               let size = attrs[.size] as? Int {
+                total += size
+            }
+        }
+        return total
+    }
+
+    /// 获取最近使用的 app 列表（用于过滤）
+    func getRecentApps(limit: Int) throws -> [String] {
+        guard db != nil else { throw StorageError.databaseNotOpen }
+
+        let sql = """
+            SELECT app_bundle_id FROM clipboard_items
+            WHERE app_bundle_id IS NOT NULL AND app_bundle_id != ''
+            GROUP BY app_bundle_id
+            ORDER BY MAX(last_used_at) DESC
+            LIMIT ?
+        """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            throw StorageError.queryFailed(String(cString: sqlite3_errmsg(db)))
+        }
+        defer { sqlite3_finalize(stmt) }
+
+        sqlite3_bind_int(stmt, 1, Int32(limit))
+
+        var apps: [String] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            if let cStr = sqlite3_column_text(stmt, 0) {
+                apps.append(String(cString: cStr))
+            }
+        }
+        return apps
+    }
+
     // MARK: - Cleanup (v0.md 2.3)
 
     func performCleanup() throws {
@@ -503,14 +552,21 @@ final class StorageService {
             try cleanupByAge(maxDays: maxDays)
         }
 
-        // 3. By space
+        // 3. By space (small content / database)
         let dbSize = try getTotalSize()
         let maxSmallBytes = cleanupSettings.maxSmallStorageMB * 1024 * 1024
         if dbSize > maxSmallBytes {
             try cleanupBySize(targetBytes: maxSmallBytes)
         }
 
-        // 4. SQLite housekeeping (v0.md 2.3)
+        // 4. By space (large content / external storage) - v0.9
+        let externalSize = try getExternalStorageSize()
+        let maxLargeBytes = cleanupSettings.maxLargeStorageMB * 1024 * 1024
+        if externalSize > maxLargeBytes {
+            try cleanupExternalStorage(targetBytes: maxLargeBytes)
+        }
+
+        // 5. SQLite housekeeping (v0.md 2.3)
         try execute("PRAGMA incremental_vacuum(100)")
     }
 
@@ -582,6 +638,39 @@ final class StorageService {
         }
     }
 
+    /// 清理外部存储（大内容）- v0.9
+    private func cleanupExternalStorage(targetBytes: Int) throws {
+        // 获取有外部存储的最旧非置顶项目
+        while try getExternalStorageSize() > targetBytes {
+            let sql = """
+                SELECT id FROM clipboard_items
+                WHERE is_pinned = 0 AND storage_ref IS NOT NULL
+                ORDER BY last_used_at ASC
+                LIMIT 100
+            """
+            var stmt: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+                throw StorageError.queryFailed(String(cString: sqlite3_errmsg(db)))
+            }
+
+            var idsToDelete: [UUID] = []
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                if let cStr = sqlite3_column_text(stmt, 0),
+                   let id = UUID(uuidString: String(cString: cStr)) {
+                    idsToDelete.append(id)
+                }
+            }
+            sqlite3_finalize(stmt)
+
+            if idsToDelete.isEmpty { break }
+
+            for id in idsToDelete {
+                try deleteItem(id)
+                if try getExternalStorageSize() <= targetBytes { break }
+            }
+        }
+    }
+
     // MARK: - External Storage
 
     private func storeExternally(id: UUID, data: Data, type: ClipboardItemType) throws -> String {
@@ -609,6 +698,121 @@ final class StorageService {
             return try Data(contentsOf: URL(fileURLWithPath: path))
         } catch {
             throw StorageError.fileOperationFailed("Failed to read external file: \(error)")
+        }
+    }
+
+    // MARK: - Thumbnail Cache (v0.8)
+
+    /// 获取缩略图路径（如果存在）
+    func getThumbnailPath(for contentHash: String) -> String? {
+        let path = (thumbnailCachePath as NSString).appendingPathComponent("\(contentHash).png")
+        if FileManager.default.fileExists(atPath: path) {
+            return path
+        }
+        return nil
+    }
+
+    /// 保存缩略图
+    func saveThumbnail(_ data: Data, for contentHash: String) throws {
+        let path = (thumbnailCachePath as NSString).appendingPathComponent("\(contentHash).png")
+        do {
+            try data.write(to: URL(fileURLWithPath: path))
+        } catch {
+            throw StorageError.fileOperationFailed("Failed to save thumbnail: \(error)")
+        }
+    }
+
+    /// 生成并保存缩略图（从原图数据）
+    /// - Parameters:
+    ///   - imageData: 原图数据
+    ///   - contentHash: 内容哈希（用于命名）
+    ///   - maxHeight: 最大高度
+    /// - Returns: 缩略图路径
+    func generateThumbnail(from imageData: Data, contentHash: String, maxHeight: Int) -> String? {
+        // 检查是否已存在
+        if let existing = getThumbnailPath(for: contentHash) {
+            return existing
+        }
+
+        guard let nsImage = NSImage(data: imageData) else { return nil }
+        let originalSize = nsImage.size
+
+        // 计算缩放比例
+        let scale = CGFloat(maxHeight) / originalSize.height
+        let newWidth = originalSize.width * scale
+        let newHeight = CGFloat(maxHeight)
+
+        // 创建缩略图
+        let newImage = NSImage(size: NSSize(width: newWidth, height: newHeight))
+        newImage.lockFocus()
+        nsImage.draw(in: NSRect(x: 0, y: 0, width: newWidth, height: newHeight),
+                     from: NSRect(origin: .zero, size: originalSize),
+                     operation: .copy,
+                     fraction: 1.0)
+        newImage.unlockFocus()
+
+        // 转换为 PNG 数据
+        guard let tiffData = newImage.tiffRepresentation,
+              let bitmap = NSBitmapImageRep(data: tiffData),
+              let pngData = bitmap.representation(using: .png, properties: [:]) else {
+            return nil
+        }
+
+        // 保存
+        let path = (thumbnailCachePath as NSString).appendingPathComponent("\(contentHash).png")
+        do {
+            try pngData.write(to: URL(fileURLWithPath: path))
+            return path
+        } catch {
+            print("Failed to save thumbnail: \(error)")
+            return nil
+        }
+    }
+
+    /// 获取原图数据（用于预览）
+    func getOriginalImageData(for item: StoredItem) -> Data? {
+        if let storageRef = item.storageRef {
+            return try? loadExternalData(path: storageRef)
+        }
+        return item.rawData
+    }
+
+    /// 清空缩略图缓存（设置变更时调用）
+    func clearThumbnailCache() {
+        try? FileManager.default.removeItem(atPath: thumbnailCachePath)
+        try? FileManager.default.createDirectory(atPath: thumbnailCachePath,
+                                                 withIntermediateDirectories: true)
+    }
+
+    /// 清理缩略图缓存（LRU 策略）
+    func cleanupThumbnailCache(maxSizeMB: Int = 50) {
+        let maxBytes = maxSizeMB * 1024 * 1024
+        let url = URL(fileURLWithPath: thumbnailCachePath)
+
+        guard let enumerator = FileManager.default.enumerator(
+            at: url,
+            includingPropertiesForKeys: [.fileSizeKey, .contentAccessDateKey]
+        ) else { return }
+
+        var files: [(url: URL, size: Int, accessDate: Date)] = []
+        var totalSize = 0
+
+        for case let fileURL as URL in enumerator {
+            guard let values = try? fileURL.resourceValues(forKeys: [.fileSizeKey, .contentAccessDateKey]),
+                  let size = values.fileSize,
+                  let accessDate = values.contentAccessDate else { continue }
+            files.append((fileURL, size, accessDate))
+            totalSize += size
+        }
+
+        // 如果超出限制，按访问时间排序删除最旧的
+        if totalSize > maxBytes {
+            files.sort { $0.accessDate < $1.accessDate }
+            for file in files {
+                if totalSize <= maxBytes { break }
+                try? FileManager.default.removeItem(at: file.url)
+                totalSize -= file.size
+            }
         }
     }
 
@@ -643,6 +847,14 @@ final class StorageService {
         let sizeBytes = Int(sqlite3_column_int(stmt, 9))
         let storageRef = sqlite3_column_text(stmt, 10).map { String(cString: $0) }
 
+        // Read inline raw_data (column 11)
+        var rawData: Data? = nil
+        let blobBytes = sqlite3_column_blob(stmt, 11)
+        let blobSize = sqlite3_column_bytes(stmt, 11)
+        if let bytes = blobBytes, blobSize > 0 {
+            rawData = Data(bytes: bytes, count: Int(blobSize))
+        }
+
         return StoredItem(
             id: id,
             type: type,
@@ -654,7 +866,8 @@ final class StorageService {
             useCount: useCount,
             isPinned: isPinned,
             sizeBytes: sizeBytes,
-            storageRef: storageRef
+            storageRef: storageRef,
+            rawData: rawData
         )
     }
 }

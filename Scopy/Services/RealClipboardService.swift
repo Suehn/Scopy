@@ -133,8 +133,13 @@ final class RealClipboardService: ClipboardServiceProtocol {
         case .text:
             monitor.copyToClipboard(text: item.plainText)
         case .rtf, .html, .image:
-            if let storageRef = item.storageRef {
-                let data = try storage.loadExternalData(path: storageRef)
+            // 优先使用内联数据（小内容），否则读取外部存储
+            var data: Data? = item.rawData
+            if data == nil, let storageRef = item.storageRef {
+                data = try storage.loadExternalData(path: storageRef)
+            }
+
+            if let data = data {
                 let pasteboardType: NSPasteboard.PasteboardType
                 switch item.type {
                 case .rtf: pasteboardType = .rtf
@@ -145,8 +150,28 @@ final class RealClipboardService: ClipboardServiceProtocol {
                 monitor.copyToClipboard(data: data, type: pasteboardType)
             }
         case .file:
-            // For files, copy the path
-            monitor.copyToClipboard(text: item.plainText)
+            // 尝试从 inline rawData 或 external storage 恢复文件 URL
+            var urlData: Data? = item.rawData
+            if urlData == nil, let storageRef = item.storageRef {
+                urlData = try? storage.loadExternalData(path: storageRef)
+            }
+
+            if let data = urlData,
+               let fileURLs = ClipboardMonitor.deserializeFileURLs(data),
+               !fileURLs.isEmpty {
+                // 使用真实的文件 URL，支持 Finder 粘贴
+                monitor.copyToClipboard(fileURLs: fileURLs)
+            } else {
+                // 回退：从路径字符串重建 URL
+                let paths = item.plainText.components(separatedBy: "\n")
+                let fileURLs = paths.compactMap { URL(fileURLWithPath: $0) }
+                if !fileURLs.isEmpty {
+                    monitor.copyToClipboard(fileURLs: fileURLs)
+                } else {
+                    // 最后回退：复制路径文本
+                    monitor.copyToClipboard(text: item.plainText)
+                }
+            }
         case .other:
             monitor.copyToClipboard(text: item.plainText)
         }
@@ -156,14 +181,25 @@ final class RealClipboardService: ClipboardServiceProtocol {
         updated.lastUsedAt = Date()
         updated.useCount += 1
         try? storage.updateItem(updated)
+
+        // 生成事件让 UI 刷新（置顶该条目）
+        search.invalidateCache()
+        eventContinuation?.yield(.itemUpdated(toDTO(updated)))
     }
 
     func updateSettings(_ newSettings: SettingsDTO) async throws {
+        let oldHeight = settings.thumbnailHeight
+        let oldShowThumbnails = settings.showImageThumbnails
         settings = newSettings
 
         // Update cleanup settings
         storage.cleanupSettings.maxItems = newSettings.maxItems
         storage.cleanupSettings.maxSmallStorageMB = newSettings.maxStorageMB
+
+        // 如果缩略图高度改变或开关状态改变，清理旧缩略图缓存（懒加载：显示时重新生成）
+        if oldHeight != newSettings.thumbnailHeight || oldShowThumbnails != newSettings.showImageThumbnails {
+            storage.clearThumbnailCache()
+        }
 
         // Save to UserDefaults
         saveSettingsToDefaults(newSettings)
@@ -184,6 +220,31 @@ final class RealClipboardService: ClipboardServiceProtocol {
         return (count, size)
     }
 
+    func getDetailedStorageStats() async throws -> StorageStatsDTO {
+        let count = try storage.getItemCount()
+        // 使用实际文件大小而非 SUM(size_bytes)
+        let dbSize = storage.getDatabaseFileSize()
+        let externalSize = try storage.getExternalStorageSize()
+        let dbPath = storage.databaseFilePath
+
+        return StorageStatsDTO(
+            itemCount: count,
+            databaseSizeBytes: dbSize,
+            externalStorageSizeBytes: externalSize,
+            totalSizeBytes: dbSize + externalSize,
+            databasePath: dbPath
+        )
+    }
+
+    func getImageData(itemID: UUID) async throws -> Data? {
+        guard let item = try storage.findByID(itemID) else { return nil }
+        return storage.getOriginalImageData(for: item)
+    }
+
+    func getRecentApps(limit: Int) async throws -> [String] {
+        return try storage.getRecentApps(limit: limit)
+    }
+
     // MARK: - Private Methods
 
     private func handleNewContent(_ content: ClipboardMonitor.ClipboardContent) async {
@@ -193,6 +254,18 @@ final class RealClipboardService: ClipboardServiceProtocol {
 
         do {
             let storedItem = try storage.upsertItem(content)
+
+            // 图片类型：生成缩略图
+            if content.type == .image, settings.showImageThumbnails {
+                if let imageData = storage.getOriginalImageData(for: storedItem) {
+                    _ = storage.generateThumbnail(
+                        from: imageData,
+                        contentHash: storedItem.contentHash,
+                        maxHeight: settings.thumbnailHeight
+                    )
+                }
+            }
+
             search.invalidateCache()
             eventContinuation?.yield(.newItem(toDTO(storedItem)))
 
@@ -204,7 +277,25 @@ final class RealClipboardService: ClipboardServiceProtocol {
     }
 
     private func toDTO(_ item: StorageService.StoredItem) -> ClipboardItemDTO {
-        ClipboardItemDTO(
+        // 图片类型：检查是否有缩略图，没有则懒加载生成
+        var thumbnailPath: String? = nil
+        if item.type == .image && settings.showImageThumbnails {
+            // 先检查是否已有缩略图
+            thumbnailPath = storage.getThumbnailPath(for: item.contentHash)
+
+            // 如果没有，即时生成（懒加载）
+            if thumbnailPath == nil {
+                if let imageData = storage.getOriginalImageData(for: item) {
+                    thumbnailPath = storage.generateThumbnail(
+                        from: imageData,
+                        contentHash: item.contentHash,
+                        maxHeight: settings.thumbnailHeight
+                    )
+                }
+            }
+        }
+
+        return ClipboardItemDTO(
             id: item.id,
             type: item.type,
             contentHash: item.contentHash,
@@ -213,7 +304,9 @@ final class RealClipboardService: ClipboardServiceProtocol {
             createdAt: item.createdAt,
             lastUsedAt: item.lastUsedAt,
             isPinned: item.isPinned,
-            sizeBytes: item.sizeBytes
+            sizeBytes: item.sizeBytes,
+            thumbnailPath: thumbnailPath,
+            storageRef: item.storageRef
         )
     }
 
@@ -226,7 +319,13 @@ final class RealClipboardService: ClipboardServiceProtocol {
             "maxItems": settings.maxItems,
             "maxStorageMB": settings.maxStorageMB,
             "saveImages": settings.saveImages,
-            "saveFiles": settings.saveFiles
+            "saveFiles": settings.saveFiles,
+            "defaultSearchMode": settings.defaultSearchMode.rawValue,
+            "hotkeyKeyCode": settings.hotkeyKeyCode,
+            "hotkeyModifiers": settings.hotkeyModifiers,
+            "showImageThumbnails": settings.showImageThumbnails,
+            "thumbnailHeight": settings.thumbnailHeight,
+            "imagePreviewDelay": settings.imagePreviewDelay
         ]
         UserDefaults.standard.set(dict, forKey: settingsKey)
     }
@@ -235,11 +334,20 @@ final class RealClipboardService: ClipboardServiceProtocol {
         guard let dict = UserDefaults.standard.dictionary(forKey: settingsKey) else {
             return .default
         }
+        let searchModeString = dict["defaultSearchMode"] as? String ?? SearchMode.fuzzy.rawValue
+        let searchMode = SearchMode(rawValue: searchModeString) ?? .fuzzy
+
         return SettingsDTO(
             maxItems: dict["maxItems"] as? Int ?? SettingsDTO.default.maxItems,
             maxStorageMB: dict["maxStorageMB"] as? Int ?? SettingsDTO.default.maxStorageMB,
             saveImages: dict["saveImages"] as? Bool ?? SettingsDTO.default.saveImages,
-            saveFiles: dict["saveFiles"] as? Bool ?? SettingsDTO.default.saveFiles
+            saveFiles: dict["saveFiles"] as? Bool ?? SettingsDTO.default.saveFiles,
+            defaultSearchMode: searchMode,
+            hotkeyKeyCode: (dict["hotkeyKeyCode"] as? NSNumber)?.uint32Value ?? SettingsDTO.default.hotkeyKeyCode,
+            hotkeyModifiers: (dict["hotkeyModifiers"] as? NSNumber)?.uint32Value ?? SettingsDTO.default.hotkeyModifiers,
+            showImageThumbnails: dict["showImageThumbnails"] as? Bool ?? SettingsDTO.default.showImageThumbnails,
+            thumbnailHeight: dict["thumbnailHeight"] as? Int ?? SettingsDTO.default.thumbnailHeight,
+            imagePreviewDelay: dict["imagePreviewDelay"] as? Double ?? SettingsDTO.default.imagePreviewDelay
         )
     }
 }

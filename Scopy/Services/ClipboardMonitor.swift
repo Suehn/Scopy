@@ -138,6 +138,50 @@ final class ClipboardMonitor {
         lastChangeCount = pasteboard.changeCount
     }
 
+    /// Copy file URLs to system clipboard
+    /// 将文件 URL 复制到系统剪贴板，支持 Finder 粘贴
+    func copyToClipboard(fileURLs: [URL]) {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+
+        // 方法1: 使用 NSURL 的 NSPasteboardWriting 协议
+        pasteboard.writeObjects(fileURLs as [NSURL])
+
+        // 方法2: 同时设置 NSFilenamesPboardType，确保 Finder 兼容
+        // 这是旧的 API，但 Finder 仍然依赖它
+        let paths = fileURLs.map { $0.path }
+        pasteboard.setPropertyList(paths, forType: NSPasteboard.PasteboardType("NSFilenamesPboardType"))
+
+        lastChangeCount = pasteboard.changeCount
+    }
+
+    // MARK: - File URL Serialization
+
+    /// 序列化文件 URL 数组为 Data
+    /// 使用文件路径而非 absoluteString，确保反序列化时能正确还原为文件 URL
+    nonisolated static func serializeFileURLs(_ urls: [URL]) -> Data? {
+        do {
+            // 使用 .path 而非 .absoluteString，避免 file:// 前缀问题
+            let paths = urls.map { $0.path }
+            return try JSONEncoder().encode(paths)
+        } catch {
+            print("Failed to serialize file URLs: \(error)")
+            return nil
+        }
+    }
+
+    /// 从 Data 反序列化文件 URL 数组
+    /// 使用 URL(fileURLWithPath:) 确保正确创建文件 URL
+    nonisolated static func deserializeFileURLs(_ data: Data) -> [URL]? {
+        do {
+            let paths = try JSONDecoder().decode([String].self, from: data)
+            return paths.map { URL(fileURLWithPath: $0) }
+        } catch {
+            print("Failed to deserialize file URLs: \(error)")
+            return nil
+        }
+    }
+
     // MARK: - Private Methods
 
     private func checkClipboard() {
@@ -161,9 +205,14 @@ final class ClipboardMonitor {
         }
 
         // 根据内容类型和大小决定处理方式
-        // 1. 图片已有预计算指纹，直接使用（不走 SHA256）
+        // 1. 图片一律走后台 SHA256，避免轻指纹误判
         // 2. 小内容在主线程同步处理
         // 3. 大内容（非图片）异步处理
+        if rawData.type == .image {
+            processLargeContentAsync(rawData)
+            return
+        }
+
         if rawData.precomputedHash != nil || rawData.sizeBytes < Self.largeContentThreshold {
             // 有预计算指纹或小内容：同步处理
             let hash = computeHash(rawData)
@@ -213,7 +262,15 @@ final class ClipboardMonitor {
 
     /// 在后台线程计算哈希
     nonisolated private func computeHashInBackground(_ rawData: RawClipboardData) async -> String {
-        // 如果有预计算的指纹（如图片轻量指纹），直接返回
+        // 图片强制使用全量 SHA256，避免轻指纹误判
+        if rawData.type == .image {
+            if let data = rawData.rawData {
+                return Self.computeHashStatic(data)
+            } else {
+                return Self.computeHashStatic(Data(rawData.plainText.utf8))
+            }
+        }
+
         if let precomputed = rawData.precomputedHash {
             return precomputed
         }
@@ -233,49 +290,32 @@ final class ClipboardMonitor {
     }
 
     /// 快速提取原始数据（不计算哈希，避免阻塞主线程）
+    /// 注意：检测顺序很重要！文件复制时剪贴板同时包含 file URL 和 plain text，
+    /// 必须先检测 file URL，否则会被误识别为文本。
     private func extractRawData(from pasteboard: NSPasteboard) -> RawClipboardData? {
         let appBundleID = getFrontmostAppBundleID()
 
-        // Try different content types in order of preference
+        // 检测顺序：File URLs > Image > RTF > HTML > Plain text
+        // Plain text 必须放最后，因为其他类型通常也包含文本表示
 
-        // 1. Plain text (most common)
-        if let string = pasteboard.string(forType: .string) {
-            let normalizedText = normalizeText(string)
+        // 1. File URLs (最高优先级 - 文件复制总是带有文本表示)
+        if let fileURLs = pasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL],
+           !fileURLs.isEmpty {
+            let paths = fileURLs.map { $0.path }.joined(separator: "\n")
+            // 序列化文件 URL 以便后续恢复
+            let urlData = Self.serializeFileURLs(fileURLs)
             return RawClipboardData(
-                type: .text,
-                plainText: normalizedText,
-                rawData: nil,
+                type: .file,
+                plainText: paths,
+                rawData: urlData,
                 appBundleID: appBundleID,
-                sizeBytes: normalizedText.utf8.count
+                sizeBytes: paths.utf8.count + (urlData?.count ?? 0)
             )
         }
 
-        // 2. RTF
-        if let rtfData = pasteboard.data(forType: .rtf) {
-            let plainText = extractPlainTextFromRTF(rtfData) ?? ""
-            return RawClipboardData(
-                type: .rtf,
-                plainText: plainText,
-                rawData: rtfData,
-                appBundleID: appBundleID,
-                sizeBytes: rtfData.count
-            )
-        }
-
-        // 3. HTML
-        if let htmlData = pasteboard.data(forType: .html) {
-            let plainText = extractPlainTextFromHTML(htmlData) ?? ""
-            return RawClipboardData(
-                type: .html,
-                plainText: plainText,
-                rawData: htmlData,
-                appBundleID: appBundleID,
-                sizeBytes: htmlData.count
-            )
-        }
-
-        // 4. Image (PNG, TIFF, etc.) - 使用轻量指纹，不阻塞主线程
-        if let imageData = pasteboard.data(forType: .png) ?? pasteboard.data(forType: .tiff) {
+        // 2. Image (PNG, TIFF, etc.) - 优先 PNG，TIFF 转为 PNG 避免存储膨胀
+        if let imageResult = extractOptimalImageData(from: pasteboard) {
+            let imageData = imageResult.data
             // 图片使用轻量指纹（分辨率 + 四角像素），避免 SHA256 全量计算
             let fingerprint = Self.computeImageFingerprint(imageData) ?? "img:unknown:\(imageData.count)"
             return RawClipboardData(
@@ -288,16 +328,39 @@ final class ClipboardMonitor {
             )
         }
 
-        // 5. File URLs
-        if let fileURLs = pasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL],
-           !fileURLs.isEmpty {
-            let paths = fileURLs.map { $0.path }.joined(separator: "\n")
+        // 3. RTF
+        if let rtfData = pasteboard.data(forType: .rtf) {
+            let plainText = extractPlainTextFromRTF(rtfData) ?? ""
             return RawClipboardData(
-                type: .file,
-                plainText: paths,
+                type: .rtf,
+                plainText: plainText,
+                rawData: rtfData,
+                appBundleID: appBundleID,
+                sizeBytes: rtfData.count
+            )
+        }
+
+        // 4. HTML
+        if let htmlData = pasteboard.data(forType: .html) {
+            let plainText = extractPlainTextFromHTML(htmlData) ?? ""
+            return RawClipboardData(
+                type: .html,
+                plainText: plainText,
+                rawData: htmlData,
+                appBundleID: appBundleID,
+                sizeBytes: htmlData.count
+            )
+        }
+
+        // 5. Plain text (最低优先级 - 作为兜底)
+        if let string = pasteboard.string(forType: .string) {
+            let normalizedText = normalizeText(string)
+            return RawClipboardData(
+                type: .text,
+                plainText: normalizedText,
                 rawData: nil,
                 appBundleID: appBundleID,
-                sizeBytes: paths.utf8.count
+                sizeBytes: normalizedText.utf8.count
             )
         }
 
@@ -318,26 +381,46 @@ final class ClipboardMonitor {
         }
     }
 
+    /// 提取剪贴板内容（包含哈希计算）
+    /// 注意：检测顺序与 extractRawData 保持一致
     private func extractContent(from pasteboard: NSPasteboard) -> ClipboardContent? {
         let appBundleID = getFrontmostAppBundleID()
 
-        // Try different content types in order of preference
+        // 检测顺序：File URLs > Image > RTF > HTML > Plain text
+        // Plain text 必须放最后，因为其他类型通常也包含文本表示
 
-        // 1. Plain text (most common)
-        if let string = pasteboard.string(forType: .string) {
-            let normalizedText = normalizeText(string)
-            let hash = computeHash(normalizedText)
+        // 1. File URLs (最高优先级)
+        if let fileURLs = pasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL],
+           !fileURLs.isEmpty {
+            let paths = fileURLs.map { $0.path }.joined(separator: "\n")
+            let hash = computeHash(paths)
+            // 序列化文件 URL 以便后续恢复
+            let urlData = Self.serializeFileURLs(fileURLs)
             return ClipboardContent(
-                type: .text,
-                plainText: normalizedText,
-                rawData: nil,
+                type: .file,
+                plainText: paths,
+                rawData: urlData,
                 appBundleID: appBundleID,
                 contentHash: hash,
-                sizeBytes: normalizedText.utf8.count
+                sizeBytes: paths.utf8.count + (urlData?.count ?? 0)
             )
         }
 
-        // 2. RTF
+        // 2. Image (PNG, TIFF, etc.) - 优先 PNG，TIFF 转为 PNG 避免存储膨胀
+        if let imageResult = extractOptimalImageData(from: pasteboard) {
+            let imageData = imageResult.data
+            let hash = computeHash(imageData)
+            return ClipboardContent(
+                type: .image,
+                plainText: "[Image: \(formatBytes(imageData.count))]",
+                rawData: imageData,
+                appBundleID: appBundleID,
+                contentHash: hash,
+                sizeBytes: imageData.count
+            )
+        }
+
+        // 3. RTF
         if let rtfData = pasteboard.data(forType: .rtf) {
             let plainText = extractPlainTextFromRTF(rtfData) ?? ""
             let hash = computeHash(rtfData)
@@ -351,7 +434,7 @@ final class ClipboardMonitor {
             )
         }
 
-        // 3. HTML
+        // 4. HTML
         if let htmlData = pasteboard.data(forType: .html) {
             let plainText = extractPlainTextFromHTML(htmlData) ?? ""
             let hash = computeHash(htmlData)
@@ -365,31 +448,17 @@ final class ClipboardMonitor {
             )
         }
 
-        // 4. Image (PNG, TIFF, etc.)
-        if let imageData = pasteboard.data(forType: .png) ?? pasteboard.data(forType: .tiff) {
-            let hash = computeHash(imageData)
+        // 5. Plain text (最低优先级 - 作为兜底)
+        if let string = pasteboard.string(forType: .string) {
+            let normalizedText = normalizeText(string)
+            let hash = computeHash(normalizedText)
             return ClipboardContent(
-                type: .image,
-                plainText: "[Image: \(formatBytes(imageData.count))]",
-                rawData: imageData,
-                appBundleID: appBundleID,
-                contentHash: hash,
-                sizeBytes: imageData.count
-            )
-        }
-
-        // 5. File URLs
-        if let fileURLs = pasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL],
-           !fileURLs.isEmpty {
-            let paths = fileURLs.map { $0.path }.joined(separator: "\n")
-            let hash = computeHash(paths)
-            return ClipboardContent(
-                type: .file,
-                plainText: paths,
+                type: .text,
+                plainText: normalizedText,
                 rawData: nil,
                 appBundleID: appBundleID,
                 contentHash: hash,
-                sizeBytes: paths.utf8.count
+                sizeBytes: normalizedText.utf8.count
             )
         }
 
@@ -589,6 +658,39 @@ final class ClipboardMonitor {
         }
         let mb = kb / 1024
         return String(format: "%.1f MB", mb)
+    }
+
+    // MARK: - TIFF to PNG Conversion
+
+    /// 将 TIFF 数据转换为 PNG 格式（避免存储膨胀）
+    /// macOS 剪贴板对截图返回 TIFF（未压缩），可能比原始 PNG 大 35 倍
+    nonisolated static func convertTIFFToPNG(_ tiffData: Data) -> Data? {
+        guard let imageSource = CGImageSourceCreateWithData(tiffData as CFData, nil),
+              let cgImage = CGImageSourceCreateImageAtIndex(imageSource, 0, nil) else {
+            return nil
+        }
+
+        let rep = NSBitmapImageRep(cgImage: cgImage)
+        return rep.representation(using: .png, properties: [:])
+    }
+
+    /// 从剪贴板提取图片数据，优先 PNG，如果只有 TIFF 则转换为 PNG
+    private func extractOptimalImageData(from pasteboard: NSPasteboard) -> (data: Data, wasTIFF: Bool)? {
+        // 优先检查 PNG（已压缩格式）
+        if let pngData = pasteboard.data(forType: .png) {
+            return (pngData, false)
+        }
+
+        // 只有 TIFF 时，转换为 PNG 以节省存储
+        if let tiffData = pasteboard.data(forType: .tiff) {
+            if let pngData = Self.convertTIFFToPNG(tiffData) {
+                return (pngData, true)
+            }
+            // 转换失败时保留 TIFF
+            return (tiffData, true)
+        }
+
+        return nil
     }
 }
 

@@ -45,7 +45,9 @@ final class MockClipboardService: ClipboardServiceProtocol {
                 createdAt: Date().addingTimeInterval(Double(-index * 3600)),
                 lastUsedAt: Date().addingTimeInterval(Double(-index * 1800)),
                 isPinned: index < 2,  // 前两个是固定的
-                sizeBytes: text.utf8.count
+                sizeBytes: text.utf8.count,
+                thumbnailPath: nil,
+                storageRef: nil
             )
             items.append(item)
         }
@@ -61,7 +63,9 @@ final class MockClipboardService: ClipboardServiceProtocol {
                 createdAt: Date().addingTimeInterval(Double(-i * 3600)),
                 lastUsedAt: Date().addingTimeInterval(Double(-i * 1800)),
                 isPinned: false,
-                sizeBytes: 100
+                sizeBytes: 100,
+                thumbnailPath: nil,
+                storageRef: nil
             )
             items.append(item)
         }
@@ -126,7 +130,9 @@ final class MockClipboardService: ClipboardServiceProtocol {
                 createdAt: item.createdAt,
                 lastUsedAt: item.lastUsedAt,
                 isPinned: true,
-                sizeBytes: item.sizeBytes
+                sizeBytes: item.sizeBytes,
+                thumbnailPath: item.thumbnailPath,
+                storageRef: item.storageRef
             )
             eventContinuation?.yield(.itemPinned(itemID))
         }
@@ -144,7 +150,9 @@ final class MockClipboardService: ClipboardServiceProtocol {
                 createdAt: item.createdAt,
                 lastUsedAt: item.lastUsedAt,
                 isPinned: false,
-                sizeBytes: item.sizeBytes
+                sizeBytes: item.sizeBytes,
+                thumbnailPath: item.thumbnailPath,
+                storageRef: item.storageRef
             )
             eventContinuation?.yield(.itemUnpinned(itemID))
         }
@@ -181,6 +189,28 @@ final class MockClipboardService: ClipboardServiceProtocol {
         return (items.count, totalBytes)
     }
 
+    func getDetailedStorageStats() async throws -> StorageStatsDTO {
+        let totalBytes = items.reduce(0) { $0 + $1.sizeBytes }
+        return StorageStatsDTO(
+            itemCount: items.count,
+            databaseSizeBytes: totalBytes,
+            externalStorageSizeBytes: 0,
+            totalSizeBytes: totalBytes,
+            databasePath: "~/Library/Application Support/Scopy/"
+        )
+    }
+
+    func getImageData(itemID: UUID) async throws -> Data? {
+        // Mock 服务不存储实际图片数据
+        return nil
+    }
+
+    func getRecentApps(limit: Int) async throws -> [String] {
+        // 返回 mock 数据中的 app 列表
+        let apps = Set(items.compactMap { $0.appBundleID })
+        return Array(apps.prefix(limit))
+    }
+
     // 模拟添加新剪贴板项
     func simulateNewClipboardItem(_ text: String) {
         let item = ClipboardItemDTO(
@@ -192,7 +222,9 @@ final class MockClipboardService: ClipboardServiceProtocol {
             createdAt: Date(),
             lastUsedAt: Date(),
             isPinned: false,
-            sizeBytes: text.utf8.count
+            sizeBytes: text.utf8.count,
+            thumbnailPath: nil,
+            storageRef: nil
         )
         items.insert(item, at: 0)
         eventContinuation?.yield(.newItem(item))

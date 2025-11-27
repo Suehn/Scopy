@@ -30,9 +30,29 @@ struct ClipboardItemDTO: Identifiable, Sendable, Hashable {
     let lastUsedAt: Date
     let isPinned: Bool
     let sizeBytes: Int
+    let thumbnailPath: String?  // 缩略图路径 (v0.8)
+    let storageRef: String?     // 外部存储路径 (v0.8 - 用于原图预览)
 
     // 用于 UI 显示
-    var title: String { plainText.isEmpty ? "(No text)" : String(plainText.prefix(100)) }
+    var title: String {
+        switch type {
+        case .file:
+            // 提取文件名，多文件显示 "文件名 + N more"
+            let paths = plainText.components(separatedBy: "\n").filter { !$0.isEmpty }
+            let fileCount = paths.count
+            let firstName = URL(fileURLWithPath: paths.first ?? "").lastPathComponent
+            if fileCount <= 1 {
+                return firstName.isEmpty ? plainText : firstName
+            } else {
+                return "\(firstName) + \(fileCount - 1) more"
+            }
+        case .image:
+            // 保持 "[Image: X KB]" 格式
+            return plainText
+        default:
+            return plainText.isEmpty ? "(No text)" : String(plainText.prefix(100))
+        }
+    }
 }
 
 /// 搜索请求 - 对应 v0.md 中的 SearchRequest
@@ -71,6 +91,7 @@ struct SearchResultPage: Sendable {
 /// 剪贴板事件 - 对应 v0.md 中的 ClipboardEvent
 enum ClipboardEvent: Sendable {
     case newItem(ClipboardItemDTO)
+    case itemUpdated(ClipboardItemDTO)  // 用于置顶更新的条目
     case itemDeleted(UUID)
     case itemPinned(UUID)
     case itemUnpinned(UUID)
@@ -83,13 +104,56 @@ struct SettingsDTO: Sendable {
     var maxStorageMB: Int
     var saveImages: Bool
     var saveFiles: Bool
+    var defaultSearchMode: SearchMode
+    var hotkeyKeyCode: UInt32
+    var hotkeyModifiers: UInt32
+    // 缩略图设置 (v0.8)
+    var showImageThumbnails: Bool
+    var thumbnailHeight: Int
+    var imagePreviewDelay: Double  // 悬浮预览延迟（秒）
 
     static let `default` = SettingsDTO(
         maxItems: 10000,
         maxStorageMB: 200,
         saveImages: true,
-        saveFiles: true
+        saveFiles: true,
+        defaultSearchMode: .fuzzy,
+        hotkeyKeyCode: 8,  // kVK_ANSI_C = 8
+        hotkeyModifiers: 0x0300,  // shiftKey (0x0200) | cmdKey (0x0100)
+        showImageThumbnails: true,
+        thumbnailHeight: 40,
+        imagePreviewDelay: 1.0
     )
+}
+
+/// 存储统计详情 DTO
+struct StorageStatsDTO: Sendable {
+    let itemCount: Int
+    let databaseSizeBytes: Int
+    let externalStorageSizeBytes: Int
+    let totalSizeBytes: Int
+    let databasePath: String
+
+    var databaseSizeText: String {
+        formatBytes(databaseSizeBytes)
+    }
+
+    var externalStorageSizeText: String {
+        formatBytes(externalStorageSizeBytes)
+    }
+
+    var totalSizeText: String {
+        formatBytes(totalSizeBytes)
+    }
+
+    private func formatBytes(_ bytes: Int) -> String {
+        let kb = Double(bytes) / 1024
+        if kb < 1024 {
+            return String(format: "%.1f KB", kb)
+        } else {
+            return String(format: "%.1f MB", kb / 1024)
+        }
+    }
 }
 
 // MARK: - Service Protocol
@@ -125,6 +189,15 @@ protocol ClipboardServiceProtocol: AnyObject {
 
     /// 获取存储统计
     func getStorageStats() async throws -> (itemCount: Int, sizeBytes: Int)
+
+    /// 获取详细的存储统计
+    func getDetailedStorageStats() async throws -> StorageStatsDTO
+
+    /// 获取图片原始数据（用于预览）
+    func getImageData(itemID: UUID) async throws -> Data?
+
+    /// 获取最近使用的 app 列表（用于过滤）
+    func getRecentApps(limit: Int) async throws -> [String]
 
     /// 事件观察 - 新增条目、删除、设置变更等
     var eventStream: AsyncStream<ClipboardEvent> { get }
