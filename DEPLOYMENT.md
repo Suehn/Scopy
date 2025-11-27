@@ -173,9 +173,9 @@ Scopy/
 
 | 数据量 | 目标 | 实测 | 测试用例 | 状态 |
 |--------|------|------|----------|------|
-| 5,000 items | < 50ms | **P95 2.05ms** | `testSearchPerformance5kItems` | ✅ |
-| 10,000 items | < 150ms | **P95 16.31ms** | `testSearchPerformance10kItems` | ✅ |
-| 25,000 items（磁盘/WAL） | < 150ms | **P95 73.33ms** | `testDiskBackedSearchPerformance25k` | ✅ |
+| 5,000 items | < 50ms | **P95 1.82ms** | `testSearchPerformance5kItems` | ✅ |
+| 10,000 items | < 150ms | **P95 17.01ms** | `testSearchPerformance10kItems` | ✅ |
+| 25,000 items（磁盘/WAL） | < 150ms | **P95 57.10ms** | `testDiskBackedSearchPerformance25k` | ✅ |
 
 ### 首屏加载性能
 
@@ -188,38 +188,38 @@ Scopy/
 
 | 场景 | 目标 | 实测 | 测试用例 | 状态 |
 |------|------|------|----------|------|
-| 5,000 项插入后内存增长 | < 100KB/项 | **+2.3MB（~0.5KB/项）** | `testMemoryEfficiency` | ✅ |
+| 5,000 项插入后内存增长 | < 100KB/项 | **+2.1MB（~0.4KB/项）** | `testMemoryEfficiency` | ✅ |
 | 500 次操作后内存增长 | < 50MB | **+0.2MB** | `testMemoryStability` | ✅ |
 
 ### 写入性能
 
 | 场景 | 目标 | 实测 | 测试用例 | 状态 |
 |------|------|------|----------|------|
-| 批量插入 (1000 items) | > 500/sec | **22.8ms（~43.8k/sec）** | `testBulkInsertPerformance` | ✅ |
-| 去重 (200 upserts) | 正确去重 | **3.55ms** | `testDeduplicationPerformance` | ✅ |
-| 清理 (900 items) | 快速完成 | **4.73ms** | `testCleanupPerformance` | ✅ |
+| 批量插入 (1000 items) | > 500/sec | **22.8ms（~43.9k/sec）** | `testBulkInsertPerformance` | ✅ |
+| 去重 (200 upserts) | 正确去重 | **3.60ms** | `testDeduplicationPerformance` | ✅ |
+| 清理 (900 items) | 快速完成 | **4.57ms** | `testCleanupPerformance` | ✅ |
 
 ### 搜索模式比较 (3k items)
 
 | 模式 | 实测 | 目标 | 测试用例 |
 |------|------|------|----------|
-| Exact | 3.07ms | < 100ms | `testSearchModeComparison` |
-| Fuzzy | 4.74ms | < 100ms | `testSearchModeComparison` |
-| Regex | 1.65ms | < 200ms | `testSearchModeComparison` |
+| Exact | 3.00ms | < 100ms | `testSearchModeComparison` |
+| Fuzzy | 4.68ms | < 100ms | `testSearchModeComparison` |
+| Regex | 1.64ms | < 200ms | `testSearchModeComparison` |
 
 ### 其他性能指标
 
 | 指标 | 实测 | 测试用例 |
 |------|------|----------|
-| 搜索防抖 (8 连续查询) | 9ms 总计（1.12ms/次） | `testSearchDebounceEffect` |
-| 短词缓存加速 | 首次 0.91ms，缓存 0.36ms | `testShortQueryPerformance` |
+| 搜索防抖 (8 连续查询) | 8ms 总计（1.05ms/次） | `testSearchDebounceEffect` |
+| 短词缓存加速 | 首次 0.95ms，缓存 0.38ms | `testShortQueryPerformance` |
 
 ### 磁盘与混合内容场景（近真实 I/O）
 
 | 场景 | 实测 | 细节 | 测试用例 |
 |------|------|------|----------|
-| 磁盘搜索（25k/WAL） | P95 73.33ms | Application Support + WAL，文本混合 | `testDiskBackedSearchPerformance25k` |
-| 混合内容搜索 | 7.57ms | 文本/HTML/RTF/大图(120KB)/文件混合；外存引用 300 | `testMixedContentIndexingOnDisk` |
+| 磁盘搜索（25k/WAL） | P95 57.10ms | Application Support + WAL，文本混合 | `testDiskBackedSearchPerformance25k` |
+| 混合内容搜索 | 7.52ms | 文本/HTML/RTF/大图(120KB)/文件混合；外存引用 300（测试后已清理） | `testMixedContentIndexingOnDisk` |
 
 ### 性能测试命令
 

@@ -491,6 +491,12 @@ final class PerformanceTests: XCTestCase {
         print("   - Returned \(page.items.count) items in \(String(format: "%.2f", elapsed))ms")
         print("   - External storage refs in recent items: \(externalCount)")
 
+        // Cleanup external artifacts written during test to avoid polluting user data
+        let fm = FileManager.default
+        recent.compactMap { $0.storageRef }.forEach { ref in
+            try? fm.removeItem(atPath: ref)
+        }
+
         XCTAssertGreaterThan(page.items.count, 0, "Search should return mixed content results")
         XCTAssertGreaterThan(externalCount, 0, "Large payloads should be stored externally")
         XCTAssertLessThan(elapsed, 150, "Mixed content search should stay under 150ms on disk")
