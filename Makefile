@@ -1,7 +1,7 @@
 # Scopy Makefile
 # 符合 v0.md 的构建和测试流程
 
-.PHONY: all setup build run clean xcode test test-unit test-perf coverage benchmark
+.PHONY: all setup build run clean xcode test test-unit test-perf coverage benchmark test-flow test-flow-quick health-check
 
 # 默认目标
 all: build
@@ -119,6 +119,20 @@ benchmark: setup
 	@echo ""
 	@echo "Benchmark results saved to benchmark-output.log"
 
+# =================== 测试流程自动化 ===================
+
+# 完整测试流程（杀进程 → 编译 → 安装 → 启动 → 健康检查）
+test-flow:
+	@bash scripts/test-flow.sh
+
+# 快速测试流程（跳过编译）
+test-flow-quick:
+	@bash scripts/test-flow.sh --skip-build
+
+# 仅运行健康检查
+health-check:
+	@bash scripts/health-check.sh
+
 # =================== 开发工具 ===================
 
 # 代码格式化（如果安装了 swift-format）
@@ -175,6 +189,11 @@ help:
 	@echo "  make test-integration - Run integration tests"
 	@echo "  make coverage     - Run tests with coverage report"
 	@echo "  make benchmark    - Run full benchmark suite"
+	@echo ""
+	@echo "Test Flow Automation:"
+	@echo "  make test-flow    - Full test flow (kill → build → install → launch → health check)"
+	@echo "  make test-flow-quick - Quick test flow (skip build)"
+	@echo "  make health-check - Run health checks only"
 	@echo ""
 	@echo "Development:"
 	@echo "  make format       - Format code (requires swift-format)"
