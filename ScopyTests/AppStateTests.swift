@@ -589,3 +589,121 @@ final class TestMockClipboardService: ClipboardServiceProtocol {
     }
 }
 
+// MARK: - Failing Mock Service for Fallback Tests (v0.10.1)
+
+/// Mock service that fails on start() - used to test fallback behavior
+@MainActor
+final class FailingMockService: ClipboardServiceProtocol {
+    private var eventContinuation: AsyncStream<ClipboardEvent>.Continuation?
+
+    var eventStream: AsyncStream<ClipboardEvent> {
+        AsyncStream { continuation in
+            self.eventContinuation = continuation
+        }
+    }
+
+    enum TestError: Error {
+        case simulatedFailure
+    }
+
+    func start() async throws {
+        throw TestError.simulatedFailure
+    }
+
+    func stop() {
+        eventContinuation?.finish()
+    }
+
+    func fetchRecent(limit: Int, offset: Int) async throws -> [ClipboardItemDTO] { [] }
+    func search(query: SearchRequest) async throws -> SearchResultPage {
+        SearchResultPage(items: [], total: 0, hasMore: false)
+    }
+    func pin(itemID: UUID) async throws {}
+    func unpin(itemID: UUID) async throws {}
+    func delete(itemID: UUID) async throws {}
+    func clearAll() async throws {}
+    func copyToClipboard(itemID: UUID) async throws {}
+    func updateSettings(_ newSettings: SettingsDTO) async throws {}
+    func getSettings() async throws -> SettingsDTO { .default }
+    func getStorageStats() async throws -> (itemCount: Int, sizeBytes: Int) { (0, 0) }
+    func getDetailedStorageStats() async throws -> StorageStatsDTO {
+        StorageStatsDTO(itemCount: 0, databaseSizeBytes: 0, externalStorageSizeBytes: 0, totalSizeBytes: 0, databasePath: "")
+    }
+    func getImageData(itemID: UUID) async throws -> Data? { nil }
+    func getRecentApps(limit: Int) async throws -> [String] { [] }
+}
+
+// MARK: - Fallback and Event Handler Tests (v0.10.1)
+
+@MainActor
+final class AppStateFallbackTests: XCTestCase {
+
+    /// Test that start() falls back to MockClipboardService when the initial service fails
+    func testStartFallsBackToMockOnFailure() async {
+        let failingService = FailingMockService()
+        let state = AppState.forTesting(service: failingService)
+
+        // Before start, service is the failing one
+        XCTAssertTrue(state.service is FailingMockService)
+
+        // After start, should fall back to MockClipboardService
+        await state.start()
+
+        // Verify service was replaced with MockClipboardService
+        XCTAssertTrue(state.service is MockClipboardService,
+                     "Service should be MockClipboardService after fallback, but was \(type(of: state.service))")
+
+        state.stop()
+    }
+
+    /// Test that settingsChanged event triggers hotkey callback with latest settings
+    func testSettingsChangedAppliesHotkey() async throws {
+        let mockService = TestMockClipboardService()
+        let state = AppState.forTesting(service: mockService)
+
+        var hotkeyApplied = false
+        var appliedKeyCode: UInt32 = 0
+        var appliedModifiers: UInt32 = 0
+
+        state.applyHotKeyHandler = { keyCode, modifiers in
+            hotkeyApplied = true
+            appliedKeyCode = keyCode
+            appliedModifiers = modifiers
+        }
+
+        await state.start()
+
+        // Emit settingsChanged event
+        mockService.emitEvent(.settingsChanged)
+
+        // Wait for event to be processed
+        try await Task.sleep(nanoseconds: 200_000_000)
+
+        XCTAssertTrue(hotkeyApplied, "Hotkey handler should be called on settingsChanged")
+        XCTAssertEqual(appliedKeyCode, SettingsDTO.default.hotkeyKeyCode)
+        XCTAssertEqual(appliedModifiers, SettingsDTO.default.hotkeyModifiers)
+
+        state.stop()
+    }
+
+    /// Test that settingsChanged without handler doesn't crash (logs warning instead)
+    func testSettingsChangedWithoutHandlerDoesNotCrash() async throws {
+        let mockService = TestMockClipboardService()
+        let state = AppState.forTesting(service: mockService)
+
+        // Explicitly set handler to nil
+        state.applyHotKeyHandler = nil
+
+        await state.start()
+
+        // Emit settingsChanged event - should not crash
+        mockService.emitEvent(.settingsChanged)
+
+        // Wait for event processing
+        try await Task.sleep(nanoseconds: 200_000_000)
+
+        // Test passes if no crash occurred
+        state.stop()
+    }
+}
+

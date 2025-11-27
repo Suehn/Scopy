@@ -39,8 +39,10 @@ class FloatingPanel: NSPanel, NSWindowDelegate {
         standardWindowButton(.zoomButton)?.isHidden = true
 
         // 设置内容视图
+        // v0.10.1: 注入 AppState 到环境，与 SettingsView 保持一致
         contentView = NSHostingView(
             rootView: view()
+                .environment(AppState.shared)
                 .ignoresSafeArea()
         )
     }

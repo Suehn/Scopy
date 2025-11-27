@@ -1,12 +1,14 @@
 import SwiftUI
 
 /// 主内容视图 - 对应 Maccy 的 ContentView
+/// v0.10.1: 改用 Environment 注入 AppState，保持与 SettingsView 一致
 struct ContentView: View {
-    @State private var appState = AppState.shared
+    @Environment(AppState.self) private var appState
     @FocusState private var searchFocused: Bool
     @State private var showClearConfirmation = false
 
     var body: some View {
+        @Bindable var bindableAppState = appState
         ZStack {
             // 背景模糊效果
             VisualEffectView()
@@ -14,7 +16,7 @@ struct ContentView: View {
             VStack(alignment: .leading, spacing: 0) {
                 // 头部搜索框
                 HeaderView(
-                    searchQuery: $appState.searchQuery,
+                    searchQuery: $bindableAppState.searchQuery,
                     searchFocused: $searchFocused
                 )
 
@@ -27,7 +29,6 @@ struct ContentView: View {
             .padding(.vertical, 5)
             .padding(.horizontal, 5)
         }
-        .environment(appState)
         .onAppear {
             searchFocused = true
             Task {
@@ -100,5 +101,6 @@ struct VisualEffectView: NSViewRepresentable {
 
 #Preview {
     ContentView()
+        .environment(AppState.shared)
         .frame(width: 320, height: 400)
 }

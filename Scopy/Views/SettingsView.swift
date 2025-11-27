@@ -4,11 +4,12 @@ import Carbon.HIToolbox
 /// 设置窗口视图
 /// v0.6: 多页 TabView 结构，支持快捷键自定义、搜索模式选择、存储统计
 /// v0.10: 改用 Environment 注入 AppState，实现完全解耦
+/// v0.10.1: 使用可选类型防止首帧默认值被误写
 struct SettingsView: View {
     @Environment(AppState.self) private var appState
 
     @State private var selectedTab = 0
-    @State private var tempSettings: SettingsDTO = .default
+    @State private var tempSettings: SettingsDTO?  // v0.10.1: 可选类型，防止首帧默认值
     @State private var isSaving = false
     @State private var storageStats: StorageStatsDTO?
     @State private var isLoadingStats = false
@@ -20,10 +21,37 @@ struct SettingsView: View {
     }
 
     var body: some View {
+        Group {
+            if tempSettings != nil {
+                settingsContent(
+                    settings: Binding(
+                        get: { tempSettings ?? .default },
+                        set: { tempSettings = $0 }
+                    )
+                )
+            } else {
+                // 加载态：防止用户在设置加载前点击 Save
+                VStack(spacing: 12) {
+                    ProgressView()
+                        .controlSize(.large)
+                    Text("Loading settings...")
+                        .foregroundStyle(.secondary)
+                }
+                .frame(width: 500, height: 420)
+            }
+        }
+        .onAppear {
+            tempSettings = appState.settings
+            refreshStats()
+        }
+    }
+
+    @ViewBuilder
+    private func settingsContent(settings: Binding<SettingsDTO>) -> some View {
         VStack(spacing: 0) {
             TabView(selection: $selectedTab) {
                 GeneralSettingsTab(
-                    tempSettings: $tempSettings
+                    tempSettings: settings
                 )
                 .tabItem {
                     Label("General", systemImage: "gear")
@@ -31,7 +59,7 @@ struct SettingsView: View {
                 .tag(0)
 
                 StorageSettingsTab(
-                    tempSettings: $tempSettings,
+                    tempSettings: settings,
                     storageStats: storageStats,
                     isLoading: isLoadingStats,
                     onRefresh: refreshStats
@@ -75,10 +103,6 @@ struct SettingsView: View {
             .background(.bar)
         }
         .frame(width: 500, height: 420)
-        .onAppear {
-            tempSettings = appState.settings
-            refreshStats()
-        }
     }
 
     private func refreshStats() {
@@ -94,21 +118,27 @@ struct SettingsView: View {
     }
 
     private func saveSettings() {
+        // v0.10.1: 防止在设置加载前保存
+        guard let currentSettings = tempSettings else {
+            print("⚠️ saveSettings: tempSettings is nil, skipping save")
+            return
+        }
+
         isSaving = true
 
-        print("🔧 saveSettings: keyCode=\(tempSettings.hotkeyKeyCode), modifiers=0x\(String(tempSettings.hotkeyModifiers, radix: 16))")
+        print("🔧 saveSettings: keyCode=\(currentSettings.hotkeyKeyCode), modifiers=0x\(String(currentSettings.hotkeyModifiers, radix: 16))")
 
         Task {
-            await appState.updateSettings(tempSettings)
+            await appState.updateSettings(currentSettings)
             // 更新 AppState 的搜索模式
             await MainActor.run {
-                appState.searchMode = tempSettings.defaultSearchMode
+                appState.searchMode = currentSettings.defaultSearchMode
 
                 // 通过回调更新全局快捷键（解耦 AppDelegate）
                 print("🔧 Updating hotkey via callback")
                 appState.applyHotKeyHandler?(
-                    tempSettings.hotkeyKeyCode,
-                    tempSettings.hotkeyModifiers
+                    currentSettings.hotkeyKeyCode,
+                    currentSettings.hotkeyModifiers
                 )
 
                 isSaving = false

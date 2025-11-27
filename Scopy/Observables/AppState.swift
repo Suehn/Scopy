@@ -127,9 +127,17 @@ final class AppState {
             print("✅ Clipboard Service started")
         } catch {
             print("❌ Failed to start Clipboard Service: \(error)")
-            // 降级到 Mock 服务
-            service = MockClipboardService()
-            print("⚠️ Falling back to Mock Clipboard Service")
+            // 停止失败的服务（防止资源泄漏）
+            service.stop()
+            // 降级到 Mock 服务并启动
+            let mockService = MockClipboardService()
+            service = mockService
+            do {
+                try await mockService.start()
+                print("⚠️ Falling back to Mock Clipboard Service (started)")
+            } catch {
+                print("❌ Mock service also failed to start: \(error)")
+            }
         }
 
         // 监听事件流
@@ -223,8 +231,14 @@ final class AppState {
             // 刷新以获取最新状态
             await load()
         case .settingsChanged:
-            // 设置变化时刷新，并通过回调重新应用全局快捷键（解耦 AppDelegate）
-            applyHotKeyHandler?(settings.hotkeyKeyCode, settings.hotkeyModifiers)
+            // 1. 先 reload 最新设置
+            await loadSettings()
+            // 2. 兜底应用热键（无回调时记录日志，便于调试 headless/测试场景）
+            if let handler = applyHotKeyHandler {
+                handler(settings.hotkeyKeyCode, settings.hotkeyModifiers)
+            } else {
+                print("⚠️ settingsChanged: applyHotKeyHandler not registered, hotkey may be out of sync")
+            }
             await load()
         }
     }
