@@ -248,8 +248,10 @@ final class BenchmarkRunner {
             let target = result.targetMs.map { String(format: "%.1f", $0) } ?? "-"
             let name = result.name.padding(toLength: 29, withPad: " ", startingAt: 0)
 
-            lines.append(String(format: "║ %@ │ %8.2f │ %7.0f │ %7s │ %10s ║",
-                                name, result.avgTimeMs, result.opsPerSecond, target, status))
+            lines.append(String(
+                format: "║ %@ │ %8.2f │ %7.0f │ %7@ │ %10@ ║",
+                name, result.avgTimeMs, result.opsPerSecond, target, status
+            ))
         }
 
         lines.append("╚═══════════════════════════════════════════════════════════════════════════╝")
