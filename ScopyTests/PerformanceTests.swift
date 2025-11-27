@@ -408,6 +408,94 @@ final class PerformanceTests: XCTestCase {
         XCTAssertLessThanOrEqual(remaining, 100)
     }
 
+    // MARK: - Realistic Disk-Backed Scenarios
+
+    /// 磁盘模式 + 2.5 万条，模拟真实 I/O（WAL 已启用）
+    func testDiskBackedSearchPerformance25k() async throws {
+        let (diskStorage, diskSearch, baseURL) = try makeDiskStorage()
+        defer {
+            diskStorage.close()
+            try? FileManager.default.removeItem(at: baseURL)
+        }
+
+        // Mixed length text to mimic real notes/snippets
+        for i in 0..<25_000 {
+            let len = 40 + (i % 200)
+            let text = "Note \(i) " + String(repeating: "lorem ipsum ", count: len / 11)
+            _ = try diskStorage.upsertItem(makeContent(text))
+        }
+        diskSearch.invalidateCache()
+
+        var times: [Double] = []
+        for query in ["lorem", "note", "ipsum", "content", "random"] {
+            let start = CFAbsoluteTimeGetCurrent()
+            let request = SearchRequest(query: query, mode: .fuzzy, limit: 50, offset: 0)
+            _ = try await diskSearch.search(request: request)
+            let elapsed = (CFAbsoluteTimeGetCurrent() - start) * 1000
+            times.append(elapsed)
+        }
+
+        times.sort()
+        let p95Index = min(Int(Double(times.count) * 0.95), times.count - 1)
+        let p95 = times[p95Index]
+        print("📊 Disk Search Performance (25k items): P95 \(String(format: "%.2f", p95))ms")
+        XCTAssertLessThan(p95, 200, "Disk-backed P95 \(p95)ms exceeds 200ms target for 10k-100k bracket")
+    }
+
+    /// 磁盘模式混合内容（文本/HTML/RTF/图片/文件），验证索引与外部存储
+    func testMixedContentIndexingOnDisk() async throws {
+        let (diskStorage, diskSearch, baseURL) = try makeDiskStorage()
+        defer {
+            diskStorage.close()
+            try? FileManager.default.removeItem(at: baseURL)
+        }
+
+        // Texts
+        for i in 0..<2_500 {
+            _ = try diskStorage.upsertItem(makeContent("Mixed text \(i) lorem ipsum dolor sit amet"))
+        }
+
+        // HTML
+        for i in 0..<400 {
+            _ = try diskStorage.upsertItem(makeHTMLContent(index: i))
+        }
+
+        // RTF
+        for i in 0..<400 {
+            _ = try diskStorage.upsertItem(makeRTFContent(index: i))
+        }
+
+        // Large images -> external storage
+        for i in 0..<300 {
+            _ = try diskStorage.upsertItem(makeImageContent(index: i, byteSize: 120 * 1024))
+        }
+
+        // File entries
+        for i in 0..<300 {
+            let path = baseURL.appendingPathComponent("file\(i).txt").path
+            _ = try diskStorage.upsertItem(makeFileContent(path: path))
+        }
+
+        diskSearch.invalidateCache()
+
+        let start = CFAbsoluteTimeGetCurrent()
+        let page = try await diskSearch.search(
+            request: SearchRequest(query: "lorem", mode: .fuzzy, limit: 50, offset: 0)
+        )
+        let elapsed = (CFAbsoluteTimeGetCurrent() - start) * 1000
+
+        let recent = try diskStorage.fetchRecent(limit: 5000, offset: 0)
+        let externalCount = recent.filter { $0.storageRef != nil }.count
+
+        print("📊 Mixed Content Disk Search:")
+        print("   - Returned \(page.items.count) items in \(String(format: "%.2f", elapsed))ms")
+        print("   - External storage refs in recent items: \(externalCount)")
+
+        XCTAssertGreaterThan(page.items.count, 0, "Search should return mixed content results")
+        XCTAssertGreaterThan(externalCount, 0, "Large payloads should be stored externally")
+        XCTAssertLessThan(elapsed, 150, "Mixed content search should stay under 150ms on disk")
+    }
+
     // MARK: - Helpers
 
     private func makeContent(_ text: String) -> ClipboardMonitor.ClipboardContent {
@@ -419,6 +507,69 @@ final class PerformanceTests: XCTestCase {
             contentHash: String(text.hashValue),
             sizeBytes: text.utf8.count
         )
+    }
+
+    private func makeHTMLContent(index: Int) -> ClipboardMonitor.ClipboardContent {
+        let html = "<p>Lorem \(index) ipsum <strong>HTML</strong> snippet</p>"
+        let data = html.data(using: .utf8)
+        return ClipboardMonitor.ClipboardContent(
+            type: .html,
+            plainText: "HTML snippet \(index)",
+            rawData: data,
+            appBundleID: "com.apple.Safari",
+            contentHash: "html-\(index)",
+            sizeBytes: data?.count ?? 0
+        )
+    }
+
+    private func makeRTFContent(index: Int) -> ClipboardMonitor.ClipboardContent {
+        let text = "RTF content \(index) lorem ipsum dolor sit amet"
+        let data = text.data(using: .utf8) // lightweight stand-in for RTF bytes
+        return ClipboardMonitor.ClipboardContent(
+            type: .rtf,
+            plainText: text,
+            rawData: data,
+            appBundleID: "com.apple.TextEdit",
+            contentHash: "rtf-\(index)",
+            sizeBytes: data?.count ?? 0
+        )
+    }
+
+    private func makeImageContent(index: Int, byteSize: Int) -> ClipboardMonitor.ClipboardContent {
+        let data = Data(repeating: UInt8(index % 255), count: byteSize)
+        return ClipboardMonitor.ClipboardContent(
+            type: .image,
+            plainText: "[Image \(index)]",
+            rawData: data,
+            appBundleID: "com.apple.Preview",
+            contentHash: "image-\(index)",
+            sizeBytes: data.count
+        )
+    }
+
+    private func makeFileContent(path: String) -> ClipboardMonitor.ClipboardContent {
+        return ClipboardMonitor.ClipboardContent(
+            type: .file,
+            plainText: path,
+            rawData: nil,
+            appBundleID: "com.apple.finder",
+            contentHash: "file-\(path)",
+            sizeBytes: path.utf8.count
+        )
+    }
+
+    private func makeDiskStorage() throws -> (StorageService, SearchService, URL) {
+        let baseURL = FileManager.default.temporaryDirectory.appendingPathComponent("scopy-perf-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: baseURL, withIntermediateDirectories: true)
+        let dbPath = baseURL.appendingPathComponent("clipboard.db").path
+
+        let storage = StorageService(databasePath: dbPath)
+        try storage.open()
+
+        let search = SearchService(storage: storage)
+        search.setDatabase(storage.database)
+
+        return (storage, search, baseURL)
     }
 
     private func getMemoryUsage() -> Int {
