@@ -87,21 +87,20 @@ open /Applications/Scopy.app
 
 ## 🧪 运行测试
 
-### 单元测试 (48 个)
+### 核心单元测试
 
 ```bash
 xcodegen generate
 xcodebuild test -scheme Scopy -destination 'platform=macOS' -only-testing:ScopyTests
 ```
 
-**预期结果** (2025-11-27 最新):
-```
-Executed 48 tests, with 1 test skipped and 0 failures
-```
+**预期结果**:
+- 核心单测（上次全量 2025-11-27）: 80/80 passed, 1 skipped
+- 性能测试（2025-11-28，含重载）: 19/19 passed
 
-**详细分解**:
+**分组参考**:
 - PerformanceProfilerTests: 6/6 ✅
-- PerformanceTests: 10/13 (3个扩展性能测试待完善)
+- PerformanceTests: 19/19 ✅（默认 RUN_HEAVY_PERF_TESTS=1）
 - SearchServiceTests: 16/16 ✅ (已修复缓存刷新问题)
 - StorageServiceTests: 13/13 ✅
 
@@ -119,14 +118,18 @@ xcodebuild test -scheme ScopyUITests -destination 'platform=macOS'
 ### 性能测试详细
 
 ```bash
-# 运行性能测试
-xcodebuild test -scheme Scopy -destination 'platform=macOS' -only-testing:ScopyTests/PerformanceTests
+# 运行性能测试（默认包含重载场景）
+RUN_HEAVY_PERF_TESTS=1 xcodebuild test -scheme Scopy -destination 'platform=macOS' -only-testing:ScopyTests/PerformanceTests
 
-# 结果示例
-Test Case 'testSearchPerformance5kItems' passed (0.131 seconds)
-Test Case 'testSearchPerformance10kItems' passed (0.348 seconds)
-Test Case 'testMemoryStability' passed (0.122 seconds)
-Test Case 'testFirstScreenLoadPerformance' passed (0.025 seconds)
+# 结果示例（2025-11-28）
+# Executed 19 tests, 0 failures, ~36s
+# 关键输出片段：
+# 📊 Search Performance (5k items): P95 1.95ms
+# 📊 Search Performance (10k items): P95 16.21ms
+# 📊 Disk Search Performance (25k items): P95 55.00ms
+# 📊 Heavy Disk Search (50k items): P95 125.94ms
+# 📊 Ultra Disk Search (75k items): P95 195.77ms
+# 🧹 External cleanup elapsed: 653.84ms
 ```
 
 ---
@@ -167,22 +170,26 @@ Scopy/
 - **硬件**: MacBook Pro (Apple Silicon)
 - **系统**: macOS 14.x+
 - **测试日期**: 2025-11-28
-- **测试框架**: XCTest（性能用例 15 个，含磁盘场景）
+- **测试框架**: XCTest（性能用例 19 个，默认启用重载场景；设置 `RUN_HEAVY_PERF_TESTS=0` 可跳过）
 
 ### 搜索性能 (P95)
 
-| 数据量 | 目标 | 实测 | 测试用例 | 状态 |
-|--------|------|------|----------|------|
-| 5,000 items | < 50ms | **P95 1.82ms** | `testSearchPerformance5kItems` | ✅ |
-| 10,000 items | < 150ms | **P95 17.01ms** | `testSearchPerformance10kItems` | ✅ |
-| 25,000 items（磁盘/WAL） | < 150ms | **P95 57.10ms** | `testDiskBackedSearchPerformance25k` | ✅ |
+| 数据量 / 场景 | 目标 | 实测 | 测试用例 | 状态 |
+|---------------|------|------|----------|------|
+| 5,000 items | < 50ms | **P95 1.95ms** | `testSearchPerformance5kItems` | ✅ |
+| 10,000 items | < 150ms | **P95 16.21ms** | `testSearchPerformance10kItems` | ✅ |
+| 25,000 items（磁盘/WAL） | < 200ms | **P95 55.00ms** | `testDiskBackedSearchPerformance25k` | ✅ |
+| 50,000 items（重载，磁盘） | < 200ms | **P95 125.94ms** | `testHeavyDiskSearchPerformance50k` | ✅ |
+| 75,000 items（极限，磁盘） | < 250ms | **P95 195.77ms** | `testUltraDiskSearchPerformance75k` | ✅ |
+| Regex 20k items | < 120ms | **P95 0.77ms** | `testRegexPerformance20kItems` | ✅ |
 
-### 首屏加载性能
+### 首屏与读取性能
 
 | 场景 | 目标 | 实测 | 测试用例 | 状态 |
 |------|------|------|----------|------|
 | 50 items 加载 | P95 < 100ms | **P95 0.08ms / Avg 0.06ms** | `testFirstScreenLoadPerformance` | ✅ |
-| 50 items 批量读取 | < 5s (100次) | **5.81ms (100 次)** | `testConcurrentReadPerformance` | ✅ |
+| 100 次批量读取 | < 5s | **5.50ms（18,185 次/秒）** | `testConcurrentReadPerformance` | ✅ |
+| Fetch recent 100 次（50/批） | < 50ms/次 | **0.06ms/次** | `testFetchRecentPerformance` | ✅ |
 
 ### 内存性能
 
@@ -195,40 +202,43 @@ Scopy/
 
 | 场景 | 目标 | 实测 | 测试用例 | 状态 |
 |------|------|------|----------|------|
-| 批量插入 (1000 items) | > 500/sec | **22.8ms（~43.9k/sec）** | `testBulkInsertPerformance` | ✅ |
-| 去重 (200 upserts) | 正确去重 | **3.60ms** | `testDeduplicationPerformance` | ✅ |
-| 清理 (900 items) | 快速完成 | **4.57ms** | `testCleanupPerformance` | ✅ |
+| 批量插入 (1000 items) | > 500/sec | **22.75ms（~43.9k/sec）** | `testBulkInsertPerformance` | ✅ |
+| 去重 (200 upserts) | 正确去重 | **3.73ms** | `testDeduplicationPerformance` | ✅ |
+| 清理 (900 items) | 快速完成 | **6.87ms** | `testCleanupPerformance` | ✅ |
+| 外部存储清理 (195MB→≤50MB) | < 800ms | **653.84ms** | `testExternalStorageStress` | ✅ |
 
 ### 搜索模式比较 (3k items)
 
 | 模式 | 实测 | 目标 | 测试用例 |
 |------|------|------|----------|
-| Exact | 3.00ms | < 100ms | `testSearchModeComparison` |
-| Fuzzy | 4.68ms | < 100ms | `testSearchModeComparison` |
-| Regex | 1.64ms | < 200ms | `testSearchModeComparison` |
+| Exact | 3.24ms | < 100ms | `testSearchModeComparison` |
+| Fuzzy | 4.76ms | < 100ms | `testSearchModeComparison` |
+| Regex | 0.91ms | < 200ms | `testSearchModeComparison` |
 
 ### 其他性能指标
 
 | 指标 | 实测 | 测试用例 |
 |------|------|----------|
-| 搜索防抖 (8 连续查询) | 8ms 总计（1.05ms/次） | `testSearchDebounceEffect` |
-| 短词缓存加速 | 首次 0.95ms，缓存 0.38ms | `testShortQueryPerformance` |
+| 搜索防抖 (8 连续查询) | 9ms 总计（1.07ms/次） | `testSearchDebounceEffect` |
+| 短词缓存加速 | 首次 0.90ms，缓存 0.36ms | `testShortQueryPerformance` |
 
 ### 磁盘与混合内容场景（近真实 I/O）
 
 | 场景 | 实测 | 细节 | 测试用例 |
 |------|------|------|----------|
-| 磁盘搜索（25k/WAL） | P95 57.10ms | Application Support + WAL，文本混合 | `testDiskBackedSearchPerformance25k` |
-| 混合内容搜索 | 7.52ms | 文本/HTML/RTF/大图(120KB)/文件混合；外存引用 300（测试后已清理） | `testMixedContentIndexingOnDisk` |
+| 磁盘搜索（25k/WAL） | P95 55.00ms | Application Support + WAL，文本混合 | `testDiskBackedSearchPerformance25k` |
+| 混合内容搜索 | 7.70ms | 文本/HTML/RTF/大图(120KB)/文件混合；外存引用 300（测试后已清理） | `testMixedContentIndexingOnDisk` |
+| 重载磁盘搜索 | P95 125.94ms (50k) / 195.77ms (75k) | 同步 WAL，真实 I/O | `testHeavyDiskSearchPerformance50k` / `testUltraDiskSearchPerformance75k` |
+| 外部存储压力 | 195.6MB -> 清理 653.84ms | 300 张 256KB 图片写入 + 外存清理 | `testExternalStorageStress` |
 
 ### 性能测试命令
 
 ```bash
 # 运行所有性能测试
-xcodebuild test -scheme Scopy -destination 'platform=macOS' -only-testing:ScopyTests/PerformanceTests
+RUN_HEAVY_PERF_TESTS=1 xcodebuild test -scheme Scopy -destination 'platform=macOS' -only-testing:ScopyTests/PerformanceTests
 
 # 预期输出
-Executed 13 tests, with 0 failures (0 unexpected) in ~1.3 seconds
+Executed 19 tests, with 0 failures (0 unexpected) in ~36 seconds
 ```
 
 ---
@@ -345,7 +355,7 @@ Scopy/
 │
 ├── ScopyTests/                 # 单元测试
 │   ├── AppStateTests.swift     # 状态管理测试 (31)
-│   ├── PerformanceTests.swift  # 性能测试 (13)
+│   ├── PerformanceTests.swift  # 性能测试 (19，含重载)
 │   ├── SearchServiceTests.swift
 │   ├── StorageServiceTests.swift
 │   └── Helpers/                # 测试基础设施
@@ -400,15 +410,14 @@ final class YourNewTests: XCTestCase {
 
 ## 📈 版本信息
 
-**当前版本**: v0.5 (测试框架完善)
-- 69 个通过的测试
-- v0.md SLO 完全对齐
-- 生产就绪
+**当前版本**: v0.9.4（过滤/复制兜底 + 性能补充）
+- 核心单测 80/80 (1 skipped，上次全量 2025-11-27)
+- 性能测试 19/19（含重载，2025-11-28，RUN_HEAVY_PERF_TESTS=1）
+- v0.md SLO 对齐，外部存储清理 < 800ms
 
-**下一版本**: v0.6 (前端 UI 实现)
-- 完整的用户界面
-- 高级交互功能
-- 性能优化
+**下一版本**: v0.9.5（规划中）
+- UI 稳定性与性能监控收敛
+- 持续跟踪部署与性能指标
 
 ---
 
@@ -424,7 +433,7 @@ final class YourNewTests: XCTestCase {
 
 部署前检查:
 
-- [x] 运行所有测试 (`48/48 passed, 1 skipped` - 2025-11-27)
+- [x] 核心单测 80/80 (1 skipped，2025-11-27)；性能测试 19/19（含重载，2025-11-28）
 - [x] 修复 SearchServiceTests 缓存刷新问题
 - [x] 配置构建到本地 `.build` 目录
 - [x] 代码编译成功 (`BUILD SUCCEEDED`)

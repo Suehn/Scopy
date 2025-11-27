@@ -8,6 +8,7 @@ final class PerformanceTests: XCTestCase {
 
     var storage: StorageService!
     var search: SearchService!
+    private let heavyPerfEnv = "RUN_HEAVY_PERF_TESTS"
 
     override func setUp() async throws {
         try await super.setUp()
@@ -502,6 +503,128 @@ final class PerformanceTests: XCTestCase {
         XCTAssertLessThan(elapsed, 150, "Mixed content search should stay under 150ms on disk")
     }
 
+    /// 重负载：磁盘模式 50k 条搜索，需手动开启 RUN_HEAVY_PERF_TESTS
+    func testHeavyDiskSearchPerformance50k() async throws {
+        try XCTSkipIf(!shouldRunHeavyPerf(), "Set \(heavyPerfEnv)=1 to run heavy disk perf tests")
+
+        let (diskStorage, diskSearch, baseURL) = try makeDiskStorage()
+        defer {
+            diskStorage.close()
+            try? FileManager.default.removeItem(at: baseURL)
+        }
+
+        for i in 0..<50_000 {
+            let len = 80 + (i % 400)
+            let text = "Heavy note \(i) " + String(repeating: "lorem ipsum ", count: len / 11)
+            _ = try diskStorage.upsertItem(makeContent(text))
+        }
+        diskSearch.invalidateCache()
+
+        var times: [Double] = []
+        for query in ["heavy", "lorem", "ipsum", "note"] {
+            let start = CFAbsoluteTimeGetCurrent()
+            _ = try await diskSearch.search(
+                request: SearchRequest(query: query, mode: .fuzzy, limit: 50, offset: 0)
+            )
+            times.append((CFAbsoluteTimeGetCurrent() - start) * 1000)
+        }
+
+        times.sort()
+        let p95Index = min(Int(Double(times.count) * 0.95), times.count - 1)
+        let p95 = times[p95Index]
+        print("📊 Heavy Disk Search (50k items): P95 \(String(format: "%.2f", p95))ms")
+        XCTAssertLessThan(p95, 200, "Heavy disk P95 \(p95)ms exceeds 200ms target for 10k-100k bracket")
+    }
+
+    /// 重负载：磁盘模式 75k 条搜索（极端场景），需手动开启 RUN_HEAVY_PERF_TESTS
+    func testUltraDiskSearchPerformance75k() async throws {
+        try XCTSkipIf(!shouldRunHeavyPerf(), "Set \(heavyPerfEnv)=1 to run heavy disk perf tests")
+
+        let (diskStorage, diskSearch, baseURL) = try makeDiskStorage()
+        defer {
+            diskStorage.close()
+            try? FileManager.default.removeItem(at: baseURL)
+        }
+
+        for i in 0..<75_000 {
+            let len = 120 + (i % 500)
+            let text = makeRealisticText(index: i, base: "Ultra note", length: len)
+            _ = try diskStorage.upsertItem(makeContent(text))
+        }
+        diskSearch.invalidateCache()
+
+        var times: [Double] = []
+        for query in ["ultra", "note", "lorem", "ipsum"] {
+            let start = CFAbsoluteTimeGetCurrent()
+            _ = try await diskSearch.search(
+                request: SearchRequest(query: query, mode: .fuzzy, limit: 50, offset: 0)
+            )
+            times.append((CFAbsoluteTimeGetCurrent() - start) * 1000)
+        }
+
+        let p95 = percentile(times, 95)
+        print("📊 Ultra Disk Search (75k items): P95 \(String(format: "%.2f", p95))ms")
+        XCTAssertLessThan(p95, 250, "Ultra disk P95 \(p95)ms exceeds 250ms target for 10k-100k bracket")
+    }
+
+    /// 大规模 regex 性能验证（20k）
+    func testRegexPerformance20kItems() async throws {
+        for i in 0..<20_000 {
+            let text = makeRealisticText(index: i, base: "Regex note", length: 80 + (i % 120))
+            _ = try storage.upsertItem(makeContent(text))
+        }
+        search.invalidateCache()
+
+        var times: [Double] = []
+        for pattern in ["Regex\\s+note", "lorem\\sipsum", "item\\s[0-9]{3,}"] {
+            let start = CFAbsoluteTimeGetCurrent()
+            _ = try await search.search(
+                request: SearchRequest(query: pattern, mode: .regex, limit: 50, offset: 0)
+            )
+            times.append((CFAbsoluteTimeGetCurrent() - start) * 1000)
+        }
+
+        let p95 = percentile(times, 95)
+        print("📊 Regex Performance (20k items): P95 \(String(format: "%.2f", p95))ms")
+        XCTAssertLessThan(p95, 120, "Regex P95 \(p95)ms exceeds 120ms target")
+    }
+
+    /// 重负载：外部存储压力（300 x 256KB，实际约 190MB 含 WAL），验证清理与引用
+    func testExternalStorageStress() async throws {
+        try XCTSkipIf(!shouldRunHeavyPerf(), "Set \(heavyPerfEnv)=1 to run heavy perf tests")
+
+        let (diskStorage, _, baseURL) = try makeDiskStorage()
+        defer {
+            diskStorage.close()
+            try? FileManager.default.removeItem(at: baseURL)
+        }
+
+        for i in 0..<300 {
+            let blob = Data(repeating: UInt8(i % 255), count: 256 * 1024) // 256KB
+            let content = ClipboardMonitor.ClipboardContent(
+                type: .image,
+                plainText: "[Large image \(i)]",
+                rawData: blob,
+                appBundleID: "com.apple.Preview",
+                contentHash: "heavy-img-\(i)",
+                sizeBytes: blob.count
+            )
+            _ = try diskStorage.upsertItem(content)
+        }
+
+        let externalSize = try diskStorage.getExternalStorageSize()
+        print("📦 External storage size after stress: \(formatBytes(externalSize))")
+        XCTAssertGreaterThan(externalSize, 10 * 1024 * 1024, "External storage should exceed 10MB after stress")
+
+        // Trigger cleanup to ensure it runs fast enough
+        diskStorage.cleanupSettings.maxLargeStorageMB = 50 // 50MB cap
+        let start = CFAbsoluteTimeGetCurrent()
+        try diskStorage.performCleanup()
+        let elapsed = (CFAbsoluteTimeGetCurrent() - start) * 1000
+        print("🧹 External cleanup elapsed: \(String(format: "%.2f", elapsed))ms")
+        XCTAssertLessThan(elapsed, 800, "External cleanup should finish within 800ms")
+    }
+
     // MARK: - Helpers
 
     private func makeContent(_ text: String) -> ClipboardMonitor.ClipboardContent {
@@ -564,6 +687,11 @@ final class PerformanceTests: XCTestCase {
         )
     }
 
+    private func makeRealisticText(index: Int, base: String, length: Int) -> String {
+        let filler = String(repeating: " lorem ipsum", count: max(1, length / 11))
+        return "\(base) \(index) \(filler)"
+    }
+
     private func makeDiskStorage() throws -> (StorageService, SearchService, URL) {
         let baseURL = FileManager.default.temporaryDirectory.appendingPathComponent("scopy-perf-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: baseURL, withIntermediateDirectories: true)
@@ -576,6 +704,21 @@ final class PerformanceTests: XCTestCase {
         search.setDatabase(storage.database)
 
         return (storage, search, baseURL)
+    }
+
+    private func shouldRunHeavyPerf() -> Bool {
+        // 默认开启重负载场景；如需关闭，可设置 RUN_HEAVY_PERF_TESTS=0
+        if let flag = ProcessInfo.processInfo.environment[heavyPerfEnv], flag == "0" {
+            return false
+        }
+        return true
+    }
+
+    private func percentile(_ values: [Double], _ p: Double) -> Double {
+        guard !values.isEmpty else { return 0 }
+        let sorted = values.sorted()
+        let index = min(Int(Double(sorted.count - 1) * (p / 100.0)), sorted.count - 1)
+        return sorted[index]
     }
 
     private func getMemoryUsage() -> Int {
