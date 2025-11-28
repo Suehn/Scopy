@@ -85,6 +85,9 @@ final class ClipboardMonitor {
 
     /// v0.10.4: 移除重复的 RunLoop.add 调用
     func startMonitoring() {
+        // v0.10.7: 确保在主线程调用，否则 Timer 不会触发
+        assert(Thread.isMainThread, "startMonitoring must be called on main thread")
+
         guard !isMonitoring else { return }
         isMonitoring = true
         lastChangeCount = NSPasteboard.general.changeCount
@@ -243,7 +246,10 @@ final class ClipboardMonitor {
             guard !Task.isCancelled else { return }
 
             // 回到主线程发送事件
+            // v0.10.7: 在 MainActor.run 内再次检查取消状态，防止向已关闭的流发送数据
             await MainActor.run {
+                guard !Task.isCancelled else { return }
+
                 let content = ClipboardContent(
                     type: rawData.type,
                     plainText: rawData.plainText,
