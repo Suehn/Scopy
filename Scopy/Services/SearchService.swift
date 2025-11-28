@@ -11,12 +11,14 @@ final class SearchService {
         case databaseNotOpen
         case invalidQuery(String)
         case searchFailed(String)
+        case timeout  // v0.10.8: 搜索超时
 
         var errorDescription: String? {
             switch self {
             case .databaseNotOpen: return "Database is not open"
             case .invalidQuery(let msg): return "Invalid query: \(msg)"
             case .searchFailed(let msg): return "Search failed: \(msg)"
+            case .timeout: return "Search timed out"
             }
         }
     }
@@ -45,6 +47,13 @@ final class SearchService {
 
     /// v0.10.7: 保护缓存刷新的锁（防止并发刷新竞态）
     private let cacheRefreshLock = NSLock()
+
+    /// v0.10.8: FTS5 COUNT 缓存（避免重复计算总数）
+    private var cachedSearchTotal: (query: String, mode: SearchMode, appFilter: String?, typeFilter: ClipboardItemType?, total: Int, timestamp: Date)?
+    private let searchTotalCacheTTL: TimeInterval = 5.0  // 5秒有效期
+
+    /// v0.10.8: 搜索超时时间
+    private let searchTimeout: TimeInterval = 5.0
 
     // MARK: - Initialization
 
@@ -142,13 +151,17 @@ final class SearchService {
 
     // MARK: - FTS5 Search Implementation
 
+    /// v0.11: 使用超时版本 + COUNT 缓存优化
     private func searchWithFTS(
         db: OpaquePointer,
         query: String,
         request: SearchRequest,
         useFuzzyRanking: Bool = false
     ) async throws -> SearchResult {
-        return try await runOnQueue { [self] in
+        // v0.11: 先检查 COUNT 缓存（在主线程，避免锁竞争）
+        let cachedTotal = getCachedTotal(for: request, query: query)
+
+        let result = try await runOnQueueWithTimeout { [self] in
             // Build SQL with filters
             var sql = """
                 SELECT c.*, bm25(clipboard_fts) as rank
@@ -177,17 +190,23 @@ final class SearchService {
                 sql += " ORDER BY rank"
             }
 
-            // Get total count first
-            let countSQL = "SELECT COUNT(*) FROM (\(sql))"
-            var countStmt: OpaquePointer?
-            var total = 0
+            // v0.11: 使用缓存的 total，避免重复 COUNT 查询
+            var total: Int
+            if let cached = cachedTotal {
+                total = cached
+            } else {
+                // 缓存未命中，执行 COUNT 查询
+                let countSQL = "SELECT COUNT(*) FROM (\(sql))"
+                var countStmt: OpaquePointer?
+                total = 0
 
-            if sqlite3_prepare_v2(db, countSQL, -1, &countStmt, nil) == SQLITE_OK {
-                self.bindParams(stmt: countStmt!, params: params)
-                if sqlite3_step(countStmt) == SQLITE_ROW {
-                    total = Int(sqlite3_column_int(countStmt, 0))
+                if sqlite3_prepare_v2(db, countSQL, -1, &countStmt, nil) == SQLITE_OK {
+                    self.bindParams(stmt: countStmt!, params: params)
+                    if sqlite3_step(countStmt) == SQLITE_ROW {
+                        total = Int(sqlite3_column_int(countStmt, 0))
+                    }
+                    sqlite3_finalize(countStmt)
                 }
-                sqlite3_finalize(countStmt)
             }
 
             // Apply pagination
@@ -214,9 +233,16 @@ final class SearchService {
                 items: items,
                 total: total,
                 hasMore: request.offset + items.count < total,
-                searchTimeMs: 0 // Will be updated by caller
+                searchTimeMs: 0
             )
         }
+
+        // v0.11: 缓存 total（仅在首次查询时，回到主线程后更新）
+        if cachedTotal == nil {
+            cacheTotal(result.total, for: request, query: query)
+        }
+
+        return result
     }
 
     // MARK: - In-Memory Cache Search (for short queries)
@@ -389,9 +415,51 @@ final class SearchService {
         }
     }
 
-    /// 空查询 + 过滤时直接访问 SQLite，避免缓存截断历史
+    /// v0.10.8: 带超时的队列执行
+    private func runOnQueueWithTimeout<T>(_ work: @escaping () throws -> T) async throws -> T {
+        let task = Task.detached(priority: .userInitiated) { [self] in
+            try await self.runOnQueue(work)
+        }
+
+        let timeoutTask = Task {
+            try await Task.sleep(nanoseconds: UInt64(searchTimeout * 1_000_000_000))
+            task.cancel()
+        }
+
+        defer { timeoutTask.cancel() }
+
+        do {
+            return try await task.value
+        } catch is CancellationError {
+            throw SearchError.timeout
+        }
+    }
+
+    /// v0.10.8: 获取缓存的搜索总数
+    private func getCachedTotal(for request: SearchRequest, query: String) -> Int? {
+        guard let cached = cachedSearchTotal,
+              cached.query == query,
+              cached.mode == request.mode,
+              cached.appFilter == request.appFilter,
+              cached.typeFilter == request.typeFilter,
+              Date().timeIntervalSince(cached.timestamp) < searchTotalCacheTTL else {
+            return nil
+        }
+        return cached.total
+    }
+
+    /// v0.10.8: 缓存搜索总数
+    private func cacheTotal(_ total: Int, for request: SearchRequest, query: String) {
+        cachedSearchTotal = (query, request.mode, request.appFilter, request.typeFilter, total, Date())
+    }
+
+    /// v0.11: 空查询 + 过滤时直接访问 SQLite，使用超时和 COUNT 缓存
     private func searchAllWithFilters(request: SearchRequest, db: OpaquePointer) async throws -> SearchResult {
-        try await runOnQueue { [self] in
+        // v0.11: 先检查 COUNT 缓存（空查询使用空字符串作为 key）
+        let cacheKey = ""
+        let cachedTotal = getCachedTotal(for: request, query: cacheKey)
+
+        let result = try await runOnQueueWithTimeout { [self] in
             var sql = """
                 SELECT * FROM clipboard_items
                 WHERE 1 = 1
@@ -409,15 +477,21 @@ final class SearchService {
 
             sql += " ORDER BY is_pinned DESC, last_used_at DESC"
 
-            let countSQL = "SELECT COUNT(*) FROM (\(sql))"
-            var total = 0
-            var countStmt: OpaquePointer?
-            if sqlite3_prepare_v2(db, countSQL, -1, &countStmt, nil) == SQLITE_OK {
-                self.bindParams(stmt: countStmt!, params: params)
-                if sqlite3_step(countStmt) == SQLITE_ROW {
-                    total = Int(sqlite3_column_int(countStmt, 0))
+            // v0.11: 使用缓存的 total，避免重复 COUNT 查询
+            var total: Int
+            if let cached = cachedTotal {
+                total = cached
+            } else {
+                let countSQL = "SELECT COUNT(*) FROM (\(sql))"
+                var countStmt: OpaquePointer?
+                total = 0
+                if sqlite3_prepare_v2(db, countSQL, -1, &countStmt, nil) == SQLITE_OK {
+                    self.bindParams(stmt: countStmt!, params: params)
+                    if sqlite3_step(countStmt) == SQLITE_ROW {
+                        total = Int(sqlite3_column_int(countStmt, 0))
+                    }
+                    sqlite3_finalize(countStmt)
                 }
-                sqlite3_finalize(countStmt)
             }
 
             sql += " LIMIT ? OFFSET ?"
@@ -445,6 +519,18 @@ final class SearchService {
                 searchTimeMs: 0
             )
         }
+
+        // v0.11: 缓存 total（仅在首次查询时）
+        if cachedTotal == nil {
+            cacheTotal(result.total, for: request, query: cacheKey)
+        }
+
+        return result
+    }
+
+    /// v0.11: 使缓存失效（数据变更时调用）
+    func invalidateSearchTotalCache() {
+        cachedSearchTotal = nil
     }
 }
 
