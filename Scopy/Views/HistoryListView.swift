@@ -114,8 +114,11 @@ struct HistoryItemView: View, Equatable {
 
     // 静态图标缓存 - 避免重复调用 NSWorkspace API
     // v0.10.4: 添加锁保护，确保线程安全
+    // v0.10.8: 添加 LRU 清理，防止内存无限增长
     private static var iconCache: [String: NSImage] = [:]
+    private static var iconAccessOrder: [String] = []
     private static let iconCacheLock = NSLock()
+    private static let maxIconCacheSize = 50
 
     // MARK: - Equatable
 
@@ -141,16 +144,22 @@ struct HistoryItemView: View, Equatable {
     }
 
     /// v0.10.4: 使用锁保护静态缓存访问
+    /// v0.10.8: 添加 LRU 清理，防止内存无限增长
     private var appIcon: NSImage? {
         guard let bundleID = item.appBundleID else { return nil }
 
-        // 先尝试从缓存读取
         Self.iconCacheLock.lock()
+        defer { Self.iconCacheLock.unlock() }
+
+        // 检查缓存
         if let cached = Self.iconCache[bundleID] {
-            Self.iconCacheLock.unlock()
+            // 更新 LRU 访问顺序
+            if let index = Self.iconAccessOrder.firstIndex(of: bundleID) {
+                Self.iconAccessOrder.remove(at: index)
+            }
+            Self.iconAccessOrder.append(bundleID)
             return cached
         }
-        Self.iconCacheLock.unlock()
 
         // 缓存未命中，获取图标
         guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) else {
@@ -158,10 +167,16 @@ struct HistoryItemView: View, Equatable {
         }
         let icon = NSWorkspace.shared.icon(forFile: url.path)
 
+        // LRU 清理：如果缓存满了，移除最旧的
+        if Self.iconCache.count >= Self.maxIconCacheSize,
+           let oldest = Self.iconAccessOrder.first {
+            Self.iconCache.removeValue(forKey: oldest)
+            Self.iconAccessOrder.removeFirst()
+        }
+
         // 写入缓存
-        Self.iconCacheLock.lock()
         Self.iconCache[bundleID] = icon
-        Self.iconCacheLock.unlock()
+        Self.iconAccessOrder.append(bundleID)
 
         return icon
     }

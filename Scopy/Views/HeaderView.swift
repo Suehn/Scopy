@@ -112,10 +112,12 @@ struct AppFilterButton: View {
     @Environment(AppState.self) private var appState
 
     // LRU 缓存：限制最大 50 个条目，防止内存泄漏
+    // v0.10.8: 添加 NSLock 保护，确保线程安全
     private static var nameCache: [String: String] = [:]
     private static var iconCache: [String: NSImage] = [:]
     private static var iconAccessOrder: [String] = []  // LRU 访问顺序
     private static let maxCacheSize = 50
+    private static let cacheLock = NSLock()
 
     var body: some View {
         Menu {
@@ -167,7 +169,10 @@ struct AppFilterButton: View {
         .help("Filter by app")
     }
 
+    /// v0.10.8: 使用锁保护缓存访问，确保线程安全
     private func appIcon(for bundleID: String) -> NSImage? {
+        Self.cacheLock.lock()
+
         // 检查缓存命中
         if let cached = Self.iconCache[bundleID] {
             // 更新 LRU 访问顺序
@@ -175,8 +180,12 @@ struct AppFilterButton: View {
                 Self.iconAccessOrder.remove(at: index)
             }
             Self.iconAccessOrder.append(bundleID)
+            Self.cacheLock.unlock()
             return cached
         }
+
+        // 缓存未命中，释放锁后获取图标（避免阻塞）
+        Self.cacheLock.unlock()
 
         guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) else {
             return nil
@@ -202,6 +211,9 @@ struct AppFilterButton: View {
         croppedIcon.unlockFocus()
         croppedIcon.isTemplate = false
 
+        // 重新获取锁来更新缓存
+        Self.cacheLock.lock()
+
         // LRU 清理：超出限制时移除最早访问的条目
         if Self.iconCache.count >= Self.maxCacheSize, let oldest = Self.iconAccessOrder.first {
             Self.iconCache.removeValue(forKey: oldest)
@@ -210,16 +222,39 @@ struct AppFilterButton: View {
 
         Self.iconCache[bundleID] = croppedIcon
         Self.iconAccessOrder.append(bundleID)
+        Self.cacheLock.unlock()
+
         return croppedIcon
     }
 
+    /// v0.10.8: 使用锁保护缓存访问，确保线程安全
     private func appName(for bundleID: String) -> String {
-        if let cached = Self.nameCache[bundleID] { return cached }
+        Self.cacheLock.lock()
+
+        if let cached = Self.nameCache[bundleID] {
+            Self.cacheLock.unlock()
+            return cached
+        }
+
+        // 缓存未命中，需要获取名称（在锁外执行）
+        Self.cacheLock.unlock()
+
         guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) else {
             return bundleID
         }
         let name = url.deletingPathExtension().lastPathComponent
+
+        // 重新获取锁来更新缓存
+        Self.cacheLock.lock()
+
+        // LRU 清理：名称缓存也需要限制大小
+        if Self.nameCache.count >= Self.maxCacheSize {
+            Self.nameCache.removeAll()  // 简单策略：满了就清空
+        }
+
         Self.nameCache[bundleID] = name
+        Self.cacheLock.unlock()
+
         return name
     }
 }
