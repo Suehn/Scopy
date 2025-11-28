@@ -1,23 +1,43 @@
 import AppKit
 import Carbon.HIToolbox
 
-/// 调试日志函数 - 写入文件
+/// v0.11: 日志轮转配置
+private let logPath = "/tmp/scopy_hotkey.log"
+private let logPathOld = "/tmp/scopy_hotkey.log.old"
+private let maxLogSize = 10 * 1024 * 1024  // 10MB
+private let logLock = NSLock()
+
+/// v0.11: 调试日志函数 - 写入文件（带轮转和线程安全）
 private func logToFile(_ message: String) {
-    let logPath = "/tmp/scopy_hotkey.log"
     let timestamp = ISO8601DateFormatter().string(from: Date())
     let logMessage = "[\(timestamp)] \(message)\n"
 
-    if let data = logMessage.data(using: .utf8) {
-        if FileManager.default.fileExists(atPath: logPath) {
-            if let handle = FileHandle(forWritingAtPath: logPath) {
-                handle.seekToEndOfFile()
-                handle.write(data)
-                handle.closeFile()
-            }
-        } else {
-            FileManager.default.createFile(atPath: logPath, contents: data)
-        }
+    guard let data = logMessage.data(using: .utf8) else { return }
+
+    // 加锁保护并发写入
+    logLock.lock()
+    defer { logLock.unlock() }
+
+    // 检查文件大小，必要时轮转
+    if let attrs = try? FileManager.default.attributesOfItem(atPath: logPath),
+       let size = attrs[.size] as? Int, size > maxLogSize {
+        // 删除旧的备份文件
+        try? FileManager.default.removeItem(atPath: logPathOld)
+        // 将当前日志重命名为备份
+        try? FileManager.default.moveItem(atPath: logPath, toPath: logPathOld)
     }
+
+    // 写入日志
+    if FileManager.default.fileExists(atPath: logPath) {
+        if let handle = try? FileHandle(forWritingTo: URL(fileURLWithPath: logPath)) {
+            defer { try? handle.close() }
+            try? handle.seekToEnd()
+            try? handle.write(contentsOf: data)
+        }
+    } else {
+        FileManager.default.createFile(atPath: logPath, contents: data)
+    }
+
     print(message)  // 同时输出到控制台
 }
 
