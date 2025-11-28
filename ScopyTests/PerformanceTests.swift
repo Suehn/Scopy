@@ -409,6 +409,111 @@ final class PerformanceTests: XCTestCase {
         XCTAssertLessThanOrEqual(remaining, 100)
     }
 
+    // MARK: - v0.11 Cleanup Performance Benchmarks
+
+    /// v0.11: 内联存储清理性能测试 (10k 项，纯 SQLite)
+    /// 目标: P95 < 300ms
+    func testInlineCleanupPerformance10k() async throws {
+        try XCTSkipIf(!shouldRunHeavyPerf(), "Set \(heavyPerfEnv)=1 to run heavy perf tests")
+
+        let (diskStorage, _, baseURL) = try makeDiskStorage()
+        defer {
+            diskStorage.close()
+            try? FileManager.default.removeItem(at: baseURL)
+        }
+
+        // 插入 10k 小内容项（内联存储）
+        for i in 0..<10_000 {
+            let text = "Inline cleanup test item \(i) with some text content"
+            _ = try diskStorage.upsertItem(makeContent(text))
+        }
+
+        diskStorage.cleanupSettings.maxItems = 1000
+
+        var times: [Double] = []
+        for _ in 0..<5 {
+            // 重新插入数据
+            for i in 0..<9000 {
+                _ = try diskStorage.upsertItem(makeContent("Refill item \(i) \(UUID().uuidString)"))
+            }
+
+            let start = CFAbsoluteTimeGetCurrent()
+            try diskStorage.performCleanup()
+            let elapsed = (CFAbsoluteTimeGetCurrent() - start) * 1000
+            times.append(elapsed)
+        }
+
+        let p95 = percentile(times, 95)
+        print("📊 Inline Cleanup Performance (10k items): P95 \(String(format: "%.2f", p95))ms")
+        XCTAssertLessThan(p95, 300, "Inline cleanup P95 \(p95)ms exceeds 300ms target")
+    }
+
+    /// v0.11: 外部存储清理性能测试 (10k 项，含文件 I/O)
+    /// 目标: P95 < 800ms
+    func testExternalCleanupPerformance10k() async throws {
+        try XCTSkipIf(!shouldRunHeavyPerf(), "Set \(heavyPerfEnv)=1 to run heavy perf tests")
+
+        let (diskStorage, _, baseURL) = try makeDiskStorage()
+        defer {
+            diskStorage.close()
+            try? FileManager.default.removeItem(at: baseURL)
+        }
+
+        // 插入 10k 大内容项（外部存储）
+        for i in 0..<10_000 {
+            let blob = Data(repeating: UInt8(i % 255), count: 120 * 1024) // 120KB
+            let content = ClipboardMonitor.ClipboardContent(
+                type: .image,
+                plainText: "[External cleanup test \(i)]",
+                rawData: blob,
+                appBundleID: "com.test.cleanup",
+                contentHash: "ext-cleanup-\(i)-\(UUID().uuidString)",
+                sizeBytes: blob.count
+            )
+            _ = try diskStorage.upsertItem(content)
+        }
+
+        diskStorage.cleanupSettings.maxItems = 1000
+        diskStorage.cleanupSettings.maxLargeStorageMB = 100 // 100MB
+
+        let start = CFAbsoluteTimeGetCurrent()
+        try diskStorage.performCleanup()
+        let elapsed = (CFAbsoluteTimeGetCurrent() - start) * 1000
+
+        print("📊 External Cleanup Performance (10k items): \(String(format: "%.2f", elapsed))ms")
+        XCTAssertLessThan(elapsed, 800, "External cleanup \(elapsed)ms exceeds 800ms target")
+    }
+
+    /// v0.11: 大规模清理性能测试 (50k 项)
+    /// 目标: P95 < 1500ms
+    func testCleanupPerformance50k() async throws {
+        try XCTSkipIf(!shouldRunHeavyPerf(), "Set \(heavyPerfEnv)=1 to run heavy perf tests")
+
+        let (diskStorage, _, baseURL) = try makeDiskStorage()
+        defer {
+            diskStorage.close()
+            try? FileManager.default.removeItem(at: baseURL)
+        }
+
+        // 插入 50k 项
+        for i in 0..<50_000 {
+            let text = "Large scale cleanup test item \(i) with content"
+            _ = try diskStorage.upsertItem(makeContent(text))
+        }
+
+        diskStorage.cleanupSettings.maxItems = 5000
+
+        let start = CFAbsoluteTimeGetCurrent()
+        try diskStorage.performCleanup()
+        let elapsed = (CFAbsoluteTimeGetCurrent() - start) * 1000
+
+        print("📊 Large Scale Cleanup Performance (50k items): \(String(format: "%.2f", elapsed))ms")
+        XCTAssertLessThan(elapsed, 1500, "50k cleanup \(elapsed)ms exceeds 1500ms target")
+
+        let remaining = try diskStorage.getItemCount()
+        XCTAssertLessThanOrEqual(remaining, 5000)
+    }
+
     // MARK: - Realistic Disk-Backed Scenarios
 
     /// 磁盘模式 + 2.5 万条，模拟真实 I/O（WAL 已启用）
