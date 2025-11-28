@@ -13,7 +13,7 @@ struct CapsuleFilterButtonStyle: ButtonStyle {
             )
             .overlay(
                 Capsule()
-                    .stroke(isActive ? ScopyColors.selectionBorder : ScopyColors.separator.opacity(0.5), lineWidth: 1)
+                    .stroke(isActive ? ScopyColors.selectionBorder : ScopyColors.separator.opacity(ScopySize.Opacity.medium), lineWidth: ScopySize.Stroke.normal)
             )
             .foregroundStyle(isActive ? Color.accentColor : ScopyColors.mutedText)
             .opacity(configuration.isPressed ? 0.8 : 1)
@@ -26,7 +26,7 @@ struct InfoTag: View {
     let systemImage: String?
 
     var body: some View {
-        HStack(spacing: 4) {
+        HStack(spacing: ScopySpacing.xs) {
             if let systemImage {
                 Image(systemName: systemImage)
             }
@@ -34,7 +34,7 @@ struct InfoTag: View {
                 .font(ScopyTypography.caption)
         }
         .padding(.horizontal, ScopySpacing.sm)
-        .padding(.vertical, 2)
+        .padding(.vertical, ScopySpacing.xxs)
         .background(
             Capsule().fill(ScopyColors.selection)
         )
@@ -102,7 +102,7 @@ struct ScopyButton: View {
             .padding(.horizontal, ScopySpacing.md)
             .padding(.vertical, ScopySpacing.sm)
             .background(
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                RoundedRectangle(cornerRadius: ScopySize.Corner.md, style: .continuous)
                     .fill(backgroundColor)
             )
             .foregroundStyle(foregroundColor)
@@ -125,12 +125,12 @@ struct ScopyCard<Content: View>: View {
         content
             .padding(ScopySpacing.md)
             .background(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                RoundedRectangle(cornerRadius: ScopySize.Corner.xl, style: .continuous)
                     .fill(ScopyColors.cardBackground)
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .stroke(ScopyColors.border.opacity(0.5), lineWidth: 0.5)
+                RoundedRectangle(cornerRadius: ScopySize.Corner.xl, style: .continuous)
+                    .stroke(ScopyColors.border.opacity(ScopySize.Opacity.medium), lineWidth: ScopySize.Stroke.thin)
             )
     }
 }
@@ -174,7 +174,7 @@ struct ScopyBadge: View {
         Text(text)
             .font(ScopyTypography.caption)
             .padding(.horizontal, ScopySpacing.sm)
-            .padding(.vertical, 2)
+            .padding(.vertical, ScopySpacing.xxs)
             .background(
                 Capsule().fill(backgroundColor)
             )

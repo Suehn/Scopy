@@ -23,6 +23,7 @@ enum ScopySize {
         static let menuApp: CGFloat = u * 4.5  // 18pt - 菜单 App 图标
         static let pin: CGFloat = u * 2.5      // 10pt - Pin 图标
         static let empty: CGFloat = u * 5      // 20pt - 空状态图标
+        static let appLogo: CGFloat = u * 12   // 48pt - App Logo
     }
 
     // MARK: - 圆角
@@ -55,6 +56,9 @@ enum ScopySize {
         static let pinIndicator: CGFloat = u * 0.75   // 3pt - Pin 指示条宽度
         static let settingsLabel: CGFloat = u * 30    // 120pt - 设置标签宽度
         static let statLabel: CGFloat = u * 12.5      // 50pt - 统计标签宽度
+        static let sidebarMin: CGFloat = u * 55       // 220pt - 侧边栏最小宽度
+        static let pickerMenu: CGFloat = u * 30       // 120pt - Picker 菜单宽度
+        static let previewMax: CGFloat = u * 125      // 500pt - 预览最大宽度
     }
 
     // MARK: - 窗口尺寸
@@ -65,5 +69,21 @@ enum ScopySize {
         static let mainHeight: CGFloat = u * 100      // 400pt
         static let settingsWidth: CGFloat = u * 180   // 720pt
         static let settingsHeight: CGFloat = u * 130  // 520pt
+    }
+
+    // MARK: - 边框宽度
+    enum Stroke {
+        static let thin: CGFloat = 0.5      // 细边框
+        static let normal: CGFloat = 1      // 标准边框
+        static let medium: CGFloat = 1.5    // 中等边框（选中态）
+        static let thick: CGFloat = 2       // 粗边框
+    }
+
+    // MARK: - 透明度
+    enum Opacity {
+        static let subtle: CGFloat = 0.1    // 微弱
+        static let light: CGFloat = 0.3     // 轻
+        static let medium: CGFloat = 0.5    // 中等
+        static let strong: CGFloat = 0.8    // 强
     }
 }
