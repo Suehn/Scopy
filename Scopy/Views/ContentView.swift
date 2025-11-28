@@ -10,24 +10,22 @@ struct ContentView: View {
     var body: some View {
         @Bindable var bindableAppState = appState
         ZStack {
-            // 背景模糊效果
             VisualEffectView()
+                .ignoresSafeArea()
 
             VStack(alignment: .leading, spacing: 0) {
-                // 头部搜索框
                 HeaderView(
                     searchQuery: $bindableAppState.searchQuery,
                     searchFocused: $searchFocused
                 )
+                .padding(.horizontal, ScopySpacing.md)
+                .padding(.top, ScopySpacing.md)
+                .padding(.bottom, ScopySpacing.sm)
 
-                // 历史列表
                 HistoryListView(searchFocused: $searchFocused)
 
-                // 底部状态栏
                 FooterView()
             }
-            .padding(.vertical, 5)
-            .padding(.horizontal, 5)
         }
         .onAppear {
             searchFocused = true
@@ -90,7 +88,7 @@ struct ContentView: View {
 struct VisualEffectView: NSViewRepresentable {
     func makeNSView(context: Context) -> NSVisualEffectView {
         let view = NSVisualEffectView()
-        view.material = .menu
+        view.material = .hudWindow
         view.blendingMode = .behindWindow
         view.state = .active
         return view
@@ -102,5 +100,5 @@ struct VisualEffectView: NSViewRepresentable {
 #Preview {
     ContentView()
         .environment(AppState.shared)
-        .frame(width: 320, height: 400)
+        .frame(width: ScopySize.Window.mainWidth, height: ScopySize.Window.mainHeight)
 }

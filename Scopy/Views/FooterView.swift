@@ -5,58 +5,77 @@ struct FooterView: View {
     @Environment(AppState.self) private var appState
     @State private var showClearConfirmation = false
 
+    private var summaryText: String {
+        if !appState.searchQuery.isEmpty {
+            return "\(appState.items.count) results"
+        } else if appState.loadedCount < appState.totalCount {
+            return "\(appState.loadedCount)/\(appState.totalCount) items"
+        } else {
+            return "\(appState.totalCount) items"
+        }
+    }
+
     var body: some View {
         VStack(spacing: 0) {
+            // Subtle top separator
             Divider()
-                .padding(.horizontal, 10)
-                .padding(.vertical, 6)
+                .background(ScopyColors.separator.opacity(0.3))
 
-            // 统计信息
-            HStack(spacing: 8) {
-                if !appState.searchQuery.isEmpty {
-                    Text("\(appState.items.count) results")
-                } else if appState.loadedCount < appState.totalCount {
-                    Text("\(appState.loadedCount) / \(appState.totalCount) items")
-                } else {
-                    Text("\(appState.totalCount) items")
-                }
+            HStack(spacing: ScopySpacing.md) {
+                // Status Info - clean text without container
+                HStack(spacing: ScopySpacing.sm) {
+                    Text(summaryText)
+                        .monospacedDigit()
+                        .lineLimit(1)
+                        .fixedSize()
+                    Text("·")
+                    Text(appState.storageSizeText)
+                        .lineLimit(1)
+                        .fixedSize()
 
-                Text("•")
-                Text(appState.storageSizeText)
-
-                if appState.canLoadMore && !appState.searchQuery.isEmpty {
-                    Text("•")
-                    if appState.isLoading {
-                        ProgressView()
-                            .controlSize(.mini)
-                    } else {
-                        Button("Load more") {
-                            Task { await appState.loadMore() }
+                    if appState.canLoadMore && !appState.searchQuery.isEmpty {
+                        Text("·")
+                        if appState.isLoading {
+                            ProgressView()
+                                .controlSize(.mini)
+                        } else {
+                            Button("Load more") {
+                                Task { await appState.loadMore() }
+                            }
+                            .buttonStyle(.plain)
+                            .foregroundStyle(ScopyColors.accent)
                         }
-                        .buttonStyle(.plain)
-                        .foregroundStyle(.blue)
                     }
                 }
+                .font(ScopyTypography.microMono)
+                .foregroundStyle(ScopyColors.tertiaryText)
+
+                Spacer()
+
+                // Action Buttons - refined styling
+                HStack(spacing: ScopySpacing.xs) {
+                    FooterButton(icon: "trash", shortcut: "⌘⌫") {
+                        showClearConfirmation = true
+                    }
+                    .help("Clear All")
+
+                    FooterButton(icon: "gearshape", shortcut: "⌘,") {
+                        appState.openSettingsHandler?()
+                    }
+                    .help("Settings")
+
+                    FooterButton(icon: "power", shortcut: "⌘Q") {
+                        NSApp.terminate(nil)
+                    }
+                    .help("Quit")
+                }
             }
-            .font(.system(size: 10))
-            .foregroundStyle(.secondary)
-            .padding(.bottom, 4)
-
-            // 操作按钮
-            HStack(spacing: 12) {
-                FooterButton(title: "Clear", shortcut: "⌘⌫") {
-                    showClearConfirmation = true
-                }
-
-                FooterButton(title: "Settings", shortcut: "⌘,") {
-                    appState.openSettingsHandler?()
-                }
-
-                FooterButton(title: "Quit", shortcut: "⌘Q") {
-                    NSApp.terminate(nil)
-                }
-            }
+            .padding(.horizontal, ScopySpacing.lg)
+            .padding(.vertical, ScopySpacing.xs)
         }
+        // v0.10.3-fix: 固定高度防止搜索时布局跳动
+        .frame(height: ScopySize.Height.footer)
+        .frame(maxWidth: .infinity)
         .alert("Clear All History?", isPresented: $showClearConfirmation) {
             Button("Cancel", role: .cancel) { }
             Button("Clear", role: .destructive) {
@@ -68,9 +87,9 @@ struct FooterView: View {
     }
 }
 
-/// 底部按钮组件
+/// 底部按钮组件 - 仅图标 + 快捷键
 struct FooterButton: View {
-    let title: String
+    let icon: String
     let shortcut: String
     let action: () -> Void
 
@@ -78,17 +97,18 @@ struct FooterButton: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 4) {
-                Text(LocalizedStringKey(title))
+            HStack(spacing: 2) {
+                Image(systemName: icon)
+                    .font(.system(size: ScopySize.Icon.xs))
                 Text(shortcut)
-                    .foregroundStyle(.secondary)
+                    .font(.system(size: ScopySize.Icon.pin, weight: .medium))
+                    .foregroundStyle(ScopyColors.tertiaryText.opacity(0.8))
             }
-            .font(.system(size: 11))
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-            .background(isHovered ? Color.accentColor.opacity(0.8) : Color.clear)
-            .foregroundStyle(isHovered ? .white : .primary)
-            .clipShape(RoundedRectangle(cornerRadius: 4))
+            .padding(.horizontal, ScopySpacing.sm)
+            .padding(.vertical, ScopySize.Width.pinIndicator)
+            .background(isHovered ? ScopyColors.secondaryBackground : Color.clear)
+            .foregroundStyle(isHovered ? ScopyColors.text : ScopyColors.mutedText)
+            .clipShape(RoundedRectangle(cornerRadius: ScopySize.Corner.sm))
         }
         .buttonStyle(.plain)
         .onHover { hovering in

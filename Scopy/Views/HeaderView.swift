@@ -9,26 +9,100 @@ struct HeaderView: View {
     @Environment(AppState.self) private var appState
 
     var body: some View {
-        HStack(spacing: 6) {
-            Text("Scopy")
-                .foregroundStyle(.secondary)
-                .font(.system(size: 12, weight: .medium))
+        HStack(spacing: ScopySpacing.md) {
+            // Search Icon
+            Image(systemName: ScopyIcons.search)
+                .font(.system(size: ScopySize.Icon.header, weight: .medium))
+                .foregroundStyle(ScopyColors.mutedText)
 
-            // App 过滤按钮
-            AppFilterButton()
+            // Search Field
+            TextField("Search...", text: $searchQuery)
+                .textFieldStyle(.plain)
+                .font(ScopyTypography.searchField)
+                .focused($searchFocused)
+                .onChange(of: searchQuery) {
+                    appState.search()
+                }
+                .onSubmit {
+                    Task { await appState.selectCurrent() }
+                }
 
-            // Type 过滤按钮
-            TypeFilterButton()
+            Spacer()
 
-            SearchFieldView(
-                query: $searchQuery,
-                searchFocused: $searchFocused
-            )
-            .frame(maxWidth: .infinity)
+            // Filters & Actions
+            HStack(spacing: ScopySpacing.sm) {
+                if !searchQuery.isEmpty {
+                    Button {
+                        searchQuery = ""
+                        appState.search()
+                    } label: {
+                        Image(systemName: ScopyIcons.clear)
+                            .foregroundStyle(ScopyColors.mutedText)
+                    }
+                    .buttonStyle(.plain)
+                }
+                
+                Divider()
+                    .frame(height: ScopySize.Height.divider)
+                
+                AppFilterButton()
+                TypeFilterButton()
+                SearchModeMenu()
+            }
         }
-        .frame(height: 28)
-        .padding(.horizontal, 10)
-        .padding(.bottom, 5)
+        .padding(ScopySpacing.md)
+        .background(ScopyColors.cardBackground)
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(ScopyColors.border.opacity(0.5), lineWidth: 0.5)
+        )
+    }
+}
+
+// MARK: - Search Mode Menu
+
+private struct SearchModeMenu: View {
+    @Environment(AppState.self) private var appState
+
+    var body: some View {
+        Menu {
+            ForEach(SearchMode.allCases, id: \.self) { mode in
+                Button {
+                    appState.searchMode = mode
+                    appState.search()
+                } label: {
+                    HStack {
+                        if mode == appState.searchMode {
+                            Image(systemName: "checkmark")
+                        }
+                        Text(modeLabel(mode))
+                    }
+                }
+            }
+        } label: {
+            Image(systemName: modeIcon(appState.searchMode))
+                .font(.system(size: ScopySize.Icon.filter))
+                .foregroundStyle(ScopyColors.mutedText)
+        }
+        .menuStyle(.borderlessButton)
+        .help("Search mode")
+    }
+
+    private func modeLabel(_ mode: SearchMode) -> String {
+        switch mode {
+        case .exact: return "Exact"
+        case .fuzzy: return "Fuzzy"
+        case .regex: return "Regex"
+        }
+    }
+    
+    private func modeIcon(_ mode: SearchMode) -> String {
+        switch mode {
+        case .exact: return "text.quote"
+        case .fuzzy: return "text.magnifyingglass"
+        case .regex: return "asterisk.circle"
+        }
     }
 }
 
@@ -36,6 +110,12 @@ struct HeaderView: View {
 
 struct AppFilterButton: View {
     @Environment(AppState.self) private var appState
+
+    // LRU 缓存：限制最大 50 个条目，防止内存泄漏
+    private static var nameCache: [String: String] = [:]
+    private static var iconCache: [String: NSImage] = [:]
+    private static var iconAccessOrder: [String] = []  // LRU 访问顺序
+    private static let maxCacheSize = 50
 
     var body: some View {
         Menu {
@@ -72,34 +152,75 @@ struct AppFilterButton: View {
                 }
             }
         } label: {
-            HStack(spacing: 2) {
-                Image(systemName: "app.badge")
-                    .font(.system(size: 11))
-                if appState.appFilter != nil {
-                    Circle()
-                        .fill(.blue)
-                        .frame(width: 5, height: 5)
-                }
+            if let bundleID = appState.appFilter, let icon = appIcon(for: bundleID) {
+                Image(nsImage: icon)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(width: ScopySize.Icon.menuApp, height: ScopySize.Icon.menuApp)
+            } else {
+                Image(systemName: ScopyIcons.filterApp)
+                    .font(.system(size: ScopySize.Icon.filter))
+                    .foregroundStyle(ScopyColors.mutedText)
             }
-            .foregroundStyle(appState.appFilter != nil ? .blue : .secondary)
         }
         .menuStyle(.borderlessButton)
-        .frame(width: 24)
         .help("Filter by app")
     }
 
     private func appIcon(for bundleID: String) -> NSImage? {
+        // 检查缓存命中
+        if let cached = Self.iconCache[bundleID] {
+            // 更新 LRU 访问顺序
+            if let index = Self.iconAccessOrder.firstIndex(of: bundleID) {
+                Self.iconAccessOrder.remove(at: index)
+            }
+            Self.iconAccessOrder.append(bundleID)
+            return cached
+        }
+
         guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) else {
             return nil
         }
-        return NSWorkspace.shared.icon(forFile: url.path)
+        let sourceIcon = NSWorkspace.shared.icon(forFile: url.path)
+
+        // Create properly sized icon - match menu app icon size
+        let iconSize = ScopySize.Icon.menuApp
+        let targetSize = NSSize(width: iconSize, height: iconSize)
+        let croppedIcon = NSImage(size: targetSize)
+
+        croppedIcon.lockFocus()
+
+        // Find the best representation and draw centered
+        if let bestRep = sourceIcon.bestRepresentation(
+            for: NSRect(origin: .zero, size: targetSize),
+            context: nil,
+            hints: [.interpolation: NSNumber(value: NSImageInterpolation.high.rawValue)]
+        ) {
+            bestRep.draw(in: NSRect(origin: .zero, size: targetSize))
+        }
+
+        croppedIcon.unlockFocus()
+        croppedIcon.isTemplate = false
+
+        // LRU 清理：超出限制时移除最早访问的条目
+        if Self.iconCache.count >= Self.maxCacheSize, let oldest = Self.iconAccessOrder.first {
+            Self.iconCache.removeValue(forKey: oldest)
+            Self.iconAccessOrder.removeFirst()
+        }
+
+        Self.iconCache[bundleID] = croppedIcon
+        Self.iconAccessOrder.append(bundleID)
+        return croppedIcon
     }
 
     private func appName(for bundleID: String) -> String {
+        if let cached = Self.nameCache[bundleID] { return cached }
         guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) else {
             return bundleID
         }
-        return url.deletingPathExtension().lastPathComponent
+        let name = url.deletingPathExtension().lastPathComponent
+        Self.nameCache[bundleID] = name
+        return name
     }
 }
 
@@ -128,19 +249,11 @@ struct TypeFilterButton: View {
             typeMenuItem(.image, label: "Image", icon: "photo")
             typeMenuItem(.file, label: "File", icon: "doc.fill")
         } label: {
-            HStack(spacing: 2) {
-                Image(systemName: "doc.text")
-                    .font(.system(size: 11))
-                if appState.typeFilter != nil {
-                    Circle()
-                        .fill(.blue)
-                        .frame(width: 5, height: 5)
-                }
-            }
-            .foregroundStyle(appState.typeFilter != nil ? .blue : .secondary)
+            Image(systemName: typeIcon(appState.typeFilter))
+                .font(.system(size: ScopySize.Icon.filter))
+                .foregroundStyle(ScopyColors.mutedText)
         }
         .menuStyle(.borderlessButton)
-        .frame(width: 24)
         .help("Filter by type")
     }
 
@@ -158,52 +271,14 @@ struct TypeFilterButton: View {
             }
         }
     }
-}
 
-/// 搜索框视图
-struct SearchFieldView: View {
-    @Binding var query: String
-    @FocusState.Binding var searchFocused: Bool
-
-    @Environment(AppState.self) private var appState
-
-    var body: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 5, style: .continuous)
-                .fill(Color.secondary.opacity(0.1))
-                .frame(height: 23)
-
-            HStack {
-                Image(systemName: "magnifyingglass")
-                    .frame(width: 11, height: 11)
-                    .padding(.leading, 5)
-                    .opacity(0.8)
-
-                TextField("Search...", text: $query)
-                    .disableAutocorrection(true)
-                    .lineLimit(1)
-                    .textFieldStyle(.plain)
-                    .focused($searchFocused)
-                    .onChange(of: query) {
-                        appState.search()
-                    }
-                    .onSubmit {
-                        Task { await appState.selectCurrent() }
-                    }
-
-                if !query.isEmpty {
-                    Button {
-                        query = ""
-                        appState.search()
-                    } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .frame(width: 11, height: 11)
-                            .padding(.trailing, 5)
-                    }
-                    .buttonStyle(.plain)
-                    .opacity(0.9)
-                }
-            }
+    private func typeIcon(_ type: ClipboardItemType?) -> String {
+        guard let type else { return ScopyIcons.filterType }
+        switch type {
+        case .text: return "doc.text"
+        case .image: return "photo"
+        case .file: return "doc.fill"
+        default: return ScopyIcons.filterType
         }
     }
 }

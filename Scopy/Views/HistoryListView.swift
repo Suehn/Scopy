@@ -8,80 +8,84 @@ struct HistoryListView: View {
     @Environment(AppState.self) private var appState
 
     var body: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(spacing: 0) {
-                    // 固定项（置顶）
-                    if !appState.pinnedItems.isEmpty && appState.searchQuery.isEmpty {
-                        ForEach(appState.pinnedItems) { item in
-                            HistoryItemView(
-                                item: item,
-                                isKeyboardSelected: appState.selectedID == item.id,
-                                settings: appState.settings,
-                                onSelect: { Task { await appState.select(item) } },
-                                onHoverSelect: { id in
-                                    appState.selectedID = id
-                                    appState.lastSelectionSource = .mouse
-                                },
-                                onTogglePin: { Task { await appState.togglePin(item) } },
-                                onDelete: { Task { await appState.delete(item) } },
-                                getImageData: { try? await appState.service.getImageData(itemID: item.id) }
-                            )
-                            .equatable()
+        if appState.items.isEmpty && !appState.isLoading {
+            EmptyStateView(
+                hasFilters: appState.hasActiveFilters,
+                openSettings: appState.openSettingsHandler
+            )
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(spacing: 0) {
+                        if appState.isLoading && appState.items.isEmpty {
+                            ProgressView()
+                                .controlSize(.small)
+                                .padding(.vertical, ScopySpacing.md)
                         }
 
-                        Divider()
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 3)
-                    }
-
-                    // 普通项
-                    ForEach(appState.unpinnedItems) { item in
-                        HistoryItemView(
-                            item: item,
-                            isKeyboardSelected: appState.selectedID == item.id,
-                            settings: appState.settings,
-                            onSelect: { Task { await appState.select(item) } },
-                            onHoverSelect: { id in
-                                appState.selectedID = id
-                                appState.lastSelectionSource = .mouse
-                            },
-                            onTogglePin: { Task { await appState.togglePin(item) } },
-                            onDelete: { Task { await appState.delete(item) } },
-                            getImageData: { try? await appState.service.getImageData(itemID: item.id) }
-                        )
-                        .equatable()
-                    }
-
-                    // 加载更多触发器（支持搜索/过滤分页）
-                    if appState.canLoadMore {
-                        LoadMoreTriggerView(isLoading: appState.isLoading)
-                            .onAppear {
-                                Task {
-                                    await appState.loadMore()
+                        if !appState.pinnedItems.isEmpty && appState.searchQuery.isEmpty {
+                            Section(header: SectionHeader(title: "Pinned", count: appState.pinnedItems.count)) {
+                                ForEach(appState.pinnedItems) { item in
+                                    historyRow(item: item)
                                 }
                             }
+                        }
+
+                        Section(header: SectionHeader(title: "Recent", count: appState.unpinnedItems.count, performanceSummary: appState.performanceSummary)) {
+                            ForEach(appState.unpinnedItems) { item in
+                                historyRow(item: item)
+                            }
+                        }
+
+                        if appState.canLoadMore {
+                            LoadMoreTriggerView(isLoading: appState.isLoading)
+                                .onAppear {
+                                    Task {
+                                        await appState.loadMore()
+                                    }
+                                }
+                        }
                     }
                 }
-            }
-            .scrollIndicators(.automatic)
-            .onChange(of: appState.selectedID) { _, newValue in
-                // 仅当键盘导航时自动滚动到选中项
-                if let id = newValue, appState.lastSelectionSource == .keyboard {
-                    withAnimation(.easeInOut(duration: 0.1)) {
-                        proxy.scrollTo(id, anchor: .center)
+                .scrollIndicators(.automatic)
+                .onChange(of: appState.selectedID) { _, newValue in
+                    // 仅当键盘导航时自动滚动到选中项
+                    if let id = newValue, appState.lastSelectionSource == .keyboard {
+                        withAnimation(.easeInOut(duration: 0.1)) {
+                            proxy.scrollTo(id, anchor: .center)
+                        }
                     }
                 }
-            }
-            // 单条删除快捷键: Option+Delete
-            .onKeyPress { keyPress in
-                if keyPress.key == .delete && keyPress.modifiers.contains(.option) {
-                    Task { await appState.deleteSelectedItem() }
-                    return .handled
+                // 单条删除快捷键: Option+Delete
+                .onKeyPress { keyPress in
+                    if keyPress.key == .delete && keyPress.modifiers.contains(.option) {
+                        Task { await appState.deleteSelectedItem() }
+                        return .handled
+                    }
+                    return .ignored
                 }
-                return .ignored
             }
         }
+    }
+
+    @ViewBuilder
+    private func historyRow(item: ClipboardItemDTO) -> some View {
+        HistoryItemView(
+            item: item,
+            isKeyboardSelected: appState.selectedID == item.id,
+            settings: appState.settings,
+            onSelect: { Task { await appState.select(item) } },
+            onHoverSelect: { id in
+                appState.selectedID = id
+                appState.lastSelectionSource = .mouse
+            },
+            onTogglePin: { Task { await appState.togglePin(item) } },
+            onDelete: { Task { await appState.delete(item) } },
+            getImageData: { try? await appState.service.getImageData(itemID: item.id) }
+        )
+        .equatable()
+        .id(item.id)
     }
 }
 
@@ -103,20 +107,15 @@ struct HistoryItemView: View, Equatable {
 
     // 局部状态 - 悬停不触发全局重绘
     @State private var isHovering = false
-    @State private var hoverDebounceTimer: Timer?
-    @State private var hoverTimer: Timer?
+    @State private var hoverDebounceTask: Task<Void, Never>?
+    @State private var hoverPreviewTask: Task<Void, Never>?
     @State private var showPreview = false
     @State private var previewImageData: Data?
 
     // 静态图标缓存 - 避免重复调用 NSWorkspace API
+    // v0.10.4: 添加锁保护，确保线程安全
     private static var iconCache: [String: NSImage] = [:]
-
-    // 静态 DateFormatter - 避免重复创建
-    private static let dateFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "MM/dd"
-        return formatter
-    }()
+    private static let iconCacheLock = NSLock()
 
     // MARK: - Equatable
 
@@ -131,23 +130,39 @@ struct HistoryItemView: View, Equatable {
 
     // MARK: - Computed Properties
 
-    /// 视觉高亮：键盘选中 OR 鼠标悬停
-    private var shouldHighlight: Bool {
-        isKeyboardSelected || isHovering
+    private var backgroundColor: Color {
+        if isKeyboardSelected {
+            return ScopyColors.selection
+        } else if isHovering {
+            return ScopyColors.hover
+        } else {
+            return Color.clear
+        }
     }
 
+    /// v0.10.4: 使用锁保护静态缓存访问
     private var appIcon: NSImage? {
         guard let bundleID = item.appBundleID else { return nil }
 
+        // 先尝试从缓存读取
+        Self.iconCacheLock.lock()
         if let cached = Self.iconCache[bundleID] {
+            Self.iconCacheLock.unlock()
             return cached
         }
+        Self.iconCacheLock.unlock()
 
+        // 缓存未命中，获取图标
         guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) else {
             return nil
         }
         let icon = NSWorkspace.shared.icon(forFile: url.path)
+
+        // 写入缓存
+        Self.iconCacheLock.lock()
         Self.iconCache[bundleID] = icon
+        Self.iconCacheLock.unlock()
+
         return icon
     }
 
@@ -163,102 +178,168 @@ struct HistoryItemView: View, Equatable {
         settings.showImageThumbnails
     }
 
+    private var metadataText: String? {
+        var parts: [String] = []
+        if let bundleID = item.appBundleID {
+            parts.append(appName(for: bundleID))
+        }
+        parts.append(formatBytes(item.sizeBytes))
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+
+    @ViewBuilder
+    private var contentView: some View {
+        switch item.type {
+        case .image where showThumbnails:
+            HStack(spacing: ScopySpacing.md) {
+                thumbnailView
+                VStack(alignment: .leading, spacing: ScopySpacing.xs) {
+                    Text(item.title)
+                        .font(ScopyTypography.body)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                    if let metadataText {
+                        Text("Image · \(metadataText)")
+                            .font(ScopyTypography.caption)
+                            .foregroundStyle(ScopyColors.mutedText)
+                            .lineLimit(1)
+                    }
+                }
+            }
+        case .file:
+            VStack(alignment: .leading, spacing: ScopySpacing.xs) {
+                HStack(spacing: ScopySpacing.sm) {
+                    Image(systemName: ScopyIcons.file)
+                        .foregroundStyle(Color.accentColor)
+                    Text(item.title)
+                        .font(ScopyTypography.body)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
+                if let metadataText {
+                    Text(metadataText)
+                        .font(ScopyTypography.caption)
+                        .foregroundStyle(ScopyColors.mutedText)
+                        .lineLimit(1)
+                }
+            }
+        case .image:
+            VStack(alignment: .leading, spacing: ScopySpacing.xs) {
+                HStack(spacing: ScopySpacing.sm) {
+                    Image(systemName: ScopyIcons.image)
+                        .foregroundStyle(.green)
+                    Text(item.title)
+                        .font(ScopyTypography.body)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
+                if let metadataText {
+                    Text("Image · \(metadataText)")
+                        .font(ScopyTypography.caption)
+                        .foregroundStyle(ScopyColors.mutedText)
+                        .lineLimit(1)
+                }
+            }
+        default:
+            VStack(alignment: .leading, spacing: ScopySpacing.xs) {
+                Text(item.title)
+                    .font(ScopyTypography.body)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                if let metadataText {
+                    Text(metadataText)
+                        .font(ScopyTypography.caption)
+                        .foregroundStyle(ScopyColors.mutedText)
+                        .lineLimit(1)
+                }
+            }
+        }
+    }
+
     // MARK: - Body
 
     var body: some View {
-        HStack(spacing: 0) {
-            // 左侧：app 图标
+        HStack(alignment: .center, spacing: ScopySpacing.sm) {
+            // Pin 标记：左侧颜色条
+            if item.isPinned {
+                Capsule()
+                    .fill(ScopyColors.selectionBorder)
+                    .frame(width: ScopySize.Width.pinIndicator, height: ScopySize.Height.pinIndicator)
+            }
+
+            // App 图标
             if let icon = appIcon {
                 Image(nsImage: icon)
                     .resizable()
-                    .frame(width: 15, height: 15)
-                    .padding(.leading, 4)
-                    .padding(.vertical, 5)
+                    .frame(width: ScopySize.Icon.listApp, height: ScopySize.Icon.listApp)
+                    .cornerRadius(ScopySize.Corner.sm)
             } else {
-                Image(systemName: "app")
-                    .frame(width: 15, height: 15)
-                    .padding(.leading, 4)
-                    .padding(.vertical, 5)
-                    .foregroundStyle(.secondary)
+                Image(systemName: ScopyIcons.app)
+                    .font(.system(size: ScopySize.Icon.sm))
+                    .foregroundStyle(ScopyColors.mutedText)
+                    .frame(width: ScopySize.Icon.listApp, height: ScopySize.Icon.listApp)
             }
 
-            Spacer().frame(width: 8)
+            contentView
 
-            // 内容区域
-            if item.type == .image && showThumbnails {
-                thumbnailView
-            } else if item.type == .file {
-                Image(systemName: "doc.fill")
-                    .frame(width: 12, height: 12)
-                    .foregroundStyle(.blue)
-                Text(item.title)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                    .font(.system(size: 13))
-                    .padding(.trailing, 5)
-            } else if item.type == .image {
-                Image(systemName: "photo")
-                    .frame(width: 12, height: 12)
-                    .foregroundStyle(.green)
-                Text(item.title)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                    .font(.system(size: 13))
-                    .padding(.trailing, 5)
-            } else {
-                Text(item.title)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                    .font(.system(size: 13))
-                    .padding(.trailing, 5)
-            }
+            Spacer(minLength: ScopySpacing.md)
 
-            Spacer()
-
-            // 右侧：时间 + Pin 标记
-            HStack(spacing: 4) {
-                Text(relativeTime)
-                    .font(.system(size: 10))
-                    .foregroundStyle(shouldHighlight ? .white.opacity(0.7) : .secondary)
-
+            HStack(alignment: .center, spacing: ScopySpacing.sm) {
                 if item.isPinned {
-                    Image(systemName: "pin.fill")
-                        .font(.system(size: 10))
+                    Image(systemName: ScopyIcons.pin)
+                        .font(.system(size: ScopySize.Icon.pin))
                         .foregroundStyle(.orange)
                 }
+
+                Text(relativeTime)
+                    .font(ScopyTypography.microMono)
+                    .foregroundStyle(ScopyColors.mutedText)
             }
-            .padding(.trailing, 8)
         }
-        .frame(minHeight: item.type == .image && showThumbnails ? thumbnailHeight + 8 : 24)
+        .padding(.horizontal, ScopySpacing.md)
+        .padding(.vertical, ScopySpacing.sm)
+        .frame(minHeight: item.type == .image && showThumbnails ? thumbnailHeight + ScopySpacing.lg : ScopySize.Height.listItem)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .foregroundStyle(shouldHighlight ? Color.white : .primary)
-        .background(shouldHighlight ? Color.accentColor.opacity(0.8) : .white.opacity(0.001))
-        .clipShape(RoundedRectangle(cornerRadius: 4))
-        .id(item.id)
+        .background(
+            RoundedRectangle(cornerRadius: ScopySize.Corner.lg, style: .continuous)
+                .fill(backgroundColor)
+        )
+        // v0.10.3: 键盘选中时添加边框
+        .overlay(
+            RoundedRectangle(cornerRadius: ScopySize.Corner.lg, style: .continuous)
+                .stroke(isKeyboardSelected ? ScopyColors.selectionBorder : Color.clear, lineWidth: 1.5)
+        )
+        // v0.10.3: 添加选中/悬停态过渡动效
+        .animation(.easeInOut(duration: 0.15), value: isHovering)
+        .animation(.easeInOut(duration: 0.15), value: isKeyboardSelected)
+        .padding(.horizontal, ScopySpacing.md) // Outer padding for floating effect
         .onTapGesture {
             onSelect()
         }
         // v0.9.3: 局部悬停状态 + 防抖更新全局选中
+        // v0.10.3: 使用 Task 替代 Timer，自动取消防止泄漏
         .onHover { hovering in
             isHovering = hovering
 
-            // 取消之前的防抖计时器
-            hoverDebounceTimer?.invalidate()
+            // 取消之前的防抖任务
+            hoverDebounceTask?.cancel()
 
             if hovering {
                 // 静止 150ms 后才更新全局选中状态
-                hoverDebounceTimer = Timer.scheduledTimer(withTimeInterval: 0.15, repeats: false) { _ in
-                    DispatchQueue.main.async {
+                hoverDebounceTask = Task {
+                    try? await Task.sleep(nanoseconds: 150_000_000)
+                    guard !Task.isCancelled else { return }
+                    await MainActor.run {
                         onHoverSelect(item.id)
                     }
                 }
 
-                // 图片预览计时器
+                // 图片预览任务
                 if item.type == .image && showThumbnails {
-                    startPreviewTimer()
+                    startPreviewTask()
                 }
             } else {
-                cancelPreviewTimer()
+                cancelPreviewTask()
                 showPreview = false
             }
         }
@@ -278,8 +359,8 @@ struct HistoryItemView: View, Equatable {
             }
         }
         .onDisappear {
-            hoverDebounceTimer?.invalidate()
-            cancelPreviewTimer()
+            hoverDebounceTask?.cancel()
+            cancelPreviewTask()
         }
     }
 
@@ -335,23 +416,27 @@ struct HistoryItemView: View, Equatable {
         }
     }
 
-    // MARK: - Preview Timer
+    // MARK: - Preview Task
+    // v0.10.3: 使用 Task 替代 Timer，自动取消防止泄漏
 
-    private func startPreviewTimer() {
-        cancelPreviewTimer()
+    private func startPreviewTask() {
+        cancelPreviewTask()
 
-        // 通过服务层获取图片数据，不再直接访问文件系统
-        Task {
+        hoverPreviewTask = Task {
+            // 先获取图片数据
             if let data = await getImageData() {
                 await MainActor.run {
                     previewImageData = data
                 }
             }
-            // 移除 else 分支 - 服务层返回 nil 则不显示预览
-        }
 
-        hoverTimer = Timer.scheduledTimer(withTimeInterval: previewDelay, repeats: false) { _ in
-            DispatchQueue.main.async {
+            // 等待预览延迟时间
+            let delayNanos = UInt64(previewDelay * 1_000_000_000)
+            try? await Task.sleep(nanoseconds: delayNanos)
+            guard !Task.isCancelled else { return }
+
+            // 显示预览
+            await MainActor.run {
                 if self.isHovering && self.previewImageData != nil {
                     self.showPreview = true
                 }
@@ -359,31 +444,32 @@ struct HistoryItemView: View, Equatable {
         }
     }
 
-    private func cancelPreviewTimer() {
-        hoverTimer?.invalidate()
-        hoverTimer = nil
+    private func cancelPreviewTask() {
+        hoverPreviewTask?.cancel()
+        hoverPreviewTask = nil
     }
 
     // MARK: - Relative Time Formatting
 
-    private var relativeTime: String {
-        let now = Date()
-        let interval = now.timeIntervalSince(item.lastUsedAt)
+    private static let relativeFormatter: RelativeDateTimeFormatter = {
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .short
+        return formatter
+    }()
 
-        if interval < 60 {
-            return "刚刚"
-        } else if interval < 3600 {
-            let minutes = Int(interval / 60)
-            return "\(minutes)分钟前"
-        } else if interval < 86400 {
-            let hours = Int(interval / 3600)
-            return "\(hours)小时前"
-        } else if interval < 604800 {
-            let days = Int(interval / 86400)
-            return "\(days)天前"
-        } else {
-            return Self.dateFormatter.string(from: item.lastUsedAt)
+    private var relativeTime: String {
+        Self.relativeFormatter.localizedString(for: item.lastUsedAt, relativeTo: Date())
+    }
+
+    private func appName(for bundleID: String) -> String {
+        if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) {
+            return url.deletingPathExtension().lastPathComponent
         }
+        return bundleID
+    }
+
+    private func formatBytes(_ bytes: Int) -> String {
+        Localization.formatBytes(bytes)
     }
 }
 
@@ -408,7 +494,76 @@ struct LoadMoreTriggerView: View {
             }
             Spacer()
         }
-        .frame(height: 30)
-        .padding(.vertical, 5)
+        .frame(height: ScopySize.Height.loadMore)
+        .padding(.vertical, ScopySpacing.xs)
+    }
+}
+
+// MARK: - Section Header
+
+private struct SectionHeader: View {
+    let title: String
+    let count: Int
+    var performanceSummary: PerformanceSummary? = nil
+
+    var body: some View {
+        HStack {
+            Text("\(title) · \(count)")
+                .font(ScopyTypography.caption)
+                .fontWeight(.medium)
+                .foregroundStyle(ScopyColors.tertiaryText)
+                .monospacedDigit()
+            
+            if let summary = performanceSummary, title == "Recent" {
+                Spacer()
+                HStack(spacing: 8) {
+                    if summary.searchSamples > 0 {
+                        Text("Search: \(summary.formattedSearchAvg)")
+                    }
+                    if summary.loadSamples > 0 {
+                        Text("Load: \(summary.formattedLoadAvg)")
+                    }
+                }
+                .font(.system(size: 10, weight: .regular, design: .monospaced))
+                .foregroundStyle(ScopyColors.tertiaryText.opacity(0.8))
+            }
+            
+            Spacer()
+        }
+        .padding(.horizontal, ScopySpacing.md)
+        .padding(.top, ScopySpacing.md)
+        .padding(.bottom, ScopySpacing.xs)
+    }
+}
+
+// MARK: - Empty State
+
+private struct EmptyStateView: View {
+    let hasFilters: Bool
+    let openSettings: (() -> Void)?
+
+    var body: some View {
+        VStack(spacing: ScopySpacing.md) {
+            Image(systemName: hasFilters ? ScopyIcons.search : ScopyIcons.tray)
+                .font(.system(size: ScopySize.Icon.empty))
+                .foregroundStyle(ScopyColors.mutedText)
+            VStack(spacing: ScopySpacing.xs) {
+                Text(hasFilters ? "No results" : "No items yet")
+                    .font(ScopyTypography.title)
+                Text(hasFilters ? "Try clearing filters or adjust search" : "New copies will appear here")
+                    .font(ScopyTypography.caption)
+                    .foregroundStyle(ScopyColors.mutedText)
+            }
+            if !hasFilters, let openSettings {
+                Button {
+                    openSettings()
+                } label: {
+                    Label("Open Settings", systemImage: ScopyIcons.settings)
+                }
+                .buttonStyle(.bordered)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(ScopySpacing.xl)
     }
 }
