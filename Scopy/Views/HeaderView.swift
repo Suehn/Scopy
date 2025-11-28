@@ -52,10 +52,10 @@ struct HeaderView: View {
         }
         .padding(ScopySpacing.md)
         .background(ScopyColors.cardBackground)
-        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: ScopySize.Corner.xl, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .stroke(ScopyColors.border.opacity(0.5), lineWidth: 0.5)
+            RoundedRectangle(cornerRadius: ScopySize.Corner.xl, style: .continuous)
+                .stroke(ScopyColors.border.opacity(ScopySize.Opacity.medium), lineWidth: ScopySize.Stroke.thin)
         )
     }
 }

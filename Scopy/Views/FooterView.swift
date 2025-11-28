@@ -19,7 +19,7 @@ struct FooterView: View {
         VStack(spacing: 0) {
             // Subtle top separator
             Divider()
-                .background(ScopyColors.separator.opacity(0.3))
+                .background(ScopyColors.separator.opacity(ScopySize.Opacity.light))
 
             HStack(spacing: ScopySpacing.md) {
                 // Status Info - clean text without container
@@ -97,12 +97,12 @@ struct FooterButton: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 2) {
+            HStack(spacing: ScopySpacing.xxs) {
                 Image(systemName: icon)
                     .font(.system(size: ScopySize.Icon.xs))
                 Text(shortcut)
                     .font(.system(size: ScopySize.Icon.pin, weight: .medium))
-                    .foregroundStyle(ScopyColors.tertiaryText.opacity(0.8))
+                    .foregroundStyle(ScopyColors.tertiaryText.opacity(ScopySize.Opacity.strong))
             }
             .padding(.horizontal, ScopySpacing.sm)
             .padding(.vertical, ScopySize.Width.pinIndicator)

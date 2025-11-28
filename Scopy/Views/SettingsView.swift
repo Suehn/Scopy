@@ -37,7 +37,7 @@ struct SettingsView: View {
                     Text("Loading settings...")
                         .foregroundStyle(.secondary)
                 }
-                .frame(width: 720, height: 520)
+                .frame(width: ScopySize.Window.settingsWidth, height: ScopySize.Window.settingsHeight)
             }
         }
         .onAppear {
@@ -52,11 +52,11 @@ struct SettingsView: View {
             NavigationSplitView {
                 List(SettingsPage.allCases, selection: $selection) { page in
                     Label(page.title, systemImage: page.icon)
-                        .font(.system(size: 13, weight: .medium))
+                        .font(ScopyTypography.sidebarLabel)
                         .tag(page)
                 }
                 .listStyle(.sidebar)
-                .frame(minWidth: 220)
+                .frame(minWidth: ScopySize.Width.sidebarMin)
             } detail: {
                 Group {
                     switch selection ?? .general {
@@ -83,7 +83,7 @@ struct SettingsView: View {
                 .padding(.vertical, ScopySpacing.md)
             }
             .navigationSplitViewColumnWidth(240)
-            .frame(minWidth: 720, minHeight: 520)
+            .frame(minWidth: ScopySize.Window.settingsWidth, minHeight: ScopySize.Window.settingsHeight)
 
             // Bottom action bar
             HStack {
@@ -106,11 +106,11 @@ struct SettingsView: View {
                 .keyboardShortcut(.defaultAction)
                 .disabled(isSaving)
             }
-            .padding(.horizontal, 20)
-            .padding(.vertical, 12)
+            .padding(.horizontal, ScopySpacing.xxl)
+            .padding(.vertical, ScopySpacing.lg)
             .background(ScopyColors.secondaryBackground)
         }
-        .frame(minWidth: 720, minHeight: 520)
+        .frame(minWidth: ScopySize.Window.settingsWidth, minHeight: ScopySize.Window.settingsHeight)
     }
 
     private func refreshStats() {
@@ -287,7 +287,7 @@ struct AppearanceSettingsPage: View {
                             Text("60 px").tag(60)
                         }
                         .pickerStyle(.menu)
-                        .frame(width: 120)
+                        .frame(width: ScopySize.Width.pickerMenu)
                     }
 
                     HStack {
@@ -300,7 +300,7 @@ struct AppearanceSettingsPage: View {
                             Text("2.0 sec").tag(2.0)
                         }
                         .pickerStyle(.menu)
-                        .frame(width: 120)
+                        .frame(width: ScopySize.Width.pickerMenu)
                     }
                 }
             } footer: {
@@ -418,7 +418,7 @@ struct StorageSettingsTab: View {
                     Spacer()
                     Text(storageStats?.databasePath ?? "~/Library/Application Support/Scopy/")
                         .foregroundStyle(.secondary)
-                        .font(.system(size: 11))
+                        .font(ScopyTypography.pathLabel)
                         .lineLimit(1)
                         .truncationMode(.middle)
                 }
@@ -455,11 +455,11 @@ struct AboutSettingsPage: View {
     @State private var autoRefreshTimer: Timer?
 
     var body: some View {
-        VStack(spacing: 16) {
+        VStack(spacing: ScopySpacing.xl) {
             // App Icon and Version
-            VStack(spacing: 6) {
+            VStack(spacing: ScopySpacing.sm) {
                 Image(systemName: "doc.on.clipboard.fill")
-                    .font(.system(size: 48))
+                    .font(.system(size: ScopySize.Icon.appLogo))
                     .foregroundStyle(.blue)
 
                 Text("Scopy")
@@ -470,14 +470,14 @@ struct AboutSettingsPage: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
-            .padding(.top, 12)
+            .padding(.top, ScopySpacing.lg)
 
             Divider()
-                .padding(.horizontal, 32)
+                .padding(.horizontal, ScopySpacing.xxxl)
 
             // Features - 紧凑两列布局
             GroupBox {
-                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 6) {
+                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: ScopySpacing.sm) {
                     FeatureRow(icon: "infinity", text: "Unlimited history")
                     FeatureRow(icon: "magnifyingglass", text: "FTS5 search")
                     FeatureRow(icon: "externaldrive", text: "Tiered storage")
@@ -490,16 +490,16 @@ struct AboutSettingsPage: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
-            .padding(.horizontal, 20)
+            .padding(.horizontal, ScopySpacing.xxl)
 
             // Performance - GroupBox 样式
             GroupBox {
-                VStack(alignment: .leading, spacing: 8) {
+                VStack(alignment: .leading, spacing: ScopySpacing.md) {
                     // Search
                     HStack(alignment: .firstTextBaseline) {
                         Text("Search")
                             .font(.caption)
-                            .frame(width: 50, alignment: .leading)
+                            .frame(width: ScopySize.Width.statLabel, alignment: .leading)
                         Spacer()
                         if let summary = performanceSummary, summary.searchSamples > 0 {
                             Text("\(formatMs(summary.searchP95)) P95 / \(formatMs(summary.searchAvg)) avg (\(summary.searchSamples) samples)")
@@ -515,7 +515,7 @@ struct AboutSettingsPage: View {
                     HStack(alignment: .firstTextBaseline) {
                         Text("Load")
                             .font(.caption)
-                            .frame(width: 50, alignment: .leading)
+                            .frame(width: ScopySize.Width.statLabel, alignment: .leading)
                         Spacer()
                         if let summary = performanceSummary, summary.loadSamples > 0 {
                             Text("\(formatMs(summary.loadP95)) P95 / \(formatMs(summary.loadAvg)) avg (\(summary.loadSamples) samples)")
@@ -531,7 +531,7 @@ struct AboutSettingsPage: View {
                     HStack(alignment: .firstTextBaseline) {
                         Text("Memory")
                             .font(.caption)
-                            .frame(width: 50, alignment: .leading)
+                            .frame(width: ScopySize.Width.statLabel, alignment: .leading)
                         Spacer()
                         Text(String(format: "%.1f MB", memoryUsageMB))
                             .font(.caption.monospacedDigit())
@@ -552,18 +552,18 @@ struct AboutSettingsPage: View {
                     .foregroundStyle(.blue)
                 }
             }
-            .padding(.horizontal, 20)
+            .padding(.horizontal, ScopySpacing.xxl)
 
             Spacer()
 
             // Links
-            HStack(spacing: 16) {
+            HStack(spacing: ScopySpacing.xl) {
                 Link("GitHub", destination: URL(string: "https://github.com")!)
                 Link("Report Issue", destination: URL(string: "https://github.com")!)
             }
             .font(.caption)
             .foregroundStyle(.blue)
-            .padding(.bottom, 8)
+            .padding(.bottom, ScopySpacing.md)
         }
         .onAppear {
             refreshPerformance()
@@ -620,9 +620,9 @@ struct FeatureRow: View {
     let text: String
 
     var body: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: ScopySpacing.xl - ScopySpacing.sm) {
             Image(systemName: icon)
-                .frame(width: 20)
+                .frame(width: ScopySize.Icon.md)
                 .foregroundStyle(.blue)
             Text(text)
                 .font(.subheadline)
@@ -772,15 +772,15 @@ struct HotKeyRecorderView: View {
                     .foregroundStyle(.blue)
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 6)
+        .padding(.horizontal, ScopySpacing.lg)
+        .padding(.vertical, ScopySpacing.sm)
         .background(
-            RoundedRectangle(cornerRadius: 6)
-                .fill(recorder.isRecording ? Color.blue.opacity(0.1) : Color.gray.opacity(0.1))
+            RoundedRectangle(cornerRadius: ScopySize.Corner.md)
+                .fill(recorder.isRecording ? Color.blue.opacity(ScopySize.Opacity.subtle) : Color.gray.opacity(ScopySize.Opacity.subtle))
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 6)
-                .stroke(recorder.isRecording ? Color.blue : Color.gray.opacity(0.3), lineWidth: 1)
+            RoundedRectangle(cornerRadius: ScopySize.Corner.md)
+                .stroke(recorder.isRecording ? Color.blue : Color.gray.opacity(ScopySize.Opacity.light), lineWidth: ScopySize.Stroke.normal)
         )
         .contentShape(Rectangle())
         .onTapGesture {

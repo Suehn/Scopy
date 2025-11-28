@@ -63,7 +63,7 @@ class FloatingPanel: NSPanel, NSWindowDelegate {
 
             var origin = NSPoint(
                 x: screenRect.midX - frame.width / 2,
-                y: screenRect.minY - frame.height - 4
+                y: screenRect.minY - frame.height - ScopySpacing.xs
             )
 
             // 确保不超出屏幕边界

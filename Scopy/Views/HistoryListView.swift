@@ -307,7 +307,7 @@ struct HistoryItemView: View, Equatable {
         // v0.10.3: 键盘选中时添加边框
         .overlay(
             RoundedRectangle(cornerRadius: ScopySize.Corner.lg, style: .continuous)
-                .stroke(isKeyboardSelected ? ScopyColors.selectionBorder : Color.clear, lineWidth: 1.5)
+                .stroke(isKeyboardSelected ? ScopyColors.selectionBorder : Color.clear, lineWidth: ScopySize.Stroke.medium)
         )
         // v0.10.3: 添加选中/悬停态过渡动效
         .animation(.easeInOut(duration: 0.15), value: isHovering)
@@ -374,14 +374,14 @@ struct HistoryItemView: View, Equatable {
                 .resizable()
                 .aspectRatio(contentMode: .fit)
                 .frame(height: thumbnailHeight)
-                .clipShape(RoundedRectangle(cornerRadius: 4))
-                .padding(.leading, 4)
-                .padding(.vertical, 4)
+                .clipShape(RoundedRectangle(cornerRadius: ScopySize.Corner.sm))
+                .padding(.leading, ScopySpacing.xs)
+                .padding(.vertical, ScopySpacing.xs)
         } else {
             Image(systemName: "photo")
                 .frame(width: thumbnailHeight, height: thumbnailHeight)
-                .padding(.leading, 4)
-                .padding(.vertical, 4)
+                .padding(.leading, ScopySpacing.xs)
+                .padding(.vertical, ScopySpacing.xs)
                 .foregroundStyle(.green)
         }
     }
@@ -392,13 +392,13 @@ struct HistoryItemView: View, Equatable {
     private var imagePreviewView: some View {
         if let imageData = previewImageData,
            let nsImage = NSImage(data: imageData) {
-            let maxWidth: CGFloat = 500
+            let maxWidth: CGFloat = ScopySize.Width.previewMax
             let originalWidth = nsImage.size.width
             let originalHeight = nsImage.size.height
 
             if originalWidth <= maxWidth {
                 Image(nsImage: nsImage)
-                    .padding(8)
+                    .padding(ScopySpacing.md)
             } else {
                 let aspectRatio = originalWidth / originalHeight
                 let displayWidth = maxWidth
@@ -408,7 +408,7 @@ struct HistoryItemView: View, Equatable {
                     .resizable()
                     .aspectRatio(contentMode: .fit)
                     .frame(width: displayWidth, height: displayHeight)
-                    .padding(8)
+                    .padding(ScopySpacing.md)
             }
         } else {
             ProgressView()
@@ -516,7 +516,7 @@ private struct SectionHeader: View {
             
             if let summary = performanceSummary, title == "Recent" {
                 Spacer()
-                HStack(spacing: 8) {
+                HStack(spacing: ScopySpacing.md) {
                     if summary.searchSamples > 0 {
                         Text("Search: \(summary.formattedSearchAvg)")
                     }
@@ -524,8 +524,8 @@ private struct SectionHeader: View {
                         Text("Load: \(summary.formattedLoadAvg)")
                     }
                 }
-                .font(.system(size: 10, weight: .regular, design: .monospaced))
-                .foregroundStyle(ScopyColors.tertiaryText.opacity(0.8))
+                .font(.system(size: ScopyTypography.Size.micro, weight: .regular, design: .monospaced))
+                .foregroundStyle(ScopyColors.tertiaryText.opacity(ScopySize.Opacity.strong))
             }
             
             Spacer()
