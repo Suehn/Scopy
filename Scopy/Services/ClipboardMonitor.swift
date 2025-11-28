@@ -46,7 +46,11 @@ final class ClipboardMonitor {
     private var timer: Timer?
     private var lastChangeCount: Int = 0
     private var isMonitoring = false
-    private var processingTask: Task<Void, Never>?
+
+    /// v0.10.8: 使用任务队列替代单任务，支持快速连续复制大文件
+    private var processingQueue: [Task<Void, Never>] = []
+    private let maxConcurrentTasks = 3
+    private let queueLock = NSLock()
 
     private let eventContinuation: AsyncStream<ClipboardContent>.Continuation
     let contentStream: AsyncStream<ClipboardContent>
@@ -76,8 +80,11 @@ final class ClipboardMonitor {
         // Direct cleanup in deinit (synchronous)
         timer?.invalidate()
         timer = nil
-        processingTask?.cancel()
-        processingTask = nil
+        // v0.10.8: 取消所有处理任务
+        queueLock.lock()
+        processingQueue.forEach { $0.cancel() }
+        processingQueue.removeAll()
+        queueLock.unlock()
         isMonitoring = false
     }
 
@@ -103,8 +110,11 @@ final class ClipboardMonitor {
     func stopMonitoring() {
         timer?.invalidate()
         timer = nil
-        processingTask?.cancel()
-        processingTask = nil
+        // v0.10.8: 取消所有处理任务
+        queueLock.lock()
+        processingQueue.forEach { $0.cancel() }
+        processingQueue.removeAll()
+        queueLock.unlock()
         isMonitoring = false
     }
 
@@ -232,11 +242,20 @@ final class ClipboardMonitor {
     }
 
     /// 异步处理大内容（在后台线程计算哈希）
+    /// v0.10.8: 使用任务队列替代单任务，支持快速连续复制大文件
     private func processLargeContentAsync(_ rawData: RawClipboardData) {
-        // 取消之前未完成的处理任务
-        processingTask?.cancel()
+        queueLock.lock()
 
-        processingTask = Task.detached(priority: .userInitiated) { [weak self] in
+        // 清理已完成的任务
+        processingQueue.removeAll { $0.isCancelled }
+
+        // 如果队列满，取消最旧的任务
+        while processingQueue.count >= maxConcurrentTasks {
+            processingQueue.first?.cancel()
+            processingQueue.removeFirst()
+        }
+
+        let task = Task.detached(priority: .userInitiated) { [weak self] in
             guard let self = self else { return }
 
             // 在后台线程计算哈希
@@ -261,6 +280,9 @@ final class ClipboardMonitor {
                 self.eventContinuation.yield(content)
             }
         }
+        processingQueue.append(task)
+
+        queueLock.unlock()
     }
 
     /// 在后台线程计算哈希
@@ -519,7 +541,7 @@ final class ClipboardMonitor {
         return "img:\(width)x\(height):\(cornerHash)"
     }
 
-    /// 提取四角像素哈希
+    /// v0.11: 提取四角像素哈希（使用 autoreleasepool 管理内存）
     /// 每个角取 4x4 像素块，共 64 像素，拼接成指纹
     nonisolated private static func extractCornerPixelsHash(from cgImage: CGImage, width: Int, height: Int) -> String {
         // 处理小图片：如果图片小于 8x8，直接用全图做简单哈希
@@ -527,102 +549,107 @@ final class ClipboardMonitor {
             return computeSmallImageHash(from: cgImage, width: width, height: height)
         }
 
-        // 正常图片：提取四角 4x4 像素块
-        let blockSize = 4
-        var pixelData: [UInt8] = []
+        // v0.11: 使用 autoreleasepool 管理 CGContext 内存，避免大图片导致内存峰值
+        return autoreleasepool {
+            // 正常图片：提取四角 4x4 像素块
+            let blockSize = 4
+            var pixelData: [UInt8] = []
 
-        // 创建位图上下文来读取像素
-        let colorSpace = CGColorSpaceCreateDeviceRGB()
-        let bytesPerPixel = 4
-        let bytesPerRow = bytesPerPixel * width
-        let bitsPerComponent = 8
+            // 创建位图上下文来读取像素
+            let colorSpace = CGColorSpaceCreateDeviceRGB()
+            let bytesPerPixel = 4
+            let bytesPerRow = bytesPerPixel * width
+            let bitsPerComponent = 8
 
-        guard let context = CGContext(
-            data: nil,
-            width: width,
-            height: height,
-            bitsPerComponent: bitsPerComponent,
-            bytesPerRow: bytesPerRow,
-            space: colorSpace,
-            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-        ) else {
-            // 降级：返回简单的尺寸哈希
-            return "\(width)\(height)"
-        }
+            guard let context = CGContext(
+                data: nil,
+                width: width,
+                height: height,
+                bitsPerComponent: bitsPerComponent,
+                bytesPerRow: bytesPerRow,
+                space: colorSpace,
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+            ) else {
+                // 降级：返回简单的尺寸哈希
+                return "\(width)\(height)"
+            }
 
-        context.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
+            context.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
 
-        guard let data = context.data else {
-            return "\(width)\(height)"
-        }
+            guard let data = context.data else {
+                return "\(width)\(height)"
+            }
 
-        let buffer = data.bindMemory(to: UInt8.self, capacity: width * height * bytesPerPixel)
+            let buffer = data.bindMemory(to: UInt8.self, capacity: width * height * bytesPerPixel)
 
-        // 四个角落的起始坐标
-        let corners: [(x: Int, y: Int)] = [
-            (0, 0),                           // 左上
-            (width - blockSize, 0),           // 右上
-            (0, height - blockSize),          // 左下
-            (width - blockSize, height - blockSize) // 右下
-        ]
+            // 四个角落的起始坐标
+            let corners: [(x: Int, y: Int)] = [
+                (0, 0),                           // 左上
+                (width - blockSize, 0),           // 右上
+                (0, height - blockSize),          // 左下
+                (width - blockSize, height - blockSize) // 右下
+            ]
 
-        // 从每个角提取 4x4 像素块的 RGB 值
-        for corner in corners {
-            for dy in 0..<blockSize {
-                for dx in 0..<blockSize {
-                    let x = corner.x + dx
-                    let y = corner.y + dy
-                    let offset = (y * width + x) * bytesPerPixel
-                    // 只取 RGB，忽略 Alpha
-                    pixelData.append(buffer[offset])     // R
-                    pixelData.append(buffer[offset + 1]) // G
-                    pixelData.append(buffer[offset + 2]) // B
+            // 从每个角提取 4x4 像素块的 RGB 值
+            for corner in corners {
+                for dy in 0..<blockSize {
+                    for dx in 0..<blockSize {
+                        let x = corner.x + dx
+                        let y = corner.y + dy
+                        let offset = (y * width + x) * bytesPerPixel
+                        // 只取 RGB，忽略 Alpha
+                        pixelData.append(buffer[offset])     // R
+                        pixelData.append(buffer[offset + 1]) // G
+                        pixelData.append(buffer[offset + 2]) // B
+                    }
                 }
             }
-        }
 
-        // 将像素数据转为十六进制字符串 (64 像素 * 3 通道 = 192 字节)
-        // 为了更短，我们做一个简单的哈希压缩
-        return compressPixelData(pixelData)
+            // 将像素数据转为十六进制字符串 (64 像素 * 3 通道 = 192 字节)
+            // 为了更短，我们做一个简单的哈希压缩
+            return compressPixelData(pixelData)
+        }
     }
 
-    /// 处理小于 8x8 的图片
+    /// v0.11: 处理小于 8x8 的图片（使用 autoreleasepool 管理内存）
     nonisolated private static func computeSmallImageHash(from cgImage: CGImage, width: Int, height: Int) -> String {
-        let colorSpace = CGColorSpaceCreateDeviceRGB()
-        let bytesPerPixel = 4
-        let bytesPerRow = bytesPerPixel * width
-        let bitsPerComponent = 8
+        return autoreleasepool {
+            let colorSpace = CGColorSpaceCreateDeviceRGB()
+            let bytesPerPixel = 4
+            let bytesPerRow = bytesPerPixel * width
+            let bitsPerComponent = 8
 
-        guard let context = CGContext(
-            data: nil,
-            width: width,
-            height: height,
-            bitsPerComponent: bitsPerComponent,
-            bytesPerRow: bytesPerRow,
-            space: colorSpace,
-            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-        ) else {
-            return "small"
+            guard let context = CGContext(
+                data: nil,
+                width: width,
+                height: height,
+                bitsPerComponent: bitsPerComponent,
+                bytesPerRow: bytesPerRow,
+                space: colorSpace,
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+            ) else {
+                return "small"
+            }
+
+            context.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
+
+            guard let data = context.data else {
+                return "small"
+            }
+
+            let buffer = data.bindMemory(to: UInt8.self, capacity: width * height * bytesPerPixel)
+            var pixelData: [UInt8] = []
+
+            // 读取所有像素
+            for i in 0..<(width * height) {
+                let offset = i * bytesPerPixel
+                pixelData.append(buffer[offset])
+                pixelData.append(buffer[offset + 1])
+                pixelData.append(buffer[offset + 2])
+            }
+
+            return compressPixelData(pixelData)
         }
-
-        context.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
-
-        guard let data = context.data else {
-            return "small"
-        }
-
-        let buffer = data.bindMemory(to: UInt8.self, capacity: width * height * bytesPerPixel)
-        var pixelData: [UInt8] = []
-
-        // 读取所有像素
-        for i in 0..<(width * height) {
-            let offset = i * bytesPerPixel
-            pixelData.append(buffer[offset])
-            pixelData.append(buffer[offset + 1])
-            pixelData.append(buffer[offset + 2])
-        }
-
-        return compressPixelData(pixelData)
     }
 
     /// 压缩像素数据为短哈希（约32字符）
