@@ -614,9 +614,14 @@ final class StorageService {
     }
 
     /// v0.10.4: 修复无限循环风险，当没有可删除项目时立即退出
+    /// v0.10.7: 添加最大迭代次数限制，防止极端情况下的无限循环
     private func cleanupBySize(targetBytes: Int) throws {
+        var iterations = 0
+        let maxIterations = 100  // 防止无限循环
+
         // Delete oldest items until under target size
-        while try getTotalSize() > targetBytes {
+        while try getTotalSize() > targetBytes && iterations < maxIterations {
+            iterations += 1
             // Get the oldest non-pinned item
             let sql = """
                 SELECT id FROM clipboard_items
@@ -646,13 +651,22 @@ final class StorageService {
                 if try getTotalSize() <= targetBytes { break }
             }
         }
+
+        if iterations >= maxIterations {
+            print("⚠️ cleanupBySize: 达到最大迭代次数 \(maxIterations)")
+        }
     }
 
     /// 清理外部存储（大内容）- v0.9
     /// v0.10.4: 添加注释说明无限循环防护
+    /// v0.10.7: 添加最大迭代次数限制
     private func cleanupExternalStorage(targetBytes: Int) throws {
+        var iterations = 0
+        let maxIterations = 100  // 防止无限循环
+
         // 获取有外部存储的最旧非置顶项目
-        while try getExternalStorageSize() > targetBytes {
+        while try getExternalStorageSize() > targetBytes && iterations < maxIterations {
+            iterations += 1
             let sql = """
                 SELECT id FROM clipboard_items
                 WHERE is_pinned = 0 AND storage_ref IS NOT NULL
@@ -681,6 +695,10 @@ final class StorageService {
                 if try getExternalStorageSize() <= targetBytes { break }
             }
         }
+
+        if iterations >= maxIterations {
+            print("⚠️ cleanupExternalStorage: 达到最大迭代次数 \(maxIterations)")
+        }
     }
 
     // MARK: - External Storage
@@ -705,7 +723,29 @@ final class StorageService {
         }
     }
 
+    /// v0.10.7: 验证存储引用是否为有效的 UUID 文件名（防止路径遍历攻击）
+    private func validateStorageRef(_ ref: String) -> Bool {
+        // 提取文件名（不含路径）
+        let filename = (ref as NSString).lastPathComponent
+
+        // 移除扩展名
+        let nameWithoutExt = (filename as NSString).deletingPathExtension
+
+        // 必须是有效的 UUID 格式
+        guard UUID(uuidString: nameWithoutExt) != nil else {
+            return false
+        }
+
+        // 不能包含路径遍历字符
+        return !ref.contains("..") && !filename.contains("/")
+    }
+
     func loadExternalData(path: String) throws -> Data {
+        // v0.10.7: 验证路径安全性
+        guard validateStorageRef(path) else {
+            throw StorageError.fileOperationFailed("Invalid storage reference: potential path traversal")
+        }
+
         do {
             return try Data(contentsOf: URL(fileURLWithPath: path))
         } catch {
