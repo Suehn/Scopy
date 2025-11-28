@@ -7,6 +7,63 @@
 
 ---
 
+## [v0.10.7] - 2025-11-28
+
+### 修复
+- **HotKeyService 竞态条件** - 添加 NSLock 保护静态 handlers 字典
+  - 主线程 + Carbon 事件线程并发访问，7 处访问点全部加锁
+- **SearchService 缓存刷新竞态** - 添加 NSLock + double-check pattern
+  - 防止并发刷新导致数据损坏
+- **ClipboardMonitor 任务取消检查** - MainActor.run 内再次检查取消状态
+  - 防止向已关闭的流发送数据
+- **ClipboardMonitor Timer 线程** - 添加主线程断言
+  - 确保 Timer 在主线程调用，否则不会触发
+- **StorageService 清理无限循环** - 添加 maxIterations=100 限制
+  - 防止所有项被 pin 时循环永不退出
+- **StorageService 路径遍历漏洞** - 添加 validateStorageRef 验证
+  - 验证 UUID 格式，防止 `../` 路径遍历攻击
+- **RealClipboardService 事件流生命周期** - 添加 isEventStreamFinished 标志
+  - 防止向已关闭的 continuation 发送数据
+- **RealClipboardService Settings 持久化** - 先写 UserDefaults，后更新内存
+  - 防止崩溃时设置丢失
+
+### 测试
+- 单元测试: **145/145 passed** (1 skipped)
+- P0 问题修复: **9/9**
+
+---
+
+## [v0.10.6] - 2025-11-28
+
+### 重构
+- **ScopySpacing** - 基于 unit 计算，与 ScopySize 保持一致
+  - 新增 `xxs` (2pt)、`xxxl` (32pt)
+  - 所有间距都是 `unit * N`
+- **ScopyTypography** - 基于 unit 计算
+  - 新增 `Size` 枚举（micro/caption/body/title/search）
+  - 新增 `sidebarLabel`、`pathLabel` 字体
+
+### 新增
+- **ScopySize.Stroke** - 边框宽度（thin/normal/medium/thick）
+- **ScopySize.Opacity** - 透明度（subtle/light/medium/strong）
+- **ScopySize.Width** - 扩展（sidebarMin/pickerMenu/previewMax）
+- **ScopySize.Icon** - 扩展（appLogo 48pt）
+
+### 改进
+- **SettingsView** - 20+ 处硬编码值替换为设计系统常量
+- **HistoryListView** - 10 处硬编码值替换
+- **ScopyComponents** - 6 处硬编码值替换
+- **HeaderView** - 3 处硬编码值替换
+- **FooterView** - 3 处硬编码值替换
+- **AppDelegate** - 窗口尺寸使用 ScopySize.Window
+- **FloatingPanel** - 间距使用 ScopySpacing
+
+### 测试
+- 单元测试: **145/145 passed** (1 skipped)
+- 设计系统覆盖率: **71% → 100%**
+
+---
+
 ## [v0.10.5] - 2025-11-28
 
 ### 新增
