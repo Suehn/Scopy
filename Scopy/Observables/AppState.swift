@@ -64,12 +64,18 @@ final class AppState {
 
     // 滚动状态 (v0.9.3 - 快速滚动时禁用悬停高亮)
     var isScrolling: Bool = false
-    private var scrollEndTimer: Timer?
+    private var scrollEndTask: Task<Void, Never>?
+
+    // 搜索版本号 - 用于防止旧搜索覆盖新结果 (v0.10.4)
+    private var searchVersion: Int = 0
 
     // 分页状态
     var canLoadMore: Bool = false
     var loadedCount: Int = 0
     var totalCount: Int = 0
+
+    // 性能统计
+    var performanceSummary: PerformanceSummary?
 
     // 存储统计
     var storageStats: (itemCount: Int, sizeBytes: Int) = (0, 0)
@@ -93,6 +99,7 @@ final class AppState {
     // 事件监听任务
     private var eventTask: Task<Void, Never>?
     private var searchTask: Task<Void, Never>?
+    private var loadMoreTask: Task<Void, Never>?
 
     // 配置：是否使用真实服务
     private static let useMockService: Bool = {
@@ -169,6 +176,7 @@ final class AppState {
     func loadSettings() async {
         do {
             settings = try await service.getSettings()
+            searchMode = settings.defaultSearchMode
         } catch {
             print("Failed to load settings: \(error)")
         }
@@ -193,14 +201,14 @@ final class AppState {
     }
 
     /// 监听剪贴板事件
+    /// v0.10.4: 移除嵌套 Task，直接在 MainActor 上下文执行
     func startEventListener() {
         eventTask = Task { [weak self] in
             guard let self = self else { return }
             for await event in self.service.eventStream {
-                // 使用 Task.detached 避免阻塞主循环
-                Task { @MainActor in
-                    await self.handleEvent(event)
-                }
+                guard !Task.isCancelled else { break }
+                // 直接调用，因为 AppState 已经是 @MainActor
+                await self.handleEvent(event)
             }
         }
     }
@@ -261,6 +269,7 @@ final class AppState {
             // 记录首屏加载性能
             let elapsedMs = (CFAbsoluteTimeGetCurrent() - startTime) * 1000
             await PerformanceMetrics.shared.recordLoadLatency(elapsedMs)
+            performanceSummary = await PerformanceMetrics.shared.getSummary()
         } catch {
             print("Failed to load items: \(error)")
         }
@@ -268,48 +277,67 @@ final class AppState {
 
     /// 加载更多（懒加载）- 符合 v0.md 的分页设计
     /// 滚动事件处理 - 快速滚动时禁用悬停高亮
+    /// v0.10.4: 使用 Task 替代 Timer，自动取消防止泄漏
     func onScroll() {
         isScrolling = true
-        scrollEndTimer?.invalidate()
-        scrollEndTimer = Timer.scheduledTimer(withTimeInterval: 0.15, repeats: false) { [weak self] _ in
-            Task { @MainActor in
-                self?.isScrolling = false
-            }
+        scrollEndTask?.cancel()
+        scrollEndTask = Task {
+            try? await Task.sleep(nanoseconds: 150_000_000) // 150ms
+            guard !Task.isCancelled else { return }
+            isScrolling = false
         }
     }
 
+    /// v0.10.4: 改进任务取消检查，确保状态变更前验证
     func loadMore() async {
-        guard canLoadMore, !isLoading else { return }
-        isLoading = true
-        defer { isLoading = false }
+        // 取消之前的 loadMore 任务，防止快速滚动时重复加载
+        loadMoreTask?.cancel()
 
-        do {
-            if hasActiveFilters {
-                let request = SearchRequest(
-                    query: searchQuery,
-                    mode: searchMode,
-                    appFilter: appFilter,
-                    typeFilter: typeFilter,
-                    limit: 50,
-                    offset: loadedCount
-                )
-                let result = try await service.search(query: request)
-                items.append(contentsOf: result.items)
-                loadedCount = items.count
-                totalCount = result.total
-                canLoadMore = result.hasMore
-            } else {
-                let moreItems = try await service.fetchRecent(limit: 100, offset: loadedCount)
-                items.append(contentsOf: moreItems)
-                loadedCount = items.count
-                canLoadMore = loadedCount < totalCount
+        loadMoreTask = Task {
+            // 先检查取消状态
+            guard !Task.isCancelled else { return }
+            guard canLoadMore, !isLoading else { return }
+
+            isLoading = true
+            defer { isLoading = false }
+
+            do {
+                if hasActiveFilters {
+                    let request = SearchRequest(
+                        query: searchQuery,
+                        mode: searchMode,
+                        appFilter: appFilter,
+                        typeFilter: typeFilter,
+                        limit: 50,
+                        offset: loadedCount
+                    )
+                    let result = try await service.search(query: request)
+                    // 在状态变更前再次检查取消状态
+                    guard !Task.isCancelled else { return }
+                    items.append(contentsOf: result.items)
+                    loadedCount = items.count
+                    totalCount = result.total
+                    canLoadMore = result.hasMore
+                } else {
+                    let moreItems = try await service.fetchRecent(limit: 100, offset: loadedCount)
+                    // 在状态变更前再次检查取消状态
+                    guard !Task.isCancelled else { return }
+                    items.append(contentsOf: moreItems)
+                    loadedCount = items.count
+                    canLoadMore = loadedCount < totalCount
+                }
+            } catch {
+                if !Task.isCancelled {
+                    print("Failed to load more: \(error)")
+                }
             }
-        } catch {
-            print("Failed to load more: \(error)")
         }
+
+        await loadMoreTask?.value
     }
 
     /// 搜索（带防抖）- 符合 v0.md 的 150-200ms 防抖设计
+    /// v0.10.4: 添加搜索版本号，防止旧搜索覆盖新结果
     func search() {
         searchTask?.cancel()
 
@@ -319,10 +347,16 @@ final class AppState {
             return
         }
 
+        // 递增搜索版本号
+        searchVersion += 1
+        let currentVersion = searchVersion
+
         searchTask = Task {
             // 防抖 150ms
             try? await Task.sleep(nanoseconds: 150_000_000)
             guard !Task.isCancelled else { return }
+            // 检查版本号，确保不是过期的搜索
+            guard currentVersion == searchVersion else { return }
 
             isLoading = true
             defer { isLoading = false }
@@ -339,6 +373,11 @@ final class AppState {
                     offset: 0
                 )
                 let result = try await service.search(query: request)
+
+                // 再次检查版本号和取消状态，确保状态更新的原子性
+                guard !Task.isCancelled, currentVersion == searchVersion else { return }
+
+                // 原子更新所有状态
                 items = result.items
                 totalCount = result.total
                 loadedCount = result.items.count
@@ -347,6 +386,7 @@ final class AppState {
                 // 记录搜索性能
                 let elapsedMs = (CFAbsoluteTimeGetCurrent() - startTime) * 1000
                 await PerformanceMetrics.shared.recordSearchLatency(elapsedMs)
+                performanceSummary = await PerformanceMetrics.shared.getSummary()
             } catch {
                 print("Search failed: \(error)")
             }

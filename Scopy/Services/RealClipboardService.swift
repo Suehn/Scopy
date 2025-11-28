@@ -74,10 +74,13 @@ final class RealClipboardService: ClipboardServiceProtocol {
         }
     }
 
+    /// v0.10.4: 显式关闭事件流，防止泄漏
     func stop() {
         monitorTask?.cancel()
         monitorTask = nil
         monitor.stopMonitoring()
+        // 显式关闭事件流 continuation
+        eventContinuation?.finish()
         storage.close()
     }
 

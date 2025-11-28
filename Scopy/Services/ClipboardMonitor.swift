@@ -83,6 +83,7 @@ final class ClipboardMonitor {
 
     // MARK: - Public API
 
+    /// v0.10.4: 移除重复的 RunLoop.add 调用
     func startMonitoring() {
         guard !isMonitoring else { return }
         isMonitoring = true
@@ -93,7 +94,7 @@ final class ClipboardMonitor {
                 self?.checkClipboard()
             }
         }
-        RunLoop.current.add(timer!, forMode: .common)
+        // Timer.scheduledTimer 已自动添加到 RunLoop.current，无需再次添加
     }
 
     func stopMonitoring() {
@@ -204,31 +205,27 @@ final class ClipboardMonitor {
             return
         }
 
-        // 根据内容类型和大小决定处理方式
+        // v0.10.4: 根据内容类型和大小决定处理方式
         // 1. 图片一律走后台 SHA256，避免轻指纹误判
-        // 2. 小内容在主线程同步处理
-        // 3. 大内容（非图片）异步处理
-        if rawData.type == .image {
+        // 2. 所有大内容（包括非图片）都异步处理，避免主线程阻塞
+        // 3. 只有小内容在主线程同步处理
+        if rawData.type == .image || rawData.sizeBytes >= Self.largeContentThreshold {
+            // 图片或大内容：异步处理
             processLargeContentAsync(rawData)
             return
         }
 
-        if rawData.precomputedHash != nil || rawData.sizeBytes < Self.largeContentThreshold {
-            // 有预计算指纹或小内容：同步处理
-            let hash = computeHash(rawData)
-            let content = ClipboardContent(
-                type: rawData.type,
-                plainText: rawData.plainText,
-                rawData: rawData.rawData,
-                appBundleID: rawData.appBundleID,
-                contentHash: hash,
-                sizeBytes: rawData.sizeBytes
-            )
-            eventContinuation.yield(content)
-        } else {
-            // 大内容（无预计算指纹）：异步处理哈希计算
-            processLargeContentAsync(rawData)
-        }
+        // 小内容（非图片）：同步处理
+        let hash = computeHash(rawData)
+        let content = ClipboardContent(
+            type: rawData.type,
+            plainText: rawData.plainText,
+            rawData: rawData.rawData,
+            appBundleID: rawData.appBundleID,
+            contentHash: hash,
+            sizeBytes: rawData.sizeBytes
+        )
+        eventContinuation.yield(content)
     }
 
     /// 异步处理大内容（在后台线程计算哈希）

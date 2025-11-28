@@ -570,6 +570,7 @@ final class StorageService {
         try execute("PRAGMA incremental_vacuum(100)")
     }
 
+    /// v0.10.4: 检查 sqlite3_step 返回值
     private func cleanupByCount(target: Int) throws {
         // Delete oldest non-pinned items beyond limit
         let sql = """
@@ -588,9 +589,13 @@ final class StorageService {
         defer { sqlite3_finalize(stmt) }
 
         sqlite3_bind_int(stmt, 1, Int32(target))
-        sqlite3_step(stmt)
+        let result = sqlite3_step(stmt)
+        guard result == SQLITE_DONE || result == SQLITE_ROW else {
+            throw StorageError.deleteFailed(String(cString: sqlite3_errmsg(db)))
+        }
     }
 
+    /// v0.10.4: 检查 sqlite3_step 返回值
     private func cleanupByAge(maxDays: Int) throws {
         let cutoff = Date().addingTimeInterval(-Double(maxDays * 24 * 3600))
 
@@ -602,9 +607,13 @@ final class StorageService {
         defer { sqlite3_finalize(stmt) }
 
         sqlite3_bind_double(stmt, 1, cutoff.timeIntervalSince1970)
-        sqlite3_step(stmt)
+        let result = sqlite3_step(stmt)
+        guard result == SQLITE_DONE || result == SQLITE_ROW else {
+            throw StorageError.deleteFailed(String(cString: sqlite3_errmsg(db)))
+        }
     }
 
+    /// v0.10.4: 修复无限循环风险，当没有可删除项目时立即退出
     private func cleanupBySize(targetBytes: Int) throws {
         // Delete oldest items until under target size
         while try getTotalSize() > targetBytes {
@@ -629,6 +638,7 @@ final class StorageService {
             }
             sqlite3_finalize(stmt)
 
+            // 没有可删除的项目（全部被 pin），退出循环防止无限循环
             if idsToDelete.isEmpty { break }
 
             for id in idsToDelete {
@@ -639,6 +649,7 @@ final class StorageService {
     }
 
     /// 清理外部存储（大内容）- v0.9
+    /// v0.10.4: 添加注释说明无限循环防护
     private func cleanupExternalStorage(targetBytes: Int) throws {
         // 获取有外部存储的最旧非置顶项目
         while try getExternalStorageSize() > targetBytes {
@@ -662,6 +673,7 @@ final class StorageService {
             }
             sqlite3_finalize(stmt)
 
+            // 没有可删除的项目（全部被 pin 或无外部存储），退出循环防止无限循环
             if idsToDelete.isEmpty { break }
 
             for id in idsToDelete {
