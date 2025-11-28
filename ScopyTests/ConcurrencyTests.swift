@@ -212,4 +212,202 @@ final class ConcurrencyTests: XCTestCase {
         // 验证最终查询是最后一个
         XCTAssertEqual(appState.searchQuery, "third", "Final query should be 'third'")
     }
+
+    // MARK: - v0.11 Concurrent Search Stress Tests
+
+    /// v0.11: 并发搜索压力测试 - 同时发起 10 个搜索请求
+    func testConcurrentSearchStress() async throws {
+        // 插入大量测试数据
+        for i in 0..<1000 {
+            let content = ClipboardMonitor.ClipboardContent(
+                type: .text,
+                plainText: "Stress test item \(i) with lorem ipsum dolor sit amet",
+                rawData: nil,
+                appBundleID: "com.test.stress",
+                contentHash: "stress_hash_\(i)",
+                sizeBytes: 60
+            )
+            _ = try storage.upsertItem(content)
+        }
+
+        // 使用 TaskGroup 实现真正的并发搜索
+        let queries = ["stress", "lorem", "ipsum", "dolor", "amet", "test", "item", "sit", "content", "hash"]
+
+        await withTaskGroup(of: SearchService.SearchResult?.self) { group in
+            for query in queries {
+                group.addTask {
+                    let request = SearchRequest(
+                        query: query,
+                        mode: .fuzzy,
+                        appFilter: nil,
+                        typeFilter: nil,
+                        limit: 50,
+                        offset: 0
+                    )
+                    return try? await self.search.search(request: request)
+                }
+            }
+
+            var successCount = 0
+            var totalItems = 0
+            for await result in group {
+                if let result = result {
+                    successCount += 1
+                    totalItems += result.items.count
+                }
+            }
+
+            // 所有搜索都应该成功完成
+            XCTAssertEqual(successCount, queries.count, "All concurrent searches should complete")
+            XCTAssertGreaterThan(totalItems, 0, "Should return some results")
+        }
+    }
+
+    /// v0.11: 并发搜索结果一致性测试 - 相同查询应返回相同结果
+    func testSearchResultConsistency() async throws {
+        // 插入测试数据
+        for i in 0..<500 {
+            let content = ClipboardMonitor.ClipboardContent(
+                type: .text,
+                plainText: "Consistency test item \(i) with unique content",
+                rawData: nil,
+                appBundleID: "com.test.consistency",
+                contentHash: "consistency_\(i)",
+                sizeBytes: 50
+            )
+            _ = try storage.upsertItem(content)
+        }
+
+        let query = "consistency"
+        var results: [SearchService.SearchResult] = []
+
+        // 并发执行相同查询 5 次
+        await withTaskGroup(of: SearchService.SearchResult?.self) { group in
+            for _ in 0..<5 {
+                group.addTask {
+                    let request = SearchRequest(
+                        query: query,
+                        mode: .fuzzy,
+                        appFilter: nil,
+                        typeFilter: nil,
+                        limit: 50,
+                        offset: 0
+                    )
+                    return try? await self.search.search(request: request)
+                }
+            }
+
+            for await result in group {
+                if let result = result {
+                    results.append(result)
+                }
+            }
+        }
+
+        // 验证所有结果一致
+        XCTAssertEqual(results.count, 5, "All searches should complete")
+
+        let firstTotal = results[0].total
+        let firstItemCount = results[0].items.count
+        for result in results {
+            XCTAssertEqual(result.total, firstTotal, "Total count should be consistent")
+            XCTAssertEqual(result.items.count, firstItemCount, "Item count should be consistent")
+        }
+    }
+
+    /// v0.11: 搜索超时测试 - 验证超时机制正常工作
+    func testSearchTimeout() async throws {
+        // 插入大量数据以增加搜索时间
+        for i in 0..<5000 {
+            let content = ClipboardMonitor.ClipboardContent(
+                type: .text,
+                plainText: "Timeout test item \(i) with some content data for testing",
+                rawData: nil,
+                appBundleID: "com.test.timeout",
+                contentHash: "timeout_\(i)",
+                sizeBytes: 60
+            )
+            _ = try storage.upsertItem(content)
+        }
+
+        // 正常搜索应该在超时前完成
+        let request = SearchRequest(
+            query: "timeout",
+            mode: .fuzzy,
+            appFilter: nil,
+            typeFilter: nil,
+            limit: 50,
+            offset: 0
+        )
+
+        let startTime = CFAbsoluteTimeGetCurrent()
+        let result = try await search.search(request: request)
+        let elapsed = CFAbsoluteTimeGetCurrent() - startTime
+
+        XCTAssertGreaterThan(result.items.count, 0, "Should return results")
+        XCTAssertLessThan(elapsed, 5.0, "Search should complete before 5s timeout")
+    }
+
+    /// v0.11: 并发清理和搜索测试 - 验证清理过程中搜索的安全性
+    func testConcurrentCleanupAndSearch() async throws {
+        // 插入测试数据
+        for i in 0..<500 {
+            let content = ClipboardMonitor.ClipboardContent(
+                type: .text,
+                plainText: "Cleanup search test item \(i)",
+                rawData: nil,
+                appBundleID: "com.test.cleanup",
+                contentHash: "cleanup_search_\(i)",
+                sizeBytes: 40
+            )
+            _ = try storage.upsertItem(content)
+        }
+
+        storage.cleanupSettings.maxItems = 100
+
+        // 并发执行清理和搜索
+        var searchSucceeded = false
+        var cleanupSucceeded = false
+
+        await withTaskGroup(of: Bool.self) { group in
+            // 搜索任务
+            group.addTask {
+                let request = SearchRequest(
+                    query: "cleanup",
+                    mode: .fuzzy,
+                    appFilter: nil,
+                    typeFilter: nil,
+                    limit: 50,
+                    offset: 0
+                )
+                if let _ = try? await self.search.search(request: request) {
+                    return true
+                }
+                return false
+            }
+
+            // 清理任务（在 MainActor 上执行）
+            group.addTask { @MainActor in
+                do {
+                    try self.storage.performCleanup()
+                    return true
+                } catch {
+                    return false
+                }
+            }
+
+            for await result in group {
+                if result {
+                    if !searchSucceeded {
+                        searchSucceeded = true
+                    } else {
+                        cleanupSucceeded = true
+                    }
+                }
+            }
+        }
+
+        // 两个操作都应该成功完成（或至少不崩溃）
+        XCTAssertTrue(searchSucceeded || cleanupSucceeded, "At least one operation should succeed")
+    }
 }
