@@ -121,15 +121,18 @@ xcodebuild test -scheme ScopyUITests -destination 'platform=macOS'
 # 运行性能测试（默认包含重载场景）
 RUN_HEAVY_PERF_TESTS=1 xcodebuild test -scheme Scopy -destination 'platform=macOS' -only-testing:ScopyTests/PerformanceTests
 
-# 结果示例（2025-11-28）
-# Executed 19 tests, 0 failures, ~36s
+# 结果示例（2025-11-29 v0.11）
+# Executed 22 tests, 0 failures, ~66s
 # 关键输出片段：
-# 📊 Search Performance (5k items): P95 1.95ms
-# 📊 Search Performance (10k items): P95 16.21ms
-# 📊 Disk Search Performance (25k items): P95 55.00ms
-# 📊 Heavy Disk Search (50k items): P95 125.94ms
-# 📊 Ultra Disk Search (75k items): P95 195.77ms
-# 🧹 External cleanup elapsed: 653.84ms
+# 📊 Search Performance (5k items): P95 2.16ms
+# 📊 Search Performance (10k items): P95 17.28ms
+# 📊 Disk Search Performance (25k items): P95 53.09ms
+# 📊 Heavy Disk Search (50k items): P95 124.64ms
+# 📊 Ultra Disk Search (75k items): P95 198.42ms
+# 📊 Inline Cleanup Performance (10k items): P95 158.64ms
+# 📊 External Cleanup Performance (10k items): 514.50ms
+# 📊 Large Scale Cleanup Performance (50k items): 407.31ms
+# 🧹 External cleanup elapsed: 123.37ms (v0.11 优化后，原 653.84ms)
 ```
 
 ---
@@ -169,19 +172,19 @@ Scopy/
 ### 测试环境
 - **硬件**: MacBook Pro (Apple Silicon)
 - **系统**: macOS 14.x+
-- **测试日期**: 2025-11-28
-- **测试框架**: XCTest（性能用例 19 个，默认启用重载场景；设置 `RUN_HEAVY_PERF_TESTS=0` 可跳过）
+- **测试日期**: 2025-11-29 (v0.11)
+- **测试框架**: XCTest（性能用例 22 个，默认启用重载场景；设置 `RUN_HEAVY_PERF_TESTS=0` 可跳过）
 
 ### 搜索性能 (P95)
 
 | 数据量 / 场景 | 目标 | 实测 | 测试用例 | 状态 |
 |---------------|------|------|----------|------|
-| 5,000 items | < 50ms | **P95 1.95ms** | `testSearchPerformance5kItems` | ✅ |
-| 10,000 items | < 150ms | **P95 16.21ms** | `testSearchPerformance10kItems` | ✅ |
-| 25,000 items（磁盘/WAL） | < 200ms | **P95 55.00ms** | `testDiskBackedSearchPerformance25k` | ✅ |
-| 50,000 items（重载，磁盘） | < 200ms | **P95 125.94ms** | `testHeavyDiskSearchPerformance50k` | ✅ |
-| 75,000 items（极限，磁盘） | < 250ms | **P95 195.77ms** | `testUltraDiskSearchPerformance75k` | ✅ |
-| Regex 20k items | < 120ms | **P95 0.77ms** | `testRegexPerformance20kItems` | ✅ |
+| 5,000 items | < 50ms | **P95 2.16ms** | `testSearchPerformance5kItems` | ✅ |
+| 10,000 items | < 150ms | **P95 17.28ms** | `testSearchPerformance10kItems` | ✅ |
+| 25,000 items（磁盘/WAL） | < 200ms | **P95 53.09ms** | `testDiskBackedSearchPerformance25k` | ✅ |
+| 50,000 items（重载，磁盘） | < 200ms | **P95 124.64ms** | `testHeavyDiskSearchPerformance50k` | ✅ |
+| 75,000 items（极限，磁盘） | < 250ms | **P95 198.42ms** | `testUltraDiskSearchPerformance75k` | ✅ |
+| Regex 20k items | < 120ms | **P95 0.79ms** | `testRegexPerformance20kItems` | ✅ |
 
 ### 首屏与读取性能
 
@@ -202,10 +205,18 @@ Scopy/
 
 | 场景 | 目标 | 实测 | 测试用例 | 状态 |
 |------|------|------|----------|------|
-| 批量插入 (1000 items) | > 500/sec | **22.75ms（~43.9k/sec）** | `testBulkInsertPerformance` | ✅ |
-| 去重 (200 upserts) | 正确去重 | **3.73ms** | `testDeduplicationPerformance` | ✅ |
-| 清理 (900 items) | 快速完成 | **6.87ms** | `testCleanupPerformance` | ✅ |
-| 外部存储清理 (195MB→≤50MB) | < 800ms | **653.84ms** | `testExternalStorageStress` | ✅ |
+| 批量插入 (1000 items) | > 500/sec | **23.83ms（~42.0k/sec）** | `testBulkInsertPerformance` | ✅ |
+| 去重 (200 upserts) | 正确去重 | **3.78ms** | `testDeduplicationPerformance` | ✅ |
+| 清理 (900 items) | 快速完成 | **59.94ms** | `testCleanupPerformance` | ✅ |
+| 外部存储清理 (195MB→≤50MB) | < 800ms | **123.37ms** | `testExternalStorageStress` | ✅ |
+
+### 清理性能 (v0.11 新增)
+
+| 场景 | 目标 | 实测 | 测试用例 | 状态 |
+|------|------|------|----------|------|
+| 内联清理 10k 项 | P95 < 300ms | **P95 158.64ms** | `testInlineCleanupPerformance10k` | ✅ |
+| 外部清理 10k 项 | < 800ms | **514.50ms** | `testExternalCleanupPerformance10k` | ✅ |
+| 大规模清理 50k 项 | < 1500ms | **407.31ms** | `testCleanupPerformance50k` | ✅ |
 
 ### 搜索模式比较 (3k items)
 
@@ -410,14 +421,15 @@ final class YourNewTests: XCTestCase {
 
 ## 📈 版本信息
 
-**当前版本**: v0.9.4（过滤/复制兜底 + 性能补充）
-- 核心单测 80/80 (1 skipped，上次全量 2025-11-27)
-- 性能测试 19/19（含重载，2025-11-28，RUN_HEAVY_PERF_TESTS=1）
-- v0.md SLO 对齐，外部存储清理 < 800ms
+**当前版本**: v0.11（性能/稳定性/测试改进）
+- 单元测试 177/177 passed (22 性能测试全部通过)
+- 外部存储清理性能提升 81%（653ms → 123ms）
+- 新增 16 个测试用例（清理性能、并发搜索、键盘导航边界）
+- FTS5 COUNT 缓存和搜索超时实际应用
 
-**下一版本**: v0.9.5（规划中）
+**下一版本**: v0.12（规划中）
+- 前端美化设计
 - UI 稳定性与性能监控收敛
-- 持续跟踪部署与性能指标
 
 ---
 
@@ -433,8 +445,9 @@ final class YourNewTests: XCTestCase {
 
 部署前检查:
 
-- [x] 核心单测 80/80 (1 skipped，2025-11-27)；性能测试 19/19（含重载，2025-11-28）
-- [x] 修复 SearchServiceTests 缓存刷新问题
+- [x] 单元测试 177/177 passed (22 性能测试，2025-11-29)
+- [x] FTS5 COUNT 缓存和搜索超时实际应用
+- [x] 数据库连接健壮性修复
 - [x] 配置构建到本地 `.build` 目录
 - [x] 代码编译成功 (`BUILD SUCCEEDED`)
 - [x] 应用能够正常部署到 /Applications
@@ -456,6 +469,6 @@ final class YourNewTests: XCTestCase {
 
 ---
 
-**最后更新**: 2025-11-27
+**最后更新**: 2025-11-29
 **维护者**: Claude Code
 **许可证**: MIT
