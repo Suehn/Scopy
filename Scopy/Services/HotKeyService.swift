@@ -36,6 +36,9 @@ final class HotKeyService {
     /// 存储已注册的热键处理器 (hotKeyID -> handler)
     private static var handlers: [UInt32: HotKeyHandler] = [:]
 
+    /// v0.10.7: 保护 handlers 字典的锁（主线程 + Carbon 事件线程并发访问）
+    private static let handlersLock = NSLock()
+
     /// 事件处理器引用
     private static var eventHandlerRef: EventHandlerRef?
 
@@ -122,8 +125,10 @@ final class HotKeyService {
         let status = UnregisterEventHotKey(hotKeyRef)
         self.hotKeyRef = nil
 
-        // 从静态字典中移除处理器
+        // 从静态字典中移除处理器（加锁保护）
+        Self.handlersLock.lock()
         Self.handlers.removeValue(forKey: currentHotKeyID)
+        Self.handlersLock.unlock()
         logToFile("🔑 Global hotkey unregistered: id=\(currentHotKeyID), status=\(status)")
         currentHotKeyID = 0
     }
@@ -146,9 +151,12 @@ final class HotKeyService {
         currentHotKeyID = Self.nextHotKeyID
         Self.nextHotKeyID += 1
 
-        // 存储处理器
+        // 存储处理器（加锁保护）
+        Self.handlersLock.lock()
         Self.handlers[currentHotKeyID] = handler
-        logToFile("📝 Handler stored: id=\(currentHotKeyID), total handlers=\(Self.handlers.count)")
+        let handlerCount = Self.handlers.count
+        Self.handlersLock.unlock()
+        logToFile("📝 Handler stored: id=\(currentHotKeyID), total handlers=\(handlerCount)")
 
         // 创建 hotKeyID 结构
         var hotKeyID = EventHotKeyID()
@@ -169,8 +177,10 @@ final class HotKeyService {
             logToFile("✅ Hotkey registered: id=\(currentHotKeyID), keyCode=\(keyCode), modifiers=0x\(String(modifiers, radix: 16)), hotKeyRef=\(String(describing: hotKeyRef))")
         } else {
             logToFile("❌ Failed to register hotkey: status=\(status)")
-            // 清理
+            // 清理（加锁保护）
+            Self.handlersLock.lock()
             Self.handlers.removeValue(forKey: currentHotKeyID)
+            Self.handlersLock.unlock()
             currentHotKeyID = 0
         }
     }
@@ -218,8 +228,13 @@ final class HotKeyService {
             return OSStatus(eventNotHandledErr)
         }
 
-        // 查找并执行处理器
-        logToFile("🔍 Looking for handler: id=\(hotKeyID.id), available handlers=\(Array(handlers.keys))")
+        // 查找并执行处理器（加锁保护）
+        handlersLock.lock()
+        let availableKeys = Array(handlers.keys)
+        let handler = handlers[hotKeyID.id]
+        handlersLock.unlock()
+
+        logToFile("🔍 Looking for handler: id=\(hotKeyID.id), available handlers=\(availableKeys)")
 
         // 按住时会重复发 pressed 事件，做简单节流
         let now = CFAbsoluteTimeGetCurrent()
@@ -229,7 +244,7 @@ final class HotKeyService {
         }
         lastFire = (hotKeyID.id, now)
 
-        if let handler = handlers[hotKeyID.id] {
+        if let handler = handler {
             logToFile("✅ Handler found, executing...")
             DispatchQueue.main.async {
                 handler()
@@ -255,7 +270,11 @@ final class HotKeyService {
     }
 
     func triggerHandlerForTesting() {
-        if let handler = Self.handlers[currentHotKeyID] {
+        Self.handlersLock.lock()
+        let handler = Self.handlers[currentHotKeyID]
+        Self.handlersLock.unlock()
+
+        if let handler = handler {
             if Thread.isMainThread {
                 handler()
             } else {
@@ -268,23 +287,33 @@ final class HotKeyService {
 
     var isRegistered: Bool {
         if Self.testingMode {
-            return Self.handlers[currentHotKeyID] != nil
+            Self.handlersLock.lock()
+            let hasHandler = Self.handlers[currentHotKeyID] != nil
+            Self.handlersLock.unlock()
+            return hasHandler
         }
         return hotKeyRef != nil
     }
 
     var hasHandler: Bool {
-        Self.handlers[currentHotKeyID] != nil
+        Self.handlersLock.lock()
+        let result = Self.handlers[currentHotKeyID] != nil
+        Self.handlersLock.unlock()
+        return result
     }
 
     func registerHandlerOnly(_ handler: @escaping HotKeyHandler) {
         currentHotKeyID = Self.nextHotKeyID
         Self.nextHotKeyID += 1
+        Self.handlersLock.lock()
         Self.handlers[currentHotKeyID] = handler
+        Self.handlersLock.unlock()
     }
 
     func unregisterHandlerOnly() {
+        Self.handlersLock.lock()
         Self.handlers.removeValue(forKey: currentHotKeyID)
+        Self.handlersLock.unlock()
         currentHotKeyID = 0
     }
     #endif
