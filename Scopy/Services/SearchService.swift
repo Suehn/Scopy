@@ -43,6 +43,9 @@ final class SearchService {
     /// 防止并发缓存刷新的标志
     private var cacheRefreshInProgress = false
 
+    /// v0.10.7: 保护缓存刷新的锁（防止并发刷新竞态）
+    private let cacheRefreshLock = NSLock()
+
     // MARK: - Initialization
 
     init(storage: StorageService) {
@@ -251,7 +254,7 @@ final class SearchService {
         }
     }
 
-    /// v0.10.4: 改进缓存刷新逻辑，确保原子性检查
+    /// v0.10.7: 使用锁保护缓存刷新，确保原子性检查
     private func refreshCacheIfNeeded() throws {
         let now = Date()
 
@@ -259,8 +262,14 @@ final class SearchService {
         let needsRefresh = recentItemsCache.isEmpty || now.timeIntervalSince(cacheTimestamp) > cacheDuration
         guard needsRefresh else { return }
 
-        // 再检查是否正在刷新（防止并发刷新）
+        // 加锁保护并发检查和刷新
+        cacheRefreshLock.lock()
+        defer { cacheRefreshLock.unlock() }
+
+        // 再次检查（double-check pattern）
         guard !cacheRefreshInProgress else { return }
+        let stillNeedsRefresh = recentItemsCache.isEmpty || now.timeIntervalSince(cacheTimestamp) > cacheDuration
+        guard stillNeedsRefresh else { return }
 
         // 设置刷新标志
         cacheRefreshInProgress = true
