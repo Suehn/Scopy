@@ -7,6 +7,82 @@
 
 ---
 
+## [v0.11] - 2025-11-29
+
+### 性能改进
+- **外部存储清理性能提升 81%** - 653ms → 123ms
+- **FTS5 COUNT 缓存实际应用** - 在 `searchWithFTS` 和 `searchAllWithFilters` 中使用缓存
+  - 缓存命中时跳过重复 COUNT 查询
+  - 新增 `invalidateSearchTotalCache()` 方法
+- **搜索超时实际应用** - 将 `runOnQueue` 替换为 `runOnQueueWithTimeout`（5秒超时）
+
+### 稳定性改进
+- **数据库连接健壮性** - 修复 `open()` 半打开状态问题
+  - 使用临时变量存储连接，失败时确保清理
+  - 新增 `executeOn()` 方法用于初始化阶段
+  - 新增 `performWALCheckpoint()` 方法
+- **HotKeyService 日志轮转** - 10MB 限制，NSLock 线程安全
+  - 保留最近 2 个日志文件（`.log` 和 `.log.old`）
+- **图片处理内存管理** - `extractCornerPixelsHash` 和 `computeSmallImageHash` 添加 autoreleasepool
+
+### 新增测试 (+16)
+- **清理性能基准测试** (PerformanceTests.swift)
+  - `testInlineCleanupPerformance10k` - P95 158.64ms (目标 < 300ms) ✅
+  - `testExternalCleanupPerformance10k` - 514.50ms (目标 < 800ms) ✅
+  - `testCleanupPerformance50k` - 407.31ms (目标 < 1500ms) ✅
+- **并发搜索压力测试** (ConcurrencyTests.swift)
+  - `testConcurrentSearchStress` - 10 个并发搜索请求
+  - `testSearchResultConsistency` - 相同查询结果一致性
+  - `testSearchTimeout` - 搜索超时机制验证
+  - `testConcurrentCleanupAndSearch` - 并发清理和搜索安全性
+- **键盘导航边界测试** (AppStateTests.swift)
+  - 9 个新增测试覆盖空列表、单项列表、删除后导航等边界条件
+
+### 性能数据 (v0.11 vs v0.10.8)
+
+| 指标 | v0.10.8 | v0.11 | 变化 |
+|------|---------|-------|------|
+| 外部存储清理 | 653.84ms | **123.37ms** | **-81%** |
+| 25k 磁盘搜索 P95 | 55.00ms | **53.09ms** | -3.5% |
+| 50k 重载搜索 P95 | 125.94ms | **124.64ms** | -1.0% |
+| 内联清理 10k P95 | N/A | **158.64ms** | 新增 |
+| 外部清理 10k | N/A | **514.50ms** | 新增 |
+| 清理 50k | N/A | **407.31ms** | 新增 |
+
+### 测试
+- 单元测试: **177/177 passed** (22 性能测试全部通过)
+- 新增测试: **+16**
+
+---
+
+## [v0.10.8] - 2025-11-28
+
+### 优化
+- **StorageService 清理性能** - 批量删除优化，避免每次迭代执行 SUM 查询
+  - 目标：清理性能 ≤500ms（原 ~800ms）
+  - 外部存储大小缓存（30 秒有效期），避免重复遍历文件系统
+- **SearchService 缓存优化** - 添加搜索超时机制（5 秒）
+  - FTS5 COUNT 缓存（5 秒有效期）
+  - 新增 `SearchError.timeout` 错误类型
+- **ClipboardMonitor 任务队列** - 使用任务队列替代单任务
+  - 最大并发任务数：3
+  - 支持快速连续复制大文件，避免历史不完整
+- **RealClipboardService 生命周期** - 改进 `stop()` 方法的任务取消顺序
+  - 确保资源正确释放
+
+### 修复
+- **HistoryItemView 图标缓存内存泄漏** - 添加 LRU 清理（最大 50 条）
+  - 添加 `iconAccessOrder` 跟踪访问顺序
+  - 超出限制时移除最旧条目
+- **AppFilterButton 缓存竞态** - 添加 NSLock 保护缓存访问
+  - 名称缓存也添加 LRU 清理
+
+### 测试
+- 单元测试: **143/145 passed** (1 skipped, 2 重载性能测试边界失败)
+- P1 问题修复: **7/7**
+
+---
+
 ## [v0.10.7] - 2025-11-28
 
 ### 修复
