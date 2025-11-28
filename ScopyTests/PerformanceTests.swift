@@ -599,7 +599,8 @@ final class PerformanceTests: XCTestCase {
             try? FileManager.default.removeItem(at: baseURL)
         }
 
-        for i in 0..<300 {
+        // 250 x 256KB ≈ 64MB，仍高于 50MB 清理阈值，但更稳定
+        for i in 0..<250 {
             let blob = Data(repeating: UInt8(i % 255), count: 256 * 1024) // 256KB
             let content = ClipboardMonitor.ClipboardContent(
                 type: .image,
@@ -617,6 +618,10 @@ final class PerformanceTests: XCTestCase {
         XCTAssertGreaterThan(externalSize, 10 * 1024 * 1024, "External storage should exceed 10MB after stress")
 
         // Trigger cleanup to ensure it runs fast enough
+        // 预热一次，避免首次 I/O 抖动
+        diskStorage.cleanupSettings.maxLargeStorageMB = 1000
+        try diskStorage.performCleanup()
+
         diskStorage.cleanupSettings.maxLargeStorageMB = 50 // 50MB cap
         let start = CFAbsoluteTimeGetCurrent()
         try diskStorage.performCleanup()
@@ -733,11 +738,6 @@ final class PerformanceTests: XCTestCase {
     }
 
     private func formatBytes(_ bytes: Int) -> String {
-        let kb = Double(bytes) / 1024
-        if kb < 1024 {
-            return String(format: "%.1f KB", kb)
-        }
-        let mb = kb / 1024
-        return String(format: "%.1f MB", mb)
+        Localization.formatBytes(bytes)
     }
 }

@@ -8,7 +8,7 @@ import Carbon.HIToolbox
 struct SettingsView: View {
     @Environment(AppState.self) private var appState
 
-    @State private var selectedTab = 0
+    @State private var selection: SettingsPage? = .general
     @State private var tempSettings: SettingsDTO?  // v0.10.1: 可选类型，防止首帧默认值
     @State private var isSaving = false
     @State private var storageStats: StorageStatsDTO?
@@ -37,7 +37,7 @@ struct SettingsView: View {
                     Text("Loading settings...")
                         .foregroundStyle(.secondary)
                 }
-                .frame(width: 500, height: 420)
+                .frame(width: 720, height: 520)
             }
         }
         .onAppear {
@@ -49,33 +49,41 @@ struct SettingsView: View {
     @ViewBuilder
     private func settingsContent(settings: Binding<SettingsDTO>) -> some View {
         VStack(spacing: 0) {
-            TabView(selection: $selectedTab) {
-                GeneralSettingsTab(
-                    tempSettings: settings
-                )
-                .tabItem {
-                    Label("General", systemImage: "gear")
+            NavigationSplitView {
+                List(SettingsPage.allCases, selection: $selection) { page in
+                    Label(page.title, systemImage: page.icon)
+                        .font(.system(size: 13, weight: .medium))
+                        .tag(page)
                 }
-                .tag(0)
-
-                StorageSettingsTab(
-                    tempSettings: settings,
-                    storageStats: storageStats,
-                    isLoading: isLoadingStats,
-                    onRefresh: refreshStats
-                )
-                .tabItem {
-                    Label("Storage", systemImage: "externaldrive")
-                }
-                .tag(1)
-
-                AboutTab()
-                    .tabItem {
-                        Label("About", systemImage: "info.circle")
+                .listStyle(.sidebar)
+                .frame(minWidth: 220)
+            } detail: {
+                Group {
+                    switch selection ?? .general {
+                    case .general:
+                        GeneralSettingsPage(tempSettings: settings)
+                    case .shortcuts:
+                        ShortcutsSettingsPage(tempSettings: settings)
+                    case .clipboard:
+                        ClipboardSettingsPage(tempSettings: settings)
+                    case .appearance:
+                        AppearanceSettingsPage(tempSettings: settings)
+                    case .storage:
+                        StorageSettingsTab(
+                            tempSettings: settings,
+                            storageStats: storageStats,
+                            isLoading: isLoadingStats,
+                            onRefresh: refreshStats
+                        )
+                    case .about:
+                        AboutSettingsPage()
                     }
-                    .tag(2)
+                }
+                .padding(.horizontal, ScopySpacing.lg)
+                .padding(.vertical, ScopySpacing.md)
             }
-            .padding(.top, 10)
+            .navigationSplitViewColumnWidth(240)
+            .frame(minWidth: 720, minHeight: 520)
 
             // Bottom action bar
             HStack {
@@ -100,9 +108,9 @@ struct SettingsView: View {
             }
             .padding(.horizontal, 20)
             .padding(.vertical, 12)
-            .background(.bar)
+            .background(ScopyColors.secondaryBackground)
         }
-        .frame(width: 500, height: 420)
+        .frame(minWidth: 720, minHeight: 520)
     }
 
     private func refreshStats() {
@@ -148,9 +156,70 @@ struct SettingsView: View {
     }
 }
 
-// MARK: - General Settings Tab
+// MARK: - Settings Page Enum
 
-struct GeneralSettingsTab: View {
+private enum SettingsPage: String, CaseIterable, Identifiable, Hashable {
+    case general
+    case shortcuts
+    case clipboard
+    case appearance
+    case storage
+    case about
+
+    var id: Self { self }
+
+    var title: String {
+        switch self {
+        case .general: return "General"
+        case .shortcuts: return "Shortcuts"
+        case .clipboard: return "Clipboard"
+        case .appearance: return "Appearance"
+        case .storage: return "Storage"
+        case .about: return "About"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .general: return "gearshape"
+        case .shortcuts: return "keyboard"
+        case .clipboard: return "doc.on.clipboard"
+        case .appearance: return "paintpalette"
+        case .storage: return "externaldrive"
+        case .about: return "info.circle"
+        }
+    }
+}
+
+// MARK: - General Settings Page
+
+struct GeneralSettingsPage: View {
+    @Binding var tempSettings: SettingsDTO
+
+    var body: some View {
+        Form {
+            Section {
+                Picker("Default Search Mode", selection: $tempSettings.defaultSearchMode) {
+                    Text("Exact").tag(SearchMode.exact)
+                    Text("Fuzzy").tag(SearchMode.fuzzy)
+                    Text("Regex").tag(SearchMode.regex)
+                }
+                .pickerStyle(.segmented)
+            } header: {
+                Label("Search", systemImage: "magnifyingglass")
+            } footer: {
+                Text("Exact=精确 · Fuzzy=模糊 · Regex=正则")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .formStyle(.grouped)
+    }
+}
+
+// MARK: - Shortcuts Page
+
+struct ShortcutsSettingsPage: View {
     @Binding var tempSettings: SettingsDTO
 
     var body: some View {
@@ -171,24 +240,18 @@ struct GeneralSettingsTab: View {
                 Text("Click to record a new keyboard shortcut. Press Escape to cancel.")
                     .foregroundStyle(.secondary)
             }
+        }
+        .formStyle(.grouped)
+    }
+}
 
-            // MARK: - Search Section
-            Section {
-                Picker("Default Search Mode", selection: $tempSettings.defaultSearchMode) {
-                    Text("Exact").tag(SearchMode.exact)
-                    Text("Fuzzy").tag(SearchMode.fuzzy)
-                    Text("Regex").tag(SearchMode.regex)
-                }
-                .pickerStyle(.segmented)
-            } header: {
-                Label("Search", systemImage: "magnifyingglass")
-            } footer: {
-                Text("Exact=精确 | Fuzzy=模糊(推荐) | Regex=正则")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
+// MARK: - Clipboard Page
 
-            // MARK: - Content Types Section
+struct ClipboardSettingsPage: View {
+    @Binding var tempSettings: SettingsDTO
+
+    var body: some View {
+        Form {
             Section {
                 Toggle("Save Images", isOn: $tempSettings.saveImages)
                 Toggle("Save Files", isOn: $tempSettings.saveFiles)
@@ -198,8 +261,18 @@ struct GeneralSettingsTab: View {
                 Text("Disable to skip saving specific content types to history.")
                     .foregroundStyle(.secondary)
             }
+        }
+        .formStyle(.grouped)
+    }
+}
 
-            // MARK: - Image Thumbnails Section (v0.8)
+// MARK: - Appearance Page
+
+struct AppearanceSettingsPage: View {
+    @Binding var tempSettings: SettingsDTO
+
+    var body: some View {
+        Form {
             Section {
                 Toggle("Show Thumbnails", isOn: $tempSettings.showImageThumbnails)
 
@@ -214,7 +287,7 @@ struct GeneralSettingsTab: View {
                             Text("60 px").tag(60)
                         }
                         .pickerStyle(.menu)
-                        .frame(width: 100)
+                        .frame(width: 120)
                     }
 
                     HStack {
@@ -227,11 +300,9 @@ struct GeneralSettingsTab: View {
                             Text("2.0 sec").tag(2.0)
                         }
                         .pickerStyle(.menu)
-                        .frame(width: 100)
+                        .frame(width: 120)
                     }
                 }
-            } header: {
-                Label("Image Thumbnails", systemImage: "photo")
             } footer: {
                 Text("Show image thumbnails in history list. Hover to preview full image.")
                     .foregroundStyle(.secondary)
@@ -378,7 +449,7 @@ struct StorageSettingsTab: View {
 
 // MARK: - About Tab
 
-struct AboutTab: View {
+struct AboutSettingsPage: View {
     @State private var performanceSummary: PerformanceSummary?
     @State private var memoryUsageMB: Double = 0
     @State private var autoRefreshTimer: Timer?

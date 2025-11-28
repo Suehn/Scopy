@@ -140,6 +140,16 @@ struct PerformanceSummary: Sendable {
         formatLatency(loadP95)
     }
 
+    /// 格式化搜索平均值
+    var formattedSearchAvg: String {
+        formatLatency(searchAvg)
+    }
+
+    /// 格式化首屏加载平均值
+    var formattedLoadAvg: String {
+        formatLatency(loadAvg)
+    }
+
     private func formatLatency(_ ms: Double) -> String {
         if ms == 0 || searchSamples == 0 {
             return "N/A"

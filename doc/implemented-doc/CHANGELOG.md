@@ -7,6 +7,96 @@
 
 ---
 
+## [v0.10.5] - 2025-11-28
+
+### 新增
+- **ScopySize 智能设计系统** - 基于 4pt 网格的统一尺寸系统
+  - 基础单位 `unit = 4pt`，所有尺寸都是 `unit * N`
+  - `Icon` - 图标尺寸（xs/sm/md/lg/xl + header/filter/listApp/menuApp/pin/empty）
+  - `Corner` - 圆角（xs/sm/md/lg/xl）
+  - `Height` - 组件高度（listItem/header/footer/loadMore/divider/pinIndicator）
+  - `Width` - 宽度（pinIndicator/settingsLabel/statLabel）
+  - `Window` - 窗口尺寸（mainWidth/mainHeight/settingsWidth/settingsHeight）
+
+### 改进
+- **HeaderView** - 6 处硬编码值替换为 ScopySize（搜索图标、过滤图标、菜单图标）
+- **HistoryListView** - 10 处硬编码值替换为 ScopySize（pin 指示条、app 图标、圆角、列表项高度）
+- **FooterView** - 5 处硬编码值替换为 ScopySize（footer 高度、按钮图标、圆角）
+- **ContentView** - 窗口尺寸替换为 ScopySize.Window
+
+### 测试
+- 单元测试: **145/146 passed** (1 skipped, 无新增失败)
+
+---
+
+## [v0.10.4] - 2025-11-28
+
+### 修复
+- **AppState Timer 内存泄漏** - `scrollEndTimer` 改为 Task，自动取消防止泄漏
+- **AppState 搜索状态竞态** - 添加 `searchVersion` 版本号，防止旧搜索覆盖新结果
+- **AppState 主线程安全违规** - 移除 `startEventListener` 中的嵌套 Task
+- **AppState loadMore 任务取消** - 状态变更前检查 `Task.isCancelled`
+- **HistoryListView 图标缓存线程不安全** - 添加 `NSLock` 保护静态缓存
+- **ClipboardMonitor 主线程阻塞** - 所有大内容（不仅图片）都异步处理
+- **ClipboardMonitor Timer 重复添加** - 移除多余的 `RunLoop.current.add()` 调用
+- **SearchService 缓存竞态** - 改进 `refreshCacheIfNeeded` 检查逻辑原子性
+- **StorageService sqlite3_step 返回值** - `cleanupByCount/cleanupByAge` 添加返回值检查
+- **StorageService 清理无限循环** - 添加注释说明 `idsToDelete.isEmpty` 防护逻辑
+- **RealClipboardService 事件流泄漏** - `stop()` 中显式调用 `eventContinuation?.finish()`
+
+### 新增
+- **ConcurrencyTests.swift** - 5 个并发安全测试（搜索取消、缓存刷新、去重、版本号）
+- **ResourceCleanupTests.swift** - 7 个资源清理测试（数据库、pin清理、事件流、任务取消）
+
+### 测试
+- 单元测试: **145/146 passed** (1 skipped, 新增 12 个测试)
+- 已知失败: `testHeavyDiskSearchPerformance50k` (P95 205ms > 200ms，边界场景)
+
+---
+
+## [v0.10.3] - 2025-11-28
+
+### 修复
+- **SearchService 缓存竞态** - 添加 `cacheRefreshInProgress` 标志防止并发刷新
+- **AppState loadMore 竞态** - 添加 `loadMoreTask` 支持任务取消，防止快速滚动时数据重复
+- **HeaderView 语法错误** - 删除多余的 `}` 和重复 MARK 注释
+- **图标缓存内存泄漏** - 实现 LRU 清理，限制最大 50 个缓存条目
+- **Timer 泄漏风险** - `hoverDebounceTimer` 和 `hoverTimer` 改为 Task，自动取消
+- **列表项对齐不一致** - 使用固定宽度占位，统一左侧对齐
+- **Pin 标记重复显示** - 左侧颜色条 + 右侧图标，不再重复
+
+### 改进
+- **过渡动效** - 选中/悬停态添加 0.15s easeInOut 动画
+- **字体大小调整** - microMono 10pt→11pt 提升可读性，搜索框 20pt→16pt
+- **选中态区分** - 键盘选中蓝色边框，鼠标悬停淡灰背景，明显区分
+
+### 新增
+- **ScopyButton 组件** - 通用按钮（primary/secondary/destructive），支持 disabled 状态
+- **ScopyCard 组件** - 卡片容器，统一圆角和边框样式
+- **ScopyBadge 组件** - 徽章组件（default/accent/warning/success）
+
+### 测试
+- 单元测试: **132/133 passed** (1 skipped)
+- 已知失败: `testUltraDiskSearchPerformance75k` (P95 290ms > 250ms，边界场景)
+
+---
+
+## [Unreleased] - 2025-11-28
+
+### 新增
+- **设计系统引入**：新增颜色/字体/间距/图标 Token 与胶囊按钮组件，统一 macOS 原生风格。
+- **主界面美化**：Header/列表/空态/底栏重做，支持搜索模式切换、Pinned/Recent 分段、相对时间本地化。
+- **Settings 重构**：改为 Sidebar 导航（General/Shortcuts/Clipboard/Appearance/Storage/About），保持原有设置读写逻辑。
+
+### 改进
+- **设置同步**：加载设置时同步搜索模式；搜索模式菜单可即时切换。
+- **本地化基础**：相对时间与体积显示改用系统格式化器，便于中英双语。
+
+### 测试
+- 未执行自动化测试（UI 大改需后续补充截图与回归）。
+
+---
+
 ## [v0.10.1] - 2025-11-28
 
 ### 修复

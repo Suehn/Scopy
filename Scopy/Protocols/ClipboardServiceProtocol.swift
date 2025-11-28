@@ -3,7 +3,7 @@ import Foundation
 // MARK: - Data Transfer Objects (DTOs)
 
 /// 搜索模式 - 对应 v0.md 中的 SearchMode
-enum SearchMode: String, Sendable {
+enum SearchMode: String, Sendable, CaseIterable {
     case exact
     case fuzzy
     case regex
