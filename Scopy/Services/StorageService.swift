@@ -68,6 +68,10 @@ final class StorageService {
 
     var cleanupSettings = CleanupSettings()
 
+    /// v0.10.8: 外部存储大小缓存（避免重复遍历文件系统）
+    private var cachedExternalSize: (size: Int, timestamp: Date)?
+    private let externalSizeCacheTTL: TimeInterval = 30  // 30秒有效期
+
     /// 暴露数据库连接给 SearchService 使用
     var database: OpaquePointer? { db }
 
@@ -101,23 +105,66 @@ final class StorageService {
 
     // MARK: - Database Lifecycle
 
+    /// v0.11: 修复半打开状态问题 - 使用临时变量，失败时确保清理
     func open() throws {
         guard db == nil else { return }
 
-        if sqlite3_open(dbPath, &db) != SQLITE_OK {
-            let error = String(cString: sqlite3_errmsg(db))
+        // 使用临时变量，避免半打开状态
+        var tempDb: OpaquePointer?
+        let openResult = sqlite3_open(dbPath, &tempDb)
+
+        if openResult != SQLITE_OK {
+            let error: String
+            if let tempDb = tempDb {
+                error = String(cString: sqlite3_errmsg(tempDb))
+                sqlite3_close(tempDb)  // 清理部分打开的连接
+            } else {
+                error = "Unknown error (code: \(openResult))"
+            }
             throw StorageError.queryFailed("Failed to open database: \(error)")
         }
 
-        // Enable WAL mode for better concurrent read performance
-        try execute("PRAGMA journal_mode = WAL")
-        try execute("PRAGMA synchronous = NORMAL")
-        try execute("PRAGMA cache_size = -64000") // 64MB cache
-        try execute("PRAGMA temp_store = MEMORY")
+        // 确保 tempDb 不为 nil
+        guard let validDb = tempDb else {
+            throw StorageError.queryFailed("Failed to open database: connection is nil")
+        }
 
-        try createTables()
-        try createIndexes()
-        try setupFTS()
+        // 尝试执行 PRAGMA 设置，失败时清理
+        do {
+            // Enable WAL mode for better concurrent read performance
+            try executeOn(validDb, "PRAGMA journal_mode = WAL")
+            try executeOn(validDb, "PRAGMA synchronous = NORMAL")
+            try executeOn(validDb, "PRAGMA cache_size = -64000") // 64MB cache
+            try executeOn(validDb, "PRAGMA temp_store = MEMORY")
+
+            // 成功后才赋值给实例变量
+            self.db = validDb
+
+            try createTables()
+            try createIndexes()
+            try setupFTS()
+        } catch {
+            // PRAGMA 或 schema 设置失败，清理连接
+            sqlite3_close(validDb)
+            throw error
+        }
+    }
+
+    /// v0.11: 在指定数据库连接上执行 SQL（用于初始化阶段）
+    private func executeOn(_ db: OpaquePointer, _ sql: String) throws {
+        var errMsg: UnsafeMutablePointer<CChar>?
+        if sqlite3_exec(db, sql, nil, nil, &errMsg) != SQLITE_OK {
+            let error = errMsg.map { String(cString: $0) } ?? "Unknown error"
+            sqlite3_free(errMsg)
+            throw StorageError.queryFailed(error)
+        }
+    }
+
+    /// v0.11: 执行 WAL 检查点（定期调用以控制 WAL 文件大小）
+    func performWALCheckpoint() {
+        guard let db = db else { return }
+        // PASSIVE 模式：不阻塞写入，尽可能多地检查点
+        sqlite3_wal_checkpoint_v2(db, nil, SQLITE_CHECKPOINT_PASSIVE, nil, nil)
     }
 
     func close() {
@@ -473,7 +520,22 @@ final class StorageService {
         return 0
     }
 
+    /// v0.10.8: 使用缓存避免重复遍历文件系统
     func getExternalStorageSize() throws -> Int {
+        // 检查缓存是否有效
+        if let cached = cachedExternalSize,
+           Date().timeIntervalSince(cached.timestamp) < externalSizeCacheTTL {
+            return cached.size
+        }
+
+        // 计算实际大小
+        let size = try calculateExternalStorageSize()
+        cachedExternalSize = (size, Date())
+        return size
+    }
+
+    /// 实际计算外部存储大小（不使用缓存）
+    private func calculateExternalStorageSize() throws -> Int {
         let url = URL(fileURLWithPath: externalStoragePath)
         let resourceKeys: Set<URLResourceKey> = [.fileSizeKey]
 
@@ -491,6 +553,11 @@ final class StorageService {
             totalSize += size
         }
         return totalSize
+    }
+
+    /// v0.10.8: 使外部存储大小缓存失效
+    private func invalidateExternalSizeCache() {
+        cachedExternalSize = nil
     }
 
     /// 获取数据库文件的实际磁盘大小（包含 WAL 和 SHM 文件）
@@ -615,16 +682,18 @@ final class StorageService {
 
     /// v0.10.4: 修复无限循环风险，当没有可删除项目时立即退出
     /// v0.10.7: 添加最大迭代次数限制，防止极端情况下的无限循环
+    /// v0.10.8: 批量删除优化，避免每次迭代都执行 SUM 查询（性能目标 ≤500ms）
     private func cleanupBySize(targetBytes: Int) throws {
+        var currentSize = try getTotalSize()  // 只查询一次
         var iterations = 0
         let maxIterations = 100  // 防止无限循环
 
         // Delete oldest items until under target size
-        while try getTotalSize() > targetBytes && iterations < maxIterations {
+        while currentSize > targetBytes && iterations < maxIterations {
             iterations += 1
-            // Get the oldest non-pinned item
+            // 批量获取最旧的非 pin 项目（包含 size_bytes 用于更新 currentSize）
             let sql = """
-                SELECT id FROM clipboard_items
+                SELECT id, size_bytes FROM clipboard_items
                 WHERE is_pinned = 0
                 ORDER BY last_used_at ASC
                 LIMIT 100
@@ -634,21 +703,24 @@ final class StorageService {
                 throw StorageError.queryFailed(String(cString: sqlite3_errmsg(db)))
             }
 
-            var idsToDelete: [UUID] = []
+            var itemsToDelete: [(id: UUID, size: Int)] = []
             while sqlite3_step(stmt) == SQLITE_ROW {
                 if let cStr = sqlite3_column_text(stmt, 0),
                    let id = UUID(uuidString: String(cString: cStr)) {
-                    idsToDelete.append(id)
+                    let size = Int(sqlite3_column_int(stmt, 1))
+                    itemsToDelete.append((id, size))
                 }
             }
             sqlite3_finalize(stmt)
 
             // 没有可删除的项目（全部被 pin），退出循环防止无限循环
-            if idsToDelete.isEmpty { break }
+            if itemsToDelete.isEmpty { break }
 
-            for id in idsToDelete {
+            // 批量删除并更新 currentSize（避免重复查询 SUM）
+            for (id, size) in itemsToDelete {
                 try deleteItem(id)
-                if try getTotalSize() <= targetBytes { break }
+                currentSize -= size
+                if currentSize <= targetBytes { break }
             }
         }
 
@@ -660,15 +732,20 @@ final class StorageService {
     /// 清理外部存储（大内容）- v0.9
     /// v0.10.4: 添加注释说明无限循环防护
     /// v0.10.7: 添加最大迭代次数限制
+    /// v0.10.8: 批量删除优化，使用缓存避免重复遍历文件系统
     private func cleanupExternalStorage(targetBytes: Int) throws {
+        // 使缓存失效，确保获取最新大小
+        invalidateExternalSizeCache()
+        var currentSize = try getExternalStorageSize()
         var iterations = 0
         let maxIterations = 100  // 防止无限循环
 
         // 获取有外部存储的最旧非置顶项目
-        while try getExternalStorageSize() > targetBytes && iterations < maxIterations {
+        while currentSize > targetBytes && iterations < maxIterations {
             iterations += 1
+            // 批量获取（包含 size_bytes 用于更新 currentSize）
             let sql = """
-                SELECT id FROM clipboard_items
+                SELECT id, size_bytes FROM clipboard_items
                 WHERE is_pinned = 0 AND storage_ref IS NOT NULL
                 ORDER BY last_used_at ASC
                 LIMIT 100
@@ -678,23 +755,29 @@ final class StorageService {
                 throw StorageError.queryFailed(String(cString: sqlite3_errmsg(db)))
             }
 
-            var idsToDelete: [UUID] = []
+            var itemsToDelete: [(id: UUID, size: Int)] = []
             while sqlite3_step(stmt) == SQLITE_ROW {
                 if let cStr = sqlite3_column_text(stmt, 0),
                    let id = UUID(uuidString: String(cString: cStr)) {
-                    idsToDelete.append(id)
+                    let size = Int(sqlite3_column_int(stmt, 1))
+                    itemsToDelete.append((id, size))
                 }
             }
             sqlite3_finalize(stmt)
 
             // 没有可删除的项目（全部被 pin 或无外部存储），退出循环防止无限循环
-            if idsToDelete.isEmpty { break }
+            if itemsToDelete.isEmpty { break }
 
-            for id in idsToDelete {
+            // 批量删除并更新 currentSize（避免重复遍历文件系统）
+            for (id, size) in itemsToDelete {
                 try deleteItem(id)
-                if try getExternalStorageSize() <= targetBytes { break }
+                currentSize -= size
+                if currentSize <= targetBytes { break }
             }
         }
+
+        // 清理完成后使缓存失效
+        invalidateExternalSizeCache()
 
         if iterations >= maxIterations {
             print("⚠️ cleanupExternalStorage: 达到最大迭代次数 \(maxIterations)")
