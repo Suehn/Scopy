@@ -242,6 +242,156 @@ final class AppStateTests: XCTestCase {
         XCTAssertNil(appState.selectedID)
     }
 
+    // MARK: - v0.11 Keyboard Navigation Boundary Tests
+
+    /// v0.11: 空列表时调用 highlightNext 不崩溃
+    func testHighlightNextOnEmptyListDoesNotCrash() {
+        XCTAssertTrue(appState.items.isEmpty)
+        XCTAssertNil(appState.selectedID)
+
+        // 多次调用不应崩溃
+        for _ in 0..<10 {
+            appState.highlightNext()
+        }
+
+        XCTAssertNil(appState.selectedID, "Selection should remain nil on empty list")
+    }
+
+    /// v0.11: 空列表时调用 highlightPrevious 不崩溃
+    func testHighlightPreviousOnEmptyListDoesNotCrash() {
+        XCTAssertTrue(appState.items.isEmpty)
+        XCTAssertNil(appState.selectedID)
+
+        // 多次调用不应崩溃
+        for _ in 0..<10 {
+            appState.highlightPrevious()
+        }
+
+        XCTAssertNil(appState.selectedID, "Selection should remain nil on empty list")
+    }
+
+    /// v0.11: 单项列表时调用 highlightNext 行为正确
+    func testHighlightNextOnSingleItem() async {
+        mockService.setItemCount(1)
+        await appState.load()
+
+        XCTAssertEqual(appState.items.count, 1)
+
+        // 无选中时，选中第一项
+        appState.highlightNext()
+        XCTAssertEqual(appState.selectedID, appState.items[0].id)
+
+        // 已选中唯一项时，保持选中（或循环到自己）
+        appState.highlightNext()
+        XCTAssertEqual(appState.selectedID, appState.items[0].id)
+    }
+
+    /// v0.11: 单项列表时调用 highlightPrevious 行为正确
+    func testHighlightPreviousOnSingleItem() async {
+        mockService.setItemCount(1)
+        await appState.load()
+
+        XCTAssertEqual(appState.items.count, 1)
+
+        // 无选中时，选中最后一项（也是第一项）
+        appState.highlightPrevious()
+        XCTAssertEqual(appState.selectedID, appState.items[0].id)
+
+        // 已选中唯一项时，保持选中（或循环到自己）
+        appState.highlightPrevious()
+        XCTAssertEqual(appState.selectedID, appState.items[0].id)
+    }
+
+    /// v0.11: 选中项被删除后导航行为正确
+    func testNavigationAfterSelectedItemDeleted() async {
+        mockService.setItemCount(5)
+        await appState.load()
+
+        // 选中第三项
+        appState.selectedID = appState.items[2].id
+        let selectedItem = appState.items[2]
+
+        // 删除选中项
+        await appState.delete(selectedItem)
+
+        // 选中项应该被清除或移动到下一项
+        // 根据 deleteSelectedItem 的实现，应该选中下一项
+        // 但 delete 方法不会自动更新 selectedID
+        // 此时 selectedID 指向已删除的项
+
+        // 调用 highlightNext 应该能正常工作
+        appState.highlightNext()
+        // 由于原选中项已不存在，应该选中第一项
+        XCTAssertNotNil(appState.selectedID)
+    }
+
+    /// v0.11: 快速连续导航不崩溃
+    func testRapidNavigationDoesNotCrash() async {
+        mockService.setItemCount(10)
+        await appState.load()
+
+        // 快速连续调用导航方法
+        for _ in 0..<100 {
+            appState.highlightNext()
+        }
+
+        for _ in 0..<100 {
+            appState.highlightPrevious()
+        }
+
+        // 交替调用
+        for _ in 0..<50 {
+            appState.highlightNext()
+            appState.highlightPrevious()
+        }
+
+        // 测试通过如果没有崩溃
+        XCTAssertNotNil(appState.selectedID)
+    }
+
+    /// v0.11: 删除选中项后选中下一项
+    func testDeleteSelectedItemSelectsNext() async {
+        mockService.setItemCount(5)
+        await appState.load()
+
+        // 选中第二项
+        appState.selectedID = appState.items[1].id
+        let nextItemID = appState.items[2].id
+
+        await appState.deleteSelectedItem()
+
+        // 应该选中原来的第三项（现在是第二项）
+        XCTAssertEqual(appState.selectedID, nextItemID)
+    }
+
+    /// v0.11: 删除最后一项时选中前一项
+    func testDeleteLastItemSelectsPrevious() async {
+        mockService.setItemCount(3)
+        await appState.load()
+
+        // 选中最后一项
+        appState.selectedID = appState.items[2].id
+        let previousItemID = appState.items[1].id
+
+        await appState.deleteSelectedItem()
+
+        // 应该选中前一项
+        XCTAssertEqual(appState.selectedID, previousItemID)
+    }
+
+    /// v0.11: 删除唯一项后选中为空
+    func testDeleteOnlyItemClearsSelection() async {
+        mockService.setItemCount(1)
+        await appState.load()
+
+        appState.selectedID = appState.items[0].id
+
+        await appState.deleteSelectedItem()
+
+        XCTAssertNil(appState.selectedID, "Selection should be nil after deleting only item")
+        XCTAssertTrue(appState.items.isEmpty)
+    }
+
     func testSelectCurrentCopiesItem() async {
         mockService.setItemCount(10)
         await appState.load()
