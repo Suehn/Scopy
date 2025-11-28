@@ -17,7 +17,16 @@ final class RealClipboardService: ClipboardServiceProtocol {
     private var eventContinuation: AsyncStream<ClipboardEvent>.Continuation?
     private var monitorTask: Task<Void, Never>?
 
+    /// v0.10.7: 事件流关闭标志，防止向已关闭的流发送数据
+    private var isEventStreamFinished = false
+
     private(set) var eventStream: AsyncStream<ClipboardEvent>
+
+    /// v0.10.7: 安全发送事件，检查流是否已关闭
+    private func yieldEvent(_ event: ClipboardEvent) {
+        guard !isEventStreamFinished else { return }
+        eventContinuation?.yield(event)
+    }
 
     // For direct database access (needed by SearchService)
     private var db: OpaquePointer? {
@@ -75,7 +84,11 @@ final class RealClipboardService: ClipboardServiceProtocol {
     }
 
     /// v0.10.4: 显式关闭事件流，防止泄漏
+    /// v0.10.7: 添加 isEventStreamFinished 标志，防止重复关闭和向已关闭流发送数据
     func stop() {
+        guard !isEventStreamFinished else { return }
+        isEventStreamFinished = true
+
         monitorTask?.cancel()
         monitorTask = nil
         monitor.stopMonitoring()
@@ -108,25 +121,25 @@ final class RealClipboardService: ClipboardServiceProtocol {
     func pin(itemID: UUID) async throws {
         try storage.setPin(itemID, pinned: true)
         search.invalidateCache()
-        eventContinuation?.yield(.itemPinned(itemID))
+        yieldEvent(.itemPinned(itemID))
     }
 
     func unpin(itemID: UUID) async throws {
         try storage.setPin(itemID, pinned: false)
         search.invalidateCache()
-        eventContinuation?.yield(.itemUnpinned(itemID))
+        yieldEvent(.itemUnpinned(itemID))
     }
 
     func delete(itemID: UUID) async throws {
         try storage.deleteItem(itemID)
         search.invalidateCache()
-        eventContinuation?.yield(.itemDeleted(itemID))
+        yieldEvent(.itemDeleted(itemID))
     }
 
     func clearAll() async throws {
         try storage.deleteAllExceptPinned()
         search.invalidateCache()
-        eventContinuation?.yield(.settingsChanged)
+        yieldEvent(.settingsChanged)
     }
 
     func copyToClipboard(itemID: UUID) async throws {
@@ -187,12 +200,18 @@ final class RealClipboardService: ClipboardServiceProtocol {
 
         // 生成事件让 UI 刷新（置顶该条目）
         search.invalidateCache()
-        eventContinuation?.yield(.itemUpdated(toDTO(updated)))
+        yieldEvent(.itemUpdated(toDTO(updated)))
     }
 
+    /// v0.10.7: 先写 UserDefaults，后更新内存，防止崩溃时设置丢失
     func updateSettings(_ newSettings: SettingsDTO) async throws {
         let oldHeight = settings.thumbnailHeight
         let oldShowThumbnails = settings.showImageThumbnails
+
+        // v0.10.7: 先持久化到磁盘，确保崩溃时不丢失
+        saveSettingsToDefaults(newSettings)
+
+        // 后更新内存
         settings = newSettings
 
         // Update cleanup settings
@@ -204,13 +223,10 @@ final class RealClipboardService: ClipboardServiceProtocol {
             storage.clearThumbnailCache()
         }
 
-        // Save to UserDefaults
-        saveSettingsToDefaults(newSettings)
-
         // Trigger cleanup if needed
         try? storage.performCleanup()
 
-        eventContinuation?.yield(.settingsChanged)
+        yieldEvent(.settingsChanged)
     }
 
     func getSettings() async throws -> SettingsDTO {
@@ -270,7 +286,7 @@ final class RealClipboardService: ClipboardServiceProtocol {
             }
 
             search.invalidateCache()
-            eventContinuation?.yield(.newItem(toDTO(storedItem)))
+            yieldEvent(.newItem(toDTO(storedItem)))
 
             // Periodic cleanup
             try? storage.performCleanup()
