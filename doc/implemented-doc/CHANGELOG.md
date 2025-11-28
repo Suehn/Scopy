@@ -7,6 +7,49 @@
 
 ---
 
+## [v0.12] - 2025-11-29
+
+### 稳定性修复 (P0)
+- **SearchService 缓存刷新竞态条件** - 将所有检查移入锁内，确保原子性
+  - 修复极端情况下多个线程同时进入刷新逻辑的问题
+- **SearchService 超时任务清理** - defer 中同时取消两个任务，防止泄漏
+  - 修复 `runOnQueueWithTimeout` 中主任务可能泄漏的问题
+- **SearchService 缓存失效完整性** - `invalidateCache()` 同时清除 `cachedSearchTotal`
+  - 修复搜索总数缓存与实际数据不同步的问题
+
+### 稳定性修复 (P1)
+- **新增 IconCache.swift** - 全局图标缓存管理器
+  - 使用 actor 确保线程安全
+  - 提供 IconCacheSync 同步访问辅助类供 View 使用
+- **AppState 启动时预加载应用图标** - 后台线程预加载常用应用图标
+  - 避免滚动时主线程阻塞
+- **HistoryItemView 使用预加载缓存** - 优先从全局缓存获取图标
+- **HistoryItemView metadataText 缓存 appName** - 使用全局缓存获取应用名称
+- **startPreviewTask 取消检查完善** - 获取数据后也检查取消状态
+
+### 性能优化 (P1)
+- **外部清理并发化** - 使用 DispatchGroup 并发删除文件
+  - 新增 `deleteFilesInParallel()` 方法
+  - 新增 `deleteItemFromDB()` 方法（仅删除数据库记录）
+
+### 性能数据 (v0.12 vs v0.11)
+
+| 指标 | v0.11 | v0.12 | 变化 |
+|------|-------|-------|------|
+| 外部存储清理 | 653.84ms | **334.39ms** | **-49%** |
+| 缓存竞态风险 | 存在 | 消除 | ✅ |
+| 超时任务泄漏 | 存在 | 消除 | ✅ |
+| 主线程阻塞风险 | 存在 | 消除 | ✅ |
+
+### 测试
+- 非性能测试: **139/139 passed** (1 skipped)
+- 性能测试: **20/22 passed**（2 个因环境波动失败，与本次修改无关）
+
+### 新增文件
+- `Scopy/Services/IconCache.swift` - 全局图标缓存管理器
+
+---
+
 ## [v0.11] - 2025-11-29
 
 ### 性能改进

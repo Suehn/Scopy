@@ -20,12 +20,14 @@
 		26ADD078C8FC126181CDD88A /* MockClipboardService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5DC8ECDED07EA5FAFB2923F3 /* MockClipboardService.swift */; };
 		2E3AC6F5BBFB8EC0EEA7BEFB /* TestDataFactory.swift in Sources */ = {isa = PBXBuildFile; fileRef = 98A81F5BEC4470C8DA1B4864 /* TestDataFactory.swift */; };
 		34825C28F41847C69922DFF6 /* ClipboardServiceProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = D42C3C8A2830B231BCC604B3 /* ClipboardServiceProtocol.swift */; };
+		3B3174B368AB94ED39C66288 /* IconCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03D97296ACC41AC0ADB05563 /* IconCache.swift */; };
 		3F35F1D85C8C126C9CE04179 /* FloatingPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = DDB1A51BEEACE7981D4FBBCD /* FloatingPanel.swift */; };
 		401BCD4DE9684844FEFE7136 /* HeaderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4059379693354F029F0086D1 /* HeaderView.swift */; };
 		43B8612CECC8A1768F74742B /* ClipboardMonitorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F940F6182C4E298B3511A044 /* ClipboardMonitorTests.swift */; };
 		45DB5C84486FE70FDAECC1D1 /* FooterView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 21D905D4EC55C2920DDD4A26 /* FooterView.swift */; };
 		4A407FF2188666F7A03835DE /* PerformanceProfiler.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADB79901F7DEAC407EBADE89 /* PerformanceProfiler.swift */; };
 		4A95D8E07E139A11201F4027 /* ConcurrencyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3527EAD22A82840AEDF3F820 /* ConcurrencyTests.swift */; };
+		4C7FFF90F6A15A8B043F01A8 /* IconCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03D97296ACC41AC0ADB05563 /* IconCache.swift */; };
 		4F1BE0CF444C5F07BEE16E97 /* MockServices.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2D09BA0550F18A7F9EF6A074 /* MockServices.swift */; };
 		4F98B4BEB7AEE0ED458F28D0 /* ScopyComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F7A2545CE101420AEDEBB8F /* ScopyComponents.swift */; };
 		56DD95C12F4A8CD6DCD8C837 /* HistoryListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8C25A96207E0DA2587E7AFBB /* HistoryListView.swift */; };
@@ -93,6 +95,7 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		03D97296ACC41AC0ADB05563 /* IconCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IconCache.swift; sourceTree = "<group>"; };
 		08E21526EAB3F1DCCB32D679 /* PerformanceMetrics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PerformanceMetrics.swift; sourceTree = "<group>"; };
 		094F7E96DC5DC3FD8002CD7E /* ScopyUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ScopyUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		0F7A2545CE101420AEDEBB8F /* ScopyComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScopyComponents.swift; sourceTree = "<group>"; };
@@ -258,6 +261,7 @@
 			children = (
 				14697A63C7CD12FC822399C0 /* ClipboardMonitor.swift */,
 				6AC510668FC9C0ADDA64E813 /* HotKeyService.swift */,
+				03D97296ACC41AC0ADB05563 /* IconCache.swift */,
 				5DC8ECDED07EA5FAFB2923F3 /* MockClipboardService.swift */,
 				08E21526EAB3F1DCCB32D679 /* PerformanceMetrics.swift */,
 				ADB79901F7DEAC407EBADE89 /* PerformanceProfiler.swift */,
@@ -479,6 +483,7 @@
 				5DA66D3B6875314AE256E8D7 /* HistoryListView.swift in Sources */,
 				E02BBEE14B763FC2FBBF7B73 /* HotKeyService.swift in Sources */,
 				6290407CDC493685A38B5DED /* HotKeyServiceTests.swift in Sources */,
+				4C7FFF90F6A15A8B043F01A8 /* IconCache.swift in Sources */,
 				E4ABCC84D78DE586451E805D /* IntegrationTests.swift in Sources */,
 				80C5D92E52A700850F1E5997 /* Localization.swift in Sources */,
 				19E1A249F8ABAA61C2F65238 /* MockClipboardService.swift in Sources */,
@@ -521,6 +526,7 @@
 				A6F593655A42AB21104FC556 /* HeaderView.swift in Sources */,
 				56DD95C12F4A8CD6DCD8C837 /* HistoryListView.swift in Sources */,
 				6A3C49D4AFE7BC50EE38FC27 /* HotKeyService.swift in Sources */,
+				3B3174B368AB94ED39C66288 /* IconCache.swift in Sources */,
 				94AB18BED4E8018E91611810 /* Localization.swift in Sources */,
 				26ADD078C8FC126181CDD88A /* MockClipboardService.swift in Sources */,
 				8299CDBD5930FE596EBBAE3B /* PerformanceMetrics.swift in Sources */,

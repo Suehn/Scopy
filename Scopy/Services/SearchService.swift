@@ -280,22 +280,15 @@ final class SearchService {
         }
     }
 
-    /// v0.10.7: 使用锁保护缓存刷新，确保原子性检查
+    /// v0.12: 修复竞态条件 - 所有检查都在锁内进行
     private func refreshCacheIfNeeded() throws {
-        let now = Date()
-
-        // 先检查是否需要刷新（不需要则直接返回）
-        let needsRefresh = recentItemsCache.isEmpty || now.timeIntervalSince(cacheTimestamp) > cacheDuration
-        guard needsRefresh else { return }
-
-        // 加锁保护并发检查和刷新
         cacheRefreshLock.lock()
         defer { cacheRefreshLock.unlock() }
 
-        // 再次检查（double-check pattern）
-        guard !cacheRefreshInProgress else { return }
-        let stillNeedsRefresh = recentItemsCache.isEmpty || now.timeIntervalSince(cacheTimestamp) > cacheDuration
-        guard stillNeedsRefresh else { return }
+        // 所有检查都在锁内进行，确保原子性
+        let now = Date()
+        let needsRefresh = recentItemsCache.isEmpty || now.timeIntervalSince(cacheTimestamp) > cacheDuration
+        guard needsRefresh && !cacheRefreshInProgress else { return }
 
         // 设置刷新标志
         cacheRefreshInProgress = true
@@ -306,9 +299,11 @@ final class SearchService {
         cacheTimestamp = now
     }
 
+    /// v0.12: 完整缓存失效，同时清除搜索总数缓存
     func invalidateCache() {
         recentItemsCache = []
         cacheTimestamp = .distantPast
+        cachedSearchTotal = nil
     }
 
     // MARK: - Fuzzy Matching
@@ -415,7 +410,7 @@ final class SearchService {
         }
     }
 
-    /// v0.10.8: 带超时的队列执行
+    /// v0.12: 带超时的队列执行，确保两个任务都被正确清理
     private func runOnQueueWithTimeout<T>(_ work: @escaping () throws -> T) async throws -> T {
         let task = Task.detached(priority: .userInitiated) { [self] in
             try await self.runOnQueue(work)
@@ -426,7 +421,11 @@ final class SearchService {
             task.cancel()
         }
 
-        defer { timeoutTask.cancel() }
+        // 确保两个任务都被取消，防止任务泄漏
+        defer {
+            timeoutTask.cancel()
+            task.cancel()
+        }
 
         do {
             return try await task.value

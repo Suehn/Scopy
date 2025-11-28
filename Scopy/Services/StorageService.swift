@@ -733,6 +733,7 @@ final class StorageService {
     /// v0.10.4: 添加注释说明无限循环防护
     /// v0.10.7: 添加最大迭代次数限制
     /// v0.10.8: 批量删除优化，使用缓存避免重复遍历文件系统
+    /// v0.12: 并发删除外部文件，提升清理性能
     private func cleanupExternalStorage(targetBytes: Int) throws {
         // 使缓存失效，确保获取最新大小
         invalidateExternalSizeCache()
@@ -743,9 +744,9 @@ final class StorageService {
         // 获取有外部存储的最旧非置顶项目
         while currentSize > targetBytes && iterations < maxIterations {
             iterations += 1
-            // 批量获取（包含 size_bytes 用于更新 currentSize）
+            // 批量获取（包含 size_bytes 和 storage_ref 用于并发删除）
             let sql = """
-                SELECT id, size_bytes FROM clipboard_items
+                SELECT id, size_bytes, storage_ref FROM clipboard_items
                 WHERE is_pinned = 0 AND storage_ref IS NOT NULL
                 ORDER BY last_used_at ASC
                 LIMIT 100
@@ -755,12 +756,14 @@ final class StorageService {
                 throw StorageError.queryFailed(String(cString: sqlite3_errmsg(db)))
             }
 
-            var itemsToDelete: [(id: UUID, size: Int)] = []
+            var itemsToDelete: [(id: UUID, size: Int, storageRef: String)] = []
             while sqlite3_step(stmt) == SQLITE_ROW {
                 if let cStr = sqlite3_column_text(stmt, 0),
-                   let id = UUID(uuidString: String(cString: cStr)) {
+                   let id = UUID(uuidString: String(cString: cStr)),
+                   let refCStr = sqlite3_column_text(stmt, 2) {
                     let size = Int(sqlite3_column_int(stmt, 1))
-                    itemsToDelete.append((id, size))
+                    let storageRef = String(cString: refCStr)
+                    itemsToDelete.append((id, size, storageRef))
                 }
             }
             sqlite3_finalize(stmt)
@@ -768,11 +771,23 @@ final class StorageService {
             // 没有可删除的项目（全部被 pin 或无外部存储），退出循环防止无限循环
             if itemsToDelete.isEmpty { break }
 
-            // 批量删除并更新 currentSize（避免重复遍历文件系统）
-            for (id, size) in itemsToDelete {
-                try deleteItem(id)
-                currentSize -= size
-                if currentSize <= targetBytes { break }
+            // 确定需要删除的项目（直到达到目标大小）
+            var itemsToActuallyDelete: [(id: UUID, size: Int, storageRef: String)] = []
+            var sizeToDelete = 0
+            for item in itemsToDelete {
+                itemsToActuallyDelete.append(item)
+                sizeToDelete += item.size
+                if currentSize - sizeToDelete <= targetBytes { break }
+            }
+
+            // v0.12: 并发删除外部文件
+            let filesToDelete = itemsToActuallyDelete.map { $0.storageRef }
+            deleteFilesInParallel(filesToDelete)
+
+            // 批量删除数据库记录（SQLite 操作必须串行）
+            for item in itemsToActuallyDelete {
+                try deleteItemFromDB(item.id)
+                currentSize -= item.size
             }
         }
 
@@ -781,6 +796,39 @@ final class StorageService {
 
         if iterations >= maxIterations {
             print("⚠️ cleanupExternalStorage: 达到最大迭代次数 \(maxIterations)")
+        }
+    }
+
+    /// v0.12: 并发删除文件，提升清理性能
+    private func deleteFilesInParallel(_ files: [String]) {
+        let group = DispatchGroup()
+        let queue = DispatchQueue(label: "com.scopy.cleanup", attributes: .concurrent)
+
+        for file in files {
+            group.enter()
+            queue.async {
+                defer { group.leave() }
+                try? FileManager.default.removeItem(atPath: file)
+            }
+        }
+
+        // 等待所有文件删除完成
+        group.wait()
+    }
+
+    /// v0.12: 仅删除数据库记录（不删除文件，用于并发清理场景）
+    private func deleteItemFromDB(_ id: UUID) throws {
+        let sql = "DELETE FROM clipboard_items WHERE id = ?"
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            throw StorageError.deleteFailed(String(cString: sqlite3_errmsg(db)))
+        }
+        defer { sqlite3_finalize(stmt) }
+
+        sqlite3_bind_text(stmt, 1, id.uuidString, -1, SQLITE_TRANSIENT)
+
+        guard sqlite3_step(stmt) == SQLITE_DONE else {
+            throw StorageError.deleteFailed(String(cString: sqlite3_errmsg(db)))
         }
     }
 

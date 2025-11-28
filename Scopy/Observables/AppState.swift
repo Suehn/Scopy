@@ -186,8 +186,20 @@ final class AppState {
     func loadRecentApps() async {
         do {
             recentApps = try await service.getRecentApps(limit: 10)
+            // v0.12: 预加载应用图标，避免滚动时主线程阻塞
+            preloadAppIcons()
         } catch {
             print("Failed to load recent apps: \(error)")
+        }
+    }
+
+    /// v0.12: 后台预加载应用图标
+    private func preloadAppIcons() {
+        let appsToPreload = recentApps
+        Task.detached(priority: .background) {
+            for bundleID in appsToPreload {
+                IconCacheSync.shared.preloadIcon(bundleID: bundleID)
+            }
         }
     }
 

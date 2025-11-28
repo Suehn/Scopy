@@ -143,15 +143,20 @@ struct HistoryItemView: View, Equatable {
         }
     }
 
-    /// v0.10.4: 使用锁保护静态缓存访问
-    /// v0.10.8: 添加 LRU 清理，防止内存无限增长
+    /// v0.12: 优先使用全局预加载缓存，避免主线程阻塞
     private var appIcon: NSImage? {
         guard let bundleID = item.appBundleID else { return nil }
 
+        // 优先从全局预加载缓存获取（同步，无阻塞）
+        if let cached = IconCacheSync.shared.getIcon(bundleID: bundleID) {
+            return cached
+        }
+
+        // 回退到本地静态缓存
         Self.iconCacheLock.lock()
         defer { Self.iconCacheLock.unlock() }
 
-        // 检查缓存
+        // 检查本地缓存
         if let cached = Self.iconCache[bundleID] {
             // 更新 LRU 访问顺序
             if let index = Self.iconAccessOrder.firstIndex(of: bundleID) {
@@ -161,7 +166,7 @@ struct HistoryItemView: View, Equatable {
             return cached
         }
 
-        // 缓存未命中，获取图标
+        // 缓存未命中，获取图标（仅在预加载未覆盖时执行）
         guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) else {
             return nil
         }
@@ -174,9 +179,12 @@ struct HistoryItemView: View, Equatable {
             Self.iconAccessOrder.removeFirst()
         }
 
-        // 写入缓存
+        // 写入本地缓存
         Self.iconCache[bundleID] = icon
         Self.iconAccessOrder.append(bundleID)
+
+        // 同时写入全局缓存，供后续使用
+        IconCacheSync.shared.setIcon(icon, for: bundleID)
 
         return icon
     }
@@ -434,12 +442,15 @@ struct HistoryItemView: View, Equatable {
     // MARK: - Preview Task
     // v0.10.3: 使用 Task 替代 Timer，自动取消防止泄漏
 
+    /// v0.12: 完善取消检查，获取数据后也检查取消状态
     private func startPreviewTask() {
         cancelPreviewTask()
 
         hoverPreviewTask = Task {
             // 先获取图片数据
             if let data = await getImageData() {
+                // v0.12: 获取数据后检查取消状态
+                guard !Task.isCancelled else { return }
                 await MainActor.run {
                     previewImageData = data
                 }
@@ -476,11 +487,9 @@ struct HistoryItemView: View, Equatable {
         Self.relativeFormatter.localizedString(for: item.lastUsedAt, relativeTo: Date())
     }
 
+    /// v0.12: 使用全局缓存获取应用名称，避免重复调用 NSWorkspace
     private func appName(for bundleID: String) -> String {
-        if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) {
-            return url.deletingPathExtension().lastPathComponent
-        }
-        return bundleID
+        return IconCacheSync.shared.getAppName(bundleID: bundleID)
     }
 
     private func formatBytes(_ bytes: Int) -> String {
