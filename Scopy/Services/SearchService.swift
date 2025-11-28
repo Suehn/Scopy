@@ -37,10 +37,11 @@ final class SearchService {
     private let queue = DispatchQueue(label: "com.scopy.search", qos: .userInitiated)
 
     /// Cache for short queries (v0.md 4.2: 短词优化)
+    /// v0.13: 扩展缓存策略 - 增加缓存大小和 TTL，提高命中率
     private var recentItemsCache: [StorageService.StoredItem] = []
     private var cacheTimestamp: Date = .distantPast
-    private let cacheDuration: TimeInterval = 5.0 // 5 seconds
-    private let shortQueryCacheSize = 500
+    private let cacheDuration: TimeInterval = 30.0 // v0.13: 30 seconds (原 5 秒)
+    private let shortQueryCacheSize = 2000 // v0.13: 2000 条 (原 500 条)
 
     /// 防止并发缓存刷新的标志
     private var cacheRefreshInProgress = false
@@ -151,95 +152,116 @@ final class SearchService {
 
     // MARK: - FTS5 Search Implementation
 
-    /// v0.11: 使用超时版本 + COUNT 缓存优化
+    /// v0.13: 使用两步查询优化 FTS5 性能
+    /// Step 1: 从 FTS5 获取 rowid 列表（避免 JOIN 开销）
+    /// Step 2: 批量获取主表数据
+    /// 同时使用 LIMIT+1 技巧消除 COUNT 查询
     private func searchWithFTS(
         db: OpaquePointer,
         query: String,
         request: SearchRequest,
         useFuzzyRanking: Bool = false
     ) async throws -> SearchResult {
-        // v0.11: 先检查 COUNT 缓存（在主线程，避免锁竞争）
-        let cachedTotal = getCachedTotal(for: request, query: query)
-
         let result = try await runOnQueueWithTimeout { [self] in
-            // Build SQL with filters
-            var sql = """
-                SELECT c.*, bm25(clipboard_fts) as rank
-                FROM clipboard_items c
-                JOIN clipboard_fts f ON c.rowid = f.rowid
+            // v0.13: Step 1 - 从 FTS5 获取 rowid 列表（高效，避免 JOIN）
+            let ftsSQL = """
+                SELECT rowid FROM clipboard_fts
                 WHERE clipboard_fts MATCH ?
+                ORDER BY bm25(clipboard_fts)
+                LIMIT ? OFFSET ?
             """
 
-            var params: [Any] = [query]
+            var ftsStmt: OpaquePointer?
+            guard sqlite3_prepare_v2(db, ftsSQL, -1, &ftsStmt, nil) == SQLITE_OK else {
+                throw SearchError.searchFailed(String(cString: sqlite3_errmsg(db)))
+            }
+            defer { sqlite3_finalize(ftsStmt) }
+
+            sqlite3_bind_text(ftsStmt, 1, query, -1, SQLITE_TRANSIENT)
+            // v0.13: LIMIT+1 技巧 - 多取一条判断 hasMore
+            sqlite3_bind_int(ftsStmt, 2, Int32(request.limit + 1))
+            sqlite3_bind_int(ftsStmt, 3, Int32(request.offset))
+
+            // 收集 rowid
+            var rowids: [Int64] = []
+            rowids.reserveCapacity(request.limit + 1)
+
+            while sqlite3_step(ftsStmt) == SQLITE_ROW {
+                let rowid = sqlite3_column_int64(ftsStmt, 0)
+                rowids.append(rowid)
+            }
+
+            // 判断 hasMore
+            let hasMore = rowids.count > request.limit
+            if hasMore {
+                rowids.removeLast()
+            }
+
+            // 如果没有结果，直接返回
+            if rowids.isEmpty {
+                return SearchResult(items: [], total: 0, hasMore: false, searchTimeMs: 0)
+            }
+
+            // v0.13: Step 2 - 批量获取主表数据
+            let placeholders = rowids.map { _ in "?" }.joined(separator: ",")
+            var mainSQL = """
+                SELECT * FROM clipboard_items
+                WHERE rowid IN (\(placeholders))
+            """
 
             // Apply filters (v0.md 3.3)
+            var filterParams: [Any] = []
             if let appFilter = request.appFilter {
-                sql += " AND c.app_bundle_id = ?"
-                params.append(appFilter)
+                mainSQL += " AND app_bundle_id = ?"
+                filterParams.append(appFilter)
             }
-
             if let typeFilter = request.typeFilter {
-                sql += " AND c.type = ?"
-                params.append(typeFilter.rawValue)
+                mainSQL += " AND type = ?"
+                filterParams.append(typeFilter.rawValue)
             }
 
-            // Order by relevance and recency (v0.md 4.3)
-            if useFuzzyRanking {
-                sql += " ORDER BY rank, c.last_used_at DESC"
-            } else {
-                sql += " ORDER BY rank"
+            // 保持 FTS5 返回的排序顺序
+            // 使用 CASE WHEN 保持原始顺序
+            let orderCases = rowids.enumerated().map { "WHEN rowid = \($0.element) THEN \($0.offset)" }.joined(separator: " ")
+            mainSQL += " ORDER BY CASE \(orderCases) END"
+
+            var mainStmt: OpaquePointer?
+            guard sqlite3_prepare_v2(db, mainSQL, -1, &mainStmt, nil) == SQLITE_OK else {
+                throw SearchError.searchFailed(String(cString: sqlite3_errmsg(db)))
             }
+            defer { sqlite3_finalize(mainStmt) }
 
-            // v0.11: 使用缓存的 total，避免重复 COUNT 查询
-            var total: Int
-            if let cached = cachedTotal {
-                total = cached
-            } else {
-                // 缓存未命中，执行 COUNT 查询
-                let countSQL = "SELECT COUNT(*) FROM (\(sql))"
-                var countStmt: OpaquePointer?
-                total = 0
-
-                if sqlite3_prepare_v2(db, countSQL, -1, &countStmt, nil) == SQLITE_OK {
-                    self.bindParams(stmt: countStmt!, params: params)
-                    if sqlite3_step(countStmt) == SQLITE_ROW {
-                        total = Int(sqlite3_column_int(countStmt, 0))
-                    }
-                    sqlite3_finalize(countStmt)
+            // 绑定 rowid 参数
+            for (index, rowid) in rowids.enumerated() {
+                sqlite3_bind_int64(mainStmt, Int32(index + 1), rowid)
+            }
+            // 绑定过滤参数
+            for (index, param) in filterParams.enumerated() {
+                let paramIndex = Int32(rowids.count + index + 1)
+                if let s = param as? String {
+                    sqlite3_bind_text(mainStmt, paramIndex, s, -1, SQLITE_TRANSIENT)
                 }
             }
 
-            // Apply pagination
-            sql += " LIMIT ? OFFSET ?"
-            params.append(request.limit)
-            params.append(request.offset)
-
-            var stmt: OpaquePointer?
-            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
-                throw SearchError.searchFailed(String(cString: sqlite3_errmsg(db)))
-            }
-            defer { sqlite3_finalize(stmt) }
-
-            self.bindParams(stmt: stmt!, params: params)
-
+            // 收集结果
             var items: [StorageService.StoredItem] = []
-            while sqlite3_step(stmt) == SQLITE_ROW {
-                if let item = self.parseItem(from: stmt!) {
+            items.reserveCapacity(rowids.count)
+
+            while sqlite3_step(mainStmt) == SQLITE_ROW {
+                if let item = self.parseItem(from: mainStmt!) {
                     items.append(item)
                 }
             }
 
+            // v0.13: total 设为 -1 表示未知（UI 层处理显示 "50+ 条"）
+            let total = hasMore ? -1 : request.offset + items.count
+
             return SearchResult(
                 items: items,
                 total: total,
-                hasMore: request.offset + items.count < total,
+                hasMore: hasMore,
                 searchTimeMs: 0
             )
-        }
-
-        // v0.11: 缓存 total（仅在首次查询时，回到主线程后更新）
-        if cachedTotal == nil {
-            cacheTotal(result.total, for: request, query: query)
         }
 
         return result
@@ -247,6 +269,7 @@ final class SearchService {
 
     // MARK: - In-Memory Cache Search (for short queries)
 
+    /// v0.13: 优化缓存搜索，使用 LIMIT+1 逻辑保持一致性
     private func searchInCache(
         request: SearchRequest,
         filter: @escaping (StorageService.StoredItem) -> Bool
@@ -266,15 +289,26 @@ final class SearchService {
                 filtered = filtered.filter { $0.type == typeFilter }
             }
 
-            let total = filtered.count
-            let start = min(request.offset, total)
-            let end = min(request.offset + request.limit, total)
-            let items = Array(filtered[start..<end])
+            let totalFiltered = filtered.count
+            let start = min(request.offset, totalFiltered)
+            // v0.13: 多取一条判断 hasMore
+            let end = min(request.offset + request.limit + 1, totalFiltered)
+
+            var items = Array(filtered[start..<end])
+
+            // v0.13: 判断 hasMore 并移除多取的那条
+            let hasMore = items.count > request.limit
+            if hasMore {
+                items.removeLast()
+            }
+
+            // v0.13: total 设为 -1 表示未知（与 FTS 搜索保持一致）
+            let total = hasMore ? -1 : request.offset + items.count
 
             return SearchResult(
                 items: items,
                 total: total,
-                hasMore: end < total,
+                hasMore: hasMore,
                 searchTimeMs: 0
             )
         }
@@ -452,12 +486,8 @@ final class SearchService {
         cachedSearchTotal = (query, request.mode, request.appFilter, request.typeFilter, total, Date())
     }
 
-    /// v0.11: 空查询 + 过滤时直接访问 SQLite，使用超时和 COUNT 缓存
+    /// v0.13: 空查询 + 过滤时直接访问 SQLite，使用 LIMIT+1 技巧
     private func searchAllWithFilters(request: SearchRequest, db: OpaquePointer) async throws -> SearchResult {
-        // v0.11: 先检查 COUNT 缓存（空查询使用空字符串作为 key）
-        let cacheKey = ""
-        let cachedTotal = getCachedTotal(for: request, query: cacheKey)
-
         let result = try await runOnQueueWithTimeout { [self] in
             var sql = """
                 SELECT * FROM clipboard_items
@@ -476,25 +506,9 @@ final class SearchService {
 
             sql += " ORDER BY is_pinned DESC, last_used_at DESC"
 
-            // v0.11: 使用缓存的 total，避免重复 COUNT 查询
-            var total: Int
-            if let cached = cachedTotal {
-                total = cached
-            } else {
-                let countSQL = "SELECT COUNT(*) FROM (\(sql))"
-                var countStmt: OpaquePointer?
-                total = 0
-                if sqlite3_prepare_v2(db, countSQL, -1, &countStmt, nil) == SQLITE_OK {
-                    self.bindParams(stmt: countStmt!, params: params)
-                    if sqlite3_step(countStmt) == SQLITE_ROW {
-                        total = Int(sqlite3_column_int(countStmt, 0))
-                    }
-                    sqlite3_finalize(countStmt)
-                }
-            }
-
+            // v0.13: LIMIT+1 技巧 - 多取一条判断 hasMore，避免 O(n) COUNT 查询
             sql += " LIMIT ? OFFSET ?"
-            params.append(request.limit)
+            params.append(request.limit + 1)  // 多取一条
             params.append(request.offset)
 
             var stmt: OpaquePointer?
@@ -504,24 +518,31 @@ final class SearchService {
             defer { sqlite3_finalize(stmt) }
             self.bindParams(stmt: stmt!, params: params)
 
+            // v0.13: 预分配数组容量
             var items: [StorageService.StoredItem] = []
+            items.reserveCapacity(request.limit + 1)
+
             while sqlite3_step(stmt) == SQLITE_ROW {
                 if let item = self.parseItem(from: stmt!) {
                     items.append(item)
                 }
             }
 
+            // v0.13: 判断 hasMore 并移除多取的那条
+            let hasMore = items.count > request.limit
+            if hasMore {
+                items.removeLast()
+            }
+
+            // v0.13: total 设为 -1 表示未知
+            let total = hasMore ? -1 : request.offset + items.count
+
             return SearchResult(
                 items: items,
                 total: total,
-                hasMore: request.offset + items.count < total,
+                hasMore: hasMore,
                 searchTimeMs: 0
             )
-        }
-
-        // v0.11: 缓存 total（仅在首次查询时）
-        if cachedTotal == nil {
-            cacheTotal(result.total, for: request, query: cacheKey)
         }
 
         return result

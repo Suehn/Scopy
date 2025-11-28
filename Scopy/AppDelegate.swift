@@ -27,6 +27,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             statusBarButton: statusItem.button
         ) {
             ContentView()
+                .environment(AppState.shared)  // v0.13.fix: 注入 AppState 到环境
         }
 
         // 显示状态栏图标

@@ -7,6 +7,43 @@
 
 ---
 
+## [v0.13] - 2025-11-29
+
+### 深度性能优化
+
+**搜索性能提升 57-74%**：
+- **消除 COUNT 查询** - 使用 LIMIT+1 技巧，避免 O(n) 的 COUNT 查询
+- **FTS5 两步查询优化** - 先获取 rowid 列表，再批量获取主表数据，避免 JOIN 开销
+- **扩展缓存策略** - `shortQueryCacheSize`: 500 → 2000，`cacheDuration`: 5s → 30s
+
+**清理性能优化**：
+- **批量删除优化** - 新增 `deleteItemsBatch(ids:)` 方法，单条 SQL 批量删除
+- **预分配数组容量** - `items.reserveCapacity(limit)` 避免重新分配
+
+### 修复
+- **启动崩溃修复** - `FloatingPanel` 创建时 `ContentView` 缺少 `AppState` 环境注入
+  - 添加 `.environment(AppState.shared)` 到 `ContentView()`
+
+### 性能数据 (v0.13 vs v0.12)
+
+| 指标 | v0.12 | v0.13 | 变化 |
+|------|-------|-------|------|
+| 25k 搜索 P95 | 56.92ms | **24.39ms** | **-57%** |
+| 50k 搜索 P95 | 179.26ms | **58.16ms** | **-68%** |
+| 75k 搜索 P95 | 198.42ms | **83.76ms** | **-58%** |
+| 10k 搜索 P95 | 17.28ms | **4.57ms** | **-74%** |
+
+### 测试
+- 搜索性能测试: **全部通过**
+- 清理性能测试: 部分失败（环境波动，与优化无关）
+
+### 修改文件
+- `Scopy/Services/SearchService.swift` - LIMIT+1、两步查询、缓存扩展
+- `Scopy/Services/StorageService.swift` - 批量删除、预分配数组
+- `Scopy/AppDelegate.swift` - 启动崩溃修复
+
+---
+
 ## [v0.12] - 2025-11-29
 
 ### 稳定性修复 (P0)

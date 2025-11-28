@@ -368,6 +368,7 @@ final class StorageService {
     }
 
     /// Fetch recent items with pagination (v0.md 2.2)
+    /// v0.13: 预分配数组容量，避免多次重新分配
     func fetchRecent(limit: Int, offset: Int) throws -> [StoredItem] {
         guard db != nil else { throw StorageError.databaseNotOpen }
 
@@ -386,7 +387,10 @@ final class StorageService {
         sqlite3_bind_int(stmt, 1, Int32(limit))
         sqlite3_bind_int(stmt, 2, Int32(offset))
 
+        // v0.13: 预分配数组容量
         var items: [StoredItem] = []
+        items.reserveCapacity(limit)
+
         while sqlite3_step(stmt) == SQLITE_ROW {
             if let stmt = stmt, let item = parseItem(from: stmt) {
                 items.append(item)
@@ -638,27 +642,50 @@ final class StorageService {
     }
 
     /// v0.10.4: 检查 sqlite3_step 返回值
+    /// v0.13: 优化 - 先删除外部文件，再批量删除数据库记录（分批处理避免 SQL 过长）
     private func cleanupByCount(target: Int) throws {
-        // Delete oldest non-pinned items beyond limit
-        let sql = """
-            DELETE FROM clipboard_items
-            WHERE id IN (
-                SELECT id FROM clipboard_items
-                WHERE is_pinned = 0
-                ORDER BY last_used_at ASC
-                LIMIT (SELECT MAX(0, COUNT(*) - ?) FROM clipboard_items WHERE is_pinned = 0)
-            )
+        // 首先获取要删除的项目（包含外部存储引用）
+        let selectSQL = """
+            SELECT id, storage_ref FROM clipboard_items
+            WHERE is_pinned = 0
+            ORDER BY last_used_at ASC
+            LIMIT (SELECT MAX(0, COUNT(*) - ?) FROM clipboard_items WHERE is_pinned = 0)
         """
-        var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
-            throw StorageError.deleteFailed(String(cString: sqlite3_errmsg(db)))
+        var selectStmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, selectSQL, -1, &selectStmt, nil) == SQLITE_OK else {
+            throw StorageError.queryFailed(String(cString: sqlite3_errmsg(db)))
         }
-        defer { sqlite3_finalize(stmt) }
+        defer { sqlite3_finalize(selectStmt) }
 
-        sqlite3_bind_int(stmt, 1, Int32(target))
-        let result = sqlite3_step(stmt)
-        guard result == SQLITE_DONE || result == SQLITE_ROW else {
-            throw StorageError.deleteFailed(String(cString: sqlite3_errmsg(db)))
+        sqlite3_bind_int(selectStmt, 1, Int32(target))
+
+        var idsToDelete: [UUID] = []
+        var filesToDelete: [String] = []
+
+        while sqlite3_step(selectStmt) == SQLITE_ROW {
+            if let cStr = sqlite3_column_text(selectStmt, 0),
+               let id = UUID(uuidString: String(cString: cStr)) {
+                idsToDelete.append(id)
+                if let refCStr = sqlite3_column_text(selectStmt, 1) {
+                    filesToDelete.append(String(cString: refCStr))
+                }
+            }
+        }
+
+        // 如果没有要删除的项目，直接返回
+        if idsToDelete.isEmpty { return }
+
+        // v0.13: 并发删除外部文件
+        if !filesToDelete.isEmpty {
+            deleteFilesInParallel(filesToDelete)
+        }
+
+        // v0.13: 分批删除数据库记录（每批 500 条，避免 SQL 过长）
+        let batchSize = 500
+        for batchStart in stride(from: 0, to: idsToDelete.count, by: batchSize) {
+            let batchEnd = min(batchStart + batchSize, idsToDelete.count)
+            let batch = Array(idsToDelete[batchStart..<batchEnd])
+            try deleteItemsBatch(ids: batch)
         }
     }
 
@@ -683,6 +710,7 @@ final class StorageService {
     /// v0.10.4: 修复无限循环风险，当没有可删除项目时立即退出
     /// v0.10.7: 添加最大迭代次数限制，防止极端情况下的无限循环
     /// v0.10.8: 批量删除优化，避免每次迭代都执行 SUM 查询（性能目标 ≤500ms）
+    /// v0.13: 使用批量 DELETE SQL 替代单项删除，消除 N+1 查询问题
     private func cleanupBySize(targetBytes: Int) throws {
         var currentSize = try getTotalSize()  // 只查询一次
         var iterations = 0
@@ -691,9 +719,9 @@ final class StorageService {
         // Delete oldest items until under target size
         while currentSize > targetBytes && iterations < maxIterations {
             iterations += 1
-            // 批量获取最旧的非 pin 项目（包含 size_bytes 用于更新 currentSize）
+            // 批量获取最旧的非 pin 项目（包含 size_bytes 和 storage_ref）
             let sql = """
-                SELECT id, size_bytes FROM clipboard_items
+                SELECT id, size_bytes, storage_ref FROM clipboard_items
                 WHERE is_pinned = 0
                 ORDER BY last_used_at ASC
                 LIMIT 100
@@ -703,12 +731,13 @@ final class StorageService {
                 throw StorageError.queryFailed(String(cString: sqlite3_errmsg(db)))
             }
 
-            var itemsToDelete: [(id: UUID, size: Int)] = []
+            var itemsToDelete: [(id: UUID, size: Int, storageRef: String?)] = []
             while sqlite3_step(stmt) == SQLITE_ROW {
                 if let cStr = sqlite3_column_text(stmt, 0),
                    let id = UUID(uuidString: String(cString: cStr)) {
                     let size = Int(sqlite3_column_int(stmt, 1))
-                    itemsToDelete.append((id, size))
+                    let storageRef = sqlite3_column_text(stmt, 2).map { String(cString: $0) }
+                    itemsToDelete.append((id, size, storageRef))
                 }
             }
             sqlite3_finalize(stmt)
@@ -716,16 +745,56 @@ final class StorageService {
             // 没有可删除的项目（全部被 pin），退出循环防止无限循环
             if itemsToDelete.isEmpty { break }
 
-            // 批量删除并更新 currentSize（避免重复查询 SUM）
-            for (id, size) in itemsToDelete {
-                try deleteItem(id)
-                currentSize -= size
-                if currentSize <= targetBytes { break }
+            // v0.13: 确定需要删除的项目（直到达到目标大小）
+            var idsToDelete: [UUID] = []
+            var sizeToDelete = 0
+            var filesToDelete: [String] = []
+
+            for item in itemsToDelete {
+                idsToDelete.append(item.id)
+                sizeToDelete += item.size
+                if let ref = item.storageRef {
+                    filesToDelete.append(ref)
+                }
+                if currentSize - sizeToDelete <= targetBytes { break }
             }
+
+            // v0.13: 批量删除外部文件（并发）
+            if !filesToDelete.isEmpty {
+                deleteFilesInParallel(filesToDelete)
+            }
+
+            // v0.13: 批量删除数据库记录（单条 SQL，单事务）
+            try deleteItemsBatch(ids: idsToDelete)
+            currentSize -= sizeToDelete
         }
 
         if iterations >= maxIterations {
             print("⚠️ cleanupBySize: 达到最大迭代次数 \(maxIterations)")
+        }
+    }
+
+    /// v0.13: 批量删除多个项目（单条 SQL，单事务，避免 N+1 查询）
+    private func deleteItemsBatch(ids: [UUID]) throws {
+        guard !ids.isEmpty else { return }
+
+        // 构建 IN 子句的占位符
+        let placeholders = ids.map { _ in "?" }.joined(separator: ",")
+        let sql = "DELETE FROM clipboard_items WHERE id IN (\(placeholders))"
+
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            throw StorageError.deleteFailed(String(cString: sqlite3_errmsg(db)))
+        }
+        defer { sqlite3_finalize(stmt) }
+
+        // 绑定所有 ID
+        for (index, id) in ids.enumerated() {
+            sqlite3_bind_text(stmt, Int32(index + 1), id.uuidString, -1, SQLITE_TRANSIENT)
+        }
+
+        guard sqlite3_step(stmt) == SQLITE_DONE else {
+            throw StorageError.deleteFailed(String(cString: sqlite3_errmsg(db)))
         }
     }
 
@@ -734,6 +803,7 @@ final class StorageService {
     /// v0.10.7: 添加最大迭代次数限制
     /// v0.10.8: 批量删除优化，使用缓存避免重复遍历文件系统
     /// v0.12: 并发删除外部文件，提升清理性能
+    /// v0.13: 使用批量 DELETE SQL 替代单项删除，消除 N+1 查询问题
     private func cleanupExternalStorage(targetBytes: Int) throws {
         // 使缓存失效，确保获取最新大小
         invalidateExternalSizeCache()
@@ -771,24 +841,24 @@ final class StorageService {
             // 没有可删除的项目（全部被 pin 或无外部存储），退出循环防止无限循环
             if itemsToDelete.isEmpty { break }
 
-            // 确定需要删除的项目（直到达到目标大小）
-            var itemsToActuallyDelete: [(id: UUID, size: Int, storageRef: String)] = []
+            // v0.13: 确定需要删除的项目（直到达到目标大小）
+            var idsToDelete: [UUID] = []
             var sizeToDelete = 0
+            var filesToDelete: [String] = []
+
             for item in itemsToDelete {
-                itemsToActuallyDelete.append(item)
+                idsToDelete.append(item.id)
                 sizeToDelete += item.size
+                filesToDelete.append(item.storageRef)
                 if currentSize - sizeToDelete <= targetBytes { break }
             }
 
             // v0.12: 并发删除外部文件
-            let filesToDelete = itemsToActuallyDelete.map { $0.storageRef }
             deleteFilesInParallel(filesToDelete)
 
-            // 批量删除数据库记录（SQLite 操作必须串行）
-            for item in itemsToActuallyDelete {
-                try deleteItemFromDB(item.id)
-                currentSize -= item.size
-            }
+            // v0.13: 批量删除数据库记录（单条 SQL，单事务）
+            try deleteItemsBatch(ids: idsToDelete)
+            currentSize -= sizeToDelete
         }
 
         // 清理完成后使缓存失效
