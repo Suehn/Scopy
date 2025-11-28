@@ -40,6 +40,9 @@ final class SearchService {
     private let cacheDuration: TimeInterval = 5.0 // 5 seconds
     private let shortQueryCacheSize = 500
 
+    /// 防止并发缓存刷新的标志
+    private var cacheRefreshInProgress = false
+
     // MARK: - Initialization
 
     init(storage: StorageService) {
@@ -248,12 +251,24 @@ final class SearchService {
         }
     }
 
+    /// v0.10.4: 改进缓存刷新逻辑，确保原子性检查
     private func refreshCacheIfNeeded() throws {
         let now = Date()
-        if recentItemsCache.isEmpty || now.timeIntervalSince(cacheTimestamp) > cacheDuration {
-            recentItemsCache = try storage.fetchRecent(limit: shortQueryCacheSize, offset: 0)
-            cacheTimestamp = now
-        }
+
+        // 先检查是否需要刷新（不需要则直接返回）
+        let needsRefresh = recentItemsCache.isEmpty || now.timeIntervalSince(cacheTimestamp) > cacheDuration
+        guard needsRefresh else { return }
+
+        // 再检查是否正在刷新（防止并发刷新）
+        guard !cacheRefreshInProgress else { return }
+
+        // 设置刷新标志
+        cacheRefreshInProgress = true
+        defer { cacheRefreshInProgress = false }
+
+        // 执行刷新
+        recentItemsCache = try storage.fetchRecent(limit: shortQueryCacheSize, offset: 0)
+        cacheTimestamp = now
     }
 
     func invalidateCache() {
