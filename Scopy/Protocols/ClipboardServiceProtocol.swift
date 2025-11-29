@@ -47,8 +47,8 @@ struct ClipboardItemDTO: Identifiable, Sendable, Hashable {
                 return "\(firstName) + \(fileCount - 1) more"
             }
         case .image:
-            // 保持 "[Image: X KB]" 格式
-            return plainText
+            // v0.15.1: 简化为 "Image"，详细信息在元数据中显示
+            return "Image"
         default:
             return plainText.isEmpty ? "(No text)" : String(plainText.prefix(100))
         }

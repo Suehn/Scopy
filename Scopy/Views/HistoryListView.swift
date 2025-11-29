@@ -111,6 +111,9 @@ struct HistoryItemView: View, Equatable {
     @State private var hoverPreviewTask: Task<Void, Never>?
     @State private var showPreview = false
     @State private var previewImageData: Data?
+    // v0.15: Text preview state
+    @State private var showTextPreview = false
+    @State private var textPreviewContent: String?
 
     // 静态图标缓存 - 避免重复调用 NSWorkspace API
     // v0.10.4: 添加锁保护，确保线程安全
@@ -201,36 +204,79 @@ struct HistoryItemView: View, Equatable {
         settings.showImageThumbnails
     }
 
-    private var metadataText: String? {
-        var parts: [String] = []
-        if let bundleID = item.appBundleID {
-            parts.append(appName(for: bundleID))
+    /// v0.15: Redesigned metadata display
+    /// - Text: {字数}字 · {行数}行 · ...{末4字}
+    /// - Image: {宽}×{高} · {大小}
+    /// - File: {文件数}个文件 · {大小}
+    private var metadataText: String {
+        switch item.type {
+        case .text, .rtf, .html:
+            return textMetadata
+        case .image:
+            return imageMetadata
+        case .file:
+            return fileMetadata
+        default:
+            return formatBytes(item.sizeBytes)
         }
-        parts.append(formatBytes(item.sizeBytes))
-        return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 
+    private var textMetadata: String {
+        let text = item.plainText
+        let charCount = text.count
+        let lineCount = text.components(separatedBy: .newlines).count
+        // v0.15.1: 显示最后15个字符（去除换行符，替换为空格）
+        let cleanText = text.replacingOccurrences(of: "\n", with: " ")
+                            .replacingOccurrences(of: "\r", with: " ")
+        let lastChars = cleanText.count <= 15 ? cleanText : "...\(String(cleanText.suffix(15)))"
+        return "\(charCount)字 · \(lineCount)行 · \(lastChars)"
+    }
+
+    private var imageMetadata: String {
+        let size = formatBytes(item.sizeBytes)
+        if let resolution = parseImageResolution(from: item.plainText) {
+            return "\(resolution) · \(size)"
+        }
+        return size
+    }
+
+    private var fileMetadata: String {
+        let paths = item.plainText.components(separatedBy: "\n").filter { !$0.isEmpty }
+        let fileCount = paths.count
+        let size = formatBytes(item.sizeBytes)
+        if fileCount == 1 {
+            return size
+        }
+        return "\(fileCount)个文件 · \(size)"
+    }
+
+    /// Parse image resolution from plainText (format: "[Image: WxH, X KB]")
+    private func parseImageResolution(from text: String) -> String? {
+        let pattern = #"\[Image:\s*(\d+)x(\d+)"#
+        guard let regex = try? NSRegularExpression(pattern: pattern),
+              let match = regex.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)),
+              let widthRange = Range(match.range(at: 1), in: text),
+              let heightRange = Range(match.range(at: 2), in: text) else {
+            return nil
+        }
+        return "\(text[widthRange])×\(text[heightRange])"
+    }
+
+    /// v0.15: Simplified content view - removed app icon, using new metadata format
     @ViewBuilder
     private var contentView: some View {
         switch item.type {
         case .image where showThumbnails:
+            // v0.15.1: 图片有缩略图时，只显示缩略图和大小，不显示 "Image" 标题
             HStack(spacing: ScopySpacing.md) {
                 thumbnailView
-                VStack(alignment: .leading, spacing: ScopySpacing.xs) {
-                    Text(item.title)
-                        .font(ScopyTypography.body)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                    if let metadataText {
-                        Text("Image · \(metadataText)")
-                            .font(ScopyTypography.caption)
-                            .foregroundStyle(ScopyColors.mutedText)
-                            .lineLimit(1)
-                    }
-                }
+                Text(metadataText)
+                    .font(.system(size: 10))
+                    .foregroundStyle(ScopyColors.mutedText)
+                    .lineLimit(1)
             }
         case .file:
-            VStack(alignment: .leading, spacing: ScopySpacing.xs) {
+            VStack(alignment: .leading, spacing: ScopySpacing.xxs) {
                 HStack(spacing: ScopySpacing.sm) {
                     Image(systemName: ScopyIcons.file)
                         .foregroundStyle(Color.accentColor)
@@ -239,15 +285,14 @@ struct HistoryItemView: View, Equatable {
                         .lineLimit(1)
                         .truncationMode(.tail)
                 }
-                if let metadataText {
-                    Text(metadataText)
-                        .font(ScopyTypography.caption)
-                        .foregroundStyle(ScopyColors.mutedText)
-                        .lineLimit(1)
-                }
+                Text(metadataText)
+                    .font(.system(size: 10))  // v0.15.1: 比主内容小2号
+                    .foregroundStyle(ScopyColors.mutedText)
+                    .lineLimit(1)
+                    .padding(.leading, ScopySpacing.md)  // v0.15.1: 缩进两格
             }
         case .image:
-            VStack(alignment: .leading, spacing: ScopySpacing.xs) {
+            VStack(alignment: .leading, spacing: ScopySpacing.xxs) {
                 HStack(spacing: ScopySpacing.sm) {
                     Image(systemName: ScopyIcons.image)
                         .foregroundStyle(.green)
@@ -256,25 +301,23 @@ struct HistoryItemView: View, Equatable {
                         .lineLimit(1)
                         .truncationMode(.tail)
                 }
-                if let metadataText {
-                    Text("Image · \(metadataText)")
-                        .font(ScopyTypography.caption)
-                        .foregroundStyle(ScopyColors.mutedText)
-                        .lineLimit(1)
-                }
+                Text(metadataText)
+                    .font(.system(size: 10))  // v0.15.1: 比主内容小2号
+                    .foregroundStyle(ScopyColors.mutedText)
+                    .lineLimit(1)
+                    .padding(.leading, ScopySpacing.md)  // v0.15.1: 缩进两格
             }
         default:
-            VStack(alignment: .leading, spacing: ScopySpacing.xs) {
+            VStack(alignment: .leading, spacing: ScopySpacing.xxs) {
                 Text(item.title)
                     .font(ScopyTypography.body)
                     .lineLimit(1)
                     .truncationMode(.tail)
-                if let metadataText {
-                    Text(metadataText)
-                        .font(ScopyTypography.caption)
-                        .foregroundStyle(ScopyColors.mutedText)
-                        .lineLimit(1)
-                }
+                Text(metadataText)
+                    .font(.system(size: 10))  // v0.15: 比主内容小2号
+                    .foregroundStyle(ScopyColors.mutedText)
+                    .lineLimit(1)
+                    .padding(.leading, ScopySpacing.md)  // v0.15: 缩进两格
             }
         }
     }
@@ -290,7 +333,7 @@ struct HistoryItemView: View, Equatable {
                     .frame(width: ScopySize.Width.pinIndicator, height: ScopySize.Height.pinIndicator)
             }
 
-            // App 图标
+            // App 图标 (v0.15: 保留图标，只移除元数据中的应用名称)
             if let icon = appIcon {
                 Image(nsImage: icon)
                     .resizable()
@@ -341,6 +384,7 @@ struct HistoryItemView: View, Equatable {
         }
         // v0.9.3: 局部悬停状态 + 防抖更新全局选中
         // v0.10.3: 使用 Task 替代 Timer，自动取消防止泄漏
+        // v0.15: 添加文本预览支持
         .onHover { hovering in
             isHovering = hovering
 
@@ -361,13 +405,23 @@ struct HistoryItemView: View, Equatable {
                 if item.type == .image && showThumbnails {
                     startPreviewTask()
                 }
+                // v0.15: 文本预览任务
+                else if item.type == .text || item.type == .rtf || item.type == .html {
+                    startTextPreviewTask()
+                }
             } else {
                 cancelPreviewTask()
                 showPreview = false
+                showTextPreview = false
+                previewImageData = nil    // v0.15.1: Clear image data to prevent memory leak
+                textPreviewContent = nil  // v0.15: Reset text preview content
             }
         }
         .popover(isPresented: $showPreview, arrowEdge: .trailing) {
             imagePreviewView
+        }
+        .popover(isPresented: $showTextPreview, arrowEdge: .trailing) {
+            textPreviewView
         }
         .contextMenu {
             Button("Copy") {
@@ -473,6 +527,56 @@ struct HistoryItemView: View, Equatable {
     private func cancelPreviewTask() {
         hoverPreviewTask?.cancel()
         hoverPreviewTask = nil
+    }
+
+    // MARK: - Text Preview (v0.15)
+
+    /// v0.15.1: Start text preview task - shows first 100 + ... + last 100 chars
+    private func startTextPreviewTask() {
+        hoverPreviewTask?.cancel()
+
+        // Generate preview content synchronously FIRST
+        let text = item.plainText
+        let preview: String
+        if text.isEmpty {
+            preview = "(Empty)"
+        } else if text.count <= 200 {
+            preview = text
+        } else {
+            let first100 = String(text.prefix(100))
+            let last100 = String(text.suffix(100))
+            preview = "\(first100)\n...\n\(last100)"
+        }
+
+        // Set content immediately (synchronous, on main thread)
+        self.textPreviewContent = preview
+
+        hoverPreviewTask = Task {
+            // Wait for preview delay
+            let delayNanos = UInt64(previewDelay * 1_000_000_000)
+            try? await Task.sleep(nanoseconds: delayNanos)
+            guard !Task.isCancelled else { return }
+
+            // Show popover (content already set)
+            await MainActor.run {
+                if self.isHovering {
+                    self.showTextPreview = true
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var textPreviewView: some View {
+        // v0.15.1: Text preview - shows first 100 + ... + last 100 chars
+        ScrollView {
+            Text(textPreviewContent ?? "(Empty)")
+                .font(.system(size: 12, design: .monospaced))
+                .textSelection(.enabled)
+                .padding(ScopySpacing.md)
+                .frame(minWidth: 300, maxWidth: 400, alignment: .leading)
+        }
+        .frame(maxHeight: 300)
     }
 
     // MARK: - Relative Time Formatting

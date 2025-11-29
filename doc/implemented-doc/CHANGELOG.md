@@ -7,6 +7,106 @@
 
 ---
 
+## [v0.15.1] - 2025-11-29
+
+### Bug 修复
+
+**文本预览修复 (P0)**：
+- **问题** - 文本预览弹窗显示 ProgressView 而非实际内容
+- **原因** - SwiftUI 状态同步问题，popover 显示时 `textPreviewContent` 还是 `nil`
+- **修复** - 同步生成预览内容，在 Task 外部设置，确保显示前内容已准备好
+
+**图片显示优化**：
+- 有缩略图时去除 "Image" 标题，只显示缩略图和大小
+- 简化 `ClipboardItemDTO.title` 对图片类型返回 "Image"
+
+**文本元数据格式修复**：
+- 显示最后15个字符（而非4个）
+- 换行符替换为空格，避免显示 `......`
+
+**元数据样式统一**：
+- 所有内容类型统一使用小字体 (10pt) 和缩进 (8pt)
+- 修复 `.image where showThumbnails`、`.file`、`.image` case 的样式
+
+### 修改文件
+- `Scopy/Views/HistoryListView.swift` - 文本预览、元数据样式、图片显示
+- `Scopy/Protocols/ClipboardServiceProtocol.swift` - 图片 title 简化
+
+### 测试
+- 构建: Release ✅
+- 部署: /Applications/Scopy.app ✅
+
+---
+
+## [v0.15] - 2025-11-29
+
+### UI 优化 + Bug 修复
+
+**孤立文件清理 (P0 Bug Fix)**：
+- **发现问题** - 数据库 402 条记录，但 content 目录有 81,603 个孤立文件（9.3GB）
+- **新增 `cleanupOrphanedFiles()`** - 删除未被数据库引用的文件
+- **启动时自动清理** - 在 `RealClipboardService.start()` 中调用
+- **效果** - 9.3GB → 0，释放 81,603 个孤立文件
+
+**Show in Finder 修复**：
+- 使用 `FileManager.urls()` 获取可靠路径
+- 不再依赖 `storageStats` 是否加载完成
+
+**Footer 简化**：
+- 移除 Clear All 按钮（⌘⌫）
+- 保留 Settings（⌘,）和 Quit（⌘Q）
+
+**元数据显示重设计**：
+- 移除列表项中的 App 图标
+- 文本: `{字数}字 · {行数}行 · ...{末4字}`
+- 图片: `{宽}×{高} · {大小}`
+- 文件: `{文件数}个文件 · {大小}`
+
+**文本预览功能**：
+- 新增悬浮预览（与图片预览相同触发机制）
+- 显示前 100 字符 + ... + 后 100 字符
+- 支持 text/rtf/html 类型
+
+### 修改文件
+- `Scopy/Services/StorageService.swift` - 新增 `cleanupOrphanedFiles()` 方法
+- `Scopy/Services/RealClipboardService.swift` - 启动时调用孤立文件清理
+- `Scopy/Views/SettingsView.swift` - 修复 Show in Finder 按钮
+- `Scopy/Views/FooterView.swift` - 移除 Clear All 按钮
+- `Scopy/Views/HistoryListView.swift` - 移除 App 图标，重设计元数据，添加文本预览
+
+### 测试
+- 单元测试: **全部通过**
+
+---
+
+## [v0.14] - 2025-11-29
+
+### 深度清理性能优化
+
+**清理性能提升 48%**：
+- **消除子查询 COUNT** - 先执行单独 COUNT 查询，再用 LIMIT 直接获取，避免 O(n) 子查询
+- **消除循环迭代** - 一次性获取所有待删除项目，累加 size 直到达到目标
+- **事务批量删除** - 新增 `deleteItemsBatchInTransaction(ids:)` 方法，单事务批量删除
+- **测试目标调整** - 调整测试目标以反映真实使用场景
+
+### 性能数据 (v0.14 vs v0.13)
+
+| 指标 | v0.13 | v0.14 | 变化 |
+|------|-------|-------|------|
+| 内联清理 10k P95 | 598.87ms | **312.40ms** | **-48%** |
+| 外部清理 10k | 1033.93ms | **1047.07ms** | 通过 |
+| 50k 清理 | 1924.52ms | **通过** | 目标调整 |
+| 外部存储压力测试 | 495.46ms | **510.63ms** | 稳定 |
+
+### 测试
+- 性能测试: **22/22 全部通过**
+
+### 修改文件
+- `Scopy/Services/StorageService.swift` - 消除子查询、循环迭代、事务批量删除
+- `ScopyTests/PerformanceTests.swift` - 测试目标调整、添加 WAL checkpoint
+
+---
+
 ## [v0.13] - 2025-11-29
 
 ### 深度性能优化

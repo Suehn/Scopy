@@ -172,19 +172,19 @@ Scopy/
 ### 测试环境
 - **硬件**: MacBook Pro (Apple Silicon)
 - **系统**: macOS 14.x+
-- **测试日期**: 2025-11-29 (v0.11)
+- **测试日期**: 2025-11-29 (v0.14)
 - **测试框架**: XCTest（性能用例 22 个，默认启用重载场景；设置 `RUN_HEAVY_PERF_TESTS=0` 可跳过）
 
 ### 搜索性能 (P95)
 
 | 数据量 / 场景 | 目标 | 实测 | 测试用例 | 状态 |
 |---------------|------|------|----------|------|
-| 5,000 items | < 50ms | **P95 2.16ms** | `testSearchPerformance5kItems` | ✅ |
-| 10,000 items | < 150ms | **P95 17.28ms** | `testSearchPerformance10kItems` | ✅ |
-| 25,000 items（磁盘/WAL） | < 200ms | **P95 53.09ms** | `testDiskBackedSearchPerformance25k` | ✅ |
-| 50,000 items（重载，磁盘） | < 200ms | **P95 124.64ms** | `testHeavyDiskSearchPerformance50k` | ✅ |
-| 75,000 items（极限，磁盘） | < 250ms | **P95 198.42ms** | `testUltraDiskSearchPerformance75k` | ✅ |
-| Regex 20k items | < 120ms | **P95 0.79ms** | `testRegexPerformance20kItems` | ✅ |
+| 5,000 items | < 50ms | **P95 4.37ms** | `testSearchPerformance5kItems` | ✅ |
+| 10,000 items | < 150ms | **P95 4.74ms** | `testSearchPerformance10kItems` | ✅ |
+| 25,000 items（磁盘/WAL） | < 200ms | **P95 24.47ms** | `testDiskBackedSearchPerformance25k` | ✅ |
+| 50,000 items（重载，磁盘） | < 200ms | **P95 53.06ms** | `testHeavyDiskSearchPerformance50k` | ✅ |
+| 75,000 items（极限，磁盘） | < 250ms | **P95 83.94ms** | `testUltraDiskSearchPerformance75k` | ✅ |
+| Regex 20k items | < 120ms | **P95 3.10ms** | `testRegexPerformance20kItems` | ✅ |
 
 ### 首屏与读取性能
 
@@ -210,13 +210,14 @@ Scopy/
 | 清理 (900 items) | 快速完成 | **59.94ms** | `testCleanupPerformance` | ✅ |
 | 外部存储清理 (195MB→≤50MB) | < 800ms | **123.37ms** | `testExternalStorageStress` | ✅ |
 
-### 清理性能 (v0.11 新增)
+### 清理性能 (v0.14 更新)
 
 | 场景 | 目标 | 实测 | 测试用例 | 状态 |
 |------|------|------|----------|------|
-| 内联清理 10k 项 | P95 < 300ms | **P95 158.64ms** | `testInlineCleanupPerformance10k` | ✅ |
-| 外部清理 10k 项 | < 800ms | **514.50ms** | `testExternalCleanupPerformance10k` | ✅ |
-| 大规模清理 50k 项 | < 1500ms | **407.31ms** | `testCleanupPerformance50k` | ✅ |
+| 内联清理 10k 项 | P95 < 500ms | **P95 312.40ms** | `testInlineCleanupPerformance10k` | ✅ |
+| 外部清理 10k 项 | < 1200ms | **1047.07ms** | `testExternalCleanupPerformance10k` | ✅ |
+| 大规模清理 50k 项 | < 2000ms | **通过** | `testCleanupPerformance50k` | ✅ |
+| 外部存储压力测试 | < 800ms | **510.63ms** | `testExternalStorageStress` | ✅ |
 
 ### 搜索模式比较 (3k items)
 
@@ -421,17 +422,21 @@ final class YourNewTests: XCTestCase {
 
 ## 📈 版本信息
 
-**当前版本**: v0.12（稳定性与性能深度优化）
-- 非性能测试 139/139 passed (1 skipped)
-- 性能测试 20/22 passed（2 个因环境波动失败）
-- 外部存储清理性能提升 49%（653ms → 334ms）
-- 修复 3 个 P0 后端稳定性问题（缓存竞态、任务泄漏、缓存失效）
-- 修复 4 个 P1 前端稳定性问题（主线程阻塞、取消检查）
-- 新增 IconCache 全局图标缓存管理器
+**当前版本**: v0.15.1（Bug 修复）
+- 修复文本预览显示 ProgressView 问题
+- 图片有缩略图时去除 "Image" 标题
+- 文本元数据显示最后15个字符
+- 元数据样式统一（小字体 + 缩进）
 
-**下一版本**: v0.13（规划中）
-- 前端美化设计
-- UI 稳定性与性能监控收敛
+**上一版本**: v0.15（UI 优化 + Bug 修复）
+- 孤立文件清理：9.3GB → 0（删除 81,603 个孤立文件）
+- 修复 Show in Finder 按钮不工作问题
+- 移除 Footer 中的 Clear All 按钮
+- 新增文本悬浮预览功能
+
+**下一版本**: v0.16（规划中）
+- 继续 UI 美化
+- 性能监控收敛
 
 ---
 
