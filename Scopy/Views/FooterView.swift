@@ -3,7 +3,6 @@ import SwiftUI
 /// 底部状态栏视图
 struct FooterView: View {
     @Environment(AppState.self) private var appState
-    @State private var showClearConfirmation = false
 
     private var summaryText: String {
         if !appState.searchQuery.isEmpty {
@@ -52,12 +51,12 @@ struct FooterView: View {
 
                 Spacer()
 
-                // Action Buttons - refined styling
+                // Action Buttons - v0.15: Single delete + Settings + Quit
                 HStack(spacing: ScopySpacing.xs) {
-                    FooterButton(icon: "trash", shortcut: "⌘⌫") {
-                        showClearConfirmation = true
+                    FooterButton(icon: "trash", shortcut: "⌥⌫") {
+                        Task { await appState.deleteSelectedItem() }
                     }
-                    .help("Clear All")
+                    .help("Delete Selected")
 
                     FooterButton(icon: "gearshape", shortcut: "⌘,") {
                         appState.openSettingsHandler?()
@@ -76,14 +75,6 @@ struct FooterView: View {
         // v0.10.3-fix: 固定高度防止搜索时布局跳动
         .frame(height: ScopySize.Height.footer)
         .frame(maxWidth: .infinity)
-        .alert("Clear All History?", isPresented: $showClearConfirmation) {
-            Button("Cancel", role: .cancel) { }
-            Button("Clear", role: .destructive) {
-                Task { await appState.clearAll() }
-            }
-        } message: {
-            Text("This will permanently delete all \(appState.totalCount) items. This action cannot be undone.")
-        }
     }
 }
 

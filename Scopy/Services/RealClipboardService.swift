@@ -68,6 +68,9 @@ final class RealClipboardService: ClipboardServiceProtocol {
         storage.cleanupSettings.maxItems = settings.maxItems
         storage.cleanupSettings.maxSmallStorageMB = settings.maxStorageMB
 
+        // v0.15: Run orphan cleanup on startup to clean up any orphaned files
+        try? storage.cleanupOrphanedFiles()
+
         // Start clipboard monitoring
         monitor.startMonitoring()
 

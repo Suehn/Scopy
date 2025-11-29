@@ -424,17 +424,17 @@ struct StorageSettingsTab: View {
                 }
 
                 Button("Show in Finder") {
-                    let path = storageStats?.databasePath ?? "~/Library/Application Support/Scopy/"
-                    let expandedPath = NSString(string: path).expandingTildeInPath
-                    let url = URL(fileURLWithPath: expandedPath)
+                    // v0.15: Use FileManager to get Application Support directory reliably
+                    // This fixes the bug where button doesn't work when storageStats is nil
+                    let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+                    let scopyDir = appSupport.appendingPathComponent("Scopy")
 
-                    if FileManager.default.fileExists(atPath: expandedPath) {
-                        // 选中文件并打开 Finder
-                        NSWorkspace.shared.activateFileViewerSelecting([url])
+                    if FileManager.default.fileExists(atPath: scopyDir.path) {
+                        NSWorkspace.shared.activateFileViewerSelecting([scopyDir])
                     } else {
-                        // 文件不存在时，打开父目录
-                        let parentURL = url.deletingLastPathComponent()
-                        NSWorkspace.shared.activateFileViewerSelecting([parentURL])
+                        // Create directory if it doesn't exist, then open
+                        try? FileManager.default.createDirectory(at: scopyDir, withIntermediateDirectories: true)
+                        NSWorkspace.shared.activateFileViewerSelecting([scopyDir])
                     }
                 }
                 .buttonStyle(.plain)
