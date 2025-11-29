@@ -247,22 +247,28 @@ final class RealClipboardService: ClipboardServiceProtocol {
 
     func getStorageStats() async throws -> (itemCount: Int, sizeBytes: Int) {
         let count = try storage.getItemCount()
-        let size = try storage.getTotalSize()
-        return (count, size)
+        // v0.15.2: 返回实际磁盘占用大小，而非数据库中记录的 size_bytes
+        let dbSize = storage.getDatabaseFileSize()
+        let externalSize = try storage.getExternalStorageSizeForStats()
+        let thumbnailSize = storage.getThumbnailCacheSize()
+        return (count, dbSize + externalSize + thumbnailSize)
     }
 
     func getDetailedStorageStats() async throws -> StorageStatsDTO {
         let count = try storage.getItemCount()
         // 使用实际文件大小而非 SUM(size_bytes)
         let dbSize = storage.getDatabaseFileSize()
-        let externalSize = try storage.getExternalStorageSize()
+        // v0.15.2: 使用强制刷新版本，避免缓存导致显示不准确
+        let externalSize = try storage.getExternalStorageSizeForStats()
+        let thumbnailSize = storage.getThumbnailCacheSize()
         let dbPath = storage.databaseFilePath
 
         return StorageStatsDTO(
             itemCount: count,
             databaseSizeBytes: dbSize,
             externalStorageSizeBytes: externalSize,
-            totalSizeBytes: dbSize + externalSize,
+            thumbnailSizeBytes: thumbnailSize,
+            totalSizeBytes: dbSize + externalSize + thumbnailSize,
             databasePath: dbPath
         )
     }

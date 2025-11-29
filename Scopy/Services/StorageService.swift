@@ -579,6 +579,33 @@ final class StorageService {
         return total
     }
 
+    /// v0.15.2: 获取外部存储大小（强制刷新，不使用缓存）
+    /// 用于 Settings 页面显示准确的存储统计
+    func getExternalStorageSizeForStats() throws -> Int {
+        return try calculateExternalStorageSize()
+    }
+
+    /// v0.15.2: 获取缩略图缓存大小
+    func getThumbnailCacheSize() -> Int {
+        let url = URL(fileURLWithPath: thumbnailCachePath)
+        let resourceKeys: Set<URLResourceKey> = [.fileSizeKey]
+
+        guard let enumerator = FileManager.default.enumerator(
+            at: url,
+            includingPropertiesForKeys: Array(resourceKeys)
+        ) else {
+            return 0
+        }
+
+        var totalSize = 0
+        for case let fileURL as URL in enumerator {
+            guard let resourceValues = try? fileURL.resourceValues(forKeys: resourceKeys),
+                  let size = resourceValues.fileSize else { continue }
+            totalSize += size
+        }
+        return totalSize
+    }
+
     /// 获取最近使用的 app 列表（用于过滤）
     func getRecentApps(limit: Int) throws -> [String] {
         guard db != nil else { throw StorageError.databaseNotOpen }

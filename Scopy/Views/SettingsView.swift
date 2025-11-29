@@ -384,6 +384,14 @@ struct StorageSettingsTab: View {
                             .foregroundStyle(.secondary)
                     }
 
+                    // v0.15.2: Thumbnails
+                    HStack {
+                        Text("Thumbnails")
+                        Spacer()
+                        Text(stats.thumbnailSizeText)
+                            .foregroundStyle(.secondary)
+                    }
+
                     // Total
                     HStack {
                         Text("Total")

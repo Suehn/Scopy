@@ -79,8 +79,20 @@ final class AppState {
 
     // 存储统计
     var storageStats: (itemCount: Int, sizeBytes: Int) = (0, 0)
+    // v0.15.2: 磁盘占用统计（带 120 秒缓存）
+    private var diskSizeCache: (size: Int, timestamp: Date)? = nil
+    private let diskSizeCacheTTL: TimeInterval = 120  // 120 秒缓存
+    var diskSizeBytes: Int = 0
+
+    /// v0.15.2: 显示格式 "内容大小 / 磁盘占用"
     var storageSizeText: String {
-        let kb = Double(storageStats.sizeBytes) / 1024
+        let contentSize = formatBytes(storageStats.sizeBytes)
+        let diskSize = formatBytes(diskSizeBytes)
+        return "\(contentSize) / \(diskSize)"
+    }
+
+    private func formatBytes(_ bytes: Int) -> String {
+        let kb = Double(bytes) / 1024
         if kb < 1024 {
             return String(format: "%.1f KB", kb)
         } else {
@@ -278,12 +290,34 @@ final class AppState {
             storageStats = stats
             canLoadMore = loadedCount < totalCount
 
+            // v0.15.2: 更新磁盘占用统计（带缓存）
+            await refreshDiskSizeIfNeeded()
+
             // 记录首屏加载性能
             let elapsedMs = (CFAbsoluteTimeGetCurrent() - startTime) * 1000
             await PerformanceMetrics.shared.recordLoadLatency(elapsedMs)
             performanceSummary = await PerformanceMetrics.shared.getSummary()
         } catch {
             print("Failed to load items: \(error)")
+        }
+    }
+
+    /// v0.15.2: 刷新磁盘占用统计（带 120 秒缓存）
+    private func refreshDiskSizeIfNeeded() async {
+        // 检查缓存是否有效
+        if let cache = diskSizeCache,
+           Date().timeIntervalSince(cache.timestamp) < diskSizeCacheTTL {
+            diskSizeBytes = cache.size
+            return
+        }
+
+        // 获取详细统计
+        do {
+            let detailedStats = try await service.getDetailedStorageStats()
+            diskSizeBytes = detailedStats.totalSizeBytes
+            diskSizeCache = (diskSizeBytes, Date())
+        } catch {
+            print("Failed to get disk size: \(error)")
         }
     }
 

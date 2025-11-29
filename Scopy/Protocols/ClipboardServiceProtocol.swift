@@ -131,6 +131,7 @@ struct StorageStatsDTO: Sendable {
     let itemCount: Int
     let databaseSizeBytes: Int
     let externalStorageSizeBytes: Int
+    let thumbnailSizeBytes: Int  // v0.15.2: 缩略图缓存大小
     let totalSizeBytes: Int
     let databasePath: String
 
@@ -140,6 +141,10 @@ struct StorageStatsDTO: Sendable {
 
     var externalStorageSizeText: String {
         formatBytes(externalStorageSizeBytes)
+    }
+
+    var thumbnailSizeText: String {
+        formatBytes(thumbnailSizeBytes)
     }
 
     var totalSizeText: String {

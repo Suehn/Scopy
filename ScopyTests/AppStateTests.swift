@@ -722,6 +722,7 @@ final class TestMockClipboardService: ClipboardServiceProtocol {
             itemCount: items.count,
             databaseSizeBytes: totalBytes,
             externalStorageSizeBytes: 0,
+            thumbnailSizeBytes: 0,
             totalSizeBytes: totalBytes,
             databasePath: "~/Library/Application Support/Scopy/"
         )
@@ -777,7 +778,7 @@ final class FailingMockService: ClipboardServiceProtocol {
     func getSettings() async throws -> SettingsDTO { .default }
     func getStorageStats() async throws -> (itemCount: Int, sizeBytes: Int) { (0, 0) }
     func getDetailedStorageStats() async throws -> StorageStatsDTO {
-        StorageStatsDTO(itemCount: 0, databaseSizeBytes: 0, externalStorageSizeBytes: 0, totalSizeBytes: 0, databasePath: "")
+        StorageStatsDTO(itemCount: 0, databaseSizeBytes: 0, externalStorageSizeBytes: 0, thumbnailSizeBytes: 0, totalSizeBytes: 0, databasePath: "")
     }
     func getImageData(itemID: UUID) async throws -> Data? { nil }
     func getRecentApps(limit: Int) async throws -> [String] { [] }

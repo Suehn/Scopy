@@ -7,6 +7,42 @@
 
 ---
 
+## [v0.15.2] - 2025-11-29
+
+### Bug 修复
+
+**存储统计显示不正确 (P1)**：
+- **问题** - Settings > Storage 页面显示 External Storage: 0 Bytes，与实际不符
+- **原因** - `getExternalStorageSize()` 有 30 秒缓存，可能缓存了旧值
+- **修复** - 新增 `getExternalStorageSizeForStats()` 方法，强制刷新不使用缓存
+
+**新增 Thumbnails 统计**：
+- 新增 `thumbnailSizeBytes` 字段到 `StorageStatsDTO`
+- 新增 `getThumbnailCacheSize()` 方法计算缩略图缓存大小
+- Settings UI 新增 Thumbnails 行显示缩略图占用空间
+
+**底部状态栏存储显示优化**：
+- 显示格式改为 `内容大小 / 磁盘占用`（如 `5.2 MB / 8.8 MB`）
+- 磁盘占用统计带 120 秒缓存，避免频繁计算
+- 新增 `refreshDiskSizeIfNeeded()` 方法管理缓存
+
+### 修改文件
+- `Scopy/Protocols/ClipboardServiceProtocol.swift` - 添加 `thumbnailSizeBytes` 到 DTO
+- `Scopy/Services/StorageService.swift` - 添加 `getThumbnailCacheSize()` 和 `getExternalStorageSizeForStats()`
+- `Scopy/Services/RealClipboardService.swift` - 更新 `getDetailedStorageStats()` 使用新方法
+- `Scopy/Services/MockClipboardService.swift` - 更新 DTO 初始化
+- `Scopy/Views/SettingsView.swift` - 添加 Thumbnails 行
+- `Scopy/Observables/AppState.swift` - 新增磁盘占用缓存和双格式显示
+
+### 测试
+- 单元测试: **161/161 passed** (1 skipped)
+- 构建: Debug ✅
+- 部署: /Applications/Scopy.app ✅
+- Settings 存储统计: Database 2.0 MB, External 4.0 MB, Thumbnails 2.9 MB, Total 8.8 MB ✅
+- 底部状态栏: `5.2 MB / 8.8 MB` ✅
+
+---
+
 ## [v0.15.1] - 2025-11-29
 
 ### Bug 修复

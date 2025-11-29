@@ -422,13 +422,18 @@ final class YourNewTests: XCTestCase {
 
 ## 📈 版本信息
 
-**当前版本**: v0.15.1（Bug 修复）
+**当前版本**: v0.15.2（Bug 修复）
+- 修复存储统计显示不正确问题（External Storage 显示 0 Bytes）
+- 新增 Thumbnails 统计显示
+- 强制刷新缓存确保统计准确
+
+**上一版本**: v0.15.1（Bug 修复）
 - 修复文本预览显示 ProgressView 问题
 - 图片有缩略图时去除 "Image" 标题
 - 文本元数据显示最后15个字符
 - 元数据样式统一（小字体 + 缩进）
 
-**上一版本**: v0.15（UI 优化 + Bug 修复）
+**更早版本**: v0.15（UI 优化 + Bug 修复）
 - 孤立文件清理：9.3GB → 0（删除 81,603 个孤立文件）
 - 修复 Show in Finder 按钮不工作问题
 - 移除 Footer 中的 Clear All 按钮

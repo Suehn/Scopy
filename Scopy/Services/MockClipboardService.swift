@@ -207,6 +207,7 @@ final class MockClipboardService: ClipboardServiceProtocol {
             itemCount: items.count,
             databaseSizeBytes: totalBytes,
             externalStorageSizeBytes: 0,
+            thumbnailSizeBytes: 0,
             totalSizeBytes: totalBytes,
             databasePath: "~/Library/Application Support/Scopy/"
         )
