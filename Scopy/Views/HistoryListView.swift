@@ -24,10 +24,19 @@ struct HistoryListView: View {
                                 .padding(.vertical, ScopySpacing.md)
                         }
 
+                        // v0.16.2: Pinned 区域可折叠
                         if !appState.pinnedItems.isEmpty && appState.searchQuery.isEmpty {
-                            Section(header: SectionHeader(title: "Pinned", count: appState.pinnedItems.count)) {
-                                ForEach(appState.pinnedItems) { item in
-                                    historyRow(item: item)
+                            Section(header: SectionHeader(
+                                title: "Pinned",
+                                count: appState.pinnedItems.count,
+                                isCollapsible: true,
+                                isCollapsed: appState.isPinnedCollapsed,
+                                onToggle: { appState.isPinnedCollapsed.toggle() }
+                            )) {
+                                if !appState.isPinnedCollapsed {
+                                    ForEach(appState.pinnedItems) { item in
+                                        historyRow(item: item)
+                                    }
                                 }
                             }
                         }
@@ -568,15 +577,17 @@ struct HistoryItemView: View, Equatable {
 
     @ViewBuilder
     private var textPreviewView: some View {
-        // v0.15.1: Text preview - shows first 100 + ... + last 100 chars
+        // v0.16.2: Text preview - 修复最后一行截断问题
         ScrollView {
             Text(textPreviewContent ?? "(Empty)")
                 .font(.system(size: 12, design: .monospaced))
                 .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(ScopySpacing.md)
-                .frame(minWidth: 300, maxWidth: 400, alignment: .leading)
+                .padding(.bottom, ScopySpacing.md)  // 额外底部 padding 防止截断
         }
-        .frame(maxHeight: 300)
+        .frame(width: 400)
+        .frame(maxHeight: 400)
     }
 
     // MARK: - Relative Time Formatting
@@ -633,15 +644,29 @@ private struct SectionHeader: View {
     let title: String
     let count: Int
     var performanceSummary: PerformanceSummary? = nil
+    /// v0.16.2: 可折叠支持
+    var isCollapsible: Bool = false
+    var isCollapsed: Bool = false
+    var onToggle: (() -> Void)? = nil
+
+    @State private var isHovered = false
 
     var body: some View {
         HStack {
+            // v0.16.2: 折叠指示器
+            if isCollapsible {
+                Image(systemName: isCollapsed ? "chevron.right" : "chevron.down")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(ScopyColors.tertiaryText)
+                    .frame(width: 12)
+            }
+
             Text("\(title) · \(count)")
                 .font(ScopyTypography.caption)
                 .fontWeight(.medium)
                 .foregroundStyle(ScopyColors.tertiaryText)
                 .monospacedDigit()
-            
+
             if let summary = performanceSummary, title == "Recent" {
                 Spacer()
                 HStack(spacing: ScopySpacing.md) {
@@ -655,12 +680,25 @@ private struct SectionHeader: View {
                 .font(.system(size: ScopyTypography.Size.micro, weight: .regular, design: .monospaced))
                 .foregroundStyle(ScopyColors.tertiaryText.opacity(ScopySize.Opacity.strong))
             }
-            
+
             Spacer()
         }
         .padding(.horizontal, ScopySpacing.md)
         .padding(.top, ScopySpacing.md)
         .padding(.bottom, ScopySpacing.xs)
+        // v0.16.2: 可点击折叠
+        .background(isCollapsible && isHovered ? ScopyColors.hover.opacity(0.5) : Color.clear)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            if isCollapsible {
+                onToggle?()
+            }
+        }
+        .onHover { hovering in
+            if isCollapsible {
+                isHovered = hovering
+            }
+        }
     }
 }
 

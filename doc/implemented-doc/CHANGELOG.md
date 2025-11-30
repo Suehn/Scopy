@@ -7,6 +7,78 @@
 
 ---
 
+## [v0.16.2] - 2025-11-29
+
+### Bug 修复
+
+**Pin 指示器显示不正确 (P1)**：
+- **问题** - Pin 后，项目在 Pinned 区域但没有左侧高亮竖线和右侧图钉图标
+- **原因** - `handleEvent(.itemPinned/.itemUnpinned)` 调用 `await load()` 刷新，但 SwiftUI 视图没有正确更新
+- **修复** - 直接更新 `items` 数组中对应项目的 `isPinned` 属性，新增 `ClipboardItemDTO.withPinned()` 方法
+
+**缓存失效问题 (P1)**：
+- **问题** - `items.removeAll`、`items.insert`、`items.append` 不触发 `didSet`，导致 `pinnedItemsCache` 没有失效
+- **修复** - 新增 `invalidatePinnedCache()` 方法，在所有修改 `items` 数组的地方手动调用
+
+### 新功能
+
+**Pinned 区域可折叠**：
+- 点击 "Pinned · N" 标题行即可折叠/展开
+- 折叠时显示 chevron.right 图标，展开时显示 chevron.down
+- 标题行 hover 时有高亮效果提示可点击
+- 新增 `AppState.isPinnedCollapsed` 状态
+
+**文本预览高度修复 (P2)**：
+- **问题** - 文本预览弹窗最后一行被截断，高度不够
+- **修复** - 添加 `.fixedSize(horizontal: false, vertical: true)` 让文本正确计算高度，增加 `maxHeight` 到 400
+
+### 修改文件
+- `Scopy/Protocols/ClipboardServiceProtocol.swift` - 新增 `withPinned()` 方法
+- `Scopy/Observables/AppState.swift` - 修复 `handleEvent`，新增 `invalidatePinnedCache()` 和 `isPinnedCollapsed`
+- `Scopy/Views/HistoryListView.swift` - `SectionHeader` 支持折叠，Pinned 区域可折叠，文本预览高度修复
+
+### 测试
+- 单元测试: **161/161 passed** (1 skipped)
+
+---
+
+## [v0.16.1] - 2025-11-29
+
+### Bug 修复
+
+**过滤器不生效 (P1)**：
+- **问题** - 选择图片类型过滤器后，复制新文本仍然显示在列表中
+- **原因** - `handleEvent(.newItem)` 无条件将新项目插入 `items`，未检查当前 `typeFilter`
+- **修复** - 新增 `matchesCurrentFilters()` 方法，只有匹配过滤条件的项目才插入列表
+
+**负数 item count (P1)**：
+- **问题** - 删除项目后，footer 显示负数（如 "-41 items"）
+- **原因** - `delete()` 和 `handleEvent(.itemDeleted)` 都递减 `totalCount`，导致每次删除减 2
+- **修复** - 移除 `delete()` 中的 `totalCount -= 1`，由事件统一处理
+
+### 修改文件
+- `Scopy/Observables/AppState.swift` - 新增 `matchesCurrentFilters()`，修复 `handleEvent(.newItem)` 和 `delete()`
+
+### 测试
+- 单元测试: **161/161 passed** (1 skipped)
+
+---
+
+## [v0.16] - 2025-11-29
+
+### 变更
+- 搜索稳定性：移除 mainStmt 强制解包；搜索超时改结构化并发；FTS 结果按 `is_pinned DESC` + 稳定顺序排序；缓存搜索统一排序；removeLast O(n) 优化为 prefix。
+- 剪贴板流安全：新增 `isContentStreamFinished` 守卫，stop/deinit 关闭流，去除 rawData 强制解包。
+- 存储性能与安全：`getTotalSize` 溢出保护；外部存储/缩略图统计改后台执行；文件删除异步化；生成缩略图前校验尺寸；外部大小缓存 TTL 180s；新增 `(type, last_used_at)` 复合索引。
+- 服务启动与统计：孤儿清理改后台任务；复制使用计数更新失败输出日志；存储统计等待后台结果。
+- 状态管理：pinned/unpinned 结果缓存 + 失效；格式化防负数；stop 统一取消后台任务。
+
+### 测试
+- 自动化测试：`xcodebuild test -scheme Scopy -destination 'platform=macOS' -only-testing:ScopyTests` **161/161 通过（1 跳过，性能用例需 RUN_PERF_TESTS）**
+- 性能测试：已运行，详见 `doc/profile/v0.16-profile.md`（搜索/清理/内存等指标）。
+
+---
+
 ## [v0.15.2] - 2025-11-29
 
 ### Bug 修复

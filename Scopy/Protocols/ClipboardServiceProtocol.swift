@@ -33,6 +33,23 @@ struct ClipboardItemDTO: Identifiable, Sendable, Hashable {
     let thumbnailPath: String?  // 缩略图路径 (v0.8)
     let storageRef: String?     // 外部存储路径 (v0.8 - 用于原图预览)
 
+    /// v0.16.2: 创建带有更新 isPinned 的新实例
+    func withPinned(_ pinned: Bool) -> ClipboardItemDTO {
+        ClipboardItemDTO(
+            id: id,
+            type: type,
+            contentHash: contentHash,
+            plainText: plainText,
+            appBundleID: appBundleID,
+            createdAt: createdAt,
+            lastUsedAt: lastUsedAt,
+            isPinned: pinned,
+            sizeBytes: sizeBytes,
+            thumbnailPath: thumbnailPath,
+            storageRef: storageRef
+        )
+    }
+
     // 用于 UI 显示
     var title: String {
         switch type {

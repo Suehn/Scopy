@@ -40,14 +40,40 @@ final class AppState {
     var service: ClipboardServiceProtocol
 
     // UI 状态
-    var items: [ClipboardItemDTO] = []
-    var pinnedItems: [ClipboardItemDTO] { items.filter { $0.isPinned } }
-    var unpinnedItems: [ClipboardItemDTO] { items.filter { !$0.isPinned } }
+    var items: [ClipboardItemDTO] = [] {
+        didSet {
+            invalidatePinnedCache()
+        }
+    }
+    private var pinnedItemsCache: [ClipboardItemDTO]?
+    private var unpinnedItemsCache: [ClipboardItemDTO]?
+
+    /// v0.16.2: 手动失效缓存（用于 items 数组被修改而非重新赋值的情况）
+    private func invalidatePinnedCache() {
+        pinnedItemsCache = nil
+        unpinnedItemsCache = nil
+    }
+
+    var pinnedItems: [ClipboardItemDTO] {
+        if let cached = pinnedItemsCache { return cached }
+        let result = items.filter { $0.isPinned }
+        pinnedItemsCache = result
+        return result
+    }
+    var unpinnedItems: [ClipboardItemDTO] {
+        if let cached = unpinnedItemsCache { return cached }
+        let result = items.filter { !$0.isPinned }
+        unpinnedItemsCache = result
+        return result
+    }
 
     var searchQuery: String = ""
     var searchMode: SearchMode = .fuzzy
     var isLoading: Bool = false
     var selectedID: UUID?
+
+    /// v0.16.2: Pinned 区域折叠状态
+    var isPinnedCollapsed: Bool = false
 
     // 过滤状态 (v0.9)
     var appFilter: String? = nil
@@ -92,7 +118,7 @@ final class AppState {
     }
 
     private func formatBytes(_ bytes: Int) -> String {
-        let kb = Double(bytes) / 1024
+        let kb = Double(max(0, bytes)) / 1024
         if kb < 1024 {
             return String(format: "%.1f KB", kb)
         } else {
@@ -176,6 +202,12 @@ final class AppState {
     func stop() {
         eventTask?.cancel()
         eventTask = nil
+        searchTask?.cancel()
+        searchTask = nil
+        loadMoreTask?.cancel()
+        loadMoreTask = nil
+        scrollEndTask?.cancel()
+        scrollEndTask = nil
 
         // 通过协议方法停止服务
         service.stop()
@@ -240,10 +272,18 @@ final class AppState {
     private func handleEvent(_ event: ClipboardEvent) async {
         switch event {
         case .newItem(let item):
-            // 新项目或重复项目：移除旧位置，插入到顶部
+            // 新项目或重复项目：移除旧位置
             let wasExisting = items.contains(where: { $0.id == item.id })
             items.removeAll { $0.id == item.id }
-            items.insert(item, at: 0)
+
+            // v0.16.1: 只有匹配当前过滤条件时才插入到列表
+            if matchesCurrentFilters(item) {
+                items.insert(item, at: 0)
+            }
+
+            // v0.16.2: 手动失效缓存（removeAll/insert 不触发 didSet）
+            invalidatePinnedCache()
+
             // 只有真正新增时才增加 totalCount
             if !wasExisting {
                 totalCount += 1
@@ -256,12 +296,25 @@ final class AppState {
             // 更新的项目：移除旧位置，插入到顶部（用于复制置顶）
             items.removeAll { $0.id == item.id }
             items.insert(item, at: 0)
+            // v0.16.2: 手动失效缓存
+            invalidatePinnedCache()
         case .itemDeleted(let id):
             items.removeAll { $0.id == id }
+            // v0.16.2: 手动失效缓存
+            invalidatePinnedCache()
             totalCount -= 1
-        case .itemPinned, .itemUnpinned:
-            // 刷新以获取最新状态
-            await load()
+        case .itemPinned(let id):
+            // v0.16.2: 直接更新 items 数组中对应项目的 isPinned 属性
+            if let index = items.firstIndex(where: { $0.id == id }) {
+                items[index] = items[index].withPinned(true)
+                invalidatePinnedCache()
+            }
+        case .itemUnpinned(let id):
+            // v0.16.2: 直接更新 items 数组中对应项目的 isPinned 属性
+            if let index = items.firstIndex(where: { $0.id == id }) {
+                items[index] = items[index].withPinned(false)
+                invalidatePinnedCache()
+            }
         case .settingsChanged:
             // 1. 先 reload 最新设置
             await loadSettings()
@@ -273,6 +326,25 @@ final class AppState {
             }
             await load()
         }
+    }
+
+    /// v0.16.1: 检查项目是否匹配当前过滤条件
+    /// 用于 handleEvent(.newItem) 决定是否将新项目插入到显示列表
+    private func matchesCurrentFilters(_ item: ClipboardItemDTO) -> Bool {
+        // 检查 typeFilter
+        if let typeFilter = typeFilter, item.type != typeFilter {
+            return false
+        }
+        // 检查 appFilter
+        if let appFilter = appFilter, item.appBundleID != appFilter {
+            return false
+        }
+        // 搜索词过滤：有搜索词时，新项目不自动插入
+        // 用户需要清除搜索或刷新才能看到
+        if !searchQuery.isEmpty {
+            return false
+        }
+        return true
     }
 
     /// 初始加载
@@ -361,6 +433,8 @@ final class AppState {
                     // 在状态变更前再次检查取消状态
                     guard !Task.isCancelled else { return }
                     items.append(contentsOf: result.items)
+                    // v0.16.2: 手动失效缓存
+                    invalidatePinnedCache()
                     loadedCount = items.count
                     totalCount = result.total
                     canLoadMore = result.hasMore
@@ -369,6 +443,8 @@ final class AppState {
                     // 在状态变更前再次检查取消状态
                     guard !Task.isCancelled else { return }
                     items.append(contentsOf: moreItems)
+                    // v0.16.2: 手动失效缓存
+                    invalidatePinnedCache()
                     loadedCount = items.count
                     canLoadMore = loadedCount < totalCount
                 }
@@ -450,6 +526,7 @@ final class AppState {
     }
 
     /// 切换固定状态
+    /// v0.16.2: 移除 await load()，由 handleEvent(.itemPinned/.itemUnpinned) 统一处理
     func togglePin(_ item: ClipboardItemDTO) async {
         do {
             if item.isPinned {
@@ -457,18 +534,21 @@ final class AppState {
             } else {
                 try await service.pin(itemID: item.id)
             }
-            await load()  // 刷新列表
+            // 状态更新由 handleEvent 统一处理，避免重复刷新
         } catch {
             print("Pin toggle failed: \(error)")
         }
     }
 
     /// 删除项目
+    /// v0.16.1: 移除 totalCount 递减，由 handleEvent(.itemDeleted) 统一处理
     func delete(_ item: ClipboardItemDTO) async {
         do {
             try await service.delete(itemID: item.id)
             items.removeAll { $0.id == item.id }
-            totalCount -= 1
+            // v0.16.2: 手动失效缓存
+            invalidatePinnedCache()
+            // totalCount 由 handleEvent(.itemDeleted) 统一递减，避免重复
         } catch {
             print("Delete failed: \(error)")
         }
