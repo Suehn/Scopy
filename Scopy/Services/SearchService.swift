@@ -220,10 +220,9 @@ final class SearchService {
                 filterParams.append(typeFilter.rawValue)
             }
 
-            // 保持 FTS5 返回的排序顺序
-            // 使用 CASE WHEN 保持原始顺序
+            // 保持 FTS5 返回的排序顺序，并确保 pinned 置顶
             let orderCases = rowids.enumerated().map { "WHEN rowid = \($0.element) THEN \($0.offset)" }.joined(separator: " ")
-            mainSQL += " ORDER BY CASE \(orderCases) END"
+            mainSQL += " ORDER BY is_pinned DESC, CASE \(orderCases) END"
 
             var mainStmt: OpaquePointer?
             guard sqlite3_prepare_v2(db, mainSQL, -1, &mainStmt, nil) == SQLITE_OK else {
@@ -248,7 +247,8 @@ final class SearchService {
             items.reserveCapacity(rowids.count)
 
             while sqlite3_step(mainStmt) == SQLITE_ROW {
-                if let item = self.parseItem(from: mainStmt!) {
+                guard let stmt = mainStmt else { break }
+                if let item = self.parseItem(from: stmt) {
                     items.append(item)
                 }
             }
@@ -288,6 +288,13 @@ final class SearchService {
             if let typeFilter = request.typeFilter {
                 filtered = filtered.filter { $0.type == typeFilter }
             }
+            // 统一排序：Pinned 置顶，其次时间
+            filtered.sort {
+                if $0.isPinned != $1.isPinned {
+                    return $0.isPinned && !$1.isPinned
+                }
+                return $0.lastUsedAt > $1.lastUsedAt
+            }
 
             let totalFiltered = filtered.count
             let start = min(request.offset, totalFiltered)
@@ -299,7 +306,7 @@ final class SearchService {
             // v0.13: 判断 hasMore 并移除多取的那条
             let hasMore = items.count > request.limit
             if hasMore {
-                items.removeLast()
+                items = Array(items.prefix(request.limit))
             }
 
             // v0.13: total 设为 -1 表示未知（与 FTS 搜索保持一致）
@@ -444,27 +451,30 @@ final class SearchService {
         }
     }
 
-    /// v0.12: 带超时的队列执行，确保两个任务都被正确清理
+    /// v0.12: 带超时的队列执行，使用结构化并发避免任务泄漏
     private func runOnQueueWithTimeout<T>(_ work: @escaping () throws -> T) async throws -> T {
-        let task = Task.detached(priority: .userInitiated) { [self] in
-            try await self.runOnQueue(work)
-        }
+        try await withThrowingTaskGroup(of: T.self) { group in
+            // 实际工作任务
+            group.addTask { [self] in
+                try await self.runOnQueue(work)
+            }
+            // 超时任务
+            group.addTask { [searchTimeout] in
+                try await Task.sleep(nanoseconds: UInt64(searchTimeout * 1_000_000_000))
+                throw SearchError.timeout
+            }
 
-        let timeoutTask = Task {
-            try await Task.sleep(nanoseconds: UInt64(searchTimeout * 1_000_000_000))
-            task.cancel()
-        }
-
-        // 确保两个任务都被取消，防止任务泄漏
-        defer {
-            timeoutTask.cancel()
-            task.cancel()
-        }
-
-        do {
-            return try await task.value
-        } catch is CancellationError {
-            throw SearchError.timeout
+            do {
+                guard let value = try await group.next() else {
+                    group.cancelAll()
+                    throw SearchError.timeout
+                }
+                group.cancelAll()
+                return value
+            } catch {
+                group.cancelAll()
+                throw error
+            }
         }
     }
 
@@ -523,7 +533,8 @@ final class SearchService {
             items.reserveCapacity(request.limit + 1)
 
             while sqlite3_step(stmt) == SQLITE_ROW {
-                if let item = self.parseItem(from: stmt!) {
+                guard let stmt = stmt else { break }
+                if let item = self.parseItem(from: stmt) {
                     items.append(item)
                 }
             }

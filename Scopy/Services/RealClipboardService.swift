@@ -68,8 +68,11 @@ final class RealClipboardService: ClipboardServiceProtocol {
         storage.cleanupSettings.maxItems = settings.maxItems
         storage.cleanupSettings.maxSmallStorageMB = settings.maxStorageMB
 
-        // v0.15: Run orphan cleanup on startup to clean up any orphaned files
-        try? storage.cleanupOrphanedFiles()
+        // v0.15: Run orphan cleanup on startup to clean up any orphaned files（异步触发，避免阻塞启动路径）
+        Task { [weak self] in
+            guard let storage = self?.storage else { return }
+            try? storage.cleanupOrphanedFiles()
+        }
 
         // Start clipboard monitoring
         monitor.startMonitoring()
@@ -208,7 +211,11 @@ final class RealClipboardService: ClipboardServiceProtocol {
         var updated = item
         updated.lastUsedAt = Date()
         updated.useCount += 1
-        try? storage.updateItem(updated)
+        do {
+            try storage.updateItem(updated)
+        } catch {
+            print("Failed to update item usage stats: \(error)")
+        }
 
         // 生成事件让 UI 刷新（置顶该条目）
         search.invalidateCache()
@@ -249,8 +256,8 @@ final class RealClipboardService: ClipboardServiceProtocol {
         let count = try storage.getItemCount()
         // v0.15.2: 返回实际磁盘占用大小，而非数据库中记录的 size_bytes
         let dbSize = storage.getDatabaseFileSize()
-        let externalSize = try storage.getExternalStorageSizeForStats()
-        let thumbnailSize = storage.getThumbnailCacheSize()
+        let externalSize = try await storage.getExternalStorageSizeForStats()
+        let thumbnailSize = await storage.getThumbnailCacheSize()
         return (count, dbSize + externalSize + thumbnailSize)
     }
 
@@ -259,8 +266,8 @@ final class RealClipboardService: ClipboardServiceProtocol {
         // 使用实际文件大小而非 SUM(size_bytes)
         let dbSize = storage.getDatabaseFileSize()
         // v0.15.2: 使用强制刷新版本，避免缓存导致显示不准确
-        let externalSize = try storage.getExternalStorageSizeForStats()
-        let thumbnailSize = storage.getThumbnailCacheSize()
+        let externalSize = try await storage.getExternalStorageSizeForStats()
+        let thumbnailSize = await storage.getThumbnailCacheSize()
         let dbPath = storage.databaseFilePath
 
         return StorageStatsDTO(

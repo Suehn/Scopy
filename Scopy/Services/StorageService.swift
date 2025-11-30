@@ -70,7 +70,7 @@ final class StorageService {
 
     /// v0.10.8: 外部存储大小缓存（避免重复遍历文件系统）
     private var cachedExternalSize: (size: Int, timestamp: Date)?
-    private let externalSizeCacheTTL: TimeInterval = 30  // 30秒有效期
+    private let externalSizeCacheTTL: TimeInterval = 180  // 延长缓存，降低频繁遍历
 
     /// 暴露数据库连接给 SearchService 使用
     var database: OpaquePointer? { db }
@@ -214,6 +214,7 @@ final class StorageService {
         try execute("CREATE INDEX IF NOT EXISTS idx_content_hash ON clipboard_items(content_hash)")
         try execute("CREATE INDEX IF NOT EXISTS idx_type ON clipboard_items(type)")
         try execute("CREATE INDEX IF NOT EXISTS idx_app ON clipboard_items(app_bundle_id)")
+        try execute("CREATE INDEX IF NOT EXISTS idx_type_recent ON clipboard_items(type, last_used_at DESC)")
     }
 
     private func setupFTS() throws {
@@ -519,7 +520,8 @@ final class StorageService {
         defer { sqlite3_finalize(stmt) }
 
         if sqlite3_step(stmt) == SQLITE_ROW {
-            return Int(sqlite3_column_int64(stmt, 0))
+            let value = sqlite3_column_int64(stmt, 0)
+            return Int(min(value, Int64(Int.max)))
         }
         return 0
     }
@@ -540,7 +542,12 @@ final class StorageService {
 
     /// 实际计算外部存储大小（不使用缓存）
     private func calculateExternalStorageSize() throws -> Int {
-        let url = URL(fileURLWithPath: externalStoragePath)
+        return try Self.calculateDirectorySize(at: externalStoragePath)
+    }
+
+    /// 静态目录大小计算，便于后台线程使用
+    nonisolated private static func calculateDirectorySize(at path: String) throws -> Int {
+        let url = URL(fileURLWithPath: path)
         let resourceKeys: Set<URLResourceKey> = [.fileSizeKey]
 
         guard let enumerator = FileManager.default.enumerator(
@@ -580,30 +587,46 @@ final class StorageService {
     }
 
     /// v0.15.2: 获取外部存储大小（强制刷新，不使用缓存）
-    /// 用于 Settings 页面显示准确的存储统计
-    func getExternalStorageSizeForStats() throws -> Int {
-        return try calculateExternalStorageSize()
+    /// 用于 Settings 页面显示准确的存储统计（后台线程计算，避免阻塞主线程）
+    func getExternalStorageSizeForStats() async throws -> Int {
+        let path = externalStoragePath
+        return try await withCheckedThrowingContinuation { continuation in
+            DispatchQueue.global(qos: .utility).async {
+                do {
+                    let size = try Self.calculateDirectorySize(at: path)
+                    continuation.resume(returning: size)
+                } catch {
+                    continuation.resume(throwing: error)
+                }
+            }
+        }
     }
 
     /// v0.15.2: 获取缩略图缓存大小
-    func getThumbnailCacheSize() -> Int {
-        let url = URL(fileURLWithPath: thumbnailCachePath)
-        let resourceKeys: Set<URLResourceKey> = [.fileSizeKey]
+    func getThumbnailCacheSize() async -> Int {
+        let path = thumbnailCachePath
+        return await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .utility).async {
+                let url = URL(fileURLWithPath: path)
+                let resourceKeys: Set<URLResourceKey> = [.fileSizeKey]
 
-        guard let enumerator = FileManager.default.enumerator(
-            at: url,
-            includingPropertiesForKeys: Array(resourceKeys)
-        ) else {
-            return 0
-        }
+                guard let enumerator = FileManager.default.enumerator(
+                    at: url,
+                    includingPropertiesForKeys: Array(resourceKeys)
+                ) else {
+                    continuation.resume(returning: 0)
+                    return
+                }
 
-        var totalSize = 0
-        for case let fileURL as URL in enumerator {
-            guard let resourceValues = try? fileURL.resourceValues(forKeys: resourceKeys),
-                  let size = resourceValues.fileSize else { continue }
-            totalSize += size
+                var totalSize = 0
+                for case let fileURL as URL in enumerator {
+                    guard let resourceValues = try? fileURL.resourceValues(forKeys: resourceKeys),
+                          let size = resourceValues.fileSize else { continue }
+                    totalSize += size
+                }
+                continuation.resume(returning: totalSize)
+            }
         }
-        return totalSize
     }
 
     /// 获取最近使用的 app 列表（用于过滤）
@@ -974,21 +997,23 @@ final class StorageService {
         invalidateExternalSizeCache()
     }
 
-    /// v0.12: 并发删除文件，提升清理性能
+    /// v0.12: 并发删除文件，提升清理性能（后台执行，避免阻塞主线程）
     private func deleteFilesInParallel(_ files: [String]) {
-        let group = DispatchGroup()
-        let queue = DispatchQueue(label: "com.scopy.cleanup", attributes: .concurrent)
+        guard !files.isEmpty else { return }
+        DispatchQueue.global(qos: .utility).async {
+            let group = DispatchGroup()
+            let queue = DispatchQueue(label: "com.scopy.cleanup", attributes: .concurrent)
 
-        for file in files {
-            group.enter()
-            queue.async {
-                defer { group.leave() }
-                try? FileManager.default.removeItem(atPath: file)
+            for file in files {
+                group.enter()
+                queue.async {
+                    defer { group.leave() }
+                    try? FileManager.default.removeItem(atPath: file)
+                }
             }
-        }
 
-        // 等待所有文件删除完成
-        group.wait()
+            group.wait()
+        }
     }
 
     /// v0.12: 仅删除数据库记录（不删除文件，用于并发清理场景）
@@ -1096,6 +1121,7 @@ final class StorageService {
         let originalSize = nsImage.size
 
         // 计算缩放比例
+        guard originalSize.height > 0, originalSize.width > 0 else { return nil }
         let scale = CGFloat(maxHeight) / originalSize.height
         let newWidth = originalSize.width * scale
         let newHeight = CGFloat(maxHeight)
@@ -1137,9 +1163,11 @@ final class StorageService {
 
     /// 清空缩略图缓存（设置变更时调用）
     func clearThumbnailCache() {
-        try? FileManager.default.removeItem(atPath: thumbnailCachePath)
-        try? FileManager.default.createDirectory(atPath: thumbnailCachePath,
-                                                 withIntermediateDirectories: true)
+        DispatchQueue.global(qos: .utility).async {
+            try? FileManager.default.removeItem(atPath: self.thumbnailCachePath)
+            try? FileManager.default.createDirectory(atPath: self.thumbnailCachePath,
+                                                     withIntermediateDirectories: true)
+        }
     }
 
     /// 清理缩略图缓存（LRU 策略）

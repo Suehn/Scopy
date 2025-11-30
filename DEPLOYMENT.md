@@ -1,5 +1,11 @@
 # Scopy 部署和使用指南
 
+## 本次更新（v0.16）
+- 搜索稳定性与 Pin 排序一致性修复；剪贴板流关闭保护。
+- 外部存储/缩略图统计、孤儿清理、文件删除后台化，减少主线程阻塞。
+- 新增 `(type, last_used_at)` 复合索引；缓存 TTL 延长以降低重复统计。
+- 测试结果：`xcodebuild test -scheme Scopy -destination 'platform=macOS' -only-testing:ScopyTests` **161/161 通过（1 跳过性能开关）**，性能实测详见 `doc/profile/v0.16-profile.md`。
+
 ## 🚀 快速开始 (推荐: 使用 deploy.sh)
 
 ### 最简单的方式 - 使用自动化脚本

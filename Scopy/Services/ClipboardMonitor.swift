@@ -18,7 +18,7 @@ final class ClipboardMonitor {
         let sizeBytes: Int
 
         var isEmpty: Bool {
-            plainText.isEmpty && (rawData == nil || rawData!.isEmpty)
+            plainText.isEmpty && (rawData?.isEmpty ?? true)
         }
     }
 
@@ -46,6 +46,7 @@ final class ClipboardMonitor {
     private var timer: Timer?
     private var lastChangeCount: Int = 0
     private var isMonitoring = false
+    private var isContentStreamFinished = false
 
     /// v0.10.8: 使用任务队列替代单任务，支持快速连续复制大文件
     private var processingQueue: [Task<Void, Never>] = []
@@ -78,6 +79,7 @@ final class ClipboardMonitor {
 
     deinit {
         // Direct cleanup in deinit (synchronous)
+        isContentStreamFinished = true
         timer?.invalidate()
         timer = nil
         // v0.10.8: 取消所有处理任务
@@ -108,6 +110,7 @@ final class ClipboardMonitor {
     }
 
     func stopMonitoring() {
+        isContentStreamFinished = true
         timer?.invalidate()
         timer = nil
         // v0.10.8: 取消所有处理任务
@@ -238,6 +241,7 @@ final class ClipboardMonitor {
             contentHash: hash,
             sizeBytes: rawData.sizeBytes
         )
+        guard !isContentStreamFinished else { return }
         eventContinuation.yield(content)
     }
 
@@ -267,7 +271,7 @@ final class ClipboardMonitor {
             // 回到主线程发送事件
             // v0.10.7: 在 MainActor.run 内再次检查取消状态，防止向已关闭的流发送数据
             await MainActor.run {
-                guard !Task.isCancelled else { return }
+                guard !Task.isCancelled, !self.isContentStreamFinished else { return }
 
                 let content = ClipboardContent(
                     type: rawData.type,
