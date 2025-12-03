@@ -93,14 +93,16 @@ private struct SearchModeMenu: View {
         switch mode {
         case .exact: return "Exact"
         case .fuzzy: return "Fuzzy"
+        case .fuzzyPlus: return "Fuzzy+"
         case .regex: return "Regex"
         }
     }
-    
+
     private func modeIcon(_ mode: SearchMode) -> String {
         switch mode {
         case .exact: return "text.quote"
         case .fuzzy: return "text.magnifyingglass"
+        case .fuzzyPlus: return "plus.magnifyingglass"
         case .regex: return "asterisk.circle"
         }
     }

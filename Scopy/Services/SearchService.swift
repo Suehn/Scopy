@@ -78,6 +78,8 @@ final class SearchService {
             result = try await searchExact(request: request)
         case .fuzzy:
             result = try await searchFuzzy(request: request)
+        case .fuzzyPlus:
+            result = try await searchFuzzyPlus(request: request)
         case .regex:
             result = try await searchRegex(request: request)
         }
@@ -142,6 +144,21 @@ final class SearchService {
         return try await searchInCache(request: request) { item in
             let range = NSRange(item.plainText.startIndex..., in: item.plainText)
             return regex.firstMatch(in: item.plainText, range: range) != nil
+        }
+    }
+
+    /// v0.19.1: Fuzzy+ 搜索 - 按空格分词，每个词独立模糊匹配
+    /// 例如 "周五 匹配" 会匹配同时包含 "周五" 和 "匹配" 的文本
+    private func searchFuzzyPlus(request: SearchRequest) async throws -> SearchResult {
+        guard db != nil else { throw SearchError.databaseNotOpen }
+
+        // Empty query returns all items
+        if request.query.isEmpty {
+            return try await searchAllWithFilters(request: request, db: db!)
+        }
+
+        return try await searchInCache(request: request) { item in
+            self.fuzzyPlusMatch(text: item.plainText, query: request.query)
         }
     }
 
@@ -375,6 +392,21 @@ final class SearchService {
             textIndex = lowerText.index(after: foundIndex)
         }
         return true
+    }
+
+    /// v0.19.1: Fuzzy+ 匹配 - 按空格分词，每个词独立模糊匹配
+    /// 例如 "周五 匹配" 会匹配同时包含 "周五" 和 "匹配" 的文本
+    private func fuzzyPlusMatch(text: String, query: String) -> Bool {
+        // 按空格分词，过滤空字符串
+        let words = query.split(separator: " ").map { String($0) }.filter { !$0.isEmpty }
+
+        // 空查询匹配所有
+        guard !words.isEmpty else { return true }
+
+        // 所有词都必须匹配
+        return words.allSatisfy { word in
+            fuzzyMatch(text: text, query: word)
+        }
     }
 
     // MARK: - Query Utilities

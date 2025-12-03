@@ -7,6 +7,27 @@
 
 ---
 
+## [v0.19.1] - 2025-12-04
+
+### 新功能
+
+**Fuzzy+ 搜索模式**：
+- **功能** - 新增 `fuzzyPlus` 搜索模式，按空格分词，每个词独立模糊匹配
+- **用例** - 搜索 "周五 匹配" 可以匹配同时包含 "周五" 和 "匹配" 的文本
+- **默认模式** - 将默认搜索模式从 `fuzzy` 改为 `fuzzyPlus`
+
+### 修改文件
+- `Scopy/Protocols/ClipboardServiceProtocol.swift` - SearchMode 枚举新增 fuzzyPlus，SettingsDTO 默认值改为 fuzzyPlus
+- `Scopy/Services/SearchService.swift` - 新增 fuzzyPlusMatch 和 searchFuzzyPlus 方法
+- `Scopy/Services/MockClipboardService.swift` - switch case 补充 fuzzyPlus
+- `Scopy/Views/HeaderView.swift` - 搜索模式菜单新增 Fuzzy+ 选项
+- `Scopy/Views/SettingsView.swift` - 设置页面新增 Fuzzy+ 选项
+
+### 测试
+- 单元测试: **161/161 passed** (1 skipped)
+
+---
+
 ## [v0.19] - 2025-12-04
 
 ### 代码深度审查修复

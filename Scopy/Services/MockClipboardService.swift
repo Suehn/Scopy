@@ -105,8 +105,8 @@ final class MockClipboardService: ClipboardServiceProtocol {
                 switch query.mode {
                 case .exact:
                     return item.plainText.localizedCaseInsensitiveContains(query.query)
-                case .fuzzy:
-                    // 简单的模糊匹配
+                case .fuzzy, .fuzzyPlus:
+                    // 简单的模糊匹配（Mock 服务不区分 fuzzy 和 fuzzyPlus）
                     return item.plainText.localizedCaseInsensitiveContains(query.query)
                 case .regex:
                     if let regex = try? NSRegularExpression(pattern: query.query, options: .caseInsensitive) {

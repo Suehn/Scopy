@@ -6,6 +6,7 @@ import Foundation
 enum SearchMode: String, Sendable, CaseIterable {
     case exact
     case fuzzy
+    case fuzzyPlus  // v0.19.1: 分词 + 每词模糊匹配
     case regex
 }
 
@@ -134,7 +135,7 @@ struct SettingsDTO: Sendable {
         maxStorageMB: 200,
         saveImages: true,
         saveFiles: true,
-        defaultSearchMode: .fuzzy,
+        defaultSearchMode: .fuzzyPlus,
         hotkeyKeyCode: 8,  // kVK_ANSI_C = 8
         hotkeyModifiers: 0x0300,  // shiftKey (0x0200) | cmdKey (0x0100)
         showImageThumbnails: true,

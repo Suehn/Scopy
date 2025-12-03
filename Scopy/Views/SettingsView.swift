@@ -202,13 +202,14 @@ struct GeneralSettingsPage: View {
                 Picker("Default Search Mode", selection: $tempSettings.defaultSearchMode) {
                     Text("Exact").tag(SearchMode.exact)
                     Text("Fuzzy").tag(SearchMode.fuzzy)
+                    Text("Fuzzy+").tag(SearchMode.fuzzyPlus)
                     Text("Regex").tag(SearchMode.regex)
                 }
-                .pickerStyle(.segmented)
+                .pickerStyle(.menu)
             } header: {
                 Label("Search", systemImage: "magnifyingglass")
             } footer: {
-                Text("Exact=精确 · Fuzzy=模糊 · Regex=正则")
+                Text("Exact=精确 · Fuzzy=模糊 · Fuzzy+=分词模糊 · Regex=正则")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
