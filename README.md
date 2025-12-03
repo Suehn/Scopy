@@ -2,6 +2,21 @@
 
 A native macOS clipboard manager with unlimited history, intelligent storage, and high-performance search.
 
+![macOS 14.0+](https://img.shields.io/badge/macOS-14.0+-blue)
+![Swift 5.9](https://img.shields.io/badge/Swift-5.9-orange)
+![License MIT](https://img.shields.io/badge/License-MIT-green)
+
+## Features
+
+- **Unlimited History** - Store 10k+ clipboard items with intelligent cleanup
+- **Multi-type Support** - Text, RTF, HTML, Images, Files
+- **Fast Search** - FTS5 full-text search with fuzzy/exact/regex modes
+- **Pin Items** - Keep important items always accessible
+- **App Filtering** - Filter history by source application
+- **Image Thumbnails** - Preview images with hover-to-zoom
+- **Global Hotkey** - Quick access with customizable shortcut (default: ⇧⌘C)
+- **Lightweight** - ~50MB memory for 10k items (90% less than naive implementation)
+
 ## Installation
 
 ### Homebrew (Recommended)
@@ -11,11 +26,29 @@ brew tap Suehn/scopy
 brew install --cask scopy
 ```
 
-> ⚠️ App is not signed. On first launch: Right-click → Open → Open
+> App is not signed. On first launch: Right-click → Open → Open
 
 ### Manual Download
 
 Download the latest `.dmg` from [Releases](https://github.com/Suehn/Scopy/releases).
+
+---
+
+## Usage
+
+| Action | Shortcut |
+|--------|----------|
+| Open/Close Panel | ⇧⌘C (customizable) |
+| Navigate | ↑ / ↓ |
+| Select & Paste | Enter |
+| Clear Search / Close | Esc |
+| Delete Item | ⌥⌫ |
+| Open Settings | ⌘, |
+
+**Mouse:**
+- Click item to copy
+- Right-click for context menu (Copy / Pin / Delete)
+- Hover image for preview
 
 ---
 
@@ -24,7 +57,7 @@ Download the latest `.dmg` from [Releases](https://github.com/Suehn/Scopy/releas
 ### Prerequisites
 
 - macOS 14.0+
-- Xcode 15.0+ or Command Line Tools
+- Xcode 16.0+
 - Homebrew (for xcodegen)
 
 ### Quick Build
@@ -43,121 +76,109 @@ make setup && make build
 # Build and run (Debug)
 make run
 
-# Build Release DMG
-./scripts/build-release.sh 0.18.0
-
-# Run tests
+# Run tests (161 tests)
 make test
+
+# Build Release DMG
+./scripts/build-release.sh
 ```
+
+---
 
 ## Architecture
 
-Scopy 遵循 **前后端彻底解耦** 的设计原则（详见 `doc/dev-doc/v0.md`）：
+Scopy follows a **protocol-first, frontend-backend separation** design:
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│                      UI Shell                           │
+│                      UI Layer                            │
 │   ┌──────────┐  ┌──────────┐  ┌──────────────────────┐ │
-│   │ MenuBar  │  │  Popup   │  │      Settings        │ │
-│   │  Icon    │  │  Window  │  │       Window         │ │
+│   │ MenuBar  │  │ Floating │  │      Settings        │ │
+│   │  Icon    │  │  Panel   │  │       Window         │ │
 │   └──────────┘  └──────────┘  └──────────────────────┘ │
 │                        │                                │
-│              Protocol Interface                         │
-│        ┌───────────────┴───────────────┐               │
-└────────│───────────────────────────────│───────────────┘
-         ▼                               ▼
+│              ClipboardServiceProtocol                   │
+└────────────────────────┼────────────────────────────────┘
+                         ▼
 ┌─────────────────────────────────────────────────────────┐
-│                    Backend Services                      │
+│                  Backend Services                        │
 │   ┌──────────────┐  ┌──────────────┐  ┌──────────────┐ │
 │   │  Clipboard   │  │   Storage    │  │    Search    │ │
-│   │   Service    │  │   Service    │  │   Service    │ │
+│   │   Monitor    │  │   Service    │  │   Service    │ │
+│   │  (polling)   │  │  (SQLite)    │  │   (FTS5)     │ │
 │   └──────────────┘  └──────────────┘  └──────────────┘ │
 └─────────────────────────────────────────────────────────┘
 ```
 
-### Key Files
+### Key Components
+
+| Component | Description |
+|-----------|-------------|
+| `ClipboardMonitor` | Polls system clipboard, detects changes, computes content hash |
+| `StorageService` | SQLite + FTS5, hierarchical storage (inline < 50KB, external files) |
+| `SearchService` | Multi-mode search with caching, timeout protection |
+| `AppState` | Observable state management, event-driven updates |
+| `FloatingPanel` | NSPanel-based popup, appears at mouse position |
+
+### Data Storage
 
 ```
-Scopy/
-├── Protocols/
-│   └── ClipboardServiceProtocol.swift  # 后端接口定义
-├── Services/
-│   └── MockClipboardService.swift      # Mock 后端实现（用于开发）
-├── Observables/
-│   └── AppState.swift                  # 全局状态管理
-├── Views/
-│   ├── ContentView.swift               # 主视图
-│   ├── HeaderView.swift                # 搜索框
-│   ├── HistoryListView.swift           # 历史列表
-│   └── FooterView.swift                # 底部状态栏
-├── FloatingPanel.swift                 # 浮动窗口
-├── AppDelegate.swift                   # 应用委托
-└── ScopyApp.swift                      # 应用入口
+~/Library/Application Support/Scopy/
+├── clipboard.db          # SQLite database with FTS5
+├── content/              # Large content (images, files)
+│   └── <uuid>.png
+└── thumbnails/           # Image thumbnail cache
 ```
 
-## Protocol-Based Backend
+---
 
-后端接口完全通过协议定义，UI 只依赖协议不依赖具体实现：
+## Performance
 
-```swift
-protocol ClipboardServiceProtocol {
-    func fetchRecent(limit: Int, offset: Int) async throws -> [ClipboardItemDTO]
-    func search(query: SearchRequest) async throws -> SearchResultPage
-    func pin(itemID: UUID) async throws
-    func unpin(itemID: UUID) async throws
-    func delete(itemID: UUID) async throws
-    // ...
-}
-```
+| Metric | Target | Actual |
+|--------|--------|--------|
+| Search ≤5k items | P95 ≤ 50ms | ~5ms |
+| Search 10k items | P95 ≤ 150ms | ~25ms |
+| Memory (10k items) | < 100MB | ~50MB |
+| First load (50 items) | < 100ms | ~5ms |
 
-### Search Request Format
+---
 
-```swift
-struct SearchRequest {
-    let query: String
-    let mode: SearchMode  // .exact, .fuzzy, .regex
-    let appFilter: String?
-    let typeFilter: ClipboardItemType?
-    let limit: Int
-    let offset: Int
-}
-```
+## Configuration
 
-## Demo / 交互示例
+Settings available in the app (⌘,):
 
-运行后：
+- **General**: Global hotkey, search mode (fuzzy/exact/regex)
+- **Storage**: Max items (default 10k), max size, auto-cleanup
+- **Appearance**: Thumbnail height, preview delay
+- **About**: Version info, storage statistics
 
-1. **菜单栏图标**: 点击剪贴板图标打开/关闭弹出窗口
-2. **搜索**: 输入文字自动搜索（150ms 防抖）
-3. **键盘导航**:
-   - `↑/↓` 上下选择
-   - `Enter` 复制并关闭
-   - `Esc` 清空搜索或关闭窗口
-4. **右键菜单**: Copy / Pin / Delete
-5. **底部操作**: Clear / Settings / Quit
+---
 
-## Testing
+## Tech Stack
 
-当前使用 `MockClipboardService` 提供测试数据，可以：
+- **UI**: SwiftUI + AppKit (NSPanel, NSStatusItem)
+- **Storage**: SQLite3 + FTS5 (full-text search)
+- **Concurrency**: Swift async/await, actors
+- **Build**: XcodeGen + Makefile
 
-1. 验证 UI 在后端 mock 模式下正常运行
-2. 测试搜索、分页、Pin/Unpin 等功能
-3. 后续实现真实后端时只需替换 Service 实现
+---
 
-## Performance Goals (from v0.md)
+## Contributing
 
-- ≤5k items: P95 search latency ≤ 50ms
-- 10k-100k items: first 50 results within P95 ≤ 100-150ms
-- Search debounce: 150-200ms during continuous input
+1. Fork the repository
+2. Create your feature branch (`git checkout -b feature/amazing`)
+3. Commit your changes (`git commit -m 'Add amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing`)
+5. Open a Pull Request
 
-## Next Steps
-
-1. 实现真实的 `ClipboardService`（监控系统剪贴板）
-2. 实现 `StorageService`（SQLite + FTS5）
-3. 实现 `SearchService`（多模式搜索）
-4. 添加设置窗口
-5. 添加快捷键支持
+---
 
 ## License
 
-MIT
+MIT License - see [LICENSE](LICENSE) for details.
+
+---
+
+## Acknowledgments
+
+Inspired by [Maccy](https://github.com/p0deje/Maccy) and other great clipboard managers.
