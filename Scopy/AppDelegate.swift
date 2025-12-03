@@ -80,7 +80,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc func togglePanel() {
-        panel?.toggle()
+        // 状态栏点击：窗口在状态栏下方
+        panel?.toggle(positionMode: .statusBar)
+    }
+
+    func togglePanelAtMousePosition() {
+        // 快捷键触发：窗口在鼠标位置
+        panel?.toggle(positionMode: .mousePosition)
     }
 
     // MARK: - Hotkey Settings
@@ -109,7 +115,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             keyCode: keyCode,
             modifiers: modifiers,
             handler: { [weak self] in
-                self?.togglePanel()
+                self?.togglePanelAtMousePosition()
             }
         )
         persistHotkeySettings(keyCode: keyCode, modifiers: modifiers)
@@ -126,6 +132,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// 打开设置窗口
     /// v0.10: 注入 AppState 到 Environment，实现完全解耦
+    /// v0.17: 修复内存泄漏 - 窗口关闭时释放并清空引用
     @MainActor
     func openSettings() {
         if settingsWindow == nil {
@@ -136,7 +143,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 defer: false
             )
             window.title = "Scopy Settings"
-            window.isReleasedWhenClosed = false
+            window.isReleasedWhenClosed = true  // v0.17: 关闭时释放窗口
 
             let settingsView = SettingsView { [weak self] in
                 self?.settingsWindow?.close()
@@ -145,6 +152,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
             window.contentView = NSHostingView(rootView: settingsView)
             window.center()
+
+            // v0.17: 监听窗口关闭事件，清空引用避免悬空指针
+            NotificationCenter.default.addObserver(
+                forName: NSWindow.willCloseNotification,
+                object: window,
+                queue: .main
+            ) { [weak self] _ in
+                self?.settingsWindow = nil
+            }
 
             settingsWindow = window
         }

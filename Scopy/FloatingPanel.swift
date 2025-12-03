@@ -1,6 +1,12 @@
 import AppKit
 import SwiftUI
 
+/// 窗口定位模式
+enum PanelPositionMode {
+    case statusBar      // 原有行为：状态栏按钮下方
+    case mousePosition  // 新行为：鼠标位置
+}
+
 /// 浮动面板 - 参考 Maccy 的 FloatingPanel 实现
 class FloatingPanel: NSPanel, NSWindowDelegate {
     var isPresented: Bool = false
@@ -45,39 +51,107 @@ class FloatingPanel: NSPanel, NSWindowDelegate {
         )
     }
 
-    func toggle() {
+    func toggle(positionMode: PanelPositionMode = .statusBar) {
         if isPresented {
             close()
         } else {
-            open()
+            open(positionMode: positionMode)
         }
     }
 
-    func open() {
-        // 计算位置（在状态栏图标下方）
-        if let button = statusBarButton, let buttonWindow = button.window {
-            let buttonRect = button.convert(button.bounds, to: nil)
-            let screenRect = buttonWindow.convertToScreen(buttonRect)
+    func open(positionMode: PanelPositionMode = .statusBar) {
+        var origin: NSPoint
 
-            var origin = NSPoint(
-                x: screenRect.midX - frame.width / 2,
-                y: screenRect.minY - frame.height - 4
-            )
-
-            // 确保不超出屏幕边界
-            if let screen = NSScreen.main {
-                let screenFrame = screen.visibleFrame
-                origin.x = max(screenFrame.minX, min(origin.x, screenFrame.maxX - frame.width))
-                origin.y = max(screenFrame.minY, origin.y)
-            }
-
-            setFrameOrigin(origin)
+        switch positionMode {
+        case .statusBar:
+            origin = calculateStatusBarPosition()
+        case .mousePosition:
+            origin = calculateMousePosition()
         }
 
+        // 应用屏幕边界约束
+        origin = constrainToScreen(origin: origin)
+
+        setFrameOrigin(origin)
         orderFrontRegardless()
         makeKey()
         isPresented = true
         statusBarButton?.isHighlighted = true
+    }
+
+    // MARK: - Position Calculation
+
+    /// 计算状态栏按钮下方的位置（原有行为）
+    private func calculateStatusBarPosition() -> NSPoint {
+        guard let button = statusBarButton, let buttonWindow = button.window else {
+            return calculateFallbackPosition()
+        }
+
+        let buttonRect = button.convert(button.bounds, to: nil)
+        let screenRect = buttonWindow.convertToScreen(buttonRect)
+
+        return NSPoint(
+            x: screenRect.midX - frame.width / 2,
+            y: screenRect.minY - frame.height - 4
+        )
+    }
+
+    /// 计算鼠标位置附近的窗口位置（新行为）
+    private func calculateMousePosition() -> NSPoint {
+        let mouseLocation = NSEvent.mouseLocation
+        let offset: CGFloat = 8
+
+        // 窗口左上角在鼠标位置右下方，避免遮挡光标
+        return NSPoint(
+            x: mouseLocation.x + offset,
+            y: mouseLocation.y - frame.height - offset
+        )
+    }
+
+    /// 约束窗口位置到屏幕可见区域内
+    private func constrainToScreen(origin: NSPoint) -> NSPoint {
+        // 找到包含鼠标或窗口的屏幕
+        let mouseLocation = NSEvent.mouseLocation
+        let targetScreen = NSScreen.screens.first { screen in
+            screen.frame.contains(mouseLocation)
+        } ?? NSScreen.main ?? NSScreen.screens.first
+
+        guard let screen = targetScreen else {
+            return origin
+        }
+
+        let screenFrame = screen.visibleFrame
+        var constrainedOrigin = origin
+
+        // 水平约束
+        if constrainedOrigin.x + frame.width > screenFrame.maxX {
+            constrainedOrigin.x = screenFrame.maxX - frame.width
+        }
+        if constrainedOrigin.x < screenFrame.minX {
+            constrainedOrigin.x = screenFrame.minX
+        }
+
+        // 垂直约束
+        if constrainedOrigin.y < screenFrame.minY {
+            constrainedOrigin.y = screenFrame.minY
+        }
+        if constrainedOrigin.y + frame.height > screenFrame.maxY {
+            constrainedOrigin.y = screenFrame.maxY - frame.height
+        }
+
+        return constrainedOrigin
+    }
+
+    /// 兜底位置：屏幕中心
+    private func calculateFallbackPosition() -> NSPoint {
+        guard let screen = NSScreen.main else {
+            return NSPoint(x: 100, y: 100)
+        }
+        let screenFrame = screen.visibleFrame
+        return NSPoint(
+            x: screenFrame.midX - frame.width / 2,
+            y: screenFrame.midY - frame.height / 2
+        )
     }
 
     override func close() {
