@@ -7,6 +7,43 @@
 
 ---
 
+## [v0.19] - 2025-12-04
+
+### 代码深度审查修复
+
+基于深度代码审查，修复 11 个稳定性、性能、内存安全和功能准确性问题。
+
+**高优先级修复 (5个)**：
+- **#1 SearchService 缓存内存** - 缓存时去除 rawData，从潜在 200MB 降至 ~10MB
+- **#2 cleanupByAge 孤立文件** - 重写方法，同时删除外部存储文件
+- **#3 cleanupOrphanedFiles 主线程阻塞** - 文件删除移到后台线程
+- **#4 图片去重逻辑矛盾** - 统一使用 SHA256，移除无用轻量指纹计算
+- **#5 stop() 等待逻辑** - 先停止监控使 stream 结束，再取消任务
+
+**中优先级修复 (3个)**：
+- **#6 图片指纹内存** - 使用 32x32 缩略图计算，从 33MB 降至 4KB (-99.99%)
+- **#7 缩略图生成** - 添加 autoreleasepool 管理中间对象
+- **#8 模糊搜索** - 所有查询都使用真正的字符顺序匹配
+
+**低优先级修复 (3个)**：
+- **#11-12 代码重复** - 新建 SQLiteHelpers.swift，提取共享代码
+- **#13 错误处理** - try? 改为 do-catch 并添加日志
+- **#15 搜索缓存** - 移除搜索时的缓存清除，只在数据变更时失效
+
+### 新增文件
+- `Scopy/Services/SQLiteHelpers.swift` - 共享 SQLite 工具函数
+
+### 修改文件
+- `Scopy/Services/StorageService.swift` - #2, #3, #7, #13
+- `Scopy/Services/SearchService.swift` - #1, #8, #11-12
+- `Scopy/Services/ClipboardMonitor.swift` - #4, #6
+- `Scopy/Services/RealClipboardService.swift` - #5, #13, #15
+
+### 测试
+- 单元测试: **161/161 passed** (1 skipped)
+
+---
+
 ## [v0.18] - 2025-12-03
 
 ### 性能优化

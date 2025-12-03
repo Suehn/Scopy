@@ -116,28 +116,20 @@ final class SearchService {
 
     /// Fuzzy search (v0.md 3.3)
     /// v0.17: 确保所有模糊搜索都不区分大小写
+    /// v0.19: 所有模糊搜索都使用真正的模糊匹配（字符顺序匹配）
     private func searchFuzzy(request: SearchRequest) async throws -> SearchResult {
-        guard let db = db else { throw SearchError.databaseNotOpen }
+        guard db != nil else { throw SearchError.databaseNotOpen }
 
         // Empty query returns all items
         if request.query.isEmpty {
-            return try await searchAllWithFilters(request: request, db: db)
+            return try await searchAllWithFilters(request: request, db: db!)
         }
 
-        // For short queries (<=4 chars), use in-memory cache with fuzzy matching
-        // This ensures fuzzy patterns like "hlo" -> "Hello" work correctly
-        // fuzzyMatch 内部已使用 lowercased()，无需额外处理
-        if request.query.count <= 4 {
-            return try await searchInCache(request: request) { item in
-                self.fuzzyMatch(text: item.plainText, query: request.query)
-            }
+        // v0.19: 所有模糊搜索都使用缓存 + 真正的模糊匹配
+        // 这确保 "hlo" 可以匹配 "Hello"，而不仅仅是前缀匹配
+        return try await searchInCache(request: request) { item in
+            self.fuzzyMatch(text: item.plainText, query: request.query)
         }
-
-        // v0.17: FTS5 with prefix matching for longer fuzzy search
-        // 将查询转为小写，确保与 FTS5 unicode61 tokenizer 的 case-folding 一致
-        let words = request.query.lowercased().split(separator: " ").map { String($0) }
-        let ftsQuery = words.map { "\($0)*" }.joined(separator: " ")
-        return try await searchWithFTS(db: db, query: ftsQuery, request: request, useFuzzyRanking: true)
     }
 
     /// Regex search (v0.md 3.3: 限制仅对结果子集执行)
@@ -326,6 +318,7 @@ final class SearchService {
 
     /// v0.12: 修复竞态条件 - 所有检查都在锁内进行
     /// v0.17.1: 使用 withLock 统一锁策略
+    /// v0.19: 修复内存问题 - 缓存时去除 rawData，避免 200MB 内存占用
     private func refreshCacheIfNeeded() throws {
         try cacheRefreshLock.withLock {
             // 所有检查都在锁内进行，确保原子性
@@ -338,7 +331,24 @@ final class SearchService {
             defer { cacheRefreshInProgress = false }
 
             // 执行刷新
-            recentItemsCache = try storage.fetchRecent(limit: shortQueryCacheSize, offset: 0)
+            let items = try storage.fetchRecent(limit: shortQueryCacheSize, offset: 0)
+            // v0.19: 去除 rawData，只保留搜索所需的元数据
+            recentItemsCache = items.map { item in
+                StorageService.StoredItem(
+                    id: item.id,
+                    type: item.type,
+                    contentHash: item.contentHash,
+                    plainText: item.plainText,
+                    appBundleID: item.appBundleID,
+                    createdAt: item.createdAt,
+                    lastUsedAt: item.lastUsedAt,
+                    useCount: item.useCount,
+                    isPinned: item.isPinned,
+                    sizeBytes: item.sizeBytes,
+                    storageRef: item.storageRef,
+                    rawData: nil  // 不缓存原始数据，节省内存
+                )
+            }
             cacheTimestamp = now
         }
     }
@@ -397,46 +407,9 @@ final class SearchService {
         }
     }
 
+    /// v0.19: 使用共享的 parseStoredItem 函数，消除代码重复
     private func parseItem(from stmt: OpaquePointer) -> StorageService.StoredItem? {
-        guard let idStr = sqlite3_column_text(stmt, 0).map({ String(cString: $0) }),
-              let id = UUID(uuidString: idStr),
-              let typeStr = sqlite3_column_text(stmt, 1).map({ String(cString: $0) }),
-              let type = ClipboardItemType(rawValue: typeStr),
-              let hashStr = sqlite3_column_text(stmt, 2).map({ String(cString: $0) }) else {
-            return nil
-        }
-
-        let plainText = sqlite3_column_text(stmt, 3).map { String(cString: $0) } ?? ""
-        let appBundleID = sqlite3_column_text(stmt, 4).map { String(cString: $0) }
-        let createdAt = Date(timeIntervalSince1970: sqlite3_column_double(stmt, 5))
-        let lastUsedAt = Date(timeIntervalSince1970: sqlite3_column_double(stmt, 6))
-        let useCount = Int(sqlite3_column_int(stmt, 7))
-        let isPinned = sqlite3_column_int(stmt, 8) != 0
-        let sizeBytes = Int(sqlite3_column_int(stmt, 9))
-        let storageRef = sqlite3_column_text(stmt, 10).map { String(cString: $0) }
-
-        // Read inline raw_data (column 11) - SearchService also needs access for file type items
-        var rawData: Data? = nil
-        let blobBytes = sqlite3_column_blob(stmt, 11)
-        let blobSize = sqlite3_column_bytes(stmt, 11)
-        if let bytes = blobBytes, blobSize > 0 {
-            rawData = Data(bytes: bytes, count: Int(blobSize))
-        }
-
-        return StorageService.StoredItem(
-            id: id,
-            type: type,
-            contentHash: hashStr,
-            plainText: plainText,
-            appBundleID: appBundleID,
-            createdAt: createdAt,
-            lastUsedAt: lastUsedAt,
-            useCount: useCount,
-            isPinned: isPinned,
-            sizeBytes: sizeBytes,
-            storageRef: storageRef,
-            rawData: rawData
-        )
+        return parseStoredItem(from: stmt)
     }
 
     // MARK: - Helpers
@@ -569,5 +542,5 @@ final class SearchService {
 }
 
 // MARK: - SQLITE_TRANSIENT helper
-
-private let SQLITE_TRANSIENT = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
+// v0.19: 移至 SQLiteHelpers.swift，此处保留注释说明
+// 使用全局 SQLITE_TRANSIENT 常量（定义在 SQLiteHelpers.swift）

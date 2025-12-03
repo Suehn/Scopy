@@ -319,21 +319,14 @@ final class ClipboardMonitor {
     }
 
     /// 在后台线程计算哈希
+    /// v0.19: 统一使用 SHA256 进行去重，确保准确性
     nonisolated private func computeHashInBackground(_ rawData: RawClipboardData) async -> String {
-        // 图片强制使用全量 SHA256，避免轻指纹误判
-        if rawData.type == .image {
-            if let data = rawData.rawData {
-                return Self.computeHashStatic(data)
-            } else {
-                return Self.computeHashStatic(Data(rawData.plainText.utf8))
-            }
-        }
-
+        // 如果有预计算的哈希（非图片类型），直接使用
         if let precomputed = rawData.precomputedHash {
             return precomputed
         }
 
-        // 否则在后台计算 SHA256
+        // 所有类型（包括图片）统一使用 SHA256
         return await withCheckedContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async {
                 let hash: String
@@ -372,17 +365,16 @@ final class ClipboardMonitor {
         }
 
         // 2. Image (PNG, TIFF, etc.) - 优先 PNG，TIFF 转为 PNG 避免存储膨胀
+        // v0.19: 图片统一使用 SHA256 去重（在后台线程计算），移除无用的轻量指纹
         if let imageResult = extractOptimalImageData(from: pasteboard) {
             let imageData = imageResult.data
-            // 图片使用轻量指纹（分辨率 + 四角像素），避免 SHA256 全量计算
-            let fingerprint = Self.computeImageFingerprint(imageData) ?? "img:unknown:\(imageData.count)"
             return RawClipboardData(
                 type: .image,
                 plainText: "[Image: \(formatBytes(imageData.count))]",
                 rawData: imageData,
                 appBundleID: appBundleID,
                 sizeBytes: imageData.count,
-                precomputedHash: fingerprint  // 预计算的指纹
+                precomputedHash: nil  // 图片哈希在后台线程计算
             )
         }
 
@@ -574,111 +566,50 @@ final class ClipboardMonitor {
         return "img:\(width)x\(height):\(cornerHash)"
     }
 
-    /// v0.11: 提取四角像素哈希（使用 autoreleasepool 管理内存）
-    /// 每个角取 4x4 像素块，共 64 像素，拼接成指纹
+    /// v0.19: 使用缩略图计算哈希，大幅减少内存占用
+    /// 将图片缩放到 32x32 后计算全图哈希，而不是在原图上提取四角
+    /// 4K 图片：原方案 33MB -> 新方案 4KB (减少 99.99%)
+    private static let thumbnailSize = 32
+
     nonisolated private static func extractCornerPixelsHash(from cgImage: CGImage, width: Int, height: Int) -> String {
-        // 处理小图片：如果图片小于 8x8，直接用全图做简单哈希
-        if width < 8 || height < 8 {
-            return computeSmallImageHash(from: cgImage, width: width, height: height)
-        }
-
-        // v0.11: 使用 autoreleasepool 管理 CGContext 内存，避免大图片导致内存峰值
         return autoreleasepool {
-            // 正常图片：提取四角 4x4 像素块
-            let blockSize = 4
-            var pixelData: [UInt8] = []
-
-            // 创建位图上下文来读取像素
+            let thumbSize = thumbnailSize
             let colorSpace = CGColorSpaceCreateDeviceRGB()
             let bytesPerPixel = 4
-            let bytesPerRow = bytesPerPixel * width
+            let bytesPerRow = bytesPerPixel * thumbSize
             let bitsPerComponent = 8
 
+            // 创建 32x32 的缩略图上下文（仅 4KB 内存）
             guard let context = CGContext(
                 data: nil,
-                width: width,
-                height: height,
+                width: thumbSize,
+                height: thumbSize,
                 bitsPerComponent: bitsPerComponent,
                 bytesPerRow: bytesPerRow,
                 space: colorSpace,
                 bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
             ) else {
-                // 降级：返回简单的尺寸哈希
                 return "\(width)\(height)"
             }
 
-            context.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
+            // 将原图绘制到缩略图上下文（自动缩放）
+            context.interpolationQuality = .low  // 快速缩放
+            context.draw(cgImage, in: CGRect(x: 0, y: 0, width: thumbSize, height: thumbSize))
 
             guard let data = context.data else {
                 return "\(width)\(height)"
             }
 
-            let buffer = data.bindMemory(to: UInt8.self, capacity: width * height * bytesPerPixel)
-
-            // 四个角落的起始坐标
-            let corners: [(x: Int, y: Int)] = [
-                (0, 0),                           // 左上
-                (width - blockSize, 0),           // 右上
-                (0, height - blockSize),          // 左下
-                (width - blockSize, height - blockSize) // 右下
-            ]
-
-            // 从每个角提取 4x4 像素块的 RGB 值
-            for corner in corners {
-                for dy in 0..<blockSize {
-                    for dx in 0..<blockSize {
-                        let x = corner.x + dx
-                        let y = corner.y + dy
-                        let offset = (y * width + x) * bytesPerPixel
-                        // 只取 RGB，忽略 Alpha
-                        pixelData.append(buffer[offset])     // R
-                        pixelData.append(buffer[offset + 1]) // G
-                        pixelData.append(buffer[offset + 2]) // B
-                    }
-                }
-            }
-
-            // 将像素数据转为十六进制字符串 (64 像素 * 3 通道 = 192 字节)
-            // 为了更短，我们做一个简单的哈希压缩
-            return compressPixelData(pixelData)
-        }
-    }
-
-    /// v0.11: 处理小于 8x8 的图片（使用 autoreleasepool 管理内存）
-    nonisolated private static func computeSmallImageHash(from cgImage: CGImage, width: Int, height: Int) -> String {
-        return autoreleasepool {
-            let colorSpace = CGColorSpaceCreateDeviceRGB()
-            let bytesPerPixel = 4
-            let bytesPerRow = bytesPerPixel * width
-            let bitsPerComponent = 8
-
-            guard let context = CGContext(
-                data: nil,
-                width: width,
-                height: height,
-                bitsPerComponent: bitsPerComponent,
-                bytesPerRow: bytesPerRow,
-                space: colorSpace,
-                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-            ) else {
-                return "small"
-            }
-
-            context.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
-
-            guard let data = context.data else {
-                return "small"
-            }
-
-            let buffer = data.bindMemory(to: UInt8.self, capacity: width * height * bytesPerPixel)
+            // 读取缩略图全部像素
+            let buffer = data.bindMemory(to: UInt8.self, capacity: thumbSize * thumbSize * bytesPerPixel)
             var pixelData: [UInt8] = []
+            pixelData.reserveCapacity(thumbSize * thumbSize * 3)
 
-            // 读取所有像素
-            for i in 0..<(width * height) {
+            for i in 0..<(thumbSize * thumbSize) {
                 let offset = i * bytesPerPixel
-                pixelData.append(buffer[offset])
-                pixelData.append(buffer[offset + 1])
-                pixelData.append(buffer[offset + 2])
+                pixelData.append(buffer[offset])     // R
+                pixelData.append(buffer[offset + 1]) // G
+                pixelData.append(buffer[offset + 2]) // B
             }
 
             return compressPixelData(pixelData)

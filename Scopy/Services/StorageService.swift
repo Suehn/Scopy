@@ -430,8 +430,13 @@ final class StorageService {
         guard db != nil else { throw StorageError.databaseNotOpen }
 
         // First get the item to clean up external storage
+        // v0.19: 添加错误日志
         if let item = try findByID(id), let storageRef = item.storageRef {
-            try? FileManager.default.removeItem(atPath: storageRef)
+            do {
+                try FileManager.default.removeItem(atPath: storageRef)
+            } catch {
+                print("⚠️ StorageService: Failed to delete external file '\(storageRef)': \(error.localizedDescription)")
+            }
         }
 
         let sql = "DELETE FROM clipboard_items WHERE id = ?"
@@ -699,6 +704,7 @@ final class StorageService {
     /// v0.15: Clean up orphaned files in external storage directory
     /// Files that exist on disk but have no corresponding database record
     /// This fixes the storage leak where files accumulate without being tracked
+    /// v0.19: 修复 - 文件删除移到后台线程，避免阻塞主线程
     func cleanupOrphanedFiles() throws {
         guard db != nil else { throw StorageError.databaseNotOpen }
 
@@ -736,23 +742,28 @@ final class StorageService {
             }
         }
 
-        // 3. Delete orphaned files in parallel
+        // 3. Delete orphaned files in background (non-blocking)
+        // v0.19: 移到后台线程执行，避免阻塞主线程
         if !orphanedFiles.isEmpty {
-            let group = DispatchGroup()
-            let queue = DispatchQueue(label: "com.scopy.orphan-cleanup", attributes: .concurrent)
+            DispatchQueue.global(qos: .utility).async { [weak self] in
+                let group = DispatchGroup()
+                let queue = DispatchQueue(label: "com.scopy.orphan-cleanup", attributes: .concurrent)
 
-            for fileURL in orphanedFiles {
-                group.enter()
-                queue.async {
-                    defer { group.leave() }
-                    try? FileManager.default.removeItem(at: fileURL)
+                for fileURL in orphanedFiles {
+                    group.enter()
+                    queue.async {
+                        defer { group.leave() }
+                        try? FileManager.default.removeItem(at: fileURL)
+                    }
+                }
+                group.wait()
+
+                // 4. Invalidate cache after cleanup (on main thread)
+                DispatchQueue.main.async {
+                    self?.invalidateExternalSizeCache()
                 }
             }
-            group.wait()
         }
-
-        // 4. Invalidate cache after cleanup
-        invalidateExternalSizeCache()
     }
 
     /// v0.14: 深度优化 - 消除子查询 COUNT，使用单次查询 + 事务批量删除
@@ -818,21 +829,46 @@ final class StorageService {
     }
 
     /// v0.10.4: 检查 sqlite3_step 返回值
+    /// v0.19: 修复 - 同时删除外部存储文件，避免孤立文件累积
     private func cleanupByAge(maxDays: Int) throws {
         let cutoff = Date().addingTimeInterval(-Double(maxDays * 24 * 3600))
 
-        let sql = "DELETE FROM clipboard_items WHERE is_pinned = 0 AND created_at < ?"
-        var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
-            throw StorageError.deleteFailed(String(cString: sqlite3_errmsg(db)))
+        // Step 1: 获取要删除的项目（包含外部存储引用）
+        let selectSQL = """
+            SELECT id, storage_ref FROM clipboard_items
+            WHERE is_pinned = 0 AND created_at < ?
+        """
+        var selectStmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, selectSQL, -1, &selectStmt, nil) == SQLITE_OK else {
+            throw StorageError.queryFailed(String(cString: sqlite3_errmsg(db)))
         }
-        defer { sqlite3_finalize(stmt) }
+        defer { sqlite3_finalize(selectStmt) }
 
-        sqlite3_bind_double(stmt, 1, cutoff.timeIntervalSince1970)
-        let result = sqlite3_step(stmt)
-        guard result == SQLITE_DONE || result == SQLITE_ROW else {
-            throw StorageError.deleteFailed(String(cString: sqlite3_errmsg(db)))
+        sqlite3_bind_double(selectStmt, 1, cutoff.timeIntervalSince1970)
+
+        var idsToDelete: [UUID] = []
+        var filesToDelete: [String] = []
+
+        while sqlite3_step(selectStmt) == SQLITE_ROW {
+            if let cStr = sqlite3_column_text(selectStmt, 0),
+               let id = UUID(uuidString: String(cString: cStr)) {
+                idsToDelete.append(id)
+                if let refCStr = sqlite3_column_text(selectStmt, 1) {
+                    filesToDelete.append(String(cString: refCStr))
+                }
+            }
         }
+
+        // 如果没有要删除的项目，直接返回
+        if idsToDelete.isEmpty { return }
+
+        // Step 2: 并发删除外部文件
+        if !filesToDelete.isEmpty {
+            deleteFilesInParallel(filesToDelete)
+        }
+
+        // Step 3: 事务批量删除数据库记录
+        try deleteItemsBatchInTransaction(ids: idsToDelete)
     }
 
     /// v0.14: 深度优化 - 消除循环迭代，单次查询 + 事务批量删除
@@ -1167,36 +1203,43 @@ final class StorageService {
     ///   - contentHash: 内容哈希（用于命名）
     ///   - maxHeight: 最大高度
     /// - Returns: 缩略图路径
+    /// v0.19: 添加 autoreleasepool 管理中间对象内存
     func generateThumbnail(from imageData: Data, contentHash: String, maxHeight: Int) -> String? {
         // 检查是否已存在
         if let existing = getThumbnailPath(for: contentHash) {
             return existing
         }
 
-        guard let nsImage = NSImage(data: imageData) else { return nil }
-        let originalSize = nsImage.size
+        // v0.19: 使用 autoreleasepool 管理 NSImage/NSBitmapImageRep 等中间对象
+        let pngData: Data? = autoreleasepool {
+            guard let nsImage = NSImage(data: imageData) else { return nil }
+            let originalSize = nsImage.size
 
-        // 计算缩放比例
-        guard originalSize.height > 0, originalSize.width > 0 else { return nil }
-        let scale = CGFloat(maxHeight) / originalSize.height
-        let newWidth = originalSize.width * scale
-        let newHeight = CGFloat(maxHeight)
+            // 计算缩放比例
+            guard originalSize.height > 0, originalSize.width > 0 else { return nil }
+            let scale = CGFloat(maxHeight) / originalSize.height
+            let newWidth = originalSize.width * scale
+            let newHeight = CGFloat(maxHeight)
 
-        // 创建缩略图
-        let newImage = NSImage(size: NSSize(width: newWidth, height: newHeight))
-        newImage.lockFocus()
-        nsImage.draw(in: NSRect(x: 0, y: 0, width: newWidth, height: newHeight),
-                     from: NSRect(origin: .zero, size: originalSize),
-                     operation: .copy,
-                     fraction: 1.0)
-        newImage.unlockFocus()
+            // 创建缩略图
+            let newImage = NSImage(size: NSSize(width: newWidth, height: newHeight))
+            newImage.lockFocus()
+            nsImage.draw(in: NSRect(x: 0, y: 0, width: newWidth, height: newHeight),
+                         from: NSRect(origin: .zero, size: originalSize),
+                         operation: .copy,
+                         fraction: 1.0)
+            newImage.unlockFocus()
 
-        // 转换为 PNG 数据
-        guard let tiffData = newImage.tiffRepresentation,
-              let bitmap = NSBitmapImageRep(data: tiffData),
-              let pngData = bitmap.representation(using: .png, properties: [:]) else {
-            return nil
+            // 转换为 PNG 数据
+            guard let tiffData = newImage.tiffRepresentation,
+                  let bitmap = NSBitmapImageRep(data: tiffData),
+                  let png = bitmap.representation(using: .png, properties: [:]) else {
+                return nil
+            }
+            return png
         }
+
+        guard let pngData = pngData else { return nil }
 
         // v0.17: 使用原子写入保存缩略图
         let path = (thumbnailCachePath as NSString).appendingPathComponent("\(contentHash).png")
@@ -1271,49 +1314,12 @@ final class StorageService {
         }
     }
 
+    /// v0.19: 使用共享的 parseStoredItem 函数，消除代码重复
     private func parseItem(from stmt: OpaquePointer) -> StoredItem? {
-        guard let idStr = sqlite3_column_text(stmt, 0).map({ String(cString: $0) }),
-              let id = UUID(uuidString: idStr),
-              let typeStr = sqlite3_column_text(stmt, 1).map({ String(cString: $0) }),
-              let type = ClipboardItemType(rawValue: typeStr),
-              let hashStr = sqlite3_column_text(stmt, 2).map({ String(cString: $0) }) else {
-            return nil
-        }
-
-        let plainText = sqlite3_column_text(stmt, 3).map { String(cString: $0) } ?? ""
-        let appBundleID = sqlite3_column_text(stmt, 4).map { String(cString: $0) }
-        let createdAt = Date(timeIntervalSince1970: sqlite3_column_double(stmt, 5))
-        let lastUsedAt = Date(timeIntervalSince1970: sqlite3_column_double(stmt, 6))
-        let useCount = Int(sqlite3_column_int(stmt, 7))
-        let isPinned = sqlite3_column_int(stmt, 8) != 0
-        let sizeBytes = Int(sqlite3_column_int(stmt, 9))
-        let storageRef = sqlite3_column_text(stmt, 10).map { String(cString: $0) }
-
-        // Read inline raw_data (column 11)
-        var rawData: Data? = nil
-        let blobBytes = sqlite3_column_blob(stmt, 11)
-        let blobSize = sqlite3_column_bytes(stmt, 11)
-        if let bytes = blobBytes, blobSize > 0 {
-            rawData = Data(bytes: bytes, count: Int(blobSize))
-        }
-
-        return StoredItem(
-            id: id,
-            type: type,
-            contentHash: hashStr,
-            plainText: plainText,
-            appBundleID: appBundleID,
-            createdAt: createdAt,
-            lastUsedAt: lastUsedAt,
-            useCount: useCount,
-            isPinned: isPinned,
-            sizeBytes: sizeBytes,
-            storageRef: storageRef,
-            rawData: rawData
-        )
+        return parseStoredItem(from: stmt)
     }
 }
 
 // MARK: - SQLITE_TRANSIENT helper
-
-private let SQLITE_TRANSIENT = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
+// v0.19: 移至 SQLiteHelpers.swift，此处保留注释说明
+// 使用全局 SQLITE_TRANSIENT 常量（定义在 SQLiteHelpers.swift）

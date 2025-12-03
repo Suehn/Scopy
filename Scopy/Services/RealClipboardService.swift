@@ -93,20 +93,23 @@ final class RealClipboardService: ClipboardServiceProtocol {
     /// v0.10.7: 添加 isEventStreamFinished 标志，防止重复关闭和向已关闭流发送数据
     /// v0.10.8: 改进 monitorTask 生命周期管理，确保任务正确取消
     /// v0.17.1: 添加任务等待逻辑，确保应用退出时数据完整性
+    /// v0.19: 修复等待逻辑 - isCancelled 只表示请求取消，不表示任务完成
     func stop() {
         guard !isEventStreamFinished else { return }
         isEventStreamFinished = true
 
-        // 1. 先取消 monitorTask
-        monitorTask?.cancel()
-
-        // 2. 停止监控（这会取消 ClipboardMonitor 的任务队列）
+        // 1. 停止监控（这会取消 ClipboardMonitor 的任务队列）
+        // 必须先停止监控，这样 contentStream 会结束，monitorTask 的 for-await 循环才会退出
         monitor.stopMonitoring()
 
-        // 3. 等待 monitorTask 完成（最多 500ms）
-        // 使用 RunLoop 避免阻塞主线程
-        let deadline = Date().addingTimeInterval(0.5)
-        while let task = monitorTask, !task.isCancelled, Date() < deadline {
+        // 2. 取消 monitorTask
+        monitorTask?.cancel()
+
+        // 3. 给任务一些时间完成清理（最多 100ms）
+        // 注意：这只是尽力而为，无法保证任务完全完成
+        // 但由于 contentStream 已结束，任务应该很快退出
+        let deadline = Date().addingTimeInterval(0.1)
+        while Date() < deadline {
             RunLoop.current.run(until: Date().addingTimeInterval(0.01))
         }
 
@@ -127,12 +130,9 @@ final class RealClipboardService: ClipboardServiceProtocol {
         return items.map { toDTO($0) }
     }
 
+    /// v0.19: 移除搜索时的缓存清除，缓存只在数据变更时失效
+    /// 原逻辑在每次新搜索时清除缓存，导致用户快速输入时频繁刷新
     func search(query: SearchRequest) async throws -> SearchResultPage {
-        // Invalidate cache on new search
-        if query.offset == 0 {
-            search.invalidateCache()
-        }
-
         let result = try await search.search(request: query)
         return SearchResultPage(
             items: result.items.map { toDTO($0) },
@@ -251,7 +251,12 @@ final class RealClipboardService: ClipboardServiceProtocol {
         }
 
         // Trigger cleanup if needed
-        try? storage.performCleanup()
+        // v0.19: 添加错误日志，便于问题追踪
+        do {
+            try storage.performCleanup()
+        } catch {
+            print("⚠️ RealClipboardService: Cleanup failed after settings update: \(error.localizedDescription)")
+        }
 
         yieldEvent(.settingsChanged)
     }
@@ -322,9 +327,14 @@ final class RealClipboardService: ClipboardServiceProtocol {
             yieldEvent(.newItem(toDTO(storedItem)))
 
             // Periodic cleanup
-            try? storage.performCleanup()
+            // v0.19: 添加错误日志
+            do {
+                try storage.performCleanup()
+            } catch {
+                print("⚠️ RealClipboardService: Periodic cleanup failed: \(error.localizedDescription)")
+            }
         } catch {
-            print("Failed to store clipboard item: \(error)")
+            print("⚠️ RealClipboardService: Failed to store clipboard item: \(error.localizedDescription)")
         }
     }
 

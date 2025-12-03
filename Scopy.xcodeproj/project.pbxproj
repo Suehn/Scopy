@@ -21,6 +21,7 @@
 		2E3AC6F5BBFB8EC0EEA7BEFB /* TestDataFactory.swift in Sources */ = {isa = PBXBuildFile; fileRef = 98A81F5BEC4470C8DA1B4864 /* TestDataFactory.swift */; };
 		2E7B84A934E65CCCB3DFB0B8 /* NSLock+Extensions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 84C61F96A731DC4419905C3E /* NSLock+Extensions.swift */; };
 		34825C28F41847C69922DFF6 /* ClipboardServiceProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = D42C3C8A2830B231BCC604B3 /* ClipboardServiceProtocol.swift */; };
+		34DCE58E45DBB5565240E8A3 /* SQLiteHelpers.swift in Sources */ = {isa = PBXBuildFile; fileRef = 030DCC9A06276325D15DE29B /* SQLiteHelpers.swift */; };
 		3B3174B368AB94ED39C66288 /* IconCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03D97296ACC41AC0ADB05563 /* IconCache.swift */; };
 		3F35F1D85C8C126C9CE04179 /* FloatingPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = DDB1A51BEEACE7981D4FBBCD /* FloatingPanel.swift */; };
 		401BCD4DE9684844FEFE7136 /* HeaderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4059379693354F029F0086D1 /* HeaderView.swift */; };
@@ -68,6 +69,7 @@
 		B192C163D6B56DD11C5C4054 /* ScopyTypography.swift in Sources */ = {isa = PBXBuildFile; fileRef = A37481D3662BD7A5717D1395 /* ScopyTypography.swift */; };
 		BC73EE655DA83097AC0514D4 /* ScopyTypography.swift in Sources */ = {isa = PBXBuildFile; fileRef = A37481D3662BD7A5717D1395 /* ScopyTypography.swift */; };
 		BCA3A9072980CA2B53CEFD0A /* ScopySize.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A71D183AE552D5A0722779D /* ScopySize.swift */; };
+		BD864CF5AF4EAFD55ED23B62 /* SQLiteHelpers.swift in Sources */ = {isa = PBXBuildFile; fileRef = 030DCC9A06276325D15DE29B /* SQLiteHelpers.swift */; };
 		BF5E207263E1819780AFE98E /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61DF2BC8CEEFB6DBC2A87609 /* AppState.swift */; };
 		C0A51AA7E4BEC084FC3D231D /* ResourceCleanupTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E89CCE301327084364FDFDE1 /* ResourceCleanupTests.swift */; };
 		C296E6B159C52200F4C441E3 /* ScopySpacing.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4E233FCC7701603B37B37B07 /* ScopySpacing.swift */; };
@@ -97,6 +99,7 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		030DCC9A06276325D15DE29B /* SQLiteHelpers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SQLiteHelpers.swift; sourceTree = "<group>"; };
 		03D97296ACC41AC0ADB05563 /* IconCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IconCache.swift; sourceTree = "<group>"; };
 		08E21526EAB3F1DCCB32D679 /* PerformanceMetrics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PerformanceMetrics.swift; sourceTree = "<group>"; };
 		094F7E96DC5DC3FD8002CD7E /* ScopyUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ScopyUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -270,6 +273,7 @@
 				ADB79901F7DEAC407EBADE89 /* PerformanceProfiler.swift */,
 				D2A285A9E32622950487740E /* RealClipboardService.swift */,
 				19DC250D8F758BB5ACBC9251 /* SearchService.swift */,
+				030DCC9A06276325D15DE29B /* SQLiteHelpers.swift */,
 				644A49B646565DEC262174A8 /* StorageService.swift */,
 			);
 			path = Services;
@@ -508,6 +512,7 @@
 				A316443B51B7C38263A0682C /* PerformanceTests.swift in Sources */,
 				D265640F938F1B16265B68BA /* RealClipboardService.swift in Sources */,
 				C0A51AA7E4BEC084FC3D231D /* ResourceCleanupTests.swift in Sources */,
+				BD864CF5AF4EAFD55ED23B62 /* SQLiteHelpers.swift in Sources */,
 				57C1FB3E5765F41546C7AD5E /* ScopyColors.swift in Sources */,
 				4F98B4BEB7AEE0ED458F28D0 /* ScopyComponents.swift in Sources */,
 				C81A97FB9F42D01C3A7D4731 /* ScopyIcons.swift in Sources */,
@@ -546,6 +551,7 @@
 				8299CDBD5930FE596EBBAE3B /* PerformanceMetrics.swift in Sources */,
 				8ADACA32A51317E6F11C7880 /* PerformanceProfiler.swift in Sources */,
 				576385E92B0B8E9B91CA7BC6 /* RealClipboardService.swift in Sources */,
+				34DCE58E45DBB5565240E8A3 /* SQLiteHelpers.swift in Sources */,
 				A4433C4ACC64F0D5DF5DA717 /* ScopyApp.swift in Sources */,
 				1216203D7B799CFDA435C0C5 /* ScopyColors.swift in Sources */,
 				0C968E38F7456C42503E1319 /* ScopyComponents.swift in Sources */,
