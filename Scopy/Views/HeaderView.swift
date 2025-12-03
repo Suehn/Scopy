@@ -71,6 +71,12 @@ private struct SearchModeMenu: View {
                 Button {
                     appState.searchMode = mode
                     appState.search()
+                    // 持久化到设置
+                    Task {
+                        var newSettings = appState.settings
+                        newSettings.defaultSearchMode = mode
+                        await appState.updateSettings(newSettings)
+                    }
                 } label: {
                     HStack {
                         if mode == appState.searchMode {

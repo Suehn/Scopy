@@ -68,7 +68,7 @@ final class AppState {
     }
 
     var searchQuery: String = ""
-    var searchMode: SearchMode = .fuzzy
+    var searchMode: SearchMode = SettingsDTO.default.defaultSearchMode
     var isLoading: Bool = false
     var selectedID: UUID?
 
@@ -234,6 +234,7 @@ final class AppState {
             searchMode = settings.defaultSearchMode
         } catch {
             print("Failed to load settings: \(error)")
+            searchMode = SettingsDTO.default.defaultSearchMode  // 降级处理
         }
     }
 
