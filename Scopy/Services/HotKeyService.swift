@@ -8,6 +8,7 @@ private let maxLogSize = 10 * 1024 * 1024  // 10MB
 private let logLock = NSLock()
 
 /// v0.11: 调试日志函数 - 写入文件（带轮转和线程安全）
+/// v0.17.1: 使用 withLock 统一锁策略
 private func logToFile(_ message: String) {
     let timestamp = ISO8601DateFormatter().string(from: Date())
     let logMessage = "[\(timestamp)] \(message)\n"
@@ -15,27 +16,26 @@ private func logToFile(_ message: String) {
     guard let data = logMessage.data(using: .utf8) else { return }
 
     // 加锁保护并发写入
-    logLock.lock()
-    defer { logLock.unlock() }
-
-    // 检查文件大小，必要时轮转
-    if let attrs = try? FileManager.default.attributesOfItem(atPath: logPath),
-       let size = attrs[.size] as? Int, size > maxLogSize {
-        // 删除旧的备份文件
-        try? FileManager.default.removeItem(atPath: logPathOld)
-        // 将当前日志重命名为备份
-        try? FileManager.default.moveItem(atPath: logPath, toPath: logPathOld)
-    }
-
-    // 写入日志
-    if FileManager.default.fileExists(atPath: logPath) {
-        if let handle = try? FileHandle(forWritingTo: URL(fileURLWithPath: logPath)) {
-            defer { try? handle.close() }
-            try? handle.seekToEnd()
-            try? handle.write(contentsOf: data)
+    logLock.withLock {
+        // 检查文件大小，必要时轮转
+        if let attrs = try? FileManager.default.attributesOfItem(atPath: logPath),
+           let size = attrs[.size] as? Int, size > maxLogSize {
+            // 删除旧的备份文件
+            try? FileManager.default.removeItem(atPath: logPathOld)
+            // 将当前日志重命名为备份
+            try? FileManager.default.moveItem(atPath: logPath, toPath: logPathOld)
         }
-    } else {
-        FileManager.default.createFile(atPath: logPath, contents: data)
+
+        // 写入日志
+        if FileManager.default.fileExists(atPath: logPath) {
+            if let handle = try? FileHandle(forWritingTo: URL(fileURLWithPath: logPath)) {
+                defer { try? handle.close() }
+                try? handle.seekToEnd()
+                try? handle.write(contentsOf: data)
+            }
+        } else {
+            FileManager.default.createFile(atPath: logPath, contents: data)
+        }
     }
 
     print(message)  // 同时输出到控制台
@@ -146,9 +146,9 @@ final class HotKeyService {
         self.hotKeyRef = nil
 
         // 从静态字典中移除处理器（加锁保护）
-        Self.handlersLock.lock()
-        Self.handlers.removeValue(forKey: currentHotKeyID)
-        Self.handlersLock.unlock()
+        Self.handlersLock.withLock {
+            Self.handlers.removeValue(forKey: currentHotKeyID)
+        }
         logToFile("🔑 Global hotkey unregistered: id=\(currentHotKeyID), status=\(status)")
         currentHotKeyID = 0
     }
@@ -167,15 +167,14 @@ final class HotKeyService {
     // MARK: - Private: Registration
 
     private func registerHotKey(keyCode: UInt32, modifiers: UInt32, handler: @escaping HotKeyHandler) {
-        // 生成新的 hotKeyID
-        currentHotKeyID = Self.nextHotKeyID
-        Self.nextHotKeyID += 1
-
-        // 存储处理器（加锁保护）
-        Self.handlersLock.lock()
-        Self.handlers[currentHotKeyID] = handler
-        let handlerCount = Self.handlers.count
-        Self.handlersLock.unlock()
+        // 生成新的 hotKeyID（加锁保护静态变量）
+        let handlerCount = Self.handlersLock.withLock {
+            currentHotKeyID = Self.nextHotKeyID
+            Self.nextHotKeyID += 1
+            // 存储处理器
+            Self.handlers[currentHotKeyID] = handler
+            return Self.handlers.count
+        }
         logToFile("📝 Handler stored: id=\(currentHotKeyID), total handlers=\(handlerCount)")
 
         // 创建 hotKeyID 结构
@@ -198,9 +197,9 @@ final class HotKeyService {
         } else {
             logToFile("❌ Failed to register hotkey: status=\(status)")
             // 清理（加锁保护）
-            Self.handlersLock.lock()
-            Self.handlers.removeValue(forKey: currentHotKeyID)
-            Self.handlersLock.unlock()
+            Self.handlersLock.withLock {
+                Self.handlers.removeValue(forKey: currentHotKeyID)
+            }
             currentHotKeyID = 0
         }
     }
@@ -248,23 +247,30 @@ final class HotKeyService {
             return OSStatus(eventNotHandledErr)
         }
 
-        // 查找并执行处理器（加锁保护）
-        handlersLock.lock()
-        let availableKeys = Array(handlers.keys)
-        let handler = handlers[hotKeyID.id]
-        handlersLock.unlock()
+        // 查找并执行处理器（加锁保护，同时保护 lastFire）
+        // v0.17.1: 使用 withLock 统一锁策略
+        let result: (handler: HotKeyHandler?, shouldExecute: Bool) = handlersLock.withLock {
+            let availableKeys = Array(handlers.keys)
+            let handler = handlers[hotKeyID.id]
 
-        logToFile("🔍 Looking for handler: id=\(hotKeyID.id), available handlers=\(availableKeys)")
+            logToFile("🔍 Looking for handler: id=\(hotKeyID.id), available handlers=\(availableKeys)")
 
-        // 按住时会重复发 pressed 事件，做简单节流
-        let now = CFAbsoluteTimeGetCurrent()
-        if let last = lastFire, last.id == hotKeyID.id, now - last.timestamp < 0.25 {
-            logToFile("⏩ Ignoring repeat pressed event for id=\(hotKeyID.id)")
+            // 按住时会重复发 pressed 事件，做简单节流
+            let now = CFAbsoluteTimeGetCurrent()
+            if let last = lastFire, last.id == hotKeyID.id, now - last.timestamp < 0.25 {
+                logToFile("⏩ Ignoring repeat pressed event for id=\(hotKeyID.id)")
+                return (nil, false)
+            }
+            lastFire = (hotKeyID.id, now)
+
+            return (handler, true)
+        }
+
+        guard result.shouldExecute else {
             return noErr
         }
-        lastFire = (hotKeyID.id, now)
 
-        if let handler = handler {
+        if let handler = result.handler {
             logToFile("✅ Handler found, executing...")
             DispatchQueue.main.async {
                 handler()
@@ -289,10 +295,11 @@ final class HotKeyService {
         testingMode = false
     }
 
+    /// v0.17.1: 使用 withLock 统一锁策略
     func triggerHandlerForTesting() {
-        Self.handlersLock.lock()
-        let handler = Self.handlers[currentHotKeyID]
-        Self.handlersLock.unlock()
+        let handler = Self.handlersLock.withLock {
+            Self.handlers[currentHotKeyID]
+        }
 
         if let handler = handler {
             if Thread.isMainThread {
@@ -307,34 +314,32 @@ final class HotKeyService {
 
     var isRegistered: Bool {
         if Self.testingMode {
-            Self.handlersLock.lock()
-            let hasHandler = Self.handlers[currentHotKeyID] != nil
-            Self.handlersLock.unlock()
-            return hasHandler
+            return Self.handlersLock.withLock {
+                Self.handlers[currentHotKeyID] != nil
+            }
         }
         return hotKeyRef != nil
     }
 
     var hasHandler: Bool {
-        Self.handlersLock.lock()
-        let result = Self.handlers[currentHotKeyID] != nil
-        Self.handlersLock.unlock()
-        return result
+        Self.handlersLock.withLock {
+            Self.handlers[currentHotKeyID] != nil
+        }
     }
 
     func registerHandlerOnly(_ handler: @escaping HotKeyHandler) {
-        currentHotKeyID = Self.nextHotKeyID
-        Self.nextHotKeyID += 1
-        Self.handlersLock.lock()
-        Self.handlers[currentHotKeyID] = handler
-        Self.handlersLock.unlock()
+        Self.handlersLock.withLock {
+            currentHotKeyID = Self.nextHotKeyID
+            Self.nextHotKeyID += 1
+            Self.handlers[currentHotKeyID] = handler
+        }
     }
 
     func unregisterHandlerOnly() {
-        Self.handlersLock.lock()
-        Self.handlers.removeValue(forKey: currentHotKeyID)
-        Self.handlersLock.unlock()
-        currentHotKeyID = 0
+        Self.handlersLock.withLock {
+            Self.handlers.removeValue(forKey: currentHotKeyID)
+            currentHotKeyID = 0
+        }
     }
     #endif
 }

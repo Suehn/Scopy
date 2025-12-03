@@ -199,17 +199,28 @@ final class AppState {
     }
 
     /// 停止应用服务
+    /// v0.17.1: 添加任务等待逻辑，确保应用退出时数据完整性
     func stop() {
+        // 1. 取消所有任务
         eventTask?.cancel()
-        eventTask = nil
         searchTask?.cancel()
-        searchTask = nil
         loadMoreTask?.cancel()
-        loadMoreTask = nil
         scrollEndTask?.cancel()
+
+        // 2. 等待关键任务完成（最多 500ms）
+        // 使用 RunLoop 避免阻塞主线程
+        let deadline = Date().addingTimeInterval(0.5)
+        while let task = eventTask, !task.isCancelled, Date() < deadline {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.01))
+        }
+
+        // 3. 清理引用
+        eventTask = nil
+        searchTask = nil
+        loadMoreTask = nil
         scrollEndTask = nil
 
-        // 通过协议方法停止服务
+        // 4. 通过协议方法停止服务
         service.stop()
     }
 

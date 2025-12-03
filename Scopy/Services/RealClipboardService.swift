@@ -92,6 +92,7 @@ final class RealClipboardService: ClipboardServiceProtocol {
     /// v0.10.4: 显式关闭事件流，防止泄漏
     /// v0.10.7: 添加 isEventStreamFinished 标志，防止重复关闭和向已关闭流发送数据
     /// v0.10.8: 改进 monitorTask 生命周期管理，确保任务正确取消
+    /// v0.17.1: 添加任务等待逻辑，确保应用退出时数据完整性
     func stop() {
         guard !isEventStreamFinished else { return }
         isEventStreamFinished = true
@@ -102,13 +103,20 @@ final class RealClipboardService: ClipboardServiceProtocol {
         // 2. 停止监控（这会取消 ClipboardMonitor 的任务队列）
         monitor.stopMonitoring()
 
-        // 3. 清理 monitorTask 引用
+        // 3. 等待 monitorTask 完成（最多 500ms）
+        // 使用 RunLoop 避免阻塞主线程
+        let deadline = Date().addingTimeInterval(0.5)
+        while let task = monitorTask, !task.isCancelled, Date() < deadline {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.01))
+        }
+
+        // 4. 清理 monitorTask 引用
         monitorTask = nil
 
-        // 4. 显式关闭事件流 continuation
+        // 5. 显式关闭事件流 continuation
         eventContinuation?.finish()
 
-        // 5. 关闭存储
+        // 6. 关闭存储
         storage.close()
     }
 

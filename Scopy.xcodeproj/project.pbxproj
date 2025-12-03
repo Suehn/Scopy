@@ -19,6 +19,7 @@
 		23E413BF3FBB4FFF3B5FF598 /* XCTestExtensions.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA19ACBA28A519AD56F862DE /* XCTestExtensions.swift */; };
 		26ADD078C8FC126181CDD88A /* MockClipboardService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5DC8ECDED07EA5FAFB2923F3 /* MockClipboardService.swift */; };
 		2E3AC6F5BBFB8EC0EEA7BEFB /* TestDataFactory.swift in Sources */ = {isa = PBXBuildFile; fileRef = 98A81F5BEC4470C8DA1B4864 /* TestDataFactory.swift */; };
+		2E7B84A934E65CCCB3DFB0B8 /* NSLock+Extensions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 84C61F96A731DC4419905C3E /* NSLock+Extensions.swift */; };
 		34825C28F41847C69922DFF6 /* ClipboardServiceProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = D42C3C8A2830B231BCC604B3 /* ClipboardServiceProtocol.swift */; };
 		3B3174B368AB94ED39C66288 /* IconCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03D97296ACC41AC0ADB05563 /* IconCache.swift */; };
 		3F35F1D85C8C126C9CE04179 /* FloatingPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = DDB1A51BEEACE7981D4FBBCD /* FloatingPanel.swift */; };
@@ -38,6 +39,7 @@
 		600C0FDBC06B8CB2E0784893 /* SearchService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 19DC250D8F758BB5ACBC9251 /* SearchService.swift */; };
 		6290407CDC493685A38B5DED /* HotKeyServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF08A6073418036ABAC09144 /* HotKeyServiceTests.swift */; };
 		6694D337867337FF5925549D /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 62C29361DE1A42C04AB601DE /* ContentView.swift */; };
+		69EF6D1083811281A05D18E7 /* NSLock+Extensions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 84C61F96A731DC4419905C3E /* NSLock+Extensions.swift */; };
 		6A3C49D4AFE7BC50EE38FC27 /* HotKeyService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6AC510668FC9C0ADDA64E813 /* HotKeyService.swift */; };
 		6B322E6344E429837C1AD94B /* ContextMenuUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AEF8649A162AEF1B81D32EE6 /* ContextMenuUITests.swift */; };
 		6F0AC66967599946E3E9501D /* AppVersion.swift in Sources */ = {isa = PBXBuildFile; fileRef = 863111D7C15F2B67D831016C /* AppVersion.swift */; };
@@ -128,6 +130,7 @@
 		74C9D67BDF3FC3265BE88014 /* Scopy.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Scopy.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		80F5648018D6B10F8FB3D046 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		81E3E40D7B7A01720DF737E2 /* PerformanceProfilerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PerformanceProfilerTests.swift; sourceTree = "<group>"; };
+		84C61F96A731DC4419905C3E /* NSLock+Extensions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "NSLock+Extensions.swift"; sourceTree = "<group>"; };
 		85328477E197D8B958744DD5 /* Scopy.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Scopy.entitlements; sourceTree = "<group>"; };
 		863111D7C15F2B67D831016C /* AppVersion.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppVersion.swift; sourceTree = "<group>"; };
 		8C25A96207E0DA2587E7AFBB /* HistoryListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryListView.swift; sourceTree = "<group>"; };
@@ -339,6 +342,7 @@
 				85328477E197D8B958744DD5 /* Scopy.entitlements */,
 				1072DE11C8E9ECC684565EA3 /* ScopyApp.swift */,
 				C8E7F13B9638715B53477797 /* Design */,
+				F27A2D1BF3700F70E1B5297F /* Extensions */,
 				B80832310BEE754A495EEBC4 /* Models */,
 				4B3899A417146FCA05E0513F /* Observables */,
 				15597088AA29CF84B2AC46F8 /* Protocols */,
@@ -347,6 +351,14 @@
 				5874149C6C03ACBD20F83EB5 /* Views */,
 			);
 			path = Scopy;
+			sourceTree = "<group>";
+		};
+		F27A2D1BF3700F70E1B5297F /* Extensions */ = {
+			isa = PBXGroup;
+			children = (
+				84C61F96A731DC4419905C3E /* NSLock+Extensions.swift */,
+			);
+			path = Extensions;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -488,6 +500,7 @@
 				80C5D92E52A700850F1E5997 /* Localization.swift in Sources */,
 				19E1A249F8ABAA61C2F65238 /* MockClipboardService.swift in Sources */,
 				4F1BE0CF444C5F07BEE16E97 /* MockServices.swift in Sources */,
+				2E7B84A934E65CCCB3DFB0B8 /* NSLock+Extensions.swift in Sources */,
 				7411E82D82153F4FD1F02B17 /* PerformanceHelpers.swift in Sources */,
 				08D10A5466F4C33F7B968678 /* PerformanceMetrics.swift in Sources */,
 				4A407FF2188666F7A03835DE /* PerformanceProfiler.swift in Sources */,
@@ -529,6 +542,7 @@
 				3B3174B368AB94ED39C66288 /* IconCache.swift in Sources */,
 				94AB18BED4E8018E91611810 /* Localization.swift in Sources */,
 				26ADD078C8FC126181CDD88A /* MockClipboardService.swift in Sources */,
+				69EF6D1083811281A05D18E7 /* NSLock+Extensions.swift in Sources */,
 				8299CDBD5930FE596EBBAE3B /* PerformanceMetrics.swift in Sources */,
 				8ADACA32A51317E6F11C7880 /* PerformanceProfiler.swift in Sources */,
 				576385E92B0B8E9B91CA7BC6 /* RealClipboardService.swift in Sources */,
