@@ -84,7 +84,7 @@ struct SearchRequest: Sendable {
 
     init(
         query: String,
-        mode: SearchMode = .fuzzy,
+        mode: SearchMode = SettingsDTO.default.defaultSearchMode,
         appFilter: String? = nil,
         typeFilter: ClipboardItemType? = nil,
         limit: Int = 50,

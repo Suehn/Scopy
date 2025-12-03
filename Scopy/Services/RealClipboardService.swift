@@ -396,8 +396,8 @@ final class RealClipboardService: ClipboardServiceProtocol {
         guard let dict = UserDefaults.standard.dictionary(forKey: settingsKey) else {
             return .default
         }
-        let searchModeString = dict["defaultSearchMode"] as? String ?? SearchMode.fuzzy.rawValue
-        let searchMode = SearchMode(rawValue: searchModeString) ?? .fuzzy
+        let searchModeString = dict["defaultSearchMode"] as? String ?? SettingsDTO.default.defaultSearchMode.rawValue
+        let searchMode = SearchMode(rawValue: searchModeString) ?? SettingsDTO.default.defaultSearchMode
 
         return SettingsDTO(
             maxItems: dict["maxItems"] as? Int ?? SettingsDTO.default.maxItems,
