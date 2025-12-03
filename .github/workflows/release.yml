@@ -1,0 +1,59 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    runs-on: macos-14
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install xcodegen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        run: xcodegen generate
+
+      - name: Build Release
+        run: |
+          xcodebuild -scheme Scopy -configuration Release build
+
+      - name: Create DMG
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          mkdir -p dmg
+          cp -r .build/Release/Scopy.app dmg/
+          hdiutil create -volname "Scopy" \
+            -srcfolder dmg \
+            -ov -format UDZO \
+            "Scopy-${VERSION}.dmg"
+
+          # 计算 SHA256
+          shasum -a 256 "Scopy-${VERSION}.dmg" > "Scopy-${VERSION}.dmg.sha256"
+
+      - name: Upload Release Assets
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            Scopy-*.dmg
+            Scopy-*.dmg.sha256
+          body: |
+            ## 安装方式
+
+            ### Homebrew (推荐)
+            ```bash
+            brew tap Suehn/scopy
+            brew install --cask scopy
+            ```
+
+            ### 手动安装
+            1. 下载 `Scopy-${{ github.ref_name }}.dmg`
+            2. 打开 DMG，拖动 Scopy 到 Applications
+            3. 首次打开：右键点击 Scopy → 打开 → 打开
+
+            > ⚠️ 应用未签名，首次打开需要手动允许

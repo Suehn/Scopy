@@ -2,35 +2,52 @@
 
 A native macOS clipboard manager with unlimited history, intelligent storage, and high-performance search.
 
-## Quick Start
+## Installation
+
+### Homebrew (Recommended)
+
+```bash
+brew tap Suehn/scopy
+brew install --cask scopy
+```
+
+> ⚠️ App is not signed. On first launch: Right-click → Open → Open
+
+### Manual Download
+
+Download the latest `.dmg` from [Releases](https://github.com/Suehn/Scopy/releases).
+
+---
+
+## Build from Source
 
 ### Prerequisites
 
 - macOS 14.0+
-- Xcode 15.0+
+- Xcode 15.0+ or Command Line Tools
 - Homebrew (for xcodegen)
 
-### Build & Run
+### Quick Build
 
 ```bash
-# 方法 1: 使用 Makefile (推荐)
-make setup    # 安装 xcodegen 并生成 Xcode 项目
-make build    # 构建
-make run      # 构建并运行
+# Install dependencies and build
+make setup && make build
 
-# 方法 2: 使用 Xcode
-make xcode    # 生成并打开 Xcode 项目
-# 然后在 Xcode 中按 ⌘R 运行
+# Or use deploy script
+./deploy.sh release
 ```
 
 ### Development
 
 ```bash
-# 清理并重新构建
-make clean && make build
+# Build and run (Debug)
+make run
 
-# 快速构建（跳过项目生成）
-make quick-build
+# Build Release DMG
+./scripts/build-release.sh 0.18.0
+
+# Run tests
+make test
 ```
 
 ## Architecture
