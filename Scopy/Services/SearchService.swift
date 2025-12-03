@@ -115,6 +115,7 @@ final class SearchService {
     }
 
     /// Fuzzy search (v0.md 3.3)
+    /// v0.17: 确保所有模糊搜索都不区分大小写
     private func searchFuzzy(request: SearchRequest) async throws -> SearchResult {
         guard let db = db else { throw SearchError.databaseNotOpen }
 
@@ -125,14 +126,16 @@ final class SearchService {
 
         // For short queries (<=4 chars), use in-memory cache with fuzzy matching
         // This ensures fuzzy patterns like "hlo" -> "Hello" work correctly
+        // fuzzyMatch 内部已使用 lowercased()，无需额外处理
         if request.query.count <= 4 {
             return try await searchInCache(request: request) { item in
                 self.fuzzyMatch(text: item.plainText, query: request.query)
             }
         }
 
-        // FTS5 with prefix matching for longer fuzzy search
-        let words = request.query.split(separator: " ").map { String($0) }
+        // v0.17: FTS5 with prefix matching for longer fuzzy search
+        // 将查询转为小写，确保与 FTS5 unicode61 tokenizer 的 case-folding 一致
+        let words = request.query.lowercased().split(separator: " ").map { String($0) }
         let ftsQuery = words.map { "\($0)*" }.joined(separator: " ")
         return try await searchWithFTS(db: db, query: ftsQuery, request: request, useFuzzyRanking: true)
     }
@@ -322,22 +325,22 @@ final class SearchService {
     }
 
     /// v0.12: 修复竞态条件 - 所有检查都在锁内进行
+    /// v0.17.1: 使用 withLock 统一锁策略
     private func refreshCacheIfNeeded() throws {
-        cacheRefreshLock.lock()
-        defer { cacheRefreshLock.unlock() }
+        try cacheRefreshLock.withLock {
+            // 所有检查都在锁内进行，确保原子性
+            let now = Date()
+            let needsRefresh = recentItemsCache.isEmpty || now.timeIntervalSince(cacheTimestamp) > cacheDuration
+            guard needsRefresh && !cacheRefreshInProgress else { return }
 
-        // 所有检查都在锁内进行，确保原子性
-        let now = Date()
-        let needsRefresh = recentItemsCache.isEmpty || now.timeIntervalSince(cacheTimestamp) > cacheDuration
-        guard needsRefresh && !cacheRefreshInProgress else { return }
+            // 设置刷新标志
+            cacheRefreshInProgress = true
+            defer { cacheRefreshInProgress = false }
 
-        // 设置刷新标志
-        cacheRefreshInProgress = true
-        defer { cacheRefreshInProgress = false }
-
-        // 执行刷新
-        recentItemsCache = try storage.fetchRecent(limit: shortQueryCacheSize, offset: 0)
-        cacheTimestamp = now
+            // 执行刷新
+            recentItemsCache = try storage.fetchRecent(limit: shortQueryCacheSize, offset: 0)
+            cacheTimestamp = now
+        }
     }
 
     /// v0.12: 完整缓存失效，同时清除搜索总数缓存

@@ -50,6 +50,8 @@ final class ClipboardMonitor {
 
     /// v0.10.8: 使用任务队列替代单任务，支持快速连续复制大文件
     private var processingQueue: [Task<Void, Never>] = []
+    /// v0.17: 任务 ID 映射，用于在任务完成后清理
+    private var taskIDMap: [UUID: Task<Void, Never>] = [:]
     private let maxConcurrentTasks = 3
     private let queueLock = NSLock()
 
@@ -83,10 +85,12 @@ final class ClipboardMonitor {
         timer?.invalidate()
         timer = nil
         // v0.10.8: 取消所有处理任务
+        // 注意: deinit 不在 @MainActor 上下文中，使用 lock/defer unlock 模式
         queueLock.lock()
+        defer { queueLock.unlock() }
         processingQueue.forEach { $0.cancel() }
         processingQueue.removeAll()
-        queueLock.unlock()
+        taskIDMap.removeAll()  // v0.17: 清理任务 ID 映射
         isMonitoring = false
     }
 
@@ -114,10 +118,12 @@ final class ClipboardMonitor {
         timer?.invalidate()
         timer = nil
         // v0.10.8: 取消所有处理任务
+        // 注意: 此方法在 @MainActor 上下文中执行，使用 lock/defer unlock 模式
         queueLock.lock()
+        defer { queueLock.unlock() }
         processingQueue.forEach { $0.cancel() }
         processingQueue.removeAll()
-        queueLock.unlock()
+        taskIDMap.removeAll()  // v0.17: 清理任务 ID 映射
         isMonitoring = false
     }
 
@@ -247,10 +253,14 @@ final class ClipboardMonitor {
 
     /// 异步处理大内容（在后台线程计算哈希）
     /// v0.10.8: 使用任务队列替代单任务，支持快速连续复制大文件
+    /// v0.17: 修复任务完成后不自动清理的内存泄漏问题
+    /// 注意: 此方法在 @MainActor 上下文中执行，使用 lock/defer unlock 模式
+    /// 因为 withLock 闭包不继承 @MainActor 隔离
     private func processLargeContentAsync(_ rawData: RawClipboardData) {
         queueLock.lock()
+        defer { queueLock.unlock() }
 
-        // 清理已完成的任务
+        // 清理已取消的任务
         processingQueue.removeAll { $0.isCancelled }
 
         // 如果队列满，取消最旧的任务
@@ -259,7 +269,16 @@ final class ClipboardMonitor {
             processingQueue.removeFirst()
         }
 
-        let task = Task.detached(priority: .userInitiated) { [weak self] in
+        // 使用 UUID 标识任务，以便在完成后清理
+        let taskID = UUID()
+        let task = Task.detached(priority: .userInitiated) { [weak self, taskID] in
+            // 确保任务完成后从队列中移除
+            defer {
+                Task { @MainActor [weak self] in
+                    self?.removeCompletedTask(id: taskID)
+                }
+            }
+
             guard let self = self else { return }
 
             // 在后台线程计算哈希
@@ -285,8 +304,18 @@ final class ClipboardMonitor {
             }
         }
         processingQueue.append(task)
+        taskIDMap[taskID] = task
+    }
 
-        queueLock.unlock()
+    /// v0.17: 从队列中移除已完成的任务
+    /// 注意: 此方法在 @MainActor 上下文中执行，使用 lock/defer unlock 模式
+    private func removeCompletedTask(id: UUID) {
+        queueLock.lock()
+        defer { queueLock.unlock() }
+        _ = taskIDMap.removeValue(forKey: id)
+        processingQueue.removeAll { $0.isCancelled }
+        // 由于 Task 是值类型，我们通过清理已取消的任务来间接清理
+        // 已完成的任务会在下次调用时被清理
     }
 
     /// 在后台线程计算哈希

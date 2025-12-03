@@ -145,6 +145,8 @@ final class StorageService {
             try setupFTS()
         } catch {
             // PRAGMA 或 schema 设置失败，清理连接
+            // v0.17: 确保重置 self.db，避免指向已关闭的连接
+            self.db = nil
             sqlite3_close(validDb)
             throw error
         }
@@ -934,8 +936,12 @@ final class StorageService {
             // 提交事务（单次 fsync）
             try execute("COMMIT")
         } catch {
-            // 回滚事务
-            try? execute("ROLLBACK")
+            // v0.17: 回滚事务，记录回滚错误但不改变异常传播
+            do {
+                try execute("ROLLBACK")
+            } catch let rollbackError {
+                print("⚠️ StorageService: ROLLBACK failed: \(rollbackError)")
+            }
             throw error
         }
     }
@@ -998,6 +1004,7 @@ final class StorageService {
     }
 
     /// v0.12: 并发删除文件，提升清理性能（后台执行，避免阻塞主线程）
+    /// v0.17: 添加错误日志记录，便于追踪删除失败
     private func deleteFilesInParallel(_ files: [String]) {
         guard !files.isEmpty else { return }
         DispatchQueue.global(qos: .utility).async {
@@ -1008,7 +1015,12 @@ final class StorageService {
                 group.enter()
                 queue.async {
                     defer { group.leave() }
-                    try? FileManager.default.removeItem(atPath: file)
+                    do {
+                        try FileManager.default.removeItem(atPath: file)
+                    } catch {
+                        // v0.17: 记录删除失败，便于追踪存储泄漏
+                        print("⚠️ StorageService: Failed to delete file '\(file)': \(error.localizedDescription)")
+                    }
                 }
             }
 
@@ -1034,6 +1046,24 @@ final class StorageService {
 
     // MARK: - External Storage
 
+    /// v0.17: 原子文件写入 - 使用临时文件 + 重命名，避免崩溃时文件损坏
+    private func writeAtomically(_ data: Data, to path: String) throws {
+        let tempPath = path + ".tmp"
+        let tempURL = URL(fileURLWithPath: tempPath)
+        let finalURL = URL(fileURLWithPath: path)
+
+        // 写入临时文件
+        try data.write(to: tempURL)
+
+        // 如果目标文件存在，先删除
+        if FileManager.default.fileExists(atPath: path) {
+            try FileManager.default.removeItem(at: finalURL)
+        }
+
+        // 原子重命名
+        try FileManager.default.moveItem(at: tempURL, to: finalURL)
+    }
+
     private func storeExternally(id: UUID, data: Data, type: ClipboardItemType) throws -> String {
         let ext: String
         switch type {
@@ -1047,7 +1077,8 @@ final class StorageService {
         let path = (externalStoragePath as NSString).appendingPathComponent(filename)
 
         do {
-            try data.write(to: URL(fileURLWithPath: path))
+            // v0.17: 使用原子写入
+            try writeAtomically(data, to: path)
             return path
         } catch {
             throw StorageError.fileOperationFailed("Failed to write external file: \(error)")
@@ -1055,6 +1086,7 @@ final class StorageService {
     }
 
     /// v0.10.7: 验证存储引用是否为有效的 UUID 文件名（防止路径遍历攻击）
+    /// v0.17: 增强验证 - 添加符号链接检查和路径规范化
     private func validateStorageRef(_ ref: String) -> Bool {
         // 提取文件名（不含路径）
         let filename = (ref as NSString).lastPathComponent
@@ -1068,7 +1100,31 @@ final class StorageService {
         }
 
         // 不能包含路径遍历字符
-        return !ref.contains("..") && !filename.contains("/")
+        guard !ref.contains("..") && !filename.contains("/") else {
+            return false
+        }
+
+        // v0.17: 检查符号链接
+        var isDirectory: ObjCBool = false
+        let exists = FileManager.default.fileExists(atPath: ref, isDirectory: &isDirectory)
+        if exists {
+            // 检查是否为符号链接
+            if let attrs = try? FileManager.default.attributesOfItem(atPath: ref),
+               let fileType = attrs[.type] as? FileAttributeType,
+               fileType == .typeSymbolicLink {
+                return false
+            }
+
+            // v0.17: 规范化路径并验证是否在允许的目录内
+            let url = URL(fileURLWithPath: ref)
+            let resolvedPath = url.resolvingSymlinksInPath().path
+            let allowedPath = URL(fileURLWithPath: externalStoragePath).resolvingSymlinksInPath().path
+            guard resolvedPath.hasPrefix(allowedPath) else {
+                return false
+            }
+        }
+
+        return true
     }
 
     func loadExternalData(path: String) throws -> Data {
@@ -1142,10 +1198,10 @@ final class StorageService {
             return nil
         }
 
-        // 保存
+        // v0.17: 使用原子写入保存缩略图
         let path = (thumbnailCachePath as NSString).appendingPathComponent("\(contentHash).png")
         do {
-            try pngData.write(to: URL(fileURLWithPath: path))
+            try writeAtomically(pngData, to: path)
             return path
         } catch {
             print("Failed to save thumbnail: \(error)")
