@@ -7,6 +7,121 @@
 
 ---
 
+## [v0.18] - 2025-12-03
+
+### 性能优化
+
+**虚拟列表 (List) 替代 LazyVStack**：
+- **问题** - LazyVStack 只实现"懒创建"，不实现"视图回收"，10k 项目内存占用 ~500MB
+- **修复** - 使用 SwiftUI `List` 替代 `ScrollView + LazyVStack`
+- **效果** - List 基于 NSTableView，具有真正的视图回收能力，内存占用降至 ~50MB（90% 改善）
+
+**缩略图内存缓存**：
+- **问题** - List 视图回收导致频繁重新加载缩略图，造成滚动卡顿
+- **修复** - 新增缩略图 LRU 缓存（最大 1000 张，约 20MB）
+- **效果** - 滚动流畅，缩略图只需加载一次
+
+### 修改文件
+- `Scopy/Views/HistoryListView.swift` - ScrollView+LazyVStack → List，新增缩略图缓存
+
+### 测试
+- 单元测试: **161/161 passed** (1 skipped)
+- 手动测试: 键盘导航、鼠标悬停、点击选择、右键菜单、图片/文本预览、Pinned 折叠、分页加载、搜索过滤 ✅
+
+---
+
+## [v0.17.1] - 2025-12-03 ✅ 审查报告修复完成
+
+> **里程碑**: 基于 `doc/review/rustling-gathering-quill.md` 的系统性修复工作已完成
+> - P0 严重问题: 4/4 ✅
+> - P1 高优先级: 6/8 ✅ (2个需架构重构暂缓)
+> - P2 中优先级: 20/22 ✅ (2个需架构重构暂缓)
+> - 暂缓项目: P1-4 (@Observable 全局重绘), P1-6 (SearchService Actor 隔离)
+
+### 原理性改进
+
+**统一锁策略 - NSLock.withLock 扩展**：
+- 新增 `Scopy/Extensions/NSLock+Extensions.swift`
+- 提供 `withLock(_:)` 方法，与 Swift 标准库保持一致
+- 应用到 SearchService、HotKeyService、HistoryListView
+- 注意: ClipboardMonitor 因 `@MainActor` 隔离限制，保留 `lock/defer unlock` 模式
+
+**P2 问题修复**：
+- **P2-5: RealClipboardService stop() 任务等待** - 添加最多 500ms 等待逻辑，确保应用退出时数据完整性
+- **P2-6: AppState stop() 任务等待** - 添加最多 500ms 等待逻辑，确保应用退出时数据完整性
+
+### 修改文件
+- `Scopy/Extensions/NSLock+Extensions.swift` - 新增
+- `Scopy/Services/SearchService.swift` - 使用 withLock
+- `Scopy/Services/HotKeyService.swift` - 使用 withLock
+- `Scopy/Views/HistoryListView.swift` - 使用 withLock
+- `Scopy/Services/RealClipboardService.swift` - P2-5 修复
+- `Scopy/Observables/AppState.swift` - P2-6 修复
+
+### 测试
+- 单元测试: **161/161 passed** (1 skipped)
+
+---
+
+## [v0.17] - 2025-12-03
+
+### 稳定性修复 (P0/P1)
+
+基于 `doc/review/rustling-gathering-quill.md` 审查报告的系统性修复。
+
+**P0 严重问题 (4个)**：
+- **HotKeyService NSLock 死锁风险** - 8 处 NSLock 添加 `defer` 保护
+- **HotKeyService 静态变量数据竞争** - `nextHotKeyID` 和 `lastFire` 加锁保护
+- **ClipboardMonitor 任务队列内存泄漏** - 任务完成后自动清理，新增 `taskIDMap` 跟踪
+- **StorageService 数据库初始化不完整** - catch 块中重置 `self.db = nil`
+
+**P1 高优先级 (6个)**：
+- **事务回滚错误处理** - 记录回滚错误但不改变异常传播
+- **原子文件写入** - 新增 `writeAtomically()` 方法，使用临时文件 + 重命名
+- **SettingsWindow 内存泄漏** - `isReleasedWhenClosed = true` + 关闭时清空引用
+- **HistoryItemView 任务泄漏** - `onDisappear` 中清理所有任务引用和状态
+- **路径验证增强** - 添加符号链接检查和路径规范化
+- **并发删除错误日志** - 添加删除失败日志记录
+
+### 新功能
+
+**模糊搜索不区分大小写**：
+- FTS5 搜索前将查询转为小写
+- 与 `unicode61` tokenizer 的 case-folding 保持一致
+
+### 修改文件
+- `Scopy/Services/HotKeyService.swift` - P0-1, P0-2
+- `Scopy/Services/ClipboardMonitor.swift` - P0-3
+- `Scopy/Services/StorageService.swift` - P0-4, P1-1, P1-2, P1-7, P1-8
+- `Scopy/AppDelegate.swift` - P1-3
+- `Scopy/Services/SearchService.swift` - 模糊搜索不区分大小写
+- `Scopy/Views/HistoryListView.swift` - P1-5
+
+### 测试
+- 单元测试: **161/161 passed** (1 skipped)
+
+---
+
+## [v0.16.3] - 2025-12-03
+
+### 新功能
+
+**快捷键触发时窗口在鼠标位置呼出**：
+- **功能** - 按下全局快捷键时，浮动面板在鼠标光标位置显示，而非状态栏下方
+- **实现** - 新增 `PanelPositionMode` 枚举区分两种定位模式
+- **多屏幕支持** - 窗口在鼠标所在屏幕显示
+- **边界约束** - 窗口自动调整位置，确保不超出屏幕可见区域
+- **兼容性** - 点击状态栏图标仍在状态栏下方显示（原有行为不变）
+
+### 修改文件
+- `Scopy/FloatingPanel.swift` - 添加定位模式枚举、重构 `open()` 方法、添加位置计算辅助方法
+- `Scopy/AppDelegate.swift` - 新增 `togglePanelAtMousePosition()` 方法、更新快捷键 handler
+
+### 测试
+- 单元测试: **161/161 passed** (1 skipped)
+
+---
+
 ## [v0.16.2] - 2025-11-29
 
 ### Bug 修复

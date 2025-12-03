@@ -7,18 +7,22 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## 开发工作流 (必读)
 
 ### 每次对话开始时
+
 1. **读取** `doc/implemented-doc/README.md` - 了解当前状态和最新版本
 2. **读取** `doc/implemented-doc/CHANGELOG.md` - 了解最近变化
 3. **参考** `doc/dev-doc/v0.md` - 设计规范和需求来源
 
 ### 每次开发完成后
+
 必须更新以下文档:
+
 1. **创建/更新版本文档** `doc/implemented-doc/vX.X.md`
 2. **更新索引** `doc/implemented-doc/README.md`
-3. **更新变更日志** `doc/implemented-doc/CHANGELOG.md`
+3. **更新变更日志** `doc/implemented-doc/CHANxaxqGELOG.md`
 4. **更新部署文档** `DEPLOYMENT.md` (如有性能/部署变化，必须包含具体数值)
 
 ### 版本命名规范
+
 ```
 v0.x       - 大版本 (新功能模块)
 v0.x.x     - 小版本 (功能增强/完善)
@@ -26,7 +30,9 @@ v0.x.fix   - 修复版本 (bug fix/hotfix)
 ```
 
 ### 版本文档模板
+
 每个版本文档必须包含:
+
 1. 📌 **一页纸总结** - What + Why + Result
 2. 🏗️ **实现路线** - 步骤列表
 3. 📂 **核心改动** - 文件列表
@@ -35,13 +41,17 @@ v0.x.fix   - 修复版本 (bug fix/hotfix)
 6. 🔮 **遗留与后续** - 下一步工作
 
 ### 性能数据要求
+
 DEPLOYMENT.md 中的性能测试必须包含:
+
 - 测试环境 (硬件/系统/日期)
 - 具体数值 (不能只写"满足")
 - 对应的测试用例名称
 
 ### 性能变化记录 (必须)
+
 每次版本迭代后，必须在 `doc/profile/` 目录下创建性能对比文档:
+
 1. **文件命名**: `vX.X-profile.md` (如 `v0.11-profile.md`)
 2. **必须包含**:
    - 与上一版本的性能对比表格
@@ -90,6 +100,7 @@ Scopy follows a **strict front-end/back-end separation** pattern to enable compo
 ## Development Commands
 
 ### 快速开始
+
 ```bash
 cd /Users/ziyi/Documents/code/Scopy
 
@@ -103,6 +114,7 @@ xcodebuild test -scheme Scopy -destination 'platform=macOS' -only-testing:ScopyT
 ```
 
 ### 构建和部署
+
 ```bash
 ./deploy.sh              # Debug 版本
 ./deploy.sh release      # Release 版本
@@ -111,6 +123,7 @@ xcodebuild test -scheme Scopy -destination 'platform=macOS' -only-testing:ScopyT
 ```
 
 ### 测试命令
+
 ```bash
 # 全部单元测试
 xcodebuild test -scheme Scopy -destination 'platform=macOS' -only-testing:ScopyTests
