@@ -57,3 +57,28 @@ jobs:
             3. 首次打开：右键点击 Scopy → 打开 → 打开
 
             > ⚠️ 应用未签名，首次打开需要手动允许
+
+      - name: Update Cask with new version and SHA256
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          SHA256=$(cat "Scopy-${VERSION}.dmg.sha256" | awk '{print $1}')
+
+          # 更新 Cask 文件
+          sed -i '' "s/version \".*\"/version \"${VERSION}\"/" Casks/scopy.rb
+          sed -i '' "s/sha256 \".*\"/sha256 \"${SHA256}\"/" Casks/scopy.rb
+
+      - name: Commit updated Cask
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Casks/scopy.rb
+          git commit -m "chore: update Cask to ${GITHUB_REF_NAME}" || echo "No changes"
+          git push origin HEAD:main
+
+      - name: Trigger homebrew-scopy sync
+        run: |
+          curl -X POST \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            https://api.github.com/repos/Suehn/homebrew-scopy/dispatches \
+            -d '{"event_type":"scopy-release"}'
