@@ -13,6 +13,7 @@ struct SettingsView: View {
     @State private var isSaving = false
     @State private var storageStats: StorageStatsDTO?
     @State private var isLoadingStats = false
+    @State private var statsTask: Task<Void, Never>?  // v0.20: 保存 Task 引用，防止泄漏
 
     var onDismiss: (() -> Void)?
 
@@ -43,6 +44,11 @@ struct SettingsView: View {
         .onAppear {
             tempSettings = appState.settings
             refreshStats()
+        }
+        .onDisappear {
+            // v0.20: 取消未完成的任务，防止内存泄漏
+            statsTask?.cancel()
+            statsTask = nil
         }
     }
 
@@ -113,15 +119,28 @@ struct SettingsView: View {
         .frame(minWidth: ScopySize.Window.settingsWidth, minHeight: ScopySize.Window.settingsHeight)
     }
 
+    /// v0.20: 保存 Task 引用，支持取消，防止内存泄漏
     private func refreshStats() {
+        // 取消之前的任务
+        statsTask?.cancel()
+
         isLoadingStats = true
-        Task {
+        statsTask = Task {
             do {
-                storageStats = try await appState.service.getDetailedStorageStats()
+                // 检查取消状态
+                guard !Task.isCancelled else { return }
+                let stats = try await appState.service.getDetailedStorageStats()
+                // 再次检查取消状态
+                guard !Task.isCancelled else { return }
+                storageStats = stats
             } catch {
-                print("Failed to load storage stats: \(error)")
+                if !Task.isCancelled {
+                    print("Failed to load storage stats: \(error)")
+                }
             }
-            isLoadingStats = false
+            if !Task.isCancelled {
+                isLoadingStats = false
+            }
         }
     }
 

@@ -371,10 +371,13 @@ final class SearchService {
     }
 
     /// v0.12: 完整缓存失效，同时清除搜索总数缓存
+    /// v0.20: 添加锁保护，防止与 refreshCacheIfNeeded 竞态
     func invalidateCache() {
-        recentItemsCache = []
-        cacheTimestamp = .distantPast
-        cachedSearchTotal = nil
+        cacheRefreshLock.withLock {
+            recentItemsCache = []
+            cacheTimestamp = .distantPast
+            cachedSearchTotal = nil
+        }
     }
 
     // MARK: - Fuzzy Matching

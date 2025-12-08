@@ -954,6 +954,7 @@ final class StorageService {
     /// v0.14: 事务包装的批量删除 - 减少 fsync 次数，大幅提升性能
     /// 原理：SQLite 默认每条 DELETE 后 fsync，事务内只在 COMMIT 时 fsync 一次
     /// 收益：9000 条删除从 ~4500ms 降到 ~200ms
+    /// v0.20: 增强错误处理 - ROLLBACK 失败时尝试恢复数据库连接
     private func deleteItemsBatchInTransaction(ids: [UUID]) throws {
         guard !ids.isEmpty else { return }
 
@@ -973,10 +974,20 @@ final class StorageService {
             try execute("COMMIT")
         } catch {
             // v0.17: 回滚事务，记录回滚错误但不改变异常传播
+            // v0.20: ROLLBACK 失败时尝试恢复数据库连接
             do {
                 try execute("ROLLBACK")
             } catch let rollbackError {
-                print("⚠️ StorageService: ROLLBACK failed: \(rollbackError)")
+                print("⚠️ StorageService: ROLLBACK failed: \(rollbackError), attempting database recovery")
+                // 尝试恢复数据库连接
+                do {
+                    close()
+                    try open()
+                    print("✅ StorageService: Database connection recovered after ROLLBACK failure")
+                } catch let recoveryError {
+                    print("❌ StorageService: Database recovery failed: \(recoveryError)")
+                    // 数据库可能处于不一致状态，记录严重错误
+                }
             }
             throw error
         }

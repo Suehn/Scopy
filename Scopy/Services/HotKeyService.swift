@@ -72,10 +72,24 @@ final class HotKeyService {
     }()
 
     /// 热键 ID 计数器
+    /// v0.20: 添加溢出保护，当接近 UInt32.max 时重置为 1
     private static var nextHotKeyID: UInt32 = 1
 
     /// 防重复触发（按住键盘时 Carbon 会重复发送 pressed 事件）
     private static var lastFire: (id: UInt32, timestamp: CFAbsoluteTime)?
+
+    /// v0.20: 安全递增 hotKeyID，防止溢出
+    private static func getNextHotKeyID() -> UInt32 {
+        // 如果接近溢出，重置为 1（跳过 0，因为 0 通常表示无效 ID）
+        // 使用 UInt32.max - 1000 作为阈值，留出足够的安全边界
+        if nextHotKeyID >= UInt32.max - 1000 {
+            logToFile("⚠️ HotKeyID approaching overflow, resetting to 1")
+            nextHotKeyID = 1
+        }
+        let id = nextHotKeyID
+        nextHotKeyID += 1
+        return id
+    }
 
     // MARK: - Instance Properties
 
@@ -168,9 +182,9 @@ final class HotKeyService {
 
     private func registerHotKey(keyCode: UInt32, modifiers: UInt32, handler: @escaping HotKeyHandler) {
         // 生成新的 hotKeyID（加锁保护静态变量）
+        // v0.20: 使用 getNextHotKeyID() 防止溢出
         let handlerCount = Self.handlersLock.withLock {
-            currentHotKeyID = Self.nextHotKeyID
-            Self.nextHotKeyID += 1
+            currentHotKeyID = Self.getNextHotKeyID()
             // 存储处理器
             Self.handlers[currentHotKeyID] = handler
             return Self.handlers.count

@@ -308,14 +308,28 @@ final class ClipboardMonitor {
     }
 
     /// v0.17: 从队列中移除已完成的任务
+    /// v0.20: 修复内存泄漏 - 同时清理 processingQueue 中已完成的任务
     /// 注意: 此方法在 @MainActor 上下文中执行，使用 lock/defer unlock 模式
     private func removeCompletedTask(id: UUID) {
         queueLock.lock()
         defer { queueLock.unlock() }
-        _ = taskIDMap.removeValue(forKey: id)
-        processingQueue.removeAll { $0.isCancelled }
-        // 由于 Task 是值类型，我们通过清理已取消的任务来间接清理
-        // 已完成的任务会在下次调用时被清理
+
+        // 从 taskIDMap 移除已完成的任务
+        if let completedTask = taskIDMap.removeValue(forKey: id) {
+            // 从 processingQueue 中移除对应的任务
+            // 使用 ObjectIdentifier 比较 Task 引用
+            processingQueue.removeAll { task in
+                // Task 是值类型，但底层有相同的 identity
+                // 通过检查是否在 taskIDMap 中来判断任务是否已完成
+                task.isCancelled || ObjectIdentifier(task as AnyObject) == ObjectIdentifier(completedTask as AnyObject)
+            }
+        }
+
+        // 额外清理：移除所有不在 taskIDMap 中的任务（已完成或已取消）
+        let activeTaskSet = Set(taskIDMap.values.map { ObjectIdentifier($0 as AnyObject) })
+        processingQueue.removeAll { task in
+            task.isCancelled || !activeTaskSet.contains(ObjectIdentifier(task as AnyObject))
+        }
     }
 
     /// 在后台线程计算哈希

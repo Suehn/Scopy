@@ -200,6 +200,7 @@ final class AppState {
 
     /// 停止应用服务
     /// v0.17.1: 添加任务等待逻辑，确保应用退出时数据完整性
+    /// v0.20: 移除 RunLoop 轮询，避免阻塞主线程
     func stop() {
         // 1. 取消所有任务
         eventTask?.cancel()
@@ -207,20 +208,16 @@ final class AppState {
         loadMoreTask?.cancel()
         scrollEndTask?.cancel()
 
-        // 2. 等待关键任务完成（最多 500ms）
-        // 使用 RunLoop 避免阻塞主线程
-        let deadline = Date().addingTimeInterval(0.5)
-        while let task = eventTask, !task.isCancelled, Date() < deadline {
-            RunLoop.current.run(until: Date().addingTimeInterval(0.01))
-        }
-
-        // 3. 清理引用
+        // 2. 清理引用（不再阻塞等待，让系统自然清理）
+        // 注意：取消任务后，任务会在下一个 await 点检查取消状态并退出
+        // 不需要阻塞主线程等待，这会导致应用退出时卡顿
         eventTask = nil
         searchTask = nil
         loadMoreTask = nil
         scrollEndTask = nil
 
-        // 4. 通过协议方法停止服务
+        // 3. 通过协议方法停止服务
+        // service.stop() 内部会处理必要的清理工作
         service.stop()
     }
 

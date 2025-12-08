@@ -141,17 +141,19 @@ final class IconCacheSync {
     }
 
     /// 同步获取应用名称
+    /// v0.20: 修复死锁风险 - 使用 withLock 确保锁正确释放，系统调用在锁外执行
     func getAppName(bundleID: String) -> String {
-        lock.lock()
+        // 1. 先检查缓存（在锁内）
+        let cached: String? = lock.withLock {
+            nameCache[bundleID]
+        }
 
-        if let cached = nameCache[bundleID] {
-            lock.unlock()
+        if let cached = cached {
             return cached
         }
 
-        lock.unlock()
-
-        // 缓存未命中，获取名称（可能阻塞）
+        // 2. 缓存未命中，在锁外获取名称（避免死锁）
+        // NSWorkspace 调用可能触发系统回调，不能在锁内执行
         let name: String
         if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) {
             name = url.deletingPathExtension().lastPathComponent
@@ -159,10 +161,20 @@ final class IconCacheSync {
             name = bundleID
         }
 
-        // 写入缓存
-        lock.lock()
-        nameCache[bundleID] = name
-        lock.unlock()
+        // 3. 写入缓存（在锁内）
+        // 使用 double-check 避免重复写入
+        lock.withLock {
+            if nameCache[bundleID] == nil {
+                // LRU 清理
+                if nameCache.count >= maxSize {
+                    // 找到最旧的名称缓存条目并移除
+                    if let oldest = accessOrder.first(where: { nameCache[$0] != nil }) {
+                        nameCache.removeValue(forKey: oldest)
+                    }
+                }
+                nameCache[bundleID] = name
+            }
+        }
 
         return name
     }
