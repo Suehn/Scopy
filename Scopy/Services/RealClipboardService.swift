@@ -154,25 +154,25 @@ final class RealClipboardService: ClipboardServiceProtocol {
 
     func pin(itemID: UUID) async throws {
         try storage.setPin(itemID, pinned: true)
-        search.invalidateCache()
+        search.handlePinnedChange(id: itemID, pinned: true)
         yieldEvent(.itemPinned(itemID))
     }
 
     func unpin(itemID: UUID) async throws {
         try storage.setPin(itemID, pinned: false)
-        search.invalidateCache()
+        search.handlePinnedChange(id: itemID, pinned: false)
         yieldEvent(.itemUnpinned(itemID))
     }
 
     func delete(itemID: UUID) async throws {
         try storage.deleteItem(itemID)
-        search.invalidateCache()
+        search.handleDeletion(id: itemID)
         yieldEvent(.itemDeleted(itemID))
     }
 
     func clearAll() async throws {
         try storage.deleteAllExceptPinned()
-        search.invalidateCache()
+        search.handleClearAll()
         yieldEvent(.settingsChanged)
     }
 
@@ -233,7 +233,7 @@ final class RealClipboardService: ClipboardServiceProtocol {
         }
 
         // 生成事件让 UI 刷新（置顶该条目）
-        search.invalidateCache()
+        search.handleUpsertedItem(updated)
         yieldEvent(.itemUpdated(toDTO(updated)))
     }
 
@@ -330,7 +330,7 @@ final class RealClipboardService: ClipboardServiceProtocol {
                 }
             }
 
-            search.invalidateCache()
+            search.handleUpsertedItem(storedItem)
             yieldEvent(.newItem(toDTO(storedItem)))
 
             // Periodic cleanup

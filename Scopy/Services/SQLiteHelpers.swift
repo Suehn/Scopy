@@ -62,3 +62,39 @@ func parseStoredItem(from stmt: OpaquePointer) -> StorageService.StoredItem? {
         rawData: rawData
     )
 }
+
+/// 从 SQLite statement 解析 StoredItem（不读取 raw_data）
+/// 用于全量模糊搜索索引与列表查询，避免读取大字段
+func parseStoredItemSummary(from stmt: OpaquePointer) -> StorageService.StoredItem? {
+    guard let idStr = safeColumnText(stmt, 0),
+          let id = UUID(uuidString: idStr),
+          let typeStr = safeColumnText(stmt, 1),
+          let type = ClipboardItemType(rawValue: typeStr),
+          let hashStr = safeColumnText(stmt, 2) else {
+        return nil
+    }
+
+    let plainText = safeColumnText(stmt, 3) ?? ""
+    let appBundleID = safeColumnText(stmt, 4)
+    let createdAt = Date(timeIntervalSince1970: sqlite3_column_double(stmt, 5))
+    let lastUsedAt = Date(timeIntervalSince1970: sqlite3_column_double(stmt, 6))
+    let useCount = Int(sqlite3_column_int(stmt, 7))
+    let isPinned = sqlite3_column_int(stmt, 8) != 0
+    let sizeBytes = Int(sqlite3_column_int(stmt, 9))
+    let storageRef = safeColumnText(stmt, 10)
+
+    return StorageService.StoredItem(
+        id: id,
+        type: type,
+        contentHash: hashStr,
+        plainText: plainText,
+        appBundleID: appBundleID,
+        createdAt: createdAt,
+        lastUsedAt: lastUsedAt,
+        useCount: useCount,
+        isPinned: isPinned,
+        sizeBytes: sizeBytes,
+        storageRef: storageRef,
+        rawData: nil
+    )
+}

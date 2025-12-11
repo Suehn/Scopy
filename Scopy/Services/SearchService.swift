@@ -30,6 +30,65 @@ final class SearchService {
         let searchTimeMs: Double
     }
 
+    private struct IndexedItem {
+        let id: UUID
+        let type: ClipboardItemType
+        let contentHash: String
+        let plainText: String
+        let plainTextLower: String
+        let appBundleID: String?
+        let createdAt: Date
+        var lastUsedAt: Date
+        var useCount: Int
+        var isPinned: Bool
+        let sizeBytes: Int
+        let storageRef: String?
+
+        init(from item: StorageService.StoredItem) {
+            self.id = item.id
+            self.type = item.type
+            self.contentHash = item.contentHash
+            self.plainText = item.plainText
+            self.plainTextLower = item.plainText.lowercased()
+            self.appBundleID = item.appBundleID
+            self.createdAt = item.createdAt
+            self.lastUsedAt = item.lastUsedAt
+            self.useCount = item.useCount
+            self.isPinned = item.isPinned
+            self.sizeBytes = item.sizeBytes
+            self.storageRef = item.storageRef
+        }
+
+        func toStoredItem() -> StorageService.StoredItem {
+            StorageService.StoredItem(
+                id: id,
+                type: type,
+                contentHash: contentHash,
+                plainText: plainText,
+                appBundleID: appBundleID,
+                createdAt: createdAt,
+                lastUsedAt: lastUsedAt,
+                useCount: useCount,
+                isPinned: isPinned,
+                sizeBytes: sizeBytes,
+                storageRef: storageRef,
+                rawData: nil
+            )
+        }
+    }
+
+    private final class FullFuzzyIndex {
+        var items: [IndexedItem?]
+        var idToSlot: [UUID: Int]
+        var charPostings: [Character: [Int]]
+
+        init(items: [IndexedItem?], idToSlot: [UUID: Int], charPostings: [Character: [Int]]) {
+            self.items = items
+            self.idToSlot = idToSlot
+            self.charPostings = charPostings
+        }
+    }
+
     // MARK: - Properties
 
     private let storage: StorageService
@@ -49,6 +108,11 @@ final class SearchService {
     /// v0.10.7: 保护缓存刷新的锁（防止并发刷新竞态）
     private let cacheRefreshLock = NSLock()
 
+    /// Full-history fuzzy index (v0.25: 全量模糊搜索)
+    private var fullIndex: FullFuzzyIndex?
+    private var fullIndexStale = true
+    private let fullIndexLock = NSLock()
+
     // v0.22: 移除 cachedSearchTotal 和 searchTotalCacheTTL（死代码）
     // v0.13 引入 LIMIT+1 技巧后，不再需要单独缓存搜索总数
 
@@ -63,6 +127,50 @@ final class SearchService {
 
     func setDatabase(_ db: OpaquePointer?) {
         self.db = db
+    }
+
+    // MARK: - Index Updates
+
+    /// 通知 SearchService 有新条目或条目更新（用于保持全量模糊索引最新）
+    func handleUpsertedItem(_ item: StorageService.StoredItem) {
+        // Short-query cache becomes stale
+        cacheRefreshLock.withLock {
+            recentItemsCache = []
+            cacheTimestamp = .distantPast
+        }
+
+        fullIndexLock.withLock {
+            guard let index = fullIndex, !fullIndexStale else { return }
+            upsertItemIntoIndex(item, index: index)
+        }
+    }
+
+    func handlePinnedChange(id: UUID, pinned: Bool) {
+        fullIndexLock.withLock {
+            guard let index = fullIndex, !fullIndexStale, let slot = index.idToSlot[id], let existing = index.items[slot] else {
+                return
+            }
+            var updated = existing
+            updated.isPinned = pinned
+            index.items[slot] = updated
+        }
+    }
+
+    func handleDeletion(id: UUID) {
+        fullIndexLock.withLock {
+            guard let index = fullIndex, !fullIndexStale, let slot = index.idToSlot[id] else { return }
+            index.items[slot] = nil
+            index.idToSlot.removeValue(forKey: id)
+        }
+
+        cacheRefreshLock.withLock {
+            recentItemsCache = []
+            cacheTimestamp = .distantPast
+        }
+    }
+
+    func handleClearAll() {
+        invalidateCache()
     }
 
     // MARK: - Search API
@@ -127,11 +235,7 @@ final class SearchService {
             return try await searchAllWithFilters(request: request, db: db)
         }
 
-        // v0.19: 所有模糊搜索都使用缓存 + 真正的模糊匹配
-        // 这确保 "hlo" 可以匹配 "Hello"，而不仅仅是前缀匹配
-        return try await searchInCache(request: request) { item in
-            self.fuzzyMatch(text: item.plainText, query: request.query)
-        }
+        return try await searchFullFuzzy(request: request, db: db, mode: .fuzzy)
     }
 
     /// Regex search (v0.md 3.3: 限制仅对结果子集执行)
@@ -158,9 +262,7 @@ final class SearchService {
             return try await searchAllWithFilters(request: request, db: db)
         }
 
-        return try await searchInCache(request: request) { item in
-            self.fuzzyPlusMatch(text: item.plainText, query: request.query)
-        }
+        return try await searchFullFuzzy(request: request, db: db, mode: .fuzzyPlus)
     }
 
     // MARK: - FTS5 Search Implementation
@@ -298,8 +400,9 @@ final class SearchService {
             // Refresh cache if stale
             try self.refreshCacheIfNeeded()
 
-            // Apply all filters
-            var filtered = recentItemsCache.filter(filter)
+            // Snapshot cache under lock to avoid concurrent mutation races
+            let cachedItems = cacheRefreshLock.withLock { recentItemsCache }
+            var filtered = cachedItems.filter(filter)
 
             // Apply additional filters
             if let appFilter = request.appFilter {
@@ -399,6 +502,240 @@ final class SearchService {
             recentItemsCache = []
             cacheTimestamp = .distantPast
         }
+
+        fullIndexLock.withLock {
+            fullIndex = nil
+            fullIndexStale = true
+        }
+    }
+
+    // MARK: - Full-History Fuzzy Search
+
+    private func searchFullFuzzy(request: SearchRequest, db: OpaquePointer, mode: SearchMode) async throws -> SearchResult {
+        let trimmedQuery = request.query.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmedQuery.isEmpty {
+            return try await searchAllWithFilters(request: request, db: db)
+        }
+
+        let normalizedRequest = SearchRequest(
+            query: trimmedQuery,
+            mode: mode,
+            appFilter: request.appFilter,
+            typeFilter: request.typeFilter,
+            typeFilters: request.typeFilters,
+            limit: request.limit,
+            offset: request.offset
+        )
+
+        return try await runOnQueueWithTimeout { [self] in
+            try ensureFullIndex(db: db)
+            return try fullIndexLock.withLock {
+                guard let index = fullIndex, !fullIndexStale else {
+                    return SearchResult(items: [], total: 0, hasMore: false, searchTimeMs: 0)
+                }
+                return try searchInFullIndex(index: index, request: normalizedRequest, mode: mode)
+            }
+        }
+    }
+
+    private func ensureFullIndex(db: OpaquePointer) throws {
+        _ = try getOrBuildFullIndex(db: db)
+    }
+
+    private func getOrBuildFullIndex(db: OpaquePointer) throws -> FullFuzzyIndex {
+        if let existing = fullIndexLock.withLock({ (!fullIndexStale) ? fullIndex : nil }) {
+            return existing
+        }
+
+        let newIndex = try buildFullIndex(db: db)
+        fullIndexLock.withLock {
+            fullIndex = newIndex
+            fullIndexStale = false
+        }
+        return newIndex
+    }
+
+    private func buildFullIndex(db: OpaquePointer) throws -> FullFuzzyIndex {
+        let sql = """
+            SELECT id, type, content_hash, plain_text, app_bundle_id, created_at, last_used_at,
+                   use_count, is_pinned, size_bytes, storage_ref
+            FROM clipboard_items
+        """
+
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            throw SearchError.searchFailed(String(cString: sqlite3_errmsg(db)))
+        }
+        defer { sqlite3_finalize(stmt) }
+
+        var items: [IndexedItem?] = []
+        var idToSlot: [UUID: Int] = [:]
+        var charPostings: [Character: [Int]] = [:]
+
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            guard let stmt = stmt, let stored = parseStoredItemSummary(from: stmt) else { continue }
+            let indexed = IndexedItem(from: stored)
+            let slot = items.count
+            items.append(indexed)
+            idToSlot[indexed.id] = slot
+
+            for ch in uniqueNonWhitespaceCharacters(indexed.plainTextLower) {
+                charPostings[ch, default: []].append(slot)
+            }
+        }
+
+        return FullFuzzyIndex(items: items, idToSlot: idToSlot, charPostings: charPostings)
+    }
+
+    private func searchInFullIndex(index: FullFuzzyIndex, request: SearchRequest, mode: SearchMode) throws -> SearchResult {
+        let queryLower = request.query.lowercased()
+        let queryChars = uniqueNonWhitespaceCharacters(queryLower)
+
+        let candidateSlots: [Int]
+        if queryChars.isEmpty {
+            candidateSlots = Array(index.items.indices)
+        } else {
+            var lists: [[Int]] = []
+            lists.reserveCapacity(queryChars.count)
+            for ch in queryChars {
+                guard let list = index.charPostings[ch] else {
+                    return SearchResult(items: [], total: 0, hasMore: false, searchTimeMs: 0)
+                }
+                lists.append(list)
+            }
+            lists.sort { $0.count < $1.count }
+
+            var candidateSet = Set(lists[0])
+            for list in lists.dropFirst() {
+                candidateSet.formIntersection(list)
+                if candidateSet.isEmpty { break }
+            }
+            candidateSlots = Array(candidateSet)
+        }
+
+        var scored: [(IndexedItem, Int)] = []
+        scored.reserveCapacity(min(candidateSlots.count, request.limit * 4))
+
+        for slot in candidateSlots {
+            guard slot < index.items.count, let item = index.items[slot] else { continue }
+
+            if let appFilter = request.appFilter, item.appBundleID != appFilter { continue }
+            if let typeFilters = request.typeFilters, !typeFilters.isEmpty {
+                if !typeFilters.contains(item.type) { continue }
+            } else if let typeFilter = request.typeFilter, item.type != typeFilter {
+                continue
+            }
+
+            guard let score = fuzzyScore(textLower: item.plainTextLower, queryLower: queryLower, mode: mode) else {
+                continue
+            }
+            scored.append((item, score))
+        }
+
+        scored.sort { lhs, rhs in
+            if lhs.0.isPinned != rhs.0.isPinned {
+                return lhs.0.isPinned && !rhs.0.isPinned
+            }
+            if lhs.1 != rhs.1 {
+                return lhs.1 > rhs.1
+            }
+            return lhs.0.lastUsedAt > rhs.0.lastUsedAt
+        }
+
+        let total = scored.count
+        let start = min(request.offset, total)
+        let end = min(start + request.limit + 1, total)
+        var page = Array(scored[start..<end])
+
+        let hasMore = page.count > request.limit
+        if hasMore {
+            page.removeLast()
+        }
+
+        let resultItems = page.map { $0.0.toStoredItem() }
+        return SearchResult(items: resultItems, total: total, hasMore: hasMore, searchTimeMs: 0)
+    }
+
+    private func upsertItemIntoIndex(_ item: StorageService.StoredItem, index: FullFuzzyIndex) {
+        if let slot = index.idToSlot[item.id], let existing = index.items[slot] {
+            if existing.plainText != item.plainText {
+                fullIndex = nil
+                fullIndexStale = true
+                return
+            }
+
+            var updated = existing
+            updated.lastUsedAt = item.lastUsedAt
+            updated.useCount = item.useCount
+            updated.isPinned = item.isPinned
+            index.items[slot] = updated
+            return
+        }
+
+        let indexed = IndexedItem(from: item)
+        let slot = index.items.count
+        index.items.append(indexed)
+        index.idToSlot[indexed.id] = slot
+
+        for ch in uniqueNonWhitespaceCharacters(indexed.plainTextLower) {
+            index.charPostings[ch, default: []].append(slot)
+        }
+    }
+
+    private func uniqueNonWhitespaceCharacters(_ text: String) -> [Character] {
+        var seen = Set<Character>()
+        var result: [Character] = []
+        seen.reserveCapacity(min(text.count, 64))
+        result.reserveCapacity(min(text.count, 64))
+
+        for ch in text {
+            if ch.isWhitespace { continue }
+            if seen.insert(ch).inserted {
+                result.append(ch)
+            }
+        }
+        return result
+    }
+
+    private func fuzzyScore(textLower: String, queryLower: String, mode: SearchMode) -> Int? {
+        switch mode {
+        case .fuzzy:
+            return fuzzyMatchScore(textLower: textLower, queryLower: queryLower)
+        case .fuzzyPlus:
+            let words = queryLower.split(separator: " ").map(String.init).filter { !$0.isEmpty }
+            guard !words.isEmpty else { return 0 }
+            var total = 0
+            for word in words {
+                guard let score = fuzzyMatchScore(textLower: textLower, queryLower: word) else { return nil }
+                total += score
+            }
+            return total
+        default:
+            return nil
+        }
+    }
+
+    private func fuzzyMatchScore(textLower: String, queryLower: String) -> Int? {
+        guard !queryLower.isEmpty else { return 0 }
+
+        var textIndex = textLower.startIndex
+        var firstPos: Int?
+        var lastPos = 0
+        var gapPenalty = 0
+        var matchedCount = 0
+
+        for ch in queryLower {
+            guard let found = textLower[textIndex...].firstIndex(of: ch) else { return nil }
+            let pos = textLower.distance(from: textLower.startIndex, to: found)
+            if firstPos == nil { firstPos = pos }
+            gapPenalty += textLower.distance(from: textIndex, to: found)
+            matchedCount += 1
+            textIndex = textLower.index(after: found)
+            lastPos = pos
+        }
+
+        let span = firstPos.map { lastPos - $0 } ?? 0
+        return matchedCount * 10 - span - gapPenalty
     }
 
     // MARK: - Fuzzy Matching

@@ -7,6 +7,25 @@
 
 ---
 
+## [v0.25] - 2025-12-12
+
+### 全量模糊搜索
+
+- **全量 Fuzzy / Fuzzy+ 搜索** - 不再仅限最近 2000 条，覆盖全部历史且保持字符顺序匹配准确性
+  - **实现** - 构建基于字符倒排索引的内存全量索引，先按字符集合求候选集，再做精确 subsequence 模糊匹配与评分排序
+- **索引增量更新** - 新增/置顶/删除时按事件更新索引，避免每次搜索重建
+- **缓存并发安全修复** - recentItemsCache 后台读取前做锁内快照，消除数据竞争
+
+### 修改文件
+- `Scopy/Services/SearchService.swift` - 全量模糊索引、增量更新、缓存快照
+- `Scopy/Services/SQLiteHelpers.swift` - 新增 `parseStoredItemSummary`
+- `Scopy/Services/RealClipboardService.swift` - 数据变更通知 SearchService
+
+### 测试
+- 单元测试: `make test-unit` **51 tests passed** (1 perf skipped)
+
+---
+
 ## [v0.24] - 2025-12-12
 
 ### 代码审查与稳定性修复
