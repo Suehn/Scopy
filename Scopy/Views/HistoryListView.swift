@@ -149,6 +149,9 @@ struct HistoryItemView: View, Equatable {
     @State private var isHovering = false
     @State private var hoverDebounceTask: Task<Void, Never>?
     @State private var hoverPreviewTask: Task<Void, Never>?
+    // v0.24: 延迟隐藏预览，避免 popover 触发 hover false 导致闪烁
+    @State private var hoverExitTask: Task<Void, Never>?
+    @State private var isPopoverHovering = false
     @State private var showPreview = false
     @State private var previewImageData: Data?
     // v0.15: Text preview state
@@ -385,6 +388,9 @@ struct HistoryItemView: View, Equatable {
 
             // 取消之前的防抖任务
             hoverDebounceTask?.cancel()
+            // 取消之前的退出清理任务
+            hoverExitTask?.cancel()
+            hoverExitTask = nil
 
             if hovering {
                 // 静止 150ms 后才更新全局选中状态
@@ -405,18 +411,65 @@ struct HistoryItemView: View, Equatable {
                     startTextPreviewTask()
                 }
             } else {
-                cancelPreviewTask()
-                showPreview = false
-                showTextPreview = false
-                previewImageData = nil    // v0.15.1: Clear image data to prevent memory leak
-                textPreviewContent = nil  // v0.15: Reset text preview content
+                // v0.24: popover 出现/消失时可能短暂触发 hover false，做 120ms 退出防抖
+                hoverExitTask = Task {
+                    try? await Task.sleep(nanoseconds: 120_000_000)
+                    guard !Task.isCancelled else { return }
+                    await MainActor.run {
+                        guard !self.isHovering, !self.isPopoverHovering else { return }
+                        self.cancelPreviewTask()
+                        self.showPreview = false
+                        self.showTextPreview = false
+                        self.previewImageData = nil    // v0.15.1: Clear image data to prevent memory leak
+                        self.textPreviewContent = nil  // v0.15: Reset text preview content
+                    }
+                }
             }
         }
         .popover(isPresented: $showPreview, arrowEdge: .trailing) {
             imagePreviewView
+                .onHover { hovering in
+                    isPopoverHovering = hovering
+                    if hovering {
+                        hoverExitTask?.cancel()
+                        hoverExitTask = nil
+                    } else if !isHovering {
+                        // popover 退出且行未悬停时，触发同样的延迟清理
+                        hoverExitTask?.cancel()
+                        hoverExitTask = Task {
+                            try? await Task.sleep(nanoseconds: 120_000_000)
+                            guard !Task.isCancelled else { return }
+                            await MainActor.run {
+                                guard !self.isHovering, !self.isPopoverHovering else { return }
+                                self.cancelPreviewTask()
+                                self.showPreview = false
+                                self.previewImageData = nil
+                            }
+                        }
+                    }
+                }
         }
         .popover(isPresented: $showTextPreview, arrowEdge: .trailing) {
             textPreviewView
+                .onHover { hovering in
+                    isPopoverHovering = hovering
+                    if hovering {
+                        hoverExitTask?.cancel()
+                        hoverExitTask = nil
+                    } else if !isHovering {
+                        hoverExitTask?.cancel()
+                        hoverExitTask = Task {
+                            try? await Task.sleep(nanoseconds: 120_000_000)
+                            guard !Task.isCancelled else { return }
+                            await MainActor.run {
+                                guard !self.isHovering, !self.isPopoverHovering else { return }
+                                self.cancelPreviewTask()
+                                self.showTextPreview = false
+                                self.textPreviewContent = nil
+                            }
+                        }
+                    }
+                }
         }
         .contextMenu {
             Button("Copy") {
@@ -434,6 +487,8 @@ struct HistoryItemView: View, Equatable {
         .onDisappear {
             hoverDebounceTask?.cancel()
             hoverDebounceTask = nil
+            hoverExitTask?.cancel()
+            hoverExitTask = nil
             cancelPreviewTask()
             // 清理状态，防止内存泄漏
             previewImageData = nil

@@ -7,6 +7,26 @@
 
 ---
 
+## [v0.24] - 2025-12-12
+
+### 代码审查与稳定性修复
+
+- **Hover 预览闪烁修复** - 图片缩略图悬停预览 `.popover` 偶发瞬闪/消失
+  - **修复** - 增加 120ms 退出防抖 + popover hover 保活，避免 tracking area 抖动导致提前关闭
+- **超深度全仓库 Review 文档** - 覆盖 v0.md 规格对齐、性能/稳定性/安全审查与后续行动清单
+  - **新增** - `doc/implemented-doc/v0.24.md`
+
+### 修改文件
+- `Scopy/Views/HistoryListView.swift` - Hover 预览稳定性修复
+- `doc/implemented-doc/v0.24.md` - 超深度 Review 文档
+- `doc/implemented-doc/README.md` - 更新版本索引
+- `doc/implemented-doc/CHANGELOG.md` - 更新变更记录
+
+### 测试
+- 单元测试: `make test-unit` **51 tests passed** (1 perf skipped)
+
+---
+
 ## [v0.23] - 2025-12-11
 
 ### 深度代码审查修复
