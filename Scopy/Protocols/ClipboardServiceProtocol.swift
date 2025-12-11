@@ -71,8 +71,9 @@ struct ClipboardItemDTO: Identifiable, Sendable, Hashable {
     }
 
     /// v0.16.2: 创建带有更新 isPinned 的新实例
+    /// v0.23: 修复 - 使用 let 替代未使用的 var
     func withPinned(_ pinned: Bool) -> ClipboardItemDTO {
-        var copy = ClipboardItemDTO(
+        let copy = ClipboardItemDTO(
             id: id,
             type: type,
             contentHash: contentHash,

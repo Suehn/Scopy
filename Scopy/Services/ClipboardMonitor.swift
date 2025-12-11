@@ -333,7 +333,7 @@ final class ClipboardMonitor {
 
     /// v0.17: 从队列中移除已完成的任务
     /// v0.20: 修复内存泄漏 - 使用 UUID 而非 ObjectIdentifier 跟踪任务
-    /// v0.22: 简化逻辑，重建 processingQueue 只保留 taskIDMap 中的活跃任务
+    /// v0.23: 简化逻辑 - taskIDMap 是唯一数据源，processingQueue 从 taskIDMap 重建
     /// 注意: 此方法在 @MainActor 上下文中执行，使用 lock/defer unlock 模式
     private func removeCompletedTask(id: UUID) {
         queueLock.lock()
@@ -342,8 +342,9 @@ final class ClipboardMonitor {
         // 从 taskIDMap 移除已完成的任务
         taskIDMap.removeValue(forKey: id)
 
-        // 重建 processingQueue：只保留未取消的活跃任务
-        processingQueue = Array(taskIDMap.values).filter { !$0.isCancelled }
+        // 重建 processingQueue：只保留 taskIDMap 中的活跃任务
+        // 这确保两个数据结构始终同步
+        processingQueue = Array(taskIDMap.values)
     }
 
     /// 在后台线程计算哈希

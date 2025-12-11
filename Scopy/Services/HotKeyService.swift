@@ -5,18 +5,24 @@ import Carbon.HIToolbox
 private let logPath = "/tmp/scopy_hotkey.log"
 private let logPathOld = "/tmp/scopy_hotkey.log.old"
 private let maxLogSize = 10 * 1024 * 1024  // 10MB
-private let logLock = NSLock()
+
+/// v0.23: 使用串行队列替代锁，避免文件 I/O 阻塞调用线程
+private let logQueue = DispatchQueue(label: "com.scopy.hotkey.log", qos: .utility)
 
 /// v0.11: 调试日志函数 - 写入文件（带轮转和线程安全）
 /// v0.17.1: 使用 withLock 统一锁策略
+/// v0.23: 改用异步队列，避免文件 I/O 阻塞调用线程
 private func logToFile(_ message: String) {
     let timestamp = ISO8601DateFormatter().string(from: Date())
     let logMessage = "[\(timestamp)] \(message)\n"
 
+    // 同步输出到控制台（快速操作）
+    print(message)
+
     guard let data = logMessage.data(using: .utf8) else { return }
 
-    // 加锁保护并发写入
-    logLock.withLock {
+    // 异步写入文件，不阻塞调用线程
+    logQueue.async {
         // 检查文件大小，必要时轮转
         if let attrs = try? FileManager.default.attributesOfItem(atPath: logPath),
            let size = attrs[.size] as? Int, size > maxLogSize {
@@ -37,8 +43,6 @@ private func logToFile(_ message: String) {
             FileManager.default.createFile(atPath: logPath, contents: data)
         }
     }
-
-    print(message)  // 同时输出到控制台
 }
 
 /// HotKeyService - 全局快捷键服务

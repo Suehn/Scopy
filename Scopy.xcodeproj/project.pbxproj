@@ -22,6 +22,7 @@
 		2E7B84A934E65CCCB3DFB0B8 /* NSLock+Extensions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 84C61F96A731DC4419905C3E /* NSLock+Extensions.swift */; };
 		34825C28F41847C69922DFF6 /* ClipboardServiceProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = D42C3C8A2830B231BCC604B3 /* ClipboardServiceProtocol.swift */; };
 		34DCE58E45DBB5565240E8A3 /* SQLiteHelpers.swift in Sources */ = {isa = PBXBuildFile; fileRef = 030DCC9A06276325D15DE29B /* SQLiteHelpers.swift */; };
+		3A8295171C39A63D594FA1B0 /* ThumbnailGenerationTracker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 86AA1CE5062ADBAB7A268400 /* ThumbnailGenerationTracker.swift */; };
 		3B3174B368AB94ED39C66288 /* IconCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03D97296ACC41AC0ADB05563 /* IconCache.swift */; };
 		3F35F1D85C8C126C9CE04179 /* FloatingPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = DDB1A51BEEACE7981D4FBBCD /* FloatingPanel.swift */; };
 		401BCD4DE9684844FEFE7136 /* HeaderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4059379693354F029F0086D1 /* HeaderView.swift */; };
@@ -83,6 +84,7 @@
 		E02BBEE14B763FC2FBBF7B73 /* HotKeyService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6AC510668FC9C0ADDA64E813 /* HotKeyService.swift */; };
 		E4ABCC84D78DE586451E805D /* IntegrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F236FB16D44AFE08ACBC9C5 /* IntegrationTests.swift */; };
 		E9D1E5B20BF9960FB0E4957C /* StorageService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 644A49B646565DEC262174A8 /* StorageService.swift */; };
+		F053CF9B3D7C4A76CB232AFF /* ThumbnailGenerationTracker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 86AA1CE5062ADBAB7A268400 /* ThumbnailGenerationTracker.swift */; };
 		F3557BE1FA909E49B1824F51 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 80F5648018D6B10F8FB3D046 /* SettingsView.swift */; };
 		F3E22C6E12B926D83DABF422 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 62C29361DE1A42C04AB601DE /* ContentView.swift */; };
 		F57DEF5DFEC07FE9586910EA /* AppStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C8E1D7C3153B156AF59F4FBD /* AppStateTests.swift */; };
@@ -136,6 +138,7 @@
 		84C61F96A731DC4419905C3E /* NSLock+Extensions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "NSLock+Extensions.swift"; sourceTree = "<group>"; };
 		85328477E197D8B958744DD5 /* Scopy.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Scopy.entitlements; sourceTree = "<group>"; };
 		863111D7C15F2B67D831016C /* AppVersion.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppVersion.swift; sourceTree = "<group>"; };
+		86AA1CE5062ADBAB7A268400 /* ThumbnailGenerationTracker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThumbnailGenerationTracker.swift; sourceTree = "<group>"; };
 		8C25A96207E0DA2587E7AFBB /* HistoryListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryListView.swift; sourceTree = "<group>"; };
 		98A81F5BEC4470C8DA1B4864 /* TestDataFactory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TestDataFactory.swift; sourceTree = "<group>"; };
 		9A71D183AE552D5A0722779D /* ScopySize.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScopySize.swift; sourceTree = "<group>"; };
@@ -275,6 +278,7 @@
 				19DC250D8F758BB5ACBC9251 /* SearchService.swift */,
 				030DCC9A06276325D15DE29B /* SQLiteHelpers.swift */,
 				644A49B646565DEC262174A8 /* StorageService.swift */,
+				86AA1CE5062ADBAB7A268400 /* ThumbnailGenerationTracker.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -525,6 +529,7 @@
 				E9D1E5B20BF9960FB0E4957C /* StorageService.swift in Sources */,
 				83B5EE1F7FAB659097712B82 /* StorageServiceTests.swift in Sources */,
 				2E3AC6F5BBFB8EC0EEA7BEFB /* TestDataFactory.swift in Sources */,
+				3A8295171C39A63D594FA1B0 /* ThumbnailGenerationTracker.swift in Sources */,
 				23E413BF3FBB4FFF3B5FF598 /* XCTestExtensions.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -562,6 +567,7 @@
 				A703B8B6CF40A0A1BEC4BC82 /* SearchService.swift in Sources */,
 				F3557BE1FA909E49B1824F51 /* SettingsView.swift in Sources */,
 				937AAD9001A0822EC9B80588 /* StorageService.swift in Sources */,
+				F053CF9B3D7C4A76CB232AFF /* ThumbnailGenerationTracker.swift in Sources */,
 				96769165BC6DF4DAA0507486 /* main.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

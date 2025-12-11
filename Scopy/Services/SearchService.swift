@@ -118,12 +118,13 @@ final class SearchService {
     /// Fuzzy search (v0.md 3.3)
     /// v0.17: 确保所有模糊搜索都不区分大小写
     /// v0.19: 所有模糊搜索都使用真正的模糊匹配（字符顺序匹配）
+    /// v0.23: 移除强制解包，使用 guard let 确保安全
     private func searchFuzzy(request: SearchRequest) async throws -> SearchResult {
-        guard db != nil else { throw SearchError.databaseNotOpen }
+        guard let db = db else { throw SearchError.databaseNotOpen }
 
         // Empty query returns all items
         if request.query.isEmpty {
-            return try await searchAllWithFilters(request: request, db: db!)
+            return try await searchAllWithFilters(request: request, db: db)
         }
 
         // v0.19: 所有模糊搜索都使用缓存 + 真正的模糊匹配
@@ -148,12 +149,13 @@ final class SearchService {
 
     /// v0.19.1: Fuzzy+ 搜索 - 按空格分词，每个词独立模糊匹配
     /// 例如 "周五 匹配" 会匹配同时包含 "周五" 和 "匹配" 的文本
+    /// v0.23: 移除强制解包，使用 guard let 确保安全
     private func searchFuzzyPlus(request: SearchRequest) async throws -> SearchResult {
-        guard db != nil else { throw SearchError.databaseNotOpen }
+        guard let db = db else { throw SearchError.databaseNotOpen }
 
         // Empty query returns all items
         if request.query.isEmpty {
-            return try await searchAllWithFilters(request: request, db: db!)
+            return try await searchAllWithFilters(request: request, db: db)
         }
 
         return try await searchInCache(request: request) { item in

@@ -375,33 +375,21 @@ final class RealClipboardService: ClipboardServiceProtocol {
     }
 
     /// v0.22.1: 后台异步生成缩略图，避免阻塞主线程
-    /// 使用 Set 跟踪正在生成的缩略图，避免重复生成
-    /// 注意：使用 nonisolated(unsafe) 静态属性和锁来跨 actor 边界安全访问
-    /// 并发安全由 thumbnailGenerationLock 保证
-    private nonisolated(unsafe) static var thumbnailGenerationInProgress = Set<String>()
-    private static let thumbnailGenerationLock = NSLock()
-
+    /// v0.23: 使用 actor 替代 nonisolated(unsafe)，确保线程安全
     private func scheduleThumbnailGeneration(for item: StorageService.StoredItem) {
         let contentHash = item.contentHash
         let maxHeight = settings.thumbnailHeight
         let storageRef = storage  // 捕获 storage 引用
 
-        // 检查是否已在生成中
-        let shouldGenerate = Self.thumbnailGenerationLock.withLock {
-            if Self.thumbnailGenerationInProgress.contains(contentHash) {
-                return false
-            }
-            Self.thumbnailGenerationInProgress.insert(contentHash)
-            return true
-        }
-
-        guard shouldGenerate else { return }
-
         // 在后台线程生成缩略图
         Task.detached(priority: .utility) {
+            // 使用 actor 安全地检查和标记生成状态
+            let shouldGenerate = await ThumbnailGenerationTracker.shared.tryMarkInProgress(contentHash)
+            guard shouldGenerate else { return }
+
             defer {
-                Self.thumbnailGenerationLock.withLock {
-                    _ = Self.thumbnailGenerationInProgress.remove(contentHash)
+                Task {
+                    await ThumbnailGenerationTracker.shared.markCompleted(contentHash)
                 }
             }
 

@@ -526,8 +526,13 @@ final class StorageService {
         sqlite3_finalize(stmt)
 
         // Delete files
+        // v0.23: 添加错误日志，便于追踪文件删除失败
         for ref in refs {
-            try? FileManager.default.removeItem(atPath: ref)
+            do {
+                try FileManager.default.removeItem(atPath: ref)
+            } catch {
+                print("⚠️ StorageService: Failed to delete external file during clearAll: \(error.localizedDescription)")
+            }
         }
 
         // Delete from DB
@@ -1015,6 +1020,9 @@ final class StorageService {
     /// 原理：SQLite 默认每条 DELETE 后 fsync，事务内只在 COMMIT 时 fsync 一次
     /// 收益：9000 条删除从 ~4500ms 降到 ~200ms
     /// v0.20: 增强错误处理 - ROLLBACK 失败时尝试恢复数据库连接
+    /// v0.23: 改进恢复逻辑 - 添加 isDatabaseCorrupted 标志，上层可检查
+    private(set) var isDatabaseCorrupted = false
+
     private func deleteItemsBatchInTransaction(ids: [UUID]) throws {
         guard !ids.isEmpty else { return }
 
@@ -1035,6 +1043,7 @@ final class StorageService {
         } catch {
             // v0.17: 回滚事务，记录回滚错误但不改变异常传播
             // v0.20: ROLLBACK 失败时尝试恢复数据库连接
+            // v0.23: 添加状态标志，让上层知道数据库可能损坏
             do {
                 try execute("ROLLBACK")
             } catch let rollbackError {
@@ -1043,10 +1052,12 @@ final class StorageService {
                 do {
                     close()
                     try open()
+                    isDatabaseCorrupted = false
                     print("✅ StorageService: Database connection recovered after ROLLBACK failure")
                 } catch let recoveryError {
                     print("❌ StorageService: Database recovery failed: \(recoveryError)")
-                    // 数据库可能处于不一致状态，记录严重错误
+                    // 标记数据库可能损坏，上层可以检查此标志并采取措施
+                    isDatabaseCorrupted = true
                 }
             }
             throw error

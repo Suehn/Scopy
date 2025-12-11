@@ -7,6 +7,56 @@
 
 ---
 
+## [v0.23] - 2025-12-11
+
+### 深度代码审查修复
+
+基于深度代码审查，修复 13 个稳定性、性能和代码质量问题，涵盖 P0 到 P3 优先级。
+
+**P0 严重问题 (2个)**：
+- **nonisolated(unsafe) 数据竞争** - `thumbnailGenerationInProgress` 使用 `nonisolated(unsafe)` 存在风险
+  - **修复** - 创建 `ThumbnailGenerationTracker` actor，利用 Swift 并发模型确保线程安全
+- **relativeTime 缓存实现问题** - 在锁内创建 `Date()` 对象，违背缓存优化初衷
+  - **修复** - 在锁外获取时间戳，锁内只做比较和更新
+
+**P1 高优先级 (2个)**：
+- **SearchService 强制解包** - `searchFuzzy` 和 `searchFuzzyPlus` 使用 `db!` 强制解包
+  - **修复** - 使用 `guard let db = db else { throw ... }` 模式
+- **ClipboardMonitor 任务队列同步** - `processingQueue` 和 `taskIDMap` 同步逻辑复杂
+  - **修复** - 简化为 taskIDMap 作为唯一数据源，processingQueue 从 taskIDMap 重建
+
+**P2 中优先级 (4个)**：
+- **日志异步写入** - HotKeyService 日志写入在锁内执行文件 I/O，可能阻塞调用线程
+  - **修复** - 使用串行 DispatchQueue 异步写入
+- **数据库恢复状态** - 数据库恢复失败后上层无法感知
+  - **修复** - 添加 `isDatabaseCorrupted` 标志
+- **错误日志** - clearAll 文件删除失败时无日志
+  - **修复** - 添加错误日志记录
+- **loadMore 等待逻辑** - 保留 await 确保调用者获取最新状态
+
+**P3 低优先级 (3个)**：
+- **var/let 问题** - ClipboardServiceProtocol 中 `withPinned` 使用 var
+  - **修复** - 改为 let
+- **try? 错误处理** - 部分错误被静默忽略
+  - **修复** - 添加 do-catch 和日志
+
+### 新增文件
+- `Scopy/Services/ThumbnailGenerationTracker.swift` - 缩略图生成状态跟踪 actor
+
+### 修改文件
+- `Scopy/Services/RealClipboardService.swift` - 使用 actor 替代 nonisolated(unsafe)
+- `Scopy/Views/HistoryListView.swift` - 修复 relativeTime 缓存实现
+- `Scopy/Services/SearchService.swift` - 移除强制解包
+- `Scopy/Services/ClipboardMonitor.swift` - 简化任务队列同步
+- `Scopy/Services/StorageService.swift` - 添加 isDatabaseCorrupted 标志、错误日志
+- `Scopy/Services/HotKeyService.swift` - 日志写入改为异步队列
+- `Scopy/Protocols/ClipboardServiceProtocol.swift` - var 改为 let
+
+### 测试
+- 单元测试: **161/161 passed** (1 skipped)
+
+---
+
 ## [v0.22.1] - 2025-12-11
 
 ### 代码审查修复

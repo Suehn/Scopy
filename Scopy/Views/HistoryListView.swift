@@ -629,23 +629,26 @@ struct HistoryItemView: View, Equatable {
     }()
 
     /// v0.21: 缓存当前时间引用，避免每次渲染创建新 Date
-    /// 使用静态缓存，每 30 秒更新一次（相对时间显示不需要秒级精度）
-    /// v0.22: 添加锁保护，确保线程安全
+    /// v0.23: 修复缓存实现 - 在锁外获取时间戳，锁内只做比较和更新
     private static var cachedNow: Date = Date()
-    private static var cachedNowTimestamp: TimeInterval = 0
+    private static var cachedNowTimestamp: TimeInterval = Date().timeIntervalSince1970
     private static let relativeTimeLock = NSLock()
 
     private var relativeTime: String {
-        // v0.22: 使用锁保护静态缓存的读写
-        return Self.relativeTimeLock.withLock {
+        // v0.23: 在锁外获取当前时间戳，避免在锁内创建 Date 对象
+        let currentTimestamp = Date().timeIntervalSince1970
+
+        // 使用锁保护静态缓存的读写
+        let now = Self.relativeTimeLock.withLock { () -> Date in
             // 每 30 秒更新一次 cachedNow
-            let currentTimestamp = Date().timeIntervalSince1970
             if currentTimestamp - Self.cachedNowTimestamp > 30 {
-                Self.cachedNow = Date()
+                Self.cachedNow = Date(timeIntervalSince1970: currentTimestamp)
                 Self.cachedNowTimestamp = currentTimestamp
             }
-            return Self.relativeFormatter.localizedString(for: item.lastUsedAt, relativeTo: Self.cachedNow)
+            return Self.cachedNow
         }
+
+        return Self.relativeFormatter.localizedString(for: item.lastUsedAt, relativeTo: now)
     }
 
     /// v0.12: 使用全局缓存获取应用名称，避免重复调用 NSWorkspace
