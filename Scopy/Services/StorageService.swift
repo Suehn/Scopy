@@ -143,6 +143,9 @@ final class StorageService {
             try createTables()
             try createIndexes()
             try setupFTS()
+
+            // v0.20: 验证 schema 完整性，确保所有表都正确创建
+            try verifySchema()
         } catch {
             // PRAGMA 或 schema 设置失败，清理连接
             // v0.17: 确保重置 self.db，避免指向已关闭的连接
@@ -169,8 +172,42 @@ final class StorageService {
         sqlite3_wal_checkpoint_v2(db, nil, SQLITE_CHECKPOINT_PASSIVE, nil, nil)
     }
 
+    /// v0.20: 验证数据库 schema 完整性
+    /// 确保主表和 FTS 表都存在，防止半打开状态导致后续操作失败
+    private func verifySchema() throws {
+        guard let db = db else {
+            throw StorageError.databaseNotOpen
+        }
+
+        // 检查主表是否存在
+        let mainTableSQL = "SELECT name FROM sqlite_master WHERE type='table' AND name='clipboard_items'"
+        var stmt: OpaquePointer?
+        if sqlite3_prepare_v2(db, mainTableSQL, -1, &stmt, nil) == SQLITE_OK {
+            defer { sqlite3_finalize(stmt) }
+            if sqlite3_step(stmt) != SQLITE_ROW {
+                throw StorageError.migrationFailed("Main table 'clipboard_items' not found")
+            }
+        } else {
+            throw StorageError.queryFailed("Failed to verify main table")
+        }
+
+        // 检查 FTS 表是否存在
+        let ftsTableSQL = "SELECT name FROM sqlite_master WHERE type='table' AND name='clipboard_fts'"
+        if sqlite3_prepare_v2(db, ftsTableSQL, -1, &stmt, nil) == SQLITE_OK {
+            defer { sqlite3_finalize(stmt) }
+            if sqlite3_step(stmt) != SQLITE_ROW {
+                throw StorageError.migrationFailed("FTS table 'clipboard_fts' not found")
+            }
+        } else {
+            throw StorageError.queryFailed("Failed to verify FTS table")
+        }
+    }
+
+    /// v0.20: 关闭前执行 WAL 检查点，确保数据完整写入
     func close() {
         if db != nil {
+            // 执行 WAL 检查点，将 WAL 日志合并到主数据库文件
+            performWALCheckpoint()
             sqlite3_close(db)
             db = nil
         }
@@ -1052,26 +1089,35 @@ final class StorageService {
 
     /// v0.12: 并发删除文件，提升清理性能（后台执行，避免阻塞主线程）
     /// v0.17: 添加错误日志记录，便于追踪删除失败
+    /// v0.20: 修复竞态条件 - 检查文件存在性，忽略"文件不存在"错误，不阻塞等待
     private func deleteFilesInParallel(_ files: [String]) {
         guard !files.isEmpty else { return }
+
+        // 去重，避免并发删除同一文件
+        let uniqueFiles = Array(Set(files))
+
         DispatchQueue.global(qos: .utility).async {
-            let group = DispatchGroup()
             let queue = DispatchQueue(label: "com.scopy.cleanup", attributes: .concurrent)
 
-            for file in files {
-                group.enter()
+            for file in uniqueFiles {
                 queue.async {
-                    defer { group.leave() }
+                    // 先检查文件是否存在，避免不必要的错误
+                    guard FileManager.default.fileExists(atPath: file) else { return }
+
                     do {
                         try FileManager.default.removeItem(atPath: file)
-                    } catch {
-                        // v0.17: 记录删除失败，便于追踪存储泄漏
+                    } catch let error as NSError {
+                        // 忽略"文件不存在"错误（可能被其他线程删除）
+                        if error.domain == NSCocoaErrorDomain && error.code == NSFileNoSuchFileError {
+                            return
+                        }
+                        // v0.17: 记录其他删除失败，便于追踪存储泄漏
                         print("⚠️ StorageService: Failed to delete file '\(file)': \(error.localizedDescription)")
                     }
                 }
             }
-
-            group.wait()
+            // v0.20: 不再使用 group.wait() 阻塞，让删除操作异步完成
+            // 文件删除是尽力而为，不需要等待完成
         }
     }
 

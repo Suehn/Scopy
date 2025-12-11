@@ -480,7 +480,8 @@ struct StorageSettingsTab: View {
 struct AboutSettingsPage: View {
     @State private var performanceSummary: PerformanceSummary?
     @State private var memoryUsageMB: Double = 0
-    @State private var autoRefreshTimer: Timer?
+    /// v0.20: 使用 Task 替代 Timer，自动响应取消，避免内存泄漏
+    @State private var autoRefreshTask: Task<Void, Never>?
 
     var body: some View {
         VStack(spacing: ScopySpacing.xl) {
@@ -619,16 +620,21 @@ struct AboutSettingsPage: View {
         }
     }
 
+    /// v0.20: 使用 Task 替代 Timer，自动响应取消，避免内存泄漏
     private func startAutoRefresh() {
-        // 30 分钟自动刷新
-        autoRefreshTimer = Timer.scheduledTimer(withTimeInterval: 30 * 60, repeats: true) { _ in
-            refreshPerformance()
+        autoRefreshTask = Task {
+            while !Task.isCancelled {
+                // 30 分钟自动刷新
+                try? await Task.sleep(nanoseconds: 30 * 60 * 1_000_000_000)
+                guard !Task.isCancelled else { break }
+                refreshPerformance()
+            }
         }
     }
 
     private func stopAutoRefresh() {
-        autoRefreshTimer?.invalidate()
-        autoRefreshTimer = nil
+        autoRefreshTask?.cancel()
+        autoRefreshTask = nil
     }
 
     /// 格式化毫秒数

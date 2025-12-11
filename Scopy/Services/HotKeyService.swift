@@ -59,6 +59,9 @@ final class HotKeyService {
     /// v0.10.7: 保护 handlers 字典的锁（主线程 + Carbon 事件线程并发访问）
     private static let handlersLock = NSLock()
 
+    /// v0.20: 保护 eventHandlerRef 的锁（防止多线程竞态）
+    private static let eventHandlerLock = NSLock()
+
     /// 事件处理器引用
     private static var eventHandlerRef: EventHandlerRef?
 
@@ -114,30 +117,33 @@ final class HotKeyService {
     // MARK: - Private: Event Handler Installation
 
     /// 安装事件处理器（只安装一次）
+    /// v0.20: 使用 eventHandlerLock 保护 eventHandlerRef 访问
     private static func installEventHandlerIfNeeded() {
-        guard eventHandlerRef == nil else {
-            logToFile("⚠️ Event handler already installed")
-            return
-        }
+        eventHandlerLock.withLock {
+            guard eventHandlerRef == nil else {
+                logToFile("⚠️ Event handler already installed")
+                return
+            }
 
-        // 只监听按下事件，避免按下/松开各触发一次导致“按住才显示”
-        var eventTypes = [
-            EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
-        ]
+            // 只监听按下事件，避免按下/松开各触发一次导致"按住才显示"
+            var eventTypes = [
+                EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
+            ]
 
-        let status = InstallEventHandler(
-            GetApplicationEventTarget(),
-            carbonEventCallback,
-            eventTypes.count,
-            &eventTypes,
-            nil,
-            &eventHandlerRef
-        )
+            let status = InstallEventHandler(
+                GetApplicationEventTarget(),
+                carbonEventCallback,
+                eventTypes.count,
+                &eventTypes,
+                nil,
+                &eventHandlerRef
+            )
 
-        if status == noErr {
-            logToFile("✅ Carbon event handler installed")
-        } else {
-            logToFile("❌ Failed to install event handler: \(status)")
+            if status == noErr {
+                logToFile("✅ Carbon event handler installed")
+            } else {
+                logToFile("❌ Failed to install event handler: \(status)")
+            }
         }
     }
 
@@ -299,7 +305,15 @@ final class HotKeyService {
     // MARK: - Testing Support
 
     #if DEBUG
-    private static var testingMode = false
+    /// v0.20: 保护 testingMode 的锁
+    private static let testingModeLock = NSLock()
+    private static var _testingMode = false
+
+    /// v0.20: 线程安全的 testingMode 访问
+    private static var testingMode: Bool {
+        get { testingModeLock.withLock { _testingMode } }
+        set { testingModeLock.withLock { _testingMode = newValue } }
+    }
 
     static func enableTestingMode() {
         testingMode = true

@@ -7,6 +7,36 @@
 
 ---
 
+## [v0.21] - 2025-12-11
+
+### 性能优化
+
+**视图渲染性能优化**：解决 1.5k 历史记录时的 UI 卡顿问题
+
+**预计算 metadata (P0)**：
+- **问题** - `metadataText` 每次渲染执行 4 次 O(n) 字符串操作
+- **修复** - 在 `ClipboardItemDTO` 初始化时预计算 `cachedTitle` 和 `cachedMetadata`
+- **效果** - metadata 计算从 O(n×m) 降到 O(1)
+
+**ForEach 数据源优化 (P0)**：
+- **问题** - `pinnedItems`/`unpinnedItems` 被访问 5 次，触发 @Observable 重复追踪
+- **修复** - 使用局部变量 `let pinned = appState.pinnedItems` 缓存结果
+- **效果** - @Observable 追踪开销减少 80%
+
+**时间格式化缓存 (P1)**：
+- **问题** - `relativeTime` 每次渲染创建新 Date 对象
+- **修复** - 静态缓存 `cachedNow`，每 30 秒更新一次
+- **效果** - Date 对象创建减少 97%
+
+### 修改文件
+- `Scopy/Protocols/ClipboardServiceProtocol.swift` - ClipboardItemDTO 添加预计算字段
+- `Scopy/Views/HistoryListView.swift` - ForEach 优化、metadataText 使用预计算值、relativeTime 缓存
+
+### 测试
+- 单元测试: **161/161 passed** (1 skipped)
+
+---
+
 ## [v0.19.1] - 2025-12-04
 
 ### 新功能

@@ -49,6 +49,10 @@ final class SearchService {
     /// v0.10.7: 保护缓存刷新的锁（防止并发刷新竞态）
     private let cacheRefreshLock = NSLock()
 
+    /// v0.20: 缓存版本号，用于检测缓存是否在搜索过程中被失效
+    /// 每次 invalidateCache() 时递增，搜索开始和结束时检查版本号一致性
+    private var cacheVersion: UInt64 = 0
+
     /// v0.10.8: FTS5 COUNT 缓存（避免重复计算总数）
     private var cachedSearchTotal: (query: String, mode: SearchMode, appFilter: String?, typeFilter: ClipboardItemType?, total: Int, timestamp: Date)?
     private let searchTotalCacheTTL: TimeInterval = 5.0  // 5秒有效期
@@ -371,13 +375,19 @@ final class SearchService {
     }
 
     /// v0.12: 完整缓存失效，同时清除搜索总数缓存
-    /// v0.20: 添加锁保护，防止与 refreshCacheIfNeeded 竞态
+    /// v0.20: 添加版本号递增，确保正在进行的搜索能检测到缓存失效
     func invalidateCache() {
         cacheRefreshLock.withLock {
+            cacheVersion += 1  // v0.20: 递增版本号
             recentItemsCache = []
             cacheTimestamp = .distantPast
             cachedSearchTotal = nil
         }
+    }
+
+    /// v0.20: 获取当前缓存版本号（线程安全）
+    private func getCurrentCacheVersion() -> UInt64 {
+        cacheRefreshLock.withLock { cacheVersion }
     }
 
     // MARK: - Fuzzy Matching

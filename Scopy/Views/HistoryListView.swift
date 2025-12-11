@@ -29,12 +29,17 @@ struct HistoryListView: View {
                             .listRowSeparator(.hidden)
                     }
 
+                    // v0.21: 使用局部变量缓存计算属性结果，避免多次访问触发 @Observable 追踪
+                    // 这样 SwiftUI 只追踪一次 pinnedItems/unpinnedItems 访问
+                    let pinned = appState.pinnedItems
+                    let unpinned = appState.unpinnedItems
+
                     // v0.18: 不使用 Section header，改为普通行以避免黑色背景
                     // Pinned Section Header
-                    if !appState.pinnedItems.isEmpty && appState.searchQuery.isEmpty {
+                    if !pinned.isEmpty && appState.searchQuery.isEmpty {
                         SectionHeader(
                             title: "Pinned",
-                            count: appState.pinnedItems.count,
+                            count: pinned.count,
                             isCollapsible: true,
                             isCollapsed: appState.isPinnedCollapsed,
                             onToggle: { appState.isPinnedCollapsed.toggle() }
@@ -45,7 +50,7 @@ struct HistoryListView: View {
 
                         // Pinned Items
                         if !appState.isPinnedCollapsed {
-                            ForEach(appState.pinnedItems) { item in
+                            ForEach(pinned) { item in
                                 historyRow(item: item)
                             }
                         }
@@ -54,7 +59,7 @@ struct HistoryListView: View {
                     // Recent Section Header
                     SectionHeader(
                         title: "Recent",
-                        count: appState.unpinnedItems.count,
+                        count: unpinned.count,
                         performanceSummary: appState.performanceSummary
                     )
                     .listRowInsets(EdgeInsets())
@@ -62,7 +67,7 @@ struct HistoryListView: View {
                     .listRowSeparator(.hidden)
 
                     // Recent Items
-                    ForEach(appState.unpinnedItems) { item in
+                    ForEach(unpinned) { item in
                         historyRow(item: item)
                     }
 
@@ -247,62 +252,9 @@ struct HistoryItemView: View, Equatable {
         settings.showImageThumbnails
     }
 
-    /// v0.15: Redesigned metadata display
-    /// - Text: {字数}字 · {行数}行 · ...{末4字}
-    /// - Image: {宽}×{高} · {大小}
-    /// - File: {文件数}个文件 · {大小}
+    /// v0.21: 使用预计算的 metadata，避免视图渲染时 O(n) 字符串操作
     private var metadataText: String {
-        switch item.type {
-        case .text, .rtf, .html:
-            return textMetadata
-        case .image:
-            return imageMetadata
-        case .file:
-            return fileMetadata
-        default:
-            return formatBytes(item.sizeBytes)
-        }
-    }
-
-    private var textMetadata: String {
-        let text = item.plainText
-        let charCount = text.count
-        let lineCount = text.components(separatedBy: .newlines).count
-        // v0.15.1: 显示最后15个字符（去除换行符，替换为空格）
-        let cleanText = text.replacingOccurrences(of: "\n", with: " ")
-                            .replacingOccurrences(of: "\r", with: " ")
-        let lastChars = cleanText.count <= 15 ? cleanText : "...\(String(cleanText.suffix(15)))"
-        return "\(charCount)字 · \(lineCount)行 · \(lastChars)"
-    }
-
-    private var imageMetadata: String {
-        let size = formatBytes(item.sizeBytes)
-        if let resolution = parseImageResolution(from: item.plainText) {
-            return "\(resolution) · \(size)"
-        }
-        return size
-    }
-
-    private var fileMetadata: String {
-        let paths = item.plainText.components(separatedBy: "\n").filter { !$0.isEmpty }
-        let fileCount = paths.count
-        let size = formatBytes(item.sizeBytes)
-        if fileCount == 1 {
-            return size
-        }
-        return "\(fileCount)个文件 · \(size)"
-    }
-
-    /// Parse image resolution from plainText (format: "[Image: WxH, X KB]")
-    private func parseImageResolution(from text: String) -> String? {
-        let pattern = #"\[Image:\s*(\d+)x(\d+)"#
-        guard let regex = try? NSRegularExpression(pattern: pattern),
-              let match = regex.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)),
-              let widthRange = Range(match.range(at: 1), in: text),
-              let heightRange = Range(match.range(at: 2), in: text) else {
-            return nil
-        }
-        return "\(text[widthRange])×\(text[heightRange])"
+        item.metadata
     }
 
     /// v0.15: Simplified content view - removed app icon, using new metadata format
@@ -670,8 +622,19 @@ struct HistoryItemView: View, Equatable {
         return formatter
     }()
 
+    /// v0.21: 缓存当前时间引用，避免每次渲染创建新 Date
+    /// 使用静态缓存，每 30 秒更新一次（相对时间显示不需要秒级精度）
+    private static var cachedNow: Date = Date()
+    private static var cachedNowTimestamp: TimeInterval = 0
+
     private var relativeTime: String {
-        Self.relativeFormatter.localizedString(for: item.lastUsedAt, relativeTo: Date())
+        // 每 30 秒更新一次 cachedNow
+        let currentTimestamp = Date().timeIntervalSince1970
+        if currentTimestamp - Self.cachedNowTimestamp > 30 {
+            Self.cachedNow = Date()
+            Self.cachedNowTimestamp = currentTimestamp
+        }
+        return Self.relativeFormatter.localizedString(for: item.lastUsedAt, relativeTo: Self.cachedNow)
     }
 
     /// v0.12: 使用全局缓存获取应用名称，避免重复调用 NSWorkspace

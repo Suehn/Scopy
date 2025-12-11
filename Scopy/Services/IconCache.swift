@@ -108,35 +108,35 @@ final class IconCacheSync {
     private init() {}
 
     /// 同步获取图标（用于 View 计算属性）
+    /// v0.20: 使用 withLock 统一锁策略
     func getIcon(bundleID: String) -> NSImage? {
-        lock.lock()
-        defer { lock.unlock() }
-
-        if let icon = cache[bundleID] {
-            // 更新 LRU
-            if let index = accessOrder.firstIndex(of: bundleID) {
-                accessOrder.remove(at: index)
+        lock.withLock {
+            if let icon = cache[bundleID] {
+                // 更新 LRU
+                if let index = accessOrder.firstIndex(of: bundleID) {
+                    accessOrder.remove(at: index)
+                }
+                accessOrder.append(bundleID)
+                return icon
             }
-            accessOrder.append(bundleID)
-            return icon
+            return nil
         }
-        return nil
     }
 
     /// 同步设置图标（预加载时调用）
+    /// v0.20: 使用 withLock 统一锁策略
     func setIcon(_ icon: NSImage, for bundleID: String) {
-        lock.lock()
-        defer { lock.unlock() }
+        lock.withLock {
+            // LRU 清理
+            if cache.count >= maxSize, let oldest = accessOrder.first {
+                cache.removeValue(forKey: oldest)
+                accessOrder.removeFirst()
+            }
 
-        // LRU 清理
-        if cache.count >= maxSize, let oldest = accessOrder.first {
-            cache.removeValue(forKey: oldest)
-            accessOrder.removeFirst()
-        }
-
-        cache[bundleID] = icon
-        if !accessOrder.contains(bundleID) {
-            accessOrder.append(bundleID)
+            cache[bundleID] = icon
+            if !accessOrder.contains(bundleID) {
+                accessOrder.append(bundleID)
+            }
         }
     }
 
@@ -180,19 +180,21 @@ final class IconCacheSync {
     }
 
     /// 预加载图标（后台线程调用）
+    /// v0.20: 修复死锁风险 - 使用 withLock 确保锁正确释放，NSWorkspace 调用在锁外执行
     func preloadIcon(bundleID: String) {
-        // 检查是否已缓存
-        lock.lock()
-        let exists = cache[bundleID] != nil
-        lock.unlock()
+        // 1. 检查是否已缓存（在锁内）
+        let exists = lock.withLock {
+            cache[bundleID] != nil
+        }
 
         guard !exists else { return }
 
-        // 获取图标（可能阻塞，应在后台线程调用）
+        // 2. 获取图标（在锁外，避免死锁）
+        // NSWorkspace 调用可能触发系统回调，不能在锁内执行
         guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) else { return }
         let icon = NSWorkspace.shared.icon(forFile: url.path)
 
-        // 写入缓存
+        // 3. 写入缓存（在锁内）
         setIcon(icon, for: bundleID)
     }
 }

@@ -464,7 +464,9 @@ final class AppState {
             }
         }
 
-        await loadMoreTask?.value
+        // v0.20: 等待任务完成，但使用 _ = 忽略返回值
+        // 这是安全的，因为 Task 内部的所有 await 操作都会正确让出控制权
+        _ = await loadMoreTask?.value
     }
 
     /// 搜索（带防抖）- 符合 v0.md 的 150-200ms 防抖设计

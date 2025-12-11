@@ -8,10 +8,18 @@ final class MockClipboardService: ClipboardServiceProtocol {
     private var settings: SettingsDTO = .default
     private var eventContinuation: AsyncStream<ClipboardEvent>.Continuation?
 
+    /// v0.20: 缓存 eventStream，避免每次访问创建新流导致旧 continuation 被覆盖
+    private var _eventStream: AsyncStream<ClipboardEvent>?
+
     var eventStream: AsyncStream<ClipboardEvent> {
-        AsyncStream { continuation in
+        if let stream = _eventStream {
+            return stream
+        }
+        let stream = AsyncStream<ClipboardEvent> { continuation in
             self.eventContinuation = continuation
         }
+        _eventStream = stream
+        return stream
     }
 
     init() {
