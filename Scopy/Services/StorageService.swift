@@ -72,6 +72,9 @@ final class StorageService {
     private var cachedExternalSize: (size: Int, timestamp: Date)?
     private let externalSizeCacheTTL: TimeInterval = 180  // 延长缓存，降低频繁遍历
 
+    /// v0.22: 保护 cachedExternalSize 的锁，防止后台线程和主线程之间的数据竞争
+    private let externalSizeCacheLock = NSLock()
+
     /// 暴露数据库连接给 SearchService 使用
     var database: OpaquePointer? { db }
 
@@ -84,15 +87,29 @@ final class StorageService {
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
         let scopyDir = appSupport.appendingPathComponent("Scopy", isDirectory: true)
 
-        // Create directories if needed
-        try? FileManager.default.createDirectory(at: scopyDir, withIntermediateDirectories: true)
+        // v0.22: 改进目录创建错误处理 - 记录错误但不阻止初始化
+        // 目录创建失败通常是权限问题，后续操作会有更具体的错误
+        do {
+            try FileManager.default.createDirectory(at: scopyDir, withIntermediateDirectories: true)
+        } catch {
+            print("⚠️ StorageService: Failed to create app directory: \(error.localizedDescription)")
+        }
 
         self.dbPath = databasePath ?? scopyDir.appendingPathComponent("clipboard.db").path
         self.externalStoragePath = scopyDir.appendingPathComponent("content", isDirectory: true).path
         self.thumbnailCachePath = scopyDir.appendingPathComponent("thumbnails", isDirectory: true).path
 
-        try? FileManager.default.createDirectory(atPath: externalStoragePath, withIntermediateDirectories: true)
-        try? FileManager.default.createDirectory(atPath: thumbnailCachePath, withIntermediateDirectories: true)
+        do {
+            try FileManager.default.createDirectory(atPath: externalStoragePath, withIntermediateDirectories: true)
+        } catch {
+            print("⚠️ StorageService: Failed to create external storage directory: \(error.localizedDescription)")
+        }
+
+        do {
+            try FileManager.default.createDirectory(atPath: thumbnailCachePath, withIntermediateDirectories: true)
+        } catch {
+            print("⚠️ StorageService: Failed to create thumbnail cache directory: \(error.localizedDescription)")
+        }
     }
 
     deinit {
@@ -571,16 +588,19 @@ final class StorageService {
     }
 
     /// v0.10.8: 使用缓存避免重复遍历文件系统
+    /// v0.22: 使用锁保护缓存访问，防止数据竞争
     func getExternalStorageSize() throws -> Int {
-        // 检查缓存是否有效
-        if let cached = cachedExternalSize,
+        // 检查缓存是否有效（加锁读取）
+        if let cached = externalSizeCacheLock.withLock({ cachedExternalSize }),
            Date().timeIntervalSince(cached.timestamp) < externalSizeCacheTTL {
             return cached.size
         }
 
         // 计算实际大小
         let size = try calculateExternalStorageSize()
-        cachedExternalSize = (size, Date())
+        externalSizeCacheLock.withLock {
+            cachedExternalSize = (size, Date())
+        }
         return size
     }
 
@@ -611,8 +631,11 @@ final class StorageService {
     }
 
     /// v0.10.8: 使外部存储大小缓存失效
+    /// v0.22: 使用锁保护缓存访问，防止数据竞争
     private func invalidateExternalSizeCache() {
-        cachedExternalSize = nil
+        externalSizeCacheLock.withLock {
+            cachedExternalSize = nil
+        }
     }
 
     /// 获取数据库文件的实际磁盘大小（包含 WAL 和 SHM 文件）
@@ -1220,14 +1243,32 @@ final class StorageService {
         return true
     }
 
+    /// v0.22: 外部文件加载最大大小限制 (100MB)
+    /// 防止恶意或损坏的文件导致内存耗尽
+    private static let maxExternalFileSize: Int = 100 * 1024 * 1024
+
     func loadExternalData(path: String) throws -> Data {
         // v0.10.7: 验证路径安全性
         guard validateStorageRef(path) else {
             throw StorageError.fileOperationFailed("Invalid storage reference: potential path traversal")
         }
 
+        // v0.22: 检查文件大小，防止加载过大文件导致内存耗尽
+        let url = URL(fileURLWithPath: path)
         do {
-            return try Data(contentsOf: URL(fileURLWithPath: path))
+            let attrs = try FileManager.default.attributesOfItem(atPath: path)
+            if let fileSize = attrs[.size] as? Int, fileSize > Self.maxExternalFileSize {
+                throw StorageError.fileOperationFailed("File too large: \(fileSize) bytes (max: \(Self.maxExternalFileSize))")
+            }
+        } catch let error as StorageError {
+            throw error
+        } catch {
+            // 文件属性获取失败，继续尝试读取（可能是权限问题）
+            print("⚠️ StorageService: Failed to get file attributes: \(error.localizedDescription)")
+        }
+
+        do {
+            return try Data(contentsOf: url)
         } catch {
             throw StorageError.fileOperationFailed("Failed to read external file: \(error)")
         }
@@ -1310,11 +1351,27 @@ final class StorageService {
     }
 
     /// 获取原图数据（用于预览）
+    /// v0.22: 修复图片数据丢失问题 - 当 rawData 为 nil 时从数据库重新加载
+    /// 这是因为 SearchService 缓存中的 rawData 被设为 nil（v0.19 内存优化）
     func getOriginalImageData(for item: StoredItem) -> Data? {
+        // 1. 优先使用外部存储（大图片 >100KB）
         if let storageRef = item.storageRef {
             return try? loadExternalData(path: storageRef)
         }
-        return item.rawData
+
+        // 2. 使用内联数据（小图片）
+        if let rawData = item.rawData {
+            return rawData
+        }
+
+        // 3. 从数据库重新加载（缓存中 rawData 为 nil 的情况）
+        // 这是 v0.19 内存优化导致的问题：缓存中的 rawData 被设为 nil
+        if let freshItem = try? findByID(item.id), let rawData = freshItem.rawData {
+            return rawData
+        }
+
+        print("⚠️ StorageService: Failed to get original image data for item \(item.id)")
+        return nil
     }
 
     /// 清空缩略图缓存（设置变更时调用）

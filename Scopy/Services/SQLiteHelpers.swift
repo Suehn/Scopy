@@ -11,25 +11,33 @@ let SQLITE_TRANSIENT = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
 
 // MARK: - StoredItem Parsing
 
+/// v0.22: 安全地从 SQLite 列获取字符串，显式检查 NULL 指针
+/// sqlite3_column_text 可能返回 NULL，直接传给 String(cString:) 会崩溃
+private func safeColumnText(_ stmt: OpaquePointer, _ column: Int32) -> String? {
+    guard let ptr = sqlite3_column_text(stmt, column) else { return nil }
+    return String(cString: ptr)
+}
+
 /// 从 SQLite statement 解析 StoredItem
 /// 用于 StorageService 和 SearchService 共享
+/// v0.22: 使用 safeColumnText 防止 NULL 指针崩溃
 func parseStoredItem(from stmt: OpaquePointer) -> StorageService.StoredItem? {
-    guard let idStr = sqlite3_column_text(stmt, 0).map({ String(cString: $0) }),
+    guard let idStr = safeColumnText(stmt, 0),
           let id = UUID(uuidString: idStr),
-          let typeStr = sqlite3_column_text(stmt, 1).map({ String(cString: $0) }),
+          let typeStr = safeColumnText(stmt, 1),
           let type = ClipboardItemType(rawValue: typeStr),
-          let hashStr = sqlite3_column_text(stmt, 2).map({ String(cString: $0) }) else {
+          let hashStr = safeColumnText(stmt, 2) else {
         return nil
     }
 
-    let plainText = sqlite3_column_text(stmt, 3).map { String(cString: $0) } ?? ""
-    let appBundleID = sqlite3_column_text(stmt, 4).map { String(cString: $0) }
+    let plainText = safeColumnText(stmt, 3) ?? ""
+    let appBundleID = safeColumnText(stmt, 4)
     let createdAt = Date(timeIntervalSince1970: sqlite3_column_double(stmt, 5))
     let lastUsedAt = Date(timeIntervalSince1970: sqlite3_column_double(stmt, 6))
     let useCount = Int(sqlite3_column_int(stmt, 7))
     let isPinned = sqlite3_column_int(stmt, 8) != 0
     let sizeBytes = Int(sqlite3_column_int(stmt, 9))
-    let storageRef = sqlite3_column_text(stmt, 10).map { String(cString: $0) }
+    let storageRef = safeColumnText(stmt, 10)
 
     // Read inline raw_data (column 11)
     var rawData: Data? = nil

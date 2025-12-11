@@ -530,8 +530,11 @@ struct HistoryItemView: View, Equatable {
     // v0.10.3: 使用 Task 替代 Timer，自动取消防止泄漏
 
     /// v0.12: 完善取消检查，获取数据后也检查取消状态
+    /// v0.22: 确保在创建新任务前取消旧任务，防止快速悬停时任务累积导致内存泄漏
     private func startPreviewTask() {
-        cancelPreviewTask()
+        // 先取消旧任务，防止多个任务同时运行
+        hoverPreviewTask?.cancel()
+        hoverPreviewTask = nil
 
         hoverPreviewTask = Task {
             // 先获取图片数据
@@ -565,8 +568,11 @@ struct HistoryItemView: View, Equatable {
     // MARK: - Text Preview (v0.15)
 
     /// v0.15.1: Start text preview task - shows first 100 + ... + last 100 chars
+    /// v0.22: 确保在创建新任务前取消旧任务，防止快速悬停时任务累积导致内存泄漏
     private func startTextPreviewTask() {
+        // 先取消旧任务，防止多个任务同时运行
         hoverPreviewTask?.cancel()
+        hoverPreviewTask = nil
 
         // Generate preview content synchronously FIRST
         let text = item.plainText
@@ -624,17 +630,22 @@ struct HistoryItemView: View, Equatable {
 
     /// v0.21: 缓存当前时间引用，避免每次渲染创建新 Date
     /// 使用静态缓存，每 30 秒更新一次（相对时间显示不需要秒级精度）
+    /// v0.22: 添加锁保护，确保线程安全
     private static var cachedNow: Date = Date()
     private static var cachedNowTimestamp: TimeInterval = 0
+    private static let relativeTimeLock = NSLock()
 
     private var relativeTime: String {
-        // 每 30 秒更新一次 cachedNow
-        let currentTimestamp = Date().timeIntervalSince1970
-        if currentTimestamp - Self.cachedNowTimestamp > 30 {
-            Self.cachedNow = Date()
-            Self.cachedNowTimestamp = currentTimestamp
+        // v0.22: 使用锁保护静态缓存的读写
+        return Self.relativeTimeLock.withLock {
+            // 每 30 秒更新一次 cachedNow
+            let currentTimestamp = Date().timeIntervalSince1970
+            if currentTimestamp - Self.cachedNowTimestamp > 30 {
+                Self.cachedNow = Date()
+                Self.cachedNowTimestamp = currentTimestamp
+            }
+            return Self.relativeFormatter.localizedString(for: item.lastUsedAt, relativeTo: Self.cachedNow)
         }
-        return Self.relativeFormatter.localizedString(for: item.lastUsedAt, relativeTo: Self.cachedNow)
     }
 
     /// v0.12: 使用全局缓存获取应用名称，避免重复调用 NSWorkspace

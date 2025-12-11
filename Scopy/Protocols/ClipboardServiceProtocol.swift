@@ -179,11 +179,14 @@ struct ClipboardItemDTO: Identifiable, Sendable, Hashable {
 }
 
 /// 搜索请求 - 对应 v0.md 中的 SearchRequest
+/// v0.22: 添加 typeFilters 支持多类型过滤（如 Rich Text = rtf + html）
 struct SearchRequest: Sendable {
     let query: String
     let mode: SearchMode
     let appFilter: String?
     let typeFilter: ClipboardItemType?
+    /// v0.22: 多类型过滤，优先于 typeFilter
+    let typeFilters: Set<ClipboardItemType>?
     let limit: Int
     let offset: Int
 
@@ -192,6 +195,7 @@ struct SearchRequest: Sendable {
         mode: SearchMode = SettingsDTO.default.defaultSearchMode,
         appFilter: String? = nil,
         typeFilter: ClipboardItemType? = nil,
+        typeFilters: Set<ClipboardItemType>? = nil,
         limit: Int = 50,
         offset: Int = 0
     ) {
@@ -199,6 +203,7 @@ struct SearchRequest: Sendable {
         self.mode = mode
         self.appFilter = appFilter
         self.typeFilter = typeFilter
+        self.typeFilters = typeFilters
         self.limit = limit
         self.offset = offset
     }

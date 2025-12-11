@@ -7,6 +7,37 @@
 
 ---
 
+## [v0.22.1] - 2025-12-11
+
+### 代码审查修复
+
+基于深度代码审查，修复 3 个稳定性和性能问题。
+
+**P0 - HotKeyService 嵌套锁死锁风险**：
+- **问题** - `registerHandlerOnly` 在 `handlersLock` 内调用 `getNextHotKeyID()`，后者使用 `nextHotKeyIDLock`，形成嵌套锁
+- **修复** - 将 `getNextHotKeyID()` 调用移到 `handlersLock` 外部
+- **效果** - 消除死锁风险
+
+**P1 - ClipboardMonitor deinit 缺少锁保护**：
+- **问题** - deinit 中直接设置 `isContentStreamFinished` 而没有使用 `contentStreamLock`
+- **修复** - 在 deinit 中使用锁保护
+- **效果** - 消除与 `checkClipboard()` 的竞态条件
+
+**P1 - toDTO 同步生成缩略图阻塞主线程**：
+- **问题** - `toDTO()` 在主线程同步调用 `generateThumbnail()`，大量图片时阻塞 UI
+- **修复** - 缩略图生成改为后台异步，使用 `Set<String>` 跟踪避免重复生成
+- **效果** - 主线程不再阻塞
+
+### 修改文件
+- `Scopy/Services/HotKeyService.swift` - 修复嵌套锁死锁风险
+- `Scopy/Services/ClipboardMonitor.swift` - deinit 添加锁保护
+- `Scopy/Services/RealClipboardService.swift` - 缩略图生成改为后台异步
+
+### 测试
+- 单元测试: **161/161 passed** (1 skipped)
+
+---
+
 ## [v0.21] - 2025-12-11
 
 ### 性能优化

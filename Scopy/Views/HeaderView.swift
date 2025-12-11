@@ -64,6 +64,8 @@ struct HeaderView: View {
 
 private struct SearchModeMenu: View {
     @Environment(AppState.self) private var appState
+    /// v0.22: 保存设置任务引用，支持取消，防止内存泄漏
+    @State private var saveTask: Task<Void, Never>?
 
     var body: some View {
         Menu {
@@ -71,8 +73,11 @@ private struct SearchModeMenu: View {
                 Button {
                     appState.searchMode = mode
                     appState.search()
+                    // v0.22: 取消之前的保存任务，防止快速切换时任务累积
+                    saveTask?.cancel()
                     // 持久化到设置
-                    Task {
+                    saveTask = Task {
+                        guard !Task.isCancelled else { return }
                         var newSettings = appState.settings
                         newSettings.defaultSearchMode = mode
                         await appState.updateSettings(newSettings)
@@ -93,6 +98,11 @@ private struct SearchModeMenu: View {
         }
         .menuStyle(.borderlessButton)
         .help("Search mode")
+        .onDisappear {
+            // v0.22: 视图消失时取消未完成的任务
+            saveTask?.cancel()
+            saveTask = nil
+        }
     }
 
     private func modeLabel(_ mode: SearchMode) -> String {
@@ -236,6 +246,9 @@ struct AppFilterButton: View {
     }
 
     /// v0.10.8: 使用锁保护缓存访问，确保线程安全
+    /// v0.22: 修复 LRU 清理策略，使用 FIFO 而非全部清空
+    private static var nameAccessOrder: [String] = []  // 名称缓存的访问顺序
+
     private func appName(for bundleID: String) -> String {
         Self.cacheLock.lock()
 
@@ -255,12 +268,14 @@ struct AppFilterButton: View {
         // 重新获取锁来更新缓存
         Self.cacheLock.lock()
 
-        // LRU 清理：名称缓存也需要限制大小
-        if Self.nameCache.count >= Self.maxCacheSize {
-            Self.nameCache.removeAll()  // 简单策略：满了就清空
+        // v0.22: LRU 清理：移除最旧的条目而非全部清空
+        if Self.nameCache.count >= Self.maxCacheSize, let oldest = Self.nameAccessOrder.first {
+            Self.nameCache.removeValue(forKey: oldest)
+            Self.nameAccessOrder.removeFirst()
         }
 
         Self.nameCache[bundleID] = name
+        Self.nameAccessOrder.append(bundleID)
         Self.cacheLock.unlock()
 
         return name
@@ -269,17 +284,27 @@ struct AppFilterButton: View {
 
 // MARK: - Type Filter Button
 
+/// v0.22: 添加 Rich Text 选项，支持 rtf + html 类型过滤
 struct TypeFilterButton: View {
     @Environment(AppState.self) private var appState
+
+    /// Rich Text 类型集合 (rtf + html)
+    private static let richTextTypes: Set<ClipboardItemType> = [.rtf, .html]
+
+    /// 当前是否选中 Rich Text 过滤
+    private var isRichTextSelected: Bool {
+        appState.typeFilters == Self.richTextTypes
+    }
 
     var body: some View {
         Menu {
             Button(action: {
                 appState.typeFilter = nil
+                appState.typeFilters = nil
                 appState.search()
             }) {
                 HStack {
-                    if appState.typeFilter == nil {
+                    if appState.typeFilter == nil && appState.typeFilters == nil {
                         Image(systemName: "checkmark")
                     }
                     Text("All Types")
@@ -289,10 +314,11 @@ struct TypeFilterButton: View {
             Divider()
 
             typeMenuItem(.text, label: "Text", icon: "doc.text")
+            richTextMenuItem()
             typeMenuItem(.image, label: "Image", icon: "photo")
             typeMenuItem(.file, label: "File", icon: "doc.fill")
         } label: {
-            Image(systemName: typeIcon(appState.typeFilter))
+            Image(systemName: currentTypeIcon)
                 .font(.system(size: ScopySize.Icon.filter))
                 .foregroundStyle(ScopyColors.mutedText)
         }
@@ -304,10 +330,11 @@ struct TypeFilterButton: View {
     private func typeMenuItem(_ type: ClipboardItemType, label: String, icon: String) -> some View {
         Button(action: {
             appState.typeFilter = type
+            appState.typeFilters = nil
             appState.search()
         }) {
             HStack {
-                if appState.typeFilter == type {
+                if appState.typeFilter == type && appState.typeFilters == nil {
                     Image(systemName: "checkmark")
                 }
                 Label(label, systemImage: icon)
@@ -315,8 +342,29 @@ struct TypeFilterButton: View {
         }
     }
 
-    private func typeIcon(_ type: ClipboardItemType?) -> String {
-        guard let type else { return ScopyIcons.filterType }
+    /// Rich Text 菜单项 (rtf + html)
+    @ViewBuilder
+    private func richTextMenuItem() -> some View {
+        Button(action: {
+            appState.typeFilter = nil
+            appState.typeFilters = Self.richTextTypes
+            appState.search()
+        }) {
+            HStack {
+                if isRichTextSelected {
+                    Image(systemName: "checkmark")
+                }
+                Label("Rich Text", systemImage: "doc.richtext")
+            }
+        }
+    }
+
+    /// 当前过滤类型的图标
+    private var currentTypeIcon: String {
+        if isRichTextSelected {
+            return "doc.richtext"
+        }
+        guard let type = appState.typeFilter else { return ScopyIcons.filterType }
         switch type {
         case .text: return "doc.text"
         case .image: return "photo"

@@ -4,9 +4,17 @@ import SwiftUI
 struct FooterView: View {
     @Environment(AppState.self) private var appState
 
+    /// v0.22: 修复 -1 显示 bug - 当 totalCount=-1 时表示"未知"，显示 "50+ items"
     private var summaryText: String {
         if !appState.searchQuery.isEmpty {
+            // 搜索模式：显示当前结果数
+            if appState.totalCount < 0 {
+                return "\(appState.items.count)+ results"
+            }
             return "\(appState.items.count) results"
+        } else if appState.totalCount < 0 {
+            // totalCount=-1 表示未知总数（v0.13 LIMIT+1 技巧）
+            return "\(appState.loadedCount)+ items"
         } else if appState.loadedCount < appState.totalCount {
             return "\(appState.loadedCount)/\(appState.totalCount) items"
         } else {

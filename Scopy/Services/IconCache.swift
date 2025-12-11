@@ -101,7 +101,10 @@ final class IconCacheSync {
 
     private var cache: [String: NSImage] = [:]
     private var nameCache: [String: String] = [:]
-    private var accessOrder: [String] = []
+    /// v0.22: 图标缓存的 LRU 访问顺序
+    private var iconAccessOrder: [String] = []
+    /// v0.22: 名称缓存的独立 LRU 访问顺序（修复共享 accessOrder 导致的 LRU 失效）
+    private var nameAccessOrder: [String] = []
     private let lock = NSLock()
     private let maxSize = 100
 
@@ -109,14 +112,15 @@ final class IconCacheSync {
 
     /// 同步获取图标（用于 View 计算属性）
     /// v0.20: 使用 withLock 统一锁策略
+    /// v0.22: 使用独立的 iconAccessOrder
     func getIcon(bundleID: String) -> NSImage? {
         lock.withLock {
             if let icon = cache[bundleID] {
                 // 更新 LRU
-                if let index = accessOrder.firstIndex(of: bundleID) {
-                    accessOrder.remove(at: index)
+                if let index = iconAccessOrder.firstIndex(of: bundleID) {
+                    iconAccessOrder.remove(at: index)
                 }
-                accessOrder.append(bundleID)
+                iconAccessOrder.append(bundleID)
                 return icon
             }
             return nil
@@ -125,27 +129,37 @@ final class IconCacheSync {
 
     /// 同步设置图标（预加载时调用）
     /// v0.20: 使用 withLock 统一锁策略
+    /// v0.22: 使用独立的 iconAccessOrder
     func setIcon(_ icon: NSImage, for bundleID: String) {
         lock.withLock {
             // LRU 清理
-            if cache.count >= maxSize, let oldest = accessOrder.first {
+            if cache.count >= maxSize, let oldest = iconAccessOrder.first {
                 cache.removeValue(forKey: oldest)
-                accessOrder.removeFirst()
+                iconAccessOrder.removeFirst()
             }
 
             cache[bundleID] = icon
-            if !accessOrder.contains(bundleID) {
-                accessOrder.append(bundleID)
+            if !iconAccessOrder.contains(bundleID) {
+                iconAccessOrder.append(bundleID)
             }
         }
     }
 
     /// 同步获取应用名称
     /// v0.20: 修复死锁风险 - 使用 withLock 确保锁正确释放，系统调用在锁外执行
+    /// v0.22: 使用独立的 nameAccessOrder，修复 LRU 清理逻辑
     func getAppName(bundleID: String) -> String {
-        // 1. 先检查缓存（在锁内）
+        // 1. 先检查缓存（在锁内），同时更新 LRU 顺序
         let cached: String? = lock.withLock {
-            nameCache[bundleID]
+            if let name = nameCache[bundleID] {
+                // 更新 LRU 访问顺序
+                if let index = nameAccessOrder.firstIndex(of: bundleID) {
+                    nameAccessOrder.remove(at: index)
+                }
+                nameAccessOrder.append(bundleID)
+                return name
+            }
+            return nil
         }
 
         if let cached = cached {
@@ -165,14 +179,13 @@ final class IconCacheSync {
         // 使用 double-check 避免重复写入
         lock.withLock {
             if nameCache[bundleID] == nil {
-                // LRU 清理
-                if nameCache.count >= maxSize {
-                    // 找到最旧的名称缓存条目并移除
-                    if let oldest = accessOrder.first(where: { nameCache[$0] != nil }) {
-                        nameCache.removeValue(forKey: oldest)
-                    }
+                // LRU 清理：移除最旧的名称缓存条目
+                if nameCache.count >= maxSize, let oldest = nameAccessOrder.first {
+                    nameCache.removeValue(forKey: oldest)
+                    nameAccessOrder.removeFirst()
                 }
                 nameCache[bundleID] = name
+                nameAccessOrder.append(bundleID)
             }
         }
 

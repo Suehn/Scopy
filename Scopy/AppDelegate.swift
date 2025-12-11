@@ -11,6 +11,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private(set) var hotKeyService: HotKeyService?
     private var settingsWindow: NSWindow?
     private let settingsKey = "ScopySettings"
+    /// v0.22: 存储事件监视器引用，以便在应用退出时移除
+    private var localEventMonitor: Any?
 
     private lazy var statusItem: NSStatusItem = {
         let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -60,7 +62,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         applyHotKey(keyCode: settings.keyCode, modifiers: settings.modifiers)
 
         // 注册 ⌘, 快捷键打开设置
-        NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+        // v0.22: 存储监视器引用，以便在应用退出时移除
+        localEventMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             if event.modifierFlags.contains(.command),
                !event.modifierFlags.contains(.shift),
                !event.modifierFlags.contains(.option),
@@ -76,6 +79,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         // 清理资源
         hotKeyService?.unregister()
+        // v0.22: 移除事件监视器，防止内存泄漏
+        if let monitor = localEventMonitor {
+            NSEvent.removeMonitor(monitor)
+            localEventMonitor = nil
+        }
         AppState.shared.stop()
     }
 

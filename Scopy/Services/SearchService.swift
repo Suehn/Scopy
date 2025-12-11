@@ -49,13 +49,8 @@ final class SearchService {
     /// v0.10.7: 保护缓存刷新的锁（防止并发刷新竞态）
     private let cacheRefreshLock = NSLock()
 
-    /// v0.20: 缓存版本号，用于检测缓存是否在搜索过程中被失效
-    /// 每次 invalidateCache() 时递增，搜索开始和结束时检查版本号一致性
-    private var cacheVersion: UInt64 = 0
-
-    /// v0.10.8: FTS5 COUNT 缓存（避免重复计算总数）
-    private var cachedSearchTotal: (query: String, mode: SearchMode, appFilter: String?, typeFilter: ClipboardItemType?, total: Int, timestamp: Date)?
-    private let searchTotalCacheTTL: TimeInterval = 5.0  // 5秒有效期
+    // v0.22: 移除 cachedSearchTotal 和 searchTotalCacheTTL（死代码）
+    // v0.13 引入 LIMIT+1 技巧后，不再需要单独缓存搜索总数
 
     /// v0.10.8: 搜索超时时间
     private let searchTimeout: TimeInterval = 5.0
@@ -231,7 +226,14 @@ final class SearchService {
                 mainSQL += " AND app_bundle_id = ?"
                 filterParams.append(appFilter)
             }
-            if let typeFilter = request.typeFilter {
+            // v0.22: 支持 typeFilters 多类型过滤
+            if let typeFilters = request.typeFilters, !typeFilters.isEmpty {
+                let placeholders = typeFilters.map { _ in "?" }.joined(separator: ",")
+                mainSQL += " AND type IN (\(placeholders))"
+                for type in typeFilters {
+                    filterParams.append(type.rawValue)
+                }
+            } else if let typeFilter = request.typeFilter {
                 mainSQL += " AND type = ?"
                 filterParams.append(typeFilter.rawValue)
             }
@@ -301,7 +303,10 @@ final class SearchService {
             if let appFilter = request.appFilter {
                 filtered = filtered.filter { $0.appBundleID == appFilter }
             }
-            if let typeFilter = request.typeFilter {
+            // v0.22: 支持 typeFilters 多类型过滤
+            if let typeFilters = request.typeFilters, !typeFilters.isEmpty {
+                filtered = filtered.filter { typeFilters.contains($0.type) }
+            } else if let typeFilter = request.typeFilter {
                 filtered = filtered.filter { $0.type == typeFilter }
             }
             // 统一排序：Pinned 置顶，其次时间
@@ -340,19 +345,30 @@ final class SearchService {
     /// v0.12: 修复竞态条件 - 所有检查都在锁内进行
     /// v0.17.1: 使用 withLock 统一锁策略
     /// v0.19: 修复内存问题 - 缓存时去除 rawData，避免 200MB 内存占用
+    /// v0.22: 修复死锁风险 - 在锁外执行数据库查询，避免持锁调用 storage.fetchRecent()
     private func refreshCacheIfNeeded() throws {
-        try cacheRefreshLock.withLock {
-            // 所有检查都在锁内进行，确保原子性
+        // Step 1: 在锁内检查是否需要刷新，并设置刷新标志
+        let shouldRefresh = cacheRefreshLock.withLock { () -> Bool in
             let now = Date()
             let needsRefresh = recentItemsCache.isEmpty || now.timeIntervalSince(cacheTimestamp) > cacheDuration
-            guard needsRefresh && !cacheRefreshInProgress else { return }
-
-            // 设置刷新标志
+            guard needsRefresh && !cacheRefreshInProgress else { return false }
             cacheRefreshInProgress = true
-            defer { cacheRefreshInProgress = false }
+            return true
+        }
 
-            // 执行刷新
-            let items = try storage.fetchRecent(limit: shortQueryCacheSize, offset: 0)
+        guard shouldRefresh else { return }
+
+        // Step 2: 在锁外执行数据库查询（避免死锁）
+        defer {
+            cacheRefreshLock.withLock {
+                cacheRefreshInProgress = false
+            }
+        }
+
+        let items = try storage.fetchRecent(limit: shortQueryCacheSize, offset: 0)
+
+        // Step 3: 在锁内更新缓存
+        cacheRefreshLock.withLock {
             // v0.19: 去除 rawData，只保留搜索所需的元数据
             recentItemsCache = items.map { item in
                 StorageService.StoredItem(
@@ -370,24 +386,17 @@ final class SearchService {
                     rawData: nil  // 不缓存原始数据，节省内存
                 )
             }
-            cacheTimestamp = now
+            cacheTimestamp = Date()
         }
     }
 
-    /// v0.12: 完整缓存失效，同时清除搜索总数缓存
-    /// v0.20: 添加版本号递增，确保正在进行的搜索能检测到缓存失效
+    /// v0.12: 完整缓存失效
+    /// v0.22: 移除 cachedSearchTotal 清除（已删除该死代码）
     func invalidateCache() {
         cacheRefreshLock.withLock {
-            cacheVersion += 1  // v0.20: 递增版本号
             recentItemsCache = []
             cacheTimestamp = .distantPast
-            cachedSearchTotal = nil
         }
-    }
-
-    /// v0.20: 获取当前缓存版本号（线程安全）
-    private func getCurrentCacheVersion() -> UInt64 {
-        cacheRefreshLock.withLock { cacheVersion }
     }
 
     // MARK: - Fuzzy Matching
@@ -499,24 +508,6 @@ final class SearchService {
         }
     }
 
-    /// v0.10.8: 获取缓存的搜索总数
-    private func getCachedTotal(for request: SearchRequest, query: String) -> Int? {
-        guard let cached = cachedSearchTotal,
-              cached.query == query,
-              cached.mode == request.mode,
-              cached.appFilter == request.appFilter,
-              cached.typeFilter == request.typeFilter,
-              Date().timeIntervalSince(cached.timestamp) < searchTotalCacheTTL else {
-            return nil
-        }
-        return cached.total
-    }
-
-    /// v0.10.8: 缓存搜索总数
-    private func cacheTotal(_ total: Int, for request: SearchRequest, query: String) {
-        cachedSearchTotal = (query, request.mode, request.appFilter, request.typeFilter, total, Date())
-    }
-
     /// v0.13: 空查询 + 过滤时直接访问 SQLite，使用 LIMIT+1 技巧
     private func searchAllWithFilters(request: SearchRequest, db: OpaquePointer) async throws -> SearchResult {
         let result = try await runOnQueueWithTimeout { [self] in
@@ -530,7 +521,14 @@ final class SearchService {
                 sql += " AND app_bundle_id = ?"
                 params.append(appFilter)
             }
-            if let typeFilter = request.typeFilter {
+            // v0.22: 支持 typeFilters 多类型过滤
+            if let typeFilters = request.typeFilters, !typeFilters.isEmpty {
+                let placeholders = typeFilters.map { _ in "?" }.joined(separator: ",")
+                sql += " AND type IN (\(placeholders))"
+                for type in typeFilters {
+                    params.append(type.rawValue)
+                }
+            } else if let typeFilter = request.typeFilter {
                 sql += " AND type = ?"
                 params.append(typeFilter.rawValue)
             }
@@ -578,11 +576,6 @@ final class SearchService {
         }
 
         return result
-    }
-
-    /// v0.11: 使缓存失效（数据变更时调用）
-    func invalidateSearchTotalCache() {
-        cachedSearchTotal = nil
     }
 }
 

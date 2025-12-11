@@ -48,6 +48,9 @@ final class ClipboardMonitor {
     private var isMonitoring = false
     private var isContentStreamFinished = false
 
+    /// v0.22: 保护 isContentStreamFinished 的锁，防止 stopMonitoring() 和 yield() 之间的竞态
+    private let contentStreamLock = NSLock()
+
     /// v0.10.8: 使用任务队列替代单任务，支持快速连续复制大文件
     private var processingQueue: [Task<Void, Never>] = []
     /// v0.17: 任务 ID 映射，用于在任务完成后清理
@@ -81,7 +84,11 @@ final class ClipboardMonitor {
 
     deinit {
         // Direct cleanup in deinit (synchronous)
+        // v0.22.1: 使用锁保护 isContentStreamFinished，与 checkClipboard() 中的锁保持一致
+        contentStreamLock.lock()
         isContentStreamFinished = true
+        contentStreamLock.unlock()
+
         timer?.invalidate()
         timer = nil
         // v0.10.8: 取消所有处理任务
@@ -113,8 +120,16 @@ final class ClipboardMonitor {
         // Timer.scheduledTimer 已自动添加到 RunLoop.current，无需再次添加
     }
 
+    /// v0.22: 使用锁保护 isContentStreamFinished，防止与 yield() 竞态
     func stopMonitoring() {
-        isContentStreamFinished = true
+        // 使用锁保护状态设置，确保与 yield 操作互斥
+        let shouldStop = contentStreamLock.withLock { () -> Bool in
+            guard !isContentStreamFinished else { return false }
+            isContentStreamFinished = true
+            return true
+        }
+        guard shouldStop else { return }
+
         timer?.invalidate()
         timer = nil
         // v0.10.8: 取消所有处理任务
@@ -247,8 +262,11 @@ final class ClipboardMonitor {
             contentHash: hash,
             sizeBytes: rawData.sizeBytes
         )
-        guard !isContentStreamFinished else { return }
-        eventContinuation.yield(content)
+        // v0.22: 使用锁保护 yield 操作，防止与 stopMonitoring() 竞态
+        contentStreamLock.withLock {
+            guard !isContentStreamFinished else { return }
+            eventContinuation.yield(content)
+        }
     }
 
     /// 异步处理大内容（在后台线程计算哈希）
@@ -264,7 +282,9 @@ final class ClipboardMonitor {
         processingQueue.removeAll { $0.isCancelled }
 
         // 如果队列满，取消最旧的任务
+        // v0.22: 添加日志，帮助诊断快速复制时的任务丢弃情况
         while processingQueue.count >= maxConcurrentTasks {
+            print("⚠️ ClipboardMonitor: Task queue full (\(maxConcurrentTasks)), dropping oldest task")
             processingQueue.first?.cancel()
             processingQueue.removeFirst()
         }
@@ -289,8 +309,9 @@ final class ClipboardMonitor {
 
             // 回到主线程发送事件
             // v0.10.7: 在 MainActor.run 内再次检查取消状态，防止向已关闭的流发送数据
+            // v0.22: 使用锁保护 yield 操作，防止与 stopMonitoring() 竞态
             await MainActor.run {
-                guard !Task.isCancelled, !self.isContentStreamFinished else { return }
+                guard !Task.isCancelled else { return }
 
                 let content = ClipboardContent(
                     type: rawData.type,
@@ -300,7 +321,10 @@ final class ClipboardMonitor {
                     contentHash: hash,
                     sizeBytes: rawData.sizeBytes
                 )
-                self.eventContinuation.yield(content)
+                self.contentStreamLock.withLock {
+                    guard !self.isContentStreamFinished else { return }
+                    self.eventContinuation.yield(content)
+                }
             }
         }
         processingQueue.append(task)
@@ -309,7 +333,7 @@ final class ClipboardMonitor {
 
     /// v0.17: 从队列中移除已完成的任务
     /// v0.20: 修复内存泄漏 - 使用 UUID 而非 ObjectIdentifier 跟踪任务
-    /// ObjectIdentifier 比较 Task 不可靠（Task 是值类型，装箱行为不确定）
+    /// v0.22: 简化逻辑，重建 processingQueue 只保留 taskIDMap 中的活跃任务
     /// 注意: 此方法在 @MainActor 上下文中执行，使用 lock/defer unlock 模式
     private func removeCompletedTask(id: UUID) {
         queueLock.lock()
@@ -318,10 +342,8 @@ final class ClipboardMonitor {
         // 从 taskIDMap 移除已完成的任务
         taskIDMap.removeValue(forKey: id)
 
-        // 重建 processingQueue：只保留仍在 taskIDMap 中的活跃任务
-        // 这比使用 ObjectIdentifier 比较更可靠
-        let activeIDs = Set(taskIDMap.keys)
-        processingQueue = taskIDMap.values.filter { !$0.isCancelled }.map { $0 }
+        // 重建 processingQueue：只保留未取消的活跃任务
+        processingQueue = Array(taskIDMap.values).filter { !$0.isCancelled }
     }
 
     /// 在后台线程计算哈希

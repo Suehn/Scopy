@@ -78,11 +78,13 @@ final class AppState {
     // 过滤状态 (v0.9)
     var appFilter: String? = nil
     var typeFilter: ClipboardItemType? = nil
+    /// v0.22: 多类型过滤，用于 Rich Text (rtf + html)
+    var typeFilters: Set<ClipboardItemType>? = nil
     var recentApps: [String] = []
 
     /// 是否有活跃的过滤条件（搜索词、app过滤、类型过滤）
     var hasActiveFilters: Bool {
-        !searchQuery.isEmpty || appFilter != nil || typeFilter != nil
+        !searchQuery.isEmpty || appFilter != nil || typeFilter != nil || typeFilters != nil
     }
 
     /// 选中来源 - 控制是否触发滚动
@@ -138,6 +140,8 @@ final class AppState {
     private var eventTask: Task<Void, Never>?
     private var searchTask: Task<Void, Never>?
     private var loadMoreTask: Task<Void, Never>?
+    /// v0.22: 防抖刷新 recentApps 的任务
+    private var recentAppsRefreshTask: Task<Void, Never>?
 
     // 配置：是否使用真实服务
     private static let useMockService: Bool = {
@@ -201,12 +205,14 @@ final class AppState {
     /// 停止应用服务
     /// v0.17.1: 添加任务等待逻辑，确保应用退出时数据完整性
     /// v0.20: 移除 RunLoop 轮询，避免阻塞主线程
+    /// v0.22: 添加 recentAppsRefreshTask 取消
     func stop() {
         // 1. 取消所有任务
         eventTask?.cancel()
         searchTask?.cancel()
         loadMoreTask?.cancel()
         scrollEndTask?.cancel()
+        recentAppsRefreshTask?.cancel()
 
         // 2. 清理引用（不再阻塞等待，让系统自然清理）
         // 注意：取消任务后，任务会在下一个 await 点检查取消状态并退出
@@ -215,6 +221,7 @@ final class AppState {
         searchTask = nil
         loadMoreTask = nil
         scrollEndTask = nil
+        recentAppsRefreshTask = nil
 
         // 3. 通过协议方法停止服务
         // service.stop() 内部会处理必要的清理工作
@@ -243,6 +250,17 @@ final class AppState {
             preloadAppIcons()
         } catch {
             print("Failed to load recent apps: \(error)")
+        }
+    }
+
+    /// v0.22: 防抖刷新 recentApps，避免快速复制时多次调用
+    private func scheduleRecentAppsRefresh() {
+        recentAppsRefreshTask?.cancel()
+        recentAppsRefreshTask = Task {
+            // 防抖 500ms
+            try? await Task.sleep(nanoseconds: 500_000_000)
+            guard !Task.isCancelled else { return }
+            await loadRecentApps()
         }
     }
 
@@ -297,9 +315,9 @@ final class AppState {
             if !wasExisting {
                 totalCount += 1
             }
-            // 如果是新 app，刷新 app 列表
+            // v0.22: 如果是新 app，刷新 app 列表（使用防抖避免频繁调用）
             if let bundleID = item.appBundleID, !recentApps.contains(bundleID) {
-                Task { await loadRecentApps() }
+                scheduleRecentAppsRefresh()
             }
         case .itemUpdated(let item):
             // 更新的项目：移除旧位置，插入到顶部（用于复制置顶）
@@ -339,9 +357,14 @@ final class AppState {
 
     /// v0.16.1: 检查项目是否匹配当前过滤条件
     /// 用于 handleEvent(.newItem) 决定是否将新项目插入到显示列表
+    /// v0.22: 支持 typeFilters 多类型过滤
     private func matchesCurrentFilters(_ item: ClipboardItemDTO) -> Bool {
-        // 检查 typeFilter
-        if let typeFilter = typeFilter, item.type != typeFilter {
+        // 检查 typeFilters（多类型过滤，优先）
+        if let typeFilters = typeFilters, !typeFilters.contains(item.type) {
+            return false
+        }
+        // 检查 typeFilter（单类型过滤）
+        if typeFilters == nil, let typeFilter = typeFilter, item.type != typeFilter {
             return false
         }
         // 检查 appFilter
@@ -435,6 +458,7 @@ final class AppState {
                         mode: searchMode,
                         appFilter: appFilter,
                         typeFilter: typeFilter,
+                        typeFilters: typeFilters,
                         limit: 50,
                         offset: loadedCount
                     )
@@ -475,7 +499,7 @@ final class AppState {
         searchTask?.cancel()
 
         // 如果没有搜索词且没有过滤条件，直接加载全部
-        if searchQuery.isEmpty && appFilter == nil && typeFilter == nil {
+        if searchQuery.isEmpty && appFilter == nil && typeFilter == nil && typeFilters == nil {
             Task { await load() }
             return
         }
@@ -502,6 +526,7 @@ final class AppState {
                     mode: searchMode,
                     appFilter: appFilter,
                     typeFilter: typeFilter,
+                    typeFilters: typeFilters,
                     limit: 50,
                     offset: 0
                 )

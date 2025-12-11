@@ -78,20 +78,29 @@ final class HotKeyService {
     /// v0.20: 添加溢出保护，当接近 UInt32.max 时重置为 1
     private static var nextHotKeyID: UInt32 = 1
 
+    /// v0.22: 保护 nextHotKeyID 的锁（防止多线程竞态）
+    private static let nextHotKeyIDLock = NSLock()
+
     /// 防重复触发（按住键盘时 Carbon 会重复发送 pressed 事件）
+    /// v0.22: 移除未使用的 lastFireLock，lastFire 由 handlersLock 统一保护
+    /// 这是有意的设计：在 handleCarbonEvent 中，lastFire 的检查和 handlers 的查找
+    /// 需要在同一个锁内完成，以确保原子性
     private static var lastFire: (id: UInt32, timestamp: CFAbsoluteTime)?
 
     /// v0.20: 安全递增 hotKeyID，防止溢出
+    /// v0.22: 添加锁保护，确保线程安全
     private static func getNextHotKeyID() -> UInt32 {
-        // 如果接近溢出，重置为 1（跳过 0，因为 0 通常表示无效 ID）
-        // 使用 UInt32.max - 1000 作为阈值，留出足够的安全边界
-        if nextHotKeyID >= UInt32.max - 1000 {
-            logToFile("⚠️ HotKeyID approaching overflow, resetting to 1")
-            nextHotKeyID = 1
+        return nextHotKeyIDLock.withLock {
+            // 如果接近溢出，重置为 1（跳过 0，因为 0 通常表示无效 ID）
+            // 使用 UInt32.max - 1000 作为阈值，留出足够的安全边界
+            if nextHotKeyID >= UInt32.max - 1000 {
+                logToFile("⚠️ HotKeyID approaching overflow, resetting to 1")
+                nextHotKeyID = 1
+            }
+            let id = nextHotKeyID
+            nextHotKeyID += 1
+            return id
         }
-        let id = nextHotKeyID
-        nextHotKeyID += 1
-        return id
     }
 
     // MARK: - Instance Properties
@@ -355,10 +364,13 @@ final class HotKeyService {
         }
     }
 
+    /// v0.22: 修复竞态条件 - 使用 getNextHotKeyID() 确保线程安全
+    /// v0.22.1: 修复嵌套锁死锁风险 - 在 handlersLock 外部调用 getNextHotKeyID()
     func registerHandlerOnly(_ handler: @escaping HotKeyHandler) {
+        // 先获取 ID（在 handlersLock 外部），避免嵌套锁死锁
+        let newID = Self.getNextHotKeyID()
         Self.handlersLock.withLock {
-            currentHotKeyID = Self.nextHotKeyID
-            Self.nextHotKeyID += 1
+            currentHotKeyID = newID
             Self.handlers[currentHotKeyID] = handler
         }
     }

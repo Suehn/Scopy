@@ -144,6 +144,7 @@ struct SettingsView: View {
         }
     }
 
+    /// v0.22: 添加错误处理，确保 isSaving 状态正确重置
     private func saveSettings() {
         // v0.10.1: 防止在设置加载前保存
         guard let currentSettings = tempSettings else {
@@ -156,20 +157,28 @@ struct SettingsView: View {
         print("🔧 saveSettings: keyCode=\(currentSettings.hotkeyKeyCode), modifiers=0x\(String(currentSettings.hotkeyModifiers, radix: 16))")
 
         Task {
-            await appState.updateSettings(currentSettings)
-            // 更新 AppState 的搜索模式
-            await MainActor.run {
-                appState.searchMode = currentSettings.defaultSearchMode
+            do {
+                try await appState.updateSettings(currentSettings)
+                // 更新 AppState 的搜索模式
+                await MainActor.run {
+                    appState.searchMode = currentSettings.defaultSearchMode
 
-                // 通过回调更新全局快捷键（解耦 AppDelegate）
-                print("🔧 Updating hotkey via callback")
-                appState.applyHotKeyHandler?(
-                    currentSettings.hotkeyKeyCode,
-                    currentSettings.hotkeyModifiers
-                )
+                    // 通过回调更新全局快捷键（解耦 AppDelegate）
+                    print("🔧 Updating hotkey via callback")
+                    appState.applyHotKeyHandler?(
+                        currentSettings.hotkeyKeyCode,
+                        currentSettings.hotkeyModifiers
+                    )
 
-                isSaving = false
-                onDismiss?()
+                    isSaving = false
+                    onDismiss?()
+                }
+            } catch {
+                print("⚠️ saveSettings failed: \(error.localizedDescription)")
+                await MainActor.run {
+                    isSaving = false
+                    // 保存失败时不关闭窗口，让用户可以重试
+                }
             }
         }
     }

@@ -102,14 +102,18 @@ final class RealClipboardService: ClipboardServiceProtocol {
     /// v0.19: 修复等待逻辑 - isCancelled 只表示请求取消，不表示任务完成
     /// v0.20: 移除 RunLoop 轮询，避免阻塞主线程
     /// v0.20: 使用锁保护事件流状态，确保与 yieldEvent() 互斥
+    /// v0.22: 修复竞态 - 在锁内获取 continuation 引用，锁外调用 finish()
     func stop() {
-        // 使用锁保护状态检查和设置，防止与 yieldEvent() 竞态
-        let shouldStop = eventStreamLock.withLock { () -> Bool in
-            guard !isEventStreamFinished else { return false }
+        // 使用锁保护状态检查和设置，同时获取 continuation 引用
+        // 这确保 yieldEvent() 不会在我们设置 isEventStreamFinished 后仍然 yield
+        let continuation = eventStreamLock.withLock { () -> AsyncStream<ClipboardEvent>.Continuation? in
+            guard !isEventStreamFinished else { return nil }
             isEventStreamFinished = true
-            return true
+            let cont = eventContinuation
+            eventContinuation = nil  // 清空引用，防止后续 yieldEvent 使用
+            return cont
         }
-        guard shouldStop else { return }
+        guard let continuation = continuation else { return }
 
         // 1. 停止监控（这会取消 ClipboardMonitor 的任务队列）
         // 必须先停止监控，这样 contentStream 会结束，monitorTask 的 for-await 循环才会退出
@@ -124,7 +128,7 @@ final class RealClipboardService: ClipboardServiceProtocol {
         monitorTask = nil
 
         // 4. 显式关闭事件流 continuation（在锁外执行，避免死锁）
-        eventContinuation?.finish()
+        continuation.finish()
 
         // 5. 关闭存储（执行 WAL checkpoint）
         storage.close()
@@ -172,6 +176,7 @@ final class RealClipboardService: ClipboardServiceProtocol {
         yieldEvent(.settingsChanged)
     }
 
+    /// v0.22: 修复图片数据丢失问题 - 使用 getOriginalImageData 统一获取数据
     func copyToClipboard(itemID: UUID) async throws {
         guard let item = try storage.findByID(itemID) else { return }
 
@@ -179,11 +184,9 @@ final class RealClipboardService: ClipboardServiceProtocol {
         case .text:
             monitor.copyToClipboard(text: item.plainText)
         case .rtf, .html, .image:
-            // 优先使用内联数据（小内容），否则读取外部存储
-            var data: Data? = item.rawData
-            if data == nil, let storageRef = item.storageRef {
-                data = try storage.loadExternalData(path: storageRef)
-            }
+            // v0.22: 使用 getOriginalImageData 统一获取数据，确保从数据库重新加载
+            // 这修复了 SearchService 缓存中 rawData 为 nil 导致的数据丢失问题
+            let data = storage.getOriginalImageData(for: item)
 
             if let data = data {
                 let pasteboardType: NSPasteboard.PasteboardType
@@ -196,11 +199,8 @@ final class RealClipboardService: ClipboardServiceProtocol {
                 monitor.copyToClipboard(data: data, type: pasteboardType)
             }
         case .file:
-            // 尝试从 inline rawData 或 external storage 恢复文件 URL
-            var urlData: Data? = item.rawData
-            if urlData == nil, let storageRef = item.storageRef {
-                urlData = try? storage.loadExternalData(path: storageRef)
-            }
+            // v0.22: 使用 getOriginalImageData 统一获取数据（虽然是文件类型，但数据获取逻辑相同）
+            let urlData = storage.getOriginalImageData(for: item)
 
             if let data = urlData,
                let fileURLs = ClipboardMonitor.deserializeFileURLs(data),
@@ -346,21 +346,16 @@ final class RealClipboardService: ClipboardServiceProtocol {
     }
 
     private func toDTO(_ item: StorageService.StoredItem) -> ClipboardItemDTO {
-        // 图片类型：检查是否有缩略图，没有则懒加载生成
+        // 图片类型：检查是否有缩略图
         var thumbnailPath: String? = nil
         if item.type == .image && settings.showImageThumbnails {
             // 先检查是否已有缩略图
             thumbnailPath = storage.getThumbnailPath(for: item.contentHash)
 
-            // 如果没有，即时生成（懒加载）
+            // v0.22.1: 如果没有缩略图，在后台异步生成，不阻塞主线程
+            // 缩略图生成完成后，UI 会在下次刷新时显示
             if thumbnailPath == nil {
-                if let imageData = storage.getOriginalImageData(for: item) {
-                    thumbnailPath = storage.generateThumbnail(
-                        from: imageData,
-                        contentHash: item.contentHash,
-                        maxHeight: settings.thumbnailHeight
-                    )
-                }
+                scheduleThumbnailGeneration(for: item)
             }
         }
 
@@ -377,6 +372,50 @@ final class RealClipboardService: ClipboardServiceProtocol {
             thumbnailPath: thumbnailPath,
             storageRef: item.storageRef
         )
+    }
+
+    /// v0.22.1: 后台异步生成缩略图，避免阻塞主线程
+    /// 使用 Set 跟踪正在生成的缩略图，避免重复生成
+    /// 注意：使用 nonisolated(unsafe) 静态属性和锁来跨 actor 边界安全访问
+    /// 并发安全由 thumbnailGenerationLock 保证
+    private nonisolated(unsafe) static var thumbnailGenerationInProgress = Set<String>()
+    private static let thumbnailGenerationLock = NSLock()
+
+    private func scheduleThumbnailGeneration(for item: StorageService.StoredItem) {
+        let contentHash = item.contentHash
+        let maxHeight = settings.thumbnailHeight
+        let storageRef = storage  // 捕获 storage 引用
+
+        // 检查是否已在生成中
+        let shouldGenerate = Self.thumbnailGenerationLock.withLock {
+            if Self.thumbnailGenerationInProgress.contains(contentHash) {
+                return false
+            }
+            Self.thumbnailGenerationInProgress.insert(contentHash)
+            return true
+        }
+
+        guard shouldGenerate else { return }
+
+        // 在后台线程生成缩略图
+        Task.detached(priority: .utility) {
+            defer {
+                Self.thumbnailGenerationLock.withLock {
+                    _ = Self.thumbnailGenerationInProgress.remove(contentHash)
+                }
+            }
+
+            // 获取原图数据并生成缩略图（需要在 MainActor 上执行）
+            await MainActor.run {
+                if let imageData = storageRef.getOriginalImageData(for: item) {
+                    _ = storageRef.generateThumbnail(
+                        from: imageData,
+                        contentHash: contentHash,
+                        maxHeight: maxHeight
+                    )
+                }
+            }
+        }
     }
 
     // MARK: - Settings Persistence
