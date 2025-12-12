@@ -1,7 +1,6 @@
 import AppKit
 import Foundation
 import ImageIO
-import SQLite3
 import UniformTypeIdentifiers
 
 /// StorageService - 数据持久化服务
@@ -32,21 +31,7 @@ final class StorageService {
         }
     }
 
-    /// Internal storage model
-    struct StoredItem {
-        let id: UUID
-        let type: ClipboardItemType
-        let contentHash: String
-        let plainText: String
-        let appBundleID: String?
-        let createdAt: Date
-        var lastUsedAt: Date
-        var useCount: Int
-        var isPinned: Bool
-        let sizeBytes: Int
-        let storageRef: String? // nil for inline, path for external
-        let rawData: Data?      // inline raw data (for small content)
-    }
+    typealias StoredItem = ClipboardStoredItem
 
     // MARK: - Configuration
 
@@ -63,10 +48,11 @@ final class StorageService {
 
     // MARK: - Properties
 
-    private var db: OpaquePointer?
     private let dbPath: String
     private let externalStoragePath: String
     private let thumbnailCachePath: String
+
+    let repository: SQLiteClipboardRepository
 
     var cleanupSettings = CleanupSettings()
 
@@ -76,9 +62,6 @@ final class StorageService {
 
     /// v0.22: 保护 cachedExternalSize 的锁，防止后台线程和主线程之间的数据竞争
     private let externalSizeCacheLock = NSLock()
-
-    /// 暴露数据库连接给 SearchService 使用
-    var database: OpaquePointer? { db }
 
     /// 数据库文件路径（用于设置窗口显示）
     var databaseFilePath: String { dbPath }
@@ -112,199 +95,44 @@ final class StorageService {
         } catch {
             print("⚠️ StorageService: Failed to create thumbnail cache directory: \(error.localizedDescription)")
         }
+
+        self.repository = SQLiteClipboardRepository(dbPath: self.dbPath)
     }
 
     deinit {
-        // Close database directly in deinit (synchronous cleanup)
-        if db != nil {
-            sqlite3_close(db)
-            db = nil
+        let repo = repository
+        Task.detached {
+            await repo.close()
         }
     }
 
     // MARK: - Database Lifecycle
 
     /// v0.11: 修复半打开状态问题 - 使用临时变量，失败时确保清理
-    func open() throws {
-        guard db == nil else { return }
-
-        // 使用临时变量，避免半打开状态
-        var tempDb: OpaquePointer?
-        let openResult = sqlite3_open(dbPath, &tempDb)
-
-        if openResult != SQLITE_OK {
-            let error: String
-            if let tempDb = tempDb {
-                error = String(cString: sqlite3_errmsg(tempDb))
-                sqlite3_close(tempDb)  // 清理部分打开的连接
-            } else {
-                error = "Unknown error (code: \(openResult))"
-            }
-            throw StorageError.queryFailed("Failed to open database: \(error)")
-        }
-
-        // 确保 tempDb 不为 nil
-        guard let validDb = tempDb else {
-            throw StorageError.queryFailed("Failed to open database: connection is nil")
-        }
-
-        // 尝试执行 PRAGMA 设置，失败时清理
-        do {
-            // Enable WAL mode for better concurrent read performance
-            try executeOn(validDb, "PRAGMA journal_mode = WAL")
-            try executeOn(validDb, "PRAGMA synchronous = NORMAL")
-            try executeOn(validDb, "PRAGMA cache_size = -64000") // 64MB cache
-            try executeOn(validDb, "PRAGMA temp_store = MEMORY")
-
-            // 成功后才赋值给实例变量
-            self.db = validDb
-
-            try createTables()
-            try createIndexes()
-            try setupFTS()
-
-            // v0.20: 验证 schema 完整性，确保所有表都正确创建
-            try verifySchema()
-        } catch {
-            // PRAGMA 或 schema 设置失败，清理连接
-            // v0.17: 确保重置 self.db，避免指向已关闭的连接
-            self.db = nil
-            sqlite3_close(validDb)
-            throw error
-        }
-    }
-
-    /// v0.11: 在指定数据库连接上执行 SQL（用于初始化阶段）
-    private func executeOn(_ db: OpaquePointer, _ sql: String) throws {
-        var errMsg: UnsafeMutablePointer<CChar>?
-        if sqlite3_exec(db, sql, nil, nil, &errMsg) != SQLITE_OK {
-            let error = errMsg.map { String(cString: $0) } ?? "Unknown error"
-            sqlite3_free(errMsg)
-            throw StorageError.queryFailed(error)
-        }
+    func open() async throws {
+        try await repository.open()
     }
 
     /// v0.11: 执行 WAL 检查点（定期调用以控制 WAL 文件大小）
     func performWALCheckpoint() {
-        guard let db = db else { return }
-        // PASSIVE 模式：不阻塞写入，尽可能多地检查点
-        sqlite3_wal_checkpoint_v2(db, nil, SQLITE_CHECKPOINT_PASSIVE, nil, nil)
-    }
-
-    /// v0.20: 验证数据库 schema 完整性
-    /// 确保主表和 FTS 表都存在，防止半打开状态导致后续操作失败
-    private func verifySchema() throws {
-        guard let db = db else {
-            throw StorageError.databaseNotOpen
+        let repo = repository
+        let semaphore = DispatchSemaphore(value: 0)
+        Task.detached {
+            await repo.walCheckpointPassive()
+            semaphore.signal()
         }
-
-        // 检查主表是否存在
-        let mainTableSQL = "SELECT name FROM sqlite_master WHERE type='table' AND name='clipboard_items'"
-        var stmt: OpaquePointer?
-        if sqlite3_prepare_v2(db, mainTableSQL, -1, &stmt, nil) == SQLITE_OK {
-            defer { sqlite3_finalize(stmt) }
-            if sqlite3_step(stmt) != SQLITE_ROW {
-                throw StorageError.migrationFailed("Main table 'clipboard_items' not found")
-            }
-        } else {
-            throw StorageError.queryFailed("Failed to verify main table")
-        }
-
-        // 检查 FTS 表是否存在
-        let ftsTableSQL = "SELECT name FROM sqlite_master WHERE type='table' AND name='clipboard_fts'"
-        if sqlite3_prepare_v2(db, ftsTableSQL, -1, &stmt, nil) == SQLITE_OK {
-            defer { sqlite3_finalize(stmt) }
-            if sqlite3_step(stmt) != SQLITE_ROW {
-                throw StorageError.migrationFailed("FTS table 'clipboard_fts' not found")
-            }
-        } else {
-            throw StorageError.queryFailed("Failed to verify FTS table")
-        }
+        semaphore.wait()
     }
 
     /// v0.20: 关闭前执行 WAL 检查点，确保数据完整写入
     func close() {
-        if db != nil {
-            // 执行 WAL 检查点，将 WAL 日志合并到主数据库文件
-            performWALCheckpoint()
-            sqlite3_close(db)
-            db = nil
+        let repo = repository
+        let semaphore = DispatchSemaphore(value: 0)
+        Task.detached {
+            await repo.close()
+            semaphore.signal()
         }
-    }
-
-    // MARK: - Schema
-
-    private func createTables() throws {
-        // Main items table
-        try execute("""
-            CREATE TABLE IF NOT EXISTS clipboard_items (
-                id TEXT PRIMARY KEY,
-                type TEXT NOT NULL,
-                content_hash TEXT NOT NULL,
-                plain_text TEXT,
-                app_bundle_id TEXT,
-                created_at REAL NOT NULL,
-                last_used_at REAL NOT NULL,
-                use_count INTEGER DEFAULT 1,
-                is_pinned INTEGER DEFAULT 0,
-                size_bytes INTEGER NOT NULL,
-                storage_ref TEXT,
-                raw_data BLOB
-            )
-        """)
-
-        // Schema version for migrations
-        try execute("""
-            CREATE TABLE IF NOT EXISTS schema_version (
-                version INTEGER PRIMARY KEY
-            )
-        """)
-
-        // Insert initial version if needed
-        try execute("INSERT OR IGNORE INTO schema_version (version) VALUES (1)")
-    }
-
-    private func createIndexes() throws {
-        // v0.md 3.1: 索引设计
-        try execute("CREATE INDEX IF NOT EXISTS idx_created_at ON clipboard_items(created_at DESC)")
-        try execute("CREATE INDEX IF NOT EXISTS idx_last_used_at ON clipboard_items(last_used_at DESC)")
-        try execute("CREATE INDEX IF NOT EXISTS idx_pinned ON clipboard_items(is_pinned DESC, last_used_at DESC)")
-        try execute("CREATE INDEX IF NOT EXISTS idx_content_hash ON clipboard_items(content_hash)")
-        try execute("CREATE INDEX IF NOT EXISTS idx_type ON clipboard_items(type)")
-        try execute("CREATE INDEX IF NOT EXISTS idx_app ON clipboard_items(app_bundle_id)")
-        try execute("CREATE INDEX IF NOT EXISTS idx_type_recent ON clipboard_items(type, last_used_at DESC)")
-    }
-
-    private func setupFTS() throws {
-        // v0.md 4.2: SQLite FTS5 索引
-        try execute("""
-            CREATE VIRTUAL TABLE IF NOT EXISTS clipboard_fts USING fts5(
-                plain_text,
-                content='clipboard_items',
-                content_rowid='rowid',
-                tokenize='unicode61 remove_diacritics 2'
-            )
-        """)
-
-        // Triggers to keep FTS in sync
-        try execute("""
-            CREATE TRIGGER IF NOT EXISTS clipboard_ai AFTER INSERT ON clipboard_items BEGIN
-                INSERT INTO clipboard_fts(rowid, plain_text) VALUES (NEW.rowid, NEW.plain_text);
-            END
-        """)
-
-        try execute("""
-            CREATE TRIGGER IF NOT EXISTS clipboard_ad AFTER DELETE ON clipboard_items BEGIN
-                INSERT INTO clipboard_fts(clipboard_fts, rowid, plain_text) VALUES('delete', OLD.rowid, OLD.plain_text);
-            END
-        """)
-
-        try execute("""
-            CREATE TRIGGER IF NOT EXISTS clipboard_au AFTER UPDATE ON clipboard_items BEGIN
-                INSERT INTO clipboard_fts(clipboard_fts, rowid, plain_text) VALUES('delete', OLD.rowid, OLD.plain_text);
-                INSERT INTO clipboard_fts(rowid, plain_text) VALUES (NEW.rowid, NEW.plain_text);
-            END
-        """)
+        semaphore.wait()
     }
 
     // MARK: - CRUD Operations
@@ -312,15 +140,13 @@ final class StorageService {
     /// Insert or update item (handles deduplication per v0.md 3.2)
     /// v0.29: 大内容外部写入后台化，避免阻塞主线程
     func upsertItem(_ content: ClipboardMonitor.ClipboardContent) async throws -> StoredItem {
-        guard db != nil else { throw StorageError.databaseNotOpen }
-
         // Check for duplicate by content hash (v0.md 3.2)
-        if let existing = try findByHash(content.contentHash) {
+        if let existing = try await repository.fetchItemByHash(content.contentHash) {
             // Update lastUsedAt and useCount instead of creating new
             var updated = existing
             updated.lastUsedAt = Date()
             updated.useCount += 1
-            try updateItem(updated)
+            try await repository.updateUsage(id: updated.id, lastUsedAt: updated.lastUsedAt, useCount: updated.useCount)
             return updated
         }
 
@@ -340,43 +166,25 @@ final class StorageService {
             inlineData = content.rawData
         }
 
-        let sql = """
-            INSERT INTO clipboard_items
-            (id, type, content_hash, plain_text, app_bundle_id, created_at, last_used_at, use_count, is_pinned, size_bytes, storage_ref, raw_data)
-            VALUES (?, ?, ?, ?, ?, ?, ?, 1, 0, ?, ?, ?)
-        """
-
-        var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
-            throw StorageError.insertFailed(String(cString: sqlite3_errmsg(db)))
-        }
-        defer { sqlite3_finalize(stmt) }
-
-        sqlite3_bind_text(stmt, 1, id.uuidString, -1, SQLITE_TRANSIENT)
-        sqlite3_bind_text(stmt, 2, content.type.rawValue, -1, SQLITE_TRANSIENT)
-        sqlite3_bind_text(stmt, 3, content.contentHash, -1, SQLITE_TRANSIENT)
-        sqlite3_bind_text(stmt, 4, content.plainText, -1, SQLITE_TRANSIENT)
-        if let appID = content.appBundleID {
-            sqlite3_bind_text(stmt, 5, appID, -1, SQLITE_TRANSIENT)
-        } else {
-            sqlite3_bind_null(stmt, 5)
-        }
-        sqlite3_bind_double(stmt, 6, now.timeIntervalSince1970)
-        sqlite3_bind_double(stmt, 7, now.timeIntervalSince1970)
-        sqlite3_bind_int(stmt, 8, Int32(content.sizeBytes))
-        if let ref = storageRef {
-            sqlite3_bind_text(stmt, 9, ref, -1, SQLITE_TRANSIENT)
-        } else {
-            sqlite3_bind_null(stmt, 9)
-        }
-        if let data = inlineData {
-            sqlite3_bind_blob(stmt, 10, (data as NSData).bytes, Int32(data.count), SQLITE_TRANSIENT)
-        } else {
-            sqlite3_bind_null(stmt, 10)
-        }
-
-        guard sqlite3_step(stmt) == SQLITE_DONE else {
-            throw StorageError.insertFailed(String(cString: sqlite3_errmsg(db)))
+        do {
+            try await repository.insertItem(
+                id: id,
+                type: content.type,
+                contentHash: content.contentHash,
+                plainText: content.plainText,
+                appBundleID: content.appBundleID,
+                createdAt: now,
+                lastUsedAt: now,
+                sizeBytes: content.sizeBytes,
+                storageRef: storageRef,
+                rawData: inlineData
+            )
+        } catch {
+            // Best-effort rollback: DB insert failed after writing external payload.
+            if let storageRef {
+                try? FileManager.default.removeItem(atPath: storageRef)
+            }
+            throw error
         }
 
         return StoredItem(
@@ -395,142 +203,44 @@ final class StorageService {
         )
     }
 
-    func findByHash(_ hash: String) throws -> StoredItem? {
-        guard db != nil else { throw StorageError.databaseNotOpen }
-
-        let sql = "SELECT * FROM clipboard_items WHERE content_hash = ? LIMIT 1"
-        var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
-            throw StorageError.queryFailed(String(cString: sqlite3_errmsg(db)))
-        }
-        defer { sqlite3_finalize(stmt) }
-
-        sqlite3_bind_text(stmt, 1, hash, -1, SQLITE_TRANSIENT)
-
-        if sqlite3_step(stmt) == SQLITE_ROW, let stmt = stmt {
-            return parseItem(from: stmt)
-        }
-        return nil
+    func findByHash(_ hash: String) async throws -> StoredItem? {
+        try await repository.fetchItemByHash(hash)
     }
 
-    func findByID(_ id: UUID) throws -> StoredItem? {
-        guard db != nil else { throw StorageError.databaseNotOpen }
-
-        let sql = "SELECT * FROM clipboard_items WHERE id = ? LIMIT 1"
-        var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
-            throw StorageError.queryFailed(String(cString: sqlite3_errmsg(db)))
-        }
-        defer { sqlite3_finalize(stmt) }
-
-        sqlite3_bind_text(stmt, 1, id.uuidString, -1, SQLITE_TRANSIENT)
-
-        if sqlite3_step(stmt) == SQLITE_ROW, let stmt = stmt {
-            return parseItem(from: stmt)
-        }
-        return nil
+    func findByID(_ id: UUID) async throws -> StoredItem? {
+        try await repository.fetchItemByID(id)
     }
 
     /// Fetch recent items with pagination (v0.md 2.2)
     /// v0.13: 预分配数组容量，避免多次重新分配
-    func fetchRecent(limit: Int, offset: Int) throws -> [StoredItem] {
-        guard db != nil else { throw StorageError.databaseNotOpen }
-
-        // Pinned items first, then by lastUsedAt
-        let sql = """
-            SELECT * FROM clipboard_items
-            ORDER BY is_pinned DESC, last_used_at DESC
-            LIMIT ? OFFSET ?
-        """
-        var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
-            throw StorageError.queryFailed(String(cString: sqlite3_errmsg(db)))
-        }
-        defer { sqlite3_finalize(stmt) }
-
-        sqlite3_bind_int(stmt, 1, Int32(limit))
-        sqlite3_bind_int(stmt, 2, Int32(offset))
-
-        // v0.13: 预分配数组容量
-        var items: [StoredItem] = []
-        items.reserveCapacity(limit)
-
-        while sqlite3_step(stmt) == SQLITE_ROW {
-            if let stmt = stmt, let item = parseItem(from: stmt) {
-                items.append(item)
-            }
-        }
-        return items
+    func fetchRecent(limit: Int, offset: Int) async throws -> [StoredItem] {
+        try await repository.fetchRecent(limit: limit, offset: offset)
     }
 
-    func updateItem(_ item: StoredItem) throws {
-        guard db != nil else { throw StorageError.databaseNotOpen }
-
-        let sql = """
-            UPDATE clipboard_items
-            SET last_used_at = ?, use_count = ?, is_pinned = ?
-            WHERE id = ?
-        """
-        var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
-            throw StorageError.updateFailed(String(cString: sqlite3_errmsg(db)))
-        }
-        defer { sqlite3_finalize(stmt) }
-
-        sqlite3_bind_double(stmt, 1, item.lastUsedAt.timeIntervalSince1970)
-        sqlite3_bind_int(stmt, 2, Int32(item.useCount))
-        sqlite3_bind_int(stmt, 3, item.isPinned ? 1 : 0)
-        sqlite3_bind_text(stmt, 4, item.id.uuidString, -1, SQLITE_TRANSIENT)
-
-        guard sqlite3_step(stmt) == SQLITE_DONE else {
-            throw StorageError.updateFailed(String(cString: sqlite3_errmsg(db)))
-        }
+    func updateItem(_ item: StoredItem) async throws {
+        try await repository.updateItemMetadata(
+            id: item.id,
+            lastUsedAt: item.lastUsedAt,
+            useCount: item.useCount,
+            isPinned: item.isPinned
+        )
     }
 
-    func deleteItem(_ id: UUID) throws {
-        guard db != nil else { throw StorageError.databaseNotOpen }
-
+    func deleteItem(_ id: UUID) async throws {
         // First get the item to clean up external storage
         // v0.19: 添加错误日志
-        if let item = try findByID(id), let storageRef = item.storageRef {
+        if let item = try await repository.fetchItemByID(id), let storageRef = item.storageRef {
             do {
                 try FileManager.default.removeItem(atPath: storageRef)
             } catch {
                 print("⚠️ StorageService: Failed to delete external file '\(storageRef)': \(error.localizedDescription)")
             }
         }
-
-        let sql = "DELETE FROM clipboard_items WHERE id = ?"
-        var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
-            throw StorageError.deleteFailed(String(cString: sqlite3_errmsg(db)))
-        }
-        defer { sqlite3_finalize(stmt) }
-
-        sqlite3_bind_text(stmt, 1, id.uuidString, -1, SQLITE_TRANSIENT)
-
-        guard sqlite3_step(stmt) == SQLITE_DONE else {
-            throw StorageError.deleteFailed(String(cString: sqlite3_errmsg(db)))
-        }
+        try await repository.deleteItem(id: id)
     }
 
-    func deleteAllExceptPinned() throws {
-        guard db != nil else { throw StorageError.databaseNotOpen }
-
-        // Get external storage refs first
-        let sql1 = "SELECT storage_ref FROM clipboard_items WHERE is_pinned = 0 AND storage_ref IS NOT NULL"
-        var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql1, -1, &stmt, nil) == SQLITE_OK else {
-            throw StorageError.queryFailed(String(cString: sqlite3_errmsg(db)))
-        }
-
-        var refs: [String] = []
-        while sqlite3_step(stmt) == SQLITE_ROW {
-            if let cStr = sqlite3_column_text(stmt, 0) {
-                refs.append(String(cString: cStr))
-            }
-        }
-        sqlite3_finalize(stmt)
+    func deleteAllExceptPinned() async throws {
+        let refs = try await repository.fetchStorageRefsForUnpinned()
 
         // Delete files
         // v0.23: 添加错误日志，便于追踪文件删除失败
@@ -543,60 +253,21 @@ final class StorageService {
         }
 
         // Delete from DB
-        try execute("DELETE FROM clipboard_items WHERE is_pinned = 0")
+        try await repository.deleteAllExceptPinned()
     }
 
-    func setPin(_ id: UUID, pinned: Bool) throws {
-        guard db != nil else { throw StorageError.databaseNotOpen }
-
-        let sql = "UPDATE clipboard_items SET is_pinned = ? WHERE id = ?"
-        var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
-            throw StorageError.updateFailed(String(cString: sqlite3_errmsg(db)))
-        }
-        defer { sqlite3_finalize(stmt) }
-
-        sqlite3_bind_int(stmt, 1, pinned ? 1 : 0)
-        sqlite3_bind_text(stmt, 2, id.uuidString, -1, SQLITE_TRANSIENT)
-
-        guard sqlite3_step(stmt) == SQLITE_DONE else {
-            throw StorageError.updateFailed(String(cString: sqlite3_errmsg(db)))
-        }
+    func setPin(_ id: UUID, pinned: Bool) async throws {
+        try await repository.updatePin(id: id, pinned: pinned)
     }
 
     // MARK: - Statistics
 
-    func getItemCount() throws -> Int {
-        guard db != nil else { throw StorageError.databaseNotOpen }
-
-        let sql = "SELECT COUNT(*) FROM clipboard_items"
-        var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
-            throw StorageError.queryFailed(String(cString: sqlite3_errmsg(db)))
-        }
-        defer { sqlite3_finalize(stmt) }
-
-        if sqlite3_step(stmt) == SQLITE_ROW {
-            return Int(sqlite3_column_int(stmt, 0))
-        }
-        return 0
+    func getItemCount() async throws -> Int {
+        try await repository.getItemCount()
     }
 
-    func getTotalSize() throws -> Int {
-        guard db != nil else { throw StorageError.databaseNotOpen }
-
-        let sql = "SELECT SUM(size_bytes) FROM clipboard_items"
-        var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
-            throw StorageError.queryFailed(String(cString: sqlite3_errmsg(db)))
-        }
-        defer { sqlite3_finalize(stmt) }
-
-        if sqlite3_step(stmt) == SQLITE_ROW {
-            let value = sqlite3_column_int64(stmt, 0)
-            return Int(min(value, Int64(Int.max)))
-        }
-        return 0
+    func getTotalSize() async throws -> Int {
+        try await repository.getTotalSize()
     }
 
     /// v0.10.8: 使用缓存避免重复遍历文件系统
@@ -709,31 +380,8 @@ final class StorageService {
     }
 
     /// 获取最近使用的 app 列表（用于过滤）
-    func getRecentApps(limit: Int) throws -> [String] {
-        guard db != nil else { throw StorageError.databaseNotOpen }
-
-        let sql = """
-            SELECT app_bundle_id FROM clipboard_items
-            WHERE app_bundle_id IS NOT NULL AND app_bundle_id != ''
-            GROUP BY app_bundle_id
-            ORDER BY MAX(last_used_at) DESC
-            LIMIT ?
-        """
-        var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
-            throw StorageError.queryFailed(String(cString: sqlite3_errmsg(db)))
-        }
-        defer { sqlite3_finalize(stmt) }
-
-        sqlite3_bind_int(stmt, 1, Int32(limit))
-
-        var apps: [String] = []
-        while sqlite3_step(stmt) == SQLITE_ROW {
-            if let cStr = sqlite3_column_text(stmt, 0) {
-                apps.append(String(cString: cStr))
-            }
-        }
-        return apps
+    func getRecentApps(limit: Int) async throws -> [String] {
+        try await repository.fetchRecentApps(limit: limit)
     }
 
     // MARK: - Cleanup (v0.md 2.3)
@@ -743,32 +391,30 @@ final class StorageService {
         case full    // 低频：完整清理
     }
 
-    func performCleanup(mode: CleanupMode = .full) throws {
-        guard db != nil else { throw StorageError.databaseNotOpen }
-
+    func performCleanup(mode: CleanupMode = .full) async throws {
         // 1. By count
-        let currentCount = try getItemCount()
+        let currentCount = try await getItemCount()
         if currentCount > cleanupSettings.maxItems {
-            try cleanupByCount(target: cleanupSettings.maxItems)
+            try await cleanupByCount(target: cleanupSettings.maxItems)
         }
 
         // 2. By age (if configured)
         if let maxDays = cleanupSettings.maxDaysAge {
-            try cleanupByAge(maxDays: maxDays)
+            try await cleanupByAge(maxDays: maxDays)
         }
 
         // 3. By space (small content / database)
-        let dbSize = try getTotalSize()
+        let dbSize = try await getTotalSize()
         let maxSmallBytes = cleanupSettings.maxSmallStorageMB * 1024 * 1024
         if dbSize > maxSmallBytes {
-            try cleanupBySize(targetBytes: maxSmallBytes)
+            try await cleanupBySize(targetBytes: maxSmallBytes)
         }
 
         // 4. By space (large content / external storage) - v0.9
         let externalSize = try getExternalStorageSize()
         let maxLargeBytes = cleanupSettings.maxLargeStorageMB * 1024 * 1024
         if externalSize > maxLargeBytes {
-            try cleanupExternalStorage(targetBytes: maxLargeBytes)
+            try await cleanupExternalStorage(targetBytes: maxLargeBytes)
         }
 
         guard mode == .full else { return }
@@ -777,11 +423,11 @@ final class StorageService {
         // v0.29: 仅在 WAL 体积明显膨胀时执行 vacuum，减少非敏感时段外的磁盘抖动
         let walSizeBytes = getWALFileSize()
         if walSizeBytes > 128 * 1024 * 1024 {
-            try execute("PRAGMA incremental_vacuum(100)")
+            try await repository.incrementalVacuum(pages: 100)
         }
 
         // 6. v0.15: Clean up orphaned files (files not referenced in database)
-        try cleanupOrphanedFiles()
+        try await cleanupOrphanedFiles()
     }
 
     private func getWALFileSize() -> Int {
@@ -797,26 +443,9 @@ final class StorageService {
     /// Files that exist on disk but have no corresponding database record
     /// This fixes the storage leak where files accumulate without being tracked
     /// v0.19: 修复 - 文件删除移到后台线程，避免阻塞主线程
-    func cleanupOrphanedFiles() throws {
-        guard db != nil else { throw StorageError.databaseNotOpen }
-
-        // 1. Get all storage_ref values from database
-        let sql = "SELECT storage_ref FROM clipboard_items WHERE storage_ref IS NOT NULL AND storage_ref <> ''"
-        var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
-            throw StorageError.queryFailed(String(cString: sqlite3_errmsg(db)))
-        }
-        defer { sqlite3_finalize(stmt) }
-
-        var validRefs = Set<String>()
-        while sqlite3_step(stmt) == SQLITE_ROW {
-            if let cStr = sqlite3_column_text(stmt, 0) {
-                let ref = String(cString: cStr)
-                // Extract filename from full path (storage_ref stores full path)
-                let filename = (ref as NSString).lastPathComponent
-                validRefs.insert(filename)
-            }
-        }
+    func cleanupOrphanedFiles() async throws {
+        // 1. Get all storage_ref filenames from database
+        let validRefs = try await repository.fetchExternalRefFilenames()
 
         // 2. Enumerate all files in content directory
         let contentURL = URL(fileURLWithPath: externalStoragePath)
@@ -861,288 +490,60 @@ final class StorageService {
     /// v0.14: 深度优化 - 消除子查询 COUNT，使用单次查询 + 事务批量删除
     /// 原理：先计算当前非 pin 数量，再用 OFFSET 直接定位要删除的记录
     /// 收益：消除 O(n) 子查询，50k 数据下节省 ~200ms
-    private func cleanupByCount(target: Int) throws {
-        // Step 1: 获取当前非 pin 项目数量（单次 COUNT，比子查询更高效）
-        let countSQL = "SELECT COUNT(*) FROM clipboard_items WHERE is_pinned = 0"
-        var countStmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, countSQL, -1, &countStmt, nil) == SQLITE_OK else {
-            throw StorageError.queryFailed(String(cString: sqlite3_errmsg(db)))
-        }
-        defer { sqlite3_finalize(countStmt) }
+    private func cleanupByCount(target: Int) async throws {
+        let plan = try await repository.planCleanupByCount(target: target)
+        guard !plan.ids.isEmpty else { return }
 
-        guard sqlite3_step(countStmt) == SQLITE_ROW else {
-            throw StorageError.queryFailed("Failed to get count")
-        }
-        let currentCount = Int(sqlite3_column_int(countStmt, 0))
-
-        // 计算需要删除的数量
-        let deleteCount = currentCount - target
-        if deleteCount <= 0 { return }
-
-        // Step 2: 直接获取要删除的项目（使用 LIMIT，避免子查询）
-        let selectSQL = """
-            SELECT id, storage_ref FROM clipboard_items
-            WHERE is_pinned = 0
-            ORDER BY last_used_at ASC
-            LIMIT ?
-        """
-        var selectStmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, selectSQL, -1, &selectStmt, nil) == SQLITE_OK else {
-            throw StorageError.queryFailed(String(cString: sqlite3_errmsg(db)))
-        }
-        defer { sqlite3_finalize(selectStmt) }
-
-        sqlite3_bind_int(selectStmt, 1, Int32(deleteCount))
-
-        var idsToDelete: [UUID] = []
-        var filesToDelete: [String] = []
-        idsToDelete.reserveCapacity(deleteCount)
-
-        while sqlite3_step(selectStmt) == SQLITE_ROW {
-            if let cStr = sqlite3_column_text(selectStmt, 0),
-               let id = UUID(uuidString: String(cString: cStr)) {
-                idsToDelete.append(id)
-                if let refCStr = sqlite3_column_text(selectStmt, 1) {
-                    filesToDelete.append(String(cString: refCStr))
-                }
-            }
+        if !plan.storageRefs.isEmpty {
+            deleteFilesInParallel(plan.storageRefs)
         }
 
-        // 如果没有要删除的项目，直接返回
-        if idsToDelete.isEmpty { return }
-
-        // v0.14: 并发删除外部文件（与数据库删除并行）
-        if !filesToDelete.isEmpty {
-            deleteFilesInParallel(filesToDelete)
-        }
-
-        // v0.14: 使用事务包装批量删除，减少 fsync 次数
-        try deleteItemsBatchInTransaction(ids: idsToDelete)
+        try await repository.deleteItemsBatchInTransaction(ids: plan.ids)
     }
 
-    /// v0.10.4: 检查 sqlite3_step 返回值
     /// v0.19: 修复 - 同时删除外部存储文件，避免孤立文件累积
-    private func cleanupByAge(maxDays: Int) throws {
+    private func cleanupByAge(maxDays: Int) async throws {
         let cutoff = Date().addingTimeInterval(-Double(maxDays * 24 * 3600))
+        let plan = try await repository.planCleanupByAge(cutoff: cutoff)
+        guard !plan.ids.isEmpty else { return }
 
-        // Step 1: 获取要删除的项目（包含外部存储引用）
-        let selectSQL = """
-            SELECT id, storage_ref FROM clipboard_items
-            WHERE is_pinned = 0 AND created_at < ?
-        """
-        var selectStmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, selectSQL, -1, &selectStmt, nil) == SQLITE_OK else {
-            throw StorageError.queryFailed(String(cString: sqlite3_errmsg(db)))
-        }
-        defer { sqlite3_finalize(selectStmt) }
-
-        sqlite3_bind_double(selectStmt, 1, cutoff.timeIntervalSince1970)
-
-        var idsToDelete: [UUID] = []
-        var filesToDelete: [String] = []
-
-        while sqlite3_step(selectStmt) == SQLITE_ROW {
-            if let cStr = sqlite3_column_text(selectStmt, 0),
-               let id = UUID(uuidString: String(cString: cStr)) {
-                idsToDelete.append(id)
-                if let refCStr = sqlite3_column_text(selectStmt, 1) {
-                    filesToDelete.append(String(cString: refCStr))
-                }
-            }
+        if !plan.storageRefs.isEmpty {
+            deleteFilesInParallel(plan.storageRefs)
         }
 
-        // 如果没有要删除的项目，直接返回
-        if idsToDelete.isEmpty { return }
-
-        // Step 2: 并发删除外部文件
-        if !filesToDelete.isEmpty {
-            deleteFilesInParallel(filesToDelete)
-        }
-
-        // Step 3: 事务批量删除数据库记录
-        try deleteItemsBatchInTransaction(ids: idsToDelete)
+        try await repository.deleteItemsBatchInTransaction(ids: plan.ids)
     }
 
     /// v0.14: 深度优化 - 消除循环迭代，单次查询 + 事务批量删除
     /// 原理：一次性获取所有待删除项目，累加 size 直到达到目标，单事务删除
     /// 收益：消除多次迭代的 SQL 开销，9000 条删除从 ~4500ms 降到 ~200ms
-    private func cleanupBySize(targetBytes: Int) throws {
-        let currentSize = try getTotalSize()
-        if currentSize <= targetBytes { return }
+    private func cleanupBySize(targetBytes: Int) async throws {
+        let plan = try await repository.planCleanupByTotalSize(targetBytes: targetBytes)
+        guard !plan.ids.isEmpty else { return }
 
-        let excessBytes = currentSize - targetBytes
-
-        // 一次性获取所有非 pin 项目（按 last_used_at 排序）
-        // 使用足够大的 LIMIT 避免多次查询
-        let sql = """
-            SELECT id, size_bytes, storage_ref FROM clipboard_items
-            WHERE is_pinned = 0
-            ORDER BY last_used_at ASC
-            LIMIT 10000
-        """
-        var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
-            throw StorageError.queryFailed(String(cString: sqlite3_errmsg(db)))
-        }
-        defer { sqlite3_finalize(stmt) }
-
-        var idsToDelete: [UUID] = []
-        var filesToDelete: [String] = []
-        var accumulatedSize = 0
-
-        // 累加 size 直到达到需要删除的量
-        while sqlite3_step(stmt) == SQLITE_ROW {
-            if let cStr = sqlite3_column_text(stmt, 0),
-               let id = UUID(uuidString: String(cString: cStr)) {
-                let size = Int(sqlite3_column_int(stmt, 1))
-                let storageRef = sqlite3_column_text(stmt, 2).map { String(cString: $0) }
-
-                idsToDelete.append(id)
-                accumulatedSize += size
-                if let ref = storageRef {
-                    filesToDelete.append(ref)
-                }
-
-                // 达到目标后停止
-                if accumulatedSize >= excessBytes { break }
-            }
+        if !plan.storageRefs.isEmpty {
+            deleteFilesInParallel(plan.storageRefs)
         }
 
-        if idsToDelete.isEmpty { return }
-
-        // v0.14: 并发删除外部文件
-        if !filesToDelete.isEmpty {
-            deleteFilesInParallel(filesToDelete)
-        }
-
-        // v0.14: 事务批量删除
-        try deleteItemsBatchInTransaction(ids: idsToDelete)
+        try await repository.deleteItemsBatchInTransaction(ids: plan.ids)
     }
 
     /// v0.13: 批量删除多个项目（单条 SQL，单事务，避免 N+1 查询）
-    private func deleteItemsBatch(ids: [UUID]) throws {
-        guard !ids.isEmpty else { return }
-
-        // 构建 IN 子句的占位符
-        let placeholders = ids.map { _ in "?" }.joined(separator: ",")
-        let sql = "DELETE FROM clipboard_items WHERE id IN (\(placeholders))"
-
-        var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
-            throw StorageError.deleteFailed(String(cString: sqlite3_errmsg(db)))
-        }
-        defer { sqlite3_finalize(stmt) }
-
-        // 绑定所有 ID
-        for (index, id) in ids.enumerated() {
-            sqlite3_bind_text(stmt, Int32(index + 1), id.uuidString, -1, SQLITE_TRANSIENT)
-        }
-
-        guard sqlite3_step(stmt) == SQLITE_DONE else {
-            throw StorageError.deleteFailed(String(cString: sqlite3_errmsg(db)))
-        }
-    }
-
-    /// v0.14: 事务包装的批量删除 - 减少 fsync 次数，大幅提升性能
-    /// 原理：SQLite 默认每条 DELETE 后 fsync，事务内只在 COMMIT 时 fsync 一次
-    /// 收益：9000 条删除从 ~4500ms 降到 ~200ms
-    /// v0.20: 增强错误处理 - ROLLBACK 失败时尝试恢复数据库连接
-    /// v0.23: 改进恢复逻辑 - 添加 isDatabaseCorrupted 标志，上层可检查
-    private(set) var isDatabaseCorrupted = false
-
-    private func deleteItemsBatchInTransaction(ids: [UUID]) throws {
-        guard !ids.isEmpty else { return }
-
-        // 开始事务
-        try execute("BEGIN IMMEDIATE TRANSACTION")
-
-        do {
-            // 分批删除（每批 999 条，SQLite 变量限制）
-            let batchSize = 999
-            for batchStart in stride(from: 0, to: ids.count, by: batchSize) {
-                let batchEnd = min(batchStart + batchSize, ids.count)
-                let batch = Array(ids[batchStart..<batchEnd])
-                try deleteItemsBatch(ids: batch)
-            }
-
-            // 提交事务（单次 fsync）
-            try execute("COMMIT")
-        } catch {
-            // v0.17: 回滚事务，记录回滚错误但不改变异常传播
-            // v0.20: ROLLBACK 失败时尝试恢复数据库连接
-            // v0.23: 添加状态标志，让上层知道数据库可能损坏
-            do {
-                try execute("ROLLBACK")
-            } catch let rollbackError {
-                print("⚠️ StorageService: ROLLBACK failed: \(rollbackError), attempting database recovery")
-                // 尝试恢复数据库连接
-                do {
-                    close()
-                    try open()
-                    isDatabaseCorrupted = false
-                    print("✅ StorageService: Database connection recovered after ROLLBACK failure")
-                } catch let recoveryError {
-                    print("❌ StorageService: Database recovery failed: \(recoveryError)")
-                    // 标记数据库可能损坏，上层可以检查此标志并采取措施
-                    isDatabaseCorrupted = true
-                }
-            }
-            throw error
-        }
-    }
-
     /// v0.14: 深度优化 - 消除循环迭代，单次查询 + 事务批量删除
     /// 原理：一次性获取所有外部存储项目，累加 size 直到达到目标，单事务删除
     /// 收益：消除多次迭代的 SQL 和文件系统开销
-    private func cleanupExternalStorage(targetBytes: Int) throws {
+    private func cleanupExternalStorage(targetBytes: Int) async throws {
         // 使缓存失效，确保获取最新大小
         invalidateExternalSizeCache()
         let currentSize = try getExternalStorageSize()
         if currentSize <= targetBytes { return }
 
         let excessBytes = currentSize - targetBytes
+        let plan = try await repository.planCleanupExternalStorage(excessBytes: excessBytes)
+        guard !plan.ids.isEmpty else { return }
 
-        // 一次性获取所有有外部存储的非 pin 项目
-        let sql = """
-            SELECT id, size_bytes, storage_ref FROM clipboard_items
-            WHERE is_pinned = 0 AND storage_ref IS NOT NULL
-            ORDER BY last_used_at ASC
-            LIMIT 5000
-        """
-        var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
-            throw StorageError.queryFailed(String(cString: sqlite3_errmsg(db)))
-        }
-        defer { sqlite3_finalize(stmt) }
-
-        var idsToDelete: [UUID] = []
-        var filesToDelete: [String] = []
-        var accumulatedSize = 0
-
-        // 累加 size 直到达到需要删除的量
-        while sqlite3_step(stmt) == SQLITE_ROW {
-            if let cStr = sqlite3_column_text(stmt, 0),
-               let id = UUID(uuidString: String(cString: cStr)),
-               let refCStr = sqlite3_column_text(stmt, 2) {
-                let size = Int(sqlite3_column_int(stmt, 1))
-                let storageRef = String(cString: refCStr)
-
-                idsToDelete.append(id)
-                filesToDelete.append(storageRef)
-                accumulatedSize += size
-
-                // 达到目标后停止
-                if accumulatedSize >= excessBytes { break }
-            }
-        }
-
-        if idsToDelete.isEmpty { return }
-
-        // v0.14: 并发删除外部文件
-        deleteFilesInParallel(filesToDelete)
-
-        // v0.14: 事务批量删除数据库记录
-        try deleteItemsBatchInTransaction(ids: idsToDelete)
+        deleteFilesInParallel(plan.storageRefs)
+        try await repository.deleteItemsBatchInTransaction(ids: plan.ids)
 
         // 清理完成后使缓存失效
         invalidateExternalSizeCache()
@@ -1179,22 +580,6 @@ final class StorageService {
             }
             // v0.20: 不再使用 group.wait() 阻塞，让删除操作异步完成
             // 文件删除是尽力而为，不需要等待完成
-        }
-    }
-
-    /// v0.12: 仅删除数据库记录（不删除文件，用于并发清理场景）
-    private func deleteItemFromDB(_ id: UUID) throws {
-        let sql = "DELETE FROM clipboard_items WHERE id = ?"
-        var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
-            throw StorageError.deleteFailed(String(cString: sqlite3_errmsg(db)))
-        }
-        defer { sqlite3_finalize(stmt) }
-
-        sqlite3_bind_text(stmt, 1, id.uuidString, -1, SQLITE_TRANSIENT)
-
-        guard sqlite3_step(stmt) == SQLITE_DONE else {
-            throw StorageError.deleteFailed(String(cString: sqlite3_errmsg(db)))
         }
     }
 
@@ -1394,8 +779,8 @@ final class StorageService {
 
     /// 获取原图数据（用于预览）
     /// v0.22: 修复图片数据丢失问题 - 当 rawData 为 nil 时从数据库重新加载
-    /// 这是因为 SearchService 缓存中的 rawData 被设为 nil（v0.19 内存优化）
-    func getOriginalImageData(for item: StoredItem) -> Data? {
+    /// 这是因为搜索层缓存/索引中 rawData 为 nil（v0.19 内存优化）
+    func getOriginalImageData(for item: StoredItem) async -> Data? {
         // 1. 优先使用外部存储（大图片 >100KB）
         if let storageRef = item.storageRef {
             return try? loadExternalData(path: storageRef)
@@ -1408,7 +793,7 @@ final class StorageService {
 
         // 3. 从数据库重新加载（缓存中 rawData 为 nil 的情况）
         // 这是 v0.19 内存优化导致的问题：缓存中的 rawData 被设为 nil
-        if let freshItem = try? findByID(item.id), let rawData = freshItem.rawData {
+        if let freshItem = try? await findByID(item.id), let rawData = freshItem.rawData {
             return rawData
         }
 
@@ -1457,25 +842,4 @@ final class StorageService {
         }
     }
 
-    // MARK: - Helpers
-
-    private func execute(_ sql: String) throws {
-        guard db != nil else { throw StorageError.databaseNotOpen }
-
-        var errMsg: UnsafeMutablePointer<CChar>?
-        if sqlite3_exec(db, sql, nil, nil, &errMsg) != SQLITE_OK {
-            let error = errMsg.map { String(cString: $0) } ?? "Unknown error"
-            sqlite3_free(errMsg)
-            throw StorageError.queryFailed(error)
-        }
-    }
-
-    /// v0.19: 使用共享的 parseStoredItem 函数，消除代码重复
-    private func parseItem(from stmt: OpaquePointer) -> StoredItem? {
-        return parseStoredItem(from: stmt)
-    }
 }
-
-// MARK: - SQLITE_TRANSIENT helper
-// v0.19: 移至 SQLiteHelpers.swift，此处保留注释说明
-// 使用全局 SQLITE_TRANSIENT 常量（定义在 SQLiteHelpers.swift）

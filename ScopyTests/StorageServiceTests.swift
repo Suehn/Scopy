@@ -12,7 +12,7 @@ final class StorageServiceTests: XCTestCase {
         try await super.setUp()
         // Use in-memory database for testing
         storage = StorageService(databasePath: ":memory:")
-        try storage.open()
+        try await storage.open()
     }
 
     override func tearDown() async throws {
@@ -31,7 +31,7 @@ final class StorageServiceTests: XCTestCase {
         XCTAssertEqual(item.type, .text)
         XCTAssertFalse(item.isPinned)
 
-        let retrieved = try storage.findByID(item.id)
+        let retrieved = try await storage.findByID(item.id)
         XCTAssertNotNil(retrieved)
         XCTAssertEqual(retrieved?.plainText, "Hello, World!")
     }
@@ -45,10 +45,10 @@ final class StorageServiceTests: XCTestCase {
         }
 
         // Fetch with pagination
-        let page1 = try storage.fetchRecent(limit: 5, offset: 0)
+        let page1 = try await storage.fetchRecent(limit: 5, offset: 0)
         XCTAssertEqual(page1.count, 5)
 
-        let page2 = try storage.fetchRecent(limit: 5, offset: 5)
+        let page2 = try await storage.fetchRecent(limit: 5, offset: 5)
         XCTAssertEqual(page2.count, 5)
 
         // Items should be different
@@ -62,13 +62,15 @@ final class StorageServiceTests: XCTestCase {
         let item = try await storage.upsertItem(content)
 
         // Verify exists
-        XCTAssertNotNil(try storage.findByID(item.id))
+        let existing = try await storage.findByID(item.id)
+        XCTAssertNotNil(existing)
 
         // Delete
-        try storage.deleteItem(item.id)
+        try await storage.deleteItem(item.id)
 
         // Verify deleted
-        XCTAssertNil(try storage.findByID(item.id))
+        let missing = try await storage.findByID(item.id)
+        XCTAssertNil(missing)
     }
 
     func testDeleteAllExceptPinned() async throws {
@@ -79,15 +81,15 @@ final class StorageServiceTests: XCTestCase {
         }
 
         // Pin one item
-        let items = try storage.fetchRecent(limit: 10, offset: 0)
+        let items = try await storage.fetchRecent(limit: 10, offset: 0)
         let itemToPin = items[0]
-        try storage.setPin(itemToPin.id, pinned: true)
+        try await storage.setPin(itemToPin.id, pinned: true)
 
         // Clear all except pinned
-        try storage.deleteAllExceptPinned()
+        try await storage.deleteAllExceptPinned()
 
         // Should only have 1 item left
-        let remaining = try storage.fetchRecent(limit: 10, offset: 0)
+        let remaining = try await storage.fetchRecent(limit: 10, offset: 0)
         XCTAssertEqual(remaining.count, 1)
         XCTAssertTrue(remaining[0].isPinned)
     }
@@ -106,11 +108,11 @@ final class StorageServiceTests: XCTestCase {
         XCTAssertEqual(item1.id, item2.id)
 
         // Use count should be incremented
-        let retrieved = try storage.findByID(item1.id)
+        let retrieved = try await storage.findByID(item1.id)
         XCTAssertEqual(retrieved?.useCount, 2)
 
         // Total count should be 1
-        let count = try storage.getItemCount()
+        let count = try await storage.getItemCount()
         XCTAssertEqual(count, 1)
     }
 
@@ -135,7 +137,7 @@ final class StorageServiceTests: XCTestCase {
         _ = try await storage.upsertItem(content2)
 
         // Should have 2 items
-        let count = try storage.getItemCount()
+        let count = try await storage.getItemCount()
         XCTAssertEqual(count, 2)
     }
 
@@ -148,13 +150,13 @@ final class StorageServiceTests: XCTestCase {
         XCTAssertFalse(item.isPinned)
 
         // Pin
-        try storage.setPin(item.id, pinned: true)
-        var retrieved = try storage.findByID(item.id)
+        try await storage.setPin(item.id, pinned: true)
+        var retrieved = try await storage.findByID(item.id)
         XCTAssertTrue(retrieved?.isPinned ?? false)
 
         // Unpin
-        try storage.setPin(item.id, pinned: false)
-        retrieved = try storage.findByID(item.id)
+        try await storage.setPin(item.id, pinned: false)
+        retrieved = try await storage.findByID(item.id)
         XCTAssertFalse(retrieved?.isPinned ?? true)
     }
 
@@ -166,34 +168,37 @@ final class StorageServiceTests: XCTestCase {
         }
 
         // Pin the third item
-        let items = try storage.fetchRecent(limit: 10, offset: 0)
-        try storage.setPin(items[2].id, pinned: true)
+        let items = try await storage.fetchRecent(limit: 10, offset: 0)
+        try await storage.setPin(items[2].id, pinned: true)
 
         // Fetch again - pinned should be first
-        let fetched = try storage.fetchRecent(limit: 10, offset: 0)
+        let fetched = try await storage.fetchRecent(limit: 10, offset: 0)
         XCTAssertTrue(fetched[0].isPinned)
     }
 
     // MARK: - Statistics Tests
 
     func testItemCount() async throws {
-        XCTAssertEqual(try storage.getItemCount(), 0)
+        let initialCount = try await storage.getItemCount()
+        XCTAssertEqual(initialCount, 0)
 
         for i in 0..<10 {
             let content = makeTestContent(text: "Item \(i)")
             _ = try await storage.upsertItem(content)
         }
 
-        XCTAssertEqual(try storage.getItemCount(), 10)
+        let finalCount = try await storage.getItemCount()
+        XCTAssertEqual(finalCount, 10)
     }
 
     func testTotalSize() async throws {
-        XCTAssertEqual(try storage.getTotalSize(), 0)
+        let initialSize = try await storage.getTotalSize()
+        XCTAssertEqual(initialSize, 0)
 
         let content = makeTestContent(text: "12345") // 5 bytes
         _ = try await storage.upsertItem(content)
 
-        let size = try storage.getTotalSize()
+        let size = try await storage.getTotalSize()
         XCTAssertEqual(size, 5)
     }
 
@@ -209,13 +214,15 @@ final class StorageServiceTests: XCTestCase {
             try await Task.sleep(nanoseconds: 10_000_000) // 10ms for ordering
         }
 
-        XCTAssertEqual(try storage.getItemCount(), 10)
+        let countBeforeCleanup = try await storage.getItemCount()
+        XCTAssertEqual(countBeforeCleanup, 10)
 
         // Cleanup
-        try storage.performCleanup()
+        try await storage.performCleanup()
 
         // Should have max 5 items
-        XCTAssertLessThanOrEqual(try storage.getItemCount(), 5)
+        let countAfterCleanup = try await storage.getItemCount()
+        XCTAssertLessThanOrEqual(countAfterCleanup, 5)
     }
 
     func testCleanupPreservesPinned() async throws {
@@ -228,15 +235,15 @@ final class StorageServiceTests: XCTestCase {
         }
 
         // Pin 2 items
-        let items = try storage.fetchRecent(limit: 10, offset: 0)
-        try storage.setPin(items[0].id, pinned: true)
-        try storage.setPin(items[1].id, pinned: true)
+        let items = try await storage.fetchRecent(limit: 10, offset: 0)
+        try await storage.setPin(items[0].id, pinned: true)
+        try await storage.setPin(items[1].id, pinned: true)
 
         // Cleanup
-        try storage.performCleanup()
+        try await storage.performCleanup()
 
         // All pinned items should survive
-        let remaining = try storage.fetchRecent(limit: 10, offset: 0)
+        let remaining = try await storage.fetchRecent(limit: 10, offset: 0)
         let pinnedCount = remaining.filter { $0.isPinned }.count
         XCTAssertEqual(pinnedCount, 2)
     }
