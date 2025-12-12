@@ -163,21 +163,18 @@ struct HistoryItemView: View, Equatable {
     @State private var loadedThumbnail: NSImage?
     @State private var thumbnailLoadTask: Task<Void, Never>?
 
-    // 静态图标缓存 - 避免重复调用 NSWorkspace API
-    // v0.10.4: 添加锁保护，确保线程安全
-    // v0.10.8: 添加 LRU 清理，防止内存无限增长
-    private static var iconCache: [String: NSImage] = [:]
-    private static var iconAccessOrder: [String] = []
-    private static let iconCacheLock = NSLock()
-    private static let maxIconCacheSize = 50
+    // 静态缓存（v0.29: NSCache 替代手写 LRU，降低锁竞争）
+    private static let iconCache: NSCache<NSString, NSImage> = {
+        let cache = NSCache<NSString, NSImage>()
+        cache.countLimit = 50
+        return cache
+    }()
 
-    // v0.18: 缩略图缓存 - 避免 List 视图回收时重复磁盘 I/O
-    // key: thumbnailPath, value: NSImage
-    // 实测: 234 张缩略图约 5MB，1000 张约 20MB，可以大幅放宽限制
-    private static var thumbnailCache: [String: NSImage] = [:]
-    private static var thumbnailAccessOrder: [String] = []
-    private static let thumbnailCacheLock = NSLock()
-    private static let maxThumbnailCacheSize = 1000  // 约 20MB 内存，换取流畅滚动
+    private static let thumbnailCache: NSCache<NSString, NSImage> = {
+        let cache = NSCache<NSString, NSImage>()
+        cache.countLimit = 1000
+        return cache
+    }()
 
     // MARK: - Equatable
 
@@ -212,40 +209,18 @@ struct HistoryItemView: View, Equatable {
             return cached
         }
 
-        // 回退到本地静态缓存
-        return Self.iconCacheLock.withLock {
-            // 检查本地缓存
-            if let cached = Self.iconCache[bundleID] {
-                // 更新 LRU 访问顺序
-                if let index = Self.iconAccessOrder.firstIndex(of: bundleID) {
-                    Self.iconAccessOrder.remove(at: index)
-                }
-                Self.iconAccessOrder.append(bundleID)
-                return cached
-            }
-
-            // 缓存未命中，获取图标（仅在预加载未覆盖时执行）
-            guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) else {
-                return nil
-            }
-            let icon = NSWorkspace.shared.icon(forFile: url.path)
-
-            // LRU 清理：如果缓存满了，移除最旧的
-            if Self.iconCache.count >= Self.maxIconCacheSize,
-               let oldest = Self.iconAccessOrder.first {
-                Self.iconCache.removeValue(forKey: oldest)
-                Self.iconAccessOrder.removeFirst()
-            }
-
-            // 写入本地缓存
-            Self.iconCache[bundleID] = icon
-            Self.iconAccessOrder.append(bundleID)
-
-            // 同时写入全局缓存，供后续使用
-            IconCacheSync.shared.setIcon(icon, for: bundleID)
-
-            return icon
+        if let cached = Self.iconCache.object(forKey: bundleID as NSString) {
+            return cached
         }
+
+        guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) else {
+            return nil
+        }
+
+        let icon = NSWorkspace.shared.icon(forFile: url.path)
+        Self.iconCache.setObject(icon, forKey: bundleID as NSString)
+        IconCacheSync.shared.setIcon(icon, for: bundleID)
+        return icon
     }
 
     private var thumbnailHeight: CGFloat {
@@ -507,30 +482,11 @@ struct HistoryItemView: View, Equatable {
 
     /// v0.18: 从缓存获取缩略图（不做磁盘 I/O）
     private func getCachedThumbnail(path: String) -> NSImage? {
-        Self.thumbnailCacheLock.withLock {
-            if let cached = Self.thumbnailCache[path] {
-                if let index = Self.thumbnailAccessOrder.firstIndex(of: path) {
-                    Self.thumbnailAccessOrder.remove(at: index)
-                }
-                Self.thumbnailAccessOrder.append(path)
-                return cached
-            }
-            return nil
-        }
+        return Self.thumbnailCache.object(forKey: path as NSString)
     }
 
     private func storeThumbnailInCache(_ image: NSImage, path: String) {
-        Self.thumbnailCacheLock.withLock {
-            if Self.thumbnailCache[path] == nil {
-                if Self.thumbnailCache.count >= Self.maxThumbnailCacheSize,
-                   let oldest = Self.thumbnailAccessOrder.first {
-                    Self.thumbnailCache.removeValue(forKey: oldest)
-                    Self.thumbnailAccessOrder.removeFirst()
-                }
-                Self.thumbnailCache[path] = image
-                Self.thumbnailAccessOrder.append(path)
-            }
-        }
+        Self.thumbnailCache.setObject(image, forKey: path as NSString)
     }
 
     private func loadThumbnailIfNeeded(path: String) {

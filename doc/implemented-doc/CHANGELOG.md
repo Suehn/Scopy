@@ -7,6 +7,42 @@
 
 ---
 
+## [v0.29] - 2025-12-12
+
+### P0 渐进搜索准确性/性能
+
+- **渐进式全量模糊搜索校准** - fuzzy/fuzzyPlus 巨大候选首屏预筛快速返回，后台强制全量校准
+  - **实现** - `SearchRequest.forceFullFuzzy` 禁用预筛；`AppState.search` 对 `total=-1` 触发 refine；`SearchService` 预筛扩展至 fuzzyPlus 单词查询
+- **预筛首屏与分页一致性补强** - 用户抢先滚动时不再出现弱相关/错序条目
+  - **实现** - `AppState.loadMore` 在 `total=-1` 时先 `forceFullFuzzy` 重拉前 N 条，再继续分页
+
+### P1 性能/内存
+
+- **全量模糊索引内存缩减** - `IndexedItem` 去掉 `plainText` 双份驻留，按页回表取完整项
+- **大内容外部写入后台化** - `StorageService.upsertItem` async + detached 原子写文件
+- **AppState 观察面收缩** - `service`/缓存/Task 标注 `@ObservationIgnored` 降低重绘半径
+
+### P2 细节优化
+
+- **NSCache 替代手写 LRU** - icon/thumbnail 缓存锁竞争降低
+- **Vacuum 按 WAL 阈值调度** - WAL>128MB 才执行 incremental vacuum
+
+### 修改文件
+- `Scopy/Observables/AppState.swift`
+- `Scopy/Protocols/ClipboardServiceProtocol.swift`
+- `Scopy/Services/SearchService.swift`
+- `Scopy/Services/StorageService.swift`
+- `Scopy/Services/RealClipboardService.swift`
+- `Scopy/Views/HistoryListView.swift`
+- `ScopyTests/*`
+- `doc/implemented-doc/v0.29.md`
+
+### 测试
+- 单元测试: `make test-unit` **52 tests passed** (1 perf skipped)
+- 性能测试: `make test-perf` **22/22 passed（含重载）**
+
+---
+
 ## [v0.28] - 2025-12-12
 
 ### P0 性能优化

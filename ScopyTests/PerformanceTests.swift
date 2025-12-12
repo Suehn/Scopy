@@ -33,7 +33,7 @@ final class PerformanceTests: XCTestCase {
 
         for i in 0..<1000 {
             let content = makeContent("Bulk insert test item \(i) with some content")
-            _ = try storage.upsertItem(content)
+            _ = try await storage.upsertItem(content)
         }
 
         let elapsed = CFAbsoluteTimeGetCurrent() - startTime
@@ -51,7 +51,7 @@ final class PerformanceTests: XCTestCase {
     func testFetchRecentPerformance() async throws {
         // Populate with data
         for i in 0..<5000 {
-            _ = try storage.upsertItem(makeContent("Performance test item \(i)"))
+            _ = try await storage.upsertItem(makeContent("Performance test item \(i)"))
         }
 
         let startTime = CFAbsoluteTimeGetCurrent()
@@ -84,7 +84,7 @@ final class PerformanceTests: XCTestCase {
                 "Performance benchmark \(i)",
                 "Quick brown fox \(i)"
             ]
-            _ = try storage.upsertItem(makeContent(texts[i % texts.count]))
+            _ = try await storage.upsertItem(makeContent(texts[i % texts.count]))
         }
         search.invalidateCache()
 
@@ -124,7 +124,7 @@ final class PerformanceTests: XCTestCase {
     func testSearchPerformance10kItems() async throws {
         // Populate with 10000 items
         for i in 0..<10000 {
-            _ = try storage.upsertItem(makeContent("Search benchmark item \(i) with text"))
+            _ = try await storage.upsertItem(makeContent("Search benchmark item \(i) with text"))
         }
         search.invalidateCache()
 
@@ -158,7 +158,7 @@ final class PerformanceTests: XCTestCase {
     func testShortQueryPerformance() async throws {
         // Populate
         for i in 0..<1000 {
-            _ = try storage.upsertItem(makeContent("Test item \(i) a b c"))
+            _ = try await storage.upsertItem(makeContent("Test item \(i) a b c"))
         }
         search.invalidateCache()
 
@@ -186,7 +186,7 @@ final class PerformanceTests: XCTestCase {
     func testSearchModeComparison() async throws {
         // Populate
         for i in 0..<3000 {
-            _ = try storage.upsertItem(makeContent("Mode comparison test item \(i)"))
+            _ = try await storage.upsertItem(makeContent("Mode comparison test item \(i)"))
         }
         search.invalidateCache()
 
@@ -231,7 +231,7 @@ final class PerformanceTests: XCTestCase {
 
         // Insert 5000 items
         for i in 0..<5000 {
-            _ = try storage.upsertItem(makeContent("Memory test item \(i) with some content data"))
+            _ = try await storage.upsertItem(makeContent("Memory test item \(i) with some content data"))
         }
 
         let afterInsertMemory = getMemoryUsage()
@@ -253,7 +253,7 @@ final class PerformanceTests: XCTestCase {
     func testConcurrentReadPerformance() async throws {
         // Populate
         for i in 0..<1000 {
-            _ = try storage.upsertItem(makeContent("Concurrent test item \(i)"))
+            _ = try await storage.upsertItem(makeContent("Concurrent test item \(i)"))
         }
 
         let startTime = CFAbsoluteTimeGetCurrent()
@@ -288,12 +288,12 @@ final class PerformanceTests: XCTestCase {
 
         // First pass - all unique
         for content in uniqueContents {
-            _ = try storage.upsertItem(content)
+            _ = try await storage.upsertItem(content)
         }
 
         // Second pass - all duplicates
         for content in uniqueContents {
-            _ = try storage.upsertItem(content)
+            _ = try await storage.upsertItem(content)
         }
 
         let elapsed = CFAbsoluteTimeGetCurrent() - startTime
@@ -312,7 +312,7 @@ final class PerformanceTests: XCTestCase {
     func testFirstScreenLoadPerformance() async throws {
         // Populate with data
         for i in 0..<5000 {
-            _ = try storage.upsertItem(makeContent("First screen test item \(i)"))
+            _ = try await storage.upsertItem(makeContent("First screen test item \(i)"))
         }
 
         var times: [Double] = []
@@ -345,7 +345,7 @@ final class PerformanceTests: XCTestCase {
         // Perform many operations
         for i in 0..<500 {
             // Insert
-            _ = try storage.upsertItem(makeContent("Stability test item \(i)"))
+            _ = try await storage.upsertItem(makeContent("Stability test item \(i)"))
 
             // Search
             let request = SearchRequest(query: "stability", mode: .fuzzy, limit: 10, offset: 0)
@@ -372,7 +372,7 @@ final class PerformanceTests: XCTestCase {
     func testSearchDebounceEffect() async throws {
         // Populate
         for i in 0..<1000 {
-            _ = try storage.upsertItem(makeContent("Debounce test item \(i)"))
+            _ = try await storage.upsertItem(makeContent("Debounce test item \(i)"))
         }
         search.invalidateCache()
 
@@ -403,7 +403,7 @@ final class PerformanceTests: XCTestCase {
     func testCleanupPerformance() async throws {
         // Insert many items
         for i in 0..<1000 {
-            _ = try storage.upsertItem(makeContent("Cleanup test item \(i)"))
+            _ = try await storage.upsertItem(makeContent("Cleanup test item \(i)"))
         }
 
         storage.cleanupSettings.maxItems = 100
@@ -436,7 +436,7 @@ final class PerformanceTests: XCTestCase {
         // 插入 10k 小内容项（内联存储）
         for i in 0..<10_000 {
             let text = "Inline cleanup test item \(i) with some text content"
-            _ = try diskStorage.upsertItem(makeContent(text))
+            _ = try await diskStorage.upsertItem(makeContent(text))
         }
 
         diskStorage.cleanupSettings.maxItems = 1000
@@ -445,7 +445,7 @@ final class PerformanceTests: XCTestCase {
         for iteration in 0..<5 {
             // 重新插入数据
             for i in 0..<9000 {
-                _ = try diskStorage.upsertItem(makeContent("Refill item \(i) \(UUID().uuidString)"))
+                _ = try await diskStorage.upsertItem(makeContent("Refill item \(i) \(UUID().uuidString)"))
             }
 
             // v0.14: 在每次清理前执行 WAL checkpoint，模拟真实场景
@@ -487,7 +487,7 @@ final class PerformanceTests: XCTestCase {
                 contentHash: "ext-cleanup-\(i)-\(UUID().uuidString)",
                 sizeBytes: blob.count
             )
-            _ = try diskStorage.upsertItem(content)
+            _ = try await diskStorage.upsertItem(content)
         }
 
         diskStorage.cleanupSettings.maxItems = 1000
@@ -519,7 +519,7 @@ final class PerformanceTests: XCTestCase {
         // 插入 50k 项
         for i in 0..<50_000 {
             let text = "Large scale cleanup test item \(i) with content"
-            _ = try diskStorage.upsertItem(makeContent(text))
+            _ = try await diskStorage.upsertItem(makeContent(text))
         }
 
         diskStorage.cleanupSettings.maxItems = 5000
@@ -553,7 +553,7 @@ final class PerformanceTests: XCTestCase {
         for i in 0..<25_000 {
             let len = 40 + (i % 200)
             let text = "Note \(i) " + String(repeating: "lorem ipsum ", count: len / 11)
-            _ = try diskStorage.upsertItem(makeContent(text))
+            _ = try await diskStorage.upsertItem(makeContent(text))
         }
         diskSearch.invalidateCache()
 
@@ -588,28 +588,28 @@ final class PerformanceTests: XCTestCase {
 
         // Texts
         for i in 0..<2_500 {
-            _ = try diskStorage.upsertItem(makeContent("Mixed text \(i) lorem ipsum dolor sit amet"))
+            _ = try await diskStorage.upsertItem(makeContent("Mixed text \(i) lorem ipsum dolor sit amet"))
         }
 
         // HTML
         for i in 0..<400 {
-            _ = try diskStorage.upsertItem(makeHTMLContent(index: i))
+            _ = try await diskStorage.upsertItem(makeHTMLContent(index: i))
         }
 
         // RTF
         for i in 0..<400 {
-            _ = try diskStorage.upsertItem(makeRTFContent(index: i))
+            _ = try await diskStorage.upsertItem(makeRTFContent(index: i))
         }
 
         // Large images -> external storage
         for i in 0..<300 {
-            _ = try diskStorage.upsertItem(makeImageContent(index: i, byteSize: 120 * 1024))
+            _ = try await diskStorage.upsertItem(makeImageContent(index: i, byteSize: 120 * 1024))
         }
 
         // File entries
         for i in 0..<300 {
             let path = baseURL.appendingPathComponent("file\(i).txt").path
-            _ = try diskStorage.upsertItem(makeFileContent(path: path))
+            _ = try await diskStorage.upsertItem(makeFileContent(path: path))
         }
 
         diskSearch.invalidateCache()
@@ -651,7 +651,7 @@ final class PerformanceTests: XCTestCase {
         for i in 0..<50_000 {
             let len = 80 + (i % 400)
             let text = "Heavy note \(i) " + String(repeating: "lorem ipsum ", count: len / 11)
-            _ = try diskStorage.upsertItem(makeContent(text))
+            _ = try await diskStorage.upsertItem(makeContent(text))
         }
         diskSearch.invalidateCache()
 
@@ -688,7 +688,7 @@ final class PerformanceTests: XCTestCase {
         for i in 0..<75_000 {
             let len = 120 + (i % 500)
             let text = makeRealisticText(index: i, base: "Ultra note", length: len)
-            _ = try diskStorage.upsertItem(makeContent(text))
+            _ = try await diskStorage.upsertItem(makeContent(text))
         }
         diskSearch.invalidateCache()
 
@@ -714,7 +714,7 @@ final class PerformanceTests: XCTestCase {
     func testRegexPerformance20kItems() async throws {
         for i in 0..<20_000 {
             let text = makeRealisticText(index: i, base: "Regex note", length: 80 + (i % 120))
-            _ = try storage.upsertItem(makeContent(text))
+            _ = try await storage.upsertItem(makeContent(text))
         }
         search.invalidateCache()
 
@@ -753,7 +753,7 @@ final class PerformanceTests: XCTestCase {
                 contentHash: "heavy-img-\(i)",
                 sizeBytes: blob.count
             )
-            _ = try diskStorage.upsertItem(content)
+            _ = try await diskStorage.upsertItem(content)
         }
 
         let externalSize = try diskStorage.getExternalStorageSize()

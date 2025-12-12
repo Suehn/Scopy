@@ -310,7 +310,8 @@ final class StorageService {
     // MARK: - CRUD Operations
 
     /// Insert or update item (handles deduplication per v0.md 3.2)
-    func upsertItem(_ content: ClipboardMonitor.ClipboardContent) throws -> StoredItem {
+    /// v0.29: 大内容外部写入后台化，避免阻塞主线程
+    func upsertItem(_ content: ClipboardMonitor.ClipboardContent) async throws -> StoredItem {
         guard db != nil else { throw StorageError.databaseNotOpen }
 
         // Check for duplicate by content hash (v0.md 3.2)
@@ -330,7 +331,11 @@ final class StorageService {
 
         // Decide storage location based on size (v0.md 2.1)
         if content.sizeBytes >= Self.externalStorageThreshold, let rawData = content.rawData {
-            storageRef = try storeExternally(id: id, data: rawData, type: content.type)
+            let path = makeExternalPath(id: id, type: content.type)
+            try await Task.detached(priority: .utility) {
+                try StorageService.writeAtomically(rawData, to: path)
+            }.value
+            storageRef = path
         } else {
             inlineData = content.rawData
         }
@@ -769,10 +774,23 @@ final class StorageService {
         guard mode == .full else { return }
 
         // 5. SQLite housekeeping (v0.md 2.3)
-        try execute("PRAGMA incremental_vacuum(100)")
+        // v0.29: 仅在 WAL 体积明显膨胀时执行 vacuum，减少非敏感时段外的磁盘抖动
+        let walSizeBytes = getWALFileSize()
+        if walSizeBytes > 128 * 1024 * 1024 {
+            try execute("PRAGMA incremental_vacuum(100)")
+        }
 
         // 6. v0.15: Clean up orphaned files (files not referenced in database)
         try cleanupOrphanedFiles()
+    }
+
+    private func getWALFileSize() -> Int {
+        let walPath = dbPath + "-wal"
+        if let attrs = try? FileManager.default.attributesOfItem(atPath: walPath),
+           let size = attrs[.size] as? NSNumber {
+            return size.intValue
+        }
+        return 0
     }
 
     /// v0.15: Clean up orphaned files in external storage directory
@@ -1183,7 +1201,7 @@ final class StorageService {
     // MARK: - External Storage
 
     /// v0.17: 原子文件写入 - 使用临时文件 + 重命名，避免崩溃时文件损坏
-    private func writeAtomically(_ data: Data, to path: String) throws {
+    nonisolated static func writeAtomically(_ data: Data, to path: String) throws {
         let tempPath = path + ".tmp"
         let tempURL = URL(fileURLWithPath: tempPath)
         let finalURL = URL(fileURLWithPath: path)
@@ -1200,7 +1218,7 @@ final class StorageService {
         try FileManager.default.moveItem(at: tempURL, to: finalURL)
     }
 
-    private func storeExternally(id: UUID, data: Data, type: ClipboardItemType) throws -> String {
+    private func makeExternalPath(id: UUID, type: ClipboardItemType) -> String {
         let ext: String
         switch type {
         case .image: ext = "png"
@@ -1210,15 +1228,7 @@ final class StorageService {
         }
 
         let filename = "\(id.uuidString).\(ext)"
-        let path = (externalStoragePath as NSString).appendingPathComponent(filename)
-
-        do {
-            // v0.17: 使用原子写入
-            try writeAtomically(data, to: path)
-            return path
-        } catch {
-            throw StorageError.fileOperationFailed("Failed to write external file: \(error)")
-        }
+        return (externalStoragePath as NSString).appendingPathComponent(filename)
     }
 
     /// v0.10.7: 验证存储引用是否为有效的 UUID 文件名（防止路径遍历攻击）
@@ -1309,7 +1319,7 @@ final class StorageService {
     func saveThumbnail(_ data: Data, for contentHash: String) throws {
         let path = (thumbnailCachePath as NSString).appendingPathComponent("\(contentHash).png")
         do {
-            try writeAtomically(data, to: path)
+            try Self.writeAtomically(data, to: path)
         } catch {
             throw StorageError.fileOperationFailed("Failed to save thumbnail: \(error)")
         }
@@ -1374,7 +1384,7 @@ final class StorageService {
         // v0.17: 使用原子写入保存缩略图
         let path = (thumbnailCachePath as NSString).appendingPathComponent("\(contentHash).png")
         do {
-            try writeAtomically(pngData, to: path)
+            try Self.writeAtomically(pngData, to: path)
             return path
         } catch {
             print("Failed to save thumbnail: \(error)")

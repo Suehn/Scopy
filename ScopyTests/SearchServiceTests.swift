@@ -120,9 +120,9 @@ final class SearchServiceTests: XCTestCase {
 
     func testAppFilter() async throws {
         // Insert items from different apps
-        _ = try storage.upsertItem(makeContent("Safari text", app: "com.apple.Safari"))
-        _ = try storage.upsertItem(makeContent("Xcode text", app: "com.apple.dt.Xcode"))
-        _ = try storage.upsertItem(makeContent("Terminal text", app: "com.apple.Terminal"))
+        _ = try await storage.upsertItem(makeContent("Safari text", app: "com.apple.Safari"))
+        _ = try await storage.upsertItem(makeContent("Xcode text", app: "com.apple.dt.Xcode"))
+        _ = try await storage.upsertItem(makeContent("Terminal text", app: "com.apple.Terminal"))
         search.invalidateCache()
 
         let request = SearchRequest(
@@ -140,8 +140,8 @@ final class SearchServiceTests: XCTestCase {
 
     func testTypeFilter() async throws {
         // Insert different types
-        _ = try storage.upsertItem(makeContent("Text content", type: .text))
-        _ = try storage.upsertItem(makeContent("HTML content", type: .html))
+        _ = try await storage.upsertItem(makeContent("Text content", type: .text))
+        _ = try await storage.upsertItem(makeContent("HTML content", type: .html))
         search.invalidateCache()
 
         let request = SearchRequest(
@@ -158,9 +158,9 @@ final class SearchServiceTests: XCTestCase {
     }
 
     func testEmptyQueryWithAppFilterReturnsAll() async throws {
-        _ = try storage.upsertItem(makeContent("A1", app: "com.test.one"))
-        _ = try storage.upsertItem(makeContent("A2", app: "com.test.one"))
-        _ = try storage.upsertItem(makeContent("B1", app: "com.test.two"))
+        _ = try await storage.upsertItem(makeContent("A1", app: "com.test.one"))
+        _ = try await storage.upsertItem(makeContent("A2", app: "com.test.one"))
+        _ = try await storage.upsertItem(makeContent("B1", app: "com.test.two"))
         search.invalidateCache()
 
         let request = SearchRequest(
@@ -179,7 +179,7 @@ final class SearchServiceTests: XCTestCase {
 
     func testFilteredPaginationHasMore() async throws {
         for i in 0..<60 {
-            _ = try storage.upsertItem(makeContent("Item \(i)", app: "com.test.paged"))
+            _ = try await storage.upsertItem(makeContent("Item \(i)", app: "com.test.paged"))
         }
         search.invalidateCache()
 
@@ -263,7 +263,7 @@ final class SearchServiceTests: XCTestCase {
         let result1 = try await search.search(request: request)
 
         // Add new item
-        _ = try storage.upsertItem(makeContent("New Item 999"))
+        _ = try await storage.upsertItem(makeContent("New Item 999"))
 
         // Invalidate cache
         search.invalidateCache()
@@ -278,9 +278,9 @@ final class SearchServiceTests: XCTestCase {
     // MARK: - Edge Cases
 
     func testSpecialCharactersInQuery() async throws {
-        _ = try storage.upsertItem(makeContent("Test with \"quotes\""))
-        _ = try storage.upsertItem(makeContent("Test with * asterisk"))
-        _ = try storage.upsertItem(makeContent("Test with - dash"))
+        _ = try await storage.upsertItem(makeContent("Test with \"quotes\""))
+        _ = try await storage.upsertItem(makeContent("Test with * asterisk"))
+        _ = try await storage.upsertItem(makeContent("Test with - dash"))
         search.invalidateCache()
 
         // These should not crash
@@ -305,9 +305,9 @@ final class SearchServiceTests: XCTestCase {
     }
 
     func testCaseSensitivity() async throws {
-        _ = try storage.upsertItem(makeContent("UPPERCASE"))
-        _ = try storage.upsertItem(makeContent("lowercase"))
-        _ = try storage.upsertItem(makeContent("MixedCase"))
+        _ = try await storage.upsertItem(makeContent("UPPERCASE"))
+        _ = try await storage.upsertItem(makeContent("lowercase"))
+        _ = try await storage.upsertItem(makeContent("MixedCase"))
         search.invalidateCache()
 
         let request = SearchRequest(query: "case", mode: .fuzzy, limit: 50, offset: 0)
@@ -318,9 +318,9 @@ final class SearchServiceTests: XCTestCase {
     }
 
     func testFuzzyPinnedItemsRankFirst() async throws {
-        let pinned = try storage.upsertItem(makeContent("axbyc"))
+        let pinned = try await storage.upsertItem(makeContent("axbyc"))
         try storage.setPin(pinned.id, pinned: true)
-        _ = try storage.upsertItem(makeContent("abc"))
+        _ = try await storage.upsertItem(makeContent("abc"))
         search.invalidateCache()
 
         let request = SearchRequest(query: "abc", mode: .fuzzy, limit: 10, offset: 0)
@@ -341,7 +341,7 @@ final class SearchServiceTests: XCTestCase {
             } else {
                 text = "Item \(i) random content xyz"
             }
-            _ = try storage.upsertItem(makeContent(text))
+            _ = try await storage.upsertItem(makeContent(text))
         }
         search.invalidateCache()
     }

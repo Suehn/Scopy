@@ -37,7 +37,7 @@ final class AppState {
     // MARK: - Properties
 
     // 后端服务（通过协议访问）
-    var service: ClipboardServiceProtocol
+    @ObservationIgnored var service: ClipboardServiceProtocol
 
     // UI 状态
     var items: [ClipboardItemDTO] = [] {
@@ -45,8 +45,8 @@ final class AppState {
             invalidatePinnedCache()
         }
     }
-    private var pinnedItemsCache: [ClipboardItemDTO]?
-    private var unpinnedItemsCache: [ClipboardItemDTO]?
+    @ObservationIgnored private var pinnedItemsCache: [ClipboardItemDTO]?
+    @ObservationIgnored private var unpinnedItemsCache: [ClipboardItemDTO]?
 
     /// v0.16.2: 手动失效缓存（用于 items 数组被修改而非重新赋值的情况）
     private func invalidatePinnedCache() {
@@ -92,7 +92,7 @@ final class AppState {
 
     // 滚动状态 (v0.9.3 - 快速滚动时禁用悬停高亮)
     var isScrolling: Bool = false
-    private var scrollEndTask: Task<Void, Never>?
+    @ObservationIgnored private var scrollEndTask: Task<Void, Never>?
 
     // 搜索版本号 - 用于防止旧搜索覆盖新结果 (v0.10.4)
     private var searchVersion: Int = 0
@@ -108,8 +108,8 @@ final class AppState {
     // 存储统计
     var storageStats: (itemCount: Int, sizeBytes: Int) = (0, 0)
     // v0.15.2: 磁盘占用统计（带 120 秒缓存）
-    private var diskSizeCache: (size: Int, timestamp: Date)? = nil
-    private let diskSizeCacheTTL: TimeInterval = 120  // 120 秒缓存
+    @ObservationIgnored private var diskSizeCache: (size: Int, timestamp: Date)? = nil
+    @ObservationIgnored private let diskSizeCacheTTL: TimeInterval = 120  // 120 秒缓存
     var diskSizeBytes: Int = 0
 
     /// v0.15.2: 显示格式 "内容大小 / 磁盘占用"
@@ -129,19 +129,21 @@ final class AppState {
     }
 
     // UI 回调（用于 AppDelegate 通信，支持测试解耦）
-    var closePanelHandler: (() -> Void)?
-    var openSettingsHandler: (() -> Void)?
+    @ObservationIgnored var closePanelHandler: (() -> Void)?
+    @ObservationIgnored var openSettingsHandler: (() -> Void)?
 
     // 快捷键回调（用于解耦 SettingsView 与 AppDelegate）
-    var applyHotKeyHandler: ((UInt32, UInt32) -> Void)?
-    var unregisterHotKeyHandler: (() -> Void)?
+    @ObservationIgnored var applyHotKeyHandler: ((UInt32, UInt32) -> Void)?
+    @ObservationIgnored var unregisterHotKeyHandler: (() -> Void)?
 
     // 事件监听任务
-    private var eventTask: Task<Void, Never>?
-    private var searchTask: Task<Void, Never>?
-    private var loadMoreTask: Task<Void, Never>?
+    @ObservationIgnored private var eventTask: Task<Void, Never>?
+    @ObservationIgnored private var searchTask: Task<Void, Never>?
+    @ObservationIgnored private var loadMoreTask: Task<Void, Never>?
+    /// v0.29: 渐进搜索 - 首屏后后台全量校准任务
+    @ObservationIgnored private var refineTask: Task<Void, Never>?
     /// v0.22: 防抖刷新 recentApps 的任务
-    private var recentAppsRefreshTask: Task<Void, Never>?
+    @ObservationIgnored private var recentAppsRefreshTask: Task<Void, Never>?
 
     // 配置：是否使用真实服务
     private static let useMockService: Bool = {
@@ -211,6 +213,7 @@ final class AppState {
         eventTask?.cancel()
         searchTask?.cancel()
         loadMoreTask?.cancel()
+        refineTask?.cancel()
         scrollEndTask?.cancel()
         recentAppsRefreshTask?.cancel()
 
@@ -220,6 +223,7 @@ final class AppState {
         eventTask = nil
         searchTask = nil
         loadMoreTask = nil
+        refineTask = nil
         scrollEndTask = nil
         recentAppsRefreshTask = nil
 
@@ -456,24 +460,50 @@ final class AppState {
 
             do {
                 if hasActiveFilters {
-                    let request = SearchRequest(
-                        query: searchQuery,
-                        mode: searchMode,
-                        appFilter: appFilter,
-                        typeFilter: typeFilter,
-                        typeFilters: typeFilters,
-                        limit: 50,
-                        offset: loadedCount
-                    )
-                    let result = try await service.search(query: request)
-                    // 在状态变更前再次检查取消状态
-                    guard !Task.isCancelled, currentVersion == searchVersion else { return }
-                    items.append(contentsOf: result.items)
-                    // v0.16.2: 手动失效缓存
-                    invalidatePinnedCache()
-                    loadedCount = items.count
-                    totalCount = result.total
-                    canLoadMore = result.hasMore
+                    // v0.29: 渐进搜索一致性 - 若当前首屏来自预筛（total = -1），loadMore 时先强制全量 fuzzy 校准
+                    if (searchMode == .fuzzy || searchMode == .fuzzyPlus),
+                       totalCount == -1 {
+                        refineTask?.cancel()
+                        refineTask = nil
+
+                        let nextLimit = loadedCount + 50
+                        let request = SearchRequest(
+                            query: searchQuery,
+                            mode: searchMode,
+                            appFilter: appFilter,
+                            typeFilter: typeFilter,
+                            typeFilters: typeFilters,
+                            forceFullFuzzy: true,
+                            limit: nextLimit,
+                            offset: 0
+                        )
+                        let result = try await service.search(query: request)
+                        guard !Task.isCancelled, currentVersion == searchVersion else { return }
+
+                        items = result.items
+                        totalCount = result.total
+                        loadedCount = items.count
+                        canLoadMore = result.hasMore
+                    } else {
+                        let request = SearchRequest(
+                            query: searchQuery,
+                            mode: searchMode,
+                            appFilter: appFilter,
+                            typeFilter: typeFilter,
+                            typeFilters: typeFilters,
+                            limit: 50,
+                            offset: loadedCount
+                        )
+                        let result = try await service.search(query: request)
+                        // 在状态变更前再次检查取消状态
+                        guard !Task.isCancelled, currentVersion == searchVersion else { return }
+                        items.append(contentsOf: result.items)
+                        // v0.16.2: 手动失效缓存
+                        invalidatePinnedCache()
+                        loadedCount = items.count
+                        totalCount = result.total
+                        canLoadMore = result.hasMore
+                    }
                 } else {
                     let moreItems = try await service.fetchRecent(limit: 100, offset: loadedCount)
                     // 在状态变更前再次检查取消状态
@@ -500,6 +530,8 @@ final class AppState {
     /// v0.10.4: 添加搜索版本号，防止旧搜索覆盖新结果
     func search() {
         searchTask?.cancel()
+        refineTask?.cancel()
+        refineTask = nil
 
         // 如果没有搜索词且没有过滤条件，直接加载全部
         if searchQuery.isEmpty && appFilter == nil && typeFilter == nil && typeFilters == nil {
@@ -547,6 +579,51 @@ final class AppState {
                 totalCount = result.total
                 loadedCount = result.items.count
                 canLoadMore = result.hasMore
+
+                // v0.29: 渐进校准 - 当首屏结果来自预筛（total = -1）时后台跑全量 fuzzy / fuzzyPlus
+                if (searchMode == .fuzzy || searchMode == .fuzzyPlus),
+                   result.total == -1,
+                   loadedCount <= 50 {
+                    let refineQuery = searchQuery
+                    let refineMode = searchMode
+                    let refineAppFilter = appFilter
+                    let refineTypeFilter = typeFilter
+                    let refineTypeFilters = typeFilters
+                    let refineVersion = currentVersion
+
+                    refineTask = Task {
+                        // 再延迟一点，减少用户继续输入时的无效 refine
+                        try? await Task.sleep(nanoseconds: 250_000_000)
+                        guard !Task.isCancelled, refineVersion == searchVersion else { return }
+
+                        let refineRequest = SearchRequest(
+                            query: refineQuery,
+                            mode: refineMode,
+                            appFilter: refineAppFilter,
+                            typeFilter: refineTypeFilter,
+                            typeFilters: refineTypeFilters,
+                            forceFullFuzzy: true,
+                            limit: 50,
+                            offset: 0
+                        )
+
+                        do {
+                            let refined = try await service.search(query: refineRequest)
+                            guard !Task.isCancelled, refineVersion == searchVersion else { return }
+
+                            // 如果用户已经加载更多页，则不覆盖
+                            guard loadedCount <= 50 else { return }
+
+                            items = refined.items
+                            totalCount = refined.total
+                            loadedCount = refined.items.count
+                            canLoadMore = refined.hasMore
+                        } catch {
+                            // refine 失败不影响首屏体验
+                            print("Refine search failed: \(error)")
+                        }
+                    }
+                }
 
                 // 记录搜索性能
                 let elapsedMs = (CFAbsoluteTimeGetCurrent() - startTime) * 1000

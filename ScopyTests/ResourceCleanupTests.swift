@@ -22,7 +22,7 @@ final class ResourceCleanupTests: XCTestCase {
             contentHash: "test_hash",
             sizeBytes: 12
         )
-        _ = try storage.upsertItem(content)
+        _ = try await storage.upsertItem(content)
 
         // 关闭数据库
         storage.close()
@@ -46,7 +46,7 @@ final class ResourceCleanupTests: XCTestCase {
                 contentHash: "pinned_\(i)",
                 sizeBytes: 20
             )
-            let item = try storage.upsertItem(content)
+            let item = try await storage.upsertItem(content)
             try storage.setPin(item.id, pinned: true)
         }
 
@@ -84,7 +84,7 @@ final class ResourceCleanupTests: XCTestCase {
                 contentHash: "hash_\(i)",
                 sizeBytes: 10
             )
-            _ = try storage.upsertItem(content)
+            _ = try await storage.upsertItem(content)
         }
 
         // 正常清理应该成功
@@ -117,7 +117,7 @@ final class ResourceCleanupTests: XCTestCase {
                 contentHash: "cache_\(i)",
                 sizeBytes: 15
             )
-            _ = try storage.upsertItem(content)
+            _ = try await storage.upsertItem(content)
         }
 
         // 执行搜索（填充缓存）

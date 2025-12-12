@@ -1,6 +1,24 @@
 # Scopy 部署和使用指南
 
-## 本次更新（v0.28）
+## 本次更新（v0.29）
+- **P0 渐进式全量模糊搜索校准**：巨大候选集首屏（ASCII 单词、offset=0）对 fuzzy/fuzzyPlus 走 FTS 预筛极速返回，后台 `forceFullFuzzy` 校准为全量 fuzzy/fuzzyPlus，保证最终零漏召回与正确排序。
+- **P0 预筛首屏与分页一致性**：若用户在校准前就滚动 `loadMore`，先强制全量 fuzzy 重拉前 N 条再分页，避免弱相关/错序条目提前出现。
+- **P1/P2 性能收敛**：
+  - 全量模糊索引移除 `plainText` 双份驻留，分页按 id 回表取完整项，降低内存峰值。
+  - 大内容外部文件写入后台化，主线程只写 DB 元信息。
+  - `NSCache` 替代 icon/thumbnail 手写 LRU，降低锁竞争；`AppState` 低频字段 `@ObservationIgnored` 缩小重绘半径。
+  - incremental vacuum 仅在 WAL >128MB 时执行，减少磁盘抖动。
+- **性能实测（Apple Silicon, macOS 14, Debug, `make test-perf`）**：
+  - Fuzzy 5k items P95 ≈ 4.91ms
+  - Fuzzy 10k items P95 ≈ 42.74ms
+  - Disk 25k fuzzy P95 ≈ 42.30ms
+  - Heavy Disk 50k fuzzy P95 ≈ 81.24ms ✅
+  - Ultra Disk 75k fuzzy P95 ≈ 122.17ms ✅
+- **测试结果**：
+  - `make test-unit` **52/52 passed**（1 perf skipped）
+  - `make test-perf` **22/22 passed（含重载）**
+
+## 上次更新（v0.28）
 - **P0 全量模糊搜索重载提速**：`SearchService.searchInFullIndex` 使用 postings 有序交集 + top‑K 小堆排序；巨大候选首屏（ASCII 单词、offset=0）自适应 FTS 预筛，后续分页仍走全量 fuzzy 保障覆盖，pinned 额外兜底。
 - **P0 图片管线后台化**：缩略图生成改用 ImageIO 后台 downsample/编码；新图缩略图不再同步生成；原图读取与 hover 预览 downsample 后台化，主线程仅做状态更新。
 - **性能实测（Apple Silicon, macOS 14, Debug, `make test-perf`）**：
@@ -13,7 +31,7 @@
   - `make test-unit` **52/52 passed**（1 perf skipped）
   - `make test-perf` **22/22 passed（含重载）**
 
-## 上次更新（v0.27）
+## 再上次更新（v0.27）
 - **P0 搜索/分页版本一致性修复**：搜索切换时自动取消旧分页任务，`loadMore` 只对当前搜索版本生效，避免旧结果混入列表。
 - **沿用 v0.26 P0 性能改进**：热路径清理节流、缩略图异步加载、短词全量模糊搜索去噪。
 - **性能实测（Apple Silicon, macOS 14, Debug, `make test-perf`）**：

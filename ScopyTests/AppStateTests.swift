@@ -179,6 +179,51 @@ final class AppStateTests: XCTestCase {
         XCTAssertNotNil(appState.items)
     }
 
+    func testProgressiveRefineUpdatesAfterPrefilter() async throws {
+        mockService.setItemCount(100)
+        await appState.load()
+        mockService.resetSearchCallCount()
+        mockService.simulatePrefilterQueries = ["test"]
+
+        appState.searchQuery = "test"
+        appState.search()
+
+        // Wait for debounce + initial search
+        try await Task.sleep(nanoseconds: 250_000_000)
+        XCTAssertEqual(mockService.searchCallCount, 1)
+        XCTAssertEqual(appState.totalCount, -1)
+
+        // Wait for refine delay + refine search
+        try await Task.sleep(nanoseconds: 400_000_000)
+        XCTAssertEqual(mockService.searchCallCount, 2)
+        XCTAssertEqual(appState.totalCount, 100)
+        XCTAssertEqual(appState.items.count, 50)
+    }
+
+    func testLoadMoreAfterPrefilterForcesFullSearch() async throws {
+        mockService.setItemCount(120)
+        await appState.load()
+        mockService.resetSearchCallCount()
+        mockService.simulatePrefilterQueries = ["test"]
+
+        appState.searchQuery = "test"
+        appState.search()
+
+        // Wait for debounce + initial prefiltered search
+        try await Task.sleep(nanoseconds: 250_000_000)
+        XCTAssertEqual(mockService.recordedSearchRequests.count, 1)
+        XCTAssertEqual(appState.totalCount, -1)
+
+        let expectedLimit = appState.loadedCount + 50
+        await appState.loadMore()
+
+        XCTAssertEqual(mockService.recordedSearchRequests.count, 2)
+        let second = mockService.recordedSearchRequests[1]
+        XCTAssertTrue(second.forceFullFuzzy)
+        XCTAssertEqual(second.offset, 0)
+        XCTAssertEqual(second.limit, expectedLimit)
+    }
+
     func testEmptySearchReloadsAllItems() async throws {
         mockService.setItemCount(100)
         await appState.load()
@@ -609,6 +654,10 @@ final class TestMockClipboardService: ClipboardServiceProtocol {
     // Artificial delays (for race-condition tests)
     var fetchRecentDelayNs: UInt64 = 0
     var searchDelayNs: UInt64 = 0
+    /// v0.29: 渐进搜索测试 - 指定查询首屏模拟预筛 total=-1
+    var simulatePrefilterQueries: Set<String> = []
+    /// 记录每次 search 请求，便于验证渐进/分页行为
+    var recordedSearchRequests: [SearchRequest] = []
 
     var eventStream: AsyncStream<ClipboardEvent> {
         AsyncStream { continuation in
@@ -649,6 +698,7 @@ final class TestMockClipboardService: ClipboardServiceProtocol {
     func resetSearchCallCount() {
         searchCallCount = 0
         lastSearchQuery = nil
+        recordedSearchRequests = []
     }
 
     func resetCopyCallCount() {
@@ -678,6 +728,7 @@ final class TestMockClipboardService: ClipboardServiceProtocol {
         }
         searchCallCount += 1
         lastSearchQuery = query.query
+        recordedSearchRequests.append(query)
 
         let filtered: [ClipboardItemDTO]
         if query.query.isEmpty {
@@ -689,9 +740,16 @@ final class TestMockClipboardService: ClipboardServiceProtocol {
         let start = min(query.offset, filtered.count)
         let end = min(query.offset + query.limit, filtered.count)
 
+        let shouldSimulatePrefilter =
+            simulatePrefilterQueries.contains(query.query) &&
+            !query.forceFullFuzzy &&
+            query.offset == 0
+
+        let total = shouldSimulatePrefilter ? -1 : filtered.count
+
         return SearchResultPage(
             items: Array(filtered[start..<end]),
-            total: filtered.count,
+            total: total,
             hasMore: end < filtered.count
         )
     }

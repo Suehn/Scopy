@@ -25,7 +25,7 @@ final class StorageServiceTests: XCTestCase {
 
     func testInsertAndRetrieve() async throws {
         let content = makeTestContent(text: "Hello, World!")
-        let item = try storage.upsertItem(content)
+        let item = try await storage.upsertItem(content)
 
         XCTAssertEqual(item.plainText, "Hello, World!")
         XCTAssertEqual(item.type, .text)
@@ -40,7 +40,7 @@ final class StorageServiceTests: XCTestCase {
         // Insert multiple items
         for i in 0..<10 {
             let content = makeTestContent(text: "Item \(i)")
-            _ = try storage.upsertItem(content)
+            _ = try await storage.upsertItem(content)
             try await Task.sleep(nanoseconds: 10_000_000) // 10ms delay for ordering
         }
 
@@ -59,7 +59,7 @@ final class StorageServiceTests: XCTestCase {
 
     func testDelete() async throws {
         let content = makeTestContent(text: "To be deleted")
-        let item = try storage.upsertItem(content)
+        let item = try await storage.upsertItem(content)
 
         // Verify exists
         XCTAssertNotNil(try storage.findByID(item.id))
@@ -75,7 +75,7 @@ final class StorageServiceTests: XCTestCase {
         // Insert some items
         for i in 0..<5 {
             let content = makeTestContent(text: "Item \(i)")
-            _ = try storage.upsertItem(content)
+            _ = try await storage.upsertItem(content)
         }
 
         // Pin one item
@@ -96,11 +96,11 @@ final class StorageServiceTests: XCTestCase {
 
     func testDeduplication() async throws {
         let content1 = makeTestContent(text: "Duplicate content")
-        let item1 = try storage.upsertItem(content1)
+        let item1 = try await storage.upsertItem(content1)
 
         // Same content should not create new item
         let content2 = makeTestContent(text: "Duplicate content")
-        let item2 = try storage.upsertItem(content2)
+        let item2 = try await storage.upsertItem(content2)
 
         // Same ID means dedup worked
         XCTAssertEqual(item1.id, item2.id)
@@ -117,11 +117,11 @@ final class StorageServiceTests: XCTestCase {
     func testDeduplicationWithNormalization() async throws {
         // Text with leading/trailing whitespace
         let content1 = makeTestContent(text: "   Normalized text   \n\r\n")
-        let item1 = try storage.upsertItem(content1)
+        let item1 = try await storage.upsertItem(content1)
 
         // Same normalized text
         let content2 = makeTestContent(text: "Normalized text")
-        let item2 = try storage.upsertItem(content2)
+        let item2 = try await storage.upsertItem(content2)
 
         // Should be deduplicated
         XCTAssertEqual(item1.id, item2.id)
@@ -129,10 +129,10 @@ final class StorageServiceTests: XCTestCase {
 
     func testDifferentContentNotDeduplicated() async throws {
         let content1 = makeTestContent(text: "Content A")
-        _ = try storage.upsertItem(content1)
+        _ = try await storage.upsertItem(content1)
 
         let content2 = makeTestContent(text: "Content B")
-        _ = try storage.upsertItem(content2)
+        _ = try await storage.upsertItem(content2)
 
         // Should have 2 items
         let count = try storage.getItemCount()
@@ -143,7 +143,7 @@ final class StorageServiceTests: XCTestCase {
 
     func testPinAndUnpin() async throws {
         let content = makeTestContent(text: "Pinnable item")
-        let item = try storage.upsertItem(content)
+        let item = try await storage.upsertItem(content)
 
         XCTAssertFalse(item.isPinned)
 
@@ -162,7 +162,7 @@ final class StorageServiceTests: XCTestCase {
         // Insert 5 items
         for i in 0..<5 {
             let content = makeTestContent(text: "Item \(i)")
-            _ = try storage.upsertItem(content)
+            _ = try await storage.upsertItem(content)
         }
 
         // Pin the third item
@@ -181,7 +181,7 @@ final class StorageServiceTests: XCTestCase {
 
         for i in 0..<10 {
             let content = makeTestContent(text: "Item \(i)")
-            _ = try storage.upsertItem(content)
+            _ = try await storage.upsertItem(content)
         }
 
         XCTAssertEqual(try storage.getItemCount(), 10)
@@ -191,7 +191,7 @@ final class StorageServiceTests: XCTestCase {
         XCTAssertEqual(try storage.getTotalSize(), 0)
 
         let content = makeTestContent(text: "12345") // 5 bytes
-        _ = try storage.upsertItem(content)
+        _ = try await storage.upsertItem(content)
 
         let size = try storage.getTotalSize()
         XCTAssertEqual(size, 5)
@@ -205,7 +205,7 @@ final class StorageServiceTests: XCTestCase {
         // Insert 10 items
         for i in 0..<10 {
             let content = makeTestContent(text: "Item \(i)")
-            _ = try storage.upsertItem(content)
+            _ = try await storage.upsertItem(content)
             try await Task.sleep(nanoseconds: 10_000_000) // 10ms for ordering
         }
 
@@ -224,7 +224,7 @@ final class StorageServiceTests: XCTestCase {
         // Insert 5 items
         for i in 0..<5 {
             let content = makeTestContent(text: "Item \(i)")
-            _ = try storage.upsertItem(content)
+            _ = try await storage.upsertItem(content)
         }
 
         // Pin 2 items

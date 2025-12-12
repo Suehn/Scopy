@@ -34,7 +34,6 @@ final class SearchService {
         let id: UUID
         let type: ClipboardItemType
         let contentHash: String
-        let plainText: String
         let plainTextLower: String
         let plainTextLowerIsASCII: Bool
         let appBundleID: String?
@@ -49,7 +48,6 @@ final class SearchService {
             self.id = item.id
             self.type = item.type
             self.contentHash = item.contentHash
-            self.plainText = item.plainText
             let lower = item.plainText.lowercased()
             self.plainTextLower = lower
             self.plainTextLowerIsASCII = lower.canBeConverted(to: .ascii)
@@ -60,23 +58,6 @@ final class SearchService {
             self.isPinned = item.isPinned
             self.sizeBytes = item.sizeBytes
             self.storageRef = item.storageRef
-        }
-
-        func toStoredItem() -> StorageService.StoredItem {
-            StorageService.StoredItem(
-                id: id,
-                type: type,
-                contentHash: contentHash,
-                plainText: plainText,
-                appBundleID: appBundleID,
-                createdAt: createdAt,
-                lastUsedAt: lastUsedAt,
-                useCount: useCount,
-                isPinned: isPinned,
-                sizeBytes: sizeBytes,
-                storageRef: storageRef,
-                rawData: nil
-            )
         }
     }
 
@@ -526,6 +507,7 @@ final class SearchService {
             appFilter: request.appFilter,
             typeFilter: request.typeFilter,
             typeFilters: request.typeFilters,
+            forceFullFuzzy: request.forceFullFuzzy,
             limit: request.limit,
             offset: request.offset
         )
@@ -628,9 +610,10 @@ final class SearchService {
             plusWords = []
         }
 
-        // 可选 FTS 加速：仅用于大候选集的首屏（offset=0）ASCII 单词查询
+        // 可选 FTS 加速：仅用于大候选集的首屏（offset=0）ASCII 单词查询（fuzzy / fuzzyPlus 单词）
         var totalIsUnknown = false
-        if mode == .fuzzy,
+        if (mode == .fuzzy || mode == .fuzzyPlus),
+           !request.forceFullFuzzy,
            request.offset == 0,
            queryLower.count >= 3,
            queryLowerIsASCII,
@@ -717,9 +700,38 @@ final class SearchService {
         let page = (start < end) ? Array(topItems[start..<end]) : []
 
         let hasMore = totalIsUnknown ? (totalMatches >= request.limit) : (totalMatches > request.offset + request.limit)
-        let resultItems = page.map { $0.item.toStoredItem() }
         let total = totalIsUnknown ? -1 : totalMatches
+
+        let pageIDs = page.map { $0.item.id }
+        let resultItems = try fetchItemsByIDs(db: db, ids: pageIDs)
         return SearchResult(items: resultItems, total: total, hasMore: hasMore, searchTimeMs: 0)
+    }
+
+    private func fetchItemsByIDs(db: OpaquePointer, ids: [UUID]) throws -> [StorageService.StoredItem] {
+        guard !ids.isEmpty else { return [] }
+
+        let placeholders = ids.map { _ in "?" }.joined(separator: ",")
+        let sql = "SELECT * FROM clipboard_items WHERE id IN (\(placeholders))"
+
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            throw SearchError.searchFailed(String(cString: sqlite3_errmsg(db)))
+        }
+        defer { sqlite3_finalize(stmt) }
+
+        for (index, id) in ids.enumerated() {
+            sqlite3_bind_text(stmt, Int32(index + 1), id.uuidString, -1, SQLITE_TRANSIENT)
+        }
+
+        var fetched: [UUID: StorageService.StoredItem] = [:]
+        fetched.reserveCapacity(ids.count)
+
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            guard let stmt = stmt, let item = parseItem(from: stmt) else { continue }
+            fetched[item.id] = item
+        }
+
+        return ids.compactMap { fetched[$0] }
     }
 
     private func ftsPrefilterSlots(
@@ -866,7 +878,7 @@ final class SearchService {
 
     private func upsertItemIntoIndex(_ item: StorageService.StoredItem, index: FullFuzzyIndex) {
         if let slot = index.idToSlot[item.id], let existing = index.items[slot] {
-            if existing.plainText != item.plainText {
+            if existing.contentHash != item.contentHash {
                 fullIndex = nil
                 fullIndexStale = true
                 return

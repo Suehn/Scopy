@@ -346,7 +346,7 @@ final class RealClipboardService: ClipboardServiceProtocol {
         if content.type == .file && !settings.saveFiles { return }
 
         do {
-            let storedItem = try storage.upsertItem(content)
+            let storedItem = try await storage.upsertItem(content)
 
             // 图片类型：异步生成缩略图（后台，避免阻塞复制热路径）
             if content.type == .image, settings.showImageThumbnails {

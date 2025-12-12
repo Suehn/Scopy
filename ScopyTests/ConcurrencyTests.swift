@@ -35,7 +35,7 @@ final class ConcurrencyTests: XCTestCase {
                 contentHash: "hash_\(i)",
                 sizeBytes: 50
             )
-            _ = try storage.upsertItem(content)
+            _ = try await storage.upsertItem(content)
         }
 
         // 快速发起多个搜索请求
@@ -87,7 +87,7 @@ final class ConcurrencyTests: XCTestCase {
                 contentHash: "cache_hash_\(i)",
                 sizeBytes: 20
             )
-            _ = try storage.upsertItem(content)
+            _ = try await storage.upsertItem(content)
         }
 
         // 顺序执行多个短查询（会触发缓存刷新）
@@ -124,7 +124,7 @@ final class ConcurrencyTests: XCTestCase {
                 contentHash: "base_\(i)",
                 sizeBytes: 30
             )
-            _ = try storage.upsertItem(content)
+            _ = try await storage.upsertItem(content)
         }
 
         // 交替执行插入和搜索
@@ -139,7 +139,7 @@ final class ConcurrencyTests: XCTestCase {
                 contentHash: "sequential_\(i)",
                 sizeBytes: 25
             )
-            _ = try storage.upsertItem(content)
+            _ = try await storage.upsertItem(content)
             successCount += 1
 
             // 搜索
@@ -176,7 +176,7 @@ final class ConcurrencyTests: XCTestCase {
                 contentHash: duplicateHash,
                 sizeBytes: 20
             )
-            _ = try storage.upsertItem(content)
+            _ = try await storage.upsertItem(content)
         }
 
         // 数据库中只应该有一条记录
@@ -227,7 +227,7 @@ final class ConcurrencyTests: XCTestCase {
                 contentHash: "stress_hash_\(i)",
                 sizeBytes: 60
             )
-            _ = try storage.upsertItem(content)
+            _ = try await storage.upsertItem(content)
         }
 
         // 使用 TaskGroup 实现真正的并发搜索
@@ -275,7 +275,7 @@ final class ConcurrencyTests: XCTestCase {
                 contentHash: "consistency_\(i)",
                 sizeBytes: 50
             )
-            _ = try storage.upsertItem(content)
+            _ = try await storage.upsertItem(content)
         }
 
         let query = "consistency"
@@ -327,7 +327,7 @@ final class ConcurrencyTests: XCTestCase {
                 contentHash: "timeout_\(i)",
                 sizeBytes: 60
             )
-            _ = try storage.upsertItem(content)
+            _ = try await storage.upsertItem(content)
         }
 
         // 正常搜索应该在超时前完成
@@ -360,7 +360,7 @@ final class ConcurrencyTests: XCTestCase {
                 contentHash: "cleanup_search_\(i)",
                 sizeBytes: 40
             )
-            _ = try storage.upsertItem(content)
+            _ = try await storage.upsertItem(content)
         }
 
         storage.cleanupSettings.maxItems = 100

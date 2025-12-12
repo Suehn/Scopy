@@ -188,6 +188,8 @@ struct SearchRequest: Sendable {
     let typeFilter: ClipboardItemType?
     /// v0.22: 多类型过滤，优先于 typeFilter
     let typeFilters: Set<ClipboardItemType>?
+    /// v0.29: 渐进搜索 - 是否强制使用全量 fuzzy（禁用首屏预筛）
+    let forceFullFuzzy: Bool
     let limit: Int
     let offset: Int
 
@@ -197,6 +199,7 @@ struct SearchRequest: Sendable {
         appFilter: String? = nil,
         typeFilter: ClipboardItemType? = nil,
         typeFilters: Set<ClipboardItemType>? = nil,
+        forceFullFuzzy: Bool = false,
         limit: Int = 50,
         offset: Int = 0
     ) {
@@ -205,6 +208,7 @@ struct SearchRequest: Sendable {
         self.appFilter = appFilter
         self.typeFilter = typeFilter
         self.typeFilters = typeFilters
+        self.forceFullFuzzy = forceFullFuzzy
         self.limit = limit
         self.offset = offset
     }
