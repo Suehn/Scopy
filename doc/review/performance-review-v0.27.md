@@ -26,11 +26,11 @@
 
 ### 1.2 真实热点与根因
 
-#### [P1] Hover 预览仍在 MainActor 读取/解码原图
+#### [P0] Hover 预览仍在 MainActor 读取/解码原图
 
 **链路**：`HistoryItemView.startPreviewTask` → `service.getImageData` → `StorageService.getOriginalImageData` → `NSImage(data:)`  
 **现象**：hover 时偶发卡顿、内存峰值上升（原图 Data + 全量解码）。  
-**原理**：`StorageService` 为 `@MainActor`，外部文件读取与 `NSImage` 解码在主线程完成。
+**原理**：`StorageService` 为 `@MainActor`，外部文件读取与 `NSImage(data:)` 解码在主线程完成；当前实现中 `getImageData()` await 会跳回主线程。
 
 **优化方向**：
 - 后台读取 + ImageIO downsample（`CGImageSourceCreateThumbnailAtIndex`，限制 maxPixelSize），只把缩放后的 `CGImage/NSImage` 回主线程。
@@ -76,11 +76,16 @@
 1. 每候选做 subsequence 评分（近似 O(M·|q|)）  
 2. 对所有 scored 做 sort（O(M log M)）
 
-**优化方向（不改变语义）**：
-- **FTS 预筛**：对 `query.count >= 3` 先用 FTS 拿 top‑K rowid（如 5k），再在候选上 fuzzy 评分排序。  
-  这对常见字符/大库效果显著。
-- **Partial top‑K 排序**：只维护 `offset+limit+1` 的小顶堆或 introselect，避免全量 sort。
+**优化方向（不改变语义、保证零漏召回）**：
 - **postings 交集优化**：用有序数组双指针交集替代 `Set.formIntersection`，减少临时分配与哈希开销。
+- **Partial top‑K 排序**：只维护 `offset+limit+1` 的小顶堆/选择算法，避免全量 sort（仍对全部候选评分，语义不变）。
+- **可选 FTS 加速**：仅作为“候选优先级/短路加速”，不可作为硬过滤；否则会破坏全量 fuzzy 的召回（FTS 分词/边界不等价于 subsequence）。
+
+#### [P2] 重复字符查询会放大候选集
+
+**现象**：`queryChars` 采用 unique 字符集合，重复字符（如 "aaa"）不会收紧候选；候选放大后由 `fuzzyMatchScore` 二次过滤。  
+**原理**：字符倒排是“必要条件预筛”，对重复字符只做存在性过滤。  
+**优化方向**：如需进一步压候选，可引入“字符计数”快速验证（按需，不作为 P0）。
 
 #### [P1] 全量模糊索引内存仍有放大空间
 
@@ -117,7 +122,7 @@
 - 将外部文件写入移到后台（utility QoS），主线程只写 DB 元数据；必要时用 actor/队列保证顺序。
 - 对超大 text 也外部化，`plain_text` 仅保留索引摘要。
 
-#### [P1] 缩略图生成依赖 MainActor 的 NSImage 绘制/编码
+#### [P0] 缩略图生成依赖 MainActor 的 NSImage 绘制/编码
 
 **位置**：`StorageService.generateThumbnail`、`RealClipboardService.scheduleThumbnailGeneration`  
 **现象**：即使在后台 Task 中触发，实际生成仍 `MainActor.run`。  
@@ -148,15 +153,17 @@
 ## 5. 下一步优先级建议
 
 - **P0（体验/准确性）**
-  1. 继续优化全量 fuzzy 在 50k+ 磁盘下的稳态：FTS 预筛 + top‑K partial 排序。
+  1. 全量 fuzzy 50k+ 稳态提速：postings 有序交集 + top‑K partial 排序（无语义/召回变更）。
+  2. 缩略图/hover 预览全链路后台化：ImageIO downsample + 编码，主线程仅做状态更新。
 - **P1（规模化与主线程重活）**
-  1. 外部文件写入后台化（特别是大图/大文本）。
-  2. 缩略图/预览 downsample 后台化（ImageIO 替代 AppKit 绘制/解码）。
-  3. SearchService actor 化统一并发语义。
-  4. AppState 拆分降低重绘依赖面。
+  1. 大内容外部写入后台化（特别是大图/大文本）。
+  2. SearchService actor 化统一并发语义。
+  3. AppState 拆分降低重绘依赖面。
+  4. 可选 FTS 加速做“优先级/短路”，但保持全量 fallback。
 - **P2（结构/细节）**
-  1. postings 交集与缓存结构微优化。
-  2. WAL/ vacuum 按阈值与 idle 调度。
+  1. 重复字符候选压缩（字符计数等）。
+  2. postings/缓存结构微优化。
+  3. WAL/ vacuum 按阈值与 idle 调度。
 
 ---
 
@@ -166,4 +173,3 @@
   - 10k/50k/100k fuzzy/fuzzyPlus 的 P95、候选集规模、排序耗时。
   - 首次构建 full fuzzy index 的 CPU/内存峰值。
   - 主线程热区：File I/O、Image Decode、List diff、sqlite3_step。
-

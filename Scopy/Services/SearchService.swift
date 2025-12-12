@@ -536,7 +536,7 @@ final class SearchService {
                 guard let index = fullIndex, !fullIndexStale else {
                     return SearchResult(items: [], total: 0, hasMore: false, searchTimeMs: 0)
                 }
-                return try searchInFullIndex(index: index, request: normalizedRequest, mode: mode)
+                return try searchInFullIndex(index: index, request: normalizedRequest, mode: mode, db: db)
             }
         }
     }
@@ -590,11 +590,11 @@ final class SearchService {
         return FullFuzzyIndex(items: items, idToSlot: idToSlot, charPostings: charPostings)
     }
 
-    private func searchInFullIndex(index: FullFuzzyIndex, request: SearchRequest, mode: SearchMode) throws -> SearchResult {
+    private func searchInFullIndex(index: FullFuzzyIndex, request: SearchRequest, mode: SearchMode, db: OpaquePointer) throws -> SearchResult {
         let queryLower = request.query.lowercased()
         let queryChars = uniqueNonWhitespaceCharacters(queryLower)
 
-        let candidateSlots: [Int]
+        var candidateSlots: [Int]
         if queryChars.isEmpty {
             candidateSlots = Array(index.items.indices)
         } else {
@@ -608,23 +608,54 @@ final class SearchService {
             }
             lists.sort { $0.count < $1.count }
 
-            var candidateSet = Set(lists[0])
+            var candidates = lists[0]
             for list in lists.dropFirst() {
-                candidateSet.formIntersection(list)
-                if candidateSet.isEmpty { break }
+                candidates = intersectSorted(candidates, list)
+                if candidates.isEmpty { break }
             }
-            candidateSlots = Array(candidateSet)
+            candidateSlots = candidates
         }
 
-        let plusWords: [String]
+        let queryLowerIsASCII = queryLower.canBeConverted(to: .ascii)
+        let plusWords: [(word: String, isASCII: Bool)]
         if mode == .fuzzyPlus {
-            plusWords = queryLower.split(separator: " ").map(String.init).filter { !$0.isEmpty }
+            plusWords = queryLower
+                .split(separator: " ")
+                .map(String.init)
+                .filter { !$0.isEmpty }
+                .map { (word: $0, isASCII: $0.canBeConverted(to: .ascii)) }
         } else {
             plusWords = []
         }
 
-        var scored: [(IndexedItem, Int)] = []
-        scored.reserveCapacity(min(candidateSlots.count, request.limit * 4))
+        // 可选 FTS 加速：仅用于大候选集的首屏（offset=0）ASCII 单词查询
+        var totalIsUnknown = false
+        if mode == .fuzzy,
+           request.offset == 0,
+           queryLower.count >= 3,
+           queryLowerIsASCII,
+           !queryLower.contains(" "),
+           candidateSlots.count >= 20_000 {
+            let desiredTopCount = max(0, request.offset + request.limit + 1)
+            let prefilterLimit = min(20_000, max(5_000, desiredTopCount * 40))
+            if let ftsSlots = try? ftsPrefilterSlots(db: db, index: index, queryLower: queryLower, limit: prefilterLimit),
+               !ftsSlots.isEmpty {
+                // 兜底：把候选里的 pinned 也并入，避免 pinned 漏召回
+                let pinnedSlots = candidateSlots.filter { slot in
+                    guard slot < index.items.count, let item = index.items[slot] else { return false }
+                    return item.isPinned
+                }
+                var merged = Set(ftsSlots)
+                for s in pinnedSlots { merged.insert(s) }
+                candidateSlots = Array(merged)
+                totalIsUnknown = true
+            }
+        }
+
+        let desiredTopCount = max(0, request.offset + request.limit + 1)
+        var topHeap = BinaryHeap<ScoredIndexedItem>(areSorted: isWorse)
+        topHeap.reserveCapacity(desiredTopCount)
+        var totalMatches = 0
 
         for slot in candidateSlots {
             guard slot < index.items.count, let item = index.items[slot] else { continue }
@@ -639,12 +670,22 @@ final class SearchService {
             let score: Int?
             switch mode {
             case .fuzzy:
-                score = fuzzyMatchScore(textLower: item.plainTextLower, queryLower: queryLower)
+                score = fuzzyMatchScore(
+                    textLower: item.plainTextLower,
+                    textLowerIsASCII: item.plainTextLowerIsASCII,
+                    queryLower: queryLower,
+                    queryLowerIsASCII: queryLowerIsASCII
+                )
             case .fuzzyPlus:
                 var totalScore = 0
                 var ok = true
-                for word in plusWords {
-                    guard let s = fuzzyMatchScore(textLower: item.plainTextLower, queryLower: word) else {
+                for wordInfo in plusWords {
+                    guard let s = fuzzyMatchScore(
+                        textLower: item.plainTextLower,
+                        textLowerIsASCII: item.plainTextLowerIsASCII,
+                        queryLower: wordInfo.word,
+                        queryLowerIsASCII: wordInfo.isASCII
+                    ) else {
                         ok = false
                         break
                     }
@@ -656,31 +697,171 @@ final class SearchService {
             }
 
             guard let score else { continue }
-            scored.append((item, score))
-        }
+            totalMatches += 1
 
-        scored.sort { lhs, rhs in
-            if lhs.0.isPinned != rhs.0.isPinned {
-                return lhs.0.isPinned && !rhs.0.isPinned
+            guard desiredTopCount > 0 else { continue }
+            let scoredItem = ScoredIndexedItem(item: item, score: score)
+
+            if topHeap.count < desiredTopCount {
+                topHeap.insert(scoredItem)
+            } else if let worst = topHeap.peek, isBetter(scoredItem, than: worst) {
+                topHeap.replaceRoot(with: scoredItem)
             }
-            if lhs.1 != rhs.1 {
-                return lhs.1 > rhs.1
-            }
-            return lhs.0.lastUsedAt > rhs.0.lastUsedAt
         }
 
-        let total = scored.count
-        let start = min(request.offset, total)
-        let end = min(start + request.limit + 1, total)
-        var page = Array(scored[start..<end])
+        var topItems = topHeap.elements
+        topItems.sort { isBetter($0, than: $1) }
 
-        let hasMore = page.count > request.limit
-        if hasMore {
-            page.removeLast()
-        }
+        let start = min(request.offset, topItems.count)
+        let end = min(start + request.limit, topItems.count)
+        let page = (start < end) ? Array(topItems[start..<end]) : []
 
-        let resultItems = page.map { $0.0.toStoredItem() }
+        let hasMore = totalIsUnknown ? (totalMatches >= request.limit) : (totalMatches > request.offset + request.limit)
+        let resultItems = page.map { $0.item.toStoredItem() }
+        let total = totalIsUnknown ? -1 : totalMatches
         return SearchResult(items: resultItems, total: total, hasMore: hasMore, searchTimeMs: 0)
+    }
+
+    private func ftsPrefilterSlots(
+        db: OpaquePointer,
+        index: FullFuzzyIndex,
+        queryLower: String,
+        limit: Int
+    ) throws -> [Int] {
+        let ftsQuery = escapeFTSQuery(queryLower)
+        let sql = """
+            SELECT clipboard_items.id
+            FROM clipboard_fts
+            JOIN clipboard_items ON clipboard_items.rowid = clipboard_fts.rowid
+            WHERE clipboard_fts MATCH ?
+            ORDER BY bm25(clipboard_fts)
+            LIMIT ?
+        """
+
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            throw SearchError.searchFailed(String(cString: sqlite3_errmsg(db)))
+        }
+        defer { sqlite3_finalize(stmt) }
+
+        sqlite3_bind_text(stmt, 1, ftsQuery, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_int(stmt, 2, Int32(limit))
+
+        var slots: [Int] = []
+        slots.reserveCapacity(limit)
+
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            guard let cStr = sqlite3_column_text(stmt, 0) else { continue }
+            let idString = String(cString: cStr)
+            if let uuid = UUID(uuidString: idString),
+               let slot = index.idToSlot[uuid] {
+                slots.append(slot)
+            }
+        }
+
+        return slots
+    }
+
+    private struct ScoredIndexedItem {
+        let item: IndexedItem
+        let score: Int
+    }
+
+    private func isBetter(_ lhs: ScoredIndexedItem, than rhs: ScoredIndexedItem) -> Bool {
+        if lhs.item.isPinned != rhs.item.isPinned {
+            return lhs.item.isPinned && !rhs.item.isPinned
+        }
+        if lhs.score != rhs.score {
+            return lhs.score > rhs.score
+        }
+        return lhs.item.lastUsedAt > rhs.item.lastUsedAt
+    }
+
+    private func isWorse(_ lhs: ScoredIndexedItem, than rhs: ScoredIndexedItem) -> Bool {
+        return isBetter(rhs, than: lhs)
+    }
+
+    private func intersectSorted(_ a: [Int], _ b: [Int]) -> [Int] {
+        var i = 0
+        var j = 0
+        var result: [Int] = []
+        result.reserveCapacity(min(a.count, b.count))
+
+        while i < a.count && j < b.count {
+            let va = a[i]
+            let vb = b[j]
+            if va == vb {
+                result.append(va)
+                i += 1
+                j += 1
+            } else if va < vb {
+                i += 1
+            } else {
+                j += 1
+            }
+        }
+
+        return result
+    }
+
+    private struct BinaryHeap<Element> {
+        private(set) var elements: [Element] = []
+        private let areSorted: (Element, Element) -> Bool
+
+        init(areSorted: @escaping (Element, Element) -> Bool) {
+            self.areSorted = areSorted
+        }
+
+        var count: Int { elements.count }
+        var peek: Element? { elements.first }
+
+        mutating func reserveCapacity(_ n: Int) {
+            elements.reserveCapacity(n)
+        }
+
+        mutating func insert(_ value: Element) {
+            elements.append(value)
+            siftUp(from: elements.count - 1)
+        }
+
+        mutating func replaceRoot(with value: Element) {
+            guard !elements.isEmpty else {
+                elements = [value]
+                return
+            }
+            elements[0] = value
+            siftDown(from: 0)
+        }
+
+        private mutating func siftUp(from index: Int) {
+            var child = index
+            var parent = (child - 1) / 2
+            while child > 0 && areSorted(elements[child], elements[parent]) {
+                elements.swapAt(child, parent)
+                child = parent
+                parent = (child - 1) / 2
+            }
+        }
+
+        private mutating func siftDown(from index: Int) {
+            var parent = index
+            while true {
+                let left = parent * 2 + 1
+                let right = left + 1
+                var candidate = parent
+
+                if left < elements.count && areSorted(elements[left], elements[candidate]) {
+                    candidate = left
+                }
+                if right < elements.count && areSorted(elements[right], elements[candidate]) {
+                    candidate = right
+                }
+
+                if candidate == parent { return }
+                elements.swapAt(parent, candidate)
+                parent = candidate
+            }
+        }
     }
 
     private func upsertItemIntoIndex(_ item: StorageService.StoredItem, index: FullFuzzyIndex) {
@@ -724,7 +905,12 @@ final class SearchService {
         return result
     }
 
-    private func fuzzyMatchScore(textLower: String, queryLower: String) -> Int? {
+    private func fuzzyMatchScore(
+        textLower: String,
+        textLowerIsASCII: Bool,
+        queryLower: String,
+        queryLowerIsASCII: Bool
+    ) -> Int? {
         guard !queryLower.isEmpty else { return 0 }
 
         // v0.26: 对极短查询（≤2 字符）使用连续子串语义
@@ -737,8 +923,8 @@ final class SearchService {
         }
 
         // ASCII 连续子串快速路径：等价于最优 subsequence 匹配
-        if queryLower.canBeConverted(to: .ascii),
-           textLower.canBeConverted(to: .ascii),
+        if queryLowerIsASCII,
+           textLowerIsASCII,
            let range = textLower.range(of: queryLower) {
             let pos = range.lowerBound.utf16Offset(in: textLower)
             let m = queryLower.utf16.count

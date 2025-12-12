@@ -1,6 +1,19 @@
 # Scopy 部署和使用指南
 
-## 本次更新（v0.27）
+## 本次更新（v0.28）
+- **P0 全量模糊搜索重载提速**：`SearchService.searchInFullIndex` 使用 postings 有序交集 + top‑K 小堆排序；巨大候选首屏（ASCII 单词、offset=0）自适应 FTS 预筛，后续分页仍走全量 fuzzy 保障覆盖，pinned 额外兜底。
+- **P0 图片管线后台化**：缩略图生成改用 ImageIO 后台 downsample/编码；新图缩略图不再同步生成；原图读取与 hover 预览 downsample 后台化，主线程仅做状态更新。
+- **性能实测（Apple Silicon, macOS 14, Debug, `make test-perf`）**：
+  - Fuzzy 5k items P95 ≈ 5.1ms
+  - Fuzzy 10k items P95 ≈ 47ms
+  - Disk 25k fuzzy P95 ≈ 43ms
+  - Heavy Disk 50k fuzzy P95 ≈ 90.6ms ✅
+  - Ultra Disk 75k fuzzy P95 ≈ 124.7ms ✅
+- **测试结果**：
+  - `make test-unit` **52/52 passed**（1 perf skipped）
+  - `make test-perf` **22/22 passed（含重载）**
+
+## 上次更新（v0.27）
 - **P0 搜索/分页版本一致性修复**：搜索切换时自动取消旧分页任务，`loadMore` 只对当前搜索版本生效，避免旧结果混入列表。
 - **沿用 v0.26 P0 性能改进**：热路径清理节流、缩略图异步加载、短词全量模糊搜索去噪。
 - **性能实测（Apple Silicon, macOS 14, Debug, `make test-perf`）**：
@@ -434,16 +447,13 @@ final class YourNewTests: XCTestCase {
 
 ## 📈 版本信息
 
-**当前版本**: v0.15.2（Bug 修复）
-- 修复存储统计显示不正确问题（External Storage 显示 0 Bytes）
-- 新增 Thumbnails 统计显示
-- 强制刷新缓存确保统计准确
+**当前版本**: v0.28（P0 性能）
+- 重载全量模糊搜索提速（50k/75k 磁盘首屏达标）
+- 图片缩略图/预览管线后台化
 
-**上一版本**: v0.15.1（Bug 修复）
-- 修复文本预览显示 ProgressView 问题
-- 图片有缩略图时去除 "Image" 标题
-- 文本元数据显示最后15个字符
-- 元数据样式统一（小字体 + 缩进）
+**上一版本**: v0.27（P0 准确性/性能）
+- 搜索/分页版本一致性修复
+- 热路径清理节流 + 缩略图异步加载 + 短词全量模糊搜索去噪
 
 **更早版本**: v0.15（UI 优化 + Bug 修复）
 - 孤立文件清理：9.3GB → 0（删除 81,603 个孤立文件）

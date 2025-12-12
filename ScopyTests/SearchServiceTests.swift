@@ -317,6 +317,18 @@ final class SearchServiceTests: XCTestCase {
         XCTAssertEqual(result.items.count, 3)
     }
 
+    func testFuzzyPinnedItemsRankFirst() async throws {
+        let pinned = try storage.upsertItem(makeContent("axbyc"))
+        try storage.setPin(pinned.id, pinned: true)
+        _ = try storage.upsertItem(makeContent("abc"))
+        search.invalidateCache()
+
+        let request = SearchRequest(query: "abc", mode: .fuzzy, limit: 10, offset: 0)
+        let result = try await search.search(request: request)
+
+        XCTAssertEqual(result.items.first?.id, pinned.id)
+    }
+
     // MARK: - Helpers
 
     private func populateTestData(count: Int = 50) async throws {

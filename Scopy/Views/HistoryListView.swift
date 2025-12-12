@@ -1,5 +1,7 @@
 import SwiftUI
 import AppKit
+import ImageIO
+import UniformTypeIdentifiers
 
 /// 历史列表视图 - 符合 v0.md 的懒加载设计
 struct HistoryListView: View {
@@ -634,8 +636,15 @@ struct HistoryItemView: View, Equatable {
             if let data = await getImageData() {
                 // v0.12: 获取数据后检查取消状态
                 guard !Task.isCancelled else { return }
+                let scale = NSScreen.main?.backingScaleFactor ?? 2.0
+                let maxPixelSize = Int(ScopySize.Width.previewMax * scale)
+                let downsampled = await Task.detached(priority: .utility) {
+                    Self.downsampleImageData(data, maxPixelSize: maxPixelSize) ?? data
+                }.value
+
+                guard !Task.isCancelled else { return }
                 await MainActor.run {
-                    previewImageData = data
+                    previewImageData = downsampled
                 }
             }
 
@@ -651,6 +660,36 @@ struct HistoryItemView: View, Equatable {
                 }
             }
         }
+    }
+
+    nonisolated private static func downsampleImageData(_ data: Data, maxPixelSize: Int) -> Data? {
+        guard maxPixelSize > 0 else { return nil }
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
+
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: maxPixelSize,
+            kCGImageSourceShouldCacheImmediately: true
+        ]
+
+        guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else {
+            return nil
+        }
+
+        let output = NSMutableData()
+        guard let destination = CGImageDestinationCreateWithData(
+            output as CFMutableData,
+            UTType.png.identifier as CFString,
+            1,
+            nil
+        ) else {
+            return nil
+        }
+
+        CGImageDestinationAddImage(destination, cgImage, nil)
+        guard CGImageDestinationFinalize(destination) else { return nil }
+        return output as Data
     }
 
     private func cancelPreviewTask() {

@@ -7,6 +7,29 @@
 
 ---
 
+## [v0.28] - 2025-12-12
+
+### P0 性能优化
+
+- **重载全量模糊搜索提速** - 50k/75k 磁盘首屏达标
+  - **实现** - `searchInFullIndex` postings 有序交集 + top‑K 小堆排序；巨大候选首屏自适应 FTS 预筛（pinned 兜底、后续分页保持全量 fuzzy）
+- **图片管线后台化** - 缩略图/hover 预览彻底移出 MainActor
+  - **实现** - ImageIO 缩略图 downsample+编码；新图缩略图后台调度；`getImageData` 外部文件后台读取；hover 预览后台 downsample
+
+### 修改文件
+- `Scopy/Services/SearchService.swift`
+- `Scopy/Services/StorageService.swift`
+- `Scopy/Services/RealClipboardService.swift`
+- `Scopy/Views/HistoryListView.swift`
+- `ScopyTests/SearchServiceTests.swift`
+- `doc/implemented-doc/v0.28.md`
+
+### 测试
+- 单元测试: `make test-unit` **52 tests passed** (1 perf skipped)
+- 性能测试: `make test-perf` **22/22 passed（含重载）**
+
+---
+
 ## [v0.27] - 2025-12-12
 
 ### P0 准确性/性能修复

@@ -1,6 +1,8 @@
 import AppKit
 import Foundation
+import ImageIO
 import SQLite3
+import UniformTypeIdentifiers
 
 /// StorageService - 数据持久化服务
 /// 符合 v0.md 第2节：分级存储（小内容SQLite内联，大内容外部文件）
@@ -1307,10 +1309,51 @@ final class StorageService {
     func saveThumbnail(_ data: Data, for contentHash: String) throws {
         let path = (thumbnailCachePath as NSString).appendingPathComponent("\(contentHash).png")
         do {
-            try data.write(to: URL(fileURLWithPath: path))
+            try writeAtomically(data, to: path)
         } catch {
             throw StorageError.fileOperationFailed("Failed to save thumbnail: \(error)")
         }
+    }
+
+    /// 生成缩略图 PNG 数据（后台安全）
+    /// 使用 ImageIO downsample + 编码，避免 AppKit 绘制/锁屏开销
+    nonisolated static func makeThumbnailPNG(from imageData: Data, maxHeight: Int) -> Data? {
+        guard maxHeight > 0 else { return nil }
+        guard let source = CGImageSourceCreateWithData(imageData as CFData, nil) else { return nil }
+
+        var maxPixelSize = CGFloat(maxHeight)
+        if let props = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+           let width = props[kCGImagePropertyPixelWidth] as? CGFloat,
+           let height = props[kCGImagePropertyPixelHeight] as? CGFloat,
+           width > 0, height > 0 {
+            let scale = CGFloat(maxHeight) / height
+            maxPixelSize = max(width * scale, CGFloat(maxHeight))
+        }
+
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: Int(maxPixelSize.rounded(.up)),
+            kCGImageSourceShouldCacheImmediately: true
+        ]
+
+        guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else {
+            return nil
+        }
+
+        let output = NSMutableData()
+        guard let destination = CGImageDestinationCreateWithData(
+            output as CFMutableData,
+            UTType.png.identifier as CFString,
+            1,
+            nil
+        ) else {
+            return nil
+        }
+
+        CGImageDestinationAddImage(destination, cgImage, nil)
+        guard CGImageDestinationFinalize(destination) else { return nil }
+        return output as Data
     }
 
     /// 生成并保存缩略图（从原图数据）
@@ -1326,36 +1369,7 @@ final class StorageService {
             return existing
         }
 
-        // v0.19: 使用 autoreleasepool 管理 NSImage/NSBitmapImageRep 等中间对象
-        let pngData: Data? = autoreleasepool {
-            guard let nsImage = NSImage(data: imageData) else { return nil }
-            let originalSize = nsImage.size
-
-            // 计算缩放比例
-            guard originalSize.height > 0, originalSize.width > 0 else { return nil }
-            let scale = CGFloat(maxHeight) / originalSize.height
-            let newWidth = originalSize.width * scale
-            let newHeight = CGFloat(maxHeight)
-
-            // 创建缩略图
-            let newImage = NSImage(size: NSSize(width: newWidth, height: newHeight))
-            newImage.lockFocus()
-            nsImage.draw(in: NSRect(x: 0, y: 0, width: newWidth, height: newHeight),
-                         from: NSRect(origin: .zero, size: originalSize),
-                         operation: .copy,
-                         fraction: 1.0)
-            newImage.unlockFocus()
-
-            // 转换为 PNG 数据
-            guard let tiffData = newImage.tiffRepresentation,
-                  let bitmap = NSBitmapImageRep(data: tiffData),
-                  let png = bitmap.representation(using: .png, properties: [:]) else {
-                return nil
-            }
-            return png
-        }
-
-        guard let pngData = pngData else { return nil }
+        guard let pngData = Self.makeThumbnailPNG(from: imageData, maxHeight: maxHeight) else { return nil }
 
         // v0.17: 使用原子写入保存缩略图
         let path = (thumbnailCachePath as NSString).appendingPathComponent("\(contentHash).png")

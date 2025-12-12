@@ -317,6 +317,20 @@ final class RealClipboardService: ClipboardServiceProtocol {
 
     func getImageData(itemID: UUID) async throws -> Data? {
         guard let item = try storage.findByID(itemID) else { return nil }
+
+        // 大图片优先走外部文件后台读取，避免主线程磁盘 I/O
+        if let storagePath = item.storageRef {
+            return await Task.detached(priority: .utility) {
+                try? Data(contentsOf: URL(fileURLWithPath: storagePath))
+            }.value
+        }
+
+        // 小图片直接返回内联数据
+        if let rawData = item.rawData {
+            return rawData
+        }
+
+        // 兜底：从数据库重新加载（理论上 findByID 已带 rawData）
         return storage.getOriginalImageData(for: item)
     }
 
@@ -334,14 +348,10 @@ final class RealClipboardService: ClipboardServiceProtocol {
         do {
             let storedItem = try storage.upsertItem(content)
 
-            // 图片类型：生成缩略图
+            // 图片类型：异步生成缩略图（后台，避免阻塞复制热路径）
             if content.type == .image, settings.showImageThumbnails {
-                if let imageData = storage.getOriginalImageData(for: storedItem) {
-                    _ = storage.generateThumbnail(
-                        from: imageData,
-                        contentHash: storedItem.contentHash,
-                        maxHeight: settings.thumbnailHeight
-                    )
+                if storage.getThumbnailPath(for: storedItem.contentHash) == nil {
+                    scheduleThumbnailGeneration(for: storedItem)
                 }
             }
 
@@ -436,15 +446,23 @@ final class RealClipboardService: ClipboardServiceProtocol {
                 }
             }
 
-            // 获取原图数据并生成缩略图（需要在 MainActor 上执行）
+            // 获取原图数据（大图走外部文件后台读取；小图必要时回主线程 DB reload）
+            let imageData: Data?
+            if let storagePath = item.storageRef {
+                imageData = try? Data(contentsOf: URL(fileURLWithPath: storagePath))
+            } else if let rawData = item.rawData {
+                imageData = rawData
+            } else {
+                imageData = await MainActor.run { storageRef.getOriginalImageData(for: item) }
+            }
+
+            guard let imageData = imageData else { return }
+
+            guard let pngData = StorageService.makeThumbnailPNG(from: imageData, maxHeight: maxHeight) else { return }
+
+            // 小文件写入留在主线程（原子写入），避免跨线程触碰 storage 的 actor 状态
             await MainActor.run {
-                if let imageData = storageRef.getOriginalImageData(for: item) {
-                    _ = storageRef.generateThumbnail(
-                        from: imageData,
-                        contentHash: contentHash,
-                        maxHeight: maxHeight
-                    )
-                }
+                try? storageRef.saveThumbnail(pngData, for: contentHash)
             }
         }
     }
