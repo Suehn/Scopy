@@ -17,6 +17,17 @@ final class RealClipboardService: ClipboardServiceProtocol {
     private var eventContinuation: AsyncStream<ClipboardEvent>.Continuation?
     private var monitorTask: Task<Void, Never>?
 
+    // MARK: - Cleanup Scheduling (v0.26)
+
+    /// 复制热路径清理节流：避免每次新条目都执行 O(N) orphan 扫描
+    private var cleanupTask: Task<Void, Never>?
+    private var isCleanupRunning = false
+    private var lastLightCleanupAt: Date = .distantPast
+    private var lastFullCleanupAt: Date = .distantPast
+    private let lightCleanupInterval: TimeInterval = 60        // 至少 60s 一次
+    private let fullCleanupInterval: TimeInterval = 3600       // orphan + vacuum 低频 1h 一次
+    private let cleanupDebounceDelay: TimeInterval = 2.0       // 连续复制合并到一次清理
+
     /// v0.10.7: 事件流关闭标志，防止向已关闭的流发送数据
     private var isEventStreamFinished = false
 
@@ -126,6 +137,10 @@ final class RealClipboardService: ClipboardServiceProtocol {
         // 由于 contentStream 已结束，任务会在下一个 await 点自然退出
         // 不需要阻塞主线程等待，这会导致应用退出时卡顿
         monitorTask = nil
+
+        // 3.5 取消清理任务
+        cleanupTask?.cancel()
+        cleanupTask = nil
 
         // 4. 显式关闭事件流 continuation（在锁外执行，避免死锁）
         continuation.finish()
@@ -333,15 +348,43 @@ final class RealClipboardService: ClipboardServiceProtocol {
             search.handleUpsertedItem(storedItem)
             yieldEvent(.newItem(toDTO(storedItem)))
 
-            // Periodic cleanup
-            // v0.19: 添加错误日志
-            do {
-                try storage.performCleanup()
-            } catch {
-                print("⚠️ RealClipboardService: Periodic cleanup failed: \(error.localizedDescription)")
-            }
+            scheduleCleanup()
         } catch {
             print("⚠️ RealClipboardService: Failed to store clipboard item: \(error.localizedDescription)")
+        }
+    }
+
+    /// v0.26: 防抖 + 节流清理
+    private func scheduleCleanup() {
+        cleanupTask?.cancel()
+        cleanupTask = Task { [weak self] in
+            guard let self = self else { return }
+            try? await Task.sleep(nanoseconds: UInt64(cleanupDebounceDelay * 1_000_000_000))
+            guard !Task.isCancelled else { return }
+            await self.runCleanupIfNeeded()
+        }
+    }
+
+    private func runCleanupIfNeeded() async {
+        guard !isCleanupRunning else { return }
+        isCleanupRunning = true
+        defer { isCleanupRunning = false }
+
+        let now = Date()
+        let needsFull = now.timeIntervalSince(lastFullCleanupAt) >= fullCleanupInterval
+        let needsLight = now.timeIntervalSince(lastLightCleanupAt) >= lightCleanupInterval
+
+        guard needsLight || needsFull else { return }
+
+        let mode: StorageService.CleanupMode = needsFull ? .full : .light
+        do {
+            try storage.performCleanup(mode: mode)
+            lastLightCleanupAt = now
+            if needsFull {
+                lastFullCleanupAt = now
+            }
+        } catch {
+            print("⚠️ RealClipboardService: Scheduled cleanup failed: \(error.localizedDescription)")
         }
     }
 

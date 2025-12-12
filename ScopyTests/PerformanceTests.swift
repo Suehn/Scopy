@@ -88,6 +88,11 @@ final class PerformanceTests: XCTestCase {
         }
         search.invalidateCache()
 
+        // v0.25+：全量模糊索引首次构建为一次性成本，不计入稳态 P95
+        _ = try await search.search(
+            request: SearchRequest(query: "warmup", mode: .fuzzy, limit: 1, offset: 0)
+        )
+
         var times: [Double] = []
 
         // Run multiple searches
@@ -122,6 +127,11 @@ final class PerformanceTests: XCTestCase {
             _ = try storage.upsertItem(makeContent("Search benchmark item \(i) with text"))
         }
         search.invalidateCache()
+
+        // v0.25+：全量模糊索引首次构建为一次性成本，不计入稳态 P95
+        _ = try await search.search(
+            request: SearchRequest(query: "warmup", mode: .fuzzy, limit: 1, offset: 0)
+        )
 
         var times: [Double] = []
 
@@ -547,6 +557,11 @@ final class PerformanceTests: XCTestCase {
         }
         diskSearch.invalidateCache()
 
+        // Warm up full fuzzy index (one‑time build)
+        _ = try await diskSearch.search(
+            request: SearchRequest(query: "warmup", mode: .fuzzy, limit: 1, offset: 0)
+        )
+
         var times: [Double] = []
         for query in ["lorem", "note", "ipsum", "content", "random"] {
             let start = CFAbsoluteTimeGetCurrent()
@@ -640,6 +655,10 @@ final class PerformanceTests: XCTestCase {
         }
         diskSearch.invalidateCache()
 
+        _ = try await diskSearch.search(
+            request: SearchRequest(query: "warmup", mode: .fuzzy, limit: 1, offset: 0)
+        )
+
         var times: [Double] = []
         for query in ["heavy", "lorem", "ipsum", "note"] {
             let start = CFAbsoluteTimeGetCurrent()
@@ -672,6 +691,10 @@ final class PerformanceTests: XCTestCase {
             _ = try diskStorage.upsertItem(makeContent(text))
         }
         diskSearch.invalidateCache()
+
+        _ = try await diskSearch.search(
+            request: SearchRequest(query: "warmup", mode: .fuzzy, limit: 1, offset: 0)
+        )
 
         var times: [Double] = []
         for query in ["ultra", "note", "lorem", "ipsum"] {

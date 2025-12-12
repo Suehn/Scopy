@@ -731,7 +731,12 @@ final class StorageService {
 
     // MARK: - Cleanup (v0.md 2.3)
 
-    func performCleanup() throws {
+    enum CleanupMode {
+        case light   // 热路径：跳过 vacuum / orphan 扫描
+        case full    // 低频：完整清理
+    }
+
+    func performCleanup(mode: CleanupMode = .full) throws {
         guard db != nil else { throw StorageError.databaseNotOpen }
 
         // 1. By count
@@ -758,6 +763,8 @@ final class StorageService {
         if externalSize > maxLargeBytes {
             try cleanupExternalStorage(targetBytes: maxLargeBytes)
         }
+
+        guard mode == .full else { return }
 
         // 5. SQLite housekeeping (v0.md 2.3)
         try execute("PRAGMA incremental_vacuum(100)")

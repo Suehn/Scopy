@@ -36,6 +36,7 @@ final class SearchService {
         let contentHash: String
         let plainText: String
         let plainTextLower: String
+        let plainTextLowerIsASCII: Bool
         let appBundleID: String?
         let createdAt: Date
         var lastUsedAt: Date
@@ -49,7 +50,9 @@ final class SearchService {
             self.type = item.type
             self.contentHash = item.contentHash
             self.plainText = item.plainText
-            self.plainTextLower = item.plainText.lowercased()
+            let lower = item.plainText.lowercased()
+            self.plainTextLower = lower
+            self.plainTextLowerIsASCII = lower.canBeConverted(to: .ascii)
             self.appBundleID = item.appBundleID
             self.createdAt = item.createdAt
             self.lastUsedAt = item.lastUsedAt
@@ -613,6 +616,13 @@ final class SearchService {
             candidateSlots = Array(candidateSet)
         }
 
+        let plusWords: [String]
+        if mode == .fuzzyPlus {
+            plusWords = queryLower.split(separator: " ").map(String.init).filter { !$0.isEmpty }
+        } else {
+            plusWords = []
+        }
+
         var scored: [(IndexedItem, Int)] = []
         scored.reserveCapacity(min(candidateSlots.count, request.limit * 4))
 
@@ -626,9 +636,26 @@ final class SearchService {
                 continue
             }
 
-            guard let score = fuzzyScore(textLower: item.plainTextLower, queryLower: queryLower, mode: mode) else {
-                continue
+            let score: Int?
+            switch mode {
+            case .fuzzy:
+                score = fuzzyMatchScore(textLower: item.plainTextLower, queryLower: queryLower)
+            case .fuzzyPlus:
+                var totalScore = 0
+                var ok = true
+                for word in plusWords {
+                    guard let s = fuzzyMatchScore(textLower: item.plainTextLower, queryLower: word) else {
+                        ok = false
+                        break
+                    }
+                    totalScore += s
+                }
+                score = ok ? totalScore : nil
+            default:
+                score = nil
             }
+
+            guard let score else { continue }
             scored.append((item, score))
         }
 
@@ -697,26 +724,26 @@ final class SearchService {
         return result
     }
 
-    private func fuzzyScore(textLower: String, queryLower: String, mode: SearchMode) -> Int? {
-        switch mode {
-        case .fuzzy:
-            return fuzzyMatchScore(textLower: textLower, queryLower: queryLower)
-        case .fuzzyPlus:
-            let words = queryLower.split(separator: " ").map(String.init).filter { !$0.isEmpty }
-            guard !words.isEmpty else { return 0 }
-            var total = 0
-            for word in words {
-                guard let score = fuzzyMatchScore(textLower: textLower, queryLower: word) else { return nil }
-                total += score
-            }
-            return total
-        default:
-            return nil
-        }
-    }
-
     private func fuzzyMatchScore(textLower: String, queryLower: String) -> Int? {
         guard !queryLower.isEmpty else { return 0 }
+
+        // v0.26: 对极短查询（≤2 字符）使用连续子串语义
+        // 全量历史仍参与搜索，但避免 subsequence 产生的大量弱相关噪音
+        if queryLower.count <= 2 {
+            guard let range = textLower.range(of: queryLower) else { return nil }
+            let pos = range.lowerBound.utf16Offset(in: textLower)
+            let m = queryLower.utf16.count
+            return m * 10 - (m - 1) - pos
+        }
+
+        // ASCII 连续子串快速路径：等价于最优 subsequence 匹配
+        if queryLower.canBeConverted(to: .ascii),
+           textLower.canBeConverted(to: .ascii),
+           let range = textLower.range(of: queryLower) {
+            let pos = range.lowerBound.utf16Offset(in: textLower)
+            let m = queryLower.utf16.count
+            return m * 10 - (m - 1) - pos
+        }
 
         var textIndex = textLower.startIndex
         var firstPos: Int?

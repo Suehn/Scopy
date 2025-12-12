@@ -21,3 +21,6 @@ Package.resolved
 
 # macOS
 .DS_Store
+
+# Test logs
+test-*.log

@@ -157,6 +157,9 @@ struct HistoryItemView: View, Equatable {
     // v0.15: Text preview state
     @State private var showTextPreview = false
     @State private var textPreviewContent: String?
+    // v0.26: 缩略图异步加载，避免主线程磁盘 I/O
+    @State private var loadedThumbnail: NSImage?
+    @State private var thumbnailLoadTask: Task<Void, Never>?
 
     // 静态图标缓存 - 避免重复调用 NSWorkspace API
     // v0.10.4: 添加锁保护，确保线程安全
@@ -490,6 +493,8 @@ struct HistoryItemView: View, Equatable {
             hoverExitTask?.cancel()
             hoverExitTask = nil
             cancelPreviewTask()
+            thumbnailLoadTask?.cancel()
+            thumbnailLoadTask = nil
             // 清理状态，防止内存泄漏
             previewImageData = nil
             textPreviewContent = nil
@@ -498,50 +503,83 @@ struct HistoryItemView: View, Equatable {
 
     // MARK: - Thumbnail View
 
-    /// v0.18: 从缓存获取缩略图，避免重复磁盘 I/O
+    /// v0.18: 从缓存获取缩略图（不做磁盘 I/O）
     private func getCachedThumbnail(path: String) -> NSImage? {
         Self.thumbnailCacheLock.withLock {
-            // 检查缓存
             if let cached = Self.thumbnailCache[path] {
-                // 更新 LRU 访问顺序
                 if let index = Self.thumbnailAccessOrder.firstIndex(of: path) {
                     Self.thumbnailAccessOrder.remove(at: index)
                 }
                 Self.thumbnailAccessOrder.append(path)
                 return cached
             }
+            return nil
+        }
+    }
 
-            // 缓存未命中，从磁盘加载
-            guard let image = NSImage(contentsOfFile: path) else {
-                return nil
+    private func storeThumbnailInCache(_ image: NSImage, path: String) {
+        Self.thumbnailCacheLock.withLock {
+            if Self.thumbnailCache[path] == nil {
+                if Self.thumbnailCache.count >= Self.maxThumbnailCacheSize,
+                   let oldest = Self.thumbnailAccessOrder.first {
+                    Self.thumbnailCache.removeValue(forKey: oldest)
+                    Self.thumbnailAccessOrder.removeFirst()
+                }
+                Self.thumbnailCache[path] = image
+                Self.thumbnailAccessOrder.append(path)
             }
+        }
+    }
 
-            // LRU 清理
-            if Self.thumbnailCache.count >= Self.maxThumbnailCacheSize,
-               let oldest = Self.thumbnailAccessOrder.first {
-                Self.thumbnailCache.removeValue(forKey: oldest)
-                Self.thumbnailAccessOrder.removeFirst()
+    private func loadThumbnailIfNeeded(path: String) {
+        if let cached = getCachedThumbnail(path: path) {
+            loadedThumbnail = cached
+            return
+        }
+        guard loadedThumbnail == nil else { return }
+
+        thumbnailLoadTask?.cancel()
+        thumbnailLoadTask = Task {
+            let data = await Task.detached(priority: .utility) {
+                try? Data(contentsOf: URL(fileURLWithPath: path))
+            }.value
+
+            guard !Task.isCancelled else { return }
+            guard let data = data else { return }
+
+            // NSImage/AppKit 创建与 @State 写入需要在主线程执行
+            let image = await MainActor.run { NSImage(data: data) }
+            guard let image = image else { return }
+
+            await MainActor.run {
+                storeThumbnailInCache(image, path: path)
+                loadedThumbnail = image
             }
-
-            // 写入缓存
-            Self.thumbnailCache[path] = image
-            Self.thumbnailAccessOrder.append(path)
-
-            return image
         }
     }
 
     @ViewBuilder
     private var thumbnailView: some View {
-        if let thumbnailPath = item.thumbnailPath,
-           let nsImage = getCachedThumbnail(path: thumbnailPath) {
-            Image(nsImage: nsImage)
-                .resizable()
-                .aspectRatio(contentMode: .fit)
-                .frame(height: thumbnailHeight)
-                .clipShape(RoundedRectangle(cornerRadius: ScopySize.Corner.sm))
-                .padding(.leading, ScopySpacing.xs)
-                .padding(.vertical, ScopySpacing.xs)
+        if let thumbnailPath = item.thumbnailPath {
+            let cachedImage = getCachedThumbnail(path: thumbnailPath) ?? loadedThumbnail
+            if let nsImage = cachedImage {
+                Image(nsImage: nsImage)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(height: thumbnailHeight)
+                    .clipShape(RoundedRectangle(cornerRadius: ScopySize.Corner.sm))
+                    .padding(.leading, ScopySpacing.xs)
+                    .padding(.vertical, ScopySpacing.xs)
+            } else {
+                Image(systemName: "photo")
+                    .frame(width: thumbnailHeight, height: thumbnailHeight)
+                    .padding(.leading, ScopySpacing.xs)
+                    .padding(.vertical, ScopySpacing.xs)
+                    .foregroundStyle(.green)
+                    .task(id: thumbnailPath) {
+                        loadThumbnailIfNeeded(path: thumbnailPath)
+                    }
+            }
         } else {
             Image(systemName: "photo")
                 .frame(width: thumbnailHeight, height: thumbnailHeight)

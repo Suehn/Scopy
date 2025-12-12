@@ -1,10 +1,17 @@
 # Scopy 部署和使用指南
 
-## 本次更新（v0.16）
-- 搜索稳定性与 Pin 排序一致性修复；剪贴板流关闭保护。
-- 外部存储/缩略图统计、孤儿清理、文件删除后台化，减少主线程阻塞。
-- 新增 `(type, last_used_at)` 复合索引；缓存 TTL 延长以降低重复统计。
-- 测试结果：`xcodebuild test -scheme Scopy -destination 'platform=macOS' -only-testing:ScopyTests` **161/161 通过（1 跳过性能开关）**，性能实测详见 `doc/profile/v0.16-profile.md`。
+## 本次更新（v0.26）
+- **P0 热路径清理节流**：复制/入库不再每次执行 orphan 扫描与 vacuum，改为防抖+节流的分级清理（light 60s / full 1h）。
+- **P0 缩略图异步加载**：历史列表滚动时缩略图冷加载移出主线程，避免磁盘 I/O 卡顿。
+- **短词全量模糊搜索去噪**：≤2 字符 query 仍在全量历史上搜索，但使用连续子串语义，避免弱相关 subsequence 结果。
+- **性能实测（Apple Silicon, macOS 14, Debug, `make test-perf`）**：
+  - Fuzzy 5k items P95 ≈ 10–11ms
+  - Fuzzy 10k items P95 ≈ 75ms
+  - Disk mixed 25k fuzzy 首屏 ≈ 60ms
+  - 50k/75k 磁盘极限 fuzzy 仍高于目标（Debug 环境），后续继续优化。
+- **测试结果**：
+  - `make test-unit` **51/51 passed**（1 perf skipped）
+  - `make test-perf` 非 heavy 场景通过
 
 ## 🚀 快速开始 (推荐: 使用 deploy.sh)
 

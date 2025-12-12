@@ -7,6 +7,31 @@
 
 ---
 
+## [v0.26] - 2025-12-12
+
+### P0 性能优化
+
+- **热路径清理节流** - 新条目写入不再每次执行 O(N) orphan 扫描与 vacuum
+  - **实现** - `StorageService.performCleanup` 分级为 light/full；`RealClipboardService` 防抖 2s + 节流（light 60s / full 1h）调度清理
+- **缩略图异步加载** - 列表滚动冷加载缩略图移出 MainActor
+  - **实现** - `HistoryItemView` 仅从内存缓存读取；磁盘读取在后台 Task 中完成，回主线程写缓存/状态
+- **短词全量模糊搜索去噪** - ≤2 字符 query 在全量历史上按连续子串匹配，避免 subsequence 弱相关噪音
+  - **实现** - `fuzzyMatchScore` 对短词使用 range(of:) 子串语义；长词保持顺序 subsequence 语义
+
+### 修改文件
+- `Scopy/Services/StorageService.swift`
+- `Scopy/Services/RealClipboardService.swift`
+- `Scopy/Views/HistoryListView.swift`
+- `Scopy/Services/SearchService.swift`
+- `ScopyTests/PerformanceTests.swift`
+- `doc/implemented-doc/v0.26.md`
+
+### 测试
+- 单元测试: `make test-unit` **51 tests passed** (1 perf skipped)
+- 性能测试: `make test-perf` 非 heavy 场景通过；重负载磁盘用例仍待优化
+
+---
+
 ## [v0.25] - 2025-12-12
 
 ### 全量模糊搜索
