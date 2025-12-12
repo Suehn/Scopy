@@ -448,6 +448,9 @@ final class AppState {
             guard !Task.isCancelled else { return }
             guard canLoadMore, !isLoading else { return }
 
+            // 记录当前搜索版本，防止搜索切换时旧分页结果混入
+            let currentVersion = searchVersion
+
             isLoading = true
             defer { isLoading = false }
 
@@ -464,7 +467,7 @@ final class AppState {
                     )
                     let result = try await service.search(query: request)
                     // 在状态变更前再次检查取消状态
-                    guard !Task.isCancelled else { return }
+                    guard !Task.isCancelled, currentVersion == searchVersion else { return }
                     items.append(contentsOf: result.items)
                     // v0.16.2: 手动失效缓存
                     invalidatePinnedCache()
@@ -474,7 +477,7 @@ final class AppState {
                 } else {
                     let moreItems = try await service.fetchRecent(limit: 100, offset: loadedCount)
                     // 在状态变更前再次检查取消状态
-                    guard !Task.isCancelled else { return }
+                    guard !Task.isCancelled, currentVersion == searchVersion else { return }
                     items.append(contentsOf: moreItems)
                     // v0.16.2: 手动失效缓存
                     invalidatePinnedCache()
@@ -507,6 +510,10 @@ final class AppState {
         // 递增搜索版本号
         searchVersion += 1
         let currentVersion = searchVersion
+
+        // 搜索切换时取消旧分页任务，避免混入无关结果
+        loadMoreTask?.cancel()
+        loadMoreTask = nil
 
         searchTask = Task {
             // 防抖 150ms

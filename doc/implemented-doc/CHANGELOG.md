@@ -7,6 +7,25 @@
 
 ---
 
+## [v0.27] - 2025-12-12
+
+### P0 准确性/性能修复
+
+- **搜索/分页版本一致性** - 搜索切换时旧分页结果不再混入当前列表
+  - **实现** - `AppState.loadMore` 捕获 `searchVersion` 并在写入前校验；`AppState.search` 切换时取消 `loadMoreTask`
+- **竞态回归测试** - 新增搜索切换时分页不混入的单测
+  - **实现** - Mock 服务支持可控延迟 + `testLoadMoreDoesNotAppendAfterSearchChange`
+
+### 修改文件
+- `Scopy/Observables/AppState.swift`
+- `ScopyTests/AppStateTests.swift`
+- `doc/implemented-doc/v0.27.md`
+
+### 测试
+- 单元测试: `make test-unit` **51 tests passed** (1 perf skipped)
+
+---
+
 ## [v0.26] - 2025-12-12
 
 ### P0 性能优化

@@ -137,6 +137,32 @@ final class AppStateTests: XCTestCase {
         XCTAssertEqual(mockService.lastSearchQuery, "second", "Should use the latest query")
     }
 
+    func testLoadMoreDoesNotAppendAfterSearchChange() async throws {
+        mockService.setItemCount(200)
+        await appState.load()
+
+        // First search to enable filtered paging
+        appState.searchQuery = "1"
+        appState.search()
+        try await Task.sleep(nanoseconds: 250_000_000) // debounce + search
+        XCTAssertTrue(appState.canLoadMore)
+
+        // Make loadMore slow so it overlaps with next search
+        mockService.searchDelayNs = 300_000_000
+        let pagingTask = Task { await appState.loadMore() }
+
+        // Switch query while paging in flight
+        mockService.searchDelayNs = 0
+        appState.searchQuery = "2"
+        appState.search()
+        try await Task.sleep(nanoseconds: 250_000_000)
+
+        await pagingTask.value
+
+        // Results should only match the latest query
+        XCTAssertTrue(appState.items.allSatisfy { $0.plainText.localizedCaseInsensitiveContains("2") })
+    }
+
     func testSearchUpdatesItemsList() async throws {
         mockService.setItemCount(100)
         await appState.load()
@@ -580,6 +606,10 @@ final class TestMockClipboardService: ClipboardServiceProtocol {
     var deleteCallCount = 0
     var clearAllCallCount = 0
 
+    // Artificial delays (for race-condition tests)
+    var fetchRecentDelayNs: UInt64 = 0
+    var searchDelayNs: UInt64 = 0
+
     var eventStream: AsyncStream<ClipboardEvent> {
         AsyncStream { continuation in
             self.eventContinuation = continuation
@@ -633,6 +663,9 @@ final class TestMockClipboardService: ClipboardServiceProtocol {
     // MARK: - Protocol Implementation
 
     func fetchRecent(limit: Int, offset: Int) async throws -> [ClipboardItemDTO] {
+        if fetchRecentDelayNs > 0 {
+            try? await Task.sleep(nanoseconds: fetchRecentDelayNs)
+        }
         let sortedItems = items.sorted { $0.lastUsedAt > $1.lastUsedAt }
         let start = min(offset, sortedItems.count)
         let end = min(offset + limit, sortedItems.count)
@@ -640,6 +673,9 @@ final class TestMockClipboardService: ClipboardServiceProtocol {
     }
 
     func search(query: SearchRequest) async throws -> SearchResultPage {
+        if searchDelayNs > 0 {
+            try? await Task.sleep(nanoseconds: searchDelayNs)
+        }
         searchCallCount += 1
         lastSearchQuery = query.query
 
@@ -857,4 +893,3 @@ final class AppStateFallbackTests: XCTestCase {
         state.stop()
     }
 }
-
