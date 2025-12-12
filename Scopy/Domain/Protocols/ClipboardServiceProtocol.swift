@@ -1,0 +1,58 @@
+import Foundation
+
+// MARK: - Service Protocol
+
+/// 剪贴板服务协议 - 对应 v0.md 中的前后端接口设计
+/// 后端只提供结构化数据和命令接口，不关心 UI
+@MainActor
+protocol ClipboardServiceProtocol: AnyObject {
+    // MARK: - Lifecycle
+
+    /// 启动服务（真实服务需要初始化数据库、启动监控；Mock 服务可空实现）
+    func start() async throws
+
+    /// 停止服务（清理资源）
+    func stop()
+
+    // MARK: - Data Access
+
+    /// 获取最近的剪贴板项
+    func fetchRecent(limit: Int, offset: Int) async throws -> [ClipboardItemDTO]
+
+    /// 搜索剪贴板历史
+    func search(query: SearchRequest) async throws -> SearchResultPage
+
+    /// 固定/取消固定项目
+    func pin(itemID: UUID) async throws
+    func unpin(itemID: UUID) async throws
+
+    /// 删除项目
+    func delete(itemID: UUID) async throws
+
+    /// 清空历史
+    func clearAll() async throws
+
+    /// 复制到系统剪贴板
+    func copyToClipboard(itemID: UUID) async throws
+
+    /// 更新设置
+    func updateSettings(_ settings: SettingsDTO) async throws
+
+    /// 获取当前设置
+    func getSettings() async throws -> SettingsDTO
+
+    /// 获取存储统计
+    func getStorageStats() async throws -> (itemCount: Int, sizeBytes: Int)
+
+    /// 获取详细的存储统计
+    func getDetailedStorageStats() async throws -> StorageStatsDTO
+
+    /// 获取图片原始数据（用于预览）
+    func getImageData(itemID: UUID) async throws -> Data?
+
+    /// 获取最近使用的 app 列表（用于过滤）
+    func getRecentApps(limit: Int) async throws -> [String]
+
+    /// 事件观察 - 新增条目、删除、设置变更等
+    var eventStream: AsyncStream<ClipboardEvent> { get }
+}

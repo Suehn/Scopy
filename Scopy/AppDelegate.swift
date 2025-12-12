@@ -10,7 +10,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var panel: FloatingPanel?
     private(set) var hotKeyService: HotKeyService?
     private var settingsWindow: NSWindow?
-    private let settingsKey = "ScopySettings"
+    private let settingsStore: SettingsStore = .shared
     /// v0.22: 存储事件监视器引用，以便在应用退出时移除
     private var localEventMonitor: Any?
 
@@ -58,8 +58,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         // 注册全局快捷键（从设置加载或使用默认 ⇧⌘C）
         hotKeyService = HotKeyService()
-        let settings = loadHotkeySettings()
-        applyHotKey(keyCode: settings.keyCode, modifiers: settings.modifiers)
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            let settings = await settingsStore.load()
+            applyHotKey(keyCode: settings.hotkeyKeyCode, modifiers: settings.hotkeyModifiers)
+        }
 
         // 注册 ⌘, 快捷键打开设置
         // v0.22: 存储监视器引用，以便在应用退出时移除
@@ -99,19 +102,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - Hotkey Settings
 
-    /// 从 UserDefaults 加载快捷键设置
-    private func loadHotkeySettings() -> (keyCode: UInt32, modifiers: UInt32) {
-        let defaults = UserDefaults.standard
-        guard let dict = defaults.dictionary(forKey: settingsKey) else {
-            // 默认: ⇧⌘C (shiftKey | cmdKey, kVK_ANSI_C)
-            // shiftKey = 0x0200, cmdKey = 0x0100, 合计 0x0300
-            return (8, 0x0300)
-        }
-        let keyCode = (dict["hotkeyKeyCode"] as? NSNumber)?.uint32Value ?? 8
-        let modifiers = (dict["hotkeyModifiers"] as? NSNumber)?.uint32Value ?? 0x0300
-        return (keyCode, modifiers)
-    }
-
     /// 统一应用并持久化快捷键，确保无需重启即可生效
     @MainActor
     func applyHotKey(keyCode: UInt32, modifiers: UInt32) {
@@ -130,10 +120,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func persistHotkeySettings(keyCode: UInt32, modifiers: UInt32) {
-        var dict = UserDefaults.standard.dictionary(forKey: settingsKey) ?? [:]
-        dict["hotkeyKeyCode"] = keyCode
-        dict["hotkeyModifiers"] = modifiers
-        UserDefaults.standard.set(dict, forKey: settingsKey)
+        Task {
+            await settingsStore.updateHotkey(keyCode: keyCode, modifiers: modifiers)
+        }
     }
 
     // MARK: - Settings Window
