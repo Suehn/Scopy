@@ -663,6 +663,19 @@ final class SearchService {
                 var totalScore = 0
                 var ok = true
                 for wordInfo in plusWords {
+                    // v0.30: fuzzyPlus 对 ASCII 长词要求连续子串，避免跨路径/噪音弱相关
+                    if wordInfo.isASCII,
+                       wordInfo.word.count >= 3 {
+                        guard let range = item.plainTextLower.range(of: wordInfo.word) else {
+                            ok = false
+                            break
+                        }
+                        let pos = range.lowerBound.utf16Offset(in: item.plainTextLower)
+                        let m = wordInfo.word.utf16.count
+                        totalScore += m * 10 - (m - 1) - pos
+                        continue
+                    }
+
                     guard let s = fuzzyMatchScore(
                         textLower: item.plainTextLower,
                         textLowerIsASCII: item.plainTextLowerIsASCII,

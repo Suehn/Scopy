@@ -46,6 +46,18 @@ final class SearchServiceTests: XCTestCase {
         XCTAssertGreaterThan(result.items.count, 0)
     }
 
+    func testFuzzyPlusRequiresContiguousASCIIWords() async throws {
+        _ = try await storage.upsertItem(makeContent("Here we go", type: .text))
+        _ = try await storage.upsertItem(makeContent("/Users/test/WeChat Files/9d5520c5d3e1ce6da40d435f5300958f.png", type: .file))
+        search.invalidateCache()
+
+        let request = SearchRequest(query: "Here we", mode: .fuzzyPlus, limit: 50, offset: 0)
+        let result = try await search.search(request: request)
+
+        XCTAssertTrue(result.items.contains { $0.plainText.localizedCaseInsensitiveContains("Here we") })
+        XCTAssertFalse(result.items.contains { $0.type == .file }, "ASCII long-word fuzzyPlus should not match gappy file paths")
+    }
+
     func testRegexSearch() async throws {
         try await populateTestData()
 

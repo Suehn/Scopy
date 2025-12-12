@@ -7,6 +7,24 @@
 
 ---
 
+## [v0.29.1] - 2025-12-12
+
+### P0 准确性修复
+
+- **fuzzyPlus 英文多词去噪** - ASCII 长词（≥3）改为连续子串语义，避免 subsequence 弱相关误召回
+  - **实现** - `SearchService.searchInFullIndex` fuzzyPlus 评分对 ASCII 长词要求 `range(of:)` 命中，否则淘汰
+
+### 修改文件
+- `Scopy/Services/SearchService.swift`
+- `ScopyTests/SearchServiceTests.swift`
+- `doc/implemented-doc/v0.29.1.md`
+
+### 测试
+- 单元测试: `make test-unit` **53 tests passed** (1 perf skipped)
+- 性能测试: `make test-perf` **22/22 passed（含重载）**
+
+---
+
 ## [v0.29] - 2025-12-12
 
 ### P0 渐进搜索准确性/性能
