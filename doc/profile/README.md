@@ -6,6 +6,11 @@
 
 | 版本 | 日期 | 主要变化 |
 |------|------|----------|
+| [v0.35.1-profile.md](./v0.35.1-profile.md) | 2025-12-13 | 文档对齐版本；性能基线沿用 v0.35（无代码改动） |
+| [v0.35-profile.md](./v0.35-profile.md) | 2025-12-13 | UI 拆分（HistoryListView components），基线记录 |
+| [v0.34-profile.md](./v0.34-profile.md) | 2025-12-13 | 缓存入口收口 + perf 用例 warmup 稳定性 |
+| [v0.33-profile.md](./v0.33-profile.md) | 2025-12-13 | Application 门面 + 事件语义，基线记录 |
+| [v0.32-profile.md](./v0.32-profile.md) | 2025-12-13 | Search actor + 只读连接分离，基线记录 |
 | [v0.29.1-profile.md](./v0.29.1-profile.md) | 2025-12-12 | fuzzyPlus 英文多词准确性修复，无性能回归 |
 | [v0.29-profile.md](./v0.29-profile.md) | 2025-12-12 | 渐进搜索校准 + 内存/存储/渲染性能收敛，小幅提速 |
 | [v0.11-profile.md](./v0.11-profile.md) | 2025-11-29 | 外部清理 -81%，+16 测试 |

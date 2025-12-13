@@ -3,7 +3,7 @@
 > 说明：本文用于指导后续“稳定性优先”的长期重构（含 Codex 执行）。`doc/review/review-v0.3-2.md` 为历史草案/补充材料，其中关键内容已合并到本文；后续以本文为准。
 
 - 最后更新：2025-12-13
-- 代码基线：`1aecb94`
+- 代码基线：`a542326`（tag `v0.35`）；文档对齐版本：`v0.35.1`
 - 关联文档：
   - 当前实现状态索引：`doc/implemented-doc/README.md`
   - 近期变更：`doc/implemented-doc/CHANGELOG.md`
@@ -56,33 +56,37 @@
 - UI 注入：`AppDelegate` 创建 `FloatingPanel`，根视图 `ContentView().environment(AppState.shared)`
 - 关键回调：
   - `AppState.shared.applyHotKeyHandler` / `unregisterHotKeyHandler` 由 `AppDelegate` 注入
-  - SettingsView 保存时会调用 `appState.updateSettings(...)`，并且**额外**直接触发 `applyHotKeyHandler`（立即应用并持久化）
+  - SettingsView 保存时会调用 `appState.updateSettings(...)`，并通过 callback 触发 `applyHotKeyHandler` 立即应用（持久化走 `SettingsStore`，不再直写 UserDefaults）
 
 ### 2.2 当前“前后端边界”
 
-- UI 通过 `Scopy/Protocols/ClipboardServiceProtocol.swift` 里的 `@MainActor protocol ClipboardServiceProtocol` 调用后端。
-- 同一个文件里混杂：DTO/Domain（`ClipboardItemDTO`、`SearchRequest`、`SettingsDTO`…）+ Protocol + Event。
+- UI 通过 `Scopy/Domain/Protocols/ClipboardServiceProtocol.swift` 里的 `@MainActor protocol ClipboardServiceProtocol` 调用后端（`RealClipboardService` 为兼容层 adapter）。
+- DTO/请求/事件/设置模型已拆到 `Scopy/Domain/Models/*`（Phase 0 已完成）。
 
 ### 2.3 当前运行时数据流（事实）
 
 1. `ClipboardMonitor`（`@MainActor`）使用 `Timer` 轮询 `NSPasteboard.general.changeCount`
 2. 提取 `RawClipboardData`（主线程），对大内容/图片走 `Task.detached` + 后台 hash
 3. `ClipboardMonitor.contentStream: AsyncStream<ClipboardContent>` 发出事件
-4. `RealClipboardService`（`@MainActor`）消费 `contentStream`
-5. `StorageService.upsertItem` 写 DB/外部文件；`SearchService.handleUpsertedItem` 更新索引
-6. `RealClipboardService.eventStream` 发出 `ClipboardEvent`
-7. `AppState`（`@Observable @MainActor`）消费 `eventStream` → 更新 items/pagination/state → SwiftUI 刷新
+4. `Application/ClipboardService`（actor）消费 `contentStream`，协调 storage/search/settings，并统一发事件
+5. `StorageService.upsertItem` 写入（DB 访问经 `SQLiteClipboardRepository` actor；外部文件/缩略图仍由 StorageService 负责）
+6. `SearchEngineImpl`（actor）维护搜索索引（自持只读连接），并消费 upsert/delete/pin/clear 事件增量更新
+7. `ClipboardService.eventStream` 发出 `ClipboardEvent`；`RealClipboardService` 仅转发该 stream
+8. `AppState`（`@Observable @MainActor`）消费 `eventStream` → 更新 items/pagination/state → SwiftUI 刷新
 
 ### 2.4 关键文件规模（当前维护成本的直接来源）
 
 | 文件 | 行数 | 主要职责（现状） |
 |---|---:|---|
-| `Scopy/Services/StorageService.swift` | 1481 | SQLite + 外部文件 + 缩略图 + 清理策略 + 统计 |
-| `Scopy/Services/SearchService.swift` | 1161 | FTS + 全量 fuzzy 索引 + 渐进 refine + cache + timeout |
+| `Scopy/Infrastructure/Search/SearchEngineImpl.swift` | 1063 | Search actor：只读连接 + fuzzy 索引 + 渐进 refine |
+| `Scopy/Services/StorageService.swift` | 845 | 分级存储/缩略图/清理；DB 访问通过 repository |
+| `Scopy/Infrastructure/Persistence/SQLiteClipboardRepository.swift` | 746 | SQLite write actor：CRUD/FTS/统计/清理 SQL |
 | `Scopy/Services/ClipboardMonitor.swift` | 819 | pasteboard 轮询 + 提取 + hash + 任务队列 + AsyncStream |
-| `Scopy/Observables/AppState.swift` | 754 | UI 状态 + 搜索/分页/过滤/事件消费 + 设置加载 |
-| `Scopy/Views/HistoryListView.swift` | 872 | 虚拟列表 + 缩略图/预览 + 多套缓存 + hover 稳定性补丁 |
-| `Scopy/Services/RealClipboardService.swift` | 531 | 门面服务：组合 monitor/storage/search/settings + 事件流 |
+| `Scopy/Application/ClipboardService.swift` | 499 | Application 门面 actor：生命周期 + 事件流 + 清理调度 |
+| `Scopy/Observables/AppState.swift` | 756 | UI 状态 + 搜索/分页/过滤/事件消费 + 设置加载 |
+| `Scopy/Views/HistoryListView.swift` | 129 | 列表框架（分区/触底加载） |
+| `Scopy/Views/History/HistoryItemView.swift` | 473 | Row（缩略图/hover/操作） |
+| `Scopy/Services/RealClipboardService.swift` | 110 | 兼容层 adapter：协议转发 |
 
 ---
 
@@ -94,64 +98,46 @@
 
 #### P0-1：`@MainActor` 标注与实际执行上下文不一致（绕隔离）
 
-事实：
+现状（已解决：v0.32）：
 
-- `SearchService` 标注为 `@MainActor`，但核心搜索通过 `DispatchQueue(label: "com.scopy.search")` 执行（`runOnQueue` / `runOnQueueWithTimeout`）。
-- `runOnQueueWithTimeout` 的超时只会“先返回”，并不会取消 `queue.async` 的 work（GCD 不可取消），导致后台仍可能继续占用 CPU/SQLite。
-
-后果：
-
-- Strict Concurrency/TSan 下属于典型隔离违规温床。
-- “看起来主线程安全，实际上绕开隔离”的模式会让问题呈现为：偶发卡顿、偶发慢、偶发状态不一致、难复现。
+- 搜索逻辑已迁入 `Scopy/Infrastructure/Search/SearchEngineImpl.swift`（actor），并移除 `DispatchQueue(label: "com.scopy.search")` / `runOnQueue*`
+- 取消/超时改为结构化并发语义：在长循环中加入 `Task.checkCancellation()`，timeout/cancel 后不再回写 UI 可见状态
 
 #### P0-2：SQLite 连接归属不清（`OpaquePointer` 跨组件/跨线程共享）
 
-事实：
+现状（已解决：v0.31–v0.32）：
 
-- `StorageService` 暴露 `var database: OpaquePointer? { db }`
-- `RealClipboardService.start()` 执行 `search.setDatabase(storage.database)`
-- `SearchService` 在 search queue 上 `sqlite3_prepare_v2/step/finalize`，同时 `StorageService` 在 MainActor 上写入/清理
-
-后果：
-
-- 读写锁争用与抖动不可控（你体感“性能不稳定”的主要来源之一）。
-- “修一个竞态、来一个死锁/抖动”的补丁循环难以结束。
+- `OpaquePointer` 仅存在于 `Scopy/Infrastructure/Persistence/*`（连接封装与 repository actor 内部）
+- 写入：`Scopy/Infrastructure/Persistence/SQLiteClipboardRepository.swift`（actor）统一持有/串行化 DB 写连接
+- 读取/搜索：`Scopy/Infrastructure/Search/SearchEngineImpl.swift` 自持独立 **只读连接**（`query_only` + `busy_timeout`），避免与写连接争用与跨线程共享
 
 #### P0-3：取消/超时语义不严格（会继续偷偷跑）
 
-事实：
+现状（已解决：v0.32；仍可增强）：
 
-- `SearchService.runOnQueueWithTimeout` 返回 timeout 后，GCD work 仍可能继续执行，并可能：
-  - 继续查询 SQLite
-  - 继续构建 fullIndex / 继续更新缓存
+- 取消/超时由结构化并发控制：超时/取消后结果被丢弃，不再污染可见状态
+- 仍可选增强（vNext+1）：在取消时对 read connection 调用 `sqlite3_interrupt`，进一步降低尾部浪费
 
-最低要求（vNext）：
+#### P0-4：设置与热键持久化多源写入（已解决：v0.30）
 
-- 即使不追求“强杀”，也必须保证：timeout/cancel 后**不会再回写 UI/缓存的最终可见状态**，并且不会积压大量无意义 work。
+现状（v0.35）：
 
-#### P0-4：设置与热键持久化多源写入（UserDefaults 分散）
+- Settings 持久化唯一入口：`Scopy/Infrastructure/Settings/SettingsStore.swift`（actor），统一读写 `UserDefaults["ScopySettings"]`
+- 热键应用入口仍在 `AppDelegate.applyHotKey`（遵循 `AGENTS.md`），持久化通过 `SettingsStore.updateHotkey(...)` 完成
+- Settings 保存：
+  - UI 调用 `AppState.updateSettings(...)` → service.updateSettings → `SettingsStore.save(...)`
+  - `SettingsView.saveSettings()` 仍会通过 callback 调用 `applyHotKeyHandler` 立即应用热键（持久化同样走 SettingsStore），不再存在“多处直写 UserDefaults 覆盖字段”的一致性风险
 
-事实：
+剩余风险：
 
-- `AppDelegate.applyHotKey` 会写入 `UserDefaults["ScopySettings"]`（hotkey 字段）。
-- `RealClipboardService.updateSettings` 会写入同一个 key（完整 settings 字典）。
-- `SettingsView.saveSettings` 在调用 `appState.updateSettings` 后还会直接调用 `applyHotKeyHandler`（立即应用并持久化）。
-- `AppState` 还把 `.settingsChanged` 当作“兜底刷新一切”的事件。
+- 仍存在“保存设置 + 立即 applyHotKey”两条路径的重复调用；但由于 SSOT 已收口，风险主要是冗余工作而非一致性错误（Phase 6 可继续收敛）
 
-后果：
+#### P0-5：事件语义不纯（已解决：v0.33）
 
-- 写入源越多，越难保证“最后写入者是谁、是否覆盖了别人的字段”，稳定性靠运气与 patch。
+现状（v0.35）：
 
-#### P0-5：事件语义不纯（clearAll 触发 settingsChanged）
-
-事实：
-
-- `RealClipboardService.clearAll()` 最后 `yieldEvent(.settingsChanged)`
-- `AppState.handleEvent(.settingsChanged)` 会 `loadSettings()` + `applyHotKeyHandler(...)` + `load()`
-
-后果：
-
-- UI 被迫把“设置变更”当作“万能刷新信号”，导致副作用面扩大、调试困难、易回归。
+- `clearAll()` 发 `ClipboardEvent.itemsCleared(keepPinned: true)`，不再触发 `.settingsChanged`
+- `AppState.handleEvent(.itemsCleared)` 最小处理为 `await load()`；设置变更仍由 `.settingsChanged` 独立承载
 
 #### P0-6：Clipboard ingest 背压策略不可控（可能无声丢历史）
 
@@ -168,34 +154,24 @@
 
 ### P1（性能/维护性问题：重构时顺手解决）
 
-#### P1-1：外部文件写入与 DB 插入缺少“失败回滚”
+#### P1-1：外部文件写入与 DB 插入缺少“失败回滚”（已解决：v0.31）
 
-事实：
+现状（v0.35）：
 
-- `StorageService.upsertItem`：先 `writeAtomically(rawData, to: path)`，再执行 `INSERT`
-- 若 `INSERT` 失败，外部文件不会回滚删除（只能靠后续 orphan cleanup）
+- `StorageService.upsertItem` 在 “外部写入成功但 DB insert 失败” 时执行 best-effort rollback（删除外部文件），避免 orphan 长期累积
 
-目标：
+#### P1-2：缓存体系重复、边界不清（已解决：v0.34）
 
-- 任何 “外部文件写入 + DB 记录” 必须具备事务式语义：DB 失败就删文件，避免 orphan 不断累积。
+现状（v0.35）：
 
-#### P1-2：缓存体系重复、边界不清
-
-事实：
-
-- 图标：`IconCache actor` + `IconCacheSync` + `HistoryItemView` 静态 `NSCache`
-- 缩略图：`HistoryItemView` 静态 `NSCache` + `StorageService` 缩略图目录 + `ThumbnailGenerationTracker`
-
-目标：
-
-- 只保留 1 套可调参的缓存入口（Icon/Thumbnail 分开），View 内不再自建“全局缓存”。
+- 图标：`Scopy/Infrastructure/Caching/IconService.swift` 作为单一入口（NSCache）
+- 缩略图：`Scopy/Infrastructure/Caching/ThumbnailCache.swift` 作为单一入口（NSCache）；View 内静态缓存已移除
 
 ### P2（清洁度/一致性：Phase 6 收尾）
 
-- `RealClipboardService.db` 永远返回 nil（死字段）。
-- `IconCache.getCached` 永远返回 nil（死接口）。
-- `SearchService.fuzzyPlusMatch` 定义但从未被调用（可删或合并实现）。
-- 阈值不一致：`ClipboardMonitor.largeContentThreshold = 50KB`、`StorageService.externalStorageThreshold = 100KB`（需集中配置并文档化）。
+- `AsyncStream` buffering policy 尚未全量显式化（`ClipboardMonitor.contentStream`、`ClipboardService.eventStream` 等仍使用默认 policy）
+- 日志仍大量使用 `print(...)`（除热键文件日志外未统一到 `os.Logger`）
+- 阈值不一致：`ClipboardMonitor.largeContentThreshold = 50KB`、`StorageService.externalStorageThreshold = 100KB`（需集中配置并文档化）
 
 ---
 
@@ -637,8 +613,8 @@ Notes：
 - 已完成（2025-12-13）：
   - 新增 `Scopy/Infrastructure/Persistence/*`：`SQLiteConnection`（statement 封装）、`SQLiteMigrations`（`PRAGMA user_version`）、`SQLiteClipboardRepository`（actor，统一 DB 访问）与 `ClipboardStoredItem`（DB 行模型）。
   - `StorageService` 已移除 SQLite3 直接访问与 `database: OpaquePointer` 暴露，DB CRUD/统计/cleanup 均转调 repository；相关接口改为 `async` 并同步更新调用方。
-  - `SearchService` 已移除 `setDatabase`/`OpaquePointer` 路径，FTS/过滤/回表均通过 repository 执行（服务层不再 `import SQLite3`）。
-  - `RealClipboardService` 装配已改为 `SearchService(repository: storage.repository)`；删除旧 `SQLiteHelpers.swift`。
+  - 搜索侧的 SQLite 指针共享路径已移除；后续 Phase 3 已进一步删除 `SearchService`，替换为 `SearchEngineImpl` actor + 独立只读连接。
+  - `SQLiteHelpers.swift` 已删除；DB 访问收口到 persistence/search 的封装层。
   - 机械校验：`Scopy/` 全仓 `rg "OpaquePointer"` 仅命中 `Infrastructure/Persistence/*`。
   - 测试：`make test-unit` 通过（53 tests passed，1 perf skipped）。
 
@@ -797,8 +773,9 @@ Notes：
 
 任务：
 
-- 删除 dead code（`IconCache.getCached`、`RealClipboardService.db`、`SearchService.fuzzyPlusMatch` 等）
+- 为 `AsyncStream` 显式指定 buffering policy（`ClipboardMonitor.contentStream`、`ClipboardService.eventStream`、`MockClipboardService.eventStream`）
 - 日志统一：除热键文件日志外迁到 `os.Logger`（分类：monitor/search/db/cleanup/ui）
+- 集中配置并文档化关键阈值（如 ingest/hash offload、external storage threshold）
 - 严格并发/TSan 回归（至少在测试 target 打开跑一次）
 
 验收（DoD）：

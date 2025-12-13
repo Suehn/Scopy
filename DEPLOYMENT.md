@@ -1,6 +1,19 @@
 # Scopy 部署和使用指南
 
-## 本次更新（v0.29.1）
+## 本次更新（v0.35.1）
+- **文档对齐**：补齐 v0.30–v0.35 的索引/变更/性能记录入口，避免“代码已迭代但索引停在旧版本”。
+- **代码基线**：v0.35（Domain/SettingsStore/Repository/Search/ClipboardService actor 重构 + HistoryListView 组件拆分）。
+- **性能基线**（Apple M3, macOS 15.7.2（24G325）, Debug, `make test-perf`；heavy 需 `RUN_HEAVY_PERF_TESTS=1`）：
+  - Fuzzy 5k items P95 ≈ 4.69ms
+  - Fuzzy 10k items P95 ≈ 44.81ms
+  - Disk 25k fuzzy P95 ≈ 55.73ms
+  - Bulk insert 1000 items ≈ 54.33ms（≈18,405 items/s）
+  - Regex 20k items P95 ≈ 3.03ms
+- **测试结果**：
+  - `make test-unit` **53 passed** (1 skipped)
+  - `make test-perf` **22 passed** (6 skipped)
+
+## 历史更新（v0.29.1）
 - **P0 fuzzyPlus 英文多词去噪**：ASCII 长词（≥3）改为连续子串语义，避免 subsequence 弱相关跨路径误召回（用户搜索更“准”）。
 - **性能无回归**（Apple Silicon, macOS 14, Debug, `make test-perf`）：
   - Fuzzy 5k items P95 ≈ 4.68ms
@@ -12,7 +25,7 @@
   - `make test-unit` **53/53 passed**（1 perf skipped）
   - `make test-perf` **22/22 passed（含重载）**
 
-## 上次更新（v0.29）
+## 历史更新（v0.29）
 - **P0 渐进式全量模糊搜索校准**：巨大候选集首屏（ASCII 单词、offset=0）对 fuzzy/fuzzyPlus 走 FTS 预筛极速返回，后台 `forceFullFuzzy` 校准为全量 fuzzy/fuzzyPlus，保证最终零漏召回与正确排序。
 - **P0 预筛首屏与分页一致性**：若用户在校准前就滚动 `loadMore`，先强制全量 fuzzy 重拉前 N 条再分页，避免弱相关/错序条目提前出现。
 - **P1/P2 性能收敛**：
@@ -30,7 +43,7 @@
   - `make test-unit` **52/52 passed**（1 perf skipped）
   - `make test-perf` **22/22 passed（含重载）**
 
-## 再上次更新（v0.28）
+## 历史更新（v0.28）
 - **P0 全量模糊搜索重载提速**：`SearchService.searchInFullIndex` 使用 postings 有序交集 + top‑K 小堆排序；巨大候选首屏（ASCII 单词、offset=0）自适应 FTS 预筛，后续分页仍走全量 fuzzy 保障覆盖，pinned 额外兜底。
 - **P0 图片管线后台化**：缩略图生成改用 ImageIO 后台 downsample/编码；新图缩略图不再同步生成；原图读取与 hover 预览 downsample 后台化，主线程仅做状态更新。
 - **性能实测（Apple Silicon, macOS 14, Debug, `make test-perf`）**：
@@ -43,7 +56,7 @@
   - `make test-unit` **52/52 passed**（1 perf skipped）
   - `make test-perf` **22/22 passed（含重载）**
 
-## 再上次更新（v0.27）
+## 历史更新（v0.27）
 - **P0 搜索/分页版本一致性修复**：搜索切换时自动取消旧分页任务，`loadMore` 只对当前搜索版本生效，避免旧结果混入列表。
 - **沿用 v0.26 P0 性能改进**：热路径清理节流、缩略图异步加载、短词全量模糊搜索去噪。
 - **性能实测（Apple Silicon, macOS 14, Debug, `make test-perf`）**：

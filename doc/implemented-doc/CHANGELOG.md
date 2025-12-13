@@ -7,6 +7,150 @@
 
 ---
 
+## [v0.35.1] - 2025-12-13
+
+### Documentation
+
+- **文档对齐 v0.30–v0.35**：补齐实现索引/变更日志/性能索引/部署摘要，避免“代码已迭代但文档停在旧版本”
+- **review SSOT 更新**：`doc/review/review-v0.3.md` 的基线与阶段状态对齐到 v0.35
+
+### 修改文件
+- `DEPLOYMENT.md`
+- `doc/implemented-doc/README.md`
+- `doc/implemented-doc/CHANGELOG.md`
+- `doc/implemented-doc/v0.35.1.md`
+- `doc/profile/README.md`
+- `doc/profile/v0.35.1-profile.md`
+- `doc/review/review-v0.3.md`
+
+### 测试
+- 无代码改动；基线沿用 v0.35：
+  - 单元测试: `make test-unit` **53 tests passed** (1 skipped)
+  - 性能测试: `make test-perf` **22 tests passed** (6 skipped；heavy 需 `RUN_HEAVY_PERF_TESTS=1`)
+
+---
+
+## [v0.35] - 2025-12-13
+
+### Presentation 重构（维护性）
+
+- **HistoryListView 拆分**：将巨型 `HistoryListView.swift` 按职责拆为 List/Row/Thumbnail/Preview 等组件，降低回归风险
+
+### 修改文件
+- `Scopy/Views/HistoryListView.swift`
+- `Scopy/Views/History/*`
+- `doc/implemented-doc/v0.35.md`
+- `doc/profile/v0.35-profile.md`
+
+### 测试
+- 单元测试: `make test-unit` **53 tests passed** (1 skipped)
+- 性能测试: `make test-perf` **22 tests passed** (6 skipped；heavy 需 `RUN_HEAVY_PERF_TESTS=1`)
+
+---
+
+## [v0.34] - 2025-12-13
+
+### 缓存入口收口 + 性能用例稳定性
+
+- **Icon/Thumbnail 单一入口**：新增 `IconService`/`ThumbnailCache`，移除 View 静态缓存与旧 `IconCacheSync/IconCache`
+- **perf 稳定性**：磁盘 mixed content 用例增加 warmup，降低一次性抖动误报
+
+### 修改文件
+- `Scopy/Infrastructure/Caching/IconService.swift`
+- `Scopy/Infrastructure/Caching/ThumbnailCache.swift`
+- `Scopy/Views/HistoryListView.swift`
+- `Scopy/Observables/AppState.swift`
+- `ScopyTests/PerformanceTests.swift`
+- `doc/implemented-doc/v0.34.md`
+- `doc/profile/v0.34-profile.md`
+
+### 测试
+- 单元测试: `make test-unit` **53 tests passed** (1 skipped)
+- 性能测试: `make test-perf` **22 tests passed** (6 skipped；heavy 需 `RUN_HEAVY_PERF_TESTS=1`)
+
+---
+
+## [v0.33] - 2025-12-13
+
+### Application 门面 + 事件语义纯化
+
+- **ClipboardService actor**：Application 层门面统一组合 monitor/storage/search/settings，并由 actor 持有 event continuation
+- **清空事件语义**：`clearAll()` 不再复用 `.settingsChanged`，改为 `.itemsCleared(keepPinned:)`
+
+### 修改文件
+- `Scopy/Application/ClipboardService.swift`
+- `Scopy/Services/RealClipboardService.swift`
+- `Scopy/Observables/AppState.swift`
+- `Scopy/Domain/Models/ClipboardEvent.swift`
+- `doc/implemented-doc/v0.33.md`
+- `doc/profile/v0.33-profile.md`
+
+### 测试
+- 单元测试: `make test-unit` **53 tests passed** (1 skipped)
+- 性能测试: `make test-perf` **22 tests passed** (6 skipped；heavy 需 `RUN_HEAVY_PERF_TESTS=1`)
+
+---
+
+## [v0.32] - 2025-12-13
+
+### Search actor + 只读连接分离
+
+- **SearchEngineImpl actor**：搜索逻辑迁入 actor，自持只读 SQLite 连接（`query_only` + `busy_timeout`），移除 GCD 超时/取消不确定性
+- **删除 SearchService**：旧 `Scopy/Services/SearchService.swift` 移除，装配与测试适配到新 Search 层
+
+### 修改文件
+- `Scopy/Infrastructure/Search/SearchEngineImpl.swift`
+- `Scopy/Services/RealClipboardService.swift`
+- `ScopyTests/*`
+- `doc/implemented-doc/v0.32.md`
+- `doc/profile/v0.32-profile.md`
+
+### 测试
+- 单元测试: `make test-unit` **53 tests passed** (1 skipped)
+- 性能测试: `make test-perf` **22 tests passed** (6 skipped；heavy 需 `RUN_HEAVY_PERF_TESTS=1`)
+
+---
+
+## [v0.31] - 2025-12-13
+
+### Persistence actor + SQLite 边界收口
+
+- **SQLiteClipboardRepository actor**：统一 DB 归属与 CRUD/FTS/统计等访问，服务层不再跨组件传递 `OpaquePointer`
+- **StorageService 迁移**：DB 相关 API `async` 化并转调 repository
+
+### 修改文件
+- `Scopy/Infrastructure/Persistence/SQLiteClipboardRepository.swift`
+- `Scopy/Infrastructure/Persistence/SQLiteConnection.swift`
+- `Scopy/Infrastructure/Persistence/SQLiteMigrations.swift`
+- `Scopy/Services/StorageService.swift`
+- `ScopyTests/StorageServiceTests.swift`
+- `doc/implemented-doc/v0.31.md`
+
+### 测试
+- 单元测试: `make test-unit` **53 tests passed** (1 skipped)
+
+---
+
+## [v0.30] - 2025-12-12
+
+### Domain 拆分 + SettingsStore SSOT
+
+- **Domain 抽离**：DTO/请求/事件/设置模型拆分到 `Scopy/Domain/Models/*`，协议移动到 `Scopy/Domain/Protocols/*`
+- **SettingsStore SSOT**：新增 settings 单一入口（actor），`AppDelegate`/`RealClipboardService` 不再直接读写 `UserDefaults["ScopySettings"]`
+
+### 修改文件
+- `Scopy/Domain/Models/*`
+- `Scopy/Domain/Protocols/ClipboardServiceProtocol.swift`
+- `Scopy/Infrastructure/Settings/SettingsStore.swift`
+- `Scopy/AppDelegate.swift`
+- `Scopy/Services/RealClipboardService.swift`
+- `doc/implemented-doc/v0.30.md`
+
+### 测试
+- 单元测试: `make test-unit` **53 tests passed** (1 skipped)
+
+---
+
 ## [v0.29.1] - 2025-12-12
 
 ### P0 准确性修复
