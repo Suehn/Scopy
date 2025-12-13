@@ -1,5 +1,7 @@
 import XCTest
+#if !SCOPY_TSAN_TESTS
 @testable import Scopy
+#endif
 
 /// 集成测试 - 测试完整的服务链
 /// 验证 v0.md 的端到端功能

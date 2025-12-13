@@ -1,5 +1,7 @@
 import Foundation
+#if !SCOPY_TSAN_TESTS
 @testable import Scopy
+#endif
 
 // MARK: - Reusable Mock ClipboardService
 

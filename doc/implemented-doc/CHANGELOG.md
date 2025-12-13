@@ -7,6 +7,33 @@
 
 ---
 
+## [v0.36.1] - 2025-12-13
+
+### Phase 6 回归：Thread Sanitizer（Hosted Tests）
+
+- **TSan 专用方案**：新增 `ScopyTestHost`（最小 AppKit host）+ `ScopyTSanTests`（Hosted unit tests）+ scheme `ScopyTSan`，补齐 `make test-tsan` 回归命令。
+- **修复 Hosted tests 崩溃**：unit-test bundle 显式设置 `NSPrincipalClass = XCTestCase`，避免注入时创建第二个 `NSApplication`。
+- **测试代码复用**：测试文件用 `SCOPY_TSAN_TESTS` 条件编译包裹 `@testable import Scopy`，在 `ScopyTests`/`ScopyTSanTests` 两种模式下保持同源。
+
+### 修改文件
+
+- `project.yml`
+- `Makefile`
+- `ScopyTestHost/main.swift`
+- `ScopyTests/*`
+- `Scopy.xcodeproj/project.pbxproj`
+- `Scopy.xcodeproj/xcshareddata/xcschemes/ScopyTSan.xcscheme`
+- `doc/implemented-doc/v0.36.1.md`
+- `doc/implemented-doc/README.md`
+- `doc/review/review-v0.3.md`
+
+### 测试
+
+- 单元测试：`make test-unit` **53 tests passed** (1 skipped)
+- Thread Sanitizer：`make test-tsan` **132 tests passed** (1 skipped)
+
+---
+
 ## [v0.36] - 2025-12-13
 
 ### Phase 6 收尾：日志统一 + AsyncStream buffering + 阈值集中

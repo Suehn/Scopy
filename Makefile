@@ -1,7 +1,7 @@
 # Scopy Makefile
 # 符合 v0.md 的构建和测试流程
 
-.PHONY: all setup build run clean xcode test test-unit test-perf coverage benchmark test-flow test-flow-quick health-check
+.PHONY: all setup build run clean xcode test test-unit test-perf test-tsan coverage benchmark test-flow test-flow-quick health-check
 
 # 默认目标
 all: build
@@ -81,6 +81,16 @@ test-perf: setup
 		-destination 'platform=macOS' \
 		-only-testing:ScopyTests/PerformanceTests \
 		2>&1 | tee test-perf.log
+
+# Thread Sanitizer (requires hosted test bundle mode)
+test-tsan: setup
+	@echo "Running Thread Sanitizer tests..."
+	ENABLE_THREAD_SANITIZER=YES xcodebuild test \
+		-project Scopy.xcodeproj \
+		-scheme ScopyTSan \
+		-destination 'platform=macOS' \
+		-only-testing:ScopyTSanTests \
+		2>&1 | tee test-tsan.log
 
 # 运行集成测试
 test-integration: setup

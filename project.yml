@@ -17,6 +17,14 @@ schemes:
       targets:
         - ScopyTests
         - ScopyUITests
+  ScopyTSan:
+    build:
+      targets:
+        ScopyTestHost: all
+        ScopyTSanTests: [test]
+    test:
+      targets:
+        - ScopyTSanTests
 
 settings:
   base:
@@ -24,7 +32,6 @@ settings:
     MACOSX_DEPLOYMENT_TARGET: "14.0"
     CODE_SIGN_STYLE: Automatic
     DEVELOPMENT_TEAM: ""
-    INFOPLIST_FILE: Scopy/Info.plist
     CODE_SIGN_ENTITLEMENTS: Scopy/Scopy.entitlements
     PRODUCT_BUNDLE_IDENTIFIER: com.scopy.app
     BUILD_DIR: $(SRCROOT)/.build
@@ -68,8 +75,49 @@ targets:
         PRODUCT_NAME: ScopyTests
         PRODUCT_BUNDLE_IDENTIFIER: com.scopy.tests
         GENERATE_INFOPLIST_FILE: true
+        INFOPLIST_KEY_NSPrincipalClass: XCTestCase
         # 不设置 TEST_HOST 和 BUNDLE_LOADER，使用独立测试 bundle 模式
     dependencies:
+      - sdk: libsqlite3.tbd
+
+  ScopyTestHost:
+    type: application
+    platform: macOS
+    sources:
+      - path: ScopyTestHost
+    settings:
+      base:
+        PRODUCT_NAME: ScopyTestHost
+        PRODUCT_BUNDLE_IDENTIFIER: com.scopy.testhost
+        GENERATE_INFOPLIST_FILE: true
+
+  ScopyTSanTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - path: ScopyTests
+        excludes:
+          - "IntegrationTests.swift"
+          - "PerformanceTests.swift"
+      # Hosted test bundle mode: includes app sources but excludes entrypoints to avoid @main conflicts.
+      - path: Scopy
+        excludes:
+          - "**/*.md"
+          - "main.swift"
+          - "ScopyApp.swift"
+          - "Info.plist"
+          - "*.entitlements"
+    settings:
+      base:
+        PRODUCT_NAME: ScopyTSanTests
+        PRODUCT_BUNDLE_IDENTIFIER: com.scopy.tsan.tests
+        GENERATE_INFOPLIST_FILE: true
+        INFOPLIST_KEY_NSPrincipalClass: XCTestCase
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/ScopyTestHost.app/Contents/MacOS/ScopyTestHost"
+        BUNDLE_LOADER: "$(TEST_HOST)"
+        OTHER_SWIFT_FLAGS: "$(inherited) -DSCOPY_TSAN_TESTS"
+    dependencies:
+      - target: ScopyTestHost
       - sdk: libsqlite3.tbd
 
   ScopyUITests:

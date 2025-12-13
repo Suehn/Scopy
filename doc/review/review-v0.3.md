@@ -799,8 +799,13 @@ Notes：
     - `make test-unit` 通过（53 tests passed，1 skipped）
     - `xcodebuild test -only-testing:ScopyTests/AppStateTests -only-testing:ScopyTests/AppStateFallbackTests` 通过（46 tests passed）
     - `make test-perf` 通过（22 tests passed，6 skipped）
+- 已完成（2025-12-13，v0.36.1）：
+  - Thread Sanitizer 回归跑通（Hosted tests）：
+    - 新增 `ScopyTestHost`（最小 AppKit host）+ `ScopyTSanTests`（Hosted unit tests）+ scheme `ScopyTSan`
+    - `make test-tsan` 通过（132 tests passed，1 skipped）
+    - 修复注入时崩溃：unit-test bundle 显式设置 `NSPrincipalClass = XCTestCase`，避免 “Creating more than one Application”
 - 待继续：
-  - Thread Sanitizer / Strict Concurrency 回归（建议先从 tests target 开始）
+  - Strict Concurrency 渐进回归（建议先从 tests target 开始，避免一次性引爆）
 
 ### Phase 7（可选）：抽成 Swift Package（强制边界）
 
@@ -817,6 +822,7 @@ Notes：
 
 - Debug build：`./deploy.sh` 或 `make build`
 - 单测：`make test-unit`（仓库已配置）
+- Thread Sanitizer：`make test-tsan`（Hosted tests，scheme `ScopyTSan`）
 - 全量测试：`make test`
 - 性能测试：`make test-perf`（内部会设置 `RUN_PERF_TESTS=1`）
 - 测试流程：`make test-flow`（脚本化 kill→build→install→launch→health-check）
@@ -842,7 +848,7 @@ Notes：
 
 ### 10.5 并发回归建议（强烈建议每个大 Phase 做一次）
 
-- Xcode Scheme 开启 Thread Sanitizer 跑 `ScopyTests`
+- Thread Sanitizer：跑 `make test-tsan`（`ScopyTests` 为独立 bundle 模式，直接开 TSan 可能触发 “loaded too late”）
 - 逐步开启 Strict Concurrency（建议先从测试 target 开始，避免一次性引爆）
 
 ---

@@ -1,5 +1,7 @@
 import XCTest
+#if !SCOPY_TSAN_TESTS
 @testable import Scopy
+#endif
 
 /// PerformanceProfiler 单元测试
 /// 验证性能测量、统计指标计算和报告生成

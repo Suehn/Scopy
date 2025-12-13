@@ -1,5 +1,7 @@
 import XCTest
+#if !SCOPY_TSAN_TESTS
 @testable import Scopy
+#endif
 
 /// 并发安全测试 - v0.10.4
 /// 验证搜索、缓存刷新、任务取消等场景的并发安全性

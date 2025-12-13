@@ -1,5 +1,7 @@
 import XCTest
+#if !SCOPY_TSAN_TESTS
 @testable import Scopy
+#endif
 
 /// 性能测试和基准测试
 /// 验证 v0.md 第4节的性能目标

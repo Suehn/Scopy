@@ -1,5 +1,7 @@
 import XCTest
+#if !SCOPY_TSAN_TESTS
 @testable import Scopy
+#endif
 
 /// 资源清理测试 - v0.10.4
 /// 验证 Timer、Task、事件流、数据库连接等资源的正确清理

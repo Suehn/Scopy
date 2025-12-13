@@ -1,5 +1,7 @@
 import XCTest
+#if !SCOPY_TSAN_TESTS
 @testable import Scopy
+#endif
 
 /// AppState 单元测试
 /// 验证状态管理、搜索防抖、键盘导航等核心逻辑

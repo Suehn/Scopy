@@ -1,5 +1,7 @@
 import XCTest
+#if !SCOPY_TSAN_TESTS
 @testable import Scopy
+#endif
 
 /// SearchService 单元测试
 /// 验证 v0.md 第4节的搜索性能和功能要求

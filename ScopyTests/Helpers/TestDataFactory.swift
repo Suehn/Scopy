@@ -1,5 +1,7 @@
 import Foundation
+#if !SCOPY_TSAN_TESTS
 @testable import Scopy
+#endif
 
 /// 测试数据工厂
 /// 提供统一的测试数据生成方法

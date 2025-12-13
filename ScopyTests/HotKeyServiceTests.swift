@@ -1,6 +1,8 @@
 import XCTest
 import Carbon.HIToolbox
+#if !SCOPY_TSAN_TESTS
 @testable import Scopy
+#endif
 
 /// HotKeyService 单元测试
 /// 验证全局快捷键的处理器管理和触发逻辑
