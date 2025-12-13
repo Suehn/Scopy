@@ -373,7 +373,7 @@ final class SearchServiceTests: XCTestCase {
         ClipboardMonitor.ClipboardContent(
             type: type,
             plainText: text,
-            rawData: nil,
+            payload: .none,
             appBundleID: app,
             contentHash: String(text.hashValue),
             sizeBytes: text.utf8.count

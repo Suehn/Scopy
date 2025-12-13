@@ -8,8 +8,8 @@
 
 | 项目 | 状态 |
 |------|------|
-| **当前版本** | v0.36.1 |
-| **测试状态** | 单元测试通过（`make test-unit`: 53 passed, 1 skipped；`make test-tsan`: 132 tests, 1 skipped） |
+| **当前版本** | v0.37 |
+| **测试状态** | 单元测试通过（`make test-unit`: 53 passed, 1 skipped；`make test-perf`: 22 passed, 6 skipped；`make test-tsan`: 132 passed, 1 skipped） |
 | **构建状态** | Debug ✅ |
 | **部署位置** | /Applications/Scopy.app |
 | **最后更新** | 2025-12-13 |
@@ -24,6 +24,7 @@
 
 | 版本 | 日期 | 主要内容 | 状态 |
 |------|------|----------|------|
+| [v0.37](./v0.37.md) | 2025-12-13 | P0-6 ingest 背压：spool + 有界并发队列（减少无声丢历史） | ✅ |
 | [v0.36.1](./v0.36.1.md) | 2025-12-13 | Phase 6 回归：Thread Sanitizer（Hosted Tests） | ✅ |
 | [v0.36](./v0.36.md) | 2025-12-13 | Phase 6 收尾：日志统一 + AsyncStream buffering + 阈值集中 | ✅ |
 | [v0.35.1](./v0.35.1.md) | 2025-12-13 | 文档索引/变更/部署对齐 v0.35 | ✅ |

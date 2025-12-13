@@ -10,15 +10,38 @@ final class ClipboardMonitor {
     // MARK: - Types
 
     struct ClipboardContent: Sendable {
+        enum Payload: Sendable {
+            case none
+            case data(Data)
+            case file(URL)
+        }
+
         let type: ClipboardItemType
         let plainText: String
-        let rawData: Data?
+        let payload: Payload
         let appBundleID: String?
         let contentHash: String
         let sizeBytes: Int
 
+        var rawData: Data? {
+            guard case .data(let data) = payload else { return nil }
+            return data
+        }
+
+        var ingestFileURL: URL? {
+            guard case .file(let url) = payload else { return nil }
+            return url
+        }
+
         var isEmpty: Bool {
-            plainText.isEmpty && (rawData?.isEmpty ?? true)
+            switch payload {
+            case .none:
+                return plainText.isEmpty
+            case .data(let data):
+                return plainText.isEmpty && data.isEmpty
+            case .file:
+                return false
+            }
         }
     }
 
@@ -51,28 +74,38 @@ final class ClipboardMonitor {
     /// v0.22: 保护 isContentStreamFinished 的锁，防止 stopMonitoring() 和 yield() 之间的竞态
     private let contentStreamLock = NSLock()
 
-    /// v0.10.8: 使用任务队列替代单任务，支持快速连续复制大文件
-    private var processingQueue: [Task<Void, Never>] = []
-    /// v0.17: 任务 ID 映射，用于在任务完成后清理
-    private var taskIDMap: [UUID: Task<Void, Never>] = [:]
-    private let maxConcurrentTasks = 3
+    private var pendingLargeContent: [RawClipboardData] = []
+    private var activeIngestTasks: [UUID: Task<Void, Never>] = [:]
+    private let maxConcurrentTasks = ScopyThresholds.ingestMaxConcurrentTasks
+    private let maxPendingItems = ScopyThresholds.ingestMaxPendingItems
     private let queueLock = NSLock()
 
     private let eventContinuation: AsyncStream<ClipboardContent>.Continuation
     let contentStream: AsyncStream<ClipboardContent>
 
+    private let ingestSpoolDirectory: URL
+
     // Configuration
     private(set) var pollingInterval: TimeInterval = 0.5 // 500ms default
     private(set) var ignoredApps: Set<String> = []
-    private static let contentStreamBufferSize = 8
 
     // MARK: - Initialization
 
     init() {
+        let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
+        let scopyCaches = caches.appendingPathComponent("Scopy", isDirectory: true)
+        let ingestDir = scopyCaches.appendingPathComponent("ingest", isDirectory: true)
+        do {
+            try FileManager.default.createDirectory(at: ingestDir, withIntermediateDirectories: true)
+        } catch {
+            ScopyLog.monitor.warning("Failed to create ingest spool directory: \(error.localizedDescription, privacy: .public)")
+        }
+        self.ingestSpoolDirectory = ingestDir
+
         var continuation: AsyncStream<ClipboardContent>.Continuation!
         self.contentStream = AsyncStream(
             ClipboardContent.self,
-            bufferingPolicy: .bufferingNewest(Self.contentStreamBufferSize)
+            bufferingPolicy: .unbounded
         ) { cont in
             continuation = cont
         }
@@ -89,13 +122,13 @@ final class ClipboardMonitor {
 
         timer?.invalidate()
         timer = nil
-        // v0.10.8: 取消所有处理任务
+        // Cancel all ingest tasks and drop pending items.
         // 注意: deinit 不在 @MainActor 上下文中，使用 lock/defer unlock 模式
         queueLock.lock()
         defer { queueLock.unlock() }
-        processingQueue.forEach { $0.cancel() }
-        processingQueue.removeAll()
-        taskIDMap.removeAll()  // v0.17: 清理任务 ID 映射
+        activeIngestTasks.values.forEach { $0.cancel() }
+        activeIngestTasks.removeAll()
+        pendingLargeContent.removeAll()
         isMonitoring = false
     }
 
@@ -130,13 +163,13 @@ final class ClipboardMonitor {
 
         timer?.invalidate()
         timer = nil
-        // v0.10.8: 取消所有处理任务
+        // Cancel all ingest tasks and drop pending items.
         // 注意: 此方法在 @MainActor 上下文中执行，使用 lock/defer unlock 模式
         queueLock.lock()
         defer { queueLock.unlock() }
-        processingQueue.forEach { $0.cancel() }
-        processingQueue.removeAll()
-        taskIDMap.removeAll()  // v0.17: 清理任务 ID 映射
+        activeIngestTasks.values.forEach { $0.cancel() }
+        activeIngestTasks.removeAll()
+        pendingLargeContent.removeAll()
         isMonitoring = false
     }
 
@@ -255,7 +288,7 @@ final class ClipboardMonitor {
         let content = ClipboardContent(
             type: rawData.type,
             plainText: rawData.plainText,
-            rawData: rawData.rawData,
+            payload: rawData.rawData.map(ClipboardContent.Payload.data) ?? .none,
             appBundleID: rawData.appBundleID,
             contentHash: hash,
             sizeBytes: rawData.sizeBytes
@@ -268,83 +301,126 @@ final class ClipboardMonitor {
     }
 
     /// 异步处理大内容（在后台线程计算哈希）
-    /// v0.10.8: 使用任务队列替代单任务，支持快速连续复制大文件
-    /// v0.17: 修复任务完成后不自动清理的内存泄漏问题
-    /// 注意: 此方法在 @MainActor 上下文中执行，使用 lock/defer unlock 模式
-    /// 因为 withLock 闭包不继承 @MainActor 隔离
     private func processLargeContentAsync(_ rawData: RawClipboardData) {
         queueLock.lock()
         defer { queueLock.unlock() }
 
-        // 清理已取消的任务
-        processingQueue.removeAll { $0.isCancelled }
+        // Best-effort cleanup: remove cancelled tasks.
+        if !activeIngestTasks.isEmpty {
+            activeIngestTasks = Dictionary(uniqueKeysWithValues: activeIngestTasks.filter { !$0.value.isCancelled })
+        }
 
-        // 如果队列满，取消最旧的任务
-        // v0.22: 添加日志，帮助诊断快速复制时的任务丢弃情况
-        while processingQueue.count >= maxConcurrentTasks {
-            ScopyLog.monitor.warning(
-                "Task queue full (\(self.maxConcurrentTasks, privacy: .public)), dropping oldest task"
+        if pendingLargeContent.count >= maxPendingItems {
+            ScopyLog.monitor.error(
+                "Ingest backlog full (\(self.maxPendingItems, privacy: .public)), dropping oldest pending item"
             )
-            processingQueue.first?.cancel()
-            processingQueue.removeFirst()
+            pendingLargeContent.removeFirst()
         }
 
-        // 使用 UUID 标识任务，以便在完成后清理
-        let taskID = UUID()
-        let task = Task.detached(priority: .userInitiated) { [weak self, taskID] in
-            // 确保任务完成后从队列中移除
-            defer {
-                Task { @MainActor [weak self] in
-                    self?.removeCompletedTask(id: taskID)
-                }
-            }
-
-            guard let self = self else { return }
-
-            // 在后台线程计算哈希
-            let hash = await self.computeHashInBackground(rawData)
-
-            // 检查任务是否被取消
-            guard !Task.isCancelled else { return }
-
-            // 回到主线程发送事件
-            // v0.10.7: 在 MainActor.run 内再次检查取消状态，防止向已关闭的流发送数据
-            // v0.22: 使用锁保护 yield 操作，防止与 stopMonitoring() 竞态
-            await MainActor.run {
-                guard !Task.isCancelled else { return }
-
-                let content = ClipboardContent(
-                    type: rawData.type,
-                    plainText: rawData.plainText,
-                    rawData: rawData.rawData,
-                    appBundleID: rawData.appBundleID,
-                    contentHash: hash,
-                    sizeBytes: rawData.sizeBytes
-                )
-                self.contentStreamLock.withLock {
-                    guard !self.isContentStreamFinished else { return }
-                    self.eventContinuation.yield(content)
-                }
-            }
-        }
-        processingQueue.append(task)
-        taskIDMap[taskID] = task
+        pendingLargeContent.append(rawData)
+        startNextIngestTasksIfNeeded()
     }
 
-    /// v0.17: 从队列中移除已完成的任务
-    /// v0.20: 修复内存泄漏 - 使用 UUID 而非 ObjectIdentifier 跟踪任务
-    /// v0.23: 简化逻辑 - taskIDMap 是唯一数据源，processingQueue 从 taskIDMap 重建
-    /// 注意: 此方法在 @MainActor 上下文中执行，使用 lock/defer unlock 模式
-    private func removeCompletedTask(id: UUID) {
+    private func startNextIngestTasksIfNeeded() {
+        while activeIngestTasks.count < maxConcurrentTasks, !pendingLargeContent.isEmpty {
+            let next = pendingLargeContent.removeFirst()
+
+            let taskID = UUID()
+            let ingestDirectory = ingestSpoolDirectory
+            let spoolThresholdBytes = ScopyThresholds.ingestSpoolBytes
+
+            let task = Task.detached(priority: .userInitiated) { [weak self, taskID, ingestDirectory] in
+                defer {
+                    Task { @MainActor [weak self] in
+                        self?.finishIngestTask(id: taskID)
+                    }
+                }
+
+                guard let self else { return }
+
+                let hash = await self.computeHashInBackground(next)
+                guard !Task.isCancelled else { return }
+
+                let payload = Self.buildPayload(
+                    rawData: next,
+                    ingestDirectory: ingestDirectory,
+                    spoolThresholdBytes: spoolThresholdBytes
+                )
+
+                if Task.isCancelled {
+                    Self.cleanupPayloadIfNeeded(payload)
+                    return
+                }
+
+                let didYield = await MainActor.run { [weak self] in
+                    guard let self else { return false }
+                    guard !Task.isCancelled else { return false }
+
+                    let content = ClipboardContent(
+                        type: next.type,
+                        plainText: next.plainText,
+                        payload: payload,
+                        appBundleID: next.appBundleID,
+                        contentHash: hash,
+                        sizeBytes: next.sizeBytes
+                    )
+
+                    return self.contentStreamLock.withLock { () -> Bool in
+                        guard !self.isContentStreamFinished else { return false }
+                        self.eventContinuation.yield(content)
+                        return true
+                    }
+                }
+
+                if !didYield {
+                    Self.cleanupPayloadIfNeeded(payload)
+                }
+            }
+
+            activeIngestTasks[taskID] = task
+        }
+    }
+
+    private func finishIngestTask(id: UUID) {
         queueLock.lock()
         defer { queueLock.unlock() }
 
-        // 从 taskIDMap 移除已完成的任务
-        taskIDMap.removeValue(forKey: id)
+        activeIngestTasks.removeValue(forKey: id)
+        startNextIngestTasksIfNeeded()
+    }
 
-        // 重建 processingQueue：只保留 taskIDMap 中的活跃任务
-        // 这确保两个数据结构始终同步
-        processingQueue = Array(taskIDMap.values)
+    nonisolated private static func buildPayload(
+        rawData: RawClipboardData,
+        ingestDirectory: URL,
+        spoolThresholdBytes: Int
+    ) -> ClipboardContent.Payload {
+        guard let data = rawData.rawData else { return .none }
+
+        guard rawData.sizeBytes >= spoolThresholdBytes else {
+            return .data(data)
+        }
+
+        let ext: String
+        switch rawData.type {
+        case .image: ext = "png"
+        case .rtf: ext = "rtf"
+        case .html: ext = "html"
+        default: ext = "dat"
+        }
+
+        let fileURL = ingestDirectory.appendingPathComponent("\(UUID().uuidString).\(ext)")
+        do {
+            try StorageService.writeAtomically(data, to: fileURL.path)
+            return .file(fileURL)
+        } catch {
+            ScopyLog.monitor.warning("Failed to spool ingest payload: \(error.localizedDescription, privacy: .public)")
+            return .data(data)
+        }
+    }
+
+    nonisolated private static func cleanupPayloadIfNeeded(_ payload: ClipboardContent.Payload) {
+        guard case .file(let url) = payload else { return }
+        try? FileManager.default.removeItem(at: url)
     }
 
     /// 在后台线程计算哈希
@@ -478,7 +554,7 @@ final class ClipboardMonitor {
             return ClipboardContent(
                 type: .file,
                 plainText: paths,
-                rawData: urlData,
+                payload: urlData.map(ClipboardContent.Payload.data) ?? .none,
                 appBundleID: appBundleID,
                 contentHash: hash,
                 sizeBytes: paths.utf8.count + (urlData?.count ?? 0)
@@ -492,7 +568,7 @@ final class ClipboardMonitor {
             return ClipboardContent(
                 type: .image,
                 plainText: "[Image: \(formatBytes(imageData.count))]",
-                rawData: imageData,
+                payload: .data(imageData),
                 appBundleID: appBundleID,
                 contentHash: hash,
                 sizeBytes: imageData.count
@@ -506,7 +582,7 @@ final class ClipboardMonitor {
             return ClipboardContent(
                 type: .rtf,
                 plainText: plainText,
-                rawData: rtfData,
+                payload: .data(rtfData),
                 appBundleID: appBundleID,
                 contentHash: hash,
                 sizeBytes: rtfData.count
@@ -520,7 +596,7 @@ final class ClipboardMonitor {
             return ClipboardContent(
                 type: .html,
                 plainText: plainText,
-                rawData: htmlData,
+                payload: .data(htmlData),
                 appBundleID: appBundleID,
                 contentHash: hash,
                 sizeBytes: htmlData.count
@@ -534,7 +610,7 @@ final class ClipboardMonitor {
             return ClipboardContent(
                 type: .text,
                 plainText: normalizedText,
-                rawData: nil,
+                payload: .none,
                 appBundleID: appBundleID,
                 contentHash: hash,
                 sizeBytes: normalizedText.utf8.count

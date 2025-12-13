@@ -3,7 +3,7 @@
 > 说明：本文用于指导后续“稳定性优先”的长期重构（含 Codex 执行）。`doc/review/review-v0.3-2.md` 为历史草案/补充材料，其中关键内容已合并到本文；后续以本文为准。
 
 - 最后更新：2025-12-13
-- 代码基线：`v0.36`
+- 代码基线：`v0.37`
 - 关联文档：
   - 当前实现状态索引：`doc/implemented-doc/README.md`
   - 近期变更：`doc/implemented-doc/CHANGELOG.md`
@@ -139,20 +139,21 @@
 - `clearAll()` 发 `ClipboardEvent.itemsCleared(keepPinned: true)`，不再触发 `.settingsChanged`
 - `AppState.handleEvent(.itemsCleared)` 最小处理为 `await load()`；设置变更仍由 `.settingsChanged` 独立承载
 
-#### P0-6：Clipboard ingest 背压策略不可控（可能无声丢历史）
+#### P0-6：Clipboard ingest 背压策略不可控（已解决：v0.37）
 
-事实：
+现状（v0.37）：
 
-- `ClipboardMonitor` 对大内容/图片使用任务队列，队列满时会：
-  - `dropping oldest task`（取消最旧任务）
-- `AsyncStream` 已显式 buffering policy（v0.36）：
-  - `ClipboardMonitor.contentStream`：`.bufferingNewest(8)`（避免大 payload 无界堆积）
-  - `ClipboardService.eventStream`：`.unbounded`（事件体量小，避免丢事件）
+- `ClipboardMonitor` 大内容处理改为“有界并发 + backlog”：
+  - 不再在队列满时 cancel oldest task；改为 pending queue（超限仅丢弃最旧 pending，并记录 error log）
+- 大 payload（默认 ≥ `ScopyThresholds.ingestSpoolBytes`）会先写入 `~/Library/Caches/Scopy/ingest/`，`contentStream` 仅传递 file ref：
+  - `ClipboardMonitor.contentStream`：`.unbounded`（payload 不再携带大 `Data`）
+  - `StorageService.upsertItem` 接收 file ref 并 move/copy 到最终 external storage；dedupe/失败路径会清理 ingest 文件
+  - `ClipboardService` 在 settings 禁用图片/文件时也会清理 ingest 文件，避免泄漏
 
-后果：
+效果：
 
-- 极端 burst（连续复制大图片/大文件）时可能“你确实复制了，但没入库”，且用户不一定可见。
-- 内存峰值与延迟尾部不可预测。
+- 在常见 burst 场景下避免无声丢历史：背压主要转移到磁盘（ingest spool），内存峰值更可控。
+- 仍存在极端情况下的丢弃策略（pending queue 超限丢弃最旧项），但会明确记录日志，便于诊断与后续 UI 提示扩展。
 
 ### P1（性能/维护性问题：重构时顺手解决）
 
@@ -174,7 +175,9 @@
 - 已完成（v0.36）：`AsyncStream` buffering policy 显式化（`ClipboardMonitor.contentStream`、`ClipboardService.eventStream`、`MockClipboardService.eventStream`）
 - 已完成（v0.36）：日志统一到 `os.Logger`（保留热键文件日志 `/tmp/scopy_hotkey.log`）
 - 已完成（v0.36）：阈值集中到 `ScopyThresholds`（ingest/hash offload、external storage）
-- 待继续：Thread Sanitizer / Strict Concurrency 回归
+- 已完成（v0.36.1）：Thread Sanitizer 回归（Hosted tests，`make test-tsan`）
+- 已完成（v0.37）：P0-6 ingest 背压确定性（ingest spool + `.unbounded` stream）
+- 待继续：Strict Concurrency 回归
 
 ---
 
@@ -804,6 +807,9 @@ Notes：
     - 新增 `ScopyTestHost`（最小 AppKit host）+ `ScopyTSanTests`（Hosted unit tests）+ scheme `ScopyTSan`
     - `make test-tsan` 通过（132 tests passed，1 skipped）
     - 修复注入时崩溃：unit-test bundle 显式设置 `NSPrincipalClass = XCTestCase`，避免 “Creating more than one Application”
+- 已完成（2025-12-13，v0.37）：
+  - P0-6 ingest 背压确定性：引入 ingest spool（`~/Library/Caches/Scopy/ingest/`）+ 有界并发队列
+  - `ClipboardMonitor.contentStream` 调整为 `.unbounded`（payload 为 file ref，不携带大 `Data`）
 - 待继续：
   - Strict Concurrency 渐进回归（建议先从 tests target 开始，避免一次性引爆）
 
@@ -833,7 +839,7 @@ Notes：
   - SQLite：`clipboard.db`（含 `-wal/-shm`）
   - 外部内容：`content/`
   - 缩略图：`thumbnails/`
-- （可选）Ingest 临时目录：`~/Library/Caches/Scopy/ingest/`
+- Ingest 临时目录：`~/Library/Caches/Scopy/ingest/`（大 payload spool；入库后会 move/copy 到 App Support）
 
 ### 10.3 热键自查
 

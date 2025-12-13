@@ -483,7 +483,7 @@ final class PerformanceTests: XCTestCase {
             let content = ClipboardMonitor.ClipboardContent(
                 type: .image,
                 plainText: "[External cleanup test \(i)]",
-                rawData: blob,
+                payload: .data(blob),
                 appBundleID: "com.test.cleanup",
                 contentHash: "ext-cleanup-\(i)-\(UUID().uuidString)",
                 sizeBytes: blob.count
@@ -748,7 +748,7 @@ final class PerformanceTests: XCTestCase {
             let content = ClipboardMonitor.ClipboardContent(
                 type: .image,
                 plainText: "[Large image \(i)]",
-                rawData: blob,
+                payload: .data(blob),
                 appBundleID: "com.apple.Preview",
                 contentHash: "heavy-img-\(i)",
                 sizeBytes: blob.count
@@ -779,7 +779,7 @@ final class PerformanceTests: XCTestCase {
         ClipboardMonitor.ClipboardContent(
             type: .text,
             plainText: text,
-            rawData: nil,
+            payload: .none,
             appBundleID: "com.test.perf",
             contentHash: String(text.hashValue),
             sizeBytes: text.utf8.count
@@ -792,7 +792,7 @@ final class PerformanceTests: XCTestCase {
         return ClipboardMonitor.ClipboardContent(
             type: .html,
             plainText: "HTML snippet \(index)",
-            rawData: data,
+            payload: data.map { .data($0) } ?? .none,
             appBundleID: "com.apple.Safari",
             contentHash: "html-\(index)",
             sizeBytes: data?.count ?? 0
@@ -805,7 +805,7 @@ final class PerformanceTests: XCTestCase {
         return ClipboardMonitor.ClipboardContent(
             type: .rtf,
             plainText: text,
-            rawData: data,
+            payload: data.map { .data($0) } ?? .none,
             appBundleID: "com.apple.TextEdit",
             contentHash: "rtf-\(index)",
             sizeBytes: data?.count ?? 0
@@ -817,7 +817,7 @@ final class PerformanceTests: XCTestCase {
         return ClipboardMonitor.ClipboardContent(
             type: .image,
             plainText: "[Image \(index)]",
-            rawData: data,
+            payload: .data(data),
             appBundleID: "com.apple.Preview",
             contentHash: "image-\(index)",
             sizeBytes: data.count
@@ -828,7 +828,7 @@ final class PerformanceTests: XCTestCase {
         return ClipboardMonitor.ClipboardContent(
             type: .file,
             plainText: path,
-            rawData: nil,
+            payload: .none,
             appBundleID: "com.apple.finder",
             contentHash: "file-\(path)",
             sizeBytes: path.utf8.count

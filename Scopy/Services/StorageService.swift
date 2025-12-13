@@ -142,6 +142,10 @@ final class StorageService {
     func upsertItem(_ content: ClipboardMonitor.ClipboardContent) async throws -> StoredItem {
         // Check for duplicate by content hash (v0.md 3.2)
         if let existing = try await repository.fetchItemByHash(content.contentHash) {
+            if let ingestURL = content.ingestFileURL {
+                try? FileManager.default.removeItem(at: ingestURL)
+            }
+
             // Update lastUsedAt and useCount instead of creating new
             var updated = existing
             updated.lastUsedAt = Date()
@@ -156,14 +160,33 @@ final class StorageService {
         var inlineData: Data? = nil
 
         // Decide storage location based on size (v0.md 2.1)
-        if content.sizeBytes >= Self.externalStorageThreshold, let rawData = content.rawData {
-            let path = makeExternalPath(id: id, type: content.type)
-            try await Task.detached(priority: .utility) {
-                try StorageService.writeAtomically(rawData, to: path)
-            }.value
-            storageRef = path
-        } else {
-            inlineData = content.rawData
+        switch content.payload {
+        case .none:
+            inlineData = nil
+        case .data(let data):
+            if content.sizeBytes >= Self.externalStorageThreshold {
+                let path = makeExternalPath(id: id, type: content.type)
+                try await Task.detached(priority: .utility) {
+                    try StorageService.writeAtomically(data, to: path)
+                }.value
+                storageRef = path
+            } else {
+                inlineData = data
+            }
+        case .file(let url):
+            if content.sizeBytes >= Self.externalStorageThreshold {
+                let path = makeExternalPath(id: id, type: content.type)
+                try await Task.detached(priority: .utility) {
+                    try StorageService.moveOrCopyFile(from: url, to: path)
+                }.value
+                storageRef = path
+            } else {
+                let data = try await Task.detached(priority: .utility) {
+                    try Data(contentsOf: url)
+                }.value
+                inlineData = data
+                try? FileManager.default.removeItem(at: url)
+            }
         }
 
         do {
@@ -183,6 +206,9 @@ final class StorageService {
             // Best-effort rollback: DB insert failed after writing external payload.
             if let storageRef {
                 try? FileManager.default.removeItem(atPath: storageRef)
+            }
+            if let ingestURL = content.ingestFileURL {
+                try? FileManager.default.removeItem(at: ingestURL)
             }
             throw error
         }
@@ -607,6 +633,22 @@ final class StorageService {
 
         // 原子重命名
         try FileManager.default.moveItem(at: tempURL, to: finalURL)
+    }
+
+    nonisolated static func moveOrCopyFile(from sourceURL: URL, to destinationPath: String) throws {
+        let destinationURL = URL(fileURLWithPath: destinationPath)
+
+        if FileManager.default.fileExists(atPath: destinationPath) {
+            try FileManager.default.removeItem(at: destinationURL)
+        }
+
+        do {
+            try FileManager.default.moveItem(at: sourceURL, to: destinationURL)
+        } catch {
+            let data = try Data(contentsOf: sourceURL)
+            try writeAtomically(data, to: destinationPath)
+            try? FileManager.default.removeItem(at: sourceURL)
+        }
     }
 
     private func makeExternalPath(id: UUID, type: ClipboardItemType) -> String {

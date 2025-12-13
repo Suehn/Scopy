@@ -6,6 +6,8 @@
 
 | 版本 | 日期 | 主要变化 |
 |------|------|----------|
+| [v0.37-profile.md](./v0.37-profile.md) | 2025-12-13 | P0-6 ingest 背压：spool + 有界并发队列（基线记录） |
+| [v0.36.1-profile.md](./v0.36.1-profile.md) | 2025-12-13 | TSan（Hosted tests）回归方案；性能基线沿用 v0.36 |
 | [v0.36-profile.md](./v0.36-profile.md) | 2025-12-13 | Phase 6：日志统一 + AsyncStream buffering + 阈值集中（基线记录） |
 | [v0.35.1-profile.md](./v0.35.1-profile.md) | 2025-12-13 | 文档对齐版本；性能基线沿用 v0.35（无代码改动） |
 | [v0.35-profile.md](./v0.35-profile.md) | 2025-12-13 | UI 拆分（HistoryListView components），基线记录 |

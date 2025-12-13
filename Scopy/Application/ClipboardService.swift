@@ -388,8 +388,18 @@ actor ClipboardService {
     private func handleNewContent(_ content: ClipboardMonitor.ClipboardContent) async {
         guard let storage, let search else { return }
 
-        if content.type == .image && !settings.saveImages { return }
-        if content.type == .file && !settings.saveFiles { return }
+        if content.type == .image && !settings.saveImages {
+            if let ingestURL = content.ingestFileURL {
+                try? FileManager.default.removeItem(at: ingestURL)
+            }
+            return
+        }
+        if content.type == .file && !settings.saveFiles {
+            if let ingestURL = content.ingestFileURL {
+                try? FileManager.default.removeItem(at: ingestURL)
+            }
+            return
+        }
 
         do {
             let storedItem = try await storage.upsertItem(content)

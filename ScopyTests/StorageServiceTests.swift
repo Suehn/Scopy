@@ -256,7 +256,7 @@ final class StorageServiceTests: XCTestCase {
         ClipboardMonitor.ClipboardContent(
             type: type,
             plainText: text,
-            rawData: nil,
+            payload: .none,
             appBundleID: "com.test.app",
             contentHash: computeHash(text),
             sizeBytes: text.utf8.count

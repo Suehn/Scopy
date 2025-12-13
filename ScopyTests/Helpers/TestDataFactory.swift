@@ -17,7 +17,7 @@ enum TestDataFactory {
         ClipboardMonitor.ClipboardContent(
             type: .text,
             plainText: text,
-            rawData: nil,
+            payload: .none,
             appBundleID: appBundleID,
             contentHash: computeHash(text),
             sizeBytes: text.utf8.count
@@ -38,7 +38,7 @@ enum TestDataFactory {
         return ClipboardMonitor.ClipboardContent(
             type: .image,
             plainText: "",
-            rawData: data,
+            payload: .data(data),
             appBundleID: appBundleID,
             contentHash: hash,
             sizeBytes: dataSize
@@ -56,7 +56,7 @@ enum TestDataFactory {
         return ClipboardMonitor.ClipboardContent(
             type: .file,
             plainText: url.absoluteString,
-            rawData: nil,
+            payload: .none,
             appBundleID: appBundleID,
             contentHash: hash,
             sizeBytes: 0

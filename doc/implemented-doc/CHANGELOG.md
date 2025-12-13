@@ -7,6 +7,37 @@
 
 ---
 
+## [v0.37] - 2025-12-13
+
+### P0-6 ingest 背压：spool + 有界并发队列（减少无声丢历史）
+
+- **不再 cancel oldest task**：`ClipboardMonitor` 大内容处理改为“有界并发 + pending backlog”，避免 burst 时直接取消最旧任务导致历史无声丢失。
+- **大 payload 先落盘再传递**：大内容（默认 ≥100KB）先写入 `~/Library/Caches/Scopy/ingest/`，`contentStream` 仅传 file ref；Storage 入库时 move/copy 到 external storage，失败/去重路径会清理临时文件。
+- **stream 不再丢历史**：`ClipboardMonitor.contentStream` 调整为 `.unbounded`（payload 不携带大 `Data`），减少消费者慢导致的 drop 风险。
+
+### 修改文件
+
+- `Scopy/Services/ClipboardMonitor.swift`
+- `Scopy/Services/StorageService.swift`
+- `Scopy/Application/ClipboardService.swift`
+- `Scopy/Infrastructure/Configuration/ScopyThresholds.swift`
+- `ScopyTests/*`（适配 `ClipboardContent.payload`）
+- `DEPLOYMENT.md`
+- `doc/profile/v0.36.1-profile.md`
+- `doc/profile/v0.37-profile.md`
+- `doc/profile/README.md`
+- `doc/implemented-doc/v0.37.md`
+- `doc/implemented-doc/README.md`
+- `doc/review/review-v0.3.md`
+
+### 测试
+
+- 单元测试：`make test-unit` **53 tests passed** (1 skipped)
+- 性能测试：`make test-perf` **22 tests passed** (6 skipped)
+- Thread Sanitizer：`make test-tsan` **132 tests passed** (1 skipped)
+
+---
+
 ## [v0.36.1] - 2025-12-13
 
 ### Phase 6 回归：Thread Sanitizer（Hosted Tests）

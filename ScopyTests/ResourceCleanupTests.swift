@@ -19,7 +19,7 @@ final class ResourceCleanupTests: XCTestCase {
         let content = ClipboardMonitor.ClipboardContent(
             type: .text,
             plainText: "Test content",
-            rawData: nil,
+            payload: .none,
             appBundleID: nil,
             contentHash: "test_hash",
             sizeBytes: 12
@@ -48,7 +48,7 @@ final class ResourceCleanupTests: XCTestCase {
             let content = ClipboardMonitor.ClipboardContent(
                 type: .text,
                 plainText: "Pinned item \(i)",
-                rawData: nil,
+                payload: .none,
                 appBundleID: nil,
                 contentHash: "pinned_\(i)",
                 sizeBytes: 20
@@ -86,7 +86,7 @@ final class ResourceCleanupTests: XCTestCase {
             let content = ClipboardMonitor.ClipboardContent(
                 type: .text,
                 plainText: "Item \(i)",
-                rawData: nil,
+                payload: .none,
                 appBundleID: nil,
                 contentHash: "hash_\(i)",
                 sizeBytes: 10
@@ -123,7 +123,7 @@ final class ResourceCleanupTests: XCTestCase {
             let content = ClipboardMonitor.ClipboardContent(
                 type: .text,
                 plainText: "Cache item \(i)",
-                rawData: nil,
+                payload: .none,
                 appBundleID: nil,
                 contentHash: "cache_\(i)",
                 sizeBytes: 15

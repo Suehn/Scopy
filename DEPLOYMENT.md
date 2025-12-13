@@ -1,6 +1,26 @@
 # Scopy 部署和使用指南
 
-## 本次更新（v0.36）
+## 本次更新（v0.37）
+- **P0-6 ingest 背压确定性**：
+  - `ClipboardMonitor` 大内容处理改为“有界并发 + backlog”，不再在队列满时 cancel oldest task（减少无声丢历史风险）。
+  - 大 payload（默认 ≥100KB）会先落盘到 `~/Library/Caches/Scopy/ingest/`，stream 只传 file ref，避免 burst 时内存堆积与 stream drop。
+- **性能实测**（Apple M3, macOS 15.7.2（24G325）, Debug, `make test-perf`；heavy 需 `RUN_HEAVY_PERF_TESTS=1`）：
+  - Fuzzy 5k items P95 ≈ 8.55ms
+  - Fuzzy 10k items P95 ≈ 78.40ms
+  - Disk 25k fuzzy P95 ≈ 115.68ms
+  - Bulk insert 1000 items ≈ 83.97ms（≈11,908 items/s）
+  - Regex 20k items P95 ≈ 5.54ms
+  - Mixed content disk search（single run, after warmup）≈ 7.37ms
+- **测试结果**：
+  - `make test-unit` **53 passed** (1 skipped)
+  - `make test-perf` **22 passed** (6 skipped)
+  - `make test-tsan` **132 passed** (1 skipped)
+
+## 历史更新（v0.36.1）
+- **Thread Sanitizer 回归**：新增 Hosted tests 方案与 `make test-tsan`，用于并发回归门槛（不触及性能路径）。
+- **性能基线**：沿用 v0.36（见 `doc/profile/v0.36.1-profile.md`）。
+
+## 历史更新（v0.36）
 - **Phase 6 收尾**：`AsyncStream` buffering policy 显式化（monitor/event streams）+ 日志统一到 `os.Logger`（保留热键文件日志）+ 阈值集中配置（`ScopyThresholds`）。
 - **性能实测**（Apple M3, macOS 15.7.2（24G325）, Debug, `make test-perf`；heavy 需 `RUN_HEAVY_PERF_TESTS=1`）：
   - Fuzzy 5k items P95 ≈ 5.23ms

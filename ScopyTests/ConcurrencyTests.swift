@@ -33,7 +33,7 @@ final class ConcurrencyTests: XCTestCase {
             let content = ClipboardMonitor.ClipboardContent(
                 type: .text,
                 plainText: "Test item \(i) with some content",
-                rawData: nil,
+                payload: .none,
                 appBundleID: "com.test.app",
                 contentHash: "hash_\(i)",
                 sizeBytes: 50
@@ -85,7 +85,7 @@ final class ConcurrencyTests: XCTestCase {
             let content = ClipboardMonitor.ClipboardContent(
                 type: .text,
                 plainText: "Cache test \(i)",
-                rawData: nil,
+                payload: .none,
                 appBundleID: nil,
                 contentHash: "cache_hash_\(i)",
                 sizeBytes: 20
@@ -122,7 +122,7 @@ final class ConcurrencyTests: XCTestCase {
             let content = ClipboardMonitor.ClipboardContent(
                 type: .text,
                 plainText: "Base item \(i)",
-                rawData: nil,
+                payload: .none,
                 appBundleID: nil,
                 contentHash: "base_\(i)",
                 sizeBytes: 30
@@ -137,7 +137,7 @@ final class ConcurrencyTests: XCTestCase {
             let content = ClipboardMonitor.ClipboardContent(
                 type: .text,
                 plainText: "Sequential item \(i)",
-                rawData: nil,
+                payload: .none,
                 appBundleID: nil,
                 contentHash: "sequential_\(i)",
                 sizeBytes: 25
@@ -174,7 +174,7 @@ final class ConcurrencyTests: XCTestCase {
             let content = ClipboardMonitor.ClipboardContent(
                 type: .text,
                 plainText: "Duplicate content",
-                rawData: nil,
+                payload: .none,
                 appBundleID: "com.test.\(i)",
                 contentHash: duplicateHash,
                 sizeBytes: 20
@@ -225,7 +225,7 @@ final class ConcurrencyTests: XCTestCase {
             let content = ClipboardMonitor.ClipboardContent(
                 type: .text,
                 plainText: "Stress test item \(i) with lorem ipsum dolor sit amet",
-                rawData: nil,
+                payload: .none,
                 appBundleID: "com.test.stress",
                 contentHash: "stress_hash_\(i)",
                 sizeBytes: 60
@@ -273,7 +273,7 @@ final class ConcurrencyTests: XCTestCase {
             let content = ClipboardMonitor.ClipboardContent(
                 type: .text,
                 plainText: "Consistency test item \(i) with unique content",
-                rawData: nil,
+                payload: .none,
                 appBundleID: "com.test.consistency",
                 contentHash: "consistency_\(i)",
                 sizeBytes: 50
@@ -325,7 +325,7 @@ final class ConcurrencyTests: XCTestCase {
             let content = ClipboardMonitor.ClipboardContent(
                 type: .text,
                 plainText: "Timeout test item \(i) with some content data for testing",
-                rawData: nil,
+                payload: .none,
                 appBundleID: "com.test.timeout",
                 contentHash: "timeout_\(i)",
                 sizeBytes: 60
@@ -358,7 +358,7 @@ final class ConcurrencyTests: XCTestCase {
             let content = ClipboardMonitor.ClipboardContent(
                 type: .text,
                 plainText: "Cleanup search test item \(i)",
-                rawData: nil,
+                payload: .none,
                 appBundleID: "com.test.cleanup",
                 contentHash: "cleanup_search_\(i)",
                 sizeBytes: 40
