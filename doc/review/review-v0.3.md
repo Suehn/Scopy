@@ -3,7 +3,7 @@
 > 说明：本文用于指导后续“稳定性优先”的长期重构（含 Codex 执行）。`doc/review/review-v0.3-2.md` 为历史草案/补充材料，其中关键内容已合并到本文；后续以本文为准。
 
 - 最后更新：2025-12-13
-- 代码基线：`v0.37`
+- 代码基线：`v0.38`
 - 关联文档：
   - 当前实现状态索引：`doc/implemented-doc/README.md`
   - 近期变更：`doc/implemented-doc/CHANGELOG.md`
@@ -771,9 +771,19 @@ Notes：
     - `xcodebuild test -only-testing:ScopyTests/AppStateTests -only-testing:ScopyTests/AppStateFallbackTests` 通过（46 tests passed）
     - `make test-perf` 通过（22 tests passed，6 skipped）
 
+- 已完成（2025-12-13，v0.38）：
+  - `ClipboardItemDTO.cachedTitle/cachedMetadata` 的 Presentation 收口：
+    - Domain：`Scopy/Domain/Models/ClipboardItemDTO.swift` 移除 UI-only 派生字段（DTO 只保留事实数据）
+    - Presentation：新增 `Scopy/Presentation/ClipboardItemDisplayText.swift`（`NSCache`）为 `ClipboardItemDTO.title/metadata` 提供计算 + 缓存
+  - `HeaderView.AppFilterButton` 移除 View 内静态 LRU 缓存，统一改为 `IconService`（图标/名称缓存入口收口）
+  - 验收：
+    - `make test-unit` 通过（53 tests passed，1 skipped）
+    - `make test-perf` 通过（22 tests passed，6 skipped）
+    - `make test-tsan` 通过（132 tests passed，1 skipped）
+
 - 待继续：
   - （可选）拆分 `AppState`（History/Settings ViewModel）
-  - `ClipboardItemDTO.cachedTitle/cachedMetadata` 的 Presentation 收口
+  - （可选）继续收口 Presentation（拆 ViewModel/formatter，减少 View 内策略代码）
 
 ### Phase 6：清理与观测（收尾）
 

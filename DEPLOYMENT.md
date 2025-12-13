@@ -1,6 +1,24 @@
 # Scopy 部署和使用指南
 
-## 本次更新（v0.37）
+## 本次更新（v0.38）
+- **Phase 5 收口：Domain vs UI**：
+  - `ClipboardItemDTO` 移除 UI-only 派生字段 `cachedTitle/cachedMetadata`，Domain 只保留事实数据。
+  - Presentation 新增 `ClipboardItemDisplayText`（`NSCache`）为 `ClipboardItemDTO.title/metadata` 提供计算 + 缓存，保持列表渲染低开销。
+  - `HeaderView.AppFilterButton` 移除 View 内静态 LRU 缓存，统一改为 `IconService`（图标/名称缓存入口收口）。
+- **性能实测**（Apple M3, macOS 15.7.2（24G325）, Debug, `make test-perf`；heavy 需 `RUN_HEAVY_PERF_TESTS=1`）：
+  - Fuzzy 5k items P95 ≈ 4.68ms
+  - Fuzzy 10k items P95 ≈ 43.44ms
+  - Disk 25k fuzzy P95 ≈ 56.15ms
+  - Bulk insert 1000 items ≈ 82.69ms（≈12,094 items/s）
+  - Fetch recent (50 items) avg ≈ 0.07ms
+  - Regex 20k items P95 ≈ 3.02ms
+  - Mixed content disk search（single run, after warmup）≈ 4.25ms
+- **测试结果**：
+  - `make test-unit` **53 passed** (1 skipped)
+  - `make test-perf` **22 passed** (6 skipped)
+  - `make test-tsan` **132 passed** (1 skipped)
+
+## 历史更新（v0.37）
 - **P0-6 ingest 背压确定性**：
   - `ClipboardMonitor` 大内容处理改为“有界并发 + backlog”，不再在队列满时 cancel oldest task（减少无声丢历史风险）。
   - 大 payload（默认 ≥100KB）会先落盘到 `~/Library/Caches/Scopy/ingest/`，stream 只传 file ref，避免 burst 时内存堆积与 stream drop。

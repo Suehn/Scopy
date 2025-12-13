@@ -7,6 +7,35 @@
 
 ---
 
+## [v0.38] - 2025-12-13
+
+### Phase 5 收口：DTO 去 UI 派生字段 + 展示缓存统一入口
+
+- **Domain vs UI 边界更清晰**：`ClipboardItemDTO` 移除 `cachedTitle/cachedMetadata`（UI-only 派生字段）。
+- **Presentation 提供展示缓存**：新增 `ClipboardItemDisplayText`（`NSCache`）为 `ClipboardItemDTO.title/metadata` 提供计算 + 缓存，避免列表渲染时重复 O(n) 字符串操作。
+- **图标缓存入口收口**：`HeaderView.AppFilterButton` 移除 View 内静态 LRU 缓存，统一改用 `IconService`。
+
+### 修改文件
+
+- `Scopy/Domain/Models/ClipboardItemDTO.swift`
+- `Scopy/Presentation/ClipboardItemDisplayText.swift`
+- `Scopy/Views/HeaderView.swift`
+- `Scopy.xcodeproj/project.pbxproj`
+- `DEPLOYMENT.md`
+- `doc/profile/v0.38-profile.md`
+- `doc/profile/README.md`
+- `doc/implemented-doc/v0.38.md`
+- `doc/implemented-doc/README.md`
+- `doc/review/review-v0.3.md`
+
+### 测试
+
+- 单元测试：`make test-unit` **53 tests passed** (1 skipped)
+- 性能测试：`make test-perf` **22 tests passed** (6 skipped)
+- Thread Sanitizer：`make test-tsan` **132 tests passed** (1 skipped)
+
+---
+
 ## [v0.37] - 2025-12-13
 
 ### P0-6 ingest 背压：spool + 有界并发队列（减少无声丢历史）

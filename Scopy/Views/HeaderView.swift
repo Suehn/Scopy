@@ -129,14 +129,6 @@ private struct SearchModeMenu: View {
 struct AppFilterButton: View {
     @Environment(AppState.self) private var appState
 
-    // LRU 缓存：限制最大 50 个条目，防止内存泄漏
-    // v0.10.8: 添加 NSLock 保护，确保线程安全
-    private static var nameCache: [String: String] = [:]
-    private static var iconCache: [String: NSImage] = [:]
-    private static var iconAccessOrder: [String] = []  // LRU 访问顺序
-    private static let maxCacheSize = 50
-    private static let cacheLock = NSLock()
-
     var body: some View {
         Menu {
             Button(action: {
@@ -165,6 +157,9 @@ struct AppFilterButton: View {
                             }
                             if let icon = appIcon(for: bundleID) {
                                 Image(nsImage: icon)
+                                    .resizable()
+                                    .aspectRatio(contentMode: .fit)
+                                    .frame(width: ScopySize.Icon.menuApp, height: ScopySize.Icon.menuApp)
                             }
                             Text(appName(for: bundleID))
                         }
@@ -187,98 +182,12 @@ struct AppFilterButton: View {
         .help("Filter by app")
     }
 
-    /// v0.10.8: 使用锁保护缓存访问，确保线程安全
     private func appIcon(for bundleID: String) -> NSImage? {
-        Self.cacheLock.lock()
-
-        // 检查缓存命中
-        if let cached = Self.iconCache[bundleID] {
-            // 更新 LRU 访问顺序
-            if let index = Self.iconAccessOrder.firstIndex(of: bundleID) {
-                Self.iconAccessOrder.remove(at: index)
-            }
-            Self.iconAccessOrder.append(bundleID)
-            Self.cacheLock.unlock()
-            return cached
-        }
-
-        // 缓存未命中，释放锁后获取图标（避免阻塞）
-        Self.cacheLock.unlock()
-
-        guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) else {
-            return nil
-        }
-        let sourceIcon = NSWorkspace.shared.icon(forFile: url.path)
-
-        // Create properly sized icon - match menu app icon size
-        let iconSize = ScopySize.Icon.menuApp
-        let targetSize = NSSize(width: iconSize, height: iconSize)
-        let croppedIcon = NSImage(size: targetSize)
-
-        croppedIcon.lockFocus()
-
-        // Find the best representation and draw centered
-        if let bestRep = sourceIcon.bestRepresentation(
-            for: NSRect(origin: .zero, size: targetSize),
-            context: nil,
-            hints: [.interpolation: NSNumber(value: NSImageInterpolation.high.rawValue)]
-        ) {
-            bestRep.draw(in: NSRect(origin: .zero, size: targetSize))
-        }
-
-        croppedIcon.unlockFocus()
-        croppedIcon.isTemplate = false
-
-        // 重新获取锁来更新缓存
-        Self.cacheLock.lock()
-
-        // LRU 清理：超出限制时移除最早访问的条目
-        if Self.iconCache.count >= Self.maxCacheSize, let oldest = Self.iconAccessOrder.first {
-            Self.iconCache.removeValue(forKey: oldest)
-            Self.iconAccessOrder.removeFirst()
-        }
-
-        Self.iconCache[bundleID] = croppedIcon
-        Self.iconAccessOrder.append(bundleID)
-        Self.cacheLock.unlock()
-
-        return croppedIcon
+        IconService.shared.icon(bundleID: bundleID)
     }
 
-    /// v0.10.8: 使用锁保护缓存访问，确保线程安全
-    /// v0.22: 修复 LRU 清理策略，使用 FIFO 而非全部清空
-    private static var nameAccessOrder: [String] = []  // 名称缓存的访问顺序
-
     private func appName(for bundleID: String) -> String {
-        Self.cacheLock.lock()
-
-        if let cached = Self.nameCache[bundleID] {
-            Self.cacheLock.unlock()
-            return cached
-        }
-
-        // 缓存未命中，需要获取名称（在锁外执行）
-        Self.cacheLock.unlock()
-
-        guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) else {
-            return bundleID
-        }
-        let name = url.deletingPathExtension().lastPathComponent
-
-        // 重新获取锁来更新缓存
-        Self.cacheLock.lock()
-
-        // v0.22: LRU 清理：移除最旧的条目而非全部清空
-        if Self.nameCache.count >= Self.maxCacheSize, let oldest = Self.nameAccessOrder.first {
-            Self.nameCache.removeValue(forKey: oldest)
-            Self.nameAccessOrder.removeFirst()
-        }
-
-        Self.nameCache[bundleID] = name
-        Self.nameAccessOrder.append(bundleID)
-        Self.cacheLock.unlock()
-
-        return name
+        IconService.shared.appName(bundleID: bundleID)
     }
 }
 
