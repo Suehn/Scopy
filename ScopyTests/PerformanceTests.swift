@@ -7,18 +7,19 @@ import XCTest
 final class PerformanceTests: XCTestCase {
 
     var storage: StorageService!
-    var search: SearchService!
+    var search: SearchEngineImpl!
     private let heavyPerfEnv = "RUN_HEAVY_PERF_TESTS"
 
     override func setUp() async throws {
         try await super.setUp()
-        storage = StorageService(databasePath: ":memory:")
-        try storage.open()
-        search = SearchService(storage: storage)
-        search.setDatabase(storage.database)
+        storage = StorageService(databasePath: Self.makeSharedInMemoryDatabasePath())
+        try await storage.open()
+        search = SearchEngineImpl(dbPath: storage.databaseFilePath)
+        try await search.open()
     }
 
     override func tearDown() async throws {
+        await search.close()
         storage.close()
         storage = nil
         search = nil
@@ -57,7 +58,7 @@ final class PerformanceTests: XCTestCase {
         let startTime = CFAbsoluteTimeGetCurrent()
 
         for _ in 0..<100 {
-            _ = try storage.fetchRecent(limit: 50, offset: 0)
+            _ = try await storage.fetchRecent(limit: 50, offset: 0)
         }
 
         let elapsed = CFAbsoluteTimeGetCurrent() - startTime
@@ -86,7 +87,7 @@ final class PerformanceTests: XCTestCase {
             ]
             _ = try await storage.upsertItem(makeContent(texts[i % texts.count]))
         }
-        search.invalidateCache()
+        await search.invalidateCache()
 
         // v0.25+：全量模糊索引首次构建为一次性成本，不计入稳态 P95
         _ = try await search.search(
@@ -126,7 +127,7 @@ final class PerformanceTests: XCTestCase {
         for i in 0..<10000 {
             _ = try await storage.upsertItem(makeContent("Search benchmark item \(i) with text"))
         }
-        search.invalidateCache()
+        await search.invalidateCache()
 
         // v0.25+：全量模糊索引首次构建为一次性成本，不计入稳态 P95
         _ = try await search.search(
@@ -160,7 +161,7 @@ final class PerformanceTests: XCTestCase {
         for i in 0..<1000 {
             _ = try await storage.upsertItem(makeContent("Test item \(i) a b c"))
         }
-        search.invalidateCache()
+        await search.invalidateCache()
 
         // First query populates cache
         let request1 = SearchRequest(query: "a", mode: .fuzzy, limit: 50, offset: 0)
@@ -188,7 +189,7 @@ final class PerformanceTests: XCTestCase {
         for i in 0..<3000 {
             _ = try await storage.upsertItem(makeContent("Mode comparison test item \(i)"))
         }
-        search.invalidateCache()
+        await search.invalidateCache()
 
         let query = "comparison"
 
@@ -199,14 +200,14 @@ final class PerformanceTests: XCTestCase {
         let exactTime = (CFAbsoluteTimeGetCurrent() - exactStart) * 1000
 
         // Fuzzy search
-        search.invalidateCache()
+        await search.invalidateCache()
         let fuzzyStart = CFAbsoluteTimeGetCurrent()
         let fuzzyRequest = SearchRequest(query: query, mode: .fuzzy, limit: 50, offset: 0)
         _ = try await search.search(request: fuzzyRequest)
         let fuzzyTime = (CFAbsoluteTimeGetCurrent() - fuzzyStart) * 1000
 
         // Regex search
-        search.invalidateCache()
+        await search.invalidateCache()
         let regexStart = CFAbsoluteTimeGetCurrent()
         let regexRequest = SearchRequest(query: "comparison", mode: .regex, limit: 50, offset: 0)
         _ = try await search.search(request: regexRequest)
@@ -261,7 +262,7 @@ final class PerformanceTests: XCTestCase {
         // Run sequential reads (simulating concurrent access pattern)
         // Note: MainActor isolation prevents true concurrent testing
         for _ in 0..<100 {
-            _ = try? storage.fetchRecent(limit: 50, offset: 0)
+            _ = try? await storage.fetchRecent(limit: 50, offset: 0)
         }
 
         let elapsed = CFAbsoluteTimeGetCurrent() - startTime
@@ -302,7 +303,7 @@ final class PerformanceTests: XCTestCase {
         print("   - 200 upserts (100 unique, 100 dups) in \(String(format: "%.2f", elapsed * 1000))ms")
 
         // Should only have 100 items
-        let count = try storage.getItemCount()
+        let count = try await storage.getItemCount()
         XCTAssertEqual(count, 100)
     }
 
@@ -320,7 +321,7 @@ final class PerformanceTests: XCTestCase {
         // Run multiple load operations
         for _ in 0..<20 {
             let startTime = CFAbsoluteTimeGetCurrent()
-            _ = try storage.fetchRecent(limit: 50, offset: 0)
+            _ = try await storage.fetchRecent(limit: 50, offset: 0)
             let elapsed = (CFAbsoluteTimeGetCurrent() - startTime) * 1000
             times.append(elapsed)
         }
@@ -352,7 +353,7 @@ final class PerformanceTests: XCTestCase {
             _ = try await search.search(request: request)
 
             // Fetch
-            _ = try storage.fetchRecent(limit: 50, offset: 0)
+            _ = try await storage.fetchRecent(limit: 50, offset: 0)
         }
 
         let finalMemory = getMemoryUsage()
@@ -374,7 +375,7 @@ final class PerformanceTests: XCTestCase {
         for i in 0..<1000 {
             _ = try await storage.upsertItem(makeContent("Debounce test item \(i)"))
         }
-        search.invalidateCache()
+        await search.invalidateCache()
 
         // Simulate rapid queries
         let queries = ["d", "de", "deb", "debo", "debou", "deboun", "debounc", "debounce"]
@@ -409,13 +410,13 @@ final class PerformanceTests: XCTestCase {
         storage.cleanupSettings.maxItems = 100
 
         let startTime = CFAbsoluteTimeGetCurrent()
-        try storage.performCleanup()
+        try await storage.performCleanup()
         let elapsed = CFAbsoluteTimeGetCurrent() - startTime
 
         print("📊 Cleanup Performance:")
         print("   - Cleaned 900 items in \(String(format: "%.2f", elapsed * 1000))ms")
 
-        let remaining = try storage.getItemCount()
+        let remaining = try await storage.getItemCount()
         XCTAssertLessThanOrEqual(remaining, 100)
     }
 
@@ -427,10 +428,9 @@ final class PerformanceTests: XCTestCase {
     func testInlineCleanupPerformance10k() async throws {
         try XCTSkipIf(!shouldRunHeavyPerf(), "Set \(heavyPerfEnv)=1 to run heavy perf tests")
 
-        let (diskStorage, _, baseURL) = try makeDiskStorage()
+        let (diskStorage, diskSearch, baseURL) = try await makeDiskStorage()
         defer {
-            diskStorage.close()
-            try? FileManager.default.removeItem(at: baseURL)
+            self.cleanupDiskResources(storage: diskStorage, search: diskSearch, baseURL: baseURL)
         }
 
         // 插入 10k 小内容项（内联存储）
@@ -452,7 +452,7 @@ final class PerformanceTests: XCTestCase {
             diskStorage.performWALCheckpoint()
 
             let start = CFAbsoluteTimeGetCurrent()
-            try diskStorage.performCleanup()
+            try await diskStorage.performCleanup()
             let elapsed = (CFAbsoluteTimeGetCurrent() - start) * 1000
             times.append(elapsed)
             print("   - Iteration \(iteration + 1): \(String(format: "%.2f", elapsed))ms")
@@ -470,10 +470,9 @@ final class PerformanceTests: XCTestCase {
     func testExternalCleanupPerformance10k() async throws {
         try XCTSkipIf(!shouldRunHeavyPerf(), "Set \(heavyPerfEnv)=1 to run heavy perf tests")
 
-        let (diskStorage, _, baseURL) = try makeDiskStorage()
+        let (diskStorage, diskSearch, baseURL) = try await makeDiskStorage()
         defer {
-            diskStorage.close()
-            try? FileManager.default.removeItem(at: baseURL)
+            self.cleanupDiskResources(storage: diskStorage, search: diskSearch, baseURL: baseURL)
         }
 
         // 插入 10k 大内容项（外部存储）
@@ -497,7 +496,7 @@ final class PerformanceTests: XCTestCase {
         diskStorage.performWALCheckpoint()
 
         let start = CFAbsoluteTimeGetCurrent()
-        try diskStorage.performCleanup()
+        try await diskStorage.performCleanup()
         let elapsed = (CFAbsoluteTimeGetCurrent() - start) * 1000
 
         print("📊 External Cleanup Performance (10k items): \(String(format: "%.2f", elapsed))ms")
@@ -510,10 +509,9 @@ final class PerformanceTests: XCTestCase {
     func testCleanupPerformance50k() async throws {
         try XCTSkipIf(!shouldRunHeavyPerf(), "Set \(heavyPerfEnv)=1 to run heavy perf tests")
 
-        let (diskStorage, _, baseURL) = try makeDiskStorage()
+        let (diskStorage, diskSearch, baseURL) = try await makeDiskStorage()
         defer {
-            diskStorage.close()
-            try? FileManager.default.removeItem(at: baseURL)
+            self.cleanupDiskResources(storage: diskStorage, search: diskSearch, baseURL: baseURL)
         }
 
         // 插入 50k 项
@@ -528,14 +526,14 @@ final class PerformanceTests: XCTestCase {
         diskStorage.performWALCheckpoint()
 
         let start = CFAbsoluteTimeGetCurrent()
-        try diskStorage.performCleanup()
+        try await diskStorage.performCleanup()
         let elapsed = (CFAbsoluteTimeGetCurrent() - start) * 1000
 
         print("📊 Large Scale Cleanup Performance (50k items): \(String(format: "%.2f", elapsed))ms")
         // v0.14: 调整目标为 2000ms，反映 45k 删除 + FTS5 同步开销
         XCTAssertLessThan(elapsed, 2000, "50k cleanup \(elapsed)ms exceeds 2000ms target")
 
-        let remaining = try diskStorage.getItemCount()
+        let remaining = try await diskStorage.getItemCount()
         XCTAssertLessThanOrEqual(remaining, 5000)
     }
 
@@ -543,10 +541,9 @@ final class PerformanceTests: XCTestCase {
 
     /// 磁盘模式 + 2.5 万条，模拟真实 I/O（WAL 已启用）
     func testDiskBackedSearchPerformance25k() async throws {
-        let (diskStorage, diskSearch, baseURL) = try makeDiskStorage()
+        let (diskStorage, diskSearch, baseURL) = try await makeDiskStorage()
         defer {
-            diskStorage.close()
-            try? FileManager.default.removeItem(at: baseURL)
+            self.cleanupDiskResources(storage: diskStorage, search: diskSearch, baseURL: baseURL)
         }
 
         // Mixed length text to mimic real notes/snippets
@@ -555,7 +552,7 @@ final class PerformanceTests: XCTestCase {
             let text = "Note \(i) " + String(repeating: "lorem ipsum ", count: len / 11)
             _ = try await diskStorage.upsertItem(makeContent(text))
         }
-        diskSearch.invalidateCache()
+        await diskSearch.invalidateCache()
 
         // Warm up full fuzzy index (one‑time build)
         _ = try await diskSearch.search(
@@ -580,10 +577,9 @@ final class PerformanceTests: XCTestCase {
 
     /// 磁盘模式混合内容（文本/HTML/RTF/图片/文件），验证索引与外部存储
     func testMixedContentIndexingOnDisk() async throws {
-        let (diskStorage, diskSearch, baseURL) = try makeDiskStorage()
+        let (diskStorage, diskSearch, baseURL) = try await makeDiskStorage()
         defer {
-            diskStorage.close()
-            try? FileManager.default.removeItem(at: baseURL)
+            self.cleanupDiskResources(storage: diskStorage, search: diskSearch, baseURL: baseURL)
         }
 
         // Texts
@@ -612,7 +608,12 @@ final class PerformanceTests: XCTestCase {
             _ = try await diskStorage.upsertItem(makeFileContent(path: path))
         }
 
-        diskSearch.invalidateCache()
+        await diskSearch.invalidateCache()
+
+        // Warm up (build caches/index) to reduce one-off variance.
+        _ = try await diskSearch.search(
+            request: SearchRequest(query: "warmup", mode: .fuzzy, limit: 1, offset: 0)
+        )
 
         let start = CFAbsoluteTimeGetCurrent()
         let page = try await diskSearch.search(
@@ -620,7 +621,7 @@ final class PerformanceTests: XCTestCase {
         )
         let elapsed = (CFAbsoluteTimeGetCurrent() - start) * 1000
 
-        let recent = try diskStorage.fetchRecent(limit: 5000, offset: 0)
+        let recent = try await diskStorage.fetchRecent(limit: 5000, offset: 0)
         let externalCount = recent.filter { $0.storageRef != nil }.count
 
         print("📊 Mixed Content Disk Search:")
@@ -642,10 +643,9 @@ final class PerformanceTests: XCTestCase {
     func testHeavyDiskSearchPerformance50k() async throws {
         try XCTSkipIf(!shouldRunHeavyPerf(), "Set \(heavyPerfEnv)=1 to run heavy disk perf tests")
 
-        let (diskStorage, diskSearch, baseURL) = try makeDiskStorage()
+        let (diskStorage, diskSearch, baseURL) = try await makeDiskStorage()
         defer {
-            diskStorage.close()
-            try? FileManager.default.removeItem(at: baseURL)
+            self.cleanupDiskResources(storage: diskStorage, search: diskSearch, baseURL: baseURL)
         }
 
         for i in 0..<50_000 {
@@ -653,7 +653,7 @@ final class PerformanceTests: XCTestCase {
             let text = "Heavy note \(i) " + String(repeating: "lorem ipsum ", count: len / 11)
             _ = try await diskStorage.upsertItem(makeContent(text))
         }
-        diskSearch.invalidateCache()
+        await diskSearch.invalidateCache()
 
         _ = try await diskSearch.search(
             request: SearchRequest(query: "warmup", mode: .fuzzy, limit: 1, offset: 0)
@@ -679,10 +679,9 @@ final class PerformanceTests: XCTestCase {
     func testUltraDiskSearchPerformance75k() async throws {
         try XCTSkipIf(!shouldRunHeavyPerf(), "Set \(heavyPerfEnv)=1 to run heavy disk perf tests")
 
-        let (diskStorage, diskSearch, baseURL) = try makeDiskStorage()
+        let (diskStorage, diskSearch, baseURL) = try await makeDiskStorage()
         defer {
-            diskStorage.close()
-            try? FileManager.default.removeItem(at: baseURL)
+            self.cleanupDiskResources(storage: diskStorage, search: diskSearch, baseURL: baseURL)
         }
 
         for i in 0..<75_000 {
@@ -690,7 +689,7 @@ final class PerformanceTests: XCTestCase {
             let text = makeRealisticText(index: i, base: "Ultra note", length: len)
             _ = try await diskStorage.upsertItem(makeContent(text))
         }
-        diskSearch.invalidateCache()
+        await diskSearch.invalidateCache()
 
         _ = try await diskSearch.search(
             request: SearchRequest(query: "warmup", mode: .fuzzy, limit: 1, offset: 0)
@@ -716,7 +715,7 @@ final class PerformanceTests: XCTestCase {
             let text = makeRealisticText(index: i, base: "Regex note", length: 80 + (i % 120))
             _ = try await storage.upsertItem(makeContent(text))
         }
-        search.invalidateCache()
+        await search.invalidateCache()
 
         var times: [Double] = []
         for pattern in ["Regex\\s+note", "lorem\\sipsum", "item\\s[0-9]{3,}"] {
@@ -736,10 +735,9 @@ final class PerformanceTests: XCTestCase {
     func testExternalStorageStress() async throws {
         try XCTSkipIf(!shouldRunHeavyPerf(), "Set \(heavyPerfEnv)=1 to run heavy perf tests")
 
-        let (diskStorage, _, baseURL) = try makeDiskStorage()
+        let (diskStorage, diskSearch, baseURL) = try await makeDiskStorage()
         defer {
-            diskStorage.close()
-            try? FileManager.default.removeItem(at: baseURL)
+            self.cleanupDiskResources(storage: diskStorage, search: diskSearch, baseURL: baseURL)
         }
 
         // 250 x 256KB ≈ 64MB，仍高于 50MB 清理阈值，但更稳定
@@ -763,11 +761,11 @@ final class PerformanceTests: XCTestCase {
         // Trigger cleanup to ensure it runs fast enough
         // 预热一次，避免首次 I/O 抖动
         diskStorage.cleanupSettings.maxLargeStorageMB = 1000
-        try diskStorage.performCleanup()
+        try await diskStorage.performCleanup()
 
         diskStorage.cleanupSettings.maxLargeStorageMB = 50 // 50MB cap
         let start = CFAbsoluteTimeGetCurrent()
-        try diskStorage.performCleanup()
+        try await diskStorage.performCleanup()
         let elapsed = (CFAbsoluteTimeGetCurrent() - start) * 1000
         print("🧹 External cleanup elapsed: \(String(format: "%.2f", elapsed))ms")
         XCTAssertLessThan(elapsed, 800, "External cleanup should finish within 800ms")
@@ -840,26 +838,37 @@ final class PerformanceTests: XCTestCase {
         return "\(base) \(index) \(filler)"
     }
 
-    private func makeDiskStorage() throws -> (StorageService, SearchService, URL) {
+    private static func makeSharedInMemoryDatabasePath() -> String {
+        "file:scopy_test_\(UUID().uuidString)?mode=memory&cache=shared"
+    }
+
+    private func makeDiskStorage() async throws -> (StorageService, SearchEngineImpl, URL) {
         let baseURL = FileManager.default.temporaryDirectory.appendingPathComponent("scopy-perf-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: baseURL, withIntermediateDirectories: true)
         let dbPath = baseURL.appendingPathComponent("clipboard.db").path
 
         let storage = StorageService(databasePath: dbPath)
-        try storage.open()
+        try await storage.open()
 
-        let search = SearchService(storage: storage)
-        search.setDatabase(storage.database)
+        let search = SearchEngineImpl(dbPath: storage.databaseFilePath)
 
         return (storage, search, baseURL)
     }
 
-    private func shouldRunHeavyPerf() -> Bool {
-        // 默认开启重负载场景；如需关闭，可设置 RUN_HEAVY_PERF_TESTS=0
-        if let flag = ProcessInfo.processInfo.environment[heavyPerfEnv], flag == "0" {
-            return false
+    private func cleanupDiskResources(storage: StorageService, search: SearchEngineImpl, baseURL: URL) {
+        let semaphore = DispatchSemaphore(value: 0)
+        Task.detached {
+            await search.close()
+            semaphore.signal()
         }
-        return true
+        semaphore.wait()
+
+        storage.close()
+        try? FileManager.default.removeItem(at: baseURL)
+    }
+
+    private func shouldRunHeavyPerf() -> Bool {
+        ProcessInfo.processInfo.environment[heavyPerfEnv] == "1"
     }
 
     private func percentile(_ values: [Double], _ p: Double) -> Double {

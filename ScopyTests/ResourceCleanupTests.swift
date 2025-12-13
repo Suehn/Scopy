@@ -11,7 +11,7 @@ final class ResourceCleanupTests: XCTestCase {
     /// 测试数据库连接在 close 后正确释放
     func testDatabaseConnectionCleanup() async throws {
         let storage = StorageService(databasePath: ":memory:")
-        try storage.open()
+        try await storage.open()
 
         // 插入一些数据
         let content = ClipboardMonitor.ClipboardContent(
@@ -27,14 +27,19 @@ final class ResourceCleanupTests: XCTestCase {
         // 关闭数据库
         storage.close()
 
-        // 验证数据库已关闭（database 应该为 nil）
-        XCTAssertNil(storage.database, "Database should be nil after close")
+        // 验证数据库已关闭（后续 DB 调用应失败）
+        do {
+            _ = try await storage.getItemCount()
+            XCTFail("Expected databaseNotOpen after close")
+        } catch {
+            // Expected
+        }
     }
 
     /// 测试清理操作在全部 pin 时不会无限循环
     func testCleanupWithAllPinnedItems() async throws {
         let storage = StorageService(databasePath: ":memory:")
-        try storage.open()
+        try await storage.open()
 
         // 插入并 pin 所有项目
         for i in 0..<10 {
@@ -47,7 +52,7 @@ final class ResourceCleanupTests: XCTestCase {
                 sizeBytes: 20
             )
             let item = try await storage.upsertItem(content)
-            try storage.setPin(item.id, pinned: true)
+            try await storage.setPin(item.id, pinned: true)
         }
 
         // 设置非常小的限制
@@ -56,14 +61,14 @@ final class ResourceCleanupTests: XCTestCase {
 
         // 执行清理 - 不应该无限循环
         let startTime = Date()
-        try storage.performCleanup()
+        try await storage.performCleanup()
         let elapsed = Date().timeIntervalSince(startTime)
 
         // 清理应该在合理时间内完成（不超过 1 秒）
         XCTAssertLessThan(elapsed, 1.0, "Cleanup should complete quickly even with all pinned items")
 
         // 所有 pinned 项目应该保留
-        let count = try storage.getItemCount()
+        let count = try await storage.getItemCount()
         XCTAssertEqual(count, 10, "All pinned items should be preserved")
 
         storage.close()
@@ -72,7 +77,7 @@ final class ResourceCleanupTests: XCTestCase {
     /// 测试 sqlite3_step 错误处理
     func testSqliteStepErrorHandling() async throws {
         let storage = StorageService(databasePath: ":memory:")
-        try storage.open()
+        try await storage.open()
 
         // 插入测试数据
         for i in 0..<5 {
@@ -89,10 +94,14 @@ final class ResourceCleanupTests: XCTestCase {
 
         // 正常清理应该成功
         storage.cleanupSettings.maxItems = 3
-        XCTAssertNoThrow(try storage.performCleanup(), "Cleanup should not throw")
+        do {
+            try await storage.performCleanup()
+        } catch {
+            XCTFail("Cleanup should not throw: \(error)")
+        }
 
         // 验证清理后的数量
-        let count = try storage.getItemCount()
+        let count = try await storage.getItemCount()
         XCTAssertLessThanOrEqual(count, 3, "Item count should be reduced")
 
         storage.close()
@@ -102,10 +111,10 @@ final class ResourceCleanupTests: XCTestCase {
 
     /// 测试搜索服务缓存失效
     func testSearchCacheInvalidation() async throws {
-        let storage = StorageService(databasePath: ":memory:")
-        try storage.open()
-        let search = SearchService(storage: storage)
-        search.setDatabase(storage.database)
+        let storage = StorageService(databasePath: Self.makeSharedInMemoryDatabasePath())
+        try await storage.open()
+        let search = SearchEngineImpl(dbPath: storage.databaseFilePath)
+        try await search.open()
 
         // 插入数据
         for i in 0..<10 {
@@ -133,12 +142,13 @@ final class ResourceCleanupTests: XCTestCase {
         XCTAssertGreaterThan(result1.total, 0, "Should find items")
 
         // 失效缓存
-        search.invalidateCache()
+        await search.invalidateCache()
 
         // 再次搜索应该仍然工作
         let result2 = try await search.search(request: request)
         XCTAssertEqual(result1.total, result2.total, "Results should be consistent after cache invalidation")
 
+        await search.close()
         storage.close()
     }
 
@@ -146,7 +156,7 @@ final class ResourceCleanupTests: XCTestCase {
 
     /// 测试事件流在服务停止后正确关闭
     func testEventStreamCleanup() async throws {
-        let service = RealClipboardService(databasePath: ":memory:")
+        let service = RealClipboardService(databasePath: Self.makeSharedInMemoryDatabasePath())
 
         // 启动服务
         try await service.start()
@@ -176,6 +186,10 @@ final class ResourceCleanupTests: XCTestCase {
         let _ = await eventTask.value
         // 如果能到这里，说明事件流正确关闭了
         XCTAssertTrue(true, "Event stream should close properly")
+    }
+
+    private static func makeSharedInMemoryDatabasePath() -> String {
+        "file:scopy_test_\(UUID().uuidString)?mode=memory&cache=shared"
     }
 
     // MARK: - Task Cancellation Tests

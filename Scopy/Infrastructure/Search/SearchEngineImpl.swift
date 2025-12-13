@@ -1,0 +1,1063 @@
+import Foundation
+
+actor SearchEngineImpl {
+    // MARK: - Types
+
+    enum SearchError: Error, LocalizedError {
+        case databaseNotOpen
+        case invalidQuery(String)
+        case searchFailed(String)
+        case timeout
+
+        var errorDescription: String? {
+            switch self {
+            case .databaseNotOpen: return "Database is not open"
+            case .invalidQuery(let msg): return "Invalid query: \(msg)"
+            case .searchFailed(let msg): return "Search failed: \(msg)"
+            case .timeout: return "Search timed out"
+            }
+        }
+    }
+
+    struct SearchResult: Sendable {
+        let items: [ClipboardStoredItem]
+        let total: Int
+        let hasMore: Bool
+        let searchTimeMs: Double
+    }
+
+    private struct IndexedItem {
+        let id: UUID
+        let type: ClipboardItemType
+        let contentHash: String
+        let plainTextLower: String
+        let plainTextLowerIsASCII: Bool
+        let appBundleID: String?
+        let createdAt: Date
+        var lastUsedAt: Date
+        var useCount: Int
+        var isPinned: Bool
+        let sizeBytes: Int
+        let storageRef: String?
+
+        init(from item: ClipboardStoredItem) {
+            self.id = item.id
+            self.type = item.type
+            self.contentHash = item.contentHash
+            let lower = item.plainText.lowercased()
+            self.plainTextLower = lower
+            self.plainTextLowerIsASCII = lower.canBeConverted(to: .ascii)
+            self.appBundleID = item.appBundleID
+            self.createdAt = item.createdAt
+            self.lastUsedAt = item.lastUsedAt
+            self.useCount = item.useCount
+            self.isPinned = item.isPinned
+            self.sizeBytes = item.sizeBytes
+            self.storageRef = item.storageRef
+        }
+    }
+
+    private struct FullFuzzyIndex {
+        var items: [IndexedItem?]
+        var idToSlot: [UUID: Int]
+        var charPostings: [Character: [Int]]
+    }
+
+    private struct ScoredIndexedItem {
+        let item: IndexedItem
+        let score: Int
+    }
+
+    private struct BinaryHeap<Element> {
+        private(set) var elements: [Element] = []
+        private let areSorted: (Element, Element) -> Bool
+
+        init(areSorted: @escaping (Element, Element) -> Bool) {
+            self.areSorted = areSorted
+        }
+
+        var count: Int { elements.count }
+        var peek: Element? { elements.first }
+
+        mutating func reserveCapacity(_ n: Int) {
+            elements.reserveCapacity(n)
+        }
+
+        mutating func insert(_ value: Element) {
+            elements.append(value)
+            siftUp(from: elements.count - 1)
+        }
+
+        mutating func replaceRoot(with value: Element) {
+            guard !elements.isEmpty else {
+                elements = [value]
+                return
+            }
+            elements[0] = value
+            siftDown(from: 0)
+        }
+
+        private mutating func siftUp(from index: Int) {
+            var child = index
+            var parent = (child - 1) / 2
+            while child > 0 && areSorted(elements[child], elements[parent]) {
+                elements.swapAt(child, parent)
+                child = parent
+                parent = (child - 1) / 2
+            }
+        }
+
+        private mutating func siftDown(from index: Int) {
+            var parent = index
+            while true {
+                let left = parent * 2 + 1
+                let right = left + 1
+                var candidate = parent
+
+                if left < elements.count && areSorted(elements[left], elements[candidate]) {
+                    candidate = left
+                }
+                if right < elements.count && areSorted(elements[right], elements[candidate]) {
+                    candidate = right
+                }
+
+                if candidate == parent { return }
+                elements.swapAt(parent, candidate)
+                parent = candidate
+            }
+        }
+    }
+
+    // MARK: - Properties
+
+    private let dbPath: String
+    private var connection: SQLiteConnection?
+
+    private var recentItemsCache: [ClipboardStoredItem] = []
+    private var cacheTimestamp: Date = .distantPast
+    private let cacheDuration: TimeInterval = 30.0
+    private let shortQueryCacheSize = 2000
+
+    private var fullIndex: FullFuzzyIndex?
+    private var fullIndexStale = true
+
+    private let searchTimeout: TimeInterval = 5.0
+    private let initialIndexBuildTimeout: TimeInterval = 30.0
+
+    // MARK: - Initialization
+
+    init(dbPath: String) {
+        self.dbPath = dbPath
+    }
+
+    // MARK: - Lifecycle
+
+    func open() throws {
+        try openIfNeeded()
+    }
+
+    func close() {
+        connection?.close()
+        connection = nil
+    }
+
+    // MARK: - Cache / Index Updates
+
+    func invalidateCache() {
+        recentItemsCache = []
+        cacheTimestamp = .distantPast
+
+        fullIndex = nil
+        fullIndexStale = true
+    }
+
+    func handleUpsertedItem(_ item: ClipboardStoredItem) {
+        recentItemsCache = []
+        cacheTimestamp = .distantPast
+
+        guard var index = fullIndex, !fullIndexStale else { return }
+        upsertItemIntoIndex(item, index: &index)
+        fullIndex = index
+    }
+
+    func handlePinnedChange(id: UUID, pinned: Bool) {
+        guard var index = fullIndex,
+              !fullIndexStale,
+              let slot = index.idToSlot[id],
+              slot < index.items.count,
+              let existing = index.items[slot] else {
+            return
+        }
+
+        var updated = existing
+        updated.isPinned = pinned
+        index.items[slot] = updated
+        fullIndex = index
+    }
+
+    func handleDeletion(id: UUID) {
+        if var index = fullIndex,
+           !fullIndexStale,
+           let slot = index.idToSlot[id],
+           slot < index.items.count {
+            index.items[slot] = nil
+            index.idToSlot.removeValue(forKey: id)
+            fullIndex = index
+        }
+
+        recentItemsCache = []
+        cacheTimestamp = .distantPast
+    }
+
+    func handleClearAll() {
+        invalidateCache()
+    }
+
+    // MARK: - Search API
+
+    func search(request: SearchRequest) async throws -> SearchResult {
+        let startTime = CFAbsoluteTimeGetCurrent()
+
+        let timeout: TimeInterval
+        switch request.mode {
+        case .fuzzy, .fuzzyPlus:
+            timeout = (fullIndex == nil || fullIndexStale) ? initialIndexBuildTimeout : searchTimeout
+        case .exact, .regex:
+            timeout = searchTimeout
+        }
+
+        let result: SearchResult = try await withTimeout(timeout: timeout) {
+            try await self.searchInternal(request: request)
+        }
+
+        let elapsedMs = (CFAbsoluteTimeGetCurrent() - startTime) * 1000
+        return SearchResult(
+            items: result.items,
+            total: result.total,
+            hasMore: result.hasMore,
+            searchTimeMs: elapsedMs
+        )
+    }
+
+    // MARK: - Search Internals
+
+    private func searchInternal(request: SearchRequest) async throws -> SearchResult {
+        try openIfNeeded()
+        try Task.checkCancellation()
+
+        switch request.mode {
+        case .exact:
+            return try await searchExact(request: request)
+        case .fuzzy:
+            return try await searchFuzzy(request: request)
+        case .fuzzyPlus:
+            return try await searchFuzzyPlus(request: request)
+        case .regex:
+            return try await searchRegex(request: request)
+        }
+    }
+
+    private func searchExact(request: SearchRequest) async throws -> SearchResult {
+        if request.query.isEmpty {
+            return try searchAllWithFilters(request: request)
+        }
+
+        if request.query.count <= 2 {
+            return try searchInCache(request: request) { item in
+                item.plainText.localizedCaseInsensitiveContains(request.query)
+            }
+        }
+
+        let query = escapeFTSQuery(request.query)
+        return try searchWithFTS(query: query, request: request)
+    }
+
+    private func searchFuzzy(request: SearchRequest) async throws -> SearchResult {
+        if request.query.isEmpty {
+            return try searchAllWithFilters(request: request)
+        }
+        return try await searchFullFuzzy(request: request, mode: .fuzzy)
+    }
+
+    private func searchFuzzyPlus(request: SearchRequest) async throws -> SearchResult {
+        if request.query.isEmpty {
+            return try searchAllWithFilters(request: request)
+        }
+        return try await searchFullFuzzy(request: request, mode: .fuzzyPlus)
+    }
+
+    private func searchRegex(request: SearchRequest) async throws -> SearchResult {
+        guard let regex = try? NSRegularExpression(pattern: request.query, options: [.caseInsensitive]) else {
+            throw SearchError.invalidQuery("Invalid regex pattern")
+        }
+
+        return try searchInCache(request: request) { item in
+            let range = NSRange(item.plainText.startIndex..., in: item.plainText)
+            return regex.firstMatch(in: item.plainText, range: range) != nil
+        }
+    }
+
+    // MARK: - FTS
+
+    private func searchWithFTS(
+        query: String,
+        request: SearchRequest
+    ) throws -> SearchResult {
+        let typeFilters = request.typeFilters.map(Array.init)
+        let page = try searchWithFTS(
+            ftsQuery: query,
+            appFilter: request.appFilter,
+            typeFilter: request.typeFilter,
+            typeFilters: typeFilters,
+            limit: request.limit,
+            offset: request.offset
+        )
+        return SearchResult(items: page.items, total: page.total, hasMore: page.hasMore, searchTimeMs: 0)
+    }
+
+    // MARK: - Cache Search
+
+    private func searchInCache(
+        request: SearchRequest,
+        filter: @escaping (ClipboardStoredItem) -> Bool
+    ) throws -> SearchResult {
+        try refreshCacheIfNeeded()
+
+        var filtered = recentItemsCache.filter(filter)
+
+        if let appFilter = request.appFilter {
+            filtered = filtered.filter { $0.appBundleID == appFilter }
+        }
+        if let typeFilters = request.typeFilters, !typeFilters.isEmpty {
+            filtered = filtered.filter { typeFilters.contains($0.type) }
+        } else if let typeFilter = request.typeFilter {
+            filtered = filtered.filter { $0.type == typeFilter }
+        }
+
+        filtered.sort {
+            if $0.isPinned != $1.isPinned {
+                return $0.isPinned && !$1.isPinned
+            }
+            return $0.lastUsedAt > $1.lastUsedAt
+        }
+
+        let totalFiltered = filtered.count
+        let start = min(request.offset, totalFiltered)
+        let end = min(request.offset + request.limit + 1, totalFiltered)
+
+        var items: [ClipboardStoredItem] = (start < end) ? Array(filtered[start..<end]) : []
+
+        let hasMore = items.count > request.limit
+        if hasMore {
+            items = Array(items.prefix(request.limit))
+        }
+
+        let total = hasMore ? -1 : request.offset + items.count
+        return SearchResult(items: items, total: total, hasMore: hasMore, searchTimeMs: 0)
+    }
+
+    private func refreshCacheIfNeeded() throws {
+        let now = Date()
+        let needsRefresh = recentItemsCache.isEmpty || now.timeIntervalSince(cacheTimestamp) > cacheDuration
+        guard needsRefresh else { return }
+
+        let items = try fetchRecentSummaries(limit: shortQueryCacheSize, offset: 0)
+        recentItemsCache = items
+        cacheTimestamp = now
+    }
+
+    // MARK: - Full-History Fuzzy Search
+
+    private func searchFullFuzzy(request: SearchRequest, mode: SearchMode) async throws -> SearchResult {
+        let trimmedQuery = request.query.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmedQuery.isEmpty {
+            return try searchAllWithFilters(request: request)
+        }
+
+        let normalizedRequest = SearchRequest(
+            query: trimmedQuery,
+            mode: mode,
+            appFilter: request.appFilter,
+            typeFilter: request.typeFilter,
+            typeFilters: request.typeFilters,
+            forceFullFuzzy: request.forceFullFuzzy,
+            limit: request.limit,
+            offset: request.offset
+        )
+
+        let index = try getOrBuildFullIndex()
+        return try searchInFullIndex(index: index, request: normalizedRequest, mode: mode)
+    }
+
+    private func getOrBuildFullIndex() throws -> FullFuzzyIndex {
+        if let index = fullIndex, !fullIndexStale {
+            return index
+        }
+
+        let newIndex = try buildFullIndex()
+        fullIndex = newIndex
+        fullIndexStale = false
+        return newIndex
+    }
+
+    private func buildFullIndex() throws -> FullFuzzyIndex {
+        let storedItems = try fetchAllSummaries()
+
+        var items: [IndexedItem?] = []
+        items.reserveCapacity(storedItems.count)
+
+        var idToSlot: [UUID: Int] = [:]
+        idToSlot.reserveCapacity(storedItems.count)
+
+        var charPostings: [Character: [Int]] = [:]
+
+        for (idx, stored) in storedItems.enumerated() {
+            if idx % 512 == 0 {
+                try Task.checkCancellation()
+            }
+
+            let indexed = IndexedItem(from: stored)
+            let slot = items.count
+            items.append(indexed)
+            idToSlot[indexed.id] = slot
+
+            for ch in uniqueNonWhitespaceCharacters(indexed.plainTextLower) {
+                charPostings[ch, default: []].append(slot)
+            }
+        }
+
+        return FullFuzzyIndex(items: items, idToSlot: idToSlot, charPostings: charPostings)
+    }
+
+    private func searchInFullIndex(index: FullFuzzyIndex, request: SearchRequest, mode: SearchMode) throws -> SearchResult {
+        let queryLower = request.query.lowercased()
+        let queryChars = uniqueNonWhitespaceCharacters(queryLower)
+
+        var candidateSlots: [Int]
+        if queryChars.isEmpty {
+            candidateSlots = Array(index.items.indices)
+        } else {
+            var lists: [[Int]] = []
+            lists.reserveCapacity(queryChars.count)
+            for ch in queryChars {
+                guard let list = index.charPostings[ch] else {
+                    return SearchResult(items: [], total: 0, hasMore: false, searchTimeMs: 0)
+                }
+                lists.append(list)
+            }
+            lists.sort { $0.count < $1.count }
+
+            var candidates = lists[0]
+            for list in lists.dropFirst() {
+                candidates = intersectSorted(candidates, list)
+                if candidates.isEmpty { break }
+            }
+            candidateSlots = candidates
+        }
+
+        let queryLowerIsASCII = queryLower.canBeConverted(to: .ascii)
+        let plusWords: [(word: String, isASCII: Bool)]
+        if mode == .fuzzyPlus {
+            plusWords = queryLower
+                .split(separator: " ")
+                .map(String.init)
+                .filter { !$0.isEmpty }
+                .map { (word: $0, isASCII: $0.canBeConverted(to: .ascii)) }
+        } else {
+            plusWords = []
+        }
+
+        var totalIsUnknown = false
+        if (mode == .fuzzy || mode == .fuzzyPlus),
+           !request.forceFullFuzzy,
+           request.offset == 0,
+           queryLower.count >= 3,
+           queryLowerIsASCII,
+           !queryLower.contains(" "),
+           candidateSlots.count >= 20_000 {
+            let desiredTopCount = max(0, request.offset + request.limit + 1)
+            let prefilterLimit = min(20_000, max(5_000, desiredTopCount * 40))
+            if let ftsSlots = try? ftsPrefilterSlots(index: index, queryLower: queryLower, limit: prefilterLimit),
+               !ftsSlots.isEmpty {
+                let pinnedSlots = candidateSlots.filter { slot in
+                    guard slot < index.items.count, let item = index.items[slot] else { return false }
+                    return item.isPinned
+                }
+                var merged = Set(ftsSlots)
+                for s in pinnedSlots { merged.insert(s) }
+                candidateSlots = Array(merged)
+                totalIsUnknown = true
+            }
+        }
+
+        let desiredTopCount = max(0, request.offset + request.limit + 1)
+        var topHeap = BinaryHeap<ScoredIndexedItem>(areSorted: isWorse)
+        topHeap.reserveCapacity(desiredTopCount)
+
+        var totalMatches = 0
+
+        for (i, slot) in candidateSlots.enumerated() {
+            if i % 1024 == 0 {
+                try Task.checkCancellation()
+            }
+
+            guard slot < index.items.count, let item = index.items[slot] else { continue }
+
+            if let appFilter = request.appFilter, item.appBundleID != appFilter { continue }
+            if let typeFilters = request.typeFilters, !typeFilters.isEmpty {
+                if !typeFilters.contains(item.type) { continue }
+            } else if let typeFilter = request.typeFilter, item.type != typeFilter {
+                continue
+            }
+
+            let score: Int?
+            switch mode {
+            case .fuzzy:
+                score = fuzzyMatchScore(
+                    textLower: item.plainTextLower,
+                    textLowerIsASCII: item.plainTextLowerIsASCII,
+                    queryLower: queryLower,
+                    queryLowerIsASCII: queryLowerIsASCII
+                )
+            case .fuzzyPlus:
+                var totalScore = 0
+                var ok = true
+                for wordInfo in plusWords {
+                    if wordInfo.isASCII, wordInfo.word.count >= 3 {
+                        guard let range = item.plainTextLower.range(of: wordInfo.word) else {
+                            ok = false
+                            break
+                        }
+                        let pos = range.lowerBound.utf16Offset(in: item.plainTextLower)
+                        let m = wordInfo.word.utf16.count
+                        totalScore += m * 10 - (m - 1) - pos
+                        continue
+                    }
+
+                    guard let s = fuzzyMatchScore(
+                        textLower: item.plainTextLower,
+                        textLowerIsASCII: item.plainTextLowerIsASCII,
+                        queryLower: wordInfo.word,
+                        queryLowerIsASCII: wordInfo.isASCII
+                    ) else {
+                        ok = false
+                        break
+                    }
+                    totalScore += s
+                }
+                score = ok ? totalScore : nil
+            default:
+                score = nil
+            }
+
+            guard let score else { continue }
+            totalMatches += 1
+
+            guard desiredTopCount > 0 else { continue }
+            let scoredItem = ScoredIndexedItem(item: item, score: score)
+
+            if topHeap.count < desiredTopCount {
+                topHeap.insert(scoredItem)
+            } else if let worst = topHeap.peek, isBetter(scoredItem, than: worst) {
+                topHeap.replaceRoot(with: scoredItem)
+            }
+        }
+
+        var topItems = topHeap.elements
+        topItems.sort { isBetter($0, than: $1) }
+
+        let start = min(request.offset, topItems.count)
+        let end = min(start + request.limit, topItems.count)
+        let page: [ScoredIndexedItem] = (start < end) ? Array(topItems[start..<end]) : []
+
+        let hasMore = totalIsUnknown ? (totalMatches >= request.limit) : (totalMatches > request.offset + request.limit)
+        let total = totalIsUnknown ? -1 : totalMatches
+
+        let pageIDs = page.map { $0.item.id }
+        let resultItems = try fetchItemsByIDs(ids: pageIDs)
+        return SearchResult(items: resultItems, total: total, hasMore: hasMore, searchTimeMs: 0)
+    }
+
+    private func ftsPrefilterSlots(index: FullFuzzyIndex, queryLower: String, limit: Int) throws -> [Int] {
+        let ftsQuery = escapeFTSQuery(queryLower)
+        let ids = try ftsPrefilterIDs(ftsQuery: ftsQuery, limit: limit)
+        return ids.compactMap { index.idToSlot[$0] }
+    }
+
+    private func isBetter(_ lhs: ScoredIndexedItem, than rhs: ScoredIndexedItem) -> Bool {
+        if lhs.item.isPinned != rhs.item.isPinned {
+            return lhs.item.isPinned && !rhs.item.isPinned
+        }
+        if lhs.score != rhs.score {
+            return lhs.score > rhs.score
+        }
+        return lhs.item.lastUsedAt > rhs.item.lastUsedAt
+    }
+
+    private func isWorse(_ lhs: ScoredIndexedItem, than rhs: ScoredIndexedItem) -> Bool {
+        isBetter(rhs, than: lhs)
+    }
+
+    private func intersectSorted(_ a: [Int], _ b: [Int]) -> [Int] {
+        var i = 0
+        var j = 0
+        var result: [Int] = []
+        result.reserveCapacity(min(a.count, b.count))
+
+        while i < a.count && j < b.count {
+            let va = a[i]
+            let vb = b[j]
+            if va == vb {
+                result.append(va)
+                i += 1
+                j += 1
+            } else if va < vb {
+                i += 1
+            } else {
+                j += 1
+            }
+        }
+
+        return result
+    }
+
+    private func upsertItemIntoIndex(_ item: ClipboardStoredItem, index: inout FullFuzzyIndex) {
+        if let slot = index.idToSlot[item.id], slot < index.items.count {
+            var existing = index.items[slot]
+            let indexed = IndexedItem(from: item)
+            if existing != nil {
+                index.items[slot] = indexed
+                return
+            }
+        }
+
+        let indexed = IndexedItem(from: item)
+        let slot = index.items.count
+        index.items.append(indexed)
+        index.idToSlot[indexed.id] = slot
+
+        for ch in uniqueNonWhitespaceCharacters(indexed.plainTextLower) {
+            index.charPostings[ch, default: []].append(slot)
+        }
+    }
+
+    private func uniqueNonWhitespaceCharacters(_ text: String) -> [Character] {
+        var seen = Set<Character>()
+        var result: [Character] = []
+        seen.reserveCapacity(min(text.count, 64))
+        result.reserveCapacity(min(text.count, 64))
+
+        for ch in text {
+            if ch.isWhitespace { continue }
+            if seen.insert(ch).inserted {
+                result.append(ch)
+            }
+        }
+        return result
+    }
+
+    private func fuzzyMatchScore(
+        textLower: String,
+        textLowerIsASCII: Bool,
+        queryLower: String,
+        queryLowerIsASCII: Bool
+    ) -> Int? {
+        guard !queryLower.isEmpty else { return 0 }
+
+        if queryLower.count <= 2 {
+            guard let range = textLower.range(of: queryLower) else { return nil }
+            let pos = range.lowerBound.utf16Offset(in: textLower)
+            let m = queryLower.utf16.count
+            return m * 10 - (m - 1) - pos
+        }
+
+        if queryLowerIsASCII,
+           textLowerIsASCII,
+           let range = textLower.range(of: queryLower) {
+            let pos = range.lowerBound.utf16Offset(in: textLower)
+            let m = queryLower.utf16.count
+            return m * 10 - (m - 1) - pos
+        }
+
+        var textIndex = textLower.startIndex
+        var firstPos: Int?
+        var lastPos = 0
+        var gapPenalty = 0
+        var matchedCount = 0
+
+        for ch in queryLower {
+            guard let found = textLower[textIndex...].firstIndex(of: ch) else { return nil }
+            let pos = textLower.distance(from: textLower.startIndex, to: found)
+            if firstPos == nil { firstPos = pos }
+            gapPenalty += textLower.distance(from: textIndex, to: found)
+            matchedCount += 1
+            textIndex = textLower.index(after: found)
+            lastPos = pos
+        }
+
+        let span = firstPos.map { lastPos - $0 } ?? 0
+        return matchedCount * 10 - span - gapPenalty
+    }
+
+    private func escapeFTSQuery(_ query: String) -> String {
+        var escaped = query
+            .replacingOccurrences(of: "\"", with: "\"\"")
+            .replacingOccurrences(of: "*", with: "")
+            .replacingOccurrences(of: "-", with: " ")
+
+        escaped = "\"\(escaped)\""
+        return escaped
+    }
+
+    // MARK: - Timeout
+
+    private func withTimeout<T>(
+        timeout: TimeInterval,
+        _ work: @escaping @Sendable () async throws -> T
+    ) async throws -> T {
+        try await withThrowingTaskGroup(of: T.self) { group in
+            group.addTask {
+                try await work()
+            }
+            group.addTask {
+                try await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+                throw SearchError.timeout
+            }
+
+            do {
+                guard let value = try await group.next() else {
+                    group.cancelAll()
+                    throw SearchError.timeout
+                }
+                group.cancelAll()
+                return value
+            } catch {
+                group.cancelAll()
+                throw error
+            }
+        }
+    }
+
+    // MARK: - DB Access
+
+    private func openIfNeeded() throws {
+        guard connection == nil else { return }
+
+        let flags = SQLiteConnection.openFlags(for: dbPath, readOnly: true)
+        let conn: SQLiteConnection
+        do {
+            conn = try SQLiteConnection(path: dbPath, flags: flags)
+        } catch {
+            throw SearchError.searchFailed(error.localizedDescription)
+        }
+
+        do {
+            try conn.execute("PRAGMA query_only = 1")
+            try conn.execute("PRAGMA busy_timeout = 500")
+            try conn.execute("PRAGMA cache_size = -64000")
+            try conn.execute("PRAGMA temp_store = MEMORY")
+            try verifySchema(conn)
+        } catch {
+            conn.close()
+            throw SearchError.searchFailed(error.localizedDescription)
+        }
+
+        connection = conn
+    }
+
+    private func verifySchema(_ connection: SQLiteConnection) throws {
+        let mainStmt = try connection.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='clipboard_items'")
+        guard try mainStmt.step() else {
+            throw SearchError.searchFailed("Main table 'clipboard_items' not found")
+        }
+
+        let ftsStmt = try connection.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='clipboard_fts'")
+        guard try ftsStmt.step() else {
+            throw SearchError.searchFailed("FTS table 'clipboard_fts' not found")
+        }
+    }
+
+    private func prepare(_ sql: String) throws -> SQLiteStatement {
+        guard let connection else { throw SearchError.databaseNotOpen }
+        do {
+            return try connection.prepare(sql)
+        } catch {
+            throw SearchError.searchFailed(error.localizedDescription)
+        }
+    }
+
+    private func fetchRecentSummaries(limit: Int, offset: Int) throws -> [ClipboardStoredItem] {
+        let sql = """
+            SELECT id, type, content_hash, plain_text, app_bundle_id, created_at, last_used_at,
+                   use_count, is_pinned, size_bytes, storage_ref
+            FROM clipboard_items
+            ORDER BY is_pinned DESC, last_used_at DESC
+            LIMIT ? OFFSET ?
+        """
+        let stmt = try prepare(sql)
+        try stmt.bindInt(limit, at: 1)
+        try stmt.bindInt(offset, at: 2)
+
+        var items: [ClipboardStoredItem] = []
+        items.reserveCapacity(limit)
+        var row = 0
+        while try stmt.step() {
+            if row % 512 == 0 { try Task.checkCancellation() }
+            row += 1
+            items.append(try parseStoredItemSummary(from: stmt))
+        }
+        return items
+    }
+
+    private func fetchAllSummaries() throws -> [ClipboardStoredItem] {
+        let sql = """
+            SELECT id, type, content_hash, plain_text, app_bundle_id, created_at, last_used_at,
+                   use_count, is_pinned, size_bytes, storage_ref
+            FROM clipboard_items
+        """
+        let stmt = try prepare(sql)
+
+        var items: [ClipboardStoredItem] = []
+        var row = 0
+        while try stmt.step() {
+            if row % 512 == 0 { try Task.checkCancellation() }
+            row += 1
+            items.append(try parseStoredItemSummary(from: stmt))
+        }
+        return items
+    }
+
+    private func fetchItemsByIDs(ids: [UUID]) throws -> [ClipboardStoredItem] {
+        guard !ids.isEmpty else { return [] }
+
+        let placeholders = ids.map { _ in "?" }.joined(separator: ",")
+        let sql = """
+            SELECT id, type, content_hash, plain_text, app_bundle_id, created_at, last_used_at,
+                   use_count, is_pinned, size_bytes, storage_ref
+            FROM clipboard_items
+            WHERE id IN (\(placeholders))
+        """
+        let stmt = try prepare(sql)
+
+        for (index, id) in ids.enumerated() {
+            try stmt.bindText(id.uuidString, at: Int32(index + 1))
+        }
+
+        var fetched: [UUID: ClipboardStoredItem] = [:]
+        fetched.reserveCapacity(ids.count)
+        while try stmt.step() {
+            let item = try parseStoredItemSummary(from: stmt)
+            fetched[item.id] = item
+        }
+
+        return ids.compactMap { fetched[$0] }
+    }
+
+    private func searchAllWithFilters(request: SearchRequest) throws -> SearchResult {
+        let typeFilters = request.typeFilters.map(Array.init)
+        let page = try searchAllWithFilters(
+            appFilter: request.appFilter,
+            typeFilter: request.typeFilter,
+            typeFilters: typeFilters,
+            limit: request.limit,
+            offset: request.offset
+        )
+        return SearchResult(items: page.items, total: page.total, hasMore: page.hasMore, searchTimeMs: 0)
+    }
+
+    private func searchAllWithFilters(
+        appFilter: String?,
+        typeFilter: ClipboardItemType?,
+        typeFilters: [ClipboardItemType]?,
+        limit: Int,
+        offset: Int
+    ) throws -> (items: [ClipboardStoredItem], total: Int, hasMore: Bool) {
+        var sql = """
+            SELECT id, type, content_hash, plain_text, app_bundle_id, created_at, last_used_at,
+                   use_count, is_pinned, size_bytes, storage_ref
+            FROM clipboard_items
+            WHERE 1 = 1
+        """
+        var params: [String] = []
+
+        if let appFilter {
+            sql += " AND app_bundle_id = ?"
+            params.append(appFilter)
+        }
+
+        if let typeFilters, !typeFilters.isEmpty {
+            let placeholders = typeFilters.map { _ in "?" }.joined(separator: ",")
+            sql += " AND type IN (\(placeholders))"
+            params.append(contentsOf: typeFilters.map(\.rawValue))
+        } else if let typeFilter {
+            sql += " AND type = ?"
+            params.append(typeFilter.rawValue)
+        }
+
+        sql += " ORDER BY is_pinned DESC, last_used_at DESC"
+        sql += " LIMIT ? OFFSET ?"
+
+        let stmt = try prepare(sql)
+        var bindIndex: Int32 = 1
+        for param in params {
+            try stmt.bindText(param, at: bindIndex)
+            bindIndex += 1
+        }
+        try stmt.bindInt(limit + 1, at: bindIndex)
+        try stmt.bindInt(offset, at: bindIndex + 1)
+
+        var items: [ClipboardStoredItem] = []
+        items.reserveCapacity(limit + 1)
+        while try stmt.step() {
+            items.append(try parseStoredItemSummary(from: stmt))
+        }
+
+        let hasMore = items.count > limit
+        if hasMore {
+            items = Array(items.prefix(limit))
+        }
+
+        let total = hasMore ? -1 : offset + items.count
+        return (items, total, hasMore)
+    }
+
+    private func searchWithFTS(
+        ftsQuery: String,
+        appFilter: String?,
+        typeFilter: ClipboardItemType?,
+        typeFilters: [ClipboardItemType]?,
+        limit: Int,
+        offset: Int
+    ) throws -> (items: [ClipboardStoredItem], total: Int, hasMore: Bool) {
+        let ftsSQL = """
+            SELECT rowid FROM clipboard_fts
+            WHERE clipboard_fts MATCH ?
+            ORDER BY bm25(clipboard_fts)
+            LIMIT ? OFFSET ?
+        """
+        let ftsStmt = try prepare(ftsSQL)
+        try ftsStmt.bindText(ftsQuery, at: 1)
+        try ftsStmt.bindInt(limit + 1, at: 2)
+        try ftsStmt.bindInt(offset, at: 3)
+
+        var rowids: [Int64] = []
+        rowids.reserveCapacity(limit + 1)
+        while try ftsStmt.step() {
+            rowids.append(ftsStmt.columnInt64(0))
+        }
+
+        let hasMore = rowids.count > limit
+        if hasMore {
+            rowids.removeLast()
+        }
+
+        if rowids.isEmpty {
+            return ([], 0, false)
+        }
+
+        let placeholders = rowids.map { _ in "?" }.joined(separator: ",")
+        var mainSQL = """
+            SELECT id, type, content_hash, plain_text, app_bundle_id, created_at, last_used_at,
+                   use_count, is_pinned, size_bytes, storage_ref
+            FROM clipboard_items
+            WHERE rowid IN (\(placeholders))
+        """
+
+        var filterParams: [String] = []
+        if let appFilter {
+            mainSQL += " AND app_bundle_id = ?"
+            filterParams.append(appFilter)
+        }
+
+        if let typeFilters, !typeFilters.isEmpty {
+            let placeholders = typeFilters.map { _ in "?" }.joined(separator: ",")
+            mainSQL += " AND type IN (\(placeholders))"
+            filterParams.append(contentsOf: typeFilters.map(\.rawValue))
+        } else if let typeFilter {
+            mainSQL += " AND type = ?"
+            filterParams.append(typeFilter.rawValue)
+        }
+
+        let orderCases = rowids.enumerated().map { "WHEN rowid = \($0.element) THEN \($0.offset)" }.joined(separator: " ")
+        mainSQL += " ORDER BY is_pinned DESC, CASE \(orderCases) END"
+
+        let mainStmt = try prepare(mainSQL)
+
+        var bindIndex: Int32 = 1
+        for rowid in rowids {
+            try mainStmt.bindInt64(rowid, at: bindIndex)
+            bindIndex += 1
+        }
+
+        for param in filterParams {
+            try mainStmt.bindText(param, at: bindIndex)
+            bindIndex += 1
+        }
+
+        var items: [ClipboardStoredItem] = []
+        items.reserveCapacity(rowids.count)
+        while try mainStmt.step() {
+            items.append(try parseStoredItemSummary(from: mainStmt))
+        }
+
+        let total = hasMore ? -1 : offset + items.count
+        return (items, total, hasMore)
+    }
+
+    private func ftsPrefilterIDs(ftsQuery: String, limit: Int) throws -> [UUID] {
+        let sql = """
+            SELECT clipboard_items.id
+            FROM clipboard_fts
+            JOIN clipboard_items ON clipboard_items.rowid = clipboard_fts.rowid
+            WHERE clipboard_fts MATCH ?
+            ORDER BY bm25(clipboard_fts)
+            LIMIT ?
+        """
+        let stmt = try prepare(sql)
+        try stmt.bindText(ftsQuery, at: 1)
+        try stmt.bindInt(limit, at: 2)
+
+        var ids: [UUID] = []
+        ids.reserveCapacity(limit)
+        while try stmt.step() {
+            guard let idString = stmt.columnText(0),
+                  let id = UUID(uuidString: idString) else { continue }
+            ids.append(id)
+        }
+        return ids
+    }
+
+    private func parseStoredItemSummary(from stmt: SQLiteStatement) throws -> ClipboardStoredItem {
+        guard let idString = stmt.columnText(0),
+              let id = UUID(uuidString: idString),
+              let typeString = stmt.columnText(1),
+              let type = ClipboardItemType(rawValue: typeString),
+              let contentHash = stmt.columnText(2) else {
+            throw SearchError.searchFailed("Failed to parse item")
+        }
+
+        let plainText = stmt.columnText(3) ?? ""
+        let appBundleID = stmt.columnText(4)
+        let createdAt = Date(timeIntervalSince1970: stmt.columnDouble(5))
+        let lastUsedAt = Date(timeIntervalSince1970: stmt.columnDouble(6))
+        let useCount = stmt.columnInt(7)
+        let isPinned = stmt.columnInt(8) != 0
+        let sizeBytes = stmt.columnInt(9)
+        let storageRef = stmt.columnText(10)
+
+        return ClipboardStoredItem(
+            id: id,
+            type: type,
+            contentHash: contentHash,
+            plainText: plainText,
+            appBundleID: appBundleID,
+            createdAt: createdAt,
+            lastUsedAt: lastUsedAt,
+            useCount: useCount,
+            isPinned: isPinned,
+            sizeBytes: sizeBytes,
+            storageRef: storageRef,
+            rawData: nil
+        )
+    }
+}

@@ -6,16 +6,17 @@ import XCTest
 @MainActor
 final class ConcurrencyTests: XCTestCase {
     var storage: StorageService!
-    var search: SearchService!
+    var search: SearchEngineImpl!
 
     override func setUp() async throws {
-        storage = StorageService(databasePath: ":memory:")
-        try storage.open()
-        search = SearchService(storage: storage)
-        search.setDatabase(storage.database)
+        storage = StorageService(databasePath: Self.makeSharedInMemoryDatabasePath())
+        try await storage.open()
+        search = SearchEngineImpl(dbPath: storage.databaseFilePath)
+        try await search.open()
     }
 
     override func tearDown() async throws {
+        await search.close()
         storage.close()
         storage = nil
         search = nil
@@ -39,7 +40,7 @@ final class ConcurrencyTests: XCTestCase {
         }
 
         // 快速发起多个搜索请求
-        var tasks: [Task<SearchService.SearchResult?, Never>] = []
+        var tasks: [Task<SearchEngineImpl.SearchResult?, Never>] = []
         for i in 0..<10 {
             let task = Task {
                 let request = SearchRequest(
@@ -91,7 +92,7 @@ final class ConcurrencyTests: XCTestCase {
         }
 
         // 顺序执行多个短查询（会触发缓存刷新）
-        var results: [SearchService.SearchResult] = []
+        var results: [SearchEngineImpl.SearchResult] = []
         for i in 0..<20 {
             let request = SearchRequest(
                 query: String(i % 10), // 短查询触发缓存
@@ -180,12 +181,12 @@ final class ConcurrencyTests: XCTestCase {
         }
 
         // 数据库中只应该有一条记录
-        let item = try storage.findByHash(duplicateHash)
+        let item = try await storage.findByHash(duplicateHash)
         XCTAssertNotNil(item, "Item should exist")
         XCTAssertGreaterThanOrEqual(item!.useCount, 1, "Use count should be updated")
 
         // 验证总数
-        let count = try storage.getItemCount()
+        let count = try await storage.getItemCount()
         XCTAssertEqual(count, 1, "Should only have one item due to deduplication")
     }
 
@@ -233,7 +234,7 @@ final class ConcurrencyTests: XCTestCase {
         // 使用 TaskGroup 实现真正的并发搜索
         let queries = ["stress", "lorem", "ipsum", "dolor", "amet", "test", "item", "sit", "content", "hash"]
 
-        await withTaskGroup(of: SearchService.SearchResult?.self) { group in
+        await withTaskGroup(of: SearchEngineImpl.SearchResult?.self) { group in
             for query in queries {
                 group.addTask {
                     let request = SearchRequest(
@@ -279,10 +280,10 @@ final class ConcurrencyTests: XCTestCase {
         }
 
         let query = "consistency"
-        var results: [SearchService.SearchResult] = []
+        var results: [SearchEngineImpl.SearchResult] = []
 
         // 并发执行相同查询 5 次
-        await withTaskGroup(of: SearchService.SearchResult?.self) { group in
+        await withTaskGroup(of: SearchEngineImpl.SearchResult?.self) { group in
             for _ in 0..<5 {
                 group.addTask {
                     let request = SearchRequest(
@@ -389,7 +390,7 @@ final class ConcurrencyTests: XCTestCase {
             // 清理任务（在 MainActor 上执行）
             group.addTask { @MainActor in
                 do {
-                    try self.storage.performCleanup()
+                    try await self.storage.performCleanup()
                     return true
                 } catch {
                     return false
@@ -409,5 +410,9 @@ final class ConcurrencyTests: XCTestCase {
 
         // 两个操作都应该成功完成（或至少不崩溃）
         XCTAssertTrue(searchSucceeded || cleanupSucceeded, "At least one operation should succeed")
+    }
+
+    private static func makeSharedInMemoryDatabasePath() -> String {
+        "file:scopy_test_\(UUID().uuidString)?mode=memory&cache=shared"
     }
 }

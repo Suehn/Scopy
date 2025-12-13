@@ -7,17 +7,18 @@ import XCTest
 final class SearchServiceTests: XCTestCase {
 
     var storage: StorageService!
-    var search: SearchService!
+    var search: SearchEngineImpl!
 
     override func setUp() async throws {
         try await super.setUp()
-        storage = StorageService(databasePath: ":memory:")
-        try storage.open()
-        search = SearchService(storage: storage)
-        search.setDatabase(storage.database)
+        storage = StorageService(databasePath: Self.makeSharedInMemoryDatabasePath())
+        try await storage.open()
+        search = SearchEngineImpl(dbPath: storage.databaseFilePath)
+        try await search.open()
     }
 
     override func tearDown() async throws {
+        await search.close()
         storage.close()
         storage = nil
         search = nil
@@ -49,7 +50,7 @@ final class SearchServiceTests: XCTestCase {
     func testFuzzyPlusRequiresContiguousASCIIWords() async throws {
         _ = try await storage.upsertItem(makeContent("Here we go", type: .text))
         _ = try await storage.upsertItem(makeContent("/Users/test/WeChat Files/9d5520c5d3e1ce6da40d435f5300958f.png", type: .file))
-        search.invalidateCache()
+        await search.invalidateCache()
 
         let request = SearchRequest(query: "Here we", mode: .fuzzyPlus, limit: 50, offset: 0)
         let result = try await search.search(request: request)
@@ -135,7 +136,7 @@ final class SearchServiceTests: XCTestCase {
         _ = try await storage.upsertItem(makeContent("Safari text", app: "com.apple.Safari"))
         _ = try await storage.upsertItem(makeContent("Xcode text", app: "com.apple.dt.Xcode"))
         _ = try await storage.upsertItem(makeContent("Terminal text", app: "com.apple.Terminal"))
-        search.invalidateCache()
+        await search.invalidateCache()
 
         let request = SearchRequest(
             query: "text",
@@ -154,7 +155,7 @@ final class SearchServiceTests: XCTestCase {
         // Insert different types
         _ = try await storage.upsertItem(makeContent("Text content", type: .text))
         _ = try await storage.upsertItem(makeContent("HTML content", type: .html))
-        search.invalidateCache()
+        await search.invalidateCache()
 
         let request = SearchRequest(
             query: "content",
@@ -173,7 +174,7 @@ final class SearchServiceTests: XCTestCase {
         _ = try await storage.upsertItem(makeContent("A1", app: "com.test.one"))
         _ = try await storage.upsertItem(makeContent("A2", app: "com.test.one"))
         _ = try await storage.upsertItem(makeContent("B1", app: "com.test.two"))
-        search.invalidateCache()
+        await search.invalidateCache()
 
         let request = SearchRequest(
             query: "",
@@ -193,7 +194,7 @@ final class SearchServiceTests: XCTestCase {
         for i in 0..<60 {
             _ = try await storage.upsertItem(makeContent("Item \(i)", app: "com.test.paged"))
         }
-        search.invalidateCache()
+        await search.invalidateCache()
 
         let firstPage = try await search.search(
             request: SearchRequest(query: "", mode: .exact, appFilter: "com.test.paged", limit: 30, offset: 0)
@@ -278,7 +279,7 @@ final class SearchServiceTests: XCTestCase {
         _ = try await storage.upsertItem(makeContent("New Item 999"))
 
         // Invalidate cache
-        search.invalidateCache()
+        await search.invalidateCache()
 
         // Search again
         let result2 = try await search.search(request: request)
@@ -293,7 +294,7 @@ final class SearchServiceTests: XCTestCase {
         _ = try await storage.upsertItem(makeContent("Test with \"quotes\""))
         _ = try await storage.upsertItem(makeContent("Test with * asterisk"))
         _ = try await storage.upsertItem(makeContent("Test with - dash"))
-        search.invalidateCache()
+        await search.invalidateCache()
 
         // These should not crash
         let queries = ["\"", "*", "-", "test\"", "test*", "test-word"]
@@ -311,7 +312,7 @@ final class SearchServiceTests: XCTestCase {
         do {
             _ = try await search.search(request: request)
             XCTFail("Should have thrown for invalid regex")
-        } catch SearchService.SearchError.invalidQuery {
+        } catch SearchEngineImpl.SearchError.invalidQuery {
             // Expected
         }
     }
@@ -320,7 +321,7 @@ final class SearchServiceTests: XCTestCase {
         _ = try await storage.upsertItem(makeContent("UPPERCASE"))
         _ = try await storage.upsertItem(makeContent("lowercase"))
         _ = try await storage.upsertItem(makeContent("MixedCase"))
-        search.invalidateCache()
+        await search.invalidateCache()
 
         let request = SearchRequest(query: "case", mode: .fuzzy, limit: 50, offset: 0)
         let result = try await search.search(request: request)
@@ -331,9 +332,9 @@ final class SearchServiceTests: XCTestCase {
 
     func testFuzzyPinnedItemsRankFirst() async throws {
         let pinned = try await storage.upsertItem(makeContent("axbyc"))
-        try storage.setPin(pinned.id, pinned: true)
+        try await storage.setPin(pinned.id, pinned: true)
         _ = try await storage.upsertItem(makeContent("abc"))
-        search.invalidateCache()
+        await search.invalidateCache()
 
         let request = SearchRequest(query: "abc", mode: .fuzzy, limit: 10, offset: 0)
         let result = try await search.search(request: request)
@@ -355,7 +356,11 @@ final class SearchServiceTests: XCTestCase {
             }
             _ = try await storage.upsertItem(makeContent(text))
         }
-        search.invalidateCache()
+        await search.invalidateCache()
+    }
+
+    private static func makeSharedInMemoryDatabasePath() -> String {
+        "file:scopy_test_\(UUID().uuidString)?mode=memory&cache=shared"
     }
 
     private func makeContent(
