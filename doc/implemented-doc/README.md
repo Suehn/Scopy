@@ -8,8 +8,8 @@
 
 | 项目 | 状态 |
 |------|------|
-| **当前版本** | v0.40 |
-| **测试状态** | 单元测试通过（`make test-unit`: 53 passed, 1 skipped；`make test-perf`: 22 passed, 6 skipped；`make test-tsan`: 132 passed, 1 skipped；Strict Concurrency: 166 tests passed, 7 skipped） |
+| **当前版本** | v0.41 |
+| **测试状态** | 单元测试通过（`make test-unit`: 53 passed, 1 skipped；`make test-perf`: 22 passed, 6 skipped；`make test-tsan`: 132 passed, 1 skipped；Strict Concurrency: `make test-strict` 166 passed, 7 skipped） |
 | **构建状态** | Debug ✅ |
 | **部署位置** | /Applications/Scopy.app |
 | **最后更新** | 2025-12-13 |
@@ -24,6 +24,7 @@
 
 | 版本 | 日期 | 主要内容 | 状态 |
 |------|------|----------|------|
+| [v0.41](./v0.41.md) | 2025-12-13 | Dev/Quality：Makefile 固化 Strict Concurrency 回归门槛 | ✅ |
 | [v0.40](./v0.40.md) | 2025-12-13 | Presentation：拆分 AppState（History/Settings ViewModel）+ perf 用例稳定性 | ✅ |
 | [v0.39](./v0.39.md) | 2025-12-13 | Phase 6 收口：Strict Concurrency 回归（Swift 6）+ perf 用例稳定性 | ✅ |
 | [v0.38](./v0.38.md) | 2025-12-13 | Phase 5 收口：DTO 去 UI 派生字段 + 展示缓存统一入口 | ✅ |

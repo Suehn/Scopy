@@ -1,7 +1,7 @@
 # Scopy Makefile
 # 符合 v0.md 的构建和测试流程
 
-.PHONY: all setup build run clean xcode test test-unit test-perf test-tsan coverage benchmark test-flow test-flow-quick health-check
+.PHONY: all setup build run clean xcode test test-unit test-perf test-tsan test-strict coverage benchmark test-flow test-flow-quick health-check
 
 # 默认目标
 all: build
@@ -91,6 +91,18 @@ test-tsan: setup
 		-destination 'platform=macOS' \
 		-only-testing:ScopyTSanTests \
 		2>&1 | tee test-tsan.log
+
+# Swift 6 Strict Concurrency regression (tests target only)
+test-strict: setup
+	@echo "Running Strict Concurrency tests..."
+	xcodebuild test \
+		-project Scopy.xcodeproj \
+		-scheme Scopy \
+		-destination 'platform=macOS' \
+		-only-testing:ScopyTests \
+		SWIFT_STRICT_CONCURRENCY=complete \
+		SWIFT_TREAT_WARNINGS_AS_ERRORS=YES \
+		2>&1 | tee strict-concurrency-test.log
 
 # 运行集成测试
 test-integration: setup
@@ -197,6 +209,7 @@ help:
 	@echo "  make test-unit    - Run unit tests only"
 	@echo "  make test-perf    - Run performance tests"
 	@echo "  make test-integration - Run integration tests"
+	@echo "  make test-strict  - Run Strict Concurrency regression"
 	@echo "  make coverage     - Run tests with coverage report"
 	@echo "  make benchmark    - Run full benchmark suite"
 	@echo ""

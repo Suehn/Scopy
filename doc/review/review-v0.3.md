@@ -3,7 +3,7 @@
 > 说明：本文用于指导后续“稳定性优先”的长期重构（含 Codex 执行）。`doc/review/review-v0.3-2.md` 为历史草案/补充材料，其中关键内容已合并到本文；后续以本文为准。
 
 - 最后更新：2025-12-13
-- 代码基线：`v0.40`
+- 代码基线：`v0.41`
 - 关联文档：
   - 当前实现状态索引：`doc/implemented-doc/README.md`
   - 近期变更：`doc/implemented-doc/CHANGELOG.md`
@@ -832,7 +832,13 @@ Notes：
     - 关键修复点：UI 缓存/展示辅助 `@MainActor` 收口、HotKeyService Carbon 回调 hop 到 MainActor、tests/UI tests 的 `Sendable` 捕获修正
 
 - 待继续：
-  - （可选）将 Strict Concurrency 固化为 CI/Makefile 回归门槛
+  - Phase 7（可选）：抽成 Swift Package（强制边界）
+
+- 已完成（2025-12-13，v0.41）：
+  - （可选）将 Strict Concurrency 固化为 CI/Makefile 回归门槛：
+    - Makefile 新增 `make test-strict`：
+      - `xcodebuild test -only-testing:ScopyTests SWIFT_STRICT_CONCURRENCY=complete SWIFT_TREAT_WARNINGS_AS_ERRORS=YES`
+      - 输出写入 `strict-concurrency-test.log` 便于审计
 
 ### Phase 7（可选）：抽成 Swift Package（强制边界）
 
@@ -850,6 +856,7 @@ Notes：
 - Debug build：`./deploy.sh` 或 `make build`
 - 单测：`make test-unit`（仓库已配置）
 - Thread Sanitizer：`make test-tsan`（Hosted tests，scheme `ScopyTSan`）
+- Strict Concurrency：`make test-strict`（tests target，Swift 6）
 - 全量测试：`make test`
 - 性能测试：`make test-perf`（内部会设置 `RUN_PERF_TESTS=1`）
 - 测试流程：`make test-flow`（脚本化 kill→build→install→launch→health-check）
@@ -877,7 +884,7 @@ Notes：
 
 - Thread Sanitizer：跑 `make test-tsan`（`ScopyTests` 为独立 bundle 模式，直接开 TSan 可能触发 “loaded too late”）
 - Strict Concurrency（建议先从测试 target 开始，避免一次性引爆）：
-  - `xcodebuild test -project Scopy.xcodeproj -scheme Scopy -destination 'platform=macOS' -only-testing:ScopyTests SWIFT_STRICT_CONCURRENCY=complete SWIFT_TREAT_WARNINGS_AS_ERRORS=YES`
+  - `make test-strict`（等价命令：`xcodebuild test -only-testing:ScopyTests SWIFT_STRICT_CONCURRENCY=complete SWIFT_TREAT_WARNINGS_AS_ERRORS=YES`）
 
 ---
 

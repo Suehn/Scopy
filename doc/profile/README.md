@@ -6,6 +6,7 @@
 
 | 版本 | 日期 | 主要变化 |
 |------|------|----------|
+| [v0.41-profile.md](./v0.41-profile.md) | 2025-12-13 | Makefile 固化 Strict Concurrency 回归门槛（性能基线记录） | 
 | [v0.40-profile.md](./v0.40-profile.md) | 2025-12-13 | AppState 拆分（History/Settings ViewModel）+ Disk 25k 用例采样稳定性 | 
 | [v0.39-profile.md](./v0.39-profile.md) | 2025-12-13 | Strict Concurrency 回归 + perf 10k 采样稳定性 | 
 | [v0.38-profile.md](./v0.38-profile.md) | 2025-12-13 | DTO 去 UI 派生字段 + 展示缓存入口（基线记录） |

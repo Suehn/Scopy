@@ -7,6 +7,32 @@
 
 ---
 
+## [v0.41] - 2025-12-13
+
+### Dev/Quality：Makefile 固化 Strict Concurrency 回归门槛
+
+- **新增 `make test-strict`**：将 Strict Concurrency（tests target）回归命令固化为 Makefile target，统一以 `SWIFT_STRICT_CONCURRENCY=complete` + `SWIFT_TREAT_WARNINGS_AS_ERRORS=YES` 跑 `ScopyTests`。
+- **日志便于审计**：输出写入 `strict-concurrency-test.log`，便于 CI/本地排查隔离回归。
+
+### 修改文件
+
+- `Makefile`
+- `DEPLOYMENT.md`
+- `doc/profile/v0.41-profile.md`
+- `doc/profile/README.md`
+- `doc/implemented-doc/v0.41.md`
+- `doc/implemented-doc/README.md`
+- `doc/review/review-v0.3.md`
+
+### 测试
+
+- 单元测试：`make test-unit` **53 tests passed** (1 skipped)
+- 性能测试：`make test-perf` **22 tests passed** (6 skipped)
+- Thread Sanitizer：`make test-tsan` **132 tests passed** (1 skipped)
+- Strict Concurrency：`make test-strict` **166 tests passed** (7 skipped)
+
+---
+
 ## [v0.40] - 2025-12-13
 
 ### Presentation：拆分 AppState（History/Settings ViewModel）+ perf 用例稳定性
