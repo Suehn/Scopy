@@ -273,7 +273,7 @@ final class AppState {
         let appsToPreload = recentApps
         Task.detached(priority: .background) {
             for bundleID in appsToPreload {
-                IconCacheSync.shared.preloadIcon(bundleID: bundleID)
+                IconService.shared.preloadIcon(bundleID: bundleID)
             }
         }
     }
@@ -346,6 +346,8 @@ final class AppState {
                 items[index] = items[index].withPinned(false)
                 invalidatePinnedCache()
             }
+        case .itemsCleared:
+            await load()
         case .settingsChanged:
             // 1. 先 reload 最新设置
             await loadSettings()

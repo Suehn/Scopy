@@ -186,7 +186,7 @@ final class MockClipboardService: ClipboardServiceProtocol {
     func clearAll() async throws {
         let pinnedItems = items.filter { $0.isPinned }
         items = pinnedItems
-        eventContinuation?.yield(.settingsChanged)
+        eventContinuation?.yield(.itemsCleared(keepPinned: true))
     }
 
     func copyToClipboard(itemID: UUID) async throws {
