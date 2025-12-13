@@ -1,0 +1,67 @@
+import AppKit
+import Foundation
+
+/// Centralized app icon/name cache.
+///
+/// Note: This file lives in Infrastructure but is currently used by Presentation code.
+/// Phase 7 (Swift Package split) will enforce dependency direction.
+final class IconService {
+    static let shared = IconService()
+
+    private let iconCache: NSCache<NSString, NSImage>
+    private let nameCache: NSCache<NSString, NSString>
+
+    private init() {
+        let iconCache = NSCache<NSString, NSImage>()
+        iconCache.countLimit = 100
+        self.iconCache = iconCache
+
+        let nameCache = NSCache<NSString, NSString>()
+        nameCache.countLimit = 100
+        self.nameCache = nameCache
+    }
+
+    func cachedIcon(bundleID: String) -> NSImage? {
+        iconCache.object(forKey: bundleID as NSString)
+    }
+
+    func icon(bundleID: String) -> NSImage? {
+        if let cached = cachedIcon(bundleID: bundleID) {
+            return cached
+        }
+
+        guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) else {
+            return nil
+        }
+
+        let icon = NSWorkspace.shared.icon(forFile: url.path)
+        iconCache.setObject(icon, forKey: bundleID as NSString)
+        return icon
+    }
+
+    func preloadIcon(bundleID: String) {
+        _ = icon(bundleID: bundleID)
+    }
+
+    func appName(bundleID: String) -> String {
+        if let cached = nameCache.object(forKey: bundleID as NSString) {
+            return cached as String
+        }
+
+        let name: String
+        if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) {
+            name = url.deletingPathExtension().lastPathComponent
+        } else {
+            name = bundleID
+        }
+
+        nameCache.setObject(name as NSString, forKey: bundleID as NSString)
+        return name
+    }
+
+    func clearAll() {
+        iconCache.removeAllObjects()
+        nameCache.removeAllObjects()
+    }
+}
+
