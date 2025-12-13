@@ -15,7 +15,10 @@ final class MockClipboardService: ClipboardServiceProtocol {
         if let stream = _eventStream {
             return stream
         }
-        let stream = AsyncStream<ClipboardEvent> { continuation in
+        let stream = AsyncStream(
+            ClipboardEvent.self,
+            bufferingPolicy: .unbounded
+        ) { continuation in
             self.eventContinuation = continuation
         }
         _eventStream = stream
@@ -192,7 +195,7 @@ final class MockClipboardService: ClipboardServiceProtocol {
     func copyToClipboard(itemID: UUID) async throws {
         guard let item = items.first(where: { $0.id == itemID }) else { return }
         // 在真实实现中，这里会复制到系统剪贴板
-        print("Copied to clipboard: \(item.plainText.prefix(50))...")
+        ScopyLog.app.info("Copied to clipboard: \(String(item.plainText.prefix(50)), privacy: .public)...")
     }
 
     func updateSettings(_ newSettings: SettingsDTO) async throws {

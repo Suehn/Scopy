@@ -8,7 +8,7 @@
 
 | 项目 | 状态 |
 |------|------|
-| **当前版本** | v0.35.1 |
+| **当前版本** | v0.36 |
 | **测试状态** | 单元测试通过（`make test-unit`: 53 passed, 1 skipped；AppState: 46 passed） |
 | **构建状态** | Debug ✅ |
 | **部署位置** | /Applications/Scopy.app |
@@ -24,6 +24,7 @@
 
 | 版本 | 日期 | 主要内容 | 状态 |
 |------|------|----------|------|
+| [v0.36](./v0.36.md) | 2025-12-13 | Phase 6 收尾：日志统一 + AsyncStream buffering + 阈值集中 | ✅ |
 | [v0.35.1](./v0.35.1.md) | 2025-12-13 | 文档索引/变更/部署对齐 v0.35 | ✅ |
 | [v0.35](./v0.35.md) | 2025-12-13 | HistoryListView 拆分（List/Row/Thumbnail/Preview 分文件） | ✅ |
 | [v0.34](./v0.34.md) | 2025-12-13 | 缓存入口收口（IconService/ThumbnailCache）+ perf 用例稳定性 | ✅ |

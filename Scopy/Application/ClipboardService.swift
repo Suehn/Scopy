@@ -54,7 +54,10 @@ actor ClipboardService {
         self.settingsStore = settingsStore
 
         var continuation: AsyncStream<ClipboardEvent>.Continuation!
-        self.eventStream = AsyncStream { cont in
+        self.eventStream = AsyncStream(
+            ClipboardEvent.self,
+            bufferingPolicy: .unbounded
+        ) { cont in
             continuation = cont
         }
         self.eventContinuation = continuation
@@ -271,7 +274,7 @@ actor ClipboardService {
         do {
             try await storage.updateItem(updated)
         } catch {
-            print("Failed to update item usage stats: \(error)")
+            ScopyLog.app.warning("Failed to update item usage stats: \(error.localizedDescription, privacy: .public)")
         }
 
         await search.handleUpsertedItem(updated)
@@ -298,7 +301,9 @@ actor ClipboardService {
             do {
                 try await storage.performCleanup()
             } catch {
-                print("⚠️ ClipboardService: Cleanup failed after settings update: \(error.localizedDescription)")
+                ScopyLog.app.warning(
+                    "Cleanup failed after settings update: \(error.localizedDescription, privacy: .public)"
+                )
             }
         }
 
@@ -401,7 +406,7 @@ actor ClipboardService {
 
             scheduleCleanup(storage: storage)
         } catch {
-            print("⚠️ ClipboardService: Failed to store clipboard item: \(error.localizedDescription)")
+            ScopyLog.app.warning("Failed to store clipboard item: \(error.localizedDescription, privacy: .public)")
         }
     }
 
@@ -435,7 +440,7 @@ actor ClipboardService {
             lastLightCleanupAt = now
             if needsFull { lastFullCleanupAt = now }
         } catch {
-            print("⚠️ ClipboardService: Scheduled cleanup failed: \(error.localizedDescription)")
+            ScopyLog.app.warning("Scheduled cleanup failed: \(error.localizedDescription, privacy: .public)")
         }
     }
 
@@ -496,4 +501,3 @@ actor ClipboardService {
         }
     }
 }
-

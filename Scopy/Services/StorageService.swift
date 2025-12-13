@@ -36,7 +36,7 @@ final class StorageService {
     // MARK: - Configuration
 
     /// Threshold for external storage (v0.md: 小内容 < X KB)
-    static let externalStorageThreshold = 100 * 1024 // 100 KB
+    static let externalStorageThreshold = ScopyThresholds.externalStorageBytes
 
     /// Default cleanup settings (v0.md 2.1)
     struct CleanupSettings {
@@ -77,7 +77,7 @@ final class StorageService {
         do {
             try FileManager.default.createDirectory(at: scopyDir, withIntermediateDirectories: true)
         } catch {
-            print("⚠️ StorageService: Failed to create app directory: \(error.localizedDescription)")
+            ScopyLog.storage.warning("Failed to create app directory: \(error.localizedDescription, privacy: .public)")
         }
 
         self.dbPath = databasePath ?? scopyDir.appendingPathComponent("clipboard.db").path
@@ -87,13 +87,13 @@ final class StorageService {
         do {
             try FileManager.default.createDirectory(atPath: externalStoragePath, withIntermediateDirectories: true)
         } catch {
-            print("⚠️ StorageService: Failed to create external storage directory: \(error.localizedDescription)")
+            ScopyLog.storage.warning("Failed to create external storage directory: \(error.localizedDescription, privacy: .public)")
         }
 
         do {
             try FileManager.default.createDirectory(atPath: thumbnailCachePath, withIntermediateDirectories: true)
         } catch {
-            print("⚠️ StorageService: Failed to create thumbnail cache directory: \(error.localizedDescription)")
+            ScopyLog.storage.warning("Failed to create thumbnail cache directory: \(error.localizedDescription, privacy: .public)")
         }
 
         self.repository = SQLiteClipboardRepository(dbPath: self.dbPath)
@@ -233,7 +233,9 @@ final class StorageService {
             do {
                 try FileManager.default.removeItem(atPath: storageRef)
             } catch {
-                print("⚠️ StorageService: Failed to delete external file '\(storageRef)': \(error.localizedDescription)")
+                ScopyLog.storage.warning(
+                    "Failed to delete external file '\(storageRef, privacy: .public)': \(error.localizedDescription, privacy: .public)"
+                )
             }
         }
         try await repository.deleteItem(id: id)
@@ -248,7 +250,9 @@ final class StorageService {
             do {
                 try FileManager.default.removeItem(atPath: ref)
             } catch {
-                print("⚠️ StorageService: Failed to delete external file during clearAll: \(error.localizedDescription)")
+                ScopyLog.storage.warning(
+                    "Failed to delete external file during clearAll: \(error.localizedDescription, privacy: .public)"
+                )
             }
         }
 
@@ -574,7 +578,9 @@ final class StorageService {
                             return
                         }
                         // v0.17: 记录其他删除失败，便于追踪存储泄漏
-                        print("⚠️ StorageService: Failed to delete file '\(file)': \(error.localizedDescription)")
+                        ScopyLog.storage.warning(
+                            "Failed to delete file '\(file, privacy: .public)': \(error.localizedDescription, privacy: .public)"
+                        )
                     }
                 }
             }
@@ -679,7 +685,7 @@ final class StorageService {
             throw error
         } catch {
             // 文件属性获取失败，继续尝试读取（可能是权限问题）
-            print("⚠️ StorageService: Failed to get file attributes: \(error.localizedDescription)")
+            ScopyLog.storage.warning("Failed to get file attributes: \(error.localizedDescription, privacy: .public)")
         }
 
         do {
@@ -772,7 +778,7 @@ final class StorageService {
             try Self.writeAtomically(pngData, to: path)
             return path
         } catch {
-            print("Failed to save thumbnail: \(error)")
+            ScopyLog.storage.error("Failed to save thumbnail: \(error.localizedDescription, privacy: .public)")
             return nil
         }
     }
@@ -797,7 +803,7 @@ final class StorageService {
             return rawData
         }
 
-        print("⚠️ StorageService: Failed to get original image data for item \(item.id)")
+        ScopyLog.storage.error("Failed to get original image data for item \(item.id.uuidString, privacy: .public)")
         return nil
     }
 

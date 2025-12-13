@@ -287,8 +287,9 @@ struct PerformanceAssertions {
         }
 
         if latencyMs > target {
-            print("⚠️ Performance warning: Search latency \(latencyMs)ms exceeds target \(target)ms for \(itemCount) items")
-            print("   File: \(file), Line: \(line)")
+            ScopyLog.search.warning(
+                "Performance warning: search latency \(latencyMs, privacy: .public)ms exceeds target \(target, privacy: .public)ms for \(itemCount, privacy: .public) items (file: \(String(describing: file), privacy: .public):\(line, privacy: .public))"
+            )
         }
     }
 
@@ -298,7 +299,9 @@ struct PerformanceAssertions {
         let target = Double(limit) * 0.5 + 10 // Rough heuristic
 
         if latencyMs > target {
-            print("⚠️ Performance warning: Fetch latency \(latencyMs)ms exceeds target \(target)ms for \(limit) items")
+            ScopyLog.search.warning(
+                "Performance warning: fetch latency \(latencyMs, privacy: .public)ms exceeds target \(target, privacy: .public)ms for limit \(limit, privacy: .public) (file: \(String(describing: file), privacy: .public):\(line, privacy: .public))"
+            )
         }
     }
 }

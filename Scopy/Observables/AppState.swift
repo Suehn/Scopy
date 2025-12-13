@@ -160,13 +160,13 @@ final class AppState {
     private init(service: ClipboardServiceProtocol? = nil) {
         if let service = service {
             self.service = service
-            print("📋 Using injected Clipboard Service")
+            ScopyLog.app.info("Using injected Clipboard Service")
         } else if Self.useMockService {
             self.service = MockClipboardService()
-            print("📋 Using Mock Clipboard Service")
+            ScopyLog.app.info("Using Mock Clipboard Service")
         } else {
             self.service = RealClipboardService()
-            print("📋 Using Real Clipboard Service")
+            ScopyLog.app.info("Using Real Clipboard Service")
         }
     }
 
@@ -175,9 +175,9 @@ final class AppState {
         // 通过协议方法启动服务（RealClipboardService 会初始化数据库和监控，MockClipboardService 为空实现）
         do {
             try await service.start()
-            print("✅ Clipboard Service started")
+            ScopyLog.app.info("Clipboard Service started")
         } catch {
-            print("❌ Failed to start Clipboard Service: \(error)")
+            ScopyLog.app.error("Failed to start Clipboard Service: \(error.localizedDescription, privacy: .public)")
             // 停止失败的服务（防止资源泄漏）
             service.stop()
             // 降级到 Mock 服务并启动
@@ -185,9 +185,9 @@ final class AppState {
             service = mockService
             do {
                 try await mockService.start()
-                print("⚠️ Falling back to Mock Clipboard Service (started)")
+                ScopyLog.app.warning("Falling back to Mock Clipboard Service (started)")
             } catch {
-                print("❌ Mock service also failed to start: \(error)")
+                ScopyLog.app.error("Mock service also failed to start: \(error.localizedDescription, privacy: .public)")
             }
         }
 
@@ -241,7 +241,7 @@ final class AppState {
             settings = try await service.getSettings()
             searchMode = settings.defaultSearchMode
         } catch {
-            print("Failed to load settings: \(error)")
+            ScopyLog.app.error("Failed to load settings: \(error.localizedDescription, privacy: .public)")
             searchMode = SettingsDTO.default.defaultSearchMode  // 降级处理
         }
     }
@@ -253,7 +253,7 @@ final class AppState {
             // v0.12: 预加载应用图标，避免滚动时主线程阻塞
             preloadAppIcons()
         } catch {
-            print("Failed to load recent apps: \(error)")
+            ScopyLog.app.error("Failed to load recent apps: \(error.localizedDescription, privacy: .public)")
         }
     }
 
@@ -283,7 +283,7 @@ final class AppState {
             try await service.updateSettings(newSettings)
             settings = newSettings
         } catch {
-            print("Failed to update settings: \(error)")
+            ScopyLog.app.error("Failed to update settings: \(error.localizedDescription, privacy: .public)")
         }
     }
 
@@ -355,7 +355,7 @@ final class AppState {
             if let handler = applyHotKeyHandler {
                 handler(settings.hotkeyKeyCode, settings.hotkeyModifiers)
             } else {
-                print("⚠️ settingsChanged: applyHotKeyHandler not registered, hotkey may be out of sync")
+                ScopyLog.app.warning("settingsChanged: applyHotKeyHandler not registered, hotkey may be out of sync")
             }
             await load()
         }
@@ -408,7 +408,7 @@ final class AppState {
             await PerformanceMetrics.shared.recordLoadLatency(elapsedMs)
             performanceSummary = await PerformanceMetrics.shared.getSummary()
         } catch {
-            print("Failed to load items: \(error)")
+            ScopyLog.app.error("Failed to load items: \(error.localizedDescription, privacy: .public)")
         }
     }
 
@@ -427,7 +427,7 @@ final class AppState {
             diskSizeBytes = detailedStats.totalSizeBytes
             diskSizeCache = (diskSizeBytes, Date())
         } catch {
-            print("Failed to get disk size: \(error)")
+            ScopyLog.app.error("Failed to get disk size: \(error.localizedDescription, privacy: .public)")
         }
     }
 
@@ -518,7 +518,7 @@ final class AppState {
                 }
             } catch {
                 if !Task.isCancelled {
-                    print("Failed to load more: \(error)")
+                    ScopyLog.app.error("Failed to load more: \(error.localizedDescription, privacy: .public)")
                 }
             }
         }
@@ -622,7 +622,7 @@ final class AppState {
                             canLoadMore = refined.hasMore
                         } catch {
                             // refine 失败不影响首屏体验
-                            print("Refine search failed: \(error)")
+                            ScopyLog.app.warning("Refine search failed: \(error.localizedDescription, privacy: .public)")
                         }
                     }
                 }
@@ -632,7 +632,7 @@ final class AppState {
                 await PerformanceMetrics.shared.recordSearchLatency(elapsedMs)
                 performanceSummary = await PerformanceMetrics.shared.getSummary()
             } catch {
-                print("Search failed: \(error)")
+                ScopyLog.app.error("Search failed: \(error.localizedDescription, privacy: .public)")
             }
         }
     }
@@ -643,7 +643,7 @@ final class AppState {
             try await service.copyToClipboard(itemID: item.id)
             closePanelHandler?()
         } catch {
-            print("Copy failed: \(error)")
+            ScopyLog.app.error("Copy failed: \(error.localizedDescription, privacy: .public)")
         }
     }
 
@@ -658,7 +658,7 @@ final class AppState {
             }
             // 状态更新由 handleEvent 统一处理，避免重复刷新
         } catch {
-            print("Pin toggle failed: \(error)")
+            ScopyLog.app.error("Pin toggle failed: \(error.localizedDescription, privacy: .public)")
         }
     }
 
@@ -672,7 +672,7 @@ final class AppState {
             invalidatePinnedCache()
             // totalCount 由 handleEvent(.itemDeleted) 统一递减，避免重复
         } catch {
-            print("Delete failed: \(error)")
+            ScopyLog.app.error("Delete failed: \(error.localizedDescription, privacy: .public)")
         }
     }
 
@@ -682,7 +682,7 @@ final class AppState {
             try await service.clearAll()
             await load()
         } catch {
-            print("Clear failed: \(error)")
+            ScopyLog.app.error("Clear failed: \(error.localizedDescription, privacy: .public)")
         }
     }
 

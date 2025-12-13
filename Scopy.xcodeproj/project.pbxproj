@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		01D01DB617998D942AE071D9 /* SearchRequest.swift in Sources */ = {isa = PBXBuildFile; fileRef = 483D3ABB1204226B663D0C1B /* SearchRequest.swift */; };
+		07D656880127B43B79E62F17 /* ScopyThresholds.swift in Sources */ = {isa = PBXBuildFile; fileRef = FFBCEEF2CC2763186DE26F69 /* ScopyThresholds.swift */; };
 		08D10A5466F4C33F7B968678 /* PerformanceMetrics.swift in Sources */ = {isa = PBXBuildFile; fileRef = 08E21526EAB3F1DCCB32D679 /* PerformanceMetrics.swift */; };
 		0C968E38F7456C42503E1319 /* ScopyComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F7A2545CE101420AEDEBB8F /* ScopyComponents.swift */; };
 		0D7026D98737757506A5787B /* AppVersion.swift in Sources */ = {isa = PBXBuildFile; fileRef = 863111D7C15F2B67D831016C /* AppVersion.swift */; };
@@ -30,6 +31,7 @@
 		31EBA4BD4EA510995A68D15F /* StorageStatsDTO.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2139514699D4D8A2C7DD478C /* StorageStatsDTO.swift */; };
 		3486E074044705F30073D105 /* SearchRequest.swift in Sources */ = {isa = PBXBuildFile; fileRef = 483D3ABB1204226B663D0C1B /* SearchRequest.swift */; };
 		38ECCA70C5F3D9DA131A3AB0 /* SettingsDTO.swift in Sources */ = {isa = PBXBuildFile; fileRef = F631D8353C250ABA42C0217C /* SettingsDTO.swift */; };
+		3A539CBFC8CAD889E3D71519 /* ScopyLogger.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9DBD01273FAB041A320AC2CB /* ScopyLogger.swift */; };
 		3A8295171C39A63D594FA1B0 /* ThumbnailGenerationTracker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 86AA1CE5062ADBAB7A268400 /* ThumbnailGenerationTracker.swift */; };
 		3B8B6827525C125DFE90983A /* ClipboardStoredItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = D199003A148D69F790D5B1A2 /* ClipboardStoredItem.swift */; };
 		3B9AFBF4400247DE93225D7B /* HistoryItemView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5901BA87F11FC6F4D1E7C673 /* HistoryItemView.swift */; };
@@ -106,6 +108,7 @@
 		BCA3A9072980CA2B53CEFD0A /* ScopySize.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A71D183AE552D5A0722779D /* ScopySize.swift */; };
 		BF5E207263E1819780AFE98E /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61DF2BC8CEEFB6DBC2A87609 /* AppState.swift */; };
 		C0A51AA7E4BEC084FC3D231D /* ResourceCleanupTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E89CCE301327084364FDFDE1 /* ResourceCleanupTests.swift */; };
+		C0A5CC87E6B57D99230F58D0 /* ScopyLogger.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9DBD01273FAB041A320AC2CB /* ScopyLogger.swift */; };
 		C296E6B159C52200F4C441E3 /* ScopySpacing.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4E233FCC7701603B37B37B07 /* ScopySpacing.swift */; };
 		C6065137A6505D64CA9BDA6C /* ClipboardItemType.swift in Sources */ = {isa = PBXBuildFile; fileRef = 490E136124D2DD944CF47971 /* ClipboardItemType.swift */; };
 		C81A97FB9F42D01C3A7D4731 /* ScopyIcons.swift in Sources */ = {isa = PBXBuildFile; fileRef = FAECF70623C7580CB548B68A /* ScopyIcons.swift */; };
@@ -123,6 +126,7 @@
 		E02BBEE14B763FC2FBBF7B73 /* HotKeyService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6AC510668FC9C0ADDA64E813 /* HotKeyService.swift */; };
 		E4ABCC84D78DE586451E805D /* IntegrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F236FB16D44AFE08ACBC9C5 /* IntegrationTests.swift */; };
 		E815A5866D7A35DB66DC86BA /* SearchResultPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7F8FB2D550672091812A6E5 /* SearchResultPage.swift */; };
+		E8E21C3000349261775A69FF /* ScopyThresholds.swift in Sources */ = {isa = PBXBuildFile; fileRef = FFBCEEF2CC2763186DE26F69 /* ScopyThresholds.swift */; };
 		E936681210443F5D76C7C036 /* ClipboardServiceProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = 930C317B2BC06CB3FDB17453 /* ClipboardServiceProtocol.swift */; };
 		E9D1E5B20BF9960FB0E4957C /* StorageService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 644A49B646565DEC262174A8 /* StorageService.swift */; };
 		F053CF9B3D7C4A76CB232AFF /* ThumbnailGenerationTracker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 86AA1CE5062ADBAB7A268400 /* ThumbnailGenerationTracker.swift */; };
@@ -201,6 +205,7 @@
 		962242CA59A1F952C0D5B10A /* IconService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IconService.swift; sourceTree = "<group>"; };
 		98A81F5BEC4470C8DA1B4864 /* TestDataFactory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TestDataFactory.swift; sourceTree = "<group>"; };
 		9A71D183AE552D5A0722779D /* ScopySize.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScopySize.swift; sourceTree = "<group>"; };
+		9DBD01273FAB041A320AC2CB /* ScopyLogger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScopyLogger.swift; sourceTree = "<group>"; };
 		A37481D3662BD7A5717D1395 /* ScopyTypography.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScopyTypography.swift; sourceTree = "<group>"; };
 		ADB79901F7DEAC407EBADE89 /* PerformanceProfiler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PerformanceProfiler.swift; sourceTree = "<group>"; };
 		AEF8649A162AEF1B81D32EE6 /* ContextMenuUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContextMenuUITests.swift; sourceTree = "<group>"; };
@@ -220,6 +225,7 @@
 		F940F6182C4E298B3511A044 /* ClipboardMonitorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipboardMonitorTests.swift; sourceTree = "<group>"; };
 		FAECF70623C7580CB548B68A /* ScopyIcons.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScopyIcons.swift; sourceTree = "<group>"; };
 		FF08A6073418036ABAC09144 /* HotKeyServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HotKeyServiceTests.swift; sourceTree = "<group>"; };
+		FFBCEEF2CC2763186DE26F69 /* ScopyThresholds.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScopyThresholds.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -349,6 +355,7 @@
 			isa = PBXGroup;
 			children = (
 				863111D7C15F2B67D831016C /* AppVersion.swift */,
+				9DBD01273FAB041A320AC2CB /* ScopyLogger.swift */,
 			);
 			path = Utilities;
 			sourceTree = "<group>";
@@ -506,6 +513,14 @@
 			path = Scopy;
 			sourceTree = "<group>";
 		};
+		EA0B202E19F1E6797ADC1834 /* Configuration */ = {
+			isa = PBXGroup;
+			children = (
+				FFBCEEF2CC2763186DE26F69 /* ScopyThresholds.swift */,
+			);
+			path = Configuration;
+			sourceTree = "<group>";
+		};
 		F27A2D1BF3700F70E1B5297F /* Extensions */ = {
 			isa = PBXGroup;
 			children = (
@@ -518,6 +533,7 @@
 			isa = PBXGroup;
 			children = (
 				196EDE361615053EC33A0851 /* Caching */,
+				EA0B202E19F1E6797ADC1834 /* Configuration */,
 				05E1F173E73ADBE84C03418B /* Persistence */,
 				016B7E2CC10364A67B182383 /* Search */,
 				9B45433DCC50E2D90D8F3A03 /* Settings */,
@@ -697,8 +713,10 @@
 				57C1FB3E5765F41546C7AD5E /* ScopyColors.swift in Sources */,
 				4F98B4BEB7AEE0ED458F28D0 /* ScopyComponents.swift in Sources */,
 				C81A97FB9F42D01C3A7D4731 /* ScopyIcons.swift in Sources */,
+				C0A5CC87E6B57D99230F58D0 /* ScopyLogger.swift in Sources */,
 				7DC66EDCE0E45DFC84BEE089 /* ScopySize.swift in Sources */,
 				CAB0C4BCEB0707C32EF0F6E5 /* ScopySpacing.swift in Sources */,
+				07D656880127B43B79E62F17 /* ScopyThresholds.swift in Sources */,
 				BC73EE655DA83097AC0514D4 /* ScopyTypography.swift in Sources */,
 				276999D1241D9F457964EC70 /* SearchEngineImpl.swift in Sources */,
 				28BA7DEBC0466743A62EA443 /* SearchMode.swift in Sources */,
@@ -759,8 +777,10 @@
 				1216203D7B799CFDA435C0C5 /* ScopyColors.swift in Sources */,
 				0C968E38F7456C42503E1319 /* ScopyComponents.swift in Sources */,
 				DA2483A05985496EAFA7CD17 /* ScopyIcons.swift in Sources */,
+				3A539CBFC8CAD889E3D71519 /* ScopyLogger.swift in Sources */,
 				BCA3A9072980CA2B53CEFD0A /* ScopySize.swift in Sources */,
 				C296E6B159C52200F4C441E3 /* ScopySpacing.swift in Sources */,
+				E8E21C3000349261775A69FF /* ScopyThresholds.swift in Sources */,
 				B192C163D6B56DD11C5C4054 /* ScopyTypography.swift in Sources */,
 				1397F9ED533B76FEE6167777 /* SearchEngineImpl.swift in Sources */,
 				5B2977D4EA7BE949046759A3 /* SearchMode.swift in Sources */,

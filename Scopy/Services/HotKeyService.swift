@@ -16,8 +16,7 @@ private func logToFile(_ message: String) {
     let timestamp = ISO8601DateFormatter().string(from: Date())
     let logMessage = "[\(timestamp)] \(message)\n"
 
-    // 同步输出到控制台（快速操作）
-    print(message)
+    ScopyLog.hotkey.info("\(message, privacy: .public)")
 
     guard let data = logMessage.data(using: .utf8) else { return }
 

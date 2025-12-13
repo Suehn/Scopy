@@ -1,6 +1,19 @@
 # Scopy 部署和使用指南
 
-## 本次更新（v0.35.1）
+## 本次更新（v0.36）
+- **Phase 6 收尾**：`AsyncStream` buffering policy 显式化（monitor/event streams）+ 日志统一到 `os.Logger`（保留热键文件日志）+ 阈值集中配置（`ScopyThresholds`）。
+- **性能实测**（Apple M3, macOS 15.7.2（24G325）, Debug, `make test-perf`；heavy 需 `RUN_HEAVY_PERF_TESTS=1`）：
+  - Fuzzy 5k items P95 ≈ 5.23ms
+  - Fuzzy 10k items P95 ≈ 44.80ms
+  - Disk 25k fuzzy P95 ≈ 56.94ms
+  - Bulk insert 1000 items ≈ 54.80ms（≈18,248 items/s）
+  - Regex 20k items P95 ≈ 3.08ms
+- **测试结果**：
+  - `make test-unit` **53 passed** (1 skipped)
+  - AppState：`xcodebuild test -only-testing:ScopyTests/AppStateTests -only-testing:ScopyTests/AppStateFallbackTests` **46 passed**
+  - `make test-perf` **22 passed** (6 skipped)
+
+## 历史更新（v0.35.1）
 - **文档对齐**：补齐 v0.30–v0.35 的索引/变更/性能记录入口，避免“代码已迭代但索引停在旧版本”。
 - **代码基线**：v0.35（Domain/SettingsStore/Repository/Search/ClipboardService actor 重构 + HistoryListView 组件拆分）。
 - **性能基线**（Apple M3, macOS 15.7.2（24G325）, Debug, `make test-perf`；heavy 需 `RUN_HEAVY_PERF_TESTS=1`）：

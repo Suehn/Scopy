@@ -135,7 +135,7 @@ struct SettingsView: View {
                 storageStats = stats
             } catch {
                 if !Task.isCancelled {
-                    print("Failed to load storage stats: \(error)")
+                    ScopyLog.ui.error("Failed to load storage stats: \(error.localizedDescription, privacy: .public)")
                 }
             }
             if !Task.isCancelled {
@@ -148,13 +148,15 @@ struct SettingsView: View {
     private func saveSettings() {
         // v0.10.1: 防止在设置加载前保存
         guard let currentSettings = tempSettings else {
-            print("⚠️ saveSettings: tempSettings is nil, skipping save")
+            ScopyLog.ui.warning("saveSettings: tempSettings is nil, skipping save")
             return
         }
 
         isSaving = true
 
-        print("🔧 saveSettings: keyCode=\(currentSettings.hotkeyKeyCode), modifiers=0x\(String(currentSettings.hotkeyModifiers, radix: 16))")
+        ScopyLog.ui.info(
+            "saveSettings: keyCode=\(currentSettings.hotkeyKeyCode, privacy: .public), modifiers=0x\(String(currentSettings.hotkeyModifiers, radix: 16), privacy: .public)"
+        )
 
         Task {
             do {
@@ -164,7 +166,7 @@ struct SettingsView: View {
                     appState.searchMode = currentSettings.defaultSearchMode
 
                     // 通过回调更新全局快捷键（解耦 AppDelegate）
-                    print("🔧 Updating hotkey via callback")
+                    ScopyLog.ui.info("Updating hotkey via callback")
                     appState.applyHotKeyHandler?(
                         currentSettings.hotkeyKeyCode,
                         currentSettings.hotkeyModifiers
@@ -174,7 +176,7 @@ struct SettingsView: View {
                     onDismiss?()
                 }
             } catch {
-                print("⚠️ saveSettings failed: \(error.localizedDescription)")
+                ScopyLog.ui.error("saveSettings failed: \(error.localizedDescription, privacy: .public)")
                 await MainActor.run {
                     isSaving = false
                     // 保存失败时不关闭窗口，让用户可以重试
@@ -701,7 +703,7 @@ class HotKeyRecorder: ObservableObject {
         isRecording = true
         didRecordNewHotKey = false
         previousHotKey = (currentKeyCode, currentModifiers)
-        print("🎹 Started hotkey recording")
+        ScopyLog.ui.info("Started hotkey recording")
 
         // 通过注入的回调暂停当前全局热键（完全解耦）
         Task { @MainActor in
@@ -728,11 +730,13 @@ class HotKeyRecorder: ObservableObject {
     private func handleKeyEvent(_ event: NSEvent) -> Bool {
         guard event.type == .keyDown else { return false }
 
-        print("🎹 Key pressed: keyCode=\(event.keyCode), modifiers=\(event.modifierFlags.rawValue)")
+        ScopyLog.ui.debug(
+            "Key pressed: keyCode=\(event.keyCode, privacy: .public), modifiers=\(event.modifierFlags.rawValue, privacy: .public)"
+        )
 
         // ESC 取消录制并恢复原快捷键
         if event.keyCode == 53 {
-            print("🎹 ESC pressed, cancelling recording")
+            ScopyLog.ui.info("ESC pressed, cancelling recording")
             DispatchQueue.main.async {
                 self.stopRecording(restorePrevious: true)
             }
@@ -748,7 +752,7 @@ class HotKeyRecorder: ObservableObject {
         if nsModifiers.contains(.option) { carbonModifiers |= UInt32(optionKey) }
         if nsModifiers.contains(.control) { carbonModifiers |= UInt32(controlKey) }
 
-        print("🎹 Carbon modifiers: 0x\(String(carbonModifiers, radix: 16))")
+        ScopyLog.ui.debug("Carbon modifiers: 0x\(String(carbonModifiers, radix: 16), privacy: .public)")
 
         // 需要至少一个修饰键
         if carbonModifiers != 0 {
@@ -757,7 +761,9 @@ class HotKeyRecorder: ObservableObject {
             didRecordNewHotKey = true
 
             DispatchQueue.main.async {
-                print("🎹 Calling onRecorded callback: keyCode=\(newKeyCode), modifiers=0x\(String(newModifiers, radix: 16))")
+                ScopyLog.ui.debug(
+                    "Calling onRecorded callback: keyCode=\(newKeyCode, privacy: .public), modifiers=0x\(String(newModifiers, radix: 16), privacy: .public)"
+                )
                 self.onRecorded?(newKeyCode, newModifiers)
                 self.stopRecording(restorePrevious: false)
             }
@@ -782,7 +788,9 @@ class HotKeyRecorder: ObservableObject {
         if restorePrevious,
            !didRecordNewHotKey,
            let previous = previousHotKey {
-            print("🎹 Restoring previous hotkey keyCode=\(previous.keyCode), modifiers=0x\(String(previous.modifiers, radix: 16))")
+            ScopyLog.ui.info(
+                "Restoring previous hotkey keyCode=\(previous.keyCode, privacy: .public), modifiers=0x\(String(previous.modifiers, radix: 16), privacy: .public)"
+            )
             Task { @MainActor in
                 // 通过注入的回调恢复快捷键（完全解耦）
                 applyHotKeyHandler?(previous.keyCode, previous.modifiers)
@@ -827,7 +835,7 @@ struct HotKeyRecorderView: View {
         )
         .contentShape(Rectangle())
         .onTapGesture {
-            print("🎹 Tapped! isRecording=\(recorder.isRecording)")
+            ScopyLog.ui.debug("Tapped: isRecording=\(recorder.isRecording, privacy: .public)")
             if recorder.isRecording {
                 recorder.stopRecording(restorePrevious: true)
             } else {
@@ -835,7 +843,7 @@ struct HotKeyRecorderView: View {
             }
         }
         .onAppear {
-            print("🎹 HotKeyRecorderView onAppear - setting up callbacks")
+            ScopyLog.ui.info("HotKeyRecorderView onAppear: setting up callbacks")
 
             // 注入回调到 recorder（完全解耦）
             recorder.unregisterHotKeyHandler = appState.unregisterHotKeyHandler
@@ -843,16 +851,18 @@ struct HotKeyRecorderView: View {
 
             // 关键：设置回调直接更新 binding，避免 .onChange 时机问题
             recorder.onRecorded = { [weak appState] newKeyCode, newModifiers in
-                print("🎹 onRecorded callback triggered!")
+                ScopyLog.ui.debug("onRecorded callback triggered")
                 keyCode = newKeyCode
                 modifiers = newModifiers
-                print("🎹 Direct binding update: keyCode=\(newKeyCode), modifiers=0x\(String(newModifiers, radix: 16))")
+                ScopyLog.ui.debug(
+                    "Direct binding update: keyCode=\(newKeyCode, privacy: .public), modifiers=0x\(String(newModifiers, radix: 16), privacy: .public)"
+                )
 
                 // 通过注入的回调立即更新全局快捷键（完全解耦）
                 Task { @MainActor in
-                    print("🎹 Calling applyHotKey via callback")
+                    ScopyLog.ui.info("Calling applyHotKey via callback")
                     appState?.applyHotKeyHandler?(newKeyCode, newModifiers)
-                    print("🎹 Hotkey immediately updated and persisted!")
+                    ScopyLog.ui.info("Hotkey immediately updated and persisted")
                 }
             }
         }

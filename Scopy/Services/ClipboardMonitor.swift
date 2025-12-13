@@ -61,21 +61,19 @@ final class ClipboardMonitor {
     private let eventContinuation: AsyncStream<ClipboardContent>.Continuation
     let contentStream: AsyncStream<ClipboardContent>
 
-    /// 后台处理队列（用于大文件的哈希计算）
-    private let backgroundQueue = DispatchQueue(label: "com.scopy.clipboard.hash", qos: .userInitiated)
-
     // Configuration
     private(set) var pollingInterval: TimeInterval = 0.5 // 500ms default
     private(set) var ignoredApps: Set<String> = []
-
-    /// 大内容阈值：超过此大小的内容在后台线程处理哈希
-    private static let largeContentThreshold = 50 * 1024 // 50 KB
+    private static let contentStreamBufferSize = 8
 
     // MARK: - Initialization
 
     init() {
         var continuation: AsyncStream<ClipboardContent>.Continuation!
-        self.contentStream = AsyncStream { cont in
+        self.contentStream = AsyncStream(
+            ClipboardContent.self,
+            bufferingPolicy: .bufferingNewest(Self.contentStreamBufferSize)
+        ) { cont in
             continuation = cont
         }
         self.eventContinuation = continuation
@@ -203,7 +201,7 @@ final class ClipboardMonitor {
             let paths = urls.map { $0.path }
             return try JSONEncoder().encode(paths)
         } catch {
-            print("Failed to serialize file URLs: \(error)")
+            ScopyLog.monitor.error("Failed to serialize file URLs: \(error.localizedDescription, privacy: .public)")
             return nil
         }
     }
@@ -215,7 +213,7 @@ final class ClipboardMonitor {
             let paths = try JSONDecoder().decode([String].self, from: data)
             return paths.map { URL(fileURLWithPath: $0) }
         } catch {
-            print("Failed to deserialize file URLs: \(error)")
+            ScopyLog.monitor.error("Failed to deserialize file URLs: \(error.localizedDescription, privacy: .public)")
             return nil
         }
     }
@@ -246,7 +244,7 @@ final class ClipboardMonitor {
         // 1. 图片一律走后台 SHA256，避免轻指纹误判
         // 2. 所有大内容（包括非图片）都异步处理，避免主线程阻塞
         // 3. 只有小内容在主线程同步处理
-        if rawData.type == .image || rawData.sizeBytes >= Self.largeContentThreshold {
+        if rawData.type == .image || rawData.sizeBytes >= ScopyThresholds.ingestHashOffloadBytes {
             // 图片或大内容：异步处理
             processLargeContentAsync(rawData)
             return
@@ -284,7 +282,9 @@ final class ClipboardMonitor {
         // 如果队列满，取消最旧的任务
         // v0.22: 添加日志，帮助诊断快速复制时的任务丢弃情况
         while processingQueue.count >= maxConcurrentTasks {
-            print("⚠️ ClipboardMonitor: Task queue full (\(maxConcurrentTasks)), dropping oldest task")
+            ScopyLog.monitor.warning(
+                "Task queue full (\(self.maxConcurrentTasks, privacy: .public)), dropping oldest task"
+            )
             processingQueue.first?.cancel()
             processingQueue.removeFirst()
         }

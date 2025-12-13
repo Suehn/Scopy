@@ -7,6 +7,36 @@
 
 ---
 
+## [v0.36] - 2025-12-13
+
+### Phase 6 收尾：日志统一 + AsyncStream buffering + 阈值集中
+
+- **日志统一**：除热键文件日志外，仓库内 `print(...)` 全量迁移到 `os.Logger`（`ScopyLog` 分类：app/monitor/storage/search/ui）
+- **AsyncStream 显式 buffering**：为 `ClipboardMonitor.contentStream`、`ClipboardService.eventStream`、`MockClipboardService.eventStream` 指定 bufferingPolicy，避免默认语义不明确
+- **阈值集中配置**：新增 `ScopyThresholds`，统一记录 ingest/hash offload 与 external storage 阈值
+
+### 修改文件
+- `Scopy/Utilities/ScopyLogger.swift`
+- `Scopy/Infrastructure/Configuration/ScopyThresholds.swift`
+- `Scopy/Services/ClipboardMonitor.swift`
+- `Scopy/Application/ClipboardService.swift`
+- `Scopy/Services/MockClipboardService.swift`
+- `Scopy/Services/StorageService.swift`
+- `Scopy/Observables/AppState.swift`
+- `Scopy/Views/SettingsView.swift`
+- `Scopy/Services/PerformanceProfiler.swift`
+- `Scopy/Services/HotKeyService.swift`
+- `Scopy.xcodeproj/project.pbxproj`
+- `doc/implemented-doc/v0.36.md`
+- `doc/profile/v0.36-profile.md`
+
+### 测试
+- 单元测试: `make test-unit` **53 tests passed** (1 skipped)
+- AppState: `xcodebuild test -only-testing:ScopyTests/AppStateTests -only-testing:ScopyTests/AppStateFallbackTests` **46 tests passed**
+- 性能测试: `make test-perf` **22 tests passed** (6 skipped；heavy 需 `RUN_HEAVY_PERF_TESTS=1`)
+
+---
+
 ## [v0.35.1] - 2025-12-13
 
 ### Documentation

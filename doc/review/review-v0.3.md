@@ -3,7 +3,7 @@
 > 说明：本文用于指导后续“稳定性优先”的长期重构（含 Codex 执行）。`doc/review/review-v0.3-2.md` 为历史草案/补充材料，其中关键内容已合并到本文；后续以本文为准。
 
 - 最后更新：2025-12-13
-- 代码基线：`a542326`（tag `v0.35`）；文档对齐版本：`v0.35.1`
+- 代码基线：`v0.36`
 - 关联文档：
   - 当前实现状态索引：`doc/implemented-doc/README.md`
   - 近期变更：`doc/implemented-doc/CHANGELOG.md`
@@ -120,7 +120,7 @@
 
 #### P0-4：设置与热键持久化多源写入（已解决：v0.30）
 
-现状（v0.35）：
+现状（v0.36）：
 
 - Settings 持久化唯一入口：`Scopy/Infrastructure/Settings/SettingsStore.swift`（actor），统一读写 `UserDefaults["ScopySettings"]`
 - 热键应用入口仍在 `AppDelegate.applyHotKey`（遵循 `AGENTS.md`），持久化通过 `SettingsStore.updateHotkey(...)` 完成
@@ -134,7 +134,7 @@
 
 #### P0-5：事件语义不纯（已解决：v0.33）
 
-现状（v0.35）：
+现状（v0.36）：
 
 - `clearAll()` 发 `ClipboardEvent.itemsCleared(keepPinned: true)`，不再触发 `.settingsChanged`
 - `AppState.handleEvent(.itemsCleared)` 最小处理为 `await load()`；设置变更仍由 `.settingsChanged` 独立承载
@@ -145,7 +145,9 @@
 
 - `ClipboardMonitor` 对大内容/图片使用任务队列，队列满时会：
   - `dropping oldest task`（取消最旧任务）
-- `AsyncStream` 使用默认 buffering policy（等价于背压语义不显式）
+- `AsyncStream` 已显式 buffering policy（v0.36）：
+  - `ClipboardMonitor.contentStream`：`.bufferingNewest(8)`（避免大 payload 无界堆积）
+  - `ClipboardService.eventStream`：`.unbounded`（事件体量小，避免丢事件）
 
 后果：
 
@@ -156,22 +158,23 @@
 
 #### P1-1：外部文件写入与 DB 插入缺少“失败回滚”（已解决：v0.31）
 
-现状（v0.35）：
+现状（v0.36）：
 
 - `StorageService.upsertItem` 在 “外部写入成功但 DB insert 失败” 时执行 best-effort rollback（删除外部文件），避免 orphan 长期累积
 
 #### P1-2：缓存体系重复、边界不清（已解决：v0.34）
 
-现状（v0.35）：
+现状（v0.36）：
 
 - 图标：`Scopy/Infrastructure/Caching/IconService.swift` 作为单一入口（NSCache）
 - 缩略图：`Scopy/Infrastructure/Caching/ThumbnailCache.swift` 作为单一入口（NSCache）；View 内静态缓存已移除
 
 ### P2（清洁度/一致性：Phase 6 收尾）
 
-- `AsyncStream` buffering policy 尚未全量显式化（`ClipboardMonitor.contentStream`、`ClipboardService.eventStream` 等仍使用默认 policy）
-- 日志仍大量使用 `print(...)`（除热键文件日志外未统一到 `os.Logger`）
-- 阈值不一致：`ClipboardMonitor.largeContentThreshold = 50KB`、`StorageService.externalStorageThreshold = 100KB`（需集中配置并文档化）
+- 已完成（v0.36）：`AsyncStream` buffering policy 显式化（`ClipboardMonitor.contentStream`、`ClipboardService.eventStream`、`MockClipboardService.eventStream`）
+- 已完成（v0.36）：日志统一到 `os.Logger`（保留热键文件日志 `/tmp/scopy_hotkey.log`）
+- 已完成（v0.36）：阈值集中到 `ScopyThresholds`（ingest/hash offload、external storage）
+- 待继续：Thread Sanitizer / Strict Concurrency 回归
 
 ---
 
@@ -786,7 +789,18 @@ Notes：
 
 Notes：
 
-- （待补充）
+- 已完成（2025-12-13，v0.36）：
+  - `AsyncStream` 显式 buffering policy：
+    - `ClipboardMonitor.contentStream`：`.bufferingNewest(8)`
+    - `ClipboardService.eventStream` / `MockClipboardService.eventStream`：`.unbounded`
+  - 日志统一：新增 `ScopyLog`（`os.Logger`），并将仓库内 `print(...)` 全量迁移到 `os.Logger`（保留热键文件日志 `/tmp/scopy_hotkey.log`）
+  - 阈值集中：新增 `ScopyThresholds`，统一 ingest/hash offload 与 external storage 阈值
+  - 验收：
+    - `make test-unit` 通过（53 tests passed，1 skipped）
+    - `xcodebuild test -only-testing:ScopyTests/AppStateTests -only-testing:ScopyTests/AppStateFallbackTests` 通过（46 tests passed）
+    - `make test-perf` 通过（22 tests passed，6 skipped）
+- 待继续：
+  - Thread Sanitizer / Strict Concurrency 回归（建议先从 tests target 开始）
 
 ### Phase 7（可选）：抽成 Swift Package（强制边界）
 
