@@ -1,6 +1,26 @@
 # Scopy 部署和使用指南
 
-## 本次更新（v0.41）
+## 本次更新（v0.42）
+- **Phase 7（准备）：ScopyKit SwiftPM 接入**：
+  - 根目录 `Package.swift` 定义本地 `ScopyKit` library，后续用于把 Domain/Infra/Application 抽成独立 module。
+  - `project.yml` 增加本地 `packages` 并让 App target 依赖 `ScopyKit`；构建/测试时会出现 `Resolve Package Graph`。
+- **性能/稳定性**：
+  - 本版本仅做工程接入，不影响运行时逻辑；性能数据在噪声范围内波动。
+- **性能实测**（Apple M3, macOS 15.7.2（24G325）, Debug, `make test-perf`；heavy 需 `RUN_HEAVY_PERF_TESTS=1`）：
+  - Fuzzy 5k items P95 ≈ 4.69ms
+  - Fuzzy 10k items P95 ≈ 43.60ms（Samples: 50）
+  - Disk 25k fuzzy P95 ≈ 56.61ms（Samples: 50）
+  - Bulk insert 1000 items ≈ 51.70ms（≈19,342 items/s）
+  - Fetch recent (50 items) avg ≈ 0.07ms
+  - Regex 20k items P95 ≈ 3.11ms
+  - Mixed content disk search（single run, after warmup）≈ 4.24ms
+- **测试结果**：
+  - `make test-unit` **53 passed** (1 skipped)
+  - `make test-perf` **22 passed** (6 skipped)
+  - `make test-tsan` **132 passed** (1 skipped)
+  - `make test-strict` **166 passed** (7 skipped)
+
+## 历史更新（v0.41）
 - **Dev/Quality：固化 Strict Concurrency 回归门槛**：
   - 新增 `make test-strict`，统一以 `SWIFT_STRICT_CONCURRENCY=complete` + `SWIFT_TREAT_WARNINGS_AS_ERRORS=YES` 跑 `ScopyTests`。
   - 输出写入 `strict-concurrency-test.log`，便于 CI/本地审计与排查。

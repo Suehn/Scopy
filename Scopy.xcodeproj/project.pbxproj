@@ -198,6 +198,7 @@
 		E815A5866D7A35DB66DC86BA /* SearchResultPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7F8FB2D550672091812A6E5 /* SearchResultPage.swift */; };
 		E8E21C3000349261775A69FF /* ScopyThresholds.swift in Sources */ = {isa = PBXBuildFile; fileRef = FFBCEEF2CC2763186DE26F69 /* ScopyThresholds.swift */; };
 		E936681210443F5D76C7C036 /* ClipboardServiceProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = 930C317B2BC06CB3FDB17453 /* ClipboardServiceProtocol.swift */; };
+		E97D44CFBD18C1091883D418 /* ScopyKit in Frameworks */ = {isa = PBXBuildFile; productRef = 3011C50D2B1653E9005CAAB0 /* ScopyKit */; };
 		E9D1E5B20BF9960FB0E4957C /* StorageService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 644A49B646565DEC262174A8 /* StorageService.swift */; };
 		E9E5671DF260D3B85BE306CE /* ClipboardEvent.swift in Sources */ = {isa = PBXBuildFile; fileRef = CCE9A425FC507166D9E590CE /* ClipboardEvent.swift */; };
 		ED5EE36FF4DA34BE8D7F492B /* StorageService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 644A49B646565DEC262174A8 /* StorageService.swift */; };
@@ -289,6 +290,7 @@
 		8C25A96207E0DA2587E7AFBB /* HistoryListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryListView.swift; sourceTree = "<group>"; };
 		930C317B2BC06CB3FDB17453 /* ClipboardServiceProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipboardServiceProtocol.swift; sourceTree = "<group>"; };
 		962242CA59A1F952C0D5B10A /* IconService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IconService.swift; sourceTree = "<group>"; };
+		981F278303CBA80DA8E8A43D /* Scopy */ = {isa = PBXFileReference; lastKnownFileType = folder; name = Scopy; path = .; sourceTree = SOURCE_ROOT; };
 		98A81F5BEC4470C8DA1B4864 /* TestDataFactory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TestDataFactory.swift; sourceTree = "<group>"; };
 		9A71D183AE552D5A0722779D /* ScopySize.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScopySize.swift; sourceTree = "<group>"; };
 		9DBD01273FAB041A320AC2CB /* ScopyLogger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScopyLogger.swift; sourceTree = "<group>"; };
@@ -330,6 +332,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				731C389FA0434EBF4696D6ED /* libsqlite3.tbd in Frameworks */,
+				E97D44CFBD18C1091883D418 /* ScopyKit in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -486,6 +489,14 @@
 			name = Frameworks;
 			sourceTree = "<group>";
 		};
+		7FE17EEF8617970E762C41B4 /* Packages */ = {
+			isa = PBXGroup;
+			children = (
+				981F278303CBA80DA8E8A43D /* Scopy */,
+			);
+			name = Packages;
+			sourceTree = "<group>";
+		};
 		8F5A37EE34AA8F4959E47D6C /* Services */ = {
 			isa = PBXGroup;
 			children = (
@@ -520,6 +531,7 @@
 		9C69D015A6946528E40569E5 = {
 			isa = PBXGroup;
 			children = (
+				7FE17EEF8617970E762C41B4 /* Packages */,
 				E48448F133BE3F80D945AC6C /* Scopy */,
 				0422E08B51B79483B0A3AA0D /* ScopyTestHost */,
 				A77C60BDFBB9197578D12D5C /* ScopyTests */,
@@ -720,6 +732,7 @@
 			);
 			name = Scopy;
 			packageProductDependencies = (
+				3011C50D2B1653E9005CAAB0 /* ScopyKit */,
 			);
 			productName = Scopy;
 			productReference = 74C9D67BDF3FC3265BE88014 /* Scopy.app */;
@@ -802,6 +815,9 @@
 			);
 			mainGroup = 9C69D015A6946528E40569E5;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				F120138A456EA87F399021B7 /* XCLocalSwiftPackageReference "." */,
+			);
 			preferredProjectObjectVersion = 77;
 			projectDirPath = "";
 			projectRoot = "";
@@ -1433,6 +1449,20 @@
 			defaultConfigurationName = Debug;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		F120138A456EA87F399021B7 /* XCLocalSwiftPackageReference "." */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = .;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		3011C50D2B1653E9005CAAB0 /* ScopyKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = ScopyKit;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 881EAC4E17987F3E27B9F996 /* Project object */;
 }

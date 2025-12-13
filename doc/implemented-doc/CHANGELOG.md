@@ -7,6 +7,35 @@
 
 ---
 
+## [v0.42] - 2025-12-13
+
+### Phase 7（准备）：引入本地 Swift Package `ScopyKit`（XcodeGen 接入）
+
+- **本地 SwiftPM 包**：根目录 `Package.swift` 定义 `ScopyKit` library target（源码来自 `Scopy/`，排除 App/Presentation 相关文件），并链接 `sqlite3`。
+- **工程接入**：`project.yml` 增加 `packages` 并让 App target 依赖 `ScopyKit` product；构建/测试时会看到 `Resolve Package Graph`。
+- **可回滚里程碑**：本版本只做“接入准备”，下一步（v0.43）再把后端源码真正迁入 package module 并完成 public API 收口。
+
+### 修改文件
+
+- `Package.swift`
+- `project.yml`
+- `Scopy.xcodeproj/project.pbxproj`
+- `DEPLOYMENT.md`
+- `doc/profile/v0.42-profile.md`
+- `doc/profile/README.md`
+- `doc/implemented-doc/v0.42.md`
+- `doc/implemented-doc/README.md`
+- `doc/review/review-v0.3.md`
+
+### 测试
+
+- 单元测试：`make test-unit` **53 tests passed** (1 skipped)
+- 性能测试：`make test-perf` **22 tests passed** (6 skipped)
+- Thread Sanitizer：`make test-tsan` **132 tests passed** (1 skipped)
+- Strict Concurrency：`make test-strict` **166 tests passed** (7 skipped)
+
+---
+
 ## [v0.41] - 2025-12-13
 
 ### Dev/Quality：Makefile 固化 Strict Concurrency 回归门槛

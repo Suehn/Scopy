@@ -2,19 +2,31 @@
 import PackageDescription
 
 let package = Package(
-    name: "Scopy",
+    name: "ScopyKit",
     platforms: [
         .macOS(.v14)
     ],
     products: [
-        .executable(name: "Scopy", targets: ["Scopy"])
+        .library(name: "ScopyKit", targets: ["ScopyKit"])
     ],
     targets: [
-        .executableTarget(
-            name: "Scopy",
+        .target(
+            name: "ScopyKit",
             path: "Scopy",
-            resources: [
-                .process("Info.plist")
+            exclude: [
+                "Info.plist",
+                "Scopy.entitlements",
+                "main.swift",
+                "ScopyApp.swift",
+                "AppDelegate.swift",
+                "FloatingPanel.swift",
+                "Design",
+                "Observables",
+                "Presentation",
+                "Views"
+            ],
+            linkerSettings: [
+                .linkedLibrary("sqlite3")
             ]
         )
     ]

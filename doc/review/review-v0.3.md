@@ -3,7 +3,7 @@
 > 说明：本文用于指导后续“稳定性优先”的长期重构（含 Codex 执行）。`doc/review/review-v0.3-2.md` 为历史草案/补充材料，其中关键内容已合并到本文；后续以本文为准。
 
 - 最后更新：2025-12-13
-- 代码基线：`v0.41`
+- 代码基线：`v0.42`
 - 关联文档：
   - 当前实现状态索引：`doc/implemented-doc/README.md`
   - 近期变更：`doc/implemented-doc/CHANGELOG.md`
@@ -846,6 +846,13 @@ Notes：
 
 - 新增 package：`ScopyKit`（Domain + Infrastructure + Application）
 - App target 仅保留 App + Presentation
+
+Notes：
+
+- 已完成（2025-12-13，v0.42）：
+  - SwiftPM 接入：根目录 `Package.swift` 新增本地 library `ScopyKit`（源码来自 `Scopy/`，排除 App/Presentation 相关文件），并链接 `sqlite3`。
+  - XcodeGen 接入：`project.yml` 增加本地 `packages`，并让 App target 依赖 `ScopyKit` product（构建/测试会看到 `Resolve Package Graph`）。
+  - 当前阶段仅完成“接入准备”；下一步（v0.43）将把后端源码从 App target 移出并完成 public API 收口，真正实现 module 边界强制。
 
 ---
 

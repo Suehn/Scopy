@@ -40,6 +40,10 @@ settings:
     MARKETING_VERSION: "0.6.0"
     CURRENT_PROJECT_VERSION: "1"
 
+packages:
+  ScopyKit:
+    path: .
+
 targets:
   Scopy:
     type: application
@@ -56,6 +60,8 @@ targets:
         INFOPLIST_FILE: Scopy/Info.plist
     dependencies:
       - sdk: libsqlite3.tbd
+      - package: ScopyKit
+        product: ScopyKit
 
   ScopyTests:
     type: bundle.unit-test
