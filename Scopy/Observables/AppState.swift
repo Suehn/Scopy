@@ -139,10 +139,11 @@ final class AppState {
             await historyViewModel.handleEvent(event)
         case .settingsChanged:
             await settingsViewModel.loadSettings()
-            historyViewModel.applySettings(settingsViewModel.settings)
+            let settings = settingsViewModel.settings
+            historyViewModel.applySettings(settings)
 
             if let handler = applyHotKeyHandler {
-                handler(settingsViewModel.settings.hotkeyKeyCode, settingsViewModel.settings.hotkeyModifiers)
+                handler(settings.hotkeyKeyCode, settings.hotkeyModifiers)
             } else {
                 ScopyLog.app.warning("settingsChanged: applyHotKeyHandler not registered, hotkey may be out of sync")
             }

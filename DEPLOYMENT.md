@@ -1,6 +1,26 @@
 # Scopy 部署和使用指南
 
-## 本次更新（v0.43）
+## 本次更新（v0.43.1）
+- **Fix/Quality（稳定性）**：
+  - `.settingsChanged` 统一驱动设置同步 + 热键应用；`AppDelegate.applyHotKey` 做幂等（相同配置不重复 unregister/register），避免竞态漏应用与冗余注册。
+  - 去重 upsert 语义修复：仅真实插入发 `.newItem`；去重命中更新发 `.itemUpdated`，避免 UI `totalCount` 错误累加。
+  - 设置保存失败不再自动关闭窗口，改为错误提示；保存成功由事件链路统一刷新。
+  - `StorageService.close/performWALCheckpoint/getExternalStorageSize` 异步化，避免主线程阻塞点与测试侧死锁风险。
+- **性能实测**（Apple M3, macOS 15.7.2（24G325）, Debug, `make test-perf`；heavy 需 `RUN_HEAVY_PERF_TESTS=1`；Low Power Mode enabled）：
+  - Fuzzy 5k items P95 ≈ 8.49ms
+  - Fuzzy 10k items P95 ≈ 79.41ms（Samples: 50；Low Power Mode 下阈值放宽至 300ms）
+  - Disk 25k fuzzy P95 ≈ 102.93ms（Samples: 50）
+  - Bulk insert 1000 items ≈ 140.62ms（≈7,112 items/s）
+  - Fetch recent (50 items) avg ≈ 0.11ms
+  - Regex 20k items P95 ≈ 5.25ms
+  - Mixed content disk search（single run）≈ 7.56ms
+- **测试结果**：
+  - `make test-unit` **53 passed** (1 skipped)
+  - `make test-perf` **22 passed** (6 skipped)
+  - `make test-tsan` **132 passed** (1 skipped)
+  - `make test-strict` **166 passed** (7 skipped)
+
+## 历史更新（v0.43）
 - **Phase 7（完成）：ScopyKit module 强制边界**：
   - App target 仅保留 App/UI/Presentation；后端（Domain/Application/Infrastructure/Services/Utilities）由本地 SwiftPM 模块 `ScopyKit` 提供。
   - `ScopyTests`/`ScopyTSanTests` 统一依赖 `ScopyKit`，不再把后端源码直接编进 test bundle。

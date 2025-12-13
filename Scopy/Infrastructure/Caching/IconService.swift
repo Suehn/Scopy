@@ -3,8 +3,7 @@ import Foundation
 
 /// Centralized app icon/name cache.
 ///
-/// Note: This file lives in Infrastructure but is currently used by Presentation code.
-/// Phase 7 (Swift Package split) will enforce dependency direction.
+/// Note: This file lives in Infrastructure but is used by Presentation code via `import ScopyKit`.
 @MainActor
 public final class IconService {
     public static let shared = IconService()

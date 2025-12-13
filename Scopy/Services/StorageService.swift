@@ -33,6 +33,18 @@ public final class StorageService {
 
     public typealias StoredItem = ClipboardStoredItem
 
+    enum UpsertOutcome: Sendable {
+        case inserted(StoredItem)
+        case updated(StoredItem)
+
+        var item: StoredItem {
+            switch self {
+            case .inserted(let item): return item
+            case .updated(let item): return item
+            }
+        }
+    }
+
     // MARK: - Configuration
 
     /// Threshold for external storage (v0.md: 小内容 < X KB)
@@ -116,25 +128,13 @@ public final class StorageService {
     }
 
     /// v0.11: 执行 WAL 检查点（定期调用以控制 WAL 文件大小）
-    public func performWALCheckpoint() {
-        let repo = repository
-        let semaphore = DispatchSemaphore(value: 0)
-        Task.detached {
-            await repo.walCheckpointPassive()
-            semaphore.signal()
-        }
-        semaphore.wait()
+    public func performWALCheckpoint() async {
+        await repository.walCheckpointPassive()
     }
 
     /// v0.20: 关闭前执行 WAL 检查点，确保数据完整写入
-    public func close() {
-        let repo = repository
-        let semaphore = DispatchSemaphore(value: 0)
-        Task.detached {
-            await repo.close()
-            semaphore.signal()
-        }
-        semaphore.wait()
+    public func close() async {
+        await repository.close()
     }
 
     // MARK: - CRUD Operations
@@ -142,6 +142,10 @@ public final class StorageService {
     /// Insert or update item (handles deduplication per v0.md 3.2)
     /// v0.29: 大内容外部写入后台化，避免阻塞主线程
     public func upsertItem(_ content: ClipboardMonitor.ClipboardContent) async throws -> StoredItem {
+        try await upsertItemWithOutcome(content).item
+    }
+
+    func upsertItemWithOutcome(_ content: ClipboardMonitor.ClipboardContent) async throws -> UpsertOutcome {
         // Check for duplicate by content hash (v0.md 3.2)
         if let existing = try await repository.fetchItemByHash(content.contentHash) {
             if let ingestURL = content.ingestFileURL {
@@ -153,7 +157,7 @@ public final class StorageService {
             updated.lastUsedAt = Date()
             updated.useCount += 1
             try await repository.updateUsage(id: updated.id, lastUsedAt: updated.lastUsedAt, useCount: updated.useCount)
-            return updated
+            return .updated(updated)
         }
 
         let id = UUID()
@@ -215,19 +219,21 @@ public final class StorageService {
             throw error
         }
 
-        return StoredItem(
-            id: id,
-            type: content.type,
-            contentHash: content.contentHash,
-            plainText: content.plainText,
-            appBundleID: content.appBundleID,
-            createdAt: now,
-            lastUsedAt: now,
-            useCount: 1,
-            isPinned: false,
-            sizeBytes: content.sizeBytes,
-            storageRef: storageRef,
-            rawData: inlineData
+        return .inserted(
+            StoredItem(
+                id: id,
+                type: content.type,
+                contentHash: content.contentHash,
+                plainText: content.plainText,
+                appBundleID: content.appBundleID,
+                createdAt: now,
+                lastUsedAt: now,
+                useCount: 1,
+                isPinned: false,
+                sizeBytes: content.sizeBytes,
+                storageRef: storageRef,
+                rawData: inlineData
+            )
         )
     }
 
@@ -304,15 +310,18 @@ public final class StorageService {
 
     /// v0.10.8: 使用缓存避免重复遍历文件系统
     /// v0.22: 使用锁保护缓存访问，防止数据竞争
-    public func getExternalStorageSize() throws -> Int {
+    public func getExternalStorageSize() async throws -> Int {
         // 检查缓存是否有效（加锁读取）
         if let cached = externalSizeCacheLock.withLock({ cachedExternalSize }),
            Date().timeIntervalSince(cached.timestamp) < externalSizeCacheTTL {
             return cached.size
         }
 
-        // 计算实际大小
-        let size = try calculateExternalStorageSize()
+        // 计算实际大小（后台计算，避免阻塞主线程）
+        let path = externalStoragePath
+        let size = try await Task.detached(priority: .utility) {
+            try Self.calculateDirectorySize(at: path)
+        }.value
         externalSizeCacheLock.withLock {
             cachedExternalSize = (size, Date())
         }
@@ -443,7 +452,7 @@ public final class StorageService {
         }
 
         // 4. By space (large content / external storage) - v0.9
-        let externalSize = try getExternalStorageSize()
+        let externalSize = try await getExternalStorageSize()
         let maxLargeBytes = cleanupSettings.maxLargeStorageMB * 1024 * 1024
         if externalSize > maxLargeBytes {
             try await cleanupExternalStorage(targetBytes: maxLargeBytes)
@@ -563,7 +572,7 @@ public final class StorageService {
     private func cleanupExternalStorage(targetBytes: Int) async throws {
         // 使缓存失效，确保获取最新大小
         invalidateExternalSizeCache()
-        let currentSize = try getExternalStorageSize()
+        let currentSize = try await getExternalStorageSize()
         if currentSize <= targetBytes { return }
 
         let excessBytes = currentSize - targetBytes

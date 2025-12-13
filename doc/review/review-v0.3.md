@@ -2,9 +2,9 @@
 
 > 说明：本文用于指导后续“稳定性优先”的长期重构（含 Codex 执行）。`doc/review/review-v0.3-2.md` 为历史草案/补充材料，其中关键内容已合并到本文；后续以本文为准。
 
-- 最后更新：2025-12-13
-- 代码基线：`v0.43`
-- 重构状态：Phase 0-7 已完成（至 `v0.43`）
+- 最后更新：2025-12-14
+- 代码基线：`v0.43.1`
+- 重构状态：Phase 0-7 已完成（至 `v0.43.1`）
 - 关联文档：
   - 当前实现状态索引：`doc/implemented-doc/README.md`
   - 近期变更：`doc/implemented-doc/CHANGELOG.md`
@@ -57,7 +57,7 @@
 - UI 注入：`AppDelegate` 创建 `FloatingPanel`，根视图 `ContentView().environment(AppState.shared)`
 - 关键回调：
   - `AppState.shared.applyHotKeyHandler` / `unregisterHotKeyHandler` 由 `AppDelegate` 注入
-  - SettingsView 保存时会调用 `appState.updateSettings(...)`，并通过 callback 触发 `applyHotKeyHandler` 立即应用（持久化走 `SettingsStore`，不再直写 UserDefaults）
+  - SettingsView 保存通过 `SettingsViewModel.updateSettingsOrThrow(...)` 写入；失败时留在窗口并提示错误，成功后由 `ClipboardService` 发出 `.settingsChanged`，`AppState` 统一驱动“reload settings + applyHotKeyHandler + reload list”
 
 ### 2.2 当前“前后端边界”
 
@@ -126,12 +126,12 @@
 - Settings 持久化唯一入口：`Scopy/Infrastructure/Settings/SettingsStore.swift`（actor），统一读写 `UserDefaults["ScopySettings"]`
 - 热键应用入口仍在 `AppDelegate.applyHotKey`（遵循 `AGENTS.md`），持久化通过 `SettingsStore.updateHotkey(...)` 完成
 - Settings 保存：
-  - UI 调用 `AppState.updateSettings(...)` → service.updateSettings → `SettingsStore.save(...)`
-  - `SettingsView.saveSettings()` 仍会通过 callback 调用 `applyHotKeyHandler` 立即应用热键（持久化同样走 SettingsStore），不再存在“多处直写 UserDefaults 覆盖字段”的一致性风险
+  - UI 调用 `SettingsViewModel.updateSettingsOrThrow(...)` → service.updateSettings → `SettingsStore.save(...)`
+  - 热键应用由 `ClipboardService` 发 `.settingsChanged`，`AppState` 统一驱动 `applyHotKeyHandler`；`AppDelegate.applyHotKey` 幂等，避免重复 unregister/register
 
 剩余风险：
 
-- 仍存在“保存设置 + 立即 applyHotKey”两条路径的重复调用；但由于 SSOT 已收口，风险主要是冗余工作而非一致性错误（Phase 6 可继续收敛）
+- 无（v0.43.1 已将保存路径与热键应用收敛为单一路径）
 
 #### P0-5：事件语义不纯（已解决：v0.33）
 

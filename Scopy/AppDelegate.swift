@@ -12,6 +12,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var panel: FloatingPanel?
     private(set) var hotKeyService: HotKeyService?
     private var settingsWindow: NSWindow?
+    private var settingsWindowCloseObserver: Any?
+    private var appliedHotKey: (keyCode: UInt32, modifiers: UInt32)?
+    private var isHotKeyRegistered = false
     private let settingsStore: SettingsStore = .shared
     /// v0.22: 存储事件监视器引用，以便在应用退出时移除
     private var localEventMonitor: Any?
@@ -55,6 +58,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
         appState.unregisterHotKeyHandler = { [weak self] in
             self?.hotKeyService?.unregister()
+            self?.isHotKeyRegistered = false
         }
 
         // 启动后端服务
@@ -88,6 +92,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         // 清理资源
         hotKeyService?.unregister()
+        isHotKeyRegistered = false
+        if let observer = settingsWindowCloseObserver {
+            NotificationCenter.default.removeObserver(observer)
+            settingsWindowCloseObserver = nil
+        }
         // v0.22: 移除事件监视器，防止内存泄漏
         if let monitor = localEventMonitor {
             NSEvent.removeMonitor(monitor)
@@ -111,6 +120,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     /// 统一应用并持久化快捷键，确保无需重启即可生效
     @MainActor
     func applyHotKey(keyCode: UInt32, modifiers: UInt32) {
+        if isHotKeyRegistered,
+           let applied = appliedHotKey,
+           applied.keyCode == keyCode,
+           applied.modifiers == modifiers {
+            return
+        }
+
         if hotKeyService == nil {
             hotKeyService = HotKeyService()
         }
@@ -122,6 +138,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.togglePanelAtMousePosition()
             }
         )
+        appliedHotKey = (keyCode, modifiers)
+        isHotKeyRegistered = true
         persistHotkeySettings(keyCode: keyCode, modifiers: modifiers)
     }
 
@@ -160,13 +178,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             window.center()
 
             // v0.17: 监听窗口关闭事件，清空引用避免悬空指针
-            NotificationCenter.default.addObserver(
+            settingsWindowCloseObserver = NotificationCenter.default.addObserver(
                 forName: NSWindow.willCloseNotification,
                 object: window,
                 queue: .main
-            ) { _ in
-                Task { @MainActor in
-                    AppDelegate.shared?.settingsWindow = nil
+            ) { [weak self] _ in
+                Task { @MainActor [weak self] in
+                    guard let self else { return }
+                    if let observer = self.settingsWindowCloseObserver {
+                        NotificationCenter.default.removeObserver(observer)
+                        self.settingsWindowCloseObserver = nil
+                    }
+                    self.settingsWindow = nil
                 }
             }
 

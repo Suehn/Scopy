@@ -17,7 +17,7 @@ final class ConcurrencyTests: XCTestCase {
 
     override func tearDown() async throws {
         await search.close()
-        storage.close()
+        await storage.close()
         storage = nil
         search = nil
     }

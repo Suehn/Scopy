@@ -97,29 +97,62 @@ final class HistoryViewModel {
     func handleEvent(_ event: ClipboardEvent) async {
         switch event {
         case .newItem(let item):
-            let wasExisting = items.contains(where: { $0.id == item.id })
+            let isUnfilteredList = searchQuery.isEmpty && appFilter == nil && typeFilter == nil && typeFilters == nil
+            let didMatchCurrentFilters = matchesCurrentFilters(item)
+
             items.removeAll { $0.id == item.id }
 
-            if matchesCurrentFilters(item) {
+            if didMatchCurrentFilters {
                 items.insert(item, at: 0)
             }
             invalidatePinnedCache()
 
-            if !wasExisting {
+            loadedCount = items.count
+            if didMatchCurrentFilters, totalCount >= 0 {
                 totalCount += 1
+            } else if isUnfilteredList, totalCount >= 0 {
+                totalCount += 1
+            }
+            if totalCount >= 0 {
+                canLoadMore = loadedCount < totalCount
             }
 
             if let bundleID = item.appBundleID, !recentApps.contains(bundleID) {
                 scheduleRecentAppsRefresh()
             }
         case .itemUpdated(let item):
+            if !searchQuery.isEmpty {
+                if let index = items.firstIndex(where: { $0.id == item.id }) {
+                    items[index] = item
+                }
+                invalidatePinnedCache()
+                return
+            }
+
+            let didMatchCurrentFilters = matchesCurrentFilters(item)
             items.removeAll { $0.id == item.id }
-            items.insert(item, at: 0)
+            if didMatchCurrentFilters {
+                items.insert(item, at: 0)
+            }
             invalidatePinnedCache()
+
+            loadedCount = items.count
+            if totalCount >= 0 {
+                canLoadMore = loadedCount < totalCount
+            }
         case .itemDeleted(let id):
+            let isUnfilteredList = searchQuery.isEmpty && appFilter == nil && typeFilter == nil && typeFilters == nil
+            let wasPresent = items.contains(where: { $0.id == id })
             items.removeAll { $0.id == id }
             invalidatePinnedCache()
-            totalCount -= 1
+
+            loadedCount = items.count
+            if totalCount >= 0 {
+                if isUnfilteredList || wasPresent {
+                    totalCount = max(0, totalCount - 1)
+                }
+                canLoadMore = loadedCount < totalCount
+            }
         case .itemPinned(let id):
             if let index = items.firstIndex(where: { $0.id == id }) {
                 items[index] = items[index].withPinned(true)

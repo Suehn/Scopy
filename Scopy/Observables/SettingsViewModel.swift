@@ -46,11 +46,15 @@ final class SettingsViewModel {
 
     func updateSettings(_ newSettings: SettingsDTO) async {
         do {
-            try await service.updateSettings(newSettings)
-            settings = newSettings
+            try await updateSettingsOrThrow(newSettings)
         } catch {
             ScopyLog.app.error("Failed to update settings: \(error.localizedDescription, privacy: .public)")
         }
+    }
+
+    func updateSettingsOrThrow(_ newSettings: SettingsDTO) async throws {
+        try await service.updateSettings(newSettings)
+        settings = newSettings
     }
 
     // MARK: - Stats

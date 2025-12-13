@@ -402,7 +402,8 @@ actor ClipboardService {
         }
 
         do {
-            let storedItem = try await storage.upsertItem(content)
+            let outcome = try await storage.upsertItemWithOutcome(content)
+            let storedItem = outcome.item
 
             if content.type == .image, settings.showImageThumbnails {
                 let existing = await storage.getThumbnailPath(for: storedItem.contentHash)
@@ -412,7 +413,13 @@ actor ClipboardService {
             }
 
             await search.handleUpsertedItem(storedItem)
-            yieldEvent(.newItem(await toDTO(storedItem, storage: storage)))
+            let dto = await toDTO(storedItem, storage: storage)
+            switch outcome {
+            case .inserted:
+                yieldEvent(.newItem(dto))
+            case .updated:
+                yieldEvent(.itemUpdated(dto))
+            }
 
             scheduleCleanup(storage: storage)
         } catch {

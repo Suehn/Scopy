@@ -25,7 +25,7 @@ final class ResourceCleanupTests: XCTestCase {
         _ = try await storage.upsertItem(content)
 
         // 关闭数据库
-        storage.close()
+        await storage.close()
 
         // 验证数据库已关闭（后续 DB 调用应失败）
         do {
@@ -71,7 +71,7 @@ final class ResourceCleanupTests: XCTestCase {
         let count = try await storage.getItemCount()
         XCTAssertEqual(count, 10, "All pinned items should be preserved")
 
-        storage.close()
+        await storage.close()
     }
 
     /// 测试 sqlite3_step 错误处理
@@ -104,7 +104,7 @@ final class ResourceCleanupTests: XCTestCase {
         let count = try await storage.getItemCount()
         XCTAssertLessThanOrEqual(count, 3, "Item count should be reduced")
 
-        storage.close()
+        await storage.close()
     }
 
     // MARK: - Search Service Cleanup Tests
@@ -149,7 +149,7 @@ final class ResourceCleanupTests: XCTestCase {
         XCTAssertEqual(result1.total, result2.total, "Results should be consistent after cache invalidation")
 
         await search.close()
-        storage.close()
+        await storage.close()
     }
 
     // MARK: - Event Stream Cleanup Tests

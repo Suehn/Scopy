@@ -7,6 +7,43 @@
 
 ---
 
+## [v0.43.1] - 2025-12-14
+
+### Fix/Quality：热键应用一致性 + 去重事件语义 + 测试稳定性
+
+- **热键应用更可靠**：`AppState` 在 `.settingsChanged` 时始终触发 `applyHotKeyHandler`；`AppDelegate.applyHotKey` 做幂等（相同配置不重复 unregister/register），避免竞态漏应用与冗余注册。
+- **去重事件语义修复**：`ClipboardService` 仅在“真实插入”时发 `.newItem`，去重命中更新时发 `.itemUpdated`，避免 UI `totalCount` 被错误累加。
+- **设置保存 UX**：设置保存失败时不再自动关闭窗口，改为显示错误提示；保存成功后由 `.settingsChanged` 统一驱动 UI/热键同步。
+- **主线程阻塞点收敛**：`StorageService.close/performWALCheckpoint/getExternalStorageSize` 异步化（避免 `@MainActor` 上 semaphore wait/同步遍历文件系统）。
+- **测试稳定性**：`PerformanceTests` 磁盘资源清理改为 async（避免潜在死锁）；Strict Concurrency 下修复 perf helper 的泛型 Sendable 报错；Low Power Mode 下 `testSearchPerformance10kItems` 阈值自适应放宽以减少误报。
+
+### 修改文件
+
+- `Scopy/AppDelegate.swift`
+- `Scopy/Application/ClipboardService.swift`
+- `Scopy/Observables/AppState.swift`
+- `Scopy/Observables/HistoryViewModel.swift`
+- `Scopy/Observables/SettingsViewModel.swift`
+- `Scopy/Services/StorageService.swift`
+- `Scopy/Views/SettingsView.swift`
+- `ScopyTests/*`
+- `DEPLOYMENT.md`
+- `doc/profile/v0.43.1-profile.md`
+- `doc/profile/README.md`
+- `doc/implemented-doc/v0.43.1.md`
+- `doc/implemented-doc/README.md`
+- `doc/implemented-doc/CHANGELOG.md`
+- `doc/review/review-v0.3.md`
+
+### 测试
+
+- 单元测试：`make test-unit` **53 tests passed** (1 skipped)
+- 性能测试：`make test-perf` **22 tests passed** (6 skipped)
+- Thread Sanitizer：`make test-tsan` **132 tests passed** (1 skipped)
+- Strict Concurrency：`make test-strict` **166 tests passed** (7 skipped)
+
+---
+
 ## [v0.43] - 2025-12-13
 
 ### Phase 7（完成）：强制 ScopyKit module 边界（后端从 App target 移出）

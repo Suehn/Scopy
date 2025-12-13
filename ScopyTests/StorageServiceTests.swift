@@ -15,7 +15,7 @@ final class StorageServiceTests: XCTestCase {
     }
 
     override func tearDown() async throws {
-        storage.close()
+        await storage.close()
         storage = nil
     }
 

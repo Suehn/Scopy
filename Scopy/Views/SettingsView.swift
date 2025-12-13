@@ -17,6 +17,7 @@ struct SettingsView: View {
     @State private var storageStats: StorageStatsDTO?
     @State private var isLoadingStats = false
     @State private var statsTask: Task<Void, Never>?  // v0.20: 保存 Task 引用，防止泄漏
+    @State private var saveErrorMessage: String?
 
     var onDismiss: (() -> Void)?
 
@@ -52,6 +53,21 @@ struct SettingsView: View {
             // v0.20: 取消未完成的任务，防止内存泄漏
             statsTask?.cancel()
             statsTask = nil
+        }
+        .alert(
+            "Failed to Save Settings",
+            isPresented: Binding(
+                get: { saveErrorMessage != nil },
+                set: { isPresented in
+                    if !isPresented { saveErrorMessage = nil }
+                }
+            )
+        ) {
+            Button("OK") {
+                saveErrorMessage = nil
+            }
+        } message: {
+            Text(saveErrorMessage ?? "")
         }
     }
 
@@ -162,18 +178,17 @@ struct SettingsView: View {
         )
 
         Task {
-            await settingsViewModel.updateSettings(currentSettings)
-            await MainActor.run {
-                historyViewModel.searchMode = currentSettings.defaultSearchMode
-
-                ScopyLog.ui.info("Updating hotkey via callback")
-                appState.applyHotKeyHandler?(
-                    currentSettings.hotkeyKeyCode,
-                    currentSettings.hotkeyModifiers
-                )
-
-                isSaving = false
-                onDismiss?()
+            do {
+                try await settingsViewModel.updateSettingsOrThrow(currentSettings)
+                await MainActor.run {
+                    isSaving = false
+                    onDismiss?()
+                }
+            } catch {
+                await MainActor.run {
+                    isSaving = false
+                    saveErrorMessage = error.localizedDescription
+                }
             }
         }
     }
