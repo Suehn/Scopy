@@ -1,7 +1,7 @@
 import Foundation
 
 /// 剪贴板事件 - 对应 v0.md 中的 ClipboardEvent
-enum ClipboardEvent: Sendable {
+public enum ClipboardEvent: Sendable {
     case newItem(ClipboardItemDTO)
     case itemUpdated(ClipboardItemDTO)  // 用于置顶更新的条目
     case itemDeleted(UUID)

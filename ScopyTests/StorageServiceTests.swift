@@ -1,7 +1,5 @@
 import XCTest
-#if !SCOPY_TSAN_TESTS
-@testable import Scopy
-#endif
+import ScopyKit
 
 /// StorageService 单元测试
 /// 验证 v0.md 第2、3节的存储和去重要求

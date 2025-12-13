@@ -1,4 +1,5 @@
 import SwiftUI
+import ScopyKit
 
 struct HistoryItemTextPreviewView: View {
     let text: String?
@@ -16,4 +17,3 @@ struct HistoryItemTextPreviewView: View {
         .frame(maxHeight: 400)
     }
 }
-

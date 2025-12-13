@@ -1,15 +1,15 @@
 import Foundation
 
-actor SearchEngineImpl {
+public actor SearchEngineImpl {
     // MARK: - Types
 
-    enum SearchError: Error, LocalizedError {
+    public enum SearchError: Error, LocalizedError {
         case databaseNotOpen
         case invalidQuery(String)
         case searchFailed(String)
         case timeout
 
-        var errorDescription: String? {
+        public var errorDescription: String? {
             switch self {
             case .databaseNotOpen: return "Database is not open"
             case .invalidQuery(let msg): return "Invalid query: \(msg)"
@@ -19,11 +19,11 @@ actor SearchEngineImpl {
         }
     }
 
-    struct SearchResult: Sendable {
-        let items: [ClipboardStoredItem]
-        let total: Int
-        let hasMore: Bool
-        let searchTimeMs: Double
+    public struct SearchResult: Sendable {
+        public let items: [ClipboardStoredItem]
+        public let total: Int
+        public let hasMore: Bool
+        public let searchTimeMs: Double
     }
 
     private struct IndexedItem {
@@ -146,24 +146,24 @@ actor SearchEngineImpl {
 
     // MARK: - Initialization
 
-    init(dbPath: String) {
+    public init(dbPath: String) {
         self.dbPath = dbPath
     }
 
     // MARK: - Lifecycle
 
-    func open() throws {
+    public func open() throws {
         try openIfNeeded()
     }
 
-    func close() {
+    public func close() {
         connection?.close()
         connection = nil
     }
 
     // MARK: - Cache / Index Updates
 
-    func invalidateCache() {
+    public func invalidateCache() {
         recentItemsCache = []
         cacheTimestamp = .distantPast
 
@@ -215,7 +215,7 @@ actor SearchEngineImpl {
 
     // MARK: - Search API
 
-    func search(request: SearchRequest) async throws -> SearchResult {
+    public func search(request: SearchRequest) async throws -> SearchResult {
         let startTime = CFAbsoluteTimeGetCurrent()
 
         let timeout: TimeInterval

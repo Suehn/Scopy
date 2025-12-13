@@ -6,8 +6,8 @@ import Foundation
 /// Note: This file lives in Infrastructure but is currently used by Presentation code.
 /// Phase 7 (Swift Package split) will enforce dependency direction.
 @MainActor
-final class IconService {
-    static let shared = IconService()
+public final class IconService {
+    public static let shared = IconService()
 
     private let iconCache: NSCache<NSString, NSImage>
     private let nameCache: NSCache<NSString, NSString>
@@ -22,11 +22,11 @@ final class IconService {
         self.nameCache = nameCache
     }
 
-    func cachedIcon(bundleID: String) -> NSImage? {
+    public func cachedIcon(bundleID: String) -> NSImage? {
         iconCache.object(forKey: bundleID as NSString)
     }
 
-    func icon(bundleID: String) -> NSImage? {
+    public func icon(bundleID: String) -> NSImage? {
         if let cached = cachedIcon(bundleID: bundleID) {
             return cached
         }
@@ -40,11 +40,11 @@ final class IconService {
         return icon
     }
 
-    func preloadIcon(bundleID: String) {
+    public func preloadIcon(bundleID: String) {
         _ = icon(bundleID: bundleID)
     }
 
-    func appName(bundleID: String) -> String {
+    public func appName(bundleID: String) -> String {
         if let cached = nameCache.object(forKey: bundleID as NSString) {
             return cached as String
         }
@@ -60,7 +60,7 @@ final class IconService {
         return name
     }
 
-    func clearAll() {
+    public func clearAll() {
         iconCache.removeAllObjects()
         nameCache.removeAllObjects()
     }

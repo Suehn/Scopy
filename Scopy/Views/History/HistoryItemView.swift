@@ -2,6 +2,7 @@ import SwiftUI
 import AppKit
 import ImageIO
 import UniformTypeIdentifiers
+import ScopyKit
 
 // MARK: - History Item View (v0.9.3 - 性能优化版)
 

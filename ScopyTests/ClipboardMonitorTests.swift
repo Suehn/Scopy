@@ -1,7 +1,6 @@
+import AppKit
 import XCTest
-#if !SCOPY_TSAN_TESTS
-@testable import Scopy
-#endif
+import ScopyKit
 
 /// ClipboardMonitor 单元测试
 /// 验证剪贴板监控和内容提取功能

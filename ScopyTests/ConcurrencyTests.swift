@@ -1,7 +1,5 @@
 import XCTest
-#if !SCOPY_TSAN_TESTS
-@testable import Scopy
-#endif
+import ScopyKit
 
 /// 并发安全测试 - v0.10.4
 /// 验证搜索、缓存刷新、任务取消等场景的并发安全性
@@ -197,7 +195,7 @@ final class ConcurrencyTests: XCTestCase {
 
     /// 测试搜索版本号防止旧结果覆盖新结果
     func testSearchVersionPreventsStaleResults() async throws {
-        let mockService = MockClipboardService()
+        let mockService = ClipboardServiceFactory.create(useMock: true)
         let appState = AppState.create(service: mockService)
 
         // 快速连续搜索

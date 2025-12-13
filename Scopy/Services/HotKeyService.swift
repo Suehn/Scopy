@@ -49,10 +49,10 @@ private func logToFile(_ message: String) {
 /// - 使用 GetEventParameter 从事件中提取 hotKeyID
 /// - 通过 hotKeyID 匹配处理器
 /// - 解决快捷键录制后需要重启才能生效的问题
-final class HotKeyService {
+public final class HotKeyService {
     // MARK: - Types
 
-    typealias HotKeyHandler = @MainActor @Sendable () -> Void
+    public typealias HotKeyHandler = @MainActor @Sendable () -> Void
 
     // MARK: - Static Properties (Carbon API 需要)
 
@@ -117,7 +117,7 @@ final class HotKeyService {
 
     // MARK: - Initialization
 
-    init() {
+    public init() {
         logToFile("🔧 HotKeyService init")
         Self.installEventHandlerIfNeeded()
     }
@@ -177,13 +177,13 @@ final class HotKeyService {
     // MARK: - Public API
 
     /// 注册全局快捷键（使用默认快捷键）
-    func register(handler: @escaping HotKeyHandler) {
+    public func register(handler: @escaping HotKeyHandler) {
         logToFile("🔧 register() called with default hotkey")
         registerHotKey(keyCode: defaultKeyCode, modifiers: defaultModifiers, handler: handler)
     }
 
     /// 注销全局快捷键
-    func unregister() {
+    public func unregister() {
         guard let hotKeyRef = hotKeyRef else {
             logToFile("⚠️ unregister() called but no hotkey registered")
             return
@@ -201,7 +201,7 @@ final class HotKeyService {
     }
 
     /// 更新快捷键（设置窗口使用）
-    func updateHotKey(keyCode: UInt32, modifiers: UInt32, handler: @escaping HotKeyHandler) {
+    public func updateHotKey(keyCode: UInt32, modifiers: UInt32, handler: @escaping HotKeyHandler) {
         logToFile("🔧 updateHotKey() called: keyCode=\(keyCode), modifiers=0x\(String(modifiers, radix: 16))")
 
         // 先注销旧的
@@ -329,20 +329,20 @@ final class HotKeyService {
     // MARK: - Testing Support
 
     #if DEBUG
-    static func enableTestingMode() {
+    public static func enableTestingMode() {
         sharedState.withValue { state in
             state.testingMode = true
         }
     }
 
-    static func disableTestingMode() {
+    public static func disableTestingMode() {
         sharedState.withValue { state in
             state.testingMode = false
         }
     }
 
     /// v0.17.1: 使用 withLock 统一锁策略
-    func triggerHandlerForTesting() {
+    public func triggerHandlerForTesting() {
         let handler = Self.sharedState.withValue { state in
             state.handlers[currentHotKeyID]
         }
@@ -354,7 +354,7 @@ final class HotKeyService {
         }
     }
 
-    var isRegistered: Bool {
+    public var isRegistered: Bool {
         let isTestingMode = Self.sharedState.withValue { state in
             state.testingMode
         }
@@ -366,7 +366,7 @@ final class HotKeyService {
         return hotKeyRef != nil
     }
 
-    var hasHandler: Bool {
+    public var hasHandler: Bool {
         Self.sharedState.withValue { state in
             state.handlers[currentHotKeyID] != nil
         }
@@ -374,7 +374,7 @@ final class HotKeyService {
 
     /// v0.22: 修复竞态条件 - 使用 getNextHotKeyID() 确保线程安全
     /// v0.22.1: 修复嵌套锁死锁风险 - 在 handlersLock 外部调用 getNextHotKeyID()
-    func registerHandlerOnly(_ handler: @escaping HotKeyHandler) {
+    public func registerHandlerOnly(_ handler: @escaping HotKeyHandler) {
         // 先获取 ID（避免在 critical region 内做额外工作）
         let newID = Self.getNextHotKeyID()
         currentHotKeyID = newID
@@ -383,7 +383,7 @@ final class HotKeyService {
         }
     }
 
-    func unregisterHandlerOnly() {
+    public func unregisterHandlerOnly() {
         Self.sharedState.withValue { state in
             _ = state.handlers.removeValue(forKey: currentHotKeyID)
         }

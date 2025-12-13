@@ -1,4 +1,5 @@
 import SwiftUI
+import ScopyKit
 
 /// 历史列表视图 - 符合 v0.md 的懒加载设计
 struct HistoryListView: View {

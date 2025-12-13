@@ -1,4 +1,5 @@
 import Foundation
+import ScopyKit
 
 /// Presentation-only helpers for deriving display strings from `ClipboardItemDTO`.
 ///

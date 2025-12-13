@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import ScopyKit
 
 @Observable
 @MainActor
@@ -90,4 +91,3 @@ final class SettingsViewModel {
         return String(format: "%.1f MB", kb / 1024)
     }
 }
-

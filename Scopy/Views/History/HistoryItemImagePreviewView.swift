@@ -1,4 +1,5 @@
 import SwiftUI
+import ScopyKit
 import AppKit
 
 struct HistoryItemImagePreviewView: View {
@@ -31,4 +32,3 @@ struct HistoryItemImagePreviewView: View {
         }
     }
 }
-

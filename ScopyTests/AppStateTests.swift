@@ -1,7 +1,5 @@
 import XCTest
-#if !SCOPY_TSAN_TESTS
-@testable import Scopy
-#endif
+import ScopyKit
 
 /// AppState 单元测试
 /// 验证状态管理、搜索防抖、键盘导航等核心逻辑
@@ -888,7 +886,7 @@ final class FailingMockService: ClipboardServiceProtocol {
 @MainActor
 final class AppStateFallbackTests: XCTestCase {
 
-    /// Test that start() falls back to MockClipboardService when the initial service fails
+    /// Test that start() falls back to a working service when the initial service fails
     func testStartFallsBackToMockOnFailure() async {
         let failingService = FailingMockService()
         let state = AppState.forTesting(service: failingService)
@@ -896,12 +894,11 @@ final class AppStateFallbackTests: XCTestCase {
         // Before start, service is the failing one
         XCTAssertTrue(state.service is FailingMockService)
 
-        // After start, should fall back to MockClipboardService
+        // After start, should fall back to a non-failing service
         await state.start()
 
-        // Verify service was replaced with MockClipboardService
-        XCTAssertTrue(state.service is MockClipboardService,
-                     "Service should be MockClipboardService after fallback, but was \(type(of: state.service))")
+        // Verify service was replaced (implementation is internal to ScopyKit)
+        XCTAssertFalse(state.service is FailingMockService, "Service should be replaced after fallback")
 
         state.stop()
     }

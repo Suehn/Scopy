@@ -3,36 +3,41 @@ import Foundation
 /// 性能分析器 - 用于收集和报告性能指标
 /// 符合 v0.md 第4节的性能监控要求
 @MainActor
-final class PerformanceProfiler {
+public final class PerformanceProfiler {
     // MARK: - Types
 
-    struct Metric {
-        let name: String
-        let values: [Double]
+    public struct Metric {
+        public let name: String
+        public let values: [Double]
 
-        var count: Int { values.count }
-        var min: Double { values.min() ?? 0 }
-        var max: Double { values.max() ?? 0 }
-        var avg: Double { values.isEmpty ? 0 : values.reduce(0, +) / Double(values.count) }
+        public init(name: String, values: [Double]) {
+            self.name = name
+            self.values = values
+        }
 
-        func percentile(_ p: Double) -> Double {
+        public var count: Int { values.count }
+        public var min: Double { values.min() ?? 0 }
+        public var max: Double { values.max() ?? 0 }
+        public var avg: Double { values.isEmpty ? 0 : values.reduce(0, +) / Double(values.count) }
+
+        public func percentile(_ p: Double) -> Double {
             guard !values.isEmpty else { return 0 }
             let sorted = values.sorted()
             let index = Int(Double(sorted.count) * p / 100)
             return sorted[Swift.min(index, sorted.count - 1)]
         }
 
-        var p50: Double { percentile(50) }
-        var p95: Double { percentile(95) }
-        var p99: Double { percentile(99) }
+        public var p50: Double { percentile(50) }
+        public var p95: Double { percentile(95) }
+        public var p99: Double { percentile(99) }
     }
 
-    struct ProfileReport: CustomStringConvertible {
-        let metrics: [Metric]
-        let timestamp: Date
-        let duration: TimeInterval
+    public struct ProfileReport: CustomStringConvertible {
+        public let metrics: [Metric]
+        public let timestamp: Date
+        public let duration: TimeInterval
 
-        var description: String {
+        public var description: String {
             var lines = [String]()
             lines.append("╔═══════════════════════════════════════════════════════════════╗")
             lines.append("║              Performance Profile Report                        ║")
@@ -70,21 +75,21 @@ final class PerformanceProfiler {
     private var startTime: Date?
     private var isEnabled = true
 
-    static let shared = PerformanceProfiler()
+    public static let shared = PerformanceProfiler()
 
     private init() {}
 
     // MARK: - Public API
 
-    func enable() { isEnabled = true }
-    func disable() { isEnabled = false }
+    public func enable() { isEnabled = true }
+    public func disable() { isEnabled = false }
 
-    func startProfiling() {
+    public func startProfiling() {
         measurements.removeAll()
         startTime = Date()
     }
 
-    func stopProfiling() -> ProfileReport {
+    public func stopProfiling() -> ProfileReport {
         let duration = startTime.map { Date().timeIntervalSince($0) } ?? 0
         let metrics = measurements.map { Metric(name: $0.key, values: $0.value) }
             .sorted { $0.name < $1.name }
@@ -98,7 +103,7 @@ final class PerformanceProfiler {
 
     /// Record a timing measurement
     @discardableResult
-    func measure<T>(_ name: String, block: () throws -> T) rethrows -> T {
+    public func measure<T>(_ name: String, block: () throws -> T) rethrows -> T {
         guard isEnabled else { return try block() }
 
         let start = CFAbsoluteTimeGetCurrent()
@@ -111,7 +116,7 @@ final class PerformanceProfiler {
 
     /// Record an async timing measurement
     @discardableResult
-    func measureAsync<T: Sendable>(_ name: String, block: () async throws -> T) async rethrows -> T {
+    public func measureAsync<T: Sendable>(_ name: String, block: () async throws -> T) async rethrows -> T {
         guard isEnabled else { return try await block() }
 
         let start = CFAbsoluteTimeGetCurrent()
@@ -123,12 +128,12 @@ final class PerformanceProfiler {
     }
 
     /// Manually record a measurement
-    func record(name: String, value: Double) {
+    public func record(name: String, value: Double) {
         measurements[name, default: []].append(value)
     }
 
     /// Get current metrics without stopping
-    func getCurrentMetrics() -> [Metric] {
+    public func getCurrentMetrics() -> [Metric] {
         measurements.map { Metric(name: $0.key, values: $0.value) }
             .sorted { $0.name < $1.name }
     }
@@ -155,20 +160,22 @@ final class PerformanceProfiler {
 
 /// 基准测试运行器
 @MainActor
-final class BenchmarkRunner {
-    struct BenchmarkResult {
-        let name: String
-        let iterations: Int
-        let totalTimeMs: Double
-        let avgTimeMs: Double
-        let opsPerSecond: Double
-        let passed: Bool
-        let targetMs: Double?
+public final class BenchmarkRunner {
+    public struct BenchmarkResult {
+        public let name: String
+        public let iterations: Int
+        public let totalTimeMs: Double
+        public let avgTimeMs: Double
+        public let opsPerSecond: Double
+        public let passed: Bool
+        public let targetMs: Double?
     }
 
     private var results: [BenchmarkResult] = []
 
-    func runBenchmark(
+    public init() {}
+
+    public func runBenchmark(
         name: String,
         iterations: Int = 100,
         targetMs: Double? = nil,
@@ -201,7 +208,7 @@ final class BenchmarkRunner {
         ))
     }
 
-    func runAsyncBenchmark(
+    public func runAsyncBenchmark(
         name: String,
         iterations: Int = 100,
         targetMs: Double? = nil,
@@ -234,7 +241,7 @@ final class BenchmarkRunner {
         ))
     }
 
-    func generateReport() -> String {
+    public func generateReport() -> String {
         var lines = [String]()
         lines.append("")
         lines.append("╔═══════════════════════════════════════════════════════════════════════════╗")
@@ -264,7 +271,7 @@ final class BenchmarkRunner {
         return lines.joined(separator: "\n")
     }
 
-    func allPassed() -> Bool {
+    public func allPassed() -> Bool {
         results.allSatisfy { $0.passed }
     }
 }
@@ -272,9 +279,9 @@ final class BenchmarkRunner {
 // MARK: - Performance Assertions
 
 /// 性能断言宏
-struct PerformanceAssertions {
+public struct PerformanceAssertions {
     /// Assert search latency meets v0.md requirements
-    static func assertSearchLatency(_ latencyMs: Double, itemCount: Int, file: StaticString = #file, line: UInt = #line) {
+    public static func assertSearchLatency(_ latencyMs: Double, itemCount: Int, file: StaticString = #file, line: UInt = #line) {
         let target: Double
         if itemCount <= 5000 {
             // v0.md 4.1: P95 ≤ 50ms for ≤5k items
@@ -294,7 +301,7 @@ struct PerformanceAssertions {
     }
 
     /// Assert fetch latency is reasonable
-    static func assertFetchLatency(_ latencyMs: Double, limit: Int, file: StaticString = #file, line: UInt = #line) {
+    public static func assertFetchLatency(_ latencyMs: Double, limit: Int, file: StaticString = #file, line: UInt = #line) {
         // Generally, fetching should be under 20ms for typical page sizes
         let target = Double(limit) * 0.5 + 10 // Rough heuristic
 

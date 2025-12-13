@@ -1,5 +1,6 @@
 import SwiftUI
 import Carbon.HIToolbox
+import ScopyKit
 
 /// 设置窗口视图
 /// v0.6: 多页 TabView 结构，支持快捷键自定义、搜索模式选择、存储统计

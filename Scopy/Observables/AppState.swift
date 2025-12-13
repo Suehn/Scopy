@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import Observation
+import ScopyKit
 
 /// 选中来源 - 用于区分鼠标和键盘导航
 enum SelectionSource {
@@ -61,10 +62,10 @@ final class AppState {
             resolvedService = service
             ScopyLog.app.info("Using injected Clipboard Service")
         } else if Self.useMockService {
-            resolvedService = MockClipboardService()
+            resolvedService = ClipboardServiceFactory.create(useMock: true)
             ScopyLog.app.info("Using Mock Clipboard Service")
         } else {
-            resolvedService = RealClipboardService()
+            resolvedService = ClipboardServiceFactory.create(useMock: false)
             ScopyLog.app.info("Using Real Clipboard Service")
         }
 
@@ -84,13 +85,13 @@ final class AppState {
             ScopyLog.app.error("Failed to start Clipboard Service: \(error.localizedDescription, privacy: .public)")
             service.stop()
 
-            let mockService = MockClipboardService()
-            service = mockService
-            settingsViewModel.updateService(mockService)
-            historyViewModel.updateService(mockService)
+            let fallback = ClipboardServiceFactory.create(useMock: true)
+            service = fallback
+            settingsViewModel.updateService(fallback)
+            historyViewModel.updateService(fallback)
 
             do {
-                try await mockService.start()
+                try await fallback.start()
                 ScopyLog.app.warning("Falling back to Mock Clipboard Service (started)")
             } catch {
                 ScopyLog.app.error("Mock service also failed to start: \(error.localizedDescription, privacy: .public)")

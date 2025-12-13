@@ -6,34 +6,50 @@ import ImageIO
 /// ClipboardMonitor - 系统剪贴板监控服务
 /// 符合 v0.md 第1节：后端只提供结构化数据和命令接口
 @MainActor
-final class ClipboardMonitor {
+public final class ClipboardMonitor {
     // MARK: - Types
 
-    struct ClipboardContent: Sendable {
-        enum Payload: Sendable {
+    public struct ClipboardContent: Sendable {
+        public enum Payload: Sendable {
             case none
             case data(Data)
             case file(URL)
         }
 
-        let type: ClipboardItemType
-        let plainText: String
-        let payload: Payload
-        let appBundleID: String?
-        let contentHash: String
-        let sizeBytes: Int
+        public let type: ClipboardItemType
+        public let plainText: String
+        public let payload: Payload
+        public let appBundleID: String?
+        public let contentHash: String
+        public let sizeBytes: Int
 
-        var rawData: Data? {
+        public init(
+            type: ClipboardItemType,
+            plainText: String,
+            payload: Payload,
+            appBundleID: String?,
+            contentHash: String,
+            sizeBytes: Int
+        ) {
+            self.type = type
+            self.plainText = plainText
+            self.payload = payload
+            self.appBundleID = appBundleID
+            self.contentHash = contentHash
+            self.sizeBytes = sizeBytes
+        }
+
+        public var rawData: Data? {
             guard case .data(let data) = payload else { return nil }
             return data
         }
 
-        var ingestFileURL: URL? {
+        public var ingestFileURL: URL? {
             guard case .file(let url) = payload else { return nil }
             return url
         }
 
-        var isEmpty: Bool {
+        public var isEmpty: Bool {
             switch payload {
             case .none:
                 return plainText.isEmpty
@@ -81,17 +97,17 @@ final class ClipboardMonitor {
     private let queueLock = NSLock()
 
     private let eventContinuation: AsyncStream<ClipboardContent>.Continuation
-    let contentStream: AsyncStream<ClipboardContent>
+    public let contentStream: AsyncStream<ClipboardContent>
 
     private let ingestSpoolDirectory: URL
 
     // Configuration
-    private(set) var pollingInterval: TimeInterval = 0.5 // 500ms default
-    private(set) var ignoredApps: Set<String> = []
+    public private(set) var pollingInterval: TimeInterval = 0.5 // 500ms default
+    public private(set) var ignoredApps: Set<String> = []
 
     // MARK: - Initialization
 
-    init() {
+    public init() {
         let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
         let scopyCaches = caches.appendingPathComponent("Scopy", isDirectory: true)
         let ingestDir = scopyCaches.appendingPathComponent("ingest", isDirectory: true)
@@ -132,7 +148,7 @@ final class ClipboardMonitor {
     // MARK: - Public API
 
     /// v0.10.4: 移除重复的 RunLoop.add 调用
-    func startMonitoring() {
+    public func startMonitoring() {
         // v0.10.7: 确保在主线程调用，否则 Timer 不会触发
         assert(Thread.isMainThread, "startMonitoring must be called on main thread")
 
@@ -149,7 +165,7 @@ final class ClipboardMonitor {
     }
 
     /// v0.22: 使用锁保护 isContentStreamFinished，防止与 yield() 竞态
-    func stopMonitoring() {
+    public func stopMonitoring() {
         // 使用锁保护状态设置，确保与 yield 操作互斥
         let shouldStop = contentStreamLock.withLock { () -> Bool in
             guard !isContentStreamFinished else { return false }
@@ -170,7 +186,7 @@ final class ClipboardMonitor {
         isMonitoring = false
     }
 
-    func setPollingInterval(_ interval: TimeInterval) {
+    public func setPollingInterval(_ interval: TimeInterval) {
         pollingInterval = max(0.1, min(5.0, interval)) // Clamp between 100ms and 5s
         if isMonitoring {
             stopMonitoring()
@@ -178,18 +194,18 @@ final class ClipboardMonitor {
         }
     }
 
-    func setIgnoredApps(_ apps: Set<String>) {
+    public func setIgnoredApps(_ apps: Set<String>) {
         ignoredApps = apps
     }
 
     /// Manually read current clipboard content
-    func readCurrentClipboard() -> ClipboardContent? {
+    public func readCurrentClipboard() -> ClipboardContent? {
         let pasteboard = NSPasteboard.general
         return extractContent(from: pasteboard)
     }
 
     /// Copy content to system clipboard
-    func copyToClipboard(text: String) {
+    public func copyToClipboard(text: String) {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         pasteboard.setString(text, forType: .string)
@@ -197,7 +213,7 @@ final class ClipboardMonitor {
         lastChangeCount = pasteboard.changeCount
     }
 
-    func copyToClipboard(data: Data, type: NSPasteboard.PasteboardType) {
+    public func copyToClipboard(data: Data, type: NSPasteboard.PasteboardType) {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         pasteboard.setData(data, forType: type)
@@ -206,7 +222,7 @@ final class ClipboardMonitor {
 
     /// Copy file URLs to system clipboard
     /// 将文件 URL 复制到系统剪贴板，支持 Finder 粘贴
-    func copyToClipboard(fileURLs: [URL]) {
+    public func copyToClipboard(fileURLs: [URL]) {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
 

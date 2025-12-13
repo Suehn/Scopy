@@ -5,7 +5,7 @@ import Foundation
 /// 剪贴板服务协议 - 对应 v0.md 中的前后端接口设计
 /// 后端只提供结构化数据和命令接口，不关心 UI
 @MainActor
-protocol ClipboardServiceProtocol: AnyObject {
+public protocol ClipboardServiceProtocol: AnyObject {
     // MARK: - Lifecycle
 
     /// 启动服务（真实服务需要初始化数据库、启动监控；Mock 服务可空实现）

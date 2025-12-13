@@ -1,7 +1,7 @@
 import Foundation
 
 /// 剪贴板项类型
-enum ClipboardItemType: String, Sendable {
+public enum ClipboardItemType: String, Sendable {
     case text
     case rtf
     case html
@@ -9,4 +9,3 @@ enum ClipboardItemType: String, Sendable {
     case file
     case other
 }
-

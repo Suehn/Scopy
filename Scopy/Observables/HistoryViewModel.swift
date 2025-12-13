@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import ScopyKit
 
 @Observable
 @MainActor
@@ -500,4 +501,3 @@ final class HistoryViewModel {
         unpinnedItemsCache = nil
     }
 }
-

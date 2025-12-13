@@ -1,7 +1,5 @@
 import XCTest
-#if !SCOPY_TSAN_TESTS
-@testable import Scopy
-#endif
+import ScopyKit
 
 /// 资源清理测试 - v0.10.4
 /// 验证 Timer、Task、事件流、数据库连接等资源的正确清理
@@ -158,7 +156,7 @@ final class ResourceCleanupTests: XCTestCase {
 
     /// 测试事件流在服务停止后正确关闭
     func testEventStreamCleanup() async throws {
-        let service = RealClipboardService(databasePath: Self.makeSharedInMemoryDatabasePath())
+        let service = ClipboardServiceFactory.create(useMock: false, databasePath: Self.makeSharedInMemoryDatabasePath())
 
         // 启动服务
         try await service.start()
@@ -198,7 +196,7 @@ final class ResourceCleanupTests: XCTestCase {
 
     /// 测试搜索任务取消后不会更新状态
     func testSearchTaskCancellation() async throws {
-        let mockService = MockClipboardService()
+        let mockService = ClipboardServiceFactory.create(useMock: true)
         let appState = AppState.create(service: mockService)
 
         // 设置初始状态
@@ -221,7 +219,7 @@ final class ResourceCleanupTests: XCTestCase {
 
     /// 测试 loadMore 任务取消
     func testLoadMoreTaskCancellation() async throws {
-        let mockService = MockClipboardService()
+        let mockService = ClipboardServiceFactory.create(useMock: true)
         let appState = AppState.create(service: mockService)
 
         // 初始化

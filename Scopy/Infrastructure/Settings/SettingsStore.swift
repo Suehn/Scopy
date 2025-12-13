@@ -5,8 +5,8 @@ import Foundation
 /// 目标：
 /// - 消灭多点读写 UserDefaults（AppDelegate / RealClipboardService 等）
 /// - 为后续“热键/设置变更订阅”提供统一入口
-actor SettingsStore {
-    static let shared = SettingsStore()
+public actor SettingsStore {
+    public static let shared = SettingsStore()
 
     private struct Constants {
         static let settingsKey = "ScopySettings"
@@ -17,30 +17,30 @@ actor SettingsStore {
 
     private var subscribers: [UUID: AsyncStream<SettingsDTO>.Continuation] = [:]
 
-    init(userDefaults: UserDefaults = .standard) {
+    public init(userDefaults: UserDefaults = .standard) {
         self.userDefaults = userDefaults
     }
 
-    func load() -> SettingsDTO {
+    public func load() -> SettingsDTO {
         let settings = Self.loadFromUserDefaults(userDefaults)
         cachedSettings = settings
         return settings
     }
 
-    func save(_ settings: SettingsDTO) {
+    public func save(_ settings: SettingsDTO) {
         userDefaults.set(Self.encode(settings), forKey: Constants.settingsKey)
         cachedSettings = settings
         broadcast(settings)
     }
 
-    func updateHotkey(keyCode: UInt32, modifiers: UInt32) {
+    public func updateHotkey(keyCode: UInt32, modifiers: UInt32) {
         var updated = cachedSettings ?? Self.loadFromUserDefaults(userDefaults)
         updated.hotkeyKeyCode = keyCode
         updated.hotkeyModifiers = modifiers
         save(updated)
     }
 
-    func observeSettings(bufferSize: Int = 1) -> AsyncStream<SettingsDTO> {
+    public func observeSettings(bufferSize: Int = 1) -> AsyncStream<SettingsDTO> {
         let id = UUID()
         return AsyncStream(SettingsDTO.self, bufferingPolicy: .bufferingNewest(bufferSize)) { continuation in
             subscribers[id] = continuation
@@ -109,4 +109,3 @@ actor SettingsStore {
         return decode(dict)
     }
 }
-

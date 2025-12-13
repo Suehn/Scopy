@@ -1,4 +1,5 @@
 import SwiftUI
+import ScopyKit
 
 /// 主内容视图 - 对应 Maccy 的 ContentView
 /// v0.10.1: 改用 Environment 注入 AppState，保持与 SettingsView 一致

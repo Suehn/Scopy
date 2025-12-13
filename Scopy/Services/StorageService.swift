@@ -6,7 +6,7 @@ import UniformTypeIdentifiers
 /// StorageService - 数据持久化服务
 /// 符合 v0.md 第2节：分级存储（小内容SQLite内联，大内容外部文件）
 @MainActor
-final class StorageService {
+public final class StorageService {
     // MARK: - Types
 
     enum StorageError: Error, LocalizedError {
@@ -31,7 +31,7 @@ final class StorageService {
         }
     }
 
-    typealias StoredItem = ClipboardStoredItem
+    public typealias StoredItem = ClipboardStoredItem
 
     // MARK: - Configuration
 
@@ -39,11 +39,13 @@ final class StorageService {
     static let externalStorageThreshold = ScopyThresholds.externalStorageBytes
 
     /// Default cleanup settings (v0.md 2.1)
-    struct CleanupSettings {
-        var maxItems: Int = 10_000
-        var maxDaysAge: Int? = nil // nil = unlimited
-        var maxSmallStorageMB: Int = 200
-        var maxLargeStorageMB: Int = 800
+    public struct CleanupSettings {
+        public var maxItems: Int = 10_000
+        public var maxDaysAge: Int? = nil // nil = unlimited
+        public var maxSmallStorageMB: Int = 200
+        public var maxLargeStorageMB: Int = 800
+
+        public init() {}
     }
 
     // MARK: - Properties
@@ -54,7 +56,7 @@ final class StorageService {
 
     let repository: SQLiteClipboardRepository
 
-    var cleanupSettings = CleanupSettings()
+    public var cleanupSettings = CleanupSettings()
 
     /// v0.10.8: 外部存储大小缓存（避免重复遍历文件系统）
     private var cachedExternalSize: (size: Int, timestamp: Date)?
@@ -64,11 +66,11 @@ final class StorageService {
     private let externalSizeCacheLock = NSLock()
 
     /// 数据库文件路径（用于设置窗口显示）
-    var databaseFilePath: String { dbPath }
+    public var databaseFilePath: String { dbPath }
 
     // MARK: - Initialization
 
-    init(databasePath: String? = nil) {
+    public init(databasePath: String? = nil) {
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
         let scopyDir = appSupport.appendingPathComponent("Scopy", isDirectory: true)
 
@@ -109,12 +111,12 @@ final class StorageService {
     // MARK: - Database Lifecycle
 
     /// v0.11: 修复半打开状态问题 - 使用临时变量，失败时确保清理
-    func open() async throws {
+    public func open() async throws {
         try await repository.open()
     }
 
     /// v0.11: 执行 WAL 检查点（定期调用以控制 WAL 文件大小）
-    func performWALCheckpoint() {
+    public func performWALCheckpoint() {
         let repo = repository
         let semaphore = DispatchSemaphore(value: 0)
         Task.detached {
@@ -125,7 +127,7 @@ final class StorageService {
     }
 
     /// v0.20: 关闭前执行 WAL 检查点，确保数据完整写入
-    func close() {
+    public func close() {
         let repo = repository
         let semaphore = DispatchSemaphore(value: 0)
         Task.detached {
@@ -139,7 +141,7 @@ final class StorageService {
 
     /// Insert or update item (handles deduplication per v0.md 3.2)
     /// v0.29: 大内容外部写入后台化，避免阻塞主线程
-    func upsertItem(_ content: ClipboardMonitor.ClipboardContent) async throws -> StoredItem {
+    public func upsertItem(_ content: ClipboardMonitor.ClipboardContent) async throws -> StoredItem {
         // Check for duplicate by content hash (v0.md 3.2)
         if let existing = try await repository.fetchItemByHash(content.contentHash) {
             if let ingestURL = content.ingestFileURL {
@@ -229,17 +231,17 @@ final class StorageService {
         )
     }
 
-    func findByHash(_ hash: String) async throws -> StoredItem? {
+    public func findByHash(_ hash: String) async throws -> StoredItem? {
         try await repository.fetchItemByHash(hash)
     }
 
-    func findByID(_ id: UUID) async throws -> StoredItem? {
+    public func findByID(_ id: UUID) async throws -> StoredItem? {
         try await repository.fetchItemByID(id)
     }
 
     /// Fetch recent items with pagination (v0.md 2.2)
     /// v0.13: 预分配数组容量，避免多次重新分配
-    func fetchRecent(limit: Int, offset: Int) async throws -> [StoredItem] {
+    public func fetchRecent(limit: Int, offset: Int) async throws -> [StoredItem] {
         try await repository.fetchRecent(limit: limit, offset: offset)
     }
 
@@ -252,7 +254,7 @@ final class StorageService {
         )
     }
 
-    func deleteItem(_ id: UUID) async throws {
+    public func deleteItem(_ id: UUID) async throws {
         // First get the item to clean up external storage
         // v0.19: 添加错误日志
         if let item = try await repository.fetchItemByID(id), let storageRef = item.storageRef {
@@ -267,7 +269,7 @@ final class StorageService {
         try await repository.deleteItem(id: id)
     }
 
-    func deleteAllExceptPinned() async throws {
+    public func deleteAllExceptPinned() async throws {
         let refs = try await repository.fetchStorageRefsForUnpinned()
 
         // Delete files
@@ -286,23 +288,23 @@ final class StorageService {
         try await repository.deleteAllExceptPinned()
     }
 
-    func setPin(_ id: UUID, pinned: Bool) async throws {
+    public func setPin(_ id: UUID, pinned: Bool) async throws {
         try await repository.updatePin(id: id, pinned: pinned)
     }
 
     // MARK: - Statistics
 
-    func getItemCount() async throws -> Int {
+    public func getItemCount() async throws -> Int {
         try await repository.getItemCount()
     }
 
-    func getTotalSize() async throws -> Int {
+    public func getTotalSize() async throws -> Int {
         try await repository.getTotalSize()
     }
 
     /// v0.10.8: 使用缓存避免重复遍历文件系统
     /// v0.22: 使用锁保护缓存访问，防止数据竞争
-    func getExternalStorageSize() throws -> Int {
+    public func getExternalStorageSize() throws -> Int {
         // 检查缓存是否有效（加锁读取）
         if let cached = externalSizeCacheLock.withLock({ cachedExternalSize }),
            Date().timeIntervalSince(cached.timestamp) < externalSizeCacheTTL {
@@ -410,18 +412,18 @@ final class StorageService {
     }
 
     /// 获取最近使用的 app 列表（用于过滤）
-    func getRecentApps(limit: Int) async throws -> [String] {
+    public func getRecentApps(limit: Int) async throws -> [String] {
         try await repository.fetchRecentApps(limit: limit)
     }
 
     // MARK: - Cleanup (v0.md 2.3)
 
-    enum CleanupMode {
+    public enum CleanupMode {
         case light   // 热路径：跳过 vacuum / orphan 扫描
         case full    // 低频：完整清理
     }
 
-    func performCleanup(mode: CleanupMode = .full) async throws {
+    public func performCleanup(mode: CleanupMode = .full) async throws {
         // 1. By count
         let currentCount = try await getItemCount()
         if currentCount > cleanupSettings.maxItems {
@@ -473,7 +475,7 @@ final class StorageService {
     /// Files that exist on disk but have no corresponding database record
     /// This fixes the storage leak where files accumulate without being tracked
     /// v0.19: 修复 - 文件删除移到后台线程，避免阻塞主线程
-    func cleanupOrphanedFiles() async throws {
+    public func cleanupOrphanedFiles() async throws {
         // 1. Get all storage_ref filenames from database
         let validRefs = try await repository.fetchExternalRefFilenames()
 

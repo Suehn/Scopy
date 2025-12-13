@@ -3,7 +3,8 @@
 > 说明：本文用于指导后续“稳定性优先”的长期重构（含 Codex 执行）。`doc/review/review-v0.3-2.md` 为历史草案/补充材料，其中关键内容已合并到本文；后续以本文为准。
 
 - 最后更新：2025-12-13
-- 代码基线：`v0.42`
+- 代码基线：`v0.43`
+- 重构状态：Phase 0-7 已完成（至 `v0.43`）
 - 关联文档：
   - 当前实现状态索引：`doc/implemented-doc/README.md`
   - 近期变更：`doc/implemented-doc/CHANGELOG.md`
@@ -831,8 +832,12 @@ Notes：
     - 结果：通过（无并发 warnings；`ScopyTests` 166 tests passed，7 skipped）
     - 关键修复点：UI 缓存/展示辅助 `@MainActor` 收口、HotKeyService Carbon 回调 hop 到 MainActor、tests/UI tests 的 `Sendable` 捕获修正
 
-- 待继续：
-  - Phase 7（可选）：抽成 Swift Package（强制边界）
+- 已完成（2025-12-13，v0.43）：
+  - Phase 7（可选）完成落地：强制 ScopyKit module 边界（后端从 App target 移出）
+  - 关键点：
+    - `project.yml`：App target 排除后端目录（Domain/Application/Infrastructure/Services/Utilities 等），并让 tests targets 依赖 `ScopyKit`
+    - 构建设置补齐：在 `BUILD_DIR=.build` 前提下，增加 `SWIFT_INCLUDE_PATHS`/`FRAMEWORK_SEARCH_PATHS` 指向 DerivedData `Build/Products/*`，确保 App/Test targets 可稳定 `import ScopyKit`
+    - 测试代码对齐：不再引用 `RealClipboardService`/`MockClipboardService` 具体类型，改走 `ClipboardServiceFactory`
 
 - 已完成（2025-12-13，v0.41）：
   - （可选）将 Strict Concurrency 固化为 CI/Makefile 回归门槛：
@@ -852,7 +857,10 @@ Notes：
 - 已完成（2025-12-13，v0.42）：
   - SwiftPM 接入：根目录 `Package.swift` 新增本地 library `ScopyKit`（源码来自 `Scopy/`，排除 App/Presentation 相关文件），并链接 `sqlite3`。
   - XcodeGen 接入：`project.yml` 增加本地 `packages`，并让 App target 依赖 `ScopyKit` product（构建/测试会看到 `Resolve Package Graph`）。
-  - 当前阶段仅完成“接入准备”；下一步（v0.43）将把后端源码从 App target 移出并完成 public API 收口，真正实现 module 边界强制。
+- 已完成（2025-12-13，v0.43）：
+  - 强制边界：App target 只保留 App/UI/Presentation；后端由 `ScopyKit` 提供，UI 通过 `import ScopyKit` 使用协议/DTO/服务入口。
+  - 构建链路：补齐 DerivedData `Build/Products/*` 搜索路径，使 `BUILD_DIR=.build` 时也能稳定 `import ScopyKit`。
+  - Tests：`ScopyTests`/`ScopyTSanTests` 统一依赖 `ScopyKit`，不再将后端源码直接编进 test bundle。
 
 ---
 

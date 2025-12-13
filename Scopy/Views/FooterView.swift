@@ -1,4 +1,5 @@
 import SwiftUI
+import ScopyKit
 
 /// 底部状态栏视图
 struct FooterView: View {

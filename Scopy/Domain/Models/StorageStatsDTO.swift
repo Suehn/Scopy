@@ -1,27 +1,43 @@
 import Foundation
 
 /// 存储统计详情 DTO
-struct StorageStatsDTO: Sendable {
-    let itemCount: Int
-    let databaseSizeBytes: Int
-    let externalStorageSizeBytes: Int
-    let thumbnailSizeBytes: Int  // v0.15.2: 缩略图缓存大小
-    let totalSizeBytes: Int
-    let databasePath: String
+public struct StorageStatsDTO: Sendable {
+    public let itemCount: Int
+    public let databaseSizeBytes: Int
+    public let externalStorageSizeBytes: Int
+    public let thumbnailSizeBytes: Int  // v0.15.2: 缩略图缓存大小
+    public let totalSizeBytes: Int
+    public let databasePath: String
 
-    var databaseSizeText: String {
+    public init(
+        itemCount: Int,
+        databaseSizeBytes: Int,
+        externalStorageSizeBytes: Int,
+        thumbnailSizeBytes: Int,
+        totalSizeBytes: Int,
+        databasePath: String
+    ) {
+        self.itemCount = itemCount
+        self.databaseSizeBytes = databaseSizeBytes
+        self.externalStorageSizeBytes = externalStorageSizeBytes
+        self.thumbnailSizeBytes = thumbnailSizeBytes
+        self.totalSizeBytes = totalSizeBytes
+        self.databasePath = databasePath
+    }
+
+    public var databaseSizeText: String {
         formatBytes(databaseSizeBytes)
     }
 
-    var externalStorageSizeText: String {
+    public var externalStorageSizeText: String {
         formatBytes(externalStorageSizeBytes)
     }
 
-    var thumbnailSizeText: String {
+    public var thumbnailSizeText: String {
         formatBytes(thumbnailSizeBytes)
     }
 
-    var totalSizeText: String {
+    public var totalSizeText: String {
         formatBytes(totalSizeBytes)
     }
 
@@ -34,4 +50,3 @@ struct StorageStatsDTO: Sendable {
         }
     }
 }
-

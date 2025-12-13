@@ -86,9 +86,9 @@ final class RealClipboardService: ClipboardServiceProtocol {
 
 // MARK: - Service Factory
 
-enum ClipboardServiceFactory {
+public enum ClipboardServiceFactory {
     @MainActor
-    static func create(useMock: Bool = false, databasePath: String? = nil) -> ClipboardServiceProtocol {
+    public static func create(useMock: Bool = false, databasePath: String? = nil) -> ClipboardServiceProtocol {
         if useMock {
             return MockClipboardService()
         }
@@ -101,10 +101,9 @@ enum ClipboardServiceFactory {
     /// - Search 使用独立 read connection，因此不能使用 `:memory:`（每个连接会得到不同数据库）。
     /// - 使用 shared-cache in-memory URI 让多连接访问同一 DB。
     @MainActor
-    static func createForTesting() -> RealClipboardService {
+    public static func createForTesting() -> ClipboardServiceProtocol {
         let unique = UUID().uuidString.replacingOccurrences(of: "-", with: "")
         let sharedMemoryURI = "file:scopy_test_\(unique)?mode=memory&cache=shared"
         return RealClipboardService(databasePath: sharedMemoryURI)
     }
 }
-

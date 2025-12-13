@@ -7,209 +7,121 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		01D01DB617998D942AE071D9 /* SearchRequest.swift in Sources */ = {isa = PBXBuildFile; fileRef = 483D3ABB1204226B663D0C1B /* SearchRequest.swift */; };
-		0230DC45955EBA2A1CF98C60 /* PerformanceProfiler.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADB79901F7DEAC407EBADE89 /* PerformanceProfiler.swift */; };
 		027ABA7EB0EA43844BC05517 /* ClipboardItemDisplayText.swift in Sources */ = {isa = PBXBuildFile; fileRef = C46B24B2682039001EA7F2A7 /* ClipboardItemDisplayText.swift */; };
 		04D00AA12169910C80C28CF9 /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61DF2BC8CEEFB6DBC2A87609 /* AppState.swift */; };
 		05C95008A01E020F43D3988B /* AppStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C8E1D7C3153B156AF59F4FBD /* AppStateTests.swift */; };
 		0620EE33AA3CA3DF36D3176B /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 80F5648018D6B10F8FB3D046 /* SettingsView.swift */; };
-		07D656880127B43B79E62F17 /* ScopyThresholds.swift in Sources */ = {isa = PBXBuildFile; fileRef = FFBCEEF2CC2763186DE26F69 /* ScopyThresholds.swift */; };
-		08D10A5466F4C33F7B968678 /* PerformanceMetrics.swift in Sources */ = {isa = PBXBuildFile; fileRef = 08E21526EAB3F1DCCB32D679 /* PerformanceMetrics.swift */; };
 		0C968E38F7456C42503E1319 /* ScopyComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F7A2545CE101420AEDEBB8F /* ScopyComponents.swift */; };
-		0D7026D98737757506A5787B /* AppVersion.swift in Sources */ = {isa = PBXBuildFile; fileRef = 863111D7C15F2B67D831016C /* AppVersion.swift */; };
 		0E35E9B208BDFBB26FE28364 /* HistoryViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 18510662ACE6AFE5DEB66283 /* HistoryViewModel.swift */; };
-		0F309702411927250F2B5EA3 /* SQLiteClipboardRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6BD542B2E9966C4FF66E2CF0 /* SQLiteClipboardRepository.swift */; };
-		11286A50B7BE63AAC4631E47 /* SearchResultPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7F8FB2D550672091812A6E5 /* SearchResultPage.swift */; };
-		114D6BB8C980B976412A003E /* SearchMode.swift in Sources */ = {isa = PBXBuildFile; fileRef = 817B89DC1EE1A600F1BA071B /* SearchMode.swift */; };
 		1216203D7B799CFDA435C0C5 /* ScopyColors.swift in Sources */ = {isa = PBXBuildFile; fileRef = 493362158599490B2914D1A5 /* ScopyColors.swift */; };
-		129EBD1870C1BE93F8FD40FB /* ThumbnailGenerationTracker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 86AA1CE5062ADBAB7A268400 /* ThumbnailGenerationTracker.swift */; };
-		1397F9ED533B76FEE6167777 /* SearchEngineImpl.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3173A022809688769F7C68E1 /* SearchEngineImpl.swift */; };
-		1706C274DE4BC51C31754730 /* ClipboardItemDTO.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A1D337D3CB7C8BD6A7C8DB9 /* ClipboardItemDTO.swift */; };
-		17833DEA54FC6C8EE1AE3D57 /* SQLiteConnection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6FCEEF416C596483E535FF92 /* SQLiteConnection.swift */; };
 		18A0B29008644A161F357EEA /* HistoryViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 18510662ACE6AFE5DEB66283 /* HistoryViewModel.swift */; };
 		19AE2BACD59D1592A7C358C5 /* HistoryItemThumbnailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20DE268ED91DDC33CB05EFB3 /* HistoryItemThumbnailView.swift */; };
-		19E1A249F8ABAA61C2F65238 /* MockClipboardService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5DC8ECDED07EA5FAFB2923F3 /* MockClipboardService.swift */; };
 		1A08F54DDAA8AF0231A8934F /* MainWindowUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 137D798E7DE3BC649D3DDE14 /* MainWindowUITests.swift */; };
 		1A2F33F96B65B19147B7E6DA /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47EB28A5AF6B73C0ADB10FA4 /* AppDelegate.swift */; };
 		1AA91316EE892A4F9D48F256 /* KeyboardNavigationUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0C6646BEAEFFB053C94B22E /* KeyboardNavigationUITests.swift */; };
-		227C7C048738B2F38B51B94D /* SearchResultPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7F8FB2D550672091812A6E5 /* SearchResultPage.swift */; };
 		22CAC8D2216EF5F939B413B0 /* HistoryViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 18510662ACE6AFE5DEB66283 /* HistoryViewModel.swift */; };
 		23337C912A577960C511EEB6 /* FooterView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 21D905D4EC55C2920DDD4A26 /* FooterView.swift */; };
 		23E413BF3FBB4FFF3B5FF598 /* XCTestExtensions.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA19ACBA28A519AD56F862DE /* XCTestExtensions.swift */; };
-		26ADD078C8FC126181CDD88A /* MockClipboardService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5DC8ECDED07EA5FAFB2923F3 /* MockClipboardService.swift */; };
-		276999D1241D9F457964EC70 /* SearchEngineImpl.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3173A022809688769F7C68E1 /* SearchEngineImpl.swift */; };
-		28BA7DEBC0466743A62EA443 /* SearchMode.swift in Sources */ = {isa = PBXBuildFile; fileRef = 817B89DC1EE1A600F1BA071B /* SearchMode.swift */; };
 		2E3AC6F5BBFB8EC0EEA7BEFB /* TestDataFactory.swift in Sources */ = {isa = PBXBuildFile; fileRef = 98A81F5BEC4470C8DA1B4864 /* TestDataFactory.swift */; };
-		2E7B84A934E65CCCB3DFB0B8 /* NSLock+Extensions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 84C61F96A731DC4419905C3E /* NSLock+Extensions.swift */; };
-		31EBA4BD4EA510995A68D15F /* StorageStatsDTO.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2139514699D4D8A2C7DD478C /* StorageStatsDTO.swift */; };
-		3486E074044705F30073D105 /* SearchRequest.swift in Sources */ = {isa = PBXBuildFile; fileRef = 483D3ABB1204226B663D0C1B /* SearchRequest.swift */; };
 		35F9DA552D86FB9CBF6A3C81 /* ScopyColors.swift in Sources */ = {isa = PBXBuildFile; fileRef = 493362158599490B2914D1A5 /* ScopyColors.swift */; };
-		38ECCA70C5F3D9DA131A3AB0 /* SettingsDTO.swift in Sources */ = {isa = PBXBuildFile; fileRef = F631D8353C250ABA42C0217C /* SettingsDTO.swift */; };
-		3A539CBFC8CAD889E3D71519 /* ScopyLogger.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9DBD01273FAB041A320AC2CB /* ScopyLogger.swift */; };
-		3A8295171C39A63D594FA1B0 /* ThumbnailGenerationTracker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 86AA1CE5062ADBAB7A268400 /* ThumbnailGenerationTracker.swift */; };
-		3B8B6827525C125DFE90983A /* ClipboardStoredItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = D199003A148D69F790D5B1A2 /* ClipboardStoredItem.swift */; };
 		3B9AFBF4400247DE93225D7B /* HistoryItemView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5901BA87F11FC6F4D1E7C673 /* HistoryItemView.swift */; };
-		3D0870078D7F167EEAB08F93 /* SQLiteMigrations.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7847DB0BCA57F8A1B0F71B3D /* SQLiteMigrations.swift */; };
 		3E1520C84E30C111BAE6445B /* HistoryListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8C25A96207E0DA2587E7AFBB /* HistoryListView.swift */; };
 		3F35F1D85C8C126C9CE04179 /* FloatingPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = DDB1A51BEEACE7981D4FBBCD /* FloatingPanel.swift */; };
 		401BCD4DE9684844FEFE7136 /* HeaderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4059379693354F029F0086D1 /* HeaderView.swift */; };
 		437D09C393E7FBBE8EB9D265 /* Localization.swift in Sources */ = {isa = PBXBuildFile; fileRef = 64F67E7978679E2B6026F8F5 /* Localization.swift */; };
 		43B8612CECC8A1768F74742B /* ClipboardMonitorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F940F6182C4E298B3511A044 /* ClipboardMonitorTests.swift */; };
 		440C0A8885E4A77144105A51 /* ConcurrencyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3527EAD22A82840AEDF3F820 /* ConcurrencyTests.swift */; };
-		446C8306B52146C3A6061A6E /* ClipboardStoredItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = D199003A148D69F790D5B1A2 /* ClipboardStoredItem.swift */; };
-		44C4113FE3F7960B27FB42CC /* NSLock+Extensions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 84C61F96A731DC4419905C3E /* NSLock+Extensions.swift */; };
 		45DB5C84486FE70FDAECC1D1 /* FooterView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 21D905D4EC55C2920DDD4A26 /* FooterView.swift */; };
-		4A407FF2188666F7A03835DE /* PerformanceProfiler.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADB79901F7DEAC407EBADE89 /* PerformanceProfiler.swift */; };
 		4A95D8E07E139A11201F4027 /* ConcurrencyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3527EAD22A82840AEDF3F820 /* ConcurrencyTests.swift */; };
 		4F1BE0CF444C5F07BEE16E97 /* MockServices.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2D09BA0550F18A7F9EF6A074 /* MockServices.swift */; };
 		4F98B4BEB7AEE0ED458F28D0 /* ScopyComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F7A2545CE101420AEDEBB8F /* ScopyComponents.swift */; };
 		507578187BE947202BD63D0B /* SettingsViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B79CC4C77E31D9CE886C254D /* SettingsViewModel.swift */; };
-		51F445374CF32715650BFEDF /* ClipboardItemDTO.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A1D337D3CB7C8BD6A7C8DB9 /* ClipboardItemDTO.swift */; };
-		532D98D2566116B84D99596C /* ThumbnailCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0B8B0BE0380984A653023A50 /* ThumbnailCache.swift */; };
 		542FFE8F4C4D397F7079AB5B /* HeaderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4059379693354F029F0086D1 /* HeaderView.swift */; };
-		55E09FD4DD4BD8300CEFE4C4 /* ClipboardService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0361C994F4B6F3F78C6C38BC /* ClipboardService.swift */; };
 		56499299AE17ABA9BCB5E396 /* SectionHeader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 72C7E22A4D3725C49208C650 /* SectionHeader.swift */; };
 		56DD95C12F4A8CD6DCD8C837 /* HistoryListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8C25A96207E0DA2587E7AFBB /* HistoryListView.swift */; };
 		574CBC1092D1BC6891FF64C0 /* PerformanceProfilerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 81E3E40D7B7A01720DF737E2 /* PerformanceProfilerTests.swift */; };
-		576385E92B0B8E9B91CA7BC6 /* RealClipboardService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2A285A9E32622950487740E /* RealClipboardService.swift */; };
 		57C1FB3E5765F41546C7AD5E /* ScopyColors.swift in Sources */ = {isa = PBXBuildFile; fileRef = 493362158599490B2914D1A5 /* ScopyColors.swift */; };
 		58756FBB91CD1B78A6B09707 /* EmptyStateView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BACD4A1BF6DABAE83D2073AE /* EmptyStateView.swift */; };
 		592F3B9027D4B1BFF844AEB0 /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61DF2BC8CEEFB6DBC2A87609 /* AppState.swift */; };
 		5957B8762A9A3A45F1E3AC86 /* HistoryItemTextPreviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F77CBE035B9D88E9E868592 /* HistoryItemTextPreviewView.swift */; };
 		5ADA570A1558437A10DE516C /* SettingsViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B79CC4C77E31D9CE886C254D /* SettingsViewModel.swift */; };
 		5B1334E850CAD27EB7B97DB1 /* HistoryItemImagePreviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 60CF1C183B3F302D5E620DB2 /* HistoryItemImagePreviewView.swift */; };
-		5B2977D4EA7BE949046759A3 /* SearchMode.swift in Sources */ = {isa = PBXBuildFile; fileRef = 817B89DC1EE1A600F1BA071B /* SearchMode.swift */; };
-		5B3F819C571E1B3EEDBD3E8E /* ScopyLogger.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9DBD01273FAB041A320AC2CB /* ScopyLogger.swift */; };
 		5B6A53676B5B957EEE6BCA1F /* ScopyTypography.swift in Sources */ = {isa = PBXBuildFile; fileRef = A37481D3662BD7A5717D1395 /* ScopyTypography.swift */; };
 		5B88BBC60EB20FAD37917440 /* ScopySize.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A71D183AE552D5A0722779D /* ScopySize.swift */; };
-		5C12ED446954BEC6D7B0CEEB /* ThumbnailCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0B8B0BE0380984A653023A50 /* ThumbnailCache.swift */; };
-		5C7572C3BC3C6DC32EBEE551 /* SettingsStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1ADD93E78AE87D01DFF53431 /* SettingsStore.swift */; };
 		5D1D8A60DEB12FAE47085E7E /* ClipboardItemDisplayText.swift in Sources */ = {isa = PBXBuildFile; fileRef = C46B24B2682039001EA7F2A7 /* ClipboardItemDisplayText.swift */; };
 		5DA66D3B6875314AE256E8D7 /* HistoryListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8C25A96207E0DA2587E7AFBB /* HistoryListView.swift */; };
 		6290407CDC493685A38B5DED /* HotKeyServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF08A6073418036ABAC09144 /* HotKeyServiceTests.swift */; };
-		6351A2EF2F09F2953C460D88 /* SQLiteClipboardRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6BD542B2E9966C4FF66E2CF0 /* SQLiteClipboardRepository.swift */; };
 		6694D337867337FF5925549D /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 62C29361DE1A42C04AB601DE /* ContentView.swift */; };
-		684D08A36D491A1CFDB58109 /* ClipboardEvent.swift in Sources */ = {isa = PBXBuildFile; fileRef = CCE9A425FC507166D9E590CE /* ClipboardEvent.swift */; };
-		688BD084CC0C21D31885A293 /* ClipboardStoredItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = D199003A148D69F790D5B1A2 /* ClipboardStoredItem.swift */; };
-		6917A2792D1F9BC70463DC7E /* ClipboardService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0361C994F4B6F3F78C6C38BC /* ClipboardService.swift */; };
-		69EF6D1083811281A05D18E7 /* NSLock+Extensions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 84C61F96A731DC4419905C3E /* NSLock+Extensions.swift */; };
-		6A26006656225A4B35AF353C /* ClipboardMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 14697A63C7CD12FC822399C0 /* ClipboardMonitor.swift */; };
-		6A3C49D4AFE7BC50EE38FC27 /* HotKeyService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6AC510668FC9C0ADDA64E813 /* HotKeyService.swift */; };
 		6A99FB613348407E1116DAB4 /* ClipboardItemDisplayText.swift in Sources */ = {isa = PBXBuildFile; fileRef = C46B24B2682039001EA7F2A7 /* ClipboardItemDisplayText.swift */; };
 		6B322E6344E429837C1AD94B /* ContextMenuUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AEF8649A162AEF1B81D32EE6 /* ContextMenuUITests.swift */; };
-		6F0AC66967599946E3E9501D /* AppVersion.swift in Sources */ = {isa = PBXBuildFile; fileRef = 863111D7C15F2B67D831016C /* AppVersion.swift */; };
 		70D5747F23695105E2867484 /* ResourceCleanupTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E89CCE301327084364FDFDE1 /* ResourceCleanupTests.swift */; };
 		721DE7132B1FFC691DA2B442 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 80F5648018D6B10F8FB3D046 /* SettingsView.swift */; };
 		728C9A64C3B9C089CF9F7A75 /* EmptyStateView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BACD4A1BF6DABAE83D2073AE /* EmptyStateView.swift */; };
 		731C389FA0434EBF4696D6ED /* libsqlite3.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = 6EE4401FFF4C04C3F4498B26 /* libsqlite3.tbd */; };
 		7411E82D82153F4FD1F02B17 /* PerformanceHelpers.swift in Sources */ = {isa = PBXBuildFile; fileRef = 21D8D06A8582ECBC98830C7E /* PerformanceHelpers.swift */; };
 		74BEC382983B8DE7AAAAF6D1 /* LoadMoreTriggerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 568714EFD72C9DC5533473A8 /* LoadMoreTriggerView.swift */; };
-		7929C1F67DF4564D877FDABB /* ClipboardServiceProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = 930C317B2BC06CB3FDB17453 /* ClipboardServiceProtocol.swift */; };
-		7B182DE13F4BE61119A7208C /* ScopyThresholds.swift in Sources */ = {isa = PBXBuildFile; fileRef = FFBCEEF2CC2763186DE26F69 /* ScopyThresholds.swift */; };
 		7BAD31599DE16D32F3FFF800 /* libsqlite3.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = 6EE4401FFF4C04C3F4498B26 /* libsqlite3.tbd */; };
-		7C4931198EBB3A686D412285 /* ClipboardMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 14697A63C7CD12FC822399C0 /* ClipboardMonitor.swift */; };
 		7D547894B05F8069CA7A3DD2 /* StorageServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6146C28BE595B15CFD414140 /* StorageServiceTests.swift */; };
 		7DC66EDCE0E45DFC84BEE089 /* ScopySize.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A71D183AE552D5A0722779D /* ScopySize.swift */; };
 		80C5D92E52A700850F1E5997 /* Localization.swift in Sources */ = {isa = PBXBuildFile; fileRef = 64F67E7978679E2B6026F8F5 /* Localization.swift */; };
-		8299CDBD5930FE596EBBAE3B /* PerformanceMetrics.swift in Sources */ = {isa = PBXBuildFile; fileRef = 08E21526EAB3F1DCCB32D679 /* PerformanceMetrics.swift */; };
 		83B5EE1F7FAB659097712B82 /* StorageServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6146C28BE595B15CFD414140 /* StorageServiceTests.swift */; };
 		847904181954981532FFE71E /* SectionHeader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 72C7E22A4D3725C49208C650 /* SectionHeader.swift */; };
-		84A08C5D9031D0D94109EF98 /* ClipboardItemDTO.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A1D337D3CB7C8BD6A7C8DB9 /* ClipboardItemDTO.swift */; };
-		8703516EFBC785DA9B32CF06 /* SQLiteMigrations.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7847DB0BCA57F8A1B0F71B3D /* SQLiteMigrations.swift */; };
-		87DAAFAF6085024B123490C3 /* ThumbnailCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0B8B0BE0380984A653023A50 /* ThumbnailCache.swift */; };
-		89EBE9145C051266119E7A65 /* SettingsStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1ADD93E78AE87D01DFF53431 /* SettingsStore.swift */; };
-		89F865E3CF9646681DA3CBAB /* PerformanceMetrics.swift in Sources */ = {isa = PBXBuildFile; fileRef = 08E21526EAB3F1DCCB32D679 /* PerformanceMetrics.swift */; };
 		89FF6438C2FC385E81DD98CB /* PerformanceProfilerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 81E3E40D7B7A01720DF737E2 /* PerformanceProfilerTests.swift */; };
-		8ADACA32A51317E6F11C7880 /* PerformanceProfiler.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADB79901F7DEAC407EBADE89 /* PerformanceProfiler.swift */; };
-		8E299A624D780E4DFF2E5956 /* SQLiteConnection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6FCEEF416C596483E535FF92 /* SQLiteConnection.swift */; };
-		8FA63D6CD2EA527549D73DD7 /* IconService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 962242CA59A1F952C0D5B10A /* IconService.swift */; };
+		8E8A09B77FADE08387078D3B /* ScopyKit in Frameworks */ = {isa = PBXBuildFile; productRef = 600F5F1A8795C728F788B9FC /* ScopyKit */; };
 		91130AD28128B7601FCDCACC /* LoadMoreTriggerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 568714EFD72C9DC5533473A8 /* LoadMoreTriggerView.swift */; };
-		937AAD9001A0822EC9B80588 /* StorageService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 644A49B646565DEC262174A8 /* StorageService.swift */; };
 		94A1AF4D8054FA51BD1CA617 /* XCTestExtensions.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA19ACBA28A519AD56F862DE /* XCTestExtensions.swift */; };
 		94AB18BED4E8018E91611810 /* Localization.swift in Sources */ = {isa = PBXBuildFile; fileRef = 64F67E7978679E2B6026F8F5 /* Localization.swift */; };
 		9661BC22D241C00A9FB7E9D0 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47EB28A5AF6B73C0ADB10FA4 /* AppDelegate.swift */; };
 		96769165BC6DF4DAA0507486 /* main.swift in Sources */ = {isa = PBXBuildFile; fileRef = 27D4729DD71F0067DDCA4752 /* main.swift */; };
 		98350810B6B0F435AD57BEF1 /* LoadMoreTriggerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 568714EFD72C9DC5533473A8 /* LoadMoreTriggerView.swift */; };
-		99BFBA74F5CFDBAD1BFDFCC0 /* SettingsDTO.swift in Sources */ = {isa = PBXBuildFile; fileRef = F631D8353C250ABA42C0217C /* SettingsDTO.swift */; };
 		99DED7606FD51D1B181D0FCE /* SettingsUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D135671D165B8AD6F558C6A /* SettingsUITests.swift */; };
-		9A2E643A25E5397932071CDB /* IconService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 962242CA59A1F952C0D5B10A /* IconService.swift */; };
 		9B7AEAA201394AEAAFBC98D2 /* HistoryItemTextPreviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F77CBE035B9D88E9E868592 /* HistoryItemTextPreviewView.swift */; };
 		9BD786560A73DC3C4CE8D4D6 /* HistoryItemThumbnailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20DE268ED91DDC33CB05EFB3 /* HistoryItemThumbnailView.swift */; };
-		9D03C56E27E232885CF29C4F /* ClipboardEvent.swift in Sources */ = {isa = PBXBuildFile; fileRef = CCE9A425FC507166D9E590CE /* ClipboardEvent.swift */; };
 		9FD858494D45577D060020B6 /* ScopySpacing.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4E233FCC7701603B37B37B07 /* ScopySpacing.swift */; };
+		9FD92224C1C7CFFBF4B37912 /* ScopyKit in Frameworks */ = {isa = PBXBuildFile; productRef = 822D98D29CCFAA4C5137A39D /* ScopyKit */; };
 		A24EE268FF89365AF67F78CB /* FloatingPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = DDB1A51BEEACE7981D4FBBCD /* FloatingPanel.swift */; };
 		A316443B51B7C38263A0682C /* PerformanceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1C176E09A1997AD49E566273 /* PerformanceTests.swift */; };
 		A370FE0C9CA60A281EC47274 /* FooterView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 21D905D4EC55C2920DDD4A26 /* FooterView.swift */; };
 		A4433C4ACC64F0D5DF5DA717 /* ScopyApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1072DE11C8E9ECC684565EA3 /* ScopyApp.swift */; };
-		A5A3F29C0EEC3940A150774C /* SettingsStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1ADD93E78AE87D01DFF53431 /* SettingsStore.swift */; };
 		A6F593655A42AB21104FC556 /* HeaderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4059379693354F029F0086D1 /* HeaderView.swift */; };
 		A7ECC4E5E2258320B82397BC /* HistoryListUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8199B08299A36E64A90129A /* HistoryListUITests.swift */; };
 		A91C52F48BFDC092FB56BD9D /* SectionHeader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 72C7E22A4D3725C49208C650 /* SectionHeader.swift */; };
 		A91F181A47B2BA511885BD3B /* EmptyStateView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BACD4A1BF6DABAE83D2073AE /* EmptyStateView.swift */; };
-		A95CC6C0C8DD9C7EB999E9B7 /* SearchEngineImpl.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3173A022809688769F7C68E1 /* SearchEngineImpl.swift */; };
 		AC847133EB07370A9105BC73 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47EB28A5AF6B73C0ADB10FA4 /* AppDelegate.swift */; };
 		AECBE8E6B53F955EB3F09911 /* libsqlite3.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = 6EE4401FFF4C04C3F4498B26 /* libsqlite3.tbd */; };
 		B0F8C23D7B1B5DBE7FDB6F6B /* HotKeyServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF08A6073418036ABAC09144 /* HotKeyServiceTests.swift */; };
-		B11EB2FBB4E3D975692C35FA /* ClipboardMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 14697A63C7CD12FC822399C0 /* ClipboardMonitor.swift */; };
 		B192C163D6B56DD11C5C4054 /* ScopyTypography.swift in Sources */ = {isa = PBXBuildFile; fileRef = A37481D3662BD7A5717D1395 /* ScopyTypography.swift */; };
 		B1CB4831365DCD6E5077365D /* TestDataFactory.swift in Sources */ = {isa = PBXBuildFile; fileRef = 98A81F5BEC4470C8DA1B4864 /* TestDataFactory.swift */; };
-		B20AA98FA263B9A3CECF1D82 /* SQLiteClipboardRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6BD542B2E9966C4FF66E2CF0 /* SQLiteClipboardRepository.swift */; };
 		B22A2A3604CB35AB839619FF /* HistoryItemImagePreviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 60CF1C183B3F302D5E620DB2 /* HistoryItemImagePreviewView.swift */; };
 		B2CEFE7289E25259D522B888 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 62C29361DE1A42C04AB601DE /* ContentView.swift */; };
-		B98D0F4E2F0F3F5A0BCE2535 /* StorageStatsDTO.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2139514699D4D8A2C7DD478C /* StorageStatsDTO.swift */; };
 		BA2B70C2C4C86E278C2FC773 /* ScopyComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F7A2545CE101420AEDEBB8F /* ScopyComponents.swift */; };
-		BB17D83B8DAF9204641D0DC0 /* RealClipboardService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2A285A9E32622950487740E /* RealClipboardService.swift */; };
 		BC73EE655DA83097AC0514D4 /* ScopyTypography.swift in Sources */ = {isa = PBXBuildFile; fileRef = A37481D3662BD7A5717D1395 /* ScopyTypography.swift */; };
 		BCA3A9072980CA2B53CEFD0A /* ScopySize.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A71D183AE552D5A0722779D /* ScopySize.swift */; };
 		BDF9443F7F2193814BC1A913 /* HistoryItemThumbnailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20DE268ED91DDC33CB05EFB3 /* HistoryItemThumbnailView.swift */; };
 		BF54B8E26A16E46E840CAE76 /* main.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A2BAEF33A56AB9DC5808252 /* main.swift */; };
 		BF5E207263E1819780AFE98E /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61DF2BC8CEEFB6DBC2A87609 /* AppState.swift */; };
 		C0A51AA7E4BEC084FC3D231D /* ResourceCleanupTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E89CCE301327084364FDFDE1 /* ResourceCleanupTests.swift */; };
-		C0A5CC87E6B57D99230F58D0 /* ScopyLogger.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9DBD01273FAB041A320AC2CB /* ScopyLogger.swift */; };
 		C1331931990CB336FE0D878C /* SettingsViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B79CC4C77E31D9CE886C254D /* SettingsViewModel.swift */; };
 		C296E6B159C52200F4C441E3 /* ScopySpacing.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4E233FCC7701603B37B37B07 /* ScopySpacing.swift */; };
-		C2DA5F3BACB41BFA790B47A6 /* SearchRequest.swift in Sources */ = {isa = PBXBuildFile; fileRef = 483D3ABB1204226B663D0C1B /* SearchRequest.swift */; };
-		C4F8C1D325CBD26B7545041D /* MockClipboardService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5DC8ECDED07EA5FAFB2923F3 /* MockClipboardService.swift */; };
-		C6065137A6505D64CA9BDA6C /* ClipboardItemType.swift in Sources */ = {isa = PBXBuildFile; fileRef = 490E136124D2DD944CF47971 /* ClipboardItemType.swift */; };
-		C66192EC055D5567F5330A40 /* ClipboardItemType.swift in Sources */ = {isa = PBXBuildFile; fileRef = 490E136124D2DD944CF47971 /* ClipboardItemType.swift */; };
 		C78B2351A13DD052B3C17FB0 /* PerformanceHelpers.swift in Sources */ = {isa = PBXBuildFile; fileRef = 21D8D06A8582ECBC98830C7E /* PerformanceHelpers.swift */; };
 		C81A97FB9F42D01C3A7D4731 /* ScopyIcons.swift in Sources */ = {isa = PBXBuildFile; fileRef = FAECF70623C7580CB548B68A /* ScopyIcons.swift */; };
 		CAB0C4BCEB0707C32EF0F6E5 /* ScopySpacing.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4E233FCC7701603B37B37B07 /* ScopySpacing.swift */; };
 		CD5F94708D052EE6F2D43655 /* HistoryItemImagePreviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 60CF1C183B3F302D5E620DB2 /* HistoryItemImagePreviewView.swift */; };
-		CD9FF5CBFF83723E5600BB63 /* ClipboardItemType.swift in Sources */ = {isa = PBXBuildFile; fileRef = 490E136124D2DD944CF47971 /* ClipboardItemType.swift */; };
-		D0C3723AF9EF8FC6CEBBBA39 /* AppVersion.swift in Sources */ = {isa = PBXBuildFile; fileRef = 863111D7C15F2B67D831016C /* AppVersion.swift */; };
 		D0DCBABCC3717C48EAF8A18C /* SearchServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 15EBBE158869225275AB5F98 /* SearchServiceTests.swift */; };
 		D12264DF065BDA48E5D7F1FE /* FloatingPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = DDB1A51BEEACE7981D4FBBCD /* FloatingPanel.swift */; };
-		D265640F938F1B16265B68BA /* RealClipboardService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2A285A9E32622950487740E /* RealClipboardService.swift */; };
 		D2FE58267F3FCB1C5696CED6 /* MockServices.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2D09BA0550F18A7F9EF6A074 /* MockServices.swift */; };
-		D328EFC52373A401922E1DDB /* SQLiteConnection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6FCEEF416C596483E535FF92 /* SQLiteConnection.swift */; };
-		D62BB0D84BC0FC8A7422AE82 /* ClipboardService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0361C994F4B6F3F78C6C38BC /* ClipboardService.swift */; };
 		DA2483A05985496EAFA7CD17 /* ScopyIcons.swift in Sources */ = {isa = PBXBuildFile; fileRef = FAECF70623C7580CB548B68A /* ScopyIcons.swift */; };
 		DBE13267B5176E233C33B848 /* HistoryItemTextPreviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F77CBE035B9D88E9E868592 /* HistoryItemTextPreviewView.swift */; };
-		DD973E1A5617EC3CE78B7ECF /* SettingsDTO.swift in Sources */ = {isa = PBXBuildFile; fileRef = F631D8353C250ABA42C0217C /* SettingsDTO.swift */; };
-		DDA404289EC2CD302C5D2B44 /* HotKeyService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6AC510668FC9C0ADDA64E813 /* HotKeyService.swift */; };
 		DDB28299C2A49D09AB3CDFD5 /* HistoryItemView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5901BA87F11FC6F4D1E7C673 /* HistoryItemView.swift */; };
 		DEDA1EF2531849DBBA1499A8 /* ClipboardMonitorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F940F6182C4E298B3511A044 /* ClipboardMonitorTests.swift */; };
 		DF15A575AEB6BFFC571AA648 /* SearchServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 15EBBE158869225275AB5F98 /* SearchServiceTests.swift */; };
-		DF535696C200F017CD196AE3 /* StorageStatsDTO.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2139514699D4D8A2C7DD478C /* StorageStatsDTO.swift */; };
-		E02BBEE14B763FC2FBBF7B73 /* HotKeyService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6AC510668FC9C0ADDA64E813 /* HotKeyService.swift */; };
 		E4ABCC84D78DE586451E805D /* IntegrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F236FB16D44AFE08ACBC9C5 /* IntegrationTests.swift */; };
 		E5753C5D865B5BB6A6F5F11E /* ScopyIcons.swift in Sources */ = {isa = PBXBuildFile; fileRef = FAECF70623C7580CB548B68A /* ScopyIcons.swift */; };
-		E815A5866D7A35DB66DC86BA /* SearchResultPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7F8FB2D550672091812A6E5 /* SearchResultPage.swift */; };
-		E8E21C3000349261775A69FF /* ScopyThresholds.swift in Sources */ = {isa = PBXBuildFile; fileRef = FFBCEEF2CC2763186DE26F69 /* ScopyThresholds.swift */; };
-		E936681210443F5D76C7C036 /* ClipboardServiceProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = 930C317B2BC06CB3FDB17453 /* ClipboardServiceProtocol.swift */; };
 		E97D44CFBD18C1091883D418 /* ScopyKit in Frameworks */ = {isa = PBXBuildFile; productRef = 3011C50D2B1653E9005CAAB0 /* ScopyKit */; };
-		E9D1E5B20BF9960FB0E4957C /* StorageService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 644A49B646565DEC262174A8 /* StorageService.swift */; };
-		E9E5671DF260D3B85BE306CE /* ClipboardEvent.swift in Sources */ = {isa = PBXBuildFile; fileRef = CCE9A425FC507166D9E590CE /* ClipboardEvent.swift */; };
-		ED5EE36FF4DA34BE8D7F492B /* StorageService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 644A49B646565DEC262174A8 /* StorageService.swift */; };
-		F053CF9B3D7C4A76CB232AFF /* ThumbnailGenerationTracker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 86AA1CE5062ADBAB7A268400 /* ThumbnailGenerationTracker.swift */; };
 		F3557BE1FA909E49B1824F51 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 80F5648018D6B10F8FB3D046 /* SettingsView.swift */; };
 		F3E22C6E12B926D83DABF422 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 62C29361DE1A42C04AB601DE /* ContentView.swift */; };
 		F57DEF5DFEC07FE9586910EA /* AppStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C8E1D7C3153B156AF59F4FBD /* AppStateTests.swift */; };
-		F735DA80E15171CA59B02203 /* IconService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 962242CA59A1F952C0D5B10A /* IconService.swift */; };
 		F782F226273CDC46067A65B9 /* HistoryItemView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5901BA87F11FC6F4D1E7C673 /* HistoryItemView.swift */; };
-		FC2B59A76CB37CF34FF9AF93 /* ClipboardServiceProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = 930C317B2BC06CB3FDB17453 /* ClipboardServiceProtocol.swift */; };
-		FDEB29D683BBA0503BDB0958 /* SQLiteMigrations.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7847DB0BCA57F8A1B0F71B3D /* SQLiteMigrations.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -231,91 +143,61 @@
 
 /* Begin PBXFileReference section */
 		00D60F774C44FB7BFFEB35B0 /* ScopyTSanTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ScopyTSanTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-		0361C994F4B6F3F78C6C38BC /* ClipboardService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipboardService.swift; sourceTree = "<group>"; };
-		08E21526EAB3F1DCCB32D679 /* PerformanceMetrics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PerformanceMetrics.swift; sourceTree = "<group>"; };
 		094F7E96DC5DC3FD8002CD7E /* ScopyUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ScopyUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-		0B8B0BE0380984A653023A50 /* ThumbnailCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThumbnailCache.swift; sourceTree = "<group>"; };
 		0F77CBE035B9D88E9E868592 /* HistoryItemTextPreviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryItemTextPreviewView.swift; sourceTree = "<group>"; };
 		0F7A2545CE101420AEDEBB8F /* ScopyComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScopyComponents.swift; sourceTree = "<group>"; };
 		1072DE11C8E9ECC684565EA3 /* ScopyApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScopyApp.swift; sourceTree = "<group>"; };
 		137D798E7DE3BC649D3DDE14 /* MainWindowUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainWindowUITests.swift; sourceTree = "<group>"; };
-		14697A63C7CD12FC822399C0 /* ClipboardMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipboardMonitor.swift; sourceTree = "<group>"; };
 		15EBBE158869225275AB5F98 /* SearchServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchServiceTests.swift; sourceTree = "<group>"; };
 		18510662ACE6AFE5DEB66283 /* HistoryViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryViewModel.swift; sourceTree = "<group>"; };
-		1ADD93E78AE87D01DFF53431 /* SettingsStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsStore.swift; sourceTree = "<group>"; };
 		1C176E09A1997AD49E566273 /* PerformanceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PerformanceTests.swift; sourceTree = "<group>"; };
 		209523D492016F8F90EA6F7A /* ScopyTestHost.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ScopyTestHost.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		20DE268ED91DDC33CB05EFB3 /* HistoryItemThumbnailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryItemThumbnailView.swift; sourceTree = "<group>"; };
-		2139514699D4D8A2C7DD478C /* StorageStatsDTO.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StorageStatsDTO.swift; sourceTree = "<group>"; };
 		21D8D06A8582ECBC98830C7E /* PerformanceHelpers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PerformanceHelpers.swift; sourceTree = "<group>"; };
 		21D905D4EC55C2920DDD4A26 /* FooterView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FooterView.swift; sourceTree = "<group>"; };
 		27D4729DD71F0067DDCA4752 /* main.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = main.swift; sourceTree = "<group>"; };
 		2D09BA0550F18A7F9EF6A074 /* MockServices.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockServices.swift; sourceTree = "<group>"; };
-		3173A022809688769F7C68E1 /* SearchEngineImpl.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchEngineImpl.swift; sourceTree = "<group>"; };
 		3527EAD22A82840AEDF3F820 /* ConcurrencyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConcurrencyTests.swift; sourceTree = "<group>"; };
 		4059379693354F029F0086D1 /* HeaderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HeaderView.swift; sourceTree = "<group>"; };
 		47EB28A5AF6B73C0ADB10FA4 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
-		483D3ABB1204226B663D0C1B /* SearchRequest.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchRequest.swift; sourceTree = "<group>"; };
-		490E136124D2DD944CF47971 /* ClipboardItemType.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipboardItemType.swift; sourceTree = "<group>"; };
 		493362158599490B2914D1A5 /* ScopyColors.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScopyColors.swift; sourceTree = "<group>"; };
 		4D135671D165B8AD6F558C6A /* SettingsUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsUITests.swift; sourceTree = "<group>"; };
 		4E233FCC7701603B37B37B07 /* ScopySpacing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScopySpacing.swift; sourceTree = "<group>"; };
 		568714EFD72C9DC5533473A8 /* LoadMoreTriggerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoadMoreTriggerView.swift; sourceTree = "<group>"; };
 		56913B13748B393E8044E08B /* ScopyTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ScopyTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		5901BA87F11FC6F4D1E7C673 /* HistoryItemView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryItemView.swift; sourceTree = "<group>"; };
-		5DC8ECDED07EA5FAFB2923F3 /* MockClipboardService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockClipboardService.swift; sourceTree = "<group>"; };
 		5F236FB16D44AFE08ACBC9C5 /* IntegrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntegrationTests.swift; sourceTree = "<group>"; };
 		60CF1C183B3F302D5E620DB2 /* HistoryItemImagePreviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryItemImagePreviewView.swift; sourceTree = "<group>"; };
 		6146C28BE595B15CFD414140 /* StorageServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StorageServiceTests.swift; sourceTree = "<group>"; };
 		61DF2BC8CEEFB6DBC2A87609 /* AppState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppState.swift; sourceTree = "<group>"; };
 		62C29361DE1A42C04AB601DE /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
-		644A49B646565DEC262174A8 /* StorageService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StorageService.swift; sourceTree = "<group>"; };
 		64F67E7978679E2B6026F8F5 /* Localization.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Localization.swift; sourceTree = "<group>"; };
 		6A2BAEF33A56AB9DC5808252 /* main.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = main.swift; sourceTree = "<group>"; };
-		6AC510668FC9C0ADDA64E813 /* HotKeyService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HotKeyService.swift; sourceTree = "<group>"; };
-		6BD542B2E9966C4FF66E2CF0 /* SQLiteClipboardRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SQLiteClipboardRepository.swift; sourceTree = "<group>"; };
 		6EE4401FFF4C04C3F4498B26 /* libsqlite3.tbd */ = {isa = PBXFileReference; lastKnownFileType = "sourcecode.text-based-dylib-definition"; name = libsqlite3.tbd; path = usr/lib/libsqlite3.tbd; sourceTree = SDKROOT; };
-		6FCEEF416C596483E535FF92 /* SQLiteConnection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SQLiteConnection.swift; sourceTree = "<group>"; };
 		72C7E22A4D3725C49208C650 /* SectionHeader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SectionHeader.swift; sourceTree = "<group>"; };
 		74C9D67BDF3FC3265BE88014 /* Scopy.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Scopy.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		7847DB0BCA57F8A1B0F71B3D /* SQLiteMigrations.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SQLiteMigrations.swift; sourceTree = "<group>"; };
-		7A1D337D3CB7C8BD6A7C8DB9 /* ClipboardItemDTO.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipboardItemDTO.swift; sourceTree = "<group>"; };
 		80F5648018D6B10F8FB3D046 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
-		817B89DC1EE1A600F1BA071B /* SearchMode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchMode.swift; sourceTree = "<group>"; };
 		81E3E40D7B7A01720DF737E2 /* PerformanceProfilerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PerformanceProfilerTests.swift; sourceTree = "<group>"; };
-		84C61F96A731DC4419905C3E /* NSLock+Extensions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "NSLock+Extensions.swift"; sourceTree = "<group>"; };
 		85328477E197D8B958744DD5 /* Scopy.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Scopy.entitlements; sourceTree = "<group>"; };
-		863111D7C15F2B67D831016C /* AppVersion.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppVersion.swift; sourceTree = "<group>"; };
-		86AA1CE5062ADBAB7A268400 /* ThumbnailGenerationTracker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThumbnailGenerationTracker.swift; sourceTree = "<group>"; };
 		8C25A96207E0DA2587E7AFBB /* HistoryListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryListView.swift; sourceTree = "<group>"; };
-		930C317B2BC06CB3FDB17453 /* ClipboardServiceProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipboardServiceProtocol.swift; sourceTree = "<group>"; };
-		962242CA59A1F952C0D5B10A /* IconService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IconService.swift; sourceTree = "<group>"; };
 		981F278303CBA80DA8E8A43D /* Scopy */ = {isa = PBXFileReference; lastKnownFileType = folder; name = Scopy; path = .; sourceTree = SOURCE_ROOT; };
 		98A81F5BEC4470C8DA1B4864 /* TestDataFactory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TestDataFactory.swift; sourceTree = "<group>"; };
 		9A71D183AE552D5A0722779D /* ScopySize.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScopySize.swift; sourceTree = "<group>"; };
-		9DBD01273FAB041A320AC2CB /* ScopyLogger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScopyLogger.swift; sourceTree = "<group>"; };
 		A37481D3662BD7A5717D1395 /* ScopyTypography.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScopyTypography.swift; sourceTree = "<group>"; };
-		ADB79901F7DEAC407EBADE89 /* PerformanceProfiler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PerformanceProfiler.swift; sourceTree = "<group>"; };
 		AEF8649A162AEF1B81D32EE6 /* ContextMenuUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContextMenuUITests.swift; sourceTree = "<group>"; };
 		B79CC4C77E31D9CE886C254D /* SettingsViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsViewModel.swift; sourceTree = "<group>"; };
 		BA19ACBA28A519AD56F862DE /* XCTestExtensions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = XCTestExtensions.swift; sourceTree = "<group>"; };
 		BACD4A1BF6DABAE83D2073AE /* EmptyStateView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmptyStateView.swift; sourceTree = "<group>"; };
 		C46B24B2682039001EA7F2A7 /* ClipboardItemDisplayText.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipboardItemDisplayText.swift; sourceTree = "<group>"; };
 		C8E1D7C3153B156AF59F4FBD /* AppStateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppStateTests.swift; sourceTree = "<group>"; };
-		CCE9A425FC507166D9E590CE /* ClipboardEvent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipboardEvent.swift; sourceTree = "<group>"; };
 		D0C6646BEAEFFB053C94B22E /* KeyboardNavigationUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardNavigationUITests.swift; sourceTree = "<group>"; };
-		D199003A148D69F790D5B1A2 /* ClipboardStoredItem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipboardStoredItem.swift; sourceTree = "<group>"; };
-		D2A285A9E32622950487740E /* RealClipboardService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RealClipboardService.swift; sourceTree = "<group>"; };
 		DDB1A51BEEACE7981D4FBBCD /* FloatingPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FloatingPanel.swift; sourceTree = "<group>"; };
 		E89CCE301327084364FDFDE1 /* ResourceCleanupTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResourceCleanupTests.swift; sourceTree = "<group>"; };
 		EBEA6A2C67F9BCC973129D90 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
-		F631D8353C250ABA42C0217C /* SettingsDTO.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsDTO.swift; sourceTree = "<group>"; };
-		F7F8FB2D550672091812A6E5 /* SearchResultPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchResultPage.swift; sourceTree = "<group>"; };
 		F8199B08299A36E64A90129A /* HistoryListUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryListUITests.swift; sourceTree = "<group>"; };
 		F940F6182C4E298B3511A044 /* ClipboardMonitorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipboardMonitorTests.swift; sourceTree = "<group>"; };
 		FAECF70623C7580CB548B68A /* ScopyIcons.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScopyIcons.swift; sourceTree = "<group>"; };
 		FF08A6073418036ABAC09144 /* HotKeyServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HotKeyServiceTests.swift; sourceTree = "<group>"; };
-		FFBCEEF2CC2763186DE26F69 /* ScopyThresholds.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScopyThresholds.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -324,6 +206,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				AECBE8E6B53F955EB3F09911 /* libsqlite3.tbd in Frameworks */,
+				8E8A09B77FADE08387078D3B /* ScopyKit in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -341,20 +224,13 @@
 			buildActionMask = 2147483647;
 			files = (
 				7BAD31599DE16D32F3FFF800 /* libsqlite3.tbd in Frameworks */,
+				9FD92224C1C7CFFBF4B37912 /* ScopyKit in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
-		016B7E2CC10364A67B182383 /* Search */ = {
-			isa = PBXGroup;
-			children = (
-				3173A022809688769F7C68E1 /* SearchEngineImpl.swift */,
-			);
-			path = Search;
-			sourceTree = "<group>";
-		};
 		0422E08B51B79483B0A3AA0D /* ScopyTestHost */ = {
 			isa = PBXGroup;
 			children = (
@@ -374,17 +250,6 @@
 			path = Helpers;
 			sourceTree = "<group>";
 		};
-		05E1F173E73ADBE84C03418B /* Persistence */ = {
-			isa = PBXGroup;
-			children = (
-				D199003A148D69F790D5B1A2 /* ClipboardStoredItem.swift */,
-				6BD542B2E9966C4FF66E2CF0 /* SQLiteClipboardRepository.swift */,
-				6FCEEF416C596483E535FF92 /* SQLiteConnection.swift */,
-				7847DB0BCA57F8A1B0F71B3D /* SQLiteMigrations.swift */,
-			);
-			path = Persistence;
-			sourceTree = "<group>";
-		};
 		1321CC0A51CAB79AF60AACF0 /* Settings */ = {
 			isa = PBXGroup;
 			children = (
@@ -392,35 +257,11 @@
 			path = Settings;
 			sourceTree = "<group>";
 		};
-		147FCD36E60E6E47E9702611 /* Models */ = {
-			isa = PBXGroup;
-			children = (
-				CCE9A425FC507166D9E590CE /* ClipboardEvent.swift */,
-				7A1D337D3CB7C8BD6A7C8DB9 /* ClipboardItemDTO.swift */,
-				490E136124D2DD944CF47971 /* ClipboardItemType.swift */,
-				817B89DC1EE1A600F1BA071B /* SearchMode.swift */,
-				483D3ABB1204226B663D0C1B /* SearchRequest.swift */,
-				F7F8FB2D550672091812A6E5 /* SearchResultPage.swift */,
-				F631D8353C250ABA42C0217C /* SettingsDTO.swift */,
-				2139514699D4D8A2C7DD478C /* StorageStatsDTO.swift */,
-			);
-			path = Models;
-			sourceTree = "<group>";
-		};
 		15597088AA29CF84B2AC46F8 /* Protocols */ = {
 			isa = PBXGroup;
 			children = (
 			);
 			path = Protocols;
-			sourceTree = "<group>";
-		};
-		196EDE361615053EC33A0851 /* Caching */ = {
-			isa = PBXGroup;
-			children = (
-				962242CA59A1F952C0D5B10A /* IconService.swift */,
-				0B8B0BE0380984A653023A50 /* ThumbnailCache.swift */,
-			);
-			path = Caching;
 			sourceTree = "<group>";
 		};
 		465B69F83B7A249C89419E10 /* ScopyUITests */ = {
@@ -460,15 +301,6 @@
 			path = Views;
 			sourceTree = "<group>";
 		};
-		5E66AD5240D1878CDF0FC696 /* Utilities */ = {
-			isa = PBXGroup;
-			children = (
-				863111D7C15F2B67D831016C /* AppVersion.swift */,
-				9DBD01273FAB041A320AC2CB /* ScopyLogger.swift */,
-			);
-			path = Utilities;
-			sourceTree = "<group>";
-		};
 		64D3283E2192FB0189422949 /* Products */ = {
 			isa = PBXGroup;
 			children = (
@@ -497,35 +329,12 @@
 			name = Packages;
 			sourceTree = "<group>";
 		};
-		8F5A37EE34AA8F4959E47D6C /* Services */ = {
-			isa = PBXGroup;
-			children = (
-				14697A63C7CD12FC822399C0 /* ClipboardMonitor.swift */,
-				6AC510668FC9C0ADDA64E813 /* HotKeyService.swift */,
-				5DC8ECDED07EA5FAFB2923F3 /* MockClipboardService.swift */,
-				08E21526EAB3F1DCCB32D679 /* PerformanceMetrics.swift */,
-				ADB79901F7DEAC407EBADE89 /* PerformanceProfiler.swift */,
-				D2A285A9E32622950487740E /* RealClipboardService.swift */,
-				644A49B646565DEC262174A8 /* StorageService.swift */,
-				86AA1CE5062ADBAB7A268400 /* ThumbnailGenerationTracker.swift */,
-			);
-			path = Services;
-			sourceTree = "<group>";
-		};
 		9A6C5FE7FD03AE7C4FE971EA /* Presentation */ = {
 			isa = PBXGroup;
 			children = (
 				C46B24B2682039001EA7F2A7 /* ClipboardItemDisplayText.swift */,
 			);
 			path = Presentation;
-			sourceTree = "<group>";
-		};
-		9B45433DCC50E2D90D8F3A03 /* Settings */ = {
-			isa = PBXGroup;
-			children = (
-				1ADD93E78AE87D01DFF53431 /* SettingsStore.swift */,
-			);
-			path = Settings;
 			sourceTree = "<group>";
 		};
 		9C69D015A6946528E40569E5 = {
@@ -557,14 +366,6 @@
 				055FEC4DA3FC145B2A9F2397 /* Helpers */,
 			);
 			path = ScopyTests;
-			sourceTree = "<group>";
-		};
-		A7875693F38CCA904E4A0C50 /* Application */ = {
-			isa = PBXGroup;
-			children = (
-				0361C994F4B6F3F78C6C38BC /* ClipboardService.swift */,
-			);
-			path = Application;
 			sourceTree = "<group>";
 		};
 		ADEF11B464BFF329C7DA9368 /* Components */ = {
@@ -609,15 +410,6 @@
 			path = Design;
 			sourceTree = "<group>";
 		};
-		D943E7D46D6711A1A2D39C32 /* Domain */ = {
-			isa = PBXGroup;
-			children = (
-				147FCD36E60E6E47E9702611 /* Models */,
-				F972B22536D6F5F841448541 /* Protocols */,
-			);
-			path = Domain;
-			sourceTree = "<group>";
-		};
 		E48448F133BE3F80D945AC6C /* Scopy */ = {
 			isa = PBXGroup;
 			children = (
@@ -627,56 +419,14 @@
 				27D4729DD71F0067DDCA4752 /* main.swift */,
 				85328477E197D8B958744DD5 /* Scopy.entitlements */,
 				1072DE11C8E9ECC684565EA3 /* ScopyApp.swift */,
-				A7875693F38CCA904E4A0C50 /* Application */,
 				C8E7F13B9638715B53477797 /* Design */,
-				D943E7D46D6711A1A2D39C32 /* Domain */,
-				F27A2D1BF3700F70E1B5297F /* Extensions */,
-				F75F3718DF648E8E5DA37E59 /* Infrastructure */,
 				B80832310BEE754A495EEBC4 /* Models */,
 				4B3899A417146FCA05E0513F /* Observables */,
 				9A6C5FE7FD03AE7C4FE971EA /* Presentation */,
 				15597088AA29CF84B2AC46F8 /* Protocols */,
-				8F5A37EE34AA8F4959E47D6C /* Services */,
-				5E66AD5240D1878CDF0FC696 /* Utilities */,
 				5874149C6C03ACBD20F83EB5 /* Views */,
 			);
 			path = Scopy;
-			sourceTree = "<group>";
-		};
-		EA0B202E19F1E6797ADC1834 /* Configuration */ = {
-			isa = PBXGroup;
-			children = (
-				FFBCEEF2CC2763186DE26F69 /* ScopyThresholds.swift */,
-			);
-			path = Configuration;
-			sourceTree = "<group>";
-		};
-		F27A2D1BF3700F70E1B5297F /* Extensions */ = {
-			isa = PBXGroup;
-			children = (
-				84C61F96A731DC4419905C3E /* NSLock+Extensions.swift */,
-			);
-			path = Extensions;
-			sourceTree = "<group>";
-		};
-		F75F3718DF648E8E5DA37E59 /* Infrastructure */ = {
-			isa = PBXGroup;
-			children = (
-				196EDE361615053EC33A0851 /* Caching */,
-				EA0B202E19F1E6797ADC1834 /* Configuration */,
-				05E1F173E73ADBE84C03418B /* Persistence */,
-				016B7E2CC10364A67B182383 /* Search */,
-				9B45433DCC50E2D90D8F3A03 /* Settings */,
-			);
-			path = Infrastructure;
-			sourceTree = "<group>";
-		};
-		F972B22536D6F5F841448541 /* Protocols */ = {
-			isa = PBXGroup;
-			children = (
-				930C317B2BC06CB3FDB17453 /* ClipboardServiceProtocol.swift */,
-			);
-			path = Protocols;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -696,6 +446,7 @@
 			);
 			name = ScopyTSanTests;
 			packageProductDependencies = (
+				600F5F1A8795C728F788B9FC /* ScopyKit */,
 			);
 			productName = ScopyTSanTests;
 			productReference = 00D60F774C44FB7BFFEB35B0 /* ScopyTSanTests.xctest */;
@@ -751,6 +502,7 @@
 			);
 			name = ScopyTests;
 			packageProductDependencies = (
+				822D98D29CCFAA4C5137A39D /* ScopyKit */,
 			);
 			productName = ScopyTests;
 			productReference = 56913B13748B393E8044E08B /* ScopyTests.xctest */;
@@ -839,16 +591,8 @@
 				9661BC22D241C00A9FB7E9D0 /* AppDelegate.swift in Sources */,
 				04D00AA12169910C80C28CF9 /* AppState.swift in Sources */,
 				05C95008A01E020F43D3988B /* AppStateTests.swift in Sources */,
-				D0C3723AF9EF8FC6CEBBBA39 /* AppVersion.swift in Sources */,
-				E9E5671DF260D3B85BE306CE /* ClipboardEvent.swift in Sources */,
-				84A08C5D9031D0D94109EF98 /* ClipboardItemDTO.swift in Sources */,
 				5D1D8A60DEB12FAE47085E7E /* ClipboardItemDisplayText.swift in Sources */,
-				C66192EC055D5567F5330A40 /* ClipboardItemType.swift in Sources */,
-				6A26006656225A4B35AF353C /* ClipboardMonitor.swift in Sources */,
 				DEDA1EF2531849DBBA1499A8 /* ClipboardMonitorTests.swift in Sources */,
-				55E09FD4DD4BD8300CEFE4C4 /* ClipboardService.swift in Sources */,
-				FC2B59A76CB37CF34FF9AF93 /* ClipboardServiceProtocol.swift in Sources */,
-				688BD084CC0C21D31885A293 /* ClipboardStoredItem.swift in Sources */,
 				440C0A8885E4A77144105A51 /* ConcurrencyTests.swift in Sources */,
 				B2CEFE7289E25259D522B888 /* ContentView.swift in Sources */,
 				58756FBB91CD1B78A6B09707 /* EmptyStateView.swift in Sources */,
@@ -861,47 +605,25 @@
 				F782F226273CDC46067A65B9 /* HistoryItemView.swift in Sources */,
 				3E1520C84E30C111BAE6445B /* HistoryListView.swift in Sources */,
 				22CAC8D2216EF5F939B413B0 /* HistoryViewModel.swift in Sources */,
-				DDA404289EC2CD302C5D2B44 /* HotKeyService.swift in Sources */,
 				B0F8C23D7B1B5DBE7FDB6F6B /* HotKeyServiceTests.swift in Sources */,
-				F735DA80E15171CA59B02203 /* IconService.swift in Sources */,
 				91130AD28128B7601FCDCACC /* LoadMoreTriggerView.swift in Sources */,
 				437D09C393E7FBBE8EB9D265 /* Localization.swift in Sources */,
-				C4F8C1D325CBD26B7545041D /* MockClipboardService.swift in Sources */,
 				D2FE58267F3FCB1C5696CED6 /* MockServices.swift in Sources */,
-				44C4113FE3F7960B27FB42CC /* NSLock+Extensions.swift in Sources */,
 				C78B2351A13DD052B3C17FB0 /* PerformanceHelpers.swift in Sources */,
-				89F865E3CF9646681DA3CBAB /* PerformanceMetrics.swift in Sources */,
-				0230DC45955EBA2A1CF98C60 /* PerformanceProfiler.swift in Sources */,
 				574CBC1092D1BC6891FF64C0 /* PerformanceProfilerTests.swift in Sources */,
-				BB17D83B8DAF9204641D0DC0 /* RealClipboardService.swift in Sources */,
 				70D5747F23695105E2867484 /* ResourceCleanupTests.swift in Sources */,
-				0F309702411927250F2B5EA3 /* SQLiteClipboardRepository.swift in Sources */,
-				17833DEA54FC6C8EE1AE3D57 /* SQLiteConnection.swift in Sources */,
-				8703516EFBC785DA9B32CF06 /* SQLiteMigrations.swift in Sources */,
 				35F9DA552D86FB9CBF6A3C81 /* ScopyColors.swift in Sources */,
 				BA2B70C2C4C86E278C2FC773 /* ScopyComponents.swift in Sources */,
 				E5753C5D865B5BB6A6F5F11E /* ScopyIcons.swift in Sources */,
-				5B3F819C571E1B3EEDBD3E8E /* ScopyLogger.swift in Sources */,
 				5B88BBC60EB20FAD37917440 /* ScopySize.swift in Sources */,
 				9FD858494D45577D060020B6 /* ScopySpacing.swift in Sources */,
-				7B182DE13F4BE61119A7208C /* ScopyThresholds.swift in Sources */,
 				5B6A53676B5B957EEE6BCA1F /* ScopyTypography.swift in Sources */,
-				A95CC6C0C8DD9C7EB999E9B7 /* SearchEngineImpl.swift in Sources */,
-				114D6BB8C980B976412A003E /* SearchMode.swift in Sources */,
-				C2DA5F3BACB41BFA790B47A6 /* SearchRequest.swift in Sources */,
-				227C7C048738B2F38B51B94D /* SearchResultPage.swift in Sources */,
 				DF15A575AEB6BFFC571AA648 /* SearchServiceTests.swift in Sources */,
 				A91C52F48BFDC092FB56BD9D /* SectionHeader.swift in Sources */,
-				DD973E1A5617EC3CE78B7ECF /* SettingsDTO.swift in Sources */,
-				A5A3F29C0EEC3940A150774C /* SettingsStore.swift in Sources */,
 				0620EE33AA3CA3DF36D3176B /* SettingsView.swift in Sources */,
 				507578187BE947202BD63D0B /* SettingsViewModel.swift in Sources */,
-				ED5EE36FF4DA34BE8D7F492B /* StorageService.swift in Sources */,
 				7D547894B05F8069CA7A3DD2 /* StorageServiceTests.swift in Sources */,
-				DF535696C200F017CD196AE3 /* StorageStatsDTO.swift in Sources */,
 				B1CB4831365DCD6E5077365D /* TestDataFactory.swift in Sources */,
-				87DAAFAF6085024B123490C3 /* ThumbnailCache.swift in Sources */,
-				129EBD1870C1BE93F8FD40FB /* ThumbnailGenerationTracker.swift in Sources */,
 				94A1AF4D8054FA51BD1CA617 /* XCTestExtensions.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -925,16 +647,8 @@
 				1A2F33F96B65B19147B7E6DA /* AppDelegate.swift in Sources */,
 				BF5E207263E1819780AFE98E /* AppState.swift in Sources */,
 				F57DEF5DFEC07FE9586910EA /* AppStateTests.swift in Sources */,
-				0D7026D98737757506A5787B /* AppVersion.swift in Sources */,
-				684D08A36D491A1CFDB58109 /* ClipboardEvent.swift in Sources */,
-				1706C274DE4BC51C31754730 /* ClipboardItemDTO.swift in Sources */,
 				027ABA7EB0EA43844BC05517 /* ClipboardItemDisplayText.swift in Sources */,
-				C6065137A6505D64CA9BDA6C /* ClipboardItemType.swift in Sources */,
-				B11EB2FBB4E3D975692C35FA /* ClipboardMonitor.swift in Sources */,
 				43B8612CECC8A1768F74742B /* ClipboardMonitorTests.swift in Sources */,
-				D62BB0D84BC0FC8A7422AE82 /* ClipboardService.swift in Sources */,
-				7929C1F67DF4564D877FDABB /* ClipboardServiceProtocol.swift in Sources */,
-				3B8B6827525C125DFE90983A /* ClipboardStoredItem.swift in Sources */,
 				4A95D8E07E139A11201F4027 /* ConcurrencyTests.swift in Sources */,
 				F3E22C6E12B926D83DABF422 /* ContentView.swift in Sources */,
 				A91F181A47B2BA511885BD3B /* EmptyStateView.swift in Sources */,
@@ -947,49 +661,27 @@
 				DDB28299C2A49D09AB3CDFD5 /* HistoryItemView.swift in Sources */,
 				5DA66D3B6875314AE256E8D7 /* HistoryListView.swift in Sources */,
 				18A0B29008644A161F357EEA /* HistoryViewModel.swift in Sources */,
-				E02BBEE14B763FC2FBBF7B73 /* HotKeyService.swift in Sources */,
 				6290407CDC493685A38B5DED /* HotKeyServiceTests.swift in Sources */,
-				8FA63D6CD2EA527549D73DD7 /* IconService.swift in Sources */,
 				E4ABCC84D78DE586451E805D /* IntegrationTests.swift in Sources */,
 				74BEC382983B8DE7AAAAF6D1 /* LoadMoreTriggerView.swift in Sources */,
 				80C5D92E52A700850F1E5997 /* Localization.swift in Sources */,
-				19E1A249F8ABAA61C2F65238 /* MockClipboardService.swift in Sources */,
 				4F1BE0CF444C5F07BEE16E97 /* MockServices.swift in Sources */,
-				2E7B84A934E65CCCB3DFB0B8 /* NSLock+Extensions.swift in Sources */,
 				7411E82D82153F4FD1F02B17 /* PerformanceHelpers.swift in Sources */,
-				08D10A5466F4C33F7B968678 /* PerformanceMetrics.swift in Sources */,
-				4A407FF2188666F7A03835DE /* PerformanceProfiler.swift in Sources */,
 				89FF6438C2FC385E81DD98CB /* PerformanceProfilerTests.swift in Sources */,
 				A316443B51B7C38263A0682C /* PerformanceTests.swift in Sources */,
-				D265640F938F1B16265B68BA /* RealClipboardService.swift in Sources */,
 				C0A51AA7E4BEC084FC3D231D /* ResourceCleanupTests.swift in Sources */,
-				6351A2EF2F09F2953C460D88 /* SQLiteClipboardRepository.swift in Sources */,
-				8E299A624D780E4DFF2E5956 /* SQLiteConnection.swift in Sources */,
-				FDEB29D683BBA0503BDB0958 /* SQLiteMigrations.swift in Sources */,
 				57C1FB3E5765F41546C7AD5E /* ScopyColors.swift in Sources */,
 				4F98B4BEB7AEE0ED458F28D0 /* ScopyComponents.swift in Sources */,
 				C81A97FB9F42D01C3A7D4731 /* ScopyIcons.swift in Sources */,
-				C0A5CC87E6B57D99230F58D0 /* ScopyLogger.swift in Sources */,
 				7DC66EDCE0E45DFC84BEE089 /* ScopySize.swift in Sources */,
 				CAB0C4BCEB0707C32EF0F6E5 /* ScopySpacing.swift in Sources */,
-				07D656880127B43B79E62F17 /* ScopyThresholds.swift in Sources */,
 				BC73EE655DA83097AC0514D4 /* ScopyTypography.swift in Sources */,
-				276999D1241D9F457964EC70 /* SearchEngineImpl.swift in Sources */,
-				28BA7DEBC0466743A62EA443 /* SearchMode.swift in Sources */,
-				3486E074044705F30073D105 /* SearchRequest.swift in Sources */,
-				E815A5866D7A35DB66DC86BA /* SearchResultPage.swift in Sources */,
 				D0DCBABCC3717C48EAF8A18C /* SearchServiceTests.swift in Sources */,
 				847904181954981532FFE71E /* SectionHeader.swift in Sources */,
-				99BFBA74F5CFDBAD1BFDFCC0 /* SettingsDTO.swift in Sources */,
-				89EBE9145C051266119E7A65 /* SettingsStore.swift in Sources */,
 				721DE7132B1FFC691DA2B442 /* SettingsView.swift in Sources */,
 				5ADA570A1558437A10DE516C /* SettingsViewModel.swift in Sources */,
-				E9D1E5B20BF9960FB0E4957C /* StorageService.swift in Sources */,
 				83B5EE1F7FAB659097712B82 /* StorageServiceTests.swift in Sources */,
-				B98D0F4E2F0F3F5A0BCE2535 /* StorageStatsDTO.swift in Sources */,
 				2E3AC6F5BBFB8EC0EEA7BEFB /* TestDataFactory.swift in Sources */,
-				5C12ED446954BEC6D7B0CEEB /* ThumbnailCache.swift in Sources */,
-				3A8295171C39A63D594FA1B0 /* ThumbnailGenerationTracker.swift in Sources */,
 				23E413BF3FBB4FFF3B5FF598 /* XCTestExtensions.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -1008,15 +700,7 @@
 			files = (
 				AC847133EB07370A9105BC73 /* AppDelegate.swift in Sources */,
 				592F3B9027D4B1BFF844AEB0 /* AppState.swift in Sources */,
-				6F0AC66967599946E3E9501D /* AppVersion.swift in Sources */,
-				9D03C56E27E232885CF29C4F /* ClipboardEvent.swift in Sources */,
-				51F445374CF32715650BFEDF /* ClipboardItemDTO.swift in Sources */,
 				6A99FB613348407E1116DAB4 /* ClipboardItemDisplayText.swift in Sources */,
-				CD9FF5CBFF83723E5600BB63 /* ClipboardItemType.swift in Sources */,
-				7C4931198EBB3A686D412285 /* ClipboardMonitor.swift in Sources */,
-				6917A2792D1F9BC70463DC7E /* ClipboardService.swift in Sources */,
-				E936681210443F5D76C7C036 /* ClipboardServiceProtocol.swift in Sources */,
-				446C8306B52146C3A6061A6E /* ClipboardStoredItem.swift in Sources */,
 				6694D337867337FF5925549D /* ContentView.swift in Sources */,
 				728C9A64C3B9C089CF9F7A75 /* EmptyStateView.swift in Sources */,
 				3F35F1D85C8C126C9CE04179 /* FloatingPanel.swift in Sources */,
@@ -1028,40 +712,18 @@
 				3B9AFBF4400247DE93225D7B /* HistoryItemView.swift in Sources */,
 				56DD95C12F4A8CD6DCD8C837 /* HistoryListView.swift in Sources */,
 				0E35E9B208BDFBB26FE28364 /* HistoryViewModel.swift in Sources */,
-				6A3C49D4AFE7BC50EE38FC27 /* HotKeyService.swift in Sources */,
-				9A2E643A25E5397932071CDB /* IconService.swift in Sources */,
 				98350810B6B0F435AD57BEF1 /* LoadMoreTriggerView.swift in Sources */,
 				94AB18BED4E8018E91611810 /* Localization.swift in Sources */,
-				26ADD078C8FC126181CDD88A /* MockClipboardService.swift in Sources */,
-				69EF6D1083811281A05D18E7 /* NSLock+Extensions.swift in Sources */,
-				8299CDBD5930FE596EBBAE3B /* PerformanceMetrics.swift in Sources */,
-				8ADACA32A51317E6F11C7880 /* PerformanceProfiler.swift in Sources */,
-				576385E92B0B8E9B91CA7BC6 /* RealClipboardService.swift in Sources */,
-				B20AA98FA263B9A3CECF1D82 /* SQLiteClipboardRepository.swift in Sources */,
-				D328EFC52373A401922E1DDB /* SQLiteConnection.swift in Sources */,
-				3D0870078D7F167EEAB08F93 /* SQLiteMigrations.swift in Sources */,
 				A4433C4ACC64F0D5DF5DA717 /* ScopyApp.swift in Sources */,
 				1216203D7B799CFDA435C0C5 /* ScopyColors.swift in Sources */,
 				0C968E38F7456C42503E1319 /* ScopyComponents.swift in Sources */,
 				DA2483A05985496EAFA7CD17 /* ScopyIcons.swift in Sources */,
-				3A539CBFC8CAD889E3D71519 /* ScopyLogger.swift in Sources */,
 				BCA3A9072980CA2B53CEFD0A /* ScopySize.swift in Sources */,
 				C296E6B159C52200F4C441E3 /* ScopySpacing.swift in Sources */,
-				E8E21C3000349261775A69FF /* ScopyThresholds.swift in Sources */,
 				B192C163D6B56DD11C5C4054 /* ScopyTypography.swift in Sources */,
-				1397F9ED533B76FEE6167777 /* SearchEngineImpl.swift in Sources */,
-				5B2977D4EA7BE949046759A3 /* SearchMode.swift in Sources */,
-				01D01DB617998D942AE071D9 /* SearchRequest.swift in Sources */,
-				11286A50B7BE63AAC4631E47 /* SearchResultPage.swift in Sources */,
 				56499299AE17ABA9BCB5E396 /* SectionHeader.swift in Sources */,
-				38ECCA70C5F3D9DA131A3AB0 /* SettingsDTO.swift in Sources */,
-				5C7572C3BC3C6DC32EBEE551 /* SettingsStore.swift in Sources */,
 				F3557BE1FA909E49B1824F51 /* SettingsView.swift in Sources */,
 				C1331931990CB336FE0D878C /* SettingsViewModel.swift in Sources */,
-				937AAD9001A0822EC9B80588 /* StorageService.swift in Sources */,
-				31EBA4BD4EA510995A68D15F /* StorageStatsDTO.swift in Sources */,
-				532D98D2566116B84D99596C /* ThumbnailCache.swift in Sources */,
-				F053CF9B3D7C4A76CB232AFF /* ThumbnailGenerationTracker.swift in Sources */,
 				96769165BC6DF4DAA0507486 /* main.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -1199,6 +861,7 @@
 				DEVELOPMENT_TEAM = "";
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				FRAMEWORK_SEARCH_PATHS = "$(inherited) $(OBJROOT)/../Products/$(CONFIGURATION)";
 				GCC_C_LANGUAGE_STANDARD = gnu11;
 				GCC_NO_COMMON_BLOCKS = YES;
 				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
@@ -1215,6 +878,7 @@
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = macosx;
 				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_INCLUDE_PATHS = "$(inherited) $(OBJROOT)/../Products/$(CONFIGURATION)";
 				SWIFT_OPTIMIZATION_LEVEL = "-O";
 				SWIFT_VERSION = 5.9;
 			};
@@ -1344,6 +1008,7 @@
 				DEVELOPMENT_TEAM = "";
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
+				FRAMEWORK_SEARCH_PATHS = "$(inherited) $(OBJROOT)/../Products/$(CONFIGURATION)";
 				GCC_C_LANGUAGE_STANDARD = gnu11;
 				GCC_DYNAMIC_NO_PIC = NO;
 				GCC_NO_COMMON_BLOCKS = YES;
@@ -1367,6 +1032,7 @@
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = macosx;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_INCLUDE_PATHS = "$(inherited) $(OBJROOT)/../Products/$(CONFIGURATION)";
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 				SWIFT_VERSION = 5.9;
 			};
@@ -1459,6 +1125,14 @@
 
 /* Begin XCSwiftPackageProductDependency section */
 		3011C50D2B1653E9005CAAB0 /* ScopyKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = ScopyKit;
+		};
+		600F5F1A8795C728F788B9FC /* ScopyKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = ScopyKit;
+		};
+		822D98D29CCFAA4C5137A39D /* ScopyKit */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = ScopyKit;
 		};

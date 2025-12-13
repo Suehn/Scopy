@@ -1,4 +1,5 @@
 import SwiftUI
+import ScopyKit
 
 struct SectionHeader: View {
     let title: String
@@ -61,4 +62,3 @@ struct SectionHeader: View {
         }
     }
 }
-

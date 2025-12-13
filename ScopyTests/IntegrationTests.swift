@@ -1,14 +1,13 @@
+import AppKit
 import XCTest
-#if !SCOPY_TSAN_TESTS
-@testable import Scopy
-#endif
+import ScopyKit
 
 /// 集成测试 - 测试完整的服务链
 /// 验证 v0.md 的端到端功能
 @MainActor
 final class IntegrationTests: XCTestCase {
 
-    var service: RealClipboardService!
+    var service: (any ClipboardServiceProtocol)!
 
     override func setUp() async throws {
         // Clear settings before each test to ensure isolation

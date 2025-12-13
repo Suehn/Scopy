@@ -1,6 +1,27 @@
 # Scopy 部署和使用指南
 
-## 本次更新（v0.42）
+## 本次更新（v0.43）
+- **Phase 7（完成）：ScopyKit module 强制边界**：
+  - App target 仅保留 App/UI/Presentation；后端（Domain/Application/Infrastructure/Services/Utilities）由本地 SwiftPM 模块 `ScopyKit` 提供。
+  - `ScopyTests`/`ScopyTSanTests` 统一依赖 `ScopyKit`，不再把后端源码直接编进 test bundle。
+- **构建/部署（重要）**：
+  - 本仓库将构建产物落到 `.build/`（`project.yml` 设置 `BUILD_DIR`/`CONFIGURATION_BUILD_DIR`），但 SwiftPM 产物仍位于 DerivedData。
+  - v0.43 补齐 `SWIFT_INCLUDE_PATHS`/`FRAMEWORK_SEARCH_PATHS` 到 DerivedData `Build/Products/*`，确保 App/Test targets 可稳定 `import ScopyKit`。
+- **性能实测**（Apple M3, macOS 15.7.2（24G325）, Debug, `make test-perf`；heavy 需 `RUN_HEAVY_PERF_TESTS=1`）：
+  - Fuzzy 5k items P95 ≈ 7.11ms
+  - Fuzzy 10k items P95 ≈ 51.88ms（Samples: 50）
+  - Disk 25k fuzzy P95 ≈ 72.74ms（Samples: 50）
+  - Bulk insert 1000 items ≈ 60.26ms（≈16,595 items/s）
+  - Fetch recent (50 items) avg ≈ 0.08ms
+  - Regex 20k items P95 ≈ 3.87ms
+  - Mixed content disk search（single run）≈ 6.10ms
+- **测试结果**：
+  - `make test-unit` **53 passed** (1 skipped)
+  - `make test-perf` **22 passed** (6 skipped)
+  - `make test-tsan` **132 passed** (1 skipped)
+  - `make test-strict` **166 passed** (7 skipped)
+
+## 历史更新（v0.42）
 - **Phase 7（准备）：ScopyKit SwiftPM 接入**：
   - 根目录 `Package.swift` 定义本地 `ScopyKit` library，后续用于把 Domain/Infra/Application 抽成独立 module。
   - `project.yml` 增加本地 `packages` 并让 App target 依赖 `ScopyKit`；构建/测试时会出现 `Resolve Package Graph`。

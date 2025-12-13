@@ -1,9 +1,14 @@
 import Foundation
 
 /// 搜索结果页 - 对应 v0.md 中的 SearchResultPage
-struct SearchResultPage: Sendable {
-    let items: [ClipboardItemDTO]
-    let total: Int
-    let hasMore: Bool
-}
+public struct SearchResultPage: Sendable {
+    public let items: [ClipboardItemDTO]
+    public let total: Int
+    public let hasMore: Bool
 
+    public init(items: [ClipboardItemDTO], total: Int, hasMore: Bool) {
+        self.items = items
+        self.total = total
+        self.hasMore = hasMore
+    }
+}

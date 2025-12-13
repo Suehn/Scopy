@@ -1,4 +1,5 @@
 import SwiftUI
+import ScopyKit
 import AppKit
 
 struct HistoryItemThumbnailView: View {

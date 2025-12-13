@@ -2,8 +2,8 @@ import AppKit
 import Foundation
 
 @MainActor
-final class ThumbnailCache {
-    static let shared = ThumbnailCache()
+public final class ThumbnailCache {
+    public static let shared = ThumbnailCache()
 
     private let cache: NSCache<NSString, NSImage>
 
@@ -13,15 +13,15 @@ final class ThumbnailCache {
         self.cache = cache
     }
 
-    func cachedImage(path: String) -> NSImage? {
+    public func cachedImage(path: String) -> NSImage? {
         cache.object(forKey: path as NSString)
     }
 
-    func store(_ image: NSImage, forPath path: String) {
+    public func store(_ image: NSImage, forPath path: String) {
         cache.setObject(image, forKey: path as NSString)
     }
 
-    func loadImage(path: String) async -> NSImage? {
+    public func loadImage(path: String) async -> NSImage? {
         if let cached = cachedImage(path: path) {
             return cached
         }
@@ -41,7 +41,7 @@ final class ThumbnailCache {
         return image
     }
 
-    func clear() {
+    public func clear() {
         cache.removeAllObjects()
     }
 }

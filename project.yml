@@ -36,6 +36,9 @@ settings:
     PRODUCT_BUNDLE_IDENTIFIER: com.scopy.app
     BUILD_DIR: $(SRCROOT)/.build
     CONFIGURATION_BUILD_DIR: $(BUILD_DIR)/$(CONFIGURATION)
+    # SwiftPM packages still build into DerivedData; add search paths so App/Test targets can `import ScopyKit`
+    SWIFT_INCLUDE_PATHS: "$(inherited) $(OBJROOT)/../Products/$(CONFIGURATION)"
+    FRAMEWORK_SEARCH_PATHS: "$(inherited) $(OBJROOT)/../Products/$(CONFIGURATION)"
     # 版本号配置 (v0.6)
     MARKETING_VERSION: "0.6.0"
     CURRENT_PROJECT_VERSION: "1"
@@ -52,6 +55,16 @@ targets:
       - path: Scopy
         excludes:
           - "**/*.md"
+          # Phase 7 (v0.43): App target only keeps App/UI/Presentation.
+          # Backend (Domain/Application/Infrastructure/Services/Utilities) is provided by SwiftPM module `ScopyKit`.
+          - "Application/**"
+          - "Domain/**"
+          - "Extensions/**"
+          - "Infrastructure/**"
+          - "Models/**"
+          - "Protocols/**"
+          - "Services/**"
+          - "Utilities/**"
     settings:
       base:
         PRODUCT_NAME: Scopy
@@ -76,6 +89,15 @@ targets:
           - "ScopyApp.swift"   # 排除 SwiftUI App，避免 NSApplication 冲突
           - "Info.plist"
           - "*.entitlements"
+          # Phase 7 (v0.43): Do not compile backend sources into tests; use `ScopyKit` dependency instead.
+          - "Application/**"
+          - "Domain/**"
+          - "Extensions/**"
+          - "Infrastructure/**"
+          - "Models/**"
+          - "Protocols/**"
+          - "Services/**"
+          - "Utilities/**"
     settings:
       base:
         PRODUCT_NAME: ScopyTests
@@ -85,6 +107,8 @@ targets:
         # 不设置 TEST_HOST 和 BUNDLE_LOADER，使用独立测试 bundle 模式
     dependencies:
       - sdk: libsqlite3.tbd
+      - package: ScopyKit
+        product: ScopyKit
 
   ScopyTestHost:
     type: application
@@ -113,6 +137,15 @@ targets:
           - "ScopyApp.swift"
           - "Info.plist"
           - "*.entitlements"
+          # Phase 7 (v0.43): Do not compile backend sources into tests; use `ScopyKit` dependency instead.
+          - "Application/**"
+          - "Domain/**"
+          - "Extensions/**"
+          - "Infrastructure/**"
+          - "Models/**"
+          - "Protocols/**"
+          - "Services/**"
+          - "Utilities/**"
     settings:
       base:
         PRODUCT_NAME: ScopyTSanTests
@@ -125,6 +158,8 @@ targets:
     dependencies:
       - target: ScopyTestHost
       - sdk: libsqlite3.tbd
+      - package: ScopyKit
+        product: ScopyKit
 
   ScopyUITests:
     type: bundle.ui-testing

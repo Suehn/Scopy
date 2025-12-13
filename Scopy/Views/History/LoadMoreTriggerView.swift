@@ -1,4 +1,5 @@
 import SwiftUI
+import ScopyKit
 
 struct LoadMoreTriggerView: View {
     var isLoading: Bool
@@ -23,4 +24,3 @@ struct LoadMoreTriggerView: View {
         .padding(.vertical, ScopySpacing.xs)
     }
 }
-

@@ -2,20 +2,20 @@ import Foundation
 
 /// 剪贴板项 DTO - 对应 v0.md 中的 ClipboardItem
 /// 说明：UI-only 的派生展示字段（title/metadata）应在 Presentation 层生成。
-struct ClipboardItemDTO: Identifiable, Sendable, Hashable {
-    let id: UUID
-    let type: ClipboardItemType
-    let contentHash: String
-    let plainText: String
-    let appBundleID: String?
-    let createdAt: Date
-    let lastUsedAt: Date
-    let isPinned: Bool
-    let sizeBytes: Int
-    let thumbnailPath: String?  // 缩略图路径 (v0.8)
-    let storageRef: String?     // 外部存储路径 (v0.8 - 用于原图预览)
+public struct ClipboardItemDTO: Identifiable, Sendable, Hashable {
+    public let id: UUID
+    public let type: ClipboardItemType
+    public let contentHash: String
+    public let plainText: String
+    public let appBundleID: String?
+    public let createdAt: Date
+    public let lastUsedAt: Date
+    public let isPinned: Bool
+    public let sizeBytes: Int
+    public let thumbnailPath: String?  // 缩略图路径 (v0.8)
+    public let storageRef: String?     // 外部存储路径 (v0.8 - 用于原图预览)
 
-    init(
+    public init(
         id: UUID,
         type: ClipboardItemType,
         contentHash: String,
@@ -43,7 +43,7 @@ struct ClipboardItemDTO: Identifiable, Sendable, Hashable {
 
     /// v0.16.2: 创建带有更新 isPinned 的新实例
     /// v0.23: 修复 - 使用 let 替代未使用的 var
-    func withPinned(_ pinned: Bool) -> ClipboardItemDTO {
+    public func withPinned(_ pinned: Bool) -> ClipboardItemDTO {
         let copy = ClipboardItemDTO(
             id: id,
             type: type,

@@ -18,7 +18,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 1. **创建/更新版本文档** `doc/implemented-doc/vX.X.md`
 2. **更新索引** `doc/implemented-doc/README.md`
-3. **更新变更日志** `doc/implemented-doc/CHANxaxqGELOG.md`
+3. **更新变更日志** `doc/implemented-doc/CHANGELOG.md`
 4. **更新部署文档** `DEPLOYMENT.md` (如有性能/部署变化，必须包含具体数值)
 
 ### 版本命名规范

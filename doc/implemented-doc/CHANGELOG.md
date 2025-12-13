@@ -7,6 +7,44 @@
 
 ---
 
+## [v0.43] - 2025-12-13
+
+### Phase 7（完成）：强制 ScopyKit module 边界（后端从 App target 移出）
+
+- **强制模块边界**：`Scopy` App target 仅保留 App/UI/Presentation 源码；后端（Domain/Application/Infrastructure/Services/Utilities）由本地 SwiftPM 模块 `ScopyKit` 提供。
+- **构建链路补齐**：在保持 `BUILD_DIR=.build` 的前提下，补齐 `SWIFT_INCLUDE_PATHS` / `FRAMEWORK_SEARCH_PATHS` 指向 DerivedData `Build/Products/*`，让 App/Test targets 稳定 `import ScopyKit`。
+- **测试对齐**：`ScopyTests`/`ScopyTSanTests` 不再直接编译后端源码，统一依赖 `ScopyKit`；测试侧避免引用 `RealClipboardService`/`MockClipboardService` 具体类型，改走 `ClipboardServiceFactory`。
+- **访问控制补齐**：将 UI/测试需要的 Domain 模型、协议与关键服务类型补齐 `public`，确保跨 module 使用一致。
+
+### 修改文件
+
+- `project.yml`
+- `Scopy.xcodeproj/project.pbxproj`
+- `Scopy/AppDelegate.swift`
+- `Scopy/Observables/*`
+- `Scopy/Views/*`
+- `Scopy/Presentation/ClipboardItemDisplayText.swift`
+- `Scopy/Domain/*`
+- `Scopy/Infrastructure/*`
+- `Scopy/Services/*`
+- `Scopy/Utilities/*`
+- `ScopyTests/*`
+- `DEPLOYMENT.md`
+- `doc/profile/v0.43-profile.md`
+- `doc/profile/README.md`
+- `doc/implemented-doc/v0.43.md`
+- `doc/implemented-doc/README.md`
+- `doc/review/review-v0.3.md`
+
+### 测试
+
+- 单元测试：`make test-unit` **53 tests passed** (1 skipped)
+- 性能测试：`make test-perf` **22 tests passed** (6 skipped)
+- Thread Sanitizer：`make test-tsan` **132 tests passed** (1 skipped)
+- Strict Concurrency：`make test-strict` **166 tests passed** (7 skipped)
+
+---
+
 ## [v0.42] - 2025-12-13
 
 ### Phase 7（准备）：引入本地 Swift Package `ScopyKit`（XcodeGen 接入）

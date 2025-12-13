@@ -1,4 +1,5 @@
 import SwiftUI
+import ScopyKit
 
 struct EmptyStateView: View {
     let hasFilters: Bool
@@ -29,4 +30,3 @@ struct EmptyStateView: View {
         .padding(ScopySpacing.xl)
     }
 }
-

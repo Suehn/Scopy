@@ -1,4 +1,5 @@
 import AppKit
+import ScopyKit
 import SwiftUI
 
 @MainActor
