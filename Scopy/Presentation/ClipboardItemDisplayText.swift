@@ -4,6 +4,7 @@ import Foundation
 ///
 /// Domain model should not carry UI-specific derived fields (e.g. title/metadata).
 /// This cache keeps UI rendering cheap without bloating the DTO.
+@MainActor
 final class ClipboardItemDisplayText {
     static let shared = ClipboardItemDisplayText()
 
@@ -128,7 +129,6 @@ final class ClipboardItemDisplayText {
 }
 
 extension ClipboardItemDTO {
-    var title: String { ClipboardItemDisplayText.shared.title(for: self) }
-    var metadata: String { ClipboardItemDisplayText.shared.metadata(for: self) }
+    @MainActor var title: String { ClipboardItemDisplayText.shared.title(for: self) }
+    @MainActor var metadata: String { ClipboardItemDisplayText.shared.metadata(for: self) }
 }
-

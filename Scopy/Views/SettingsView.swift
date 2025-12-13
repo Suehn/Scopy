@@ -159,28 +159,18 @@ struct SettingsView: View {
         )
 
         Task {
-            do {
-                try await appState.updateSettings(currentSettings)
-                // 更新 AppState 的搜索模式
-                await MainActor.run {
-                    appState.searchMode = currentSettings.defaultSearchMode
+            await appState.updateSettings(currentSettings)
+            await MainActor.run {
+                appState.searchMode = currentSettings.defaultSearchMode
 
-                    // 通过回调更新全局快捷键（解耦 AppDelegate）
-                    ScopyLog.ui.info("Updating hotkey via callback")
-                    appState.applyHotKeyHandler?(
-                        currentSettings.hotkeyKeyCode,
-                        currentSettings.hotkeyModifiers
-                    )
+                ScopyLog.ui.info("Updating hotkey via callback")
+                appState.applyHotKeyHandler?(
+                    currentSettings.hotkeyKeyCode,
+                    currentSettings.hotkeyModifiers
+                )
 
-                    isSaving = false
-                    onDismiss?()
-                }
-            } catch {
-                ScopyLog.ui.error("saveSettings failed: \(error.localizedDescription, privacy: .public)")
-                await MainActor.run {
-                    isSaving = false
-                    // 保存失败时不关闭窗口，让用户可以重试
-                }
+                isSaving = false
+                onDismiss?()
             }
         }
     }
@@ -680,7 +670,8 @@ struct FeatureRow: View {
 /// 快捷键录制器 - 使用 class 以便在闭包中正确更新状态
 /// v0.9.3: 使用回调方式直接更新 binding，避免 .onChange 时机问题
 /// v0.10: 完全解耦，通过注入的回调与外部通信
-class HotKeyRecorder: ObservableObject {
+@MainActor
+final class HotKeyRecorder: ObservableObject {
     @Published var isRecording = false
 
     /// 录制完成回调 - 直接更新 binding
@@ -706,45 +697,44 @@ class HotKeyRecorder: ObservableObject {
         ScopyLog.ui.info("Started hotkey recording")
 
         // 通过注入的回调暂停当前全局热键（完全解耦）
-        Task { @MainActor in
-            unregisterHotKeyHandler?()
-        }
+        unregisterHotKeyHandler?()
 
         // 尝试前置窗口，减少焦点问题；全局监听兜底
         NSApp.activate(ignoringOtherApps: true)
 
-        let handler: (NSEvent) -> Bool = { [weak self] event in
-            guard let self = self else { return false }
-            return self.handleKeyEvent(event)
+        eventMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .flagsChanged]) { [weak self] event in
+            guard let self else { return event }
+            return self.handleKeyEvent(event) ? nil : event
         }
 
-        eventMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .flagsChanged]) { event in
-            handler(event) ? nil : event
-        }
-
-        globalEventMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.keyDown]) { event in
-            _ = handler(event)
+        globalEventMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.keyDown]) { [weak self] event in
+            let keyCode = event.keyCode
+            let modifiersRawValue = event.modifierFlags.rawValue
+            Task { @MainActor [weak self] in
+                _ = self?.handleKeyDown(keyCode: keyCode, modifiersRawValue: modifiersRawValue)
+            }
         }
     }
 
     private func handleKeyEvent(_ event: NSEvent) -> Bool {
         guard event.type == .keyDown else { return false }
+        return handleKeyDown(keyCode: event.keyCode, modifiersRawValue: event.modifierFlags.rawValue)
+    }
 
+    private func handleKeyDown(keyCode: UInt16, modifiersRawValue: UInt) -> Bool {
         ScopyLog.ui.debug(
-            "Key pressed: keyCode=\(event.keyCode, privacy: .public), modifiers=\(event.modifierFlags.rawValue, privacy: .public)"
+            "Key pressed: keyCode=\(keyCode, privacy: .public), modifiers=\(modifiersRawValue, privacy: .public)"
         )
 
         // ESC 取消录制并恢复原快捷键
-        if event.keyCode == 53 {
+        if keyCode == 53 {
             ScopyLog.ui.info("ESC pressed, cancelling recording")
-            DispatchQueue.main.async {
-                self.stopRecording(restorePrevious: true)
-            }
+            stopRecording(restorePrevious: true)
             return true
         }
 
         // 获取修饰键（转换为 Carbon 格式）
-        let nsModifiers = event.modifierFlags
+        let nsModifiers = NSEvent.ModifierFlags(rawValue: modifiersRawValue)
         var carbonModifiers: UInt32 = 0
 
         if nsModifiers.contains(.command) { carbonModifiers |= UInt32(cmdKey) }
@@ -756,17 +746,15 @@ class HotKeyRecorder: ObservableObject {
 
         // 需要至少一个修饰键
         if carbonModifiers != 0 {
-            let newKeyCode = UInt32(event.keyCode)
+            let newKeyCode = UInt32(keyCode)
             let newModifiers = carbonModifiers
             didRecordNewHotKey = true
 
-            DispatchQueue.main.async {
-                ScopyLog.ui.debug(
-                    "Calling onRecorded callback: keyCode=\(newKeyCode, privacy: .public), modifiers=0x\(String(newModifiers, radix: 16), privacy: .public)"
-                )
-                self.onRecorded?(newKeyCode, newModifiers)
-                self.stopRecording(restorePrevious: false)
-            }
+            ScopyLog.ui.debug(
+                "Calling onRecorded callback: keyCode=\(newKeyCode, privacy: .public), modifiers=0x\(String(newModifiers, radix: 16), privacy: .public)"
+            )
+            onRecorded?(newKeyCode, newModifiers)
+            stopRecording(restorePrevious: false)
             return true
         }
 
@@ -791,10 +779,7 @@ class HotKeyRecorder: ObservableObject {
             ScopyLog.ui.info(
                 "Restoring previous hotkey keyCode=\(previous.keyCode, privacy: .public), modifiers=0x\(String(previous.modifiers, radix: 16), privacy: .public)"
             )
-            Task { @MainActor in
-                // 通过注入的回调恢复快捷键（完全解耦）
-                applyHotKeyHandler?(previous.keyCode, previous.modifiers)
-            }
+            applyHotKeyHandler?(previous.keyCode, previous.modifiers)
         }
     }
 }

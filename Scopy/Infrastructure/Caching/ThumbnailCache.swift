@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 
+@MainActor
 final class ThumbnailCache {
     static let shared = ThumbnailCache()
 
@@ -32,7 +33,7 @@ final class ThumbnailCache {
         guard !Task.isCancelled else { return nil }
         guard let data else { return nil }
 
-        let image = await MainActor.run { NSImage(data: data) }
+        let image = NSImage(data: data)
         guard !Task.isCancelled else { return nil }
         guard let image else { return nil }
 
@@ -44,4 +45,3 @@ final class ThumbnailCache {
         cache.removeAllObjects()
     }
 }
-

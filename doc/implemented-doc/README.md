@@ -8,8 +8,8 @@
 
 | 项目 | 状态 |
 |------|------|
-| **当前版本** | v0.38 |
-| **测试状态** | 单元测试通过（`make test-unit`: 53 passed, 1 skipped；`make test-perf`: 22 passed, 6 skipped；`make test-tsan`: 132 passed, 1 skipped） |
+| **当前版本** | v0.39 |
+| **测试状态** | 单元测试通过（`make test-unit`: 53 passed, 1 skipped；`make test-perf`: 22 passed, 6 skipped；`make test-tsan`: 132 passed, 1 skipped；Strict Concurrency: 166 tests passed, 7 skipped） |
 | **构建状态** | Debug ✅ |
 | **部署位置** | /Applications/Scopy.app |
 | **最后更新** | 2025-12-13 |
@@ -24,6 +24,7 @@
 
 | 版本 | 日期 | 主要内容 | 状态 |
 |------|------|----------|------|
+| [v0.39](./v0.39.md) | 2025-12-13 | Phase 6 收口：Strict Concurrency 回归（Swift 6）+ perf 用例稳定性 | ✅ |
 | [v0.38](./v0.38.md) | 2025-12-13 | Phase 5 收口：DTO 去 UI 派生字段 + 展示缓存统一入口 | ✅ |
 | [v0.37](./v0.37.md) | 2025-12-13 | P0-6 ingest 背压：spool + 有界并发队列（减少无声丢历史） | ✅ |
 | [v0.36.1](./v0.36.1.md) | 2025-12-13 | Phase 6 回归：Thread Sanitizer（Hosted Tests） | ✅ |

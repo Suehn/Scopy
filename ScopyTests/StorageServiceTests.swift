@@ -11,7 +11,6 @@ final class StorageServiceTests: XCTestCase {
     var storage: StorageService!
 
     override func setUp() async throws {
-        try await super.setUp()
         // Use in-memory database for testing
         storage = StorageService(databasePath: ":memory:")
         try await storage.open()
@@ -20,7 +19,6 @@ final class StorageServiceTests: XCTestCase {
     override func tearDown() async throws {
         storage.close()
         storage = nil
-        try await super.tearDown()
     }
 
     // MARK: - Basic CRUD Tests

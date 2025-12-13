@@ -12,7 +12,6 @@ final class AppStateTests: XCTestCase {
     var mockService: TestMockClipboardService!
 
     override func setUp() async throws {
-        try await super.setUp()
         mockService = TestMockClipboardService()
         appState = AppState.forTesting(service: mockService)
     }
@@ -21,7 +20,6 @@ final class AppStateTests: XCTestCase {
         appState.stop()
         appState = nil
         mockService = nil
-        try await super.tearDown()
     }
 
     // MARK: - Initialization Tests
@@ -168,8 +166,6 @@ final class AppStateTests: XCTestCase {
     func testSearchUpdatesItemsList() async throws {
         mockService.setItemCount(100)
         await appState.load()
-
-        let initialCount = appState.items.count
 
         appState.searchQuery = "test"
         appState.search()
@@ -511,12 +507,19 @@ final class AppStateTests: XCTestCase {
 
         let item = appState.items[0]
         let wasPinned = item.isPinned
+        mockService.pinCallCount = 0
+        mockService.unpinCallCount = 0
 
         await appState.togglePin(item)
 
         // Item state should be toggled (load is called after toggle)
         // The mock service handles pin/unpin
         XCTAssertEqual(mockService.pinCallCount + mockService.unpinCallCount, 1)
+        if wasPinned {
+            XCTAssertEqual(mockService.unpinCallCount, 1)
+        } else {
+            XCTAssertEqual(mockService.pinCallCount, 1)
+        }
     }
 
     func testDeleteRemovesItem() async {

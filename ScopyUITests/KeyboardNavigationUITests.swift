@@ -2,18 +2,19 @@ import XCTest
 
 /// Keyboard Navigation UI Tests
 /// Tests for keyboard shortcuts and navigation
+@MainActor
 final class KeyboardNavigationUITests: XCTestCase {
 
     var app: XCUIApplication!
 
-    override func setUpWithError() throws {
+    override func setUp() async throws {
         continueAfterFailure = false
         app = XCUIApplication()
         app.launchArguments = ["--uitesting"]
         app.launch()
     }
 
-    override func tearDownWithError() throws {
+    override func tearDown() async throws {
         app.terminate()
         app = nil
     }
@@ -31,7 +32,8 @@ final class KeyboardNavigationUITests: XCTestCase {
         window.typeKey(.downArrow, modifierFlags: [])
 
         // Should have selected an item (verify via selection highlight)
-        XCTAssertTrue(window.exists)
+        let exists = window.exists
+        XCTAssertTrue(exists)
     }
 
     func testUpArrowSelectsPreviousItem() throws {
@@ -46,7 +48,8 @@ final class KeyboardNavigationUITests: XCTestCase {
         window.typeKey(.downArrow, modifierFlags: [])
         window.typeKey(.upArrow, modifierFlags: [])
 
-        XCTAssertTrue(window.exists)
+        let exists = window.exists
+        XCTAssertTrue(exists)
     }
 
     func testEnterKeySelectsItem() throws {
@@ -83,7 +86,8 @@ final class KeyboardNavigationUITests: XCTestCase {
         Thread.sleep(forTimeInterval: 0.2)
 
         // Search should be cleared or window closed
-        XCTAssertTrue(app.exists)
+        let exists = app.exists
+        XCTAssertTrue(exists)
     }
 
     func testMultipleDownArrowsNavigatesList() throws {
@@ -98,6 +102,7 @@ final class KeyboardNavigationUITests: XCTestCase {
             window.typeKey(.downArrow, modifierFlags: [])
         }
 
-        XCTAssertTrue(window.exists)
+        let exists = window.exists
+        XCTAssertTrue(exists)
     }
 }

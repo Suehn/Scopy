@@ -6,6 +6,7 @@
 
 | 版本 | 日期 | 主要变化 |
 |------|------|----------|
+| [v0.39-profile.md](./v0.39-profile.md) | 2025-12-13 | Strict Concurrency 回归 + perf 10k 采样稳定性 | 
 | [v0.38-profile.md](./v0.38-profile.md) | 2025-12-13 | DTO 去 UI 派生字段 + 展示缓存入口（基线记录） |
 | [v0.37-profile.md](./v0.37-profile.md) | 2025-12-13 | P0-6 ingest 背压：spool + 有界并发队列（基线记录） |
 | [v0.36.1-profile.md](./v0.36.1-profile.md) | 2025-12-13 | TSan（Hosted tests）回归方案；性能基线沿用 v0.36 |

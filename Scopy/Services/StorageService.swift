@@ -477,13 +477,31 @@ final class StorageService {
         // 1. Get all storage_ref filenames from database
         let validRefs = try await repository.fetchExternalRefFilenames()
 
-        // 2. Enumerate all files in content directory
+        // 2. Enumerate all files in content directory (sync; avoid iterating in async context)
+        let orphanedFiles = findOrphanedExternalFiles(validRefs: validRefs)
+        guard !orphanedFiles.isEmpty else { return }
+
+        // 3. Delete orphaned files concurrently (non-blocking; structured concurrency)
+        await withTaskGroup(of: Void.self) { group in
+            for fileURL in orphanedFiles {
+                group.addTask {
+                    let fileManager = FileManager()
+                    try? fileManager.removeItem(at: fileURL)
+                }
+            }
+        }
+
+        // 4. Invalidate cache after cleanup
+        invalidateExternalSizeCache()
+    }
+
+    private func findOrphanedExternalFiles(validRefs: Set<String>) -> [URL] {
         let contentURL = URL(fileURLWithPath: externalStoragePath)
         guard let enumerator = FileManager.default.enumerator(
             at: contentURL,
             includingPropertiesForKeys: nil,
             options: [.skipsHiddenFiles, .skipsSubdirectoryDescendants]
-        ) else { return }
+        ) else { return [] }
 
         var orphanedFiles: [URL] = []
         for case let fileURL as URL in enumerator {
@@ -492,29 +510,7 @@ final class StorageService {
                 orphanedFiles.append(fileURL)
             }
         }
-
-        // 3. Delete orphaned files in background (non-blocking)
-        // v0.19: 移到后台线程执行，避免阻塞主线程
-        if !orphanedFiles.isEmpty {
-            DispatchQueue.global(qos: .utility).async { [weak self] in
-                let group = DispatchGroup()
-                let queue = DispatchQueue(label: "com.scopy.orphan-cleanup", attributes: .concurrent)
-
-                for fileURL in orphanedFiles {
-                    group.enter()
-                    queue.async {
-                        defer { group.leave() }
-                        try? FileManager.default.removeItem(at: fileURL)
-                    }
-                }
-                group.wait()
-
-                // 4. Invalidate cache after cleanup (on main thread)
-                DispatchQueue.main.async {
-                    self?.invalidateExternalSizeCache()
-                }
-            }
-        }
+        return orphanedFiles
     }
 
     /// v0.14: 深度优化 - 消除子查询 COUNT，使用单次查询 + 事务批量删除

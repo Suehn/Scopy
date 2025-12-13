@@ -1,6 +1,7 @@
 import AppKit
 import SwiftUI
 
+@MainActor
 class AppDelegate: NSObject, NSApplicationDelegate {
     /// 单例访问
     static var shared: AppDelegate? {
@@ -120,6 +121,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func persistHotkeySettings(keyCode: UInt32, modifiers: UInt32) {
+        let settingsStore = settingsStore
         Task {
             await settingsStore.updateHotkey(keyCode: keyCode, modifiers: modifiers)
         }
@@ -155,8 +157,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 forName: NSWindow.willCloseNotification,
                 object: window,
                 queue: .main
-            ) { [weak self] _ in
-                self?.settingsWindow = nil
+            ) { _ in
+                Task { @MainActor in
+                    AppDelegate.shared?.settingsWindow = nil
+                }
             }
 
             settingsWindow = window

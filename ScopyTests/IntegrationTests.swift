@@ -11,7 +11,6 @@ final class IntegrationTests: XCTestCase {
     var service: RealClipboardService!
 
     override func setUp() async throws {
-        try await super.setUp()
         // Clear settings before each test to ensure isolation
         UserDefaults.standard.removeObject(forKey: "ScopySettings")
         service = ClipboardServiceFactory.createForTesting()
@@ -21,7 +20,6 @@ final class IntegrationTests: XCTestCase {
     override func tearDown() async throws {
         service.stop()
         service = nil
-        try await super.tearDown()
     }
 
     // MARK: - Full Workflow Tests

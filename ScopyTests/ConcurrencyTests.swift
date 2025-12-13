@@ -42,6 +42,7 @@ final class ConcurrencyTests: XCTestCase {
         }
 
         // 快速发起多个搜索请求
+        let search = self.search!
         var tasks: [Task<SearchEngineImpl.SearchResult?, Never>] = []
         for i in 0..<10 {
             let task = Task {
@@ -53,7 +54,7 @@ final class ConcurrencyTests: XCTestCase {
                     limit: 50,
                     offset: 0
                 )
-                return try? await self.search.search(request: request)
+                return try? await search.search(request: request)
             }
             tasks.append(task)
         }
@@ -234,6 +235,7 @@ final class ConcurrencyTests: XCTestCase {
         }
 
         // 使用 TaskGroup 实现真正的并发搜索
+        let search = self.search!
         let queries = ["stress", "lorem", "ipsum", "dolor", "amet", "test", "item", "sit", "content", "hash"]
 
         await withTaskGroup(of: SearchEngineImpl.SearchResult?.self) { group in
@@ -247,7 +249,7 @@ final class ConcurrencyTests: XCTestCase {
                         limit: 50,
                         offset: 0
                     )
-                    return try? await self.search.search(request: request)
+                    return try? await search.search(request: request)
                 }
             }
 
@@ -281,6 +283,7 @@ final class ConcurrencyTests: XCTestCase {
             _ = try await storage.upsertItem(content)
         }
 
+        let search = self.search!
         let query = "consistency"
         var results: [SearchEngineImpl.SearchResult] = []
 
@@ -296,7 +299,7 @@ final class ConcurrencyTests: XCTestCase {
                         limit: 50,
                         offset: 0
                     )
-                    return try? await self.search.search(request: request)
+                    return try? await search.search(request: request)
                 }
             }
 
@@ -369,46 +372,21 @@ final class ConcurrencyTests: XCTestCase {
         storage.cleanupSettings.maxItems = 100
 
         // 并发执行清理和搜索
-        var searchSucceeded = false
-        var cleanupSucceeded = false
+        let search = self.search!
+        let storage = self.storage!
 
-        await withTaskGroup(of: Bool.self) { group in
-            // 搜索任务
-            group.addTask {
-                let request = SearchRequest(
-                    query: "cleanup",
-                    mode: .fuzzy,
-                    appFilter: nil,
-                    typeFilter: nil,
-                    limit: 50,
-                    offset: 0
-                )
-                if let _ = try? await self.search.search(request: request) {
-                    return true
-                }
-                return false
-            }
+        let request = SearchRequest(
+            query: "cleanup",
+            mode: .fuzzy,
+            appFilter: nil,
+            typeFilter: nil,
+            limit: 50,
+            offset: 0
+        )
 
-            // 清理任务（在 MainActor 上执行）
-            group.addTask { @MainActor in
-                do {
-                    try await self.storage.performCleanup()
-                    return true
-                } catch {
-                    return false
-                }
-            }
-
-            for await result in group {
-                if result {
-                    if !searchSucceeded {
-                        searchSucceeded = true
-                    } else {
-                        cleanupSucceeded = true
-                    }
-                }
-            }
-        }
+        async let searchResult = try? search.search(request: request)
+        let cleanupSucceeded = (try? await storage.performCleanup()) != nil
+        let searchSucceeded = (await searchResult) != nil
 
         // 两个操作都应该成功完成（或至少不崩溃）
         XCTAssertTrue(searchSucceeded || cleanupSucceeded, "At least one operation should succeed")

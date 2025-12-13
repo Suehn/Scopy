@@ -266,7 +266,7 @@ final class MockInMemoryStorageService {
 
     func upsertItem(_ content: ClipboardMonitor.ClipboardContent) throws -> ClipboardItemDTO {
         insertCallCount += 1
-        let item = TestDataFactory.makeItem(plainText: content.plainText ?? "")
+        let item = TestDataFactory.makeItem(plainText: content.plainText)
         items.insert(item, at: 0)
         return item
     }

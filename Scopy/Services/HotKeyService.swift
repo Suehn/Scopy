@@ -35,7 +35,7 @@ private func logToFile(_ message: String) {
         if FileManager.default.fileExists(atPath: logPath) {
             if let handle = try? FileHandle(forWritingTo: URL(fileURLWithPath: logPath)) {
                 defer { try? handle.close() }
-                try? handle.seekToEnd()
+                _ = try? handle.seekToEnd()
                 try? handle.write(contentsOf: data)
             }
         } else {
@@ -52,21 +52,35 @@ private func logToFile(_ message: String) {
 final class HotKeyService {
     // MARK: - Types
 
-    typealias HotKeyHandler = () -> Void
+    typealias HotKeyHandler = @MainActor @Sendable () -> Void
 
     // MARK: - Static Properties (Carbon API 需要)
 
-    /// 存储已注册的热键处理器 (hotKeyID -> handler)
-    private static var handlers: [UInt32: HotKeyHandler] = [:]
+    private struct SharedState {
+        var handlers: [UInt32: HotKeyHandler] = [:]
+        var eventHandlerRef: EventHandlerRef?
+        var isInstallingEventHandler = false
+        var nextHotKeyID: UInt32 = 1
+        var lastFire: (id: UInt32, timestamp: CFAbsoluteTime)?
+        #if DEBUG
+        var testingMode = false
+        #endif
+    }
 
-    /// v0.10.7: 保护 handlers 字典的锁（主线程 + Carbon 事件线程并发访问）
-    private static let handlersLock = NSLock()
+    private final class Locked<Value>: @unchecked Sendable {
+        private let lock = NSLock()
+        private var value: Value
 
-    /// v0.20: 保护 eventHandlerRef 的锁（防止多线程竞态）
-    private static let eventHandlerLock = NSLock()
+        init(_ value: Value) {
+            self.value = value
+        }
 
-    /// 事件处理器引用
-    private static var eventHandlerRef: EventHandlerRef?
+        func withValue<R>(_ body: (inout Value) -> R) -> R {
+            lock.withLock { body(&value) }
+        }
+    }
+
+    private static let sharedState = Locked(SharedState())
 
     /// 热键签名
     private static let hotKeySignature: OSType = {
@@ -77,31 +91,17 @@ final class HotKeyService {
         return result
     }()
 
-    /// 热键 ID 计数器
-    /// v0.20: 添加溢出保护，当接近 UInt32.max 时重置为 1
-    private static var nextHotKeyID: UInt32 = 1
-
-    /// v0.22: 保护 nextHotKeyID 的锁（防止多线程竞态）
-    private static let nextHotKeyIDLock = NSLock()
-
-    /// 防重复触发（按住键盘时 Carbon 会重复发送 pressed 事件）
-    /// v0.22: 移除未使用的 lastFireLock，lastFire 由 handlersLock 统一保护
-    /// 这是有意的设计：在 handleCarbonEvent 中，lastFire 的检查和 handlers 的查找
-    /// 需要在同一个锁内完成，以确保原子性
-    private static var lastFire: (id: UInt32, timestamp: CFAbsoluteTime)?
-
-    /// v0.20: 安全递增 hotKeyID，防止溢出
-    /// v0.22: 添加锁保护，确保线程安全
+    /// v0.20: 安全递增 hotKeyID，防止溢出（通过 lock-isolated shared state 串行化）
     private static func getNextHotKeyID() -> UInt32 {
-        return nextHotKeyIDLock.withLock {
+        return sharedState.withValue { state in
             // 如果接近溢出，重置为 1（跳过 0，因为 0 通常表示无效 ID）
             // 使用 UInt32.max - 1000 作为阈值，留出足够的安全边界
-            if nextHotKeyID >= UInt32.max - 1000 {
+            if state.nextHotKeyID >= UInt32.max - 1000 {
                 logToFile("⚠️ HotKeyID approaching overflow, resetting to 1")
-                nextHotKeyID = 1
+                state.nextHotKeyID = 1
             }
-            let id = nextHotKeyID
-            nextHotKeyID += 1
+            let id = state.nextHotKeyID
+            state.nextHotKeyID += 1
             return id
         }
     }
@@ -129,33 +129,48 @@ final class HotKeyService {
     // MARK: - Private: Event Handler Installation
 
     /// 安装事件处理器（只安装一次）
-    /// v0.20: 使用 eventHandlerLock 保护 eventHandlerRef 访问
     private static func installEventHandlerIfNeeded() {
-        eventHandlerLock.withLock {
-            guard eventHandlerRef == nil else {
+        let shouldInstall = sharedState.withValue { state -> Bool in
+            guard state.eventHandlerRef == nil else {
                 logToFile("⚠️ Event handler already installed")
-                return
+                return false
             }
+            guard !state.isInstallingEventHandler else {
+                logToFile("⚠️ Event handler installation already in progress")
+                return false
+            }
+            state.isInstallingEventHandler = true
+            return true
+        }
 
-            // 只监听按下事件，避免按下/松开各触发一次导致"按住才显示"
-            var eventTypes = [
-                EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
-            ]
+        guard shouldInstall else { return }
 
-            let status = InstallEventHandler(
-                GetApplicationEventTarget(),
-                carbonEventCallback,
-                eventTypes.count,
-                &eventTypes,
-                nil,
-                &eventHandlerRef
-            )
+        // 只监听按下事件，避免按下/松开各触发一次导致"按住才显示"
+        var eventTypes = [
+            EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
+        ]
 
+        var handlerRef: EventHandlerRef?
+        let status = InstallEventHandler(
+            GetApplicationEventTarget(),
+            carbonEventCallback,
+            eventTypes.count,
+            &eventTypes,
+            nil,
+            &handlerRef
+        )
+
+        sharedState.withValue { state in
+            state.isInstallingEventHandler = false
             if status == noErr {
-                logToFile("✅ Carbon event handler installed")
-            } else {
-                logToFile("❌ Failed to install event handler: \(status)")
+                state.eventHandlerRef = handlerRef
             }
+        }
+
+        if status == noErr {
+            logToFile("✅ Carbon event handler installed")
+        } else {
+            logToFile("❌ Failed to install event handler: \(status)")
         }
     }
 
@@ -177,9 +192,9 @@ final class HotKeyService {
         let status = UnregisterEventHotKey(hotKeyRef)
         self.hotKeyRef = nil
 
-        // 从静态字典中移除处理器（加锁保护）
-        Self.handlersLock.withLock {
-            Self.handlers.removeValue(forKey: currentHotKeyID)
+        // 从共享状态中移除处理器
+        Self.sharedState.withValue { state in
+            _ = state.handlers.removeValue(forKey: currentHotKeyID)
         }
         logToFile("🔑 Global hotkey unregistered: id=\(currentHotKeyID), status=\(status)")
         currentHotKeyID = 0
@@ -199,13 +214,12 @@ final class HotKeyService {
     // MARK: - Private: Registration
 
     private func registerHotKey(keyCode: UInt32, modifiers: UInt32, handler: @escaping HotKeyHandler) {
-        // 生成新的 hotKeyID（加锁保护静态变量）
         // v0.20: 使用 getNextHotKeyID() 防止溢出
-        let handlerCount = Self.handlersLock.withLock {
-            currentHotKeyID = Self.getNextHotKeyID()
-            // 存储处理器
-            Self.handlers[currentHotKeyID] = handler
-            return Self.handlers.count
+        let newID = Self.getNextHotKeyID()
+        currentHotKeyID = newID
+        let handlerCount = Self.sharedState.withValue { state -> Int in
+            state.handlers[newID] = handler
+            return state.handlers.count
         }
         logToFile("📝 Handler stored: id=\(currentHotKeyID), total handlers=\(handlerCount)")
 
@@ -228,9 +242,8 @@ final class HotKeyService {
             logToFile("✅ Hotkey registered: id=\(currentHotKeyID), keyCode=\(keyCode), modifiers=0x\(String(modifiers, radix: 16)), hotKeyRef=\(String(describing: hotKeyRef))")
         } else {
             logToFile("❌ Failed to register hotkey: status=\(status)")
-            // 清理（加锁保护）
-            Self.handlersLock.withLock {
-                Self.handlers.removeValue(forKey: currentHotKeyID)
+            Self.sharedState.withValue { state in
+                _ = state.handlers.removeValue(forKey: newID)
             }
             currentHotKeyID = 0
         }
@@ -279,21 +292,20 @@ final class HotKeyService {
             return OSStatus(eventNotHandledErr)
         }
 
-        // 查找并执行处理器（加锁保护，同时保护 lastFire）
-        // v0.17.1: 使用 withLock 统一锁策略
-        let result: (handler: HotKeyHandler?, shouldExecute: Bool) = handlersLock.withLock {
-            let availableKeys = Array(handlers.keys)
-            let handler = handlers[hotKeyID.id]
+        // 查找并执行处理器（共享状态串行化，同时保护 lastFire）
+        let result: (handler: HotKeyHandler?, shouldExecute: Bool) = sharedState.withValue { state in
+            let availableKeys = Array(state.handlers.keys)
+            let handler = state.handlers[hotKeyID.id]
 
             logToFile("🔍 Looking for handler: id=\(hotKeyID.id), available handlers=\(availableKeys)")
 
             // 按住时会重复发 pressed 事件，做简单节流
             let now = CFAbsoluteTimeGetCurrent()
-            if let last = lastFire, last.id == hotKeyID.id, now - last.timestamp < 0.25 {
+            if let last = state.lastFire, last.id == hotKeyID.id, now - last.timestamp < 0.25 {
                 logToFile("⏩ Ignoring repeat pressed event for id=\(hotKeyID.id)")
                 return (nil, false)
             }
-            lastFire = (hotKeyID.id, now)
+            state.lastFire = (hotKeyID.id, now)
 
             return (handler, true)
         }
@@ -304,7 +316,7 @@ final class HotKeyService {
 
         if let handler = result.handler {
             logToFile("✅ Handler found, executing...")
-            DispatchQueue.main.async {
+            Task { @MainActor in
                 handler()
             }
             return noErr
@@ -317,72 +329,65 @@ final class HotKeyService {
     // MARK: - Testing Support
 
     #if DEBUG
-    /// v0.20: 保护 testingMode 的锁
-    private static let testingModeLock = NSLock()
-    private static var _testingMode = false
-
-    /// v0.20: 线程安全的 testingMode 访问
-    private static var testingMode: Bool {
-        get { testingModeLock.withLock { _testingMode } }
-        set { testingModeLock.withLock { _testingMode = newValue } }
-    }
-
     static func enableTestingMode() {
-        testingMode = true
+        sharedState.withValue { state in
+            state.testingMode = true
+        }
     }
 
     static func disableTestingMode() {
-        testingMode = false
+        sharedState.withValue { state in
+            state.testingMode = false
+        }
     }
 
     /// v0.17.1: 使用 withLock 统一锁策略
     func triggerHandlerForTesting() {
-        let handler = Self.handlersLock.withLock {
-            Self.handlers[currentHotKeyID]
+        let handler = Self.sharedState.withValue { state in
+            state.handlers[currentHotKeyID]
         }
 
         if let handler = handler {
-            if Thread.isMainThread {
+            Task { @MainActor in
                 handler()
-            } else {
-                DispatchQueue.main.async {
-                    handler()
-                }
             }
         }
     }
 
     var isRegistered: Bool {
-        if Self.testingMode {
-            return Self.handlersLock.withLock {
-                Self.handlers[currentHotKeyID] != nil
+        let isTestingMode = Self.sharedState.withValue { state in
+            state.testingMode
+        }
+        if isTestingMode {
+            return Self.sharedState.withValue { state in
+                state.handlers[currentHotKeyID] != nil
             }
         }
         return hotKeyRef != nil
     }
 
     var hasHandler: Bool {
-        Self.handlersLock.withLock {
-            Self.handlers[currentHotKeyID] != nil
+        Self.sharedState.withValue { state in
+            state.handlers[currentHotKeyID] != nil
         }
     }
 
     /// v0.22: 修复竞态条件 - 使用 getNextHotKeyID() 确保线程安全
     /// v0.22.1: 修复嵌套锁死锁风险 - 在 handlersLock 外部调用 getNextHotKeyID()
     func registerHandlerOnly(_ handler: @escaping HotKeyHandler) {
-        // 先获取 ID（在 handlersLock 外部），避免嵌套锁死锁
+        // 先获取 ID（避免在 critical region 内做额外工作）
         let newID = Self.getNextHotKeyID()
-        Self.handlersLock.withLock {
-            currentHotKeyID = newID
-            Self.handlers[currentHotKeyID] = handler
+        currentHotKeyID = newID
+        Self.sharedState.withValue { state in
+            state.handlers[newID] = handler
         }
     }
 
     func unregisterHandlerOnly() {
-        Self.handlersLock.withLock {
-            Self.handlers.removeValue(forKey: currentHotKeyID)
-            currentHotKeyID = 0
+        Self.sharedState.withValue { state in
+            _ = state.handlers.removeValue(forKey: currentHotKeyID)
         }
+        currentHotKeyID = 0
     }
     #endif
 }

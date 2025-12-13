@@ -3,7 +3,7 @@
 > 说明：本文用于指导后续“稳定性优先”的长期重构（含 Codex 执行）。`doc/review/review-v0.3-2.md` 为历史草案/补充材料，其中关键内容已合并到本文；后续以本文为准。
 
 - 最后更新：2025-12-13
-- 代码基线：`v0.38`
+- 代码基线：`v0.39`
 - 关联文档：
   - 当前实现状态索引：`doc/implemented-doc/README.md`
   - 近期变更：`doc/implemented-doc/CHANGELOG.md`
@@ -177,7 +177,7 @@
 - 已完成（v0.36）：阈值集中到 `ScopyThresholds`（ingest/hash offload、external storage）
 - 已完成（v0.36.1）：Thread Sanitizer 回归（Hosted tests，`make test-tsan`）
 - 已完成（v0.37）：P0-6 ingest 背压确定性（ingest spool + `.unbounded` stream）
-- 待继续：Strict Concurrency 回归
+- 已完成（v0.39）：Strict Concurrency 回归
 
 ---
 
@@ -820,8 +820,14 @@ Notes：
 - 已完成（2025-12-13，v0.37）：
   - P0-6 ingest 背压确定性：引入 ingest spool（`~/Library/Caches/Scopy/ingest/`）+ 有界并发队列
   - `ClipboardMonitor.contentStream` 调整为 `.unbounded`（payload 为 file ref，不携带大 `Data`）
+- 已完成（2025-12-13，v0.39）：
+  - Strict Concurrency 渐进回归（先从 tests target 开始）：
+    - 命令：`xcodebuild test -project Scopy.xcodeproj -scheme Scopy -destination 'platform=macOS' -only-testing:ScopyTests SWIFT_STRICT_CONCURRENCY=complete SWIFT_TREAT_WARNINGS_AS_ERRORS=YES`
+    - 结果：通过（无并发 warnings；`ScopyTests` 166 tests passed，7 skipped）
+    - 关键修复点：UI 缓存/展示辅助 `@MainActor` 收口、HotKeyService Carbon 回调 hop 到 MainActor、tests/UI tests 的 `Sendable` 捕获修正
+
 - 待继续：
-  - Strict Concurrency 渐进回归（建议先从 tests target 开始，避免一次性引爆）
+  - （可选）将 Strict Concurrency 固化为 CI/Makefile 回归门槛
 
 ### Phase 7（可选）：抽成 Swift Package（强制边界）
 
@@ -865,7 +871,8 @@ Notes：
 ### 10.5 并发回归建议（强烈建议每个大 Phase 做一次）
 
 - Thread Sanitizer：跑 `make test-tsan`（`ScopyTests` 为独立 bundle 模式，直接开 TSan 可能触发 “loaded too late”）
-- 逐步开启 Strict Concurrency（建议先从测试 target 开始，避免一次性引爆）
+- Strict Concurrency（建议先从测试 target 开始，避免一次性引爆）：
+  - `xcodebuild test -project Scopy.xcodeproj -scheme Scopy -destination 'platform=macOS' -only-testing:ScopyTests SWIFT_STRICT_CONCURRENCY=complete SWIFT_TREAT_WARNINGS_AS_ERRORS=YES`
 
 ---
 

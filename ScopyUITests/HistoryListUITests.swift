@@ -2,18 +2,19 @@ import XCTest
 
 /// History List UI Tests
 /// Tests for the clipboard history list functionality
+@MainActor
 final class HistoryListUITests: XCTestCase {
 
     var app: XCUIApplication!
 
-    override func setUpWithError() throws {
+    override func setUp() async throws {
         continueAfterFailure = false
         app = XCUIApplication()
         app.launchArguments = ["--uitesting"]
         app.launch()
     }
 
-    override func tearDownWithError() throws {
+    override func tearDown() async throws {
         app.terminate()
         app = nil
     }
@@ -23,7 +24,8 @@ final class HistoryListUITests: XCTestCase {
     func testHistoryListExists() throws {
         // Wait for the list to appear
         let list = app.scrollViews.firstMatch
-        XCTAssertTrue(list.waitForExistence(timeout: 5))
+        let exists = list.waitForExistence(timeout: 5)
+        XCTAssertTrue(exists)
     }
 
     func testHistoryListHasItems() throws {
@@ -36,7 +38,8 @@ final class HistoryListUITests: XCTestCase {
 
         // Check for text elements in the list
         let staticTexts = list.staticTexts
-        XCTAssertGreaterThan(staticTexts.count, 0)
+        let count = staticTexts.count
+        XCTAssertGreaterThan(count, 0)
     }
 
     func testListScrolling() throws {
@@ -50,7 +53,8 @@ final class HistoryListUITests: XCTestCase {
         list.swipeUp()
 
         // List should still exist after scrolling
-        XCTAssertTrue(list.exists)
+        let exists = list.exists
+        XCTAssertTrue(exists)
     }
 
     func testItemSelection() throws {
@@ -82,7 +86,8 @@ final class HistoryListUITests: XCTestCase {
         Thread.sleep(forTimeInterval: 0.3) // Wait for debounce
 
         let list = app.scrollViews.firstMatch
-        XCTAssertTrue(list.exists)
+        let exists = list.exists
+        XCTAssertTrue(exists)
     }
 
     func testEmptySearchShowsResults() throws {
@@ -99,6 +104,7 @@ final class HistoryListUITests: XCTestCase {
         Thread.sleep(forTimeInterval: 0.3)
 
         let list = app.scrollViews.firstMatch
-        XCTAssertTrue(list.exists)
+        let exists = list.exists
+        XCTAssertTrue(exists)
     }
 }

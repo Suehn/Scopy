@@ -273,7 +273,7 @@ final class AppState {
         let appsToPreload = recentApps
         Task.detached(priority: .background) {
             for bundleID in appsToPreload {
-                IconService.shared.preloadIcon(bundleID: bundleID)
+                await IconService.shared.preloadIcon(bundleID: bundleID)
             }
         }
     }

@@ -40,27 +40,21 @@ struct HistoryItemThumbnailView: View {
             .foregroundStyle(.green)
     }
 
+    @MainActor
     private func loadThumbnailIfNeeded(path: String) async {
         if lastLoadedPath != path {
-            await MainActor.run {
-                loadedThumbnail = nil
-                lastLoadedPath = path
-            }
+            loadedThumbnail = nil
+            lastLoadedPath = path
         }
 
         if let cached = ThumbnailCache.shared.cachedImage(path: path) {
-            await MainActor.run {
-                loadedThumbnail = cached
-            }
+            loadedThumbnail = cached
             return
         }
 
         let image = await ThumbnailCache.shared.loadImage(path: path)
         guard !Task.isCancelled else { return }
         guard let image else { return }
-        await MainActor.run {
-            loadedThumbnail = image
-        }
+        loadedThumbnail = image
     }
 }
-

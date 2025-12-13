@@ -53,6 +53,7 @@ enum PerformanceHelpers {
     }
 
     /// 异步版本的样本收集
+    @MainActor
     static func collectTimeSamplesAsync(
         iterations: Int,
         warmupIterations: Int = 2,

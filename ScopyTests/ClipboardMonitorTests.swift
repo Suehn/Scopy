@@ -11,14 +11,12 @@ final class ClipboardMonitorTests: XCTestCase {
     var monitor: ClipboardMonitor!
 
     override func setUp() async throws {
-        try await super.setUp()
         monitor = ClipboardMonitor()
     }
 
     override func tearDown() async throws {
         monitor.stopMonitoring()
         monitor = nil
-        try await super.tearDown()
     }
 
     // MARK: - Initialization Tests

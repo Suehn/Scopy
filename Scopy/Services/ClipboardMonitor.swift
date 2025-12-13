@@ -119,9 +119,6 @@ final class ClipboardMonitor {
         contentStreamLock.lock()
         isContentStreamFinished = true
         contentStreamLock.unlock()
-
-        timer?.invalidate()
-        timer = nil
         // Cancel all ingest tasks and drop pending items.
         // 注意: deinit 不在 @MainActor 上下文中，使用 lock/defer unlock 模式
         queueLock.lock()
@@ -674,7 +671,7 @@ final class ClipboardMonitor {
     /// v0.19: 使用缩略图计算哈希，大幅减少内存占用
     /// 将图片缩放到 32x32 后计算全图哈希，而不是在原图上提取四角
     /// 4K 图片：原方案 33MB -> 新方案 4KB (减少 99.99%)
-    private static let thumbnailSize = 32
+    nonisolated private static let thumbnailSize = 32
 
     nonisolated private static func extractCornerPixelsHash(from cgImage: CGImage, width: Int, height: Int) -> String {
         return autoreleasepool {

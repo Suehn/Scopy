@@ -5,6 +5,7 @@ import Foundation
 ///
 /// Note: This file lives in Infrastructure but is currently used by Presentation code.
 /// Phase 7 (Swift Package split) will enforce dependency direction.
+@MainActor
 final class IconService {
     static let shared = IconService()
 
@@ -64,4 +65,3 @@ final class IconService {
         nameCache.removeAllObjects()
     }
 }
-

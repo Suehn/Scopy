@@ -7,6 +7,50 @@
 
 ---
 
+## [v0.39] - 2025-12-13
+
+### Phase 6 收口：Strict Concurrency 回归（Swift 6）+ perf 用例稳定性
+
+- **Strict Concurrency（Swift 6）回归跑通**：修复 `Sendable` 捕获、actor/`@MainActor` 隔离边界问题（含 UI tests），支持 `SWIFT_TREAT_WARNINGS_AS_ERRORS=YES`。
+- **HotKeyService 更稳**：静态共享状态收口为单一 lock-isolated `SharedState`；Carbon 回调只做查 handler + 节流 + hop 到 `@MainActor` 执行。
+- **perf 用例更稳定**：`testSearchPerformance10kItems` 采样从 5 → 50（10 rounds × 5 queries），降低一次性系统抖动导致的 P95 误报。
+- **日志文件不入库**：忽略 `build.log` 与 `strict-concurrency-*.log`。
+
+### 修改文件
+
+- `.gitignore`
+- `Scopy/AppDelegate.swift`
+- `Scopy/Application/ClipboardService.swift`
+- `Scopy/Infrastructure/Caching/IconService.swift`
+- `Scopy/Infrastructure/Caching/ThumbnailCache.swift`
+- `Scopy/Infrastructure/Search/SearchEngineImpl.swift`
+- `Scopy/Observables/AppState.swift`
+- `Scopy/Presentation/ClipboardItemDisplayText.swift`
+- `Scopy/Services/ClipboardMonitor.swift`
+- `Scopy/Services/HotKeyService.swift`
+- `Scopy/Services/PerformanceProfiler.swift`
+- `Scopy/Services/StorageService.swift`
+- `Scopy/Views/History/HistoryItemThumbnailView.swift`
+- `Scopy/Views/History/HistoryItemView.swift`
+- `Scopy/Views/SettingsView.swift`
+- `ScopyTests/*`
+- `ScopyUITests/*`
+- `DEPLOYMENT.md`
+- `doc/profile/v0.39-profile.md`
+- `doc/profile/README.md`
+- `doc/implemented-doc/v0.39.md`
+- `doc/implemented-doc/README.md`
+- `doc/review/review-v0.3.md`
+
+### 测试
+
+- 单元测试：`make test-unit` **53 tests passed** (1 skipped)
+- 性能测试：`make test-perf` **22 tests passed** (6 skipped)
+- Thread Sanitizer：`make test-tsan` **132 tests passed** (1 skipped)
+- Strict Concurrency：`xcodebuild test -only-testing:ScopyTests SWIFT_STRICT_CONCURRENCY=complete SWIFT_TREAT_WARNINGS_AS_ERRORS=YES` **166 tests passed** (7 skipped)
+
+---
+
 ## [v0.38] - 2025-12-13
 
 ### Phase 5 收口：DTO 去 UI 派生字段 + 展示缓存统一入口

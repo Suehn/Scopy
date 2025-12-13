@@ -111,7 +111,7 @@ final class PerformanceProfiler {
 
     /// Record an async timing measurement
     @discardableResult
-    func measureAsync<T>(_ name: String, block: () async throws -> T) async rethrows -> T {
+    func measureAsync<T: Sendable>(_ name: String, block: () async throws -> T) async rethrows -> T {
         guard isEnabled else { return try await block() }
 
         let start = CFAbsoluteTimeGetCurrent()
@@ -141,7 +141,7 @@ final class PerformanceProfiler {
     }
 
     /// Profile a search operation
-    func profileSearch<T>(mode: SearchMode, block: () async throws -> T) async rethrows -> T {
+    func profileSearch<T: Sendable>(mode: SearchMode, block: () async throws -> T) async rethrows -> T {
         try await measureAsync("Search.\(mode.rawValue)", block: block)
     }
 

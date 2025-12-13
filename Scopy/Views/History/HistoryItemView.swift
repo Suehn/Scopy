@@ -34,7 +34,7 @@ struct HistoryItemView: View, Equatable {
 
     // MARK: - Equatable
 
-    static func == (lhs: HistoryItemView, rhs: HistoryItemView) -> Bool {
+    nonisolated static func == (lhs: HistoryItemView, rhs: HistoryItemView) -> Bool {
         lhs.item.id == rhs.item.id &&
         lhs.item.lastUsedAt == rhs.item.lastUsedAt &&
         lhs.item.isPinned == rhs.item.isPinned &&
@@ -470,4 +470,3 @@ struct HistoryItemView: View, Equatable {
         Localization.formatBytes(bytes)
     }
 }
-

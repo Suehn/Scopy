@@ -1,6 +1,26 @@
 # Scopy 部署和使用指南
 
-## 本次更新（v0.38）
+## 本次更新（v0.39）
+- **Phase 6 收口：Strict Concurrency 回归（Swift 6）**：
+  - 单测 target 以 `SWIFT_STRICT_CONCURRENCY=complete` + `SWIFT_TREAT_WARNINGS_AS_ERRORS=YES` 回归通过（无并发 warnings）。
+  - 关键修复：`Sendable` 捕获（tests/UI tests）、`@MainActor` 边界（UI 缓存/显示辅助）、HotKeyService Carbon 回调 hop 到 MainActor。
+- **性能/稳定性**：
+  - perf 用例稳定性：`testSearchPerformance10kItems` 采样从 5 → 50（10 rounds × 5 queries），降低一次性系统抖动导致的 P95 误报。
+- **性能实测**（Apple M3, macOS 15.7.2（24G325）, Debug, `make test-perf`；heavy 需 `RUN_HEAVY_PERF_TESTS=1`）：
+  - Fuzzy 5k items P95 ≈ 4.66ms
+  - Fuzzy 10k items P95 ≈ 45.63ms（Samples: 50）
+  - Disk 25k fuzzy P95 ≈ 55.89ms
+  - Bulk insert 1000 items ≈ 54.96ms（≈18,195 items/s）
+  - Fetch recent (50 items) avg ≈ 0.07ms
+  - Regex 20k items P95 ≈ 3.04ms
+  - Mixed content disk search（single run, after warmup）≈ 4.06ms
+- **测试结果**：
+  - `make test-unit` **53 passed** (1 skipped)
+  - `make test-perf` **22 passed** (6 skipped)
+  - `make test-tsan` **132 passed** (1 skipped)
+  - Strict Concurrency：`xcodebuild test -only-testing:ScopyTests SWIFT_STRICT_CONCURRENCY=complete SWIFT_TREAT_WARNINGS_AS_ERRORS=YES` **166 passed** (7 skipped)
+
+## 历史更新（v0.38）
 - **Phase 5 收口：Domain vs UI**：
   - `ClipboardItemDTO` 移除 UI-only 派生字段 `cachedTitle/cachedMetadata`，Domain 只保留事实数据。
   - Presentation 新增 `ClipboardItemDisplayText`（`NSCache`）为 `ClipboardItemDTO.title/metadata` 提供计算 + 缓存，保持列表渲染低开销。

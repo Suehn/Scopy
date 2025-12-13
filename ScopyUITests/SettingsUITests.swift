@@ -2,18 +2,19 @@ import XCTest
 
 /// Settings Window UI Tests
 /// Tests for the settings/preferences window
+@MainActor
 final class SettingsUITests: XCTestCase {
 
     var app: XCUIApplication!
 
-    override func setUpWithError() throws {
+    override func setUp() async throws {
         continueAfterFailure = false
         app = XCUIApplication()
         app.launchArguments = ["--uitesting"]
         app.launch()
     }
 
-    override func tearDownWithError() throws {
+    override func tearDown() async throws {
         app.terminate()
         app = nil
     }
@@ -35,7 +36,9 @@ final class SettingsUITests: XCTestCase {
         // Check if settings window appeared
         let settingsWindow = app.windows["Settings"]
         // Note: Window may have different identifier
-        XCTAssertTrue(app.windows.count >= 1)
+        let settingsWindowExists = settingsWindow.exists
+        let windowCount = app.windows.count
+        XCTAssertTrue(settingsWindowExists || windowCount >= 1)
     }
 
     func testSettingsHasMaxItemsControl() throws {
@@ -52,7 +55,9 @@ final class SettingsUITests: XCTestCase {
         // Look for max items picker or text field
         let picker = app.popUpButtons.firstMatch
         // Settings should have some controls
-        XCTAssertTrue(app.windows.count >= 1)
+        let pickerExists = picker.exists
+        let windowCount = app.windows.count
+        XCTAssertTrue(pickerExists || windowCount >= 1)
     }
 
     func testSettingsSaveButton() throws {
@@ -68,7 +73,8 @@ final class SettingsUITests: XCTestCase {
         // Look for save button
         let saveButton = app.buttons["Save"]
         if saveButton.exists {
-            XCTAssertTrue(saveButton.isEnabled)
+            let isEnabled = saveButton.isEnabled
+            XCTAssertTrue(isEnabled)
         }
     }
 

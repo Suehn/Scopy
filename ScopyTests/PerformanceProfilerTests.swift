@@ -11,7 +11,6 @@ final class PerformanceProfilerTests: XCTestCase {
     var profiler: PerformanceProfiler!
 
     override func setUp() async throws {
-        try await super.setUp()
         profiler = PerformanceProfiler.shared
         profiler.enable()
         profiler.startProfiling()
@@ -20,7 +19,6 @@ final class PerformanceProfilerTests: XCTestCase {
     override func tearDown() async throws {
         _ = profiler.stopProfiling()
         profiler = nil
-        try await super.tearDown()
     }
 
     // MARK: - Test 1: Synchronous Measure
@@ -108,7 +106,7 @@ final class PerformanceProfilerTests: XCTestCase {
     func testBenchmarkRunner() async throws {
         let runner = BenchmarkRunner()
 
-        try runner.runBenchmark(
+        runner.runBenchmark(
             name: "simple_bench",
             iterations: 50,
             targetMs: 1.0,
@@ -130,7 +128,7 @@ final class PerformanceProfilerTests: XCTestCase {
     func testAsyncBenchmarkRunner() async throws {
         let runner = BenchmarkRunner()
 
-        try await runner.runAsyncBenchmark(
+        await runner.runAsyncBenchmark(
             name: "async_bench",
             iterations: 10,
             targetMs: 50.0,

@@ -2,18 +2,19 @@ import XCTest
 
 /// Main Window UI Tests
 /// Tests for the main application window functionality
+@MainActor
 final class MainWindowUITests: XCTestCase {
 
     var app: XCUIApplication!
 
-    override func setUpWithError() throws {
+    override func setUp() async throws {
         continueAfterFailure = false
         app = XCUIApplication()
         app.launchArguments = ["--uitesting"]
         app.launch()
     }
 
-    override func tearDownWithError() throws {
+    override func tearDown() async throws {
         app.terminate()
         app = nil
     }
@@ -22,19 +23,22 @@ final class MainWindowUITests: XCTestCase {
 
     func testAppLaunches() throws {
         // Verify app launches successfully
-        XCTAssertTrue(app.exists)
+        let exists = app.exists
+        XCTAssertTrue(exists)
     }
 
     func testMainWindowExists() throws {
         // The main window should exist after launch
         let window = app.windows.firstMatch
-        XCTAssertTrue(window.waitForExistence(timeout: 5))
+        let exists = window.waitForExistence(timeout: 5)
+        XCTAssertTrue(exists)
     }
 
     func testSearchFieldExists() throws {
         // Search field should be visible
         let searchField = app.searchFields.firstMatch
-        XCTAssertTrue(searchField.waitForExistence(timeout: 5))
+        let exists = searchField.waitForExistence(timeout: 5)
+        XCTAssertTrue(exists)
     }
 
     func testSearchFieldAcceptsInput() throws {
@@ -48,7 +52,8 @@ final class MainWindowUITests: XCTestCase {
         searchField.typeText("test query")
 
         // Verify text was entered
-        XCTAssertEqual(searchField.value as? String, "test query")
+        let value = searchField.value as? String
+        XCTAssertEqual(value, "test query")
     }
 
     func testSearchFieldClearButton() throws {
@@ -65,7 +70,8 @@ final class MainWindowUITests: XCTestCase {
         let clearButton = app.buttons["Clear"].firstMatch
         if clearButton.exists {
             clearButton.click()
-            XCTAssertEqual(searchField.value as? String ?? "", "")
+            let value = searchField.value as? String ?? ""
+            XCTAssertEqual(value, "")
         }
     }
 
@@ -77,6 +83,7 @@ final class MainWindowUITests: XCTestCase {
         }
 
         // Check window title or identifier
-        XCTAssertTrue(window.exists)
+        let exists = window.exists
+        XCTAssertTrue(exists)
     }
 }

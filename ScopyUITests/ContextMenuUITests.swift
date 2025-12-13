@@ -2,18 +2,19 @@ import XCTest
 
 /// Context Menu UI Tests
 /// Tests for right-click context menu functionality
+@MainActor
 final class ContextMenuUITests: XCTestCase {
 
     var app: XCUIApplication!
 
-    override func setUpWithError() throws {
+    override func setUp() async throws {
         continueAfterFailure = false
         app = XCUIApplication()
         app.launchArguments = ["--uitesting"]
         app.launch()
     }
 
-    override func tearDownWithError() throws {
+    override func tearDown() async throws {
         app.terminate()
         app = nil
     }
@@ -36,6 +37,7 @@ final class ContextMenuUITests: XCTestCase {
 
             // Check if context menu appeared
             let menu = app.menus.firstMatch
+            _ = menu.exists
             // Menu may not be easily accessible in XCUITest
         }
     }
@@ -56,7 +58,8 @@ final class ContextMenuUITests: XCTestCase {
             // Look for Copy menu item
             let copyItem = app.menuItems["Copy"]
             if copyItem.exists {
-                XCTAssertTrue(copyItem.isEnabled)
+                let isEnabled = copyItem.isEnabled
+                XCTAssertTrue(isEnabled)
             }
         }
     }
@@ -76,6 +79,7 @@ final class ContextMenuUITests: XCTestCase {
 
             // Look for Pin menu item
             let pinItem = app.menuItems["Pin"]
+            _ = pinItem.exists
             // May be "Unpin" if already pinned
         }
     }
@@ -96,7 +100,8 @@ final class ContextMenuUITests: XCTestCase {
             // Look for Delete menu item
             let deleteItem = app.menuItems["Delete"]
             if deleteItem.exists {
-                XCTAssertTrue(deleteItem.isEnabled)
+                let isEnabled = deleteItem.isEnabled
+                XCTAssertTrue(isEnabled)
             }
         }
     }

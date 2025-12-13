@@ -13,7 +13,6 @@ final class PerformanceTests: XCTestCase {
     private let heavyPerfEnv = "RUN_HEAVY_PERF_TESTS"
 
     override func setUp() async throws {
-        try await super.setUp()
         storage = StorageService(databasePath: Self.makeSharedInMemoryDatabasePath())
         try await storage.open()
         search = SearchEngineImpl(dbPath: storage.databaseFilePath)
@@ -25,7 +24,6 @@ final class PerformanceTests: XCTestCase {
         storage.close()
         storage = nil
         search = nil
-        try await super.tearDown()
     }
 
     // MARK: - Storage Performance
@@ -137,13 +135,18 @@ final class PerformanceTests: XCTestCase {
         )
 
         var times: [Double] = []
+        let queries = ["search", "benchmark", "item", "text", "with"]
+        let sampleRounds = 10
 
-        for query in ["search", "benchmark", "item", "text", "with"] {
-            let startTime = CFAbsoluteTimeGetCurrent()
-            let request = SearchRequest(query: query, mode: .fuzzy, limit: 50, offset: 0)
-            _ = try await search.search(request: request)
-            let elapsed = (CFAbsoluteTimeGetCurrent() - startTime) * 1000
-            times.append(elapsed)
+        // More samples => less flaky P95 under transient system load.
+        for _ in 0..<sampleRounds {
+            for query in queries {
+                let startTime = CFAbsoluteTimeGetCurrent()
+                let request = SearchRequest(query: query, mode: .fuzzy, limit: 50, offset: 0)
+                _ = try await search.search(request: request)
+                let elapsed = (CFAbsoluteTimeGetCurrent() - startTime) * 1000
+                times.append(elapsed)
+            }
         }
 
         times.sort()
@@ -151,6 +154,7 @@ final class PerformanceTests: XCTestCase {
         let p95 = times[min(p95Index, times.count - 1)]
 
         print("📊 Search Performance (10k items):")
+        print("   - Samples: \(times.count)")
         print("   - P95: \(String(format: "%.2f", p95))ms")
 
         // v0.md 4.1: P95 ≤ 100-150ms for 10k-100k items

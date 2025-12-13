@@ -623,7 +623,7 @@ actor SearchEngineImpl {
 
     private func upsertItemIntoIndex(_ item: ClipboardStoredItem, index: inout FullFuzzyIndex) {
         if let slot = index.idToSlot[item.id], slot < index.items.count {
-            var existing = index.items[slot]
+            let existing = index.items[slot]
             let indexed = IndexedItem(from: item)
             if existing != nil {
                 index.items[slot] = indexed
@@ -711,7 +711,7 @@ actor SearchEngineImpl {
 
     // MARK: - Timeout
 
-    private func withTimeout<T>(
+    private func withTimeout<T: Sendable>(
         timeout: TimeInterval,
         _ work: @escaping @Sendable () async throws -> T
     ) async throws -> T {

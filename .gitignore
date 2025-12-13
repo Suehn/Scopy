@@ -24,3 +24,7 @@ Package.resolved
 
 # Test logs
 test-*.log
+
+# Build logs
+build.log
+strict-concurrency-*.log

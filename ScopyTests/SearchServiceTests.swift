@@ -12,7 +12,6 @@ final class SearchServiceTests: XCTestCase {
     var search: SearchEngineImpl!
 
     override func setUp() async throws {
-        try await super.setUp()
         storage = StorageService(databasePath: Self.makeSharedInMemoryDatabasePath())
         try await storage.open()
         search = SearchEngineImpl(dbPath: storage.databaseFilePath)
@@ -24,7 +23,6 @@ final class SearchServiceTests: XCTestCase {
         storage.close()
         storage = nil
         search = nil
-        try await super.tearDown()
     }
 
     // MARK: - Basic Search Tests

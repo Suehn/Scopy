@@ -25,9 +25,7 @@ final class HotKeyServiceTests: XCTestCase {
         let service = HotKeyService()
         let expectation = XCTestExpectation(description: "Handler should be called")
 
-        var handlerCalled = false
         service.registerHandlerOnly {
-            handlerCalled = true
             expectation.fulfill()
         }
 
@@ -39,17 +37,17 @@ final class HotKeyServiceTests: XCTestCase {
         service.triggerHandlerForTesting()
 
         wait(for: [expectation], timeout: 1.0)
-        XCTAssertTrue(handlerCalled, "Handler should have been called")
     }
 
     // MARK: - Test 2: Unregister Handler
 
     func testUnregisterHandler() throws {
         let service = HotKeyService()
-        var callCount = 0
+        let shouldNotCall = XCTestExpectation(description: "Handler should not be called after unregister")
+        shouldNotCall.isInverted = true
 
         service.registerHandlerOnly {
-            callCount += 1
+            shouldNotCall.fulfill()
         }
 
         XCTAssertTrue(service.isRegistered)
@@ -63,12 +61,7 @@ final class HotKeyServiceTests: XCTestCase {
         // Trigger should not call handler (handler is nil)
         service.triggerHandlerForTesting()
 
-        // Give async dispatch time to run (if it would)
-        let expectation = XCTestExpectation(description: "Wait")
-        expectation.isInverted = true
-        wait(for: [expectation], timeout: 0.1)
-
-        XCTAssertEqual(callCount, 0, "Handler should not be called after unregister")
+        wait(for: [shouldNotCall], timeout: 0.2)
     }
 
     // MARK: - Test 3: Re-register Replaces Handler
@@ -76,30 +69,23 @@ final class HotKeyServiceTests: XCTestCase {
     func testReregisterReplacesHandler() throws {
         let service = HotKeyService()
 
-        var handler1Called = false
-        var handler2Called = false
+        let handler1ShouldNotCall = XCTestExpectation(description: "Handler 1 should not be called")
+        handler1ShouldNotCall.isInverted = true
+        let handler2ShouldCall = XCTestExpectation(description: "Handler 2 should be called")
 
         // Register first handler
         service.registerHandlerOnly {
-            handler1Called = true
+            handler1ShouldNotCall.fulfill()
         }
 
         // Register second handler (should replace)
         service.registerHandlerOnly {
-            handler2Called = true
+            handler2ShouldCall.fulfill()
         }
 
-        let expectation = XCTestExpectation(description: "Handler 2 called")
         service.triggerHandlerForTesting()
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            expectation.fulfill()
-        }
-
-        wait(for: [expectation], timeout: 1.0)
-
-        XCTAssertFalse(handler1Called, "Old handler should not be called")
-        XCTAssertTrue(handler2Called, "New handler should be called")
+        wait(for: [handler2ShouldCall, handler1ShouldNotCall], timeout: 0.5)
     }
 
     // MARK: - Test 4: Handler Runs on Main Thread
@@ -108,34 +94,34 @@ final class HotKeyServiceTests: XCTestCase {
         let service = HotKeyService()
         let expectation = XCTestExpectation(description: "Handler executed")
 
-        var isMainThread = false
-
         service.registerHandlerOnly {
-            isMainThread = Thread.isMainThread
+            XCTAssertTrue(Thread.isMainThread, "Handler should run on main thread")
             expectation.fulfill()
         }
 
-        // Trigger from background thread
-        DispatchQueue.global().async {
-            service.triggerHandlerForTesting()
+        let servicePtrValue = UInt(bitPattern: Unmanaged.passUnretained(service).toOpaque())
+        withExtendedLifetime(service) {
+            DispatchQueue.global().async {
+                guard let servicePtr = UnsafeMutableRawPointer(bitPattern: servicePtrValue) else { return }
+                let service = Unmanaged<HotKeyService>.fromOpaque(servicePtr).takeUnretainedValue()
+                service.triggerHandlerForTesting()
+            }
+            wait(for: [expectation], timeout: 1.0)
         }
 
-        wait(for: [expectation], timeout: 1.0)
-        XCTAssertTrue(isMainThread, "Handler should run on main thread")
     }
 
     // MARK: - Test 5: Multiple Triggers
 
     func testMultipleTriggers() throws {
         let service = HotKeyService()
-        var callCount = 0
         let expectedCalls = 5
 
         let expectation = XCTestExpectation(description: "All calls completed")
+        expectation.assertForOverFulfill = true
         expectation.expectedFulfillmentCount = expectedCalls
 
         service.registerHandlerOnly {
-            callCount += 1
             expectation.fulfill()
         }
 
@@ -145,7 +131,6 @@ final class HotKeyServiceTests: XCTestCase {
         }
 
         wait(for: [expectation], timeout: 2.0)
-        XCTAssertEqual(callCount, expectedCalls, "Handler should be called \(expectedCalls) times")
     }
 
     // MARK: - Test 6: Handler Closure Capture

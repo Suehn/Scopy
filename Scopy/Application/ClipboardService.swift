@@ -382,7 +382,7 @@ actor ClipboardService {
 
     private func getMonitorStream() async -> AsyncStream<ClipboardMonitor.ClipboardContent>? {
         guard let monitor else { return nil }
-        return await monitor.contentStream
+        return monitor.contentStream
     }
 
     private func handleNewContent(_ content: ClipboardMonitor.ClipboardContent) async {
