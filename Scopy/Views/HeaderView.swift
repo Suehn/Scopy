@@ -6,7 +6,7 @@ struct HeaderView: View {
     @Binding var searchQuery: String
     @FocusState.Binding var searchFocused: Bool
 
-    @Environment(AppState.self) private var appState
+    @Environment(HistoryViewModel.self) private var historyViewModel
 
     var body: some View {
         HStack(spacing: ScopySpacing.md) {
@@ -21,10 +21,10 @@ struct HeaderView: View {
                 .font(ScopyTypography.searchField)
                 .focused($searchFocused)
                 .onChange(of: searchQuery) {
-                    appState.search()
+                    historyViewModel.search()
                 }
                 .onSubmit {
-                    Task { await appState.selectCurrent() }
+                    Task { await historyViewModel.selectCurrent() }
                 }
 
             Spacer()
@@ -34,7 +34,7 @@ struct HeaderView: View {
                 if !searchQuery.isEmpty {
                     Button {
                         searchQuery = ""
-                        appState.search()
+                        historyViewModel.search()
                     } label: {
                         Image(systemName: ScopyIcons.clear)
                             .foregroundStyle(ScopyColors.mutedText)
@@ -63,7 +63,8 @@ struct HeaderView: View {
 // MARK: - Search Mode Menu
 
 private struct SearchModeMenu: View {
-    @Environment(AppState.self) private var appState
+    @Environment(HistoryViewModel.self) private var historyViewModel
+    @Environment(SettingsViewModel.self) private var settingsViewModel
     /// v0.22: 保存设置任务引用，支持取消，防止内存泄漏
     @State private var saveTask: Task<Void, Never>?
 
@@ -71,20 +72,20 @@ private struct SearchModeMenu: View {
         Menu {
             ForEach(SearchMode.allCases, id: \.self) { mode in
                 Button {
-                    appState.searchMode = mode
-                    appState.search()
+                    historyViewModel.searchMode = mode
+                    historyViewModel.search()
                     // v0.22: 取消之前的保存任务，防止快速切换时任务累积
                     saveTask?.cancel()
                     // 持久化到设置
                     saveTask = Task {
                         guard !Task.isCancelled else { return }
-                        var newSettings = appState.settings
+                        var newSettings = settingsViewModel.settings
                         newSettings.defaultSearchMode = mode
-                        await appState.updateSettings(newSettings)
+                        await settingsViewModel.updateSettings(newSettings)
                     }
                 } label: {
                     HStack {
-                        if mode == appState.searchMode {
+                        if mode == historyViewModel.searchMode {
                             Image(systemName: "checkmark")
                         }
                         Text(modeLabel(mode))
@@ -92,7 +93,7 @@ private struct SearchModeMenu: View {
                 }
             }
         } label: {
-            Image(systemName: modeIcon(appState.searchMode))
+            Image(systemName: modeIcon(historyViewModel.searchMode))
                 .font(.system(size: ScopySize.Icon.filter))
                 .foregroundStyle(ScopyColors.mutedText)
         }
@@ -127,32 +128,32 @@ private struct SearchModeMenu: View {
 // MARK: - App Filter Button
 
 struct AppFilterButton: View {
-    @Environment(AppState.self) private var appState
+    @Environment(HistoryViewModel.self) private var historyViewModel
 
     var body: some View {
         Menu {
             Button(action: {
-                appState.appFilter = nil
-                appState.search()
+                historyViewModel.appFilter = nil
+                historyViewModel.search()
             }) {
                 HStack {
-                    if appState.appFilter == nil {
+                    if historyViewModel.appFilter == nil {
                         Image(systemName: "checkmark")
                     }
                     Text("All Apps")
                 }
             }
 
-            if !appState.recentApps.isEmpty {
+            if !historyViewModel.recentApps.isEmpty {
                 Divider()
 
-                ForEach(appState.recentApps, id: \.self) { bundleID in
+                ForEach(historyViewModel.recentApps, id: \.self) { bundleID in
                     Button(action: {
-                        appState.appFilter = bundleID
-                        appState.search()
+                        historyViewModel.appFilter = bundleID
+                        historyViewModel.search()
                     }) {
                         HStack {
-                            if appState.appFilter == bundleID {
+                            if historyViewModel.appFilter == bundleID {
                                 Image(systemName: "checkmark")
                             }
                             if let icon = appIcon(for: bundleID) {
@@ -167,7 +168,7 @@ struct AppFilterButton: View {
                 }
             }
         } label: {
-            if let bundleID = appState.appFilter, let icon = appIcon(for: bundleID) {
+            if let bundleID = historyViewModel.appFilter, let icon = appIcon(for: bundleID) {
                 Image(nsImage: icon)
                     .resizable()
                     .aspectRatio(contentMode: .fit)
@@ -195,25 +196,25 @@ struct AppFilterButton: View {
 
 /// v0.22: 添加 Rich Text 选项，支持 rtf + html 类型过滤
 struct TypeFilterButton: View {
-    @Environment(AppState.self) private var appState
+    @Environment(HistoryViewModel.self) private var historyViewModel
 
     /// Rich Text 类型集合 (rtf + html)
     private static let richTextTypes: Set<ClipboardItemType> = [.rtf, .html]
 
     /// 当前是否选中 Rich Text 过滤
     private var isRichTextSelected: Bool {
-        appState.typeFilters == Self.richTextTypes
+        historyViewModel.typeFilters == Self.richTextTypes
     }
 
     var body: some View {
         Menu {
             Button(action: {
-                appState.typeFilter = nil
-                appState.typeFilters = nil
-                appState.search()
+                historyViewModel.typeFilter = nil
+                historyViewModel.typeFilters = nil
+                historyViewModel.search()
             }) {
                 HStack {
-                    if appState.typeFilter == nil && appState.typeFilters == nil {
+                    if historyViewModel.typeFilter == nil && historyViewModel.typeFilters == nil {
                         Image(systemName: "checkmark")
                     }
                     Text("All Types")
@@ -238,12 +239,12 @@ struct TypeFilterButton: View {
     @ViewBuilder
     private func typeMenuItem(_ type: ClipboardItemType, label: String, icon: String) -> some View {
         Button(action: {
-            appState.typeFilter = type
-            appState.typeFilters = nil
-            appState.search()
+            historyViewModel.typeFilter = type
+            historyViewModel.typeFilters = nil
+            historyViewModel.search()
         }) {
             HStack {
-                if appState.typeFilter == type && appState.typeFilters == nil {
+                if historyViewModel.typeFilter == type && historyViewModel.typeFilters == nil {
                     Image(systemName: "checkmark")
                 }
                 Label(label, systemImage: icon)
@@ -255,9 +256,9 @@ struct TypeFilterButton: View {
     @ViewBuilder
     private func richTextMenuItem() -> some View {
         Button(action: {
-            appState.typeFilter = nil
-            appState.typeFilters = Self.richTextTypes
-            appState.search()
+            historyViewModel.typeFilter = nil
+            historyViewModel.typeFilters = Self.richTextTypes
+            historyViewModel.search()
         }) {
             HStack {
                 if isRichTextSelected {
@@ -273,7 +274,7 @@ struct TypeFilterButton: View {
         if isRichTextSelected {
             return "doc.richtext"
         }
-        guard let type = appState.typeFilter else { return ScopyIcons.filterType }
+        guard let type = historyViewModel.typeFilter else { return ScopyIcons.filterType }
         switch type {
         case .text: return "doc.text"
         case .image: return "photo"

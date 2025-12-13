@@ -5,11 +5,13 @@ struct HistoryListView: View {
     @FocusState.Binding var searchFocused: Bool
 
     @Environment(AppState.self) private var appState
+    @Environment(HistoryViewModel.self) private var historyViewModel
+    @Environment(SettingsViewModel.self) private var settingsViewModel
 
     var body: some View {
-        if appState.items.isEmpty && !appState.isLoading {
+        if historyViewModel.items.isEmpty && !historyViewModel.isLoading {
             EmptyStateView(
-                hasFilters: appState.hasActiveFilters,
+                hasFilters: historyViewModel.hasActiveFilters,
                 openSettings: appState.openSettingsHandler
             )
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -19,7 +21,7 @@ struct HistoryListView: View {
             ScrollViewReader { proxy in
                 List {
                     // Loading indicator
-                    if appState.isLoading && appState.items.isEmpty {
+                    if historyViewModel.isLoading && historyViewModel.items.isEmpty {
                         ProgressView()
                             .controlSize(.small)
                             .padding(.vertical, ScopySpacing.md)
@@ -30,25 +32,25 @@ struct HistoryListView: View {
 
                     // v0.21: 使用局部变量缓存计算属性结果，避免多次访问触发 @Observable 追踪
                     // 这样 SwiftUI 只追踪一次 pinnedItems/unpinnedItems 访问
-                    let pinned = appState.pinnedItems
-                    let unpinned = appState.unpinnedItems
+                    let pinned = historyViewModel.pinnedItems
+                    let unpinned = historyViewModel.unpinnedItems
 
                     // v0.18: 不使用 Section header，改为普通行以避免黑色背景
                     // Pinned Section Header
-                    if !pinned.isEmpty && appState.searchQuery.isEmpty {
+                    if !pinned.isEmpty && historyViewModel.searchQuery.isEmpty {
                         SectionHeader(
                             title: "Pinned",
                             count: pinned.count,
                             isCollapsible: true,
-                            isCollapsed: appState.isPinnedCollapsed,
-                            onToggle: { appState.isPinnedCollapsed.toggle() }
+                            isCollapsed: historyViewModel.isPinnedCollapsed,
+                            onToggle: { historyViewModel.isPinnedCollapsed.toggle() }
                         )
                         .listRowInsets(EdgeInsets())
                         .listRowBackground(Color.clear)
                         .listRowSeparator(.hidden)
 
                         // Pinned Items
-                        if !appState.isPinnedCollapsed {
+                        if !historyViewModel.isPinnedCollapsed {
                             ForEach(pinned) { item in
                                 historyRow(item: item)
                             }
@@ -59,7 +61,7 @@ struct HistoryListView: View {
                     SectionHeader(
                         title: "Recent",
                         count: unpinned.count,
-                        performanceSummary: appState.performanceSummary
+                        performanceSummary: historyViewModel.performanceSummary
                     )
                     .listRowInsets(EdgeInsets())
                     .listRowBackground(Color.clear)
@@ -71,22 +73,22 @@ struct HistoryListView: View {
                     }
 
                     // Load More Trigger
-                    if appState.canLoadMore {
-                        LoadMoreTriggerView(isLoading: appState.isLoading)
+                    if historyViewModel.canLoadMore {
+                        LoadMoreTriggerView(isLoading: historyViewModel.isLoading)
                             .listRowInsets(EdgeInsets())
                             .listRowBackground(Color.clear)
                             .listRowSeparator(.hidden)
                             .onAppear {
-                                Task { await appState.loadMore() }
+                                Task { await historyViewModel.loadMore() }
                             }
                     }
                 }
                 .listStyle(.plain)
                 .scrollContentBackground(.hidden)
                 .scrollIndicators(.automatic)
-                .onChange(of: appState.selectedID) { _, newValue in
+                .onChange(of: historyViewModel.selectedID) { _, newValue in
                     // 仅当键盘导航时自动滚动到选中项
-                    if let id = newValue, appState.lastSelectionSource == .keyboard {
+                    if let id = newValue, historyViewModel.lastSelectionSource == .keyboard {
                         withAnimation(.easeInOut(duration: 0.1)) {
                             proxy.scrollTo(id, anchor: .center)
                         }
@@ -95,7 +97,7 @@ struct HistoryListView: View {
                 // 单条删除快捷键: Option+Delete
                 .onKeyPress { keyPress in
                     if keyPress.key == .delete && keyPress.modifiers.contains(.option) {
-                        Task { await appState.deleteSelectedItem() }
+                        Task { await historyViewModel.deleteSelectedItem() }
                         return .handled
                     }
                     return .ignored
@@ -109,16 +111,16 @@ struct HistoryListView: View {
     private func historyRow(item: ClipboardItemDTO) -> some View {
         HistoryItemView(
             item: item,
-            isKeyboardSelected: appState.selectedID == item.id,
-            settings: appState.settings,
-            onSelect: { Task { await appState.select(item) } },
+            isKeyboardSelected: historyViewModel.selectedID == item.id,
+            settings: settingsViewModel.settings,
+            onSelect: { Task { await historyViewModel.select(item) } },
             onHoverSelect: { id in
-                appState.selectedID = id
-                appState.lastSelectionSource = .mouse
+                historyViewModel.selectedID = id
+                historyViewModel.lastSelectionSource = .mouse
             },
-            onTogglePin: { Task { await appState.togglePin(item) } },
-            onDelete: { Task { await appState.delete(item) } },
-            getImageData: { try? await appState.service.getImageData(itemID: item.id) }
+            onTogglePin: { Task { await historyViewModel.togglePin(item) } },
+            onDelete: { Task { await historyViewModel.delete(item) } },
+            getImageData: { try? await historyViewModel.getImageData(itemID: item.id) }
         )
         .equatable()
         .id(item.id)

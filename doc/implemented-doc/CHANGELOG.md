@@ -7,6 +7,42 @@
 
 ---
 
+## [v0.40] - 2025-12-13
+
+### Presentation：拆分 AppState（History/Settings ViewModel）+ perf 用例稳定性
+
+- **AppState 拆分**：新增 `HistoryViewModel` / `SettingsViewModel`，AppState 收敛为服务启动/事件分发协调器（保留兼容 API）。
+- **View 依赖收口**：主窗口视图改为依赖 `HistoryViewModel`；设置窗口改为依赖 `SettingsViewModel`（保存时同步 searchMode）。
+- **perf 稳定性**：`testDiskBackedSearchPerformance25k` 采样从 5 → 50（10 rounds × 5 queries），降低 P95 误报。
+
+### 修改文件
+
+- `Scopy/Observables/AppState.swift`
+- `Scopy/Observables/HistoryViewModel.swift`
+- `Scopy/Observables/SettingsViewModel.swift`
+- `Scopy/AppDelegate.swift`
+- `Scopy/Views/ContentView.swift`
+- `Scopy/Views/HeaderView.swift`
+- `Scopy/Views/HistoryListView.swift`
+- `Scopy/Views/FooterView.swift`
+- `Scopy/Views/SettingsView.swift`
+- `ScopyTests/PerformanceTests.swift`
+- `DEPLOYMENT.md`
+- `doc/profile/v0.40-profile.md`
+- `doc/profile/README.md`
+- `doc/implemented-doc/v0.40.md`
+- `doc/implemented-doc/README.md`
+- `doc/review/review-v0.3.md`
+
+### 测试
+
+- 单元测试：`make test-unit` **53 tests passed** (1 skipped)
+- 性能测试：`make test-perf` **22 tests passed** (6 skipped)
+- Thread Sanitizer：`make test-tsan` **132 tests passed** (1 skipped)
+- Strict Concurrency：`xcodebuild test -only-testing:ScopyTests SWIFT_STRICT_CONCURRENCY=complete SWIFT_TREAT_WARNINGS_AS_ERRORS=YES` **166 tests passed** (7 skipped)
+
+---
+
 ## [v0.39] - 2025-12-13
 
 ### Phase 6 收口：Strict Concurrency 回归（Swift 6）+ perf 用例稳定性

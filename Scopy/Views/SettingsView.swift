@@ -7,6 +7,8 @@ import Carbon.HIToolbox
 /// v0.10.1: 使用可选类型防止首帧默认值被误写
 struct SettingsView: View {
     @Environment(AppState.self) private var appState
+    @Environment(SettingsViewModel.self) private var settingsViewModel
+    @Environment(HistoryViewModel.self) private var historyViewModel
 
     @State private var selection: SettingsPage? = .general
     @State private var tempSettings: SettingsDTO?  // v0.10.1: 可选类型，防止首帧默认值
@@ -42,7 +44,7 @@ struct SettingsView: View {
             }
         }
         .onAppear {
-            tempSettings = appState.settings
+            tempSettings = settingsViewModel.settings
             refreshStats()
         }
         .onDisappear {
@@ -129,7 +131,7 @@ struct SettingsView: View {
             do {
                 // 检查取消状态
                 guard !Task.isCancelled else { return }
-                let stats = try await appState.service.getDetailedStorageStats()
+                let stats = try await settingsViewModel.getDetailedStorageStats()
                 // 再次检查取消状态
                 guard !Task.isCancelled else { return }
                 storageStats = stats
@@ -159,9 +161,9 @@ struct SettingsView: View {
         )
 
         Task {
-            await appState.updateSettings(currentSettings)
+            await settingsViewModel.updateSettings(currentSettings)
             await MainActor.run {
-                appState.searchMode = currentSettings.defaultSearchMode
+                historyViewModel.searchMode = currentSettings.defaultSearchMode
 
                 ScopyLog.ui.info("Updating hotkey via callback")
                 appState.applyHotKeyHandler?(
@@ -907,4 +909,6 @@ struct HotKeyRecorderView: View {
 #Preview {
     SettingsView()
         .environment(AppState.shared)
+        .environment(AppState.shared.historyViewModel)
+        .environment(AppState.shared.settingsViewModel)
 }

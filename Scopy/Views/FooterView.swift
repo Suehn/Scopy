@@ -3,22 +3,24 @@ import SwiftUI
 /// 底部状态栏视图
 struct FooterView: View {
     @Environment(AppState.self) private var appState
+    @Environment(HistoryViewModel.self) private var historyViewModel
+    @Environment(SettingsViewModel.self) private var settingsViewModel
 
     /// v0.22: 修复 -1 显示 bug - 当 totalCount=-1 时表示"未知"，显示 "50+ items"
     private var summaryText: String {
-        if !appState.searchQuery.isEmpty {
+        if !historyViewModel.searchQuery.isEmpty {
             // 搜索模式：显示当前结果数
-            if appState.totalCount < 0 {
-                return "\(appState.items.count)+ results"
+            if historyViewModel.totalCount < 0 {
+                return "\(historyViewModel.items.count)+ results"
             }
-            return "\(appState.items.count) results"
-        } else if appState.totalCount < 0 {
+            return "\(historyViewModel.items.count) results"
+        } else if historyViewModel.totalCount < 0 {
             // totalCount=-1 表示未知总数（v0.13 LIMIT+1 技巧）
-            return "\(appState.loadedCount)+ items"
-        } else if appState.loadedCount < appState.totalCount {
-            return "\(appState.loadedCount)/\(appState.totalCount) items"
+            return "\(historyViewModel.loadedCount)+ items"
+        } else if historyViewModel.loadedCount < historyViewModel.totalCount {
+            return "\(historyViewModel.loadedCount)/\(historyViewModel.totalCount) items"
         } else {
-            return "\(appState.totalCount) items"
+            return "\(historyViewModel.totalCount) items"
         }
     }
 
@@ -36,18 +38,18 @@ struct FooterView: View {
                         .lineLimit(1)
                         .fixedSize()
                     Text("·")
-                    Text(appState.storageSizeText)
+                    Text(settingsViewModel.storageSizeText)
                         .lineLimit(1)
                         .fixedSize()
 
-                    if appState.canLoadMore && !appState.searchQuery.isEmpty {
+                    if historyViewModel.canLoadMore && !historyViewModel.searchQuery.isEmpty {
                         Text("·")
-                        if appState.isLoading {
+                        if historyViewModel.isLoading {
                             ProgressView()
                                 .controlSize(.mini)
                         } else {
                             Button("Load more") {
-                                Task { await appState.loadMore() }
+                                Task { await historyViewModel.loadMore() }
                             }
                             .buttonStyle(.plain)
                             .foregroundStyle(ScopyColors.accent)
@@ -62,7 +64,7 @@ struct FooterView: View {
                 // Action Buttons - v0.15: Single delete + Settings + Quit
                 HStack(spacing: ScopySpacing.xs) {
                     FooterButton(icon: "trash", shortcut: "⌥⌫") {
-                        Task { await appState.deleteSelectedItem() }
+                        Task { await historyViewModel.deleteSelectedItem() }
                     }
                     .help("Delete Selected")
 

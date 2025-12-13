@@ -1,6 +1,26 @@
 # Scopy 部署和使用指南
 
-## 本次更新（v0.39）
+## 本次更新（v0.40）
+- **Presentation：拆分 AppState（History/Settings ViewModel）**：
+  - 新增 `HistoryViewModel` / `SettingsViewModel`，AppState 收敛为“服务启动 + 事件分发 + UI 回调”协调器（保留兼容 API）。
+  - 主窗口视图改为依赖 `HistoryViewModel`，设置窗口改为依赖 `SettingsViewModel`；依赖方向更清晰，为后续 Phase 7（Swift Package）做准备。
+- **性能/稳定性**：
+  - perf 用例稳定性：`testDiskBackedSearchPerformance25k` 采样从 5 → 50（10 rounds × 5 queries），降低一次性系统抖动导致的 P95 误报。
+- **性能实测**（Apple M3, macOS 15.7.2（24G325）, Debug, `make test-perf`；heavy 需 `RUN_HEAVY_PERF_TESTS=1`）：
+  - Fuzzy 5k items P95 ≈ 4.72ms
+  - Fuzzy 10k items P95 ≈ 46.06ms（Samples: 50）
+  - Disk 25k fuzzy P95 ≈ 58.44ms（Samples: 50）
+  - Bulk insert 1000 items ≈ 51.57ms（≈19,390 items/s）
+  - Fetch recent (50 items) avg ≈ 0.07ms
+  - Regex 20k items P95 ≈ 3.11ms
+  - Mixed content disk search（single run, after warmup）≈ 4.24ms
+- **测试结果**：
+  - `make test-unit` **53 passed** (1 skipped)
+  - `make test-perf` **22 passed** (6 skipped)
+  - `make test-tsan` **132 passed** (1 skipped)
+  - Strict Concurrency：`xcodebuild test -only-testing:ScopyTests SWIFT_STRICT_CONCURRENCY=complete SWIFT_TREAT_WARNINGS_AS_ERRORS=YES` **166 passed** (7 skipped)
+
+## 历史更新（v0.39）
 - **Phase 6 收口：Strict Concurrency 回归（Swift 6）**：
   - 单测 target 以 `SWIFT_STRICT_CONCURRENCY=complete` + `SWIFT_TREAT_WARNINGS_AS_ERRORS=YES` 回归通过（无并发 warnings）。
   - 关键修复：`Sendable` 捕获（tests/UI tests）、`@MainActor` 边界（UI 缓存/显示辅助）、HotKeyService Carbon 回调 hop 到 MainActor。

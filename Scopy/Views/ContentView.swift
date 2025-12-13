@@ -4,18 +4,19 @@ import SwiftUI
 /// v0.10.1: 改用 Environment 注入 AppState，保持与 SettingsView 一致
 struct ContentView: View {
     @Environment(AppState.self) private var appState
+    @Environment(HistoryViewModel.self) private var historyViewModel
     @FocusState private var searchFocused: Bool
     @State private var showClearConfirmation = false
 
     var body: some View {
-        @Bindable var bindableAppState = appState
+        @Bindable var bindableHistory = historyViewModel
         ZStack {
             VisualEffectView()
                 .ignoresSafeArea()
 
             VStack(alignment: .leading, spacing: 0) {
                 HeaderView(
-                    searchQuery: $bindableAppState.searchQuery,
+                    searchQuery: $bindableHistory.searchQuery,
                     searchFocused: $searchFocused
                 )
                 .padding(.horizontal, ScopySpacing.md)
@@ -30,7 +31,7 @@ struct ContentView: View {
         .onAppear {
             searchFocused = true
             Task {
-                await appState.load()
+                await historyViewModel.load()
             }
         }
         .onKeyPress { keyPress in
@@ -39,7 +40,7 @@ struct ContentView: View {
         .alert("Clear All History", isPresented: $showClearConfirmation) {
             Button("Cancel", role: .cancel) { }
             Button("Clear All", role: .destructive) {
-                Task { await appState.clearAll() }
+                Task { await historyViewModel.clearAll() }
             }
         } message: {
             Text("This will permanently delete all clipboard history. This action cannot be undone.")
@@ -49,7 +50,7 @@ struct ContentView: View {
     private func handleKeyPress(_ keyPress: KeyPress) -> KeyPress.Result {
         // ⌥⌫ (Option+Delete) - 删除选中项
         if keyPress.key == .delete && keyPress.modifiers.contains(.option) {
-            Task { await appState.deleteSelectedItem() }
+            Task { await historyViewModel.deleteSelectedItem() }
             return .handled
         }
 
@@ -61,18 +62,18 @@ struct ContentView: View {
 
         switch keyPress.key {
         case .downArrow:
-            appState.highlightNext()
+            historyViewModel.highlightNext()
             return .handled
         case .upArrow:
-            appState.highlightPrevious()
+            historyViewModel.highlightPrevious()
             return .handled
         case .return:
-            Task { await appState.selectCurrent() }
+            Task { await historyViewModel.selectCurrent() }
             return .handled
         case .escape:
-            if !appState.searchQuery.isEmpty {
-                appState.searchQuery = ""
-                appState.search()
+            if !historyViewModel.searchQuery.isEmpty {
+                historyViewModel.searchQuery = ""
+                historyViewModel.search()
             } else {
                 appState.closePanelHandler?()
             }
@@ -100,5 +101,7 @@ struct VisualEffectView: NSViewRepresentable {
 #Preview {
     ContentView()
         .environment(AppState.shared)
+        .environment(AppState.shared.historyViewModel)
+        .environment(AppState.shared.settingsViewModel)
         .frame(width: ScopySize.Window.mainWidth, height: ScopySize.Window.mainHeight)
 }

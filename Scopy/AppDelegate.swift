@@ -24,37 +24,41 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        let appState = AppState.shared
+
         // 创建浮动面板
         panel = FloatingPanel(
             contentRect: NSRect(x: 0, y: 0, width: Int(ScopySize.Window.mainWidth), height: Int(ScopySize.Window.mainHeight)),
             statusBarButton: statusItem.button
         ) {
             ContentView()
-                .environment(AppState.shared)  // v0.13.fix: 注入 AppState 到环境
+                .environment(appState)
+                .environment(appState.historyViewModel)
+                .environment(appState.settingsViewModel)
         }
 
         // 显示状态栏图标
         _ = statusItem
 
         // 设置 UI 回调
-        AppState.shared.closePanelHandler = { [weak self] in
+        appState.closePanelHandler = { [weak self] in
             self?.panel?.close()
         }
-        AppState.shared.openSettingsHandler = { [weak self] in
+        appState.openSettingsHandler = { [weak self] in
             self?.openSettings()
         }
 
         // 设置快捷键回调（用于解耦 SettingsView 与 AppDelegate）
-        AppState.shared.applyHotKeyHandler = { [weak self] keyCode, modifiers in
+        appState.applyHotKeyHandler = { [weak self] keyCode, modifiers in
             self?.applyHotKey(keyCode: keyCode, modifiers: modifiers)
         }
-        AppState.shared.unregisterHotKeyHandler = { [weak self] in
+        appState.unregisterHotKeyHandler = { [weak self] in
             self?.hotKeyService?.unregister()
         }
 
         // 启动后端服务
         Task {
-            await AppState.shared.start()
+            await appState.start()
         }
 
         // 注册全局快捷键（从设置加载或使用默认 ⇧⌘C）
@@ -147,7 +151,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             let settingsView = SettingsView { [weak self] in
                 self?.settingsWindow?.close()
             }
-            .environment(AppState.shared)  // 注入 AppState 到环境
+            .environment(AppState.shared)
+            .environment(AppState.shared.historyViewModel)
+            .environment(AppState.shared.settingsViewModel)
 
             window.contentView = NSHostingView(rootView: settingsView)
             window.center()

@@ -566,18 +566,25 @@ final class PerformanceTests: XCTestCase {
         )
 
         var times: [Double] = []
-        for query in ["lorem", "note", "ipsum", "content", "random"] {
-            let start = CFAbsoluteTimeGetCurrent()
-            let request = SearchRequest(query: query, mode: .fuzzy, limit: 50, offset: 0)
-            _ = try await diskSearch.search(request: request)
-            let elapsed = (CFAbsoluteTimeGetCurrent() - start) * 1000
-            times.append(elapsed)
+        let queries = ["lorem", "note", "ipsum", "content", "random"]
+        let sampleRounds = 10
+
+        // More samples => less flaky P95 under transient system load.
+        for _ in 0..<sampleRounds {
+            for query in queries {
+                let start = CFAbsoluteTimeGetCurrent()
+                let request = SearchRequest(query: query, mode: .fuzzy, limit: 50, offset: 0)
+                _ = try await diskSearch.search(request: request)
+                let elapsed = (CFAbsoluteTimeGetCurrent() - start) * 1000
+                times.append(elapsed)
+            }
         }
 
         times.sort()
         let p95Index = min(Int(Double(times.count) * 0.95), times.count - 1)
         let p95 = times[p95Index]
         print("📊 Disk Search Performance (25k items): P95 \(String(format: "%.2f", p95))ms")
+        print("   - Samples: \(times.count)")
         XCTAssertLessThan(p95, 200, "Disk-backed P95 \(p95)ms exceeds 200ms target for 10k-100k bracket")
     }
 

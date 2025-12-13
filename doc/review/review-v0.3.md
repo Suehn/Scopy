@@ -3,7 +3,7 @@
 > 说明：本文用于指导后续“稳定性优先”的长期重构（含 Codex 执行）。`doc/review/review-v0.3-2.md` 为历史草案/补充材料，其中关键内容已合并到本文；后续以本文为准。
 
 - 最后更新：2025-12-13
-- 代码基线：`v0.39`
+- 代码基线：`v0.40`
 - 关联文档：
   - 当前实现状态索引：`doc/implemented-doc/README.md`
   - 近期变更：`doc/implemented-doc/CHANGELOG.md`
@@ -781,9 +781,14 @@ Notes：
     - `make test-perf` 通过（22 tests passed，6 skipped）
     - `make test-tsan` 通过（132 tests passed，1 skipped）
 
-- 待继续：
-  - （可选）拆分 `AppState`（History/Settings ViewModel）
-  - （可选）继续收口 Presentation（拆 ViewModel/formatter，减少 View 内策略代码）
+- 已完成（v0.40）：
+  - （可选）拆分 `AppState`（History/Settings ViewModel）：
+    - 新增 `Scopy/Observables/HistoryViewModel.swift`、`Scopy/Observables/SettingsViewModel.swift`
+    - `AppState` 收敛为启动/事件分发协调器（保留兼容 API，降低一次性大改风险）
+    - `AppDelegate` 在 Environment 注入 `AppState + HistoryViewModel + SettingsViewModel`
+  - （可选）继续收口 Presentation（减少 View 内策略代码）：
+    - 主窗口相关视图改为直接依赖 `HistoryViewModel`（search/paging/selection/actions）
+    - 设置窗口改为依赖 `SettingsViewModel`（settings 读写与 stats 获取）
 
 ### Phase 6：清理与观测（收尾）
 
