@@ -8,8 +8,8 @@
 
 | 项目 | 状态 |
 |------|------|
-| **当前版本** | v0.43.13 |
-| **测试状态** | 单元测试通过（`make test-unit`: 143 passed, 1 skipped；`make test-perf`: 17 passed, 6 skipped；`make test-tsan`: 143 passed, 1 skipped；Strict Concurrency: `make test-strict` 143 passed, 1 skipped；`make test-integration`: 12 passed） |
+| **当前版本** | v0.43.14 |
+| **测试状态** | 单元测试通过（`make test-unit`: 147 passed, 1 skipped；`make test-perf`: 17 passed, 6 skipped；`make test-tsan`: 147 passed, 1 skipped；Strict Concurrency: `make test-strict` 147 passed, 1 skipped；`make test-integration`: 12 passed） |
 | **构建状态** | Debug ✅ |
 | **部署位置** | /Applications/Scopy.app |
 | **最后更新** | 2025-12-15 |
@@ -24,6 +24,7 @@
 
 | 版本 | 日期 | 主要内容 | 状态 |
 |------|------|----------|------|
+| [v0.43.14](./v0.43.14.md) | 2025-12-15 | Fix/UX：字数统计按“词/字”单位（中英文混排更准确） | ✅ |
 | [v0.43.13](./v0.43.13.md) | 2025-12-15 | Fix/UX：图片 hover 预览弹窗贴合图片尺寸 | ✅ |
 | [v0.43.12](./v0.43.12.md) | 2025-12-15 | Fix/UX：搜索结果按时间排序（Pinned 优先）+ 大结果集性能不回退 | ✅ |
 | [v0.43.11](./v0.43.11.md) | 2025-12-14 | Fix/Perf：Hover 预览首帧稳定 + 浏览器粘贴兜底（HTML 非 UTF-8） | ✅ |

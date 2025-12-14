@@ -7,6 +7,26 @@
 
 ---
 
+## [v0.43.14] - 2025-12-15
+
+### Fix/UX：字数统计按“词/字”单位（中英文混排更准确）
+
+- **字数统计口径修复**：
+  - 英文/数字：按连续词计数（避免把一个单词按字母算多个“字”）。
+  - 中文/日文/韩文：按字计数（与常见“字数统计”口径一致）。
+
+### 修改文件
+
+- `Scopy/Domain/Utilities/TextMetrics.swift`
+- `Scopy/Presentation/ClipboardItemDisplayText.swift`
+- `ScopyTests/TextMetricsTests.swift`
+
+### 测试
+
+- 单元测试：`make test-unit` **147 passed** (1 skipped)
+- Thread Sanitizer：`make test-tsan` **147 passed** (1 skipped)
+- Strict Concurrency：`make test-strict` **147 passed** (1 skipped)
+
 ## [v0.43.13] - 2025-12-15
 
 ### Fix/UX：图片 hover 预览弹窗贴合图片尺寸

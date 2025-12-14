@@ -83,7 +83,7 @@ final class ClipboardItemDisplayText {
     }
 
     private func computeTextMetadata(_ text: String) -> String {
-        let charCount = text.count
+        let charCount = TextMetrics.displayWordUnitCount(for: text)
         let lineCount = text.components(separatedBy: .newlines).count
         let cleanText = text.replacingOccurrences(of: "\n", with: " ")
             .replacingOccurrences(of: "\r", with: " ")
