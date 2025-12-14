@@ -340,6 +340,24 @@ final class SearchServiceTests: XCTestCase {
         XCTAssertEqual(result.items.first?.id, pinned.id)
     }
 
+    func testShortQueryPrefilterCanRefineToFullFuzzy() async throws {
+        _ = try await storage.upsertItem(makeContent("zz_target_oldest"))
+        for i in 0..<2001 {
+            _ = try await storage.upsertItem(makeContent("Item \(i)"))
+        }
+        await search.invalidateCache()
+
+        let prefilter = try await search.search(request: SearchRequest(query: "zz", mode: .fuzzy, limit: 50, offset: 0))
+        XCTAssertTrue(prefilter.items.isEmpty)
+        XCTAssertEqual(prefilter.total, -1)
+
+        let full = try await search.search(
+            request: SearchRequest(query: "zz", mode: .fuzzy, forceFullFuzzy: true, limit: 50, offset: 0)
+        )
+        XCTAssertTrue(full.items.contains { $0.plainText.localizedCaseInsensitiveContains("zz") })
+        XCTAssertNotEqual(full.total, -1)
+    }
+
     // MARK: - Helpers
 
     private func populateTestData(count: Int = 50) async throws {

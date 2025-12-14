@@ -205,7 +205,12 @@ struct HistoryItemView: View, Equatable {
         // v0.10.3: 使用 Task 替代 Timer，自动取消防止泄漏
         // v0.15: 添加文本预览支持
         .onHover { hovering in
-            if isScrolling { return }
+            if isScrolling {
+                if isHovering {
+                    isHovering = false
+                }
+                return
+            }
             isHovering = hovering
 
             // 取消之前的防抖任务
@@ -313,6 +318,20 @@ struct HistoryItemView: View, Equatable {
             hoverExitTask = nil
             cancelPreviewTask()
             // 清理状态，防止内存泄漏
+            previewImageData = nil
+            textPreviewContent = nil
+        }
+        .onChange(of: isScrolling) { _, newValue in
+            guard newValue else { return }
+            isHovering = false
+            hoverDebounceTask?.cancel()
+            hoverDebounceTask = nil
+            hoverExitTask?.cancel()
+            hoverExitTask = nil
+            cancelPreviewTask()
+            showPreview = false
+            showTextPreview = false
+            isPopoverHovering = false
             previewImageData = nil
             textPreviewContent = nil
         }

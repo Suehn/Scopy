@@ -7,6 +7,36 @@
 
 ---
 
+## [v0.43.3] - 2025-12-14
+
+### Fix/Perf：短词搜索全量校准恢复 + 高速滚动进一步降载
+
+- **短词全量搜索恢复**：短词（≤2）fuzzy/fuzzyPlus 首屏仍走 recent cache，但结果标记为预筛（`total=-1`），并支持 `forceFullFuzzy=true` 触发全量 full-index 搜索，保证最终召回与排序可校准。
+- **渐进 refine 与分页一致性**：短词也允许后台 refine；当处于预筛（`total=-1`）时，`loadMore()` 会先强制 full-fuzzy 拉取前 N 条再分页，避免“永远停在 cache 子集”的不全量问题。
+- **滚动期进一步降载**：滚动期间忽略 hover 事件并清理悬停状态；键盘选中动画在滚动时禁用；缩略图 placeholder 在滚动时不再启动 `.task`，降低高速滚动的主线程负担。
+
+### 修改文件
+
+- `Scopy/Infrastructure/Search/SearchEngineImpl.swift`
+- `Scopy/Observables/HistoryViewModel.swift`
+- `Scopy/Views/History/HistoryItemView.swift`
+- `Scopy/Views/History/HistoryItemThumbnailView.swift`
+- `ScopyTests/SearchServiceTests.swift`
+- `DEPLOYMENT.md`
+- `doc/profile/v0.43.3-profile.md`
+- `doc/profile/README.md`
+- `doc/implemented-doc/v0.43.3.md`
+- `doc/implemented-doc/README.md`
+- `doc/implemented-doc/CHANGELOG.md`
+- `doc/review/review-v0.3.md`
+
+### 测试
+
+- 单元测试：`make test-unit` **53 tests passed** (1 skipped)
+- 性能测试：`make test-perf` **16 tests passed** (6 skipped)
+- Thread Sanitizer：`make test-tsan` **132 tests passed** (1 skipped)
+- Strict Concurrency：`make test-strict` **160 tests passed** (7 skipped)
+
 ## [v0.43.2] - 2025-12-14
 
 ### Perf/UX：Low Power Mode 滚动优化 + 搜索取消更及时

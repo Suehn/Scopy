@@ -404,7 +404,9 @@ final class HistoryViewModel {
                     let refineVersion = currentVersion
 
                     refineTask = Task {
-                        try? await Task.sleep(nanoseconds: 250_000_000)
+                        let trimmed = refineQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+                        let delayNs: UInt64 = trimmed.count <= 2 ? 450_000_000 : 250_000_000
+                        try? await Task.sleep(nanoseconds: delayNs)
                         guard !Task.isCancelled, refineVersion == searchVersion else { return }
 
                         let refineRequest = SearchRequest(

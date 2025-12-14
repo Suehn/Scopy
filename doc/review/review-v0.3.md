@@ -3,8 +3,8 @@
 > 说明：本文用于指导后续“稳定性优先”的长期重构（含 Codex 执行）。`doc/review/review-v0.3-2.md` 为历史草案/补充材料，其中关键内容已合并到本文；后续以本文为准。
 
 - 最后更新：2025-12-14
-- 代码基线：`v0.43.2`
-- 重构状态：Phase 0-7 已完成（至 `v0.43.2`）
+- 代码基线：`v0.43.3`
+- 重构状态：Phase 0-7 已完成（至 `v0.43.3`）
 - 关联文档：
   - 当前实现状态索引：`doc/implemented-doc/README.md`
   - 近期变更：`doc/implemented-doc/CHANGELOG.md`
@@ -476,7 +476,7 @@ Scopy/
 组件拆分建议（与现有实现一一对应）：
 
 - `FTSQueryEngine`：FTS 查询与两步查询（rowid → 批量取主表）
-- `SearchCache`：短词缓存（TTL + 大小）
+- `SearchCache`：短词 cache 预筛（TTL + 大小；`total=-1` + `forceFullFuzzy` 可全量校准）
 - `FullFuzzyIndex`：全量 fuzzy 内存索引（postings/idToSlot）
 - `FuzzyScorer`：`fuzzyMatchScore`（含短词连续语义、ASCII 连续子串语义）
 - `CandidatePrefilter`：大候选集首屏 FTS 预筛（保留 `total == -1` 语义以兼容 UI/测试）

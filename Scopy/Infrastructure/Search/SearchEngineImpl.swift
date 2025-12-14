@@ -397,6 +397,22 @@ public actor SearchEngineImpl {
         }
 
         if trimmedQuery.count <= 2 {
+            if request.forceFullFuzzy {
+                let normalizedRequest = SearchRequest(
+                    query: trimmedQuery,
+                    mode: mode,
+                    appFilter: request.appFilter,
+                    typeFilter: request.typeFilter,
+                    typeFilters: request.typeFilters,
+                    forceFullFuzzy: true,
+                    limit: request.limit,
+                    offset: request.offset
+                )
+
+                let index = try getOrBuildFullIndex()
+                return try searchInFullIndex(index: index, request: normalizedRequest, mode: mode)
+            }
+
             let normalizedRequest = SearchRequest(
                 query: trimmedQuery,
                 mode: mode,
@@ -408,9 +424,12 @@ public actor SearchEngineImpl {
                 offset: request.offset
             )
 
-            return try searchInCache(request: normalizedRequest) { item in
+            let cached = try searchInCache(request: normalizedRequest) { item in
                 item.plainText.localizedCaseInsensitiveContains(trimmedQuery)
             }
+
+            // Treat short-query cache result as prefilter: it may miss older matches.
+            return SearchResult(items: cached.items, total: -1, hasMore: cached.hasMore, searchTimeMs: 0)
         }
 
         let normalizedRequest = SearchRequest(
