@@ -3,6 +3,8 @@
 
 .PHONY: all setup build run clean xcode test test-unit test-perf test-tsan test-strict coverage benchmark test-flow test-flow-quick health-check
 
+VERSION_ARGS := $(shell bash scripts/version.sh --xcodebuild-args 2>/dev/null)
+
 # 默认目标
 all: build
 
@@ -19,12 +21,12 @@ xcode: setup
 # 构建项目
 build: setup
 	@echo "Building Scopy..."
-	xcodebuild -project Scopy.xcodeproj -scheme Scopy -configuration Debug build
+	xcodebuild -project Scopy.xcodeproj -scheme Scopy -configuration Debug build $(VERSION_ARGS)
 
 # 构建 Release 版本
 release: setup
 	@echo "Building Scopy (Release)..."
-	xcodebuild -project Scopy.xcodeproj -scheme Scopy -configuration Release build
+	xcodebuild -project Scopy.xcodeproj -scheme Scopy -configuration Release build $(VERSION_ARGS)
 
 # 构建并运行
 run: build
@@ -45,7 +47,7 @@ quick-build:
 	@if [ ! -f "Scopy.xcodeproj/project.pbxproj" ]; then \
 		$(MAKE) setup; \
 	fi
-	xcodebuild -project Scopy.xcodeproj -scheme Scopy -configuration Debug build
+	xcodebuild -project Scopy.xcodeproj -scheme Scopy -configuration Debug build $(VERSION_ARGS)
 
 # =================== 测试命令 ===================
 
@@ -57,6 +59,7 @@ test: setup
 		-scheme Scopy \
 		-destination 'platform=macOS' \
 		-resultBundlePath TestResults.xcresult \
+		$(VERSION_ARGS) \
 		2>&1 | tee test.log
 
 # 仅运行单元测试（排除性能测试）
@@ -69,6 +72,7 @@ test-unit: setup
 		-only-testing:ScopyTests \
 		-skip-testing:ScopyTests/IntegrationTests \
 		-skip-testing:ScopyTests/PerformanceTests \
+		$(VERSION_ARGS) \
 		2>&1 | tee test-unit.log
 
 # 运行性能测试
@@ -79,6 +83,7 @@ test-perf: setup
 		-scheme Scopy \
 		-destination 'platform=macOS' \
 		-only-testing:ScopyTests/PerformanceTests \
+		$(VERSION_ARGS) \
 		2>&1 | tee test-perf.log
 
 # Thread Sanitizer (requires hosted test bundle mode)
@@ -89,6 +94,7 @@ test-tsan: setup
 		-scheme ScopyTSan \
 		-destination 'platform=macOS' \
 		-only-testing:ScopyTSanTests \
+		$(VERSION_ARGS) \
 		2>&1 | tee test-tsan.log
 
 # Swift 6 Strict Concurrency regression (tests target only)
@@ -103,6 +109,7 @@ test-strict: setup
 		-skip-testing:ScopyTests/PerformanceTests \
 		SWIFT_STRICT_CONCURRENCY=complete \
 		SWIFT_TREAT_WARNINGS_AS_ERRORS=YES \
+		$(VERSION_ARGS) \
 		2>&1 | tee strict-concurrency-test.log
 
 # 运行集成测试
@@ -113,6 +120,7 @@ test-integration: setup
 		-scheme Scopy \
 		-destination 'platform=macOS' \
 		-only-testing:ScopyTests/IntegrationTests \
+		$(VERSION_ARGS) \
 		2>&1 | tee test-integration.log
 
 # 生成测试覆盖率报告
@@ -124,6 +132,7 @@ coverage: setup
 		-destination 'platform=macOS' \
 		-enableCodeCoverage YES \
 		-resultBundlePath CoverageResults.xcresult \
+		$(VERSION_ARGS) \
 		2>&1 | tee coverage.log
 	@echo ""
 	@echo "Coverage report generated at CoverageResults.xcresult"
@@ -138,6 +147,7 @@ benchmark: setup
 		-scheme Scopy \
 		-destination 'platform=macOS' \
 		-only-testing:ScopyTests/PerformanceTests \
+		$(VERSION_ARGS) \
 		2>&1 | tee benchmark-output.log
 	@echo ""
 	@echo "Benchmark results saved to benchmark-output.log"

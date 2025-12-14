@@ -1,16 +1,44 @@
 # Scopy 部署和使用指南
 
-## 本次更新（v0.43.13）
-- **Fix/UX（Hover 预览弹窗贴合内容尺寸）**：
-  - 图片预览：按图片等比缩放后的实际显示尺寸设置 `frame`，避免宽屏截图出现大量空白边。
-  - 文本预览：高度按文本实际布局自适应（上限 `mainHeight`，超出滚动），避免少量文本也占满大窗口。
-- **性能**：本版本无性能/部署相关改动，沿用 v0.43.12 基线。
+## Release/版本号（v0.43.15 起，必须）
+
+### 版本号来源（Single Source of Truth）
+
+- **发布版本号仅来自 git tag**（例如 `v0.43.14`）。
+- 历史遗留的 `v0.18.*`（commit count）不再作为发布口径；后续版本按 `v0.43.x` 继续递增。
+
+### 构建注入（确保 About/版本展示一致）
+
+- `CFBundleShortVersionString = $(MARKETING_VERSION)`
+- `CFBundleVersion = $(CURRENT_PROJECT_VERSION)`
+- 本地/CI 统一通过 `scripts/version.sh` 生成：
+  - `MARKETING_VERSION`：取 tag（优先 HEAD tag，其次最近 tag），去掉前缀 `v`
+  - `CURRENT_PROJECT_VERSION`：`git rev-list --count HEAD`
+
+### 发布流程（推荐）
+
+1. 合入版本提交（含版本文档、索引、CHANGELOG、profile；如涉及部署/性能，也更新本文件并写明环境与具体数值）。
+2. 创建 tag：`git tag -a vX.Y.Z -m "Release vX.Y.Z <title>"`
+3. 推送：`git push origin main` + `git push origin vX.Y.Z`（或 `git push --tags`）
+4. GitHub Actions `Build and Release` 从 tag 构建 DMG 并生成 `.sha256`；Cask 更新以 PR 形式提交（不再自动 push main）。
+
+**CI 环境**（GitHub Actions）：
+- runner：`macos-15`
+- Xcode：`16.0`
+
+## 本次更新（v0.43.15）
+
+- **Dev/Release（tag 驱动版本）**：
+  - 发布版本号以 git tag 为单一事实来源，停止 `0.18.{commit_count}` 自动版本。
+  - 构建注入 `MARKETING_VERSION/CURRENT_PROJECT_VERSION`，确保 About/版本展示一致。
+  - CI 发布流程：从 tag 构建；Cask 更新走 PR（workflow 不直接 push main）。
+- **性能**：本版本不涉及搜索/存储/清理热路径；性能基线沿用 v0.43.14。
 - **测试结果**：
-  - `make test-unit` **143 passed** (1 skipped)
+  - `make test-unit` **147 passed** (1 skipped)
   - `make test-integration` **12 passed**
   - `make test-perf` **17 passed** (6 skipped)
-  - `make test-tsan` **143 passed** (1 skipped)
-  - `make test-strict` **143 passed** (1 skipped)
+  - `make test-tsan` **147 passed** (1 skipped)
+  - `make test-strict` **147 passed** (1 skipped)
 
 ## 历史更新（v0.43.12）
 - **Fix/UX（搜索结果按时间排序）**：

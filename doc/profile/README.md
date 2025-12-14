@@ -6,6 +6,7 @@
 
 | 版本 | 日期 | 主要变化 |
 |------|------|----------|
+| [v0.43.15-profile.md](./v0.43.15-profile.md) | 2025-12-15 | Dev/Release：版本统一由 git tag 驱动（停止 commit-count 自动版本） |
 | [v0.43.14-profile.md](./v0.43.14-profile.md) | 2025-12-15 | Fix/UX：字数统计按“词/字”单位（中英文混排更准确） |
 | [v0.43.13-profile.md](./v0.43.13-profile.md) | 2025-12-15 | Fix/UX：Hover 预览弹窗贴合内容尺寸（图片/文本） |
 | [v0.43.12-profile.md](./v0.43.12-profile.md) | 2025-12-15 | Fix/UX：搜索结果按时间排序（Pinned 优先）+ 大结果集性能不回退 |

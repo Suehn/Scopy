@@ -1,34 +1,55 @@
 name: Build and Release
 
-# 已改用本地 pre-push hook 构建，此 workflow 仅保留手动触发
 on:
-  workflow_dispatch:  # 手动触发
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "要发布的 tag（例如 v0.43.14）。留空则使用当前触发的 ref。"
+        required: false
+        type: string
 
 jobs:
   build:
     runs-on: macos-15
+    permissions:
+      contents: write
+      pull-requests: write
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0  # 获取完整历史，用于生成版本号
+          ref: ${{ inputs.tag || github.ref_name }}
 
       - name: Setup Xcode
         uses: maxim-lobanov/setup-xcode@v1
         with:
           xcode-version: '16.0'
 
-      - name: Generate version
+      - name: Resolve version from git tag
         id: version
         run: |
-          # 基于 commit 数量生成版本号: 0.18.{commit_count}
+          TAG="${{ inputs.tag || github.ref_name }}"
+          if [[ -z "${TAG}" ]]; then
+            echo "Missing tag input/ref" >&2
+            exit 1
+          fi
+          if [[ "${TAG}" != v* ]]; then
+            echo "Invalid tag: ${TAG} (expected prefix 'v')" >&2
+            exit 1
+          fi
+          VERSION="${TAG#v}"
           COMMIT_COUNT=$(git rev-list --count HEAD)
-          VERSION="0.18.${COMMIT_COUNT}"
           SHORT_SHA=$(git rev-parse --short HEAD)
-          echo "version=${VERSION}" >> $GITHUB_OUTPUT
-          echo "short_sha=${SHORT_SHA}" >> $GITHUB_OUTPUT
-          echo "Generated version: ${VERSION} (${SHORT_SHA})"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "build=${COMMIT_COUNT}" >> "$GITHUB_OUTPUT"
+          echo "short_sha=${SHORT_SHA}" >> "$GITHUB_OUTPUT"
+          echo "Resolved version: ${TAG} (${SHORT_SHA}), build=${COMMIT_COUNT}"
 
       - name: Install xcodegen
         run: brew install xcodegen
@@ -38,7 +59,9 @@ jobs:
 
       - name: Build Release
         run: |
-          xcodebuild -scheme Scopy -configuration Release build
+          VERSION="${{ steps.version.outputs.version }}"
+          BUILD="${{ steps.version.outputs.build }}"
+          xcodebuild -scheme Scopy -configuration Release build MARKETING_VERSION="${VERSION}" CURRENT_PROJECT_VERSION="${BUILD}"
 
       - name: Create DMG
         run: |
@@ -56,8 +79,8 @@ jobs:
       - name: Create or Update Release
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: v${{ steps.version.outputs.version }}
-          name: v${{ steps.version.outputs.version }}
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: ${{ steps.version.outputs.tag }}
           files: |
             Scopy-*.dmg
             Scopy-*.dmg.sha256
@@ -89,19 +112,14 @@ jobs:
           sed -i '' "s/version \".*\"/version \"${VERSION}\"/" Casks/scopy.rb
           sed -i '' "s/sha256 \".*\"/sha256 \"${SHA256}\"/" Casks/scopy.rb
 
-      - name: Commit updated Cask
-        run: |
-          VERSION="${{ steps.version.outputs.version }}"
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add Casks/scopy.rb
-          git diff --staged --quiet || git commit -m "chore: update Cask to v${VERSION}"
-          git push origin HEAD:main
-
-      - name: Trigger homebrew-scopy sync
-        run: |
-          curl -X POST \
-            -H "Accept: application/vnd.github+json" \
-            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
-            https://api.github.com/repos/Suehn/homebrew-scopy/dispatches \
-            -d '{"event_type":"scopy-release"}'
+      - name: Create PR for updated Cask
+        uses: peter-evans/create-pull-request@v7
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: "chore: update Cask to v${{ steps.version.outputs.version }}"
+          branch: "automation/cask-v${{ steps.version.outputs.version }}"
+          title: "chore: update Cask to v${{ steps.version.outputs.version }}"
+          body: |
+            Automated Cask bump for `${{ steps.version.outputs.tag }}`.
+          add-paths: |
+            Casks/scopy.rb

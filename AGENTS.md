@@ -38,6 +38,12 @@
 
 - 提交信息：简短祈使句（例 “Fix hotkey recording”）。
 - PR：说明改动、测试结果，UI 变更附截图，关联 issue；若性能/部署变化，附具体数据与环境。
+- 版本发布（必须）：统一使用 **git tag** 驱动版本号与发布（禁止用“commit count 自动生成版本”）。
+  - 创建版本提交（含 `doc/implemented-doc/vX.Y.Z.md`、索引、CHANGELOG、profile、必要时 `DEPLOYMENT.md`）
+  - 打 tag：`git tag -a vX.Y.Z -m "Release vX.Y.Z <title>"`
+  - 推送：`git push origin main` + `git push origin vX.Y.Z`（或 `git push --tags`）
+  - Release 产物：GitHub Actions `Build and Release` 仅从 tag 构建；Cask 更新通过 PR 合入（workflow 不再直接 push main）。
+  - 本地构建：推荐用 `make`/`./deploy.sh`（会注入 `MARKETING_VERSION/CURRENT_PROJECT_VERSION`；见 `scripts/version.sh`）。
 
 ## 架构与热键要点
 

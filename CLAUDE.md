@@ -20,6 +20,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 2. **更新索引** `doc/implemented-doc/README.md`
 3. **更新变更日志** `doc/implemented-doc/CHANGELOG.md`
 4. **更新部署文档** `DEPLOYMENT.md` (如有性能/部署变化，必须包含具体数值)
+5. **版本发布一律用 git tag**：发布版本号不得由 commit count 自动生成；tag 作为发布单一事实来源（详见 `AGENTS.md` 与 `DEPLOYMENT.md`）。
 
 ### 版本命名规范
 
@@ -63,6 +64,14 @@ DEPLOYMENT.md 中的性能测试必须包含:
    - 清理性能 (内联/外部/大规模)
    - 写入性能 (批量插入/去重)
    - 内存性能 (如有变化)
+
+---
+
+## Release 规范（必须）
+
+- **版本号来源**：仅允许来自 git tag（例如 `v0.43.14`），禁止用 commit count 自动生成版本（历史遗留 tag 例：`v0.18.*` 不再作为发布口径）。
+- **构建注入**：本地与 CI 构建需要注入 `MARKETING_VERSION` / `CURRENT_PROJECT_VERSION`（统一入口 `scripts/version.sh`）。
+- **CI 行为**：GitHub Actions `Build and Release` 只从 tag 构建并产出 DMG；Cask 更新通过 PR 合入，workflow 不直接 push main。
 
 ---
 

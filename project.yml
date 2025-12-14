@@ -40,8 +40,9 @@ settings:
     SWIFT_INCLUDE_PATHS: "$(inherited) $(OBJROOT)/../Products/$(CONFIGURATION)"
     FRAMEWORK_SEARCH_PATHS: "$(inherited) $(OBJROOT)/../Products/$(CONFIGURATION)"
     # 版本号配置 (v0.6)
-    MARKETING_VERSION: "0.6.0"
-    CURRENT_PROJECT_VERSION: "1"
+    # Note: 发布版本统一由 git tag 驱动，详见 scripts/version.sh 与 DEPLOYMENT.md。
+    MARKETING_VERSION: "0.0.0"
+    CURRENT_PROJECT_VERSION: "0"
 
 packages:
   ScopyKit:

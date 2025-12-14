@@ -48,6 +48,11 @@ echo ""
 echo -e "配置: ${YELLOW}$CONFIGURATION${NC}"
 echo -e "项目路径: ${YELLOW}$PROJECT_DIR${NC}"
 echo -e "输出目录: ${YELLOW}$PROJECT_DIR/.build${NC}"
+
+VERSION_ARGS="$(bash "$PROJECT_DIR/scripts/version.sh" --xcodebuild-args 2>/dev/null || true)"
+if [[ -n "${VERSION_ARGS}" ]]; then
+    echo -e "版本参数: ${YELLOW}${VERSION_ARGS}${NC}"
+fi
 echo ""
 
 # Step 1: 清理 (可选)
@@ -81,10 +86,11 @@ echo -e "${BLUE}[4/6]${NC} 编译应用 ($CONFIGURATION 模式)..."
 if ! xcodebuild build \
     -scheme Scopy \
     -configuration "$CONFIGURATION" \
+    ${VERSION_ARGS} \
     > /dev/null 2>&1; then
     echo -e "${RED}✗ 编译失败${NC}"
     echo "    运行以下命令查看详情:"
-    echo "    xcodebuild build -scheme Scopy -configuration $CONFIGURATION"
+    echo "    xcodebuild build -scheme Scopy -configuration $CONFIGURATION ${VERSION_ARGS}"
     exit 1
 fi
 echo -e "${GREEN}✓ 编译成功${NC}"

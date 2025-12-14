@@ -5,7 +5,32 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
----
+## [v0.43.15] - 2025-12-15
+
+### Dev/Release：版本统一由 git tag 驱动（停止 commit-count 自动版本）
+
+- **版本号统一口径**：
+  - 发布版本号以 git tag 为单一事实来源（例如 `v0.43.14`），历史遗留 `v0.18.*` 不再作为发布口径。
+  - `Info.plist` 版本字段改为使用 `$(MARKETING_VERSION)` / `$(CURRENT_PROJECT_VERSION)`。
+  - `Makefile` / `deploy.sh` 统一注入 build settings（统一入口 `scripts/version.sh`）。
+- **CI 发布流程更安全**：
+  - GitHub Actions `Build and Release` 从 tag 构建，不再用 commit count 自动生成版本。
+  - Cask 更新改为 PR（workflow 不再直接 push main）。
+
+### 修改文件
+
+- `scripts/version.sh`
+- `Scopy/Info.plist`
+- `Makefile`
+- `deploy.sh`
+- `.github/workflows/release.yml`
+- `AGENTS.md`
+- `CLAUDE.md`
+- `DEPLOYMENT.md`
+
+### 测试
+
+- 单元测试：`make test-unit` **147 passed** (1 skipped)
 
 ## [v0.43.14] - 2025-12-15
 
