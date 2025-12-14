@@ -1,6 +1,18 @@
 # Scopy 部署和使用指南
 
-## 本次更新（v0.43.12）
+## 本次更新（v0.43.13）
+- **Fix/UX（Hover 预览弹窗贴合内容尺寸）**：
+  - 图片预览：按图片等比缩放后的实际显示尺寸设置 `frame`，避免宽屏截图出现大量空白边。
+  - 文本预览：高度按文本实际布局自适应（上限 `mainHeight`，超出滚动），避免少量文本也占满大窗口。
+- **性能**：本版本无性能/部署相关改动，沿用 v0.43.12 基线。
+- **测试结果**：
+  - `make test-unit` **143 passed** (1 skipped)
+  - `make test-integration` **12 passed**
+  - `make test-perf` **17 passed** (6 skipped)
+  - `make test-tsan` **143 passed** (1 skipped)
+  - `make test-strict` **143 passed** (1 skipped)
+
+## 历史更新（v0.43.12）
 - **Fix/UX（搜索结果按时间排序）**：
   - 搜索结果统一按 `isPinned DESC, lastUsedAt DESC` 排序（Pinned 仍稳定置顶）。
   - 大结果集（候选≥20k）使用 time-first FTS prefilter，避免排序变更引入磁盘搜索性能回退。

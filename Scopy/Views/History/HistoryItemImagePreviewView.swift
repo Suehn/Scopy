@@ -10,6 +10,10 @@ struct HistoryItemImagePreviewView: View {
     @State private var lastLoadedPath: String?
 
     var body: some View {
+        let maxWidth: CGFloat = ScopySize.Width.previewMax
+        let maxHeight: CGFloat = ScopySize.Window.mainHeight
+        let size = displaySize(maxWidth: maxWidth, maxHeight: maxHeight)
+
         ZStack {
             if let cgImage = model.previewCGImage {
                 previewImage(Image(decorative: cgImage, scale: 1.0))
@@ -29,14 +33,39 @@ struct HistoryItemImagePreviewView: View {
                 ProgressView()
             }
         }
-        .frame(width: 400, height: 400)
-        .padding(ScopySpacing.md)
+        .frame(width: size.width, height: size.height)
     }
 
     private func previewImage(_ image: Image) -> some View {
         image
             .resizable()
             .aspectRatio(contentMode: .fit)
+    }
+
+    private func displaySize(maxWidth: CGFloat, maxHeight: CGFloat) -> CGSize {
+        let size: CGSize?
+        if let cgImage = model.previewCGImage {
+            size = CGSize(width: cgImage.width, height: cgImage.height)
+        } else if let thumbnailPath {
+            let loaded = lastLoadedPath == thumbnailPath ? loadedThumbnail : nil
+            let cached = ThumbnailCache.shared.cachedImage(path: thumbnailPath) ?? loaded
+            size = cached?.size
+        } else {
+            size = nil
+        }
+
+        guard let size else {
+            return CGSize(width: maxWidth, height: maxHeight)
+        }
+
+        let originalWidth = max(size.width, 1)
+        let originalHeight = max(size.height, 1)
+
+        let widthScale = maxWidth / originalWidth
+        let heightScale = maxHeight / originalHeight
+        let scale = min(widthScale, heightScale)
+
+        return CGSize(width: originalWidth * scale, height: originalHeight * scale)
     }
 
     @MainActor

@@ -7,6 +7,27 @@
 
 ---
 
+## [v0.43.13] - 2025-12-15
+
+### Fix/UX：图片 hover 预览弹窗贴合图片尺寸
+
+- **预览弹窗去空隙**：
+  - 图片预览：不再固定方形 `frame`，按图片等比缩放后的实际显示尺寸设置 `frame`，避免宽屏截图出现大量空白边。
+  - 文本预览：不再固定 400×400，高度按文本实际布局自适应（上限 `mainHeight`，超出滚动）。
+
+### 修改文件
+
+- `Scopy/Views/History/HistoryItemImagePreviewView.swift`
+- `Scopy/Views/History/HistoryItemTextPreviewView.swift`
+
+### 测试
+
+- 单元测试：`make test-unit` **143 passed** (1 skipped)
+- 集成测试：`make test-integration` **12 passed**
+- 性能测试：`make test-perf` **17 passed** (6 skipped)
+- Thread Sanitizer：`make test-tsan` **143 passed** (1 skipped)
+- Strict Concurrency：`make test-strict` **143 passed** (1 skipped)
+
 ## [v0.43.12] - 2025-12-15
 
 ### Fix/UX：搜索结果按时间排序（Pinned 优先）+ 大结果集性能不回退

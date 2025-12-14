@@ -6,6 +6,7 @@
 
 | 版本 | 日期 | 主要变化 |
 |------|------|----------|
+| [v0.43.13-profile.md](./v0.43.13-profile.md) | 2025-12-15 | Fix/UX：Hover 预览弹窗贴合内容尺寸（图片/文本） |
 | [v0.43.12-profile.md](./v0.43.12-profile.md) | 2025-12-15 | Fix/UX：搜索结果按时间排序（Pinned 优先）+ 大结果集性能不回退 |
 | [v0.43.11-profile.md](./v0.43.11-profile.md) | 2025-12-14 | Fix/Perf：Hover 预览首帧稳定 + 浏览器粘贴兜底（HTML 非 UTF-8） |
 | [v0.43.10-profile.md](./v0.43.10-profile.md) | 2025-12-14 | Dev/Quality：测试隔离 + 性能用例更贴近实际（fuzzyPlus/cold/service path） |
