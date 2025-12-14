@@ -20,7 +20,6 @@ struct HistoryItemTextPreviewView: View {
                     .padding(ScopySpacing.md)
             }
         }
-        .frame(width: 400)
-        .frame(maxHeight: 400)
+        .frame(width: 400, height: 400)
     }
 }

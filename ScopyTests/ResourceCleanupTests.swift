@@ -173,8 +173,8 @@ final class ResourceCleanupTests: XCTestCase {
             return eventCount
         }
 
-        // 短暂等待
-        try await Task.sleep(nanoseconds: 100_000_000) // 100ms
+        // Give the listener a chance to subscribe.
+        await Task.yield()
 
         // 停止服务
         service.stop()
@@ -196,43 +196,53 @@ final class ResourceCleanupTests: XCTestCase {
 
     /// 测试搜索任务取消后不会更新状态
     func testSearchTaskCancellation() async throws {
-        let mockService = ClipboardServiceFactory.create(useMock: true)
-        let appState = AppState.create(service: mockService)
+        let service = TestMockClipboardService()
+        let appState = AppState.forTesting(service: service)
+        defer { appState.stop() }
 
         // 设置初始状态
-        appState.searchQuery = "test"
+        service.setItemCount(100)
+        await appState.load()
+        service.resetSearchCallCount()
+
+        appState.searchQuery = "1"
 
         // 开始搜索
         appState.search()
 
         // 立即取消（通过开始新搜索）
-        appState.searchQuery = "new query"
+        appState.searchQuery = "2"
         appState.search()
 
-        // 等待搜索完成
-        try await Task.sleep(nanoseconds: 300_000_000) // 300ms
+        await assertEventually(timeout: 1.0, pollInterval: 0.01, {
+            service.searchCallCount >= 1 && service.lastSearchQuery == "2"
+        }, message: "Search cancellation should settle on latest query")
 
         // 验证状态一致性（不应该有旧搜索的结果）
-        // 由于是 mock 服务，主要验证不会崩溃
+        XCTAssertTrue(appState.items.allSatisfy { $0.plainText.localizedCaseInsensitiveContains("2") })
+        // 主要验证不会崩溃
         XCTAssertTrue(true, "Search cancellation should not cause issues")
     }
 
     /// 测试 loadMore 任务取消
     func testLoadMoreTaskCancellation() async throws {
-        let mockService = ClipboardServiceFactory.create(useMock: true)
-        let appState = AppState.create(service: mockService)
+        let service = TestMockClipboardService()
+        let appState = AppState.forTesting(service: service)
+        defer { appState.stop() }
 
         // 初始化
+        service.setItemCount(200)
         await appState.load()
-        appState.canLoadMore = true
+        XCTAssertTrue(appState.canLoadMore)
 
         // 快速连续调用 loadMore
         Task { await appState.loadMore() }
         Task { await appState.loadMore() }
         Task { await appState.loadMore() }
 
-        // 等待完成
-        try await Task.sleep(nanoseconds: 200_000_000) // 200ms
+        await assertEventually(timeout: 1.0, pollInterval: 0.01, {
+            appState.loadedCount == 150
+        }, message: "loadMore should append exactly one page")
 
         // 验证不会崩溃
         XCTAssertTrue(true, "Multiple loadMore calls should not cause issues")

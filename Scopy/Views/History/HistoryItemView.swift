@@ -1,7 +1,6 @@
 import SwiftUI
 import AppKit
 import ImageIO
-import UniformTypeIdentifiers
 import ScopyKit
 
 // MARK: - History Item View (v0.9.3 - 性能优化版)
@@ -250,7 +249,7 @@ struct HistoryItemView: View, Equatable {
                         self.cancelPreviewTask()
                         self.showPreview = false
                         self.showTextPreview = false
-                        self.previewModel.imageData = nil    // v0.15.1: Clear image data to prevent memory leak
+                        self.previewModel.previewCGImage = nil
                         self.previewModel.text = nil  // v0.15: Reset text preview content
                     }
                 }
@@ -273,7 +272,7 @@ struct HistoryItemView: View, Equatable {
                                 guard !self.isHovering, !self.isPopoverHovering else { return }
                                 self.cancelPreviewTask()
                                 self.showPreview = false
-                                self.previewModel.imageData = nil
+                                self.previewModel.previewCGImage = nil
                             }
                         }
                     }
@@ -321,7 +320,7 @@ struct HistoryItemView: View, Equatable {
             hoverExitTask = nil
             cancelPreviewTask()
             // 清理状态，防止内存泄漏
-            previewModel.imageData = nil
+            previewModel.previewCGImage = nil
             previewModel.text = nil
         }
         .onChange(of: isScrolling) { _, newValue in
@@ -335,7 +334,7 @@ struct HistoryItemView: View, Equatable {
             showPreview = false
             showTextPreview = false
             isPopoverHovering = false
-            previewModel.imageData = nil
+            previewModel.previewCGImage = nil
             previewModel.text = nil
         }
     }
@@ -353,11 +352,12 @@ struct HistoryItemView: View, Equatable {
         hoverPreviewTask = Task(priority: .userInitiated) { @MainActor in
             let delayNanos = UInt64(previewDelay * 1_000_000_000)
             let scale = NSScreen.main?.backingScaleFactor ?? 2.0
-            let maxPixelSize = Int(ScopySize.Width.previewMax * scale)
+            let maxPixelSize = Int(400 * scale)
 
             // v0.43.6: 预取 preview 数据（在 hover delay 内完成 IO/downsample），减少 popover 出现后的等待与“重悬停才显示”的体感。
-            let prefetchDelayNanos: UInt64 = min(150_000_000, delayNanos)
-            let preparedPreviewData: Task<Data?, Never> = Task(priority: .userInitiated) { @MainActor in
+            let prefetchDelayNanos: UInt64 = min(50_000_000, delayNanos)
+            let storageRef = item.storageRef
+            let preparedPreviewImage: Task<CGImage?, Never> = Task(priority: .userInitiated) { @MainActor in
                 if prefetchDelayNanos > 0 {
                     try? await Task.sleep(nanoseconds: prefetchDelayNanos)
                 }
@@ -365,19 +365,25 @@ struct HistoryItemView: View, Equatable {
                 guard !isScrolling else { return nil }
                 guard isHovering else { return nil }
 
-                guard let data = await getImageData() else { return nil }
-                guard !Task.isCancelled else { return nil }
+                let cgImage: CGImage?
+                if let storageRef, !storageRef.isEmpty {
+                    cgImage = await Task.detached(priority: .userInitiated) {
+                        Self.makePreviewCGImage(fromFileAtPath: storageRef, maxPixelSize: maxPixelSize)
+                    }.value
+                } else {
+                    guard let data = await getImageData() else { return nil }
+                    cgImage = await Task.detached(priority: .userInitiated) {
+                        Self.makePreviewCGImage(from: data, maxPixelSize: maxPixelSize)
+                    }.value
+                }
 
-                let downsampled = await Task.detached(priority: .userInitiated) {
-                    Self.downsampleImageData(data, maxPixelSize: maxPixelSize) ?? data
-                }.value
                 guard !Task.isCancelled else { return nil }
                 guard !isScrolling else { return nil }
                 guard isHovering else { return nil }
-                previewModel.imageData = downsampled
-                return downsampled
+                previewModel.previewCGImage = cgImage
+                return cgImage
             }
-            defer { preparedPreviewData.cancel() }
+            defer { preparedPreviewImage.cancel() }
 
             try? await Task.sleep(nanoseconds: delayNanos)
             guard !Task.isCancelled else { return }
@@ -386,69 +392,37 @@ struct HistoryItemView: View, Equatable {
 
             self.showPreview = true
 
-            if let previewData = await preparedPreviewData.value {
+            if let cgImage = await preparedPreviewImage.value {
                 guard !Task.isCancelled else { return }
-                previewModel.imageData = previewData
+                previewModel.previewCGImage = cgImage
             }
 
         }
     }
 
-    nonisolated private static func downsampleImageData(_ data: Data, maxPixelSize: Int) -> Data? {
+    nonisolated private static func makePreviewCGImage(from data: Data, maxPixelSize: Int) -> CGImage? {
         guard maxPixelSize > 0 else { return nil }
         guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
-
-        if let props = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
-           let width = props[kCGImagePropertyPixelWidth] as? NSNumber,
-           let height = props[kCGImagePropertyPixelHeight] as? NSNumber
-        {
-            let maxDimension = max(width.intValue, height.intValue)
-            if maxDimension > 0, maxDimension <= maxPixelSize {
-                return nil
-            }
-        }
-
         let options: [CFString: Any] = [
             kCGImageSourceCreateThumbnailFromImageAlways: true,
             kCGImageSourceCreateThumbnailWithTransform: true,
             kCGImageSourceThumbnailMaxPixelSize: maxPixelSize,
             kCGImageSourceShouldCacheImmediately: true
         ]
+        return CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
+    }
 
-        guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else {
-            return nil
-        }
-
-        let hasAlpha: Bool
-        switch cgImage.alphaInfo {
-        case .first, .last, .premultipliedFirst, .premultipliedLast, .alphaOnly:
-            hasAlpha = true
-        case .none, .noneSkipFirst, .noneSkipLast:
-            hasAlpha = false
-        @unknown default:
-            hasAlpha = true
-        }
-
-        let output = NSMutableData()
-        guard let destination = CGImageDestinationCreateWithData(
-            output as CFMutableData,
-            (hasAlpha ? UTType.png.identifier : UTType.jpeg.identifier) as CFString,
-            1,
-            nil
-        ) else {
-            return nil
-        }
-
-        if hasAlpha {
-            CGImageDestinationAddImage(destination, cgImage, nil)
-        } else {
-            let properties: [CFString: Any] = [
-                kCGImageDestinationLossyCompressionQuality: 0.85
-            ]
-            CGImageDestinationAddImage(destination, cgImage, properties as CFDictionary)
-        }
-        guard CGImageDestinationFinalize(destination) else { return nil }
-        return output as Data
+    nonisolated private static func makePreviewCGImage(fromFileAtPath path: String, maxPixelSize: Int) -> CGImage? {
+        guard maxPixelSize > 0 else { return nil }
+        let url = URL(fileURLWithPath: path)
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: maxPixelSize,
+            kCGImageSourceShouldCacheImmediately: true
+        ]
+        return CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
     }
 
     private func cancelPreviewTask() {

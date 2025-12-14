@@ -254,7 +254,21 @@ actor ClipboardService {
             let data = await storage.getOriginalImageData(for: item)
             if let data {
                 let itemType = item.type
-                let plainText = item.plainText
+                let plainText: String
+                if itemType == .rtf {
+                    plainText = item.plainText.isEmpty
+                        ? (NSAttributedString(rtf: data, documentAttributes: nil)?.string ?? "")
+                        : item.plainText
+                } else if itemType == .html {
+                    let options: [NSAttributedString.DocumentReadingOptionKey: Any] = [
+                        .documentType: NSAttributedString.DocumentType.html
+                    ]
+                    plainText = item.plainText.isEmpty
+                        ? ((try? NSAttributedString(data: data, options: options, documentAttributes: nil))?.string ?? "")
+                        : item.plainText
+                } else {
+                    plainText = item.plainText
+                }
 
                 let pasteboardType: NSPasteboard.PasteboardType
                 switch itemType {
@@ -309,7 +323,7 @@ actor ClipboardService {
         }
 
         await search.handleUpsertedItem(updated)
-        yieldEvent(.itemUpdated(await toDTO(updated, storage: storage)))
+        yieldEvent(.itemUpdated(await toDTO(updated, storage: storage, thumbnailGenerationPriority: .userInitiated)))
     }
 
     func updateSettings(_ newSettings: SettingsDTO) async throws {
@@ -327,6 +341,9 @@ actor ClipboardService {
 
             if oldHeight != newSettings.thumbnailHeight || oldShowThumbnails != newSettings.showImageThumbnails {
                 await storage.clearThumbnailCache()
+                await MainActor.run {
+                    ThumbnailCache.shared.clear()
+                }
             }
 
             do {
@@ -436,15 +453,8 @@ actor ClipboardService {
             let outcome = try await storage.upsertItemWithOutcome(content)
             let storedItem = outcome.item
 
-            if content.type == .image, settings.showImageThumbnails {
-                let existing = await storage.getThumbnailPath(for: storedItem.contentHash)
-                if existing == nil {
-                    scheduleThumbnailGeneration(for: storedItem, storage: storage)
-                }
-            }
-
             await search.handleUpsertedItem(storedItem)
-            let dto = await toDTO(storedItem, storage: storage)
+            let dto = await toDTO(storedItem, storage: storage, thumbnailGenerationPriority: .userInitiated)
             switch outcome {
             case .inserted:
                 yieldEvent(.newItem(dto))
@@ -492,12 +502,20 @@ actor ClipboardService {
         }
     }
 
-    private func toDTO(_ item: StorageService.StoredItem, storage: StorageService) async -> ClipboardItemDTO {
+    private func toDTO(
+        _ item: StorageService.StoredItem,
+        storage: StorageService,
+        thumbnailGenerationPriority: TaskPriority = .utility
+    ) async -> ClipboardItemDTO {
         var thumbnailPath: String? = nil
         if item.type == .image && settings.showImageThumbnails {
             thumbnailPath = await storage.getThumbnailPath(for: item.contentHash)
             if thumbnailPath == nil {
-                scheduleThumbnailGeneration(for: item, storage: storage)
+                scheduleThumbnailGeneration(
+                    for: item,
+                    storage: storage,
+                    priority: thumbnailGenerationPriority
+                )
             }
         }
 
@@ -516,13 +534,17 @@ actor ClipboardService {
         )
     }
 
-    private func scheduleThumbnailGeneration(for item: StorageService.StoredItem, storage: StorageService) {
+    private func scheduleThumbnailGeneration(
+        for item: StorageService.StoredItem,
+        storage: StorageService,
+        priority: TaskPriority = .utility
+    ) {
         let itemID = item.id
         let contentHash = item.contentHash
         let maxHeight = settings.thumbnailHeight
         let storageRef = storage
 
-        Task.detached(priority: .utility) { [weak self] in
+        Task.detached(priority: priority) { [weak self] in
             let shouldGenerate = await ThumbnailGenerationTracker.shared.tryMarkInProgress(contentHash)
             guard shouldGenerate else { return }
 
@@ -532,17 +554,18 @@ actor ClipboardService {
                 }
             }
 
-            let imageData: Data?
-            if let storagePath = item.storageRef {
-                imageData = try? Data(contentsOf: URL(fileURLWithPath: storagePath))
+            let pngData: Data?
+            if let storagePath = item.storageRef, !storagePath.isEmpty {
+                pngData = StorageService.makeThumbnailPNG(fromFileAtPath: storagePath, maxHeight: maxHeight)
             } else if let rawData = item.rawData {
-                imageData = rawData
+                pngData = StorageService.makeThumbnailPNG(from: rawData, maxHeight: maxHeight)
+            } else if let imageData = await storageRef.getOriginalImageData(for: item) {
+                pngData = StorageService.makeThumbnailPNG(from: imageData, maxHeight: maxHeight)
             } else {
-                imageData = await storageRef.getOriginalImageData(for: item)
+                pngData = nil
             }
 
-            guard let imageData else { return }
-            guard let pngData = StorageService.makeThumbnailPNG(from: imageData, maxHeight: maxHeight) else { return }
+            guard let pngData else { return }
 
             guard let thumbnailPath = try? await storageRef.saveThumbnail(pngData, for: contentHash) else { return }
             await self?.yieldThumbnailUpdated(itemID: itemID, thumbnailPath: thumbnailPath)
@@ -551,6 +574,9 @@ actor ClipboardService {
 
     private func yieldThumbnailUpdated(itemID: UUID, thumbnailPath: String) {
         guard settings.showImageThumbnails else { return }
+        Task { @MainActor in
+            ThumbnailCache.shared.remove(path: thumbnailPath)
+        }
         yieldEvent(.thumbnailUpdated(itemID: itemID, thumbnailPath: thumbnailPath))
     }
 }

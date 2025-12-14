@@ -156,8 +156,13 @@ final class AppState {
 // MARK: - Testing Support
 
 extension AppState {
-    static func forTesting(service: ClipboardServiceProtocol) -> AppState {
-        create(service: service)
+    static func forTesting(
+        service: ClipboardServiceProtocol,
+        historyTiming: HistoryViewModel.Timing = .tests
+    ) -> AppState {
+        let state = create(service: service)
+        state.historyViewModel.configureTiming(historyTiming)
+        return state
     }
 }
 

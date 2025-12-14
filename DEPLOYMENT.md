@@ -1,24 +1,24 @@
 # Scopy 部署和使用指南
 
-## 本次更新（v0.43.10）
-- **Dev/Quality（测试隔离 + 性能用例更贴近实际）**：
-  - `ClipboardMonitor` 支持注入 pasteboard/polling interval；Integration/Monitor 测试改用 unique pasteboard，避免污染系统剪贴板。
-  - perf 用例默认使用 `fuzzyPlus`（与 Settings 默认一致），并补充 cold start 与 service-path 端到端磁盘搜索基线。
-  - Makefile `setup` 增加 XcodeGen 输入签名缓存，减少无意义的 `xcodegen generate` 与 `project.pbxproj` 重写。
+## 本次更新（v0.43.11）
+- **Fix/Perf（Hover 预览首帧稳定 + 浏览器粘贴兜底）**：
+  - hover 预览：popover 固定尺寸；预览模型持有 downsampled `CGImage`，避免首次展示“先小后大/需重悬停”。
+  - 图片链路：预览/缩略图优先走 ImageIO（file path 直读 + downsample）；`ThumbnailCache` 解码移出主线程。
+  - 粘贴兜底：HTML plain text 提取不再假设 UTF-8；回写剪贴板时对 `.html/.rtf` 的空 `plainText` 从 data 解析生成 `.string`，减少 Chrome/Edge 粘贴空内容。
 - **性能实测**（MacBook Air（Mac15,12）24GB, macOS 15.7.2（24G325）, Debug, `make test-perf`；heavy 需 `RUN_HEAVY_PERF_TESTS=1`；Low Power Mode disabled）：
-  - Search 10k (fuzzyPlus) cold start ≈ 132.50ms；steady P95 ≈ 54.00ms（Samples: 50）
-  - Disk 25k (fuzzyPlus) cold start ≈ 710.09ms；steady P95 ≈ 63.07ms（Samples: 60）
-  - Service-path disk 10k (fuzzyPlus) cold start ≈ 255.02ms；steady P95 ≈ 48.86ms（Samples: 50）
-  - Bulk insert 1000 items ≈ 62.75ms（≈15,935 items/s）
-  - Fetch recent (50 items) avg ≈ 0.07ms
-  - Regex 20k items P95 ≈ 3.32ms
-  - Mixed content disk search（single run）≈ 4.75ms
+  - Search 10k (fuzzyPlus) cold start ≈ 131.58ms；steady P95 ≈ 59.03ms（Samples: 50）
+  - Disk 25k (fuzzyPlus) cold start ≈ 739.60ms；steady P95 ≈ 66.36ms（Samples: 60）
+  - Service-path disk 10k (fuzzyPlus) cold start ≈ 259.61ms；steady P95 ≈ 49.58ms（Samples: 50）
+  - Bulk insert 1000 items ≈ 66.04ms（≈15,141 items/s）
+  - Fetch recent (50 items) avg ≈ 0.08ms
+  - Regex 20k items P95 ≈ 4.73ms
+  - Mixed content disk search（single run）≈ 5.11ms
 - **测试结果**：
-  - `make test-unit` **137 passed** (1 skipped)
+  - `make test-unit` **142 passed** (1 skipped)
   - `make test-integration` **12 passed**
   - `make test-perf` **17 passed** (6 skipped)
-  - `make test-tsan` **137 passed** (1 skipped)
-  - `make test-strict` **137 passed** (1 skipped)
+  - `make test-tsan` **142 passed** (1 skipped)
+  - `make test-strict` **142 passed** (1 skipped)
 
 ## 历史更新（v0.43.9）
 - **Perf/Quality（后台 I/O + ClipboardMonitor 语义修复）**：

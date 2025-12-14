@@ -195,24 +195,41 @@ final class ConcurrencyTests: XCTestCase {
 
     /// 测试搜索版本号防止旧结果覆盖新结果
     func testSearchVersionPreventsStaleResults() async throws {
-        let mockService = ClipboardServiceFactory.create(useMock: true)
-        let appState = AppState.create(service: mockService)
+        let service = TestMockClipboardService()
+        let appState = AppState.forTesting(service: service)
+        defer { appState.stop() }
 
-        // 快速连续搜索
-        appState.searchQuery = "first"
+        service.setItemCount(200)
+        await appState.load()
+        service.resetSearchCallCount()
+        service.searchDelayIgnoresCancellation = true
+
+        // Make the first query slower, so it completes after the second query.
+        service.searchDelayNsByQuery["1"] = 120_000_000
+        service.searchDelayNsByQuery["2"] = 0
+
+        appState.searchQuery = "1"
         appState.search()
 
-        appState.searchQuery = "second"
+        // Wait for the first debounce window to elapse so the slow search actually starts.
+        try await Task.sleep(nanoseconds: 30_000_000)
+
+        appState.searchQuery = "2"
         appState.search()
 
-        appState.searchQuery = "third"
-        appState.search()
+        // Fast search should win first.
+        await assertEventually(timeout: 1.0, pollInterval: 0.01, {
+            service.searchCallCount == 1 &&
+            service.lastSearchQuery == "2" &&
+            !appState.items.isEmpty
+        }, message: "Fast search should complete first")
+        XCTAssertTrue(appState.items.allSatisfy { $0.plainText.localizedCaseInsensitiveContains("2") })
 
-        // 等待搜索完成
-        try await Task.sleep(nanoseconds: 400_000_000) // 400ms
-
-        // 验证最终查询是最后一个
-        XCTAssertEqual(appState.searchQuery, "third", "Final query should be 'third'")
+        // Slow search completes later, but should not overwrite the latest results.
+        await assertEventually(timeout: 1.0, pollInterval: 0.01, {
+            service.searchCallCount == 2
+        }, message: "Slow search should eventually complete")
+        XCTAssertTrue(appState.items.allSatisfy { $0.plainText.localizedCaseInsensitiveContains("2") })
     }
 
     // MARK: - v0.11 Concurrent Search Stress Tests

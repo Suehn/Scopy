@@ -72,6 +72,23 @@ final class ClipboardMonitorTests: XCTestCase {
         XCTAssertNil(content)
     }
 
+    func testReadCurrentClipboardHTMLNonUTF8ProvidesPlainTextFallback() {
+        let html = "<html><body>你好 Hello</body></html>"
+        guard let htmlData = html.data(using: .utf16) else {
+            XCTFail("Failed to encode HTML data")
+            return
+        }
+
+        pasteboard.clearContents()
+        pasteboard.setData(htmlData, forType: .html)
+
+        let content = monitor.readCurrentClipboard()
+        XCTAssertNotNil(content)
+        XCTAssertEqual(content?.type, .html)
+        XCTAssertTrue(content?.plainText.contains("你好") ?? false)
+        XCTAssertTrue(content?.plainText.contains("Hello") ?? false)
+    }
+
     // MARK: - Copy To Clipboard Tests
 
     func testCopyTextToClipboard() {

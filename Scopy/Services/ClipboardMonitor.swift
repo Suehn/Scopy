@@ -778,12 +778,10 @@ public final class ClipboardMonitor {
     }
 
     private func extractPlainTextFromHTML(_ data: Data) -> String? {
-        guard let htmlString = String(data: data, encoding: .utf8),
-              let attributedString = try? NSAttributedString(
-                data: Data(htmlString.utf8),
-                options: [.documentType: NSAttributedString.DocumentType.html],
-                documentAttributes: nil
-              ) else {
+        let options: [NSAttributedString.DocumentReadingOptionKey: Any] = [
+            .documentType: NSAttributedString.DocumentType.html
+        ]
+        guard let attributedString = try? NSAttributedString(data: data, options: options, documentAttributes: nil) else {
             return nil
         }
         return attributedString.string

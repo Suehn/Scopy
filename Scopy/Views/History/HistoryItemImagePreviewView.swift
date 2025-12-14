@@ -10,48 +10,33 @@ struct HistoryItemImagePreviewView: View {
     @State private var lastLoadedPath: String?
 
     var body: some View {
-        if let imageData = model.imageData,
-           let nsImage = NSImage(data: imageData) {
-            previewImage(nsImage)
-        } else if let thumbnailPath {
-            let loaded = lastLoadedPath == thumbnailPath ? loadedThumbnail : nil
-            let cached = ThumbnailCache.shared.cachedImage(path: thumbnailPath) ?? loaded
+        ZStack {
+            if let cgImage = model.previewCGImage {
+                previewImage(Image(decorative: cgImage, scale: 1.0))
+            } else if let thumbnailPath {
+                let loaded = lastLoadedPath == thumbnailPath ? loadedThumbnail : nil
+                let cached = ThumbnailCache.shared.cachedImage(path: thumbnailPath) ?? loaded
 
-            if let nsImage = cached {
-                previewImage(nsImage)
+                if let nsImage = cached {
+                    previewImage(Image(nsImage: nsImage))
+                } else {
+                    ProgressView()
+                        .task(id: thumbnailPath) {
+                            await loadThumbnailIfNeeded(path: thumbnailPath)
+                        }
+                }
             } else {
                 ProgressView()
-                    .padding()
-                    .task(id: thumbnailPath) {
-                        await loadThumbnailIfNeeded(path: thumbnailPath)
-                    }
             }
-        } else {
-            ProgressView()
-                .padding()
         }
+        .frame(width: 400, height: 400)
+        .padding(ScopySpacing.md)
     }
 
-    @ViewBuilder
-    private func previewImage(_ nsImage: NSImage) -> some View {
-        let maxWidth: CGFloat = ScopySize.Width.previewMax
-        let maxHeight: CGFloat = 400
-
-        let originalWidth = max(nsImage.size.width, 1)
-        let originalHeight = max(nsImage.size.height, 1)
-
-        let widthScale = maxWidth / originalWidth
-        let heightScale = maxHeight / originalHeight
-        let scale = min(widthScale, heightScale)
-
-        let displayWidth = originalWidth * scale
-        let displayHeight = originalHeight * scale
-
-        Image(nsImage: nsImage)
+    private func previewImage(_ image: Image) -> some View {
+        image
             .resizable()
             .aspectRatio(contentMode: .fit)
-            .frame(width: displayWidth, height: displayHeight)
-            .padding(ScopySpacing.md)
     }
 
     @MainActor

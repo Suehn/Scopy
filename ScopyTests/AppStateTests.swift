@@ -94,29 +94,30 @@ final class AppStateTests: XCTestCase {
     // MARK: - Search Debounce Tests (v0.md 4.1: 150-200ms)
 
     func testSearchDebounce150ms() async throws {
-        mockService.setItemCount(100)
-        await appState.load()
-        mockService.resetSearchCallCount()
+        // This test locks the production debounce behavior (150ms) without forcing the rest of the suite to wait that long.
+        let service = TestMockClipboardService()
+        let state = AppState.forTesting(service: service, historyTiming: .production)
+        defer { state.stop() }
+
+        service.setItemCount(100)
+        await state.load()
+        service.resetSearchCallCount()
 
         // Rapid search calls
-        appState.searchQuery = "h"
-        appState.search()
-        appState.searchQuery = "he"
-        appState.search()
-        appState.searchQuery = "hel"
-        appState.search()
+        state.searchQuery = "h"
+        state.search()
+        state.searchQuery = "he"
+        state.search()
+        state.searchQuery = "hel"
+        state.search()
 
         // Wait less than debounce time
         try await Task.sleep(nanoseconds: 100_000_000) // 100ms
-        XCTAssertEqual(mockService.searchCallCount, 0, "Search should not execute before debounce")
+        XCTAssertEqual(service.searchCallCount, 0, "Search should not execute before debounce")
 
-        // Wait for debounce to complete (TSan / CI may delay scheduling significantly)
-        let start = CFAbsoluteTimeGetCurrent()
-        while mockService.searchCallCount == 0, (CFAbsoluteTimeGetCurrent() - start) < 1.0 {
-            try await Task.sleep(nanoseconds: 50_000_000)
-        }
-
-        XCTAssertEqual(mockService.searchCallCount, 1, "Only one search should execute after debounce")
+        await assertEventually(timeout: 1.0, pollInterval: 0.01, {
+            service.searchCallCount == 1
+        }, message: "Only one search should execute after debounce")
     }
 
     func testRapidSearchCancelsPrevious() async throws {
@@ -132,10 +133,9 @@ final class AppStateTests: XCTestCase {
         appState.searchQuery = "second"
         appState.search()
 
-        // Wait for debounce
-        try await Task.sleep(nanoseconds: 200_000_000)
-
-        XCTAssertEqual(mockService.searchCallCount, 1)
+        await assertEventually(timeout: 1.0, pollInterval: 0.01, {
+            self.mockService.searchCallCount == 1
+        }, message: "Search should eventually execute once")
         XCTAssertEqual(mockService.lastSearchQuery, "second", "Should use the latest query")
     }
 
@@ -146,18 +146,22 @@ final class AppStateTests: XCTestCase {
         // First search to enable filtered paging
         appState.searchQuery = "1"
         appState.search()
-        try await Task.sleep(nanoseconds: 250_000_000) // debounce + search
+        await assertEventually(timeout: 1.0, pollInterval: 0.01, {
+            self.mockService.searchCallCount == 1 && !self.appState.isLoading
+        }, message: "Initial search should complete")
         XCTAssertTrue(appState.canLoadMore)
 
         // Make loadMore slow so it overlaps with next search
-        mockService.searchDelayNs = 300_000_000
+        mockService.searchDelayNs = 120_000_000
         let pagingTask = Task { await appState.loadMore() }
 
         // Switch query while paging in flight
         mockService.searchDelayNs = 0
         appState.searchQuery = "2"
         appState.search()
-        try await Task.sleep(nanoseconds: 250_000_000)
+        await assertEventually(timeout: 1.0, pollInterval: 0.01, {
+            self.appState.items.allSatisfy { $0.plainText.localizedCaseInsensitiveContains("2") } && !self.appState.isLoading
+        }, message: "Second search should complete with latest results")
 
         await pagingTask.value
 
@@ -172,11 +176,10 @@ final class AppStateTests: XCTestCase {
         appState.searchQuery = "test"
         appState.search()
 
-        // Wait for debounce + search
-        try await Task.sleep(nanoseconds: 250_000_000)
-
-        // Mock service filters items, so count might change
-        XCTAssertNotNil(appState.items)
+        await assertEventually(timeout: 1.0, pollInterval: 0.01, {
+            self.mockService.lastSearchQuery == "test" && !self.appState.isLoading
+        }, message: "Search should complete")
+        XCTAssertFalse(appState.items.isEmpty)
     }
 
     func testProgressiveRefineUpdatesAfterPrefilter() async throws {
@@ -188,15 +191,13 @@ final class AppStateTests: XCTestCase {
         appState.searchQuery = "test"
         appState.search()
 
-        // Wait for debounce + initial search
-        try await Task.sleep(nanoseconds: 250_000_000)
-        XCTAssertEqual(mockService.searchCallCount, 1)
-        XCTAssertEqual(appState.totalCount, -1)
+        await assertEventually(timeout: 1.0, pollInterval: 0.01, {
+            self.mockService.searchCallCount == 1 && self.appState.totalCount == -1
+        }, message: "Initial prefiltered search should complete")
 
-        // Wait for refine delay + refine search
-        try await Task.sleep(nanoseconds: 400_000_000)
-        XCTAssertEqual(mockService.searchCallCount, 2)
-        XCTAssertEqual(appState.totalCount, 100)
+        await assertEventually(timeout: 1.0, pollInterval: 0.01, {
+            self.mockService.searchCallCount == 2 && self.appState.totalCount == 100
+        }, message: "Refine search should complete")
         XCTAssertEqual(appState.items.count, 50)
     }
 
@@ -209,10 +210,12 @@ final class AppStateTests: XCTestCase {
         appState.searchQuery = "test"
         appState.search()
 
-        // Wait for debounce + initial prefiltered search
-        try await Task.sleep(nanoseconds: 250_000_000)
+        await assertEventually(timeout: 1.0, pollInterval: 0.01, {
+            self.mockService.recordedSearchRequests.count == 1 &&
+            self.appState.totalCount == -1 &&
+            !self.appState.isLoading
+        }, message: "Initial prefiltered search should complete")
         XCTAssertEqual(mockService.recordedSearchRequests.count, 1)
-        XCTAssertEqual(appState.totalCount, -1)
 
         let expectedLimit = appState.loadedCount + 50
         await appState.loadMore()
@@ -231,12 +234,16 @@ final class AppStateTests: XCTestCase {
         // First do a search
         appState.searchQuery = "test"
         appState.search()
-        try await Task.sleep(nanoseconds: 250_000_000)
+        await assertEventually(timeout: 1.0, pollInterval: 0.01, {
+            !self.appState.isLoading && !self.appState.searchQuery.isEmpty
+        }, message: "Search should complete")
 
         // Then clear search
         appState.searchQuery = ""
         appState.search()
-        try await Task.sleep(nanoseconds: 100_000_000)
+        await assertEventually(timeout: 1.0, pollInterval: 0.01, {
+            self.appState.items.count == 50 && self.appState.searchQuery.isEmpty && !self.appState.isLoading
+        }, message: "Empty search should reload")
 
         XCTAssertEqual(appState.items.count, 50, "Should reload all items on empty search")
     }
@@ -661,6 +668,9 @@ final class TestMockClipboardService: ClipboardServiceProtocol {
     // Artificial delays (for race-condition tests)
     var fetchRecentDelayNs: UInt64 = 0
     var searchDelayNs: UInt64 = 0
+    var searchDelayNsByQuery: [String: UInt64] = [:]
+    /// When true, the artificial search delay will not be interrupted by task cancellation (simulates a backend that can't cancel promptly).
+    var searchDelayIgnoresCancellation: Bool = false
     /// v0.29: 渐进搜索测试 - 指定查询首屏模拟预筛 total=-1
     var simulatePrefilterQueries: Set<String> = []
     /// 记录每次 search 请求，便于验证渐进/分页行为
@@ -721,7 +731,11 @@ final class TestMockClipboardService: ClipboardServiceProtocol {
 
     func fetchRecent(limit: Int, offset: Int) async throws -> [ClipboardItemDTO] {
         if fetchRecentDelayNs > 0 {
-            try? await Task.sleep(nanoseconds: fetchRecentDelayNs)
+            do {
+                try await Task.sleep(nanoseconds: fetchRecentDelayNs)
+            } catch {
+                return []
+            }
         }
         let sortedItems = items.sorted { $0.lastUsedAt > $1.lastUsedAt }
         let start = min(offset, sortedItems.count)
@@ -730,8 +744,17 @@ final class TestMockClipboardService: ClipboardServiceProtocol {
     }
 
     func search(query: SearchRequest) async throws -> SearchResultPage {
-        if searchDelayNs > 0 {
-            try? await Task.sleep(nanoseconds: searchDelayNs)
+        let effectiveDelayNs = searchDelayNsByQuery[query.query] ?? searchDelayNs
+        if effectiveDelayNs > 0 {
+            if searchDelayIgnoresCancellation {
+                await Self.sleepUncancellable(nanoseconds: effectiveDelayNs)
+            } else {
+                do {
+                    try await Task.sleep(nanoseconds: effectiveDelayNs)
+                } catch {
+                    return SearchResultPage(items: [], total: 0, hasMore: false)
+                }
+            }
         }
         searchCallCount += 1
         lastSearchQuery = query.query
@@ -759,6 +782,17 @@ final class TestMockClipboardService: ClipboardServiceProtocol {
             total: total,
             hasMore: end < filtered.count
         )
+    }
+
+    nonisolated private static func sleepUncancellable(nanoseconds: UInt64) async {
+        guard nanoseconds > 0 else { return }
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .utility).asyncAfter(
+                deadline: .now() + .nanoseconds(Int(nanoseconds))
+            ) {
+                continuation.resume()
+            }
+        }
     }
 
     func pin(itemID: UUID) async throws {
@@ -911,6 +945,7 @@ final class AppStateFallbackTests: XCTestCase {
     func testSettingsChangedAppliesHotkey() async throws {
         let mockService = TestMockClipboardService()
         let state = AppState.forTesting(service: mockService)
+        defer { state.stop() }
 
         var hotkeyApplied = false
         var appliedKeyCode: UInt32 = 0
@@ -927,20 +962,19 @@ final class AppStateFallbackTests: XCTestCase {
         // Emit settingsChanged event
         mockService.emitEvent(.settingsChanged)
 
-        // Wait for event to be processed
-        try await Task.sleep(nanoseconds: 200_000_000)
+        await assertEventually(timeout: 1.0, pollInterval: 0.01, {
+            hotkeyApplied
+        }, message: "Hotkey handler should be called on settingsChanged")
 
-        XCTAssertTrue(hotkeyApplied, "Hotkey handler should be called on settingsChanged")
         XCTAssertEqual(appliedKeyCode, SettingsDTO.default.hotkeyKeyCode)
         XCTAssertEqual(appliedModifiers, SettingsDTO.default.hotkeyModifiers)
-
-        state.stop()
     }
 
     /// Test that settingsChanged without handler doesn't crash (logs warning instead)
     func testSettingsChangedWithoutHandlerDoesNotCrash() async throws {
         let mockService = TestMockClipboardService()
         let state = AppState.forTesting(service: mockService)
+        defer { state.stop() }
 
         // Explicitly set handler to nil
         state.applyHotKeyHandler = nil
@@ -950,17 +984,18 @@ final class AppStateFallbackTests: XCTestCase {
         // Emit settingsChanged event - should not crash
         mockService.emitEvent(.settingsChanged)
 
-        // Wait for event processing
-        try await Task.sleep(nanoseconds: 200_000_000)
+        await assertEventually(timeout: 1.0, pollInterval: 0.01, {
+            !state.isLoading
+        }, message: "settingsChanged should finish processing")
 
         // Test passes if no crash occurred
-        state.stop()
     }
 
     func testThumbnailUpdatedUpdatesItemWithoutReordering() async throws {
         let mockService = TestMockClipboardService()
         mockService.setItemCount(5)
         let state = AppState.forTesting(service: mockService)
+        defer { state.stop() }
 
         await state.start()
 
@@ -969,7 +1004,9 @@ final class AppStateFallbackTests: XCTestCase {
         let thumbnailPath = "/tmp/scopy-test-thumbnail-\(UUID().uuidString).png"
 
         mockService.emitEvent(.thumbnailUpdated(itemID: targetID, thumbnailPath: thumbnailPath))
-        try await Task.sleep(nanoseconds: 200_000_000)
+        await assertEventually(timeout: 1.0, pollInterval: 0.01, {
+            state.items.first(where: { $0.id == targetID })?.thumbnailPath == thumbnailPath
+        }, message: "Thumbnail path should be updated in place")
 
         XCTAssertEqual(state.items.map(\.id), originalOrder, "Thumbnail updates should not reorder items")
         XCTAssertEqual(
@@ -977,7 +1014,5 @@ final class AppStateFallbackTests: XCTestCase {
             thumbnailPath,
             "Thumbnail path should be updated in place"
         )
-
-        state.stop()
     }
 }

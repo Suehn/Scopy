@@ -903,6 +903,49 @@ public final class StorageService {
         return output as Data
     }
 
+    /// 生成缩略图 PNG 数据（文件路径版本，后台安全）
+    /// - Note: 优先走 ImageIO + URL，避免读入完整 Data（对外部存储大图片更省内存/更快）。
+    nonisolated static func makeThumbnailPNG(fromFileAtPath path: String, maxHeight: Int) -> Data? {
+        guard maxHeight > 0 else { return nil }
+        let url = URL(fileURLWithPath: path)
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
+
+        var maxPixelSize = CGFloat(maxHeight)
+        if let props = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+           let width = props[kCGImagePropertyPixelWidth] as? CGFloat,
+           let height = props[kCGImagePropertyPixelHeight] as? CGFloat,
+           width > 0, height > 0
+        {
+            let scale = CGFloat(maxHeight) / height
+            maxPixelSize = max(width * scale, CGFloat(maxHeight))
+        }
+
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: Int(maxPixelSize.rounded(.up)),
+            kCGImageSourceShouldCacheImmediately: true
+        ]
+
+        guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else {
+            return nil
+        }
+
+        let output = NSMutableData()
+        guard let destination = CGImageDestinationCreateWithData(
+            output as CFMutableData,
+            UTType.png.identifier as CFString,
+            1,
+            nil
+        ) else {
+            return nil
+        }
+
+        CGImageDestinationAddImage(destination, cgImage, nil)
+        guard CGImageDestinationFinalize(destination) else { return nil }
+        return output as Data
+    }
+
     /// 获取原图数据（用于预览）
     /// v0.22: 修复图片数据丢失问题 - 当 rawData 为 nil 时从数据库重新加载
     /// 这是因为搜索层缓存/索引中 rawData 为 nil（v0.19 内存优化）

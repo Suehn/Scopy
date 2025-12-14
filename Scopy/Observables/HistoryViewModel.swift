@@ -5,10 +5,38 @@ import ScopyKit
 @Observable
 @MainActor
 final class HistoryViewModel {
+    struct Timing: Sendable {
+        var searchDebounceNs: UInt64
+        var refineShortQueryDelayNs: UInt64
+        var refineLongQueryDelayNs: UInt64
+        var recentAppsRefreshDelayNs: UInt64
+        var scrollPollIntervalNs: UInt64
+        var scrollIdleThresholdSeconds: TimeInterval
+
+        static let production = Timing(
+            searchDebounceNs: 150_000_000,
+            refineShortQueryDelayNs: 450_000_000,
+            refineLongQueryDelayNs: 250_000_000,
+            recentAppsRefreshDelayNs: 500_000_000,
+            scrollPollIntervalNs: 80_000_000,
+            scrollIdleThresholdSeconds: 0.15
+        )
+
+        static let tests = Timing(
+            searchDebounceNs: 20_000_000,
+            refineShortQueryDelayNs: 40_000_000,
+            refineLongQueryDelayNs: 40_000_000,
+            recentAppsRefreshDelayNs: 20_000_000,
+            scrollPollIntervalNs: 5_000_000,
+            scrollIdleThresholdSeconds: 0.02
+        )
+    }
+
     // MARK: - Properties
 
     @ObservationIgnored private var service: ClipboardServiceProtocol
     @ObservationIgnored private let settingsViewModel: SettingsViewModel
+    @ObservationIgnored private var timing: Timing = .production
 
     @ObservationIgnored var closePanelHandler: (() -> Void)?
 
@@ -73,6 +101,10 @@ final class HistoryViewModel {
     init(service: ClipboardServiceProtocol, settingsViewModel: SettingsViewModel) {
         self.service = service
         self.settingsViewModel = settingsViewModel
+    }
+
+    func configureTiming(_ timing: Timing) {
+        self.timing = timing
     }
 
     func updateService(_ service: ClipboardServiceProtocol) {
@@ -210,7 +242,7 @@ final class HistoryViewModel {
     private func scheduleRecentAppsRefresh() {
         recentAppsRefreshTask?.cancel()
         recentAppsRefreshTask = Task {
-            try? await Task.sleep(nanoseconds: 500_000_000)
+            try? await Task.sleep(nanoseconds: timing.recentAppsRefreshDelayNs)
             guard !Task.isCancelled else { return }
             await loadRecentApps()
         }
@@ -282,10 +314,10 @@ final class HistoryViewModel {
         scrollEndTask = Task { [weak self] in
             guard let self else { return }
             while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 80_000_000)
+                try? await Task.sleep(nanoseconds: timing.scrollPollIntervalNs)
                 guard !Task.isCancelled else { return }
                 let now = CFAbsoluteTimeGetCurrent()
-                if now - self.lastScrollTimestamp >= 0.15 {
+                if now - self.lastScrollTimestamp >= timing.scrollIdleThresholdSeconds {
                     self.isScrolling = false
                     self.scrollEndTask = nil
                     return
@@ -385,7 +417,7 @@ final class HistoryViewModel {
         loadMoreTask = nil
 
         searchTask = Task {
-            try? await Task.sleep(nanoseconds: 150_000_000)
+            try? await Task.sleep(nanoseconds: timing.searchDebounceNs)
             guard !Task.isCancelled else { return }
             guard currentVersion == searchVersion else { return }
 
@@ -424,7 +456,7 @@ final class HistoryViewModel {
 
                     refineTask = Task {
                         let trimmed = refineQuery.trimmingCharacters(in: .whitespacesAndNewlines)
-                        let delayNs: UInt64 = trimmed.count <= 2 ? 450_000_000 : 250_000_000
+                        let delayNs: UInt64 = trimmed.count <= 2 ? timing.refineShortQueryDelayNs : timing.refineLongQueryDelayNs
                         try? await Task.sleep(nanoseconds: delayNs)
                         guard !Task.isCancelled, refineVersion == searchVersion else { return }
 

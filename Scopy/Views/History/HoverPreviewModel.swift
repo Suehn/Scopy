@@ -1,9 +1,9 @@
 import Combine
+import CoreGraphics
 import Foundation
 
 @MainActor
 final class HoverPreviewModel: ObservableObject {
-    @Published var imageData: Data?
+    @Published var previewCGImage: CGImage?
     @Published var text: String?
 }
-

@@ -7,6 +7,36 @@
 
 ---
 
+## [v0.43.11] - 2025-12-14
+
+### Fix/Perf：Hover 预览首帧稳定 + 浏览器粘贴兜底（HTML 非 UTF-8）
+
+- **hover 预览首帧稳定**：Image/Text popover 固定 `frame`，预览模型直接持有 downsampled `CGImage`，减少首帧“先小后大/需重悬停”的体感。
+- **预览/缩略图链路提速**：预览优先走 ImageIO（file path 直读 + downsample）；`ThumbnailCache` 解码移出主线程并支持按 path evict；缩略图生成支持 priority。
+- **浏览器粘贴兜底**：HTML plain text 提取不再假设 UTF-8；回写剪贴板时对 `.html/.rtf` 的空 `plainText` 从 data 解析生成 `.string`，减少 Chrome/Edge 粘贴空内容。
+
+### 修改文件
+
+- `Scopy/Views/History/HoverPreviewModel.swift`
+- `Scopy/Views/History/HistoryItemView.swift`
+- `Scopy/Views/History/HistoryItemImagePreviewView.swift`
+- `Scopy/Views/History/HistoryItemTextPreviewView.swift`
+- `Scopy/Views/History/HistoryItemThumbnailView.swift`
+- `Scopy/Infrastructure/Caching/ThumbnailCache.swift`
+- `Scopy/Services/StorageService.swift`
+- `Scopy/Application/ClipboardService.swift`
+- `Scopy/Services/ClipboardMonitor.swift`
+- `ScopyTests/ClipboardMonitorTests.swift`
+- `ScopyTests/ClipboardServiceCopyToClipboardTests.swift`
+
+### 测试
+
+- 单元测试：`make test-unit` **142 tests passed** (1 skipped)
+- 集成测试：`make test-integration` **12 passed**
+- 性能测试：`make test-perf` **17 passed** (6 skipped)
+- Thread Sanitizer：`make test-tsan` **142 tests passed** (1 skipped)
+- Strict Concurrency：`make test-strict` **142 tests passed** (1 skipped)
+
 ## [v0.43.10] - 2025-12-14
 
 ### Dev/Quality：测试隔离 + 性能用例更贴近实际（fuzzyPlus/cold/service path）

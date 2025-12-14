@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import ImageIO
 
 @MainActor
 public final class ThumbnailCache {
@@ -21,6 +22,10 @@ public final class ThumbnailCache {
         cache.setObject(image, forKey: path as NSString)
     }
 
+    public func remove(path: String) {
+        cache.removeObject(forKey: path as NSString)
+    }
+
     public func loadImage(path: String) async -> NSImage? {
         await loadImage(path: path, priority: .utility)
     }
@@ -30,17 +35,19 @@ public final class ThumbnailCache {
             return cached
         }
 
-        let data = await Task.detached(priority: priority) {
-            try? Data(contentsOf: URL(fileURLWithPath: path), options: [.mappedIfSafe])
+        let cgImage: CGImage? = await Task.detached(priority: priority) { () async -> CGImage? in
+            let url = URL(fileURLWithPath: path)
+            guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
+            let options: [CFString: Any] = [
+                kCGImageSourceShouldCacheImmediately: true
+            ]
+            return CGImageSourceCreateImageAtIndex(source, 0, options as CFDictionary)
         }.value
 
         guard !Task.isCancelled else { return nil }
-        guard let data else { return nil }
+        guard let cgImage else { return nil }
 
-        let image = NSImage(data: data)
-        guard !Task.isCancelled else { return nil }
-        guard let image else { return nil }
-
+        let image = NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
         store(image, forPath: path)
         return image
     }
