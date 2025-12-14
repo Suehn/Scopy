@@ -7,6 +7,39 @@
 
 ---
 
+## [v0.43.2] - 2025-12-14
+
+### Perf/UX：Low Power Mode 滚动优化 + 搜索取消更及时
+
+- **滚动期间降载**：List live scroll 时标记 `isScrolling`，滚动期间暂停缩略图异步加载、禁用 hover 预览/hover 选中并减少动画开销，降低低功耗模式下快速滚动卡顿。
+- **滚动事件更可靠**：新增 `ListLiveScrollObserverView` 监听 `NSScrollView.didLiveScrollNotification`，使 `HistoryViewModel.onScroll()` 真正由 UI 滚动驱动。
+- **搜索取消更及时**：Search actor 在取消/超时时调用 `sqlite3_interrupt` 中断只读查询，减少尾部浪费；短词（≤2）模糊搜索走 recent cache，避免触发全量 fuzzy/refine 的重路径。
+
+### 修改文件
+
+- `Scopy/Views/History/ListLiveScrollObserverView.swift`
+- `Scopy/Views/HistoryListView.swift`
+- `Scopy/Observables/HistoryViewModel.swift`
+- `Scopy/Views/History/HistoryItemView.swift`
+- `Scopy/Views/History/HistoryItemThumbnailView.swift`
+- `Scopy/Infrastructure/Search/SearchEngineImpl.swift`
+- `Scopy.xcodeproj/project.pbxproj`
+- `ScopyTests/ClipboardMonitorTests.swift`
+- `DEPLOYMENT.md`
+- `doc/profile/v0.43.2-profile.md`
+- `doc/profile/README.md`
+- `doc/implemented-doc/v0.43.2.md`
+- `doc/implemented-doc/README.md`
+- `doc/implemented-doc/CHANGELOG.md`
+- `doc/review/review-v0.3.md`
+
+### 测试
+
+- 单元测试：`make test-unit` **53 tests passed** (1 skipped)
+- 性能测试：`make test-perf` **22 tests passed** (6 skipped)
+- Thread Sanitizer：`make test-tsan` **132 tests passed** (1 skipped)
+- Strict Concurrency：`make test-strict` **166 tests passed** (7 skipped)
+
 ## [v0.43.1] - 2025-12-14
 
 ### Fix/Quality：热键应用一致性 + 去重事件语义 + 测试稳定性

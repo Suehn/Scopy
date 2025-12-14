@@ -87,6 +87,7 @@ struct HistoryListView: View {
                 .listStyle(.plain)
                 .scrollContentBackground(.hidden)
                 .scrollIndicators(.automatic)
+                .background(ListLiveScrollObserverView(onScroll: { historyViewModel.onScroll() }))
                 .onChange(of: historyViewModel.selectedID) { _, newValue in
                     // 仅当键盘导航时自动滚动到选中项
                     if let id = newValue, historyViewModel.lastSelectionSource == .keyboard {
@@ -113,6 +114,7 @@ struct HistoryListView: View {
         HistoryItemView(
             item: item,
             isKeyboardSelected: historyViewModel.selectedID == item.id,
+            isScrolling: historyViewModel.isScrolling,
             settings: settingsViewModel.settings,
             onSelect: { Task { await historyViewModel.select(item) } },
             onHoverSelect: { id in

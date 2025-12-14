@@ -52,6 +52,7 @@ final class HistoryViewModel {
     var lastSelectionSource: SelectionSource = .programmatic
 
     var isScrolling: Bool = false
+    @ObservationIgnored private var lastScrollTimestamp: CFAbsoluteTime = 0
     @ObservationIgnored private var scrollEndTask: Task<Void, Never>?
 
     private var searchVersion: Int = 0
@@ -250,12 +251,27 @@ final class HistoryViewModel {
     }
 
     func onScroll() {
-        isScrolling = true
-        scrollEndTask?.cancel()
-        scrollEndTask = Task {
-            try? await Task.sleep(nanoseconds: 150_000_000)
-            guard !Task.isCancelled else { return }
-            isScrolling = false
+        lastScrollTimestamp = CFAbsoluteTimeGetCurrent()
+        if !isScrolling {
+            isScrolling = true
+        }
+
+        if scrollEndTask != nil {
+            return
+        }
+
+        scrollEndTask = Task { [weak self] in
+            guard let self else { return }
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 80_000_000)
+                guard !Task.isCancelled else { return }
+                let now = CFAbsoluteTimeGetCurrent()
+                if now - self.lastScrollTimestamp >= 0.15 {
+                    self.isScrolling = false
+                    self.scrollEndTask = nil
+                    return
+                }
+            }
         }
     }
 

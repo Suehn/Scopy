@@ -11,6 +11,7 @@ import ScopyKit
 struct HistoryItemView: View, Equatable {
     let item: ClipboardItemDTO
     let isKeyboardSelected: Bool
+    let isScrolling: Bool
     let settings: SettingsDTO
 
     // 回调闭包 - 不参与 Equatable 比较
@@ -40,6 +41,7 @@ struct HistoryItemView: View, Equatable {
         lhs.item.lastUsedAt == rhs.item.lastUsedAt &&
         lhs.item.isPinned == rhs.item.isPinned &&
         lhs.isKeyboardSelected == rhs.isKeyboardSelected &&
+        lhs.isScrolling == rhs.isScrolling &&
         lhs.settings.showImageThumbnails == rhs.settings.showImageThumbnails &&
         lhs.settings.thumbnailHeight == rhs.settings.thumbnailHeight
     }
@@ -86,7 +88,7 @@ struct HistoryItemView: View, Equatable {
         case .image where showThumbnails:
             // v0.15.1: 图片有缩略图时，只显示缩略图和大小，不显示 "Image" 标题
             HStack(spacing: ScopySpacing.md) {
-                HistoryItemThumbnailView(thumbnailPath: item.thumbnailPath, height: thumbnailHeight)
+                HistoryItemThumbnailView(thumbnailPath: item.thumbnailPath, height: thumbnailHeight, isScrolling: isScrolling)
                 Text(metadataText)
                     .font(.system(size: 10))
                     .foregroundStyle(ScopyColors.mutedText)
@@ -193,8 +195,8 @@ struct HistoryItemView: View, Equatable {
                 .stroke(isKeyboardSelected ? ScopyColors.selectionBorder : Color.clear, lineWidth: ScopySize.Stroke.medium)
         )
         // v0.10.3: 添加选中/悬停态过渡动效
-        .animation(.easeInOut(duration: 0.15), value: isHovering)
-        .animation(.easeInOut(duration: 0.15), value: isKeyboardSelected)
+        .animation(isScrolling ? nil : .easeInOut(duration: 0.15), value: isHovering)
+        .animation(isScrolling ? nil : .easeInOut(duration: 0.15), value: isKeyboardSelected)
         .padding(.horizontal, ScopySpacing.md) // Outer padding for floating effect
         .onTapGesture {
             onSelect()
@@ -203,6 +205,7 @@ struct HistoryItemView: View, Equatable {
         // v0.10.3: 使用 Task 替代 Timer，自动取消防止泄漏
         // v0.15: 添加文本预览支持
         .onHover { hovering in
+            if isScrolling { return }
             isHovering = hovering
 
             // 取消之前的防抖任务

@@ -1,4 +1,5 @@
 import Foundation
+import SQLite3
 
 public actor SearchEngineImpl {
     // MARK: - Types
@@ -24,6 +25,10 @@ public actor SearchEngineImpl {
         public let total: Int
         public let hasMore: Bool
         public let searchTimeMs: Double
+    }
+
+    private struct SQLiteInterruptHandle: @unchecked Sendable {
+        let handle: OpaquePointer
     }
 
     private struct IndexedItem {
@@ -226,8 +231,25 @@ public actor SearchEngineImpl {
             timeout = searchTimeout
         }
 
-        let result: SearchResult = try await withTimeout(timeout: timeout) {
-            try await self.searchInternal(request: request)
+        try openIfNeeded()
+        let interruptHandle = connection?.handle.map { SQLiteInterruptHandle(handle: $0) }
+
+        let result: SearchResult
+        do {
+            result = try await withTaskCancellationHandler(operation: {
+                try await withTimeout(timeout: timeout) {
+                    try await self.searchInternal(request: request)
+                }
+            }, onCancel: {
+                if let interruptHandle {
+                    sqlite3_interrupt(interruptHandle.handle)
+                }
+            })
+        } catch {
+            if case SearchError.timeout = error, let interruptHandle {
+                sqlite3_interrupt(interruptHandle.handle)
+            }
+            throw error
         }
 
         let elapsedMs = (CFAbsoluteTimeGetCurrent() - startTime) * 1000
@@ -372,6 +394,23 @@ public actor SearchEngineImpl {
         let trimmedQuery = request.query.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmedQuery.isEmpty {
             return try searchAllWithFilters(request: request)
+        }
+
+        if trimmedQuery.count <= 2 {
+            let normalizedRequest = SearchRequest(
+                query: trimmedQuery,
+                mode: mode,
+                appFilter: request.appFilter,
+                typeFilter: request.typeFilter,
+                typeFilters: request.typeFilters,
+                forceFullFuzzy: request.forceFullFuzzy,
+                limit: request.limit,
+                offset: request.offset
+            )
+
+            return try searchInCache(request: normalizedRequest) { item in
+                item.plainText.localizedCaseInsensitiveContains(trimmedQuery)
+            }
         }
 
         let normalizedRequest = SearchRequest(

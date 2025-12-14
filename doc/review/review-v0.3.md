@@ -3,8 +3,8 @@
 > 说明：本文用于指导后续“稳定性优先”的长期重构（含 Codex 执行）。`doc/review/review-v0.3-2.md` 为历史草案/补充材料，其中关键内容已合并到本文；后续以本文为准。
 
 - 最后更新：2025-12-14
-- 代码基线：`v0.43.1`
-- 重构状态：Phase 0-7 已完成（至 `v0.43.1`）
+- 代码基线：`v0.43.2`
+- 重构状态：Phase 0-7 已完成（至 `v0.43.2`）
 - 关联文档：
   - 当前实现状态索引：`doc/implemented-doc/README.md`
   - 近期变更：`doc/implemented-doc/CHANGELOG.md`
@@ -114,10 +114,24 @@
 
 #### P0-3：取消/超时语义不严格（会继续偷偷跑）
 
-现状（已解决：v0.32；仍可增强）：
+现状（已解决：v0.43.2 完成增强）：
 
 - 取消/超时由结构化并发控制：超时/取消后结果被丢弃，不再污染可见状态
-- 仍可选增强（vNext+1）：在取消时对 read connection 调用 `sqlite3_interrupt`，进一步降低尾部浪费
+- 已增强（v0.43.2）：取消/超时时对 read connection 调用 `sqlite3_interrupt`，进一步降低尾部浪费
+
+#### P0-7：Low Power Mode 快速滚动仍可能卡顿（已解决：v0.43.2）
+
+现状（v0.43.2）：
+
+- List live scroll 时标记 `HistoryViewModel.isScrolling`（通过 `NSScrollView.didLiveScrollNotification` 监听）
+- 滚动期间降载：
+  - 暂停缩略图异步加载（避免 IO/解码抢占）
+  - 禁用 hover 预览与 hover 选中（避免 popover 与频繁 selection 更新）
+  - 滚动期减少动画开销（降低主线程合成压力）
+
+效果：
+
+- 在低功耗场景下快速滚动更稳（优先保证滚动流畅，滚动结束后恢复加载与预览）。
 
 #### P0-4：设置与热键持久化多源写入（已解决：v0.30）
 
@@ -472,7 +486,7 @@ Scopy/
 
 - 全量评分循环中加入 `Task.checkCancellation()`（或定期检查 `Task.isCancelled`）
 - timeout 不强求“强杀 SQL”，但必须保证“结果丢弃 + 不污染可见状态”
-- 可选增强（vNext+1）：取消时调用 `sqlite3_interrupt(readDb)`
+- 已增强（v0.43.2）：取消/超时时调用 `sqlite3_interrupt(readDb)`
 
 ### 8.4 Settings（SSOT）
 

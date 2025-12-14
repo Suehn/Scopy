@@ -5,9 +5,15 @@ import AppKit
 struct HistoryItemThumbnailView: View {
     let thumbnailPath: String?
     let height: CGFloat
+    let isScrolling: Bool
 
     @State private var loadedThumbnail: NSImage?
     @State private var lastLoadedPath: String?
+
+    private struct TaskKey: Hashable {
+        let path: String
+        let isScrolling: Bool
+    }
 
     var body: some View {
         if let thumbnailPath {
@@ -23,10 +29,14 @@ struct HistoryItemThumbnailView: View {
                     .padding(.leading, ScopySpacing.xs)
                     .padding(.vertical, ScopySpacing.xs)
             } else {
-                thumbnailPlaceholder
-                    .task(id: thumbnailPath) {
-                        await loadThumbnailIfNeeded(path: thumbnailPath)
-                    }
+                if isScrolling {
+                    thumbnailPlaceholder
+                } else {
+                    thumbnailPlaceholder
+                        .task(id: TaskKey(path: thumbnailPath, isScrolling: isScrolling)) {
+                            await loadThumbnailIfNeeded(path: thumbnailPath)
+                        }
+                }
             }
         } else {
             thumbnailPlaceholder

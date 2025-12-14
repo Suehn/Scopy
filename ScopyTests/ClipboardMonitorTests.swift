@@ -214,32 +214,40 @@ final class ClipboardMonitorTests: XCTestCase {
 
     func testMonitorDetectsChanges() async {
         var receivedContent: ClipboardMonitor.ClipboardContent?
+        let expectedPrefix = "New clipboard content"
 
-        // Start monitoring
+        monitor.setPollingInterval(0.1)
+
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString("Baseline \(UUID())", forType: .string)
+
+        // Start monitoring (baseline should not trigger)
         monitor.startMonitoring()
 
         // Listen for events
         let expectation = XCTestExpectation(description: "Clipboard change detected")
         let task = Task {
             for await content in monitor.contentStream {
-                receivedContent = content
-                expectation.fulfill()
-                break
+                if content.plainText.contains(expectedPrefix) {
+                    receivedContent = content
+                    expectation.fulfill()
+                    break
+                }
             }
         }
 
         // Wait a bit then change clipboard
         try? await Task.sleep(nanoseconds: 100_000_000) // 100ms
 
-        let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
-        pasteboard.setString("New clipboard content \(UUID())", forType: .string)
+        pasteboard.setString("\(expectedPrefix) \(UUID())", forType: .string)
 
-        await fulfillment(of: [expectation], timeout: 2.0)
+        await fulfillment(of: [expectation], timeout: 3.0)
         task.cancel()
 
         XCTAssertNotNil(receivedContent)
-        XCTAssertTrue(receivedContent?.plainText.contains("New clipboard content") ?? false)
+        XCTAssertTrue(receivedContent?.plainText.contains(expectedPrefix) ?? false)
     }
 
     // MARK: - App Bundle ID Tests

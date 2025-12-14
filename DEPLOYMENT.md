@@ -1,6 +1,24 @@
 # Scopy 部署和使用指南
 
-## 本次更新（v0.43.1）
+## 本次更新（v0.43.2）
+- **Perf/UX（交互与功耗场景）**：
+  - 滚动期间降载：List live scroll 时暂停缩略图异步加载、禁用 hover 预览/hover 选中并减少动画开销，降低 Low Power Mode 下快速滚动卡顿。
+  - 搜索取消更及时：取消/超时时调用 `sqlite3_interrupt` 中断只读查询，减少尾部浪费；短词（≤2）模糊搜索走 recent cache，避免触发全量 fuzzy/refine 重路径。
+- **性能实测**（MacBook Air Apple M3 24GB, macOS 15.7.2（24G325）, Debug, `make test-perf`；heavy 需 `RUN_HEAVY_PERF_TESTS=1`；Low Power Mode enabled）：
+  - Fuzzy 5k items P95 ≈ 8.45ms
+  - Fuzzy 10k items P95 ≈ 78.50ms（Samples: 50；Low Power Mode 下测试阈值放宽至 300ms）
+  - Disk 25k fuzzy P95 ≈ 104.57ms（Samples: 50）
+  - Bulk insert 1000 items ≈ 83.76ms（≈11,940 items/s）
+  - Fetch recent (50 items) avg ≈ 0.12ms
+  - Regex 20k items P95 ≈ 5.20ms
+  - Mixed content disk search（single run）≈ 7.31ms
+- **测试结果**：
+  - `make test-unit` **53 passed** (1 skipped)
+  - `make test-perf` **22 passed** (6 skipped)
+  - `make test-tsan` **132 passed** (1 skipped)
+  - `make test-strict` **166 passed** (7 skipped)
+
+## 历史更新（v0.43.1）
 - **Fix/Quality（稳定性）**：
   - `.settingsChanged` 统一驱动设置同步 + 热键应用；`AppDelegate.applyHotKey` 做幂等（相同配置不重复 unregister/register），避免竞态漏应用与冗余注册。
   - 去重 upsert 语义修复：仅真实插入发 `.newItem`；去重命中更新发 `.itemUpdated`，避免 UI `totalCount` 错误累加。

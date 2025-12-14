@@ -24,10 +24,12 @@
 		23E413BF3FBB4FFF3B5FF598 /* XCTestExtensions.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA19ACBA28A519AD56F862DE /* XCTestExtensions.swift */; };
 		2E3AC6F5BBFB8EC0EEA7BEFB /* TestDataFactory.swift in Sources */ = {isa = PBXBuildFile; fileRef = 98A81F5BEC4470C8DA1B4864 /* TestDataFactory.swift */; };
 		35F9DA552D86FB9CBF6A3C81 /* ScopyColors.swift in Sources */ = {isa = PBXBuildFile; fileRef = 493362158599490B2914D1A5 /* ScopyColors.swift */; };
+		36012B3E0492649A27A3334A /* ListLiveScrollObserverView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 69E5EDE952C99FFB76658AD2 /* ListLiveScrollObserverView.swift */; };
 		3B9AFBF4400247DE93225D7B /* HistoryItemView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5901BA87F11FC6F4D1E7C673 /* HistoryItemView.swift */; };
 		3E1520C84E30C111BAE6445B /* HistoryListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8C25A96207E0DA2587E7AFBB /* HistoryListView.swift */; };
 		3F35F1D85C8C126C9CE04179 /* FloatingPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = DDB1A51BEEACE7981D4FBBCD /* FloatingPanel.swift */; };
 		401BCD4DE9684844FEFE7136 /* HeaderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4059379693354F029F0086D1 /* HeaderView.swift */; };
+		41CE19EE13324E299BEB89A3 /* ListLiveScrollObserverView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 69E5EDE952C99FFB76658AD2 /* ListLiveScrollObserverView.swift */; };
 		437D09C393E7FBBE8EB9D265 /* Localization.swift in Sources */ = {isa = PBXBuildFile; fileRef = 64F67E7978679E2B6026F8F5 /* Localization.swift */; };
 		43B8612CECC8A1768F74742B /* ClipboardMonitorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F940F6182C4E298B3511A044 /* ClipboardMonitorTests.swift */; };
 		440C0A8885E4A77144105A51 /* ConcurrencyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3527EAD22A82840AEDF3F820 /* ConcurrencyTests.swift */; };
@@ -120,6 +122,7 @@
 		E97D44CFBD18C1091883D418 /* ScopyKit in Frameworks */ = {isa = PBXBuildFile; productRef = 3011C50D2B1653E9005CAAB0 /* ScopyKit */; };
 		F3557BE1FA909E49B1824F51 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 80F5648018D6B10F8FB3D046 /* SettingsView.swift */; };
 		F3E22C6E12B926D83DABF422 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 62C29361DE1A42C04AB601DE /* ContentView.swift */; };
+		F46EA2E946C32E791B2710E6 /* ListLiveScrollObserverView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 69E5EDE952C99FFB76658AD2 /* ListLiveScrollObserverView.swift */; };
 		F57DEF5DFEC07FE9586910EA /* AppStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C8E1D7C3153B156AF59F4FBD /* AppStateTests.swift */; };
 		F782F226273CDC46067A65B9 /* HistoryItemView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5901BA87F11FC6F4D1E7C673 /* HistoryItemView.swift */; };
 /* End PBXBuildFile section */
@@ -172,6 +175,7 @@
 		61DF2BC8CEEFB6DBC2A87609 /* AppState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppState.swift; sourceTree = "<group>"; };
 		62C29361DE1A42C04AB601DE /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		64F67E7978679E2B6026F8F5 /* Localization.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Localization.swift; sourceTree = "<group>"; };
+		69E5EDE952C99FFB76658AD2 /* ListLiveScrollObserverView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ListLiveScrollObserverView.swift; sourceTree = "<group>"; };
 		6A2BAEF33A56AB9DC5808252 /* main.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = main.swift; sourceTree = "<group>"; };
 		6EE4401FFF4C04C3F4498B26 /* libsqlite3.tbd */ = {isa = PBXFileReference; lastKnownFileType = "sourcecode.text-based-dylib-definition"; name = libsqlite3.tbd; path = usr/lib/libsqlite3.tbd; sourceTree = SDKROOT; };
 		72C7E22A4D3725C49208C650 /* SectionHeader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SectionHeader.swift; sourceTree = "<group>"; };
@@ -390,6 +394,7 @@
 				0F77CBE035B9D88E9E868592 /* HistoryItemTextPreviewView.swift */,
 				20DE268ED91DDC33CB05EFB3 /* HistoryItemThumbnailView.swift */,
 				5901BA87F11FC6F4D1E7C673 /* HistoryItemView.swift */,
+				69E5EDE952C99FFB76658AD2 /* ListLiveScrollObserverView.swift */,
 				568714EFD72C9DC5533473A8 /* LoadMoreTriggerView.swift */,
 				72C7E22A4D3725C49208C650 /* SectionHeader.swift */,
 			);
@@ -606,6 +611,7 @@
 				3E1520C84E30C111BAE6445B /* HistoryListView.swift in Sources */,
 				22CAC8D2216EF5F939B413B0 /* HistoryViewModel.swift in Sources */,
 				B0F8C23D7B1B5DBE7FDB6F6B /* HotKeyServiceTests.swift in Sources */,
+				41CE19EE13324E299BEB89A3 /* ListLiveScrollObserverView.swift in Sources */,
 				91130AD28128B7601FCDCACC /* LoadMoreTriggerView.swift in Sources */,
 				437D09C393E7FBBE8EB9D265 /* Localization.swift in Sources */,
 				D2FE58267F3FCB1C5696CED6 /* MockServices.swift in Sources */,
@@ -663,6 +669,7 @@
 				18A0B29008644A161F357EEA /* HistoryViewModel.swift in Sources */,
 				6290407CDC493685A38B5DED /* HotKeyServiceTests.swift in Sources */,
 				E4ABCC84D78DE586451E805D /* IntegrationTests.swift in Sources */,
+				F46EA2E946C32E791B2710E6 /* ListLiveScrollObserverView.swift in Sources */,
 				74BEC382983B8DE7AAAAF6D1 /* LoadMoreTriggerView.swift in Sources */,
 				80C5D92E52A700850F1E5997 /* Localization.swift in Sources */,
 				4F1BE0CF444C5F07BEE16E97 /* MockServices.swift in Sources */,
@@ -712,6 +719,7 @@
 				3B9AFBF4400247DE93225D7B /* HistoryItemView.swift in Sources */,
 				56DD95C12F4A8CD6DCD8C837 /* HistoryListView.swift in Sources */,
 				0E35E9B208BDFBB26FE28364 /* HistoryViewModel.swift in Sources */,
+				36012B3E0492649A27A3334A /* ListLiveScrollObserverView.swift in Sources */,
 				98350810B6B0F435AD57BEF1 /* LoadMoreTriggerView.swift in Sources */,
 				94AB18BED4E8018E91611810 /* Localization.swift in Sources */,
 				A4433C4ACC64F0D5DF5DA717 /* ScopyApp.swift in Sources */,

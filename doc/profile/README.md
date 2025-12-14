@@ -6,6 +6,7 @@
 
 | 版本 | 日期 | 主要变化 |
 |------|------|----------|
+| [v0.43.2-profile.md](./v0.43.2-profile.md) | 2025-12-14 | Perf/UX：Low Power Mode 滚动优化 + 搜索取消更及时 |
 | [v0.43.1-profile.md](./v0.43.1-profile.md) | 2025-12-14 | Fix/Quality：热键应用一致性 + 去重事件语义 + 测试稳定性（含 Low Power Mode 备注） | 
 | [v0.43-profile.md](./v0.43-profile.md) | 2025-12-13 | Phase 7：ScopyKit module 强制边界（后端从 App target 移出） | 
 | [v0.42-profile.md](./v0.42-profile.md) | 2025-12-13 | Phase 7：ScopyKit SwiftPM 接入准备（性能基线记录） | 
