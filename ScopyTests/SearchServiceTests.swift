@@ -340,6 +340,41 @@ final class SearchServiceTests: XCTestCase {
         XCTAssertEqual(result.items.first?.id, pinned.id)
     }
 
+    func testExactSearchResultsSortByLastUsedAt() async throws {
+        let pinnedOld = try await storage.upsertItem(makeContent("alpha pinned old"))
+        try await storage.setPin(pinnedOld.id, pinned: true)
+        try await Task.sleep(nanoseconds: 10_000_000)
+
+        _ = try await storage.upsertItem(makeContent("alpha middle"))
+        try await Task.sleep(nanoseconds: 10_000_000)
+
+        _ = try await storage.upsertItem(makeContent("alpha newest"))
+        await search.invalidateCache()
+
+        let result = try await search.search(request: SearchRequest(query: "alpha", mode: .exact, limit: 10, offset: 0))
+        XCTAssertEqual(result.items.count, 3)
+        XCTAssertEqual(result.items.first?.id, pinnedOld.id, "Pinned items should still rank first")
+
+        let unpinned = result.items.filter { !$0.isPinned }
+        XCTAssertEqual(unpinned.count, 2)
+        XCTAssertGreaterThan(unpinned[0].lastUsedAt, unpinned[1].lastUsedAt)
+    }
+
+    func testFuzzySearchResultsSortByLastUsedAt() async throws {
+        _ = try await storage.upsertItem(makeContent("abc"))
+        try await Task.sleep(nanoseconds: 10_000_000)
+        _ = try await storage.upsertItem(makeContent("axbyc"))
+        await search.invalidateCache()
+
+        let result = try await search.search(request: SearchRequest(query: "abc", mode: .fuzzy, limit: 10, offset: 0))
+        XCTAssertGreaterThanOrEqual(result.items.count, 2)
+
+        // "axbyc" is newer but a worse fuzzy match than "abc"; search should still be time-sorted.
+        XCTAssertTrue(result.items[0].plainText.localizedCaseInsensitiveContains("axbyc"))
+        XCTAssertTrue(result.items[1].plainText.localizedCaseInsensitiveContains("abc"))
+        XCTAssertGreaterThan(result.items[0].lastUsedAt, result.items[1].lastUsedAt)
+    }
+
     func testShortQueryPrefilterCanRefineToFullFuzzy() async throws {
         _ = try await storage.upsertItem(makeContent("zz_target_oldest"))
         for i in 0..<2001 {

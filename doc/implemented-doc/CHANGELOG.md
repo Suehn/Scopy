@@ -7,6 +7,27 @@
 
 ---
 
+## [v0.43.12] - 2025-12-15
+
+### Fix/UX：搜索结果按时间排序（Pinned 优先）+ 大结果集性能不回退
+
+- **统一时间排序**：搜索结果按 `isPinned DESC, lastUsedAt DESC` 输出（`exact`/`fuzzy`/`fuzzyPlus`/短词 cache 路径一致）。
+- **exact (FTS) 对齐列表顺序**：`idx_pinned` 驱动时间排序查询，Pinned 仍稳定置顶。
+- **大结果集 prefilter 保性能**：候选≥20k 时用 time-first FTS prefilter（多词用 `AND`），避免排序变更引入磁盘搜索 P95 回退。
+
+### 修改文件
+
+- `Scopy/Infrastructure/Search/SearchEngineImpl.swift`
+- `ScopyTests/SearchServiceTests.swift`
+
+### 测试
+
+- 单元测试：`make test-unit` **143 passed** (1 skipped)
+- 集成测试：`make test-integration` **12 passed**
+- 性能测试：`make test-perf` **17 passed** (6 skipped)
+- Thread Sanitizer：`make test-tsan` **143 passed** (1 skipped)
+- Strict Concurrency：`make test-strict` **143 passed** (1 skipped)
+
 ## [v0.43.11] - 2025-12-14
 
 ### Fix/Perf：Hover 预览首帧稳定 + 浏览器粘贴兜底（HTML 非 UTF-8）

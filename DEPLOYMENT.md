@@ -1,6 +1,25 @@
 # Scopy 部署和使用指南
 
-## 本次更新（v0.43.11）
+## 本次更新（v0.43.12）
+- **Fix/UX（搜索结果按时间排序）**：
+  - 搜索结果统一按 `isPinned DESC, lastUsedAt DESC` 排序（Pinned 仍稳定置顶）。
+  - 大结果集（候选≥20k）使用 time-first FTS prefilter，避免排序变更引入磁盘搜索性能回退。
+- **性能实测**（MacBook Air（Mac15,12）24GB, macOS 15.7.2（24G325）, Debug, `make test-perf`；heavy 需 `RUN_HEAVY_PERF_TESTS=1`；Low Power Mode disabled）：
+  - Search 10k (fuzzyPlus) cold start ≈ 113.67ms；steady P95 ≈ 48.44ms（Samples: 50）
+  - Disk 25k (fuzzyPlus) cold start ≈ 712.36ms；steady P95 ≈ 44.92ms（Samples: 60）
+  - Service-path disk 10k (fuzzyPlus) cold start ≈ 251.20ms；steady P95 ≈ 39.45ms（Samples: 50）
+  - Bulk insert 1000 items ≈ 56.15ms（≈17,809 items/s）
+  - Fetch recent (50 items) avg ≈ 0.07ms
+  - Regex 20k items P95 ≈ 3.32ms
+  - Mixed content disk search（single run）≈ 11.42ms
+- **测试结果**：
+  - `make test-unit` **143 passed** (1 skipped)
+  - `make test-integration` **12 passed**
+  - `make test-perf` **17 passed** (6 skipped)
+  - `make test-tsan` **143 passed** (1 skipped)
+  - `make test-strict` **143 passed** (1 skipped)
+
+## 历史更新（v0.43.11）
 - **Fix/Perf（Hover 预览首帧稳定 + 浏览器粘贴兜底）**：
   - hover 预览：popover 固定尺寸；预览模型持有 downsampled `CGImage`，避免首次展示“先小后大/需重悬停”。
   - 图片链路：预览/缩略图优先走 ImageIO（file path 直读 + downsample）；`ThumbnailCache` 解码移出主线程。
