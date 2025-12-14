@@ -7,6 +7,37 @@
 
 ---
 
+## [v0.43.9] - 2025-12-14
+
+### Perf/Quality：后台 I/O + ClipboardMonitor 语义修复（避免主线程阻塞）
+
+- **回写剪贴板/预览不再主线程读盘**：外部文件读取改为后台 `.mappedIfSafe`，减少 hover/click 卡顿。
+- **图片 ingest 更顺滑**：TIFF→PNG 转码移到后台 ingest task，并确保 `sizeBytes/plainText/hash` 以最终 PNG 为准，避免误判外部存储/清理阈值。
+- **修复 ClipboardMonitor stop/start 语义**：stop 不再永久阻断 stream；引入 session gate 防止 restart 后旧任务误 yield。
+- **orphan cleanup 更稳**：磁盘枚举移到后台，Application Support 目录解析失败时更保守（测试场景避免误删）。
+- **代码质量**：移除未用代码，消除 `Continuation!` / `first!`，Strict Concurrency 通过。
+
+### 修改文件
+
+- `Scopy/Services/StorageService.swift`
+- `Scopy/Services/ClipboardMonitor.swift`
+- `Scopy/Application/ClipboardService.swift`
+- `Scopy/Views/SettingsView.swift`
+- `DEPLOYMENT.md`
+- `doc/profile/v0.43.9-profile.md`
+- `doc/profile/README.md`
+- `doc/implemented-doc/v0.43.9.md`
+- `doc/implemented-doc/README.md`
+- `doc/implemented-doc/CHANGELOG.md`
+- `doc/review/review-v0.3.md`
+
+### 测试
+
+- 单元测试：`make test-unit` **57 tests passed** (1 skipped)
+- 性能测试：`make test-perf` **16 tests passed** (6 skipped)
+- Thread Sanitizer：`make test-tsan` **137 tests passed** (1 skipped)
+- Strict Concurrency：`make test-strict` **165 tests passed** (7 skipped)
+
 ## [v0.43.8] - 2025-12-14
 
 ### Fix/UX：悬浮预览首帧不正确 + 不刷新（图片/文本）

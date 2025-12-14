@@ -473,8 +473,13 @@ struct StorageSettingsTab: View {
                 Button("Show in Finder") {
                     // v0.15: Use FileManager to get Application Support directory reliably
                     // This fixes the bug where button doesn't work when storageStats is nil
-                    let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-                    let scopyDir = appSupport.appendingPathComponent("Scopy")
+                    let scopyDir: URL
+                    if let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first {
+                        scopyDir = appSupport.appendingPathComponent("Scopy")
+                    } else {
+                        ScopyLog.ui.warning("Failed to resolve Application Support directory; showing Home in Finder")
+                        scopyDir = FileManager.default.homeDirectoryForCurrentUser
+                    }
 
                     if FileManager.default.fileExists(atPath: scopyDir.path) {
                         NSWorkspace.shared.activateFileViewerSelecting([scopyDir])

@@ -6,6 +6,7 @@
 
 | 版本 | 日期 | 主要变化 |
 |------|------|----------|
+| [v0.43.9-profile.md](./v0.43.9-profile.md) | 2025-12-14 | Perf/Quality：后台 I/O + ClipboardMonitor 语义修复（避免主线程阻塞） |
 | [v0.43.8-profile.md](./v0.43.8-profile.md) | 2025-12-14 | Fix/UX：悬浮预览首帧不正确 + 不刷新（图片/文本） |
 | [v0.43.7-profile.md](./v0.43.7-profile.md) | 2025-12-14 | Fix/UX：浏览器输入框粘贴空内容（RTF/HTML plain text fallback） |
 | [v0.43.6-profile.md](./v0.43.6-profile.md) | 2025-12-14 | Perf/UX：hover 图片预览更及时（预取 + ThumbnailCache 优先级） |

@@ -53,14 +53,18 @@ actor ClipboardService {
         self.databasePath = databasePath
         self.settingsStore = settingsStore
 
-        var continuation: AsyncStream<ClipboardEvent>.Continuation!
-        self.eventStream = AsyncStream(
+        var continuation: AsyncStream<ClipboardEvent>.Continuation?
+        let stream = AsyncStream(
             ClipboardEvent.self,
             bufferingPolicy: .unbounded
         ) { cont in
             continuation = cont
         }
-        self.eventContinuation = continuation
+        guard let resolvedContinuation = continuation else {
+            fatalError("Failed to create ClipboardService event stream continuation")
+        }
+        self.eventStream = stream
+        self.eventContinuation = resolvedContinuation
     }
 
     deinit {

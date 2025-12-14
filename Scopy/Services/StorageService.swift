@@ -129,8 +129,12 @@ public final class StorageService {
             return resolveEphemeralRootDirectory()
         }
 
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        return appSupport.appendingPathComponent("Scopy", isDirectory: true)
+        if let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first {
+            return appSupport.appendingPathComponent("Scopy", isDirectory: true)
+        }
+
+        ScopyLog.storage.warning("Failed to resolve Application Support directory; falling back to temporary directory")
+        return FileManager.default.temporaryDirectory.appendingPathComponent("Scopy", isDirectory: true)
     }
 
     private static func isRunningUnderTests() -> Bool {
@@ -391,11 +395,6 @@ public final class StorageService {
         return size
     }
 
-    /// 实际计算外部存储大小（不使用缓存）
-    private func calculateExternalStorageSize() throws -> Int {
-        return try Self.calculateDirectorySize(at: externalStoragePath)
-    }
-
     /// 静态目录大小计算，便于后台线程使用
     nonisolated private static func calculateDirectorySize(at path: String) throws -> Int {
         let url = URL(fileURLWithPath: path)
@@ -560,8 +559,11 @@ public final class StorageService {
         // 1. Get all storage_ref filenames from database
         let validRefs = try await repository.fetchExternalRefFilenames()
 
-        // 2. Enumerate all files in content directory (sync; avoid iterating in async context)
-        let orphanedFiles = findOrphanedExternalFiles(validRefs: validRefs)
+        // 2. Enumerate all files in content directory off-main (may traverse many files)
+        let contentPath = externalStoragePath
+        let orphanedFiles = await Task.detached(priority: .utility) {
+            Self.findOrphanedExternalFiles(validRefs: validRefs, externalStoragePath: contentPath)
+        }.value
         guard !orphanedFiles.isEmpty else { return }
 
         // 3. Delete orphaned files concurrently (non-blocking; structured concurrency)
@@ -598,7 +600,10 @@ public final class StorageService {
 
     private func isAppSupportContentDirectory(_ path: String) -> Bool {
         let contentURL = URL(fileURLWithPath: path).resolvingSymlinksInPath().standardizedFileURL
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        guard let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
+            ScopyLog.storage.error("Unable to resolve Application Support directory; treating content directory as protected")
+            return true
+        }
         let expected = appSupport
             .appendingPathComponent("Scopy", isDirectory: true)
             .appendingPathComponent("content", isDirectory: true)
@@ -608,7 +613,7 @@ public final class StorageService {
         return contentURL.path == expected.path || contentURL.path.hasPrefix(expected.path + "/")
     }
 
-    private func findOrphanedExternalFiles(validRefs: Set<String>) -> [URL] {
+    nonisolated private static func findOrphanedExternalFiles(validRefs: Set<String>, externalStoragePath: String) -> [URL] {
         let contentURL = URL(fileURLWithPath: externalStoragePath)
         guard let enumerator = FileManager.default.enumerator(
             at: contentURL,
@@ -773,41 +778,35 @@ public final class StorageService {
         return (externalStoragePath as NSString).appendingPathComponent(filename)
     }
 
-    /// v0.10.7: 验证存储引用是否为有效的 UUID 文件名（防止路径遍历攻击）
-    /// v0.17: 增强验证 - 添加符号链接检查和路径规范化
-    private func validateStorageRef(_ ref: String) -> Bool {
-        // 提取文件名（不含路径）
-        let filename = (ref as NSString).lastPathComponent
+    /// v0.22: 外部文件加载最大大小限制 (100MB)
+    /// 防止恶意或损坏的文件导致内存耗尽
+    nonisolated private static let maxExternalFileSize: Int = 100 * 1024 * 1024
 
-        // 移除扩展名
+    nonisolated private static func validateStorageRef(_ ref: String, externalStoragePath: String) -> Bool {
+        let filename = (ref as NSString).lastPathComponent
         let nameWithoutExt = (filename as NSString).deletingPathExtension
 
-        // 必须是有效的 UUID 格式
         guard UUID(uuidString: nameWithoutExt) != nil else {
             return false
         }
 
-        // 不能包含路径遍历字符
         guard !ref.contains("..") && !filename.contains("/") else {
             return false
         }
 
-        // v0.17: 检查符号链接
         var isDirectory: ObjCBool = false
         let exists = FileManager.default.fileExists(atPath: ref, isDirectory: &isDirectory)
         if exists {
-            // 检查是否为符号链接
             if let attrs = try? FileManager.default.attributesOfItem(atPath: ref),
                let fileType = attrs[.type] as? FileAttributeType,
                fileType == .typeSymbolicLink {
                 return false
             }
 
-            // v0.17: 规范化路径并验证是否在允许的目录内
             let url = URL(fileURLWithPath: ref)
             let resolvedPath = url.resolvingSymlinksInPath().path
             let allowedPath = URL(fileURLWithPath: externalStoragePath).resolvingSymlinksInPath().path
-            guard resolvedPath.hasPrefix(allowedPath) else {
+            guard resolvedPath.hasPrefix(allowedPath + "/") else {
                 return false
             }
         }
@@ -815,32 +814,25 @@ public final class StorageService {
         return true
     }
 
-    /// v0.22: 外部文件加载最大大小限制 (100MB)
-    /// 防止恶意或损坏的文件导致内存耗尽
-    private static let maxExternalFileSize: Int = 100 * 1024 * 1024
-
-    func loadExternalData(path: String) throws -> Data {
-        // v0.10.7: 验证路径安全性
-        guard validateStorageRef(path) else {
+    nonisolated private static func loadExternalData(path: String, externalStoragePath: String) throws -> Data {
+        guard validateStorageRef(path, externalStoragePath: externalStoragePath) else {
             throw StorageError.fileOperationFailed("Invalid storage reference: potential path traversal")
         }
 
-        // v0.22: 检查文件大小，防止加载过大文件导致内存耗尽
         let url = URL(fileURLWithPath: path)
         do {
             let attrs = try FileManager.default.attributesOfItem(atPath: path)
-            if let fileSize = attrs[.size] as? Int, fileSize > Self.maxExternalFileSize {
-                throw StorageError.fileOperationFailed("File too large: \(fileSize) bytes (max: \(Self.maxExternalFileSize))")
+            if let fileSize = attrs[.size] as? Int, fileSize > maxExternalFileSize {
+                throw StorageError.fileOperationFailed("File too large: \(fileSize) bytes (max: \(maxExternalFileSize))")
             }
         } catch let error as StorageError {
             throw error
         } catch {
-            // 文件属性获取失败，继续尝试读取（可能是权限问题）
             ScopyLog.storage.warning("Failed to get file attributes: \(error.localizedDescription, privacy: .public)")
         }
 
         do {
-            return try Data(contentsOf: url)
+            return try Data(contentsOf: url, options: [.mappedIfSafe])
         } catch {
             throw StorageError.fileOperationFailed("Failed to read external file: \(error)")
         }
@@ -911,39 +903,16 @@ public final class StorageService {
         return output as Data
     }
 
-    /// 生成并保存缩略图（从原图数据）
-    /// - Parameters:
-    ///   - imageData: 原图数据
-    ///   - contentHash: 内容哈希（用于命名）
-    ///   - maxHeight: 最大高度
-    /// - Returns: 缩略图路径
-    /// v0.19: 添加 autoreleasepool 管理中间对象内存
-    func generateThumbnail(from imageData: Data, contentHash: String, maxHeight: Int) -> String? {
-        // 检查是否已存在
-        if let existing = getThumbnailPath(for: contentHash) {
-            return existing
-        }
-
-        guard let pngData = Self.makeThumbnailPNG(from: imageData, maxHeight: maxHeight) else { return nil }
-
-        // v0.17: 使用原子写入保存缩略图
-        let path = (thumbnailCachePath as NSString).appendingPathComponent("\(contentHash).png")
-        do {
-            try Self.writeAtomically(pngData, to: path)
-            return path
-        } catch {
-            ScopyLog.storage.error("Failed to save thumbnail: \(error.localizedDescription, privacy: .public)")
-            return nil
-        }
-    }
-
     /// 获取原图数据（用于预览）
     /// v0.22: 修复图片数据丢失问题 - 当 rawData 为 nil 时从数据库重新加载
     /// 这是因为搜索层缓存/索引中 rawData 为 nil（v0.19 内存优化）
     func getOriginalImageData(for item: StoredItem) async -> Data? {
         // 1. 优先使用外部存储（大图片 >100KB）
         if let storageRef = item.storageRef {
-            return try? loadExternalData(path: storageRef)
+            let allowedRoot = externalStoragePath
+            return await Task.detached(priority: .userInitiated) {
+                try? Self.loadExternalData(path: storageRef, externalStoragePath: allowedRoot)
+            }.value
         }
 
         // 2. 使用内联数据（小图片）

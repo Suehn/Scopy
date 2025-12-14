@@ -1,6 +1,26 @@
 # Scopy 部署和使用指南
 
-## 本次更新（v0.43.8）
+## 本次更新（v0.43.9）
+- **Perf/Quality（后台 I/O + ClipboardMonitor 语义修复）**：
+  - 外部文件读取改为后台 `.mappedIfSafe`：回写剪贴板与图片预览不再主线程同步读盘，降低 hover/click 卡顿。
+  - 图片 ingest 的 TIFF→PNG 转码移到后台 ingest task，并确保 `sizeBytes/plainText/hash` 以最终 PNG 为准（避免误判外部存储/清理阈值）。
+  - `ClipboardMonitor` stop/start 语义修复：stop 不再永久阻断 stream；session gate 防止 restart 后旧任务误 yield。
+  - orphan cleanup 的磁盘遍历移到后台；Application Support 目录解析失败时更保守（测试场景避免误删）。
+- **性能实测**（MacBook Air Apple M3 24GB, macOS 15.7.2（24G325）, Debug, `make test-perf`；heavy 需 `RUN_HEAVY_PERF_TESTS=1`；Low Power Mode enabled）：
+  - Fuzzy 5k items P95 ≈ 8.41ms
+  - Fuzzy 10k items P95 ≈ 76.89ms（Samples: 50；Low Power Mode 下测试阈值放宽至 300ms）
+  - Disk 25k fuzzy P95 ≈ 108.72ms（Samples: 50）
+  - Bulk insert 1000 items ≈ 82.99ms（≈12,050 items/s）
+  - Fetch recent (50 items) avg ≈ 0.11ms
+  - Regex 20k items P95 ≈ 5.31ms
+  - Mixed content disk search（single run）≈ 7.50ms
+- **测试结果**：
+  - `make test-unit` **57 passed** (1 skipped)
+  - `make test-perf` **16 passed** (6 skipped)
+  - `make test-tsan` **137 passed** (1 skipped)
+  - `make test-strict` **165 passed** (7 skipped)
+
+## 历史更新（v0.43.8）
 - **Fix/UX（悬浮预览首帧不正确 + 不刷新）**：
   - 图片 hover 预览改为订阅 `ObservableObject` 预览模型：preview 数据就绪后可在同一次 popover 展示中无缝替换，避免“移开再悬停才显示”的体感。
   - 图片预览统一按预览区域 `fit` 渲染：缩略图占位也会放大显示，避免“小缩略图当预览”。

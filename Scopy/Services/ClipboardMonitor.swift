@@ -2,6 +2,7 @@ import AppKit
 import CoreGraphics
 import Foundation
 import ImageIO
+import UniformTypeIdentifiers
 
 /// ClipboardMonitor - 系统剪贴板监控服务
 /// 符合 v0.md 第1节：后端只提供结构化数据和命令接口
@@ -69,14 +70,24 @@ public final class ClipboardMonitor {
         let appBundleID: String?
         let sizeBytes: Int
         let precomputedHash: String?  // 图片等内容的预计算轻量指纹
+        let imageDataWasTIFF: Bool
 
-        init(type: ClipboardItemType, plainText: String, rawData: Data?, appBundleID: String?, sizeBytes: Int, precomputedHash: String? = nil) {
+        init(
+            type: ClipboardItemType,
+            plainText: String,
+            rawData: Data?,
+            appBundleID: String?,
+            sizeBytes: Int,
+            precomputedHash: String? = nil,
+            imageDataWasTIFF: Bool = false
+        ) {
             self.type = type
             self.plainText = plainText
             self.rawData = rawData
             self.appBundleID = appBundleID
             self.sizeBytes = sizeBytes
             self.precomputedHash = precomputedHash
+            self.imageDataWasTIFF = imageDataWasTIFF
         }
     }
 
@@ -85,10 +96,7 @@ public final class ClipboardMonitor {
     private var timer: Timer?
     private var lastChangeCount: Int = 0
     private var isMonitoring = false
-    private var isContentStreamFinished = false
-
-    /// v0.22: 保护 isContentStreamFinished 的锁，防止 stopMonitoring() 和 yield() 之间的竞态
-    private let contentStreamLock = NSLock()
+    private var monitoringSessionID: UInt64 = 0
 
     private var pendingLargeContent: [RawClipboardData] = []
     private var activeIngestTasks: [UUID: Task<Void, Never>] = [:]
@@ -108,7 +116,10 @@ public final class ClipboardMonitor {
     // MARK: - Initialization
 
     public init() {
-        let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
+        let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first ?? {
+            ScopyLog.monitor.warning("Failed to resolve caches directory; falling back to temporary directory")
+            return FileManager.default.temporaryDirectory
+        }()
         let scopyCaches = caches.appendingPathComponent("Scopy", isDirectory: true)
         let ingestDir = scopyCaches.appendingPathComponent("ingest", isDirectory: true)
         do {
@@ -118,23 +129,22 @@ public final class ClipboardMonitor {
         }
         self.ingestSpoolDirectory = ingestDir
 
-        var continuation: AsyncStream<ClipboardContent>.Continuation!
-        self.contentStream = AsyncStream(
+        var continuation: AsyncStream<ClipboardContent>.Continuation?
+        let stream = AsyncStream(
             ClipboardContent.self,
             bufferingPolicy: .unbounded
         ) { cont in
             continuation = cont
         }
-        self.eventContinuation = continuation
+        guard let resolvedContinuation = continuation else {
+            fatalError("Failed to create ClipboardMonitor content stream continuation")
+        }
+        self.contentStream = stream
+        self.eventContinuation = resolvedContinuation
         self.lastChangeCount = NSPasteboard.general.changeCount
     }
 
     deinit {
-        // Direct cleanup in deinit (synchronous)
-        // v0.22.1: 使用锁保护 isContentStreamFinished，与 checkClipboard() 中的锁保持一致
-        contentStreamLock.lock()
-        isContentStreamFinished = true
-        contentStreamLock.unlock()
         // Cancel all ingest tasks and drop pending items.
         // 注意: deinit 不在 @MainActor 上下文中，使用 lock/defer unlock 模式
         queueLock.lock()
@@ -154,6 +164,7 @@ public final class ClipboardMonitor {
 
         guard !isMonitoring else { return }
         isMonitoring = true
+        monitoringSessionID &+= 1
         lastChangeCount = NSPasteboard.general.changeCount
 
         timer = Timer.scheduledTimer(withTimeInterval: pollingInterval, repeats: true) { [weak self] _ in
@@ -164,15 +175,10 @@ public final class ClipboardMonitor {
         // Timer.scheduledTimer 已自动添加到 RunLoop.current，无需再次添加
     }
 
-    /// v0.22: 使用锁保护 isContentStreamFinished，防止与 yield() 竞态
     public func stopMonitoring() {
-        // 使用锁保护状态设置，确保与 yield 操作互斥
-        let shouldStop = contentStreamLock.withLock { () -> Bool in
-            guard !isContentStreamFinished else { return false }
-            isContentStreamFinished = true
-            return true
-        }
-        guard shouldStop else { return }
+        guard isMonitoring else { return }
+        isMonitoring = false
+        monitoringSessionID &+= 1
 
         timer?.invalidate()
         timer = nil
@@ -183,7 +189,6 @@ public final class ClipboardMonitor {
         activeIngestTasks.values.forEach { $0.cancel() }
         activeIngestTasks.removeAll()
         pendingLargeContent.removeAll()
-        isMonitoring = false
     }
 
     public func setPollingInterval(_ interval: TimeInterval) {
@@ -279,6 +284,8 @@ public final class ClipboardMonitor {
     // MARK: - Private Methods
 
     private func checkClipboard() {
+        guard isMonitoring else { return }
+
         let pasteboard = NSPasteboard.general
         let currentChangeCount = pasteboard.changeCount
 
@@ -318,11 +325,7 @@ public final class ClipboardMonitor {
             contentHash: hash,
             sizeBytes: rawData.sizeBytes
         )
-        // v0.22: 使用锁保护 yield 操作，防止与 stopMonitoring() 竞态
-        contentStreamLock.withLock {
-            guard !isContentStreamFinished else { return }
-            eventContinuation.yield(content)
-        }
+        eventContinuation.yield(content)
     }
 
     /// 异步处理大内容（在后台线程计算哈希）
@@ -353,8 +356,9 @@ public final class ClipboardMonitor {
             let taskID = UUID()
             let ingestDirectory = ingestSpoolDirectory
             let spoolThresholdBytes = ScopyThresholds.ingestSpoolBytes
+            let sessionID = monitoringSessionID
 
-            let task = Task.detached(priority: .userInitiated) { [weak self, taskID, ingestDirectory] in
+            let task = Task.detached(priority: .userInitiated) { [weak self, taskID, ingestDirectory, sessionID] in
                 defer {
                     Task { @MainActor [weak self] in
                         self?.finishIngestTask(id: taskID)
@@ -363,11 +367,35 @@ public final class ClipboardMonitor {
 
                 guard let self else { return }
 
-                let hash = await self.computeHashInBackground(next)
                 guard !Task.isCancelled else { return }
 
+                var payloadData = next.rawData
+                var plainText = next.plainText
+                var sizeBytes = next.sizeBytes
+
+                if next.type == .image, let imageData = next.rawData {
+                    if next.imageDataWasTIFF, let pngData = Self.convertTIFFToPNG(imageData) {
+                        payloadData = pngData
+                    } else {
+                        payloadData = imageData
+                    }
+                    sizeBytes = payloadData?.count ?? imageData.count
+                    plainText = "[Image: \(Self.formatBytes(sizeBytes))]"
+                }
+
+                let hash: String
+                if let precomputed = next.precomputedHash {
+                    hash = precomputed
+                } else if let payloadData {
+                    hash = Self.computeHashStatic(payloadData)
+                } else {
+                    hash = Self.computeHashStatic(Data(plainText.utf8))
+                }
+
                 let payload = Self.buildPayload(
-                    rawData: next,
+                    type: next.type,
+                    data: payloadData,
+                    sizeBytes: sizeBytes,
                     ingestDirectory: ingestDirectory,
                     spoolThresholdBytes: spoolThresholdBytes
                 )
@@ -377,24 +405,26 @@ public final class ClipboardMonitor {
                     return
                 }
 
+                let resolvedPlainText = plainText
+                let resolvedSizeBytes = sizeBytes
+
                 let didYield = await MainActor.run { [weak self] in
                     guard let self else { return false }
                     guard !Task.isCancelled else { return false }
+                    guard self.isMonitoring else { return false }
+                    guard self.monitoringSessionID == sessionID else { return false }
 
                     let content = ClipboardContent(
                         type: next.type,
-                        plainText: next.plainText,
+                        plainText: resolvedPlainText,
                         payload: payload,
                         appBundleID: next.appBundleID,
                         contentHash: hash,
-                        sizeBytes: next.sizeBytes
+                        sizeBytes: resolvedSizeBytes
                     )
 
-                    return self.contentStreamLock.withLock { () -> Bool in
-                        guard !self.isContentStreamFinished else { return false }
-                        self.eventContinuation.yield(content)
-                        return true
-                    }
+                    self.eventContinuation.yield(content)
+                    return true
                 }
 
                 if !didYield {
@@ -415,18 +445,20 @@ public final class ClipboardMonitor {
     }
 
     nonisolated private static func buildPayload(
-        rawData: RawClipboardData,
+        type: ClipboardItemType,
+        data: Data?,
+        sizeBytes: Int,
         ingestDirectory: URL,
         spoolThresholdBytes: Int
     ) -> ClipboardContent.Payload {
-        guard let data = rawData.rawData else { return .none }
+        guard let data else { return .none }
 
-        guard rawData.sizeBytes >= spoolThresholdBytes else {
+        guard sizeBytes >= spoolThresholdBytes else {
             return .data(data)
         }
 
         let ext: String
-        switch rawData.type {
+        switch type {
         case .image: ext = "png"
         case .rtf: ext = "rtf"
         case .html: ext = "html"
@@ -446,28 +478,6 @@ public final class ClipboardMonitor {
     nonisolated private static func cleanupPayloadIfNeeded(_ payload: ClipboardContent.Payload) {
         guard case .file(let url) = payload else { return }
         try? FileManager.default.removeItem(at: url)
-    }
-
-    /// 在后台线程计算哈希
-    /// v0.19: 统一使用 SHA256 进行去重，确保准确性
-    nonisolated private func computeHashInBackground(_ rawData: RawClipboardData) async -> String {
-        // 如果有预计算的哈希（非图片类型），直接使用
-        if let precomputed = rawData.precomputedHash {
-            return precomputed
-        }
-
-        // 所有类型（包括图片）统一使用 SHA256
-        return await withCheckedContinuation { continuation in
-            DispatchQueue.global(qos: .userInitiated).async {
-                let hash: String
-                if let data = rawData.rawData {
-                    hash = Self.computeHashStatic(data)
-                } else {
-                    hash = Self.computeHashStatic(Data(rawData.plainText.utf8))
-                }
-                continuation.resume(returning: hash)
-            }
-        }
     }
 
     /// 快速提取原始数据（不计算哈希，避免阻塞主线程）
@@ -494,23 +504,24 @@ public final class ClipboardMonitor {
             )
         }
 
-        // 2. Image (PNG, TIFF, etc.) - 优先 PNG，TIFF 转为 PNG 避免存储膨胀
+        // 2. Image (PNG, TIFF, etc.) - 优先 PNG；TIFF 转 PNG 延迟到后台（避免主线程重编码）
         // v0.19: 图片统一使用 SHA256 去重（在后台线程计算），移除无用的轻量指纹
-        if let imageResult = extractOptimalImageData(from: pasteboard) {
+        if let imageResult = extractImageDataForIngest(from: pasteboard) {
             let imageData = imageResult.data
             return RawClipboardData(
                 type: .image,
-                plainText: "[Image: \(formatBytes(imageData.count))]",
+                plainText: "[Image]",
                 rawData: imageData,
                 appBundleID: appBundleID,
                 sizeBytes: imageData.count,
-                precomputedHash: nil  // 图片哈希在后台线程计算
+                precomputedHash: nil,
+                imageDataWasTIFF: imageResult.wasTIFF
             )
         }
 
         // 3. RTF
         if let rtfData = pasteboard.data(forType: .rtf) {
-            let plainText = extractPlainTextFromRTF(rtfData) ?? ""
+            let plainText = normalizeText(pasteboard.string(forType: .string) ?? extractPlainTextFromRTF(rtfData) ?? "")
             return RawClipboardData(
                 type: .rtf,
                 plainText: plainText,
@@ -522,7 +533,7 @@ public final class ClipboardMonitor {
 
         // 4. HTML
         if let htmlData = pasteboard.data(forType: .html) {
-            let plainText = extractPlainTextFromHTML(htmlData) ?? ""
+            let plainText = normalizeText(pasteboard.string(forType: .string) ?? extractPlainTextFromHTML(htmlData) ?? "")
             return RawClipboardData(
                 type: .html,
                 plainText: plainText,
@@ -592,7 +603,7 @@ public final class ClipboardMonitor {
             let hash = computeHash(imageData)
             return ClipboardContent(
                 type: .image,
-                plainText: "[Image: \(formatBytes(imageData.count))]",
+                plainText: "[Image: \(Self.formatBytes(imageData.count))]",
                 payload: .data(imageData),
                 appBundleID: appBundleID,
                 contentHash: hash,
@@ -602,7 +613,7 @@ public final class ClipboardMonitor {
 
         // 3. RTF
         if let rtfData = pasteboard.data(forType: .rtf) {
-            let plainText = extractPlainTextFromRTF(rtfData) ?? ""
+            let plainText = normalizeText(pasteboard.string(forType: .string) ?? extractPlainTextFromRTF(rtfData) ?? "")
             let hash = computeHash(rtfData)
             return ClipboardContent(
                 type: .rtf,
@@ -616,7 +627,7 @@ public final class ClipboardMonitor {
 
         // 4. HTML
         if let htmlData = pasteboard.data(forType: .html) {
-            let plainText = extractPlainTextFromHTML(htmlData) ?? ""
+            let plainText = normalizeText(pasteboard.string(forType: .string) ?? extractPlainTextFromHTML(htmlData) ?? "")
             let hash = computeHash(htmlData)
             return ClipboardContent(
                 type: .html,
@@ -775,7 +786,7 @@ public final class ClipboardMonitor {
         return attributedString.string
     }
 
-    private func formatBytes(_ bytes: Int) -> String {
+    nonisolated private static func formatBytes(_ bytes: Int) -> String {
         let kb = Double(bytes) / 1024
         if kb < 1024 {
             return String(format: "%.1f KB", kb)
@@ -789,13 +800,36 @@ public final class ClipboardMonitor {
     /// 将 TIFF 数据转换为 PNG 格式（避免存储膨胀）
     /// macOS 剪贴板对截图返回 TIFF（未压缩），可能比原始 PNG 大 35 倍
     nonisolated static func convertTIFFToPNG(_ tiffData: Data) -> Data? {
-        guard let imageSource = CGImageSourceCreateWithData(tiffData as CFData, nil),
-              let cgImage = CGImageSourceCreateImageAtIndex(imageSource, 0, nil) else {
+        guard let imageSource = CGImageSourceCreateWithData(tiffData as CFData, nil) else {
             return nil
         }
 
-        let rep = NSBitmapImageRep(cgImage: cgImage)
-        return rep.representation(using: .png, properties: [:])
+        let output = NSMutableData()
+        guard let destination = CGImageDestinationCreateWithData(
+            output as CFMutableData,
+            UTType.png.identifier as CFString,
+            1,
+            nil
+        ) else {
+            return nil
+        }
+
+        CGImageDestinationAddImageFromSource(destination, imageSource, 0, nil)
+        guard CGImageDestinationFinalize(destination) else { return nil }
+        return output as Data
+    }
+
+    /// 从剪贴板提取图片数据（用于 ingest），优先 PNG；TIFF 转 PNG 在后台执行
+    private func extractImageDataForIngest(from pasteboard: NSPasteboard) -> (data: Data, wasTIFF: Bool)? {
+        if let pngData = pasteboard.data(forType: .png) {
+            return (pngData, false)
+        }
+
+        if let tiffData = pasteboard.data(forType: .tiff) {
+            return (tiffData, true)
+        }
+
+        return nil
     }
 
     /// 从剪贴板提取图片数据，优先 PNG，如果只有 TIFF 则转换为 PNG
