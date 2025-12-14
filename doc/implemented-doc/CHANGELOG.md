@@ -7,6 +7,35 @@
 
 ---
 
+## [v0.43.8] - 2025-12-14
+
+### Fix/UX：悬浮预览首帧不正确 + 不刷新（图片/文本）
+
+- **修复图片 hover 预览“先出现小缩略图/需重悬停才变正常预览”**：popover 内容改为订阅 `ObservableObject` 预览模型，preview 数据就绪后可在同一次 popover 展示中无缝替换。
+- **修复图片预览“缩略图占位过小”**：预览图统一按预览区域 `fit` 渲染，缩略图占位也会放大显示（避免“小缩略图当预览”的体感）。
+- **修复文本 hover 预览首次显示 `(Empty)`**：`nil` 期间展示 `ProgressView`，并通过预览模型订阅确保内容生成后即时刷新。
+
+### 修改文件
+
+- `Scopy/Views/History/HoverPreviewModel.swift`
+- `Scopy/Views/History/HistoryItemView.swift`
+- `Scopy/Views/History/HistoryItemImagePreviewView.swift`
+- `Scopy/Views/History/HistoryItemTextPreviewView.swift`
+- `DEPLOYMENT.md`
+- `doc/profile/v0.43.8-profile.md`
+- `doc/profile/README.md`
+- `doc/implemented-doc/v0.43.8.md`
+- `doc/implemented-doc/README.md`
+- `doc/implemented-doc/CHANGELOG.md`
+- `doc/review/review-v0.3.md`
+
+### 测试
+
+- 单元测试：`make test-unit` **57 tests passed** (1 skipped)
+- 性能测试：`make test-perf` **16 tests passed** (6 skipped)
+- Thread Sanitizer：`make test-tsan` **137 tests passed** (1 skipped)
+- Strict Concurrency：`make test-strict` **165 tests passed** (7 skipped)
+
 ## [v0.43.7] - 2025-12-14
 
 ### Fix/UX：浏览器输入框粘贴空内容（RTF/HTML 缺少 plain text）

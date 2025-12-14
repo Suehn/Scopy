@@ -3,14 +3,14 @@ import ScopyKit
 import AppKit
 
 struct HistoryItemImagePreviewView: View {
-    let previewImageData: Data?
+    @ObservedObject var model: HoverPreviewModel
     let thumbnailPath: String?
 
     @State private var loadedThumbnail: NSImage?
     @State private var lastLoadedPath: String?
 
     var body: some View {
-        if let imageData = previewImageData,
+        if let imageData = model.imageData,
            let nsImage = NSImage(data: imageData) {
             previewImage(nsImage)
         } else if let thumbnailPath {
@@ -35,24 +35,23 @@ struct HistoryItemImagePreviewView: View {
     @ViewBuilder
     private func previewImage(_ nsImage: NSImage) -> some View {
         let maxWidth: CGFloat = ScopySize.Width.previewMax
-        let originalWidth = nsImage.size.width
-        let originalHeight = nsImage.size.height
-        let safeHeight = max(originalHeight, 1)
+        let maxHeight: CGFloat = 400
 
-        if originalWidth <= maxWidth {
-            Image(nsImage: nsImage)
-                .padding(ScopySpacing.md)
-        } else {
-            let aspectRatio = originalWidth / safeHeight
-            let displayWidth = maxWidth
-            let displayHeight = displayWidth / max(aspectRatio, 0.01)
+        let originalWidth = max(nsImage.size.width, 1)
+        let originalHeight = max(nsImage.size.height, 1)
 
-            Image(nsImage: nsImage)
-                .resizable()
-                .aspectRatio(contentMode: .fit)
-                .frame(width: displayWidth, height: displayHeight)
-                .padding(ScopySpacing.md)
-        }
+        let widthScale = maxWidth / originalWidth
+        let heightScale = maxHeight / originalHeight
+        let scale = min(widthScale, heightScale)
+
+        let displayWidth = originalWidth * scale
+        let displayHeight = originalHeight * scale
+
+        Image(nsImage: nsImage)
+            .resizable()
+            .aspectRatio(contentMode: .fit)
+            .frame(width: displayWidth, height: displayHeight)
+            .padding(ScopySpacing.md)
     }
 
     @MainActor

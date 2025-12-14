@@ -8,7 +8,7 @@
 
 | 项目 | 状态 |
 |------|------|
-| **当前版本** | v0.43.7 |
+| **当前版本** | v0.43.8 |
 | **测试状态** | 单元测试通过（`make test-unit`: 57 passed, 1 skipped；`make test-perf`: 16 passed, 6 skipped；`make test-tsan`: 137 passed, 1 skipped；Strict Concurrency: `make test-strict` 165 passed, 7 skipped） |
 | **构建状态** | Debug ✅ |
 | **部署位置** | /Applications/Scopy.app |
@@ -24,6 +24,7 @@
 
 | 版本 | 日期 | 主要内容 | 状态 |
 |------|------|----------|------|
+| [v0.43.8](./v0.43.8.md) | 2025-12-14 | Fix/UX：悬浮预览首帧不正确 + 不刷新（图片/文本） | ✅ |
 | [v0.43.7](./v0.43.7.md) | 2025-12-14 | Fix/UX：浏览器输入框粘贴空内容（RTF/HTML 缺少 plain text） | ✅ |
 | [v0.43.6](./v0.43.6.md) | 2025-12-14 | Perf/UX：hover 图片预览更及时（预取 + ThumbnailCache 优先级） | ✅ |
 | [v0.43.5](./v0.43.5.md) | 2025-12-14 | Perf/UX：图片预览提速（缩略图占位 + JPEG downsample） | ✅ |

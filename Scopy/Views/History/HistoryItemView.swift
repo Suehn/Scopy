@@ -29,10 +29,9 @@ struct HistoryItemView: View, Equatable {
     @State private var hoverExitTask: Task<Void, Never>?
     @State private var isPopoverHovering = false
     @State private var showPreview = false
-    @State private var previewImageData: Data?
     // v0.15: Text preview state
     @State private var showTextPreview = false
-    @State private var textPreviewContent: String?
+    @StateObject private var previewModel = HoverPreviewModel()
 
     // MARK: - Equatable
 
@@ -251,14 +250,14 @@ struct HistoryItemView: View, Equatable {
                         self.cancelPreviewTask()
                         self.showPreview = false
                         self.showTextPreview = false
-                        self.previewImageData = nil    // v0.15.1: Clear image data to prevent memory leak
-                        self.textPreviewContent = nil  // v0.15: Reset text preview content
+                        self.previewModel.imageData = nil    // v0.15.1: Clear image data to prevent memory leak
+                        self.previewModel.text = nil  // v0.15: Reset text preview content
                     }
                 }
             }
         }
         .popover(isPresented: $showPreview, arrowEdge: .trailing) {
-            HistoryItemImagePreviewView(previewImageData: previewImageData, thumbnailPath: item.thumbnailPath)
+            HistoryItemImagePreviewView(model: previewModel, thumbnailPath: item.thumbnailPath)
                 .onHover { hovering in
                     isPopoverHovering = hovering
                     if hovering {
@@ -274,14 +273,14 @@ struct HistoryItemView: View, Equatable {
                                 guard !self.isHovering, !self.isPopoverHovering else { return }
                                 self.cancelPreviewTask()
                                 self.showPreview = false
-                                self.previewImageData = nil
+                                self.previewModel.imageData = nil
                             }
                         }
                     }
                 }
         }
         .popover(isPresented: $showTextPreview, arrowEdge: .trailing) {
-            HistoryItemTextPreviewView(text: textPreviewContent)
+            HistoryItemTextPreviewView(model: previewModel)
                 .onHover { hovering in
                     isPopoverHovering = hovering
                     if hovering {
@@ -296,7 +295,7 @@ struct HistoryItemView: View, Equatable {
                                 guard !self.isHovering, !self.isPopoverHovering else { return }
                                 self.cancelPreviewTask()
                                 self.showTextPreview = false
-                                self.textPreviewContent = nil
+                                self.previewModel.text = nil
                             }
                         }
                     }
@@ -322,8 +321,8 @@ struct HistoryItemView: View, Equatable {
             hoverExitTask = nil
             cancelPreviewTask()
             // 清理状态，防止内存泄漏
-            previewImageData = nil
-            textPreviewContent = nil
+            previewModel.imageData = nil
+            previewModel.text = nil
         }
         .onChange(of: isScrolling) { _, newValue in
             guard newValue else { return }
@@ -336,8 +335,8 @@ struct HistoryItemView: View, Equatable {
             showPreview = false
             showTextPreview = false
             isPopoverHovering = false
-            previewImageData = nil
-            textPreviewContent = nil
+            previewModel.imageData = nil
+            previewModel.text = nil
         }
     }
 
@@ -373,6 +372,9 @@ struct HistoryItemView: View, Equatable {
                     Self.downsampleImageData(data, maxPixelSize: maxPixelSize) ?? data
                 }.value
                 guard !Task.isCancelled else { return nil }
+                guard !isScrolling else { return nil }
+                guard isHovering else { return nil }
+                previewModel.imageData = downsampled
                 return downsampled
             }
             defer { preparedPreviewData.cancel() }
@@ -386,7 +388,7 @@ struct HistoryItemView: View, Equatable {
 
             if let previewData = await preparedPreviewData.value {
                 guard !Task.isCancelled else { return }
-                previewImageData = previewData
+                previewModel.imageData = previewData
             }
 
         }
@@ -486,7 +488,7 @@ struct HistoryItemView: View, Equatable {
 
             await MainActor.run {
                 if self.isHovering {
-                    self.textPreviewContent = preview
+                    self.previewModel.text = preview
                     self.showTextPreview = true
                 }
             }
