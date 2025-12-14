@@ -4,6 +4,7 @@ import Foundation
 public enum ClipboardEvent: Sendable {
     case newItem(ClipboardItemDTO)
     case itemUpdated(ClipboardItemDTO)  // 用于置顶更新的条目
+    case thumbnailUpdated(itemID: UUID, thumbnailPath: String)
     case itemDeleted(UUID)
     case itemPinned(UUID)
     case itemUnpinned(UUID)

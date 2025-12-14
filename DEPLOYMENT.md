@@ -1,6 +1,24 @@
 # Scopy 部署和使用指南
 
-## 本次更新（v0.43.3）
+## 本次更新（v0.43.4）
+- **Fix/UX（测试隔离 + 缩略图即时刷新）**：
+  - 测试隔离外部存储根目录：in-memory / 测试场景下外部内容目录不再落到 `Application Support/Scopy/content`，避免测试触发 orphan 清理时误删真实历史原图。
+  - 缩略图即时刷新：缩略图保存后发出 `.thumbnailUpdated` 事件；列表行的 `Equatable` 比较纳入 `thumbnailPath`，确保缩略图路径变化会触发 UI 刷新（无需搜索/重载）。
+- **性能实测**（MacBook Air Apple M3 24GB, macOS 15.7.2（24G325）, Debug, `make test-perf`；heavy 需 `RUN_HEAVY_PERF_TESTS=1`；Low Power Mode disabled）：
+  - Fuzzy 5k items P95 ≈ 4.82ms
+  - Fuzzy 10k items P95 ≈ 44.61ms（Samples: 50）
+  - Disk 25k fuzzy P95 ≈ 70.83ms（Samples: 50）
+  - Bulk insert 1000 items ≈ 51.87ms（≈19,277 items/s）
+  - Fetch recent (50 items) avg ≈ 0.07ms
+  - Regex 20k items P95 ≈ 2.99ms
+  - Mixed content disk search（single run）≈ 4.25ms
+- **测试结果**：
+  - `make test-unit` **55 passed** (1 skipped)
+  - `make test-perf` **16 passed** (6 skipped)
+  - `make test-tsan` **135 passed** (1 skipped)
+  - `make test-strict` **163 passed** (7 skipped)
+
+## 历史更新（v0.43.3）
 - **Fix/Perf（搜索精度 + 高速滚动）**：
   - 短词（≤2）fuzzy/fuzzyPlus：首屏仍走 recent cache 快速返回，但标记为预筛（`total=-1`），并支持 `forceFullFuzzy=true` 走全量 full-index；UI 将在后台渐进 refine 到全量精确结果。
   - 预筛分页一致性：当 `total=-1` 时，`loadMore()` 会先强制 full-fuzzy 拉取前 N 条再分页，避免“永远停在 cache 子集”的不全量问题。

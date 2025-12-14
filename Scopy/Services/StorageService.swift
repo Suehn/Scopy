@@ -63,6 +63,7 @@ public final class StorageService {
     // MARK: - Properties
 
     private let dbPath: String
+    private let rootDirectory: URL
     private let externalStoragePath: String
     private let thumbnailCachePath: String
 
@@ -82,21 +83,21 @@ public final class StorageService {
 
     // MARK: - Initialization
 
-    public init(databasePath: String? = nil) {
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        let scopyDir = appSupport.appendingPathComponent("Scopy", isDirectory: true)
+    public init(databasePath: String? = nil, storageRootURL: URL? = nil) {
+        let rootURL = Self.resolveRootDirectory(databasePath: databasePath, storageRootURL: storageRootURL)
 
         // v0.22: 改进目录创建错误处理 - 记录错误但不阻止初始化
         // 目录创建失败通常是权限问题，后续操作会有更具体的错误
         do {
-            try FileManager.default.createDirectory(at: scopyDir, withIntermediateDirectories: true)
+            try FileManager.default.createDirectory(at: rootURL, withIntermediateDirectories: true)
         } catch {
             ScopyLog.storage.warning("Failed to create app directory: \(error.localizedDescription, privacy: .public)")
         }
 
-        self.dbPath = databasePath ?? scopyDir.appendingPathComponent("clipboard.db").path
-        self.externalStoragePath = scopyDir.appendingPathComponent("content", isDirectory: true).path
-        self.thumbnailCachePath = scopyDir.appendingPathComponent("thumbnails", isDirectory: true).path
+        self.rootDirectory = rootURL
+        self.dbPath = databasePath ?? rootURL.appendingPathComponent("clipboard.db").path
+        self.externalStoragePath = rootURL.appendingPathComponent("content", isDirectory: true).path
+        self.thumbnailCachePath = rootURL.appendingPathComponent("thumbnails", isDirectory: true).path
 
         do {
             try FileManager.default.createDirectory(atPath: externalStoragePath, withIntermediateDirectories: true)
@@ -111,6 +112,68 @@ public final class StorageService {
         }
 
         self.repository = SQLiteClipboardRepository(dbPath: self.dbPath)
+    }
+
+    private static func resolveRootDirectory(databasePath: String?, storageRootURL: URL?) -> URL {
+        if let storageRootURL { return storageRootURL }
+
+        if let databasePath, !databasePath.isEmpty, !isInMemoryDatabasePath(databasePath) {
+            return URL(fileURLWithPath: databasePath).deletingLastPathComponent()
+        }
+
+        if isRunningUnderTests() {
+            return resolveTestRootDirectory(databasePath: databasePath)
+        }
+
+        if isInMemoryDatabasePath(databasePath ?? "") {
+            return resolveEphemeralRootDirectory()
+        }
+
+        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        return appSupport.appendingPathComponent("Scopy", isDirectory: true)
+    }
+
+    private static func isRunningUnderTests() -> Bool {
+        let env = ProcessInfo.processInfo.environment
+        if env["XCTestConfigurationFilePath"] != nil
+            || env["XCTestBundlePath"] != nil
+            || env["XCTestSessionIdentifier"] != nil
+        {
+            return true
+        }
+
+        // Hosted tests may not carry the typical env keys in some configurations.
+        // Avoid touching user Application Support data when XCTest is present.
+        return NSClassFromString("XCTestCase") != nil
+    }
+
+    private static func isInMemoryDatabasePath(_ databasePath: String) -> Bool {
+        if databasePath == ":memory:" { return true }
+        if databasePath.hasPrefix("file::memory:") { return true }
+        if databasePath.contains("mode=memory") { return true }
+        return false
+    }
+
+    private static let testRunIdentifier: String = {
+        ProcessInfo.processInfo.environment["SCOPY_TEST_RUN_ID"]
+            ?? String(ProcessInfo.processInfo.processIdentifier)
+    }()
+
+    private static func resolveTestRootDirectory(databasePath: String?) -> URL {
+        if let databasePath, !databasePath.isEmpty, !isInMemoryDatabasePath(databasePath) {
+            return URL(fileURLWithPath: databasePath).deletingLastPathComponent()
+        }
+
+        let base = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ScopyTests", isDirectory: true)
+            .appendingPathComponent(testRunIdentifier, isDirectory: true)
+        return base.appendingPathComponent(UUID().uuidString, isDirectory: true)
+    }
+
+    private static func resolveEphemeralRootDirectory() -> URL {
+        FileManager.default.temporaryDirectory
+            .appendingPathComponent("ScopyTemp", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
     }
 
     deinit {
@@ -485,6 +548,15 @@ public final class StorageService {
     /// This fixes the storage leak where files accumulate without being tracked
     /// v0.19: 修复 - 文件删除移到后台线程，避免阻塞主线程
     public func cleanupOrphanedFiles() async throws {
+        if Self.isRunningUnderTests(), isAppSupportContentDirectory(externalStoragePath) {
+            ScopyLog.storage.error("Refusing to cleanup orphaned files under Application Support during tests")
+            return
+        }
+
+        if shouldRefuseOrphanCleanupForMismatchedDatabaseRoot() {
+            return
+        }
+
         // 1. Get all storage_ref filenames from database
         let validRefs = try await repository.fetchExternalRefFilenames()
 
@@ -504,6 +576,36 @@ public final class StorageService {
 
         // 4. Invalidate cache after cleanup
         invalidateExternalSizeCache()
+    }
+
+    private func shouldRefuseOrphanCleanupForMismatchedDatabaseRoot() -> Bool {
+        guard !Self.isInMemoryDatabasePath(dbPath) else { return false }
+
+        let databaseDirectory = URL(fileURLWithPath: dbPath).deletingLastPathComponent()
+            .resolvingSymlinksInPath()
+            .standardizedFileURL
+        let storageRoot = rootDirectory
+            .resolvingSymlinksInPath()
+            .standardizedFileURL
+
+        guard databaseDirectory.path != storageRoot.path else { return false }
+
+        ScopyLog.storage.error(
+            "Refusing to cleanup orphaned files due to mismatched database/root directories (db=\(databaseDirectory.path, privacy: .public), root=\(storageRoot.path, privacy: .public))"
+        )
+        return true
+    }
+
+    private func isAppSupportContentDirectory(_ path: String) -> Bool {
+        let contentURL = URL(fileURLWithPath: path).resolvingSymlinksInPath().standardizedFileURL
+        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let expected = appSupport
+            .appendingPathComponent("Scopy", isDirectory: true)
+            .appendingPathComponent("content", isDirectory: true)
+            .resolvingSymlinksInPath()
+            .standardizedFileURL
+
+        return contentURL.path == expected.path || contentURL.path.hasPrefix(expected.path + "/")
     }
 
     private func findOrphanedExternalFiles(validRefs: Set<String>) -> [URL] {
@@ -756,10 +858,13 @@ public final class StorageService {
     }
 
     /// 保存缩略图
-    func saveThumbnail(_ data: Data, for contentHash: String) throws {
+    func saveThumbnail(_ data: Data, for contentHash: String) async throws -> String {
         let path = (thumbnailCachePath as NSString).appendingPathComponent("\(contentHash).png")
         do {
-            try Self.writeAtomically(data, to: path)
+            try await Task.detached(priority: .utility) {
+                try Self.writeAtomically(data, to: path)
+            }.value
+            return path
         } catch {
             throw StorageError.fileOperationFailed("Failed to save thumbnail: \(error)")
         }

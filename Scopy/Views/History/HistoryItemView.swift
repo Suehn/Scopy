@@ -40,6 +40,7 @@ struct HistoryItemView: View, Equatable {
         lhs.item.id == rhs.item.id &&
         lhs.item.lastUsedAt == rhs.item.lastUsedAt &&
         lhs.item.isPinned == rhs.item.isPinned &&
+        lhs.item.thumbnailPath == rhs.item.thumbnailPath &&
         lhs.isKeyboardSelected == rhs.isKeyboardSelected &&
         lhs.isScrolling == rhs.isScrolling &&
         lhs.settings.showImageThumbnails == rhs.settings.showImageThumbnails &&

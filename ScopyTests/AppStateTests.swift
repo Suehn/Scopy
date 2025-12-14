@@ -110,8 +110,12 @@ final class AppStateTests: XCTestCase {
         try await Task.sleep(nanoseconds: 100_000_000) // 100ms
         XCTAssertEqual(mockService.searchCallCount, 0, "Search should not execute before debounce")
 
-        // Wait for debounce to complete
-        try await Task.sleep(nanoseconds: 100_000_000) // Another 100ms (total 200ms)
+        // Wait for debounce to complete (TSan / CI may delay scheduling significantly)
+        let start = CFAbsoluteTimeGetCurrent()
+        while mockService.searchCallCount == 0, (CFAbsoluteTimeGetCurrent() - start) < 1.0 {
+            try await Task.sleep(nanoseconds: 50_000_000)
+        }
+
         XCTAssertEqual(mockService.searchCallCount, 1, "Only one search should execute after debounce")
     }
 
@@ -950,6 +954,30 @@ final class AppStateFallbackTests: XCTestCase {
         try await Task.sleep(nanoseconds: 200_000_000)
 
         // Test passes if no crash occurred
+        state.stop()
+    }
+
+    func testThumbnailUpdatedUpdatesItemWithoutReordering() async throws {
+        let mockService = TestMockClipboardService()
+        mockService.setItemCount(5)
+        let state = AppState.forTesting(service: mockService)
+
+        await state.start()
+
+        let originalOrder = state.items.map(\.id)
+        let targetID = state.items[2].id
+        let thumbnailPath = "/tmp/scopy-test-thumbnail-\(UUID().uuidString).png"
+
+        mockService.emitEvent(.thumbnailUpdated(itemID: targetID, thumbnailPath: thumbnailPath))
+        try await Task.sleep(nanoseconds: 200_000_000)
+
+        XCTAssertEqual(state.items.map(\.id), originalOrder, "Thumbnail updates should not reorder items")
+        XCTAssertEqual(
+            state.items.first(where: { $0.id == targetID })?.thumbnailPath,
+            thumbnailPath,
+            "Thumbnail path should be updated in place"
+        )
+
         state.stop()
     }
 }

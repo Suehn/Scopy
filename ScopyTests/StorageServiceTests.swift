@@ -246,6 +246,55 @@ final class StorageServiceTests: XCTestCase {
         XCTAssertEqual(pinnedCount, 2)
     }
 
+    func testExternalStorageIsIsolatedFromUserDataDuringTests() async throws {
+        let content = makeLargeTestContent()
+        let item = try await storage.upsertItem(content)
+
+        guard let storageRef = item.storageRef else {
+            XCTFail("Expected external storageRef for large content")
+            return
+        }
+
+        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        XCTAssertFalse(
+            storageRef.contains(appSupport.path),
+            "Tests should not write into Application Support: \(storageRef)"
+        )
+
+        XCTAssertTrue(
+            storageRef.hasPrefix(FileManager.default.temporaryDirectory.path),
+            "Expected test external storage to live under temporaryDirectory: \(storageRef)"
+        )
+
+        try await storage.deleteItem(item.id)
+    }
+
+    func testDiskDatabaseUsesDatabaseDirectoryForExternalStorageInTests() async throws {
+        let baseURL = FileManager.default.temporaryDirectory.appendingPathComponent("scopy-storage-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: baseURL, withIntermediateDirectories: true)
+
+        let dbPath = baseURL.appendingPathComponent("clipboard.db").path
+        let diskStorage = StorageService(databasePath: dbPath)
+        try await diskStorage.open()
+
+        let content = makeLargeTestContent()
+        let item = try await diskStorage.upsertItem(content)
+        guard let storageRef = item.storageRef else {
+            XCTFail("Expected external storageRef for large content")
+            return
+        }
+
+        let expectedPrefix = baseURL.appendingPathComponent("content", isDirectory: true).path
+        XCTAssertTrue(
+            storageRef.hasPrefix(expectedPrefix),
+            "Expected external storage to be colocated with database: \(storageRef)"
+        )
+
+        try await diskStorage.deleteItem(item.id)
+        await diskStorage.close()
+        try? FileManager.default.removeItem(at: baseURL)
+    }
+
     // MARK: - Helpers
 
     private func makeTestContent(text: String, type: ClipboardItemType = .text) -> ClipboardMonitor.ClipboardContent {
@@ -264,5 +313,17 @@ final class StorageServiceTests: XCTestCase {
         var hasher = Hasher()
         hasher.combine(text.trimmingCharacters(in: .whitespacesAndNewlines))
         return String(hasher.finalize())
+    }
+
+    private func makeLargeTestContent() -> ClipboardMonitor.ClipboardContent {
+        let data = Data(repeating: 0xA5, count: 2 * 1024 * 1024)
+        return ClipboardMonitor.ClipboardContent(
+            type: .image,
+            plainText: "Large test image",
+            payload: .data(data),
+            appBundleID: "com.test.app",
+            contentHash: "large-\(UUID().uuidString)",
+            sizeBytes: data.count
+        )
     }
 }

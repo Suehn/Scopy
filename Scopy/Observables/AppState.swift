@@ -135,7 +135,7 @@ final class AppState {
 
     private func handleEvent(_ event: ClipboardEvent) async {
         switch event {
-        case .newItem, .itemUpdated, .itemDeleted, .itemPinned, .itemUnpinned, .itemsCleared:
+        case .newItem, .itemUpdated, .thumbnailUpdated, .itemDeleted, .itemPinned, .itemUnpinned, .itemsCleared:
             await historyViewModel.handleEvent(event)
         case .settingsChanged:
             await settingsViewModel.loadSettings()

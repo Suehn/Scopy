@@ -121,6 +121,25 @@ final class HistoryViewModel {
             if let bundleID = item.appBundleID, !recentApps.contains(bundleID) {
                 scheduleRecentAppsRefresh()
             }
+        case .thumbnailUpdated(let itemID, let thumbnailPath):
+            guard let index = items.firstIndex(where: { $0.id == itemID }) else { return }
+            let existing = items[index]
+            guard existing.thumbnailPath != thumbnailPath else { return }
+
+            items[index] = ClipboardItemDTO(
+                id: existing.id,
+                type: existing.type,
+                contentHash: existing.contentHash,
+                plainText: existing.plainText,
+                appBundleID: existing.appBundleID,
+                createdAt: existing.createdAt,
+                lastUsedAt: existing.lastUsedAt,
+                isPinned: existing.isPinned,
+                sizeBytes: existing.sizeBytes,
+                thumbnailPath: thumbnailPath,
+                storageRef: existing.storageRef
+            )
+            invalidatePinnedCache()
         case .itemUpdated(let item):
             if !searchQuery.isEmpty {
                 if let index = items.firstIndex(where: { $0.id == item.id }) {

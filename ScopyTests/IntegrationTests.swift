@@ -8,17 +8,29 @@ import ScopyKit
 final class IntegrationTests: XCTestCase {
 
     var service: (any ClipboardServiceProtocol)!
+    private var tempDirectory: URL?
 
     override func setUp() async throws {
         // Clear settings before each test to ensure isolation
         UserDefaults.standard.removeObject(forKey: "ScopySettings")
-        service = ClipboardServiceFactory.createForTesting()
+
+        let baseURL = FileManager.default.temporaryDirectory.appendingPathComponent("scopy-integration-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: baseURL, withIntermediateDirectories: true)
+        tempDirectory = baseURL
+
+        let dbPath = baseURL.appendingPathComponent("clipboard.db").path
+        service = ClipboardServiceFactory.create(useMock: false, databasePath: dbPath)
         try await service.start()
     }
 
     override func tearDown() async throws {
         service.stop()
+        try? await Task.sleep(nanoseconds: 200_000_000)
+        if let tempDirectory {
+            try? FileManager.default.removeItem(at: tempDirectory)
+        }
         service = nil
+        tempDirectory = nil
     }
 
     // MARK: - Full Workflow Tests

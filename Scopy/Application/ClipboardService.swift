@@ -486,11 +486,12 @@ actor ClipboardService {
     }
 
     private func scheduleThumbnailGeneration(for item: StorageService.StoredItem, storage: StorageService) {
+        let itemID = item.id
         let contentHash = item.contentHash
         let maxHeight = settings.thumbnailHeight
         let storageRef = storage
 
-        Task.detached(priority: .utility) {
+        Task.detached(priority: .utility) { [weak self] in
             let shouldGenerate = await ThumbnailGenerationTracker.shared.tryMarkInProgress(contentHash)
             guard shouldGenerate else { return }
 
@@ -512,9 +513,13 @@ actor ClipboardService {
             guard let imageData else { return }
             guard let pngData = StorageService.makeThumbnailPNG(from: imageData, maxHeight: maxHeight) else { return }
 
-            await MainActor.run {
-                try? storageRef.saveThumbnail(pngData, for: contentHash)
-            }
+            guard let thumbnailPath = try? await storageRef.saveThumbnail(pngData, for: contentHash) else { return }
+            await self?.yieldThumbnailUpdated(itemID: itemID, thumbnailPath: thumbnailPath)
         }
+    }
+
+    private func yieldThumbnailUpdated(itemID: UUID, thumbnailPath: String) {
+        guard settings.showImageThumbnails else { return }
+        yieldEvent(.thumbnailUpdated(itemID: itemID, thumbnailPath: thumbnailPath))
     }
 }

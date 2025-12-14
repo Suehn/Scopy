@@ -7,6 +7,39 @@
 
 ---
 
+## [v0.43.4] - 2025-12-14
+
+### Fix/UX：测试隔离外部原图 + 缩略图即时刷新
+
+- **修复测试误删外部原图**：`StorageService` 在测试/in-memory 场景下使用临时 root 目录，避免将外部内容目录落到 `Application Support/Scopy/content`；并增加 orphan 清理的保护（DB 目录与 root 不一致时拒绝执行）。
+- **缩略图即时刷新**：缩略图保存完成后发出 `.thumbnailUpdated` 事件；`HistoryItemView` 的 `Equatable` 比较纳入 `thumbnailPath`，保证缩略图路径变化会触发列表行刷新（无需搜索/重载）。
+
+### 修改文件
+
+- `Scopy/Services/StorageService.swift`
+- `Scopy/Application/ClipboardService.swift`
+- `Scopy/Domain/Models/ClipboardEvent.swift`
+- `Scopy/Observables/AppState.swift`
+- `Scopy/Observables/HistoryViewModel.swift`
+- `Scopy/Views/History/HistoryItemView.swift`
+- `ScopyTests/AppStateTests.swift`
+- `ScopyTests/IntegrationTests.swift`
+- `ScopyTests/StorageServiceTests.swift`
+- `DEPLOYMENT.md`
+- `doc/profile/v0.43.4-profile.md`
+- `doc/profile/README.md`
+- `doc/implemented-doc/v0.43.4.md`
+- `doc/implemented-doc/README.md`
+- `doc/implemented-doc/CHANGELOG.md`
+- `doc/review/review-v0.3.md`
+
+### 测试
+
+- 单元测试：`make test-unit` **55 tests passed** (1 skipped)
+- 性能测试：`make test-perf` **16 tests passed** (6 skipped)
+- Thread Sanitizer：`make test-tsan` **135 tests passed** (1 skipped)
+- Strict Concurrency：`make test-strict` **163 tests passed** (7 skipped)
+
 ## [v0.43.3] - 2025-12-14
 
 ### Fix/Perf：短词搜索全量校准恢复 + 高速滚动进一步降载
