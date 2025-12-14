@@ -89,6 +89,36 @@ final class ClipboardMonitorTests: XCTestCase {
         XCTAssertEqual(retrieved, data)
     }
 
+    func testCopyRichTextProvidesPlainTextFallback() throws {
+        let attributed = NSAttributedString(string: "Rich text")
+        let range = NSRange(location: 0, length: attributed.length)
+        let rtfData = try attributed.data(
+            from: range,
+            documentAttributes: [.documentType: NSAttributedString.DocumentType.rtf]
+        )
+
+        monitor.copyToClipboard(text: "Rich text", data: rtfData, type: .rtf)
+
+        let pasteboard = NSPasteboard.general
+        XCTAssertEqual(pasteboard.string(forType: .string), "Rich text")
+        XCTAssertEqual(pasteboard.data(forType: .rtf), rtfData)
+    }
+
+    func testCopyHTMLProvidesPlainTextFallback() throws {
+        let attributed = NSAttributedString(string: "Hello <World>")
+        let range = NSRange(location: 0, length: attributed.length)
+        let htmlData = try attributed.data(
+            from: range,
+            documentAttributes: [.documentType: NSAttributedString.DocumentType.html]
+        )
+
+        monitor.copyToClipboard(text: "Hello <World>", data: htmlData, type: .html)
+
+        let pasteboard = NSPasteboard.general
+        XCTAssertEqual(pasteboard.string(forType: .string), "Hello <World>")
+        XCTAssertEqual(pasteboard.data(forType: .html), htmlData)
+    }
+
     // MARK: - Content Type Detection Tests
 
     func testTextContentDetection() {

@@ -220,6 +220,18 @@ public final class ClipboardMonitor {
         lastChangeCount = pasteboard.changeCount
     }
 
+    public func copyToClipboard(text: String, data: Data, type: NSPasteboard.PasteboardType) {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+
+        let item = NSPasteboardItem()
+        item.setString(text, forType: .string)
+        item.setData(data, forType: type)
+        pasteboard.writeObjects([item])
+
+        lastChangeCount = pasteboard.changeCount
+    }
+
     /// Copy file URLs to system clipboard
     /// 将文件 URL 复制到系统剪贴板，支持 Finder 粘贴
     public func copyToClipboard(fileURLs: [URL]) {

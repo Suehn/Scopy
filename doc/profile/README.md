@@ -6,6 +6,7 @@
 
 | 版本 | 日期 | 主要变化 |
 |------|------|----------|
+| [v0.43.7-profile.md](./v0.43.7-profile.md) | 2025-12-14 | Fix/UX：浏览器输入框粘贴空内容（RTF/HTML plain text fallback） |
 | [v0.43.6-profile.md](./v0.43.6-profile.md) | 2025-12-14 | Perf/UX：hover 图片预览更及时（预取 + ThumbnailCache 优先级） |
 | [v0.43.5-profile.md](./v0.43.5-profile.md) | 2025-12-14 | Perf/UX：图片预览提速（缩略图占位 + JPEG downsample） |
 | [v0.43.4-profile.md](./v0.43.4-profile.md) | 2025-12-14 | Fix/UX：测试隔离外部原图 + 缩略图即时刷新 |

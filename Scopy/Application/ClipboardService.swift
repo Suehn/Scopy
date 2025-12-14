@@ -230,15 +230,23 @@ actor ClipboardService {
         case .rtf, .html, .image:
             let data = await storage.getOriginalImageData(for: item)
             if let data {
+                let itemType = item.type
+                let plainText = item.plainText
+
                 let pasteboardType: NSPasteboard.PasteboardType
-                switch item.type {
+                switch itemType {
                 case .rtf: pasteboardType = .rtf
                 case .html: pasteboardType = .html
                 case .image: pasteboardType = .png
                 default: pasteboardType = .string
                 }
+
                 await MainActor.run {
-                    monitor.copyToClipboard(data: data, type: pasteboardType)
+                    if itemType == .rtf || itemType == .html {
+                        monitor.copyToClipboard(text: plainText, data: data, type: pasteboardType)
+                    } else {
+                        monitor.copyToClipboard(data: data, type: pasteboardType)
+                    }
                 }
             }
         case .file:

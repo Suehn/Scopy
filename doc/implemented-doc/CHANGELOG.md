@@ -7,6 +7,33 @@
 
 ---
 
+## [v0.43.7] - 2025-12-14
+
+### Fix/UX：浏览器输入框粘贴空内容（RTF/HTML 缺少 plain text）
+
+- **修复 Chrome/Edge 输入框粘贴为空**：`.rtf/.html` 回写剪贴板时同时写入 `.string`（plain text）+ 原始格式数据，浏览器输入框可正常 `⌘V`。
+- **单测覆盖**：新增用例验证 `.rtf/.html` 回写后剪贴板同时包含 `.string` 与对应格式数据。
+
+### 修改文件
+
+- `Scopy/Services/ClipboardMonitor.swift`
+- `Scopy/Application/ClipboardService.swift`
+- `ScopyTests/ClipboardMonitorTests.swift`
+- `DEPLOYMENT.md`
+- `doc/profile/v0.43.7-profile.md`
+- `doc/profile/README.md`
+- `doc/implemented-doc/v0.43.7.md`
+- `doc/implemented-doc/README.md`
+- `doc/implemented-doc/CHANGELOG.md`
+- `doc/review/review-v0.3.md`
+
+### 测试
+
+- 单元测试：`make test-unit` **57 tests passed** (1 skipped)
+- 性能测试：`make test-perf` **16 tests passed** (6 skipped)
+- Thread Sanitizer：`make test-tsan` **137 tests passed** (1 skipped)
+- Strict Concurrency：`make test-strict` **165 tests passed** (7 skipped)
+
 ## [v0.43.6] - 2025-12-14
 
 ### Perf/UX：hover 图片预览更及时（预取 + ThumbnailCache 优先级）
