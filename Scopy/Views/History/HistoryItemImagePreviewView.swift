@@ -67,7 +67,7 @@ struct HistoryItemImagePreviewView: View {
             return
         }
 
-        let image = await ThumbnailCache.shared.loadImage(path: path)
+        let image = await ThumbnailCache.shared.loadImage(path: path, priority: .userInitiated)
         guard !Task.isCancelled else { return }
         guard let image else { return }
         loadedThumbnail = image

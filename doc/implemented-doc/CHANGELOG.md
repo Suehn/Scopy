@@ -7,6 +7,33 @@
 
 ---
 
+## [v0.43.6] - 2025-12-14
+
+### Perf/UX：hover 图片预览更及时（预取 + ThumbnailCache 优先级）
+
+- **hover 预览更稳定**：在 hover delay 期间预取原图数据并完成 downsample，popover 出现后更容易直接展示预览图，减少“长时间转圈/移开再悬停才显示”的体感。
+- **缩略图占位更及时**：`ThumbnailCache` 支持按场景传入优先级；popover 预览按 `userInitiated` 加载缩略图并使用 `.mappedIfSafe`，优先响应当前交互。
+
+### 修改文件
+
+- `Scopy/Infrastructure/Caching/ThumbnailCache.swift`
+- `Scopy/Views/History/HistoryItemImagePreviewView.swift`
+- `Scopy/Views/History/HistoryItemView.swift`
+- `DEPLOYMENT.md`
+- `doc/profile/v0.43.6-profile.md`
+- `doc/profile/README.md`
+- `doc/implemented-doc/v0.43.6.md`
+- `doc/implemented-doc/README.md`
+- `doc/implemented-doc/CHANGELOG.md`
+- `doc/review/review-v0.3.md`
+
+### 测试
+
+- 单元测试：`make test-unit` **55 tests passed** (1 skipped)
+- 性能测试：`make test-perf` **16 tests passed** (6 skipped)
+- Thread Sanitizer：`make test-tsan` **135 tests passed** (1 skipped)
+- Strict Concurrency：`make test-strict` **163 tests passed** (7 skipped)
+
 ## [v0.43.5] - 2025-12-14
 
 ### Perf/UX：图片预览提速（缩略图占位 + JPEG downsample）

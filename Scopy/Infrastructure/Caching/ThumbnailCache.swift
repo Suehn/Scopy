@@ -22,12 +22,16 @@ public final class ThumbnailCache {
     }
 
     public func loadImage(path: String) async -> NSImage? {
+        await loadImage(path: path, priority: .utility)
+    }
+
+    public func loadImage(path: String, priority: TaskPriority) async -> NSImage? {
         if let cached = cachedImage(path: path) {
             return cached
         }
 
-        let data = await Task.detached(priority: .utility) {
-            try? Data(contentsOf: URL(fileURLWithPath: path))
+        let data = await Task.detached(priority: priority) {
+            try? Data(contentsOf: URL(fileURLWithPath: path), options: [.mappedIfSafe])
         }.value
 
         guard !Task.isCancelled else { return nil }

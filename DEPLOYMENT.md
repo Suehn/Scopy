@@ -1,6 +1,24 @@
 # Scopy 部署和使用指南
 
-## 本次更新（v0.43.5）
+## 本次更新（v0.43.6）
+- **Perf/UX（hover 图片预览更及时）**：
+  - hover delay 期间预取原图数据并完成 downsample，popover 出现后更容易直接展示预览图，减少“长时间转圈/移开再悬停才显示”的体感。
+  - popover 缩略图占位加载使用 `userInitiated` 优先级；`ThumbnailCache.loadImage` 使用 `.mappedIfSafe` 降低读盘拷贝开销。
+- **性能实测**（MacBook Air Apple M3 24GB, macOS 15.7.2（24G325）, Debug, `make test-perf`；heavy 需 `RUN_HEAVY_PERF_TESTS=1`；Low Power Mode enabled）：
+  - Fuzzy 5k items P95 ≈ 8.23ms
+  - Fuzzy 10k items P95 ≈ 77.35ms（Samples: 50；Low Power Mode 下测试阈值放宽至 300ms）
+  - Disk 25k fuzzy P95 ≈ 110.59ms（Samples: 50）
+  - Bulk insert 1000 items ≈ 82.74ms（≈12,086 items/s）
+  - Fetch recent (50 items) avg ≈ 0.11ms
+  - Regex 20k items P95 ≈ 5.31ms
+  - Mixed content disk search（single run）≈ 7.91ms
+- **测试结果**：
+  - `make test-unit` **55 passed** (1 skipped)
+  - `make test-perf` **16 passed** (6 skipped)
+  - `make test-tsan` **135 passed** (1 skipped)
+  - `make test-strict` **163 passed** (7 skipped)
+
+## 历史更新（v0.43.5）
 - **Perf/UX（图片 hover 预览提速）**：
   - popover 在延迟到达后先展示缩略图占位（若已缓存），原图准备好后无缝替换，避免长时间转圈。
   - downsample：若像素已小于 `maxPixelSize` 则跳过重编码；无 alpha 用 JPEG（q=0.85）避免 PNG 编码 CPU 开销。

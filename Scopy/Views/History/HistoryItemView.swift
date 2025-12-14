@@ -351,29 +351,42 @@ struct HistoryItemView: View, Equatable {
         hoverPreviewTask?.cancel()
         hoverPreviewTask = nil
 
-        hoverPreviewTask = Task {
+        hoverPreviewTask = Task(priority: .userInitiated) { @MainActor in
             let delayNanos = UInt64(previewDelay * 1_000_000_000)
+            let scale = NSScreen.main?.backingScaleFactor ?? 2.0
+            let maxPixelSize = Int(ScopySize.Width.previewMax * scale)
+
+            // v0.43.6: 预取 preview 数据（在 hover delay 内完成 IO/downsample），减少 popover 出现后的等待与“重悬停才显示”的体感。
+            let prefetchDelayNanos: UInt64 = min(150_000_000, delayNanos)
+            let preparedPreviewData: Task<Data?, Never> = Task(priority: .userInitiated) { @MainActor in
+                if prefetchDelayNanos > 0 {
+                    try? await Task.sleep(nanoseconds: prefetchDelayNanos)
+                }
+                guard !Task.isCancelled else { return nil }
+                guard !isScrolling else { return nil }
+                guard isHovering else { return nil }
+
+                guard let data = await getImageData() else { return nil }
+                guard !Task.isCancelled else { return nil }
+
+                let downsampled = await Task.detached(priority: .userInitiated) {
+                    Self.downsampleImageData(data, maxPixelSize: maxPixelSize) ?? data
+                }.value
+                guard !Task.isCancelled else { return nil }
+                return downsampled
+            }
+            defer { preparedPreviewData.cancel() }
+
             try? await Task.sleep(nanoseconds: delayNanos)
             guard !Task.isCancelled else { return }
             guard !isScrolling else { return }
             guard isHovering else { return }
 
-            await MainActor.run {
-                self.showPreview = true
-            }
+            self.showPreview = true
 
-            if let data = await getImageData() {
+            if let previewData = await preparedPreviewData.value {
                 guard !Task.isCancelled else { return }
-                let scale = NSScreen.main?.backingScaleFactor ?? 2.0
-                let maxPixelSize = Int(ScopySize.Width.previewMax * scale)
-                let downsampled = await Task.detached(priority: .userInitiated) {
-                    Self.downsampleImageData(data, maxPixelSize: maxPixelSize) ?? data
-                }.value
-
-                guard !Task.isCancelled else { return }
-                await MainActor.run {
-                    previewImageData = downsampled
-                }
+                previewImageData = previewData
             }
 
         }
