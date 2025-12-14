@@ -6,6 +6,7 @@
 
 | 版本 | 日期 | 主要变化 |
 |------|------|----------|
+| [v0.43.5-profile.md](./v0.43.5-profile.md) | 2025-12-14 | Perf/UX：图片预览提速（缩略图占位 + JPEG downsample） |
 | [v0.43.4-profile.md](./v0.43.4-profile.md) | 2025-12-14 | Fix/UX：测试隔离外部原图 + 缩略图即时刷新 |
 | [v0.43.3-profile.md](./v0.43.3-profile.md) | 2025-12-14 | Fix/Perf：短词搜索全量校准恢复 + 高速滚动进一步降载 |
 | [v0.43.2-profile.md](./v0.43.2-profile.md) | 2025-12-14 | Perf/UX：Low Power Mode 滚动优化 + 搜索取消更及时 |

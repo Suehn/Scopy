@@ -212,6 +212,7 @@ struct HistoryItemView: View, Equatable {
                 }
                 return
             }
+
             isHovering = hovering
 
             // 取消之前的防抖任务
@@ -222,11 +223,13 @@ struct HistoryItemView: View, Equatable {
 
             if hovering {
                 // 静止 150ms 后才更新全局选中状态
-                hoverDebounceTask = Task {
-                    try? await Task.sleep(nanoseconds: 150_000_000)
-                    guard !Task.isCancelled else { return }
-                    await MainActor.run {
-                        onHoverSelect(item.id)
+                if !isScrolling {
+                    hoverDebounceTask = Task {
+                        try? await Task.sleep(nanoseconds: 150_000_000)
+                        guard !Task.isCancelled else { return }
+                        await MainActor.run {
+                            onHoverSelect(item.id)
+                        }
                     }
                 }
 
@@ -255,7 +258,7 @@ struct HistoryItemView: View, Equatable {
             }
         }
         .popover(isPresented: $showPreview, arrowEdge: .trailing) {
-            HistoryItemImagePreviewView(previewImageData: previewImageData)
+            HistoryItemImagePreviewView(previewImageData: previewImageData, thumbnailPath: item.thumbnailPath)
                 .onHover { hovering in
                     isPopoverHovering = hovering
                     if hovering {
@@ -349,13 +352,21 @@ struct HistoryItemView: View, Equatable {
         hoverPreviewTask = nil
 
         hoverPreviewTask = Task {
-            // 先获取图片数据
+            let delayNanos = UInt64(previewDelay * 1_000_000_000)
+            try? await Task.sleep(nanoseconds: delayNanos)
+            guard !Task.isCancelled else { return }
+            guard !isScrolling else { return }
+            guard isHovering else { return }
+
+            await MainActor.run {
+                self.showPreview = true
+            }
+
             if let data = await getImageData() {
-                // v0.12: 获取数据后检查取消状态
                 guard !Task.isCancelled else { return }
                 let scale = NSScreen.main?.backingScaleFactor ?? 2.0
                 let maxPixelSize = Int(ScopySize.Width.previewMax * scale)
-                let downsampled = await Task.detached(priority: .utility) {
+                let downsampled = await Task.detached(priority: .userInitiated) {
                     Self.downsampleImageData(data, maxPixelSize: maxPixelSize) ?? data
                 }.value
 
@@ -365,23 +376,22 @@ struct HistoryItemView: View, Equatable {
                 }
             }
 
-            // 等待预览延迟时间
-            let delayNanos = UInt64(previewDelay * 1_000_000_000)
-            try? await Task.sleep(nanoseconds: delayNanos)
-            guard !Task.isCancelled else { return }
-
-            // 显示预览
-            await MainActor.run {
-                if self.isHovering && self.previewImageData != nil {
-                    self.showPreview = true
-                }
-            }
         }
     }
 
     nonisolated private static func downsampleImageData(_ data: Data, maxPixelSize: Int) -> Data? {
         guard maxPixelSize > 0 else { return nil }
         guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
+
+        if let props = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+           let width = props[kCGImagePropertyPixelWidth] as? NSNumber,
+           let height = props[kCGImagePropertyPixelHeight] as? NSNumber
+        {
+            let maxDimension = max(width.intValue, height.intValue)
+            if maxDimension > 0, maxDimension <= maxPixelSize {
+                return nil
+            }
+        }
 
         let options: [CFString: Any] = [
             kCGImageSourceCreateThumbnailFromImageAlways: true,
@@ -394,17 +404,34 @@ struct HistoryItemView: View, Equatable {
             return nil
         }
 
+        let hasAlpha: Bool
+        switch cgImage.alphaInfo {
+        case .first, .last, .premultipliedFirst, .premultipliedLast, .alphaOnly:
+            hasAlpha = true
+        case .none, .noneSkipFirst, .noneSkipLast:
+            hasAlpha = false
+        @unknown default:
+            hasAlpha = true
+        }
+
         let output = NSMutableData()
         guard let destination = CGImageDestinationCreateWithData(
             output as CFMutableData,
-            UTType.png.identifier as CFString,
+            (hasAlpha ? UTType.png.identifier : UTType.jpeg.identifier) as CFString,
             1,
             nil
         ) else {
             return nil
         }
 
-        CGImageDestinationAddImage(destination, cgImage, nil)
+        if hasAlpha {
+            CGImageDestinationAddImage(destination, cgImage, nil)
+        } else {
+            let properties: [CFString: Any] = [
+                kCGImageDestinationLossyCompressionQuality: 0.85
+            ]
+            CGImageDestinationAddImage(destination, cgImage, properties as CFDictionary)
+        }
         guard CGImageDestinationFinalize(destination) else { return nil }
         return output as Data
     }
@@ -423,31 +450,30 @@ struct HistoryItemView: View, Equatable {
         hoverPreviewTask?.cancel()
         hoverPreviewTask = nil
 
-        // Generate preview content synchronously FIRST
-        let text = item.plainText
-        let preview: String
-        if text.isEmpty {
-            preview = "(Empty)"
-        } else if text.count <= 200 {
-            preview = text
-        } else {
-            let first100 = String(text.prefix(100))
-            let last100 = String(text.suffix(100))
-            preview = "\(first100)\n...\n\(last100)"
-        }
-
-        // Set content immediately (synchronous, on main thread)
-        self.textPreviewContent = preview
-
         hoverPreviewTask = Task {
             // Wait for preview delay
             let delayNanos = UInt64(previewDelay * 1_000_000_000)
             try? await Task.sleep(nanoseconds: delayNanos)
             guard !Task.isCancelled else { return }
+            guard !isScrolling else { return }
+            guard isHovering else { return }
 
-            // Show popover (content already set)
+            let text = item.plainText
+            let preview = await Task.detached(priority: .utility) {
+                if text.isEmpty {
+                    return "(Empty)"
+                }
+                if text.count <= 200 {
+                    return text
+                }
+                let first100 = String(text.prefix(100))
+                let last100 = String(text.suffix(100))
+                return "\(first100)\n...\n\(last100)"
+            }.value
+
             await MainActor.run {
                 if self.isHovering {
+                    self.textPreviewContent = preview
                     self.showTextPreview = true
                 }
             }

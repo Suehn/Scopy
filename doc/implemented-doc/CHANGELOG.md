@@ -7,6 +7,33 @@
 
 ---
 
+## [v0.43.5] - 2025-12-14
+
+### Perf/UX：图片预览提速（缩略图占位 + JPEG downsample）
+
+- **图片 hover 预览更快**：popover 在延迟到达后先展示缩略图占位（若已缓存），原图准备好后无缝替换，避免长时间转圈。
+- **downsample 更省 CPU**：若图片像素已小于 `maxPixelSize` 则跳过重编码；无 alpha 用 JPEG（q=0.85）避免 PNG 编码开销；预览 IO + downsample 使用 `userInitiated` 优先级，优先响应当前交互。
+
+### 修改文件
+
+- `Scopy/Views/History/HistoryItemView.swift`
+- `Scopy/Views/History/HistoryItemImagePreviewView.swift`
+- `Scopy/Application/ClipboardService.swift`
+- `DEPLOYMENT.md`
+- `doc/profile/v0.43.5-profile.md`
+- `doc/profile/README.md`
+- `doc/implemented-doc/v0.43.5.md`
+- `doc/implemented-doc/README.md`
+- `doc/implemented-doc/CHANGELOG.md`
+- `doc/review/review-v0.3.md`
+
+### 测试
+
+- 单元测试：`make test-unit` **55 tests passed** (1 skipped)
+- 性能测试：`make test-perf` **16 tests passed** (6 skipped)
+- Thread Sanitizer：`make test-tsan` **135 tests passed** (1 skipped)
+- Strict Concurrency：`make test-strict` **163 tests passed** (7 skipped)
+
 ## [v0.43.4] - 2025-12-14
 
 ### Fix/UX：测试隔离外部原图 + 缩略图即时刷新
@@ -18,13 +45,8 @@
 
 - `Scopy/Services/StorageService.swift`
 - `Scopy/Application/ClipboardService.swift`
-- `Scopy/Domain/Models/ClipboardEvent.swift`
-- `Scopy/Observables/AppState.swift`
 - `Scopy/Observables/HistoryViewModel.swift`
 - `Scopy/Views/History/HistoryItemView.swift`
-- `ScopyTests/AppStateTests.swift`
-- `ScopyTests/IntegrationTests.swift`
-- `ScopyTests/StorageServiceTests.swift`
 - `DEPLOYMENT.md`
 - `doc/profile/v0.43.4-profile.md`
 - `doc/profile/README.md`
@@ -70,6 +92,8 @@
 - Thread Sanitizer：`make test-tsan` **132 tests passed** (1 skipped)
 - Strict Concurrency：`make test-strict` **160 tests passed** (7 skipped)
 
+---
+
 ## [v0.43.2] - 2025-12-14
 
 ### Perf/UX：Low Power Mode 滚动优化 + 搜索取消更及时
@@ -87,7 +111,6 @@
 - `Scopy/Views/History/HistoryItemThumbnailView.swift`
 - `Scopy/Infrastructure/Search/SearchEngineImpl.swift`
 - `Scopy.xcodeproj/project.pbxproj`
-- `ScopyTests/ClipboardMonitorTests.swift`
 - `DEPLOYMENT.md`
 - `doc/profile/v0.43.2-profile.md`
 - `doc/profile/README.md`
@@ -102,6 +125,8 @@
 - 性能测试：`make test-perf` **22 tests passed** (6 skipped)
 - Thread Sanitizer：`make test-tsan` **132 tests passed** (1 skipped)
 - Strict Concurrency：`make test-strict` **166 tests passed** (7 skipped)
+
+---
 
 ## [v0.43.1] - 2025-12-14
 

@@ -346,8 +346,8 @@ actor ClipboardService {
         guard let item = try await storage.findByID(itemID) else { return nil }
 
         if let storagePath = item.storageRef {
-            return await Task.detached(priority: .utility) {
-                try? Data(contentsOf: URL(fileURLWithPath: storagePath))
+            return await Task.detached(priority: .userInitiated) {
+                try? Data(contentsOf: URL(fileURLWithPath: storagePath), options: [.mappedIfSafe])
             }.value
         }
 

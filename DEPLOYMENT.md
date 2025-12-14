@@ -1,6 +1,25 @@
 # Scopy 部署和使用指南
 
-## 本次更新（v0.43.4）
+## 本次更新（v0.43.5）
+- **Perf/UX（图片 hover 预览提速）**：
+  - popover 在延迟到达后先展示缩略图占位（若已缓存），原图准备好后无缝替换，避免长时间转圈。
+  - downsample：若像素已小于 `maxPixelSize` 则跳过重编码；无 alpha 用 JPEG（q=0.85）避免 PNG 编码 CPU 开销。
+  - 预览 IO + downsample 使用 `userInitiated` 优先级；外部文件读取使用 `.mappedIfSafe`，提升交互优先级与读盘效率。
+- **性能实测**（MacBook Air Apple M3 24GB, macOS 15.7.2（24G325）, Debug, `make test-perf`；heavy 需 `RUN_HEAVY_PERF_TESTS=1`；Low Power Mode enabled）：
+  - Fuzzy 5k items P95 ≈ 8.26ms
+  - Fuzzy 10k items P95 ≈ 75.82ms（Samples: 50；Low Power Mode 下测试阈值放宽至 300ms）
+  - Disk 25k fuzzy P95 ≈ 99.52ms（Samples: 50）
+  - Bulk insert 1000 items ≈ 84.10ms（≈11,891 items/s）
+  - Fetch recent (50 items) avg ≈ 0.11ms
+  - Regex 20k items P95 ≈ 5.32ms
+  - Mixed content disk search（single run）≈ 7.46ms
+- **测试结果**：
+  - `make test-unit` **55 passed** (1 skipped)
+  - `make test-perf` **16 passed** (6 skipped)
+  - `make test-tsan` **135 passed** (1 skipped)
+  - `make test-strict` **163 passed** (7 skipped)
+
+## 历史更新（v0.43.4）
 - **Fix/UX（测试隔离 + 缩略图即时刷新）**：
   - 测试隔离外部存储根目录：in-memory / 测试场景下外部内容目录不再落到 `Application Support/Scopy/content`，避免测试触发 orphan 清理时误删真实历史原图。
   - 缩略图即时刷新：缩略图保存后发出 `.thumbnailUpdated` 事件；列表行的 `Equatable` 比较纳入 `thumbnailPath`，确保缩略图路径变化会触发 UI 刷新（无需搜索/重载）。
@@ -49,26 +68,6 @@
   - Fetch recent (50 items) avg ≈ 0.12ms
   - Regex 20k items P95 ≈ 5.20ms
   - Mixed content disk search（single run）≈ 7.31ms
-- **测试结果**：
-  - `make test-unit` **53 passed** (1 skipped)
-  - `make test-perf` **22 passed** (6 skipped)
-  - `make test-tsan` **132 passed** (1 skipped)
-  - `make test-strict` **166 passed** (7 skipped)
-
-## 历史更新（v0.43.1）
-- **Fix/Quality（稳定性）**：
-  - `.settingsChanged` 统一驱动设置同步 + 热键应用；`AppDelegate.applyHotKey` 做幂等（相同配置不重复 unregister/register），避免竞态漏应用与冗余注册。
-  - 去重 upsert 语义修复：仅真实插入发 `.newItem`；去重命中更新发 `.itemUpdated`，避免 UI `totalCount` 错误累加。
-  - 设置保存失败不再自动关闭窗口，改为错误提示；保存成功由事件链路统一刷新。
-  - `StorageService.close/performWALCheckpoint/getExternalStorageSize` 异步化，避免主线程阻塞点与测试侧死锁风险。
-- **性能实测**（Apple M3, macOS 15.7.2（24G325）, Debug, `make test-perf`；heavy 需 `RUN_HEAVY_PERF_TESTS=1`；Low Power Mode enabled）：
-  - Fuzzy 5k items P95 ≈ 8.49ms
-  - Fuzzy 10k items P95 ≈ 79.41ms（Samples: 50；Low Power Mode 下阈值放宽至 300ms）
-  - Disk 25k fuzzy P95 ≈ 102.93ms（Samples: 50）
-  - Bulk insert 1000 items ≈ 140.62ms（≈7,112 items/s）
-  - Fetch recent (50 items) avg ≈ 0.11ms
-  - Regex 20k items P95 ≈ 5.25ms
-  - Mixed content disk search（single run）≈ 7.56ms
 - **测试结果**：
   - `make test-unit` **53 passed** (1 skipped)
   - `make test-perf` **22 passed** (6 skipped)
