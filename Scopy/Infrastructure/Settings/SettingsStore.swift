@@ -21,6 +21,14 @@ public actor SettingsStore {
         self.userDefaults = userDefaults
     }
 
+    /// Create an isolated SettingsStore backed by a named suite.
+    ///
+    /// Notes:
+    /// - This avoids passing a non-Sendable `UserDefaults` instance across actor boundaries in Swift 6 strict mode.
+    public init(suiteName: String) {
+        self.userDefaults = UserDefaults(suiteName: suiteName) ?? .standard
+    }
+
     public func load() -> SettingsDTO {
         let settings = Self.loadFromUserDefaults(userDefaults)
         cachedSettings = settings

@@ -8,14 +8,17 @@ import ScopyKit
 final class ClipboardMonitorTests: XCTestCase {
 
     var monitor: ClipboardMonitor!
+    private var pasteboard: NSPasteboard!
 
     override func setUp() async throws {
-        monitor = ClipboardMonitor()
+        pasteboard = NSPasteboard.withUniqueName()
+        monitor = ClipboardMonitor(pasteboard: pasteboard)
     }
 
     override func tearDown() async throws {
         monitor.stopMonitoring()
         monitor = nil
+        pasteboard = nil
     }
 
     // MARK: - Initialization Tests
@@ -51,7 +54,6 @@ final class ClipboardMonitorTests: XCTestCase {
 
     func testReadCurrentClipboard() {
         // Set something to clipboard
-        let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         pasteboard.setString("Test clipboard content", forType: .string)
 
@@ -63,7 +65,6 @@ final class ClipboardMonitorTests: XCTestCase {
 
     func testReadEmptyClipboard() {
         // Clear clipboard
-        let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
 
         let content = monitor.readCurrentClipboard()
@@ -76,7 +77,6 @@ final class ClipboardMonitorTests: XCTestCase {
     func testCopyTextToClipboard() {
         monitor.copyToClipboard(text: "Copied text")
 
-        let pasteboard = NSPasteboard.general
         XCTAssertEqual(pasteboard.string(forType: .string), "Copied text")
     }
 
@@ -84,7 +84,6 @@ final class ClipboardMonitorTests: XCTestCase {
         let data = "Binary data".data(using: .utf8)!
         monitor.copyToClipboard(data: data, type: .string)
 
-        let pasteboard = NSPasteboard.general
         let retrieved = pasteboard.data(forType: .string)
         XCTAssertEqual(retrieved, data)
     }
@@ -99,7 +98,6 @@ final class ClipboardMonitorTests: XCTestCase {
 
         monitor.copyToClipboard(text: "Rich text", data: rtfData, type: .rtf)
 
-        let pasteboard = NSPasteboard.general
         XCTAssertEqual(pasteboard.string(forType: .string), "Rich text")
         XCTAssertEqual(pasteboard.data(forType: .rtf), rtfData)
     }
@@ -114,7 +112,6 @@ final class ClipboardMonitorTests: XCTestCase {
 
         monitor.copyToClipboard(text: "Hello <World>", data: htmlData, type: .html)
 
-        let pasteboard = NSPasteboard.general
         XCTAssertEqual(pasteboard.string(forType: .string), "Hello <World>")
         XCTAssertEqual(pasteboard.data(forType: .html), htmlData)
     }
@@ -122,7 +119,6 @@ final class ClipboardMonitorTests: XCTestCase {
     // MARK: - Content Type Detection Tests
 
     func testTextContentDetection() {
-        let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         pasteboard.setString("Plain text content", forType: .string)
 
@@ -140,7 +136,6 @@ final class ClipboardMonitorTests: XCTestCase {
 
         guard let tiffData = image.tiffRepresentation else { return }
 
-        let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         pasteboard.setData(tiffData, forType: .tiff)
 
@@ -152,7 +147,6 @@ final class ClipboardMonitorTests: XCTestCase {
     // MARK: - Hash Tests (v0.md 3.2)
 
     func testContentHashConsistency() {
-        let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         pasteboard.setString("Hash test content", forType: .string)
 
@@ -164,8 +158,6 @@ final class ClipboardMonitorTests: XCTestCase {
     }
 
     func testContentHashDifferent() {
-        let pasteboard = NSPasteboard.general
-
         pasteboard.clearContents()
         pasteboard.setString("Content A", forType: .string)
         let content1 = monitor.readCurrentClipboard()
@@ -179,8 +171,6 @@ final class ClipboardMonitorTests: XCTestCase {
     }
 
     func testTextNormalization() {
-        let pasteboard = NSPasteboard.general
-
         // Test with leading/trailing whitespace
         pasteboard.clearContents()
         pasteboard.setString("   normalized   ", forType: .string)
@@ -196,8 +186,6 @@ final class ClipboardMonitorTests: XCTestCase {
     }
 
     func testLineEndingNormalization() {
-        let pasteboard = NSPasteboard.general
-
         // Windows line endings
         pasteboard.clearContents()
         pasteboard.setString("line1\r\nline2", forType: .string)
@@ -215,7 +203,6 @@ final class ClipboardMonitorTests: XCTestCase {
     // MARK: - Size Calculation Tests
 
     func testSizeCalculation() {
-        let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         pasteboard.setString("12345", forType: .string) // 5 bytes
 
@@ -224,7 +211,6 @@ final class ClipboardMonitorTests: XCTestCase {
     }
 
     func testUTF8SizeCalculation() {
-        let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         pasteboard.setString("你好", forType: .string) // 6 bytes in UTF-8
 
@@ -248,7 +234,6 @@ final class ClipboardMonitorTests: XCTestCase {
 
         monitor.setPollingInterval(0.1)
 
-        let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         pasteboard.setString("Baseline \(UUID())", forType: .string)
 
@@ -284,7 +269,6 @@ final class ClipboardMonitorTests: XCTestCase {
 
     func testAppBundleIDCapture() {
         // Note: This tests the current frontmost app, which may vary
-        let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         pasteboard.setString("Test", forType: .string)
 
@@ -300,7 +284,6 @@ final class ClipboardMonitorTests: XCTestCase {
     func testVeryLongText() {
         let longText = String(repeating: "a", count: 100_000) // 100KB
 
-        let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         pasteboard.setString(longText, forType: .string)
 
@@ -312,7 +295,6 @@ final class ClipboardMonitorTests: XCTestCase {
     func testSpecialCharacters() {
         let specialText = "Hello 👋 World 🌍 \n\t\r Special \"quotes\" 'and' <html>"
 
-        let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         pasteboard.setString(specialText, forType: .string)
 

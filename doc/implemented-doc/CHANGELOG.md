@@ -7,6 +7,41 @@
 
 ---
 
+## [v0.43.10] - 2025-12-14
+
+### Dev/Quality：测试隔离 + 性能用例更贴近实际（fuzzyPlus/cold/service path）
+
+- **测试隔离**：`ClipboardMonitor` 支持注入 pasteboard/polling interval；Integration/Monitor 测试改用 unique pasteboard，避免污染系统剪贴板。
+- **集成测试提速**：用异步轮询替代固定 `sleep`，并确保逐条写入都被 monitor 捕获（避免漏采）；用例执行时间显著下降。
+- **搜索性能测试更贴近实际**：
+  - perf 用例默认使用 `fuzzyPlus`（与 Settings 默认一致）。
+  - 增加 cold start 指标（首次 fuzzyPlus 触发全量索引构建）。
+  - 增加端到端 service-path 磁盘搜索基线（包含 DTO 转换/actor hop）。
+- **测试工作流优化**：Makefile `setup` 增加 XcodeGen 输入签名缓存，避免每次测试都重写 `project.pbxproj`；`make test-unit`/`make test-strict` 默认跳过重用例（Integration/Performance）。
+- **SettingsStore**：新增 `init(suiteName:)`，便于 Swift 6 Strict 下在测试中隔离 settings（避免跨 actor 传递 `UserDefaults`）。
+
+### 修改文件
+
+- `Scopy/Services/ClipboardMonitor.swift`
+- `Scopy/Application/ClipboardService.swift`
+- `Scopy/Services/RealClipboardService.swift`
+- `Scopy/Infrastructure/Settings/SettingsStore.swift`
+- `ScopyTests/ClipboardMonitorTests.swift`
+- `ScopyTests/IntegrationTests.swift`
+- `ScopyTests/PerformanceTests.swift`
+- `ScopyTests/Helpers/XCTestExtensions.swift`
+- `Makefile`
+- `scripts/xcodegen-generate-if-needed.sh`
+- `.gitignore`
+
+### 测试
+
+- 单元测试：`make test-unit` **137 tests passed** (1 skipped)
+- 集成测试：`make test-integration` **12 tests passed**
+- 性能测试：`make test-perf` **17 tests passed** (6 skipped)
+- Thread Sanitizer：`make test-tsan` **137 tests passed** (1 skipped)
+- Strict Concurrency：`make test-strict` **137 tests passed** (1 skipped)
+
 ## [v0.43.9] - 2025-12-14
 
 ### Perf/Quality：后台 I/O + ClipboardMonitor 语义修复（避免主线程阻塞）

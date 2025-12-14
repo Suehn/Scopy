@@ -26,6 +26,8 @@ actor ClipboardService {
 
     private let databasePath: String?
     private let settingsStore: SettingsStore
+    private let monitorPasteboardName: String?
+    private let monitorPollingInterval: TimeInterval?
 
     private var monitor: ClipboardMonitor?
     private var storage: StorageService?
@@ -49,9 +51,16 @@ actor ClipboardService {
 
     // MARK: - Initialization
 
-    init(databasePath: String? = nil, settingsStore: SettingsStore = .shared) {
+    init(
+        databasePath: String? = nil,
+        settingsStore: SettingsStore = .shared,
+        monitorPasteboardName: String? = nil,
+        monitorPollingInterval: TimeInterval? = nil
+    ) {
         self.databasePath = databasePath
         self.settingsStore = settingsStore
+        self.monitorPasteboardName = monitorPasteboardName
+        self.monitorPollingInterval = monitorPollingInterval
 
         var continuation: AsyncStream<ClipboardEvent>.Continuation?
         let stream = AsyncStream(
@@ -79,7 +88,17 @@ actor ClipboardService {
         guard !isStarted else { return }
         isStarted = true
 
-        let monitor = await MainActor.run { ClipboardMonitor() }
+        let pasteboardName = monitorPasteboardName
+        let pollingInterval = monitorPollingInterval
+        let monitor = await MainActor.run {
+            let pasteboard: NSPasteboard
+            if let pasteboardName, !pasteboardName.isEmpty {
+                pasteboard = NSPasteboard(name: NSPasteboard.Name(pasteboardName))
+            } else {
+                pasteboard = .general
+            }
+            return ClipboardMonitor(pasteboard: pasteboard, pollingInterval: pollingInterval)
+        }
         let storage = await MainActor.run { StorageService(databasePath: databasePath) }
         let dbPath = await storage.databaseFilePath
         let search = SearchEngineImpl(dbPath: dbPath)

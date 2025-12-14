@@ -28,3 +28,6 @@ test-*.log
 # Build logs
 build.log
 strict-concurrency-*.log
+
+# XcodeGen cache
+.xcodegen.signature

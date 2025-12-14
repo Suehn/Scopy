@@ -93,6 +93,7 @@ public final class ClipboardMonitor {
 
     // MARK: - Properties
 
+    private let pasteboard: NSPasteboard
     private var timer: Timer?
     private var lastChangeCount: Int = 0
     private var isMonitoring = false
@@ -115,7 +116,15 @@ public final class ClipboardMonitor {
 
     // MARK: - Initialization
 
-    public init() {
+    public init(
+        pasteboard: NSPasteboard = .general,
+        pollingInterval: TimeInterval? = nil
+    ) {
+        self.pasteboard = pasteboard
+        if let pollingInterval {
+            self.pollingInterval = max(0.1, min(5.0, pollingInterval))
+        }
+
         let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first ?? {
             ScopyLog.monitor.warning("Failed to resolve caches directory; falling back to temporary directory")
             return FileManager.default.temporaryDirectory
@@ -141,7 +150,7 @@ public final class ClipboardMonitor {
         }
         self.contentStream = stream
         self.eventContinuation = resolvedContinuation
-        self.lastChangeCount = NSPasteboard.general.changeCount
+        self.lastChangeCount = pasteboard.changeCount
     }
 
     deinit {
@@ -165,7 +174,7 @@ public final class ClipboardMonitor {
         guard !isMonitoring else { return }
         isMonitoring = true
         monitoringSessionID &+= 1
-        lastChangeCount = NSPasteboard.general.changeCount
+        lastChangeCount = pasteboard.changeCount
 
         timer = Timer.scheduledTimer(withTimeInterval: pollingInterval, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
@@ -205,13 +214,11 @@ public final class ClipboardMonitor {
 
     /// Manually read current clipboard content
     public func readCurrentClipboard() -> ClipboardContent? {
-        let pasteboard = NSPasteboard.general
         return extractContent(from: pasteboard)
     }
 
     /// Copy content to system clipboard
     public func copyToClipboard(text: String) {
-        let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         pasteboard.setString(text, forType: .string)
         // Update change count to avoid triggering our own copy as new item
@@ -219,14 +226,12 @@ public final class ClipboardMonitor {
     }
 
     public func copyToClipboard(data: Data, type: NSPasteboard.PasteboardType) {
-        let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         pasteboard.setData(data, forType: type)
         lastChangeCount = pasteboard.changeCount
     }
 
     public func copyToClipboard(text: String, data: Data, type: NSPasteboard.PasteboardType) {
-        let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
 
         let item = NSPasteboardItem()
@@ -240,7 +245,6 @@ public final class ClipboardMonitor {
     /// Copy file URLs to system clipboard
     /// 将文件 URL 复制到系统剪贴板，支持 Finder 粘贴
     public func copyToClipboard(fileURLs: [URL]) {
-        let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
 
         // 方法1: 使用 NSURL 的 NSPasteboardWriting 协议
@@ -286,7 +290,6 @@ public final class ClipboardMonitor {
     private func checkClipboard() {
         guard isMonitoring else { return }
 
-        let pasteboard = NSPasteboard.general
         let currentChangeCount = pasteboard.changeCount
 
         guard currentChangeCount != lastChangeCount else { return }

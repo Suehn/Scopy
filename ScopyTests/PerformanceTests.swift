@@ -1,3 +1,4 @@
+import AppKit
 import XCTest
 import ScopyKit
 
@@ -87,17 +88,22 @@ final class PerformanceTests: XCTestCase {
         }
         await search.invalidateCache()
 
-        // v0.25+：全量模糊索引首次构建为一次性成本，不计入稳态 P95
+        // Default mode is fuzzyPlus (SettingsDTO.defaultSearchMode).
+        // Measure cold (index build) separately from steady-state latency.
+        let coldStart = CFAbsoluteTimeGetCurrent()
         _ = try await search.search(
-            request: SearchRequest(query: "warmup", mode: .fuzzy, limit: 1, offset: 0)
+            request: SearchRequest(query: "hello world", mode: .fuzzyPlus, limit: 1, offset: 0)
         )
+        let coldMs = (CFAbsoluteTimeGetCurrent() - coldStart) * 1000
+        print("📊 Search Cold Start (5k items, fuzzyPlus): \(String(format: "%.2f", coldMs))ms")
+        XCTAssertLessThan(coldMs, 1500, "Cold index build took too long: \(coldMs)ms")
 
         var times: [Double] = []
 
         // Run multiple searches
-        for query in ["Hello", "test", "random", "fox", "data"] {
+        for query in ["Hello", "search test", "random data", "brown fox", "benchmark"] {
             let startTime = CFAbsoluteTimeGetCurrent()
-            let request = SearchRequest(query: query, mode: .fuzzy, limit: 50, offset: 0)
+            let request = SearchRequest(query: query, mode: .fuzzyPlus, limit: 50, offset: 0)
             _ = try await search.search(request: request)
             let elapsed = (CFAbsoluteTimeGetCurrent() - startTime) * 1000
             times.append(elapsed)
@@ -127,20 +133,25 @@ final class PerformanceTests: XCTestCase {
         }
         await search.invalidateCache()
 
-        // v0.25+：全量模糊索引首次构建为一次性成本，不计入稳态 P95
+        // Default mode is fuzzyPlus (SettingsDTO.defaultSearchMode).
+        // Measure cold (index build) separately from steady-state latency.
+        let coldStart = CFAbsoluteTimeGetCurrent()
         _ = try await search.search(
-            request: SearchRequest(query: "warmup", mode: .fuzzy, limit: 1, offset: 0)
+            request: SearchRequest(query: "search benchmark", mode: .fuzzyPlus, limit: 1, offset: 0)
         )
+        let coldMs = (CFAbsoluteTimeGetCurrent() - coldStart) * 1000
+        print("📊 Search Cold Start (10k items, fuzzyPlus): \(String(format: "%.2f", coldMs))ms")
+        XCTAssertLessThan(coldMs, 3000, "Cold index build took too long: \(coldMs)ms")
 
         var times: [Double] = []
-        let queries = ["search", "benchmark", "item", "text", "with"]
+        let queries = ["search", "benchmark", "benchmark item", "with text", "search benchmark"]
         let sampleRounds = 10
 
         // More samples => less flaky P95 under transient system load.
         for _ in 0..<sampleRounds {
             for query in queries {
                 let startTime = CFAbsoluteTimeGetCurrent()
-                let request = SearchRequest(query: query, mode: .fuzzy, limit: 50, offset: 0)
+                let request = SearchRequest(query: query, mode: .fuzzyPlus, limit: 50, offset: 0)
                 _ = try await search.search(request: request)
                 let elapsed = (CFAbsoluteTimeGetCurrent() - startTime) * 1000
                 times.append(elapsed)
@@ -174,12 +185,12 @@ final class PerformanceTests: XCTestCase {
         await search.invalidateCache()
 
         // First query populates cache
-        let request1 = SearchRequest(query: "a", mode: .fuzzy, limit: 50, offset: 0)
+        let request1 = SearchRequest(query: "a", mode: .fuzzyPlus, limit: 50, offset: 0)
         let result1 = try await search.search(request: request1)
         let time1 = result1.searchTimeMs
 
         // Second query should hit cache
-        let request2 = SearchRequest(query: "b", mode: .fuzzy, limit: 50, offset: 0)
+        let request2 = SearchRequest(query: "b", mode: .fuzzyPlus, limit: 50, offset: 0)
         let result2 = try await search.search(request: request2)
         let time2 = result2.searchTimeMs
 
@@ -359,7 +370,7 @@ final class PerformanceTests: XCTestCase {
             _ = try await storage.upsertItem(makeContent("Stability test item \(i)"))
 
             // Search
-            let request = SearchRequest(query: "stability", mode: .fuzzy, limit: 10, offset: 0)
+            let request = SearchRequest(query: "stability", mode: .fuzzyPlus, limit: 10, offset: 0)
             _ = try await search.search(request: request)
 
             // Fetch
@@ -393,7 +404,7 @@ final class PerformanceTests: XCTestCase {
         let startTime = CFAbsoluteTimeGetCurrent()
 
         for query in queries {
-            let request = SearchRequest(query: query, mode: .fuzzy, limit: 50, offset: 0)
+            let request = SearchRequest(query: query, mode: .fuzzyPlus, limit: 50, offset: 0)
             _ = try await search.search(request: request)
         }
 
@@ -540,31 +551,124 @@ final class PerformanceTests: XCTestCase {
 
     // MARK: - Realistic Disk-Backed Scenarios
 
+    /// 端到端：走 ClipboardService 搜索路径（含 DTO 转换/actor hop），更接近 UI 体验。
+    func testServiceSearchPerformanceDisk10k() async throws {
+        let baseURL = FileManager.default.temporaryDirectory.appendingPathComponent("scopy-service-perf-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: baseURL, withIntermediateDirectories: true)
+
+        let dbPath = baseURL.appendingPathComponent("clipboard.db").path
+
+        let storage = StorageService(databasePath: dbPath)
+        try await storage.open()
+        for i in 0..<10_000 {
+            let len = 50 + (i % 200)
+            let text = makeRealisticText(index: i, base: "Service note", length: len)
+            _ = try await storage.upsertItem(makeContent(text))
+        }
+        await storage.performWALCheckpoint()
+        await storage.close()
+
+        let suiteName = "scopy-service-perf-settings-\(UUID().uuidString)"
+        UserDefaults.standard.removePersistentDomain(forName: suiteName)
+        let settingsStore = SettingsStore(suiteName: suiteName)
+
+        let pasteboard = NSPasteboard.withUniqueName()
+        let service = ClipboardServiceFactory.create(
+            useMock: false,
+            databasePath: dbPath,
+            settingsStore: settingsStore,
+            monitorPasteboardName: pasteboard.name.rawValue,
+            monitorPollingInterval: 5.0
+        )
+
+        func cleanup() async {
+            service.stop()
+            try? await Task.sleep(nanoseconds: 200_000_000)
+            UserDefaults.standard.removePersistentDomain(forName: suiteName)
+            try? FileManager.default.removeItem(at: baseURL)
+        }
+
+        do {
+            try await service.start()
+
+            // Cold search includes full index build.
+            let coldStart = CFAbsoluteTimeGetCurrent()
+            _ = try await service.search(query: SearchRequest(query: "service note", mode: .fuzzyPlus, limit: 50, offset: 0))
+            let coldMs = (CFAbsoluteTimeGetCurrent() - coldStart) * 1000
+            print("📊 Service Search Cold Start (10k items, fuzzyPlus): \(String(format: "%.2f", coldMs))ms")
+            XCTAssertLessThan(coldMs, 8000, "Service cold search took too long: \(coldMs)ms")
+
+            var times: [Double] = []
+            let queries = ["service", "service note", "lorem", "note 9999", "ipsum"]
+            let sampleRounds = 10
+            for _ in 0..<sampleRounds {
+                for query in queries {
+                    let start = CFAbsoluteTimeGetCurrent()
+                    _ = try await service.search(query: SearchRequest(query: query, mode: .fuzzyPlus, limit: 50, offset: 0))
+                    times.append((CFAbsoluteTimeGetCurrent() - start) * 1000)
+                }
+            }
+
+            let p95 = percentile(times, 95)
+            let avg = times.reduce(0, +) / Double(times.count)
+
+            print("📊 Service Search Performance (10k items, fuzzyPlus):")
+            print("   - Samples: \(times.count)")
+            print("   - Average: \(String(format: "%.2f", avg))ms")
+            print("   - P95: \(String(format: "%.2f", p95))ms")
+
+            PerformanceAssertions.assertSearchLatency(p95, itemCount: 10_000)
+
+            let isLowPowerMode = ProcessInfo.processInfo.isLowPowerModeEnabled
+            let maxP95 = isLowPowerMode ? 500.0 : 250.0
+            XCTAssertLessThan(p95, maxP95, "Service P95 \(p95)ms exceeds \(maxP95)ms target")
+        } catch {
+            await cleanup()
+            throw error
+        }
+
+        await cleanup()
+    }
+
     /// 磁盘模式 + 2.5 万条，模拟真实 I/O（WAL 已启用）
     func testDiskBackedSearchPerformance25k() async throws {
         try await withDiskStorage { diskStorage, diskSearch, _ in
             // Mixed length text to mimic real notes/snippets
             for i in 0..<25_000 {
                 let len = 40 + (i % 200)
-                let text = "Note \(i) " + String(repeating: "lorem ipsum ", count: len / 11)
+                let localePrefix: String
+                switch i % 12 {
+                case 0: localePrefix = "你好世界"
+                case 1: localePrefix = "こんにちは世界"
+                case 2: localePrefix = "안녕하세요세계"
+                case 3: localePrefix = "🚀Launch"
+                default: localePrefix = "Note"
+                }
+
+                let path = "/Users/test/Documents/file\(i).txt"
+                let text = "\(localePrefix) \(i) " + String(repeating: "lorem ipsum ", count: len / 11) + " \(path)"
                 _ = try await diskStorage.upsertItem(makeContent(text))
             }
             await diskSearch.invalidateCache()
 
-            // Warm up full fuzzy index (one‑time build)
+            // Default mode is fuzzyPlus; measure cold build separately.
+            let coldStart = CFAbsoluteTimeGetCurrent()
             _ = try await diskSearch.search(
-                request: SearchRequest(query: "warmup", mode: .fuzzy, limit: 1, offset: 0)
+                request: SearchRequest(query: "lorem ipsum", mode: .fuzzyPlus, limit: 1, offset: 0)
             )
+            let coldMs = (CFAbsoluteTimeGetCurrent() - coldStart) * 1000
+            print("📊 Disk Search Cold Start (25k items, fuzzyPlus): \(String(format: "%.2f", coldMs))ms")
+            XCTAssertLessThan(coldMs, 5000, "Disk cold index build took too long: \(coldMs)ms")
 
             var times: [Double] = []
-            let queries = ["lorem", "note", "ipsum", "content", "random"]
+            let queries = ["lorem", "lorem ipsum", "note", "你好世界", "documents", "file123"]
             let sampleRounds = 10
 
             // More samples => less flaky P95 under transient system load.
             for _ in 0..<sampleRounds {
                 for query in queries {
                     let start = CFAbsoluteTimeGetCurrent()
-                    let request = SearchRequest(query: query, mode: .fuzzy, limit: 50, offset: 0)
+                    let request = SearchRequest(query: query, mode: .fuzzyPlus, limit: 50, offset: 0)
                     _ = try await diskSearch.search(request: request)
                     let elapsed = (CFAbsoluteTimeGetCurrent() - start) * 1000
                     times.append(elapsed)
@@ -613,12 +717,12 @@ final class PerformanceTests: XCTestCase {
 
             // Warm up (build caches/index) to reduce one-off variance.
             _ = try await diskSearch.search(
-                request: SearchRequest(query: "warmup", mode: .fuzzy, limit: 1, offset: 0)
+                request: SearchRequest(query: "warmup", mode: .fuzzyPlus, limit: 1, offset: 0)
             )
 
             let start = CFAbsoluteTimeGetCurrent()
             let page = try await diskSearch.search(
-                request: SearchRequest(query: "lorem", mode: .fuzzy, limit: 50, offset: 0)
+                request: SearchRequest(query: "lorem", mode: .fuzzyPlus, limit: 50, offset: 0)
             )
             let elapsed = (CFAbsoluteTimeGetCurrent() - start) * 1000
 
@@ -654,14 +758,14 @@ final class PerformanceTests: XCTestCase {
             await diskSearch.invalidateCache()
 
             _ = try await diskSearch.search(
-                request: SearchRequest(query: "warmup", mode: .fuzzy, limit: 1, offset: 0)
+                request: SearchRequest(query: "warmup", mode: .fuzzyPlus, limit: 1, offset: 0)
             )
 
             var times: [Double] = []
             for query in ["heavy", "lorem", "ipsum", "note"] {
                 let start = CFAbsoluteTimeGetCurrent()
                 _ = try await diskSearch.search(
-                    request: SearchRequest(query: query, mode: .fuzzy, limit: 50, offset: 0)
+                    request: SearchRequest(query: query, mode: .fuzzyPlus, limit: 50, offset: 0)
                 )
                 times.append((CFAbsoluteTimeGetCurrent() - start) * 1000)
             }
@@ -687,14 +791,14 @@ final class PerformanceTests: XCTestCase {
             await diskSearch.invalidateCache()
 
             _ = try await diskSearch.search(
-                request: SearchRequest(query: "warmup", mode: .fuzzy, limit: 1, offset: 0)
+                request: SearchRequest(query: "warmup", mode: .fuzzyPlus, limit: 1, offset: 0)
             )
 
             var times: [Double] = []
             for query in ["ultra", "note", "lorem", "ipsum"] {
                 let start = CFAbsoluteTimeGetCurrent()
                 _ = try await diskSearch.search(
-                    request: SearchRequest(query: query, mode: .fuzzy, limit: 50, offset: 0)
+                    request: SearchRequest(query: query, mode: .fuzzyPlus, limit: 50, offset: 0)
                 )
                 times.append((CFAbsoluteTimeGetCurrent() - start) * 1000)
             }

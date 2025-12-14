@@ -13,8 +13,18 @@ final class RealClipboardService: ClipboardServiceProtocol {
         clipboardService.eventStream
     }
 
-    init(databasePath: String? = nil, settingsStore: SettingsStore = .shared) {
-        self.clipboardService = ClipboardService(databasePath: databasePath, settingsStore: settingsStore)
+    init(
+        databasePath: String? = nil,
+        settingsStore: SettingsStore = .shared,
+        monitorPasteboardName: String? = nil,
+        monitorPollingInterval: TimeInterval? = nil
+    ) {
+        self.clipboardService = ClipboardService(
+            databasePath: databasePath,
+            settingsStore: settingsStore,
+            monitorPasteboardName: monitorPasteboardName,
+            monitorPollingInterval: monitorPollingInterval
+        )
     }
 
     // MARK: - Lifecycle
@@ -88,11 +98,22 @@ final class RealClipboardService: ClipboardServiceProtocol {
 
 public enum ClipboardServiceFactory {
     @MainActor
-    public static func create(useMock: Bool = false, databasePath: String? = nil) -> ClipboardServiceProtocol {
+    public static func create(
+        useMock: Bool = false,
+        databasePath: String? = nil,
+        settingsStore: SettingsStore = .shared,
+        monitorPasteboardName: String? = nil,
+        monitorPollingInterval: TimeInterval? = nil
+    ) -> ClipboardServiceProtocol {
         if useMock {
             return MockClipboardService()
         }
-        return RealClipboardService(databasePath: databasePath)
+        return RealClipboardService(
+            databasePath: databasePath,
+            settingsStore: settingsStore,
+            monitorPasteboardName: monitorPasteboardName,
+            monitorPollingInterval: monitorPollingInterval
+        )
     }
 
     /// Create service for testing with shared in-memory database.
@@ -101,9 +122,18 @@ public enum ClipboardServiceFactory {
     /// - Search 使用独立 read connection，因此不能使用 `:memory:`（每个连接会得到不同数据库）。
     /// - 使用 shared-cache in-memory URI 让多连接访问同一 DB。
     @MainActor
-    public static func createForTesting() -> ClipboardServiceProtocol {
+    public static func createForTesting(
+        settingsStore: SettingsStore = .shared,
+        monitorPasteboardName: String? = nil,
+        monitorPollingInterval: TimeInterval? = nil
+    ) -> ClipboardServiceProtocol {
         let unique = UUID().uuidString.replacingOccurrences(of: "-", with: "")
         let sharedMemoryURI = "file:scopy_test_\(unique)?mode=memory&cache=shared"
-        return RealClipboardService(databasePath: sharedMemoryURI)
+        return RealClipboardService(
+            databasePath: sharedMemoryURI,
+            settingsStore: settingsStore,
+            monitorPasteboardName: monitorPasteboardName,
+            monitorPollingInterval: monitorPollingInterval
+        )
     }
 }

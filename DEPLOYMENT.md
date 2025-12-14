@@ -1,6 +1,26 @@
 # Scopy 部署和使用指南
 
-## 本次更新（v0.43.9）
+## 本次更新（v0.43.10）
+- **Dev/Quality（测试隔离 + 性能用例更贴近实际）**：
+  - `ClipboardMonitor` 支持注入 pasteboard/polling interval；Integration/Monitor 测试改用 unique pasteboard，避免污染系统剪贴板。
+  - perf 用例默认使用 `fuzzyPlus`（与 Settings 默认一致），并补充 cold start 与 service-path 端到端磁盘搜索基线。
+  - Makefile `setup` 增加 XcodeGen 输入签名缓存，减少无意义的 `xcodegen generate` 与 `project.pbxproj` 重写。
+- **性能实测**（MacBook Air（Mac15,12）24GB, macOS 15.7.2（24G325）, Debug, `make test-perf`；heavy 需 `RUN_HEAVY_PERF_TESTS=1`；Low Power Mode disabled）：
+  - Search 10k (fuzzyPlus) cold start ≈ 132.50ms；steady P95 ≈ 54.00ms（Samples: 50）
+  - Disk 25k (fuzzyPlus) cold start ≈ 710.09ms；steady P95 ≈ 63.07ms（Samples: 60）
+  - Service-path disk 10k (fuzzyPlus) cold start ≈ 255.02ms；steady P95 ≈ 48.86ms（Samples: 50）
+  - Bulk insert 1000 items ≈ 62.75ms（≈15,935 items/s）
+  - Fetch recent (50 items) avg ≈ 0.07ms
+  - Regex 20k items P95 ≈ 3.32ms
+  - Mixed content disk search（single run）≈ 4.75ms
+- **测试结果**：
+  - `make test-unit` **137 passed** (1 skipped)
+  - `make test-integration` **12 passed**
+  - `make test-perf` **17 passed** (6 skipped)
+  - `make test-tsan` **137 passed** (1 skipped)
+  - `make test-strict` **137 passed** (1 skipped)
+
+## 历史更新（v0.43.9）
 - **Perf/Quality（后台 I/O + ClipboardMonitor 语义修复）**：
   - 外部文件读取改为后台 `.mappedIfSafe`：回写剪贴板与图片预览不再主线程同步读盘，降低 hover/click 卡顿。
   - 图片 ingest 的 TIFF→PNG 转码移到后台 ingest task，并确保 `sizeBytes/plainText/hash` 以最终 PNG 为准（避免误判外部存储/清理阈值）。

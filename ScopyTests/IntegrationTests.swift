@@ -9,17 +9,30 @@ final class IntegrationTests: XCTestCase {
 
     var service: (any ClipboardServiceProtocol)!
     private var tempDirectory: URL?
+    private var pasteboard: NSPasteboard!
+    private var settingsStore: SettingsStore!
+    private var settingsSuiteName: String?
 
     override func setUp() async throws {
-        // Clear settings before each test to ensure isolation
-        UserDefaults.standard.removeObject(forKey: "ScopySettings")
+        let suiteName = "scopy-integration-settings-\(UUID().uuidString)"
+        UserDefaults.standard.removePersistentDomain(forName: suiteName)
+        settingsStore = SettingsStore(suiteName: suiteName)
+        settingsSuiteName = suiteName
+
+        pasteboard = NSPasteboard.withUniqueName()
 
         let baseURL = FileManager.default.temporaryDirectory.appendingPathComponent("scopy-integration-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: baseURL, withIntermediateDirectories: true)
         tempDirectory = baseURL
 
         let dbPath = baseURL.appendingPathComponent("clipboard.db").path
-        service = ClipboardServiceFactory.create(useMock: false, databasePath: dbPath)
+        service = ClipboardServiceFactory.create(
+            useMock: false,
+            databasePath: dbPath,
+            settingsStore: settingsStore,
+            monitorPasteboardName: pasteboard.name.rawValue,
+            monitorPollingInterval: 0.1
+        )
         try await service.start()
     }
 
@@ -31,6 +44,12 @@ final class IntegrationTests: XCTestCase {
         }
         service = nil
         tempDirectory = nil
+        pasteboard = nil
+        settingsStore = nil
+        if let suiteName = settingsSuiteName {
+            UserDefaults.standard.removePersistentDomain(forName: suiteName)
+        }
+        settingsSuiteName = nil
     }
 
     // MARK: - Full Workflow Tests
@@ -41,12 +60,13 @@ final class IntegrationTests: XCTestCase {
         XCTAssertEqual(items.count, 0)
 
         // 2. Simulate clipboard changes
-        let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         pasteboard.setString("First item", forType: .string)
-
-        // Wait for event
-        try await Task.sleep(nanoseconds: 600_000_000) // 600ms
+        await waitForConditionAsync(timeout: 2.0, pollInterval: 0.05) { [service] in
+            guard let service else { return false }
+            let items = try? await service.fetchRecent(limit: 10, offset: 0)
+            return items?.contains(where: { $0.plainText == "First item" }) ?? false
+        }
 
         // 3. Verify item was captured
         items = try await service.fetchRecent(limit: 10, offset: 0)
@@ -58,12 +78,15 @@ final class IntegrationTests: XCTestCase {
 
     func testSearchIntegration() async throws {
         // Insert test data through clipboard
-        let pasteboard = NSPasteboard.general
-
         for i in 0..<5 {
             pasteboard.clearContents()
             pasteboard.setString("Search test item \(i)", forType: .string)
-            try await Task.sleep(nanoseconds: 600_000_000) // 600ms each
+            let expectedText = "Search test item \(i)"
+            await waitForConditionAsync(timeout: 2.0, pollInterval: 0.05) { [service] in
+                guard let service else { return false }
+                let items = try? await service.fetchRecent(limit: 20, offset: 0)
+                return items?.contains(where: { $0.plainText == expectedText }) ?? false
+            }
         }
 
         // Search for items
@@ -75,14 +98,18 @@ final class IntegrationTests: XCTestCase {
 
     func testPinUnpinIntegration() async throws {
         // Add an item
-        let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
-        pasteboard.setString("Pin test item \(UUID())", forType: .string)
-        try await Task.sleep(nanoseconds: 600_000_000)
+        let uniqueText = "Pin test item \(UUID())"
+        pasteboard.setString(uniqueText, forType: .string)
+        await waitForConditionAsync(timeout: 2.0, pollInterval: 0.05) { [service] in
+            guard let service else { return false }
+            let items = try? await service.fetchRecent(limit: 20, offset: 0)
+            return items?.contains(where: { $0.plainText == uniqueText }) ?? false
+        }
 
         // Get the item
         var items = try await service.fetchRecent(limit: 10, offset: 0)
-        guard let item = items.first else {
+        guard let item = items.first(where: { $0.plainText == uniqueText }) else {
             XCTFail("No items found")
             return
         }
@@ -108,11 +135,14 @@ final class IntegrationTests: XCTestCase {
 
     func testDeleteIntegration() async throws {
         // Add an item
-        let pasteboard = NSPasteboard.general
         let uniqueText = "Delete test item \(UUID())"
         pasteboard.clearContents()
         pasteboard.setString(uniqueText, forType: .string)
-        try await Task.sleep(nanoseconds: 600_000_000)
+        await waitForConditionAsync(timeout: 2.0, pollInterval: 0.05) { [service] in
+            guard let service else { return false }
+            let items = try? await service.fetchRecent(limit: 50, offset: 0)
+            return items?.contains(where: { $0.plainText == uniqueText }) ?? false
+        }
 
         // Get the item
         var items = try await service.fetchRecent(limit: 10, offset: 0)
@@ -132,12 +162,15 @@ final class IntegrationTests: XCTestCase {
 
     func testClearAllIntegration() async throws {
         // Add some items
-        let pasteboard = NSPasteboard.general
-
         for i in 0..<3 {
             pasteboard.clearContents()
-            pasteboard.setString("Clear test \(i)", forType: .string)
-            try await Task.sleep(nanoseconds: 600_000_000)
+            let text = "Clear test \(i)"
+            pasteboard.setString(text, forType: .string)
+            await waitForConditionAsync(timeout: 2.0, pollInterval: 0.05) { [service] in
+                guard let service else { return false }
+                let items = try? await service.fetchRecent(limit: 20, offset: 0)
+                return items?.contains(where: { $0.plainText == text }) ?? false
+            }
         }
 
         // Pin one
@@ -159,11 +192,14 @@ final class IntegrationTests: XCTestCase {
 
     func testCopyToClipboardIntegration() async throws {
         // Add an item first
-        let pasteboard = NSPasteboard.general
         let originalText = "Copy test \(UUID())"
         pasteboard.clearContents()
         pasteboard.setString(originalText, forType: .string)
-        try await Task.sleep(nanoseconds: 600_000_000)
+        await waitForConditionAsync(timeout: 2.0, pollInterval: 0.05) { [service] in
+            guard let service else { return false }
+            let items = try? await service.fetchRecent(limit: 20, offset: 0)
+            return items?.contains(where: { $0.plainText == originalText }) ?? false
+        }
 
         // Change clipboard to something else
         pasteboard.clearContents()
@@ -179,15 +215,13 @@ final class IntegrationTests: XCTestCase {
         // Copy it back to clipboard
         try await service.copyToClipboard(itemID: item.id)
 
-        // Wait a moment
-        try await Task.sleep(nanoseconds: 100_000_000)
-
         // Verify clipboard content
-        XCTAssertEqual(pasteboard.string(forType: .string), originalText)
+        await waitForConditionAsync(timeout: 1.0, pollInterval: 0.05) { [pasteboard] in
+            pasteboard?.string(forType: .string) == originalText
+        }
     }
 
     func testCopyInlineRTF() async throws {
-        let pasteboard = NSPasteboard.general
         let rtfString = "RTF inline \(UUID())"
         let rtfData = NSAttributedString(string: rtfString).rtf(from: NSRange(location: 0, length: rtfString.count), documentAttributes: [:])
 
@@ -199,7 +233,11 @@ final class IntegrationTests: XCTestCase {
             return
         }
 
-        try await Task.sleep(nanoseconds: 600_000_000)
+        await waitForConditionAsync(timeout: 2.0, pollInterval: 0.05) { [service] in
+            guard let service else { return false }
+            let items = try? await service.fetchRecent(limit: 20, offset: 0)
+            return items?.contains(where: { $0.type == .rtf && $0.plainText.contains(rtfString) }) ?? false
+        }
 
         let items = try await service.fetchRecent(limit: 10, offset: 0)
         guard let item = items.first(where: { $0.type == .rtf }) else {
@@ -208,10 +246,10 @@ final class IntegrationTests: XCTestCase {
         }
 
         try await service.copyToClipboard(itemID: item.id)
-        try await Task.sleep(nanoseconds: 100_000_000)
 
-        let pastedRTF = pasteboard.data(forType: .rtf)
-        XCTAssertEqual(pastedRTF, rtfData)
+        await waitForConditionAsync(timeout: 1.0, pollInterval: 0.05) { [pasteboard] in
+            pasteboard?.data(forType: .rtf) == rtfData
+        }
     }
 
     // MARK: - Settings Tests
@@ -240,11 +278,15 @@ final class IntegrationTests: XCTestCase {
         XCTAssertEqual(stats.itemCount, 0)
 
         // Add items
-        let pasteboard = NSPasteboard.general
         for i in 0..<3 {
             pasteboard.clearContents()
-            pasteboard.setString("Stats test \(i)", forType: .string)
-            try await Task.sleep(nanoseconds: 600_000_000)
+            let text = "Stats test \(i)"
+            pasteboard.setString(text, forType: .string)
+            await waitForConditionAsync(timeout: 2.0, pollInterval: 0.05) { [service] in
+                guard let service else { return false }
+                let items = try? await service.fetchRecent(limit: 20, offset: 0)
+                return items?.contains(where: { $0.plainText == text }) ?? false
+            }
         }
 
         // Check stats
@@ -266,17 +308,30 @@ final class IntegrationTests: XCTestCase {
         }
 
         // Trigger some events
-        let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         pasteboard.setString("Event test \(UUID())", forType: .string)
-        try await Task.sleep(nanoseconds: 800_000_000)
+        await waitForConditionAsync(timeout: 2.0, pollInterval: 0.05) {
+            await MainActor.run {
+                receivedEvents.contains { event in
+                    if case .newItem = event { return true }
+                    return false
+                }
+            }
+        }
 
         let items = try await service.fetchRecent(limit: 10, offset: 0)
         if let item = items.first {
             try await service.pin(itemID: item.id)
         }
 
-        try await Task.sleep(nanoseconds: 200_000_000)
+        await waitForConditionAsync(timeout: 2.0, pollInterval: 0.05) {
+            await MainActor.run {
+                receivedEvents.contains { event in
+                    if case .itemPinned = event { return true }
+                    return false
+                }
+            }
+        }
         eventTask.cancel()
 
         // Should have received events
@@ -286,18 +341,34 @@ final class IntegrationTests: XCTestCase {
     // MARK: - Deduplication Integration Tests
 
     func testDeduplicationIntegration() async throws {
-        let pasteboard = NSPasteboard.general
         let uniqueText = "Dedup test \(UUID())"
 
         // First copy
         pasteboard.clearContents()
         pasteboard.setString(uniqueText, forType: .string)
-        try await Task.sleep(nanoseconds: 600_000_000)
+        await waitForConditionAsync(timeout: 2.0, pollInterval: 0.05) { [service] in
+            guard let service else { return false }
+            let items = try? await service.fetchRecent(limit: 20, offset: 0)
+            return items?.contains(where: { $0.plainText == uniqueText }) ?? false
+        }
+        let first = try await service.search(
+            query: SearchRequest(query: uniqueText, mode: .exact, limit: 1, offset: 0)
+        ).items.first
+        let firstLastUsedAt = first?.lastUsedAt
 
         // Same content again
         pasteboard.clearContents()
         pasteboard.setString(uniqueText, forType: .string)
-        try await Task.sleep(nanoseconds: 600_000_000)
+        if let firstLastUsedAt {
+            await waitForConditionAsync(timeout: 2.0, pollInterval: 0.05) { [service] in
+                guard let service else { return false }
+                let result = try? await service.search(
+                    query: SearchRequest(query: uniqueText, mode: .exact, limit: 1, offset: 0)
+                )
+                guard let latest = result?.items.first else { return false }
+                return latest.lastUsedAt > firstLastUsedAt
+            }
+        }
 
         // Should only have one item with that text
         let request = SearchRequest(query: uniqueText, mode: .exact, limit: 50, offset: 0)
@@ -310,12 +381,16 @@ final class IntegrationTests: XCTestCase {
 
     func testPaginationIntegration() async throws {
         // Add enough items to test pagination
-        let pasteboard = NSPasteboard.general
-
-        for i in 0..<15 {
+        let count = 12
+        for i in 0..<count {
             pasteboard.clearContents()
-            pasteboard.setString("Page test item \(i)", forType: .string)
-            try await Task.sleep(nanoseconds: 550_000_000)
+            let text = "Page test item \(i)"
+            pasteboard.setString(text, forType: .string)
+            await waitForConditionAsync(timeout: 2.0, pollInterval: 0.05) { [service] in
+                guard let service else { return false }
+                let items = try? await service.fetchRecent(limit: count + 5, offset: 0)
+                return items?.contains(where: { $0.plainText == text }) ?? false
+            }
         }
 
         // Fetch first page

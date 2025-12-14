@@ -10,8 +10,7 @@ all: build
 setup:
 	@echo "Installing xcodegen if not present..."
 	@which xcodegen > /dev/null || brew install xcodegen
-	@echo "Generating Xcode project..."
-	xcodegen generate
+	@bash scripts/xcodegen-generate-if-needed.sh
 
 # 生成 Xcode 项目
 xcode: setup
@@ -67,9 +66,9 @@ test-unit: setup
 		-project Scopy.xcodeproj \
 		-scheme Scopy \
 		-destination 'platform=macOS' \
-		-only-testing:ScopyTests/StorageServiceTests \
-		-only-testing:ScopyTests/SearchServiceTests \
-		-only-testing:ScopyTests/ClipboardMonitorTests \
+		-only-testing:ScopyTests \
+		-skip-testing:ScopyTests/IntegrationTests \
+		-skip-testing:ScopyTests/PerformanceTests \
 		2>&1 | tee test-unit.log
 
 # 运行性能测试
@@ -100,6 +99,8 @@ test-strict: setup
 		-scheme Scopy \
 		-destination 'platform=macOS' \
 		-only-testing:ScopyTests \
+		-skip-testing:ScopyTests/IntegrationTests \
+		-skip-testing:ScopyTests/PerformanceTests \
 		SWIFT_STRICT_CONCURRENCY=complete \
 		SWIFT_TREAT_WARNINGS_AS_ERRORS=YES \
 		2>&1 | tee strict-concurrency-test.log

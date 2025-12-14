@@ -196,6 +196,49 @@ extension XCTestCase {
             return nil
         }
     }
+
+    /// 等待异步条件满足（condition 为 async）
+    @MainActor
+    func waitForConditionAsync(
+        timeout: TimeInterval = 5.0,
+        pollInterval: TimeInterval = 0.1,
+        _ condition: @MainActor @escaping () async -> Bool,
+        file: StaticString = #file,
+        line: UInt = #line
+    ) async {
+        let deadline = Date().addingTimeInterval(timeout)
+
+        while Date() < deadline {
+            if await condition() {
+                return
+            }
+            try? await Task.sleep(nanoseconds: UInt64(pollInterval * 1_000_000_000))
+        }
+
+        XCTFail("Condition not met within \(timeout) seconds", file: file, line: line)
+    }
+
+    /// 等待异步 getter 返回非空值
+    @MainActor
+    func waitForValueAsync<T>(
+        timeout: TimeInterval = 5.0,
+        pollInterval: TimeInterval = 0.1,
+        _ getter: @MainActor @escaping () async -> T?,
+        file: StaticString = #file,
+        line: UInt = #line
+    ) async -> T? {
+        let deadline = Date().addingTimeInterval(timeout)
+
+        while Date() < deadline {
+            if let value = await getter() {
+                return value
+            }
+            try? await Task.sleep(nanoseconds: UInt64(pollInterval * 1_000_000_000))
+        }
+
+        XCTFail("Value not available within \(timeout) seconds", file: file, line: line)
+        return nil
+    }
 }
 
 // MARK: - Timing Assertions
