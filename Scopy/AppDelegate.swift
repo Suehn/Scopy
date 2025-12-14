@@ -30,6 +30,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         let appState = AppState.shared
 
+        let isUITesting = ProcessInfo.processInfo.arguments.contains("--uitesting")
+
         // 创建浮动面板
         panel = FloatingPanel(
             contentRect: NSRect(x: 0, y: 0, width: Int(ScopySize.Window.mainWidth), height: Int(ScopySize.Window.mainHeight)),
@@ -86,6 +88,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 return nil
             }
             return event
+        }
+
+        if isUITesting {
+            openSettings()
         }
     }
 
@@ -159,8 +165,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     func openSettings() {
         if settingsWindow == nil {
             let window = NSWindow(
-                contentRect: NSRect(x: 0, y: 0, width: 420, height: 380),
-                styleMask: [.titled, .closable],
+                contentRect: NSRect(
+                    x: 0,
+                    y: 0,
+                    width: Int(ScopySize.Window.settingsWidth),
+                    height: Int(ScopySize.Window.settingsHeight)
+                ),
+                styleMask: [.titled, .closable, .resizable],
                 backing: .buffered,
                 defer: false
             )

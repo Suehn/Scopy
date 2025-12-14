@@ -30,15 +30,7 @@ final class SettingsUITests: XCTestCase {
 
         // Open settings with Cmd+,
         window.typeKey(",", modifierFlags: .command)
-
-        Thread.sleep(forTimeInterval: 0.5)
-
-        // Check if settings window appeared
-        let settingsWindow = app.windows["Settings"]
-        // Note: Window may have different identifier
-        let settingsWindowExists = settingsWindow.exists
-        let windowCount = app.windows.count
-        XCTAssertTrue(settingsWindowExists || windowCount >= 1)
+        XCTAssertTrue(app.buttons["Settings.SaveButton"].waitForExistence(timeout: 3))
     }
 
     func testSettingsHasMaxItemsControl() throws {
@@ -50,14 +42,11 @@ final class SettingsUITests: XCTestCase {
         }
 
         window.typeKey(",", modifierFlags: .command)
-        Thread.sleep(forTimeInterval: 0.5)
+        XCTAssertTrue(app.buttons["Settings.SaveButton"].waitForExistence(timeout: 3))
 
-        // Look for max items picker or text field
-        let picker = app.popUpButtons.firstMatch
-        // Settings should have some controls
-        let pickerExists = picker.exists
-        let windowCount = app.windows.count
-        XCTAssertTrue(pickerExists || windowCount >= 1)
+        // Open Storage page and verify picker exists
+        app.staticTexts["存储"].click()
+        XCTAssertTrue(app.popUpButtons["Settings.MaxItemsPicker"].waitForExistence(timeout: 2))
     }
 
     func testSettingsSaveButton() throws {
@@ -68,14 +57,10 @@ final class SettingsUITests: XCTestCase {
         }
 
         window.typeKey(",", modifierFlags: .command)
-        Thread.sleep(forTimeInterval: 0.5)
+        let saveButton = app.buttons["Settings.SaveButton"]
+        XCTAssertTrue(saveButton.waitForExistence(timeout: 3))
 
-        // Look for save button
-        let saveButton = app.buttons["Save"]
-        if saveButton.exists {
-            let isEnabled = saveButton.isEnabled
-            XCTAssertTrue(isEnabled)
-        }
+        XCTAssertTrue(saveButton.isEnabled)
     }
 
     func testSettingsCancelButton() throws {
@@ -86,13 +71,9 @@ final class SettingsUITests: XCTestCase {
         }
 
         window.typeKey(",", modifierFlags: .command)
-        Thread.sleep(forTimeInterval: 0.5)
+        let cancelButton = app.buttons["Settings.CancelButton"]
+        XCTAssertTrue(cancelButton.waitForExistence(timeout: 3))
 
-        // Look for cancel button
-        let cancelButton = app.buttons["Cancel"]
-        if cancelButton.exists {
-            cancelButton.click()
-            // Window should close
-        }
+        cancelButton.click()
     }
 }

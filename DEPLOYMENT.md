@@ -26,13 +26,16 @@
 - runner：`macos-15`
 - Xcode：`16.0`
 
-## 本次更新（v0.43.15）
+## 本次更新（v0.43.16）
 
-- **Dev/Release（tag 驱动版本）**：
-  - 发布版本号以 git tag 为单一事实来源，停止 `0.18.{commit_count}` 自动版本。
-  - 构建注入 `MARKETING_VERSION/CURRENT_PROJECT_VERSION`，确保 About/版本展示一致。
-  - CI 发布流程：从 tag 构建；Cask 更新走 PR（workflow 不直接 push main）。
-- **性能**：本版本不涉及搜索/存储/清理热路径；性能基线沿用 v0.43.14。
+- **Fix/UX（设置界面重做）**：
+  - 设置窗口尺寸对齐设计系统（`settingsWidth/settingsHeight`），避免拥挤与错位。
+  - 侧边栏分类 + 页面标题/分组样式统一，文案与图标更一致。
+  - UI 测试关键控件增加 `accessibilityIdentifier`；`--uitesting` 自动打开设置窗口。
+- **性能实测**（MacBook Air（Mac15,12）24GB, macOS 15.7.2（24G325）, Debug, `make test-perf`；Low Power Mode disabled）：
+  - Search 10k (fuzzyPlus) cold start ≈ 112.40ms；steady P95 ≈ 49.12ms（Samples: 50）
+  - Disk 25k (fuzzyPlus) cold start ≈ 739.63ms；steady P95 ≈ 47.85ms（Samples: 60）
+  - Service-path disk 10k (fuzzyPlus) cold start ≈ 251.77ms；steady P95 ≈ 39.65ms（Samples: 50）
 - **测试结果**：
   - `make test-unit` **147 passed** (1 skipped)
   - `make test-integration` **12 passed**

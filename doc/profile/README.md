@@ -6,6 +6,7 @@
 
 | 版本 | 日期 | 主要变化 |
 |------|------|----------|
+| [v0.43.16-profile.md](./v0.43.16-profile.md) | 2025-12-15 | Fix/UX：重做设置界面（布局清晰 + 对齐 + 图标统一） |
 | [v0.43.15-profile.md](./v0.43.15-profile.md) | 2025-12-15 | Dev/Release：版本统一由 git tag 驱动（停止 commit-count 自动版本） |
 | [v0.43.14-profile.md](./v0.43.14-profile.md) | 2025-12-15 | Fix/UX：字数统计按“词/字”单位（中英文混排更准确） |
 | [v0.43.13-profile.md](./v0.43.13-profile.md) | 2025-12-15 | Fix/UX：Hover 预览弹窗贴合内容尺寸（图片/文本） |

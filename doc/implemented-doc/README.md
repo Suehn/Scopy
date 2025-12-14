@@ -8,8 +8,8 @@
 
 | 项目 | 状态 |
 |------|------|
-| **当前版本** | v0.43.15 |
-| **测试状态** | 单元测试通过（`make test-unit`: 147 passed, 1 skipped；`make test-perf`: 17 passed, 6 skipped；`make test-tsan`: 147 passed, 1 skipped；Strict Concurrency: `make test-strict` 147 passed, 1 skipped；`make test-integration`: 12 passed） |
+| **当前版本** | v0.43.16 |
+| **测试状态** | 单元测试通过（`make test-unit`: 147 passed, 1 skipped；`make test-perf`: 17 passed, 6 skipped；`make test-tsan`: 147 passed, 1 skipped；Strict Concurrency: `make test-strict` 147 passed, 1 skipped；`make test-integration`: 12 passed；UI(Settings): 4 passed） |
 | **构建状态** | Debug ✅ |
 | **部署位置** | /Applications/Scopy.app |
 | **最后更新** | 2025-12-15 |
@@ -24,6 +24,7 @@
 
 | 版本 | 日期 | 主要内容 | 状态 |
 |------|------|----------|------|
+| [v0.43.16](./v0.43.16.md) | 2025-12-15 | Fix/UX：重做设置界面（布局清晰 + 对齐 + 图标统一） | ✅ |
 | [v0.43.15](./v0.43.15.md) | 2025-12-15 | Dev/Release：版本统一由 git tag 驱动（停止 commit-count 自动版本） | ✅ |
 | [v0.43.14](./v0.43.14.md) | 2025-12-15 | Fix/UX：字数统计按“词/字”单位（中英文混排更准确） | ✅ |
 | [v0.43.13](./v0.43.13.md) | 2025-12-15 | Fix/UX：图片 hover 预览弹窗贴合图片尺寸 | ✅ |

@@ -5,6 +5,32 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [v0.43.16] - 2025-12-15
+
+### Fix/UX：重做设置界面（布局清晰 + 对齐 + 图标统一）
+
+- **设置窗口体验**：
+  - 设置页重构并收口到 `Scopy/Views/Settings/`，统一页面结构与分组排版，文案更一致。
+  - 设置窗口尺寸对齐 `ScopySize.Window.settingsWidth/settingsHeight`，避免内容被挤压导致对齐错乱。
+- **测试稳定性**：
+  - UI 测试关键控件添加 `accessibilityIdentifier`。
+  - `--uitesting` 启动参数下自动打开设置窗口，避免无窗口导致 UI 用例不稳定。
+
+### 修改文件
+
+- `Scopy/Views/Settings/SettingsView.swift`
+- `Scopy/Views/Settings/*.swift`
+- `Scopy/AppDelegate.swift`
+- `ScopyUITests/SettingsUITests.swift`
+
+### 测试
+
+- 单元测试：`make test-unit` **147 passed** (1 skipped)
+- 集成测试：`make test-integration` **12 passed**
+- 性能测试：`make test-perf` **17 passed** (6 skipped)
+- Thread Sanitizer：`make test-tsan` **147 passed** (1 skipped)
+- Strict Concurrency：`make test-strict` **147 passed** (1 skipped)
+
 ## [v0.43.15] - 2025-12-15
 
 ### Dev/Release：版本统一由 git tag 驱动（停止 commit-count 自动版本）
