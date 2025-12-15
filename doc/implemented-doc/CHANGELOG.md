@@ -5,6 +5,24 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [v0.43.26] - 2025-12-16
+
+### Fix/Preview：`\left...\right` 公式更鲁棒（避免被拆碎/误包裹）
+
+- **修复 loose `\left...\right` 公式**：对 `J\left(\left|...\right|\right)` 这类常见于论文/PDF 文本段落、但不在 `$...$` 内的片段，优先整体包裹为一个 `$...$`，避免被后续规则拆碎导致 KaTeX 报错。
+- **降低破碎 `$` 的二次损坏风险**：当原文本已包含 `$...$` 时，对 standalone TeX 命令的自动包裹更保守，避免生成 `$$$...` 等进一步破坏。
+- **回归测试**：新增英文论文段落与 Wasserstein 片段用例，覆盖 `\left...\right` run、`equation` 环境块与 `$()` inline math 的稳定性。
+
+### 修改文件
+
+- `Scopy/Views/History/MathNormalizer.swift`
+- `ScopyTests/MarkdownMathRenderingTests.swift`
+
+### 测试
+
+- 定向单测：`xcodebuild test -scheme Scopy -destination 'platform=macOS' -only-testing:ScopyTests/MarkdownMathRenderingTests` ✅
+- Release 构建：`xcodebuild build -scheme Scopy -configuration Release -destination 'platform=macOS'` ✅
+
 ## [v0.43.25] - 2025-12-16
 
 ### Fix/Preview：论文式 LaTeX 段落渲染修复（避免环境内注入 `$`）

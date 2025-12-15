@@ -268,14 +268,193 @@ enum MathNormalizer {
 
     private static func normalizePlainTextSegment(_ text: String) -> String {
         guard text.contains("\\") else { return text }
-        if text.contains("\\(") || text.contains("\\[") || text.contains("$$") { return text }
+        if text.contains("\\(") || text.contains("\\[") { return text }
 
-        var s = wrapBracketedMath(text, open: "(", close: ")", maxInnerLength: 320)
-        s = wrapBracketedMath(s, open: "（", close: "）", maxInnerLength: 320)
-        s = wrapBracketedMath(s, open: "[", close: "]", maxInnerLength: 320)
-        s = wrapBracketedMath(s, open: "【", close: "】", maxInnerLength: 320)
-        s = wrapStandaloneCommandsOutsideDollarMath(s, maxLength: 160)
-        return s
+        let hasAnyDollar = text.contains("$")
+        return transformOutsideDollarMath(text) { chunk in
+            // 1) First, wrap `\left...\right` runs as one math segment to avoid later transforms
+            // accidentally splitting them (which makes KaTeX fail).
+            var s = wrapLeftRightRunAsMath(chunk, maxScan: 2_000)
+
+            // 2) Then apply other "loose LaTeX" heuristics only outside any `$...$` segments,
+            // including the ones we just inserted above.
+            s = transformOutsideDollarMath(s) { outside in
+                var t = outside
+                t = wrapBracketedMath(t, open: "(", close: ")", maxInnerLength: 320)
+                t = wrapBracketedMath(t, open: "（", close: "）", maxInnerLength: 320)
+                t = wrapBracketedMath(t, open: "[", close: "]", maxInnerLength: 320)
+                t = wrapBracketedMath(t, open: "【", close: "】", maxInnerLength: 320)
+                // Be conservative when the original input already contains `$...$`:
+                // malformed PDF extraction often has broken `$` boundaries, and wrapping standalone commands
+                // can easily create `$$$...` artifacts that then confuse the protection phase.
+                if !hasAnyDollar {
+                    t = transformOutsideDollarMath(t) { wrapStandaloneCommands($0, maxLength: 160) }
+                }
+                return t
+            }
+
+            return s
+        }
+    }
+
+    private static func transformOutsideDollarMath(_ text: String, transform: (String) -> String) -> String {
+        guard text.contains("$") else { return transform(text) }
+
+        var result = ""
+        result.reserveCapacity(text.count)
+
+        var i = text.startIndex
+        while i < text.endIndex {
+            guard text[i] == "$" else {
+                if let next = text[i...].firstIndex(of: "$") {
+                    let chunk = String(text[i..<next])
+                    result += transform(chunk)
+                    i = next
+                    continue
+                }
+                let chunk = String(text[i..<text.endIndex])
+                result += transform(chunk)
+                break
+            }
+
+            // Handle escaped dollars.
+            if i > text.startIndex, text[text.index(before: i)] == "\\" {
+                result.append("$")
+                i = text.index(after: i)
+                continue
+            }
+
+            // Detect delimiter (`$` or `$$`).
+            let next = text.index(after: i)
+            let isDouble = next < text.endIndex && text[next] == "$"
+            let delimiter = isDouble ? "$$" : "$"
+            let afterStart = isDouble ? text.index(after: next) : next
+
+            if let end = findUnescapedDollarDelimiter(in: text, delimiter: delimiter, from: afterStart) {
+                let endAfter = text.index(end, offsetBy: delimiter.count)
+                result += text[i..<endAfter]
+                i = endAfter
+                continue
+            }
+
+            // Unclosed: treat the `$` as normal text.
+            result.append("$")
+            i = text.index(after: i)
+        }
+
+        return result
+    }
+
+    /// Wraps loose `...\\left ... \\right...` runs into `$...$` so KaTeX can render them.
+    ///
+    /// This targets common PDF/LaTeX text like `J\\left(\\left|...\\right|\\right)` that appears outside any `$...$`.
+    /// We must wrap the whole run; wrapping just `\\mathbf{...}` fragments breaks the `\\left/\\right` pairing.
+    private static func wrapLeftRightRunAsMath(_ text: String, maxScan: Int) -> String {
+        guard text.contains("\\left"), text.contains("\\right") else { return text }
+
+        var result = ""
+        result.reserveCapacity(text.count + 8)
+
+        var i = text.startIndex
+        while i < text.endIndex {
+            guard let leftRange = text.range(of: "\\left", range: i..<text.endIndex) else {
+                result += text[i..<text.endIndex]
+                break
+            }
+
+            result += text[i..<leftRange.lowerBound]
+
+            // Expand to include an ASCII identifier immediately before `\left` (e.g. `J\left`).
+            var start = leftRange.lowerBound
+            var prefixStart = start
+            while prefixStart > text.startIndex {
+                let prevIndex = text.index(before: prefixStart)
+                let ch = text[prevIndex]
+                if isASCIIIdentifierChar(ch) {
+                    prefixStart = prevIndex
+                    continue
+                }
+                break
+            }
+            start = prefixStart
+
+            var depth = 1
+            var scanIndex = leftRange.upperBound
+            var scanned = 0
+
+            while scanIndex < text.endIndex, scanned < maxScan {
+                let nextLeft = text.range(of: "\\left", range: scanIndex..<text.endIndex)
+                let nextRight = text.range(of: "\\right", range: scanIndex..<text.endIndex)
+                guard let rightRange = nextRight else { break }
+
+                if let leftRange2 = nextLeft, leftRange2.lowerBound < rightRange.lowerBound {
+                    depth += 1
+                    scanIndex = leftRange2.upperBound
+                    scanned += 1
+                    continue
+                }
+
+                depth -= 1
+                var endAfterRight = rightRange.upperBound
+                endAfterRight = consumeRightDelimiterToken(in: text, from: endAfterRight)
+                scanIndex = endAfterRight
+                scanned += 1
+
+                if depth == 0 {
+                    let run = String(text[start..<endAfterRight])
+                    if !run.contains("$"), shouldWrapAsMath(run) {
+                        result.append("$")
+                        result += run
+                        result.append("$")
+                    } else {
+                        result += run
+                    }
+                    i = endAfterRight
+                    break
+                }
+            }
+
+            if depth != 0 {
+                // Unmatched: keep original.
+                result += text[leftRange.lowerBound..<text.endIndex]
+                break
+            }
+        }
+
+        return result
+    }
+
+    private static func consumeRightDelimiterToken(in text: String, from index: String.Index) -> String.Index {
+        var i = index
+        while i < text.endIndex, text[i].isWhitespace {
+            i = text.index(after: i)
+        }
+        guard i < text.endIndex else { return i }
+
+        if text[i] == "\\" {
+            var j = text.index(after: i)
+            var letters = 0
+            while j < text.endIndex, text[j].isLetter, letters < 32 {
+                j = text.index(after: j)
+                letters += 1
+            }
+            if letters == 0, j < text.endIndex {
+                j = text.index(after: j)
+            }
+            return j
+        }
+
+        return text.index(after: i)
+    }
+
+    private static func isASCIIIdentifierChar(_ ch: Character) -> Bool {
+        guard ch.unicodeScalars.count == 1, let scalar = ch.unicodeScalars.first else { return false }
+        switch scalar.value {
+        case 48...57, 65...90, 97...122: // 0-9 A-Z a-z
+            return true
+        default:
+            return ch == "_" || ch == "-"
+        }
     }
 
     private static func wrapBracketedMath(_ text: String, open: Character, close: Character, maxInnerLength: Int) -> String {
@@ -341,56 +520,6 @@ enum MathNormalizer {
             }
 
             i = text.index(after: closeIndex)
-        }
-
-        return result
-    }
-
-    private static func wrapStandaloneCommandsOutsideDollarMath(_ text: String, maxLength: Int) -> String {
-        guard text.contains("\\") else { return text }
-        guard text.contains("$") else { return wrapStandaloneCommands(text, maxLength: maxLength) }
-
-        var result = ""
-        result.reserveCapacity(text.count)
-
-        var i = text.startIndex
-        while i < text.endIndex {
-            guard text[i] == "$" else {
-                // Copy until next `$` (fast path).
-                if let next = text[i...].firstIndex(of: "$") {
-                    let chunk = String(text[i..<next])
-                    result += wrapStandaloneCommands(chunk, maxLength: maxLength)
-                    i = next
-                    continue
-                }
-                let chunk = String(text[i..<text.endIndex])
-                result += wrapStandaloneCommands(chunk, maxLength: maxLength)
-                break
-            }
-
-            // Handle escaped dollars.
-            if i > text.startIndex, text[text.index(before: i)] == "\\" {
-                result.append("$")
-                i = text.index(after: i)
-                continue
-            }
-
-            // Detect delimiter (`$` or `$$`).
-            let next = text.index(after: i)
-            let isDouble = next < text.endIndex && text[next] == "$"
-            let delimiter = isDouble ? "$$" : "$"
-            let afterStart = isDouble ? text.index(after: next) : next
-
-            if let end = findUnescapedDollarDelimiter(in: text, delimiter: delimiter, from: afterStart) {
-                let endAfter = text.index(end, offsetBy: delimiter.count)
-                result += text[i..<endAfter]
-                i = endAfter
-                continue
-            }
-
-            // Unclosed: treat the `$` as normal text.
-            result.append("$")
-            i = text.index(after: i)
         }
 
         return result

@@ -246,4 +246,62 @@ final class MarkdownMathRenderingTests: XCTestCase {
             XCTAssertTrue(block.contains("\\tag{"))
         }
     }
+
+    func testLooseLeftRightRunIsWrappedAsSingleMathSegment() {
+        let input = """
+        where \\hat{s}_i^\\mu=\\hat{S}_i^\\mu / s, \\mathbf{r}_i is the $d$-dimensional vector, \
+        J\\left(\\left|\\mathbf{r}_i-\\mathbf{r}_j\\right|\\right) is the interaction strength.
+        """
+
+        let normalized = MathNormalizer.wrapLooseLaTeX(input)
+        XCTAssertTrue(normalized.contains("$J\\left("))
+        XCTAssertTrue(normalized.contains("\\right)$"))
+
+        let protected = MathProtector.protectMath(in: normalized)
+        let leftRight = protected.placeholders.map(\.original).first { s in
+            s.contains("$J\\left(") && s.contains("\\right)$")
+        }
+        XCTAssertNotNil(leftRight)
+        if let leftRight {
+            XCTAssertFalse(leftRight.dropFirst().contains("$$"))
+            XCTAssertTrue(leftRight.contains("\\mathbf{r}_i"))
+        }
+    }
+
+    func testWassersteinSnippetWrapsLooseParenMathAndKeepsEquationEnvironmentIntact() {
+        let input = """
+        \\subsubsection{2.6.1 最优传输与 Wasserstein 距离}
+
+        最优传输（Optimal Transport, OT）关注将一个分布“搬运”为另一个分布的最小代价。设 $(P)$ 与 $(Q)$ 为定义在空间 $(\\Omega)$ 上的概率分布，$(\\Pi(P,Q))$ 表示以 $(P,Q)$ 为边缘分布的联合分布集合。
+
+        Wasserstein距离可定义为
+        \\begin{equation}
+        \\begin{aligned}
+        W(P,Q)
+        =
+        \\inf_{\\pi\\in\\Pi(P,Q)} \\int_{\\Omega\\times\\Omega} c(x,y), d\\pi(x,y).
+        \\end{aligned}
+        \\tag{2-17}
+        \\end{equation}
+        """
+
+        let latexNormalized = LaTeXDocumentNormalizer.normalize(input)
+        let normalized = MathNormalizer.wrapLooseLaTeX(latexNormalized)
+
+        // Keep already-delimited `$...$` paren math intact.
+        XCTAssertTrue(normalized.contains("$(\\Pi(P,Q))$"))
+        XCTAssertTrue(normalized.contains("$(\\Omega)$"))
+
+        let protected = MathProtector.protectMath(in: normalized)
+        let equationBlocks = protected.placeholders
+            .map(\.original)
+            .filter { $0.contains("\\begin{equation}") && $0.contains("\\end{equation}") }
+        XCTAssertEqual(equationBlocks.count, 1)
+        if let block = equationBlocks.first {
+            XCTAssertFalse(block.contains("$"))
+            XCTAssertTrue(block.contains("\\inf_{\\pi\\in\\Pi(P,Q)}"))
+            XCTAssertTrue(block.contains("\\Omega\\times\\Omega"))
+            XCTAssertTrue(block.contains("\\tag{2-17}"))
+        }
+    }
 }
