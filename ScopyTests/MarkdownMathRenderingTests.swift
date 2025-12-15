@@ -208,4 +208,42 @@ final class MarkdownMathRenderingTests: XCTestCase {
         XCTAssertTrue(html.contains("\\begin{equation}"))
         XCTAssertTrue(html.contains("\\tag{2-1}"))
     }
+
+    func testFullPaperSnippetDoesNotInjectNestedDollarsInsideEquationEnvironments() {
+        let input = """
+        \\subsection{2.1 问题定义与符号约定}
+
+        设用户集合为 ($\\mathcal{U}$)，物品集合为 ($\\mathcal{I}$)，观测到的交互集合为
+        \\begin{equation}
+        \\begin{aligned}
+        \\mathcal{E}\\subseteq \\mathcal{U}\\times\\mathcal{I}.
+        \\end{aligned}
+        \\tag{2-1}
+        \\end{equation}
+
+        为了刻画用户—物品之间的协同关系，常将交互数据表示为二部图
+        \\begin{equation}
+        \\begin{aligned}
+        \\mathcal{G}=(\\mathcal{V},\\mathcal{E}),\\quad \\mathcal{V}=\\mathcal{U}\\cup\\mathcal{I}.
+        \\end{aligned}
+        \\tag{2-2}
+        \\end{equation}
+        """
+
+        let latexNormalized = LaTeXDocumentNormalizer.normalize(input)
+        let normalized = MathNormalizer.wrapLooseLaTeX(latexNormalized)
+        let protected = MathProtector.protectMath(in: normalized)
+
+        let equationBlocks = protected.placeholders
+            .map(\.original)
+            .filter { $0.contains("\\begin{equation}") && $0.contains("\\end{equation}") }
+        XCTAssertFalse(equationBlocks.isEmpty)
+
+        for block in equationBlocks {
+            // Environment math should not contain nested `$...$` injected by the loose-LaTeX wrapper.
+            XCTAssertFalse(block.contains("$"))
+            XCTAssertTrue(block.contains("\\mathcal"))
+            XCTAssertTrue(block.contains("\\tag{"))
+        }
+    }
 }

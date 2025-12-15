@@ -5,6 +5,22 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [v0.43.25] - 2025-12-16
+
+### Fix/Preview：论文式 LaTeX 段落渲染修复（避免环境内注入 `$`）
+
+- **修复环境公式渲染失败**：`MathNormalizer.wrapLooseLaTeX` 跳过 `$$...$$` display 块与 `\\begin{equation/align/...}` 环境块内部，避免将 `\\mathcal{...}` 等命令错误包裹为 `$...$` 导致 KaTeX 环境解析出现“嵌套 `$`”错误。
+- **回归测试**：新增整段论文内容用例，确保环境块内部不被注入 `$`，否则测试直接失败。
+
+### 修改文件
+
+- `Scopy/Views/History/MathNormalizer.swift`
+- `ScopyTests/MarkdownMathRenderingTests.swift`
+
+### 测试
+
+- 定向单测：`xcodebuild test -scheme Scopy -destination 'platform=macOS' -only-testing:ScopyTests/MarkdownMathRenderingTests` ✅
+
 ## [v0.43.24] - 2025-12-16
 
 ### Fix/Preview：LaTeX 环境公式渲染更兼容 + 预览脚本注入防护

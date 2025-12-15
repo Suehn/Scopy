@@ -38,6 +38,11 @@ enum MathNormalizer {
         var fenceMarker: Character? = nil
         var fenceCount = 0
 
+        var inDisplayDollarBlock = false
+
+        var inEnvironmentBlock = false
+        var environmentName: String = ""
+
         // Some sources use display-math blocks like:
         // [
         //   ...TeX...
@@ -69,6 +74,37 @@ enum MathNormalizer {
             }
 
             if inFencedCodeBlock {
+                outputLines.append(line)
+                continue
+            }
+
+            if inEnvironmentBlock {
+                outputLines.append(line)
+                if line.contains("\\end{\(environmentName)}") {
+                    inEnvironmentBlock = false
+                    environmentName = ""
+                }
+                continue
+            }
+
+            if let beginName = environmentBeginName(in: line) {
+                inEnvironmentBlock = true
+                environmentName = beginName
+                outputLines.append(line)
+                if line.contains("\\end{\(environmentName)}") {
+                    inEnvironmentBlock = false
+                    environmentName = ""
+                }
+                continue
+            }
+
+            if isDisplayDollarDelimiterLine(line) {
+                outputLines.append(line)
+                inDisplayDollarBlock.toggle()
+                continue
+            }
+
+            if inDisplayDollarBlock {
                 outputLines.append(line)
                 continue
             }
@@ -130,6 +166,29 @@ enum MathNormalizer {
     private static func isBracketDisplayDelimiterLine(_ line: String, expected: Character) -> Bool {
         line.trimmingCharacters(in: .whitespacesAndNewlines).count == 1
             && line.trimmingCharacters(in: .whitespacesAndNewlines).first == expected
+    }
+
+    private static func isDisplayDollarDelimiterLine(_ line: String) -> Bool {
+        line.trimmingCharacters(in: .whitespacesAndNewlines) == "$$"
+    }
+
+    private static func environmentBeginName(in line: String) -> String? {
+        let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.hasPrefix("\\begin{") else { return nil }
+        guard let close = trimmed.firstIndex(of: "}") else { return nil }
+        let start = trimmed.index(trimmed.startIndex, offsetBy: "\\begin{".count)
+        let name = String(trimmed[start..<close])
+
+        let supported: Set<String> = [
+            "equation", "equation*",
+            "align", "align*",
+            "aligned",
+            "cases",
+            "gather", "gather*",
+            "multline", "multline*",
+            "split"
+        ]
+        return supported.contains(name) ? name : nil
     }
 
     private static func leadingIndentSpaces(in line: String) -> Int {
