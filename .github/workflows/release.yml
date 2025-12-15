@@ -167,60 +167,40 @@ jobs:
           fi
           echo "sha256=${SHA256}" >> "$GITHUB_OUTPUT"
 
-  update_casks:
+  update_homebrew_tap:
     needs: build_release
-    runs-on: macos-15
+    runs-on: ubuntu-latest
     permissions:
-      contents: write
-      pull-requests: write
+      contents: none
 
     steps:
-      - name: Checkout main
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          ref: main
-
-      - name: Update Cask
-        run: |
-          VERSION="${{ needs.build_release.outputs.version }}"
-          SHA256="${{ needs.build_release.outputs.sha256 }}"
-
-          sed -i '' "s/version \".*\"/version \"${VERSION}\"/" Casks/scopy.rb
-          sed -i '' "s/sha256 \".*\"/sha256 \"${SHA256}\"/" Casks/scopy.rb
-
-      - name: Create PR for updated Cask
-        uses: peter-evans/create-pull-request@v7
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          base: main
-          commit-message: "chore: update Cask to v${{ needs.build_release.outputs.version }}"
-          branch: "automation/cask-v${{ needs.build_release.outputs.version }}"
-          title: "chore: update Cask to v${{ needs.build_release.outputs.version }}"
-          body: |
-            Automated Cask bump for `${{ needs.build_release.outputs.tag }}`.
-          add-paths: |
-            Casks/scopy.rb
-
-      - name: Open PR to Homebrew/homebrew-cask
-        continue-on-error: true
+      - name: Update Homebrew tap (Suehn/homebrew-scopy)
         env:
-          HOMEBREW_GITHUB_API_TOKEN: ${{ secrets.HOMEBREW_GITHUB_API_TOKEN }}
+          TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_GITHUB_API_TOKEN }}
         run: |
-          if [[ -z "${HOMEBREW_GITHUB_API_TOKEN:-}" ]]; then
-            echo "HOMEBREW_GITHUB_API_TOKEN is not set; skipping Homebrew/homebrew-cask bump PR."
+          set -euo pipefail
+          if [[ -z "${TAP_GITHUB_TOKEN:-}" ]]; then
+            echo "HOMEBREW_GITHUB_API_TOKEN is not set; skipping tap update for Suehn/homebrew-scopy."
             exit 0
           fi
 
           VERSION="${{ needs.build_release.outputs.version }}"
           SHA256="${{ needs.build_release.outputs.sha256 }}"
-          URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/v${VERSION}/Scopy-${VERSION}.dmg"
 
-          brew update
-          brew bump-cask-pr \
-            --cask scopy \
-            --version "${VERSION}" \
-            --sha256 "${SHA256}" \
-            --url "${URL}" \
-            --no-browse \
-            --message "scopy ${VERSION}"
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          TAP_DIR="homebrew-scopy"
+          git clone "https://x-access-token:${TAP_GITHUB_TOKEN}@github.com/Suehn/homebrew-scopy.git" "${TAP_DIR}"
+
+          python3 -c "import re; p='${TAP_DIR}/Casks/scopy.rb'; s=open(p,'r',encoding='utf-8').read(); s=re.sub(r'version \"[^\"]+\"', f'version \"{VERSION}\"', s); s=re.sub(r'sha256 \"[^\"]+\"', f'sha256 \"{SHA256}\"', s); open(p,'w',encoding='utf-8').write(s)"
+
+          cd "${TAP_DIR}"
+          if git diff --quiet; then
+            echo "Tap already up-to-date (scopy ${VERSION})."
+            exit 0
+          fi
+
+          git add Casks/scopy.rb
+          git commit -m "scopy ${VERSION}"
+          git push origin HEAD:main
