@@ -80,11 +80,14 @@ struct MarkdownPreviewWebView: NSViewRepresentable {
             forIdentifier: blockNetworkRuleListIdentifier,
             encodedContentRuleList: blockNetworkRulesJSON
         ) { ruleList, _ in
-            guard let ruleList else { return }
             ruleListLock.lock()
-            cachedBlockNetworkRuleList = ruleList
             isCompilingRuleList = false
+            if let ruleList {
+                cachedBlockNetworkRuleList = ruleList
+            }
             ruleListLock.unlock()
+
+            guard let ruleList else { return }
             DispatchQueue.main.async {
                 for pending in pendingControllers.allObjects {
                     pending.add(ruleList)

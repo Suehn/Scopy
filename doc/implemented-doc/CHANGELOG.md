@@ -5,6 +5,38 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [v0.43.27] - 2025-12-16
+
+### Refactor/Preview：预览渲染实现收敛（环境 SSOT + 轻量工具复用）+ KaTeX 语法回归测试
+
+- **SSOT：环境与 delimiters 收敛**：新增 `MathEnvironmentSupport`，统一维护 KaTeX auto-render 的环境 delimiters 与可识别 `\\begin{...}` 环境集合，避免 Swift/JS/测试列表漂移。
+- **重复逻辑抽象**：新增 `MarkdownCodeSkipper`，统一 fenced/inline code 跳过与缩进计算，减少 `LaTeXDocumentNormalizer` / `MathNormalizer` / `MathProtector` 重复实现。
+- **性能与健壮性**：
+  - `MarkdownDetector` 对超大文本（> 200k UTF-16）快速返回，避免 hover 检测阶段无意义扫描。
+  - `MarkdownPreviewWebView` 的网络阻断规则编译失败时复位状态，避免后续永远处于 compiling 状态。
+  - placeholder 替换由多次 split/join 收敛为一次 regex replace 映射，减少大段公式文本的 JS 处理成本。
+- **安全**：CSP 收紧 `img-src`，移除 `file:`，避免剪贴板 Markdown 读取本机任意路径文件。
+- **测试**：
+  - 新增 `KaTeXRenderToStringTests`：用 `JavaScriptCore` 执行 `katex.renderToString`，对论文/符号表样例的每个数学片段做语法回归验证。
+  - 补充 `MarkdownMathRenderingTests`：覆盖 `(\mathcal{U})`（无 `$`）与 `\\( \\)` / `\\[ \\]` 的保护行为。
+
+### 修改文件
+
+- `Scopy/Views/History/MathEnvironmentSupport.swift`
+- `Scopy/Views/History/MarkdownCodeSkipper.swift`
+- `Scopy/Views/History/MarkdownHTMLRenderer.swift`
+- `Scopy/Views/History/MathNormalizer.swift`
+- `Scopy/Views/History/MathProtector.swift`
+- `Scopy/Views/History/LaTeXDocumentNormalizer.swift`
+- `Scopy/Views/History/MarkdownDetector.swift`
+- `Scopy/Views/History/MarkdownPreviewWebView.swift`
+- `ScopyTests/KaTeXRenderToStringTests.swift`
+- `ScopyTests/MarkdownMathRenderingTests.swift`
+
+### 测试
+
+- 定向单测：`xcodebuild test -scheme Scopy -destination 'platform=macOS' -only-testing:ScopyTests/MarkdownMathRenderingTests -only-testing:ScopyTests/KaTeXRenderToStringTests` ✅
+
 ## [v0.43.26] - 2025-12-16
 
 ### Fix/Preview：`\left...\right` 公式更鲁棒（避免被拆碎/误包裹）

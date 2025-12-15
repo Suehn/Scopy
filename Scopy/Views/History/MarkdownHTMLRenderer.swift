@@ -21,6 +21,37 @@ enum MarkdownHTMLRenderer {
         )
     }
 
+    private static let cspMetaTag = """
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src 'self' data:; style-src 'self' 'unsafe-inline' file:; script-src 'self' 'unsafe-inline' file:; font-src 'self' data: file:;">
+    """
+
+    private static let baseStyle = """
+    <style>
+      :root { color-scheme: light dark; }
+      body {
+        margin: 0;
+        padding: 16px;
+        font: -apple-system-body;
+        line-height: 1.45;
+        background: transparent;
+      }
+      #content { word-break: break-word; }
+      pre, code { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
+      pre {
+        padding: 12px;
+        border-radius: 8px;
+        overflow-x: auto;
+      }
+      img { max-width: 100%; height: auto; }
+      a { pointer-events: none; text-decoration: underline; }
+      blockquote { margin: 0; padding-left: 12px; border-left: 3px solid rgba(127,127,127,0.35); }
+      hr { border: 0; border-top: 1px solid rgba(127,127,127,0.35); margin: 12px 0; }
+      table { border-collapse: collapse; width: 100%; }
+      th, td { border: 1px solid rgba(127,127,127,0.25); padding: 6px 8px; vertical-align: top; }
+      thead th { background: rgba(127,127,127,0.10); }
+    </style>
+    """
+
     private static func htmlDocument(
         markdown: String,
         placeholders: [(placeholder: String, original: String)],
@@ -29,6 +60,7 @@ enum MarkdownHTMLRenderer {
     ) -> String {
         let mathIncludes: String
         if enableMath {
+            let delimitersLiteral = MathEnvironmentSupport.katexDelimitersJSArrayLiteral()
             mathIncludes = """
             <link rel="stylesheet" href="katex.min.css">
             <script defer src="katex.min.js"></script>
@@ -41,23 +73,7 @@ enum MarkdownHTMLRenderer {
                   if (!el) { return; }
                   if (typeof renderMathInElement !== 'function') { return; }
                   renderMathInElement(el, {
-                    delimiters: [
-                      {left: '\\\\begin{equation}', right: '\\\\end{equation}', display: true},
-                      {left: '\\\\begin{equation*}', right: '\\\\end{equation*}', display: true},
-                      {left: '\\\\begin{align}', right: '\\\\end{align}', display: true},
-                      {left: '\\\\begin{align*}', right: '\\\\end{align*}', display: true},
-                      {left: '\\\\begin{aligned}', right: '\\\\end{aligned}', display: true},
-                      {left: '\\\\begin{cases}', right: '\\\\end{cases}', display: true},
-                      {left: '\\\\begin{gather}', right: '\\\\end{gather}', display: true},
-                      {left: '\\\\begin{gather*}', right: '\\\\end{gather*}', display: true},
-                      {left: '\\\\begin{multline}', right: '\\\\end{multline}', display: true},
-                      {left: '\\\\begin{multline*}', right: '\\\\end{multline*}', display: true},
-                      {left: '\\\\begin{split}', right: '\\\\end{split}', display: true},
-                      {left: '$$', right: '$$', display: true},
-                      {left: '$', right: '$', display: false},
-                      {left: '\\\\[', right: '\\\\]', display: true},
-                      {left: '\\\\(', right: '\\\\)', display: false}
-                    ],
+                    delimiters: \(delimitersLiteral),
                     throwOnError: false,
                     strict: 'ignore',
                     ignoredTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code']
@@ -86,8 +102,8 @@ enum MarkdownHTMLRenderer {
         }
 
         let markdownLiteral = jsonStringLiteral(markdown)
-        let placeholderPairs: [[String]] = placeholders.map { [$0.placeholder, escapeHTML($0.original)] }
-        let placeholdersLiteral = jsonStringLiteral(placeholderPairs)
+        let placeholderMap: [String: String] = Dictionary(uniqueKeysWithValues: placeholders.map { ($0.placeholder, escapeHTML($0.original)) })
+        let placeholdersLiteral = jsonStringLiteral(placeholderMap)
 
         let markdownRenderScript = """
         <script defer src="contrib/markdown-it.min.js"></script>
@@ -102,14 +118,13 @@ enum MarkdownHTMLRenderer {
               }
 
               var md = window.markdownit({ html: false, linkify: false, typographer: true });
+              if (md && typeof md.enable === 'function') {
+                md.enable('table');
+              }
               var src = \(markdownLiteral);
               var html = md.render(src);
-              var pairs = \(placeholdersLiteral);
-              for (var i = 0; i < pairs.length; i++) {
-                var key = pairs[i][0];
-                var val = pairs[i][1];
-                html = html.split(key).join(val);
-              }
+              var map = \(placeholdersLiteral);
+              html = html.replace(/SCOPYMATHPLACEHOLDER\\d+X/g, function (m) { return map[m] || m; });
               el.innerHTML = html;
 
               if (typeof window.__scopyRenderMath === 'function') {
@@ -132,33 +147,10 @@ enum MarkdownHTMLRenderer {
           <head>
             <meta charset="utf-8">
             <meta name="viewport" content="width=device-width, initial-scale=1">
-            <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src 'self' data: file:; style-src 'self' 'unsafe-inline' file:; script-src 'self' 'unsafe-inline' file:; font-src 'self' data: file:;">
+            \(cspMetaTag)
             \(markdownRenderScript)
             \(mathIncludes)
-            <style>
-              :root { color-scheme: light dark; }
-              body {
-                margin: 0;
-                padding: 16px;
-                font: -apple-system-body;
-                line-height: 1.45;
-                background: transparent;
-              }
-              #content { word-break: break-word; }
-              pre, code { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
-              pre {
-                padding: 12px;
-                border-radius: 8px;
-                overflow-x: auto;
-              }
-              img { max-width: 100%; height: auto; }
-              a { pointer-events: none; text-decoration: underline; }
-              blockquote { margin: 0; padding-left: 12px; border-left: 3px solid rgba(127,127,127,0.35); }
-              hr { border: 0; border-top: 1px solid rgba(127,127,127,0.35); margin: 12px 0; }
-              table { border-collapse: collapse; width: 100%; }
-              th, td { border: 1px solid rgba(127,127,127,0.25); padding: 6px 8px; vertical-align: top; }
-              thead th { background: rgba(127,127,127,0.10); }
-            </style>
+            \(baseStyle)
           </head>
           <body>
             <div id="content"><pre>\(escapeHTML(fallbackText))</pre></div>
@@ -185,9 +177,9 @@ enum MarkdownHTMLRenderer {
         return s.replacingOccurrences(of: "</script", with: "<\\/script", options: [.caseInsensitive])
     }
 
-    private static func jsonStringLiteral(_ value: [[String]]) -> String {
+    private static func jsonStringLiteral(_ value: [String: String]) -> String {
         let data = (try? JSONEncoder().encode(value)) ?? Data()
-        let s = String(data: data, encoding: .utf8) ?? "[]"
+        let s = String(data: data, encoding: .utf8) ?? "{}"
         return s.replacingOccurrences(of: "</script", with: "<\\/script", options: [.caseInsensitive])
     }
 }

@@ -14,7 +14,7 @@ enum LaTeXDocumentNormalizer {
         for lineSub in text.split(separator: "\n", omittingEmptySubsequences: false) {
             let line = String(lineSub)
 
-            if let (marker, count) = fencePrefix(in: line) {
+            if let (marker, count) = MarkdownCodeSkipper.fencePrefix(in: line) {
                 if !inFencedCodeBlock {
                     inFencedCodeBlock = true
                     fenceMarker = marker
@@ -68,15 +68,4 @@ enum LaTeXDocumentNormalizer {
 
         return nil
     }
-
-    private static func fencePrefix(in line: String) -> (Character, Int)? {
-        let trimmed = line.trimmingCharacters(in: .whitespaces)
-        guard let first = trimmed.first, first == "`" || first == "~" else { return nil }
-        var count = 0
-        for ch in trimmed {
-            if ch == first { count += 1 } else { break }
-        }
-        return count >= 3 ? (first, count) : nil
-    }
 }
-

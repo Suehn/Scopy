@@ -56,7 +56,7 @@ enum MathNormalizer {
         for lineSub in markdown.split(separator: "\n", omittingEmptySubsequences: false) {
             var line = String(lineSub)
 
-            if let (marker, count) = fencePrefix(in: line) {
+            if let (marker, count) = MarkdownCodeSkipper.fencePrefix(in: line) {
                 if !inFencedCodeBlock {
                     inFencedCodeBlock = true
                     fenceMarker = marker
@@ -87,7 +87,7 @@ enum MathNormalizer {
                 continue
             }
 
-            if let beginName = environmentBeginName(in: line) {
+            if let beginName = MathEnvironmentSupport.environmentBeginName(in: line) {
                 inEnvironmentBlock = true
                 environmentName = beginName
                 outputLines.append(line)
@@ -116,7 +116,7 @@ enum MathNormalizer {
                     bracketLines.removeAll(keepingCapacity: true)
                 }
                 inBracketDisplayBlock = true
-                bracketIndentSpaces = min(3, leadingIndentSpaces(in: line))
+                bracketIndentSpaces = min(3, MarkdownCodeSkipper.leadingIndentSpaces(in: line))
                 bracketLines.append(line)
                 continue
             }
@@ -140,7 +140,7 @@ enum MathNormalizer {
                 continue
             }
 
-            line = processInlineCode(in: line) { segment in
+            line = MarkdownCodeSkipper.processInlineCode(in: line) { segment in
                 normalizePlainTextSegment(segment)
             }
             outputLines.append(line)
@@ -153,16 +153,6 @@ enum MathNormalizer {
         return outputLines.joined(separator: "\n")
     }
 
-    private static func fencePrefix(in line: String) -> (Character, Int)? {
-        let trimmed = line.trimmingCharacters(in: .whitespaces)
-        guard let first = trimmed.first, first == "`" || first == "~" else { return nil }
-        var count = 0
-        for ch in trimmed {
-            if ch == first { count += 1 } else { break }
-        }
-        return count >= 3 ? (first, count) : nil
-    }
-
     private static func isBracketDisplayDelimiterLine(_ line: String, expected: Character) -> Bool {
         line.trimmingCharacters(in: .whitespacesAndNewlines).count == 1
             && line.trimmingCharacters(in: .whitespacesAndNewlines).first == expected
@@ -170,41 +160,6 @@ enum MathNormalizer {
 
     private static func isDisplayDollarDelimiterLine(_ line: String) -> Bool {
         line.trimmingCharacters(in: .whitespacesAndNewlines) == "$$"
-    }
-
-    private static func environmentBeginName(in line: String) -> String? {
-        let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard trimmed.hasPrefix("\\begin{") else { return nil }
-        guard let close = trimmed.firstIndex(of: "}") else { return nil }
-        let start = trimmed.index(trimmed.startIndex, offsetBy: "\\begin{".count)
-        let name = String(trimmed[start..<close])
-
-        let supported: Set<String> = [
-            "equation", "equation*",
-            "align", "align*",
-            "aligned",
-            "cases",
-            "gather", "gather*",
-            "multline", "multline*",
-            "split"
-        ]
-        return supported.contains(name) ? name : nil
-    }
-
-    private static func leadingIndentSpaces(in line: String) -> Int {
-        var spaces = 0
-        for ch in line {
-            if ch == " " {
-                spaces += 1
-                continue
-            }
-            if ch == "\t" {
-                spaces += 4
-                continue
-            }
-            break
-        }
-        return spaces
     }
 
     private static func shouldTreatAsDisplayMathBlock(_ s: String) -> Bool {
@@ -216,54 +171,6 @@ enum MathNormalizer {
         if s.contains("^") || s.contains("_") { return true }
         if s.contains("\\") && (s.contains("{") || s.contains("=")) { return true }
         return false
-    }
-
-    private static func processInlineCode(in line: String, transform: (String) -> String) -> String {
-        guard line.contains("`") else { return transform(line) }
-
-        var result = ""
-        result.reserveCapacity(line.count)
-
-        var i = line.startIndex
-        var inCode = false
-        var backtickCount = 0
-        var segmentStart = i
-
-        func flushSegment(to end: String.Index) {
-            let segment = String(line[segmentStart..<end])
-            result += inCode ? segment : transform(segment)
-        }
-
-        while i < line.endIndex {
-            if line[i] == "`" {
-                // Count backticks run.
-                var j = i
-                var run = 0
-                while j < line.endIndex, line[j] == "`" {
-                    run += 1
-                    j = line.index(after: j)
-                }
-
-                flushSegment(to: i)
-                result += String(repeating: "`", count: run)
-
-                if !inCode {
-                    inCode = true
-                    backtickCount = run
-                } else if run == backtickCount {
-                    inCode = false
-                    backtickCount = 0
-                }
-
-                i = j
-                segmentStart = i
-                continue
-            }
-            i = line.index(after: i)
-        }
-
-        flushSegment(to: line.endIndex)
-        return result
     }
 
     private static func normalizePlainTextSegment(_ text: String) -> String {

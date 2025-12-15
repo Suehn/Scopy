@@ -3,6 +3,8 @@ import Foundation
 enum MarkdownDetector {
     static func isLikelyMarkdown(_ text: String) -> Bool {
         if text.isEmpty { return false }
+        // Hover preview never renders Markdown for extremely large payloads anyway; keep detection cheap.
+        if text.utf16.count > 200_000 { return false }
 
         if containsMath(text) { return true }
 

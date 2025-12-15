@@ -2,6 +2,27 @@ import XCTest
 import Down
 
 final class MarkdownMathRenderingTests: XCTestCase {
+    func testLooseParenMathWithoutDollarDelimitersIsWrapped() {
+        let input = "设用户集合为 (\\mathcal{U}), 物品集合为 (\\mathcal{I})."
+
+        let normalized = MathNormalizer.wrapLooseLaTeX(input)
+
+        XCTAssertTrue(normalized.contains("$\\left(\\mathcal{U}\\right)$"))
+        XCTAssertTrue(normalized.contains("$\\left(\\mathcal{I}\\right)$"))
+    }
+
+    func testBackslashParenDelimitedMathIsProtected() {
+        let input = "inline math: \\(\\mathcal{U}_u^{+}\\) and display: \\[x^2 + y^2\\]."
+
+        let normalized = MathNormalizer.wrapLooseLaTeX(input)
+        let protected = MathProtector.protectMath(in: normalized)
+
+        // Both delimited segments should be protected and survive markdown parsing without being broken.
+        XCTAssertEqual(protected.placeholders.count, 2)
+        XCTAssertTrue(protected.placeholders.map(\.original).contains(where: { $0.contains("\\(\\mathcal{U}_u^{+}\\)") }))
+        XCTAssertTrue(protected.placeholders.map(\.original).contains(where: { $0.contains("\\[x^2 + y^2\\]") }))
+    }
+
     func testInlineDollarMathIsNotBrokenByMarkdownEmphasis() {
         let input = """
         使用用户集合为 ($\\mathcal{U}_u^{+}$), 物品集合为 ($\\mathcal{I}$)。

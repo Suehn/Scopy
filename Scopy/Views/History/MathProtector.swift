@@ -52,7 +52,7 @@ enum MathProtector {
         for lineSub in markdown.split(separator: "\n", omittingEmptySubsequences: false) {
             var line = String(lineSub)
 
-            if let (marker, count) = fencePrefix(in: line) {
+            if let (marker, count) = MarkdownCodeSkipper.fencePrefix(in: line) {
                 if !inFencedCodeBlock {
                     inFencedCodeBlock = true
                     fenceMarker = marker
@@ -78,10 +78,10 @@ enum MathProtector {
             // \begin{equation}
             //   ...
             // \end{equation}
-            if let beginName = environmentBeginName(in: line), !inEnvironmentBlock {
+            if let beginName = MathEnvironmentSupport.environmentBeginName(in: line), !inEnvironmentBlock {
                 inEnvironmentBlock = true
                 environmentName = beginName
-                environmentIndentSpaces = min(3, leadingIndentSpaces(in: line))
+                environmentIndentSpaces = min(3, MarkdownCodeSkipper.leadingIndentSpaces(in: line))
                 environmentLines.removeAll(keepingCapacity: true)
                 environmentLines.append(line)
                 environmentUTF16Count = line.utf16.count
@@ -149,7 +149,7 @@ enum MathProtector {
                     displayDollarUTF16Count = 0
                 } else {
                     inDisplayDollarBlock = true
-                    displayDollarIndentSpaces = min(3, leadingIndentSpaces(in: line))
+                    displayDollarIndentSpaces = min(3, MarkdownCodeSkipper.leadingIndentSpaces(in: line))
                     displayDollarLines.removeAll(keepingCapacity: true)
                     displayDollarLines.append(line)
                     displayDollarUTF16Count = line.utf16.count
@@ -174,7 +174,7 @@ enum MathProtector {
                 }
             }
 
-            line = processInlineCode(in: line) { segment in
+            line = MarkdownCodeSkipper.processInlineCode(in: line) { segment in
                 protectMathInPlainTextSegment(segment, placeholders: &placeholders)
             }
             outputLines.append(line)
@@ -204,101 +204,8 @@ enum MathProtector {
 
     // MARK: - Implementation
 
-    private static func fencePrefix(in line: String) -> (Character, Int)? {
-        let trimmed = line.trimmingCharacters(in: .whitespaces)
-        guard let first = trimmed.first, first == "`" || first == "~" else { return nil }
-        var count = 0
-        for ch in trimmed {
-            if ch == first { count += 1 } else { break }
-        }
-        return count >= 3 ? (first, count) : nil
-    }
-
     private static func isDisplayDollarDelimiterLine(_ line: String) -> Bool {
         line.trimmingCharacters(in: .whitespacesAndNewlines) == "$$"
-    }
-
-    private static func environmentBeginName(in line: String) -> String? {
-        let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard trimmed.hasPrefix("\\begin{") else { return nil }
-        guard let close = trimmed.firstIndex(of: "}") else { return nil }
-        let start = trimmed.index(trimmed.startIndex, offsetBy: "\\begin{".count)
-        let name = String(trimmed[start..<close])
-        // Keep it scoped to environments we explicitly support in auto-render delimiters.
-        let supported: Set<String> = [
-            "equation", "equation*",
-            "align", "align*",
-            "aligned",
-            "cases",
-            "gather", "gather*",
-            "multline", "multline*",
-            "split"
-        ]
-        return supported.contains(name) ? name : nil
-    }
-
-    private static func leadingIndentSpaces(in line: String) -> Int {
-        // Convert tabs to 4 spaces (best-effort) and clamp later.
-        var spaces = 0
-        for ch in line {
-            if ch == " " {
-                spaces += 1
-                continue
-            }
-            if ch == "\t" {
-                spaces += 4
-                continue
-            }
-            break
-        }
-        return spaces
-    }
-
-    private static func processInlineCode(in line: String, transform: (String) -> String) -> String {
-        guard line.contains("`") else { return transform(line) }
-
-        var result = ""
-        result.reserveCapacity(line.count)
-
-        var i = line.startIndex
-        var inCode = false
-        var backtickCount = 0
-        var segmentStart = i
-
-        func flushSegment(to end: String.Index) {
-            let segment = String(line[segmentStart..<end])
-            result += inCode ? segment : transform(segment)
-        }
-
-        while i < line.endIndex {
-            if line[i] == "`" {
-                var j = i
-                var run = 0
-                while j < line.endIndex, line[j] == "`" {
-                    run += 1
-                    j = line.index(after: j)
-                }
-
-                flushSegment(to: i)
-                result += String(repeating: "`", count: run)
-
-                if !inCode {
-                    inCode = true
-                    backtickCount = run
-                } else if run == backtickCount {
-                    inCode = false
-                    backtickCount = 0
-                }
-
-                i = j
-                segmentStart = i
-                continue
-            }
-            i = line.index(after: i)
-        }
-
-        flushSegment(to: line.endIndex)
-        return result
     }
 
     private static func nextPlaceholder(index: Int) -> String {
@@ -315,17 +222,9 @@ enum MathProtector {
 
         // 1) Protect environments (multi-line variants are usually already line-wrapped from OCR/PDF extract).
         // We do this before $ detection so environments inside $...$ are handled by $ protection.
-        out = protectEnvironment(out, name: "equation", placeholders: &placeholders)
-        out = protectEnvironment(out, name: "equation*", placeholders: &placeholders)
-        out = protectEnvironment(out, name: "align", placeholders: &placeholders)
-        out = protectEnvironment(out, name: "align*", placeholders: &placeholders)
-        out = protectEnvironment(out, name: "aligned", placeholders: &placeholders)
-        out = protectEnvironment(out, name: "cases", placeholders: &placeholders)
-        out = protectEnvironment(out, name: "gather", placeholders: &placeholders)
-        out = protectEnvironment(out, name: "gather*", placeholders: &placeholders)
-        out = protectEnvironment(out, name: "multline", placeholders: &placeholders)
-        out = protectEnvironment(out, name: "multline*", placeholders: &placeholders)
-        out = protectEnvironment(out, name: "split", placeholders: &placeholders)
+        for name in MathEnvironmentSupport.supportedEnvironmentNamesInOrder {
+            out = protectEnvironment(out, name: name, placeholders: &placeholders)
+        }
 
         // 2) Protect \(...\) and \[...\]
         out = protectDelimited(out, left: "\\(", right: "\\)", maxInnerUTF16: maxInlineMathUTF16Count, placeholders: &placeholders)
