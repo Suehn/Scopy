@@ -8,7 +8,7 @@
 
 | 项目 | 状态 |
 |------|------|
-| **当前版本** | v0.43.23 |
+| **当前版本** | v0.43.24 |
 | **测试状态** | 单元测试通过（`make test-unit`: Executed 158 tests, 1 skipped；Strict Concurrency: `make test-strict` Executed 158 tests, 1 skipped；性能测试：`make test-perf` Executed 23 tests, 6 skipped） |
 | **构建状态** | Debug ✅ |
 | **部署位置** | /Applications/Scopy.app |
@@ -24,6 +24,7 @@
 
 | 版本 | 日期 | 主要内容 | 状态 |
 |------|------|----------|------|
+| [v0.43.24](./v0.43.24.md) | 2025-12-16 | Fix/Preview：LaTeX 环境公式渲染更兼容 + 预览脚本注入防护 | ✅ |
 | [v0.43.23](./v0.43.23.md) | 2025-12-16 | Fix/Preview：Markdown hover 预览稳定性 + 表格 + 公式兼容性增强 | ✅ |
 | [v0.43.22](./v0.43.22.md) | 2025-12-15 | UX/Preview：Markdown 渲染 hover 预览（KaTeX 公式）+ 安全/高性能 | ✅ |
 | [v0.43.21](./v0.43.21.md) | 2025-12-15 | Dev/Release：main push 自动打 tag + Homebrew(cask) bump PR + 防覆盖 DMG | ✅ |

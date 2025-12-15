@@ -5,6 +5,24 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [v0.43.24] - 2025-12-16
+
+### Fix/Preview：LaTeX 环境公式渲染更兼容 + 预览脚本注入防护
+
+- **环境公式更兼容**：KaTeX auto-render 增加 `\\begin{equation}...\\end{equation}` / `align` / `gather` / `multline` / `cases` / `split`（含 `*` 变体）等 delimiter，提升论文/PDF 风格片段的渲染一致性（保留 `\\tag{...}` 等写法由 KaTeX 解释）。
+- **安全增强**：内联脚本的 JSON 字面量额外转义 `</script`（case-insensitive），避免剪贴板内容导致脚本提前闭合而破坏渲染/产生注入风险。
+
+### 修改文件
+
+- `Scopy/Views/History/MarkdownHTMLRenderer.swift`
+- `Scopy/Views/History/MathProtector.swift`
+- `ScopyTests/MarkdownMathRenderingTests.swift`
+
+### 测试
+
+- 定向单测：`xcodebuild test -scheme Scopy -destination 'platform=macOS' -only-testing:ScopyTests/MarkdownMathRenderingTests` ✅
+- Release 构建：`xcodebuild build -scheme Scopy -configuration Release -destination 'platform=macOS'` ✅
+
 ## [v0.43.23] - 2025-12-16
 
 ### Fix/Preview：Markdown hover 预览稳定性 + 表格 + 公式兼容性增强

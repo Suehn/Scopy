@@ -224,13 +224,17 @@ enum MathProtector {
         guard let close = trimmed.firstIndex(of: "}") else { return nil }
         let start = trimmed.index(trimmed.startIndex, offsetBy: "\\begin{".count)
         let name = String(trimmed[start..<close])
-        // Keep it scoped to the environments we already support in auto-render delimiters.
-        switch name {
-        case "equation", "align", "aligned", "cases":
-            return name
-        default:
-            return nil
-        }
+        // Keep it scoped to environments we explicitly support in auto-render delimiters.
+        let supported: Set<String> = [
+            "equation", "equation*",
+            "align", "align*",
+            "aligned",
+            "cases",
+            "gather", "gather*",
+            "multline", "multline*",
+            "split"
+        ]
+        return supported.contains(name) ? name : nil
     }
 
     private static func leadingIndentSpaces(in line: String) -> Int {
@@ -312,9 +316,16 @@ enum MathProtector {
         // 1) Protect environments (multi-line variants are usually already line-wrapped from OCR/PDF extract).
         // We do this before $ detection so environments inside $...$ are handled by $ protection.
         out = protectEnvironment(out, name: "equation", placeholders: &placeholders)
+        out = protectEnvironment(out, name: "equation*", placeholders: &placeholders)
         out = protectEnvironment(out, name: "align", placeholders: &placeholders)
+        out = protectEnvironment(out, name: "align*", placeholders: &placeholders)
         out = protectEnvironment(out, name: "aligned", placeholders: &placeholders)
         out = protectEnvironment(out, name: "cases", placeholders: &placeholders)
+        out = protectEnvironment(out, name: "gather", placeholders: &placeholders)
+        out = protectEnvironment(out, name: "gather*", placeholders: &placeholders)
+        out = protectEnvironment(out, name: "multline", placeholders: &placeholders)
+        out = protectEnvironment(out, name: "multline*", placeholders: &placeholders)
+        out = protectEnvironment(out, name: "split", placeholders: &placeholders)
 
         // 2) Protect \(...\) and \[...\]
         out = protectDelimited(out, left: "\\(", right: "\\)", maxInnerUTF16: maxInlineMathUTF16Count, placeholders: &placeholders)
@@ -568,8 +579,60 @@ enum MathProtector {
 
     private static func normalizeMathSegment(_ s: String) -> String {
         var out = normalizeEscapedTeXCommandsInMath(s)
+        out = removeCommandWithSingleBracedArg(out, command: "\\label")
         out = normalizeSetBracesInMath(out)
         return out
+    }
+
+    private static func removeCommandWithSingleBracedArg(_ s: String, command: String) -> String {
+        guard let (updated, _) = extractCommandWithSingleBracedArg(s, command: command) else { return s }
+        return updated
+    }
+
+    private static func extractCommandWithSingleBracedArg(_ s: String, command: String) -> (String, String)? {
+        guard let range = s.range(of: command) else { return nil }
+        let afterCmd = range.upperBound
+        guard afterCmd < s.endIndex, s[afterCmd] == "{" else { return nil }
+
+        var i = s.index(after: afterCmd)
+        var depth = 1
+        var scanned = 0
+        while i < s.endIndex, scanned < maxBlockMathUTF16Count {
+            let c = s[i]
+            if c == "{" { depth += 1 }
+            if c == "}" {
+                depth -= 1
+                if depth == 0 { break }
+            }
+            i = s.index(after: i)
+            scanned += 1
+        }
+        guard i < s.endIndex, depth == 0 else { return nil }
+
+        let arg = String(s[s.index(after: afterCmd)..<i])
+        let afterArg = s.index(after: i)
+
+        // Remove surrounding whitespace/newlines when deleting the command to avoid leaving blank lines.
+        var left = range.lowerBound
+        while left > s.startIndex {
+            let prev = s[s.index(before: left)]
+            if prev == " " || prev == "\t" { left = s.index(before: left); continue }
+            break
+        }
+        var right = afterArg
+        while right < s.endIndex {
+            let ch = s[right]
+            if ch == " " || ch == "\t" { right = s.index(after: right); continue }
+            if ch == "\n" {
+                right = s.index(after: right)
+                break
+            }
+            break
+        }
+
+        var updated = s
+        updated.replaceSubrange(left..<right, with: "")
+        return (updated, arg)
     }
 
     /// Best-effort: text copied from JSON / code often contains `\\command` instead of `\command`.

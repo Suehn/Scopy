@@ -168,11 +168,12 @@ final class MarkdownMathRenderingTests: XCTestCase {
         XCTAssertEqual(protected.placeholders.count, 1)
         XCTAssertTrue(protected.placeholders[0].original.contains("\\begin{equation}"))
         XCTAssertTrue(protected.placeholders[0].original.contains("\\end{equation}"))
+        XCTAssertTrue(protected.placeholders[0].original.contains("\\tag{2-1}"))
 
         let html = MarkdownHTMLRenderer.render(markdown: input)
         XCTAssertTrue(html.contains("katex.min.js"))
         XCTAssertTrue(html.contains("\\begin{equation}"))
-        XCTAssertTrue(html.contains("\\end{equation}"))
+        XCTAssertTrue(html.contains("\\tag{2-1}"))
     }
 
     func testEquationEnvironmentTriggersMathPipelineEvenWithoutDollars() {
@@ -185,5 +186,26 @@ final class MarkdownMathRenderingTests: XCTestCase {
 
         let html = MarkdownHTMLRenderer.render(markdown: input)
         XCTAssertTrue(html.contains("katex.min.js"))
+    }
+
+    func testLaTeXSubsectionAndEquationEnvironmentArePassedThroughToRenderer() {
+        let input = """
+        \\subsection{2.1 问题定义与符号约定}
+
+        设用户集合为 ($\\mathcal{U}$)，物品集合为 ($\\mathcal{I}$)。
+
+        \\begin{equation}
+        \\begin{aligned}
+        \\mathcal{E}\\subseteq \\mathcal{U}\\times\\mathcal{I}.
+        \\end{aligned}
+        \\tag{2-1}
+        \\end{equation}
+        """
+
+        let html = MarkdownHTMLRenderer.render(markdown: input)
+        XCTAssertTrue(html.contains("katex.min.js"))
+        XCTAssertTrue(html.contains("## 2.1 问题定义与符号约定"))
+        XCTAssertTrue(html.contains("\\begin{equation}"))
+        XCTAssertTrue(html.contains("\\tag{2-1}"))
     }
 }

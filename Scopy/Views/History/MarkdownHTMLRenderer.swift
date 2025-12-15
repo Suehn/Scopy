@@ -42,14 +42,21 @@ enum MarkdownHTMLRenderer {
                   if (typeof renderMathInElement !== 'function') { return; }
                   renderMathInElement(el, {
                     delimiters: [
+                      {left: '\\\\begin{equation}', right: '\\\\end{equation}', display: true},
+                      {left: '\\\\begin{equation*}', right: '\\\\end{equation*}', display: true},
+                      {left: '\\\\begin{align}', right: '\\\\end{align}', display: true},
+                      {left: '\\\\begin{align*}', right: '\\\\end{align*}', display: true},
+                      {left: '\\\\begin{aligned}', right: '\\\\end{aligned}', display: true},
+                      {left: '\\\\begin{cases}', right: '\\\\end{cases}', display: true},
+                      {left: '\\\\begin{gather}', right: '\\\\end{gather}', display: true},
+                      {left: '\\\\begin{gather*}', right: '\\\\end{gather*}', display: true},
+                      {left: '\\\\begin{multline}', right: '\\\\end{multline}', display: true},
+                      {left: '\\\\begin{multline*}', right: '\\\\end{multline*}', display: true},
+                      {left: '\\\\begin{split}', right: '\\\\end{split}', display: true},
                       {left: '$$', right: '$$', display: true},
                       {left: '$', right: '$', display: false},
                       {left: '\\\\[', right: '\\\\]', display: true},
-                      {left: '\\\\(', right: '\\\\)', display: false},
-                      {left: '\\\\begin{equation}', right: '\\\\end{equation}', display: true},
-                      {left: '\\\\begin{align}', right: '\\\\end{align}', display: true},
-                      {left: '\\\\begin{aligned}', right: '\\\\end{aligned}', display: true},
-                      {left: '\\\\begin{cases}', right: '\\\\end{cases}', display: true}
+                      {left: '\\\\(', right: '\\\\)', display: false}
                     ],
                     throwOnError: false,
                     strict: 'ignore',
@@ -173,11 +180,14 @@ enum MarkdownHTMLRenderer {
         // A JSON literal is a safe JS literal for our use (no interpolation or eval).
         // Use JSONEncoder to avoid NSJSONSerialization raising NSException on top-level fragments.
         let data = (try? JSONEncoder().encode(value)) ?? Data()
-        return String(data: data, encoding: .utf8) ?? "\"\""
+        let s = String(data: data, encoding: .utf8) ?? "\"\""
+        // Prevent `</script>` from prematurely terminating our inline script tag.
+        return s.replacingOccurrences(of: "</script", with: "<\\/script", options: [.caseInsensitive])
     }
 
     private static func jsonStringLiteral(_ value: [[String]]) -> String {
         let data = (try? JSONEncoder().encode(value)) ?? Data()
-        return String(data: data, encoding: .utf8) ?? "[]"
+        let s = String(data: data, encoding: .utf8) ?? "[]"
+        return s.replacingOccurrences(of: "</script", with: "<\\/script", options: [.caseInsensitive])
     }
 }
