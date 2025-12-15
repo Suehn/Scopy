@@ -39,6 +39,10 @@ final class RealClipboardService: ClipboardServiceProtocol {
         }
     }
 
+    func stopAndWait() async {
+        await clipboardService.stop()
+    }
+
     // MARK: - Data Access
 
     func fetchRecent(limit: Int, offset: Int) async throws -> [ClipboardItemDTO] {

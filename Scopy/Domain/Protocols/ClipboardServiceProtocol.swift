@@ -14,6 +14,9 @@ public protocol ClipboardServiceProtocol: AnyObject {
     /// 停止服务（清理资源）
     func stop()
 
+    /// 停止服务并等待清理完成（用于测试/退出路径，避免 sleep-based 等待）
+    func stopAndWait() async
+
     // MARK: - Data Access
 
     /// 获取最近的剪贴板项
@@ -55,4 +58,10 @@ public protocol ClipboardServiceProtocol: AnyObject {
 
     /// 事件观察 - 新增条目、删除、设置变更等
     var eventStream: AsyncStream<ClipboardEvent> { get }
+}
+
+public extension ClipboardServiceProtocol {
+    func stopAndWait() async {
+        stop()
+    }
 }

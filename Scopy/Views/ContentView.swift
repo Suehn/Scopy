@@ -32,7 +32,7 @@ struct ContentView: View {
         .onAppear {
             searchFocused = true
             Task {
-                await historyViewModel.load()
+                await historyViewModel.loadIfStale()
             }
         }
         .onKeyPress { keyPress in

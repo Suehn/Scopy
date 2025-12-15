@@ -6,28 +6,26 @@ import Foundation
 final class MockClipboardService: ClipboardServiceProtocol {
     private var items: [ClipboardItemDTO] = []
     private var settings: SettingsDTO = .default
-    private var eventContinuation: AsyncStream<ClipboardEvent>.Continuation?
-
-    /// v0.20: 缓存 eventStream，避免每次访问创建新流导致旧 continuation 被覆盖
-    private var _eventStream: AsyncStream<ClipboardEvent>?
+    private let eventQueue: AsyncBoundedQueue<ClipboardEvent>
+    private let stream: AsyncStream<ClipboardEvent>
 
     var eventStream: AsyncStream<ClipboardEvent> {
-        if let stream = _eventStream {
-            return stream
-        }
-        let stream = AsyncStream(
-            ClipboardEvent.self,
-            bufferingPolicy: .unbounded
-        ) { continuation in
-            self.eventContinuation = continuation
-        }
-        _eventStream = stream
         return stream
     }
 
     init() {
+        let queue = AsyncBoundedQueue<ClipboardEvent>(capacity: ScopyThresholds.clipboardEventStreamMaxBufferedItems)
+        self.eventQueue = queue
+        self.stream = AsyncStream(unfolding: { await queue.dequeue() })
+
         // 生成一些测试数据
         generateMockData()
+    }
+
+    deinit {
+        Task { [eventQueue] in
+            await eventQueue.finish()
+        }
     }
 
     // MARK: - Lifecycle
@@ -37,7 +35,10 @@ final class MockClipboardService: ClipboardServiceProtocol {
     }
 
     func stop() {
-        eventContinuation?.finish()
+    }
+
+    func stopAndWait() async {
+        await eventQueue.finish()
     }
 
     // MARK: - Private
@@ -157,7 +158,7 @@ final class MockClipboardService: ClipboardServiceProtocol {
                 thumbnailPath: item.thumbnailPath,
                 storageRef: item.storageRef
             )
-            eventContinuation?.yield(.itemPinned(itemID))
+            await yieldEvent(.itemPinned(itemID))
         }
     }
 
@@ -177,30 +178,30 @@ final class MockClipboardService: ClipboardServiceProtocol {
                 thumbnailPath: item.thumbnailPath,
                 storageRef: item.storageRef
             )
-            eventContinuation?.yield(.itemUnpinned(itemID))
+            await yieldEvent(.itemUnpinned(itemID))
         }
     }
 
     func delete(itemID: UUID) async throws {
         items.removeAll { $0.id == itemID }
-        eventContinuation?.yield(.itemDeleted(itemID))
+        await yieldEvent(.itemDeleted(itemID))
     }
 
     func clearAll() async throws {
         let pinnedItems = items.filter { $0.isPinned }
         items = pinnedItems
-        eventContinuation?.yield(.itemsCleared(keepPinned: true))
+        await yieldEvent(.itemsCleared(keepPinned: true))
     }
 
     func copyToClipboard(itemID: UUID) async throws {
         guard let item = items.first(where: { $0.id == itemID }) else { return }
         // 在真实实现中，这里会复制到系统剪贴板
-        ScopyLog.app.info("Copied to clipboard: \(String(item.plainText.prefix(50)), privacy: .public)...")
+        ScopyLog.app.info("Copied to clipboard: \(String(item.plainText.prefix(50)), privacy: .private)...")
     }
 
     func updateSettings(_ newSettings: SettingsDTO) async throws {
         settings = newSettings
-        eventContinuation?.yield(.settingsChanged)
+        await yieldEvent(.settingsChanged)
     }
 
     func getSettings() async throws -> SettingsDTO {
@@ -251,6 +252,12 @@ final class MockClipboardService: ClipboardServiceProtocol {
             storageRef: nil
         )
         items.insert(item, at: 0)
-        eventContinuation?.yield(.newItem(item))
+        Task { [eventQueue] in
+            await eventQueue.enqueue(.newItem(item))
+        }
+    }
+
+    private func yieldEvent(_ event: ClipboardEvent) async {
+        await eventQueue.enqueue(event)
     }
 }

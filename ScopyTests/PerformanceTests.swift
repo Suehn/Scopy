@@ -582,8 +582,7 @@ final class PerformanceTests: XCTestCase {
         )
 
         func cleanup() async {
-            service.stop()
-            try? await Task.sleep(nanoseconds: 200_000_000)
+            await service.stopAndWait()
             UserDefaults.standard.removePersistentDomain(forName: suiteName)
             try? FileManager.default.removeItem(at: baseURL)
         }

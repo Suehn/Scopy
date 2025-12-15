@@ -1,5 +1,6 @@
 import AppKit
 import ScopyKit
+import ScopyUISupport
 import SwiftUI
 
 /// 头部视图 - 包含标题、过滤按钮和搜索框

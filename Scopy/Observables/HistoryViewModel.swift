@@ -1,6 +1,7 @@
 import Foundation
 import Observation
 import ScopyKit
+import ScopyUISupport
 
 @Observable
 @MainActor
@@ -96,6 +97,8 @@ final class HistoryViewModel {
     @ObservationIgnored private var refineTask: Task<Void, Never>?
     @ObservationIgnored private var recentAppsRefreshTask: Task<Void, Never>?
 
+    @ObservationIgnored private var lastLoadedAt: Date = .distantPast
+
     // MARK: - Init
 
     init(service: ClipboardServiceProtocol, settingsViewModel: SettingsViewModel) {
@@ -154,6 +157,7 @@ final class HistoryViewModel {
                 scheduleRecentAppsRefresh()
             }
         case .thumbnailUpdated(let itemID, let thumbnailPath):
+            ThumbnailCache.shared.remove(path: thumbnailPath)
             guard let index = items.firstIndex(where: { $0.id == itemID }) else { return }
             let existing = items[index]
             guard existing.thumbnailPath != thumbnailPath else { return }
@@ -235,7 +239,7 @@ final class HistoryViewModel {
             recentApps = try await service.getRecentApps(limit: 10)
             preloadAppIcons()
         } catch {
-            ScopyLog.app.error("Failed to load recent apps: \(error.localizedDescription, privacy: .public)")
+            ScopyLog.app.error("Failed to load recent apps: \(error.localizedDescription, privacy: .private)")
         }
     }
 
@@ -250,9 +254,9 @@ final class HistoryViewModel {
 
     private func preloadAppIcons() {
         let appsToPreload = recentApps
-        Task.detached(priority: .background) {
+        Task { @MainActor in
             for bundleID in appsToPreload {
-                await IconService.shared.preloadIcon(bundleID: bundleID)
+                IconService.shared.preloadIcon(bundleID: bundleID)
             }
         }
     }
@@ -285,6 +289,7 @@ final class HistoryViewModel {
             let fetchedItems = try await service.fetchRecent(limit: 50, offset: 0)
             items = fetchedItems
             loadedCount = fetchedItems.count
+            lastLoadedAt = Date()
 
             let stats = try await service.getStorageStats()
             totalCount = stats.itemCount
@@ -297,8 +302,14 @@ final class HistoryViewModel {
             await PerformanceMetrics.shared.recordLoadLatency(elapsedMs)
             performanceSummary = await PerformanceMetrics.shared.getSummary()
         } catch {
-            ScopyLog.app.error("Failed to load items: \(error.localizedDescription, privacy: .public)")
+            ScopyLog.app.error("Failed to load items: \(error.localizedDescription, privacy: .private)")
         }
+    }
+
+    func loadIfStale(minIntervalSeconds: TimeInterval = 0.5) async {
+        guard !isLoading else { return }
+        guard items.isEmpty || Date().timeIntervalSince(lastLoadedAt) >= minIntervalSeconds else { return }
+        await load()
     }
 
     func onScroll() {
@@ -390,7 +401,7 @@ final class HistoryViewModel {
                 }
             } catch {
                 if !Task.isCancelled {
-                    ScopyLog.app.error("Failed to load more: \(error.localizedDescription, privacy: .public)")
+                    ScopyLog.app.error("Failed to load more: \(error.localizedDescription, privacy: .private)")
                 }
             }
         }
@@ -482,7 +493,7 @@ final class HistoryViewModel {
                             loadedCount = refined.items.count
                             canLoadMore = refined.hasMore
                         } catch {
-                            ScopyLog.app.warning("Refine search failed: \(error.localizedDescription, privacy: .public)")
+                            ScopyLog.app.warning("Refine search failed: \(error.localizedDescription, privacy: .private)")
                         }
                     }
                 }
@@ -491,7 +502,7 @@ final class HistoryViewModel {
                 await PerformanceMetrics.shared.recordSearchLatency(elapsedMs)
                 performanceSummary = await PerformanceMetrics.shared.getSummary()
             } catch {
-                ScopyLog.app.error("Search failed: \(error.localizedDescription, privacy: .public)")
+                ScopyLog.app.error("Search failed: \(error.localizedDescription, privacy: .private)")
             }
         }
     }
@@ -503,7 +514,7 @@ final class HistoryViewModel {
             try await service.copyToClipboard(itemID: item.id)
             closePanelHandler?()
         } catch {
-            ScopyLog.app.error("Copy failed: \(error.localizedDescription, privacy: .public)")
+            ScopyLog.app.error("Copy failed: \(error.localizedDescription, privacy: .private)")
         }
     }
 
@@ -515,7 +526,7 @@ final class HistoryViewModel {
                 try await service.pin(itemID: item.id)
             }
         } catch {
-            ScopyLog.app.error("Pin toggle failed: \(error.localizedDescription, privacy: .public)")
+            ScopyLog.app.error("Pin toggle failed: \(error.localizedDescription, privacy: .private)")
         }
     }
 
@@ -525,7 +536,7 @@ final class HistoryViewModel {
             items.removeAll { $0.id == item.id }
             invalidatePinnedCache()
         } catch {
-            ScopyLog.app.error("Delete failed: \(error.localizedDescription, privacy: .public)")
+            ScopyLog.app.error("Delete failed: \(error.localizedDescription, privacy: .private)")
         }
     }
 
@@ -534,7 +545,7 @@ final class HistoryViewModel {
             try await service.clearAll()
             await load()
         } catch {
-            ScopyLog.app.error("Clear failed: \(error.localizedDescription, privacy: .public)")
+            ScopyLog.app.error("Clear failed: \(error.localizedDescription, privacy: .private)")
         }
     }
 

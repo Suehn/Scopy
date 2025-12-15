@@ -7,7 +7,8 @@ let package = Package(
         .macOS(.v14)
     ],
     products: [
-        .library(name: "ScopyKit", targets: ["ScopyKit"])
+        .library(name: "ScopyKit", targets: ["ScopyKit"]),
+        .library(name: "ScopyUISupport", targets: ["ScopyUISupport"])
     ],
     targets: [
         .target(
@@ -28,6 +29,10 @@ let package = Package(
             linkerSettings: [
                 .linkedLibrary("sqlite3")
             ]
+        ),
+        .target(
+            name: "ScopyUISupport",
+            path: "ScopyUISupport"
         )
     ]
 )

@@ -82,8 +82,8 @@ final class AppState {
             try await service.start()
             ScopyLog.app.info("Clipboard Service started")
         } catch {
-            ScopyLog.app.error("Failed to start Clipboard Service: \(error.localizedDescription, privacy: .public)")
-            service.stop()
+            ScopyLog.app.error("Failed to start Clipboard Service: \(error.localizedDescription, privacy: .private)")
+            await service.stopAndWait()
 
             let fallback = ClipboardServiceFactory.create(useMock: true)
             service = fallback
@@ -94,7 +94,7 @@ final class AppState {
                 try await fallback.start()
                 ScopyLog.app.warning("Falling back to Mock Clipboard Service (started)")
             } catch {
-                ScopyLog.app.error("Mock service also failed to start: \(error.localizedDescription, privacy: .public)")
+                ScopyLog.app.error("Mock service also failed to start: \(error.localizedDescription, privacy: .private)")
             }
         }
 

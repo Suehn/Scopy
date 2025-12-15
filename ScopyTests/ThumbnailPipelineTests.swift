@@ -3,6 +3,7 @@ import ImageIO
 import UniformTypeIdentifiers
 import XCTest
 @testable import ScopyKit
+import ScopyUISupport
 
 @MainActor
 final class ThumbnailPipelineTests: XCTestCase {

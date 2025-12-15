@@ -35,7 +35,7 @@ actor ClipboardService {
 
     private var settings: SettingsDTO = .default
 
-    private var eventContinuation: AsyncStream<ClipboardEvent>.Continuation?
+    private let eventQueue: AsyncBoundedQueue<ClipboardEvent>
     private var monitorTask: Task<Void, Never>?
     private var isStarted = false
 
@@ -62,24 +62,17 @@ actor ClipboardService {
         self.monitorPasteboardName = monitorPasteboardName
         self.monitorPollingInterval = monitorPollingInterval
 
-        var continuation: AsyncStream<ClipboardEvent>.Continuation?
-        let stream = AsyncStream(
-            ClipboardEvent.self,
-            bufferingPolicy: .unbounded
-        ) { cont in
-            continuation = cont
-        }
-        guard let resolvedContinuation = continuation else {
-            fatalError("Failed to create ClipboardService event stream continuation")
-        }
-        self.eventStream = stream
-        self.eventContinuation = resolvedContinuation
+        let queue = AsyncBoundedQueue<ClipboardEvent>(capacity: ScopyThresholds.clipboardEventStreamMaxBufferedItems)
+        self.eventQueue = queue
+        self.eventStream = AsyncStream(unfolding: { await queue.dequeue() })
     }
 
     deinit {
         monitorTask?.cancel()
         cleanupTask?.cancel()
-        eventContinuation?.finish()
+        Task { [eventQueue] in
+            await eventQueue.finish()
+        }
     }
 
     // MARK: - Lifecycle
@@ -154,11 +147,6 @@ actor ClipboardService {
         cleanupTask?.cancel()
         cleanupTask = nil
 
-        if let continuation = eventContinuation {
-            eventContinuation = nil
-            continuation.finish()
-        }
-
         if let monitor {
             await MainActor.run {
                 monitor.stopMonitoring()
@@ -208,7 +196,7 @@ actor ClipboardService {
 
         try await storage.setPin(itemID, pinned: true)
         await search.handlePinnedChange(id: itemID, pinned: true)
-        yieldEvent(.itemPinned(itemID))
+        await yieldEvent(.itemPinned(itemID))
     }
 
     func unpin(itemID: UUID) async throws {
@@ -217,7 +205,7 @@ actor ClipboardService {
 
         try await storage.setPin(itemID, pinned: false)
         await search.handlePinnedChange(id: itemID, pinned: false)
-        yieldEvent(.itemUnpinned(itemID))
+        await yieldEvent(.itemUnpinned(itemID))
     }
 
     func delete(itemID: UUID) async throws {
@@ -226,7 +214,7 @@ actor ClipboardService {
 
         try await storage.deleteItem(itemID)
         await search.handleDeletion(id: itemID)
-        yieldEvent(.itemDeleted(itemID))
+        await yieldEvent(.itemDeleted(itemID))
     }
 
     func clearAll() async throws {
@@ -235,7 +223,7 @@ actor ClipboardService {
 
         try await storage.deleteAllExceptPinned()
         await search.handleClearAll()
-        yieldEvent(.itemsCleared(keepPinned: true))
+        await yieldEvent(.itemsCleared(keepPinned: true))
     }
 
     func copyToClipboard(itemID: UUID) async throws {
@@ -319,11 +307,11 @@ actor ClipboardService {
         do {
             try await storage.updateItem(updated)
         } catch {
-            ScopyLog.app.warning("Failed to update item usage stats: \(error.localizedDescription, privacy: .public)")
+            ScopyLog.app.warning("Failed to update item usage stats: \(error.localizedDescription, privacy: .private)")
         }
 
         await search.handleUpsertedItem(updated)
-        yieldEvent(.itemUpdated(await toDTO(updated, storage: storage, thumbnailGenerationPriority: .userInitiated)))
+        await yieldEvent(.itemUpdated(await toDTO(updated, storage: storage, thumbnailGenerationPriority: .userInitiated)))
     }
 
     func updateSettings(_ newSettings: SettingsDTO) async throws {
@@ -341,21 +329,18 @@ actor ClipboardService {
 
             if oldHeight != newSettings.thumbnailHeight || oldShowThumbnails != newSettings.showImageThumbnails {
                 await storage.clearThumbnailCache()
-                await MainActor.run {
-                    ThumbnailCache.shared.clear()
-                }
             }
 
             do {
                 try await storage.performCleanup()
             } catch {
                 ScopyLog.app.warning(
-                    "Cleanup failed after settings update: \(error.localizedDescription, privacy: .public)"
+                    "Cleanup failed after settings update: \(error.localizedDescription, privacy: .private)"
                 )
             }
         }
 
-        yieldEvent(.settingsChanged)
+        await yieldEvent(.settingsChanged)
     }
 
     func getSettings() async -> SettingsDTO {
@@ -392,17 +377,6 @@ actor ClipboardService {
     func getImageData(itemID: UUID) async throws -> Data? {
         let storage = try requireStorage()
         guard let item = try await storage.findByID(itemID) else { return nil }
-
-        if let storagePath = item.storageRef {
-            return await Task.detached(priority: .userInitiated) {
-                try? Data(contentsOf: URL(fileURLWithPath: storagePath), options: [.mappedIfSafe])
-            }.value
-        }
-
-        if let rawData = item.rawData {
-            return rawData
-        }
-
         return await storage.getOriginalImageData(for: item)
     }
 
@@ -457,19 +431,19 @@ actor ClipboardService {
             let dto = await toDTO(storedItem, storage: storage, thumbnailGenerationPriority: .userInitiated)
             switch outcome {
             case .inserted:
-                yieldEvent(.newItem(dto))
+                await yieldEvent(.newItem(dto))
             case .updated:
-                yieldEvent(.itemUpdated(dto))
+                await yieldEvent(.itemUpdated(dto))
             }
 
             scheduleCleanup(storage: storage)
         } catch {
-            ScopyLog.app.warning("Failed to store clipboard item: \(error.localizedDescription, privacy: .public)")
+            ScopyLog.app.warning("Failed to store clipboard item: \(error.localizedDescription, privacy: .private)")
         }
     }
 
-    private func yieldEvent(_ event: ClipboardEvent) {
-        eventContinuation?.yield(event)
+    private func yieldEvent(_ event: ClipboardEvent) async {
+        await eventQueue.enqueue(event)
     }
 
     private func scheduleCleanup(storage: StorageService) {
@@ -498,7 +472,7 @@ actor ClipboardService {
             lastLightCleanupAt = now
             if needsFull { lastFullCleanupAt = now }
         } catch {
-            ScopyLog.app.warning("Scheduled cleanup failed: \(error.localizedDescription, privacy: .public)")
+            ScopyLog.app.warning("Scheduled cleanup failed: \(error.localizedDescription, privacy: .private)")
         }
     }
 
@@ -511,7 +485,7 @@ actor ClipboardService {
         if item.type == .image && settings.showImageThumbnails {
             thumbnailPath = await storage.getThumbnailPath(for: item.contentHash)
             if thumbnailPath == nil {
-                scheduleThumbnailGeneration(
+                await scheduleThumbnailGeneration(
                     for: item,
                     storage: storage,
                     priority: thumbnailGenerationPriority
@@ -538,13 +512,26 @@ actor ClipboardService {
         for item: StorageService.StoredItem,
         storage: StorageService,
         priority: TaskPriority = .utility
-    ) {
+    ) async {
         let itemID = item.id
         let contentHash = item.contentHash
         let maxHeight = settings.thumbnailHeight
-        let storageRef = storage
 
-        Task.detached(priority: priority) { [weak self] in
+        let externalStorageRoot = storage.externalStorageDirectoryPath
+        let thumbnailCacheRoot = storage.thumbnailCacheDirectoryPath
+
+        let storagePath = item.storageRef
+        let rawData = item.rawData
+        let fallbackImageData: Data?
+        if (storagePath == nil || storagePath?.isEmpty == true), rawData == nil {
+            fallbackImageData = await storage.getOriginalImageData(for: item)
+        } else {
+            fallbackImageData = nil
+        }
+
+        Task.detached(priority: priority) { [weak self, itemID, contentHash, maxHeight, storagePath, rawData, fallbackImageData, externalStorageRoot, thumbnailCacheRoot] in
+            guard let self else { return }
+
             let shouldGenerate = await ThumbnailGenerationTracker.shared.tryMarkInProgress(contentHash)
             guard shouldGenerate else { return }
 
@@ -555,28 +542,44 @@ actor ClipboardService {
             }
 
             let pngData: Data?
-            if let storagePath = item.storageRef, !storagePath.isEmpty {
+            if let storagePath, !storagePath.isEmpty {
+                guard StorageService.validateStorageRef(storagePath, externalStoragePath: externalStorageRoot) else {
+                    ScopyLog.app.warning("Thumbnail skipped: invalid storageRef (possible traversal)")
+                    return
+                }
                 pngData = StorageService.makeThumbnailPNG(fromFileAtPath: storagePath, maxHeight: maxHeight)
-            } else if let rawData = item.rawData {
+            } else if let rawData {
                 pngData = StorageService.makeThumbnailPNG(from: rawData, maxHeight: maxHeight)
-            } else if let imageData = await storageRef.getOriginalImageData(for: item) {
-                pngData = StorageService.makeThumbnailPNG(from: imageData, maxHeight: maxHeight)
+            } else if let fallbackImageData {
+                pngData = StorageService.makeThumbnailPNG(from: fallbackImageData, maxHeight: maxHeight)
             } else {
                 pngData = nil
             }
 
             guard let pngData else { return }
 
-            guard let thumbnailPath = try? await storageRef.saveThumbnail(pngData, for: contentHash) else { return }
-            await self?.yieldThumbnailUpdated(itemID: itemID, thumbnailPath: thumbnailPath)
+            let thumbnailPath = (thumbnailCacheRoot as NSString).appendingPathComponent("\(contentHash).png")
+            if !FileManager.default.fileExists(atPath: thumbnailCacheRoot) {
+                try? FileManager.default.createDirectory(
+                    atPath: thumbnailCacheRoot,
+                    withIntermediateDirectories: true,
+                    attributes: nil
+                )
+            }
+            do {
+                try StorageService.writeAtomically(pngData, to: thumbnailPath)
+            } catch {
+                ScopyLog.app.warning("Failed to write thumbnail: \(error.localizedDescription, privacy: .private)")
+                return
+            }
+
+            await self.yieldThumbnailUpdated(itemID: itemID, thumbnailPath: thumbnailPath)
         }
     }
 
-    private func yieldThumbnailUpdated(itemID: UUID, thumbnailPath: String) {
+    private func yieldThumbnailUpdated(itemID: UUID, thumbnailPath: String) async {
         guard settings.showImageThumbnails else { return }
-        Task { @MainActor in
-            ThumbnailCache.shared.remove(path: thumbnailPath)
-        }
-        yieldEvent(.thumbnailUpdated(itemID: itemID, thumbnailPath: thumbnailPath))
+        await yieldEvent(.thumbnailUpdated(itemID: itemID, thumbnailPath: thumbnailPath))
     }
+
 }

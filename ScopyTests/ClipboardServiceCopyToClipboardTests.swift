@@ -59,8 +59,9 @@ final class ClipboardServiceCopyToClipboardTests: XCTestCase {
     }
 
     override func tearDown() async throws {
-        service?.stop()
-        try? await Task.sleep(nanoseconds: 200_000_000)
+        if let service {
+            await service.stopAndWait()
+        }
         if let tempDirectory {
             try? FileManager.default.removeItem(at: tempDirectory)
         }

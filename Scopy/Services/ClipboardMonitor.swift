@@ -10,6 +10,29 @@ import UniformTypeIdentifiers
 public final class ClipboardMonitor {
     // MARK: - Types
 
+    private struct SendableTimer: @unchecked Sendable {
+        let timer: Timer
+    }
+
+    private final class TimerBox: @unchecked Sendable {
+        private let lock = NSLock()
+        private var timer: Timer?
+
+        func set(_ timer: Timer?) {
+            lock.lock()
+            defer { lock.unlock() }
+            self.timer = timer
+        }
+
+        func take() -> Timer? {
+            lock.lock()
+            defer { lock.unlock() }
+            let value = timer
+            timer = nil
+            return value
+        }
+    }
+
     public struct ClipboardContent: Sendable {
         public enum Payload: Sendable {
             case none
@@ -94,10 +117,11 @@ public final class ClipboardMonitor {
     // MARK: - Properties
 
     private let pasteboard: NSPasteboard
-    private var timer: Timer?
+    nonisolated private let timerBox: TimerBox
     private var lastChangeCount: Int = 0
     private var isMonitoring = false
     private var monitoringSessionID: UInt64 = 0
+    private var isCheckingClipboard = false
 
     private var pendingLargeContent: [RawClipboardData] = []
     private var activeIngestTasks: [UUID: Task<Void, Never>] = [:]
@@ -105,7 +129,7 @@ public final class ClipboardMonitor {
     private let maxPendingItems = ScopyThresholds.ingestMaxPendingItems
     private let queueLock = NSLock()
 
-    private let eventContinuation: AsyncStream<ClipboardContent>.Continuation
+    private let contentQueue: AsyncBoundedQueue<ClipboardContent>
     public let contentStream: AsyncStream<ClipboardContent>
 
     private let ingestSpoolDirectory: URL
@@ -121,6 +145,7 @@ public final class ClipboardMonitor {
         pollingInterval: TimeInterval? = nil
     ) {
         self.pasteboard = pasteboard
+        self.timerBox = TimerBox()
         if let pollingInterval {
             self.pollingInterval = max(0.1, min(5.0, pollingInterval))
         }
@@ -134,26 +159,29 @@ public final class ClipboardMonitor {
         do {
             try FileManager.default.createDirectory(at: ingestDir, withIntermediateDirectories: true)
         } catch {
-            ScopyLog.monitor.warning("Failed to create ingest spool directory: \(error.localizedDescription, privacy: .public)")
+            ScopyLog.monitor.warning("Failed to create ingest spool directory: \(error.localizedDescription, privacy: .private)")
         }
         self.ingestSpoolDirectory = ingestDir
 
-        var continuation: AsyncStream<ClipboardContent>.Continuation?
-        let stream = AsyncStream(
-            ClipboardContent.self,
-            bufferingPolicy: .unbounded
-        ) { cont in
-            continuation = cont
-        }
-        guard let resolvedContinuation = continuation else {
-            fatalError("Failed to create ClipboardMonitor content stream continuation")
-        }
-        self.contentStream = stream
-        self.eventContinuation = resolvedContinuation
+        let queue = AsyncBoundedQueue<ClipboardContent>(capacity: ScopyThresholds.monitorContentStreamMaxBufferedItems)
+        self.contentQueue = queue
+        self.contentStream = AsyncStream(unfolding: { await queue.dequeue() })
         self.lastChangeCount = pasteboard.changeCount
     }
 
     deinit {
+        Task { [contentQueue] in
+            await contentQueue.finish()
+        }
+
+        // Ensure the RunLoop timer is invalidated even if `stopMonitoring()` was not called.
+        if let timer = timerBox.take() {
+            let sendableTimer = SendableTimer(timer: timer)
+            DispatchQueue.main.async {
+                sendableTimer.timer.invalidate()
+            }
+        }
+
         // Cancel all ingest tasks and drop pending items.
         // 注意: deinit 不在 @MainActor 上下文中，使用 lock/defer unlock 模式
         queueLock.lock()
@@ -176,11 +204,12 @@ public final class ClipboardMonitor {
         monitoringSessionID &+= 1
         lastChangeCount = pasteboard.changeCount
 
-        timer = Timer.scheduledTimer(withTimeInterval: pollingInterval, repeats: true) { [weak self] _ in
+        let timer = Timer.scheduledTimer(withTimeInterval: pollingInterval, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
-                self?.checkClipboard()
+                await self?.checkClipboard()
             }
         }
+        timerBox.set(timer)
         // Timer.scheduledTimer 已自动添加到 RunLoop.current，无需再次添加
     }
 
@@ -189,8 +218,9 @@ public final class ClipboardMonitor {
         isMonitoring = false
         monitoringSessionID &+= 1
 
-        timer?.invalidate()
-        timer = nil
+        if let timer = timerBox.take() {
+            timer.invalidate()
+        }
         // Cancel all ingest tasks and drop pending items.
         // 注意: 此方法在 @MainActor 上下文中执行，使用 lock/defer unlock 模式
         queueLock.lock()
@@ -268,7 +298,7 @@ public final class ClipboardMonitor {
             let paths = urls.map { $0.path }
             return try JSONEncoder().encode(paths)
         } catch {
-            ScopyLog.monitor.error("Failed to serialize file URLs: \(error.localizedDescription, privacy: .public)")
+            ScopyLog.monitor.error("Failed to serialize file URLs: \(error.localizedDescription, privacy: .private)")
             return nil
         }
     }
@@ -280,15 +310,18 @@ public final class ClipboardMonitor {
             let paths = try JSONDecoder().decode([String].self, from: data)
             return paths.map { URL(fileURLWithPath: $0) }
         } catch {
-            ScopyLog.monitor.error("Failed to deserialize file URLs: \(error.localizedDescription, privacy: .public)")
+            ScopyLog.monitor.error("Failed to deserialize file URLs: \(error.localizedDescription, privacy: .private)")
             return nil
         }
     }
 
     // MARK: - Private Methods
 
-    private func checkClipboard() {
+    private func checkClipboard() async {
         guard isMonitoring else { return }
+        guard !isCheckingClipboard else { return }
+        isCheckingClipboard = true
+        defer { isCheckingClipboard = false }
 
         let currentChangeCount = pasteboard.changeCount
 
@@ -328,7 +361,7 @@ public final class ClipboardMonitor {
             contentHash: hash,
             sizeBytes: rawData.sizeBytes
         )
-        eventContinuation.yield(content)
+        await contentQueue.enqueue(content)
     }
 
     /// 异步处理大内容（在后台线程计算哈希）
@@ -360,8 +393,9 @@ public final class ClipboardMonitor {
             let ingestDirectory = ingestSpoolDirectory
             let spoolThresholdBytes = ScopyThresholds.ingestSpoolBytes
             let sessionID = monitoringSessionID
+            let contentQueue = contentQueue
 
-            let task = Task.detached(priority: .userInitiated) { [weak self, taskID, ingestDirectory, sessionID] in
+            let task = Task.detached(priority: .userInitiated) { [weak self, taskID, ingestDirectory, sessionID, contentQueue] in
                 defer {
                     Task { @MainActor [weak self] in
                         self?.finishIngestTask(id: taskID)
@@ -411,28 +445,29 @@ public final class ClipboardMonitor {
                 let resolvedPlainText = plainText
                 let resolvedSizeBytes = sizeBytes
 
-                let didYield = await MainActor.run { [weak self] in
+                let shouldEmit = await MainActor.run { [weak self] in
                     guard let self else { return false }
                     guard !Task.isCancelled else { return false }
                     guard self.isMonitoring else { return false }
                     guard self.monitoringSessionID == sessionID else { return false }
-
-                    let content = ClipboardContent(
-                        type: next.type,
-                        plainText: resolvedPlainText,
-                        payload: payload,
-                        appBundleID: next.appBundleID,
-                        contentHash: hash,
-                        sizeBytes: resolvedSizeBytes
-                    )
-
-                    self.eventContinuation.yield(content)
                     return true
                 }
 
-                if !didYield {
+                guard shouldEmit else {
                     Self.cleanupPayloadIfNeeded(payload)
+                    return
                 }
+
+                let content = ClipboardContent(
+                    type: next.type,
+                    plainText: resolvedPlainText,
+                    payload: payload,
+                    appBundleID: next.appBundleID,
+                    contentHash: hash,
+                    sizeBytes: resolvedSizeBytes
+                )
+
+                await contentQueue.enqueue(content)
             }
 
             activeIngestTasks[taskID] = task
@@ -473,7 +508,7 @@ public final class ClipboardMonitor {
             try StorageService.writeAtomically(data, to: fileURL.path)
             return .file(fileURL)
         } catch {
-            ScopyLog.monitor.warning("Failed to spool ingest payload: \(error.localizedDescription, privacy: .public)")
+            ScopyLog.monitor.warning("Failed to spool ingest payload: \(error.localizedDescription, privacy: .private)")
             return .data(data)
         }
     }

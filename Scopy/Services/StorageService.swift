@@ -67,6 +67,10 @@ public final class StorageService {
     private let externalStoragePath: String
     private let thumbnailCachePath: String
 
+    /// Exposed as immutable values so non-`@MainActor` contexts can safely validate/read paths without capturing `StorageService`.
+    nonisolated let externalStorageDirectoryPath: String
+    nonisolated let thumbnailCacheDirectoryPath: String
+
     let repository: SQLiteClipboardRepository
 
     public var cleanupSettings = CleanupSettings()
@@ -91,24 +95,28 @@ public final class StorageService {
         do {
             try FileManager.default.createDirectory(at: rootURL, withIntermediateDirectories: true)
         } catch {
-            ScopyLog.storage.warning("Failed to create app directory: \(error.localizedDescription, privacy: .public)")
+            ScopyLog.storage.warning("Failed to create app directory: \(error.localizedDescription, privacy: .private)")
         }
 
         self.rootDirectory = rootURL
         self.dbPath = databasePath ?? rootURL.appendingPathComponent("clipboard.db").path
-        self.externalStoragePath = rootURL.appendingPathComponent("content", isDirectory: true).path
-        self.thumbnailCachePath = rootURL.appendingPathComponent("thumbnails", isDirectory: true).path
+        let externalPath = rootURL.appendingPathComponent("content", isDirectory: true).path
+        let thumbnailPath = rootURL.appendingPathComponent("thumbnails", isDirectory: true).path
+        self.externalStoragePath = externalPath
+        self.thumbnailCachePath = thumbnailPath
+        self.externalStorageDirectoryPath = externalPath
+        self.thumbnailCacheDirectoryPath = thumbnailPath
 
         do {
             try FileManager.default.createDirectory(atPath: externalStoragePath, withIntermediateDirectories: true)
         } catch {
-            ScopyLog.storage.warning("Failed to create external storage directory: \(error.localizedDescription, privacy: .public)")
+            ScopyLog.storage.warning("Failed to create external storage directory: \(error.localizedDescription, privacy: .private)")
         }
 
         do {
             try FileManager.default.createDirectory(atPath: thumbnailCachePath, withIntermediateDirectories: true)
         } catch {
-            ScopyLog.storage.warning("Failed to create thumbnail cache directory: \(error.localizedDescription, privacy: .public)")
+            ScopyLog.storage.warning("Failed to create thumbnail cache directory: \(error.localizedDescription, privacy: .private)")
         }
 
         self.repository = SQLiteClipboardRepository(dbPath: self.dbPath)
@@ -335,7 +343,7 @@ public final class StorageService {
                 try FileManager.default.removeItem(atPath: storageRef)
             } catch {
                 ScopyLog.storage.warning(
-                    "Failed to delete external file '\(storageRef, privacy: .public)': \(error.localizedDescription, privacy: .public)"
+                    "Failed to delete external file '\(storageRef, privacy: .private)': \(error.localizedDescription, privacy: .private)"
                 )
             }
         }
@@ -352,7 +360,7 @@ public final class StorageService {
                 try FileManager.default.removeItem(atPath: ref)
             } catch {
                 ScopyLog.storage.warning(
-                    "Failed to delete external file during clearAll: \(error.localizedDescription, privacy: .public)"
+                    "Failed to delete external file during clearAll: \(error.localizedDescription, privacy: .private)"
                 )
             }
         }
@@ -593,7 +601,7 @@ public final class StorageService {
         guard databaseDirectory.path != storageRoot.path else { return false }
 
         ScopyLog.storage.error(
-            "Refusing to cleanup orphaned files due to mismatched database/root directories (db=\(databaseDirectory.path, privacy: .public), root=\(storageRoot.path, privacy: .public))"
+            "Refusing to cleanup orphaned files due to mismatched database/root directories (db=\(databaseDirectory.path, privacy: .private), root=\(storageRoot.path, privacy: .private))"
         )
         return true
     }
@@ -719,7 +727,7 @@ public final class StorageService {
                         }
                         // v0.17: 记录其他删除失败，便于追踪存储泄漏
                         ScopyLog.storage.warning(
-                            "Failed to delete file '\(file, privacy: .public)': \(error.localizedDescription, privacy: .public)"
+                            "Failed to delete file '\(file, privacy: .private)': \(error.localizedDescription, privacy: .private)"
                         )
                     }
                 }
@@ -782,7 +790,7 @@ public final class StorageService {
     /// 防止恶意或损坏的文件导致内存耗尽
     nonisolated private static let maxExternalFileSize: Int = 100 * 1024 * 1024
 
-    nonisolated private static func validateStorageRef(_ ref: String, externalStoragePath: String) -> Bool {
+    nonisolated static func validateStorageRef(_ ref: String, externalStoragePath: String) -> Bool {
         let filename = (ref as NSString).lastPathComponent
         let nameWithoutExt = (filename as NSString).deletingPathExtension
 
@@ -828,7 +836,7 @@ public final class StorageService {
         } catch let error as StorageError {
             throw error
         } catch {
-            ScopyLog.storage.warning("Failed to get file attributes: \(error.localizedDescription, privacy: .public)")
+            ScopyLog.storage.warning("Failed to get file attributes: \(error.localizedDescription, privacy: .private)")
         }
 
         do {

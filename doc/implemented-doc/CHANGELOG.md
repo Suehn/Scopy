@@ -5,6 +5,32 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [v0.43.20] - 2025-12-15
+
+### UX/Perf：Hover 预览可滚动（全文/长图）+ 预览高度按屏幕上限自适应
+
+- **文本 hover 预览更可用**：
+  - 不再只展示首尾截断；改为全文预览，鼠标移入预览框可直接滚动查看全部内容。
+  - 预览框高度按内容自适应，上限为当前屏幕可视高度的 70%。
+  - 文本渲染改用 `NSTextView + NSScrollView`，提升大文本滚动与选择的稳定性。
+- **图片 hover 预览更贴合长图**：
+  - 预览框宽度固定 500pt，高度按等比缩放后的实际高度自适应（上限为当前屏幕可视高度的 70%）。
+  - 长图超出上限后在预览框内纵向滚动查看全图。
+  - 预览 downsample 按目标宽度优化，并对极端长边增加像素上限保护，避免内存峰值/卡顿。
+
+### 修改文件
+
+- `Scopy/Views/History/HistoryItemView.swift`
+- `Scopy/Views/History/HistoryItemTextPreviewView.swift`
+- `Scopy/Views/History/HistoryItemImagePreviewView.swift`
+- `Scopy/Views/History/HoverPreviewScreenMetrics.swift`
+
+### 测试
+
+- 单元测试：`make test-unit` **147 passed** (1 skipped)
+- Strict Concurrency：`make test-strict` **147 passed** (1 skipped)
+- 性能测试：`make test-perf` **23 passed** (6 skipped)
+
 ## [v0.43.17] - 2025-12-15
 
 ### Fix/UX：设置窗口更像 macOS 设置（不再误退出 + 热键失败回退 + 侧边栏搜索）
@@ -25,6 +51,46 @@
 - `Scopy/Views/Settings/SettingsView.swift`
 - `Scopy/Views/Settings/HotKeyRecorderView.swift`
 - `Scopy/Domain/Models/SettingsDTO.swift`
+
+### 测试
+
+- 单元测试：`make test-unit` **147 passed** (1 skipped)
+- Strict Concurrency：`make test-strict` **147 passed** (1 skipped)
+
+## [v0.43.19] - 2025-12-15
+
+### Fix/Quality：安全/并发/边界收口（外部文件校验 + 事件流背压 + UI 支撑模块）
+
+- **安全**：
+  - 图片原始数据读取统一走 `StorageService` 校验/读取逻辑，避免绕过 `storageRef` 防护。
+  - 缩略图生成对 `storageRef` 增加校验，避免异常路径被读取/解析。
+- **并发与稳定性**：
+  - `ClipboardService` / `ClipboardMonitor` 事件流改为有界背压（不丢事件），避免 `.unbounded` 导致的极端内存风险。
+  - `ClipboardMonitor` deinit 增加 timer 兜底清理，并通过线程安全 box 满足 Strict Concurrency。
+  - 新增 `stopAndWait()`，测试与退出路径不再依赖 sleep。
+- **结构与维护性**：
+  - 抽出 `ScopyUISupport`（`IconService` / `ThumbnailCache`），后端移除对 UI cache 的直接依赖。
+  - `ContentView` 改用 `loadIfStale()`，避免启动瞬间重复 load。
+  - 路径/潜在敏感错误日志收敛为 `.private`。
+
+### 修改文件
+
+- `Package.swift`
+- `project.yml`
+- `Scopy/Application/ClipboardService.swift`
+- `Scopy/Services/ClipboardMonitor.swift`
+- `Scopy/Utilities/AsyncBoundedQueue.swift`
+- `Scopy/Domain/Protocols/ClipboardServiceProtocol.swift`
+- `Scopy/Services/RealClipboardService.swift`
+- `ScopyUISupport/IconService.swift`
+- `ScopyUISupport/ThumbnailCache.swift`
+- `Scopy/Observables/AppState.swift`
+- `Scopy/Observables/HistoryViewModel.swift`
+- `Scopy/Observables/SettingsViewModel.swift`
+- `Scopy/Views/ContentView.swift`
+- `Scopy/Views/HeaderView.swift`
+- `Scopy/Views/History/*`
+- `ScopyTests/*`
 
 ### 测试
 

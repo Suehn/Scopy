@@ -17,4 +17,10 @@ enum ScopyThresholds {
 
     /// StorageService: content >= threshold will be stored in external file (not inline DB blob).
     static let externalStorageBytes = 100 * 1024
+
+    /// ClipboardService: maximum buffered UI events before applying backpressure.
+    static let clipboardEventStreamMaxBufferedItems = 2048
+
+    /// ClipboardMonitor: maximum buffered clipboard contents before applying backpressure.
+    static let monitorContentStreamMaxBufferedItems = 256
 }

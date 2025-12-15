@@ -154,7 +154,7 @@ final class ResourceCleanupTests: XCTestCase {
 
     // MARK: - Event Stream Cleanup Tests
 
-    /// 测试事件流在服务停止后正确关闭
+    /// 测试服务停止后，事件监听任务可被取消并正常收尾（无需依赖 stream finish）
     func testEventStreamCleanup() async throws {
         let service = ClipboardServiceFactory.create(useMock: false, databasePath: Self.makeSharedInMemoryDatabasePath())
 
@@ -176,16 +176,16 @@ final class ResourceCleanupTests: XCTestCase {
         // Give the listener a chance to subscribe.
         await Task.yield()
 
-        // 停止服务
-        service.stop()
+        // 停止服务（等待资源收尾）
+        await service.stopAndWait()
 
         // 取消事件任务
         eventTask.cancel()
 
         // 验证任务可以正常结束
         let _ = await eventTask.value
-        // 如果能到这里，说明事件流正确关闭了
-        XCTAssertTrue(true, "Event stream should close properly")
+        // 如果能到这里，说明停止 + 取消路径不会卡住
+        XCTAssertTrue(true, "Event stream listener should be cancellable after stop")
     }
 
     private static func makeSharedInMemoryDatabasePath() -> String {

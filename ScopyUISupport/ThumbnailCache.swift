@@ -2,6 +2,7 @@ import AppKit
 import Foundation
 import ImageIO
 
+/// In-memory thumbnail cache for UI rendering.
 @MainActor
 public final class ThumbnailCache {
     public static let shared = ThumbnailCache()

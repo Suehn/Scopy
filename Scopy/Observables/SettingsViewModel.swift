@@ -1,6 +1,7 @@
 import Foundation
 import Observation
 import ScopyKit
+import ScopyUISupport
 
 @Observable
 @MainActor
@@ -39,7 +40,7 @@ final class SettingsViewModel {
         do {
             settings = try await service.getSettings()
         } catch {
-            ScopyLog.app.error("Failed to load settings: \(error.localizedDescription, privacy: .public)")
+            ScopyLog.app.error("Failed to load settings: \(error.localizedDescription, privacy: .private)")
             settings = .default
         }
     }
@@ -48,13 +49,20 @@ final class SettingsViewModel {
         do {
             try await updateSettingsOrThrow(newSettings)
         } catch {
-            ScopyLog.app.error("Failed to update settings: \(error.localizedDescription, privacy: .public)")
+            ScopyLog.app.error("Failed to update settings: \(error.localizedDescription, privacy: .private)")
         }
     }
 
     func updateSettingsOrThrow(_ newSettings: SettingsDTO) async throws {
+        let oldSettings = settings
         try await service.updateSettings(newSettings)
         settings = newSettings
+
+        if oldSettings.thumbnailHeight != newSettings.thumbnailHeight
+            || oldSettings.showImageThumbnails != newSettings.showImageThumbnails
+        {
+            ThumbnailCache.shared.clear()
+        }
     }
 
     // MARK: - Stats
@@ -77,7 +85,7 @@ final class SettingsViewModel {
             diskSizeBytes = detailed.totalSizeBytes
             diskSizeCache = (diskSizeBytes, Date())
         } catch {
-            ScopyLog.app.error("Failed to get disk size: \(error.localizedDescription, privacy: .public)")
+            ScopyLog.app.error("Failed to get disk size: \(error.localizedDescription, privacy: .private)")
         }
     }
 

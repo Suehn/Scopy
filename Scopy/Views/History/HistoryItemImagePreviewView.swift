@@ -1,5 +1,6 @@
 import SwiftUI
 import ScopyKit
+import ScopyUISupport
 import AppKit
 
 struct HistoryItemImagePreviewView: View {
@@ -10,39 +11,56 @@ struct HistoryItemImagePreviewView: View {
     @State private var lastLoadedPath: String?
 
     var body: some View {
-        let maxWidth: CGFloat = ScopySize.Width.previewMax
-        let maxHeight: CGFloat = ScopySize.Window.mainHeight
-        let size = displaySize(maxWidth: maxWidth, maxHeight: maxHeight)
+        let width: CGFloat = ScopySize.Width.previewMax
+        let maxHeight: CGFloat = HoverPreviewScreenMetrics.maxPopoverHeightPoints()
 
-        ZStack {
-            if let cgImage = model.previewCGImage {
-                previewImage(Image(decorative: cgImage, scale: 1.0))
-            } else if let thumbnailPath {
-                let loaded = lastLoadedPath == thumbnailPath ? loadedThumbnail : nil
-                let cached = ThumbnailCache.shared.cachedImage(path: thumbnailPath) ?? loaded
+        let content = previewContent()
+        let naturalHeight = previewHeight(width: width)
+        let desiredHeight = min(maxHeight, max(80, naturalHeight))
 
-                if let nsImage = cached {
-                    previewImage(Image(nsImage: nsImage))
-                } else {
-                    ProgressView()
-                        .task(id: thumbnailPath) {
-                            await loadThumbnailIfNeeded(path: thumbnailPath)
-                        }
+        Group {
+            if naturalHeight > maxHeight {
+                ScrollView(.vertical) {
+                    content
+                        .frame(width: width, height: naturalHeight)
                 }
+                .scrollIndicators(.visible)
+                .frame(width: width, height: desiredHeight)
             } else {
-                ProgressView()
+                content
+                    .frame(width: width, height: desiredHeight)
             }
         }
-        .frame(width: size.width, height: size.height)
     }
 
-    private func previewImage(_ image: Image) -> some View {
-        image
-            .resizable()
-            .aspectRatio(contentMode: .fit)
+    @ViewBuilder
+    private func previewContent() -> some View {
+        if let cgImage = model.previewCGImage {
+            Image(decorative: cgImage, scale: 1.0)
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+        } else if let thumbnailPath {
+            let loaded = lastLoadedPath == thumbnailPath ? loadedThumbnail : nil
+            let cached = ThumbnailCache.shared.cachedImage(path: thumbnailPath) ?? loaded
+
+            if let nsImage = cached {
+                Image(nsImage: nsImage)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+            } else {
+                ProgressView()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .task(id: thumbnailPath) {
+                        await loadThumbnailIfNeeded(path: thumbnailPath)
+                    }
+            }
+        } else {
+            ProgressView()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
     }
 
-    private func displaySize(maxWidth: CGFloat, maxHeight: CGFloat) -> CGSize {
+    private func previewHeight(width: CGFloat) -> CGFloat {
         let size: CGSize?
         if let cgImage = model.previewCGImage {
             size = CGSize(width: cgImage.width, height: cgImage.height)
@@ -54,18 +72,12 @@ struct HistoryItemImagePreviewView: View {
             size = nil
         }
 
-        guard let size else {
-            return CGSize(width: maxWidth, height: maxHeight)
-        }
+        guard let size else { return min(HoverPreviewScreenMetrics.maxPopoverHeightPoints(), 200) }
 
         let originalWidth = max(size.width, 1)
         let originalHeight = max(size.height, 1)
-
-        let widthScale = maxWidth / originalWidth
-        let heightScale = maxHeight / originalHeight
-        let scale = min(widthScale, heightScale)
-
-        return CGSize(width: originalWidth * scale, height: originalHeight * scale)
+        let scaledHeight = width * (originalHeight / originalWidth)
+        return ceil(scaledHeight)
     }
 
     @MainActor

@@ -76,6 +76,8 @@ targets:
       - sdk: libsqlite3.tbd
       - package: ScopyKit
         product: ScopyKit
+      - package: ScopyKit
+        product: ScopyUISupport
 
   ScopyTests:
     type: bundle.unit-test
@@ -110,6 +112,8 @@ targets:
       - sdk: libsqlite3.tbd
       - package: ScopyKit
         product: ScopyKit
+      - package: ScopyKit
+        product: ScopyUISupport
 
   ScopyTestHost:
     type: application
@@ -161,6 +165,8 @@ targets:
       - sdk: libsqlite3.tbd
       - package: ScopyKit
         product: ScopyKit
+      - package: ScopyKit
+        product: ScopyUISupport
 
   ScopyUITests:
     type: bundle.ui-testing

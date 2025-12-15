@@ -2,8 +2,6 @@ import AppKit
 import Foundation
 
 /// Centralized app icon/name cache.
-///
-/// Note: This file lives in Infrastructure but is used by Presentation code via `import ScopyKit`.
 @MainActor
 public final class IconService {
     public static let shared = IconService()
