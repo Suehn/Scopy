@@ -68,20 +68,20 @@ jobs:
 
           if [[ "${HTTP_CODE}" == "200" ]]; then
             python3 - <<'PY'
-import json
-import os
-import sys
+          import json
+          import os
+          import sys
 
-asset = os.environ["ASSET"]
-with open("release.json", "r", encoding="utf-8") as f:
-    data = json.load(f)
+          asset = os.environ["ASSET"]
+          with open("release.json", "r", encoding="utf-8") as f:
+              data = json.load(f)
 
-names = [a.get("name") for a in data.get("assets", [])]
-if asset in names:
-    sys.stderr.write(f"Release already contains {asset}; refusing to overwrite.\n")
-    sys.stderr.write("Bump version, create a new tag, and release again.\n")
-    sys.exit(1)
-PY
+          names = [a.get("name") for a in data.get("assets", [])]
+          if asset in names:
+              sys.stderr.write(f"Release already contains {asset}; refusing to overwrite.\n")
+              sys.stderr.write("Bump version, create a new tag, and release again.\n")
+              sys.exit(1)
+          PY
           elif [[ "${HTTP_CODE}" == "404" ]]; then
             echo "No existing release for ${TAG}; continuing."
           else
