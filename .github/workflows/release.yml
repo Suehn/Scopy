@@ -73,8 +73,8 @@ jobs:
             "${API_URL}" || true)"
 
           if [[ "${HTTP_CODE}" == "200" ]]; then
-            SHA_URL="$(SHA_NAME="${SHA}" python3 -c 'import json,os; data=json.load(open(\"release.json\",\"r\",encoding=\"utf-8\")); assets=data.get(\"assets\",[]); url_map={a.get(\"name\"): a.get(\"browser_download_url\") for a in assets}; print(url_map.get(os.environ[\"SHA_NAME\"], \"\"))')"
-            DMG_URL="$(DMG_NAME="${DMG}" python3 -c 'import json,os; data=json.load(open(\"release.json\",\"r\",encoding=\"utf-8\")); assets=data.get(\"assets\",[]); url_map={a.get(\"name\"): a.get(\"browser_download_url\") for a in assets}; print(url_map.get(os.environ[\"DMG_NAME\"], \"\"))')"
+            SHA_URL="$(SHA_NAME="${SHA}" python3 -c "import json,os; data=json.load(open('release.json','r',encoding='utf-8')); assets=data.get('assets',[]); url_map={a.get('name'): a.get('browser_download_url') for a in assets}; print(url_map.get(os.environ['SHA_NAME'], ''))")"
+            DMG_URL="$(DMG_NAME="${DMG}" python3 -c "import json,os; data=json.load(open('release.json','r',encoding='utf-8')); assets=data.get('assets',[]); url_map={a.get('name'): a.get('browser_download_url') for a in assets}; print(url_map.get(os.environ['DMG_NAME'], ''))")"
 
             if [[ -n "${SHA_URL}" && -n "${DMG_URL}" ]]; then
               echo "Found existing release assets for ${TAG}; will reuse them (no rebuild/no overwrite)."
