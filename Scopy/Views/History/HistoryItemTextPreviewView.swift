@@ -6,16 +6,30 @@ struct HistoryItemTextPreviewView: View {
     @ObservedObject var model: HoverPreviewModel
 
     var body: some View {
-        let width: CGFloat = ScopySize.Width.previewMax
+        let maxWidth: CGFloat = ScopySize.Width.previewMax
         let maxHeight: CGFloat = HoverPreviewScreenMetrics.maxPopoverHeightPoints()
         let font = NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
         let padding: CGFloat = ScopySpacing.md
 
         if let text = model.text {
-            let measuredTextHeight: CGFloat = estimateTextHeight(text, font: font, width: width - padding * 2, maxHeight: maxHeight)
+            let width = HoverPreviewTextSizing.preferredWidth(
+                for: text,
+                font: font,
+                padding: padding,
+                maxWidth: maxWidth
+            )
+
+            let measuredTextHeight: CGFloat = HoverPreviewTextSizing.preferredTextHeight(
+                for: text,
+                font: font,
+                contentWidth: max(1, width - padding * 2),
+                maxHeight: maxHeight
+            )
             let textContentHeight = measuredTextHeight + padding * 2
-            let contentHeight = model.isMarkdown ? (model.markdownContentHeight ?? textContentHeight) : textContentHeight
-            let clampedHeight = min(maxHeight, max(64, contentHeight))
+
+            // Add a small buffer to avoid occasional off-by-a-few-pixels scroll for very small content.
+            let contentHeight = (model.isMarkdown ? (model.markdownContentHeight ?? textContentHeight) : textContentHeight) + 4
+            let clampedHeight = min(maxHeight, max(1, contentHeight))
             let shouldScroll = contentHeight > maxHeight
 
             if model.isMarkdown, let html = model.markdownHTML {
@@ -34,31 +48,8 @@ struct HistoryItemTextPreviewView: View {
             }
         } else {
             ProgressView()
-                .frame(width: width, height: min(maxHeight, 160))
+                .frame(width: maxWidth, height: min(maxHeight, 160))
         }
-    }
-
-    private func estimateTextHeight(_ text: String, font: NSFont, width: CGFloat, maxHeight: CGFloat) -> CGFloat {
-        guard width > 0 else { return 0 }
-        if text.isEmpty { return 0 }
-
-        // Avoid heavy measurement for very large strings; long content can just use max height + scroll.
-        if text.utf16.count >= 1_500 { return maxHeight }
-
-        var newlineCount = 0
-        for ch in text {
-            if ch == "\n" {
-                newlineCount += 1
-                if newlineCount >= 20 { return maxHeight }
-            }
-        }
-
-        let attributed = NSAttributedString(string: text, attributes: [.font: font])
-        let rect = attributed.boundingRect(
-            with: CGSize(width: width, height: .greatestFiniteMagnitude),
-            options: [.usesLineFragmentOrigin, .usesFontLeading]
-        )
-        return ceil(rect.height)
     }
 }
 

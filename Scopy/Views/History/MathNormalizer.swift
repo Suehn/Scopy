@@ -27,7 +27,8 @@ enum MathNormalizer {
     /// - Only wraps short, single-line bracketed fragments or short standalone commands.
     /// - Skips anything that already contains `$` or `\\(` / `\\[` delimiters.
     static func wrapLooseLaTeX(_ markdown: String) -> String {
-        guard markdown.contains("\\") else { return markdown }
+        // Fast path: if there's no TeX-ish signal at all, avoid scanning.
+        if !markdown.contains("\\"), !markdown.contains("_"), !markdown.contains("^") { return markdown }
         // Keep this bounded; hover preview should never spend time "fixing" huge payloads.
         if markdown.utf16.count > 200_000 { return markdown }
 
@@ -174,7 +175,7 @@ enum MathNormalizer {
     }
 
     private static func normalizePlainTextSegment(_ text: String) -> String {
-        guard text.contains("\\") else { return text }
+        guard text.contains("\\") || text.contains("_") || text.contains("^") else { return text }
         if text.contains("\\(") || text.contains("\\[") { return text }
 
         let hasAnyDollar = text.contains("$")
@@ -552,7 +553,20 @@ enum MathNormalizer {
 
         // Must contain at least one known TeX command, or strong math signal.
         if containsKnownCommand(in: s) { return true }
-        if s.contains("^") || s.contains("_") { return true }
+        if s.contains("^") || s.contains("_") {
+            // Heuristic for common "paper style" math without explicit delimiters.
+            // Avoid wrapping non-math identifiers like `(foo_bar)` by requiring braces, digits, or a clear operator.
+            if s.contains("{") { return true }
+            if containsDigit(in: s) { return true }
+            if s.contains("=") { return true }
+        }
+        return false
+    }
+
+    private static func containsDigit(in s: String) -> Bool {
+        for ch in s {
+            if ch >= "0", ch <= "9" { return true }
+        }
         return false
     }
 

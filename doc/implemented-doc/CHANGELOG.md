@@ -5,6 +5,77 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [v0.44] - 2025-12-16
+
+### Release：Preview 稳健性 + 自动发布（Homebrew 对齐）
+
+- **Preview/Rendering**：Markdown/LaTeX 预览更鲁棒（code-skip、括号内上下标识别、动态高度修复、移除最小宽高钳制等），并补齐回归测试覆盖。
+- **依赖/构建**：移除仅用于测试的 `Down` SwiftPM 依赖，减少构建复杂度并保持工程生成一致。
+- **发布自动化**：`main` 推送且更新实现文档后自动打 tag 并发布；发布 workflow 拒绝覆盖同一 tag 的 DMG，避免 Homebrew `SHA-256 mismatch`；可选自动对 `Homebrew/homebrew-cask` 发起 bump PR。
+
+## [v0.43.31] - 2025-12-16
+
+### Preview：LaTeX/Markdown 预览稳健性与依赖收敛（code-skip + 移除 Down）
+
+- **避免破坏代码片段**：
+  - `LaTeXInlineTextNormalizer` 跳过 fenced code block 与 inline code span（避免把 `` `\\textbf{...}` `` 转成 Markdown 粗体）。
+  - `LaTeXDocumentNormalizer` 对 `` `\\label{...}` `` 不再整行丢弃；inline `\\label{...}` 删除仅作用于非 code segment。
+- **依赖收敛**：移除仅用于测试的 `Down` SwiftPM 依赖，减少构建复杂度（工程通过 `xcodegen generate` 重新生成以保持一致）。
+- **回归测试**：新增 code-skip 与脚本提前闭合（`</script>`）相关用例。
+
+### 修改文件
+
+- `Scopy/Views/History/LaTeXInlineTextNormalizer.swift`
+- `Scopy/Views/History/LaTeXDocumentNormalizer.swift`
+- `Scopy/Views/History/MarkdownPreviewWebView.swift`
+- `ScopyTests/MarkdownMathRenderingTests.swift`
+- `project.yml`
+- `Scopy.xcodeproj/project.pbxproj`
+
+## [v0.43.32] - 2025-12-16
+
+### Preview：括号内下标/上标公式更鲁棒（`(T_{io}=...)` 等）
+
+- **公式识别增强**：当文本包含 `_`/`^` 且满足更强数学信号（如包含 `{`、数字或 `=`）时，也会对 `(...)` 做数学包裹，确保 KaTeX 能渲染。
+- **防误判**：对 `(foo_bar)` 这类普通标识符（无 `{}`、无数字、无 `=`）不做数学包裹。
+- **回归测试**：新增“可复算例子”片段用例（`(T_{io}=12.4)ms` 等）及负向用例。
+
+### 修改文件
+
+- `Scopy/Views/History/MathNormalizer.swift`
+- `ScopyTests/MarkdownMathRenderingTests.swift`
+
+## [v0.43.33] - 2025-12-16
+
+### Preview：动态高度更准确更稳定（Retina 不再低估 + 监听内容变化）
+
+- **高度上报修复**：WKWebView 的 `scrollHeight` 为 CSS 像素（逻辑像素），移除按 `devicePixelRatio` 的二次缩放，避免 Retina 下高度被低估导致“未到上限仍需滚动”。
+- **高度同步更稳**：
+  - `ResizeObserver` 监听 `#content` 尺寸变化（Markdown 渲染 / KaTeX 渲染 / 图片加载）。
+  - `document.fonts.ready` 后补一次上报（字体加载后高度更准确）。
+  - `window.load` 后补一次上报（避免资源加载完成较晚导致滞后）。
+- **回归测试**：新增断言，防止未来再次引入 `devicePixelRatio` 缩放。
+
+### 修改文件
+
+- `Scopy/Views/History/MarkdownHTMLRenderer.swift`
+- `ScopyTests/KaTeXRenderToStringTests.swift`
+
+## [v0.43.35] - 2025-12-16
+
+### Preview：移除最小宽高限制，完全动态贴合
+
+- **文本预览**：移除 `minWidth/minHeight` 钳制，宽高仅受 `maxWidth/maxHeight` 上限约束，单行短文本可显著收缩。
+- **图片预览**：移除图片高度最小值钳制，矮图按真实比例高度展示，减少空白。
+- **回归测试**：更新 `HoverPreviewTextSizingTests`，不再假定存在最小宽度。
+
+### 修改文件
+
+- `Scopy/Views/History/HoverPreviewTextSizing.swift`
+- `Scopy/Views/History/HistoryItemTextPreviewView.swift`
+- `Scopy/Views/History/HistoryItemImagePreviewView.swift`
+- `ScopyTests/HoverPreviewTextSizingTests.swift`
+
 ## [v0.43.28] - 2025-12-16
 
 ### UX/Preview：常见 LaTeX 文档结构（itemize/enumerate/quote/paragraph/label）转 Markdown

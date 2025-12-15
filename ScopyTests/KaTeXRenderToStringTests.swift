@@ -9,6 +9,12 @@ final class KaTeXRenderToStringTests: XCTestCase {
         XCTAssertTrue(html.contains("markdown-it.min.js"))
     }
 
+    func testMarkdownPreviewHeightReportingDoesNotDivideByDevicePixelRatio() {
+        let html = MarkdownHTMLRenderer.render(markdown: "x")
+        XCTAssertFalse(html.contains("devicePixelRatio"))
+        XCTAssertTrue(html.contains("postMessage(h)"))
+    }
+
     func testMarkdownTableUsesHorizontalScrollWithBalancedWrapping() {
         let html = MarkdownHTMLRenderer.render(markdown: "| a | b |\n| --- | --- |\n| 1 | 2 |")
         XCTAssertTrue(html.contains("overflow-x: auto;"))

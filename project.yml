@@ -47,9 +47,6 @@ settings:
 packages:
   ScopyKit:
     path: .
-  Down:
-    url: https://github.com/johnxnguyen/Down.git
-    from: 0.11.0
 
 targets:
   Scopy:
@@ -81,8 +78,6 @@ targets:
         product: ScopyKit
       - package: ScopyKit
         product: ScopyUISupport
-      - package: Down
-        product: Down
     preBuildScripts:
       - name: "Stage SwiftPM Resource Bundles"
         script: |
@@ -184,8 +179,6 @@ targets:
         product: ScopyKit
       - package: ScopyKit
         product: ScopyUISupport
-      - package: Down
-        product: Down
     preBuildScripts:
       - name: "Stage SwiftPM Resource Bundles"
         script: |
@@ -290,8 +283,6 @@ targets:
         product: ScopyKit
       - package: ScopyKit
         product: ScopyUISupport
-      - package: Down
-        product: Down
     preBuildScripts:
       - name: "Stage SwiftPM Resource Bundles"
         script: |

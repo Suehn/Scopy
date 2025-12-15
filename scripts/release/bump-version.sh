@@ -96,7 +96,7 @@ insert_changelog_section() {
         exit 1
     fi
 
-    if rg -n "^## \\[${tag}\\]" "${CHANGELOG}" >/dev/null; then
+    if grep -Fq "## [${tag}]" "${CHANGELOG}"; then
         echo "Changelog already contains ${tag}; refusing to insert." >&2
         exit 1
     fi
@@ -141,7 +141,7 @@ update_doc_index() {
     ' "${DOC_INDEX}" > "${tmp}"
     mv "${tmp}" "${DOC_INDEX}"
 
-    if ! rg -n "\\| \\[${new_tag}\\]\\(\\./${new_tag}\\.md\\)" "${DOC_INDEX}" >/dev/null; then
+    if ! grep -Fq "| [${new_tag}](./${new_tag}.md)" "${DOC_INDEX}"; then
         tmp="$(mktemp)"
         awk -v new_tag="${new_tag}" -v date_str="${date_str}" -v summary="${summary}" '
           BEGIN { inserted=0 }
@@ -252,4 +252,3 @@ main() {
 }
 
 main "$@"
-

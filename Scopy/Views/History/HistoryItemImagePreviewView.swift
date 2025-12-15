@@ -16,7 +16,7 @@ struct HistoryItemImagePreviewView: View {
 
         let content = previewContent()
         let naturalHeight = previewHeight(width: width)
-        let desiredHeight = min(maxHeight, max(80, naturalHeight))
+        let desiredHeight = min(maxHeight, max(1, naturalHeight))
 
         Group {
             if naturalHeight > maxHeight {
@@ -72,7 +72,7 @@ struct HistoryItemImagePreviewView: View {
             size = nil
         }
 
-        guard let size else { return min(HoverPreviewScreenMetrics.maxPopoverHeightPoints(), 200) }
+        guard let size else { return min(HoverPreviewScreenMetrics.maxPopoverHeightPoints(), 120) }
 
         let originalWidth = max(size.width, 1)
         let originalHeight = max(size.height, 1)

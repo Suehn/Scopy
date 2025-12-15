@@ -33,10 +33,9 @@ if [[ ! -f "${CHANGELOG}" ]]; then
     exit 1
 fi
 
-if ! rg -n "^## \\[${TAG}\\]" "${CHANGELOG}" >/dev/null; then
+if ! grep -Fq "## [${TAG}]" "${CHANGELOG}"; then
     echo "Changelog does not contain heading: ## [${TAG}] ..." >&2
     exit 1
 fi
 
 echo "OK: ${TAG}"
-

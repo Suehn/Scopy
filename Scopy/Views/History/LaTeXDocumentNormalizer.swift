@@ -42,10 +42,13 @@ enum LaTeXDocumentNormalizer {
             }
 
             // Drop common document-only metadata commands.
-            if isLabelOnlyLine(line) {
+            // Do not drop labels when the entire line is an inline code span like: `\label{...}`
+            if isLabelOnlyLine(line), !line.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("`") {
                 continue
             }
-            line = removeInlineLabel(line)
+            line = MarkdownCodeSkipper.processInlineCode(in: line) { segment in
+                removeInlineLabel(segment)
+            }
 
             // Block environments -> Markdown.
             if isBeginEnvironmentLine(line, name: "quote") {

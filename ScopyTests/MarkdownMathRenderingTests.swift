@@ -1,7 +1,28 @@
 import XCTest
-import Down
 
 final class MarkdownMathRenderingTests: XCTestCase {
+    func testParenSubscriptMathWithoutBackslashIsWrapped() {
+        let input = """
+        * (T_{io}=12.4)ms，(T_{aug}=47.8)ms → (T_{data}=60.2)ms
+        """
+
+        let normalized = MathNormalizer.wrapLooseLaTeX(input)
+        XCTAssertTrue(normalized.contains("$\\left(T_{io}=12.4\\right)$ms"))
+        XCTAssertTrue(normalized.contains("$\\left(T_{aug}=47.8\\right)$ms"))
+        XCTAssertTrue(normalized.contains("$\\left(T_{data}=60.2\\right)$ms"))
+
+        let html = MarkdownHTMLRenderer.render(markdown: input)
+        XCTAssertTrue(html.contains("katex.min.js"))
+        XCTAssertTrue(html.contains("$\\left(T_{io}=12.4\\right)$"))
+    }
+
+    func testParenUnderscoreWithoutBracesOrDigitsIsNotWrapped() {
+        let input = "note: (foo_bar) should stay plain."
+        let normalized = MathNormalizer.wrapLooseLaTeX(input)
+        XCTAssertTrue(normalized.contains("(foo_bar)"))
+        XCTAssertFalse(normalized.contains("$\\left(foo_bar\\right)$"))
+    }
+
     func testLaTeXDocumentCommandsAreNormalizedForMarkdownPreview() {
         let input = """
         \\section{本文研究内容与主要创新点}\u{2028}\\label{sec:contribution}
@@ -30,6 +51,48 @@ final class MarkdownMathRenderingTests: XCTestCase {
         XCTAssertTrue(inline.contains("- **知识内容层（What to distill）**：内容"))
         XCTAssertTrue(inline.contains("1. *统一建模*：内容"))
     }
+
+    func testLaTeXInlineTextNormalizerDoesNotModifyInlineCodeSpansOrFencedCode() {
+        let input = """
+        normal: \\textbf{OK} and `\\textbf{NO}`.
+
+        ```
+        \\textbf{NO}
+        \\emph{NO}
+        ```
+        """
+
+        let out = LaTeXInlineTextNormalizer.normalize(input)
+        XCTAssertTrue(out.contains("normal: **OK** and `\\textbf{NO}`."))
+        XCTAssertTrue(out.contains("```"))
+        XCTAssertTrue(out.contains("\\textbf{NO}"))
+        XCTAssertTrue(out.contains("\\emph{NO}"))
+    }
+
+    func testLaTeXDocumentNormalizerDoesNotDropLabelInsideInlineCodeSpan() {
+        let input = """
+        `\\label{sec:keep}`
+        \\label{sec:drop}
+        """
+        let out = LaTeXDocumentNormalizer.normalize(input)
+        XCTAssertTrue(out.contains("`\\label{sec:keep}`"))
+        XCTAssertFalse(out.contains("\\label{sec:drop}"))
+    }
+
+    func testMarkdownRendererEscapesScriptTagTerminatorInInjectedStringLiterals() {
+        let input = "x </script> y"
+        let html = MarkdownHTMLRenderer.render(markdown: input)
+        guard let start = html.range(of: "var src = ")?.lowerBound else {
+            XCTFail("Missing `var src =` in rendered HTML")
+            return
+        }
+        let tail = html[start...]
+        let end = tail.firstIndex(of: ";") ?? tail.endIndex
+        let snippet = String(tail[..<end]).lowercased()
+        XCTAssertTrue(snippet.contains("script"))
+        XCTAssertFalse(snippet.contains("</script"))
+    }
+
     func testLooseParenMathWithoutDollarDelimitersIsWrapped() {
         let input = "设用户集合为 (\\mathcal{U}), 物品集合为 (\\mathcal{I})."
 
@@ -117,20 +180,6 @@ final class MarkdownMathRenderingTests: XCTestCase {
         XCTAssertEqual(protected.placeholders.count, 1)
         XCTAssertTrue(protected.placeholders[0].original.contains("\\phi"))
         XCTAssertTrue(protected.markdown.contains(protected.placeholders[0].placeholder))
-
-        let rendered = try? Down(markdownString: protected.markdown).toHTML(DownOptions.safe.union(.smart))
-        XCTAssertNotNil(rendered)
-
-        if let rendered {
-            XCTAssertTrue(rendered.contains(protected.placeholders[0].placeholder))
-            let restored = MathProtector.restoreMath(in: rendered, placeholders: protected.placeholders, escape: { $0 })
-            XCTAssertTrue(restored.contains("\\phi"))
-            XCTAssertTrue(restored.contains("\\triangleq"))
-            XCTAssertTrue(restored.contains("\\frac"))
-            XCTAssertTrue(restored.contains("\\bar"))
-            XCTAssertTrue(restored.contains("\\text{aug}"))
-            XCTAssertTrue(restored.contains("\\text{io}"))
-        }
 
         let html = MarkdownHTMLRenderer.render(markdown: input)
         XCTAssertTrue(html.contains("katex.min.js"))

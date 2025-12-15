@@ -8,8 +8,8 @@
 
 | 项目 | 状态 |
 |------|------|
-| **当前版本** | v0.43.30 |
-| **测试状态** | 单元测试通过（`make test-unit`: Executed 158 tests, 1 skipped；Strict Concurrency: `make test-strict` Executed 158 tests, 1 skipped；性能测试：`make test-perf` Executed 23 tests, 6 skipped） |
+| **当前版本** | v0.44 |
+| **测试状态** | 单元测试通过（`xcodebuild test -scheme Scopy -destination 'platform=macOS' -only-testing:ScopyTests`: Executed 213 tests, 7 skipped） |
 | **构建状态** | Debug ✅ |
 | **部署位置** | /Applications/Scopy.app |
 | **最后更新** | 2025-12-16 |
@@ -24,6 +24,12 @@
 
 | 版本 | 日期 | 主要内容 | 状态 |
 |------|------|----------|------|
+| [v0.44](./v0.44.md) | 2025-12-16 | Release：Preview 稳健性 + 自动发布（Homebrew 对齐） | ✅ |
+| [v0.43.35](./v0.43.35.md) | 2025-12-16 | Preview：移除最小宽高限制，完全动态贴合 | ✅ |
+| [v0.43.34](./v0.43.34.md) | 2025-12-16 | Preview：单行短文本/矮图预览更贴合（宽度可收缩 + 最小高度收敛） | ✅ |
+| [v0.43.33](./v0.43.33.md) | 2025-12-16 | Preview：动态高度更准确更稳定（Retina 不再低估 + 监听内容变化） | ✅ |
+| [v0.43.32](./v0.43.32.md) | 2025-12-16 | Preview：括号内下标/上标公式更鲁棒（`(T_{io}=...)` 等） | ✅ |
+| [v0.43.31](./v0.43.31.md) | 2025-12-16 | Preview：LaTeX/Markdown 预览稳健性与依赖收敛（code-skip + 移除 Down） | ✅ |
 | [v0.43.30](./v0.43.30.md) | 2025-12-16 | UX/Preview：表格显示优化（横向滚动 + 适度换行）+ 预览高度贴合 HTML 内容 | ✅ |
 | [v0.43.28](./v0.43.28.md) | 2025-12-16 | UX/Preview：常见 LaTeX 文档结构（itemize/enumerate/quote/paragraph/label）转 Markdown | ✅ |
 | [v0.43.27](./v0.43.27.md) | 2025-12-16 | Refactor/Preview：预览渲染实现收敛（环境 SSOT + 轻量工具复用）+ KaTeX 语法回归测试 | ✅ |

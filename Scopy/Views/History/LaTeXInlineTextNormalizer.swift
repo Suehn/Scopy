@@ -7,6 +7,48 @@ enum LaTeXInlineTextNormalizer {
     static func normalize(_ text: String) -> String {
         if text.isEmpty { return text }
 
+        var outputLines: [String] = []
+        outputLines.reserveCapacity(text.split(separator: "\n", omittingEmptySubsequences: false).count)
+
+        var inFencedCodeBlock = false
+        var fenceMarker: Character? = nil
+        var fenceCount = 0
+
+        for lineSub in text.split(separator: "\n", omittingEmptySubsequences: false) {
+            var line = String(lineSub)
+
+            if let (marker, count) = MarkdownCodeSkipper.fencePrefix(in: line) {
+                if !inFencedCodeBlock {
+                    inFencedCodeBlock = true
+                    fenceMarker = marker
+                    fenceCount = count
+                    outputLines.append(line)
+                    continue
+                }
+                if marker == fenceMarker, count >= fenceCount {
+                    inFencedCodeBlock = false
+                    fenceMarker = nil
+                    fenceCount = 0
+                    outputLines.append(line)
+                    continue
+                }
+            }
+
+            if inFencedCodeBlock {
+                outputLines.append(line)
+                continue
+            }
+
+            line = MarkdownCodeSkipper.processInlineCode(in: line) { segment in
+                normalizePlainTextSegment(segment)
+            }
+            outputLines.append(line)
+        }
+
+        return outputLines.joined(separator: "\n")
+    }
+
+    private static func normalizePlainTextSegment(_ text: String) -> String {
         var out = text
         out = replaceCommandWithBracedArg(out, command: "\\textbf", wrap: { "**\($0)**" })
         out = replaceCommandWithBracedArg(out, command: "\\emph", wrap: { "*\($0)*" })
@@ -57,4 +99,3 @@ enum LaTeXInlineTextNormalizer {
         return out
     }
 }
-

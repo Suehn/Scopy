@@ -130,16 +130,15 @@ enum MarkdownHTMLRenderer {
         <script>
           (function () {
             var lastHeight = 0;
+            var ro = null;
             window.__scopyReportHeight = function () {
               try {
                 if (!window.webkit || !window.webkit.messageHandlers || !window.webkit.messageHandlers.scopyHeight) { return; }
                 var h = Math.max(document.body.scrollHeight || 0, document.documentElement.scrollHeight || 0);
-                var dpr = window.devicePixelRatio || 1;
-                var hp = h / dpr;
-                if (!hp) { return; }
-                if (Math.abs(hp - lastHeight) < 1) { return; }
-                lastHeight = hp;
-                window.webkit.messageHandlers.scopyHeight.postMessage(hp);
+                if (!h) { return; }
+                if (Math.abs(h - lastHeight) < 1) { return; }
+                lastHeight = h;
+                window.webkit.messageHandlers.scopyHeight.postMessage(h);
               } catch (e) { }
             };
 
@@ -170,6 +169,17 @@ enum MarkdownHTMLRenderer {
               html = html.replace(/SCOPYMATHPLACEHOLDER\\d+X/g, function (m) { return map[m] || m; });
               el.innerHTML = html;
 
+              // Keep content height in sync as KaTeX renders and fonts load.
+              if (typeof ResizeObserver === 'function') {
+                if (ro) { try { ro.disconnect(); } catch (e) { } }
+                ro = new ResizeObserver(function () { scheduleReportHeight(); });
+                try { ro.observe(el); } catch (e) { }
+              }
+
+              if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === 'function') {
+                document.fonts.ready.then(function () { scheduleReportHeight(); }).catch(function () { });
+              }
+
               if (typeof window.__scopyRenderMath === 'function') {
                 window.__scopyRenderMath();
               }
@@ -181,6 +191,14 @@ enum MarkdownHTMLRenderer {
               document.addEventListener('DOMContentLoaded', renderMarkdown);
             } else {
               renderMarkdown();
+            }
+
+            // Some layout changes may only settle after full load.
+            if (window && typeof window.addEventListener === 'function') {
+              window.addEventListener('load', function () {
+                scheduleReportHeight();
+                setTimeout(scheduleReportHeight, 120);
+              });
             }
           })();
         </script>
