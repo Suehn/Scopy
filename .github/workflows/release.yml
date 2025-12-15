@@ -12,11 +12,14 @@ on:
         type: string
 
 jobs:
-  build:
+  build_release:
     runs-on: macos-15
     permissions:
       contents: write
-      pull-requests: write
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+      version: ${{ steps.version.outputs.version }}
+      sha256: ${{ steps.sha.outputs.sha256 }}
 
     steps:
       - name: Checkout
@@ -51,14 +54,17 @@ jobs:
           echo "short_sha=${SHORT_SHA}" >> "$GITHUB_OUTPUT"
           echo "Resolved version: ${TAG} (${SHORT_SHA}), build=${COMMIT_COUNT}"
 
-      - name: Refuse to overwrite existing DMG
+      - name: Check existing release assets
+        id: existing
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           TAG="${{ steps.version.outputs.tag }}"
           VERSION="${{ steps.version.outputs.version }}"
-          ASSET="Scopy-${VERSION}.dmg"
-          export ASSET
+          DMG="Scopy-${VERSION}.dmg"
+          SHA="Scopy-${VERSION}.dmg.sha256"
+
+          echo "has_assets=false" >> "$GITHUB_OUTPUT"
 
           API_URL="https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}"
           HTTP_CODE="$(curl -sS -o release.json -w '%{http_code}' \
@@ -67,23 +73,19 @@ jobs:
             "${API_URL}" || true)"
 
           if [[ "${HTTP_CODE}" == "200" ]]; then
-            python3 - <<'PY'
-          import json
-          import os
-          import sys
+            SHA_URL="$(SHA_NAME="${SHA}" python3 -c 'import json,os; data=json.load(open(\"release.json\",\"r\",encoding=\"utf-8\")); assets=data.get(\"assets\",[]); url_map={a.get(\"name\"): a.get(\"browser_download_url\") for a in assets}; print(url_map.get(os.environ[\"SHA_NAME\"], \"\"))')"
+            DMG_URL="$(DMG_NAME="${DMG}" python3 -c 'import json,os; data=json.load(open(\"release.json\",\"r\",encoding=\"utf-8\")); assets=data.get(\"assets\",[]); url_map={a.get(\"name\"): a.get(\"browser_download_url\") for a in assets}; print(url_map.get(os.environ[\"DMG_NAME\"], \"\"))')"
 
-          asset = os.environ["ASSET"]
-          with open("release.json", "r", encoding="utf-8") as f:
-              data = json.load(f)
-
-          names = [a.get("name") for a in data.get("assets", [])]
-          if asset in names:
-              sys.stderr.write(f"Release already contains {asset}; refusing to overwrite.\n")
-              sys.stderr.write("Bump version, create a new tag, and release again.\n")
-              sys.exit(1)
-          PY
+            if [[ -n "${SHA_URL}" && -n "${DMG_URL}" ]]; then
+              echo "Found existing release assets for ${TAG}; will reuse them (no rebuild/no overwrite)."
+              echo "has_assets=true" >> "$GITHUB_OUTPUT"
+              echo "sha_url=${SHA_URL}" >> "$GITHUB_OUTPUT"
+            else
+              echo "Release exists for ${TAG} but assets are incomplete; rebuilding is required." >&2
+              exit 1
+            fi
           elif [[ "${HTTP_CODE}" == "404" ]]; then
-            echo "No existing release for ${TAG}; continuing."
+            echo "No existing release for ${TAG}; building and publishing."
           else
             echo "Failed to query GitHub release API for ${TAG} (HTTP ${HTTP_CODE})." >&2
             if [[ -f release.json ]]; then
@@ -93,18 +95,22 @@ jobs:
           fi
 
       - name: Install xcodegen
+        if: ${{ steps.existing.outputs.has_assets != 'true' }}
         run: brew install xcodegen
 
       - name: Generate Xcode project
+        if: ${{ steps.existing.outputs.has_assets != 'true' }}
         run: xcodegen generate
 
       - name: Build Release
+        if: ${{ steps.existing.outputs.has_assets != 'true' }}
         run: |
           VERSION="${{ steps.version.outputs.version }}"
           BUILD="${{ steps.version.outputs.build }}"
           xcodebuild -scheme Scopy -configuration Release build MARKETING_VERSION="${VERSION}" CURRENT_PROJECT_VERSION="${BUILD}"
 
       - name: Create DMG
+        if: ${{ steps.existing.outputs.has_assets != 'true' }}
         run: |
           VERSION="${{ steps.version.outputs.version }}"
           mkdir -p dmg
@@ -118,6 +124,7 @@ jobs:
           shasum -a 256 "Scopy-${VERSION}.dmg" > "Scopy-${VERSION}.dmg.sha256"
 
       - name: Create or Update Release
+        if: ${{ steps.existing.outputs.has_assets != 'true' }}
         uses: softprops/action-gh-release@v1
         with:
           tag_name: ${{ steps.version.outputs.tag }}
@@ -143,12 +150,42 @@ jobs:
             > ⚠️ 应用未签名，首次打开需要手动允许
           make_latest: true
 
-      - name: Update Cask
+      - name: Fetch SHA256 file (reuse existing)
+        if: ${{ steps.existing.outputs.has_assets == 'true' }}
         run: |
           VERSION="${{ steps.version.outputs.version }}"
-          SHA256=$(cat "Scopy-${VERSION}.dmg.sha256" | awk '{print $1}')
+          curl -fsSL "${{ steps.existing.outputs.sha_url }}" -o "Scopy-${VERSION}.dmg.sha256"
 
-          # 更新 Cask 文件
+      - name: Resolve SHA256
+        id: sha
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          SHA256="$(awk '{print $1}' "Scopy-${VERSION}.dmg.sha256")"
+          if [[ -z "${SHA256}" ]]; then
+            echo "Failed to resolve SHA256 from Scopy-${VERSION}.dmg.sha256" >&2
+            exit 1
+          fi
+          echo "sha256=${SHA256}" >> "$GITHUB_OUTPUT"
+
+  update_casks:
+    needs: build_release
+    runs-on: macos-15
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: main
+
+      - name: Update Cask
+        run: |
+          VERSION="${{ needs.build_release.outputs.version }}"
+          SHA256="${{ needs.build_release.outputs.sha256 }}"
+
           sed -i '' "s/version \".*\"/version \"${VERSION}\"/" Casks/scopy.rb
           sed -i '' "s/sha256 \".*\"/sha256 \"${SHA256}\"/" Casks/scopy.rb
 
@@ -156,11 +193,12 @@ jobs:
         uses: peter-evans/create-pull-request@v7
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          commit-message: "chore: update Cask to v${{ steps.version.outputs.version }}"
-          branch: "automation/cask-v${{ steps.version.outputs.version }}"
-          title: "chore: update Cask to v${{ steps.version.outputs.version }}"
+          base: main
+          commit-message: "chore: update Cask to v${{ needs.build_release.outputs.version }}"
+          branch: "automation/cask-v${{ needs.build_release.outputs.version }}"
+          title: "chore: update Cask to v${{ needs.build_release.outputs.version }}"
           body: |
-            Automated Cask bump for `${{ steps.version.outputs.tag }}`.
+            Automated Cask bump for `${{ needs.build_release.outputs.tag }}`.
           add-paths: |
             Casks/scopy.rb
 
@@ -174,8 +212,8 @@ jobs:
             exit 0
           fi
 
-          VERSION="${{ steps.version.outputs.version }}"
-          SHA256="$(awk '{print $1}' "Scopy-${VERSION}.dmg.sha256")"
+          VERSION="${{ needs.build_release.outputs.version }}"
+          SHA256="${{ needs.build_release.outputs.sha256 }}"
           URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/v${VERSION}/Scopy-${VERSION}.dmg"
 
           brew update
