@@ -6,6 +6,8 @@
 
 | 版本 | 日期 | 主要变化 |
 |------|------|----------|
+| [v0.43.22-profile.md](./v0.43.22-profile.md) | 2025-12-15 | UX/Preview：Markdown 渲染 hover 预览（KaTeX 公式）+ 安全/高性能 |
+| [v0.43.20-profile.md](./v0.43.20-profile.md) | 2025-12-15 | UX/Perf：Hover 预览可滚动（全文/长图）+ 预览高度按屏幕上限自适应 |
 | [v0.43.16-profile.md](./v0.43.16-profile.md) | 2025-12-15 | Fix/UX：重做设置界面（布局清晰 + 对齐 + 图标统一） |
 | [v0.43.15-profile.md](./v0.43.15-profile.md) | 2025-12-15 | Dev/Release：版本统一由 git tag 驱动（停止 commit-count 自动版本） |
 | [v0.43.14-profile.md](./v0.43.14-profile.md) | 2025-12-15 | Fix/UX：字数统计按“词/字”单位（中英文混排更准确） |

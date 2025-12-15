@@ -1,0 +1,36 @@
+name: Auto Tag Release
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "doc/implemented-doc/**"
+      - "DEPLOYMENT.md"
+
+jobs:
+  tag:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate release docs
+        run: bash scripts/release/validate-release-docs.sh
+
+      - name: Create annotated tag from doc index
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          TAG="$(bash scripts/release/tag-from-doc.sh --ensure)"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+        id: tag
+
+      - name: Push tag
+        run: git push origin "${{ steps.tag.outputs.tag }}"
+

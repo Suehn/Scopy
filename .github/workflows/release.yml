@@ -51,6 +51,23 @@ jobs:
           echo "short_sha=${SHORT_SHA}" >> "$GITHUB_OUTPUT"
           echo "Resolved version: ${TAG} (${SHORT_SHA}), build=${COMMIT_COUNT}"
 
+      - name: Refuse to overwrite existing DMG
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ steps.version.outputs.tag }}"
+          VERSION="${{ steps.version.outputs.version }}"
+          ASSET="Scopy-${VERSION}.dmg"
+          if gh release view "${TAG}" --repo "${GITHUB_REPOSITORY}" --json assets -q '.assets[].name' > assets.txt 2>/dev/null; then
+            if rg -n "^${ASSET}$" assets.txt >/dev/null; then
+              echo "Release ${TAG} already contains ${ASSET}; refusing to overwrite." >&2
+              echo "Bump version, create a new tag, and release again." >&2
+              exit 1
+            fi
+          else
+            echo "No existing release for ${TAG}; continuing."
+          fi
+
       - name: Install xcodegen
         run: brew install xcodegen
 
@@ -89,7 +106,6 @@ jobs:
 
             ### Homebrew 安装
             ```bash
-            brew tap Suehn/scopy
             brew install --cask scopy
             # 或更新
             brew upgrade --cask scopy
@@ -123,3 +139,22 @@ jobs:
             Automated Cask bump for `${{ steps.version.outputs.tag }}`.
           add-paths: |
             Casks/scopy.rb
+
+      - name: Open PR to Homebrew/homebrew-cask
+        if: ${{ secrets.HOMEBREW_GITHUB_API_TOKEN != '' }}
+        continue-on-error: true
+        env:
+          HOMEBREW_GITHUB_API_TOKEN: ${{ secrets.HOMEBREW_GITHUB_API_TOKEN }}
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          SHA256="$(awk '{print $1}' "Scopy-${VERSION}.dmg.sha256")"
+          URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/v${VERSION}/Scopy-${VERSION}.dmg"
+
+          brew update
+          brew bump-cask-pr \
+            --cask scopy \
+            --version "${VERSION}" \
+            --sha256 "${SHA256}" \
+            --url "${URL}" \
+            --no-browse \
+            --message "scopy ${VERSION}"

@@ -17,8 +17,13 @@ struct HistoryItemTextPreviewView: View {
             let clampedHeight = min(maxHeight, max(64, contentHeight))
             let shouldScroll = contentHeight > maxHeight
 
-            HoverPreviewTextView(text: text, font: font, width: width, shouldScroll: shouldScroll)
-                .frame(width: width, height: clampedHeight)
+            if model.isMarkdown, let html = model.markdownHTML {
+                MarkdownPreviewWebView(html: html, shouldScroll: shouldScroll)
+                    .frame(width: width, height: clampedHeight)
+            } else {
+                HoverPreviewTextView(text: text, font: font, width: width, shouldScroll: shouldScroll)
+                    .frame(width: width, height: clampedHeight)
+            }
         } else {
             ProgressView()
                 .frame(width: width, height: min(maxHeight, 160))
@@ -30,7 +35,15 @@ struct HistoryItemTextPreviewView: View {
         if text.isEmpty { return 0 }
 
         // Avoid heavy measurement for very large strings; long content can just use max height + scroll.
-        if text.utf16.count >= 20_000 { return maxHeight }
+        if text.utf16.count >= 1_500 { return maxHeight }
+
+        var newlineCount = 0
+        for ch in text {
+            if ch == "\n" {
+                newlineCount += 1
+                if newlineCount >= 20 { return maxHeight }
+            }
+        }
 
         let attributed = NSAttributedString(string: text, attributes: [.font: font])
         let rect = attributed.boundingRect(

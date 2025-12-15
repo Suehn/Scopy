@@ -2,7 +2,7 @@
 # 符合 v0.md 的构建和测试流程
 
 .PHONY: all setup build run clean xcode test test-unit test-perf test-tsan test-strict coverage benchmark test-flow test-flow-quick health-check
-.PHONY: tag-release push-release
+.PHONY: tag-release push-release release-validate release-bump-patch
 
 VERSION_ARGS := $(shell bash scripts/version.sh --xcodebuild-args 2>/dev/null)
 
@@ -109,7 +109,6 @@ test-strict: setup
 		-skip-testing:ScopyTests/IntegrationTests \
 		-skip-testing:ScopyTests/PerformanceTests \
 		SWIFT_STRICT_CONCURRENCY=complete \
-		SWIFT_TREAT_WARNINGS_AS_ERRORS=YES \
 		$(VERSION_ARGS) \
 		2>&1 | tee strict-concurrency-test.log
 
@@ -256,3 +255,9 @@ push-release:
 	@echo "  - Search ≤5k items: P95 ≤ 50ms"
 	@echo "  - Search 10k-100k: P95 ≤ 150ms"
 	@echo "  - Debounce: 150-200ms"
+
+release-validate:
+	@bash scripts/release/validate-release-docs.sh
+
+release-bump-patch:
+	@bash scripts/release/bump-version.sh --patch

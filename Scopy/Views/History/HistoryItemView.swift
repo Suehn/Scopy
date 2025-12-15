@@ -25,6 +25,7 @@ struct HistoryItemView: View, Equatable {
     @State private var isHovering = false
     @State private var hoverDebounceTask: Task<Void, Never>?
     @State private var hoverPreviewTask: Task<Void, Never>?
+    @State private var hoverMarkdownTask: Task<Void, Never>?
     // v0.24: 延迟隐藏预览，避免 popover 触发 hover false 导致闪烁
     @State private var hoverExitTask: Task<Void, Never>?
     @State private var isPopoverHovering = false
@@ -252,6 +253,8 @@ struct HistoryItemView: View, Equatable {
                         self.showTextPreview = false
                         self.previewModel.previewCGImage = nil
                         self.previewModel.text = nil  // v0.15: Reset text preview content
+                        self.previewModel.markdownHTML = nil
+                        self.previewModel.isMarkdown = false
                     }
                 }
             }
@@ -296,6 +299,8 @@ struct HistoryItemView: View, Equatable {
                                 self.cancelPreviewTask()
                                 self.showTextPreview = false
                                 self.previewModel.text = nil
+                                self.previewModel.markdownHTML = nil
+                                self.previewModel.isMarkdown = false
                             }
                         }
                     }
@@ -323,6 +328,8 @@ struct HistoryItemView: View, Equatable {
             // 清理状态，防止内存泄漏
             previewModel.previewCGImage = nil
             previewModel.text = nil
+            previewModel.markdownHTML = nil
+            previewModel.isMarkdown = false
         }
         .onChange(of: isScrolling) { _, newValue in
             guard newValue else { return }
@@ -337,6 +344,8 @@ struct HistoryItemView: View, Equatable {
             isPopoverHovering = false
             previewModel.previewCGImage = nil
             previewModel.text = nil
+            previewModel.markdownHTML = nil
+            previewModel.isMarkdown = false
         }
     }
 
@@ -452,6 +461,8 @@ struct HistoryItemView: View, Equatable {
     private func cancelPreviewTask() {
         hoverPreviewTask?.cancel()
         hoverPreviewTask = nil
+        hoverMarkdownTask?.cancel()
+        hoverMarkdownTask = nil
     }
 
     // MARK: - Text Preview (v0.15)
@@ -462,8 +473,10 @@ struct HistoryItemView: View, Equatable {
         // 先取消旧任务，防止多个任务同时运行
         hoverPreviewTask?.cancel()
         hoverPreviewTask = nil
+        hoverMarkdownTask?.cancel()
+        hoverMarkdownTask = nil
 
-        hoverPreviewTask = Task {
+        hoverPreviewTask = Task(priority: .userInitiated) { @MainActor in
             // Wait for preview delay
             let delayNanos = UInt64(previewDelay * 1_000_000_000)
             try? await Task.sleep(nanoseconds: delayNanos)
@@ -474,10 +487,32 @@ struct HistoryItemView: View, Equatable {
             let text = item.plainText
             let preview = text.isEmpty ? "(Empty)" : text
 
-            await MainActor.run {
-                if self.isHovering {
-                    self.previewModel.text = preview
-                    self.showTextPreview = true
+            let isMarkdown = MarkdownDetector.isLikelyMarkdown(preview)
+            if self.isHovering {
+                self.previewModel.text = preview
+                self.previewModel.isMarkdown = isMarkdown
+                self.previewModel.markdownHTML = nil
+                self.showTextPreview = true
+            }
+
+            guard isMarkdown else { return }
+            // Avoid heavy Markdown -> HTML render for very large clipboard payloads.
+            guard preview.utf16.count <= 200_000 else { return }
+
+            let cacheKey = item.contentHash
+            if let cached = MarkdownPreviewCache.shared.html(forKey: cacheKey) {
+                if self.isHovering, self.previewModel.text == preview {
+                    self.previewModel.markdownHTML = cached
+                }
+                return
+            }
+
+            hoverMarkdownTask = Task.detached(priority: .utility) {
+                let html = MarkdownHTMLRenderer.render(markdown: preview)
+                MarkdownPreviewCache.shared.setHTML(html, forKey: cacheKey)
+                await MainActor.run {
+                    guard self.isHovering, self.previewModel.text == preview else { return }
+                    self.previewModel.markdownHTML = html
                 }
             }
         }

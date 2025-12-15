@@ -47,6 +47,9 @@ settings:
 packages:
   ScopyKit:
     path: .
+  Down:
+    url: https://github.com/johnxnguyen/Down.git
+    from: 0.11.0
 
 targets:
   Scopy:
@@ -78,6 +81,73 @@ targets:
         product: ScopyKit
       - package: ScopyKit
         product: ScopyUISupport
+      - package: Down
+        product: Down
+    preBuildScripts:
+      - name: "Stage SwiftPM Resource Bundles"
+        script: |
+          set -euo pipefail
+          pick_src_dir_once() {
+            for dir in "${OBJROOT}/../Products/${CONFIGURATION}" "${SYMROOT:-}/${CONFIGURATION}"; do
+              if [ ! -d "$dir" ]; then
+                continue
+              fi
+              for bundle in "$dir"/*.bundle; do
+                if [ -e "$bundle" ]; then
+                  echo "$dir"
+                  return 0
+                fi
+              done
+            done
+            return 1
+          }
+          SRC_DIR=""
+          for _ in 1 2 3 4 5 6 7 8 9 10 \
+                   11 12 13 14 15 16 17 18 19 20 \
+                   21 22 23 24 25 26 27 28 29 30 \
+                   31 32 33 34 35 36 37 38 39 40 \
+                   41 42 43 44 45 46 47 48 49 50; do
+            SRC_DIR="$(pick_src_dir_once || true)"
+            if [ -n "$SRC_DIR" ]; then
+              break
+            fi
+            sleep 0.05
+          done
+          DST_DIR="${CONFIGURATION_BUILD_DIR}"
+          if [ -z "$SRC_DIR" ] || [ ! -d "$SRC_DIR" ]; then
+            exit 0
+          fi
+          mkdir -p "$DST_DIR"
+          LOCK_DIR="$DST_DIR/.spm_bundle_stage.lock"
+          while ! mkdir "$LOCK_DIR" 2>/dev/null; do
+            sleep 0.05
+          done
+          trap 'rmdir "$LOCK_DIR" 2>/dev/null || true' EXIT
+          for bundle in "$SRC_DIR"/*.bundle; do
+            if [ ! -e "$bundle" ]; then
+              continue
+            fi
+            name="$(basename "$bundle")"
+            if [ -d "$DST_DIR/$name" ]; then
+              continue
+            fi
+            ditto "$bundle" "$DST_DIR/$name"
+          done
+        basedOnDependencyAnalysis: false
+    postBuildScripts:
+      - name: "Stage MarkdownPreview Assets"
+        script: |
+          set -euo pipefail
+          SRC_DIR="${SRCROOT}/Scopy/Resources/MarkdownPreview"
+          DST_DIR="${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/MarkdownPreview"
+          if [ ! -d "$SRC_DIR" ]; then
+            exit 0
+          fi
+          rm -rf "$DST_DIR"
+          ditto "$SRC_DIR" "$DST_DIR"
+        basedOnDependencyAnalysis: false
+    resources:
+      - path: Scopy/Resources
 
   ScopyTests:
     type: bundle.unit-test
@@ -114,6 +184,59 @@ targets:
         product: ScopyKit
       - package: ScopyKit
         product: ScopyUISupport
+      - package: Down
+        product: Down
+    preBuildScripts:
+      - name: "Stage SwiftPM Resource Bundles"
+        script: |
+          set -euo pipefail
+          pick_src_dir_once() {
+            for dir in "${OBJROOT}/../Products/${CONFIGURATION}" "${SYMROOT:-}/${CONFIGURATION}"; do
+              if [ ! -d "$dir" ]; then
+                continue
+              fi
+              for bundle in "$dir"/*.bundle; do
+                if [ -e "$bundle" ]; then
+                  echo "$dir"
+                  return 0
+                fi
+              done
+            done
+            return 1
+          }
+          SRC_DIR=""
+          for _ in 1 2 3 4 5 6 7 8 9 10 \
+                   11 12 13 14 15 16 17 18 19 20 \
+                   21 22 23 24 25 26 27 28 29 30 \
+                   31 32 33 34 35 36 37 38 39 40 \
+                   41 42 43 44 45 46 47 48 49 50; do
+            SRC_DIR="$(pick_src_dir_once || true)"
+            if [ -n "$SRC_DIR" ]; then
+              break
+            fi
+            sleep 0.05
+          done
+          DST_DIR="${CONFIGURATION_BUILD_DIR}"
+          if [ -z "$SRC_DIR" ] || [ ! -d "$SRC_DIR" ]; then
+            exit 0
+          fi
+          mkdir -p "$DST_DIR"
+          LOCK_DIR="$DST_DIR/.spm_bundle_stage.lock"
+          while ! mkdir "$LOCK_DIR" 2>/dev/null; do
+            sleep 0.05
+          done
+          trap 'rmdir "$LOCK_DIR" 2>/dev/null || true' EXIT
+          for bundle in "$SRC_DIR"/*.bundle; do
+            if [ ! -e "$bundle" ]; then
+              continue
+            fi
+            name="$(basename "$bundle")"
+            if [ -d "$DST_DIR/$name" ]; then
+              continue
+            fi
+            ditto "$bundle" "$DST_DIR/$name"
+          done
+        basedOnDependencyAnalysis: false
 
   ScopyTestHost:
     type: application
@@ -167,6 +290,59 @@ targets:
         product: ScopyKit
       - package: ScopyKit
         product: ScopyUISupport
+      - package: Down
+        product: Down
+    preBuildScripts:
+      - name: "Stage SwiftPM Resource Bundles"
+        script: |
+          set -euo pipefail
+          pick_src_dir_once() {
+            for dir in "${OBJROOT}/../Products/${CONFIGURATION}" "${SYMROOT:-}/${CONFIGURATION}"; do
+              if [ ! -d "$dir" ]; then
+                continue
+              fi
+              for bundle in "$dir"/*.bundle; do
+                if [ -e "$bundle" ]; then
+                  echo "$dir"
+                  return 0
+                fi
+              done
+            done
+            return 1
+          }
+          SRC_DIR=""
+          for _ in 1 2 3 4 5 6 7 8 9 10 \
+                   11 12 13 14 15 16 17 18 19 20 \
+                   21 22 23 24 25 26 27 28 29 30 \
+                   31 32 33 34 35 36 37 38 39 40 \
+                   41 42 43 44 45 46 47 48 49 50; do
+            SRC_DIR="$(pick_src_dir_once || true)"
+            if [ -n "$SRC_DIR" ]; then
+              break
+            fi
+            sleep 0.05
+          done
+          DST_DIR="${CONFIGURATION_BUILD_DIR}"
+          if [ -z "$SRC_DIR" ] || [ ! -d "$SRC_DIR" ]; then
+            exit 0
+          fi
+          mkdir -p "$DST_DIR"
+          LOCK_DIR="$DST_DIR/.spm_bundle_stage.lock"
+          while ! mkdir "$LOCK_DIR" 2>/dev/null; do
+            sleep 0.05
+          done
+          trap 'rmdir "$LOCK_DIR" 2>/dev/null || true' EXIT
+          for bundle in "$SRC_DIR"/*.bundle; do
+            if [ ! -e "$bundle" ]; then
+              continue
+            fi
+            name="$(basename "$bundle")"
+            if [ -d "$DST_DIR/$name" ]; then
+              continue
+            fi
+            ditto "$bundle" "$DST_DIR/$name"
+          done
+        basedOnDependencyAnalysis: false
 
   ScopyUITests:
     type: bundle.ui-testing

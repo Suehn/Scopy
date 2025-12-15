@@ -5,6 +5,91 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [v0.43.23] - 2025-12-16
+
+### Fix/Preview：Markdown hover 预览稳定性 + 表格 + 公式兼容性增强
+
+- **修复 hover 预览崩溃**：`MarkdownHTMLRenderer` 生成 JS 字面量改用 `JSONEncoder`，避免 `NSJSONSerialization` 对 top-level fragment 抛 `NSException` 触发 `SIGABRT`。
+- **Markdown 表格支持**：渲染从 `Down(cmark)` 切换为 `WKWebView` 内置 `markdown-it`，支持 pipe table 等常见语法（仍保持 `html:false`/禁跳转/不出网）。
+- **公式兼容性增强**：
+  - 归一化 `[\n...\n]` 形式 display 块为 `$$\n...\n$$`。
+  - 多行 `\\begin{equation} ... \\end{equation}`（以及 `align/aligned/cases`）按块保护，避免 Markdown 分段导致 delimiter 跨 DOM 节点失效。
+  - 数学片段内将 `\\command` 归一化为 `\command`（仅对 `\\` 后紧跟字母的场景），提升从 JSON/代码字符串拷贝的兼容性。
+  - 对 `(...)` / `（...）` / `[...]` / `【...】` 中的 TeX 片段自动包裹为 `$\\left(...\\right)$` / `$\\left[...\\right]$`，并避免在 `$...$` 内二次包裹导致 `$` 不配对。
+  - 对 `={i\\mid ...}` 这类 set notation 归一化为 `=\\{...\\}`，避免 `{}` 被 KaTeX 当作分组而“括号消失”。
+- **LaTeX 文本可读性**：轻量支持 `\\section/\\subsection/\\subsubsection` 转为 Markdown 标题（按行首匹配，跳过 fenced code block）。
+- **资源打包修复**：新增构建阶段将 `Scopy/Resources/MarkdownPreview` 以目录结构复制进 app bundle，确保 `katex.min.css/js`、`contrib/*` 与 `fonts/*` 可按相对路径加载。
+
+### 修改文件
+
+- `Scopy/Views/History/MarkdownHTMLRenderer.swift`
+- `Scopy/Views/History/MathNormalizer.swift`
+- `Scopy/Views/History/MathProtector.swift`
+- `project.yml`
+- `ScopyTests/MarkdownMathRenderingTests.swift`
+- `Scopy/Resources/MarkdownPreview/contrib/markdown-it.min.js`
+
+### 测试
+
+- 单元测试：`make test-unit`（Executed 158 tests, 1 skipped, 0 failures）
+- Strict Concurrency：`make test-strict`（Executed 158 tests, 1 skipped, 0 failures）
+- 性能测试：`make test-perf`（Executed 23 tests, 6 skipped, 0 failures）
+
+## [v0.43.22] - 2025-12-15
+
+### UX/Preview：Markdown 渲染 hover 预览（KaTeX 公式）+ 安全/高性能
+
+- **Markdown hover 预览**：
+  - 检测到常见 Markdown 语法（代码块/标题/列表/链接/强调等）或公式分隔符时，hover 预览使用 Markdown 渲染展示。
+  - Markdown 渲染后台执行并按 `contentHash` 缓存；首帧仍优先显示纯文本，避免 hover 卡顿。
+- **公式支持**：
+  - 内置 KaTeX（auto-render），支持 `$...$` / `$$...$$` / `\\(...\\)` / `\\[...\\]`。
+  - 兼容性增强：对常见“无分隔符的 TeX 片段”（例如 `(\mathcal{U})`）自动补齐 `$...$`；并内置 `mhchem`（`\ce{...}`）。
+  - 兼容性增强（关键）：渲染前对 `$...$` 等数学片段做占位符保护，避免 Markdown emphasis 把公式拆成多个 DOM text node，导致 KaTeX 无法识别。
+  - 兼容性增强（PDF/Word 抽取）：修复相邻 inline 片段导致的 `$$` 误判、`\\quad $\\command` stray `$`，并对缺失环境但包含 `&` 的公式自动升级为 `\\begin{aligned}`；支持跨行 `$$\\n...\\n$$` display 公式块。
+- **安全**：
+  - Markdown 转 HTML 使用 safe 选项（抑制 raw HTML/unsafe links）。
+  - 预览 `WKWebView` 默认不出网（CSP 仅放行 `file:` 本地资源 + content rule list block http/https），并禁用链接点击跳转。
+- **构建兼容性**：
+  - 新增 SwiftPM resource bundle staging，兼容自定义 `CONFIGURATION_BUILD_DIR=.build/...` 的构建布局。
+  - `make test-strict` 兼容 SwiftPM 依赖（避免与 `-suppress-warnings` 冲突）。
+
+### 修改文件
+
+- `Scopy/Views/History/HistoryItemView.swift`
+- `Scopy/Views/History/HoverPreviewModel.swift`
+- `Scopy/Views/History/HistoryItemTextPreviewView.swift`
+- `Scopy/Views/History/MarkdownDetector.swift`
+- `Scopy/Views/History/MarkdownHTMLRenderer.swift`
+- `Scopy/Views/History/MarkdownPreviewCache.swift`
+- `Scopy/Views/History/MarkdownPreviewWebView.swift`
+- `Scopy/Resources/MarkdownPreview/*`
+- `project.yml`
+- `Makefile`
+- `DEPLOYMENT.md`
+
+### 测试
+
+- 单元测试：`make test-unit` **151 passed** (1 skipped)
+- Strict Concurrency：`make test-strict` **151 passed** (1 skipped)
+- 性能测试：`make test-perf` **23 passed** (6 skipped)
+
+## [v0.43.21] - 2025-12-15
+
+### Dev/Release：main push 自动打 tag + Homebrew(cask) bump PR + 防覆盖 DMG
+
+- **自动打 tag（可选）**：推送到 `main` 且更新实现文档后，从 `doc/implemented-doc/README.md` 解析 **当前版本** 并自动打 tag，触发 Release workflow。
+- **防止覆盖发布产物**：Release workflow 检测到同一 tag 已存在同名 DMG 时直接失败，避免 Homebrew `SHA-256 mismatch`。
+- **Homebrew/homebrew-cask 自动 PR（可选）**：发布后可自动对上游 cask 发起 bump PR（需要配置 token；失败不阻断发布）。
+
+### 修改文件
+
+- `.github/workflows/auto-tag.yml`
+- `.github/workflows/release.yml`
+- `scripts/release/validate-release-docs.sh`
+- `DEPLOYMENT.md`
+- `README.md`
+
 ## [v0.43.20] - 2025-12-15
 
 ### UX/Perf：Hover 预览可滚动（全文/长图）+ 预览高度按屏幕上限自适应

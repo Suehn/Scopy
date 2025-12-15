@@ -24,26 +24,40 @@
    - 或手动：`git push origin main` + `git push origin vX.Y.Z`
 4. GitHub Actions `Build and Release` 从 tag 构建 DMG 并生成 `.sha256`；Cask 更新以 PR 形式提交（不再自动 push main）。
 
+### 自动化（可选）
+
+- 推送到 `main` 且更新了 `doc/implemented-doc/*` 时，GitHub Actions 会从 `doc/implemented-doc/README.md` 读取 **当前版本**，校验版本文档/CHANGELOG 后自动打 tag（等价于 `make tag-release`），并 push tag 触发发布。
+- 发布 workflow 会拒绝覆盖同一 tag 的既有 DMG（避免 Homebrew SHA mismatch）；如需修复发布，请 **递增版本并创建新 tag**。
+- 如配置了仓库 Secret `HOMEBREW_GITHUB_API_TOKEN`，发布后会自动对 `Homebrew/homebrew-cask` 发起 bump PR（`brew install --cask scopy` 依赖该仓库合并）。
+
 **CI 环境**（GitHub Actions）：
 - runner：`macos-15`
 - Xcode：`16.0`
 
-## 本次更新（v0.43.16）
+## 本次更新（v0.43.23）
 
-- **Fix/UX（设置界面重做）**：
-  - 设置窗口尺寸对齐设计系统（`settingsWidth/settingsHeight`），避免拥挤与错位。
-  - 侧边栏分类 + 页面标题/分组样式统一，文案与图标更一致。
-  - UI 测试关键控件增加 `accessibilityIdentifier`；`--uitesting` 自动打开设置窗口。
-- **性能实测**（MacBook Air（Mac15,12）24GB, macOS 15.7.2（24G325）, Debug, `make test-perf`；Low Power Mode disabled）：
-  - Search 10k (fuzzyPlus) cold start ≈ 112.40ms；steady P95 ≈ 49.12ms（Samples: 50）
-  - Disk 25k (fuzzyPlus) cold start ≈ 739.63ms；steady P95 ≈ 47.85ms（Samples: 60）
-  - Service-path disk 10k (fuzzyPlus) cold start ≈ 251.77ms；steady P95 ≈ 39.65ms（Samples: 50）
+- **Fix/Preview（Markdown hover 预览：稳定性 + 表格 + 公式鲁棒性）**：
+  - 检测到 Markdown/公式分隔符时，hover 预览使用 Markdown 渲染展示（首帧仍优先显示纯文本）。
+  - 渲染引擎：`WKWebView` 内置 `markdown-it`（禁 raw HTML：`html:false`；`linkify:false`），支持 pipe table 等常见表格语法。
+  - 公式：内置 KaTeX auto-render + `mhchem`，支持 `$...$` / `$$...$$` / `\\(...\\)` / `\\[...\\]`；并对 `$...$` 等数学片段做占位符保护，避免被 Markdown emphasis 打碎导致无法识别。
+  - 兼容性增强：归一化 `[\n...\n]` display 块为 `$$\n...\n$$`；数学片段内将 `\\command` 归一化为 `\command`（仅对 `\\` 后紧跟字母的场景）。
+  - 稳定性：修复渲染器使用 `NSJSONSerialization` 生成 JS 字面量导致的崩溃（`SIGABRT`）。
+  - 资源：构建阶段将 `Scopy/Resources/MarkdownPreview` 以目录结构复制进 app bundle，确保 `katex.min.css/js`、`contrib/*` 与 `fonts/*` 可按相对路径加载。
+  - 安全：CSP 默认 `default-src 'none'`（仅放行 `file:`/`data:` 本地资源），并通过 `WKWebView` content rule list 阻断 `http/https` 与跳转。
+- **构建/测试约束**：
+  - App/Test 使用自定义 `CONFIGURATION_BUILD_DIR=.build/...`；为兼容 SwiftPM 资源 bundle（`.bundle`）落在 DerivedData，新增 staging 脚本将其复制到 `.build/<config>`。
+  - `make test-strict` 保持 `SWIFT_STRICT_CONCURRENCY=complete`，不再全局开启 warnings-as-errors（SwiftPM 依赖默认 `-suppress-warnings` 与其冲突）。
+- **性能实测**（Apple M3 24GB, macOS 15.7.2（24G325）, Debug, `make test-perf`；heavy 需 `RUN_HEAVY_PERF_TESTS=1`）：
+  - Search 5k (fuzzyPlus) cold start ≈ 39.30ms；steady P95 ≈ 5.29ms（Samples: 50）
+  - Search 10k (fuzzyPlus) cold start ≈ 116.15ms；steady P95 ≈ 52.23ms（Samples: 50）
+  - Service-path disk 10k (fuzzyPlus) cold start ≈ 284.26ms；steady P95 ≈ 42.08ms（Samples: 50）
+  - Regex 20k items P95 ≈ 3.09ms
+  - Mixed content disk search（single run）≈ 11.30ms
+  - Memory（5k inserts）increase ≈ 2.4MB；stability（500 iterations）growth ≈ 0.2MB
 - **测试结果**：
-  - `make test-unit` **147 passed** (1 skipped)
-  - `make test-integration` **12 passed**
-  - `make test-perf` **17 passed** (6 skipped)
-  - `make test-tsan` **147 passed** (1 skipped)
-  - `make test-strict` **147 passed** (1 skipped)
+  - `make test-unit`（Executed 158 tests, 1 skipped, 0 failures）
+  - `make test-perf`（Executed 23 tests, 6 skipped, 0 failures）
+  - `make test-strict`（Executed 158 tests, 1 skipped, 0 failures）
 
 ## 历史更新（v0.43.12）
 - **Fix/UX（搜索结果按时间排序）**：
