@@ -6,8 +6,10 @@ import WebKit
 struct MarkdownPreviewWebView: NSViewRepresentable {
     let html: String
     let shouldScroll: Bool
+    let onContentHeightChange: @MainActor (CGFloat) -> Void
 
     private static let blockNetworkRuleListIdentifier = "ScopyMarkdownPreviewBlockNetwork"
+    private static let heightMessageHandlerName = "scopyHeight"
     private static let blockNetworkRulesJSON = """
     [
       {
@@ -29,6 +31,7 @@ struct MarkdownPreviewWebView: NSViewRepresentable {
         config.userContentController = WKUserContentController()
 
         Self.installNetworkBlocker(into: config.userContentController)
+        config.userContentController.add(context.coordinator, name: Self.heightMessageHandlerName)
 
         let webView = WKWebView(frame: .zero, configuration: config)
         webView.navigationDelegate = context.coordinator
@@ -40,6 +43,7 @@ struct MarkdownPreviewWebView: NSViewRepresentable {
     }
 
     func updateNSView(_ webView: WKWebView, context: Context) {
+        context.coordinator.onContentHeightChange = onContentHeightChange
         configureScrollers(for: webView, shouldScroll: shouldScroll)
 
         if context.coordinator.lastHTML != html {
@@ -96,8 +100,10 @@ struct MarkdownPreviewWebView: NSViewRepresentable {
         }
     }
 
-    final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate {
+    final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler {
         var lastHTML: String = ""
+        var onContentHeightChange: (@MainActor (CGFloat) -> Void)?
+        private var lastReportedHeight: CGFloat = 0
 
         func webView(
             _ webView: WKWebView,
@@ -138,6 +144,30 @@ struct MarkdownPreviewWebView: NSViewRepresentable {
             webView.evaluateJavaScript("typeof window.__scopyRenderMath === 'function'") { result, _ in
                 guard let ok = result as? Bool, ok else { return }
                 webView.evaluateJavaScript("window.__scopyRenderMath()") { _, _ in }
+            }
+            webView.evaluateJavaScript("typeof window.__scopyReportHeight === 'function'") { result, _ in
+                guard let ok = result as? Bool, ok else { return }
+                webView.evaluateJavaScript("window.__scopyReportHeight()") { _, _ in }
+            }
+        }
+
+        func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+            guard message.name == MarkdownPreviewWebView.heightMessageHandlerName else { return }
+            let value: CGFloat?
+            if let n = message.body as? NSNumber {
+                value = CGFloat(truncating: n)
+            } else if let d = message.body as? Double {
+                value = CGFloat(d)
+            } else if let i = message.body as? Int {
+                value = CGFloat(i)
+            } else {
+                value = nil
+            }
+            guard let value, value.isFinite, value > 0 else { return }
+            if abs(value - lastReportedHeight) < 1 { return }
+            lastReportedHeight = value
+            Task { @MainActor in
+                self.onContentHeightChange?(value)
             }
         }
     }

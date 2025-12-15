@@ -9,6 +9,14 @@ final class KaTeXRenderToStringTests: XCTestCase {
         XCTAssertTrue(html.contains("markdown-it.min.js"))
     }
 
+    func testMarkdownTableUsesHorizontalScrollWithBalancedWrapping() {
+        let html = MarkdownHTMLRenderer.render(markdown: "| a | b |\n| --- | --- |\n| 1 | 2 |")
+        XCTAssertTrue(html.contains("overflow-x: auto;"))
+        XCTAssertTrue(html.contains("white-space: normal;"))
+        XCTAssertTrue(html.contains("word-break: normal;"))
+        XCTAssertTrue(html.contains("max-width: 520px;"))
+    }
+
     func testKaTeXRenderToStringForTableSnippetMathSegments() throws {
         let input = #"""
         | 符号                                      | 含义                     |
@@ -198,4 +206,3 @@ private final class KaTeXEngine {
         throw NSError(domain: "ScopyTests", code: 6, userInfo: [NSLocalizedDescriptionKey: "Cannot locate Scopy/Resources/MarkdownPreview from test file path."])
     }
 }
-

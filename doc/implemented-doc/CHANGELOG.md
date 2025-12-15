@@ -26,6 +26,25 @@
 - `Scopy/Views/History/MarkdownHTMLRenderer.swift`
 - `ScopyTests/MarkdownMathRenderingTests.swift`
 
+## [v0.43.30] - 2025-12-16
+
+### UX/Preview：表格显示优化（横向滚动 + 适度换行）+ 预览高度贴合 HTML 内容
+
+- **表格显示**：
+  - 继续支持横向滚动（`overflow-x: auto`），避免列太多时被强行挤压。
+  - 单元格允许适度换行（`white-space: normal` + `max-width`），提升可读性，避免“整行超宽”或“逐字竖排”两种极端。
+- **预览高度**：WKWebView 通过 `scrollHeight` 回传内容高度，popover 高度随 HTML 内容更新（表格/公式渲染后的实际高度更准确）。
+- **回归测试**：新增断言覆盖表格 CSS（横向滚动 + 适度换行）。
+
+### 修改文件
+
+- `Scopy/Views/History/HoverPreviewModel.swift`
+- `Scopy/Views/History/HistoryItemTextPreviewView.swift`
+- `Scopy/Views/History/HistoryItemView.swift`
+- `Scopy/Views/History/MarkdownHTMLRenderer.swift`
+- `Scopy/Views/History/MarkdownPreviewWebView.swift`
+- `ScopyTests/KaTeXRenderToStringTests.swift`
+
 ## [v0.43.27] - 2025-12-16
 
 ### Refactor/Preview：预览渲染实现收敛（环境 SSOT + 轻量工具复用）+ KaTeX 语法回归测试

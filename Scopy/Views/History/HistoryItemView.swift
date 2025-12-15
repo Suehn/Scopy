@@ -254,6 +254,7 @@ struct HistoryItemView: View, Equatable {
                         self.previewModel.previewCGImage = nil
                         self.previewModel.text = nil  // v0.15: Reset text preview content
                         self.previewModel.markdownHTML = nil
+                        self.previewModel.markdownContentHeight = nil
                         self.previewModel.isMarkdown = false
                     }
                 }
@@ -300,6 +301,7 @@ struct HistoryItemView: View, Equatable {
                                 self.showTextPreview = false
                                 self.previewModel.text = nil
                                 self.previewModel.markdownHTML = nil
+                                self.previewModel.markdownContentHeight = nil
                                 self.previewModel.isMarkdown = false
                             }
                         }
@@ -329,6 +331,7 @@ struct HistoryItemView: View, Equatable {
             previewModel.previewCGImage = nil
             previewModel.text = nil
             previewModel.markdownHTML = nil
+            previewModel.markdownContentHeight = nil
             previewModel.isMarkdown = false
         }
         .onChange(of: isScrolling) { _, newValue in
@@ -345,6 +348,7 @@ struct HistoryItemView: View, Equatable {
             previewModel.previewCGImage = nil
             previewModel.text = nil
             previewModel.markdownHTML = nil
+            previewModel.markdownContentHeight = nil
             previewModel.isMarkdown = false
         }
     }
@@ -492,6 +496,7 @@ struct HistoryItemView: View, Equatable {
                 self.previewModel.text = preview
                 self.previewModel.isMarkdown = isMarkdown
                 self.previewModel.markdownHTML = nil
+                self.previewModel.markdownContentHeight = nil
                 self.showTextPreview = true
             }
 

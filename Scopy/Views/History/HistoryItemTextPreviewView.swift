@@ -12,13 +12,21 @@ struct HistoryItemTextPreviewView: View {
         let padding: CGFloat = ScopySpacing.md
 
         if let text = model.text {
-            let measuredHeight: CGFloat = estimateTextHeight(text, font: font, width: width - padding * 2, maxHeight: maxHeight)
-            let contentHeight = measuredHeight + padding * 2
+            let measuredTextHeight: CGFloat = estimateTextHeight(text, font: font, width: width - padding * 2, maxHeight: maxHeight)
+            let textContentHeight = measuredTextHeight + padding * 2
+            let contentHeight = model.isMarkdown ? (model.markdownContentHeight ?? textContentHeight) : textContentHeight
             let clampedHeight = min(maxHeight, max(64, contentHeight))
             let shouldScroll = contentHeight > maxHeight
 
             if model.isMarkdown, let html = model.markdownHTML {
-                MarkdownPreviewWebView(html: html, shouldScroll: shouldScroll)
+                MarkdownPreviewWebView(
+                    html: html,
+                    shouldScroll: shouldScroll,
+                    onContentHeightChange: { height in
+                        if let existing = model.markdownContentHeight, abs(existing - height) < 1 { return }
+                        model.markdownContentHeight = height
+                    }
+                )
                     .frame(width: width, height: clampedHeight)
             } else {
                 HoverPreviewTextView(text: text, font: font, width: width, shouldScroll: shouldScroll)

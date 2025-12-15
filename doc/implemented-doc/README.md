@@ -8,7 +8,7 @@
 
 | 项目 | 状态 |
 |------|------|
-| **当前版本** | v0.43.28 |
+| **当前版本** | v0.43.30 |
 | **测试状态** | 单元测试通过（`make test-unit`: Executed 158 tests, 1 skipped；Strict Concurrency: `make test-strict` Executed 158 tests, 1 skipped；性能测试：`make test-perf` Executed 23 tests, 6 skipped） |
 | **构建状态** | Debug ✅ |
 | **部署位置** | /Applications/Scopy.app |
@@ -24,6 +24,7 @@
 
 | 版本 | 日期 | 主要内容 | 状态 |
 |------|------|----------|------|
+| [v0.43.30](./v0.43.30.md) | 2025-12-16 | UX/Preview：表格显示优化（横向滚动 + 适度换行）+ 预览高度贴合 HTML 内容 | ✅ |
 | [v0.43.28](./v0.43.28.md) | 2025-12-16 | UX/Preview：常见 LaTeX 文档结构（itemize/enumerate/quote/paragraph/label）转 Markdown | ✅ |
 | [v0.43.27](./v0.43.27.md) | 2025-12-16 | Refactor/Preview：预览渲染实现收敛（环境 SSOT + 轻量工具复用）+ KaTeX 语法回归测试 | ✅ |
 | [v0.43.26](./v0.43.26.md) | 2025-12-16 | Fix/Preview：`\\left...\\right` 公式更鲁棒（避免被拆碎/误包裹） | ✅ |

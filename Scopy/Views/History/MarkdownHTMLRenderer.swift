@@ -47,8 +47,24 @@ enum MarkdownHTMLRenderer {
       a { pointer-events: none; text-decoration: underline; }
       blockquote { margin: 0; padding-left: 12px; border-left: 3px solid rgba(127,127,127,0.35); }
       hr { border: 0; border-top: 1px solid rgba(127,127,127,0.35); margin: 12px 0; }
-      table { border-collapse: collapse; width: 100%; }
-      th, td { border: 1px solid rgba(127,127,127,0.25); padding: 6px 8px; vertical-align: top; }
+      table {
+        display: block;
+        border-collapse: collapse;
+        max-width: 100%;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        width: max-content;
+        min-width: 100%;
+      }
+      th, td {
+        border: 1px solid rgba(127,127,127,0.25);
+        padding: 6px 8px;
+        vertical-align: top;
+        white-space: normal;
+        word-break: normal;
+        overflow-wrap: break-word;
+        max-width: 520px;
+      }
       thead th { background: rgba(127,127,127,0.10); }
     </style>
     """
@@ -79,6 +95,9 @@ enum MarkdownHTMLRenderer {
                     strict: 'ignore',
                     ignoredTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code']
                   });
+                  if (typeof window.__scopyReportHeight === 'function') {
+                    window.__scopyReportHeight();
+                  }
                 };
 
                 function tryRender() {
@@ -110,6 +129,29 @@ enum MarkdownHTMLRenderer {
         <script defer src="contrib/markdown-it.min.js"></script>
         <script>
           (function () {
+            var lastHeight = 0;
+            window.__scopyReportHeight = function () {
+              try {
+                if (!window.webkit || !window.webkit.messageHandlers || !window.webkit.messageHandlers.scopyHeight) { return; }
+                var h = Math.max(document.body.scrollHeight || 0, document.documentElement.scrollHeight || 0);
+                var dpr = window.devicePixelRatio || 1;
+                var hp = h / dpr;
+                if (!hp) { return; }
+                if (Math.abs(hp - lastHeight) < 1) { return; }
+                lastHeight = hp;
+                window.webkit.messageHandlers.scopyHeight.postMessage(hp);
+              } catch (e) { }
+            };
+
+            function scheduleReportHeight() {
+              if (typeof window.__scopyReportHeight !== 'function') { return; }
+              if (typeof window.requestAnimationFrame === 'function') {
+                window.requestAnimationFrame(window.__scopyReportHeight);
+              } else {
+                setTimeout(window.__scopyReportHeight, 0);
+              }
+            }
+
             function renderMarkdown() {
               var el = document.getElementById('content');
               if (!el) { return; }
@@ -131,6 +173,8 @@ enum MarkdownHTMLRenderer {
               if (typeof window.__scopyRenderMath === 'function') {
                 window.__scopyRenderMath();
               }
+              scheduleReportHeight();
+              setTimeout(scheduleReportHeight, 120);
             }
 
             if (document.readyState === 'loading') {
