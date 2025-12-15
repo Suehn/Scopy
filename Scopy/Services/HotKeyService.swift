@@ -249,6 +249,21 @@ public final class HotKeyService {
         }
     }
 
+    public var isRegistered: Bool {
+        #if DEBUG
+        let isTestingMode = Self.sharedState.withValue { state in
+            state.testingMode
+        }
+        if isTestingMode {
+            return Self.sharedState.withValue { state in
+                state.handlers[currentHotKeyID] != nil
+            }
+        }
+        #endif
+
+        return hotKeyRef != nil
+    }
+
     // MARK: - Static: Event Handling
 
     /// 处理 Carbon 事件
@@ -352,18 +367,6 @@ public final class HotKeyService {
                 handler()
             }
         }
-    }
-
-    public var isRegistered: Bool {
-        let isTestingMode = Self.sharedState.withValue { state in
-            state.testingMode
-        }
-        if isTestingMode {
-            return Self.sharedState.withValue { state in
-                state.handlers[currentHotKeyID] != nil
-            }
-        }
-        return hotKeyRef != nil
     }
 
     public var hasHandler: Bool {

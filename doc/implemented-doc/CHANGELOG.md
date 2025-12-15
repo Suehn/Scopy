@@ -5,6 +5,32 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [v0.43.17] - 2025-12-15
+
+### Fix/UX：设置窗口更像 macOS 设置（不再误退出 + 热键失败回退 + 侧边栏搜索）
+
+- **设置窗口更稳更像系统**：
+  - Settings 侧边栏支持搜索；行样式更接近系统设置（图标底色与对齐）。
+  - 底部 action bar 使用系统材质与按钮风格，保存按钮仅在有改动时可点。
+  - 打开设置窗口时强制 reload settings，减少“提示不更新”的错觉。
+- **修复“关闭设置窗口会退出程序”**：menubar app 场景下显式禁用 last window closed 自动终止。
+- **热键应用一致性增强**：
+  - `applyHotKey` 以实际注册状态为准，避免误判导致跳过更新。
+  - 热键注册失败时自动回退并提示用户（避免 UI 显示与实际不一致）。
+
+### 修改文件
+
+- `Scopy/AppDelegate.swift`
+- `Scopy/Services/HotKeyService.swift`
+- `Scopy/Views/Settings/SettingsView.swift`
+- `Scopy/Views/Settings/HotKeyRecorderView.swift`
+- `Scopy/Domain/Models/SettingsDTO.swift`
+
+### 测试
+
+- 单元测试：`make test-unit` **147 passed** (1 skipped)
+- Strict Concurrency：`make test-strict` **147 passed** (1 skipped)
+
 ## [v0.43.16] - 2025-12-15
 
 ### Fix/UX：重做设置界面（布局清晰 + 对齐 + 图标统一）

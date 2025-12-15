@@ -6,6 +6,7 @@ struct SettingsView: View {
     @Environment(SettingsViewModel.self) private var settingsViewModel
 
     @State private var selection: SettingsPage? = .general
+    @State private var sidebarSearchText = ""
     @State private var tempSettings: SettingsDTO?
     @State private var isSaving = false
     @State private var saveErrorMessage: String?
@@ -29,7 +30,10 @@ struct SettingsView: View {
             }
         }
         .onAppear {
-            tempSettings = settingsViewModel.settings
+            Task { @MainActor in
+                await settingsViewModel.loadSettings()
+                tempSettings = settingsViewModel.settings
+            }
             refreshStats()
         }
         .onDisappear {
@@ -61,15 +65,27 @@ struct SettingsView: View {
         .frame(width: ScopySize.Window.settingsWidth, height: ScopySize.Window.settingsHeight)
     }
 
+    private var filteredPages: [SettingsPage] {
+        let query = sidebarSearchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return SettingsPage.allCases }
+
+        return SettingsPage.allCases.filter { page in
+            page.title.localizedCaseInsensitiveContains(query)
+                || (page.subtitle?.localizedCaseInsensitiveContains(query) ?? false)
+        }
+    }
+
     private func settingsContent(settings: Binding<SettingsDTO>) -> some View {
-        VStack(spacing: 0) {
+        let isDirty = settings.wrappedValue != settingsViewModel.settings
+
+        return VStack(spacing: 0) {
             NavigationSplitView {
-                List(SettingsPage.allCases, selection: $selection) { page in
-                    Label(page.title, systemImage: page.icon)
-                        .font(ScopyTypography.sidebarLabel)
+                List(filteredPages, selection: $selection) { page in
+                    SettingsSidebarRow(page: page)
                         .tag(page)
                 }
                 .listStyle(.sidebar)
+                .searchable(text: $sidebarSearchText, placement: .sidebar, prompt: "搜索设置")
                 .frame(minWidth: ScopySize.Width.sidebarMin)
             } detail: {
                 Group {
@@ -93,14 +109,15 @@ struct SettingsView: View {
                         AboutSettingsPage()
                     }
                 }
-                .padding(.horizontal, ScopySpacing.lg)
-                .padding(.vertical, ScopySpacing.md)
             }
             .navigationSplitViewColumnWidth(240)
             .frame(minWidth: ScopySize.Window.settingsWidth, minHeight: ScopySize.Window.settingsHeight)
+            .padding(.horizontal, ScopySpacing.lg)
+            .padding(.vertical, ScopySpacing.md)
 
             SettingsActionBar(
                 isSaving: isSaving,
+                isDirty: isDirty,
                 onReset: { tempSettings = .default },
                 onCancel: { onDismiss?() },
                 onSave: saveSettings
@@ -157,31 +174,94 @@ struct SettingsView: View {
 
 private struct SettingsActionBar: View {
     let isSaving: Bool
+    let isDirty: Bool
     let onReset: () -> Void
     let onCancel: () -> Void
     let onSave: () -> Void
 
     var body: some View {
-        HStack {
-            Button("恢复默认", action: onReset)
-                .buttonStyle(.plain)
-                .foregroundStyle(.secondary)
-                .accessibilityIdentifier("Settings.ResetButton")
+        VStack(spacing: 0) {
+            Divider()
+            HStack(spacing: ScopySpacing.md) {
+                Button("恢复默认", action: onReset)
+                    .buttonStyle(.link)
+                    .accessibilityIdentifier("Settings.ResetButton")
 
-            Spacer()
+                Spacer()
 
-            Button("取消", action: onCancel)
-                .keyboardShortcut(.cancelAction)
-                .accessibilityIdentifier("Settings.CancelButton")
+                Button("取消", action: onCancel)
+                    .buttonStyle(.bordered)
+                    .keyboardShortcut(.cancelAction)
+                    .accessibilityIdentifier("Settings.CancelButton")
 
-            Button("保存", action: onSave)
-                .keyboardShortcut(.defaultAction)
-                .disabled(isSaving)
-                .accessibilityIdentifier("Settings.SaveButton")
+                Button("保存", action: onSave)
+                    .buttonStyle(.borderedProminent)
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(!isDirty || isSaving)
+                    .accessibilityIdentifier("Settings.SaveButton")
+            }
+            .padding(.horizontal, ScopySpacing.xl)
+            .padding(.vertical, ScopySpacing.md)
+            .background(.regularMaterial)
         }
-        .padding(.horizontal, ScopySpacing.xxl)
-        .padding(.vertical, ScopySpacing.lg)
-        .background(ScopyColors.secondaryBackground)
+    }
+}
+
+#if canImport(AppKit)
+private struct SettingsSidebarRow: View {
+    let page: SettingsPage
+
+    var body: some View {
+        HStack(spacing: ScopySpacing.md) {
+            SettingsSymbolIcon(systemName: page.icon, tint: iconColor, size: 22)
+
+            VStack(alignment: .leading, spacing: 1) {
+                Text(page.title)
+                    .font(ScopyTypography.sidebarLabel)
+                if let subtitle = page.subtitle, !subtitle.isEmpty {
+                    Text(subtitle)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            }
+        }
+    }
+
+    private var iconColor: Color {
+        switch page {
+        case .general:
+            return .gray
+        case .shortcuts:
+            return .purple
+        case .clipboard:
+            return .green
+        case .appearance:
+            return .orange
+        case .storage:
+            return .blue
+        case .about:
+            return .secondary
+        }
+    }
+}
+#endif
+
+private struct SettingsSymbolIcon: View {
+    let systemName: String
+    let tint: Color
+    let size: CGFloat
+
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .fill(tint.opacity(0.18))
+            Image(systemName: systemName)
+                .symbolRenderingMode(.hierarchical)
+                .foregroundStyle(tint)
+                .font(.system(size: size * 0.55, weight: .semibold))
+        }
+        .frame(width: size, height: size)
     }
 }
 
@@ -191,4 +271,3 @@ private struct SettingsActionBar: View {
         .environment(AppState.shared.historyViewModel)
         .environment(AppState.shared.settingsViewModel)
 }
-

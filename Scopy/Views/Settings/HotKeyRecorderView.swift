@@ -2,6 +2,8 @@ import SwiftUI
 import Carbon.HIToolbox
 
 struct HotKeyRecorderView: View {
+    @Environment(SettingsViewModel.self) private var settingsViewModel
+
     @Binding var keyCode: UInt32
     @Binding var modifiers: UInt32
 
@@ -9,6 +11,7 @@ struct HotKeyRecorderView: View {
     let applyHotKeyHandler: ((UInt32, UInt32) -> Void)?
 
     @StateObject private var recorder = HotKeyRecorder()
+    @State private var applyErrorMessage: String?
 
     var body: some View {
         Button(action: toggleRecording) {
@@ -35,11 +38,25 @@ struct HotKeyRecorderView: View {
                 modifiers = newModifiers
                 Task { @MainActor in
                     applyHotKeyHandler?(newKeyCode, newModifiers)
+                    await syncFromPersistedSettings(expectedKeyCode: newKeyCode, expectedModifiers: newModifiers)
                 }
             }
         }
         .onDisappear {
             recorder.stopRecording(restorePrevious: true)
+        }
+        .alert(
+            "快捷键不可用",
+            isPresented: Binding(
+                get: { applyErrorMessage != nil },
+                set: { isPresented in
+                    if !isPresented { applyErrorMessage = nil }
+                }
+            )
+        ) {
+            Button("好") { applyErrorMessage = nil }
+        } message: {
+            Text(applyErrorMessage ?? "")
         }
     }
 
@@ -49,6 +66,22 @@ struct HotKeyRecorderView: View {
         } else {
             recorder.startRecording(currentKeyCode: keyCode, currentModifiers: modifiers)
         }
+    }
+
+    @MainActor
+    private func syncFromPersistedSettings(expectedKeyCode: UInt32, expectedModifiers: UInt32) async {
+        // SettingsStore 写入是异步的；给一次短暂的调度窗口，避免立即读到旧值。
+        try? await Task.sleep(nanoseconds: 50_000_000)
+        await settingsViewModel.loadSettings()
+
+        let persisted = settingsViewModel.settings
+        guard persisted.hotkeyKeyCode != expectedKeyCode || persisted.hotkeyModifiers != expectedModifiers else {
+            return
+        }
+
+        keyCode = persisted.hotkeyKeyCode
+        modifiers = persisted.hotkeyModifiers
+        applyErrorMessage = "该快捷键可能已被系统或其他应用占用，已恢复为 \(formatHotKey(keyCode: keyCode, modifiers: modifiers))"
     }
 
     private func formatHotKey(keyCode: UInt32, modifiers: UInt32) -> String {
@@ -91,4 +124,3 @@ struct HotKeyRecorderView: View {
         return keyMap[keyCode] ?? "?"
     }
 }
-

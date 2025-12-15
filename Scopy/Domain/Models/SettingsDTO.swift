@@ -1,7 +1,7 @@
 import Foundation
 
 /// 设置 DTO
-public struct SettingsDTO: Sendable {
+public struct SettingsDTO: Sendable, Equatable {
     public var maxItems: Int
     public var maxStorageMB: Int
     public var saveImages: Bool

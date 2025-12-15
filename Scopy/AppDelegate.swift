@@ -95,6 +95,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        false
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
         // 清理资源
         hotKeyService?.unregister()
@@ -126,16 +130,20 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     /// 统一应用并持久化快捷键，确保无需重启即可生效
     @MainActor
     func applyHotKey(keyCode: UInt32, modifiers: UInt32) {
-        if isHotKeyRegistered,
+        let requested = (keyCode: keyCode, modifiers: modifiers)
+
+        if hotKeyService?.isRegistered == true,
            let applied = appliedHotKey,
-           applied.keyCode == keyCode,
-           applied.modifiers == modifiers {
+           applied.keyCode == requested.keyCode,
+           applied.modifiers == requested.modifiers {
             return
         }
 
         if hotKeyService == nil {
             hotKeyService = HotKeyService()
         }
+
+        let previousHotKey = appliedHotKey
 
         hotKeyService?.updateHotKey(
             keyCode: keyCode,
@@ -144,9 +152,35 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.togglePanelAtMousePosition()
             }
         )
-        appliedHotKey = (keyCode, modifiers)
+
+        guard hotKeyService?.isRegistered == true else {
+            ScopyLog.hotkey.error(
+                "Failed to register global hotkey, reverting. keyCode=\(keyCode, privacy: .public), modifiers=0x\(String(modifiers, radix: 16), privacy: .public)"
+            )
+
+            let fallback = previousHotKey ?? (SettingsDTO.default.hotkeyKeyCode, SettingsDTO.default.hotkeyModifiers)
+            hotKeyService?.updateHotKey(
+                keyCode: fallback.0,
+                modifiers: fallback.1,
+                handler: { [weak self] in
+                    self?.togglePanelAtMousePosition()
+                }
+            )
+
+            if hotKeyService?.isRegistered == true {
+                appliedHotKey = (fallback.0, fallback.1)
+                isHotKeyRegistered = true
+                persistHotkeySettings(keyCode: fallback.0, modifiers: fallback.1)
+            } else {
+                appliedHotKey = nil
+                isHotKeyRegistered = false
+            }
+            return
+        }
+
+        appliedHotKey = requested
         isHotKeyRegistered = true
-        persistHotkeySettings(keyCode: keyCode, modifiers: modifiers)
+        persistHotkeySettings(keyCode: requested.keyCode, modifiers: requested.modifiers)
     }
 
     private func persistHotkeySettings(keyCode: UInt32, modifiers: UInt32) {
