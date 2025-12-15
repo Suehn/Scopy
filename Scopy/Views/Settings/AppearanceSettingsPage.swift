@@ -34,6 +34,8 @@ struct AppearanceSettingsPage: View {
                 }
             } header: {
                 Label("预览", systemImage: "photo")
+                    .symbolRenderingMode(.hierarchical)
+                    .foregroundStyle(.secondary)
             } footer: {
                 Text("开启缩略图可提升列表可读性；悬停可预览原图（延迟用于避免误触）。")
                     .foregroundStyle(.secondary)
@@ -41,4 +43,3 @@ struct AppearanceSettingsPage: View {
         }
     }
 }
-

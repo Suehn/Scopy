@@ -32,6 +32,8 @@ struct StorageSettingsPage: View {
                 .accessibilityIdentifier("Settings.MaxStoragePicker")
             } header: {
                 Label("限制", systemImage: "gauge.with.dots.needle.bottom.50percent")
+                    .symbolRenderingMode(.hierarchical)
+                    .foregroundStyle(.secondary)
             } footer: {
                 Text("超过上限后会自动清理较旧的条目（Pinned 会被保留）。")
                     .foregroundStyle(.secondary)
@@ -70,13 +72,14 @@ struct StorageSettingsPage: View {
                         Label("刷新", systemImage: "arrow.clockwise")
                     }
                     .buttonStyle(.plain)
-                    .foregroundStyle(.blue)
                 } else {
                     Text("无法读取存储统计")
                         .foregroundStyle(.secondary)
                 }
             } header: {
                 Label("当前占用", systemImage: "chart.pie")
+                    .symbolRenderingMode(.hierarchical)
+                    .foregroundStyle(.secondary)
             }
 
             Section {
@@ -99,6 +102,8 @@ struct StorageSettingsPage: View {
                 }
             } header: {
                 Label("位置", systemImage: "folder")
+                    .symbolRenderingMode(.hierarchical)
+                    .foregroundStyle(.secondary)
             }
         }
     }

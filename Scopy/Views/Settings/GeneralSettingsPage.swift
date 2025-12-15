@@ -17,6 +17,8 @@ struct GeneralSettingsPage: View {
                 .accessibilityIdentifier("Settings.DefaultSearchModePicker")
             } header: {
                 Label("搜索", systemImage: "magnifyingglass")
+                    .symbolRenderingMode(.hierarchical)
+                    .foregroundStyle(.secondary)
             } footer: {
                 Text("建议默认使用 Fuzzy+（与主界面默认一致）。Regex 适合高级用法，但可能更慢。")
                     .font(.caption)

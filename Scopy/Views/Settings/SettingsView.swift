@@ -10,6 +10,7 @@ struct SettingsView: View {
     @State private var tempSettings: SettingsDTO?
     @State private var isSaving = false
     @State private var saveErrorMessage: String?
+    @State private var savedHint: String?
 
     @State private var storageStats: StorageStatsDTO?
     @State private var isLoadingStats = false
@@ -112,12 +113,11 @@ struct SettingsView: View {
             }
             .navigationSplitViewColumnWidth(240)
             .frame(minWidth: ScopySize.Window.settingsWidth, minHeight: ScopySize.Window.settingsHeight)
-            .padding(.horizontal, ScopySpacing.lg)
-            .padding(.vertical, ScopySpacing.md)
 
             SettingsActionBar(
                 isSaving: isSaving,
                 isDirty: isDirty,
+                savedHint: savedHint,
                 onReset: { tempSettings = .default },
                 onCancel: { onDismiss?() },
                 onSave: saveSettings
@@ -160,7 +160,13 @@ struct SettingsView: View {
                 try await settingsViewModel.updateSettingsOrThrow(currentSettings)
                 await MainActor.run {
                     isSaving = false
-                    onDismiss?()
+                    savedHint = "已保存"
+                    Task { @MainActor in
+                        try? await Task.sleep(nanoseconds: 1_200_000_000)
+                        if savedHint == "已保存" {
+                            savedHint = nil
+                        }
+                    }
                 }
             } catch {
                 await MainActor.run {
@@ -175,6 +181,7 @@ struct SettingsView: View {
 private struct SettingsActionBar: View {
     let isSaving: Bool
     let isDirty: Bool
+    let savedHint: String?
     let onReset: () -> Void
     let onCancel: () -> Void
     let onSave: () -> Void
@@ -188,6 +195,13 @@ private struct SettingsActionBar: View {
                     .accessibilityIdentifier("Settings.ResetButton")
 
                 Spacer()
+
+                if let savedHint {
+                    Text(savedHint)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .transition(.opacity)
+                }
 
                 Button("取消", action: onCancel)
                     .buttonStyle(.bordered)

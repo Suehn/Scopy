@@ -18,6 +18,8 @@ struct ShortcutsSettingsPage: View {
                 }
             } header: {
                 Label("快捷键", systemImage: "keyboard")
+                    .symbolRenderingMode(.hierarchical)
+                    .foregroundStyle(.secondary)
             } footer: {
                 Text("点击录制新快捷键，按 ESC 取消。录制完成后会立即生效并持久化。")
                     .foregroundStyle(.secondary)
@@ -25,4 +27,3 @@ struct ShortcutsSettingsPage: View {
         }
     }
 }
-

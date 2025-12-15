@@ -2264,3 +2264,29 @@
   - UI 组件和 Mock 后端
   - 基础搜索和列表功能
   - 键盘导航支持
+## [v0.43.18] - 2025-12-15
+
+### Fix/UI：设置页视觉与排版再打磨（减少空白 + 图标去“全蓝” + About 对齐）
+
+- **视觉与排版**：
+  - 详情页去掉多余外层 padding，减少顶部空白；page container 统一间距。
+  - Sidebar 行增加 subtitle；图标改为带底色的分组 tint（更接近系统设置）。
+  - Section header 图标改为 hierarchical + secondary，避免默认 accent 蓝过强。
+  - About 页改为 Form sections，使用真实 App icon；特性/指标对齐更一致。
+- **交互与稳定性**：
+  - 保存成功不再自动关闭设置窗口，避免 menubar app 场景被误认为“退出”；并显示 “已保存” 提示。
+  - 设置窗口设置最小尺寸，避免拖小导致内容/按钮显示不全。
+
+### 修改文件
+
+- `Scopy/Views/Settings/SettingsView.swift`
+- `Scopy/Views/Settings/SettingsPageHeader.swift`
+- `Scopy/Views/Settings/AboutSettingsPage.swift`
+- `Scopy/Views/Settings/SettingsFeatureRow.swift`
+- `Scopy/Views/Settings/*SettingsPage.swift`
+- `Scopy/AppDelegate.swift`
+
+### 测试
+
+- 单元测试：`make test-unit` **147 passed** (1 skipped)
+- Strict Concurrency：`make test-strict` **147 passed** (1 skipped)

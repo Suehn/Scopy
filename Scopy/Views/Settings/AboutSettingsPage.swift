@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 struct AboutSettingsPage: View {
@@ -6,80 +7,83 @@ struct AboutSettingsPage: View {
     @State private var autoRefreshTask: Task<Void, Never>?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: ScopySpacing.xl) {
-            SettingsPageHeader(title: SettingsPage.about.title, subtitle: nil, systemImage: SettingsPage.about.icon)
+        SettingsPageContainer(page: .about) {
+            Section {
+                HStack(spacing: ScopySpacing.md) {
+                    Image(nsImage: NSApp.applicationIconImage)
+                        .resizable()
+                        .interpolation(.high)
+                        .scaledToFit()
+                        .frame(width: 48, height: 48)
+                        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
 
-            GroupBox {
-                VStack(alignment: .leading, spacing: ScopySpacing.sm) {
-                    HStack(spacing: ScopySpacing.md) {
-                        Image(systemName: "doc.on.clipboard.fill")
-                            .font(.system(size: 36, weight: .semibold))
-                            .foregroundStyle(.blue)
-                            .frame(width: 44)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(AppVersion.appName)
-                                .font(.title3)
-                                .fontWeight(.semibold)
-                            Text("版本 \(AppVersion.fullVersion)")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                            Text("构建日期 \(AppVersion.buildDate)")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                        Spacer()
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(AppVersion.appName)
+                            .font(.title3)
+                            .fontWeight(.semibold)
+                        Text("版本 \(AppVersion.fullVersion)")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                        Text("构建日期 \(AppVersion.buildDate)")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
                     }
-                }
-            } label: {
-                Text("应用信息")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
 
-            GroupBox {
-                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: ScopySpacing.sm) {
-                    SettingsFeatureRow(icon: "infinity", text: "无限历史")
-                    SettingsFeatureRow(icon: "magnifyingglass", text: "高性能搜索")
-                    SettingsFeatureRow(icon: "externaldrive", text: "分层存储")
-                    SettingsFeatureRow(icon: "checkmark.circle", text: "去重写入")
-                    SettingsFeatureRow(icon: "keyboard", text: "全局快捷键")
-                    SettingsFeatureRow(icon: "bolt", text: "低延迟体验")
-                }
-            } label: {
-                Text("特性")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            GroupBox {
-                VStack(alignment: .leading, spacing: ScopySpacing.md) {
-                    metricRow(title: "搜索", value: searchValue)
-                    metricRow(title: "首屏", value: loadValue)
-                    metricRow(title: "内存", value: String(format: "%.1f MB", memoryUsageMB))
-                }
-            } label: {
-                HStack {
-                    Text("性能（进程内采样）")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
                     Spacer()
-                    Button(action: refreshPerformance) {
-                        Image(systemName: "arrow.clockwise")
-                            .font(.caption2)
-                    }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(.blue)
                 }
+                .padding(.vertical, ScopySpacing.xs)
+            } header: {
+                Text("应用信息")
             }
 
-            HStack(spacing: ScopySpacing.xl) {
+            Section {
+                LazyVGrid(
+                    columns: [GridItem(.flexible(minimum: 120), spacing: ScopySpacing.md), GridItem(.flexible(minimum: 120))],
+                    alignment: .leading,
+                    spacing: ScopySpacing.sm
+                ) {
+                    SettingsFeatureRow(icon: "infinity", text: "无限历史", tint: .purple)
+                    SettingsFeatureRow(icon: "magnifyingglass", text: "高性能搜索", tint: .blue)
+                    SettingsFeatureRow(icon: "externaldrive", text: "分层存储", tint: .orange)
+                    SettingsFeatureRow(icon: "checkmark.seal", text: "去重写入", tint: .green)
+                    SettingsFeatureRow(icon: "keyboard", text: "全局快捷键", tint: .indigo)
+                    SettingsFeatureRow(icon: "bolt", text: "低延迟体验", tint: .teal)
+                }
+                .padding(.vertical, ScopySpacing.xs)
+            } header: {
+                Text("特性")
+            }
+
+            Section {
+                LabeledContent("搜索") {
+                    Text(searchValue)
+                        .font(.callout.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+                LabeledContent("首屏") {
+                    Text(loadValue)
+                        .font(.callout.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+                LabeledContent("内存") {
+                    Text(String(format: "%.1f MB", memoryUsageMB))
+                        .font(.callout.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+
+                Button("刷新") {
+                    refreshPerformance()
+                }
+            } header: {
+                Text("性能（进程内采样）")
+            }
+
+            Section {
                 Link("GitHub", destination: URL(string: "https://github.com/Suehn/Scopy")!)
                 Link("反馈问题", destination: URL(string: "https://github.com/Suehn/Scopy/issues/new")!)
+            } header: {
+                Text("链接")
             }
-            .font(.caption)
-            .foregroundStyle(.blue)
-
-            Spacer()
         }
         .onAppear {
             refreshPerformance()
@@ -98,18 +102,6 @@ struct AboutSettingsPage: View {
     private var loadValue: String {
         guard let summary = performanceSummary, summary.loadSamples > 0 else { return "N/A" }
         return "\(formatMs(summary.loadP95)) P95 / \(formatMs(summary.loadAvg)) avg (\(summary.loadSamples) samples)"
-    }
-
-    private func metricRow(title: String, value: String) -> some View {
-        HStack(alignment: .firstTextBaseline) {
-            Text(title)
-                .font(.caption)
-                .frame(width: ScopySize.Width.statLabel, alignment: .leading)
-            Spacer()
-            Text(value)
-                .font(.caption.monospacedDigit())
-                .foregroundStyle(.secondary)
-        }
     }
 
     private func refreshPerformance() {
@@ -154,4 +146,3 @@ struct AboutSettingsPage: View {
         }
     }
 }
-

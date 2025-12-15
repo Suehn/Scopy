@@ -210,7 +210,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 defer: false
             )
             window.title = "Scopy Settings"
+            window.titleVisibility = .hidden
+            window.titlebarAppearsTransparent = true
+            window.toolbarStyle = .unifiedCompact
             window.isReleasedWhenClosed = true  // v0.17: 关闭时释放窗口
+            window.contentMinSize = NSSize(width: ScopySize.Window.settingsWidth, height: ScopySize.Window.settingsHeight)
+            window.minSize = NSSize(width: ScopySize.Window.settingsWidth, height: ScopySize.Window.settingsHeight)
 
             let settingsView = SettingsView { [weak self] in
                 self?.settingsWindow?.close()

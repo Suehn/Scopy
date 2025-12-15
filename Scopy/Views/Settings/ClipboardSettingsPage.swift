@@ -11,6 +11,8 @@ struct ClipboardSettingsPage: View {
                 Toggle("保存文件", isOn: $tempSettings.saveFiles)
             } header: {
                 Label("内容类型", systemImage: "doc.on.clipboard")
+                    .symbolRenderingMode(.hierarchical)
+                    .foregroundStyle(.secondary)
             } footer: {
                 Text("关闭某类内容后，Scopy 将跳过写入历史（不会影响当前剪贴板）。")
                     .foregroundStyle(.secondary)
@@ -18,4 +20,3 @@ struct ClipboardSettingsPage: View {
         }
     }
 }
-
