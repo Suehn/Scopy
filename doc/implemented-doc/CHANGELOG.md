@@ -5,6 +5,14 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [v0.44.fix] - 2025-12-16
+
+### Fix/Preview：hover 预览动态宽高更准确（Markdown/Text）
+
+- **Markdown 预览高度**：改用 `#content.getBoundingClientRect()` 的尺寸上报，避免 `body.scrollHeight` 在内容很短时被 viewport 高度“顶住”导致 popover 过高/空白。
+- **Markdown 预览宽高联动**：上报 `{width,height}`，SwiftUI 侧基于实测宽高更新 popover 尺寸，减少“宽度过大留白/高度不贴合”的情况。
+- **纯文本预览宽度**：多行文本不再一律强制 `maxWidth`，而是按最长行估算并在接近上限时回退到 `maxWidth`，让短多行也能收缩。
+
 ## [v0.44] - 2025-12-16
 
 ### Release：Preview 稳健性 + 自动发布（Homebrew 对齐）

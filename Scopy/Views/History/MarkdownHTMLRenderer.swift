@@ -31,12 +31,17 @@ enum MarkdownHTMLRenderer {
       :root { color-scheme: light dark; }
       body {
         margin: 0;
-        padding: 16px;
+        padding: 0;
         font: -apple-system-body;
         line-height: 1.45;
         background: transparent;
       }
-      #content { word-break: break-word; }
+      #content {
+        padding: 16px;
+        display: inline-block;
+        max-width: 100%;
+        word-break: break-word;
+      }
       pre, code { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
       pre {
         padding: 12px;
@@ -129,16 +134,22 @@ enum MarkdownHTMLRenderer {
         <script defer src="contrib/markdown-it.min.js"></script>
         <script>
           (function () {
-            var lastHeight = 0;
+            var lastH = 0;
+            var lastW = 0;
             var ro = null;
             window.__scopyReportHeight = function () {
               try {
-                if (!window.webkit || !window.webkit.messageHandlers || !window.webkit.messageHandlers.scopyHeight) { return; }
-                var h = Math.max(document.body.scrollHeight || 0, document.documentElement.scrollHeight || 0);
+                if (!window.webkit || !window.webkit.messageHandlers || !window.webkit.messageHandlers.scopySize) { return; }
+                var el = document.getElementById('content');
+                if (!el) { return; }
+                var rect = el.getBoundingClientRect();
+                var w = Math.ceil(rect.width || 0);
+                var h = Math.ceil(rect.height || 0);
                 if (!h) { return; }
-                if (Math.abs(h - lastHeight) < 1) { return; }
-                lastHeight = h;
-                window.webkit.messageHandlers.scopyHeight.postMessage(h);
+                if (Math.abs(h - lastH) < 1 && Math.abs(w - lastW) < 1) { return; }
+                lastH = h;
+                lastW = w;
+                window.webkit.messageHandlers.scopySize.postMessage({ width: w, height: h });
               } catch (e) { }
             };
 

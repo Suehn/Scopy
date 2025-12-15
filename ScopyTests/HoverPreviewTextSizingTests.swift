@@ -28,7 +28,8 @@ final class HoverPreviewTextSizingTests: XCTestCase {
             padding: padding,
             maxWidth: maxWidth
         )
-        XCTAssertEqual(w, maxWidth)
+        XCTAssertGreaterThan(w, 0)
+        XCTAssertLessThan(w, maxWidth)
     }
 
     func testPreferredTextHeightIncreasesWithNewlines() {

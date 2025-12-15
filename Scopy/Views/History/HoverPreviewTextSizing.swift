@@ -14,14 +14,25 @@ enum HoverPreviewTextSizing {
         // Avoid sizing work for large payloads.
         if text.utf16.count >= 1_500 { return maxWidth }
 
-        // If it's clearly multi-line, keep the stable max width to avoid jitter as content reflows.
-        if text.contains("\n") { return maxWidth }
+        let lines = text.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline)
+        if lines.isEmpty { return max(1, maxWidth) }
 
-        // Single-line: measure without a container. Using TextKit's `usedRect` tends to report the full
-        // line fragment width, which prevents shrinking for short strings.
-        let measured = (text as NSString).size(withAttributes: [.font: font])
+        // Prefer shrinking for small payloads (including short multi-line outputs), but keep max width
+        // for very large/many-line content to avoid excessive layout work and unstable reflow.
+        if lines.count > 80 { return maxWidth }
+
+        let maxMeasuredLineWidth: CGFloat = lines.prefix(80).reduce(0) { acc, line in
+            let s = String(line).replacingOccurrences(of: "\t", with: "    ")
+            let measured = (s as NSString).size(withAttributes: [.font: font])
+            return max(acc, measured.width)
+        }
+
         // Add some slack so glyph descenders/emoji don't get clipped on edge cases.
-        let desired = measured.width + padding * 2 + 8
+        let desired = maxMeasuredLineWidth + padding * 2 + 8
+
+        // If the content is close to max width, just use max width to keep layout stable.
+        if desired >= maxWidth * 0.92 { return maxWidth }
+
         return max(1, min(maxWidth, ceil(desired)))
     }
 
@@ -36,14 +47,6 @@ enum HoverPreviewTextSizing {
 
         // Avoid heavy measurement for very large strings; long content can just use max height + scroll.
         if text.utf16.count >= 1_500 { return maxHeight }
-
-        var newlineCount = 0
-        for ch in text {
-            if ch == "\n" {
-                newlineCount += 1
-                if newlineCount >= 20 { return maxHeight }
-            }
-        }
 
         let measured = measureText(text, font: font, contentWidth: contentWidth)
         return min(maxHeight, measured.height)

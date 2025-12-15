@@ -12,12 +12,14 @@ struct HistoryItemTextPreviewView: View {
         let padding: CGFloat = ScopySpacing.md
 
         if let text = model.text {
-            let width = HoverPreviewTextSizing.preferredWidth(
+            let fallbackWidth = HoverPreviewTextSizing.preferredWidth(
                 for: text,
                 font: font,
                 padding: padding,
                 maxWidth: maxWidth
             )
+            let markdownMeasuredWidth = model.markdownContentSize?.width
+            let width = max(1, min(maxWidth, ceil(markdownMeasuredWidth ?? fallbackWidth)))
 
             let measuredTextHeight: CGFloat = HoverPreviewTextSizing.preferredTextHeight(
                 for: text,
@@ -28,7 +30,8 @@ struct HistoryItemTextPreviewView: View {
             let textContentHeight = measuredTextHeight + padding * 2
 
             // Add a small buffer to avoid occasional off-by-a-few-pixels scroll for very small content.
-            let contentHeight = (model.isMarkdown ? (model.markdownContentHeight ?? textContentHeight) : textContentHeight) + 4
+            let markdownMeasuredHeight = model.markdownContentSize?.height
+            let contentHeight = (model.isMarkdown ? (markdownMeasuredHeight ?? textContentHeight) : textContentHeight) + 4
             let clampedHeight = min(maxHeight, max(1, contentHeight))
             let shouldScroll = contentHeight > maxHeight
 
@@ -36,9 +39,14 @@ struct HistoryItemTextPreviewView: View {
                 MarkdownPreviewWebView(
                     html: html,
                     shouldScroll: shouldScroll,
-                    onContentHeightChange: { height in
-                        if let existing = model.markdownContentHeight, abs(existing - height) < 1 { return }
-                        model.markdownContentHeight = height
+                    onContentSizeChange: { size in
+                        if let existing = model.markdownContentSize,
+                           abs(existing.width - size.width) < 1,
+                           abs(existing.height - size.height) < 1
+                        {
+                            return
+                        }
+                        model.markdownContentSize = size
                     }
                 )
                     .frame(width: width, height: clampedHeight)

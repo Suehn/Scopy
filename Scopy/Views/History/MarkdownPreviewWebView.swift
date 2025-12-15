@@ -6,10 +6,10 @@ import WebKit
 struct MarkdownPreviewWebView: NSViewRepresentable {
     let html: String
     let shouldScroll: Bool
-    let onContentHeightChange: @MainActor (CGFloat) -> Void
+    let onContentSizeChange: @MainActor (CGSize) -> Void
 
     private static let blockNetworkRuleListIdentifier = "ScopyMarkdownPreviewBlockNetwork"
-    private static let heightMessageHandlerName = "scopyHeight"
+    private static let sizeMessageHandlerName = "scopySize"
     private static let blockNetworkRulesJSON = """
     [
       {
@@ -31,7 +31,7 @@ struct MarkdownPreviewWebView: NSViewRepresentable {
         config.userContentController = WKUserContentController()
 
         Self.installNetworkBlocker(into: config.userContentController)
-        config.userContentController.add(context.coordinator, name: Self.heightMessageHandlerName)
+        config.userContentController.add(context.coordinator, name: Self.sizeMessageHandlerName)
 
         let webView = WKWebView(frame: .zero, configuration: config)
         webView.navigationDelegate = context.coordinator
@@ -43,7 +43,7 @@ struct MarkdownPreviewWebView: NSViewRepresentable {
     }
 
     func updateNSView(_ webView: WKWebView, context: Context) {
-        context.coordinator.onContentHeightChange = onContentHeightChange
+        context.coordinator.onContentSizeChange = onContentSizeChange
         configureScrollers(for: webView, shouldScroll: shouldScroll)
 
         if context.coordinator.lastHTML != html {
@@ -102,8 +102,8 @@ struct MarkdownPreviewWebView: NSViewRepresentable {
 
     final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler {
         var lastHTML: String = ""
-        var onContentHeightChange: (@MainActor (CGFloat) -> Void)?
-        private var lastReportedHeight: CGFloat = 0
+        var onContentSizeChange: (@MainActor (CGSize) -> Void)?
+        private var lastReportedSize: CGSize = .zero
 
         func webView(
             _ webView: WKWebView,
@@ -152,23 +152,49 @@ struct MarkdownPreviewWebView: NSViewRepresentable {
         }
 
         func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
-            guard message.name == MarkdownPreviewWebView.heightMessageHandlerName else { return }
-            let value: CGFloat?
-            if let n = message.body as? NSNumber {
-                value = CGFloat(truncating: n)
-            } else if let d = message.body as? Double {
-                value = CGFloat(d)
-            } else if let i = message.body as? Int {
-                value = CGFloat(i)
-            } else {
-                value = nil
+            guard message.name == MarkdownPreviewWebView.sizeMessageHandlerName else { return }
+
+            var size: CGSize?
+            if let dict = message.body as? [String: Any] {
+                let w = dict["width"]
+                let h = dict["height"]
+                size = CGSize(width: Self.cgFloat(from: w), height: Self.cgFloat(from: h))
+            } else if let dict = message.body as? NSDictionary {
+                let w = dict["width"]
+                let h = dict["height"]
+                size = CGSize(width: Self.cgFloat(from: w), height: Self.cgFloat(from: h))
+            } else if let n = message.body as? NSNumber {
+                // Backward-compatible: height-only payload.
+                size = CGSize(width: 0, height: CGFloat(truncating: n))
             }
-            guard let value, value.isFinite, value > 0 else { return }
-            if abs(value - lastReportedHeight) < 1 { return }
-            lastReportedHeight = value
+
+            guard let size else { return }
+            guard size.width.isFinite, size.height.isFinite else { return }
+            guard size.height > 0 else { return }
+
+            if abs(size.width - lastReportedSize.width) < 1, abs(size.height - lastReportedSize.height) < 1 {
+                return
+            }
+            lastReportedSize = size
             Task { @MainActor in
-                self.onContentHeightChange?(value)
+                self.onContentSizeChange?(size)
             }
+        }
+
+        private static func cgFloat(from any: Any?) -> CGFloat {
+            if let n = any as? NSNumber {
+                return CGFloat(truncating: n)
+            }
+            if let d = any as? Double {
+                return CGFloat(d)
+            }
+            if let i = any as? Int {
+                return CGFloat(i)
+            }
+            if let s = any as? String, let d = Double(s) {
+                return CGFloat(d)
+            }
+            return 0
         }
     }
 }

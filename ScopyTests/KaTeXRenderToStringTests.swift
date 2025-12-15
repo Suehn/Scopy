@@ -12,7 +12,7 @@ final class KaTeXRenderToStringTests: XCTestCase {
     func testMarkdownPreviewHeightReportingDoesNotDivideByDevicePixelRatio() {
         let html = MarkdownHTMLRenderer.render(markdown: "x")
         XCTAssertFalse(html.contains("devicePixelRatio"))
-        XCTAssertTrue(html.contains("postMessage(h)"))
+        XCTAssertTrue(html.contains("postMessage({ width: w, height: h })"))
     }
 
     func testMarkdownTableUsesHorizontalScrollWithBalancedWrapping() {

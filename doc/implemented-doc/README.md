@@ -8,7 +8,7 @@
 
 | 项目 | 状态 |
 |------|------|
-| **当前版本** | v0.44 |
+| **当前版本** | v0.44.fix |
 | **测试状态** | 单元测试通过（`xcodebuild test -scheme Scopy -destination 'platform=macOS' -only-testing:ScopyTests`: Executed 213 tests, 7 skipped） |
 | **构建状态** | Debug ✅ |
 | **部署位置** | /Applications/Scopy.app |
@@ -24,6 +24,7 @@
 
 | 版本 | 日期 | 主要内容 | 状态 |
 |------|------|----------|------|
+| [v0.44.fix](./v0.44.fix.md) | 2025-12-16 | Fix/Preview：hover 预览动态宽高更准确（Markdown/Text） | ✅ |
 | [v0.44](./v0.44.md) | 2025-12-16 | Release：Preview 稳健性 + 自动发布（Homebrew 对齐） | ✅ |
 | [v0.43.35](./v0.43.35.md) | 2025-12-16 | Preview：移除最小宽高限制，完全动态贴合 | ✅ |
 | [v0.43.34](./v0.43.34.md) | 2025-12-16 | Preview：单行短文本/矮图预览更贴合（宽度可收缩 + 最小高度收敛） | ✅ |
