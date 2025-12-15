@@ -165,11 +165,15 @@ jobs:
             Casks/scopy.rb
 
       - name: Open PR to Homebrew/homebrew-cask
-        if: ${{ secrets.HOMEBREW_GITHUB_API_TOKEN != '' }}
         continue-on-error: true
         env:
           HOMEBREW_GITHUB_API_TOKEN: ${{ secrets.HOMEBREW_GITHUB_API_TOKEN }}
         run: |
+          if [[ -z "${HOMEBREW_GITHUB_API_TOKEN:-}" ]]; then
+            echo "HOMEBREW_GITHUB_API_TOKEN is not set; skipping Homebrew/homebrew-cask bump PR."
+            exit 0
+          fi
+
           VERSION="${{ steps.version.outputs.version }}"
           SHA256="$(awk '{print $1}' "Scopy-${VERSION}.dmg.sha256")"
           URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/v${VERSION}/Scopy-${VERSION}.dmg"
