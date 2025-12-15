@@ -3,8 +3,11 @@
 # 构建 Release 版本并打包为 .dmg
 #
 # 用法:
-#   ./scripts/build-release.sh           # 使用默认版本 0.18.0
-#   ./scripts/build-release.sh 0.19.0    # 指定版本号
+#   ./scripts/build-release.sh
+#
+# 说明:
+#   - v0.43.15 起，发布版本号以 git tag 为单一事实来源（详见 DEPLOYMENT.md）
+#   - 本脚本会从当前 HEAD tag 解析版本并注入 MARKETING_VERSION/CURRENT_PROJECT_VERSION
 
 set -e
 
@@ -20,17 +23,26 @@ BLUE='\033[0;34m'
 NC='\033[0m'
 
 # 配置
-VERSION="${1:-0.18.0}"
 APP_NAME="Scopy"
 BUILD_DIR=".build/Release"
 DMG_DIR=".build/dmg"
+
+TAG_ON_HEAD="$(git tag --points-at HEAD --list 'v[0-9]*' --sort=v:refname | grep -v '^v0\\.18\\.' | tail -n 1 || true)"
+if [[ -z "${TAG_ON_HEAD}" ]]; then
+    echo -e "${RED}✗ 当前 HEAD 没有可用的 release tag（vX.Y.Z）${NC}"
+    echo -e "${YELLOW}  建议：make tag-release && git push --follow-tags origin main${NC}"
+    exit 1
+fi
+
+VERSION="${TAG_ON_HEAD#v}"
+VERSION_ARGS="$(bash scripts/version.sh --xcodebuild-args 2>/dev/null || true)"
 DMG_NAME="${APP_NAME}-${VERSION}.dmg"
 
 echo -e "${BLUE}================================================${NC}"
 echo -e "${BLUE}   Scopy Release 构建脚本${NC}"
 echo -e "${BLUE}================================================${NC}"
 echo ""
-echo -e "版本: ${YELLOW}${VERSION}${NC}"
+echo -e "版本: ${YELLOW}${TAG_ON_HEAD}${NC}"
 echo -e "输出: ${YELLOW}.build/${DMG_NAME}${NC}"
 echo ""
 
@@ -45,10 +57,10 @@ echo -e "${GREEN}✓ 项目生成完成${NC}"
 
 # Step 2: 构建 Release
 echo -e "${BLUE}[2/5]${NC} 构建 Release 版本..."
-if ! xcodebuild -scheme Scopy -configuration Release build > /dev/null 2>&1; then
+if ! xcodebuild -scheme Scopy -configuration Release build ${VERSION_ARGS} > /dev/null 2>&1; then
     echo -e "${RED}✗ 构建失败${NC}"
     echo "    运行以下命令查看详情:"
-    echo "    xcodebuild -scheme Scopy -configuration Release build"
+    echo "    xcodebuild -scheme Scopy -configuration Release build ${VERSION_ARGS}"
     exit 1
 fi
 echo -e "${GREEN}✓ 构建成功${NC}"
@@ -102,7 +114,7 @@ echo -e "📊 文件大小: ${YELLOW}$(du -h ".build/${DMG_NAME}" | cut -f1)${NC
 echo -e "🔐 SHA256:   ${YELLOW}${SHA256}${NC}"
 echo ""
 echo -e "下一步:"
-echo -e "  1. 在 GitHub 创建 Release (tag: v${VERSION})"
+echo -e "  1. 在 GitHub 创建 Release (tag: ${TAG_ON_HEAD})"
 echo -e "  2. 上传 .build/${DMG_NAME}"
 echo -e "  3. 更新 homebrew-scopy/Casks/scopy.rb 中的 sha256"
 echo ""

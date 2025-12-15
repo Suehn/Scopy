@@ -18,8 +18,10 @@
 ### 发布流程（推荐）
 
 1. 合入版本提交（含版本文档、索引、CHANGELOG、profile；如涉及部署/性能，也更新本文件并写明环境与具体数值）。
-2. 创建 tag：`git tag -a vX.Y.Z -m "Release vX.Y.Z <title>"`
-3. 推送：`git push origin main` + `git push origin vX.Y.Z`（或 `git push --tags`）
+2. 创建 tag（推荐用脚本，版本来源 `doc/implemented-doc/README.md`）：`make tag-release`
+3. 推送（确保 tag 一并推送）：
+   - 一次性：`make push-release`
+   - 或手动：`git push origin main` + `git push origin vX.Y.Z`
 4. GitHub Actions `Build and Release` 从 tag 构建 DMG 并生成 `.sha256`；Cask 更新以 PR 形式提交（不再自动 push main）。
 
 **CI 环境**（GitHub Actions）：

@@ -2,6 +2,7 @@
 # 符合 v0.md 的构建和测试流程
 
 .PHONY: all setup build run clean xcode test test-unit test-perf test-tsan test-strict coverage benchmark test-flow test-flow-quick health-check
+.PHONY: tag-release push-release
 
 VERSION_ARGS := $(shell bash scripts/version.sh --xcodebuild-args 2>/dev/null)
 
@@ -234,10 +235,22 @@ help:
 	@echo "  make lint         - Lint code (requires swiftlint)"
 	@echo "  make stats        - Show project statistics"
 	@echo ""
+	@echo "Release:"
+	@echo "  make tag-release  - Tag HEAD from implemented-doc index"
+	@echo "  make push-release - Push main + current tag"
+	@echo ""
 	@echo "Requirements:"
 	@echo "  - Xcode 15.0+"
 	@echo "  - macOS 14.0+"
 	@echo "  - Homebrew (for xcodegen installation)"
+
+# =================== Release Helpers ===================
+
+tag-release:
+	@bash scripts/release/tag-from-doc.sh
+
+push-release:
+	@bash scripts/release/push-main.sh
 	@echo ""
 	@echo "Performance Targets (v0.md):"
 	@echo "  - Search ≤5k items: P95 ≤ 50ms"

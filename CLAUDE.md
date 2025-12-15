@@ -72,6 +72,7 @@ DEPLOYMENT.md 中的性能测试必须包含:
 - **版本号来源**：仅允许来自 git tag（例如 `v0.43.14`），禁止用 commit count 自动生成版本（历史遗留 tag 例：`v0.18.*` 不再作为发布口径）。
 - **构建注入**：本地与 CI 构建需要注入 `MARKETING_VERSION` / `CURRENT_PROJECT_VERSION`（统一入口 `scripts/version.sh`）。
 - **CI 行为**：GitHub Actions `Build and Release` 只从 tag 构建并产出 DMG；Cask 更新通过 PR 合入，workflow 不直接 push main。
+- **推送建议**：发布前 `make tag-release`；推送用 `make push-release`（会 push main + 当前 tag）。
 
 ---
 
