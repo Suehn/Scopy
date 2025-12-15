@@ -5,6 +5,27 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [v0.43.28] - 2025-12-16
+
+### UX/Preview：常见 LaTeX 文档结构（itemize/enumerate/quote/paragraph/label）转 Markdown
+
+- **文档结构转换**：
+  - `\\begin{itemize}/\\item/\\end{itemize}` → Markdown bullet list
+  - `\\begin{enumerate}/\\item/\\end{enumerate}` → Markdown ordered list
+  - `\\begin{quote}...\\end{quote}` → Markdown blockquote
+  - `\\paragraph/\\subparagraph` → Markdown heading
+  - `\\label{...}` → 移除（减少预览噪声）
+- **内联文本命令**：`\\textbf{...}`/`\\emph{...}`/`\\textit{...}` 映射到 Markdown（在 math placeholder 保护之后执行，避免破坏公式）
+- **换行兼容**：归一化 CRLF 与 `U+2028/U+2029` 行分隔符为 `\\n`，提升从 PDF/Word 拷贝时的稳定性
+- **回归测试**：新增论文式片段用例，覆盖 `\\section + \\label`、`itemize/enumerate/quote` 与内联 `\\textbf/\\emph` 的转换
+
+### 修改文件
+
+- `Scopy/Views/History/LaTeXDocumentNormalizer.swift`
+- `Scopy/Views/History/LaTeXInlineTextNormalizer.swift`
+- `Scopy/Views/History/MarkdownHTMLRenderer.swift`
+- `ScopyTests/MarkdownMathRenderingTests.swift`
+
 ## [v0.43.27] - 2025-12-16
 
 ### Refactor/Preview：预览渲染实现收敛（环境 SSOT + 轻量工具复用）+ KaTeX 语法回归测试

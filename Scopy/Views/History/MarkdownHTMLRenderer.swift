@@ -5,16 +5,17 @@ enum MarkdownHTMLRenderer {
         let latexNormalized = LaTeXDocumentNormalizer.normalize(markdown)
         let normalizedMarkdown = MathNormalizer.wrapLooseLaTeX(latexNormalized)
         let protected = MathProtector.protectMath(in: normalizedMarkdown)
+        let inlineNormalizedMarkdown = LaTeXInlineTextNormalizer.normalize(protected.markdown)
         let hasMath = MarkdownDetector.containsMath(normalizedMarkdown)
 
         let fallbackText = MathProtector.restoreMath(
-            in: protected.markdown,
+            in: inlineNormalizedMarkdown,
             placeholders: protected.placeholders,
             escape: { $0 }
         )
 
         return htmlDocument(
-            markdown: protected.markdown,
+            markdown: inlineNormalizedMarkdown,
             placeholders: protected.placeholders,
             enableMath: hasMath,
             fallbackText: fallbackText

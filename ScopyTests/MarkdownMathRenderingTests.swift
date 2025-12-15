@@ -2,6 +2,34 @@ import XCTest
 import Down
 
 final class MarkdownMathRenderingTests: XCTestCase {
+    func testLaTeXDocumentCommandsAreNormalizedForMarkdownPreview() {
+        let input = """
+        \\section{本文研究内容与主要创新点}\u{2028}\\label{sec:contribution}
+        \\begin{itemize}[leftmargin=1cm]
+        \\item \\textbf{知识内容层（What to distill）}：内容
+        \\end{itemize}
+        \\begin{quote}
+        在不改变线上统一部署的 ID-only MLPRec 架构的前提下。
+        \\end{quote}
+        \\begin{enumerate}[leftmargin=1cm]
+        \\item \\emph{统一建模}：内容
+        \\end{enumerate}
+        """
+
+        let doc = LaTeXDocumentNormalizer.normalize(input)
+        XCTAssertTrue(doc.contains("# 本文研究内容与主要创新点"))
+        XCTAssertFalse(doc.contains("\\label{"))
+        XCTAssertFalse(doc.contains("\\begin{itemize}"))
+        XCTAssertTrue(doc.contains("- \\textbf{知识内容层（What to distill）}：内容"))
+        XCTAssertTrue(doc.contains("> 在不改变线上统一部署的 ID-only MLPRec 架构的前提下。"))
+        XCTAssertTrue(doc.contains("1. \\emph{统一建模}：内容"))
+
+        let normalizedMarkdown = MathNormalizer.wrapLooseLaTeX(doc)
+        let protected = MathProtector.protectMath(in: normalizedMarkdown)
+        let inline = LaTeXInlineTextNormalizer.normalize(protected.markdown)
+        XCTAssertTrue(inline.contains("- **知识内容层（What to distill）**：内容"))
+        XCTAssertTrue(inline.contains("1. *统一建模*：内容"))
+    }
     func testLooseParenMathWithoutDollarDelimitersIsWrapped() {
         let input = "设用户集合为 (\\mathcal{U}), 物品集合为 (\\mathcal{I})."
 
