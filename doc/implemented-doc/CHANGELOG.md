@@ -5,6 +5,13 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [v0.44.fix18] - 2025-12-16
+
+### UX/Settings：卡片与背景更一体（仅前端视觉，不改变设置逻辑）
+
+- **移除“黑色卡片底色”**：Settings 分组卡片改为与窗口背景一致的底色，仅保留更轻的分隔线/边框，避免深色模式下出现“黑框”割裂感。
+- **一致性**：General/Clipboard/Storage 等页面与 About 页视觉风格统一，整体更接近 macOS Ventura+ System Settings 的“内容面板一体化”观感。
+
 ## [v0.44.fix17] - 2025-12-16
 
 ### UX/Settings：对齐 macOS Ventura+ 系统设置风格（仅前端重排，不改变设置逻辑）

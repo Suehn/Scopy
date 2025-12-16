@@ -62,11 +62,11 @@ struct SettingsCard<Content: View>: View {
         VStack(alignment: .leading, spacing: 0) {
             content()
         }
-        .background(ScopyColors.secondaryBackground)
+        .background(ScopyColors.background)
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(ScopyColors.border.opacity(ScopySize.Opacity.light), lineWidth: ScopySize.Stroke.thin)
+                .stroke(ScopyColors.separator.opacity(ScopySize.Opacity.light), lineWidth: ScopySize.Stroke.thin)
         )
     }
 }
