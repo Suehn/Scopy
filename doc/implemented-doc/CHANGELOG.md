@@ -5,6 +5,14 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [v0.44.fix14] - 2025-12-16
+
+### Fix/Dedup：去重稳定性修复（不改变用户可见内容）
+
+- **RTF/HTML 去重改为基于标准化主文本**：`contentHash` 对 `rtf/html` 不再使用原始 payload 计算（其内部常含可变 metadata，导致“看起来一样但 hash 不同”而重复入库），改为基于 `plainText` 计算以满足 v0.md 3.2 的文本去重精度要求。
+- **文本标准化补强（仍属于“统一换行/去首尾空白”范畴）**：新增对 Unicode 行分隔符（U+2028/U+2029/U+0085）、NBSP（U+00A0）、BOM（U+FEFF）的归一化，避免 PDF/网页复制导致的“肉眼一致但 hash 不同”。
+- **回归测试**：新增 RTF/HTML payload 不同但主文本相同的 hash 一致性测试，以及 Unicode 换行/NBSP/BOM 标准化测试。
+
 ## [v0.44.fix13] - 2025-12-16
 
 ### Fix/Preview：修复嵌套数学段占位符泄漏（语义不变）

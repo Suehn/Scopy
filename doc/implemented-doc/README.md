@@ -8,8 +8,8 @@
 
 | 项目 | 状态 |
 |------|------|
-| **当前版本** | v0.44.fix13 |
-| **测试状态** | 单元测试通过（`xcodebuild test -scheme Scopy -destination 'platform=macOS' -only-testing:ScopyTests`: Executed 232 tests, 7 skipped） |
+| **当前版本** | v0.44.fix14 |
+| **测试状态** | 单元测试通过（`xcodebuild test -scheme Scopy -destination 'platform=macOS' -only-testing:ScopyTests`: Executed 236 tests, 7 skipped） |
 | **构建状态** | Debug ✅ |
 | **部署位置** | /Applications/Scopy.app |
 | **最后更新** | 2025-12-16 |
@@ -24,6 +24,7 @@
 
 | 版本 | 日期 | 主要内容 | 状态 |
 |------|------|----------|------|
+| [v0.44.fix14](./v0.44.fix14.md) | 2025-12-16 | Fix/Dedup：RTF/HTML 去重改为基于标准化主文本（避免 payload 波动导致重复）+ 文本标准化补强 + 回归测试 | ✅ |
 | [v0.44.fix13](./v0.44.fix13.md) | 2025-12-16 | Fix/Preview：修复 `$...$` 内含 `\\begin{cases}...\\end{cases}` 导致占位符泄漏（SCOPYMATHPLACEHOLDER）+ 回归测试 | ✅ |
 | [v0.44.fix12](./v0.44.fix12.md) | 2025-12-16 | Fix/Preview：更完善的 “loose LaTeX” 支持（函数命令吸收参数）+ 扩展环境（matrix/alignat）+ 题目 21 回归测试 | ✅ |
 | [v0.44.fix11](./v0.44.fix11.md) | 2025-12-16 | UX/Preview：恢复 Markdown 预览动态宽度（shrink-to-fit）+ WKWebView 滚动条 idle-hide 更可靠 | ✅ |

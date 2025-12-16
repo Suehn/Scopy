@@ -603,9 +603,31 @@ public final class ClipboardMonitor {
             return precomputed
         }
         // 否则计算 SHA256
-        if let data = rawData.rawData {
-            return computeHash(data)
-        } else {
+        //
+        // v0.md 3.2：文本去重以“标准化后的主文本”为准（去首尾空白、统一换行）。
+        // - text / rtf / html：以 plainText 计算 hash，避免 RTF/HTML payload 中的可变 metadata 造成“看起来一样但 hash 不同”。
+        // - image：以二进制数据计算 hash。
+        // - file：以路径文本计算 hash（序列化 URL 数据可能含可变字段）。
+        switch rawData.type {
+        case .text, .rtf, .html:
+            if !rawData.plainText.isEmpty {
+                return computeHash(rawData.plainText)
+            }
+            if let data = rawData.rawData {
+                return computeHash(data)
+            }
+            return computeHash(rawData.plainText)
+        case .file:
+            return computeHash(rawData.plainText)
+        case .image:
+            if let data = rawData.rawData {
+                return computeHash(data)
+            }
+            return computeHash(rawData.plainText)
+        case .other:
+            if let data = rawData.rawData {
+                return computeHash(data)
+            }
             return computeHash(rawData.plainText)
         }
     }
@@ -652,7 +674,8 @@ public final class ClipboardMonitor {
         // 3. RTF
         if let rtfData = pasteboard.data(forType: .rtf) {
             let plainText = normalizeText(pasteboard.string(forType: .string) ?? extractPlainTextFromRTF(rtfData) ?? "")
-            let hash = computeHash(rtfData)
+            // Dedup by normalized main text (v0.md 3.2). RTF payload may vary across copies even when the text is identical.
+            let hash = plainText.isEmpty ? computeHash(rtfData) : computeHash(plainText)
             return ClipboardContent(
                 type: .rtf,
                 plainText: plainText,
@@ -666,7 +689,8 @@ public final class ClipboardMonitor {
         // 4. HTML
         if let htmlData = pasteboard.data(forType: .html) {
             let plainText = normalizeText(pasteboard.string(forType: .string) ?? extractPlainTextFromHTML(htmlData) ?? "")
-            let hash = computeHash(htmlData)
+            // Dedup by normalized main text (v0.md 3.2). HTML payload may include volatile metadata.
+            let hash = plainText.isEmpty ? computeHash(htmlData) : computeHash(plainText)
             return ClipboardContent(
                 type: .html,
                 plainText: plainText,
@@ -703,6 +727,13 @@ public final class ClipboardMonitor {
     /// Normalize text for consistent hashing (v0.md 3.2: 去首尾空白、统一换行)
     private func normalizeText(_ text: String) -> String {
         text
+            // Normalize common Unicode line separators to '\n' for stable hashing (still "统一换行").
+            .replacingOccurrences(of: "\u{2028}", with: "\n") // LINE SEPARATOR
+            .replacingOccurrences(of: "\u{2029}", with: "\n") // PARAGRAPH SEPARATOR
+            .replacingOccurrences(of: "\u{0085}", with: "\n") // NEXT LINE
+            // Normalize NBSP/BOM that commonly appear in PDF/web copies.
+            .replacingOccurrences(of: "\u{00A0}", with: " ")  // NO-BREAK SPACE
+            .replacingOccurrences(of: "\u{FEFF}", with: "")   // BOM / ZERO WIDTH NO-BREAK SPACE
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .replacingOccurrences(of: "\r\n", with: "\n")
             .replacingOccurrences(of: "\r", with: "\n")

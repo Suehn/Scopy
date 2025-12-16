@@ -217,6 +217,89 @@ final class ClipboardMonitorTests: XCTestCase {
         XCTAssertEqual(content1?.contentHash, content2?.contentHash)
     }
 
+    func testUnicodeLineSeparatorNormalization() {
+        // Unicode line separator
+        pasteboard.clearContents()
+        pasteboard.setString("line1\u{2028}line2", forType: .string)
+        let content1 = monitor.readCurrentClipboard()
+
+        // Unix line endings
+        pasteboard.clearContents()
+        pasteboard.setString("line1\nline2", forType: .string)
+        let content2 = monitor.readCurrentClipboard()
+
+        XCTAssertEqual(content1?.contentHash, content2?.contentHash)
+    }
+
+    func testNBSPAndBOMNormalization() {
+        pasteboard.clearContents()
+        pasteboard.setString("\u{FEFF}\u{00A0}Normalized\u{00A0}\u{FEFF}", forType: .string)
+        let content1 = monitor.readCurrentClipboard()
+
+        pasteboard.clearContents()
+        pasteboard.setString("Normalized", forType: .string)
+        let content2 = monitor.readCurrentClipboard()
+
+        XCTAssertEqual(content1?.contentHash, content2?.contentHash)
+    }
+
+    func testRTFContentHashUsesNormalizedPlainTextNotRawPayload() throws {
+        let plainText = "Duplicate rich text"
+
+        let a1 = NSMutableAttributedString(string: plainText)
+        a1.addAttribute(.font, value: NSFont.systemFont(ofSize: 12), range: NSRange(location: 0, length: a1.length))
+        let rtf1 = try a1.data(from: NSRange(location: 0, length: a1.length), documentAttributes: [
+            .documentType: NSAttributedString.DocumentType.rtf
+        ])
+
+        let a2 = NSMutableAttributedString(string: plainText)
+        a2.addAttribute(.font, value: NSFont.boldSystemFont(ofSize: 14), range: NSRange(location: 0, length: a2.length))
+        let rtf2 = try a2.data(from: NSRange(location: 0, length: a2.length), documentAttributes: [
+            .documentType: NSAttributedString.DocumentType.rtf
+        ])
+
+        XCTAssertNotEqual(rtf1, rtf2)
+
+        pasteboard.clearContents()
+        pasteboard.setString(plainText, forType: .string)
+        pasteboard.setData(rtf1, forType: .rtf)
+        let content1 = monitor.readCurrentClipboard()
+
+        pasteboard.clearContents()
+        pasteboard.setString(plainText, forType: .string)
+        pasteboard.setData(rtf2, forType: .rtf)
+        let content2 = monitor.readCurrentClipboard()
+
+        XCTAssertEqual(content1?.type, .rtf)
+        XCTAssertEqual(content2?.type, .rtf)
+        XCTAssertEqual(content1?.plainText, plainText)
+        XCTAssertEqual(content2?.plainText, plainText)
+        XCTAssertEqual(content1?.contentHash, content2?.contentHash)
+    }
+
+    func testHTMLContentHashUsesNormalizedPlainTextNotRawPayload() {
+        let plainText = "Hello <World>"
+        let html1 = Data("<html><body><b>Hello <World></b></body></html>".utf8)
+        let html2 = Data("<div style=\"color:red\">Hello <World></div>".utf8)
+        XCTAssertNotEqual(html1, html2)
+
+        pasteboard.clearContents()
+        pasteboard.setString(plainText, forType: .string)
+        pasteboard.setData(html1, forType: .html)
+        let content1 = monitor.readCurrentClipboard()
+
+        pasteboard.clearContents()
+        pasteboard.setString(plainText, forType: .string)
+        pasteboard.setData(html2, forType: .html)
+        let content2 = monitor.readCurrentClipboard()
+
+        XCTAssertEqual(content1?.type, .html)
+        XCTAssertEqual(content2?.type, .html)
+        XCTAssertEqual(content1?.plainText, plainText)
+        XCTAssertEqual(content2?.plainText, plainText)
+        XCTAssertEqual(content1?.contentHash, content2?.contentHash)
+    }
+
     // MARK: - Size Calculation Tests
 
     func testSizeCalculation() {
