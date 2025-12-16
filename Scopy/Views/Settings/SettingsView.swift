@@ -109,6 +109,7 @@ struct SettingsView: View {
                     AboutSettingsPage()
                 }
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .background(ScopyColors.background)
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 SettingsActionBar(

@@ -5,6 +5,12 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [v0.44.fix19] - 2025-12-16
+
+### UX/Settings：修复 Detail 背景两种颜色（仅前端视觉，不改变设置逻辑）
+
+- **统一 Detail 背景**：Detail 列的内容视图强制填满可用空间并统一使用 `windowBackgroundColor`，避免部分页面出现背景“两种颜色”的割裂感。
+
 ## [v0.44.fix18] - 2025-12-16
 
 ### UX/Settings：卡片与背景更一体（仅前端视觉，不改变设置逻辑）

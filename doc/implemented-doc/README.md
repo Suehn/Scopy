@@ -8,7 +8,7 @@
 
 | 项目 | 状态 |
 |------|------|
-| **当前版本** | v0.44.fix18 |
+| **当前版本** | v0.44.fix19 |
 | **测试状态** | 单元测试通过（`make test-unit`: Executed 201 tests, 1 skipped） |
 | **构建状态** | Debug ✅ |
 | **部署位置** | /Applications/Scopy.app |
@@ -24,6 +24,7 @@
 
 | 版本 | 日期 | 主要内容 | 状态 |
 |------|------|----------|------|
+| [v0.44.fix19](./v0.44.fix19.md) | 2025-12-16 | UX/Settings：修复 Detail 背景出现“两种颜色”的割裂感（填满容器并统一背景） | ✅ |
 | [v0.44.fix18](./v0.44.fix18.md) | 2025-12-16 | UX/Settings：移除“黑色卡片底色”，卡片与背景更一体（对齐 About 页风格） | ✅ |
 | [v0.44.fix17](./v0.44.fix17.md) | 2025-12-16 | UX/Settings：对齐 macOS Ventura+ 系统设置风格（页面 Header+副标题、卡片式分组、footer 用 safeAreaInset、侧边栏 subtitle 与配色优化） | ✅ |
 | [v0.44.fix16](./v0.44.fix16.md) | 2025-12-16 | Fix/Quality：性能指标展示修复（load 不再被误判为 N/A）+ 清理缩略图并发卫生（避免 MainActor capture 警告） | ✅ |
