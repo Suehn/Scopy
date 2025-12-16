@@ -6,14 +6,31 @@ enum MathNormalizer {
         "alpha", "beta", "gamma", "delta", "epsilon", "zeta", "eta", "theta", "iota", "kappa", "lambda", "mu", "nu", "xi", "pi", "rho", "sigma", "tau", "upsilon", "phi", "chi", "psi", "omega",
         "Gamma", "Delta", "Theta", "Lambda", "Xi", "Pi", "Sigma", "Upsilon", "Phi", "Psi", "Omega",
         "mathcal", "mathbb", "mathrm", "mathbf", "mathit", "mathsf", "mathtt",
+        "mathscr", "mathfrak", "operatorname",
         "text", "frac", "dfrac", "tfrac", "sqrt",
+        "ln", "log", "exp",
+        "sin", "cos", "tan", "cot", "sec", "csc",
+        "arcsin", "arccos", "arctan",
+        "sinh", "cosh", "tanh", "coth",
         "sum", "prod", "int", "iint", "iiint",
+        "lim", "limsup", "liminf",
+        "inf", "sup", "min", "max",
         "in", "notin", "mid", "cup", "cap", "setminus", "subset", "subseteq", "supset", "supseteq",
         "times", "cdot", "cdots", "ldots",
-        "le", "leq", "ge", "geq", "neq", "approx", "sim",
+        "le", "leq", "leqslant", "ge", "geq", "geqslant", "neq", "approx", "sim",
         "to", "mapsto", "leftarrow", "rightarrow", "leftrightarrow", "Leftarrow", "Rightarrow", "Leftrightarrow",
         "land", "lor", "neg", "forall", "exists",
+        "infty",
         // Intentionally exclude \\begin/\\end: they are handled by KaTeX environment delimiters + MathProtector.
+    ]
+
+    private static let commandsAcceptingFollowingAtom: Set<String> = [
+        "ln", "log", "exp",
+        "sin", "cos", "tan", "cot", "sec", "csc",
+        "arcsin", "arccos", "arctan",
+        "sinh", "cosh", "tanh", "coth",
+        "lim", "limsup", "liminf",
+        "inf", "sup", "min", "max"
     ]
 
     /// Wraps "loose LaTeX" fragments into KaTeX-friendly delimiters.
@@ -179,6 +196,11 @@ enum MathNormalizer {
         if text.contains("\\(") || text.contains("\\[") { return text }
 
         let hasAnyDollar = text.contains("$")
+        // If the text contains `$$`, it may be a display-math delimiter *or* a PDF extraction artifact
+        // (`$...$$...$`). Be conservative and skip standalone wrapping in this case to avoid creating
+        // confusing `$$$...` sequences before the protection/disambiguation phase.
+        let allowStandaloneCommandWrap = !hasAnyDollar
+            || (!text.contains("$$") && dollarMathDelimitersAppearBalanced(in: text))
         return transformOutsideDollarMath(text) { chunk in
             // 1) First, wrap `\left...\right` runs as one math segment to avoid later transforms
             // accidentally splitting them (which makes KaTeX fail).
@@ -194,10 +216,9 @@ enum MathNormalizer {
                 t = transformOutsideDollarMath(t) { wrapBracketedMath($0, open: "（", close: "）", maxInnerLength: 320) }
                 t = transformOutsideDollarMath(t) { wrapBracketedMath($0, open: "[", close: "]", maxInnerLength: 320) }
                 t = transformOutsideDollarMath(t) { wrapBracketedMath($0, open: "【", close: "】", maxInnerLength: 320) }
-                // Be conservative when the original input already contains `$...$`:
-                // malformed PDF extraction often has broken `$` boundaries, and wrapping standalone commands
-                // can easily create `$$$...` artifacts that then confuse the protection phase.
-                if !hasAnyDollar {
+                // Wrap standalone TeX commands outside `$...$` as a best-effort fallback for "loose LaTeX" snippets.
+                // If the input has unbalanced `$`, skip to avoid creating `$$$...` artifacts.
+                if allowStandaloneCommandWrap {
                     t = transformOutsideDollarMath(t) { wrapStandaloneCommands($0, maxLength: 160) }
                 }
                 return t
@@ -205,6 +226,54 @@ enum MathNormalizer {
 
             return s
         }
+    }
+
+    private static func dollarMathDelimitersAppearBalanced(in text: String) -> Bool {
+        guard text.contains("$") else { return true }
+
+        var inMath = false
+        var delimiterIsDouble = false
+
+        var i = text.startIndex
+        while i < text.endIndex {
+            if text[i] == "$" {
+                if i > text.startIndex, text[text.index(before: i)] == "\\" {
+                    i = text.index(after: i)
+                    continue
+                }
+
+                if inMath {
+                    if delimiterIsDouble {
+                        let next = text.index(after: i)
+                        if next < text.endIndex, text[next] == "$" {
+                            inMath = false
+                            delimiterIsDouble = false
+                            i = text.index(after: next)
+                            continue
+                        }
+                    } else {
+                        inMath = false
+                        i = text.index(after: i)
+                        continue
+                    }
+                } else {
+                    let next = text.index(after: i)
+                    if next < text.endIndex, text[next] == "$" {
+                        inMath = true
+                        delimiterIsDouble = true
+                        i = text.index(after: next)
+                        continue
+                    }
+                    inMath = true
+                    delimiterIsDouble = false
+                    i = text.index(after: i)
+                    continue
+                }
+            }
+            i = text.index(after: i)
+        }
+
+        return !inMath
     }
 
     private static func transformOutsideDollarMath(_ text: String, transform: (String) -> String) -> String {
@@ -532,6 +601,13 @@ enum MathNormalizer {
                 break
             }
 
+            if commandsAcceptingFollowingAtom.contains(name) {
+                if let extended = consumeFollowingAtom(in: text, from: end, maxLength: maxLength - consumed) {
+                    consumed += text.distance(from: end, to: extended)
+                    end = extended
+                }
+            }
+
             let expr = String(text[i..<end])
             if shouldWrapAsMath(expr) {
                 result.append("$")
@@ -544,6 +620,97 @@ enum MathNormalizer {
         }
 
         return result
+    }
+
+    private static func consumeFollowingAtom(in text: String, from index: String.Index, maxLength: Int) -> String.Index? {
+        guard maxLength > 0 else { return nil }
+
+        var i = index
+        var scanned = 0
+        while i < text.endIndex, scanned < maxLength, text[i].isWhitespace, text[i] != "\n" {
+            i = text.index(after: i)
+            scanned += 1
+        }
+        guard i < text.endIndex, scanned < maxLength else { return nil }
+
+        let start = i
+        let ch = text[i]
+
+        if ch == "{" {
+            return consumeBalancedBraces(in: text, from: start, maxLength: maxLength)
+        }
+
+        if ch == "(" {
+            return consumeBalancedParentheses(in: text, from: start, maxLength: maxLength)
+        }
+
+        if ch == "\\" {
+            // Another TeX command as the argument.
+            var j = text.index(after: i)
+            var letters = 0
+            while j < text.endIndex, letters < 32, text[j].isLetter {
+                j = text.index(after: j)
+                letters += 1
+            }
+            if letters == 0 {
+                return nil
+            }
+            // Optionally consume a single braced group: \alpha{...} (rare but safe).
+            if j < text.endIndex, text[j] == "{" {
+                return consumeBalancedBraces(in: text, from: j, maxLength: max(0, maxLength - text.distance(from: start, to: j)))
+            }
+            return j
+        }
+
+        // Variable/number token (e.g. x, x0, t/a); keep conservative.
+        var j = i
+        while j < text.endIndex, scanned < maxLength {
+            let c = text[j]
+            if c.isLetter || c.isNumber || c == "_" || c == "." {
+                j = text.index(after: j)
+                scanned += 1
+                continue
+            }
+            break
+        }
+
+        return j > start ? j : nil
+    }
+
+    private static func consumeBalancedBraces(in text: String, from start: String.Index, maxLength: Int) -> String.Index? {
+        guard start < text.endIndex, text[start] == "{" else { return nil }
+        var k = text.index(after: start)
+        var depth = 1
+        var local = 0
+        while k < text.endIndex, local < maxLength {
+            let c = text[k]
+            if c == "{" { depth += 1 }
+            if c == "}" {
+                depth -= 1
+                if depth == 0 { return text.index(after: k) }
+            }
+            local += 1
+            k = text.index(after: k)
+        }
+        return nil
+    }
+
+    private static func consumeBalancedParentheses(in text: String, from start: String.Index, maxLength: Int) -> String.Index? {
+        guard start < text.endIndex, text[start] == "(" else { return nil }
+        var k = text.index(after: start)
+        var depth = 1
+        var local = 0
+        while k < text.endIndex, local < maxLength {
+            let c = text[k]
+            if c == "(" { depth += 1 }
+            if c == ")" {
+                depth -= 1
+                if depth == 0 { return text.index(after: k) }
+            }
+            local += 1
+            k = text.index(after: k)
+        }
+        return nil
     }
 
     private static func shouldWrapAsMath(_ s: String) -> Bool {

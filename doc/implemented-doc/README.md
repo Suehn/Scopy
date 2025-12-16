@@ -8,7 +8,7 @@
 
 | 项目 | 状态 |
 |------|------|
-| **当前版本** | v0.44.fix11 |
+| **当前版本** | v0.44.fix12 |
 | **测试状态** | 单元测试通过（`xcodebuild test -scheme Scopy -destination 'platform=macOS' -only-testing:ScopyTests`: Executed 229 tests, 7 skipped） |
 | **构建状态** | Debug ✅ |
 | **部署位置** | /Applications/Scopy.app |
@@ -24,6 +24,7 @@
 
 | 版本 | 日期 | 主要内容 | 状态 |
 |------|------|----------|------|
+| [v0.44.fix12](./v0.44.fix12.md) | 2025-12-16 | Fix/Preview：更完善的 “loose LaTeX” 支持（函数命令吸收参数）+ 扩展环境（matrix/alignat）+ 题目 21 回归测试 | ✅ |
 | [v0.44.fix11](./v0.44.fix11.md) | 2025-12-16 | UX/Preview：恢复 Markdown 预览动态宽度（shrink-to-fit）+ WKWebView 滚动条 idle-hide 更可靠 | ✅ |
 | [v0.44.fix10](./v0.44.fix10.md) | 2025-12-16 | UX/Preview：消除 Markdown/LaTeX 不必要横向滚动条 + 滚动条“仅滚动时显示”更可靠 | ✅ |
 | [v0.44.fix9](./v0.44.fix9.md) | 2025-12-16 | UX/Preview：hover Markdown/LaTeX 预览更宽（更少横向滚动）+ 滚动条仅滚动时显示 | ✅ |
@@ -421,6 +422,6 @@ v0.5-Phase5: CI/CD ░░░░░░░░░░░░░░░░░░░░�
 
 ---
 
-**最后更新**: 2025-12-15
+**最后更新**: 2025-12-16
 **维护者**: Codex CLI
-**最新完成**: v0.43.18（设置页视觉与排版再打磨）
+**最新完成**: v0.44.fix12（增强 “loose LaTeX” 渲染兼容性）

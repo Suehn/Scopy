@@ -134,6 +134,28 @@ final class KaTeXRenderToStringTests: XCTestCase {
         }
     }
 
+    func testKaTeXRenderToStringForExamQuestion21Snippet() throws {
+        let input = #"""
+        ### 第 21 题
+
+        已知 $a \in \mathbf{R}$， $f(x) = 2x - \ln x + a$.
+
+        (1) 求函数 $y = f(x)$ 的驻点；
+
+        (2) 设 $g(x) = \begin{cases} f(x), & x > 0 \\ g(x+1), & x < 0 \end{cases}$，若关于 $x$ 的方程 $g(x) + g(-x) = 0$ 在区间 $(-1, 0)$ 内有解，求 $a$ 的取值范围；
+
+        (3) 定义 $\text{sgn}(x) = \begin{cases} 1, & x > 0 \\ 0, & x = 0 \\ -1, & x < 0 \end{cases}$，设 $h(x) = 2x - (2x - f(x))\text{sgn}(2x - f(x))$， $h(x_0) = \frac{t}{a}$，若存在实数 $a$，使得 $\left\{ x \left| h(x) \ge \frac{t}{a} \right. \right\} \neq [x_0, +\infty)$，求实数 $t$ 的最小值.
+        """#
+
+        let segments = mathSegmentsForRender(markdown: input)
+        XCTAssertGreaterThanOrEqual(segments.count, 6)
+
+        let engine = try KaTeXEngine.shared()
+        for seg in segments {
+            XCTAssertNoThrow(try engine.renderToString(latex: seg.expression, displayMode: seg.display))
+        }
+    }
+
     // MARK: - Pipeline
 
     private struct Segment {

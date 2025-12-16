@@ -214,6 +214,12 @@ final class MarkdownMathRenderingTests: XCTestCase {
         XCTAssertTrue(html.contains("$\\mathcal{U}_u^{+}$"))
     }
 
+    func testStandaloneFunctionCommandIsWrappedEvenWhenOtherDollarMathExists() {
+        let input = "已知 $a \\in \\mathbf{R}$，则 \\ln x 为常见函数。"
+        let normalized = MathNormalizer.wrapLooseLaTeX(input)
+        XCTAssertTrue(normalized.contains("$\\ln x$"))
+    }
+
     func testBracketedDisplayMathBlocksAreNormalizedToDollarBlocks() {
         let input = """
         下面是一个 display block：

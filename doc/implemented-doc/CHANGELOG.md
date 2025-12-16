@@ -5,6 +5,20 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [v0.44.fix12] - 2025-12-16
+
+### Fix/Preview：更完善的 “loose LaTeX” 兼容（不改既有数学语义）
+
+- **更强的 loose LaTeX 包裹能力（语义等价）**：
+  - 扩充常见数学命令集合（`\\ln/\\log/\\sin/\\cos/\\infty/...`），提升“无 `$...$` 分隔符的 LaTeX 片段”被识别并包裹为 KaTeX 可渲染片段的概率。
+  - 对函数类命令（如 `\\ln x`、`\\sin x`）在包裹时支持吸收一个紧随其后的“原子参数”（变量/括号/花括号/下一条命令），避免只包裹命令本体导致的渲染碎片化。
+  - 保持对含 `$$` 的 PDF 抽取异常文本的保守策略，避免在保护/去歧义阶段之前制造 `$$$...` 之类的混乱分隔符序列。
+- **扩展 LaTeX 环境支持范围**：
+  - 额外支持 `matrix/pmatrix/bmatrix/...`、`alignat/alignedat` 等常见环境在 hover preview 中被保护并交由 KaTeX auto-render 渲染。
+- **回归测试补齐**：
+  - 新增“第 21 题”完整片段的 KaTeX render-to-string 回归测试，确保 `cases/sgn/集合表示` 等组合不会触发 KaTeX parse error。
+  - 新增 `\\ln x` 在同一行已存在 `$...$` 数学段时仍能被正确包裹的用例。
+
 ## [v0.44.fix11] - 2025-12-16
 
 ### UX/Preview：恢复 Markdown 预览动态宽度，并把 WKWebView 滚动条 idle-hide 做到“确实生效”

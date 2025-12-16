@@ -11,11 +11,15 @@ enum MathEnvironmentSupport {
     static let supportedEnvironmentNamesInOrder: [String] = [
         "equation", "equation*",
         "align", "align*",
+        "alignat", "alignat*",
+        "alignedat",
         "aligned",
         "cases",
         "gather", "gather*",
         "multline", "multline*",
-        "split"
+        "split",
+        // Matrix / array-like environments commonly used in math snippets.
+        "matrix", "pmatrix", "bmatrix", "Bmatrix", "vmatrix", "Vmatrix", "smallmatrix", "array"
     ]
     static let supportedEnvironmentNames: Set<String> = Set(supportedEnvironmentNamesInOrder)
 
@@ -25,6 +29,9 @@ enum MathEnvironmentSupport {
         .init(left: "\\begin{equation*}", right: "\\end{equation*}", display: true),
         .init(left: "\\begin{align}", right: "\\end{align}", display: true),
         .init(left: "\\begin{align*}", right: "\\end{align*}", display: true),
+        .init(left: "\\begin{alignat}", right: "\\end{alignat}", display: true),
+        .init(left: "\\begin{alignat*}", right: "\\end{alignat*}", display: true),
+        .init(left: "\\begin{alignedat}", right: "\\end{alignedat}", display: true),
         .init(left: "\\begin{aligned}", right: "\\end{aligned}", display: true),
         .init(left: "\\begin{cases}", right: "\\end{cases}", display: true),
         .init(left: "\\begin{gather}", right: "\\end{gather}", display: true),
@@ -32,6 +39,14 @@ enum MathEnvironmentSupport {
         .init(left: "\\begin{multline}", right: "\\end{multline}", display: true),
         .init(left: "\\begin{multline*}", right: "\\end{multline*}", display: true),
         .init(left: "\\begin{split}", right: "\\end{split}", display: true),
+        .init(left: "\\begin{matrix}", right: "\\end{matrix}", display: true),
+        .init(left: "\\begin{pmatrix}", right: "\\end{pmatrix}", display: true),
+        .init(left: "\\begin{bmatrix}", right: "\\end{bmatrix}", display: true),
+        .init(left: "\\begin{Bmatrix}", right: "\\end{Bmatrix}", display: true),
+        .init(left: "\\begin{vmatrix}", right: "\\end{vmatrix}", display: true),
+        .init(left: "\\begin{Vmatrix}", right: "\\end{Vmatrix}", display: true),
+        .init(left: "\\begin{smallmatrix}", right: "\\end{smallmatrix}", display: true),
+        .init(left: "\\begin{array}", right: "\\end{array}", display: true),
         // Dollar and bracket delimiters.
         .init(left: "$$", right: "$$", display: true),
         .init(left: "$", right: "$", display: false),
