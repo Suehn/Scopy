@@ -61,6 +61,18 @@
 - **测试结果**（Apple M3 24GB, macOS 15.7.2（24G325）, Xcode 16.3）：
   - `xcodebuild test -scheme Scopy -destination 'platform=macOS' -only-testing:ScopyTests`：Executed 220 tests, 7 skipped, 0 failures
 
+## 本次更新（v0.44.fix5）
+
+- **Perf/Search（长文/大库更稳）**：
+  - FTS query 统一收敛为“多词 AND + 特殊字符转义”，避免 phrase 语义导致的错失匹配与 `MATCH` 解析失败。
+  - fuzzy(Plus) 大候选集场景更早使用 FTS 预筛，降低万字长文导致候选集膨胀时的 CPU 峰值。
+  - SQLite 读写连接启用 `PRAGMA mmap_size = 268435456`（256MB），提升大库随机读取吞吐。
+- **性能实测**（`hw.model=Mac15,12`, 24GB；macOS 15.7.2（24G325）；Xcode 16.3（16E140）, Debug）：
+  - Disk 25k fuzzyPlus：cold start 710.20ms；P95 47.56ms（Samples: 60）
+  - Long-doc exact（40 docs, ~15840 chars）：P95 0.23ms（Samples: 20）
+- **测试结果**：
+  - `xcodebuild test -scheme Scopy -destination 'platform=macOS' -only-testing:ScopyTests -skip-testing:ScopyTests/IntegrationTests`：Executed 214 tests, 7 skipped, 0 failures
+
 ## 本次更新（v0.43.23）
 
 - **Fix/Preview（Markdown hover 预览：稳定性 + 表格 + 公式鲁棒性）**：

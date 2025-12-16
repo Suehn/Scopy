@@ -35,6 +35,17 @@ final class SearchServiceTests: XCTestCase {
         XCTAssertTrue(result.items.allSatisfy { $0.plainText.lowercased().contains("hello") })
     }
 
+    func testExactSearchSplitsWordsByDefault() async throws {
+        _ = try await storage.upsertItem(makeContent("Hello there World", type: .text))
+        _ = try await storage.upsertItem(makeContent("Hello World", type: .text))
+        await search.invalidateCache()
+
+        let result = try await search.search(request: SearchRequest(query: "Hello World", mode: .exact, limit: 50, offset: 0))
+        XCTAssertTrue(result.items.contains { $0.plainText.localizedCaseInsensitiveContains("Hello") })
+        XCTAssertTrue(result.items.contains { $0.plainText.localizedCaseInsensitiveContains("World") })
+        XCTAssertTrue(result.items.contains { $0.plainText.localizedCaseInsensitiveContains("Hello there World") })
+    }
+
     func testFuzzySearch() async throws {
         try await populateTestData()
 

@@ -5,6 +5,18 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [v0.44.fix5] - 2025-12-16
+
+### Perf/Search：FTS query 更鲁棒（多词 AND + 特殊字符不崩）+ 大库读取 mmap
+
+- **FTS 查询构造**：新增 `FTSQueryBuilder` 统一做 `*` 删除、`-`→空格、`"`→`""` 转义，并将多词 query 组合为 `AND`（避免整段 phrase 导致的错失匹配与解析失败）。
+- **fuzzy(Plus) 大候选集降载**：当候选集合较大且 query 为 ASCII 多词/较长时，更早使用 FTS 预筛，降低长文场景下的逐条扫描开销峰值。
+- **SQLite 读优化**：读写连接均启用 `PRAGMA mmap_size = 268435456`（256MB），提升大库随机读取吞吐（对性能无副作用的保守设置）。
+- **测试补齐**：
+  - `FTSQueryBuilderTests`：覆盖空白/多词/通配符/连字符用例。
+  - `SearchServiceTests`：覆盖多词 exact（`AND`）与特殊字符不崩溃用例。
+  - `PerformanceTests`：新增“长文 exact”轻量回归用例。
+
 ## [v0.44.fix3] - 2025-12-16
 
 ### Fix/Preview：Markdown/公式懒加载渐变更自然 + 高度更新更稳定（减少闪烁）

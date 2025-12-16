@@ -290,8 +290,10 @@ public actor SearchEngineImpl {
             }
         }
 
-        let query = escapeFTSQuery(request.query)
-        return try searchWithFTS(query: query, request: request)
+        guard let ftsQuery = FTSQueryBuilder.build(userQuery: request.query) else {
+            return try searchAllWithFilters(request: request)
+        }
+        return try searchWithFTS(query: ftsQuery, request: request)
     }
 
     private func searchFuzzy(request: SearchRequest) async throws -> SearchResult {
@@ -570,23 +572,13 @@ public actor SearchEngineImpl {
         if (mode == .fuzzy || mode == .fuzzyPlus),
            !request.forceFullFuzzy,
            request.offset == 0,
-           queryLower.count >= 3,
+           queryLower.count >= 4,
            queryLowerIsASCII,
-           candidateSlots.count >= 20_000 {
+           candidateSlots.count >= 6_000 {
             let desiredTopCount = max(0, request.offset + request.limit + 1)
             let prefilterLimit = min(20_000, max(5_000, desiredTopCount * 40))
-            let ftsQuery: String
-            if queryLower.contains(" ") {
-                let words = queryLower
-                    .split(whereSeparator: \.isWhitespace)
-                    .map(String.init)
-                    .filter { !$0.isEmpty }
-                ftsQuery = words.map(escapeFTSQuery).joined(separator: " AND ")
-            } else {
-                ftsQuery = escapeFTSQuery(queryLower)
-            }
-
-            if let ftsSlots = try? ftsPrefilterSlots(index: index, ftsQuery: ftsQuery, limit: prefilterLimit),
+            if let ftsQuery = FTSQueryBuilder.build(userQuery: queryLower),
+               let ftsSlots = try? ftsPrefilterSlots(index: index, ftsQuery: ftsQuery, limit: prefilterLimit),
                !ftsSlots.isEmpty {
                 let pinnedSlots = candidateSlots.filter { slot in
                     guard slot < index.items.count, let item = index.items[slot] else { return false }
@@ -829,16 +821,6 @@ public actor SearchEngineImpl {
         return matchedCount * 10 - span - gapPenalty
     }
 
-    private func escapeFTSQuery(_ query: String) -> String {
-        var escaped = query
-            .replacingOccurrences(of: "\"", with: "\"\"")
-            .replacingOccurrences(of: "*", with: "")
-            .replacingOccurrences(of: "-", with: " ")
-
-        escaped = "\"\(escaped)\""
-        return escaped
-    }
-
     // MARK: - Timeout
 
     private func withTimeout<T: Sendable>(
@@ -886,6 +868,7 @@ public actor SearchEngineImpl {
             try conn.execute("PRAGMA busy_timeout = 500")
             try conn.execute("PRAGMA cache_size = -64000")
             try conn.execute("PRAGMA temp_store = MEMORY")
+            try conn.execute("PRAGMA mmap_size = 268435456")
             try verifySchema(conn)
         } catch {
             conn.close()

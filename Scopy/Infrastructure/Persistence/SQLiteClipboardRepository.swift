@@ -41,6 +41,7 @@ actor SQLiteClipboardRepository {
             try conn.execute("PRAGMA synchronous = NORMAL")
             try conn.execute("PRAGMA cache_size = -64000")
             try conn.execute("PRAGMA temp_store = MEMORY")
+            try conn.execute("PRAGMA mmap_size = 268435456")
 
             try SQLiteMigrations.migrateIfNeeded(conn)
             try verifySchema(conn)

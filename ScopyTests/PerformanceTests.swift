@@ -176,6 +176,56 @@ final class PerformanceTests: XCTestCase {
         XCTAssertLessThan(p95, maxP95, "P95 search latency \(p95)ms exceeds \(maxP95)ms target")
     }
 
+    /// 长文场景：验证 FTS exact 查询在长文本下仍保持可用延迟。
+    ///
+    /// 说明：
+    /// - 覆盖“单条文本很长”的压力，与 10k/25k 的“条目数量压力”互补。
+    /// - 控制规模，使其可在常规 test-run 中执行，避免依赖 scheme/env 传参。
+    func testExactSearchPerformanceLongDocuments() async throws {
+        let docCount = 40
+        let block = "Here, we describe the formalism of the time-dependent spin wave theory. "
+        let body = String(repeating: block, count: 220) // ~16k chars
+
+        for i in 0..<docCount {
+            let token = "WASSERSTEIN_TOKEN_\(i)"
+            let text = "LongDoc \(i)\n" + body + "\nTail \(token)\n"
+            _ = try await storage.upsertItem(makeContent(text))
+        }
+        await search.invalidateCache()
+
+        // Warmup: first exact search may pay some sqlite page-cache misses.
+        let lastIndex = docCount - 1
+        _ = try await search.search(request: SearchRequest(query: "Tail WASSERSTEIN_TOKEN_\(lastIndex)", mode: .exact, limit: 10, offset: 0))
+
+        var times: [Double] = []
+        let queries = [
+            "WASSERSTEIN_TOKEN_\(lastIndex)",
+            "LongDoc 12",
+            "spin wave theory",
+            "Tail WASSERSTEIN_TOKEN_3"
+        ]
+
+        for _ in 0..<5 {
+            for q in queries {
+                let start = CFAbsoluteTimeGetCurrent()
+                let result = try await search.search(request: SearchRequest(query: q, mode: .exact, limit: 50, offset: 0))
+                XCTAssertGreaterThan(result.items.count, 0, "Query should return some results: \(q)")
+                times.append((CFAbsoluteTimeGetCurrent() - start) * 1000)
+            }
+        }
+
+        let p95 = percentile(times, 95)
+        let avg = times.reduce(0, +) / Double(times.count)
+        print("📊 Exact Search Long Documents (\(docCount) docs, ~\(body.utf16.count) chars):")
+        print("   - Samples: \(times.count)")
+        print("   - Average: \(String(format: "%.2f", avg))ms")
+        print("   - P95: \(String(format: "%.2f", p95))ms")
+
+        let isLowPowerMode = ProcessInfo.processInfo.isLowPowerModeEnabled
+        let maxP95 = isLowPowerMode ? 450.0 : 250.0
+        XCTAssertLessThan(p95, maxP95, "Long-doc exact P95 \(p95)ms exceeds \(maxP95)ms")
+    }
+
     /// 测试短词搜索性能（缓存优化）
     func testShortQueryPerformance() async throws {
         // Populate
