@@ -5,6 +5,15 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [v0.44.fix7] - 2025-12-16
+
+### Perf/Search：语义等价的后端降载与一致性修复
+
+- **FTS 写放大修复**：FTS external-content 的 `clipboard_au` trigger 改为仅在 `plain_text` 变化时触发（`AFTER UPDATE OF plain_text ... WHEN OLD.plain_text IS NOT NEW.plain_text`），避免仅更新 `last_used_at/use_count/is_pinned` 时反复重建 FTS 索引条目（语义不变）。
+- **Statement cache**：`SearchEngineImpl` 内复用热路径 prepared statements（每次使用前后 `reset/clear_bindings`），降低打字高频查询时的固定开销（语义不变）。
+- **一致性修复**：cleanup 成功后统一 `search.invalidateCache()`；pin/unpin 会同步失效 short-query cache，避免短词搜索 30s 内置顶状态/排序短暂不一致（语义不变）。
+- **fuzzy 深分页稳定**：offset>0 时缓存本次 query 的“全量有序 matches”，后续分页切片返回，避免深分页重复全量 topK 扫描导致抖动（排序 comparator 不变，语义不变）。
+
 ## [v0.44.fix6] - 2025-12-16
 
 ### Fix/Preview：避免括号内 `[...]` 被二次包裹（防嵌套 `$`/KaTeX parse error）

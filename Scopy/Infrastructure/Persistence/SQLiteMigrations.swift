@@ -1,7 +1,7 @@
 import Foundation
 
 enum SQLiteMigrations {
-    static let currentUserVersion: Int32 = 1
+    static let currentUserVersion: Int32 = 2
 
     static func migrateIfNeeded(_ connection: SQLiteConnection) throws {
         let userVersion = try readUserVersion(connection)
@@ -92,9 +92,15 @@ enum SQLiteMigrations {
             """
         )
 
+        // v2: Avoid FTS churn on metadata-only updates (last_used_at/use_count/is_pinned).
+        // Only refresh FTS row when plain_text changes.
+        try connection.execute("DROP TRIGGER IF EXISTS clipboard_au")
         try connection.execute(
             """
-            CREATE TRIGGER IF NOT EXISTS clipboard_au AFTER UPDATE ON clipboard_items BEGIN
+            CREATE TRIGGER clipboard_au
+            AFTER UPDATE OF plain_text ON clipboard_items
+            WHEN OLD.plain_text IS NOT NEW.plain_text
+            BEGIN
                 INSERT INTO clipboard_fts(clipboard_fts, rowid, plain_text) VALUES('delete', OLD.rowid, OLD.plain_text);
                 INSERT INTO clipboard_fts(rowid, plain_text) VALUES (NEW.rowid, NEW.plain_text);
             END
@@ -102,4 +108,3 @@ enum SQLiteMigrations {
         )
     }
 }
-

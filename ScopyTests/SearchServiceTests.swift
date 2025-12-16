@@ -1,5 +1,6 @@
 import XCTest
 import ScopyKit
+import SQLite3
 
 /// SearchService 单元测试
 /// 验证 v0.md 第4节的搜索性能和功能要求
@@ -126,6 +127,7 @@ final class SearchServiceTests: XCTestCase {
         XCTAssertTrue(ids1.isDisjoint(with: ids2))
     }
 
+
     func testHasMoreFlag() async throws {
         try await populateTestData(count: 25)
 
@@ -136,6 +138,49 @@ final class SearchServiceTests: XCTestCase {
         let request2 = SearchRequest(query: "Item", mode: .fuzzy, limit: 10, offset: 20)
         let result2 = try await search.search(request: request2)
         XCTAssertFalse(result2.hasMore) // Only 5 items left (25 - 20)
+    }
+
+    func testFTSUpdateTriggerOnlyFiresOnPlainTextChange() async throws {
+        // Verify migration installs the optimized trigger definition (v2).
+        let dbPath = storage.databaseFilePath
+        var db: OpaquePointer?
+        defer {
+            if let db {
+                sqlite3_close(db)
+            }
+        }
+
+        let flags = SQLITE_OPEN_READONLY | SQLITE_OPEN_URI
+        XCTAssertEqual(sqlite3_open_v2(dbPath, &db, flags, nil), SQLITE_OK, "Failed to open database for inspection")
+        guard let db else {
+            XCTFail("Database handle is nil")
+            return
+        }
+
+        func querySingleText(_ sql: String) -> String? {
+            var stmt: OpaquePointer?
+            defer { sqlite3_finalize(stmt) }
+            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return nil }
+            guard sqlite3_step(stmt) == SQLITE_ROW else { return nil }
+            guard let cString = sqlite3_column_text(stmt, 0) else { return nil }
+            return String(cString: cString)
+        }
+
+        func querySingleInt(_ sql: String) -> Int? {
+            var stmt: OpaquePointer?
+            defer { sqlite3_finalize(stmt) }
+            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return nil }
+            guard sqlite3_step(stmt) == SQLITE_ROW else { return nil }
+            return Int(sqlite3_column_int(stmt, 0))
+        }
+
+        let userVersion = querySingleInt("PRAGMA user_version") ?? 0
+        XCTAssertGreaterThanOrEqual(userVersion, 2, "Expected migration user_version >= 2")
+
+        let triggerSQL = querySingleText("SELECT sql FROM sqlite_master WHERE type='trigger' AND name='clipboard_au'")
+        XCTAssertNotNil(triggerSQL, "Expected clipboard_au trigger to exist")
+        XCTAssertTrue(triggerSQL?.contains("AFTER UPDATE OF plain_text") == true)
+        XCTAssertTrue(triggerSQL?.contains("WHEN OLD.plain_text IS NOT NEW.plain_text") == true)
     }
 
     // MARK: - Filter Tests

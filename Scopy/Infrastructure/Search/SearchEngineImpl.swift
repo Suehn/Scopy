@@ -145,6 +145,32 @@ public actor SearchEngineImpl {
 
     private var fullIndex: FullFuzzyIndex?
     private var fullIndexStale = true
+    private var fullIndexGeneration: UInt64 = 0
+
+    private struct CachedStatement {
+        let sql: String
+        let statement: SQLiteStatement
+    }
+
+    private var statementCache: [String: CachedStatement] = [:]
+    private let statementCacheLimit = 32
+
+    private struct FuzzySortedMatchesCacheKey: Hashable {
+        let mode: SearchMode
+        let queryLower: String
+        let appFilter: String?
+        let typeFilter: ClipboardItemType?
+        let typeFiltersKey: String?
+        let forceFullFuzzy: Bool
+        let indexGeneration: UInt64
+    }
+
+    private struct FuzzySortedMatchesCacheValue {
+        let key: FuzzySortedMatchesCacheKey
+        let matches: [ScoredSlot] // Already sorted by isBetterSlot
+    }
+
+    private var fuzzySortedMatchesCache: FuzzySortedMatchesCacheValue?
 
     private let searchTimeout: TimeInterval = 5.0
     private let initialIndexBuildTimeout: TimeInterval = 30.0
@@ -162,6 +188,8 @@ public actor SearchEngineImpl {
     }
 
     public func close() {
+        statementCache = [:]
+        fuzzySortedMatchesCache = nil
         connection?.close()
         connection = nil
     }
@@ -174,18 +202,25 @@ public actor SearchEngineImpl {
 
         fullIndex = nil
         fullIndexStale = true
+        markIndexChanged()
     }
 
     func handleUpsertedItem(_ item: ClipboardStoredItem) {
         recentItemsCache = []
         cacheTimestamp = .distantPast
+        fuzzySortedMatchesCache = nil
 
         guard var index = fullIndex, !fullIndexStale else { return }
         upsertItemIntoIndex(item, index: &index)
         fullIndex = index
+        markIndexChanged()
     }
 
     func handlePinnedChange(id: UUID, pinned: Bool) {
+        recentItemsCache = []
+        cacheTimestamp = .distantPast
+        fuzzySortedMatchesCache = nil
+
         guard var index = fullIndex,
               !fullIndexStale,
               let slot = index.idToSlot[id],
@@ -198,6 +233,7 @@ public actor SearchEngineImpl {
         updated.isPinned = pinned
         index.items[slot] = updated
         fullIndex = index
+        markIndexChanged()
     }
 
     func handleDeletion(id: UUID) {
@@ -208,10 +244,12 @@ public actor SearchEngineImpl {
             index.items[slot] = nil
             index.idToSlot.removeValue(forKey: id)
             fullIndex = index
+            markIndexChanged()
         }
 
         recentItemsCache = []
         cacheTimestamp = .distantPast
+        fuzzySortedMatchesCache = nil
     }
 
     func handleClearAll() {
@@ -668,6 +706,70 @@ public actor SearchEngineImpl {
             return SearchResult(items: resultItems, total: -1, hasMore: hasMore, searchTimeMs: 0)
         }
 
+        func typeFiltersKey(_ set: Set<ClipboardItemType>?) -> String? {
+            guard let set, !set.isEmpty else { return nil }
+            return set.map(\.rawValue).sorted().joined(separator: ",")
+        }
+
+        let sortedCacheKey = FuzzySortedMatchesCacheKey(
+            mode: mode,
+            queryLower: queryLower,
+            appFilter: request.appFilter,
+            typeFilter: request.typeFilter,
+            typeFiltersKey: typeFiltersKey(request.typeFilters),
+            forceFullFuzzy: request.forceFullFuzzy,
+            indexGeneration: fullIndexGeneration
+        )
+
+        func pageFromSortedMatches(_ sorted: [ScoredSlot]) throws -> SearchResult {
+            let totalMatches = sorted.count
+            let start = min(request.offset, totalMatches)
+            let end = min(start + request.limit + 1, totalMatches)
+            var page: [ScoredSlot] = (start < end) ? Array(sorted[start..<end]) : []
+
+            let hasMore = page.count > request.limit
+            if hasMore {
+                page.removeLast()
+            }
+
+            let pageIDs = page.compactMap { index.items[$0.slot]?.id }
+            let resultItems = try fetchItemsByIDs(ids: pageIDs)
+            return SearchResult(items: resultItems, total: totalMatches, hasMore: hasMore, searchTimeMs: 0)
+        }
+
+        // P0: Stabilize deep paging cost without changing semantics.
+        // For non-zero offsets, compute and cache the fully sorted matches once per query/index generation.
+        if request.offset > 0 {
+            if let cached = fuzzySortedMatchesCache, cached.key == sortedCacheKey {
+                return try pageFromSortedMatches(cached.matches)
+            }
+
+            var matches: [ScoredSlot] = []
+            matches.reserveCapacity(min(candidateSlots.count, 8192))
+
+            for (i, slot) in candidateSlots.enumerated() {
+                if i % 1024 == 0 {
+                    try Task.checkCancellation()
+                }
+
+                guard slot < index.items.count, let item = index.items[slot] else { continue }
+
+                if let appFilter = request.appFilter, item.appBundleID != appFilter { continue }
+                if let typeFilters = request.typeFilters, !typeFilters.isEmpty {
+                    if !typeFilters.contains(item.type) { continue }
+                } else if let typeFilter = request.typeFilter, item.type != typeFilter {
+                    continue
+                }
+
+                guard let score = computeScore(for: item) else { continue }
+                matches.append(ScoredSlot(slot: slot, score: score))
+            }
+
+            matches.sort { isBetterSlot($0, than: $1) }
+            fuzzySortedMatchesCache = FuzzySortedMatchesCacheValue(key: sortedCacheKey, matches: matches)
+            return try pageFromSortedMatches(matches)
+        }
+
         var topHeap = BinaryHeap<ScoredSlot>(areSorted: isWorseSlot)
         topHeap.reserveCapacity(desiredTopCount)
 
@@ -876,6 +978,8 @@ public actor SearchEngineImpl {
         }
 
         connection = conn
+        statementCache = [:]
+        fuzzySortedMatchesCache = nil
     }
 
     private func verifySchema(_ connection: SQLiteConnection) throws {
@@ -892,9 +996,21 @@ public actor SearchEngineImpl {
 
     private func prepare(_ sql: String) throws -> SQLiteStatement {
         guard let connection else { throw SearchError.databaseNotOpen }
+
+        if let cached = statementCache[sql] {
+            cached.statement.reset()
+            return cached.statement
+        }
+
         do {
-            return try connection.prepare(sql)
+            let stmt = try connection.prepare(sql)
+            if statementCache.count >= statementCacheLimit {
+                statementCache = [:]
+            }
+            statementCache[sql] = CachedStatement(sql: sql, statement: stmt)
+            return stmt
         } catch {
+            statementCache.removeValue(forKey: sql)
             throw SearchError.searchFailed(error.localizedDescription)
         }
     }
@@ -908,6 +1024,7 @@ public actor SearchEngineImpl {
             LIMIT ? OFFSET ?
         """
         let stmt = try prepare(sql)
+        defer { stmt.reset() }
         try stmt.bindInt(limit, at: 1)
         try stmt.bindInt(offset, at: 2)
 
@@ -929,6 +1046,7 @@ public actor SearchEngineImpl {
             FROM clipboard_items
         """
         let stmt = try prepare(sql)
+        defer { stmt.reset() }
 
         var items: [ClipboardStoredItem] = []
         var row = 0
@@ -951,6 +1069,7 @@ public actor SearchEngineImpl {
             WHERE id IN (\(placeholders))
         """
         let stmt = try prepare(sql)
+        defer { stmt.reset() }
 
         for (index, id) in ids.enumerated() {
             try stmt.bindText(id.uuidString, at: Int32(index + 1))
@@ -1011,6 +1130,7 @@ public actor SearchEngineImpl {
         sql += " LIMIT ? OFFSET ?"
 
         let stmt = try prepare(sql)
+        defer { stmt.reset() }
         var bindIndex: Int32 = 1
         for param in params {
             try stmt.bindText(param, at: bindIndex)
@@ -1072,6 +1192,7 @@ public actor SearchEngineImpl {
         sql += " LIMIT ? OFFSET ?"
 
         let stmt = try prepare(sql)
+        defer { stmt.reset() }
         var bindIndex: Int32 = 1
         for param in params {
             try stmt.bindText(param, at: bindIndex)
@@ -1107,6 +1228,7 @@ public actor SearchEngineImpl {
             LIMIT ?
         """
         let stmt = try prepare(sql)
+        defer { stmt.reset() }
         try stmt.bindText(ftsQuery, at: 1)
         try stmt.bindInt(limit, at: 2)
 
@@ -1152,5 +1274,12 @@ public actor SearchEngineImpl {
             storageRef: storageRef,
             rawData: nil
         )
+    }
+
+    // MARK: - Index Change Tracking
+
+    private func markIndexChanged() {
+        fullIndexGeneration &+= 1
+        fuzzySortedMatchesCache = nil
     }
 }

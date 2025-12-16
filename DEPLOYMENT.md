@@ -73,6 +73,20 @@
 - **测试结果**：
   - `xcodebuild test -scheme Scopy -destination 'platform=macOS' -only-testing:ScopyTests -skip-testing:ScopyTests/IntegrationTests`：Executed 214 tests, 7 skipped, 0 failures
 
+## 本次更新（v0.44.fix7）
+
+- **Perf/Search（语义等价，稳定性优先）**：
+  - FTS 写放大修复：`clipboard_au` trigger 仅在 `plain_text` 变化时触发，避免元数据更新导致 FTS churn（`PRAGMA user_version=2`）。
+  - SearchEngineImpl statement cache：复用热路径 prepared statements，降低高频输入时的固定开销。
+  - 一致性修复：cleanup 后统一 `search.invalidateCache()`；pin/unpin 同步失效 short-query cache，避免短词搜索短暂不一致。
+  - fuzzy 深分页稳定：offset>0 缓存本次 query 的全量有序 matches，后续分页切片返回（排序 comparator 不变）。
+- **性能实测**（`hw.model=Mac15,12`, 24GB；macOS 15.7.2（24G325）；Xcode 16.3（16E140）, Debug，`PerformanceTests`）：
+  - Disk 25k fuzzyPlus：cold start 720.22ms；P95 46.08ms（Samples: 60）
+  - Service-path disk 10k fuzzyPlus：cold start 250.20ms；P95 35.54ms（Samples: 50）
+- **测试结果**：
+  - `xcodebuild test -scheme Scopy -destination 'platform=macOS' -only-testing:ScopyTests/PerformanceTests`：Executed 24 tests, 6 skipped, 0 failures
+  - `xcodebuild test -scheme Scopy -destination 'platform=macOS' -only-testing:ScopyTests/SearchServiceTests`：Executed 25 tests, 1 skipped, 0 failures
+
 ## 本次更新（v0.43.23）
 
 - **Fix/Preview（Markdown hover 预览：稳定性 + 表格 + 公式鲁棒性）**：

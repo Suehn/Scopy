@@ -333,6 +333,9 @@ actor ClipboardService {
 
             do {
                 try await storage.performCleanup()
+                if let search {
+                    await search.invalidateCache()
+                }
             } catch {
                 ScopyLog.app.warning(
                     "Cleanup failed after settings update: \(error.localizedDescription, privacy: .private)"
@@ -469,6 +472,9 @@ actor ClipboardService {
         let mode: StorageService.CleanupMode = needsFull ? .full : .light
         do {
             try await storage.performCleanup(mode: mode)
+            if let search {
+                await search.invalidateCache()
+            }
             lastLightCleanupAt = now
             if needsFull { lastFullCleanupAt = now }
         } catch {

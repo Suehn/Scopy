@@ -193,6 +193,7 @@
 		731C389FA0434EBF4696D6ED /* libsqlite3.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = 6EE4401FFF4C04C3F4498B26 /* libsqlite3.tbd */; };
 		735CF6392AE3EBBDBE2E7E02 /* KaTeX_SansSerif-Regular.woff in Resources */ = {isa = PBXBuildFile; fileRef = 291DBFC6B0FAC7CE6CFCBE90 /* KaTeX_SansSerif-Regular.woff */; };
 		73912DB0D7AA2626E0F36049 /* KaTeX_AMS-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = AB54E903D484FE44C7F78B86 /* KaTeX_AMS-Regular.ttf */; };
+		739CA7545B002CEB718E4EEE /* SearchBackendConsistencyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 66A10DAA25261DC94EED1258 /* SearchBackendConsistencyTests.swift */; };
 		7411E82D82153F4FD1F02B17 /* PerformanceHelpers.swift in Sources */ = {isa = PBXBuildFile; fileRef = 21D8D06A8582ECBC98830C7E /* PerformanceHelpers.swift */; };
 		74216586C5DB28A55AC3D70B /* HotKeyRecorderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10A8A6276630C764728D88F6 /* HotKeyRecorderView.swift */; };
 		7439D47010B02F0697319E57 /* KaTeX_SansSerif-Bold.woff in Resources */ = {isa = PBXBuildFile; fileRef = F4F9D4349691447CC4244642 /* KaTeX_SansSerif-Bold.woff */; };
@@ -375,6 +376,7 @@
 		DF392D969C2EA104479B1B13 /* HoverPreviewTextSizing.swift in Sources */ = {isa = PBXBuildFile; fileRef = D8917ECD9B983D1DE16E8771 /* HoverPreviewTextSizing.swift */; };
 		E05E6B1865EE279500489011 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 15AD12EB1E64621C175C997C /* SettingsView.swift */; };
 		E1810664181CAB8A03B59441 /* KaTeX_Typewriter-Regular.woff in Resources */ = {isa = PBXBuildFile; fileRef = A8242720DB38F21E56D5181F /* KaTeX_Typewriter-Regular.woff */; };
+		E1B1C2949A98A02A5EBE4082 /* SearchBackendConsistencyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 66A10DAA25261DC94EED1258 /* SearchBackendConsistencyTests.swift */; };
 		E3C2F6B350186FF0229C06B6 /* ShortcutsSettingsPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 961091813A2F9C555BE37BAC /* ShortcutsSettingsPage.swift */; };
 		E49BC4A74E3B5881D5F412CA /* KaTeX_Main-BoldItalic.woff in Resources */ = {isa = PBXBuildFile; fileRef = FE0803F8876C714967D88EA9 /* KaTeX_Main-BoldItalic.woff */; };
 		E4ABCC84D78DE586451E805D /* IntegrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F236FB16D44AFE08ACBC9C5 /* IntegrationTests.swift */; };
@@ -507,6 +509,7 @@
 		61DF2BC8CEEFB6DBC2A87609 /* AppState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppState.swift; sourceTree = "<group>"; };
 		62C29361DE1A42C04AB601DE /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		64F67E7978679E2B6026F8F5 /* Localization.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Localization.swift; sourceTree = "<group>"; };
+		66A10DAA25261DC94EED1258 /* SearchBackendConsistencyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchBackendConsistencyTests.swift; sourceTree = "<group>"; };
 		69386A72A42FB0CEB954D029 /* KaTeX_Math-BoldItalic.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "KaTeX_Math-BoldItalic.ttf"; sourceTree = "<group>"; };
 		69E5EDE952C99FFB76658AD2 /* ListLiveScrollObserverView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ListLiveScrollObserverView.swift; sourceTree = "<group>"; };
 		6A2BAEF33A56AB9DC5808252 /* main.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = main.swift; sourceTree = "<group>"; };
@@ -848,6 +851,7 @@
 				81E3E40D7B7A01720DF737E2 /* PerformanceProfilerTests.swift */,
 				1C176E09A1997AD49E566273 /* PerformanceTests.swift */,
 				E89CCE301327084364FDFDE1 /* ResourceCleanupTests.swift */,
+				66A10DAA25261DC94EED1258 /* SearchBackendConsistencyTests.swift */,
 				15EBBE158869225275AB5F98 /* SearchServiceTests.swift */,
 				6146C28BE595B15CFD414140 /* StorageServiceTests.swift */,
 				2AB48529B6E462A63799B326 /* TextMetricsTests.swift */,
@@ -1460,6 +1464,7 @@
 				5B88BBC60EB20FAD37917440 /* ScopySize.swift in Sources */,
 				9FD858494D45577D060020B6 /* ScopySpacing.swift in Sources */,
 				5B6A53676B5B957EEE6BCA1F /* ScopyTypography.swift in Sources */,
+				739CA7545B002CEB718E4EEE /* SearchBackendConsistencyTests.swift in Sources */,
 				DF15A575AEB6BFFC571AA648 /* SearchServiceTests.swift in Sources */,
 				A91C52F48BFDC092FB56BD9D /* SectionHeader.swift in Sources */,
 				BBEE409F0ED1F50921C21EE1 /* SettingsFeatureRow.swift in Sources */,
@@ -1553,6 +1558,7 @@
 				7DC66EDCE0E45DFC84BEE089 /* ScopySize.swift in Sources */,
 				CAB0C4BCEB0707C32EF0F6E5 /* ScopySpacing.swift in Sources */,
 				BC73EE655DA83097AC0514D4 /* ScopyTypography.swift in Sources */,
+				E1B1C2949A98A02A5EBE4082 /* SearchBackendConsistencyTests.swift in Sources */,
 				D0DCBABCC3717C48EAF8A18C /* SearchServiceTests.swift in Sources */,
 				847904181954981532FFE71E /* SectionHeader.swift in Sources */,
 				025979CA93982E8AB3C2589F /* SettingsFeatureRow.swift in Sources */,

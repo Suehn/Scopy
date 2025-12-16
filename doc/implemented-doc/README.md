@@ -8,8 +8,8 @@
 
 | 项目 | 状态 |
 |------|------|
-| **当前版本** | v0.44.fix6 |
-| **测试状态** | 单元测试通过（`xcodebuild test -scheme Scopy -destination 'platform=macOS' -only-testing:ScopyTests -skip-testing:ScopyTests/IntegrationTests`: Executed 215 tests, 7 skipped） |
+| **当前版本** | v0.44.fix7 |
+| **测试状态** | 单元测试通过（`xcodebuild test -scheme Scopy -destination 'platform=macOS' -only-testing:ScopyTests -skip-testing:ScopyTests/IntegrationTests`: Executed 217 tests, 7 skipped） |
 | **构建状态** | Debug ✅ |
 | **部署位置** | /Applications/Scopy.app |
 | **最后更新** | 2025-12-16 |
@@ -24,6 +24,7 @@
 
 | 版本 | 日期 | 主要内容 | 状态 |
 |------|------|----------|------|
+| [v0.44.fix7](./v0.44.fix7.md) | 2025-12-16 | Perf/Search：FTS 写放大修复（plain_text-only trigger）+ statement cache + cleanup/pin 一致性 + fuzzy 深分页稳定 | ✅ |
 | [v0.44.fix6](./v0.44.fix6.md) | 2025-12-16 | Fix/Preview：避免括号内 `[...]` 被二次包裹（防嵌套 `$`/KaTeX parse error） | ✅ |
 | [v0.44.fix5](./v0.44.fix5.md) | 2025-12-16 | Perf/Search：FTS query 构造更鲁棒（多词 AND + 特殊字符不崩）+ mmap 读优化 | ✅ |
 | [v0.44.fix4](./v0.44.fix4.md) | 2025-12-16 | Fix/Preview：LaTeX `tabular`/`center`/`rule` 更可读（转 Markdown 表格/分割线） | ✅ |
