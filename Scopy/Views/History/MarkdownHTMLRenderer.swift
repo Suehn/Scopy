@@ -136,6 +136,7 @@ enum MarkdownHTMLRenderer {
           (function () {
             var lastH = 0;
             var lastW = 0;
+            var pendingRAF = false;
             var ro = null;
             window.__scopyReportHeight = function () {
               try {
@@ -155,10 +156,18 @@ enum MarkdownHTMLRenderer {
 
             function scheduleReportHeight() {
               if (typeof window.__scopyReportHeight !== 'function') { return; }
+              if (pendingRAF) { return; }
+              pendingRAF = true;
               if (typeof window.requestAnimationFrame === 'function') {
-                window.requestAnimationFrame(window.__scopyReportHeight);
+                window.requestAnimationFrame(function () {
+                  pendingRAF = false;
+                  window.__scopyReportHeight();
+                });
               } else {
-                setTimeout(window.__scopyReportHeight, 0);
+                setTimeout(function () {
+                  pendingRAF = false;
+                  window.__scopyReportHeight();
+                }, 0);
               }
             }
 

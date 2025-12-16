@@ -471,7 +471,7 @@ struct HistoryItemView: View, Equatable {
 
     // MARK: - Text Preview (v0.15)
 
-    /// v0.15.1: Start text preview task - shows first 100 + ... + last 100 chars
+    /// v0.15.1: Start text preview task - uses `plainText` (full content) and lazily upgrades to Markdown preview when detected.
     /// v0.22: 确保在创建新任务前取消旧任务，防止快速悬停时任务累积导致内存泄漏
     private func startTextPreviewTask() {
         // 先取消旧任务，防止多个任务同时运行

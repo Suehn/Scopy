@@ -34,6 +34,15 @@
 - runner：`macos-15`
 - Xcode：`16.0`
 
+## 本次更新（v0.44.fix2）
+
+- **Fix/Preview（误判收敛）**：`MarkdownDetector.containsMath` 不再把“出现两个 `$`”直接判定为数学公式，仅在检测到成对 `$...$`（以及 `$$` / `\\(`/`\\[` / LaTeX 环境 / 已知命令）时启用 math 相关渲染，降低货币/变量/日志等纯文本误走 WebView 的概率。
+- **Perf（等价收敛）**：
+  - 尺寸上报调度：同一帧内合并多次 `scheduleReportHeight()`（挂起 rAF 次数从“可能多次”收敛为最多 1 次/帧；≈≤60Hz 上限），最终上报尺寸不变。
+  - 归一化 fast-path：无 TeX/inline 命令信号时跳过扫描（`MathProtector` / `LaTeXInlineTextNormalizer`），减少 hover 预览非公式文本的 CPU 开销。
+- **测试结果**（Apple M3 24GB, macOS 15.7.2（24G325）, Xcode 16.3）：
+  - `xcodebuild test -scheme Scopy -destination 'platform=macOS' -only-testing:ScopyTests`：Executed 218 tests, 7 skipped, 0 failures
+
 ## 本次更新（v0.43.23）
 
 - **Fix/Preview（Markdown hover 预览：稳定性 + 表格 + 公式鲁棒性）**：

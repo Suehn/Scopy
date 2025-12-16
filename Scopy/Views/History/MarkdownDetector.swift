@@ -44,19 +44,9 @@ enum MarkdownDetector {
         if text.contains("\\begin{cases}") { return true }
         if containsKnownLaTeXCommand(text) { return true }
 
-        // Heuristic: at least two '$' with content between them.
-        // Avoid scanning huge strings too deeply; math detection is best-effort.
-        var dollarCount = 0
-        var scanned = 0
-        for ch in text {
-            if ch == "$" {
-                dollarCount += 1
-                if dollarCount >= 2 { return true }
-            }
-            scanned += 1
-            if scanned >= 200_000 { break }
-        }
-        return false
+        // Detect paired `$...$` inline math. Do not treat mere multiple `$` (e.g. currency, shell vars)
+        // as math; this avoids routing plain text through the Markdown+KaTeX pipeline.
+        return containsPairedInlineDollarMath(text, maxScanUTF16: 200_000)
     }
 
     private static let latexCommands: Set<String> = [
@@ -102,5 +92,98 @@ enum MarkdownDetector {
             i = j
         }
         return false
+    }
+
+    private static func containsPairedInlineDollarMath(_ text: String, maxScanUTF16: Int) -> Bool {
+        guard text.contains("$") else { return false }
+
+        var i = text.startIndex
+        var scanned = 0
+        while i < text.endIndex, scanned < maxScanUTF16 {
+            guard text[i] == "$" else {
+                i = text.index(after: i)
+                scanned += 1
+                continue
+            }
+
+            // Ignore escaped dollars.
+            if i > text.startIndex, text[text.index(before: i)] == "\\" {
+                i = text.index(after: i)
+                scanned += 1
+                continue
+            }
+
+            let next = text.index(after: i)
+            // Skip `$$` here; `contains("$$")` already handled above.
+            if next < text.endIndex, text[next] == "$" {
+                i = text.index(after: next)
+                scanned += 2
+                continue
+            }
+
+            let afterStart = next
+            guard let end = findClosingInlineDollar(in: text, from: afterStart, maxScanUTF16: maxScanUTF16 - scanned) else {
+                // Unclosed `$`: treat as plain text.
+                i = text.index(after: i)
+                scanned += 1
+                continue
+            }
+
+            let inner = text[afterStart..<end]
+            // Require some non-whitespace content to reduce false positives like `$ $`.
+            if inner.contains(where: { !$0.isWhitespace && !$0.isNewline }) {
+                return true
+            }
+
+            i = text.index(after: end)
+            scanned += 2
+        }
+
+        return false
+    }
+
+    private static func findClosingInlineDollar(
+        in text: String,
+        from index: String.Index,
+        maxScanUTF16: Int
+    ) -> String.Index? {
+        var i = index
+        var scanned = 0
+        while i < text.endIndex, scanned < maxScanUTF16 {
+            if text[i] == "$" {
+                // Ignore escaped dollars.
+                if i > text.startIndex, text[text.index(before: i)] == "\\" {
+                    i = text.index(after: i)
+                    scanned += 1
+                    continue
+                }
+                // Ignore `$$` here.
+                let next = text.index(after: i)
+                if next < text.endIndex, text[next] == "$" {
+                    i = text.index(after: next)
+                    scanned += 2
+                    continue
+                }
+                // Heuristic: treat `$` as a closing delimiter only when it's followed by a boundary.
+                // This avoids false positives for currency/variables like "$5 ... $6" / "$HOME ... $PATH",
+                // where the next `$` is usually an opening delimiter (immediately followed by a word/digit).
+                if isClosingDollarBoundary(text, at: i) {
+                    return i
+                }
+            }
+            i = text.index(after: i)
+            scanned += 1
+        }
+        return nil
+    }
+
+    private static func isClosingDollarBoundary(_ text: String, at dollar: String.Index) -> Bool {
+        let after = text.index(after: dollar)
+        guard after < text.endIndex else { return true }
+        let ch = text[after]
+        if ch.isWhitespace || ch.isNewline { return true }
+        if ch.isLetter || ch.isNumber { return false }
+        if ch == "_" { return false }
+        return true
     }
 }

@@ -6,6 +6,7 @@ enum LaTeXInlineTextNormalizer {
     /// This runs *after* math protection, so it must never touch protected math placeholders.
     static func normalize(_ text: String) -> String {
         if text.isEmpty { return text }
+        if !text.contains("\\textbf{"), !text.contains("\\emph{"), !text.contains("\\textit{") { return text }
 
         var outputLines: [String] = []
         outputLines.reserveCapacity(text.split(separator: "\n", omittingEmptySubsequences: false).count)

@@ -5,6 +5,16 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [v0.44.fix2] - 2025-12-16
+
+### Fix/Preview：减少 `$` 误判（货币/变量）+ 预览性能小优化
+
+- **修复误判**：`MarkdownDetector.containsMath` 不再把“文本里出现两个 `$`”直接视为数学公式，改为只识别成对的未转义 `$...$`（以及 `$$` / `\\(` / `\\[` / LaTeX 环境 / 已知命令），避免货币、shell 变量等纯文本被错误走 Markdown+KaTeX 渲染管线。
+- **性能优化（等价）**：
+  - Markdown 预览尺寸上报：同一帧内合并多次 `scheduleReportHeight()`，减少 burst 场景下重复 rAF 调度与 `postMessage` 尝试（最终上报尺寸不变）。
+  - 归一化 fast-path：无 `\\textbf{}`/`\\emph{}`/`\\textit{}` 时跳过 `LaTeXInlineTextNormalizer` 扫描；无 `$` 且无 `\\` 时 `MathProtector` 直接返回，减少 hover 预览非公式文本的 CPU 开销。
+- **测试补齐**：新增 `MarkdownDetectorTests`，覆盖货币/变量/不闭合 `$` 的负向用例与 `$d$` 的正向用例。
+
 ## [v0.44.fix] - 2025-12-16
 
 ### Fix/Preview：hover 预览动态宽高更准确（Markdown/Text）

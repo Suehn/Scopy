@@ -26,6 +26,11 @@ enum MathProtector {
             return ProtectedMath(markdown: markdown, placeholders: [])
         }
 
+        // Fast path: if there's no TeX/math signal at all, avoid scanning line-by-line.
+        if !markdown.contains("$"), !markdown.contains("\\") {
+            return ProtectedMath(markdown: markdown, placeholders: [])
+        }
+
         var placeholders: [(String, String)] = []
         placeholders.reserveCapacity(16)
 
