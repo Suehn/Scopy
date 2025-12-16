@@ -132,26 +132,26 @@ public struct PerformanceSummary: Sendable {
 
     /// 格式化搜索 P95 (精确到2位有效数字)
     public var formattedSearchP95: String {
-        formatLatency(searchP95)
+        formatLatency(searchP95, samples: searchSamples)
     }
 
     /// 格式化首屏加载 P95
     public var formattedLoadP95: String {
-        formatLatency(loadP95)
+        formatLatency(loadP95, samples: loadSamples)
     }
 
     /// 格式化搜索平均值
     public var formattedSearchAvg: String {
-        formatLatency(searchAvg)
+        formatLatency(searchAvg, samples: searchSamples)
     }
 
     /// 格式化首屏加载平均值
     public var formattedLoadAvg: String {
-        formatLatency(loadAvg)
+        formatLatency(loadAvg, samples: loadSamples)
     }
 
-    private func formatLatency(_ ms: Double) -> String {
-        if ms == 0 || searchSamples == 0 {
+    private func formatLatency(_ ms: Double, samples: Int) -> String {
+        if samples == 0 {
             return "N/A"
         } else if ms < 1 {
             return String(format: "%.2f ms", ms)

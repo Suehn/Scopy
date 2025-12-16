@@ -983,10 +983,11 @@ public final class StorageService {
 
     /// 清空缩略图缓存（设置变更时调用）
     func clearThumbnailCache() {
+        let path = thumbnailCachePath
         DispatchQueue.global(qos: .utility).async {
-            try? FileManager.default.removeItem(atPath: self.thumbnailCachePath)
-            try? FileManager.default.createDirectory(atPath: self.thumbnailCachePath,
-                                                     withIntermediateDirectories: true)
+            let fileManager = FileManager.default
+            try? fileManager.removeItem(atPath: path)
+            try? fileManager.createDirectory(atPath: path, withIntermediateDirectories: true)
         }
     }
 

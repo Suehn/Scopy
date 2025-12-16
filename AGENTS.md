@@ -45,6 +45,10 @@
     - 一次性：`make push-release`
     - 或手动：`git push origin main` + `git push origin vX.Y.Z`
   - Release 产物：GitHub Actions `Build and Release` 仅从 tag 构建；Cask 更新通过 PR 合入（workflow 不再直接 push main）。
+  - 发布完成定义（必须做到）：**Homebrew 可安装/可升级到该版本**。
+    - 等待 tag 对应 release 产出 `Scopy-<version>.dmg` + `Scopy-<version>.dmg.sha256`
+    - 确认 tap `Suehn/homebrew-scopy` 的 `Casks/scopy.rb` 已更新到同版本与 sha（CI 有 `HOMEBREW_GITHUB_API_TOKEN` 会自动更新；否则手动提 PR/推送）
+    - 本地验证：`brew tap Suehn/scopy` → `brew update` → `brew info --cask scopy` → `brew fetch --cask scopy`（可选 `brew upgrade --cask scopy`）
   - 本地构建：推荐用 `make`/`./deploy.sh`（会注入 `MARKETING_VERSION/CURRENT_PROJECT_VERSION`；见 `scripts/version.sh`）。
 
 ## 架构与热键要点

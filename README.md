@@ -22,17 +22,14 @@ A native macOS clipboard manager with unlimited history, intelligent storage, an
 ### Homebrew (Recommended)
 
 ```bash
+brew tap Suehn/scopy
 brew install --cask scopy
+
+# Upgrade
+brew upgrade --cask scopy
 ```
 
 > App is not signed. On first launch: Right-click → Open → Open
-
-If you prefer a custom tap:
-
-```bash
-brew tap Suehn/scopy
-brew install --cask scopy
-```
 
 ### Manual Download
 
@@ -82,7 +79,10 @@ make setup && make build
 # Build and run (Debug)
 make run
 
-# Run tests (161 tests)
+# Run unit tests
+make test-unit  # ScopyTests (latest: 237 tests, 7 skipped)
+
+# Or run full suite
 make test
 
 # Build Release DMG

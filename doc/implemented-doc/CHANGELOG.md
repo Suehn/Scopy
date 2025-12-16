@@ -5,6 +5,14 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [v0.44.fix16] - 2025-12-16
+
+### Fix/Quality：性能指标展示修复 + 并发卫生收口（不改变用户数据/行为）
+
+- **PerformanceSummary：load 指标不再被误判为 N/A**：`PerformanceSummary.formatLatency` 之前用 `searchSamples == 0` 作为所有指标的 “N/A” 条件，导致“只有 load 样本但没有 search 样本”时，load 也会显示 N/A；现按各自 sample 计数判断（search 用 `searchSamples`，load 用 `loadSamples`）。
+- **StorageService 并发卫生**：`clearThumbnailCache()` 改为先复制 `thumbnailCachePath` 到局部常量，再在后台队列执行文件操作，避免 `@MainActor` 类型在后台闭包里捕获 `self` 引发 Swift 6 strict concurrency 警告。
+- **Docs**：更新 `README.md` / `AGENTS.md` 的 Homebrew 安装与发布校验清单，避免发布后“可用性不闭环”。
+
 ## [v0.44.fix15] - 2025-12-16
 
 ### Fix/Preview：Markdown 预览保留软换行（不影响 Markdown 语义）

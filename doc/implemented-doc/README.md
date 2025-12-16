@@ -8,7 +8,7 @@
 
 | 项目 | 状态 |
 |------|------|
-| **当前版本** | v0.44.fix15 |
+| **当前版本** | v0.44.fix16 |
 | **测试状态** | 单元测试通过（`xcodebuild test -scheme Scopy -destination 'platform=macOS' -only-testing:ScopyTests`: Executed 237 tests, 7 skipped） |
 | **构建状态** | Debug ✅ |
 | **部署位置** | /Applications/Scopy.app |
@@ -24,6 +24,7 @@
 
 | 版本 | 日期 | 主要内容 | 状态 |
 |------|------|----------|------|
+| [v0.44.fix16](./v0.44.fix16.md) | 2025-12-16 | Fix/Quality：性能指标展示修复（load 不再被误判为 N/A）+ 清理缩略图并发卫生（避免 MainActor capture 警告） | ✅ |
 | [v0.44.fix15](./v0.44.fix15.md) | 2025-12-16 | Fix/Preview：Markdown 预览保留软换行（breaks=true）以正确显示题目/段落换行 + 回归测试 | ✅ |
 | [v0.44.fix14](./v0.44.fix14.md) | 2025-12-16 | Fix/Dedup：RTF/HTML 去重改为基于标准化主文本（避免 payload 波动导致重复）+ 文本标准化补强 + 回归测试 | ✅ |
 | [v0.44.fix13](./v0.44.fix13.md) | 2025-12-16 | Fix/Preview：修复 `$...$` 内含 `\\begin{cases}...\\end{cases}` 导致占位符泄漏（SCOPYMATHPLACEHOLDER）+ 回归测试 | ✅ |
