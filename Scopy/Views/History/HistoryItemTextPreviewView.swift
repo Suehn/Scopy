@@ -7,7 +7,7 @@ struct HistoryItemTextPreviewView: View {
     let markdownWebViewController: MarkdownPreviewWebViewController?
 
     var body: some View {
-        let maxWidth: CGFloat = ScopySize.Width.previewMax
+        let maxWidth: CGFloat = HoverPreviewScreenMetrics.maxPopoverWidthPoints()
         let maxHeight: CGFloat = HoverPreviewScreenMetrics.maxPopoverHeightPoints()
         let font = NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
         let padding: CGFloat = ScopySpacing.md
@@ -20,7 +20,9 @@ struct HistoryItemTextPreviewView: View {
                 maxWidth: maxWidth
             )
             let markdownMeasuredWidth = model.markdownContentSize?.width
-            let width = max(1, min(maxWidth, ceil(markdownMeasuredWidth ?? fallbackWidth)))
+            let widthBuffer: CGFloat = model.isMarkdown ? 24 : 0
+            let unclampedWidth = max(1, min(maxWidth, ceil((markdownMeasuredWidth ?? fallbackWidth) + widthBuffer)))
+            let width = (model.isMarkdown && model.markdownHasHorizontalOverflow) || (unclampedWidth >= maxWidth * 0.92) ? maxWidth : unclampedWidth
 
             let measuredTextHeight: CGFloat = HoverPreviewTextSizing.preferredTextHeight(
                 for: text,
@@ -104,6 +106,7 @@ private struct HoverPreviewTextView: NSViewRepresentable {
 
         context.coordinator.scrollView = scrollView
         context.coordinator.textView = textView
+        context.coordinator.scrollbarAutoHider.attach(to: scrollView)
         return scrollView
     }
 
@@ -111,6 +114,8 @@ private struct HoverPreviewTextView: NSViewRepresentable {
         guard let textView = context.coordinator.textView else { return }
 
         nsView.hasVerticalScroller = shouldScroll
+        context.coordinator.scrollbarAutoHider.attach(to: nsView)
+        context.coordinator.scrollbarAutoHider.applyHiddenState()
 
         let availableWidth = max(1, width)
         if context.coordinator.lastWidth != availableWidth {
@@ -140,5 +145,6 @@ private struct HoverPreviewTextView: NSViewRepresentable {
         weak var textView: NSTextView?
         var lastText: String = ""
         var lastWidth: CGFloat = 0
+        let scrollbarAutoHider = ScrollbarAutoHider()
     }
 }

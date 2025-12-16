@@ -8,5 +8,6 @@ final class HoverPreviewModel: ObservableObject {
     @Published var text: String?
     @Published var markdownHTML: String?
     @Published var markdownContentSize: CGSize?
+    @Published var markdownHasHorizontalOverflow: Bool = false
     @Published var isMarkdown: Bool = false
 }

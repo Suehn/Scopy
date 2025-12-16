@@ -5,6 +5,19 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [v0.44.fix9] - 2025-12-16
+
+### UX/Preview：hover Markdown/LaTeX 预览宽度与滚动条体验优化
+
+- **更稳的宽度策略**：
+  - 预览最大宽度上调（并按当前屏幕可视区域做上限），减少 90% 场景下因宽度不足导致的“右侧轻微裁切/需要横向滚动”。
+  - Markdown 预览尺寸上报改为 `{width,height,overflowX}`，SwiftUI 侧在确实存在横向溢出时直接使用最大宽度，减少“差一点点不够”的情况。
+- **横向滚动“仅在需要时”出现**：
+  - WKWebView 外层 `NSScrollView` 默认不启用水平滚动条；仅在页面实际横向溢出时启用（避免系统“总是显示滚动条”导致的底部常驻条）。
+  - 对 KaTeX display block 做局部横向滚动容器（`.katex-display { overflow-x: auto; max-width: 100%; }`），尽量让“横向滚动局部化”，避免整页被撑宽。
+- **滚动条只在滚动时显示（强制）**：
+  - 对 hover 预览的 scroll view 额外做 scroller show/hide（覆盖系统偏好），滚动时显示，静止后自动隐藏。
+
 ## [v0.44.fix8] - 2025-12-16
 
 ### Perf/Search：语义等价的后端降载与一致性修复

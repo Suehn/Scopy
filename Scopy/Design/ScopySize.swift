@@ -58,7 +58,7 @@ enum ScopySize {
         static let statLabel: CGFloat = u * 12.5      // 50pt - 统计标签宽度
         static let sidebarMin: CGFloat = u * 55       // 220pt - 侧边栏最小宽度
         static let pickerMenu: CGFloat = u * 30       // 120pt - Picker 菜单宽度
-        static let previewMax: CGFloat = u * 125      // 500pt - 预览最大宽度
+        static let previewMax: CGFloat = u * 160      // 640pt - 预览最大宽度
     }
 
     // MARK: - 窗口尺寸

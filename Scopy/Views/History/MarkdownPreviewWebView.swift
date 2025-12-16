@@ -3,10 +3,15 @@ import SwiftUI
 import AppKit
 import WebKit
 
+struct MarkdownContentMetrics: Equatable {
+    let size: CGSize
+    let hasHorizontalOverflow: Bool
+}
+
 struct MarkdownPreviewWebView: NSViewRepresentable {
     let html: String
     let shouldScroll: Bool
-    let onContentSizeChange: @MainActor (CGSize) -> Void
+    let onContentSizeChange: @MainActor (MarkdownContentMetrics) -> Void
 
     private static let blockNetworkRuleListIdentifier = "ScopyMarkdownPreviewBlockNetwork"
     private static let sizeMessageHandlerName = "scopySize"
@@ -39,12 +44,20 @@ struct MarkdownPreviewWebView: NSViewRepresentable {
         webView.allowsMagnification = false
         webView.setValue(false, forKey: "drawsBackground")
         configureScrollers(for: webView, shouldScroll: shouldScroll)
+        if let scrollView = webView.enclosingScrollView {
+            context.coordinator.scrollbarAutoHider.attach(to: scrollView)
+            context.coordinator.scrollbarAutoHider.applyHiddenState()
+        }
         return webView
     }
 
     func updateNSView(_ webView: WKWebView, context: Context) {
         context.coordinator.onContentSizeChange = onContentSizeChange
         configureScrollers(for: webView, shouldScroll: shouldScroll)
+        if let scrollView = webView.enclosingScrollView {
+            context.coordinator.scrollbarAutoHider.attach(to: scrollView)
+            context.coordinator.scrollbarAutoHider.applyHiddenState()
+        }
 
         if context.coordinator.lastHTML != html {
             context.coordinator.lastHTML = html
@@ -60,6 +73,9 @@ struct MarkdownPreviewWebView: NSViewRepresentable {
     private func configureScrollers(for webView: WKWebView, shouldScroll: Bool) {
         guard let scrollView = webView.enclosingScrollView else { return }
         scrollView.hasVerticalScroller = shouldScroll
+        // Only enable horizontal scroller when the page actually overflows horizontally;
+        // this avoids a persistent bottom bar under the system "always show scroll bars" setting.
+        scrollView.hasHorizontalScroller = false
         scrollView.autohidesScrollers = true
         scrollView.scrollerStyle = .overlay
         scrollView.drawsBackground = false
@@ -102,8 +118,9 @@ struct MarkdownPreviewWebView: NSViewRepresentable {
 
     final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler {
         var lastHTML: String = ""
-        var onContentSizeChange: (@MainActor (CGSize) -> Void)?
-        private var lastReportedSize: CGSize = .zero
+        var onContentSizeChange: (@MainActor (MarkdownContentMetrics) -> Void)?
+        private var lastReportedMetrics: MarkdownContentMetrics = MarkdownContentMetrics(size: .zero, hasHorizontalOverflow: false)
+        let scrollbarAutoHider = ScrollbarAutoHider()
 
         func webView(
             _ webView: WKWebView,
@@ -155,14 +172,29 @@ struct MarkdownPreviewWebView: NSViewRepresentable {
             guard message.name == MarkdownPreviewWebView.sizeMessageHandlerName else { return }
 
             var size: CGSize?
+            var overflowX: Bool = false
             if let dict = message.body as? [String: Any] {
                 let w = dict["width"]
                 let h = dict["height"]
                 size = CGSize(width: Self.cgFloat(from: w), height: Self.cgFloat(from: h))
+                if let b = dict["overflowX"] as? Bool {
+                    overflowX = b
+                } else if let n = dict["overflowX"] as? NSNumber {
+                    overflowX = n.boolValue
+                } else if let s = dict["overflowX"] as? String {
+                    overflowX = (s == "true" || s == "1")
+                }
             } else if let dict = message.body as? NSDictionary {
                 let w = dict["width"]
                 let h = dict["height"]
                 size = CGSize(width: Self.cgFloat(from: w), height: Self.cgFloat(from: h))
+                if let b = dict["overflowX"] as? Bool {
+                    overflowX = b
+                } else if let n = dict["overflowX"] as? NSNumber {
+                    overflowX = n.boolValue
+                } else if let s = dict["overflowX"] as? String {
+                    overflowX = (s == "true" || s == "1")
+                }
             } else if let n = message.body as? NSNumber {
                 // Backward-compatible: height-only payload.
                 size = CGSize(width: 0, height: CGFloat(truncating: n))
@@ -172,12 +204,25 @@ struct MarkdownPreviewWebView: NSViewRepresentable {
             guard size.width.isFinite, size.height.isFinite else { return }
             guard size.height > 0 else { return }
 
-            if abs(size.width - lastReportedSize.width) < 1, abs(size.height - lastReportedSize.height) < 1 {
+            let metrics = MarkdownContentMetrics(size: size, hasHorizontalOverflow: overflowX)
+            if abs(metrics.size.width - lastReportedMetrics.size.width) < 1,
+               abs(metrics.size.height - lastReportedMetrics.size.height) < 1,
+               metrics.hasHorizontalOverflow == lastReportedMetrics.hasHorizontalOverflow
+            {
                 return
             }
-            lastReportedSize = size
+            lastReportedMetrics = metrics
+
+            if let webView = message.webView, let scrollView = webView.enclosingScrollView {
+                scrollView.hasHorizontalScroller = overflowX
+                scrollbarAutoHider.attach(to: scrollView)
+                scrollbarAutoHider.applyHiddenState()
+                DispatchQueue.main.async { [weak scrollbarAutoHider] in
+                    scrollbarAutoHider?.applyHiddenState()
+                }
+            }
             Task { @MainActor in
-                self.onContentSizeChange?(size)
+                self.onContentSizeChange?(metrics)
             }
         }
 
@@ -203,9 +248,10 @@ struct MarkdownPreviewWebView: NSViewRepresentable {
 final class MarkdownPreviewWebViewController: NSObject, ObservableObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler {
     let webView: WKWebView
 
-    var onContentSizeChange: (@MainActor (CGSize) -> Void)?
+    var onContentSizeChange: (@MainActor (MarkdownContentMetrics) -> Void)?
     private var lastHTML: String = ""
-    private var lastReportedSize: CGSize = .zero
+    private var lastReportedMetrics: MarkdownContentMetrics = MarkdownContentMetrics(size: .zero, hasHorizontalOverflow: false)
+    private let scrollbarAutoHider = ScrollbarAutoHider()
 
     override init() {
         let config = WKWebViewConfiguration()
@@ -234,12 +280,17 @@ final class MarkdownPreviewWebViewController: NSObject, ObservableObject, WKNavi
         scrollView.autohidesScrollers = true
         scrollView.scrollerStyle = .overlay
         scrollView.drawsBackground = false
+        scrollbarAutoHider.attach(to: scrollView)
+        scrollbarAutoHider.applyHiddenState()
+        DispatchQueue.main.async { [weak scrollbarAutoHider] in
+            scrollbarAutoHider?.applyHiddenState()
+        }
     }
 
     func loadHTMLIfNeeded(_ html: String) {
         if lastHTML == html { return }
         lastHTML = html
-        lastReportedSize = .zero
+        lastReportedMetrics = MarkdownContentMetrics(size: .zero, hasHorizontalOverflow: false)
         let baseURL = Bundle.main.resourceURL?.appendingPathComponent("MarkdownPreview", isDirectory: true)
         webView.loadHTMLString(html, baseURL: baseURL)
     }
@@ -298,14 +349,29 @@ final class MarkdownPreviewWebViewController: NSObject, ObservableObject, WKNavi
         guard message.name == "scopySize" else { return }
 
         var size: CGSize?
+        var overflowX: Bool = false
         if let dict = message.body as? [String: Any] {
             let w = dict["width"]
             let h = dict["height"]
             size = CGSize(width: Self.cgFloat(from: w), height: Self.cgFloat(from: h))
+            if let b = dict["overflowX"] as? Bool {
+                overflowX = b
+            } else if let n = dict["overflowX"] as? NSNumber {
+                overflowX = n.boolValue
+            } else if let s = dict["overflowX"] as? String {
+                overflowX = (s == "true" || s == "1")
+            }
         } else if let dict = message.body as? NSDictionary {
             let w = dict["width"]
             let h = dict["height"]
             size = CGSize(width: Self.cgFloat(from: w), height: Self.cgFloat(from: h))
+            if let b = dict["overflowX"] as? Bool {
+                overflowX = b
+            } else if let n = dict["overflowX"] as? NSNumber {
+                overflowX = n.boolValue
+            } else if let s = dict["overflowX"] as? String {
+                overflowX = (s == "true" || s == "1")
+            }
         } else if let n = message.body as? NSNumber {
             size = CGSize(width: 0, height: CGFloat(truncating: n))
         }
@@ -314,12 +380,25 @@ final class MarkdownPreviewWebViewController: NSObject, ObservableObject, WKNavi
         guard size.width.isFinite, size.height.isFinite else { return }
         guard size.height > 0 else { return }
 
-        if abs(size.width - lastReportedSize.width) < 1, abs(size.height - lastReportedSize.height) < 1 {
+        let metrics = MarkdownContentMetrics(size: size, hasHorizontalOverflow: overflowX)
+        if abs(metrics.size.width - lastReportedMetrics.size.width) < 1,
+           abs(metrics.size.height - lastReportedMetrics.size.height) < 1,
+           metrics.hasHorizontalOverflow == lastReportedMetrics.hasHorizontalOverflow
+        {
             return
         }
-        lastReportedSize = size
+        lastReportedMetrics = metrics
+
+        if let scrollView = webView.enclosingScrollView {
+            scrollView.hasHorizontalScroller = overflowX
+            scrollbarAutoHider.attach(to: scrollView)
+            scrollbarAutoHider.applyHiddenState()
+            DispatchQueue.main.async { [weak scrollbarAutoHider] in
+                scrollbarAutoHider?.applyHiddenState()
+            }
+        }
         Task { @MainActor in
-            self.onContentSizeChange?(size)
+            self.onContentSizeChange?(metrics)
         }
     }
 
@@ -344,7 +423,7 @@ struct ReusableMarkdownPreviewWebView: NSViewRepresentable {
     @ObservedObject var controller: MarkdownPreviewWebViewController
     let html: String
     let shouldScroll: Bool
-    let onContentSizeChange: @MainActor (CGSize) -> Void
+    let onContentSizeChange: @MainActor (MarkdownContentMetrics) -> Void
 
     func makeNSView(context: Context) -> WKWebView {
         controller.webView
@@ -354,5 +433,93 @@ struct ReusableMarkdownPreviewWebView: NSViewRepresentable {
         controller.onContentSizeChange = onContentSizeChange
         controller.setShouldScroll(shouldScroll)
         controller.loadHTMLIfNeeded(html)
+    }
+}
+
+/// Ensures scrollbars stay hidden when idle and only appear while scrolling.
+/// This intentionally overrides the system "always show scroll bars" preference for hover-preview surfaces.
+final class ScrollbarAutoHider: NSObject {
+    private weak var scrollView: NSScrollView?
+    private var hideWorkItem: DispatchWorkItem?
+
+    func attach(to scrollView: NSScrollView) {
+        if self.scrollView === scrollView { return }
+        detach()
+        self.scrollView = scrollView
+
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleLiveScroll(_:)),
+            name: NSScrollView.didLiveScrollNotification,
+            object: scrollView
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleEndLiveScroll(_:)),
+            name: NSScrollView.didEndLiveScrollNotification,
+            object: scrollView
+        )
+
+        applyHiddenState()
+        DispatchQueue.main.async { [weak self] in
+            self?.applyHiddenState()
+        }
+    }
+
+    func detach() {
+        hideWorkItem?.cancel()
+        hideWorkItem = nil
+
+        if let scrollView {
+            NotificationCenter.default.removeObserver(self, name: NSScrollView.didLiveScrollNotification, object: scrollView)
+            NotificationCenter.default.removeObserver(self, name: NSScrollView.didEndLiveScrollNotification, object: scrollView)
+        }
+        scrollView = nil
+    }
+
+    deinit {
+        detach()
+    }
+
+    func applyHiddenState() {
+        guard let scrollView else { return }
+        if let vs = scrollView.verticalScroller {
+            vs.isHidden = true
+            vs.alphaValue = 0
+        }
+        if let hs = scrollView.horizontalScroller {
+            hs.isHidden = true
+            hs.alphaValue = 0
+        }
+    }
+
+    @objc private func handleLiveScroll(_ notification: Notification) {
+        showScrollers()
+        scheduleHide()
+    }
+
+    @objc private func handleEndLiveScroll(_ notification: Notification) {
+        scheduleHide()
+    }
+
+    private func showScrollers() {
+        guard let scrollView else { return }
+        if let vs = scrollView.verticalScroller {
+            vs.isHidden = false
+            vs.alphaValue = 1
+        }
+        if let hs = scrollView.horizontalScroller {
+            hs.isHidden = false
+            hs.alphaValue = 1
+        }
+    }
+
+    private func scheduleHide() {
+        hideWorkItem?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            self?.applyHiddenState()
+        }
+        hideWorkItem = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.75, execute: work)
     }
 }

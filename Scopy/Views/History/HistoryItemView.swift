@@ -368,7 +368,7 @@ struct HistoryItemView: View, Equatable {
            let html = previewModel.markdownHTML,
            let text = previewModel.text
         {
-            let maxWidth: CGFloat = ScopySize.Width.previewMax
+            let maxWidth: CGFloat = HoverPreviewScreenMetrics.maxPopoverWidthPoints()
             let containerWidth = max(1, maxWidth)
 
             if let controller = markdownWebViewController {
@@ -377,11 +377,12 @@ struct HistoryItemView: View, Equatable {
                     html: html,
                     containerWidth: containerWidth,
                     settleNanoseconds: 90_000_000,
-                    onStableSize: { size in
+                    onStableMetrics: { metrics in
                         guard self.isHovering else { return }
                         guard self.previewModel.markdownHTML == html else { return }
                         guard self.previewModel.text == text else { return }
-                        self.previewModel.markdownContentSize = size
+                        self.previewModel.markdownContentSize = metrics.size
+                        self.previewModel.markdownHasHorizontalOverflow = metrics.hasHorizontalOverflow
                         self.showTextPreview = true
                     }
                 )
@@ -611,9 +612,9 @@ private struct MarkdownPreviewMeasurer: View {
     let html: String
     let containerWidth: CGFloat
     let settleNanoseconds: UInt64
-    let onStableSize: @MainActor (CGSize) -> Void
+    let onStableMetrics: @MainActor (MarkdownContentMetrics) -> Void
 
-    @State private var pendingSize: CGSize?
+    @State private var pendingMetrics: MarkdownContentMetrics?
     @State private var settleTask: Task<Void, Never>?
 
     var body: some View {
@@ -621,14 +622,14 @@ private struct MarkdownPreviewMeasurer: View {
             controller: controller,
             html: html,
             shouldScroll: false,
-            onContentSizeChange: { size in
-                pendingSize = size
+            onContentSizeChange: { metrics in
+                pendingMetrics = metrics
                 settleTask?.cancel()
                 settleTask = Task { @MainActor in
                     try? await Task.sleep(nanoseconds: settleNanoseconds)
                     guard !Task.isCancelled else { return }
-                    guard let final = pendingSize else { return }
-                    onStableSize(final)
+                    guard let final = pendingMetrics else { return }
+                    onStableMetrics(final)
                 }
             }
         )

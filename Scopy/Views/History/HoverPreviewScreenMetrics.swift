@@ -10,6 +10,15 @@ enum HoverPreviewScreenMetrics {
         return NSScreen.main?.visibleFrame ?? .zero
     }
 
+    static func maxPopoverWidthPoints() -> CGFloat {
+        let visibleWidth = activeVisibleFrame().width
+        if visibleWidth > 0 {
+            // Popover is anchored to list items on the right; keep enough space to avoid going off-screen.
+            return min(ScopySize.Width.previewMax, floor(visibleWidth * 0.62))
+        }
+        return ScopySize.Width.previewMax
+    }
+
     static func maxPopoverHeightPoints() -> CGFloat {
         let visibleHeight = activeVisibleFrame().height
         if visibleHeight > 0 {
@@ -18,4 +27,3 @@ enum HoverPreviewScreenMetrics {
         return ScopySize.Window.mainHeight
     }
 }
-

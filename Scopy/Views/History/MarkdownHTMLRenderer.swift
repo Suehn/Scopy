@@ -40,6 +40,7 @@ enum MarkdownHTMLRenderer {
         padding: 16px;
         display: inline-block;
         max-width: 100%;
+        box-sizing: border-box;
         word-break: break-word;
         opacity: 0;
         transition: opacity 140ms ease-in-out;
@@ -49,19 +50,27 @@ enum MarkdownHTMLRenderer {
         padding: 12px;
         border-radius: 8px;
         overflow-x: auto;
+        max-width: 100%;
+        box-sizing: border-box;
       }
       img { max-width: 100%; height: auto; }
       a { pointer-events: none; text-decoration: underline; }
       blockquote { margin: 0; padding-left: 12px; border-left: 3px solid rgba(127,127,127,0.35); }
       hr { border: 0; border-top: 1px solid rgba(127,127,127,0.35); margin: 12px 0; }
+      .katex-display {
+        max-width: 100%;
+        overflow-x: auto;
+        overflow-y: hidden;
+        -webkit-overflow-scrolling: touch;
+      }
       table {
         display: block;
         border-collapse: collapse;
         max-width: 100%;
         overflow-x: auto;
         -webkit-overflow-scrolling: touch;
-        width: max-content;
-        min-width: 100%;
+        width: 100%;
+        table-layout: fixed;
       }
       th, td {
         border: 1px solid rgba(127,127,127,0.25);
@@ -147,12 +156,18 @@ enum MarkdownHTMLRenderer {
                 if (!el) { return; }
                 var rect = el.getBoundingClientRect();
                 var w = Math.ceil(rect.width || 0);
-                var h = Math.ceil(rect.height || 0);
+                var sh = Math.ceil(el.scrollHeight || 0);
+                var h = Math.ceil(Math.max(rect.height || 0, sh));
+                var se = document.scrollingElement || document.documentElement;
+                var overflowX = false;
+                try {
+                  overflowX = !!se && ((se.scrollWidth || 0) - (se.clientWidth || 0) > 1);
+                } catch (e) { overflowX = false; }
                 if (!h) { return; }
                 if (Math.abs(h - lastH) < 1 && Math.abs(w - lastW) < 1) { return; }
                 lastH = h;
                 lastW = w;
-                window.webkit.messageHandlers.scopySize.postMessage({ width: w, height: h });
+                window.webkit.messageHandlers.scopySize.postMessage({ width: w, height: h, overflowX: overflowX });
               } catch (e) { }
             };
 
