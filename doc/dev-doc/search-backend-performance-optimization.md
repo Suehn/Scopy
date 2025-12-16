@@ -1,7 +1,7 @@
 # Scopy 搜索后端性能优化参考报告（代码深度 Review + 可落地方案）
 
 更新日期：2025-12-16  
-当前版本基线：v0.44.fix7（见 `doc/implemented-doc/README.md`）  
+当前版本基线：v0.44.fix8（见 `doc/implemented-doc/README.md`）  
 目标：把“后端搜索”在真实用户数据形态下（长文/大库/高频输入）做成 **更稳、更省内存、更低尾延迟**，并为后续迭代提供一份可直接照着执行的优化清单与验证方法。
 
 > 本文是“现状梳理 + 风险点 + 优化方案 + 验证用例设计”的合并版；后续优化时建议先按 **P0 → P1 → P2** 推进，每一步都用 `ScopyTests/PerformanceTests.swift` 的基线用例做 A/B 验证。
@@ -283,7 +283,7 @@ Scopy 当前搜索后端是一个组合系统：
 
 - 需要做一次 schema migration（drop old trigger + create new trigger），通常不需要重建 FTS 表。
 
-已落地（v0.44.fix7，语义等价）：
+已落地（v0.44.fix8，语义等价）：
 
 - migration bump：`PRAGMA user_version` 从 1 → 2（`Scopy/Infrastructure/Persistence/SQLiteMigrations.swift`）。
 - 将 `clipboard_au` 改为仅在 `plain_text` 变化时才触发：
@@ -334,7 +334,7 @@ Scopy 当前搜索后端是一个组合系统：
 - cleanup 完成后，至少执行一次 `search.invalidateCache()`（或标记 `fullIndexStale=true`），保证下一次 search 重建索引与缓存。
 - 更精细的做法：让 `StorageService.performCleanup` 返回被删除的 ids（或通过事件流发布），由 `ClipboardService` 逐个调用 `search.handleDeletion`（但批量删除时逐个回调也可能有开销，需要权衡）。
 
-已落地（v0.44.fix7，语义等价）：
+已落地（v0.44.fix8，语义等价）：
 
 - cleanup 成功后统一 `await search.invalidateCache()`，保证 search-side 的 fullIndex / short-query cache 与 DB 状态一致：
   - 定时 cleanup：`Scopy/Application/ClipboardService.swift`
@@ -358,7 +358,7 @@ Scopy 当前搜索后端是一个组合系统：
 
 - 在 `handlePinnedChange` 内同步清空 `recentItemsCache`（或将 `cacheTimestamp` 置为 `.distantPast`），让下一次短词搜索立即从 DB 刷新。
 
-已落地（v0.44.fix7，语义等价）：
+已落地（v0.44.fix8，语义等价）：
 
 - `SearchEngineImpl.handlePinnedChange` 现在会同步失效 short-query cache（`recentItemsCache/cacheTimestamp`），并清空分页缓存。
 - 回归测试：`SearchBackendConsistencyTests.testPinnedChangeInvalidatesShortQueryCacheThroughClipboardService`（通过 service-path 验证 pin 后短词搜索立即生效）。
@@ -398,7 +398,7 @@ Scopy 当前搜索后端是一个组合系统：
 
 - 在 `PerformanceTests` 增加一个“高频短查询 200 次”的 micro-benchmark：对比平均耗时与 P95。
 
-已落地（v0.44.fix7，语义等价）：
+已落地（v0.44.fix8，语义等价）：
 
 - 在 `SearchEngineImpl` 内加入 statement cache（actor 串行，天然安全）：
   - 以 SQL 字符串作为 key，复用 `SQLiteStatement`
@@ -465,7 +465,7 @@ Scopy 当前搜索后端是一个组合系统：
 - 在 fuzzy 的排序规则里（pinned/time 优先），深分页时“全局 topK heap + 全量扫描”是最大的不稳定来源；  
   语义等价且工程上更稳的做法是：**固定 comparator 不变，但把分页从“重复全量 topK”改成“本次 query 的结果序列复用（cache/cursor）”**。
 
-已落地（v0.44.fix7，语义等价）：
+已落地（v0.44.fix8，语义等价）：
 
 - `SearchEngineImpl.searchInFullIndex` 对 offset>0 的分页请求，会按原 comparator 计算并缓存“本次 query 的全量有序 matches 列表”，后续页直接切片返回：
   - key：`mode + queryLower + filters + forceFullFuzzy + indexGeneration`

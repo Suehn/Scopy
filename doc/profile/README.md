@@ -6,7 +6,7 @@
 
 | 版本 | 日期 | 主要变化 |
 |------|------|----------|
-| [v0.44.fix7-profile.md](./v0.44.fix7-profile.md) | 2025-12-16 | Perf/Search：FTS 写放大修复 + statement cache + cleanup/pin 一致性 + fuzzy 深分页稳定（语义等价） |
+| [v0.44.fix8-profile.md](./v0.44.fix8-profile.md) | 2025-12-16 | Perf/Search：FTS 写放大修复 + statement cache + cleanup/pin 一致性 + fuzzy 深分页稳定（语义等价） |
 | [v0.44.fix6-profile.md](./v0.44.fix6-profile.md) | 2025-12-16 | Fix/Preview：括号内含 `[...]` 避免二次包裹（性能基线记录） |
 | [v0.44.fix5-profile.md](./v0.44.fix5-profile.md) | 2025-12-16 | Perf/Search：FTS query 更鲁棒（多词 AND + 特殊字符不崩）+ mmap 读优化（性能基线记录） |
 | [v0.43.22-profile.md](./v0.43.22-profile.md) | 2025-12-15 | UX/Preview：Markdown 渲染 hover 预览（KaTeX 公式）+ 安全/高性能 |

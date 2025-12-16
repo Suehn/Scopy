@@ -5,7 +5,7 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
-## [v0.44.fix7] - 2025-12-16
+## [v0.44.fix8] - 2025-12-16
 
 ### Perf/Search：语义等价的后端降载与一致性修复
 

@@ -73,7 +73,7 @@
 - **测试结果**：
   - `xcodebuild test -scheme Scopy -destination 'platform=macOS' -only-testing:ScopyTests -skip-testing:ScopyTests/IntegrationTests`：Executed 214 tests, 7 skipped, 0 failures
 
-## 本次更新（v0.44.fix7）
+## 本次更新（v0.44.fix8）
 
 - **Perf/Search（语义等价，稳定性优先）**：
   - FTS 写放大修复：`clipboard_au` trigger 仅在 `plain_text` 变化时触发，避免元数据更新导致 FTS churn（`PRAGMA user_version=2`）。
