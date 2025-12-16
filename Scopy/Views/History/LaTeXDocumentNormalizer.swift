@@ -16,6 +16,10 @@ enum LaTeXDocumentNormalizer {
         var listStack: [ListKind] = []
         var inQuoteBlock = false
 
+        var inTabularBlock = false
+        var tabularLines: [String] = []
+        tabularLines.reserveCapacity(32)
+
         for lineSub in normalizedNewlines.split(separator: "\n", omittingEmptySubsequences: false) {
             var line = String(lineSub)
 
@@ -41,6 +45,20 @@ enum LaTeXDocumentNormalizer {
                 continue
             }
 
+            if inTabularBlock {
+                if isEndEnvironmentLine(line, name: "tabular") {
+                    inTabularBlock = false
+                    let tableLines = convertTabularToMarkdownTable(tabularLines)
+                    tabularLines.removeAll(keepingCapacity: true)
+                    for t in tableLines {
+                        outputLines.append(applyQuotePrefixIfNeeded(t, inQuoteBlock: inQuoteBlock))
+                    }
+                    continue
+                }
+                tabularLines.append(line)
+                continue
+            }
+
             // Drop common document-only metadata commands.
             // Do not drop labels when the entire line is an inline code span like: `\label{...}`
             if isLabelOnlyLine(line), !line.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("`") {
@@ -57,6 +75,17 @@ enum LaTeXDocumentNormalizer {
             }
             if isEndEnvironmentLine(line, name: "quote") {
                 inQuoteBlock = false
+                continue
+            }
+            if isBeginEnvironmentLine(line, name: "center") {
+                continue
+            }
+            if isEndEnvironmentLine(line, name: "center") {
+                continue
+            }
+            if isBeginTabularEnvironmentLine(line) {
+                inTabularBlock = true
+                tabularLines.removeAll(keepingCapacity: true)
                 continue
             }
             if isBeginEnvironmentLine(line, name: "itemize") {
@@ -87,6 +116,11 @@ enum LaTeXDocumentNormalizer {
 
             if let itemLine = convertItemLine(line, listStack: listStack) {
                 outputLines.append(applyQuotePrefixIfNeeded(itemLine, inQuoteBlock: inQuoteBlock))
+                continue
+            }
+
+            if let converted = convertHorizontalRuleLine(line) {
+                outputLines.append(applyQuotePrefixIfNeeded(converted, inQuoteBlock: inQuoteBlock))
                 continue
             }
 
@@ -195,6 +229,14 @@ enum LaTeXDocumentNormalizer {
         line.trimmingCharacters(in: .whitespacesAndNewlines) == "\\end{\(name)}"
     }
 
+    private static func isBeginTabularEnvironmentLine(_ line: String) -> Bool {
+        let t = line.trimmingCharacters(in: .whitespacesAndNewlines)
+        return t.hasPrefix("\\begin{tabular}")
+            || t.hasPrefix("\\begin{tabular}{")
+            || t.hasPrefix("\\begin{tabular*}")
+            || t.hasPrefix("\\begin{tabular*}{")
+    }
+
     private static func isLabelOnlyLine(_ line: String) -> Bool {
         let t = line.trimmingCharacters(in: .whitespacesAndNewlines)
         return t.hasPrefix("\\label{") && t.hasSuffix("}")
@@ -230,6 +272,108 @@ enum LaTeXDocumentNormalizer {
         guard inQuoteBlock else { return line }
         if line.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return line }
         return "> " + line
+    }
+
+    private static func convertHorizontalRuleLine(_ line: String) -> String? {
+        let t = line.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard t.contains("\\rule{\\linewidth}") || t.contains("\\rule{\\textwidth}") else { return nil }
+        if t.hasPrefix("\\noindent\\rule{\\linewidth}") || t.hasPrefix("\\rule{\\linewidth}") {
+            return "---"
+        }
+        if t.hasPrefix("\\noindent\\rule{\\textwidth}") || t.hasPrefix("\\rule{\\textwidth}") {
+            return "---"
+        }
+        return nil
+    }
+
+    private static func convertTabularToMarkdownTable(_ lines: [String]) -> [String] {
+        // Best-effort conversion of:
+        // \begin{tabular}{|l|l|}
+        // \hline
+        // A & B \\
+        // \hline
+        // ... \\
+        // \hline
+        // \end{tabular}
+        //
+        // into a Markdown pipe table.
+        var rawRows: [String] = []
+        rawRows.reserveCapacity(16)
+
+        var current = ""
+
+        func flushRow(_ row: String) {
+            let trimmed = row.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.isEmpty { return }
+            rawRows.append(trimmed)
+        }
+
+        for line in lines {
+            let t = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            if t.isEmpty { continue }
+            if t == "\\hline" || t == "\\hline{}" || t.hasPrefix("\\hline%") { continue }
+
+            current += current.isEmpty ? t : " " + t
+
+            while let range = current.range(of: "\\\\") {
+                let before = String(current[..<range.lowerBound])
+                flushRow(before)
+                current = String(current[range.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+        }
+        flushRow(current)
+
+        guard !rawRows.isEmpty else { return [] }
+        let headerCells = splitTabularCells(rawRows[0])
+        guard !headerCells.isEmpty else { return lines }
+        let columnCount = headerCells.count
+
+        var out: [String] = []
+        out.reserveCapacity(rawRows.count + 2)
+
+        out.append("| " + headerCells.joined(separator: " | ") + " |")
+        out.append("| " + Array(repeating: "---", count: columnCount).joined(separator: " | ") + " |")
+
+        if rawRows.count > 1 {
+            for row in rawRows.dropFirst() {
+                var cells = splitTabularCells(row)
+                if cells.count < columnCount {
+                    cells.append(contentsOf: Array(repeating: "", count: columnCount - cells.count))
+                } else if cells.count > columnCount {
+                    let head = cells.prefix(columnCount - 1)
+                    let tail = cells.suffix(cells.count - (columnCount - 1)).joined(separator: " ")
+                    cells = Array(head) + [tail]
+                }
+                out.append("| " + cells.joined(separator: " | ") + " |")
+            }
+        }
+
+        return out
+    }
+
+    private static func splitTabularCells(_ row: String) -> [String] {
+        var cells: [String] = []
+        cells.reserveCapacity(4)
+
+        var current = ""
+        current.reserveCapacity(row.count)
+
+        var prevWasBackslash = false
+        for ch in row {
+            if ch == "&", !prevWasBackslash {
+                cells.append(current.trimmingCharacters(in: .whitespacesAndNewlines))
+                current = ""
+                prevWasBackslash = false
+                continue
+            }
+            current.append(ch)
+            prevWasBackslash = ch == "\\"
+        }
+        let last = current.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !last.isEmpty || !cells.isEmpty {
+            cells.append(last)
+        }
+        return cells
     }
 
     private static func normalizeNewlines(_ text: String) -> String {

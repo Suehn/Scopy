@@ -12,6 +12,17 @@
 - **渐变过渡**：Markdown WebView 内部在 markdown-it + KaTeX 渲染完成后再淡入内容；同时 SwiftUI 侧在纯文本 → Markdown 预览“懒升级”时做交叉淡入淡出，减少生硬切换。
 - **减少闪烁**：对 WebView 上报的 `{width,height}` 做 80ms 去抖并只在稳定后更新 popover 尺寸，避免短时间多次重算导致的“抖动/闪烁”。
 
+## [v0.44.fix4] - 2025-12-16
+
+### Fix/Preview：tabular 表格更可读 + `\\text{}` 下划线更稳（不破坏既有公式）
+
+- **LaTeX 表格更可读**：将常见的 `\\begin{center}...\\begin{tabular}...\\end{tabular}...\\end{center}`（含 `\\hline` / `&` / `\\\\`）转换为 Markdown pipe table，让 hover 预览能正确布局并保留公式渲染。
+- **分割线兼容**：将 `\\noindent\\rule{\\linewidth}{...}` / `\\rule{\\textwidth}{...}` 归一化为 Markdown `---`。
+- **公式稳定性修复**：对数学片段中的 `\\text{...}` 自动转义未转义的 `_`（例如 `drop_last` → `drop\\_last`），避免 KaTeX 报错导致整段公式显示为红色错误文本。
+- **回归测试**：
+  - 新增 tabular → Markdown table + rule → hr 的用例。
+  - 新增包含 `\\text{...drop_last...}` 的公式片段，用 KaTeX 引擎真实 `renderToString` 验证不会报错。
+
 ## [v0.44.fix2] - 2025-12-16
 
 ### Fix/Preview：减少 `$` 误判（货币/变量）+ 预览性能小优化

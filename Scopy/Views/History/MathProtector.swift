@@ -483,8 +483,80 @@ enum MathProtector {
 
     private static func normalizeMathSegment(_ s: String) -> String {
         var out = normalizeEscapedTeXCommandsInMath(s)
+        out = escapeUnderscoreInsideTextCommands(out)
         out = removeCommandWithSingleBracedArg(out, command: "\\label")
         out = normalizeSetBracesInMath(out)
+        return out
+    }
+
+    /// KaTeX follows LaTeX rules: underscores in text mode must be escaped.
+    ///
+    /// Real-world clipboard content often includes `\\text{... drop_last ...}` without escaping `_`,
+    /// which makes KaTeX treat `_` as a subscript operator and can produce a render error.
+    private static func escapeUnderscoreInsideTextCommands(_ s: String) -> String {
+        guard s.contains("\\text{"), s.contains("_") else { return s }
+
+        var out = ""
+        out.reserveCapacity(s.count + 8)
+
+        var i = s.startIndex
+        var scanned = 0
+        while i < s.endIndex, scanned < maxBlockMathUTF16Count * 8 {
+            guard let range = s.range(of: "\\text{", range: i..<s.endIndex) else {
+                out += s[i..<s.endIndex]
+                break
+            }
+
+            out += s[i..<range.lowerBound]
+            out += "\\text{"
+
+            var j = range.upperBound
+            var depth = 1
+            var content = ""
+            content.reserveCapacity(64)
+
+            while j < s.endIndex, scanned < maxBlockMathUTF16Count * 8 {
+                let ch = s[j]
+                if ch == "{" { depth += 1 }
+                if ch == "}" {
+                    depth -= 1
+                    if depth == 0 { break }
+                }
+                content.append(ch)
+                j = s.index(after: j)
+                scanned += 1
+            }
+
+            if j >= s.endIndex || depth != 0 {
+                // Unbalanced: keep original tail.
+                out += s[range.upperBound..<s.endIndex]
+                break
+            }
+
+            out += escapeUnescapedUnderscore(content)
+            out.append("}")
+
+            i = s.index(after: j)
+            scanned += 1
+        }
+
+        return out
+    }
+
+    private static func escapeUnescapedUnderscore(_ s: String) -> String {
+        guard s.contains("_") else { return s }
+        var out = ""
+        out.reserveCapacity(s.count + 4)
+
+        var prevWasBackslash = false
+        for ch in s {
+            if ch == "_" && !prevWasBackslash {
+                out.append("\\")
+            }
+            out.append(ch)
+            prevWasBackslash = ch == "\\"
+        }
+
         return out
     }
 

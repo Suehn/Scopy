@@ -402,4 +402,49 @@ final class MarkdownMathRenderingTests: XCTestCase {
             XCTAssertTrue(block.contains("\\tag{2-17}"))
         }
     }
+
+    func testLaTeXTabularIsNormalizedToMarkdownTableAndRuleToHorizontalRule() {
+        let input = """
+        为减少符号重复，表2-1给出本章常用符号的约定。
+
+        \\begin{center}
+        \\begin{tabular}{|l|l|}
+        \\hline
+        符号 & 含义 \\\\
+        \\hline
+        $(\\mathcal{U},\\mathcal{I})$ & 用户集合、物品集合 \\\\
+        $(\\mathcal{E})$ & 观测到的交互集合 \\\\
+        $(\\mathcal{N}_u,\\mathcal{N}_i)$ & 用户/物品的一阶邻居集合 \\\\
+        $(\\mathcal{G}=(\\mathcal{V},\\mathcal{E}))$ & 用户—物品二部图 \\\\
+        $(\\mathbf{A},\\mathbf{D},\\mathbf{L})$ & 邻接矩阵、度矩阵、归一化拉普拉斯矩阵 \\\\
+        $(\\mathbf{x}_i^{(m)})$ & 物品 $(i)$ 的第 $(m)$ 种模态特征 \\\\
+        $(\\mathbf{e}_u,\\mathbf{e}_i)$ & 用户/物品潜在表示 \\\\
+        $(\\hat{y}_{ui})$ & 用户 $(u)$ 对物品 $(i)$ 的预测偏好分数 \\\\
+        \\hline
+        \\end{tabular}
+        \\end{center}
+
+        \\noindent\\rule{\\linewidth}{0.4pt}
+
+        \\subsection{2.2 隐式反馈 Top-(N) 推荐任务、训练目标与评估协议}
+        """
+
+        let doc = LaTeXDocumentNormalizer.normalize(input)
+        XCTAssertFalse(doc.contains("\\begin{tabular}"))
+        XCTAssertFalse(doc.contains("\\end{tabular}"))
+        XCTAssertFalse(doc.contains("\\hline"))
+        XCTAssertFalse(doc.contains("\\begin{center}"))
+        XCTAssertFalse(doc.contains("\\end{center}"))
+
+        XCTAssertTrue(doc.contains("| 符号 | 含义 |"))
+        XCTAssertTrue(doc.contains("| --- | --- |"))
+        XCTAssertTrue(doc.contains("| $(\\mathcal{U},\\mathcal{I})$ | 用户集合、物品集合 |"))
+        XCTAssertTrue(doc.contains("---"))
+        XCTAssertTrue(doc.contains("## 2.2 隐式反馈 Top-(N) 推荐任务、训练目标与评估协议"))
+
+        // Full pipeline should keep KaTeX enabled.
+        let html = MarkdownHTMLRenderer.render(markdown: input)
+        XCTAssertTrue(html.contains("katex.min.js"))
+        XCTAssertTrue(html.contains("md.enable('table')"))
+    }
 }

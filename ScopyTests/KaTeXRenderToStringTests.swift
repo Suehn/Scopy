@@ -93,6 +93,47 @@ final class KaTeXRenderToStringTests: XCTestCase {
         }
     }
 
+    func testKaTeXRenderToStringForCostVectorSnippetWithDropLastInText() throws {
+        let input = #"""
+        ### 3.1 输入与符号（全部都能从你 runtime 日志拿到）
+
+        来自 warm‑up（按你大纲：warm‑up 用 L4 全服务）
+
+        * (C^{base}*{io}, C^{base}*{aug}, C^{base}_{comp})（稳态均值，单位：秒/step 或 ms/step）
+        * (C^{base}*{data}=C^{base}*{io}+C^{base}_{aug})
+        * (C^{base}=\max(C^{base}*{data}, C^{base}*{comp}))
+
+        来自 per‑level microbench（按你大纲的 cost 向量）
+
+        * (\mathbf c^{(k)}=(c^{(k)}*{io},c^{(k)}*{aug},c^{(k)}_{comp}),\ k\in{0,1,2,3,4})
+        * 以及（可选但强烈建议记录）按 level 分桶的命中率 (x_k)（I/O hit）与增强复用命中率 (h_k)（aug reuse hit），用于把 (c^{(k)}*{io},c^{(k)}*{aug}) 写成期望形式。
+
+        来自 MSIS 调度输出
+
+        * 投影后的比例 (\rho=[\rho_4,\rho_3,\rho_2,\rho_1,\rho_0])，以及执行后统计的 (\hat\rho)。
+
+        来自训练任务的常量
+
+        * 数据集大小 (N)，batch size (B)，每 epoch steps：
+          [
+          S=\left\lceil\frac{N}{B}\right\rceil \quad (\text{或使用 drop_last 对应的 } \left\lfloor\frac{N}{B}\right\rfloor)
+          ]
+        * epoch 数 (E) 或 time‑to‑accuracy 门槛对应的 epoch/step 数（来自实际训练曲线）。
+
+        控制面开销
+
+        * 每 epoch 的调度额外 CPU 时间：(t_{\text{imp}},t_{\text{alloc}},t_{\text{cachemeta}})，可直接从日志计时器拿到。
+        """#
+
+        let segments = mathSegmentsForRender(markdown: input)
+        XCTAssertFalse(segments.isEmpty)
+
+        let engine = try KaTeXEngine.shared()
+        for seg in segments {
+            XCTAssertNoThrow(try engine.renderToString(latex: seg.expression, displayMode: seg.display))
+        }
+    }
+
     // MARK: - Pipeline
 
     private struct Segment {

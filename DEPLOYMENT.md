@@ -52,6 +52,15 @@
 - **测试结果**（Apple M3 24GB, macOS 15.7.2（24G325）, Xcode 16.3）：
   - `xcodebuild test -scheme Scopy -destination 'platform=macOS' -only-testing:ScopyTests`：Executed 218 tests, 7 skipped, 0 failures
 
+## 本次更新（v0.44.fix4）
+
+- **Fix/Preview（LaTeX 文档可读性 + 公式稳定）**：
+  - `tabular` 表格（常见符号约定表）归一化为 Markdown pipe table，避免 raw LaTeX 作为纯文本挤成一行。
+  - `\\noindent\\rule{\\linewidth}{...}` / `\\rule{\\textwidth}{...}` 归一化为 Markdown `---` 分割线。
+  - `\\text{...}` 内部的未转义 `_` 自动转义为 `\\_`（例如 `drop_last` → `drop\\_last`），避免 KaTeX 报错导致整段公式红字。
+- **测试结果**（Apple M3 24GB, macOS 15.7.2（24G325）, Xcode 16.3）：
+  - `xcodebuild test -scheme Scopy -destination 'platform=macOS' -only-testing:ScopyTests`：Executed 220 tests, 7 skipped, 0 failures
+
 ## 本次更新（v0.43.23）
 
 - **Fix/Preview（Markdown hover 预览：稳定性 + 表格 + 公式鲁棒性）**：
