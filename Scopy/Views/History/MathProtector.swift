@@ -194,14 +194,18 @@ enum MathProtector {
             outputLines.append(contentsOf: environmentLines)
         }
 
-        return ProtectedMath(markdown: outputLines.joined(separator: "\n"), placeholders: placeholders)
+        let resolved = resolveNestedPlaceholders(placeholders)
+        return ProtectedMath(markdown: outputLines.joined(separator: "\n"), placeholders: resolved)
     }
 
     /// Restores placeholders into HTML as escaped text.
     static func restoreMath(in html: String, placeholders: [(placeholder: String, original: String)], escape: (String) -> String) -> String {
         guard !placeholders.isEmpty else { return html }
         var out = html
-        for (placeholder, original) in placeholders {
+        // Restore in reverse insertion order (outer segments first). If an outer segment contains an inner
+        // placeholder, replacing the outer one first ensures the inner placeholder becomes visible in `out`,
+        // and will be replaced by a later iteration.
+        for (placeholder, original) in placeholders.reversed() {
             out = out.replacingOccurrences(of: placeholder, with: escape(original))
         }
         return out
@@ -216,6 +220,48 @@ enum MathProtector {
     private static func nextPlaceholder(index: Int) -> String {
         // Alnum only to avoid Markdown emphasis parsing.
         "SCOPYMATHPLACEHOLDER\(index)X"
+    }
+
+    private static func resolveNestedPlaceholders(_ placeholders: [(String, String)]) -> [(String, String)] {
+        guard placeholders.count >= 2 else { return placeholders }
+
+        // In some real-world text (e.g. `$...\\begin{cases}...\\end{cases}...$`), environment protection may run
+        // before dollar-math protection and produce nested placeholders. If we store an outer segment containing an
+        // inner placeholder, a single-pass restore will leave `SCOPYMATHPLACEHOLDER...` visible (KaTeX renders it as
+        // spaced letters). Expand placeholder originals so each `original` is self-contained.
+        var resolved: [(String, String)] = []
+        resolved.reserveCapacity(placeholders.count)
+
+        for (placeholder, original) in placeholders {
+            var expanded = original
+            if expanded.contains("SCOPYMATHPLACEHOLDER"), !resolved.isEmpty {
+                for (innerPlaceholder, innerOriginal) in resolved {
+                    if expanded.contains(innerPlaceholder) {
+                        expanded = expanded.replacingOccurrences(of: innerPlaceholder, with: innerOriginal)
+                    }
+                }
+            }
+            resolved.append((placeholder, expanded))
+        }
+
+        // Best-effort final pass: if anything still references other placeholders, expand against the full set.
+        // This is still bounded and small (hover-preview only).
+        if resolved.contains(where: { $0.1.contains("SCOPYMATHPLACEHOLDER") }) {
+            var fully = resolved
+            for idx in 0..<fully.count {
+                var expanded = fully[idx].1
+                for (otherPlaceholder, otherOriginal) in fully {
+                    if otherPlaceholder == fully[idx].0 { continue }
+                    if expanded.contains(otherPlaceholder) {
+                        expanded = expanded.replacingOccurrences(of: otherPlaceholder, with: otherOriginal)
+                    }
+                }
+                fully[idx].1 = expanded
+            }
+            resolved = fully
+        }
+
+        return resolved
     }
 
     private static func protectMathInPlainTextSegment(_ text: String, placeholders: inout [(String, String)]) -> String {

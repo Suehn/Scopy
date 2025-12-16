@@ -149,6 +149,9 @@ final class KaTeXRenderToStringTests: XCTestCase {
 
         let segments = mathSegmentsForRender(markdown: input)
         XCTAssertGreaterThanOrEqual(segments.count, 6)
+        for seg in segments {
+            XCTAssertFalse(seg.expression.contains("SCOPYMATHPLACEHOLDER"))
+        }
 
         let engine = try KaTeXEngine.shared()
         for seg in segments {

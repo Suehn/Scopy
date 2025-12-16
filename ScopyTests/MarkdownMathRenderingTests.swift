@@ -220,6 +220,17 @@ final class MarkdownMathRenderingTests: XCTestCase {
         XCTAssertTrue(normalized.contains("$\\ln x$"))
     }
 
+    func testInlineCasesInsideDollarMathDoesNotLeakNestedPlaceholder() {
+        let input = #"定义 $\text{sgn}(x)=\begin{cases} 1, & x > 0 \\ 0, & x = 0 \\ -1, & x < 0 \end{cases}$，并设 $h(x)=2x-(2x-f(x))\text{sgn}(2x-f(x))$。"#
+        let normalized = MathNormalizer.wrapLooseLaTeX(input)
+        let protected = MathProtector.protectMath(in: normalized)
+        for original in protected.placeholders.map(\.original) {
+            XCTAssertFalse(original.contains("SCOPYMATHPLACEHOLDER"))
+        }
+        let html = MarkdownHTMLRenderer.render(markdown: input)
+        XCTAssertTrue(html.contains("katex.min.js"))
+    }
+
     func testBracketedDisplayMathBlocksAreNormalizedToDollarBlocks() {
         let input = """
         下面是一个 display block：

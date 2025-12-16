@@ -5,6 +5,14 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [v0.44.fix13] - 2025-12-16
+
+### Fix/Preview：修复嵌套数学段占位符泄漏（语义不变）
+
+- 修复 `$...$` 数学段中包含 `\\begin{cases}...\\end{cases}` 等环境时，保护阶段生成“嵌套占位符”导致还原后 `SCOPYMATHPLACEHOLDER...` 文本泄漏到最终 HTML/KaTeX 的问题。
+- 保护阶段新增“嵌套占位符展开”与还原阶段的安全替换顺序，确保每个 math segment 的 `original` 自洽、还原不会遗漏。
+- 新增回归测试覆盖 `\\text{sgn}` + `cases` + 多段 `$...$` 的真实试题片段，验证 KaTeX render-to-string 不再出现占位符与 parse error。
+
 ## [v0.44.fix12] - 2025-12-16
 
 ### Fix/Preview：更完善的 “loose LaTeX” 兼容（不改既有数学语义）
