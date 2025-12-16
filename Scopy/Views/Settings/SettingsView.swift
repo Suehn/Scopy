@@ -164,6 +164,7 @@ struct SettingsView: View {
                 await MainActor.run {
                     isSaving = false
                     savedHint = "已保存"
+                    onDismiss?()
                     Task { @MainActor in
                         try? await Task.sleep(nanoseconds: 1_200_000_000)
                         if savedHint == "已保存" {

@@ -3,7 +3,7 @@ import ScopyKit
 import SwiftUI
 
 @MainActor
-class AppDelegate: NSObject, NSApplicationDelegate {
+class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     /// 单例访问
     static var shared: AppDelegate? {
         NSApp.delegate as? AppDelegate
@@ -12,7 +12,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var panel: FloatingPanel?
     private(set) var hotKeyService: HotKeyService?
     private var settingsWindow: NSWindow?
-    private var settingsWindowCloseObserver: Any?
     private var appliedHotKey: (keyCode: UInt32, modifiers: UInt32)?
     private var isHotKeyRegistered = false
     private let settingsStore: SettingsStore = .shared
@@ -103,10 +102,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // 清理资源
         hotKeyService?.unregister()
         isHotKeyRegistered = false
-        if let observer = settingsWindowCloseObserver {
-            NotificationCenter.default.removeObserver(observer)
-            settingsWindowCloseObserver = nil
-        }
         // v0.22: 移除事件监视器，防止内存泄漏
         if let monitor = localEventMonitor {
             NSEvent.removeMonitor(monitor)
@@ -197,8 +192,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     /// v0.17: 修复内存泄漏 - 窗口关闭时释放并清空引用
     @MainActor
     func openSettings() {
-        if settingsWindow == nil {
-            let window = NSWindow(
+        let window: NSWindow
+        if let settingsWindow {
+            window = settingsWindow
+        } else {
+            window = NSWindow(
                 contentRect: NSRect(
                     x: 0,
                     y: 0,
@@ -213,40 +211,38 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             window.titleVisibility = .hidden
             window.titlebarAppearsTransparent = true
             window.toolbarStyle = .unifiedCompact
-            window.isReleasedWhenClosed = true  // v0.17: 关闭时释放窗口
+            window.isReleasedWhenClosed = false
             window.contentMinSize = NSSize(width: ScopySize.Window.settingsWidth, height: ScopySize.Window.settingsHeight)
             window.minSize = NSSize(width: ScopySize.Window.settingsWidth, height: ScopySize.Window.settingsHeight)
-
-            let settingsView = SettingsView { [weak self] in
-                self?.settingsWindow?.close()
-            }
-            .environment(AppState.shared)
-            .environment(AppState.shared.historyViewModel)
-            .environment(AppState.shared.settingsViewModel)
-
-            window.contentView = NSHostingView(rootView: settingsView)
+            window.delegate = self
             window.center()
-
-            // v0.17: 监听窗口关闭事件，清空引用避免悬空指针
-            settingsWindowCloseObserver = NotificationCenter.default.addObserver(
-                forName: NSWindow.willCloseNotification,
-                object: window,
-                queue: .main
-            ) { [weak self] _ in
-                Task { @MainActor [weak self] in
-                    guard let self else { return }
-                    if let observer = self.settingsWindowCloseObserver {
-                        NotificationCenter.default.removeObserver(observer)
-                        self.settingsWindowCloseObserver = nil
-                    }
-                    self.settingsWindow = nil
-                }
-            }
 
             settingsWindow = window
         }
 
-        settingsWindow?.makeKeyAndOrderFront(nil)
+        window.contentView = NSHostingView(rootView: makeSettingsView(onDismiss: { [weak self] in
+            self?.dismissSettings()
+        }))
+        window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    func windowShouldClose(_ sender: NSWindow) -> Bool {
+        if sender == settingsWindow {
+            dismissSettings()
+            return false
+        }
+        return true
+    }
+
+    private func dismissSettings() {
+        settingsWindow?.orderOut(nil)
+    }
+
+    private func makeSettingsView(onDismiss: @escaping () -> Void) -> some View {
+        SettingsView(onDismiss: onDismiss)
+            .environment(AppState.shared)
+            .environment(AppState.shared.historyViewModel)
+            .environment(AppState.shared.settingsViewModel)
     }
 }

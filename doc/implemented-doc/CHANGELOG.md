@@ -5,6 +5,13 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [v0.44.fix20] - 2025-12-16
+
+### Fix/UX：Settings 关闭不再退出应用 + 主窗口默认尺寸调整
+
+- **Settings 关闭只隐藏窗口**：点击窗口关闭按钮或 Save/Cancel 都只会关闭设置窗口，不再导致 Scopy 退出（保持菜单栏应用体验）。
+- **主窗口默认尺寸**：FloatingPanel 初始大小调整为 480×640，首次启动显示更完整。
+
 ## [v0.44.fix19] - 2025-12-16
 
 ### UX/Settings：修复 Detail 背景两种颜色（仅前端视觉，不改变设置逻辑）
