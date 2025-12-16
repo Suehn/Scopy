@@ -8,7 +8,7 @@
 
 | 项目 | 状态 |
 |------|------|
-| **当前版本** | v0.44.fix9 |
+| **当前版本** | v0.44.fix10 |
 | **测试状态** | 单元测试通过（`xcodebuild test -scheme Scopy -destination 'platform=macOS' -only-testing:ScopyTests`: Executed 229 tests, 7 skipped） |
 | **构建状态** | Debug ✅ |
 | **部署位置** | /Applications/Scopy.app |
@@ -24,6 +24,7 @@
 
 | 版本 | 日期 | 主要内容 | 状态 |
 |------|------|----------|------|
+| [v0.44.fix10](./v0.44.fix10.md) | 2025-12-16 | UX/Preview：消除 Markdown/LaTeX 不必要横向滚动条 + 滚动条“仅滚动时显示”更可靠 | ✅ |
 | [v0.44.fix9](./v0.44.fix9.md) | 2025-12-16 | UX/Preview：hover Markdown/LaTeX 预览更宽（更少横向滚动）+ 滚动条仅滚动时显示 | ✅ |
 | [v0.44.fix8](./v0.44.fix8.md) | 2025-12-16 | Perf/Search：FTS 写放大修复（plain_text-only trigger）+ statement cache + cleanup/pin 一致性 + fuzzy 深分页稳定 | ✅ |
 | [v0.44.fix6](./v0.44.fix6.md) | 2025-12-16 | Fix/Preview：避免括号内 `[...]` 被二次包裹（防嵌套 `$`/KaTeX parse error） | ✅ |

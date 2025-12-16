@@ -5,6 +5,18 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [v0.44.fix10] - 2025-12-16
+
+### UX/Preview：彻底消除“不必要滚动条”，并让滚动条在 idle 时可靠隐藏
+
+- **消除 KaTeX/代码块的“无意义横向滚动条”**：
+  - 对 HTML 内部的 overflow 容器（KaTeX display、`pre`、`table`）默认隐藏滚动条（即使系统设置为“总是显示滚动条”），仅在用户实际滚动时短暂显示。
+  - 通过 JS 捕获 scroll/wheel 事件，给 `<html>` 临时加 class，CSS 才放出滚动条（体验一致、且不影响可滚动性）。
+- **滚动条自动隐藏更可靠（NSScrollView）**：
+  - `ScrollbarAutoHider` 从依赖 `NSScrollView.didLiveScrollNotification` 改为监听 `contentView` 的 `boundsDidChangeNotification`，覆盖 WKWebView 场景下更常见的滚动路径，确保竖向滚动条 idle 时也能隐藏。
+- **Markdown 预览宽度更稳定**：
+  - Markdown/LaTeX 预览展示时宽度固定使用当前屏幕上限（与预测量宽度一致），避免“缩窄后 reflow 触发 overflow → 出现横条”的抖动问题。
+
 ## [v0.44.fix9] - 2025-12-16
 
 ### UX/Preview：hover Markdown/LaTeX 预览宽度与滚动条体验优化

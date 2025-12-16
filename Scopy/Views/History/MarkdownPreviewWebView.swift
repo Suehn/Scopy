@@ -213,7 +213,7 @@ struct MarkdownPreviewWebView: NSViewRepresentable {
             }
             lastReportedMetrics = metrics
 
-            if let webView = message.webView, let scrollView = webView.enclosingScrollView {
+            if let wk = message.webView as? WKWebView, let scrollView = wk.enclosingScrollView {
                 scrollView.hasHorizontalScroller = overflowX
                 scrollbarAutoHider.attach(to: scrollView)
                 scrollbarAutoHider.applyHiddenState()
@@ -440,25 +440,24 @@ struct ReusableMarkdownPreviewWebView: NSViewRepresentable {
 /// This intentionally overrides the system "always show scroll bars" preference for hover-preview surfaces.
 final class ScrollbarAutoHider: NSObject {
     private weak var scrollView: NSScrollView?
+    private weak var contentView: NSClipView?
     private var hideWorkItem: DispatchWorkItem?
 
     func attach(to scrollView: NSScrollView) {
         if self.scrollView === scrollView { return }
         detach()
         self.scrollView = scrollView
+        self.contentView = scrollView.contentView
+        scrollView.contentView.postsBoundsChangedNotifications = true
 
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(handleLiveScroll(_:)),
-            name: NSScrollView.didLiveScrollNotification,
-            object: scrollView
-        )
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(handleEndLiveScroll(_:)),
-            name: NSScrollView.didEndLiveScrollNotification,
-            object: scrollView
-        )
+        if let contentView = scrollView.contentView as NSClipView? {
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(handleAnyScroll(_:)),
+                name: NSView.boundsDidChangeNotification,
+                object: contentView
+            )
+        }
 
         applyHiddenState()
         DispatchQueue.main.async { [weak self] in
@@ -470,11 +469,11 @@ final class ScrollbarAutoHider: NSObject {
         hideWorkItem?.cancel()
         hideWorkItem = nil
 
-        if let scrollView {
-            NotificationCenter.default.removeObserver(self, name: NSScrollView.didLiveScrollNotification, object: scrollView)
-            NotificationCenter.default.removeObserver(self, name: NSScrollView.didEndLiveScrollNotification, object: scrollView)
+        if let contentView {
+            NotificationCenter.default.removeObserver(self, name: NSView.boundsDidChangeNotification, object: contentView)
         }
         scrollView = nil
+        contentView = nil
     }
 
     deinit {
@@ -493,12 +492,8 @@ final class ScrollbarAutoHider: NSObject {
         }
     }
 
-    @objc private func handleLiveScroll(_ notification: Notification) {
+    @objc private func handleAnyScroll(_ notification: Notification) {
         showScrollers()
-        scheduleHide()
-    }
-
-    @objc private func handleEndLiveScroll(_ notification: Notification) {
         scheduleHide()
     }
 

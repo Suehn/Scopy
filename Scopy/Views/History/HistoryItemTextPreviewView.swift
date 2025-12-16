@@ -20,9 +20,14 @@ struct HistoryItemTextPreviewView: View {
                 maxWidth: maxWidth
             )
             let markdownMeasuredWidth = model.markdownContentSize?.width
-            let widthBuffer: CGFloat = model.isMarkdown ? 24 : 0
-            let unclampedWidth = max(1, min(maxWidth, ceil((markdownMeasuredWidth ?? fallbackWidth) + widthBuffer)))
-            let width = (model.isMarkdown && model.markdownHasHorizontalOverflow) || (unclampedWidth >= maxWidth * 0.92) ? maxWidth : unclampedWidth
+            let width: CGFloat = {
+                if model.isMarkdown {
+                    // Keep markdown preview width stable (measured at max width), avoiding reflow-induced overflow and jitter.
+                    return maxWidth
+                }
+                let unclampedWidth = max(1, min(maxWidth, ceil(markdownMeasuredWidth ?? fallbackWidth)))
+                return (unclampedWidth >= maxWidth * 0.92) ? maxWidth : unclampedWidth
+            }()
 
             let measuredTextHeight: CGFloat = HoverPreviewTextSizing.preferredTextHeight(
                 for: text,

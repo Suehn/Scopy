@@ -82,6 +82,21 @@ enum MarkdownHTMLRenderer {
         max-width: 520px;
       }
       thead th { background: rgba(127,127,127,0.10); }
+
+      /* Hide scrollbars inside HTML when idle (even if system setting is "always show scroll bars").
+         We show them temporarily while the user is actively scrolling (JS toggles the class). */
+      pre::-webkit-scrollbar,
+      table::-webkit-scrollbar,
+      .katex-display::-webkit-scrollbar {
+        width: 0px;
+        height: 0px;
+      }
+      html.scopy-scrollbars-visible pre::-webkit-scrollbar,
+      html.scopy-scrollbars-visible table::-webkit-scrollbar,
+      html.scopy-scrollbars-visible .katex-display::-webkit-scrollbar {
+        width: 8px;
+        height: 8px;
+      }
     </style>
     """
 
@@ -197,6 +212,22 @@ enum MarkdownHTMLRenderer {
               }
               // Keep it hidden until the final layout (including KaTeX) is applied; SwiftUI shows a text fallback underneath.
               try { el.style.opacity = '0'; } catch (e) { }
+
+              var scrollbarHideTimer = null;
+              function showScrollbarsTemporarily() {
+                try {
+                  var root = document.documentElement;
+                  if (!root) { return; }
+                  root.classList.add('scopy-scrollbars-visible');
+                  if (scrollbarHideTimer) { clearTimeout(scrollbarHideTimer); }
+                  scrollbarHideTimer = setTimeout(function () {
+                    try { root.classList.remove('scopy-scrollbars-visible'); } catch (e) { }
+                  }, 700);
+                } catch (e) { }
+              }
+              // `scroll` doesn't bubble; capture phase catches it from overflow containers (pre/table/katex-display).
+              try { document.addEventListener('scroll', function () { showScrollbarsTemporarily(); }, true); } catch (e) { }
+              try { document.addEventListener('wheel', function () { showScrollbarsTemporarily(); }, { passive: true }); } catch (e) { }
 
               var md = window.markdownit({ html: false, linkify: false, typographer: true });
               if (md && typeof md.enable === 'function') {
