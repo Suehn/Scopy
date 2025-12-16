@@ -5,6 +5,19 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [v0.44.fix11] - 2025-12-16
+
+### UX/Preview：恢复 Markdown 预览动态宽度，并把 WKWebView 滚动条 idle-hide 做到“确实生效”
+
+- **恢复 Markdown 预览动态宽度（shrink-to-fit）**：
+  - v0.44.fix10 为避免 reflow 抖动，将 Markdown 预览宽度固定为上限，导致小内容出现“右侧空白过大、动态宽度失效”。
+  - 现在改为使用预测量得到的内容宽度（`markdownContentSize.width`）做 shrink-to-fit，同时保留“接近上限时直接 snap 到 max”的稳定性规则；当检测到横向滚动需求时直接用 max 宽度，尽量减少横向滚动发生概率。
+- **滚动条 idle-hide 更可靠（WKWebView）**：
+  - 之前部分路径无法拿到 WKWebView 内部真实 `NSScrollView`，导致 `ScrollbarAutoHider` 没有 attach 到正确的 scroll view，系统“总是显示滚动条”时就会出现“竖向滚动条不会隐藏”的现象。
+  - 现在通过递归查找 WKWebView 子视图中的 `NSScrollView` 并 attach，保证 show/hide 覆盖实际滚动路径。
+- **减少无意义横向滚动条的触发面**：
+  - HTML 侧禁用页面级 `overflow-x`，把横向滚动限制在 `pre/.katex-display/table` 等局部容器；并把“横向溢出”信号更偏向反映这些容器的真实滚动需求，用于 SwiftUI 侧选择更合适的 popover 宽度。
+
 ## [v0.44.fix10] - 2025-12-16
 
 ### UX/Preview：彻底消除“不必要滚动条”，并让滚动条在 idle 时可靠隐藏

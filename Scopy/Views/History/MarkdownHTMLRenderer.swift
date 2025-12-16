@@ -36,6 +36,7 @@ enum MarkdownHTMLRenderer {
         line-height: 1.45;
         background: transparent;
       }
+      html, body { overflow-x: hidden; }
       #content {
         padding: 16px;
         display: inline-block;
@@ -173,10 +174,22 @@ enum MarkdownHTMLRenderer {
                 var w = Math.ceil(rect.width || 0);
                 var sh = Math.ceil(el.scrollHeight || 0);
                 var h = Math.ceil(Math.max(rect.height || 0, sh));
-                var se = document.scrollingElement || document.documentElement;
                 var overflowX = false;
                 try {
-                  overflowX = !!se && ((se.scrollWidth || 0) - (se.clientWidth || 0) > 1);
+                  // Detect horizontal scroll requirement inside common overflow containers (KaTeX display, code blocks, tables).
+                  // We use this signal to prefer a wider popover, while keeping the outer scroll view's horizontal scroller disabled.
+                  var nodes = el.querySelectorAll('pre, table, .katex-display');
+                  for (var i = 0; i < nodes.length; i++) {
+                    var n = nodes[i];
+                    if (!n) { continue; }
+                    var cw = n.clientWidth || 0;
+                    var sw = n.scrollWidth || 0;
+                    if (cw > 0 && (sw - cw) > 1) { overflowX = true; break; }
+                  }
+                  if (!overflowX) {
+                    var se = document.scrollingElement || document.documentElement;
+                    overflowX = !!se && ((se.scrollWidth || 0) - (se.clientWidth || 0) > 2);
+                  }
                 } catch (e) { overflowX = false; }
                 if (!h) { return; }
                 if (Math.abs(h - lastH) < 1 && Math.abs(w - lastW) < 1) { return; }

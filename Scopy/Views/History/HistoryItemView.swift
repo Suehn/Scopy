@@ -335,6 +335,7 @@ struct HistoryItemView: View, Equatable {
             previewModel.text = nil
 	            previewModel.markdownHTML = nil
 	            previewModel.markdownContentSize = nil
+	            previewModel.markdownHasHorizontalOverflow = false
 	            previewModel.isMarkdown = false
 	            markdownWebViewController = nil
 	        }
@@ -353,6 +354,7 @@ struct HistoryItemView: View, Equatable {
             previewModel.text = nil
 	            previewModel.markdownHTML = nil
 	            previewModel.markdownContentSize = nil
+	            previewModel.markdownHasHorizontalOverflow = false
 	            previewModel.isMarkdown = false
 	            markdownWebViewController = nil
 	        }
@@ -534,6 +536,7 @@ struct HistoryItemView: View, Equatable {
                 self.previewModel.isMarkdown = isMarkdown
                 self.previewModel.markdownHTML = nil
                 self.previewModel.markdownContentSize = nil
+                self.previewModel.markdownHasHorizontalOverflow = false
                 self.showTextPreview = !isMarkdown
             }
 

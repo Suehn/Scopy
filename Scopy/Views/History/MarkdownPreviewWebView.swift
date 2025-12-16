@@ -3,6 +3,22 @@ import SwiftUI
 import AppKit
 import WebKit
 
+private enum MarkdownPreviewScrollViewResolver {
+    static func resolve(for view: NSView) -> NSScrollView? {
+        if let sv = view as? NSScrollView { return sv }
+        if let sv = view.enclosingScrollView { return sv }
+        return findFirstScrollView(in: view)
+    }
+
+    private static func findFirstScrollView(in view: NSView) -> NSScrollView? {
+        for subview in view.subviews {
+            if let sv = subview as? NSScrollView { return sv }
+            if let found = findFirstScrollView(in: subview) { return found }
+        }
+        return nil
+    }
+}
+
 struct MarkdownContentMetrics: Equatable {
     let size: CGSize
     let hasHorizontalOverflow: Bool
@@ -44,20 +60,14 @@ struct MarkdownPreviewWebView: NSViewRepresentable {
         webView.allowsMagnification = false
         webView.setValue(false, forKey: "drawsBackground")
         configureScrollers(for: webView, shouldScroll: shouldScroll)
-        if let scrollView = webView.enclosingScrollView {
-            context.coordinator.scrollbarAutoHider.attach(to: scrollView)
-            context.coordinator.scrollbarAutoHider.applyHiddenState()
-        }
+        context.coordinator.attachScrollbarAutoHiderIfPossible(for: webView)
         return webView
     }
 
     func updateNSView(_ webView: WKWebView, context: Context) {
         context.coordinator.onContentSizeChange = onContentSizeChange
         configureScrollers(for: webView, shouldScroll: shouldScroll)
-        if let scrollView = webView.enclosingScrollView {
-            context.coordinator.scrollbarAutoHider.attach(to: scrollView)
-            context.coordinator.scrollbarAutoHider.applyHiddenState()
-        }
+        context.coordinator.attachScrollbarAutoHiderIfPossible(for: webView)
 
         if context.coordinator.lastHTML != html {
             context.coordinator.lastHTML = html
@@ -71,10 +81,10 @@ struct MarkdownPreviewWebView: NSViewRepresentable {
     }
 
     private func configureScrollers(for webView: WKWebView, shouldScroll: Bool) {
-        guard let scrollView = webView.enclosingScrollView else { return }
+        guard let scrollView = MarkdownPreviewScrollViewResolver.resolve(for: webView) else { return }
         scrollView.hasVerticalScroller = shouldScroll
-        // Only enable horizontal scroller when the page actually overflows horizontally;
-        // this avoids a persistent bottom bar under the system "always show scroll bars" setting.
+        // Keep the outer horizontal scroller disabled. Horizontal overflow is handled inside HTML (e.g. KaTeX/code)
+        // so we don't show a persistent bottom bar under the system "always show scroll bars" setting.
         scrollView.hasHorizontalScroller = false
         scrollView.autohidesScrollers = true
         scrollView.scrollerStyle = .overlay
@@ -122,6 +132,27 @@ struct MarkdownPreviewWebView: NSViewRepresentable {
         private var lastReportedMetrics: MarkdownContentMetrics = MarkdownContentMetrics(size: .zero, hasHorizontalOverflow: false)
         let scrollbarAutoHider = ScrollbarAutoHider()
 
+        func attachScrollbarAutoHiderIfPossible(for webView: WKWebView) {
+            if let scrollView = MarkdownPreviewScrollViewResolver.resolve(for: webView) {
+                scrollbarAutoHider.attach(to: scrollView)
+                scrollbarAutoHider.applyHiddenState()
+                DispatchQueue.main.async { [weak scrollbarAutoHider] in
+                    scrollbarAutoHider?.applyHiddenState()
+                }
+            } else {
+                DispatchQueue.main.async { [weak self, weak webView] in
+                    guard let self, let webView else { return }
+                    if let scrollView = MarkdownPreviewScrollViewResolver.resolve(for: webView) {
+                        self.scrollbarAutoHider.attach(to: scrollView)
+                        self.scrollbarAutoHider.applyHiddenState()
+                        DispatchQueue.main.async { [weak scrollbarAutoHider = self.scrollbarAutoHider] in
+                            scrollbarAutoHider?.applyHiddenState()
+                        }
+                    }
+                }
+            }
+        }
+
         func webView(
             _ webView: WKWebView,
             decidePolicyFor navigationAction: WKNavigationAction,
@@ -158,6 +189,7 @@ struct MarkdownPreviewWebView: NSViewRepresentable {
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
             // Best-effort: ensure math render runs even if DOMContentLoaded timing varies.
+            attachScrollbarAutoHiderIfPossible(for: webView)
             webView.evaluateJavaScript("typeof window.__scopyRenderMath === 'function'") { result, _ in
                 guard let ok = result as? Bool, ok else { return }
                 webView.evaluateJavaScript("window.__scopyRenderMath()") { _, _ in }
@@ -213,13 +245,8 @@ struct MarkdownPreviewWebView: NSViewRepresentable {
             }
             lastReportedMetrics = metrics
 
-            if let wk = message.webView as? WKWebView, let scrollView = wk.enclosingScrollView {
-                scrollView.hasHorizontalScroller = overflowX
-                scrollbarAutoHider.attach(to: scrollView)
-                scrollbarAutoHider.applyHiddenState()
-                DispatchQueue.main.async { [weak scrollbarAutoHider] in
-                    scrollbarAutoHider?.applyHiddenState()
-                }
+            if let wk = message.webView as? WKWebView {
+                attachScrollbarAutoHiderIfPossible(for: wk)
             }
             Task { @MainActor in
                 self.onContentSizeChange?(metrics)
@@ -275,11 +302,12 @@ final class MarkdownPreviewWebViewController: NSObject, ObservableObject, WKNavi
     }
 
     func setShouldScroll(_ shouldScroll: Bool) {
-        guard let scrollView = webView.enclosingScrollView else { return }
+        guard let scrollView = MarkdownPreviewScrollViewResolver.resolve(for: webView) else { return }
         scrollView.hasVerticalScroller = shouldScroll
         scrollView.autohidesScrollers = true
         scrollView.scrollerStyle = .overlay
         scrollView.drawsBackground = false
+        scrollView.hasHorizontalScroller = false
         scrollbarAutoHider.attach(to: scrollView)
         scrollbarAutoHider.applyHiddenState()
         DispatchQueue.main.async { [weak scrollbarAutoHider] in
@@ -389,8 +417,7 @@ final class MarkdownPreviewWebViewController: NSObject, ObservableObject, WKNavi
         }
         lastReportedMetrics = metrics
 
-        if let scrollView = webView.enclosingScrollView {
-            scrollView.hasHorizontalScroller = overflowX
+        if let scrollView = MarkdownPreviewScrollViewResolver.resolve(for: webView) {
             scrollbarAutoHider.attach(to: scrollView)
             scrollbarAutoHider.applyHiddenState()
             DispatchQueue.main.async { [weak scrollbarAutoHider] in

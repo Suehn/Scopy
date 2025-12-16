@@ -22,11 +22,14 @@ struct HistoryItemTextPreviewView: View {
             let markdownMeasuredWidth = model.markdownContentSize?.width
             let width: CGFloat = {
                 if model.isMarkdown {
-                    // Keep markdown preview width stable (measured at max width), avoiding reflow-induced overflow and jitter.
-                    return maxWidth
+                    // Prefer shrink-to-fit for small Markdown payloads, while snapping to max width when near-max or when
+                    // horizontal scrolling is detected (e.g. long KaTeX / code blocks).
+                    let measured = markdownMeasuredWidth ?? fallbackWidth
+                    let desired = max(1, min(maxWidth, ceil(measured + 2)))
+                    if model.markdownHasHorizontalOverflow { return maxWidth }
+                    return (desired >= maxWidth * 0.92) ? maxWidth : desired
                 }
-                let unclampedWidth = max(1, min(maxWidth, ceil(markdownMeasuredWidth ?? fallbackWidth)))
-                return (unclampedWidth >= maxWidth * 0.92) ? maxWidth : unclampedWidth
+                return fallbackWidth
             }()
 
             let measuredTextHeight: CGFloat = HoverPreviewTextSizing.preferredTextHeight(
@@ -49,14 +52,34 @@ struct HistoryItemTextPreviewView: View {
                         controller: controller,
                         html: html,
                         shouldScroll: shouldScroll,
-                        onContentSizeChange: { _ in }
+                        onContentSizeChange: { metrics in
+                            guard model.markdownHTML == html else { return }
+                            if let existing = model.markdownContentSize, existing.width > 0 {
+                                model.markdownContentSize = CGSize(width: existing.width, height: metrics.size.height)
+                            } else {
+                                model.markdownContentSize = metrics.size
+                            }
+                            if metrics.hasHorizontalOverflow {
+                                model.markdownHasHorizontalOverflow = true
+                            }
+                        }
                     )
                     .frame(width: width, height: clampedHeight)
                 } else {
                     MarkdownPreviewWebView(
                         html: html,
                         shouldScroll: shouldScroll,
-                        onContentSizeChange: { _ in }
+                        onContentSizeChange: { metrics in
+                            guard model.markdownHTML == html else { return }
+                            if let existing = model.markdownContentSize, existing.width > 0 {
+                                model.markdownContentSize = CGSize(width: existing.width, height: metrics.size.height)
+                            } else {
+                                model.markdownContentSize = metrics.size
+                            }
+                            if metrics.hasHorizontalOverflow {
+                                model.markdownHasHorizontalOverflow = true
+                            }
+                        }
                     )
                     .frame(width: width, height: clampedHeight)
                 }
