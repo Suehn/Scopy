@@ -5,6 +5,13 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [v0.44.fix6] - 2025-12-16
+
+### Fix/Preview：避免括号内 `[...]` 被二次包裹（防嵌套 `$`/KaTeX parse error）
+
+- `MathNormalizer` 的括号包裹每轮之间按 `$...$` 重新分段，避免对新插入的数学段再次包裹，防止生成嵌套 `$` 并打断 `\left/\right` 成对关系。
+- 新增 `\rho=[\rho_4,...,\rho_0]` 回归测试，覆盖真实样例与 KaTeX render-to-string 路径。
+
 ## [v0.44.fix5] - 2025-12-16
 
 ### Perf/Search：FTS query 更鲁棒（多词 AND + 特殊字符不崩）+ 大库读取 mmap

@@ -102,6 +102,17 @@ final class MarkdownMathRenderingTests: XCTestCase {
         XCTAssertTrue(normalized.contains("$\\left(\\mathcal{I}\\right)$"))
     }
 
+    func testRhoVectorParenWithInnerBracketIsWrappedAsSingleMathSegment() {
+        let input = #"投影后的比例 (\rho=[\rho_4,\rho_3,\rho_2,\rho_1,\rho_0])，以及执行后统计的 (\hat\rho)。"#
+
+        let normalized = MathNormalizer.wrapLooseLaTeX(input)
+
+        XCTAssertTrue(normalized.contains(#"$\left(\rho=[\rho_4,\rho_3,\rho_2,\rho_1,\rho_0]\right)$"#))
+        XCTAssertFalse(normalized.contains(#"$\left(\rho=$"#))
+        XCTAssertFalse(normalized.contains(#"\rho=$\left["#))
+    }
+
+
     func testBackslashParenDelimitedMathIsProtected() {
         let input = "inline math: \\(\\mathcal{U}_u^{+}\\) and display: \\[x^2 + y^2\\]."
 

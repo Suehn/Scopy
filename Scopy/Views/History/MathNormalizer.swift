@@ -188,10 +188,12 @@ enum MathNormalizer {
             // including the ones we just inserted above.
             s = transformOutsideDollarMath(s) { outside in
                 var t = outside
-                t = wrapBracketedMath(t, open: "(", close: ")", maxInnerLength: 320)
-                t = wrapBracketedMath(t, open: "（", close: "）", maxInnerLength: 320)
-                t = wrapBracketedMath(t, open: "[", close: "]", maxInnerLength: 320)
-                t = wrapBracketedMath(t, open: "【", close: "】", maxInnerLength: 320)
+                // Each wrapping pass may insert `$...$`. Re-split between passes so we never
+                // wrap inside newly-inserted math (avoids nested `$` and broken `\left/\right` pairs).
+                t = transformOutsideDollarMath(t) { wrapBracketedMath($0, open: "(", close: ")", maxInnerLength: 320) }
+                t = transformOutsideDollarMath(t) { wrapBracketedMath($0, open: "（", close: "）", maxInnerLength: 320) }
+                t = transformOutsideDollarMath(t) { wrapBracketedMath($0, open: "[", close: "]", maxInnerLength: 320) }
+                t = transformOutsideDollarMath(t) { wrapBracketedMath($0, open: "【", close: "】", maxInnerLength: 320) }
                 // Be conservative when the original input already contains `$...$`:
                 // malformed PDF extraction often has broken `$` boundaries, and wrapping standalone commands
                 // can easily create `$$$...` artifacts that then confuse the protection phase.
