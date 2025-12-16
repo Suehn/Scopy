@@ -43,6 +43,15 @@
 - **测试结果**（Apple M3 24GB, macOS 15.7.2（24G325）, Xcode 16.3）：
   - `xcodebuild test -scheme Scopy -destination 'platform=macOS' -only-testing:ScopyTests`：Executed 218 tests, 7 skipped, 0 failures
 
+## 本次更新（v0.44.fix3）
+
+- **Fix/Preview（体验稳定）**：Markdown/LaTeX 预览改为“渲染 + 尺寸稳定后再打开 popover”，避免懒加载阶段 popover 高度/宽度反复调整造成的闪烁与跳动。
+- **实现要点**：
+  - 复用同一个 `WKWebView`：先离屏预热加载 HTML，尺寸稳定后将同一实例用于 popover 展示，避免二次加载导致的二次抖动。
+  - 尺寸稳定策略：收到 size 上报后等待 90ms 无新上报再视为稳定（可按体验调整）。
+- **测试结果**（Apple M3 24GB, macOS 15.7.2（24G325）, Xcode 16.3）：
+  - `xcodebuild test -scheme Scopy -destination 'platform=macOS' -only-testing:ScopyTests`：Executed 218 tests, 7 skipped, 0 failures
+
 ## 本次更新（v0.43.23）
 
 - **Fix/Preview（Markdown hover 预览：稳定性 + 表格 + 公式鲁棒性）**：

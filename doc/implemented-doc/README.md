@@ -8,7 +8,7 @@
 
 | 项目 | 状态 |
 |------|------|
-| **当前版本** | v0.44.fix2 |
+| **当前版本** | v0.44.fix3 |
 | **测试状态** | 单元测试通过（`xcodebuild test -scheme Scopy -destination 'platform=macOS' -only-testing:ScopyTests`: Executed 218 tests, 7 skipped） |
 | **构建状态** | Debug ✅ |
 | **部署位置** | /Applications/Scopy.app |
@@ -24,6 +24,7 @@
 
 | 版本 | 日期 | 主要内容 | 状态 |
 |------|------|----------|------|
+| [v0.44.fix3](./v0.44.fix3.md) | 2025-12-16 | Fix/Preview：Markdown/公式懒加载渐变更自然 + 高度更新更稳定（减少闪烁） | ✅ |
 | [v0.44.fix2](./v0.44.fix2.md) | 2025-12-16 | Fix/Preview：减少 `$` 误判（货币/变量）+ 预览尺寸上报/归一化轻量提速 | ✅ |
 | [v0.44.fix](./v0.44.fix.md) | 2025-12-16 | Fix/Preview：hover 预览动态宽高更准确（Markdown/Text） | ✅ |
 | [v0.44](./v0.44.md) | 2025-12-16 | Release：Preview 稳健性 + 自动发布（Homebrew 对齐） | ✅ |

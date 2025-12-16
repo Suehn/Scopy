@@ -41,6 +41,8 @@ enum MarkdownHTMLRenderer {
         display: inline-block;
         max-width: 100%;
         word-break: break-word;
+        opacity: 0;
+        transition: opacity 140ms ease-in-out;
       }
       pre, code { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
       pre {
@@ -178,6 +180,8 @@ enum MarkdownHTMLRenderer {
                 setTimeout(renderMarkdown, 30);
                 return;
               }
+              // Keep it hidden until the final layout (including KaTeX) is applied; SwiftUI shows a text fallback underneath.
+              try { el.style.opacity = '0'; } catch (e) { }
 
               var md = window.markdownit({ html: false, linkify: false, typographer: true });
               if (md && typeof md.enable === 'function') {
@@ -203,6 +207,7 @@ enum MarkdownHTMLRenderer {
               if (typeof window.__scopyRenderMath === 'function') {
                 window.__scopyRenderMath();
               }
+              try { el.style.opacity = '1'; } catch (e) { }
               scheduleReportHeight();
               setTimeout(scheduleReportHeight, 120);
             }

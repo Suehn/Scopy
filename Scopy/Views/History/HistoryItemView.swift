@@ -26,6 +26,7 @@ struct HistoryItemView: View, Equatable {
     @State private var hoverDebounceTask: Task<Void, Never>?
     @State private var hoverPreviewTask: Task<Void, Never>?
     @State private var hoverMarkdownTask: Task<Void, Never>?
+    @State private var markdownWebViewController: MarkdownPreviewWebViewController?
     // v0.24: 延迟隐藏预览，避免 popover 触发 hover false 导致闪烁
     @State private var hoverExitTask: Task<Void, Never>?
     @State private var isPopoverHovering = false
@@ -241,25 +242,26 @@ struct HistoryItemView: View, Equatable {
                 else if item.type == .text || item.type == .rtf || item.type == .html {
                     startTextPreviewTask()
                 }
-            } else {
-                // v0.24: popover 出现/消失时可能短暂触发 hover false，做 120ms 退出防抖
-                hoverExitTask = Task {
-                    try? await Task.sleep(nanoseconds: 120_000_000)
-                    guard !Task.isCancelled else { return }
-                    await MainActor.run {
-                        guard !self.isHovering, !self.isPopoverHovering else { return }
-                        self.cancelPreviewTask()
-                        self.showPreview = false
-                        self.showTextPreview = false
-                        self.previewModel.previewCGImage = nil
-                        self.previewModel.text = nil  // v0.15: Reset text preview content
-                        self.previewModel.markdownHTML = nil
-                        self.previewModel.markdownContentSize = nil
-                        self.previewModel.isMarkdown = false
-                    }
-                }
-            }
-        }
+	            } else {
+	                // v0.24: popover 出现/消失时可能短暂触发 hover false，做 120ms 退出防抖
+	                hoverExitTask = Task {
+	                    try? await Task.sleep(nanoseconds: 120_000_000)
+	                    guard !Task.isCancelled else { return }
+	                    await MainActor.run {
+	                        guard !self.isHovering, !self.isPopoverHovering else { return }
+	                        self.cancelPreviewTask()
+	                        self.showPreview = false
+	                        self.showTextPreview = false
+	                        self.previewModel.previewCGImage = nil
+	                        self.previewModel.text = nil  // v0.15: Reset text preview content
+	                        self.previewModel.markdownHTML = nil
+	                        self.previewModel.markdownContentSize = nil
+	                        self.previewModel.isMarkdown = false
+	                        self.markdownWebViewController = nil
+	                    }
+	                }
+	            }
+	        }
         .popover(isPresented: $showPreview, arrowEdge: .trailing) {
             HistoryItemImagePreviewView(model: previewModel, thumbnailPath: item.thumbnailPath)
                 .onHover { hovering in
@@ -283,11 +285,11 @@ struct HistoryItemView: View, Equatable {
                     }
                 }
         }
-        .popover(isPresented: $showTextPreview, arrowEdge: .trailing) {
-            HistoryItemTextPreviewView(model: previewModel)
-                .onHover { hovering in
-                    isPopoverHovering = hovering
-                    if hovering {
+	        .popover(isPresented: $showTextPreview, arrowEdge: .trailing) {
+	            HistoryItemTextPreviewView(model: previewModel, markdownWebViewController: markdownWebViewController)
+	                .onHover { hovering in
+	                    isPopoverHovering = hovering
+	                    if hovering {
                         hoverExitTask?.cancel()
                         hoverExitTask = nil
                     } else if !isHovering {
@@ -300,14 +302,15 @@ struct HistoryItemView: View, Equatable {
                                 self.cancelPreviewTask()
                                 self.showTextPreview = false
                                 self.previewModel.text = nil
-                                self.previewModel.markdownHTML = nil
-                                self.previewModel.markdownContentSize = nil
-                                self.previewModel.isMarkdown = false
-                            }
-                        }
-                    }
-                }
-        }
+	                                self.previewModel.markdownHTML = nil
+	                                self.previewModel.markdownContentSize = nil
+	                                self.previewModel.isMarkdown = false
+	                                self.markdownWebViewController = nil
+	                            }
+	                        }
+	                    }
+	                }
+	        }
         .contextMenu {
             Button("Copy") {
                 onSelect()
@@ -321,7 +324,7 @@ struct HistoryItemView: View, Equatable {
             }
         }
         // v0.17: 增强任务清理 - 确保视图消失时释放所有任务引用
-        .onDisappear {
+	        .onDisappear {
             hoverDebounceTask?.cancel()
             hoverDebounceTask = nil
             hoverExitTask?.cancel()
@@ -330,11 +333,12 @@ struct HistoryItemView: View, Equatable {
             // 清理状态，防止内存泄漏
             previewModel.previewCGImage = nil
             previewModel.text = nil
-            previewModel.markdownHTML = nil
-            previewModel.markdownContentSize = nil
-            previewModel.isMarkdown = false
-        }
-        .onChange(of: isScrolling) { _, newValue in
+	            previewModel.markdownHTML = nil
+	            previewModel.markdownContentSize = nil
+	            previewModel.isMarkdown = false
+	            markdownWebViewController = nil
+	        }
+	        .onChange(of: isScrolling) { _, newValue in
             guard newValue else { return }
             isHovering = false
             hoverDebounceTask?.cancel()
@@ -347,9 +351,41 @@ struct HistoryItemView: View, Equatable {
             isPopoverHovering = false
             previewModel.previewCGImage = nil
             previewModel.text = nil
-            previewModel.markdownHTML = nil
-            previewModel.markdownContentSize = nil
-            previewModel.isMarkdown = false
+	            previewModel.markdownHTML = nil
+	            previewModel.markdownContentSize = nil
+	            previewModel.isMarkdown = false
+	            markdownWebViewController = nil
+	        }
+	        .background(markdownPreMeasureView)
+	    }
+
+    @ViewBuilder
+    private var markdownPreMeasureView: some View {
+        if isHovering,
+           previewModel.isMarkdown,
+           !showTextPreview,
+           previewModel.markdownContentSize == nil,
+           let html = previewModel.markdownHTML,
+           let text = previewModel.text
+        {
+            let maxWidth: CGFloat = ScopySize.Width.previewMax
+            let containerWidth = max(1, maxWidth)
+
+            if let controller = markdownWebViewController {
+                MarkdownPreviewMeasurer(
+                    controller: controller,
+                    html: html,
+                    containerWidth: containerWidth,
+                    settleNanoseconds: 90_000_000,
+                    onStableSize: { size in
+                        guard self.isHovering else { return }
+                        guard self.previewModel.markdownHTML == html else { return }
+                        guard self.previewModel.text == text else { return }
+                        self.previewModel.markdownContentSize = size
+                        self.showTextPreview = true
+                    }
+                )
+            }
         }
     }
 
@@ -497,7 +533,7 @@ struct HistoryItemView: View, Equatable {
                 self.previewModel.isMarkdown = isMarkdown
                 self.previewModel.markdownHTML = nil
                 self.previewModel.markdownContentSize = nil
-                self.showTextPreview = true
+                self.showTextPreview = !isMarkdown
             }
 
             guard isMarkdown else { return }
@@ -508,6 +544,9 @@ struct HistoryItemView: View, Equatable {
             if let cached = MarkdownPreviewCache.shared.html(forKey: cacheKey) {
                 if self.isHovering, self.previewModel.text == preview {
                     self.previewModel.markdownHTML = cached
+                    if self.markdownWebViewController == nil {
+                        self.markdownWebViewController = MarkdownPreviewWebViewController()
+                    }
                 }
                 return
             }
@@ -518,6 +557,9 @@ struct HistoryItemView: View, Equatable {
                 await MainActor.run {
                     guard self.isHovering, self.previewModel.text == preview else { return }
                     self.previewModel.markdownHTML = html
+                    if self.markdownWebViewController == nil {
+                        self.markdownWebViewController = MarkdownPreviewWebViewController()
+                    }
                 }
             }
         }
@@ -561,5 +603,41 @@ struct HistoryItemView: View, Equatable {
 
     private func formatBytes(_ bytes: Int) -> String {
         Localization.formatBytes(bytes)
+    }
+}
+
+private struct MarkdownPreviewMeasurer: View {
+    let controller: MarkdownPreviewWebViewController
+    let html: String
+    let containerWidth: CGFloat
+    let settleNanoseconds: UInt64
+    let onStableSize: @MainActor (CGSize) -> Void
+
+    @State private var pendingSize: CGSize?
+    @State private var settleTask: Task<Void, Never>?
+
+    var body: some View {
+        ReusableMarkdownPreviewWebView(
+            controller: controller,
+            html: html,
+            shouldScroll: false,
+            onContentSizeChange: { size in
+                pendingSize = size
+                settleTask?.cancel()
+                settleTask = Task { @MainActor in
+                    try? await Task.sleep(nanoseconds: settleNanoseconds)
+                    guard !Task.isCancelled else { return }
+                    guard let final = pendingSize else { return }
+                    onStableSize(final)
+                }
+            }
+        )
+        .frame(width: max(1, containerWidth), height: 1)
+        .opacity(0.001)
+        .allowsHitTesting(false)
+        .onDisappear {
+            settleTask?.cancel()
+            settleTask = nil
+        }
     }
 }

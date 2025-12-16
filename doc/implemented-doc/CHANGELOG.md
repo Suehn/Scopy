@@ -5,6 +5,13 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [v0.44.fix3] - 2025-12-16
+
+### Fix/Preview：Markdown/公式懒加载渐变更自然 + 高度更新更稳定（减少闪烁）
+
+- **渐变过渡**：Markdown WebView 内部在 markdown-it + KaTeX 渲染完成后再淡入内容；同时 SwiftUI 侧在纯文本 → Markdown 预览“懒升级”时做交叉淡入淡出，减少生硬切换。
+- **减少闪烁**：对 WebView 上报的 `{width,height}` 做 80ms 去抖并只在稳定后更新 popover 尺寸，避免短时间多次重算导致的“抖动/闪烁”。
+
 ## [v0.44.fix2] - 2025-12-16
 
 ### Fix/Preview：减少 `$` 误判（货币/变量）+ 预览性能小优化

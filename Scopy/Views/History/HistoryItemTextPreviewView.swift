@@ -4,6 +4,7 @@ import AppKit
 
 struct HistoryItemTextPreviewView: View {
     @ObservedObject var model: HoverPreviewModel
+    let markdownWebViewController: MarkdownPreviewWebViewController?
 
     var body: some View {
         let maxWidth: CGFloat = ScopySize.Width.previewMax
@@ -36,20 +37,22 @@ struct HistoryItemTextPreviewView: View {
             let shouldScroll = contentHeight > maxHeight
 
             if model.isMarkdown, let html = model.markdownHTML {
-                MarkdownPreviewWebView(
-                    html: html,
-                    shouldScroll: shouldScroll,
-                    onContentSizeChange: { size in
-                        if let existing = model.markdownContentSize,
-                           abs(existing.width - size.width) < 1,
-                           abs(existing.height - size.height) < 1
-                        {
-                            return
-                        }
-                        model.markdownContentSize = size
-                    }
-                )
+                if let controller = markdownWebViewController {
+                    ReusableMarkdownPreviewWebView(
+                        controller: controller,
+                        html: html,
+                        shouldScroll: shouldScroll,
+                        onContentSizeChange: { _ in }
+                    )
                     .frame(width: width, height: clampedHeight)
+                } else {
+                    MarkdownPreviewWebView(
+                        html: html,
+                        shouldScroll: shouldScroll,
+                        onContentSizeChange: { _ in }
+                    )
+                    .frame(width: width, height: clampedHeight)
+                }
             } else {
                 HoverPreviewTextView(text: text, font: font, width: width, shouldScroll: shouldScroll)
                     .frame(width: width, height: clampedHeight)
