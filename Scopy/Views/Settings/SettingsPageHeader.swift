@@ -1,29 +1,24 @@
 import SwiftUI
+import ScopyKit
 
 struct SettingsPageHeader: View {
-    let title: String
-    let subtitle: String?
-    let systemImage: String
+    let page: SettingsPage
 
     var body: some View {
-        HStack(spacing: ScopySpacing.md) {
-            Image(systemName: systemImage)
-                .symbolRenderingMode(.hierarchical)
-                .foregroundStyle(.secondary)
-                .font(.system(size: 22, weight: .semibold))
-                .frame(width: 28, height: 28, alignment: .center)
+        HStack(alignment: .center, spacing: 12) {
+            SettingsPageHeaderIcon(systemName: page.icon)
 
-            VStack(alignment: .leading, spacing: 1) {
-                Text(title)
-                    .font(.system(size: 22, weight: .semibold))
-                if let subtitle, !subtitle.isEmpty {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(page.title)
+                    .font(.title)
+                    .fontWeight(.bold)
+
+                if let subtitle = page.subtitle, !subtitle.isEmpty {
                     Text(subtitle)
-                        .font(.callout)
+                        .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
             }
-
-            Spacer(minLength: 0)
         }
     }
 }
@@ -33,17 +28,39 @@ struct SettingsPageContainer<Content: View>: View {
     @ViewBuilder let content: () -> Content
 
     var body: some View {
-        VStack(alignment: .leading, spacing: ScopySpacing.sm) {
-            SettingsPageHeader(title: page.title, subtitle: page.subtitle, systemImage: page.icon)
-                .padding(.top, ScopySpacing.md)
-                .padding(.horizontal, ScopySpacing.xl)
-            Form {
-                content()
+        VStack(spacing: 0) {
+            SettingsPageHeader(page: page)
+                .padding(.horizontal, 24)
+                .padding(.top, 24)
+                .padding(.bottom, 12)
+                .background(ScopyColors.background)
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 24) {
+                    content()
+                }
+                .padding(.horizontal, 24)
+                .padding(.bottom, 24)
             }
-            .formStyle(.grouped)
-            .padding(.horizontal, ScopySpacing.xl)
-            .padding(.top, -ScopySpacing.sm)
+            .scrollContentBackground(.hidden)
         }
-        .padding(.bottom, ScopySpacing.xl)
+        .background(ScopyColors.background)
+    }
+}
+
+private struct SettingsPageHeaderIcon: View {
+    let systemName: String
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .fill(ScopyColors.secondaryBackground)
+                .frame(width: 30, height: 30) // Slightly smaller for header
+
+            Image(systemName: systemName)
+                .font(.system(size: 15, weight: .semibold))
+                .symbolRenderingMode(.hierarchical)
+                .foregroundStyle(.secondary)
+        }
     }
 }

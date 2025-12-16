@@ -56,3 +56,7 @@
 - 统一入口 `AppDelegate.applyHotKey`：注册 + 持久化 UserDefaults；HotKeyService 仅监听 `kEventHotKeyPressed`，含轻节流防按住重复。
 - 设置事件 `.settingsChanged` 兜底重应用热键。
 - 热键日志：`/tmp/scopy_hotkey.log`。
+
+## 设置窗口约定
+
+- Settings 使用显式 **Save/Cancel** 事务模型（`isDirty`），UI 重排/视觉改进需避免任何设置逻辑/行为变化（不要改成 autosave）。

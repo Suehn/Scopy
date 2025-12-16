@@ -153,10 +153,12 @@ Scopy follows a **protocol-first, frontend-backend separation** design:
 
 Settings available in the app (⌘,):
 
-- **General**: Global hotkey, search mode (fuzzy/exact/regex)
-- **Storage**: Max items (default 10k), max size, auto-cleanup
-- **Appearance**: Thumbnail height, preview delay
-- **About**: Version info, storage statistics
+- **General**: Default search mode (exact/fuzzy/fuzzy+/regex)
+- **Shortcuts**: Global hotkey recording
+- **Clipboard**: Save images / files toggles
+- **Appearance**: Thumbnail height, hover preview delay
+- **Storage**: Max items, inline storage limit, storage statistics
+- **About**: Version info, performance + links
 
 ---
 

@@ -79,50 +79,49 @@ struct SettingsView: View {
     private func settingsContent(settings: Binding<SettingsDTO>) -> some View {
         let isDirty = settings.wrappedValue != settingsViewModel.settings
 
-        return VStack(spacing: 0) {
-            NavigationSplitView {
-                List(filteredPages, selection: $selection) { page in
-                    SettingsSidebarRow(page: page)
-                        .tag(page)
-                }
-                .listStyle(.sidebar)
-                .searchable(text: $sidebarSearchText, placement: .sidebar, prompt: "搜索设置")
-                .frame(minWidth: ScopySize.Width.sidebarMin)
-            } detail: {
-                Group {
-                    switch selection ?? .general {
-                    case .general:
-                        GeneralSettingsPage(tempSettings: settings)
-                    case .shortcuts:
-                        ShortcutsSettingsPage(tempSettings: settings)
-                    case .clipboard:
-                        ClipboardSettingsPage(tempSettings: settings)
-                    case .appearance:
-                        AppearanceSettingsPage(tempSettings: settings)
-                    case .storage:
-                        StorageSettingsPage(
-                            tempSettings: settings,
-                            storageStats: storageStats,
-                            isLoading: isLoadingStats,
-                            onRefresh: refreshStats
-                        )
-                    case .about:
-                        AboutSettingsPage()
-                    }
+        return NavigationSplitView {
+            List(filteredPages, selection: $selection) { page in
+                SettingsSidebarRow(page: page)
+                    .tag(page)
+            }
+            .listStyle(.sidebar)
+            .searchable(text: $sidebarSearchText, placement: .sidebar, prompt: "搜索")
+            .frame(minWidth: ScopySize.Width.sidebarMin)
+        } detail: {
+            Group {
+                switch selection ?? .general {
+                case .general:
+                    GeneralSettingsPage(tempSettings: settings)
+                case .shortcuts:
+                    ShortcutsSettingsPage(tempSettings: settings)
+                case .clipboard:
+                    ClipboardSettingsPage(tempSettings: settings)
+                case .appearance:
+                    AppearanceSettingsPage(tempSettings: settings)
+                case .storage:
+                    StorageSettingsPage(
+                        tempSettings: settings,
+                        storageStats: storageStats,
+                        isLoading: isLoadingStats,
+                        onRefresh: refreshStats
+                    )
+                case .about:
+                    AboutSettingsPage()
                 }
             }
-            .navigationSplitViewColumnWidth(240)
-            .frame(minWidth: ScopySize.Window.settingsWidth, minHeight: ScopySize.Window.settingsHeight)
-
-            SettingsActionBar(
-                isSaving: isSaving,
-                isDirty: isDirty,
-                savedHint: savedHint,
-                onReset: { tempSettings = .default },
-                onCancel: { onDismiss?() },
-                onSave: saveSettings
-            )
+            .background(ScopyColors.background)
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                SettingsActionBar(
+                    isSaving: isSaving,
+                    isDirty: isDirty,
+                    savedHint: savedHint,
+                    onReset: { tempSettings = .default },
+                    onCancel: { onDismiss?() },
+                    onSave: saveSettings
+                )
+            }
         }
+        .navigationSplitViewColumnWidth(min: 220, ideal: 240, max: 300)
         .frame(minWidth: ScopySize.Window.settingsWidth, minHeight: ScopySize.Window.settingsHeight)
     }
 
@@ -135,13 +134,16 @@ struct SettingsView: View {
                 guard !Task.isCancelled else { return }
                 let stats = try await settingsViewModel.getDetailedStorageStats()
                 guard !Task.isCancelled else { return }
-                storageStats = stats
+                await MainActor.run {
+                    storageStats = stats
+                }
             } catch {
                 if !Task.isCancelled {
                     ScopyLog.ui.error("Failed to load storage stats: \(error.localizedDescription, privacy: .public)")
                 }
             }
-            if !Task.isCancelled {
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
                 isLoadingStats = false
             }
         }
@@ -187,37 +189,34 @@ private struct SettingsActionBar: View {
     let onSave: () -> Void
 
     var body: some View {
-        VStack(spacing: 0) {
-            Divider()
-            HStack(spacing: ScopySpacing.md) {
-                Button("恢复默认", action: onReset)
-                    .buttonStyle(.link)
-                    .accessibilityIdentifier("Settings.ResetButton")
+        HStack(spacing: 12) {
+            Button("恢复默认", action: onReset)
+                .buttonStyle(.link)
+                .controlSize(.small)
+                .accessibilityIdentifier("Settings.ResetButton")
 
-                Spacer()
+            Spacer()
 
-                if let savedHint {
-                    Text(savedHint)
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                        .transition(.opacity)
-                }
-
-                Button("取消", action: onCancel)
-                    .buttonStyle(.bordered)
-                    .keyboardShortcut(.cancelAction)
-                    .accessibilityIdentifier("Settings.CancelButton")
-
-                Button("保存", action: onSave)
-                    .buttonStyle(.borderedProminent)
-                    .keyboardShortcut(.defaultAction)
-                    .disabled(!isDirty || isSaving)
-                    .accessibilityIdentifier("Settings.SaveButton")
+            if let savedHint {
+                Text(savedHint)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .transition(.opacity)
             }
-            .padding(.horizontal, ScopySpacing.xl)
-            .padding(.vertical, ScopySpacing.md)
-            .background(.regularMaterial)
+
+            Button("取消", action: onCancel)
+                .keyboardShortcut(.cancelAction)
+                .accessibilityIdentifier("Settings.CancelButton")
+
+            Button("保存", action: onSave)
+                .buttonStyle(.borderedProminent)
+                .keyboardShortcut(.defaultAction)
+                .disabled(!isDirty || isSaving)
+                .accessibilityIdentifier("Settings.SaveButton")
         }
+        .padding(EdgeInsets(top: 16, leading: 24, bottom: 16, trailing: 24))
+        .background(Color(nsColor: .windowBackgroundColor))
+        .overlay(Divider(), alignment: .top)
     }
 }
 
@@ -226,26 +225,30 @@ private struct SettingsSidebarRow: View {
     let page: SettingsPage
 
     var body: some View {
-        HStack(spacing: ScopySpacing.md) {
-            SettingsSymbolIcon(systemName: page.icon, tint: iconColor, size: 22)
+        HStack(spacing: 8) {
+            SettingsSymbolIcon(systemName: page.icon, tint: iconColor)
 
             VStack(alignment: .leading, spacing: 1) {
                 Text(page.title)
-                    .font(ScopyTypography.sidebarLabel)
+                    .font(.body)
+                    .fontWeight(.regular)
+
                 if let subtitle = page.subtitle, !subtitle.isEmpty {
                     Text(subtitle)
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                        .lineLimit(1)
                 }
             }
+
+            Spacer()
         }
+        .padding(.vertical, 6) // Standard macOS Settings row height
     }
 
     private var iconColor: Color {
         switch page {
         case .general:
-            return .gray
+            return .gray // macOS standard for General is gray
         case .shortcuts:
             return .purple
         case .clipboard:
@@ -255,7 +258,7 @@ private struct SettingsSidebarRow: View {
         case .storage:
             return .blue
         case .about:
-            return .secondary
+            return .gray
         }
     }
 }
@@ -264,18 +267,17 @@ private struct SettingsSidebarRow: View {
 private struct SettingsSymbolIcon: View {
     let systemName: String
     let tint: Color
-    let size: CGFloat
 
     var body: some View {
         ZStack {
             RoundedRectangle(cornerRadius: 6, style: .continuous)
-                .fill(tint.opacity(0.18))
+                .fill(tint)
+                .frame(width: 26, height: 26) // Slightly larger, standard macOS size
+
             Image(systemName: systemName)
-                .symbolRenderingMode(.hierarchical)
-                .foregroundStyle(tint)
-                .font(.system(size: size * 0.55, weight: .semibold))
+                .font(.system(size: 15, weight: .medium))
+                .foregroundStyle(.white)
         }
-        .frame(width: size, height: size)
     }
 }
 

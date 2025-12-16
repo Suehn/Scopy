@@ -7,22 +7,21 @@ struct ShortcutsSettingsPage: View {
 
     var body: some View {
         SettingsPageContainer(page: .shortcuts) {
-            Section {
-                LabeledContent("全局快捷键") {
-                    HotKeyRecorderView(
-                        keyCode: $tempSettings.hotkeyKeyCode,
-                        modifiers: $tempSettings.hotkeyModifiers,
-                        unregisterHotKeyHandler: appState.unregisterHotKeyHandler,
-                        applyHotKeyHandler: appState.applyHotKeyHandler
-                    )
+            SettingsSection(
+                "快捷键",
+                systemImage: "keyboard",
+                footer: "点击录制新快捷键，按 ESC 取消。录制完成后会立即生效并持久化。"
+            ) {
+                SettingsCardRow {
+                    LabeledContent("全局快捷键") {
+                        HotKeyRecorderView(
+                            keyCode: $tempSettings.hotkeyKeyCode,
+                            modifiers: $tempSettings.hotkeyModifiers,
+                            unregisterHotKeyHandler: appState.unregisterHotKeyHandler,
+                            applyHotKeyHandler: appState.applyHotKeyHandler
+                        )
+                    }
                 }
-            } header: {
-                Label("快捷键", systemImage: "keyboard")
-                    .symbolRenderingMode(.hierarchical)
-                    .foregroundStyle(.secondary)
-            } footer: {
-                Text("点击录制新快捷键，按 ESC 取消。录制完成后会立即生效并持久化。")
-                    .foregroundStyle(.secondary)
             }
         }
     }

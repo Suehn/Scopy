@@ -5,6 +5,16 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [v0.44.fix17] - 2025-12-16
+
+### UX/Settings：对齐 macOS Ventura+ 系统设置风格（仅前端重排，不改变设置逻辑）
+
+- **页面结构统一**：每页采用 “Header（图标 + 标题 + 副标题）→ 分组卡片（Settings-style）” 的信息架构，整体更接近 macOS 13+ System Settings。
+- **分组卡片组件化**：引入 `SettingsSection/SettingsCard/SettingsCardRow`，统一分组标题、卡片圆角、分割线与 footer 文案风格，减少页面间视觉漂移。
+- **底部操作条更原生**：footer 改用 `safeAreaInset(edge: .bottom)` 固定，避免手工 padding 导致遮挡/留白；背景与窗口更融合并带顶部分隔线。
+- **侧边栏更像系统设置**：增加 subtitle、优化图标配色与行高，提升可扫读性与点击命中率。
+- **并发卫生（UI 侧）**：Storage stats 加载结果在 `MainActor` 更新，避免 strict concurrency 下跨线程更新 UI 状态的潜在告警。
+
 ## [v0.44.fix16] - 2025-12-16
 
 ### Fix/Quality：性能指标展示修复 + 并发卫生收口（不改变用户数据/行为）
