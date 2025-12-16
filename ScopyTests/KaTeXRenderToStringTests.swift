@@ -9,6 +9,18 @@ final class KaTeXRenderToStringTests: XCTestCase {
         XCTAssertTrue(html.contains("markdown-it.min.js"))
     }
 
+    func testMarkdownPreviewPreservesSoftLineBreaks() {
+        let input = """
+        **【试卷二】第 21 题**
+        设函数 $y=f(x)$ 的定义域为 $D$，导函数为 $y=f'(x)$。
+        (1) 若函数 $f(x)=\\ln x$，请判断该函数是否具有性质 $P(1)$；
+        (2) 若函数 $f(x)=x^3+a$ 具有性质 $P(2)$；
+        """
+
+        let html = MarkdownHTMLRenderer.render(markdown: input)
+        XCTAssertTrue(html.contains("breaks: true"))
+    }
+
     func testMarkdownPreviewHeightReportingDoesNotDivideByDevicePixelRatio() {
         let html = MarkdownHTMLRenderer.render(markdown: "x")
         XCTAssertFalse(html.contains("devicePixelRatio"))

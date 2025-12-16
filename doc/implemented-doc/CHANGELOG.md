@@ -5,6 +5,13 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [v0.44.fix15] - 2025-12-16
+
+### Fix/Preview：Markdown 预览保留软换行（不影响 Markdown 语义）
+
+- hover Markdown/LaTeX 预览启用 markdown-it 的 `breaks` 选项，将“段内单换行”转换为 `<br>`，以正确展示从 PDF/网页复制的题目/段落换行（不要求用户额外插入空行或 `␠␠`）。
+- 新增回归测试，确保预览脚本开启 `breaks: true`（防止将来回退导致换行再次丢失）。
+
 ## [v0.44.fix14] - 2025-12-16
 
 ### Fix/Dedup：去重稳定性修复（不改变用户可见内容）

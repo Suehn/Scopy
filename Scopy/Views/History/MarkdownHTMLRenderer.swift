@@ -242,7 +242,9 @@ enum MarkdownHTMLRenderer {
               try { document.addEventListener('scroll', function () { showScrollbarsTemporarily(); }, true); } catch (e) { }
               try { document.addEventListener('wheel', function () { showScrollbarsTemporarily(); }, { passive: true }); } catch (e) { }
 
-              var md = window.markdownit({ html: false, linkify: false, typographer: true });
+              // Preserve single newlines as hard line breaks. Clipboard/PDF copied text often uses line breaks
+              // without blank lines, and the hover preview should respect that formatting.
+              var md = window.markdownit({ html: false, linkify: false, typographer: true, breaks: true });
               if (md && typeof md.enable === 'function') {
                 md.enable('table');
               }
