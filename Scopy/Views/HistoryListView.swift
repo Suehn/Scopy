@@ -87,6 +87,7 @@ struct HistoryListView: View {
                 .listStyle(.plain)
                 .scrollContentBackground(.hidden)
                 .scrollIndicators(.automatic)
+                .accessibilityIdentifier("History.List")
                 .background(ListLiveScrollObserverView(onScroll: { historyViewModel.onScroll() }))
                 .onChange(of: historyViewModel.selectedID) { _, newValue in
                     // 仅当键盘导航时自动滚动到选中项
@@ -127,6 +128,7 @@ struct HistoryListView: View {
         )
         .equatable()
         .id(item.id)
+        .accessibilityIdentifier("History.Item.\(item.id.uuidString)")
         .listRowInsets(EdgeInsets())      // 移除默认内边距
         .listRowBackground(Color.clear)    // 透明背景
         .listRowSeparator(.hidden)         // 隐藏分隔线

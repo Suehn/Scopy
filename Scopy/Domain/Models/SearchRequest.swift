@@ -5,6 +5,7 @@ import Foundation
 public struct SearchRequest: Sendable {
     public let query: String
     public let mode: SearchMode
+    public let sortMode: SearchSortMode
     public let appFilter: String?
     public let typeFilter: ClipboardItemType?
     /// v0.22: 多类型过滤，优先于 typeFilter
@@ -17,6 +18,7 @@ public struct SearchRequest: Sendable {
     public init(
         query: String,
         mode: SearchMode = SettingsDTO.default.defaultSearchMode,
+        sortMode: SearchSortMode = .relevance,
         appFilter: String? = nil,
         typeFilter: ClipboardItemType? = nil,
         typeFilters: Set<ClipboardItemType>? = nil,
@@ -26,6 +28,7 @@ public struct SearchRequest: Sendable {
     ) {
         self.query = query
         self.mode = mode
+        self.sortMode = sortMode
         self.appFilter = appFilter
         self.typeFilter = typeFilter
         self.typeFilters = typeFilters

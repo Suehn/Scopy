@@ -1016,10 +1016,12 @@ public final class StorageService {
         return output as Data
     }
 
-    /// 获取原图数据（用于预览）
-    /// v0.22: 修复图片数据丢失问题 - 当 rawData 为 nil 时从数据库重新加载
-    /// 这是因为搜索层缓存/索引中 rawData 为 nil（v0.19 内存优化）
-    func getOriginalImageData(for item: StoredItem) async -> Data? {
+    /// Load raw payload data for a stored item.
+    ///
+    /// Notes:
+    /// - This is used by image/rtf/html/file restore paths.
+    /// - When `rawData` is nil (e.g. memory-optimized summaries), this falls back to reloading from DB.
+    func loadPayloadData(for item: StoredItem) async -> Data? {
         // 1. 优先使用外部存储（大图片 >100KB）
         if let storageRef = item.storageRef {
             let allowedRoot = externalStoragePath
@@ -1041,6 +1043,11 @@ public final class StorageService {
 
         ScopyLog.storage.error("Failed to get original image data for item \(item.id.uuidString, privacy: .public)")
         return nil
+    }
+
+    @available(*, deprecated, message: "Use loadPayloadData(for:) (this method name was misleading).")
+    func getOriginalImageData(for item: StoredItem) async -> Data? {
+        await loadPayloadData(for: item)
     }
 
     /// 清空缩略图缓存（设置变更时调用）

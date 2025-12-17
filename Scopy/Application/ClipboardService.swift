@@ -248,7 +248,7 @@ actor ClipboardService {
                 monitor.copyToClipboard(text: item.plainText)
             }
         case .rtf, .html, .image:
-            let data = await storage.getOriginalImageData(for: item)
+            let data = await storage.loadPayloadData(for: item)
             if let data {
                 let itemType = item.type
                 let plainText: String
@@ -284,7 +284,7 @@ actor ClipboardService {
                 }
             }
         case .file:
-            let urlData = await storage.getOriginalImageData(for: item)
+            let urlData = await storage.loadPayloadData(for: item)
             if let data = urlData,
                let fileURLs = ClipboardMonitor.deserializeFileURLs(data),
                !fileURLs.isEmpty {
@@ -396,7 +396,7 @@ actor ClipboardService {
     func getImageData(itemID: UUID) async throws -> Data? {
         let storage = try requireStorage()
         guard let item = try await storage.findByID(itemID) else { return nil }
-        return await storage.getOriginalImageData(for: item)
+        return await storage.loadPayloadData(for: item)
     }
 
     func getRecentApps(limit: Int) async throws -> [String] {
@@ -546,7 +546,7 @@ actor ClipboardService {
         let rawData = item.rawData
         let fallbackImageData: Data?
         if (storagePath == nil || storagePath?.isEmpty == true), rawData == nil {
-            fallbackImageData = await storage.getOriginalImageData(for: item)
+            fallbackImageData = await storage.loadPayloadData(for: item)
         } else {
             fallbackImageData = nil
         }

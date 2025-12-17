@@ -2,9 +2,13 @@ import Foundation
 
 enum MarkdownHTMLRenderer {
     static func render(markdown: String) -> String {
+        guard !Task.isCancelled else { return "" }
         let latexNormalized = LaTeXDocumentNormalizer.normalize(markdown)
+        guard !Task.isCancelled else { return "" }
         let normalizedMarkdown = MathNormalizer.wrapLooseLaTeX(latexNormalized)
+        guard !Task.isCancelled else { return "" }
         let protected = MathProtector.protectMath(in: normalizedMarkdown)
+        guard !Task.isCancelled else { return "" }
         let inlineNormalizedMarkdown = LaTeXInlineTextNormalizer.normalize(protected.markdown)
         let hasMath = MarkdownDetector.containsMath(normalizedMarkdown)
 
@@ -14,6 +18,7 @@ enum MarkdownHTMLRenderer {
             escape: { $0 }
         )
 
+        guard !Task.isCancelled else { return "" }
         return htmlDocument(
             markdown: inlineNormalizedMarkdown,
             placeholders: protected.placeholders,

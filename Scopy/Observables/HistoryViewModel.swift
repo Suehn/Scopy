@@ -113,12 +113,20 @@ final class HistoryViewModel {
     @ObservationIgnored private var recentAppsRefreshTask: Task<Void, Never>?
 
     @ObservationIgnored private var lastLoadedAt: Date = .distantPast
+    @ObservationIgnored private let ftsSortModeDefaultsKey = "Scopy.FTSSortMode"
+
+    var ftsSortMode: SearchSortMode = .relevance
 
     // MARK: - Init
 
     init(service: ClipboardServiceProtocol, settingsViewModel: SettingsViewModel) {
         self.service = service
         self.settingsViewModel = settingsViewModel
+
+        if let raw = UserDefaults.standard.string(forKey: ftsSortModeDefaultsKey),
+           let mode = SearchSortMode(rawValue: raw) {
+            ftsSortMode = mode
+        }
     }
 
     func configureTiming(_ timing: Timing) {
@@ -460,6 +468,7 @@ final class HistoryViewModel {
                 let request = SearchRequest(
                     query: searchQuery,
                     mode: searchMode,
+                    sortMode: ftsSortMode,
                     appFilter: appFilter,
                     typeFilter: typeFilter,
                     typeFilters: typeFilters,
@@ -524,6 +533,12 @@ final class HistoryViewModel {
                 ScopyLog.app.error("Search failed: \(error.localizedDescription, privacy: .private)")
             }
         }
+    }
+
+    func toggleFTSSortMode() {
+        ftsSortMode = ftsSortMode.toggled
+        UserDefaults.standard.set(ftsSortMode.rawValue, forKey: ftsSortModeDefaultsKey)
+        search()
     }
 
     // MARK: - Actions

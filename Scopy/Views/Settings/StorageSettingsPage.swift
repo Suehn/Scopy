@@ -13,7 +13,7 @@ struct StorageSettingsPage: View {
             SettingsSection(
                 "限制",
                 systemImage: "gauge.with.dots.needle.bottom.50percent",
-                footer: "超过上限后会自动清理较旧的条目（Pinned 会被保留）。"
+                footer: "超过上限后会自动清理较旧的条目（Pinned 会被保留）。“内容估算上限”按条目内容体积（SUM(size_bytes)）计算，不等同于数据库文件大小。"
             ) {
                 SettingsCardRow {
                     LabeledContent("历史条目上限") {
@@ -34,7 +34,7 @@ struct StorageSettingsPage: View {
                 SettingsCardDivider()
 
                 SettingsCardRow {
-                    LabeledContent("内联存储上限") {
+                    LabeledContent("内容估算上限") {
                         Picker("", selection: $tempSettings.maxStorageMB) {
                             Text("100 MB").tag(100)
                             Text("200 MB").tag(200)

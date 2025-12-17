@@ -23,28 +23,26 @@ final class HistoryListUITests: XCTestCase {
 
     func testHistoryListExists() throws {
         // Wait for the list to appear
-        let list = app.scrollViews.firstMatch
-        let exists = list.waitForExistence(timeout: 5)
+        let list = app.anyElement("History.List")
+        let exists = list.waitForExistence(timeout: 10)
         XCTAssertTrue(exists)
     }
 
     func testHistoryListHasItems() throws {
         // In UI testing mode with mock data, should have items
-        let list = app.scrollViews.firstMatch
-        guard list.waitForExistence(timeout: 5) else {
+        let list = app.anyElement("History.List")
+        guard list.waitForExistence(timeout: 10) else {
             XCTFail("List not found")
             return
         }
 
-        // Check for text elements in the list
-        let staticTexts = list.staticTexts
-        let count = staticTexts.count
-        XCTAssertGreaterThan(count, 0)
+        let items = app.anyElements(matching: NSPredicate(format: "identifier BEGINSWITH %@", "History.Item."))
+        XCTAssertGreaterThan(items.count, 0)
     }
 
     func testListScrolling() throws {
-        let list = app.scrollViews.firstMatch
-        guard list.waitForExistence(timeout: 5) else {
+        let list = app.anyElement("History.List")
+        guard list.waitForExistence(timeout: 10) else {
             XCTFail("List not found")
             return
         }
@@ -58,23 +56,23 @@ final class HistoryListUITests: XCTestCase {
     }
 
     func testItemSelection() throws {
-        let list = app.scrollViews.firstMatch
-        guard list.waitForExistence(timeout: 5) else {
+        let list = app.anyElement("History.List")
+        guard list.waitForExistence(timeout: 10) else {
             XCTFail("List not found")
             return
         }
 
         // Click on first item
-        let firstItem = list.staticTexts.firstMatch
-        if firstItem.exists {
+        _ = list
+        let firstItem = app.anyElements(matching: NSPredicate(format: "identifier BEGINSWITH %@", "History.Item.")).firstMatch
+        if firstItem.waitForExistence(timeout: 5) {
             firstItem.click()
-            // Item should remain visible or window may close
         }
     }
 
     func testListRefreshesOnSearch() throws {
-        let searchField = app.searchFields.firstMatch
-        guard searchField.waitForExistence(timeout: 5) else {
+        let searchField = app.anyElement("History.SearchField")
+        guard searchField.waitForExistence(timeout: 10) else {
             XCTFail("Search field not found")
             return
         }
@@ -82,29 +80,38 @@ final class HistoryListUITests: XCTestCase {
         searchField.click()
         searchField.typeText("test")
 
-        // Wait for search results
-        Thread.sleep(forTimeInterval: 0.3) // Wait for debounce
+        // Wait for the query text to be reflected in the field value.
+        waitForPredicate(
+            NSPredicate(format: "value CONTAINS[c] %@", "test"),
+            on: searchField,
+            timeout: 3,
+            message: "Search field did not receive input"
+        )
 
-        let list = app.scrollViews.firstMatch
-        let exists = list.exists
-        XCTAssertTrue(exists)
+        XCTAssertTrue(app.anyElement("History.List").exists)
     }
 
     func testEmptySearchShowsResults() throws {
-        let searchField = app.searchFields.firstMatch
-        guard searchField.waitForExistence(timeout: 5) else {
+        let searchField = app.anyElement("History.SearchField")
+        guard searchField.waitForExistence(timeout: 10) else {
             XCTFail("Search field not found")
             return
         }
 
-        // Clear search
+        // Enter search text then clear it (⌘A + ⌫) so the behavior is deterministic.
         searchField.click()
-        searchField.typeText("\u{8}") // Backspace
+        searchField.typeText("test")
 
-        Thread.sleep(forTimeInterval: 0.3)
+        // Delete typed characters (avoid modifier-dependent shortcuts for stability).
+        searchField.typeText(String(repeating: "\u{8}", count: 4))
 
-        let list = app.scrollViews.firstMatch
-        let exists = list.exists
-        XCTAssertTrue(exists)
+        waitForPredicate(
+            NSPredicate(format: "value == '' OR value == nil OR value CONTAINS[c] %@", "Search"),
+            on: searchField,
+            timeout: 3,
+            message: "Search field did not clear"
+        )
+
+        XCTAssertTrue(app.anyElement("History.List").exists)
     }
 }

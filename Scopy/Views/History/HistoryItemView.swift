@@ -556,7 +556,9 @@ struct HistoryItemView: View, Equatable {
             }
 
             hoverMarkdownTask = Task.detached(priority: .utility) {
+                guard !Task.isCancelled else { return }
                 let html = MarkdownHTMLRenderer.render(markdown: preview)
+                guard !Task.isCancelled, !html.isEmpty else { return }
                 MarkdownPreviewCache.shared.setHTML(html, forKey: cacheKey)
                 await MainActor.run {
                     guard self.isHovering, self.previewModel.text == preview else { return }

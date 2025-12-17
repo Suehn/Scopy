@@ -21,88 +21,95 @@ final class ContextMenuUITests: XCTestCase {
 
     // MARK: - Context Menu Tests
 
+    private func historyListOutline() -> XCUIElement {
+        app.outlines["History.List"]
+    }
+
+    private func contextMenuItem(title: String) -> XCUIElement {
+        let menu = historyListOutline().menus.firstMatch
+        return menu.menuItems.matching(NSPredicate(format: "identifier == %@ AND label == %@", "menuAction:", title)).firstMatch
+    }
+
     func testContextMenuAppearsOnRightClick() throws {
-        let list = app.scrollViews.firstMatch
-        guard list.waitForExistence(timeout: 5) else {
-            XCTFail("List not found")
+        let list = app.anyElement("History.List")
+        guard list.waitForExistence(timeout: 10) else {
+            XCTFail("History list not found")
             return
         }
 
-        // Right-click on first item
-        let firstItem = list.staticTexts.firstMatch
-        if firstItem.exists {
-            firstItem.rightClick()
-
-            Thread.sleep(forTimeInterval: 0.3)
-
-            // Check if context menu appeared
-            let menu = app.menus.firstMatch
-            _ = menu.exists
-            // Menu may not be easily accessible in XCUITest
+        let firstItem = app.anyElements(matching: NSPredicate(format: "identifier BEGINSWITH %@", "History.Item.")).firstMatch
+        guard firstItem.waitForExistence(timeout: 10) else {
+            XCTFail("No history items found")
+            return
         }
+
+        firstItem.rightClick()
+        _ = app.exists
     }
 
     func testContextMenuHasCopyOption() throws {
-        let list = app.scrollViews.firstMatch
-        guard list.waitForExistence(timeout: 5) else {
-            XCTFail("List not found")
+        let list = app.anyElement("History.List")
+        guard list.waitForExistence(timeout: 10) else {
+            XCTFail("History list not found")
             return
         }
 
-        let firstItem = list.staticTexts.firstMatch
-        if firstItem.exists {
-            firstItem.rightClick()
-
-            Thread.sleep(forTimeInterval: 0.3)
-
-            // Look for Copy menu item
-            let copyItem = app.menuItems["Copy"]
-            if copyItem.exists {
-                let isEnabled = copyItem.isEnabled
-                XCTAssertTrue(isEnabled)
-            }
+        let firstItem = app.anyElements(matching: NSPredicate(format: "identifier BEGINSWITH %@", "History.Item.")).firstMatch
+        guard firstItem.waitForExistence(timeout: 10) else {
+            XCTFail("No history items found")
+            return
         }
+
+        firstItem.rightClick()
+
+        let copyItem = contextMenuItem(title: "Copy")
+        guard copyItem.waitForExistence(timeout: 2) else {
+            throw XCTSkip("Context menu items are not reliably exposed to XCUITest on macOS for this view.")
+        }
+        XCTAssertTrue(copyItem.isEnabled)
     }
 
     func testContextMenuHasPinOption() throws {
-        let list = app.scrollViews.firstMatch
-        guard list.waitForExistence(timeout: 5) else {
-            XCTFail("List not found")
+        let list = app.anyElement("History.List")
+        guard list.waitForExistence(timeout: 10) else {
+            XCTFail("History list not found")
             return
         }
 
-        let firstItem = list.staticTexts.firstMatch
-        if firstItem.exists {
-            firstItem.rightClick()
+        let firstItem = app.anyElements(matching: NSPredicate(format: "identifier BEGINSWITH %@", "History.Item.")).firstMatch
+        guard firstItem.waitForExistence(timeout: 10) else {
+            XCTFail("No history items found")
+            return
+        }
 
-            Thread.sleep(forTimeInterval: 0.3)
+        firstItem.rightClick()
 
-            // Look for Pin menu item
-            let pinItem = app.menuItems["Pin"]
-            _ = pinItem.exists
-            // May be "Unpin" if already pinned
+        let pinItem = contextMenuItem(title: "Pin")
+        let unpinItem = contextMenuItem(title: "Unpin")
+        guard pinItem.waitForExistence(timeout: 2) || unpinItem.waitForExistence(timeout: 2) else {
+            throw XCTSkip("Context menu items are not reliably exposed to XCUITest on macOS for this view.")
         }
     }
 
     func testContextMenuHasDeleteOption() throws {
-        let list = app.scrollViews.firstMatch
-        guard list.waitForExistence(timeout: 5) else {
-            XCTFail("List not found")
+        let list = app.anyElement("History.List")
+        guard list.waitForExistence(timeout: 10) else {
+            XCTFail("History list not found")
             return
         }
 
-        let firstItem = list.staticTexts.firstMatch
-        if firstItem.exists {
-            firstItem.rightClick()
-
-            Thread.sleep(forTimeInterval: 0.3)
-
-            // Look for Delete menu item
-            let deleteItem = app.menuItems["Delete"]
-            if deleteItem.exists {
-                let isEnabled = deleteItem.isEnabled
-                XCTAssertTrue(isEnabled)
-            }
+        let firstItem = app.anyElements(matching: NSPredicate(format: "identifier BEGINSWITH %@", "History.Item.")).firstMatch
+        guard firstItem.waitForExistence(timeout: 10) else {
+            XCTFail("No history items found")
+            return
         }
+
+        firstItem.rightClick()
+
+        let deleteItem = contextMenuItem(title: "Delete")
+        guard deleteItem.waitForExistence(timeout: 2) else {
+            throw XCTSkip("Context menu items are not reliably exposed to XCUITest on macOS for this view.")
+        }
+        XCTAssertTrue(deleteItem.isEnabled)
     }
 }

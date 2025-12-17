@@ -1,5 +1,6 @@
 import SwiftUI
 import Carbon.HIToolbox
+import ScopyKit
 
 struct HotKeyRecorderView: View {
     @Environment(SettingsViewModel.self) private var settingsViewModel
@@ -37,8 +38,10 @@ struct HotKeyRecorderView: View {
                 keyCode = newKeyCode
                 modifiers = newModifiers
                 Task { @MainActor in
-                    applyHotKeyHandler?(newKeyCode, newModifiers)
-                    await syncFromPersistedSettings(expectedKeyCode: newKeyCode, expectedModifiers: newModifiers)
+                    await applyHotKeyAndSyncFromPersistedSettings(
+                        expectedKeyCode: newKeyCode,
+                        expectedModifiers: newModifiers
+                    )
                 }
             }
         }
@@ -69,12 +72,32 @@ struct HotKeyRecorderView: View {
     }
 
     @MainActor
-    private func syncFromPersistedSettings(expectedKeyCode: UInt32, expectedModifiers: UInt32) async {
-        // SettingsStore 写入是异步的；给一次短暂的调度窗口，避免立即读到旧值。
-        try? await Task.sleep(nanoseconds: 50_000_000)
-        await settingsViewModel.loadSettings()
+    private func applyHotKeyAndSyncFromPersistedSettings(expectedKeyCode: UInt32, expectedModifiers: UInt32) async {
+        let store = SettingsStore.shared
+        let stream = await store.observeSettings(bufferSize: 2)
+        let iteratorBox = SettingsIteratorBox(stream.makeAsyncIterator())
 
+        let initial = await iteratorBox.next()
+        let initialKeyCode = initial?.hotkeyKeyCode
+        let initialModifiers = initial?.hotkeyModifiers
+
+        applyHotKeyHandler?(expectedKeyCode, expectedModifiers)
+
+        if initialKeyCode == expectedKeyCode, initialModifiers == expectedModifiers {
+            return
+        }
+
+        let updated = await nextSettings(iteratorBox, timeout: 1.5)
+        if let updated,
+           updated.hotkeyKeyCode == expectedKeyCode,
+           updated.hotkeyModifiers == expectedModifiers {
+            return
+        }
+
+        // Either the requested hotkey was rejected and reverted, or we timed out waiting for persistence.
+        await settingsViewModel.loadSettings()
         let persisted = settingsViewModel.settings
+
         guard persisted.hotkeyKeyCode != expectedKeyCode || persisted.hotkeyModifiers != expectedModifiers else {
             return
         }
@@ -82,6 +105,37 @@ struct HotKeyRecorderView: View {
         keyCode = persisted.hotkeyKeyCode
         modifiers = persisted.hotkeyModifiers
         applyErrorMessage = "该快捷键可能已被系统或其他应用占用，已恢复为 \(formatHotKey(keyCode: keyCode, modifiers: modifiers))"
+    }
+
+    private final class SettingsIteratorBox {
+        var iterator: AsyncStream<SettingsDTO>.AsyncIterator
+
+        init(_ iterator: AsyncStream<SettingsDTO>.AsyncIterator) {
+            self.iterator = iterator
+        }
+
+        func next() async -> SettingsDTO? {
+            await iterator.next()
+        }
+    }
+
+    private func nextSettings(
+        _ iterator: SettingsIteratorBox,
+        timeout: TimeInterval
+    ) async -> SettingsDTO? {
+        await withTaskGroup(of: SettingsDTO?.self) { group in
+            group.addTask {
+                await iterator.next()
+            }
+            group.addTask {
+                try? await Task.sleep(nanoseconds: UInt64(max(0, timeout) * 1_000_000_000))
+                return nil
+            }
+
+            let value = await group.next() ?? nil
+            group.cancelAll()
+            return value
+        }
     }
 
     private func formatHotKey(keyCode: UInt32, modifiers: UInt32) -> String {

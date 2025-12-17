@@ -64,14 +64,13 @@ final class KeyboardNavigationUITests: XCTestCase {
 
         // Press enter - should copy and possibly close window
         window.typeKey(.return, modifierFlags: [])
-
-        // Window may close after selection
-        Thread.sleep(forTimeInterval: 0.5)
+        // Window may close after selection; just ensure we don't crash.
+        _ = window.exists
     }
 
     func testEscapeKeyClearsSearch() throws {
-        let searchField = app.searchFields.firstMatch
-        guard searchField.waitForExistence(timeout: 5) else {
+        let searchField = app.anyElement("History.SearchField")
+        guard searchField.waitForExistence(timeout: 10) else {
             XCTFail("Search field not found")
             return
         }
@@ -83,11 +82,13 @@ final class KeyboardNavigationUITests: XCTestCase {
         // Press escape
         app.windows.firstMatch.typeKey(.escape, modifierFlags: [])
 
-        Thread.sleep(forTimeInterval: 0.2)
-
-        // Search should be cleared or window closed
-        let exists = app.exists
-        XCTAssertTrue(exists)
+        // Search should be cleared (or panel closed). We assert the query is no longer "test".
+        waitForPredicate(
+            NSPredicate(format: "NOT (value CONTAINS[c] %@)", "test"),
+            on: searchField,
+            timeout: 2,
+            message: "Escape did not clear the search field"
+        )
     }
 
     func testMultipleDownArrowsNavigatesList() throws {

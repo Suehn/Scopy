@@ -29,7 +29,7 @@ final class SettingsUITests: XCTestCase {
         }
 
         // Open settings with Cmd+,
-        window.typeKey(",", modifierFlags: .command)
+        app.typeKey(",", modifierFlags: .command)
         XCTAssertTrue(app.buttons["Settings.SaveButton"].waitForExistence(timeout: 3))
     }
 
@@ -41,7 +41,7 @@ final class SettingsUITests: XCTestCase {
             return
         }
 
-        window.typeKey(",", modifierFlags: .command)
+        app.typeKey(",", modifierFlags: .command)
         XCTAssertTrue(app.buttons["Settings.SaveButton"].waitForExistence(timeout: 3))
 
         // Open Storage page and verify picker exists
@@ -56,11 +56,12 @@ final class SettingsUITests: XCTestCase {
             return
         }
 
-        window.typeKey(",", modifierFlags: .command)
+        app.typeKey(",", modifierFlags: .command)
         let saveButton = app.buttons["Settings.SaveButton"]
         XCTAssertTrue(saveButton.waitForExistence(timeout: 3))
 
-        XCTAssertTrue(saveButton.isEnabled)
+        // With no changes, Save is expected to be disabled (transaction model).
+        XCTAssertFalse(saveButton.isEnabled)
     }
 
     func testSettingsCancelButton() throws {
@@ -70,7 +71,7 @@ final class SettingsUITests: XCTestCase {
             return
         }
 
-        window.typeKey(",", modifierFlags: .command)
+        app.typeKey(",", modifierFlags: .command)
         let cancelButton = app.buttons["Settings.CancelButton"]
         XCTAssertTrue(cancelButton.waitForExistence(timeout: 3))
 

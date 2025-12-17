@@ -10,6 +10,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     var panel: FloatingPanel?
+    private var uiTestWindow: NSWindow?
     private(set) var hotKeyService: HotKeyService?
     private var settingsWindow: NSWindow?
     private var appliedHotKey: (keyCode: UInt32, modifiers: UInt32)?
@@ -31,15 +32,41 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
         let isUITesting = ProcessInfo.processInfo.arguments.contains("--uitesting")
 
-        // 创建浮动面板
-        panel = FloatingPanel(
-            contentRect: NSRect(x: 0, y: 0, width: Int(ScopySize.Window.mainWidth), height: Int(ScopySize.Window.mainHeight)),
-            statusBarButton: statusItem.button
-        ) {
-            ContentView()
-                .environment(appState)
-                .environment(appState.historyViewModel)
-                .environment(appState.settingsViewModel)
+        let rootView = ContentView()
+            .environment(appState)
+            .environment(appState.historyViewModel)
+            .environment(appState.settingsViewModel)
+
+        if isUITesting {
+            // XCUITest interacts more reliably with a standard window than a non-activating panel.
+            let window = NSWindow(
+                contentRect: NSRect(
+                    x: 0,
+                    y: 0,
+                    width: Int(ScopySize.Window.mainWidth),
+                    height: Int(ScopySize.Window.mainHeight)
+                ),
+                styleMask: [.titled, .closable, .resizable, .fullSizeContentView],
+                backing: .buffered,
+                defer: false
+            )
+            window.title = "Scopy"
+            window.titleVisibility = .hidden
+            window.titlebarAppearsTransparent = true
+            window.isReleasedWhenClosed = false
+            window.center()
+            window.contentView = NSHostingView(rootView: rootView)
+            window.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            uiTestWindow = window
+        } else {
+            // 创建浮动面板
+            panel = FloatingPanel(
+                contentRect: NSRect(x: 0, y: 0, width: Int(ScopySize.Window.mainWidth), height: Int(ScopySize.Window.mainHeight)),
+                statusBarButton: statusItem.button
+            ) {
+                rootView
+            }
         }
 
         // 显示状态栏图标
@@ -47,7 +74,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
         // 设置 UI 回调
         appState.closePanelHandler = { [weak self] in
-            self?.panel?.close()
+            if isUITesting {
+                self?.uiTestWindow?.close()
+            } else {
+                self?.panel?.close()
+            }
         }
         appState.openSettingsHandler = { [weak self] in
             self?.openSettings()
@@ -90,7 +121,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
 
         if isUITesting {
-            openSettings()
+            // Window already presented above.
         }
     }
 
@@ -112,12 +143,25 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     @objc func togglePanel() {
         // 状态栏点击：窗口在状态栏下方
-        panel?.toggle(positionMode: .statusBar)
+        if let panel {
+            panel.toggle(positionMode: .statusBar)
+        } else if let uiTestWindow {
+            if uiTestWindow.isVisible {
+                uiTestWindow.close()
+            } else {
+                uiTestWindow.makeKeyAndOrderFront(nil)
+                NSApp.activate(ignoringOtherApps: true)
+            }
+        }
     }
 
     func togglePanelAtMousePosition() {
         // 快捷键触发：窗口在鼠标位置
-        panel?.toggle(positionMode: .mousePosition)
+        if let panel {
+            panel.toggle(positionMode: .mousePosition)
+        } else {
+            togglePanel()
+        }
     }
 
     // MARK: - Hotkey Settings

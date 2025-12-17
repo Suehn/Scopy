@@ -407,13 +407,36 @@ final class SearchServiceTests: XCTestCase {
         _ = try await storage.upsertItem(makeContent("alpha newest"))
         await search.invalidateCache()
 
-        let result = try await search.search(request: SearchRequest(query: "alpha", mode: .exact, limit: 10, offset: 0))
+        let result = try await search.search(
+            request: SearchRequest(query: "alpha", mode: .exact, sortMode: .recent, limit: 10, offset: 0)
+        )
         XCTAssertEqual(result.items.count, 3)
         XCTAssertEqual(result.items.first?.id, pinnedOld.id, "Pinned items should still rank first")
 
         let unpinned = result.items.filter { !$0.isPinned }
         XCTAssertEqual(unpinned.count, 2)
         XCTAssertGreaterThan(unpinned[0].lastUsedAt, unpinned[1].lastUsedAt)
+    }
+
+    func testExactFTSSortModeRelevanceUsesBM25Ordering() async throws {
+        let olderMoreRelevant = try await storage.upsertItem(makeContent("alpha alpha alpha beta gamma"))
+        try await Task.sleep(nanoseconds: 10_000_000)
+        let newerLessRelevant = try await storage.upsertItem(makeContent("alpha"))
+        await search.invalidateCache()
+
+        let ftsQuery = "\"alpha\""
+
+        let expectedIDs = try queryExactFTSIDsOrderedByRelevance(ftsQuery: ftsQuery, limit: 10)
+        let relevance = try await search.search(
+            request: SearchRequest(query: "alpha", mode: .exact, sortMode: .relevance, limit: 10, offset: 0)
+        )
+        XCTAssertEqual(relevance.items.map(\.id), expectedIDs)
+
+        let recent = try await search.search(
+            request: SearchRequest(query: "alpha", mode: .exact, sortMode: .recent, limit: 10, offset: 0)
+        )
+        XCTAssertEqual(recent.items.first?.id, newerLessRelevant.id)
+        XCTAssertTrue(recent.items.contains(where: { $0.id == olderMoreRelevant.id }))
     }
 
     func testFuzzySearchResultsSortByLastUsedAt() async throws {
@@ -483,5 +506,49 @@ final class SearchServiceTests: XCTestCase {
             contentHash: String(text.hashValue),
             sizeBytes: text.utf8.count
         )
+    }
+
+    private func queryExactFTSIDsOrderedByRelevance(ftsQuery: String, limit: Int) throws -> [UUID] {
+        var db: OpaquePointer?
+        defer {
+            if let db {
+                sqlite3_close(db)
+            }
+        }
+
+        let flags = SQLITE_OPEN_READONLY | SQLITE_OPEN_URI
+        XCTAssertEqual(sqlite3_open_v2(storage.databaseFilePath, &db, flags, nil), SQLITE_OK, "Failed to open database")
+        guard let db else {
+            XCTFail("Database handle is nil")
+            return []
+        }
+
+        let sql = """
+            SELECT clipboard_items.id
+            FROM clipboard_items
+            JOIN clipboard_fts ON clipboard_items.rowid = clipboard_fts.rowid
+            WHERE clipboard_fts MATCH ?
+            ORDER BY clipboard_items.is_pinned DESC, bm25(clipboard_fts) ASC, clipboard_items.last_used_at DESC, clipboard_items.id ASC
+            LIMIT ?
+        """
+
+        var stmt: OpaquePointer?
+        defer { sqlite3_finalize(stmt) }
+        XCTAssertEqual(sqlite3_prepare_v2(db, sql, -1, &stmt, nil), SQLITE_OK, "Failed to prepare statement")
+        guard let stmt else { return [] }
+
+        let sqliteTransient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
+        sqlite3_bind_text(stmt, 1, ftsQuery, -1, sqliteTransient)
+        sqlite3_bind_int(stmt, 2, Int32(limit))
+
+        var ids: [UUID] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            guard let cString = sqlite3_column_text(stmt, 0) else { continue }
+            let idString = String(cString: cString)
+            if let id = UUID(uuidString: idString) {
+                ids.append(id)
+            }
+        }
+        return ids
     }
 }

@@ -380,6 +380,7 @@ public actor SearchEngineImpl {
         let typeFilters = request.typeFilters.map(Array.init)
         let page = try searchWithFTS(
             ftsQuery: query,
+            sortMode: request.sortMode,
             appFilter: request.appFilter,
             typeFilter: request.typeFilter,
             typeFilters: typeFilters,
@@ -1177,42 +1178,63 @@ public actor SearchEngineImpl {
 
     private func searchWithFTS(
         ftsQuery: String,
+        sortMode: SearchSortMode,
         appFilter: String?,
         typeFilter: ClipboardItemType?,
         typeFilters: [ClipboardItemType]?,
         limit: Int,
         offset: Int
     ) throws -> (items: [ClipboardStoredItem], total: Int, hasMore: Bool) {
-        var sql = """
-            SELECT id, type, content_hash, plain_text, app_bundle_id, created_at, last_used_at,
-                   use_count, is_pinned, size_bytes, storage_ref
-            FROM clipboard_items INDEXED BY idx_pinned
-            WHERE rowid IN (
-                SELECT rowid
-                FROM clipboard_fts
+        let sql: String
+        switch sortMode {
+        case .relevance:
+            sql = """
+                SELECT clipboard_items.id, clipboard_items.type, clipboard_items.content_hash, clipboard_items.plain_text,
+                       clipboard_items.app_bundle_id, clipboard_items.created_at, clipboard_items.last_used_at,
+                       clipboard_items.use_count, clipboard_items.is_pinned, clipboard_items.size_bytes, clipboard_items.storage_ref
+                FROM clipboard_items INDEXED BY idx_pinned
+                JOIN clipboard_fts ON clipboard_items.rowid = clipboard_fts.rowid
                 WHERE clipboard_fts MATCH ?
-            )
-        """
+            """
+        case .recent:
+            sql = """
+                SELECT id, type, content_hash, plain_text, app_bundle_id, created_at, last_used_at,
+                       use_count, is_pinned, size_bytes, storage_ref
+                FROM clipboard_items INDEXED BY idx_pinned
+                WHERE rowid IN (
+                    SELECT rowid
+                    FROM clipboard_fts
+                    WHERE clipboard_fts MATCH ?
+                )
+            """
+        }
+
+        var sqlWithFilters = sql
         var params: [String] = [ftsQuery]
 
         if let appFilter {
-            sql += " AND clipboard_items.app_bundle_id = ?"
+            sqlWithFilters += " AND clipboard_items.app_bundle_id = ?"
             params.append(appFilter)
         }
 
         if let typeFilters, !typeFilters.isEmpty {
             let placeholders = typeFilters.map { _ in "?" }.joined(separator: ",")
-            sql += " AND clipboard_items.type IN (\(placeholders))"
+            sqlWithFilters += " AND clipboard_items.type IN (\(placeholders))"
             params.append(contentsOf: typeFilters.map(\.rawValue))
         } else if let typeFilter {
-            sql += " AND clipboard_items.type = ?"
+            sqlWithFilters += " AND clipboard_items.type = ?"
             params.append(typeFilter.rawValue)
         }
 
-        sql += " ORDER BY is_pinned DESC, last_used_at DESC"
-        sql += " LIMIT ? OFFSET ?"
+        switch sortMode {
+        case .relevance:
+            sqlWithFilters += " ORDER BY clipboard_items.is_pinned DESC, bm25(clipboard_fts) ASC, clipboard_items.last_used_at DESC, clipboard_items.id ASC"
+        case .recent:
+            sqlWithFilters += " ORDER BY clipboard_items.is_pinned DESC, clipboard_items.last_used_at DESC, clipboard_items.id ASC"
+        }
+        sqlWithFilters += " LIMIT ? OFFSET ?"
 
-        let stmt = try prepare(sql)
+        let stmt = try prepare(sqlWithFilters)
         defer { stmt.reset() }
         var bindIndex: Int32 = 1
         for param in params {

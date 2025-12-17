@@ -23,6 +23,7 @@ struct HeaderView: View {
                     .textFieldStyle(.plain)
                     .font(ScopyTypography.searchField)
                     .focused($searchFocused)
+                    .accessibilityIdentifier("History.SearchField")
                     .onChange(of: searchQuery) {
                         historyViewModel.search()
                     }
@@ -49,6 +50,7 @@ struct HeaderView: View {
 
                     AppFilterButton()
                     TypeFilterButton()
+                    FTSSortToggleButton(searchQuery: searchQuery)
                     SearchModeMenu()
                 }
             }
@@ -133,6 +135,52 @@ private struct SearchModeMenu: View {
         case .fuzzyPlus: return "plus.magnifyingglass"
         case .regex: return "asterisk.circle"
         }
+    }
+}
+
+// MARK: - FTS Sort Toggle
+
+private struct FTSSortToggleButton: View {
+    @Environment(HistoryViewModel.self) private var historyViewModel
+
+    let searchQuery: String
+
+    var body: some View {
+        Button {
+            historyViewModel.toggleFTSSortMode()
+        } label: {
+            Image(systemName: iconName)
+                .font(.system(size: ScopySize.Icon.filter))
+                .foregroundStyle(ScopyColors.mutedText)
+        }
+        .buttonStyle(.plain)
+        .disabled(!isApplicable)
+        .help(helpText)
+    }
+
+    private var isApplicable: Bool {
+        let trimmed = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        return historyViewModel.searchMode == .exact && trimmed.count >= 3
+    }
+
+    private var iconName: String {
+        switch historyViewModel.ftsSortMode {
+        case .relevance:
+            return "sparkle.magnifyingglass"
+        case .recent:
+            return "clock"
+        }
+    }
+
+    private var helpText: String {
+        let modeText: String
+        switch historyViewModel.ftsSortMode {
+        case .relevance:
+            modeText = "Relevance (FTS rank + last used)"
+        case .recent:
+            modeText = "Recent (last used)"
+        }
+        return isApplicable ? "FTS sort: \(modeText)" : "FTS sort applies to Exact queries (≥3 chars)"
     }
 }
 
