@@ -204,13 +204,14 @@ public final class ClipboardMonitor {
         monitoringSessionID &+= 1
         lastChangeCount = pasteboard.changeCount
 
-        let timer = Timer.scheduledTimer(withTimeInterval: pollingInterval, repeats: true) { [weak self] _ in
+        // Important: schedule on `.common` modes so UI/menu tracking doesn't pause sampling.
+        let timer = Timer(timeInterval: pollingInterval, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
                 await self?.checkClipboard()
             }
         }
+        RunLoop.main.add(timer, forMode: .common)
         timerBox.set(timer)
-        // Timer.scheduledTimer 已自动添加到 RunLoop.current，无需再次添加
     }
 
     public func stopMonitoring() {
@@ -324,8 +325,13 @@ public final class ClipboardMonitor {
         defer { isCheckingClipboard = false }
 
         let currentChangeCount = pasteboard.changeCount
+        let previousChangeCount = lastChangeCount
 
-        guard currentChangeCount != lastChangeCount else { return }
+        guard currentChangeCount != previousChangeCount else { return }
+        let delta = currentChangeCount - previousChangeCount
+        if delta > 1 {
+            ScopyLog.monitor.debug("Pasteboard changeCount jumped by \(delta) (prev=\(previousChangeCount), current=\(currentChangeCount))")
+        }
         lastChangeCount = currentChangeCount
 
         // 快速提取原始数据（在主线程）

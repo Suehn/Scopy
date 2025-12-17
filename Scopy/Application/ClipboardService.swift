@@ -81,8 +81,11 @@ actor ClipboardService {
         guard !isStarted else { return }
         isStarted = true
 
+        let loadedSettings = await settingsStore.load()
+        settings = loadedSettings
+
         let pasteboardName = monitorPasteboardName
-        let pollingInterval = monitorPollingInterval
+        let pollingInterval = monitorPollingInterval ?? (TimeInterval(loadedSettings.clipboardPollingIntervalMs) / 1000.0)
         let monitor = await MainActor.run {
             let pasteboard: NSPasteboard
             if let pasteboardName, !pasteboardName.isEmpty {
@@ -102,9 +105,6 @@ actor ClipboardService {
 
         try await storage.open()
         try await search.open()
-
-        let loadedSettings = await settingsStore.load()
-        settings = loadedSettings
 
         await MainActor.run {
             storage.cleanupSettings.maxItems = loadedSettings.maxItems
@@ -317,9 +317,18 @@ actor ClipboardService {
     func updateSettings(_ newSettings: SettingsDTO) async throws {
         let oldHeight = settings.thumbnailHeight
         let oldShowThumbnails = settings.showImageThumbnails
+        let oldPollingMs = settings.clipboardPollingIntervalMs
 
         await settingsStore.save(newSettings)
         settings = newSettings
+
+        if monitorPollingInterval == nil,
+           oldPollingMs != newSettings.clipboardPollingIntervalMs,
+           let monitor {
+            await MainActor.run {
+                monitor.setPollingInterval(TimeInterval(newSettings.clipboardPollingIntervalMs) / 1000.0)
+            }
+        }
 
         if let storage = storage {
             await MainActor.run {

@@ -21,6 +21,36 @@ struct ClipboardSettingsPage: View {
                     Toggle("保存文件", isOn: $tempSettings.saveFiles)
                 }
             }
+
+            SettingsSection(
+                "采样频率",
+                systemImage: "timer",
+                footer: "采样间隔越小，捕获越及时，但更耗电。"
+            ) {
+                SettingsCardRow {
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Text("剪贴板采样间隔")
+                            Spacer()
+                            Text("\(tempSettings.clipboardPollingIntervalMs) ms")
+                                .foregroundStyle(.secondary)
+                                .monospacedDigit()
+                        }
+
+                        Slider(
+                            value: Binding(
+                                get: { Double(tempSettings.clipboardPollingIntervalMs) },
+                                set: { newValue in
+                                    let stepped = (newValue / 100.0).rounded() * 100.0
+                                    tempSettings.clipboardPollingIntervalMs = Int(stepped)
+                                }
+                            ),
+                            in: 100...2000,
+                            step: 100
+                        )
+                    }
+                }
+            }
         }
     }
 }

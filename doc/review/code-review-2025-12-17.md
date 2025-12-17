@@ -65,8 +65,15 @@
 
 **定位**
 
-- `Scopy/Services/ClipboardMonitor.swift:207`：`Timer.scheduledTimer(withTimeInterval:repeats:block:)` 创建并自动加入当前 RunLoop。
+- （基于 `7418acc`）`Scopy/Services/ClipboardMonitor.swift:207`：`Timer.scheduledTimer(withTimeInterval:repeats:block:)` 创建并自动加入当前 RunLoop（default mode）。
 - `Scopy/Services/ClipboardMonitor.swift:326-351`：`changeCount` 发生跳变时只读取一次当前内容，无法补回“跳变期间的中间内容”。
+  - （待发布：v0.44.fix22）实现已改为 `Timer(timeInterval:)` + `RunLoop.main.add(..., forMode: .common)`。
+
+**修复跟进（待发布：v0.44.fix22）**
+
+- **已改**：采样 timer 不再使用 `scheduledTimer` 绑定 default mode，改为 `Timer(timeInterval:)` + `RunLoop.main.add(..., forMode: .common)`，避免 UI/menu tracking 时采样暂停导致 `changeCount` 跳变与“漏记录中间复制”。（对应你在本文开头指出的“必须持续运行的后台采集不要绑 default mode”的原则）
+- **新增设置项**：Settings 增加“剪贴板采样间隔”（100ms～2s，步进 100ms），并落盘到 `SettingsDTO.clipboardPollingIntervalMs`；更新后会重启采样 timer。
+- **测试**：新增“采样间隔=2000ms 时捕获会延迟”的行为用例 + SettingsStore 持久化/clamp 回归（详见 `ScopyTests/IntegrationTests.swift` 的新增测试类）。
 
 **现象/风险**
 

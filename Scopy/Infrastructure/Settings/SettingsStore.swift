@@ -83,6 +83,7 @@ public actor SettingsStore {
             "maxStorageMB": settings.maxStorageMB,
             "saveImages": settings.saveImages,
             "saveFiles": settings.saveFiles,
+            "clipboardPollingIntervalMs": settings.clipboardPollingIntervalMs,
             "defaultSearchMode": settings.defaultSearchMode.rawValue,
             "hotkeyKeyCode": settings.hotkeyKeyCode,
             "hotkeyModifiers": settings.hotkeyModifiers,
@@ -96,11 +97,15 @@ public actor SettingsStore {
         let searchModeString = dict["defaultSearchMode"] as? String ?? SettingsDTO.default.defaultSearchMode.rawValue
         let searchMode = SearchMode(rawValue: searchModeString) ?? SettingsDTO.default.defaultSearchMode
 
+        let pollingMsRaw = dict["clipboardPollingIntervalMs"] as? Int ?? SettingsDTO.default.clipboardPollingIntervalMs
+        let pollingMs = max(100, min(2000, pollingMsRaw))
+
         return SettingsDTO(
             maxItems: dict["maxItems"] as? Int ?? SettingsDTO.default.maxItems,
             maxStorageMB: dict["maxStorageMB"] as? Int ?? SettingsDTO.default.maxStorageMB,
             saveImages: dict["saveImages"] as? Bool ?? SettingsDTO.default.saveImages,
             saveFiles: dict["saveFiles"] as? Bool ?? SettingsDTO.default.saveFiles,
+            clipboardPollingIntervalMs: pollingMs,
             defaultSearchMode: searchMode,
             hotkeyKeyCode: (dict["hotkeyKeyCode"] as? NSNumber)?.uint32Value ?? SettingsDTO.default.hotkeyKeyCode,
             hotkeyModifiers: (dict["hotkeyModifiers"] as? NSNumber)?.uint32Value ?? SettingsDTO.default.hotkeyModifiers,

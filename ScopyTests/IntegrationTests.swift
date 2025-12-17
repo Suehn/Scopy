@@ -406,3 +406,121 @@ final class IntegrationTests: XCTestCase {
         XCTAssertTrue(ids1.isDisjoint(with: ids2))
     }
 }
+
+@MainActor
+final class PollingIntervalSettingTests: XCTestCase {
+
+    private var service: (any ClipboardServiceProtocol)!
+    private var tempDirectory: URL?
+    private var pasteboard: NSPasteboard!
+    private var settingsStore: SettingsStore!
+    private var settingsSuiteName: String?
+
+    override func setUp() async throws {
+        let suiteName = "scopy-polling-interval-settings-\(UUID().uuidString)"
+        UserDefaults.standard.removePersistentDomain(forName: suiteName)
+        settingsStore = SettingsStore(suiteName: suiteName)
+        settingsSuiteName = suiteName
+
+        var settings = await settingsStore.load()
+        settings.clipboardPollingIntervalMs = 2000
+        await settingsStore.save(settings)
+
+        pasteboard = NSPasteboard.withUniqueName()
+
+        let baseURL = FileManager.default.temporaryDirectory.appendingPathComponent("scopy-polling-interval-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: baseURL, withIntermediateDirectories: true)
+        tempDirectory = baseURL
+
+        let dbPath = baseURL.appendingPathComponent("clipboard.db").path
+        service = ClipboardServiceFactory.create(
+            useMock: false,
+            databasePath: dbPath,
+            settingsStore: settingsStore,
+            monitorPasteboardName: pasteboard.name.rawValue,
+            monitorPollingInterval: nil
+        )
+        try await service.start()
+    }
+
+    override func tearDown() async throws {
+        if let service {
+            await service.stopAndWait()
+        }
+        if let tempDirectory {
+            try? FileManager.default.removeItem(at: tempDirectory)
+        }
+        service = nil
+        tempDirectory = nil
+        pasteboard = nil
+        settingsStore = nil
+        if let suiteName = settingsSuiteName {
+            UserDefaults.standard.removePersistentDomain(forName: suiteName)
+        }
+        settingsSuiteName = nil
+    }
+
+    func testPollingInterval2000msDelaysCapture() async throws {
+        pasteboard.clearContents()
+        pasteboard.setString("Delayed capture item", forType: .string)
+
+        try await Task.sleep(nanoseconds: 700_000_000) // 0.7s < 2.0s
+        let earlyItems = try await service.fetchRecent(limit: 10, offset: 0)
+        XCTAssertFalse(earlyItems.contains(where: { $0.plainText == "Delayed capture item" }))
+
+        await waitForConditionAsync(timeout: 4.0, pollInterval: 0.05) { [service] in
+            guard let service else { return false }
+            let items = try? await service.fetchRecent(limit: 20, offset: 0)
+            return items?.contains(where: { $0.plainText == "Delayed capture item" }) ?? false
+        }
+    }
+}
+
+final class SettingsStorePersistenceTests: XCTestCase {
+
+    func testDefaultSettingsIncludesPollingInterval() {
+        XCTAssertEqual(SettingsDTO.default.clipboardPollingIntervalMs, 500)
+    }
+
+    func testSaveAndLoadPollingIntervalPersists() async {
+        let suiteName = "scopy-settingsstore-\(UUID().uuidString)"
+        defer { UserDefaults.standard.removePersistentDomain(forName: suiteName) }
+        UserDefaults.standard.removePersistentDomain(forName: suiteName)
+
+        let store = SettingsStore(suiteName: suiteName)
+
+        var settings = await store.load()
+        settings.clipboardPollingIntervalMs = 1200
+        await store.save(settings)
+
+        let loaded = await store.load()
+        XCTAssertEqual(loaded.clipboardPollingIntervalMs, 1200)
+    }
+
+    func testPollingIntervalClampedWhenDecoding() async {
+        let suiteName = "scopy-settingsstore-clamp-\(UUID().uuidString)"
+        defer { UserDefaults.standard.removePersistentDomain(forName: suiteName) }
+        UserDefaults.standard.removePersistentDomain(forName: suiteName)
+
+        let defaults = UserDefaults(suiteName: suiteName)!
+        let store = SettingsStore(suiteName: suiteName)
+
+        defaults.set(
+            [
+                "clipboardPollingIntervalMs": 10
+            ],
+            forKey: "ScopySettings"
+        )
+        let minLoaded = await store.load()
+        XCTAssertEqual(minLoaded.clipboardPollingIntervalMs, 100)
+
+        defaults.set(
+            [
+                "clipboardPollingIntervalMs": 99999
+            ],
+            forKey: "ScopySettings"
+        )
+        let maxLoaded = await store.load()
+        XCTAssertEqual(maxLoaded.clipboardPollingIntervalMs, 2000)
+    }
+}

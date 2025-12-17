@@ -5,6 +5,14 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [v0.44.fix22] - 2025-12-17
+
+### Fix/Clipboard Monitor：采样不再因 tracking 暂停 + 采样间隔可配置
+
+- **稳定性（P1-1）**：ClipboardMonitor 采样不再依赖 RunLoop default mode：改为把 Timer 加到 `.common` modes，避免 UI/menu tracking 时采样暂停导致 `changeCount` 跳变、只记录最后一次、进而“历史漏条”。
+- **设置项**：新增“剪贴板采样间隔”滑条（100ms～2s，步进 100ms），并持久化到 Settings；生效时会重启采样定时器。
+- **测试**：补齐 SettingsStore 的持久化/边界（clamp 100～2000ms）回归；新增 2000ms 采样间隔下“捕获会延迟”的行为测试。
+
 ## [v0.44.fix21] - 2025-12-17
 
 ### Fix/Clipboard Ingest：避免公式伪影写入历史
