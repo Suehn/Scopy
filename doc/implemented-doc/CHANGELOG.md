@@ -5,6 +5,15 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [v0.44.fix24] - 2025-12-17
+
+### Fix/Long-run 稳定性：索引生命周期 + 有界并发 I/O + 搜索状态机原子化
+
+- **后端长期稳定（P2-2）**：full fuzzy index 增加 tombstone 健康度阈值（tombstone 比例到阈值 → 标记 stale → 下一次 fuzzy 自动重建），避免删除积累导致 postings 候选集合“越来越脏”引发性能随时间漂移。
+- **文件 I/O 稳定性（P2-7 / P2-10）**：清理/批量删除统一改为 bounded concurrency（默认并发度 8），并把 Clear All 的文件删除移出主线程，避免极端数据量下 UI 卡顿与 I/O 调度风暴。
+- **生命周期原子性（P2-5）**：`ClipboardService.start()` 改为“局部构建 + 成功后一次性提交”，失败路径 best-effort cleanup，确保可重试且不遗留半初始化状态。
+- **并发状态机（P2-9）**：清空搜索也统一 bump `searchVersion` 并取消 in-flight paging；移除 Clear/Esc 的重复 `search()` 触发，避免旧任务污染新列表与重复 I/O。
+
 ## [v0.44.fix23] - 2025-12-17
 
 ### Fix/Search 语义提示 + Fix/Dedup 哈希正确性门槛

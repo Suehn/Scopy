@@ -192,6 +192,12 @@
 
 ## P2-2：全量 fuzzy 索引存在内存放大与 tombstone/postings 漂移（长期运行性能退化）
 
+**修复跟进（已发布：v0.44.fix24）**
+
+- **索引健康度阈值**：为 full fuzzy index 增加 `tombstoneCount`，删除时累计；当 tombstone 比例达到阈值时将 `fullIndexStale = true`，并在下一次 fuzzy 查询时重建 full index（从而重置 postings，避免长期运行的候选集合“越来越脏”导致性能漂移）。
+- **测试**：新增单测覆盖“删除达到阈值 → 标记 stale → 下一次 fuzzy 触发重建并清零 tombstones”。
+- **未纳入本次修复**：对“超长文本进入 full index 的工程化兜底（只索引前 N / 改走 FTS）”尚未落地；本次修复聚焦于 **tombstone/postings 漂移** 的长期退化风险，不引入潜在的搜索语义变化。
+
 **定位**
 
 - 内存放大：
@@ -290,9 +296,15 @@
 
 ## P2-5：`ClipboardService.start()` 抛错时可能留下半初始化状态（需要 stop 才能恢复）
 
+**修复跟进（已发布：v0.44.fix24）**
+
+- **原子化 start**：改为“局部变量构建 + open 全部成功后一次性提交”，并把 `isStarted = true` 延后到成功路径；失败时 best-effort `stopMonitoring()` + `close()`，保证对象可重试且不遗留半初始化状态。
+- **测试**：新增单测，构造必然失败的 DB 路径触发 `start()` 抛错，验证连续两次调用 `start()` 都会尝试启动并抛错（而不是被 `isStarted` 直接短路）。
+
 **定位**
 
 - `Scopy/Application/ClipboardService.swift:58-120`：`start()` 在可能抛错的操作（`storage.open()` / `search.open()`）之前先设置 `isStarted = true`，并在 open 成功前就把 `monitor/storage/search` 赋给成员变量。
+  - 注：以上为 review 基线版本（v0.44.fix20）定位；该问题已在 v0.44.fix24 修复。
 
 **现象/风险**
 
@@ -363,10 +375,15 @@
 
 ## P2-7：清理大量文件时会创建海量并发删除任务/blocks（无并发上限）
 
+**修复跟进（已发布：v0.44.fix24）**
+
+- **统一有界并发**：将 bulk 文件删除收敛为 bounded concurrency（默认并发度 8），避免 orphan cleanup / cleanup plan / Clear All 等路径在极端文件数下触发调度风暴与文件系统争用。
+- **实现方式**：用“限流 TaskGroup”（fill → `await group.next()` → 补位）实现 `forEachConcurrent`，并在各清理路径中复用。
+
 **定位**
 
 - `Scopy/Services/StorageService.swift:557-589`：`cleanupOrphanedFiles()` 对每个 orphan file `group.addTask { removeItem(...) }`。
-- `Scopy/Services/StorageService.swift:707-737`：`deleteFilesInParallel(_:)` 为每个路径 `queue.async { removeItem(...) }`，同样没有并发上限（且不等待结束）。
+- `Scopy/Services/StorageService.swift:707-737`：修复前存在 `deleteFilesInParallel(_:)` 为每个路径 `queue.async { removeItem(...) }`（无并发上限且不等待结束）；该实现已在 v0.44.fix24 收敛为 bounded concurrency 的 `deleteFilesBounded` / `forEachConcurrent`。
 
 **现象/风险**
 
@@ -429,10 +446,17 @@
 
 ## P2-9：清空搜索/筛选时未版本化/未取消 in-flight paging，旧任务可能污染新列表；部分 UI 还会重复触发 `search()`
 
+**修复跟进（已发布：v0.44.fix24）**
+
+- **版本化/取消 in-flight**：`HistoryViewModel.search()` 即使走“无搜索/无过滤”的回退路径，也会统一 `searchVersion += 1` 并取消 `loadMoreTask`，确保旧分页任务不会污染新列表。
+- **消除双触发**：Clear / Esc 仅负责修改 `searchQuery`，由 `TextField.onChange` 作为唯一触发源调用 `search()`，避免重复 load/search 导致的状态抖动与额外 I/O。
+- **测试**：新增单测，通过延迟 `loadMore` 的返回并在 in-flight 时清空搜索，验证旧结果不会 append 到新列表。
+
 **定位**
 
 - `Scopy/Observables/HistoryViewModel.swift:414-429`：
   - `search()` 在 “无搜索/无过滤” 时走早返回：`Task { await load() }`，**没有** `searchVersion += 1`，也 **没有** `loadMoreTask?.cancel()`。
+  - 注：以上为 review 基线版本（v0.44.fix20）定位；该问题已在 v0.44.fix24 修复。
 - `Scopy/Views/HeaderView.swift:21-45`：
   - `TextField(...).onChange(of: searchQuery) { historyViewModel.search() }`
   - Clear 按钮同时 `searchQuery = ""` 且显式调用 `historyViewModel.search()`（与 `onChange` 叠加）。
@@ -471,10 +495,15 @@
 
 ## P2-10：Clear All（deleteAllExceptPinned）在主线程同步删除大量外部文件，极端情况下会卡 UI
 
+**修复跟进（已发布：v0.44.fix24）**
+
+- **移出主线程 + 有界并发**：`deleteAllExceptPinned()` 的批量文件删除改为 `Task.detached` 执行，并复用 bounded concurrency 删除器，避免主线程同步 I/O 造成 UI 卡顿。
+- **测试**：新增单测，注入“慢删除”钩子并验证 MainActor 仍可在删除过程中继续调度（同时检查并发度不超过上限）。
+
 **定位**
 
 - `Scopy/Application/ClipboardService.swift:220-226`：`clearAll()` 调用 `storage.deleteAllExceptPinned()`。
-- `Scopy/Services/StorageService.swift:353-370`：`deleteAllExceptPinned()` 在 `@MainActor` 上遍历 `storageRefsForUnpinned`，同步执行 `FileManager.default.removeItem(atPath:)`。
+- `Scopy/Services/StorageService.swift:353-370`：修复前 `deleteAllExceptPinned()` 在 `@MainActor` 上遍历 `storageRefsForUnpinned` 并同步执行 `FileManager.default.removeItem(atPath:)`；该问题已在 v0.44.fix24 修复（移出主线程 + bounded concurrency）。
 
 **现象/风险**
 
