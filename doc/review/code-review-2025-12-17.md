@@ -330,6 +330,12 @@
 
 ## P2-6：Markdown hover-preview 复用 WebView：`WKScriptMessageHandler` 可能形成 retain cycle，导致 controller 不释放
 
+**修复跟进（已发布：v0.44.fix25）**
+
+- **弱代理拆环（根治）**：引入弱代理 `WKScriptMessageHandler`（`WeakScriptMessageHandler`），`WKUserContentController` 只强持有 proxy，proxy 仅弱持有真实 handler，从根因上断开 `controller → WKWebView → userContentController → handler → controller` 的强引用环。
+- **双保险 teardown**：在 `NSViewRepresentable.dismantleNSView` 中显式 `removeScriptMessageHandler` + `nil` 掉 delegates，并停止 loading，确保 view 被移除时 WebKit 侧引用链可回收。
+- **测试**：新增单测创建并释放 `MarkdownPreviewWebViewController`，验证可 deinit（避免“只改了代码但无法证明释放”的误判）。
+
 **定位**
 
 - `Scopy/Views/History/MarkdownPreviewWebView.swift:275-302`：`MarkdownPreviewWebViewController` 持有 `webView: WKWebView`（强引用）。
@@ -407,6 +413,12 @@
 ---
 
 ## P2-8：`getStorageStats()` / `getDetailedStorageStats()` 重复做全量遍历，首屏/刷新可能触发两次重扫描
+
+**修复跟进（已发布：v0.44.fix25）**
+
+- **明确口径（不改功能，仅纠偏）**：`getStorageStats()` 仅返回“内容估算”（DB `SUM(size_bytes)`），不再做目录遍历；`getDetailedStorageStats()` 继续作为“真实磁盘占用”（DB 文件 + 外部目录 + 缩略图目录）。
+- **去重计算**：首屏 `HistoryViewModel.load()` 仍然可快速拿到 itemCount + 内容估算；真实磁盘占用则复用 `SettingsViewModel` 的 TTL 缓存异步刷新，避免同一时刻重复扫描目录。
+- **测试**：新增单测构造 orphan 缩略图文件，验证 “内容估算=0” 而 “真实磁盘占用>0”，确保两种口径不再混用。
 
 **定位**
 

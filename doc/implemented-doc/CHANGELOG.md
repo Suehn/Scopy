@@ -5,6 +5,13 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [v0.44.fix25] - 2025-12-17
+
+### Fix/WebView 生命周期 + Fix/Stats 口径去重
+
+- **WebKit 生命周期（P2-6）**：Markdown hover-preview 的 script message handler 改为弱代理转发（`WeakScriptMessageHandler`），并在 view dismantle 时显式 `removeScriptMessageHandler` + `nil` 掉 delegates，避免潜在 retain cycle 导致 controller 不释放、长期运行内存增长。
+- **统计/扫描去重（P2-8）**：`getStorageStats()` 明确为“内容估算”（DB `SUM(size_bytes)`），不再触发目录遍历；“真实磁盘占用”仍由 `getDetailedStorageStats()` 计算并由 `SettingsViewModel` TTL 缓存刷新，避免首屏/刷新路径重复重 I/O。
+
 ## [v0.44.fix24] - 2025-12-17
 
 ### Fix/Long-run 稳定性：索引生命周期 + 有界并发 I/O + 搜索状态机原子化
