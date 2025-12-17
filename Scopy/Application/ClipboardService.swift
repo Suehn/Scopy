@@ -371,10 +371,8 @@ actor ClipboardService {
     func getStorageStats() async throws -> (itemCount: Int, sizeBytes: Int) {
         let storage = try requireStorage()
         let count = try await storage.getItemCount()
-        let dbSize = await storage.getDatabaseFileSize()
-        let externalSize = try await storage.getExternalStorageSizeForStats()
-        let thumbnailSize = await storage.getThumbnailCacheSize()
-        return (count, dbSize + externalSize + thumbnailSize)
+        let contentSize = try await storage.getTotalSize()
+        return (count, contentSize)
     }
 
     func getDetailedStorageStats() async throws -> StorageStatsDTO {

@@ -2,6 +2,7 @@ import Foundation
 import SwiftUI
 import AppKit
 import WebKit
+import ScopyUISupport
 
 private enum MarkdownPreviewScrollViewResolver {
     static func resolve(for view: NSView) -> NSScrollView? {
@@ -30,7 +31,7 @@ struct MarkdownPreviewWebView: NSViewRepresentable {
     let onContentSizeChange: @MainActor (MarkdownContentMetrics) -> Void
 
     private static let blockNetworkRuleListIdentifier = "ScopyMarkdownPreviewBlockNetwork"
-    private static let sizeMessageHandlerName = "scopySize"
+    fileprivate static let sizeMessageHandlerName = "scopySize"
     private static let blockNetworkRulesJSON = """
     [
       {
@@ -52,7 +53,7 @@ struct MarkdownPreviewWebView: NSViewRepresentable {
         config.userContentController = WKUserContentController()
 
         Self.installNetworkBlocker(into: config.userContentController)
-        config.userContentController.add(context.coordinator, name: Self.sizeMessageHandlerName)
+        config.userContentController.add(context.coordinator.sizeMessageHandlerProxy, name: Self.sizeMessageHandlerName)
 
         let webView = WKWebView(frame: .zero, configuration: config)
         webView.navigationDelegate = context.coordinator
@@ -78,6 +79,15 @@ struct MarkdownPreviewWebView: NSViewRepresentable {
 
     func makeCoordinator() -> Coordinator {
         Coordinator()
+    }
+
+    @MainActor
+    static func dismantleNSView(_ nsView: WKWebView, coordinator: Coordinator) {
+        nsView.stopLoading()
+        nsView.navigationDelegate = nil
+        nsView.uiDelegate = nil
+        nsView.configuration.userContentController.removeScriptMessageHandler(forName: Self.sizeMessageHandlerName)
+        coordinator.scrollbarAutoHider.detach()
     }
 
     private func configureScrollers(for webView: WKWebView, shouldScroll: Bool) {
@@ -131,6 +141,12 @@ struct MarkdownPreviewWebView: NSViewRepresentable {
         var onContentSizeChange: (@MainActor (MarkdownContentMetrics) -> Void)?
         private var lastReportedMetrics: MarkdownContentMetrics = MarkdownContentMetrics(size: .zero, hasHorizontalOverflow: false)
         let scrollbarAutoHider = ScrollbarAutoHider()
+        let sizeMessageHandlerProxy = WeakScriptMessageHandler()
+
+        override init() {
+            super.init()
+            sizeMessageHandlerProxy.delegate = self
+        }
 
         func attachScrollbarAutoHiderIfPossible(for webView: WKWebView) {
             if let scrollView = MarkdownPreviewScrollViewResolver.resolve(for: webView) {
@@ -279,6 +295,7 @@ final class MarkdownPreviewWebViewController: NSObject, ObservableObject, WKNavi
     private var lastHTML: String = ""
     private var lastReportedMetrics: MarkdownContentMetrics = MarkdownContentMetrics(size: .zero, hasHorizontalOverflow: false)
     private let scrollbarAutoHider = ScrollbarAutoHider()
+    private let sizeMessageHandlerProxy = WeakScriptMessageHandler()
 
     override init() {
         let config = WKWebViewConfiguration()
@@ -295,13 +312,31 @@ final class MarkdownPreviewWebViewController: NSObject, ObservableObject, WKNavi
 
         // Reuse the same network blocker & message handler semantics as the one-shot web view.
         MarkdownPreviewWebView.installNetworkBlocker(into: config.userContentController)
-        config.userContentController.add(self, name: "scopySize")
+        sizeMessageHandlerProxy.delegate = self
+        config.userContentController.add(sizeMessageHandlerProxy, name: MarkdownPreviewWebView.sizeMessageHandlerName)
 
-        wv.navigationDelegate = self
-        wv.uiDelegate = self
+        attachWebViewIfNeeded()
+    }
+
+    func attachWebViewIfNeeded() {
+        let controller = webView.configuration.userContentController
+        controller.removeScriptMessageHandler(forName: MarkdownPreviewWebView.sizeMessageHandlerName)
+        controller.add(sizeMessageHandlerProxy, name: MarkdownPreviewWebView.sizeMessageHandlerName)
+
+        webView.navigationDelegate = self
+        webView.uiDelegate = self
+    }
+
+    func detachWebView() {
+        webView.stopLoading()
+        webView.navigationDelegate = nil
+        webView.uiDelegate = nil
+        webView.configuration.userContentController.removeScriptMessageHandler(forName: MarkdownPreviewWebView.sizeMessageHandlerName)
+        scrollbarAutoHider.detach()
     }
 
     func setShouldScroll(_ shouldScroll: Bool) {
+        attachWebViewIfNeeded()
         guard let scrollView = MarkdownPreviewScrollViewResolver.resolve(for: webView) else { return }
         scrollView.hasVerticalScroller = shouldScroll
         scrollView.autohidesScrollers = true
@@ -316,6 +351,7 @@ final class MarkdownPreviewWebViewController: NSObject, ObservableObject, WKNavi
     }
 
     func loadHTMLIfNeeded(_ html: String) {
+        attachWebViewIfNeeded()
         if lastHTML == html { return }
         lastHTML = html
         lastReportedMetrics = MarkdownContentMetrics(size: .zero, hasHorizontalOverflow: false)
@@ -453,13 +489,28 @@ struct ReusableMarkdownPreviewWebView: NSViewRepresentable {
     let onContentSizeChange: @MainActor (MarkdownContentMetrics) -> Void
 
     func makeNSView(context: Context) -> WKWebView {
-        controller.webView
+        controller.attachWebViewIfNeeded()
+        return controller.webView
     }
 
     func updateNSView(_ webView: WKWebView, context: Context) {
+        controller.attachWebViewIfNeeded()
         controller.onContentSizeChange = onContentSizeChange
         controller.setShouldScroll(shouldScroll)
         controller.loadHTMLIfNeeded(html)
+    }
+
+    @MainActor
+    static func dismantleNSView(_ nsView: WKWebView, coordinator: ()) {
+        // Ensure the controller does not keep WebKit delegates/handlers alive when the view is removed.
+        if let controller = (nsView.navigationDelegate as? MarkdownPreviewWebViewController) {
+            controller.detachWebView()
+        } else {
+            nsView.stopLoading()
+            nsView.navigationDelegate = nil
+            nsView.uiDelegate = nil
+            nsView.configuration.userContentController.removeScriptMessageHandler(forName: MarkdownPreviewWebView.sizeMessageHandlerName)
+        }
     }
 }
 
