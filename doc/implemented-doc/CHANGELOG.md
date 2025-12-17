@@ -5,6 +5,14 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [v0.44.fix28] - 2025-12-18
+
+### Feat/Preview：导出渲染结果为 PNG（白底黑字）到剪贴板
+
+- **Copy Rendered Preview as Image**：Markdown/LaTeX hover 预览新增按钮，可将当前渲染结果以白底黑字样式导出为 PNG 到剪贴板（与预览一致的布局/尺寸）。
+- **高性能实现**：导出使用 `WKWebView.takeSnapshot` 获取图像，并在后台线程完成 PNG 编码，避免在主线程做重计算；导出样式仅在 snapshot 期间临时启用，结束后自动恢复，不影响现有预览体验。
+- **Service API**：`ClipboardServiceProtocol` 新增 `copyToClipboard(imagePNGData:)` 统一走 `.png` 写入 pasteboard，供导出能力复用。
+
 ## [v0.44.fix27] - 2025-12-18
 
 ### Fix/Keyboard：`⌥⌫` 删除选中项修复
