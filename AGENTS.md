@@ -40,6 +40,8 @@
 - PR：说明改动、测试结果，UI 变更附截图，关联 issue；若性能/部署变化，附具体数据与环境。
 - 版本发布（必须）：统一使用 **git tag** 驱动版本号与发布（禁止用“commit count 自动生成版本”）。
   - 创建版本提交（含 `doc/implemented-doc/vX.Y.Z.md`、索引、CHANGELOG、profile、必要时 `DEPLOYMENT.md`）
+  - 发布前校验（必须过）：`make release-validate`（校验索引里的 **当前版本** 对应的版本文档/CHANGELOG 条目都存在）
+  - 需要创建新版本文档骨架时：`make release-bump-patch`（从实现文档索引读取当前版本并递增 patch）
   - 打 tag（推荐从实现文档索引读取当前版本）：`make tag-release`
   - 推送（确保 tag 一并推送）：
     - 一次性：`make push-release`

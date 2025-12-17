@@ -72,7 +72,12 @@ DEPLOYMENT.md 中的性能测试必须包含:
 - **版本号来源**：仅允许来自 git tag（例如 `v0.43.14`），禁止用 commit count 自动生成版本（历史遗留 tag 例：`v0.18.*` 不再作为发布口径）。
 - **构建注入**：本地与 CI 构建需要注入 `MARKETING_VERSION` / `CURRENT_PROJECT_VERSION`（统一入口 `scripts/version.sh`）。
 - **CI 行为**：GitHub Actions `Build and Release` 只从 tag 构建并产出 DMG；Cask 更新通过 PR 合入，workflow 不直接 push main。
-- **推送建议**：发布前 `make tag-release`；推送用 `make push-release`（会 push main + 当前 tag）。
+- **发布检查表（必须过）**：
+  - 版本提交：更新 `doc/implemented-doc/vX.Y.Z.md` + `doc/implemented-doc/README.md` + `doc/implemented-doc/CHANGELOG.md`（性能/部署变化则同步 `DEPLOYMENT.md`，含环境与数值）。
+  - 校验：`make release-validate`（确保索引里的 **当前版本** 对应的版本文档/CHANGELOG 条目齐全）。
+  - 打 tag：`make tag-release`（tag 从实现文档索引读取；要求工作区干净）。
+  - 推送：`make push-release`（push main + 当前 tag）。
+  - Homebrew 闭环：等待 release 产出 `Scopy-<version>.dmg` + `.sha256`，并确认 `Suehn/homebrew-scopy` 的 `Casks/scopy.rb` 已更新到同版本与 sha；本地用 `brew fetch --cask scopy`/`brew upgrade --cask scopy` 验证可安装可升级。
 
 ---
 

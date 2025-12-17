@@ -89,6 +89,65 @@ final class ClipboardMonitorTests: XCTestCase {
         XCTAssertTrue(content?.plainText.contains("Hello") ?? false)
     }
 
+    func testReadCurrentClipboardHTMLUsesRichPayloadPlainTextEvenWhenStringIsCorrupted() {
+        let expected = #"[\mathbf{e}^L_i = \mathbf{e}_i + \sum_{u\in\mathcal{N}_i} \frac{1}{\sqrt{|\mathcal{N}_i|}\sqrt{|\mathcal{N}_u|}} \mathbf{e}_u]"#
+        let html = "<html><body><pre>\(expected)</pre></body></html>"
+        let htmlData = Data(html.utf8)
+
+        let corruptedPlain = """
+        \\mathbf{e}^L_i
+        ==================
+        \\mathbf{e}*i + \\sum*{u\\in\\mathcal{N}_i} \\frac{1}{\\sqrt{|\\mathcal{N}_i|}\\sqrt{|\\mathcal{N}_u|}} \\mathbf{e}_u
+        """
+
+        pasteboard.clearContents()
+        let item = NSPasteboardItem()
+        item.setString(corruptedPlain, forType: .string)
+        item.setData(htmlData, forType: .html)
+        pasteboard.writeObjects([item])
+
+        let content = monitor.readCurrentClipboard()
+        XCTAssertNotNil(content)
+        XCTAssertEqual(content?.type, .html)
+        let text = content?.plainText ?? ""
+
+        XCTAssertTrue(text.contains("\\sum_{u\\in\\mathcal{N}_i}"))
+        XCTAssertTrue(text.contains("\\mathbf{e}_i"))
+        XCTAssertFalse(text.contains("\\sum*{"))
+        XCTAssertFalse(text.contains("================"))
+    }
+
+    func testReadCurrentClipboardRTFUsesRichPayloadPlainTextEvenWhenStringIsCorrupted() throws {
+        let expected = #"[\mathbf{e}^L_i = \mathbf{e}_i + \sum_{u\in\mathcal{N}_i} \frac{1}{\sqrt{|\mathcal{N}_i|}\sqrt{|\mathcal{N}_u|}} \mathbf{e}_u]"#
+        let attributed = NSAttributedString(string: expected)
+        let range = NSRange(location: 0, length: attributed.length)
+        let rtfData = try attributed.data(from: range, documentAttributes: [
+            .documentType: NSAttributedString.DocumentType.rtf
+        ])
+
+        let corruptedPlain = """
+        \\mathbf{e}^L_i
+        ==================
+        \\mathbf{e}*i + \\sum*{u\\in\\mathcal{N}_i} \\frac{1}{\\sqrt{|\\mathcal{N}_i|}\\sqrt{|\\mathcal{N}_u|}} \\mathbf{e}_u
+        """
+
+        pasteboard.clearContents()
+        let item = NSPasteboardItem()
+        item.setString(corruptedPlain, forType: .string)
+        item.setData(rtfData, forType: .rtf)
+        pasteboard.writeObjects([item])
+
+        let content = monitor.readCurrentClipboard()
+        XCTAssertNotNil(content)
+        XCTAssertEqual(content?.type, .rtf)
+        let text = content?.plainText ?? ""
+
+        XCTAssertTrue(text.contains("\\sum_{u\\in\\mathcal{N}_i}"))
+        XCTAssertTrue(text.contains("\\mathbf{e}_i"))
+        XCTAssertFalse(text.contains("\\sum*{"))
+        XCTAssertFalse(text.contains("================"))
+    }
+
     // MARK: - Copy To Clipboard Tests
 
     func testCopyTextToClipboard() {

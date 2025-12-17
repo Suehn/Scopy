@@ -8,11 +8,11 @@
 
 | 项目 | 状态 |
 |------|------|
-| **当前版本** | v0.44.fix20 |
-| **测试状态** | 单元测试通过（`make test-unit`: Executed 201 tests, 1 skipped） |
+| **当前版本** | v0.44.fix21 |
+| **测试状态** | 单元测试通过（`make test-unit`: Executed 204 tests, 1 skipped） |
 | **构建状态** | Debug ✅ |
 | **部署位置** | /Applications/Scopy.app |
-| **最后更新** | 2025-12-16 |
+| **最后更新** | 2025-12-17 |
 
 > 详细变更历史请查看 [CHANGELOG.md](./CHANGELOG.md)
 
@@ -24,6 +24,7 @@
 
 | 版本 | 日期 | 主要内容 | 状态 |
 |------|------|----------|------|
+| [v0.44.fix21](./v0.44.fix21.md) | 2025-12-17 | Fix/Clipboard Ingest：`.string` 与 rich 不一致且富文本含 TeX 时优先取 rich payload 的纯文本，避免公式伪影写入历史 | ✅ |
 | [v0.44.fix20](./v0.44.fix20.md) | 2025-12-16 | Fix/UX：Settings 关闭不再退出应用 + 主窗口默认尺寸 480×640 | ✅ |
 | [v0.44.fix19](./v0.44.fix19.md) | 2025-12-16 | UX/Settings：修复 Detail 背景出现“两种颜色”的割裂感（填满容器并统一背景） | ✅ |
 | [v0.44.fix18](./v0.44.fix18.md) | 2025-12-16 | UX/Settings：移除“黑色卡片底色”，卡片与背景更一体（对齐 About 页风格） | ✅ |

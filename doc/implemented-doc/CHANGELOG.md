@@ -5,6 +5,14 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [v0.44.fix21] - 2025-12-17
+
+### Fix/Clipboard Ingest：避免公式伪影写入历史
+
+- **根因**：部分 App 在 pasteboard 同时提供 `.html/.rtf` 与 `.string`，但 `.string` 可能来自“富文本→Markdown”转换（不理解 LaTeX 数学语义），导致 `_`/`^` 被当作 Markdown 语法，出现 `==========`、`\sum*{...}`、`\mathbf{e}*i` 等伪影。
+- **修复策略（原理性）**：`.string` 仍优先，但当 `.string` 与 rich payload 的纯文本提取结果不一致且 extracted 明显包含 TeX 命令时，改用 rich payload 的纯文本作为 `plainText`，避免污染入库（同时保持非 TeX 场景的既有行为）。
+- **回归测试**：新增 HTML/RTF 两条单测，构造“rich 正常但 `.string` 已污染”的输入，验证 `plainText` 保持 TeX 语义（含 `\sum_{...}`）且不包含 `\sum*{`/`==========`。
+
 ## [v0.44.fix20] - 2025-12-16
 
 ### Fix/UX：Settings 关闭不再退出应用 + 主窗口默认尺寸调整

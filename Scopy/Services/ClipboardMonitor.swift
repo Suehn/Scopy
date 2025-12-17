@@ -559,7 +559,7 @@ public final class ClipboardMonitor {
 
         // 3. RTF
         if let rtfData = pasteboard.data(forType: .rtf) {
-            let plainText = normalizeText(pasteboard.string(forType: .string) ?? extractPlainTextFromRTF(rtfData) ?? "")
+            let plainText = normalizeText(extractPreferredPlainText(from: pasteboard, richTextData: rtfData, type: .rtf))
             return RawClipboardData(
                 type: .rtf,
                 plainText: plainText,
@@ -571,7 +571,7 @@ public final class ClipboardMonitor {
 
         // 4. HTML
         if let htmlData = pasteboard.data(forType: .html) {
-            let plainText = normalizeText(pasteboard.string(forType: .string) ?? extractPlainTextFromHTML(htmlData) ?? "")
+            let plainText = normalizeText(extractPreferredPlainText(from: pasteboard, richTextData: htmlData, type: .html))
             return RawClipboardData(
                 type: .html,
                 plainText: plainText,
@@ -673,7 +673,7 @@ public final class ClipboardMonitor {
 
         // 3. RTF
         if let rtfData = pasteboard.data(forType: .rtf) {
-            let plainText = normalizeText(pasteboard.string(forType: .string) ?? extractPlainTextFromRTF(rtfData) ?? "")
+            let plainText = normalizeText(extractPreferredPlainText(from: pasteboard, richTextData: rtfData, type: .rtf))
             // Dedup by normalized main text (v0.md 3.2). RTF payload may vary across copies even when the text is identical.
             let hash = plainText.isEmpty ? computeHash(rtfData) : computeHash(plainText)
             return ClipboardContent(
@@ -688,7 +688,7 @@ public final class ClipboardMonitor {
 
         // 4. HTML
         if let htmlData = pasteboard.data(forType: .html) {
-            let plainText = normalizeText(pasteboard.string(forType: .string) ?? extractPlainTextFromHTML(htmlData) ?? "")
+            let plainText = normalizeText(extractPreferredPlainText(from: pasteboard, richTextData: htmlData, type: .html))
             // Dedup by normalized main text (v0.md 3.2). HTML payload may include volatile metadata.
             let hash = plainText.isEmpty ? computeHash(htmlData) : computeHash(plainText)
             return ClipboardContent(
@@ -719,6 +719,57 @@ public final class ClipboardMonitor {
     }
 
     // MARK: - Helper Methods
+
+    private func extractPreferredPlainText(from pasteboard: NSPasteboard, richTextData: Data, type: ClipboardItemType) -> String {
+        // For rich types, prefer the pasteboard-provided `.string` when it's a faithful plain-text representation of
+        // the rich payload. Some apps provide `.string` that is already a lossy transformation (e.g. rich -> Markdown),
+        // which can corrupt TeX-heavy content; in those cases, fall back to extracting plain text from the rich payload.
+        let extracted: String?
+        switch type {
+        case .rtf:
+            extracted = extractPlainTextFromRTF(richTextData)
+        case .html:
+            extracted = extractPlainTextFromHTML(richTextData)
+        default:
+            extracted = nil
+        }
+
+        let candidate = pasteboard.string(forType: .string) ?? ""
+        if candidate.isEmpty {
+            return extracted ?? ""
+        }
+
+        guard let extracted, !extracted.isEmpty else {
+            return candidate
+        }
+
+        if normalizeText(candidate) == normalizeText(extracted) {
+            return candidate
+        }
+
+        // If the extracted text is TeX-heavy and the pasteboard `.string` differs materially from it, prefer the
+        // extracted version to avoid storing a transformed/Markdown-converted representation.
+        if containsTeXCommands(extracted) {
+            return extracted
+        }
+
+        return candidate
+    }
+
+    private func containsTeXCommands(_ text: String) -> Bool {
+        var sawBackslash = false
+        for ch in text {
+            if sawBackslash {
+                if ch.isLetter { return true }
+                sawBackslash = false
+                continue
+            }
+            if ch == "\\" {
+                sawBackslash = true
+            }
+        }
+        return false
+    }
 
     private func getFrontmostAppBundleID() -> String? {
         NSWorkspace.shared.frontmostApplication?.bundleIdentifier
