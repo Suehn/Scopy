@@ -234,6 +234,13 @@
 
 ## P2-3：FTS 结果排序未纳入匹配度（与 v0.md 排序描述不一致）
 
+**修复跟进（已发布：v0.44.fix26）**
+
+- **已改**：Exact（FTS）支持两种排序并可在 UI 一键切换：
+  - `Relevance`：`bm25(clipboard_fts)` + `last_used_at`（默认）
+  - `Recent`：`last_used_at`
+- **测试**：新增单测对齐 SQLite 查询结果，覆盖 `bm25` 排序的稳定性。
+
 **定位**
 
 - `Scopy/Infrastructure/Search/SearchEngineImpl.swift:1165-1216`：FTS 查询 `ORDER BY is_pinned DESC, last_used_at DESC`。
@@ -541,6 +548,10 @@
 
 ## P3-1：“内联存储上限”语义可能误导：实际约束 `SUM(size_bytes)` 而非数据库文件大小
 
+**修复跟进（已发布：v0.44.fix26）**
+
+- **已改**：Storage Settings 文案改为“内容估算上限”，并在 footer 明确口径为 `SUM(size_bytes)`，避免与数据库文件大小混淆。
+
 **定位**
 
 - UI 文案：`Scopy/Views/Settings/StorageSettingsPage.swift:36-49`（“内联存储上限”）
@@ -562,6 +573,10 @@
 ---
 
 ## P3-2：命名误导：`getOriginalImageData` 实际是“取 raw payload”，被用于 file/rtf/html
+
+**修复跟进（已发布：v0.44.fix26）**
+
+- **已改**：新增 `loadPayloadData(for:)` 替代误导性命名；旧 `getOriginalImageData(for:)` 保留为 deprecated 转发，避免破坏性改动。
 
 **定位**
 
@@ -598,6 +613,11 @@
 
 ## P3-4：部分 UI 测试依赖固定 sleep，可能在慢机器/CI 上 flaky
 
+**修复跟进（已发布：v0.44.fix26）**
+
+- **已改**：UI tests 多处固定 sleep 改为 predicate/exists 条件等待。
+- **补强**：`--uitesting` 模式下主界面改用标准 `NSWindow` 承载，避免 non-activating panel 在 XCUITest 中不可见导致的误报。
+
 **定位**
 
 - `ScopyUITests/ContextMenuUITests.swift` / `ScopyUITests/HistoryListUITests.swift` / `ScopyUITests/KeyboardNavigationUITests.swift`：多处使用 `Thread.sleep(forTimeInterval:)` 等待 UI debounce/动画。
@@ -614,6 +634,10 @@
 ---
 
 ## P3-5：hover Markdown 渲染任务取消不够“及时”（CPU 浪费风险，低优先级）
+
+**修复跟进（已发布：v0.44.fix26）**
+
+- **已改**：hover Markdown 渲染任务与 renderer 增加取消检查，避免已取消仍执行渲染/缓存（减少无效 CPU 工作）。
 
 **定位**
 
@@ -681,6 +705,10 @@
 ---
 
 ## P3-7：HotKeyRecorderView 用固定 sleep 同步持久化 hotkey，存在竞态与误报风险（低优先级）
+
+**修复跟进（已发布：v0.44.fix26）**
+
+- **已改**：移除固定 sleep，改为基于 `SettingsStore.observeSettings()` 等待持久化更新并校验；若注册失败回退，UI 会同步回读持久化值并提示。
 
 **定位**
 

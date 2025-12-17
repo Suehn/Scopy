@@ -8,11 +8,11 @@
 
 | 项目 | 状态 |
 |------|------|
-| **当前版本** | v0.44.fix25 |
-| **测试状态** | 单元测试通过（`make test-unit`: Executed 217 tests, 1 skipped） |
+| **当前版本** | v0.44.fix26 |
+| **测试状态** | 单元测试通过（`make test-unit`: Executed 218 tests, 1 skipped）；UI 测试通过（`xcodebuild test -only-testing:ScopyUITests`: Executed 25 tests, 4 skipped） |
 | **构建状态** | Debug ✅ |
 | **部署位置** | /Applications/Scopy.app |
-| **最后更新** | 2025-12-17 |
+| **最后更新** | 2025-12-18 |
 
 > 详细变更历史请查看 [CHANGELOG.md](./CHANGELOG.md)
 
@@ -24,6 +24,7 @@
 
 | 版本 | 日期 | 主要内容 | 状态 |
 |------|------|----------|------|
+| [v0.44.fix26](./v0.44.fix26.md) | 2025-12-18 | Fix/Search：Exact(FTS) 支持 Relevance(bm25+lastUsed)/Recent(lastUsed) 并提供 UI 一键切换；Fix/Settings：存储上限口径更清晰；Fix/HotKey：移除固定 sleep；Perf/Preview：hover 取消更及时；Test：UI 测试稳定性提升（--uitesting 标准窗口 + 条件等待） | ✅ |
 | [v0.44.fix25](./v0.44.fix25.md) | 2025-12-17 | Fix/WebView：WKScriptMessageHandler 弱代理 + dismantle 拆环可释放 + 回归测试；Fix/Stats：内容估算/真实磁盘占用口径分离，避免首屏重复目录扫描 | ✅ |
 | [v0.44.fix24](./v0.44.fix24.md) | 2025-12-17 | Fix/Stability：full fuzzy index tombstone 阈值→stale→重建 + Clear All/cleanup 有界并发并移出主线程 + start 原子化 + 搜索状态机竞态修复 | ✅ |
 | [v0.44.fix23](./v0.44.fix23.md) | 2025-12-17 | Fix/Search：短词/Regex 搜索范围显式提示（recent cache 2000）+ Fix/Dedup：SHA256 改用 CryptoKit 并补齐测试向量 | ✅ |

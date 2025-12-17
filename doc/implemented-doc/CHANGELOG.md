@@ -5,6 +5,17 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [v0.44.fix26] - 2025-12-18
+
+### Fix/Search（FTS 排序可切换）+ Fix/Quality（P3 系列）
+
+- **Search（P2-3）**：Exact（FTS）新增两种排序：`Relevance`（`bm25(clipboard_fts)` + `last_used_at`）与 `Recent`（`last_used_at`）；主面板 Header 增加一键切换按钮（默认 `Relevance`，可切回 `Recent`）。
+- **文案口径（P3-1）**：Storage Settings 中“内联存储上限”更名为“内容估算上限”，并明确按 `SUM(size_bytes)` 计算，避免与 DB 文件大小混淆。
+- **命名准确性（P3-2）**：`StorageService.getOriginalImageData` 改为 `loadPayloadData`（旧名保留 deprecated 转发），避免在 file/rtf/html 等路径上产生误导。
+- **HotKey 竞态（P3-7）**：HotKeyRecorderView 移除固定 sleep 等待持久化，改为监听 `SettingsStore.observeSettings()` 的更新并校验，降低误报风险。
+- **Preview 取消语义（P3-5）**：hover Markdown 渲染任务加入取消检查，避免已取消仍继续渲染/缓存造成 CPU 浪费。
+- **UI 测试稳定性（P3-4）**：UI tests 去掉多处固定 sleep，改为条件等待；`--uitesting` 模式下主界面用标准 `NSWindow` 承载，提升可观测性与稳定性。
+
 ## [v0.44.fix25] - 2025-12-17
 
 ### Fix/WebView 生命周期 + Fix/Stats 口径去重
