@@ -5,6 +5,14 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [v0.44.fix27] - 2025-12-18
+
+### Fix/Keyboard：`⌥⌫` 删除选中项修复
+
+- **Delete Selected**：修复 `⌥⌫` 在搜索框聚焦时被 TextField 吃掉、导致“删除选中条目”不生效的问题；改为在 AppKit 层（local keyDown monitor）拦截并转发到 `HistoryViewModel.deleteSelectedItem()`，确保快捷键始终生效。
+- **UITests**：新增 UI 回归用例覆盖“搜索框聚焦 + `⌥⌫` 删除选中项”；`--uitesting` 下主窗口设为 `.floating` level，降低外部窗口遮挡导致的 hit-test flaky（不影响生产行为）。
+- **Accessibility（测试辅助）**：列表条目补充 `accessibilityValue`（selected/unselected）用于 UI 用例稳定定位当前选中项（不改变功能）。
+
 ## [v0.44.fix26] - 2025-12-18
 
 ### Fix/Search（FTS 排序可切换）+ Fix/Quality（P3 系列）
