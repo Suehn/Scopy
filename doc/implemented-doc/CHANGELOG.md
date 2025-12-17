@@ -5,6 +5,13 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [v0.44.fix23] - 2025-12-17
+
+### Fix/Search 语义提示 + Fix/Dedup 哈希正确性门槛
+
+- **实现准确性（P1-2）**：对 Exact 短词（≤2）与 Regex “仅搜索最近 2000 条（recent cache）”的性能策略补齐显式 UI 提示，避免“搜不到 = 不存在”的误解，并引导用户通过 “Exact 输入 ≥3” 或 “切换 Fuzzy/Fuzzy+” 获得全量搜索。
+- **后端性能/正确性（P2-1）**：移除自实现 SHA256，改用 `CryptoKit.SHA256.hash(data:)`；补齐标准测试向量（空串、`"abc"`、multi-block），把哈希正确性纳入 CI 门槛。
+
 ## [v0.44.fix22] - 2025-12-17
 
 ### Fix/Clipboard Monitor：采样不再因 tracking 暂停 + 采样间隔可配置

@@ -8,8 +8,8 @@
 
 | 项目 | 状态 |
 |------|------|
-| **当前版本** | v0.44.fix22 |
-| **测试状态** | 单元测试通过（`make test-unit`: Executed 207 tests, 1 skipped） |
+| **当前版本** | v0.44.fix23 |
+| **测试状态** | 单元测试通过（`make test-unit`: Executed 211 tests, 1 skipped） |
 | **构建状态** | Debug ✅ |
 | **部署位置** | /Applications/Scopy.app |
 | **最后更新** | 2025-12-17 |
@@ -24,6 +24,7 @@
 
 | 版本 | 日期 | 主要内容 | 状态 |
 |------|------|----------|------|
+| [v0.44.fix23](./v0.44.fix23.md) | 2025-12-17 | Fix/Search：短词/Regex 搜索范围显式提示（recent cache 2000）+ Fix/Dedup：SHA256 改用 CryptoKit 并补齐测试向量 | ✅ |
 | [v0.44.fix22](./v0.44.fix22.md) | 2025-12-17 | Fix/Clipboard Monitor：采样 Timer 绑定 `.common` modes（避免 tracking 暂停漏采）+ Settings 可调采样间隔（100ms~2s） | ✅ |
 | [v0.44.fix21](./v0.44.fix21.md) | 2025-12-17 | Fix/Clipboard Ingest：`.string` 与 rich 不一致且富文本含 TeX 时优先取 rich payload 的纯文本，避免公式伪影写入历史 | ✅ |
 | [v0.44.fix20](./v0.44.fix20.md) | 2025-12-16 | Fix/UX：Settings 关闭不再退出应用 + 主窗口默认尺寸 480×640 | ✅ |

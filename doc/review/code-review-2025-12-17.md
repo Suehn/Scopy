@@ -67,9 +67,9 @@
 
 - （基于 `7418acc`）`Scopy/Services/ClipboardMonitor.swift:207`：`Timer.scheduledTimer(withTimeInterval:repeats:block:)` 创建并自动加入当前 RunLoop（default mode）。
 - `Scopy/Services/ClipboardMonitor.swift:326-351`：`changeCount` 发生跳变时只读取一次当前内容，无法补回“跳变期间的中间内容”。
-  - （待发布：v0.44.fix22）实现已改为 `Timer(timeInterval:)` + `RunLoop.main.add(..., forMode: .common)`。
+  - （已发布：v0.44.fix22）实现已改为 `Timer(timeInterval:)` + `RunLoop.main.add(..., forMode: .common)`。
 
-**修复跟进（待发布：v0.44.fix22）**
+**修复跟进（已发布：v0.44.fix22）**
 
 - **已改**：采样 timer 不再使用 `scheduledTimer` 绑定 default mode，改为 `Timer(timeInterval:)` + `RunLoop.main.add(..., forMode: .common)`，避免 UI/menu tracking 时采样暂停导致 `changeCount` 跳变与“漏记录中间复制”。（对应你在本文开头指出的“必须持续运行的后台采集不要绑 default mode”的原则）
 - **新增设置项**：Settings 增加“剪贴板采样间隔”（100ms～2s，步进 100ms），并落盘到 `SettingsDTO.clipboardPollingIntervalMs`；更新后会重启采样 timer。
@@ -123,6 +123,12 @@
 - 更糟的是：当用户尝试翻页（load more）时，后续请求仍走 `searchInCache`，等价于“只能在 recent cache 里分页”，用户无法到达更早历史的匹配。
 - 备注：**regex 模式目前也只在 recent cache 上做匹配**（`SearchEngineImpl.searchRegex` → `searchInCache`），且没有 fuzzy 那样的 prefilter/refine 机制。v0.md 允许 regex “限制子集以避免 O(n)”，但如果 UI 暴露 “Regex” 模式给用户，建议明确说明“只搜最近 N 条”或提供可控的全量策略（需评估性能）。
 
+**修复跟进（路线 B：显式语义，已发布：v0.44.fix23）**
+
+- **选择**：保留“exact 短词（≤2）与 regex 只搜 recent cache（2000）”的性能策略，但把它从“隐性规格”改成“显式 UI 语义”。
+- **UI 提示**：在搜索框下展示提示文案（Exact ≤2 / Regex），引导用户通过“输入 ≥3 字符（Exact）”或“切换到 Fuzzy/Fuzzy+”获得全量搜索。
+- **测试**：新增单测覆盖提示文案的出现条件（见 `ScopyTests/IntegrationTests.swift` 的 `SearchHintTests`）。
+
 **这和 v0.md 的关系**
 
 - `doc/dev-doc/v0.md` 4.2 “短词/长词优化”写的是“短词可以先在内存缓存最近 N 条快速过滤”，语义上更像**prefilter**而不是“只搜最近 N 条作为最终结果”。当前 fuzzy 已按 prefilter 思路实现（短词先 cache，随后 refine full fuzzy），但 exact 没有同样机制。
@@ -153,6 +159,11 @@
 - `Scopy/Services/ClipboardMonitor.swift:944-952`：`update(data:)` 每 64B：
   - `Array(buffer.prefix(64))` 复制一份 chunk
   - `buffer.removeFirst(64)` 触发数组搬移（潜在 O(n)）
+
+**修复跟进（已发布：v0.44.fix23）**
+
+- **已改**：移除自实现 SHA256，改为使用 `CryptoKit` 的 `SHA256.hash(data:)`，避免高拷贝/高搬移路径并降低正确性风险。
+- **测试**：补齐 SHA256 经典测试向量（空串、`"abc"`、multi-block 向量），把“哈希正确性”纳入 CI 门槛（见 `ScopyTests/ClipboardMonitorTests.swift` 的 `testSHA256HashVectors`）。
 
 **现象/风险**
 
