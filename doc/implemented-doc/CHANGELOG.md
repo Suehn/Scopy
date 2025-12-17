@@ -5,6 +5,19 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [v0.44.fix29] - 2025-12-18
+
+### Fix/Preview: export PNG table-fit + clipboard-only
+
+- **导出按钮语义拆分**：Markdown/LaTeX 预览的“导出渲染结果为 PNG”拆成两种：
+  - 导出到剪贴板并写入历史（便于回溯）
+  - 仅导出到剪贴板（不污染历史）
+- **避免白图/空白导出**：导出链路在 snapshot 前显式等待 markdown 渲染完成 + export-mode CSS 生效（`#content` opacity）+（如有）首次 KaTeX render 完成，减少“偶发全白”。
+- **表格缩放更可靠**：export-mode 表格改为 wrapper + `transform: scale(...)` 适配可用宽度，不再依赖 `zoom`；并用 `getBoundingClientRect()` 校正 subpixel rounding，降低“缩放后仍截断”的概率。
+- **导出尺寸更新**：短边上限调整为 1500px，长边上限调整为 65536px（`16_384 * 4`），导出仍保持 PNG。
+- **FTS 排序切换按钮修复**：切换排序立即触发搜索（不再受 debounce 影响），分页请求也携带 `sortMode`，避免“按钮看起来不生效”。
+- **Release tooling**：`make release-bump-patch` 支持 `vX.Y.fixN` 的 patch bump。
+
 ## [v0.44.fix28] - 2025-12-18
 
 ### Feat/Preview：导出渲染结果为 PNG（白底黑字）到剪贴板
