@@ -431,16 +431,20 @@ final class HistoryViewModel {
         refineTask?.cancel()
         refineTask = nil
 
-        if searchQuery.isEmpty && appFilter == nil && typeFilter == nil && typeFilters == nil {
-            Task { await load() }
-            return
-        }
-
         searchVersion += 1
         let currentVersion = searchVersion
 
         loadMoreTask?.cancel()
         loadMoreTask = nil
+
+        if searchQuery.isEmpty && appFilter == nil && typeFilter == nil && typeFilters == nil {
+            searchTask = Task {
+                guard !Task.isCancelled else { return }
+                guard currentVersion == searchVersion else { return }
+                await load()
+            }
+            return
+        }
 
         searchTask = Task {
             try? await Task.sleep(nanoseconds: timing.searchDebounceNs)

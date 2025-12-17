@@ -79,13 +79,12 @@ actor ClipboardService {
 
     func start() async throws {
         guard !isStarted else { return }
-        isStarted = true
 
         let loadedSettings = await settingsStore.load()
-        settings = loadedSettings
 
         let pasteboardName = monitorPasteboardName
         let pollingInterval = monitorPollingInterval ?? (TimeInterval(loadedSettings.clipboardPollingIntervalMs) / 1000.0)
+
         let monitor = await MainActor.run {
             let pasteboard: NSPasteboard
             if let pasteboardName, !pasteboardName.isEmpty {
@@ -95,37 +94,47 @@ actor ClipboardService {
             }
             return ClipboardMonitor(pasteboard: pasteboard, pollingInterval: pollingInterval)
         }
+
         let storage = await MainActor.run { StorageService(databasePath: databasePath) }
         let dbPath = await storage.databaseFilePath
         let search = SearchEngineImpl(dbPath: dbPath)
 
-        self.monitor = monitor
-        self.storage = storage
-        self.search = search
+        do {
+            try await storage.open()
+            try await search.open()
 
-        try await storage.open()
-        try await search.open()
-
-        await MainActor.run {
-            storage.cleanupSettings.maxItems = loadedSettings.maxItems
-            storage.cleanupSettings.maxSmallStorageMB = loadedSettings.maxStorageMB
-        }
-
-        Task { [storage] in
-            try? await storage.cleanupOrphanedFiles()
-        }
-
-        await MainActor.run {
-            monitor.startMonitoring()
-        }
-
-        monitorTask = Task { [weak self] in
-            guard let self else { return }
-            guard let stream = await self.getMonitorStream() else { return }
-            for await content in stream {
-                guard !Task.isCancelled else { break }
-                await self.handleNewContent(content)
+            await MainActor.run {
+                storage.cleanupSettings.maxItems = loadedSettings.maxItems
+                storage.cleanupSettings.maxSmallStorageMB = loadedSettings.maxStorageMB
+                monitor.startMonitoring()
             }
+
+            let monitorTask = Task { [weak self] in
+                guard let self else { return }
+                guard let stream = await self.getMonitorStream() else { return }
+                for await content in stream {
+                    guard !Task.isCancelled else { break }
+                    await self.handleNewContent(content)
+                }
+            }
+
+            self.settings = loadedSettings
+            self.monitor = monitor
+            self.storage = storage
+            self.search = search
+            self.monitorTask = monitorTask
+            self.isStarted = true
+
+            Task { [storage] in
+                try? await storage.cleanupOrphanedFiles()
+            }
+        } catch {
+            await MainActor.run {
+                monitor.stopMonitoring()
+            }
+            await storage.close()
+            await search.close()
+            throw error
         }
     }
 

@@ -37,7 +37,6 @@ struct HeaderView: View {
                     if !searchQuery.isEmpty {
                         Button {
                             searchQuery = ""
-                            historyViewModel.search()
                         } label: {
                             Image(systemName: ScopyIcons.clear)
                                 .foregroundStyle(ScopyColors.mutedText)

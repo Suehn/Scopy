@@ -66,6 +66,7 @@ public actor SearchEngineImpl {
         var items: [IndexedItem?]
         var idToSlot: [UUID: Int]
         var charPostings: [Character: [Int]]
+        var tombstoneCount: Int
     }
 
     private struct ScoredSlot {
@@ -146,6 +147,10 @@ public actor SearchEngineImpl {
     private var fullIndex: FullFuzzyIndex?
     private var fullIndexStale = true
     private var fullIndexGeneration: UInt64 = 0
+
+    private let fullIndexTombstoneRatioStaleThreshold: Double = 0.25
+    private let fullIndexTombstoneMinSlotsForStale: Int = 64
+    private let fullIndexTombstoneMinCountForStale: Int = 16
 
     private struct CachedStatement {
         let sql: String
@@ -241,10 +246,17 @@ public actor SearchEngineImpl {
            !fullIndexStale,
            let slot = index.idToSlot[id],
            slot < index.items.count {
-            index.items[slot] = nil
+            if index.items[slot] != nil {
+                index.items[slot] = nil
+                index.tombstoneCount += 1
+            }
             index.idToSlot.removeValue(forKey: id)
             fullIndex = index
             markIndexChanged()
+
+            if shouldMarkFullIndexStaleAfterDeletion(index: index) {
+                fullIndexStale = true
+            }
         }
 
         recentItemsCache = []
@@ -524,7 +536,16 @@ public actor SearchEngineImpl {
             }
         }
 
-        return FullFuzzyIndex(items: items, idToSlot: idToSlot, charPostings: charPostings)
+        return FullFuzzyIndex(items: items, idToSlot: idToSlot, charPostings: charPostings, tombstoneCount: 0)
+    }
+
+    private func shouldMarkFullIndexStaleAfterDeletion(index: FullFuzzyIndex) -> Bool {
+        guard !fullIndexStale else { return false }
+        guard index.items.count >= fullIndexTombstoneMinSlotsForStale else { return false }
+        guard index.tombstoneCount >= fullIndexTombstoneMinCountForStale else { return false }
+
+        let ratio = Double(index.tombstoneCount) / Double(index.items.count)
+        return ratio >= fullIndexTombstoneRatioStaleThreshold
     }
 
     private func searchInFullIndex(index: FullFuzzyIndex, request: SearchRequest, mode: SearchMode) throws -> SearchResult {
@@ -1282,4 +1303,13 @@ public actor SearchEngineImpl {
         fullIndexGeneration &+= 1
         fuzzySortedMatchesCache = nil
     }
+
+    #if DEBUG
+    func debugFullIndexHealth() -> (isBuilt: Bool, isStale: Bool, slots: Int, tombstones: Int) {
+        guard let index = fullIndex else {
+            return (false, fullIndexStale, 0, 0)
+        }
+        return (true, fullIndexStale, index.items.count, index.tombstoneCount)
+    }
+    #endif
 }

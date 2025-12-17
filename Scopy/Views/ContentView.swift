@@ -74,7 +74,6 @@ struct ContentView: View {
         case .escape:
             if !historyViewModel.searchQuery.isEmpty {
                 historyViewModel.searchQuery = ""
-                historyViewModel.search()
             } else {
                 appState.closePanelHandler?()
             }

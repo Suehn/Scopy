@@ -50,6 +50,15 @@ public final class StorageService {
     /// Threshold for external storage (v0.md: 小内容 < X KB)
     static let externalStorageThreshold = ScopyThresholds.externalStorageBytes
 
+    /// Concurrency limit for bulk filesystem deletions (avoid I/O storms).
+    static let maxConcurrentFileDeletions = 8
+
+    typealias FileRemover = @Sendable (URL) throws -> Void
+
+    #if DEBUG
+    nonisolated(unsafe) static var fileRemoverForTesting: FileRemover?
+    #endif
+
     /// Default cleanup settings (v0.md 2.1)
     public struct CleanupSettings {
         public var maxItems: Int = 10_000
@@ -353,17 +362,15 @@ public final class StorageService {
     public func deleteAllExceptPinned() async throws {
         let refs = try await repository.fetchStorageRefsForUnpinned()
 
-        // Delete files
-        // v0.23: 添加错误日志，便于追踪文件删除失败
-        for ref in refs {
-            do {
-                try FileManager.default.removeItem(atPath: ref)
-            } catch {
-                ScopyLog.storage.warning(
-                    "Failed to delete external file during clearAll: \(error.localizedDescription, privacy: .private)"
-                )
-            }
-        }
+        // Delete files off-main with bounded concurrency to avoid UI stalls and I/O storms.
+        let fileURLs = refs.map { URL(fileURLWithPath: $0) }
+        await Task.detached(priority: .utility) {
+            await Self.deleteFilesBounded(
+                fileURLs,
+                maxConcurrent: Self.maxConcurrentFileDeletions,
+                logContext: "clearAll"
+            )
+        }.value
 
         // Delete from DB
         try await repository.deleteAllExceptPinned()
@@ -574,15 +581,15 @@ public final class StorageService {
         }.value
         guard !orphanedFiles.isEmpty else { return }
 
-        // 3. Delete orphaned files concurrently (non-blocking; structured concurrency)
-        await withTaskGroup(of: Void.self) { group in
-            for fileURL in orphanedFiles {
-                group.addTask {
-                    let fileManager = FileManager()
-                    try? fileManager.removeItem(at: fileURL)
-                }
-            }
-        }
+        // 3. Delete orphaned files with bounded concurrency (avoid I/O storms).
+        let filesToDelete = orphanedFiles
+        await Task.detached(priority: .utility) {
+            await Self.deleteFilesBounded(
+                filesToDelete,
+                maxConcurrent: Self.maxConcurrentFileDeletions,
+                logContext: "orphanCleanup"
+            )
+        }.value
 
         // 4. Invalidate cache after cleanup
         invalidateExternalSizeCache()
@@ -647,7 +654,14 @@ public final class StorageService {
         guard !plan.ids.isEmpty else { return }
 
         if !plan.storageRefs.isEmpty {
-            deleteFilesInParallel(plan.storageRefs)
+            let fileURLs = plan.storageRefs.map { URL(fileURLWithPath: $0) }
+            await Task.detached(priority: .utility) {
+                await Self.deleteFilesBounded(
+                    fileURLs,
+                    maxConcurrent: Self.maxConcurrentFileDeletions,
+                    logContext: "cleanupByCount"
+                )
+            }.value
         }
 
         try await repository.deleteItemsBatchInTransaction(ids: plan.ids)
@@ -660,7 +674,14 @@ public final class StorageService {
         guard !plan.ids.isEmpty else { return }
 
         if !plan.storageRefs.isEmpty {
-            deleteFilesInParallel(plan.storageRefs)
+            let fileURLs = plan.storageRefs.map { URL(fileURLWithPath: $0) }
+            await Task.detached(priority: .utility) {
+                await Self.deleteFilesBounded(
+                    fileURLs,
+                    maxConcurrent: Self.maxConcurrentFileDeletions,
+                    logContext: "cleanupByAge"
+                )
+            }.value
         }
 
         try await repository.deleteItemsBatchInTransaction(ids: plan.ids)
@@ -674,7 +695,14 @@ public final class StorageService {
         guard !plan.ids.isEmpty else { return }
 
         if !plan.storageRefs.isEmpty {
-            deleteFilesInParallel(plan.storageRefs)
+            let fileURLs = plan.storageRefs.map { URL(fileURLWithPath: $0) }
+            await Task.detached(priority: .utility) {
+                await Self.deleteFilesBounded(
+                    fileURLs,
+                    maxConcurrent: Self.maxConcurrentFileDeletions,
+                    logContext: "cleanupBySize"
+                )
+            }.value
         }
 
         try await repository.deleteItemsBatchInTransaction(ids: plan.ids)
@@ -694,46 +722,80 @@ public final class StorageService {
         let plan = try await repository.planCleanupExternalStorage(excessBytes: excessBytes)
         guard !plan.ids.isEmpty else { return }
 
-        deleteFilesInParallel(plan.storageRefs)
+        let fileURLs = plan.storageRefs.map { URL(fileURLWithPath: $0) }
+        await Task.detached(priority: .utility) {
+            await Self.deleteFilesBounded(
+                fileURLs,
+                maxConcurrent: Self.maxConcurrentFileDeletions,
+                logContext: "cleanupExternalStorage"
+            )
+        }.value
         try await repository.deleteItemsBatchInTransaction(ids: plan.ids)
 
         // 清理完成后使缓存失效
         invalidateExternalSizeCache()
     }
 
-    /// v0.12: 并发删除文件，提升清理性能（后台执行，避免阻塞主线程）
-    /// v0.17: 添加错误日志记录，便于追踪删除失败
-    /// v0.20: 修复竞态条件 - 检查文件存在性，忽略"文件不存在"错误，不阻塞等待
-    private func deleteFilesInParallel(_ files: [String]) {
-        guard !files.isEmpty else { return }
+    nonisolated static func deleteFilesBounded(
+        _ fileURLs: [URL],
+        maxConcurrent: Int,
+        logContext: StaticString
+    ) async {
+        guard !fileURLs.isEmpty else { return }
 
-        // 去重，避免并发删除同一文件
-        let uniqueFiles = Array(Set(files))
+        let unique = Array(Set(fileURLs.map(\.path))).map { URL(fileURLWithPath: $0) }
+        let remover: FileRemover = {
+            #if DEBUG
+            if let hook = Self.fileRemoverForTesting { return hook }
+            #endif
+            return { url in try FileManager.default.removeItem(at: url) }
+        }()
 
-        DispatchQueue.global(qos: .utility).async {
-            let queue = DispatchQueue(label: "com.scopy.cleanup", attributes: .concurrent)
+        await forEachConcurrent(unique, maxConcurrent: maxConcurrent) { fileURL in
+            guard FileManager.default.fileExists(atPath: fileURL.path) else { return }
 
-            for file in uniqueFiles {
-                queue.async {
-                    // 先检查文件是否存在，避免不必要的错误
-                    guard FileManager.default.fileExists(atPath: file) else { return }
+            do {
+                try remover(fileURL)
+            } catch let error as NSError {
+                // Ignore "file not found" (may be deleted concurrently).
+                if error.domain == NSCocoaErrorDomain && error.code == NSFileNoSuchFileError {
+                    return
+                }
+                ScopyLog.storage.warning(
+                    "[\(logContext)] Failed to delete file '\(fileURL.path, privacy: .private)': \(error.localizedDescription, privacy: .private)"
+                )
+            } catch {
+                ScopyLog.storage.warning(
+                    "[\(logContext)] Failed to delete file '\(fileURL.path, privacy: .private)': \(error.localizedDescription, privacy: .private)"
+                )
+            }
+        }
+    }
 
-                    do {
-                        try FileManager.default.removeItem(atPath: file)
-                    } catch let error as NSError {
-                        // 忽略"文件不存在"错误（可能被其他线程删除）
-                        if error.domain == NSCocoaErrorDomain && error.code == NSFileNoSuchFileError {
-                            return
-                        }
-                        // v0.17: 记录其他删除失败，便于追踪存储泄漏
-                        ScopyLog.storage.warning(
-                            "Failed to delete file '\(file, privacy: .private)': \(error.localizedDescription, privacy: .private)"
-                        )
-                    }
+    nonisolated static func forEachConcurrent<T: Sendable>(
+        _ items: [T],
+        maxConcurrent: Int,
+        operation: @escaping @Sendable (T) async -> Void
+    ) async {
+        let limit = max(1, maxConcurrent)
+        guard !items.isEmpty else { return }
+
+        await withTaskGroup(of: Void.self) { group in
+            var iterator = items.makeIterator()
+            let initial = min(limit, items.count)
+            for _ in 0..<initial {
+                guard let item = iterator.next() else { break }
+                group.addTask {
+                    await operation(item)
                 }
             }
-            // v0.20: 不再使用 group.wait() 阻塞，让删除操作异步完成
-            // 文件删除是尽力而为，不需要等待完成
+
+            while await group.next() != nil {
+                guard let item = iterator.next() else { continue }
+                group.addTask {
+                    await operation(item)
+                }
+            }
         }
     }
 
