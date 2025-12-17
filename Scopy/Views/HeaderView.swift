@@ -11,45 +11,55 @@ struct HeaderView: View {
     @Environment(HistoryViewModel.self) private var historyViewModel
 
     var body: some View {
-        HStack(spacing: ScopySpacing.md) {
-            // Search Icon
-            Image(systemName: ScopyIcons.search)
-                .font(.system(size: ScopySize.Icon.header, weight: .medium))
-                .foregroundStyle(ScopyColors.mutedText)
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: ScopySpacing.md) {
+                // Search Icon
+                Image(systemName: ScopyIcons.search)
+                    .font(.system(size: ScopySize.Icon.header, weight: .medium))
+                    .foregroundStyle(ScopyColors.mutedText)
 
-            // Search Field
-            TextField("Search...", text: $searchQuery)
-                .textFieldStyle(.plain)
-                .font(ScopyTypography.searchField)
-                .focused($searchFocused)
-                .onChange(of: searchQuery) {
-                    historyViewModel.search()
-                }
-                .onSubmit {
-                    Task { await historyViewModel.selectCurrent() }
-                }
-
-            Spacer()
-
-            // Filters & Actions
-            HStack(spacing: ScopySpacing.sm) {
-                if !searchQuery.isEmpty {
-                    Button {
-                        searchQuery = ""
+                // Search Field
+                TextField("Search...", text: $searchQuery)
+                    .textFieldStyle(.plain)
+                    .font(ScopyTypography.searchField)
+                    .focused($searchFocused)
+                    .onChange(of: searchQuery) {
                         historyViewModel.search()
-                    } label: {
-                        Image(systemName: ScopyIcons.clear)
-                            .foregroundStyle(ScopyColors.mutedText)
                     }
-                    .buttonStyle(.plain)
+                    .onSubmit {
+                        Task { await historyViewModel.selectCurrent() }
+                    }
+
+                Spacer()
+
+                // Filters & Actions
+                HStack(spacing: ScopySpacing.sm) {
+                    if !searchQuery.isEmpty {
+                        Button {
+                            searchQuery = ""
+                            historyViewModel.search()
+                        } label: {
+                            Image(systemName: ScopyIcons.clear)
+                                .foregroundStyle(ScopyColors.mutedText)
+                        }
+                        .buttonStyle(.plain)
+                    }
+
+                    Divider()
+                        .frame(height: ScopySize.Height.divider)
+
+                    AppFilterButton()
+                    TypeFilterButton()
+                    SearchModeMenu()
                 }
-                
-                Divider()
-                    .frame(height: ScopySize.Height.divider)
-                
-                AppFilterButton()
-                TypeFilterButton()
-                SearchModeMenu()
+            }
+
+            if let hint = historyViewModel.cacheLimitedSearchHint {
+                Text(hint)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
         .padding(ScopySpacing.md)

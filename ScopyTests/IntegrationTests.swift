@@ -524,3 +524,74 @@ final class SettingsStorePersistenceTests: XCTestCase {
         XCTAssertEqual(maxLoaded.clipboardPollingIntervalMs, 2000)
     }
 }
+
+@MainActor
+final class SearchHintTests: XCTestCase {
+
+    private final class StubClipboardService: ClipboardServiceProtocol {
+        var eventStream: AsyncStream<ClipboardEvent> { AsyncStream { $0.finish() } }
+
+        func start() async throws {}
+        func stop() {}
+        func stopAndWait() async {}
+        func fetchRecent(limit: Int, offset: Int) async throws -> [ClipboardItemDTO] { [] }
+        func search(query: SearchRequest) async throws -> SearchResultPage { SearchResultPage(items: [], total: 0, hasMore: false) }
+        func pin(itemID: UUID) async throws {}
+        func unpin(itemID: UUID) async throws {}
+        func delete(itemID: UUID) async throws {}
+        func clearAll() async throws {}
+        func copyToClipboard(itemID: UUID) async throws {}
+        func updateSettings(_ settings: SettingsDTO) async throws {}
+        func getSettings() async throws -> SettingsDTO { .default }
+        func getStorageStats() async throws -> (itemCount: Int, sizeBytes: Int) { (0, 0) }
+        func getDetailedStorageStats() async throws -> StorageStatsDTO {
+            StorageStatsDTO(
+                itemCount: 0,
+                databaseSizeBytes: 0,
+                externalStorageSizeBytes: 0,
+                thumbnailSizeBytes: 0,
+                totalSizeBytes: 0,
+                databasePath: ""
+            )
+        }
+        func getImageData(itemID: UUID) async throws -> Data? { nil }
+        func getRecentApps(limit: Int) async throws -> [String] { [] }
+    }
+
+    func testExactShortQueryShowsHint() {
+        let service = StubClipboardService()
+        let settings = SettingsViewModel(service: service)
+        let viewModel = HistoryViewModel(service: service, settingsViewModel: settings)
+
+        viewModel.searchMode = .exact
+        viewModel.searchQuery = "ab"
+
+        let hint = viewModel.cacheLimitedSearchHint
+        XCTAssertNotNil(hint)
+        XCTAssertTrue(hint?.contains("2000") ?? false)
+    }
+
+    func testExactLongQueryDoesNotShowHint() {
+        let service = StubClipboardService()
+        let settings = SettingsViewModel(service: service)
+        let viewModel = HistoryViewModel(service: service, settingsViewModel: settings)
+
+        viewModel.searchMode = .exact
+        viewModel.searchQuery = "abc"
+
+        XCTAssertNil(viewModel.cacheLimitedSearchHint)
+    }
+
+    func testRegexShowsHint() {
+        let service = StubClipboardService()
+        let settings = SettingsViewModel(service: service)
+        let viewModel = HistoryViewModel(service: service, settingsViewModel: settings)
+
+        viewModel.searchMode = .regex
+        viewModel.searchQuery = "Item \\\\d+"
+
+        let hint = viewModel.cacheLimitedSearchHint
+        XCTAssertNotNil(hint)
+        XCTAssertTrue(hint?.contains("2000") ?? false)
+    }
+}

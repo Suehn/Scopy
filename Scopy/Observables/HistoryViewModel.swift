@@ -92,6 +92,21 @@ final class HistoryViewModel {
 
     var performanceSummary: PerformanceSummary?
 
+    var cacheLimitedSearchHint: String? {
+        let trimmed = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        switch searchMode {
+        case .exact:
+            guard !trimmed.isEmpty, trimmed.count <= 2 else { return nil }
+            return "Exact 短词（≤2）仅搜索最近 2000 条。输入 ≥3 字符或切换到 Fuzzy/Fuzzy+ 以全量搜索。"
+        case .regex:
+            guard !trimmed.isEmpty else { return nil }
+            return "Regex 仅搜索最近 2000 条（性能考虑）。如需全量搜索，请切换到 Exact（≥3 字符）或 Fuzzy/Fuzzy+。"
+        case .fuzzy, .fuzzyPlus:
+            return nil
+        }
+    }
+
     @ObservationIgnored private var searchTask: Task<Void, Never>?
     @ObservationIgnored private var loadMoreTask: Task<Void, Never>?
     @ObservationIgnored private var refineTask: Task<Void, Never>?
