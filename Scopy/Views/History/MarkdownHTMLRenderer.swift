@@ -103,6 +103,33 @@ enum MarkdownHTMLRenderer {
         width: 8px;
         height: 8px;
       }
+
+      /* Export-only appearance: force light theme (white background + black text) for snapshotting. */
+      html.scopy-export-light { color-scheme: light !important; }
+      html.scopy-export-light,
+      html.scopy-export-light body {
+        background: #ffffff !important;
+        color: #000000 !important;
+      }
+      html.scopy-export-light #content { opacity: 1 !important; }
+      html.scopy-export-light a { color: #000000 !important; }
+      html.scopy-export-light pre { background: rgba(0,0,0,0.04) !important; }
+      html.scopy-export-light blockquote { border-left-color: rgba(0,0,0,0.28) !important; }
+      html.scopy-export-light hr { border-top-color: rgba(0,0,0,0.28) !important; }
+      html.scopy-export-light th, html.scopy-export-light td { border-color: rgba(0,0,0,0.22) !important; }
+      html.scopy-export-light thead th { background: rgba(0,0,0,0.06) !important; }
+      html.scopy-export-light .katex { color: #000000 !important; }
+
+      /* Never include scrollbars in exported snapshot (even if scrolling recently toggled them on). */
+      html.scopy-export-light pre::-webkit-scrollbar,
+      html.scopy-export-light table::-webkit-scrollbar,
+      html.scopy-export-light .katex-display::-webkit-scrollbar,
+      html.scopy-export-light.scopy-scrollbars-visible pre::-webkit-scrollbar,
+      html.scopy-export-light.scopy-scrollbars-visible table::-webkit-scrollbar,
+      html.scopy-export-light.scopy-scrollbars-visible .katex-display::-webkit-scrollbar {
+        width: 0px !important;
+        height: 0px !important;
+      }
     </style>
     """
 
@@ -170,6 +197,18 @@ enum MarkdownHTMLRenderer {
             var lastW = 0;
             var pendingRAF = false;
             var ro = null;
+            window.__scopySetExportMode = function (enabled) {
+              try {
+                var root = document.documentElement;
+                if (!root) { return; }
+                if (enabled) {
+                  root.classList.add('scopy-export-light');
+                  root.classList.remove('scopy-scrollbars-visible');
+                } else {
+                  root.classList.remove('scopy-export-light');
+                }
+              } catch (e) { }
+            };
             window.__scopyReportHeight = function () {
               try {
                 if (!window.webkit || !window.webkit.messageHandlers || !window.webkit.messageHandlers.scopySize) { return; }

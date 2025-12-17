@@ -3,6 +3,8 @@ import SwiftUI
 import AppKit
 import WebKit
 import ScopyUISupport
+import UniformTypeIdentifiers
+import ImageIO
 
 private enum MarkdownPreviewScrollViewResolver {
     static func resolve(for view: NSView) -> NSScrollView? {
@@ -261,7 +263,7 @@ struct MarkdownPreviewWebView: NSViewRepresentable {
             }
             lastReportedMetrics = metrics
 
-            if let wk = message.webView as? WKWebView {
+            if let wk = message.webView {
                 attachScrollbarAutoHiderIfPossible(for: wk)
             }
             Task { @MainActor in
@@ -289,10 +291,18 @@ struct MarkdownPreviewWebView: NSViewRepresentable {
 
 @MainActor
 final class MarkdownPreviewWebViewController: NSObject, ObservableObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler {
+    enum ExportSnapshotError: Error {
+        case notReady
+        case invalidBounds
+        case snapshotFailed
+        case tiffEncodingFailed
+    }
+
     let webView: WKWebView
 
     var onContentSizeChange: (@MainActor (MarkdownContentMetrics) -> Void)?
     private var lastHTML: String = ""
+    private var isContentLoaded: Bool = false
     private var lastReportedMetrics: MarkdownContentMetrics = MarkdownContentMetrics(size: .zero, hasHorizontalOverflow: false)
     private let scrollbarAutoHider = ScrollbarAutoHider()
     private let sizeMessageHandlerProxy = WeakScriptMessageHandler()
@@ -354,9 +364,115 @@ final class MarkdownPreviewWebViewController: NSObject, ObservableObject, WKNavi
         attachWebViewIfNeeded()
         if lastHTML == html { return }
         lastHTML = html
+        isContentLoaded = false
         lastReportedMetrics = MarkdownContentMetrics(size: .zero, hasHorizontalOverflow: false)
         let baseURL = Bundle.main.resourceURL?.appendingPathComponent("MarkdownPreview", isDirectory: true)
         webView.loadHTMLString(html, baseURL: baseURL)
+    }
+
+    // MARK: - Export Snapshot (Copy as Image)
+
+    func makeLightSnapshotPNGForClipboard() async throws -> Data {
+        guard !lastHTML.isEmpty, isContentLoaded else { throw ExportSnapshotError.notReady }
+
+        let rect = webView.bounds
+        guard rect.width.isFinite, rect.height.isFinite, rect.width > 1, rect.height > 1 else {
+            throw ExportSnapshotError.invalidBounds
+        }
+
+        // Best-effort: toggle export-only light appearance. This is scoped to snapshotting only.
+        await evaluateJavaScriptIgnoringResult(Self.exportModeToggleJS(enabled: true))
+        defer {
+            webView.evaluateJavaScript(Self.exportModeToggleJS(enabled: false)) { _, _ in }
+        }
+
+        let image = try await takeSnapshot(rect: rect)
+        guard let tiff = image.tiffRepresentation else { throw ExportSnapshotError.tiffEncodingFailed }
+
+        // Encode PNG off the main thread (snapshot is UI-bound, encoding is pure data processing).
+        return try await withCheckedThrowingContinuation { continuation in
+            Task.detached(priority: .utility) {
+                do {
+                    let png = try Self.convertTIFFDataToPNG(tiff)
+                    continuation.resume(returning: png)
+                } catch {
+                    continuation.resume(throwing: error)
+                }
+            }
+        }
+    }
+
+    private static func exportModeToggleJS(enabled: Bool) -> String {
+        let flag = enabled ? "true" : "false"
+        return """
+        (function () {
+          try {
+            if (typeof window.__scopySetExportMode === 'function') {
+              window.__scopySetExportMode(\(flag));
+              return true;
+            }
+            var root = document.documentElement;
+            if (!root) { return false; }
+            if (\(flag)) {
+              root.classList.add('scopy-export-light');
+              root.classList.remove('scopy-scrollbars-visible');
+            } else {
+              root.classList.remove('scopy-export-light');
+            }
+            return true;
+          } catch (e) { return false; }
+        })();
+        """
+    }
+
+    private func evaluateJavaScriptIgnoringResult(_ js: String) async {
+        await withCheckedContinuation { continuation in
+            webView.evaluateJavaScript(js) { _, _ in
+                continuation.resume()
+            }
+        }
+    }
+
+    private func takeSnapshot(rect: CGRect) async throws -> NSImage {
+        try await withCheckedThrowingContinuation { continuation in
+            let config = WKSnapshotConfiguration()
+            config.rect = rect
+            config.snapshotWidth = NSNumber(value: Double(max(1, rect.width)))
+            if #available(macOS 10.15, *) {
+                config.afterScreenUpdates = true
+            }
+
+            webView.takeSnapshot(with: config) { image, error in
+                if let error {
+                    continuation.resume(throwing: error)
+                    return
+                }
+                guard let image else {
+                    continuation.resume(throwing: ExportSnapshotError.snapshotFailed)
+                    return
+                }
+                continuation.resume(returning: image)
+            }
+        }
+    }
+
+    nonisolated private static func convertTIFFDataToPNG(_ tiffData: Data) throws -> Data {
+        guard let source = CGImageSourceCreateWithData(tiffData as CFData, nil) else {
+            throw ExportSnapshotError.snapshotFailed
+        }
+        guard let cgImage = CGImageSourceCreateImageAtIndex(source, 0, nil) else {
+            throw ExportSnapshotError.snapshotFailed
+        }
+
+        let out = NSMutableData()
+        guard let dest = CGImageDestinationCreateWithData(out as CFMutableData, UTType.png.identifier as CFString, 1, nil) else {
+            throw ExportSnapshotError.snapshotFailed
+        }
+        CGImageDestinationAddImage(dest, cgImage, nil)
+        guard CGImageDestinationFinalize(dest) else {
+            throw ExportSnapshotError.snapshotFailed
+        }
+        return out as Data
     }
 
     // MARK: - WKNavigationDelegate / WKUIDelegate
@@ -396,6 +512,7 @@ final class MarkdownPreviewWebViewController: NSObject, ObservableObject, WKNavi
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        isContentLoaded = true
         // Best-effort: ensure math render runs even if DOMContentLoaded timing varies.
         webView.evaluateJavaScript("typeof window.__scopyRenderMath === 'function'") { result, _ in
             guard let ok = result as? Bool, ok else { return }

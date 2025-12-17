@@ -38,6 +38,10 @@ public protocol ClipboardServiceProtocol: AnyObject {
     /// 复制到系统剪贴板
     func copyToClipboard(itemID: UUID) async throws
 
+    /// 复制图片到系统剪贴板（用于渲染预览导出等场景）
+    /// - Note: 统一使用 PNG，确保跨应用粘贴一致性。
+    func copyToClipboard(imagePNGData: Data) async throws
+
     /// 更新设置
     func updateSettings(_ settings: SettingsDTO) async throws
 

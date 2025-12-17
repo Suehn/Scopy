@@ -323,6 +323,13 @@ actor ClipboardService {
         await yieldEvent(.itemUpdated(await toDTO(updated, storage: storage, thumbnailGenerationPriority: .userInitiated)))
     }
 
+    func copyToClipboard(imagePNGData: Data) async throws {
+        let monitor = try requireMonitor()
+        await MainActor.run {
+            monitor.copyToClipboard(data: imagePNGData, type: .png)
+        }
+    }
+
     func updateSettings(_ newSettings: SettingsDTO) async throws {
         let oldHeight = settings.thumbnailHeight
         let oldShowThumbnails = settings.showImageThumbnails

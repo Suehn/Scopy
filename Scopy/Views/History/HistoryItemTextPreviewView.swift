@@ -6,6 +6,11 @@ struct HistoryItemTextPreviewView: View {
     @ObservedObject var model: HoverPreviewModel
     let markdownWebViewController: MarkdownPreviewWebViewController?
 
+    @Environment(AppState.self) private var appState
+
+    @State private var exportTask: Task<Void, Never>?
+    @State private var isExporting: Bool = false
+
     var body: some View {
         let maxWidth: CGFloat = HoverPreviewScreenMetrics.maxPopoverWidthPoints()
         let maxHeight: CGFloat = HoverPreviewScreenMetrics.maxPopoverHeightPoints()
@@ -47,42 +52,46 @@ struct HistoryItemTextPreviewView: View {
             let shouldScroll = contentHeight > maxHeight
 
             if model.isMarkdown, let html = model.markdownHTML {
-                if let controller = markdownWebViewController {
-                    ReusableMarkdownPreviewWebView(
-                        controller: controller,
-                        html: html,
-                        shouldScroll: shouldScroll,
-                        onContentSizeChange: { metrics in
-                            guard model.markdownHTML == html else { return }
-                            if let existing = model.markdownContentSize, existing.width > 0 {
-                                model.markdownContentSize = CGSize(width: existing.width, height: metrics.size.height)
-                            } else {
-                                model.markdownContentSize = metrics.size
+                ZStack(alignment: .topTrailing) {
+                    if let controller = markdownWebViewController {
+                        ReusableMarkdownPreviewWebView(
+                            controller: controller,
+                            html: html,
+                            shouldScroll: shouldScroll,
+                            onContentSizeChange: { metrics in
+                                guard model.markdownHTML == html else { return }
+                                if let existing = model.markdownContentSize, existing.width > 0 {
+                                    model.markdownContentSize = CGSize(width: existing.width, height: metrics.size.height)
+                                } else {
+                                    model.markdownContentSize = metrics.size
+                                }
+                                if metrics.hasHorizontalOverflow {
+                                    model.markdownHasHorizontalOverflow = true
+                                }
                             }
-                            if metrics.hasHorizontalOverflow {
-                                model.markdownHasHorizontalOverflow = true
+                        )
+                    } else {
+                        MarkdownPreviewWebView(
+                            html: html,
+                            shouldScroll: shouldScroll,
+                            onContentSizeChange: { metrics in
+                                guard model.markdownHTML == html else { return }
+                                if let existing = model.markdownContentSize, existing.width > 0 {
+                                    model.markdownContentSize = CGSize(width: existing.width, height: metrics.size.height)
+                                } else {
+                                    model.markdownContentSize = metrics.size
+                                }
+                                if metrics.hasHorizontalOverflow {
+                                    model.markdownHasHorizontalOverflow = true
+                                }
                             }
-                        }
-                    )
-                    .frame(width: width, height: clampedHeight)
-                } else {
-                    MarkdownPreviewWebView(
-                        html: html,
-                        shouldScroll: shouldScroll,
-                        onContentSizeChange: { metrics in
-                            guard model.markdownHTML == html else { return }
-                            if let existing = model.markdownContentSize, existing.width > 0 {
-                                model.markdownContentSize = CGSize(width: existing.width, height: metrics.size.height)
-                            } else {
-                                model.markdownContentSize = metrics.size
-                            }
-                            if metrics.hasHorizontalOverflow {
-                                model.markdownHasHorizontalOverflow = true
-                            }
-                        }
-                    )
-                    .frame(width: width, height: clampedHeight)
+                        )
+                    }
+
+                    exportButton(html: html)
+                        .padding(10)
                 }
+                .frame(width: width, height: clampedHeight)
             } else {
                 HoverPreviewTextView(text: text, font: font, width: width, shouldScroll: shouldScroll)
                     .frame(width: width, height: clampedHeight)
@@ -90,6 +99,62 @@ struct HistoryItemTextPreviewView: View {
         } else {
             ProgressView()
                 .frame(width: maxWidth, height: min(maxHeight, 160))
+        }
+    }
+
+    @ViewBuilder
+    private func exportButton(html: String) -> some View {
+        Button {
+            exportTask?.cancel()
+            exportTask = Task { @MainActor in
+                await exportRenderedMarkdownToClipboard(expectedHTML: html)
+            }
+        } label: {
+            Group {
+                if isExporting {
+                    ProgressView()
+                        .controlSize(.mini)
+                } else {
+                    Image(systemName: ScopyIcons.exportImage)
+                        .font(.system(size: ScopySize.Icon.filter, weight: .medium))
+                        .foregroundStyle(ScopyColors.mutedText)
+                }
+            }
+            .frame(width: 22, height: 22)
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("Preview.ExportImage")
+        .help("Copy rendered preview as PNG")
+        .disabled(isExporting || markdownWebViewController == nil)
+        .background(
+            RoundedRectangle(cornerRadius: ScopySize.Corner.sm, style: .continuous)
+                .fill(ScopyColors.cardBackground)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: ScopySize.Corner.sm, style: .continuous)
+                .stroke(ScopyColors.border.opacity(ScopySize.Opacity.subtle), lineWidth: ScopySize.Stroke.thin)
+        )
+        .onDisappear {
+            exportTask?.cancel()
+            exportTask = nil
+            isExporting = false
+        }
+    }
+
+    @MainActor
+    private func exportRenderedMarkdownToClipboard(expectedHTML: String) async {
+        guard let controller = markdownWebViewController else { return }
+        guard model.markdownHTML == expectedHTML else { return }
+        guard !isExporting else { return }
+
+        isExporting = true
+        defer { isExporting = false }
+
+        do {
+            let pngData = try await controller.makeLightSnapshotPNGForClipboard()
+            try await appState.service.copyToClipboard(imagePNGData: pngData)
+        } catch {
+            ScopyLog.ui.error("Failed to export rendered preview image: \(error.localizedDescription, privacy: .private)")
         }
     }
 }

@@ -15,5 +15,5 @@ enum ScopyIcons {
     static let warning = "exclamationmark.triangle"
     static let refresh = "arrow.clockwise"
     static let settings = "gear"
+    static let exportImage = "photo.on.rectangle.angled"
 }
-
