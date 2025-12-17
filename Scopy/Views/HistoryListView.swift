@@ -112,9 +112,10 @@ struct HistoryListView: View {
     /// v0.18: 添加 List 修饰符以保持原有样式
     @ViewBuilder
     private func historyRow(item: ClipboardItemDTO) -> some View {
+        let isSelected = historyViewModel.selectedID == item.id
         HistoryItemView(
             item: item,
-            isKeyboardSelected: historyViewModel.selectedID == item.id,
+            isKeyboardSelected: isSelected,
             isScrolling: historyViewModel.isScrolling,
             settings: settingsViewModel.settings,
             onSelect: { Task { await historyViewModel.select(item) } },
@@ -129,6 +130,7 @@ struct HistoryListView: View {
         .equatable()
         .id(item.id)
         .accessibilityIdentifier("History.Item.\(item.id.uuidString)")
+        .accessibilityValue(isSelected ? "selected" : "unselected")
         .listRowInsets(EdgeInsets())      // 移除默认内边距
         .listRowBackground(Color.clear)    // 透明背景
         .listRowSeparator(.hidden)         // 隐藏分隔线

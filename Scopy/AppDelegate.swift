@@ -54,6 +54,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             window.titleVisibility = .hidden
             window.titlebarAppearsTransparent = true
             window.isReleasedWhenClosed = false
+            // Keep the test window on top to avoid other apps occluding it and causing hit-testing failures.
+            window.level = .floating
             window.center()
             window.contentView = NSHostingView(rootView: rootView)
             window.makeKeyAndOrderFront(nil)
@@ -109,12 +111,31 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         // 注册 ⌘, 快捷键打开设置
         // v0.22: 存储监视器引用，以便在应用退出时移除
         localEventMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self else { return event }
+
+            let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+
+            // ⌥⌫ (Option+Delete) - 删除选中项
+            // NOTE: SwiftUI TextField may consume ⌥⌫ for word deletion; handle at the AppKit layer so the shortcut always works.
+            if flags.contains(.option),
+               !flags.contains(.command),
+               !flags.contains(.control),
+               !flags.contains(.shift),
+               (event.keyCode == 51 || event.keyCode == 117),
+               (self.panel?.isVisible == true || self.uiTestWindow?.isVisible == true),
+               AppState.shared.historyViewModel.selectedID != nil {
+                Task { @MainActor in
+                    await AppState.shared.historyViewModel.deleteSelectedItem()
+                }
+                return nil
+            }
+
             if event.modifierFlags.contains(.command),
                !event.modifierFlags.contains(.shift),
                !event.modifierFlags.contains(.option),
                !event.modifierFlags.contains(.control),
                event.charactersIgnoringModifiers == "," {
-                self?.openSettings()
+                self.openSettings()
                 return nil
             }
             return event

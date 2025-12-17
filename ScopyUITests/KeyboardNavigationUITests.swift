@@ -21,6 +21,52 @@ final class KeyboardNavigationUITests: XCTestCase {
 
     // MARK: - Arrow Key Navigation
 
+    func testOptionDeleteDeletesSelectedItemEvenWhenSearchFocused() throws {
+        let list = app.anyElement("History.List")
+        guard list.waitForExistence(timeout: 10) else {
+            XCTFail("History list not found")
+            return
+        }
+
+        let searchField = app.anyElement("History.SearchField")
+        guard searchField.waitForExistence(timeout: 10) else {
+            XCTFail("Search field not found")
+            return
+        }
+        searchField.click()
+
+        let window = app.windows.firstMatch
+        guard window.waitForExistence(timeout: 5) else {
+            XCTFail("Window not found")
+            return
+        }
+        // Select the first item via keyboard so we don't close the panel/window (click selects+copies).
+        window.typeKey(.downArrow, modifierFlags: [])
+
+        let selectedItem = app.anyElements(
+            matching: NSPredicate(
+                format: "identifier BEGINSWITH %@ AND value == %@",
+                "History.Item.",
+                "selected"
+            )
+        ).firstMatch
+        guard selectedItem.waitForExistence(timeout: 5) else {
+            XCTFail("Selected item not found")
+            return
+        }
+
+        let selectedItemIdentifier = selectedItem.identifier
+        window.typeKey(.delete, modifierFlags: [.option])
+
+        let deletedElement = app.anyElement(selectedItemIdentifier)
+        waitForPredicate(
+            NSPredicate(format: "exists == 0"),
+            on: deletedElement,
+            timeout: 5,
+            message: "Option+Delete did not delete the selected item"
+        )
+    }
+
     func testDownArrowSelectsNextItem() throws {
         let window = app.windows.firstMatch
         guard window.waitForExistence(timeout: 5) else {
