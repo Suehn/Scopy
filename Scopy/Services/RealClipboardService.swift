@@ -73,8 +73,8 @@ final class RealClipboardService: ClipboardServiceProtocol {
         try await clipboardService.copyToClipboard(itemID: itemID)
     }
 
-    func copyToClipboard(imagePNGData: Data) async throws {
-        try await clipboardService.copyToClipboard(imagePNGData: imagePNGData)
+    func copyToClipboard(imagePNGData: Data, recordInHistory: Bool) async throws {
+        try await clipboardService.copyToClipboard(imagePNGData: imagePNGData, recordInHistory: recordInHistory)
     }
 
     func updateSettings(_ settings: SettingsDTO) async throws {

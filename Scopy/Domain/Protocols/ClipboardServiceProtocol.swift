@@ -40,6 +40,7 @@ public protocol ClipboardServiceProtocol: AnyObject {
 
     /// 复制图片到系统剪贴板（用于渲染预览导出等场景）
     /// - Note: 统一使用 PNG，确保跨应用粘贴一致性。
+    func copyToClipboard(imagePNGData: Data, recordInHistory: Bool) async throws
     func copyToClipboard(imagePNGData: Data) async throws
 
     /// 更新设置
@@ -67,5 +68,9 @@ public protocol ClipboardServiceProtocol: AnyObject {
 public extension ClipboardServiceProtocol {
     func stopAndWait() async {
         stop()
+    }
+
+    func copyToClipboard(imagePNGData: Data) async throws {
+        try await copyToClipboard(imagePNGData: imagePNGData, recordInHistory: true)
     }
 }

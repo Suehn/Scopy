@@ -400,6 +400,7 @@ final class HistoryViewModel {
                     let request = SearchRequest(
                         query: searchQuery,
                         mode: searchMode,
+                        sortMode: ftsSortMode,
                         appFilter: appFilter,
                         typeFilter: typeFilter,
                         typeFilters: typeFilters,
@@ -434,7 +435,7 @@ final class HistoryViewModel {
 
     // MARK: - Search
 
-    func search() {
+    func search(immediate: Bool = false) {
         searchTask?.cancel()
         refineTask?.cancel()
         refineTask = nil
@@ -455,7 +456,9 @@ final class HistoryViewModel {
         }
 
         searchTask = Task {
-            try? await Task.sleep(nanoseconds: timing.searchDebounceNs)
+            if !immediate {
+                try? await Task.sleep(nanoseconds: timing.searchDebounceNs)
+            }
             guard !Task.isCancelled else { return }
             guard currentVersion == searchVersion else { return }
 
@@ -538,7 +541,7 @@ final class HistoryViewModel {
     func toggleFTSSortMode() {
         ftsSortMode = ftsSortMode.toggled
         UserDefaults.standard.set(ftsSortMode.rawValue, forKey: ftsSortModeDefaultsKey)
-        search()
+        search(immediate: true)
     }
 
     // MARK: - Actions

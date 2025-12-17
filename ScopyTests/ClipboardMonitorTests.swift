@@ -1,6 +1,8 @@
 import AppKit
 import XCTest
 import ScopyKit
+import ImageIO
+import UniformTypeIdentifiers
 
 /// ClipboardMonitor 单元测试
 /// 验证剪贴板监控和内容提取功能
@@ -206,6 +208,27 @@ final class ClipboardMonitorTests: XCTestCase {
 
         XCTAssertEqual(pasteboard.string(forType: .string), "Hello <World>")
         XCTAssertEqual(pasteboard.data(forType: .html), htmlData)
+    }
+
+    func testCopyImageWithRecordInHistoryIsCapturedByMonitor() async throws {
+        monitor.setPollingInterval(0.1)
+        monitor.startMonitoring()
+
+        let exp = expectation(description: "received image content")
+        let listener = Task { @MainActor in
+            for await content in monitor.contentStream {
+                if content.type == .image {
+                    exp.fulfill()
+                    break
+                }
+            }
+        }
+        defer { listener.cancel() }
+
+        let pngData = try Self.makeTestPNGData()
+        monitor.copyToClipboard(data: pngData, type: .png, recordInHistory: true)
+
+        await fulfillment(of: [exp], timeout: 3.0)
     }
 
     // MARK: - Content Type Detection Tests
@@ -476,5 +499,50 @@ final class ClipboardMonitorTests: XCTestCase {
         let content = monitor.readCurrentClipboard()
         XCTAssertNotNil(content)
         XCTAssertTrue(content?.plainText.contains("👋") ?? false)
+    }
+
+    private static func makeTestPNGData() throws -> Data {
+        let width = 2
+        let height = 2
+        let bytesPerPixel = 4
+        let bytesPerRow = width * bytesPerPixel
+        var buffer = [UInt8](repeating: 0, count: width * height * bytesPerPixel)
+        for i in stride(from: 0, to: buffer.count, by: bytesPerPixel) {
+            buffer[i + 0] = 0x00 // R
+            buffer[i + 1] = 0x00 // G
+            buffer[i + 2] = 0x00 // B
+            buffer[i + 3] = 0xFF // A
+        }
+
+        guard let provider = CGDataProvider(data: Data(buffer) as CFData) else {
+            throw XCTSkip("Unable to create CGDataProvider")
+        }
+        let cs = CGColorSpaceCreateDeviceRGB()
+        let bitmapInfo = CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue)
+        guard let cgImage = CGImage(
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bitsPerPixel: 32,
+            bytesPerRow: bytesPerRow,
+            space: cs,
+            bitmapInfo: bitmapInfo,
+            provider: provider,
+            decode: nil,
+            shouldInterpolate: false,
+            intent: .defaultIntent
+        ) else {
+            throw XCTSkip("Unable to create CGImage")
+        }
+
+        let out = NSMutableData()
+        guard let dest = CGImageDestinationCreateWithData(out as CFMutableData, UTType.png.identifier as CFString, 1, nil) else {
+            throw XCTSkip("Unable to create PNG destination")
+        }
+        CGImageDestinationAddImage(dest, cgImage, nil)
+        guard CGImageDestinationFinalize(dest) else {
+            throw XCTSkip("Unable to finalize PNG destination")
+        }
+        return out as Data
     }
 }

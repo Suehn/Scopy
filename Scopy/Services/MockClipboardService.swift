@@ -199,8 +199,8 @@ final class MockClipboardService: ClipboardServiceProtocol {
         ScopyLog.app.info("Copied to clipboard: \(String(item.plainText.prefix(50)), privacy: .private)...")
     }
 
-    func copyToClipboard(imagePNGData: Data) async throws {
-        ScopyLog.app.info("Copied rendered image to clipboard (\(imagePNGData.count) bytes)")
+    func copyToClipboard(imagePNGData: Data, recordInHistory: Bool) async throws {
+        ScopyLog.app.info("Copied rendered image to clipboard (\(imagePNGData.count) bytes), recordInHistory=\(recordInHistory)")
     }
 
     func updateSettings(_ newSettings: SettingsDTO) async throws {

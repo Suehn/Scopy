@@ -323,10 +323,10 @@ actor ClipboardService {
         await yieldEvent(.itemUpdated(await toDTO(updated, storage: storage, thumbnailGenerationPriority: .userInitiated)))
     }
 
-    func copyToClipboard(imagePNGData: Data) async throws {
+    func copyToClipboard(imagePNGData: Data, recordInHistory: Bool) async throws {
         let monitor = try requireMonitor()
         await MainActor.run {
-            monitor.copyToClipboard(data: imagePNGData, type: .png)
+            monitor.copyToClipboard(data: imagePNGData, type: .png, recordInHistory: recordInHistory)
         }
     }
 

@@ -88,7 +88,7 @@ struct HistoryItemTextPreviewView: View {
                         )
                     }
 
-                    exportButton(html: html)
+                    exportButtons(html: html, containerWidthPoints: width)
                         .padding(10)
                 }
                 .frame(width: width, height: clampedHeight)
@@ -103,19 +103,61 @@ struct HistoryItemTextPreviewView: View {
     }
 
     @ViewBuilder
-    private func exportButton(html: String) -> some View {
-        Button {
+    private func exportButtons(html: String, containerWidthPoints: CGFloat) -> some View {
+        HStack(spacing: 6) {
+            exportButton(
+                systemImage: ScopyIcons.exportImageToHistory,
+                accessibilityID: "Preview.ExportImage.Record",
+                help: "Copy rendered preview as PNG (and record to history)",
+                onTap: {
+                    exportTask?.cancel()
+                    exportTask = Task { @MainActor in
+                        await exportRenderedMarkdownToClipboard(
+                            expectedHTML: html,
+                            containerWidthPoints: containerWidthPoints,
+                            recordInHistory: true
+                        )
+                    }
+                }
+            )
+
+            exportButton(
+                systemImage: ScopyIcons.exportImage,
+                accessibilityID: "Preview.ExportImage.Only",
+                help: "Copy rendered preview as PNG (clipboard only)",
+                onTap: {
+                    exportTask?.cancel()
+                    exportTask = Task { @MainActor in
+                        await exportRenderedMarkdownToClipboard(
+                            expectedHTML: html,
+                            containerWidthPoints: containerWidthPoints,
+                            recordInHistory: false
+                        )
+                    }
+                }
+            )
+        }
+        .onDisappear {
             exportTask?.cancel()
-            exportTask = Task { @MainActor in
-                await exportRenderedMarkdownToClipboard(expectedHTML: html)
-            }
-        } label: {
+            exportTask = nil
+            isExporting = false
+        }
+    }
+
+    @ViewBuilder
+    private func exportButton(
+        systemImage: String,
+        accessibilityID: String,
+        help: String,
+        onTap: @escaping () -> Void
+    ) -> some View {
+        Button(action: onTap) {
             Group {
                 if isExporting {
                     ProgressView()
                         .controlSize(.mini)
                 } else {
-                    Image(systemName: ScopyIcons.exportImage)
+                    Image(systemName: systemImage)
                         .font(.system(size: ScopySize.Icon.filter, weight: .medium))
                         .foregroundStyle(ScopyColors.mutedText)
                 }
@@ -123,9 +165,9 @@ struct HistoryItemTextPreviewView: View {
             .frame(width: 22, height: 22)
         }
         .buttonStyle(.plain)
-        .accessibilityIdentifier("Preview.ExportImage")
-        .help("Copy rendered preview as PNG")
-        .disabled(isExporting || markdownWebViewController == nil)
+        .accessibilityIdentifier(accessibilityID)
+        .help(help)
+        .disabled(isExporting)
         .background(
             RoundedRectangle(cornerRadius: ScopySize.Corner.sm, style: .continuous)
                 .fill(ScopyColors.cardBackground)
@@ -134,16 +176,14 @@ struct HistoryItemTextPreviewView: View {
             RoundedRectangle(cornerRadius: ScopySize.Corner.sm, style: .continuous)
                 .stroke(ScopyColors.border.opacity(ScopySize.Opacity.subtle), lineWidth: ScopySize.Stroke.thin)
         )
-        .onDisappear {
-            exportTask?.cancel()
-            exportTask = nil
-            isExporting = false
-        }
     }
 
     @MainActor
-    private func exportRenderedMarkdownToClipboard(expectedHTML: String) async {
-        guard let controller = markdownWebViewController else { return }
+    private func exportRenderedMarkdownToClipboard(
+        expectedHTML: String,
+        containerWidthPoints: CGFloat,
+        recordInHistory: Bool
+    ) async {
         guard model.markdownHTML == expectedHTML else { return }
         guard !isExporting else { return }
 
@@ -151,8 +191,14 @@ struct HistoryItemTextPreviewView: View {
         defer { isExporting = false }
 
         do {
-            let pngData = try await controller.makeLightSnapshotPNGForClipboard()
-            try await appState.service.copyToClipboard(imagePNGData: pngData)
+            let renderer = MarkdownExportRenderer()
+            let pngData = try await renderer.renderPNG(
+                html: expectedHTML,
+                containerWidthPoints: containerWidthPoints,
+                maxShortSidePixels: 1500,
+                maxLongSidePixels: 16_384 * 4
+            )
+            try await appState.service.copyToClipboard(imagePNGData: pngData, recordInHistory: recordInHistory)
         } catch {
             ScopyLog.ui.error("Failed to export rendered preview image: \(error.localizedDescription, privacy: .private)")
         }

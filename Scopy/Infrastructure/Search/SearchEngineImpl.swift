@@ -1192,7 +1192,7 @@ public actor SearchEngineImpl {
                 SELECT clipboard_items.id, clipboard_items.type, clipboard_items.content_hash, clipboard_items.plain_text,
                        clipboard_items.app_bundle_id, clipboard_items.created_at, clipboard_items.last_used_at,
                        clipboard_items.use_count, clipboard_items.is_pinned, clipboard_items.size_bytes, clipboard_items.storage_ref
-                FROM clipboard_items INDEXED BY idx_pinned
+                FROM clipboard_items
                 JOIN clipboard_fts ON clipboard_items.rowid = clipboard_fts.rowid
                 WHERE clipboard_fts MATCH ?
             """

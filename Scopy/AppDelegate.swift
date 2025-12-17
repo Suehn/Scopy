@@ -53,6 +53,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             window.title = "Scopy"
             window.titleVisibility = .hidden
             window.titlebarAppearsTransparent = true
+            window.titlebarSeparatorStyle = .none
+            window.isMovableByWindowBackground = true
+            window.standardWindowButton(.closeButton)?.isHidden = true
+            window.standardWindowButton(.miniaturizeButton)?.isHidden = true
+            window.standardWindowButton(.zoomButton)?.isHidden = true
             window.isReleasedWhenClosed = false
             // Keep the test window on top to avoid other apps occluding it and causing hit-testing failures.
             window.level = .floating

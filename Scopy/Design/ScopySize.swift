@@ -65,7 +65,7 @@ enum ScopySize {
     enum Window {
         private static var u: CGFloat { ScopySize.unit }
 
-        static let mainWidth: CGFloat = u * 120       // 480pt
+        static let mainWidth: CGFloat = u * 105       // 420pt
         static let mainHeight: CGFloat = u * 160      // 640pt
         static let settingsWidth: CGFloat = u * 180   // 720pt
         static let settingsHeight: CGFloat = u * 130  // 520pt

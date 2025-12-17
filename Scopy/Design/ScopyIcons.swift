@@ -16,4 +16,5 @@ enum ScopyIcons {
     static let refresh = "arrow.clockwise"
     static let settings = "gear"
     static let exportImage = "photo.on.rectangle.angled"
+    static let exportImageToHistory = "photo.badge.plus"
 }

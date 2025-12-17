@@ -260,7 +260,24 @@ public final class ClipboardMonitor {
     public func copyToClipboard(data: Data, type: NSPasteboard.PasteboardType) {
         pasteboard.clearContents()
         pasteboard.setData(data, forType: type)
+        // Default behavior: avoid triggering our own copy as a new history item.
         lastChangeCount = pasteboard.changeCount
+    }
+
+    /// Copy data to clipboard and optionally allow the monitor to record it as a new history item.
+    ///
+    /// - Note: When `recordInHistory` is `true`, we intentionally do NOT update `lastChangeCount`,
+    ///   so the next polling tick will capture this clipboard change.
+    public func copyToClipboard(
+        data: Data,
+        type: NSPasteboard.PasteboardType,
+        recordInHistory: Bool
+    ) {
+        pasteboard.clearContents()
+        pasteboard.setData(data, forType: type)
+        if !recordInHistory {
+            lastChangeCount = pasteboard.changeCount
+        }
     }
 
     public func copyToClipboard(text: String, data: Data, type: NSPasteboard.PasteboardType) {

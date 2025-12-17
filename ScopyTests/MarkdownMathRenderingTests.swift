@@ -1,6 +1,14 @@
 import XCTest
 
 final class MarkdownMathRenderingTests: XCTestCase {
+    func testMarkdownRendererIncludesExportModeHook() {
+        let html = MarkdownHTMLRenderer.render(markdown: "x")
+        XCTAssertTrue(html.contains("scopy-export-light"))
+        XCTAssertTrue(html.contains("__scopySetExportMode"))
+        XCTAssertTrue(html.contains("__scopyMarkdownRendered"))
+        XCTAssertTrue(html.contains("__scopyFitTablesForExport"))
+    }
+
     func testParenSubscriptMathWithoutBackslashIsWrapped() {
         let input = """
         * (T_{io}=12.4)ms，(T_{aug}=47.8)ms → (T_{data}=60.2)ms
