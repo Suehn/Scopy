@@ -5,6 +5,7 @@ import WebKit
 import ScopyUISupport
 import UniformTypeIdentifiers
 import ImageIO
+import os
 
 private enum MarkdownPreviewScrollViewResolver {
     static func resolve(for view: NSView) -> NSScrollView? {
@@ -24,6 +25,21 @@ private enum MarkdownPreviewScrollViewResolver {
 
 @MainActor
 final class MarkdownExportRenderer: NSObject {
+    private static let logger = Logger(
+        subsystem: Bundle.main.bundleIdentifier ?? "Scopy",
+        category: "ui"
+    )
+
+    private enum RenderConstants {
+        // Prefer tiling for very tall pages; a single huge WKWebView snapshot may return blank/partial images.
+        static let maxSingleSnapshotHeightPoints: CGFloat = 20_000
+        static let tileViewportHeightPoints: CGFloat = 1000
+        static let tileOverlapPoints: CGFloat = 1
+
+        // Safety guard for stitched images (RGBA 8-bit => ~4 bytes/pixel).
+        static let maxTotalPixels: Int = 60_000_000
+    }
+
     enum ExportError: Error {
         case navigationFailed
         case notReady
@@ -147,12 +163,37 @@ final class MarkdownExportRenderer: NSObject {
             maxShortSidePixels: maxShortSidePixels,
             maxLongSidePixels: maxLongSidePixels
         )
-        let image = try await takeSnapshot(
-            size: CGSize(width: finalWidth, height: finalHeight),
-            snapshotWidthPoints: CGFloat(snapshotTarget.width)
+        let snapshotWidthPoints = CGFloat(max(1, snapshotTarget.width))
+
+        if finalHeight <= RenderConstants.maxSingleSnapshotHeightPoints {
+            do {
+                let image = try await takeSnapshot(
+                    size: CGSize(width: finalWidth, height: finalHeight),
+                    snapshotWidthPoints: snapshotWidthPoints
+                )
+                var rect = CGRect(origin: .zero, size: image.size)
+                guard let cgImage = image.cgImage(forProposedRect: &rect, context: nil, hints: nil) else {
+                    throw ExportError.imageEncodeFailed
+                }
+                let trimmed = Self.trimBottomWhitespaceIfNeeded(cgImage: cgImage)
+                return try await encodePNG(
+                    cgImage: trimmed,
+                    maxShortSidePixels: maxShortSidePixels,
+                    maxLongSidePixels: maxLongSidePixels
+                )
+            } catch {
+                // Fall back to tiled rendering for robustness.
+                Self.logger.warning("Export snapshot failed; falling back to tiled render. error=\(String(describing: error), privacy: .private)")
+            }
+        }
+
+        let stitched = try await renderTiledCGImage(
+            contentWidthPoints: finalWidth,
+            contentHeightPoints: finalHeight,
+            snapshotWidthPoints: snapshotWidthPoints
         )
         return try await encodePNG(
-            image: image,
+            cgImage: stitched,
             maxShortSidePixels: maxShortSidePixels,
             maxLongSidePixels: maxLongSidePixels
         )
@@ -316,6 +357,262 @@ final class MarkdownExportRenderer: NSObject {
         }
     }
 
+    private func encodePNG(cgImage: CGImage, maxShortSidePixels: Int, maxLongSidePixels: Int) async throws -> Data {
+        try await withCheckedThrowingContinuation { continuation in
+            Task.detached(priority: .utility) {
+                do {
+                    let scaledCGImage = try Self.scaleDownIfNeeded(
+                        cgImage: cgImage,
+                        maxShortSidePixels: maxShortSidePixels,
+                        maxLongSidePixels: maxLongSidePixels
+                    )
+                    let out = NSMutableData()
+                    guard let dest = CGImageDestinationCreateWithData(out as CFMutableData, UTType.png.identifier as CFString, 1, nil) else {
+                        throw ExportError.imageEncodeFailed
+                    }
+                    CGImageDestinationAddImage(dest, scaledCGImage, nil)
+                    guard CGImageDestinationFinalize(dest) else {
+                        throw ExportError.imageEncodeFailed
+                    }
+                    continuation.resume(returning: out as Data)
+                } catch {
+                    continuation.resume(throwing: error)
+                }
+            }
+        }
+    }
+
+    private func renderTiledCGImage(
+        contentWidthPoints: CGFloat,
+        contentHeightPoints: CGFloat,
+        snapshotWidthPoints: CGFloat
+    ) async throws -> CGImage {
+        let viewportHeightPoints = max(1, min(RenderConstants.tileViewportHeightPoints, contentHeightPoints))
+        webView.frame = CGRect(x: 0, y: 0, width: max(1, contentWidthPoints), height: viewportHeightPoints)
+
+        var outputWidthPixels: Int?
+        var outputHeightPixels: Int?
+        var effectiveScale: Double?
+        var context: CGContext?
+        var bytesPerRow: Int = 0
+
+        let cs = CGColorSpaceCreateDeviceRGB()
+        let bitmapInfo = CGImageAlphaInfo.premultipliedLast.rawValue
+
+        func ensureContextIfNeeded(from tile: CGImage, tileHeightPoints: CGFloat) throws {
+            if context != nil { return }
+
+            let rawScaleX = Double(tile.width) / Double(max(1, contentWidthPoints))
+            var outW = max(1, tile.width)
+            var outH = max(1, Int((Double(contentHeightPoints) * rawScaleX).rounded()))
+            var scale = rawScaleX
+
+            let totalPixels = outW * outH
+            if totalPixels > RenderConstants.maxTotalPixels {
+                let down = sqrt(Double(RenderConstants.maxTotalPixels) / Double(max(1, totalPixels)))
+                scale = rawScaleX * down
+                outW = max(1, Int((Double(outW) * down).rounded()))
+                outH = max(1, Int((Double(outH) * down).rounded()))
+            }
+
+            outputWidthPixels = outW
+            outputHeightPixels = outH
+            effectiveScale = scale
+
+            bytesPerRow = outW * 4
+            guard let ctx = CGContext(
+                data: nil,
+                width: outW,
+                height: outH,
+                bitsPerComponent: 8,
+                bytesPerRow: bytesPerRow,
+                space: cs,
+                bitmapInfo: bitmapInfo
+            ) else {
+                throw ExportError.imageEncodeFailed
+            }
+            ctx.setFillColor(CGColor(red: 1, green: 1, blue: 1, alpha: 1))
+            ctx.fill(CGRect(x: 0, y: 0, width: CGFloat(outW), height: CGFloat(outH)))
+            context = ctx
+        }
+
+        func cgImage(from image: NSImage) throws -> CGImage {
+            var rect = CGRect(origin: .zero, size: image.size)
+            guard let cgImage = image.cgImage(forProposedRect: &rect, context: nil, hints: nil) else {
+                throw ExportError.imageDecodeFailed
+            }
+            return cgImage
+        }
+
+        func scaleToOutputWidthIfNeeded(_ image: CGImage, targetWidth: Int) throws -> CGImage {
+            let srcW = image.width
+            let srcH = image.height
+            guard srcW > 0, srcH > 0 else { throw ExportError.imageDecodeFailed }
+            if srcW == targetWidth { return image }
+
+            let scale = Double(targetWidth) / Double(srcW)
+            let targetHeight = max(1, Int((Double(srcH) * scale).rounded()))
+            guard let ctx = CGContext(
+                data: nil,
+                width: targetWidth,
+                height: targetHeight,
+                bitsPerComponent: 8,
+                bytesPerRow: 0,
+                space: cs,
+                bitmapInfo: bitmapInfo
+            ) else {
+                throw ExportError.imageEncodeFailed
+            }
+            ctx.interpolationQuality = .high
+            ctx.setShouldAntialias(true)
+            ctx.setAllowsAntialiasing(true)
+            ctx.draw(image, in: CGRect(x: 0, y: 0, width: targetWidth, height: targetHeight))
+            guard let scaled = ctx.makeImage() else { throw ExportError.imageEncodeFailed }
+            return scaled
+        }
+
+        var scrollYPoints: CGFloat = 0
+        let overlap = max(0, RenderConstants.tileOverlapPoints)
+        while scrollYPoints < contentHeightPoints {
+            let remaining = contentHeightPoints - scrollYPoints
+            let captureHeightPoints = max(1, min(viewportHeightPoints, remaining))
+
+            try await scrollTo(yPoints: scrollYPoints)
+
+            let image = try await takeSnapshot(
+                size: CGSize(width: max(1, contentWidthPoints), height: captureHeightPoints),
+                snapshotWidthPoints: snapshotWidthPoints
+            )
+            let tileCG = try cgImage(from: image)
+
+            try ensureContextIfNeeded(from: tileCG, tileHeightPoints: captureHeightPoints)
+            guard let outW = outputWidthPixels, let outH = outputHeightPixels, let scale = effectiveScale, let ctx = context else {
+                throw ExportError.imageEncodeFailed
+            }
+
+            let normalizedTile = try scaleToOutputWidthIfNeeded(tileCG, targetWidth: outW)
+
+            let bottomYPoints = contentHeightPoints - (scrollYPoints + captureHeightPoints)
+            var drawY = Int((Double(bottomYPoints) * scale).rounded())
+            if drawY < 0 { drawY = 0 }
+            if drawY + normalizedTile.height > outH {
+                drawY = max(0, outH - normalizedTile.height)
+            }
+
+            ctx.draw(
+                normalizedTile,
+                in: CGRect(
+                    x: 0,
+                    y: CGFloat(drawY),
+                    width: CGFloat(outW),
+                    height: CGFloat(normalizedTile.height)
+                )
+            )
+
+            if remaining <= viewportHeightPoints { break }
+            scrollYPoints += max(1, viewportHeightPoints - overlap)
+        }
+
+        guard let out = context?.makeImage() else { throw ExportError.imageEncodeFailed }
+        guard let ctxData = context?.data, bytesPerRow > 0 else { return out }
+        return Self.trimBottomWhitespaceIfNeeded(image: out, contextData: ctxData, bytesPerRow: bytesPerRow)
+    }
+
+    private func scrollTo(yPoints: CGFloat) async throws {
+        let y = Double(max(0, yPoints))
+        _ = try await evaluateJavaScript("(function(){ try { window.scrollTo(0, \(y)); } catch (e) { } return true; })();")
+        // Give WebKit a moment to paint after programmatic scroll.
+        try? await Task.sleep(nanoseconds: 70_000_000)
+    }
+
+    nonisolated private static func trimBottomWhitespaceIfNeeded(
+        image: CGImage,
+        contextData: UnsafeMutableRawPointer,
+        bytesPerRow: Int
+    ) -> CGImage {
+        let w = image.width
+        let h = image.height
+        guard w > 0, h > 0 else { return image }
+        guard bytesPerRow > 0 else { return image }
+
+        let buffer = contextData.assumingMemoryBound(to: UInt8.self)
+        let sampleStepX = 8
+        let skipRightPixels = min(24, max(0, w / 24))
+        let whiteThreshold: UInt8 = 250
+
+        func rowIsMostlyWhite(_ y: Int) -> Bool {
+            let start = y * bytesPerRow
+            var darkCount = 0
+            var sampleCount = 0
+            var x = 0
+            let maxX = max(0, w - skipRightPixels)
+            while x < maxX {
+                let idx = start + x * 4
+                if idx + 2 < bytesPerRow * h {
+                    let r = buffer[idx]
+                    let g = buffer[idx + 1]
+                    let b = buffer[idx + 2]
+                    if r < whiteThreshold || g < whiteThreshold || b < whiteThreshold {
+                        darkCount += 1
+                    }
+                    sampleCount += 1
+                }
+                x += sampleStepX
+            }
+            return darkCount <= max(6, sampleCount / 180)
+        }
+
+        // Notes:
+        // - `context.data` is laid out top-to-bottom (row 0 is the top scanline),
+        //   and `CGImage.cropping(to:)` uses an origin at top-left.
+        // - To trim *bottom* whitespace, we scan from bottom (h-1) upwards.
+        var lastContentRowYFromTop: Int?
+        for y in stride(from: h - 1, through: 0, by: -1) {
+            if !rowIsMostlyWhite(y) {
+                lastContentRowYFromTop = y
+                break
+            }
+        }
+        guard let lastContentRowYFromTop else { return image }
+
+        let bottomMargin = min(40, max(0, h - 1))
+        let desiredHeight = min(h, lastContentRowYFromTop + 1 + bottomMargin)
+        if desiredHeight >= h { return image }
+        if desiredHeight <= 0 { return image }
+
+        let rect = CGRect(x: 0, y: 0, width: w, height: desiredHeight)
+        return image.cropping(to: rect) ?? image
+    }
+
+    nonisolated private static func trimBottomWhitespaceIfNeeded(cgImage: CGImage) -> CGImage {
+        let w = cgImage.width
+        let h = cgImage.height
+        guard w > 0, h > 0 else { return cgImage }
+
+        let cs = CGColorSpaceCreateDeviceRGB()
+        let bytesPerRow = w * 4
+        guard let ctx = CGContext(
+            data: nil,
+            width: w,
+            height: h,
+            bitsPerComponent: 8,
+            bytesPerRow: bytesPerRow,
+            space: cs,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else {
+            return cgImage
+        }
+        ctx.setFillColor(CGColor(red: 1, green: 1, blue: 1, alpha: 1))
+        ctx.fill(CGRect(x: 0, y: 0, width: w, height: h))
+        ctx.interpolationQuality = .high
+        ctx.setShouldAntialias(true)
+        ctx.setAllowsAntialiasing(true)
+        ctx.draw(cgImage, in: CGRect(x: 0, y: 0, width: w, height: h))
+
+        guard let outImage = ctx.makeImage(), let data = ctx.data else { return cgImage }
+        return trimBottomWhitespaceIfNeeded(image: outImage, contextData: data, bytesPerRow: bytesPerRow)
+    }
+
     nonisolated static func computeScaledPixelSize(
         srcWidth: Int,
         srcHeight: Int,
@@ -367,12 +664,22 @@ final class MarkdownExportRenderer: NSObject {
         let baseH = max(1, Int(contentHeightPoints.rounded(.up)))
         let baseShort = min(baseW, baseH)
         let oversampleShort = min(baseShort * 2, maxShortSidePixels * 2)
-        return computeScaledPixelSize(
+        let target = computeScaledPixelSize(
             srcWidth: baseW,
             srcHeight: baseH,
             shortSidePixels: max(1, oversampleShort),
             maxLongSidePixels: maxLongSidePixels
         )
+
+        let totalPixels = target.width * target.height
+        if totalPixels <= RenderConstants.maxTotalPixels {
+            return target
+        }
+
+        let down = sqrt(Double(RenderConstants.maxTotalPixels) / Double(max(1, totalPixels)))
+        let w = max(1, Int((Double(target.width) * down).rounded()))
+        let h = max(1, Int((Double(target.height) * down).rounded()))
+        return (width: w, height: h, shortSide: min(w, h))
     }
 
     nonisolated private static func scaleDownIfNeeded(

@@ -8,11 +8,11 @@
 
 | 项目 | 状态 |
 |------|------|
-| **当前版本** | v0.44.fix29 |
-| **测试状态** | 单元测试通过（`make test-unit`: Executed 224 tests, 1 skipped）；UI 测试：本次未重新验证（上次记录：Executed 26 tests, 4 skipped） |
+| **当前版本** | v0.44.fix30 |
+| **测试状态** | 单元测试通过（`make test-unit`: Executed 225 tests, 1 skipped）；UI 测试：本次未重新验证（上次记录：Executed 26 tests, 4 skipped） |
 | **构建状态** | Debug ✅ |
 | **部署位置** | /Applications/Scopy.app |
-| **最后更新** | 2025-12-18 |
+| **最后更新** | 2025-12-19 |
 
 > 详细变更历史请查看 [CHANGELOG.md](./CHANGELOG.md)
 
@@ -24,6 +24,7 @@
 
 | 版本 | 日期 | 主要内容 | 状态 |
 |------|------|----------|------|
+| [v0.44.fix30](./v0.44.fix30.md) | 2025-12-19 | Fix/Preview: export PNG long render (tiled+trim) + ATX headings | ✅ |
 | [v0.44.fix29](./v0.44.fix29.md) | 2025-12-18 | Fix/Preview: export PNG table-fit + clipboard-only | ✅ |
 | [v0.44.fix28](./v0.44.fix28.md) | 2025-12-18 | Feat/Preview：Markdown/LaTeX hover 预览新增“导出渲染结果为 PNG（白底黑字）到剪贴板”按钮；PNG 编码后台线程执行，导出样式仅 snapshot 期间生效 | ✅ |
 | [v0.44.fix27](./v0.44.fix27.md) | 2025-12-18 | Fix/Keyboard：修复 `⌥⌫` 在搜索框聚焦时不触发删除选中项；Test：新增 UI 回归覆盖并提升 `--uitesting` 抗遮挡稳定性 | ✅ |

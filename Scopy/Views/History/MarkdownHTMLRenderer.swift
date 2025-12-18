@@ -10,21 +10,100 @@ enum MarkdownHTMLRenderer {
         let protected = MathProtector.protectMath(in: normalizedMarkdown)
         guard !Task.isCancelled else { return "" }
         let inlineNormalizedMarkdown = LaTeXInlineTextNormalizer.normalize(protected.markdown)
+        let renderMarkdown = normalizeATXHeadings(in: inlineNormalizedMarkdown)
         let hasMath = MarkdownDetector.containsMath(normalizedMarkdown)
 
         let fallbackText = MathProtector.restoreMath(
-            in: inlineNormalizedMarkdown,
+            in: renderMarkdown,
             placeholders: protected.placeholders,
             escape: { $0 }
         )
 
         guard !Task.isCancelled else { return "" }
         return htmlDocument(
-            markdown: inlineNormalizedMarkdown,
+            markdown: renderMarkdown,
             placeholders: protected.placeholders,
             enableMath: hasMath,
             fallbackText: fallbackText
         )
+    }
+
+    /// Best-effort: normalize ATX headings like `##标题` -> `## 标题`.
+    /// Some sources omit the required space after `#`, which makes heading levels look identical (plain text).
+    private static func normalizeATXHeadings(in markdown: String) -> String {
+        guard markdown.contains("#") else { return markdown }
+
+        var out: [String] = []
+        out.reserveCapacity(markdown.split(separator: "\n", omittingEmptySubsequences: false).count)
+
+        var inFence: (marker: Character, count: Int)?
+        for lineSub in markdown.split(separator: "\n", omittingEmptySubsequences: false) {
+            let line = String(lineSub)
+
+            if let (marker, count) = MarkdownCodeSkipper.fencePrefix(in: line) {
+                if let current = inFence {
+                    if current.marker == marker, count >= current.count {
+                        inFence = nil
+                    }
+                } else {
+                    inFence = (marker: marker, count: count)
+                }
+                out.append(line)
+                continue
+            }
+
+            if inFence != nil {
+                out.append(line)
+                continue
+            }
+
+            // Avoid altering indented code blocks.
+            let leadingSpaces = MarkdownCodeSkipper.leadingIndentSpaces(in: line)
+            if leadingSpaces > 3 {
+                out.append(line)
+                continue
+            }
+
+            var i = line.startIndex
+            while i < line.endIndex, line[i] == " " {
+                i = line.index(after: i)
+            }
+
+            guard i < line.endIndex, line[i] == "#" else {
+                out.append(line)
+                continue
+            }
+
+            var j = i
+            var hashCount = 0
+            while j < line.endIndex, line[j] == "#" {
+                hashCount += 1
+                j = line.index(after: j)
+            }
+
+            guard (1...6).contains(hashCount), j < line.endIndex else {
+                out.append(line)
+                continue
+            }
+
+            let next = line[j]
+            if next == " " || next == "\t" {
+                out.append(line)
+                continue
+            }
+
+            // Avoid shebang-like patterns in plain text.
+            if hashCount == 1, next == "!" {
+                out.append(line)
+                continue
+            }
+
+            let prefix = String(line[..<j])
+            let rest = String(line[j...])
+            out.append(prefix + " " + rest)
+        }
+
+        return out.joined(separator: "\n")
     }
 
     private static let cspMetaTag = """
@@ -225,6 +304,7 @@ enum MarkdownHTMLRenderer {
             try { window.__scopyMathRendered = true; } catch (e) { }
             window.__scopyMarkdownRendered = false;
             window.__scopyTablesFitDone = false;
+            var minAllowNoWrapScale = 0.40;  // below this, prefer wrapping over tiny scaled text
             function unwrapExportTables(el) {
               try {
                 var wraps = el.querySelectorAll('.scopy-table-export-wrap');
@@ -306,9 +386,42 @@ enum MarkdownHTMLRenderer {
 
                   var prev = 1;
                   try { prev = parseFloat(inner.getAttribute('data-scopy-export-scale') || '1') || 1; } catch (e) { prev = 1; }
+                  var prevMode = 'nowrap';
+                  try { prevMode = String(inner.getAttribute('data-scopy-export-mode') || 'nowrap'); } catch (e) { prevMode = 'nowrap'; }
 
                   // Reset to measure natural size. (Transforms do not affect scrollWidth/scrollHeight, but this keeps it predictable.)
                   try { inner.style.transform = 'scale(1)'; } catch (e) { }
+
+                  function applyCellMode(table, mode) {
+                    try {
+                      if (!table || !table.querySelectorAll) { return; }
+                      var cells = table.querySelectorAll('th, td');
+                      for (var j = 0; j < (cells.length || 0); j++) {
+                        var cell = cells[j];
+                        if (!cell || !cell.style) { continue; }
+                        cell.style.maxWidth = 'none';
+                        cell.style.minWidth = '0';
+                        if (mode === 'nowrap') {
+                          cell.style.whiteSpace = 'nowrap';
+                          cell.style.overflowWrap = 'normal';
+                          cell.style.wordBreak = 'normal';
+                        } else {
+                          cell.style.whiteSpace = 'normal';
+                          cell.style.overflowWrap = 'break-word';
+                          cell.style.wordBreak = 'normal';
+                        }
+                      }
+                    } catch (e) { }
+                  }
+
+                  var table = null;
+                  try { table = inner.querySelector('table'); } catch (e) { table = null; }
+
+                  // Strategy:
+                  // - Prefer no-wrap (minimize line breaks) and scale down to fit width.
+                  // - If no-wrap requires strong downscale, fall back to wrapping to keep text readable.
+                  var chosenMode = 'nowrap';
+                  if (table) { applyCellMode(table, 'nowrap'); }
 
                   var naturalW = inner.scrollWidth || 0;
                   var naturalH = inner.scrollHeight || 0;
@@ -318,6 +431,34 @@ enum MarkdownHTMLRenderer {
                   if (naturalW > safeW) { scale = safeW / naturalW; }
                   if (scale < 0.20) { scale = 0.20; }
                   if (scale > 1) { scale = 1; }
+
+                  if (table && scale < minAllowNoWrapScale) {
+                    // Try wrapping only when no-wrap scaling would make the text too small.
+                    applyCellMode(table, 'wrap');
+                    // Force reflow before measuring.
+                    try { void inner.offsetHeight; } catch (e) { }
+                    var wrapW = inner.scrollWidth || 0;
+                    var wrapH = inner.scrollHeight || 0;
+                    if (wrapW > 0 && wrapH > 0) {
+                      var wrapScale = 1;
+                      if (wrapW > safeW) { wrapScale = safeW / wrapW; }
+                      if (wrapScale < 0.20) { wrapScale = 0.20; }
+                      if (wrapScale > 1) { wrapScale = 1; }
+
+                      if (wrapScale > scale + 0.0005) {
+                        chosenMode = 'wrap';
+                        naturalW = wrapW;
+                        naturalH = wrapH;
+                        scale = wrapScale;
+                      } else {
+                        applyCellMode(table, 'nowrap');
+                        chosenMode = 'nowrap';
+                      }
+                    } else {
+                      applyCellMode(table, 'nowrap');
+                      chosenMode = 'nowrap';
+                    }
+                  }
 
                   // Apply scale, then verify with boundingClientRect (includes subpixel rounding) and correct if needed.
                   try { inner.style.transform = 'scale(' + scale + ')'; } catch (e) { }
@@ -340,7 +481,9 @@ enum MarkdownHTMLRenderer {
                   var scaledH = Math.ceil(naturalH * scale + 3);
                   try { wrap.style.height = String(scaledH) + 'px'; } catch (e) { }
                   try { inner.setAttribute('data-scopy-export-scale', String(scale)); } catch (e) { }
+                  try { inner.setAttribute('data-scopy-export-mode', String(chosenMode)); } catch (e) { }
                   if (Math.abs(scale - prev) > 0.001) { changed = true; }
+                  if (chosenMode !== prevMode) { changed = true; }
 
                   if (visualW > safeW + 0.5) { overflow = true; }
                 }

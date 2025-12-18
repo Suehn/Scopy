@@ -31,11 +31,32 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let appState = AppState.shared
 
         let isUITesting = ProcessInfo.processInfo.arguments.contains("--uitesting")
+        let isExportHarness: Bool = {
+#if DEBUG
+            return isUITesting && ProcessInfo.processInfo.environment["SCOPY_UITEST_EXPORT_HARNESS"] == "1"
+#else
+            return false
+#endif
+        }()
 
-        let rootView = ContentView()
-            .environment(appState)
-            .environment(appState.historyViewModel)
-            .environment(appState.settingsViewModel)
+        let rootView: AnyView = {
+#if DEBUG
+            if isExportHarness {
+                return AnyView(
+                    ExportPreviewHarnessView()
+                        .environment(appState)
+                        .environment(appState.historyViewModel)
+                        .environment(appState.settingsViewModel)
+                )
+            }
+#endif
+            return AnyView(
+                ContentView()
+                    .environment(appState)
+                    .environment(appState.historyViewModel)
+                    .environment(appState.settingsViewModel)
+            )
+        }()
 
         if isUITesting {
             // XCUITest interacts more reliably with a standard window than a non-activating panel.
@@ -105,6 +126,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             await appState.start()
         }
 
+        #if DEBUG
+        if isUITesting, ProcessInfo.processInfo.environment["SCOPY_UITEST_AUTO_EXPORT_MARKDOWN"] == "1" {
+            Task { @MainActor in
+                await self.runUITestAutoExportMarkdown()
+            }
+        }
+        #endif
+
         // 注册全局快捷键（从设置加载或使用默认 ⇧⌘C）
         hotKeyService = HotKeyService()
         Task { @MainActor [weak self] in
@@ -150,6 +179,59 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             // Window already presented above.
         }
     }
+
+    // MARK: - UI Testing
+
+    #if DEBUG
+    @MainActor
+    private func runUITestAutoExportMarkdown() async {
+        let processInfo = ProcessInfo.processInfo
+        let dumpPath = processInfo.environment["SCOPY_EXPORT_DUMP_PATH"] ?? ""
+        let errorPath = processInfo.environment["SCOPY_EXPORT_ERROR_DUMP_PATH"] ?? ""
+
+        let containerWidthPoints: CGFloat = {
+            if let s = processInfo.environment["SCOPY_EXPORT_CONTAINER_WIDTH_POINTS"],
+               let d = Double(s),
+               d > 0 {
+                return CGFloat(d)
+            }
+            return 820
+        }()
+
+        func writeError(_ message: String) {
+            guard !errorPath.isEmpty else { return }
+            try? Data(message.utf8).write(to: URL(fileURLWithPath: errorPath), options: [.atomic])
+        }
+
+        guard let markdownPath = processInfo.environment["SCOPY_UITEST_AUTO_EXPORT_MARKDOWN_PATH"],
+              !markdownPath.isEmpty
+        else {
+            writeError("Missing SCOPY_UITEST_AUTO_EXPORT_MARKDOWN_PATH")
+            return
+        }
+
+        guard let markdown = try? String(contentsOfFile: markdownPath, encoding: .utf8), !markdown.isEmpty else {
+            writeError("Failed to read markdown from \(markdownPath)")
+            return
+        }
+
+        do {
+            let html = MarkdownHTMLRenderer.render(markdown: markdown)
+            let renderer = MarkdownExportRenderer()
+            let pngData = try await renderer.renderPNG(
+                html: html,
+                containerWidthPoints: containerWidthPoints,
+                maxShortSidePixels: 1500,
+                maxLongSidePixels: 16_384 * 4
+            )
+            if !dumpPath.isEmpty {
+                try pngData.write(to: URL(fileURLWithPath: dumpPath), options: [.atomic])
+            }
+        } catch {
+            writeError(String(describing: error))
+        }
+    }
+    #endif
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         false
@@ -316,3 +398,54 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             .environment(AppState.shared.settingsViewModel)
     }
 }
+
+#if DEBUG
+/// UI testing harness: shows the real Markdown preview view (including export buttons) inside a stable window.
+@MainActor
+private struct ExportPreviewHarnessView: View {
+    @StateObject private var model: HoverPreviewModel
+    private let controller = MarkdownPreviewWebViewController()
+
+    init() {
+        let markdown = Self.loadMarkdown()
+        let m = HoverPreviewModel()
+        m.text = markdown
+        m.isMarkdown = true
+        m.markdownHTML = MarkdownHTMLRenderer.render(markdown: markdown)
+        _model = StateObject(wrappedValue: m)
+    }
+
+    var body: some View {
+        ZStack(alignment: .topLeading) {
+            HistoryItemTextPreviewView(model: model, markdownWebViewController: controller)
+                .padding(12)
+
+            Text("Export Harness")
+                .opacity(0.001)
+                .accessibilityIdentifier("UITest.ExportPreviewHarness")
+        }
+        .frame(minWidth: 820, minHeight: 620)
+        .accessibilityIdentifier("UITest.ExportPreviewHarness.Root")
+    }
+
+    private static func loadMarkdown() -> String {
+        if let path = ProcessInfo.processInfo.environment["SCOPY_UITEST_EXPORT_MARKDOWN_PATH"],
+           !path.isEmpty,
+           let s = try? String(contentsOfFile: path, encoding: .utf8),
+           !s.isEmpty {
+            return s
+        }
+
+        return """
+        # SCOPY_UITEST_EXPORT_HARNESS
+
+        ## Wide Table
+
+        | very_long_header_col_01 | very_long_header_col_02 | very_long_header_col_03 | very_long_header_col_04 | very_long_header_col_05 |
+        | --- | --- | --- | --- | --- |
+        | 1 | 2 | 3 | 4 | 5 |
+        | aaaaaaaaaaaaaaaaaaaaa | bbbbbbbbbbbbbbbbbbbbb | ccccccccccccccccccccc | ddddddddddddddddddddd | eeeeeeeeeeeeeeeeeeeee |
+        """
+    }
+}
+#endif

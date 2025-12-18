@@ -5,6 +5,16 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [v0.44.fix30] - 2025-12-19
+
+### Fix/Preview: export PNG long render (tiled+trim) + ATX headings
+
+- **底部空白裁剪兜底**：导出 PNG 在测量高度之外增加“像素级底部白边裁剪”，修复部分场景下出现的“底部超大空白”。
+- **长图拼接导出**：超长内容或 snapshot 不稳定时，使用 tiled snapshot 滚动拼接为一张长图；并加总像素预算 clamp，避免分配超大 RGBA buffer 引发 OOM。
+- **表格尽量少换行**：export-mode 表格优先 no-wrap 缩放（减少换行）；仅当缩放过小且 wrap 能显著提升可读性时才回退到 wrap。
+- **标题层级一致性**：对输入 `##标题` 这种缺空格的 ATX headings 做 best-effort 归一化为 `## 标题`（避开 fenced/indented code blocks），恢复纯 Markdown 多级标题的视觉层级。
+- **DEBUG 回归入口**：补充 UI 测试导出 harness 与自动导出开关（DEBUG-only），便于稳定复现与回归导出链路（不影响生产行为）。
+
 ## [v0.44.fix29] - 2025-12-18
 
 ### Fix/Preview: export PNG table-fit + clipboard-only

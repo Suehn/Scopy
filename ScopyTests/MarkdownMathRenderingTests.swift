@@ -101,6 +101,31 @@ final class MarkdownMathRenderingTests: XCTestCase {
         XCTAssertFalse(snippet.contains("</script"))
     }
 
+    func testMarkdownRendererNormalizesATXHeadingsWithoutSpaceOutsideCodeBlocks() {
+        let input = """
+        ##TitleA
+        ###TitleB
+
+        ```text
+        ##FENCE_HEADING
+        ```
+
+            ##INDENT_HEADING
+        """
+
+        let html = MarkdownHTMLRenderer.render(markdown: input)
+
+        XCTAssertTrue(html.contains("## TitleA"))
+        XCTAssertTrue(html.contains("### TitleB"))
+        XCTAssertFalse(html.contains("##TitleA"))
+        XCTAssertFalse(html.contains("###TitleB"))
+
+        XCTAssertTrue(html.contains("##FENCE_HEADING"))
+        XCTAssertFalse(html.contains("## FENCE_HEADING"))
+        XCTAssertTrue(html.contains("##INDENT_HEADING"))
+        XCTAssertFalse(html.contains("## INDENT_HEADING"))
+    }
+
     func testLooseParenMathWithoutDollarDelimitersIsWrapped() {
         let input = "设用户集合为 (\\mathcal{U}), 物品集合为 (\\mathcal{I})."
 
