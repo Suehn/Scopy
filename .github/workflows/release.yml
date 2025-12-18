@@ -159,14 +159,15 @@ jobs:
           ## 自动构建 @ ${SHORT_SHA}
 
           ### Homebrew 安装
-          ```bash
+          ~~~bash
+          brew tap Suehn/scopy
           brew install --cask scopy
           # 或更新
           brew upgrade --cask scopy
-          ```
+          ~~~
 
           ### 手动安装
-          1. 下载 `Scopy-${VERSION}.dmg`
+          1. 下载 Scopy-${VERSION}.dmg
           2. 打开 DMG，拖动 Scopy 到 Applications
           3. 首次打开：右键点击 → 打开 → 打开
 
@@ -184,7 +185,6 @@ jobs:
             Scopy-*.dmg
             Scopy-*.dmg.sha256
           body_path: release_body.md
-          make_latest: true
 
       - name: Fetch SHA256 file (reuse existing)
         if: ${{ steps.existing.outputs.has_assets == 'true' }}
