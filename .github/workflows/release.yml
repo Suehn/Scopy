@@ -154,24 +154,24 @@ jobs:
             cat release_changelog_section.md
             cat <<EOF
 
----
+          ---
 
-## 自动构建 @ ${SHORT_SHA}
+          ## 自动构建 @ ${SHORT_SHA}
 
-### Homebrew 安装
-\`\`\`bash
-brew install --cask scopy
-# 或更新
-brew upgrade --cask scopy
-\`\`\`
+          ### Homebrew 安装
+          ```bash
+          brew install --cask scopy
+          # 或更新
+          brew upgrade --cask scopy
+          ```
 
-### 手动安装
-1. 下载 \`Scopy-${VERSION}.dmg\`
-2. 打开 DMG，拖动 Scopy 到 Applications
-3. 首次打开：右键点击 → 打开 → 打开
+          ### 手动安装
+          1. 下载 `Scopy-${VERSION}.dmg`
+          2. 打开 DMG，拖动 Scopy 到 Applications
+          3. 首次打开：右键点击 → 打开 → 打开
 
-> ⚠️ 应用未签名，首次打开需要手动允许
-EOF
+          > ⚠️ 应用未签名，首次打开需要手动允许
+          EOF
           } > release_body.md
 
       - name: Create or Update Release
