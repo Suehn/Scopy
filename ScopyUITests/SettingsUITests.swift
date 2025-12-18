@@ -11,7 +11,6 @@ final class SettingsUITests: XCTestCase {
         continueAfterFailure = false
         app = XCUIApplication()
         app.launchArguments = ["--uitesting"]
-        app.launchEnvironment["USE_MOCK_SERVICE"] = "1"
         app.launch()
     }
 

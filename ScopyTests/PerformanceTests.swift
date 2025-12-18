@@ -264,26 +264,23 @@ final class PerformanceTests: XCTestCase {
 
         let query = "comparison"
 
-        // Exact search (warm + steady-state)
-        let exactRequest = SearchRequest(query: query, mode: .exact, limit: 50, offset: 0)
-        _ = try await search.search(request: exactRequest) // warmup
+        // Exact search
         let exactStart = CFAbsoluteTimeGetCurrent()
+        let exactRequest = SearchRequest(query: query, mode: .exact, limit: 50, offset: 0)
         _ = try await search.search(request: exactRequest)
         let exactTime = (CFAbsoluteTimeGetCurrent() - exactStart) * 1000
 
         // Fuzzy search
         await search.invalidateCache()
-        let fuzzyRequest = SearchRequest(query: query, mode: .fuzzy, limit: 50, offset: 0)
-        _ = try await search.search(request: fuzzyRequest) // warmup
         let fuzzyStart = CFAbsoluteTimeGetCurrent()
+        let fuzzyRequest = SearchRequest(query: query, mode: .fuzzy, limit: 50, offset: 0)
         _ = try await search.search(request: fuzzyRequest)
         let fuzzyTime = (CFAbsoluteTimeGetCurrent() - fuzzyStart) * 1000
 
         // Regex search
         await search.invalidateCache()
-        let regexRequest = SearchRequest(query: "comparison", mode: .regex, limit: 50, offset: 0)
-        _ = try await search.search(request: regexRequest) // warmup
         let regexStart = CFAbsoluteTimeGetCurrent()
+        let regexRequest = SearchRequest(query: "comparison", mode: .regex, limit: 50, offset: 0)
         _ = try await search.search(request: regexRequest)
         let regexTime = (CFAbsoluteTimeGetCurrent() - regexStart) * 1000
 

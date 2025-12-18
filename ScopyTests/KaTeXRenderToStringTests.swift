@@ -30,9 +30,9 @@ final class KaTeXRenderToStringTests: XCTestCase {
     func testMarkdownTableUsesHorizontalScrollWithBalancedWrapping() {
         let html = MarkdownHTMLRenderer.render(markdown: "| a | b |\n| --- | --- |\n| 1 | 2 |")
         XCTAssertTrue(html.contains("overflow-x: auto;"))
-        XCTAssertTrue(html.contains("white-space: normal;"))
+        XCTAssertTrue(html.contains("white-space: nowrap;"))
         XCTAssertTrue(html.contains("word-break: normal;"))
-        XCTAssertTrue(html.contains("max-width: 520px;"))
+        XCTAssertTrue(html.contains("max-width: 100%;"))
     }
 
     func testKaTeXRenderToStringForTableSnippetMathSegments() throws {

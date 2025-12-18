@@ -34,6 +34,7 @@ struct HistoryItemView: View, Equatable {
     // v0.15: Text preview state
     @State private var showTextPreview = false
     @StateObject private var previewModel = HoverPreviewModel()
+    @State private var isUITestTapPreviewEnabled: Bool = false
 
     // MARK: - Equatable
 
@@ -202,6 +203,22 @@ struct HistoryItemView: View, Equatable {
         .padding(.horizontal, ScopySpacing.md) // Outer padding for floating effect
         .onTapGesture {
             onSelect()
+            if isUITestTapPreviewEnabled {
+                isHovering = true
+                isPopoverHovering = true
+                if item.type == .image && showThumbnails {
+                    startPreviewTask()
+                } else if item.type == .text || item.type == .rtf || item.type == .html {
+                    startTextPreviewTask()
+                }
+            }
+        }
+        .onAppear {
+            if ProcessInfo.processInfo.arguments.contains("--uitesting") {
+                isUITestTapPreviewEnabled = (ProcessInfo.processInfo.environment["SCOPY_UITEST_OPEN_PREVIEW_ON_TAP"] == "1")
+            } else {
+                isUITestTapPreviewEnabled = false
+            }
         }
         // v0.9.3: 局部悬停状态 + 防抖更新全局选中
         // v0.10.3: 使用 Task 替代 Timer，自动取消防止泄漏
@@ -242,26 +259,29 @@ struct HistoryItemView: View, Equatable {
                 else if item.type == .text || item.type == .rtf || item.type == .html {
                     startTextPreviewTask()
                 }
-	            } else {
-	                // v0.24: popover 出现/消失时可能短暂触发 hover false，做 120ms 退出防抖
-	                hoverExitTask = Task {
-	                    try? await Task.sleep(nanoseconds: 120_000_000)
-	                    guard !Task.isCancelled else { return }
-	                    await MainActor.run {
-	                        guard !self.isHovering, !self.isPopoverHovering else { return }
-	                        self.cancelPreviewTask()
-	                        self.showPreview = false
-	                        self.showTextPreview = false
-	                        self.previewModel.previewCGImage = nil
-	                        self.previewModel.text = nil  // v0.15: Reset text preview content
-	                        self.previewModel.markdownHTML = nil
-	                        self.previewModel.markdownContentSize = nil
-	                        self.previewModel.isMarkdown = false
-	                        self.markdownWebViewController = nil
-	                    }
-	                }
-	            }
-	        }
+            } else {
+                // v0.24: popover 出现/消失时可能短暂触发 hover false，做 120ms 退出防抖
+                hoverExitTask = Task {
+                    try? await Task.sleep(nanoseconds: 120_000_000)
+                    guard !Task.isCancelled else { return }
+                    await MainActor.run {
+                        guard !self.isHovering, !self.isPopoverHovering else { return }
+                        self.cancelPreviewTask()
+                        self.showPreview = false
+                        self.showTextPreview = false
+                        self.previewModel.previewCGImage = nil
+                        self.previewModel.text = nil  // v0.15: Reset text preview content
+                        self.previewModel.markdownHTML = nil
+                        self.previewModel.markdownContentSize = nil
+                        self.previewModel.isMarkdown = false
+                        self.previewModel.isExporting = false
+                        self.previewModel.exportSuccess = false
+                        self.previewModel.exportFailed = false
+                        self.markdownWebViewController = nil
+                    }
+                }
+            }
+        }
         .popover(isPresented: $showPreview, arrowEdge: .trailing) {
             HistoryItemImagePreviewView(model: previewModel, thumbnailPath: item.thumbnailPath)
                 .onHover { hovering in
@@ -285,11 +305,11 @@ struct HistoryItemView: View, Equatable {
                     }
                 }
         }
-	        .popover(isPresented: $showTextPreview, arrowEdge: .trailing) {
-	            HistoryItemTextPreviewView(model: previewModel, markdownWebViewController: markdownWebViewController)
-	                .onHover { hovering in
-	                    isPopoverHovering = hovering
-	                    if hovering {
+        .popover(isPresented: $showTextPreview, arrowEdge: .trailing) {
+            HistoryItemTextPreviewView(model: previewModel, markdownWebViewController: markdownWebViewController)
+                .onHover { hovering in
+                    isPopoverHovering = hovering
+                    if hovering {
                         hoverExitTask?.cancel()
                         hoverExitTask = nil
                     } else if !isHovering {
@@ -305,12 +325,15 @@ struct HistoryItemView: View, Equatable {
 	                                self.previewModel.markdownHTML = nil
 	                                self.previewModel.markdownContentSize = nil
 	                                self.previewModel.isMarkdown = false
+	                                self.previewModel.isExporting = false
+	                                self.previewModel.exportSuccess = false
+	                                self.previewModel.exportFailed = false
 	                                self.markdownWebViewController = nil
 	                            }
 	                        }
 	                    }
-	                }
-	        }
+                }
+        }
         .contextMenu {
             Button("Copy") {
                 onSelect()
@@ -324,7 +347,7 @@ struct HistoryItemView: View, Equatable {
             }
         }
         // v0.17: 增强任务清理 - 确保视图消失时释放所有任务引用
-	        .onDisappear {
+        .onDisappear {
             hoverDebounceTask?.cancel()
             hoverDebounceTask = nil
             hoverExitTask?.cancel()
@@ -333,13 +356,16 @@ struct HistoryItemView: View, Equatable {
             // 清理状态，防止内存泄漏
             previewModel.previewCGImage = nil
             previewModel.text = nil
-	            previewModel.markdownHTML = nil
+            previewModel.markdownHTML = nil
 	            previewModel.markdownContentSize = nil
 	            previewModel.markdownHasHorizontalOverflow = false
 	            previewModel.isMarkdown = false
+	            previewModel.isExporting = false
+	            previewModel.exportSuccess = false
+	            previewModel.exportFailed = false
 	            markdownWebViewController = nil
 	        }
-	        .onChange(of: isScrolling) { _, newValue in
+        .onChange(of: isScrolling) { _, newValue in
             guard newValue else { return }
             isHovering = false
             hoverDebounceTask?.cancel()
@@ -352,14 +378,17 @@ struct HistoryItemView: View, Equatable {
             isPopoverHovering = false
             previewModel.previewCGImage = nil
             previewModel.text = nil
-	            previewModel.markdownHTML = nil
+            previewModel.markdownHTML = nil
 	            previewModel.markdownContentSize = nil
 	            previewModel.markdownHasHorizontalOverflow = false
 	            previewModel.isMarkdown = false
+	            previewModel.isExporting = false
+	            previewModel.exportSuccess = false
+	            previewModel.exportFailed = false
 	            markdownWebViewController = nil
 	        }
-	        .background(markdownPreMeasureView)
-	    }
+        .background(markdownPreMeasureView)
+    }
 
     @ViewBuilder
     private var markdownPreMeasureView: some View {
@@ -404,8 +433,8 @@ struct HistoryItemView: View, Equatable {
 
         hoverPreviewTask = Task(priority: .userInitiated) { @MainActor in
             let delayNanos = UInt64(previewDelay * 1_000_000_000)
-            let scale = NSScreen.main?.backingScaleFactor ?? 2.0
-            let targetWidthPoints = ScopySize.Width.previewMax
+            let scale = HoverPreviewScreenMetrics.activeBackingScaleFactor()
+            let targetWidthPoints = HoverPreviewScreenMetrics.maxPopoverWidthPoints()
             let targetWidthPixels = max(1, Int(targetWidthPoints * scale))
             let maxLongSidePixels = 12_000
 

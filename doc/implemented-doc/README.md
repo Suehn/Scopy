@@ -8,8 +8,8 @@
 
 | 项目 | 状态 |
 |------|------|
-| **当前版本** | v0.44.fix30 |
-| **测试状态** | 单元测试通过（`make test-unit`: Executed 225 tests, 1 skipped）；UI 测试：本次未重新验证（上次记录：Executed 26 tests, 4 skipped） |
+| **当前版本** | v0.50 |
+| **测试状态** | 单元测试通过（`make test-unit`: Executed 220 tests, 1 skipped, 0 failures）；UI 测试：本机 UI automation 未就绪（Timed out while enabling automation mode），未复验 |
 | **构建状态** | Debug ✅ |
 | **部署位置** | /Applications/Scopy.app |
 | **最后更新** | 2025-12-19 |
@@ -24,10 +24,8 @@
 
 | 版本 | 日期 | 主要内容 | 状态 |
 |------|------|----------|------|
-| [v0.44.fix30](./v0.44.fix30.md) | 2025-12-19 | Fix/Preview: export PNG long render (tiled+trim) + ATX headings | ✅ |
-| [v0.44.fix29](./v0.44.fix29.md) | 2025-12-18 | Fix/Preview: export PNG table-fit + clipboard-only | ✅ |
-| [v0.44.fix28](./v0.44.fix28.md) | 2025-12-18 | Feat/Preview：Markdown/LaTeX hover 预览新增“导出渲染结果为 PNG（白底黑字）到剪贴板”按钮；PNG 编码后台线程执行，导出样式仅 snapshot 期间生效 | ✅ |
-| [v0.44.fix27](./v0.44.fix27.md) | 2025-12-18 | Fix/Keyboard：修复 `⌥⌫` 在搜索框聚焦时不触发删除选中项；Test：新增 UI 回归覆盖并提升 `--uitesting` 抗遮挡稳定性 | ✅ |
+| [v0.50](./v0.50.md) | 2025-12-19 | Release：导出图片逻辑重构（Markdown/LaTeX hover 预览一键导出 PNG 到剪贴板；长图拼接、表格自适应、底部空白裁剪；预览样式与回归测试补齐） | ✅ |
+| [v0.44.fix27](./v0.44.fix27.md) | 2025-12-18 | Feat/Preview + Fix/Export：Markdown/LaTeX 导出 PNG 到剪贴板（固定 1080px 宽、动态高度、长内容分片拼接、表格少换行、底部空白裁剪） | ✅ |
 | [v0.44.fix26](./v0.44.fix26.md) | 2025-12-18 | Fix/Search：Exact(FTS) 支持 Relevance(bm25+lastUsed)/Recent(lastUsed) 并提供 UI 一键切换；Fix/Settings：存储上限口径更清晰；Fix/HotKey：移除固定 sleep；Perf/Preview：hover 取消更及时；Test：UI 测试稳定性提升（--uitesting 标准窗口 + 条件等待） | ✅ |
 | [v0.44.fix25](./v0.44.fix25.md) | 2025-12-17 | Fix/WebView：WKScriptMessageHandler 弱代理 + dismantle 拆环可释放 + 回归测试；Fix/Stats：内容估算/真实磁盘占用口径分离，避免首屏重复目录扫描 | ✅ |
 | [v0.44.fix24](./v0.44.fix24.md) | 2025-12-17 | Fix/Stability：full fuzzy index tombstone 阈值→stale→重建 + Clear All/cleanup 有界并发并移出主线程 + start 原子化 + 搜索状态机竞态修复 | ✅ |

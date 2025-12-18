@@ -29,7 +29,7 @@ enum MarkdownHTMLRenderer {
     }
 
     /// Best-effort: normalize ATX headings like `##标题` -> `## 标题`.
-    /// Some sources omit the required space after `#`, which makes heading levels look identical (plain text).
+    /// Some Markdown sources omit the required space after `#`, which makes heading levels look identical (plain text).
     private static func normalizeATXHeadings(in markdown: String) -> String {
         guard markdown.contains("#") else { return markdown }
 
@@ -58,15 +58,15 @@ enum MarkdownHTMLRenderer {
             }
 
             // Avoid altering indented code blocks.
-            let leadingSpaces = MarkdownCodeSkipper.leadingIndentSpaces(in: line)
+            var i = line.startIndex
+            var leadingSpaces = 0
+            while i < line.endIndex, line[i] == " " {
+                leadingSpaces += 1
+                i = line.index(after: i)
+            }
             if leadingSpaces > 3 {
                 out.append(line)
                 continue
-            }
-
-            var i = line.startIndex
-            while i < line.endIndex, line[i] == " " {
-                i = line.index(after: i)
             }
 
             guard i < line.endIndex, line[i] == "#" else {
@@ -91,7 +91,6 @@ enum MarkdownHTMLRenderer {
                 out.append(line)
                 continue
             }
-
             // Avoid shebang-like patterns in plain text.
             if hashCount == 1, next == "!" {
                 out.append(line)
@@ -155,16 +154,15 @@ enum MarkdownHTMLRenderer {
         overflow-x: auto;
         -webkit-overflow-scrolling: touch;
         width: 100%;
-        table-layout: fixed;
+        table-layout: auto;
       }
       th, td {
         border: 1px solid rgba(127,127,127,0.25);
         padding: 6px 8px;
         vertical-align: top;
-        white-space: normal;
+        white-space: nowrap;
         word-break: normal;
-        overflow-wrap: break-word;
-        max-width: 520px;
+        overflow-wrap: normal;
       }
       thead th { background: rgba(127,127,127,0.10); }
 
@@ -181,54 +179,6 @@ enum MarkdownHTMLRenderer {
       html.scopy-scrollbars-visible .katex-display::-webkit-scrollbar {
         width: 8px;
         height: 8px;
-      }
-
-      /* Export-only appearance: force light theme (white background + black text) for snapshotting. */
-      html.scopy-export-light { color-scheme: light !important; }
-      html.scopy-export-light,
-      html.scopy-export-light body {
-        background: #ffffff !important;
-        color: #000000 !important;
-      }
-      html.scopy-export-light #content { opacity: 1 !important; }
-      html.scopy-export-light a { color: #000000 !important; }
-      html.scopy-export-light pre { background: rgba(0,0,0,0.04) !important; }
-      html.scopy-export-light blockquote { border-left-color: rgba(0,0,0,0.28) !important; }
-      html.scopy-export-light hr { border-top-color: rgba(0,0,0,0.28) !important; }
-      html.scopy-export-light th, html.scopy-export-light td { border-color: rgba(0,0,0,0.22) !important; }
-      html.scopy-export-light thead th { background: rgba(0,0,0,0.06) !important; }
-      html.scopy-export-light .katex { color: #000000 !important; }
-
-      /* Export-only: keep the document width fixed, but scale tables (only tables) to avoid horizontal clipping.
-         We do this with a wrapper + CSS transform so layout measurement remains reliable (avoid `zoom`). */
-      html.scopy-export-light table {
-        display: table !important;
-        overflow: visible !important;
-        max-width: none !important;
-        width: -webkit-max-content !important;
-        width: max-content !important;
-        table-layout: auto !important;
-      }
-      html.scopy-export-light .scopy-table-export-wrap {
-        width: 100%;
-        max-width: 100%;
-        overflow-x: hidden;
-        overflow-y: visible;
-      }
-      html.scopy-export-light .scopy-table-export-inner {
-        display: inline-block;
-        transform-origin: top left;
-      }
-
-      /* Never include scrollbars in exported snapshot (even if scrolling recently toggled them on). */
-      html.scopy-export-light pre::-webkit-scrollbar,
-      html.scopy-export-light table::-webkit-scrollbar,
-      html.scopy-export-light .katex-display::-webkit-scrollbar,
-      html.scopy-export-light.scopy-scrollbars-visible pre::-webkit-scrollbar,
-      html.scopy-export-light.scopy-scrollbars-visible table::-webkit-scrollbar,
-      html.scopy-export-light.scopy-scrollbars-visible .katex-display::-webkit-scrollbar {
-        width: 0px !important;
-        height: 0px !important;
       }
     </style>
     """
@@ -249,8 +199,6 @@ enum MarkdownHTMLRenderer {
             <script defer src="contrib/auto-render.min.js"></script>
             <script>
               (function () {
-                try { window.__scopyHasMath = true; } catch (e) { }
-                try { window.__scopyMathRendered = false; } catch (e) { }
                 window.__scopyRenderMath = function () {
                   var el = document.getElementById('content');
                   if (!el) { return; }
@@ -261,7 +209,6 @@ enum MarkdownHTMLRenderer {
                     strict: 'ignore',
                     ignoredTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code']
                   });
-                  try { window.__scopyMathRendered = true; } catch (e) { }
                   if (typeof window.__scopyReportHeight === 'function') {
                     window.__scopyReportHeight();
                   }
@@ -300,295 +247,6 @@ enum MarkdownHTMLRenderer {
             var lastW = 0;
             var pendingRAF = false;
             var ro = null;
-            try { window.__scopyHasMath = false; } catch (e) { }
-            try { window.__scopyMathRendered = true; } catch (e) { }
-            window.__scopyMarkdownRendered = false;
-            window.__scopyTablesFitDone = false;
-            var minAllowNoWrapScale = 0.40;  // below this, prefer wrapping over tiny scaled text
-            function unwrapExportTables(el) {
-              try {
-                var wraps = el.querySelectorAll('.scopy-table-export-wrap');
-                for (var i = 0; i < wraps.length; i++) {
-                  var w = wraps[i];
-                  if (!w || !w.parentNode) { continue; }
-                  var inner = w.querySelector('.scopy-table-export-inner');
-                  var t = inner ? inner.querySelector('table') : null;
-                  if (t) {
-                    w.parentNode.insertBefore(t, w);
-                  }
-                  try { w.parentNode.removeChild(w); } catch (e) { }
-                }
-              } catch (e) { }
-            }
-
-            function ensureExportTableWrappers(el) {
-              var tables = el.querySelectorAll('table');
-              if (!tables || tables.length === 0) { return; }
-              for (var i = 0; i < tables.length; i++) {
-                var t = tables[i];
-                if (!t || !t.parentNode) { continue; }
-                // Already wrapped
-                try {
-                  if (t.closest && t.closest('.scopy-table-export-inner')) { continue; }
-                } catch (e) { }
-
-                var wrap = document.createElement('div');
-                wrap.className = 'scopy-table-export-wrap';
-                var inner = document.createElement('div');
-                inner.className = 'scopy-table-export-inner';
-
-                t.parentNode.insertBefore(wrap, t);
-                wrap.appendChild(inner);
-                inner.appendChild(t);
-              }
-            }
-
-            window.__scopyFitTablesForExport = function () {
-              try { window.__scopyTablesFitDone = false; } catch (e) { }
-
-              function fitOnce() {
-                var root = document.documentElement;
-                if (!root || !root.classList || !root.classList.contains('scopy-export-light')) { return { done: true, changed: false, overflow: false }; }
-                var el = document.getElementById('content');
-                if (!el) { return { done: true, changed: false, overflow: false }; }
-
-                ensureExportTableWrappers(el);
-
-                // Fit to the actual available content width (exclude padding) so we never clip by 1-2px.
-                var containerW = 0;
-                try {
-                  var rect = el.getBoundingClientRect();
-                  var cs = window.getComputedStyle ? window.getComputedStyle(el) : null;
-                  var padL = cs ? (parseFloat(cs.paddingLeft || '0') || 0) : 0;
-                  var padR = cs ? (parseFloat(cs.paddingRight || '0') || 0) : 0;
-                  containerW = (rect.width || 0) - padL - padR;
-                } catch (e) { containerW = 0; }
-                if (!containerW || containerW <= 0) {
-                  containerW = el.clientWidth || 0;
-                }
-                if (!containerW || containerW <= 0) {
-                  return { done: true, changed: false, overflow: false };
-                }
-
-                var changed = false;
-                var overflow = false;
-
-                // Leave a small safety margin to avoid 1px clipping due to borders / subpixel rounding.
-                var safeW = containerW - 8;
-                if (safeW < 1) { safeW = 1; }
-
-                var wraps = el.querySelectorAll('.scopy-table-export-wrap');
-                for (var i = 0; i < wraps.length; i++) {
-                  var wrap = wraps[i];
-                  if (!wrap) { continue; }
-                  var inner = wrap.querySelector('.scopy-table-export-inner');
-                  if (!inner) { continue; }
-
-                  var prev = 1;
-                  try { prev = parseFloat(inner.getAttribute('data-scopy-export-scale') || '1') || 1; } catch (e) { prev = 1; }
-                  var prevMode = 'nowrap';
-                  try { prevMode = String(inner.getAttribute('data-scopy-export-mode') || 'nowrap'); } catch (e) { prevMode = 'nowrap'; }
-
-                  // Reset to measure natural size. (Transforms do not affect scrollWidth/scrollHeight, but this keeps it predictable.)
-                  try { inner.style.transform = 'scale(1)'; } catch (e) { }
-
-                  function applyCellMode(table, mode) {
-                    try {
-                      if (!table || !table.querySelectorAll) { return; }
-                      var cells = table.querySelectorAll('th, td');
-                      for (var j = 0; j < (cells.length || 0); j++) {
-                        var cell = cells[j];
-                        if (!cell || !cell.style) { continue; }
-                        cell.style.maxWidth = 'none';
-                        cell.style.minWidth = '0';
-                        if (mode === 'nowrap') {
-                          cell.style.whiteSpace = 'nowrap';
-                          cell.style.overflowWrap = 'normal';
-                          cell.style.wordBreak = 'normal';
-                        } else {
-                          cell.style.whiteSpace = 'normal';
-                          cell.style.overflowWrap = 'break-word';
-                          cell.style.wordBreak = 'normal';
-                        }
-                      }
-                    } catch (e) { }
-                  }
-
-                  var table = null;
-                  try { table = inner.querySelector('table'); } catch (e) { table = null; }
-
-                  // Strategy:
-                  // - Prefer no-wrap (minimize line breaks) and scale down to fit width.
-                  // - If no-wrap requires strong downscale, fall back to wrapping to keep text readable.
-                  var chosenMode = 'nowrap';
-                  if (table) { applyCellMode(table, 'nowrap'); }
-
-                  var naturalW = inner.scrollWidth || 0;
-                  var naturalH = inner.scrollHeight || 0;
-                  if (!naturalW || naturalW <= 0 || !naturalH || naturalH <= 0) { continue; }
-
-                  var scale = 1;
-                  if (naturalW > safeW) { scale = safeW / naturalW; }
-                  if (scale < 0.20) { scale = 0.20; }
-                  if (scale > 1) { scale = 1; }
-
-                  if (table && scale < minAllowNoWrapScale) {
-                    // Try wrapping only when no-wrap scaling would make the text too small.
-                    applyCellMode(table, 'wrap');
-                    // Force reflow before measuring.
-                    try { void inner.offsetHeight; } catch (e) { }
-                    var wrapW = inner.scrollWidth || 0;
-                    var wrapH = inner.scrollHeight || 0;
-                    if (wrapW > 0 && wrapH > 0) {
-                      var wrapScale = 1;
-                      if (wrapW > safeW) { wrapScale = safeW / wrapW; }
-                      if (wrapScale < 0.20) { wrapScale = 0.20; }
-                      if (wrapScale > 1) { wrapScale = 1; }
-
-                      if (wrapScale > scale + 0.0005) {
-                        chosenMode = 'wrap';
-                        naturalW = wrapW;
-                        naturalH = wrapH;
-                        scale = wrapScale;
-                      } else {
-                        applyCellMode(table, 'nowrap');
-                        chosenMode = 'nowrap';
-                      }
-                    } else {
-                      applyCellMode(table, 'nowrap');
-                      chosenMode = 'nowrap';
-                    }
-                  }
-
-                  // Apply scale, then verify with boundingClientRect (includes subpixel rounding) and correct if needed.
-                  try { inner.style.transform = 'scale(' + scale + ')'; } catch (e) { }
-                  var visualW = 0;
-                  try { visualW = inner.getBoundingClientRect().width || 0; } catch (e) { visualW = 0; }
-                  if (visualW > safeW - 0.5 && visualW > 0) {
-                    overflow = true;
-                    var factor = (safeW - 2) / visualW;
-                    var fixed = scale * factor;
-                    if (fixed < 0.20) { fixed = 0.20; }
-                    if (fixed > 1) { fixed = 1; }
-                    if (Math.abs(fixed - scale) > 0.0005) {
-                      scale = fixed;
-                      try { inner.style.transform = 'scale(' + scale + ')'; } catch (e) { }
-                    }
-                    try { visualW = inner.getBoundingClientRect().width || visualW; } catch (e) { }
-                  }
-
-                  // Make the wrapper allocate enough height for the transformed inner (transforms don't affect layout).
-                  var scaledH = Math.ceil(naturalH * scale + 3);
-                  try { wrap.style.height = String(scaledH) + 'px'; } catch (e) { }
-                  try { inner.setAttribute('data-scopy-export-scale', String(scale)); } catch (e) { }
-                  try { inner.setAttribute('data-scopy-export-mode', String(chosenMode)); } catch (e) { }
-                  if (Math.abs(scale - prev) > 0.001) { changed = true; }
-                  if (chosenMode !== prevMode) { changed = true; }
-
-                  if (visualW > safeW + 0.5) { overflow = true; }
-                }
-
-                return { done: false, changed: changed, overflow: overflow };
-              }
-
-              var maxIter = 14;
-              var iter = 0;
-              function step() {
-                try {
-                  var r = fitOnce();
-                  if (r.done) {
-                    if (typeof window.requestAnimationFrame === 'function') {
-                      window.requestAnimationFrame(function () { try { window.__scopyTablesFitDone = true; } catch (e) { } });
-                    } else {
-                      try { window.__scopyTablesFitDone = true; } catch (e) { }
-                    }
-                    return;
-                  }
-
-                  iter += 1;
-                  if (iter < maxIter && (r.changed || r.overflow)) {
-                    if (typeof window.requestAnimationFrame === 'function') {
-                      window.requestAnimationFrame(step);
-                    } else {
-                      setTimeout(step, 0);
-                    }
-                    return;
-                  }
-
-                  if (typeof window.requestAnimationFrame === 'function') {
-                    window.requestAnimationFrame(function () {
-                      try { window.__scopyTablesFitDone = true; } catch (e) { }
-                      scheduleReportHeight();
-                      setTimeout(scheduleReportHeight, 80);
-                    });
-                  } else {
-                    try { window.__scopyTablesFitDone = true; } catch (e) { }
-                    scheduleReportHeight();
-                    setTimeout(scheduleReportHeight, 80);
-                  }
-                } catch (e) {
-                  try { window.__scopyTablesFitDone = true; } catch (e2) { }
-                }
-              }
-
-              if (typeof window.requestAnimationFrame === 'function') {
-                window.requestAnimationFrame(step);
-              } else {
-                setTimeout(step, 0);
-              }
-            };
-            window.__scopyExportHasHorizontalOverflow = function () {
-              try {
-                var root = document.documentElement;
-                if (!root || !root.classList || !root.classList.contains('scopy-export-light')) { return false; }
-                var el = document.getElementById('content');
-                if (!el) { return false; }
-
-                var containerW = 0;
-                try {
-                  var rect = el.getBoundingClientRect();
-                  var cs = window.getComputedStyle ? window.getComputedStyle(el) : null;
-                  var padL = cs ? (parseFloat(cs.paddingLeft || '0') || 0) : 0;
-                  var padR = cs ? (parseFloat(cs.paddingRight || '0') || 0) : 0;
-                  containerW = (rect.width || 0) - padL - padR;
-                } catch (e) { containerW = 0; }
-                if (!containerW || containerW <= 0) { containerW = el.clientWidth || 0; }
-                if (!containerW || containerW <= 0) { return false; }
-
-                var safeW = containerW - 8;
-                if (safeW < 1) { safeW = 1; }
-                var wraps = el.querySelectorAll('.scopy-table-export-wrap');
-                for (var i = 0; i < wraps.length; i++) {
-                  var inner = wraps[i] ? wraps[i].querySelector('.scopy-table-export-inner') : null;
-                  if (!inner) { continue; }
-                  var w = 0;
-                  try { w = inner.getBoundingClientRect().width || 0; } catch (e) { w = 0; }
-                  if (w > safeW + 0.5) { return true; }
-                }
-                return false;
-              } catch (e) { return false; }
-            };
-            window.__scopySetExportMode = function (enabled) {
-              try {
-                var root = document.documentElement;
-                if (!root) { return; }
-                if (enabled) {
-                  root.classList.add('scopy-export-light');
-                  root.classList.remove('scopy-scrollbars-visible');
-                  if (typeof window.__scopyFitTablesForExport === 'function') {
-                    setTimeout(function () { try { window.__scopyFitTablesForExport(); } catch (e) { } }, 0);
-                  }
-                } else {
-                  root.classList.remove('scopy-export-light');
-                  try {
-                    var el = document.getElementById('content');
-                    if (el) {
-                      unwrapExportTables(el);
-                    }
-                  } catch (e) { }
-                }
-              } catch (e) { }
-            };
             window.__scopyReportHeight = function () {
               try {
                 if (!window.webkit || !window.webkit.messageHandlers || !window.webkit.messageHandlers.scopySize) { return; }
@@ -693,7 +351,6 @@ enum MarkdownHTMLRenderer {
                 window.__scopyRenderMath();
               }
               try { el.style.opacity = '1'; } catch (e) { }
-              try { window.__scopyMarkdownRendered = true; } catch (e) { }
               scheduleReportHeight();
               setTimeout(scheduleReportHeight, 120);
             }

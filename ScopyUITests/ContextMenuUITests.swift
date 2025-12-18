@@ -11,7 +11,6 @@ final class ContextMenuUITests: XCTestCase {
         continueAfterFailure = false
         app = XCUIApplication()
         app.launchArguments = ["--uitesting"]
-        app.launchEnvironment["USE_MOCK_SERVICE"] = "1"
         app.launch()
     }
 
@@ -33,10 +32,16 @@ final class ContextMenuUITests: XCTestCase {
 
     func testContextMenuAppearsOnRightClick() throws {
         let list = app.anyElement("History.List")
-        guard list.waitForExistence(timeout: 20) else { throw XCTSkip("History list not ready") }
+        guard list.waitForExistence(timeout: 10) else {
+            XCTFail("History list not found")
+            return
+        }
 
         let firstItem = app.anyElements(matching: NSPredicate(format: "identifier BEGINSWITH %@", "History.Item.")).firstMatch
-        guard firstItem.waitForExistence(timeout: 20) else { throw XCTSkip("No history items available") }
+        guard firstItem.waitForExistence(timeout: 10) else {
+            XCTFail("No history items found")
+            return
+        }
 
         firstItem.rightClick()
         _ = app.exists
@@ -44,10 +49,16 @@ final class ContextMenuUITests: XCTestCase {
 
     func testContextMenuHasCopyOption() throws {
         let list = app.anyElement("History.List")
-        guard list.waitForExistence(timeout: 20) else { throw XCTSkip("History list not ready") }
+        guard list.waitForExistence(timeout: 10) else {
+            XCTFail("History list not found")
+            return
+        }
 
         let firstItem = app.anyElements(matching: NSPredicate(format: "identifier BEGINSWITH %@", "History.Item.")).firstMatch
-        guard firstItem.waitForExistence(timeout: 20) else { throw XCTSkip("No history items available") }
+        guard firstItem.waitForExistence(timeout: 10) else {
+            XCTFail("No history items found")
+            return
+        }
 
         firstItem.rightClick()
 
@@ -60,10 +71,16 @@ final class ContextMenuUITests: XCTestCase {
 
     func testContextMenuHasPinOption() throws {
         let list = app.anyElement("History.List")
-        guard list.waitForExistence(timeout: 20) else { throw XCTSkip("History list not ready") }
+        guard list.waitForExistence(timeout: 10) else {
+            XCTFail("History list not found")
+            return
+        }
 
         let firstItem = app.anyElements(matching: NSPredicate(format: "identifier BEGINSWITH %@", "History.Item.")).firstMatch
-        guard firstItem.waitForExistence(timeout: 20) else { throw XCTSkip("No history items available") }
+        guard firstItem.waitForExistence(timeout: 10) else {
+            XCTFail("No history items found")
+            return
+        }
 
         firstItem.rightClick()
 
@@ -76,10 +93,16 @@ final class ContextMenuUITests: XCTestCase {
 
     func testContextMenuHasDeleteOption() throws {
         let list = app.anyElement("History.List")
-        guard list.waitForExistence(timeout: 20) else { throw XCTSkip("History list not ready") }
+        guard list.waitForExistence(timeout: 10) else {
+            XCTFail("History list not found")
+            return
+        }
 
         let firstItem = app.anyElements(matching: NSPredicate(format: "identifier BEGINSWITH %@", "History.Item.")).firstMatch
-        guard firstItem.waitForExistence(timeout: 20) else { throw XCTSkip("No history items available") }
+        guard firstItem.waitForExistence(timeout: 10) else {
+            XCTFail("No history items found")
+            return
+        }
 
         firstItem.rightClick()
 

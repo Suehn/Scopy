@@ -6,10 +6,8 @@ struct HistoryItemTextPreviewView: View {
     @ObservedObject var model: HoverPreviewModel
     let markdownWebViewController: MarkdownPreviewWebViewController?
 
-    @Environment(AppState.self) private var appState
-
-    @State private var exportTask: Task<Void, Never>?
-    @State private var isExporting: Bool = false
+    // Export success feedback reset task
+    @State private var exportSuccessResetTask: Task<Void, Never>?
 
     var body: some View {
         let maxWidth: CGFloat = HoverPreviewScreenMetrics.maxPopoverWidthPoints()
@@ -70,6 +68,7 @@ struct HistoryItemTextPreviewView: View {
                                 }
                             }
                         )
+                        .frame(width: width, height: clampedHeight)
                     } else {
                         MarkdownPreviewWebView(
                             html: html,
@@ -86,11 +85,14 @@ struct HistoryItemTextPreviewView: View {
                                 }
                             }
                         )
+                        .frame(width: width, height: clampedHeight)
                     }
 
-                    exportButtons(html: html, containerWidthPoints: width)
-                        .padding(10)
+                    exportButton()
+                        .padding(ScopySpacing.sm)
                 }
+                .accessibilityIdentifier("History.Preview.Container")
+                .accessibilityElement(children: .contain)
                 .frame(width: width, height: clampedHeight)
             } else {
                 HoverPreviewTextView(text: text, font: font, width: width, shouldScroll: shouldScroll)
@@ -102,105 +104,101 @@ struct HistoryItemTextPreviewView: View {
         }
     }
 
-    @ViewBuilder
-    private func exportButtons(html: String, containerWidthPoints: CGFloat) -> some View {
-        HStack(spacing: 6) {
-            exportButton(
-                systemImage: ScopyIcons.exportImageToHistory,
-                accessibilityID: "Preview.ExportImage.Record",
-                help: "Copy rendered preview as PNG (and record to history)",
-                onTap: {
-                    exportTask?.cancel()
-                    exportTask = Task { @MainActor in
-                        await exportRenderedMarkdownToClipboard(
-                            expectedHTML: html,
-                            containerWidthPoints: containerWidthPoints,
-                            recordInHistory: true
-                        )
-                    }
-                }
-            )
-
-            exportButton(
-                systemImage: ScopyIcons.exportImage,
-                accessibilityID: "Preview.ExportImage.Only",
-                help: "Copy rendered preview as PNG (clipboard only)",
-                onTap: {
-                    exportTask?.cancel()
-                    exportTask = Task { @MainActor in
-                        await exportRenderedMarkdownToClipboard(
-                            expectedHTML: html,
-                            containerWidthPoints: containerWidthPoints,
-                            recordInHistory: false
-                        )
-                    }
-                }
-            )
-        }
-        .onDisappear {
-            exportTask?.cancel()
-            exportTask = nil
-            isExporting = false
-        }
-    }
+    // MARK: - Export Button
 
     @ViewBuilder
-    private func exportButton(
-        systemImage: String,
-        accessibilityID: String,
-        help: String,
-        onTap: @escaping () -> Void
-    ) -> some View {
-        Button(action: onTap) {
+    private func exportButton() -> some View {
+        Button(action: { exportToPNG() }) {
             Group {
-                if isExporting {
+                if model.exportSuccess {
+                    Image(systemName: "checkmark")
+                        .foregroundColor(.green)
+                } else if model.exportFailed {
+                    Image(systemName: "xmark")
+                        .foregroundColor(.red)
+                } else if model.isExporting {
                     ProgressView()
-                        .controlSize(.mini)
+                        .scaleEffect(0.6)
+                        .frame(width: 14, height: 14)
                 } else {
-                    Image(systemName: systemImage)
-                        .font(.system(size: ScopySize.Icon.filter, weight: .medium))
-                        .foregroundStyle(ScopyColors.mutedText)
+                    Image(systemName: ScopyIcons.image)
+                        .foregroundColor(ScopyColors.mutedText)
                 }
             }
-            .frame(width: 22, height: 22)
+            .font(.system(size: 12, weight: .medium))
+            .frame(width: 24, height: 24)
         }
+        .accessibilityIdentifier("History.Preview.ExportButton")
+        .accessibilityLabel("Export PNG")
+        .accessibilityValue(model.exportSuccess ? "success" : (model.exportFailed ? "failed" : (model.isExporting ? "exporting" : "idle")))
         .buttonStyle(.plain)
-        .accessibilityIdentifier(accessibilityID)
-        .help(help)
-        .disabled(isExporting)
         .background(
-            RoundedRectangle(cornerRadius: ScopySize.Corner.sm, style: .continuous)
-                .fill(ScopyColors.cardBackground)
+            Circle()
+                .fill(ScopyColors.secondaryBackground.opacity(0.9))
         )
         .overlay(
-            RoundedRectangle(cornerRadius: ScopySize.Corner.sm, style: .continuous)
-                .stroke(ScopyColors.border.opacity(ScopySize.Opacity.subtle), lineWidth: ScopySize.Stroke.thin)
+            Circle()
+                .stroke(ScopyColors.separator.opacity(0.5), lineWidth: 0.5)
         )
+        .help(exportButtonHelpText)
+        .disabled(model.isExporting)
+        .onDisappear {
+            exportSuccessResetTask?.cancel()
+            exportSuccessResetTask = nil
+            model.exportSuccess = false
+            model.exportFailed = false
+            model.exportErrorMessage = nil
+        }
     }
 
-    @MainActor
-    private func exportRenderedMarkdownToClipboard(
-        expectedHTML: String,
-        containerWidthPoints: CGFloat,
-        recordInHistory: Bool
-    ) async {
-        guard model.markdownHTML == expectedHTML else { return }
-        guard !isExporting else { return }
+    private var exportButtonHelpText: String {
+        if model.isExporting { return "Exporting PNG…" }
+        if model.exportFailed, let message = model.exportErrorMessage, !message.isEmpty {
+            return "Export failed: \(message)"
+        }
+        return "Export as PNG to clipboard"
+    }
 
-        isExporting = true
-        defer { isExporting = false }
+    private func exportToPNG() {
+        guard !model.isExporting else { return }
+        guard let html = model.markdownHTML else { return }
 
-        do {
-            let renderer = MarkdownExportRenderer()
-            let pngData = try await renderer.renderPNG(
-                html: expectedHTML,
-                containerWidthPoints: containerWidthPoints,
-                maxShortSidePixels: 1500,
-                maxLongSidePixels: 16_384 * 4
-            )
-            try await appState.service.copyToClipboard(imagePNGData: pngData, recordInHistory: recordInHistory)
-        } catch {
-            ScopyLog.ui.error("Failed to export rendered preview image: \(error.localizedDescription, privacy: .private)")
+        model.isExporting = true
+        model.exportSuccess = false
+        model.exportFailed = false
+        model.exportErrorMessage = nil
+        exportSuccessResetTask?.cancel()
+
+        MarkdownExportService.exportToPNGClipboard(html: html, targetWidthPixels: 1080) { result in
+            Task { @MainActor in
+                model.isExporting = false
+
+                switch result {
+                case .success:
+                    model.exportSuccess = true
+                    model.exportErrorMessage = nil
+                    // Reset success state after 1.5 seconds
+                    exportSuccessResetTask = Task {
+                        try? await Task.sleep(nanoseconds: 1_500_000_000)
+                        guard !Task.isCancelled else { return }
+                        await MainActor.run {
+                            model.exportSuccess = false
+                        }
+                    }
+                case .failure(let error):
+                    model.exportFailed = true
+                    model.exportErrorMessage = error.localizedDescription
+                    ScopyLog.ui.error("Export failed: \(error.localizedDescription, privacy: .public)")
+                    exportSuccessResetTask = Task {
+                        try? await Task.sleep(nanoseconds: 1_500_000_000)
+                        guard !Task.isCancelled else { return }
+                        await MainActor.run {
+                            model.exportFailed = false
+                            model.exportErrorMessage = nil
+                        }
+                    }
+                }
+            }
         }
     }
 }

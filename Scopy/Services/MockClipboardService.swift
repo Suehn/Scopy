@@ -45,6 +45,33 @@ final class MockClipboardService: ClipboardServiceProtocol {
 
     private func generateMockData() {
         let sampleTexts = [
+            """
+            # SCOPY_EXPORT_TEST_MARKDOWN
+
+            交互图频谱基础（UI Export Test）
+
+            - 这是一段用于 UI 导出验证的 Markdown 内容。
+            - 公式：$E = mc^2$，以及 $\\sum_{i=1}^{n} i = \\frac{n(n+1)}{2}$。
+
+            ## Wide Table
+
+            | very_long_header_col_01 | very_long_header_col_02 | very_long_header_col_03 | very_long_header_col_04 | very_long_header_col_05 | very_long_header_col_06 | very_long_header_col_07 | very_long_header_col_08 | very_long_header_col_09 | very_long_header_col_10 |
+            | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+            | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 |
+            | aaaaaaaaaaaaaaaaaaaaa | bbbbbbbbbbbbbbbbbbbbb | ccccccccccccccccccccc | ddddddddddddddddddddd | eeeeeeeeeeeeeeeeeeeee | fffffffffffffffffffff | ggggggggggggggggggggg | hhhhhhhhhhhhhhhhhhhhh | iiiiiiiiiiiiiiiiiiiii | jjjjjjjjjjjjjjjjjjjjj |
+
+            ## Long Content
+
+            这是第一段，用于确保导出高度超过一个视口，验证“全文导出”。
+
+            这是第二段，包含一些中文与 English mixed content，确保排版稳定。
+
+            这是第三段，继续拉长内容高度。重复几段以确保 snapshot 覆盖整页。
+
+            这是第四段，继续拉长内容高度。重复几段以确保 snapshot 覆盖整页。
+
+            这是第五段，继续拉长内容高度。重复几段以确保 snapshot 覆盖整页。
+            """,
             "Hello, World! This is a sample clipboard item.",
             "https://github.com/example/repo",
             "SELECT * FROM users WHERE id = 1;",
@@ -197,10 +224,6 @@ final class MockClipboardService: ClipboardServiceProtocol {
         guard let item = items.first(where: { $0.id == itemID }) else { return }
         // 在真实实现中，这里会复制到系统剪贴板
         ScopyLog.app.info("Copied to clipboard: \(String(item.plainText.prefix(50)), privacy: .private)...")
-    }
-
-    func copyToClipboard(imagePNGData: Data, recordInHistory: Bool) async throws {
-        ScopyLog.app.info("Copied rendered image to clipboard (\(imagePNGData.count) bytes), recordInHistory=\(recordInHistory)")
     }
 
     func updateSettings(_ newSettings: SettingsDTO) async throws {

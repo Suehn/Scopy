@@ -63,30 +63,16 @@ extract_current_tag() {
 
 bump_patch_tag() {
     local tag="$1"
+    if [[ ! "${tag}" =~ ^v([0-9]+)\.([0-9]+)(\.([0-9]+))?$ ]]; then
+        echo "Unsupported tag format for --patch bump: ${tag} (expected vX.Y or vX.Y.Z)" >&2
+        exit 1
+    fi
     local major minor patch
-
-    # SemVer: vX.Y.Z
-    if [[ "${tag}" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
-        major="${BASH_REMATCH[1]}"
-        minor="${BASH_REMATCH[2]}"
-        patch="${BASH_REMATCH[3]}"
-        patch=$((patch + 1))
-        echo "v${major}.${minor}.${patch}"
-        return 0
-    fi
-
-    # Fix series: vX.Y.fixN
-    if [[ "${tag}" =~ ^v([0-9]+)\.([0-9]+)\.fix([0-9]+)$ ]]; then
-        major="${BASH_REMATCH[1]}"
-        minor="${BASH_REMATCH[2]}"
-        patch="${BASH_REMATCH[3]}"
-        patch=$((patch + 1))
-        echo "v${major}.${minor}.fix${patch}"
-        return 0
-    fi
-
-    echo "Unsupported tag format for --patch bump: ${tag} (expected vX.Y.Z or vX.Y.fixN)" >&2
-    exit 1
+    major="${BASH_REMATCH[1]}"
+    minor="${BASH_REMATCH[2]}"
+    patch="${BASH_REMATCH[4]:-0}"
+    patch=$((patch + 1))
+    echo "v${major}.${minor}.${patch}"
 }
 
 ensure_clean_worktree() {

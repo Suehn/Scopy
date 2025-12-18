@@ -212,10 +212,6 @@ final class ReusableMockClipboardService: ClipboardServiceProtocol {
         lastCopiedItemID = itemID
     }
 
-    func copyToClipboard(imagePNGData: Data, recordInHistory: Bool) async throws {
-        // No-op for tests.
-    }
-
     func updateSettings(_ newSettings: SettingsDTO) async throws {
         settings = newSettings
     }

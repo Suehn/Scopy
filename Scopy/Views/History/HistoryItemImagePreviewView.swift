@@ -11,7 +11,7 @@ struct HistoryItemImagePreviewView: View {
     @State private var lastLoadedPath: String?
 
     var body: some View {
-        let width: CGFloat = ScopySize.Width.previewMax
+        let width: CGFloat = resolvedPreviewWidthPoints(maxWidth: HoverPreviewScreenMetrics.maxPopoverWidthPoints())
         let maxHeight: CGFloat = HoverPreviewScreenMetrics.maxPopoverHeightPoints()
 
         let content = previewContent()
@@ -78,6 +78,27 @@ struct HistoryItemImagePreviewView: View {
         let originalHeight = max(size.height, 1)
         let scaledHeight = width * (originalHeight / originalWidth)
         return ceil(scaledHeight)
+    }
+
+    private func resolvedPreviewWidthPoints(maxWidth: CGFloat) -> CGFloat {
+        guard maxWidth > 0 else { return 1 }
+        guard let cgImage = model.previewCGImage else { return maxWidth }
+
+        let maxHeight: CGFloat = HoverPreviewScreenMetrics.maxPopoverHeightPoints()
+        let originalWidthPixels = max(1, CGFloat(cgImage.width))
+        let originalHeightPixels = max(1, CGFloat(cgImage.height))
+        let heightAtMaxWidth = maxWidth * (originalHeightPixels / originalWidthPixels)
+
+        // Only avoid upscaling for very tall content (scrollable previews). For normal images, upscaling can be
+        // desirable (e.g. small icons).
+        guard heightAtMaxWidth > maxHeight else { return maxWidth }
+
+        let scale = max(1, HoverPreviewScreenMetrics.activeBackingScaleFactor())
+        let nativeWidthPoints = floor(originalWidthPixels / scale)
+        if nativeWidthPoints > 0, nativeWidthPoints < maxWidth {
+            return nativeWidthPoints
+        }
+        return maxWidth
     }
 
     @MainActor

@@ -541,7 +541,6 @@ final class SearchHintTests: XCTestCase {
         func delete(itemID: UUID) async throws {}
         func clearAll() async throws {}
         func copyToClipboard(itemID: UUID) async throws {}
-        func copyToClipboard(imagePNGData: Data, recordInHistory: Bool) async throws {}
         func updateSettings(_ settings: SettingsDTO) async throws {}
         func getSettings() async throws -> SettingsDTO { .default }
         func getStorageStats() async throws -> (itemCount: Int, sizeBytes: Int) { (0, 0) }

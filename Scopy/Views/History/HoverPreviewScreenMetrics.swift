@@ -10,6 +10,14 @@ enum HoverPreviewScreenMetrics {
         return NSScreen.main?.visibleFrame ?? .zero
     }
 
+    static func activeBackingScaleFactor() -> CGFloat {
+        let mouse = NSEvent.mouseLocation
+        if let screen = NSScreen.screens.first(where: { $0.frame.contains(mouse) }) {
+            return screen.backingScaleFactor
+        }
+        return NSScreen.main?.backingScaleFactor ?? 2.0
+    }
+
     static func maxPopoverWidthPoints() -> CGFloat {
         let visibleWidth = activeVisibleFrame().width
         if visibleWidth > 0 {

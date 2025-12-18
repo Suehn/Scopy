@@ -123,6 +123,57 @@ jobs:
           # 计算 SHA256
           shasum -a 256 "Scopy-${VERSION}.dmg" > "Scopy-${VERSION}.dmg.sha256"
 
+      - name: Generate Release Notes (from CHANGELOG)
+        if: ${{ steps.existing.outputs.has_assets != 'true' }}
+        run: |
+          set -euo pipefail
+
+          TAG="${{ steps.version.outputs.tag }}"
+          VERSION="${{ steps.version.outputs.version }}"
+          SHORT_SHA="${{ steps.version.outputs.short_sha }}"
+          CHANGELOG="doc/implemented-doc/CHANGELOG.md"
+
+          if [[ ! -f "${CHANGELOG}" ]]; then
+            echo "Missing changelog: ${CHANGELOG}" >&2
+            exit 1
+          fi
+
+          if ! grep -Fq "## [${TAG}]" "${CHANGELOG}"; then
+            echo "Changelog does not contain heading: ## [${TAG}] ..." >&2
+            exit 1
+          fi
+
+          awk -v tag="${TAG}" '
+            $0 ~ "^## \\[" tag "\\]" { in=1; next }
+            in && $0 ~ "^## \\[" { exit }
+            in { print }
+          ' "${CHANGELOG}" > release_changelog_section.md
+
+          {
+            printf "## 更新内容\\n\\n"
+            cat release_changelog_section.md
+            cat <<EOF
+
+---
+
+## 自动构建 @ ${SHORT_SHA}
+
+### Homebrew 安装
+\`\`\`bash
+brew install --cask scopy
+# 或更新
+brew upgrade --cask scopy
+\`\`\`
+
+### 手动安装
+1. 下载 \`Scopy-${VERSION}.dmg\`
+2. 打开 DMG，拖动 Scopy 到 Applications
+3. 首次打开：右键点击 → 打开 → 打开
+
+> ⚠️ 应用未签名，首次打开需要手动允许
+EOF
+          } > release_body.md
+
       - name: Create or Update Release
         if: ${{ steps.existing.outputs.has_assets != 'true' }}
         uses: softprops/action-gh-release@v1
@@ -132,22 +183,7 @@ jobs:
           files: |
             Scopy-*.dmg
             Scopy-*.dmg.sha256
-          body: |
-            ## 自动构建 @ ${{ steps.version.outputs.short_sha }}
-
-            ### Homebrew 安装
-            ```bash
-            brew install --cask scopy
-            # 或更新
-            brew upgrade --cask scopy
-            ```
-
-            ### 手动安装
-            1. 下载 `Scopy-${{ steps.version.outputs.version }}.dmg`
-            2. 打开 DMG，拖动 Scopy 到 Applications
-            3. 首次打开：右键点击 → 打开 → 打开
-
-            > ⚠️ 应用未签名，首次打开需要手动允许
+          body_path: release_body.md
           make_latest: true
 
       - name: Fetch SHA256 file (reuse existing)

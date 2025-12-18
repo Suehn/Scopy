@@ -5,44 +5,28 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
-## [v0.44.fix30] - 2025-12-19
+## [v0.50] - 2025-12-19
 
-### Fix/Preview: export PNG long render (tiled+trim) + ATX headings
+### Release：导出图片逻辑重构（Markdown/LaTeX → PNG）
 
-- **底部空白裁剪兜底**：导出 PNG 在测量高度之外增加“像素级底部白边裁剪”，修复部分场景下出现的“底部超大空白”。
-- **长图拼接导出**：超长内容或 snapshot 不稳定时，使用 tiled snapshot 滚动拼接为一张长图；并加总像素预算 clamp，避免分配超大 RGBA buffer 引发 OOM。
-- **表格尽量少换行**：export-mode 表格优先 no-wrap 缩放（减少换行）；仅当缩放过小且 wrap 能显著提升可读性时才回退到 wrap。
-- **标题层级一致性**：对输入 `##标题` 这种缺空格的 ATX headings 做 best-effort 归一化为 `## 标题`（避开 fenced/indented code blocks），恢复纯 Markdown 多级标题的视觉层级。
-- **DEBUG 回归入口**：补充 UI 测试导出 harness 与自动导出开关（DEBUG-only），便于稳定复现与回归导出链路（不影响生产行为）。
-
-## [v0.44.fix29] - 2025-12-18
-
-### Fix/Preview: export PNG table-fit + clipboard-only
-
-- **导出按钮语义拆分**：Markdown/LaTeX 预览的“导出渲染结果为 PNG”拆成两种：
-  - 导出到剪贴板并写入历史（便于回溯）
-  - 仅导出到剪贴板（不污染历史）
-- **避免白图/空白导出**：导出链路在 snapshot 前显式等待 markdown 渲染完成 + export-mode CSS 生效（`#content` opacity）+（如有）首次 KaTeX render 完成，减少“偶发全白”。
-- **表格缩放更可靠**：export-mode 表格改为 wrapper + `transform: scale(...)` 适配可用宽度，不再依赖 `zoom`；并用 `getBoundingClientRect()` 校正 subpixel rounding，降低“缩放后仍截断”的概率。
-- **导出尺寸更新**：短边上限调整为 1500px，长边上限调整为 65536px（`16_384 * 4`），导出仍保持 PNG。
-- **FTS 排序切换按钮修复**：切换排序立即触发搜索（不再受 debounce 影响），分页请求也携带 `sortMode`，避免“按钮看起来不生效”。
-- **Release tooling**：`make release-bump-patch` 支持 `vX.Y.fixN` 的 patch bump。
-
-## [v0.44.fix28] - 2025-12-18
-
-### Feat/Preview：导出渲染结果为 PNG（白底黑字）到剪贴板
-
-- **Copy Rendered Preview as Image**：Markdown/LaTeX hover 预览新增按钮，可将当前渲染结果以白底黑字样式导出为 PNG 到剪贴板（与预览一致的布局/尺寸）。
-- **高性能实现**：导出使用 `WKWebView.takeSnapshot` 获取图像，并在后台线程完成 PNG 编码，避免在主线程做重计算；导出样式仅在 snapshot 期间临时启用，结束后自动恢复，不影响现有预览体验。
-- **Service API**：`ClipboardServiceProtocol` 新增 `copyToClipboard(imagePNGData:)` 统一走 `.png` 写入 pasteboard，供导出能力复用。
+- **一键导出 PNG**：hover Markdown/LaTeX 预览右上角新增 Export PNG，一键把渲染结果写入剪贴板（白底黑字，跨应用粘贴更稳定）。
+- **导出更稳**：固定宽 `1080px`、高度按内容动态测量；超长内容采用 tile-based snapshot 分片渲染并拼接为单张长图。
+- **表格可读性**：宽表格优先 no-wrap + 轻量缩放减少换行；当缩放过小则回退 wrap 策略，并输出 table metrics 便于回归与诊断。
+- **空白裁剪**：对导出结果做像素级底部白边裁剪，消除偶发“超长白底尾巴”。
+- **预览一致性**：修复 `##标题` 这类缺空格 ATX headings 的层级不明显问题（自动标准化为 `## 标题`）；预览表格改为横向滚动以减少换行。
+- **测试**：新增 Export PNG 单测与端到端 UI tests（宽度/高度/表格/剪贴板/底部空白）。
 
 ## [v0.44.fix27] - 2025-12-18
 
-### Fix/Keyboard：`⌥⌫` 删除选中项修复
+### Feat/Preview + Fix/Export：Markdown/LaTeX 导出 PNG（长图/表格/高度）
 
-- **Delete Selected**：修复 `⌥⌫` 在搜索框聚焦时被 TextField 吃掉、导致“删除选中条目”不生效的问题；改为在 AppKit 层（local keyDown monitor）拦截并转发到 `HistoryViewModel.deleteSelectedItem()`，确保快捷键始终生效。
-- **UITests**：新增 UI 回归用例覆盖“搜索框聚焦 + `⌥⌫` 删除选中项”；`--uitesting` 下主窗口设为 `.floating` level，降低外部窗口遮挡导致的 hit-test flaky（不影响生产行为）。
-- **Accessibility（测试辅助）**：列表条目补充 `accessibilityValue`（selected/unselected）用于 UI 用例稳定定位当前选中项（不改变功能）。
+- **Export 按钮**：hover Markdown/LaTeX 预览右上角新增“导出为 PNG 并写入剪贴板”，提供 exporting/成功/失败反馈（自动回落）。
+- **导出尺寸**：导出 PNG 固定宽 `1080px`；高度按 `#content` 实际渲染自适应，短内容不再被 padding 成大画布。
+- **长内容长图**：内容过长时采用 tile-based snapshot 分片渲染并拼接为单张 PNG；必要时按像素预算做全局字体缩放以控制峰值内存。
+- **表格少换行**：导出优先 no-wrap 并按宽度轻量缩放；当缩放过小则回退到 wrap 策略保证可读性，并支持输出 table metrics 便于回归。
+- **底部空白**：导出 PNG 增加白底像素裁剪，消除偶发超长白底尾巴。
+- **预览一致性**：修复 Markdown ATX 标题缺空格（`##标题`）导致层级不明显的问题（render 前自动标准化为 `## 标题`）；预览表格改为横向滚动以减少换行。
+- **测试**：新增导出端到端 UI tests（尺寸/表格/剪贴板/空白裁剪）与标题规范化回归测试。
 
 ## [v0.44.fix26] - 2025-12-18
 
