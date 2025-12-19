@@ -5,7 +5,7 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
-## [v0.50.fix1] - 2025-12-19
+## [v0.50.fix2] - 2025-12-19
 
 ### Fix/Export + Fix/Quality
 
@@ -13,6 +13,7 @@
 - **Preview/并发**：hover 预览图片解码采用 Sendable 传递，缓存与质量策略抽离，减少并发警告。
 - **Test/稳定性**：性能测试 skip 时 tearDown 安全释放；导出 UI 测试优先点击可访问按钮。
 - **代码质量**：移除无意义 WKWebView downcast；并发计数器封装，清理 Swift 6 警告。
+- **版本说明**：由于远端 `v0.50.fix1` tag 冲突，本次以 `v0.50.fix2` 重新发布（内容一致）。
 
 ## [v0.50] - 2025-12-19
 
