@@ -220,8 +220,8 @@ struct HistoryItemView: View, Equatable {
         .animation(isScrolling ? nil : .easeInOut(duration: 0.15), value: isKeyboardSelected)
         .padding(.horizontal, ScopySpacing.md) // Outer padding for floating effect
         .onTapGesture {
-            onSelect()
             if isUITestTapPreviewEnabled {
+                // UI 测试预览模式下避免关闭面板，允许预览弹窗出现
                 isHovering = true
                 isPopoverHovering = true
                 if item.type == .image && showThumbnails {
@@ -229,6 +229,8 @@ struct HistoryItemView: View, Equatable {
                 } else if item.type == .text || item.type == .rtf || item.type == .html {
                     startTextPreviewTask()
                 }
+            } else {
+                onSelect()
             }
         }
         .onAppear {
@@ -292,6 +294,14 @@ struct HistoryItemView: View, Equatable {
             cancelHoverTasks()
             resetPreviewState(hidePopovers: true)
         }
+        .background(
+            ScrollWheelDismissMonitor(
+                isActive: showPreview || showTextPreview,
+                onScrollWheel: { dismissPreviewForScrollWheel() }
+            )
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+        )
         .background(markdownPreMeasureView)
     }
 
@@ -480,6 +490,15 @@ struct HistoryItemView: View, Equatable {
             kCGImageSourceThumbnailMaxPixelSize: requestedMax,
             kCGImageSourceShouldCacheImmediately: true
         ]
+        if ScrollPerformanceProfile.isEnabled {
+            let start = CFAbsoluteTimeGetCurrent()
+            let image = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
+            if image != nil {
+                let elapsed = (CFAbsoluteTimeGetCurrent() - start) * 1000
+                ScrollPerformanceProfile.recordMetric(name: "hover.preview_image_decode_ms", elapsedMs: elapsed)
+            }
+            return image
+        }
         return CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
     }
 
@@ -570,6 +589,13 @@ struct HistoryItemView: View, Equatable {
         }
     }
 
+    private func dismissPreviewForScrollWheel() {
+        guard shouldResetPreviewOnScroll else { return }
+        isHovering = false
+        cancelHoverTasks()
+        resetPreviewState(hidePopovers: true)
+    }
+
     // MARK: - Text Preview (v0.15)
 
     /// v0.15.1: Start text preview task - uses `plainText` (full content) and lazily upgrades to Markdown preview when detected.
@@ -620,7 +646,15 @@ struct HistoryItemView: View, Equatable {
             let previewText = preview
             hoverMarkdownTask = Task(priority: .utility) { [previewText, cacheKey] in
                 guard !Task.isCancelled else { return }
-                let html = MarkdownHTMLRenderer.render(markdown: previewText)
+                let html: String
+                if ScrollPerformanceProfile.isEnabled {
+                    let start = CFAbsoluteTimeGetCurrent()
+                    html = MarkdownHTMLRenderer.render(markdown: previewText)
+                    let elapsed = (CFAbsoluteTimeGetCurrent() - start) * 1000
+                    ScrollPerformanceProfile.recordMetric(name: "hover.markdown_render_ms", elapsedMs: elapsed)
+                } else {
+                    html = MarkdownHTMLRenderer.render(markdown: previewText)
+                }
                 guard !Task.isCancelled, !html.isEmpty else { return }
                 MarkdownPreviewCache.shared.setHTML(html, forKey: cacheKey)
                 await MainActor.run { [previewText] in
@@ -711,6 +745,54 @@ private struct MarkdownPreviewMeasurer: View {
         .onDisappear {
             settleTask?.cancel()
             settleTask = nil
+        }
+    }
+}
+
+private struct ScrollWheelDismissMonitor: NSViewRepresentable {
+    let isActive: Bool
+    let onScrollWheel: () -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(onScrollWheel: onScrollWheel)
+    }
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView(frame: .zero)
+        context.coordinator.update(isActive: isActive)
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        context.coordinator.onScrollWheel = onScrollWheel
+        context.coordinator.update(isActive: isActive)
+    }
+
+    final class Coordinator {
+        var onScrollWheel: () -> Void
+        private var monitor: Any?
+
+        init(onScrollWheel: @escaping () -> Void) {
+            self.onScrollWheel = onScrollWheel
+        }
+
+        func update(isActive: Bool) {
+            if isActive {
+                guard monitor == nil else { return }
+                monitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
+                    self?.onScrollWheel()
+                    return event
+                }
+            } else if let monitor {
+                NSEvent.removeMonitor(monitor)
+                self.monitor = nil
+            }
+        }
+
+        deinit {
+            if let monitor {
+                NSEvent.removeMonitor(monitor)
+            }
         }
     }
 }

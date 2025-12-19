@@ -329,11 +329,13 @@ final class HistoryViewModel {
     func scrollDidStart() {
         guard !isScrolling else { return }
         isScrolling = true
+        ScrollPerformanceProfile.shared.scrollDidStart()
     }
 
     func scrollDidEnd() {
         guard isScrolling else { return }
         isScrolling = false
+        ScrollPerformanceProfile.shared.scrollDidEnd()
     }
 
     func loadMore() async {

@@ -34,6 +34,21 @@
 - runner：`macos-15`
 - Xcode：`16.0`
 
+## 本次更新（v0.50.fix8）
+
+- **Perf/Profile（滚动）**：新增 ScrollPerformanceProfile，采样 frame time / drop ratio / scroll speed 并输出 JSON。
+- **Perf/Profile（分层）**：文本 title/metadata、缩略图解码、hover 预览 decode/Markdown render 计时入桶（profiling 开启时）。
+- **Mock 场景矩阵**：Mock 数据量/图片数量/文本长度/缩略图开关可配置，用于基线对比。
+- **UX**：hover 预览滚轮触发自动关闭，避免预览遮挡滚动；UI 测试预览点击不关闭面板。
+- **Tests**：新增 scroll profile UI 测试入口（默认跳过，需 `SCOPY_RUN_PROFILE_UI_TESTS=1` 或 `/tmp/scopy_run_profile_ui_tests`），覆盖 baseline/text-only/image-heavy。
+- **性能实测**（Apple M3 24GB；macOS 15.7.2（24G325）；Xcode 16.3（16E140），Debug）：
+  - baseline-image-accessibility：frame P50 16.67ms，P95 16.67ms，avg 19.01ms，max 341.67ms，drop_ratio 0.01899
+  - image-heavy-no-accessibility：frame P50 16.67ms，P95 25.00ms，avg 19.35ms，max 325.00ms，drop_ratio 0.02251
+  - text-only：frame P50 16.67ms，P95 25.00ms，avg 19.44ms，max 350.00ms，drop_ratio 0.02265
+  - buckets（baseline）：text.title_ms p50 0.0020ms / p95 0.0110ms；text.metadata_ms p50 0.0249ms / p95 0.2110ms；image.thumbnail_decode_ms p50 18.15ms / p95 18.32ms
+- **测试结果**：
+  - `SCOPY_RUN_PROFILE_UI_TESTS=1 xcodebuild test -scheme Scopy -destination 'platform=macOS' -only-testing:ScopyUITests/HistoryListUITests`：Executed 10 tests, 0 failures
+
 ## 本次更新（v0.50.fix7）
 
 - **Perf/UI（滚动）**：DisplayText title/metadata 在后台预热，减少滚动进入新页时的主线程文本扫描。

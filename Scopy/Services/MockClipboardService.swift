@@ -1,11 +1,64 @@
+import AppKit
 import Foundation
 
 /// Mock 剪贴板服务 - 用于 UI 开发和测试
 /// 符合 v0.md 的解耦验收标准: UI 可以在「后端 mock」模式下运行
 @MainActor
 final class MockClipboardService: ClipboardServiceProtocol {
+    private struct MockConfig {
+        let itemCount: Int
+        let imageCount: Int
+        let showThumbnails: Bool?
+        let imagePreviewDelay: Double?
+        let thumbnailSize: Int
+        let textLength: Int
+
+        static func load() -> MockConfig {
+            let env = ProcessInfo.processInfo.environment
+            let itemCount = max(0, parseInt(env["SCOPY_MOCK_ITEM_COUNT"]) ?? 100)
+            let imageCount = max(0, parseInt(env["SCOPY_MOCK_IMAGE_COUNT"]) ?? 0)
+            let showThumbnails = parseBool(env["SCOPY_MOCK_SHOW_THUMBNAILS"])
+            let imagePreviewDelay = parseDouble(env["SCOPY_MOCK_IMAGE_PREVIEW_DELAY"])
+            let thumbnailSize = max(16, parseInt(env["SCOPY_MOCK_THUMBNAIL_SIZE"]) ?? 64)
+            let textLength = max(0, parseInt(env["SCOPY_MOCK_TEXT_LENGTH"]) ?? 0)
+
+            return MockConfig(
+                itemCount: itemCount,
+                imageCount: imageCount,
+                showThumbnails: showThumbnails,
+                imagePreviewDelay: imagePreviewDelay,
+                thumbnailSize: thumbnailSize,
+                textLength: textLength
+            )
+        }
+
+        private static func parseInt(_ value: String?) -> Int? {
+            guard let value, !value.isEmpty else { return nil }
+            return Int(value)
+        }
+
+        private static func parseDouble(_ value: String?) -> Double? {
+            guard let value, !value.isEmpty else { return nil }
+            return Double(value)
+        }
+
+        private static func parseBool(_ value: String?) -> Bool? {
+            guard let value else { return nil }
+            switch value.lowercased() {
+            case "1", "true", "yes":
+                return true
+            case "0", "false", "no":
+                return false
+            default:
+                return nil
+            }
+        }
+    }
+
+    private static let config = MockConfig.load()
+
     private var items: [ClipboardItemDTO] = []
-    private var settings: SettingsDTO = .default
+    private var settings: SettingsDTO
     private let eventQueue: AsyncBoundedQueue<ClipboardEvent>
     private let stream: AsyncStream<ClipboardEvent>
 
@@ -14,12 +67,14 @@ final class MockClipboardService: ClipboardServiceProtocol {
     }
 
     init() {
+        let config = Self.config
         let queue = AsyncBoundedQueue<ClipboardEvent>(capacity: ScopyThresholds.clipboardEventStreamMaxBufferedItems)
         self.eventQueue = queue
         self.stream = AsyncStream(unfolding: { await queue.dequeue() })
+        self.settings = Self.applySettingsOverrides(config: config)
 
         // 生成一些测试数据
-        generateMockData()
+        generateMockData(config: config)
     }
 
     deinit {
@@ -43,7 +98,7 @@ final class MockClipboardService: ClipboardServiceProtocol {
 
     // MARK: - Private
 
-    private func generateMockData() {
+    private func generateMockData(config: MockConfig) {
         let sampleTexts = [
             """
             # SCOPY_EXPORT_TEST_MARKDOWN
@@ -85,6 +140,12 @@ final class MockClipboardService: ClipboardServiceProtocol {
         ]
 
         let apps = ["com.apple.Safari", "com.apple.Terminal", "com.microsoft.VSCode", "com.apple.finder", nil]
+        let totalCount = max(sampleTexts.count, config.itemCount)
+        let extraCount = max(0, totalCount - sampleTexts.count)
+        let imageCount = min(config.imageCount, extraCount)
+        let imagePaths = Self.prepareMockThumbnails(count: imageCount, size: config.thumbnailSize)
+        let generatedText = Self.makeGeneratedText(length: config.textLength)
+        let now = Date()
 
         for (index, text) in sampleTexts.enumerated() {
             let item = ClipboardItemDTO(
@@ -93,8 +154,8 @@ final class MockClipboardService: ClipboardServiceProtocol {
                 contentHash: UUID().uuidString,
                 plainText: text,
                 appBundleID: apps[index % apps.count],
-                createdAt: Date().addingTimeInterval(Double(-index * 3600)),
-                lastUsedAt: Date().addingTimeInterval(Double(-index * 1800)),
+                createdAt: now.addingTimeInterval(Double(-index * 3600)),
+                lastUsedAt: now.addingTimeInterval(Double(-index * 1800)),
                 isPinned: index < 2,  // 前两个是固定的
                 sizeBytes: text.utf8.count,
                 thumbnailPath: nil,
@@ -103,23 +164,114 @@ final class MockClipboardService: ClipboardServiceProtocol {
             items.append(item)
         }
 
-        // 添加更多测试数据以测试分页
-        for i in 10..<100 {
-            let item = ClipboardItemDTO(
-                id: UUID(),
-                type: .text,
-                contentHash: UUID().uuidString,
-                plainText: "Test item #\(i) - Some random text content for testing pagination and scrolling behavior.",
-                appBundleID: apps[i % apps.count],
-                createdAt: Date().addingTimeInterval(Double(-i * 3600)),
-                lastUsedAt: Date().addingTimeInterval(Double(-i * 1800)),
-                isPinned: false,
-                sizeBytes: 100,
-                thumbnailPath: nil,
-                storageRef: nil
-            )
-            items.append(item)
+        // 添加更多测试数据以测试分页 / 滚动性能
+        for i in 0..<extraCount {
+            let index = sampleTexts.count + i
+            if i < imageCount {
+                let path = imagePaths[i]
+                let item = ClipboardItemDTO(
+                    id: UUID(),
+                    type: .image,
+                    contentHash: UUID().uuidString,
+                    plainText: "",
+                    appBundleID: apps[index % apps.count],
+                    createdAt: now.addingTimeInterval(Double(-index * 3600)),
+                    lastUsedAt: now.addingTimeInterval(Double(-index * 1800)),
+                    isPinned: false,
+                    sizeBytes: 0,
+                    thumbnailPath: path,
+                    storageRef: nil
+                )
+                items.append(item)
+            } else {
+                let item = ClipboardItemDTO(
+                    id: UUID(),
+                    type: .text,
+                    contentHash: UUID().uuidString,
+                    plainText: Self.makeItemText(index: index, fallback: generatedText),
+                    appBundleID: apps[index % apps.count],
+                    createdAt: now.addingTimeInterval(Double(-index * 3600)),
+                    lastUsedAt: now.addingTimeInterval(Double(-index * 1800)),
+                    isPinned: false,
+                    sizeBytes: 100,
+                    thumbnailPath: nil,
+                    storageRef: nil
+                )
+                items.append(item)
+            }
         }
+    }
+
+    private static func applySettingsOverrides(config: MockConfig) -> SettingsDTO {
+        var settings = SettingsDTO.default
+        if let showThumbnails = config.showThumbnails {
+            settings.showImageThumbnails = showThumbnails
+        }
+        if let imagePreviewDelay = config.imagePreviewDelay {
+            settings.imagePreviewDelay = imagePreviewDelay
+        }
+        return settings
+    }
+
+    private static func prepareMockThumbnails(count: Int, size: Int) -> [String] {
+        guard count > 0 else { return [] }
+        let directory = URL(fileURLWithPath: "/tmp/scopy_mock_thumbnails", isDirectory: true)
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: nil)
+
+        var paths: [String] = []
+        paths.reserveCapacity(count)
+
+        for index in 0..<count {
+            let url = directory.appendingPathComponent("thumb_\(size)_\(index).png")
+            if !FileManager.default.fileExists(atPath: url.path) {
+                if let data = makeThumbnailData(size: size, seed: index) {
+                    try? data.write(to: url, options: .atomic)
+                }
+            }
+            paths.append(url.path)
+        }
+
+        return paths
+    }
+
+    private static func makeThumbnailData(size: Int, seed: Int) -> Data? {
+        guard let rep = NSBitmapImageRep(
+            bitmapDataPlanes: nil,
+            pixelsWide: size,
+            pixelsHigh: size,
+            bitsPerSample: 8,
+            samplesPerPixel: 4,
+            hasAlpha: true,
+            isPlanar: false,
+            colorSpaceName: .deviceRGB,
+            bytesPerRow: 0,
+            bitsPerPixel: 0
+        ) else {
+            return nil
+        }
+
+        let hue = CGFloat((seed % 360)) / 360.0
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
+        NSColor(calibratedHue: hue, saturation: 0.4, brightness: 0.9, alpha: 1.0).setFill()
+        NSRect(x: 0, y: 0, width: size, height: size).fill()
+        NSGraphicsContext.restoreGraphicsState()
+        return rep.representation(using: .png, properties: [:])
+    }
+
+    private static func makeGeneratedText(length: Int) -> String? {
+        guard length > 0 else { return nil }
+        let seed = "word word word "
+        let repeats = max(1, length / seed.count + 1)
+        let text = String(repeating: seed, count: repeats)
+        return String(text.prefix(length))
+    }
+
+    private static func makeItemText(index: Int, fallback: String?) -> String {
+        if let fallback {
+            return fallback
+        }
+        return "Test item #\(index) - Some random text content for testing pagination and scrolling behavior."
     }
 
     func fetchRecent(limit: Int, offset: Int) async throws -> [ClipboardItemDTO] {

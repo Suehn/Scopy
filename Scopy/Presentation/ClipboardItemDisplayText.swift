@@ -1,5 +1,6 @@
 import Foundation
 import ScopyKit
+import ScopyUISupport
 
 /// Presentation-only helpers for deriving display strings from `ClipboardItemDTO`.
 ///
@@ -41,7 +42,15 @@ final class ClipboardItemDisplayText {
         let key = makeCacheKey(for: item)
         if let cached = titleCache[key] { return cached }
 
-        let computed = Self.computeTitle(type: item.type, plainText: item.plainText)
+        let computed: String
+        if ScrollPerformanceProfile.isEnabled {
+            let start = CFAbsoluteTimeGetCurrent()
+            computed = Self.computeTitle(type: item.type, plainText: item.plainText)
+            let elapsed = (CFAbsoluteTimeGetCurrent() - start) * 1000
+            ScrollPerformanceProfile.recordMetric(name: "text.title_ms", elapsedMs: elapsed)
+        } else {
+            computed = Self.computeTitle(type: item.type, plainText: item.plainText)
+        }
         titleCache[key] = computed
         return computed
     }
@@ -51,7 +60,15 @@ final class ClipboardItemDisplayText {
         let key = makeCacheKey(for: item)
         if let cached = metadataCache[key] { return cached }
 
-        let computed = Self.computeMetadata(type: item.type, plainText: item.plainText, sizeBytes: item.sizeBytes)
+        let computed: String
+        if ScrollPerformanceProfile.isEnabled {
+            let start = CFAbsoluteTimeGetCurrent()
+            computed = Self.computeMetadata(type: item.type, plainText: item.plainText, sizeBytes: item.sizeBytes)
+            let elapsed = (CFAbsoluteTimeGetCurrent() - start) * 1000
+            ScrollPerformanceProfile.recordMetric(name: "text.metadata_ms", elapsedMs: elapsed)
+        } else {
+            computed = Self.computeMetadata(type: item.type, plainText: item.plainText, sizeBytes: item.sizeBytes)
+        }
         metadataCache[key] = computed
         return computed
     }

@@ -5,6 +5,27 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [v0.50.fix8] - 2025-12-19
+
+### Perf/Profile
+
+- **ScrollPerformanceProfile**：新增滚动基线采样（frame time / drop ratio / scroll speed）与 JSON 输出。
+- **分层耗时桶**：文本 title/metadata、缩略图解码、hover 预览 decode/Markdown render 计时（仅 profiling 开启时）。
+- **Mock 可配置**：Mock 数据规模/图片数量/文本长度/缩略图可配置，支持场景矩阵对比。
+- **UI Test 入口**：新增 scroll profile UI test（默认跳过，需 `SCOPY_RUN_PROFILE_UI_TESTS=1` 或 `/tmp/scopy_run_profile_ui_tests`），并扩展 text-only / image-heavy 场景。
+- **Profile 场景标识**：JSON 输出增加 `profile_scenario` 字段，便于聚合对比。
+- **Scroll 采样兜底**：无 live scroll 通知时仍可产出基线（启动时间戳与帧采样更稳）。
+
+### Fix/UX
+
+- **Hover 预览滚动遮挡**：滚轮触发时自动关闭 preview，避免弹层遮挡导致列表无法滚动。
+- **UI 测试预览**：`SCOPY_UITEST_OPEN_PREVIEW_ON_TAP=1` 时点击行不会关闭面板，保证预览可见。
+
+### Tests
+
+- **稳定性**：UI tests 增加窗口聚焦与滚动目标兜底（window fallback），减少无法命中控件的 flaky。
+- **覆盖**：新增 hover preview dismiss 测试与 3 组 scroll profile 场景测试。
+
 ## [v0.50.fix7] - 2025-12-19
 
 ### Perf/UI

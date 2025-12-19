@@ -29,6 +29,7 @@ struct HistoryItemThumbnailView: View {
                     .clipShape(RoundedRectangle(cornerRadius: ScopySize.Corner.sm))
                     .padding(.leading, ScopySpacing.xs)
                     .padding(.vertical, ScopySpacing.xs)
+                    .accessibilityIdentifier("History.Item.Thumbnail")
             } else {
                 if isScrolling {
                     thumbnailPlaceholder
@@ -50,6 +51,7 @@ struct HistoryItemThumbnailView: View {
             .padding(.leading, ScopySpacing.xs)
             .padding(.vertical, ScopySpacing.xs)
             .foregroundStyle(.green)
+            .accessibilityIdentifier("History.Item.Thumbnail")
     }
 
     @MainActor

@@ -8,9 +8,9 @@
 
 | 项目 | 状态 |
 |------|------|
-| **当前版本** | v0.50.fix7 |
-| **测试状态** | 单元测试通过（`xcodebuild test -project Scopy.xcodeproj -scheme Scopy -destination 'platform=macOS' -only-testing:ScopyTests`: Executed 269 tests, 25 skipped, 0 failures；Performance tests 跳过：`RUN_PERF_TESTS` 未设置）；UI 测试：未复验 |
-| **构建状态** | Debug ✅ |
+| **当前版本** | v0.50.fix8 |
+| **测试状态** | 已运行（UI profile baseline；`testScrollProfileBaseline` 通过） |
+| **构建状态** | 未复验 |
 | **部署位置** | /Applications/Scopy.app |
 | **最后更新** | 2025-12-19 |
 
@@ -24,6 +24,7 @@
 
 | 版本 | 日期 | 主要内容 | 状态 |
 |------|------|----------|------|
+| [v0.50.fix8](./v0.50.fix8.md) | 2025-12-19 | Perf/Profile：滚动基线采样 + 场景矩阵（text-only/image-heavy）+ hover 预览滚动遮挡修复 | ✅ |
 | [v0.50.fix7](./v0.50.fix7.md) | 2025-12-19 | Perf/UI：DisplayText 预热（滚动主线程降载）+ 预热测试 | ✅ |
 | [v0.50.fix6](./v0.50.fix6.md) | 2025-12-19 | Perf/UI：滚动状态 start/end + 行级/文本 metadata 降载 + 性能测试 | ✅ |
 | [v0.50.fix5](./v0.50.fix5.md) | 2025-12-19 | Refactor：优雅性重构（入口拆分、预览清理集中、队列 ring buffer、缓存/格式化收敛）+ Review 文档（重发布版本号） | ✅ |

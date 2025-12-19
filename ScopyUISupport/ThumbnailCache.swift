@@ -36,6 +36,7 @@ public final class ThumbnailCache {
             return cached
         }
 
+        let profileStart = ScrollPerformanceProfile.isEnabled ? CFAbsoluteTimeGetCurrent() : nil
         let cgImage: CGImage? = await Task.detached(priority: priority) { () async -> CGImage? in
             let url = URL(fileURLWithPath: path)
             guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
@@ -48,6 +49,10 @@ public final class ThumbnailCache {
         guard !Task.isCancelled else { return nil }
         guard let cgImage else { return nil }
 
+        if let profileStart {
+            let elapsed = (CFAbsoluteTimeGetCurrent() - profileStart) * 1000
+            ScrollPerformanceProfile.recordMetric(name: "image.thumbnail_decode_ms", elapsedMs: elapsed)
+        }
         let image = NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
         store(image, forPath: path)
         return image

@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 
 /// 性能分析器 - 用于收集和报告性能指标

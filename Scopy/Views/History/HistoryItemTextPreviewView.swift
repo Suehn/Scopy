@@ -15,93 +15,97 @@ struct HistoryItemTextPreviewView: View {
         let font = NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
         let padding: CGFloat = ScopySpacing.md
 
-        if let text = model.text {
-            let fallbackWidth = HoverPreviewTextSizing.preferredWidth(
-                for: text,
-                font: font,
-                padding: padding,
-                maxWidth: maxWidth
-            )
-            let markdownMeasuredWidth = model.markdownContentSize?.width
-            let width: CGFloat = {
-                if model.isMarkdown {
-                    // Prefer shrink-to-fit for small Markdown payloads, while snapping to max width when near-max or when
-                    // horizontal scrolling is detected (e.g. long KaTeX / code blocks).
-                    let measured = markdownMeasuredWidth ?? fallbackWidth
-                    let desired = max(1, min(maxWidth, ceil(measured + 2)))
-                    if model.markdownHasHorizontalOverflow { return maxWidth }
-                    return (desired >= maxWidth * 0.92) ? maxWidth : desired
-                }
-                return fallbackWidth
-            }()
-
-            let measuredTextHeight: CGFloat = HoverPreviewTextSizing.preferredTextHeight(
-                for: text,
-                font: font,
-                contentWidth: max(1, width - padding * 2),
-                maxHeight: maxHeight
-            )
-            let textContentHeight = measuredTextHeight + padding * 2
-
-            // Add a small buffer to avoid occasional off-by-a-few-pixels scroll for very small content.
-            let markdownMeasuredHeight = model.markdownContentSize?.height
-            let contentHeight = (model.isMarkdown ? (markdownMeasuredHeight ?? textContentHeight) : textContentHeight) + 4
-            let clampedHeight = min(maxHeight, max(1, contentHeight))
-            let shouldScroll = contentHeight > maxHeight
-
-            if model.isMarkdown, let html = model.markdownHTML {
-                ZStack(alignment: .topTrailing) {
-                    if let controller = markdownWebViewController {
-                        ReusableMarkdownPreviewWebView(
-                            controller: controller,
-                            html: html,
-                            shouldScroll: shouldScroll,
-                            onContentSizeChange: { metrics in
-                                guard model.markdownHTML == html else { return }
-                                if let existing = model.markdownContentSize, existing.width > 0 {
-                                    model.markdownContentSize = CGSize(width: existing.width, height: metrics.size.height)
-                                } else {
-                                    model.markdownContentSize = metrics.size
-                                }
-                                if metrics.hasHorizontalOverflow {
-                                    model.markdownHasHorizontalOverflow = true
-                                }
-                            }
-                        )
-                        .frame(width: width, height: clampedHeight)
-                    } else {
-                        MarkdownPreviewWebView(
-                            html: html,
-                            shouldScroll: shouldScroll,
-                            onContentSizeChange: { metrics in
-                                guard model.markdownHTML == html else { return }
-                                if let existing = model.markdownContentSize, existing.width > 0 {
-                                    model.markdownContentSize = CGSize(width: existing.width, height: metrics.size.height)
-                                } else {
-                                    model.markdownContentSize = metrics.size
-                                }
-                                if metrics.hasHorizontalOverflow {
-                                    model.markdownHasHorizontalOverflow = true
-                                }
-                            }
-                        )
-                        .frame(width: width, height: clampedHeight)
+        Group {
+            if let text = model.text {
+                let fallbackWidth = HoverPreviewTextSizing.preferredWidth(
+                    for: text,
+                    font: font,
+                    padding: padding,
+                    maxWidth: maxWidth
+                )
+                let markdownMeasuredWidth = model.markdownContentSize?.width
+                let width: CGFloat = {
+                    if model.isMarkdown {
+                        // Prefer shrink-to-fit for small Markdown payloads, while snapping to max width when near-max or when
+                        // horizontal scrolling is detected (e.g. long KaTeX / code blocks).
+                        let measured = markdownMeasuredWidth ?? fallbackWidth
+                        let desired = max(1, min(maxWidth, ceil(measured + 2)))
+                        if model.markdownHasHorizontalOverflow { return maxWidth }
+                        return (desired >= maxWidth * 0.92) ? maxWidth : desired
                     }
+                    return fallbackWidth
+                }()
 
-                    exportButton()
-                        .padding(ScopySpacing.sm)
-                }
-                .accessibilityIdentifier("History.Preview.Container")
-                .accessibilityElement(children: .contain)
-                .frame(width: width, height: clampedHeight)
-            } else {
-                HoverPreviewTextView(text: text, font: font, width: width, shouldScroll: shouldScroll)
+                let measuredTextHeight: CGFloat = HoverPreviewTextSizing.preferredTextHeight(
+                    for: text,
+                    font: font,
+                    contentWidth: max(1, width - padding * 2),
+                    maxHeight: maxHeight
+                )
+                let textContentHeight = measuredTextHeight + padding * 2
+
+                // Add a small buffer to avoid occasional off-by-a-few-pixels scroll for very small content.
+                let markdownMeasuredHeight = model.markdownContentSize?.height
+                let contentHeight = (model.isMarkdown ? (markdownMeasuredHeight ?? textContentHeight) : textContentHeight) + 4
+                let clampedHeight = min(maxHeight, max(1, contentHeight))
+                let shouldScroll = contentHeight > maxHeight
+
+                if model.isMarkdown, let html = model.markdownHTML {
+                    ZStack(alignment: .topTrailing) {
+                        if let controller = markdownWebViewController {
+                            ReusableMarkdownPreviewWebView(
+                                controller: controller,
+                                html: html,
+                                shouldScroll: shouldScroll,
+                                onContentSizeChange: { metrics in
+                                    guard model.markdownHTML == html else { return }
+                                    if let existing = model.markdownContentSize, existing.width > 0 {
+                                        model.markdownContentSize = CGSize(width: existing.width, height: metrics.size.height)
+                                    } else {
+                                        model.markdownContentSize = metrics.size
+                                    }
+                                    if metrics.hasHorizontalOverflow {
+                                        model.markdownHasHorizontalOverflow = true
+                                    }
+                                }
+                            )
+                            .frame(width: width, height: clampedHeight)
+                        } else {
+                            MarkdownPreviewWebView(
+                                html: html,
+                                shouldScroll: shouldScroll,
+                                onContentSizeChange: { metrics in
+                                    guard model.markdownHTML == html else { return }
+                                    if let existing = model.markdownContentSize, existing.width > 0 {
+                                        model.markdownContentSize = CGSize(width: existing.width, height: metrics.size.height)
+                                    } else {
+                                        model.markdownContentSize = metrics.size
+                                    }
+                                    if metrics.hasHorizontalOverflow {
+                                        model.markdownHasHorizontalOverflow = true
+                                    }
+                                }
+                            )
+                            .frame(width: width, height: clampedHeight)
+                        }
+
+                        exportButton()
+                            .padding(ScopySpacing.sm)
+                    }
+                    .accessibilityIdentifier("History.Preview.Container")
+                    .accessibilityElement(children: .contain)
                     .frame(width: width, height: clampedHeight)
+                } else {
+                    HoverPreviewTextView(text: text, font: font, width: width, shouldScroll: shouldScroll)
+                        .frame(width: width, height: clampedHeight)
+                }
+            } else {
+                ProgressView()
+                    .frame(width: maxWidth, height: min(maxHeight, 160))
             }
-        } else {
-            ProgressView()
-                .frame(width: maxWidth, height: min(maxHeight, 160))
         }
+        .accessibilityIdentifier("History.Preview.Text")
+        .accessibilityElement(children: .contain)
     }
 
     // MARK: - Export Button

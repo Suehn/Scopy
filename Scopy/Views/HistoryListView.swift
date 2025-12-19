@@ -1,5 +1,6 @@
 import SwiftUI
 import ScopyKit
+import ScopyUISupport
 
 /// 历史列表视图 - 符合 v0.md 的懒加载设计
 struct HistoryListView: View {
@@ -10,6 +11,8 @@ struct HistoryListView: View {
     @Environment(SettingsViewModel.self) private var settingsViewModel
 
     private static let isUITesting: Bool = ProcessInfo.processInfo.arguments.contains("--uitesting")
+    private static let profileAccessibility: Bool = ProcessInfo.processInfo.environment["SCOPY_PROFILE_ACCESSIBILITY"] == "1"
+    private static let shouldExposeAccessibility: Bool = isUITesting || profileAccessibility
 
     var body: some View {
         if historyViewModel.items.isEmpty && !historyViewModel.isLoading {
@@ -95,9 +98,13 @@ struct HistoryListView: View {
                 .background(
                     ListLiveScrollObserverView(
                         onScrollStart: { historyViewModel.scrollDidStart() },
-                        onScrollEnd: { historyViewModel.scrollDidEnd() }
+                        onScrollEnd: { historyViewModel.scrollDidEnd() },
+                        onScrollViewAttach: ScrollPerformanceProfile.isEnabled ? { scrollView in
+                            ScrollPerformanceProfile.shared.attachScrollView(scrollView)
+                        } : nil
                     )
                 )
+                .background(ScrollFrameSamplerView())
                 .onChange(of: historyViewModel.selectedID) { _, newValue in
                     // 仅当键盘导航时自动滚动到选中项
                     if let id = newValue, historyViewModel.lastSelectionSource == .keyboard {
@@ -140,7 +147,7 @@ struct HistoryListView: View {
         .id(item.id)
 
         return Group {
-            if Self.isUITesting {
+            if Self.shouldExposeAccessibility {
                 row.accessibilityIdentifier("History.Item.\(item.id.uuidString)")
                     .accessibilityValue(isSelected ? "selected" : "unselected")
             } else {
@@ -150,5 +157,20 @@ struct HistoryListView: View {
         .listRowInsets(EdgeInsets())      // 移除默认内边距
         .listRowBackground(Color.clear)    // 透明背景
         .listRowSeparator(.hidden)         // 隐藏分隔线
+    }
+}
+
+private struct ScrollFrameSamplerView: View {
+    var body: some View {
+        if ScrollPerformanceProfile.isEnabled {
+            TimelineView(.animation) { context in
+                Color.clear
+                    .onChange(of: context.date) { _, newValue in
+                        ScrollPerformanceProfile.shared.recordFrameTick(newValue)
+                    }
+            }
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+        }
     }
 }

@@ -31,6 +31,8 @@ struct HistoryItemImagePreviewView: View {
                     .frame(width: width, height: desiredHeight)
             }
         }
+        .accessibilityIdentifier("History.Preview.Image")
+        .accessibilityElement(children: .contain)
     }
 
     @ViewBuilder

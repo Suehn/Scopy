@@ -4,17 +4,20 @@ import SwiftUI
 struct ListLiveScrollObserverView: NSViewRepresentable {
     let onScrollStart: () -> Void
     let onScrollEnd: () -> Void
+    var onScrollViewAttach: ((NSScrollView) -> Void)? = nil
 
     func makeNSView(context: Context) -> ObserverView {
         let view = ObserverView()
         view.onScrollStart = onScrollStart
         view.onScrollEnd = onScrollEnd
+        view.onScrollViewAttach = onScrollViewAttach
         return view
     }
 
     func updateNSView(_ nsView: ObserverView, context: Context) {
         nsView.onScrollStart = onScrollStart
         nsView.onScrollEnd = onScrollEnd
+        nsView.onScrollViewAttach = onScrollViewAttach
         nsView.attachIfNeeded()
     }
 }
@@ -23,6 +26,7 @@ extension ListLiveScrollObserverView {
     final class ObserverView: NSView {
         var onScrollStart: (() -> Void)?
         var onScrollEnd: (() -> Void)?
+        var onScrollViewAttach: ((NSScrollView) -> Void)?
 
         private weak var observedScrollView: NSScrollView?
         private var isLiveScrolling = false
@@ -46,11 +50,12 @@ extension ListLiveScrollObserverView {
         }
 
         func attachIfNeeded() {
-            guard let scrollView = findEnclosingScrollView() else { return }
+            guard let scrollView = findEnclosingScrollView() ?? findScrollViewInWindow() else { return }
             guard observedScrollView !== scrollView else { return }
 
             detach()
             observedScrollView = scrollView
+            onScrollViewAttach?(scrollView)
 
             NotificationCenter.default.addObserver(
                 self,
@@ -110,6 +115,25 @@ extension ListLiveScrollObserverView {
                     return scrollView
                 }
                 ancestor = view.superview
+            }
+            return nil
+        }
+
+        private func findScrollViewInWindow() -> NSScrollView? {
+            guard let contentView = window?.contentView else { return nil }
+            return findFirstScrollView(in: contentView)
+        }
+
+        private func findFirstScrollView(in view: NSView) -> NSScrollView? {
+            if let scrollView = view as? NSScrollView {
+                if scrollView.documentView is NSTableView || scrollView.documentView is NSOutlineView {
+                    return scrollView
+                }
+            }
+            for subview in view.subviews {
+                if let found = findFirstScrollView(in: subview) {
+                    return found
+                }
             }
             return nil
         }
