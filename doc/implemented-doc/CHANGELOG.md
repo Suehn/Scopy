@@ -5,6 +5,15 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [v0.50.fix1] - 2025-12-19
+
+### Fix/Export + Fix/Quality
+
+- **导出/表格**：超宽表格导出 PNG 时默认缩放；当缩放比例 < 0.35 时固定缩放到 0.35 并启用换行，避免不可读/截断。
+- **Preview/并发**：hover 预览图片解码采用 Sendable 传递，缓存与质量策略抽离，减少并发警告。
+- **Test/稳定性**：性能测试 skip 时 tearDown 安全释放；导出 UI 测试优先点击可访问按钮。
+- **代码质量**：移除无意义 WKWebView downcast；并发计数器封装，清理 Swift 6 警告。
+
 ## [v0.50] - 2025-12-19
 
 ### Release：导出图片逻辑重构（Markdown/LaTeX → PNG）
@@ -14,7 +23,17 @@
 - **表格可读性**：宽表格优先 no-wrap + 轻量缩放减少换行；当缩放过小则回退 wrap 策略，并输出 table metrics 便于回归与诊断。
 - **空白裁剪**：对导出结果做像素级底部白边裁剪，消除偶发“超长白底尾巴”。
 - **预览一致性**：修复 `##标题` 这类缺空格 ATX headings 的层级不明显问题（自动标准化为 `## 标题`）；预览表格改为横向滚动以减少换行。
+- **图片预览清晰度**：hover 图片预览对超长图改为按预览框宽度与屏幕 scale 生成更高分辨率 downsample，并加 60s TTL 内存缓存减少重复解码；预览宽度策略保持一致，不再针对超长图单独 shrink。
 - **测试**：新增 Export PNG 单测与端到端 UI tests（宽度/高度/表格/剪贴板/底部空白）。
+
+### Fixes（post-release）
+
+- **导出缩放更完整**：全局缩放改为对 `#content` 进行 transform 缩放，长图/图片主导高度场景可有效降高（不再仅缩字号）。
+- **导出错误可观测**：`applyGlobalScale` JS 返回 false 时转为显式失败，避免 silent fail。
+- **并发卫生**：hover 预览后台解码跨线程传递 `CGImage` 增加 Sendable 包装；HoverPreviewImageCache 清理任务避免 retain cycle。
+- **测试稳定性**：UI 导出按钮优先使用可访问节点点击；性能基准默认需 `RUN_PERF_TESTS=1` 启用，降低 CI flake。
+- **发布/脚本**：health-check/test-flow 脚本路径改为自动推导；仓库内 Cask 版本对齐 v0.50。
+- **导出/表格**：超宽表格导出 PNG 时默认仅缩放表格；当缩放比例 < 0.35 时固定缩放到 0.35 并启用换行以避免截断。
 
 ## [v0.44.fix27] - 2025-12-18
 

@@ -8,8 +8,8 @@
 
 | 项目 | 状态 |
 |------|------|
-| **当前版本** | v0.50 |
-| **测试状态** | 单元测试通过（`make test-unit`: Executed 220 tests, 1 skipped, 0 failures）；UI 测试：本机 UI automation 未就绪（Timed out while enabling automation mode），未复验 |
+| **当前版本** | v0.50.fix1 |
+| **测试状态** | 单元测试通过（`xcodebuild test -scheme Scopy -destination 'platform=macOS' -only-testing:ScopyTests`: Executed 260 tests, 25 skipped, 0 failures）；UI 测试：本机 UI automation 未就绪（Timed out while enabling automation mode），未复验 |
 | **构建状态** | Debug ✅ |
 | **部署位置** | /Applications/Scopy.app |
 | **最后更新** | 2025-12-19 |
@@ -24,6 +24,7 @@
 
 | 版本 | 日期 | 主要内容 | 状态 |
 |------|------|----------|------|
+| [v0.50.fix1](./v0.50.fix1.md) | 2025-12-19 | Fix：导出 PNG 表格最小缩放 0.35 + 换行兜底；hover 预览缓存/质量策略收敛；测试稳定性与警告清理 | ✅ |
 | [v0.50](./v0.50.md) | 2025-12-19 | Release：导出图片逻辑重构（Markdown/LaTeX hover 预览一键导出 PNG 到剪贴板；长图拼接、表格自适应、底部空白裁剪；预览样式与回归测试补齐） | ✅ |
 | [v0.44.fix27](./v0.44.fix27.md) | 2025-12-18 | Feat/Preview + Fix/Export：Markdown/LaTeX 导出 PNG 到剪贴板（固定 1080px 宽、动态高度、长内容分片拼接、表格少换行、底部空白裁剪） | ✅ |
 | [v0.44.fix26](./v0.44.fix26.md) | 2025-12-18 | Fix/Search：Exact(FTS) 支持 Relevance(bm25+lastUsed)/Recent(lastUsed) 并提供 UI 一键切换；Fix/Settings：存储上限口径更清晰；Fix/HotKey：移除固定 sleep；Perf/Preview：hover 取消更及时；Test：UI 测试稳定性提升（--uitesting 标准窗口 + 条件等待） | ✅ |
