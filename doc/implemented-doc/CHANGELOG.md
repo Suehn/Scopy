@@ -5,6 +5,17 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [v0.50.fix3] - 2025-12-19
+
+### Refactor/Quality
+
+- **App/UI**：AppDelegate 启动流程拆分为 helper；预览清理集中，避免状态遗漏；MarkdownPreviewWebView 消息解析统一封装。
+- **Services**：ClipboardService 复制路径拆分为小函数；StorageService 目录创建逻辑收敛。
+- **Infrastructure**：SearchEngineImpl 缓存失效逻辑统一封装。
+- **Utilities**：AsyncBoundedQueue 改为 ring buffer，出队 O(1)。
+- **Observables**：HistoryViewModel 任务取消/过滤判断收敛；PerformanceMetrics 延迟格式化统一。
+- **Docs**：新增优雅性深度 review 文档。
+
 ## [v0.50.fix2] - 2025-12-19
 
 ### Fix/Export + Fix/Quality
