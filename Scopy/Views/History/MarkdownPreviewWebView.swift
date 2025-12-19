@@ -261,7 +261,7 @@ struct MarkdownPreviewWebView: NSViewRepresentable {
             }
             lastReportedMetrics = metrics
 
-            if let wk = message.webView as? WKWebView {
+            if let wk = message.webView {
                 attachScrollbarAutoHiderIfPossible(for: wk)
             }
             Task { @MainActor in

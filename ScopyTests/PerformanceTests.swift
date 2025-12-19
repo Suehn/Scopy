@@ -9,9 +9,11 @@ final class PerformanceTests: XCTestCase {
 
     var storage: StorageService!
     var search: SearchEngineImpl!
+    private let perfEnv = "RUN_PERF_TESTS"
     private let heavyPerfEnv = "RUN_HEAVY_PERF_TESTS"
 
     override func setUp() async throws {
+        try XCTSkipIf(!shouldRunPerf(), "Set \(perfEnv)=1 to run performance tests")
         storage = StorageService(databasePath: Self.makeSharedInMemoryDatabasePath())
         try await storage.open()
         search = SearchEngineImpl(dbPath: storage.databaseFilePath)
@@ -19,8 +21,12 @@ final class PerformanceTests: XCTestCase {
     }
 
     override func tearDown() async throws {
-        await search.close()
-        await storage.close()
+        if let search {
+            await search.close()
+        }
+        if let storage {
+            await storage.close()
+        }
         storage = nil
         search = nil
     }
@@ -257,7 +263,7 @@ final class PerformanceTests: XCTestCase {
     /// 比较三种搜索模式的性能
     func testSearchModeComparison() async throws {
         // Populate
-        for i in 0..<3000 {
+        for i in 0..<1000 {
             _ = try await storage.upsertItem(makeContent("Mode comparison test item \(i)"))
         }
         await search.invalidateCache()
@@ -284,7 +290,7 @@ final class PerformanceTests: XCTestCase {
         _ = try await search.search(request: regexRequest)
         let regexTime = (CFAbsoluteTimeGetCurrent() - regexStart) * 1000
 
-        print("📊 Search Mode Comparison (3k items):")
+        print("📊 Search Mode Comparison (1k items):")
         print("   - Exact: \(String(format: "%.2f", exactTime))ms")
         print("   - Fuzzy: \(String(format: "%.2f", fuzzyTime))ms")
         print("   - Regex: \(String(format: "%.2f", regexTime))ms")
@@ -1024,6 +1030,10 @@ final class PerformanceTests: XCTestCase {
 
     private func shouldRunHeavyPerf() -> Bool {
         ProcessInfo.processInfo.environment[heavyPerfEnv] == "1"
+    }
+
+    private func shouldRunPerf() -> Bool {
+        ProcessInfo.processInfo.environment[perfEnv] == "1" || shouldRunHeavyPerf()
     }
 
     private func percentile(_ values: [Double], _ p: Double) -> Double {

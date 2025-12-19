@@ -6,6 +6,10 @@ import ScopyUISupport
 
 // MARK: - History Item View (v0.9.3 - 性能优化版)
 
+private struct SendableCGImage: @unchecked Sendable {
+    let image: CGImage
+}
+
 /// 单个历史项视图 - 实现 Equatable 以优化重绘
 /// v0.9.3: 使用局部悬停状态 + 防抖 + Equatable 优化滚动性能
 struct HistoryItemView: View, Equatable {
@@ -322,16 +326,16 @@ struct HistoryItemView: View, Equatable {
                                 self.cancelPreviewTask()
                                 self.showTextPreview = false
                                 self.previewModel.text = nil
-	                                self.previewModel.markdownHTML = nil
-	                                self.previewModel.markdownContentSize = nil
-	                                self.previewModel.isMarkdown = false
-	                                self.previewModel.isExporting = false
-	                                self.previewModel.exportSuccess = false
-	                                self.previewModel.exportFailed = false
-	                                self.markdownWebViewController = nil
-	                            }
-	                        }
-	                    }
+                                    self.previewModel.markdownHTML = nil
+                                    self.previewModel.markdownContentSize = nil
+                                    self.previewModel.isMarkdown = false
+                                    self.previewModel.isExporting = false
+                                    self.previewModel.exportSuccess = false
+                                    self.previewModel.exportFailed = false
+                                    self.markdownWebViewController = nil
+                                }
+                            }
+                        }
                 }
         }
         .contextMenu {
@@ -357,14 +361,14 @@ struct HistoryItemView: View, Equatable {
             previewModel.previewCGImage = nil
             previewModel.text = nil
             previewModel.markdownHTML = nil
-	            previewModel.markdownContentSize = nil
-	            previewModel.markdownHasHorizontalOverflow = false
-	            previewModel.isMarkdown = false
-	            previewModel.isExporting = false
-	            previewModel.exportSuccess = false
-	            previewModel.exportFailed = false
-	            markdownWebViewController = nil
-	        }
+                previewModel.markdownContentSize = nil
+                previewModel.markdownHasHorizontalOverflow = false
+                previewModel.isMarkdown = false
+                previewModel.isExporting = false
+                previewModel.exportSuccess = false
+                previewModel.exportFailed = false
+                markdownWebViewController = nil
+            }
         .onChange(of: isScrolling) { _, newValue in
             guard newValue else { return }
             isHovering = false
@@ -379,14 +383,14 @@ struct HistoryItemView: View, Equatable {
             previewModel.previewCGImage = nil
             previewModel.text = nil
             previewModel.markdownHTML = nil
-	            previewModel.markdownContentSize = nil
-	            previewModel.markdownHasHorizontalOverflow = false
-	            previewModel.isMarkdown = false
-	            previewModel.isExporting = false
-	            previewModel.exportSuccess = false
-	            previewModel.exportFailed = false
-	            markdownWebViewController = nil
-	        }
+                previewModel.markdownContentSize = nil
+                previewModel.markdownHasHorizontalOverflow = false
+                previewModel.isMarkdown = false
+                previewModel.isExporting = false
+                previewModel.exportSuccess = false
+                previewModel.exportFailed = false
+                markdownWebViewController = nil
+            }
         .background(markdownPreMeasureView)
     }
 
@@ -436,12 +440,14 @@ struct HistoryItemView: View, Equatable {
             let scale = HoverPreviewScreenMetrics.activeBackingScaleFactor()
             let targetWidthPoints = HoverPreviewScreenMetrics.maxPopoverWidthPoints()
             let targetWidthPixels = max(1, Int(targetWidthPoints * scale))
-            let maxLongSidePixels = 12_000
+            let maxLongSidePixels = HoverPreviewImageQualityPolicy.maxSidePixels
+            let cacheKeyBase = item.contentHash.isEmpty ? item.id.uuidString : item.contentHash
+            let previewCacheKey = "\(cacheKeyBase)|w\(targetWidthPixels)"
 
             // v0.43.6: 预取 preview 数据（在 hover delay 内完成 IO/downsample），减少 popover 出现后的等待与“重悬停才显示”的体感。
             let prefetchDelayNanos: UInt64 = min(50_000_000, delayNanos)
             let storageRef = item.storageRef
-            let preparedPreviewImage: Task<CGImage?, Never> = Task(priority: .userInitiated) { @MainActor in
+            let preparedPreviewImage: Task<CGImage?, Never> = Task(priority: .userInitiated) { @MainActor () -> CGImage? in
                 if prefetchDelayNanos > 0 {
                     try? await Task.sleep(nanoseconds: prefetchDelayNanos)
                 }
@@ -449,21 +455,45 @@ struct HistoryItemView: View, Equatable {
                 guard !isScrolling else { return nil }
                 guard isHovering else { return nil }
 
+                if let cached = HoverPreviewImageCache.shared.image(forKey: previewCacheKey) {
+                    previewModel.previewCGImage = cached
+                    return cached
+                }
+
                 let cgImage: CGImage?
                 if let storageRef, !storageRef.isEmpty {
-                    cgImage = await Task.detached(priority: .userInitiated) {
-                        Self.makePreviewCGImage(fromFileAtPath: storageRef, targetWidthPixels: targetWidthPixels, maxLongSidePixels: maxLongSidePixels)
+                    let sendable = await Task.detached(priority: .userInitiated) { () -> SendableCGImage? in
+                        guard let image = Self.makePreviewCGImage(
+                            fromFileAtPath: storageRef,
+                            targetWidthPixels: targetWidthPixels,
+                            maxLongSidePixels: maxLongSidePixels
+                        ) else {
+                            return nil
+                        }
+                        return SendableCGImage(image: image)
                     }.value
+                    cgImage = sendable?.image
                 } else {
                     guard let data = await getImageData() else { return nil }
-                    cgImage = await Task.detached(priority: .userInitiated) {
-                        Self.makePreviewCGImage(from: data, targetWidthPixels: targetWidthPixels, maxLongSidePixels: maxLongSidePixels)
+                    let sendable = await Task.detached(priority: .userInitiated) { () -> SendableCGImage? in
+                        guard let image = Self.makePreviewCGImage(
+                            from: data,
+                            targetWidthPixels: targetWidthPixels,
+                            maxLongSidePixels: maxLongSidePixels
+                        ) else {
+                            return nil
+                        }
+                        return SendableCGImage(image: image)
                     }.value
+                    cgImage = sendable?.image
                 }
 
                 guard !Task.isCancelled else { return nil }
                 guard !isScrolling else { return nil }
                 guard isHovering else { return nil }
+                if let cgImage {
+                    HoverPreviewImageCache.shared.setImage(cgImage, forKey: previewCacheKey)
+                }
                 previewModel.previewCGImage = cgImage
                 return cgImage
             }
@@ -524,10 +554,13 @@ struct HistoryItemView: View, Equatable {
         let w = props[kCGImagePropertyPixelWidth] as? Int ?? 0
         let h = props[kCGImagePropertyPixelHeight] as? Int ?? 0
         guard w > 0, h > 0 else { return fallback }
-
-        let expectedScaledHeight = Int((Double(h) * Double(targetWidthPixels) / Double(w)).rounded(.up))
-        let requested = max(targetWidthPixels, expectedScaledHeight)
-        return min(maxLongSidePixels, max(1, requested))
+        let plan = HoverPreviewImageQualityPolicy.plan(
+            sourceWidthPixels: w,
+            sourceHeightPixels: h,
+            idealTargetWidthPixels: targetWidthPixels,
+            maxSidePixels: maxLongSidePixels
+        )
+        return min(maxLongSidePixels, max(1, plan.maxPixelSize))
     }
 
     private func cancelPreviewTask() {
@@ -584,13 +617,14 @@ struct HistoryItemView: View, Equatable {
                 return
             }
 
-            hoverMarkdownTask = Task.detached(priority: .utility) {
+            let previewText = preview
+            hoverMarkdownTask = Task(priority: .utility) { [previewText, cacheKey] in
                 guard !Task.isCancelled else { return }
-                let html = MarkdownHTMLRenderer.render(markdown: preview)
+                let html = MarkdownHTMLRenderer.render(markdown: previewText)
                 guard !Task.isCancelled, !html.isEmpty else { return }
                 MarkdownPreviewCache.shared.setHTML(html, forKey: cacheKey)
-                await MainActor.run {
-                    guard self.isHovering, self.previewModel.text == preview else { return }
+                await MainActor.run { [previewText] in
+                    guard self.isHovering, self.previewModel.text == previewText else { return }
                     self.previewModel.markdownHTML = html
                     if self.markdownWebViewController == nil {
                         self.markdownWebViewController = MarkdownPreviewWebViewController()

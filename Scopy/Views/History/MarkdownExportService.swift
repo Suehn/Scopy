@@ -579,8 +579,7 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
         let scaleTablesJS = """
         (function() {
           var w = \(widthPoints);
-          var minPreferNoWrapScale = 0.92; // prefer no-wrap scaling when shrink is small
-          var minAllowNoWrapScale = 0.40;  // below this, prefer wrapping over tiny scaled text
+          var minAllowNoWrapScale = 0.35; // below this, wrap to preserve readability
           function computeTargetWidthPoints(content) {
             var padL = 0, padR = 0;
             try {
@@ -601,7 +600,7 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
               gp.removeChild(p);
             } catch (e) { }
           }
-          function applyCellMode(table, mode) {
+          function applyNoWrap(table) {
             try {
               var cells = table.querySelectorAll('th, td');
               for (var j = 0; j < (cells.length || 0); j++) {
@@ -609,16 +608,35 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
                 if (!cell || !cell.style) { continue; }
                 cell.style.maxWidth = 'none';
                 cell.style.minWidth = '0';
-                if (mode === 'nowrap') {
-                  cell.style.whiteSpace = 'nowrap';
-                  cell.style.overflowWrap = 'normal';
-                  cell.style.wordBreak = 'normal';
-                } else {
-                  cell.style.whiteSpace = 'normal';
-                  cell.style.overflowWrap = 'anywhere';
-                  cell.style.wordBreak = 'break-word';
-                }
+                cell.style.whiteSpace = 'nowrap';
+                cell.style.overflowWrap = 'normal';
+                cell.style.wordBreak = 'normal';
               }
+            } catch (e) { }
+            try {
+              table.style.tableLayout = 'auto';
+              table.style.width = 'auto';
+              table.style.maxWidth = 'none';
+            } catch (e) { }
+          }
+
+          function applyWrap(table) {
+            try {
+              var cells = table.querySelectorAll('th, td');
+              for (var j = 0; j < (cells.length || 0); j++) {
+                var cell = cells[j];
+                if (!cell || !cell.style) { continue; }
+                cell.style.maxWidth = 'none';
+                cell.style.minWidth = '0';
+                cell.style.whiteSpace = 'normal';
+                cell.style.overflowWrap = 'anywhere';
+                cell.style.wordBreak = 'break-word';
+              }
+            } catch (e) { }
+            try {
+              table.style.tableLayout = 'fixed';
+              table.style.width = '100%';
+              table.style.maxWidth = '100%';
             } catch (e) { }
           }
 
@@ -629,32 +647,6 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
             try { scrollW = Math.ceil((table.scrollWidth || 0)); } catch (e) { scrollW = 0; }
             try { offsetW = Math.ceil((table.offsetWidth || 0)); } catch (e) { offsetW = 0; }
             return Math.max(rectW, scrollW, offsetW);
-          }
-
-          function wrapAndScaleIfNeeded(table, targetWidth) {
-            // Allow wrapping to reduce width, then scale only if still overflowing (e.g. long unbroken tokens).
-            try {
-              table.style.display = 'table';
-              table.style.tableLayout = 'fixed';
-              table.style.width = '100%';
-              table.style.maxWidth = '100%';
-              table.style.overflow = 'visible';
-            } catch (e) { }
-            applyCellMode(table, 'wrap');
-
-            var w1 = measureTableWidth(table);
-            if (!w1 || w1 <= targetWidth + 2) { return { mode: 'wrap', scale: 1, rawWidth: w1 }; }
-
-            // Still overflowing: expand to natural width and scale down.
-            try {
-              table.style.tableLayout = 'auto';
-              table.style.width = w1 + 'px';
-              table.style.maxWidth = 'none';
-            } catch (e) { }
-            var w2 = measureTableWidth(table);
-            var rawWidth = w2 || w1;
-            var scale = rawWidth > 0 ? (targetWidth / rawWidth) : 1;
-            return { mode: 'wrap', scale: scale, rawWidth: rawWidth };
           }
 
           function scaleWideTables(content, targetWidth) {
@@ -672,56 +664,27 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
                 table.style.overflow = 'visible';
               } catch (e) { }
 
-              // Strategy:
-              // 1) Try no-wrap layout and scale down to fit width (minimize line breaks).
-              // 2) If scale would be too small, prefer wrapping (keep text readable).
-              function applyNoWrap() {
-                applyCellMode(table, 'nowrap');
-                try {
-                  table.style.tableLayout = 'auto';
-                  table.style.width = 'auto';
-                  table.style.maxWidth = 'none';
-                } catch (e) { }
+              applyNoWrap(table);
+
+              var rawWidth = measureTableWidth(table);
+              if (!rawWidth || rawWidth <= targetWidth + 1) { continue; }
+
+              var scale = targetWidth / rawWidth;
+              var useWrap = false;
+              if (scale > 0 && scale < minAllowNoWrapScale) {
+                // Preserve readability: cap minimum scale at 0.35, and enable wrapping to avoid truncation.
+                applyWrap(table);
+                useWrap = true;
+                scale = minAllowNoWrapScale;
+                rawWidth = Math.ceil(targetWidth / minAllowNoWrapScale);
               }
-
-              applyNoWrap();
-
-              var rawWidthNoWrap = measureTableWidth(table);
-              if (!rawWidthNoWrap || rawWidthNoWrap <= targetWidth + 1) { continue; }
-
-              var noWrapScale = targetWidth / rawWidthNoWrap;
-              var chosen = { mode: 'nowrap', scale: noWrapScale, rawWidth: rawWidthNoWrap };
-
-              var wrapChoice = null;
-              if (!noWrapScale || !isFinite(noWrapScale)) {
-                wrapChoice = wrapAndScaleIfNeeded(table, targetWidth);
-                chosen = wrapChoice;
-              } else if (noWrapScale < minPreferNoWrapScale) {
-                // If no-wrap needs noticeable downscale, prefer wrapping to keep text readable.
-                wrapChoice = wrapAndScaleIfNeeded(table, targetWidth);
-                var wrapScale = 1;
-                try {
-                  wrapScale = (wrapChoice && wrapChoice.scale && isFinite(wrapChoice.scale)) ? wrapChoice.scale : 1;
-                } catch (e) { wrapScale = 1; }
-
-                if (noWrapScale < minAllowNoWrapScale || wrapScale >= noWrapScale) {
-                  chosen = wrapChoice;
-                } else {
-                  applyNoWrap();
-                  chosen = { mode: 'nowrap', scale: noWrapScale, rawWidth: rawWidthNoWrap };
-                }
-              } else {
-                chosen = { mode: 'nowrap', scale: noWrapScale, rawWidth: rawWidthNoWrap };
-              }
-
-              var scale = chosen.scale || 1;
               if (!scale || !isFinite(scale) || scale >= 0.999) { continue; }
               if (scale <= 0) { continue; }
 
               // Expand the table to its raw width, then scale down inside a fixed-width wrapper.
               try {
-                table.style.tableLayout = 'auto';
-                table.style.width = Math.ceil(chosen.rawWidth) + 'px';
+                table.style.tableLayout = useWrap ? 'fixed' : 'auto';
+                table.style.width = Math.ceil(rawWidth) + 'px';
                 table.style.maxWidth = 'none';
                 table.style.overflow = 'visible';
               } catch (e) { }
@@ -784,7 +747,13 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
 
             // Prefer #content measurements for export height so short content doesn't get padded to the viewport height.
             // (documentElement.scrollHeight tends to floor to the viewport height.)
-            var h = Math.max(rectH || 0, sh || 0);
+            var useTransform = !!(window && window.__scopyExportUsesTransform);
+            var h = 0;
+            if (useTransform && rectH > 0) {
+              h = rectH;
+            } else {
+              h = Math.max(rectH || 0, sh || 0);
+            }
 
             var fonts = 'n/a';
             try { fonts = (document.fonts && document.fonts.status) ? document.fonts.status : 'n/a'; } catch (e) { fonts = 'n/a'; }
@@ -1018,28 +987,33 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
         let js = """
         (function() {
           try {
-            // Ensure we do not inherit any previous zoom-based scaling logic.
+            // Reset any prior scaling so we can re-apply deterministically.
             try { document.documentElement && (document.documentElement.style.zoom = ''); } catch (e) { }
             try { document.body && (document.body.style.zoom = ''); } catch (e) { }
 
             window.__scopyExportScale = \(Double(scale));
+            window.__scopyExportUsesTransform = true;
 
             var body = document.body;
             if (!body) { return false; }
+            var content = document.getElementById('content');
+            if (!content) { return false; }
 
-            var base = window.__scopyExportBaseFontSize;
-            if (!base || !isFinite(base) || base <= 0) {
-              try {
-                var cs = window.getComputedStyle(body);
-                base = parseFloat(cs.fontSize || '0') || 0;
-              } catch (e) { base = 0; }
-              if (!base || !isFinite(base) || base <= 0) { base = 14; }
-              window.__scopyExportBaseFontSize = base;
-            }
+            var nextScale = \(Double(scale));
+            if (!nextScale || !isFinite(nextScale) || nextScale <= 0) { nextScale = 1; }
 
-            var next = base * \(Double(scale));
-            if (!next || !isFinite(next) || next <= 0) { next = 1; }
-            body.style.fontSize = '' + next + 'px';
+            // Scale the entire content (including images) via transform and compensate width.
+            try {
+              content.style.transformOrigin = 'top left';
+              content.style.transform = 'scale(' + nextScale + ')';
+              var widthPercent = Math.max(1, (100 / nextScale));
+              content.style.width = widthPercent + '%';
+              content.style.maxWidth = widthPercent + '%';
+              content.style.display = 'inline-block';
+            } catch (e) { return false; }
+
+            // Ensure font-size reset so we don't double-scale text.
+            try { body.style.fontSize = ''; } catch (e) { }
             return true;
           } catch (e) {
             return false;
@@ -1047,7 +1021,23 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
         })();
         """
         do {
-            _ = try await evaluateJavaScript(webView: webView, javaScriptString: js)
+            let result = try await evaluateJavaScript(webView: webView, javaScriptString: js)
+            let ok: Bool
+            if let boolValue = result as? Bool {
+                ok = boolValue
+            } else if let num = result as? NSNumber {
+                ok = num.boolValue
+            } else {
+                ok = false
+            }
+            if !ok {
+                let error = NSError(
+                    domain: "Scopy.MarkdownExport",
+                    code: 2,
+                    userInfo: [NSLocalizedDescriptionKey: "applyGlobalScale returned false"]
+                )
+                throw MarkdownExportService.ExportError.stageFailed(stage: .applyScale, underlying: error)
+            }
         } catch {
             throw MarkdownExportService.ExportError.stageFailed(stage: .applyScale, underlying: error)
         }

@@ -67,19 +67,24 @@ final class ExportMarkdownPNGUITests: XCTestCase {
         let window = app.windows.firstMatch
         XCTAssertTrue(window.exists)
 
-        // Overlay buttons on top of WebView can be hard to hit deterministically in XCUITest. Click a small grid near
-        // the top-right area (and mirrored vertically for coordinate-origin differences) until export starts.
-        let xs: [CGFloat] = [0.80, 0.86, 0.92, 0.96]
-        let ys: [CGFloat] = [0.08, 0.12, 0.16, 0.84, 0.88, 0.92]
-        for y in ys {
-            for x in xs {
+        let exportButton = app.buttons["History.Preview.ExportButton"]
+        if exportButton.waitForExistence(timeout: 5) {
+            exportButton.click()
+        } else {
+            // Overlay buttons on top of WebView can be hard to hit deterministically in XCUITest. Click a small grid near
+            // the top-right area (and mirrored vertically for coordinate-origin differences) until export starts.
+            let xs: [CGFloat] = [0.80, 0.86, 0.92, 0.96]
+            let ys: [CGFloat] = [0.08, 0.12, 0.16, 0.84, 0.88, 0.92]
+            for y in ys {
+                for x in xs {
+                    if FileManager.default.fileExists(atPath: dumpPath) { break }
+                    if FileManager.default.fileExists(atPath: errorPath) { break }
+                    window.coordinate(withNormalizedOffset: CGVector(dx: x, dy: y)).click()
+                    RunLoop.current.run(until: Date().addingTimeInterval(0.35))
+                }
                 if FileManager.default.fileExists(atPath: dumpPath) { break }
                 if FileManager.default.fileExists(atPath: errorPath) { break }
-                window.coordinate(withNormalizedOffset: CGVector(dx: x, dy: y)).click()
-                RunLoop.current.run(until: Date().addingTimeInterval(0.35))
             }
-            if FileManager.default.fileExists(atPath: dumpPath) { break }
-            if FileManager.default.fileExists(atPath: errorPath) { break }
         }
 
         waitForExport(dumpPath: dumpPath, errorPath: errorPath, timeoutSeconds: 30)

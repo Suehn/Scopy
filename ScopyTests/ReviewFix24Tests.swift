@@ -83,23 +83,44 @@ final class StorageDeletionConcurrencyTests: XCTestCase {
             _ = try await storage.upsertItem(content)
         }
 
-        let lock = NSLock()
-        var inFlight = 0
-        var maxInFlight = 0
+        final class InFlightCounter: @unchecked Sendable {
+            private let lock = NSLock()
+            private var inFlight = 0
+            private var maxInFlight = 0
+
+            func increment() {
+                lock.lock()
+                inFlight += 1
+                if inFlight > maxInFlight {
+                    maxInFlight = inFlight
+                }
+                lock.unlock()
+            }
+
+            func decrement() {
+                lock.lock()
+                inFlight -= 1
+                lock.unlock()
+            }
+
+            var max: Int {
+                lock.lock()
+                let value = maxInFlight
+                lock.unlock()
+                return value
+            }
+        }
+
+        let counter = InFlightCounter()
 
         let originalRemover = StorageService.fileRemoverForTesting
         StorageService.fileRemoverForTesting = { url in
-            lock.lock()
-            inFlight += 1
-            maxInFlight = max(maxInFlight, inFlight)
-            lock.unlock()
+            counter.increment()
 
             usleep(50_000) // 50ms
             try? FileManager.default.removeItem(at: url)
 
-            lock.lock()
-            inFlight -= 1
-            lock.unlock()
+            counter.decrement()
         }
         defer { StorageService.fileRemoverForTesting = originalRemover }
 
@@ -116,7 +137,7 @@ final class StorageDeletionConcurrencyTests: XCTestCase {
         await fulfillment(of: [tick], timeout: 1.0)
         _ = try await deletion.value
 
-        XCTAssertLessThanOrEqual(maxInFlight, StorageService.maxConcurrentFileDeletions)
+        XCTAssertLessThanOrEqual(counter.max, StorageService.maxConcurrentFileDeletions)
 
         let remaining = try await storage.fetchRecent(limit: 10, offset: 0)
         XCTAssertTrue(remaining.allSatisfy(\.isPinned))

@@ -7,7 +7,8 @@ set -e
 
 # =================== 配置 ===================
 
-PROJECT_DIR="/Users/ziyi/Documents/code/Scopy"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 APP_NAME="Scopy"
 DB_PATH="$HOME/Library/Application Support/Scopy/clipboard.db"
 
