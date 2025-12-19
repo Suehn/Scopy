@@ -31,3 +31,6 @@ strict-concurrency-*.log
 
 # XcodeGen cache
 .xcodegen.signature
+
+# Planning docs
+plan/
