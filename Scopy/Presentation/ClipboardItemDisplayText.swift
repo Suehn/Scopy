@@ -9,50 +9,147 @@ import ScopyKit
 final class ClipboardItemDisplayText {
     static let shared = ClipboardItemDisplayText()
 
-    private let titleCache: NSCache<NSString, NSString>
-    private let metadataCache: NSCache<NSString, NSString>
+    private struct CacheKey: Hashable {
+        let type: ClipboardItemType
+        let contentHash: String
+    }
+
+    private struct PrewarmSnapshot: Sendable {
+        let type: ClipboardItemType
+        let contentKey: String
+        let plainText: String
+        let sizeBytes: Int
+    }
+
+    private struct PrewarmEntry: Sendable {
+        let type: ClipboardItemType
+        let contentKey: String
+        let title: String
+        let metadata: String
+    }
+
+    private var titleCache: [CacheKey: String] = [:]
+    private var metadataCache: [CacheKey: String] = [:]
+
+    private let cacheLimit: Int = 20_000
 
     private init() {
-        let titleCache = NSCache<NSString, NSString>()
-        titleCache.countLimit = 10_000
-        self.titleCache = titleCache
-
-        let metadataCache = NSCache<NSString, NSString>()
-        metadataCache.countLimit = 10_000
-        self.metadataCache = metadataCache
     }
 
     func title(for item: ClipboardItemDTO) -> String {
-        let key = titleCacheKey(for: item)
-        if let cached = titleCache.object(forKey: key) {
-            return cached as String
-        }
+        trimCacheIfNeeded()
+        let key = makeCacheKey(for: item)
+        if let cached = titleCache[key] { return cached }
 
-        let computed = computeTitle(type: item.type, plainText: item.plainText)
-        titleCache.setObject(computed as NSString, forKey: key)
+        let computed = Self.computeTitle(type: item.type, plainText: item.plainText)
+        titleCache[key] = computed
         return computed
     }
 
     func metadata(for item: ClipboardItemDTO) -> String {
-        let key = metadataCacheKey(for: item)
-        if let cached = metadataCache.object(forKey: key) {
-            return cached as String
-        }
+        trimCacheIfNeeded()
+        let key = makeCacheKey(for: item)
+        if let cached = metadataCache[key] { return cached }
 
-        let computed = computeMetadata(type: item.type, plainText: item.plainText, sizeBytes: item.sizeBytes)
-        metadataCache.setObject(computed as NSString, forKey: key)
+        let computed = Self.computeMetadata(type: item.type, plainText: item.plainText, sizeBytes: item.sizeBytes)
+        metadataCache[key] = computed
         return computed
     }
 
-    private func titleCacheKey(for item: ClipboardItemDTO) -> NSString {
-        "\(item.type.rawValue)|\(item.contentHash)" as NSString
+    @discardableResult
+    func prewarm(items: [ClipboardItemDTO]) -> Task<Void, Never>? {
+        guard !items.isEmpty else { return nil }
+        let snapshots = items.map { item in
+            PrewarmSnapshot(
+                type: item.type,
+                contentKey: Self.cacheKeyContent(for: item),
+                plainText: item.plainText,
+                sizeBytes: item.sizeBytes
+            )
+        }
+
+        let task = Task.detached(priority: .utility) { [snapshots] in
+            var entries: [PrewarmEntry] = []
+            entries.reserveCapacity(snapshots.count)
+            for snapshot in snapshots {
+                let title = Self.computeTitle(type: snapshot.type, plainText: snapshot.plainText)
+                let metadata = Self.computeMetadata(
+                    type: snapshot.type,
+                    plainText: snapshot.plainText,
+                    sizeBytes: snapshot.sizeBytes
+                )
+                entries.append(
+                    PrewarmEntry(
+                        type: snapshot.type,
+                        contentKey: snapshot.contentKey,
+                        title: title,
+                        metadata: metadata
+                    )
+                )
+            }
+            let preparedEntries = entries
+            await MainActor.run {
+                ClipboardItemDisplayText.shared.storePrewarmEntries(preparedEntries)
+            }
+        }
+
+        return task
     }
 
-    private func metadataCacheKey(for item: ClipboardItemDTO) -> NSString {
-        "\(item.type.rawValue)|\(item.contentHash)|\(item.sizeBytes)" as NSString
+    func cachedTitle(for item: ClipboardItemDTO) -> String? {
+        titleCache[makeCacheKey(for: item)]
     }
 
-    private func computeTitle(type: ClipboardItemType, plainText: String) -> String {
+    func cachedMetadata(for item: ClipboardItemDTO) -> String? {
+        metadataCache[makeCacheKey(for: item)]
+    }
+
+    func clearCaches() {
+        titleCache.removeAll(keepingCapacity: true)
+        metadataCache.removeAll(keepingCapacity: true)
+    }
+
+    private func trimCacheIfNeeded() {
+        if titleCache.count > cacheLimit {
+            titleCache.removeAll(keepingCapacity: true)
+        }
+        if metadataCache.count > cacheLimit {
+            metadataCache.removeAll(keepingCapacity: true)
+        }
+    }
+
+    private func makeCacheKey(for item: ClipboardItemDTO) -> CacheKey {
+        CacheKey(type: item.type, contentHash: Self.cacheKeyContent(for: item))
+    }
+
+    private func storePrewarmEntries(_ entries: [PrewarmEntry]) {
+        guard !entries.isEmpty else { return }
+        trimCacheIfNeeded()
+        var titleCount = titleCache.count
+        var metadataCount = metadataCache.count
+
+        for entry in entries {
+            if titleCount >= cacheLimit || metadataCount >= cacheLimit {
+                break
+            }
+
+            let key = CacheKey(type: entry.type, contentHash: entry.contentKey)
+            if titleCache[key] == nil {
+                titleCache[key] = entry.title
+                titleCount += 1
+            }
+            if metadataCache[key] == nil {
+                metadataCache[key] = entry.metadata
+                metadataCount += 1
+            }
+        }
+    }
+
+    private nonisolated static func cacheKeyContent(for item: ClipboardItemDTO) -> String {
+        item.contentHash.isEmpty ? item.id.uuidString : item.contentHash
+    }
+
+    private nonisolated static func computeTitle(type: ClipboardItemType, plainText: String) -> String {
         switch type {
         case .file:
             let paths = plainText.components(separatedBy: "\n").filter { !$0.isEmpty }
@@ -69,7 +166,7 @@ final class ClipboardItemDisplayText {
         }
     }
 
-    private func computeMetadata(type: ClipboardItemType, plainText: String, sizeBytes: Int) -> String {
+    private nonisolated static func computeMetadata(type: ClipboardItemType, plainText: String, sizeBytes: Int) -> String {
         switch type {
         case .text, .rtf, .html:
             return computeTextMetadata(plainText)
@@ -82,16 +179,68 @@ final class ClipboardItemDisplayText {
         }
     }
 
-    private func computeTextMetadata(_ text: String) -> String {
-        let charCount = TextMetrics.displayWordUnitCount(for: text)
-        let lineCount = text.components(separatedBy: .newlines).count
-        let cleanText = text.replacingOccurrences(of: "\n", with: " ")
-            .replacingOccurrences(of: "\r", with: " ")
-        let lastChars = cleanText.count <= 15 ? cleanText : "...\(String(cleanText.suffix(15)))"
-        return "\(charCount)字 · \(lineCount)行 · \(lastChars)"
+    private nonisolated static func computeTextMetadata(_ text: String) -> String {
+        let summary = TextMetrics.displayWordUnitCountAndLineCount(for: text)
+
+        // Match previous behavior:
+        // - lineCount: `components(separatedBy: .newlines).count`
+        // - suffix: last 15 Characters of `text.replacingOccurrences(of: "\n", with: " ").replacingOccurrences(of: "\r", with: " ")`
+        // - prefix: add "..." only when the cleaned text character count > 15
+        let maxTailChars = 15
+
+        let (suffix, needsEllipsis) = cleanTailAndEllipsis(text, maxTailChars: maxTailChars)
+        let lastChars = needsEllipsis ? "...\(suffix)" : suffix
+        return "\(summary.wordUnitCount)字 · \(summary.lineCount)行 · \(lastChars)"
     }
 
-    private func computeImageMetadata(_ plainText: String, sizeBytes: Int) -> String {
+    private nonisolated static func cleanTailAndEllipsis(_ text: String, maxTailChars: Int) -> (suffix: String, needsEllipsis: Bool) {
+        // Determine if cleaned text length exceeds the threshold without scanning the whole string.
+        // Note: "\r\n" is a single grapheme cluster, but legacy replacement produces two spaces (two Characters),
+        // so we must treat it as 2 when checking the cleaned Character count.
+        var needsEllipsis = false
+        var cleanedCount = 0
+        for ch in text {
+            if ch == "\r\n" {
+                cleanedCount += 2
+            } else {
+                cleanedCount += 1
+            }
+            if cleanedCount > maxTailChars {
+                needsEllipsis = true
+                break
+            }
+        }
+
+        var tail: [Character] = []
+        tail.reserveCapacity(maxTailChars)
+        var remaining = maxTailChars
+        for ch in text.reversed() {
+            if remaining <= 0 { break }
+            if ch == "\r\n" {
+                // Legacy replacement: "\r" -> " ", "\n" -> " " (two spaces).
+                if remaining > 0 {
+                    tail.append(" ")
+                    remaining -= 1
+                }
+                if remaining > 0 {
+                    tail.append(" ")
+                    remaining -= 1
+                }
+                continue
+            }
+            if ch == "\n" || ch == "\r" {
+                tail.append(" ")
+                remaining -= 1
+                continue
+            }
+            tail.append(ch)
+            remaining -= 1
+        }
+
+        return (String(tail.reversed()), needsEllipsis)
+    }
+
+    private nonisolated static func computeImageMetadata(_ plainText: String, sizeBytes: Int) -> String {
         let size = formatBytes(sizeBytes)
         if let resolution = parseImageResolution(from: plainText) {
             return "\(resolution) · \(size)"
@@ -99,7 +248,7 @@ final class ClipboardItemDisplayText {
         return size
     }
 
-    private func computeFileMetadata(_ plainText: String, sizeBytes: Int) -> String {
+    private nonisolated static func computeFileMetadata(_ plainText: String, sizeBytes: Int) -> String {
         let paths = plainText.components(separatedBy: "\n").filter { !$0.isEmpty }
         let fileCount = paths.count
         let size = formatBytes(sizeBytes)
@@ -109,7 +258,7 @@ final class ClipboardItemDisplayText {
         return "\(fileCount)个文件 · \(size)"
     }
 
-    private func parseImageResolution(from text: String) -> String? {
+    private nonisolated static func parseImageResolution(from text: String) -> String? {
         let pattern = #"\[Image:\s*(\d+)x(\d+)"#
         guard let regex = try? NSRegularExpression(pattern: pattern),
               let match = regex.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)),
@@ -120,7 +269,7 @@ final class ClipboardItemDisplayText {
         return "\(text[widthRange])×\(text[heightRange])"
     }
 
-    private func formatBytes(_ bytes: Int) -> String {
+    private nonisolated static func formatBytes(_ bytes: Int) -> String {
         let kb = Double(bytes) / 1024
         if kb < 1024 {
             return String(format: "%.1f KB", kb)

@@ -5,6 +5,25 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [v0.50.fix7] - 2025-12-19
+
+### Perf/UI
+
+- **DisplayText 预热**：title/metadata 在后台预热并批量写缓存，减少滚动进入新页时的主线程文本扫描。
+- **HistoryViewModel**：load/loadMore/search/事件更新触发预热，滚动路径优先命中缓存。
+- **Tests**：新增滚动观察 reattach/end-without-start 与 DisplayText 预热性能用例；全量 ScopyTests 通过（perf tests 需 `RUN_PERF_TESTS=1`）。
+
+## [v0.50.fix6] - 2025-12-19
+
+### Perf/UI
+
+- **滚动状态**：改为监听 `NSScrollView.willStartLiveScroll`/`didEndLiveScroll`，移除高频 onScroll 轮询，降低滚动时主线程负载。
+- **Hover 追踪**：滚动期间关闭行级 hover tracking，预览清理仅在有状态时触发，减少无效事件与状态写入。
+- **行级渲染**：相对时间文本缓存；仅在悬停/选中时绘制背景/边框，降低滚动时重复格式化与绘制成本。
+- **文本列表**：metadata 计算改为单次扫描/低分配（保持展示不变）；DisplayText 缓存 key 去拼接字符串；非 UI 测试模式移除行级 accessibility identifier/value，降低滚动期辅助功能树更新成本。
+- **Observables**：HistoryViewModel 仅在 start/end 切换 `isScrolling`，避免重复状态更新。
+- **Tests**：新增滚动状态性能测试，覆盖 scroll state 更新成本。
+
 ## [v0.50.fix5] - 2025-12-19
 
 ### Refactor/Quality

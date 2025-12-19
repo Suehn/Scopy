@@ -8,8 +8,8 @@
 
 | 项目 | 状态 |
 |------|------|
-| **当前版本** | v0.50.fix5 |
-| **测试状态** | 单元测试通过（`xcodebuild test -scheme Scopy -destination 'platform=macOS' -only-testing:ScopyTests`: Executed 260 tests, 25 skipped, 0 failures）；UI 测试：未复验 |
+| **当前版本** | v0.50.fix7 |
+| **测试状态** | 单元测试通过（`xcodebuild test -project Scopy.xcodeproj -scheme Scopy -destination 'platform=macOS' -only-testing:ScopyTests`: Executed 269 tests, 25 skipped, 0 failures；Performance tests 跳过：`RUN_PERF_TESTS` 未设置）；UI 测试：未复验 |
 | **构建状态** | Debug ✅ |
 | **部署位置** | /Applications/Scopy.app |
 | **最后更新** | 2025-12-19 |
@@ -24,6 +24,8 @@
 
 | 版本 | 日期 | 主要内容 | 状态 |
 |------|------|----------|------|
+| [v0.50.fix7](./v0.50.fix7.md) | 2025-12-19 | Perf/UI：DisplayText 预热（滚动主线程降载）+ 预热测试 | ✅ |
+| [v0.50.fix6](./v0.50.fix6.md) | 2025-12-19 | Perf/UI：滚动状态 start/end + 行级/文本 metadata 降载 + 性能测试 | ✅ |
 | [v0.50.fix5](./v0.50.fix5.md) | 2025-12-19 | Refactor：优雅性重构（入口拆分、预览清理集中、队列 ring buffer、缓存/格式化收敛）+ Review 文档（重发布版本号） | ✅ |
 | [v0.50.fix4](./v0.50.fix4.md) | 2025-12-19 | Refactor：优雅性重构（入口拆分、预览清理集中、队列 ring buffer、缓存/格式化收敛）+ Review 文档（重发布版本号） | ✅ |
 | [v0.50.fix2](./v0.50.fix2.md) | 2025-12-19 | Fix：导出 PNG 表格最小缩放 0.35 + 换行兜底；hover 预览缓存/质量策略收敛；测试稳定性与警告清理（重发布版本号） | ✅ |

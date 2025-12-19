@@ -34,6 +34,29 @@
 - runner：`macos-15`
 - Xcode：`16.0`
 
+## 本次更新（v0.50.fix7）
+
+- **Perf/UI（滚动）**：DisplayText title/metadata 在后台预热，减少滚动进入新页时的主线程文本扫描。
+- **Observables**：HistoryViewModel 在 load/loadMore/search/事件更新触发预热，滚动路径优先命中缓存。
+- **Tests**：新增滚动观察 reattach/end-without-start 与 DisplayText 预热性能用例；全量 ScopyTests 通过（性能测试需 `RUN_PERF_TESTS=1`）。
+- **性能实测**（`hw.model=Mac15,12`, 24GB；macOS 15.7.2（24G325）；Xcode 16.3（16E140）, Debug）：
+  - Scroll state update（1000 samples）：min 0.00 μs, max 1.07 μs, mean 0.31 μs, median 0.00 μs, P95 1.07 μs, P99 1.07 μs, std dev 0.46 μs
+  - DisplayText metadata access（400 items × 4096 chars）：cold 324.58 ms, cached 204.92 μs
+- **测试结果**：
+  - `xcodebuild test -project Scopy.xcodeproj -scheme Scopy -destination 'platform=macOS' -only-testing:ScopyTests`：Executed 269 tests, 25 skipped, 0 failures（perf tests 跳过：`RUN_PERF_TESTS` 未设置）
+
+## 本次更新（v0.50.fix6）
+
+- **Perf/UI（滚动）**：滚动状态改为 start/end 事件驱动，移除高频 onScroll 轮询，降低滚动 CPU 峰值。
+- **Perf/UI（滚动）**：滚动期间关闭行级 hover tracking，预览清理仅在有状态时触发，减少无效事件与状态写入。
+- **Perf/UI（滚动）**：相对时间文本缓存 + 行背景/边框仅在悬停或选中时绘制，减少滚动时格式化与绘制开销。
+- **Perf/UI（滚动）**：文本 metadata 计算改为单次扫描/低分配；DisplayText 缓存 key 去拼接字符串；非 UI 测试模式移除行级 accessibility identifier/value，降低纯文本高速滚动 CPU。
+- **测试**：新增 ScrollPerformanceTests，量化 scroll state 更新成本。
+- **性能实测**（`hw.model=Mac15,12`, 24GB；macOS 15.7.2（24G325）；Xcode 16.3（16E140）, Debug）：  
+  - Scroll state update（1000 samples）：min 0.00 μs, max 1.07 μs, mean 0.18 μs, median 0.00 μs, P95 1.07 μs, P99 1.07 μs, std dev 0.39 μs
+- **测试结果**：  
+  - `xcodebuild test -project Scopy.xcodeproj -scheme Scopy -destination 'platform=macOS' -only-testing:ScopyTests/ScrollPerformanceTests/testScrollStatePerformance`：Executed 1 test, 0 failures
+
 ## 本次更新（v0.44.fix2）
 
 - **Fix/Preview（误判收敛）**：`MarkdownDetector.containsMath` 不再把“出现两个 `$`”直接判定为数学公式，仅在检测到成对 `$...$`（以及 `$$` / `\\(`/`\\[` / LaTeX 环境 / 已知命令）时启用 math 相关渲染，降低货币/变量/日志等纯文本误走 WebView 的概率。

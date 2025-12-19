@@ -11,25 +11,19 @@ final class HistoryViewModel {
         var refineShortQueryDelayNs: UInt64
         var refineLongQueryDelayNs: UInt64
         var recentAppsRefreshDelayNs: UInt64
-        var scrollPollIntervalNs: UInt64
-        var scrollIdleThresholdSeconds: TimeInterval
 
         static let production = Timing(
             searchDebounceNs: 150_000_000,
             refineShortQueryDelayNs: 450_000_000,
             refineLongQueryDelayNs: 250_000_000,
-            recentAppsRefreshDelayNs: 500_000_000,
-            scrollPollIntervalNs: 80_000_000,
-            scrollIdleThresholdSeconds: 0.15
+            recentAppsRefreshDelayNs: 500_000_000
         )
 
         static let tests = Timing(
             searchDebounceNs: 20_000_000,
             refineShortQueryDelayNs: 40_000_000,
             refineLongQueryDelayNs: 40_000_000,
-            recentAppsRefreshDelayNs: 20_000_000,
-            scrollPollIntervalNs: 5_000_000,
-            scrollIdleThresholdSeconds: 0.02
+            recentAppsRefreshDelayNs: 20_000_000
         )
     }
 
@@ -85,8 +79,6 @@ final class HistoryViewModel {
     var lastSelectionSource: SelectionSource = .programmatic
 
     var isScrolling: Bool = false
-    @ObservationIgnored private var lastScrollTimestamp: CFAbsoluteTime = 0
-    @ObservationIgnored private var scrollEndTask: Task<Void, Never>?
 
     private var searchVersion: Int = 0
 
@@ -145,7 +137,6 @@ final class HistoryViewModel {
         cancelTask(&searchTask)
         cancelTask(&loadMoreTask)
         cancelTask(&refineTask)
-        cancelTask(&scrollEndTask)
         cancelTask(&recentAppsRefreshTask)
     }
 
@@ -160,6 +151,7 @@ final class HistoryViewModel {
 
             if didMatchCurrentFilters {
                 items.insert(item, at: 0)
+                prewarmDisplayText(for: [item])
             }
             invalidatePinnedCache()
 
@@ -200,6 +192,7 @@ final class HistoryViewModel {
             if !searchQuery.isEmpty {
                 if let index = items.firstIndex(where: { $0.id == item.id }) {
                     items[index] = item
+                    prewarmDisplayText(for: [item])
                 }
                 invalidatePinnedCache()
                 return
@@ -209,6 +202,7 @@ final class HistoryViewModel {
             items.removeAll { $0.id == item.id }
             if didMatchCurrentFilters {
                 items.insert(item, at: 0)
+                prewarmDisplayText(for: [item])
             }
             invalidatePinnedCache()
 
@@ -307,6 +301,7 @@ final class HistoryViewModel {
 
             let fetchedItems = try await service.fetchRecent(limit: 50, offset: 0)
             items = fetchedItems
+            prewarmDisplayText(for: fetchedItems)
             loadedCount = fetchedItems.count
             lastLoadedAt = Date()
 
@@ -331,29 +326,14 @@ final class HistoryViewModel {
         await load()
     }
 
-    func onScroll() {
-        lastScrollTimestamp = CFAbsoluteTimeGetCurrent()
-        if !isScrolling {
-            isScrolling = true
-        }
+    func scrollDidStart() {
+        guard !isScrolling else { return }
+        isScrolling = true
+    }
 
-        if scrollEndTask != nil {
-            return
-        }
-
-        scrollEndTask = Task { [weak self] in
-            guard let self else { return }
-            while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: timing.scrollPollIntervalNs)
-                guard !Task.isCancelled else { return }
-                let now = CFAbsoluteTimeGetCurrent()
-                if now - self.lastScrollTimestamp >= timing.scrollIdleThresholdSeconds {
-                    self.isScrolling = false
-                    self.scrollEndTask = nil
-                    return
-                }
-            }
-        }
+    func scrollDidEnd() {
+        guard isScrolling else { return }
+        isScrolling = false
     }
 
     func loadMore() async {
@@ -387,6 +367,7 @@ final class HistoryViewModel {
                         let result = try await service.search(query: request)
                         guard !Task.isCancelled, currentVersion == searchVersion else { return }
                         items = result.items
+                        prewarmDisplayText(for: result.items)
                         loadedCount = result.items.count
                         totalCount = result.total
                         canLoadMore = result.hasMore
@@ -407,6 +388,7 @@ final class HistoryViewModel {
 
                     items.append(contentsOf: result.items)
                     invalidatePinnedCache()
+                    prewarmDisplayText(for: result.items)
                     loadedCount = items.count
                     totalCount = result.total
                     canLoadMore = result.hasMore
@@ -415,6 +397,7 @@ final class HistoryViewModel {
                     guard !Task.isCancelled, currentVersion == searchVersion else { return }
                     items.append(contentsOf: moreItems)
                     invalidatePinnedCache()
+                    prewarmDisplayText(for: moreItems)
                     loadedCount = items.count
                     canLoadMore = loadedCount < totalCount
                 }
@@ -473,6 +456,7 @@ final class HistoryViewModel {
                 guard !Task.isCancelled, currentVersion == searchVersion else { return }
 
                 items = result.items
+                prewarmDisplayText(for: result.items)
                 totalCount = result.total
                 loadedCount = result.items.count
                 canLoadMore = result.hasMore
@@ -511,6 +495,7 @@ final class HistoryViewModel {
                             guard loadedCount <= 50 else { return }
 
                             items = refined.items
+                            prewarmDisplayText(for: refined.items)
                             totalCount = refined.total
                             loadedCount = refined.items.count
                             canLoadMore = refined.hasMore
@@ -640,6 +625,11 @@ final class HistoryViewModel {
     private func invalidatePinnedCache() {
         pinnedItemsCache = nil
         unpinnedItemsCache = nil
+    }
+
+    private func prewarmDisplayText(for items: [ClipboardItemDTO]) {
+        guard !items.isEmpty else { return }
+        ClipboardItemDisplayText.shared.prewarm(items: items)
     }
 
     private func cancelTask(_ task: inout Task<Void, Never>?) {
