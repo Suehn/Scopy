@@ -5,6 +5,7 @@ struct SectionHeader: View {
     let title: String
     let count: Int
     var performanceSummary: PerformanceSummary? = nil
+    var isScrolling: Bool = false
     /// v0.16.2: 可折叠支持
     var isCollapsible: Bool = false
     var isCollapsed: Bool = false
@@ -56,8 +57,13 @@ struct SectionHeader: View {
             }
         }
         .onHover { hovering in
-            if isCollapsible {
+            if isCollapsible && !isScrolling {
                 isHovered = hovering
+            }
+        }
+        .onChange(of: isScrolling) { _, newValue in
+            if newValue && isHovered {
+                isHovered = false
             }
         }
     }

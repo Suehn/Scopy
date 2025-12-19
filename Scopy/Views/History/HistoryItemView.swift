@@ -38,6 +38,7 @@ struct HistoryItemView: View, Equatable {
     // v0.15: Text preview state
     @State private var showTextPreview = false
     @StateObject private var previewModel = HoverPreviewModel()
+    @State private var relativeTimeText: String = ""
     @State private var isUITestTapPreviewEnabled: Bool = false
 
     // MARK: - Equatable
@@ -150,7 +151,16 @@ struct HistoryItemView: View, Equatable {
 
     // MARK: - Body
 
+    @ViewBuilder
     var body: some View {
+        if isScrolling {
+            rowContent
+        } else {
+            rowContent.onHover(perform: handleHover)
+        }
+    }
+
+    private var rowContent: some View {
         HStack(alignment: .center, spacing: ScopySpacing.sm) {
             // Pin 标记：左侧颜色条
             if item.isPinned {
@@ -183,7 +193,7 @@ struct HistoryItemView: View, Equatable {
                         .foregroundStyle(.orange)
                 }
 
-                Text(relativeTime)
+                Text(relativeTimeText.isEmpty ? relativeTime : relativeTimeText)
                     .font(ScopyTypography.microMono)
                     .foregroundStyle(ScopyColors.mutedText)
             }
@@ -192,15 +202,19 @@ struct HistoryItemView: View, Equatable {
         .padding(.vertical, ScopySpacing.sm)
         .frame(minHeight: item.type == .image && showThumbnails ? thumbnailHeight + ScopySpacing.lg : ScopySize.Height.listItem)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: ScopySize.Corner.lg, style: .continuous)
-                .fill(backgroundColor)
-        )
+        .background {
+            if isKeyboardSelected || isHovering {
+                RoundedRectangle(cornerRadius: ScopySize.Corner.lg, style: .continuous)
+                    .fill(backgroundColor)
+            }
+        }
         // v0.10.3: 键盘选中时添加边框
-        .overlay(
-            RoundedRectangle(cornerRadius: ScopySize.Corner.lg, style: .continuous)
-                .stroke(isKeyboardSelected ? ScopyColors.selectionBorder : Color.clear, lineWidth: ScopySize.Stroke.medium)
-        )
+        .overlay {
+            if isKeyboardSelected {
+                RoundedRectangle(cornerRadius: ScopySize.Corner.lg, style: .continuous)
+                    .stroke(ScopyColors.selectionBorder, lineWidth: ScopySize.Stroke.medium)
+            }
+        }
         // v0.10.3: 添加选中/悬停态过渡动效
         .animation(isScrolling ? nil : .easeInOut(duration: 0.15), value: isHovering)
         .animation(isScrolling ? nil : .easeInOut(duration: 0.15), value: isKeyboardSelected)
@@ -223,47 +237,10 @@ struct HistoryItemView: View, Equatable {
             } else {
                 isUITestTapPreviewEnabled = false
             }
+            updateRelativeTimeText()
         }
-        // v0.9.3: 局部悬停状态 + 防抖更新全局选中
-        // v0.10.3: 使用 Task 替代 Timer，自动取消防止泄漏
-        // v0.15: 添加文本预览支持
-        .onHover { hovering in
-            if isScrolling {
-                if isHovering {
-                    isHovering = false
-                }
-                return
-            }
-
-            isHovering = hovering
-
-            cancelHoverDebounceTask()
-            cancelHoverExitTask()
-
-            if hovering {
-                // 静止 150ms 后才更新全局选中状态
-                if !isScrolling {
-                    hoverDebounceTask = Task {
-                        try? await Task.sleep(nanoseconds: 150_000_000)
-                        guard !Task.isCancelled else { return }
-                        await MainActor.run {
-                            onHoverSelect(item.id)
-                        }
-                    }
-                }
-
-                // 图片预览任务
-                if item.type == .image && showThumbnails {
-                    startPreviewTask()
-                }
-                // v0.15: 文本预览任务
-                else if item.type == .text || item.type == .rtf || item.type == .html {
-                    startTextPreviewTask()
-                }
-            } else {
-                // v0.24: popover 出现/消失时可能短暂触发 hover false，做 120ms 退出防抖
-                scheduleHoverExitCleanup()
-            }
+        .onChange(of: item.lastUsedAt) { _, _ in
+            updateRelativeTimeText()
         }
         .popover(isPresented: $showPreview, arrowEdge: .trailing) {
             HistoryItemImagePreviewView(model: previewModel, thumbnailPath: item.thumbnailPath)
@@ -306,12 +283,56 @@ struct HistoryItemView: View, Equatable {
             resetPreviewState(hidePopovers: true)
         }
         .onChange(of: isScrolling) { _, newValue in
-            guard newValue else { return }
+            if !newValue {
+                updateRelativeTimeText()
+                return
+            }
+            guard shouldResetPreviewOnScroll else { return }
             isHovering = false
             cancelHoverTasks()
             resetPreviewState(hidePopovers: true)
         }
         .background(markdownPreMeasureView)
+    }
+
+    private func handleHover(_ hovering: Bool) {
+        if isScrolling {
+            if isHovering {
+                isHovering = false
+            }
+            return
+        }
+
+        isHovering = hovering
+
+        cancelHoverDebounceTask()
+        cancelHoverExitTask()
+
+        if hovering {
+            // 静止 150ms 后才更新全局选中状态
+            if !isScrolling {
+                hoverDebounceTask = Task {
+                    try? await Task.sleep(nanoseconds: 150_000_000)
+                    guard !Task.isCancelled else { return }
+                    await MainActor.run {
+                        onHoverSelect(item.id)
+                    }
+                }
+            }
+
+            // 图片预览任务
+            if item.type == .image && showThumbnails {
+                startPreviewTask()
+            }
+            // v0.15: 文本预览任务
+            else if item.type == .text || item.type == .rtf || item.type == .html {
+                startTextPreviewTask()
+            }
+        } else {
+            // v0.24: popover 出现/消失时可能短暂触发 hover false，做 120ms 退出防抖
+            cancelPreviewTask()
+            scheduleHoverExitCleanup()
+        }
     }
 
     @ViewBuilder
@@ -520,6 +541,25 @@ struct HistoryItemView: View, Equatable {
         resetPreviewModel()
     }
 
+    private var shouldResetPreviewOnScroll: Bool {
+        if isHovering || isPopoverHovering || showPreview || showTextPreview {
+            return true
+        }
+        if hoverPreviewTask != nil || hoverMarkdownTask != nil {
+            return true
+        }
+        if hoverDebounceTask != nil || hoverExitTask != nil {
+            return true
+        }
+        if previewModel.previewCGImage != nil || previewModel.text != nil || previewModel.markdownHTML != nil {
+            return true
+        }
+        if previewModel.isExporting || previewModel.exportSuccess || previewModel.exportFailed || previewModel.exportErrorMessage != nil {
+            return true
+        }
+        return false
+    }
+
     private func scheduleHoverExitCleanup() {
         cancelHoverExitTask()
         hoverExitTask = Task { @MainActor in
@@ -623,6 +663,10 @@ struct HistoryItemView: View, Equatable {
         }
 
         return Self.relativeFormatter.localizedString(for: item.lastUsedAt, relativeTo: now)
+    }
+
+    private func updateRelativeTimeText() {
+        relativeTimeText = relativeTime
     }
 
     /// v0.12: 使用全局缓存获取应用名称，避免重复调用 NSWorkspace

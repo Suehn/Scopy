@@ -2,25 +2,30 @@ import AppKit
 import SwiftUI
 
 struct ListLiveScrollObserverView: NSViewRepresentable {
-    let onScroll: () -> Void
+    let onScrollStart: () -> Void
+    let onScrollEnd: () -> Void
 
     func makeNSView(context: Context) -> ObserverView {
         let view = ObserverView()
-        view.onScroll = onScroll
+        view.onScrollStart = onScrollStart
+        view.onScrollEnd = onScrollEnd
         return view
     }
 
     func updateNSView(_ nsView: ObserverView, context: Context) {
-        nsView.onScroll = onScroll
+        nsView.onScrollStart = onScrollStart
+        nsView.onScrollEnd = onScrollEnd
         nsView.attachIfNeeded()
     }
 }
 
 extension ListLiveScrollObserverView {
     final class ObserverView: NSView {
-        var onScroll: (() -> Void)?
+        var onScrollStart: (() -> Void)?
+        var onScrollEnd: (() -> Void)?
 
         private weak var observedScrollView: NSScrollView?
+        private var isLiveScrolling = false
 
         override func viewDidMoveToSuperview() {
             super.viewDidMoveToSuperview()
@@ -49,14 +54,14 @@ extension ListLiveScrollObserverView {
 
             NotificationCenter.default.addObserver(
                 self,
-                selector: #selector(handleLiveScroll(_:)),
-                name: NSScrollView.didLiveScrollNotification,
+                selector: #selector(handleScrollStart(_:)),
+                name: NSScrollView.willStartLiveScrollNotification,
                 object: scrollView
             )
 
             NotificationCenter.default.addObserver(
                 self,
-                selector: #selector(handleLiveScroll(_:)),
+                selector: #selector(handleScrollEnd(_:)),
                 name: NSScrollView.didEndLiveScrollNotification,
                 object: scrollView
             )
@@ -66,7 +71,7 @@ extension ListLiveScrollObserverView {
             if let observedScrollView {
                 NotificationCenter.default.removeObserver(
                     self,
-                    name: NSScrollView.didLiveScrollNotification,
+                    name: NSScrollView.willStartLiveScrollNotification,
                     object: observedScrollView
                 )
                 NotificationCenter.default.removeObserver(
@@ -76,10 +81,22 @@ extension ListLiveScrollObserverView {
                 )
             }
             observedScrollView = nil
+            if isLiveScrolling {
+                isLiveScrolling = false
+                onScrollEnd?()
+            }
         }
 
-        @objc private func handleLiveScroll(_ notification: Notification) {
-            onScroll?()
+        @objc private func handleScrollStart(_ notification: Notification) {
+            guard !isLiveScrolling else { return }
+            isLiveScrolling = true
+            onScrollStart?()
+        }
+
+        @objc private func handleScrollEnd(_ notification: Notification) {
+            guard isLiveScrolling else { return }
+            isLiveScrolling = false
+            onScrollEnd?()
         }
 
         private func findEnclosingScrollView() -> NSScrollView? {

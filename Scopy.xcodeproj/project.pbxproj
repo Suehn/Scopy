@@ -87,6 +87,7 @@
 		2D7A4916A5D6C1E115F435A4 /* MathEnvironmentSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = BBD2BD25B039DA8458E6884A /* MathEnvironmentSupport.swift */; };
 		2DA012275EB17CAC0F2AADF2 /* KaTeX_Size3-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 0FCD300F73DC064A18BACA5B /* KaTeX_Size3-Regular.ttf */; };
 		2E3AC6F5BBFB8EC0EEA7BEFB /* TestDataFactory.swift in Sources */ = {isa = PBXBuildFile; fileRef = 98A81F5BEC4470C8DA1B4864 /* TestDataFactory.swift */; };
+		2F21B622233CBD3AE5D4E9A9 /* ClipboardItemDisplayTextTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B48DDD4A33C8F8F615B17CA0 /* ClipboardItemDisplayTextTests.swift */; };
 		2F483FB5F05DC1F003816DFB /* HoverPreviewImageCacheTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 747759CE91D4B8639F351272 /* HoverPreviewImageCacheTests.swift */; };
 		2FCF65AF361332A023B227D9 /* LaTeXInlineTextNormalizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2DAAE2DB0F49DD63A8BAE8E6 /* LaTeXInlineTextNormalizer.swift */; };
 		3047E4FD24CAE155C2C25E9E /* HoverPreviewScreenMetrics.swift in Sources */ = {isa = PBXBuildFile; fileRef = DC7C11B8E94C704C047F77FF /* HoverPreviewScreenMetrics.swift */; };
@@ -152,6 +153,7 @@
 		4FC8534524AB61CFDC58B302 /* KaTeX_Main-BoldItalic.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 1368BF4985A25DB8E6A2F335 /* KaTeX_Main-BoldItalic.ttf */; };
 		4FCD76208AFC2F050829B148 /* mhchem.min.js in Resources */ = {isa = PBXBuildFile; fileRef = 2EA6E5CB5D4F09D1967B7D21 /* mhchem.min.js */; };
 		507578187BE947202BD63D0B /* SettingsViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B79CC4C77E31D9CE886C254D /* SettingsViewModel.swift */; };
+		50850D2A4AF603800C289F6C /* ScrollPerformanceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0CACB3776A96E06FA53E387A /* ScrollPerformanceTests.swift */; };
 		521114383ACB5A875A5EE97D /* KaTeX_AMS-Regular.woff2 in Resources */ = {isa = PBXBuildFile; fileRef = 6F00D09F6FFB196F3B17E451 /* KaTeX_AMS-Regular.woff2 */; };
 		53ED585BC4AC2068BFDDB4F9 /* KaTeX_Math-Italic.woff in Resources */ = {isa = PBXBuildFile; fileRef = 9644B5C6C165540B99E861D0 /* KaTeX_Math-Italic.woff */; };
 		542FFE8F4C4D397F7079AB5B /* HeaderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4059379693354F029F0086D1 /* HeaderView.swift */; };
@@ -178,6 +180,7 @@
 		5D1D8A60DEB12FAE47085E7E /* ClipboardItemDisplayText.swift in Sources */ = {isa = PBXBuildFile; fileRef = C46B24B2682039001EA7F2A7 /* ClipboardItemDisplayText.swift */; };
 		5DA66D3B6875314AE256E8D7 /* HistoryListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8C25A96207E0DA2587E7AFBB /* HistoryListView.swift */; };
 		5E4F26434E12A6F9818A0E8C /* KaTeX_Script-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = CBE2D342D5B027E53089C35D /* KaTeX_Script-Regular.ttf */; };
+		5E7CE158A9A7BB0AD50CA392 /* ClipboardItemDisplayTextTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B48DDD4A33C8F8F615B17CA0 /* ClipboardItemDisplayTextTests.swift */; };
 		61C325464B3E5B9C919E50AB /* SettingsPageHeader.swift in Sources */ = {isa = PBXBuildFile; fileRef = C977DE6F35EC7F84B1462BF9 /* SettingsPageHeader.swift */; };
 		6290407CDC493685A38B5DED /* HotKeyServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF08A6073418036ABAC09144 /* HotKeyServiceTests.swift */; };
 		62B85960B71ABB85BEEC2FA6 /* MarkdownHTMLRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 56B7BF6CBDB5580664B77B40 /* MarkdownHTMLRenderer.swift */; };
@@ -293,6 +296,7 @@
 		9E151941D9EF29EEFFB8562A /* KaTeX_Fraktur-Bold.woff in Resources */ = {isa = PBXBuildFile; fileRef = C292766FEABCFB7962B37D27 /* KaTeX_Fraktur-Bold.woff */; };
 		9E313361A8B13D417298110B /* MarkdownPreviewWebView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8D861CAAB54D3FB78AB36051 /* MarkdownPreviewWebView.swift */; };
 		9E74A39CF966E2318A3A70DE /* MarkdownPreviewWebView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8D861CAAB54D3FB78AB36051 /* MarkdownPreviewWebView.swift */; };
+		9F4C8052A15B59C031AF3A34 /* ScrollPerformanceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0CACB3776A96E06FA53E387A /* ScrollPerformanceTests.swift */; };
 		9FD858494D45577D060020B6 /* ScopySpacing.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4E233FCC7701603B37B37B07 /* ScopySpacing.swift */; };
 		9FD92224C1C7CFFBF4B37912 /* ScopyKit in Frameworks */ = {isa = PBXBuildFile; productRef = 822D98D29CCFAA4C5137A39D /* ScopyKit */; };
 		9FF312FF1E24EAAE5D387650 /* KaTeX_Size2-Regular.woff2 in Resources */ = {isa = PBXBuildFile; fileRef = C7E55F940607C8C9FC85A39D /* KaTeX_Size2-Regular.woff2 */; };
@@ -478,6 +482,7 @@
 		0561A157ADE4BA245A49A9E1 /* HoverPreviewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HoverPreviewModel.swift; sourceTree = "<group>"; };
 		094F7E96DC5DC3FD8002CD7E /* ScopyUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ScopyUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		0C442EB6B998A8961A987D12 /* KaTeX_Main-Regular.woff2 */ = {isa = PBXFileReference; path = "KaTeX_Main-Regular.woff2"; sourceTree = "<group>"; };
+		0CACB3776A96E06FA53E387A /* ScrollPerformanceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScrollPerformanceTests.swift; sourceTree = "<group>"; };
 		0F77CBE035B9D88E9E868592 /* HistoryItemTextPreviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryItemTextPreviewView.swift; sourceTree = "<group>"; };
 		0F7A2545CE101420AEDEBB8F /* ScopyComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScopyComponents.swift; sourceTree = "<group>"; };
 		0FCD300F73DC064A18BACA5B /* KaTeX_Size3-Regular.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "KaTeX_Size3-Regular.ttf"; sourceTree = "<group>"; };
@@ -592,6 +597,7 @@
 		AB54E903D484FE44C7F78B86 /* KaTeX_AMS-Regular.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "KaTeX_AMS-Regular.ttf"; sourceTree = "<group>"; };
 		AEF8649A162AEF1B81D32EE6 /* ContextMenuUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContextMenuUITests.swift; sourceTree = "<group>"; };
 		B1D884F45B497E86587BF725 /* KaTeX_Size3-Regular.woff */ = {isa = PBXFileReference; path = "KaTeX_Size3-Regular.woff"; sourceTree = "<group>"; };
+		B48DDD4A33C8F8F615B17CA0 /* ClipboardItemDisplayTextTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipboardItemDisplayTextTests.swift; sourceTree = "<group>"; };
 		B71324125BE1417C5D4E6E9D /* KaTeX_Fraktur-Bold.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "KaTeX_Fraktur-Bold.ttf"; sourceTree = "<group>"; };
 		B79CC4C77E31D9CE886C254D /* SettingsViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsViewModel.swift; sourceTree = "<group>"; };
 		B98F18E6E4E1E553EF6A31B4 /* SettingsPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsPage.swift; sourceTree = "<group>"; };
@@ -890,6 +896,7 @@
 			isa = PBXGroup;
 			children = (
 				C8E1D7C3153B156AF59F4FBD /* AppStateTests.swift */,
+				B48DDD4A33C8F8F615B17CA0 /* ClipboardItemDisplayTextTests.swift */,
 				F940F6182C4E298B3511A044 /* ClipboardMonitorTests.swift */,
 				4196431EE6371BEE9C6BED01 /* ClipboardServiceCopyToClipboardTests.swift */,
 				3527EAD22A82840AEDF3F820 /* ConcurrencyTests.swift */,
@@ -907,6 +914,7 @@
 				1C176E09A1997AD49E566273 /* PerformanceTests.swift */,
 				E89CCE301327084364FDFDE1 /* ResourceCleanupTests.swift */,
 				D09D06477D29F2066855D402 /* ReviewFix24Tests.swift */,
+				0CACB3776A96E06FA53E387A /* ScrollPerformanceTests.swift */,
 				66A10DAA25261DC94EED1258 /* SearchBackendConsistencyTests.swift */,
 				15EBBE158869225275AB5F98 /* SearchServiceTests.swift */,
 				2B74B9321A306FE81A60891D /* SearchStateMachineTests.swift */,
@@ -1500,6 +1508,7 @@
 				D4C231881F5CF33E0C69832A /* AppVersion.swift in Sources */,
 				058BFCE0B478C3A010F211C5 /* AppearanceSettingsPage.swift in Sources */,
 				5D1D8A60DEB12FAE47085E7E /* ClipboardItemDisplayText.swift in Sources */,
+				2F21B622233CBD3AE5D4E9A9 /* ClipboardItemDisplayTextTests.swift in Sources */,
 				DEDA1EF2531849DBBA1499A8 /* ClipboardMonitorTests.swift in Sources */,
 				76FFC55CFDB533B79D97E63C /* ClipboardServiceCopyToClipboardTests.swift in Sources */,
 				B9FD103AFC45F9F6B464E7B4 /* ClipboardSettingsPage.swift in Sources */,
@@ -1559,6 +1568,7 @@
 				5B88BBC60EB20FAD37917440 /* ScopySize.swift in Sources */,
 				9FD858494D45577D060020B6 /* ScopySpacing.swift in Sources */,
 				5B6A53676B5B957EEE6BCA1F /* ScopyTypography.swift in Sources */,
+				9F4C8052A15B59C031AF3A34 /* ScrollPerformanceTests.swift in Sources */,
 				739CA7545B002CEB718E4EEE /* SearchBackendConsistencyTests.swift in Sources */,
 				DF15A575AEB6BFFC571AA648 /* SearchServiceTests.swift in Sources */,
 				F709D7207473885FDC5C18D7 /* SearchStateMachineTests.swift in Sources */,
@@ -1606,6 +1616,7 @@
 				7166E945AC8A16163CC7B924 /* AppVersion.swift in Sources */,
 				9746B0E3394739E5BF814BA8 /* AppearanceSettingsPage.swift in Sources */,
 				027ABA7EB0EA43844BC05517 /* ClipboardItemDisplayText.swift in Sources */,
+				5E7CE158A9A7BB0AD50CA392 /* ClipboardItemDisplayTextTests.swift in Sources */,
 				43B8612CECC8A1768F74742B /* ClipboardMonitorTests.swift in Sources */,
 				A38DCE579215B40A6617DFF0 /* ClipboardServiceCopyToClipboardTests.swift in Sources */,
 				5711A88FD03C9BA2150E7B36 /* ClipboardSettingsPage.swift in Sources */,
@@ -1667,6 +1678,7 @@
 				7DC66EDCE0E45DFC84BEE089 /* ScopySize.swift in Sources */,
 				CAB0C4BCEB0707C32EF0F6E5 /* ScopySpacing.swift in Sources */,
 				BC73EE655DA83097AC0514D4 /* ScopyTypography.swift in Sources */,
+				50850D2A4AF603800C289F6C /* ScrollPerformanceTests.swift in Sources */,
 				E1B1C2949A98A02A5EBE4082 /* SearchBackendConsistencyTests.swift in Sources */,
 				D0DCBABCC3717C48EAF8A18C /* SearchServiceTests.swift in Sources */,
 				3258DD075C34E6F8D8B08383 /* SearchStateMachineTests.swift in Sources */,

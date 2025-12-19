@@ -291,8 +291,12 @@ extension AppState {
         await historyViewModel.load()
     }
 
-    func onScroll() {
-        historyViewModel.onScroll()
+    func scrollDidStart() {
+        historyViewModel.scrollDidStart()
+    }
+
+    func scrollDidEnd() {
+        historyViewModel.scrollDidEnd()
     }
 
     func loadMore() async {

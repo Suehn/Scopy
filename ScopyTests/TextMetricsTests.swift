@@ -18,5 +18,22 @@ final class TextMetricsTests: XCTestCase {
         XCTAssertEqual(TextMetrics.displayWordUnitCount(for: "v0.43.13"), 3)
         XCTAssertEqual(TextMetrics.displayWordUnitCount(for: "don\u{2019}t stop"), 2)
     }
-}
 
+    func testDisplayWordUnitCountAndLineCountMatchesComponentsNewlinesCount() {
+        let samples: [String] = [
+            "",
+            "a",
+            "a\nb",
+            "a\r\nb",
+            "\n\n",
+            "a\u{2028}b\u{2029}c",
+            "end-with-newline\n"
+        ]
+
+        for text in samples {
+            let expected = text.components(separatedBy: .newlines).count
+            let actual = TextMetrics.displayWordUnitCountAndLineCount(for: text).lineCount
+            XCTAssertEqual(actual, expected, "lineCount mismatch for text: \(String(reflecting: text))")
+        }
+    }
+}

@@ -11,11 +11,11 @@ public final class IconService {
 
     private init() {
         let iconCache = NSCache<NSString, NSImage>()
-        iconCache.countLimit = 100
+        iconCache.countLimit = 500
         self.iconCache = iconCache
 
         let nameCache = NSCache<NSString, NSString>()
-        nameCache.countLimit = 100
+        nameCache.countLimit = 500
         self.nameCache = nameCache
     }
 

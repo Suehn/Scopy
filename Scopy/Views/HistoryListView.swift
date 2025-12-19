@@ -9,6 +9,8 @@ struct HistoryListView: View {
     @Environment(HistoryViewModel.self) private var historyViewModel
     @Environment(SettingsViewModel.self) private var settingsViewModel
 
+    private static let isUITesting: Bool = ProcessInfo.processInfo.arguments.contains("--uitesting")
+
     var body: some View {
         if historyViewModel.items.isEmpty && !historyViewModel.isLoading {
             EmptyStateView(
@@ -42,6 +44,7 @@ struct HistoryListView: View {
                         SectionHeader(
                             title: "Pinned",
                             count: pinned.count,
+                            isScrolling: historyViewModel.isScrolling,
                             isCollapsible: true,
                             isCollapsed: historyViewModel.isPinnedCollapsed,
                             onToggle: { historyViewModel.isPinnedCollapsed.toggle() }
@@ -62,7 +65,8 @@ struct HistoryListView: View {
                     SectionHeader(
                         title: "Recent",
                         count: unpinned.count,
-                        performanceSummary: historyViewModel.performanceSummary
+                        performanceSummary: historyViewModel.performanceSummary,
+                        isScrolling: historyViewModel.isScrolling
                     )
                     .listRowInsets(EdgeInsets())
                     .listRowBackground(Color.clear)
@@ -88,7 +92,12 @@ struct HistoryListView: View {
                 .scrollContentBackground(.hidden)
                 .scrollIndicators(.automatic)
                 .accessibilityIdentifier("History.List")
-                .background(ListLiveScrollObserverView(onScroll: { historyViewModel.onScroll() }))
+                .background(
+                    ListLiveScrollObserverView(
+                        onScrollStart: { historyViewModel.scrollDidStart() },
+                        onScrollEnd: { historyViewModel.scrollDidEnd() }
+                    )
+                )
                 .onChange(of: historyViewModel.selectedID) { _, newValue in
                     // 仅当键盘导航时自动滚动到选中项
                     if let id = newValue, historyViewModel.lastSelectionSource == .keyboard {
@@ -113,7 +122,7 @@ struct HistoryListView: View {
     @ViewBuilder
     private func historyRow(item: ClipboardItemDTO) -> some View {
         let isSelected = historyViewModel.selectedID == item.id
-        HistoryItemView(
+        let row = HistoryItemView(
             item: item,
             isKeyboardSelected: isSelected,
             isScrolling: historyViewModel.isScrolling,
@@ -129,8 +138,15 @@ struct HistoryListView: View {
         )
         .equatable()
         .id(item.id)
-        .accessibilityIdentifier("History.Item.\(item.id.uuidString)")
-        .accessibilityValue(isSelected ? "selected" : "unselected")
+
+        return Group {
+            if Self.isUITesting {
+                row.accessibilityIdentifier("History.Item.\(item.id.uuidString)")
+                    .accessibilityValue(isSelected ? "selected" : "unselected")
+            } else {
+                row
+            }
+        }
         .listRowInsets(EdgeInsets())      // 移除默认内边距
         .listRowBackground(Color.clear)    // 透明背景
         .listRowSeparator(.hidden)         // 隐藏分隔线
