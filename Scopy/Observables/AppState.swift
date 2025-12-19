@@ -100,8 +100,7 @@ final class AppState {
 
         startEventListener()
 
-        await settingsViewModel.loadSettings()
-        historyViewModel.applySettings(settingsViewModel.settings)
+        await refreshSettings(applyHotKey: false)
 
         await historyViewModel.loadRecentApps()
         await historyViewModel.load()
@@ -138,17 +137,25 @@ final class AppState {
         case .newItem, .itemUpdated, .thumbnailUpdated, .itemDeleted, .itemPinned, .itemUnpinned, .itemsCleared:
             await historyViewModel.handleEvent(event)
         case .settingsChanged:
-            await settingsViewModel.loadSettings()
-            let settings = settingsViewModel.settings
-            historyViewModel.applySettings(settings)
-
-            if let handler = applyHotKeyHandler {
-                handler(settings.hotkeyKeyCode, settings.hotkeyModifiers)
-            } else {
-                ScopyLog.app.warning("settingsChanged: applyHotKeyHandler not registered, hotkey may be out of sync")
-            }
-
+            await refreshSettings(applyHotKey: true)
             await historyViewModel.load()
+        }
+    }
+
+    private func refreshSettings(applyHotKey: Bool) async {
+        await settingsViewModel.loadSettings()
+        let settings = settingsViewModel.settings
+        historyViewModel.applySettings(settings)
+        if applyHotKey {
+            applyHotKeyIfNeeded(settings: settings)
+        }
+    }
+
+    private func applyHotKeyIfNeeded(settings: SettingsDTO) {
+        if let handler = applyHotKeyHandler {
+            handler(settings.hotkeyKeyCode, settings.hotkeyModifiers)
+        } else {
+            ScopyLog.app.warning("settingsChanged: applyHotKeyHandler not registered, hotkey may be out of sync")
         }
     }
 }

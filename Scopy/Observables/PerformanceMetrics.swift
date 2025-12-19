@@ -16,18 +16,12 @@ public actor PerformanceMetrics {
 
     /// 记录搜索延迟 (ms)
     public func recordSearchLatency(_ ms: Double) {
-        searchLatencies.append(ms)
-        if searchLatencies.count > maxSamples {
-            searchLatencies.removeFirst()
-        }
+        recordLatency(ms, buffer: &searchLatencies)
     }
 
     /// 记录首屏加载延迟 (ms)
     public func recordLoadLatency(_ ms: Double) {
-        loadLatencies.append(ms)
-        if loadLatencies.count > maxSamples {
-            loadLatencies.removeFirst()
-        }
+        recordLatency(ms, buffer: &loadLatencies)
     }
 
     // MARK: - Statistics
@@ -58,12 +52,12 @@ public actor PerformanceMetrics {
 
     /// 格式化搜索 P95 显示 (精确到2位有效数字)
     public var formattedSearchP95: String {
-        formatLatency(searchP95)
+        LatencyFormatter.format(ms: searchP95, samples: nil)
     }
 
     /// 格式化首屏加载 P95 显示
     public var formattedLoadP95: String {
-        formatLatency(loadP95)
+        LatencyFormatter.format(ms: loadP95, samples: nil)
     }
 
     /// 样本数量
@@ -92,15 +86,10 @@ public actor PerformanceMetrics {
         return sorted[min(index, sorted.count - 1)]
     }
 
-    private func formatLatency(_ ms: Double) -> String {
-        if ms == 0 {
-            return "N/A"
-        } else if ms < 1 {
-            return String(format: "%.2f ms", ms)
-        } else if ms < 10 {
-            return String(format: "%.1f ms", ms)
-        } else {
-            return String(format: "%.0f ms", ms)
+    private func recordLatency(_ ms: Double, buffer: inout [Double]) {
+        buffer.append(ms)
+        if buffer.count > maxSamples {
+            buffer.removeFirst()
         }
     }
 }
@@ -132,33 +121,39 @@ public struct PerformanceSummary: Sendable {
 
     /// 格式化搜索 P95 (精确到2位有效数字)
     public var formattedSearchP95: String {
-        formatLatency(searchP95, samples: searchSamples)
+        LatencyFormatter.format(ms: searchP95, samples: searchSamples)
     }
 
     /// 格式化首屏加载 P95
     public var formattedLoadP95: String {
-        formatLatency(loadP95, samples: loadSamples)
+        LatencyFormatter.format(ms: loadP95, samples: loadSamples)
     }
 
     /// 格式化搜索平均值
     public var formattedSearchAvg: String {
-        formatLatency(searchAvg, samples: searchSamples)
+        LatencyFormatter.format(ms: searchAvg, samples: searchSamples)
     }
 
     /// 格式化首屏加载平均值
     public var formattedLoadAvg: String {
-        formatLatency(loadAvg, samples: loadSamples)
+        LatencyFormatter.format(ms: loadAvg, samples: loadSamples)
     }
+}
 
-    private func formatLatency(_ ms: Double, samples: Int) -> String {
-        if samples == 0 {
+private enum LatencyFormatter {
+    static func format(ms: Double, samples: Int?) -> String {
+        if let samples, samples == 0 {
             return "N/A"
-        } else if ms < 1 {
-            return String(format: "%.2f ms", ms)
-        } else if ms < 10 {
-            return String(format: "%.1f ms", ms)
-        } else {
-            return String(format: "%.0f ms", ms)
         }
+        if samples == nil, ms == 0 {
+            return "N/A"
+        }
+        if ms < 1 {
+            return String(format: "%.2f ms", ms)
+        }
+        if ms < 10 {
+            return String(format: "%.1f ms", ms)
+        }
+        return String(format: "%.0f ms", ms)
     }
 }

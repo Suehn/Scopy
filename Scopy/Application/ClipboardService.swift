@@ -242,73 +242,7 @@ actor ClipboardService {
 
         guard let item = try await storage.findByID(itemID) else { return }
 
-        switch item.type {
-        case .text:
-            await MainActor.run {
-                monitor.copyToClipboard(text: item.plainText)
-            }
-        case .rtf, .html, .image:
-            let data = await storage.loadPayloadData(for: item)
-            if let data {
-                let itemType = item.type
-                let plainText: String
-                if itemType == .rtf {
-                    plainText = item.plainText.isEmpty
-                        ? (NSAttributedString(rtf: data, documentAttributes: nil)?.string ?? "")
-                        : item.plainText
-                } else if itemType == .html {
-                    let options: [NSAttributedString.DocumentReadingOptionKey: Any] = [
-                        .documentType: NSAttributedString.DocumentType.html
-                    ]
-                    plainText = item.plainText.isEmpty
-                        ? ((try? NSAttributedString(data: data, options: options, documentAttributes: nil))?.string ?? "")
-                        : item.plainText
-                } else {
-                    plainText = item.plainText
-                }
-
-                let pasteboardType: NSPasteboard.PasteboardType
-                switch itemType {
-                case .rtf: pasteboardType = .rtf
-                case .html: pasteboardType = .html
-                case .image: pasteboardType = .png
-                default: pasteboardType = .string
-                }
-
-                await MainActor.run {
-                    if itemType == .rtf || itemType == .html {
-                        monitor.copyToClipboard(text: plainText, data: data, type: pasteboardType)
-                    } else {
-                        monitor.copyToClipboard(data: data, type: pasteboardType)
-                    }
-                }
-            }
-        case .file:
-            let urlData = await storage.loadPayloadData(for: item)
-            if let data = urlData,
-               let fileURLs = ClipboardMonitor.deserializeFileURLs(data),
-               !fileURLs.isEmpty {
-                await MainActor.run {
-                    monitor.copyToClipboard(fileURLs: fileURLs)
-                }
-            } else {
-                let paths = item.plainText.components(separatedBy: "\n")
-                let fileURLs = paths.compactMap { URL(fileURLWithPath: $0) }
-                if !fileURLs.isEmpty {
-                    await MainActor.run {
-                        monitor.copyToClipboard(fileURLs: fileURLs)
-                    }
-                } else {
-                    await MainActor.run {
-                        monitor.copyToClipboard(text: item.plainText)
-                    }
-                }
-            }
-        case .other:
-            await MainActor.run {
-                monitor.copyToClipboard(text: item.plainText)
-            }
-        }
+        await performClipboardCopy(item: item, monitor: monitor, storage: storage)
 
         var updated = item
         updated.lastUsedAt = Date()
@@ -321,6 +255,98 @@ actor ClipboardService {
 
         await search.handleUpsertedItem(updated)
         await yieldEvent(.itemUpdated(await toDTO(updated, storage: storage, thumbnailGenerationPriority: .userInitiated)))
+    }
+
+    private func performClipboardCopy(
+        item: StorageService.StoredItem,
+        monitor: ClipboardMonitor,
+        storage: StorageService
+    ) async {
+        switch item.type {
+        case .text:
+            await copyPlainText(item.plainText, monitor: monitor)
+        case .rtf, .html, .image:
+            await copyRichPayload(item: item, monitor: monitor, storage: storage)
+        case .file:
+            await copyFilePayload(item: item, monitor: monitor, storage: storage)
+        case .other:
+            await copyPlainText(item.plainText, monitor: monitor)
+        }
+    }
+
+    private func copyPlainText(_ text: String, monitor: ClipboardMonitor) async {
+        await MainActor.run {
+            monitor.copyToClipboard(text: text)
+        }
+    }
+
+    private func copyRichPayload(
+        item: StorageService.StoredItem,
+        monitor: ClipboardMonitor,
+        storage: StorageService
+    ) async {
+        let data = await storage.loadPayloadData(for: item)
+        guard let data else { return }
+
+        let itemType = item.type
+        let pasteboardType: NSPasteboard.PasteboardType
+        switch itemType {
+        case .rtf: pasteboardType = .rtf
+        case .html: pasteboardType = .html
+        case .image: pasteboardType = .png
+        default: pasteboardType = .string
+        }
+
+        await MainActor.run {
+            if itemType == .rtf || itemType == .html {
+                let plainText = Self.resolvePlainText(for: item, data: data)
+                monitor.copyToClipboard(text: plainText, data: data, type: pasteboardType)
+            } else {
+                monitor.copyToClipboard(data: data, type: pasteboardType)
+            }
+        }
+    }
+
+    private func copyFilePayload(
+        item: StorageService.StoredItem,
+        monitor: ClipboardMonitor,
+        storage: StorageService
+    ) async {
+        let urlData = await storage.loadPayloadData(for: item)
+        if let data = urlData,
+           let fileURLs = ClipboardMonitor.deserializeFileURLs(data),
+           !fileURLs.isEmpty {
+            await MainActor.run {
+                monitor.copyToClipboard(fileURLs: fileURLs)
+            }
+            return
+        }
+
+        let paths = item.plainText.components(separatedBy: "\n")
+        let fileURLs = paths.compactMap { URL(fileURLWithPath: $0) }
+        if !fileURLs.isEmpty {
+            await MainActor.run {
+                monitor.copyToClipboard(fileURLs: fileURLs)
+            }
+        } else {
+            await copyPlainText(item.plainText, monitor: monitor)
+        }
+    }
+
+    nonisolated private static func resolvePlainText(for item: StorageService.StoredItem, data: Data) -> String {
+        if !item.plainText.isEmpty { return item.plainText }
+
+        switch item.type {
+        case .rtf:
+            return NSAttributedString(rtf: data, documentAttributes: nil)?.string ?? ""
+        case .html:
+            let options: [NSAttributedString.DocumentReadingOptionKey: Any] = [
+                .documentType: NSAttributedString.DocumentType.html
+            ]
+            return (try? NSAttributedString(data: data, options: options, documentAttributes: nil))?.string ?? ""
+        default:
+            return item.plainText
+        }
     }
 
     func updateSettings(_ newSettings: SettingsDTO) async throws {

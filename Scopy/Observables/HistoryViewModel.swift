@@ -78,6 +78,10 @@ final class HistoryViewModel {
         !searchQuery.isEmpty || appFilter != nil || typeFilter != nil || typeFilters != nil
     }
 
+    private var isUnfilteredList: Bool {
+        !hasActiveFilters
+    }
+
     var lastSelectionSource: SelectionSource = .programmatic
 
     var isScrolling: Bool = false
@@ -138,17 +142,11 @@ final class HistoryViewModel {
     }
 
     func stop() {
-        searchTask?.cancel()
-        loadMoreTask?.cancel()
-        refineTask?.cancel()
-        scrollEndTask?.cancel()
-        recentAppsRefreshTask?.cancel()
-
-        searchTask = nil
-        loadMoreTask = nil
-        refineTask = nil
-        scrollEndTask = nil
-        recentAppsRefreshTask = nil
+        cancelTask(&searchTask)
+        cancelTask(&loadMoreTask)
+        cancelTask(&refineTask)
+        cancelTask(&scrollEndTask)
+        cancelTask(&recentAppsRefreshTask)
     }
 
     // MARK: - Event Handling
@@ -156,7 +154,6 @@ final class HistoryViewModel {
     func handleEvent(_ event: ClipboardEvent) async {
         switch event {
         case .newItem(let item):
-            let isUnfilteredList = searchQuery.isEmpty && appFilter == nil && typeFilter == nil && typeFilters == nil
             let didMatchCurrentFilters = matchesCurrentFilters(item)
 
             items.removeAll { $0.id == item.id }
@@ -220,7 +217,6 @@ final class HistoryViewModel {
                 canLoadMore = loadedCount < totalCount
             }
         case .itemDeleted(let id):
-            let isUnfilteredList = searchQuery.isEmpty && appFilter == nil && typeFilter == nil && typeFilters == nil
             let wasPresent = items.contains(where: { $0.id == id })
             items.removeAll { $0.id == id }
             invalidatePinnedCache()
@@ -361,7 +357,7 @@ final class HistoryViewModel {
     }
 
     func loadMore() async {
-        loadMoreTask?.cancel()
+        cancelTask(&loadMoreTask)
 
         loadMoreTask = Task {
             guard !Task.isCancelled else { return }
@@ -373,7 +369,7 @@ final class HistoryViewModel {
             defer { isLoading = false }
 
             do {
-                if !searchQuery.isEmpty || appFilter != nil || typeFilter != nil || typeFilters != nil {
+                if !isUnfilteredList {
                     // When current result is prefilter (total = -1), force full fuzzy before paging.
                     if totalCount == -1,
                        (searchMode == .fuzzy || searchMode == .fuzzyPlus) {
@@ -435,17 +431,15 @@ final class HistoryViewModel {
     // MARK: - Search
 
     func search() {
-        searchTask?.cancel()
-        refineTask?.cancel()
-        refineTask = nil
+        cancelTask(&searchTask)
+        cancelTask(&refineTask)
 
         searchVersion += 1
         let currentVersion = searchVersion
 
-        loadMoreTask?.cancel()
-        loadMoreTask = nil
+        cancelTask(&loadMoreTask)
 
-        if searchQuery.isEmpty && appFilter == nil && typeFilter == nil && typeFilters == nil {
+        if isUnfilteredList {
             searchTask = Task {
                 guard !Task.isCancelled else { return }
                 guard currentVersion == searchVersion else { return }
@@ -646,5 +640,10 @@ final class HistoryViewModel {
     private func invalidatePinnedCache() {
         pinnedItemsCache = nil
         unpinnedItemsCache = nil
+    }
+
+    private func cancelTask(_ task: inout Task<Void, Never>?) {
+        task?.cancel()
+        task = nil
     }
 }

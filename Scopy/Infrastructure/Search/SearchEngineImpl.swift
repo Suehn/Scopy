@@ -202,18 +202,12 @@ public actor SearchEngineImpl {
     // MARK: - Cache / Index Updates
 
     public func invalidateCache() {
-        recentItemsCache = []
-        cacheTimestamp = .distantPast
-
-        fullIndex = nil
-        fullIndexStale = true
-        markIndexChanged()
+        resetRecentCache()
+        resetFullIndex()
     }
 
     func handleUpsertedItem(_ item: ClipboardStoredItem) {
-        recentItemsCache = []
-        cacheTimestamp = .distantPast
-        fuzzySortedMatchesCache = nil
+        resetQueryCaches()
 
         guard var index = fullIndex, !fullIndexStale else { return }
         upsertItemIntoIndex(item, index: &index)
@@ -222,9 +216,7 @@ public actor SearchEngineImpl {
     }
 
     func handlePinnedChange(id: UUID, pinned: Bool) {
-        recentItemsCache = []
-        cacheTimestamp = .distantPast
-        fuzzySortedMatchesCache = nil
+        resetQueryCaches()
 
         guard var index = fullIndex,
               !fullIndexStale,
@@ -259,13 +251,27 @@ public actor SearchEngineImpl {
             }
         }
 
-        recentItemsCache = []
-        cacheTimestamp = .distantPast
-        fuzzySortedMatchesCache = nil
+        resetQueryCaches()
     }
 
     func handleClearAll() {
         invalidateCache()
+    }
+
+    private func resetRecentCache() {
+        recentItemsCache = []
+        cacheTimestamp = .distantPast
+    }
+
+    private func resetQueryCaches() {
+        resetRecentCache()
+        fuzzySortedMatchesCache = nil
+    }
+
+    private func resetFullIndex() {
+        fullIndex = nil
+        fullIndexStale = true
+        markIndexChanged()
     }
 
     // MARK: - Search API

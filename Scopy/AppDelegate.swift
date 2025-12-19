@@ -28,74 +28,119 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        let isUITesting = ProcessInfo.processInfo.arguments.contains("--uitesting")
-        let isExportHarness = isUITesting && ProcessInfo.processInfo.environment["SCOPY_UITEST_EXPORT_HARNESS"] == "1"
+        let context = resolveLaunchContext()
 
-        if isExportHarness {
-            let window = NSWindow(
-                contentRect: NSRect(x: 0, y: 0, width: 820, height: 620),
-                styleMask: [.titled, .closable, .resizable, .fullSizeContentView],
-                backing: .buffered,
-                defer: false
-            )
-            window.title = "Scopy Export Harness"
-            window.titleVisibility = .hidden
-            window.titlebarAppearsTransparent = true
-            window.isReleasedWhenClosed = false
-            window.level = .floating
-            window.center()
-            window.contentView = NSHostingView(rootView: ExportPreviewHarnessView())
-            window.makeKeyAndOrderFront(nil)
-            NSApp.activate(ignoringOtherApps: true)
-            uiTestWindow = window
+        if context.isExportHarness {
+            uiTestWindow = makeExportHarnessWindow()
             return
         }
 
         let appState = AppState.shared
+        let rootView = makeRootView(appState: appState)
 
-        let rootView = ContentView()
-            .environment(appState)
-            .environment(appState.historyViewModel)
-            .environment(appState.settingsViewModel)
-
-        if isUITesting {
-            // XCUITest interacts more reliably with a standard window than a non-activating panel.
-            let window = NSWindow(
-                contentRect: NSRect(
-                    x: 0,
-                    y: 0,
-                    width: Int(ScopySize.Window.mainWidth),
-                    height: Int(ScopySize.Window.mainHeight)
-                ),
-                styleMask: [.titled, .closable, .resizable, .fullSizeContentView],
-                backing: .buffered,
-                defer: false
-            )
-            window.title = "Scopy"
-            window.titleVisibility = .hidden
-            window.titlebarAppearsTransparent = true
-            window.isReleasedWhenClosed = false
-            // Keep the test window on top to avoid other apps occluding it and causing hit-testing failures.
-            window.level = .floating
-            window.center()
-            window.contentView = NSHostingView(rootView: rootView)
-            window.makeKeyAndOrderFront(nil)
-            NSApp.activate(ignoringOtherApps: true)
-            uiTestWindow = window
+        if context.isUITesting {
+            uiTestWindow = makeUITestWindow(rootView: rootView)
         } else {
-            // 创建浮动面板
-            panel = FloatingPanel(
-                contentRect: NSRect(x: 0, y: 0, width: Int(ScopySize.Window.mainWidth), height: Int(ScopySize.Window.mainHeight)),
-                statusBarButton: statusItem.button
-            ) {
-                rootView
-            }
+            panel = makeMainPanel(rootView: rootView)
         }
 
         // 显示状态栏图标
         _ = statusItem
 
-        // 设置 UI 回调
+        configureAppHandlers(appState: appState, isUITesting: context.isUITesting)
+
+        // 启动后端服务
+        Task {
+            await appState.start()
+        }
+
+        if context.isUITesting, ProcessInfo.processInfo.environment["SCOPY_UITEST_AUTO_EXPORT_MARKDOWN"] == "1" {
+            Task { @MainActor in
+                await self.runUITestAutoExportMarkdown(appState: appState)
+            }
+        }
+
+        setupHotKeyRegistration()
+        installLocalEventMonitor()
+    }
+
+    private struct LaunchContext {
+        let isUITesting: Bool
+        let isExportHarness: Bool
+    }
+
+    private func resolveLaunchContext() -> LaunchContext {
+        let isUITesting = ProcessInfo.processInfo.arguments.contains("--uitesting")
+        let isExportHarness = isUITesting && ProcessInfo.processInfo.environment["SCOPY_UITEST_EXPORT_HARNESS"] == "1"
+        return LaunchContext(isUITesting: isUITesting, isExportHarness: isExportHarness)
+    }
+
+    private func makeRootView(appState: AppState) -> some View {
+        ContentView()
+            .environment(appState)
+            .environment(appState.historyViewModel)
+            .environment(appState.settingsViewModel)
+    }
+
+    private func makeExportHarnessWindow() -> NSWindow {
+        let window = makeHostingWindow(
+            rootView: ExportPreviewHarnessView(),
+            size: NSSize(width: 820, height: 620),
+            styleMask: [.titled, .closable, .resizable, .fullSizeContentView],
+            title: "Scopy Export Harness",
+            level: .floating
+        )
+        return window
+    }
+
+    private func makeUITestWindow<V: View>(rootView: V) -> NSWindow {
+        let window = makeHostingWindow(
+            rootView: rootView,
+            size: NSSize(width: ScopySize.Window.mainWidth, height: ScopySize.Window.mainHeight),
+            styleMask: [.titled, .closable, .resizable, .fullSizeContentView],
+            title: "Scopy",
+            level: .floating
+        )
+        return window
+    }
+
+    private func makeMainPanel<V: View>(rootView: V) -> FloatingPanel {
+        FloatingPanel(
+            contentRect: NSRect(x: 0, y: 0, width: Int(ScopySize.Window.mainWidth), height: Int(ScopySize.Window.mainHeight)),
+            statusBarButton: statusItem.button
+        ) {
+            rootView
+        }
+    }
+
+    private func makeHostingWindow<V: View>(
+        rootView: V,
+        size: NSSize,
+        styleMask: NSWindow.StyleMask,
+        title: String,
+        level: NSWindow.Level? = nil
+    ) -> NSWindow {
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: Int(size.width), height: Int(size.height)),
+            styleMask: styleMask,
+            backing: .buffered,
+            defer: false
+        )
+        window.title = title
+        window.titleVisibility = .hidden
+        window.titlebarAppearsTransparent = true
+        window.isReleasedWhenClosed = false
+        if let level {
+            window.level = level
+        }
+        window.center()
+        window.contentView = NSHostingView(rootView: rootView)
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        return window
+    }
+
+    private func configureAppHandlers(appState: AppState, isUITesting: Bool) {
         appState.closePanelHandler = { [weak self] in
             if isUITesting {
                 self?.uiTestWindow?.close()
@@ -115,18 +160,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             self?.hotKeyService?.unregister()
             self?.isHotKeyRegistered = false
         }
+    }
 
-        // 启动后端服务
-        Task {
-            await appState.start()
-        }
-
-        if isUITesting, ProcessInfo.processInfo.environment["SCOPY_UITEST_AUTO_EXPORT_MARKDOWN"] == "1" {
-            Task { @MainActor in
-                await self.runUITestAutoExportMarkdown(appState: appState)
-            }
-        }
-
+    private func setupHotKeyRegistration() {
         // 注册全局快捷键（从设置加载或使用默认 ⇧⌘C）
         hotKeyService = HotKeyService()
         Task { @MainActor [weak self] in
@@ -134,7 +170,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             let settings = await settingsStore.load()
             applyHotKey(keyCode: settings.hotkeyKeyCode, modifiers: settings.hotkeyModifiers)
         }
+    }
 
+    private func installLocalEventMonitor() {
         // 注册 ⌘, 快捷键打开设置
         // v0.22: 存储监视器引用，以便在应用退出时移除
         localEventMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
@@ -166,10 +204,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 return nil
             }
             return event
-        }
-
-        if isUITesting {
-            // Window already presented above.
         }
     }
 

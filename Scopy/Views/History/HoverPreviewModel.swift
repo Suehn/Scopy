@@ -16,4 +16,17 @@ final class HoverPreviewModel: ObservableObject {
     @Published var exportSuccess: Bool = false
     @Published var exportFailed: Bool = false
     @Published var exportErrorMessage: String?
+
+    func reset() {
+        previewCGImage = nil
+        text = nil
+        markdownHTML = nil
+        markdownContentSize = nil
+        markdownHasHorizontalOverflow = false
+        isMarkdown = false
+        isExporting = false
+        exportSuccess = false
+        exportFailed = false
+        exportErrorMessage = nil
+    }
 }

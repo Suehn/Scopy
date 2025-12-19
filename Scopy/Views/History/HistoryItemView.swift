@@ -237,11 +237,8 @@ struct HistoryItemView: View, Equatable {
 
             isHovering = hovering
 
-            // 取消之前的防抖任务
-            hoverDebounceTask?.cancel()
-            // 取消之前的退出清理任务
-            hoverExitTask?.cancel()
-            hoverExitTask = nil
+            cancelHoverDebounceTask()
+            cancelHoverExitTask()
 
             if hovering {
                 // 静止 150ms 后才更新全局选中状态
@@ -265,25 +262,7 @@ struct HistoryItemView: View, Equatable {
                 }
             } else {
                 // v0.24: popover 出现/消失时可能短暂触发 hover false，做 120ms 退出防抖
-                hoverExitTask = Task {
-                    try? await Task.sleep(nanoseconds: 120_000_000)
-                    guard !Task.isCancelled else { return }
-                    await MainActor.run {
-                        guard !self.isHovering, !self.isPopoverHovering else { return }
-                        self.cancelPreviewTask()
-                        self.showPreview = false
-                        self.showTextPreview = false
-                        self.previewModel.previewCGImage = nil
-                        self.previewModel.text = nil  // v0.15: Reset text preview content
-                        self.previewModel.markdownHTML = nil
-                        self.previewModel.markdownContentSize = nil
-                        self.previewModel.isMarkdown = false
-                        self.previewModel.isExporting = false
-                        self.previewModel.exportSuccess = false
-                        self.previewModel.exportFailed = false
-                        self.markdownWebViewController = nil
-                    }
-                }
+                scheduleHoverExitCleanup()
             }
         }
         .popover(isPresented: $showPreview, arrowEdge: .trailing) {
@@ -291,21 +270,10 @@ struct HistoryItemView: View, Equatable {
                 .onHover { hovering in
                     isPopoverHovering = hovering
                     if hovering {
-                        hoverExitTask?.cancel()
-                        hoverExitTask = nil
+                        cancelHoverExitTask()
                     } else if !isHovering {
                         // popover 退出且行未悬停时，触发同样的延迟清理
-                        hoverExitTask?.cancel()
-                        hoverExitTask = Task {
-                            try? await Task.sleep(nanoseconds: 120_000_000)
-                            guard !Task.isCancelled else { return }
-                            await MainActor.run {
-                                guard !self.isHovering, !self.isPopoverHovering else { return }
-                                self.cancelPreviewTask()
-                                self.showPreview = false
-                                self.previewModel.previewCGImage = nil
-                            }
-                        }
+                        scheduleHoverExitCleanup()
                     }
                 }
         }
@@ -314,28 +282,10 @@ struct HistoryItemView: View, Equatable {
                 .onHover { hovering in
                     isPopoverHovering = hovering
                     if hovering {
-                        hoverExitTask?.cancel()
-                        hoverExitTask = nil
+                        cancelHoverExitTask()
                     } else if !isHovering {
-                        hoverExitTask?.cancel()
-                        hoverExitTask = Task {
-                            try? await Task.sleep(nanoseconds: 120_000_000)
-                            guard !Task.isCancelled else { return }
-                            await MainActor.run {
-                                guard !self.isHovering, !self.isPopoverHovering else { return }
-                                self.cancelPreviewTask()
-                                self.showTextPreview = false
-                                self.previewModel.text = nil
-                                    self.previewModel.markdownHTML = nil
-                                    self.previewModel.markdownContentSize = nil
-                                    self.previewModel.isMarkdown = false
-                                    self.previewModel.isExporting = false
-                                    self.previewModel.exportSuccess = false
-                                    self.previewModel.exportFailed = false
-                                    self.markdownWebViewController = nil
-                                }
-                            }
-                        }
+                        scheduleHoverExitCleanup()
+                    }
                 }
         }
         .contextMenu {
@@ -352,45 +302,15 @@ struct HistoryItemView: View, Equatable {
         }
         // v0.17: 增强任务清理 - 确保视图消失时释放所有任务引用
         .onDisappear {
-            hoverDebounceTask?.cancel()
-            hoverDebounceTask = nil
-            hoverExitTask?.cancel()
-            hoverExitTask = nil
-            cancelPreviewTask()
-            // 清理状态，防止内存泄漏
-            previewModel.previewCGImage = nil
-            previewModel.text = nil
-            previewModel.markdownHTML = nil
-                previewModel.markdownContentSize = nil
-                previewModel.markdownHasHorizontalOverflow = false
-                previewModel.isMarkdown = false
-                previewModel.isExporting = false
-                previewModel.exportSuccess = false
-                previewModel.exportFailed = false
-                markdownWebViewController = nil
-            }
+            cancelHoverTasks()
+            resetPreviewState(hidePopovers: true)
+        }
         .onChange(of: isScrolling) { _, newValue in
             guard newValue else { return }
             isHovering = false
-            hoverDebounceTask?.cancel()
-            hoverDebounceTask = nil
-            hoverExitTask?.cancel()
-            hoverExitTask = nil
-            cancelPreviewTask()
-            showPreview = false
-            showTextPreview = false
-            isPopoverHovering = false
-            previewModel.previewCGImage = nil
-            previewModel.text = nil
-            previewModel.markdownHTML = nil
-                previewModel.markdownContentSize = nil
-                previewModel.markdownHasHorizontalOverflow = false
-                previewModel.isMarkdown = false
-                previewModel.isExporting = false
-                previewModel.exportSuccess = false
-                previewModel.exportFailed = false
-                markdownWebViewController = nil
-            }
+            cancelHoverTasks()
+            resetPreviewState(hidePopovers: true)
+        }
         .background(markdownPreMeasureView)
     }
 
@@ -568,6 +488,46 @@ struct HistoryItemView: View, Equatable {
         hoverPreviewTask = nil
         hoverMarkdownTask?.cancel()
         hoverMarkdownTask = nil
+    }
+
+    private func cancelHoverDebounceTask() {
+        hoverDebounceTask?.cancel()
+        hoverDebounceTask = nil
+    }
+
+    private func cancelHoverExitTask() {
+        hoverExitTask?.cancel()
+        hoverExitTask = nil
+    }
+
+    private func cancelHoverTasks() {
+        cancelHoverDebounceTask()
+        cancelHoverExitTask()
+    }
+
+    private func resetPreviewModel() {
+        previewModel.reset()
+        markdownWebViewController = nil
+    }
+
+    private func resetPreviewState(hidePopovers: Bool) {
+        cancelPreviewTask()
+        if hidePopovers {
+            showPreview = false
+            showTextPreview = false
+        }
+        isPopoverHovering = false
+        resetPreviewModel()
+    }
+
+    private func scheduleHoverExitCleanup() {
+        cancelHoverExitTask()
+        hoverExitTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 120_000_000)
+            guard !Task.isCancelled else { return }
+            guard !self.isHovering, !self.isPopoverHovering else { return }
+            self.resetPreviewState(hidePopovers: true)
+        }
     }
 
     // MARK: - Text Preview (v0.15)

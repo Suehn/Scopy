@@ -20,6 +20,59 @@ private enum MarkdownPreviewScrollViewResolver {
     }
 }
 
+private enum MarkdownPreviewMessageParser {
+    static func metrics(from message: WKScriptMessage) -> MarkdownContentMetrics? {
+        guard message.name == MarkdownPreviewWebView.sizeMessageHandlerName else { return nil }
+
+        var size: CGSize?
+        var overflowX: Bool = false
+        if let dict = message.body as? [String: Any] {
+            size = parseSize(from: dict)
+            overflowX = parseOverflow(from: dict["overflowX"])
+        } else if let dict = message.body as? NSDictionary {
+            size = CGSize(width: cgFloat(from: dict["width"]), height: cgFloat(from: dict["height"]))
+            overflowX = parseOverflow(from: dict["overflowX"])
+        } else if let n = message.body as? NSNumber {
+            // Backward-compatible: height-only payload.
+            size = CGSize(width: 0, height: CGFloat(truncating: n))
+        }
+
+        guard let size else { return nil }
+        guard size.width.isFinite, size.height.isFinite else { return nil }
+        guard size.height > 0 else { return nil }
+        return MarkdownContentMetrics(size: size, hasHorizontalOverflow: overflowX)
+    }
+
+    private static func parseSize(from dict: [String: Any]) -> CGSize {
+        let w = dict["width"]
+        let h = dict["height"]
+        return CGSize(width: cgFloat(from: w), height: cgFloat(from: h))
+    }
+
+    private static func parseOverflow(from value: Any?) -> Bool {
+        if let b = value as? Bool { return b }
+        if let n = value as? NSNumber { return n.boolValue }
+        if let s = value as? String { return s == "true" || s == "1" }
+        return false
+    }
+
+    private static func cgFloat(from any: Any?) -> CGFloat {
+        if let n = any as? NSNumber {
+            return CGFloat(truncating: n)
+        }
+        if let d = any as? Double {
+            return CGFloat(d)
+        }
+        if let i = any as? Int {
+            return CGFloat(i)
+        }
+        if let s = any as? String, let d = Double(s) {
+            return CGFloat(d)
+        }
+        return 0
+    }
+}
+
 struct MarkdownContentMetrics: Equatable {
     let size: CGSize
     let hasHorizontalOverflow: Bool
@@ -217,42 +270,7 @@ struct MarkdownPreviewWebView: NSViewRepresentable {
         }
 
         func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
-            guard message.name == MarkdownPreviewWebView.sizeMessageHandlerName else { return }
-
-            var size: CGSize?
-            var overflowX: Bool = false
-            if let dict = message.body as? [String: Any] {
-                let w = dict["width"]
-                let h = dict["height"]
-                size = CGSize(width: Self.cgFloat(from: w), height: Self.cgFloat(from: h))
-                if let b = dict["overflowX"] as? Bool {
-                    overflowX = b
-                } else if let n = dict["overflowX"] as? NSNumber {
-                    overflowX = n.boolValue
-                } else if let s = dict["overflowX"] as? String {
-                    overflowX = (s == "true" || s == "1")
-                }
-            } else if let dict = message.body as? NSDictionary {
-                let w = dict["width"]
-                let h = dict["height"]
-                size = CGSize(width: Self.cgFloat(from: w), height: Self.cgFloat(from: h))
-                if let b = dict["overflowX"] as? Bool {
-                    overflowX = b
-                } else if let n = dict["overflowX"] as? NSNumber {
-                    overflowX = n.boolValue
-                } else if let s = dict["overflowX"] as? String {
-                    overflowX = (s == "true" || s == "1")
-                }
-            } else if let n = message.body as? NSNumber {
-                // Backward-compatible: height-only payload.
-                size = CGSize(width: 0, height: CGFloat(truncating: n))
-            }
-
-            guard let size else { return }
-            guard size.width.isFinite, size.height.isFinite else { return }
-            guard size.height > 0 else { return }
-
-            let metrics = MarkdownContentMetrics(size: size, hasHorizontalOverflow: overflowX)
+            guard let metrics = MarkdownPreviewMessageParser.metrics(from: message) else { return }
             if abs(metrics.size.width - lastReportedMetrics.size.width) < 1,
                abs(metrics.size.height - lastReportedMetrics.size.height) < 1,
                metrics.hasHorizontalOverflow == lastReportedMetrics.hasHorizontalOverflow
@@ -267,22 +285,6 @@ struct MarkdownPreviewWebView: NSViewRepresentable {
             Task { @MainActor in
                 self.onContentSizeChange?(metrics)
             }
-        }
-
-        private static func cgFloat(from any: Any?) -> CGFloat {
-            if let n = any as? NSNumber {
-                return CGFloat(truncating: n)
-            }
-            if let d = any as? Double {
-                return CGFloat(d)
-            }
-            if let i = any as? Int {
-                return CGFloat(i)
-            }
-            if let s = any as? String, let d = Double(s) {
-                return CGFloat(d)
-            }
-            return 0
         }
     }
 }
@@ -410,41 +412,7 @@ final class MarkdownPreviewWebViewController: NSObject, ObservableObject, WKNavi
     // MARK: - WKScriptMessageHandler
 
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
-        guard message.name == "scopySize" else { return }
-
-        var size: CGSize?
-        var overflowX: Bool = false
-        if let dict = message.body as? [String: Any] {
-            let w = dict["width"]
-            let h = dict["height"]
-            size = CGSize(width: Self.cgFloat(from: w), height: Self.cgFloat(from: h))
-            if let b = dict["overflowX"] as? Bool {
-                overflowX = b
-            } else if let n = dict["overflowX"] as? NSNumber {
-                overflowX = n.boolValue
-            } else if let s = dict["overflowX"] as? String {
-                overflowX = (s == "true" || s == "1")
-            }
-        } else if let dict = message.body as? NSDictionary {
-            let w = dict["width"]
-            let h = dict["height"]
-            size = CGSize(width: Self.cgFloat(from: w), height: Self.cgFloat(from: h))
-            if let b = dict["overflowX"] as? Bool {
-                overflowX = b
-            } else if let n = dict["overflowX"] as? NSNumber {
-                overflowX = n.boolValue
-            } else if let s = dict["overflowX"] as? String {
-                overflowX = (s == "true" || s == "1")
-            }
-        } else if let n = message.body as? NSNumber {
-            size = CGSize(width: 0, height: CGFloat(truncating: n))
-        }
-
-        guard let size else { return }
-        guard size.width.isFinite, size.height.isFinite else { return }
-        guard size.height > 0 else { return }
-
-        let metrics = MarkdownContentMetrics(size: size, hasHorizontalOverflow: overflowX)
+        guard let metrics = MarkdownPreviewMessageParser.metrics(from: message) else { return }
         if abs(metrics.size.width - lastReportedMetrics.size.width) < 1,
            abs(metrics.size.height - lastReportedMetrics.size.height) < 1,
            metrics.hasHorizontalOverflow == lastReportedMetrics.hasHorizontalOverflow
@@ -463,22 +431,6 @@ final class MarkdownPreviewWebViewController: NSObject, ObservableObject, WKNavi
         Task { @MainActor in
             self.onContentSizeChange?(metrics)
         }
-    }
-
-    private static func cgFloat(from any: Any?) -> CGFloat {
-        if let n = any as? NSNumber {
-            return CGFloat(truncating: n)
-        }
-        if let d = any as? Double {
-            return CGFloat(d)
-        }
-        if let i = any as? Int {
-            return CGFloat(i)
-        }
-        if let s = any as? String, let d = Double(s) {
-            return CGFloat(d)
-        }
-        return 0
     }
 }
 

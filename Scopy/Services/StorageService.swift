@@ -101,11 +101,7 @@ public final class StorageService {
 
         // v0.22: 改进目录创建错误处理 - 记录错误但不阻止初始化
         // 目录创建失败通常是权限问题，后续操作会有更具体的错误
-        do {
-            try FileManager.default.createDirectory(at: rootURL, withIntermediateDirectories: true)
-        } catch {
-            ScopyLog.storage.warning("Failed to create app directory: \(error.localizedDescription, privacy: .private)")
-        }
+        Self.createDirectoryIfNeeded(at: rootURL, description: "app directory")
 
         self.rootDirectory = rootURL
         self.dbPath = databasePath ?? rootURL.appendingPathComponent("clipboard.db").path
@@ -116,17 +112,8 @@ public final class StorageService {
         self.externalStorageDirectoryPath = externalPath
         self.thumbnailCacheDirectoryPath = thumbnailPath
 
-        do {
-            try FileManager.default.createDirectory(atPath: externalStoragePath, withIntermediateDirectories: true)
-        } catch {
-            ScopyLog.storage.warning("Failed to create external storage directory: \(error.localizedDescription, privacy: .private)")
-        }
-
-        do {
-            try FileManager.default.createDirectory(atPath: thumbnailCachePath, withIntermediateDirectories: true)
-        } catch {
-            ScopyLog.storage.warning("Failed to create thumbnail cache directory: \(error.localizedDescription, privacy: .private)")
-        }
+        Self.createDirectoryIfNeeded(at: URL(fileURLWithPath: externalStoragePath), description: "external storage directory")
+        Self.createDirectoryIfNeeded(at: URL(fileURLWithPath: thumbnailCachePath), description: "thumbnail cache directory")
 
         self.repository = SQLiteClipboardRepository(dbPath: self.dbPath)
     }
@@ -195,6 +182,14 @@ public final class StorageService {
         FileManager.default.temporaryDirectory
             .appendingPathComponent("ScopyTemp", isDirectory: true)
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
+    }
+
+    private static func createDirectoryIfNeeded(at url: URL, description: String) {
+        do {
+            try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        } catch {
+            ScopyLog.storage.warning("Failed to create \(description): \(error.localizedDescription, privacy: .private)")
+        }
     }
 
     deinit {

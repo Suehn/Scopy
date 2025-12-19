@@ -6,7 +6,10 @@ import Foundation
 /// - Intended use: avoid `AsyncStream` `.unbounded` buffering while preserving event ordering.
 actor AsyncBoundedQueue<Element: Sendable> {
     private let capacity: Int
-    private var buffer: [Element] = []
+    private var buffer: [Element?]
+    private var headIndex: Int = 0
+    private var tailIndex: Int = 0
+    private var bufferedCount: Int = 0
     private var isFinished = false
 
     private struct ReceiverWaiter {
@@ -23,7 +26,9 @@ actor AsyncBoundedQueue<Element: Sendable> {
     private var waitingSenders: [SenderWaiter] = []
 
     init(capacity: Int) {
-        self.capacity = max(1, capacity)
+        let safeCapacity = max(1, capacity)
+        self.capacity = safeCapacity
+        self.buffer = Array(repeating: nil, count: safeCapacity)
     }
 
     func enqueue(_ element: Element) async {
@@ -36,7 +41,7 @@ actor AsyncBoundedQueue<Element: Sendable> {
             return
         }
 
-        while buffer.count >= capacity && !isFinished {
+        while bufferedCount >= capacity && !isFinished {
             guard !Task.isCancelled else { return }
             let waiterID = UUID()
             await withTaskCancellationHandler {
@@ -58,12 +63,17 @@ actor AsyncBoundedQueue<Element: Sendable> {
             return
         }
 
-        buffer.append(element)
+        buffer[tailIndex] = element
+        tailIndex = (tailIndex + 1) % capacity
+        bufferedCount += 1
     }
 
     func dequeue() async -> Element? {
-        if !buffer.isEmpty {
-            let element = buffer.removeFirst()
+        if bufferedCount > 0 {
+            let element = buffer[headIndex]
+            buffer[headIndex] = nil
+            headIndex = (headIndex + 1) % capacity
+            bufferedCount -= 1
             if !waitingSenders.isEmpty {
                 let sender = waitingSenders.removeFirst()
                 sender.continuation.resume()
