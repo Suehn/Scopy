@@ -34,6 +34,19 @@
 - runner：`macos-15`
 - Xcode：`16.0`
 
+## 本次更新（v0.50.fix11）
+
+- **Perf/UI（滚动）**：仅在预览开启时才创建 `ScrollWheelDismissMonitor`，避免列表每行常驻 `NSViewRepresentable`。
+- **Perf/UI（滚动）**：`relativeTimeText` 在 `HistoryItemView.init` 预初始化，移除 `.onAppear` 首次写入 `@State`，减少行进入视窗时的额外更新回合。
+- **Chore**：`trace/` 加入 `.gitignore`。
+- **性能实测**（`hw.model=Mac15,12`, 24GB；macOS 15.7.2（24G325）；Xcode 16.3（16E140），Debug，UI 自动化单次对比）：
+  - baseline-image-accessibility（10k items + 2k thumbnails，accessibility on）
+    - v0.50.fix10：frame avg 20.61ms，max 508.33ms，drop_ratio 0.03767（samples=292）
+    - v0.50.fix11：frame avg 18.12ms，max 208.33ms，drop_ratio 0.01807（samples=332）
+- **测试结果**：
+  - `xcodebuild test -scheme Scopy -destination 'platform=macOS' -only-testing:ScopyTests`：Executed 269 tests, 25 skipped, 0 failures
+  - `SCOPY_RUN_PROFILE_UI_TESTS=1 xcodebuild test -scheme Scopy -destination 'platform=macOS' -only-testing:ScopyUITests/HistoryListUITests/testScrollProfileBaseline`：Executed 1 test, 0 failures
+
 ## 本次更新（v0.50.fix8）
 
 - **Perf/Profile（滚动）**：新增 ScrollPerformanceProfile，采样 frame time / drop ratio / scroll speed 并输出 JSON。

@@ -5,6 +5,17 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [v0.50.fix11] - 2025-12-20
+
+### Perf/UI（Scroll）
+
+- **Preview scroll monitor**：仅在预览开启时才创建 `ScrollWheelDismissMonitor`，避免列表每行常驻 `NSViewRepresentable`。
+- **Relative time**：`relativeTimeText` 在 `init` 预初始化，移除 `.onAppear` 的首次 `@State` 写入，减少行进入视窗时的额外更新回合。
+
+### Chore
+
+- **Git ignore**：`trace/` 加入 `.gitignore`，避免 profiling 产物误入版本控制。
+
 ## [v0.50.fix10] - 2025-12-20
 
 ### Docs/Install

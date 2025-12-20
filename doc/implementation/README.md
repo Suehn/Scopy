@@ -8,9 +8,9 @@
 
 | 项目 | 状态 |
 |------|------|
-| **当前版本** | v0.50.fix10 |
-| **测试状态** | 未运行 |
-| **构建状态** | 未复验 |
+| **当前版本** | v0.50.fix11 |
+| **测试状态** | ✅ 已运行（ScopyTests + scroll profile UI test） |
+| **构建状态** | ✅ 已复验 |
 | **部署位置** | /Applications/Scopy.app |
 | **最后更新** | 2025-12-20 |
 
@@ -24,6 +24,7 @@
 
 | 版本 | 日期 | 主要内容 | 状态 |
 |------|------|----------|------|
+| [v0.50.fix11](./releases/v0.50.fix11.md) | 2025-12-20 | Perf/UI：滚动降载（lazy scroll monitor + relativeTime init） | ✅ |
 | [v0.50.fix10](./releases/v0.50.fix10.md) | 2025-12-20 | Docs/Install：默认安装命令含去隔离步骤 | ✅ |
 | [v0.50.fix9](./releases/v0.50.fix9.md) | 2025-12-20 | Fix/Preview：滚动不再误关闭预览；UX/Thumbnail：缩略图直接加载无占位符 | ✅ |
 | [v0.50.fix8](./releases/v0.50.fix8.md) | 2025-12-19 | Perf/Profile：滚动基线采样 + 场景矩阵（text-only/image-heavy）+ hover 预览滚动遮挡修复 | ✅ |

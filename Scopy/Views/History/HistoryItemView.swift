@@ -41,6 +41,29 @@ struct HistoryItemView: View, Equatable {
     @State private var relativeTimeText: String = ""
     @State private var isUITestTapPreviewEnabled: Bool = false
 
+    init(
+        item: ClipboardItemDTO,
+        isKeyboardSelected: Bool,
+        isScrolling: Bool,
+        settings: SettingsDTO,
+        onSelect: @escaping () -> Void,
+        onHoverSelect: @escaping (UUID) -> Void,
+        onTogglePin: @escaping () -> Void,
+        onDelete: @escaping () -> Void,
+        getImageData: @escaping () async -> Data?
+    ) {
+        self.item = item
+        self.isKeyboardSelected = isKeyboardSelected
+        self.isScrolling = isScrolling
+        self.settings = settings
+        self.onSelect = onSelect
+        self.onHoverSelect = onHoverSelect
+        self.onTogglePin = onTogglePin
+        self.onDelete = onDelete
+        self.getImageData = getImageData
+        _relativeTimeText = State(initialValue: Self.makeRelativeTimeString(for: item.lastUsedAt))
+    }
+
     // MARK: - Equatable
 
     nonisolated static func == (lhs: HistoryItemView, rhs: HistoryItemView) -> Bool {
@@ -239,7 +262,6 @@ struct HistoryItemView: View, Equatable {
             } else {
                 isUITestTapPreviewEnabled = false
             }
-            updateRelativeTimeText()
         }
         .onChange(of: item.lastUsedAt) { _, _ in
             updateRelativeTimeText()
@@ -294,14 +316,16 @@ struct HistoryItemView: View, Equatable {
             cancelHoverTasks()
             resetPreviewState(hidePopovers: true)
         }
-        .background(
-            ScrollWheelDismissMonitor(
-                isActive: showPreview || showTextPreview,
-                onScrollWheel: { dismissPreviewForScrollWheel() }
-            )
-            .allowsHitTesting(false)
-            .accessibilityHidden(true)
-        )
+        .background {
+            if showPreview || showTextPreview {
+                ScrollWheelDismissMonitor(
+                    isActive: true,
+                    onScrollWheel: dismissPreviewForScrollWheel
+                )
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
+            }
+        }
         .background(markdownPreMeasureView)
     }
 
@@ -683,7 +707,7 @@ struct HistoryItemView: View, Equatable {
     private static var cachedNowTimestamp: TimeInterval = Date().timeIntervalSince1970
     private static let relativeTimeLock = NSLock()
 
-    private var relativeTime: String {
+    private static func makeRelativeTimeString(for lastUsedAt: Date) -> String {
         // v0.23: 在锁外获取当前时间戳，避免在锁内创建 Date 对象
         let currentTimestamp = Date().timeIntervalSince1970
 
@@ -697,7 +721,11 @@ struct HistoryItemView: View, Equatable {
             return Self.cachedNow
         }
 
-        return Self.relativeFormatter.localizedString(for: item.lastUsedAt, relativeTo: now)
+        return Self.relativeFormatter.localizedString(for: lastUsedAt, relativeTo: now)
+    }
+
+    private var relativeTime: String {
+        Self.makeRelativeTimeString(for: item.lastUsedAt)
     }
 
     private func updateRelativeTimeText() {
