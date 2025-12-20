@@ -131,7 +131,7 @@ jobs:
           TAG="${{ steps.version.outputs.tag }}"
           VERSION="${{ steps.version.outputs.version }}"
           SHORT_SHA="${{ steps.version.outputs.short_sha }}"
-          CHANGELOG="doc/implemented-doc/CHANGELOG.md"
+          CHANGELOG="doc/implementation/CHANGELOG.md"
 
           if [[ ! -f "${CHANGELOG}" ]]; then
             echo "Missing changelog: ${CHANGELOG}" >&2
