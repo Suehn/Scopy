@@ -3,7 +3,6 @@
 A native macOS clipboard manager with unlimited history, intelligent storage, and high-performance search.
 
 ![macOS 14.0+](https://img.shields.io/badge/macOS-14.0+-blue)
-![Swift 5.9](https://img.shields.io/badge/Swift-5.9-orange)
 ![License MIT](https://img.shields.io/badge/License-MIT-green)
 
 ## Features
@@ -13,9 +12,10 @@ A native macOS clipboard manager with unlimited history, intelligent storage, an
 - **Fast Search** - FTS5 full-text search with fuzzy/exact/regex modes
 - **Pin Items** - Keep important items always accessible
 - **App Filtering** - Filter history by source application
-- **Image Thumbnails** - Preview images with hover-to-zoom
+- **Hover Preview** - Markdown/LaTeX/image previews with scrollable content
+- **Export PNG** - One-click export from Markdown/LaTeX preview
+- **Image Thumbnails** - Inline thumbnails with configurable size
 - **Global Hotkey** - Quick access with customizable shortcut (default: ⇧⌘C)
-- **Lightweight** - ~50MB memory for 10k items (90% less than naive implementation)
 
 ## Installation
 
@@ -31,9 +31,17 @@ brew upgrade --cask scopy
 
 > App is not signed. On first launch: Right-click → Open → Open
 
+**If Scopy.app does not appear in /Applications:**
+
+```bash
+brew reinstall --cask scopy --appdir=/Applications
+# or copy manually
+cp -R /opt/homebrew/Caskroom/scopy/<version>/Scopy.app /Applications/
+```
+
 ### Manual Download
 
-Download the latest `.dmg` from [Releases](https://github.com/Suehn/Scopy/releases).
+Download the latest `.dmg` from Releases.
 
 ---
 
@@ -51,7 +59,8 @@ Download the latest `.dmg` from [Releases](https://github.com/Suehn/Scopy/releas
 **Mouse:**
 - Click item to copy
 - Right-click for context menu (Copy / Pin / Delete)
-- Hover image for preview
+- Hover image/text for preview
+- In Markdown/LaTeX preview, use Export PNG
 
 ---
 
@@ -59,35 +68,46 @@ Download the latest `.dmg` from [Releases](https://github.com/Suehn/Scopy/releas
 
 ### Prerequisites
 
-- macOS 14.0+
+- macOS 14.0+ (Sonoma)
 - Xcode 16.0+
 - Homebrew (for xcodegen)
 
 ### Quick Build
 
 ```bash
-# Install dependencies and build
-make setup && make build
+# Debug build
+./deploy.sh
 
-# Or use deploy script
+# Release build
 ./deploy.sh release
+
+# Only build (no launch)
+./deploy.sh --no-launch
 ```
 
 ### Development
 
 ```bash
-# Build and run (Debug)
-make run
+# Generate Xcode project (if needed)
+xcodegen generate
 
-# Run unit tests
-make test-unit  # ScopyTests (latest: 237 tests, 7 skipped)
-
-# Or run full suite
-make test
-
-# Build Release DMG
-./scripts/build-release.sh
+# Unit tests
+xcodebuild test -scheme Scopy -destination 'platform=macOS' -only-testing:ScopyTests
 ```
+
+### Release (Maintainers)
+
+Releases are **tag-driven**:
+
+```bash
+make release-validate
+make tag-release
+
+git push origin main
+git push origin vX.Y.Z
+```
+
+Homebrew cask is updated by CI when `HOMEBREW_GITHUB_API_TOKEN` is available; otherwise update the tap manually.
 
 ---
 
@@ -97,7 +117,7 @@ Scopy follows a **protocol-first, frontend-backend separation** design:
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│                      UI Layer                            │
+│                      UI Layer                           │
 │   ┌──────────┐  ┌──────────┐  ┌──────────────────────┐ │
 │   │ MenuBar  │  │ Floating │  │      Settings        │ │
 │   │  Icon    │  │  Panel   │  │       Window         │ │
@@ -107,7 +127,7 @@ Scopy follows a **protocol-first, frontend-backend separation** design:
 └────────────────────────┼────────────────────────────────┘
                          ▼
 ┌─────────────────────────────────────────────────────────┐
-│                  Backend Services                        │
+│                  Backend Services                       │
 │   ┌──────────────┐  ┌──────────────┐  ┌──────────────┐ │
 │   │  Clipboard   │  │   Storage    │  │    Search    │ │
 │   │   Monitor    │  │   Service    │  │   Service    │ │
@@ -121,10 +141,10 @@ Scopy follows a **protocol-first, frontend-backend separation** design:
 | Component | Description |
 |-----------|-------------|
 | `ClipboardMonitor` | Polls system clipboard, detects changes, computes content hash |
-| `StorageService` | SQLite + FTS5, hierarchical storage (inline < 50KB, external files) |
-| `SearchService` | Multi-mode search with caching, timeout protection |
+| `StorageService` | SQLite + FTS5, inline/external storage split |
+| `SearchService` | Multi-mode search with caching and timeouts |
 | `AppState` | Observable state management, event-driven updates |
-| `FloatingPanel` | NSPanel-based popup, appears at mouse position |
+| `FloatingPanel` | NSPanel-based popup near cursor |
 
 ### Data Storage
 
@@ -138,36 +158,13 @@ Scopy follows a **protocol-first, frontend-backend separation** design:
 
 ---
 
-## Performance
+## Documentation
 
-| Metric | Target | Actual |
-|--------|--------|--------|
-| Search ≤5k items | P95 ≤ 50ms | ~5ms |
-| Search 10k items | P95 ≤ 150ms | ~25ms |
-| Memory (10k items) | < 100MB | ~50MB |
-| First load (50 items) | < 100ms | ~5ms |
-
----
-
-## Configuration
-
-Settings available in the app (⌘,):
-
-- **General**: Default search mode (exact/fuzzy/fuzzy+/regex)
-- **Shortcuts**: Global hotkey recording
-- **Clipboard**: Save images / files toggles
-- **Appearance**: Thumbnail height, hover preview delay
-- **Storage**: Max items, inline storage limit, storage statistics
-- **About**: Version info, performance + links
-
----
-
-## Tech Stack
-
-- **UI**: SwiftUI + AppKit (NSPanel, NSStatusItem)
-- **Storage**: SQLite3 + FTS5 (full-text search)
-- **Concurrency**: Swift async/await, actors
-- **Build**: XcodeGen + Makefile
+- `doc/README.md` - Documentation structure
+- `doc/implementation/README.md` - Current status and release index
+- `doc/implementation/CHANGELOG.md` - Changelog
+- `doc/specs/v0.md` - Product spec
+- `doc/profiles/` - Performance baselines
 
 ---
 
@@ -178,6 +175,8 @@ Settings available in the app (⌘,):
 3. Commit your changes (`git commit -m 'Add amazing feature'`)
 4. Push to the branch (`git push origin feature/amazing`)
 5. Open a Pull Request
+
+For maintainers: update release docs (`doc/implementation/releases/`), index, and CHANGELOG for every shipped change.
 
 ---
 
