@@ -31,6 +31,12 @@ brew upgrade --cask scopy
 
 > App is not signed. On first launch: Right-click → Open → Open
 
+**If macOS blocks the app after install:**
+
+```bash
+xattr -dr com.apple.quarantine /Applications/Scopy.app
+```
+
 **If Scopy.app does not appear in /Applications:**
 
 ```bash
