@@ -5,6 +5,7 @@
 .PHONY: tag-release push-release release-validate release-bump-patch
 
 VERSION_ARGS := $(shell bash scripts/version.sh --xcodebuild-args 2>/dev/null)
+LOG_DIR := logs
 
 # 默认目标
 all: build
@@ -55,17 +56,19 @@ quick-build:
 # 运行所有测试
 test: setup
 	@echo "Running all tests..."
+	@mkdir -p $(LOG_DIR)
 	xcodebuild test \
 		-project Scopy.xcodeproj \
 		-scheme Scopy \
 		-destination 'platform=macOS' \
-		-resultBundlePath TestResults.xcresult \
+		-resultBundlePath $(LOG_DIR)/TestResults.xcresult \
 		$(VERSION_ARGS) \
-		2>&1 | tee test.log
+		2>&1 | tee $(LOG_DIR)/test.log
 
 # 仅运行单元测试（排除性能测试）
 test-unit: setup
 	@echo "Running unit tests..."
+	@mkdir -p $(LOG_DIR)
 	xcodebuild test \
 		-project Scopy.xcodeproj \
 		-scheme Scopy \
@@ -74,33 +77,36 @@ test-unit: setup
 		-skip-testing:ScopyTests/IntegrationTests \
 		-skip-testing:ScopyTests/PerformanceTests \
 		$(VERSION_ARGS) \
-		2>&1 | tee test-unit.log
+		2>&1 | tee $(LOG_DIR)/test-unit.log
 
 # 运行性能测试
 test-perf: setup
 	@echo "Running performance tests..."
+	@mkdir -p $(LOG_DIR)
 	RUN_PERF_TESTS=1 xcodebuild test \
 		-project Scopy.xcodeproj \
 		-scheme Scopy \
 		-destination 'platform=macOS' \
 		-only-testing:ScopyTests/PerformanceTests \
 		$(VERSION_ARGS) \
-		2>&1 | tee test-perf.log
+		2>&1 | tee $(LOG_DIR)/test-perf.log
 
 # Thread Sanitizer (requires hosted test bundle mode)
 test-tsan: setup
 	@echo "Running Thread Sanitizer tests..."
+	@mkdir -p $(LOG_DIR)
 	ENABLE_THREAD_SANITIZER=YES xcodebuild test \
 		-project Scopy.xcodeproj \
 		-scheme ScopyTSan \
 		-destination 'platform=macOS' \
 		-only-testing:ScopyTSanTests \
 		$(VERSION_ARGS) \
-		2>&1 | tee test-tsan.log
+		2>&1 | tee $(LOG_DIR)/test-tsan.log
 
 # Swift 6 Strict Concurrency regression (tests target only)
 test-strict: setup
 	@echo "Running Strict Concurrency tests..."
+	@mkdir -p $(LOG_DIR)
 	xcodebuild test \
 		-project Scopy.xcodeproj \
 		-scheme Scopy \
@@ -110,47 +116,50 @@ test-strict: setup
 		-skip-testing:ScopyTests/PerformanceTests \
 		SWIFT_STRICT_CONCURRENCY=complete \
 		$(VERSION_ARGS) \
-		2>&1 | tee strict-concurrency-test.log
+		2>&1 | tee $(LOG_DIR)/strict-concurrency-test.log
 
 # 运行集成测试
 test-integration: setup
 	@echo "Running integration tests..."
+	@mkdir -p $(LOG_DIR)
 	xcodebuild test \
 		-project Scopy.xcodeproj \
 		-scheme Scopy \
 		-destination 'platform=macOS' \
 		-only-testing:ScopyTests/IntegrationTests \
 		$(VERSION_ARGS) \
-		2>&1 | tee test-integration.log
+		2>&1 | tee $(LOG_DIR)/test-integration.log
 
 # 生成测试覆盖率报告
 coverage: setup
 	@echo "Running tests with coverage..."
+	@mkdir -p $(LOG_DIR)
 	xcodebuild test \
 		-project Scopy.xcodeproj \
 		-scheme Scopy \
 		-destination 'platform=macOS' \
 		-enableCodeCoverage YES \
-		-resultBundlePath CoverageResults.xcresult \
+		-resultBundlePath $(LOG_DIR)/CoverageResults.xcresult \
 		$(VERSION_ARGS) \
-		2>&1 | tee coverage.log
+		2>&1 | tee $(LOG_DIR)/coverage.log
 	@echo ""
-	@echo "Coverage report generated at CoverageResults.xcresult"
-	@echo "View with: xcrun xccov view --report CoverageResults.xcresult"
+	@echo "Coverage report generated at $(LOG_DIR)/CoverageResults.xcresult"
+	@echo "View with: xcrun xccov view --report $(LOG_DIR)/CoverageResults.xcresult"
 
 # 运行基准测试
 benchmark: setup
 	@echo "Running benchmarks..."
 	@echo "This will take a few minutes..."
+	@mkdir -p $(LOG_DIR)
 	RUN_PERF_TESTS=1 xcodebuild test \
 		-project Scopy.xcodeproj \
 		-scheme Scopy \
 		-destination 'platform=macOS' \
 		-only-testing:ScopyTests/PerformanceTests \
 		$(VERSION_ARGS) \
-		2>&1 | tee benchmark-output.log
+		2>&1 | tee $(LOG_DIR)/benchmark-output.log
 	@echo ""
-	@echo "Benchmark results saved to benchmark-output.log"
+	@echo "Benchmark results saved to $(LOG_DIR)/benchmark-output.log"
 
 # =================== 测试流程自动化 ===================
 
@@ -235,7 +244,7 @@ help:
 	@echo "  make stats        - Show project statistics"
 	@echo ""
 	@echo "Release:"
-	@echo "  make tag-release  - Tag HEAD from implemented-doc index"
+	@echo "  make tag-release  - Tag HEAD from doc/implementation/README.md index"
 	@echo "  make push-release - Push main + current tag"
 	@echo ""
 	@echo "Requirements:"

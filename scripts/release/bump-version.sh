@@ -4,8 +4,8 @@ set -euo pipefail
 PROJECT_ROOT="$(git rev-parse --show-toplevel)"
 cd "${PROJECT_ROOT}"
 
-DOC_INDEX="doc/implemented-doc/README.md"
-CHANGELOG="doc/implemented-doc/CHANGELOG.md"
+DOC_INDEX="doc/implementation/README.md"
+CHANGELOG="doc/implementation/CHANGELOG.md"
 
 usage() {
     cat <<EOF
@@ -141,12 +141,12 @@ update_doc_index() {
     ' "${DOC_INDEX}" > "${tmp}"
     mv "${tmp}" "${DOC_INDEX}"
 
-    if ! grep -Fq "| [${new_tag}](./${new_tag}.md)" "${DOC_INDEX}"; then
+    if ! grep -Fq "| [${new_tag}](./releases/${new_tag}.md)" "${DOC_INDEX}"; then
         tmp="$(mktemp)"
         awk -v new_tag="${new_tag}" -v date_str="${date_str}" -v summary="${summary}" '
           BEGIN { inserted=0 }
           /^\| \[v/ && inserted==0 {
-            print "| [" new_tag "](./" new_tag ".md) | " date_str " | " summary " | ✅ |"
+            print "| [" new_tag "](./releases/" new_tag ".md) | " date_str " | " summary " | ✅ |"
             inserted=1
           }
           { print }
@@ -160,7 +160,7 @@ create_version_doc() {
     local date_str="$2"
     local summary="$3"
 
-    local doc="doc/implemented-doc/${tag}.md"
+    local doc="doc/implementation/releases/${tag}.md"
     if [[ -f "${doc}" ]]; then
         echo "Version doc already exists: ${doc}" >&2
         exit 1
@@ -246,7 +246,7 @@ main() {
 
     echo "Bumped: ${old_tag} -> ${new_tag}"
     echo "Next:"
-    echo "  - Fill in doc: doc/implemented-doc/${new_tag}.md"
+    echo "  - Fill in doc: doc/implementation/releases/${new_tag}.md"
     echo "  - Update doc index + changelog if needed"
     echo "  - Commit, then push to main (auto-tag will tag from doc index)"
 }

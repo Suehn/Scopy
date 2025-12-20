@@ -14,9 +14,9 @@ if [[ "${TAG}" =~ ^v0\.18\. ]]; then
     exit 1
 fi
 
-DOC_INDEX="doc/implemented-doc/README.md"
-VERSION_DOC="doc/implemented-doc/${TAG}.md"
-CHANGELOG="doc/implemented-doc/CHANGELOG.md"
+DOC_INDEX="doc/implementation/README.md"
+VERSION_DOC="doc/implementation/releases/${TAG}.md"
+CHANGELOG="doc/implementation/CHANGELOG.md"
 
 if [[ ! -f "${DOC_INDEX}" ]]; then
     echo "Missing ${DOC_INDEX}" >&2

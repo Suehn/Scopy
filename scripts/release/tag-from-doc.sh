@@ -4,7 +4,7 @@ set -euo pipefail
 PROJECT_ROOT="$(git rev-parse --show-toplevel)"
 cd "${PROJECT_ROOT}"
 
-DOC_INDEX="doc/implemented-doc/README.md"
+DOC_INDEX="doc/implementation/README.md"
 
 extract_current_version_tag() {
     if [[ ! -f "${DOC_INDEX}" ]]; then
@@ -48,7 +48,7 @@ ensure_clean_worktree() {
 
 tag_message() {
     local tag="$1"
-    local doc_file="doc/implemented-doc/${tag}.md"
+    local doc_file="doc/implementation/releases/${tag}.md"
     if [[ -f "${doc_file}" ]]; then
         local title
         title="$(awk 'NR==1{print; exit}' "${doc_file}")"

@@ -22,12 +22,20 @@ Package.resolved
 # macOS
 .DS_Store
 
-# Test logs
+# Logs
+logs/
+*.log
+*.log.*
 test-*.log
-
-# Build logs
+test.log
+test_output.log
 build.log
 strict-concurrency-*.log
+coverage.log
+benchmark-output.log
+*.profraw
+*.xcresult/
+CoverageResults.xcresult/
 
 # XcodeGen cache
 .xcodegen.signature

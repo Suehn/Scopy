@@ -18,7 +18,7 @@
 ### 发布流程（推荐）
 
 1. 合入版本提交（含版本文档、索引、CHANGELOG、profile；如涉及部署/性能，也更新本文件并写明环境与具体数值）。
-2. 创建 tag（推荐用脚本，版本来源 `doc/implemented-doc/README.md`）：`make tag-release`
+2. 创建 tag（推荐用脚本，版本来源 `doc/implementation/README.md`）：`make tag-release`
 3. 推送（确保 tag 一并推送）：
    - 一次性：`make push-release`
    - 或手动：`git push origin main` + `git push origin vX.Y.Z`
@@ -26,7 +26,7 @@
 
 ### 自动化（可选）
 
-- 推送到 `main` 且更新了 `doc/implemented-doc/*` 时，GitHub Actions 会从 `doc/implemented-doc/README.md` 读取 **当前版本**，校验版本文档/CHANGELOG 后自动打 tag（等价于 `make tag-release`），并 push tag 触发发布。
+- 推送到 `main` 且更新了 `doc/implementation/*` 时，GitHub Actions 会从 `doc/implementation/README.md` 读取 **当前版本**，校验版本文档/CHANGELOG 后自动打 tag（等价于 `make tag-release`），并 push tag 触发发布。
 - 发布 workflow 会拒绝覆盖同一 tag 的既有 DMG（避免 Homebrew SHA mismatch）；如需修复发布，请 **递增版本并创建新 tag**。
 - 如配置了仓库 Secret `HOMEBREW_GITHUB_API_TOKEN`，发布后会自动对 `Homebrew/homebrew-cask` 发起 bump PR（`brew install --cask scopy` 依赖该仓库合并）。
 
@@ -381,7 +381,7 @@
 ## 历史更新（v0.41）
 - **Dev/Quality：固化 Strict Concurrency 回归门槛**：
   - 新增 `make test-strict`，统一以 `SWIFT_STRICT_CONCURRENCY=complete` + `SWIFT_TREAT_WARNINGS_AS_ERRORS=YES` 跑 `ScopyTests`。
-  - 输出写入 `strict-concurrency-test.log`，便于 CI/本地审计与排查。
+  - 输出写入 `logs/strict-concurrency-test.log`，便于 CI/本地审计与排查。
 - **性能/稳定性**：
   - 本版本仅新增回归入口，不影响运行时逻辑；性能数据在噪声范围内波动。
 - **性能实测**（Apple M3, macOS 15.7.2（24G325）, Debug, `make test-perf`；heavy 需 `RUN_HEAVY_PERF_TESTS=1`）：
@@ -474,7 +474,7 @@
 
 ## 历史更新（v0.36.1）
 - **Thread Sanitizer 回归**：新增 Hosted tests 方案与 `make test-tsan`，用于并发回归门槛（不触及性能路径）。
-- **性能基线**：沿用 v0.36（见 `doc/profile/v0.36.1-profile.md`）。
+- **性能基线**：沿用 v0.36（见 `doc/profiles/v0.36.1-profile.md`）。
 
 ## 历史更新（v0.36）
 - **Phase 6 收尾**：`AsyncStream` buffering policy 显式化（monitor/event streams）+ 日志统一到 `os.Logger`（保留热键文件日志）+ 阈值集中配置（`ScopyThresholds`）。
@@ -1001,9 +1001,9 @@ final class YourNewTests: XCTestCase {
 
 ## 📚 相关文档
 
-- 📖 **完整设计**: `doc/implemented-doc/v0.5.md`
-- 📖 **快速上手**: `doc/implemented-doc/v0.5-walkthrough.md`
-- 📖 **设计规范**: `dev-doc/v0.md`
+- 📖 **完整设计**: `doc/implementation/releases/v0.5.md`
+- 📖 **快速上手**: `doc/implementation/releases/v0.5-walkthrough.md`
+- 📖 **设计规范**: `doc/specs/v0.md`
 
 ---
 
