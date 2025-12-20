@@ -23,19 +23,13 @@ A native macOS clipboard manager with unlimited history, intelligent storage, an
 
 ```bash
 brew tap Suehn/scopy
-brew install --cask scopy
+brew install --cask scopy && xattr -dr com.apple.quarantine /Applications/Scopy.app
 
 # Upgrade
-brew upgrade --cask scopy
+brew upgrade --cask scopy && xattr -dr com.apple.quarantine /Applications/Scopy.app
 ```
 
 > App is not signed. On first launch: Right-click → Open → Open
-
-**If macOS blocks the app after install:**
-
-```bash
-xattr -dr com.apple.quarantine /Applications/Scopy.app
-```
 
 **If Scopy.app does not appear in /Applications:**
 
