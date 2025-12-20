@@ -591,6 +591,7 @@ struct HistoryItemView: View, Equatable {
 
     private func dismissPreviewForScrollWheel() {
         guard shouldResetPreviewOnScroll else { return }
+        guard !isPopoverHovering else { return }
         isHovering = false
         cancelHoverTasks()
         resetPreviewState(hidePopovers: true)

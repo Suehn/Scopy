@@ -51,6 +51,7 @@
     - 等待 tag 对应 release 产出 `Scopy-<version>.dmg` + `Scopy-<version>.dmg.sha256`
     - 确认 tap `Suehn/homebrew-scopy` 的 `Casks/scopy.rb` 已更新到同版本与 sha（CI 有 `HOMEBREW_GITHUB_API_TOKEN` 会自动更新；否则手动提 PR/推送）
     - 本地验证：`brew tap Suehn/scopy` → `brew update` → `brew info --cask scopy` → `brew fetch --cask scopy`（可选 `brew upgrade --cask scopy`）
+    - 安装落地校验（必须做）：确认 `/Applications/Scopy.app` 存在；若未出现，执行 `brew reinstall --cask scopy --appdir=/Applications` 或从 `/opt/homebrew/Caskroom/scopy/<version>/Scopy.app` 手动复制到 `/Applications`。
   - 本地构建：推荐用 `make`/`./deploy.sh`（会注入 `MARKETING_VERSION/CURRENT_PROJECT_VERSION`；见 `scripts/version.sh`）。
 
 ## 架构与热键要点

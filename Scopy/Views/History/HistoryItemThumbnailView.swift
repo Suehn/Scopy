@@ -11,11 +11,6 @@ struct HistoryItemThumbnailView: View {
     @State private var loadedThumbnail: NSImage?
     @State private var lastLoadedPath: String?
 
-    private struct TaskKey: Hashable {
-        let path: String
-        let isScrolling: Bool
-    }
-
     var body: some View {
         if let thumbnailPath {
             let loaded = lastLoadedPath == thumbnailPath ? loadedThumbnail : nil
@@ -31,14 +26,10 @@ struct HistoryItemThumbnailView: View {
                     .padding(.vertical, ScopySpacing.xs)
                     .accessibilityIdentifier("History.Item.Thumbnail")
             } else {
-                if isScrolling {
-                    thumbnailPlaceholder
-                } else {
-                    thumbnailPlaceholder
-                        .task(id: TaskKey(path: thumbnailPath, isScrolling: isScrolling)) {
-                            await loadThumbnailIfNeeded(path: thumbnailPath)
-                        }
-                }
+                thumbnailPlaceholder
+                    .task(id: thumbnailPath) {
+                        await loadThumbnailIfNeeded(path: thumbnailPath)
+                    }
             }
         } else {
             thumbnailPlaceholder
@@ -46,11 +37,10 @@ struct HistoryItemThumbnailView: View {
     }
 
     private var thumbnailPlaceholder: some View {
-        Image(systemName: "photo")
+        Color.clear
             .frame(width: height, height: height)
             .padding(.leading, ScopySpacing.xs)
             .padding(.vertical, ScopySpacing.xs)
-            .foregroundStyle(.green)
             .accessibilityIdentifier("History.Item.Thumbnail")
     }
 

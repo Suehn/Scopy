@@ -8,11 +8,11 @@
 
 | 项目 | 状态 |
 |------|------|
-| **当前版本** | v0.50.fix8 |
-| **测试状态** | 已运行（UI profile baseline；`testScrollProfileBaseline` 通过） |
+| **当前版本** | v0.50.fix9 |
+| **测试状态** | 未运行 |
 | **构建状态** | 未复验 |
 | **部署位置** | /Applications/Scopy.app |
-| **最后更新** | 2025-12-19 |
+| **最后更新** | 2025-12-20 |
 
 > 详细变更历史请查看 [CHANGELOG.md](./CHANGELOG.md)
 
@@ -24,6 +24,7 @@
 
 | 版本 | 日期 | 主要内容 | 状态 |
 |------|------|----------|------|
+| [v0.50.fix9](./releases/v0.50.fix9.md) | 2025-12-20 | Fix/Preview：滚动不再误关闭预览；UX/Thumbnail：缩略图直接加载无占位符 | ✅ |
 | [v0.50.fix8](./releases/v0.50.fix8.md) | 2025-12-19 | Perf/Profile：滚动基线采样 + 场景矩阵（text-only/image-heavy）+ hover 预览滚动遮挡修复 | ✅ |
 | [v0.50.fix7](./releases/v0.50.fix7.md) | 2025-12-19 | Perf/UI：DisplayText 预热（滚动主线程降载）+ 预热测试 | ✅ |
 | [v0.50.fix6](./releases/v0.50.fix6.md) | 2025-12-19 | Perf/UI：滚动状态 start/end + 行级/文本 metadata 降载 + 性能测试 | ✅ |

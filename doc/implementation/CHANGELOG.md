@@ -5,6 +5,13 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [v0.50.fix9] - 2025-12-20
+
+### Fix/Preview + UX/Thumbnail
+
+- **预览滚动**：滚轮触发时仅在非预览区域关闭 popover，预览内容滚动不再误关闭。
+- **缩略图加载**：取消占位符图标，缩略图直接加载且不再因滚动延迟。
+
 ## [v0.50.fix8] - 2025-12-19
 
 ### Perf/Profile
