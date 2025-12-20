@@ -5,6 +5,13 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [v0.50.fix10] - 2025-12-20
+
+### Docs/Install
+
+- **README**：安装/升级命令默认包含 `xattr -dr com.apple.quarantine /Applications/Scopy.app`。
+- **Release Notes**：补充安装去隔离说明与默认命令。
+
 ## [v0.50.fix9] - 2025-12-20
 
 ### Fix/Preview + UX/Thumbnail
