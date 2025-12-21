@@ -160,7 +160,14 @@ private struct FTSSortToggleButton: View {
 
     private var isApplicable: Bool {
         let trimmed = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
-        return historyViewModel.searchMode == .exact && trimmed.count >= 3
+        switch historyViewModel.searchMode {
+        case .exact:
+            return trimmed.count >= 3
+        case .fuzzy, .fuzzyPlus:
+            return !trimmed.isEmpty
+        case .regex:
+            return false
+        }
     }
 
     private var iconName: String {
@@ -176,11 +183,11 @@ private struct FTSSortToggleButton: View {
         let modeText: String
         switch historyViewModel.ftsSortMode {
         case .relevance:
-            modeText = "Relevance (FTS rank + last used)"
+            modeText = "Relevance (score + last used)"
         case .recent:
             modeText = "Recent (last used)"
         }
-        return isApplicable ? "FTS sort: \(modeText)" : "FTS sort applies to Exact queries (≥3 chars)"
+        return isApplicable ? "Sort: \(modeText)" : "Sort applies to Exact (≥3 chars) and Fuzzy/Fuzzy+ queries"
     }
 }
 

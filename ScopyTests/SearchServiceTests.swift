@@ -439,19 +439,49 @@ final class SearchServiceTests: XCTestCase {
         XCTAssertTrue(recent.items.contains(where: { $0.id == olderMoreRelevant.id }))
     }
 
-    func testFuzzySearchResultsSortByLastUsedAt() async throws {
+    func testFuzzySearchSortModeRecentUsesLastUsedAt() async throws {
         _ = try await storage.upsertItem(makeContent("abc"))
         try await Task.sleep(nanoseconds: 10_000_000)
         _ = try await storage.upsertItem(makeContent("axbyc"))
         await search.invalidateCache()
 
-        let result = try await search.search(request: SearchRequest(query: "abc", mode: .fuzzy, limit: 10, offset: 0))
+        let result = try await search.search(
+            request: SearchRequest(query: "abc", mode: .fuzzy, sortMode: .recent, limit: 10, offset: 0)
+        )
         XCTAssertGreaterThanOrEqual(result.items.count, 2)
 
         // "axbyc" is newer but a worse fuzzy match than "abc"; search should still be time-sorted.
         XCTAssertTrue(result.items[0].plainText.localizedCaseInsensitiveContains("axbyc"))
         XCTAssertTrue(result.items[1].plainText.localizedCaseInsensitiveContains("abc"))
         XCTAssertGreaterThan(result.items[0].lastUsedAt, result.items[1].lastUsedAt)
+    }
+
+    func testFuzzySearchSortModeRelevanceUsesScore() async throws {
+        _ = try await storage.upsertItem(makeContent("abc"))
+        try await Task.sleep(nanoseconds: 10_000_000)
+        _ = try await storage.upsertItem(makeContent("axbyc"))
+        await search.invalidateCache()
+
+        let result = try await search.search(
+            request: SearchRequest(query: "abc", mode: .fuzzy, sortMode: .relevance, limit: 10, offset: 0)
+        )
+        XCTAssertGreaterThanOrEqual(result.items.count, 2)
+
+        // "abc" is a better fuzzy match than "axbyc"; relevance should prioritize score.
+        XCTAssertTrue(result.items[0].plainText.localizedCaseInsensitiveContains("abc"))
+    }
+
+    func testFuzzyPlusSearchSortModeRelevanceUsesScore() async throws {
+        _ = try await storage.upsertItem(makeContent("hello world"))
+        try await Task.sleep(nanoseconds: 10_000_000)
+        _ = try await storage.upsertItem(makeContent("xx hello yy world"))
+        await search.invalidateCache()
+
+        let result = try await search.search(
+            request: SearchRequest(query: "hello world", mode: .fuzzyPlus, sortMode: .relevance, limit: 10, offset: 0)
+        )
+        XCTAssertGreaterThanOrEqual(result.items.count, 2)
+        XCTAssertTrue(result.items[0].plainText.localizedCaseInsensitiveContains("hello world"))
     }
 
     func testShortQueryPrefilterCanRefineToFullFuzzy() async throws {

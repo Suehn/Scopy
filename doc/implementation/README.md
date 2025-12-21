@@ -8,11 +8,11 @@
 
 | 项目 | 状态 |
 |------|------|
-| **当前版本** | v0.50.fix11 |
-| **测试状态** | ✅ 已运行（ScopyTests + scroll profile UI test） |
+| **当前版本** | v0.50.fix12 |
+| **测试状态** | ✅ 已运行（ScopyTests） |
 | **构建状态** | ✅ 已复验 |
 | **部署位置** | /Applications/Scopy.app |
-| **最后更新** | 2025-12-20 |
+| **最后更新** | 2025-12-21 |
 
 > 详细变更历史请查看 [CHANGELOG.md](./CHANGELOG.md)
 
@@ -24,6 +24,7 @@
 
 | 版本 | 日期 | 主要内容 | 状态 |
 |------|------|----------|------|
+| [v0.50.fix12](./releases/v0.50.fix12.md) | 2025-12-21 | Fix/Search：Fuzzy/Fuzzy+ 排序切换恢复生效（按时间/按打分）+ 分页一致性 | ✅ |
 | [v0.50.fix11](./releases/v0.50.fix11.md) | 2025-12-20 | Perf/UI：滚动降载（lazy scroll monitor + relativeTime init） | ✅ |
 | [v0.50.fix10](./releases/v0.50.fix10.md) | 2025-12-20 | Docs/Install：默认安装命令含去隔离步骤 | ✅ |
 | [v0.50.fix9](./releases/v0.50.fix9.md) | 2025-12-20 | Fix/Preview：滚动不再误关闭预览；UX/Thumbnail：缩略图直接加载无占位符 | ✅ |

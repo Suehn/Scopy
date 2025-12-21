@@ -162,6 +162,7 @@ public actor SearchEngineImpl {
 
     private struct FuzzySortedMatchesCacheKey: Hashable {
         let mode: SearchMode
+        let sortMode: SearchSortMode
         let queryLower: String
         let appFilter: String?
         let typeFilter: ClipboardItemType?
@@ -460,6 +461,7 @@ public actor SearchEngineImpl {
                 let normalizedRequest = SearchRequest(
                     query: trimmedQuery,
                     mode: mode,
+                    sortMode: request.sortMode,
                     appFilter: request.appFilter,
                     typeFilter: request.typeFilter,
                     typeFilters: request.typeFilters,
@@ -475,6 +477,7 @@ public actor SearchEngineImpl {
             let normalizedRequest = SearchRequest(
                 query: trimmedQuery,
                 mode: mode,
+                sortMode: request.sortMode,
                 appFilter: request.appFilter,
                 typeFilter: request.typeFilter,
                 typeFilters: request.typeFilters,
@@ -483,17 +486,130 @@ public actor SearchEngineImpl {
                 offset: request.offset
             )
 
-            let cached = try searchInCache(request: normalizedRequest) { item in
+            if request.sortMode == .recent {
+                let cached = try searchInCache(request: normalizedRequest) { item in
+                    item.plainText.localizedCaseInsensitiveContains(trimmedQuery)
+                }
+
+                // Treat short-query cache result as prefilter: it may miss older matches.
+                return SearchResult(items: cached.items, total: -1, hasMore: cached.hasMore, searchTimeMs: 0)
+            }
+
+            let fullCacheRequest = SearchRequest(
+                query: trimmedQuery,
+                mode: mode,
+                sortMode: request.sortMode,
+                appFilter: request.appFilter,
+                typeFilter: request.typeFilter,
+                typeFilters: request.typeFilters,
+                forceFullFuzzy: request.forceFullFuzzy,
+                limit: shortQueryCacheSize,
+                offset: 0
+            )
+            let cachedAll = try searchInCache(request: fullCacheRequest) { item in
                 item.plainText.localizedCaseInsensitiveContains(trimmedQuery)
             }
 
-            // Treat short-query cache result as prefilter: it may miss older matches.
-            return SearchResult(items: cached.items, total: -1, hasMore: cached.hasMore, searchTimeMs: 0)
+            let queryLower = trimmedQuery.lowercased()
+            let queryLowerIsASCII = queryLower.canBeConverted(to: .ascii)
+            let plusWords: [(word: String, isASCII: Bool)]
+            if mode == .fuzzyPlus {
+                plusWords = queryLower
+                    .split(separator: " ")
+                    .map(String.init)
+                    .filter { !$0.isEmpty }
+                    .map { (word: $0, isASCII: $0.canBeConverted(to: .ascii)) }
+            } else {
+                plusWords = []
+            }
+
+            func score(for item: ClipboardStoredItem) -> Int? {
+                let textLower = item.plainText.lowercased()
+                let textLowerIsASCII = textLower.canBeConverted(to: .ascii)
+
+                switch mode {
+                case .fuzzy:
+                    return fuzzyMatchScore(
+                        textLower: textLower,
+                        textLowerIsASCII: textLowerIsASCII,
+                        queryLower: queryLower,
+                        queryLowerIsASCII: queryLowerIsASCII
+                    )
+                case .fuzzyPlus:
+                    var totalScore = 0
+                    var ok = true
+                    for wordInfo in plusWords {
+                        if wordInfo.isASCII, wordInfo.word.count >= 3 {
+                            guard let range = textLower.range(of: wordInfo.word) else {
+                                ok = false
+                                break
+                            }
+                            let pos = range.lowerBound.utf16Offset(in: textLower)
+                            let m = wordInfo.word.utf16.count
+                            totalScore += m * 10 - (m - 1) - pos
+                            continue
+                        }
+
+                        guard let s = fuzzyMatchScore(
+                            textLower: textLower,
+                            textLowerIsASCII: textLowerIsASCII,
+                            queryLower: wordInfo.word,
+                            queryLowerIsASCII: wordInfo.isASCII
+                        ) else {
+                            ok = false
+                            break
+                        }
+                        totalScore += s
+                    }
+                    return ok ? totalScore : nil
+                default:
+                    return nil
+                }
+            }
+
+            struct ScoredCachedItem {
+                let item: ClipboardStoredItem
+                let score: Int
+            }
+
+            var scored: [ScoredCachedItem] = []
+            scored.reserveCapacity(cachedAll.items.count)
+            for item in cachedAll.items {
+                guard let score = score(for: item) else { continue }
+                scored.append(ScoredCachedItem(item: item, score: score))
+            }
+
+            scored.sort { lhs, rhs in
+                if lhs.item.isPinned != rhs.item.isPinned {
+                    return lhs.item.isPinned && !rhs.item.isPinned
+                }
+                if lhs.score != rhs.score {
+                    return lhs.score > rhs.score
+                }
+                if lhs.item.lastUsedAt != rhs.item.lastUsedAt {
+                    return lhs.item.lastUsedAt > rhs.item.lastUsedAt
+                }
+                return lhs.item.id.uuidString < rhs.item.id.uuidString
+            }
+
+            let totalMatches = scored.count
+            let start = min(request.offset, totalMatches)
+            let end = min(start + request.limit + 1, totalMatches)
+            var page = (start < end) ? Array(scored[start..<end]) : []
+
+            let hasMore = page.count > request.limit
+            if hasMore {
+                page.removeLast()
+            }
+
+            let items = page.map(\.item)
+            return SearchResult(items: items, total: -1, hasMore: hasMore, searchTimeMs: 0)
         }
 
         let normalizedRequest = SearchRequest(
             query: trimmedQuery,
             mode: mode,
+            sortMode: request.sortMode,
             appFilter: request.appFilter,
             typeFilter: request.typeFilter,
             typeFilters: request.typeFilters,
@@ -658,6 +774,7 @@ public actor SearchEngineImpl {
         }
 
         let desiredTopCount = max(0, request.offset + request.limit + 1)
+        let sortMode = request.sortMode
         func isBetterSlot(_ lhs: ScoredSlot, than rhs: ScoredSlot) -> Bool {
             guard let lhsItem = index.items[lhs.slot] else { return false }
             guard let rhsItem = index.items[rhs.slot] else { return true }
@@ -665,11 +782,21 @@ public actor SearchEngineImpl {
             if lhsItem.isPinned != rhsItem.isPinned {
                 return lhsItem.isPinned && !rhsItem.isPinned
             }
-            if lhsItem.lastUsedAt != rhsItem.lastUsedAt {
-                return lhsItem.lastUsedAt > rhsItem.lastUsedAt
-            }
-            if lhs.score != rhs.score {
-                return lhs.score > rhs.score
+            switch sortMode {
+            case .recent:
+                if lhsItem.lastUsedAt != rhsItem.lastUsedAt {
+                    return lhsItem.lastUsedAt > rhsItem.lastUsedAt
+                }
+                if lhs.score != rhs.score {
+                    return lhs.score > rhs.score
+                }
+            case .relevance:
+                if lhs.score != rhs.score {
+                    return lhs.score > rhs.score
+                }
+                if lhsItem.lastUsedAt != rhsItem.lastUsedAt {
+                    return lhsItem.lastUsedAt > rhsItem.lastUsedAt
+                }
             }
             return lhsItem.id.uuidString < rhsItem.id.uuidString
         }
@@ -679,26 +806,65 @@ public actor SearchEngineImpl {
         }
 
         if totalIsUnknown {
-            candidateSlots.sort { lhsSlot, rhsSlot in
-                guard lhsSlot < index.items.count, rhsSlot < index.items.count else { return lhsSlot < rhsSlot }
-                let lhsItem = index.items[lhsSlot]
-                let rhsItem = index.items[rhsSlot]
-                if lhsItem == nil { return false }
-                if rhsItem == nil { return true }
-                guard let lhsItem, let rhsItem else { return false }
+            if sortMode == .recent {
+                candidateSlots.sort { lhsSlot, rhsSlot in
+                    guard lhsSlot < index.items.count, rhsSlot < index.items.count else { return lhsSlot < rhsSlot }
+                    let lhsItem = index.items[lhsSlot]
+                    let rhsItem = index.items[rhsSlot]
+                    if lhsItem == nil { return false }
+                    if rhsItem == nil { return true }
+                    guard let lhsItem, let rhsItem else { return false }
 
-                if lhsItem.isPinned != rhsItem.isPinned {
-                    return lhsItem.isPinned && !rhsItem.isPinned
+                    if lhsItem.isPinned != rhsItem.isPinned {
+                        return lhsItem.isPinned && !rhsItem.isPinned
+                    }
+                    if lhsItem.lastUsedAt != rhsItem.lastUsedAt {
+                        return lhsItem.lastUsedAt > rhsItem.lastUsedAt
+                    }
+                    return lhsItem.id.uuidString < rhsItem.id.uuidString
                 }
-                if lhsItem.lastUsedAt != rhsItem.lastUsedAt {
-                    return lhsItem.lastUsedAt > rhsItem.lastUsedAt
+
+                var pageSlots: [Int] = []
+                pageSlots.reserveCapacity(request.limit + 1)
+                var matchesSeen = 0
+
+                for (i, slot) in candidateSlots.enumerated() {
+                    if i % 1024 == 0 {
+                        try Task.checkCancellation()
+                    }
+
+                    guard slot < index.items.count, let item = index.items[slot] else { continue }
+
+                    if let appFilter = request.appFilter, item.appBundleID != appFilter { continue }
+                    if let typeFilters = request.typeFilters, !typeFilters.isEmpty {
+                        if !typeFilters.contains(item.type) { continue }
+                    } else if let typeFilter = request.typeFilter, item.type != typeFilter {
+                        continue
+                    }
+
+                    guard computeScore(for: item) != nil else { continue }
+
+                    if matchesSeen >= request.offset {
+                        pageSlots.append(slot)
+                        if pageSlots.count >= request.limit + 1 {
+                            break
+                        }
+                    }
+                    matchesSeen += 1
                 }
-                return lhsItem.id.uuidString < rhsItem.id.uuidString
+
+                let hasMore = pageSlots.count > request.limit
+                if hasMore {
+                    pageSlots.removeLast()
+                }
+                let pageIDs = pageSlots.compactMap { index.items[$0]?.id }
+                let resultItems = try fetchItemsByIDs(ids: pageIDs)
+                return SearchResult(items: resultItems, total: -1, hasMore: hasMore, searchTimeMs: 0)
             }
 
-            var pageSlots: [Int] = []
-            pageSlots.reserveCapacity(request.limit + 1)
-            var matchesSeen = 0
+            var topHeap = BinaryHeap<ScoredSlot>(areSorted: isWorseSlot)
+            topHeap.reserveCapacity(desiredTopCount)
+            var totalMatches = 0
 
             for (i, slot) in candidateSlots.enumerated() {
                 if i % 1024 == 0 {
@@ -714,22 +880,28 @@ public actor SearchEngineImpl {
                     continue
                 }
 
-                guard computeScore(for: item) != nil else { continue }
+                guard let score = computeScore(for: item) else { continue }
+                totalMatches += 1
 
-                if matchesSeen >= request.offset {
-                    pageSlots.append(slot)
-                    if pageSlots.count >= request.limit + 1 {
-                        break
-                    }
+                guard desiredTopCount > 0 else { continue }
+                let scoredItem = ScoredSlot(slot: slot, score: score)
+
+                if topHeap.count < desiredTopCount {
+                    topHeap.insert(scoredItem)
+                } else if let worst = topHeap.peek, isBetterSlot(scoredItem, than: worst) {
+                    topHeap.replaceRoot(with: scoredItem)
                 }
-                matchesSeen += 1
             }
 
-            let hasMore = pageSlots.count > request.limit
-            if hasMore {
-                pageSlots.removeLast()
-            }
-            let pageIDs = pageSlots.compactMap { index.items[$0]?.id }
+            var topItems = topHeap.elements
+            topItems.sort { isBetterSlot($0, than: $1) }
+
+            let start = min(request.offset, topItems.count)
+            let end = min(start + request.limit, topItems.count)
+            let page: [ScoredSlot] = (start < end) ? Array(topItems[start..<end]) : []
+
+            let hasMore = totalMatches > request.offset + request.limit
+            let pageIDs = page.compactMap { index.items[$0.slot]?.id }
             let resultItems = try fetchItemsByIDs(ids: pageIDs)
             return SearchResult(items: resultItems, total: -1, hasMore: hasMore, searchTimeMs: 0)
         }
@@ -741,6 +913,7 @@ public actor SearchEngineImpl {
 
         let sortedCacheKey = FuzzySortedMatchesCacheKey(
             mode: mode,
+            sortMode: request.sortMode,
             queryLower: queryLower,
             appFilter: request.appFilter,
             typeFilter: request.typeFilter,

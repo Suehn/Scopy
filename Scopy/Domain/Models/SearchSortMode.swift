@@ -3,7 +3,8 @@ import Foundation
 /// Search result sort mode.
 ///
 /// Notes:
-/// - Only affects the `.exact` mode when it uses FTS (typically query length >= 3).
+/// - Affects `.exact` when it uses FTS (typically query length >= 3).
+/// - Also controls fuzzy/fuzzyPlus ordering when a query is present.
 public enum SearchSortMode: String, Sendable, CaseIterable {
     case relevance
     case recent
@@ -15,4 +16,3 @@ public enum SearchSortMode: String, Sendable, CaseIterable {
         }
     }
 }
-

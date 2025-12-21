@@ -359,6 +359,7 @@ final class HistoryViewModel {
                         let request = SearchRequest(
                             query: searchQuery,
                             mode: searchMode,
+                            sortMode: ftsSortMode,
                             appFilter: appFilter,
                             typeFilter: typeFilter,
                             typeFilters: typeFilters,
@@ -379,6 +380,7 @@ final class HistoryViewModel {
                     let request = SearchRequest(
                         query: searchQuery,
                         mode: searchMode,
+                        sortMode: ftsSortMode,
                         appFilter: appFilter,
                         typeFilter: typeFilter,
                         typeFilters: typeFilters,
@@ -482,6 +484,7 @@ final class HistoryViewModel {
                         let refineRequest = SearchRequest(
                             query: refineQuery,
                             mode: refineMode,
+                            sortMode: ftsSortMode,
                             appFilter: refineAppFilter,
                             typeFilter: refineTypeFilter,
                             typeFilters: refineTypeFilters,

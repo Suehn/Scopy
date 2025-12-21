@@ -5,6 +5,18 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [v0.50.fix12] - 2025-12-21
+
+### Fix/Search
+
+- **Fuzzy/Fuzzy+ 排序**：sortMode 生效（Relevance=score 优先，Recent=lastUsed 优先），Pinned 仍置顶。
+- **分页一致性**：loadMore/refine 请求补齐 sortMode，避免翻页排序漂移。
+- **缓存键**：fuzzy 排序缓存纳入 sortMode，切换排序不再复用旧顺序。
+
+### Test
+
+- **Fuzzy 排序**：新增 relevance 排序单测，保留 recent 排序验证。
+
 ## [v0.50.fix11] - 2025-12-20
 
 ### Perf/UI（Scroll）
