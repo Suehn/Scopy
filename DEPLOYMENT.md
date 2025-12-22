@@ -34,6 +34,17 @@
 - runner：`macos-15`
 - Xcode：`16.0`
 
+## 本次更新（v0.50.fix13）
+
+- **Fix/Preview**：hover Markdown/LaTeX 预览跨行复用单个 `WKWebView`（`MarkdownPreviewWebViewController` 上移到列表层），避免频繁 create/destroy。
+- **Fix/Preview**：popover 全局互斥（同一时刻最多 1 个 hover preview），避免同一个 `WKWebView` 同帧挂到两个 hierarchy。
+- **Fix/Preview**：修复 popover close 竞态误取消任务，快速 re-hover 同一行更稳定。
+- **指标（本地 Debug，`hw.model=Mac15,12`, 24GB；macOS 15.7.2（24G325）；Xcode 16.3（16E140））**：
+  - `WKWebView` 实例数：全局共享 1 个（不再每行创建/销毁）
+  - hover preview popover：同时最多 1 个
+- **测试结果**：
+  - `xcodebuild test -scheme Scopy -destination 'platform=macOS' -only-testing:ScopyTests`：Executed 271 tests, 25 skipped, 0 failures
+
 ## 本次更新（v0.50.fix11）
 
 - **Perf/UI（滚动）**：仅在预览开启时才创建 `ScrollWheelDismissMonitor`，避免列表每行常驻 `NSViewRepresentable`。

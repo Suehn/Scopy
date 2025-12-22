@@ -5,6 +5,18 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [v0.50.fix13] - 2025-12-22
+
+### Fix/Preview
+
+- **WebView 复用**：Markdown/LaTeX hover 预览改为共享单个 `MarkdownPreviewWebViewController` / `WKWebView`（跨行复用），避免频繁 create/destroy 带来的 WebKit churn 与 `Web Content` 进程增长。
+- **Popover 全局互斥**：列表层统一协调 hover preview popover，同一时刻最多一个，避免同一个 `WKWebView` 同步挂载到多个 view hierarchy。
+- **快速 re-hover 稳定性**：修复 popover close 回调与 hover 任务启动的竞态，避免同一行“移开关闭后快速再 hover 不再弹出”。
+
+### Test
+
+- `xcodebuild test -scheme Scopy -destination 'platform=macOS' -only-testing:ScopyTests`：Executed 271 tests, 25 skipped, 0 failures
+
 ## [v0.50.fix12] - 2025-12-21
 
 ### Fix/Search

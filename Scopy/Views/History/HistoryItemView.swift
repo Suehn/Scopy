@@ -12,6 +12,7 @@ private struct SendableCGImage: @unchecked Sendable {
 
 /// 单个历史项视图 - 实现 Equatable 以优化重绘
 /// v0.9.3: 使用局部悬停状态 + 防抖 + Equatable 优化滚动性能
+@MainActor
 struct HistoryItemView: View, Equatable {
     let item: ClipboardItemDTO
     let isKeyboardSelected: Bool
@@ -24,19 +25,21 @@ struct HistoryItemView: View, Equatable {
     let onTogglePin: () -> Void
     let onDelete: () -> Void
     let getImageData: () async -> Data?
+    let markdownWebViewController: MarkdownPreviewWebViewController
+    let isImagePreviewPresented: Bool
+    let isTextPreviewPresented: Bool
+    let requestPopover: (HoverPreviewPopoverKind?) -> Void
+    let dismissOtherPopovers: () -> Void
 
     // 局部状态 - 悬停不触发全局重绘
     @State private var isHovering = false
     @State private var hoverDebounceTask: Task<Void, Never>?
     @State private var hoverPreviewTask: Task<Void, Never>?
     @State private var hoverMarkdownTask: Task<Void, Never>?
-    @State private var markdownWebViewController: MarkdownPreviewWebViewController?
     // v0.24: 延迟隐藏预览，避免 popover 触发 hover false 导致闪烁
     @State private var hoverExitTask: Task<Void, Never>?
     @State private var isPopoverHovering = false
-    @State private var showPreview = false
     // v0.15: Text preview state
-    @State private var showTextPreview = false
     @StateObject private var previewModel = HoverPreviewModel()
     @State private var relativeTimeText: String = ""
     @State private var isUITestTapPreviewEnabled: Bool = false
@@ -50,7 +53,12 @@ struct HistoryItemView: View, Equatable {
         onHoverSelect: @escaping (UUID) -> Void,
         onTogglePin: @escaping () -> Void,
         onDelete: @escaping () -> Void,
-        getImageData: @escaping () async -> Data?
+        getImageData: @escaping () async -> Data?,
+        markdownWebViewController: MarkdownPreviewWebViewController,
+        isImagePreviewPresented: Bool,
+        isTextPreviewPresented: Bool,
+        requestPopover: @escaping (HoverPreviewPopoverKind?) -> Void,
+        dismissOtherPopovers: @escaping () -> Void
     ) {
         self.item = item
         self.isKeyboardSelected = isKeyboardSelected
@@ -61,6 +69,11 @@ struct HistoryItemView: View, Equatable {
         self.onTogglePin = onTogglePin
         self.onDelete = onDelete
         self.getImageData = getImageData
+        self.markdownWebViewController = markdownWebViewController
+        self.isImagePreviewPresented = isImagePreviewPresented
+        self.isTextPreviewPresented = isTextPreviewPresented
+        self.requestPopover = requestPopover
+        self.dismissOtherPopovers = dismissOtherPopovers
         _relativeTimeText = State(initialValue: Self.makeRelativeTimeString(for: item.lastUsedAt))
     }
 
@@ -73,6 +86,8 @@ struct HistoryItemView: View, Equatable {
         lhs.item.thumbnailPath == rhs.item.thumbnailPath &&
         lhs.isKeyboardSelected == rhs.isKeyboardSelected &&
         lhs.isScrolling == rhs.isScrolling &&
+        lhs.isImagePreviewPresented == rhs.isImagePreviewPresented &&
+        lhs.isTextPreviewPresented == rhs.isTextPreviewPresented &&
         lhs.settings.showImageThumbnails == rhs.settings.showImageThumbnails &&
         lhs.settings.thumbnailHeight == rhs.settings.thumbnailHeight
     }
@@ -245,6 +260,7 @@ struct HistoryItemView: View, Equatable {
         .onTapGesture {
             if isUITestTapPreviewEnabled {
                 // UI 测试预览模式下避免关闭面板，允许预览弹窗出现
+                dismissOtherPopovers()
                 isHovering = true
                 isPopoverHovering = true
                 if item.type == .image && showThumbnails {
@@ -266,8 +282,31 @@ struct HistoryItemView: View, Equatable {
         .onChange(of: item.lastUsedAt) { _, _ in
             updateRelativeTimeText()
         }
-        .popover(isPresented: $showPreview, arrowEdge: .trailing) {
+        .popover(
+            isPresented: Binding(
+                get: { isImagePreviewPresented },
+                set: { presented in
+                    requestPopover(presented ? .image : nil)
+                }
+            ),
+            arrowEdge: .trailing
+        ) {
             HistoryItemImagePreviewView(model: previewModel, thumbnailPath: item.thumbnailPath)
+                .background(
+                    PopoverWindowCloseObserver {
+                        // `onHover(false)` / `onDisappear` is not guaranteed to run when the system dismisses a popover.
+                        // Observe the underlying popover window close to keep state in sync.
+                        isPopoverHovering = false
+                        DispatchQueue.main.async {
+                            if !isHovering {
+                                resetPreviewState(hidePopovers: true)
+                            } else {
+                                requestPopover(nil)
+                            }
+                        }
+                    }
+                    .allowsHitTesting(false)
+                )
                 .onHover { hovering in
                     isPopoverHovering = hovering
                     if hovering {
@@ -277,15 +316,62 @@ struct HistoryItemView: View, Equatable {
                         scheduleHoverExitCleanup()
                     }
                 }
+                .onDisappear {
+                    // `onHover(false)` is not guaranteed to fire when the popover is dismissed by the system.
+                    // Keep local/global state in sync so the same row can be re-presented reliably.
+                    isPopoverHovering = false
+                    DispatchQueue.main.async {
+                        if !isHovering {
+                            resetPreviewState(hidePopovers: true)
+                        } else {
+                            requestPopover(nil)
+                        }
+                    }
+                }
         }
-        .popover(isPresented: $showTextPreview, arrowEdge: .trailing) {
+        .popover(
+            isPresented: Binding(
+                get: { isTextPreviewPresented },
+                set: { presented in
+                    requestPopover(presented ? .text : nil)
+                }
+            ),
+            arrowEdge: .trailing
+        ) {
             HistoryItemTextPreviewView(model: previewModel, markdownWebViewController: markdownWebViewController)
+                .background(
+                    PopoverWindowCloseObserver {
+                        // `onHover(false)` / `onDisappear` is not guaranteed to run when the system dismisses a popover.
+                        // Observe the underlying popover window close to keep state in sync.
+                        isPopoverHovering = false
+                        DispatchQueue.main.async {
+                            if !isHovering {
+                                resetPreviewState(hidePopovers: true)
+                            } else {
+                                requestPopover(nil)
+                            }
+                        }
+                    }
+                    .allowsHitTesting(false)
+                )
                 .onHover { hovering in
                     isPopoverHovering = hovering
                     if hovering {
                         cancelHoverExitTask()
                     } else if !isHovering {
                         scheduleHoverExitCleanup()
+                    }
+                }
+                .onDisappear {
+                    // `onHover(false)` is not guaranteed to fire when the popover is dismissed by the system.
+                    // Keep local/global state in sync so the same row can be re-presented reliably.
+                    isPopoverHovering = false
+                    DispatchQueue.main.async {
+                        if !isHovering {
+                            resetPreviewState(hidePopovers: true)
+                        } else {
+                            requestPopover(nil)
+                        }
                     }
                 }
         }
@@ -317,7 +403,7 @@ struct HistoryItemView: View, Equatable {
             resetPreviewState(hidePopovers: true)
         }
         .background {
-            if showPreview || showTextPreview {
+            if isImagePreviewPresented || isTextPreviewPresented {
                 ScrollWheelDismissMonitor(
                     isActive: true,
                     onScrollWheel: dismissPreviewForScrollWheel
@@ -337,6 +423,9 @@ struct HistoryItemView: View, Equatable {
             return
         }
 
+        if hovering {
+            dismissOtherPopovers()
+        }
         isHovering = hovering
 
         cancelHoverDebounceTask()
@@ -373,7 +462,7 @@ struct HistoryItemView: View, Equatable {
     private var markdownPreMeasureView: some View {
         if isHovering,
            previewModel.isMarkdown,
-           !showTextPreview,
+           (!isTextPreviewPresented || markdownWebViewController.webView.superview == nil),
            previewModel.markdownContentSize == nil,
            let html = previewModel.markdownHTML,
            let text = previewModel.text
@@ -381,22 +470,20 @@ struct HistoryItemView: View, Equatable {
             let maxWidth: CGFloat = HoverPreviewScreenMetrics.maxPopoverWidthPoints()
             let containerWidth = max(1, maxWidth)
 
-            if let controller = markdownWebViewController {
-                MarkdownPreviewMeasurer(
-                    controller: controller,
-                    html: html,
-                    containerWidth: containerWidth,
-                    settleNanoseconds: 90_000_000,
-                    onStableMetrics: { metrics in
-                        guard self.isHovering else { return }
-                        guard self.previewModel.markdownHTML == html else { return }
-                        guard self.previewModel.text == text else { return }
-                        self.previewModel.markdownContentSize = metrics.size
-                        self.previewModel.markdownHasHorizontalOverflow = metrics.hasHorizontalOverflow
-                        self.showTextPreview = true
-                    }
-                )
-            }
+            MarkdownPreviewMeasurer(
+                controller: markdownWebViewController,
+                html: html,
+                containerWidth: containerWidth,
+                settleNanoseconds: 90_000_000,
+                onStableMetrics: { metrics in
+                    guard self.isHovering else { return }
+                    guard self.previewModel.markdownHTML == html else { return }
+                    guard self.previewModel.text == text else { return }
+                    self.previewModel.markdownContentSize = metrics.size
+                    self.previewModel.markdownHasHorizontalOverflow = metrics.hasHorizontalOverflow
+                    self.requestPopover(.text)
+                }
+            )
         }
     }
 
@@ -479,7 +566,7 @@ struct HistoryItemView: View, Equatable {
             guard !isScrolling else { return }
             guard isHovering else { return }
 
-            self.showPreview = true
+            self.requestPopover(.image)
 
             if let cgImage = await preparedPreviewImage.value {
                 guard !Task.isCancelled else { return }
@@ -571,21 +658,19 @@ struct HistoryItemView: View, Equatable {
 
     private func resetPreviewModel() {
         previewModel.reset()
-        markdownWebViewController = nil
     }
 
     private func resetPreviewState(hidePopovers: Bool) {
         cancelPreviewTask()
         if hidePopovers {
-            showPreview = false
-            showTextPreview = false
+            requestPopover(nil)
         }
         isPopoverHovering = false
         resetPreviewModel()
     }
 
     private var shouldResetPreviewOnScroll: Bool {
-        if isHovering || isPopoverHovering || showPreview || showTextPreview {
+        if isHovering || isPopoverHovering || isImagePreviewPresented || isTextPreviewPresented {
             return true
         }
         if hoverPreviewTask != nil || hoverMarkdownTask != nil {
@@ -650,7 +735,9 @@ struct HistoryItemView: View, Equatable {
                 self.previewModel.markdownHTML = nil
                 self.previewModel.markdownContentSize = nil
                 self.previewModel.markdownHasHorizontalOverflow = false
-                self.showTextPreview = !isMarkdown
+                if !isMarkdown {
+                    self.requestPopover(.text)
+                }
             }
 
             guard isMarkdown else { return }
@@ -661,9 +748,6 @@ struct HistoryItemView: View, Equatable {
             if let cached = MarkdownPreviewCache.shared.html(forKey: cacheKey) {
                 if self.isHovering, self.previewModel.text == preview {
                     self.previewModel.markdownHTML = cached
-                    if self.markdownWebViewController == nil {
-                        self.markdownWebViewController = MarkdownPreviewWebViewController()
-                    }
                 }
                 return
             }
@@ -685,9 +769,6 @@ struct HistoryItemView: View, Equatable {
                 await MainActor.run { [previewText] in
                     guard self.isHovering, self.previewModel.text == previewText else { return }
                     self.previewModel.markdownHTML = html
-                    if self.markdownWebViewController == nil {
-                        self.markdownWebViewController = MarkdownPreviewWebViewController()
-                    }
                 }
             }
         }
@@ -822,6 +903,65 @@ private struct ScrollWheelDismissMonitor: NSViewRepresentable {
             if let monitor {
                 NSEvent.removeMonitor(monitor)
             }
+        }
+    }
+}
+
+/// Observes the popover window closing event.
+/// SwiftUI's `.popover(isPresented:)` can get out-of-sync on macOS when the system dismisses the popover without
+/// driving the binding back to `false`. This observer provides a best-effort signal to reset local/global state.
+private struct PopoverWindowCloseObserver: NSViewRepresentable {
+    let onClose: () -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(onClose: onClose)
+    }
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView(frame: .zero)
+        context.coordinator.attach(to: view)
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        context.coordinator.onClose = onClose
+        context.coordinator.attach(to: nsView)
+    }
+
+    final class Coordinator {
+        var onClose: () -> Void
+        private weak var observedWindow: NSWindow?
+        private var closeObserver: NSObjectProtocol?
+
+        init(onClose: @escaping () -> Void) {
+            self.onClose = onClose
+        }
+
+        func attach(to view: NSView) {
+            guard let window = view.window else { return }
+            if observedWindow === window { return }
+            detach()
+            observedWindow = window
+            closeObserver = NotificationCenter.default.addObserver(
+                forName: NSWindow.willCloseNotification,
+                object: window,
+                queue: .main
+            ) { [weak self] _ in
+                self?.onClose()
+                self?.detach()
+            }
+        }
+
+        private func detach() {
+            if let closeObserver {
+                NotificationCenter.default.removeObserver(closeObserver)
+            }
+            closeObserver = nil
+            observedWindow = nil
+        }
+
+        deinit {
+            detach()
         }
     }
 }

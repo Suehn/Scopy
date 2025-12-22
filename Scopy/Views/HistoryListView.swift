@@ -1,14 +1,35 @@
+import Foundation
 import SwiftUI
 import ScopyKit
 import ScopyUISupport
 
+/// Hover preview popover kind used to coordinate a single active preview across the list.
+enum HoverPreviewPopoverKind: Equatable {
+    case image
+    case text
+}
+
+/// The currently active hover preview popover (at most one at a time).
+struct HoverPreviewPopoverState: Equatable {
+    let itemID: UUID
+    let kind: HoverPreviewPopoverKind
+}
+
 /// 历史列表视图 - 符合 v0.md 的懒加载设计
+@MainActor
 struct HistoryListView: View {
     @FocusState.Binding var searchFocused: Bool
 
     @Environment(AppState.self) private var appState
     @Environment(HistoryViewModel.self) private var historyViewModel
     @Environment(SettingsViewModel.self) private var settingsViewModel
+
+    // Shared Markdown preview controller to avoid repeatedly creating/destroying WebKit views/processes.
+    @StateObject private var sharedMarkdownPreviewController = MarkdownPreviewWebViewController()
+
+    // Enforce that at most one hover preview popover is presented at a time.
+    @State private var activePopover: HoverPreviewPopoverState?
+    @State private var pendingPopover: HoverPreviewPopoverState?
 
     private static let isUITesting: Bool = ProcessInfo.processInfo.arguments.contains("--uitesting")
     private static let profileAccessibility: Bool = ProcessInfo.processInfo.environment["SCOPY_PROFILE_ACCESSIBILITY"] == "1"
@@ -125,10 +146,92 @@ struct HistoryListView: View {
         }
     }
 
+    // MARK: - Preview Popover Coordination
+
+    @MainActor
+    private func detachSharedMarkdownWebViewIfAttached() {
+        guard sharedMarkdownPreviewController.webView.superview != nil else { return }
+        sharedMarkdownPreviewController.detachWebView()
+        sharedMarkdownPreviewController.webView.removeFromSuperview()
+    }
+
+    @MainActor
+    private func dismissAnyPopover(except itemID: UUID) {
+        if activePopover?.itemID == itemID {
+            return
+        }
+
+        pendingPopover = nil
+        activePopover = nil
+        detachSharedMarkdownWebViewIfAttached()
+    }
+
+    @MainActor
+    private func presentPopover(itemID: UUID, kind: HoverPreviewPopoverKind) {
+        let next = HoverPreviewPopoverState(itemID: itemID, kind: kind)
+        if activePopover == next {
+            // SwiftUI's popover binding can occasionally get out-of-sync on macOS (popover dismissed by the system
+            // without driving the `isPresented` binding back to `false`). In that case, re-hovering the same row
+            // would be blocked by this equality check. Force a toggle to allow re-presenting the same popover.
+            detachSharedMarkdownWebViewIfAttached()
+            pendingPopover = next
+            activePopover = nil
+            DispatchQueue.main.async {
+                guard pendingPopover == next else { return }
+                activePopover = next
+                pendingPopover = nil
+            }
+            return
+        }
+
+        if activePopover != nil {
+            // Close current popover first, then present the next one on the next run loop tick.
+            // This avoids attempting to attach the same WKWebView to two view hierarchies in one update cycle.
+            detachSharedMarkdownWebViewIfAttached()
+            pendingPopover = next
+            activePopover = nil
+            DispatchQueue.main.async {
+                guard pendingPopover == next else { return }
+                activePopover = next
+                pendingPopover = nil
+            }
+            return
+        }
+
+        // If the shared web view is still attached (e.g. pre-measure view), detach it before presenting the popover.
+        // Present on the next run loop tick to avoid transient "already has a superview" issues.
+        if sharedMarkdownPreviewController.webView.superview != nil {
+            detachSharedMarkdownWebViewIfAttached()
+            pendingPopover = next
+            DispatchQueue.main.async {
+                guard pendingPopover == next else { return }
+                activePopover = next
+                pendingPopover = nil
+            }
+            return
+        }
+
+        pendingPopover = nil
+        activePopover = next
+    }
+
+    @MainActor
+    private func dismissPopoverIfActive(itemID: UUID) {
+        if pendingPopover?.itemID == itemID {
+            pendingPopover = nil
+        }
+        if activePopover?.itemID == itemID {
+            detachSharedMarkdownWebViewIfAttached()
+            activePopover = nil
+        }
+    }
+
     /// v0.18: 添加 List 修饰符以保持原有样式
     @ViewBuilder
     private func historyRow(item: ClipboardItemDTO) -> some View {
         let isSelected = historyViewModel.selectedID == item.id
+        let isImagePreviewPresented = activePopover?.itemID == item.id && activePopover?.kind == .image
+        let isTextPreviewPresented = activePopover?.itemID == item.id && activePopover?.kind == .text
         let row = HistoryItemView(
             item: item,
             isKeyboardSelected: isSelected,
@@ -141,12 +244,25 @@ struct HistoryListView: View {
             },
             onTogglePin: { Task { await historyViewModel.togglePin(item) } },
             onDelete: { Task { await historyViewModel.delete(item) } },
-            getImageData: { try? await historyViewModel.getImageData(itemID: item.id) }
+            getImageData: { try? await historyViewModel.getImageData(itemID: item.id) },
+            markdownWebViewController: sharedMarkdownPreviewController,
+            isImagePreviewPresented: isImagePreviewPresented,
+            isTextPreviewPresented: isTextPreviewPresented,
+            requestPopover: { kind in
+                guard let kind else {
+                    dismissPopoverIfActive(itemID: item.id)
+                    return
+                }
+                presentPopover(itemID: item.id, kind: kind)
+            },
+            dismissOtherPopovers: {
+                dismissAnyPopover(except: item.id)
+            }
         )
         .equatable()
         .id(item.id)
 
-        return Group {
+        Group {
             if Self.shouldExposeAccessibility {
                 row.accessibilityIdentifier("History.Item.\(item.id.uuidString)")
                     .accessibilityValue(isSelected ? "selected" : "unselected")
