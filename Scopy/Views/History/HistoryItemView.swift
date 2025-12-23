@@ -487,6 +487,14 @@ struct HistoryItemView: View, Equatable {
             let maxWidth: CGFloat = HoverPreviewScreenMetrics.maxPopoverWidthPoints()
             let containerWidth = max(1, maxWidth)
             let cacheKey = item.contentHash
+            let font = NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
+            let padding: CGFloat = ScopySpacing.md
+            let fallbackWidth = HoverPreviewTextSizing.preferredWidth(
+                for: text,
+                font: font,
+                padding: padding,
+                maxWidth: maxWidth
+            )
 
             MarkdownPreviewMeasurer(
                 controller: markdownWebViewController,
@@ -497,10 +505,19 @@ struct HistoryItemView: View, Equatable {
                     guard self.isHovering else { return }
                     guard self.previewModel.markdownHTML == html else { return }
                     guard self.previewModel.text == text else { return }
-                    self.previewModel.markdownContentSize = metrics.size
-                    self.previewModel.markdownHasHorizontalOverflow = metrics.hasHorizontalOverflow
+                    let stableWidth: CGFloat = {
+                        let w = metrics.size.width
+                        guard w.isFinite, w > 0 else { return fallbackWidth }
+                        if w < 40 { return fallbackWidth }
+                        if fallbackWidth.isFinite, fallbackWidth > 0, w < fallbackWidth * 0.5 { return fallbackWidth }
+                        return min(maxWidth, w)
+                    }()
+                    let stableSize = CGSize(width: max(1, stableWidth), height: metrics.size.height)
+                    let stableMetrics = MarkdownContentMetrics(size: stableSize, hasHorizontalOverflow: metrics.hasHorizontalOverflow)
+                    self.previewModel.markdownContentSize = stableMetrics.size
+                    self.previewModel.markdownHasHorizontalOverflow = stableMetrics.hasHorizontalOverflow
                     if !cacheKey.isEmpty {
-                        MarkdownPreviewCache.shared.setMetrics(metrics, forKey: cacheKey)
+                        MarkdownPreviewCache.shared.setMetrics(stableMetrics, forKey: cacheKey)
                     }
                     self.requestPopover(.text)
                 }
@@ -780,9 +797,28 @@ struct HistoryItemView: View, Equatable {
             {
                 if self.isHovering, self.previewModel.text == preview {
                     // Fast-path: reuse cached metrics to avoid waiting for WebKit to re-emit identical size messages.
+                    let maxWidth: CGFloat = HoverPreviewScreenMetrics.maxPopoverWidthPoints()
+                    let font = NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
+                    let padding: CGFloat = ScopySpacing.md
+                    let fallbackWidth = HoverPreviewTextSizing.preferredWidth(
+                        for: preview,
+                        font: font,
+                        padding: padding,
+                        maxWidth: maxWidth
+                    )
+                    let stableWidth: CGFloat = {
+                        let w = cachedMetrics.size.width
+                        guard w.isFinite, w > 0 else { return fallbackWidth }
+                        if w < 40 { return fallbackWidth }
+                        if fallbackWidth.isFinite, fallbackWidth > 0, w < fallbackWidth * 0.5 { return fallbackWidth }
+                        return min(maxWidth, w)
+                    }()
+                    let stableSize = CGSize(width: max(1, stableWidth), height: cachedMetrics.size.height)
+                    let stableMetrics = MarkdownContentMetrics(size: stableSize, hasHorizontalOverflow: cachedMetrics.hasHorizontalOverflow)
                     self.previewModel.markdownHTML = cachedHTML
-                    self.previewModel.markdownContentSize = cachedMetrics.size
-                    self.previewModel.markdownHasHorizontalOverflow = cachedMetrics.hasHorizontalOverflow
+                    self.previewModel.markdownContentSize = stableMetrics.size
+                    self.previewModel.markdownHasHorizontalOverflow = stableMetrics.hasHorizontalOverflow
+                    MarkdownPreviewCache.shared.setMetrics(stableMetrics, forKey: cacheKey)
                     self.requestPopover(.text)
                 }
                 return

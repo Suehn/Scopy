@@ -5,6 +5,18 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [v0.50.fix15] - 2025-12-23
+
+### Fix/Preview
+
+- **长内容滚动更顺滑**：修复复用 WKWebView 后长 Markdown/LaTeX 预览滚动卡顿/偶发渲染缺块：复用时优先回放已知 metrics，仅在必要时延迟触发尺寸 refresh（等待有效布局宽度），避免 0 宽度测量污染缓存。
+- **宽度 metrics 更健壮**：Markdown 预览宽度加入 sane-check（绝对/相对阈值）并允许纠正，避免 popover 宽度被锁到极窄导致高度暴涨。
+- **滚动期降载**：HTML 仅对 overflow 容器触发临时滚动条显示；`ScrollbarAutoHider` 改为 deadline+timer，避免滚动期间高频 cancel/reschedule。
+
+### Test
+
+- ⏸ 未运行（按需可跑：`xcodebuild test -scheme Scopy -destination 'platform=macOS' -only-testing:ScopyTests`）
+
 ## [v0.50.fix14] - 2025-12-23
 
 ### Fix/Preview

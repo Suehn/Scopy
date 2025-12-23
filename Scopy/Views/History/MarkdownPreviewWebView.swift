@@ -295,8 +295,10 @@ final class MarkdownPreviewWebViewController: NSObject, ObservableObject, WKNavi
 
     var onContentSizeChange: (@MainActor (MarkdownContentMetrics) -> Void)?
     private var lastHTML: String = ""
-    private var lastReportedMetrics: MarkdownContentMetrics = MarkdownContentMetrics(size: .zero, hasHorizontalOverflow: false)
+    private var lastKnownMetrics: MarkdownContentMetrics?
+    private var lastDeliveredMetrics: MarkdownContentMetrics = MarkdownContentMetrics(size: .zero, hasHorizontalOverflow: false)
     private var lastLoadFinished: Bool = false
+    private var pendingContentRefreshTask: Task<Void, Never>?
     private let scrollbarAutoHider = ScrollbarAutoHider()
     private let sizeMessageHandlerProxy = WeakScriptMessageHandler()
 
@@ -331,6 +333,8 @@ final class MarkdownPreviewWebViewController: NSObject, ObservableObject, WKNavi
     }
 
     func detachWebView() {
+        pendingContentRefreshTask?.cancel()
+        pendingContentRefreshTask = nil
         webView.stopLoading()
         webView.navigationDelegate = nil
         webView.uiDelegate = nil
@@ -338,7 +342,7 @@ final class MarkdownPreviewWebViewController: NSObject, ObservableObject, WKNavi
         scrollbarAutoHider.detach()
         onContentSizeChange = nil
         // Allow the next consumer (popover / measurer) to receive a fresh metrics callback even if the size is unchanged.
-        lastReportedMetrics = MarkdownContentMetrics(size: .zero, hasHorizontalOverflow: false)
+        lastDeliveredMetrics = MarkdownContentMetrics(size: .zero, hasHorizontalOverflow: false)
     }
 
     func setShouldScroll(_ shouldScroll: Bool) {
@@ -358,25 +362,46 @@ final class MarkdownPreviewWebViewController: NSObject, ObservableObject, WKNavi
 
     func loadHTMLIfNeeded(_ html: String) {
         attachWebViewIfNeeded()
+
         if lastHTML == html {
             // Important: When reusing the same WKWebView across hovers, WebKit may not re-run load callbacks and the
-            // page may not automatically re-post the same size message. Reset the last reported metrics and trigger
-            // a best-effort height report so the measurer/popover can re-open reliably.
-            lastReportedMetrics = MarkdownContentMetrics(size: .zero, hasHorizontalOverflow: false)
+            // page may not automatically re-post the same size message. Prefer replaying the cached metrics to the
+            // current consumer (popover / measurer) to avoid expensive JS re-measurement during transient layout.
+            if let metrics = lastKnownMetrics,
+               metrics.size.height > 0,
+               abs(metrics.size.width - lastDeliveredMetrics.size.width) >= 1 ||
+                abs(metrics.size.height - lastDeliveredMetrics.size.height) >= 1 ||
+                metrics.hasHorizontalOverflow != lastDeliveredMetrics.hasHorizontalOverflow
+            {
+                lastDeliveredMetrics = metrics
+                Task { @MainActor in
+                    self.onContentSizeChange?(metrics)
+                }
+                // Do not force JS re-measurement here; the cached metrics are sufficient to size the popover/measurer.
+                return
+            }
 
             if !lastLoadFinished {
+                pendingContentRefreshTask?.cancel()
+                pendingContentRefreshTask = nil
                 // If the last navigation never finished (e.g. hover exited mid-load), retry the load.
                 let baseURL = Bundle.main.resourceURL?.appendingPathComponent("MarkdownPreview", isDirectory: true)
                 webView.loadHTMLString(html, baseURL: baseURL)
             } else {
-                requestContentRefresh(for: webView, forceSizeReport: true)
+                // If we have no known metrics for this HTML (e.g. prior load was interrupted), request one.
+                if lastKnownMetrics == nil {
+                    scheduleContentRefresh(for: webView, forceSizeReport: true)
+                }
             }
             return
         }
 
         lastHTML = html
         lastLoadFinished = false
-        lastReportedMetrics = MarkdownContentMetrics(size: .zero, hasHorizontalOverflow: false)
+        pendingContentRefreshTask?.cancel()
+        pendingContentRefreshTask = nil
+        lastKnownMetrics = nil
+        lastDeliveredMetrics = MarkdownContentMetrics(size: .zero, hasHorizontalOverflow: false)
         let baseURL = Bundle.main.resourceURL?.appendingPathComponent("MarkdownPreview", isDirectory: true)
         webView.loadHTMLString(html, baseURL: baseURL)
     }
@@ -419,20 +444,22 @@ final class MarkdownPreviewWebViewController: NSObject, ObservableObject, WKNavi
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         lastLoadFinished = true
-        requestContentRefresh(for: webView, forceSizeReport: false)
+        scheduleContentRefresh(for: webView, forceSizeReport: false)
     }
 
     // MARK: - WKScriptMessageHandler
 
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
         guard let metrics = MarkdownPreviewMessageParser.metrics(from: message) else { return }
-        if abs(metrics.size.width - lastReportedMetrics.size.width) < 1,
-           abs(metrics.size.height - lastReportedMetrics.size.height) < 1,
-           metrics.hasHorizontalOverflow == lastReportedMetrics.hasHorizontalOverflow
+        lastKnownMetrics = metrics
+
+        if abs(metrics.size.width - lastDeliveredMetrics.size.width) < 1,
+           abs(metrics.size.height - lastDeliveredMetrics.size.height) < 1,
+           metrics.hasHorizontalOverflow == lastDeliveredMetrics.hasHorizontalOverflow
         {
             return
         }
-        lastReportedMetrics = metrics
+        lastDeliveredMetrics = metrics
 
         if let scrollView = MarkdownPreviewScrollViewResolver.resolve(for: webView) {
             scrollbarAutoHider.attach(to: scrollView)
@@ -443,6 +470,24 @@ final class MarkdownPreviewWebViewController: NSObject, ObservableObject, WKNavi
         }
         Task { @MainActor in
             self.onContentSizeChange?(metrics)
+        }
+    }
+
+    private func scheduleContentRefresh(for webView: WKWebView, forceSizeReport: Bool) {
+        pendingContentRefreshTask?.cancel()
+        pendingContentRefreshTask = Task { @MainActor in
+            // SwiftUI can call `updateNSView` before the representable receives its final size.
+            // Avoid forcing `__scopyReportHeight` while the web view is still in a transient 0-width layout state,
+            // otherwise we may cache a bogus tiny width and poison future popover sizing.
+            var attempts = 0
+            while attempts < 12 {
+                if webView.bounds.width > 1 { break }
+                attempts += 1
+                try? await Task.sleep(nanoseconds: 16_000_000)
+                guard !Task.isCancelled else { return }
+            }
+            guard webView.bounds.width > 1 else { return }
+            requestContentRefresh(for: webView, forceSizeReport: forceSizeReport)
         }
     }
 
@@ -498,7 +543,9 @@ struct ReusableMarkdownPreviewWebView: NSViewRepresentable {
 final class ScrollbarAutoHider: NSObject {
     private weak var scrollView: NSScrollView?
     private weak var contentView: NSClipView?
-    private var hideWorkItem: DispatchWorkItem?
+    private var hideTimer: DispatchSourceTimer?
+    private var hideDeadline: CFAbsoluteTime = 0
+    private var scrollersVisible: Bool = false
 
     func attach(to scrollView: NSScrollView) {
         if self.scrollView === scrollView { return }
@@ -523,14 +570,14 @@ final class ScrollbarAutoHider: NSObject {
     }
 
     func detach() {
-        hideWorkItem?.cancel()
-        hideWorkItem = nil
+        stopHideTimer()
 
         if let contentView {
             NotificationCenter.default.removeObserver(self, name: NSView.boundsDidChangeNotification, object: contentView)
         }
         scrollView = nil
         contentView = nil
+        scrollersVisible = false
     }
 
     deinit {
@@ -547,14 +594,17 @@ final class ScrollbarAutoHider: NSObject {
             hs.isHidden = true
             hs.alphaValue = 0
         }
+        scrollersVisible = false
     }
 
     @objc private func handleAnyScroll(_ notification: Notification) {
-        showScrollers()
-        scheduleHide()
+        showScrollersIfNeeded()
+        hideDeadline = CFAbsoluteTimeGetCurrent() + 0.75
+        startHideTimerIfNeeded()
     }
 
-    private func showScrollers() {
+    private func showScrollersIfNeeded() {
+        guard !scrollersVisible else { return }
         guard let scrollView else { return }
         if let vs = scrollView.verticalScroller {
             vs.isHidden = false
@@ -564,14 +614,32 @@ final class ScrollbarAutoHider: NSObject {
             hs.isHidden = false
             hs.alphaValue = 1
         }
+        scrollersVisible = true
     }
 
-    private func scheduleHide() {
-        hideWorkItem?.cancel()
-        let work = DispatchWorkItem { [weak self] in
-            self?.applyHiddenState()
+    private func startHideTimerIfNeeded() {
+        guard hideTimer == nil else { return }
+        let timer = DispatchSource.makeTimerSource(queue: .main)
+        timer.schedule(deadline: .now() + 0.12, repeating: 0.12)
+        timer.setEventHandler { [weak self] in
+            self?.handleHideTimerTick()
         }
-        hideWorkItem = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.75, execute: work)
+        hideTimer = timer
+        timer.resume()
+    }
+
+    private func stopHideTimer() {
+        hideTimer?.cancel()
+        hideTimer = nil
+    }
+
+    private func handleHideTimerTick() {
+        guard scrollersVisible else {
+            stopHideTimer()
+            return
+        }
+        guard CFAbsoluteTimeGetCurrent() >= hideDeadline else { return }
+        applyHiddenState()
+        stopHideTimer()
     }
 }

@@ -8,7 +8,7 @@
 
 | 项目 | 状态 |
 |------|------|
-| **当前版本** | v0.50.fix14 |
+| **当前版本** | v0.50.fix15 |
 | **测试状态** | ⏸ 暂未运行（按需：ScopyTests） |
 | **构建状态** | ✅ 已复验 |
 | **部署位置** | /Applications/Scopy.app |
@@ -24,6 +24,7 @@
 
 | 版本 | 日期 | 主要内容 | 状态 |
 |------|------|----------|------|
+| [v0.50.fix15](./releases/v0.50.fix15.md) | 2025-12-23 | Fix/Preview：长内容预览滚动卡顿/渲染缺块修复（复用链路尺寸回放 + 滚动降载） | ✅ |
 | [v0.50.fix14](./releases/v0.50.fix14.md) | 2025-12-23 | Fix/Preview：hover 预览 close/reopen 竞态收口（快速 re-hover 同一行更稳定） | ✅ |
 | [v0.50.fix13](./releases/v0.50.fix13.md) | 2025-12-22 | Fix/Preview：hover Markdown/LaTeX 预览复用 WKWebView（全局单实例）+ 快速 re-hover 稳定性 | ✅ |
 | [v0.50.fix12](./releases/v0.50.fix12.md) | 2025-12-21 | Fix/Search：Fuzzy/Fuzzy+ 排序切换恢复生效（按时间/按打分）+ 分页一致性 | ✅ |

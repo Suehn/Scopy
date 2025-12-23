@@ -9,6 +9,9 @@ struct HistoryItemTextPreviewView: View {
     // Export success feedback reset task
     @State private var exportSuccessResetTask: Task<Void, Never>?
 
+    private static let minSaneMarkdownMeasuredWidth: CGFloat = 40
+    private static let markdownWidthGrowThreshold: CGFloat = 40
+
     var body: some View {
         let maxWidth: CGFloat = HoverPreviewScreenMetrics.maxPopoverWidthPoints()
         let maxHeight: CGFloat = HoverPreviewScreenMetrics.maxPopoverHeightPoints()
@@ -23,7 +26,12 @@ struct HistoryItemTextPreviewView: View {
                     padding: padding,
                     maxWidth: maxWidth
                 )
-                let markdownMeasuredWidth = model.markdownContentSize?.width
+                let markdownMeasuredWidth: CGFloat? = {
+                    guard let w = model.markdownContentSize?.width else { return nil }
+                    guard w.isFinite, w >= Self.minSaneMarkdownMeasuredWidth else { return nil }
+                    if fallbackWidth.isFinite, fallbackWidth > 0, w < fallbackWidth * 0.5 { return nil }
+                    return w
+                }()
                 let width: CGFloat = {
                     if model.isMarkdown {
                         // Prefer shrink-to-fit for small Markdown payloads, while snapping to max width when near-max or when
@@ -59,8 +67,21 @@ struct HistoryItemTextPreviewView: View {
                                 shouldScroll: shouldScroll,
                                 onContentSizeChange: { metrics in
                                     guard model.markdownHTML == html else { return }
-                                    if let existing = model.markdownContentSize, existing.width > 0 {
-                                        model.markdownContentSize = CGSize(width: existing.width, height: metrics.size.height)
+                                    let newWidth = metrics.size.width
+                                    let newHeight = metrics.size.height
+                                    if let existing = model.markdownContentSize {
+                                        let existingWidth = existing.width
+                                        var width = existingWidth
+                                        if existingWidth < Self.minSaneMarkdownMeasuredWidth,
+                                           newWidth > existingWidth
+                                        {
+                                            width = newWidth
+                                        } else if newWidth > existingWidth + Self.markdownWidthGrowThreshold {
+                                            width = newWidth
+                                        } else if existingWidth <= 0, newWidth > 0 {
+                                            width = newWidth
+                                        }
+                                        model.markdownContentSize = CGSize(width: width, height: newHeight)
                                     } else {
                                         model.markdownContentSize = metrics.size
                                     }
@@ -76,8 +97,21 @@ struct HistoryItemTextPreviewView: View {
                                 shouldScroll: shouldScroll,
                                 onContentSizeChange: { metrics in
                                     guard model.markdownHTML == html else { return }
-                                    if let existing = model.markdownContentSize, existing.width > 0 {
-                                        model.markdownContentSize = CGSize(width: existing.width, height: metrics.size.height)
+                                    let newWidth = metrics.size.width
+                                    let newHeight = metrics.size.height
+                                    if let existing = model.markdownContentSize {
+                                        let existingWidth = existing.width
+                                        var width = existingWidth
+                                        if existingWidth < Self.minSaneMarkdownMeasuredWidth,
+                                           newWidth > existingWidth
+                                        {
+                                            width = newWidth
+                                        } else if newWidth > existingWidth + Self.markdownWidthGrowThreshold {
+                                            width = newWidth
+                                        } else if existingWidth <= 0, newWidth > 0 {
+                                            width = newWidth
+                                        }
+                                        model.markdownContentSize = CGSize(width: width, height: newHeight)
                                     } else {
                                         model.markdownContentSize = metrics.size
                                     }

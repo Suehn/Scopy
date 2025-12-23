@@ -145,14 +145,12 @@ enum MarkdownHTMLRenderer {
         max-width: 100%;
         overflow-x: auto;
         overflow-y: hidden;
-        -webkit-overflow-scrolling: touch;
       }
       table {
         display: block;
         border-collapse: collapse;
         max-width: 100%;
         overflow-x: auto;
-        -webkit-overflow-scrolling: touch;
         width: 100%;
         table-layout: auto;
       }
@@ -167,7 +165,7 @@ enum MarkdownHTMLRenderer {
       thead th { background: rgba(127,127,127,0.10); }
 
       /* Hide scrollbars inside HTML when idle (even if system setting is "always show scroll bars").
-         We show them temporarily while the user is actively scrolling (JS toggles the class). */
+         We show them temporarily while the user is actively scrolling overflow containers (JS toggles the class). */
       pre::-webkit-scrollbar,
       table::-webkit-scrollbar,
       .katex-display::-webkit-scrollbar {
@@ -320,9 +318,36 @@ enum MarkdownHTMLRenderer {
                   }, 700);
                 } catch (e) { }
               }
+              function isOverflowContainerEventTarget(t) {
+                try {
+                  if (!t) { return false; }
+                  // Element nodes only. Document scrolling is very high frequency and should not toggle scrollbars.
+                  if (t.nodeType !== 1) { return false; }
+                  if (t.matches && t.matches('pre, table, .katex-display')) { return true; }
+                  if (t.closest && t.closest('pre, table, .katex-display')) { return true; }
+                } catch (e) { }
+                return false;
+              }
               // `scroll` doesn't bubble; capture phase catches it from overflow containers (pre/table/katex-display).
-              try { document.addEventListener('scroll', function () { showScrollbarsTemporarily(); }, true); } catch (e) { }
-              try { document.addEventListener('wheel', function () { showScrollbarsTemporarily(); }, { passive: true }); } catch (e) { }
+              // Avoid toggling on main document scroll to keep vertical scrolling smooth for long content.
+              try {
+                document.addEventListener('scroll', function (ev) {
+                  try {
+                    if (!ev) { return; }
+                    if (!isOverflowContainerEventTarget(ev.target)) { return; }
+                    showScrollbarsTemporarily();
+                  } catch (e) { }
+                }, true);
+              } catch (e) { }
+              try {
+                document.addEventListener('wheel', function (ev) {
+                  try {
+                    if (!ev) { return; }
+                    if (!isOverflowContainerEventTarget(ev.target)) { return; }
+                    showScrollbarsTemporarily();
+                  } catch (e) { }
+                }, { passive: true });
+              } catch (e) { }
 
               // Preserve single newlines as hard line breaks. Clipboard/PDF copied text often uses line breaks
               // without blank lines, and the hover preview should respect that formatting.
