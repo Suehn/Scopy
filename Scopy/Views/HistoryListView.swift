@@ -15,6 +15,11 @@ struct HoverPreviewPopoverState: Equatable {
     let kind: HoverPreviewPopoverKind
 }
 
+private struct HoverPreviewDismissSnapshot: Equatable {
+    let itemID: UUID
+    let at: CFTimeInterval
+}
+
 /// 历史列表视图 - 符合 v0.md 的懒加载设计
 @MainActor
 struct HistoryListView: View {
@@ -30,6 +35,9 @@ struct HistoryListView: View {
     // Enforce that at most one hover preview popover is presented at a time.
     @State private var activePopover: HoverPreviewPopoverState?
     @State private var pendingPopover: HoverPreviewPopoverState?
+    @State private var lastDismissedPopover: HoverPreviewDismissSnapshot?
+
+    private static let popoverReopenCooldownSeconds: CFTimeInterval = 0.25
 
     private static let isUITesting: Bool = ProcessInfo.processInfo.arguments.contains("--uitesting")
     private static let profileAccessibility: Bool = ProcessInfo.processInfo.environment["SCOPY_PROFILE_ACCESSIBILITY"] == "1"
@@ -161,9 +169,44 @@ struct HistoryListView: View {
             return
         }
 
+        if let existing = activePopover {
+            recordPopoverDismiss(itemID: existing.itemID)
+        }
         pendingPopover = nil
         activePopover = nil
         detachSharedMarkdownWebViewIfAttached()
+    }
+
+    @MainActor
+    private func recordPopoverDismiss(itemID: UUID) {
+        lastDismissedPopover = HoverPreviewDismissSnapshot(itemID: itemID, at: CFAbsoluteTimeGetCurrent())
+    }
+
+    @MainActor
+    private func schedulePopoverPresentation(_ next: HoverPreviewPopoverState, delaySeconds: CFTimeInterval) {
+        pendingPopover = next
+        if delaySeconds <= 0 {
+            DispatchQueue.main.async {
+                guard pendingPopover == next else { return }
+                activePopover = next
+                pendingPopover = nil
+            }
+            return
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + delaySeconds) {
+            guard pendingPopover == next else { return }
+            activePopover = next
+            pendingPopover = nil
+        }
+    }
+
+    @MainActor
+    private func reopenDelaySeconds(for itemID: UUID) -> CFTimeInterval {
+        guard let snapshot = lastDismissedPopover, snapshot.itemID == itemID else { return 0 }
+        let elapsed = CFAbsoluteTimeGetCurrent() - snapshot.at
+        let remaining = Self.popoverReopenCooldownSeconds - elapsed
+        return remaining > 0 ? remaining : 0
     }
 
     @MainActor
@@ -173,28 +216,22 @@ struct HistoryListView: View {
             // SwiftUI's popover binding can occasionally get out-of-sync on macOS (popover dismissed by the system
             // without driving the `isPresented` binding back to `false`). In that case, re-hovering the same row
             // would be blocked by this equality check. Force a toggle to allow re-presenting the same popover.
+            recordPopoverDismiss(itemID: itemID)
             detachSharedMarkdownWebViewIfAttached()
-            pendingPopover = next
             activePopover = nil
-            DispatchQueue.main.async {
-                guard pendingPopover == next else { return }
-                activePopover = next
-                pendingPopover = nil
-            }
+            schedulePopoverPresentation(next, delaySeconds: reopenDelaySeconds(for: itemID))
             return
         }
 
         if activePopover != nil {
             // Close current popover first, then present the next one on the next run loop tick.
             // This avoids attempting to attach the same WKWebView to two view hierarchies in one update cycle.
-            detachSharedMarkdownWebViewIfAttached()
-            pendingPopover = next
-            activePopover = nil
-            DispatchQueue.main.async {
-                guard pendingPopover == next else { return }
-                activePopover = next
-                pendingPopover = nil
+            if let existing = activePopover {
+                recordPopoverDismiss(itemID: existing.itemID)
             }
+            detachSharedMarkdownWebViewIfAttached()
+            activePopover = nil
+            schedulePopoverPresentation(next, delaySeconds: reopenDelaySeconds(for: itemID))
             return
         }
 
@@ -202,16 +239,16 @@ struct HistoryListView: View {
         // Present on the next run loop tick to avoid transient "already has a superview" issues.
         if sharedMarkdownPreviewController.webView.superview != nil {
             detachSharedMarkdownWebViewIfAttached()
-            pendingPopover = next
-            DispatchQueue.main.async {
-                guard pendingPopover == next else { return }
-                activePopover = next
-                pendingPopover = nil
-            }
+            schedulePopoverPresentation(next, delaySeconds: reopenDelaySeconds(for: itemID))
             return
         }
 
         pendingPopover = nil
+        let delay = reopenDelaySeconds(for: itemID)
+        if delay > 0 {
+            schedulePopoverPresentation(next, delaySeconds: delay)
+            return
+        }
         activePopover = next
     }
 
@@ -221,6 +258,7 @@ struct HistoryListView: View {
             pendingPopover = nil
         }
         if activePopover?.itemID == itemID {
+            recordPopoverDismiss(itemID: itemID)
             detachSharedMarkdownWebViewIfAttached()
             activePopover = nil
         }

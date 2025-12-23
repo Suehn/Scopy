@@ -5,6 +5,18 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [v0.50.fix14] - 2025-12-23
+
+### Fix/Preview
+
+- **快速 re-hover 稳定性（同一行）**：修复 popover close 兜底在“仍处于 hover/即将 reopen”的窗口期误触发清理，导致 pending reopen 被取消，从而出现“关闭后快速再 hover 同一行不再弹出”。
+- **Popover close 监听更可靠**：`PopoverWindowCloseObserver` 改为在 `viewDidMoveToWindow` 时绑定窗口监听，并在 `viewWillMove(toWindow: nil)` 时兜底触发 close，同步清理更稳。
+- **Markdown 预览复用补强**：缓存 Markdown 预览 metrics（size/overflow），并允许强制触发尺寸上报，减少“同样内容复用时不再上报尺寸”的 reopen 偶发。
+
+### Test
+
+- ⏸ 未运行（按用户要求，按需可跑：`xcodebuild test -scheme Scopy -destination 'platform=macOS' -only-testing:ScopyTests`）
+
 ## [v0.50.fix13] - 2025-12-22
 
 ### Fix/Preview

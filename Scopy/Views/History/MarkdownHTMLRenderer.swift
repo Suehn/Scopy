@@ -247,7 +247,7 @@ enum MarkdownHTMLRenderer {
             var lastW = 0;
             var pendingRAF = false;
             var ro = null;
-            window.__scopyReportHeight = function () {
+            window.__scopyReportHeight = function (force) {
               try {
                 if (!window.webkit || !window.webkit.messageHandlers || !window.webkit.messageHandlers.scopySize) { return; }
                 var el = document.getElementById('content');
@@ -274,7 +274,7 @@ enum MarkdownHTMLRenderer {
                   }
                 } catch (e) { overflowX = false; }
                 if (!h) { return; }
-                if (Math.abs(h - lastH) < 1 && Math.abs(w - lastW) < 1) { return; }
+                if (!force && Math.abs(h - lastH) < 1 && Math.abs(w - lastW) < 1) { return; }
                 lastH = h;
                 lastW = w;
                 window.webkit.messageHandlers.scopySize.postMessage({ width: w, height: h, overflowX: overflowX });

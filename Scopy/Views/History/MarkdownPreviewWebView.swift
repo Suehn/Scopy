@@ -296,6 +296,7 @@ final class MarkdownPreviewWebViewController: NSObject, ObservableObject, WKNavi
     var onContentSizeChange: (@MainActor (MarkdownContentMetrics) -> Void)?
     private var lastHTML: String = ""
     private var lastReportedMetrics: MarkdownContentMetrics = MarkdownContentMetrics(size: .zero, hasHorizontalOverflow: false)
+    private var lastLoadFinished: Bool = false
     private let scrollbarAutoHider = ScrollbarAutoHider()
     private let sizeMessageHandlerProxy = WeakScriptMessageHandler()
 
@@ -335,6 +336,9 @@ final class MarkdownPreviewWebViewController: NSObject, ObservableObject, WKNavi
         webView.uiDelegate = nil
         webView.configuration.userContentController.removeScriptMessageHandler(forName: MarkdownPreviewWebView.sizeMessageHandlerName)
         scrollbarAutoHider.detach()
+        onContentSizeChange = nil
+        // Allow the next consumer (popover / measurer) to receive a fresh metrics callback even if the size is unchanged.
+        lastReportedMetrics = MarkdownContentMetrics(size: .zero, hasHorizontalOverflow: false)
     }
 
     func setShouldScroll(_ shouldScroll: Bool) {
@@ -354,8 +358,24 @@ final class MarkdownPreviewWebViewController: NSObject, ObservableObject, WKNavi
 
     func loadHTMLIfNeeded(_ html: String) {
         attachWebViewIfNeeded()
-        if lastHTML == html { return }
+        if lastHTML == html {
+            // Important: When reusing the same WKWebView across hovers, WebKit may not re-run load callbacks and the
+            // page may not automatically re-post the same size message. Reset the last reported metrics and trigger
+            // a best-effort height report so the measurer/popover can re-open reliably.
+            lastReportedMetrics = MarkdownContentMetrics(size: .zero, hasHorizontalOverflow: false)
+
+            if !lastLoadFinished {
+                // If the last navigation never finished (e.g. hover exited mid-load), retry the load.
+                let baseURL = Bundle.main.resourceURL?.appendingPathComponent("MarkdownPreview", isDirectory: true)
+                webView.loadHTMLString(html, baseURL: baseURL)
+            } else {
+                requestContentRefresh(for: webView, forceSizeReport: true)
+            }
+            return
+        }
+
         lastHTML = html
+        lastLoadFinished = false
         lastReportedMetrics = MarkdownContentMetrics(size: .zero, hasHorizontalOverflow: false)
         let baseURL = Bundle.main.resourceURL?.appendingPathComponent("MarkdownPreview", isDirectory: true)
         webView.loadHTMLString(html, baseURL: baseURL)
@@ -398,15 +418,8 @@ final class MarkdownPreviewWebViewController: NSObject, ObservableObject, WKNavi
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        // Best-effort: ensure math render runs even if DOMContentLoaded timing varies.
-        webView.evaluateJavaScript("typeof window.__scopyRenderMath === 'function'") { result, _ in
-            guard let ok = result as? Bool, ok else { return }
-            webView.evaluateJavaScript("window.__scopyRenderMath()") { _, _ in }
-        }
-        webView.evaluateJavaScript("typeof window.__scopyReportHeight === 'function'") { result, _ in
-            guard let ok = result as? Bool, ok else { return }
-            webView.evaluateJavaScript("window.__scopyReportHeight()") { _, _ in }
-        }
+        lastLoadFinished = true
+        requestContentRefresh(for: webView, forceSizeReport: false)
     }
 
     // MARK: - WKScriptMessageHandler
@@ -430,6 +443,20 @@ final class MarkdownPreviewWebViewController: NSObject, ObservableObject, WKNavi
         }
         Task { @MainActor in
             self.onContentSizeChange?(metrics)
+        }
+    }
+
+    private func requestContentRefresh(for webView: WKWebView, forceSizeReport: Bool) {
+        // Best-effort: ensure math render & size reporting run even if DOMContentLoaded timing varies,
+        // and for reuse cases where the web view is re-attached without a navigation finishing.
+        webView.evaluateJavaScript("typeof window.__scopyRenderMath === 'function'") { result, _ in
+            guard let ok = result as? Bool, ok else { return }
+            webView.evaluateJavaScript("window.__scopyRenderMath()") { _, _ in }
+        }
+        webView.evaluateJavaScript("typeof window.__scopyReportHeight === 'function'") { result, _ in
+            guard let ok = result as? Bool, ok else { return }
+            let force = forceSizeReport ? "true" : "false"
+            webView.evaluateJavaScript("window.__scopyReportHeight(\(force))") { _, _ in }
         }
     }
 }
