@@ -34,12 +34,22 @@
 - runner：`macos-15`
 - Xcode：`16.0`
 
+## 本次更新（v0.50.fix18）
+
+- **Fix/Release（pngquant 进包生效）**：修复部分 release 产物中 `Tools/pngquant` 未被打包的问题：构建阶段强制将 `Scopy/Resources/Tools/pngquant` 复制到 `Scopy.app/Contents/Resources/Tools/pngquant` 并设为可执行，同时拷贝 `Scopy/Resources/ThirdParty/pngquant/*`。
+- **Fix/PNG（手动优化历史图片）**：历史列表新增“优化图片（pngquant）”按钮，点击后会覆盖 `content/` 原图，同时更新 DB 的 hash/size 并刷新 UI；若压缩后不变小会自动回滚并提示“无变化”。
+- **UX**：hover 在优化按钮上不再触发预览，避免误弹预览影响操作。
+- **验证环境**（本地）：`hw.model=Mac15,12`；macOS 15.7.3（24G419）；Xcode 16.3（16E140）
+- **验证结果**：
+  - Release build：`.build/Release/Scopy.app/Contents/Resources/Tools/pngquant --version` → `3.0.3`
+  - `xcodebuild test -scheme Scopy -destination 'platform=macOS' -only-testing:ScopyTests`：Executed 276 tests, 25 skipped, 0 failures
+
 ## 本次更新（v0.50.fix17）
 
 - **Feat/PNG（pngquant）**：Markdown/LaTeX 导出 PNG 默认启用 pngquant 压缩（写入剪贴板前完成压缩），导出进入历史与 `content/` 的会是压缩后的 PNG。
 - **可选：历史图片写入前压缩**：新增设置开关（默认关闭），开启后图片写入历史前会压缩并覆盖原始 payload；导出/写入分别提供独立参数（quality/speed/colors）。
 - **打包与兼容**：
-  - 默认随 App bundle 内置 `Tools/pngquant`（`Scopy/Resources/Tools/pngquant`），并在 build phase 中确保可执行权限。
+  - 设计目标为随 App bundle 内置 `Tools/pngquant`（`Scopy/Resources/Tools/pngquant`）；实际“进包”问题在 `v0.50.fix18` 修复。
   - 如用户配置自定义路径，则优先使用；否则可回退探测 brew 常见路径；不可用时 best-effort 跳过，不影响原导出/写入功能链路。
   - 许可信息随包附带：`Scopy/Resources/ThirdParty/pngquant/*`。
 - **测试结果**：

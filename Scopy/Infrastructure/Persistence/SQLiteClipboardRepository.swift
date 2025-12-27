@@ -151,6 +151,27 @@ actor SQLiteClipboardRepository {
         _ = try stmt.step()
     }
 
+    func updateItemPayload(
+        id: UUID,
+        contentHash: String,
+        sizeBytes: Int,
+        storageRef: String?,
+        rawData: Data?
+    ) throws {
+        let sql = """
+            UPDATE clipboard_items
+            SET content_hash = ?, size_bytes = ?, storage_ref = ?, raw_data = ?
+            WHERE id = ?
+        """
+        let stmt = try prepare(sql)
+        try stmt.bindText(contentHash, at: 1)
+        try stmt.bindInt(sizeBytes, at: 2)
+        try stmt.bindText(storageRef, at: 3)
+        try stmt.bindBlob(rawData, at: 4)
+        try stmt.bindText(id.uuidString, at: 5)
+        _ = try stmt.step()
+    }
+
     func deleteItem(id: UUID) throws {
         let sql = "DELETE FROM clipboard_items WHERE id = ?"
         let stmt = try prepare(sql)

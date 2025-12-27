@@ -93,6 +93,10 @@ final class RealClipboardService: ClipboardServiceProtocol {
         try await clipboardService.getImageData(itemID: itemID)
     }
 
+    func optimizeImage(itemID: UUID) async throws -> ImageOptimizationOutcomeDTO {
+        try await clipboardService.optimizeImage(itemID: itemID)
+    }
+
     func getRecentApps(limit: Int) async throws -> [String] {
         try await clipboardService.getRecentApps(limit: limit)
     }

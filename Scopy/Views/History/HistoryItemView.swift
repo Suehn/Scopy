@@ -24,6 +24,7 @@ struct HistoryItemView: View, Equatable {
     let onHoverSelect: (UUID) -> Void
     let onTogglePin: () -> Void
     let onDelete: () -> Void
+    let onOptimizeImage: () async -> ImageOptimizationOutcomeDTO
     let getImageData: () async -> Data?
     let markdownWebViewController: MarkdownPreviewWebViewController
     let isImagePreviewPresented: Bool
@@ -45,6 +46,11 @@ struct HistoryItemView: View, Equatable {
     @StateObject private var previewModel = HoverPreviewModel()
     @State private var relativeTimeText: String = ""
     @State private var isUITestTapPreviewEnabled: Bool = false
+    @State private var optimizeImageTask: Task<Void, Never>?
+    @State private var optimizeMessageTask: Task<Void, Never>?
+    @State private var isOptimizingImage: Bool = false
+    @State private var optimizeMessage: String?
+    @State private var isHoveringOptimizeButton: Bool = false
 
     init(
         item: ClipboardItemDTO,
@@ -55,6 +61,7 @@ struct HistoryItemView: View, Equatable {
         onHoverSelect: @escaping (UUID) -> Void,
         onTogglePin: @escaping () -> Void,
         onDelete: @escaping () -> Void,
+        onOptimizeImage: @escaping () async -> ImageOptimizationOutcomeDTO,
         getImageData: @escaping () async -> Data?,
         markdownWebViewController: MarkdownPreviewWebViewController,
         isImagePreviewPresented: Bool,
@@ -70,6 +77,7 @@ struct HistoryItemView: View, Equatable {
         self.onHoverSelect = onHoverSelect
         self.onTogglePin = onTogglePin
         self.onDelete = onDelete
+        self.onOptimizeImage = onOptimizeImage
         self.getImageData = getImageData
         self.markdownWebViewController = markdownWebViewController
         self.isImagePreviewPresented = isImagePreviewPresented
@@ -230,10 +238,36 @@ struct HistoryItemView: View, Equatable {
             Spacer(minLength: ScopySpacing.md)
 
             HStack(alignment: .center, spacing: ScopySpacing.sm) {
+                if item.type == .image, (isHovering || isKeyboardSelected) {
+                    Button {
+                        startOptimizeImageTask()
+                    } label: {
+                        if isOptimizingImage {
+                            ProgressView()
+                                .controlSize(.small)
+                        } else {
+                            Image(systemName: "wand.and.stars")
+                                .font(.system(size: ScopySize.Icon.pin))
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .help("优化图片大小（pngquant）")
+                    .disabled(isOptimizingImage)
+                    .onHover { hovering in
+                        handleOptimizeButtonHover(hovering)
+                    }
+                }
+
                 if item.isPinned {
                     Image(systemName: ScopyIcons.pin)
                         .font(.system(size: ScopySize.Icon.pin))
                         .foregroundStyle(.orange)
+                }
+
+                if let optimizeMessage, !optimizeMessage.isEmpty {
+                    Text(optimizeMessage)
+                        .font(ScopyTypography.microMono)
+                        .foregroundStyle(ScopyColors.mutedText)
                 }
 
                 Text(relativeTimeText.isEmpty ? relativeTime : relativeTimeText)
@@ -437,6 +471,7 @@ struct HistoryItemView: View, Equatable {
             if isHovering {
                 isHovering = false
             }
+            isHoveringOptimizeButton = false
             return
         }
 
@@ -461,14 +496,15 @@ struct HistoryItemView: View, Equatable {
             }
 
             // 图片预览任务
-            if item.type == .image && showThumbnails {
+            if !isHoveringOptimizeButton, item.type == .image && showThumbnails {
                 startPreviewTask()
             }
             // v0.15: 文本预览任务
-            else if item.type == .text || item.type == .rtf || item.type == .html {
+            else if !isHoveringOptimizeButton, item.type == .text || item.type == .rtf || item.type == .html {
                 startTextPreviewTask()
             }
         } else {
+            isHoveringOptimizeButton = false
             // v0.24: popover 出现/消失时可能短暂触发 hover false，做 120ms 退出防抖
             cancelPreviewTask()
             scheduleHoverExitCleanup()
@@ -693,6 +729,35 @@ struct HistoryItemView: View, Equatable {
         hoverExitTask = nil
     }
 
+    private func cancelOptimizeMessageTask() {
+        optimizeMessageTask?.cancel()
+        optimizeMessageTask = nil
+    }
+
+    private func cancelOptimizeImageTask() {
+        optimizeImageTask?.cancel()
+        optimizeImageTask = nil
+        isOptimizingImage = false
+    }
+
+    private func handleOptimizeButtonHover(_ hovering: Bool) {
+        if hovering {
+            isHoveringOptimizeButton = true
+            resetPreviewState(hidePopovers: true)
+            return
+        }
+
+        isHoveringOptimizeButton = false
+        guard isHovering else { return }
+        guard !isScrolling else { return }
+
+        if item.type == .image && showThumbnails {
+            startPreviewTask()
+        } else if item.type == .text || item.type == .rtf || item.type == .html {
+            startTextPreviewTask()
+        }
+    }
+
     private func cancelHoverTasks() {
         cancelHoverDebounceTask()
         cancelHoverExitTask()
@@ -709,6 +774,52 @@ struct HistoryItemView: View, Equatable {
         }
         isPopoverHovering = false
         resetPreviewModel()
+    }
+
+    private func startOptimizeImageTask() {
+        guard item.type == .image else { return }
+        guard !isOptimizingImage else { return }
+
+        cancelOptimizeImageTask()
+        cancelOptimizeMessageTask()
+
+        isOptimizingImage = true
+        optimizeImageTask = Task { @MainActor in
+            defer {
+                isOptimizingImage = false
+            }
+
+            let outcome = await onOptimizeImage()
+            optimizeMessage = Self.makeOptimizeMessage(outcome)
+            guard optimizeMessage != nil else { return }
+
+            optimizeMessageTask = Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+                guard !Task.isCancelled else { return }
+                optimizeMessage = nil
+            }
+        }
+    }
+
+    private static func makeOptimizeMessage(_ outcome: ImageOptimizationOutcomeDTO) -> String? {
+        switch outcome.result {
+        case .optimized:
+            let original = max(0, outcome.originalBytes)
+            let optimized = max(0, outcome.optimizedBytes)
+            guard original > 0, optimized >= 0 else { return "已优化" }
+            guard optimized < original else { return "无变化" }
+            let percent = Int((Double(original - optimized) / Double(original) * 100.0).rounded())
+            guard percent > 0 else { return "已压缩" }
+            return "压缩 -\(percent)%"
+        case .noChange:
+            return "无变化"
+        case .failed(let message):
+            let lower = message.lowercased()
+            if lower.contains("pngquant") && (lower.contains("not found") || lower.contains("not executable")) {
+                return "pngquant 不可用"
+            }
+            return "压缩失败"
+        }
     }
 
     private var shouldResetPreviewOnScroll: Bool {

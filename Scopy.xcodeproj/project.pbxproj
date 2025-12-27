@@ -1464,7 +1464,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "set -euo pipefail\nTOOL_PATH=\"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/Tools/pngquant\"\nif [ ! -f \"$TOOL_PATH\" ]; then\n  exit 0\nfi\nchmod +x \"$TOOL_PATH\" || true\n";
+			shellScript = "set -euo pipefail\nSRC_TOOL=\"${SRCROOT}/Scopy/Resources/Tools/pngquant\"\nDST_TOOL_DIR=\"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/Tools\"\nDST_TOOL=\"${DST_TOOL_DIR}/pngquant\"\nif [ ! -f \"$SRC_TOOL\" ]; then\n  exit 0\nfi\nmkdir -p \"$DST_TOOL_DIR\"\nditto \"$SRC_TOOL\" \"$DST_TOOL\"\nchmod +x \"$DST_TOOL\" || true\n\nSRC_TP_DIR=\"${SRCROOT}/Scopy/Resources/ThirdParty/pngquant\"\nDST_TP_PARENT=\"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/ThirdParty\"\nDST_TP_DIR=\"${DST_TP_PARENT}/pngquant\"\nif [ -d \"$SRC_TP_DIR\" ]; then\n  mkdir -p \"$DST_TP_PARENT\"\n  rm -rf \"$DST_TP_DIR\"\n  ditto \"$SRC_TP_DIR\" \"$DST_TP_DIR\"\nfi\n";
 		};
 		38A68C0F6991A8F75E8A1C87 /* Stage SwiftPM Resource Bundles */ = {
 			isa = PBXShellScriptBuildPhase;

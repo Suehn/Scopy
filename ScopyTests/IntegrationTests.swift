@@ -623,6 +623,9 @@ final class SearchHintTests: XCTestCase {
             )
         }
         func getImageData(itemID: UUID) async throws -> Data? { nil }
+        func optimizeImage(itemID: UUID) async throws -> ImageOptimizationOutcomeDTO {
+            ImageOptimizationOutcomeDTO(result: .noChange, originalBytes: 0, optimizedBytes: 0)
+        }
         func getRecentApps(limit: Int) async throws -> [String] { [] }
     }
 

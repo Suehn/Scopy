@@ -340,6 +340,22 @@ public final class StorageService {
         )
     }
 
+    func updateItemPayload(
+        id: UUID,
+        contentHash: String,
+        sizeBytes: Int,
+        storageRef: String?,
+        rawData: Data?
+    ) async throws {
+        try await repository.updateItemPayload(
+            id: id,
+            contentHash: contentHash,
+            sizeBytes: sizeBytes,
+            storageRef: storageRef,
+            rawData: rawData
+        )
+    }
+
     public func deleteItem(_ id: UUID) async throws {
         // First get the item to clean up external storage
         // v0.19: 添加错误日志

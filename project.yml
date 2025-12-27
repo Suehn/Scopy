@@ -144,11 +144,24 @@ targets:
       - name: "Fix Bundled Tool Permissions"
         script: |
           set -euo pipefail
-          TOOL_PATH="${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/Tools/pngquant"
-          if [ ! -f "$TOOL_PATH" ]; then
+          SRC_TOOL="${SRCROOT}/Scopy/Resources/Tools/pngquant"
+          DST_TOOL_DIR="${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/Tools"
+          DST_TOOL="${DST_TOOL_DIR}/pngquant"
+          if [ ! -f "$SRC_TOOL" ]; then
             exit 0
           fi
-          chmod +x "$TOOL_PATH" || true
+          mkdir -p "$DST_TOOL_DIR"
+          ditto "$SRC_TOOL" "$DST_TOOL"
+          chmod +x "$DST_TOOL" || true
+
+          SRC_TP_DIR="${SRCROOT}/Scopy/Resources/ThirdParty/pngquant"
+          DST_TP_PARENT="${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/ThirdParty"
+          DST_TP_DIR="${DST_TP_PARENT}/pngquant"
+          if [ -d "$SRC_TP_DIR" ]; then
+            mkdir -p "$DST_TP_PARENT"
+            rm -rf "$DST_TP_DIR"
+            ditto "$SRC_TP_DIR" "$DST_TP_DIR"
+          fi
         basedOnDependencyAnalysis: false
     resources:
       - path: Scopy/Resources

@@ -210,6 +210,15 @@ final class HistoryViewModel {
             if totalCount >= 0 {
                 canLoadMore = loadedCount < totalCount
             }
+        case .itemContentUpdated(let item):
+            guard let index = items.firstIndex(where: { $0.id == item.id }) else { return }
+            let existing = items[index]
+            if existing.thumbnailPath != item.thumbnailPath, let oldPath = existing.thumbnailPath {
+                ThumbnailCache.shared.remove(path: oldPath)
+            }
+            items[index] = item
+            prewarmDisplayText(for: [item])
+            invalidatePinnedCache()
         case .itemDeleted(let id):
             let wasPresent = items.contains(where: { $0.id == id })
             items.removeAll { $0.id == id }
@@ -569,6 +578,18 @@ final class HistoryViewModel {
 
     func getImageData(itemID: UUID) async throws -> Data? {
         try await service.getImageData(itemID: itemID)
+    }
+
+    func optimizeImage(_ item: ClipboardItemDTO) async -> ImageOptimizationOutcomeDTO {
+        do {
+            return try await service.optimizeImage(itemID: item.id)
+        } catch {
+            return ImageOptimizationOutcomeDTO(
+                result: .failed(message: error.localizedDescription),
+                originalBytes: item.sizeBytes,
+                optimizedBytes: item.sizeBytes
+            )
+        }
     }
 
     // MARK: - Keyboard Navigation

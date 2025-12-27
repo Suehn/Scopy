@@ -242,6 +242,35 @@ final class ReusableMockClipboardService: ClipboardServiceProtocol {
         return nil
     }
 
+    func optimizeImage(itemID: UUID) async throws -> ImageOptimizationOutcomeDTO {
+        guard let index = items.firstIndex(where: { $0.id == itemID }) else {
+            return ImageOptimizationOutcomeDTO(result: .noChange, originalBytes: 0, optimizedBytes: 0)
+        }
+        let item = items[index]
+        guard item.type == .image else {
+            return ImageOptimizationOutcomeDTO(result: .noChange, originalBytes: item.sizeBytes, optimizedBytes: item.sizeBytes)
+        }
+
+        let original = max(0, item.sizeBytes)
+        let optimized = max(0, original - max(1, original / 4))
+        let updated = ClipboardItemDTO(
+            id: item.id,
+            type: item.type,
+            contentHash: UUID().uuidString,
+            plainText: item.plainText,
+            appBundleID: item.appBundleID,
+            createdAt: item.createdAt,
+            lastUsedAt: item.lastUsedAt,
+            isPinned: item.isPinned,
+            sizeBytes: optimized,
+            thumbnailPath: item.thumbnailPath,
+            storageRef: item.storageRef
+        )
+        items[index] = updated
+        emitEvent(.itemContentUpdated(updated))
+        return ImageOptimizationOutcomeDTO(result: .optimized, originalBytes: original, optimizedBytes: optimized)
+    }
+
     func getRecentApps(limit: Int) async throws -> [String] {
         // 返回 mock 数据中的 app 列表
         let apps = Set(items.compactMap { $0.appBundleID })

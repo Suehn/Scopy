@@ -282,6 +282,7 @@ struct HistoryListView: View {
             },
             onTogglePin: { Task { await historyViewModel.togglePin(item) } },
             onDelete: { Task { await historyViewModel.delete(item) } },
+            onOptimizeImage: { await historyViewModel.optimizeImage(item) },
             getImageData: { try? await historyViewModel.getImageData(itemID: item.id) },
             markdownWebViewController: sharedMarkdownPreviewController,
             isImagePreviewPresented: isImagePreviewPresented,

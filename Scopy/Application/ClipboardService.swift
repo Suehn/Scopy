@@ -427,6 +427,193 @@ actor ClipboardService {
         return await storage.loadPayloadData(for: item)
     }
 
+    func optimizeImage(itemID: UUID) async throws -> ImageOptimizationOutcomeDTO {
+        let storage = try requireStorage()
+        guard let item = try await storage.findByID(itemID) else {
+            return ImageOptimizationOutcomeDTO(result: .noChange, originalBytes: 0, optimizedBytes: 0)
+        }
+        guard item.type == .image else {
+            return ImageOptimizationOutcomeDTO(result: .noChange, originalBytes: item.sizeBytes, optimizedBytes: item.sizeBytes)
+        }
+
+        let options = PngquantService.Options(
+            binaryPath: settings.pngquantBinaryPath,
+            qualityMin: settings.pngquantCopyImageQualityMin,
+            qualityMax: settings.pngquantCopyImageQualityMax,
+            speed: settings.pngquantCopyImageSpeed,
+            colors: settings.pngquantCopyImageColors
+        )
+
+        if let storageRef = item.storageRef, !storageRef.isEmpty {
+            guard StorageService.validateStorageRef(storageRef, externalStoragePath: storage.externalStorageDirectoryPath) else {
+                return ImageOptimizationOutcomeDTO(
+                    result: .failed(message: "Invalid storageRef"),
+                    originalBytes: item.sizeBytes,
+                    optimizedBytes: item.sizeBytes
+                )
+            }
+
+            let url = URL(fileURLWithPath: storageRef)
+            let originalBytes = Self.fileSizeBestEffort(url: url) ?? item.sizeBytes
+            let backupURL = URL(fileURLWithPath: storageRef + ".scopy-backup-\(UUID().uuidString)")
+
+            do {
+                if FileManager.default.fileExists(atPath: backupURL.path) {
+                    try? FileManager.default.removeItem(at: backupURL)
+                }
+                try FileManager.default.copyItem(at: url, to: backupURL)
+
+                // Legacy safety: older builds may have stored TIFF (or other) payload under a .png path.
+                // Ensure the file is a real PNG before invoking pngquant, otherwise pngquant will hard-fail.
+                var didTranscodeToPNG = false
+                if !PngquantService.isLikelyPNGFile(url) {
+                    didTranscodeToPNG = try await Task.detached(priority: .utility) { () throws -> Bool in
+                        let data = try Data(contentsOf: url, options: [.mappedIfSafe])
+                        guard let pngData = ClipboardMonitor.convertTIFFToPNG(data) else { return false }
+                        try StorageService.writeAtomically(pngData, to: url.path)
+                        return true
+                    }.value
+                }
+
+                if !PngquantService.isLikelyPNGFile(url), !didTranscodeToPNG {
+                    // Unknown/unsupported image format; keep the original payload.
+                    try? FileManager.default.removeItem(at: backupURL)
+                    let currentSize = Self.fileSizeBestEffort(url: url) ?? originalBytes
+                    return ImageOptimizationOutcomeDTO(result: .noChange, originalBytes: originalBytes, optimizedBytes: currentSize)
+                }
+
+                let replaced = try await Task.detached(priority: .utility) {
+                    try PngquantService.compressPNGFileInPlace(url, options: options)
+                }.value
+
+                // If neither transcoding nor pngquant changed the file, return noChange.
+                if !replaced, !didTranscodeToPNG {
+                    try? FileManager.default.removeItem(at: backupURL)
+                    let currentSize = Self.fileSizeBestEffort(url: url) ?? originalBytes
+                    return ImageOptimizationOutcomeDTO(result: .noChange, originalBytes: originalBytes, optimizedBytes: currentSize)
+                }
+
+                let optimizedBytes = Self.fileSizeBestEffort(url: url) ?? originalBytes
+                if optimizedBytes >= originalBytes {
+                    // Don't keep changes that don't reduce size.
+                    if FileManager.default.fileExists(atPath: backupURL.path) {
+                        try? FileManager.default.removeItem(at: url)
+                        try? FileManager.default.moveItem(at: backupURL, to: url)
+                    } else {
+                        try? FileManager.default.removeItem(at: backupURL)
+                    }
+                    return ImageOptimizationOutcomeDTO(result: .noChange, originalBytes: originalBytes, optimizedBytes: originalBytes)
+                }
+
+                let data = try Data(contentsOf: url, options: [.mappedIfSafe])
+                let newHash = ClipboardMonitor.computeHashStatic(data)
+
+                try await storage.updateItemPayload(
+                    id: item.id,
+                    contentHash: newHash,
+                    sizeBytes: optimizedBytes,
+                    storageRef: storageRef,
+                    rawData: nil
+                )
+
+                if let search {
+                    await search.invalidateCache()
+                }
+
+                try? FileManager.default.removeItem(at: backupURL)
+
+                let updated = StorageService.StoredItem(
+                    id: item.id,
+                    type: item.type,
+                    contentHash: newHash,
+                    plainText: item.plainText,
+                    appBundleID: item.appBundleID,
+                    createdAt: item.createdAt,
+                    lastUsedAt: item.lastUsedAt,
+                    useCount: item.useCount,
+                    isPinned: item.isPinned,
+                    sizeBytes: optimizedBytes,
+                    storageRef: storageRef,
+                    rawData: nil
+                )
+                let dto = await toDTO(updated, storage: storage, thumbnailGenerationPriority: .userInitiated)
+                await yieldEvent(.itemContentUpdated(dto))
+
+                return ImageOptimizationOutcomeDTO(result: .optimized, originalBytes: originalBytes, optimizedBytes: optimizedBytes)
+            } catch {
+                // Best-effort restore original file to keep DB/file consistent.
+                if FileManager.default.fileExists(atPath: backupURL.path) {
+                    try? FileManager.default.removeItem(at: url)
+                    try? FileManager.default.moveItem(at: backupURL, to: url)
+                } else {
+                    try? FileManager.default.removeItem(at: backupURL)
+                }
+
+                return ImageOptimizationOutcomeDTO(
+                    result: .failed(message: error.localizedDescription),
+                    originalBytes: originalBytes,
+                    optimizedBytes: originalBytes
+                )
+            }
+        }
+
+        if let rawData = item.rawData {
+            let originalBytes = rawData.count
+            do {
+                let compressed = try await Task.detached(priority: .utility) {
+                    try PngquantService.compressPNGData(rawData, options: options)
+                }.value
+
+                guard compressed != rawData else {
+                    return ImageOptimizationOutcomeDTO(result: .noChange, originalBytes: originalBytes, optimizedBytes: originalBytes)
+                }
+
+                let newHash = ClipboardMonitor.computeHashStatic(compressed)
+                let optimizedBytes = compressed.count
+
+                try await storage.updateItemPayload(
+                    id: item.id,
+                    contentHash: newHash,
+                    sizeBytes: optimizedBytes,
+                    storageRef: nil,
+                    rawData: compressed
+                )
+
+                if let search {
+                    await search.invalidateCache()
+                }
+
+                let updated = StorageService.StoredItem(
+                    id: item.id,
+                    type: item.type,
+                    contentHash: newHash,
+                    plainText: item.plainText,
+                    appBundleID: item.appBundleID,
+                    createdAt: item.createdAt,
+                    lastUsedAt: item.lastUsedAt,
+                    useCount: item.useCount,
+                    isPinned: item.isPinned,
+                    sizeBytes: optimizedBytes,
+                    storageRef: nil,
+                    rawData: compressed
+                )
+                let dto = await toDTO(updated, storage: storage, thumbnailGenerationPriority: .userInitiated)
+                await yieldEvent(.itemContentUpdated(dto))
+
+                return ImageOptimizationOutcomeDTO(result: .optimized, originalBytes: originalBytes, optimizedBytes: optimizedBytes)
+            } catch {
+                return ImageOptimizationOutcomeDTO(
+                    result: .failed(message: error.localizedDescription),
+                    originalBytes: originalBytes,
+                    optimizedBytes: originalBytes
+                )
+            }
+        }
+
+        // Fallback: item has no inline data and no storageRef (unexpected)
+        return ImageOptimizationOutcomeDTO(result: .noChange, originalBytes: item.sizeBytes, optimizedBytes: item.sizeBytes)
+    }
+
     func getRecentApps(limit: Int) async throws -> [String] {
         let storage = try requireStorage()
         return try await storage.getRecentApps(limit: limit)
@@ -447,6 +634,12 @@ actor ClipboardService {
     private func requireSearch() throws -> SearchEngineImpl {
         guard let search else { throw ClipboardServiceError.notStarted }
         return search
+    }
+
+    nonisolated private static func fileSizeBestEffort(url: URL) -> Int? {
+        guard let attrs = try? FileManager.default.attributesOfItem(atPath: url.path),
+              let size = attrs[.size] as? Int else { return nil }
+        return size
     }
 
     private func getMonitorStream() async -> AsyncStream<ClipboardMonitor.ClipboardContent>? {

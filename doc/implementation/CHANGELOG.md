@@ -5,6 +5,22 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [v0.50.fix18] - 2025-12-27
+
+### Fix/PNG
+
+- **Release 包携带 pngquant**：构建时将 `Scopy/Resources/Tools/pngquant` 复制到 app bundle 的 `Resources/Tools/pngquant` 并设为可执行，避免导出/优化在无系统 pngquant 时失效。
+- **手动优化历史图片（覆盖原图）**：历史列表新增“优化图片（pngquant）”按钮，点击后使用 pngquant 覆盖原图并更新 DB 的 hash/size；UI 会提示压缩比（或无变化/不可用）。
+- **压缩失败兜底**：对历史遗留的“非 PNG 却落在 .png 路径”先尝试 TIFF→PNG 转码，再执行 pngquant；若未变小自动回滚，避免“压缩失败”误报。
+
+### UX
+
+- **hover 优化按钮不触发预览**：hover 在优化按钮上会取消/隐藏预览，离开按钮后若仍在行内再恢复预览任务。
+
+### Test
+
+- `xcodebuild test -scheme Scopy -destination 'platform=macOS' -only-testing:ScopyTests`：Executed 276 tests, 25 skipped, 0 failures
+
 ## [v0.50.fix17] - 2025-12-27
 
 ### Feat/PNG

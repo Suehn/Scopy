@@ -868,6 +868,13 @@ final class TestMockClipboardService: ClipboardServiceProtocol {
         return nil
     }
 
+    func optimizeImage(itemID: UUID) async throws -> ImageOptimizationOutcomeDTO {
+        guard let item = items.first(where: { $0.id == itemID }) else {
+            return ImageOptimizationOutcomeDTO(result: .noChange, originalBytes: 0, optimizedBytes: 0)
+        }
+        return ImageOptimizationOutcomeDTO(result: .noChange, originalBytes: item.sizeBytes, optimizedBytes: item.sizeBytes)
+    }
+
     func getRecentApps(limit: Int) async throws -> [String] {
         // 返回 mock 数据中的 app 列表
         let apps = Set(items.compactMap { $0.appBundleID })
@@ -916,6 +923,9 @@ final class FailingMockService: ClipboardServiceProtocol {
         StorageStatsDTO(itemCount: 0, databaseSizeBytes: 0, externalStorageSizeBytes: 0, thumbnailSizeBytes: 0, totalSizeBytes: 0, databasePath: "")
     }
     func getImageData(itemID: UUID) async throws -> Data? { nil }
+    func optimizeImage(itemID: UUID) async throws -> ImageOptimizationOutcomeDTO {
+        ImageOptimizationOutcomeDTO(result: .noChange, originalBytes: 0, optimizedBytes: 0)
+    }
     func getRecentApps(limit: Int) async throws -> [String] { [] }
 }
 

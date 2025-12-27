@@ -53,6 +53,9 @@ public protocol ClipboardServiceProtocol: AnyObject {
     /// 获取图片原始数据（用于预览）
     func getImageData(itemID: UUID) async throws -> Data?
 
+    /// 手动优化历史中的图片（pngquant）：压缩并覆盖原图，同时更新 DB 的 hash/size。
+    func optimizeImage(itemID: UUID) async throws -> ImageOptimizationOutcomeDTO
+
     /// 获取最近使用的 app 列表（用于过滤）
     func getRecentApps(limit: Int) async throws -> [String]
 

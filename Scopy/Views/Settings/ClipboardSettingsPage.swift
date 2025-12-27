@@ -23,12 +23,12 @@ struct ClipboardSettingsPage: View {
             }
 
             SettingsSection(
-                "历史图片压缩（pngquant）",
+                "历史图片优化（pngquant）",
                 systemImage: "photo",
-                footer: "开启后，图片写入 Scopy 历史前会先用 pngquant 做有损压缩并覆盖原图（降低 content/ 占用）。默认关闭。"
+                footer: "Scopy 已内置 pngquant，无需额外安装。你可以在历史列表每条图片右侧点击“优化”按钮手动压缩并覆盖原图；也可以开启自动压缩，让新图片写入历史前自动压缩。两者共用同一套参数。"
             ) {
                 SettingsCardRow {
-                    Toggle("压缩历史图片", isOn: $tempSettings.pngquantCopyImageEnabled)
+                    Toggle("自动压缩新图片", isOn: $tempSettings.pngquantCopyImageEnabled)
                 }
 
                 SettingsCardDivider()
@@ -73,7 +73,6 @@ struct ClipboardSettingsPage: View {
                             step: 1
                         )
                     }
-                    .disabled(!tempSettings.pngquantCopyImageEnabled)
                 }
 
                 SettingsCardDivider()
@@ -100,7 +99,6 @@ struct ClipboardSettingsPage: View {
                             step: 1
                         )
                     }
-                    .disabled(!tempSettings.pngquantCopyImageEnabled)
                 }
 
                 SettingsCardDivider()
@@ -118,7 +116,6 @@ struct ClipboardSettingsPage: View {
                         .pickerStyle(.menu)
                         .frame(width: ScopySize.Width.pickerMenu)
                     }
-                    .disabled(!tempSettings.pngquantCopyImageEnabled)
                 }
             }
 
@@ -248,207 +245,6 @@ struct ClipboardSettingsPage: View {
                             in: 100...2000,
                             step: 100
                         )
-                    }
-                }
-            }
-
-            SettingsSection(
-                "PNG 优化（pngquant）",
-                systemImage: "wand.and.stars",
-                footer: "pngquant 是外部命令行工具：留空会优先使用应用内置 Tools/pngquant（若存在），否则自动探测常见路径（如 /opt/homebrew/bin/pngquant）。导出 Markdown/LaTeX PNG 默认会压缩并覆盖输出内容；普通图片写入历史默认不压缩。"
-            ) {
-                SettingsCardRow {
-                    LabeledContent("pngquant 路径") {
-                        TextField("留空自动探测", text: $tempSettings.pngquantBinaryPath)
-                            .textFieldStyle(.roundedBorder)
-                            .frame(width: 280)
-                            .accessibilityIdentifier("Settings.PngquantBinaryPathField")
-                    }
-                }
-
-                SettingsCardDivider()
-
-                SettingsCardRow {
-                    Toggle("导出 Markdown/LaTeX PNG 时压缩", isOn: $tempSettings.pngquantMarkdownExportEnabled)
-                        .accessibilityIdentifier("Settings.PngquantMarkdownExportEnabledToggle")
-                }
-
-                if tempSettings.pngquantMarkdownExportEnabled {
-                    SettingsCardDivider()
-
-                    SettingsCardRow {
-                        LabeledContent("导出质量") {
-                            HStack(spacing: 8) {
-                                Picker(
-                                    "",
-                                    selection: Binding(
-                                        get: { tempSettings.pngquantMarkdownExportQualityMin },
-                                        set: { newValue in
-                                            tempSettings.pngquantMarkdownExportQualityMin = newValue
-                                            if tempSettings.pngquantMarkdownExportQualityMax < newValue {
-                                                tempSettings.pngquantMarkdownExportQualityMax = newValue
-                                            }
-                                        }
-                                    )
-                                ) {
-                                    ForEach(stride(from: 0, through: 100, by: 5).map { $0 }, id: \.self) { v in
-                                        Text("\(v)").tag(v)
-                                    }
-                                }
-                                .labelsHidden()
-                                .pickerStyle(.menu)
-                                .frame(width: 72)
-
-                                Text("–")
-                                    .foregroundStyle(.secondary)
-
-                                Picker(
-                                    "",
-                                    selection: Binding(
-                                        get: { tempSettings.pngquantMarkdownExportQualityMax },
-                                        set: { newValue in
-                                            tempSettings.pngquantMarkdownExportQualityMax = newValue
-                                            if tempSettings.pngquantMarkdownExportQualityMin > newValue {
-                                                tempSettings.pngquantMarkdownExportQualityMin = newValue
-                                            }
-                                        }
-                                    )
-                                ) {
-                                    ForEach(stride(from: 0, through: 100, by: 5).map { $0 }, id: \.self) { v in
-                                        Text("\(v)").tag(v)
-                                    }
-                                }
-                                .labelsHidden()
-                                .pickerStyle(.menu)
-                                .frame(width: 72)
-                            }
-                            .accessibilityIdentifier("Settings.PngquantMarkdownExportQualityRange")
-                        }
-                    }
-
-                    SettingsCardDivider()
-
-                    SettingsCardRow {
-                        LabeledContent("导出速度") {
-                            Picker("", selection: $tempSettings.pngquantMarkdownExportSpeed) {
-                                ForEach(Array(1...11), id: \.self) { v in
-                                    Text("\(v)").tag(v)
-                                }
-                            }
-                            .labelsHidden()
-                            .pickerStyle(.menu)
-                            .frame(width: ScopySize.Width.pickerMenu)
-                            .accessibilityIdentifier("Settings.PngquantMarkdownExportSpeedPicker")
-                        }
-                    }
-
-                    SettingsCardDivider()
-
-                    SettingsCardRow {
-                        LabeledContent("导出颜色数") {
-                            Picker("", selection: $tempSettings.pngquantMarkdownExportColors) {
-                                ForEach([16, 32, 64, 128, 256], id: \.self) { v in
-                                    Text("\(v)").tag(v)
-                                }
-                            }
-                            .labelsHidden()
-                            .pickerStyle(.menu)
-                            .frame(width: ScopySize.Width.pickerMenu)
-                            .accessibilityIdentifier("Settings.PngquantMarkdownExportColorsPicker")
-                        }
-                    }
-                }
-
-                SettingsCardDivider()
-
-                SettingsCardRow {
-                    Toggle("图片写入历史前压缩", isOn: $tempSettings.pngquantCopyImageEnabled)
-                        .accessibilityIdentifier("Settings.PngquantCopyImageEnabledToggle")
-                }
-
-                if tempSettings.pngquantCopyImageEnabled {
-                    SettingsCardDivider()
-
-                    SettingsCardRow {
-                        LabeledContent("写入质量") {
-                            HStack(spacing: 8) {
-                                Picker(
-                                    "",
-                                    selection: Binding(
-                                        get: { tempSettings.pngquantCopyImageQualityMin },
-                                        set: { newValue in
-                                            tempSettings.pngquantCopyImageQualityMin = newValue
-                                            if tempSettings.pngquantCopyImageQualityMax < newValue {
-                                                tempSettings.pngquantCopyImageQualityMax = newValue
-                                            }
-                                        }
-                                    )
-                                ) {
-                                    ForEach(stride(from: 0, through: 100, by: 5).map { $0 }, id: \.self) { v in
-                                        Text("\(v)").tag(v)
-                                    }
-                                }
-                                .labelsHidden()
-                                .pickerStyle(.menu)
-                                .frame(width: 72)
-
-                                Text("–")
-                                    .foregroundStyle(.secondary)
-
-                                Picker(
-                                    "",
-                                    selection: Binding(
-                                        get: { tempSettings.pngquantCopyImageQualityMax },
-                                        set: { newValue in
-                                            tempSettings.pngquantCopyImageQualityMax = newValue
-                                            if tempSettings.pngquantCopyImageQualityMin > newValue {
-                                                tempSettings.pngquantCopyImageQualityMin = newValue
-                                            }
-                                        }
-                                    )
-                                ) {
-                                    ForEach(stride(from: 0, through: 100, by: 5).map { $0 }, id: \.self) { v in
-                                        Text("\(v)").tag(v)
-                                    }
-                                }
-                                .labelsHidden()
-                                .pickerStyle(.menu)
-                                .frame(width: 72)
-                            }
-                            .accessibilityIdentifier("Settings.PngquantCopyImageQualityRange")
-                        }
-                    }
-
-                    SettingsCardDivider()
-
-                    SettingsCardRow {
-                        LabeledContent("写入速度") {
-                            Picker("", selection: $tempSettings.pngquantCopyImageSpeed) {
-                                ForEach(Array(1...11), id: \.self) { v in
-                                    Text("\(v)").tag(v)
-                                }
-                            }
-                            .labelsHidden()
-                            .pickerStyle(.menu)
-                            .frame(width: ScopySize.Width.pickerMenu)
-                            .accessibilityIdentifier("Settings.PngquantCopyImageSpeedPicker")
-                        }
-                    }
-
-                    SettingsCardDivider()
-
-                    SettingsCardRow {
-                        LabeledContent("写入颜色数") {
-                            Picker("", selection: $tempSettings.pngquantCopyImageColors) {
-                                ForEach([16, 32, 64, 128, 256], id: \.self) { v in
-                                    Text("\(v)").tag(v)
-                                }
-                            }
-                            .labelsHidden()
-                            .pickerStyle(.menu)
-                            .frame(width: ScopySize.Width.pickerMenu)
-                            .accessibilityIdentifier("Settings.PngquantCopyImageColorsPicker")
-                        }
                     }
                 }
             }

@@ -80,6 +80,18 @@ public enum PngquantService {
         return data.prefix(signature.count).elementsEqual(signature)
     }
 
+    static func isLikelyPNGFile(_ fileURL: URL) -> Bool {
+        do {
+            let handle = try FileHandle(forReadingFrom: fileURL)
+            defer { try? handle.close() }
+
+            let data = try handle.read(upToCount: 8) ?? Data()
+            return isLikelyPNG(data)
+        } catch {
+            return false
+        }
+    }
+
     static func compressPNGData(_ pngData: Data, options: Options) throws -> Data {
         guard isLikelyPNG(pngData) else { return pngData }
 
