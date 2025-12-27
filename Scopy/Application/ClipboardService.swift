@@ -470,8 +470,10 @@ actor ClipboardService {
             return
         }
 
+        let preparedContent = await prepareContentForStorage(content)
+
         do {
-            let outcome = try await storage.upsertItemWithOutcome(content)
+            let outcome = try await storage.upsertItemWithOutcome(preparedContent)
             let storedItem = outcome.item
 
             await search.handleUpsertedItem(storedItem)
@@ -486,6 +488,68 @@ actor ClipboardService {
             scheduleCleanup(storage: storage)
         } catch {
             ScopyLog.app.warning("Failed to store clipboard item: \(error.localizedDescription, privacy: .private)")
+        }
+    }
+
+    private func prepareContentForStorage(
+        _ content: ClipboardMonitor.ClipboardContent
+    ) async -> ClipboardMonitor.ClipboardContent {
+        guard content.type == .image else { return content }
+        guard settings.pngquantCopyImageEnabled else { return content }
+
+        let options = PngquantService.Options(
+            binaryPath: settings.pngquantBinaryPath,
+            qualityMin: settings.pngquantCopyImageQualityMin,
+            qualityMax: settings.pngquantCopyImageQualityMax,
+            speed: settings.pngquantCopyImageSpeed,
+            colors: settings.pngquantCopyImageColors
+        )
+
+        switch content.payload {
+        case .data(let data):
+            let compressed = await Task.detached(priority: .utility) {
+                PngquantService.compressBestEffort(data, options: options)
+            }.value
+
+            guard compressed != data else { return content }
+            let hash = ClipboardMonitor.computeHashStatic(compressed)
+            return ClipboardMonitor.ClipboardContent(
+                type: content.type,
+                plainText: content.plainText,
+                payload: .data(compressed),
+                appBundleID: content.appBundleID,
+                contentHash: hash,
+                sizeBytes: compressed.count
+            )
+        case .file(let url):
+            let replaced = await Task.detached(priority: .utility) {
+                PngquantService.compressFileBestEffort(url, options: options)
+            }.value
+            guard replaced else { return content }
+
+            let updatedSize: Int = {
+                guard let attrs = try? FileManager.default.attributesOfItem(atPath: url.path),
+                      let size = attrs[.size] as? Int else { return content.sizeBytes }
+                return size
+            }()
+
+            let updatedHash: String = {
+                guard let data = try? Data(contentsOf: url, options: [.mappedIfSafe]) else {
+                    return content.contentHash
+                }
+                return ClipboardMonitor.computeHashStatic(data)
+            }()
+
+            return ClipboardMonitor.ClipboardContent(
+                type: content.type,
+                plainText: content.plainText,
+                payload: .file(url),
+                appBundleID: content.appBundleID,
+                contentHash: updatedHash,
+                sizeBytes: updatedSize
+            )
+        case .none:
+            return content
         }
     }
 

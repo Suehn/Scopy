@@ -482,6 +482,10 @@ final class SettingsStorePersistenceTests: XCTestCase {
         XCTAssertEqual(SettingsDTO.default.clipboardPollingIntervalMs, 500)
     }
 
+    func testDefaultSettingsIncludesPngquantExportEnabled() {
+        XCTAssertTrue(SettingsDTO.default.pngquantMarkdownExportEnabled)
+    }
+
     func testSaveAndLoadPollingIntervalPersists() async {
         let suiteName = "scopy-settingsstore-\(UUID().uuidString)"
         defer { UserDefaults.standard.removePersistentDomain(forName: suiteName) }
@@ -495,6 +499,41 @@ final class SettingsStorePersistenceTests: XCTestCase {
 
         let loaded = await store.load()
         XCTAssertEqual(loaded.clipboardPollingIntervalMs, 1200)
+    }
+
+    func testSaveAndLoadPngquantSettingsPersist() async {
+        let suiteName = "scopy-settingsstore-pngquant-\(UUID().uuidString)"
+        defer { UserDefaults.standard.removePersistentDomain(forName: suiteName) }
+        UserDefaults.standard.removePersistentDomain(forName: suiteName)
+
+        let store = SettingsStore(suiteName: suiteName)
+
+        var settings = await store.load()
+        settings.pngquantBinaryPath = "/tmp/pngquant"
+        settings.pngquantMarkdownExportEnabled = false
+        settings.pngquantMarkdownExportQualityMin = 60
+        settings.pngquantMarkdownExportQualityMax = 75
+        settings.pngquantMarkdownExportSpeed = 11
+        settings.pngquantMarkdownExportColors = 128
+        settings.pngquantCopyImageEnabled = true
+        settings.pngquantCopyImageQualityMin = 55
+        settings.pngquantCopyImageQualityMax = 70
+        settings.pngquantCopyImageSpeed = 1
+        settings.pngquantCopyImageColors = 64
+        await store.save(settings)
+
+        let loaded = await store.load()
+        XCTAssertEqual(loaded.pngquantBinaryPath, "/tmp/pngquant")
+        XCTAssertFalse(loaded.pngquantMarkdownExportEnabled)
+        XCTAssertEqual(loaded.pngquantMarkdownExportQualityMin, 60)
+        XCTAssertEqual(loaded.pngquantMarkdownExportQualityMax, 75)
+        XCTAssertEqual(loaded.pngquantMarkdownExportSpeed, 11)
+        XCTAssertEqual(loaded.pngquantMarkdownExportColors, 128)
+        XCTAssertTrue(loaded.pngquantCopyImageEnabled)
+        XCTAssertEqual(loaded.pngquantCopyImageQualityMin, 55)
+        XCTAssertEqual(loaded.pngquantCopyImageQualityMax, 70)
+        XCTAssertEqual(loaded.pngquantCopyImageSpeed, 1)
+        XCTAssertEqual(loaded.pngquantCopyImageColors, 64)
     }
 
     func testPollingIntervalClampedWhenDecoding() async {
@@ -522,6 +561,35 @@ final class SettingsStorePersistenceTests: XCTestCase {
         )
         let maxLoaded = await store.load()
         XCTAssertEqual(maxLoaded.clipboardPollingIntervalMs, 2000)
+    }
+
+    func testPngquantSettingsClampedWhenDecoding() async {
+        let suiteName = "scopy-settingsstore-pngquant-clamp-\(UUID().uuidString)"
+        defer { UserDefaults.standard.removePersistentDomain(forName: suiteName) }
+        UserDefaults.standard.removePersistentDomain(forName: suiteName)
+
+        let defaults = UserDefaults(suiteName: suiteName)!
+        let store = SettingsStore(suiteName: suiteName)
+
+        defaults.set(
+            [
+                "pngquantMarkdownExportSpeed": 999,
+                "pngquantMarkdownExportColors": 1,
+                "pngquantMarkdownExportQualityMin": 90,
+                "pngquantMarkdownExportQualityMax": 10,
+                "pngquantCopyImageSpeed": 0,
+                "pngquantCopyImageColors": 999
+            ],
+            forKey: "ScopySettings"
+        )
+
+        let loaded = await store.load()
+        XCTAssertEqual(loaded.pngquantMarkdownExportSpeed, 11)
+        XCTAssertEqual(loaded.pngquantMarkdownExportColors, 2)
+        XCTAssertEqual(loaded.pngquantMarkdownExportQualityMin, 90)
+        XCTAssertEqual(loaded.pngquantMarkdownExportQualityMax, 90)
+        XCTAssertEqual(loaded.pngquantCopyImageSpeed, 1)
+        XCTAssertEqual(loaded.pngquantCopyImageColors, 256)
     }
 }
 

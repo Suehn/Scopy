@@ -3,6 +3,7 @@ import ScopyKit
 import AppKit
 
 struct HistoryItemTextPreviewView: View {
+    @Environment(SettingsViewModel.self) private var settingsViewModel
     @ObservedObject var model: HoverPreviewModel
     let markdownWebViewController: MarkdownPreviewWebViewController?
 
@@ -184,6 +185,7 @@ struct HistoryItemTextPreviewView: View {
             exportSuccessResetTask?.cancel()
             exportSuccessResetTask = nil
             model.exportSuccess = false
+            model.exportSuccessMessage = nil
             model.exportFailed = false
             model.exportErrorMessage = nil
         }
@@ -191,6 +193,9 @@ struct HistoryItemTextPreviewView: View {
 
     private var exportButtonHelpText: String {
         if model.isExporting { return "Exporting PNG…" }
+        if model.exportSuccess, let message = model.exportSuccessMessage, !message.isEmpty {
+            return message
+        }
         if model.exportFailed, let message = model.exportErrorMessage, !message.isEmpty {
             return "Export failed: \(message)"
         }
@@ -201,19 +206,45 @@ struct HistoryItemTextPreviewView: View {
         guard !model.isExporting else { return }
         guard let html = model.markdownHTML else { return }
 
+        let settings = settingsViewModel.settings
+        let pngquantOptions: PngquantService.Options? = {
+            guard settings.pngquantMarkdownExportEnabled else { return nil }
+            return PngquantService.Options(
+                binaryPath: settings.pngquantBinaryPath,
+                qualityMin: settings.pngquantMarkdownExportQualityMin,
+                qualityMax: settings.pngquantMarkdownExportQualityMax,
+                speed: settings.pngquantMarkdownExportSpeed,
+                colors: settings.pngquantMarkdownExportColors
+            )
+        }()
+
         model.isExporting = true
         model.exportSuccess = false
+        model.exportSuccessMessage = nil
         model.exportFailed = false
         model.exportErrorMessage = nil
         exportSuccessResetTask?.cancel()
 
-        MarkdownExportService.exportToPNGClipboard(html: html, targetWidthPixels: 1080) { result in
+        MarkdownExportService.exportToPNGClipboard(
+            html: html,
+            targetWidthPixels: 1080,
+            pngquantOptions: pngquantOptions
+        ) { result in
             Task { @MainActor in
                 model.isExporting = false
 
                 switch result {
-                case .success:
+                case .success(let stats):
                     model.exportSuccess = true
+                    if let percent = stats.percentSaved {
+                        if percent > 0 {
+                            model.exportSuccessMessage = "Exported PNG (pngquant -\(percent)%)"
+                        } else {
+                            model.exportSuccessMessage = "Exported PNG (pngquant no change)"
+                        }
+                    } else {
+                        model.exportSuccessMessage = "Exported PNG"
+                    }
                     model.exportErrorMessage = nil
                     // Reset success state after 1.5 seconds
                     exportSuccessResetTask = Task {
@@ -221,6 +252,7 @@ struct HistoryItemTextPreviewView: View {
                         guard !Task.isCancelled else { return }
                         await MainActor.run {
                             model.exportSuccess = false
+                            model.exportSuccessMessage = nil
                         }
                     }
                 case .failure(let error):

@@ -5,6 +5,25 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [v0.50.fix17] - 2025-12-27
+
+### Feat/PNG
+
+- **pngquant 集成（导出默认压缩）**：Markdown/LaTeX 导出 PNG 时默认使用 pngquant 压缩，并在写入剪贴板前完成压缩，因此历史与 `content/` 只保留压缩后的 PNG。
+- **可选：图片写入历史时压缩**：新增设置项 `pngquantCopyImageEnabled`（默认关闭），启用后图片进入历史前会用 pngquant 压缩并替换原始 payload；导出/写入分别提供独立参数（quality/speed/colors），并支持自定义 pngquant 路径（留空优先使用内置 Tools/pngquant，其次探测 brew 常见路径）。
+
+### Fix/Storage
+
+- **清理原因可观测**：自动清理按条数/按内容估算上限/按外部存储触发时，会记录触发原因与删除计划（便于定位“重启后少了多少条”是哪个阈值导致）。
+
+### UI
+
+- Settings → Clipboard：新增 PNG 优化设置（开关 + 核心参数）。
+
+### Test
+
+- `xcodebuild test -scheme Scopy -destination 'platform=macOS' -only-testing:ScopyTests`：Executed 276 tests, 25 skipped, 0 failures
+
 ## [v0.50.fix16] - 2025-12-27
 
 ### Fix/Storage

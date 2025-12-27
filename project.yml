@@ -141,6 +141,15 @@ targets:
           rm -rf "$DST_DIR"
           ditto "$SRC_DIR" "$DST_DIR"
         basedOnDependencyAnalysis: false
+      - name: "Fix Bundled Tool Permissions"
+        script: |
+          set -euo pipefail
+          TOOL_PATH="${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/Tools/pngquant"
+          if [ ! -f "$TOOL_PATH" ]; then
+            exit 0
+          fi
+          chmod +x "$TOOL_PATH" || true
+        basedOnDependencyAnalysis: false
     resources:
       - path: Scopy/Resources
 

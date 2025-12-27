@@ -14,6 +14,7 @@ final class HoverPreviewModel: ObservableObject {
     // Export state
     @Published var isExporting: Bool = false
     @Published var exportSuccess: Bool = false
+    @Published var exportSuccessMessage: String?
     @Published var exportFailed: Bool = false
     @Published var exportErrorMessage: String?
 
@@ -26,6 +27,7 @@ final class HoverPreviewModel: ObservableObject {
         isMarkdown = false
         isExporting = false
         exportSuccess = false
+        exportSuccessMessage = nil
         exportFailed = false
         exportErrorMessage = nil
     }

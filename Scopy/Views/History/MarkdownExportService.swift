@@ -2,6 +2,7 @@ import AppKit
 import Foundation
 import ImageIO
 import os
+import ScopyKit
 import UniformTypeIdentifiers
 import WebKit
 
@@ -9,6 +10,24 @@ import WebKit
 enum MarkdownExportService {
     fileprivate static let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "Scopy", category: "export")
     static let defaultTargetWidthPixels: CGFloat = 1080
+
+    struct ExportStats: Sendable, Equatable {
+        let originalPNGBytes: Int
+        let finalPNGBytes: Int
+        let pngquantRequested: Bool
+
+        var percentSaved: Int? {
+            guard pngquantRequested else { return nil }
+            guard originalPNGBytes > 0 else { return nil }
+            let saved = 1.0 - (Double(finalPNGBytes) / Double(originalPNGBytes))
+            return max(0, min(100, Int((saved * 100.0).rounded())))
+        }
+    }
+
+    struct ExportOutcome: Sendable {
+        let pngData: Data
+        let stats: ExportStats
+    }
 
     enum ExportStage: String {
         case loadHTML
@@ -32,17 +51,25 @@ enum MarkdownExportService {
     static func exportToPNGClipboard(
         html: String,
         targetWidthPixels: CGFloat = defaultTargetWidthPixels,
-        completion: @escaping (Result<Void, Error>) -> Void
+        pngquantOptions: PngquantService.Options? = nil,
+        completion: @escaping (Result<ExportStats, Error>) -> Void
     ) {
-        exportToPNGData(html: html, targetWidthPixels: targetWidthPixels) { result in
+        exportToPNGData(html: html, targetWidthPixels: targetWidthPixels, pngquantOptions: pngquantOptions) { result in
             switch result {
-            case .success(let pngData):
+            case .success(let outcome):
                 do {
                     if let dumpPath = ProcessInfo.processInfo.environment["SCOPY_EXPORT_DUMP_PATH"], !dumpPath.isEmpty {
-                        try? pngData.write(to: URL(fileURLWithPath: dumpPath), options: [.atomic])
+                        try? outcome.pngData.write(to: URL(fileURLWithPath: dumpPath), options: [.atomic])
                     }
-                    try writePNGToPasteboard(pngData: pngData, pasteboard: resolvedPasteboardForExport())
-                    completion(.success(()))
+                    try writePNGToPasteboard(pngData: outcome.pngData, pasteboard: resolvedPasteboardForExport())
+
+                    if let percent = outcome.stats.percentSaved {
+                        logger.info(
+                            "Exported PNG with pngquant: saved \(percent, privacy: .public)% (\(outcome.stats.originalPNGBytes, privacy: .public) -> \(outcome.stats.finalPNGBytes, privacy: .public) bytes)"
+                        )
+                    }
+
+                    completion(.success(outcome.stats))
                 } catch {
                     completion(.failure(error))
                 }
@@ -61,9 +88,15 @@ enum MarkdownExportService {
     static func exportToPNGData(
         html: String,
         targetWidthPixels: CGFloat = defaultTargetWidthPixels,
-        completion: @escaping (Result<Data, Error>) -> Void
+        pngquantOptions: PngquantService.Options? = nil,
+        completion: @escaping (Result<ExportOutcome, Error>) -> Void
     ) {
-        let coordinator = ExportCoordinator(html: html, targetWidthPixels: targetWidthPixels, completion: completion)
+        let coordinator = ExportCoordinator(
+            html: html,
+            targetWidthPixels: targetWidthPixels,
+            pngquantOptions: pngquantOptions,
+            completion: completion
+        )
         coordinator.start()
     }
 
@@ -170,7 +203,8 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
     private let html: String
     private let targetWidthPixels: CGFloat
     private let viewportWidthPoints: CGFloat
-    private let completion: (Result<Data, Error>) -> Void
+    private let pngquantOptions: PngquantService.Options?
+    private let completion: (Result<MarkdownExportService.ExportOutcome, Error>) -> Void
     private let targetScreen: NSScreen?
     private let backingScaleFactor: CGFloat
     private var webView: WKWebView?
@@ -184,7 +218,12 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
     // Keep a strong reference to self until export completes
     private static var activeCoordinators: Set<ExportCoordinator> = []
 
-    init(html: String, targetWidthPixels: CGFloat, completion: @escaping (Result<Data, Error>) -> Void) {
+    init(
+        html: String,
+        targetWidthPixels: CGFloat,
+        pngquantOptions: PngquantService.Options?,
+        completion: @escaping (Result<MarkdownExportService.ExportOutcome, Error>) -> Void
+    ) {
         self.html = html
         self.completion = completion
         let screen = Self.activeScreen()
@@ -192,6 +231,7 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
         self.backingScaleFactor = screen?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2.0
         self.targetWidthPixels = max(1, targetWidthPixels)
         self.viewportWidthPoints = max(1, self.targetWidthPixels / max(1, self.backingScaleFactor))
+        self.pngquantOptions = pngquantOptions
         super.init()
     }
 
@@ -349,15 +389,15 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
             guard let self, let webView = self.webView, !self.isCompleted else { return }
 
             do {
-                let pngData = try await self.exportPNG(webView: webView)
-                self.completeWithSuccess(pngData)
+                let outcome = try await self.exportPNG(webView: webView)
+                self.completeWithSuccess(outcome)
             } catch {
                 self.completeWithError(error)
             }
         }
     }
 
-    private func exportPNG(webView: WKWebView) async throws -> Data {
+    private func exportPNG(webView: WKWebView) async throws -> MarkdownExportService.ExportOutcome {
         stage = .prepareLayout
         let initialScrollHeightPoints = try await prepareForExportScrollHeightPoints(webView: webView)
         var scrollHeightPoints = initialScrollHeightPoints
@@ -403,8 +443,8 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
         stage = .snapshotOnce
         if scrollHeightPoints <= MarkdownExportRenderConstants.maxSingleSnapshotRectHeightPoints {
             do {
-                let pngData = try await exportSingleSnapshotPNG(webView: webView, heightPoints: scrollHeightPoints)
-                return pngData
+                let outcome = try await exportSingleSnapshotPNG(webView: webView, heightPoints: scrollHeightPoints)
+                return outcome
             } catch {
                 // Fall back to tiled snapshots for robustness (long content or intermittent WebKit snapshot failures).
                 MarkdownExportService.logger.error("Single snapshot failed; falling back to tiled export. scale=\(appliedScale, privacy: .public) heightPt=\(scrollHeightPoints, privacy: .public) error=\(String(describing: error), privacy: .public)")
@@ -412,11 +452,11 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
         }
 
         stage = .snapshotTiles
-        let pngData = try await exportTiledPNG(webView: webView, totalHeightPoints: scrollHeightPoints)
-        return pngData
+        let outcome = try await exportTiledPNG(webView: webView, totalHeightPoints: scrollHeightPoints)
+        return outcome
     }
 
-    private func exportSingleSnapshotPNG(webView: WKWebView, heightPoints: CGFloat) async throws -> Data {
+    private func exportSingleSnapshotPNG(webView: WKWebView, heightPoints: CGFloat) async throws -> MarkdownExportService.ExportOutcome {
         try await resizeWebViewForSnapshot(webView: webView, heightPoints: heightPoints)
 
         let rectPoints = CGRect(
@@ -437,14 +477,30 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
         let cg = try cgImage(from: image)
 
         stage = .pngEncoding
+        let targetWidthPixels = self.targetWidthPixels
+        let pngquantOptions = self.pngquantOptions
         return try await Task.detached(priority: .userInitiated) {
-            let targetWidth = max(1, Int(round(self.targetWidthPixels)))
+            let targetWidth = max(1, Int(round(targetWidthPixels)))
             let normalized = Self.scaleCGImageIfNeeded(image: cg, targetWidthPixels: targetWidth)
-            return try Self.pngDataFromCGImageWithWhiteBackground(normalized)
+            let originalData = try Self.pngDataFromCGImageWithWhiteBackground(normalized)
+            let finalData: Data
+            if let pngquantOptions {
+                finalData = PngquantService.compressBestEffort(originalData, options: pngquantOptions)
+            } else {
+                finalData = originalData
+            }
+            return MarkdownExportService.ExportOutcome(
+                pngData: finalData,
+                stats: MarkdownExportService.ExportStats(
+                    originalPNGBytes: originalData.count,
+                    finalPNGBytes: finalData.count,
+                    pngquantRequested: pngquantOptions != nil
+                )
+            )
         }.value
     }
 
-    private func exportTiledPNG(webView: WKWebView, totalHeightPoints: CGFloat) async throws -> Data {
+    private func exportTiledPNG(webView: WKWebView, totalHeightPoints: CGFloat) async throws -> MarkdownExportService.ExportOutcome {
         let targetWidthPixelsInt = max(1, Int(round(targetWidthPixels)))
         let totalHeightPointsInt = max(1, Int(ceil(totalHeightPoints)))
         let totalHeightPixelsInt = max(1, Int(ceil(CGFloat(totalHeightPointsInt) * backingScaleFactor)))
@@ -534,7 +590,28 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
 
         stage = .pngEncoding
         let trimmed = Self.trimBottomWhitespaceIfNeeded(image: stitched, contextData: ctx.data, bytesPerRow: bytesPerRow)
-        return try Self.pngDataFromCGImage(trimmed)
+        let originalPNG = try Self.pngDataFromCGImage(trimmed)
+        if let pngquantOptions {
+            let finalPNG = await Task.detached(priority: .userInitiated) {
+                PngquantService.compressBestEffort(originalPNG, options: pngquantOptions)
+            }.value
+            return MarkdownExportService.ExportOutcome(
+                pngData: finalPNG,
+                stats: MarkdownExportService.ExportStats(
+                    originalPNGBytes: originalPNG.count,
+                    finalPNGBytes: finalPNG.count,
+                    pngquantRequested: true
+                )
+            )
+        }
+        return MarkdownExportService.ExportOutcome(
+            pngData: originalPNG,
+            stats: MarkdownExportService.ExportStats(
+                originalPNGBytes: originalPNG.count,
+                finalPNGBytes: originalPNG.count,
+                pngquantRequested: false
+            )
+        )
     }
 
     private func scrollTo(webView: WKWebView, yPoints: CGFloat) async throws {
@@ -1262,11 +1339,11 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
 
     // MARK: - Completion
 
-    private func completeWithSuccess(_ pngData: Data) {
+    private func completeWithSuccess(_ outcome: MarkdownExportService.ExportOutcome) {
         guard !isCompleted else { return }
         isCompleted = true
         cleanup()
-        completion(.success(pngData))
+        completion(.success(outcome))
     }
 
     private func completeWithError(_ error: Error) {

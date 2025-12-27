@@ -8,6 +8,20 @@ public struct SettingsDTO: Sendable, Equatable {
     public var cleanupImagesOnly: Bool
     public var saveImages: Bool
     public var saveFiles: Bool
+    /// pngquant CLI 路径（留空则自动探测）
+    public var pngquantBinaryPath: String
+    /// 当启用时，图片写入剪贴板历史前会先用 pngquant 压缩（只保留压缩后的图片，覆盖原始写入）。
+    public var pngquantCopyImageEnabled: Bool
+    public var pngquantCopyImageQualityMin: Int
+    public var pngquantCopyImageQualityMax: Int
+    public var pngquantCopyImageSpeed: Int
+    public var pngquantCopyImageColors: Int
+    /// 当启用时，导出 Markdown/LaTeX 渲染 PNG 到剪贴板会先用 pngquant 压缩（只输出压缩后的 PNG）。
+    public var pngquantMarkdownExportEnabled: Bool
+    public var pngquantMarkdownExportQualityMin: Int
+    public var pngquantMarkdownExportQualityMax: Int
+    public var pngquantMarkdownExportSpeed: Int
+    public var pngquantMarkdownExportColors: Int
     /// Clipboard polling interval in milliseconds.
     ///
     /// Range: 100ms...2000ms, step 100ms.
@@ -26,6 +40,17 @@ public struct SettingsDTO: Sendable, Equatable {
         cleanupImagesOnly: false,
         saveImages: true,
         saveFiles: true,
+        pngquantBinaryPath: "",
+        pngquantCopyImageEnabled: false,
+        pngquantCopyImageQualityMin: 65,
+        pngquantCopyImageQualityMax: 80,
+        pngquantCopyImageSpeed: 3,
+        pngquantCopyImageColors: 256,
+        pngquantMarkdownExportEnabled: true,
+        pngquantMarkdownExportQualityMin: 70,
+        pngquantMarkdownExportQualityMax: 85,
+        pngquantMarkdownExportSpeed: 3,
+        pngquantMarkdownExportColors: 256,
         clipboardPollingIntervalMs: 500,
         defaultSearchMode: .fuzzyPlus,
         hotkeyKeyCode: 8,  // kVK_ANSI_C = 8

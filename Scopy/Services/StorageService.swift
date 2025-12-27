@@ -507,19 +507,35 @@ public final class StorageService {
 
     public func performCleanup(mode: CleanupMode = .full) async throws {
         let cleanupImagesOnly = cleanupSettings.cleanupImagesOnly
+        let modeText = (mode == .full) ? "full" : "light"
+        let maxItems = cleanupSettings.maxItems
+        let maxTotalMB = cleanupSettings.maxSmallStorageMB
+        let maxExternalMB = cleanupSettings.maxLargeStorageMB
+        ScopyLog.storage.info(
+            "Cleanup start: mode=\(modeText, privacy: .public) imagesOnly=\(cleanupImagesOnly, privacy: .public) maxItems=\(maxItems, privacy: .public) maxTotalMB=\(maxTotalMB, privacy: .public) maxExternalMB=\(maxExternalMB, privacy: .public)"
+        )
 
         // 1. By count
         let currentCount = try await getItemCount()
         if currentCount > cleanupSettings.maxItems {
             if cleanupImagesOnly {
+                ScopyLog.storage.info(
+                    "Cleanup by count (imagesOnly): current=\(currentCount, privacy: .public) max=\(maxItems, privacy: .public) delete=\(currentCount - maxItems, privacy: .public)"
+                )
                 try await cleanupImagesOnlyByCount(deleteCount: currentCount - cleanupSettings.maxItems)
             } else {
+                ScopyLog.storage.info(
+                    "Cleanup by count: current=\(currentCount, privacy: .public) max=\(maxItems, privacy: .public) target=\(maxItems, privacy: .public)"
+                )
                 try await cleanupByCount(target: cleanupSettings.maxItems)
             }
         }
 
         // 2. By age (if configured)
         if let maxDays = cleanupSettings.maxDaysAge {
+            ScopyLog.storage.info(
+                "Cleanup by age: maxDays=\(maxDays, privacy: .public) imagesOnly=\(cleanupImagesOnly, privacy: .public)"
+            )
             if cleanupImagesOnly {
                 try await cleanupByAge(maxDays: maxDays, typeFilter: .image)
             } else {
@@ -531,6 +547,9 @@ public final class StorageService {
         let dbSize = try await getTotalSize()
         let maxSmallBytes = cleanupSettings.maxSmallStorageMB * 1024 * 1024
         if dbSize > maxSmallBytes {
+            ScopyLog.storage.info(
+                "Cleanup by size: currentBytes=\(dbSize, privacy: .public) maxBytes=\(maxSmallBytes, privacy: .public) imagesOnly=\(cleanupImagesOnly, privacy: .public)"
+            )
             if cleanupImagesOnly {
                 try await cleanupBySize(targetBytes: maxSmallBytes, typeFilter: .image)
             } else {
@@ -542,6 +561,9 @@ public final class StorageService {
         let externalSize = try await getExternalStorageSize()
         let maxLargeBytes = cleanupSettings.maxLargeStorageMB * 1024 * 1024
         if externalSize > maxLargeBytes {
+            ScopyLog.storage.info(
+                "Cleanup external storage: currentBytes=\(externalSize, privacy: .public) maxBytes=\(maxLargeBytes, privacy: .public) imagesOnly=\(cleanupImagesOnly, privacy: .public)"
+            )
             if cleanupImagesOnly {
                 try await cleanupExternalStorage(targetBytes: maxLargeBytes, typeFilter: .image)
             } else {
@@ -666,6 +688,9 @@ public final class StorageService {
     private func cleanupByCount(target: Int) async throws {
         let plan = try await repository.planCleanupByCount(target: target)
         guard !plan.ids.isEmpty else { return }
+        ScopyLog.storage.info(
+            "cleanupByCount: deleting \(plan.ids.count, privacy: .public) items (files=\(plan.storageRefs.count, privacy: .public)) target=\(target, privacy: .public)"
+        )
 
         if !plan.storageRefs.isEmpty {
             let fileURLs = plan.storageRefs.map { URL(fileURLWithPath: $0) }
@@ -684,6 +709,9 @@ public final class StorageService {
     private func cleanupImagesOnlyByCount(deleteCount: Int) async throws {
         let plan = try await repository.planCleanupUnpinnedImages(limit: deleteCount)
         guard !plan.ids.isEmpty else { return }
+        ScopyLog.storage.info(
+            "cleanupImagesOnlyByCount: deleting \(plan.ids.count, privacy: .public) images (files=\(plan.storageRefs.count, privacy: .public)) requested=\(deleteCount, privacy: .public)"
+        )
 
         if !plan.storageRefs.isEmpty {
             let fileURLs = plan.storageRefs.map { URL(fileURLWithPath: $0) }
@@ -704,6 +732,9 @@ public final class StorageService {
         let cutoff = Date().addingTimeInterval(-Double(maxDays * 24 * 3600))
         let plan = try await repository.planCleanupByAge(cutoff: cutoff, typeFilter: typeFilter)
         guard !plan.ids.isEmpty else { return }
+        ScopyLog.storage.info(
+            "cleanupByAge: deleting \(plan.ids.count, privacy: .public) items (files=\(plan.storageRefs.count, privacy: .public)) maxDays=\(maxDays, privacy: .public) type=\(String(describing: typeFilter), privacy: .public)"
+        )
 
         if !plan.storageRefs.isEmpty {
             let fileURLs = plan.storageRefs.map { URL(fileURLWithPath: $0) }
@@ -725,6 +756,9 @@ public final class StorageService {
     private func cleanupBySize(targetBytes: Int, typeFilter: ClipboardItemType?) async throws {
         let plan = try await repository.planCleanupByTotalSize(targetBytes: targetBytes, typeFilter: typeFilter)
         guard !plan.ids.isEmpty else { return }
+        ScopyLog.storage.info(
+            "cleanupBySize: deleting \(plan.ids.count, privacy: .public) items (files=\(plan.storageRefs.count, privacy: .public)) targetBytes=\(targetBytes, privacy: .public) type=\(String(describing: typeFilter), privacy: .public)"
+        )
 
         if !plan.storageRefs.isEmpty {
             let fileURLs = plan.storageRefs.map { URL(fileURLWithPath: $0) }
@@ -753,6 +787,9 @@ public final class StorageService {
         let excessBytes = currentSize - targetBytes
         let plan = try await repository.planCleanupExternalStorage(excessBytes: excessBytes, typeFilter: typeFilter)
         guard !plan.ids.isEmpty else { return }
+        ScopyLog.storage.info(
+            "cleanupExternalStorage: deleting \(plan.ids.count, privacy: .public) items (files=\(plan.storageRefs.count, privacy: .public)) excessBytes=\(excessBytes, privacy: .public) type=\(String(describing: typeFilter), privacy: .public)"
+        )
 
         let fileURLs = plan.storageRefs.map { URL(fileURLWithPath: $0) }
         await Task.detached(priority: .utility) {

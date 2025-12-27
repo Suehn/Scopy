@@ -526,6 +526,7 @@
 		40BEDF7D2448B733FAA444B2 /* LaTeXDocumentNormalizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LaTeXDocumentNormalizer.swift; sourceTree = "<group>"; };
 		4196431EE6371BEE9C6BED01 /* ClipboardServiceCopyToClipboardTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipboardServiceCopyToClipboardTests.swift; sourceTree = "<group>"; };
 		42D411B91F0A819854835FBE /* KaTeX_Caligraphic-Bold.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "KaTeX_Caligraphic-Bold.ttf"; sourceTree = "<group>"; };
+		4363B3275C036B26FBD9F5A3 /* pngquant */ = {isa = PBXFileReference; path = pngquant; sourceTree = "<group>"; };
 		47EB28A5AF6B73C0ADB10FA4 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		493362158599490B2914D1A5 /* ScopyColors.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScopyColors.swift; sourceTree = "<group>"; };
 		493C86BD8E4F500AA9F36C33 /* MarkdownDetectorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownDetectorTests.swift; sourceTree = "<group>"; };
@@ -596,6 +597,7 @@
 		A8262481882F3823DDB6056E /* AppearanceSettingsPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppearanceSettingsPage.swift; sourceTree = "<group>"; };
 		AB54E903D484FE44C7F78B86 /* KaTeX_AMS-Regular.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "KaTeX_AMS-Regular.ttf"; sourceTree = "<group>"; };
 		AEF8649A162AEF1B81D32EE6 /* ContextMenuUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContextMenuUITests.swift; sourceTree = "<group>"; };
+		AFF722C65B960E0E5627CF4A /* COPYRIGHT */ = {isa = PBXFileReference; path = COPYRIGHT; sourceTree = "<group>"; };
 		B1D884F45B497E86587BF725 /* KaTeX_Size3-Regular.woff */ = {isa = PBXFileReference; path = "KaTeX_Size3-Regular.woff"; sourceTree = "<group>"; };
 		B48DDD4A33C8F8F615B17CA0 /* ClipboardItemDisplayTextTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipboardItemDisplayTextTests.swift; sourceTree = "<group>"; };
 		B71324125BE1417C5D4E6E9D /* KaTeX_Fraktur-Bold.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "KaTeX_Fraktur-Bold.ttf"; sourceTree = "<group>"; };
@@ -738,6 +740,14 @@
 				F5B3B2D2A177E7AF63CCAB2C /* Fixtures */,
 			);
 			path = ScopyUITests;
+			sourceTree = "<group>";
+		};
+		4A78C1C65EE9BA5588CACBB3 /* pngquant */ = {
+			isa = PBXGroup;
+			children = (
+				AFF722C65B960E0E5627CF4A /* COPYRIGHT */,
+			);
+			path = pngquant;
 			sourceTree = "<group>";
 		};
 		4B3899A417146FCA05E0513F /* Observables */ = {
@@ -971,8 +981,18 @@
 			isa = PBXGroup;
 			children = (
 				948AFD198D19EAD010357E60 /* MarkdownPreview */,
+				ECFA17106A8EF8281E09C2D6 /* ThirdParty */,
+				C7C74FC30FC592DE30C8B2D9 /* Tools */,
 			);
 			path = Resources;
+			sourceTree = "<group>";
+		};
+		C7C74FC30FC592DE30C8B2D9 /* Tools */ = {
+			isa = PBXGroup;
+			children = (
+				4363B3275C036B26FBD9F5A3 /* pngquant */,
+			);
+			path = Tools;
 			sourceTree = "<group>";
 		};
 		C8E7F13B9638715B53477797 /* Design */ = {
@@ -1015,6 +1035,14 @@
 				2EA6E5CB5D4F09D1967B7D21 /* mhchem.min.js */,
 			);
 			path = contrib;
+			sourceTree = "<group>";
+		};
+		ECFA17106A8EF8281E09C2D6 /* ThirdParty */ = {
+			isa = PBXGroup;
+			children = (
+				4A78C1C65EE9BA5588CACBB3 /* pngquant */,
+			);
+			path = ThirdParty;
 			sourceTree = "<group>";
 		};
 		F5B3B2D2A177E7AF63CCAB2C /* Fixtures */ = {
@@ -1079,6 +1107,7 @@
 				399DA51422110B651484A2D0 /* Resources */,
 				62362C964D4D0789861392E4 /* Frameworks */,
 				F0C3468392507EFD43747E33 /* Stage MarkdownPreview Assets */,
+				19AE8947E505FB2299BB7990 /* Fix Bundled Tool Permissions */,
 			);
 			buildRules = (
 			);
@@ -1418,6 +1447,25 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXShellScriptBuildPhase section */
+		19AE8947E505FB2299BB7990 /* Fix Bundled Tool Permissions */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Fix Bundled Tool Permissions";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "set -euo pipefail\nTOOL_PATH=\"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/Tools/pngquant\"\nif [ ! -f \"$TOOL_PATH\" ]; then\n  exit 0\nfi\nchmod +x \"$TOOL_PATH\" || true\n";
+		};
 		38A68C0F6991A8F75E8A1C87 /* Stage SwiftPM Resource Bundles */ = {
 			isa = PBXShellScriptBuildPhase;
 			alwaysOutOfDate = 1;
