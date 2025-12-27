@@ -246,6 +246,64 @@ final class StorageServiceTests: XCTestCase {
         XCTAssertEqual(pinnedCount, 2)
     }
 
+    func testCleanupImagesOnlyBySizeDoesNotDeleteText() async throws {
+        storage.cleanupSettings.cleanupImagesOnly = true
+        storage.cleanupSettings.maxSmallStorageMB = 1
+
+        // Insert text first (oldest)
+        for i in 0..<5 {
+            let content = makeTestContent(text: "Text \(i)")
+            _ = try await storage.upsertItem(content)
+        }
+
+        // Insert large images to exceed size limit
+        let image1 = try await storage.upsertItem(makeLargeTestContent())
+        let image2 = try await storage.upsertItem(makeLargeTestContent())
+        let countBeforeCleanup = try await storage.getItemCount()
+        XCTAssertEqual(countBeforeCleanup, 7)
+
+        // Cleanup should delete images but keep all text items.
+        try await storage.performCleanup()
+
+        let remaining = try await storage.fetchRecent(limit: 100, offset: 0)
+        XCTAssertEqual(remaining.filter { $0.type == .text }.count, 5)
+        XCTAssertTrue(remaining.allSatisfy { $0.type == .text })
+        let foundImage1 = try await storage.findByID(image1.id)
+        XCTAssertNil(foundImage1)
+        let foundImage2 = try await storage.findByID(image2.id)
+        XCTAssertNil(foundImage2)
+    }
+
+    func testCleanupImagesOnlyByCountDoesNotDeleteText() async throws {
+        storage.cleanupSettings.cleanupImagesOnly = true
+        storage.cleanupSettings.maxItems = 3
+
+        // Insert texts
+        for i in 0..<5 {
+            let content = makeTestContent(text: "Text \(i)")
+            _ = try await storage.upsertItem(content)
+        }
+
+        // Insert images (eligible for cleanup)
+        let image1 = try await storage.upsertItem(makeLargeTestContent())
+        let image2 = try await storage.upsertItem(makeLargeTestContent())
+        let countBeforeCleanup = try await storage.getItemCount()
+        XCTAssertEqual(countBeforeCleanup, 7)
+
+        // Cleanup should delete images but not text, even if still above maxItems.
+        try await storage.performCleanup()
+
+        let remaining = try await storage.fetchRecent(limit: 100, offset: 0)
+        XCTAssertEqual(remaining.filter { $0.type == .text }.count, 5)
+        XCTAssertTrue(remaining.allSatisfy { $0.type == .text })
+        let foundImage1 = try await storage.findByID(image1.id)
+        XCTAssertNil(foundImage1)
+        let foundImage2 = try await storage.findByID(image2.id)
+        XCTAssertNil(foundImage2)
+        let countAfterCleanup = try await storage.getItemCount()
+        XCTAssertEqual(countAfterCleanup, 5)
+    }
+
     func testExternalStorageIsIsolatedFromUserDataDuringTests() async throws {
         let content = makeLargeTestContent()
         let item = try await storage.upsertItem(content)

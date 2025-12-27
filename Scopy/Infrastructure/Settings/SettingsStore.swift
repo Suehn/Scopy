@@ -81,6 +81,7 @@ public actor SettingsStore {
         [
             "maxItems": settings.maxItems,
             "maxStorageMB": settings.maxStorageMB,
+            "cleanupImagesOnly": settings.cleanupImagesOnly,
             "saveImages": settings.saveImages,
             "saveFiles": settings.saveFiles,
             "clipboardPollingIntervalMs": settings.clipboardPollingIntervalMs,
@@ -103,6 +104,7 @@ public actor SettingsStore {
         return SettingsDTO(
             maxItems: dict["maxItems"] as? Int ?? SettingsDTO.default.maxItems,
             maxStorageMB: dict["maxStorageMB"] as? Int ?? SettingsDTO.default.maxStorageMB,
+            cleanupImagesOnly: dict["cleanupImagesOnly"] as? Bool ?? SettingsDTO.default.cleanupImagesOnly,
             saveImages: dict["saveImages"] as? Bool ?? SettingsDTO.default.saveImages,
             saveFiles: dict["saveFiles"] as? Bool ?? SettingsDTO.default.saveFiles,
             clipboardPollingIntervalMs: pollingMs,

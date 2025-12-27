@@ -496,12 +496,22 @@ actor SQLiteClipboardRepository {
     }
 
     func planCleanupByAge(cutoff: Date) throws -> DeletePlan {
-        let selectSQL = """
+        try planCleanupByAge(cutoff: cutoff, typeFilter: nil)
+    }
+
+    func planCleanupByAge(cutoff: Date, typeFilter: ClipboardItemType?) throws -> DeletePlan {
+        var selectSQL = """
             SELECT id, storage_ref FROM clipboard_items
             WHERE is_pinned = 0 AND created_at < ?
         """
+        if typeFilter != nil {
+            selectSQL += " AND type = ?"
+        }
         let stmt = try prepare(selectSQL)
         try stmt.bindDouble(cutoff.timeIntervalSince1970, at: 1)
+        if let typeFilter {
+            try stmt.bindText(typeFilter.rawValue, at: 2)
+        }
 
         var ids: [UUID] = []
         var refs: [String] = []
@@ -517,18 +527,31 @@ actor SQLiteClipboardRepository {
     }
 
     func planCleanupByTotalSize(targetBytes: Int) throws -> DeletePlan {
+        try planCleanupByTotalSize(targetBytes: targetBytes, typeFilter: nil)
+    }
+
+    func planCleanupByTotalSize(targetBytes: Int, typeFilter: ClipboardItemType?) throws -> DeletePlan {
         let currentSize = try getTotalSize()
         guard currentSize > targetBytes else { return DeletePlan(ids: [], storageRefs: []) }
 
         let excessBytes = currentSize - targetBytes
 
-        let sql = """
+        var sql = """
             SELECT id, size_bytes, storage_ref FROM clipboard_items
             WHERE is_pinned = 0
+        """
+        if typeFilter != nil {
+            sql += " AND type = ?"
+        }
+        sql += """
+
             ORDER BY last_used_at ASC
             LIMIT 10000
         """
         let stmt = try prepare(sql)
+        if let typeFilter {
+            try stmt.bindText(typeFilter.rawValue, at: 1)
+        }
 
         var ids: [UUID] = []
         var refs: [String] = []
@@ -556,13 +579,26 @@ actor SQLiteClipboardRepository {
     }
 
     func planCleanupExternalStorage(excessBytes: Int) throws -> DeletePlan {
-        let sql = """
+        try planCleanupExternalStorage(excessBytes: excessBytes, typeFilter: nil)
+    }
+
+    func planCleanupExternalStorage(excessBytes: Int, typeFilter: ClipboardItemType?) throws -> DeletePlan {
+        var sql = """
             SELECT id, size_bytes, storage_ref FROM clipboard_items
             WHERE is_pinned = 0 AND storage_ref IS NOT NULL
+        """
+        if typeFilter != nil {
+            sql += " AND type = ?"
+        }
+        sql += """
+
             ORDER BY last_used_at ASC
             LIMIT 5000
         """
         let stmt = try prepare(sql)
+        if let typeFilter {
+            try stmt.bindText(typeFilter.rawValue, at: 1)
+        }
 
         var ids: [UUID] = []
         var refs: [String] = []
@@ -581,6 +617,35 @@ actor SQLiteClipboardRepository {
 
             if accumulatedSize >= excessBytes {
                 break
+            }
+        }
+
+        return DeletePlan(ids: ids, storageRefs: refs)
+    }
+
+    func planCleanupUnpinnedImages(limit: Int) throws -> DeletePlan {
+        guard limit > 0 else { return DeletePlan(ids: [], storageRefs: []) }
+
+        let sql = """
+            SELECT id, storage_ref FROM clipboard_items
+            WHERE is_pinned = 0 AND type = ?
+            ORDER BY last_used_at ASC
+            LIMIT ?
+        """
+        let stmt = try prepare(sql)
+        try stmt.bindText(ClipboardItemType.image.rawValue, at: 1)
+        try stmt.bindInt(limit, at: 2)
+
+        var ids: [UUID] = []
+        var refs: [String] = []
+        ids.reserveCapacity(limit)
+
+        while try stmt.step() {
+            guard let idString = stmt.columnText(0),
+                  let id = UUID(uuidString: idString) else { continue }
+            ids.append(id)
+            if let ref = stmt.columnText(1) {
+                refs.append(ref)
             }
         }
 

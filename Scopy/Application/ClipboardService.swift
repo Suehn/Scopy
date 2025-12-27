@@ -106,6 +106,7 @@ actor ClipboardService {
             await MainActor.run {
                 storage.cleanupSettings.maxItems = loadedSettings.maxItems
                 storage.cleanupSettings.maxSmallStorageMB = loadedSettings.maxStorageMB
+                storage.cleanupSettings.cleanupImagesOnly = loadedSettings.cleanupImagesOnly
                 monitor.startMonitoring()
             }
 
@@ -369,6 +370,7 @@ actor ClipboardService {
             await MainActor.run {
                 storage.cleanupSettings.maxItems = newSettings.maxItems
                 storage.cleanupSettings.maxSmallStorageMB = newSettings.maxStorageMB
+                storage.cleanupSettings.cleanupImagesOnly = newSettings.cleanupImagesOnly
             }
 
             if oldHeight != newSettings.thumbnailHeight || oldShowThumbnails != newSettings.showImageThumbnails {

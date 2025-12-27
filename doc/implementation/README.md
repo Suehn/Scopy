@@ -8,11 +8,11 @@
 
 | 项目 | 状态 |
 |------|------|
-| **当前版本** | v0.50.fix15 |
-| **测试状态** | ⏸ 暂未运行（按需：ScopyTests） |
+| **当前版本** | v0.50.fix16 |
+| **测试状态** | ✅ ScopyTests（273 tests, 25 skipped, 0 failures） |
 | **构建状态** | ✅ 已复验 |
 | **部署位置** | /Applications/Scopy.app |
-| **最后更新** | 2025-12-23 |
+| **最后更新** | 2025-12-27 |
 
 > 详细变更历史请查看 [CHANGELOG.md](./CHANGELOG.md)
 
@@ -24,6 +24,7 @@
 
 | 版本 | 日期 | 主要内容 | 状态 |
 |------|------|----------|------|
+| [v0.50.fix16](./releases/v0.50.fix16.md) | 2025-12-27 | Fix/Storage：新增“仅清理图片（文本永久保留）”选项，避免容量清理误删文本历史 | ✅ |
 | [v0.50.fix15](./releases/v0.50.fix15.md) | 2025-12-23 | Fix/Preview：长内容预览滚动卡顿/渲染缺块修复（复用链路尺寸回放 + 滚动降载） | ✅ |
 | [v0.50.fix14](./releases/v0.50.fix14.md) | 2025-12-23 | Fix/Preview：hover 预览 close/reopen 竞态收口（快速 re-hover 同一行更稳定） | ✅ |
 | [v0.50.fix13](./releases/v0.50.fix13.md) | 2025-12-22 | Fix/Preview：hover Markdown/LaTeX 预览复用 WKWebView（全局单实例）+ 快速 re-hover 稳定性 | ✅ |

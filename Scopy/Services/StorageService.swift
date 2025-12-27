@@ -65,6 +65,7 @@ public final class StorageService {
         public var maxDaysAge: Int? = nil // nil = unlimited
         public var maxSmallStorageMB: Int = 200
         public var maxLargeStorageMB: Int = 800
+        public var cleanupImagesOnly: Bool = false
 
         public init() {}
     }
@@ -505,29 +506,47 @@ public final class StorageService {
     }
 
     public func performCleanup(mode: CleanupMode = .full) async throws {
+        let cleanupImagesOnly = cleanupSettings.cleanupImagesOnly
+
         // 1. By count
         let currentCount = try await getItemCount()
         if currentCount > cleanupSettings.maxItems {
-            try await cleanupByCount(target: cleanupSettings.maxItems)
+            if cleanupImagesOnly {
+                try await cleanupImagesOnlyByCount(deleteCount: currentCount - cleanupSettings.maxItems)
+            } else {
+                try await cleanupByCount(target: cleanupSettings.maxItems)
+            }
         }
 
         // 2. By age (if configured)
         if let maxDays = cleanupSettings.maxDaysAge {
-            try await cleanupByAge(maxDays: maxDays)
+            if cleanupImagesOnly {
+                try await cleanupByAge(maxDays: maxDays, typeFilter: .image)
+            } else {
+                try await cleanupByAge(maxDays: maxDays, typeFilter: nil)
+            }
         }
 
         // 3. By space (small content / database)
         let dbSize = try await getTotalSize()
         let maxSmallBytes = cleanupSettings.maxSmallStorageMB * 1024 * 1024
         if dbSize > maxSmallBytes {
-            try await cleanupBySize(targetBytes: maxSmallBytes)
+            if cleanupImagesOnly {
+                try await cleanupBySize(targetBytes: maxSmallBytes, typeFilter: .image)
+            } else {
+                try await cleanupBySize(targetBytes: maxSmallBytes, typeFilter: nil)
+            }
         }
 
         // 4. By space (large content / external storage) - v0.9
         let externalSize = try await getExternalStorageSize()
         let maxLargeBytes = cleanupSettings.maxLargeStorageMB * 1024 * 1024
         if externalSize > maxLargeBytes {
-            try await cleanupExternalStorage(targetBytes: maxLargeBytes)
+            if cleanupImagesOnly {
+                try await cleanupExternalStorage(targetBytes: maxLargeBytes, typeFilter: .image)
+            } else {
+                try await cleanupExternalStorage(targetBytes: maxLargeBytes, typeFilter: nil)
+            }
         }
 
         guard mode == .full else { return }
@@ -662,10 +681,28 @@ public final class StorageService {
         try await repository.deleteItemsBatchInTransaction(ids: plan.ids)
     }
 
+    private func cleanupImagesOnlyByCount(deleteCount: Int) async throws {
+        let plan = try await repository.planCleanupUnpinnedImages(limit: deleteCount)
+        guard !plan.ids.isEmpty else { return }
+
+        if !plan.storageRefs.isEmpty {
+            let fileURLs = plan.storageRefs.map { URL(fileURLWithPath: $0) }
+            await Task.detached(priority: .utility) {
+                await Self.deleteFilesBounded(
+                    fileURLs,
+                    maxConcurrent: Self.maxConcurrentFileDeletions,
+                    logContext: "cleanupImagesOnlyByCount"
+                )
+            }.value
+        }
+
+        try await repository.deleteItemsBatchInTransaction(ids: plan.ids)
+    }
+
     /// v0.19: 修复 - 同时删除外部存储文件，避免孤立文件累积
-    private func cleanupByAge(maxDays: Int) async throws {
+    private func cleanupByAge(maxDays: Int, typeFilter: ClipboardItemType?) async throws {
         let cutoff = Date().addingTimeInterval(-Double(maxDays * 24 * 3600))
-        let plan = try await repository.planCleanupByAge(cutoff: cutoff)
+        let plan = try await repository.planCleanupByAge(cutoff: cutoff, typeFilter: typeFilter)
         guard !plan.ids.isEmpty else { return }
 
         if !plan.storageRefs.isEmpty {
@@ -685,8 +722,8 @@ public final class StorageService {
     /// v0.14: 深度优化 - 消除循环迭代，单次查询 + 事务批量删除
     /// 原理：一次性获取所有待删除项目，累加 size 直到达到目标，单事务删除
     /// 收益：消除多次迭代的 SQL 开销，9000 条删除从 ~4500ms 降到 ~200ms
-    private func cleanupBySize(targetBytes: Int) async throws {
-        let plan = try await repository.planCleanupByTotalSize(targetBytes: targetBytes)
+    private func cleanupBySize(targetBytes: Int, typeFilter: ClipboardItemType?) async throws {
+        let plan = try await repository.planCleanupByTotalSize(targetBytes: targetBytes, typeFilter: typeFilter)
         guard !plan.ids.isEmpty else { return }
 
         if !plan.storageRefs.isEmpty {
@@ -707,14 +744,14 @@ public final class StorageService {
     /// v0.14: 深度优化 - 消除循环迭代，单次查询 + 事务批量删除
     /// 原理：一次性获取所有外部存储项目，累加 size 直到达到目标，单事务删除
     /// 收益：消除多次迭代的 SQL 和文件系统开销
-    private func cleanupExternalStorage(targetBytes: Int) async throws {
+    private func cleanupExternalStorage(targetBytes: Int, typeFilter: ClipboardItemType?) async throws {
         // 使缓存失效，确保获取最新大小
         invalidateExternalSizeCache()
         let currentSize = try await getExternalStorageSize()
         if currentSize <= targetBytes { return }
 
         let excessBytes = currentSize - targetBytes
-        let plan = try await repository.planCleanupExternalStorage(excessBytes: excessBytes)
+        let plan = try await repository.planCleanupExternalStorage(excessBytes: excessBytes, typeFilter: typeFilter)
         guard !plan.ids.isEmpty else { return }
 
         let fileURLs = plan.storageRefs.map { URL(fileURLWithPath: $0) }

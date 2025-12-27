@@ -5,6 +5,17 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [v0.50.fix16] - 2025-12-27
+
+### Fix/Storage
+
+- **仅清理图片（文本永久保留）**：新增存储设置项 `cleanupImagesOnly`，开启后自动清理仅删除图片条目（及其 `content/` 外部 payload），避免容量清理误删文本历史；Pinned 图片仍会被保留。
+- **清理范围更可控**：按条数/按内容估算上限/按外部存储上限/按天数的清理路径统一支持“仅清理图片”策略；若主要占用来自文本或大量 Pinned 图片，可能无法把占用降到上限。
+
+### Test
+
+- `xcodebuild test -scheme Scopy -destination 'platform=macOS' -only-testing:ScopyTests`：Executed 273 tests, 25 skipped, 0 failures
+
 ## [v0.50.fix15] - 2025-12-23
 
 ### Fix/Preview

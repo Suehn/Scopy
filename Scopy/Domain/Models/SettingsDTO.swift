@@ -4,6 +4,8 @@ import Foundation
 public struct SettingsDTO: Sendable, Equatable {
     public var maxItems: Int
     public var maxStorageMB: Int
+    /// 当启用时，自动清理仅删除图片条目（及其外部 payload），不会删除文本/富文本等条目。
+    public var cleanupImagesOnly: Bool
     public var saveImages: Bool
     public var saveFiles: Bool
     /// Clipboard polling interval in milliseconds.
@@ -21,6 +23,7 @@ public struct SettingsDTO: Sendable, Equatable {
     public static let `default` = SettingsDTO(
         maxItems: 10000,
         maxStorageMB: 200,
+        cleanupImagesOnly: false,
         saveImages: true,
         saveFiles: true,
         clipboardPollingIntervalMs: 500,
