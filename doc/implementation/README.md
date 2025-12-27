@@ -8,11 +8,11 @@
 
 | 项目 | 状态 |
 |------|------|
-| **当前版本** | v0.50.fix18 |
-| **测试状态** | ✅ ScopyTests（276 tests, 25 skipped, 0 failures） |
+| **当前版本** | v0.50.fix19 |
+| **测试状态** | ✅ ScopyTests（277 tests, 25 skipped, 0 failures） |
 | **构建状态** | ✅ 已复验 |
 | **部署位置** | /Applications/Scopy.app |
-| **最后更新** | 2025-12-27 |
+| **最后更新** | 2025-12-28 |
 
 > 详细变更历史请查看 [CHANGELOG.md](./CHANGELOG.md)
 
@@ -24,6 +24,7 @@
 
 | 版本 | 日期 | 主要内容 | 状态 |
 |------|------|----------|------|
+| [v0.50.fix19](./releases/v0.50.fix19.md) | 2025-12-28 | Fix/Stats：外部压缩后同步 size_bytes，修复“内容估算/磁盘占用”显示不一致与清理误判 | ✅ |
 | [v0.50.fix18](./releases/v0.50.fix18.md) | 2025-12-27 | Fix/PNG：修复 release 包未带 pngquant；历史图片手动优化（覆盖原图+压缩比提示）；hover 优化按钮不触发预览 | ✅ |
 | [v0.50.fix17](./releases/v0.50.fix17.md) | 2025-12-27 | Feat/PNG：集成 pngquant，导出 PNG 默认压缩；可选压缩历史图片（两套参数） | ✅ |
 | [v0.50.fix16](./releases/v0.50.fix16.md) | 2025-12-27 | Fix/Storage：新增“仅清理图片（文本永久保留）”选项，避免容量清理误删文本历史 | ✅ |

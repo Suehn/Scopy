@@ -37,6 +37,7 @@ final class ScrollPerformanceTests: XCTestCase {
         func optimizeImage(itemID: UUID) async throws -> ImageOptimizationOutcomeDTO {
             ImageOptimizationOutcomeDTO(result: .noChange, originalBytes: 0, optimizedBytes: 0)
         }
+        func syncExternalImageSizeBytesFromDisk() async throws -> Int { 0 }
         func getRecentApps(limit: Int) async throws -> [String] { [] }
     }
 

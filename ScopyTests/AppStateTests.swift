@@ -875,6 +875,8 @@ final class TestMockClipboardService: ClipboardServiceProtocol {
         return ImageOptimizationOutcomeDTO(result: .noChange, originalBytes: item.sizeBytes, optimizedBytes: item.sizeBytes)
     }
 
+    func syncExternalImageSizeBytesFromDisk() async throws -> Int { 0 }
+
     func getRecentApps(limit: Int) async throws -> [String] {
         // 返回 mock 数据中的 app 列表
         let apps = Set(items.compactMap { $0.appBundleID })
@@ -926,6 +928,7 @@ final class FailingMockService: ClipboardServiceProtocol {
     func optimizeImage(itemID: UUID) async throws -> ImageOptimizationOutcomeDTO {
         ImageOptimizationOutcomeDTO(result: .noChange, originalBytes: 0, optimizedBytes: 0)
     }
+    func syncExternalImageSizeBytesFromDisk() async throws -> Int { 0 }
     func getRecentApps(limit: Int) async throws -> [String] { [] }
 }
 

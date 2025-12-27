@@ -402,6 +402,48 @@ public final class StorageService {
         try await repository.getTotalSize()
     }
 
+    /// v0.50.fix19: 同步外部图片的 `size_bytes` 与磁盘真实文件大小。
+    ///
+    /// 场景：用户在应用外部对 `content/` 目录批量压缩/覆盖图片后，
+    /// DB 的 `size_bytes` 仍是旧值，会导致：
+    /// - Footer “内容估算”显示偏大（甚至出现估算 > 磁盘的反直觉情况）
+    /// - 按“内容估算上限”触发的自动清理误删
+    ///
+    /// 该方法只更新 `size_bytes`，不改变 `content_hash`（避免大规模重建缩略图/缓存）。
+    func syncExternalImageSizeBytesFromDisk() async throws -> Int {
+        let records = try await repository.fetchExternalStorageSizeRecords(typeFilter: .image)
+        guard !records.isEmpty else { return 0 }
+
+        let externalRoot = externalStorageDirectoryPath
+        let updates = await Task.detached(priority: .utility) {
+            var pending: [SQLiteClipboardRepository.SizeBytesUpdate] = []
+            pending.reserveCapacity(records.count)
+            let fm = FileManager.default
+
+            for record in records {
+                guard StorageService.validateStorageRef(record.storageRef, externalStoragePath: externalRoot) else {
+                    continue
+                }
+
+                guard let attrs = try? fm.attributesOfItem(atPath: record.storageRef),
+                      let fileSize = attrs[.size] as? Int,
+                      fileSize > 0 else {
+                    continue
+                }
+
+                guard fileSize != record.sizeBytes else { continue }
+                pending.append(SQLiteClipboardRepository.SizeBytesUpdate(id: record.id, sizeBytes: fileSize))
+            }
+
+            return pending
+        }.value
+
+        guard !updates.isEmpty else { return 0 }
+        try await repository.updateItemSizeBytesBatchInTransaction(updates: updates)
+        invalidateExternalSizeCache()
+        return updates.count
+    }
+
     /// v0.10.8: 使用缓存避免重复遍历文件系统
     /// v0.22: 使用锁保护缓存访问，防止数据竞争
     public func getExternalStorageSize() async throws -> Int {

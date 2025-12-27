@@ -1,5 +1,5 @@
 import XCTest
-import ScopyKit
+@testable import ScopyKit
 
 /// StorageService 单元测试
 /// 验证 v0.md 第2、3节的存储和去重要求
@@ -351,6 +351,25 @@ final class StorageServiceTests: XCTestCase {
         try await diskStorage.deleteItem(item.id)
         await diskStorage.close()
         try? FileManager.default.removeItem(at: baseURL)
+    }
+
+    func testSyncExternalImageSizeBytesFromDiskUpdatesDBSizeBytes() async throws {
+        let item = try await storage.upsertItem(makeLargeTestContent())
+
+        guard let storageRef = item.storageRef else {
+            XCTFail("Expected external storageRef for image item")
+            return
+        }
+        XCTAssertTrue(FileManager.default.fileExists(atPath: storageRef))
+
+        let smallerData = Data(repeating: 0x00, count: 1234)
+        try smallerData.write(to: URL(fileURLWithPath: storageRef), options: [.atomic])
+
+        let updated = try await storage.syncExternalImageSizeBytesFromDisk()
+        XCTAssertEqual(updated, 1)
+
+        let refreshed = try await storage.findByID(item.id)
+        XCTAssertEqual(refreshed?.sizeBytes, smallerData.count)
     }
 
     // MARK: - Helpers

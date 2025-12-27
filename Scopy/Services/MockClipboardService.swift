@@ -438,6 +438,11 @@ final class MockClipboardService: ClipboardServiceProtocol {
         return ImageOptimizationOutcomeDTO(result: .optimized, originalBytes: original, optimizedBytes: optimized)
     }
 
+    func syncExternalImageSizeBytesFromDisk() async throws -> Int {
+        // Mock 环境不接触真实文件系统，返回 0 表示无更新。
+        0
+    }
+
     func getRecentApps(limit: Int) async throws -> [String] {
         // 返回 mock 数据中的 app 列表
         let apps = Set(items.compactMap { $0.appBundleID })

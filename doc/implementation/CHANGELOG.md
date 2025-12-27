@@ -5,6 +5,17 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [v0.50.fix19] - 2025-12-28
+
+### Fix/Stats
+
+- **外部压缩后同步 size_bytes**：当用户在应用外部覆盖/压缩 `content/` 下的图片文件后，自动同步 DB 的 `size_bytes`（只更新体积，不更新 hash），避免“内容估算”长期偏大。
+- **避免误清理**：检测到“内容估算明显大于真实磁盘占用”时才触发同步（带轻量阈值与 1h 级别节流），降低后台扫描频率，避免按估算上限触发的误清理。
+
+### Test
+
+- `xcodebuild test -scheme Scopy -destination 'platform=macOS' -only-testing:ScopyTests`：Executed 277 tests, 25 skipped, 0 failures
+
 ## [v0.50.fix18] - 2025-12-27
 
 ### Fix/PNG

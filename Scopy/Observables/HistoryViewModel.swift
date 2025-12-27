@@ -320,6 +320,7 @@ final class HistoryViewModel {
 
             settingsViewModel.storageStats = stats
             await settingsViewModel.refreshDiskSizeIfNeeded()
+            settingsViewModel.syncExternalImageSizeBytesFromDiskIfNeeded()
 
             let elapsedMs = (CFAbsoluteTimeGetCurrent() - startTime) * 1000
             await PerformanceMetrics.shared.recordLoadLatency(elapsedMs)

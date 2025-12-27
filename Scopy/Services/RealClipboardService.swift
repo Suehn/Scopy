@@ -97,6 +97,10 @@ final class RealClipboardService: ClipboardServiceProtocol {
         try await clipboardService.optimizeImage(itemID: itemID)
     }
 
+    func syncExternalImageSizeBytesFromDisk() async throws -> Int {
+        try await clipboardService.syncExternalImageSizeBytesFromDisk()
+    }
+
     func getRecentApps(limit: Int) async throws -> [String] {
         try await clipboardService.getRecentApps(limit: limit)
     }

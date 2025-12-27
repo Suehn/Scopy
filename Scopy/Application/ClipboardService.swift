@@ -421,6 +421,15 @@ actor ClipboardService {
         )
     }
 
+    func syncExternalImageSizeBytesFromDisk() async throws -> Int {
+        let storage = try requireStorage()
+        let updated = try await storage.syncExternalImageSizeBytesFromDisk()
+        if updated > 0 {
+            ScopyLog.storage.info("Synced external image size_bytes from disk: updated=\(updated, privacy: .public)")
+        }
+        return updated
+    }
+
     func getImageData(itemID: UUID) async throws -> Data? {
         let storage = try requireStorage()
         guard let item = try await storage.findByID(itemID) else { return nil }

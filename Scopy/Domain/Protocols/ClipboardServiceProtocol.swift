@@ -56,6 +56,13 @@ public protocol ClipboardServiceProtocol: AnyObject {
     /// 手动优化历史中的图片（pngquant）：压缩并覆盖原图，同时更新 DB 的 hash/size。
     func optimizeImage(itemID: UUID) async throws -> ImageOptimizationOutcomeDTO
 
+    /// 修复/同步：当用户在应用外部批量压缩了 `content/` 下的图片时，
+    /// 数据库里的 `size_bytes` 可能仍是旧值，导致“内容估算”显示偏大与清理策略误判。
+    /// 该方法会从磁盘读取外部图片的真实文件大小并写回 `size_bytes`。
+    ///
+    /// - Returns: 实际更新了多少条记录（size_bytes 发生变化的条目数）
+    func syncExternalImageSizeBytesFromDisk() async throws -> Int
+
     /// 获取最近使用的 app 列表（用于过滤）
     func getRecentApps(limit: Int) async throws -> [String]
 

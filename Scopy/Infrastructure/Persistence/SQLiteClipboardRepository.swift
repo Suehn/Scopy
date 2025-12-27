@@ -21,6 +21,17 @@ actor SQLiteClipboardRepository {
         let storageRefs: [String]
     }
 
+    struct ExternalStorageSizeRecord: Sendable {
+        let id: UUID
+        let sizeBytes: Int
+        let storageRef: String
+    }
+
+    struct SizeBytesUpdate: Sendable {
+        let id: UUID
+        let sizeBytes: Int
+    }
+
     private let dbPath: String
     private var connection: SQLiteConnection?
 
@@ -196,6 +207,40 @@ actor SQLiteClipboardRepository {
         return refs
     }
 
+    func fetchExternalStorageSizeRecords(typeFilter: ClipboardItemType?) throws -> [ExternalStorageSizeRecord] {
+        var sql = """
+            SELECT id, size_bytes, storage_ref
+            FROM clipboard_items
+            WHERE storage_ref IS NOT NULL AND storage_ref != ''
+        """
+
+        if typeFilter != nil {
+            sql += " AND type = ?"
+        }
+
+        let stmt = try prepare(sql)
+        if let typeFilter {
+            try stmt.bindText(typeFilter.rawValue, at: 1)
+        }
+
+        var records: [ExternalStorageSizeRecord] = []
+        while try stmt.step() {
+            guard let idString = stmt.columnText(0),
+                  let id = UUID(uuidString: idString),
+                  let storageRef = stmt.columnText(2),
+                  !storageRef.isEmpty else { continue }
+
+            records.append(
+                ExternalStorageSizeRecord(
+                    id: id,
+                    sizeBytes: stmt.columnInt(1),
+                    storageRef: storageRef
+                )
+            )
+        }
+        return records
+    }
+
     func fetchRecent(limit: Int, offset: Int) throws -> [ClipboardStoredItem] {
         let sql = """
             SELECT * FROM clipboard_items
@@ -303,6 +348,31 @@ actor SQLiteClipboardRepository {
         guard try stmt.step() else { return 0 }
         let value = stmt.columnInt64(0)
         return Int(min(value, Int64(Int.max)))
+    }
+
+    func updateItemSizeBytesBatchInTransaction(updates: [SizeBytesUpdate]) throws {
+        guard !updates.isEmpty else { return }
+
+        try execute("BEGIN IMMEDIATE TRANSACTION")
+
+        do {
+            let stmt = try prepare("UPDATE clipboard_items SET size_bytes = ? WHERE id = ?")
+            for update in updates {
+                stmt.reset()
+                try stmt.bindInt(update.sizeBytes, at: 1)
+                try stmt.bindText(update.id.uuidString, at: 2)
+                _ = try stmt.step()
+            }
+            try execute("COMMIT")
+        } catch {
+            do {
+                try execute("ROLLBACK")
+            } catch {
+                isDatabaseCorrupted = true
+                try recoverDatabase()
+            }
+            throw error
+        }
     }
 
     func searchAllWithFilters(
