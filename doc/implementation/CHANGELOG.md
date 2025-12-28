@@ -5,6 +5,28 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [v0.50.fix20] - 2025-12-27
+
+### Feat/Preview
+
+- **文件 hover 预览增强**：普通文件接入 Quick Look（PDF 可滚动多页、视频可播放），视频预览尺寸贴合比例；.md 文件读取并渲染 Markdown。
+- **文件元数据**：展示真实文件大小 + 备注，不再显示路径文本大小。
+- **文件备注可搜**：右键编辑/清空备注，备注写入存储并纳入搜索（FTS + fuzzy）。
+
+### Fix/Preview
+
+- **Markdown 文件 hover 稳定性**：首次 hover 改为加载占位，避免纯文本/Markdown 闪烁切换。
+- **Markdown 文件预览不再被预计算打断**：仅文本条目触发 Markdown 预计算，避免文件预览被切到文本 popover。
+
+### UX
+
+- **文件元信息位置优化**：文件条目元信息回到标题下方左对齐，优先保证缩略图尺寸。
+- **备注编辑体验**：备注编辑弹窗样式一体化，编辑时不再触发 hover 预览干扰。
+
+### Test
+
+- ⏸ 未运行（按需可跑：`xcodebuild test -scheme Scopy -destination 'platform=macOS' -only-testing:ScopyTests`）
+
 ## [v0.50.fix19] - 2025-12-28
 
 ### Fix/Stats

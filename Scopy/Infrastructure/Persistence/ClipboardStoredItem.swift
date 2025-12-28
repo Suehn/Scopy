@@ -7,12 +7,14 @@ public struct ClipboardStoredItem: Sendable {
     public let type: ClipboardItemType
     public let contentHash: String
     public let plainText: String
+    public let note: String?
     public let appBundleID: String?
     public let createdAt: Date
     public var lastUsedAt: Date
     public var useCount: Int
     public var isPinned: Bool
     public let sizeBytes: Int
+    public let fileSizeBytes: Int?
     public let storageRef: String?
     public let rawData: Data?
 }

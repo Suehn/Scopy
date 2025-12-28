@@ -61,6 +61,10 @@ final class RealClipboardService: ClipboardServiceProtocol {
         try await clipboardService.unpin(itemID: itemID)
     }
 
+    func updateNote(itemID: UUID, note: String?) async throws {
+        try await clipboardService.updateNote(itemID: itemID, note: note)
+    }
+
     func delete(itemID: UUID) async throws {
         try await clipboardService.delete(itemID: itemID)
     }

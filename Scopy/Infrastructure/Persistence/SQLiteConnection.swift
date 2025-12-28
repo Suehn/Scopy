@@ -182,6 +182,13 @@ final class SQLiteStatement {
         Int(sqlite3_column_int(statement, index))
     }
 
+    func columnIntOptional(_ index: Int32) -> Int? {
+        if sqlite3_column_type(statement, index) == SQLITE_NULL {
+            return nil
+        }
+        return Int(sqlite3_column_int(statement, index))
+    }
+
     func columnInt64(_ index: Int32) -> Int64 {
         sqlite3_column_int64(statement, index)
     }

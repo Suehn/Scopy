@@ -179,11 +179,13 @@ final class HistoryViewModel {
                 type: existing.type,
                 contentHash: existing.contentHash,
                 plainText: existing.plainText,
+                note: existing.note,
                 appBundleID: existing.appBundleID,
                 createdAt: existing.createdAt,
                 lastUsedAt: existing.lastUsedAt,
                 isPinned: existing.isPinned,
                 sizeBytes: existing.sizeBytes,
+                fileSizeBytes: existing.fileSizeBytes,
                 thumbnailPath: thumbnailPath,
                 storageRef: existing.storageRef
             )
@@ -565,6 +567,14 @@ final class HistoryViewModel {
             invalidatePinnedCache()
         } catch {
             ScopyLog.app.error("Delete failed: \(error.localizedDescription, privacy: .private)")
+        }
+    }
+
+    func updateNote(_ item: ClipboardItemDTO, note: String?) async {
+        do {
+            try await service.updateNote(itemID: item.id, note: note)
+        } catch {
+            ScopyLog.app.error("Update note failed: \(error.localizedDescription, privacy: .private)")
         }
     }
 

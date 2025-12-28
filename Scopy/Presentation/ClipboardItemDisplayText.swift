@@ -10,27 +10,37 @@ import ScopyUISupport
 final class ClipboardItemDisplayText {
     static let shared = ClipboardItemDisplayText()
 
-    private struct CacheKey: Hashable {
+    private struct TitleCacheKey: Hashable {
         let type: ClipboardItemType
-        let contentHash: String
+        let contentKey: String
+    }
+
+    private struct MetadataCacheKey: Hashable {
+        let type: ClipboardItemType
+        let contentKey: String
+        let note: String?
+        let sizeBytes: Int
+        let fileSizeBytes: Int?
     }
 
     private struct PrewarmSnapshot: Sendable {
         let type: ClipboardItemType
         let contentKey: String
         let plainText: String
+        let note: String?
         let sizeBytes: Int
+        let fileSizeBytes: Int?
     }
 
     private struct PrewarmEntry: Sendable {
-        let type: ClipboardItemType
-        let contentKey: String
+        let titleKey: TitleCacheKey
+        let metadataKey: MetadataCacheKey
         let title: String
         let metadata: String
     }
 
-    private var titleCache: [CacheKey: String] = [:]
-    private var metadataCache: [CacheKey: String] = [:]
+    private var titleCache: [TitleCacheKey: String] = [:]
+    private var metadataCache: [MetadataCacheKey: String] = [:]
 
     private let cacheLimit: Int = 20_000
 
@@ -39,7 +49,7 @@ final class ClipboardItemDisplayText {
 
     func title(for item: ClipboardItemDTO) -> String {
         trimCacheIfNeeded()
-        let key = makeCacheKey(for: item)
+        let key = makeTitleCacheKey(for: item)
         if let cached = titleCache[key] { return cached }
 
         let computed: String
@@ -57,17 +67,29 @@ final class ClipboardItemDisplayText {
 
     func metadata(for item: ClipboardItemDTO) -> String {
         trimCacheIfNeeded()
-        let key = makeCacheKey(for: item)
+        let key = makeMetadataCacheKey(for: item)
         if let cached = metadataCache[key] { return cached }
 
         let computed: String
         if ScrollPerformanceProfile.isEnabled {
             let start = CFAbsoluteTimeGetCurrent()
-            computed = Self.computeMetadata(type: item.type, plainText: item.plainText, sizeBytes: item.sizeBytes)
+            computed = Self.computeMetadata(
+                type: item.type,
+                plainText: item.plainText,
+                note: item.note,
+                sizeBytes: item.sizeBytes,
+                fileSizeBytes: item.fileSizeBytes
+            )
             let elapsed = (CFAbsoluteTimeGetCurrent() - start) * 1000
             ScrollPerformanceProfile.recordMetric(name: "text.metadata_ms", elapsedMs: elapsed)
         } else {
-            computed = Self.computeMetadata(type: item.type, plainText: item.plainText, sizeBytes: item.sizeBytes)
+            computed = Self.computeMetadata(
+                type: item.type,
+                plainText: item.plainText,
+                note: item.note,
+                sizeBytes: item.sizeBytes,
+                fileSizeBytes: item.fileSizeBytes
+            )
         }
         metadataCache[key] = computed
         return computed
@@ -81,7 +103,9 @@ final class ClipboardItemDisplayText {
                 type: item.type,
                 contentKey: Self.cacheKeyContent(for: item),
                 plainText: item.plainText,
-                sizeBytes: item.sizeBytes
+                note: item.note,
+                sizeBytes: item.sizeBytes,
+                fileSizeBytes: item.fileSizeBytes
             )
         }
 
@@ -93,12 +117,22 @@ final class ClipboardItemDisplayText {
                 let metadata = Self.computeMetadata(
                     type: snapshot.type,
                     plainText: snapshot.plainText,
-                    sizeBytes: snapshot.sizeBytes
+                    note: snapshot.note,
+                    sizeBytes: snapshot.sizeBytes,
+                    fileSizeBytes: snapshot.fileSizeBytes
+                )
+                let titleKey = TitleCacheKey(type: snapshot.type, contentKey: snapshot.contentKey)
+                let metadataKey = MetadataCacheKey(
+                    type: snapshot.type,
+                    contentKey: snapshot.contentKey,
+                    note: snapshot.note,
+                    sizeBytes: snapshot.sizeBytes,
+                    fileSizeBytes: snapshot.fileSizeBytes
                 )
                 entries.append(
                     PrewarmEntry(
-                        type: snapshot.type,
-                        contentKey: snapshot.contentKey,
+                        titleKey: titleKey,
+                        metadataKey: metadataKey,
                         title: title,
                         metadata: metadata
                     )
@@ -114,11 +148,11 @@ final class ClipboardItemDisplayText {
     }
 
     func cachedTitle(for item: ClipboardItemDTO) -> String? {
-        titleCache[makeCacheKey(for: item)]
+        titleCache[makeTitleCacheKey(for: item)]
     }
 
     func cachedMetadata(for item: ClipboardItemDTO) -> String? {
-        metadataCache[makeCacheKey(for: item)]
+        metadataCache[makeMetadataCacheKey(for: item)]
     }
 
     func clearCaches() {
@@ -135,8 +169,18 @@ final class ClipboardItemDisplayText {
         }
     }
 
-    private func makeCacheKey(for item: ClipboardItemDTO) -> CacheKey {
-        CacheKey(type: item.type, contentHash: Self.cacheKeyContent(for: item))
+    private func makeTitleCacheKey(for item: ClipboardItemDTO) -> TitleCacheKey {
+        TitleCacheKey(type: item.type, contentKey: Self.cacheKeyContent(for: item))
+    }
+
+    private func makeMetadataCacheKey(for item: ClipboardItemDTO) -> MetadataCacheKey {
+        MetadataCacheKey(
+            type: item.type,
+            contentKey: Self.cacheKeyContent(for: item),
+            note: item.note,
+            sizeBytes: item.sizeBytes,
+            fileSizeBytes: item.fileSizeBytes
+        )
     }
 
     private func storePrewarmEntries(_ entries: [PrewarmEntry]) {
@@ -150,13 +194,12 @@ final class ClipboardItemDisplayText {
                 break
             }
 
-            let key = CacheKey(type: entry.type, contentHash: entry.contentKey)
-            if titleCache[key] == nil {
-                titleCache[key] = entry.title
+            if titleCache[entry.titleKey] == nil {
+                titleCache[entry.titleKey] = entry.title
                 titleCount += 1
             }
-            if metadataCache[key] == nil {
-                metadataCache[key] = entry.metadata
+            if metadataCache[entry.metadataKey] == nil {
+                metadataCache[entry.metadataKey] = entry.metadata
                 metadataCount += 1
             }
         }
@@ -183,14 +226,20 @@ final class ClipboardItemDisplayText {
         }
     }
 
-    private nonisolated static func computeMetadata(type: ClipboardItemType, plainText: String, sizeBytes: Int) -> String {
+    private nonisolated static func computeMetadata(
+        type: ClipboardItemType,
+        plainText: String,
+        note: String?,
+        sizeBytes: Int,
+        fileSizeBytes: Int?
+    ) -> String {
         switch type {
         case .text, .rtf, .html:
             return computeTextMetadata(plainText)
         case .image:
             return computeImageMetadata(plainText, sizeBytes: sizeBytes)
         case .file:
-            return computeFileMetadata(plainText, sizeBytes: sizeBytes)
+            return computeFileMetadata(plainText, note: note, sizeBytes: sizeBytes, fileSizeBytes: fileSizeBytes)
         default:
             return formatBytes(sizeBytes)
         }
@@ -265,14 +314,31 @@ final class ClipboardItemDisplayText {
         return size
     }
 
-    private nonisolated static func computeFileMetadata(_ plainText: String, sizeBytes: Int) -> String {
+    private nonisolated static func computeFileMetadata(
+        _ plainText: String,
+        note: String?,
+        sizeBytes _: Int,
+        fileSizeBytes: Int?
+    ) -> String {
         let paths = plainText.components(separatedBy: "\n").filter { !$0.isEmpty }
         let fileCount = paths.count
-        let size = formatBytes(sizeBytes)
-        if fileCount == 1 {
-            return size
+        var parts: [String] = []
+
+        if fileCount > 1 {
+            parts.append("\(fileCount)个文件")
         }
-        return "\(fileCount)个文件 · \(size)"
+
+        if let fileSizeBytes, fileSizeBytes > 0 {
+            parts.append(formatBytes(fileSizeBytes))
+        } else {
+            parts.append("未知大小")
+        }
+
+        if let note, !note.isEmpty {
+            parts.append(note)
+        }
+
+        return parts.joined(separator: " · ")
     }
 
     private nonisolated static func parseImageResolution(from text: String) -> String? {

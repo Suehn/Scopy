@@ -44,24 +44,30 @@ public final class ClipboardMonitor {
         public let type: ClipboardItemType
         public let plainText: String
         public let payload: Payload
+        public let note: String?
         public let appBundleID: String?
         public let contentHash: String
         public let sizeBytes: Int
+        public let fileSizeBytes: Int?
 
         public init(
             type: ClipboardItemType,
             plainText: String,
             payload: Payload,
+            note: String? = nil,
             appBundleID: String?,
             contentHash: String,
-            sizeBytes: Int
+            sizeBytes: Int,
+            fileSizeBytes: Int? = nil
         ) {
             self.type = type
             self.plainText = plainText
             self.payload = payload
+            self.note = note
             self.appBundleID = appBundleID
             self.contentHash = contentHash
             self.sizeBytes = sizeBytes
+            self.fileSizeBytes = fileSizeBytes
         }
 
         public var rawData: Data? {
@@ -93,6 +99,7 @@ public final class ClipboardMonitor {
         let rawData: Data?
         let appBundleID: String?
         let sizeBytes: Int
+        let fileSizeBytes: Int?
         let precomputedHash: String?  // 图片等内容的预计算轻量指纹
         let imageDataWasTIFF: Bool
 
@@ -102,6 +109,7 @@ public final class ClipboardMonitor {
             rawData: Data?,
             appBundleID: String?,
             sizeBytes: Int,
+            fileSizeBytes: Int? = nil,
             precomputedHash: String? = nil,
             imageDataWasTIFF: Bool = false
         ) {
@@ -110,6 +118,7 @@ public final class ClipboardMonitor {
             self.rawData = rawData
             self.appBundleID = appBundleID
             self.sizeBytes = sizeBytes
+            self.fileSizeBytes = fileSizeBytes
             self.precomputedHash = precomputedHash
             self.imageDataWasTIFF = imageDataWasTIFF
         }
@@ -317,6 +326,23 @@ public final class ClipboardMonitor {
         }
     }
 
+    nonisolated private static func fileSizeBytesBestEffort(_ urls: [URL]) -> Int? {
+        var total = 0
+        var didRead = false
+
+        for url in urls {
+            var isDirectory: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory) else { continue }
+            guard !isDirectory.boolValue else { continue }
+            if let size = (try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize {
+                total += size
+                didRead = true
+            }
+        }
+
+        return didRead ? total : nil
+    }
+
     // MARK: - Private Methods
 
     private func checkClipboard() async {
@@ -366,7 +392,8 @@ public final class ClipboardMonitor {
             payload: rawData.rawData.map(ClipboardContent.Payload.data) ?? .none,
             appBundleID: rawData.appBundleID,
             contentHash: hash,
-            sizeBytes: rawData.sizeBytes
+            sizeBytes: rawData.sizeBytes,
+            fileSizeBytes: rawData.fileSizeBytes
         )
         await contentQueue.enqueue(content)
     }
@@ -471,7 +498,8 @@ public final class ClipboardMonitor {
                     payload: payload,
                     appBundleID: next.appBundleID,
                     contentHash: hash,
-                    sizeBytes: resolvedSizeBytes
+                    sizeBytes: resolvedSizeBytes,
+                    fileSizeBytes: next.fileSizeBytes
                 )
 
                 await contentQueue.enqueue(content)
@@ -540,12 +568,14 @@ public final class ClipboardMonitor {
             let paths = fileURLs.map { $0.path }.joined(separator: "\n")
             // 序列化文件 URL 以便后续恢复
             let urlData = Self.serializeFileURLs(fileURLs)
+            let fileSizeBytes = Self.fileSizeBytesBestEffort(fileURLs)
             return RawClipboardData(
                 type: .file,
                 plainText: paths,
                 rawData: urlData,
                 appBundleID: appBundleID,
-                sizeBytes: paths.utf8.count + (urlData?.count ?? 0)
+                sizeBytes: paths.utf8.count + (urlData?.count ?? 0),
+                fileSizeBytes: fileSizeBytes
             )
         }
 
@@ -654,13 +684,15 @@ public final class ClipboardMonitor {
             let hash = computeHash(paths)
             // 序列化文件 URL 以便后续恢复
             let urlData = Self.serializeFileURLs(fileURLs)
+            let fileSizeBytes = Self.fileSizeBytesBestEffort(fileURLs)
             return ClipboardContent(
                 type: .file,
                 plainText: paths,
                 payload: urlData.map(ClipboardContent.Payload.data) ?? .none,
                 appBundleID: appBundleID,
                 contentHash: hash,
-                sizeBytes: paths.utf8.count + (urlData?.count ?? 0)
+                sizeBytes: paths.utf8.count + (urlData?.count ?? 0),
+                fileSizeBytes: fileSizeBytes
             )
         }
 

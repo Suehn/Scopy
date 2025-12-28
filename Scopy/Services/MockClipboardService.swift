@@ -153,11 +153,13 @@ final class MockClipboardService: ClipboardServiceProtocol {
                 type: .text,
                 contentHash: UUID().uuidString,
                 plainText: text,
+                note: nil,
                 appBundleID: apps[index % apps.count],
                 createdAt: now.addingTimeInterval(Double(-index * 3600)),
                 lastUsedAt: now.addingTimeInterval(Double(-index * 1800)),
                 isPinned: index < 2,  // 前两个是固定的
                 sizeBytes: text.utf8.count,
+                fileSizeBytes: nil,
                 thumbnailPath: nil,
                 storageRef: nil
             )
@@ -174,11 +176,13 @@ final class MockClipboardService: ClipboardServiceProtocol {
                     type: .image,
                     contentHash: UUID().uuidString,
                     plainText: "",
+                    note: nil,
                     appBundleID: apps[index % apps.count],
                     createdAt: now.addingTimeInterval(Double(-index * 3600)),
                     lastUsedAt: now.addingTimeInterval(Double(-index * 1800)),
                     isPinned: false,
                     sizeBytes: 0,
+                    fileSizeBytes: nil,
                     thumbnailPath: path,
                     storageRef: nil
                 )
@@ -189,11 +193,13 @@ final class MockClipboardService: ClipboardServiceProtocol {
                     type: .text,
                     contentHash: UUID().uuidString,
                     plainText: Self.makeItemText(index: index, fallback: generatedText),
+                    note: nil,
                     appBundleID: apps[index % apps.count],
                     createdAt: now.addingTimeInterval(Double(-index * 3600)),
                     lastUsedAt: now.addingTimeInterval(Double(-index * 1800)),
                     isPinned: false,
                     sizeBytes: 100,
+                    fileSizeBytes: nil,
                     thumbnailPath: nil,
                     storageRef: nil
                 )
@@ -293,16 +299,17 @@ final class MockClipboardService: ClipboardServiceProtocol {
             filtered = items
         } else {
             filtered = items.filter { item in
+                let searchable = item.plainText + (item.note.map { " \($0)" } ?? "")
                 switch query.mode {
                 case .exact:
-                    return item.plainText.localizedCaseInsensitiveContains(query.query)
+                    return searchable.localizedCaseInsensitiveContains(query.query)
                 case .fuzzy, .fuzzyPlus:
                     // 简单的模糊匹配（Mock 服务不区分 fuzzy 和 fuzzyPlus）
-                    return item.plainText.localizedCaseInsensitiveContains(query.query)
+                    return searchable.localizedCaseInsensitiveContains(query.query)
                 case .regex:
                     if let regex = try? NSRegularExpression(pattern: query.query, options: .caseInsensitive) {
-                        let range = NSRange(item.plainText.startIndex..., in: item.plainText)
-                        return regex.firstMatch(in: item.plainText, range: range) != nil
+                        let range = NSRange(searchable.startIndex..., in: searchable)
+                        return regex.firstMatch(in: searchable, range: range) != nil
                     }
                     return false
                 }
@@ -329,11 +336,13 @@ final class MockClipboardService: ClipboardServiceProtocol {
                 type: item.type,
                 contentHash: item.contentHash,
                 plainText: item.plainText,
+                note: item.note,
                 appBundleID: item.appBundleID,
                 createdAt: item.createdAt,
                 lastUsedAt: item.lastUsedAt,
                 isPinned: true,
                 sizeBytes: item.sizeBytes,
+                fileSizeBytes: item.fileSizeBytes,
                 thumbnailPath: item.thumbnailPath,
                 storageRef: item.storageRef
             )
@@ -349,16 +358,42 @@ final class MockClipboardService: ClipboardServiceProtocol {
                 type: item.type,
                 contentHash: item.contentHash,
                 plainText: item.plainText,
+                note: item.note,
                 appBundleID: item.appBundleID,
                 createdAt: item.createdAt,
                 lastUsedAt: item.lastUsedAt,
                 isPinned: false,
                 sizeBytes: item.sizeBytes,
+                fileSizeBytes: item.fileSizeBytes,
                 thumbnailPath: item.thumbnailPath,
                 storageRef: item.storageRef
             )
             await yieldEvent(.itemUnpinned(itemID))
         }
+    }
+
+    func updateNote(itemID: UUID, note: String?) async throws {
+        guard let index = items.firstIndex(where: { $0.id == itemID }) else { return }
+        let trimmed = note?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalized = (trimmed?.isEmpty ?? true) ? nil : trimmed
+        let item = items[index]
+        let updated = ClipboardItemDTO(
+            id: item.id,
+            type: item.type,
+            contentHash: item.contentHash,
+            plainText: item.plainText,
+            note: normalized,
+            appBundleID: item.appBundleID,
+            createdAt: item.createdAt,
+            lastUsedAt: item.lastUsedAt,
+            isPinned: item.isPinned,
+            sizeBytes: item.sizeBytes,
+            fileSizeBytes: item.fileSizeBytes,
+            thumbnailPath: item.thumbnailPath,
+            storageRef: item.storageRef
+        )
+        items[index] = updated
+        await yieldEvent(.itemContentUpdated(updated))
     }
 
     func delete(itemID: UUID) async throws {
@@ -425,11 +460,13 @@ final class MockClipboardService: ClipboardServiceProtocol {
             type: item.type,
             contentHash: UUID().uuidString,
             plainText: item.plainText,
+            note: item.note,
             appBundleID: item.appBundleID,
             createdAt: item.createdAt,
             lastUsedAt: item.lastUsedAt,
             isPinned: item.isPinned,
             sizeBytes: optimized,
+            fileSizeBytes: item.fileSizeBytes,
             thumbnailPath: item.thumbnailPath,
             storageRef: item.storageRef
         )
@@ -456,11 +493,13 @@ final class MockClipboardService: ClipboardServiceProtocol {
             type: .text,
             contentHash: UUID().uuidString,
             plainText: text,
+            note: nil,
             appBundleID: "com.apple.dt.Xcode",
             createdAt: Date(),
             lastUsedAt: Date(),
             isPinned: false,
             sizeBytes: text.utf8.count,
+            fileSizeBytes: nil,
             thumbnailPath: nil,
             storageRef: nil
         )

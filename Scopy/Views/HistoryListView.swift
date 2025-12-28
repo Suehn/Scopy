@@ -7,6 +7,7 @@ import ScopyUISupport
 enum HoverPreviewPopoverKind: Equatable {
     case image
     case text
+    case file
 }
 
 /// The currently active hover preview popover (at most one at a time).
@@ -270,6 +271,7 @@ struct HistoryListView: View {
         let isSelected = historyViewModel.selectedID == item.id
         let isImagePreviewPresented = activePopover?.itemID == item.id && activePopover?.kind == .image
         let isTextPreviewPresented = activePopover?.itemID == item.id && activePopover?.kind == .text
+        let isFilePreviewPresented = activePopover?.itemID == item.id && activePopover?.kind == .file
         let row = HistoryItemView(
             item: item,
             isKeyboardSelected: isSelected,
@@ -282,11 +284,15 @@ struct HistoryListView: View {
             },
             onTogglePin: { Task { await historyViewModel.togglePin(item) } },
             onDelete: { Task { await historyViewModel.delete(item) } },
+            onUpdateNote: { note in
+                Task { await historyViewModel.updateNote(item, note: note) }
+            },
             onOptimizeImage: { await historyViewModel.optimizeImage(item) },
             getImageData: { try? await historyViewModel.getImageData(itemID: item.id) },
             markdownWebViewController: sharedMarkdownPreviewController,
             isImagePreviewPresented: isImagePreviewPresented,
             isTextPreviewPresented: isTextPreviewPresented,
+            isFilePreviewPresented: isFilePreviewPresented,
             requestPopover: { kind in
                 guard let kind else {
                     dismissPopoverIfActive(itemID: item.id)

@@ -29,6 +29,9 @@ public protocol ClipboardServiceProtocol: AnyObject {
     func pin(itemID: UUID) async throws
     func unpin(itemID: UUID) async throws
 
+    /// 更新备注（用于文件条目）
+    func updateNote(itemID: UUID, note: String?) async throws
+
     /// 删除项目
     func delete(itemID: UUID) async throws
 

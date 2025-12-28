@@ -49,7 +49,12 @@ public actor SearchEngineImpl {
             self.id = item.id
             self.type = item.type
             self.contentHash = item.contentHash
-            let lower = item.plainText.lowercased()
+            var combined = item.plainText
+            if let note = item.note, !note.isEmpty {
+                combined.append("\n")
+                combined.append(note)
+            }
+            let lower = combined.lowercased()
             self.plainTextLower = lower
             self.plainTextLowerIsASCII = lower.canBeConverted(to: .ascii)
             self.appBundleID = item.appBundleID
@@ -211,7 +216,18 @@ public actor SearchEngineImpl {
         resetQueryCaches()
 
         guard var index = fullIndex, !fullIndexStale else { return }
-        upsertItemIntoIndex(item, index: &index)
+        if let slot = index.idToSlot[item.id],
+           slot < index.items.count,
+           let existing = index.items[slot] {
+            let updated = IndexedItem(from: item)
+            if existing.plainTextLower != updated.plainTextLower {
+                fullIndexStale = true
+            } else {
+                index.items[slot] = updated
+            }
+        } else {
+            upsertItemIntoIndex(item, index: &index)
+        }
         fullIndex = index
         markIndexChanged()
     }
@@ -1218,8 +1234,8 @@ public actor SearchEngineImpl {
 
     private func fetchRecentSummaries(limit: Int, offset: Int) throws -> [ClipboardStoredItem] {
         let sql = """
-            SELECT id, type, content_hash, plain_text, app_bundle_id, created_at, last_used_at,
-                   use_count, is_pinned, size_bytes, storage_ref
+            SELECT id, type, content_hash, plain_text, note, app_bundle_id, created_at, last_used_at,
+                   use_count, is_pinned, size_bytes, storage_ref, file_size_bytes
             FROM clipboard_items
             ORDER BY is_pinned DESC, last_used_at DESC
             LIMIT ? OFFSET ?
@@ -1242,8 +1258,8 @@ public actor SearchEngineImpl {
 
     private func fetchAllSummaries() throws -> [ClipboardStoredItem] {
         let sql = """
-            SELECT id, type, content_hash, plain_text, app_bundle_id, created_at, last_used_at,
-                   use_count, is_pinned, size_bytes, storage_ref
+            SELECT id, type, content_hash, plain_text, note, app_bundle_id, created_at, last_used_at,
+                   use_count, is_pinned, size_bytes, storage_ref, file_size_bytes
             FROM clipboard_items
         """
         let stmt = try prepare(sql)
@@ -1264,8 +1280,8 @@ public actor SearchEngineImpl {
 
         let placeholders = ids.map { _ in "?" }.joined(separator: ",")
         let sql = """
-            SELECT id, type, content_hash, plain_text, app_bundle_id, created_at, last_used_at,
-                   use_count, is_pinned, size_bytes, storage_ref
+            SELECT id, type, content_hash, plain_text, note, app_bundle_id, created_at, last_used_at,
+                   use_count, is_pinned, size_bytes, storage_ref, file_size_bytes
             FROM clipboard_items
             WHERE id IN (\(placeholders))
         """
@@ -1306,8 +1322,8 @@ public actor SearchEngineImpl {
         offset: Int
     ) throws -> (items: [ClipboardStoredItem], total: Int, hasMore: Bool) {
         var sql = """
-            SELECT id, type, content_hash, plain_text, app_bundle_id, created_at, last_used_at,
-                   use_count, is_pinned, size_bytes, storage_ref
+            SELECT id, type, content_hash, plain_text, note, app_bundle_id, created_at, last_used_at,
+                   use_count, is_pinned, size_bytes, storage_ref, file_size_bytes
             FROM clipboard_items
             WHERE 1 = 1
         """
@@ -1377,8 +1393,8 @@ public actor SearchEngineImpl {
             """
         case .recent:
             sql = """
-                SELECT id, type, content_hash, plain_text, app_bundle_id, created_at, last_used_at,
-                       use_count, is_pinned, size_bytes, storage_ref
+                SELECT id, type, content_hash, plain_text, note, app_bundle_id, created_at, last_used_at,
+                       use_count, is_pinned, size_bytes, storage_ref, file_size_bytes
                 FROM clipboard_items INDEXED BY idx_pinned
                 WHERE rowid IN (
                     SELECT rowid
@@ -1474,25 +1490,29 @@ public actor SearchEngineImpl {
         }
 
         let plainText = stmt.columnText(3) ?? ""
-        let appBundleID = stmt.columnText(4)
-        let createdAt = Date(timeIntervalSince1970: stmt.columnDouble(5))
-        let lastUsedAt = Date(timeIntervalSince1970: stmt.columnDouble(6))
-        let useCount = stmt.columnInt(7)
-        let isPinned = stmt.columnInt(8) != 0
-        let sizeBytes = stmt.columnInt(9)
-        let storageRef = stmt.columnText(10)
+        let note = stmt.columnText(4)
+        let appBundleID = stmt.columnText(5)
+        let createdAt = Date(timeIntervalSince1970: stmt.columnDouble(6))
+        let lastUsedAt = Date(timeIntervalSince1970: stmt.columnDouble(7))
+        let useCount = stmt.columnInt(8)
+        let isPinned = stmt.columnInt(9) != 0
+        let sizeBytes = stmt.columnInt(10)
+        let storageRef = stmt.columnText(11)
+        let fileSizeBytes = stmt.columnIntOptional(12)
 
         return ClipboardStoredItem(
             id: id,
             type: type,
             contentHash: contentHash,
             plainText: plainText,
+            note: note,
             appBundleID: appBundleID,
             createdAt: createdAt,
             lastUsedAt: lastUsedAt,
             useCount: useCount,
             isPinned: isPinned,
             sizeBytes: sizeBytes,
+            fileSizeBytes: fileSizeBytes,
             storageRef: storageRef,
             rawData: nil
         )

@@ -218,6 +218,21 @@ actor ClipboardService {
         await yieldEvent(.itemUnpinned(itemID))
     }
 
+    func updateNote(itemID: UUID, note: String?) async throws {
+        let storage = try requireStorage()
+        let search = try requireSearch()
+
+        guard let existing = try await storage.findByID(itemID) else { return }
+        let trimmed = note?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalized = (trimmed?.isEmpty ?? true) ? nil : trimmed
+        guard existing.note != normalized else { return }
+
+        guard let updated = try await storage.updateNote(id: itemID, note: normalized) else { return }
+        await search.handleUpsertedItem(updated)
+        let dto = await toDTO(updated, storage: storage, thumbnailGenerationPriority: .userInitiated)
+        await yieldEvent(.itemContentUpdated(dto))
+    }
+
     func delete(itemID: UUID) async throws {
         let storage = try requireStorage()
         let search = try requireSearch()
@@ -536,12 +551,14 @@ actor ClipboardService {
                     type: item.type,
                     contentHash: newHash,
                     plainText: item.plainText,
+                    note: item.note,
                     appBundleID: item.appBundleID,
                     createdAt: item.createdAt,
                     lastUsedAt: item.lastUsedAt,
                     useCount: item.useCount,
                     isPinned: item.isPinned,
                     sizeBytes: optimizedBytes,
+                    fileSizeBytes: item.fileSizeBytes,
                     storageRef: storageRef,
                     rawData: nil
                 )
@@ -597,12 +614,14 @@ actor ClipboardService {
                     type: item.type,
                     contentHash: newHash,
                     plainText: item.plainText,
+                    note: item.note,
                     appBundleID: item.appBundleID,
                     createdAt: item.createdAt,
                     lastUsedAt: item.lastUsedAt,
                     useCount: item.useCount,
                     isPinned: item.isPinned,
                     sizeBytes: optimizedBytes,
+                    fileSizeBytes: item.fileSizeBytes,
                     storageRef: nil,
                     rawData: compressed
                 )
@@ -719,9 +738,11 @@ actor ClipboardService {
                 type: content.type,
                 plainText: content.plainText,
                 payload: .data(compressed),
+                note: content.note,
                 appBundleID: content.appBundleID,
                 contentHash: hash,
-                sizeBytes: compressed.count
+                sizeBytes: compressed.count,
+                fileSizeBytes: content.fileSizeBytes
             )
         case .file(let url):
             let replaced = await Task.detached(priority: .utility) {
@@ -746,9 +767,11 @@ actor ClipboardService {
                 type: content.type,
                 plainText: content.plainText,
                 payload: .file(url),
+                note: content.note,
                 appBundleID: content.appBundleID,
                 contentHash: updatedHash,
-                sizeBytes: updatedSize
+                sizeBytes: updatedSize,
+                fileSizeBytes: content.fileSizeBytes
             )
         case .none:
             return content
@@ -798,15 +821,37 @@ actor ClipboardService {
         thumbnailGenerationPriority: TaskPriority = .utility
     ) async -> ClipboardItemDTO {
         var thumbnailPath: String? = nil
-        if item.type == .image && settings.showImageThumbnails {
-            thumbnailPath = await storage.getThumbnailPath(for: item.contentHash)
-            if thumbnailPath == nil {
-                await scheduleThumbnailGeneration(
-                    for: item,
-                    storage: storage,
-                    priority: thumbnailGenerationPriority
-                )
+        var fileSizeBytes: Int? = item.fileSizeBytes
+        if settings.showImageThumbnails {
+            switch item.type {
+            case .image:
+                thumbnailPath = await storage.getThumbnailPath(for: item.contentHash)
+                if thumbnailPath == nil {
+                    await scheduleThumbnailGeneration(
+                        for: item,
+                        storage: storage,
+                        priority: thumbnailGenerationPriority
+                    )
+                }
+            case .file:
+                if let info = FilePreviewSupport.previewInfo(from: item.plainText, requireExists: false),
+                   FilePreviewSupport.shouldGenerateThumbnail(for: info.url) {
+                    thumbnailPath = await storage.getFileThumbnailPath(for: item.contentHash)
+                    if thumbnailPath == nil {
+                        await scheduleThumbnailGeneration(
+                            for: item,
+                            storage: storage,
+                            priority: thumbnailGenerationPriority
+                        )
+                    }
+                }
+            default:
+                break
             }
+        }
+
+        if item.type == .file, fileSizeBytes == nil {
+            fileSizeBytes = FilePreviewSupport.totalFileSizeBytes(from: item.plainText)
         }
 
         return ClipboardItemDTO(
@@ -814,11 +859,13 @@ actor ClipboardService {
             type: item.type,
             contentHash: item.contentHash,
             plainText: item.plainText,
+            note: item.note,
             appBundleID: item.appBundleID,
             createdAt: item.createdAt,
             lastUsedAt: item.lastUsedAt,
             isPinned: item.isPinned,
             sizeBytes: item.sizeBytes,
+            fileSizeBytes: fileSizeBytes,
             thumbnailPath: thumbnailPath,
             storageRef: item.storageRef
         )
@@ -831,7 +878,9 @@ actor ClipboardService {
     ) async {
         let itemID = item.id
         let contentHash = item.contentHash
+        let itemType = item.type
         let maxHeight = settings.thumbnailHeight
+        let quickLookScale = await MainActor.run { NSScreen.main?.backingScaleFactor ?? 2.0 }
 
         let externalStorageRoot = storage.externalStorageDirectoryPath
         let thumbnailCacheRoot = storage.thumbnailCacheDirectoryPath
@@ -845,36 +894,73 @@ actor ClipboardService {
             fallbackImageData = nil
         }
 
-        Task.detached(priority: priority) { [weak self, itemID, contentHash, maxHeight, storagePath, rawData, fallbackImageData, externalStorageRoot, thumbnailCacheRoot] in
+        Task.detached(priority: priority) { [weak self, itemID, contentHash, itemType, maxHeight, quickLookScale, storagePath, rawData, fallbackImageData, externalStorageRoot, thumbnailCacheRoot] in
             guard let self else { return }
 
-            let shouldGenerate = await ThumbnailGenerationTracker.shared.tryMarkInProgress(contentHash)
+            let trackerKey: String
+            if itemType == .file {
+                trackerKey = "file_\(contentHash)"
+            } else {
+                trackerKey = contentHash
+            }
+
+            let shouldGenerate = await ThumbnailGenerationTracker.shared.tryMarkInProgress(trackerKey)
             guard shouldGenerate else { return }
 
             defer {
                 Task {
-                    await ThumbnailGenerationTracker.shared.markCompleted(contentHash)
+                    await ThumbnailGenerationTracker.shared.markCompleted(trackerKey)
                 }
             }
 
             let pngData: Data?
-            if let storagePath, !storagePath.isEmpty {
-                guard StorageService.validateStorageRef(storagePath, externalStoragePath: externalStorageRoot) else {
-                    ScopyLog.app.warning("Thumbnail skipped: invalid storageRef (possible traversal)")
-                    return
+            switch itemType {
+            case .image:
+                if let storagePath, !storagePath.isEmpty {
+                    guard StorageService.validateStorageRef(storagePath, externalStoragePath: externalStorageRoot) else {
+                        ScopyLog.app.warning("Thumbnail skipped: invalid storageRef (possible traversal)")
+                        return
+                    }
+                    pngData = StorageService.makeThumbnailPNG(fromFileAtPath: storagePath, maxHeight: maxHeight)
+                } else if let rawData {
+                    pngData = StorageService.makeThumbnailPNG(from: rawData, maxHeight: maxHeight)
+                } else if let fallbackImageData {
+                    pngData = StorageService.makeThumbnailPNG(from: fallbackImageData, maxHeight: maxHeight)
+                } else {
+                    pngData = nil
                 }
-                pngData = StorageService.makeThumbnailPNG(fromFileAtPath: storagePath, maxHeight: maxHeight)
-            } else if let rawData {
-                pngData = StorageService.makeThumbnailPNG(from: rawData, maxHeight: maxHeight)
-            } else if let fallbackImageData {
-                pngData = StorageService.makeThumbnailPNG(from: fallbackImageData, maxHeight: maxHeight)
-            } else {
+            case .file:
+                guard let info = FilePreviewSupport.previewInfo(from: item.plainText, requireExists: true),
+                      FilePreviewSupport.shouldGenerateThumbnail(for: info.url) else {
+                    pngData = nil
+                    break
+                }
+                switch info.kind {
+                case .image:
+                    pngData = StorageService.makeThumbnailPNG(fromFileAtPath: info.url.path, maxHeight: maxHeight)
+                case .video:
+                    pngData = FilePreviewSupport.makeVideoThumbnailPNG(from: info.url, maxHeight: maxHeight)
+                case .other:
+                    let maxSidePixels = max(1, Int(CGFloat(maxHeight) * quickLookScale))
+                    pngData = await FilePreviewSupport.makeQuickLookThumbnailPNG(
+                        from: info.url,
+                        maxSidePixels: maxSidePixels,
+                        scale: quickLookScale
+                    )
+                }
+            default:
                 pngData = nil
             }
 
             guard let pngData else { return }
 
-            let thumbnailPath = (thumbnailCacheRoot as NSString).appendingPathComponent("\(contentHash).png")
+            let filename: String
+            if itemType == .file {
+                filename = StorageService.fileThumbnailFilename(for: contentHash)
+            } else {
+                filename = "\(contentHash).png"
+            }
+            let thumbnailPath = (thumbnailCacheRoot as NSString).appendingPathComponent(filename)
             if !FileManager.default.fileExists(atPath: thumbnailCacheRoot) {
                 try? FileManager.default.createDirectory(
                     atPath: thumbnailCacheRoot,

@@ -7,11 +7,13 @@ public struct ClipboardItemDTO: Identifiable, Sendable, Hashable {
     public let type: ClipboardItemType
     public let contentHash: String
     public let plainText: String
+    public let note: String?
     public let appBundleID: String?
     public let createdAt: Date
     public let lastUsedAt: Date
     public let isPinned: Bool
     public let sizeBytes: Int
+    public let fileSizeBytes: Int?
     public let thumbnailPath: String?  // 缩略图路径 (v0.8)
     public let storageRef: String?     // 外部存储路径 (v0.8 - 用于原图预览)
 
@@ -20,11 +22,13 @@ public struct ClipboardItemDTO: Identifiable, Sendable, Hashable {
         type: ClipboardItemType,
         contentHash: String,
         plainText: String,
+        note: String?,
         appBundleID: String?,
         createdAt: Date,
         lastUsedAt: Date,
         isPinned: Bool,
         sizeBytes: Int,
+        fileSizeBytes: Int?,
         thumbnailPath: String?,
         storageRef: String?
     ) {
@@ -32,11 +36,13 @@ public struct ClipboardItemDTO: Identifiable, Sendable, Hashable {
         self.type = type
         self.contentHash = contentHash
         self.plainText = plainText
+        self.note = note
         self.appBundleID = appBundleID
         self.createdAt = createdAt
         self.lastUsedAt = lastUsedAt
         self.isPinned = isPinned
         self.sizeBytes = sizeBytes
+        self.fileSizeBytes = fileSizeBytes
         self.thumbnailPath = thumbnailPath
         self.storageRef = storageRef
     }
@@ -49,11 +55,13 @@ public struct ClipboardItemDTO: Identifiable, Sendable, Hashable {
             type: type,
             contentHash: contentHash,
             plainText: plainText,
+            note: note,
             appBundleID: appBundleID,
             createdAt: createdAt,
             lastUsedAt: lastUsedAt,
             isPinned: pinned,
             sizeBytes: sizeBytes,
+            fileSizeBytes: fileSizeBytes,
             thumbnailPath: thumbnailPath,
             storageRef: storageRef
         )

@@ -6,6 +6,17 @@ struct HistoryItemTextPreviewView: View {
     @Environment(SettingsViewModel.self) private var settingsViewModel
     @ObservedObject var model: HoverPreviewModel
     let markdownWebViewController: MarkdownPreviewWebViewController?
+    let showMarkdownPlaceholder: Bool
+
+    init(
+        model: HoverPreviewModel,
+        markdownWebViewController: MarkdownPreviewWebViewController?,
+        showMarkdownPlaceholder: Bool = false
+    ) {
+        self._model = ObservedObject(wrappedValue: model)
+        self.markdownWebViewController = markdownWebViewController
+        self.showMarkdownPlaceholder = showMarkdownPlaceholder
+    }
 
     // Export success feedback reset task
     @State private var exportSuccessResetTask: Task<Void, Never>?
@@ -59,7 +70,10 @@ struct HistoryItemTextPreviewView: View {
                 let clampedHeight = min(maxHeight, max(1, contentHeight))
                 let shouldScroll = contentHeight > maxHeight
 
-                if model.isMarkdown, let html = model.markdownHTML {
+                if model.isMarkdown, model.markdownHTML == nil, showMarkdownPlaceholder {
+                    ProgressView()
+                        .frame(width: width, height: clampedHeight)
+                } else if model.isMarkdown, let html = model.markdownHTML {
                     ZStack(alignment: .topTrailing) {
                         if let controller = markdownWebViewController {
                             ReusableMarkdownPreviewWebView(

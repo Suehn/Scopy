@@ -281,10 +281,12 @@ public final class StorageService {
                 type: content.type,
                 contentHash: content.contentHash,
                 plainText: content.plainText,
+                note: content.note,
                 appBundleID: content.appBundleID,
                 createdAt: now,
                 lastUsedAt: now,
                 sizeBytes: content.sizeBytes,
+                fileSizeBytes: content.fileSizeBytes,
                 storageRef: storageRef,
                 rawData: inlineData
             )
@@ -305,12 +307,14 @@ public final class StorageService {
                 type: content.type,
                 contentHash: content.contentHash,
                 plainText: content.plainText,
+                note: content.note,
                 appBundleID: content.appBundleID,
                 createdAt: now,
                 lastUsedAt: now,
                 useCount: 1,
                 isPinned: false,
                 sizeBytes: content.sizeBytes,
+                fileSizeBytes: content.fileSizeBytes,
                 storageRef: storageRef,
                 rawData: inlineData
             )
@@ -337,6 +341,27 @@ public final class StorageService {
             lastUsedAt: item.lastUsedAt,
             useCount: item.useCount,
             isPinned: item.isPinned
+        )
+    }
+
+    func updateNote(id: UUID, note: String?) async throws -> StoredItem? {
+        guard let existing = try await repository.fetchItemByID(id) else { return nil }
+        try await repository.updateItemNote(id: id, note: note)
+        return StoredItem(
+            id: existing.id,
+            type: existing.type,
+            contentHash: existing.contentHash,
+            plainText: existing.plainText,
+            note: note,
+            appBundleID: existing.appBundleID,
+            createdAt: existing.createdAt,
+            lastUsedAt: existing.lastUsedAt,
+            useCount: existing.useCount,
+            isPinned: existing.isPinned,
+            sizeBytes: existing.sizeBytes,
+            fileSizeBytes: existing.fileSizeBytes,
+            storageRef: existing.storageRef,
+            rawData: existing.rawData
         )
     }
 
@@ -1044,6 +1069,20 @@ public final class StorageService {
             return path
         }
         return nil
+    }
+
+    /// 获取文件缩略图路径（如果存在）
+    func getFileThumbnailPath(for contentHash: String) -> String? {
+        let filename = Self.fileThumbnailFilename(for: contentHash)
+        let path = (thumbnailCachePath as NSString).appendingPathComponent(filename)
+        if FileManager.default.fileExists(atPath: path) {
+            return path
+        }
+        return nil
+    }
+
+    nonisolated static func fileThumbnailFilename(for contentHash: String) -> String {
+        "file_\(contentHash).png"
     }
 
     /// 保存缩略图

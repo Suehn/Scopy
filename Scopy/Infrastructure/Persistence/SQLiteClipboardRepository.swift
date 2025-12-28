@@ -75,7 +75,12 @@ actor SQLiteClipboardRepository {
     }
 
     func fetchItemByHash(_ hash: String) throws -> ClipboardStoredItem? {
-        let sql = "SELECT * FROM clipboard_items WHERE content_hash = ? LIMIT 1"
+        let sql = """
+            SELECT id, type, content_hash, plain_text, note, app_bundle_id, created_at, last_used_at,
+                   use_count, is_pinned, size_bytes, storage_ref, raw_data, file_size_bytes
+            FROM clipboard_items
+            WHERE content_hash = ? LIMIT 1
+        """
         let stmt = try prepare(sql)
         try stmt.bindText(hash, at: 1)
         if try stmt.step() {
@@ -85,7 +90,12 @@ actor SQLiteClipboardRepository {
     }
 
     func fetchItemByID(_ id: UUID) throws -> ClipboardStoredItem? {
-        let sql = "SELECT * FROM clipboard_items WHERE id = ? LIMIT 1"
+        let sql = """
+            SELECT id, type, content_hash, plain_text, note, app_bundle_id, created_at, last_used_at,
+                   use_count, is_pinned, size_bytes, storage_ref, raw_data, file_size_bytes
+            FROM clipboard_items
+            WHERE id = ? LIMIT 1
+        """
         let stmt = try prepare(sql)
         try stmt.bindText(id.uuidString, at: 1)
         if try stmt.step() {
@@ -99,17 +109,19 @@ actor SQLiteClipboardRepository {
         type: ClipboardItemType,
         contentHash: String,
         plainText: String,
+        note: String?,
         appBundleID: String?,
         createdAt: Date,
         lastUsedAt: Date,
         sizeBytes: Int,
+        fileSizeBytes: Int?,
         storageRef: String?,
         rawData: Data?
     ) throws {
         let sql = """
             INSERT INTO clipboard_items
-            (id, type, content_hash, plain_text, app_bundle_id, created_at, last_used_at, use_count, is_pinned, size_bytes, storage_ref, raw_data)
-            VALUES (?, ?, ?, ?, ?, ?, ?, 1, 0, ?, ?, ?)
+            (id, type, content_hash, plain_text, note, app_bundle_id, created_at, last_used_at, use_count, is_pinned, size_bytes, storage_ref, raw_data, file_size_bytes)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?, ?, ?, ?)
         """
         let stmt = try prepare(sql)
 
@@ -117,12 +129,18 @@ actor SQLiteClipboardRepository {
         try stmt.bindText(type.rawValue, at: 2)
         try stmt.bindText(contentHash, at: 3)
         try stmt.bindText(plainText, at: 4)
-        try stmt.bindText(appBundleID, at: 5)
-        try stmt.bindDouble(createdAt.timeIntervalSince1970, at: 6)
-        try stmt.bindDouble(lastUsedAt.timeIntervalSince1970, at: 7)
-        try stmt.bindInt(sizeBytes, at: 8)
-        try stmt.bindText(storageRef, at: 9)
-        try stmt.bindBlob(rawData, at: 10)
+        try stmt.bindText(note, at: 5)
+        try stmt.bindText(appBundleID, at: 6)
+        try stmt.bindDouble(createdAt.timeIntervalSince1970, at: 7)
+        try stmt.bindDouble(lastUsedAt.timeIntervalSince1970, at: 8)
+        try stmt.bindInt(sizeBytes, at: 9)
+        try stmt.bindText(storageRef, at: 10)
+        try stmt.bindBlob(rawData, at: 11)
+        if let fileSizeBytes {
+            try stmt.bindInt(fileSizeBytes, at: 12)
+        } else {
+            try stmt.bindNull(12)
+        }
 
         _ = try stmt.step()
     }
@@ -180,6 +198,14 @@ actor SQLiteClipboardRepository {
         try stmt.bindText(storageRef, at: 3)
         try stmt.bindBlob(rawData, at: 4)
         try stmt.bindText(id.uuidString, at: 5)
+        _ = try stmt.step()
+    }
+
+    func updateItemNote(id: UUID, note: String?) throws {
+        let sql = "UPDATE clipboard_items SET note = ? WHERE id = ?"
+        let stmt = try prepare(sql)
+        try stmt.bindText(note, at: 1)
+        try stmt.bindText(id.uuidString, at: 2)
         _ = try stmt.step()
     }
 
@@ -243,7 +269,9 @@ actor SQLiteClipboardRepository {
 
     func fetchRecent(limit: Int, offset: Int) throws -> [ClipboardStoredItem] {
         let sql = """
-            SELECT * FROM clipboard_items
+            SELECT id, type, content_hash, plain_text, note, app_bundle_id, created_at, last_used_at,
+                   use_count, is_pinned, size_bytes, storage_ref, raw_data, file_size_bytes
+            FROM clipboard_items
             ORDER BY is_pinned DESC, last_used_at DESC
             LIMIT ? OFFSET ?
         """
@@ -261,8 +289,8 @@ actor SQLiteClipboardRepository {
 
     func fetchRecentSummaries(limit: Int, offset: Int) throws -> [ClipboardStoredItem] {
         let sql = """
-            SELECT id, type, content_hash, plain_text, app_bundle_id, created_at, last_used_at,
-                   use_count, is_pinned, size_bytes, storage_ref
+            SELECT id, type, content_hash, plain_text, note, app_bundle_id, created_at, last_used_at,
+                   use_count, is_pinned, size_bytes, storage_ref, file_size_bytes
             FROM clipboard_items
             ORDER BY is_pinned DESC, last_used_at DESC
             LIMIT ? OFFSET ?
@@ -281,8 +309,8 @@ actor SQLiteClipboardRepository {
 
     func fetchAllSummaries() throws -> [ClipboardStoredItem] {
         let sql = """
-            SELECT id, type, content_hash, plain_text, app_bundle_id, created_at, last_used_at,
-                   use_count, is_pinned, size_bytes, storage_ref
+            SELECT id, type, content_hash, plain_text, note, app_bundle_id, created_at, last_used_at,
+                   use_count, is_pinned, size_bytes, storage_ref, file_size_bytes
             FROM clipboard_items
         """
         let stmt = try prepare(sql)
@@ -298,7 +326,12 @@ actor SQLiteClipboardRepository {
         guard !ids.isEmpty else { return [] }
 
         let placeholders = ids.map { _ in "?" }.joined(separator: ",")
-        let sql = "SELECT * FROM clipboard_items WHERE id IN (\(placeholders))"
+        let sql = """
+            SELECT id, type, content_hash, plain_text, note, app_bundle_id, created_at, last_used_at,
+                   use_count, is_pinned, size_bytes, storage_ref, raw_data, file_size_bytes
+            FROM clipboard_items
+            WHERE id IN (\(placeholders))
+        """
         let stmt = try prepare(sql)
 
         for (index, id) in ids.enumerated() {
@@ -383,8 +416,8 @@ actor SQLiteClipboardRepository {
         offset: Int
     ) throws -> (items: [ClipboardStoredItem], total: Int, hasMore: Bool) {
         var sql = """
-            SELECT id, type, content_hash, plain_text, app_bundle_id, created_at, last_used_at,
-                   use_count, is_pinned, size_bytes, storage_ref
+            SELECT id, type, content_hash, plain_text, note, app_bundle_id, created_at, last_used_at,
+                   use_count, is_pinned, size_bytes, storage_ref, file_size_bytes
             FROM clipboard_items
             WHERE 1 = 1
         """
@@ -469,8 +502,8 @@ actor SQLiteClipboardRepository {
         // Step 2: fetch from main table (apply filters)
         let placeholders = rowids.map { _ in "?" }.joined(separator: ",")
         var mainSQL = """
-            SELECT id, type, content_hash, plain_text, app_bundle_id, created_at, last_used_at,
-                   use_count, is_pinned, size_bytes, storage_ref
+            SELECT id, type, content_hash, plain_text, note, app_bundle_id, created_at, last_used_at,
+                   use_count, is_pinned, size_bytes, storage_ref, file_size_bytes
             FROM clipboard_items
             WHERE rowid IN (\(placeholders))
         """
@@ -823,26 +856,30 @@ actor SQLiteClipboardRepository {
         }
 
         let plainText = stmt.columnText(3) ?? ""
-        let appBundleID = stmt.columnText(4)
-        let createdAt = Date(timeIntervalSince1970: stmt.columnDouble(5))
-        let lastUsedAt = Date(timeIntervalSince1970: stmt.columnDouble(6))
-        let useCount = stmt.columnInt(7)
-        let isPinned = stmt.columnInt(8) != 0
-        let sizeBytes = stmt.columnInt(9)
-        let storageRef = stmt.columnText(10)
-        let rawData = stmt.columnBlobData(11)
+        let note = stmt.columnText(4)
+        let appBundleID = stmt.columnText(5)
+        let createdAt = Date(timeIntervalSince1970: stmt.columnDouble(6))
+        let lastUsedAt = Date(timeIntervalSince1970: stmt.columnDouble(7))
+        let useCount = stmt.columnInt(8)
+        let isPinned = stmt.columnInt(9) != 0
+        let sizeBytes = stmt.columnInt(10)
+        let storageRef = stmt.columnText(11)
+        let rawData = stmt.columnBlobData(12)
+        let fileSizeBytes = stmt.columnIntOptional(13)
 
         return ClipboardStoredItem(
             id: id,
             type: type,
             contentHash: contentHash,
             plainText: plainText,
+            note: note,
             appBundleID: appBundleID,
             createdAt: createdAt,
             lastUsedAt: lastUsedAt,
             useCount: useCount,
             isPinned: isPinned,
             sizeBytes: sizeBytes,
+            fileSizeBytes: fileSizeBytes,
             storageRef: storageRef,
             rawData: rawData
         )
@@ -858,25 +895,29 @@ actor SQLiteClipboardRepository {
         }
 
         let plainText = stmt.columnText(3) ?? ""
-        let appBundleID = stmt.columnText(4)
-        let createdAt = Date(timeIntervalSince1970: stmt.columnDouble(5))
-        let lastUsedAt = Date(timeIntervalSince1970: stmt.columnDouble(6))
-        let useCount = stmt.columnInt(7)
-        let isPinned = stmt.columnInt(8) != 0
-        let sizeBytes = stmt.columnInt(9)
-        let storageRef = stmt.columnText(10)
+        let note = stmt.columnText(4)
+        let appBundleID = stmt.columnText(5)
+        let createdAt = Date(timeIntervalSince1970: stmt.columnDouble(6))
+        let lastUsedAt = Date(timeIntervalSince1970: stmt.columnDouble(7))
+        let useCount = stmt.columnInt(8)
+        let isPinned = stmt.columnInt(9) != 0
+        let sizeBytes = stmt.columnInt(10)
+        let storageRef = stmt.columnText(11)
+        let fileSizeBytes = stmt.columnIntOptional(12)
 
         return ClipboardStoredItem(
             id: id,
             type: type,
             contentHash: contentHash,
             plainText: plainText,
+            note: note,
             appBundleID: appBundleID,
             createdAt: createdAt,
             lastUsedAt: lastUsedAt,
             useCount: useCount,
             isPinned: isPinned,
             sizeBytes: sizeBytes,
+            fileSizeBytes: fileSizeBytes,
             storageRef: storageRef,
             rawData: nil
         )

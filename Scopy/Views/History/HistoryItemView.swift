@@ -24,11 +24,13 @@ struct HistoryItemView: View, Equatable {
     let onHoverSelect: (UUID) -> Void
     let onTogglePin: () -> Void
     let onDelete: () -> Void
+    let onUpdateNote: (String?) -> Void
     let onOptimizeImage: () async -> ImageOptimizationOutcomeDTO
     let getImageData: () async -> Data?
     let markdownWebViewController: MarkdownPreviewWebViewController
     let isImagePreviewPresented: Bool
     let isTextPreviewPresented: Bool
+    let isFilePreviewPresented: Bool
     let requestPopover: (HoverPreviewPopoverKind?) -> Void
     let dismissOtherPopovers: () -> Void
 
@@ -42,6 +44,7 @@ struct HistoryItemView: View, Equatable {
     @State private var isPopoverHovering = false
     @State private var imagePopoverToken = UUID()
     @State private var textPopoverToken = UUID()
+    @State private var filePopoverToken = UUID()
     // v0.15: Text preview state
     @StateObject private var previewModel = HoverPreviewModel()
     @State private var relativeTimeText: String = ""
@@ -51,6 +54,8 @@ struct HistoryItemView: View, Equatable {
     @State private var isOptimizingImage: Bool = false
     @State private var optimizeMessage: String?
     @State private var isHoveringOptimizeButton: Bool = false
+    @State private var isNoteEditorPresented: Bool = false
+    @State private var noteDraft: String = ""
 
     init(
         item: ClipboardItemDTO,
@@ -61,11 +66,13 @@ struct HistoryItemView: View, Equatable {
         onHoverSelect: @escaping (UUID) -> Void,
         onTogglePin: @escaping () -> Void,
         onDelete: @escaping () -> Void,
+        onUpdateNote: @escaping (String?) -> Void,
         onOptimizeImage: @escaping () async -> ImageOptimizationOutcomeDTO,
         getImageData: @escaping () async -> Data?,
         markdownWebViewController: MarkdownPreviewWebViewController,
         isImagePreviewPresented: Bool,
         isTextPreviewPresented: Bool,
+        isFilePreviewPresented: Bool,
         requestPopover: @escaping (HoverPreviewPopoverKind?) -> Void,
         dismissOtherPopovers: @escaping () -> Void
     ) {
@@ -77,11 +84,13 @@ struct HistoryItemView: View, Equatable {
         self.onHoverSelect = onHoverSelect
         self.onTogglePin = onTogglePin
         self.onDelete = onDelete
+        self.onUpdateNote = onUpdateNote
         self.onOptimizeImage = onOptimizeImage
         self.getImageData = getImageData
         self.markdownWebViewController = markdownWebViewController
         self.isImagePreviewPresented = isImagePreviewPresented
         self.isTextPreviewPresented = isTextPreviewPresented
+        self.isFilePreviewPresented = isFilePreviewPresented
         self.requestPopover = requestPopover
         self.dismissOtherPopovers = dismissOtherPopovers
         _relativeTimeText = State(initialValue: Self.makeRelativeTimeString(for: item.lastUsedAt))
@@ -94,10 +103,13 @@ struct HistoryItemView: View, Equatable {
         lhs.item.lastUsedAt == rhs.item.lastUsedAt &&
         lhs.item.isPinned == rhs.item.isPinned &&
         lhs.item.thumbnailPath == rhs.item.thumbnailPath &&
+        lhs.item.note == rhs.item.note &&
+        lhs.item.fileSizeBytes == rhs.item.fileSizeBytes &&
         lhs.isKeyboardSelected == rhs.isKeyboardSelected &&
         lhs.isScrolling == rhs.isScrolling &&
         lhs.isImagePreviewPresented == rhs.isImagePreviewPresented &&
         lhs.isTextPreviewPresented == rhs.isTextPreviewPresented &&
+        lhs.isFilePreviewPresented == rhs.isFilePreviewPresented &&
         lhs.settings.showImageThumbnails == rhs.settings.showImageThumbnails &&
         lhs.settings.thumbnailHeight == rhs.settings.thumbnailHeight
     }
@@ -111,6 +123,102 @@ struct HistoryItemView: View, Equatable {
             return ScopyColors.hover
         } else {
             return Color.clear
+        }
+    }
+
+    private func startMarkdownFilePreviewTask(url: URL, cacheKeyBase: String) {
+        hoverPreviewTask = Task(priority: .userInitiated) { @MainActor in
+            let delayNanos = UInt64(previewDelay * 1_000_000_000)
+            try? await Task.sleep(nanoseconds: delayNanos)
+            guard !Task.isCancelled else { return }
+            guard !isScrolling else { return }
+            guard isHovering else { return }
+
+            let maxBytes = 200_000
+            let previewText: String? = await Task.detached(priority: .utility) {
+                FilePreviewSupport.readTextFile(url: url, maxBytes: maxBytes)
+            }.value
+
+            guard !Task.isCancelled else { return }
+            guard !isScrolling else { return }
+            guard isHovering else { return }
+
+            guard let rawText = previewText else {
+                previewModel.text = nil
+                previewModel.isMarkdown = false
+                previewModel.markdownHTML = nil
+                previewModel.markdownContentSize = nil
+                previewModel.markdownHasHorizontalOverflow = false
+                self.requestPopover(.file)
+                return
+            }
+
+            let preview = rawText.isEmpty ? "(Empty)" : rawText
+            previewModel.text = preview
+            previewModel.isMarkdown = true
+            previewModel.markdownHTML = nil
+            previewModel.markdownContentSize = nil
+            previewModel.markdownHasHorizontalOverflow = false
+            self.requestPopover(.file)
+
+            guard preview.utf16.count <= 200_000 else { return }
+
+            let cacheKey = "file|\(cacheKeyBase)"
+            if let cachedHTML = MarkdownPreviewCache.shared.html(forKey: cacheKey),
+               let cachedMetrics = MarkdownPreviewCache.shared.metrics(forKey: cacheKey)
+            {
+                if self.isHovering, self.previewModel.text == preview {
+                    let maxWidth: CGFloat = HoverPreviewScreenMetrics.maxPopoverWidthPoints()
+                    let font = NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
+                    let padding: CGFloat = ScopySpacing.md
+                    let fallbackWidth = HoverPreviewTextSizing.preferredWidth(
+                        for: preview,
+                        font: font,
+                        padding: padding,
+                        maxWidth: maxWidth
+                    )
+                    let stableWidth: CGFloat = {
+                        let w = cachedMetrics.size.width
+                        guard w.isFinite, w > 0 else { return fallbackWidth }
+                        if w < 40 { return fallbackWidth }
+                        if fallbackWidth.isFinite, fallbackWidth > 0, w < fallbackWidth * 0.5 { return fallbackWidth }
+                        return min(maxWidth, w)
+                    }()
+                    let stableSize = CGSize(width: max(1, stableWidth), height: cachedMetrics.size.height)
+                    let stableMetrics = MarkdownContentMetrics(size: stableSize, hasHorizontalOverflow: cachedMetrics.hasHorizontalOverflow)
+                    self.previewModel.markdownHTML = cachedHTML
+                    self.previewModel.markdownContentSize = stableMetrics.size
+                    self.previewModel.markdownHasHorizontalOverflow = stableMetrics.hasHorizontalOverflow
+                    MarkdownPreviewCache.shared.setMetrics(stableMetrics, forKey: cacheKey)
+                }
+                return
+            }
+            if let cached = MarkdownPreviewCache.shared.html(forKey: cacheKey) {
+                if self.isHovering, self.previewModel.text == preview {
+                    self.previewModel.markdownHTML = cached
+                }
+                return
+            }
+
+            let markdownSource = preview
+            hoverMarkdownTask = Task(priority: .utility) { [markdownSource, cacheKey] in
+                guard !Task.isCancelled else { return }
+                let html: String
+                if ScrollPerformanceProfile.isEnabled {
+                    let start = CFAbsoluteTimeGetCurrent()
+                    html = MarkdownHTMLRenderer.render(markdown: markdownSource)
+                    let elapsed = (CFAbsoluteTimeGetCurrent() - start) * 1000
+                    ScrollPerformanceProfile.recordMetric(name: "hover.markdown_render_ms", elapsedMs: elapsed)
+                } else {
+                    html = MarkdownHTMLRenderer.render(markdown: markdownSource)
+                }
+                guard !Task.isCancelled, !html.isEmpty else { return }
+                MarkdownPreviewCache.shared.setHTML(html, forKey: cacheKey)
+                await MainActor.run { [markdownSource] in
+                    guard self.isHovering, self.previewModel.text == markdownSource else { return }
+                    self.previewModel.markdownHTML = html
+                }
+            }
         }
     }
 
@@ -132,6 +240,29 @@ struct HistoryItemView: View, Equatable {
         settings.showImageThumbnails
     }
 
+    private var filePreviewInfo: FilePreviewInfo? {
+        guard item.type == .file else { return nil }
+        return FilePreviewSupport.previewInfo(from: item.plainText, requireExists: false)
+    }
+
+    private var filePreviewPath: String? {
+        filePreviewInfo?.url.path
+    }
+
+    private var filePreviewKind: FilePreviewKind? {
+        filePreviewInfo?.kind
+    }
+
+    private var filePreviewIsMarkdown: Bool {
+        guard let info = filePreviewInfo else { return false }
+        return FilePreviewSupport.isMarkdownFile(info.url)
+    }
+
+    private var canShowFileThumbnail: Bool {
+        guard showThumbnails, item.type == .file, let info = filePreviewInfo else { return false }
+        return FilePreviewSupport.shouldGenerateThumbnail(for: info.url)
+    }
+
     /// v0.21: 使用预计算的 metadata，避免视图渲染时 O(n) 字符串操作
     private var metadataText: String {
         item.metadata
@@ -151,20 +282,29 @@ struct HistoryItemView: View, Equatable {
                     .lineLimit(1)
             }
         case .file:
-            VStack(alignment: .leading, spacing: ScopySpacing.xxs) {
-                HStack(spacing: ScopySpacing.sm) {
+            HStack(spacing: ScopySpacing.sm) {
+                if canShowFileThumbnail {
+                    HistoryItemFileThumbnailView(
+                        thumbnailPath: item.thumbnailPath,
+                        height: thumbnailHeight,
+                        kind: filePreviewKind ?? .other
+                    )
+                } else {
                     Image(systemName: ScopyIcons.file)
                         .foregroundStyle(Color.accentColor)
+                        .frame(width: thumbnailHeight, height: thumbnailHeight)
+                }
+                VStack(alignment: .leading, spacing: ScopySpacing.xxs) {
                     Text(item.title)
                         .font(ScopyTypography.body)
                         .lineLimit(1)
                         .truncationMode(.tail)
+                    Text(metadataText)
+                        .font(.system(size: 10))  // v0.15.1: 比主内容小2号
+                        .foregroundStyle(ScopyColors.mutedText)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
                 }
-                Text(metadataText)
-                    .font(.system(size: 10))  // v0.15.1: 比主内容小2号
-                    .foregroundStyle(ScopyColors.mutedText)
-                    .lineLimit(1)
-                    .padding(.leading, ScopySpacing.md)  // v0.15.1: 缩进两格
             }
         case .image:
             VStack(alignment: .leading, spacing: ScopySpacing.xxs) {
@@ -211,6 +351,9 @@ struct HistoryItemView: View, Equatable {
     private var rowContent: some View {
         let imageToken = imagePopoverToken
         let textToken = textPopoverToken
+        let fileToken = filePopoverToken
+
+        let needsThumbnailHeight = (item.type == .image && showThumbnails) || canShowFileThumbnail
 
         return HStack(alignment: .center, spacing: ScopySpacing.sm) {
             // Pin 标记：左侧颜色条
@@ -277,7 +420,7 @@ struct HistoryItemView: View, Equatable {
         }
         .padding(.horizontal, ScopySpacing.md)
         .padding(.vertical, ScopySpacing.sm)
-        .frame(minHeight: item.type == .image && showThumbnails ? thumbnailHeight + ScopySpacing.lg : ScopySize.Height.listItem)
+        .frame(minHeight: needsThumbnailHeight ? thumbnailHeight + ScopySpacing.lg : ScopySize.Height.listItem)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background {
             if isKeyboardSelected || isHovering {
@@ -304,6 +447,8 @@ struct HistoryItemView: View, Equatable {
                 isPopoverHovering = true
                 if item.type == .image && showThumbnails {
                     startPreviewTask()
+                } else if item.type == .file {
+                    startFilePreviewTask()
                 } else if item.type == .text || item.type == .rtf || item.type == .html {
                     startTextPreviewTask()
                 }
@@ -426,6 +571,64 @@ struct HistoryItemView: View, Equatable {
                     }
                 }
         }
+        .popover(
+            isPresented: Binding(
+                get: { isFilePreviewPresented },
+                set: { presented in
+                    if presented {
+                        requestPopover(.file)
+                        return
+                    }
+                    // Ignore delayed dismiss callbacks from a previous popover session.
+                    guard fileToken == filePopoverToken else { return }
+                    requestPopover(nil)
+                }
+            ),
+            arrowEdge: .trailing
+        ) {
+            HistoryItemFilePreviewView(
+                model: previewModel,
+                thumbnailPath: item.thumbnailPath,
+                kind: filePreviewKind ?? .other,
+                filePath: filePreviewPath,
+                markdownWebViewController: markdownWebViewController
+            )
+            .background(
+                PopoverWindowCloseObserver {
+                    // `onHover(false)` / `onDisappear` is not guaranteed to run when the system dismisses a popover.
+                    // Observe the underlying popover window close to keep state in sync.
+                    guard fileToken == filePopoverToken else { return }
+                    isPopoverHovering = false
+                    DispatchQueue.main.async {
+                        guard fileToken == filePopoverToken else { return }
+                        if !isHovering {
+                            resetPreviewState(hidePopovers: true)
+                        }
+                    }
+                }
+                .allowsHitTesting(false)
+            )
+            .onHover { hovering in
+                isPopoverHovering = hovering
+                if hovering {
+                    cancelHoverExitTask()
+                } else if !isHovering {
+                    scheduleHoverExitCleanup()
+                }
+            }
+            .onDisappear {
+                // `onHover(false)` is not guaranteed to fire when the popover is dismissed by the system.
+                // Keep local/global state in sync so the same row can be re-presented reliably.
+                guard fileToken == filePopoverToken else { return }
+                isPopoverHovering = false
+                DispatchQueue.main.async {
+                    guard fileToken == filePopoverToken else { return }
+                    if !isHovering {
+                        resetPreviewState(hidePopovers: true)
+                    }
+                }
+            }
+        }
         .contextMenu {
             Button("Copy") {
                 onSelect()
@@ -433,15 +636,34 @@ struct HistoryItemView: View, Equatable {
             Button(item.isPinned ? "Unpin" : "Pin") {
                 onTogglePin()
             }
+            if item.type == .file {
+                Divider()
+                Button(noteMenuTitle) {
+                    presentNoteEditor()
+                }
+                if item.note?.isEmpty == false {
+                    Button("Clear Note") {
+                        onUpdateNote(nil)
+                    }
+                }
+            }
             Divider()
             Button("Delete", role: .destructive) {
                 onDelete()
             }
         }
+        .popover(isPresented: $isNoteEditorPresented, arrowEdge: .leading) {
+            HistoryItemFileNoteEditorView(
+                note: $noteDraft,
+                onSave: { commitNoteDraft() },
+                onCancel: { dismissNoteEditor() }
+            )
+        }
         // v0.17: 增强任务清理 - 确保视图消失时释放所有任务引用
         .onDisappear {
             cancelHoverTasks()
             resetPreviewState(hidePopovers: true)
+            isNoteEditorPresented = false
         }
         .onChange(of: isScrolling) { _, newValue in
             if !newValue {
@@ -454,7 +676,7 @@ struct HistoryItemView: View, Equatable {
             resetPreviewState(hidePopovers: true)
         }
         .background {
-            if isImagePreviewPresented || isTextPreviewPresented {
+            if isImagePreviewPresented || isTextPreviewPresented || isFilePreviewPresented {
                 ScrollWheelDismissMonitor(
                     isActive: true,
                     onScrollWheel: dismissPreviewForScrollWheel
@@ -495,13 +717,17 @@ struct HistoryItemView: View, Equatable {
                 }
             }
 
-            // 图片预览任务
-            if !isHoveringOptimizeButton, item.type == .image && showThumbnails {
-                startPreviewTask()
-            }
-            // v0.15: 文本预览任务
-            else if !isHoveringOptimizeButton, item.type == .text || item.type == .rtf || item.type == .html {
-                startTextPreviewTask()
+            if !isHoveringOptimizeButton && !isNoteEditorPresented {
+                // 图片预览任务
+                if item.type == .image && showThumbnails {
+                    startPreviewTask()
+                } else if item.type == .file {
+                    startFilePreviewTask()
+                }
+                // v0.15: 文本预览任务
+                else if item.type == .text || item.type == .rtf || item.type == .html {
+                    startTextPreviewTask()
+                }
             }
         } else {
             isHoveringOptimizeButton = false
@@ -514,6 +740,7 @@ struct HistoryItemView: View, Equatable {
     @ViewBuilder
     private var markdownPreMeasureView: some View {
         if isHovering,
+           (item.type == .text || item.type == .rtf || item.type == .html),
            previewModel.isMarkdown,
            (!isTextPreviewPresented || markdownWebViewController.webView.superview == nil),
            previewModel.markdownContentSize == nil,
@@ -654,6 +881,101 @@ struct HistoryItemView: View, Equatable {
         }
     }
 
+    private func startFilePreviewTask() {
+        guard let previewInfo = FilePreviewSupport.previewInfo(from: item.plainText, requireExists: true) else { return }
+
+        // 在启动新一轮预览任务时立即刷新 token，避免上一轮 popover 的延迟 dismiss 回调
+        filePopoverToken = UUID()
+
+        // 先取消旧任务，防止多个任务同时运行
+        hoverPreviewTask?.cancel()
+        hoverPreviewTask = nil
+        hoverMarkdownTask?.cancel()
+        hoverMarkdownTask = nil
+
+        let cacheKeyBase = item.contentHash.isEmpty ? item.id.uuidString : item.contentHash
+        let kindToken = previewInfo.kind.rawValue
+        let shouldPrefetchImage = previewInfo.kind == .image
+
+        if filePreviewIsMarkdown {
+            startMarkdownFilePreviewTask(url: previewInfo.url, cacheKeyBase: cacheKeyBase)
+            return
+        }
+
+        hoverPreviewTask = Task(priority: .userInitiated) { @MainActor in
+            let delayNanos = UInt64(previewDelay * 1_000_000_000)
+            let scale = HoverPreviewScreenMetrics.activeBackingScaleFactor()
+            let targetWidthPoints = HoverPreviewScreenMetrics.maxPopoverWidthPoints()
+            let targetWidthPixels = max(1, Int(targetWidthPoints * scale))
+            let targetHeightPoints = HoverPreviewScreenMetrics.maxPopoverHeightPoints()
+            let targetHeightPixels = max(1, Int(targetHeightPoints * scale))
+            let quickLookMaxSidePixels = max(targetWidthPixels, targetHeightPixels)
+            let maxLongSidePixels = HoverPreviewImageQualityPolicy.maxSidePixels
+            let previewCacheKey = "file|\(cacheKeyBase)|\(kindToken)|w\(targetWidthPixels)"
+
+            let prefetchDelayNanos: UInt64 = min(50_000_000, delayNanos)
+            let preparedPreviewImage: Task<CGImage?, Never> = Task(priority: .userInitiated) { @MainActor () -> CGImage? in
+                guard shouldPrefetchImage else { return nil }
+                if prefetchDelayNanos > 0 {
+                    try? await Task.sleep(nanoseconds: prefetchDelayNanos)
+                }
+                guard !Task.isCancelled else { return nil }
+                guard !isScrolling else { return nil }
+                guard isHovering else { return nil }
+
+                if let cached = HoverPreviewImageCache.shared.image(forKey: previewCacheKey) {
+                    previewModel.previewCGImage = cached
+                    return cached
+                }
+
+                let sendable = await Task.detached(priority: .userInitiated) { () async -> SendableCGImage? in
+                    let cgImage: CGImage?
+                    switch previewInfo.kind {
+                    case .image:
+                        cgImage = Self.makePreviewCGImage(
+                            fromFileAtPath: previewInfo.url.path,
+                            targetWidthPixels: targetWidthPixels,
+                            maxLongSidePixels: maxLongSidePixels
+                        )
+                    case .video:
+                        cgImage = FilePreviewSupport.makeVideoPreviewCGImage(from: previewInfo.url, maxSidePixels: maxLongSidePixels)
+                    case .other:
+                        cgImage = await FilePreviewSupport.makeQuickLookPreviewCGImage(
+                            from: previewInfo.url,
+                            maxSidePixels: quickLookMaxSidePixels,
+                            scale: scale
+                        )
+                    }
+                    guard let cgImage else { return nil }
+                    return SendableCGImage(image: cgImage)
+                }.value
+
+                let cgImage = sendable?.image
+                guard !Task.isCancelled else { return nil }
+                guard !isScrolling else { return nil }
+                guard isHovering else { return nil }
+                if let cgImage {
+                    HoverPreviewImageCache.shared.setImage(cgImage, forKey: previewCacheKey)
+                }
+                previewModel.previewCGImage = cgImage
+                return cgImage
+            }
+            defer { preparedPreviewImage.cancel() }
+
+            try? await Task.sleep(nanoseconds: delayNanos)
+            guard !Task.isCancelled else { return }
+            guard !isScrolling else { return }
+            guard isHovering else { return }
+
+            self.requestPopover(.file)
+
+            if let cgImage = await preparedPreviewImage.value {
+                guard !Task.isCancelled else { return }
+                previewModel.previewCGImage = cgImage
+            }
+        }
+    }
+
     nonisolated private static func makePreviewCGImage(from data: Data, targetWidthPixels: Int, maxLongSidePixels: Int) -> CGImage? {
         guard targetWidthPixels > 0, maxLongSidePixels > 0 else { return nil }
         guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
@@ -740,6 +1062,28 @@ struct HistoryItemView: View, Equatable {
         isOptimizingImage = false
     }
 
+    private var noteMenuTitle: String {
+        item.note?.isEmpty == false ? "Edit Note..." : "Add Note..."
+    }
+
+    private func presentNoteEditor() {
+        noteDraft = item.note ?? ""
+        isNoteEditorPresented = true
+        dismissOtherPopovers()
+        resetPreviewState(hidePopovers: true)
+    }
+
+    private func commitNoteDraft() {
+        let trimmed = noteDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalized = trimmed.isEmpty ? nil : trimmed
+        onUpdateNote(normalized)
+        dismissNoteEditor()
+    }
+
+    private func dismissNoteEditor() {
+        isNoteEditorPresented = false
+    }
+
     private func handleOptimizeButtonHover(_ hovering: Bool) {
         if hovering {
             isHoveringOptimizeButton = true
@@ -753,6 +1097,8 @@ struct HistoryItemView: View, Equatable {
 
         if item.type == .image && showThumbnails {
             startPreviewTask()
+        } else if item.type == .file {
+            startFilePreviewTask()
         } else if item.type == .text || item.type == .rtf || item.type == .html {
             startTextPreviewTask()
         }
@@ -823,7 +1169,7 @@ struct HistoryItemView: View, Equatable {
     }
 
     private var shouldResetPreviewOnScroll: Bool {
-        if isHovering || isPopoverHovering || isImagePreviewPresented || isTextPreviewPresented {
+        if isHovering || isPopoverHovering || isImagePreviewPresented || isTextPreviewPresented || isFilePreviewPresented {
             return true
         }
         if hoverPreviewTask != nil || hoverMarkdownTask != nil {
