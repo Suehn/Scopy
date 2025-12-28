@@ -49,6 +49,25 @@ actor ClipboardService {
     private let fullCleanupInterval: TimeInterval = 3600
     private let cleanupDebounceDelay: TimeInterval = 2.0
 
+    // MARK: - File Size Computation
+
+    private let fileSizeComputationRetryInterval: TimeInterval = 3 * 3600
+    private let maxConcurrentFileSizeComputations = 2
+
+    private var fileSizeComputationInProgress = Set<UUID>()
+    private var fileSizeComputationLastAttemptAt: [UUID: Date] = [:]
+
+    private var activeFileSizeComputations = 0
+    private var fileSizeComputationWaiters: [CheckedContinuation<Void, Never>] = []
+    private var fileSizeComputationWaiterHead = 0
+
+    // MARK: - Thumbnail Generation
+
+    private let maxConcurrentThumbnailGenerations = 2
+    private var activeThumbnailGenerations = 0
+    private var thumbnailGenerationWaiters: [CheckedContinuation<Void, Never>] = []
+    private var thumbnailGenerationWaiterHead = 0
+
     // MARK: - Initialization
 
     init(
@@ -851,7 +870,7 @@ actor ClipboardService {
         }
 
         if item.type == .file, fileSizeBytes == nil {
-            fileSizeBytes = FilePreviewSupport.totalFileSizeBytes(from: item.plainText)
+            scheduleFileSizeComputationIfNeeded(itemID: item.id, plainText: item.plainText)
         }
 
         return ClipboardItemDTO(
@@ -869,6 +888,112 @@ actor ClipboardService {
             thumbnailPath: thumbnailPath,
             storageRef: item.storageRef
         )
+    }
+
+    private func scheduleFileSizeComputationIfNeeded(itemID: UUID, plainText: String) {
+        let now = Date()
+        if let lastAttempt = fileSizeComputationLastAttemptAt[itemID],
+           now.timeIntervalSince(lastAttempt) < fileSizeComputationRetryInterval
+        {
+            return
+        }
+        if fileSizeComputationInProgress.contains(itemID) {
+            return
+        }
+
+        fileSizeComputationInProgress.insert(itemID)
+        fileSizeComputationLastAttemptAt[itemID] = now
+
+        Task.detached(priority: .utility) { [weak self, itemID, plainText] in
+            guard let self else { return }
+
+            await self.acquireFileSizeComputationSlot()
+            let computed = Task.isCancelled ? nil : FilePreviewSupport.totalFileSizeBytes(from: plainText)
+            await self.finishFileSizeComputation(itemID: itemID)
+
+            guard !Task.isCancelled else { return }
+            guard let computed else { return }
+            await self.applyComputedFileSizeBytes(itemID: itemID, fileSizeBytes: computed)
+        }
+    }
+
+    private func acquireFileSizeComputationSlot() async {
+        if activeFileSizeComputations < maxConcurrentFileSizeComputations {
+            activeFileSizeComputations += 1
+            return
+        }
+        await withCheckedContinuation { continuation in
+            fileSizeComputationWaiters.append(continuation)
+        }
+    }
+
+    private func finishFileSizeComputation(itemID: UUID) {
+        fileSizeComputationInProgress.remove(itemID)
+        releaseFileSizeComputationSlot()
+    }
+
+    private func releaseFileSizeComputationSlot() {
+        if fileSizeComputationWaiterHead < fileSizeComputationWaiters.count {
+            let continuation = fileSizeComputationWaiters[fileSizeComputationWaiterHead]
+            fileSizeComputationWaiterHead += 1
+            continuation.resume()
+
+            if fileSizeComputationWaiterHead > 32 {
+                fileSizeComputationWaiters.removeFirst(fileSizeComputationWaiterHead)
+                fileSizeComputationWaiterHead = 0
+            }
+            return
+        }
+
+        activeFileSizeComputations = max(0, activeFileSizeComputations - 1)
+        if fileSizeComputationWaiterHead > 0 {
+            fileSizeComputationWaiters.removeAll(keepingCapacity: true)
+            fileSizeComputationWaiterHead = 0
+        }
+    }
+
+    private func applyComputedFileSizeBytes(itemID: UUID, fileSizeBytes: Int) async {
+        guard let storage else { return }
+
+        do {
+            let updated = try await storage.updateFileSizeBytes(id: itemID, fileSizeBytes: fileSizeBytes)
+            fileSizeComputationLastAttemptAt.removeValue(forKey: itemID)
+            guard let updated else { return }
+            let dto = await toDTO(updated, storage: storage, thumbnailGenerationPriority: .utility)
+            await yieldEvent(.itemContentUpdated(dto))
+        } catch {
+            ScopyLog.app.warning("Failed to update fileSizeBytes for item \(itemID.uuidString, privacy: .private): \(error.localizedDescription, privacy: .private)")
+        }
+    }
+
+    private func acquireThumbnailGenerationSlot() async {
+        if activeThumbnailGenerations < maxConcurrentThumbnailGenerations {
+            activeThumbnailGenerations += 1
+            return
+        }
+        await withCheckedContinuation { continuation in
+            thumbnailGenerationWaiters.append(continuation)
+        }
+    }
+
+    private func releaseThumbnailGenerationSlot() {
+        if thumbnailGenerationWaiterHead < thumbnailGenerationWaiters.count {
+            let continuation = thumbnailGenerationWaiters[thumbnailGenerationWaiterHead]
+            thumbnailGenerationWaiterHead += 1
+            continuation.resume()
+
+            if thumbnailGenerationWaiterHead > 32 {
+                thumbnailGenerationWaiters.removeFirst(thumbnailGenerationWaiterHead)
+                thumbnailGenerationWaiterHead = 0
+            }
+            return
+        }
+
+        activeThumbnailGenerations = max(0, activeThumbnailGenerations - 1)
+        if thumbnailGenerationWaiterHead > 0 {
+            thumbnailGenerationWaiters.removeAll(keepingCapacity: true)
+            thumbnailGenerationWaiterHead = 0
+        }
     }
 
     private func scheduleThumbnailGeneration(
@@ -907,9 +1032,13 @@ actor ClipboardService {
             let shouldGenerate = await ThumbnailGenerationTracker.shared.tryMarkInProgress(trackerKey)
             guard shouldGenerate else { return }
 
+            await self.acquireThumbnailGenerationSlot()
             defer {
                 Task {
                     await ThumbnailGenerationTracker.shared.markCompleted(trackerKey)
+                }
+                Task {
+                    await self.releaseThumbnailGenerationSlot()
                 }
             }
 

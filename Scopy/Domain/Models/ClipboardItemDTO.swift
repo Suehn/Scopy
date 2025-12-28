@@ -22,13 +22,13 @@ public struct ClipboardItemDTO: Identifiable, Sendable, Hashable {
         type: ClipboardItemType,
         contentHash: String,
         plainText: String,
-        note: String?,
+        note: String? = nil,
         appBundleID: String?,
         createdAt: Date,
         lastUsedAt: Date,
         isPinned: Bool,
         sizeBytes: Int,
-        fileSizeBytes: Int?,
+        fileSizeBytes: Int? = nil,
         thumbnailPath: String?,
         storageRef: String?
     ) {

@@ -49,11 +49,28 @@ struct HistoryItemFileThumbnailView: View {
     }
 
     private var thumbnailPlaceholder: some View {
-        Color.clear
-            .frame(width: height, height: height)
-            .padding(.leading, ScopySpacing.xs)
-            .padding(.vertical, ScopySpacing.xs)
-            .accessibilityIdentifier("History.Item.FileThumbnail")
+        ZStack {
+            Color.clear
+
+            Image(systemName: placeholderIconName)
+                .foregroundStyle(Color.accentColor)
+                .font(.system(size: max(12, height * 0.44)))
+        }
+        .frame(width: height, height: height)
+        .padding(.leading, ScopySpacing.xs)
+        .padding(.vertical, ScopySpacing.xs)
+        .accessibilityIdentifier("History.Item.FileThumbnail")
+    }
+
+    private var placeholderIconName: String {
+        switch kind {
+        case .image:
+            return ScopyIcons.image
+        case .video:
+            return "film"
+        case .other:
+            return ScopyIcons.file
+        }
     }
 
     @MainActor

@@ -212,9 +212,9 @@ final class ClipboardItemDisplayText {
     private nonisolated static func computeTitle(type: ClipboardItemType, plainText: String) -> String {
         switch type {
         case .file:
-            let paths = plainText.components(separatedBy: "\n").filter { !$0.isEmpty }
-            let fileCount = paths.count
-            let firstName = URL(fileURLWithPath: paths.first ?? "").lastPathComponent
+            let summary = summarizeFilePlainText(plainText)
+            let fileCount = summary.fileCount
+            let firstName = URL(fileURLWithPath: summary.firstPath ?? "").lastPathComponent
             if fileCount <= 1 {
                 return firstName.isEmpty ? plainText : firstName
             }
@@ -320,15 +320,14 @@ final class ClipboardItemDisplayText {
         sizeBytes _: Int,
         fileSizeBytes: Int?
     ) -> String {
-        let paths = plainText.components(separatedBy: "\n").filter { !$0.isEmpty }
-        let fileCount = paths.count
+        let fileCount = summarizeFilePlainText(plainText).fileCount
         var parts: [String] = []
 
         if fileCount > 1 {
             parts.append("\(fileCount)个文件")
         }
 
-        if let fileSizeBytes, fileSizeBytes > 0 {
+        if let fileSizeBytes {
             parts.append(formatBytes(fileSizeBytes))
         } else {
             parts.append("未知大小")
@@ -339,6 +338,39 @@ final class ClipboardItemDisplayText {
         }
 
         return parts.joined(separator: " · ")
+    }
+
+    private nonisolated static func summarizeFilePlainText(_ plainText: String) -> (firstPath: String?, fileCount: Int) {
+        guard !plainText.isEmpty else { return (nil, 0) }
+
+        var firstPath: String?
+        var fileCount = 0
+
+        var lineStart = plainText.startIndex
+        var index = lineStart
+
+        while index < plainText.endIndex {
+            let ch = plainText[index]
+            if ch == "\n" {
+                if lineStart != index {
+                    fileCount += 1
+                    if firstPath == nil {
+                        firstPath = String(plainText[lineStart..<index])
+                    }
+                }
+                lineStart = plainText.index(after: index)
+            }
+            index = plainText.index(after: index)
+        }
+
+        if lineStart != plainText.endIndex {
+            fileCount += 1
+            if firstPath == nil {
+                firstPath = String(plainText[lineStart..<plainText.endIndex])
+            }
+        }
+
+        return (firstPath, fileCount)
     }
 
     private nonisolated static func parseImageResolution(from text: String) -> String? {
@@ -353,6 +385,9 @@ final class ClipboardItemDisplayText {
     }
 
     private nonisolated static func formatBytes(_ bytes: Int) -> String {
+        if bytes < 1024 {
+            return "\(bytes) B"
+        }
         let kb = Double(bytes) / 1024
         if kb < 1024 {
             return String(format: "%.1f KB", kb)

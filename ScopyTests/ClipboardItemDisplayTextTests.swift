@@ -1,3 +1,4 @@
+import Foundation
 import XCTest
 import ScopyKit
 
@@ -25,6 +26,36 @@ final class ClipboardItemDisplayTextTests: XCTestCase {
             let expected = legacyTextMetadata(text)
             let actual = ClipboardItemDisplayText.shared.metadata(for: makeTextItem(plainText: text))
             XCTAssertEqual(actual, expected, "metadata mismatch for text: \(String(reflecting: text))")
+        }
+    }
+
+    @MainActor
+    func testFileTitleAndMetadataMatchLegacyImplementation() {
+        let samples: [(plainText: String, note: String?, fileSizeBytes: Int?)] = [
+            ("/tmp/a.txt", nil, nil),
+            ("/tmp/a.txt", "hello", nil),
+            ("/tmp/a.txt", nil, 0),
+            ("/tmp/a.txt", nil, 123),
+            ("/tmp/a.txt\n/tmp/b.txt", nil, nil),
+            ("/tmp/a.txt\n/tmp/b.txt", "note", 1024),
+            ("\n/tmp/a.txt\n\n/tmp/b.txt\n", nil, 2048)
+        ]
+
+        for sample in samples {
+            let item = makeFileItem(
+                plainText: sample.plainText,
+                note: sample.note,
+                fileSizeBytes: sample.fileSizeBytes
+            )
+
+            let expectedTitle = legacyFileTitle(sample.plainText)
+            let expectedMetadata = legacyFileMetadata(sample.plainText, note: sample.note, fileSizeBytes: sample.fileSizeBytes)
+
+            let actualTitle = ClipboardItemDisplayText.shared.title(for: item)
+            let actualMetadata = ClipboardItemDisplayText.shared.metadata(for: item)
+
+            XCTAssertEqual(actualTitle, expectedTitle, "title mismatch for file plainText: \(String(reflecting: sample.plainText))")
+            XCTAssertEqual(actualMetadata, expectedMetadata, "metadata mismatch for file plainText: \(String(reflecting: sample.plainText))")
         }
     }
 
@@ -62,6 +93,24 @@ final class ClipboardItemDisplayTextTests: XCTestCase {
         )
     }
 
+    private func makeFileItem(plainText: String, note: String?, fileSizeBytes: Int?) -> ClipboardItemDTO {
+        ClipboardItemDTO(
+            id: UUID(),
+            type: .file,
+            contentHash: UUID().uuidString,
+            plainText: plainText,
+            note: note,
+            appBundleID: nil,
+            createdAt: Date(),
+            lastUsedAt: Date(),
+            isPinned: false,
+            sizeBytes: plainText.utf8.count,
+            fileSizeBytes: fileSizeBytes,
+            thumbnailPath: nil,
+            storageRef: nil
+        )
+    }
+
     // Reference implementation (pre-optimization) to guard behavior stability.
     private func legacyTextMetadata(_ text: String) -> String {
         let charCount = TextMetrics.displayWordUnitCount(for: text)
@@ -70,5 +119,48 @@ final class ClipboardItemDisplayTextTests: XCTestCase {
             .replacingOccurrences(of: "\r", with: " ")
         let lastChars = cleanText.count <= 15 ? cleanText : "...\(String(cleanText.suffix(15)))"
         return "\(charCount)字 · \(lineCount)行 · \(lastChars)"
+    }
+
+    private func legacyFileTitle(_ plainText: String) -> String {
+        let paths = plainText.components(separatedBy: "\n").filter { !$0.isEmpty }
+        let fileCount = paths.count
+        let firstName = URL(fileURLWithPath: paths.first ?? "").lastPathComponent
+        if fileCount <= 1 {
+            return firstName.isEmpty ? plainText : firstName
+        }
+        return "\(firstName) + \(fileCount - 1) more"
+    }
+
+    private func legacyFileMetadata(_ plainText: String, note: String?, fileSizeBytes: Int?) -> String {
+        let paths = plainText.components(separatedBy: "\n").filter { !$0.isEmpty }
+        let fileCount = paths.count
+        var parts: [String] = []
+
+        if fileCount > 1 {
+            parts.append("\(fileCount)个文件")
+        }
+
+        if let fileSizeBytes {
+            parts.append(legacyFormatBytes(fileSizeBytes))
+        } else {
+            parts.append("未知大小")
+        }
+
+        if let note, !note.isEmpty {
+            parts.append(note)
+        }
+
+        return parts.joined(separator: " · ")
+    }
+
+    private func legacyFormatBytes(_ bytes: Int) -> String {
+        if bytes < 1024 {
+            return "\(bytes) B"
+        }
+        let kb = Double(bytes) / 1024
+        if kb < 1024 {
+            return String(format: "%.1f KB", kb)
+        }
+        return String(format: "%.1f MB", kb / 1024)
     }
 }

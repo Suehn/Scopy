@@ -365,6 +365,28 @@ public final class StorageService {
         )
     }
 
+    func updateFileSizeBytes(id: UUID, fileSizeBytes: Int?) async throws -> StoredItem? {
+        guard let existing = try await repository.fetchItemByID(id) else { return nil }
+        guard existing.fileSizeBytes != fileSizeBytes else { return nil }
+        try await repository.updateItemFileSizeBytes(id: id, fileSizeBytes: fileSizeBytes)
+        return StoredItem(
+            id: existing.id,
+            type: existing.type,
+            contentHash: existing.contentHash,
+            plainText: existing.plainText,
+            note: existing.note,
+            appBundleID: existing.appBundleID,
+            createdAt: existing.createdAt,
+            lastUsedAt: existing.lastUsedAt,
+            useCount: existing.useCount,
+            isPinned: existing.isPinned,
+            sizeBytes: existing.sizeBytes,
+            fileSizeBytes: fileSizeBytes,
+            storageRef: existing.storageRef,
+            rawData: existing.rawData
+        )
+    }
+
     func updateItemPayload(
         id: UUID,
         contentHash: String,

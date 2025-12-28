@@ -209,6 +209,18 @@ actor SQLiteClipboardRepository {
         _ = try stmt.step()
     }
 
+    func updateItemFileSizeBytes(id: UUID, fileSizeBytes: Int?) throws {
+        let sql = "UPDATE clipboard_items SET file_size_bytes = ? WHERE id = ?"
+        let stmt = try prepare(sql)
+        if let fileSizeBytes {
+            try stmt.bindInt(fileSizeBytes, at: 1)
+        } else {
+            try stmt.bindNull(1)
+        }
+        try stmt.bindText(id.uuidString, at: 2)
+        _ = try stmt.step()
+    }
+
     func deleteItem(id: UUID) throws {
         let sql = "DELETE FROM clipboard_items WHERE id = ?"
         let stmt = try prepare(sql)

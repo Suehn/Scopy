@@ -13,6 +13,8 @@ struct HistoryItemFilePreviewView: View {
     @State private var loadedThumbnail: NSImage?
     @State private var lastLoadedPath: String?
     @State private var videoNaturalSize: CGSize?
+    @State private var cachedFileExists: Bool = false
+    @State private var cachedFileExistsPath: String?
 
     var body: some View {
         if isMarkdownPreview {
@@ -48,6 +50,7 @@ struct HistoryItemFilePreviewView: View {
             .accessibilityIdentifier("History.Preview.File")
             .accessibilityElement(children: .contain)
             .task(id: filePath) {
+                await updateFileExists(path: filePath)
                 await loadVideoNaturalSizeIfNeeded(path: filePath)
             }
         }
@@ -55,7 +58,7 @@ struct HistoryItemFilePreviewView: View {
 
     @ViewBuilder
     private func previewContent() -> some View {
-        if kind != .image, let filePath, FileManager.default.fileExists(atPath: filePath) {
+        if kind != .image, let filePath, isFileAvailable {
             QuickLookPreviewView(url: URL(fileURLWithPath: filePath))
         } else if let cgImage = model.previewCGImage {
             Image(decorative: cgImage, scale: 1.0)
@@ -91,8 +94,13 @@ struct HistoryItemFilePreviewView: View {
         guard model.isMarkdown else { return false }
         guard let filePath else { return false }
         guard kind == .other else { return false }
-        guard FileManager.default.fileExists(atPath: filePath) else { return false }
         return FilePreviewSupport.isMarkdownFile(URL(fileURLWithPath: filePath))
+    }
+
+    private var isFileAvailable: Bool {
+        guard let filePath else { return false }
+        guard cachedFileExistsPath == filePath else { return false }
+        return cachedFileExists
     }
 
     private func previewWidth(maxWidth: CGFloat, maxHeight: CGFloat) -> CGFloat {
@@ -104,7 +112,7 @@ struct HistoryItemFilePreviewView: View {
     }
 
     private func previewHeight(width: CGFloat) -> CGFloat {
-        if kind != .image, let filePath, FileManager.default.fileExists(atPath: filePath) {
+        if kind != .image, let filePath, isFileAvailable {
             if kind == .video, let size = videoNaturalSize {
                 let naturalWidth = max(size.width, 1)
                 let naturalHeight = max(size.height, 1)
@@ -133,6 +141,25 @@ struct HistoryItemFilePreviewView: View {
         let originalHeight = max(size.height, 1)
         let scaledHeight = width * (originalHeight / originalWidth)
         return ceil(scaledHeight)
+    }
+
+    @MainActor
+    private func updateFileExists(path: String?) async {
+        guard let path else {
+            cachedFileExistsPath = nil
+            cachedFileExists = false
+            return
+        }
+
+        cachedFileExistsPath = path
+        cachedFileExists = false
+
+        let exists = await Task.detached(priority: .utility) {
+            FileManager.default.fileExists(atPath: path)
+        }.value
+        guard !Task.isCancelled else { return }
+        guard cachedFileExistsPath == path else { return }
+        cachedFileExists = exists
     }
 
     @MainActor

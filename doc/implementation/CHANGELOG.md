@@ -5,6 +5,26 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [v0.56] - 2025-12-28
+
+### Feat/Files
+
+- **文件 hover 预览**：普通文件接入 Quick Look（PDF 可滚动多页、视频可播放），Markdown 文件读取并渲染 Markdown。
+- **文件备注可搜**：右键编辑/清空备注，备注写入存储并纳入搜索（FTS + fuzzy）。
+- **文件元数据**：展示真实文件大小（`fileSizeBytes`）+ 备注，并持久化避免重复扫盘。
+
+### Perf/Stability
+
+- **移除主线程文件 IO**：文件大小统计从主线程移除，改为后台 best-effort 计算（限流/去重/节流）并写回 DB。
+- **Markdown 文件预览 TTL**：读盘预览缓存引入 3h TTL，并保证 text/HTML/metrics 同源，避免“内容变了但预览仍旧/不一致”。
+- **预览健壮性**：文件存在性检查后台化，降低网络盘/失联挂载点导致的卡顿概率。
+- **后台任务有界并发**：缩略图生成增加并发上限，避免大量缺失缩略图时任务并发过高。
+- **列表渲染降载**：文件条目 title/metadata 计算避免全量 split/分配，降低大量文件路径场景的 UI 卡顿风险。
+
+### Test
+
+- `xcodebuild test -scheme Scopy -destination 'platform=macOS' -only-testing:ScopyTests`：Executed 278 tests, 25 skipped, 0 failures
+
 ## [v0.50.fix20] - 2025-12-27
 
 ### Feat/Preview

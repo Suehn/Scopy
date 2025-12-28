@@ -49,15 +49,33 @@ public enum FilePreviewSupport {
     }
 
     public static func primaryFileURL(from plainText: String, requireExists: Bool = true) -> URL? {
-        for line in plainText.split(whereSeparator: \.isNewline) {
-            let path = line.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard let url = parseFileURL(from: path) else { continue }
-            if requireExists {
-                var isDirectory: ObjCBool = false
-                guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory) else { continue }
-                guard !isDirectory.boolValue else { continue }
+        var start = plainText.startIndex
+        while start < plainText.endIndex {
+            var end = start
+            while end < plainText.endIndex, !plainText[end].isNewline {
+                end = plainText.index(after: end)
             }
-            return url
+
+            if start != end {
+                let rawLine = plainText[start..<end]
+                let path = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
+                if let url = parseFileURL(from: path) {
+                    if requireExists {
+                        var isDirectory: ObjCBool = false
+                        if FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory),
+                           !isDirectory.boolValue {
+                            return url
+                        }
+                    } else {
+                        return url
+                    }
+                }
+            }
+
+            start = end
+            while start < plainText.endIndex, plainText[start].isNewline {
+                start = plainText.index(after: start)
+            }
         }
         return nil
     }
@@ -103,7 +121,17 @@ public enum FilePreviewSupport {
            size > maxBytes {
             return nil
         }
-        guard let data = try? Data(contentsOf: url, options: [.mappedIfSafe]) else { return nil }
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
+        defer {
+            try? handle.close()
+        }
+        // Read a small prefix so we never pull huge files into memory when `fileSizeKey` is unavailable.
+        let data: Data
+        do {
+            data = try handle.read(upToCount: maxBytes + 1) ?? Data()
+        } catch {
+            return nil
+        }
         guard data.count <= maxBytes else { return nil }
         if let utf8 = String(data: data, encoding: .utf8) {
             return utf8

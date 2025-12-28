@@ -77,4 +77,8 @@ public extension ClipboardServiceProtocol {
     func stopAndWait() async {
         stop()
     }
+
+    func updateNote(itemID _: UUID, note _: String?) async throws {
+        // Default no-op for backwards compatibility (tests / stubs).
+    }
 }
