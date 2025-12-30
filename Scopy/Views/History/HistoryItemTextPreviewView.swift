@@ -1,6 +1,7 @@
 import SwiftUI
 import ScopyKit
 import AppKit
+import Foundation
 
 struct HistoryItemTextPreviewView: View {
     @Environment(SettingsViewModel.self) private var settingsViewModel
@@ -16,13 +17,19 @@ struct HistoryItemTextPreviewView: View {
         self._model = ObservedObject(wrappedValue: model)
         self.markdownWebViewController = markdownWebViewController
         self.showMarkdownPlaceholder = showMarkdownPlaceholder
+        self._exportResolutionPercent = State(initialValue: Self.initialExportResolutionPercent())
     }
 
     // Export success feedback reset task
     @State private var exportSuccessResetTask: Task<Void, Never>?
 
+    @State private var exportResolutionPercent: Int
+
     private static let minSaneMarkdownMeasuredWidth: CGFloat = 40
     private static let markdownWidthGrowThreshold: CGFloat = 40
+
+    private static let exportResolutionPercentUserDefaultsKey = "ScopyMarkdownExportResolutionPercent"
+    private static let uiTestExportResolutionEnvKey = "SCOPY_UITEST_MARKDOWN_EXPORT_RESOLUTION"
 
     var body: some View {
         let maxWidth: CGFloat = HoverPreviewScreenMetrics.maxPopoverWidthPoints()
@@ -106,6 +113,7 @@ struct HistoryItemTextPreviewView: View {
                                 }
                             )
                             .frame(width: width, height: clampedHeight)
+                            .accessibilityHidden(isUITesting)
                         } else {
                             MarkdownPreviewWebView(
                                 html: html,
@@ -136,9 +144,13 @@ struct HistoryItemTextPreviewView: View {
                                 }
                             )
                             .frame(width: width, height: clampedHeight)
+                            .accessibilityHidden(isUITesting)
                         }
 
-                        exportButton()
+                        HStack(spacing: ScopySpacing.xs) {
+                            exportResolutionMenu()
+                            exportButton()
+                        }
                             .padding(ScopySpacing.sm)
                     }
                     .accessibilityIdentifier("History.Preview.Container")
@@ -158,6 +170,116 @@ struct HistoryItemTextPreviewView: View {
     }
 
     // MARK: - Export Button
+
+    private enum MarkdownExportResolution: Int, CaseIterable, Identifiable {
+        case x1 = 100
+        case x1_5 = 150
+        case x2 = 200
+
+        var id: Int { rawValue }
+
+        var scale: CGFloat { CGFloat(rawValue) / 100 }
+
+        var label: String {
+            switch self {
+            case .x1: return "1x"
+            case .x1_5: return "1.5x"
+            case .x2: return "2x"
+            }
+        }
+    }
+
+    private var exportResolution: MarkdownExportResolution {
+        MarkdownExportResolution(rawValue: exportResolutionPercent) ?? .x1
+    }
+
+    private var exportResolutionScale: CGFloat {
+        exportResolution.scale
+    }
+
+    private var isUITesting: Bool {
+        ProcessInfo.processInfo.arguments.contains("--uitesting")
+    }
+
+    private static func initialExportResolutionPercent() -> Int {
+        let processInfo = ProcessInfo.processInfo
+        if processInfo.arguments.contains("--uitesting") {
+            return parseExportResolutionPercent(from: processInfo.environment[uiTestExportResolutionEnvKey]) ?? MarkdownExportResolution.x1.rawValue
+        }
+
+        let stored = UserDefaults.standard.integer(forKey: exportResolutionPercentUserDefaultsKey)
+        if let resolution = MarkdownExportResolution(rawValue: stored) {
+            return resolution.rawValue
+        }
+        return MarkdownExportResolution.x1.rawValue
+    }
+
+    private static func parseExportResolutionPercent(from raw: String?) -> Int? {
+        guard let raw else { return nil }
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+
+        let lowered = trimmed.lowercased()
+        let noSuffix: String
+        if lowered.hasSuffix("x") {
+            noSuffix = String(lowered.dropLast())
+        } else {
+            noSuffix = lowered
+        }
+
+        if let percent = Int(noSuffix), percent >= 50 {
+            return MarkdownExportResolution(rawValue: percent)?.rawValue
+        }
+        if let multiplier = Double(noSuffix), multiplier > 0 {
+            let percent = Int(round(multiplier * 100))
+            return MarkdownExportResolution(rawValue: percent)?.rawValue
+        }
+        return nil
+    }
+
+    private func persistExportResolutionPercentIfNeeded() {
+        guard !isUITesting else { return }
+        UserDefaults.standard.set(exportResolutionPercent, forKey: Self.exportResolutionPercentUserDefaultsKey)
+    }
+
+    @ViewBuilder
+    private func exportResolutionMenu() -> some View {
+        Menu {
+            ForEach(MarkdownExportResolution.allCases) { resolution in
+                Button {
+                    exportResolutionPercent = resolution.rawValue
+                    persistExportResolutionPercentIfNeeded()
+                } label: {
+                    HStack {
+                        if exportResolutionPercent == resolution.rawValue {
+                            Image(systemName: "checkmark")
+                        }
+                        Text(resolution.label)
+                    }
+                }
+            }
+        } label: {
+            Text(exportResolution.label)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundColor(ScopyColors.mutedText)
+                .frame(height: 24)
+                .padding(.horizontal, 8)
+                .background(
+                    Capsule()
+                        .fill(ScopyColors.secondaryBackground.opacity(0.9))
+                )
+                .overlay(
+                    Capsule()
+                        .stroke(ScopyColors.separator.opacity(0.5), lineWidth: 0.5)
+                )
+        }
+        .menuStyle(.borderlessButton)
+        .accessibilityIdentifier("History.Preview.ExportResolutionMenu")
+        .accessibilityLabel("Export resolution")
+        .accessibilityValue(exportResolution.label)
+        .help("Export resolution (\(exportResolution.label))")
+        .disabled(model.isExporting)
+    }
 
     @ViewBuilder
     private func exportButton() -> some View {
@@ -213,7 +335,7 @@ struct HistoryItemTextPreviewView: View {
         if model.exportFailed, let message = model.exportErrorMessage, !message.isEmpty {
             return "Export failed: \(message)"
         }
-        return "Export as PNG to clipboard"
+        return "Export as PNG to clipboard (\(exportResolution.label))"
     }
 
     private func exportToPNG() {
@@ -239,9 +361,13 @@ struct HistoryItemTextPreviewView: View {
         model.exportErrorMessage = nil
         exportSuccessResetTask?.cancel()
 
+        let exportResolutionLabel = exportResolution.label
+        let exportResolutionScale = exportResolutionScale
+
         MarkdownExportService.exportToPNGClipboard(
             html: html,
-            targetWidthPixels: 1080,
+            targetWidthPixels: MarkdownExportService.defaultTargetWidthPixels,
+            resolutionScale: exportResolutionScale,
             pngquantOptions: pngquantOptions
         ) { result in
             Task { @MainActor in
@@ -252,12 +378,12 @@ struct HistoryItemTextPreviewView: View {
                     model.exportSuccess = true
                     if let percent = stats.percentSaved {
                         if percent > 0 {
-                            model.exportSuccessMessage = "Exported PNG (pngquant -\(percent)%)"
+                            model.exportSuccessMessage = "Exported PNG (\(exportResolutionLabel), pngquant -\(percent)%)"
                         } else {
-                            model.exportSuccessMessage = "Exported PNG (pngquant no change)"
+                            model.exportSuccessMessage = "Exported PNG (\(exportResolutionLabel), pngquant no change)"
                         }
                     } else {
-                        model.exportSuccessMessage = "Exported PNG"
+                        model.exportSuccessMessage = "Exported PNG (\(exportResolutionLabel))"
                     }
                     model.exportErrorMessage = nil
                     // Reset success state after 1.5 seconds

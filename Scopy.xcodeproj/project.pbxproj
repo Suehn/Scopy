@@ -117,6 +117,7 @@
 		3B51B59153F687E962BF0488 /* MarkdownExportService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D6C7D3A41F9511E99C25FE27 /* MarkdownExportService.swift */; };
 		3B9AFBF4400247DE93225D7B /* HistoryItemView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5901BA87F11FC6F4D1E7C673 /* HistoryItemView.swift */; };
 		3C2370D659CE232C0FC1005A /* katex.min.js in Resources */ = {isa = PBXBuildFile; fileRef = 6C2AD2CE0AA48137C50F5FA1 /* katex.min.js */; };
+		3E0EFA5878B55F14BCE746CF /* resolution_scale.md in Resources */ = {isa = PBXBuildFile; fileRef = 78C694E7F8CA4BC030CEB9A0 /* resolution_scale.md */; };
 		3E1520C84E30C111BAE6445B /* HistoryListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8C25A96207E0DA2587E7AFBB /* HistoryListView.swift */; };
 		3E84B148CF8F58896F777BC9 /* MathProtector.swift in Sources */ = {isa = PBXBuildFile; fileRef = 402DB00DDC36B589300A4D6C /* MathProtector.swift */; };
 		3F35F1D85C8C126C9CE04179 /* FloatingPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = DDB1A51BEEACE7981D4FBBCD /* FloatingPanel.swift */; };
@@ -577,6 +578,7 @@
 		731B070DC304C5CC7CDC7C75 /* HistoryItemFileThumbnailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryItemFileThumbnailView.swift; sourceTree = "<group>"; };
 		747759CE91D4B8639F351272 /* HoverPreviewImageCacheTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HoverPreviewImageCacheTests.swift; sourceTree = "<group>"; };
 		74C9D67BDF3FC3265BE88014 /* Scopy.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Scopy.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		78C694E7F8CA4BC030CEB9A0 /* resolution_scale.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = resolution_scale.md; sourceTree = "<group>"; };
 		78CD1BD4D4A172EB6DCBA95A /* KaTeX_Main-Italic.woff */ = {isa = PBXFileReference; path = "KaTeX_Main-Italic.woff"; sourceTree = "<group>"; };
 		791C51A3902AB70F1262DA2D /* UITestWaits.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UITestWaits.swift; sourceTree = "<group>"; };
 		7B47012368E8607A49B45194 /* MarkdownPreviewCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownPreviewCache.swift; sourceTree = "<group>"; };
@@ -1068,6 +1070,7 @@
 		F5B3B2D2A177E7AF63CCAB2C /* Fixtures */ = {
 			isa = PBXGroup;
 			children = (
+				78C694E7F8CA4BC030CEB9A0 /* resolution_scale.md */,
 				0369BFC689675CC6D741D885 /* temp.txt */,
 			);
 			path = Fixtures;
@@ -1244,6 +1247,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				3E0EFA5878B55F14BCE746CF /* resolution_scale.md in Resources */,
 				7F7930C54C6210D50C0A32D4 /* temp.txt in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

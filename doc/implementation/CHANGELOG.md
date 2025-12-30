@@ -5,6 +5,18 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased]
+
+## [v0.57] - 2025-12-30
+
+### Feat/Export
+
+- **Markdown/LaTeX 导出 PNG 分辨率**：hover 预览导出新增 1.5x/2x；输出宽度为 1080/1620/2160px；导出改为 PDF 渲染后按目标像素栅格化，确保同样逻辑尺寸但更清晰，并兼顾长内容的面积预算。
+
+### Test
+
+- `xcodebuild test -scheme Scopy -destination 'platform=macOS' -only-testing:ScopyTests`：Executed 278 tests, 25 skipped, 0 failures
+
 ## [v0.56] - 2025-12-28
 
 ### Feat/Files

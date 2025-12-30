@@ -522,6 +522,12 @@ struct ReusableMarkdownPreviewWebView: NSViewRepresentable {
         controller.onContentSizeChange = onContentSizeChange
         controller.setShouldScroll(shouldScroll)
         controller.loadHTMLIfNeeded(html)
+        if ProcessInfo.processInfo.arguments.contains("--uitesting") {
+            // XCUITest sometimes fails to discover SwiftUI overlay controls when WKWebView contributes its own
+            // accessibility tree. Hide the web view from accessibility during UI tests to make overlay buttons
+            // (e.g. export) reliably queryable/clickable.
+            webView.setAccessibilityElement(false)
+        }
     }
 
     @MainActor
