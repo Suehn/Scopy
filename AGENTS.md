@@ -46,11 +46,12 @@
   - 推送（确保 tag 一并推送）：
     - 一次性：`make push-release`
     - 或手动：`git push origin main` + `git push origin vX.Y.Z`
-  - Release 产物：GitHub Actions `Build and Release` 仅从 tag 构建；Cask 更新通过 PR 合入（workflow 不再直接 push main）。
+  - Release 产物：GitHub Actions `Build and Release` 仅从 tag 构建并上传 DMG + `.sha256`；并会（在 main 上）更新本仓库 `Casks/scopy.rb` 到同版本与 sha（`Suehn/homebrew-scopy` 会定时从这里同步）。
   - 发布完成定义（必须做到）：**Homebrew 可安装/可升级到该版本**。
-    - 等待 tag 对应 release 产出 `Scopy-<version>.dmg` + `Scopy-<version>.dmg.sha256`
-    - 确认 tap `Suehn/homebrew-scopy` 的 `Casks/scopy.rb` 已更新到同版本与 sha（CI 有 `HOMEBREW_GITHUB_API_TOKEN` 会自动更新；否则手动提 PR/推送）
-    - 本地验证：`brew tap Suehn/scopy` → `brew update` → `brew info --cask scopy` → `brew fetch --cask scopy`（可选 `brew upgrade --cask scopy`）
+    - 等待 tag 对应 release 产出 `Scopy-<version>.dmg` + `Scopy-<version>.dmg.sha256`（不要覆盖同 tag 的 DMG；修复发布请 bump 版本重发）
+    - 同步源检查（必须）：`curl -fsSL https://raw.githubusercontent.com/Suehn/Scopy/main/Casks/scopy.rb | sed -n '1,12p'`（version/sha 必须匹配上一步的 `.sha256`）
+    - tap 检查（必须）：`curl -fsSL https://raw.githubusercontent.com/Suehn/homebrew-scopy/main/Casks/scopy.rb | sed -n '1,12p'`（应已跟随同步源更新；若未配置 token，可去 tap 仓库手动 Run “Sync Cask from Scopy” workflow 或等待每日定时）
+    - 本地验证：`brew tap Suehn/scopy` → `brew update` → `brew info --cask scopy`（看 version/From）→ `brew fetch --cask scopy -f`（必要时 `brew cat scopy` 排查 cask 内容）
     - 安装落地校验（必须做）：确认 `/Applications/Scopy.app` 存在；若未出现，执行 `brew reinstall --cask scopy --appdir=/Applications` 或从 `/opt/homebrew/Caskroom/scopy/<version>/Scopy.app` 手动复制到 `/Applications`。
   - 本地构建：推荐用 `make`/`./deploy.sh`（会注入 `MARKETING_VERSION/CURRENT_PROJECT_VERSION`；见 `scripts/version.sh`）。
 

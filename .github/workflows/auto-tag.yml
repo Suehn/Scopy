@@ -5,7 +5,7 @@ on:
     branches:
       - main
     paths:
-      - "doc/implemented-doc/**"
+      - "doc/implementation/**"
       - "DEPLOYMENT.md"
 
 jobs:
@@ -33,4 +33,3 @@ jobs:
 
       - name: Push tag
         run: git push origin "${{ steps.tag.outputs.tag }}"
-

@@ -240,3 +240,37 @@ jobs:
           git add Casks/scopy.rb
           git commit -m "scopy ${VERSION}"
           git push origin HEAD:main
+
+  update_repo_cask:
+    needs: build_release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: main
+
+      - name: Update Casks/scopy.rb in Scopy repo
+        run: |
+          set -euo pipefail
+
+          VERSION="${{ needs.build_release.outputs.version }}"
+          SHA256="${{ needs.build_release.outputs.sha256 }}"
+
+          python3 -c "import re; p='Casks/scopy.rb'; s=open(p,'r',encoding='utf-8').read(); s=re.sub(r'version \"[^\"]+\"', f'version \"{VERSION}\"', s); s=re.sub(r'sha256 \"[^\"]+\"', f'sha256 \"{SHA256}\"', s); open(p,'w',encoding='utf-8').write(s)"
+
+          if git diff --quiet; then
+            echo "Repo cask already up-to-date (scopy ${VERSION})."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add Casks/scopy.rb
+          git commit -m "chore: bump cask to ${VERSION}"
+          git push origin HEAD:main
