@@ -7,6 +7,21 @@
 
 ## [Unreleased]
 
+## [v0.57.fix1] - 2026-01-02
+
+### Fix/Clipboard
+
+- **ChatGPT 网页复制公式纯文本错乱**：当网页使用 KaTeX/MathML 渲染公式且剪贴板 `.string` 发生“拆字/换行”时，从 HTML 的 `<annotation encoding="application/x-tex">` 提取 LaTeX，并生成 `$...$`/`$$...$$` 形式的可粘贴文本。
+- **RTF + HTML 共存择优**：当剪贴板同时包含 RTF/HTML 时，优先采用 HTML 提取的 TeX 纯文本（而非碎片化 plain text），避免历史内容被污染。
+
+### Dev/Release
+
+- **Homebrew cask 不再被同步回滚**：发布后保持 `Casks/scopy.rb` 与 release 版本/sha 一致（作为 `Suehn/homebrew-scopy` 的同步源），避免 Homebrew 长期停留在旧版本。
+
+### Test
+
+- `xcodebuild test -scheme Scopy -destination 'platform=macOS' -only-testing:ScopyTests`：Executed 280 tests, 25 skipped, 0 failures
+
 ## [v0.57] - 2025-12-30
 
 ### Feat/Export
