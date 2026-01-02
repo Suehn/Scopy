@@ -46,13 +46,24 @@
   - 推送（确保 tag 一并推送）：
     - 一次性：`make push-release`
     - 或手动：`git push origin main` + `git push origin vX.Y.Z`
-  - Release 产物：GitHub Actions `Build and Release` 仅从 tag 构建并上传 DMG + `.sha256`；并会（在 main 上）更新本仓库 `Casks/scopy.rb` 到同版本与 sha（`Suehn/homebrew-scopy` 会定时从这里同步）。
+  - Release 产物：GitHub Actions `Build and Release` 仅从 tag 构建并上传 DMG + `.sha256`；并会在 `main` 上更新本仓库 `Casks/scopy.rb` 到同版本与 sha；同时尝试更新 `Suehn/homebrew-scopy`（依赖 `HOMEBREW_GITHUB_API_TOKEN`，缺失时会跳过）。
   - 发布完成定义（必须做到）：**Homebrew 可安装/可升级到该版本**。
     - 等待 tag 对应 release 产出 `Scopy-<version>.dmg` + `Scopy-<version>.dmg.sha256`（不要覆盖同 tag 的 DMG；修复发布请 bump 版本重发）
     - 同步源检查（必须）：`curl -fsSL https://raw.githubusercontent.com/Suehn/Scopy/main/Casks/scopy.rb | sed -n '1,12p'`（version/sha 必须匹配上一步的 `.sha256`）
-    - tap 检查（必须）：`curl -fsSL https://raw.githubusercontent.com/Suehn/homebrew-scopy/main/Casks/scopy.rb | sed -n '1,12p'`（应已跟随同步源更新；若未配置 token，可去 tap 仓库手动 Run “Sync Cask from Scopy” workflow 或等待每日定时）
+    - tap 检查（必须）：`curl -fsSL https://raw.githubusercontent.com/Suehn/homebrew-scopy/main/Casks/scopy.rb | sed -n '1,12p'`（应与同步源一致；若仍旧版本，通常是 workflow 缺少权限/secret，需手动提交 tap 仓库的 `Casks/scopy.rb`）
     - 本地验证：`brew tap Suehn/scopy` → `brew update` → `brew info --cask scopy`（看 version/From）→ `brew fetch --cask scopy -f`（必要时 `brew cat scopy` 排查 cask 内容）
     - 安装落地校验（必须做）：确认 `/Applications/Scopy.app` 存在；若未出现，执行 `brew reinstall --cask scopy --appdir=/Applications` 或从 `/opt/homebrew/Caskroom/scopy/<version>/Scopy.app` 手动复制到 `/Applications`。
+    - 常见故障排查（版本“回滚/下载错版本”）：
+      - 先看本地到底用的哪个 cask：`brew info --cask scopy`（From/版本），必要时 `brew cat scopy`。
+      - 强制刷新 tap + 重装（适用于“以为是 fix18 但装到 fix2”这类缓存/旧 tap 场景）：
+        ```bash
+        brew untap Suehn/scopy >/dev/null 2>&1
+        rm -rf "$(brew --repo Suehn/scopy 2>/dev/null || true)"
+        brew update && brew tap Suehn/scopy && brew update
+        brew reinstall --cask scopy --force --appdir=/Applications
+        xattr -dr com.apple.quarantine /Applications/Scopy.app 2>/dev/null || true
+        ```
+      - 用 Info.plist 确认真正安装的版本（不要只看 UI/文件名）：`defaults read /Applications/Scopy.app/Contents/Info CFBundleShortVersionString`
   - 本地构建：推荐用 `make`/`./deploy.sh`（会注入 `MARKETING_VERSION/CURRENT_PROJECT_VERSION`；见 `scripts/version.sh`）。
 
 ## 架构与热键要点
