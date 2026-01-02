@@ -572,7 +572,14 @@ public final class ClipboardMonitor {
 
         // 3. RTF
         if let rtfData = pasteboard.data(forType: .rtf) {
-            let plainText = normalizeText(extractPreferredPlainText(from: pasteboard, richTextData: rtfData, type: .rtf))
+            let rtfPlainText = normalizeText(extractPreferredPlainText(from: pasteboard, richTextData: rtfData, type: .rtf))
+            let plainText: String
+            if let htmlData = pasteboard.data(forType: .html) {
+                let htmlPlainText = normalizeText(extractPreferredPlainText(from: pasteboard, richTextData: htmlData, type: .html))
+                plainText = shouldPreferRichPlainText(htmlPlainText, over: rtfPlainText) ? htmlPlainText : rtfPlainText
+            } else {
+                plainText = rtfPlainText
+            }
             return RawClipboardData(
                 type: .rtf,
                 plainText: plainText,
@@ -686,7 +693,14 @@ public final class ClipboardMonitor {
 
         // 3. RTF
         if let rtfData = pasteboard.data(forType: .rtf) {
-            let plainText = normalizeText(extractPreferredPlainText(from: pasteboard, richTextData: rtfData, type: .rtf))
+            let rtfPlainText = normalizeText(extractPreferredPlainText(from: pasteboard, richTextData: rtfData, type: .rtf))
+            let plainText: String
+            if let htmlData = pasteboard.data(forType: .html) {
+                let htmlPlainText = normalizeText(extractPreferredPlainText(from: pasteboard, richTextData: htmlData, type: .html))
+                plainText = shouldPreferRichPlainText(htmlPlainText, over: rtfPlainText) ? htmlPlainText : rtfPlainText
+            } else {
+                plainText = rtfPlainText
+            }
             // Dedup by normalized main text (v0.md 3.2). RTF payload may vary across copies even when the text is identical.
             let hash = plainText.isEmpty ? computeHash(rtfData) : computeHash(plainText)
             return ClipboardContent(
@@ -770,18 +784,61 @@ public final class ClipboardMonitor {
     }
 
     private func containsTeXCommands(_ text: String) -> Bool {
+        // Heuristic: detect common TeX signals so we can prefer an extracted rich payload representation
+        // over a corrupted pasteboard `.string` (e.g. KaTeX/MathML selection from web pages).
+        if !text.contains("\\") && !text.contains("$") {
+            return false
+        }
+
         var sawBackslash = false
+        var dollarCount = 0
         for ch in text {
+            if ch == "$" {
+                dollarCount += 1
+                if dollarCount >= 2 { return true }
+            }
+
             if sawBackslash {
-                if ch.isLetter { return true }
+                if ch.isLetter { return true } // \frac, \varepsilon, ...
+                if ch == "(" || ch == "[" || ch == ")" || ch == "]" { return true } // \( \) \[ \]
                 sawBackslash = false
                 continue
             }
+
             if ch == "\\" {
                 sawBackslash = true
             }
         }
+
         return false
+    }
+
+    private func shouldPreferRichPlainText(_ candidate: String, over baseline: String) -> Bool {
+        guard !candidate.isEmpty else { return false }
+        if baseline.isEmpty { return true }
+
+        if containsTeXCommands(candidate), !containsTeXCommands(baseline) {
+            return true
+        }
+
+        if isLikelyFragmentedCopyText(baseline), !isLikelyFragmentedCopyText(candidate) {
+            return true
+        }
+
+        return false
+    }
+
+    private func isLikelyFragmentedCopyText(_ text: String) -> Bool {
+        // Typical symptom when copying KaTeX-rendered equations as plain text: a lot of 1-2 character lines.
+        let lines = text.split(separator: "\n", omittingEmptySubsequences: true)
+        guard lines.count >= 8 else { return false }
+
+        var shortLineCount = 0
+        for line in lines {
+            if line.count <= 2 { shortLineCount += 1 }
+        }
+
+        return Double(shortLineCount) / Double(lines.count) >= 0.6
     }
 
     private func getFrontmostAppBundleID() -> String? {
@@ -905,6 +962,14 @@ public final class ClipboardMonitor {
     }
 
     private func extractPlainTextFromHTML(_ data: Data) -> String? {
+        if let html = decodeHTMLDataToString(data),
+           html.range(of: "application/x-tex", options: .caseInsensitive) != nil {
+            let extracted = extractMarkdownLikeTextFromKaTeXHTML(html)
+            if !extracted.isEmpty {
+                return extracted
+            }
+        }
+
         let options: [NSAttributedString.DocumentReadingOptionKey: Any] = [
             .documentType: NSAttributedString.DocumentType.html
         ]
@@ -912,6 +977,292 @@ public final class ClipboardMonitor {
             return nil
         }
         return attributedString.string
+    }
+
+    private func decodeHTMLDataToString(_ data: Data) -> String? {
+        // In practice pasteboard HTML is usually UTF-8, but some producers emit UTF-16.
+        let encodings: [String.Encoding] = [
+            .utf8,
+            .utf16,
+            .utf16LittleEndian,
+            .utf16BigEndian,
+            .unicode,
+            .isoLatin1,
+            .windowsCP1252
+        ]
+
+        for encoding in encodings {
+            if let string = String(data: data, encoding: encoding) {
+                return string
+            }
+        }
+
+        return nil
+    }
+
+    private func extractMarkdownLikeTextFromKaTeXHTML(_ html: String) -> String {
+        // Fast path: avoid work when there's no KaTeX marker.
+        if !html.localizedCaseInsensitiveContains("katex") {
+            return ""
+        }
+
+        var output = ""
+        output.reserveCapacity(min(html.utf8.count, 16_384))
+
+        var index = html.startIndex
+        var inKaTeX = false
+        var kaTeXSpanDepth = 0
+        var kaTeXIsDisplay = false
+
+        var inAnnotation = false
+        var annotationIsDisplay = false
+        var annotationBuffer = ""
+
+        while index < html.endIndex {
+            guard let tagStart = html[index...].firstIndex(of: "<") else {
+                let tail = String(html[index...])
+                appendHTMLText(tail, to: &output, inKaTeX: inKaTeX, inAnnotation: &inAnnotation, annotationBuffer: &annotationBuffer)
+                break
+            }
+
+            let textSegment = String(html[index..<tagStart])
+            appendHTMLText(textSegment, to: &output, inKaTeX: inKaTeX, inAnnotation: &inAnnotation, annotationBuffer: &annotationBuffer)
+
+            guard let tagEnd = html[tagStart...].firstIndex(of: ">") else { break }
+            let rawTag = String(html[html.index(after: tagStart)..<tagEnd])
+            index = html.index(after: tagEnd)
+
+            let tag = rawTag.trimmingCharacters(in: .whitespacesAndNewlines)
+            if tag.isEmpty { continue }
+            if tag.hasPrefix("!--") { continue }
+
+            let isClosing = tag.hasPrefix("/")
+            let tagBody = isClosing ? tag.dropFirst() : Substring(tag)
+            let tagName = tagBody
+                .prefix { !$0.isWhitespace && $0 != "/" }
+                .lowercased()
+
+            if tagName.isEmpty { continue }
+
+            if inAnnotation {
+                if isClosing, tagName == "annotation" {
+                    let tex = decodeHTMLEntities(annotationBuffer).trimmingCharacters(in: .whitespacesAndNewlines)
+                    annotationBuffer = ""
+                    inAnnotation = false
+
+                    if !tex.isEmpty {
+                        if annotationIsDisplay {
+                            appendNewlines(1, to: &output)
+                            output.append("$$\n")
+                            output.append(tex)
+                            output.append("\n$$")
+                            appendNewlines(1, to: &output)
+                        } else {
+                            output.append("$")
+                            output.append(tex)
+                            output.append("$")
+                        }
+                    }
+                }
+                continue
+            }
+
+            switch tagName {
+            case "br":
+                appendNewlines(1, to: &output)
+            case "p", "div", "section", "article":
+                if isClosing {
+                    appendNewlines(2, to: &output)
+                }
+            case "h1", "h2", "h3", "h4", "h5", "h6":
+                if isClosing {
+                    appendNewlines(2, to: &output)
+                } else if let level = Int(tagName.dropFirst()) {
+                    appendNewlines(output.isEmpty ? 0 : 2, to: &output)
+                    output.append(String(repeating: "#", count: level))
+                    output.append(" ")
+                }
+            case "li":
+                if isClosing {
+                    appendNewlines(1, to: &output)
+                } else {
+                    appendNewlines(output.isEmpty ? 0 : 1, to: &output)
+                    output.append("- ")
+                }
+            case "annotation":
+                if !isClosing,
+                   attribute(named: "encoding", in: tag)?.lowercased() == "application/x-tex" {
+                    inAnnotation = true
+                    annotationIsDisplay = kaTeXIsDisplay
+                    annotationBuffer = ""
+                }
+            case "span":
+                if isClosing {
+                    if inKaTeX {
+                        kaTeXSpanDepth -= 1
+                        if kaTeXSpanDepth <= 0 {
+                            inKaTeX = false
+                            kaTeXSpanDepth = 0
+                            kaTeXIsDisplay = false
+                        }
+                    }
+                } else {
+                    if inKaTeX {
+                        kaTeXSpanDepth += 1
+                    } else if let classAttr = attribute(named: "class", in: tag),
+                              classAttr.localizedCaseInsensitiveContains("katex") {
+                        inKaTeX = true
+                        kaTeXSpanDepth = 1
+                        kaTeXIsDisplay = classAttr.localizedCaseInsensitiveContains("katex-display")
+                    }
+                }
+            default:
+                break
+            }
+        }
+
+        return output.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func appendHTMLText(
+        _ text: String,
+        to output: inout String,
+        inKaTeX: Bool,
+        inAnnotation: inout Bool,
+        annotationBuffer: inout String
+    ) {
+        guard !text.isEmpty else { return }
+        if inAnnotation {
+            annotationBuffer.append(text)
+            return
+        }
+        if inKaTeX {
+            return
+        }
+
+        let decoded = decodeHTMLEntities(text)
+        for ch in decoded {
+            if ch.isWhitespace || ch.isNewline {
+                if output.isEmpty { continue }
+                if output.last == " " || output.last == "\n" { continue }
+                output.append(" ")
+            } else {
+                output.append(ch)
+            }
+        }
+    }
+
+    private func appendNewlines(_ count: Int, to output: inout String) {
+        guard count > 0 else { return }
+        var trimmed = output
+        while trimmed.last == " " {
+            trimmed.removeLast()
+        }
+        output = trimmed
+        if output.isEmpty {
+            output.append(String(repeating: "\n", count: count))
+            return
+        }
+
+        let existingNewlines = output.reversed().prefix { $0 == "\n" }.count
+        let needed = max(0, count - existingNewlines)
+        if needed > 0 {
+            output.append(String(repeating: "\n", count: needed))
+        }
+    }
+
+    private func attribute(named name: String, in tag: String) -> String? {
+        // Extremely small attribute parser: looks for name="..." or name='...'.
+        // Tag is the raw content inside "<" and ">".
+        let needle = "\(name.lowercased())="
+        guard let range = tag.range(of: needle, options: [.caseInsensitive]) else { return nil }
+
+        var i = range.upperBound
+        while i < tag.endIndex, tag[i].isWhitespace {
+            i = tag.index(after: i)
+        }
+        guard i < tag.endIndex else { return nil }
+
+        let quote = tag[i]
+        if quote == "\"" || quote == "'" {
+            let start = tag.index(after: i)
+            guard let end = tag[start...].firstIndex(of: quote) else { return nil }
+            return String(tag[start..<end])
+        }
+
+        // Unquoted value: read until whitespace.
+        let start = i
+        var end = start
+        while end < tag.endIndex, !tag[end].isWhitespace {
+            end = tag.index(after: end)
+        }
+        return String(tag[start..<end])
+    }
+
+    private func decodeHTMLEntities(_ text: String) -> String {
+        guard text.contains("&") else { return text }
+
+        var output = ""
+        output.reserveCapacity(text.count)
+
+        var index = text.startIndex
+        while index < text.endIndex {
+            let ch = text[index]
+            if ch != "&" {
+                output.append(ch)
+                index = text.index(after: index)
+                continue
+            }
+
+            guard let semi = text[index...].firstIndex(of: ";") else {
+                output.append(ch)
+                index = text.index(after: index)
+                continue
+            }
+
+            let entity = String(text[text.index(after: index)..<semi])
+            if let decoded = decodeHTMLEntity(entity) {
+                output.append(decoded)
+                index = text.index(after: semi)
+                continue
+            }
+
+            output.append("&")
+            index = text.index(after: index)
+        }
+
+        return output
+    }
+
+    private func decodeHTMLEntity(_ entity: String) -> String? {
+        switch entity.lowercased() {
+        case "amp": return "&"
+        case "lt": return "<"
+        case "gt": return ">"
+        case "quot": return "\""
+        case "#39", "apos": return "'"
+        case "nbsp": return " "
+        default:
+            break
+        }
+
+        if entity.hasPrefix("#x") || entity.hasPrefix("#X") {
+            let hex = entity.dropFirst(2)
+            if let value = UInt32(hex, radix: 16), let scalar = UnicodeScalar(value) {
+                return String(Character(scalar))
+            }
+            return nil
+        }
+
+        if entity.hasPrefix("#") {
+            let dec = entity.dropFirst()
+            if let value = UInt32(dec, radix: 10), let scalar = UnicodeScalar(value) {
+                return String(Character(scalar))
+            }
+            return nil
+        }
+
+        return nil
     }
 
     nonisolated private static func formatBytes(_ bytes: Int) -> String {

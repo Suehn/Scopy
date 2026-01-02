@@ -133,6 +133,82 @@ final class ClipboardMonitorTests: XCTestCase {
         XCTAssertFalse(text.contains("================"))
     }
 
+    func testReadCurrentClipboardHTMLKaTeXUsesAnnotationTeXForPlainText() {
+        let html = """
+        <html><body>
+        <h3>符号与公式层面的关键修正</h3>
+        <p>(1) 不要用 <span class="katex"><span class="katex-mathml"><math><semantics>
+        <annotation encoding="application/x-tex">W_p</annotation>
+        </semantics></math></span><span class="katex-html" aria-hidden="true">Wp</span></span> 表示 unbiased Sinkhorn</p>
+        <p>你在第3章写：</p>
+        <span class="katex-display"><span class="katex"><span class="katex-mathml"><math><semantics>
+        <annotation encoding="application/x-tex">W_p(P,Q)=W_\\varepsilon(P,Q)-\\frac12 W_\\varepsilon(P,P)-\\frac12 W_\\varepsilon(Q,Q).\\quad(3.17)</annotation>
+        </semantics></math></span><span class="katex-html" aria-hidden="true">...</span></span></span>
+        </body></html>
+        """
+        let htmlData = Data(html.utf8)
+
+        let corruptedPlain = """
+        W
+        p
+        (P,Q)=W
+        """
+
+        pasteboard.clearContents()
+        let item = NSPasteboardItem()
+        item.setString(corruptedPlain, forType: .string)
+        item.setData(htmlData, forType: .html)
+        pasteboard.writeObjects([item])
+
+        let content = monitor.readCurrentClipboard()
+        XCTAssertNotNil(content)
+        XCTAssertEqual(content?.type, .html)
+
+        let text = content?.plainText ?? ""
+        XCTAssertTrue(text.contains("$W_p$"))
+        XCTAssertTrue(text.contains("$$"))
+        XCTAssertTrue(text.contains("W_\\varepsilon(P,Q)"))
+        XCTAssertTrue(text.contains("\\frac12"))
+        XCTAssertFalse(text.contains("katex"))
+    }
+
+    func testReadCurrentClipboardRTFPrefersKaTeXAnnotationFromHTMLWhenAvailable() throws {
+        let html = """
+        <html><body>
+        <p>Eq: <span class="katex"><span class="katex-mathml"><math><semantics>
+        <annotation encoding="application/x-tex">W_p</annotation>
+        </semantics></math></span><span class="katex-html" aria-hidden="true">Wp</span></span></p>
+        </body></html>
+        """
+        let htmlData = Data(html.utf8)
+
+        let attributed = NSAttributedString(string: "RTF fallback W p")
+        let range = NSRange(location: 0, length: attributed.length)
+        let rtfData = try attributed.data(from: range, documentAttributes: [
+            .documentType: NSAttributedString.DocumentType.rtf
+        ])
+
+        let corruptedPlain = """
+        W
+        p
+        """
+
+        pasteboard.clearContents()
+        let item = NSPasteboardItem()
+        item.setString(corruptedPlain, forType: .string)
+        item.setData(rtfData, forType: .rtf)
+        item.setData(htmlData, forType: .html)
+        pasteboard.writeObjects([item])
+
+        let content = monitor.readCurrentClipboard()
+        XCTAssertNotNil(content)
+        XCTAssertEqual(content?.type, .rtf)
+
+        let text = content?.plainText ?? ""
+        XCTAssertTrue(text.contains("$W_p$"))
+        XCTAssertFalse(text.contains("RTF fallback"))
+    }
+
     func testReadCurrentClipboardRTFUsesRichPayloadPlainTextEvenWhenStringIsCorrupted() throws {
         let expected = #"[\mathbf{e}^L_i = \mathbf{e}_i + \sum_{u\in\mathcal{N}_i} \frac{1}{\sqrt{|\mathcal{N}_i|}\sqrt{|\mathcal{N}_u|}} \mathbf{e}_u]"#
         let attributed = NSAttributedString(string: expected)
