@@ -537,8 +537,14 @@ public final class ClipboardMonitor {
     private func extractRawData(from pasteboard: NSPasteboard) -> RawClipboardData? {
         let appBundleID = getFrontmostAppBundleID()
 
-        // 检测顺序：File URLs > Image > RTF > HTML > Plain text
+        // 检测顺序（默认）：File URLs > Image > RTF > HTML > Plain text
         // Plain text 必须放最后，因为其他类型通常也包含文本表示
+        //
+        // 例外：Office/Excel 复制单元格时，经常同时提供“图片预览 + HTML/RTF/文本”。
+        // 此时如果优先选 Image，会导致历史记录变成图片，粘贴行为也不符合用户预期（表格应保持为富文本/文本）。
+        //
+        // 这里采用“仅在检测到明显的表格/Office 富文本信号时”才让 Image 退到后面，
+        // 以避免影响浏览器/设计工具等真正的图片复制场景。
 
         // 1. File URLs (最高优先级 - 文件复制总是带有文本表示)
         if let fileURLs = pasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL],
@@ -555,9 +561,11 @@ public final class ClipboardMonitor {
             )
         }
 
-        // 2. Image (PNG, TIFF, etc.) - 优先 PNG；TIFF 转 PNG 延迟到后台（避免主线程重编码）
+        let shouldPreferRichTypesOverImage = shouldPreferRichTypesOverImage(from: pasteboard)
+
+        // 2. Image (PNG, TIFF, etc.) - 默认优先 PNG；TIFF 转 PNG 延迟到后台（避免主线程重编码）
         // v0.19: 图片统一使用 SHA256 去重（在后台线程计算），移除无用的轻量指纹
-        if let imageResult = extractImageDataForIngest(from: pasteboard) {
+        if !shouldPreferRichTypesOverImage, let imageResult = extractImageDataForIngest(from: pasteboard) {
             let imageData = imageResult.data
             return RawClipboardData(
                 type: .image,
@@ -613,6 +621,21 @@ public final class ClipboardMonitor {
             )
         }
 
+        // 6. Image（兜底）
+        // 如果上面没有任何富文本/文本可用，再回退到图片，确保复制图表/截图等场景不丢失内容。
+        if shouldPreferRichTypesOverImage, let imageResult = extractImageDataForIngest(from: pasteboard) {
+            let imageData = imageResult.data
+            return RawClipboardData(
+                type: .image,
+                plainText: "[Image]",
+                rawData: imageData,
+                appBundleID: appBundleID,
+                sizeBytes: imageData.count,
+                precomputedHash: nil,
+                imageDataWasTIFF: imageResult.wasTIFF
+            )
+        }
+
         return nil
     }
 
@@ -657,8 +680,11 @@ public final class ClipboardMonitor {
     private func extractContent(from pasteboard: NSPasteboard) -> ClipboardContent? {
         let appBundleID = getFrontmostAppBundleID()
 
-        // 检测顺序：File URLs > Image > RTF > HTML > Plain text
+        // 检测顺序（默认）：File URLs > Image > RTF > HTML > Plain text
         // Plain text 必须放最后，因为其他类型通常也包含文本表示
+        //
+        // 例外：当剪贴板同时包含“图片 + Office 表格类富文本/文本”时（常见于 Excel 复制单元格），
+        // 让图片降级为兜底，优先保留表格的富文本/文本语义（详见 extractRawData 注释）。
 
         // 1. File URLs (最高优先级)
         if let fileURLs = pasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL],
@@ -677,8 +703,10 @@ public final class ClipboardMonitor {
             )
         }
 
-        // 2. Image (PNG, TIFF, etc.) - 优先 PNG，TIFF 转为 PNG 避免存储膨胀
-        if let imageResult = extractOptimalImageData(from: pasteboard) {
+        let shouldPreferRichTypesOverImage = shouldPreferRichTypesOverImage(from: pasteboard)
+
+        // 2. Image (PNG, TIFF, etc.) - 默认优先 PNG，TIFF 转为 PNG 避免存储膨胀
+        if !shouldPreferRichTypesOverImage, let imageResult = extractOptimalImageData(from: pasteboard) {
             let imageData = imageResult.data
             let hash = computeHash(imageData)
             return ClipboardContent(
@@ -742,7 +770,84 @@ public final class ClipboardMonitor {
             )
         }
 
+        // 6. Image（兜底）
+        if shouldPreferRichTypesOverImage, let imageResult = extractOptimalImageData(from: pasteboard) {
+            let imageData = imageResult.data
+            let hash = computeHash(imageData)
+            return ClipboardContent(
+                type: .image,
+                plainText: "[Image: \(Self.formatBytes(imageData.count))]",
+                payload: .data(imageData),
+                appBundleID: appBundleID,
+                contentHash: hash,
+                sizeBytes: imageData.count
+            )
+        }
+
         return nil
+    }
+
+    private func shouldPreferRichTypesOverImage(from pasteboard: NSPasteboard) -> Bool {
+        // 仅当剪贴板确实包含图片时才需要此判断，避免无谓开销。
+        guard let types = pasteboard.types, types.contains(.png) || types.contains(.tiff) else {
+            return false
+        }
+
+        let hasHTML = types.contains(.html)
+        let hasRTF = types.contains(.rtf)
+        let hasString = types.contains(.string)
+        guard hasHTML || hasRTF || hasString else { return false }
+
+        // Office/Excel 复制通常会带一些自定义的 pasteboard types；优先用 types 快速识别。
+        if types.contains(where: { $0.rawValue.localizedCaseInsensitiveContains("excel") }) {
+            return true
+        }
+
+        if hasHTML, let htmlData = pasteboard.data(forType: .html), Self.htmlLooksLikeOfficeSpreadsheet(htmlData) {
+            return true
+        }
+
+        if hasRTF, let rtfData = pasteboard.data(forType: .rtf), Self.rtfLooksLikeTable(rtfData) {
+            return true
+        }
+
+        if hasString, let string = pasteboard.string(forType: .string), Self.stringLooksLikeTabularData(string) {
+            return true
+        }
+
+        return false
+    }
+
+    nonisolated private static func htmlLooksLikeOfficeSpreadsheet(_ htmlData: Data) -> Bool {
+        // 仅扫描前面一小段，避免大表格导致不必要的开销。
+        let sample = String(decoding: htmlData.prefix(16 * 1024), as: UTF8.self).lowercased()
+
+        // 复制图片（浏览器/设计工具）常见为 <img ...>；即便 HTML 包在 table 中，也不应抢走 image。
+        if sample.contains("<img") { return false }
+
+        // Excel/Office 常见签名（不要求全部命中；任一命中即可）
+        if sample.contains("urn:schemas-microsoft-com:office:excel") { return true }
+        if sample.contains("microsoft excel") { return true }
+        if sample.contains("mso-") { return true }
+
+        // 兜底：明确的表格结构（Excel 复制单元格基本都会包含）
+        if sample.contains("<table") && (sample.contains("<td") || sample.contains("<tr")) {
+            return true
+        }
+
+        return false
+    }
+
+    nonisolated private static func rtfLooksLikeTable(_ rtfData: Data) -> Bool {
+        let sample = String(decoding: rtfData.prefix(16 * 1024), as: UTF8.self).lowercased()
+        // RTF 表格常见控制字：\trowd / \cell
+        return sample.contains("\\trowd") || sample.contains("\\cell")
+    }
+
+    nonisolated private static func stringLooksLikeTabularData(_ string: String) -> Bool {
+        // Excel/Sheets 复制单元格的 plain text 往往是 TSV（列用 tab，行用 \n）。
+        // 注意：不要仅凭“多行”就判定为表格，否则可能误伤“复制图片 + 多行文本描述”的场景。
+        return string.contains("\t")
     }
 
     // MARK: - Helper Methods

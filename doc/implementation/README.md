@@ -8,11 +8,11 @@
 
 | 项目 | 状态 |
 |------|------|
-| **当前版本** | v0.57.fix1 |
-| **测试状态** | ✅ 通过（ScopyTests，2026-01-02） |
-| **构建状态** | ✅ 通过（xcodebuild test，2026-01-02） |
+| **当前版本** | v0.57.fix2 |
+| **测试状态** | ✅ 通过（ScopyTests，2026-01-03） |
+| **构建状态** | ✅ 通过（xcodebuild test，2026-01-03） |
 | **部署位置** | /Applications/Scopy.app |
-| **最后更新** | 2026-01-02 |
+| **最后更新** | 2026-01-03 |
 
 > 详细变更历史请查看 [CHANGELOG.md](./CHANGELOG.md)
 
@@ -24,6 +24,7 @@
 
 | 版本 | 日期 | 主要内容 | 状态 |
 |------|------|----------|------|
+| [v0.57.fix2](./releases/v0.57.fix2.md) | 2026-01-03 | Fix/Clipboard：修复 Excel 复制单元格时历史误识别为图片（优先保留表格富文本/文本语义） | ✅ |
 | [v0.57.fix1](./releases/v0.57.fix1.md) | 2026-01-02 | Fix/Clipboard：修复 ChatGPT 网页复制（KaTeX/MathML）导致的纯文本公式错乱；粘贴到 Typora 可直接得到 `$...$`/`$$...$$` | ✅ |
 | [v0.57](./releases/v0.57.md) | 2025-12-30 | Feat/Export：Markdown/LaTeX 导出 PNG 分辨率 1.5x/2x（真高 DPI），PDF 渲染栅格化 + 长内容兜底 | ✅ |
 | [v0.56](./releases/v0.56.md) | 2025-12-28 | Release：文件条目预览（Quick Look + Markdown）+ 文件备注可搜 + 元数据显示真实文件大小；性能/稳定性硬化（避免主线程读盘、预览 TTL、有界并发） | ✅ |

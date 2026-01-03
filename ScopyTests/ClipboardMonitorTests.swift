@@ -312,6 +312,63 @@ final class ClipboardMonitorTests: XCTestCase {
         XCTAssertNotNil(content?.rawData)
     }
 
+    func testTableHTMLPrefersHTMLOverImageWhenBothExist() {
+        // Simulate Office/Excel: image preview + HTML table + plain text.
+        let image = NSImage(size: NSSize(width: 10, height: 10))
+        image.lockFocus()
+        NSColor.red.set()
+        NSBezierPath.fill(NSRect(x: 0, y: 0, width: 10, height: 10))
+        image.unlockFocus()
+
+        guard let tiffData = image.tiffRepresentation else { return }
+
+        let html = """
+        <html xmlns:x="urn:schemas-microsoft-com:office:excel"><body>
+        <table><tr><td>1</td><td>2</td></tr></table>
+        </body></html>
+        """
+        let htmlData = Data(html.utf8)
+        let plainText = "1\t2"
+
+        pasteboard.clearContents()
+        let item = NSPasteboardItem()
+        item.setString(plainText, forType: .string)
+        item.setData(htmlData, forType: .html)
+        item.setData(tiffData, forType: .tiff)
+        pasteboard.writeObjects([item])
+
+        let content = monitor.readCurrentClipboard()
+        XCTAssertEqual(content?.type, .html)
+        XCTAssertEqual(content?.plainText, plainText)
+        XCTAssertEqual(content?.rawData, htmlData)
+    }
+
+    func testImageHTMLKeepsImageWhenHTMLLooksLikeImage() {
+        // Copy image from browser often includes a small <img ...> HTML snippet; should remain image.
+        let image = NSImage(size: NSSize(width: 10, height: 10))
+        image.lockFocus()
+        NSColor.red.set()
+        NSBezierPath.fill(NSRect(x: 0, y: 0, width: 10, height: 10))
+        image.unlockFocus()
+
+        guard let tiffData = image.tiffRepresentation else { return }
+
+        let html = #"<html><body><img src="https://example.com/a.png" /></body></html>"#
+        let htmlData = Data(html.utf8)
+        let plainText = "https://example.com/a.png"
+
+        pasteboard.clearContents()
+        let item = NSPasteboardItem()
+        item.setString(plainText, forType: .string)
+        item.setData(htmlData, forType: .html)
+        item.setData(tiffData, forType: .tiff)
+        pasteboard.writeObjects([item])
+
+        let content = monitor.readCurrentClipboard()
+        XCTAssertEqual(content?.type, .image)
+        XCTAssertNotNil(content?.rawData)
+    }
+
     // MARK: - Hash Tests (v0.md 3.2)
 
     func testContentHashConsistency() {
@@ -514,6 +571,63 @@ final class ClipboardMonitorTests: XCTestCase {
 
         XCTAssertNotNil(receivedContent)
         XCTAssertTrue(receivedContent?.plainText.contains(expectedPrefix) ?? false)
+    }
+
+    func testMonitorPrefersHTMLTableOverImageWhenBothExist() async {
+        var receivedContent: ClipboardMonitor.ClipboardContent?
+        let expectedText = "1\t2"
+
+        monitor.setPollingInterval(0.1)
+
+        pasteboard.clearContents()
+        pasteboard.setString("Baseline \(UUID())", forType: .string)
+
+        monitor.startMonitoring()
+
+        let expectation = XCTestExpectation(description: "Clipboard change detected as HTML table")
+        let task = Task {
+            for await content in monitor.contentStream {
+                if content.type == .html, content.plainText == expectedText {
+                    receivedContent = content
+                    expectation.fulfill()
+                    break
+                }
+            }
+        }
+
+        try? await Task.sleep(nanoseconds: 100_000_000) // 100ms
+
+        let image = NSImage(size: NSSize(width: 10, height: 10))
+        image.lockFocus()
+        NSColor.red.set()
+        NSBezierPath.fill(NSRect(x: 0, y: 0, width: 10, height: 10))
+        image.unlockFocus()
+        guard let tiffData = image.tiffRepresentation else {
+            task.cancel()
+            XCTFail("Failed to generate test image TIFF")
+            return
+        }
+
+        let html = """
+        <html xmlns:x="urn:schemas-microsoft-com:office:excel"><body>
+        <table><tr><td>1</td><td>2</td></tr></table>
+        </body></html>
+        """
+        let htmlData = Data(html.utf8)
+
+        pasteboard.clearContents()
+        let item = NSPasteboardItem()
+        item.setString(expectedText, forType: .string)
+        item.setData(htmlData, forType: .html)
+        item.setData(tiffData, forType: .tiff)
+        pasteboard.writeObjects([item])
+
+        await fulfillment(of: [expectation], timeout: 3.0)
+        task.cancel()
+
+        XCTAssertNotNil(receivedContent)
+        XCTAssertEqual(receivedContent?.type, .html)
+        XCTAssertEqual(receivedContent?.plainText, expectedText)
     }
 
     // MARK: - App Bundle ID Tests

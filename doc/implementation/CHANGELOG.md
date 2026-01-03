@@ -7,6 +7,16 @@
 
 ## [Unreleased]
 
+## [v0.57.fix2] - 2026-01-03
+
+### Fix/Clipboard
+
+- **Excel 复制单元格误识别为图片**：当剪贴板同时包含“图片预览 + Office 表格类富文本/文本”时，优先存储 HTML/RTF/文本语义，图片降级为兜底，避免历史记录变成图片并影响粘贴行为。
+
+### Test
+
+- `xcodebuild test -scheme Scopy -destination 'platform=macOS' -only-testing:ScopyTests`：Executed 283 tests, 25 skipped, 0 failures（2026-01-03）
+
 ## [v0.57.fix1] - 2026-01-02
 
 ### Fix/Clipboard
