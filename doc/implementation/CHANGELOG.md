@@ -7,6 +7,22 @@
 
 ## [Unreleased]
 
+## [v0.58.fix1] - 2026-01-11
+
+### Perf/Search
+
+- **2 字短词进一步提速**：为 ASCII 1/2 字符短词引入内存 `ShortQueryIndex`（char/bigram 稀疏 postings），用候选集快速定位并以 Swift UTF-8 bytes 扫描计算 matchPos，避免 SQLite `lower(...)`/`instr(...)` 全表扫描的高开销（覆盖不漏项，排序语义保持一致）。
+
+### Infra/SQLite
+
+- `SQLiteStatement.columnTextBytes(_:)`：支持零拷贝读取 UTF-8 字节，供高性能扫描使用。
+
+### Test
+
+- 新增短词 pinned 命中回归测试（SearchServiceTests）。
+- `make test-unit`：Executed 255 tests, 1 skipped, 0 failures（2026-01-11）
+- `make test-strict`：Executed 255 tests, 1 skipped, 0 failures（2026-01-11）
+
 ## [v0.58] - 2026-01-11
 
 ### Perf/Search

@@ -8,7 +8,7 @@
 
 | 项目 | 状态 |
 |------|------|
-| **当前版本** | v0.58 |
+| **当前版本** | v0.58.fix1 |
 | **测试状态** | ✅ 通过（make test-unit / make test-strict，2026-01-11） |
 | **构建状态** | ✅ 通过（make build，2026-01-11） |
 | **部署位置** | /Applications/Scopy.app |
@@ -24,6 +24,7 @@
 
 | 版本 | 日期 | 主要内容 | 状态 |
 |------|------|----------|------|
+| [v0.58.fix1](./releases/v0.58.fix1.md) | 2026-01-11 | Perf/Search：2 字短词（cm）进一步提速到 ~5ms P95（真实 143MB DB）；Correctness：短词 pinned 回归测试 | ✅ |
 | [v0.58](./releases/v0.58.md) | 2026-01-11 | Perf/Search：6k+ 大文本历史 fuzzy 提速 + 渐进式全量校准；Fix/UX：搜索时显示 Pinned；Tooling：真实 DB 快照基准 | ✅ |
 | [v0.57.fix2](./releases/v0.57.fix2.md) | 2026-01-03 | Fix/Clipboard：修复 Excel 复制单元格时历史误识别为图片（优先保留表格富文本/文本语义） | ✅ |
 | [v0.57.fix1](./releases/v0.57.fix1.md) | 2026-01-02 | Fix/Clipboard：修复 ChatGPT 网页复制（KaTeX/MathML）导致的纯文本公式错乱；粘贴到 Typora 可直接得到 `$...$`/`$$...$$` | ✅ |
