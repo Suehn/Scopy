@@ -1,7 +1,7 @@
 import Foundation
 
 enum SQLiteMigrations {
-    static let currentUserVersion: Int32 = 3
+    static let currentUserVersion: Int32 = 4
 
     static func migrateIfNeeded(_ connection: SQLiteConnection) throws {
         let userVersion = try readUserVersion(connection)
@@ -18,6 +18,9 @@ enum SQLiteMigrations {
             try rebuildFTS(connection)
         } else {
             try setupFTS(connection)
+        }
+        if userVersion < 4 {
+            try setupTrigramFTSIfSupported(connection)
         }
 
         try connection.execute("PRAGMA user_version = \(currentUserVersion)")
@@ -115,6 +118,61 @@ enum SQLiteMigrations {
             END
             """
         )
+    }
+
+    private static func setupTrigramFTSIfSupported(_ connection: SQLiteConnection) throws {
+        // Optional: FTS5 trigram tokenizer may not be available on all SQLite builds.
+        // If unsupported, keep the DB usable and fall back to existing search paths.
+        do {
+            try connection.execute(
+                """
+                CREATE VIRTUAL TABLE IF NOT EXISTS clipboard_fts_trigram USING fts5(
+                    plain_text,
+                    note,
+                    content='clipboard_items',
+                    content_rowid='rowid',
+                    tokenize='trigram'
+                )
+                """
+            )
+        } catch {
+            let message = error.localizedDescription.lowercased()
+            if message.contains("trigram") || message.contains("tokenizer") {
+                return
+            }
+            throw error
+        }
+
+        try connection.execute(
+            """
+            CREATE TRIGGER IF NOT EXISTS clipboard_trigram_ai AFTER INSERT ON clipboard_items BEGIN
+                INSERT INTO clipboard_fts_trigram(rowid, plain_text, note) VALUES (NEW.rowid, NEW.plain_text, NEW.note);
+            END
+            """
+        )
+
+        try connection.execute(
+            """
+            CREATE TRIGGER IF NOT EXISTS clipboard_trigram_ad AFTER DELETE ON clipboard_items BEGIN
+                INSERT INTO clipboard_fts_trigram(clipboard_fts_trigram, rowid, plain_text, note) VALUES('delete', OLD.rowid, OLD.plain_text, OLD.note);
+            END
+            """
+        )
+
+        try connection.execute("DROP TRIGGER IF EXISTS clipboard_trigram_au")
+        try connection.execute(
+            """
+            CREATE TRIGGER clipboard_trigram_au
+            AFTER UPDATE OF plain_text, note ON clipboard_items
+            WHEN OLD.plain_text IS NOT NEW.plain_text OR OLD.note IS NOT NEW.note
+            BEGIN
+                INSERT INTO clipboard_fts_trigram(clipboard_fts_trigram, rowid, plain_text, note) VALUES('delete', OLD.rowid, OLD.plain_text, OLD.note);
+                INSERT INTO clipboard_fts_trigram(rowid, plain_text, note) VALUES (NEW.rowid, NEW.plain_text, NEW.note);
+            END
+            """
+        )
+
+        try connection.execute("INSERT INTO clipboard_fts_trigram(clipboard_fts_trigram) VALUES('rebuild')")
     }
 
     private static func addColumnIfNeeded(
