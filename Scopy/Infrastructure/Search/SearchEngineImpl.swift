@@ -24,6 +24,7 @@ public actor SearchEngineImpl {
         public let items: [ClipboardStoredItem]
         public let total: Int
         public let hasMore: Bool
+        public let isPrefilter: Bool
         public let searchTimeMs: Double
     }
 
@@ -31,12 +32,16 @@ public actor SearchEngineImpl {
         let handle: OpaquePointer
     }
 
+    private struct CachedRecentItem {
+        let item: ClipboardStoredItem
+        let plainTextLower: String
+    }
+
     private struct IndexedItem {
         let id: UUID
         let type: ClipboardItemType
         let contentHash: String
         let plainTextLower: String
-        let plainTextLowerIsASCII: Bool
         let appBundleID: String?
         let createdAt: Date
         var lastUsedAt: Date
@@ -56,7 +61,6 @@ public actor SearchEngineImpl {
             }
             let lower = combined.lowercased()
             self.plainTextLower = lower
-            self.plainTextLowerIsASCII = lower.canBeConverted(to: .ascii)
             self.appBundleID = item.appBundleID
             self.createdAt = item.createdAt
             self.lastUsedAt = item.lastUsedAt
@@ -72,6 +76,18 @@ public actor SearchEngineImpl {
         var idToSlot: [UUID: Int]
         var charPostings: [Character: [Int]]
         var tombstoneCount: Int
+    }
+
+    private struct CorpusMetrics: Sendable {
+        let itemCount: Int
+        let avgPlainTextLength: Double
+        let maxPlainTextLength: Int
+
+        var isHeavyPlainTextCorpus: Bool {
+            // Heuristic: long-text corpus makes full-history fuzzy scanning expensive/unpredictable.
+            // - avg ≥ 1k chars OR max ≥ 100k chars => prefer FTS for interactive fuzzy queries.
+            avgPlainTextLength >= 1024 || maxPlainTextLength >= 100_000
+        }
     }
 
     private struct ScoredSlot {
@@ -144,7 +160,7 @@ public actor SearchEngineImpl {
     private let dbPath: String
     private var connection: SQLiteConnection?
 
-    private var recentItemsCache: [ClipboardStoredItem] = []
+    private var recentItemsCache: [CachedRecentItem] = []
     private var cacheTimestamp: Date = .distantPast
     private let cacheDuration: TimeInterval = 30.0
     private let shortQueryCacheSize = 2000
@@ -186,6 +202,15 @@ public actor SearchEngineImpl {
     private let searchTimeout: TimeInterval = 5.0
     private let initialIndexBuildTimeout: TimeInterval = 30.0
 
+    private var corpusMetrics: CorpusMetrics?
+    private var corpusMetricsUpdatedAt: Date = .distantPast
+    private let corpusMetricsRefreshInterval: TimeInterval = 30.0
+
+    private var charPostingsScratchASCII: [Bool] = Array(repeating: false, count: 128)
+    private var charPostingsScratchNonASCII: Set<Character> = []
+
+    private var supportsTrigramFTS: Bool = false
+
     // MARK: - Initialization
 
     public init(dbPath: String) {
@@ -201,6 +226,9 @@ public actor SearchEngineImpl {
     public func close() {
         statementCache = [:]
         fuzzySortedMatchesCache = nil
+        corpusMetrics = nil
+        corpusMetricsUpdatedAt = .distantPast
+        supportsTrigramFTS = false
         connection?.close()
         connection = nil
     }
@@ -210,26 +238,44 @@ public actor SearchEngineImpl {
     public func invalidateCache() {
         resetRecentCache()
         resetFullIndex()
+        markCorpusMetricsStale()
     }
 
     func handleUpsertedItem(_ item: ClipboardStoredItem) {
         resetQueryCaches()
 
-        guard var index = fullIndex, !fullIndexStale else { return }
+        var shouldStaleCorpusMetrics = false
+
+        guard var index = fullIndex, !fullIndexStale else {
+            // Index not built yet; upserts may change corpus size/shape before first search.
+            markCorpusMetricsStale()
+            return
+        }
+
         if let slot = index.idToSlot[item.id],
            slot < index.items.count,
            let existing = index.items[slot] {
             let updated = IndexedItem(from: item)
             if existing.plainTextLower != updated.plainTextLower {
+                // Text/note changed: corpus length distribution may change.
+                shouldStaleCorpusMetrics = true
                 fullIndexStale = true
             } else {
+                // Metadata-only update: keep index in sync without forcing a rebuild.
                 index.items[slot] = updated
             }
         } else {
+            // New item: corpus count changes.
+            shouldStaleCorpusMetrics = true
             upsertItemIntoIndex(item, index: &index)
         }
+
         fullIndex = index
         markIndexChanged()
+
+        if shouldStaleCorpusMetrics {
+            markCorpusMetricsStale()
+        }
     }
 
     func handlePinnedChange(id: UUID, pinned: Bool) {
@@ -251,6 +297,8 @@ public actor SearchEngineImpl {
     }
 
     func handleDeletion(id: UUID) {
+        markCorpusMetricsStale()
+
         if var index = fullIndex,
            !fullIndexStale,
            let slot = index.idToSlot[id],
@@ -330,6 +378,7 @@ public actor SearchEngineImpl {
             items: result.items,
             total: result.total,
             hasMore: result.hasMore,
+            isPrefilter: result.isPrefilter,
             searchTimeMs: elapsedMs
         )
     }
@@ -338,6 +387,7 @@ public actor SearchEngineImpl {
 
     private func searchInternal(request: SearchRequest) async throws -> SearchResult {
         try openIfNeeded()
+        refreshCorpusMetricsIfNeeded()
         try Task.checkCancellation()
 
         switch request.mode {
@@ -363,10 +413,31 @@ public actor SearchEngineImpl {
             }
         }
 
-        guard let ftsQuery = FTSQueryBuilder.build(userQuery: request.query) else {
+        let trimmedQuery = request.query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let ftsQuery = FTSQueryBuilder.build(userQuery: trimmedQuery) else {
             return try searchAllWithFilters(request: request)
         }
-        return try searchWithFTS(query: ftsQuery, request: request)
+
+        let fts = try searchWithFTS(query: ftsQuery, request: request, isPrefilter: false)
+        if fts.items.isEmpty,
+           !trimmedQuery.isEmpty,
+           !trimmedQuery.canBeConverted(to: .ascii) {
+            let tokens = substringSearchTokens(trimmedQuery)
+            let typeFilters = request.typeFilters.map(Array.init)
+            if let page = try? searchWithSubstring(
+                tokens: tokens,
+                sortMode: request.sortMode,
+                appFilter: request.appFilter,
+                typeFilter: request.typeFilter,
+                typeFilters: typeFilters,
+                limit: request.limit,
+                offset: request.offset
+            ), !page.items.isEmpty {
+                return SearchResult(items: page.items, total: page.total, hasMore: page.hasMore, isPrefilter: false, searchTimeMs: 0)
+            }
+        }
+
+        return fts
     }
 
     private func searchFuzzy(request: SearchRequest) async throws -> SearchResult {
@@ -398,7 +469,8 @@ public actor SearchEngineImpl {
 
     private func searchWithFTS(
         query: String,
-        request: SearchRequest
+        request: SearchRequest,
+        isPrefilter: Bool
     ) throws -> SearchResult {
         let typeFilters = request.typeFilters.map(Array.init)
         let page = try searchWithFTS(
@@ -410,7 +482,59 @@ public actor SearchEngineImpl {
             limit: request.limit,
             offset: request.offset
         )
-        return SearchResult(items: page.items, total: page.total, hasMore: page.hasMore, searchTimeMs: 0)
+        return SearchResult(items: page.items, total: page.total, hasMore: page.hasMore, isPrefilter: isPrefilter, searchTimeMs: 0)
+    }
+
+    private func substringSearchTokens(_ query: String) -> [String] {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty { return [] }
+
+        let normalized = trimmed
+            .replacingOccurrences(of: "*", with: "")
+            .replacingOccurrences(of: "-", with: " ")
+
+        return normalized
+            .split(whereSeparator: \.isWhitespace)
+            .map(String.init)
+            .filter { !$0.isEmpty }
+    }
+
+    private func fuzzyPlusTokens(_ queryLower: String) -> [String] {
+        let trimmed = queryLower.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty { return [] }
+
+        return trimmed
+            .split(whereSeparator: \.isWhitespace)
+            .map(String.init)
+            .filter { !$0.isEmpty }
+    }
+
+    private func buildTrigramFTSQuery(tokens: [String]) -> String? {
+        let tokens = tokens.filter { !$0.isEmpty }
+        guard !tokens.isEmpty else { return nil }
+
+        func quotePhrase(_ raw: String) -> String {
+            let escaped = raw.replacingOccurrences(of: "\"", with: "\"\"")
+            return "\"\(escaped)\""
+        }
+
+        if tokens.count == 1 {
+            return quotePhrase(tokens[0])
+        }
+        return tokens.map(quotePhrase).joined(separator: " AND ")
+    }
+
+    private func shouldUseTrigramFTS(tokens: [String]) -> Bool {
+        guard supportsTrigramFTS else { return false }
+        guard !tokens.isEmpty else { return false }
+        return tokens.allSatisfy { $0.count >= 3 }
+    }
+
+    private func shouldUseSubstringOnlyFallbackForFuzzyPlus(tokens: [String]) -> Bool {
+        guard !tokens.isEmpty else { return false }
+        return tokens.allSatisfy { token in
+            token.count >= 3 && token.canBeConverted(to: .ascii)
+        }
     }
 
     // MARK: - Cache Search
@@ -421,22 +545,21 @@ public actor SearchEngineImpl {
     ) throws -> SearchResult {
         try refreshCacheIfNeeded()
 
-        var filtered = recentItemsCache.filter(filter)
+        var filtered: [ClipboardStoredItem] = []
+        filtered.reserveCapacity(min(recentItemsCache.count, request.limit + 1))
 
-        if let appFilter = request.appFilter {
-            filtered = filtered.filter { $0.appBundleID == appFilter }
-        }
-        if let typeFilters = request.typeFilters, !typeFilters.isEmpty {
-            filtered = filtered.filter { typeFilters.contains($0.type) }
-        } else if let typeFilter = request.typeFilter {
-            filtered = filtered.filter { $0.type == typeFilter }
-        }
+        for cached in recentItemsCache {
+            let item = cached.item
+            if !filter(item) { continue }
 
-        filtered.sort {
-            if $0.isPinned != $1.isPinned {
-                return $0.isPinned && !$1.isPinned
+            if let appFilter = request.appFilter, item.appBundleID != appFilter { continue }
+            if let typeFilters = request.typeFilters, !typeFilters.isEmpty {
+                if !typeFilters.contains(item.type) { continue }
+            } else if let typeFilter = request.typeFilter {
+                if item.type != typeFilter { continue }
             }
-            return $0.lastUsedAt > $1.lastUsedAt
+
+            filtered.append(item)
         }
 
         let totalFiltered = filtered.count
@@ -451,7 +574,7 @@ public actor SearchEngineImpl {
         }
 
         let total = hasMore ? -1 : request.offset + items.count
-        return SearchResult(items: items, total: total, hasMore: hasMore, searchTimeMs: 0)
+        return SearchResult(items: items, total: total, hasMore: hasMore, isPrefilter: true, searchTimeMs: 0)
     }
 
     private func refreshCacheIfNeeded() throws {
@@ -460,7 +583,9 @@ public actor SearchEngineImpl {
         guard needsRefresh else { return }
 
         let items = try fetchRecentSummaries(limit: shortQueryCacheSize, offset: 0)
-        recentItemsCache = items
+        recentItemsCache = items.map { item in
+            CachedRecentItem(item: item, plainTextLower: item.plainText.lowercased())
+        }
         cacheTimestamp = now
     }
 
@@ -472,8 +597,88 @@ public actor SearchEngineImpl {
             return try searchAllWithFilters(request: request)
         }
 
+        // If fuzzyPlus query consists of long ASCII tokens (>= 3), the match semantics are substring-only.
+        // For the "full scan" stage, use SQL substring search directly to avoid expensive full-history scoring.
+        if request.forceFullFuzzy,
+           mode == .fuzzyPlus {
+            let tokens = fuzzyPlusTokens(trimmedQuery.lowercased())
+            if shouldUseSubstringOnlyFallbackForFuzzyPlus(tokens: tokens) {
+                let typeFilters = request.typeFilters.map(Array.init)
+                let page = try searchWithSubstringLike(
+                    tokens: tokens,
+                    sortMode: request.sortMode,
+                    appFilter: request.appFilter,
+                    typeFilter: request.typeFilter,
+                    typeFilters: typeFilters,
+                    limit: request.limit,
+                    offset: request.offset
+                )
+                return SearchResult(items: page.items, total: page.total, hasMore: page.hasMore, isPrefilter: false, searchTimeMs: 0)
+            }
+        }
+
+        if !request.forceFullFuzzy,
+           trimmedQuery.count >= 3,
+           shouldPreferFTSForFuzzy(query: trimmedQuery),
+           let ftsQuery = FTSQueryBuilder.build(userQuery: trimmedQuery)
+        {
+            // Fast-path for long-text corpora: return quick prefilter results first, then let UI refine
+            // with `forceFullFuzzy=true` to run a full-history scan (progressive search UX).
+            let fts = try searchWithFTS(query: ftsQuery, request: request, isPrefilter: true)
+            if !fts.items.isEmpty { return fts }
+
+            // For fuzzyPlus, long ASCII tokens (>= 3) are required to match contiguously.
+            // If FTS yields no matches, use a SQL substring-only fallback to avoid full-history scans,
+            // especially for "no result" cases that would otherwise cost O(n * text_length).
+            if mode == .fuzzyPlus {
+                let tokens = fuzzyPlusTokens(trimmedQuery.lowercased())
+                if shouldUseSubstringOnlyFallbackForFuzzyPlus(tokens: tokens) {
+                    let typeFilters = request.typeFilters.map(Array.init)
+                    let page = try searchWithSubstringLike(
+                        tokens: tokens,
+                        sortMode: request.sortMode,
+                        appFilter: request.appFilter,
+                        typeFilter: request.typeFilter,
+                        typeFilters: typeFilters,
+                        limit: request.limit,
+                        offset: request.offset
+                    )
+                    return SearchResult(items: page.items, total: page.total, hasMore: page.hasMore, isPrefilter: false, searchTimeMs: 0)
+                }
+            }
+
+            if !trimmedQuery.canBeConverted(to: .ascii) {
+                let tokens = substringSearchTokens(trimmedQuery)
+                let typeFilters = request.typeFilters.map(Array.init)
+                if let page = try? searchWithSubstring(
+                    tokens: tokens,
+                    sortMode: request.sortMode,
+                    appFilter: request.appFilter,
+                    typeFilter: request.typeFilter,
+                    typeFilters: typeFilters,
+                    limit: request.limit,
+                    offset: request.offset
+                ), !page.items.isEmpty {
+                    return SearchResult(items: page.items, total: page.total, hasMore: page.hasMore, isPrefilter: true, searchTimeMs: 0)
+                }
+            }
+
+            if trimmedQuery.count <= 6 {
+                let fallback = try searchFuzzyInRecentCache(request: request, mode: mode, query: trimmedQuery)
+                if !fallback.items.isEmpty {
+                    return fallback
+                }
+            }
+
+            // Keep the initial (non-forceFullFuzzy) stage fast: even if no prefilter match is found,
+            // return an empty prefilter result quickly and allow UI to refine with a full scan.
+            return SearchResult(items: [], total: 0, hasMore: false, isPrefilter: true, searchTimeMs: 0)
+        }
+
         if trimmedQuery.count <= 2 {
-            if request.forceFullFuzzy {
+            // Prefer the in-memory full index if it is already available; otherwise, fall back to a SQL substring scan.
+            // This avoids the multi-second "first full scan" penalty on large DBs while keeping match/sort semantics stable.
+            if let index = fullIndex, !fullIndexStale {
                 let normalizedRequest = SearchRequest(
                     query: trimmedQuery,
                     mode: mode,
@@ -481,145 +686,32 @@ public actor SearchEngineImpl {
                     appFilter: request.appFilter,
                     typeFilter: request.typeFilter,
                     typeFilters: request.typeFilters,
-                    forceFullFuzzy: true,
+                    forceFullFuzzy: request.forceFullFuzzy,
                     limit: request.limit,
                     offset: request.offset
                 )
-
-                let index = try getOrBuildFullIndex()
-                return try searchInFullIndex(index: index, request: normalizedRequest, mode: mode)
+                let result = try searchInFullIndex(index: index, request: normalizedRequest, mode: mode)
+                return SearchResult(
+                    items: result.items,
+                    total: result.total,
+                    hasMore: result.hasMore,
+                    isPrefilter: result.isPrefilter,
+                    searchTimeMs: 0
+                )
             }
 
-            let normalizedRequest = SearchRequest(
-                query: trimmedQuery,
-                mode: mode,
+            let tokenLower = trimmedQuery.lowercased()
+            let typeFilters = request.typeFilters.map(Array.init)
+            let page = try searchWithShortQuerySubstring(
+                tokenLower: tokenLower,
                 sortMode: request.sortMode,
                 appFilter: request.appFilter,
                 typeFilter: request.typeFilter,
-                typeFilters: request.typeFilters,
-                forceFullFuzzy: request.forceFullFuzzy,
+                typeFilters: typeFilters,
                 limit: request.limit,
                 offset: request.offset
             )
-
-            if request.sortMode == .recent {
-                let cached = try searchInCache(request: normalizedRequest) { item in
-                    item.plainText.localizedCaseInsensitiveContains(trimmedQuery)
-                }
-
-                // Treat short-query cache result as prefilter: it may miss older matches.
-                return SearchResult(items: cached.items, total: -1, hasMore: cached.hasMore, searchTimeMs: 0)
-            }
-
-            let fullCacheRequest = SearchRequest(
-                query: trimmedQuery,
-                mode: mode,
-                sortMode: request.sortMode,
-                appFilter: request.appFilter,
-                typeFilter: request.typeFilter,
-                typeFilters: request.typeFilters,
-                forceFullFuzzy: request.forceFullFuzzy,
-                limit: shortQueryCacheSize,
-                offset: 0
-            )
-            let cachedAll = try searchInCache(request: fullCacheRequest) { item in
-                item.plainText.localizedCaseInsensitiveContains(trimmedQuery)
-            }
-
-            let queryLower = trimmedQuery.lowercased()
-            let queryLowerIsASCII = queryLower.canBeConverted(to: .ascii)
-            let plusWords: [(word: String, isASCII: Bool)]
-            if mode == .fuzzyPlus {
-                plusWords = queryLower
-                    .split(separator: " ")
-                    .map(String.init)
-                    .filter { !$0.isEmpty }
-                    .map { (word: $0, isASCII: $0.canBeConverted(to: .ascii)) }
-            } else {
-                plusWords = []
-            }
-
-            func score(for item: ClipboardStoredItem) -> Int? {
-                let textLower = item.plainText.lowercased()
-                let textLowerIsASCII = textLower.canBeConverted(to: .ascii)
-
-                switch mode {
-                case .fuzzy:
-                    return fuzzyMatchScore(
-                        textLower: textLower,
-                        textLowerIsASCII: textLowerIsASCII,
-                        queryLower: queryLower,
-                        queryLowerIsASCII: queryLowerIsASCII
-                    )
-                case .fuzzyPlus:
-                    var totalScore = 0
-                    var ok = true
-                    for wordInfo in plusWords {
-                        if wordInfo.isASCII, wordInfo.word.count >= 3 {
-                            guard let range = textLower.range(of: wordInfo.word) else {
-                                ok = false
-                                break
-                            }
-                            let pos = range.lowerBound.utf16Offset(in: textLower)
-                            let m = wordInfo.word.utf16.count
-                            totalScore += m * 10 - (m - 1) - pos
-                            continue
-                        }
-
-                        guard let s = fuzzyMatchScore(
-                            textLower: textLower,
-                            textLowerIsASCII: textLowerIsASCII,
-                            queryLower: wordInfo.word,
-                            queryLowerIsASCII: wordInfo.isASCII
-                        ) else {
-                            ok = false
-                            break
-                        }
-                        totalScore += s
-                    }
-                    return ok ? totalScore : nil
-                default:
-                    return nil
-                }
-            }
-
-            struct ScoredCachedItem {
-                let item: ClipboardStoredItem
-                let score: Int
-            }
-
-            var scored: [ScoredCachedItem] = []
-            scored.reserveCapacity(cachedAll.items.count)
-            for item in cachedAll.items {
-                guard let score = score(for: item) else { continue }
-                scored.append(ScoredCachedItem(item: item, score: score))
-            }
-
-            scored.sort { lhs, rhs in
-                if lhs.item.isPinned != rhs.item.isPinned {
-                    return lhs.item.isPinned && !rhs.item.isPinned
-                }
-                if lhs.score != rhs.score {
-                    return lhs.score > rhs.score
-                }
-                if lhs.item.lastUsedAt != rhs.item.lastUsedAt {
-                    return lhs.item.lastUsedAt > rhs.item.lastUsedAt
-                }
-                return lhs.item.id.uuidString < rhs.item.id.uuidString
-            }
-
-            let totalMatches = scored.count
-            let start = min(request.offset, totalMatches)
-            let end = min(start + request.limit + 1, totalMatches)
-            var page = (start < end) ? Array(scored[start..<end]) : []
-
-            let hasMore = page.count > request.limit
-            if hasMore {
-                page.removeLast()
-            }
-
-            let items = page.map(\.item)
-            return SearchResult(items: items, total: -1, hasMore: hasMore, searchTimeMs: 0)
+            return SearchResult(items: page.items, total: page.total, hasMore: page.hasMore, isPrefilter: false, searchTimeMs: 0)
         }
 
         let normalizedRequest = SearchRequest(
@@ -635,7 +727,14 @@ public actor SearchEngineImpl {
         )
 
         let index = try getOrBuildFullIndex()
-        return try searchInFullIndex(index: index, request: normalizedRequest, mode: mode)
+        let result = try searchInFullIndex(index: index, request: normalizedRequest, mode: mode)
+        return SearchResult(
+            items: result.items,
+            total: result.total,
+            hasMore: result.hasMore,
+            isPrefilter: result.isPrefilter,
+            searchTimeMs: 0
+        )
     }
 
     private func getOrBuildFullIndex() throws -> FullFuzzyIndex {
@@ -650,29 +749,51 @@ public actor SearchEngineImpl {
     }
 
     private func buildFullIndex() throws -> FullFuzzyIndex {
-        let storedItems = try fetchAllSummaries()
+        let estimatedCount = corpusMetrics?.itemCount ?? 0
+
+        let sql = """
+            SELECT id, type, content_hash, plain_text, note, app_bundle_id, created_at, last_used_at,
+                   use_count, is_pinned, size_bytes, storage_ref, file_size_bytes
+            FROM clipboard_items
+        """
+        let stmt = try prepare(sql)
+        defer { stmt.reset() }
 
         var items: [IndexedItem?] = []
-        items.reserveCapacity(storedItems.count)
+        if estimatedCount > 0 {
+            items.reserveCapacity(estimatedCount)
+        }
 
         var idToSlot: [UUID: Int] = [:]
-        idToSlot.reserveCapacity(storedItems.count)
+        if estimatedCount > 0 {
+            idToSlot.reserveCapacity(estimatedCount)
+        }
 
         var charPostings: [Character: [Int]] = [:]
+        var seenASCII = Array(repeating: false, count: 128)
+        var seenNonASCII = Set<Character>()
+        seenNonASCII.reserveCapacity(16)
 
-        for (idx, stored) in storedItems.enumerated() {
-            if idx % 512 == 0 {
+        var row = 0
+        while try stmt.step() {
+            if row % 512 == 0 {
                 try Task.checkCancellation()
             }
+            row += 1
 
+            let stored = try parseStoredItemSummary(from: stmt)
             let indexed = IndexedItem(from: stored)
             let slot = items.count
             items.append(indexed)
             idToSlot[indexed.id] = slot
 
-            for ch in uniqueNonWhitespaceCharacters(indexed.plainTextLower) {
-                charPostings[ch, default: []].append(slot)
-            }
+            appendSlotToCharPostings(
+                text: indexed.plainTextLower,
+                slot: slot,
+                charPostings: &charPostings,
+                seenASCII: &seenASCII,
+                seenNonASCII: &seenNonASCII
+            )
         }
 
         return FullFuzzyIndex(items: items, idToSlot: idToSlot, charPostings: charPostings, tombstoneCount: 0)
@@ -699,7 +820,7 @@ public actor SearchEngineImpl {
             lists.reserveCapacity(queryChars.count)
             for ch in queryChars {
                 guard let list = index.charPostings[ch] else {
-                    return SearchResult(items: [], total: 0, hasMore: false, searchTimeMs: 0)
+                    return SearchResult(items: [], total: 0, hasMore: false, isPrefilter: false, searchTimeMs: 0)
                 }
                 lists.append(list)
             }
@@ -730,7 +851,6 @@ public actor SearchEngineImpl {
             case .fuzzy:
                 return fuzzyMatchScore(
                     textLower: item.plainTextLower,
-                    textLowerIsASCII: item.plainTextLowerIsASCII,
                     queryLower: queryLower,
                     queryLowerIsASCII: queryLowerIsASCII
                 )
@@ -751,7 +871,6 @@ public actor SearchEngineImpl {
 
                     guard let s = fuzzyMatchScore(
                         textLower: item.plainTextLower,
-                        textLowerIsASCII: item.plainTextLowerIsASCII,
                         queryLower: wordInfo.word,
                         queryLowerIsASCII: wordInfo.isASCII
                     ) else {
@@ -875,7 +994,7 @@ public actor SearchEngineImpl {
                 }
                 let pageIDs = pageSlots.compactMap { index.items[$0]?.id }
                 let resultItems = try fetchItemsByIDs(ids: pageIDs)
-                return SearchResult(items: resultItems, total: -1, hasMore: hasMore, searchTimeMs: 0)
+                return SearchResult(items: resultItems, total: -1, hasMore: hasMore, isPrefilter: true, searchTimeMs: 0)
             }
 
             var topHeap = BinaryHeap<ScoredSlot>(areSorted: isWorseSlot)
@@ -919,7 +1038,7 @@ public actor SearchEngineImpl {
             let hasMore = totalMatches > request.offset + request.limit
             let pageIDs = page.compactMap { index.items[$0.slot]?.id }
             let resultItems = try fetchItemsByIDs(ids: pageIDs)
-            return SearchResult(items: resultItems, total: -1, hasMore: hasMore, searchTimeMs: 0)
+            return SearchResult(items: resultItems, total: -1, hasMore: hasMore, isPrefilter: true, searchTimeMs: 0)
         }
 
         func typeFiltersKey(_ set: Set<ClipboardItemType>?) -> String? {
@@ -951,7 +1070,7 @@ public actor SearchEngineImpl {
 
             let pageIDs = page.compactMap { index.items[$0.slot]?.id }
             let resultItems = try fetchItemsByIDs(ids: pageIDs)
-            return SearchResult(items: resultItems, total: totalMatches, hasMore: hasMore, searchTimeMs: 0)
+            return SearchResult(items: resultItems, total: totalMatches, hasMore: hasMore, isPrefilter: false, searchTimeMs: 0)
         }
 
         // P0: Stabilize deep paging cost without changing semantics.
@@ -1031,7 +1150,136 @@ public actor SearchEngineImpl {
 
         let pageIDs = page.compactMap { index.items[$0.slot]?.id }
         let resultItems = try fetchItemsByIDs(ids: pageIDs)
-        return SearchResult(items: resultItems, total: total, hasMore: hasMore, searchTimeMs: 0)
+        return SearchResult(items: resultItems, total: total, hasMore: hasMore, isPrefilter: totalIsUnknown, searchTimeMs: 0)
+    }
+
+    private func shouldPreferFTSForFuzzy(query: String) -> Bool {
+        guard let corpusMetrics else { return false }
+        guard !query.isEmpty else { return false }
+        return corpusMetrics.isHeavyPlainTextCorpus
+    }
+
+    private func searchFuzzyInRecentCache(request: SearchRequest, mode: SearchMode, query: String) throws -> SearchResult {
+        try refreshCacheIfNeeded()
+
+        let queryLower = query.lowercased()
+        let queryLowerIsASCII = queryLower.canBeConverted(to: .ascii)
+
+        let plusWords: [(word: String, isASCII: Bool)]
+        if mode == .fuzzyPlus {
+            plusWords = queryLower
+                .split(separator: " ")
+                .map(String.init)
+                .filter { !$0.isEmpty }
+                .map { (word: $0, isASCII: $0.canBeConverted(to: .ascii)) }
+        } else {
+            plusWords = []
+        }
+
+        func score(for item: ClipboardStoredItem) -> Int? {
+            let combined: String = {
+                if let note = item.note, !note.isEmpty {
+                    return item.plainText + "\n" + note
+                }
+                return item.plainText
+            }()
+
+            let textLower = combined.lowercased()
+
+            switch mode {
+            case .fuzzy:
+                return fuzzyMatchScore(
+                    textLower: textLower,
+                    queryLower: queryLower,
+                    queryLowerIsASCII: queryLowerIsASCII
+                )
+            case .fuzzyPlus:
+                var totalScore = 0
+                var ok = true
+                for wordInfo in plusWords {
+                    if wordInfo.isASCII, wordInfo.word.count >= 3 {
+                        guard let range = textLower.range(of: wordInfo.word) else {
+                            ok = false
+                            break
+                        }
+                        let pos = range.lowerBound.utf16Offset(in: textLower)
+                        let m = wordInfo.word.utf16.count
+                        totalScore += m * 10 - (m - 1) - pos
+                        continue
+                    }
+
+                    guard let s = fuzzyMatchScore(
+                        textLower: textLower,
+                        queryLower: wordInfo.word,
+                        queryLowerIsASCII: wordInfo.isASCII
+                    ) else {
+                        ok = false
+                        break
+                    }
+                    totalScore += s
+                }
+                return ok ? totalScore : nil
+            default:
+                return nil
+            }
+        }
+
+        struct ScoredCachedItem {
+            let item: ClipboardStoredItem
+            let score: Int
+        }
+
+        var scored: [ScoredCachedItem] = []
+        scored.reserveCapacity(min(recentItemsCache.count, shortQueryCacheSize))
+
+        for cached in recentItemsCache {
+            let item = cached.item
+            if let appFilter = request.appFilter, item.appBundleID != appFilter { continue }
+            if let typeFilters = request.typeFilters, !typeFilters.isEmpty {
+                if !typeFilters.contains(item.type) { continue }
+            } else if let typeFilter = request.typeFilter {
+                if item.type != typeFilter { continue }
+            }
+
+            guard let s = score(for: item) else { continue }
+            scored.append(ScoredCachedItem(item: item, score: s))
+        }
+
+        scored.sort { lhs, rhs in
+            if lhs.item.isPinned != rhs.item.isPinned {
+                return lhs.item.isPinned && !rhs.item.isPinned
+            }
+            switch request.sortMode {
+            case .recent:
+                if lhs.item.lastUsedAt != rhs.item.lastUsedAt {
+                    return lhs.item.lastUsedAt > rhs.item.lastUsedAt
+                }
+                if lhs.score != rhs.score {
+                    return lhs.score > rhs.score
+                }
+            case .relevance:
+                if lhs.score != rhs.score {
+                    return lhs.score > rhs.score
+                }
+                if lhs.item.lastUsedAt != rhs.item.lastUsedAt {
+                    return lhs.item.lastUsedAt > rhs.item.lastUsedAt
+                }
+            }
+            return lhs.item.id.uuidString < rhs.item.id.uuidString
+        }
+
+        let totalMatches = scored.count
+        let start = min(request.offset, totalMatches)
+        let end = min(start + request.limit + 1, totalMatches)
+        var page = (start < end) ? Array(scored[start..<end]) : []
+
+        let hasMore = page.count > request.limit
+        if hasMore {
+            page.removeLast()
+        }
+
+        let items = page.map(\.item)
+        return SearchResult(items: items, total: -1, hasMore: hasMore, isPrefilter: true, searchTimeMs: 0)
     }
 
     private func ftsPrefilterSlots(index: FullFuzzyIndex, ftsQuery: String, limit: Int) throws -> [Int] {
@@ -1077,8 +1325,41 @@ public actor SearchEngineImpl {
         index.items.append(indexed)
         index.idToSlot[indexed.id] = slot
 
-        for ch in uniqueNonWhitespaceCharacters(indexed.plainTextLower) {
-            index.charPostings[ch, default: []].append(slot)
+        appendSlotToCharPostings(
+            text: indexed.plainTextLower,
+            slot: slot,
+            charPostings: &index.charPostings,
+            seenASCII: &charPostingsScratchASCII,
+            seenNonASCII: &charPostingsScratchNonASCII
+        )
+    }
+
+    private func appendSlotToCharPostings(
+        text: String,
+        slot: Int,
+        charPostings: inout [Character: [Int]],
+        seenASCII: inout [Bool],
+        seenNonASCII: inout Set<Character>
+    ) {
+        for i in 0..<seenASCII.count {
+            seenASCII[i] = false
+        }
+        seenNonASCII.removeAll(keepingCapacity: true)
+
+        for ch in text {
+            if ch.isWhitespace { continue }
+            if let ascii = ch.asciiValue {
+                let idx = Int(ascii)
+                if !seenASCII[idx] {
+                    seenASCII[idx] = true
+                    charPostings[ch, default: []].append(slot)
+                }
+                continue
+            }
+
+            if seenNonASCII.insert(ch).inserted {
+                charPostings[ch, default: []].append(slot)
+            }
         }
     }
 
@@ -1099,45 +1380,170 @@ public actor SearchEngineImpl {
 
     private func fuzzyMatchScore(
         textLower: String,
-        textLowerIsASCII: Bool,
         queryLower: String,
         queryLowerIsASCII: Bool
     ) -> Int? {
         guard !queryLower.isEmpty else { return 0 }
 
         if queryLower.count <= 2 {
-            guard let range = textLower.range(of: queryLower) else { return nil }
-            let pos = range.lowerBound.utf16Offset(in: textLower)
+            guard let pos = findNeedleUTF16Offset(haystack: textLower, needle: queryLower) else { return nil }
             let m = queryLower.utf16.count
             return m * 10 - (m - 1) - pos
         }
 
-        if queryLowerIsASCII,
-           textLowerIsASCII,
-           let range = textLower.range(of: queryLower) {
-            let pos = range.lowerBound.utf16Offset(in: textLower)
-            let m = queryLower.utf16.count
-            return m * 10 - (m - 1) - pos
+        if queryLowerIsASCII {
+            return fuzzyMatchScoreASCIIUTF16(textLower: textLower, queryLower: queryLower)
         }
 
-        var textIndex = textLower.startIndex
+        // Fuzzy subsequence matching (non-contiguous). Implemented as a single pass to avoid
+        // repeated `String.Index` distance computations on large/unicode-heavy texts.
+        let queryCount = queryLower.count
+        var queryIterator = queryLower.makeIterator()
+        guard var queryChar = queryIterator.next() else { return 0 }
+
         var firstPos: Int?
         var lastPos = 0
         var gapPenalty = 0
         var matchedCount = 0
+        var searchStartPos = 0
 
-        for ch in queryLower {
-            guard let found = textLower[textIndex...].firstIndex(of: ch) else { return nil }
-            let pos = textLower.distance(from: textLower.startIndex, to: found)
-            if firstPos == nil { firstPos = pos }
-            gapPenalty += textLower.distance(from: textIndex, to: found)
-            matchedCount += 1
-            textIndex = textLower.index(after: found)
-            lastPos = pos
+        var pos = 0
+        for ch in textLower {
+            if ch == queryChar {
+                if firstPos == nil { firstPos = pos }
+                gapPenalty += pos - searchStartPos
+                matchedCount += 1
+                lastPos = pos
+                if let next = queryIterator.next() {
+                    queryChar = next
+                    searchStartPos = pos + 1
+                } else {
+                    break
+                }
+            }
+            pos += 1
         }
 
+        guard matchedCount == queryCount else { return nil }
         let span = firstPos.map { lastPos - $0 } ?? 0
         return matchedCount * 10 - span - gapPenalty
+    }
+
+    private func fuzzyMatchScoreASCIIUTF16(textLower: String, queryLower: String) -> Int? {
+        // ASCII-only query: run a single-pass subsequence match on UTF16 code units.
+        //
+        // Rationale:
+        // - Avoids `Character` iteration overhead on very large texts.
+        // - Keeps score semantics aligned with the existing gap/span model, and naturally
+        //   ranks contiguous matches higher (because span/gapPenalty become smaller).
+        let queryUnits = Array(queryLower.utf16)
+        guard !queryUnits.isEmpty else { return 0 }
+
+        var queryIndex = 0
+        let queryCount = queryUnits.count
+        var firstPos: Int?
+        var lastPos = 0
+        var gapPenalty = 0
+        var matchedCount = 0
+        var searchStartPos = 0
+
+        var pos = 0
+        for cu in textLower.utf16 {
+            if cu == queryUnits[queryIndex] {
+                if firstPos == nil { firstPos = pos }
+                gapPenalty += pos - searchStartPos
+                matchedCount += 1
+                lastPos = pos
+                queryIndex += 1
+                if queryIndex >= queryCount { break }
+                searchStartPos = pos + 1
+            }
+            pos += 1
+        }
+
+        guard matchedCount == queryCount else { return nil }
+        let span = firstPos.map { lastPos - $0 } ?? 0
+        return matchedCount * 10 - span - gapPenalty
+    }
+
+    private func findNeedleUTF16Offset(haystack: String, needle: String) -> Int? {
+        guard !needle.isEmpty else { return 0 }
+
+        if !isSafeForFastUTF16Search(needle) {
+            guard let range = haystack.range(of: needle) else { return nil }
+            return range.lowerBound.utf16Offset(in: haystack)
+        }
+
+        let needleUnits = Array(needle.utf16)
+        guard let first = needleUnits.first else { return 0 }
+
+        // Hot path: short queries (≤ 2 chars) => needle is tiny in UTF16 as well (most cases).
+        switch needleUnits.count {
+        case 1:
+            var pos = 0
+            for cu in haystack.utf16 {
+                if cu == first { return pos }
+                pos += 1
+            }
+            return nil
+        case 2:
+            let second = needleUnits[1]
+            var pos = 0
+            var prev: UInt16? = nil
+            for cu in haystack.utf16 {
+                if prev == first, cu == second {
+                    return pos - 1
+                }
+                prev = cu
+                pos += 1
+            }
+            return nil
+        case 3:
+            let second = needleUnits[1]
+            let third = needleUnits[2]
+            var pos = 0
+            var prev1: UInt16? = nil
+            var prev2: UInt16? = nil
+            for cu in haystack.utf16 {
+                if prev2 == first, prev1 == second, cu == third {
+                    return pos - 2
+                }
+                prev2 = prev1
+                prev1 = cu
+                pos += 1
+            }
+            return nil
+        case 4:
+            let second = needleUnits[1]
+            let third = needleUnits[2]
+            let fourth = needleUnits[3]
+            var pos = 0
+            var prev1: UInt16? = nil
+            var prev2: UInt16? = nil
+            var prev3: UInt16? = nil
+            for cu in haystack.utf16 {
+                if prev3 == first, prev2 == second, prev1 == third, cu == fourth {
+                    return pos - 3
+                }
+                prev3 = prev2
+                prev2 = prev1
+                prev1 = cu
+                pos += 1
+            }
+            return nil
+        default:
+            guard let range = haystack.range(of: needle) else { return nil }
+            return range.lowerBound.utf16Offset(in: haystack)
+        }
+    }
+
+    private func isSafeForFastUTF16Search(_ needle: String) -> Bool {
+        // If canonical mapping changes, Swift `String` search may match canonically-equivalent sequences.
+        // Keep the fast UTF16 scan only when the needle is stable under canonical compose/decompose.
+        let ns = needle as NSString
+        if ns.precomposedStringWithCanonicalMapping != needle { return false }
+        if ns.decomposedStringWithCanonicalMapping != needle { return false }
+        return true
     }
 
     // MARK: - Timeout
@@ -1189,6 +1595,7 @@ public actor SearchEngineImpl {
             try conn.execute("PRAGMA temp_store = MEMORY")
             try conn.execute("PRAGMA mmap_size = 268435456")
             try verifySchema(conn)
+            supportsTrigramFTS = (try? conn.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='clipboard_fts_trigram'").step()) == true
         } catch {
             conn.close()
             throw SearchError.searchFailed(error.localizedDescription)
@@ -1197,6 +1604,48 @@ public actor SearchEngineImpl {
         connection = conn
         statementCache = [:]
         fuzzySortedMatchesCache = nil
+        refreshCorpusMetricsIfNeeded(force: true)
+    }
+
+    private func markCorpusMetricsStale() {
+        corpusMetricsUpdatedAt = .distantPast
+    }
+
+    private func refreshCorpusMetricsIfNeeded(force: Bool = false) {
+        let now = Date()
+        if !force,
+           corpusMetrics != nil,
+           now.timeIntervalSince(corpusMetricsUpdatedAt) < corpusMetricsRefreshInterval {
+            return
+        }
+
+        if let metrics = try? computeCorpusMetrics() {
+            corpusMetrics = metrics
+        }
+        corpusMetricsUpdatedAt = now
+    }
+
+    private func computeCorpusMetrics() throws -> CorpusMetrics {
+        let sql = """
+            SELECT COUNT(*), AVG(LENGTH(CAST(plain_text AS BLOB))), MAX(LENGTH(CAST(plain_text AS BLOB)))
+            FROM clipboard_items
+        """
+        let stmt = try prepare(sql)
+        defer { stmt.reset() }
+
+        guard try stmt.step() else {
+            return CorpusMetrics(itemCount: 0, avgPlainTextLength: 0, maxPlainTextLength: 0)
+        }
+
+        let itemCount = stmt.columnInt(0)
+        let avgLength = stmt.columnDouble(1)
+        let maxLength = stmt.columnInt(2)
+
+        return CorpusMetrics(
+            itemCount: itemCount,
+            avgPlainTextLength: avgLength,
+            maxPlainTextLength: maxLength
+        )
     }
 
     private func verifySchema(_ connection: SQLiteConnection) throws {
@@ -1311,7 +1760,7 @@ public actor SearchEngineImpl {
             limit: request.limit,
             offset: request.offset
         )
-        return SearchResult(items: page.items, total: page.total, hasMore: page.hasMore, searchTimeMs: 0)
+        return SearchResult(items: page.items, total: page.total, hasMore: page.hasMore, isPrefilter: false, searchTimeMs: 0)
     }
 
     private func searchAllWithFilters(
@@ -1385,22 +1834,22 @@ public actor SearchEngineImpl {
         case .relevance:
             sql = """
                 SELECT clipboard_items.id, clipboard_items.type, clipboard_items.content_hash, clipboard_items.plain_text,
-                       clipboard_items.app_bundle_id, clipboard_items.created_at, clipboard_items.last_used_at,
-                       clipboard_items.use_count, clipboard_items.is_pinned, clipboard_items.size_bytes, clipboard_items.storage_ref
-                FROM clipboard_items INDEXED BY idx_pinned
-                JOIN clipboard_fts ON clipboard_items.rowid = clipboard_fts.rowid
+                       clipboard_items.note, clipboard_items.app_bundle_id, clipboard_items.created_at, clipboard_items.last_used_at,
+                       clipboard_items.use_count, clipboard_items.is_pinned, clipboard_items.size_bytes, clipboard_items.storage_ref,
+                       clipboard_items.file_size_bytes
+                FROM clipboard_fts
+                JOIN clipboard_items ON clipboard_items.rowid = clipboard_fts.rowid
                 WHERE clipboard_fts MATCH ?
             """
         case .recent:
             sql = """
-                SELECT id, type, content_hash, plain_text, note, app_bundle_id, created_at, last_used_at,
-                       use_count, is_pinned, size_bytes, storage_ref, file_size_bytes
-                FROM clipboard_items INDEXED BY idx_pinned
-                WHERE rowid IN (
-                    SELECT rowid
-                    FROM clipboard_fts
-                    WHERE clipboard_fts MATCH ?
-                )
+                SELECT clipboard_items.id, clipboard_items.type, clipboard_items.content_hash, clipboard_items.plain_text,
+                       clipboard_items.note, clipboard_items.app_bundle_id, clipboard_items.created_at, clipboard_items.last_used_at,
+                       clipboard_items.use_count, clipboard_items.is_pinned, clipboard_items.size_bytes, clipboard_items.storage_ref,
+                       clipboard_items.file_size_bytes
+                FROM clipboard_fts
+                JOIN clipboard_items ON clipboard_items.rowid = clipboard_fts.rowid
+                WHERE clipboard_fts MATCH ?
             """
         }
 
@@ -1453,16 +1902,529 @@ public actor SearchEngineImpl {
         return (items, total, hasMore)
     }
 
+    private func searchWithTrigramFTS(
+        ftsQuery: String,
+        primaryTokenLower: String,
+        sortMode: SearchSortMode,
+        appFilter: String?,
+        typeFilter: ClipboardItemType?,
+        typeFilters: [ClipboardItemType]?,
+        limit: Int,
+        offset: Int
+    ) throws -> (items: [ClipboardStoredItem], total: Int, hasMore: Bool) {
+        let sql: String
+        var params: [String] = []
+
+        switch sortMode {
+        case .recent:
+            sql = """
+                SELECT clipboard_items.id, clipboard_items.type, clipboard_items.content_hash, clipboard_items.plain_text,
+                       clipboard_items.note, clipboard_items.app_bundle_id, clipboard_items.created_at, clipboard_items.last_used_at,
+                       clipboard_items.use_count, clipboard_items.is_pinned, clipboard_items.size_bytes, clipboard_items.storage_ref,
+                       clipboard_items.file_size_bytes
+                FROM clipboard_fts_trigram
+                JOIN clipboard_items ON clipboard_items.rowid = clipboard_fts_trigram.rowid
+                WHERE clipboard_fts_trigram MATCH ?
+            """
+            params.append(ftsQuery)
+        case .relevance:
+            sql = """
+                SELECT id, type, content_hash, plain_text, note, app_bundle_id, created_at, last_used_at,
+                       use_count, is_pinned, size_bytes, storage_ref, file_size_bytes
+                FROM (
+                    SELECT clipboard_items.id, clipboard_items.type, clipboard_items.content_hash, clipboard_items.plain_text,
+                           clipboard_items.note, clipboard_items.app_bundle_id, clipboard_items.created_at, clipboard_items.last_used_at,
+                           clipboard_items.use_count, clipboard_items.is_pinned, clipboard_items.size_bytes, clipboard_items.storage_ref,
+                           clipboard_items.file_size_bytes,
+                           instr(lower(clipboard_items.plain_text), ?) AS plainPos,
+                           instr(lower(coalesce(clipboard_items.note, '')), ?) AS notePos
+                    FROM clipboard_fts_trigram
+                    JOIN clipboard_items ON clipboard_items.rowid = clipboard_fts_trigram.rowid
+                    WHERE clipboard_fts_trigram MATCH ?
+            """
+            params.append(primaryTokenLower)
+            params.append(primaryTokenLower)
+            params.append(ftsQuery)
+        }
+
+        var sqlWithFilters = sql
+
+        if let appFilter {
+            sqlWithFilters += " AND app_bundle_id = ?"
+            params.append(appFilter)
+        }
+
+        if let typeFilters, !typeFilters.isEmpty {
+            let placeholders = typeFilters.map { _ in "?" }.joined(separator: ",")
+            sqlWithFilters += " AND type IN (\(placeholders))"
+            params.append(contentsOf: typeFilters.map(\.rawValue))
+        } else if let typeFilter {
+            sqlWithFilters += " AND type = ?"
+            params.append(typeFilter.rawValue)
+        }
+
+        switch sortMode {
+        case .recent:
+            sqlWithFilters += " ORDER BY is_pinned DESC, last_used_at DESC, id ASC"
+            sqlWithFilters += " LIMIT ? OFFSET ?"
+        case .relevance:
+            sqlWithFilters += """
+                    ) t
+                WHERE plainPos > 0 OR notePos > 0
+                ORDER BY is_pinned DESC,
+                         CASE
+                           WHEN plainPos > 0 AND notePos > 0 THEN CASE WHEN plainPos < notePos THEN plainPos ELSE notePos END
+                           WHEN plainPos > 0 THEN plainPos
+                           ELSE notePos
+                         END ASC,
+                         last_used_at DESC,
+                         id ASC
+                LIMIT ? OFFSET ?
+            """
+        }
+
+        let stmt = try prepare(sqlWithFilters)
+        defer { stmt.reset() }
+        var bindIndex: Int32 = 1
+        for param in params {
+            try stmt.bindText(param, at: bindIndex)
+            bindIndex += 1
+        }
+        try stmt.bindInt(limit + 1, at: bindIndex)
+        try stmt.bindInt(offset, at: bindIndex + 1)
+
+        var items: [ClipboardStoredItem] = []
+        items.reserveCapacity(limit + 1)
+        while try stmt.step() {
+            items.append(try parseStoredItemSummary(from: stmt))
+        }
+
+        let hasMore = items.count > limit
+        if hasMore {
+            items.removeLast()
+        }
+        let total = hasMore ? -1 : offset + items.count
+        return (items, total, hasMore)
+    }
+
+    private func searchWithSubstring(
+        tokens: [String],
+        sortMode: SearchSortMode,
+        appFilter: String?,
+        typeFilter: ClipboardItemType?,
+        typeFilters: [ClipboardItemType]?,
+        limit: Int,
+        offset: Int
+    ) throws -> (items: [ClipboardStoredItem], total: Int, hasMore: Bool) {
+        let tokens = tokens.filter { !$0.isEmpty }
+        guard let primary = tokens.first else { return ([], 0, false) }
+        let extraTokens = Array(tokens.dropFirst())
+
+        if shouldUseTrigramFTS(tokens: tokens),
+           let ftsQuery = buildTrigramFTSQuery(tokens: tokens)
+        {
+            return try searchWithTrigramFTS(
+                ftsQuery: ftsQuery,
+                primaryTokenLower: primary.lowercased(),
+                sortMode: sortMode,
+                appFilter: appFilter,
+                typeFilter: typeFilter,
+                typeFilters: typeFilters,
+                limit: limit,
+                offset: offset
+            )
+        }
+
+        var params: [String] = []
+        var sql: String
+
+        switch sortMode {
+        case .recent:
+            sql = """
+                SELECT id, type, content_hash, plain_text, note, app_bundle_id, created_at, last_used_at,
+                       use_count, is_pinned, size_bytes, storage_ref, file_size_bytes
+                FROM clipboard_items INDEXED BY idx_pinned
+                WHERE 1 = 1
+            """
+
+            if let appFilter {
+                sql += " AND app_bundle_id = ?"
+                params.append(appFilter)
+            }
+
+            if let typeFilters, !typeFilters.isEmpty {
+                let placeholders = typeFilters.map { _ in "?" }.joined(separator: ",")
+                sql += " AND type IN (\(placeholders))"
+                params.append(contentsOf: typeFilters.map(\.rawValue))
+            } else if let typeFilter {
+                sql += " AND type = ?"
+                params.append(typeFilter.rawValue)
+            }
+
+            func appendTokenFilter(_ token: String) {
+                sql += " AND (instr(plain_text, ?) > 0 OR instr(coalesce(note, ''), ?) > 0)"
+                params.append(token)
+                params.append(token)
+            }
+
+            appendTokenFilter(primary)
+            for token in extraTokens {
+                appendTokenFilter(token)
+            }
+
+            sql += " ORDER BY is_pinned DESC, last_used_at DESC, id ASC"
+            sql += " LIMIT ? OFFSET ?"
+        case .relevance:
+            sql = """
+                SELECT id, type, content_hash, plain_text, note, app_bundle_id, created_at, last_used_at,
+                       use_count, is_pinned, size_bytes, storage_ref, file_size_bytes
+                FROM (
+                    SELECT id, type, content_hash, plain_text, note, app_bundle_id, created_at, last_used_at,
+                           use_count, is_pinned, size_bytes, storage_ref, file_size_bytes,
+                           instr(plain_text, ?) AS plainPos,
+                           instr(coalesce(note, ''), ?) AS notePos
+                    FROM clipboard_items INDEXED BY idx_pinned
+                    WHERE 1 = 1
+            """
+            params.append(primary)
+            params.append(primary)
+
+            if let appFilter {
+                sql += " AND app_bundle_id = ?"
+                params.append(appFilter)
+            }
+
+            if let typeFilters, !typeFilters.isEmpty {
+                let placeholders = typeFilters.map { _ in "?" }.joined(separator: ",")
+                sql += " AND type IN (\(placeholders))"
+                params.append(contentsOf: typeFilters.map(\.rawValue))
+            } else if let typeFilter {
+                sql += " AND type = ?"
+                params.append(typeFilter.rawValue)
+            }
+
+            for token in extraTokens {
+                sql += " AND (instr(plain_text, ?) > 0 OR instr(coalesce(note, ''), ?) > 0)"
+                params.append(token)
+                params.append(token)
+            }
+
+            sql += """
+                    ) t
+                WHERE plainPos > 0 OR notePos > 0
+                ORDER BY is_pinned DESC,
+                         CASE
+                           WHEN plainPos > 0 AND notePos > 0 THEN CASE WHEN plainPos < notePos THEN plainPos ELSE notePos END
+                           WHEN plainPos > 0 THEN plainPos
+                           ELSE notePos
+                         END ASC,
+                         last_used_at DESC,
+                         id ASC
+                LIMIT ? OFFSET ?
+            """
+        }
+
+        let stmt = try prepare(sql)
+        defer { stmt.reset() }
+
+        var bindIndex: Int32 = 1
+        for param in params {
+            try stmt.bindText(param, at: bindIndex)
+            bindIndex += 1
+        }
+        try stmt.bindInt(limit + 1, at: bindIndex)
+        try stmt.bindInt(offset, at: bindIndex + 1)
+
+        var items: [ClipboardStoredItem] = []
+        items.reserveCapacity(limit + 1)
+        while try stmt.step() {
+            items.append(try parseStoredItemSummary(from: stmt))
+        }
+
+        let hasMore = items.count > limit
+        if hasMore {
+            items.removeLast()
+        }
+        let total = hasMore ? -1 : offset + items.count
+        return (items, total, hasMore)
+    }
+
+    private func searchWithShortQuerySubstring(
+        tokenLower: String,
+        sortMode: SearchSortMode,
+        appFilter: String?,
+        typeFilter: ClipboardItemType?,
+        typeFilters: [ClipboardItemType]?,
+        limit: Int,
+        offset: Int
+    ) throws -> (items: [ClipboardStoredItem], total: Int, hasMore: Bool) {
+        let tokenLower = tokenLower.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !tokenLower.isEmpty else { return ([], 0, false) }
+        let useLower = tokenLower.canBeConverted(to: .ascii)
+        let plainSearchExpr = useLower ? "lower(plain_text)" : "plain_text"
+        let noteSearchExpr = useLower ? "lower(coalesce(note, ''))" : "coalesce(note, '')"
+
+        var params: [String] = []
+        var sql = """
+            SELECT id, type, content_hash, plain_text, note, app_bundle_id, created_at, last_used_at,
+                   use_count, is_pinned, size_bytes, storage_ref, file_size_bytes
+            FROM (
+                SELECT id, type, content_hash, plain_text, note, app_bundle_id, created_at, last_used_at,
+                       use_count, is_pinned, size_bytes, storage_ref, file_size_bytes,
+                       instr(\(plainSearchExpr), ?) AS plainPos,
+                       instr(\(noteSearchExpr), ?) AS notePos,
+                       length(coalesce(plain_text, '')) AS plainLen
+                FROM clipboard_items INDEXED BY idx_pinned
+                WHERE 1 = 1
+        """
+
+        params.append(tokenLower)
+        params.append(tokenLower)
+
+        if let appFilter {
+            sql += " AND app_bundle_id = ?"
+            params.append(appFilter)
+        }
+
+        if let typeFilters, !typeFilters.isEmpty {
+            let placeholders = typeFilters.map { _ in "?" }.joined(separator: ",")
+            sql += " AND type IN (\(placeholders))"
+            params.append(contentsOf: typeFilters.map(\.rawValue))
+        } else if let typeFilter {
+            sql += " AND type = ?"
+            params.append(typeFilter.rawValue)
+        }
+
+        sql += """
+                ) t
+            WHERE plainPos > 0 OR notePos > 0
+            ORDER BY is_pinned DESC,
+        """
+
+        switch sortMode {
+        case .recent:
+            sql += " last_used_at DESC,"
+        case .relevance:
+            break
+        }
+
+        // Match scoring semantics for short queries:
+        // - If match is in note, treat it as occurring after plain_text (plainLen + '\n' + notePos).
+        // This preserves the "plain text matches outrank note-only matches" behavior.
+        sql += """
+                     CASE
+                       WHEN plainPos > 0 THEN plainPos
+                       ELSE plainLen + 1 + notePos
+                     END ASC,
+        """
+
+        if sortMode == .relevance {
+            sql += " last_used_at DESC,"
+        }
+
+        sql += """
+                     id ASC
+            LIMIT ? OFFSET ?
+        """
+
+        let stmt = try prepare(sql)
+        defer { stmt.reset() }
+
+        var bindIndex: Int32 = 1
+        for param in params {
+            try stmt.bindText(param, at: bindIndex)
+            bindIndex += 1
+        }
+        try stmt.bindInt(limit + 1, at: bindIndex)
+        try stmt.bindInt(offset, at: bindIndex + 1)
+
+        var items: [ClipboardStoredItem] = []
+        items.reserveCapacity(limit + 1)
+        while try stmt.step() {
+            items.append(try parseStoredItemSummary(from: stmt))
+        }
+
+        let hasMore = items.count > limit
+        if hasMore {
+            items.removeLast()
+        }
+        let total = hasMore ? -1 : offset + items.count
+        return (items, total, hasMore)
+    }
+
+    private func escapeForLike(_ token: String) -> String {
+        guard !token.isEmpty else { return token }
+        var result = ""
+        result.reserveCapacity(token.count)
+        for ch in token {
+            if ch == "\\" || ch == "%" || ch == "_" {
+                result.append("\\")
+            }
+            result.append(ch)
+        }
+        return result
+    }
+
+    private func searchWithSubstringLike(
+        tokens: [String],
+        sortMode: SearchSortMode,
+        appFilter: String?,
+        typeFilter: ClipboardItemType?,
+        typeFilters: [ClipboardItemType]?,
+        limit: Int,
+        offset: Int
+    ) throws -> (items: [ClipboardStoredItem], total: Int, hasMore: Bool) {
+        let tokens = tokens.filter { !$0.isEmpty }
+        guard let primary = tokens.first else { return ([], 0, false) }
+        let extraTokens = Array(tokens.dropFirst())
+
+        if shouldUseTrigramFTS(tokens: tokens),
+           let ftsQuery = buildTrigramFTSQuery(tokens: tokens)
+        {
+            return try searchWithTrigramFTS(
+                ftsQuery: ftsQuery,
+                primaryTokenLower: primary,
+                sortMode: sortMode,
+                appFilter: appFilter,
+                typeFilter: typeFilter,
+                typeFilters: typeFilters,
+                limit: limit,
+                offset: offset
+            )
+        }
+
+        func likePattern(for token: String) -> String {
+            "%" + escapeForLike(token) + "%"
+        }
+
+        var params: [String] = []
+        var sql: String
+
+        switch sortMode {
+        case .recent:
+            sql = """
+                SELECT id, type, content_hash, plain_text, note, app_bundle_id, created_at, last_used_at,
+                       use_count, is_pinned, size_bytes, storage_ref, file_size_bytes
+                FROM clipboard_items INDEXED BY idx_pinned
+                WHERE 1 = 1
+            """
+
+            if let appFilter {
+                sql += " AND app_bundle_id = ?"
+                params.append(appFilter)
+            }
+
+            if let typeFilters, !typeFilters.isEmpty {
+                let placeholders = typeFilters.map { _ in "?" }.joined(separator: ",")
+                sql += " AND type IN (\(placeholders))"
+                params.append(contentsOf: typeFilters.map(\.rawValue))
+            } else if let typeFilter {
+                sql += " AND type = ?"
+                params.append(typeFilter.rawValue)
+            }
+
+            func appendTokenFilter(_ token: String) {
+                sql += " AND (plain_text LIKE ? ESCAPE '\\' OR coalesce(note, '') LIKE ? ESCAPE '\\')"
+                let pattern = likePattern(for: token)
+                params.append(pattern)
+                params.append(pattern)
+            }
+
+            appendTokenFilter(primary)
+            for token in extraTokens {
+                appendTokenFilter(token)
+            }
+
+            sql += " ORDER BY is_pinned DESC, last_used_at DESC, id ASC"
+            sql += " LIMIT ? OFFSET ?"
+        case .relevance:
+            sql = """
+                SELECT id, type, content_hash, plain_text, note, app_bundle_id, created_at, last_used_at,
+                       use_count, is_pinned, size_bytes, storage_ref, file_size_bytes
+                FROM (
+                    SELECT id, type, content_hash, plain_text, note, app_bundle_id, created_at, last_used_at,
+                           use_count, is_pinned, size_bytes, storage_ref, file_size_bytes,
+                           instr(lower(plain_text), ?) AS plainPos,
+                           instr(lower(coalesce(note, '')), ?) AS notePos
+                    FROM clipboard_items INDEXED BY idx_pinned
+                    WHERE 1 = 1
+            """
+            params.append(primary)
+            params.append(primary)
+
+            if let appFilter {
+                sql += " AND app_bundle_id = ?"
+                params.append(appFilter)
+            }
+
+            if let typeFilters, !typeFilters.isEmpty {
+                let placeholders = typeFilters.map { _ in "?" }.joined(separator: ",")
+                sql += " AND type IN (\(placeholders))"
+                params.append(contentsOf: typeFilters.map(\.rawValue))
+            } else if let typeFilter {
+                sql += " AND type = ?"
+                params.append(typeFilter.rawValue)
+            }
+
+            func appendTokenFilter(_ token: String) {
+                sql += " AND (plain_text LIKE ? ESCAPE '\\' OR coalesce(note, '') LIKE ? ESCAPE '\\')"
+                let pattern = likePattern(for: token)
+                params.append(pattern)
+                params.append(pattern)
+            }
+
+            appendTokenFilter(primary)
+            for token in extraTokens {
+                appendTokenFilter(token)
+            }
+
+            sql += """
+                    ) t
+                WHERE plainPos > 0 OR notePos > 0
+                ORDER BY is_pinned DESC,
+                         CASE
+                           WHEN plainPos > 0 AND notePos > 0 THEN CASE WHEN plainPos < notePos THEN plainPos ELSE notePos END
+                           WHEN plainPos > 0 THEN plainPos
+                           ELSE notePos
+                         END ASC,
+                         last_used_at DESC,
+                         id ASC
+                LIMIT ? OFFSET ?
+            """
+        }
+
+        let stmt = try prepare(sql)
+        defer { stmt.reset() }
+
+        var bindIndex: Int32 = 1
+        for param in params {
+            try stmt.bindText(param, at: bindIndex)
+            bindIndex += 1
+        }
+        try stmt.bindInt(limit + 1, at: bindIndex)
+        try stmt.bindInt(offset, at: bindIndex + 1)
+
+        var items: [ClipboardStoredItem] = []
+        items.reserveCapacity(limit + 1)
+        while try stmt.step() {
+            items.append(try parseStoredItemSummary(from: stmt))
+        }
+
+        let hasMore = items.count > limit
+        if hasMore {
+            items.removeLast()
+        }
+        let total = hasMore ? -1 : offset + items.count
+        return (items, total, hasMore)
+    }
+
     private func ftsPrefilterIDs(ftsQuery: String, limit: Int) throws -> [UUID] {
         let sql = """
-            SELECT id
-            FROM clipboard_items INDEXED BY idx_pinned
-            WHERE rowid IN (
-                SELECT rowid
-                FROM clipboard_fts
-                WHERE clipboard_fts MATCH ?
-            )
-            ORDER BY is_pinned DESC, last_used_at DESC
+            SELECT clipboard_items.id
+            FROM clipboard_fts
+            JOIN clipboard_items ON clipboard_items.rowid = clipboard_fts.rowid
+            WHERE clipboard_fts MATCH ?
+            ORDER BY clipboard_items.is_pinned DESC, clipboard_items.last_used_at DESC
             LIMIT ?
         """
         let stmt = try prepare(sql)

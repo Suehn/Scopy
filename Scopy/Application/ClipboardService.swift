@@ -35,6 +35,14 @@ actor ClipboardService {
 
     private var settings: SettingsDTO = .default
 
+    private struct ThumbnailCacheIndex: Sendable {
+        let root: String
+        var filenames: Set<String>
+    }
+
+    private var thumbnailCacheIndex: ThumbnailCacheIndex?
+    private var thumbnailCacheIndexTask: Task<Void, Never>?
+
     private let eventQueue: AsyncBoundedQueue<ClipboardEvent>
     private var monitorTask: Task<Void, Never>?
     private var isStarted = false
@@ -145,6 +153,8 @@ actor ClipboardService {
             self.monitorTask = monitorTask
             self.isStarted = true
 
+            scheduleThumbnailCacheIndexBuildIfNeeded(thumbnailCacheRoot: storage.thumbnailCacheDirectoryPath)
+
             Task { [storage] in
                 try? await storage.cleanupOrphanedFiles()
             }
@@ -169,6 +179,10 @@ actor ClipboardService {
         self.monitor = nil
         self.storage = nil
         self.search = nil
+        thumbnailCacheIndex = nil
+
+        thumbnailCacheIndexTask?.cancel()
+        thumbnailCacheIndexTask = nil
 
         monitorTask?.cancel()
         monitorTask = nil
@@ -199,7 +213,7 @@ actor ClipboardService {
         var dtos: [ClipboardItemDTO] = []
         dtos.reserveCapacity(items.count)
         for item in items {
-            dtos.append(await toDTO(item, storage: storage))
+            dtos.append(toDTO(item, storage: storage))
         }
         return dtos
     }
@@ -213,10 +227,10 @@ actor ClipboardService {
         var dtos: [ClipboardItemDTO] = []
         dtos.reserveCapacity(result.items.count)
         for item in result.items {
-            dtos.append(await toDTO(item, storage: storage))
+            dtos.append(toDTO(item, storage: storage))
         }
 
-        return SearchResultPage(items: dtos, total: result.total, hasMore: result.hasMore)
+        return SearchResultPage(items: dtos, total: result.total, hasMore: result.hasMore, isPrefilter: result.isPrefilter)
     }
 
     func pin(itemID: UUID) async throws {
@@ -248,7 +262,7 @@ actor ClipboardService {
 
         guard let updated = try await storage.updateNote(id: itemID, note: normalized) else { return }
         await search.handleUpsertedItem(updated)
-        let dto = await toDTO(updated, storage: storage, thumbnailGenerationPriority: .userInitiated)
+        let dto = toDTO(updated, storage: storage, thumbnailGenerationPriority: .userInitiated)
         await yieldEvent(.itemContentUpdated(dto))
     }
 
@@ -289,7 +303,7 @@ actor ClipboardService {
         }
 
         await search.handleUpsertedItem(updated)
-        await yieldEvent(.itemUpdated(await toDTO(updated, storage: storage, thumbnailGenerationPriority: .userInitiated)))
+        await yieldEvent(.itemUpdated(toDTO(updated, storage: storage, thumbnailGenerationPriority: .userInitiated)))
     }
 
     private func performClipboardCopy(
@@ -412,8 +426,10 @@ actor ClipboardService {
             }
 
             do {
+                let beforeCount = try await storage.getItemCount()
                 try await storage.performCleanup()
-                if let search {
+                let afterCount = try await storage.getItemCount()
+                if beforeCount != afterCount, let search {
                     await search.invalidateCache()
                 }
             } catch {
@@ -559,10 +575,6 @@ actor ClipboardService {
                     rawData: nil
                 )
 
-                if let search {
-                    await search.invalidateCache()
-                }
-
                 try? FileManager.default.removeItem(at: backupURL)
 
                 let updated = StorageService.StoredItem(
@@ -581,7 +593,10 @@ actor ClipboardService {
                     storageRef: storageRef,
                     rawData: nil
                 )
-                let dto = await toDTO(updated, storage: storage, thumbnailGenerationPriority: .userInitiated)
+                if let search {
+                    await search.handleUpsertedItem(updated)
+                }
+                let dto = toDTO(updated, storage: storage, thumbnailGenerationPriority: .userInitiated)
                 await yieldEvent(.itemContentUpdated(dto))
 
                 return ImageOptimizationOutcomeDTO(result: .optimized, originalBytes: originalBytes, optimizedBytes: optimizedBytes)
@@ -624,10 +639,6 @@ actor ClipboardService {
                     rawData: compressed
                 )
 
-                if let search {
-                    await search.invalidateCache()
-                }
-
                 let updated = StorageService.StoredItem(
                     id: item.id,
                     type: item.type,
@@ -644,7 +655,10 @@ actor ClipboardService {
                     storageRef: nil,
                     rawData: compressed
                 )
-                let dto = await toDTO(updated, storage: storage, thumbnailGenerationPriority: .userInitiated)
+                if let search {
+                    await search.handleUpsertedItem(updated)
+                }
+                let dto = toDTO(updated, storage: storage, thumbnailGenerationPriority: .userInitiated)
                 await yieldEvent(.itemContentUpdated(dto))
 
                 return ImageOptimizationOutcomeDTO(result: .optimized, originalBytes: originalBytes, optimizedBytes: optimizedBytes)
@@ -717,7 +731,7 @@ actor ClipboardService {
             let storedItem = outcome.item
 
             await search.handleUpsertedItem(storedItem)
-            let dto = await toDTO(storedItem, storage: storage, thumbnailGenerationPriority: .userInitiated)
+            let dto = toDTO(storedItem, storage: storage, thumbnailGenerationPriority: .userInitiated)
             switch outcome {
             case .inserted:
                 await yieldEvent(.newItem(dto))
@@ -823,8 +837,10 @@ actor ClipboardService {
 
         let mode: StorageService.CleanupMode = needsFull ? .full : .light
         do {
+            let beforeCount = try await storage.getItemCount()
             try await storage.performCleanup(mode: mode)
-            if let search {
+            let afterCount = try await storage.getItemCount()
+            if beforeCount != afterCount, let search {
                 await search.invalidateCache()
             }
             lastLightCleanupAt = now
@@ -838,15 +854,18 @@ actor ClipboardService {
         _ item: StorageService.StoredItem,
         storage: StorageService,
         thumbnailGenerationPriority: TaskPriority = .utility
-    ) async -> ClipboardItemDTO {
+    ) -> ClipboardItemDTO {
         var thumbnailPath: String? = nil
-        var fileSizeBytes: Int? = item.fileSizeBytes
+        let fileSizeBytes: Int? = item.fileSizeBytes
         if settings.showImageThumbnails {
+            let thumbnailCacheRoot = storage.thumbnailCacheDirectoryPath
             switch item.type {
             case .image:
-                thumbnailPath = await storage.getThumbnailPath(for: item.contentHash)
-                if thumbnailPath == nil {
-                    await scheduleThumbnailGeneration(
+                let filename = "\(item.contentHash).png"
+                if let path = thumbnailPathIfExists(filename: filename, thumbnailCacheRoot: thumbnailCacheRoot) {
+                    thumbnailPath = path
+                } else if shouldScheduleImageThumbnailGeneration(for: item, externalStorageRoot: storage.externalStorageDirectoryPath) {
+                    scheduleThumbnailGenerationIfNeeded(
                         for: item,
                         storage: storage,
                         priority: thumbnailGenerationPriority
@@ -855,9 +874,11 @@ actor ClipboardService {
             case .file:
                 if let info = FilePreviewSupport.previewInfo(from: item.plainText, requireExists: false),
                    FilePreviewSupport.shouldGenerateThumbnail(for: info.url) {
-                    thumbnailPath = await storage.getFileThumbnailPath(for: item.contentHash)
-                    if thumbnailPath == nil {
-                        await scheduleThumbnailGeneration(
+                    let filename = StorageService.fileThumbnailFilename(for: item.contentHash)
+                    if let path = thumbnailPathIfExists(filename: filename, thumbnailCacheRoot: thumbnailCacheRoot) {
+                        thumbnailPath = path
+                    } else {
+                        scheduleThumbnailGenerationIfNeeded(
                             for: item,
                             storage: storage,
                             priority: thumbnailGenerationPriority
@@ -888,6 +909,17 @@ actor ClipboardService {
             thumbnailPath: thumbnailPath,
             storageRef: item.storageRef
         )
+    }
+
+    private func scheduleThumbnailGenerationIfNeeded(
+        for item: StorageService.StoredItem,
+        storage: StorageService,
+        priority: TaskPriority
+    ) {
+        Task { [weak self, item, storage] in
+            guard let self else { return }
+            await self.scheduleThumbnailGeneration(for: item, storage: storage, priority: priority)
+        }
     }
 
     private func scheduleFileSizeComputationIfNeeded(itemID: UUID, plainText: String) {
@@ -959,7 +991,7 @@ actor ClipboardService {
             let updated = try await storage.updateFileSizeBytes(id: itemID, fileSizeBytes: fileSizeBytes)
             fileSizeComputationLastAttemptAt.removeValue(forKey: itemID)
             guard let updated else { return }
-            let dto = await toDTO(updated, storage: storage, thumbnailGenerationPriority: .utility)
+            let dto = toDTO(updated, storage: storage, thumbnailGenerationPriority: .utility)
             await yieldEvent(.itemContentUpdated(dto))
         } catch {
             ScopyLog.app.warning("Failed to update fileSizeBytes for item \(itemID.uuidString, privacy: .private): \(error.localizedDescription, privacy: .private)")
@@ -1013,7 +1045,7 @@ actor ClipboardService {
         let storagePath = item.storageRef
         let rawData = item.rawData
         let fallbackImageData: Data?
-        if (storagePath == nil || storagePath?.isEmpty == true), rawData == nil {
+        if itemType == .image, (storagePath == nil || storagePath?.isEmpty == true), rawData == nil {
             fallbackImageData = await storage.loadPayloadData(for: item)
         } else {
             fallbackImageData = nil
@@ -1110,7 +1142,92 @@ actor ClipboardService {
 
     private func yieldThumbnailUpdated(itemID: UUID, thumbnailPath: String) async {
         guard settings.showImageThumbnails else { return }
+        rememberThumbnailExists(thumbnailPath: thumbnailPath)
         await yieldEvent(.thumbnailUpdated(itemID: itemID, thumbnailPath: thumbnailPath))
     }
 
+}
+
+// MARK: - Thumbnail Cache Index
+
+extension ClipboardService {
+    private func scheduleThumbnailCacheIndexBuildIfNeeded(thumbnailCacheRoot: String) {
+        guard !thumbnailCacheRoot.isEmpty else { return }
+
+        if let index = thumbnailCacheIndex, index.root == thumbnailCacheRoot {
+            return
+        }
+
+        thumbnailCacheIndexTask?.cancel()
+        thumbnailCacheIndexTask = Task.detached(priority: .utility) { [weak self, thumbnailCacheRoot] in
+            let filenames: [String]
+            do {
+                filenames = try FileManager.default.contentsOfDirectory(atPath: thumbnailCacheRoot)
+            } catch {
+                filenames = []
+            }
+
+            let index = ThumbnailCacheIndex(root: thumbnailCacheRoot, filenames: Set(filenames))
+            await self?.setThumbnailCacheIndex(index)
+        }
+    }
+
+    private func setThumbnailCacheIndex(_ index: ThumbnailCacheIndex) {
+        thumbnailCacheIndex = index
+    }
+
+    private func thumbnailPathIfExists(filename: String, thumbnailCacheRoot: String) -> String? {
+        if let index = thumbnailCacheIndex, index.root == thumbnailCacheRoot {
+            guard index.filenames.contains(filename) else { return nil }
+            return (thumbnailCacheRoot as NSString).appendingPathComponent(filename)
+        }
+
+        let path = (thumbnailCacheRoot as NSString).appendingPathComponent(filename)
+        guard FileManager.default.fileExists(atPath: path) else { return nil }
+
+        if var index = thumbnailCacheIndex, index.root == thumbnailCacheRoot {
+            index.filenames.insert(filename)
+            thumbnailCacheIndex = index
+        } else {
+            thumbnailCacheIndex = ThumbnailCacheIndex(root: thumbnailCacheRoot, filenames: [filename])
+        }
+
+        return path
+    }
+
+    private func rememberThumbnailExists(thumbnailPath: String) {
+        let root = (thumbnailPath as NSString).deletingLastPathComponent
+        guard !root.isEmpty else { return }
+
+        let filename = (thumbnailPath as NSString).lastPathComponent
+        guard !filename.isEmpty else { return }
+
+        if var index = thumbnailCacheIndex, index.root == root {
+            index.filenames.insert(filename)
+            thumbnailCacheIndex = index
+        } else {
+            thumbnailCacheIndex = ThumbnailCacheIndex(root: root, filenames: [filename])
+        }
+    }
+
+    private func shouldScheduleImageThumbnailGeneration(for item: StorageService.StoredItem, externalStorageRoot: String) -> Bool {
+        guard item.type == .image else { return false }
+
+        guard let storageRef = item.storageRef, !storageRef.isEmpty else {
+            return true
+        }
+
+        let filename = (storageRef as NSString).lastPathComponent
+        let nameWithoutExt = (filename as NSString).deletingPathExtension
+
+        // Mirror the early safe checks of `StorageService.validateStorageRef` without touching filesystem.
+        guard UUID(uuidString: nameWithoutExt) != nil else { return false }
+        guard !storageRef.contains("..") && !filename.contains("/") else { return false }
+
+        let allowedPath = (externalStorageRoot as NSString).standardizingPath
+        let normalizedRef = (storageRef as NSString).standardizingPath
+        guard normalizedRef.hasPrefix(allowedPath + "/") else { return false }
+
+        return true
+    }
 }

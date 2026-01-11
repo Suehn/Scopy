@@ -13,9 +13,11 @@ final class HistoryViewModel {
         var recentAppsRefreshDelayNs: UInt64
 
         static let production = Timing(
-            searchDebounceNs: 150_000_000,
-            refineShortQueryDelayNs: 450_000_000,
-            refineLongQueryDelayNs: 250_000_000,
+            // v0.29+: 更快的首屏反馈（10ms 级）
+            searchDebounceNs: 0,
+            // v0.57+: 长词全量校准足够快，refine 立即执行；短词保留极短 delay 避免抖动
+            refineShortQueryDelayNs: 10_000_000,
+            refineLongQueryDelayNs: 0,
             recentAppsRefreshDelayNs: 500_000_000
         )
 
@@ -85,6 +87,7 @@ final class HistoryViewModel {
     var canLoadMore: Bool = false
     var loadedCount: Int = 0
     var totalCount: Int = 0
+    var isPrefilterResult: Bool = false
 
     var performanceSummary: PerformanceSummary?
 
@@ -99,6 +102,20 @@ final class HistoryViewModel {
             guard !trimmed.isEmpty else { return nil }
             return "Regex 仅搜索最近 2000 条（性能考虑）。如需全量搜索，请切换到 Exact（≥3 字符）或 Fuzzy/Fuzzy+。"
         case .fuzzy, .fuzzyPlus:
+            return nil
+        }
+    }
+
+    var progressiveSearchHint: String? {
+        guard isPrefilterResult else { return nil }
+
+        let trimmed = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+
+        switch searchMode {
+        case .fuzzy, .fuzzyPlus:
+            return "首屏为预筛结果，正在全量校准…（排序/漏项可能会更新）"
+        case .exact, .regex:
             return nil
         }
     }
@@ -314,7 +331,13 @@ final class HistoryViewModel {
             items = fetchedItems
             prewarmDisplayText(for: fetchedItems)
             loadedCount = fetchedItems.count
+            isPrefilterResult = false
             lastLoadedAt = Date()
+
+            // Load latency should reflect "first screen ready" rather than unrelated background work.
+            let elapsedMs = (CFAbsoluteTimeGetCurrent() - startTime) * 1000
+            await PerformanceMetrics.shared.recordLoadLatency(elapsedMs)
+            performanceSummary = await PerformanceMetrics.shared.getSummary()
 
             let stats = try await service.getStorageStats()
             totalCount = stats.itemCount
@@ -323,10 +346,6 @@ final class HistoryViewModel {
             settingsViewModel.storageStats = stats
             await settingsViewModel.refreshDiskSizeIfNeeded()
             settingsViewModel.syncExternalImageSizeBytesFromDiskIfNeeded()
-
-            let elapsedMs = (CFAbsoluteTimeGetCurrent() - startTime) * 1000
-            await PerformanceMetrics.shared.recordLoadLatency(elapsedMs)
-            performanceSummary = await PerformanceMetrics.shared.getSummary()
         } catch {
             ScopyLog.app.error("Failed to load items: \(error.localizedDescription, privacy: .private)")
         }
@@ -365,7 +384,7 @@ final class HistoryViewModel {
             do {
                 if !isUnfilteredList {
                     // When current result is prefilter (total = -1), force full fuzzy before paging.
-                    if totalCount == -1,
+                    if isPrefilterResult,
                        (searchMode == .fuzzy || searchMode == .fuzzyPlus) {
                         let expectedLimit = loadedCount + 50
                         let request = SearchRequest(
@@ -386,6 +405,7 @@ final class HistoryViewModel {
                         loadedCount = result.items.count
                         totalCount = result.total
                         canLoadMore = result.hasMore
+                        isPrefilterResult = result.isPrefilter
                         return
                     }
 
@@ -408,6 +428,7 @@ final class HistoryViewModel {
                     loadedCount = items.count
                     totalCount = result.total
                     canLoadMore = result.hasMore
+                    isPrefilterResult = result.isPrefilter
                 } else {
                     let moreItems = try await service.fetchRecent(limit: 100, offset: loadedCount)
                     guard !Task.isCancelled, currentVersion == searchVersion else { return }
@@ -416,6 +437,7 @@ final class HistoryViewModel {
                     prewarmDisplayText(for: moreItems)
                     loadedCount = items.count
                     canLoadMore = loadedCount < totalCount
+                    isPrefilterResult = false
                 }
             } catch {
                 if !Task.isCancelled {
@@ -476,9 +498,10 @@ final class HistoryViewModel {
                 totalCount = result.total
                 loadedCount = result.items.count
                 canLoadMore = result.hasMore
+                isPrefilterResult = result.isPrefilter
 
                 if (searchMode == .fuzzy || searchMode == .fuzzyPlus),
-                   result.total == -1,
+                   result.isPrefilter,
                    loadedCount <= 50 {
                     let refineQuery = searchQuery
                     let refineMode = searchMode
@@ -516,6 +539,7 @@ final class HistoryViewModel {
                             totalCount = refined.total
                             loadedCount = refined.items.count
                             canLoadMore = refined.hasMore
+                            isPrefilterResult = refined.isPrefilter
                         } catch {
                             ScopyLog.app.warning("Refine search failed: \(error.localizedDescription, privacy: .private)")
                         }

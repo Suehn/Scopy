@@ -62,6 +62,14 @@ struct HeaderView: View {
                     .lineLimit(2)
                     .fixedSize(horizontal: false, vertical: true)
             }
+
+            if let hint = historyViewModel.progressiveSearchHint {
+                Text(hint)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
         .padding(ScopySpacing.md)
         .background(ScopyColors.cardBackground)

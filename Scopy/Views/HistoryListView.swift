@@ -73,7 +73,7 @@ struct HistoryListView: View {
 
                     // v0.18: 不使用 Section header，改为普通行以避免黑色背景
                     // Pinned Section Header
-                    if !pinned.isEmpty && historyViewModel.searchQuery.isEmpty {
+                    if !pinned.isEmpty {
                         SectionHeader(
                             title: "Pinned",
                             count: pinned.count,

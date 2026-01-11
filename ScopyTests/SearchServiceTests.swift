@@ -1,5 +1,5 @@
 import XCTest
-import ScopyKit
+@testable import ScopyKit
 import SQLite3
 
 /// SearchService 单元测试
@@ -55,6 +55,21 @@ final class SearchServiceTests: XCTestCase {
 
         // Fuzzy should find "Hello" with "hlo"
         XCTAssertGreaterThan(result.items.count, 0)
+    }
+
+    func testFuzzySearchMatchesASCIIAbbreviationsAsSubsequence() async throws {
+        _ = try await storage.upsertItem(makeContent("command"))
+        _ = try await storage.upsertItem(makeContent("commit"))
+        await search.invalidateCache()
+
+        let result = try await search.search(
+            request: SearchRequest(query: "cmd", mode: .fuzzy, sortMode: .relevance, forceFullFuzzy: true, limit: 50, offset: 0)
+        )
+
+        XCTAssertTrue(
+            result.items.contains(where: { $0.plainText.localizedCaseInsensitiveContains("command") }),
+            "fuzzy should match ASCII subsequence abbreviations (cmd -> command)"
+        )
     }
 
     func testFuzzyPlusRequiresContiguousASCIIWords() async throws {
@@ -342,6 +357,106 @@ final class SearchServiceTests: XCTestCase {
         XCTAssertGreaterThan(result2.total, result1.total)
     }
 
+    func testCorpusMetricsRefreshDoesNotForceShortQueryPrefilter() async throws {
+        // Regression guard:
+        // Short (<= 2 chars) fuzzy queries must still search the full history without relying on a cache-limited prefilter,
+        // even when the corpus becomes "heavy".
+        let block = "Here we describe the formalism of the time-dependent spin wave theory. "
+        let longText = String(repeating: block, count: 200) // ~14k chars
+
+        for i in 0..<40 {
+            _ = try await storage.upsertItem(makeContent("LongDoc \(i)\n" + longText))
+        }
+        await search.invalidateCache()
+
+        let result = try await search.search(
+            request: SearchRequest(query: "zz", mode: .fuzzyPlus, sortMode: .relevance, limit: 50, offset: 0)
+        )
+        XCTAssertFalse(result.isPrefilter)
+    }
+
+    // MARK: - CJK / Substring Fallback
+
+    func testExactSearchFallsBackToSubstringForCJKRun() async throws {
+        _ = try await storage.upsertItem(makeContent("这是一份基于你提供的音频内容的逐字稿为了确保内容完整"))
+        await search.invalidateCache()
+
+        let result = try await search.search(
+            request: SearchRequest(query: "逐字稿", mode: .exact, sortMode: .relevance, limit: 10, offset: 0)
+        )
+        XCTAssertEqual(result.items.count, 1)
+        XCTAssertTrue(result.items[0].plainText.contains("逐字稿"))
+        XCTAssertFalse(result.isPrefilter)
+    }
+
+    func testFuzzyPlusFindsOldCJKItemBeyondRecentCacheWhenFTSMisses() async throws {
+        // Ensure the match is older than the 2k recent-cache window.
+        let target = try await storage.upsertItem(makeContent("这是一个很长的中文字符串包含逐字稿在中间用于测试"))
+
+        // Make corpus "heavy" so fuzzy+ prefers FTS fast-path; unicode61 FTS cannot match CJK substrings reliably.
+        _ = try await storage.upsertItem(makeContent(String(repeating: "a", count: 120_000)))
+
+        for i in 0..<2001 {
+            _ = try await storage.upsertItem(makeContent("Filler \(i)"))
+        }
+        await search.invalidateCache()
+
+        let result = try await search.search(
+            request: SearchRequest(query: "逐字稿", mode: .fuzzyPlus, sortMode: .relevance, limit: 50, offset: 0)
+        )
+
+        XCTAssertTrue(result.items.contains(where: { $0.id == target.id }))
+        XCTAssertTrue(result.isPrefilter)
+    }
+
+    func testFuzzyPlusSkipsFullIndexWhenSubstringOnlyQueryHasNoMatches() async throws {
+        // Make the corpus "heavy" so fuzzyPlus prefers the FTS fast-path first.
+        _ = try await storage.upsertItem(makeContent(String(repeating: "a", count: 120_000)))
+        await search.invalidateCache()
+
+#if DEBUG
+        let before = await search.debugFullIndexHealth()
+        XCTAssertFalse(before.isBuilt)
+#endif
+
+        // "cmd" has no contiguous substring match in this dataset. Without the substring-only SQL fallback,
+        // fuzzyPlus would proceed to build a full in-memory index and scan the entire corpus.
+        let result = try await search.search(
+            request: SearchRequest(query: "cmd", mode: .fuzzyPlus, sortMode: .relevance, limit: 50, offset: 0)
+        )
+
+        XCTAssertEqual(result.items.count, 0)
+        XCTAssertFalse(result.isPrefilter)
+
+#if DEBUG
+        let after = await search.debugFullIndexHealth()
+        XCTAssertFalse(after.isBuilt)
+#endif
+    }
+
+    func testFuzzyPlusSubstringOnlyFallbackEscapesLikeWildcards() async throws {
+        // Ensure the substring-only fallback is used (heavy corpus + FTS miss),
+        // then verify SQL LIKE wildcards are escaped and treated literally.
+        _ = try await storage.upsertItem(makeContent(String(repeating: "a", count: 120_000)))
+        _ = try await storage.upsertItem(makeContent("abcdef"))
+        await search.invalidateCache()
+
+#if DEBUG
+        let before = await search.debugFullIndexHealth()
+        XCTAssertFalse(before.isBuilt)
+#endif
+
+        let result = try await search.search(
+            request: SearchRequest(query: "a_c", mode: .fuzzyPlus, sortMode: .relevance, limit: 50, offset: 0)
+        )
+        XCTAssertEqual(result.items.count, 0)
+
+#if DEBUG
+        let after = await search.debugFullIndexHealth()
+        XCTAssertFalse(after.isBuilt)
+#endif
+    }
+
     // MARK: - Edge Cases
 
     func testSpecialCharactersInQuery() async throws {
@@ -484,22 +599,37 @@ final class SearchServiceTests: XCTestCase {
         XCTAssertTrue(result.items[0].plainText.localizedCaseInsensitiveContains("hello world"))
     }
 
-    func testShortQueryPrefilterCanRefineToFullFuzzy() async throws {
-        _ = try await storage.upsertItem(makeContent("zz_target_oldest"))
+    func testShortQueryRelevancePrefersPlainTextMatchesOverNoteMatches() async throws {
+        let plainMatch = try await storage.upsertItem(makeContent("ab"))
+        try await Task.sleep(nanoseconds: 10_000_000)
+
+        let noteOnly = try await storage.upsertItem(makeContent("xxxxxxxx"))
+        _ = try await storage.updateNote(id: noteOnly.id, note: "ab")
+        await search.invalidateCache()
+
+        let result = try await search.search(
+            request: SearchRequest(query: "ab", mode: .fuzzy, sortMode: .relevance, limit: 10, offset: 0)
+        )
+        XCTAssertGreaterThanOrEqual(result.items.count, 2)
+        XCTAssertEqual(result.items.first?.id, plainMatch.id)
+    }
+
+    func testShortQuerySearchesFullHistoryWithoutPrefilter() async throws {
+        let target = try await storage.upsertItem(makeContent("zz_target_oldest"))
         for i in 0..<2001 {
             _ = try await storage.upsertItem(makeContent("Item \(i)"))
         }
         await search.invalidateCache()
 
-        let prefilter = try await search.search(request: SearchRequest(query: "zz", mode: .fuzzy, limit: 50, offset: 0))
-        XCTAssertTrue(prefilter.items.isEmpty)
-        XCTAssertEqual(prefilter.total, -1)
+        let result = try await search.search(request: SearchRequest(query: "zz", mode: .fuzzy, limit: 50, offset: 0))
+        XCTAssertTrue(result.items.contains(where: { $0.id == target.id }))
+        XCTAssertFalse(result.isPrefilter)
 
-        let full = try await search.search(
+        let forced = try await search.search(
             request: SearchRequest(query: "zz", mode: .fuzzy, forceFullFuzzy: true, limit: 50, offset: 0)
         )
-        XCTAssertTrue(full.items.contains { $0.plainText.localizedCaseInsensitiveContains("zz") })
-        XCTAssertNotEqual(full.total, -1)
+        XCTAssertTrue(forced.items.contains(where: { $0.id == target.id }))
+        XCTAssertFalse(forced.isPrefilter)
     }
 
     // MARK: - Helpers

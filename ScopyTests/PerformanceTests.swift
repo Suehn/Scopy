@@ -9,11 +9,9 @@ final class PerformanceTests: XCTestCase {
 
     var storage: StorageService!
     var search: SearchEngineImpl!
-    private let perfEnv = "RUN_PERF_TESTS"
-    private let heavyPerfEnv = "RUN_HEAVY_PERF_TESTS"
 
     override func setUp() async throws {
-        try XCTSkipIf(!shouldRunPerf(), "Set \(perfEnv)=1 to run performance tests")
+        try XCTSkipIf(!shouldRunPerf(), "Run: make test-perf")
         storage = StorageService(databasePath: Self.makeSharedInMemoryDatabasePath())
         try await storage.open()
         search = SearchEngineImpl(dbPath: storage.databaseFilePath)
@@ -180,6 +178,55 @@ final class PerformanceTests: XCTestCase {
             print("   - Low Power Mode enabled: relaxed target to \(String(format: "%.0f", maxP95))ms")
         }
         XCTAssertLessThan(p95, maxP95, "P95 search latency \(p95)ms exceeds \(maxP95)ms target")
+    }
+
+    /// 混合文本（含 Emoji / CJK 等非 ASCII）场景：验证 fuzzy（非 fuzzyPlus）在 ~6k 条时仍可用。
+    ///
+    /// 说明：
+    /// - 真实使用中，clipboard 内容常混入 emoji/CJK，导致 `textLowerIsASCII == false`。
+    /// - 对 ASCII query（如 url/token/命令）应尽量命中 substring fast-path，避免退化到逐字符 fuzzy 扫描造成延迟飙升。
+    func testFuzzySearchPerformanceMixedUnicode6kItems() async throws {
+        try XCTSkipIf(!shouldRunHeavyPerf(), "Run: make test-perf-heavy")
+
+        let itemCount = 6000
+        let fillerUnit = "abcdefghijklmnopqrstuvwxyz0123456789 "
+        let filler = String(repeating: fillerUnit, count: 25) // ~925 chars
+        for i in 0..<itemCount {
+            let text = "Item \(i) 😀 \(filler) keyword \(i)"
+            _ = try await storage.upsertItem(makeContent(text))
+        }
+        await search.invalidateCache()
+
+        // Warmup: build index once.
+        let cold = try await search.search(
+            request: SearchRequest(query: "keyword", mode: .fuzzy, limit: 1, offset: 0)
+        )
+        print("📊 Fuzzy Cold Start (6k mixed unicode, fuzzy): \(String(format: "%.2f", cold.searchTimeMs))ms")
+        XCTAssertGreaterThan(cold.items.count, 0)
+
+        var times: [Double] = []
+        let sampleRounds = 20
+        for _ in 0..<sampleRounds {
+            let result = try await search.search(
+                request: SearchRequest(query: "keyword", mode: .fuzzy, limit: 50, offset: 0)
+            )
+            XCTAssertEqual(result.items.count, 50)
+            times.append(result.searchTimeMs)
+        }
+
+        let p95 = percentile(times, 95)
+        let avg = times.reduce(0, +) / Double(times.count)
+        print("📊 Fuzzy Performance (6k mixed unicode, fuzzy):")
+        print("   - Samples: \(times.count)")
+        print("   - Average: \(String(format: "%.2f", avg))ms")
+        print("   - P95: \(String(format: "%.2f", p95))ms")
+
+        let isLowPowerMode = ProcessInfo.processInfo.isLowPowerModeEnabled
+        let maxP95 = isLowPowerMode ? 600.0 : 200.0
+        if isLowPowerMode {
+            print("   - Low Power Mode enabled: relaxed target to \(String(format: "%.0f", maxP95))ms")
+        }
+        XCTAssertLessThan(p95, maxP95, "Mixed unicode fuzzy P95 \(p95)ms exceeds \(maxP95)ms target")
     }
 
     /// 长文场景：验证 FTS exact 查询在长文本下仍保持可用延迟。
@@ -503,7 +550,7 @@ final class PerformanceTests: XCTestCase {
     /// 目标: P95 < 500ms（调整目标以反映真实场景：每次循环重新插入数据导致 WAL 膨胀）
     /// 真实场景：单次清理 9000 条约 200-300ms，但测试循环累积 WAL 开销
     func testInlineCleanupPerformance10k() async throws {
-        try XCTSkipIf(!shouldRunHeavyPerf(), "Set \(heavyPerfEnv)=1 to run heavy perf tests")
+        try XCTSkipIf(!shouldRunHeavyPerf(), "Run: make test-perf-heavy")
 
         try await withDiskStorage { diskStorage, _, _ in
             // 插入 10k 小内容项（内联存储）
@@ -542,7 +589,7 @@ final class PerformanceTests: XCTestCase {
     /// 目标: P95 < 1200ms（调整目标：10k 大文件写入 + 9k 文件删除 + 数据库清理）
     /// 真实场景：外部存储清理涉及大量文件 I/O，性能受磁盘速度影响
     func testExternalCleanupPerformance10k() async throws {
-        try XCTSkipIf(!shouldRunHeavyPerf(), "Set \(heavyPerfEnv)=1 to run heavy perf tests")
+        try XCTSkipIf(!shouldRunHeavyPerf(), "Run: make test-perf-heavy")
 
         try await withDiskStorage { diskStorage, _, _ in
             // 插入 10k 大内容项（外部存储）
@@ -578,7 +625,7 @@ final class PerformanceTests: XCTestCase {
     /// v0.14: 大规模清理性能测试 (50k 项)
     /// 目标: P95 < 2000ms（调整目标：50k 插入后 WAL 膨胀 + 45k 删除 + FTS5 同步）
     func testCleanupPerformance50k() async throws {
-        try XCTSkipIf(!shouldRunHeavyPerf(), "Set \(heavyPerfEnv)=1 to run heavy perf tests")
+        try XCTSkipIf(!shouldRunHeavyPerf(), "Run: make test-perf-heavy")
 
         try await withDiskStorage { diskStorage, _, _ in
             // 插入 50k 项
@@ -800,9 +847,9 @@ final class PerformanceTests: XCTestCase {
         }
     }
 
-    /// 重负载：磁盘模式 50k 条搜索，需手动开启 RUN_HEAVY_PERF_TESTS
+    /// 重负载：磁盘模式 50k 条搜索（可选，较慢）
     func testHeavyDiskSearchPerformance50k() async throws {
-        try XCTSkipIf(!shouldRunHeavyPerf(), "Set \(heavyPerfEnv)=1 to run heavy disk perf tests")
+        try XCTSkipIf(!shouldRunHeavyPerf(), "Run: make test-perf-heavy")
 
         try await withDiskStorage { diskStorage, diskSearch, _ in
             for i in 0..<50_000 {
@@ -833,9 +880,9 @@ final class PerformanceTests: XCTestCase {
         }
     }
 
-    /// 重负载：磁盘模式 75k 条搜索（极端场景），需手动开启 RUN_HEAVY_PERF_TESTS
+    /// 重负载：磁盘模式 75k 条搜索（极端场景，可选，较慢）
     func testUltraDiskSearchPerformance75k() async throws {
-        try XCTSkipIf(!shouldRunHeavyPerf(), "Set \(heavyPerfEnv)=1 to run heavy disk perf tests")
+        try XCTSkipIf(!shouldRunHeavyPerf(), "Run: make test-perf-heavy")
 
         try await withDiskStorage { diskStorage, diskSearch, _ in
             for i in 0..<75_000 {
@@ -888,7 +935,7 @@ final class PerformanceTests: XCTestCase {
 
     /// 重负载：外部存储压力（300 x 256KB，实际约 190MB 含 WAL），验证清理与引用
     func testExternalStorageStress() async throws {
-        try XCTSkipIf(!shouldRunHeavyPerf(), "Set \(heavyPerfEnv)=1 to run heavy perf tests")
+        try XCTSkipIf(!shouldRunHeavyPerf(), "Run: make test-perf-heavy")
 
         try await withDiskStorage { diskStorage, _, _ in
             // 250 x 256KB ≈ 64MB，仍高于 50MB 清理阈值，但更稳定
@@ -1029,11 +1076,19 @@ final class PerformanceTests: XCTestCase {
     }
 
     private func shouldRunHeavyPerf() -> Bool {
-        ProcessInfo.processInfo.environment[heavyPerfEnv] == "1"
+#if SCOPY_HEAVY_PERF_TESTS
+        return true
+#else
+        return false
+#endif
     }
 
     private func shouldRunPerf() -> Bool {
-        ProcessInfo.processInfo.environment[perfEnv] == "1" || shouldRunHeavyPerf()
+#if SCOPY_PERF_TESTS || SCOPY_HEAVY_PERF_TESTS
+        return true
+#else
+        return false
+#endif
     }
 
     private func percentile(_ values: [Double], _ p: Double) -> Double {

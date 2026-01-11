@@ -91,10 +91,9 @@ final class AppStateTests: XCTestCase {
         XCTAssertEqual(appState.loadedCount, countBefore, "Should not change when canLoadMore is false")
     }
 
-    // MARK: - Search Debounce Tests (v0.md 4.1: 150-200ms)
+    // MARK: - Search Coalescing Tests
 
-    func testSearchDebounce150ms() async throws {
-        // This test locks the production debounce behavior (150ms) without forcing the rest of the suite to wait that long.
+    func testSearchCoalescesRapidInputWithoutDebounce() async throws {
         let service = TestMockClipboardService()
         let state = AppState.forTesting(service: service, historyTiming: .production)
         defer { state.stop() }
@@ -111,13 +110,15 @@ final class AppStateTests: XCTestCase {
         state.searchQuery = "hel"
         state.search()
 
-        // Wait less than debounce time
-        try await Task.sleep(nanoseconds: 100_000_000) // 100ms
-        XCTAssertEqual(service.searchCallCount, 0, "Search should not execute before debounce")
-
         await assertEventually(timeout: 1.0, pollInterval: 0.01, {
             service.searchCallCount == 1
-        }, message: "Only one search should execute after debounce")
+        }, message: "Rapid input should coalesce into a single search")
+
+        XCTAssertEqual(service.lastSearchQuery, "hel", "Should use the latest query")
+
+        // Ensure no extra searches fire later.
+        try await Task.sleep(nanoseconds: 100_000_000) // 100ms
+        XCTAssertEqual(service.searchCallCount, 1, "Should not execute more than once for rapid input")
     }
 
     func testRapidSearchCancelsPrevious() async throws {
@@ -780,7 +781,8 @@ final class TestMockClipboardService: ClipboardServiceProtocol {
         return SearchResultPage(
             items: Array(filtered[start..<end]),
             total: total,
-            hasMore: end < filtered.count
+            hasMore: end < filtered.count,
+            isPrefilter: shouldSimulatePrefilter
         )
     }
 
