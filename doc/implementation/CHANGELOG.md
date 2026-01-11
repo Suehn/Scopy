@@ -7,6 +7,18 @@
 
 ## [Unreleased]
 
+## [v0.58.fix2] - 2026-01-12
+
+### Perf/Search
+
+- **2 字中文/非 ASCII 短词提速（不减搜索范围）**：`ShortQueryIndex` 新增非 ASCII UTF16 bigram postings；短词（≤2）在 index 就绪后优先走“候选集 + SQL instr 排序”路径，避免对全表执行 `instr(...)` substring 扫描；语义与排序保持一致，且候选集不会漏项（必要时仍会回退到全表扫描）。  
+  - 真实 143MB / 6k+ 项快照库（`perf-db/clipboard.db`，release `ScopyBench`，warmup 20/iters 30）：`数学` avg ~10ms，P95 ~13ms（此前 ~31ms avg）。
+
+### Test
+
+- `make test-unit`：Executed 256 tests, 1 skipped, 0 failures（2026-01-12）
+- `make test-strict`：Executed 256 tests, 1 skipped, 0 failures（2026-01-12）
+
 ## [v0.58.fix1] - 2026-01-11
 
 ### Perf/Search

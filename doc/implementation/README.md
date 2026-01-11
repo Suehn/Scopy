@@ -8,11 +8,11 @@
 
 | 项目 | 状态 |
 |------|------|
-| **当前版本** | v0.58.fix1 |
-| **测试状态** | ✅ 通过（make test-unit / make test-strict，2026-01-11） |
-| **构建状态** | ✅ 通过（make build，2026-01-11） |
+| **当前版本** | v0.58.fix2 |
+| **测试状态** | ✅ 通过（make test-unit / make test-strict，2026-01-12） |
+| **构建状态** | ✅ 通过（make build，2026-01-12） |
 | **部署位置** | /Applications/Scopy.app |
-| **最后更新** | 2026-01-11 |
+| **最后更新** | 2026-01-12 |
 
 > 详细变更历史请查看 [CHANGELOG.md](./CHANGELOG.md)
 
@@ -24,6 +24,7 @@
 
 | 版本 | 日期 | 主要内容 | 状态 |
 |------|------|----------|------|
+| [v0.58.fix2](./releases/v0.58.fix2.md) | 2026-01-12 | Perf/Search：2 字中文短词（数学等）提速到 ~13ms P95（真实 143MB DB）；Correctness：中文短词 pinned 回归测试 | ✅ |
 | [v0.58.fix1](./releases/v0.58.fix1.md) | 2026-01-11 | Perf/Search：2 字短词（cm）进一步提速到 ~5ms P95（真实 143MB DB）；Correctness：短词 pinned 回归测试 | ✅ |
 | [v0.58](./releases/v0.58.md) | 2026-01-11 | Perf/Search：6k+ 大文本历史 fuzzy 提速 + 渐进式全量校准；Fix/UX：搜索时显示 Pinned；Tooling：真实 DB 快照基准 | ✅ |
 | [v0.57.fix2](./releases/v0.57.fix2.md) | 2026-01-03 | Fix/Clipboard：修复 Excel 复制单元格时历史误识别为图片（优先保留表格富文本/文本语义） | ✅ |
