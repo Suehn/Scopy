@@ -1,7 +1,8 @@
 # Scopy Makefile
 # 符合 v0.md 的构建和测试流程
 
-.PHONY: all setup build run clean xcode test test-unit test-perf test-tsan test-strict coverage benchmark test-flow test-flow-quick health-check
+.PHONY: all setup build run clean xcode test test-unit test-perf test-perf-heavy test-snapshot-perf test-tsan test-strict coverage benchmark test-flow test-flow-quick health-check
+.PHONY: snapshot-perf-db bench-snapshot-search
 .PHONY: tag-release push-release release-validate release-bump-patch
 
 VERSION_ARGS := $(shell bash scripts/version.sh --xcodebuild-args 2>/dev/null)
@@ -83,13 +84,40 @@ test-unit: setup
 test-perf: setup
 	@echo "Running performance tests..."
 	@mkdir -p $(LOG_DIR)
-	RUN_PERF_TESTS=1 xcodebuild test \
+	xcodebuild test \
 		-project Scopy.xcodeproj \
 		-scheme Scopy \
 		-destination 'platform=macOS' \
 		-only-testing:ScopyTests/PerformanceTests \
+		OTHER_SWIFT_FLAGS='$$(inherited) -DSCOPY_PERF_TESTS' \
 		$(VERSION_ARGS) \
 		2>&1 | tee $(LOG_DIR)/test-perf.log
+
+# 运行重负载性能测试（更慢）
+test-perf-heavy: setup
+	@echo "Running heavy performance tests..."
+	@mkdir -p $(LOG_DIR)
+	xcodebuild test \
+		-project Scopy.xcodeproj \
+		-scheme Scopy \
+		-destination 'platform=macOS' \
+		-only-testing:ScopyTests/PerformanceTests \
+		OTHER_SWIFT_FLAGS='$$(inherited) -DSCOPY_PERF_TESTS -DSCOPY_HEAVY_PERF_TESTS' \
+		$(VERSION_ARGS) \
+		2>&1 | tee $(LOG_DIR)/test-perf-heavy.log
+
+# 运行基于真实快照 DB 的端到端性能测试（需先 make snapshot-perf-db）
+test-snapshot-perf: setup
+	@echo "Running snapshot performance tests..."
+	@mkdir -p $(LOG_DIR)
+	xcodebuild test \
+		-project Scopy.xcodeproj \
+		-scheme Scopy \
+		-destination 'platform=macOS' \
+		-only-testing:ScopyTests/SnapshotPerformanceTests \
+		OTHER_SWIFT_FLAGS='$$(inherited) -DSCOPY_SNAPSHOT_PERF_TESTS' \
+		$(VERSION_ARGS) \
+		2>&1 | tee $(LOG_DIR)/test-snapshot-perf.log
 
 # Thread Sanitizer (requires hosted test bundle mode)
 test-tsan: setup
@@ -209,6 +237,22 @@ stats:
 		fi; \
 	done
 
+# =================== 性能测试辅助 ===================
+
+# 拷贝真实数据库快照到仓库（用于本地真实性能测试；文件已在 .gitignore 中忽略）
+snapshot-perf-db:
+	@bash scripts/snapshot-perf-db.sh
+
+# 用 perf-db/clipboard.db 运行 release 级搜索基准（更贴近真实体验）
+bench-snapshot-search:
+	@test -f perf-db/clipboard.db || (echo "Missing perf snapshot DB. Run: make snapshot-perf-db" && exit 1)
+	@echo "Running ScopyBench (release) on perf snapshot..."
+	@swift run -c release ScopyBench --db perf-db/clipboard.db --mode fuzzyPlus --sort relevance --query cm --iters 30 --warmup 3
+	@swift run -c release ScopyBench --db perf-db/clipboard.db --mode fuzzyPlus --sort relevance --query cmd --iters 30 --warmup 3
+	@swift run -c release ScopyBench --db perf-db/clipboard.db --mode fuzzyPlus --sort relevance --query cm --force-full-fuzzy --iters 30 --warmup 3
+	@swift run -c release ScopyBench --db perf-db/clipboard.db --mode fuzzy --sort relevance --query abc --force-full-fuzzy --iters 30 --warmup 3
+	@swift run -c release ScopyBench --db perf-db/clipboard.db --mode fuzzy --sort relevance --query cmd --force-full-fuzzy --iters 30 --warmup 3
+
 # =================== 帮助 ===================
 
 # 帮助信息
@@ -228,6 +272,8 @@ help:
 	@echo "  make test         - Run all tests"
 	@echo "  make test-unit    - Run unit tests only"
 	@echo "  make test-perf    - Run performance tests"
+	@echo "  make test-perf-heavy - Run heavy perf tests"
+	@echo "  make test-snapshot-perf - Run snapshot perf tests"
 	@echo "  make test-integration - Run integration tests"
 	@echo "  make test-strict  - Run Strict Concurrency regression"
 	@echo "  make coverage     - Run tests with coverage report"

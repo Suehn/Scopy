@@ -8,7 +8,8 @@ let package = Package(
     ],
     products: [
         .library(name: "ScopyKit", targets: ["ScopyKit"]),
-        .library(name: "ScopyUISupport", targets: ["ScopyUISupport"])
+        .library(name: "ScopyUISupport", targets: ["ScopyUISupport"]),
+        .executable(name: "ScopyBench", targets: ["ScopyBench"])
     ],
     targets: [
         .target(
@@ -33,6 +34,14 @@ let package = Package(
         .target(
             name: "ScopyUISupport",
             path: "ScopyUISupport"
+        ),
+        .executableTarget(
+            name: "ScopyBench",
+            dependencies: ["ScopyKit"],
+            path: "Tools/ScopyBench",
+            linkerSettings: [
+                .linkedLibrary("sqlite3")
+            ]
         )
     ]
 )

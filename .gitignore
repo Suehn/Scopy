@@ -45,3 +45,6 @@ plan/
 
 # Profiling / tracing artifacts
 trace/
+
+# Local performance DB snapshot (never commit)
+perf-db/
