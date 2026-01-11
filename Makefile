@@ -247,11 +247,12 @@ snapshot-perf-db:
 bench-snapshot-search:
 	@test -f perf-db/clipboard.db || (echo "Missing perf snapshot DB. Run: make snapshot-perf-db" && exit 1)
 	@echo "Running ScopyBench (release) on perf snapshot..."
-	@swift run -c release ScopyBench --db perf-db/clipboard.db --mode fuzzyPlus --sort relevance --query cm --iters 30 --warmup 3
-	@swift run -c release ScopyBench --db perf-db/clipboard.db --mode fuzzyPlus --sort relevance --query cmd --iters 30 --warmup 3
-	@swift run -c release ScopyBench --db perf-db/clipboard.db --mode fuzzyPlus --sort relevance --query cm --force-full-fuzzy --iters 30 --warmup 3
-	@swift run -c release ScopyBench --db perf-db/clipboard.db --mode fuzzy --sort relevance --query abc --force-full-fuzzy --iters 30 --warmup 3
-	@swift run -c release ScopyBench --db perf-db/clipboard.db --mode fuzzy --sort relevance --query cmd --force-full-fuzzy --iters 30 --warmup 3
+	@swift run -c release ScopyBench --db perf-db/clipboard.db --mode fuzzyPlus --sort relevance --query cm --iters 30 --warmup 20
+	@swift run -c release ScopyBench --db perf-db/clipboard.db --mode fuzzyPlus --sort relevance --query '数学' --iters 30 --warmup 20
+	@swift run -c release ScopyBench --db perf-db/clipboard.db --mode fuzzyPlus --sort relevance --query cmd --iters 30 --warmup 20
+	@swift run -c release ScopyBench --db perf-db/clipboard.db --mode fuzzyPlus --sort relevance --query cm --force-full-fuzzy --iters 30 --warmup 20
+	@swift run -c release ScopyBench --db perf-db/clipboard.db --mode fuzzy --sort relevance --query abc --force-full-fuzzy --iters 30 --warmup 20
+	@swift run -c release ScopyBench --db perf-db/clipboard.db --mode fuzzy --sort relevance --query cmd --force-full-fuzzy --iters 30 --warmup 20
 
 # =================== 帮助 ===================
 

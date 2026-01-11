@@ -93,10 +93,17 @@ public actor SearchEngineImpl {
         // Key: (a << 7) | b
         private var asciiBigramPostings: [UInt16: [Int]] = [:]
 
+        // Key: (a << 16) | b
+        //
+        // This covers the hottest non-ASCII short query case (e.g. 2 CJK chars like “数学”),
+        // where SQLite `instr()` substring scans become expensive on large text corpora.
+        private var nonASCIIBigramPostings: [UInt32: [Int]] = [:]
+
         // Scratch stamps to keep postings unique per ingestion pass.
         private var ingestStamp: UInt32 = 1
         private var seenASCIICharStamp: [UInt32] = Array(repeating: 0, count: Self.asciiCharCount)
         private var seenASCIIBigramStamp: [UInt32] = Array(repeating: 0, count: Self.asciiBigramCount)
+        private var seenNonASCIIBigramStamp: [UInt32: UInt32] = [:]
 
         // Scratch stamps to deduplicate candidate lists at query time.
         private var candidateStamp: UInt32 = 1
@@ -144,11 +151,13 @@ public actor SearchEngineImpl {
                     slotToContentHash[slot] = contentHash
                     slotToType[slot] = type
                     ingestASCII(from: plainText, slot: slot)
+                    ingestNonASCIIBigramsUTF16(from: plainText, slot: slot)
                 }
 
                 // Note changes do not affect contentHash; always ingest note to avoid false negatives.
                 if let note, !note.isEmpty {
                     ingestASCII(from: note, slot: slot)
+                    ingestNonASCIIBigramsUTF16(from: note, slot: slot)
                 }
                 return
             }
@@ -162,8 +171,10 @@ public actor SearchEngineImpl {
             slotCandidateStamp.append(0)
 
             ingestASCII(from: plainText, slot: slot)
+            ingestNonASCIIBigramsUTF16(from: plainText, slot: slot)
             if let note, !note.isEmpty {
                 ingestASCII(from: note, slot: slot)
+                ingestNonASCIIBigramsUTF16(from: note, slot: slot)
             }
         }
 
@@ -198,6 +209,38 @@ public actor SearchEngineImpl {
 
             if slots.isEmpty { return [] }
 
+            return uniqueIDStrings(from: slots)
+        }
+
+        mutating func candidateIDStringsForNonASCIIBigram(tokenLower: String) -> [String]? {
+            let token = tokenLower.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !token.isEmpty else { return nil }
+            guard !token.canBeConverted(to: .ascii) else { return nil }
+
+            var units: [UInt16] = []
+            units.reserveCapacity(2)
+            for cu in token.utf16 {
+                units.append(cu)
+                if units.count > 2 { break }
+            }
+
+            // Only handle the hottest case: 2-UTF16-unit tokens that are fully non-ASCII.
+            // Examples:
+            // - "数学" => 2 units (CJK), supported.
+            // - "😀"  => 2 units (surrogates), supported as a single Unicode scalar.
+            guard units.count == 2,
+                  units[0] >= 128,
+                  units[1] >= 128 else {
+                return nil
+            }
+
+            let key = (UInt32(units[0]) << 16) | UInt32(units[1])
+            let slots = nonASCIIBigramPostings[key] ?? []
+            if slots.isEmpty { return [] }
+            return uniqueIDStrings(from: slots)
+        }
+
+        private mutating func uniqueIDStrings(from slots: [Int]) -> [String] {
             candidateStamp &+= 1
             if candidateStamp == 0 {
                 candidateStamp = 1
@@ -259,6 +302,35 @@ public actor SearchEngineImpl {
                     }
                 }
                 prev = b
+            }
+        }
+
+        private mutating func ingestNonASCIIBigramsUTF16(from text: String, slot: Int) {
+            guard !text.isEmpty else { return }
+
+            ingestStamp &+= 1
+            if ingestStamp == 0 {
+                ingestStamp = 1
+                seenASCIICharStamp = Array(repeating: 0, count: seenASCIICharStamp.count)
+                seenASCIIBigramStamp = Array(repeating: 0, count: seenASCIIBigramStamp.count)
+                seenNonASCIIBigramStamp.removeAll(keepingCapacity: true)
+            }
+
+            var prev: UInt16? = nil
+            for cu in text.utf16 {
+                guard cu >= 128 else {
+                    prev = nil
+                    continue
+                }
+
+                if let p = prev {
+                    let key = (UInt32(p) << 16) | UInt32(cu)
+                    if seenNonASCIIBigramStamp[key] != ingestStamp {
+                        seenNonASCIIBigramStamp[key] = ingestStamp
+                        nonASCIIBigramPostings[key, default: []].append(slot)
+                    }
+                }
+                prev = cu
             }
         }
     }
@@ -1035,10 +1107,10 @@ public actor SearchEngineImpl {
             return SearchResult(items: [], total: 0, hasMore: false, isPrefilter: true, searchTimeMs: 0)
         }
 
-        if trimmedQuery.count <= 2 {
-            // Prefer the in-memory full index if it is already available; otherwise, fall back to a SQL substring scan.
-            // This avoids the multi-second "first full scan" penalty on large DBs while keeping match/sort semantics stable.
-            if let index = fullIndex, !fullIndexStale {
+	        if trimmedQuery.count <= 2 {
+	            // Prefer the in-memory full index if it is already available; otherwise, fall back to a SQL substring scan.
+	            // This avoids the multi-second "first full scan" penalty on large DBs while keeping match/sort semantics stable.
+	            if let index = fullIndex, !fullIndexStale {
                 let normalizedRequest = SearchRequest(
                     query: trimmedQuery,
                     mode: mode,
@@ -1058,46 +1130,71 @@ public actor SearchEngineImpl {
                     isPrefilter: result.isPrefilter,
                     searchTimeMs: 0
                 )
-            }
+	            }
 
-            let tokenLower = trimmedQuery.lowercased()
-            let typeFilters = request.typeFilters.map(Array.init)
+	            let tokenLower = trimmedQuery.lowercased()
+	            let typeFilters = request.typeFilters.map(Array.init)
 
-            if tokenLower.canBeConverted(to: .ascii) {
-                startShortQueryIndexBuildIfNeeded()
-                if var shortIndex = shortQueryIndex {
-                    let candidates = shortIndex.candidateIDStrings(for: tokenLower)
-                    shortQueryIndex = shortIndex
-                    if candidates.isEmpty {
-                        return SearchResult(items: [], total: 0, hasMore: false, isPrefilter: false, searchTimeMs: 0)
-                    }
+	            startShortQueryIndexBuildIfNeeded()
+	            if var shortIndex = shortQueryIndex {
+	                if tokenLower.canBeConverted(to: .ascii) {
+	                    let candidates = shortIndex.candidateIDStrings(for: tokenLower)
+	                    shortQueryIndex = shortIndex
+	                    if candidates.isEmpty {
+	                        return SearchResult(items: [], total: 0, hasMore: false, isPrefilter: false, searchTimeMs: 0)
+	                    }
 
-                    if let itemCount = corpusMetrics?.itemCount,
-                       itemCount > 0,
-                       candidates.count > 4096,
-                       Double(candidates.count) / Double(itemCount) > 0.85
-                    {
-                        // Extremely broad short query: candidate filtering no longer helps and building a huge
-                        // candidates payload may cost more than a direct SQL scan. Fall back to SQL scan below.
-                    } else {
-                        let page = try searchWithShortQuerySubstringCandidates(
-                            tokenLower: tokenLower,
-                            candidateIDStrings: candidates,
-                            sortMode: request.sortMode,
-                            appFilter: request.appFilter,
-                            typeFilter: request.typeFilter,
-                            typeFilters: typeFilters,
-                            limit: request.limit,
-                            offset: request.offset
-                        )
-                        return SearchResult(items: page.items, total: page.total, hasMore: page.hasMore, isPrefilter: false, searchTimeMs: 0)
-                    }
-                }
-            }
+	                    if let itemCount = corpusMetrics?.itemCount,
+	                       itemCount > 0,
+	                       candidates.count > 4096,
+	                       Double(candidates.count) / Double(itemCount) > 0.85
+	                    {
+	                        // Extremely broad short query: candidate filtering no longer helps and building a huge
+	                        // candidates payload may cost more than a direct SQL scan. Fall back to SQL scan below.
+	                    } else {
+	                        let page = try searchWithShortQuerySubstringCandidates(
+	                            tokenLower: tokenLower,
+	                            candidateIDStrings: candidates,
+	                            sortMode: request.sortMode,
+	                            appFilter: request.appFilter,
+	                            typeFilter: request.typeFilter,
+	                            typeFilters: typeFilters,
+	                            limit: request.limit,
+	                            offset: request.offset
+	                        )
+	                        return SearchResult(items: page.items, total: page.total, hasMore: page.hasMore, isPrefilter: false, searchTimeMs: 0)
+	                    }
+	                } else if let candidates = shortIndex.candidateIDStringsForNonASCIIBigram(tokenLower: tokenLower) {
+	                    shortQueryIndex = shortIndex
+	                    if candidates.isEmpty {
+	                        return SearchResult(items: [], total: 0, hasMore: false, isPrefilter: false, searchTimeMs: 0)
+	                    }
 
-            let page = try searchWithShortQuerySubstring(
-                tokenLower: tokenLower,
-                sortMode: request.sortMode,
+	                    if let itemCount = corpusMetrics?.itemCount,
+	                       itemCount > 0,
+	                       candidates.count > 4096,
+	                       Double(candidates.count) / Double(itemCount) > 0.85
+	                    {
+	                        // Extremely broad short query: candidate filtering no longer helps. Fall back to SQL scan below.
+	                    } else {
+	                        let page = try searchWithShortQuerySubstringCandidatesSQL(
+	                            tokenLower: tokenLower,
+	                            candidateIDStrings: candidates,
+	                            sortMode: request.sortMode,
+	                            appFilter: request.appFilter,
+	                            typeFilter: request.typeFilter,
+	                            typeFilters: typeFilters,
+	                            limit: request.limit,
+	                            offset: request.offset
+	                        )
+	                        return SearchResult(items: page.items, total: page.total, hasMore: page.hasMore, isPrefilter: false, searchTimeMs: 0)
+	                    }
+	                }
+	            }
+
+	            let page = try searchWithShortQuerySubstring(
+	                tokenLower: tokenLower,
+	                sortMode: request.sortMode,
                 appFilter: request.appFilter,
                 typeFilter: request.typeFilter,
                 typeFilters: typeFilters,
@@ -2541,13 +2638,26 @@ public actor SearchEngineImpl {
             items.removeLast()
         }
         let total = hasMore ? -1 : offset + items.count
-        return (items, total, hasMore)
-    }
+	        return (items, total, hasMore)
+	    }
 
-    private func searchWithShortQuerySubstringCandidates(
-        tokenLower: String,
-        candidateIDStrings: [String],
-        sortMode: SearchSortMode,
+	    private func buildCandidateIDsJSON(_ ids: [String]) -> String {
+	        var json = "["
+	        json.reserveCapacity(ids.count * 40 + 2)
+	        for (i, id) in ids.enumerated() {
+	            if i > 0 { json.append(",") }
+	            json.append("\"")
+	            json.append(id)
+	            json.append("\"")
+	        }
+	        json.append("]")
+	        return json
+	    }
+
+	    private func searchWithShortQuerySubstringCandidates(
+	        tokenLower: String,
+	        candidateIDStrings: [String],
+	        sortMode: SearchSortMode,
         appFilter: String?,
         typeFilter: ClipboardItemType?,
         typeFilters: [ClipboardItemType]?,
@@ -2559,10 +2669,10 @@ public actor SearchEngineImpl {
         guard !candidateIDStrings.isEmpty else { return ([], 0, false) }
 
         let needleLowerBytes = Array(tokenLower.utf8)
-        guard (needleLowerBytes.count == 1 || needleLowerBytes.count == 2),
-              needleLowerBytes.allSatisfy({ $0 < 128 }) else {
-            return try searchWithShortQuerySubstring(
-                tokenLower: tokenLower,
+	        guard (needleLowerBytes.count == 1 || needleLowerBytes.count == 2),
+	              needleLowerBytes.allSatisfy({ $0 < 128 }) else {
+	            return try searchWithShortQuerySubstring(
+	                tokenLower: tokenLower,
                 sortMode: sortMode,
                 appFilter: appFilter,
                 typeFilter: typeFilter,
@@ -2570,22 +2680,9 @@ public actor SearchEngineImpl {
                 limit: limit,
                 offset: offset
             )
-        }
+	        }
 
-        func buildCandidatesJSON(_ ids: [String]) -> String {
-            var json = "["
-            json.reserveCapacity(ids.count * 40 + 2)
-            for (i, id) in ids.enumerated() {
-                if i > 0 { json.append(",") }
-                json.append("\"")
-                json.append(id)
-                json.append("\"")
-            }
-            json.append("]")
-            return json
-        }
-
-        let candidatesJSON = buildCandidatesJSON(candidateIDStrings)
+	        let candidatesJSON = buildCandidateIDsJSON(candidateIDStrings)
 
         var sql = """
             WITH candidates(id) AS (SELECT value FROM json_each(?))
@@ -2758,15 +2855,121 @@ public actor SearchEngineImpl {
             pageIDs.removeLast()
         }
 
-        let items = try fetchItemsByIDs(ids: pageIDs)
-        let total = hasMore ? -1 : offset + items.count
-        return (items, total, hasMore)
-    }
+	        let items = try fetchItemsByIDs(ids: pageIDs)
+	        let total = hasMore ? -1 : offset + items.count
+	        return (items, total, hasMore)
+	    }
 
-    private func searchWithShortQuerySubstring(
-        tokenLower: String,
-        sortMode: SearchSortMode,
-        appFilter: String?,
+	    private func searchWithShortQuerySubstringCandidatesSQL(
+	        tokenLower: String,
+	        candidateIDStrings: [String],
+	        sortMode: SearchSortMode,
+	        appFilter: String?,
+	        typeFilter: ClipboardItemType?,
+	        typeFilters: [ClipboardItemType]?,
+	        limit: Int,
+	        offset: Int
+	    ) throws -> (items: [ClipboardStoredItem], total: Int, hasMore: Bool) {
+	        let tokenLower = tokenLower.trimmingCharacters(in: .whitespacesAndNewlines)
+	        guard !tokenLower.isEmpty else { return ([], 0, false) }
+	        guard !candidateIDStrings.isEmpty else { return ([], 0, false) }
+
+	        let useLower = tokenLower.canBeConverted(to: .ascii)
+	        let plainSearchExpr = useLower ? "lower(plain_text)" : "plain_text"
+	        let noteSearchExpr = useLower ? "lower(coalesce(note, ''))" : "coalesce(note, '')"
+
+	        var params: [String] = []
+	        params.append(buildCandidateIDsJSON(candidateIDStrings))
+	        params.append(tokenLower)
+	        params.append(tokenLower)
+
+	        var sql = """
+	            WITH candidates(id) AS (SELECT value FROM json_each(?))
+	            SELECT id, type, content_hash, plain_text, note, app_bundle_id, created_at, last_used_at,
+	                   use_count, is_pinned, size_bytes, storage_ref, file_size_bytes
+	            FROM (
+	                SELECT clipboard_items.id, clipboard_items.type, clipboard_items.content_hash, clipboard_items.plain_text, clipboard_items.note, clipboard_items.app_bundle_id, clipboard_items.created_at, clipboard_items.last_used_at,
+	                       clipboard_items.use_count, clipboard_items.is_pinned, clipboard_items.size_bytes, clipboard_items.storage_ref, clipboard_items.file_size_bytes,
+	                       instr(\(plainSearchExpr), ?) AS plainPos,
+	                       instr(\(noteSearchExpr), ?) AS notePos,
+	                       length(coalesce(plain_text, '')) AS plainLen
+	                FROM clipboard_items
+	                JOIN candidates ON clipboard_items.id = candidates.id
+	                WHERE 1 = 1
+	        """
+
+	        if let appFilter {
+	            sql += " AND app_bundle_id = ?"
+	            params.append(appFilter)
+	        }
+
+	        if let typeFilters, !typeFilters.isEmpty {
+	            let placeholders = typeFilters.map { _ in "?" }.joined(separator: ",")
+	            sql += " AND type IN (\(placeholders))"
+	            params.append(contentsOf: typeFilters.map(\.rawValue))
+	        } else if let typeFilter {
+	            sql += " AND type = ?"
+	            params.append(typeFilter.rawValue)
+	        }
+
+	        sql += """
+	                ) t
+	            WHERE plainPos > 0 OR notePos > 0
+	            ORDER BY is_pinned DESC,
+	        """
+
+	        switch sortMode {
+	        case .recent:
+	            sql += " last_used_at DESC,"
+	        case .relevance:
+	            break
+	        }
+
+	        sql += """
+	                     CASE
+	                       WHEN plainPos > 0 THEN plainPos
+	                       ELSE plainLen + 1 + notePos
+	                     END ASC,
+	        """
+
+	        if sortMode == .relevance {
+	            sql += " last_used_at DESC,"
+	        }
+
+	        sql += """
+	                     id ASC
+	            LIMIT ? OFFSET ?
+	        """
+
+	        let stmt = try prepare(sql)
+	        defer { stmt.reset() }
+
+	        var bindIndex: Int32 = 1
+	        for param in params {
+	            try stmt.bindText(param, at: bindIndex)
+	            bindIndex += 1
+	        }
+	        try stmt.bindInt(limit + 1, at: bindIndex)
+	        try stmt.bindInt(offset, at: bindIndex + 1)
+
+	        var items: [ClipboardStoredItem] = []
+	        items.reserveCapacity(limit + 1)
+	        while try stmt.step() {
+	            items.append(try parseStoredItemSummary(from: stmt))
+	        }
+
+	        let hasMore = items.count > limit
+	        if hasMore {
+	            items.removeLast()
+	        }
+	        let total = hasMore ? -1 : offset + items.count
+	        return (items, total, hasMore)
+	    }
+
+	    private func searchWithShortQuerySubstring(
+	        tokenLower: String,
+	        sortMode: SearchSortMode,
+	        appFilter: String?,
         typeFilter: ClipboardItemType?,
         typeFilters: [ClipboardItemType]?,
         limit: Int,
@@ -3107,6 +3310,18 @@ public actor SearchEngineImpl {
             return (false, fullIndexStale, 0, 0)
         }
         return (true, fullIndexStale, index.items.count, index.tombstoneCount)
+    }
+
+    func debugShortQueryIndexHealth() -> (isBuilt: Bool, isBuilding: Bool) {
+        let isBuilt = shortQueryIndex != nil
+        let isBuilding = shortQueryIndexBuildTask != nil
+        return (isBuilt, isBuilding)
+    }
+
+    func debugAwaitShortQueryIndexBuild() async {
+        if let task = shortQueryIndexBuildTask {
+            await task.value
+        }
     }
     #endif
 }
