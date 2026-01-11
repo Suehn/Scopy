@@ -1,5 +1,24 @@
 # Repository Guidelines
 
+## AI Coding Workflow（Codex / Claude Code）
+
+### 真实约束（不要猜）
+
+- 以 `project.yml` 为单一事实来源：`SWIFT_VERSION` / `MACOSX_DEPLOYMENT_TARGET` / `xcodeVersion`；除非明确要求，不要改这些基线。
+- 引入新系统 API（例如 macOS 26 / Liquid Glass）必须 `if #available` + fallback；把可用性封装在组件/适配层，避免业务逻辑散落条件分支。
+
+### 权威上下文（防幻觉）
+
+- 不要凭记忆编 Apple / Swift API：先用 MCP `cupertino` 搜索/阅读 Apple 文档或 sample code，确认**精确签名**与平台可用性再落代码。
+- 文档仍以编译器为裁判：写完立刻本地编译/测试，不留“占位实现”。
+
+### 验证闭环（改代码后必跑）
+
+- 基线：`make build` + `make test-unit`
+- 并发/actor/线程相关：额外跑 `make test-strict`；需要时跑 `make test-tsan`
+- 热键相关：自查 `/tmp/scopy_hotkey.log`（按下仅触发一次，且包含 `updateHotKey()`）
+- 注意：`make build/test*` 会触发 `make setup`；若缺 `xcodegen` 可能会尝试 `brew install xcodegen`，在无法联网或未授权时先询问。
+
 ## 必读文档
 
 - 行为准则要同时参考 @CLAUDE.md 的说法准则
@@ -17,16 +36,18 @@
 
 ## 构建与开发
 
-- Debug 构建：`./deploy.sh` 或 `xcodebuild -scheme Scopy -configuration Debug -destination 'platform=macOS' build`
-- Release 构建：`./deploy.sh release`
+- Debug 构建：`make build`（推荐）或 `./deploy.sh`
+- Release 构建：`make release` 或 `./deploy.sh release`
 - 仅编译不启动：`./deploy.sh --no-launch`
-- 生成工程（需要时）：`xcodegen generate`
+- 生成工程（需要时）：`bash scripts/xcodegen-generate-if-needed.sh` 或 `xcodegen generate`
 
 ## 测试
 
-- 单测：`xcodebuild test -scheme Scopy -destination 'platform=macOS' -only-testing:ScopyTests`
+- 单测（推荐）：`make test-unit`（或 `xcodebuild test -scheme Scopy -destination 'platform=macOS' -only-testing:ScopyTests`）
+- 并发回归（推荐）：`make test-strict`（`SWIFT_STRICT_CONCURRENCY=complete`）
 - 定向：`-only-testing:ScopyTests/<TestName>`
 - 热键改动自查：`/tmp/scopy_hotkey.log` 应有 `updateHotKey()` 且按下仅触发一次。
+- 性能基准测试必须使用从 `~/Library/Application Support/Scopy/clipboard.db` 快照到仓库内的最新副本（`make snapshot-perf-db`，文件不提交）。
 
 ## 编码风格
 

@@ -7,6 +7,36 @@
 
 ## [Unreleased]
 
+## [v0.58] - 2026-01-11
+
+### Perf/Search
+
+- **Fuzzy（ASCII 长词）大幅提速**：将 ASCII 子序列匹配从 `Character` 遍历改为 UTF16 单次扫描，显著降低 6k+ 大文本历史下的全量 fuzzy 延迟（稳定性/语义保持不变，排序仍由 score + lastUsedAt 决定）。
+- **渐进式全量校准（不减搜索范围）**：长文本语料优先返回 FTS 预筛首屏，并在后台自动触发全量校准（UI 提示“正在全量校准”，排序/漏项会更新）。
+- **短词（≤2）全量覆盖**：Fuzzy/Fuzzy+ 的短词不再依赖 cache-limited prefilter；在未预热全量索引时使用 SQL substring 扫描保障全量匹配，索引已存在时优先走内存索引以进一步降低延迟。
+
+### Fix/UX
+
+- **搜索时显示 Pinned 命中结果**：Pinned 区域不再仅在空搜索时展示；搜索状态下如有 pinned 命中会稳定显示。
+
+### Perf/UI
+
+- **缩略图路径判断降载**：DTO 转换避免对每条结果重复触盘检查缩略图文件；启动时异步建立 thumbnail cache 文件名索引，并在生成缩略图时增量更新索引，降低端到端搜索/滚动抖动。
+
+### Tooling/Perf
+
+- **真实性能基准**：新增 `make snapshot-perf-db`（从 `~/Library/Application Support/Scopy/clipboard.db` 复制最新快照到仓库目录，文件不提交）与 `make bench-snapshot-search`（release 级基准）。
+- **可选端到端快照测试**：新增 `make test-snapshot-perf`（需先准备 `perf-db/clipboard.db`）。
+
+### DB/Migration
+
+- **可选 Trigram FTS**：在 SQLite 支持 trigram tokenizer 时创建 `clipboard_fts_trigram`（不支持则跳过，保持数据库可用）。
+
+### Test
+
+- `make test-unit`：Executed 254 tests, 1 skipped, 0 failures（2026-01-11）
+- `make test-strict`：Executed 254 tests, 1 skipped, 0 failures（2026-01-11）
+
 ## [v0.57.fix2] - 2026-01-03
 
 ### Fix/Clipboard

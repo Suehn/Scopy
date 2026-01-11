@@ -34,6 +34,24 @@
 - runner：`macos-15`
 - Xcode：`16.0`
 
+## 本次更新（v0.58）
+
+- **Perf/Search（6k+ 大文本历史）**：
+  - ASCII fuzzy 子序列匹配改为 UTF16 单次扫描，降低全量 fuzzy 扫描延迟与抖动。
+  - 渐进式全量校准：长文本语料优先返回 FTS 预筛首屏，并自动触发全量校准（不减少搜索范围），UI 会提示“正在全量校准”。
+  - 短词（≤2）全量覆盖：未预热全量索引时用 SQL substring 扫描保障覆盖，索引已存在时优先走内存索引进一步提速。
+- **Fix/UX（Pinned）**：搜索状态下如有 pinned 命中，Pinned 区域仍会展示（不再仅空搜索时展示）。
+- **Perf/UI（端到端）**：DTO 转换避免对每条结果重复触盘检查缩略图；启动时异步建立 thumbnail cache 文件名索引，缩略图生成后增量更新索引，降低端到端搜索/滚动抖动。
+- **真实性能基准（必须）**：每次先将 `~/Library/Application Support/Scopy/clipboard.db` 快照到仓库目录（`make snapshot-perf-db`，并确保不提交），再用 `make bench-snapshot-search` 跑基准。
+- **性能实测**（本地，release，`perf-db/clipboard.db` ≈ 143MB；`hw.model=Mac15,12`；macOS 26.2（25C56）；Xcode 16.3（16E140）；2026-01-11）：
+  - fuzzyPlus relevance query=cm：avg 41.10ms，P95 42.04ms
+  - fuzzyPlus relevance query=cmd：avg 0.09ms，P95 0.12ms
+  - fuzzy relevance forceFullFuzzy query=abc：avg 2.40ms，P95 2.50ms
+  - fuzzy relevance forceFullFuzzy query=cmd：avg 2.69ms，P95 2.79ms
+- **测试结果**：
+  - `make test-unit`：Executed 254 tests, 1 skipped, 0 failures（2026-01-11）
+  - `make test-strict`：Executed 254 tests, 1 skipped, 0 failures（2026-01-11）
+
 ## 本次更新（v0.50.fix18）
 
 - **Fix/Release（pngquant 进包生效）**：修复部分 release 产物中 `Tools/pngquant` 未被打包的问题：构建阶段强制将 `Scopy/Resources/Tools/pngquant` 复制到 `Scopy.app/Contents/Resources/Tools/pngquant` 并设为可执行，同时拷贝 `Scopy/Resources/ThirdParty/pngquant/*`。

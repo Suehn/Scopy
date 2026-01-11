@@ -4,6 +4,25 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ---
 
+## AI 工程化护栏（防幻觉 / 可验证）
+
+### 真实约束（不要猜）
+
+- 以 `project.yml` 为单一事实来源：当前 `SWIFT_VERSION=5.9`、`MACOSX_DEPLOYMENT_TARGET=14.0`；除非明确要求，不要擅自升级语言版本/最低系统版本。
+- 引入新系统 API（例如 macOS 26 / Liquid Glass）必须 `if #available` + fallback，并把可用性判断封装在组件内部（避免业务逻辑散落条件分支）。
+
+### 权威上下文（Apple / Swift）
+
+- 不要凭记忆编 Apple API：先用 MCP `cupertino` 搜索/阅读 Apple Developer Documentation 或 sample code，确认**精确签名**与平台可用性再写代码。
+- 当文档与编译器提示冲突，以编译器为最终裁判；提交前必须能本地编译通过。
+
+### 验证闭环（改代码后必跑）
+
+- 基线：`make build` + `make test-unit`
+- 并发/actor/线程相关：额外跑 `make test-strict`；需要时跑 `make test-tsan`
+- 热键相关：自查 `/tmp/scopy_hotkey.log`（按下仅触发一次，且包含 `updateHotKey()`）
+- 注意：`make build/test*` 会触发 `make setup`；若缺 `xcodegen` 可能会尝试 `brew install xcodegen`，在无法联网或未授权时先询问。
+
 ## 开发工作流 (必读)
 
 ### 每次对话开始时
@@ -48,6 +67,7 @@ DEPLOYMENT.md 中的性能测试必须包含:
 - 测试环境 (硬件/系统/日期)
 - 具体数值 (不能只写"满足")
 - 对应的测试用例名称
+- 性能基准必须基于真实数据：每次先将 `~/Library/Application Support/Scopy/clipboard.db` 快照到仓库目录（`make snapshot-perf-db`，并确保不提交）。
 
 ### 性能变化记录 (必须)
 
@@ -83,7 +103,7 @@ DEPLOYMENT.md 中的性能测试必须包含:
 
 ## Project Overview
 
-**Scopy** is a native macOS clipboard manager designed to provide unlimited history, intelligent storage, and high-performance search. The project is currently in the specification phase with a detailed architecture document (`doc/specs/v0.md`) that serves as the complete Phase 1 requirements.
+**Scopy** is a native macOS clipboard manager designed to provide unlimited history, intelligent storage, and high-performance search. The current implementation status and latest version are tracked in `doc/implementation/README.md`, while `doc/specs/v0.md` documents the Phase 1 requirements baseline.
 
 ## Architecture
 
@@ -119,20 +139,24 @@ Scopy follows a **strict front-end/back-end separation** pattern to enable compo
 ```bash
 cd /Users/ziyi/Documents/code/Scopy
 
-# 部署应用 (推荐)
-./deploy.sh release    # Release 版本
-./deploy.sh            # Debug 版本
+# 构建（推荐，自动注入版本号）
+make build
+
+# 运行（可选）
+make run
 
 # 运行测试
-xcodegen generate
-xcodebuild test -scheme Scopy -destination 'platform=macOS' -only-testing:ScopyTests
+make test-unit
+make test-strict   # Strict concurrency regression
 ```
 
 ### 构建和部署
 
 ```bash
-./deploy.sh              # Debug 版本
-./deploy.sh release      # Release 版本
+make build               # Debug build
+make release             # Release build
+./deploy.sh              # Debug 版本（会安装到 /Applications，按需使用）
+./deploy.sh release      # Release 版本（同上）
 ./deploy.sh clean        # 清理后重新编译
 ./deploy.sh --no-launch  # 编译但不自动启动
 ```
@@ -140,14 +164,21 @@ xcodebuild test -scheme Scopy -destination 'platform=macOS' -only-testing:ScopyT
 ### 测试命令
 
 ```bash
-# 全部单元测试
-xcodebuild test -scheme Scopy -destination 'platform=macOS' -only-testing:ScopyTests
+# 全部测试
+make test
+
+# 单元测试（排除 perf/integration）
+make test-unit
 
 # 性能测试
-xcodebuild test -scheme Scopy -destination 'platform=macOS' -only-testing:ScopyTests/PerformanceTests
+make test-perf
 
-# 查看测试结果
-# 当前: 48/48 tests passed (1 skipped)
+# 严格并发回归（Swift strict concurrency）
+make test-strict
+
+# 查看测试结果/日志
+# - 日志：logs/*.log
+# - xcresult：logs/TestResults.xcresult
 ```
 
 ## Key Design Requirements
