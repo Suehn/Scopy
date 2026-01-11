@@ -78,6 +78,191 @@ public actor SearchEngineImpl {
         var tombstoneCount: Int
     }
 
+    private struct ShortQueryIndex: Sendable {
+        // ASCII-only char index: 128
+        private static let asciiCharCount = 128
+        // ASCII-only bigram index: 128 * 128
+        private static let asciiBigramCount = 128 * 128
+
+        private var slotToIDString: [String?] = []
+        private var slotToContentHash: [String] = []
+        private var slotToType: [ClipboardItemType] = []
+        private var idToSlot: [UUID: Int] = [:]
+
+        private var asciiCharPostings: [[Int]] = Array(repeating: [], count: Self.asciiCharCount)
+        // Key: (a << 7) | b
+        private var asciiBigramPostings: [UInt16: [Int]] = [:]
+
+        // Scratch stamps to keep postings unique per ingestion pass.
+        private var ingestStamp: UInt32 = 1
+        private var seenASCIICharStamp: [UInt32] = Array(repeating: 0, count: Self.asciiCharCount)
+        private var seenASCIIBigramStamp: [UInt32] = Array(repeating: 0, count: Self.asciiBigramCount)
+
+        // Scratch stamps to deduplicate candidate lists at query time.
+        private var candidateStamp: UInt32 = 1
+        private var slotCandidateStamp: [UInt32] = []
+
+        init(reserveSlots: Int) {
+            let reserve = max(0, reserveSlots)
+            slotToIDString.reserveCapacity(reserve)
+            slotToContentHash.reserveCapacity(reserve)
+            slotToType.reserveCapacity(reserve)
+            idToSlot.reserveCapacity(reserve)
+            slotCandidateStamp.reserveCapacity(reserve)
+        }
+
+        mutating func markDeleted(id: UUID) {
+            guard let slot = idToSlot.removeValue(forKey: id),
+                  slot < slotToIDString.count else {
+                return
+            }
+            slotToIDString[slot] = nil
+        }
+
+        mutating func upsert(_ item: ClipboardStoredItem) {
+            upsert(
+                id: item.id,
+                type: item.type,
+                contentHash: item.contentHash,
+                plainText: item.plainText,
+                note: item.note
+            )
+        }
+
+        mutating func upsert(
+            id: UUID,
+            type: ClipboardItemType,
+            contentHash: String,
+            plainText: String,
+            note: String?
+        ) {
+            if let slot = idToSlot[id],
+               slot < slotToIDString.count {
+                // For text items, contentHash tracks plain_text changes well; avoid re-ingesting on metadata updates.
+                // For non-text items, plain_text may change without affecting contentHash (e.g. "[Image: ...]"); ingest anyway.
+                if type != .text || slotToContentHash[slot] != contentHash || slotToType[slot] != type {
+                    slotToContentHash[slot] = contentHash
+                    slotToType[slot] = type
+                    ingestASCII(from: plainText, slot: slot)
+                }
+
+                // Note changes do not affect contentHash; always ingest note to avoid false negatives.
+                if let note, !note.isEmpty {
+                    ingestASCII(from: note, slot: slot)
+                }
+                return
+            }
+
+            let slot = slotToIDString.count
+            let idString = id.uuidString
+            slotToIDString.append(idString)
+            slotToContentHash.append(contentHash)
+            slotToType.append(type)
+            idToSlot[id] = slot
+            slotCandidateStamp.append(0)
+
+            ingestASCII(from: plainText, slot: slot)
+            if let note, !note.isEmpty {
+                ingestASCII(from: note, slot: slot)
+            }
+        }
+
+        mutating func candidateIDStrings(for tokenLower: String) -> [String] {
+            let token = tokenLower.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !token.isEmpty else { return [] }
+            guard token.canBeConverted(to: .ascii) else { return [] }
+
+            let bytes = Array(token.utf8)
+            guard bytes.count == 1 || bytes.count == 2 else { return [] }
+
+            func lowerASCII(_ b: UInt8) -> UInt8 {
+                if b >= 65 && b <= 90 { return b | 0x20 }
+                return b
+            }
+
+            let slots: [Int]
+            switch bytes.count {
+            case 1:
+                let c = Int(lowerASCII(bytes[0]))
+                guard c >= 0 && c < Self.asciiCharCount else { return [] }
+                slots = asciiCharPostings[c]
+            case 2:
+                let a = Int(lowerASCII(bytes[0]))
+                let b = Int(lowerASCII(bytes[1]))
+                guard a >= 0 && a < Self.asciiCharCount, b >= 0 && b < Self.asciiCharCount else { return [] }
+                let key = UInt16((a << 7) | b)
+                slots = asciiBigramPostings[key] ?? []
+            default:
+                return []
+            }
+
+            if slots.isEmpty { return [] }
+
+            candidateStamp &+= 1
+            if candidateStamp == 0 {
+                candidateStamp = 1
+                slotCandidateStamp = Array(repeating: 0, count: slotCandidateStamp.count)
+            }
+
+            var result: [String] = []
+            result.reserveCapacity(min(256, slots.count))
+
+            for slot in slots {
+                guard slot < slotToIDString.count else { continue }
+                if slot < slotCandidateStamp.count {
+                    if slotCandidateStamp[slot] == candidateStamp { continue }
+                    slotCandidateStamp[slot] = candidateStamp
+                }
+                if let id = slotToIDString[slot] {
+                    result.append(id)
+                }
+            }
+            return result
+        }
+
+        private mutating func ingestASCII(from text: String, slot: Int) {
+            guard !text.isEmpty else { return }
+
+            ingestStamp &+= 1
+            if ingestStamp == 0 {
+                ingestStamp = 1
+                seenASCIICharStamp = Array(repeating: 0, count: seenASCIICharStamp.count)
+                seenASCIIBigramStamp = Array(repeating: 0, count: seenASCIIBigramStamp.count)
+            }
+
+            func lowerASCII(_ b: UInt8) -> UInt8 {
+                if b >= 65 && b <= 90 { return b | 0x20 }
+                return b
+            }
+
+            var prev: UInt8? = nil
+            for raw in text.utf8 {
+                guard raw < 128 else {
+                    prev = nil
+                    continue
+                }
+
+                let b = lowerASCII(raw)
+
+                let c = Int(b)
+                if seenASCIICharStamp[c] != ingestStamp {
+                    seenASCIICharStamp[c] = ingestStamp
+                    asciiCharPostings[c].append(slot)
+                }
+
+                if let p = prev {
+                    let key = UInt16((Int(p) << 7) | Int(b))
+                    let idx = Int(key)
+                    if seenASCIIBigramStamp[idx] != ingestStamp {
+                        seenASCIIBigramStamp[idx] = ingestStamp
+                        asciiBigramPostings[key, default: []].append(slot)
+                    }
+                }
+                prev = b
+            }
+        }
+    }
+
     private struct CorpusMetrics: Sendable {
         let itemCount: Int
         let avgPlainTextLength: Double
@@ -159,6 +344,7 @@ public actor SearchEngineImpl {
 
     private let dbPath: String
     private var connection: SQLiteConnection?
+    private var knownDataVersion: Int64?
 
     private var recentItemsCache: [CachedRecentItem] = []
     private var cacheTimestamp: Date = .distantPast
@@ -168,6 +354,12 @@ public actor SearchEngineImpl {
     private var fullIndex: FullFuzzyIndex?
     private var fullIndexStale = true
     private var fullIndexGeneration: UInt64 = 0
+
+    private var shortQueryIndex: ShortQueryIndex?
+    private var shortQueryIndexBuildTask: Task<Void, Never>?
+    private var shortQueryIndexBuildGeneration: UInt64 = 0
+    private var shortQueryIndexPendingUpserts: [ClipboardStoredItem] = []
+    private var shortQueryIndexPendingDeletions: [UUID] = []
 
     private let fullIndexTombstoneRatioStaleThreshold: Double = 0.25
     private let fullIndexTombstoneMinSlotsForStale: Int = 64
@@ -229,6 +421,12 @@ public actor SearchEngineImpl {
         corpusMetrics = nil
         corpusMetricsUpdatedAt = .distantPast
         supportsTrigramFTS = false
+        shortQueryIndexBuildTask?.cancel()
+        shortQueryIndexBuildTask = nil
+        shortQueryIndex = nil
+        shortQueryIndexPendingUpserts = []
+        shortQueryIndexPendingDeletions = []
+        knownDataVersion = nil
         connection?.close()
         connection = nil
     }
@@ -238,11 +436,16 @@ public actor SearchEngineImpl {
     public func invalidateCache() {
         resetRecentCache()
         resetFullIndex()
+        resetShortQueryIndex()
         markCorpusMetricsStale()
+        refreshKnownDataVersionIfPossible()
+        startShortQueryIndexBuildIfNeeded()
     }
 
     func handleUpsertedItem(_ item: ClipboardStoredItem) {
         resetQueryCaches()
+        handleShortQueryIndexUpsert(item)
+        refreshKnownDataVersionIfPossible()
 
         var shouldStaleCorpusMetrics = false
 
@@ -280,6 +483,7 @@ public actor SearchEngineImpl {
 
     func handlePinnedChange(id: UUID, pinned: Bool) {
         resetQueryCaches()
+        refreshKnownDataVersionIfPossible()
 
         guard var index = fullIndex,
               !fullIndexStale,
@@ -298,6 +502,8 @@ public actor SearchEngineImpl {
 
     func handleDeletion(id: UUID) {
         markCorpusMetricsStale()
+        handleShortQueryIndexDeletion(id: id)
+        refreshKnownDataVersionIfPossible()
 
         if var index = fullIndex,
            !fullIndexStale,
@@ -321,6 +527,7 @@ public actor SearchEngineImpl {
 
     func handleClearAll() {
         invalidateCache()
+        refreshKnownDataVersionIfPossible()
     }
 
     private func resetRecentCache() {
@@ -337,6 +544,158 @@ public actor SearchEngineImpl {
         fullIndex = nil
         fullIndexStale = true
         markIndexChanged()
+    }
+
+    private func resetShortQueryIndex() {
+        shortQueryIndexBuildTask?.cancel()
+        shortQueryIndexBuildTask = nil
+        shortQueryIndexBuildGeneration &+= 1
+        shortQueryIndex = nil
+        shortQueryIndexPendingUpserts = []
+        shortQueryIndexPendingDeletions = []
+    }
+
+    private func handleShortQueryIndexUpsert(_ item: ClipboardStoredItem) {
+        if shortQueryIndexBuildTask != nil {
+            shortQueryIndexPendingUpserts.append(item)
+            return
+        }
+
+        guard var index = shortQueryIndex else { return }
+        index.upsert(item)
+        shortQueryIndex = index
+    }
+
+    private func handleShortQueryIndexDeletion(id: UUID) {
+        if shortQueryIndexBuildTask != nil {
+            shortQueryIndexPendingDeletions.append(id)
+            return
+        }
+
+        guard var index = shortQueryIndex else { return }
+        index.markDeleted(id: id)
+        shortQueryIndex = index
+    }
+
+    private func startShortQueryIndexBuildIfNeeded() {
+        guard shortQueryIndex == nil else { return }
+        guard shortQueryIndexBuildTask == nil else { return }
+
+        let estimatedCount = corpusMetrics?.itemCount ?? 0
+        guard estimatedCount >= shortQueryCacheSize else { return }
+
+        shortQueryIndexPendingUpserts = []
+        shortQueryIndexPendingDeletions = []
+
+        shortQueryIndexBuildGeneration &+= 1
+        let generation = shortQueryIndexBuildGeneration
+        let reserveSlots = estimatedCount
+
+        shortQueryIndexBuildTask = Task.detached(priority: .utility) { [dbPath] in
+            let index = Self.buildShortQueryIndexSnapshot(dbPath: dbPath, reserveSlots: reserveSlots)
+            await self.finishShortQueryIndexBuild(generation: generation, index: index)
+        }
+    }
+
+    private static func buildShortQueryIndexSnapshot(dbPath: String, reserveSlots: Int) -> ShortQueryIndex? {
+        let flags = SQLiteConnection.openFlags(for: dbPath, readOnly: true)
+        let conn: SQLiteConnection
+        do {
+            conn = try SQLiteConnection(path: dbPath, flags: flags)
+        } catch {
+            return nil
+        }
+        defer { conn.close() }
+
+        do {
+            try conn.execute("PRAGMA query_only = 1")
+            try conn.execute("PRAGMA busy_timeout = 500")
+            try conn.execute("PRAGMA cache_size = -64000")
+            try conn.execute("PRAGMA temp_store = MEMORY")
+            try conn.execute("PRAGMA mmap_size = 268435456")
+        } catch {
+            return nil
+        }
+
+        var index = ShortQueryIndex(reserveSlots: reserveSlots)
+
+        do {
+            let stmt = try conn.prepare("SELECT id, type, content_hash, plain_text, note FROM clipboard_items")
+            var row = 0
+            while try stmt.step() {
+                if row % 256 == 0, Task.isCancelled { return nil }
+                row += 1
+
+                guard let idString = stmt.columnText(0),
+                      let id = UUID(uuidString: idString),
+                      let typeRaw = stmt.columnText(1),
+                      let type = ClipboardItemType(rawValue: typeRaw) else {
+                    continue
+                }
+
+                let contentHash = stmt.columnText(2) ?? ""
+                let plainText = stmt.columnText(3) ?? ""
+                let note = stmt.columnText(4)
+
+                index.upsert(id: id, type: type, contentHash: contentHash, plainText: plainText, note: note)
+            }
+        } catch {
+            return nil
+        }
+
+        return Task.isCancelled ? nil : index
+    }
+
+    private func finishShortQueryIndexBuild(generation: UInt64, index: ShortQueryIndex?) {
+        guard shortQueryIndexBuildGeneration == generation else { return }
+        shortQueryIndexBuildTask = nil
+
+        guard var index else { return }
+
+        for id in shortQueryIndexPendingDeletions {
+            index.markDeleted(id: id)
+        }
+        shortQueryIndexPendingDeletions = []
+
+        for item in shortQueryIndexPendingUpserts {
+            index.upsert(item)
+        }
+        shortQueryIndexPendingUpserts = []
+
+        shortQueryIndex = index
+    }
+
+    private func fetchDataVersion() throws -> Int64 {
+        let stmt = try prepare("PRAGMA data_version")
+        defer { stmt.reset() }
+        guard try stmt.step() else { return 0 }
+        return stmt.columnInt64(0)
+    }
+
+    private func refreshKnownDataVersionIfPossible() {
+        guard connection != nil else { return }
+        if let v = try? fetchDataVersion() {
+            knownDataVersion = v
+        }
+    }
+
+    private func invalidateInMemoryIndexesIfDBChangedExternally() {
+        guard connection != nil else { return }
+        guard let known = knownDataVersion else {
+            refreshKnownDataVersionIfPossible()
+            return
+        }
+        guard let current = try? fetchDataVersion() else { return }
+        guard current != known else { return }
+
+        // DB has changed but we haven't observed it through our update callbacks yet.
+        // To guarantee "full history" correctness, drop in-memory indexes/caches and fall back to SQL scans.
+        resetQueryCaches()
+        resetFullIndex()
+        resetShortQueryIndex()
+        markCorpusMetricsStale()
+        knownDataVersion = current
+        startShortQueryIndexBuildIfNeeded()
     }
 
     // MARK: - Search API
@@ -388,6 +747,7 @@ public actor SearchEngineImpl {
     private func searchInternal(request: SearchRequest) async throws -> SearchResult {
         try openIfNeeded()
         refreshCorpusMetricsIfNeeded()
+        invalidateInMemoryIndexesIfDBChangedExternally()
         try Task.checkCancellation()
 
         switch request.mode {
@@ -702,6 +1062,39 @@ public actor SearchEngineImpl {
 
             let tokenLower = trimmedQuery.lowercased()
             let typeFilters = request.typeFilters.map(Array.init)
+
+            if tokenLower.canBeConverted(to: .ascii) {
+                startShortQueryIndexBuildIfNeeded()
+                if var shortIndex = shortQueryIndex {
+                    let candidates = shortIndex.candidateIDStrings(for: tokenLower)
+                    shortQueryIndex = shortIndex
+                    if candidates.isEmpty {
+                        return SearchResult(items: [], total: 0, hasMore: false, isPrefilter: false, searchTimeMs: 0)
+                    }
+
+                    if let itemCount = corpusMetrics?.itemCount,
+                       itemCount > 0,
+                       candidates.count > 4096,
+                       Double(candidates.count) / Double(itemCount) > 0.85
+                    {
+                        // Extremely broad short query: candidate filtering no longer helps and building a huge
+                        // candidates payload may cost more than a direct SQL scan. Fall back to SQL scan below.
+                    } else {
+                        let page = try searchWithShortQuerySubstringCandidates(
+                            tokenLower: tokenLower,
+                            candidateIDStrings: candidates,
+                            sortMode: request.sortMode,
+                            appFilter: request.appFilter,
+                            typeFilter: request.typeFilter,
+                            typeFilters: typeFilters,
+                            limit: request.limit,
+                            offset: request.offset
+                        )
+                        return SearchResult(items: page.items, total: page.total, hasMore: page.hasMore, isPrefilter: false, searchTimeMs: 0)
+                    }
+                }
+            }
+
             let page = try searchWithShortQuerySubstring(
                 tokenLower: tokenLower,
                 sortMode: request.sortMode,
@@ -1605,6 +1998,8 @@ public actor SearchEngineImpl {
         statementCache = [:]
         fuzzySortedMatchesCache = nil
         refreshCorpusMetricsIfNeeded(force: true)
+        refreshKnownDataVersionIfPossible()
+        startShortQueryIndexBuildIfNeeded()
     }
 
     private func markCorpusMetricsStale() {
@@ -2145,6 +2540,225 @@ public actor SearchEngineImpl {
         if hasMore {
             items.removeLast()
         }
+        let total = hasMore ? -1 : offset + items.count
+        return (items, total, hasMore)
+    }
+
+    private func searchWithShortQuerySubstringCandidates(
+        tokenLower: String,
+        candidateIDStrings: [String],
+        sortMode: SearchSortMode,
+        appFilter: String?,
+        typeFilter: ClipboardItemType?,
+        typeFilters: [ClipboardItemType]?,
+        limit: Int,
+        offset: Int
+    ) throws -> (items: [ClipboardStoredItem], total: Int, hasMore: Bool) {
+        let tokenLower = tokenLower.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !tokenLower.isEmpty else { return ([], 0, false) }
+        guard !candidateIDStrings.isEmpty else { return ([], 0, false) }
+
+        let needleLowerBytes = Array(tokenLower.utf8)
+        guard (needleLowerBytes.count == 1 || needleLowerBytes.count == 2),
+              needleLowerBytes.allSatisfy({ $0 < 128 }) else {
+            return try searchWithShortQuerySubstring(
+                tokenLower: tokenLower,
+                sortMode: sortMode,
+                appFilter: appFilter,
+                typeFilter: typeFilter,
+                typeFilters: typeFilters,
+                limit: limit,
+                offset: offset
+            )
+        }
+
+        func buildCandidatesJSON(_ ids: [String]) -> String {
+            var json = "["
+            json.reserveCapacity(ids.count * 40 + 2)
+            for (i, id) in ids.enumerated() {
+                if i > 0 { json.append(",") }
+                json.append("\"")
+                json.append(id)
+                json.append("\"")
+            }
+            json.append("]")
+            return json
+        }
+
+        let candidatesJSON = buildCandidatesJSON(candidateIDStrings)
+
+        var sql = """
+            WITH candidates(id) AS (SELECT value FROM json_each(?))
+            SELECT clipboard_items.id,
+                   clipboard_items.last_used_at,
+                   clipboard_items.is_pinned,
+                   clipboard_items.plain_text,
+                   clipboard_items.note
+            FROM clipboard_items
+            JOIN candidates ON clipboard_items.id = candidates.id
+            WHERE 1 = 1
+        """
+
+        var params: [String] = []
+        params.append(candidatesJSON)
+
+        if let appFilter {
+            sql += " AND app_bundle_id = ?"
+            params.append(appFilter)
+        }
+
+        if let typeFilters, !typeFilters.isEmpty {
+            let placeholders = typeFilters.map { _ in "?" }.joined(separator: ",")
+            sql += " AND type IN (\(placeholders))"
+            params.append(contentsOf: typeFilters.map(\.rawValue))
+        } else if let typeFilter {
+            sql += " AND type = ?"
+            params.append(typeFilter.rawValue)
+        }
+
+        let stmt = try prepare(sql)
+        defer { stmt.reset() }
+
+        var bindIndex: Int32 = 1
+        for param in params {
+            try stmt.bindText(param, at: bindIndex)
+            bindIndex += 1
+        }
+
+        @inline(__always)
+        func lowerASCII(_ b: UInt8) -> UInt8 {
+            if b >= 65 && b <= 90 { return b | 0x20 }
+            return b
+        }
+
+        func instrASCIIInsensitiveUTF8(
+            haystack: (ptr: UnsafePointer<UInt8>, length: Int)?,
+            needleLower: [UInt8]
+        ) -> (pos: Int, lengthIfNoMatch: Int) {
+            guard let haystack else { return (pos: 0, lengthIfNoMatch: 0) }
+            guard !needleLower.isEmpty else { return (pos: 1, lengthIfNoMatch: 0) }
+
+            let n0 = needleLower[0]
+            let n1 = (needleLower.count >= 2) ? needleLower[1] : 0
+
+            var i = 0
+            var codepointPos = 1
+            var prevLower: UInt8? = nil
+            var prevPos = 0
+
+            while i < haystack.length {
+                let byte = haystack.ptr[i]
+                if byte < 128 {
+                    let lower = lowerASCII(byte)
+
+                    if needleLower.count == 1 {
+                        if lower == n0 { return (pos: codepointPos, lengthIfNoMatch: 0) }
+                    } else if let prevLower, prevLower == n0, lower == n1 {
+                        return (pos: prevPos, lengthIfNoMatch: 0)
+                    }
+
+                    prevLower = lower
+                    prevPos = codepointPos
+
+                    i += 1
+                    codepointPos += 1
+                    continue
+                }
+
+                prevLower = nil
+
+                let adv: Int
+                switch byte {
+                case 0xC0...0xDF: adv = 2
+                case 0xE0...0xEF: adv = 3
+                case 0xF0...0xF7: adv = 4
+                default: adv = 1
+                }
+
+                i += adv
+                codepointPos += 1
+            }
+
+            return (pos: 0, lengthIfNoMatch: codepointPos - 1)
+        }
+
+        struct CandidateHit {
+            let idString: String
+            let lastUsedAt: Double
+            let isPinned: Bool
+            let matchPos: Int
+        }
+
+        var hits: [CandidateHit] = []
+        hits.reserveCapacity(min(candidateIDStrings.count, 8192))
+        while try stmt.step() {
+            guard let idString = stmt.columnText(0) else { continue }
+
+            let lastUsedAt = stmt.columnDouble(1)
+            let isPinned = stmt.columnInt(2) != 0
+
+            let plainRes = instrASCIIInsensitiveUTF8(
+                haystack: stmt.columnTextBytes(3),
+                needleLower: needleLowerBytes
+            )
+            if plainRes.pos > 0 {
+                hits.append(CandidateHit(idString: idString, lastUsedAt: lastUsedAt, isPinned: isPinned, matchPos: plainRes.pos))
+                continue
+            }
+
+            let noteRes = instrASCIIInsensitiveUTF8(
+                haystack: stmt.columnTextBytes(4),
+                needleLower: needleLowerBytes
+            )
+            guard noteRes.pos > 0 else { continue }
+
+            let matchPos = plainRes.lengthIfNoMatch + 1 + noteRes.pos
+            hits.append(CandidateHit(idString: idString, lastUsedAt: lastUsedAt, isPinned: isPinned, matchPos: matchPos))
+        }
+
+        hits.sort { lhs, rhs in
+            if lhs.isPinned != rhs.isPinned {
+                return lhs.isPinned && !rhs.isPinned
+            }
+
+            switch sortMode {
+            case .recent:
+                if lhs.lastUsedAt != rhs.lastUsedAt {
+                    return lhs.lastUsedAt > rhs.lastUsedAt
+                }
+                if lhs.matchPos != rhs.matchPos {
+                    return lhs.matchPos < rhs.matchPos
+                }
+            case .relevance:
+                if lhs.matchPos != rhs.matchPos {
+                    return lhs.matchPos < rhs.matchPos
+                }
+                if lhs.lastUsedAt != rhs.lastUsedAt {
+                    return lhs.lastUsedAt > rhs.lastUsedAt
+                }
+            }
+
+            return lhs.idString < rhs.idString
+        }
+
+        let start = min(offset, hits.count)
+        let end = min(offset + limit + 1, hits.count)
+        let pageHits: [CandidateHit] = (start < end) ? Array(hits[start..<end]) : []
+
+        var pageIDs: [UUID] = []
+        pageIDs.reserveCapacity(min(pageHits.count, limit + 1))
+        for hit in pageHits {
+            if let id = UUID(uuidString: hit.idString) {
+                pageIDs.append(id)
+            }
+        }
+
+        let hasMore = pageIDs.count > limit
+        if hasMore {
+            pageIDs.removeLast()
+        }
+
+        let items = try fetchItemsByIDs(ids: pageIDs)
         let total = hasMore ? -1 : offset + items.count
         return (items, total, hasMore)
     }
