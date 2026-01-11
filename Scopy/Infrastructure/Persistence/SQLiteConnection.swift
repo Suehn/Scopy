@@ -178,6 +178,12 @@ final class SQLiteStatement {
         return String(cString: ptr)
     }
 
+    func columnTextBytes(_ index: Int32) -> (ptr: UnsafePointer<UInt8>, length: Int)? {
+        guard let ptr = sqlite3_column_text(statement, index) else { return nil }
+        let length = Int(sqlite3_column_bytes(statement, index))
+        return (ptr: ptr, length: length)
+    }
+
     func columnInt(_ index: Int32) -> Int {
         Int(sqlite3_column_int(statement, index))
     }
