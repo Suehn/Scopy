@@ -511,6 +511,24 @@ final class SearchServiceTests: XCTestCase {
         XCTAssertEqual(result.items.first?.id, pinned.id)
     }
 
+    func testShortQueryPinnedItemsRankFirst() async throws {
+        let pinned = try await storage.upsertItem(makeContent("AB pinned"))
+        try await storage.setPin(pinned.id, pinned: true)
+        try await Task.sleep(nanoseconds: 10_000_000)
+
+        _ = try await storage.upsertItem(makeContent("ab unpinned"))
+        for i in 0..<2001 {
+            _ = try await storage.upsertItem(makeContent("Item \(i) filler"))
+        }
+        await search.invalidateCache()
+
+        let request = SearchRequest(query: "ab", mode: .fuzzyPlus, sortMode: .relevance, limit: 10, offset: 0)
+        let result = try await search.search(request: request)
+
+        XCTAssertTrue(result.items.contains(where: { $0.id == pinned.id }))
+        XCTAssertEqual(result.items.first?.id, pinned.id)
+    }
+
     func testExactSearchResultsSortByLastUsedAt() async throws {
         let pinnedOld = try await storage.upsertItem(makeContent("alpha pinned old"))
         try await storage.setPin(pinnedOld.id, pinned: true)
