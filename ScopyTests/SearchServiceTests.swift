@@ -642,6 +642,57 @@ final class SearchServiceTests: XCTestCase {
         XCTAssertTrue(result.items[0].plainText.localizedCaseInsensitiveContains("hello world"))
     }
 
+    func testShortQueryUsesFullIndexWhenAvailableAndRanksByMatchPosition() async throws {
+        let better = try await storage.upsertItem(makeContent("abxxxx"))
+        try await Task.sleep(nanoseconds: 10_000_000)
+        _ = try await storage.upsertItem(makeContent("xxabxx"))
+        await search.invalidateCache()
+
+        // Build the full index with a longer query first, so short queries can reuse it.
+        _ = try await search.search(
+            request: SearchRequest(query: "abx", mode: .fuzzy, sortMode: .relevance, forceFullFuzzy: true, limit: 10, offset: 0)
+        )
+
+        let result = try await search.search(
+            request: SearchRequest(query: "ab", mode: .fuzzy, sortMode: .relevance, limit: 10, offset: 0)
+        )
+        XCTAssertGreaterThanOrEqual(result.items.count, 2)
+        XCTAssertEqual(result.items.first?.id, better.id, "Relevance should prefer earlier match position for short queries")
+    }
+
+    func testFullIndexPrefilterSupportsMixedASCIIAndNonASCIICharacters() async throws {
+        let target = try await storage.upsertItem(makeContent("a学b"))
+        _ = try await storage.upsertItem(makeContent("ab"))
+        _ = try await storage.upsertItem(makeContent("学b"))
+        await search.invalidateCache()
+
+        let result = try await search.search(
+            request: SearchRequest(query: "a学b", mode: .fuzzy, sortMode: .relevance, forceFullFuzzy: true, limit: 50, offset: 0)
+        )
+        XCTAssertEqual(result.items.map(\.id), [target.id])
+    }
+
+    func testFullIndexUpdatesOnTextChangeWithoutForcingRebuild() async throws {
+        let noteOnly = try await storage.upsertItem(makeContent("xxxxxxxx"))
+        await search.invalidateCache()
+
+        // Build full index first.
+        _ = try await search.search(
+            request: SearchRequest(query: "xxx", mode: .fuzzy, sortMode: .relevance, forceFullFuzzy: true, limit: 10, offset: 0)
+        )
+
+        guard let updated = try await storage.updateNote(id: noteOnly.id, note: "ab") else {
+            XCTFail("updateNote returned nil")
+            return
+        }
+        await search.handleUpsertedItem(updated)
+
+        let result = try await search.search(
+            request: SearchRequest(query: "ab", mode: .fuzzy, sortMode: .relevance, limit: 10, offset: 0)
+        )
+        XCTAssertTrue(result.items.contains { $0.id == noteOnly.id })
+    }
+
     func testShortQueryRelevancePrefersPlainTextMatchesOverNoteMatches() async throws {
         let plainMatch = try await storage.upsertItem(makeContent("ab"))
         try await Task.sleep(nanoseconds: 10_000_000)

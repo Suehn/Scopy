@@ -268,6 +268,7 @@
 		89C6F6585F448AF4EAD81976 /* KaTeX_Script-Regular.woff in Resources */ = {isa = PBXBuildFile; fileRef = 024FB47EE00106753C4DB412 /* KaTeX_Script-Regular.woff */; };
 		89FF6438C2FC385E81DD98CB /* PerformanceProfilerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 81E3E40D7B7A01720DF737E2 /* PerformanceProfilerTests.swift */; };
 		8BE426A1F9634674C78210D8 /* KaTeX_SansSerif-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 6119B6CED24CEDFCE2AA9419 /* KaTeX_SansSerif-Regular.ttf */; };
+		8D36A0AA429718DE7A55C83A /* RealDatabaseRegressionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 48400516AB3B998E1313FBAE /* RealDatabaseRegressionTests.swift */; };
 		8D5D46A01D0CA160688F934C /* KaTeX_Caligraphic-Bold.woff2 in Resources */ = {isa = PBXBuildFile; fileRef = EFFB5A8F8CB41B987173626B /* KaTeX_Caligraphic-Bold.woff2 */; };
 		8D9F5718B47D4CCAF06F79D0 /* KaTeX_Fraktur-Regular.woff2 in Resources */ = {isa = PBXBuildFile; fileRef = 583CEBA44B45A3F8F9422FBC /* KaTeX_Fraktur-Regular.woff2 */; };
 		8E09FFE67101D5769C94AB65 /* HotKeyRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3A1E175FDD120FFDD7F1D4E4 /* HotKeyRecorder.swift */; };
@@ -345,6 +346,7 @@
 		B1CB4831365DCD6E5077365D /* TestDataFactory.swift in Sources */ = {isa = PBXBuildFile; fileRef = 98A81F5BEC4470C8DA1B4864 /* TestDataFactory.swift */; };
 		B22A2A3604CB35AB839619FF /* HistoryItemImagePreviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 60CF1C183B3F302D5E620DB2 /* HistoryItemImagePreviewView.swift */; };
 		B2CEFE7289E25259D522B888 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 62C29361DE1A42C04AB601DE /* ContentView.swift */; };
+		B44A609E8ADAB5EC0EDA9BAC /* RealDatabaseRegressionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 48400516AB3B998E1313FBAE /* RealDatabaseRegressionTests.swift */; };
 		B4ADD9D45E76589E4B83DBE3 /* katex.min.css in Resources */ = {isa = PBXBuildFile; fileRef = 1F95016417AE5066D641D49C /* katex.min.css */; };
 		B4C5294BC87EF895135FDFDD /* KaTeX_Caligraphic-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = FD494BE1E8A9226E9C010653 /* KaTeX_Caligraphic-Regular.ttf */; };
 		B5416974ED765C7FBC1CD835 /* KaTeX_Main-Regular.woff2 in Resources */ = {isa = PBXBuildFile; fileRef = 0C442EB6B998A8961A987D12 /* KaTeX_Main-Regular.woff2 */; };
@@ -543,6 +545,7 @@
 		42D411B91F0A819854835FBE /* KaTeX_Caligraphic-Bold.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "KaTeX_Caligraphic-Bold.ttf"; sourceTree = "<group>"; };
 		4363B3275C036B26FBD9F5A3 /* pngquant */ = {isa = PBXFileReference; path = pngquant; sourceTree = "<group>"; };
 		47EB28A5AF6B73C0ADB10FA4 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
+		48400516AB3B998E1313FBAE /* RealDatabaseRegressionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RealDatabaseRegressionTests.swift; sourceTree = "<group>"; };
 		493362158599490B2914D1A5 /* ScopyColors.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScopyColors.swift; sourceTree = "<group>"; };
 		493C86BD8E4F500AA9F36C33 /* MarkdownDetectorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownDetectorTests.swift; sourceTree = "<group>"; };
 		4A59DA66E57493CA04F53377 /* KaTeX_Size2-Regular.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "KaTeX_Size2-Regular.ttf"; sourceTree = "<group>"; };
@@ -943,6 +946,7 @@
 				C1EC3BA03A837723813AF74F /* MarkdownMathRenderingTests.swift */,
 				81E3E40D7B7A01720DF737E2 /* PerformanceProfilerTests.swift */,
 				1C176E09A1997AD49E566273 /* PerformanceTests.swift */,
+				48400516AB3B998E1313FBAE /* RealDatabaseRegressionTests.swift */,
 				E89CCE301327084364FDFDE1 /* ResourceCleanupTests.swift */,
 				D09D06477D29F2066855D402 /* ReviewFix24Tests.swift */,
 				0CACB3776A96E06FA53E387A /* ScrollPerformanceTests.swift */,
@@ -1640,6 +1644,7 @@
 				0AD305C3B070786AC4309A0C /* PerformanceMetrics.swift in Sources */,
 				574CBC1092D1BC6891FF64C0 /* PerformanceProfilerTests.swift in Sources */,
 				BA3261E96493B569E993FB95 /* QuickLookPreviewView.swift in Sources */,
+				8D36A0AA429718DE7A55C83A /* RealDatabaseRegressionTests.swift in Sources */,
 				70D5747F23695105E2867484 /* ResourceCleanupTests.swift in Sources */,
 				DEEA24997C244EFA23B8C608 /* ReviewFix24Tests.swift in Sources */,
 				35F9DA552D86FB9CBF6A3C81 /* ScopyColors.swift in Sources */,
@@ -1755,6 +1760,7 @@
 				89FF6438C2FC385E81DD98CB /* PerformanceProfilerTests.swift in Sources */,
 				A316443B51B7C38263A0682C /* PerformanceTests.swift in Sources */,
 				2E1E253710C3749720A35AFD /* QuickLookPreviewView.swift in Sources */,
+				B44A609E8ADAB5EC0EDA9BAC /* RealDatabaseRegressionTests.swift in Sources */,
 				C0A51AA7E4BEC084FC3D231D /* ResourceCleanupTests.swift in Sources */,
 				FE96B78665F159342116C6D5 /* ReviewFix24Tests.swift in Sources */,
 				57C1FB3E5765F41546C7AD5E /* ScopyColors.swift in Sources */,

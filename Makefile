@@ -2,6 +2,7 @@
 # 符合 v0.md 的构建和测试流程
 
 .PHONY: all setup build run clean xcode test test-unit test-perf test-perf-heavy test-snapshot-perf test-tsan test-strict coverage benchmark test-flow test-flow-quick health-check
+.PHONY: test-real-db
 .PHONY: snapshot-perf-db bench-snapshot-search
 .PHONY: tag-release push-release release-validate release-bump-patch
 
@@ -118,6 +119,19 @@ test-snapshot-perf: setup
 		OTHER_SWIFT_FLAGS='$$(inherited) -DSCOPY_SNAPSHOT_PERF_TESTS' \
 		$(VERSION_ARGS) \
 		2>&1 | tee $(LOG_DIR)/test-snapshot-perf.log
+
+# 运行基于本机真实 DB 的对照回归测试（可选，需 -DSCOPY_REAL_DB_TESTS）
+test-real-db: setup
+	@echo "Running real database regression tests..."
+	@mkdir -p $(LOG_DIR)
+	xcodebuild test \
+		-project Scopy.xcodeproj \
+		-scheme Scopy \
+		-destination 'platform=macOS' \
+		-only-testing:ScopyTests/RealDatabaseRegressionTests \
+		OTHER_SWIFT_FLAGS='$$(inherited) -DSCOPY_REAL_DB_TESTS' \
+		$(VERSION_ARGS) \
+		2>&1 | tee $(LOG_DIR)/test-real-db.log
 
 # Thread Sanitizer (requires hosted test bundle mode)
 test-tsan: setup
