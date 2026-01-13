@@ -34,6 +34,30 @@
 - runner：`macos-15`
 - Xcode：`16.0`
 
+## 本次更新（v0.59）
+
+- **Perf/Search（冷启动 refine 收敛，语义不变）**：
+  - fullIndex 磁盘冷启动缓存（binary plist，best-effort）：下次启动优先加载，fingerprint（DB/WAL size+mtime）不匹配则放弃，保证准确性优先。
+  - prefilter 命中时后台预热 fullIndex：避免“第一次 refine”承担 fullIndex 冷构建成本。
+  - fullIndex 增量更新：upsert/pin/delete 实时应用；文本变化用 tombstone + append 策略保持 correctness，同时避免 postings 移除的高成本。
+  - 热路径收敛：query 预处理、ASCII postings 快路径、statement cache LRU、`json_each` 固定 SQL shape + 保序 fetch 等（保持语义与排序一致）。
+- **性能实测**（本地，release，`perf-db/clipboard.db` ≈ 148.6MB；`hw.model=Mac15,12`；macOS 26.3（25D5087f）；Xcode 26.2（17C52）；2026-01-13）：
+  - fuzzyPlus relevance query=cm：avg 4.89ms，P95 5.43ms（warmup 20 / iters 30）
+  - fuzzyPlus relevance query=数学：avg 9.40ms，P95 11.82ms
+  - fuzzyPlus relevance query=cmd：avg 0.10ms，P95 0.11ms
+  - fuzzyPlus relevance forceFullFuzzy query=cm：avg 5.15ms，P95 5.42ms
+  - fuzzy relevance forceFullFuzzy query=abc：avg 2.36ms，P95 2.51ms
+  - fuzzy relevance forceFullFuzzy query=cmd：avg 2.61ms，P95 2.64ms
+- **冷启动 refine 对照**（本地，DEBUG，真实 DB `~/Library/Application Support/Scopy/clipboard.db` ≈ 148.6MB；`make test-real-db` 输出；2026-01-13）：
+  - prefilter：~1.30ms
+  - prefilter + 后台预热后 refine：~16.33ms
+  - 冷启动直接 refine（无预热）：~2305.90ms
+  - 磁盘缓存加载 refine：~861.03ms（缓存文件 `clipboard.db.fullindex.v2.plist` ≈ 38.8MB）
+- **测试结果**：
+  - `make test-unit`：Executed 259 tests, 1 skipped, 0 failures（2026-01-13）
+  - `make test-strict`：Executed 259 tests, 1 skipped, 0 failures（2026-01-13）
+  - `make test-real-db`：Executed 2 tests, 0 failures（2026-01-13）
+
 ## 本次更新（v0.58）
 
 - **Perf/Search（6k+ 大文本历史）**：

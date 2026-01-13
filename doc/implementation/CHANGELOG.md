@@ -7,6 +7,24 @@
 
 ## [Unreleased]
 
+## [v0.59] - 2026-01-13
+
+### Perf/Search
+
+- **冷启动首次 refine（forceFullFuzzy）大幅收敛（不减搜索范围）**：prefilter 命中后后台预热 fullIndex，并新增 fullIndex 磁盘冷启动缓存（best-effort，fingerprint 校验不匹配则放弃加载）。  
+  - 真实 DB 对照（`make test-real-db`，`~/Library/Application Support/Scopy/clipboard.db` ≈ 148.6MB）：prefilter ~1.30ms；prefilter+预热 refine ~16.33ms；冷启动直接 refine ~2305.90ms；磁盘缓存加载 refine ~861.03ms；缓存文件 ~38.8MB。
+- **低风险热路径收敛**：query 预处理（避免 per-item 分配）、ASCII postings 快路径（减少 Character 字典开销）、statement cache LRU、`json_each` 固定 SQL shape + 保序 fetch 等，保持语义与排序一致。
+
+### Tooling/Test
+
+- 新增真实 DB 对照回归：验证 “prefilter+prewarm 的 refine” 与 “冷启动直接 refine” 结果集合 + 排序一致；验证磁盘缓存加载与重建结果一致。
+- 新增 `make test-real-db` 入口（可选，需 `-DSCOPY_REAL_DB_TESTS`）。
+
+### Test
+
+- `make test-unit`：Executed 259 tests, 1 skipped, 0 failures（2026-01-13）
+- `make test-strict`：Executed 259 tests, 1 skipped, 0 failures（2026-01-13）
+
 ## [v0.58.fix2] - 2026-01-12
 
 ### Perf/Search

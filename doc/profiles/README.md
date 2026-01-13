@@ -6,6 +6,7 @@
 
 | 版本 | 日期 | 主要变化 |
 |------|------|----------|
+| [v0.59-profile.md](./v0.59-profile.md) | 2026-01-13 | Perf/Search：冷启动 refine 预热 + fullIndex 磁盘缓存（语义不变） |
 | [v0.50.fix8-profile.md](./v0.50.fix8-profile.md) | 2025-12-19 | Perf/Profile：滚动基线采样 + 场景矩阵（text-only/image-heavy） |
 | [v0.50.fix7-profile.md](./v0.50.fix7-profile.md) | 2025-12-19 | Perf/UI：DisplayText 预热（滚动路径降载） |
 | [v0.44.fix8-profile.md](./v0.44.fix8-profile.md) | 2025-12-16 | Perf/Search：FTS 写放大修复 + statement cache + cleanup/pin 一致性 + fuzzy 深分页稳定（语义等价） |
