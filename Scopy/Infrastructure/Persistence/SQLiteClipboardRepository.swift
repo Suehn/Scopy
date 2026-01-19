@@ -118,66 +118,74 @@ actor SQLiteClipboardRepository {
         storageRef: String?,
         rawData: Data?
     ) throws {
-        let sql = """
-            INSERT INTO clipboard_items
-            (id, type, content_hash, plain_text, note, app_bundle_id, created_at, last_used_at, use_count, is_pinned, size_bytes, storage_ref, raw_data, file_size_bytes)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?, ?, ?, ?)
-        """
-        let stmt = try prepare(sql)
+        try performWriteTransaction {
+            let sql = """
+                INSERT INTO clipboard_items
+                (id, type, content_hash, plain_text, note, app_bundle_id, created_at, last_used_at, use_count, is_pinned, size_bytes, storage_ref, raw_data, file_size_bytes)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?, ?, ?, ?)
+            """
+            let stmt = try prepare(sql)
 
-        try stmt.bindText(id.uuidString, at: 1)
-        try stmt.bindText(type.rawValue, at: 2)
-        try stmt.bindText(contentHash, at: 3)
-        try stmt.bindText(plainText, at: 4)
-        try stmt.bindText(note, at: 5)
-        try stmt.bindText(appBundleID, at: 6)
-        try stmt.bindDouble(createdAt.timeIntervalSince1970, at: 7)
-        try stmt.bindDouble(lastUsedAt.timeIntervalSince1970, at: 8)
-        try stmt.bindInt(sizeBytes, at: 9)
-        try stmt.bindText(storageRef, at: 10)
-        try stmt.bindBlob(rawData, at: 11)
-        if let fileSizeBytes {
-            try stmt.bindInt(fileSizeBytes, at: 12)
-        } else {
-            try stmt.bindNull(12)
+            try stmt.bindText(id.uuidString, at: 1)
+            try stmt.bindText(type.rawValue, at: 2)
+            try stmt.bindText(contentHash, at: 3)
+            try stmt.bindText(plainText, at: 4)
+            try stmt.bindText(note, at: 5)
+            try stmt.bindText(appBundleID, at: 6)
+            try stmt.bindDouble(createdAt.timeIntervalSince1970, at: 7)
+            try stmt.bindDouble(lastUsedAt.timeIntervalSince1970, at: 8)
+            try stmt.bindInt(sizeBytes, at: 9)
+            try stmt.bindText(storageRef, at: 10)
+            try stmt.bindBlob(rawData, at: 11)
+            if let fileSizeBytes {
+                try stmt.bindInt(fileSizeBytes, at: 12)
+            } else {
+                try stmt.bindNull(12)
+            }
+
+            _ = try stmt.step()
         }
-
-        _ = try stmt.step()
     }
 
     func updateUsage(id: UUID, lastUsedAt: Date, useCount: Int) throws {
-        let sql = """
-            UPDATE clipboard_items
-            SET last_used_at = ?, use_count = ?
-            WHERE id = ?
-        """
-        let stmt = try prepare(sql)
-        try stmt.bindDouble(lastUsedAt.timeIntervalSince1970, at: 1)
-        try stmt.bindInt(useCount, at: 2)
-        try stmt.bindText(id.uuidString, at: 3)
-        _ = try stmt.step()
+        try performWriteTransaction {
+            let sql = """
+                UPDATE clipboard_items
+                SET last_used_at = ?, use_count = ?
+                WHERE id = ?
+            """
+            let stmt = try prepare(sql)
+            try stmt.bindDouble(lastUsedAt.timeIntervalSince1970, at: 1)
+            try stmt.bindInt(useCount, at: 2)
+            try stmt.bindText(id.uuidString, at: 3)
+            _ = try stmt.step()
+        }
     }
 
     func updateItemMetadata(id: UUID, lastUsedAt: Date, useCount: Int, isPinned: Bool) throws {
-        let sql = """
-            UPDATE clipboard_items
-            SET last_used_at = ?, use_count = ?, is_pinned = ?
-            WHERE id = ?
-        """
-        let stmt = try prepare(sql)
-        try stmt.bindDouble(lastUsedAt.timeIntervalSince1970, at: 1)
-        try stmt.bindInt(useCount, at: 2)
-        try stmt.bindInt(isPinned ? 1 : 0, at: 3)
-        try stmt.bindText(id.uuidString, at: 4)
-        _ = try stmt.step()
+        try performWriteTransaction {
+            let sql = """
+                UPDATE clipboard_items
+                SET last_used_at = ?, use_count = ?, is_pinned = ?
+                WHERE id = ?
+            """
+            let stmt = try prepare(sql)
+            try stmt.bindDouble(lastUsedAt.timeIntervalSince1970, at: 1)
+            try stmt.bindInt(useCount, at: 2)
+            try stmt.bindInt(isPinned ? 1 : 0, at: 3)
+            try stmt.bindText(id.uuidString, at: 4)
+            _ = try stmt.step()
+        }
     }
 
     func updatePin(id: UUID, pinned: Bool) throws {
-        let sql = "UPDATE clipboard_items SET is_pinned = ? WHERE id = ?"
-        let stmt = try prepare(sql)
-        try stmt.bindInt(pinned ? 1 : 0, at: 1)
-        try stmt.bindText(id.uuidString, at: 2)
-        _ = try stmt.step()
+        try performWriteTransaction {
+            let sql = "UPDATE clipboard_items SET is_pinned = ? WHERE id = ?"
+            let stmt = try prepare(sql)
+            try stmt.bindInt(pinned ? 1 : 0, at: 1)
+            try stmt.bindText(id.uuidString, at: 2)
+            _ = try stmt.step()
+        }
     }
 
     func updateItemPayload(
@@ -187,49 +195,59 @@ actor SQLiteClipboardRepository {
         storageRef: String?,
         rawData: Data?
     ) throws {
-        let sql = """
-            UPDATE clipboard_items
-            SET content_hash = ?, size_bytes = ?, storage_ref = ?, raw_data = ?
-            WHERE id = ?
-        """
-        let stmt = try prepare(sql)
-        try stmt.bindText(contentHash, at: 1)
-        try stmt.bindInt(sizeBytes, at: 2)
-        try stmt.bindText(storageRef, at: 3)
-        try stmt.bindBlob(rawData, at: 4)
-        try stmt.bindText(id.uuidString, at: 5)
-        _ = try stmt.step()
+        try performWriteTransaction {
+            let sql = """
+                UPDATE clipboard_items
+                SET content_hash = ?, size_bytes = ?, storage_ref = ?, raw_data = ?
+                WHERE id = ?
+            """
+            let stmt = try prepare(sql)
+            try stmt.bindText(contentHash, at: 1)
+            try stmt.bindInt(sizeBytes, at: 2)
+            try stmt.bindText(storageRef, at: 3)
+            try stmt.bindBlob(rawData, at: 4)
+            try stmt.bindText(id.uuidString, at: 5)
+            _ = try stmt.step()
+        }
     }
 
     func updateItemNote(id: UUID, note: String?) throws {
-        let sql = "UPDATE clipboard_items SET note = ? WHERE id = ?"
-        let stmt = try prepare(sql)
-        try stmt.bindText(note, at: 1)
-        try stmt.bindText(id.uuidString, at: 2)
-        _ = try stmt.step()
+        try performWriteTransaction {
+            let sql = "UPDATE clipboard_items SET note = ? WHERE id = ?"
+            let stmt = try prepare(sql)
+            try stmt.bindText(note, at: 1)
+            try stmt.bindText(id.uuidString, at: 2)
+            _ = try stmt.step()
+        }
     }
 
     func updateItemFileSizeBytes(id: UUID, fileSizeBytes: Int?) throws {
-        let sql = "UPDATE clipboard_items SET file_size_bytes = ? WHERE id = ?"
-        let stmt = try prepare(sql)
-        if let fileSizeBytes {
-            try stmt.bindInt(fileSizeBytes, at: 1)
-        } else {
-            try stmt.bindNull(1)
+        try performWriteTransaction {
+            let sql = "UPDATE clipboard_items SET file_size_bytes = ? WHERE id = ?"
+            let stmt = try prepare(sql)
+            if let fileSizeBytes {
+                try stmt.bindInt(fileSizeBytes, at: 1)
+            } else {
+                try stmt.bindNull(1)
+            }
+            try stmt.bindText(id.uuidString, at: 2)
+            _ = try stmt.step()
         }
-        try stmt.bindText(id.uuidString, at: 2)
-        _ = try stmt.step()
     }
 
     func deleteItem(id: UUID) throws {
-        let sql = "DELETE FROM clipboard_items WHERE id = ?"
-        let stmt = try prepare(sql)
-        try stmt.bindText(id.uuidString, at: 1)
-        _ = try stmt.step()
+        try performWriteTransaction {
+            let sql = "DELETE FROM clipboard_items WHERE id = ?"
+            let stmt = try prepare(sql)
+            try stmt.bindText(id.uuidString, at: 1)
+            _ = try stmt.step()
+        }
     }
 
     func deleteAllExceptPinned() throws {
-        try execute("DELETE FROM clipboard_items WHERE is_pinned = 0")
+        try performWriteTransaction {
+            try execute("DELETE FROM clipboard_items WHERE is_pinned = 0")
+        }
     }
 
     func fetchStorageRefsForUnpinned() throws -> [String] {
@@ -284,7 +302,7 @@ actor SQLiteClipboardRepository {
             SELECT id, type, content_hash, plain_text, note, app_bundle_id, created_at, last_used_at,
                    use_count, is_pinned, size_bytes, storage_ref, raw_data, file_size_bytes
             FROM clipboard_items
-            ORDER BY is_pinned DESC, last_used_at DESC
+            ORDER BY is_pinned DESC, last_used_at DESC, id ASC
             LIMIT ? OFFSET ?
         """
         let stmt = try prepare(sql)
@@ -304,7 +322,7 @@ actor SQLiteClipboardRepository {
             SELECT id, type, content_hash, plain_text, note, app_bundle_id, created_at, last_used_at,
                    use_count, is_pinned, size_bytes, storage_ref, file_size_bytes
             FROM clipboard_items
-            ORDER BY is_pinned DESC, last_used_at DESC
+            ORDER BY is_pinned DESC, last_used_at DESC, id ASC
             LIMIT ? OFFSET ?
         """
         let stmt = try prepare(sql)
@@ -397,10 +415,7 @@ actor SQLiteClipboardRepository {
 
     func updateItemSizeBytesBatchInTransaction(updates: [SizeBytesUpdate]) throws {
         guard !updates.isEmpty else { return }
-
-        try execute("BEGIN IMMEDIATE TRANSACTION")
-
-        do {
+        try performWriteTransaction {
             let stmt = try prepare("UPDATE clipboard_items SET size_bytes = ? WHERE id = ?")
             for update in updates {
                 stmt.reset()
@@ -408,15 +423,6 @@ actor SQLiteClipboardRepository {
                 try stmt.bindText(update.id.uuidString, at: 2)
                 _ = try stmt.step()
             }
-            try execute("COMMIT")
-        } catch {
-            do {
-                try execute("ROLLBACK")
-            } catch {
-                isDatabaseCorrupted = true
-                try recoverDatabase()
-            }
-            throw error
         }
     }
 
@@ -449,7 +455,7 @@ actor SQLiteClipboardRepository {
             params.append(typeFilter.rawValue)
         }
 
-        sql += " ORDER BY is_pinned DESC, last_used_at DESC"
+        sql += " ORDER BY is_pinned DESC, last_used_at DESC, id ASC"
         sql += " LIMIT ? OFFSET ?"
 
         let stmt = try prepare(sql)
@@ -790,25 +796,13 @@ actor SQLiteClipboardRepository {
 
     func deleteItemsBatchInTransaction(ids: [UUID]) throws {
         guard !ids.isEmpty else { return }
-
-        try execute("BEGIN IMMEDIATE TRANSACTION")
-
-        do {
+        try performWriteTransaction {
             let batchSize = 999
             for batchStart in stride(from: 0, to: ids.count, by: batchSize) {
                 let batchEnd = min(batchStart + batchSize, ids.count)
                 let batch = Array(ids[batchStart..<batchEnd])
                 try deleteItemsBatch(ids: batch)
             }
-            try execute("COMMIT")
-        } catch {
-            do {
-                try execute("ROLLBACK")
-            } catch {
-                isDatabaseCorrupted = true
-                try recoverDatabase()
-            }
-            throw error
         }
     }
 
@@ -824,6 +818,27 @@ actor SQLiteClipboardRepository {
             flags |= SQLITE_OPEN_URI
         }
         return flags
+    }
+
+    private func bumpMutationSeq() throws {
+        try execute("UPDATE scopy_meta SET mutation_seq = mutation_seq + 1 WHERE id = 1")
+    }
+
+    private func performWriteTransaction(_ body: () throws -> Void) throws {
+        try execute("BEGIN IMMEDIATE TRANSACTION")
+        do {
+            try body()
+            try bumpMutationSeq()
+            try execute("COMMIT")
+        } catch {
+            do {
+                try execute("ROLLBACK")
+            } catch {
+                isDatabaseCorrupted = true
+                try recoverDatabase()
+            }
+            throw error
+        }
     }
 
     private func execute(_ sql: String) throws {

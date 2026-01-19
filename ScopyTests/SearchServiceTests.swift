@@ -554,6 +554,45 @@ final class SearchServiceTests: XCTestCase {
         XCTAssertEqual(result.items.first?.id, pinned.id)
     }
 
+    func testShortQueryIndexRebuildsAfterTombstones() async throws {
+#if !DEBUG
+        throw XCTSkip("Requires DEBUG build for index health inspection")
+#endif
+
+        for i in 0..<3000 {
+            _ = try await storage.upsertItem(makeContent("ab item \(i) filler"))
+        }
+
+        await search.invalidateCache()
+        _ = try await search.search(request: SearchRequest(query: "ab", mode: .fuzzyPlus, sortMode: .relevance, limit: 10, offset: 0))
+
+        await search.debugAwaitShortQueryIndexBuild()
+        var stats = await search.debugShortQueryIndexStats()
+        XCTAssertTrue(stats.isBuilt)
+        XCTAssertEqual(stats.tombstones, 0)
+        XCTAssertEqual(stats.slots, stats.live)
+
+        let toDelete = try await storage.fetchRecent(limit: 900, offset: 0)
+        var startedRebuild = false
+        for item in toDelete {
+            try await storage.deleteItem(item.id)
+            await search.handleDeletion(id: item.id)
+
+            let health = await search.debugShortQueryIndexHealth()
+            if health.isBuilding {
+                startedRebuild = true
+                break
+            }
+        }
+        XCTAssertTrue(startedRebuild, "Expected short query index rebuild to start after tombstones threshold")
+
+        await search.debugAwaitShortQueryIndexBuild()
+        stats = await search.debugShortQueryIndexStats()
+        XCTAssertTrue(stats.isBuilt)
+        XCTAssertEqual(stats.tombstones, 0)
+        XCTAssertEqual(stats.slots, stats.live)
+    }
+
     func testExactSearchResultsSortByLastUsedAt() async throws {
         let pinnedOld = try await storage.upsertItem(makeContent("alpha pinned old"))
         try await storage.setPin(pinnedOld.id, pinned: true)

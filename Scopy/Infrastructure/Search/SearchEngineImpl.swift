@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import SQLite3
 
@@ -113,16 +114,19 @@ public actor SearchEngineImpl {
 
     private struct FullIndexSnapshot: Sendable {
         let index: FullFuzzyIndex
-        let dataVersion: Int64
+        let startDataVersion: Int64
+        let endDataVersion: Int64
         let source: FullIndexSnapshotSource
     }
 
-    private struct FullIndexDiskCacheV2: Codable, Sendable {
+    private struct FullIndexDiskCacheV3: Codable, Sendable {
         let version: Int
         let dbFileSize: UInt64
         let dbFileModifiedAt: TimeInterval
         let walFileSize: UInt64
         let walFileModifiedAt: TimeInterval
+        let shmFileSize: UInt64
+        let shmFileModifiedAt: TimeInterval
         let items: [DiskIndexedItem?]
         let asciiCharPostings: [[Int]]
         let nonASCIICharPostings: [String: [Int]]
@@ -194,6 +198,13 @@ public actor SearchEngineImpl {
             slotToType.reserveCapacity(reserve)
             idToSlot.reserveCapacity(reserve)
             slotCandidateStamp.reserveCapacity(reserve)
+        }
+
+        func healthStats() -> (slots: Int, live: Int, tombstones: Int) {
+            let slots = slotToIDString.count
+            let live = idToSlot.count
+            let tombstones = max(0, slots - live)
+            return (slots, live, tombstones)
         }
 
         mutating func markDeleted(id: UUID) {
@@ -494,7 +505,8 @@ public actor SearchEngineImpl {
 
     private let dbPath: String
     private var connection: SQLiteConnection?
-    private var knownDataVersion: Int64?
+    private var usesMutationSeq: Bool = false
+    private var knownDBChangeToken: Int64?
 
     private var recentItemsCache: [CachedRecentItem] = []
     private var cacheTimestamp: Date = .distantPast
@@ -504,6 +516,7 @@ public actor SearchEngineImpl {
     private var fullIndex: FullFuzzyIndex?
     private var fullIndexStale = true
     private var fullIndexGeneration: UInt64 = 0
+    private var observedMutationCounter: UInt64 = 0
 
 #if DEBUG
     private var debugFullIndexLastSnapshotSourceValue: FullIndexSnapshotSource?
@@ -518,6 +531,7 @@ public actor SearchEngineImpl {
     private var fullIndexBuildTask: Task<Void, Never>?
     private var fullIndexBuildGeneration: UInt64 = 0
     private var fullIndexPendingEvents: [FullIndexPendingEvent] = []
+    private var fullIndexDiskCachePersistTask: Task<Void, Never>?
 
     private var shortQueryIndex: ShortQueryIndex?
     private var shortQueryIndexBuildTask: Task<Void, Never>?
@@ -528,6 +542,10 @@ public actor SearchEngineImpl {
     private let fullIndexTombstoneRatioStaleThreshold: Double = 0.25
     private let fullIndexTombstoneMinSlotsForStale: Int = 64
     private let fullIndexTombstoneMinCountForStale: Int = 16
+
+    private let shortQueryIndexTombstoneRatioRebuildThreshold: Double = 0.25
+    private let shortQueryIndexTombstoneMinSlotsForRebuild: Int = 2000
+    private let shortQueryIndexTombstoneMinCountForRebuild: Int = 256
 
     private struct CachedStatement {
         let sql: String
@@ -551,7 +569,8 @@ public actor SearchEngineImpl {
 
     private struct FuzzySortedMatchesCacheValue {
         let key: FuzzySortedMatchesCacheKey
-        let matches: [ScoredSlot] // Already sorted by isBetterSlot
+        let totalMatches: Int
+        let topMatches: [ScoredSlot] // Already sorted by isBetterSlot; may be truncated for deep paging.
     }
 
     private var fuzzySortedMatchesCache: FuzzySortedMatchesCacheValue?
@@ -559,7 +578,7 @@ public actor SearchEngineImpl {
     private let searchTimeout: TimeInterval = 5.0
     private let initialIndexBuildTimeout: TimeInterval = 30.0
 
-    private static let fullIndexDiskCacheVersion: Int = 2
+    private static let fullIndexDiskCacheVersion: Int = 3
 
     private var corpusMetrics: CorpusMetrics?
     private var corpusMetricsUpdatedAt: Date = .distantPast
@@ -595,7 +614,10 @@ public actor SearchEngineImpl {
         shortQueryIndexPendingUpserts = []
         shortQueryIndexPendingDeletions = []
 
-        await persistFullIndexDiskCacheIfPossible()
+        scheduleFullIndexDiskCachePersistIfPossible()
+        if let task = fullIndexDiskCachePersistTask {
+            _ = try? await withTimeout(timeout: 0.25) { await task.value }
+        }
 
         statementCache = [:]
         statementCacheLRU = []
@@ -603,7 +625,8 @@ public actor SearchEngineImpl {
         corpusMetrics = nil
         corpusMetricsUpdatedAt = .distantPast
         supportsTrigramFTS = false
-        knownDataVersion = nil
+        knownDBChangeToken = nil
+        usesMutationSeq = false
         connection?.close()
         connection = nil
     }
@@ -615,14 +638,17 @@ public actor SearchEngineImpl {
         resetFullIndex()
         resetShortQueryIndex()
         markCorpusMetricsStale()
-        refreshKnownDataVersionIfPossible()
+        refreshKnownDBChangeTokenIfPossible()
         startShortQueryIndexBuildIfNeeded()
     }
 
     func handleUpsertedItem(_ item: ClipboardStoredItem) {
+        observedMutationCounter &+= 1
+        if invalidateInMemoryIndexesIfDBChangedExternallyBeforeApplyingInternalMutationIfNeeded() {
+            return
+        }
         resetQueryCaches()
         handleShortQueryIndexUpsert(item)
-        refreshKnownDataVersionIfPossible()
 
         var shouldStaleCorpusMetrics = false
 
@@ -640,10 +666,17 @@ public actor SearchEngineImpl {
 
         // Keep the full index always usable by applying upserts incrementally.
         // For text/note changes, we may create tombstones to avoid expensive postings removals.
+        let beforeTombstones = index.tombstoneCount
         shouldStaleCorpusMetrics = upsertItemIntoIndex(item, index: &index)
 
         fullIndex = index
         markIndexChanged()
+
+        if index.tombstoneCount > beforeTombstones,
+           shouldMarkFullIndexStaleDueToTombstones(index: index) {
+            fullIndexStale = true
+            startFullIndexBuildIfNeeded(force: true)
+        }
 
         if shouldStaleCorpusMetrics {
             markCorpusMetricsStale()
@@ -651,8 +684,11 @@ public actor SearchEngineImpl {
     }
 
     func handlePinnedChange(id: UUID, pinned: Bool) {
+        observedMutationCounter &+= 1
+        if invalidateInMemoryIndexesIfDBChangedExternallyBeforeApplyingInternalMutationIfNeeded() {
+            return
+        }
         resetQueryCaches()
-        refreshKnownDataVersionIfPossible()
 
         if fullIndexBuildTask != nil {
             fullIndexPendingEvents.append(.pin(id, pinned))
@@ -675,9 +711,12 @@ public actor SearchEngineImpl {
     }
 
     func handleDeletion(id: UUID) {
+        observedMutationCounter &+= 1
+        if invalidateInMemoryIndexesIfDBChangedExternallyBeforeApplyingInternalMutationIfNeeded() {
+            return
+        }
         markCorpusMetricsStale()
         handleShortQueryIndexDeletion(id: id)
-        refreshKnownDataVersionIfPossible()
 
         if fullIndexBuildTask != nil {
             fullIndexPendingEvents.append(.delete(id))
@@ -697,8 +736,9 @@ public actor SearchEngineImpl {
             fullIndex = index
             markIndexChanged()
 
-            if shouldMarkFullIndexStaleAfterDeletion(index: index) {
+            if shouldMarkFullIndexStaleDueToTombstones(index: index) {
                 fullIndexStale = true
+                startFullIndexBuildIfNeeded(force: true)
             }
         }
 
@@ -706,8 +746,8 @@ public actor SearchEngineImpl {
     }
 
     func handleClearAll() {
+        observedMutationCounter &+= 1
         invalidateCache()
-        refreshKnownDataVersionIfPossible()
     }
 
     private func resetRecentCache() {
@@ -750,6 +790,15 @@ public actor SearchEngineImpl {
         shortQueryIndex = index
     }
 
+    private func shouldRebuildShortQueryIndexDueToTombstones(index: ShortQueryIndex) -> Bool {
+        let stats = index.healthStats()
+        guard stats.slots >= shortQueryIndexTombstoneMinSlotsForRebuild else { return false }
+        guard stats.tombstones >= shortQueryIndexTombstoneMinCountForRebuild else { return false }
+
+        let ratio = Double(stats.tombstones) / Double(stats.slots)
+        return ratio >= shortQueryIndexTombstoneRatioRebuildThreshold
+    }
+
     private func handleShortQueryIndexDeletion(id: UUID) {
         if shortQueryIndexBuildTask != nil {
             shortQueryIndexPendingDeletions.append(id)
@@ -758,7 +807,15 @@ public actor SearchEngineImpl {
 
         guard var index = shortQueryIndex else { return }
         index.markDeleted(id: id)
-        shortQueryIndex = index
+        if shouldRebuildShortQueryIndexDueToTombstones(index: index) {
+            let liveCount = index.healthStats().live
+            resetShortQueryIndex()
+            if liveCount >= shortQueryCacheSize {
+                startShortQueryIndexBuildIfNeeded()
+            }
+        } else {
+            shortQueryIndex = index
+        }
     }
 
     private func startShortQueryIndexBuildIfNeeded() {
@@ -792,15 +849,22 @@ public actor SearchEngineImpl {
         }
 
         fullIndexPendingEvents = []
+        let startedMutationCounter = observedMutationCounter
+        let startedDBChangeToken = knownDBChangeToken ?? (try? fetchDBChangeToken()) ?? 0
 
         fullIndexBuildGeneration &+= 1
         let generation = fullIndexBuildGeneration
         let reserveSlots = estimatedCount
 
-        fullIndexBuildTask = Task.detached(priority: .utility) { [dbPath] in
+        fullIndexBuildTask = Task.detached(priority: .utility) { [dbPath, startedMutationCounter, startedDBChangeToken] in
             let snapshot = Self.loadFullIndexSnapshotFromDiskCache(dbPath: dbPath)
                 ?? Self.buildFullIndexSnapshot(dbPath: dbPath, reserveSlots: reserveSlots)
-            await self.finishFullIndexBuild(generation: generation, snapshot: snapshot)
+            await self.finishFullIndexBuild(
+                generation: generation,
+                startedMutationCounter: startedMutationCounter,
+                startedDBChangeToken: startedDBChangeToken,
+                snapshot: snapshot
+            )
         }
     }
 
@@ -970,7 +1034,7 @@ public actor SearchEngineImpl {
             return nil
         }
 
-        guard let endDataVersion = readDataVersion(), endDataVersion == startDataVersion else { return nil }
+        guard let endDataVersion = readDataVersion() else { return nil }
         guard !Task.isCancelled else { return nil }
 
         let index = FullFuzzyIndex(
@@ -980,14 +1044,89 @@ public actor SearchEngineImpl {
             nonASCIICharPostings: nonASCIICharPostings,
             tombstoneCount: 0
         )
-        return FullIndexSnapshot(index: index, dataVersion: startDataVersion, source: .database)
+        return FullIndexSnapshot(
+            index: index,
+            startDataVersion: startDataVersion,
+            endDataVersion: endDataVersion,
+            source: .database
+        )
     }
 
     private static func fullIndexDiskCachePath(dbPath: String) -> String {
         "\(dbPath).fullindex.v\(fullIndexDiskCacheVersion).plist"
     }
 
-    private static func dbFileFingerprint(dbPath: String) -> (dbSize: UInt64, dbModifiedAt: TimeInterval, walSize: UInt64, walModifiedAt: TimeInterval)? {
+    private static func fullIndexDiskCacheChecksumPath(dbPath: String) -> String {
+        fullIndexDiskCachePath(dbPath: dbPath) + ".sha256"
+    }
+
+    private static func sha256Hex(_ data: Data) -> String {
+        let digest = SHA256.hash(data: data)
+        return digest.map { String(format: "%02x", $0) }.joined()
+    }
+
+    private static func validateDiskCachePostings(_ postings: [Int], itemsCount: Int) -> Bool {
+        guard !postings.isEmpty else { return true }
+
+        let first = postings[0]
+        if first < 0 { return false }
+
+        let last = postings[postings.count - 1]
+        if last >= itemsCount { return false }
+
+        // Sample a few indices to catch obviously corrupted or unsorted postings without scanning the full array.
+        if postings.count > 1 {
+            var indices = [
+                0,
+                postings.count / 4,
+                postings.count / 2,
+                (postings.count * 3) / 4,
+                postings.count - 1,
+            ]
+            indices.sort()
+
+            var previousIndex: Int = -1
+            var previousValue: Int = -1
+            for index in indices {
+                if index == previousIndex { continue }
+                let value = postings[index]
+                if value < 0 || value >= itemsCount { return false }
+                if previousValue >= 0, value <= previousValue { return false }
+                previousIndex = index
+                previousValue = value
+            }
+        }
+
+        // Validate small windows at the beginning and end (cheap and catches many truncation/corruption patterns).
+        let window = min(8, postings.count)
+        var previous = postings[0]
+        for i in 1..<window {
+            let value = postings[i]
+            if value <= previous { return false }
+            previous = value
+        }
+        if postings.count > window {
+            previous = postings[postings.count - window]
+            for i in (postings.count - window + 1)..<postings.count {
+                let value = postings[i]
+                if value <= previous { return false }
+                previous = value
+            }
+        }
+
+        return true
+    }
+
+    private static func dbFileFingerprint(
+        dbPath: String
+    ) -> (
+        dbSize: UInt64,
+        dbModifiedAt: TimeInterval,
+        walSize: UInt64,
+        walModifiedAt: TimeInterval,
+        shmSize: UInt64,
+        shmModifiedAt: TimeInterval
+    )? {
         do {
             let dbAttrs = try FileManager.default.attributesOfItem(atPath: dbPath)
             guard let dbSize = dbAttrs[.size] as? NSNumber,
@@ -1008,31 +1147,92 @@ public actor SearchEngineImpl {
                 walModifiedAt = modifiedAt.timeIntervalSince1970
             }
 
-            return (dbSize.uint64Value, dbModifiedAt.timeIntervalSince1970, walSize, walModifiedAt)
+            let shmPath = "\(dbPath)-shm"
+            var shmSize: UInt64 = 0
+            var shmModifiedAt: TimeInterval = 0
+            if FileManager.default.fileExists(atPath: shmPath) {
+                let shmAttrs = try FileManager.default.attributesOfItem(atPath: shmPath)
+                guard let size = shmAttrs[.size] as? NSNumber,
+                      let modifiedAt = shmAttrs[.modificationDate] as? Date else {
+                    return nil
+                }
+                shmSize = size.uint64Value
+                shmModifiedAt = modifiedAt.timeIntervalSince1970
+            }
+
+            return (
+                dbSize: dbSize.uint64Value,
+                dbModifiedAt: dbModifiedAt.timeIntervalSince1970,
+                walSize: walSize,
+                walModifiedAt: walModifiedAt,
+                shmSize: shmSize,
+                shmModifiedAt: shmModifiedAt
+            )
         } catch {
             return nil
         }
     }
 
     private static func loadFullIndexSnapshotFromDiskCache(dbPath: String) -> FullIndexSnapshot? {
+        #if DEBUG
+        let loadStart = CFAbsoluteTimeGetCurrent()
+        #endif
+
         guard let fp = dbFileFingerprint(dbPath: dbPath) else { return nil }
 
         let cachePath = fullIndexDiskCachePath(dbPath: dbPath)
         guard FileManager.default.fileExists(atPath: cachePath) else { return nil }
 
+        let checksumPath = fullIndexDiskCacheChecksumPath(dbPath: dbPath)
+        guard let checksumRaw = try? String(contentsOfFile: checksumPath, encoding: .utf8) else { return nil }
+        let checksum = checksumRaw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard checksum.count == 64 else { return nil }
+
         guard let data = try? Data(contentsOf: URL(fileURLWithPath: cachePath), options: [.mappedIfSafe]) else {
             return nil
         }
 
+        #if DEBUG
+        let checksumStart = CFAbsoluteTimeGetCurrent()
+        #endif
+        let computedChecksum = sha256Hex(data)
+        #if DEBUG
+        let checksumMs = (CFAbsoluteTimeGetCurrent() - checksumStart) * 1000
+        #endif
+        guard computedChecksum == checksum else { return nil }
+
+        #if DEBUG
+        let decodeStart = CFAbsoluteTimeGetCurrent()
+        #endif
         let decoder = PropertyListDecoder()
-        guard let cache = try? decoder.decode(FullIndexDiskCacheV2.self, from: data) else { return nil }
+        guard let cache = try? decoder.decode(FullIndexDiskCacheV3.self, from: data) else { return nil }
+        #if DEBUG
+        let decodeMs = (CFAbsoluteTimeGetCurrent() - decodeStart) * 1000
+        #endif
         guard cache.version == fullIndexDiskCacheVersion else { return nil }
         guard cache.dbFileSize == fp.dbSize, cache.dbFileModifiedAt == fp.dbModifiedAt else { return nil }
         guard cache.walFileSize == fp.walSize, cache.walFileModifiedAt == fp.walModifiedAt else { return nil }
+        guard cache.shmFileSize == fp.shmSize, cache.shmFileModifiedAt == fp.shmModifiedAt else { return nil }
         guard cache.asciiCharPostings.count == 128 else { return nil }
 
+        // We rely on the .sha256 sidecar to protect against truncated/corrupted cache files.
+        // Keep the remaining validation lightweight to preserve fast startup loads.
+        let itemsCount = cache.items.count
+        for postings in cache.asciiCharPostings {
+            if !validateDiskCachePostings(postings, itemsCount: itemsCount) { return nil }
+        }
+        for postings in cache.nonASCIICharPostings.values {
+            if !validateDiskCachePostings(postings, itemsCount: itemsCount) { return nil }
+        }
+
         guard let index = fullIndexFromDiskCache(cache) else { return nil }
-        return FullIndexSnapshot(index: index, dataVersion: 0, source: .diskCache)
+        #if DEBUG
+        let totalMs = (CFAbsoluteTimeGetCurrent() - loadStart) * 1000
+        ScopyLog.search.debug(
+            "Loaded fullIndex disk cache: bytes=\(data.count, privacy: .public) checksumMs=\(checksumMs, privacy: .public) decodeMs=\(decodeMs, privacy: .public) totalMs=\(totalMs, privacy: .public)"
+        )
+        #endif
+        return FullIndexSnapshot(index: index, startDataVersion: 0, endDataVersion: 0, source: .diskCache)
     }
 
     private static func loadFullIndexFromDiskCache(dbPath: String) -> FullFuzzyIndex? {
@@ -1040,7 +1240,7 @@ public actor SearchEngineImpl {
         return snapshot?.index
     }
 
-    private static func fullIndexFromDiskCache(_ cache: FullIndexDiskCacheV2) -> FullFuzzyIndex? {
+    private static func fullIndexFromDiskCache(_ cache: FullIndexDiskCacheV3) -> FullFuzzyIndex? {
         var items: [IndexedItem?] = []
         items.reserveCapacity(cache.items.count)
 
@@ -1089,7 +1289,8 @@ public actor SearchEngineImpl {
         )
     }
 
-    private func persistFullIndexDiskCacheIfPossible() async {
+    private func scheduleFullIndexDiskCachePersistIfPossible() {
+        guard fullIndexDiskCachePersistTask == nil else { return }
         invalidateInMemoryIndexesIfDBChangedExternally()
         guard let index = fullIndex, !fullIndexStale else { return }
         guard index.asciiCharPostings.count == 128 else { return }
@@ -1101,54 +1302,94 @@ public actor SearchEngineImpl {
             nonASCII[String(ch)] = postings
         }
 
-        let cache = FullIndexDiskCacheV2(
+        let cache = FullIndexDiskCacheV3(
             version: Self.fullIndexDiskCacheVersion,
             dbFileSize: fp.dbSize,
             dbFileModifiedAt: fp.dbModifiedAt,
             walFileSize: fp.walSize,
             walFileModifiedAt: fp.walModifiedAt,
+            shmFileSize: fp.shmSize,
+            shmFileModifiedAt: fp.shmModifiedAt,
             items: index.items.map { $0.map(DiskIndexedItem.init(from:)) },
             asciiCharPostings: index.asciiCharPostings,
             nonASCIICharPostings: nonASCII
         )
 
         let cachePath = Self.fullIndexDiskCachePath(dbPath: dbPath)
-        await Task.detached(priority: .utility) {
+        let checksumPath = Self.fullIndexDiskCacheChecksumPath(dbPath: dbPath)
+        fullIndexDiskCachePersistTask = Task.detached(priority: .utility) { [cache] in
             do {
                 let encoder = PropertyListEncoder()
                 encoder.outputFormat = .binary
                 let data = try encoder.encode(cache)
                 try data.write(to: URL(fileURLWithPath: cachePath), options: [.atomic])
+                let checksum = Self.sha256Hex(data)
+                try checksum.write(to: URL(fileURLWithPath: checksumPath), atomically: true, encoding: .utf8)
             } catch {
                 // Best-effort cache: ignore failures.
             }
-        }.value
+            await self.finishFullIndexDiskCachePersist()
+        }
+    }
+
+    private func finishFullIndexDiskCachePersist() {
+        fullIndexDiskCachePersistTask = nil
     }
 
     private func finishShortQueryIndexBuild(generation: UInt64, index: ShortQueryIndex?) {
         guard shortQueryIndexBuildGeneration == generation else { return }
         shortQueryIndexBuildTask = nil
 
-        guard var index else { return }
-
-        for id in shortQueryIndexPendingDeletions {
-            index.markDeleted(id: id)
-        }
+        let pendingDeletions = shortQueryIndexPendingDeletions
+        let pendingUpserts = shortQueryIndexPendingUpserts
+        shortQueryIndexPendingUpserts = []
         shortQueryIndexPendingDeletions = []
 
-        for item in shortQueryIndexPendingUpserts {
+        guard var index else { return }
+
+        for id in pendingDeletions {
+            index.markDeleted(id: id)
+        }
+
+        for item in pendingUpserts {
             index.upsert(item)
         }
-        shortQueryIndexPendingUpserts = []
 
         shortQueryIndex = index
     }
 
-    private func finishFullIndexBuild(generation: UInt64, snapshot: FullIndexSnapshot?) {
+    private func finishFullIndexBuild(
+        generation: UInt64,
+        startedMutationCounter: UInt64,
+        startedDBChangeToken: Int64,
+        snapshot: FullIndexSnapshot?
+    ) {
         guard fullIndexBuildGeneration == generation else { return }
         fullIndexBuildTask = nil
 
+        let pending = fullIndexPendingEvents
+        fullIndexPendingEvents = []
+
         guard let snapshot else { return }
+        if usesMutationSeq,
+           snapshot.source == .database,
+           let currentToken = try? fetchDBChangeToken() {
+            let observedDelta = Int64(observedMutationCounter &- startedMutationCounter)
+            let expectedToken = startedDBChangeToken &+ observedDelta
+            if currentToken != expectedToken {
+                // The DB changed during background build, but those commits weren't fully observed via our callbacks
+                // (e.g. cleanup transactions, another app instance, or a missed notification). Drop in-memory
+                // indexes/caches to guarantee full-history correctness.
+                resetQueryCaches()
+                resetFullIndex()
+                resetShortQueryIndex()
+                markCorpusMetricsStale()
+                knownDBChangeToken = currentToken
+                startShortQueryIndexBuildIfNeeded()
+                return
+            }
+        }
+
         var index = snapshot.index
 
 #if DEBUG
@@ -1156,7 +1397,7 @@ public actor SearchEngineImpl {
 #endif
 
         // Apply changes observed while building in the background.
-        for event in fullIndexPendingEvents {
+        for event in pending {
             switch event {
             case .upsert(let item):
                 upsertItemIntoIndex(item, index: &index)
@@ -1179,14 +1420,17 @@ public actor SearchEngineImpl {
                 }
             }
         }
-        fullIndexPendingEvents = []
 
         fullIndex = index
-        fullIndexStale = false
-
-        refreshKnownDataVersionIfPossible()
+        fullIndexStale = shouldMarkFullIndexStaleDueToTombstones(index: index)
 
         markIndexChanged()
+
+        if fullIndexStale {
+            startFullIndexBuildIfNeeded(force: true)
+        } else if snapshot.source == .database {
+            scheduleFullIndexDiskCachePersistIfPossible()
+        }
     }
 
     private func fetchDataVersion() throws -> Int64 {
@@ -1196,20 +1440,70 @@ public actor SearchEngineImpl {
         return stmt.columnInt64(0)
     }
 
-    private func refreshKnownDataVersionIfPossible() {
-        guard connection != nil else { return }
-        if let v = try? fetchDataVersion() {
-            knownDataVersion = v
+    private func fetchMutationSeq() throws -> Int64 {
+        let stmt = try prepare("SELECT mutation_seq FROM scopy_meta WHERE id = 1")
+        defer { stmt.reset() }
+        guard try stmt.step() else { return 0 }
+        return stmt.columnInt64(0)
+    }
+
+    private func fetchDBChangeToken() throws -> Int64 {
+        if usesMutationSeq {
+            return try fetchMutationSeq()
         }
+        return try fetchDataVersion()
+    }
+
+    private func refreshKnownDBChangeTokenIfPossible() {
+        guard connection != nil else { return }
+        if let v = try? fetchDBChangeToken() {
+            knownDBChangeToken = v
+        }
+    }
+
+    @discardableResult
+    private func invalidateInMemoryIndexesIfDBChangedExternallyBeforeApplyingInternalMutationIfNeeded() -> Bool {
+        guard connection != nil else { return false }
+        guard let known = knownDBChangeToken else {
+            refreshKnownDBChangeTokenIfPossible()
+            return false
+        }
+        guard let current = try? fetchDBChangeToken() else { return false }
+        guard current != known else { return false }
+
+        if usesMutationSeq {
+            // Our update callbacks are invoked per storage commit, and `mutation_seq` is incremented
+            // exactly once per commit. Therefore delta == 1 is the expected case.
+            if current == known + 1 {
+                knownDBChangeToken = current
+                return false
+            }
+        } else {
+            // Fallback: best-effort with `PRAGMA data_version`. We cannot rely on it being a strict
+            // per-commit counter across all SQLite builds/modes, but delta == 1 is still the expected
+            // case for our own storage commits.
+            if current == known + 1 {
+                knownDBChangeToken = current
+                return false
+            }
+        }
+
+        resetQueryCaches()
+        resetFullIndex()
+        resetShortQueryIndex()
+        markCorpusMetricsStale()
+        knownDBChangeToken = current
+        startShortQueryIndexBuildIfNeeded()
+        return true
     }
 
     private func invalidateInMemoryIndexesIfDBChangedExternally() {
         guard connection != nil else { return }
-        guard let known = knownDataVersion else {
-            refreshKnownDataVersionIfPossible()
+        guard let known = knownDBChangeToken else {
+            refreshKnownDBChangeTokenIfPossible()
             return
         }
-        guard let current = try? fetchDataVersion() else { return }
+        guard let current = try? fetchDBChangeToken() else { return }
         guard current != known else { return }
 
         // DB has changed but we haven't observed it through our update callbacks yet.
@@ -1218,7 +1512,7 @@ public actor SearchEngineImpl {
         resetFullIndex()
         resetShortQueryIndex()
         markCorpusMetricsStale()
-        knownDataVersion = current
+        knownDBChangeToken = current
         startShortQueryIndexBuildIfNeeded()
     }
 
@@ -1704,24 +1998,29 @@ public actor SearchEngineImpl {
         }
 
         if let loaded = Self.loadFullIndexFromDiskCache(dbPath: dbPath) {
-            fullIndex = loaded
-            fullIndexStale = false
-            refreshKnownDataVersionIfPossible()
-            markIndexChanged()
+            if shouldMarkFullIndexStaleDueToTombstones(index: loaded) {
+                // A heavily tombstoned disk snapshot can significantly degrade candidate intersections.
+                // Treat it as unusable and rebuild from DB to keep refine latency stable.
+                fullIndexStale = true
+            } else {
+                fullIndex = loaded
+                fullIndexStale = false
+                markIndexChanged()
 #if DEBUG
-            debugFullIndexLastSnapshotSourceValue = .diskCache
+                debugFullIndexLastSnapshotSourceValue = .diskCache
 #endif
-            return loaded
+                return loaded
+            }
         }
 
         let newIndex = try buildFullIndex()
         fullIndex = newIndex
         fullIndexStale = false
-        refreshKnownDataVersionIfPossible()
         markIndexChanged()
 #if DEBUG
         debugFullIndexLastSnapshotSourceValue = .database
 #endif
+        scheduleFullIndexDiskCachePersistIfPossible()
         return newIndex
     }
 
@@ -1784,8 +2083,7 @@ public actor SearchEngineImpl {
         )
     }
 
-    private func shouldMarkFullIndexStaleAfterDeletion(index: FullFuzzyIndex) -> Bool {
-        guard !fullIndexStale else { return false }
+    private func shouldMarkFullIndexStaleDueToTombstones(index: FullFuzzyIndex) -> Bool {
         guard index.items.count >= fullIndexTombstoneMinSlotsForStale else { return false }
         guard index.tombstoneCount >= fullIndexTombstoneMinCountForStale else { return false }
 
@@ -2054,31 +2352,31 @@ public actor SearchEngineImpl {
             indexGeneration: fullIndexGeneration
         )
 
-        func pageFromSortedMatches(_ sorted: [ScoredSlot]) throws -> SearchResult {
-            let totalMatches = sorted.count
-            let start = min(request.offset, totalMatches)
-            let end = min(start + request.limit + 1, totalMatches)
-            var page: [ScoredSlot] = (start < end) ? Array(sorted[start..<end]) : []
-
-            let hasMore = page.count > request.limit
-            if hasMore {
-                page.removeLast()
-            }
-
+        func pageFromSortedMatches(_ sortedTop: [ScoredSlot], totalMatches: Int) throws -> SearchResult {
+            let start = min(request.offset, sortedTop.count)
+            let end = min(start + request.limit, sortedTop.count)
+            let page: [ScoredSlot] = (start < end) ? Array(sortedTop[start..<end]) : []
+            let hasMore = totalMatches > request.offset + request.limit
             let pageIDs = page.compactMap { index.items[$0.slot]?.id }
             let resultItems = try fetchItemsByIDs(ids: pageIDs)
             return SearchResult(items: resultItems, total: totalMatches, hasMore: hasMore, isPrefilter: false, searchTimeMs: 0)
         }
 
-        // P0: Stabilize deep paging cost without changing semantics.
-        // For non-zero offsets, compute and cache the fully sorted matches once per query/index generation.
+        // Deep paging: cache a bounded "top-K" prefix to avoid repeated rescans without pinning a huge array in memory.
         if request.offset > 0 {
-            if let cached = fuzzySortedMatchesCache, cached.key == sortedCacheKey {
-                return try pageFromSortedMatches(cached.matches)
+            let maxDeepPagingCacheTopMatches = 50_000
+            let deepPagingCachePrefetchExtra = 2_000
+            let cacheTopCount = min(maxDeepPagingCacheTopMatches, desiredTopCount + deepPagingCachePrefetchExtra)
+
+            if let cached = fuzzySortedMatchesCache,
+               cached.key == sortedCacheKey,
+               cached.topMatches.count >= desiredTopCount {
+                return try pageFromSortedMatches(cached.topMatches, totalMatches: cached.totalMatches)
             }
 
-            var matches: [ScoredSlot] = []
-            matches.reserveCapacity(min(candidateSlots.count, 8192))
+            var topHeap = BinaryHeap<ScoredSlot>(areSorted: isWorseSlot)
+            topHeap.reserveCapacity(min(cacheTopCount, 8192))
+            var totalMatches = 0
 
             for (i, slot) in candidateSlots.enumerated() {
                 if i % 1024 == 0 {
@@ -2095,12 +2393,32 @@ public actor SearchEngineImpl {
                 }
 
                 guard let score = computeScore(for: item) else { continue }
-                matches.append(ScoredSlot(slot: slot, score: score))
+                totalMatches += 1
+
+                guard cacheTopCount > 0 else { continue }
+                let scoredItem = ScoredSlot(slot: slot, score: score)
+
+                if topHeap.count < cacheTopCount {
+                    topHeap.insert(scoredItem)
+                } else if let worst = topHeap.peek, isBetterSlot(scoredItem, than: worst) {
+                    topHeap.replaceRoot(with: scoredItem)
+                }
             }
 
-            matches.sort { isBetterSlot($0, than: $1) }
-            fuzzySortedMatchesCache = FuzzySortedMatchesCacheValue(key: sortedCacheKey, matches: matches)
-            return try pageFromSortedMatches(matches)
+            var topItems = topHeap.elements
+            topItems.sort { isBetterSlot($0, than: $1) }
+
+            if topItems.count <= maxDeepPagingCacheTopMatches {
+                fuzzySortedMatchesCache = FuzzySortedMatchesCacheValue(
+                    key: sortedCacheKey,
+                    totalMatches: totalMatches,
+                    topMatches: topItems
+                )
+            } else {
+                fuzzySortedMatchesCache = nil
+            }
+
+            return try pageFromSortedMatches(topItems, totalMatches: totalMatches)
         }
 
         var topHeap = BinaryHeap<ScoredSlot>(areSorted: isWorseSlot)
@@ -2681,6 +2999,7 @@ public actor SearchEngineImpl {
             try conn.execute("PRAGMA mmap_size = 268435456")
             try verifySchema(conn)
             supportsTrigramFTS = (try? conn.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='clipboard_fts_trigram'").step()) == true
+            usesMutationSeq = (try? conn.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='scopy_meta'").step()) == true
         } catch {
             conn.close()
             throw SearchError.searchFailed(error.localizedDescription)
@@ -2691,7 +3010,7 @@ public actor SearchEngineImpl {
         statementCacheLRU = []
         fuzzySortedMatchesCache = nil
         refreshCorpusMetricsIfNeeded(force: true)
-        refreshKnownDataVersionIfPossible()
+        refreshKnownDBChangeTokenIfPossible()
         startShortQueryIndexBuildIfNeeded()
     }
 
@@ -2794,7 +3113,7 @@ public actor SearchEngineImpl {
             SELECT id, type, content_hash, plain_text, note, app_bundle_id, created_at, last_used_at,
                    use_count, is_pinned, size_bytes, storage_ref, file_size_bytes
             FROM clipboard_items
-            ORDER BY is_pinned DESC, last_used_at DESC
+            ORDER BY is_pinned DESC, last_used_at DESC, id ASC
             LIMIT ? OFFSET ?
         """
         let stmt = try prepare(sql)
@@ -2914,7 +3233,7 @@ public actor SearchEngineImpl {
             params.append(typeFilter.rawValue)
         }
 
-        sql += " ORDER BY is_pinned DESC, last_used_at DESC"
+        sql += " ORDER BY is_pinned DESC, last_used_at DESC, id ASC"
         sql += " LIMIT ? OFFSET ?"
 
         let stmt = try prepare(sql)
@@ -3951,6 +4270,17 @@ public actor SearchEngineImpl {
         return (isBuilding, fullIndexPendingEvents.count)
     }
 
+    func debugCancelFullIndexBuild() {
+        fullIndexBuildTask?.cancel()
+    }
+
+    func debugFullIndexDiskCachePaths() -> (cachePath: String, checksumPath: String) {
+        (
+            cachePath: Self.fullIndexDiskCachePath(dbPath: dbPath),
+            checksumPath: Self.fullIndexDiskCacheChecksumPath(dbPath: dbPath)
+        )
+    }
+
     func debugStartFullIndexBuild(force: Bool = true) {
         startFullIndexBuildIfNeeded(force: force)
     }
@@ -3965,6 +4295,15 @@ public actor SearchEngineImpl {
         let isBuilt = shortQueryIndex != nil
         let isBuilding = shortQueryIndexBuildTask != nil
         return (isBuilt, isBuilding)
+    }
+
+    func debugShortQueryIndexStats() -> (isBuilt: Bool, isBuilding: Bool, slots: Int, live: Int, tombstones: Int) {
+        let isBuilding = shortQueryIndexBuildTask != nil
+        guard let index = shortQueryIndex else {
+            return (false, isBuilding, 0, 0, 0)
+        }
+        let stats = index.healthStats()
+        return (true, isBuilding, stats.slots, stats.live, stats.tombstones)
     }
 
     func debugAwaitShortQueryIndexBuild() async {

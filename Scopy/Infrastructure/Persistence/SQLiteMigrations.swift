@@ -1,7 +1,7 @@
 import Foundation
 
 enum SQLiteMigrations {
-    static let currentUserVersion: Int32 = 4
+    static let currentUserVersion: Int32 = 5
 
     static func migrateIfNeeded(_ connection: SQLiteConnection) throws {
         let userVersion = try readUserVersion(connection)
@@ -21,6 +21,9 @@ enum SQLiteMigrations {
         }
         if userVersion < 4 {
             try setupTrigramFTSIfSupported(connection)
+        }
+        if userVersion < 5 {
+            try setupMetaTable(connection)
         }
 
         try connection.execute("PRAGMA user_version = \(currentUserVersion)")
@@ -63,6 +66,18 @@ enum SQLiteMigrations {
             """
         )
         try connection.execute("INSERT OR IGNORE INTO schema_version (version) VALUES (1)")
+    }
+
+    private static func setupMetaTable(_ connection: SQLiteConnection) throws {
+        try connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS scopy_meta (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                mutation_seq INTEGER NOT NULL DEFAULT 0
+            )
+            """
+        )
+        try connection.execute("INSERT OR IGNORE INTO scopy_meta (id, mutation_seq) VALUES (1, 0)")
     }
 
     private static func createIndexes(_ connection: SQLiteConnection) throws {
