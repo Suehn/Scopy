@@ -7,6 +7,26 @@
 
 ## [Unreleased]
 
+## [v0.59.fix1] - 2026-01-19
+
+### Perf/Search
+
+- **fullIndex 磁盘缓存 hardening（best-effort）**：缓存升级到 v3（DB/WAL/SHM fingerprint + `*.sha256` 旁路校验）；校验失败自动回退 DB 重建，保证准确性优先。
+- **full-history correctness 兜底（外部写入/漏回调）**：引入 `scopy_meta.mutation_seq`（commit counter）作为 change token；检测到未观测提交时丢弃内存索引并回退 SQL 扫描/重建，避免 full-history 不完整。
+- **tombstone 衰退兜底**：upsert（文本/备注）产生 tombstone 同样纳入 stale 判定，达到阈值触发后台重建，避免 postings 膨胀导致 refine 逐步变慢。
+- **深分页成本收敛**：deep paging 采用 bounded top-K 缓存，避免大 offset 反复扫描或无界内存增长。
+- **close/pending 体验**：写盘改为后台任务 + time budget 等待；build 取消/失败也清理 pending 队列。
+
+### DB/Migration
+
+- 新增 `scopy_meta`（`mutation_seq` commit counter）；DB user_version bump 到 `5`。
+
+### Test
+
+- `make test-unit`：Executed 266 tests, 1 skipped, 0 failures（2026-01-19）
+- `make test-strict`：Executed 266 tests, 1 skipped, 0 failures（2026-01-19）
+- `make test-real-db`：Executed 2 tests, 0 failures（2026-01-19）
+
 ## [v0.59] - 2026-01-13
 
 ### Perf/Search

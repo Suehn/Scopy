@@ -8,11 +8,11 @@
 
 | 项目 | 状态 |
 |------|------|
-| **当前版本** | v0.59 |
-| **测试状态** | ✅ 通过（make test-unit / make test-strict，2026-01-13） |
-| **构建状态** | ✅ 通过（make build，2026-01-13） |
+| **当前版本** | v0.59.fix1 |
+| **测试状态** | ✅ 通过（make test-unit / make test-strict / make test-real-db，2026-01-19） |
+| **构建状态** | ✅ 通过（make build，2026-01-19） |
 | **部署位置** | /Applications/Scopy.app |
-| **最后更新** | 2026-01-13 |
+| **最后更新** | 2026-01-19 |
 
 > 详细变更历史请查看 [CHANGELOG.md](./CHANGELOG.md)
 
@@ -24,6 +24,7 @@
 
 | 版本 | 日期 | 主要内容 | 状态 |
 |------|------|----------|------|
+| [v0.59.fix1](./releases/v0.59.fix1.md) | 2026-01-19 | Correctness/Robustness：fullIndex 磁盘缓存 hardening（DB/WAL/SHM fingerprint + `*.sha256`）+ `mutation_seq` change token 兜底；Perf/Search：tombstone 衰退与深分页成本收敛；Test：回归覆盖补齐 | ✅ |
 | [v0.59](./releases/v0.59.md) | 2026-01-13 | Perf/Search：fullIndex 冷启动磁盘缓存 + prefilter 后台预热（首次 refine 从 2s+ 收敛到 ~16ms）；Tooling/Test：新增真实 DB 对照回归 + `make test-real-db` | ✅ |
 | [v0.58.fix2](./releases/v0.58.fix2.md) | 2026-01-12 | Perf/Search：2 字中文短词（数学等）提速到 ~13ms P95（真实 143MB DB）；Correctness：中文短词 pinned 回归测试 | ✅ |
 | [v0.58.fix1](./releases/v0.58.fix1.md) | 2026-01-11 | Perf/Search：2 字短词（cm）进一步提速到 ~5ms P95（真实 143MB DB）；Correctness：短词 pinned 回归测试 | ✅ |

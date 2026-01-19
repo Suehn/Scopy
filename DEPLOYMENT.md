@@ -34,6 +34,25 @@
 - runner：`macos-15`
 - Xcode：`16.0`
 
+## 本次更新（v0.59.fix1）
+
+- **Correctness/Robustness（语义不变）**：
+  - fullIndex 磁盘缓存 hardening（v3）：fingerprint（DB/WAL/SHM size+mtime）+ `*.sha256` 旁路校验；并对 postings 做轻量结构校验；任一失败则自动回退 DB 重建（准确性优先）。
+  - full-history 兜底：新增 `scopy_meta.mutation_seq`（commit counter，user_version=5）作为 change token；检测到未观测提交（外部写入/漏回调）时丢弃内存索引并回退 SQL 扫描/重建，避免 full-history 不完整。
+  - tombstone 衰退兜底：upsert（文本/备注）产生 tombstone 同样纳入 stale 判定，达到阈值触发后台重建，避免 postings 膨胀导致 refine 逐步变慢。
+  - deep paging 成本收敛：bounded top-K 缓存，避免大 offset 反复扫描或无界内存增长。
+  - close/pending 体验：写盘改为后台任务 + time budget 等待；build 取消/失败也清理 pending 队列。
+- **冷启动 refine 对照**（本地，DEBUG，真实 DB `~/Library/Application Support/Scopy/clipboard.db` ≈ 145.9MB；`make test-real-db` 输出；`hw.model=Mac15,12`；macOS 26.3（25D5101c）；Xcode 26.2（17C52）；2026-01-19）：
+  - prefilter：~2.06ms
+  - prefilter + 后台预热后 refine：~18.09ms
+  - 冷启动直接 refine（无预热）：~3105.86ms
+  - 冷启动重建 refine（无缓存）：~2274.50ms
+  - 磁盘缓存加载 refine：~905.25ms（缓存文件 `clipboard.db.fullindex.v3.plist` ≈ 39.1MB，旁路校验 `*.sha256`）
+- **测试结果**：
+  - `make test-unit`：Executed 266 tests, 1 skipped, 0 failures（2026-01-19）
+  - `make test-strict`：Executed 266 tests, 1 skipped, 0 failures（2026-01-19）
+  - `make test-real-db`：Executed 2 tests, 0 failures（2026-01-19）
+
 ## 本次更新（v0.59）
 
 - **Perf/Search（冷启动 refine 收敛，语义不变）**：
