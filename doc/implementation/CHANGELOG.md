@@ -7,6 +7,34 @@
 
 ## [Unreleased]
 
+- （暂无）
+
+## [v0.59.fix2] - 2026-01-27
+
+### Tooling/Test
+
+- 修复 `make test*` 系列目标的“假绿”：为所有 `xcodebuild … | tee …` pipeline 启用 `pipefail`，确保测试失败会正确让 `make` 返回非 0。
+
+### Fix/Swift 6 Concurrency
+
+- 收敛 Swift 6 Strict Concurrency 阻塞级告警：为 Markdown/WKWebView 渲染与导出路径补齐 MainActor/Sendable 语义并修正 WebKit delegate 签名，避免 Swift 6 language mode error 类诊断。
+- Settings 热键录制：以有界轮询等待 Settings 持久化回写，避免跨并发边界传递非 Sendable 值导致的诊断与潜在不稳定。
+
+### Fix/TSan
+
+- 修复 TSan 下的测试 data race：将测试轮询 helper 迁移到 MainActor 访问 UI state，并在 `SCOPY_TSAN_TESTS` 下放宽一处性能断言，提升 `make test-tsan` 稳定性。
+
+### Fix/AVFoundation
+
+- 替换弃用的同步 track 属性访问：使用 `loadTracks(withMediaType:)` 与 `load(.naturalSize/.preferredTransform)` 异步加载，兼容新版 SDK 并避免主线程阻塞。
+
+### Test
+
+- `make build`：**BUILD SUCCEEDED**（2026-01-27）
+- `make test-unit`：Executed 266 tests, 1 skipped, 0 failures（2026-01-27）
+- `make test-strict`：Executed 266 tests, 1 skipped, 0 failures（2026-01-27）
+- `make test-tsan`：Executed 256 tests, 1 skipped, 0 failures（2026-01-27）
+
 ## [v0.59.fix1] - 2026-01-19
 
 ### Perf/Search
