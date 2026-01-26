@@ -4,6 +4,7 @@ import AppKit
 import WebKit
 import ScopyUISupport
 
+@MainActor
 private enum MarkdownPreviewScrollViewResolver {
     static func resolve(for view: NSView) -> NSScrollView? {
         if let sv = view as? NSScrollView { return sv }
@@ -20,6 +21,7 @@ private enum MarkdownPreviewScrollViewResolver {
     }
 }
 
+@MainActor
 private enum MarkdownPreviewMessageParser {
     static func metrics(from message: WKScriptMessage) -> MarkdownContentMetrics? {
         guard message.name == MarkdownPreviewWebView.sizeMessageHandlerName else { return nil }
@@ -98,6 +100,7 @@ struct MarkdownPreviewWebView: NSViewRepresentable {
     private static let ruleListLock = NSLock()
     private static let pendingControllers = NSHashTable<WKUserContentController>.weakObjects()
 
+    @MainActor
     func makeNSView(context: Context) -> WKWebView {
         let config = WKWebViewConfiguration()
         config.websiteDataStore = .nonPersistent()
@@ -118,6 +121,7 @@ struct MarkdownPreviewWebView: NSViewRepresentable {
         return webView
     }
 
+    @MainActor
     func updateNSView(_ webView: WKWebView, context: Context) {
         context.coordinator.onContentSizeChange = onContentSizeChange
         configureScrollers(for: webView, shouldScroll: shouldScroll)
@@ -130,6 +134,7 @@ struct MarkdownPreviewWebView: NSViewRepresentable {
         }
     }
 
+    @MainActor
     func makeCoordinator() -> Coordinator {
         Coordinator()
     }
@@ -143,6 +148,7 @@ struct MarkdownPreviewWebView: NSViewRepresentable {
         coordinator.scrollbarAutoHider.detach()
     }
 
+    @MainActor
     private func configureScrollers(for webView: WKWebView, shouldScroll: Bool) {
         guard let scrollView = MarkdownPreviewScrollViewResolver.resolve(for: webView) else { return }
         scrollView.hasVerticalScroller = shouldScroll
@@ -189,6 +195,7 @@ struct MarkdownPreviewWebView: NSViewRepresentable {
         }
     }
 
+    @MainActor
     final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler {
         var lastHTML: String = ""
         var onContentSizeChange: (@MainActor (MarkdownContentMetrics) -> Void)?
@@ -205,27 +212,29 @@ struct MarkdownPreviewWebView: NSViewRepresentable {
             if let scrollView = MarkdownPreviewScrollViewResolver.resolve(for: webView) {
                 scrollbarAutoHider.attach(to: scrollView)
                 scrollbarAutoHider.applyHiddenState()
-                DispatchQueue.main.async { [weak scrollbarAutoHider] in
+                Task { @MainActor [weak scrollbarAutoHider] in
+                    await Task.yield()
                     scrollbarAutoHider?.applyHiddenState()
                 }
             } else {
-                DispatchQueue.main.async { [weak self, weak webView] in
+                Task { @MainActor [weak self, weak webView] in
+                    await Task.yield()
                     guard let self, let webView else { return }
                     if let scrollView = MarkdownPreviewScrollViewResolver.resolve(for: webView) {
                         self.scrollbarAutoHider.attach(to: scrollView)
                         self.scrollbarAutoHider.applyHiddenState()
-                        DispatchQueue.main.async { [weak scrollbarAutoHider = self.scrollbarAutoHider] in
-                            scrollbarAutoHider?.applyHiddenState()
-                        }
+                        await Task.yield()
+                        self.scrollbarAutoHider.applyHiddenState()
                     }
                 }
             }
         }
 
+        @MainActor
         func webView(
             _ webView: WKWebView,
             decidePolicyFor navigationAction: WKNavigationAction,
-            decisionHandler: @escaping (WKNavigationActionPolicy) -> Void
+            decisionHandler: @escaping @MainActor (WKNavigationActionPolicy) -> Void
         ) {
             if navigationAction.targetFrame == nil {
                 decisionHandler(.cancel)
@@ -355,7 +364,8 @@ final class MarkdownPreviewWebViewController: NSObject, ObservableObject, WKNavi
         scrollView.hasHorizontalScroller = false
         scrollbarAutoHider.attach(to: scrollView)
         scrollbarAutoHider.applyHiddenState()
-        DispatchQueue.main.async { [weak scrollbarAutoHider] in
+        Task { @MainActor [weak scrollbarAutoHider] in
+            await Task.yield()
             scrollbarAutoHider?.applyHiddenState()
         }
     }
@@ -411,7 +421,7 @@ final class MarkdownPreviewWebViewController: NSObject, ObservableObject, WKNavi
     func webView(
         _ webView: WKWebView,
         decidePolicyFor navigationAction: WKNavigationAction,
-        decisionHandler: @escaping (WKNavigationActionPolicy) -> Void
+        decisionHandler: @escaping @MainActor (WKNavigationActionPolicy) -> Void
     ) {
         if navigationAction.targetFrame == nil {
             decisionHandler(.cancel)
@@ -464,7 +474,8 @@ final class MarkdownPreviewWebViewController: NSObject, ObservableObject, WKNavi
         if let scrollView = MarkdownPreviewScrollViewResolver.resolve(for: webView) {
             scrollbarAutoHider.attach(to: scrollView)
             scrollbarAutoHider.applyHiddenState()
-            DispatchQueue.main.async { [weak scrollbarAutoHider] in
+            Task { @MainActor [weak scrollbarAutoHider] in
+                await Task.yield()
                 scrollbarAutoHider?.applyHiddenState()
             }
         }
@@ -512,11 +523,13 @@ struct ReusableMarkdownPreviewWebView: NSViewRepresentable {
     let shouldScroll: Bool
     let onContentSizeChange: @MainActor (MarkdownContentMetrics) -> Void
 
+    @MainActor
     func makeNSView(context: Context) -> WKWebView {
         controller.attachWebViewIfNeeded()
         return controller.webView
     }
 
+    @MainActor
     func updateNSView(_ webView: WKWebView, context: Context) {
         controller.attachWebViewIfNeeded()
         controller.onContentSizeChange = onContentSizeChange
@@ -546,10 +559,11 @@ struct ReusableMarkdownPreviewWebView: NSViewRepresentable {
 
 /// Ensures scrollbars stay hidden when idle and only appear while scrolling.
 /// This intentionally overrides the system "always show scroll bars" preference for hover-preview surfaces.
+@MainActor
 final class ScrollbarAutoHider: NSObject {
     private weak var scrollView: NSScrollView?
     private weak var contentView: NSClipView?
-    private var hideTimer: DispatchSourceTimer?
+    private nonisolated(unsafe) var hideTimer: DispatchSourceTimer?
     private var hideDeadline: CFAbsoluteTime = 0
     private var scrollersVisible: Bool = false
 
@@ -570,7 +584,8 @@ final class ScrollbarAutoHider: NSObject {
         }
 
         applyHiddenState()
-        DispatchQueue.main.async { [weak self] in
+        Task { @MainActor [weak self] in
+            await Task.yield()
             self?.applyHiddenState()
         }
     }
@@ -587,7 +602,9 @@ final class ScrollbarAutoHider: NSObject {
     }
 
     deinit {
-        detach()
+        hideTimer?.cancel()
+        hideTimer = nil
+        NotificationCenter.default.removeObserver(self)
     }
 
     func applyHiddenState() {

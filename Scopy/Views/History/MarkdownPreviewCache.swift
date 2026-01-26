@@ -1,7 +1,9 @@
 import Foundation
 import CoreGraphics
 
-final class MarkdownPreviewCache {
+// NSCache 本身是线程安全的；本缓存仅存放 String/struct 等值类型（必要时用 NSObject box 包装），
+// 因此作为全局共享缓存是安全的（对并发检查使用 @unchecked Sendable 明确意图）。
+final class MarkdownPreviewCache: @unchecked Sendable {
     static let shared = MarkdownPreviewCache()
 
     private final class MetricsBox: NSObject {

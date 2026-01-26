@@ -1582,14 +1582,14 @@ private struct PopoverWindowCloseObserver: NSViewRepresentable {
         context.coordinator.attach(to: nsView.window)
     }
 
-    final class Coordinator {
+    final class Coordinator: NSObject {
         var onClose: () -> Void
         private weak var observedWindow: NSWindow?
-        private var closeObserver: NSObjectProtocol?
         private var hasEmittedClose = false
 
         init(onClose: @escaping () -> Void) {
             self.onClose = onClose
+            super.init()
         }
 
         func attach(to window: NSWindow?) {
@@ -1598,21 +1598,27 @@ private struct PopoverWindowCloseObserver: NSViewRepresentable {
             detach()
             observedWindow = window
             hasEmittedClose = false
-            closeObserver = NotificationCenter.default.addObserver(
-                forName: NSWindow.willCloseNotification,
-                object: window,
-                queue: .main
-            ) { [weak self] _ in
-                self?.emitClose()
-            }
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(handleWindowWillClose(_:)),
+                name: NSWindow.willCloseNotification,
+                object: window
+            )
         }
 
         private func detach() {
-            if let closeObserver {
-                NotificationCenter.default.removeObserver(closeObserver)
+            if let observedWindow {
+                NotificationCenter.default.removeObserver(
+                    self,
+                    name: NSWindow.willCloseNotification,
+                    object: observedWindow
+                )
             }
-            closeObserver = nil
             observedWindow = nil
+        }
+
+        @objc private func handleWindowWillClose(_ notification: Notification) {
+            emitClose()
         }
 
         func emitClose() {

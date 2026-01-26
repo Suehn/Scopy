@@ -112,7 +112,7 @@ struct HistoryItemFilePreviewView: View {
     }
 
     private func previewHeight(width: CGFloat) -> CGFloat {
-        if kind != .image, let filePath, isFileAvailable {
+        if kind != .image, isFileAvailable {
             if kind == .video, let size = videoNaturalSize {
                 let naturalWidth = max(size.width, 1)
                 let naturalHeight = max(size.height, 1)

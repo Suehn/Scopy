@@ -311,8 +311,10 @@ final class SearchServiceTests: XCTestCase {
         // Check that search time is reported
         XCTAssertGreaterThanOrEqual(result.searchTimeMs, 0)
 
+        #if !SCOPY_TSAN_TESTS
         // For 1k items, should be very fast (< 100ms typically)
         XCTAssertLessThan(result.searchTimeMs, 100, "Search took too long: \(result.searchTimeMs)ms")
+        #endif
     }
 
     // MARK: - Short Query Optimization Tests (v0.md 4.2)

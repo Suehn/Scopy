@@ -74,12 +74,9 @@ struct HotKeyRecorderView: View {
     @MainActor
     private func applyHotKeyAndSyncFromPersistedSettings(expectedKeyCode: UInt32, expectedModifiers: UInt32) async {
         let store = SettingsStore.shared
-        let stream = await store.observeSettings(bufferSize: 2)
-        let iteratorBox = SettingsIteratorBox(stream.makeAsyncIterator())
-
-        let initial = await iteratorBox.next()
-        let initialKeyCode = initial?.hotkeyKeyCode
-        let initialModifiers = initial?.hotkeyModifiers
+        let initial = await store.load()
+        let initialKeyCode = initial.hotkeyKeyCode
+        let initialModifiers = initial.hotkeyModifiers
 
         applyHotKeyHandler?(expectedKeyCode, expectedModifiers)
 
@@ -87,10 +84,12 @@ struct HotKeyRecorderView: View {
             return
         }
 
-        let updated = await nextSettings(iteratorBox, timeout: 1.5)
-        if let updated,
-           updated.hotkeyKeyCode == expectedKeyCode,
-           updated.hotkeyModifiers == expectedModifiers {
+        if await waitForPersistedHotkey(
+            store: store,
+            expectedKeyCode: expectedKeyCode,
+            expectedModifiers: expectedModifiers,
+            timeout: 1.5
+        ) {
             return
         }
 
@@ -107,35 +106,22 @@ struct HotKeyRecorderView: View {
         applyErrorMessage = "该快捷键可能已被系统或其他应用占用，已恢复为 \(formatHotKey(keyCode: keyCode, modifiers: modifiers))"
     }
 
-    private final class SettingsIteratorBox {
-        var iterator: AsyncStream<SettingsDTO>.AsyncIterator
-
-        init(_ iterator: AsyncStream<SettingsDTO>.AsyncIterator) {
-            self.iterator = iterator
-        }
-
-        func next() async -> SettingsDTO? {
-            await iterator.next()
-        }
-    }
-
-    private func nextSettings(
-        _ iterator: SettingsIteratorBox,
+    @MainActor
+    private func waitForPersistedHotkey(
+        store: SettingsStore,
+        expectedKeyCode: UInt32,
+        expectedModifiers: UInt32,
         timeout: TimeInterval
-    ) async -> SettingsDTO? {
-        await withTaskGroup(of: SettingsDTO?.self) { group in
-            group.addTask {
-                await iterator.next()
+    ) async -> Bool {
+        let deadline = CFAbsoluteTimeGetCurrent() + max(0, timeout)
+        while CFAbsoluteTimeGetCurrent() < deadline {
+            let current = await store.load()
+            if current.hotkeyKeyCode == expectedKeyCode, current.hotkeyModifiers == expectedModifiers {
+                return true
             }
-            group.addTask {
-                try? await Task.sleep(nanoseconds: UInt64(max(0, timeout) * 1_000_000_000))
-                return nil
-            }
-
-            let value = await group.next() ?? nil
-            group.cancelAll()
-            return value
+            try? await Task.sleep(nanoseconds: 50_000_000)
         }
+        return false
     }
 
     private func formatHotKey(keyCode: UInt32, modifiers: UInt32) -> String {

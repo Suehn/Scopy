@@ -59,131 +59,131 @@ quick-build:
 test: setup
 	@echo "Running all tests..."
 	@mkdir -p $(LOG_DIR)
-	xcodebuild test \
+	bash -o pipefail -c 'xcodebuild test \
 		-project Scopy.xcodeproj \
 		-scheme Scopy \
-		-destination 'platform=macOS' \
+		-destination platform=macOS \
 		-resultBundlePath $(LOG_DIR)/TestResults.xcresult \
 		$(VERSION_ARGS) \
-		2>&1 | tee $(LOG_DIR)/test.log
+		2>&1 | tee $(LOG_DIR)/test.log'
 
 # 仅运行单元测试（排除性能测试）
 test-unit: setup
 	@echo "Running unit tests..."
 	@mkdir -p $(LOG_DIR)
-	xcodebuild test \
+	bash -o pipefail -c 'xcodebuild test \
 		-project Scopy.xcodeproj \
 		-scheme Scopy \
-		-destination 'platform=macOS' \
+		-destination platform=macOS \
 		-only-testing:ScopyTests \
 		-skip-testing:ScopyTests/IntegrationTests \
 		-skip-testing:ScopyTests/PerformanceTests \
 		$(VERSION_ARGS) \
-		2>&1 | tee $(LOG_DIR)/test-unit.log
+		2>&1 | tee $(LOG_DIR)/test-unit.log'
 
 # 运行性能测试
 test-perf: setup
 	@echo "Running performance tests..."
 	@mkdir -p $(LOG_DIR)
-	xcodebuild test \
+	bash -o pipefail -c 'xcodebuild test \
 		-project Scopy.xcodeproj \
 		-scheme Scopy \
-		-destination 'platform=macOS' \
+		-destination platform=macOS \
 		-only-testing:ScopyTests/PerformanceTests \
-		OTHER_SWIFT_FLAGS='$$(inherited) -DSCOPY_PERF_TESTS' \
+		OTHER_SWIFT_FLAGS="\$$(inherited) -DSCOPY_PERF_TESTS" \
 		$(VERSION_ARGS) \
-		2>&1 | tee $(LOG_DIR)/test-perf.log
+		2>&1 | tee $(LOG_DIR)/test-perf.log'
 
 # 运行重负载性能测试（更慢）
 test-perf-heavy: setup
 	@echo "Running heavy performance tests..."
 	@mkdir -p $(LOG_DIR)
-	xcodebuild test \
+	bash -o pipefail -c 'xcodebuild test \
 		-project Scopy.xcodeproj \
 		-scheme Scopy \
-		-destination 'platform=macOS' \
+		-destination platform=macOS \
 		-only-testing:ScopyTests/PerformanceTests \
-		OTHER_SWIFT_FLAGS='$$(inherited) -DSCOPY_PERF_TESTS -DSCOPY_HEAVY_PERF_TESTS' \
+		OTHER_SWIFT_FLAGS="\$$(inherited) -DSCOPY_PERF_TESTS -DSCOPY_HEAVY_PERF_TESTS" \
 		$(VERSION_ARGS) \
-		2>&1 | tee $(LOG_DIR)/test-perf-heavy.log
+		2>&1 | tee $(LOG_DIR)/test-perf-heavy.log'
 
 # 运行基于真实快照 DB 的端到端性能测试（需先 make snapshot-perf-db）
 test-snapshot-perf: setup
 	@echo "Running snapshot performance tests..."
 	@mkdir -p $(LOG_DIR)
-	xcodebuild test \
+	bash -o pipefail -c 'xcodebuild test \
 		-project Scopy.xcodeproj \
 		-scheme Scopy \
-		-destination 'platform=macOS' \
+		-destination platform=macOS \
 		-only-testing:ScopyTests/SnapshotPerformanceTests \
-		OTHER_SWIFT_FLAGS='$$(inherited) -DSCOPY_SNAPSHOT_PERF_TESTS' \
+		OTHER_SWIFT_FLAGS="\$$(inherited) -DSCOPY_SNAPSHOT_PERF_TESTS" \
 		$(VERSION_ARGS) \
-		2>&1 | tee $(LOG_DIR)/test-snapshot-perf.log
+		2>&1 | tee $(LOG_DIR)/test-snapshot-perf.log'
 
 # 运行基于本机真实 DB 的对照回归测试（可选，需 -DSCOPY_REAL_DB_TESTS）
 test-real-db: setup
 	@echo "Running real database regression tests..."
 	@mkdir -p $(LOG_DIR)
-	xcodebuild test \
+	bash -o pipefail -c 'xcodebuild test \
 		-project Scopy.xcodeproj \
 		-scheme Scopy \
-		-destination 'platform=macOS' \
+		-destination platform=macOS \
 		-only-testing:ScopyTests/RealDatabaseRegressionTests \
-		OTHER_SWIFT_FLAGS='$$(inherited) -DSCOPY_REAL_DB_TESTS' \
+		OTHER_SWIFT_FLAGS="\$$(inherited) -DSCOPY_REAL_DB_TESTS" \
 		$(VERSION_ARGS) \
-		2>&1 | tee $(LOG_DIR)/test-real-db.log
+		2>&1 | tee $(LOG_DIR)/test-real-db.log'
 
 # Thread Sanitizer (requires hosted test bundle mode)
 test-tsan: setup
 	@echo "Running Thread Sanitizer tests..."
 	@mkdir -p $(LOG_DIR)
-	ENABLE_THREAD_SANITIZER=YES xcodebuild test \
+	bash -o pipefail -c 'ENABLE_THREAD_SANITIZER=YES xcodebuild test \
 		-project Scopy.xcodeproj \
 		-scheme ScopyTSan \
-		-destination 'platform=macOS' \
+		-destination platform=macOS \
 		-only-testing:ScopyTSanTests \
 		$(VERSION_ARGS) \
-		2>&1 | tee $(LOG_DIR)/test-tsan.log
+		2>&1 | tee $(LOG_DIR)/test-tsan.log'
 
 # Swift 6 Strict Concurrency regression (tests target only)
 test-strict: setup
 	@echo "Running Strict Concurrency tests..."
 	@mkdir -p $(LOG_DIR)
-	xcodebuild test \
+	bash -o pipefail -c 'xcodebuild test \
 		-project Scopy.xcodeproj \
 		-scheme Scopy \
-		-destination 'platform=macOS' \
+		-destination platform=macOS \
 		-only-testing:ScopyTests \
 		-skip-testing:ScopyTests/IntegrationTests \
 		-skip-testing:ScopyTests/PerformanceTests \
 		SWIFT_STRICT_CONCURRENCY=complete \
 		$(VERSION_ARGS) \
-		2>&1 | tee $(LOG_DIR)/strict-concurrency-test.log
+		2>&1 | tee $(LOG_DIR)/strict-concurrency-test.log'
 
 # 运行集成测试
 test-integration: setup
 	@echo "Running integration tests..."
 	@mkdir -p $(LOG_DIR)
-	xcodebuild test \
+	bash -o pipefail -c 'xcodebuild test \
 		-project Scopy.xcodeproj \
 		-scheme Scopy \
-		-destination 'platform=macOS' \
+		-destination platform=macOS \
 		-only-testing:ScopyTests/IntegrationTests \
 		$(VERSION_ARGS) \
-		2>&1 | tee $(LOG_DIR)/test-integration.log
+		2>&1 | tee $(LOG_DIR)/test-integration.log'
 
 # 生成测试覆盖率报告
 coverage: setup
 	@echo "Running tests with coverage..."
 	@mkdir -p $(LOG_DIR)
-	xcodebuild test \
+	bash -o pipefail -c 'xcodebuild test \
 		-project Scopy.xcodeproj \
 		-scheme Scopy \
-		-destination 'platform=macOS' \
+		-destination platform=macOS \
 		-enableCodeCoverage YES \
 		-resultBundlePath $(LOG_DIR)/CoverageResults.xcresult \
 		$(VERSION_ARGS) \
-		2>&1 | tee $(LOG_DIR)/coverage.log
+		2>&1 | tee $(LOG_DIR)/coverage.log'
 	@echo ""
 	@echo "Coverage report generated at $(LOG_DIR)/CoverageResults.xcresult"
 	@echo "View with: xcrun xccov view --report $(LOG_DIR)/CoverageResults.xcresult"
@@ -193,13 +193,13 @@ benchmark: setup
 	@echo "Running benchmarks..."
 	@echo "This will take a few minutes..."
 	@mkdir -p $(LOG_DIR)
-	RUN_PERF_TESTS=1 xcodebuild test \
+	bash -o pipefail -c 'RUN_PERF_TESTS=1 xcodebuild test \
 		-project Scopy.xcodeproj \
 		-scheme Scopy \
-		-destination 'platform=macOS' \
+		-destination platform=macOS \
 		-only-testing:ScopyTests/PerformanceTests \
 		$(VERSION_ARGS) \
-		2>&1 | tee $(LOG_DIR)/benchmark-output.log
+		2>&1 | tee $(LOG_DIR)/benchmark-output.log'
 	@echo ""
 	@echo "Benchmark results saved to $(LOG_DIR)/benchmark-output.log"
 

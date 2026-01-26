@@ -419,6 +419,7 @@ private struct HoverPreviewTextView: NSViewRepresentable {
     let width: CGFloat
     let shouldScroll: Bool
 
+    @MainActor
     func makeNSView(context: Context) -> NSScrollView {
         let scrollView = NSScrollView()
         scrollView.borderType = .noBorder
@@ -457,6 +458,7 @@ private struct HoverPreviewTextView: NSViewRepresentable {
         return scrollView
     }
 
+    @MainActor
     func updateNSView(_ nsView: NSScrollView, context: Context) {
         guard let textView = context.coordinator.textView else { return }
 
@@ -483,10 +485,12 @@ private struct HoverPreviewTextView: NSViewRepresentable {
         }
     }
 
+    @MainActor
     func makeCoordinator() -> Coordinator {
         Coordinator()
     }
 
+    @MainActor
     final class Coordinator {
         weak var scrollView: NSScrollView?
         weak var textView: NSTextView?

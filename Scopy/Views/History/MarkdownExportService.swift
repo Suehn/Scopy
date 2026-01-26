@@ -757,7 +757,7 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
           return true;
         })();
         """
-        _ = try await evaluateJavaScript(webView: webView, javaScriptString: js)
+        _ = try await evaluateJavaScriptBool(webView: webView, javaScriptString: js)
         // Give WebKit a moment to paint after programmatic scroll.
         try? await Task.sleep(nanoseconds: 70_000_000)
     }
@@ -1009,7 +1009,7 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
         """
 
         do {
-            _ = try await evaluateJavaScript(webView: webView, javaScriptString: setupJS)
+            _ = try await evaluateJavaScriptBool(webView: webView, javaScriptString: setupJS)
         } catch {
             throw MarkdownExportService.ExportError.stageFailed(stage: .prepareLayout, underlying: error)
         }
@@ -1022,9 +1022,9 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
 
         for _ in 0..<60 {
             let now = CFAbsoluteTimeGetCurrent()
-            let value: Any?
+            let value: String
             do {
-                value = try await evaluateJavaScript(webView: webView, javaScriptString: measureJS)
+                value = try await evaluateJavaScriptString(webView: webView, javaScriptString: measureJS)
             } catch {
                 throw MarkdownExportService.ExportError.stageFailed(stage: .prepareLayout, underlying: error)
             }
@@ -1053,15 +1053,7 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
                let stableStart = stableSince,
                (now - stableStart) >= 0.20
             {
-                let scaleValue = try? await evaluateJavaScript(webView: webView, javaScriptString: scaleTablesJS)
-                let scaled: Bool
-                if let b = scaleValue as? Bool {
-                    scaled = b
-                } else if let n = scaleValue as? NSNumber {
-                    scaled = n.boolValue
-                } else {
-                    scaled = false
-                }
+                let scaled = (try? await evaluateJavaScriptBool(webView: webView, javaScriptString: scaleTablesJS)) ?? false
 
                 if scaled {
                     didScaleTables = true
@@ -1239,20 +1231,13 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
         })();
         """
 
-        let value = try? await evaluateJavaScript(webView: webView, javaScriptString: js)
-        let content: String
-        if let s = value as? String {
-            content = s
-        } else {
-            content = String(describing: value)
-        }
+        let content = (try? await evaluateJavaScriptString(webView: webView, javaScriptString: js)) ?? ""
         try? Data(content.utf8).write(to: URL(fileURLWithPath: path), options: [.atomic])
         didDumpTableMetrics = true
     }
 
-    nonisolated private static func parseHeightFromMeasureValue(_ value: Any?) -> CGFloat {
-        if let s = value as? String,
-           let data = s.data(using: .utf8),
+    nonisolated private static func parseHeightFromMeasureValue(_ value: String) -> CGFloat {
+        if let data = value.data(using: .utf8),
            let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
         {
             if let n = obj["height"] as? NSNumber { return max(0, CGFloat(truncating: n)) }
@@ -1260,14 +1245,11 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
             if let i = obj["height"] as? Int { return max(0, CGFloat(i)) }
             if let str = obj["height"] as? String, let d = Double(str) { return max(0, CGFloat(d)) }
         }
-        if let n = value as? NSNumber { return max(0, CGFloat(truncating: n)) }
-        if let d = value as? Double { return max(0, CGFloat(d)) }
         return 0
     }
 
-    nonisolated private static func parseFontsStatusFromMeasureValue(_ value: Any?) -> String? {
-        guard let s = value as? String,
-              let data = s.data(using: .utf8),
+    nonisolated private static func parseFontsStatusFromMeasureValue(_ value: String) -> String? {
+        guard let data = value.data(using: .utf8),
               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
         else { return nil }
 
@@ -1301,10 +1283,7 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
           }
         })();
         """
-        let value = try await evaluateJavaScript(webView: webView, javaScriptString: js)
-        if let s = value as? String { return s }
-        if let n = value as? NSNumber { return n.stringValue }
-        return String(describing: value)
+        return try await evaluateJavaScriptString(webView: webView, javaScriptString: js)
     }
 
     private func applyGlobalScale(webView: WKWebView, scale: CGFloat) async throws {
@@ -1362,15 +1341,7 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
         })();
         """
         do {
-            let result = try await evaluateJavaScript(webView: webView, javaScriptString: js)
-            let ok: Bool
-            if let boolValue = result as? Bool {
-                ok = boolValue
-            } else if let num = result as? NSNumber {
-                ok = num.boolValue
-            } else {
-                ok = false
-            }
+            let ok = try await evaluateJavaScriptBool(webView: webView, javaScriptString: js)
             if !ok {
                 let error = NSError(
                     domain: "Scopy.MarkdownExport",
@@ -1393,7 +1364,7 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
         })();
         """
         do {
-            _ = try await evaluateJavaScript(webView: webView, javaScriptString: js)
+            _ = try await evaluateJavaScriptBool(webView: webView, javaScriptString: js)
         } catch {
             // Best-effort: scrolling shouldn't be a hard failure for export.
         }
@@ -1420,15 +1391,37 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
         try? await Task.sleep(nanoseconds: 80_000_000)
     }
 
-    private func evaluateJavaScript(webView: WKWebView, javaScriptString: String) async throws -> Any? {
+    private func evaluateJavaScript<T: Sendable>(
+        webView: WKWebView,
+        javaScriptString: String,
+        transform: @escaping (Any?) -> T
+    ) async throws -> T {
         try await withCheckedThrowingContinuation { continuation in
             webView.evaluateJavaScript(javaScriptString) { value, error in
                 if let error {
                     continuation.resume(throwing: error)
                     return
                 }
-                continuation.resume(returning: value)
+                continuation.resume(returning: transform(value))
             }
+        }
+    }
+
+    private func evaluateJavaScriptBool(webView: WKWebView, javaScriptString: String) async throws -> Bool {
+        try await evaluateJavaScript(webView: webView, javaScriptString: javaScriptString) { value in
+            if let boolValue = value as? Bool { return boolValue }
+            if let num = value as? NSNumber { return num.boolValue }
+            if let str = value as? String { return str == "true" || str == "1" }
+            return false
+        }
+    }
+
+    private func evaluateJavaScriptString(webView: WKWebView, javaScriptString: String) async throws -> String {
+        try await evaluateJavaScript(webView: webView, javaScriptString: javaScriptString) { value in
+            if let str = value as? String { return str }
+            if let num = value as? NSNumber { return num.stringValue }
+            if value == nil { return "" }
+            return String(describing: value)
         }
     }
 

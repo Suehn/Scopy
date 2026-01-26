@@ -212,14 +212,10 @@ final class KaTeXRenderToStringTests: XCTestCase {
 }
 
 private final class KaTeXEngine {
-    private static var cached: KaTeXEngine?
     private let context: JSContext
 
     static func shared() throws -> KaTeXEngine {
-        if let cached { return cached }
-        let engine = try KaTeXEngine()
-        cached = engine
-        return engine
+        try KaTeXEngine()
     }
 
     private init() throws {

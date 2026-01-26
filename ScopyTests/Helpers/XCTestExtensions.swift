@@ -5,10 +5,11 @@ import XCTest
 extension XCTestCase {
 
     /// 等待异步条件满足
+    @MainActor
     func waitForCondition(
         timeout: TimeInterval = 5.0,
         pollInterval: TimeInterval = 0.1,
-        _ condition: @escaping () -> Bool,
+        _ condition: @MainActor @escaping () -> Bool,
         file: StaticString = #file,
         line: UInt = #line
     ) async {
@@ -25,10 +26,11 @@ extension XCTestCase {
     }
 
     /// 等待异步条件满足（带返回值）
+    @MainActor
     func waitForValue<T>(
         timeout: TimeInterval = 5.0,
         pollInterval: TimeInterval = 0.1,
-        _ getter: @escaping () -> T?,
+        _ getter: @MainActor @escaping () -> T?,
         file: StaticString = #file,
         line: UInt = #line
     ) async -> T? {

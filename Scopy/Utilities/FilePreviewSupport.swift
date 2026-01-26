@@ -172,12 +172,19 @@ public enum FilePreviewSupport {
     public static func loadVideoNaturalSize(from url: URL) async -> CGSize? {
         await Task.detached(priority: .utility) {
             let asset = AVURLAsset(url: url)
-            guard let track = asset.tracks(withMediaType: .video).first else { return nil }
-            let transformed = track.naturalSize.applying(track.preferredTransform)
-            let width = abs(transformed.width)
-            let height = abs(transformed.height)
-            guard width.isFinite, height.isFinite, width > 0, height > 0 else { return nil }
-            return CGSize(width: width, height: height)
+            do {
+                let tracks = try await asset.loadTracks(withMediaType: .video)
+                guard let track = tracks.first else { return nil }
+                let naturalSize = try await track.load(.naturalSize)
+                let transform = try await track.load(.preferredTransform)
+                let transformed = naturalSize.applying(transform)
+                let width = abs(transformed.width)
+                let height = abs(transformed.height)
+                guard width.isFinite, height.isFinite, width > 0, height > 0 else { return nil }
+                return CGSize(width: width, height: height)
+            } catch {
+                return nil
+            }
         }.value
     }
 
