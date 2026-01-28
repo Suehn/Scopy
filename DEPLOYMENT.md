@@ -34,6 +34,34 @@
 - runner：`macos-15`
 - Xcode：`16.0`
 
+## 本次更新（v0.59.fix3）
+
+- **Perf/Search（语义不变）**：
+  - 短词（≤2 chars）候选分页使用 top‑K heap（取 `offset+limit+1`），避免 O(k log k) 全量排序带来的抖动。
+  - `computeCorpusMetrics` 刷新从“按时间周期刷新”改为“仅 stale/force 刷新”，消除周期性 O(n) 全表聚合抖动。
+- **Infra/SQLite（语义不变）**：
+  - DB user_version bump 到 `6`：在 `scopy_meta` 增量维护 `item_count/unpinned_count/total_size_bytes`（触发器精确维护），统计读侧从 O(n) 收敛到 O(1)，旧库自动 fallback。
+  - 新增索引 `idx_recent_order` / `idx_app_last_used`，降低常见排序/分组查询的常数成本。
+- **Perf/UI（语义不变）**：
+  - hover Markdown 渲染移出 MainActor；滚动期间缩略图 decode 降优先级，减少主线程竞争。
+
+**性能实测**（本地，release，`perf-db/clipboard.db` 6421 items / 148.6MB；`hw.model=Mac15,12`；macOS 26.3（25D5112c）；Xcode 26.2（17C52）；2026-01-29）：
+- ScopyBench（engine，warmup 20 / iters 30；`logs/perf-audit-2026-01-29_03-22-58/scopybench.jsonl`）：
+  - fuzzyPlus relevance `cm`：avg 5.17ms，P95 5.58ms
+  - fuzzyPlus relevance `数学`：avg 8.73ms，P95 9.15ms
+  - fuzzyPlus relevance `cmd`：avg 0.11ms，P95 0.14ms
+- PerformanceTests（`make test-perf`）：
+  - 5k（fuzzyPlus）：P95 4.81ms；cold 82.11ms
+  - 10k（fuzzyPlus）：P95 25.15ms；cold 191.60ms
+  - Disk 25k（fuzzyPlus）：P95 52.74ms；cold 795.69ms
+  - Service Disk 10k（fuzzyPlus）：P95 22.06ms；cold 287.59ms
+
+**测试结果**（2026-01-29）：
+- `make test-unit`：Executed 272 tests, 1 skipped, 0 failures
+- `make test-strict`：Executed 272 tests, 1 skipped, 0 failures
+- `make test-tsan`：Executed 262 tests, 1 skipped, 0 failures
+- `make test-perf`：Executed 25 tests, 7 skipped, 0 failures
+
 ## 本次更新（v0.59.fix1）
 
 - **Correctness/Robustness（语义不变）**：

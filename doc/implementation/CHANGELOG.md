@@ -9,6 +9,35 @@
 
 - （暂无）
 
+## [v0.59.fix3] - 2026-01-29
+
+### Perf/Search
+
+- `computeCorpusMetrics` 刷新从“时间驱动”改为“仅 stale/force 刷新”，消除周期性 O(n) 聚合抖动（保持搜索语义不变）。
+- 短词（≤2 chars）候选分页：用 top‑K heap 取 `offset+limit+1` 替代全量排序，避免 O(k log k)（保持排序 comparator 不变），并新增深分页一致性回归测试。
+
+### Perf/UI
+
+- hover Markdown 渲染移出 MainActor，减少滚动/hover 卡顿。
+- 滚动期间缩略图 decode 降优先级，减少主线程竞争。
+
+### Infra/SQLite
+
+- DB user_version bump 到 `6`：在 `scopy_meta` 增量维护 `item_count/unpinned_count/total_size_bytes` 并通过 trigger 保持精确一致；统计读侧从 O(n) 收敛到 O(1)（旧库自动 fallback 到原 SQL）。
+- 新增索引 `idx_recent_order` / `idx_app_last_used`，降低常见排序与 recent apps 分组查询的常数开销（语义不变）。
+
+### Tooling/Perf
+
+- 修复 `scripts/perf-audit.sh` 在 `set -u` 下空数组展开崩溃，便于稳定输出基准日志。
+
+### Test
+
+- `make build`：**BUILD SUCCEEDED**（2026-01-29）
+- `make test-unit`：Executed 272 tests, 1 skipped, 0 failures（2026-01-29）
+- `make test-strict`：Executed 272 tests, 1 skipped, 0 failures（2026-01-29）
+- `make test-tsan`：Executed 262 tests, 1 skipped, 0 failures（2026-01-29）
+- `make test-perf`：Executed 25 tests, 7 skipped, 0 failures（2026-01-29）
+
 ## [v0.59.fix2] - 2026-01-27
 
 ### Tooling/Test

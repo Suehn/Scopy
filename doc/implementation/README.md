@@ -8,11 +8,11 @@
 
 | 项目 | 状态 |
 |------|------|
-| **当前版本** | v0.59.fix2 |
-| **测试状态** | ✅ 通过（make test-unit / make test-strict / make test-tsan，2026-01-27） |
-| **构建状态** | ✅ 通过（make build，2026-01-27） |
+| **当前版本** | v0.59.fix3 |
+| **测试状态** | ✅ 通过（make test-unit / make test-strict / make test-tsan / make test-perf，2026-01-29） |
+| **构建状态** | ✅ 通过（make build，2026-01-29） |
 | **部署位置** | /Applications/Scopy.app |
-| **最后更新** | 2026-01-27 |
+| **最后更新** | 2026-01-29 |
 
 > 详细变更历史请查看 [CHANGELOG.md](./CHANGELOG.md)
 
@@ -24,6 +24,7 @@
 
 | 版本 | 日期 | 主要内容 | 状态 |
 |------|------|----------|------|
+| [v0.59.fix3](./releases/v0.59.fix3.md) | 2026-01-29 | Perf/Search：短词候选 top‑K heap（O(k log K)）；DB：meta 计数读侧 O(1)（user_version=6）；UI：hover Markdown 后台渲染 | ✅ |
 | [v0.59.fix2](./releases/v0.59.fix2.md) | 2026-01-27 | Tooling/Test：修复 make test* 假绿（pipefail）；Fix/Compatibility：Swift 6 Strict Concurrency/TSan 稳定性修复 + AVFoundation 弃用 API 迁移 | ✅ |
 | [v0.59.fix1](./releases/v0.59.fix1.md) | 2026-01-19 | Correctness/Robustness：fullIndex 磁盘缓存 hardening（DB/WAL/SHM fingerprint + `*.sha256`）+ `mutation_seq` change token 兜底；Perf/Search：tombstone 衰退与深分页成本收敛；Test：回归覆盖补齐 | ✅ |
 | [v0.59](./releases/v0.59.md) | 2026-01-13 | Perf/Search：fullIndex 冷启动磁盘缓存 + prefilter 后台预热（首次 refine 从 2s+ 收敛到 ~16ms）；Tooling/Test：新增真实 DB 对照回归 + `make test-real-db` | ✅ |

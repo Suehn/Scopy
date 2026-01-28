@@ -6,6 +6,8 @@
 
 | 版本 | 日期 | 主要变化 |
 |------|------|----------|
+| [v0.59.fix3-profile.md](./v0.59.fix3-profile.md) | 2026-01-29 | Perf/Search + SQLite：短词候选 top‑K（deep paging 更稳）+ 统计读侧 O(1) + 去除周期性 O(n) 聚合抖动 |
+| [perf-baseline-2026-01-27.md](./perf-baseline-2026-01-27.md) | 2026-01-27 | 基线：SearchEngine/Service snapshot + perf tests（非发布版本快照） |
 | [v0.59-profile.md](./v0.59-profile.md) | 2026-01-13 | Perf/Search：冷启动 refine 预热 + fullIndex 磁盘缓存（语义不变） |
 | [v0.50.fix8-profile.md](./v0.50.fix8-profile.md) | 2025-12-19 | Perf/Profile：滚动基线采样 + 场景矩阵（text-only/image-heavy） |
 | [v0.50.fix7-profile.md](./v0.50.fix7-profile.md) | 2025-12-19 | Perf/UI：DisplayText 预热（滚动路径降载） |
