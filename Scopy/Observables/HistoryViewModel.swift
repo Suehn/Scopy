@@ -170,7 +170,6 @@ final class HistoryViewModel {
                 items.insert(item, at: 0)
                 prewarmDisplayText(for: [item])
             }
-            invalidatePinnedCache()
 
             loadedCount = items.count
             if didMatchCurrentFilters, totalCount >= 0 {
@@ -206,14 +205,12 @@ final class HistoryViewModel {
                 thumbnailPath: thumbnailPath,
                 storageRef: existing.storageRef
             )
-            invalidatePinnedCache()
         case .itemUpdated(let item):
             if !searchQuery.isEmpty {
                 if let index = items.firstIndex(where: { $0.id == item.id }) {
                     items[index] = item
                     prewarmDisplayText(for: [item])
                 }
-                invalidatePinnedCache()
                 return
             }
 
@@ -223,7 +220,6 @@ final class HistoryViewModel {
                 items.insert(item, at: 0)
                 prewarmDisplayText(for: [item])
             }
-            invalidatePinnedCache()
 
             loadedCount = items.count
             if totalCount >= 0 {
@@ -237,11 +233,10 @@ final class HistoryViewModel {
             }
             items[index] = item
             prewarmDisplayText(for: [item])
-            invalidatePinnedCache()
         case .itemDeleted(let id):
-            let wasPresent = items.contains(where: { $0.id == id })
+            let previousCount = items.count
             items.removeAll { $0.id == id }
-            invalidatePinnedCache()
+            let wasPresent = items.count != previousCount
 
             loadedCount = items.count
             if totalCount >= 0 {
@@ -253,12 +248,10 @@ final class HistoryViewModel {
         case .itemPinned(let id):
             if let index = items.firstIndex(where: { $0.id == id }) {
                 items[index] = items[index].withPinned(true)
-                invalidatePinnedCache()
             }
         case .itemUnpinned(let id):
             if let index = items.firstIndex(where: { $0.id == id }) {
                 items[index] = items[index].withPinned(false)
-                invalidatePinnedCache()
             }
         case .itemsCleared:
             await load()
@@ -423,7 +416,6 @@ final class HistoryViewModel {
                     guard !Task.isCancelled, currentVersion == searchVersion else { return }
 
                     items.append(contentsOf: result.items)
-                    invalidatePinnedCache()
                     prewarmDisplayText(for: result.items)
                     loadedCount = items.count
                     totalCount = result.total
@@ -433,7 +425,6 @@ final class HistoryViewModel {
                     let moreItems = try await service.fetchRecent(limit: 100, offset: loadedCount)
                     guard !Task.isCancelled, currentVersion == searchVersion else { return }
                     items.append(contentsOf: moreItems)
-                    invalidatePinnedCache()
                     prewarmDisplayText(for: moreItems)
                     loadedCount = items.count
                     canLoadMore = loadedCount < totalCount
@@ -588,7 +579,6 @@ final class HistoryViewModel {
         do {
             try await service.delete(itemID: item.id)
             items.removeAll { $0.id == item.id }
-            invalidatePinnedCache()
         } catch {
             ScopyLog.app.error("Delete failed: \(error.localizedDescription, privacy: .private)")
         }

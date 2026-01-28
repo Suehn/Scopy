@@ -401,16 +401,29 @@ actor SQLiteClipboardRepository {
     }
 
     func getItemCount() throws -> Int {
-        let stmt = try prepare("SELECT COUNT(*) FROM clipboard_items")
-        guard try stmt.step() else { return 0 }
-        return stmt.columnInt(0)
+        do {
+            let stmt = try prepare("SELECT item_count FROM scopy_meta WHERE id = 1")
+            guard try stmt.step() else { return 0 }
+            return stmt.columnInt(0)
+        } catch {
+            let stmt = try prepare("SELECT COUNT(*) FROM clipboard_items")
+            guard try stmt.step() else { return 0 }
+            return stmt.columnInt(0)
+        }
     }
 
     func getTotalSize() throws -> Int {
-        let stmt = try prepare("SELECT SUM(size_bytes) FROM clipboard_items")
-        guard try stmt.step() else { return 0 }
-        let value = stmt.columnInt64(0)
-        return Int(min(value, Int64(Int.max)))
+        do {
+            let stmt = try prepare("SELECT total_size_bytes FROM scopy_meta WHERE id = 1")
+            guard try stmt.step() else { return 0 }
+            let value = stmt.columnInt64(0)
+            return Int(min(value, Int64(Int.max)))
+        } catch {
+            let stmt = try prepare("SELECT SUM(size_bytes) FROM clipboard_items")
+            guard try stmt.step() else { return 0 }
+            let value = stmt.columnInt64(0)
+            return Int(min(value, Int64(Int.max)))
+        }
     }
 
     func updateItemSizeBytesBatchInTransaction(updates: [SizeBytesUpdate]) throws {
@@ -604,10 +617,17 @@ actor SQLiteClipboardRepository {
     }
 
     func planCleanupByCount(target: Int) throws -> DeletePlan {
-        let countSQL = "SELECT COUNT(*) FROM clipboard_items WHERE is_pinned = 0"
-        let countStmt = try prepare(countSQL)
-        guard try countStmt.step() else { return DeletePlan(ids: [], storageRefs: []) }
-        let currentCount = countStmt.columnInt(0)
+        let currentCount: Int
+        do {
+            let stmt = try prepare("SELECT unpinned_count FROM scopy_meta WHERE id = 1")
+            guard try stmt.step() else { return DeletePlan(ids: [], storageRefs: []) }
+            currentCount = stmt.columnInt(0)
+        } catch {
+            let countSQL = "SELECT COUNT(*) FROM clipboard_items WHERE is_pinned = 0"
+            let countStmt = try prepare(countSQL)
+            guard try countStmt.step() else { return DeletePlan(ids: [], storageRefs: []) }
+            currentCount = countStmt.columnInt(0)
+        }
 
         let deleteCount = currentCount - target
         guard deleteCount > 0 else { return DeletePlan(ids: [], storageRefs: []) }

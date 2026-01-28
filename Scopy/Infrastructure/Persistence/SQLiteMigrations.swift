@@ -1,7 +1,7 @@
 import Foundation
 
 enum SQLiteMigrations {
-    static let currentUserVersion: Int32 = 5
+    static let currentUserVersion: Int32 = 6
 
     static func migrateIfNeeded(_ connection: SQLiteConnection) throws {
         let userVersion = try readUserVersion(connection)
@@ -24,6 +24,9 @@ enum SQLiteMigrations {
         }
         if userVersion < 5 {
             try setupMetaTable(connection)
+        }
+        if userVersion < 6 {
+            try setupMetaCounters(connection)
         }
 
         try connection.execute("PRAGMA user_version = \(currentUserVersion)")
@@ -80,13 +83,89 @@ enum SQLiteMigrations {
         try connection.execute("INSERT OR IGNORE INTO scopy_meta (id, mutation_seq) VALUES (1, 0)")
     }
 
+    private static func setupMetaCounters(_ connection: SQLiteConnection) throws {
+        try addColumnIfNeeded(connection, table: "scopy_meta", column: "item_count", type: "INTEGER NOT NULL DEFAULT 0")
+        try addColumnIfNeeded(connection, table: "scopy_meta", column: "unpinned_count", type: "INTEGER NOT NULL DEFAULT 0")
+        try addColumnIfNeeded(connection, table: "scopy_meta", column: "total_size_bytes", type: "INTEGER NOT NULL DEFAULT 0")
+
+        // Backfill counters (one-time O(n)).
+        try connection.execute(
+            """
+            UPDATE scopy_meta
+            SET item_count = (SELECT COUNT(*) FROM clipboard_items),
+                unpinned_count = (SELECT COUNT(*) FROM clipboard_items WHERE is_pinned = 0),
+                total_size_bytes = COALESCE((SELECT SUM(size_bytes) FROM clipboard_items), 0)
+            WHERE id = 1
+            """
+        )
+
+        // Triggers keep counters exact. Must NOT touch mutation_seq (bumped exactly once per commit in code).
+        try connection.execute(
+            """
+            CREATE TRIGGER IF NOT EXISTS scopy_meta_clipboard_ai
+            AFTER INSERT ON clipboard_items
+            BEGIN
+                UPDATE scopy_meta
+                SET item_count = item_count + 1,
+                    unpinned_count = unpinned_count + CASE WHEN NEW.is_pinned = 0 THEN 1 ELSE 0 END,
+                    total_size_bytes = total_size_bytes + NEW.size_bytes
+                WHERE id = 1;
+            END
+            """
+        )
+
+        try connection.execute(
+            """
+            CREATE TRIGGER IF NOT EXISTS scopy_meta_clipboard_ad
+            AFTER DELETE ON clipboard_items
+            BEGIN
+                UPDATE scopy_meta
+                SET item_count = item_count - 1,
+                    unpinned_count = unpinned_count - CASE WHEN OLD.is_pinned = 0 THEN 1 ELSE 0 END,
+                    total_size_bytes = total_size_bytes - OLD.size_bytes
+                WHERE id = 1;
+            END
+            """
+        )
+
+        try connection.execute(
+            """
+            CREATE TRIGGER IF NOT EXISTS scopy_meta_clipboard_au_size
+            AFTER UPDATE OF size_bytes ON clipboard_items
+            WHEN OLD.size_bytes IS NOT NEW.size_bytes
+            BEGIN
+                UPDATE scopy_meta
+                SET total_size_bytes = total_size_bytes + (NEW.size_bytes - OLD.size_bytes)
+                WHERE id = 1;
+            END
+            """
+        )
+
+        try connection.execute(
+            """
+            CREATE TRIGGER IF NOT EXISTS scopy_meta_clipboard_au_pinned
+            AFTER UPDATE OF is_pinned ON clipboard_items
+            WHEN OLD.is_pinned IS NOT NEW.is_pinned
+            BEGIN
+                UPDATE scopy_meta
+                SET unpinned_count = unpinned_count
+                    + (CASE WHEN NEW.is_pinned = 0 THEN 1 ELSE 0 END)
+                    - (CASE WHEN OLD.is_pinned = 0 THEN 1 ELSE 0 END)
+                WHERE id = 1;
+            END
+            """
+        )
+    }
+
     private static func createIndexes(_ connection: SQLiteConnection) throws {
         try connection.execute("CREATE INDEX IF NOT EXISTS idx_created_at ON clipboard_items(created_at DESC)")
         try connection.execute("CREATE INDEX IF NOT EXISTS idx_last_used_at ON clipboard_items(last_used_at DESC)")
         try connection.execute("CREATE INDEX IF NOT EXISTS idx_pinned ON clipboard_items(is_pinned DESC, last_used_at DESC)")
+        try connection.execute("CREATE INDEX IF NOT EXISTS idx_recent_order ON clipboard_items(is_pinned DESC, last_used_at DESC, id ASC)")
         try connection.execute("CREATE INDEX IF NOT EXISTS idx_content_hash ON clipboard_items(content_hash)")
         try connection.execute("CREATE INDEX IF NOT EXISTS idx_type ON clipboard_items(type)")
         try connection.execute("CREATE INDEX IF NOT EXISTS idx_app ON clipboard_items(app_bundle_id)")
+        try connection.execute("CREATE INDEX IF NOT EXISTS idx_app_last_used ON clipboard_items(app_bundle_id, last_used_at DESC)")
         try connection.execute("CREATE INDEX IF NOT EXISTS idx_type_recent ON clipboard_items(type, last_used_at DESC)")
     }
 

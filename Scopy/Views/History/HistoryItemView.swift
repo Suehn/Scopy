@@ -181,7 +181,9 @@ struct HistoryItemView: View, Equatable {
                     let markdownSource = preview
                     hoverMarkdownTask = Task(priority: .utility) { [markdownSource, cacheKey] in
                         guard !Task.isCancelled else { return }
-                        let html = MarkdownHTMLRenderer.render(markdown: markdownSource)
+                        let html = await Task.detached(priority: .utility) {
+                            MarkdownHTMLRenderer.render(markdown: markdownSource)
+                        }.value
                         guard !Task.isCancelled, !html.isEmpty else { return }
                         if let current = MarkdownPreviewCache.shared.filePreview(forKey: cacheKey),
                            current.text == markdownSource
@@ -1398,15 +1400,17 @@ struct HistoryItemView: View, Equatable {
             let previewText = preview
             hoverMarkdownTask = Task(priority: .utility) { [previewText, cacheKey] in
                 guard !Task.isCancelled else { return }
-                let html: String
-                if ScrollPerformanceProfile.isEnabled {
-                    let start = CFAbsoluteTimeGetCurrent()
-                    html = MarkdownHTMLRenderer.render(markdown: previewText)
-                    let elapsed = (CFAbsoluteTimeGetCurrent() - start) * 1000
-                    ScrollPerformanceProfile.recordMetric(name: "hover.markdown_render_ms", elapsedMs: elapsed)
-                } else {
-                    html = MarkdownHTMLRenderer.render(markdown: previewText)
-                }
+                let metricsEnabled = ScrollPerformanceProfile.isEnabled
+                let html = await Task.detached(priority: .utility) {
+                    if metricsEnabled {
+                        let start = CFAbsoluteTimeGetCurrent()
+                        let html = MarkdownHTMLRenderer.render(markdown: previewText)
+                        let elapsed = (CFAbsoluteTimeGetCurrent() - start) * 1000
+                        ScrollPerformanceProfile.recordMetric(name: "hover.markdown_render_ms", elapsedMs: elapsed)
+                        return html
+                    }
+                    return MarkdownHTMLRenderer.render(markdown: previewText)
+                }.value
                 guard !Task.isCancelled, !html.isEmpty else { return }
                 MarkdownPreviewCache.shared.setHTML(html, forKey: cacheKey)
                 await MainActor.run { [previewText] in

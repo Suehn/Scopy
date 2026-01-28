@@ -531,6 +531,24 @@ final class SearchServiceTests: XCTestCase {
         XCTAssertEqual(result.items.first?.id, pinned.id)
     }
 
+    func testShortQueryCandidatesPagingIsDeterministicWithLargeHitSet() async throws {
+        var inserted: [ClipboardStoredItem] = []
+        inserted.reserveCapacity(30)
+        for i in 0..<30 {
+            inserted.append(try await storage.upsertItem(makeContent("ab item \(i)")))
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+        await search.invalidateCache()
+
+        let result = try await search.search(
+            request: SearchRequest(query: "ab", mode: .fuzzyPlus, sortMode: .relevance, limit: 5, offset: 10)
+        )
+
+        let expectedIDs = [19, 18, 17, 16, 15].map { inserted[$0].id }
+        XCTAssertEqual(result.items.map(\.id), expectedIDs)
+        XCTAssertTrue(result.hasMore)
+    }
+
     func testShortQueryCJKPinnedItemsRankFirst() async throws {
         let pinned = try await storage.upsertItem(makeContent("数学 pinned"))
         try await storage.setPin(pinned.id, pinned: true)

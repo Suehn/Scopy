@@ -1,7 +1,7 @@
 # Scopy Makefile
 # 符合 v0.md 的构建和测试流程
 
-.PHONY: all setup build run clean xcode test test-unit test-perf test-perf-heavy test-snapshot-perf test-tsan test-strict coverage benchmark test-flow test-flow-quick health-check
+.PHONY: all setup build run clean xcode test test-unit test-perf test-perf-heavy test-snapshot-perf test-tsan test-strict coverage benchmark perf-audit test-flow test-flow-quick health-check
 .PHONY: test-real-db
 .PHONY: snapshot-perf-db bench-snapshot-search
 .PHONY: tag-release push-release release-validate release-bump-patch
@@ -108,17 +108,18 @@ test-perf-heavy: setup
 		2>&1 | tee $(LOG_DIR)/test-perf-heavy.log'
 
 # 运行基于真实快照 DB 的端到端性能测试（需先 make snapshot-perf-db）
+# 注意：将环境变量注入到 XCTest 需要使用 TEST_RUNNER_ 前缀。
 test-snapshot-perf: setup
 	@echo "Running snapshot performance tests..."
 	@mkdir -p $(LOG_DIR)
-	bash -o pipefail -c 'xcodebuild test \
+	bash -o pipefail -c '{ echo "Snapshot env: SCOPY_SNAPSHOT_DB_PATH=$${SCOPY_SNAPSHOT_DB_PATH:-} SCOPY_SNAPSHOT_STRICT_SLO=$${SCOPY_SNAPSHOT_STRICT_SLO:-}"; TEST_RUNNER_SCOPY_SNAPSHOT_DB_PATH="$$SCOPY_SNAPSHOT_DB_PATH" TEST_RUNNER_SCOPY_SNAPSHOT_STRICT_SLO="$$SCOPY_SNAPSHOT_STRICT_SLO" xcodebuild test \
 		-project Scopy.xcodeproj \
 		-scheme Scopy \
 		-destination platform=macOS \
 		-only-testing:ScopyTests/SnapshotPerformanceTests \
 		OTHER_SWIFT_FLAGS="\$$(inherited) -DSCOPY_SNAPSHOT_PERF_TESTS" \
 		$(VERSION_ARGS) \
-		2>&1 | tee $(LOG_DIR)/test-snapshot-perf.log'
+		; } 2>&1 | tee $(LOG_DIR)/test-snapshot-perf.log'
 
 # 运行基于本机真实 DB 的对照回归测试（可选，需 -DSCOPY_REAL_DB_TESTS）
 test-real-db: setup
@@ -198,6 +199,7 @@ benchmark: setup
 		-scheme Scopy \
 		-destination platform=macOS \
 		-only-testing:ScopyTests/PerformanceTests \
+		OTHER_SWIFT_FLAGS="\$$(inherited) -DSCOPY_PERF_TESTS" \
 		$(VERSION_ARGS) \
 		2>&1 | tee $(LOG_DIR)/benchmark-output.log'
 	@echo ""
@@ -267,6 +269,10 @@ bench-snapshot-search:
 	@swift run -c release ScopyBench --db perf-db/clipboard.db --mode fuzzyPlus --sort relevance --query cm --force-full-fuzzy --iters 30 --warmup 20
 	@swift run -c release ScopyBench --db perf-db/clipboard.db --mode fuzzy --sort relevance --query abc --force-full-fuzzy --iters 30 --warmup 20
 	@swift run -c release ScopyBench --db perf-db/clipboard.db --mode fuzzy --sort relevance --query cmd --force-full-fuzzy --iters 30 --warmup 20
+
+# 一键性能审计（bench + perf tests；输出落盘到 logs/perf-audit-*）
+perf-audit:
+	@bash scripts/perf-audit.sh
 
 # =================== 帮助 ===================
 

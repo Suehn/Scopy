@@ -1,6 +1,7 @@
 import CryptoKit
 import Foundation
 import SQLite3
+import os
 
 public actor SearchEngineImpl {
     // MARK: - Types
@@ -21,16 +22,104 @@ public actor SearchEngineImpl {
         }
     }
 
+    public struct SearchPerfMetrics: Sendable {
+        public struct Phase: Sendable {
+            public let name: String
+            public let ms: Double
+
+            public init(name: String, ms: Double) {
+                self.name = name
+                self.ms = ms
+            }
+        }
+
+        public struct Counter: Sendable {
+            public let name: String
+            public let value: Int
+
+            public init(name: String, value: Int) {
+                self.name = name
+                self.value = value
+            }
+        }
+
+        public let phases: [Phase]
+        public let counters: [Counter]
+
+        public init(phases: [Phase], counters: [Counter]) {
+            self.phases = phases
+            self.counters = counters
+        }
+    }
+
     public struct SearchResult: Sendable {
         public let items: [ClipboardStoredItem]
         public let total: Int
         public let hasMore: Bool
         public let isPrefilter: Bool
         public let searchTimeMs: Double
+        public let perf: SearchPerfMetrics?
+
+        public init(
+            items: [ClipboardStoredItem],
+            total: Int,
+            hasMore: Bool,
+            isPrefilter: Bool,
+            searchTimeMs: Double,
+            perf: SearchPerfMetrics? = nil
+        ) {
+            self.items = items
+            self.total = total
+            self.hasMore = hasMore
+            self.isPrefilter = isPrefilter
+            self.searchTimeMs = searchTimeMs
+            self.perf = perf
+        }
     }
 
     private struct SQLiteInterruptHandle: @unchecked Sendable {
         let handle: OpaquePointer
+    }
+
+    private enum Perf {
+        static let metricsEnabled: Bool = ProcessInfo.processInfo.environment["SCOPY_PERF_METRICS"] == "1"
+        static let signpostsEnabled: Bool = ProcessInfo.processInfo.environment["SCOPY_PERF_SIGNPOSTS"] == "1"
+        static let log = OSLog(subsystem: "com.scopy.app", category: "perf")
+    }
+
+    private final class PerfContext {
+        private(set) var phases: [SearchPerfMetrics.Phase] = []
+        private(set) var counters: [SearchPerfMetrics.Counter] = []
+
+        func addPhase(_ name: String, ms: Double) {
+            phases.append(SearchPerfMetrics.Phase(name: name, ms: ms))
+        }
+
+        func addCounter(_ name: String, value: Int) {
+            counters.append(SearchPerfMetrics.Counter(name: name, value: value))
+        }
+
+        func measure<T>(_ name: String, _ block: () throws -> T) rethrows -> T {
+            let start = CFAbsoluteTimeGetCurrent()
+            defer {
+                let elapsedMs = (CFAbsoluteTimeGetCurrent() - start) * 1000
+                addPhase(name, ms: elapsedMs)
+            }
+            return try block()
+        }
+
+        func measureAsync<T>(_ name: String, _ block: () async throws -> T) async rethrows -> T {
+            let start = CFAbsoluteTimeGetCurrent()
+            defer {
+                let elapsedMs = (CFAbsoluteTimeGetCurrent() - start) * 1000
+                addPhase(name, ms: elapsedMs)
+            }
+            return try await block()
+        }
+
+        func snapshot() -> SearchPerfMetrics {
+            SearchPerfMetrics(phases: phases, counters: counters)
+        }
     }
 
     private struct CachedRecentItem {
@@ -119,6 +208,16 @@ public actor SearchEngineImpl {
         let source: FullIndexSnapshotSource
     }
 
+    private enum ShortQueryIndexSnapshotSource: String, Sendable {
+        case database
+        case diskCache
+    }
+
+    private struct ShortQueryIndexSnapshot: Sendable {
+        let index: ShortQueryIndex
+        let source: ShortQueryIndexSnapshotSource
+    }
+
     private struct FullIndexDiskCacheV3: Codable, Sendable {
         let version: Int
         let dbFileSize: UInt64
@@ -130,6 +229,38 @@ public actor SearchEngineImpl {
         let items: [DiskIndexedItem?]
         let asciiCharPostings: [[Int]]
         let nonASCIICharPostings: [String: [Int]]
+    }
+
+    private struct ShortQueryIndexDiskCacheV1: Codable, Sendable {
+        let version: Int
+        let dbFileSize: UInt64
+        let dbFileModifiedAt: TimeInterval
+        let walFileSize: UInt64
+        let walFileModifiedAt: TimeInterval
+        let shmFileSize: UInt64
+        let shmFileModifiedAt: TimeInterval
+        let slots: [DiskShortQuerySlot]
+        let asciiCharPostings: [[Int]]
+        let asciiBigramPostings: [DiskUInt16Postings]
+        let nonASCIIBigramPostings: [DiskUInt32Postings]
+    }
+
+    private struct DiskShortQuerySlot: Codable, Sendable {
+        let id: String?
+        let contentHash: String
+        let type: String
+        let plainTextHash: String?
+        let noteHash: String?
+    }
+
+    private struct DiskUInt16Postings: Codable, Sendable {
+        let key: UInt16
+        let postings: [Int]
+    }
+
+    private struct DiskUInt32Postings: Codable, Sendable {
+        let key: UInt32
+        let postings: [Int]
     }
 
     private struct DiskIndexedItem: Codable, Sendable {
@@ -169,6 +300,8 @@ public actor SearchEngineImpl {
         private var slotToIDString: [String?] = []
         private var slotToContentHash: [String] = []
         private var slotToType: [ClipboardItemType] = []
+        private var slotToPlainTextHash: [String?] = []
+        private var slotToNoteHash: [String?] = []
         private var idToSlot: [UUID: Int] = [:]
 
         private var asciiCharPostings: [[Int]] = Array(repeating: [], count: Self.asciiCharCount)
@@ -196,6 +329,8 @@ public actor SearchEngineImpl {
             slotToIDString.reserveCapacity(reserve)
             slotToContentHash.reserveCapacity(reserve)
             slotToType.reserveCapacity(reserve)
+            slotToPlainTextHash.reserveCapacity(reserve)
+            slotToNoteHash.reserveCapacity(reserve)
             idToSlot.reserveCapacity(reserve)
             slotCandidateStamp.reserveCapacity(reserve)
         }
@@ -232,23 +367,35 @@ public actor SearchEngineImpl {
             plainText: String,
             note: String?
         ) {
+            let newPlainTextHash: String? = (type == .text) ? nil : SearchEngineImpl.sha256Hex(Data(plainText.utf8))
+            let newNoteHash: String? = note.flatMap { raw in
+                guard !raw.isEmpty else { return nil }
+                return SearchEngineImpl.sha256Hex(Data(raw.utf8))
+            }
+
             if let slot = idToSlot[id],
                slot < slotToIDString.count {
-                // For text items, contentHash tracks plain_text changes well; avoid re-ingesting on metadata updates.
-                // For non-text items, plain_text may change without affecting contentHash (e.g. "[Image: ...]"); ingest anyway.
-                if type != .text || slotToContentHash[slot] != contentHash || slotToType[slot] != type {
-                    slotToContentHash[slot] = contentHash
-                    slotToType[slot] = type
-                    ingestASCII(from: plainText, slot: slot)
-                    ingestNonASCIIBigramsUTF16(from: plainText, slot: slot)
+                if slot < slotToContentHash.count,
+                   slot < slotToType.count,
+                   slot < slotToPlainTextHash.count,
+                   slot < slotToNoteHash.count {
+                    let shouldReindex: Bool
+                    if type == .text {
+                        // For text items, contentHash tracks plain_text changes well; avoid re-ingesting on usage updates.
+                        shouldReindex = slotToContentHash[slot] != contentHash || slotToType[slot] != type || slotToNoteHash[slot] != newNoteHash
+                    } else {
+                        // For non-text items, plain_text may change without affecting contentHash (e.g. "[Image: ...]").
+                        // Track a separate plainTextHash to avoid re-indexing on pure metadata updates.
+                        shouldReindex = slotToContentHash[slot] != contentHash
+                            || slotToType[slot] != type
+                            || slotToPlainTextHash[slot] != newPlainTextHash
+                            || slotToNoteHash[slot] != newNoteHash
+                    }
+                    if !shouldReindex { return }
                 }
 
-                // Note changes do not affect contentHash; always ingest note to avoid false negatives.
-                if let note, !note.isEmpty {
-                    ingestASCII(from: note, slot: slot)
-                    ingestNonASCIIBigramsUTF16(from: note, slot: slot)
-                }
-                return
+                // Never ingest into an existing slot: postings must remain strictly increasing to keep disk cache valid.
+                markDeleted(id: id)
             }
 
             let slot = slotToIDString.count
@@ -256,15 +403,13 @@ public actor SearchEngineImpl {
             slotToIDString.append(idString)
             slotToContentHash.append(contentHash)
             slotToType.append(type)
+            slotToPlainTextHash.append(newPlainTextHash)
+            slotToNoteHash.append(newNoteHash)
             idToSlot[id] = slot
             slotCandidateStamp.append(0)
 
-            ingestASCII(from: plainText, slot: slot)
-            ingestNonASCIIBigramsUTF16(from: plainText, slot: slot)
-            if let note, !note.isEmpty {
-                ingestASCII(from: note, slot: slot)
-                ingestNonASCIIBigramsUTF16(from: note, slot: slot)
-            }
+            ingestASCII(plainText: plainText, note: note, slot: slot)
+            ingestNonASCIIBigramsUTF16(plainText: plainText, note: note, slot: slot)
         }
 
         mutating func candidateIDStrings(for tokenLower: String) -> [String] {
@@ -352,50 +497,8 @@ public actor SearchEngineImpl {
             return result
         }
 
-        private mutating func ingestASCII(from text: String, slot: Int) {
-            guard !text.isEmpty else { return }
-
-            ingestStamp &+= 1
-            if ingestStamp == 0 {
-                ingestStamp = 1
-                seenASCIICharStamp = Array(repeating: 0, count: seenASCIICharStamp.count)
-                seenASCIIBigramStamp = Array(repeating: 0, count: seenASCIIBigramStamp.count)
-            }
-
-            func lowerASCII(_ b: UInt8) -> UInt8 {
-                if b >= 65 && b <= 90 { return b | 0x20 }
-                return b
-            }
-
-            var prev: UInt8? = nil
-            for raw in text.utf8 {
-                guard raw < 128 else {
-                    prev = nil
-                    continue
-                }
-
-                let b = lowerASCII(raw)
-
-                let c = Int(b)
-                if seenASCIICharStamp[c] != ingestStamp {
-                    seenASCIICharStamp[c] = ingestStamp
-                    asciiCharPostings[c].append(slot)
-                }
-
-                if let p = prev {
-                    let key = UInt16((Int(p) << 7) | Int(b))
-                    let idx = Int(key)
-                    if seenASCIIBigramStamp[idx] != ingestStamp {
-                        seenASCIIBigramStamp[idx] = ingestStamp
-                        asciiBigramPostings[key, default: []].append(slot)
-                    }
-                }
-                prev = b
-            }
-        }
-
-        private mutating func ingestNonASCIIBigramsUTF16(from text: String, slot: Int) {
-            guard !text.isEmpty else { return }
+        private mutating func ingestASCII(plainText: String, note: String?, slot: Int) {
+            guard !plainText.isEmpty || (note?.isEmpty == false) else { return }
 
             ingestStamp &+= 1
             if ingestStamp == 0 {
@@ -405,22 +508,191 @@ public actor SearchEngineImpl {
                 seenNonASCIIBigramStamp.removeAll(keepingCapacity: true)
             }
 
-            var prev: UInt16? = nil
-            for cu in text.utf16 {
-                guard cu >= 128 else {
-                    prev = nil
-                    continue
-                }
-
-                if let p = prev {
-                    let key = (UInt32(p) << 16) | UInt32(cu)
-                    if seenNonASCIIBigramStamp[key] != ingestStamp {
-                        seenNonASCIIBigramStamp[key] = ingestStamp
-                        nonASCIIBigramPostings[key, default: []].append(slot)
-                    }
-                }
-                prev = cu
+            @inline(__always)
+            func lowerASCII(_ b: UInt8) -> UInt8 {
+                if b >= 65 && b <= 90 { return b | 0x20 }
+                return b
             }
+
+            func ingestPart(_ text: String) {
+                var prev: UInt8? = nil
+                for raw in text.utf8 {
+                    guard raw < 128 else {
+                        prev = nil
+                        continue
+                    }
+
+                    let b = lowerASCII(raw)
+
+                    let c = Int(b)
+                    if seenASCIICharStamp[c] != ingestStamp {
+                        seenASCIICharStamp[c] = ingestStamp
+                        asciiCharPostings[c].append(slot)
+                    }
+
+                    if let p = prev {
+                        let key = UInt16((Int(p) << 7) | Int(b))
+                        let idx = Int(key)
+                        if seenASCIIBigramStamp[idx] != ingestStamp {
+                            seenASCIIBigramStamp[idx] = ingestStamp
+                            asciiBigramPostings[key, default: []].append(slot)
+                        }
+                    }
+                    prev = b
+                }
+            }
+
+            if !plainText.isEmpty {
+                ingestPart(plainText)
+            }
+            if let note, !note.isEmpty {
+                ingestPart(note)
+            }
+        }
+
+        private mutating func ingestNonASCIIBigramsUTF16(plainText: String, note: String?, slot: Int) {
+            guard !plainText.isEmpty || (note?.isEmpty == false) else { return }
+
+            ingestStamp &+= 1
+            if ingestStamp == 0 {
+                ingestStamp = 1
+                seenASCIICharStamp = Array(repeating: 0, count: seenASCIICharStamp.count)
+                seenASCIIBigramStamp = Array(repeating: 0, count: seenASCIIBigramStamp.count)
+                seenNonASCIIBigramStamp.removeAll(keepingCapacity: true)
+            }
+
+            func ingestPart(_ text: String) {
+                var prev: UInt16? = nil
+                for cu in text.utf16 {
+                    guard cu >= 128 else {
+                        prev = nil
+                        continue
+                    }
+
+                    if let p = prev {
+                        let key = (UInt32(p) << 16) | UInt32(cu)
+                        if seenNonASCIIBigramStamp[key] != ingestStamp {
+                            seenNonASCIIBigramStamp[key] = ingestStamp
+                            nonASCIIBigramPostings[key, default: []].append(slot)
+                        }
+                    }
+                    prev = cu
+                }
+            }
+
+            if !plainText.isEmpty {
+                ingestPart(plainText)
+            }
+            if let note, !note.isEmpty {
+                ingestPart(note)
+            }
+        }
+
+        var asciiCharPostingsCount: Int {
+            asciiCharPostings.count
+        }
+
+        func toDiskCache(
+            version: Int,
+            fp: (
+                dbSize: UInt64,
+                dbModifiedAt: TimeInterval,
+                walSize: UInt64,
+                walModifiedAt: TimeInterval,
+                shmSize: UInt64,
+                shmModifiedAt: TimeInterval
+            )
+        ) -> ShortQueryIndexDiskCacheV1 {
+            var slots: [DiskShortQuerySlot] = []
+            slots.reserveCapacity(slotToIDString.count)
+            for i in 0..<slotToIDString.count {
+                slots.append(
+                    DiskShortQuerySlot(
+                        id: slotToIDString[i],
+                        contentHash: slotToContentHash[i],
+                        type: slotToType[i].rawValue,
+                        plainTextHash: slotToPlainTextHash[i],
+                        noteHash: slotToNoteHash[i]
+                    )
+                )
+            }
+
+            let asciiBigramKeys = asciiBigramPostings.keys.sorted()
+            var asciiBigram: [DiskUInt16Postings] = []
+            asciiBigram.reserveCapacity(asciiBigramKeys.count)
+            for key in asciiBigramKeys {
+                asciiBigram.append(DiskUInt16Postings(key: key, postings: asciiBigramPostings[key] ?? []))
+            }
+
+            let nonASCIIBigramKeys = nonASCIIBigramPostings.keys.sorted()
+            var nonASCIIBigram: [DiskUInt32Postings] = []
+            nonASCIIBigram.reserveCapacity(nonASCIIBigramKeys.count)
+            for key in nonASCIIBigramKeys {
+                nonASCIIBigram.append(DiskUInt32Postings(key: key, postings: nonASCIIBigramPostings[key] ?? []))
+            }
+
+            return ShortQueryIndexDiskCacheV1(
+                version: version,
+                dbFileSize: fp.dbSize,
+                dbFileModifiedAt: fp.dbModifiedAt,
+                walFileSize: fp.walSize,
+                walFileModifiedAt: fp.walModifiedAt,
+                shmFileSize: fp.shmSize,
+                shmFileModifiedAt: fp.shmModifiedAt,
+                slots: slots,
+                asciiCharPostings: asciiCharPostings,
+                asciiBigramPostings: asciiBigram,
+                nonASCIIBigramPostings: nonASCIIBigram
+            )
+        }
+
+        init?(diskCache: ShortQueryIndexDiskCacheV1) {
+            let slotCount = diskCache.slots.count
+            self = ShortQueryIndex(reserveSlots: slotCount)
+
+            slotToIDString = diskCache.slots.map(\.id)
+            slotToContentHash = diskCache.slots.map(\.contentHash)
+            slotToPlainTextHash = diskCache.slots.map(\.plainTextHash)
+            slotToNoteHash = diskCache.slots.map(\.noteHash)
+
+            slotToType = []
+            slotToType.reserveCapacity(slotCount)
+
+            idToSlot = [:]
+            idToSlot.reserveCapacity(slotCount)
+
+            for (slot, entry) in diskCache.slots.enumerated() {
+                guard let type = ClipboardItemType(rawValue: entry.type) else { return nil }
+                slotToType.append(type)
+
+                if let idString = entry.id {
+                    guard let id = UUID(uuidString: idString) else { return nil }
+                    idToSlot[id] = slot
+                }
+            }
+
+            asciiCharPostings = diskCache.asciiCharPostings
+
+            asciiBigramPostings = [:]
+            asciiBigramPostings.reserveCapacity(diskCache.asciiBigramPostings.count)
+            for entry in diskCache.asciiBigramPostings {
+                if asciiBigramPostings[entry.key] != nil { return nil }
+                asciiBigramPostings[entry.key] = entry.postings
+            }
+
+            nonASCIIBigramPostings = [:]
+            nonASCIIBigramPostings.reserveCapacity(diskCache.nonASCIIBigramPostings.count)
+            for entry in diskCache.nonASCIIBigramPostings {
+                if nonASCIIBigramPostings[entry.key] != nil { return nil }
+                nonASCIIBigramPostings[entry.key] = entry.postings
+            }
+
+            ingestStamp = 1
+            candidateStamp = 1
+            seenNonASCIIBigramStamp = [:]
+            seenASCIICharStamp = Array(repeating: 0, count: Self.asciiCharCount)
+            seenASCIIBigramStamp = Array(repeating: 0, count: Self.asciiBigramCount)
+            slotCandidateStamp = Array(repeating: 0, count: slotCount)
         }
     }
 
@@ -520,6 +792,7 @@ public actor SearchEngineImpl {
 
 #if DEBUG
     private var debugFullIndexLastSnapshotSourceValue: FullIndexSnapshotSource?
+    private var debugShortQueryIndexLastSnapshotSourceValue: ShortQueryIndexSnapshotSource?
 #endif
 
     private enum FullIndexPendingEvent: Sendable {
@@ -538,6 +811,7 @@ public actor SearchEngineImpl {
     private var shortQueryIndexBuildGeneration: UInt64 = 0
     private var shortQueryIndexPendingUpserts: [ClipboardStoredItem] = []
     private var shortQueryIndexPendingDeletions: [UUID] = []
+    private var shortQueryIndexDiskCachePersistTask: Task<Void, Never>?
 
     private let fullIndexTombstoneRatioStaleThreshold: Double = 0.25
     private let fullIndexTombstoneMinSlotsForStale: Int = 64
@@ -579,10 +853,10 @@ public actor SearchEngineImpl {
     private let initialIndexBuildTimeout: TimeInterval = 30.0
 
     private static let fullIndexDiskCacheVersion: Int = 3
+    private static let shortQueryIndexDiskCacheVersion: Int = 1
 
     private var corpusMetrics: CorpusMetrics?
     private var corpusMetricsUpdatedAt: Date = .distantPast
-    private let corpusMetricsRefreshInterval: TimeInterval = 30.0
 
     private var charPostingsScratchASCII: [Bool] = Array(repeating: false, count: 128)
     private var charPostingsScratchNonASCII: Set<Character> = []
@@ -610,6 +884,12 @@ public actor SearchEngineImpl {
         shortQueryIndexBuildTask?.cancel()
         shortQueryIndexBuildTask = nil
         shortQueryIndexBuildGeneration &+= 1
+
+        scheduleShortQueryIndexDiskCachePersistIfPossible()
+        if let task = shortQueryIndexDiskCachePersistTask {
+            _ = try? await withTimeout(timeout: 0.25) { await task.value }
+        }
+
         shortQueryIndex = nil
         shortQueryIndexPendingUpserts = []
         shortQueryIndexPendingDeletions = []
@@ -787,7 +1067,15 @@ public actor SearchEngineImpl {
 
         guard var index = shortQueryIndex else { return }
         index.upsert(item)
-        shortQueryIndex = index
+        if shouldRebuildShortQueryIndexDueToTombstones(index: index) {
+            let liveCount = index.healthStats().live
+            resetShortQueryIndex()
+            if liveCount >= shortQueryCacheSize {
+                startShortQueryIndexBuildIfNeeded()
+            }
+        } else {
+            shortQueryIndex = index
+        }
     }
 
     private func shouldRebuildShortQueryIndexDueToTombstones(index: ShortQueryIndex) -> Bool {
@@ -818,12 +1106,12 @@ public actor SearchEngineImpl {
         }
     }
 
-    private func startShortQueryIndexBuildIfNeeded() {
+    private func startShortQueryIndexBuildIfNeeded(force: Bool = false) {
         guard shortQueryIndex == nil else { return }
         guard shortQueryIndexBuildTask == nil else { return }
 
         let estimatedCount = corpusMetrics?.itemCount ?? 0
-        guard estimatedCount >= shortQueryCacheSize else { return }
+        guard force || estimatedCount >= shortQueryCacheSize else { return }
 
         shortQueryIndexPendingUpserts = []
         shortQueryIndexPendingDeletions = []
@@ -833,8 +1121,27 @@ public actor SearchEngineImpl {
         let reserveSlots = estimatedCount
 
         shortQueryIndexBuildTask = Task.detached(priority: .utility) { [dbPath] in
-            let index = Self.buildShortQueryIndexSnapshot(dbPath: dbPath, reserveSlots: reserveSlots)
-            await self.finishShortQueryIndexBuild(generation: generation, index: index)
+            let snapshot = Self.loadShortQueryIndexSnapshotFromDiskCache(dbPath: dbPath)
+                ?? Self.buildShortQueryIndexSnapshot(dbPath: dbPath, reserveSlots: reserveSlots)
+            await self.finishShortQueryIndexBuild(generation: generation, snapshot: snapshot)
+        }
+    }
+
+    private func shortQueryIndexWaitTimeout(tokenLower: String) -> TimeInterval {
+        guard let metrics = corpusMetrics else { return 0 }
+        guard metrics.isHeavyPlainTextCorpus else { return 0 }
+        if tokenLower.canBeConverted(to: .ascii) {
+            return 0.005
+        }
+        return 0.01
+    }
+
+    private func waitForShortQueryIndexBuild(task: Task<Void, Never>, timeout: TimeInterval) async throws {
+        do {
+            try await withTimeout(timeout: timeout) { await task.value }
+        } catch {
+            if case SearchError.timeout = error { return }
+            throw error
         }
     }
 
@@ -868,7 +1175,7 @@ public actor SearchEngineImpl {
         }
     }
 
-    private static func buildShortQueryIndexSnapshot(dbPath: String, reserveSlots: Int) -> ShortQueryIndex? {
+    private static func buildShortQueryIndexSnapshot(dbPath: String, reserveSlots: Int) -> ShortQueryIndexSnapshot? {
         let flags = SQLiteConnection.openFlags(for: dbPath, readOnly: true)
         let conn: SQLiteConnection
         do {
@@ -914,7 +1221,8 @@ public actor SearchEngineImpl {
             return nil
         }
 
-        return Task.isCancelled ? nil : index
+        guard !Task.isCancelled else { return nil }
+        return ShortQueryIndexSnapshot(index: index, source: .database)
     }
 
     private static func buildFullIndexSnapshot(dbPath: String, reserveSlots: Int) -> FullIndexSnapshot? {
@@ -1060,6 +1368,14 @@ public actor SearchEngineImpl {
         fullIndexDiskCachePath(dbPath: dbPath) + ".sha256"
     }
 
+    private static func shortQueryIndexDiskCachePath(dbPath: String) -> String {
+        "\(dbPath).shortindex.v\(shortQueryIndexDiskCacheVersion).plist"
+    }
+
+    private static func shortQueryIndexDiskCacheChecksumPath(dbPath: String) -> String {
+        shortQueryIndexDiskCachePath(dbPath: dbPath) + ".sha256"
+    }
+
     private static func sha256Hex(_ data: Data) -> String {
         let digest = SHA256.hash(data: data)
         return digest.map { String(format: "%02x", $0) }.joined()
@@ -1171,6 +1487,53 @@ public actor SearchEngineImpl {
         } catch {
             return nil
         }
+    }
+
+    private static func loadShortQueryIndexSnapshotFromDiskCache(dbPath: String) -> ShortQueryIndexSnapshot? {
+        guard let fp = dbFileFingerprint(dbPath: dbPath) else { return nil }
+        let cachePath = shortQueryIndexDiskCachePath(dbPath: dbPath)
+        guard FileManager.default.fileExists(atPath: cachePath) else { return nil }
+
+        let checksumPath = shortQueryIndexDiskCacheChecksumPath(dbPath: dbPath)
+        guard let checksumRaw = try? String(contentsOfFile: checksumPath, encoding: .utf8) else { return nil }
+        let checksum = checksumRaw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard checksum.count == 64 else { return nil }
+
+        guard let data = try? Data(contentsOf: URL(fileURLWithPath: cachePath), options: [.mappedIfSafe]) else {
+            return nil
+        }
+
+        let computedChecksum = sha256Hex(data)
+        guard computedChecksum == checksum else { return nil }
+
+        let decoder = PropertyListDecoder()
+        guard let cache = try? decoder.decode(ShortQueryIndexDiskCacheV1.self, from: data) else { return nil }
+        guard cache.version == shortQueryIndexDiskCacheVersion else { return nil }
+        guard cache.dbFileSize == fp.dbSize,
+              cache.dbFileModifiedAt == fp.dbModifiedAt,
+              cache.walFileSize == fp.walSize,
+              cache.walFileModifiedAt == fp.walModifiedAt,
+              cache.shmFileSize == fp.shmSize,
+              cache.shmFileModifiedAt == fp.shmModifiedAt else {
+            return nil
+        }
+
+        guard cache.asciiCharPostings.count == 128 else { return nil }
+
+        let slotCount = cache.slots.count
+        for postings in cache.asciiCharPostings {
+            if !validateDiskCachePostings(postings, itemsCount: slotCount) { return nil }
+        }
+        for entry in cache.asciiBigramPostings {
+            if entry.key >= 16384 { return nil }
+            if !validateDiskCachePostings(entry.postings, itemsCount: slotCount) { return nil }
+        }
+        for entry in cache.nonASCIIBigramPostings {
+            if !validateDiskCachePostings(entry.postings, itemsCount: slotCount) { return nil }
+        }
+
+        guard let index = ShortQueryIndex(diskCache: cache) else { return nil }
+        return ShortQueryIndexSnapshot(index: index, source: .diskCache)
     }
 
     private static func loadFullIndexSnapshotFromDiskCache(dbPath: String) -> FullIndexSnapshot? {
@@ -1289,6 +1652,39 @@ public actor SearchEngineImpl {
         )
     }
 
+    private func scheduleShortQueryIndexDiskCachePersistIfPossible() {
+        guard shortQueryIndexDiskCachePersistTask == nil else { return }
+        invalidateInMemoryIndexesIfDBChangedExternally()
+        guard let index = shortQueryIndex else { return }
+        guard index.asciiCharPostingsCount == 128 else { return }
+        guard let fp = Self.dbFileFingerprint(dbPath: dbPath) else { return }
+
+        let cache = index.toDiskCache(
+            version: Self.shortQueryIndexDiskCacheVersion,
+            fp: fp
+        )
+
+        let cachePath = Self.shortQueryIndexDiskCachePath(dbPath: dbPath)
+        let checksumPath = Self.shortQueryIndexDiskCacheChecksumPath(dbPath: dbPath)
+        shortQueryIndexDiskCachePersistTask = Task.detached(priority: .utility) { [cache] in
+            do {
+                let encoder = PropertyListEncoder()
+                encoder.outputFormat = .binary
+                let data = try encoder.encode(cache)
+                try data.write(to: URL(fileURLWithPath: cachePath), options: [.atomic])
+                let checksum = Self.sha256Hex(data)
+                try checksum.write(to: URL(fileURLWithPath: checksumPath), atomically: true, encoding: .utf8)
+            } catch {
+                // Best-effort cache: ignore failures.
+            }
+            await self.finishShortQueryIndexDiskCachePersist()
+        }
+    }
+
+    private func finishShortQueryIndexDiskCachePersist() {
+        shortQueryIndexDiskCachePersistTask = nil
+    }
+
     private func scheduleFullIndexDiskCachePersistIfPossible() {
         guard fullIndexDiskCachePersistTask == nil else { return }
         invalidateInMemoryIndexesIfDBChangedExternally()
@@ -1336,7 +1732,7 @@ public actor SearchEngineImpl {
         fullIndexDiskCachePersistTask = nil
     }
 
-    private func finishShortQueryIndexBuild(generation: UInt64, index: ShortQueryIndex?) {
+    private func finishShortQueryIndexBuild(generation: UInt64, snapshot: ShortQueryIndexSnapshot?) {
         guard shortQueryIndexBuildGeneration == generation else { return }
         shortQueryIndexBuildTask = nil
 
@@ -1345,7 +1741,8 @@ public actor SearchEngineImpl {
         shortQueryIndexPendingUpserts = []
         shortQueryIndexPendingDeletions = []
 
-        guard var index else { return }
+        guard let snapshot else { return }
+        var index = snapshot.index
 
         for id in pendingDeletions {
             index.markDeleted(id: id)
@@ -1356,6 +1753,14 @@ public actor SearchEngineImpl {
         }
 
         shortQueryIndex = index
+
+#if DEBUG
+        debugShortQueryIndexLastSnapshotSourceValue = snapshot.source
+#endif
+
+        if snapshot.source == .database {
+            scheduleShortQueryIndexDiskCachePersistIfPossible()
+        }
     }
 
     private func finishFullIndexBuild(
@@ -1520,6 +1925,27 @@ public actor SearchEngineImpl {
 
     public func search(request: SearchRequest) async throws -> SearchResult {
         let startTime = CFAbsoluteTimeGetCurrent()
+        let perfContext = Perf.metricsEnabled ? PerfContext() : nil
+        let signpostID = Perf.signpostsEnabled ? OSSignpostID(log: Perf.log) : nil
+
+        if let signpostID {
+            os_signpost(
+                .begin,
+                log: Perf.log,
+                name: "Search",
+                signpostID: signpostID,
+                "mode=%{public}@ sort=%{public}@ forceFullFuzzy=%{public}d queryLen=%{public}d",
+                request.mode.rawValue,
+                request.sortMode.rawValue,
+                request.forceFullFuzzy ? 1 : 0,
+                request.query.count
+            )
+        }
+        defer {
+            if let signpostID {
+                os_signpost(.end, log: Perf.log, name: "Search", signpostID: signpostID)
+            }
+        }
 
         let timeout: TimeInterval
         switch request.mode {
@@ -1536,7 +1962,7 @@ public actor SearchEngineImpl {
         do {
             result = try await withTaskCancellationHandler(operation: {
                 try await withTimeout(timeout: timeout) {
-                    try await self.searchInternal(request: request)
+                    try await self.searchInternal(request: request, perf: perfContext)
                 }
             }, onCancel: {
                 if let interruptHandle {
@@ -1551,30 +1977,42 @@ public actor SearchEngineImpl {
         }
 
         let elapsedMs = (CFAbsoluteTimeGetCurrent() - startTime) * 1000
+        perfContext?.addPhase("search_total", ms: elapsedMs)
+        perfContext?.addCounter("returned_items", value: result.items.count)
         return SearchResult(
             items: result.items,
             total: result.total,
             hasMore: result.hasMore,
             isPrefilter: result.isPrefilter,
-            searchTimeMs: elapsedMs
+            searchTimeMs: elapsedMs,
+            perf: perfContext?.snapshot()
         )
     }
 
     // MARK: - Search Internals
 
-    private func searchInternal(request: SearchRequest) async throws -> SearchResult {
+    private func searchInternal(request: SearchRequest, perf: PerfContext?) async throws -> SearchResult {
         try openIfNeeded()
-        refreshCorpusMetricsIfNeeded()
-        invalidateInMemoryIndexesIfDBChangedExternally()
+        if let perf {
+            perf.measure("refresh_corpus_metrics") { refreshCorpusMetricsIfNeeded() }
+        } else {
+            refreshCorpusMetricsIfNeeded()
+        }
+
+        if let perf {
+            perf.measure("invalidate_external_db_change") { invalidateInMemoryIndexesIfDBChangedExternally() }
+        } else {
+            invalidateInMemoryIndexesIfDBChangedExternally()
+        }
         try Task.checkCancellation()
 
         switch request.mode {
         case .exact:
             return try await searchExact(request: request)
         case .fuzzy:
-            return try await searchFuzzy(request: request)
+            return try await searchFuzzy(request: request, perf: perf)
         case .fuzzyPlus:
-            return try await searchFuzzyPlus(request: request)
+            return try await searchFuzzyPlus(request: request, perf: perf)
         case .regex:
             return try await searchRegex(request: request)
         }
@@ -1618,18 +2056,18 @@ public actor SearchEngineImpl {
         return fts
     }
 
-    private func searchFuzzy(request: SearchRequest) async throws -> SearchResult {
+    private func searchFuzzy(request: SearchRequest, perf: PerfContext?) async throws -> SearchResult {
         if request.query.isEmpty {
             return try searchAllWithFilters(request: request)
         }
-        return try await searchFullFuzzy(request: request, mode: .fuzzy)
+        return try await searchFullFuzzy(request: request, mode: .fuzzy, perf: perf)
     }
 
-    private func searchFuzzyPlus(request: SearchRequest) async throws -> SearchResult {
+    private func searchFuzzyPlus(request: SearchRequest, perf: PerfContext?) async throws -> SearchResult {
         if request.query.isEmpty {
             return try searchAllWithFilters(request: request)
         }
-        return try await searchFullFuzzy(request: request, mode: .fuzzyPlus)
+        return try await searchFullFuzzy(request: request, mode: .fuzzyPlus, perf: perf)
     }
 
     private func searchRegex(request: SearchRequest) async throws -> SearchResult {
@@ -1775,7 +2213,7 @@ public actor SearchEngineImpl {
 
     // MARK: - Full-History Fuzzy Search
 
-    private func searchFullFuzzy(request: SearchRequest, mode: SearchMode) async throws -> SearchResult {
+    private func searchFullFuzzy(request: SearchRequest, mode: SearchMode, perf: PerfContext?) async throws -> SearchResult {
         let trimmedQuery = request.query.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmedQuery.isEmpty {
             return try searchAllWithFilters(request: request)
@@ -1808,10 +2246,18 @@ public actor SearchEngineImpl {
         {
             // Fast-path for long-text corpora: return quick prefilter results first, then let UI refine
             // with `forceFullFuzzy=true` to run a full-history scan (progressive search UX).
-            let fts = try searchWithFTS(query: ftsQuery, request: request, isPrefilter: true)
+            let fts: SearchResult
+            if let perf {
+                fts = try perf.measure("fts_prefilter") {
+                    try searchWithFTS(query: ftsQuery, request: request, isPrefilter: true)
+                }
+            } else {
+                fts = try searchWithFTS(query: ftsQuery, request: request, isPrefilter: true)
+            }
             if !fts.items.isEmpty {
                 // Warm up the full index in the background so the first refine does not pay the cold build cost.
                 startFullIndexBuildIfNeeded()
+                perf?.addCounter("fts_prefilter_items", value: fts.items.count)
                 return fts
             }
 
@@ -1822,7 +2268,52 @@ public actor SearchEngineImpl {
                 let tokens = fuzzyPlusTokens(trimmedQuery.lowercased())
                 if shouldUseSubstringOnlyFallbackForFuzzyPlus(tokens: tokens) {
                     let typeFilters = request.typeFilters.map(Array.init)
-                    let page = try searchWithSubstringLike(
+                    let page: (items: [ClipboardStoredItem], total: Int, hasMore: Bool)
+                    if let perf {
+                        page = try perf.measure("sql_substring_only_fallback") {
+                            try searchWithSubstringLike(
+                                tokens: tokens,
+                                sortMode: request.sortMode,
+                                appFilter: request.appFilter,
+                                typeFilter: request.typeFilter,
+                                typeFilters: typeFilters,
+                                limit: request.limit,
+                                offset: request.offset
+                            )
+                        }
+                    } else {
+                        page = try searchWithSubstringLike(
+                            tokens: tokens,
+                            sortMode: request.sortMode,
+                            appFilter: request.appFilter,
+                            typeFilter: request.typeFilter,
+                            typeFilters: typeFilters,
+                            limit: request.limit,
+                            offset: request.offset
+                        )
+                    }
+                    return SearchResult(items: page.items, total: page.total, hasMore: page.hasMore, isPrefilter: false, searchTimeMs: 0)
+                }
+            }
+
+            if !trimmedQuery.canBeConverted(to: .ascii) {
+                let tokens = substringSearchTokens(trimmedQuery)
+                let typeFilters = request.typeFilters.map(Array.init)
+                let page: (items: [ClipboardStoredItem], total: Int, hasMore: Bool)?
+                if let perf {
+                    page = try? perf.measure("sql_substring_fallback_non_ascii") {
+                        try searchWithSubstring(
+                            tokens: tokens,
+                            sortMode: request.sortMode,
+                            appFilter: request.appFilter,
+                            typeFilter: request.typeFilter,
+                            typeFilters: typeFilters,
+                            limit: request.limit,
+                            offset: request.offset
+                        )
+                    }
+                } else {
+                    page = try? searchWithSubstring(
                         tokens: tokens,
                         sortMode: request.sortMode,
                         appFilter: request.appFilter,
@@ -1831,24 +2322,11 @@ public actor SearchEngineImpl {
                         limit: request.limit,
                         offset: request.offset
                     )
-                    return SearchResult(items: page.items, total: page.total, hasMore: page.hasMore, isPrefilter: false, searchTimeMs: 0)
                 }
-            }
-
-            if !trimmedQuery.canBeConverted(to: .ascii) {
-                let tokens = substringSearchTokens(trimmedQuery)
-                let typeFilters = request.typeFilters.map(Array.init)
-                if let page = try? searchWithSubstring(
-                    tokens: tokens,
-                    sortMode: request.sortMode,
-                    appFilter: request.appFilter,
-                    typeFilter: request.typeFilter,
-                    typeFilters: typeFilters,
-                    limit: request.limit,
-                    offset: request.offset
-                ), !page.items.isEmpty {
+                if let page, !page.items.isEmpty {
                     // Warm up the full index in the background so the first refine does not pay the cold build cost.
                     startFullIndexBuildIfNeeded()
+                    perf?.addCounter("substring_fallback_items", value: page.items.count)
                     return SearchResult(items: page.items, total: page.total, hasMore: page.hasMore, isPrefilter: true, searchTimeMs: 0)
                 }
             }
@@ -1872,6 +2350,7 @@ public actor SearchEngineImpl {
             // Prefer the in-memory full index if it is already available; otherwise, fall back to a SQL substring scan.
             // This avoids the multi-second "first full scan" penalty on large DBs while keeping match/sort semantics stable.
             if let index = fullIndex, !fullIndexStale {
+                perf?.addCounter("short_query_path_full_index", value: 1)
                 let normalizedRequest = SearchRequest(
                     query: trimmedQuery,
                     mode: mode,
@@ -1883,7 +2362,7 @@ public actor SearchEngineImpl {
                     limit: request.limit,
                     offset: request.offset
                 )
-                let result = try searchInFullIndex(index: index, request: normalizedRequest, mode: mode)
+                let result = try searchInFullIndex(index: index, request: normalizedRequest, mode: mode, perf: perf)
                 return SearchResult(
                     items: result.items,
                     total: result.total,
@@ -1897,6 +2376,20 @@ public actor SearchEngineImpl {
             let typeFilters = request.typeFilters.map(Array.init)
 
             startShortQueryIndexBuildIfNeeded()
+
+            if shortQueryIndex == nil, let task = shortQueryIndexBuildTask {
+                let waitTimeout = shortQueryIndexWaitTimeout(tokenLower: tokenLower)
+                if waitTimeout > 0 {
+                    if let perf {
+                        try await perf.measureAsync("short_query_index_wait") {
+                            try await waitForShortQueryIndexBuild(task: task, timeout: waitTimeout)
+                        }
+                    } else {
+                        try await waitForShortQueryIndexBuild(task: task, timeout: waitTimeout)
+                    }
+                }
+            }
+
             if var shortIndex = shortQueryIndex {
                 if tokenLower.canBeConverted(to: .ascii) {
                     let candidates = shortIndex.candidateIDStrings(for: tokenLower)
@@ -1913,16 +2406,34 @@ public actor SearchEngineImpl {
                         // Extremely broad short query: candidate filtering no longer helps and building a huge
                         // candidates payload may cost more than a direct SQL scan. Fall back to SQL scan below.
                     } else {
-                        let page = try searchWithShortQuerySubstringCandidates(
-                            tokenLower: tokenLower,
-                            candidateIDStrings: candidates,
-                            sortMode: request.sortMode,
-                            appFilter: request.appFilter,
-                            typeFilter: request.typeFilter,
-                            typeFilters: typeFilters,
-                            limit: request.limit,
-                            offset: request.offset
-                        )
+                        perf?.addCounter("short_query_path_short_index", value: 1)
+                        perf?.addCounter("short_query_short_index_candidates", value: candidates.count)
+                        let page: (items: [ClipboardStoredItem], total: Int, hasMore: Bool)
+                        if let perf {
+                            page = try perf.measure("short_query_short_index_fetch") {
+                                try searchWithShortQuerySubstringCandidates(
+                                    tokenLower: tokenLower,
+                                    candidateIDStrings: candidates,
+                                    sortMode: request.sortMode,
+                                    appFilter: request.appFilter,
+                                    typeFilter: request.typeFilter,
+                                    typeFilters: typeFilters,
+                                    limit: request.limit,
+                                    offset: request.offset
+                                )
+                            }
+                        } else {
+                            page = try searchWithShortQuerySubstringCandidates(
+                                tokenLower: tokenLower,
+                                candidateIDStrings: candidates,
+                                sortMode: request.sortMode,
+                                appFilter: request.appFilter,
+                                typeFilter: request.typeFilter,
+                                typeFilters: typeFilters,
+                                limit: request.limit,
+                                offset: request.offset
+                            )
+                        }
                         return SearchResult(items: page.items, total: page.total, hasMore: page.hasMore, isPrefilter: false, searchTimeMs: 0)
                     }
                 } else if let candidates = shortIndex.candidateIDStringsForNonASCIIBigram(tokenLower: tokenLower) {
@@ -1938,30 +2449,64 @@ public actor SearchEngineImpl {
                     {
                         // Extremely broad short query: candidate filtering no longer helps. Fall back to SQL scan below.
                     } else {
-                        let page = try searchWithShortQuerySubstringCandidatesSQL(
-                            tokenLower: tokenLower,
-                            candidateIDStrings: candidates,
-                            sortMode: request.sortMode,
-                            appFilter: request.appFilter,
-                            typeFilter: request.typeFilter,
-                            typeFilters: typeFilters,
-                            limit: request.limit,
-                            offset: request.offset
-                        )
+                        perf?.addCounter("short_query_path_short_index", value: 1)
+                        perf?.addCounter("short_query_short_index_candidates", value: candidates.count)
+                        let page: (items: [ClipboardStoredItem], total: Int, hasMore: Bool)
+                        if let perf {
+                            page = try perf.measure("short_query_short_index_sql_fetch") {
+                                try searchWithShortQuerySubstringCandidatesSQL(
+                                    tokenLower: tokenLower,
+                                    candidateIDStrings: candidates,
+                                    sortMode: request.sortMode,
+                                    appFilter: request.appFilter,
+                                    typeFilter: request.typeFilter,
+                                    typeFilters: typeFilters,
+                                    limit: request.limit,
+                                    offset: request.offset
+                                )
+                            }
+                        } else {
+                            page = try searchWithShortQuerySubstringCandidatesSQL(
+                                tokenLower: tokenLower,
+                                candidateIDStrings: candidates,
+                                sortMode: request.sortMode,
+                                appFilter: request.appFilter,
+                                typeFilter: request.typeFilter,
+                                typeFilters: typeFilters,
+                                limit: request.limit,
+                                offset: request.offset
+                            )
+                        }
                         return SearchResult(items: page.items, total: page.total, hasMore: page.hasMore, isPrefilter: false, searchTimeMs: 0)
                     }
                 }
             }
 
-            let page = try searchWithShortQuerySubstring(
-                tokenLower: tokenLower,
-                sortMode: request.sortMode,
-                appFilter: request.appFilter,
-                typeFilter: request.typeFilter,
-                typeFilters: typeFilters,
-                limit: request.limit,
-                offset: request.offset
-            )
+            perf?.addCounter("short_query_path_sql_scan", value: 1)
+            let page: (items: [ClipboardStoredItem], total: Int, hasMore: Bool)
+            if let perf {
+                page = try perf.measure("sql_short_query_scan") {
+                    try searchWithShortQuerySubstring(
+                        tokenLower: tokenLower,
+                        sortMode: request.sortMode,
+                        appFilter: request.appFilter,
+                        typeFilter: request.typeFilter,
+                        typeFilters: typeFilters,
+                        limit: request.limit,
+                        offset: request.offset
+                    )
+                }
+            } else {
+                page = try searchWithShortQuerySubstring(
+                    tokenLower: tokenLower,
+                    sortMode: request.sortMode,
+                    appFilter: request.appFilter,
+                    typeFilter: request.typeFilter,
+                    typeFilters: typeFilters,
+                    limit: request.limit,
+                    offset: request.offset
+                )
+            }
             return SearchResult(items: page.items, total: page.total, hasMore: page.hasMore, isPrefilter: false, searchTimeMs: 0)
         }
 
@@ -1978,11 +2523,15 @@ public actor SearchEngineImpl {
         )
 
         if let task = fullIndexBuildTask {
-            await task.value
+            if let perf {
+                _ = await perf.measureAsync("full_index_build_wait") { await task.value }
+            } else {
+                await task.value
+            }
         }
 
-        let index = try getOrBuildFullIndex()
-        let result = try searchInFullIndex(index: index, request: normalizedRequest, mode: mode)
+        let index = try getOrBuildFullIndex(perf: perf)
+        let result = try searchInFullIndex(index: index, request: normalizedRequest, mode: mode, perf: perf)
         return SearchResult(
             items: result.items,
             total: result.total,
@@ -1992,12 +2541,22 @@ public actor SearchEngineImpl {
         )
     }
 
-    private func getOrBuildFullIndex() throws -> FullFuzzyIndex {
+    private func getOrBuildFullIndex(perf: PerfContext?) throws -> FullFuzzyIndex {
         if let index = fullIndex, !fullIndexStale {
+            perf?.addCounter("full_index_source_memory", value: 1)
             return index
         }
 
-        if let loaded = Self.loadFullIndexFromDiskCache(dbPath: dbPath) {
+        let loaded: FullFuzzyIndex?
+        if let perf {
+            loaded = perf.measure("full_index_disk_cache_load") {
+                Self.loadFullIndexFromDiskCache(dbPath: dbPath)
+            }
+        } else {
+            loaded = Self.loadFullIndexFromDiskCache(dbPath: dbPath)
+        }
+
+        if let loaded {
             if shouldMarkFullIndexStaleDueToTombstones(index: loaded) {
                 // A heavily tombstoned disk snapshot can significantly degrade candidate intersections.
                 // Treat it as unusable and rebuild from DB to keep refine latency stable.
@@ -2006,6 +2565,8 @@ public actor SearchEngineImpl {
                 fullIndex = loaded
                 fullIndexStale = false
                 markIndexChanged()
+                perf?.addCounter("full_index_source_disk_cache", value: 1)
+                perf?.addCounter("full_index_items", value: loaded.items.count)
 #if DEBUG
                 debugFullIndexLastSnapshotSourceValue = .diskCache
 #endif
@@ -2013,10 +2574,19 @@ public actor SearchEngineImpl {
             }
         }
 
-        let newIndex = try buildFullIndex()
+        let newIndex: FullFuzzyIndex
+        if let perf {
+            newIndex = try perf.measure("full_index_build_from_db") {
+                try buildFullIndex(perf: perf)
+            }
+        } else {
+            newIndex = try buildFullIndex(perf: nil)
+        }
         fullIndex = newIndex
         fullIndexStale = false
         markIndexChanged()
+        perf?.addCounter("full_index_source_database", value: 1)
+        perf?.addCounter("full_index_items", value: newIndex.items.count)
 #if DEBUG
         debugFullIndexLastSnapshotSourceValue = .database
 #endif
@@ -2024,7 +2594,7 @@ public actor SearchEngineImpl {
         return newIndex
     }
 
-    private func buildFullIndex() throws -> FullFuzzyIndex {
+    private func buildFullIndex(perf: PerfContext?) throws -> FullFuzzyIndex {
         let estimatedCount = corpusMetrics?.itemCount ?? 0
 
         let sql = """
@@ -2091,38 +2661,59 @@ public actor SearchEngineImpl {
         return ratio >= fullIndexTombstoneRatioStaleThreshold
     }
 
-    private func searchInFullIndex(index: FullFuzzyIndex, request: SearchRequest, mode: SearchMode) throws -> SearchResult {
+    private func computeCandidateSlots(
+        index: FullFuzzyIndex,
+        queryChars: (asciiCodes: [UInt8], nonASCIIChars: [Character])
+    ) -> [Int] {
+        if queryChars.asciiCodes.isEmpty, queryChars.nonASCIIChars.isEmpty {
+            return Array(index.items.indices)
+        }
+
+        var lists: [[Int]] = []
+        lists.reserveCapacity(queryChars.asciiCodes.count + queryChars.nonASCIIChars.count)
+
+        for ascii in queryChars.asciiCodes {
+            let list = index.asciiCharPostings[Int(ascii)]
+            if list.isEmpty {
+                return []
+            }
+            lists.append(list)
+        }
+
+        for ch in queryChars.nonASCIIChars {
+            guard let list = index.nonASCIICharPostings[ch], !list.isEmpty else {
+                return []
+            }
+            lists.append(list)
+        }
+
+        lists.sort { $0.count < $1.count }
+
+        var candidates = lists[0]
+        for list in lists.dropFirst() {
+            candidates = intersectSorted(candidates, list)
+            if candidates.isEmpty { break }
+        }
+        return candidates
+    }
+
+    private func searchInFullIndex(index: FullFuzzyIndex, request: SearchRequest, mode: SearchMode, perf: PerfContext?) throws -> SearchResult {
         let queryLower = request.query.lowercased()
         let queryChars = uniqueNonWhitespaceQueryCharacters(queryLower)
 
         var candidateSlots: [Int]
-        if queryChars.asciiCodes.isEmpty, queryChars.nonASCIIChars.isEmpty {
-            candidateSlots = Array(index.items.indices)
+        if let perf {
+            candidateSlots = perf.measure("full_index_candidate_intersection") {
+                computeCandidateSlots(index: index, queryChars: queryChars)
+            }
         } else {
-            var lists: [[Int]] = []
-            lists.reserveCapacity(queryChars.asciiCodes.count + queryChars.nonASCIIChars.count)
-            for ascii in queryChars.asciiCodes {
-                let list = index.asciiCharPostings[Int(ascii)]
-                if list.isEmpty {
-                    return SearchResult(items: [], total: 0, hasMore: false, isPrefilter: false, searchTimeMs: 0)
-                }
-                lists.append(list)
-            }
-            for ch in queryChars.nonASCIIChars {
-                guard let list = index.nonASCIICharPostings[ch] else {
-                    return SearchResult(items: [], total: 0, hasMore: false, isPrefilter: false, searchTimeMs: 0)
-                }
-                lists.append(list)
-            }
-            lists.sort { $0.count < $1.count }
-
-            var candidates = lists[0]
-            for list in lists.dropFirst() {
-                candidates = intersectSorted(candidates, list)
-                if candidates.isEmpty { break }
-            }
-            candidateSlots = candidates
+            candidateSlots = computeCandidateSlots(index: index, queryChars: queryChars)
         }
+
+        if candidateSlots.isEmpty {
+            return SearchResult(items: [], total: 0, hasMore: false, isPrefilter: false, searchTimeMs: 0)
+        }
+        perf?.addCounter("full_index_candidate_slots", value: candidateSlots.count)
 
         let queryLowerIsASCII = queryLower.canBeConverted(to: .ascii)
         let preparedQuery = prepareFuzzyQuery(queryLower: queryLower, queryLowerIsASCII: queryLowerIsASCII)
@@ -2183,23 +2774,33 @@ public actor SearchEngineImpl {
         var totalIsUnknown = false
         if (mode == .fuzzy || mode == .fuzzyPlus),
            !request.forceFullFuzzy,
-           request.offset == 0,
+            request.offset == 0,
            queryLower.count >= 4,
            queryLowerIsASCII,
            candidateSlots.count >= 6_000 {
             let desiredTopCount = max(0, request.offset + request.limit + 1)
             let prefilterLimit = min(20_000, max(5_000, desiredTopCount * 40))
-            if let ftsQuery = FTSQueryBuilder.build(userQuery: queryLower),
-               let ftsSlots = try? ftsPrefilterSlots(index: index, ftsQuery: ftsQuery, limit: prefilterLimit),
-               !ftsSlots.isEmpty {
-                let pinnedSlots = candidateSlots.filter { slot in
-                    guard slot < index.items.count, let item = index.items[slot] else { return false }
-                    return item.isPinned
+            if let ftsQuery = FTSQueryBuilder.build(userQuery: queryLower) {
+                let ftsSlots: [Int]?
+                if let perf {
+                    ftsSlots = try? perf.measure("full_index_fts_prefilter_slots") {
+                        try ftsPrefilterSlots(index: index, ftsQuery: ftsQuery, limit: prefilterLimit)
+                    }
+                } else {
+                    ftsSlots = try? ftsPrefilterSlots(index: index, ftsQuery: ftsQuery, limit: prefilterLimit)
                 }
-                var merged = Set(ftsSlots)
-                for s in pinnedSlots { merged.insert(s) }
-                candidateSlots = Array(merged)
-                totalIsUnknown = true
+
+                if let ftsSlots, !ftsSlots.isEmpty {
+                    let pinnedSlots = candidateSlots.filter { slot in
+                        guard slot < index.items.count, let item = index.items[slot] else { return false }
+                        return item.isPinned
+                    }
+                    var merged = Set(ftsSlots)
+                    for s in pinnedSlots { merged.insert(s) }
+                    candidateSlots = Array(merged)
+                    perf?.addCounter("full_index_fts_prefilter_candidate_slots", value: candidateSlots.count)
+                    totalIsUnknown = true
+                }
             }
         }
 
@@ -2237,27 +2838,49 @@ public actor SearchEngineImpl {
 
         if totalIsUnknown {
             if sortMode == .recent {
-                candidateSlots.sort { lhsSlot, rhsSlot in
-                    guard lhsSlot < index.items.count, rhsSlot < index.items.count else { return lhsSlot < rhsSlot }
-                    let lhsItem = index.items[lhsSlot]
-                    let rhsItem = index.items[rhsSlot]
-                    if lhsItem == nil { return false }
-                    if rhsItem == nil { return true }
-                    guard let lhsItem, let rhsItem else { return false }
+                if perf == nil {
+                    candidateSlots.sort { lhsSlot, rhsSlot in
+                        guard lhsSlot < index.items.count, rhsSlot < index.items.count else { return lhsSlot < rhsSlot }
+                        let lhsItem = index.items[lhsSlot]
+                        let rhsItem = index.items[rhsSlot]
+                        if lhsItem == nil { return false }
+                        if rhsItem == nil { return true }
+                        guard let lhsItem, let rhsItem else { return false }
 
-                    if lhsItem.isPinned != rhsItem.isPinned {
-                        return lhsItem.isPinned && !rhsItem.isPinned
+                        if lhsItem.isPinned != rhsItem.isPinned {
+                            return lhsItem.isPinned && !rhsItem.isPinned
+                        }
+                        if lhsItem.lastUsedAt != rhsItem.lastUsedAt {
+                            return lhsItem.lastUsedAt > rhsItem.lastUsedAt
+                        }
+                        return lhsItem.id.uuidString < rhsItem.id.uuidString
                     }
-                    if lhsItem.lastUsedAt != rhsItem.lastUsedAt {
-                        return lhsItem.lastUsedAt > rhsItem.lastUsedAt
+                } else {
+                    let sortStart = CFAbsoluteTimeGetCurrent()
+                    candidateSlots.sort { lhsSlot, rhsSlot in
+                        guard lhsSlot < index.items.count, rhsSlot < index.items.count else { return lhsSlot < rhsSlot }
+                        let lhsItem = index.items[lhsSlot]
+                        let rhsItem = index.items[rhsSlot]
+                        if lhsItem == nil { return false }
+                        if rhsItem == nil { return true }
+                        guard let lhsItem, let rhsItem else { return false }
+
+                        if lhsItem.isPinned != rhsItem.isPinned {
+                            return lhsItem.isPinned && !rhsItem.isPinned
+                        }
+                        if lhsItem.lastUsedAt != rhsItem.lastUsedAt {
+                            return lhsItem.lastUsedAt > rhsItem.lastUsedAt
+                        }
+                        return lhsItem.id.uuidString < rhsItem.id.uuidString
                     }
-                    return lhsItem.id.uuidString < rhsItem.id.uuidString
+                    perf?.addPhase("full_index_prefilter_recent_candidate_sort", ms: (CFAbsoluteTimeGetCurrent() - sortStart) * 1000)
                 }
 
                 var pageSlots: [Int] = []
                 pageSlots.reserveCapacity(request.limit + 1)
                 var matchesSeen = 0
 
+                let scanStart = CFAbsoluteTimeGetCurrent()
                 for (i, slot) in candidateSlots.enumerated() {
                     if i % 1024 == 0 {
                         try Task.checkCancellation()
@@ -2282,13 +2905,22 @@ public actor SearchEngineImpl {
                     }
                     matchesSeen += 1
                 }
+                perf?.addPhase("full_index_prefilter_recent_scan", ms: (CFAbsoluteTimeGetCurrent() - scanStart) * 1000)
+                perf?.addCounter("full_index_prefilter_total_matches", value: matchesSeen)
 
                 let hasMore = pageSlots.count > request.limit
                 if hasMore {
                     pageSlots.removeLast()
                 }
                 let pageIDs = pageSlots.compactMap { index.items[$0]?.id }
-                let resultItems = try fetchItemsByIDs(ids: pageIDs)
+                let resultItems: [ClipboardStoredItem]
+                if let perf {
+                    resultItems = try perf.measure("full_index_prefilter_fetch_items") {
+                        try fetchItemsByIDs(ids: pageIDs)
+                    }
+                } else {
+                    resultItems = try fetchItemsByIDs(ids: pageIDs)
+                }
                 return SearchResult(items: resultItems, total: -1, hasMore: hasMore, isPrefilter: true, searchTimeMs: 0)
             }
 
@@ -2296,6 +2928,7 @@ public actor SearchEngineImpl {
             topHeap.reserveCapacity(desiredTopCount)
             var totalMatches = 0
 
+            let scoreStart = CFAbsoluteTimeGetCurrent()
             for (i, slot) in candidateSlots.enumerated() {
                 if i % 1024 == 0 {
                     try Task.checkCancellation()
@@ -2322,9 +2955,13 @@ public actor SearchEngineImpl {
                     topHeap.replaceRoot(with: scoredItem)
                 }
             }
+            perf?.addPhase("full_index_prefilter_scoring", ms: (CFAbsoluteTimeGetCurrent() - scoreStart) * 1000)
+            perf?.addCounter("full_index_prefilter_total_matches", value: totalMatches)
 
             var topItems = topHeap.elements
+            let sortStart = CFAbsoluteTimeGetCurrent()
             topItems.sort { isBetterSlot($0, than: $1) }
+            perf?.addPhase("full_index_prefilter_sort", ms: (CFAbsoluteTimeGetCurrent() - sortStart) * 1000)
 
             let start = min(request.offset, topItems.count)
             let end = min(start + request.limit, topItems.count)
@@ -2332,7 +2969,14 @@ public actor SearchEngineImpl {
 
             let hasMore = totalMatches > request.offset + request.limit
             let pageIDs = page.compactMap { index.items[$0.slot]?.id }
-            let resultItems = try fetchItemsByIDs(ids: pageIDs)
+            let resultItems: [ClipboardStoredItem]
+            if let perf {
+                resultItems = try perf.measure("full_index_prefilter_fetch_items") {
+                    try fetchItemsByIDs(ids: pageIDs)
+                }
+            } else {
+                resultItems = try fetchItemsByIDs(ids: pageIDs)
+            }
             return SearchResult(items: resultItems, total: -1, hasMore: hasMore, isPrefilter: true, searchTimeMs: 0)
         }
 
@@ -3019,17 +3663,16 @@ public actor SearchEngineImpl {
     }
 
     private func refreshCorpusMetricsIfNeeded(force: Bool = false) {
-        let now = Date()
         if !force,
            corpusMetrics != nil,
-           now.timeIntervalSince(corpusMetricsUpdatedAt) < corpusMetricsRefreshInterval {
+           corpusMetricsUpdatedAt != .distantPast {
             return
         }
 
         if let metrics = try? computeCorpusMetrics() {
             corpusMetrics = metrics
         }
-        corpusMetricsUpdatedAt = now
+        corpusMetricsUpdatedAt = Date()
     }
 
     private func computeCorpusMetrics() throws -> CorpusMetrics {
@@ -3735,34 +4378,10 @@ public actor SearchEngineImpl {
             let matchPos: Int
         }
 
-        var hits: [CandidateHit] = []
-        hits.reserveCapacity(min(candidateIDStrings.count, 8192))
-        while try stmt.step() {
-            guard let idString = stmt.columnText(0) else { continue }
+        let keepCount = offset + limit + 1
 
-            let lastUsedAt = stmt.columnDouble(1)
-            let isPinned = stmt.columnInt(2) != 0
-
-            let plainRes = instrASCIIInsensitiveUTF8(
-                haystack: stmt.columnTextBytes(3),
-                needleLower: needleLowerBytes
-            )
-            if plainRes.pos > 0 {
-                hits.append(CandidateHit(idString: idString, lastUsedAt: lastUsedAt, isPinned: isPinned, matchPos: plainRes.pos))
-                continue
-            }
-
-            let noteRes = instrASCIIInsensitiveUTF8(
-                haystack: stmt.columnTextBytes(4),
-                needleLower: needleLowerBytes
-            )
-            guard noteRes.pos > 0 else { continue }
-
-            let matchPos = plainRes.lengthIfNoMatch + 1 + noteRes.pos
-            hits.append(CandidateHit(idString: idString, lastUsedAt: lastUsedAt, isPinned: isPinned, matchPos: matchPos))
-        }
-
-        hits.sort { lhs, rhs in
+        @inline(__always)
+        func isBetter(_ lhs: CandidateHit, _ rhs: CandidateHit) -> Bool {
             if lhs.isPinned != rhs.isPinned {
                 return lhs.isPinned && !rhs.isPinned
             }
@@ -3787,9 +4406,95 @@ public actor SearchEngineImpl {
             return lhs.idString < rhs.idString
         }
 
-        let start = min(offset, hits.count)
-        let end = min(offset + limit + 1, hits.count)
-        let pageHits: [CandidateHit] = (start < end) ? Array(hits[start..<end]) : []
+        @inline(__always)
+        func isWorse(_ lhs: CandidateHit, _ rhs: CandidateHit) -> Bool {
+            isBetter(rhs, lhs)
+        }
+
+        var heap: [CandidateHit] = []
+        heap.reserveCapacity(min(keepCount, 8192))
+
+        @inline(__always)
+        func heapSiftUp(_ startIndex: Int) {
+            var childIndex = startIndex
+            while childIndex > 0 {
+                let parentIndex = (childIndex - 1) / 2
+                if !isWorse(heap[childIndex], heap[parentIndex]) {
+                    break
+                }
+                heap.swapAt(childIndex, parentIndex)
+                childIndex = parentIndex
+            }
+        }
+
+        @inline(__always)
+        func heapSiftDown(_ startIndex: Int) {
+            var parentIndex = startIndex
+            while true {
+                let leftIndex = parentIndex * 2 + 1
+                if leftIndex >= heap.count { break }
+                let rightIndex = leftIndex + 1
+
+                var worstIndex = leftIndex
+                if rightIndex < heap.count, isWorse(heap[rightIndex], heap[leftIndex]) {
+                    worstIndex = rightIndex
+                }
+
+                if !isWorse(heap[worstIndex], heap[parentIndex]) {
+                    break
+                }
+                heap.swapAt(parentIndex, worstIndex)
+                parentIndex = worstIndex
+            }
+        }
+
+        @inline(__always)
+        func heapInsertKeepingTopK(_ hit: CandidateHit) {
+            if keepCount <= 0 { return }
+
+            if heap.count < keepCount {
+                heap.append(hit)
+                heapSiftUp(heap.count - 1)
+                return
+            }
+
+            guard !heap.isEmpty else { return }
+            if isBetter(hit, heap[0]) {
+                heap[0] = hit
+                heapSiftDown(0)
+            }
+        }
+
+        while try stmt.step() {
+            guard let idString = stmt.columnText(0) else { continue }
+
+            let lastUsedAt = stmt.columnDouble(1)
+            let isPinned = stmt.columnInt(2) != 0
+
+            let plainRes = instrASCIIInsensitiveUTF8(
+                haystack: stmt.columnTextBytes(3),
+                needleLower: needleLowerBytes
+            )
+            if plainRes.pos > 0 {
+                heapInsertKeepingTopK(CandidateHit(idString: idString, lastUsedAt: lastUsedAt, isPinned: isPinned, matchPos: plainRes.pos))
+                continue
+            }
+
+            let noteRes = instrASCIIInsensitiveUTF8(
+                haystack: stmt.columnTextBytes(4),
+                needleLower: needleLowerBytes
+            )
+            guard noteRes.pos > 0 else { continue }
+
+            let matchPos = plainRes.lengthIfNoMatch + 1 + noteRes.pos
+            heapInsertKeepingTopK(CandidateHit(idString: idString, lastUsedAt: lastUsedAt, isPinned: isPinned, matchPos: matchPos))
+        }
+
+        heap.sort(by: isBetter)
+
+        let start = min(offset, heap.count)
+        let end = min(offset + limit + 1, heap.count)
+        let pageHits: [CandidateHit] = (start < end) ? Array(heap[start..<end]) : []
 
         var pageIDs: [UUID] = []
         pageIDs.reserveCapacity(min(pageHits.count, limit + 1))
@@ -3799,7 +4504,7 @@ public actor SearchEngineImpl {
             }
         }
 
-        let hasMore = pageIDs.count > limit
+        let hasMore = heap.count == keepCount
         if hasMore {
             pageIDs.removeLast()
         }
@@ -4281,6 +4986,13 @@ public actor SearchEngineImpl {
         )
     }
 
+    func debugShortQueryIndexDiskCachePaths() -> (cachePath: String, checksumPath: String) {
+        (
+            cachePath: Self.shortQueryIndexDiskCachePath(dbPath: dbPath),
+            checksumPath: Self.shortQueryIndexDiskCacheChecksumPath(dbPath: dbPath)
+        )
+    }
+
     func debugStartFullIndexBuild(force: Bool = true) {
         startFullIndexBuildIfNeeded(force: force)
     }
@@ -4304,6 +5016,14 @@ public actor SearchEngineImpl {
         }
         let stats = index.healthStats()
         return (true, isBuilding, stats.slots, stats.live, stats.tombstones)
+    }
+
+    func debugShortQueryIndexLastSnapshotSource() -> String? {
+        debugShortQueryIndexLastSnapshotSourceValue?.rawValue
+    }
+
+    func debugStartShortQueryIndexBuild(force: Bool = true) {
+        startShortQueryIndexBuildIfNeeded(force: force)
     }
 
     func debugAwaitShortQueryIndexBuild() async {

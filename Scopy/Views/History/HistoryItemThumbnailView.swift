@@ -56,7 +56,8 @@ struct HistoryItemThumbnailView: View {
             return
         }
 
-        let image = await ThumbnailCache.shared.loadImage(path: path, priority: .userInitiated)
+        let priority: TaskPriority = isScrolling ? .utility : .userInitiated
+        let image = await ThumbnailCache.shared.loadImage(path: path, priority: priority)
         guard !Task.isCancelled else { return }
         guard let image else { return }
         loadedThumbnail = image
