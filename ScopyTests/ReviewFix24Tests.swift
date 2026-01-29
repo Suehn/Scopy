@@ -71,22 +71,6 @@ final class StorageDeletionConcurrencyTests: XCTestCase {
         try FileManager.default.createDirectory(at: baseURL, withIntermediateDirectories: true)
 
         let dbPath = baseURL.appendingPathComponent("clipboard.db").path
-        let storage = StorageService(databasePath: dbPath)
-        try await storage.open()
-
-        let payload = Data(repeating: 0xB, count: ScopyThresholds.externalStorageBytes)
-        for i in 0..<40 {
-            let content = ClipboardMonitor.ClipboardContent(
-                type: .image,
-                plainText: "large \(i)",
-                payload: .data(payload),
-                appBundleID: "com.test.app",
-                contentHash: "large-\(i)-\(UUID().uuidString)",
-                sizeBytes: payload.count
-            )
-            _ = try await storage.upsertItem(content)
-        }
-
         final class InFlightCounter: @unchecked Sendable {
             private let lock = NSLock()
             private var inFlight = 0
@@ -116,17 +100,30 @@ final class StorageDeletionConcurrencyTests: XCTestCase {
         }
 
         let counter = InFlightCounter()
-
-        let originalRemover = StorageService.fileRemoverForTesting
-        StorageService.fileRemoverForTesting = { url in
+        let fileOps = StorageService.StorageFileOps(removeFile: { url in
             counter.increment()
 
             usleep(50_000) // 50ms
             try? FileManager.default.removeItem(at: url)
 
             counter.decrement()
+        })
+
+        let storage = StorageService(databasePath: dbPath, fileOps: fileOps)
+        try await storage.open()
+
+        let payload = Data(repeating: 0xB, count: ScopyThresholds.externalStorageBytes)
+        for i in 0..<40 {
+            let content = ClipboardMonitor.ClipboardContent(
+                type: .image,
+                plainText: "large \(i)",
+                payload: .data(payload),
+                appBundleID: "com.test.app",
+                contentHash: "large-\(i)-\(UUID().uuidString)",
+                sizeBytes: payload.count
+            )
+            _ = try await storage.upsertItem(content)
         }
-        defer { StorageService.fileRemoverForTesting = originalRemover }
 
         let tick = expectation(description: "Main actor remains responsive")
         Task { @MainActor in

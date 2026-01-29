@@ -53,11 +53,19 @@ public final class StorageService {
     /// Concurrency limit for bulk filesystem deletions (avoid I/O storms).
     static let maxConcurrentFileDeletions = 8
 
-    typealias FileRemover = @Sendable (URL) throws -> Void
+    public typealias FileRemover = @Sendable (URL) throws -> Void
 
-    #if DEBUG
-    nonisolated(unsafe) static var fileRemoverForTesting: FileRemover?
-    #endif
+    public struct StorageFileOps: Sendable {
+        public let removeFile: FileRemover
+
+        public init(removeFile: @escaping FileRemover) {
+            self.removeFile = removeFile
+        }
+
+        public static let live = StorageFileOps(removeFile: { url in
+            try FileManager.default.removeItem(at: url)
+        })
+    }
 
     /// Default cleanup settings (v0.md 2.1)
     public struct CleanupSettings {
@@ -76,6 +84,7 @@ public final class StorageService {
     private let rootDirectory: URL
     private let externalStoragePath: String
     private let thumbnailCachePath: String
+    private let fileOps: StorageFileOps
 
     /// Exposed as immutable values so non-`@MainActor` contexts can safely validate/read paths without capturing `StorageService`.
     nonisolated let externalStorageDirectoryPath: String
@@ -97,7 +106,11 @@ public final class StorageService {
 
     // MARK: - Initialization
 
-    public init(databasePath: String? = nil, storageRootURL: URL? = nil) {
+    public init(
+        databasePath: String? = nil,
+        storageRootURL: URL? = nil,
+        fileOps: StorageFileOps = .live
+    ) {
         let rootURL = Self.resolveRootDirectory(databasePath: databasePath, storageRootURL: storageRootURL)
 
         // v0.22: 改进目录创建错误处理 - 记录错误但不阻止初始化
@@ -112,6 +125,7 @@ public final class StorageService {
         self.thumbnailCachePath = thumbnailPath
         self.externalStorageDirectoryPath = externalPath
         self.thumbnailCacheDirectoryPath = thumbnailPath
+        self.fileOps = fileOps
 
         Self.createDirectoryIfNeeded(at: URL(fileURLWithPath: externalStoragePath), description: "external storage directory")
         Self.createDirectoryIfNeeded(at: URL(fileURLWithPath: thumbnailCachePath), description: "thumbnail cache directory")
@@ -404,35 +418,79 @@ public final class StorageService {
     }
 
     public func deleteItem(_ id: UUID) async throws {
-        // First get the item to clean up external storage
-        // v0.19: 添加错误日志
-        if let item = try await repository.fetchItemByID(id), let storageRef = item.storageRef {
+        // DB-first: only delete external file after DB deletion succeeds.
+        let storageRef = try await repository.deleteItemReturningStorageRef(id: id)
+
+        guard let storageRef else { return }
+        let externalRoot = externalStorageDirectoryPath
+        guard StorageService.validateStorageRef(storageRef, externalStoragePath: externalRoot) else {
+            ScopyLog.storage.warning("Refusing to delete invalid storageRef '\(storageRef, privacy: .private)'")
+            return
+        }
+
+        let fileURL = URL(fileURLWithPath: storageRef)
+        let remover = fileOps.removeFile
+        await Task.detached(priority: .utility) {
+            guard FileManager.default.fileExists(atPath: fileURL.path) else { return }
             do {
-                try FileManager.default.removeItem(atPath: storageRef)
+                try remover(fileURL)
+            } catch let error as NSError {
+                // Ignore "file not found" (may be deleted concurrently).
+                if error.domain == NSCocoaErrorDomain && error.code == NSFileNoSuchFileError {
+                    return
+                }
+                ScopyLog.storage.warning(
+                    "Failed to delete external file '\(fileURL.path, privacy: .private)': \(error.localizedDescription, privacy: .private)"
+                )
             } catch {
                 ScopyLog.storage.warning(
-                    "Failed to delete external file '\(storageRef, privacy: .private)': \(error.localizedDescription, privacy: .private)"
+                    "Failed to delete external file '\(fileURL.path, privacy: .private)': \(error.localizedDescription, privacy: .private)"
                 )
             }
-        }
-        try await repository.deleteItem(id: id)
+        }.value
     }
 
     public func deleteAllExceptPinned() async throws {
-        let refs = try await repository.fetchStorageRefsForUnpinned()
+        // DB-first: capture refs + delete rows in one transaction to avoid racey ref snapshots.
+        let refs = try await repository.deleteAllExceptPinnedReturningStorageRefs()
 
         // Delete files off-main with bounded concurrency to avoid UI stalls and I/O storms.
-        let fileURLs = refs.map { URL(fileURLWithPath: $0) }
+        let fileURLs = validatedExternalFileURLs(from: refs, logContext: "clearAll")
+        guard !fileURLs.isEmpty else { return }
+        let remover = fileOps.removeFile
         await Task.detached(priority: .utility) {
             await Self.deleteFilesBounded(
                 fileURLs,
                 maxConcurrent: Self.maxConcurrentFileDeletions,
-                logContext: "clearAll"
+                logContext: "clearAll",
+                removeFile: remover
             )
         }.value
+    }
 
-        // Delete from DB
-        try await repository.deleteAllExceptPinned()
+    private func validatedExternalFileURLs(from storageRefs: [String], logContext: StaticString) -> [URL] {
+        guard !storageRefs.isEmpty else { return [] }
+
+        let externalRoot = externalStorageDirectoryPath
+        var urls: [URL] = []
+        urls.reserveCapacity(storageRefs.count)
+
+        var invalidCount = 0
+        for ref in storageRefs {
+            guard StorageService.validateStorageRef(ref, externalStoragePath: externalRoot) else {
+                invalidCount += 1
+                continue
+            }
+            urls.append(URL(fileURLWithPath: ref))
+        }
+
+        if invalidCount > 0 {
+            ScopyLog.storage.warning(
+                "[\(logContext)] Skipped \(invalidCount, privacy: .public) invalid storage refs"
+            )
+        }
+
+        return urls
     }
 
     public func setPin(_ id: UUID, pinned: Bool) async throws {
@@ -724,11 +782,13 @@ public final class StorageService {
 
         // 3. Delete orphaned files with bounded concurrency (avoid I/O storms).
         let filesToDelete = orphanedFiles
+        let remover = fileOps.removeFile
         await Task.detached(priority: .utility) {
             await Self.deleteFilesBounded(
                 filesToDelete,
                 maxConcurrent: Self.maxConcurrentFileDeletions,
-                logContext: "orphanCleanup"
+                logContext: "orphanCleanup",
+                removeFile: remover
             )
         }.value
 
@@ -797,18 +857,20 @@ public final class StorageService {
             "cleanupByCount: deleting \(plan.ids.count, privacy: .public) items (files=\(plan.storageRefs.count, privacy: .public)) target=\(target, privacy: .public)"
         )
 
-        if !plan.storageRefs.isEmpty {
-            let fileURLs = plan.storageRefs.map { URL(fileURLWithPath: $0) }
-            await Task.detached(priority: .utility) {
-                await Self.deleteFilesBounded(
-                    fileURLs,
-                    maxConcurrent: Self.maxConcurrentFileDeletions,
-                    logContext: "cleanupByCount"
-                )
-            }.value
-        }
-
+        // DB-first: avoid deleting external files when DB deletion fails.
         try await repository.deleteItemsBatchInTransaction(ids: plan.ids)
+
+        let fileURLs = validatedExternalFileURLs(from: plan.storageRefs, logContext: "cleanupByCount")
+        guard !fileURLs.isEmpty else { return }
+        let remover = fileOps.removeFile
+        await Task.detached(priority: .utility) {
+            await Self.deleteFilesBounded(
+                fileURLs,
+                maxConcurrent: Self.maxConcurrentFileDeletions,
+                logContext: "cleanupByCount",
+                removeFile: remover
+            )
+        }.value
     }
 
     private func cleanupImagesOnlyByCount(deleteCount: Int) async throws {
@@ -818,18 +880,20 @@ public final class StorageService {
             "cleanupImagesOnlyByCount: deleting \(plan.ids.count, privacy: .public) images (files=\(plan.storageRefs.count, privacy: .public)) requested=\(deleteCount, privacy: .public)"
         )
 
-        if !plan.storageRefs.isEmpty {
-            let fileURLs = plan.storageRefs.map { URL(fileURLWithPath: $0) }
-            await Task.detached(priority: .utility) {
-                await Self.deleteFilesBounded(
-                    fileURLs,
-                    maxConcurrent: Self.maxConcurrentFileDeletions,
-                    logContext: "cleanupImagesOnlyByCount"
-                )
-            }.value
-        }
-
+        // DB-first: avoid deleting external files when DB deletion fails.
         try await repository.deleteItemsBatchInTransaction(ids: plan.ids)
+
+        let fileURLs = validatedExternalFileURLs(from: plan.storageRefs, logContext: "cleanupImagesOnlyByCount")
+        guard !fileURLs.isEmpty else { return }
+        let remover = fileOps.removeFile
+        await Task.detached(priority: .utility) {
+            await Self.deleteFilesBounded(
+                fileURLs,
+                maxConcurrent: Self.maxConcurrentFileDeletions,
+                logContext: "cleanupImagesOnlyByCount",
+                removeFile: remover
+            )
+        }.value
     }
 
     /// v0.19: 修复 - 同时删除外部存储文件，避免孤立文件累积
@@ -841,18 +905,20 @@ public final class StorageService {
             "cleanupByAge: deleting \(plan.ids.count, privacy: .public) items (files=\(plan.storageRefs.count, privacy: .public)) maxDays=\(maxDays, privacy: .public) type=\(String(describing: typeFilter), privacy: .public)"
         )
 
-        if !plan.storageRefs.isEmpty {
-            let fileURLs = plan.storageRefs.map { URL(fileURLWithPath: $0) }
-            await Task.detached(priority: .utility) {
-                await Self.deleteFilesBounded(
-                    fileURLs,
-                    maxConcurrent: Self.maxConcurrentFileDeletions,
-                    logContext: "cleanupByAge"
-                )
-            }.value
-        }
-
+        // DB-first: avoid deleting external files when DB deletion fails.
         try await repository.deleteItemsBatchInTransaction(ids: plan.ids)
+
+        let fileURLs = validatedExternalFileURLs(from: plan.storageRefs, logContext: "cleanupByAge")
+        guard !fileURLs.isEmpty else { return }
+        let remover = fileOps.removeFile
+        await Task.detached(priority: .utility) {
+            await Self.deleteFilesBounded(
+                fileURLs,
+                maxConcurrent: Self.maxConcurrentFileDeletions,
+                logContext: "cleanupByAge",
+                removeFile: remover
+            )
+        }.value
     }
 
     /// v0.14: 深度优化 - 消除循环迭代，单次查询 + 事务批量删除
@@ -865,18 +931,20 @@ public final class StorageService {
             "cleanupBySize: deleting \(plan.ids.count, privacy: .public) items (files=\(plan.storageRefs.count, privacy: .public)) targetBytes=\(targetBytes, privacy: .public) type=\(String(describing: typeFilter), privacy: .public)"
         )
 
-        if !plan.storageRefs.isEmpty {
-            let fileURLs = plan.storageRefs.map { URL(fileURLWithPath: $0) }
-            await Task.detached(priority: .utility) {
-                await Self.deleteFilesBounded(
-                    fileURLs,
-                    maxConcurrent: Self.maxConcurrentFileDeletions,
-                    logContext: "cleanupBySize"
-                )
-            }.value
-        }
-
+        // DB-first: avoid deleting external files when DB deletion fails.
         try await repository.deleteItemsBatchInTransaction(ids: plan.ids)
+
+        let fileURLs = validatedExternalFileURLs(from: plan.storageRefs, logContext: "cleanupBySize")
+        guard !fileURLs.isEmpty else { return }
+        let remover = fileOps.removeFile
+        await Task.detached(priority: .utility) {
+            await Self.deleteFilesBounded(
+                fileURLs,
+                maxConcurrent: Self.maxConcurrentFileDeletions,
+                logContext: "cleanupBySize",
+                removeFile: remover
+            )
+        }.value
     }
 
     /// v0.13: 批量删除多个项目（单条 SQL，单事务，避免 N+1 查询）
@@ -896,15 +964,19 @@ public final class StorageService {
             "cleanupExternalStorage: deleting \(plan.ids.count, privacy: .public) items (files=\(plan.storageRefs.count, privacy: .public)) excessBytes=\(excessBytes, privacy: .public) type=\(String(describing: typeFilter), privacy: .public)"
         )
 
-        let fileURLs = plan.storageRefs.map { URL(fileURLWithPath: $0) }
+        // DB-first: avoid deleting external files when DB deletion fails.
+        try await repository.deleteItemsBatchInTransaction(ids: plan.ids)
+
+        let fileURLs = validatedExternalFileURLs(from: plan.storageRefs, logContext: "cleanupExternalStorage")
+        let remover = fileOps.removeFile
         await Task.detached(priority: .utility) {
             await Self.deleteFilesBounded(
                 fileURLs,
                 maxConcurrent: Self.maxConcurrentFileDeletions,
-                logContext: "cleanupExternalStorage"
+                logContext: "cleanupExternalStorage",
+                removeFile: remover
             )
         }.value
-        try await repository.deleteItemsBatchInTransaction(ids: plan.ids)
 
         // 清理完成后使缓存失效
         invalidateExternalSizeCache()
@@ -913,23 +985,18 @@ public final class StorageService {
     nonisolated static func deleteFilesBounded(
         _ fileURLs: [URL],
         maxConcurrent: Int,
-        logContext: StaticString
+        logContext: StaticString,
+        removeFile: @escaping FileRemover
     ) async {
         guard !fileURLs.isEmpty else { return }
 
         let unique = Array(Set(fileURLs.map(\.path))).map { URL(fileURLWithPath: $0) }
-        let remover: FileRemover = {
-            #if DEBUG
-            if let hook = Self.fileRemoverForTesting { return hook }
-            #endif
-            return { url in try FileManager.default.removeItem(at: url) }
-        }()
 
         await forEachConcurrent(unique, maxConcurrent: maxConcurrent) { fileURL in
             guard FileManager.default.fileExists(atPath: fileURL.path) else { return }
 
             do {
-                try remover(fileURL)
+                try removeFile(fileURL)
             } catch let error as NSError {
                 // Ignore "file not found" (may be deleted concurrently).
                 if error.domain == NSCocoaErrorDomain && error.code == NSFileNoSuchFileError {
@@ -1038,9 +1105,19 @@ public final class StorageService {
             return false
         }
 
+        let standardizedRefPath = URL(fileURLWithPath: ref).standardizedFileURL.path
+        let standardizedAllowedPath = URL(fileURLWithPath: externalStoragePath).standardizedFileURL.path
+        guard standardizedRefPath.hasPrefix(standardizedAllowedPath + "/") else {
+            return false
+        }
+
         var isDirectory: ObjCBool = false
         let exists = FileManager.default.fileExists(atPath: ref, isDirectory: &isDirectory)
         if exists {
+            if isDirectory.boolValue {
+                return false
+            }
+
             if let attrs = try? FileManager.default.attributesOfItem(atPath: ref),
                let fileType = attrs[.type] as? FileAttributeType,
                fileType == .typeSymbolicLink {

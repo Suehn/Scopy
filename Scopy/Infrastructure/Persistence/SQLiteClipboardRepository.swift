@@ -50,6 +50,7 @@ actor SQLiteClipboardRepository {
         do {
             try conn.execute("PRAGMA journal_mode = WAL")
             try conn.execute("PRAGMA synchronous = NORMAL")
+            try conn.execute("PRAGMA busy_timeout = 500")
             try conn.execute("PRAGMA cache_size = -64000")
             try conn.execute("PRAGMA temp_store = MEMORY")
             try conn.execute("PRAGMA mmap_size = 268435456")
@@ -244,10 +245,51 @@ actor SQLiteClipboardRepository {
         }
     }
 
+    func deleteItemReturningStorageRef(id: UUID) throws -> String? {
+        var storageRef: String?
+        try performWriteTransaction {
+            // Finalize the statement before running the DELETE to avoid locking the table in the same connection.
+            do {
+                let sql = "SELECT storage_ref FROM clipboard_items WHERE id = ? LIMIT 1"
+                let stmt = try prepare(sql)
+                try stmt.bindText(id.uuidString, at: 1)
+                if try stmt.step(),
+                   let ref = stmt.columnText(0),
+                   !ref.isEmpty {
+                    storageRef = ref
+                }
+            }
+
+            let sql = "DELETE FROM clipboard_items WHERE id = ?"
+            let stmt = try prepare(sql)
+            try stmt.bindText(id.uuidString, at: 1)
+            _ = try stmt.step()
+        }
+        return storageRef
+    }
+
     func deleteAllExceptPinned() throws {
         try performWriteTransaction {
             try execute("DELETE FROM clipboard_items WHERE is_pinned = 0")
         }
+    }
+
+    func deleteAllExceptPinnedReturningStorageRefs() throws -> [String] {
+        var refs: [String] = []
+        try performWriteTransaction {
+            // Finalize the statement before running the DELETE to avoid locking the table in the same connection.
+            do {
+                let sql = "SELECT storage_ref FROM clipboard_items WHERE is_pinned = 0 AND storage_ref IS NOT NULL AND storage_ref <> ''"
+                let stmt = try prepare(sql)
+                while try stmt.step() {
+                    if let ref = stmt.columnText(0) {
+                        refs.append(ref)
+                    }
+                }
+            }
+            try execute("DELETE FROM clipboard_items WHERE is_pinned = 0")
+        }
+        return refs
     }
 
     func fetchStorageRefsForUnpinned() throws -> [String] {

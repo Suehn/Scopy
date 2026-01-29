@@ -315,7 +315,7 @@ help:
 	@echo "  make push-release - Push main + current tag"
 	@echo ""
 	@echo "Requirements:"
-	@echo "  - Xcode 15.0+"
+	@echo "  - Xcode 16.0+"
 	@echo "  - macOS 14.0+"
 	@echo "  - Homebrew (for xcodegen installation)"
 

@@ -34,6 +34,19 @@
 - runner：`macos-15`
 - Xcode：`16.0`
 
+## 本次更新（v0.60）
+
+- **Refactor/Stability（用户无感）**：
+  - Settings：保存采用“字段级 patch merge 到 latest”，降低并发覆盖风险；hotkey 仍保持“录制后立即生效 + 独立持久化”语义。
+  - Storage：删除路径 DB-first（DB 成功后再删文件）+ 有界并发文件删除；强化外部 `storageRef` 校验，避免越界/目录/软链接误删。
+  - HotKey：收敛潜在并发竞态（lock-isolated `currentHotKeyID`）。
+- **测试结果**（2026-01-30）：
+  - `make build` ✅
+  - `make test-unit` ✅（Executed 276 tests, 1 skipped, 0 failures）
+  - `make test-strict` ✅（Executed 276 tests, 1 skipped, 0 failures）
+  - `make test-tsan` ✅（Executed 266 tests, 1 skipped, 0 failures）
+  - `make test-perf` ✅（Executed 25 tests, 7 skipped, 0 failures）
+
 ## 本次更新（v0.59.fix3）
 
 - **Perf/Search（语义不变）**：

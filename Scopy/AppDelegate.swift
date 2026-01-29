@@ -3,7 +3,7 @@ import ScopyKit
 import SwiftUI
 
 @MainActor
-class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
+class AppDelegate: NSObject, NSApplicationDelegate {
     /// 单例访问
     static var shared: AppDelegate? {
         NSApp.delegate as? AppDelegate
@@ -12,7 +12,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     var panel: FloatingPanel?
     private var uiTestWindow: NSWindow?
     private(set) var hotKeyService: HotKeyService?
-    private var settingsWindow: NSWindow?
+    private lazy var settingsWindowCoordinator = SettingsWindowCoordinator()
     private var appliedHotKey: (keyCode: UInt32, modifiers: UInt32)?
     private var isHotKeyRegistered = false
     private let settingsStore: SettingsStore = .shared
@@ -378,57 +378,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     /// v0.17: 修复内存泄漏 - 窗口关闭时释放并清空引用
     @MainActor
     func openSettings() {
-        let window: NSWindow
-        if let settingsWindow {
-            window = settingsWindow
-        } else {
-            window = NSWindow(
-                contentRect: NSRect(
-                    x: 0,
-                    y: 0,
-                    width: Int(ScopySize.Window.settingsWidth),
-                    height: Int(ScopySize.Window.settingsHeight)
-                ),
-                styleMask: [.titled, .closable, .resizable],
-                backing: .buffered,
-                defer: false
-            )
-            window.title = "Scopy Settings"
-            window.titleVisibility = .hidden
-            window.titlebarAppearsTransparent = true
-            window.toolbarStyle = .unifiedCompact
-            window.isReleasedWhenClosed = false
-            window.contentMinSize = NSSize(width: ScopySize.Window.settingsWidth, height: ScopySize.Window.settingsHeight)
-            window.minSize = NSSize(width: ScopySize.Window.settingsWidth, height: ScopySize.Window.settingsHeight)
-            window.delegate = self
-            window.center()
-
-            settingsWindow = window
-        }
-
-        window.contentView = NSHostingView(rootView: makeSettingsView(onDismiss: { [weak self] in
-            self?.dismissSettings()
-        }))
-        window.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
-    }
-
-    func windowShouldClose(_ sender: NSWindow) -> Bool {
-        if sender == settingsWindow {
-            dismissSettings()
-            return false
-        }
-        return true
-    }
-
-    private func dismissSettings() {
-        settingsWindow?.orderOut(nil)
-    }
-
-    private func makeSettingsView(onDismiss: @escaping () -> Void) -> some View {
-        SettingsView(onDismiss: onDismiss)
-            .environment(AppState.shared)
-            .environment(AppState.shared.historyViewModel)
-            .environment(AppState.shared.settingsViewModel)
+        settingsWindowCoordinator.show()
     }
 }

@@ -8,6 +8,7 @@ struct SettingsView: View {
     @State private var selection: SettingsPage? = .general
     @State private var sidebarSearchText = ""
     @State private var tempSettings: SettingsDTO?
+    @State private var baselineSettings: SettingsDTO?
     @State private var isSaving = false
     @State private var saveErrorMessage: String?
     @State private var savedHint: String?
@@ -33,7 +34,9 @@ struct SettingsView: View {
         .onAppear {
             Task { @MainActor in
                 await settingsViewModel.loadSettings()
-                tempSettings = settingsViewModel.settings
+                let loaded = settingsViewModel.settings
+                baselineSettings = loaded
+                tempSettings = loaded
             }
             refreshStats()
         }
@@ -77,7 +80,10 @@ struct SettingsView: View {
     }
 
     private func settingsContent(settings: Binding<SettingsDTO>) -> some View {
-        let isDirty = settings.wrappedValue != settingsViewModel.settings
+        let baseline = baselineSettings ?? settingsViewModel.settings
+        let patch = SettingsPatch.from(baseline: baseline, draft: settings.wrappedValue)
+            .droppingHotkey()
+        let isDirty = !patch.isEmpty
 
         return NavigationSplitView {
             List(filteredPages, selection: $selection) { page in
@@ -116,7 +122,16 @@ struct SettingsView: View {
                     isSaving: isSaving,
                     isDirty: isDirty,
                     savedHint: savedHint,
-                    onReset: { tempSettings = .default },
+                    onReset: {
+                        guard let current = tempSettings else {
+                            tempSettings = .default
+                            return
+                        }
+                        var reset = SettingsDTO.default
+                        reset.hotkeyKeyCode = current.hotkeyKeyCode
+                        reset.hotkeyModifiers = current.hotkeyModifiers
+                        tempSettings = reset
+                    },
                     onCancel: { onDismiss?() },
                     onSave: saveSettings
                 )
@@ -151,8 +166,8 @@ struct SettingsView: View {
     }
 
     private func saveSettings() {
-        guard let currentSettings = tempSettings else {
-            ScopyLog.ui.warning("saveSettings: tempSettings is nil, skipping save")
+        guard let baselineSettings, let currentSettings = tempSettings else {
+            ScopyLog.ui.warning("saveSettings: baselineSettings or tempSettings is nil, skipping save")
             return
         }
 
@@ -160,10 +175,24 @@ struct SettingsView: View {
 
         Task {
             do {
-                try await settingsViewModel.updateSettingsOrThrow(currentSettings)
+                let patch = SettingsPatch.from(baseline: baselineSettings, draft: currentSettings)
+                    .droppingHotkey()
+                guard !patch.isEmpty else {
+                    await MainActor.run {
+                        isSaving = false
+                        onDismiss?()
+                    }
+                    return
+                }
+
+                let latest = (try? await settingsViewModel.getLatestSettingsOrThrow()) ?? baselineSettings
+                let merged = latest.applying(patch)
+                try await settingsViewModel.updateSettingsOrThrow(merged)
                 await MainActor.run {
                     isSaving = false
                     savedHint = "已保存"
+                    self.baselineSettings = merged
+                    tempSettings = merged
                     onDismiss?()
                     Task { @MainActor in
                         try? await Task.sleep(nanoseconds: 1_200_000_000)

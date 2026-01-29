@@ -9,6 +9,39 @@
 
 - （暂无）
 
+## [v0.60] - 2026-01-30
+
+### Refactor/Settings
+
+- 设置保存改为“字段级 patch merge 到 latest”后再写回，避免并发更新时被旧快照覆盖（hotkey 字段保持“录制后立即生效 + 独立持久化”，不会走 Save/Cancel 事务）。
+- 修复设置页 `恢复默认` 与 hotkey 独立持久化语义不一致导致的 UI 误导（Reset 会保留当前 hotkey）。
+
+### Fix/Storage
+
+- 删除路径改为 DB-first：DB 删除成功后再 best-effort 删除外部文件；并将批量文件删除改为有界并发，避免 I/O 风暴与主线程卡顿。
+- 强化 `storageRef` 校验：拒绝越界/目录/软链接；并让单条删除的 `storageRef` 读取与行删除在同一事务内完成，减少极端竞态孤儿文件窗口。
+- 新增确定性回归：DB busy 时不应删除外部文件。
+
+### Fix/HotKey
+
+- `currentHotKeyID` lock-isolated，并在进入共享状态锁前 snapshot，降低潜在 data race/锁顺序风险。
+
+### Fix/Concurrency
+
+- 移除 `nonisolated(unsafe)` timer 存储热点，改为显式锁盒子托管，提升 Strict Concurrency/TSan 稳定性。
+
+### Tooling/CI
+
+- 新增 CI（build + unit + strict），并对齐 `project.yml` 的 Xcode 基线为 16.0。
+
+### Test
+
+- `make build`：**BUILD SUCCEEDED**（2026-01-30）
+- `make test-unit`：Executed 276 tests, 1 skipped, 0 failures（2026-01-30）
+- `make test-strict`：Executed 276 tests, 1 skipped, 0 failures（2026-01-30）
+- `make test-tsan`：Executed 266 tests, 1 skipped, 0 failures（2026-01-30）
+- `make test-perf`：Executed 25 tests, 7 skipped, 0 failures（2026-01-30）
+
 ## [v0.59.fix3] - 2026-01-29
 
 ### Perf/Search

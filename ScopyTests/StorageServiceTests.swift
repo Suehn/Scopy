@@ -8,6 +8,23 @@ final class StorageServiceTests: XCTestCase {
 
     var storage: StorageService!
 
+    private final class RemoveFileProbe: @unchecked Sendable {
+        private let lock = NSLock()
+        private var value: Int = 0
+
+        func recordCall() {
+            lock.lock()
+            value += 1
+            lock.unlock()
+        }
+
+        var callCount: Int {
+            lock.lock()
+            defer { lock.unlock() }
+            return value
+        }
+    }
+
     override func setUp() async throws {
         // Use in-memory database for testing
         storage = StorageService(databasePath: ":memory:")
@@ -351,6 +368,55 @@ final class StorageServiceTests: XCTestCase {
         try await diskStorage.deleteItem(item.id)
         await diskStorage.close()
         try? FileManager.default.removeItem(at: baseURL)
+    }
+
+    func testDeleteItemDoesNotRemoveExternalFileWhenDBIsBusy() async throws {
+        let baseURL = FileManager.default.temporaryDirectory.appendingPathComponent("scopy-delete-busy-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: baseURL, withIntermediateDirectories: true)
+
+        let probe = RemoveFileProbe()
+        let fileOps = StorageService.StorageFileOps(removeFile: { url in
+            probe.recordCall()
+            try FileManager.default.removeItem(at: url)
+        })
+
+        let dbPath = baseURL.appendingPathComponent("clipboard.db").path
+        let diskStorage = StorageService(databasePath: dbPath, fileOps: fileOps)
+        try await diskStorage.open()
+        defer {
+            Task { @MainActor in
+                await diskStorage.close()
+                try? FileManager.default.removeItem(at: baseURL)
+            }
+        }
+
+        let item = try await diskStorage.upsertItem(makeLargeTestContent())
+        guard let storageRef = item.storageRef else {
+            XCTFail("Expected external storageRef for large content")
+            return
+        }
+        XCTAssertTrue(FileManager.default.fileExists(atPath: storageRef))
+
+        let lockFlags = SQLiteConnection.openFlags(for: dbPath, readOnly: false)
+        let locker = try SQLiteConnection(path: dbPath, flags: lockFlags)
+        try locker.execute("BEGIN IMMEDIATE TRANSACTION")
+        defer {
+            try? locker.execute("ROLLBACK")
+            locker.close()
+        }
+
+        do {
+            try await diskStorage.deleteItem(item.id)
+            XCTFail("Expected deleteItem to fail while DB is busy")
+        } catch {
+            // Expected
+        }
+
+        XCTAssertTrue(
+            FileManager.default.fileExists(atPath: storageRef),
+            "File should not be deleted when DB deletion fails"
+        )
+        XCTAssertEqual(probe.callCount, 0, "File remover should not be called when DB deletion fails")
     }
 
     func testSyncExternalImageSizeBytesFromDiskUpdatesDBSizeBytes() async throws {

@@ -109,7 +109,12 @@ public final class HotKeyService {
     // MARK: - Instance Properties
 
     private var hotKeyRef: EventHotKeyRef?
-    private var currentHotKeyID: UInt32 = 0
+    private let currentHotKeyIDBox = Locked(UInt32(0))
+
+    private var currentHotKeyID: UInt32 {
+        get { currentHotKeyIDBox.withValue { $0 } }
+        set { currentHotKeyIDBox.withValue { $0 = newValue } }
+    }
 
     // 默认快捷键: ⇧⌘C
     private let defaultKeyCode: UInt32 = UInt32(kVK_ANSI_C)  // 8
@@ -189,14 +194,15 @@ public final class HotKeyService {
             return
         }
 
+        let hotKeyID = currentHotKeyID
         let status = UnregisterEventHotKey(hotKeyRef)
         self.hotKeyRef = nil
 
         // 从共享状态中移除处理器
         Self.sharedState.withValue { state in
-            _ = state.handlers.removeValue(forKey: currentHotKeyID)
+            _ = state.handlers.removeValue(forKey: hotKeyID)
         }
-        logToFile("🔑 Global hotkey unregistered: id=\(currentHotKeyID), status=\(status)")
+        logToFile("🔑 Global hotkey unregistered: id=\(hotKeyID), status=\(status)")
         currentHotKeyID = 0
     }
 
@@ -221,12 +227,12 @@ public final class HotKeyService {
             state.handlers[newID] = handler
             return state.handlers.count
         }
-        logToFile("📝 Handler stored: id=\(currentHotKeyID), total handlers=\(handlerCount)")
+        logToFile("📝 Handler stored: id=\(newID), total handlers=\(handlerCount)")
 
         // 创建 hotKeyID 结构
         var hotKeyID = EventHotKeyID()
         hotKeyID.signature = Self.hotKeySignature
-        hotKeyID.id = currentHotKeyID
+        hotKeyID.id = newID
 
         // 注册热键
         let status = RegisterEventHotKey(
@@ -239,7 +245,7 @@ public final class HotKeyService {
         )
 
         if status == noErr {
-            logToFile("✅ Hotkey registered: id=\(currentHotKeyID), keyCode=\(keyCode), modifiers=0x\(String(modifiers, radix: 16)), hotKeyRef=\(String(describing: hotKeyRef))")
+            logToFile("✅ Hotkey registered: id=\(newID), keyCode=\(keyCode), modifiers=0x\(String(modifiers, radix: 16)), hotKeyRef=\(String(describing: hotKeyRef))")
         } else {
             logToFile("❌ Failed to register hotkey: status=\(status)")
             Self.sharedState.withValue { state in
@@ -255,8 +261,9 @@ public final class HotKeyService {
             state.testingMode
         }
         if isTestingMode {
+            let hotKeyID = currentHotKeyID
             return Self.sharedState.withValue { state in
-                state.handlers[currentHotKeyID] != nil
+                state.handlers[hotKeyID] != nil
             }
         }
         #endif
@@ -358,8 +365,9 @@ public final class HotKeyService {
 
     /// v0.17.1: 使用 withLock 统一锁策略
     public func triggerHandlerForTesting() {
+        let hotKeyID = currentHotKeyID
         let handler = Self.sharedState.withValue { state in
-            state.handlers[currentHotKeyID]
+            state.handlers[hotKeyID]
         }
 
         if let handler = handler {
@@ -370,8 +378,9 @@ public final class HotKeyService {
     }
 
     public var hasHandler: Bool {
-        Self.sharedState.withValue { state in
-            state.handlers[currentHotKeyID] != nil
+        let hotKeyID = currentHotKeyID
+        return Self.sharedState.withValue { state in
+            state.handlers[hotKeyID] != nil
         }
     }
 
@@ -387,8 +396,9 @@ public final class HotKeyService {
     }
 
     public func unregisterHandlerOnly() {
+        let hotKeyID = currentHotKeyID
         Self.sharedState.withValue { state in
-            _ = state.handlers.removeValue(forKey: currentHotKeyID)
+            _ = state.handlers.removeValue(forKey: hotKeyID)
         }
         currentHotKeyID = 0
     }

@@ -44,6 +44,21 @@ final class SettingsViewModel {
 
     // MARK: - Settings
 
+    func updateDefaultSearchMode(_ mode: SearchMode) async {
+        do {
+            var latest = try await service.getSettings()
+            latest.defaultSearchMode = mode
+            try await service.updateSettings(latest)
+            settings = latest
+        } catch {
+            ScopyLog.app.error("Failed to update default search mode: \(error.localizedDescription, privacy: .private)")
+        }
+    }
+
+    func getLatestSettingsOrThrow() async throws -> SettingsDTO {
+        try await service.getSettings()
+    }
+
     func loadSettings() async {
         do {
             settings = try await service.getSettings()

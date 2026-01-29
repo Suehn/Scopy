@@ -90,6 +90,7 @@ struct HotKeyRecorderView: View {
             expectedModifiers: expectedModifiers,
             timeout: 1.5
         ) {
+            await settingsViewModel.loadSettings()
             return
         }
 

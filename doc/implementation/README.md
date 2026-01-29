@@ -8,11 +8,11 @@
 
 | 项目 | 状态 |
 |------|------|
-| **当前版本** | v0.59.fix3 |
-| **测试状态** | ✅ 通过（make test-unit / make test-strict / make test-tsan / make test-perf，2026-01-29） |
-| **构建状态** | ✅ 通过（make build，2026-01-29） |
+| **当前版本** | v0.60 |
+| **测试状态** | ✅ 通过（make test-unit / make test-strict / make test-tsan / make test-perf，2026-01-30） |
+| **构建状态** | ✅ 通过（make build，2026-01-30） |
 | **部署位置** | /Applications/Scopy.app |
-| **最后更新** | 2026-01-29 |
+| **最后更新** | 2026-01-30 |
 
 > 详细变更历史请查看 [CHANGELOG.md](./CHANGELOG.md)
 
@@ -24,6 +24,7 @@
 
 | 版本 | 日期 | 主要内容 | 状态 |
 |------|------|----------|------|
+| [v0.60](./releases/v0.60.md) | 2026-01-30 | Refactor/Stability：Settings 并发 patch-merge；Storage DB-first 删除 + 路径校验；HotKey 并发修复；CI(Xcode 16) | ✅ |
 | [v0.59.fix3](./releases/v0.59.fix3.md) | 2026-01-29 | Perf/Search：短词候选 top‑K heap（O(k log K)）；DB：meta 计数读侧 O(1)（user_version=6）；UI：hover Markdown 后台渲染 | ✅ |
 | [v0.59.fix2](./releases/v0.59.fix2.md) | 2026-01-27 | Tooling/Test：修复 make test* 假绿（pipefail）；Fix/Compatibility：Swift 6 Strict Concurrency/TSan 稳定性修复 + AVFoundation 弃用 API 迁移 | ✅ |
 | [v0.59.fix1](./releases/v0.59.fix1.md) | 2026-01-19 | Correctness/Robustness：fullIndex 磁盘缓存 hardening（DB/WAL/SHM fingerprint + `*.sha256`）+ `mutation_seq` change token 兜底；Perf/Search：tombstone 衰退与深分页成本收敛；Test：回归覆盖补齐 | ✅ |

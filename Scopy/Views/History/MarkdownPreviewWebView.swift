@@ -561,9 +561,34 @@ struct ReusableMarkdownPreviewWebView: NSViewRepresentable {
 /// This intentionally overrides the system "always show scroll bars" preference for hover-preview surfaces.
 @MainActor
 final class ScrollbarAutoHider: NSObject {
+    private final class HideTimerBox: @unchecked Sendable {
+        private let lock = NSLock()
+        private var timer: DispatchSourceTimer?
+
+        func hasTimer() -> Bool {
+            lock.lock()
+            defer { lock.unlock() }
+            return timer != nil
+        }
+
+        func set(_ timer: DispatchSourceTimer?) {
+            lock.lock()
+            defer { lock.unlock() }
+            self.timer = timer
+        }
+
+        func take() -> DispatchSourceTimer? {
+            lock.lock()
+            defer { lock.unlock() }
+            let value = timer
+            timer = nil
+            return value
+        }
+    }
+
     private weak var scrollView: NSScrollView?
     private weak var contentView: NSClipView?
-    private nonisolated(unsafe) var hideTimer: DispatchSourceTimer?
+    nonisolated private let hideTimerBox = HideTimerBox()
     private var hideDeadline: CFAbsoluteTime = 0
     private var scrollersVisible: Bool = false
 
@@ -602,8 +627,7 @@ final class ScrollbarAutoHider: NSObject {
     }
 
     deinit {
-        hideTimer?.cancel()
-        hideTimer = nil
+        hideTimerBox.take()?.cancel()
         NotificationCenter.default.removeObserver(self)
     }
 
@@ -641,19 +665,18 @@ final class ScrollbarAutoHider: NSObject {
     }
 
     private func startHideTimerIfNeeded() {
-        guard hideTimer == nil else { return }
+        guard !hideTimerBox.hasTimer() else { return }
         let timer = DispatchSource.makeTimerSource(queue: .main)
         timer.schedule(deadline: .now() + 0.12, repeating: 0.12)
         timer.setEventHandler { [weak self] in
             self?.handleHideTimerTick()
         }
-        hideTimer = timer
+        hideTimerBox.set(timer)
         timer.resume()
     }
 
     private func stopHideTimer() {
-        hideTimer?.cancel()
-        hideTimer = nil
+        hideTimerBox.take()?.cancel()
     }
 
     private func handleHideTimerTick() {

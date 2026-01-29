@@ -100,9 +100,7 @@ private struct SearchModeMenu: View {
                     // 持久化到设置
                     saveTask = Task {
                         guard !Task.isCancelled else { return }
-                        var newSettings = settingsViewModel.settings
-                        newSettings.defaultSearchMode = mode
-                        await settingsViewModel.updateSettings(newSettings)
+                        await settingsViewModel.updateDefaultSearchMode(mode)
                     }
                 } label: {
                     HStack {
