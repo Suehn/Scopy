@@ -71,6 +71,7 @@ Download the latest `.dmg` from Releases.
 - macOS 14.0+ (Sonoma)
 - Xcode 16.0+
 - Homebrew (for xcodegen)
+- python3 (for perf summary/benchmark scripts)
 
 ### Quick Build
 
@@ -91,9 +92,41 @@ Download the latest `.dmg` from Releases.
 # Generate Xcode project (if needed)
 xcodegen generate
 
-# Unit tests
-xcodebuild test -scheme Scopy -destination 'platform=macOS' -only-testing:ScopyTests
+# Build + regression tests
+make build
+make test-unit
+make test-strict
 ```
+
+### Performance Benchmark (Realistic)
+
+```bash
+# 1) Snapshot real user DB (do not commit perf-db/clipboard.db)
+make snapshot-perf-db
+
+# 2) Backend release benchmark gate
+make test-snapshot-perf-release
+
+# 3) Frontend realistic scroll/profile (tiered)
+# Daily smoke (default)
+make perf-frontend-profile
+
+# Pre-commit standard
+make perf-frontend-profile-standard
+
+# Pre-release full (slowest, most stable)
+make perf-frontend-profile-full
+
+# 4) Merge backend + frontend into one table
+make perf-unified-table \
+  BACKEND_BASELINE=logs/perf-audit-<baseline> \
+  BACKEND_CURRENT=logs/perf-audit-<current> \
+  FRONTEND_SUMMARY=logs/perf-frontend-profile-<run>/frontend-scroll-profile-summary.json
+```
+
+Outputs are written to `logs/` (JSON + Markdown), including a unified front/back comparison table.
+
+If UI tests fail with `Not authorized for performing UI testing actions`, grant Automation/Accessibility permissions for Xcode/XCTest and rerun.
 
 ### Release (Maintainers)
 
@@ -102,12 +135,12 @@ Releases are **tag-driven**:
 ```bash
 make release-validate
 make tag-release
-
-git push origin main
-git push origin vX.Y.Z
+make push-release
 ```
 
 Homebrew cask is updated by CI when `HOMEBREW_GITHUB_API_TOKEN` is available; otherwise update the tap manually.
+
+Maintainers should follow the full release/brew acceptance checklist in `AGENTS.md` (including source/tap cask sync and local brew install verification).
 
 ---
 
@@ -165,6 +198,7 @@ Scopy follows a **protocol-first, frontend-backend separation** design:
 - `doc/implementation/CHANGELOG.md` - Changelog
 - `doc/specs/v0.md` - Product spec
 - `doc/profiles/` - Performance baselines
+- `doc/reviews/perf-*.md` - Perf audits, causality, acceptance, and unified front/back reports
 
 ---
 

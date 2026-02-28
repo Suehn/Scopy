@@ -17,6 +17,11 @@
 
 - 基线：`make build` + `make test-unit`
 - 并发/actor/线程相关：额外跑 `make test-strict`；需要时跑 `make test-tsan`
+- 性能改动（搜索/清理/滚动）：
+  - 后端至少跑 `make test-snapshot-perf-release`
+  - 前端日常至少跑 `make perf-frontend-profile`（smoke，真实 snapshot DB）
+  - 提交前建议跑 `make perf-frontend-profile-standard`；发布前必须跑 `make perf-frontend-profile-full`
+  - 最终用 `make perf-unified-table` 生成前后端同表对比证据
 - 热键相关：自查 `/tmp/scopy_hotkey.log`（按下仅触发一次，且包含 `updateHotKey()`）
 - 注意：`make build/test*` 会触发 `make setup`；若缺 `xcodegen` 可能会尝试 `brew install xcodegen`，在无法联网或未授权时先询问。
 
@@ -49,6 +54,9 @@
 - 定向：`-only-testing:ScopyTests/<TestName>`
 - 热键改动自查：`/tmp/scopy_hotkey.log` 应有 `updateHotKey()` 且按下仅触发一次。
 - 性能基准测试必须使用从 `~/Library/Application Support/Scopy/clipboard.db` 快照到仓库内的最新副本（`make snapshot-perf-db`，文件不提交）。
+- Release 快照性能门禁：`make test-snapshot-perf-release`
+- 前端真实性能采样：`make perf-frontend-profile`（smoke） / `make perf-frontend-profile-standard`（提交前） / `make perf-frontend-profile-full`（发布前）
+- 前后端统一量化同表：`make perf-unified-table BACKEND_BASELINE=... BACKEND_CURRENT=... FRONTEND_SUMMARY=...`
 
 ## 编码风格
 

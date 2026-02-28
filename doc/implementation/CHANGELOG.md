@@ -7,7 +7,38 @@
 
 ## [Unreleased]
 
-- （暂无）
+### Notes
+
+- No unreleased entries.
+
+## [v0.60.1] - 2026-02-28
+
+### Perf/Backend
+
+- Cleanup 组合路径优化：count-plan 释放空间估算改为 DB 聚合（`sumExternalBytes(ids:)`），移除 10k 清理场景下逐文件 `stat` 扫描。
+- Cleanup 组合路径去重修复：`planCleanupExternalStorage(..., excludingIDs:)` 排除已选 count-plan，减少重复规划与二次清理。
+- Makefile release perf 门禁修复：`test-snapshot-perf-release` 对 p95 解析做数值校验，避免解析失败假绿。
+
+### Perf/Frontend
+
+- 新增真实场景 UI profile 基准链路：`make perf-frontend-profile`（snapshot DB、accessibility/mixed/text-bias、baseline/current 对照）。
+- 前端 profile 分层：`make perf-frontend-profile`（smoke，默认）/ `make perf-frontend-profile-standard`（提交前）/ `make perf-frontend-profile-full`（发布前）。
+- 新增前后端统一同表：`make perf-unified-table`（合并 backend perf-audit 与 frontend profile）。
+- UI profile 滚动驱动稳定性修复：改为窗口坐标拖拽，规避 AX 失效导致的偶发用例失败。
+- UI profile 在权限缺失时给出明确提示（Automation/Accessibility），减少排障时间。
+
+### Tooling/Project
+
+- `project.yml` 相关脚本阶段设置 `basedOnDependencyAnalysis: false`，确保资源 staging 与权限修复不被增量构建漏执行。
+
+### Verification
+
+- `make build`：BUILD SUCCEEDED（2026-02-28）
+- `make test-unit`：Executed 276 tests, 1 skipped, 0 failures（2026-02-28）
+- `make test-strict`：Executed 276 tests, 1 skipped, 0 failures（2026-02-28）
+- `make test-perf-heavy`：Executed 25 tests, 0 failures；`External Cleanup Performance (10k items): 1170.10ms`（2026-02-28）
+- `make test-snapshot-perf-release`：cmd p95=0.115ms（target 50）、cm p95=5.274ms（target 20）（2026-02-28）
+- 前端 profile（smoke）产物：`logs/perf-frontend-profile-2026-02-28_19-38-53`（2026-02-28）
 
 ## [v0.60] - 2026-01-30
 

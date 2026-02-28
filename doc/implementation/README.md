@@ -8,11 +8,11 @@
 
 | 项目 | 状态 |
 |------|------|
-| **当前版本** | v0.60 |
-| **测试状态** | ✅ 通过（make test-unit / make test-strict / make test-tsan / make test-perf，2026-01-30） |
-| **构建状态** | ✅ 通过（make build，2026-01-30） |
+| **当前版本** | v0.60.1 |
+| **测试状态** | ✅ 通过（build / unit / strict / heavy perf / snapshot-release，2026-02-28） |
+| **构建状态** | ✅ 通过（make build，2026-02-28） |
 | **部署位置** | /Applications/Scopy.app |
-| **最后更新** | 2026-01-30 |
+| **最后更新** | 2026-02-28 |
 
 > 详细变更历史请查看 [CHANGELOG.md](./CHANGELOG.md)
 
@@ -24,6 +24,7 @@
 
 | 版本 | 日期 | 主要内容 | 状态 |
 |------|------|----------|------|
+| [v0.60.1](./releases/v0.60.1.md) | 2026-02-28 | Perf/Frontend+Backend：cleanup 组合规划收敛（10k 外部清理 ~1019ms）+ 真实场景 frontend profile + 前后端统一同表 + release perf gate 修复 | ✅ |
 | [v0.60](./releases/v0.60.md) | 2026-01-30 | Refactor/Stability：Settings 并发 patch-merge；Storage DB-first 删除 + 路径校验；HotKey 并发修复；CI(Xcode 16) | ✅ |
 | [v0.59.fix3](./releases/v0.59.fix3.md) | 2026-01-29 | Perf/Search：短词候选 top‑K heap（O(k log K)）；DB：meta 计数读侧 O(1)（user_version=6）；UI：hover Markdown 后台渲染 | ✅ |
 | [v0.59.fix2](./releases/v0.59.fix2.md) | 2026-01-27 | Tooling/Test：修复 make test* 假绿（pipefail）；Fix/Compatibility：Swift 6 Strict Concurrency/TSan 稳定性修复 + AVFoundation 弃用 API 迁移 | ✅ |
@@ -454,7 +455,9 @@ private init() {
 
 ---
 
-## 📊 项目进度
+## 📊 项目进度（历史归档）
+
+> 说明：以下进度条是 v0.5 阶段的历史记录，仅保留归档参考；当前状态以文档顶部“当前状态”和版本表为准。
 
 ```
 v0.1-v0.4: 基础功能 ████████████████████ 100%
@@ -465,10 +468,10 @@ v0.5-Phase4: UI 测试 ░░░░░░░░░░░░░░░░░░░
 v0.5-Phase5: CI/CD ░░░░░░░░░░░░░░░░░░░░░ 0% (计划)
 ```
 
-**总体完成度**: ~20% (v0.5 系列中)
+**总体完成度（历史）**: ~20% (v0.5 系列中)
 
 ---
 
-**最后更新**: 2025-12-17
+**最后更新**: 2026-02-28
 **维护者**: Codex CLI
-**最新完成**: v0.44.fix25（WebView 生命周期拆环 + Stats 口径去重）
+**最新完成**: v0.60.1（Perf Frontend+Backend 收敛 + release gate 修复）

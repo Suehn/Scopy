@@ -20,6 +20,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 - 基线：`make build` + `make test-unit`
 - 并发/actor/线程相关：额外跑 `make test-strict`；需要时跑 `make test-tsan`
+- 性能改动（搜索/清理/滚动）：
+  - 后端至少跑 `make test-snapshot-perf-release`
+  - 前端日常至少跑 `make perf-frontend-profile`（smoke，真实 snapshot DB）
+  - 提交前建议跑 `make perf-frontend-profile-standard`；发布前必须跑 `make perf-frontend-profile-full`
+  - 最终生成前后端同表：`make perf-unified-table BACKEND_BASELINE=... BACKEND_CURRENT=... FRONTEND_SUMMARY=...`
 - 热键相关：自查 `/tmp/scopy_hotkey.log`（按下仅触发一次，且包含 `updateHotKey()`）
 - 注意：`make build/test*` 会触发 `make setup`；若缺 `xcodegen` 可能会尝试 `brew install xcodegen`，在无法联网或未授权时先询问。
 
@@ -68,6 +73,8 @@ DEPLOYMENT.md 中的性能测试必须包含:
 - 具体数值 (不能只写"满足")
 - 对应的测试用例名称
 - 性能基准必须基于真实数据：每次先将 `~/Library/Application Support/Scopy/clipboard.db` 快照到仓库目录（`make snapshot-perf-db`，并确保不提交）。
+- 前端性能必须包含真实场景 scroll/profile 结果（日常 smoke：`make perf-frontend-profile`；发布前 full：`make perf-frontend-profile-full`）。
+- 性能结论必须提供前后端统一对比表（`make perf-unified-table` 产物）。
 
 ### 性能变化记录 (必须)
 
@@ -172,9 +179,16 @@ make test-unit
 
 # 性能测试
 make test-perf
+make test-snapshot-perf-release
 
 # 严格并发回归（Swift strict concurrency）
 make test-strict
+
+# 前端真实性能采样 + 前后端统一对比
+make perf-frontend-profile
+make perf-frontend-profile-standard
+make perf-frontend-profile-full
+make perf-unified-table BACKEND_BASELINE=... BACKEND_CURRENT=... FRONTEND_SUMMARY=...
 
 # 查看测试结果/日志
 # - 日志：logs/*.log
