@@ -29,6 +29,8 @@ extension ListLiveScrollObserverView {
         var onScrollViewAttach: ((NSScrollView) -> Void)?
 
         private weak var observedScrollView: NSScrollView?
+        private weak var cachedWindow: NSWindow?
+        private weak var cachedWindowResolvedScrollView: NSScrollView?
         private var isLiveScrolling = false
 
         override func viewDidMoveToSuperview() {
@@ -44,6 +46,8 @@ extension ListLiveScrollObserverView {
             super.viewDidMoveToWindow()
             if window == nil {
                 detach()
+                cachedWindow = nil
+                cachedWindowResolvedScrollView = nil
             } else {
                 attachIfNeeded()
             }
@@ -86,6 +90,8 @@ extension ListLiveScrollObserverView {
                 )
             }
             observedScrollView = nil
+            cachedWindow = nil
+            cachedWindowResolvedScrollView = nil
             if isLiveScrolling {
                 isLiveScrolling = false
                 onScrollEnd?()
@@ -120,8 +126,20 @@ extension ListLiveScrollObserverView {
         }
 
         private func findScrollViewInWindow() -> NSScrollView? {
-            guard let contentView = window?.contentView else { return nil }
-            return findFirstScrollView(in: contentView)
+            guard let window else { return nil }
+            if PerfFeatureFlags.scrollResolverCacheEnabled,
+               cachedWindow === window,
+               let cachedWindowResolvedScrollView {
+                return cachedWindowResolvedScrollView
+            }
+
+            guard let contentView = window.contentView else { return nil }
+            let resolved = findFirstScrollView(in: contentView)
+            if PerfFeatureFlags.scrollResolverCacheEnabled {
+                cachedWindow = window
+                cachedWindowResolvedScrollView = resolved
+            }
+            return resolved
         }
 
         private func findFirstScrollView(in view: NSView) -> NSScrollView? {

@@ -48,6 +48,47 @@ final class AppState {
 
     @ObservationIgnored private var eventTask: Task<Void, Never>?
 
+    private struct ServiceEnvironmentOptions {
+        let databasePath: String?
+        let monitorPasteboardName: String?
+        let monitorPollingInterval: TimeInterval?
+
+        static func load() -> ServiceEnvironmentOptions {
+            let env = ProcessInfo.processInfo.environment
+            let dbPath = normalizedString(env["SCOPY_SERVICE_DB_PATH"])
+            let pasteboard = normalizedString(env["SCOPY_SERVICE_MONITOR_PASTEBOARD"])
+            let interval = resolvePollingInterval(env: env)
+            return ServiceEnvironmentOptions(
+                databasePath: dbPath,
+                monitorPasteboardName: pasteboard,
+                monitorPollingInterval: interval
+            )
+        }
+
+        private static func resolvePollingInterval(env: [String: String]) -> TimeInterval? {
+            if let seconds = parseDouble(env["SCOPY_SERVICE_MONITOR_INTERVAL_SEC"]) {
+                return max(0.01, seconds)
+            }
+            if let millis = parseDouble(env["SCOPY_SERVICE_MONITOR_INTERVAL_MS"]) {
+                return max(0.01, millis / 1000.0)
+            }
+            return nil
+        }
+
+        private static func normalizedString(_ value: String?) -> String? {
+            guard let value else { return nil }
+            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? nil : trimmed
+        }
+
+        private static func parseDouble(_ value: String?) -> Double? {
+            guard let value else { return nil }
+            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { return nil }
+            return Double(trimmed)
+        }
+    }
+
     private static let useMockService: Bool = {
         #if DEBUG
         return ProcessInfo.processInfo.environment["USE_MOCK_SERVICE"] != "0"
@@ -58,6 +99,7 @@ final class AppState {
 
     private init(service: ClipboardServiceProtocol? = nil) {
         let resolvedService: ClipboardServiceProtocol
+        let envOptions = ServiceEnvironmentOptions.load()
         if let service {
             resolvedService = service
             ScopyLog.app.info("Using injected Clipboard Service")
@@ -65,7 +107,12 @@ final class AppState {
             resolvedService = ClipboardServiceFactory.create(useMock: true)
             ScopyLog.app.info("Using Mock Clipboard Service")
         } else {
-            resolvedService = ClipboardServiceFactory.create(useMock: false)
+            resolvedService = ClipboardServiceFactory.create(
+                useMock: false,
+                databasePath: envOptions.databasePath,
+                monitorPasteboardName: envOptions.monitorPasteboardName,
+                monitorPollingInterval: envOptions.monitorPollingInterval
+            )
             ScopyLog.app.info("Using Real Clipboard Service")
         }
 

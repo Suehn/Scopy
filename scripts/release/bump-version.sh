@@ -76,12 +76,9 @@ bump_patch_tag() {
 }
 
 ensure_clean_worktree() {
-    if ! git diff --quiet; then
-        echo "Working tree has unstaged changes; commit/stash before bumping version docs." >&2
-        exit 1
-    fi
-    if ! git diff --cached --quiet; then
-        echo "Index has staged changes; commit/stash before bumping version docs." >&2
+    if [[ -n "$(git status --porcelain)" ]]; then
+        echo "Working tree is not clean (includes untracked files); commit/stash before bumping version docs." >&2
+        git status --short >&2
         exit 1
     fi
 }
@@ -105,7 +102,7 @@ insert_changelog_section() {
     tmp="$(mktemp)"
     awk -v tag="${tag}" -v date_str="${date_str}" -v summary="${summary}" '
       BEGIN { inserted=0 }
-      /^## \[/ && inserted==0 {
+      /^## \[/ && $0 !~ /^## \[Unreleased\]/ && inserted==0 {
         print "## [" tag "] - " date_str
         print ""
         print "### " summary
@@ -115,6 +112,17 @@ insert_changelog_section() {
         inserted=1
       }
       { print }
+      END {
+        if (inserted==0) {
+          print ""
+          print "## [" tag "] - " date_str
+          print ""
+          print "### " summary
+          print ""
+          print "- TODO"
+          print ""
+        }
+      }
     ' "${CHANGELOG}" > "${tmp}"
     mv "${tmp}" "${CHANGELOG}"
 }
@@ -248,7 +256,9 @@ main() {
     echo "Next:"
     echo "  - Fill in doc: doc/implementation/releases/${new_tag}.md"
     echo "  - Update doc index + changelog if needed"
-    echo "  - Commit, then push to main (auto-tag will tag from doc index)"
+    echo "  - Run: make release-validate"
+    echo "  - Commit, then run: make tag-release"
+    echo "  - Publish: make push-release"
 }
 
 main "$@"

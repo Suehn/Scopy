@@ -21,6 +21,25 @@ actor SQLiteClipboardRepository {
         let storageRefs: [String]
     }
 
+    static func mergeDeletePlans(_ plans: [DeletePlan]) -> DeletePlan {
+        guard !plans.isEmpty else { return DeletePlan(ids: [], storageRefs: []) }
+
+        var mergedIDs: [UUID] = []
+        var seenIDs: Set<UUID> = []
+        var mergedRefs: [String] = []
+        var seenRefs: Set<String> = []
+
+        for plan in plans {
+            for id in plan.ids where seenIDs.insert(id).inserted {
+                mergedIDs.append(id)
+            }
+            for ref in plan.storageRefs where seenRefs.insert(ref).inserted {
+                mergedRefs.append(ref)
+            }
+        }
+        return DeletePlan(ids: mergedIDs, storageRefs: mergedRefs)
+    }
+
     struct ExternalStorageSizeRecord: Sendable {
         let id: UUID
         let sizeBytes: Int
@@ -468,6 +487,26 @@ actor SQLiteClipboardRepository {
         }
     }
 
+    func getExternalSize() throws -> Int {
+        do {
+            let stmt = try prepare("SELECT external_size_bytes FROM scopy_meta WHERE id = 1")
+            guard try stmt.step() else { return 0 }
+            let value = stmt.columnInt64(0)
+            return Int(min(value, Int64(Int.max)))
+        } catch {
+            let stmt = try prepare(
+                """
+                SELECT COALESCE(SUM(size_bytes), 0)
+                FROM clipboard_items
+                WHERE storage_ref IS NOT NULL AND storage_ref <> ''
+                """
+            )
+            guard try stmt.step() else { return 0 }
+            let value = stmt.columnInt64(0)
+            return Int(min(value, Int64(Int.max)))
+        }
+    }
+
     func updateItemSizeBytesBatchInTransaction(updates: [SizeBytesUpdate]) throws {
         guard !updates.isEmpty else { return }
         try performWriteTransaction {
@@ -782,11 +821,46 @@ actor SQLiteClipboardRepository {
         return DeletePlan(ids: ids, storageRefs: refs)
     }
 
+    func sumExternalBytes(ids: [UUID]) throws -> Int {
+        guard !ids.isEmpty else { return 0 }
+
+        let batchSize = 900
+        var total: Int64 = 0
+
+        for batchStart in stride(from: 0, to: ids.count, by: batchSize) {
+            let batchEnd = min(batchStart + batchSize, ids.count)
+            let batch = Array(ids[batchStart..<batchEnd])
+            let placeholders = batch.map { _ in "?" }.joined(separator: ",")
+            let sql = """
+                SELECT COALESCE(SUM(size_bytes), 0)
+                FROM clipboard_items
+                WHERE storage_ref IS NOT NULL AND storage_ref <> ''
+                  AND id IN (\(placeholders))
+                """
+            let stmt = try prepare(sql)
+            for (index, id) in batch.enumerated() {
+                try stmt.bindText(id.uuidString, at: Int32(index + 1))
+            }
+            guard try stmt.step() else { continue }
+            total += max(0, stmt.columnInt64(0))
+        }
+
+        return Int(min(total, Int64(Int.max)))
+    }
+
     func planCleanupExternalStorage(excessBytes: Int) throws -> DeletePlan {
-        try planCleanupExternalStorage(excessBytes: excessBytes, typeFilter: nil)
+        try planCleanupExternalStorage(excessBytes: excessBytes, typeFilter: nil, excludingIDs: [])
     }
 
     func planCleanupExternalStorage(excessBytes: Int, typeFilter: ClipboardItemType?) throws -> DeletePlan {
+        try planCleanupExternalStorage(excessBytes: excessBytes, typeFilter: typeFilter, excludingIDs: [])
+    }
+
+    func planCleanupExternalStorage(
+        excessBytes: Int,
+        typeFilter: ClipboardItemType?,
+        excludingIDs: Set<UUID>
+    ) throws -> DeletePlan {
         var sql = """
             SELECT id, size_bytes, storage_ref FROM clipboard_items
             WHERE is_pinned = 0 AND storage_ref IS NOT NULL
@@ -794,11 +868,8 @@ actor SQLiteClipboardRepository {
         if typeFilter != nil {
             sql += " AND type = ?"
         }
-        sql += """
-
-            ORDER BY last_used_at ASC
-            LIMIT 5000
-        """
+        sql += " AND storage_ref <> ''"
+        sql += " ORDER BY last_used_at ASC, id ASC"
         let stmt = try prepare(sql)
         if let typeFilter {
             try stmt.bindText(typeFilter.rawValue, at: 1)
@@ -806,20 +877,22 @@ actor SQLiteClipboardRepository {
 
         var ids: [UUID] = []
         var refs: [String] = []
-        var accumulatedSize = 0
+        var accumulatedSize: Int64 = 0
+        let targetBytes = Int64(max(0, excessBytes))
 
         while try stmt.step() {
             guard let idString = stmt.columnText(0),
                   let id = UUID(uuidString: idString),
                   let ref = stmt.columnText(2) else { continue }
+            if excludingIDs.contains(id) { continue }
 
-            let size = stmt.columnInt(1)
+            let size = max(Int64(0), stmt.columnInt64(1))
 
             ids.append(id)
             refs.append(ref)
             accumulatedSize += size
 
-            if accumulatedSize >= excessBytes {
+            if accumulatedSize >= targetBytes {
                 break
             }
         }

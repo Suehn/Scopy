@@ -1,4 +1,5 @@
 import AppKit
+import Darwin
 import Foundation
 import ImageIO
 import UniformTypeIdentifiers
@@ -50,8 +51,9 @@ public final class StorageService {
     /// Threshold for external storage (v0.md: 小内容 < X KB)
     static let externalStorageThreshold = ScopyThresholds.externalStorageBytes
 
-    /// Concurrency limit for bulk filesystem deletions (avoid I/O storms).
-    static let maxConcurrentFileDeletions = 8
+    /// Baseline concurrency limit for bulk filesystem deletions.
+    /// Large cleanup batches can temporarily raise this via `fileDeletionConcurrency(for:)`.
+    nonisolated static let maxConcurrentFileDeletions = 8
 
     public typealias FileRemover = @Sendable (URL) throws -> Void
 
@@ -63,7 +65,7 @@ public final class StorageService {
         }
 
         public static let live = StorageFileOps(removeFile: { url in
-            try FileManager.default.removeItem(at: url)
+            try StorageService.fastRemoveFile(url)
         })
     }
 
@@ -456,16 +458,20 @@ public final class StorageService {
 
         // Delete files off-main with bounded concurrency to avoid UI stalls and I/O storms.
         let fileURLs = validatedExternalFileURLs(from: refs, logContext: "clearAll")
-        guard !fileURLs.isEmpty else { return }
+        guard !fileURLs.isEmpty else {
+            invalidateExternalSizeCache()
+            return
+        }
         let remover = fileOps.removeFile
         await Task.detached(priority: .utility) {
-            await Self.deleteFilesBounded(
-                fileURLs,
-                maxConcurrent: Self.maxConcurrentFileDeletions,
-                logContext: "clearAll",
-                removeFile: remover
-            )
+                await Self.deleteFilesBounded(
+                    fileURLs,
+                    maxConcurrent: Self.fileDeletionConcurrency(for: fileURLs.count),
+                    logContext: "clearAll",
+                    removeFile: remover
+                )
         }.value
+        invalidateExternalSizeCache()
     }
 
     private func validatedExternalFileURLs(from storageRefs: [String], logContext: StaticString) -> [URL] {
@@ -556,6 +562,20 @@ public final class StorageService {
         if let cached = externalSizeCacheLock.withLock({ cachedExternalSize }),
            Date().timeIntervalSince(cached.timestamp) < externalSizeCacheTTL {
             return cached.size
+        }
+
+        if PerfFeatureFlags.externalSizeMetaFastPathEnabled {
+            do {
+                let size = try await repository.getExternalSize()
+                externalSizeCacheLock.withLock {
+                    cachedExternalSize = (size, Date())
+                }
+                return size
+            } catch {
+                ScopyLog.storage.warning(
+                    "Failed to read external_size_bytes from meta, fallback to directory scan: \(error.localizedDescription, privacy: .private)"
+                )
+            }
         }
 
         // 计算实际大小（后台计算，避免阻塞主线程）
@@ -674,23 +694,42 @@ public final class StorageService {
         let maxItems = cleanupSettings.maxItems
         let maxTotalMB = cleanupSettings.maxSmallStorageMB
         let maxExternalMB = cleanupSettings.maxLargeStorageMB
+        let maxLargeBytes = maxExternalMB * 1024 * 1024
         ScopyLog.storage.info(
             "Cleanup start: mode=\(modeText, privacy: .public) imagesOnly=\(cleanupImagesOnly, privacy: .public) maxItems=\(maxItems, privacy: .public) maxTotalMB=\(maxTotalMB, privacy: .public) maxExternalMB=\(maxExternalMB, privacy: .public)"
         )
 
+        // 0. Composite path (count + external): reduce duplicated DB scans and delete passes.
+        var currentCount = try await getItemCount()
+        if PerfFeatureFlags.cleanupCompositePlanEnabled,
+           currentCount > maxItems {
+            let currentExternalSize = try await getExternalStorageSize()
+            if currentExternalSize > maxLargeBytes {
+                let didCleanupComposite = try await cleanupCountAndExternalIfNeeded(
+                    currentCount: currentCount,
+                    externalSize: currentExternalSize,
+                    maxItems: maxItems,
+                    maxLargeBytes: maxLargeBytes,
+                    cleanupImagesOnly: cleanupImagesOnly
+                )
+                if didCleanupComposite {
+                    currentCount = try await getItemCount()
+                }
+            }
+        }
+
         // 1. By count
-        let currentCount = try await getItemCount()
-        if currentCount > cleanupSettings.maxItems {
+        if currentCount > maxItems {
             if cleanupImagesOnly {
                 ScopyLog.storage.info(
                     "Cleanup by count (imagesOnly): current=\(currentCount, privacy: .public) max=\(maxItems, privacy: .public) delete=\(currentCount - maxItems, privacy: .public)"
                 )
-                try await cleanupImagesOnlyByCount(deleteCount: currentCount - cleanupSettings.maxItems)
+                try await cleanupImagesOnlyByCount(deleteCount: currentCount - maxItems)
             } else {
                 ScopyLog.storage.info(
                     "Cleanup by count: current=\(currentCount, privacy: .public) max=\(maxItems, privacy: .public) target=\(maxItems, privacy: .public)"
                 )
-                try await cleanupByCount(target: cleanupSettings.maxItems)
+                try await cleanupByCount(target: maxItems)
             }
         }
 
@@ -722,7 +761,6 @@ public final class StorageService {
 
         // 4. By space (large content / external storage) - v0.9
         let externalSize = try await getExternalStorageSize()
-        let maxLargeBytes = cleanupSettings.maxLargeStorageMB * 1024 * 1024
         if externalSize > maxLargeBytes {
             ScopyLog.storage.info(
                 "Cleanup external storage: currentBytes=\(externalSize, privacy: .public) maxBytes=\(maxLargeBytes, privacy: .public) imagesOnly=\(cleanupImagesOnly, privacy: .public)"
@@ -784,12 +822,12 @@ public final class StorageService {
         let filesToDelete = orphanedFiles
         let remover = fileOps.removeFile
         await Task.detached(priority: .utility) {
-            await Self.deleteFilesBounded(
-                filesToDelete,
-                maxConcurrent: Self.maxConcurrentFileDeletions,
-                logContext: "orphanCleanup",
-                removeFile: remover
-            )
+                await Self.deleteFilesBounded(
+                    filesToDelete,
+                    maxConcurrent: Self.fileDeletionConcurrency(for: filesToDelete.count),
+                    logContext: "orphanCleanup",
+                    removeFile: remover
+                )
         }.value
 
         // 4. Invalidate cache after cleanup
@@ -847,6 +885,82 @@ public final class StorageService {
         return orphanedFiles
     }
 
+    private func cleanupCountAndExternalIfNeeded(
+        currentCount: Int,
+        externalSize: Int,
+        maxItems: Int,
+        maxLargeBytes: Int,
+        cleanupImagesOnly: Bool
+    ) async throws -> Bool {
+        guard PerfFeatureFlags.cleanupCompositePlanEnabled else { return false }
+
+        let deleteCount = max(0, currentCount - maxItems)
+        let excessBytes = max(0, externalSize - maxLargeBytes)
+        guard deleteCount > 0 || excessBytes > 0 else { return false }
+
+        let countPlan: SQLiteClipboardRepository.DeletePlan
+        if deleteCount > 0 {
+            if cleanupImagesOnly {
+                countPlan = try await repository.planCleanupUnpinnedImages(limit: deleteCount)
+            } else {
+                countPlan = try await repository.planCleanupByCount(target: maxItems)
+            }
+        } else {
+            countPlan = SQLiteClipboardRepository.DeletePlan(ids: [], storageRefs: [])
+        }
+
+        let estimatedFreedByCount = try await repository.sumExternalBytes(ids: countPlan.ids)
+        let remainingExcess = max(0, excessBytes - estimatedFreedByCount)
+        let externalPlan: SQLiteClipboardRepository.DeletePlan
+        if remainingExcess > 0 {
+            externalPlan = try await repository.planCleanupExternalStorage(
+                excessBytes: remainingExcess,
+                typeFilter: cleanupImagesOnly ? .image : nil,
+                excludingIDs: Set(countPlan.ids)
+            )
+        } else {
+            externalPlan = SQLiteClipboardRepository.DeletePlan(ids: [], storageRefs: [])
+        }
+
+        if PerfFeatureFlags.cleanupShadowCompareEnabled {
+            ScopyLog.storage.info(
+                "Cleanup shadow compare: countPlan=\(countPlan.ids.count, privacy: .public) externalPlan=\(externalPlan.ids.count, privacy: .public) estimatedFreedByCount=\(estimatedFreedByCount, privacy: .public) remainingExcess=\(remainingExcess, privacy: .public)"
+            )
+        }
+
+        let merged = SQLiteClipboardRepository.mergeDeletePlans([countPlan, externalPlan])
+        guard !merged.ids.isEmpty else { return false }
+
+        ScopyLog.storage.info(
+            "cleanupComposite: deleting \(merged.ids.count, privacy: .public) items (count=\(countPlan.ids.count, privacy: .public), external=\(externalPlan.ids.count, privacy: .public), files=\(merged.storageRefs.count, privacy: .public), remainingExcess=\(remainingExcess, privacy: .public))"
+        )
+        try await applyDeletePlan(merged, logContext: "cleanupComposite")
+        return true
+    }
+
+    private func applyDeletePlan(_ plan: SQLiteClipboardRepository.DeletePlan, logContext: StaticString) async throws {
+        guard !plan.ids.isEmpty else { return }
+
+        // DB-first: avoid deleting external files when DB deletion fails.
+        try await repository.deleteItemsBatchInTransaction(ids: plan.ids)
+
+        let fileURLs = validatedExternalFileURLs(from: plan.storageRefs, logContext: logContext)
+        guard !fileURLs.isEmpty else {
+            invalidateExternalSizeCache()
+            return
+        }
+        let remover = fileOps.removeFile
+        await Task.detached(priority: .utility) {
+            await Self.deleteFilesBounded(
+                fileURLs,
+                maxConcurrent: Self.fileDeletionConcurrency(for: fileURLs.count),
+                logContext: logContext,
+                removeFile: remover
+            )
+        }.value
+        invalidateExternalSizeCache()
+    }
+
     /// v0.14: 深度优化 - 消除子查询 COUNT，使用单次查询 + 事务批量删除
     /// 原理：先计算当前非 pin 数量，再用 OFFSET 直接定位要删除的记录
     /// 收益：消除 O(n) 子查询，50k 数据下节省 ~200ms
@@ -861,16 +975,20 @@ public final class StorageService {
         try await repository.deleteItemsBatchInTransaction(ids: plan.ids)
 
         let fileURLs = validatedExternalFileURLs(from: plan.storageRefs, logContext: "cleanupByCount")
-        guard !fileURLs.isEmpty else { return }
+        guard !fileURLs.isEmpty else {
+            invalidateExternalSizeCache()
+            return
+        }
         let remover = fileOps.removeFile
         await Task.detached(priority: .utility) {
-            await Self.deleteFilesBounded(
-                fileURLs,
-                maxConcurrent: Self.maxConcurrentFileDeletions,
-                logContext: "cleanupByCount",
-                removeFile: remover
-            )
+                await Self.deleteFilesBounded(
+                    fileURLs,
+                    maxConcurrent: Self.fileDeletionConcurrency(for: fileURLs.count),
+                    logContext: "cleanupByCount",
+                    removeFile: remover
+                )
         }.value
+        invalidateExternalSizeCache()
     }
 
     private func cleanupImagesOnlyByCount(deleteCount: Int) async throws {
@@ -884,16 +1002,20 @@ public final class StorageService {
         try await repository.deleteItemsBatchInTransaction(ids: plan.ids)
 
         let fileURLs = validatedExternalFileURLs(from: plan.storageRefs, logContext: "cleanupImagesOnlyByCount")
-        guard !fileURLs.isEmpty else { return }
+        guard !fileURLs.isEmpty else {
+            invalidateExternalSizeCache()
+            return
+        }
         let remover = fileOps.removeFile
         await Task.detached(priority: .utility) {
-            await Self.deleteFilesBounded(
-                fileURLs,
-                maxConcurrent: Self.maxConcurrentFileDeletions,
-                logContext: "cleanupImagesOnlyByCount",
-                removeFile: remover
-            )
+                await Self.deleteFilesBounded(
+                    fileURLs,
+                    maxConcurrent: Self.fileDeletionConcurrency(for: fileURLs.count),
+                    logContext: "cleanupImagesOnlyByCount",
+                    removeFile: remover
+                )
         }.value
+        invalidateExternalSizeCache()
     }
 
     /// v0.19: 修复 - 同时删除外部存储文件，避免孤立文件累积
@@ -909,16 +1031,20 @@ public final class StorageService {
         try await repository.deleteItemsBatchInTransaction(ids: plan.ids)
 
         let fileURLs = validatedExternalFileURLs(from: plan.storageRefs, logContext: "cleanupByAge")
-        guard !fileURLs.isEmpty else { return }
+        guard !fileURLs.isEmpty else {
+            invalidateExternalSizeCache()
+            return
+        }
         let remover = fileOps.removeFile
         await Task.detached(priority: .utility) {
-            await Self.deleteFilesBounded(
-                fileURLs,
-                maxConcurrent: Self.maxConcurrentFileDeletions,
-                logContext: "cleanupByAge",
-                removeFile: remover
-            )
+                await Self.deleteFilesBounded(
+                    fileURLs,
+                    maxConcurrent: Self.fileDeletionConcurrency(for: fileURLs.count),
+                    logContext: "cleanupByAge",
+                    removeFile: remover
+                )
         }.value
+        invalidateExternalSizeCache()
     }
 
     /// v0.14: 深度优化 - 消除循环迭代，单次查询 + 事务批量删除
@@ -935,16 +1061,20 @@ public final class StorageService {
         try await repository.deleteItemsBatchInTransaction(ids: plan.ids)
 
         let fileURLs = validatedExternalFileURLs(from: plan.storageRefs, logContext: "cleanupBySize")
-        guard !fileURLs.isEmpty else { return }
+        guard !fileURLs.isEmpty else {
+            invalidateExternalSizeCache()
+            return
+        }
         let remover = fileOps.removeFile
         await Task.detached(priority: .utility) {
-            await Self.deleteFilesBounded(
-                fileURLs,
-                maxConcurrent: Self.maxConcurrentFileDeletions,
-                logContext: "cleanupBySize",
-                removeFile: remover
-            )
+                await Self.deleteFilesBounded(
+                    fileURLs,
+                    maxConcurrent: Self.fileDeletionConcurrency(for: fileURLs.count),
+                    logContext: "cleanupBySize",
+                    removeFile: remover
+                )
         }.value
+        invalidateExternalSizeCache()
     }
 
     /// v0.13: 批量删除多个项目（单条 SQL，单事务，避免 N+1 查询）
@@ -970,12 +1100,12 @@ public final class StorageService {
         let fileURLs = validatedExternalFileURLs(from: plan.storageRefs, logContext: "cleanupExternalStorage")
         let remover = fileOps.removeFile
         await Task.detached(priority: .utility) {
-            await Self.deleteFilesBounded(
-                fileURLs,
-                maxConcurrent: Self.maxConcurrentFileDeletions,
-                logContext: "cleanupExternalStorage",
-                removeFile: remover
-            )
+                await Self.deleteFilesBounded(
+                    fileURLs,
+                    maxConcurrent: Self.fileDeletionConcurrency(for: fileURLs.count),
+                    logContext: "cleanupExternalStorage",
+                    removeFile: remover
+                )
         }.value
 
         // 清理完成后使缓存失效
@@ -990,54 +1120,90 @@ public final class StorageService {
     ) async {
         guard !fileURLs.isEmpty else { return }
 
-        let unique = Array(Set(fileURLs.map(\.path))).map { URL(fileURLWithPath: $0) }
+        var uniquePaths: [String] = []
+        uniquePaths.reserveCapacity(fileURLs.count)
+        var seen = Set<String>()
+        seen.reserveCapacity(fileURLs.count)
+        for url in fileURLs {
+            if seen.insert(url.path).inserted {
+                uniquePaths.append(url.path)
+            }
+        }
 
-        await forEachConcurrent(unique, maxConcurrent: maxConcurrent) { fileURL in
-            guard FileManager.default.fileExists(atPath: fileURL.path) else { return }
+        let uniquePathsSnapshot = uniquePaths
+        let workerCount = min(max(1, maxConcurrent), uniquePathsSnapshot.count)
+        let chunkSize = max(64, (uniquePathsSnapshot.count + workerCount - 1) / workerCount)
 
-            do {
-                try removeFile(fileURL)
-            } catch let error as NSError {
-                // Ignore "file not found" (may be deleted concurrently).
-                if error.domain == NSCocoaErrorDomain && error.code == NSFileNoSuchFileError {
-                    return
+        await withTaskGroup(of: Void.self) { group in
+            for start in stride(from: 0, to: uniquePathsSnapshot.count, by: chunkSize) {
+                let end = min(start + chunkSize, uniquePathsSnapshot.count)
+                let chunkPaths = Array(uniquePathsSnapshot[start..<end])
+                group.addTask {
+                    for path in chunkPaths {
+                        let fileURL = URL(fileURLWithPath: path)
+                        do {
+                            try removeFile(fileURL)
+                        } catch let error as NSError {
+                            // Ignore "file not found" (may be deleted concurrently).
+                            if error.domain == NSCocoaErrorDomain && error.code == NSFileNoSuchFileError {
+                                continue
+                            }
+                            ScopyLog.storage.warning(
+                                "[\(logContext)] Failed to delete file '\(fileURL.path, privacy: .private)': \(error.localizedDescription, privacy: .private)"
+                            )
+                        } catch {
+                            ScopyLog.storage.warning(
+                                "[\(logContext)] Failed to delete file '\(fileURL.path, privacy: .private)': \(error.localizedDescription, privacy: .private)"
+                            )
+                        }
+                    }
                 }
-                ScopyLog.storage.warning(
-                    "[\(logContext)] Failed to delete file '\(fileURL.path, privacy: .private)': \(error.localizedDescription, privacy: .private)"
-                )
-            } catch {
-                ScopyLog.storage.warning(
-                    "[\(logContext)] Failed to delete file '\(fileURL.path, privacy: .private)': \(error.localizedDescription, privacy: .private)"
-                )
             }
         }
     }
 
-    nonisolated static func forEachConcurrent<T: Sendable>(
-        _ items: [T],
-        maxConcurrent: Int,
-        operation: @escaping @Sendable (T) async -> Void
-    ) async {
-        let limit = max(1, maxConcurrent)
-        guard !items.isEmpty else { return }
+    nonisolated static func fileDeletionConcurrency(for fileCount: Int) -> Int {
+        let base = max(1, maxConcurrentFileDeletions)
+        guard fileCount > 0 else { return base }
 
-        await withTaskGroup(of: Void.self) { group in
-            var iterator = items.makeIterator()
-            let initial = min(limit, items.count)
-            for _ in 0..<initial {
-                guard let item = iterator.next() else { break }
-                group.addTask {
-                    await operation(item)
-                }
-            }
-
-            while await group.next() != nil {
-                guard let item = iterator.next() else { continue }
-                group.addTask {
-                    await operation(item)
-                }
-            }
+        let cores = max(2, ProcessInfo.processInfo.activeProcessorCount)
+        if fileCount >= 8_192 {
+            return min(128, max(base, cores * 8))
         }
+        if fileCount >= 2_048 {
+            return min(96, max(base, cores * 6))
+        }
+        if fileCount >= 512 {
+            return min(64, max(base, cores * 4))
+        }
+        return base
+    }
+
+    nonisolated static func fastRemoveFile(_ url: URL) throws {
+        let path = url.path
+        let result = path.withCString { cPath in
+            unlink(cPath)
+        }
+        if result == 0 {
+            return
+        }
+
+        let code = errno
+        if code == ENOENT {
+            throw NSError(
+                domain: NSCocoaErrorDomain,
+                code: NSFileNoSuchFileError,
+                userInfo: [NSFilePathErrorKey: path]
+            )
+        }
+
+        // Fall back for directory-like paths or permission edge cases.
+        if code == EISDIR || code == EPERM {
+            try FileManager.default.removeItem(at: url)
+            return
+        }
+
+        throw NSError(domain: NSPOSIXErrorDomain, code: Int(code), userInfo: [NSFilePathErrorKey: path])
     }
 
     // MARK: - External Storage

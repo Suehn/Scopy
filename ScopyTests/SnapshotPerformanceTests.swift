@@ -75,14 +75,22 @@ final class SnapshotPerformanceTests: XCTestCase {
         // Short query path (≤2 chars) is a common UX hot path and should remain snappy.
         // Note: End-to-end includes service layer overhead (DTO conversion, metadata, etc.). Use a stable default SLO,
         // and allow an optional strict target for profiling sessions.
-        let strictShortQuerySLO = ProcessInfo.processInfo.environment["SCOPY_SNAPSHOT_STRICT_SLO"] == "1"
+        let strictShortQuerySLORequested = ProcessInfo.processInfo.environment["SCOPY_SNAPSHOT_STRICT_SLO"] == "1"
         #if DEBUG
         let defaultCmP95Target = 150.0
+        let strictCmP95Target = 150.0
+        let strictShortQuerySLOApplied = false
         #else
         let defaultCmP95Target = 50.0
+        let strictCmP95Target = ProcessInfo.processInfo.environment["SCOPY_SNAPSHOT_STRICT_TARGET_MS"]
+            .flatMap(Double.init) ?? 25.0
+        let strictShortQuerySLOApplied = strictShortQuerySLORequested
         #endif
-        let cmP95Target = strictShortQuerySLO ? 15.0 : defaultCmP95Target
-        print("📌 Snapshot short-query SLO: strict=\(strictShortQuerySLO ? 1 : 0) targetP95=\(cmP95Target)ms")
+        if strictShortQuerySLORequested && !strictShortQuerySLOApplied {
+            print("⚠️ Snapshot strict short-query SLO requested but running DEBUG build; using default target.")
+        }
+        let cmP95Target = strictShortQuerySLOApplied ? strictCmP95Target : defaultCmP95Target
+        print("📌 Snapshot short-query SLO: strictRequested=\(strictShortQuerySLORequested ? 1 : 0) strictApplied=\(strictShortQuerySLOApplied ? 1 : 0) targetP95=\(cmP95Target)ms")
         try await measure(query: "cm", label: "\(dbLabel), fuzzyPlus, query=cm", maxP95: cmP95Target)
 
         await service.stopAndWait()

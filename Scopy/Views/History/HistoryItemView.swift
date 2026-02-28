@@ -10,6 +10,49 @@ private struct SendableCGImage: @unchecked Sendable {
     let image: CGImage
 }
 
+private actor PreviewTaskBudget {
+    static let shared = PreviewTaskBudget(limit: 4)
+
+    private let limit: Int
+    private var inFlight: Int = 0
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    init(limit: Int) {
+        self.limit = max(1, limit)
+    }
+
+    func acquireIfNeeded() async {
+        guard PerfFeatureFlags.previewTaskBudgetEnabled else { return }
+        if inFlight < limit {
+            inFlight += 1
+            return
+        }
+        await withCheckedContinuation { continuation in
+            waiters.append(continuation)
+        }
+    }
+
+    func releaseIfNeeded() {
+        guard PerfFeatureFlags.previewTaskBudgetEnabled else { return }
+        if let continuation = waiters.first {
+            waiters.removeFirst()
+            continuation.resume()
+            return
+        }
+        inFlight = max(0, inFlight - 1)
+    }
+}
+
+private func runBudgetedDetached<T: Sendable>(
+    priority: TaskPriority,
+    operation: @escaping @Sendable () async -> T
+) async -> T {
+    await PreviewTaskBudget.shared.acquireIfNeeded()
+    let result = await Task.detached(priority: priority, operation: operation).value
+    await PreviewTaskBudget.shared.releaseIfNeeded()
+    return result
+}
+
 /// 单个历史项视图 - 实现 Equatable 以优化重绘
 /// v0.9.3: 使用局部悬停状态 + 防抖 + Equatable 优化滚动性能
 @MainActor
@@ -181,9 +224,9 @@ struct HistoryItemView: View, Equatable {
                     let markdownSource = preview
                     hoverMarkdownTask = Task(priority: .utility) { [markdownSource, cacheKey] in
                         guard !Task.isCancelled else { return }
-                        let html = await Task.detached(priority: .utility) {
+                        let html = await runBudgetedDetached(priority: .utility) {
                             MarkdownHTMLRenderer.render(markdown: markdownSource)
-                        }.value
+                        }
                         guard !Task.isCancelled, !html.isEmpty else { return }
                         if let current = MarkdownPreviewCache.shared.filePreview(forKey: cacheKey),
                            current.text == markdownSource
@@ -212,9 +255,9 @@ struct HistoryItemView: View, Equatable {
                 self.requestPopover(.file)
             }
 
-            let previewText: String? = await Task.detached(priority: .utility) {
+            let previewText: String? = await runBudgetedDetached(priority: .utility) {
                 FilePreviewSupport.readTextFile(url: url, maxBytes: maxBytes)
-            }.value
+            }
 
             guard !Task.isCancelled else { return }
             guard !isScrolling else { return }
@@ -921,7 +964,7 @@ struct HistoryItemView: View, Equatable {
 
                 let cgImage: CGImage?
                 if let storageRef, !storageRef.isEmpty {
-                    let sendable = await Task.detached(priority: .userInitiated) { () -> SendableCGImage? in
+                    let sendable = await runBudgetedDetached(priority: .userInitiated) { () async -> SendableCGImage? in
                         guard let image = Self.makePreviewCGImage(
                             fromFileAtPath: storageRef,
                             targetWidthPixels: targetWidthPixels,
@@ -930,11 +973,11 @@ struct HistoryItemView: View, Equatable {
                             return nil
                         }
                         return SendableCGImage(image: image)
-                    }.value
+                    }
                     cgImage = sendable?.image
                 } else {
                     guard let data = await getImageData() else { return nil }
-                    let sendable = await Task.detached(priority: .userInitiated) { () -> SendableCGImage? in
+                    let sendable = await runBudgetedDetached(priority: .userInitiated) { () async -> SendableCGImage? in
                         guard let image = Self.makePreviewCGImage(
                             from: data,
                             targetWidthPixels: targetWidthPixels,
@@ -943,7 +986,7 @@ struct HistoryItemView: View, Equatable {
                             return nil
                         }
                         return SendableCGImage(image: image)
-                    }.value
+                    }
                     cgImage = sendable?.image
                 }
 
@@ -1023,7 +1066,7 @@ struct HistoryItemView: View, Equatable {
                     return cached
                 }
 
-                let sendable = await Task.detached(priority: .userInitiated) { () async -> SendableCGImage? in
+                let sendable = await runBudgetedDetached(priority: .userInitiated) { () async -> SendableCGImage? in
                     let cgImage: CGImage?
                     switch previewInfo.kind {
                     case .image:
@@ -1043,7 +1086,7 @@ struct HistoryItemView: View, Equatable {
                     }
                     guard let cgImage else { return nil }
                     return SendableCGImage(image: cgImage)
-                }.value
+                }
 
                 let cgImage = sendable?.image
                 guard !Task.isCancelled else { return nil }
@@ -1401,7 +1444,7 @@ struct HistoryItemView: View, Equatable {
             hoverMarkdownTask = Task(priority: .utility) { [previewText, cacheKey] in
                 guard !Task.isCancelled else { return }
                 let metricsEnabled = ScrollPerformanceProfile.isEnabled
-                let html = await Task.detached(priority: .utility) {
+                let html = await runBudgetedDetached(priority: .utility) {
                     if metricsEnabled {
                         let start = CFAbsoluteTimeGetCurrent()
                         let html = MarkdownHTMLRenderer.render(markdown: previewText)
@@ -1410,7 +1453,7 @@ struct HistoryItemView: View, Equatable {
                         return html
                     }
                     return MarkdownHTMLRenderer.render(markdown: previewText)
-                }.value
+                }
                 guard !Task.isCancelled, !html.isEmpty else { return }
                 MarkdownPreviewCache.shared.setHTML(html, forKey: cacheKey)
                 await MainActor.run { [previewText] in

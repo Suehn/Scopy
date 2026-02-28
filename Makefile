@@ -1,13 +1,16 @@
 # Scopy Makefile
 # 符合 v0.md 的构建和测试流程
 
-.PHONY: all setup build run clean xcode test test-unit test-perf test-perf-heavy test-snapshot-perf test-tsan test-strict coverage benchmark perf-audit test-flow test-flow-quick health-check
+.PHONY: all setup build run clean xcode test test-unit test-perf test-perf-heavy test-snapshot-perf test-snapshot-perf-release test-tsan test-strict coverage benchmark perf-audit perf-frontend-profile perf-frontend-profile-smoke perf-frontend-profile-standard perf-frontend-profile-full perf-unified-table test-flow test-flow-quick health-check
 .PHONY: test-real-db
 .PHONY: snapshot-perf-db bench-snapshot-search
 .PHONY: tag-release push-release release-validate release-bump-patch
 
 VERSION_ARGS := $(shell bash scripts/version.sh --xcodebuild-args 2>/dev/null)
 LOG_DIR := logs
+FRONTEND_PROFILE_SMOKE_ARGS := --skip-setup --repeats 1 --duration 3 --min-samples 50
+FRONTEND_PROFILE_STANDARD_ARGS := --skip-setup --repeats 1 --duration 6 --min-samples 120
+FRONTEND_PROFILE_FULL_ARGS := --repeats 3 --duration 10 --min-samples 260
 
 # 默认目标
 all: build
@@ -120,6 +123,28 @@ test-snapshot-perf: setup
 		OTHER_SWIFT_FLAGS="\$$(inherited) -DSCOPY_SNAPSHOT_PERF_TESTS" \
 		$(VERSION_ARGS) \
 		; } 2>&1 | tee $(LOG_DIR)/test-snapshot-perf.log'
+
+# 运行 release 配置的快照性能校验（ScopyBench + 阈值断言）
+test-snapshot-perf-release: setup
+	@echo "Running snapshot performance tests (Release benchmark)..."
+	@mkdir -p $(LOG_DIR)
+	bash -o pipefail -c 'set -euo pipefail; \
+		DB_PATH="$${SCOPY_SNAPSHOT_DB_PATH:-perf-db/clipboard.db}"; \
+		if [ "$${DB_PATH#/}" = "$$DB_PATH" ]; then DB_PATH="$(CURDIR)/$$DB_PATH"; fi; \
+		if [ ! -f "$$DB_PATH" ]; then echo "Missing snapshot DB at $$DB_PATH. Run: make snapshot-perf-db or set SCOPY_SNAPSHOT_DB_PATH"; exit 1; fi; \
+		CMD_TARGET="$${SCOPY_SNAPSHOT_RELEASE_CMD_P95_MS:-50}"; \
+		CM_TARGET="$${SCOPY_SNAPSHOT_RELEASE_CM_P95_MS:-20}"; \
+		{ \
+			echo "Snapshot release bench env: DB=$$DB_PATH cmdTarget=$$CMD_TARGET cmTarget=$$CM_TARGET"; \
+			swift build -c release --product ScopyBench > $(LOG_DIR)/scopybench.release.build.log 2>&1; \
+			./.build/release/ScopyBench --layer service --db "$$DB_PATH" --mode fuzzyPlus --sort relevance --query cmd --iters 30 --warmup 20 --json > $(LOG_DIR)/snapshot-release-cmd.jsonl; \
+			./.build/release/ScopyBench --layer service --db "$$DB_PATH" --mode fuzzyPlus --sort relevance --query cm --iters 30 --warmup 20 --json > $(LOG_DIR)/snapshot-release-cm.jsonl; \
+			CMD_P95=$$(python3 scripts/extract_p95.py $(LOG_DIR)/snapshot-release-cmd.jsonl) || (echo "Failed to parse cmd p95 from $(LOG_DIR)/snapshot-release-cmd.jsonl" && exit 1); \
+			CM_P95=$$(python3 scripts/extract_p95.py $(LOG_DIR)/snapshot-release-cm.jsonl) || (echo "Failed to parse cm p95 from $(LOG_DIR)/snapshot-release-cm.jsonl" && exit 1); \
+			echo "Release bench p95: cmd=$$CMD_P95 ms (target $$CMD_TARGET), cm=$$CM_P95 ms (target $$CM_TARGET)"; \
+			awk -v actual="$$CMD_P95" -v target="$$CMD_TARGET" "BEGIN { exit (actual <= target) ? 0 : 1 }"; \
+			awk -v actual="$$CM_P95" -v target="$$CM_TARGET" "BEGIN { exit (actual <= target) ? 0 : 1 }"; \
+		} 2>&1 | tee $(LOG_DIR)/test-snapshot-perf-release.log'
 
 # 运行基于本机真实 DB 的对照回归测试（可选，需 -DSCOPY_REAL_DB_TESTS）
 test-real-db: setup
@@ -274,6 +299,28 @@ bench-snapshot-search:
 perf-audit:
 	@bash scripts/perf-audit.sh
 
+# 前端 scroll/profile 真实性能审计（默认开发用轻量 smoke）
+perf-frontend-profile: perf-frontend-profile-smoke
+
+# 轻量 smoke：日常开发默认（最快）
+perf-frontend-profile-smoke:
+	@bash scripts/perf-frontend-profile.sh $(FRONTEND_PROFILE_SMOKE_ARGS)
+
+# 标准档：提交前验证（统计更稳）
+perf-frontend-profile-standard:
+	@bash scripts/perf-frontend-profile.sh $(FRONTEND_PROFILE_STANDARD_ARGS)
+
+# 全量档：发布前基准（最慢，结果最稳定）
+perf-frontend-profile-full:
+	@bash scripts/perf-frontend-profile.sh $(FRONTEND_PROFILE_FULL_ARGS)
+
+# 汇总前后端同表对比（需传 BACKEND_BASELINE/BACKEND_CURRENT/FRONTEND_SUMMARY）
+perf-unified-table:
+	@test -n "$$BACKEND_BASELINE" || (echo "Missing BACKEND_BASELINE=<logs/perf-audit-...>" && exit 1)
+	@test -n "$$BACKEND_CURRENT" || (echo "Missing BACKEND_CURRENT=<logs/perf-audit-...>" && exit 1)
+	@test -n "$$FRONTEND_SUMMARY" || (echo "Missing FRONTEND_SUMMARY=<logs/perf-frontend-profile-.../frontend-scroll-profile-summary.json>" && exit 1)
+	@bash scripts/perf-unified-table.sh --backend-baseline "$$BACKEND_BASELINE" --backend-current "$$BACKEND_CURRENT" --frontend-summary "$$FRONTEND_SUMMARY"
+
 # =================== 帮助 ===================
 
 # 帮助信息
@@ -295,10 +342,15 @@ help:
 	@echo "  make test-perf    - Run performance tests"
 	@echo "  make test-perf-heavy - Run heavy perf tests"
 	@echo "  make test-snapshot-perf - Run snapshot perf tests"
+	@echo "  make test-snapshot-perf-release - Run snapshot perf tests in Release mode"
 	@echo "  make test-integration - Run integration tests"
 	@echo "  make test-strict  - Run Strict Concurrency regression"
 	@echo "  make coverage     - Run tests with coverage report"
 	@echo "  make benchmark    - Run full benchmark suite"
+	@echo "  make perf-frontend-profile - Run frontend profile smoke (default)"
+	@echo "  make perf-frontend-profile-standard - Run frontend profile standard tier"
+	@echo "  make perf-frontend-profile-full - Run frontend profile full release tier"
+	@echo "  make perf-unified-table - Merge backend+frontend metrics into one table"
 	@echo ""
 	@echo "Test Flow Automation:"
 	@echo "  make test-flow    - Full test flow (kill → build → install → launch → health check)"
@@ -318,6 +370,7 @@ help:
 	@echo "  - Xcode 16.0+"
 	@echo "  - macOS 14.0+"
 	@echo "  - Homebrew (for xcodegen installation)"
+	@echo "  - python3 (for perf summary parsing scripts)"
 
 # =================== Release Helpers ===================
 

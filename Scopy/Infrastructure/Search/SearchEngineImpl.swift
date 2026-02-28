@@ -87,7 +87,49 @@ public actor SearchEngineImpl {
         static let log = OSLog(subsystem: "com.scopy.app", category: "perf")
     }
 
-    private final class PerfContext {
+    private struct AdaptiveSearchTuning {
+        var prefilterMin: Int
+        var prefilterMax: Int
+        var prefilterScale: Int
+        var deepPagingCacheTopMatches: Int
+        var deepPagingCachePrefetchExtra: Int
+
+        static let fallback = AdaptiveSearchTuning(
+            prefilterMin: 5_000,
+            prefilterMax: 20_000,
+            prefilterScale: 40,
+            deepPagingCacheTopMatches: 50_000,
+            deepPagingCachePrefetchExtra: 2_000
+        )
+
+        static func current(candidateCount: Int) -> AdaptiveSearchTuning {
+            guard PerfFeatureFlags.searchAdaptiveTuningEnabled else {
+                return .fallback
+            }
+
+            let cores = max(2, ProcessInfo.processInfo.activeProcessorCount)
+            var tuning = fallback
+
+            if cores >= 10 {
+                tuning.prefilterMax = 30_000
+                tuning.prefilterScale = 48
+                tuning.deepPagingCacheTopMatches = 64_000
+                tuning.deepPagingCachePrefetchExtra = 3_000
+            } else if cores <= 4 {
+                tuning.prefilterMax = 16_000
+                tuning.prefilterScale = 32
+                tuning.deepPagingCacheTopMatches = 36_000
+                tuning.deepPagingCachePrefetchExtra = 1_500
+            }
+
+            if candidateCount >= 20_000 {
+                tuning.prefilterMax = max(tuning.prefilterMax, 36_000)
+            }
+            return tuning
+        }
+    }
+
+    private final class PerfContext: @unchecked Sendable {
         private(set) var phases: [SearchPerfMetrics.Phase] = []
         private(set) var counters: [SearchPerfMetrics.Counter] = []
 
@@ -106,15 +148,6 @@ public actor SearchEngineImpl {
                 addPhase(name, ms: elapsedMs)
             }
             return try block()
-        }
-
-        func measureAsync<T>(_ name: String, _ block: () async throws -> T) async rethrows -> T {
-            let start = CFAbsoluteTimeGetCurrent()
-            defer {
-                let elapsedMs = (CFAbsoluteTimeGetCurrent() - start) * 1000
-                addPhase(name, ms: elapsedMs)
-            }
-            return try await block()
         }
 
         func snapshot() -> SearchPerfMetrics {
@@ -2381,9 +2414,10 @@ public actor SearchEngineImpl {
                 let waitTimeout = shortQueryIndexWaitTimeout(tokenLower: tokenLower)
                 if waitTimeout > 0 {
                     if let perf {
-                        try await perf.measureAsync("short_query_index_wait") {
-                            try await waitForShortQueryIndexBuild(task: task, timeout: waitTimeout)
-                        }
+                        let phaseStart = CFAbsoluteTimeGetCurrent()
+                        try await waitForShortQueryIndexBuild(task: task, timeout: waitTimeout)
+                        let elapsedMs = (CFAbsoluteTimeGetCurrent() - phaseStart) * 1000
+                        perf.addPhase("short_query_index_wait", ms: elapsedMs)
                     } else {
                         try await waitForShortQueryIndexBuild(task: task, timeout: waitTimeout)
                     }
@@ -2524,7 +2558,10 @@ public actor SearchEngineImpl {
 
         if let task = fullIndexBuildTask {
             if let perf {
-                _ = await perf.measureAsync("full_index_build_wait") { await task.value }
+                let phaseStart = CFAbsoluteTimeGetCurrent()
+                _ = await task.value
+                let elapsedMs = (CFAbsoluteTimeGetCurrent() - phaseStart) * 1000
+                perf.addPhase("full_index_build_wait", ms: elapsedMs)
             } else {
                 await task.value
             }
@@ -2576,9 +2613,10 @@ public actor SearchEngineImpl {
 
         let newIndex: FullFuzzyIndex
         if let perf {
-            newIndex = try perf.measure("full_index_build_from_db") {
-                try buildFullIndex(perf: perf)
-            }
+            let phaseStart = CFAbsoluteTimeGetCurrent()
+            newIndex = try buildFullIndex(perf: perf)
+            let elapsedMs = (CFAbsoluteTimeGetCurrent() - phaseStart) * 1000
+            perf.addPhase("full_index_build_from_db", ms: elapsedMs)
         } else {
             newIndex = try buildFullIndex(perf: nil)
         }
@@ -2778,8 +2816,13 @@ public actor SearchEngineImpl {
            queryLower.count >= 4,
            queryLowerIsASCII,
            candidateSlots.count >= 6_000 {
+            let tuning = AdaptiveSearchTuning.current(candidateCount: candidateSlots.count)
             let desiredTopCount = max(0, request.offset + request.limit + 1)
-            let prefilterLimit = min(20_000, max(5_000, desiredTopCount * 40))
+            let prefilterLimit = min(
+                tuning.prefilterMax,
+                max(tuning.prefilterMin, desiredTopCount * tuning.prefilterScale)
+            )
+            perf?.addCounter("adaptive_prefilter_limit", value: prefilterLimit)
             if let ftsQuery = FTSQueryBuilder.build(userQuery: queryLower) {
                 let ftsSlots: [Int]?
                 if let perf {
@@ -3008,8 +3051,9 @@ public actor SearchEngineImpl {
 
         // Deep paging: cache a bounded "top-K" prefix to avoid repeated rescans without pinning a huge array in memory.
         if request.offset > 0 {
-            let maxDeepPagingCacheTopMatches = 50_000
-            let deepPagingCachePrefetchExtra = 2_000
+            let tuning = AdaptiveSearchTuning.current(candidateCount: candidateSlots.count)
+            let maxDeepPagingCacheTopMatches = tuning.deepPagingCacheTopMatches
+            let deepPagingCachePrefetchExtra = tuning.deepPagingCachePrefetchExtra
             let cacheTopCount = min(maxDeepPagingCacheTopMatches, desiredTopCount + deepPagingCachePrefetchExtra)
 
             if let cached = fuzzySortedMatchesCache,

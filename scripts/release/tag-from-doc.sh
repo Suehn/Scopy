@@ -36,12 +36,22 @@ extract_current_version_tag() {
 }
 
 ensure_clean_worktree() {
-    if ! git diff --quiet; then
-        echo "Working tree has unstaged changes; commit/stash before tagging." >&2
+    if [[ -n "$(git status --porcelain)" ]]; then
+        echo "Working tree is not clean (includes untracked files); commit/stash before tagging." >&2
+        git status --short >&2
         exit 1
     fi
-    if ! git diff --cached --quiet; then
-        echo "Index has staged changes; commit/stash before tagging." >&2
+}
+
+ensure_release_doc_tracked() {
+    local tag="$1"
+    local doc_file="doc/implementation/releases/${tag}.md"
+    if [[ ! -f "${doc_file}" ]]; then
+        echo "Missing release doc for ${tag}: ${doc_file}" >&2
+        exit 1
+    fi
+    if ! git ls-files --error-unmatch "${doc_file}" >/dev/null 2>&1; then
+        echo "Release doc is not tracked in git: ${doc_file}" >&2
         exit 1
     fi
 }
@@ -79,6 +89,7 @@ main() {
     esac
 
     ensure_clean_worktree
+    ensure_release_doc_tracked "${tag}"
 
     if git rev-parse -q --verify "refs/tags/${tag}" >/dev/null; then
         if [[ "$(git rev-list -n 1 "${tag}")" != "$(git rev-parse HEAD)" ]]; then

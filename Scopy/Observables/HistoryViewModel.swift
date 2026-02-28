@@ -38,11 +38,16 @@ final class HistoryViewModel {
     @ObservationIgnored var closePanelHandler: (() -> Void)?
 
     var items: [ClipboardItemDTO] = [] {
-        didSet { invalidatePinnedCache() }
+        didSet {
+            invalidatePinnedCache()
+            itemIndexCacheValid = false
+        }
     }
 
     @ObservationIgnored private var pinnedItemsCache: [ClipboardItemDTO]?
     @ObservationIgnored private var unpinnedItemsCache: [ClipboardItemDTO]?
+    @ObservationIgnored private var itemIndexByID: [UUID: Int] = [:]
+    @ObservationIgnored private var itemIndexCacheValid: Bool = false
 
     var pinnedItems: [ClipboardItemDTO] {
         if let cached = pinnedItemsCache { return cached }
@@ -164,11 +169,11 @@ final class HistoryViewModel {
         case .newItem(let item):
             let didMatchCurrentFilters = matchesCurrentFilters(item)
 
-            items.removeAll { $0.id == item.id }
-
             if didMatchCurrentFilters {
-                items.insert(item, at: 0)
+                _ = insertOrMoveItemToFront(item)
                 prewarmDisplayText(for: [item])
+            } else {
+                _ = removeItem(withID: item.id)
             }
 
             loadedCount = items.count
@@ -186,11 +191,11 @@ final class HistoryViewModel {
             }
         case .thumbnailUpdated(let itemID, let thumbnailPath):
             ThumbnailCache.shared.remove(path: thumbnailPath)
-            guard let index = items.firstIndex(where: { $0.id == itemID }) else { return }
+            guard let index = indexOfItem(withID: itemID) else { return }
             let existing = items[index]
             guard existing.thumbnailPath != thumbnailPath else { return }
 
-            items[index] = ClipboardItemDTO(
+            let updated = ClipboardItemDTO(
                 id: existing.id,
                 type: existing.type,
                 contentHash: existing.contentHash,
@@ -205,20 +210,22 @@ final class HistoryViewModel {
                 thumbnailPath: thumbnailPath,
                 storageRef: existing.storageRef
             )
+            setItemIfChanged(at: index, to: updated)
         case .itemUpdated(let item):
             if !searchQuery.isEmpty {
-                if let index = items.firstIndex(where: { $0.id == item.id }) {
-                    items[index] = item
+                if let index = indexOfItem(withID: item.id) {
+                    setItemIfChanged(at: index, to: item)
                     prewarmDisplayText(for: [item])
                 }
                 return
             }
 
             let didMatchCurrentFilters = matchesCurrentFilters(item)
-            items.removeAll { $0.id == item.id }
             if didMatchCurrentFilters {
-                items.insert(item, at: 0)
+                _ = insertOrMoveItemToFront(item)
                 prewarmDisplayText(for: [item])
+            } else {
+                _ = removeItem(withID: item.id)
             }
 
             loadedCount = items.count
@@ -226,17 +233,15 @@ final class HistoryViewModel {
                 canLoadMore = loadedCount < totalCount
             }
         case .itemContentUpdated(let item):
-            guard let index = items.firstIndex(where: { $0.id == item.id }) else { return }
+            guard let index = indexOfItem(withID: item.id) else { return }
             let existing = items[index]
             if existing.thumbnailPath != item.thumbnailPath, let oldPath = existing.thumbnailPath {
                 ThumbnailCache.shared.remove(path: oldPath)
             }
-            items[index] = item
+            setItemIfChanged(at: index, to: item)
             prewarmDisplayText(for: [item])
         case .itemDeleted(let id):
-            let previousCount = items.count
-            items.removeAll { $0.id == id }
-            let wasPresent = items.count != previousCount
+            let wasPresent = removeItem(withID: id)
 
             loadedCount = items.count
             if totalCount >= 0 {
@@ -246,12 +251,14 @@ final class HistoryViewModel {
                 canLoadMore = loadedCount < totalCount
             }
         case .itemPinned(let id):
-            if let index = items.firstIndex(where: { $0.id == id }) {
-                items[index] = items[index].withPinned(true)
+            if let index = indexOfItem(withID: id) {
+                let updated = items[index].withPinned(true)
+                setItemIfChanged(at: index, to: updated)
             }
         case .itemUnpinned(let id):
-            if let index = items.firstIndex(where: { $0.id == id }) {
-                items[index] = items[index].withPinned(false)
+            if let index = indexOfItem(withID: id) {
+                let updated = items[index].withPinned(false)
+                setItemIfChanged(at: index, to: updated)
             }
         case .itemsCleared:
             await load()
@@ -461,7 +468,9 @@ final class HistoryViewModel {
         }
 
         searchTask = Task {
-            try? await Task.sleep(nanoseconds: timing.searchDebounceNs)
+            let query = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+            let debounceNs = effectiveSearchDebounceNs(for: query)
+            try? await Task.sleep(nanoseconds: debounceNs)
             guard !Task.isCancelled else { return }
             guard currentVersion == searchVersion else { return }
 
@@ -623,7 +632,7 @@ final class HistoryViewModel {
         guard !items.isEmpty else { return }
         lastSelectionSource = .keyboard
         if let currentID = selectedID,
-           let currentIndex = items.firstIndex(where: { $0.id == currentID }),
+           let currentIndex = indexOfItem(withID: currentID),
            currentIndex < items.count - 1 {
             selectedID = items[currentIndex + 1].id
         } else {
@@ -635,7 +644,7 @@ final class HistoryViewModel {
         guard !items.isEmpty else { return }
         lastSelectionSource = .keyboard
         if let currentID = selectedID,
-           let currentIndex = items.firstIndex(where: { $0.id == currentID }),
+           let currentIndex = indexOfItem(withID: currentID),
            currentIndex > 0 {
             selectedID = items[currentIndex - 1].id
         } else {
@@ -645,7 +654,7 @@ final class HistoryViewModel {
 
     func deleteSelectedItem() async {
         guard let id = selectedID else { return }
-        guard let index = items.firstIndex(where: { $0.id == id }) else { return }
+        guard let index = indexOfItem(withID: id) else { return }
 
         let nextID: UUID?
         if index < items.count - 1 {
@@ -656,9 +665,7 @@ final class HistoryViewModel {
             nextID = nil
         }
 
-        if let item = items.first(where: { $0.id == id }) {
-            await delete(item)
-        }
+        await delete(items[index])
 
         selectedID = nextID
         lastSelectionSource = .programmatic
@@ -666,8 +673,8 @@ final class HistoryViewModel {
 
     func selectCurrent() async {
         if let selectedID,
-           let item = items.first(where: { $0.id == selectedID }) {
-            await select(item)
+           let index = indexOfItem(withID: selectedID) {
+            await select(items[index])
         }
     }
 
@@ -681,6 +688,63 @@ final class HistoryViewModel {
     private func prewarmDisplayText(for items: [ClipboardItemDTO]) {
         guard !items.isEmpty else { return }
         ClipboardItemDisplayText.shared.prewarm(items: items)
+    }
+
+    private func rebuildItemIndexCacheIfNeeded() {
+        guard PerfFeatureFlags.historyIndexingEnabled else { return }
+        guard !itemIndexCacheValid else { return }
+        var rebuilt: [UUID: Int] = [:]
+        rebuilt.reserveCapacity(items.count)
+        for (index, item) in items.enumerated() {
+            rebuilt[item.id] = index
+        }
+        itemIndexByID = rebuilt
+        itemIndexCacheValid = true
+    }
+
+    private func indexOfItem(withID id: UUID) -> Int? {
+        guard PerfFeatureFlags.historyIndexingEnabled else {
+            return items.firstIndex(where: { $0.id == id })
+        }
+        rebuildItemIndexCacheIfNeeded()
+        return itemIndexByID[id]
+    }
+
+    @discardableResult
+    private func setItemIfChanged(at index: Int, to value: ClipboardItemDTO) -> Bool {
+        guard items.indices.contains(index) else { return false }
+        guard items[index] != value else { return false }
+        items[index] = value
+        return true
+    }
+
+    @discardableResult
+    private func removeItem(withID id: UUID) -> Bool {
+        guard let index = indexOfItem(withID: id) else { return false }
+        items.remove(at: index)
+        return true
+    }
+
+    @discardableResult
+    private func insertOrMoveItemToFront(_ item: ClipboardItemDTO) -> Bool {
+        if let existingIndex = indexOfItem(withID: item.id) {
+            if existingIndex == 0 {
+                return setItemIfChanged(at: existingIndex, to: item)
+            }
+            items.remove(at: existingIndex)
+        }
+        items.insert(item, at: 0)
+        return true
+    }
+
+    private func effectiveSearchDebounceNs(for query: String) -> UInt64 {
+        guard PerfFeatureFlags.shortQueryDebounceEnabled else {
+            return timing.searchDebounceNs
+        }
+        if query.count <= 2 {
+            return max(timing.searchDebounceNs, 16_000_000)
+        }
+        return timing.searchDebounceNs
     }
 
     private func cancelTask(_ task: inout Task<Void, Never>?) {

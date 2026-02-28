@@ -1,7 +1,7 @@
 import Foundation
 
 enum SQLiteMigrations {
-    static let currentUserVersion: Int32 = 6
+    static let currentUserVersion: Int32 = 7
 
     static func migrateIfNeeded(_ connection: SQLiteConnection) throws {
         let userVersion = try readUserVersion(connection)
@@ -27,6 +27,9 @@ enum SQLiteMigrations {
         }
         if userVersion < 6 {
             try setupMetaCounters(connection)
+        }
+        if userVersion < 7 {
+            try setupMetaExternalSizeCounter(connection)
         }
 
         try connection.execute("PRAGMA user_version = \(currentUserVersion)")
@@ -151,6 +154,78 @@ enum SQLiteMigrations {
                 SET unpinned_count = unpinned_count
                     + (CASE WHEN NEW.is_pinned = 0 THEN 1 ELSE 0 END)
                     - (CASE WHEN OLD.is_pinned = 0 THEN 1 ELSE 0 END)
+                WHERE id = 1;
+            END
+            """
+        )
+    }
+
+    private static func setupMetaExternalSizeCounter(_ connection: SQLiteConnection) throws {
+        try addColumnIfNeeded(connection, table: "scopy_meta", column: "external_size_bytes", type: "INTEGER NOT NULL DEFAULT 0")
+
+        try connection.execute(
+            """
+            UPDATE scopy_meta
+            SET external_size_bytes = COALESCE(
+                (
+                    SELECT SUM(size_bytes)
+                    FROM clipboard_items
+                    WHERE storage_ref IS NOT NULL AND storage_ref <> ''
+                ),
+                0
+            )
+            WHERE id = 1
+            """
+        )
+
+        try connection.execute(
+            """
+            CREATE TRIGGER IF NOT EXISTS scopy_meta_clipboard_ai_external
+            AFTER INSERT ON clipboard_items
+            BEGIN
+                UPDATE scopy_meta
+                SET external_size_bytes = external_size_bytes
+                    + CASE
+                        WHEN NEW.storage_ref IS NOT NULL AND NEW.storage_ref <> '' THEN NEW.size_bytes
+                        ELSE 0
+                    END
+                WHERE id = 1;
+            END
+            """
+        )
+
+        try connection.execute(
+            """
+            CREATE TRIGGER IF NOT EXISTS scopy_meta_clipboard_ad_external
+            AFTER DELETE ON clipboard_items
+            BEGIN
+                UPDATE scopy_meta
+                SET external_size_bytes = external_size_bytes
+                    - CASE
+                        WHEN OLD.storage_ref IS NOT NULL AND OLD.storage_ref <> '' THEN OLD.size_bytes
+                        ELSE 0
+                    END
+                WHERE id = 1;
+            END
+            """
+        )
+
+        try connection.execute(
+            """
+            CREATE TRIGGER IF NOT EXISTS scopy_meta_clipboard_au_external
+            AFTER UPDATE OF size_bytes, storage_ref ON clipboard_items
+            WHEN OLD.size_bytes IS NOT NEW.size_bytes OR OLD.storage_ref IS NOT NEW.storage_ref
+            BEGIN
+                UPDATE scopy_meta
+                SET external_size_bytes = external_size_bytes
+                    - CASE
+                        WHEN OLD.storage_ref IS NOT NULL AND OLD.storage_ref <> '' THEN OLD.size_bytes
+                        ELSE 0
+                    END
+                    + CASE
+                        WHEN NEW.storage_ref IS NOT NULL AND NEW.storage_ref <> '' THEN NEW.size_bytes
+                        ELSE 0
+                    END
                 WHERE id = 1;
             END
             """

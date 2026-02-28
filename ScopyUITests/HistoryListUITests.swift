@@ -5,6 +5,19 @@ import XCTest
 @MainActor
 final class HistoryListUITests: XCTestCase {
 
+    private enum ScrollProfileDataSource: String {
+        case mock
+        case realSnapshot
+    }
+
+    private static let forwardedPerfKeys: [String] = [
+        "SCOPY_PERF_HISTORY_INDEX",
+        "SCOPY_PERF_SCROLL_RESOLVER_CACHE",
+        "SCOPY_PERF_MARKDOWN_RESOLVER_CACHE",
+        "SCOPY_PERF_PREVIEW_TASK_BUDGET",
+        "SCOPY_PERF_SHORT_QUERY_DEBOUNCE"
+    ]
+
     var app: XCUIApplication!
 
     override func setUp() async throws {
@@ -21,9 +34,30 @@ final class HistoryListUITests: XCTestCase {
     }
 
     private var profileTestsEnabled: Bool {
-        let envEnabled = ProcessInfo.processInfo.environment["SCOPY_RUN_PROFILE_UI_TESTS"] == "1"
+        let envEnabled = envValue("SCOPY_RUN_PROFILE_UI_TESTS") == "1"
         let flagEnabled = FileManager.default.fileExists(atPath: "/tmp/scopy_run_profile_ui_tests")
         return envEnabled || flagEnabled
+    }
+
+    private var profileDurationOverrideSeconds: TimeInterval? {
+        parseDouble(envValue("SCOPY_UI_PROFILE_DURATION_SEC"))
+    }
+
+    private var profileMinSamplesOverride: Int? {
+        parseInt(envValue("SCOPY_UI_PROFILE_MIN_SAMPLES"))
+    }
+
+    private var profileOutputDirectory: String? {
+        envValue("SCOPY_UI_PROFILE_OUTPUT_DIR")
+    }
+
+    private var profileRunID: String {
+        envValue("SCOPY_UI_PROFILE_RUN_ID")
+            ?? UUID().uuidString
+    }
+
+    private var profileSnapshotDBPath: String? {
+        envValue("SCOPY_UI_PROFILE_DB_PATH")
     }
 
     // MARK: - List Display Tests
@@ -153,6 +187,48 @@ final class HistoryListUITests: XCTestCase {
         )
     }
 
+    func testScrollProfileRealSnapshotAccessibility() throws {
+        try runScrollProfileScenario(
+            scenario: "real-snapshot-accessibility",
+            itemCount: 0,
+            imageCount: 0,
+            showThumbnails: true,
+            textLength: 0,
+            accessibility: true,
+            dataSource: .realSnapshot,
+            durationSeconds: 10,
+            minSamples: 260
+        )
+    }
+
+    func testScrollProfileRealSnapshotMixed() throws {
+        try runScrollProfileScenario(
+            scenario: "real-snapshot-mixed",
+            itemCount: 0,
+            imageCount: 0,
+            showThumbnails: true,
+            textLength: 0,
+            accessibility: false,
+            dataSource: .realSnapshot,
+            durationSeconds: 10,
+            minSamples: 260
+        )
+    }
+
+    func testScrollProfileRealSnapshotTextBias() throws {
+        try runScrollProfileScenario(
+            scenario: "real-snapshot-text-bias",
+            itemCount: 0,
+            imageCount: 0,
+            showThumbnails: false,
+            textLength: 0,
+            accessibility: false,
+            dataSource: .realSnapshot,
+            durationSeconds: 10,
+            minSamples: 260
+        )
+    }
+
     func testHoverPreviewDismissesOnScroll() throws {
         app.terminate()
         app.launchEnvironment = [:]
@@ -228,6 +304,7 @@ final class HistoryListUITests: XCTestCase {
         showThumbnails: Bool,
         textLength: Int,
         accessibility: Bool,
+        dataSource: ScrollProfileDataSource = .mock,
         durationSeconds: TimeInterval = 6,
         minSamples: Int = 180
     ) throws {
@@ -235,18 +312,45 @@ final class HistoryListUITests: XCTestCase {
             throw XCTSkip("Set SCOPY_RUN_PROFILE_UI_TESTS=1 or touch /tmp/scopy_run_profile_ui_tests to enable scroll profiling UI tests")
         }
 
+        let resolvedDuration = max(4, profileDurationOverrideSeconds ?? durationSeconds)
+        let resolvedMinSamples = max(60, profileMinSamplesOverride ?? minSamples)
+
         app.terminate()
         app.launchEnvironment = [:]
 
-        let profilePath = "/tmp/scopy_scroll_profile_\(scenario)_\(UUID().uuidString).json"
-        app.launchEnvironment["USE_MOCK_SERVICE"] = "1"
-        app.launchEnvironment["SCOPY_MOCK_ITEM_COUNT"] = "\(itemCount)"
-        app.launchEnvironment["SCOPY_MOCK_IMAGE_COUNT"] = "\(imageCount)"
-        app.launchEnvironment["SCOPY_MOCK_SHOW_THUMBNAILS"] = showThumbnails ? "1" : "0"
-        app.launchEnvironment["SCOPY_MOCK_TEXT_LENGTH"] = "\(textLength)"
+        let testEnv = ProcessInfo.processInfo.environment
+        for key in Self.forwardedPerfKeys {
+            if let value = normalized(testEnv[key]) ?? normalized(testEnv["TEST_RUNNER_\(key)"]) {
+                app.launchEnvironment[key] = value
+            }
+        }
+
+        let profilePath = makeProfileOutputPath(scenario: scenario, runID: profileRunID)
+        switch dataSource {
+        case .mock:
+            app.launchEnvironment["USE_MOCK_SERVICE"] = "1"
+            app.launchEnvironment["SCOPY_MOCK_ITEM_COUNT"] = "\(itemCount)"
+            app.launchEnvironment["SCOPY_MOCK_IMAGE_COUNT"] = "\(imageCount)"
+            app.launchEnvironment["SCOPY_MOCK_SHOW_THUMBNAILS"] = showThumbnails ? "1" : "0"
+            app.launchEnvironment["SCOPY_MOCK_TEXT_LENGTH"] = "\(textLength)"
+            app.launchEnvironment["SCOPY_PROFILE_DATA_SOURCE"] = dataSource.rawValue
+        case .realSnapshot:
+            guard let dbPath = profileSnapshotDBPath else {
+                throw XCTSkip("Set SCOPY_UI_PROFILE_DB_PATH to an absolute snapshot DB path for real-snapshot profiling")
+            }
+            guard FileManager.default.fileExists(atPath: dbPath) else {
+                throw XCTSkip("Snapshot DB not found at \(dbPath)")
+            }
+            app.launchEnvironment["USE_MOCK_SERVICE"] = "0"
+            app.launchEnvironment["SCOPY_SERVICE_DB_PATH"] = dbPath
+            app.launchEnvironment["SCOPY_SERVICE_MONITOR_PASTEBOARD"] = "org.scopy.profile.\(safeFileToken(profileRunID)).\(safeFileToken(scenario))"
+            // Reduce monitor wakeups during UI profile runs; keep sampling focused on list/render path.
+            app.launchEnvironment["SCOPY_SERVICE_MONITOR_INTERVAL_SEC"] = "2.5"
+            app.launchEnvironment["SCOPY_PROFILE_DATA_SOURCE"] = dataSource.rawValue
+        }
         app.launchEnvironment["SCOPY_SCROLL_PROFILE"] = "1"
-        app.launchEnvironment["SCOPY_PROFILE_DURATION_SEC"] = "\(durationSeconds)"
-        app.launchEnvironment["SCOPY_PROFILE_MIN_SAMPLES"] = "\(minSamples)"
+        app.launchEnvironment["SCOPY_PROFILE_DURATION_SEC"] = "\(resolvedDuration)"
+        app.launchEnvironment["SCOPY_PROFILE_MIN_SAMPLES"] = "\(resolvedMinSamples)"
         app.launchEnvironment["SCOPY_PROFILE_OUTPUT"] = profilePath
         app.launchEnvironment["SCOPY_PROFILE_ACCESSIBILITY"] = accessibility ? "1" : "0"
         app.launchEnvironment["SCOPY_PROFILE_SCENARIO"] = scenario
@@ -260,13 +364,13 @@ final class HistoryListUITests: XCTestCase {
             return
         }
 
-        exerciseScroll(on: list, durationSeconds: durationSeconds)
+        exerciseScroll(durationSeconds: resolvedDuration)
 
         let predicate = NSPredicate { _, _ in
             FileManager.default.fileExists(atPath: profilePath)
         }
         let expectation = XCTNSPredicateExpectation(predicate: predicate, object: nil)
-        let result = XCTWaiter.wait(for: [expectation], timeout: max(12, durationSeconds + 6))
+        let result = XCTWaiter.wait(for: [expectation], timeout: max(12, resolvedDuration + 6))
         XCTAssertEqual(result, .completed, "Profile output not found at \(profilePath)")
 
         let data = try Data(contentsOf: URL(fileURLWithPath: profilePath))
@@ -279,14 +383,85 @@ final class HistoryListUITests: XCTestCase {
         XCTAssertEqual(scenarioName, scenario, "Profile scenario mismatch")
     }
 
-    private func exerciseScroll(on list: XCUIElement, durationSeconds: TimeInterval) {
+    private func exerciseScroll(durationSeconds: TimeInterval) {
         let window = app.windows.firstMatch
-        let endTime = Date().addingTimeInterval(durationSeconds)
-        while Date() < endTime {
-            let target = list.isHittable ? list : window
-            target.swipeUp()
-            usleep(120_000)
+        guard window.waitForExistence(timeout: 5) else { return }
+        if window.isHittable {
+            window.click()
         }
+
+        let endTime = Date().addingTimeInterval(durationSeconds)
+        var step = 0
+        while Date() < endTime {
+            guard window.exists else {
+                usleep(120_000)
+                continue
+            }
+            switch step % 6 {
+            case 0, 1, 4:
+                dragScroll(in: window, upward: true)
+            case 2:
+                dragScroll(in: window, upward: false)
+            case 3:
+                dragScroll(in: window, upward: true)
+                dragScroll(in: window, upward: true)
+            default:
+                dragScroll(in: window, upward: false)
+            }
+            usleep((step % 3 == 0) ? 90_000 : 120_000)
+            step += 1
+        }
+    }
+
+    private func dragScroll(in window: XCUIElement, upward: Bool) {
+        let startY: CGFloat = upward ? 0.78 : 0.22
+        let endY: CGFloat = upward ? 0.22 : 0.78
+        let start = window.coordinate(withNormalizedOffset: CGVector(dx: 0.55, dy: startY))
+        let end = window.coordinate(withNormalizedOffset: CGVector(dx: 0.55, dy: endY))
+        start.press(forDuration: 0.01, thenDragTo: end)
+    }
+
+    private func makeProfileOutputPath(scenario: String, runID: String) -> String {
+        if let outputDir = profileOutputDirectory {
+            let directory = URL(fileURLWithPath: outputDir, isDirectory: true)
+            try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            let token = safeFileToken(scenario)
+            let runToken = safeFileToken(runID)
+            return directory.appendingPathComponent("\(token)-\(runToken).json").path
+        }
+        return "/tmp/scopy_scroll_profile_\(safeFileToken(scenario))_\(UUID().uuidString).json"
+    }
+
+    private func safeFileToken(_ raw: String) -> String {
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "._-"))
+        let mapped = raw.unicodeScalars.map { allowed.contains($0) ? Character($0) : "-" }
+        var token = String(mapped)
+        while token.contains("--") {
+            token = token.replacingOccurrences(of: "--", with: "-")
+        }
+        token = token.trimmingCharacters(in: CharacterSet(charactersIn: "-"))
+        return token.isEmpty ? "profile" : token
+    }
+
+    private func normalized(_ raw: String?) -> String? {
+        guard let raw else { return nil }
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    private func envValue(_ key: String) -> String? {
+        let env = ProcessInfo.processInfo.environment
+        return normalized(env[key]) ?? normalized(env["TEST_RUNNER_\(key)"])
+    }
+
+    private func parseInt(_ raw: String?) -> Int? {
+        guard let normalized = normalized(raw) else { return nil }
+        return Int(normalized)
+    }
+
+    private func parseDouble(_ raw: String?) -> Double? {
+        guard let normalized = normalized(raw) else { return nil }
+        return Double(normalized)
     }
 
     private func prepareMainWindow(timeout: TimeInterval = 12) -> XCUIElement? {

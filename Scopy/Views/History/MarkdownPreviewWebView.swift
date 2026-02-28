@@ -6,10 +6,40 @@ import ScopyUISupport
 
 @MainActor
 private enum MarkdownPreviewScrollViewResolver {
+    private final class WeakScrollViewBox {
+        weak var value: NSScrollView?
+        init(_ value: NSScrollView?) {
+            self.value = value
+        }
+    }
+
+    private static var cache: [ObjectIdentifier: WeakScrollViewBox] = [:]
+
     static func resolve(for view: NSView) -> NSScrollView? {
-        if let sv = view as? NSScrollView { return sv }
-        if let sv = view.enclosingScrollView { return sv }
-        return findFirstScrollView(in: view)
+        if PerfFeatureFlags.markdownResolverCacheEnabled {
+            let key = ObjectIdentifier(view)
+            if let cached = cache[key]?.value {
+                return cached
+            }
+            // Opportunistic pruning for deallocated views.
+            if cache.count > 256 {
+                cache = cache.filter { $0.value.value != nil }
+            }
+        }
+
+        let resolved: NSScrollView?
+        if let sv = view as? NSScrollView {
+            resolved = sv
+        } else if let sv = view.enclosingScrollView {
+            resolved = sv
+        } else {
+            resolved = findFirstScrollView(in: view)
+        }
+
+        if PerfFeatureFlags.markdownResolverCacheEnabled {
+            cache[ObjectIdentifier(view)] = WeakScrollViewBox(resolved)
+        }
+        return resolved
     }
 
     private static func findFirstScrollView(in view: NSView) -> NSScrollView? {
