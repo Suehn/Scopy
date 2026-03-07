@@ -5,8 +5,12 @@ on:
     branches:
       - main
     paths:
-      - "doc/implementation/**"
-      - "DEPLOYMENT.md"
+      - "doc/meta/release-current.yml"
+      - "doc/releases/**"
+      - "doc/current/release-runbook.md"
+      - "doc/perf/release-profiles/**"
+      - "scripts/release/**"
+      - "scripts/docs/**"
 
 jobs:
   tag:
@@ -23,7 +27,7 @@ jobs:
       - name: Validate release docs
         run: bash scripts/release/validate-release-docs.sh
 
-      - name: Create annotated tag from doc index
+      - name: Create annotated tag from release metadata
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"

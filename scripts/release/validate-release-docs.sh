@@ -4,32 +4,30 @@ set -euo pipefail
 PROJECT_ROOT="$(git rev-parse --show-toplevel)"
 cd "${PROJECT_ROOT}"
 
-TAG="$(bash scripts/release/tag-from-doc.sh --tag)"
-if [[ -z "${TAG}" || "${TAG}" != v* ]]; then
-    echo "Failed to resolve release tag from doc index." >&2
-    exit 1
-fi
-if [[ "${TAG}" =~ ^v0\.18\. ]]; then
-    echo "Refusing legacy tag: ${TAG}" >&2
-    exit 1
-fi
+source scripts/release/release-metadata.sh
 
-DOC_INDEX="doc/implementation/README.md"
-VERSION_DOC="doc/implementation/releases/${TAG}.md"
-CHANGELOG="doc/implementation/CHANGELOG.md"
+TAG="$(release_meta_require version)"
+RELEASE_DOC="$(release_meta_require release_doc)"
+CHANGELOG="$(release_meta_require changelog_file)"
+METADATA_FILE="$(release_meta_file)"
 
-if [[ ! -f "${DOC_INDEX}" ]]; then
-    echo "Missing ${DOC_INDEX}" >&2
+if [[ ! -f "${METADATA_FILE}" ]]; then
+    echo "Missing ${METADATA_FILE}" >&2
     exit 1
 fi
 
-if [[ ! -f "${VERSION_DOC}" ]]; then
-    echo "Missing version doc: ${VERSION_DOC}" >&2
+if [[ ! -f "${RELEASE_DOC}" ]]; then
+    echo "Missing version doc: ${RELEASE_DOC}" >&2
     exit 1
 fi
 
 if [[ ! -f "${CHANGELOG}" ]]; then
     echo "Missing changelog: ${CHANGELOG}" >&2
+    exit 1
+fi
+
+if [[ "$(basename "${RELEASE_DOC}" .md)" != "${TAG}" ]]; then
+    echo "release_doc basename does not match version: ${RELEASE_DOC} vs ${TAG}" >&2
     exit 1
 fi
 
@@ -39,3 +37,4 @@ if ! grep -Fq "## [${TAG}]" "${CHANGELOG}"; then
 fi
 
 echo "OK: ${TAG}"
+

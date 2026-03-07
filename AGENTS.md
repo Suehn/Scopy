@@ -28,8 +28,8 @@
 ## 必读文档
 
 - 行为准则要同时参考 @CLAUDE.md 的说法准则
-- 启动前依次阅读：`doc/implementation/README.md`（当前状态）、`doc/implementation/CHANGELOG.md`（近期改动）、`doc/specs/v0.md`（规格）。
-- CLAUDE 约定：完成开发必须更新版本文档、索引、CHANGELOG；性能/部署变更需写入 `DEPLOYMENT.md`，含环境与具体数值。
+- 启动前依次阅读：`doc/meta/release-current.yml`（当前版本与入口）、`doc/releases/README.md`/`doc/releases/CHANGELOG.md`（近期改动）、`doc/current/product-spec.md`（需求）、`doc/current/development-guide.md`（开发指南）。
+- CLAUDE 约定：完成开发必须更新 release metadata、版本文档、索引、CHANGELOG；性能/部署变更需写入 `doc/current/release-runbook.md`，含环境与具体数值。
 
 ## 项目结构
 
@@ -37,7 +37,7 @@
 - 服务：`Scopy/Services/`（HotKeyService、ClipboardMonitor、StorageService、SearchService）。
 - 状态与协议：`Scopy/Observables/`，`Scopy/Protocols/`。
 - 测试：`ScopyTests/`，`ScopyUITests/`。
-- 文档：`doc/implementation/`（版本/变更）、`doc/specs/v0.md`（规格）。
+- 文档：`doc/releases/`（版本/变更）、`doc/current/product-spec.md`（规格）、`doc/current/maintainer-guide.md`（流程）。
 - 脚本：`deploy.sh`，`Makefile`。
 
 ## 构建与开发
@@ -69,10 +69,10 @@
 - 提交信息：简短祈使句（例 “Fix hotkey recording”）。
 - PR：说明改动、测试结果，UI 变更附截图，关联 issue；若性能/部署变化，附具体数据与环境。
 - 版本发布（必须）：统一使用 **git tag** 驱动版本号与发布（禁止用“commit count 自动生成版本”）。
-  - 创建版本提交（含 `doc/implementation/releases/vX.Y.Z.md`、索引、CHANGELOG、profile、必要时 `DEPLOYMENT.md`）
+  - 创建版本提交（含 `doc/meta/release-current.yml`、`doc/releases/history/vX.Y.Z.md`、索引、CHANGELOG、profile 或 `profile_doc: null`、必要时 `doc/current/release-runbook.md`）
   - 发布前校验（必须过）：`make release-validate`（校验索引里的 **当前版本** 对应的版本文档/CHANGELOG 条目都存在）
-  - 需要创建新版本文档骨架时：`make release-bump-patch`（从实现文档索引读取当前版本并递增 patch）
-  - 打 tag（推荐从实现文档索引读取当前版本）：`make tag-release`
+  - 需要创建新版本文档骨架时：`make release-bump-patch`（从 release metadata 读取当前版本并递增 patch）
+  - 打 tag（推荐从 release metadata 读取当前版本）：`make tag-release`
   - 推送（确保 tag 一并推送）：
     - 一次性：`make push-release`
     - 或手动：`git push origin main` + `git push origin vX.Y.Z`

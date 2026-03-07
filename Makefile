@@ -363,8 +363,9 @@ help:
 	@echo "  make stats        - Show project statistics"
 	@echo ""
 	@echo "Release:"
-	@echo "  make tag-release  - Tag HEAD from doc/implementation/README.md index"
+	@echo "  make tag-release  - Tag HEAD from doc/meta/release-current.yml"
 	@echo "  make push-release - Push main + current tag"
+	@echo "  make docs-validate - Validate canonical docs, metadata, and links"
 	@echo ""
 	@echo "Requirements:"
 	@echo "  - Xcode 16.0+"
@@ -387,6 +388,9 @@ push-release:
 
 release-validate:
 	@bash scripts/release/validate-release-docs.sh
+
+docs-validate:
+	@bash scripts/docs/validate-docs.sh
 
 release-bump-patch:
 	@bash scripts/release/bump-version.sh --patch

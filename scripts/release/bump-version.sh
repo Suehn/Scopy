@@ -4,15 +4,17 @@ set -euo pipefail
 PROJECT_ROOT="$(git rev-parse --show-toplevel)"
 cd "${PROJECT_ROOT}"
 
-DOC_INDEX="doc/implementation/README.md"
-CHANGELOG="doc/implementation/CHANGELOG.md"
+source scripts/release/release-metadata.sh
+
+RELEASE_INDEX="doc/releases/README.md"
+CHANGELOG="$(release_meta_require changelog_file)"
 
 usage() {
     cat <<EOF
 Usage: scripts/release/bump-version.sh [--patch] [--title "Summary line"]
 
   --patch   Bump patch version (default)
-  --title   Optional short summary used in README/CHANGELOG placeholders
+  --title   Optional short summary used in metadata and changelog placeholders
 EOF
 }
 
@@ -47,18 +49,12 @@ parse_args() {
     done
 }
 
-extract_current_tag() {
-    if [[ ! -f "${DOC_INDEX}" ]]; then
-        echo "Missing ${DOC_INDEX}" >&2
+ensure_clean_worktree() {
+    if [[ -n "$(git status --porcelain)" ]]; then
+        echo "Working tree is not clean (includes untracked files); commit/stash before bumping version docs." >&2
+        git status --short >&2
         exit 1
     fi
-    local tag
-    tag="$(awk -F'|' '/\*\*当前版本\*\*/ {gsub(/[[:space:]]/, "", $3); print $3; exit}' "${DOC_INDEX}")"
-    if [[ -z "${tag}" ]]; then
-        echo "Failed to parse current version from ${DOC_INDEX}" >&2
-        exit 1
-    fi
-    echo "${tag}"
 }
 
 bump_patch_tag() {
@@ -75,100 +71,11 @@ bump_patch_tag() {
     echo "v${major}.${minor}.${patch}"
 }
 
-ensure_clean_worktree() {
-    if [[ -n "$(git status --porcelain)" ]]; then
-        echo "Working tree is not clean (includes untracked files); commit/stash before bumping version docs." >&2
-        git status --short >&2
-        exit 1
-    fi
-}
-
-insert_changelog_section() {
-    local tag="$1"
-    local date_str="$2"
-    local summary="$3"
-
-    if [[ ! -f "${CHANGELOG}" ]]; then
-        echo "Missing ${CHANGELOG}" >&2
-        exit 1
-    fi
-
-    if grep -Fq "## [${tag}]" "${CHANGELOG}"; then
-        echo "Changelog already contains ${tag}; refusing to insert." >&2
-        exit 1
-    fi
-
-    local tmp
-    tmp="$(mktemp)"
-    awk -v tag="${tag}" -v date_str="${date_str}" -v summary="${summary}" '
-      BEGIN { inserted=0 }
-      /^## \[/ && $0 !~ /^## \[Unreleased\]/ && inserted==0 {
-        print "## [" tag "] - " date_str
-        print ""
-        print "### " summary
-        print ""
-        print "- TODO"
-        print ""
-        inserted=1
-      }
-      { print }
-      END {
-        if (inserted==0) {
-          print ""
-          print "## [" tag "] - " date_str
-          print ""
-          print "### " summary
-          print ""
-          print "- TODO"
-          print ""
-        }
-      }
-    ' "${CHANGELOG}" > "${tmp}"
-    mv "${tmp}" "${CHANGELOG}"
-}
-
-update_doc_index() {
-    local old_tag="$1"
-    local new_tag="$2"
-    local date_str="$3"
-    local summary="$4"
-
-    local tmp
-    tmp="$(mktemp)"
-    awk -v old_tag="${old_tag}" -v new_tag="${new_tag}" -v date_str="${date_str}" -v summary="${summary}" '
-      {
-        line=$0
-        if (line ~ /\| \*\*当前版本\*\* \|/) {
-          gsub(old_tag, new_tag, line)
-        }
-        if (line ~ /\| \*\*最后更新\*\* \|/) {
-          sub(/\| \*\*最后更新\*\* \| [0-9]{4}-[0-9]{2}-[0-9]{2} \|/, "| **最后更新** | " date_str " |", line)
-        }
-        print line
-      }
-    ' "${DOC_INDEX}" > "${tmp}"
-    mv "${tmp}" "${DOC_INDEX}"
-
-    if ! grep -Fq "| [${new_tag}](./releases/${new_tag}.md)" "${DOC_INDEX}"; then
-        tmp="$(mktemp)"
-        awk -v new_tag="${new_tag}" -v date_str="${date_str}" -v summary="${summary}" '
-          BEGIN { inserted=0 }
-          /^\| \[v/ && inserted==0 {
-            print "| [" new_tag "](./releases/" new_tag ".md) | " date_str " | " summary " | ✅ |"
-            inserted=1
-          }
-          { print }
-        ' "${DOC_INDEX}" > "${tmp}"
-        mv "${tmp}" "${DOC_INDEX}"
-    fi
-}
-
 create_version_doc() {
     local tag="$1"
-    local date_str="$2"
-    local summary="$3"
+    local summary="$2"
+    local doc="doc/releases/history/${tag}.md"
 
-    local doc="doc/implementation/releases/${tag}.md"
     if [[ -f "${doc}" ]]; then
         echo "Version doc already exists: ${doc}" >&2
         exit 1
@@ -177,51 +84,104 @@ create_version_doc() {
     cat > "${doc}" <<EOF
 # ${tag}
 
-## 📌 一页纸总结（What / Why / Result）
-
-### What
+## Summary
 
 - ${summary}
 
-### Why
+## Key Changes
 
 - TODO
 
-### Result
+## Verification
 
 - TODO
 
----
-
-## 🏗️ 实现路线
-
-1. TODO
-
----
-
-## 📂 核心改动
-
-- TODO
-
----
-
-## 🎯 关键指标
-
-- TODO
-
----
-
-## 📊 当前状态
-
-- 单元测试：\`make test-unit\` TODO
-- Strict Concurrency：\`make test-strict\` TODO
-
----
-
-## 🔮 遗留与后续
+## Follow-up
 
 - TODO
 EOF
+}
+
+insert_changelog_section() {
+    local tag="$1"
+    local date_str="$2"
+    local summary="$3"
+
+    python3 - "${CHANGELOG}" "${tag}" "${date_str}" "${summary}" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+tag = sys.argv[2]
+date_str = sys.argv[3]
+summary = sys.argv[4]
+text = path.read_text(encoding="utf-8")
+heading = f"## [{tag}] - {date_str}\n\n### {summary}\n\n- TODO\n"
+if f"## [{tag}]" in text:
+    raise SystemExit(f"Changelog already contains {tag}")
+needle = "## [Unreleased]\n\n### Notes\n\n- No unreleased entries.\n"
+if needle in text:
+    text = text.replace(needle, needle + "\n" + heading + "\n", 1)
+else:
+    marker = "## [Unreleased]"
+    idx = text.find(marker)
+    if idx == -1:
+        text = heading + "\n" + text
+    else:
+        insert_at = text.find("\n", idx)
+        text = text[:insert_at + 1] + "\n" + heading + "\n" + text[insert_at + 1:]
+path.write_text(text, encoding="utf-8")
+PY
+}
+
+update_release_metadata_and_index() {
+    local old_tag="$1"
+    local new_tag="$2"
+    local date_str="$3"
+    local summary="$4"
+
+    python3 - "$(release_meta_file)" "${RELEASE_INDEX}" "${new_tag}" "${date_str}" "${summary}" <<'PY'
+from pathlib import Path
+import re
+import sys
+
+meta_path = Path(sys.argv[1])
+index_path = Path(sys.argv[2])
+tag = sys.argv[3]
+date_str = sys.argv[4]
+summary = sys.argv[5]
+
+meta = meta_path.read_text(encoding="utf-8")
+meta = re.sub(r"^version: .*$", f"version: {tag}", meta, count=1, flags=re.M)
+meta = re.sub(r"^date: .*$", f"date: {date_str}", meta, count=1, flags=re.M)
+meta = re.sub(r"^release_doc: .*$", f"release_doc: doc/releases/history/{tag}.md", meta, count=1, flags=re.M)
+meta = re.sub(r"^profile_doc: .*$", "profile_doc: null", meta, count=1, flags=re.M)
+meta = re.sub(r"^last_verified_at: .*$", f"last_verified_at: {date_str}", meta, count=1, flags=re.M)
+meta = re.sub(r"^summary: .*$", f"summary: {summary}", meta, count=1, flags=re.M)
+meta_path.write_text(meta, encoding="utf-8")
+
+current_block = f"""<!-- release-current:start -->
+- Version: `{tag}`
+- Date: `{date_str}`
+- Release note: [{tag}](./history/{tag}.md)
+- Changelog: [CHANGELOG.md](./CHANGELOG.md)
+- Profile doc: `none`
+<!-- release-current:end -->""".replace("`", chr(96))
+
+index = index_path.read_text(encoding="utf-8")
+index = re.sub(r"<!-- release-current:start -->.*?<!-- release-current:end -->", current_block, index, count=1, flags=re.S)
+
+recent_match = re.search(r"<!-- release-recent:start -->\n(.*?)\n<!-- release-recent:end -->", index, flags=re.S)
+if not recent_match:
+    raise SystemExit("Missing recent release markers in doc/releases/README.md")
+recent_lines = [line for line in recent_match.group(1).splitlines() if line.strip()]
+new_line = f"- `{date_str}` [{tag}](./history/{tag}.md) - {summary}".replace("`", chr(96))
+recent_lines = [new_line] + [line for line in recent_lines if f"[{tag}]" not in line]
+recent_lines = recent_lines[:12]
+recent_block = "<!-- release-recent:start -->\n" + "\n".join(recent_lines) + "\n<!-- release-recent:end -->"
+index = re.sub(r"<!-- release-recent:start -->.*?<!-- release-recent:end -->", recent_block, index, count=1, flags=re.S)
+index_path.write_text(index, encoding="utf-8")
+PY
 }
 
 main() {
@@ -229,11 +189,7 @@ main() {
     ensure_clean_worktree
 
     local old_tag new_tag date_str summary
-    old_tag="$(extract_current_tag)"
-    if [[ "${old_tag}" =~ ^v0\.18\. ]]; then
-        echo "Refusing legacy tag in doc index: ${old_tag}" >&2
-        exit 1
-    fi
+    old_tag="$(release_meta_require version)"
 
     case "${BUMP_KIND}" in
     patch)
@@ -248,17 +204,18 @@ main() {
     date_str="$(date +%Y-%m-%d)"
     summary="${TITLE:-Dev/Release: TODO}"
 
-    create_version_doc "${new_tag}" "${date_str}" "${summary}"
-    update_doc_index "${old_tag}" "${new_tag}" "${date_str}" "${summary}"
+    create_version_doc "${new_tag}" "${summary}"
+    update_release_metadata_and_index "${old_tag}" "${new_tag}" "${date_str}" "${summary}"
     insert_changelog_section "${new_tag}" "${date_str}" "${summary}"
 
     echo "Bumped: ${old_tag} -> ${new_tag}"
     echo "Next:"
-    echo "  - Fill in doc: doc/implementation/releases/${new_tag}.md"
-    echo "  - Update doc index + changelog if needed"
-    echo "  - Run: make release-validate"
+    echo "  - Fill in doc: doc/releases/history/${new_tag}.md"
+    echo "  - Review metadata + release index + changelog"
+    echo "  - Run: make docs-validate && make release-validate"
     echo "  - Commit, then run: make tag-release"
     echo "  - Publish: make push-release"
 }
 
 main "$@"
+

@@ -4,35 +4,22 @@ set -euo pipefail
 PROJECT_ROOT="$(git rev-parse --show-toplevel)"
 cd "${PROJECT_ROOT}"
 
-DOC_INDEX="doc/implementation/README.md"
+source scripts/release/release-metadata.sh
 
-extract_current_version_tag() {
-    if [[ ! -f "${DOC_INDEX}" ]]; then
-        echo "Missing ${DOC_INDEX}" >&2
-        exit 1
-    fi
-
-    # Expected line: | **当前版本** | v0.43.18 |
-    local tag
-    tag="$(awk -F'|' '/\*\*当前版本\*\*/ {gsub(/[[:space:]]/, "", $3); print $3; exit}' "${DOC_INDEX}")"
-    if [[ -z "${tag}" ]]; then
-        echo "Failed to parse current version from ${DOC_INDEX}" >&2
-        exit 1
-    fi
-    if [[ "${tag}" != v* ]]; then
-        echo "Invalid version tag in ${DOC_INDEX}: ${tag} (expected prefix 'v')" >&2
+validate_tag() {
+    local tag="$1"
+    if [[ -z "${tag}" || "${tag}" != v* ]]; then
+        echo "Invalid tag in release metadata: ${tag}" >&2
         exit 1
     fi
     if [[ ! "${tag}" =~ ^v[0-9]+\.[0-9]+(\.[0-9]+)?([-.][0-9A-Za-z]+)?$ ]]; then
-        echo "Invalid version tag format in ${DOC_INDEX}: ${tag}" >&2
+        echo "Invalid tag format in release metadata: ${tag}" >&2
         exit 1
     fi
     if [[ "${tag}" =~ ^v0\.18\. ]]; then
-        echo "Refusing legacy tag line in ${DOC_INDEX}: ${tag}" >&2
+        echo "Refusing legacy tag in release metadata: ${tag}" >&2
         exit 1
     fi
-
-    echo "${tag}"
 }
 
 ensure_clean_worktree() {
@@ -44,10 +31,9 @@ ensure_clean_worktree() {
 }
 
 ensure_release_doc_tracked() {
-    local tag="$1"
-    local doc_file="doc/implementation/releases/${tag}.md"
+    local doc_file="$1"
     if [[ ! -f "${doc_file}" ]]; then
-        echo "Missing release doc for ${tag}: ${doc_file}" >&2
+        echo "Missing release doc: ${doc_file}" >&2
         exit 1
     fi
     if ! git ls-files --error-unmatch "${doc_file}" >/dev/null 2>&1; then
@@ -57,8 +43,7 @@ ensure_release_doc_tracked() {
 }
 
 tag_message() {
-    local tag="$1"
-    local doc_file="doc/implementation/releases/${tag}.md"
+    local doc_file="$1"
     if [[ -f "${doc_file}" ]]; then
         local title
         title="$(awk 'NR==1{print; exit}' "${doc_file}")"
@@ -66,14 +51,16 @@ tag_message() {
         echo "${title}"
         return 0
     fi
-    echo "Release ${tag}"
+    echo "Release $(release_meta_require version)"
 }
 
 main() {
     local cmd="${1:---ensure}"
+    local tag doc_file
 
-    local tag
-    tag="$(extract_current_version_tag)"
+    tag="$(release_meta_require version)"
+    doc_file="$(release_meta_require release_doc)"
+    validate_tag "${tag}"
 
     case "${cmd}" in
     --tag)
@@ -89,7 +76,7 @@ main() {
     esac
 
     ensure_clean_worktree
-    ensure_release_doc_tracked "${tag}"
+    ensure_release_doc_tracked "${doc_file}"
 
     if git rev-parse -q --verify "refs/tags/${tag}" >/dev/null; then
         if [[ "$(git rev-list -n 1 "${tag}")" != "$(git rev-parse HEAD)" ]]; then
@@ -100,10 +87,9 @@ main() {
         exit 0
     fi
 
-    local message
-    message="$(tag_message "${tag}")"
-    git tag -a "${tag}" -m "${message}"
+    git tag -a "${tag}" -m "$(tag_message "${doc_file}")"
     echo "${tag}"
 }
 
 main "$@"
+

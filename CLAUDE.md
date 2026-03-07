@@ -32,19 +32,21 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ### 每次对话开始时
 
-1. **读取** `doc/implementation/README.md` - 了解当前状态和最新版本
-2. **读取** `doc/implementation/CHANGELOG.md` - 了解最近变化
-3. **参考** `doc/specs/v0.md` - 设计规范和需求来源
+1. **读取** `doc/meta/release-current.yml` - 了解当前版本和 canonical 文档入口
+2. **读取** `doc/releases/README.md` / `doc/releases/CHANGELOG.md` - 了解最新 release 状态
+3. **参考** `doc/current/product-spec.md` - 当前需求基线
+4. **参考** `doc/current/development-guide.md` - 当前开发与实现指南
 
 ### 每次开发完成后
 
 必须更新以下文档:
 
-1. **创建/更新版本文档** `doc/implementation/releases/vX.X.md`
-2. **更新索引** `doc/implementation/README.md`
-3. **更新变更日志** `doc/implementation/CHANGELOG.md`
-4. **更新部署文档** `DEPLOYMENT.md` (如有性能/部署变化，必须包含具体数值)
-5. **版本发布一律用 git tag**：发布版本号不得由 commit count 自动生成；tag 作为发布单一事实来源（详见 `AGENTS.md` 与 `DEPLOYMENT.md`）。
+1. **更新 release metadata** `doc/meta/release-current.yml`
+2. **创建/更新版本文档** `doc/releases/history/vX.Y.Z.md`
+3. **更新索引** `doc/releases/README.md`
+4. **更新变更日志** `doc/releases/CHANGELOG.md`
+5. **更新部署文档** `doc/current/release-runbook.md` (如有性能/部署变化，必须包含具体数值)
+6. **版本发布一律用 git tag**：发布版本号不得由 commit count 自动生成；tag 作为发布单一事实来源（详见 `AGENTS.md` 与 `doc/current/release-runbook.md`）。
 
 ### 版本命名规范
 
@@ -67,7 +69,7 @@ v0.x.fix   - 修复版本 (bug fix/hotfix)
 
 ### 性能数据要求
 
-DEPLOYMENT.md 中的性能测试必须包含:
+doc/current/release-runbook.md 中的性能测试要求必须包含:
 
 - 测试环境 (硬件/系统/日期)
 - 具体数值 (不能只写"满足")
@@ -78,7 +80,7 @@ DEPLOYMENT.md 中的性能测试必须包含:
 
 ### 性能变化记录 (必须)
 
-每次版本迭代后，必须在 `doc/profiles/` 目录下创建性能对比文档:
+当 release 需要单独性能档案时，在 `doc/perf/release-profiles/` 下创建性能对比文档；否则在 metadata 中显式记录 `profile_doc: null`:
 
 1. **文件命名**: `vX.X-profile.md` (如 `v0.11-profile.md`)
 2. **必须包含**:
@@ -100,9 +102,9 @@ DEPLOYMENT.md 中的性能测试必须包含:
 - **构建注入**：本地与 CI 构建需要注入 `MARKETING_VERSION` / `CURRENT_PROJECT_VERSION`（统一入口 `scripts/version.sh`）。
 - **CI 行为**：GitHub Actions `Build and Release` 只从 tag 构建并产出 DMG；Cask 更新通过 PR 合入，workflow 不直接 push main。
 - **发布检查表（必须过）**：
-  - 版本提交：更新 `doc/implementation/releases/vX.Y.Z.md` + `doc/implementation/README.md` + `doc/implementation/CHANGELOG.md`（性能/部署变化则同步 `DEPLOYMENT.md`，含环境与数值）。
+  - 版本提交：更新 `doc/meta/release-current.yml` + `doc/releases/history/vX.Y.Z.md` + `doc/releases/README.md` + `doc/releases/CHANGELOG.md`（性能/部署变化则同步 `doc/current/release-runbook.md`，含环境与数值）。
   - 校验：`make release-validate`（确保索引里的 **当前版本** 对应的版本文档/CHANGELOG 条目齐全）。
-  - 打 tag：`make tag-release`（tag 从实现文档索引读取；要求工作区干净）。
+  - 打 tag：`make tag-release`（tag 从 release metadata 读取；要求工作区干净）。
   - 推送：`make push-release`（push main + 当前 tag）。
   - Homebrew 闭环：等待 release 产出 `Scopy-<version>.dmg` + `.sha256`，并确认 `Suehn/homebrew-scopy` 的 `Casks/scopy.rb` 已更新到同版本与 sha；本地用 `brew fetch --cask scopy`/`brew upgrade --cask scopy` 验证可安装可升级。
 
@@ -110,7 +112,7 @@ DEPLOYMENT.md 中的性能测试必须包含:
 
 ## Project Overview
 
-**Scopy** is a native macOS clipboard manager designed to provide unlimited history, intelligent storage, and high-performance search. The current implementation status and latest version are tracked in `doc/implementation/README.md`, while `doc/specs/v0.md` documents the Phase 1 requirements baseline.
+**Scopy** is a native macOS clipboard manager designed to provide unlimited history, intelligent storage, and high-performance search. The current implementation status and latest version are tracked in `doc/meta/release-current.yml` and `doc/releases/README.md`, while `doc/current/product-spec.md` documents the active requirements baseline.
 
 ## Architecture
 
@@ -229,7 +231,7 @@ Results return paginated responses with hasMore flag for progressive rendering.
 
 ## Important Notes for Implementers
 
-1. **This is a specification-driven project**: The detailed requirements in `doc/specs/v0.md` define Phase 1 scope and acceptance criteria
+1. **This is a specification-driven project**: The detailed requirements in `doc/current/product-spec.md` define the active scope and acceptance criteria
 2. **Start with backend**: Implement ClipboardService, StorageService, and SearchService before UI
 3. **UI comes last**: The protocol-based architecture allows UI development to happen independently
 4. **Performance is first-class**: Quantified SLOs guide implementation choices and should inform testing strategy
@@ -237,7 +239,7 @@ Results return paginated responses with hasMore flag for progressive rendering.
 
 ## Specification Reference
 
-The complete Phase 1 specification is in `doc/specs/v0.md` with the four core goals:
+The active requirements baseline is in `doc/current/product-spec.md` with the four core goals:
 
 1. Native beautiful UI + complete backend/frontend decoupling
 2. Unlimited history + hierarchical storage + lazy loading

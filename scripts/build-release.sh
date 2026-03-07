@@ -6,7 +6,7 @@
 #   ./scripts/build-release.sh
 #
 # 说明:
-#   - v0.43.15 起，发布版本号以 git tag 为单一事实来源（详见 DEPLOYMENT.md）
+#   - v0.43.15 起，发布版本号以 git tag 为单一事实来源（详见 doc/current/release-runbook.md）
 #   - 本脚本会从当前 HEAD tag 解析版本并注入 MARKETING_VERSION/CURRENT_PROJECT_VERSION
 
 set -e

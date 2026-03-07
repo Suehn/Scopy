@@ -193,12 +193,13 @@ Scopy follows a **protocol-first, frontend-backend separation** design:
 
 ## Documentation
 
-- `doc/README.md` - Documentation structure
-- `doc/implementation/README.md` - Current status and release index
-- `doc/implementation/CHANGELOG.md` - Changelog
-- `doc/specs/v0.md` - Product spec
-- `doc/profiles/` - Performance baselines
-- `doc/reviews/perf-*.md` - Perf audits, causality, acceptance, and unified front/back reports
+- `doc/README.md` - Documentation portal
+- `doc/current/maintainer-guide.md` - Canonical maintainer workflow
+- `doc/releases/README.md` - Current release index
+- `doc/releases/CHANGELOG.md` - Current changelog window
+- `doc/current/product-spec.md` - Product spec
+- `doc/perf/` - Performance evidence and studies
+- `doc/reviews/` - Review and audit reports
 
 ---
 
@@ -210,13 +211,13 @@ Scopy follows a **protocol-first, frontend-backend separation** design:
 4. Push to the branch (`git push origin feature/amazing`)
 5. Open a Pull Request
 
-For maintainers: update release docs (`doc/implementation/releases/`), index, and CHANGELOG for every shipped change.
+For maintainers: update `doc/meta/release-current.yml`, `doc/releases/history/`, `doc/releases/README.md`, and `doc/releases/CHANGELOG.md` for every shipped release.
 
 ---
 
 ## License
 
-MIT License - see [LICENSE](LICENSE) for details.
+MIT License.
 
 ---
 
