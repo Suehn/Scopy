@@ -40,9 +40,16 @@ final class MarkdownExportServiceTests: XCTestCase {
 
         let pasteboardName = NSPasteboard.Name("ScopyTests.MarkdownExportServiceTests.\(UUID().uuidString)")
         let pasteboard = NSPasteboard(name: pasteboardName)
+        pasteboard.clearContents()
+        pasteboard.setString("stale-text", forType: .string)
+        pasteboard.setData(Data("<p>stale-html</p>".utf8), forType: .html)
 
         try MarkdownExportService.writePNGToPasteboard(pngData: pngData, pasteboard: pasteboard)
 
         XCTAssertNotNil(pasteboard.data(forType: .png))
+        XCTAssertNotNil(pasteboard.data(forType: .tiff))
+        XCTAssertNotNil(NSImage(pasteboard: pasteboard))
+        XCTAssertNil(pasteboard.string(forType: .string))
+        XCTAssertNil(pasteboard.data(forType: .html))
     }
 }

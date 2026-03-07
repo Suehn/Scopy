@@ -264,6 +264,30 @@ public final class ClipboardMonitor {
     }
 
     public func copyToClipboard(data: Data, type: NSPasteboard.PasteboardType) {
+        if type == .png {
+            guard let imagePayload = Self.makeImagePayloadForPasteboardWrite(data) else {
+                ScopyLog.monitor.error("Failed to normalize image payload as PNG before pasteboard write")
+                return
+            }
+
+            pasteboard.clearContents()
+            let declaredTypes: [NSPasteboard.PasteboardType] = imagePayload.tiffData == nil ? [.png] : [.png, .tiff]
+            pasteboard.declareTypes(declaredTypes, owner: nil)
+
+            guard pasteboard.setData(imagePayload.pngData, forType: .png) else {
+                ScopyLog.monitor.error("Failed to write PNG payload to pasteboard")
+                return
+            }
+
+            if let tiffData = imagePayload.tiffData,
+               !pasteboard.setData(tiffData, forType: .tiff) {
+                ScopyLog.monitor.warning("Failed to write TIFF fallback for PNG payload")
+            }
+
+            lastChangeCount = pasteboard.changeCount
+            return
+        }
+
         pasteboard.clearContents()
         pasteboard.setData(data, forType: type)
         lastChangeCount = pasteboard.changeCount
@@ -278,6 +302,108 @@ public final class ClipboardMonitor {
         pasteboard.writeObjects([item])
 
         lastChangeCount = pasteboard.changeCount
+    }
+
+    private struct ImagePasteboardPayload {
+        let pngData: Data
+        let tiffData: Data?
+    }
+
+    nonisolated private static func makeImagePayloadForPasteboardWrite(_ data: Data) -> ImagePasteboardPayload? {
+        guard let imageSource = CGImageSourceCreateWithData(data as CFData, nil),
+              let image = CGImageSourceCreateImageAtIndex(imageSource, 0, nil) else {
+            return nil
+        }
+
+        let sourceType = CGImageSourceGetType(imageSource) as String?
+        if sourceType == UTType.png.identifier, !Self.shouldRasterizeForPNGReplay(image) {
+            return ImagePasteboardPayload(pngData: data, tiffData: nil)
+        }
+
+        if sourceType == UTType.png.identifier,
+           let tiffData = Self.rasterizeCGImageToStandardTIFF(image) {
+            // Preserve the original PNG bytes for fidelity while giving Codex/arboard
+            // a rasterized TIFF representation it can decode reliably.
+            return ImagePasteboardPayload(pngData: data, tiffData: tiffData)
+        }
+
+        guard let pngData = Self.rasterizeCGImageToStandardPNG(image) else { return nil }
+        return ImagePasteboardPayload(pngData: pngData, tiffData: nil)
+    }
+
+    nonisolated private static func shouldRasterizeForPNGReplay(_ image: CGImage) -> Bool {
+        guard let colorSpace = image.colorSpace else { return true }
+        if colorSpace.model != .rgb { return true }
+        if image.bitsPerPixel < 24 { return true }
+        return false
+    }
+
+    nonisolated private static func rasterizeCGImageToStandardPNG(_ image: CGImage) -> Data? {
+        guard let context = Self.makeStandardRGBAContext(for: image) else { return nil }
+
+        let width = image.width
+        let height = image.height
+        context.interpolationQuality = CGInterpolationQuality.high
+        context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+
+        guard let rasterizedImage = context.makeImage() else { return nil }
+
+        let output = NSMutableData()
+        guard let destination = CGImageDestinationCreateWithData(
+            output as CFMutableData,
+            UTType.png.identifier as CFString,
+            1,
+            nil
+        ) else {
+            return nil
+        }
+
+        CGImageDestinationAddImage(destination, rasterizedImage, nil)
+        guard CGImageDestinationFinalize(destination) else { return nil }
+        return output as Data
+    }
+
+    nonisolated private static func rasterizeCGImageToStandardTIFF(_ image: CGImage) -> Data? {
+        guard let context = Self.makeStandardRGBAContext(for: image) else { return nil }
+
+        let width = image.width
+        let height = image.height
+        context.interpolationQuality = CGInterpolationQuality.high
+        context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+
+        guard let rasterizedImage = context.makeImage() else { return nil }
+
+        let output = NSMutableData()
+        guard let destination = CGImageDestinationCreateWithData(
+            output as CFMutableData,
+            UTType.tiff.identifier as CFString,
+            1,
+            nil
+        ) else {
+            return nil
+        }
+
+        CGImageDestinationAddImage(destination, rasterizedImage, nil)
+        guard CGImageDestinationFinalize(destination) else { return nil }
+        return output as Data
+    }
+
+    nonisolated private static func makeStandardRGBAContext(for image: CGImage) -> CGContext? {
+        let width = image.width
+        let height = image.height
+        guard width > 0, height > 0 else { return nil }
+
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        let bitmapInfo = CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue).union(.byteOrder32Big)
+        return CGContext(
+            data: nil,
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bytesPerRow: 0,
+            space: colorSpace,
+            bitmapInfo: bitmapInfo.rawValue
+        )
     }
 
     /// Copy file URLs to system clipboard
@@ -546,9 +672,15 @@ public final class ClipboardMonitor {
         // 这里采用“仅在检测到明显的表格/Office 富文本信号时”才让 Image 退到后面，
         // 以避免影响浏览器/设计工具等真正的图片复制场景。
 
+        let fileURLs = (pasteboard.readObjects(
+            forClasses: [NSURL.self],
+            options: [.urlReadingFileURLsOnly: true]
+        ) as? [URL]) ?? []
+        let shouldPreferImageOverFileURLs = shouldPreferImageOverFileURLs(fileURLs: fileURLs, from: pasteboard)
+
         // 1. File URLs (最高优先级 - 文件复制总是带有文本表示)
-        if let fileURLs = pasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL],
-           !fileURLs.isEmpty {
+        // 例外：部分 App（如 IM）复制图片时会同时给“临时图片文件路径 + 图片二进制”，这类场景应保留图片语义。
+        if !fileURLs.isEmpty, !shouldPreferImageOverFileURLs {
             let paths = fileURLs.map { $0.path }.joined(separator: "\n")
             // 序列化文件 URL 以便后续恢复
             let urlData = Self.serializeFileURLs(fileURLs)
@@ -565,7 +697,7 @@ public final class ClipboardMonitor {
 
         // 2. Image (PNG, TIFF, etc.) - 默认优先 PNG；TIFF 转 PNG 延迟到后台（避免主线程重编码）
         // v0.19: 图片统一使用 SHA256 去重（在后台线程计算），移除无用的轻量指纹
-        if !shouldPreferRichTypesOverImage, let imageResult = extractImageDataForIngest(from: pasteboard) {
+        if !shouldPreferRichTypesOverImage, let imageResult = extractImageDataForIngest(from: pasteboard, candidateFileURL: fileURLs.first) {
             let imageData = imageResult.data
             return RawClipboardData(
                 type: .image,
@@ -623,7 +755,7 @@ public final class ClipboardMonitor {
 
         // 6. Image（兜底）
         // 如果上面没有任何富文本/文本可用，再回退到图片，确保复制图表/截图等场景不丢失内容。
-        if shouldPreferRichTypesOverImage, let imageResult = extractImageDataForIngest(from: pasteboard) {
+        if shouldPreferRichTypesOverImage, let imageResult = extractImageDataForIngest(from: pasteboard, candidateFileURL: fileURLs.first) {
             let imageData = imageResult.data
             return RawClipboardData(
                 type: .image,
@@ -686,9 +818,15 @@ public final class ClipboardMonitor {
         // 例外：当剪贴板同时包含“图片 + Office 表格类富文本/文本”时（常见于 Excel 复制单元格），
         // 让图片降级为兜底，优先保留表格的富文本/文本语义（详见 extractRawData 注释）。
 
+        let fileURLs = (pasteboard.readObjects(
+            forClasses: [NSURL.self],
+            options: [.urlReadingFileURLsOnly: true]
+        ) as? [URL]) ?? []
+        let shouldPreferImageOverFileURLs = shouldPreferImageOverFileURLs(fileURLs: fileURLs, from: pasteboard)
+
         // 1. File URLs (最高优先级)
-        if let fileURLs = pasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL],
-           !fileURLs.isEmpty {
+        // 例外：临时图片路径与图片二进制并存时（常见于聊天/IM 客户端）优先按图片处理。
+        if !fileURLs.isEmpty, !shouldPreferImageOverFileURLs {
             let paths = fileURLs.map { $0.path }.joined(separator: "\n")
             let hash = computeHash(paths)
             // 序列化文件 URL 以便后续恢复
@@ -706,7 +844,7 @@ public final class ClipboardMonitor {
         let shouldPreferRichTypesOverImage = shouldPreferRichTypesOverImage(from: pasteboard)
 
         // 2. Image (PNG, TIFF, etc.) - 默认优先 PNG，TIFF 转为 PNG 避免存储膨胀
-        if !shouldPreferRichTypesOverImage, let imageResult = extractOptimalImageData(from: pasteboard) {
+        if !shouldPreferRichTypesOverImage, let imageResult = extractOptimalImageData(from: pasteboard, candidateFileURL: fileURLs.first) {
             let imageData = imageResult.data
             let hash = computeHash(imageData)
             return ClipboardContent(
@@ -771,7 +909,7 @@ public final class ClipboardMonitor {
         }
 
         // 6. Image（兜底）
-        if shouldPreferRichTypesOverImage, let imageResult = extractOptimalImageData(from: pasteboard) {
+        if shouldPreferRichTypesOverImage, let imageResult = extractOptimalImageData(from: pasteboard, candidateFileURL: fileURLs.first) {
             let imageData = imageResult.data
             let hash = computeHash(imageData)
             return ClipboardContent(
@@ -816,6 +954,56 @@ public final class ClipboardMonitor {
         }
 
         return false
+    }
+
+    private func shouldPreferImageOverFileURLs(fileURLs: [URL], from pasteboard: NSPasteboard) -> Bool {
+        guard fileURLs.count == 1 else { return false }
+        let fileURL = fileURLs[0]
+        guard Self.isLikelyTemporaryImageFileURL(fileURL) else { return false }
+        if extractImageDataForIngest(from: pasteboard, candidateFileURL: nil) != nil {
+            return true
+        }
+        return Self.loadImageFileDataAsPNG(fileURL) != nil
+    }
+
+    nonisolated static func isLikelyTemporaryImageFileURL(_ url: URL) -> Bool {
+        guard url.isFileURL else { return false }
+        let ext = url.pathExtension.lowercased()
+        let imageExtensions: Set<String> = [
+            "png", "jpg", "jpeg", "gif", "webp", "heic", "heif", "bmp", "tiff", "tif"
+        ]
+        guard imageExtensions.contains(ext) else { return false }
+
+        let path = url.standardizedFileURL.path.lowercased()
+        if path.hasPrefix("/tmp/") || path.hasPrefix("/private/tmp/") { return true }
+        if path.contains("/var/folders/") { return true }
+        if path.contains("/library/caches/") { return true }
+        if path.contains("/library/containers/com.tencent.xinwechat/"),
+           (path.contains("/temp/") || path.contains("/rwtemp/") || path.contains("/xwechat_files/")) {
+            return true
+        }
+        if path.contains("/xwechat_files/"),
+           (path.contains("/temp/") || path.contains("/rwtemp/")) {
+            return true
+        }
+        return false
+    }
+
+    nonisolated static func loadImageFileDataAsPNG(_ url: URL) -> Data? {
+        guard isLikelyTemporaryImageFileURL(url) else { return nil }
+
+        let fileData: Data
+        do {
+            fileData = try Data(contentsOf: url, options: [.mappedIfSafe])
+        } catch {
+            return nil
+        }
+
+        if PngquantService.isLikelyPNG(fileData) {
+            return fileData
+        }
+
+        return convertTIFFToPNG(fileData)
     }
 
     nonisolated private static func htmlLooksLikeOfficeSpreadsheet(_ htmlData: Data) -> Bool {
@@ -1404,7 +1592,10 @@ public final class ClipboardMonitor {
     }
 
     /// 从剪贴板提取图片数据（用于 ingest），优先 PNG；TIFF 转 PNG 在后台执行
-    private func extractImageDataForIngest(from pasteboard: NSPasteboard) -> (data: Data, wasTIFF: Bool)? {
+    private func extractImageDataForIngest(
+        from pasteboard: NSPasteboard,
+        candidateFileURL: URL? = nil
+    ) -> (data: Data, wasTIFF: Bool)? {
         if let pngData = pasteboard.data(forType: .png) {
             return (pngData, false)
         }
@@ -1413,11 +1604,25 @@ public final class ClipboardMonitor {
             return (tiffData, true)
         }
 
+        if let image = NSImage(pasteboard: pasteboard),
+           let tiffData = image.tiffRepresentation,
+           let pngData = Self.convertTIFFToPNG(tiffData) {
+            return (pngData, false)
+        }
+
+        if let candidateFileURL,
+           let pngData = Self.loadImageFileDataAsPNG(candidateFileURL) {
+            return (pngData, false)
+        }
+
         return nil
     }
 
     /// 从剪贴板提取图片数据，优先 PNG，如果只有 TIFF 则转换为 PNG
-    private func extractOptimalImageData(from pasteboard: NSPasteboard) -> (data: Data, wasTIFF: Bool)? {
+    private func extractOptimalImageData(
+        from pasteboard: NSPasteboard,
+        candidateFileURL: URL? = nil
+    ) -> (data: Data, wasTIFF: Bool)? {
         // 优先检查 PNG（已压缩格式）
         if let pngData = pasteboard.data(forType: .png) {
             return (pngData, false)
@@ -1430,6 +1635,17 @@ public final class ClipboardMonitor {
             }
             // 转换失败时保留 TIFF
             return (tiffData, true)
+        }
+
+        if let image = NSImage(pasteboard: pasteboard),
+           let tiffData = image.tiffRepresentation,
+           let pngData = Self.convertTIFFToPNG(tiffData) {
+            return (pngData, false)
+        }
+
+        if let candidateFileURL,
+           let pngData = Self.loadImageFileDataAsPNG(candidateFileURL) {
+            return (pngData, false)
         }
 
         return nil

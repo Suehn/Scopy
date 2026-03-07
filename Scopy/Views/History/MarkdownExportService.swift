@@ -127,12 +127,124 @@ enum MarkdownExportService {
 
     @MainActor
     static func writePNGToPasteboard(pngData: Data, pasteboard: NSPasteboard) throws {
-        pasteboard.declareTypes([.png], owner: nil)
+        guard let imagePayload = makeImagePayloadForPasteboardWrite(pngData) else {
+            logger.error("Failed to normalize PNG payload before pasteboard export")
+            throw ExportError.stageFailed(stage: .pasteboardWrite, underlying: nil)
+        }
 
-        guard pasteboard.setData(pngData, forType: .png) else {
+        pasteboard.clearContents()
+        let declaredTypes: [NSPasteboard.PasteboardType] = imagePayload.tiffData == nil ? [.png] : [.png, .tiff]
+        pasteboard.declareTypes(declaredTypes, owner: nil)
+
+        guard pasteboard.setData(imagePayload.pngData, forType: .png) else {
             logger.error("Failed to set PNG data on pasteboard")
             throw ExportError.stageFailed(stage: .pasteboardWrite, underlying: nil)
         }
+
+        if let tiffData = imagePayload.tiffData,
+           !pasteboard.setData(tiffData, forType: .tiff) {
+            logger.warning("Failed to set TIFF fallback on pasteboard")
+        }
+    }
+
+    private struct ImagePasteboardPayload {
+        let pngData: Data
+        let tiffData: Data?
+    }
+
+    private static func makeImagePayloadForPasteboardWrite(_ data: Data) -> ImagePasteboardPayload? {
+        guard let imageSource = CGImageSourceCreateWithData(data as CFData, nil),
+              let image = CGImageSourceCreateImageAtIndex(imageSource, 0, nil) else {
+            return nil
+        }
+
+        let sourceType = CGImageSourceGetType(imageSource) as String?
+        if sourceType == UTType.png.identifier, !shouldRasterizeForPNGReplay(image) {
+            return ImagePasteboardPayload(pngData: data, tiffData: nil)
+        }
+
+        if sourceType == UTType.png.identifier,
+           let tiffData = rasterizeCGImageToStandardTIFF(image) {
+            // Preserve the original PNG bytes for fidelity while giving narrow
+            // macOS readers such as Codex/arboard a rasterized TIFF fallback.
+            return ImagePasteboardPayload(pngData: data, tiffData: tiffData)
+        }
+
+        guard let pngData = rasterizeCGImageToStandardPNG(image) else { return nil }
+        return ImagePasteboardPayload(pngData: pngData, tiffData: nil)
+    }
+
+    private static func shouldRasterizeForPNGReplay(_ image: CGImage) -> Bool {
+        guard let colorSpace = image.colorSpace else { return true }
+        if colorSpace.model != .rgb { return true }
+        if image.bitsPerPixel < 24 { return true }
+        return false
+    }
+
+    private static func rasterizeCGImageToStandardPNG(_ image: CGImage) -> Data? {
+        guard let context = makeStandardRGBAContext(for: image) else { return nil }
+        let width = image.width
+        let height = image.height
+        context.interpolationQuality = CGInterpolationQuality.high
+        context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+
+        guard let rasterizedImage = context.makeImage() else { return nil }
+
+        let output = NSMutableData()
+        guard let destination = CGImageDestinationCreateWithData(
+            output as CFMutableData,
+            UTType.png.identifier as CFString,
+            1,
+            nil
+        ) else {
+            return nil
+        }
+
+        CGImageDestinationAddImage(destination, rasterizedImage, nil)
+        guard CGImageDestinationFinalize(destination) else { return nil }
+        return output as Data
+    }
+
+    private static func rasterizeCGImageToStandardTIFF(_ image: CGImage) -> Data? {
+        guard let context = makeStandardRGBAContext(for: image) else { return nil }
+        let width = image.width
+        let height = image.height
+        context.interpolationQuality = CGInterpolationQuality.high
+        context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+
+        guard let rasterizedImage = context.makeImage() else { return nil }
+
+        let output = NSMutableData()
+        guard let destination = CGImageDestinationCreateWithData(
+            output as CFMutableData,
+            UTType.tiff.identifier as CFString,
+            1,
+            nil
+        ) else {
+            return nil
+        }
+
+        CGImageDestinationAddImage(destination, rasterizedImage, nil)
+        guard CGImageDestinationFinalize(destination) else { return nil }
+        return output as Data
+    }
+
+    private static func makeStandardRGBAContext(for image: CGImage) -> CGContext? {
+        let width = image.width
+        let height = image.height
+        guard width > 0, height > 0 else { return nil }
+
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        let bitmapInfo = CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue).union(.byteOrder32Big)
+        return CGContext(
+            data: nil,
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bytesPerRow: 0,
+            space: colorSpace,
+            bitmapInfo: bitmapInfo.rawValue
+        )
     }
 
     @MainActor

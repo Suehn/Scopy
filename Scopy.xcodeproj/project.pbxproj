@@ -634,6 +634,7 @@
 		9EFEC5C5952694258B5B6FF4 /* GeneralSettingsPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeneralSettingsPage.swift; sourceTree = "<group>"; };
 		A07BE2D7E32049F721CA02A8 /* ExportMarkdownPNGUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExportMarkdownPNGUITests.swift; sourceTree = "<group>"; };
 		A0EECF53173B59CAB3D8C65E /* KaTeX_Main-Bold.woff */ = {isa = PBXFileReference; path = "KaTeX_Main-Bold.woff"; sourceTree = "<group>"; };
+		A26E3611EA99F4352E31136A /* history-replay-real-screenshot-paletted.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "history-replay-real-screenshot-paletted.png"; sourceTree = "<group>"; };
 		A37481D3662BD7A5717D1395 /* ScopyTypography.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScopyTypography.swift; sourceTree = "<group>"; };
 		A3B7B7C569A2A465F8FD6E0B /* KaTeX_Fraktur-Bold.woff2 */ = {isa = PBXFileReference; path = "KaTeX_Fraktur-Bold.woff2"; sourceTree = "<group>"; };
 		A40F18C0C88BD6A0DA356BEA /* KaTeXRenderToStringTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KaTeXRenderToStringTests.swift; sourceTree = "<group>"; };
@@ -905,6 +906,14 @@
 			name = Products;
 			sourceTree = "<group>";
 		};
+		771238F3F638E42115D8DE1B /* Fixtures */ = {
+			isa = PBXGroup;
+			children = (
+				A26E3611EA99F4352E31136A /* history-replay-real-screenshot-paletted.png */,
+			);
+			path = Fixtures;
+			sourceTree = "<group>";
+		};
 		7DCDC4FCE32ECD1D9EF44597 /* Frameworks */ = {
 			isa = PBXGroup;
 			children = (
@@ -992,6 +1001,7 @@
 				2AB48529B6E462A63799B326 /* TextMetricsTests.swift */,
 				4DC3860748ED4F3133AF0914 /* ThumbnailPipelineTests.swift */,
 				916B40014CC1AF81D9893229 /* WebViewLifecycleTests.swift */,
+				771238F3F638E42115D8DE1B /* Fixtures */,
 				055FEC4DA3FC145B2A9F2397 /* Helpers */,
 			);
 			path = ScopyTests;

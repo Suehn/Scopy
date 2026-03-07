@@ -365,6 +365,13 @@ actor ClipboardService {
         if let data = urlData,
            let fileURLs = ClipboardMonitor.deserializeFileURLs(data),
            !fileURLs.isEmpty {
+            if let pngData = Self.resolvePNGDataForTemporaryImageFileURLs(fileURLs) {
+                await MainActor.run {
+                    monitor.copyToClipboard(data: pngData, type: .png)
+                }
+                return
+            }
+
             await MainActor.run {
                 monitor.copyToClipboard(fileURLs: fileURLs)
             }
@@ -374,6 +381,13 @@ actor ClipboardService {
         let paths = item.plainText.components(separatedBy: "\n")
         let fileURLs = paths.compactMap { URL(fileURLWithPath: $0) }
         if !fileURLs.isEmpty {
+            if let pngData = Self.resolvePNGDataForTemporaryImageFileURLs(fileURLs) {
+                await MainActor.run {
+                    monitor.copyToClipboard(data: pngData, type: .png)
+                }
+                return
+            }
+
             await MainActor.run {
                 monitor.copyToClipboard(fileURLs: fileURLs)
             }
@@ -396,6 +410,11 @@ actor ClipboardService {
         default:
             return item.plainText
         }
+    }
+
+    nonisolated private static func resolvePNGDataForTemporaryImageFileURLs(_ fileURLs: [URL]) -> Data? {
+        guard fileURLs.count == 1 else { return nil }
+        return ClipboardMonitor.loadImageFileDataAsPNG(fileURLs[0])
     }
 
     func updateSettings(_ newSettings: SettingsDTO) async throws {

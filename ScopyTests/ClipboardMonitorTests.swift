@@ -256,6 +256,35 @@ final class ClipboardMonitorTests: XCTestCase {
         XCTAssertEqual(retrieved, data)
     }
 
+    func testCopyInvalidPNGDataKeepsPreviousClipboardContent() {
+        pasteboard.clearContents()
+        pasteboard.setString("baseline", forType: .string)
+
+        monitor.copyToClipboard(data: Data([0x00, 0x01, 0x02]), type: .png)
+
+        XCTAssertEqual(pasteboard.string(forType: .string), "baseline")
+        XCTAssertNil(pasteboard.data(forType: .png))
+    }
+
+    func testCopyPNGDataProducesCodexReadableImagePayload() throws {
+        let pngData = try makeSolidColorPNGData()
+
+        pasteboard.clearContents()
+        pasteboard.setString("baseline", forType: .string)
+
+        monitor.copyToClipboard(data: pngData, type: .png)
+
+        guard let copiedPNGData = pasteboard.data(forType: .png) else {
+            XCTFail("Expected PNG payload on pasteboard")
+            return
+        }
+
+        XCTAssertTrue(isLikelyPNG(copiedPNGData))
+        XCTAssertNotNil(pasteboard.data(forType: .tiff))
+        XCTAssertNil(pasteboard.string(forType: .string))
+        XCTAssertNotNil(NSImage(pasteboard: pasteboard))
+    }
+
     func testCopyRichTextProvidesPlainTextFallback() throws {
         let attributed = NSAttributedString(string: "Rich text")
         let range = NSRange(location: 0, length: attributed.length)
@@ -310,6 +339,118 @@ final class ClipboardMonitorTests: XCTestCase {
         let content = monitor.readCurrentClipboard()
         XCTAssertEqual(content?.type, .image)
         XCTAssertNotNil(content?.rawData)
+    }
+
+    func testImageWithTemporaryImageFileURLPrefersImageContent() throws {
+        guard let tiffData = makeSolidColorTIFFData() else {
+            XCTFail("Failed to generate image data")
+            return
+        }
+        let tempImageURL = try makeTemporaryImageFileURL()
+        defer { try? FileManager.default.removeItem(at: tempImageURL.deletingLastPathComponent()) }
+
+        pasteboard.clearContents()
+        let item = NSPasteboardItem()
+        item.setString(tempImageURL.absoluteString, forType: .fileURL)
+        item.setString(tempImageURL.path, forType: .string)
+        item.setData(tiffData, forType: .tiff)
+        pasteboard.writeObjects([item])
+
+        let content = monitor.readCurrentClipboard()
+        XCTAssertEqual(content?.type, .image)
+        XCTAssertNotNil(content?.rawData)
+    }
+
+    func testTemporaryImageFileURLWithoutImageTypesButDecodableFileStillPrefersImage() throws {
+        let tempImageURL = try makeTemporaryValidPNGFileURL()
+        defer { try? FileManager.default.removeItem(at: tempImageURL.deletingLastPathComponent()) }
+
+        pasteboard.clearContents()
+        let item = NSPasteboardItem()
+        item.setString(tempImageURL.absoluteString, forType: .fileURL)
+        item.setString(tempImageURL.path, forType: .string)
+        pasteboard.writeObjects([item])
+
+        let content = monitor.readCurrentClipboard()
+        XCTAssertEqual(content?.type, .image)
+        guard let rawData = content?.rawData else {
+            XCTFail("Expected image payload data")
+            return
+        }
+        XCTAssertTrue(isLikelyPNG(rawData))
+    }
+
+    func testWeChatContainerImageFileURLWithoutImageTypesStillPrefersImage() throws {
+        let rootDirectory = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("scopy-wechat-path-\(UUID().uuidString)", isDirectory: true)
+        let weChatTempDirectory = rootDirectory
+            .appendingPathComponent(
+                "Library/Containers/com.tencent.xinWeChat/Data/Documents/xwechat_files/wxid_test/temp/RWTemp/2026-03",
+                isDirectory: true
+            )
+        try FileManager.default.createDirectory(at: weChatTempDirectory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: rootDirectory) }
+
+        let image = NSImage(size: NSSize(width: 12, height: 12))
+        image.lockFocus()
+        NSColor.systemTeal.setFill()
+        NSBezierPath(rect: NSRect(x: 0, y: 0, width: 12, height: 12)).fill()
+        image.unlockFocus()
+        guard let tiffData = image.tiffRepresentation,
+              let rep = NSBitmapImageRep(data: tiffData),
+              let pngData = rep.representation(using: .png, properties: [:]) else {
+            XCTFail("Failed to generate PNG data")
+            return
+        }
+
+        let imageURL = weChatTempDirectory.appendingPathComponent("wechat-\(UUID().uuidString).png")
+        try pngData.write(to: imageURL, options: .atomic)
+
+        pasteboard.clearContents()
+        let item = NSPasteboardItem()
+        item.setString(imageURL.absoluteString, forType: .fileURL)
+        item.setString(imageURL.path, forType: .string)
+        pasteboard.writeObjects([item])
+
+        let content = monitor.readCurrentClipboard()
+        XCTAssertEqual(content?.type, .image)
+        guard let rawData = content?.rawData else {
+            XCTFail("Expected image payload data")
+            return
+        }
+        XCTAssertTrue(isLikelyPNG(rawData))
+    }
+
+    func testTemporaryNonImageFileURLStillDetectedAsFile() throws {
+        let tempTextURL = try makeTemporaryTextFileURL()
+        defer { try? FileManager.default.removeItem(at: tempTextURL.deletingLastPathComponent()) }
+
+        pasteboard.clearContents()
+        pasteboard.writeObjects([tempTextURL as NSURL])
+
+        let content = monitor.readCurrentClipboard()
+        XCTAssertEqual(content?.type, .file)
+        XCTAssertTrue(content?.plainText.contains(tempTextURL.path) ?? false)
+    }
+
+    func testNonTemporaryImageFileURLWithFileListTypeStillDetectedAsFile() throws {
+        guard let tiffData = makeSolidColorTIFFData() else {
+            XCTFail("Failed to generate image data")
+            return
+        }
+        let imageURL = try makeNonTemporaryImageFileURL()
+        defer { try? FileManager.default.removeItem(at: imageURL.deletingLastPathComponent()) }
+
+        pasteboard.clearContents()
+        let item = NSPasteboardItem()
+        item.setString(imageURL.absoluteString, forType: .fileURL)
+        item.setString(imageURL.path, forType: .string)
+        item.setData(tiffData, forType: .tiff)
+        pasteboard.writeObjects([item])
+        pasteboard.setPropertyList([imageURL.path], forType: NSPasteboard.PasteboardType("NSFilenamesPboardType"))
+
+        let content = monitor.readCurrentClipboard()
+        XCTAssertEqual(content?.type, .file)
     }
 
     func testTableHTMLPrefersHTMLOverImageWhenBothExist() {
@@ -630,6 +771,48 @@ final class ClipboardMonitorTests: XCTestCase {
         XCTAssertEqual(receivedContent?.plainText, expectedText)
     }
 
+    func testMonitorPrefersImageWhenTemporaryImageFileURLAndImageBothExist() async throws {
+        var receivedContent: ClipboardMonitor.ClipboardContent?
+
+        monitor.setPollingInterval(0.1)
+        pasteboard.clearContents()
+        pasteboard.setString("Baseline \(UUID())", forType: .string)
+        monitor.startMonitoring()
+
+        let expectation = XCTestExpectation(description: "Clipboard change detected as image")
+        let task = Task {
+            for await content in monitor.contentStream {
+                if content.type == .image {
+                    receivedContent = content
+                    expectation.fulfill()
+                    break
+                }
+            }
+        }
+
+        try? await Task.sleep(nanoseconds: 100_000_000)
+
+        guard let tiffData = makeSolidColorTIFFData() else {
+            task.cancel()
+            XCTFail("Failed to generate image data")
+            return
+        }
+        let tempImageURL = try makeTemporaryImageFileURL()
+        defer { try? FileManager.default.removeItem(at: tempImageURL.deletingLastPathComponent()) }
+
+        pasteboard.clearContents()
+        let item = NSPasteboardItem()
+        item.setString(tempImageURL.absoluteString, forType: .fileURL)
+        item.setString(tempImageURL.path, forType: .string)
+        item.setData(tiffData, forType: .tiff)
+        pasteboard.writeObjects([item])
+
+        await fulfillment(of: [expectation], timeout: 3.0)
+        task.cancel()
+
+        XCTAssertEqual(receivedContent?.type, .image)
+    }
+
     // MARK: - App Bundle ID Tests
 
     func testAppBundleIDCapture() {
@@ -666,5 +849,98 @@ final class ClipboardMonitorTests: XCTestCase {
         let content = monitor.readCurrentClipboard()
         XCTAssertNotNil(content)
         XCTAssertTrue(content?.plainText.contains("👋") ?? false)
+    }
+
+    private func makeSolidColorTIFFData() -> Data? {
+        let image = NSImage(size: NSSize(width: 12, height: 12))
+        image.lockFocus()
+        NSColor.systemGreen.setFill()
+        NSBezierPath(rect: NSRect(x: 0, y: 0, width: 12, height: 12)).fill()
+        image.unlockFocus()
+        return image.tiffRepresentation
+    }
+
+    private func makeSolidColorPNGData() throws -> Data {
+        let image = NSImage(size: NSSize(width: 12, height: 12))
+        image.lockFocus()
+        NSColor.systemPurple.setFill()
+        NSBezierPath(rect: NSRect(x: 0, y: 0, width: 12, height: 12)).fill()
+        image.unlockFocus()
+
+        guard let tiffData = image.tiffRepresentation,
+              let rep = NSBitmapImageRep(data: tiffData),
+              let pngData = rep.representation(using: .png, properties: [:]) else {
+            throw NSError(domain: "ClipboardMonitorTests", code: 3)
+        }
+
+        return pngData
+    }
+
+    private func makeTemporaryImageFileURL() throws -> URL {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("scopy-clipboard-monitor-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let url = directory.appendingPathComponent("image-\(UUID().uuidString).png")
+        try Data([0x89, 0x50, 0x4E, 0x47]).write(to: url, options: .atomic)
+        return url
+    }
+
+    private func makeTemporaryValidPNGFileURL() throws -> URL {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("scopy-clipboard-monitor-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let url = directory.appendingPathComponent("image-\(UUID().uuidString).png")
+
+        let image = NSImage(size: NSSize(width: 12, height: 12))
+        image.lockFocus()
+        NSColor.systemOrange.setFill()
+        NSBezierPath(rect: NSRect(x: 0, y: 0, width: 12, height: 12)).fill()
+        image.unlockFocus()
+
+        guard let tiffData = image.tiffRepresentation,
+              let rep = NSBitmapImageRep(data: tiffData),
+              let pngData = rep.representation(using: .png, properties: [:]) else {
+            throw NSError(domain: "ClipboardMonitorTests", code: 1)
+        }
+
+        try pngData.write(to: url, options: .atomic)
+        return url
+    }
+
+    private func makeTemporaryTextFileURL() throws -> URL {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("scopy-clipboard-monitor-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let url = directory.appendingPathComponent("note-\(UUID().uuidString).txt")
+        try Data("not-image".utf8).write(to: url, options: .atomic)
+        return url
+    }
+
+    private func makeNonTemporaryImageFileURL() throws -> URL {
+        let directory = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("scopy-clipboard-monitor-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let url = directory.appendingPathComponent("image-\(UUID().uuidString).png")
+
+        let image = NSImage(size: NSSize(width: 12, height: 12))
+        image.lockFocus()
+        NSColor.systemBlue.setFill()
+        NSBezierPath(rect: NSRect(x: 0, y: 0, width: 12, height: 12)).fill()
+        image.unlockFocus()
+
+        guard let tiffData = image.tiffRepresentation,
+              let rep = NSBitmapImageRep(data: tiffData),
+              let pngData = rep.representation(using: .png, properties: [:]) else {
+            throw NSError(domain: "ClipboardMonitorTests", code: 2)
+        }
+
+        try pngData.write(to: url, options: .atomic)
+        return url
+    }
+
+    private func isLikelyPNG(_ data: Data) -> Bool {
+        let signature: [UInt8] = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]
+        guard data.count >= signature.count else { return false }
+        return data.prefix(signature.count).elementsEqual(signature)
     }
 }
