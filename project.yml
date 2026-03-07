@@ -200,6 +200,8 @@ targets:
     platform: macOS
     sources:
       - path: ScopyTests
+        excludes:
+          - "Fixtures/**"
       # 独立测试 bundle 模式：直接包含应用源码，避免 SwiftUI App 生命周期冲突
       - path: Scopy
         excludes:
@@ -304,6 +306,7 @@ targets:
     sources:
       - path: ScopyTests
         excludes:
+          - "Fixtures/**"
           - "IntegrationTests.swift"
           - "PerformanceTests.swift"
       # Hosted test bundle mode: includes app sources but excludes entrypoints to avoid @main conflicts.
