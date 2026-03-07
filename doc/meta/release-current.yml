@@ -1,6 +1,6 @@
-version: v0.60.1
-date: 2026-02-28
-release_doc: doc/releases/history/v0.60.1.md
+version: v0.60.2
+date: 2026-03-07
+release_doc: doc/releases/history/v0.60.2.md
 release_index: doc/releases/README.md
 changelog_file: doc/releases/CHANGELOG.md
 profile_doc: null
@@ -8,12 +8,12 @@ runbook_doc: doc/current/release-runbook.md
 spec_doc: doc/current/product-spec.md
 development_doc: doc/current/development-guide.md
 architecture_doc: doc/current/architecture.md
-last_verified_at: 2026-02-28
-summary: Perf and release hardening with frontend profile flow, unified perf table, and cleanup-path convergence
+last_verified_at: 2026-03-07
+summary: Historical image replay compatibility fix for Codex and temporary image files
 verification:
   build: pass
   test_unit: pass
   test_strict: pass
   test_tsan: not_run
-  test_perf_heavy: pass
-  test_snapshot_perf_release: pass
+  test_perf_heavy: not_run
+  test_snapshot_perf_release: not_run

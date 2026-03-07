@@ -5,7 +5,7 @@ owner: maintainers
 last_reviewed: 2026-03-07
 canonical: true
 related_versions:
-  - v0.60.1
+  - v0.60.2
 ---
 
 # Current Requirements
@@ -14,7 +14,7 @@ This document is the active requirements baseline for Scopy. Historical planning
 
 ## Reference State
 
-- Reference release: `v0.60.1`
+- Reference release: `v0.60.2`
 - Source of truth for current version metadata: [../meta/release-current.yml](../meta/release-current.yml)
 - Source of truth for development and implementation workflow: [development-guide.md](./development-guide.md)
 

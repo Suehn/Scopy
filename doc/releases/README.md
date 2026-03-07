@@ -19,9 +19,9 @@ This page is the human-facing index for current release state. Automation should
 ## Current Release
 
 <!-- release-current:start -->
-- Version: `v0.60.1`
-- Date: `2026-02-28`
-- Release note: [v0.60.1](./history/v0.60.1.md)
+- Version: `v0.60.2`
+- Date: `2026-03-07`
+- Release note: [v0.60.2](./history/v0.60.2.md)
 - Changelog: [CHANGELOG.md](./CHANGELOG.md)
 - Profile doc: `none`
 <!-- release-current:end -->
@@ -29,6 +29,7 @@ This page is the human-facing index for current release state. Automation should
 ## Recent Releases
 
 <!-- release-recent:start -->
+- `2026-03-07` [v0.60.2](./history/v0.60.2.md) - Historical image replay compatibility fix for Codex and temporary image files
 - `2026-02-28` [v0.60.1](./history/v0.60.1.md) - Perf and release hardening with frontend profile flow, unified perf table, and cleanup-path convergence
 - `2026-01-30` [v0.60](./history/v0.60.md) - Refactor and stability release for settings persistence, storage deletion, and hotkey concurrency
 - `2026-01-29` [v0.59.fix3](./history/v0.59.fix3.md) - Search and SQLite performance tightening with O(1) stats reads

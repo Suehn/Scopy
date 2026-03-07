@@ -11,6 +11,28 @@
 
 - No unreleased entries.
 
+## [v0.60.2] - 2026-03-07
+
+### Fix/Clipboard
+
+- 历史图片回放不再为了兼容 Codex 直接重写 palette PNG：标准 PNG 保留原始 `public.png` bytes；高风险 palette/indexed PNG 保留原始 `public.png`，并额外补一份 rasterized `public.tiff` fallback 给窄读取链路使用。
+- 修复“图片先进历史后再回放给 Codex 失败”的边界，同时保留普通应用对原始 PNG 表示的可见性，避免“刚复制立即粘贴”和“从历史回放粘贴”在 PNG bytes 上被无差别改写。
+- 文件回放语义继续收紧在正确边界：临时/误分类图片文件 URL 回放为图片；普通 Finder 图片文件和普通文本文件仍按 file URL 回放，不被错误降级成图片复制。
+
+### Tooling/Test
+
+- `project.yml` 排除 `ScopyTests/Fixtures/**`，避免 `xcodegen` / `make build` 把回归 fixture 和说明文件重新加入测试资源阶段，保证 release 验证后工作树保持干净。
+- 新增安全真实截图 fixture `ScopyTests/Fixtures/history-replay-real-screenshot-paletted.png`，锁定 Codex/macOS 剪贴板回放回归；同时补充 `ClipboardMonitorTests`、`ClipboardServiceCopyToClipboardTests`、`MarkdownExportServiceTests` 覆盖历史图片回放、临时图片文件 URL、旧类型清理等边界。
+
+### Verification
+
+- `make build`：BUILD SUCCEEDED（2026-03-07）
+- `make test-unit`：Executed 290 tests, 1 skipped, 0 failures（2026-03-07）
+- `make test-strict`：Executed 290 tests, 1 skipped, 0 failures（2026-03-07）
+- `make docs-validate`：passed（2026-03-07）
+- `make release-validate`：passed（2026-03-07）
+
+
 ## [v0.60.1] - 2026-02-28
 
 ### Perf/Backend

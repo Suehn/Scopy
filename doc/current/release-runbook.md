@@ -5,7 +5,7 @@ owner: maintainers
 last_reviewed: 2026-03-07
 canonical: true
 related_versions:
-  - v0.60.1
+  - v0.60.2
 ---
 
 # Release Runbook
