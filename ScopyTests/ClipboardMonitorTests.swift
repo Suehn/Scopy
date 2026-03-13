@@ -272,7 +272,7 @@ final class ClipboardMonitorTests: XCTestCase {
         pasteboard.clearContents()
         pasteboard.setString("baseline", forType: .string)
 
-        monitor.copyToClipboard(data: pngData, type: .png)
+        monitor.copyToClipboard(data: pngData, type: .png, imageWriteMode: .codexOptimized)
 
         guard let copiedPNGData = pasteboard.data(forType: .png) else {
             XCTFail("Expected PNG payload on pasteboard")

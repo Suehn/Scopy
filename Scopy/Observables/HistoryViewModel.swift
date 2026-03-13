@@ -572,6 +572,15 @@ final class HistoryViewModel {
         }
     }
 
+    func selectOptimizedForCodex(_ item: ClipboardItemDTO) async {
+        do {
+            try await service.copyToClipboardOptimizedForCodex(itemID: item.id)
+            closePanelHandler?()
+        } catch {
+            ScopyLog.app.error("Codex-optimized copy failed: \(error.localizedDescription, privacy: .private)")
+        }
+    }
+
     func togglePin(_ item: ClipboardItemDTO) async {
         do {
             if item.isPinned {

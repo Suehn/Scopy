@@ -9,6 +9,11 @@ import UniformTypeIdentifiers
 /// 符合 v0.md 第1节：后端只提供结构化数据和命令接口
 @MainActor
 public final class ClipboardMonitor {
+    public enum ImagePasteboardWriteMode: Sendable {
+        case standard
+        case codexOptimized
+    }
+
     // MARK: - Types
 
     private struct SendableTimer: @unchecked Sendable {
@@ -263,23 +268,27 @@ public final class ClipboardMonitor {
         lastChangeCount = pasteboard.changeCount
     }
 
-    public func copyToClipboard(data: Data, type: NSPasteboard.PasteboardType) {
+    public func copyToClipboard(
+        data: Data,
+        type: NSPasteboard.PasteboardType,
+        imageWriteMode: ImagePasteboardWriteMode = .standard
+    ) {
         if type == .png {
-            guard let imagePayload = Self.makeImagePayloadForPasteboardWrite(data) else {
+            guard let imagePayload = Self.makeImagePasteboardPayloadForWrite(data, imageWriteMode: imageWriteMode) else {
                 ScopyLog.monitor.error("Failed to normalize image payload as PNG before pasteboard write")
                 return
             }
 
             pasteboard.clearContents()
-            let declaredTypes: [NSPasteboard.PasteboardType] = imagePayload.tiffData == nil ? [.png] : [.png, .tiff]
+            let declaredTypes: [NSPasteboard.PasteboardType] = imagePayload.compatibilityTIFFData == nil ? [.png] : [.png, .tiff]
             pasteboard.declareTypes(declaredTypes, owner: nil)
 
-            guard pasteboard.setData(imagePayload.pngData, forType: .png) else {
+            guard pasteboard.setData(imagePayload.primaryPNGData, forType: .png) else {
                 ScopyLog.monitor.error("Failed to write PNG payload to pasteboard")
                 return
             }
 
-            if let tiffData = imagePayload.tiffData,
+            if let tiffData = imagePayload.compatibilityTIFFData,
                !pasteboard.setData(tiffData, forType: .tiff) {
                 ScopyLog.monitor.warning("Failed to write TIFF fallback for PNG payload")
             }
@@ -304,38 +313,93 @@ public final class ClipboardMonitor {
         lastChangeCount = pasteboard.changeCount
     }
 
-    private struct ImagePasteboardPayload {
-        let pngData: Data
-        let tiffData: Data?
+    struct ImagePasteboardPayload {
+        let primaryPNGData: Data
+        let compatibilityTIFFData: Data?
     }
 
-    nonisolated private static func makeImagePayloadForPasteboardWrite(_ data: Data) -> ImagePasteboardPayload? {
+    nonisolated static func makeImagePasteboardPayloadForWrite(
+        _ data: Data,
+        imageWriteMode: ImagePasteboardWriteMode
+    ) -> ImagePasteboardPayload? {
         guard let imageSource = CGImageSourceCreateWithData(data as CFData, nil),
               let image = CGImageSourceCreateImageAtIndex(imageSource, 0, nil) else {
             return nil
         }
 
         let sourceType = CGImageSourceGetType(imageSource) as String?
-        if sourceType == UTType.png.identifier, !Self.shouldRasterizeForPNGReplay(image) {
-            return ImagePasteboardPayload(pngData: data, tiffData: nil)
+        if sourceType == UTType.png.identifier {
+            switch imageWriteMode {
+            case .standard:
+                return ImagePasteboardPayload(primaryPNGData: data, compatibilityTIFFData: nil)
+            case .codexOptimized:
+                if !Self.shouldAddTIFFFallbackForPNGReplay(data) {
+                    return ImagePasteboardPayload(primaryPNGData: data, compatibilityTIFFData: nil)
+                }
+            }
         }
 
         if sourceType == UTType.png.identifier,
            let tiffData = Self.rasterizeCGImageToStandardTIFF(image) {
-            // Preserve the original PNG bytes for fidelity while giving Codex/arboard
-            // a rasterized TIFF representation it can decode reliably.
-            return ImagePasteboardPayload(pngData: data, tiffData: tiffData)
+            // Keep the stored PNG bytes as the primary representation so replay
+            // continues to prefer the pngquant result when available. Only add a
+            // rasterized TIFF as a compatibility fallback for narrow readers.
+            return ImagePasteboardPayload(primaryPNGData: data, compatibilityTIFFData: tiffData)
         }
 
         guard let pngData = Self.rasterizeCGImageToStandardPNG(image) else { return nil }
-        return ImagePasteboardPayload(pngData: pngData, tiffData: nil)
+        return ImagePasteboardPayload(primaryPNGData: pngData, compatibilityTIFFData: nil)
     }
 
-    nonisolated private static func shouldRasterizeForPNGReplay(_ image: CGImage) -> Bool {
-        guard let colorSpace = image.colorSpace else { return true }
-        if colorSpace.model != .rgb { return true }
-        if image.bitsPerPixel < 24 { return true }
-        return false
+    nonisolated static func shouldAddTIFFFallbackForPNGReplay(_ pngData: Data) -> Bool {
+        guard let metadata = Self.parsePNGHeaderForReplayPolicy(pngData) else { return true }
+
+        switch metadata.colorType {
+        case 2, 6:
+            return metadata.bitDepth < 8
+        default:
+            return true
+        }
+    }
+
+    private struct PNGReplayHeader {
+        let bitDepth: UInt8
+        let colorType: UInt8
+    }
+
+    nonisolated private static func parsePNGHeaderForReplayPolicy(_ data: Data) -> PNGReplayHeader? {
+        let signature: [UInt8] = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]
+        guard data.count >= 33, data.prefix(signature.count).elementsEqual(signature) else { return nil }
+        guard Self.pngUInt32(data, at: 8) == 13 else { return nil }
+        guard Self.pngASCII(data, at: 12, length: 4) == "IHDR" else { return nil }
+
+        guard let bitDepth = Self.pngByte(data, at: 24),
+              let colorType = Self.pngByte(data, at: 25) else {
+            return nil
+        }
+        return PNGReplayHeader(bitDepth: bitDepth, colorType: colorType)
+    }
+
+    nonisolated private static func pngByte(_ data: Data, at offset: Int) -> UInt8? {
+        guard offset >= 0, offset < data.count else { return nil }
+        return data[data.startIndex + offset]
+    }
+
+    nonisolated private static func pngUInt32(_ data: Data, at offset: Int) -> UInt32? {
+        guard offset >= 0, offset + 3 < data.count else { return nil }
+        guard let b0 = Self.pngByte(data, at: offset),
+              let b1 = Self.pngByte(data, at: offset + 1),
+              let b2 = Self.pngByte(data, at: offset + 2),
+              let b3 = Self.pngByte(data, at: offset + 3) else {
+            return nil
+        }
+        return (UInt32(b0) << 24) | (UInt32(b1) << 16) | (UInt32(b2) << 8) | UInt32(b3)
+    }
+
+    nonisolated private static func pngASCII(_ data: Data, at offset: Int, length: Int) -> String? {
+        guard offset >= 0, length >= 0, offset + length <= data.count else { return nil }
+        let range = (data.startIndex + offset)..<(data.startIndex + offset + length)
+        return String(data: data.subdata(in: range), encoding: .ascii)
     }
 
     nonisolated private static func rasterizeCGImageToStandardPNG(_ image: CGImage) -> Data? {

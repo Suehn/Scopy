@@ -285,13 +285,29 @@ actor ClipboardService {
     }
 
     func copyToClipboard(itemID: UUID) async throws {
+        try await copyToClipboard(itemID: itemID, imageWriteMode: .standard)
+    }
+
+    func copyToClipboardOptimizedForCodex(itemID: UUID) async throws {
+        try await copyToClipboard(itemID: itemID, imageWriteMode: .codexOptimized)
+    }
+
+    private func copyToClipboard(
+        itemID: UUID,
+        imageWriteMode: ClipboardMonitor.ImagePasteboardWriteMode
+    ) async throws {
         let monitor = try requireMonitor()
         let storage = try requireStorage()
         let search = try requireSearch()
 
         guard let item = try await storage.findByID(itemID) else { return }
 
-        await performClipboardCopy(item: item, monitor: monitor, storage: storage)
+        await performClipboardCopy(
+            item: item,
+            monitor: monitor,
+            storage: storage,
+            imageWriteMode: imageWriteMode
+        )
 
         var updated = item
         updated.lastUsedAt = Date()
@@ -309,15 +325,16 @@ actor ClipboardService {
     private func performClipboardCopy(
         item: StorageService.StoredItem,
         monitor: ClipboardMonitor,
-        storage: StorageService
+        storage: StorageService,
+        imageWriteMode: ClipboardMonitor.ImagePasteboardWriteMode
     ) async {
         switch item.type {
         case .text:
             await copyPlainText(item.plainText, monitor: monitor)
         case .rtf, .html, .image:
-            await copyRichPayload(item: item, monitor: monitor, storage: storage)
+            await copyRichPayload(item: item, monitor: monitor, storage: storage, imageWriteMode: imageWriteMode)
         case .file:
-            await copyFilePayload(item: item, monitor: monitor, storage: storage)
+            await copyFilePayload(item: item, monitor: monitor, storage: storage, imageWriteMode: imageWriteMode)
         case .other:
             await copyPlainText(item.plainText, monitor: monitor)
         }
@@ -332,7 +349,8 @@ actor ClipboardService {
     private func copyRichPayload(
         item: StorageService.StoredItem,
         monitor: ClipboardMonitor,
-        storage: StorageService
+        storage: StorageService,
+        imageWriteMode: ClipboardMonitor.ImagePasteboardWriteMode
     ) async {
         let data = await storage.loadPayloadData(for: item)
         guard let data else { return }
@@ -351,7 +369,7 @@ actor ClipboardService {
                 let plainText = Self.resolvePlainText(for: item, data: data)
                 monitor.copyToClipboard(text: plainText, data: data, type: pasteboardType)
             } else {
-                monitor.copyToClipboard(data: data, type: pasteboardType)
+                monitor.copyToClipboard(data: data, type: pasteboardType, imageWriteMode: imageWriteMode)
             }
         }
     }
@@ -359,7 +377,8 @@ actor ClipboardService {
     private func copyFilePayload(
         item: StorageService.StoredItem,
         monitor: ClipboardMonitor,
-        storage: StorageService
+        storage: StorageService,
+        imageWriteMode: ClipboardMonitor.ImagePasteboardWriteMode
     ) async {
         let urlData = await storage.loadPayloadData(for: item)
         if let data = urlData,
@@ -367,7 +386,7 @@ actor ClipboardService {
            !fileURLs.isEmpty {
             if let pngData = Self.resolvePNGDataForTemporaryImageFileURLs(fileURLs) {
                 await MainActor.run {
-                    monitor.copyToClipboard(data: pngData, type: .png)
+                    monitor.copyToClipboard(data: pngData, type: .png, imageWriteMode: imageWriteMode)
                 }
                 return
             }
@@ -383,7 +402,7 @@ actor ClipboardService {
         if !fileURLs.isEmpty {
             if let pngData = Self.resolvePNGDataForTemporaryImageFileURLs(fileURLs) {
                 await MainActor.run {
-                    monitor.copyToClipboard(data: pngData, type: .png)
+                    monitor.copyToClipboard(data: pngData, type: .png, imageWriteMode: imageWriteMode)
                 }
                 return
             }

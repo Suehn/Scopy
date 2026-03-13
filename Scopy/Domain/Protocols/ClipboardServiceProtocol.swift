@@ -41,6 +41,10 @@ public protocol ClipboardServiceProtocol: AnyObject {
     /// 复制到系统剪贴板
     func copyToClipboard(itemID: UUID) async throws
 
+    /// 显式为 Codex 这类窄图片读取路径准备兼容表示。
+    /// 该入口只应由明确的用户动作触发，避免影响普通粘贴语义。
+    func copyToClipboardOptimizedForCodex(itemID: UUID) async throws
+
     /// 更新设置
     func updateSettings(_ settings: SettingsDTO) async throws
 
@@ -80,5 +84,9 @@ public extension ClipboardServiceProtocol {
 
     func updateNote(itemID _: UUID, note _: String?) async throws {
         // Default no-op for backwards compatibility (tests / stubs).
+    }
+
+    func copyToClipboardOptimizedForCodex(itemID: UUID) async throws {
+        try await copyToClipboard(itemID: itemID)
     }
 }

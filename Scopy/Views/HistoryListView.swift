@@ -278,6 +278,7 @@ struct HistoryListView: View {
             isScrolling: historyViewModel.isScrolling,
             settings: settingsViewModel.settings,
             onSelect: { Task { await historyViewModel.select(item) } },
+            onSelectOptimizedForCodex: { Task { await historyViewModel.selectOptimizedForCodex(item) } },
             onHoverSelect: { id in
                 historyViewModel.selectedID = id
                 historyViewModel.lastSelectionSource = .mouse

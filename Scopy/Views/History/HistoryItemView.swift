@@ -64,6 +64,7 @@ struct HistoryItemView: View, Equatable {
 
     // 回调闭包 - 不参与 Equatable 比较
     let onSelect: () -> Void
+    let onSelectOptimizedForCodex: () -> Void
     let onHoverSelect: (UUID) -> Void
     let onTogglePin: () -> Void
     let onDelete: () -> Void
@@ -107,6 +108,7 @@ struct HistoryItemView: View, Equatable {
         isScrolling: Bool,
         settings: SettingsDTO,
         onSelect: @escaping () -> Void,
+        onSelectOptimizedForCodex: @escaping () -> Void,
         onHoverSelect: @escaping (UUID) -> Void,
         onTogglePin: @escaping () -> Void,
         onDelete: @escaping () -> Void,
@@ -125,6 +127,7 @@ struct HistoryItemView: View, Equatable {
         self.isScrolling = isScrolling
         self.settings = settings
         self.onSelect = onSelect
+        self.onSelectOptimizedForCodex = onSelectOptimizedForCodex
         self.onHoverSelect = onHoverSelect
         self.onTogglePin = onTogglePin
         self.onDelete = onDelete
@@ -761,6 +764,11 @@ struct HistoryItemView: View, Equatable {
         .contextMenu {
             Button("Copy") {
                 onSelect()
+            }
+            if item.type == .image {
+                Button("Paste-optimized for Codex") {
+                    onSelectOptimizedForCodex()
+                }
             }
             Button(item.isPinned ? "Unpin" : "Pin") {
                 onTogglePin()

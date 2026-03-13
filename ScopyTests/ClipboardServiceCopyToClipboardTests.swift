@@ -1,6 +1,6 @@
 import AppKit
 import XCTest
-import ScopyKit
+@testable import ScopyKit
 
 @MainActor
 final class ClipboardServiceCopyToClipboardTests: XCTestCase {
@@ -241,6 +241,52 @@ final class ClipboardServiceCopyToClipboardTests: XCTestCase {
         XCTAssertNotNil(pasteboard.data(forType: .tiff))
     }
 
+    func testPNGReplayPolicyKeepsStandardPNGAsPrimaryRepresentation() throws {
+        guard let insertedStandardPNGImageData else {
+            XCTFail("Missing inserted standard PNG image data")
+            return
+        }
+
+        XCTAssertFalse(ClipboardMonitor.shouldAddTIFFFallbackForPNGReplay(insertedStandardPNGImageData))
+    }
+
+    func testPNGReplayPolicyAddsCompatibilityFallbackForRealPalettedPNG() throws {
+        guard let insertedPalettedImageData else {
+            XCTFail("Missing inserted paletted image data")
+            return
+        }
+
+        XCTAssertTrue(ClipboardMonitor.shouldAddTIFFFallbackForPNGReplay(insertedPalettedImageData))
+    }
+
+    func testStandardReplayPayloadForPalettedPNGDoesNotAddCompatibilityTIFF() throws {
+        guard let insertedPalettedImageData else {
+            XCTFail("Missing inserted paletted image data")
+            return
+        }
+
+        let payload = ClipboardMonitor.makeImagePasteboardPayloadForWrite(
+            insertedPalettedImageData,
+            imageWriteMode: .standard
+        )
+        XCTAssertEqual(payload?.primaryPNGData, insertedPalettedImageData)
+        XCTAssertNil(payload?.compatibilityTIFFData)
+    }
+
+    func testCodexOptimizedReplayPayloadForPalettedPNGAddsCompatibilityTIFF() throws {
+        guard let insertedPalettedImageData else {
+            XCTFail("Missing inserted paletted image data")
+            return
+        }
+
+        let payload = ClipboardMonitor.makeImagePasteboardPayloadForWrite(
+            insertedPalettedImageData,
+            imageWriteMode: .codexOptimized
+        )
+        XCTAssertEqual(payload?.primaryPNGData, insertedPalettedImageData)
+        XCTAssertNotNil(payload?.compatibilityTIFFData)
+    }
+
     func testCopyToClipboardImageWhenStoredPayloadIsStandardPNGPreservesReplayBytes() async throws {
         guard let insertedStandardPNGImageItemID else {
             XCTFail("Missing inserted standard PNG image item ID")
@@ -263,7 +309,7 @@ final class ClipboardServiceCopyToClipboardTests: XCTestCase {
         XCTAssertNotNil(pasteboard.data(forType: .tiff))
     }
 
-    func testCopyToClipboardImageWhenStoredPayloadIsPalettedPNGPreservesOriginalPNGAndAddsTIFFFallback() async throws {
+    func testCopyToClipboardImageWhenStoredPayloadIsPalettedPNGPreservesOriginalPNGBytes() async throws {
         guard let insertedPalettedImageItemID else {
             XCTFail("Missing inserted paletted image item ID")
             return
@@ -283,7 +329,34 @@ final class ClipboardServiceCopyToClipboardTests: XCTestCase {
         XCTAssertTrue(isLikelyPNG(pngData))
         XCTAssertEqual(pngData, insertedPalettedImageData)
         XCTAssertNotNil(NSImage(pasteboard: pasteboard))
-        XCTAssertNotNil(pasteboard.data(forType: .tiff))
+    }
+
+    func testCopyToClipboardOptimizedForCodexWhenStoredPayloadIsPalettedPNGAddsCompatibilityTIFF() async throws {
+        guard let insertedPalettedImageItemID else {
+            XCTFail("Missing inserted paletted image item ID")
+            return
+        }
+        guard let insertedPalettedImageData else {
+            XCTFail("Missing inserted paletted image data")
+            return
+        }
+        guard let expectedPayload = ClipboardMonitor.makeImagePasteboardPayloadForWrite(
+            insertedPalettedImageData,
+            imageWriteMode: .codexOptimized
+        ) else {
+            XCTFail("Expected codex-optimized image payload")
+            return
+        }
+        guard let expectedTIFFData = expectedPayload.compatibilityTIFFData else {
+            XCTFail("Expected compatibility TIFF fallback")
+            return
+        }
+
+        try await service.copyToClipboardOptimizedForCodex(itemID: insertedPalettedImageItemID)
+
+        XCTAssertEqual(pasteboard.data(forType: .png), insertedPalettedImageData)
+        XCTAssertEqual(pasteboard.data(forType: .tiff), expectedTIFFData)
+        XCTAssertNotNil(NSImage(pasteboard: pasteboard))
     }
 
     func testCopyToClipboardMisclassifiedTemporaryImageFilePublishesPNGInsteadOfFileURLs() async throws {

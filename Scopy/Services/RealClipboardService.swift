@@ -77,6 +77,10 @@ final class RealClipboardService: ClipboardServiceProtocol {
         try await clipboardService.copyToClipboard(itemID: itemID)
     }
 
+    func copyToClipboardOptimizedForCodex(itemID: UUID) async throws {
+        try await clipboardService.copyToClipboardOptimizedForCodex(itemID: itemID)
+    }
+
     func updateSettings(_ settings: SettingsDTO) async throws {
         try await clipboardService.updateSettings(settings)
     }
