@@ -1,8 +1,8 @@
 import Foundation
 
 enum HoverPreviewImageQualityPolicy {
-    static let maxSidePixels: Int = 32_767
-    static let maxTotalPixels: Double = 24_000_000
+    static let maxSidePixels: Int = 98_304
+    static let maxTotalPixels: Double = 64_000_000
 
     struct RenderPlan: Sendable {
         let scaleFactor: Double
@@ -29,7 +29,10 @@ enum HoverPreviewImageQualityPolicy {
 
         let w = Double(sourceWidthPixels)
         let h = Double(sourceHeightPixels)
-        let idealW = Double(idealTargetWidthPixels)
+        // Preview rendering should never budget around upscaling beyond the source width:
+        // doing so makes very tall images look blurry because we shrink them to satisfy a
+        // pixel budget that the source image could never actually use.
+        let idealW = min(Double(sourceWidthPixels), Double(idealTargetWidthPixels))
         let idealH = (h * idealW) / w
         let idealMaxDim = max(idealW, idealH)
         let idealTotal = idealW * idealH
@@ -57,4 +60,3 @@ enum HoverPreviewImageQualityPolicy {
         )
     }
 }
-

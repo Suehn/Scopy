@@ -1,4 +1,5 @@
 import AppKit
+import Darwin
 import Foundation
 import ImageIO
 import os
@@ -127,58 +128,37 @@ enum MarkdownExportService {
 
     @MainActor
     static func writePNGToPasteboard(pngData: Data, pasteboard: NSPasteboard) throws {
-        guard let imagePayload = makeImagePayloadForPasteboardWrite(pngData) else {
+        guard let imagePayload = makeStandardImagePayloadForPasteboardWrite(pngData) else {
             logger.error("Failed to normalize PNG payload before pasteboard export")
             throw ExportError.stageFailed(stage: .pasteboardWrite, underlying: nil)
         }
 
         pasteboard.clearContents()
-        let declaredTypes: [NSPasteboard.PasteboardType] = imagePayload.tiffData == nil ? [.png] : [.png, .tiff]
-        pasteboard.declareTypes(declaredTypes, owner: nil)
+        pasteboard.declareTypes([.png], owner: nil)
 
-        guard pasteboard.setData(imagePayload.pngData, forType: .png) else {
+        guard pasteboard.setData(imagePayload.primaryPNGData, forType: .png) else {
             logger.error("Failed to set PNG data on pasteboard")
             throw ExportError.stageFailed(stage: .pasteboardWrite, underlying: nil)
-        }
-
-        if let tiffData = imagePayload.tiffData,
-           !pasteboard.setData(tiffData, forType: .tiff) {
-            logger.warning("Failed to set TIFF fallback on pasteboard")
         }
     }
 
     private struct ImagePasteboardPayload {
-        let pngData: Data
-        let tiffData: Data?
+        let primaryPNGData: Data
     }
 
-    private static func makeImagePayloadForPasteboardWrite(_ data: Data) -> ImagePasteboardPayload? {
+    private static func makeStandardImagePayloadForPasteboardWrite(_ data: Data) -> ImagePasteboardPayload? {
         guard let imageSource = CGImageSourceCreateWithData(data as CFData, nil),
               let image = CGImageSourceCreateImageAtIndex(imageSource, 0, nil) else {
             return nil
         }
 
         let sourceType = CGImageSourceGetType(imageSource) as String?
-        if sourceType == UTType.png.identifier, !shouldRasterizeForPNGReplay(image) {
-            return ImagePasteboardPayload(pngData: data, tiffData: nil)
-        }
-
-        if sourceType == UTType.png.identifier,
-           let tiffData = rasterizeCGImageToStandardTIFF(image) {
-            // Preserve the original PNG bytes for fidelity while giving narrow
-            // macOS readers such as Codex/arboard a rasterized TIFF fallback.
-            return ImagePasteboardPayload(pngData: data, tiffData: tiffData)
+        if sourceType == UTType.png.identifier {
+            return ImagePasteboardPayload(primaryPNGData: data)
         }
 
         guard let pngData = rasterizeCGImageToStandardPNG(image) else { return nil }
-        return ImagePasteboardPayload(pngData: pngData, tiffData: nil)
-    }
-
-    private static func shouldRasterizeForPNGReplay(_ image: CGImage) -> Bool {
-        guard let colorSpace = image.colorSpace else { return true }
-        if colorSpace.model != .rgb { return true }
-        if image.bitsPerPixel < 24 { return true }
-        return false
+        return ImagePasteboardPayload(primaryPNGData: pngData)
     }
 
     private static func rasterizeCGImageToStandardPNG(_ image: CGImage) -> Data? {
@@ -194,30 +174,6 @@ enum MarkdownExportService {
         guard let destination = CGImageDestinationCreateWithData(
             output as CFMutableData,
             UTType.png.identifier as CFString,
-            1,
-            nil
-        ) else {
-            return nil
-        }
-
-        CGImageDestinationAddImage(destination, rasterizedImage, nil)
-        guard CGImageDestinationFinalize(destination) else { return nil }
-        return output as Data
-    }
-
-    private static func rasterizeCGImageToStandardTIFF(_ image: CGImage) -> Data? {
-        guard let context = makeStandardRGBAContext(for: image) else { return nil }
-        let width = image.width
-        let height = image.height
-        context.interpolationQuality = CGInterpolationQuality.high
-        context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
-
-        guard let rasterizedImage = context.makeImage() else { return nil }
-
-        let output = NSMutableData()
-        guard let destination = CGImageDestinationCreateWithData(
-            output as CFMutableData,
-            UTType.tiff.identifier as CFString,
             1,
             nil
         ) else {
@@ -258,6 +214,20 @@ enum MarkdownExportService {
         }
         return .general
     }
+
+#if DEBUG
+    static func debugMaxSupportedHeightPixels(targetWidthPixels: CGFloat = defaultTargetWidthPixels) -> CGFloat {
+        MarkdownExportRenderConstants.maxSupportedHeightPixels(for: targetWidthPixels)
+    }
+
+    static func debugUsesFileBackedBitmap(widthPixels: Int, heightPixels: Int) -> Bool {
+        ExportBitmapCanvas.shouldUseFileBackedBitmap(width: widthPixels, height: heightPixels)
+    }
+
+    static func debugShouldBypassPDFForVeryTallContent(heightPoints: CGFloat) -> Bool {
+        heightPoints > MarkdownExportRenderConstants.maxSafePDFExportHeightPoints
+    }
+#endif
 }
 
 // MARK: - Export Coordinator
@@ -265,8 +235,11 @@ enum MarkdownExportService {
 private enum MarkdownExportRenderConstants {
     static let exportViewportHeightPoints: CGFloat = 1000
     static let minSnapshotHeightPoints: CGFloat = 120
+    static let defaultMaxInlineBitmapPixels: CGFloat = 60_000_000
+    static let maxHeightBudgetMultiplier: CGFloat = 10
+    static let maxSafePDFExportHeightPoints: CGFloat = 29_000
 
-    // Prevent runaway memory usage / internal WebKit snapshot limits.
+    // Raise the default height budget 10x while keeping extra-long exports off the heap.
     static var maxTotalPixels: CGFloat {
         let processInfo = ProcessInfo.processInfo
         if processInfo.arguments.contains("--uitesting"),
@@ -276,13 +249,232 @@ private enum MarkdownExportRenderConstants {
            value >= 1_000_000 {
             return CGFloat(value)
         }
-        return 60_000_000
+        return defaultMaxInlineBitmapPixels * maxHeightBudgetMultiplier
+    }
+
+    static var maxInMemoryBitmapPixels: CGFloat {
+        min(maxTotalPixels, defaultMaxInlineBitmapPixels)
+    }
+
+    static func maxSupportedHeightPixels(for targetWidthPixels: CGFloat) -> CGFloat {
+        let width = max(1, targetWidthPixels)
+        return floor(maxTotalPixels / width)
     }
 
     // Keep single-shot snapshots within a conservative height. Taller exports should switch to tiled snapshot + stitch.
     static let maxSingleSnapshotRectHeightPoints: CGFloat = 20_000
     static let snapshotTileOverlapPoints: CGFloat = 1
     static let minAllowedGlobalScale: CGFloat = 0.02
+}
+
+private final class ExportBitmapStorage {
+    let pointer: UnsafeMutableRawPointer
+    let length: Int
+    private let fileDescriptor: Int32
+
+    private init(pointer: UnsafeMutableRawPointer, length: Int, fileDescriptor: Int32) {
+        self.pointer = pointer
+        self.length = length
+        self.fileDescriptor = fileDescriptor
+    }
+
+    deinit {
+        munmap(pointer, length)
+        close(fileDescriptor)
+    }
+
+    static func createMapped(length: Int) throws -> ExportBitmapStorage {
+        guard length > 0 else {
+            throw NSError(
+                domain: NSPOSIXErrorDomain,
+                code: Int(EINVAL),
+                userInfo: [NSLocalizedDescriptionKey: "Invalid bitmap length: \(length)"]
+            )
+        }
+
+        var template = Array(
+            FileManager.default.temporaryDirectory
+                .appendingPathComponent("scopy-markdown-export-XXXXXX")
+                .path
+                .utf8CString
+        )
+        let fd = mkstemp(&template)
+        guard fd >= 0 else {
+            throw posixError(operation: "mkstemp")
+        }
+
+        let unlinkResult = template.withUnsafeMutableBufferPointer { buffer in
+            unlink(buffer.baseAddress)
+        }
+        if unlinkResult != 0 {
+            close(fd)
+            throw posixError(operation: "unlink")
+        }
+
+        guard ftruncate(fd, off_t(length)) == 0 else {
+            let error = posixError(operation: "ftruncate")
+            close(fd)
+            throw error
+        }
+
+        let mapped = mmap(nil, length, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0)
+        guard mapped != MAP_FAILED, let mapped else {
+            let error = posixError(operation: "mmap")
+            close(fd)
+            throw error
+        }
+
+        return ExportBitmapStorage(pointer: mapped, length: length, fileDescriptor: fd)
+    }
+
+    func makeDataProvider() -> CGDataProvider? {
+        let retainedSelf = Unmanaged.passRetained(self)
+        guard let provider = CGDataProvider(
+            dataInfo: retainedSelf.toOpaque(),
+            data: pointer,
+            size: length,
+            releaseData: { info, _, _ in
+                guard let info else { return }
+                Unmanaged<ExportBitmapStorage>.fromOpaque(info).release()
+            }
+        ) else {
+            retainedSelf.release()
+            return nil
+        }
+        return provider
+    }
+
+    private static func posixError(operation: String, code: Int32 = errno) -> NSError {
+        NSError(
+            domain: NSPOSIXErrorDomain,
+            code: Int(code),
+            userInfo: [NSLocalizedDescriptionKey: "\(operation) failed: \(String(cString: strerror(code)))"]
+        )
+    }
+}
+
+private final class ExportBitmapCanvas {
+    let context: CGContext
+    let bytesPerRow: Int
+    let dataPointer: UnsafeMutableRawPointer?
+
+    private let width: Int
+    private let height: Int
+    private let storage: ExportBitmapStorage?
+
+    private init(
+        context: CGContext,
+        width: Int,
+        height: Int,
+        bytesPerRow: Int,
+        dataPointer: UnsafeMutableRawPointer?,
+        storage: ExportBitmapStorage?
+    ) {
+        self.context = context
+        self.width = width
+        self.height = height
+        self.bytesPerRow = bytesPerRow
+        self.dataPointer = dataPointer
+        self.storage = storage
+    }
+
+    static func shouldUseFileBackedBitmap(width: Int, height: Int) -> Bool {
+        guard width > 0, height > 0 else { return false }
+        let totalPixels = CGFloat(width) * CGFloat(height)
+        return totalPixels > MarkdownExportRenderConstants.maxInMemoryBitmapPixels + 0.5
+    }
+
+    static func make(
+        width: Int,
+        height: Int,
+        stage: MarkdownExportService.ExportStage
+    ) throws -> ExportBitmapCanvas {
+        guard width > 0, height > 0 else {
+            throw MarkdownExportService.ExportError.stageFailed(stage: stage, underlying: nil)
+        }
+
+        let (bytesPerRow, rowOverflow) = width.multipliedReportingOverflow(by: 4)
+        let (bufferLength, bufferOverflow) = bytesPerRow.multipliedReportingOverflow(by: height)
+        guard !rowOverflow, !bufferOverflow, bufferLength > 0 else {
+            throw MarkdownExportService.ExportError.exportLimitExceeded(
+                reason: "Bitmap buffer overflow (w=\(width)px, h=\(height)px)"
+            )
+        }
+
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        let bitmapInfo = CGImageAlphaInfo.premultipliedLast.rawValue
+
+        if shouldUseFileBackedBitmap(width: width, height: height) {
+            let storage: ExportBitmapStorage
+            do {
+                storage = try ExportBitmapStorage.createMapped(length: bufferLength)
+            } catch {
+                throw MarkdownExportService.ExportError.stageFailed(stage: stage, underlying: error)
+            }
+
+            guard let context = CGContext(
+                data: storage.pointer,
+                width: width,
+                height: height,
+                bitsPerComponent: 8,
+                bytesPerRow: bytesPerRow,
+                space: colorSpace,
+                bitmapInfo: bitmapInfo
+            ) else {
+                throw MarkdownExportService.ExportError.stageFailed(stage: stage, underlying: nil)
+            }
+
+            return ExportBitmapCanvas(
+                context: context,
+                width: width,
+                height: height,
+                bytesPerRow: bytesPerRow,
+                dataPointer: storage.pointer,
+                storage: storage
+            )
+        }
+
+        guard let context = CGContext(
+            data: nil,
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bytesPerRow: bytesPerRow,
+            space: colorSpace,
+            bitmapInfo: bitmapInfo
+        ) else {
+            throw MarkdownExportService.ExportError.stageFailed(stage: stage, underlying: nil)
+        }
+
+        return ExportBitmapCanvas(
+            context: context,
+            width: width,
+            height: height,
+            bytesPerRow: bytesPerRow,
+            dataPointer: context.data,
+            storage: nil
+        )
+    }
+
+    func makeImage() -> CGImage? {
+        if let storage {
+            guard let provider = storage.makeDataProvider() else { return nil }
+            return CGImage(
+                width: width,
+                height: height,
+                bitsPerComponent: 8,
+                bitsPerPixel: 32,
+                bytesPerRow: bytesPerRow,
+                space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue),
+                provider: provider,
+                decode: nil,
+                shouldInterpolate: true,
+                intent: .defaultIntent
+            )
+        }
+        return context.makeImage()
+    }
 }
 
 /// Manages the lifecycle of offscreen WebView for export
@@ -564,8 +756,7 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
     private func exportPNG(webView: WKWebView) async throws -> MarkdownExportService.ExportOutcome {
         stage = .prepareLayout
         let initialScrollHeightPoints = try await prepareForExportScrollHeightPoints(webView: webView)
-        var scrollHeightPoints = initialScrollHeightPoints
-        if scrollHeightPoints <= 0 {
+        if initialScrollHeightPoints <= 0 {
             let details = (try? await layoutDebugInfo(webView: webView)) ?? "No debug info"
             let underlying = NSError(
                 domain: "Scopy.MarkdownExport",
@@ -574,6 +765,7 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
             )
             throw MarkdownExportService.ExportError.stageFailed(stage: .prepareLayout, underlying: underlying)
         }
+        var scrollHeightPoints = initialScrollHeightPoints
 
         stage = .applyScale
         // Target output width is fixed (pixels). We avoid downscaling unless we hit safe image-area constraints.
@@ -609,17 +801,27 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
 
         let isUITesting = ProcessInfo.processInfo.arguments.contains("--uitesting")
         let processInfo = ProcessInfo.processInfo
-        let requiresPDFExportForResolution = outputScale > 1.001
+        let pdfExplicitlyRequired = processInfo.environment[ExportEnv.requirePDFExport] == "1"
+        let shouldBypassPDFForVeryTallContent = !pdfExplicitlyRequired
+            && scrollHeightPoints > MarkdownExportRenderConstants.maxSafePDFExportHeightPoints
+        let requiresPDFExportForResolution = outputScale > 1.001 && !shouldBypassPDFForVeryTallContent
         let shouldAttemptPDF: Bool = {
             let env = processInfo.environment
             if let raw = env[ExportEnv.disablePDFExport], raw == "1" { return false }
+            if pdfExplicitlyRequired { return true }
+            if shouldBypassPDFForVeryTallContent { return false }
             if requiresPDFExportForResolution { return true }
             if isUITesting {
                 return env[ExportEnv.uiTestEnablePDFExport] == "1"
             }
             return true
         }()
-        let requiresPDFExport = requiresPDFExportForResolution || processInfo.environment[ExportEnv.requirePDFExport] == "1"
+        if shouldBypassPDFForVeryTallContent {
+            MarkdownExportService.logger.info(
+                "Skipping PDF export for very tall content and falling back to tiled snapshot. heightPt=\(scrollHeightPoints, privacy: .public)"
+            )
+        }
+        let requiresPDFExport = requiresPDFExportForResolution || pdfExplicitlyRequired
         if requiresPDFExport, !shouldAttemptPDF {
             let underlying = NSError(
                 domain: "Scopy.MarkdownExport",
@@ -761,20 +963,13 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
             )
         }
 
-        let bytesPerRow = targetWidthPixelsInt * 4
-        let cs = CGColorSpaceCreateDeviceRGB()
-        let bitmapInfo = CGImageAlphaInfo.premultipliedLast.rawValue
-        guard let ctx = CGContext(
-            data: nil,
+        let canvas = try ExportBitmapCanvas.make(
             width: targetWidthPixelsInt,
             height: totalHeightPixelsInt,
-            bitsPerComponent: 8,
-            bytesPerRow: bytesPerRow,
-            space: cs,
-            bitmapInfo: bitmapInfo
-        ) else {
-            throw MarkdownExportService.ExportError.stageFailed(stage: .stitchTiles, underlying: nil)
-        }
+            stage: .stitchTiles
+        )
+        let ctx = canvas.context
+        let bytesPerRow = canvas.bytesPerRow
 
         ctx.setFillColor(CGColor(red: 1, green: 1, blue: 1, alpha: 1))
         ctx.fill(CGRect(x: 0, y: 0, width: CGFloat(targetWidthPixelsInt), height: CGFloat(totalHeightPixelsInt)))
@@ -790,11 +985,18 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
             let remaining = CGFloat(totalHeightPointsInt) - scrollYPoints
             let captureHeightPoints = max(1, min(tileViewportHeightPoints, remaining))
 
-            try await scrollTo(webView: webView, yPoints: scrollYPoints)
+            let actualScrollYPoints = try await scrollTo(webView: webView, yPoints: scrollYPoints)
+            let captureOffsetPoints = max(
+                0,
+                min(
+                    tileViewportHeightPoints - captureHeightPoints,
+                    scrollYPoints - actualScrollYPoints
+                )
+            )
 
             let rectPoints = CGRect(
                 x: 0,
-                y: 0,
+                y: captureOffsetPoints,
                 width: viewportWidthPoints,
                 height: captureHeightPoints
             )
@@ -832,12 +1034,12 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
             scrollYPoints += max(1, tileViewportHeightPoints - overlapPoints)
         }
 
-        guard let stitched = ctx.makeImage() else {
+        guard let stitched = canvas.makeImage() else {
             throw MarkdownExportService.ExportError.stageFailed(stage: .stitchTiles, underlying: nil)
         }
 
         stage = .pngEncoding
-        let trimmed = Self.trimBottomWhitespaceIfNeeded(image: stitched, contextData: ctx.data, bytesPerRow: bytesPerRow)
+        let trimmed = Self.trimBottomWhitespaceIfNeeded(image: stitched, contextData: canvas.dataPointer, bytesPerRow: bytesPerRow)
         let originalPNG = try Self.pngDataFromCGImage(trimmed)
         if let pngquantOptions {
             let finalPNG = await Task.detached(priority: .userInitiated) {
@@ -862,16 +1064,68 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
         )
     }
 
-    private func scrollTo(webView: WKWebView, yPoints: CGFloat) async throws {
-        let js = """
-        (function() {
-          try { window.scrollTo(0, \(Double(max(0, yPoints)))); } catch (e) { }
-          return true;
-        })();
-        """
-        _ = try await evaluateJavaScriptBool(webView: webView, javaScriptString: js)
+    private func scrollTo(webView: WKWebView, yPoints: CGFloat) async throws -> CGFloat {
+        let target = Double(max(0, yPoints))
+        if let scrollView = resolvedScrollView(for: webView),
+           let documentView = scrollView.documentView
+        {
+            let clipView = scrollView.contentView
+            let documentHeight = max(documentView.bounds.height, documentView.frame.height)
+            let viewportHeight = max(clipView.bounds.height, clipView.frame.height)
+            let maxOffsetY = max(0, documentHeight - viewportHeight)
+            let boundedY = CGFloat(min(target, Double(maxOffsetY)))
+            clipView.scroll(to: NSPoint(x: 0, y: boundedY))
+            scrollView.reflectScrolledClipView(clipView)
+            scrollView.layoutSubtreeIfNeeded()
+            documentView.layoutSubtreeIfNeeded()
+            webView.layoutSubtreeIfNeeded()
+            webView.displayIfNeeded()
+        } else {
+            let scrollJS = """
+            (function() {
+              try { window.scrollTo(0, \(target)); } catch (e) { }
+              return true;
+            })();
+            """
+            _ = try await evaluateJavaScriptBool(webView: webView, javaScriptString: scrollJS)
+        }
         // Give WebKit a moment to paint after programmatic scroll.
         try? await Task.sleep(nanoseconds: 70_000_000)
+
+        let actualJS = """
+        (function() {
+          try {
+            var y = 0;
+            if (typeof window.scrollY === 'number') { y = window.scrollY; }
+            else if (typeof window.pageYOffset === 'number') { y = window.pageYOffset; }
+            else if (document && document.documentElement && typeof document.documentElement.scrollTop === 'number') { y = document.documentElement.scrollTop; }
+            return String(Math.max(0, y || 0));
+          } catch (e) {
+            return "0";
+          }
+        })();
+        """
+        let actual = try await evaluateJavaScriptString(webView: webView, javaScriptString: actualJS)
+        return max(0, CGFloat(Double(actual) ?? 0))
+    }
+
+    private func resolvedScrollView(for webView: WKWebView) -> NSScrollView? {
+        if let enclosing = webView.enclosingScrollView {
+            return enclosing
+        }
+        return findFirstScrollView(in: webView)
+    }
+
+    private func findFirstScrollView(in view: NSView) -> NSScrollView? {
+        for subview in view.subviews {
+            if let scrollView = subview as? NSScrollView {
+                return scrollView
+            }
+            if let found = findFirstScrollView(in: subview) {
+                return found
+            }
+        }
+        return nil
     }
 
     private func cgImage(from image: NSImage) throws -> CGImage {
@@ -1704,20 +1958,13 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
             )
         }
 
-        let bytesPerRow = targetWidthPixels * 4
-        let cs = CGColorSpaceCreateDeviceRGB()
-        let bitmapInfo = CGImageAlphaInfo.premultipliedLast.rawValue
-        guard let ctx = CGContext(
-            data: nil,
+        let canvas = try ExportBitmapCanvas.make(
             width: targetWidthPixels,
             height: totalHeightPixels,
-            bitsPerComponent: 8,
-            bytesPerRow: bytesPerRow,
-            space: cs,
-            bitmapInfo: bitmapInfo
-        ) else {
-            throw MarkdownExportService.ExportError.stageFailed(stage: .rasterizePDF, underlying: nil)
-        }
+            stage: .rasterizePDF
+        )
+        let ctx = canvas.context
+        let bytesPerRow = canvas.bytesPerRow
 
         ctx.interpolationQuality = .high
         ctx.setFillColor(CGColor(red: 1, green: 1, blue: 1, alpha: 1))
@@ -1757,11 +2004,11 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
             ctx.restoreGState()
         }
 
-        guard let image = ctx.makeImage() else {
+        guard let image = canvas.makeImage() else {
             throw MarkdownExportService.ExportError.stageFailed(stage: .rasterizePDF, underlying: nil)
         }
 
-        return trimBottomWhitespaceIfNeeded(image: image, contextData: ctx.data, bytesPerRow: bytesPerRow)
+        return trimBottomWhitespaceIfNeeded(image: image, contextData: canvas.dataPointer, bytesPerRow: bytesPerRow)
     }
 
     nonisolated private static func trimBottomWhitespaceIfNeeded(

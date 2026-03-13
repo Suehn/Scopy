@@ -714,6 +714,75 @@ final class ExportMarkdownPNGUITests: XCTestCase {
         XCTAssertGreaterThan(props.height, 200, "Expected short content export height to be non-trivial (background + padding)")
     }
 
+    func testAutoExportTallContentKeepsBottomContentVisible() throws {
+        let htmlPath = "/tmp/scopy_uitest_export_bottom_guard.html"
+        let dumpPath = "/tmp/scopy_uitest_export_bottom_guard.png"
+        let errorPath = "/tmp/scopy_uitest_export_bottom_guard_error.txt"
+
+        try? FileManager.default.removeItem(atPath: htmlPath)
+        try? FileManager.default.removeItem(atPath: dumpPath)
+        try? FileManager.default.removeItem(atPath: errorPath)
+
+        let html = """
+        <!doctype html>
+        <html>
+          <head>
+            <meta charset="utf-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1">
+            <style>
+              :root { color-scheme: light; }
+              html, body { margin: 0; padding: 0; background: #fff; color: #111; font: 600 24px/1.45 -apple-system-body; }
+              #content { box-sizing: border-box; width: 100%; padding: 24px 32px 0; background: #fff; }
+              .top {
+                height: 180px;
+                border-radius: 20px;
+                background: #d61f3a;
+                color: #fff;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                font-size: 56px;
+                margin: 0 0 20px 0;
+              }
+              .spacer { height: 32000px; }
+              .bottom-bar { height: 200px; background: #000; margin: 0; padding: 0; }
+            </style>
+          </head>
+          <body>
+            <div id="content">
+              <div class="top">TOP</div>
+              <p>content before spacer</p>
+              <div class="spacer"></div>
+              <div class="bottom-bar"></div>
+            </div>
+          </body>
+        </html>
+        """
+        try Data(html.utf8).write(to: URL(fileURLWithPath: htmlPath), options: [.atomic])
+
+        let app = XCUIApplication()
+        app.launchArguments = ["--uitesting"]
+        app.launchEnvironment["SCOPY_UITEST_AUTO_EXPORT_MARKDOWN"] = "1"
+        app.launchEnvironment["SCOPY_UITEST_AUTO_EXPORT_HTML_PATH"] = htmlPath
+        app.launchEnvironment["SCOPY_EXPORT_DISABLE_PDF"] = "1"
+        app.launchEnvironment["SCOPY_EXPORT_DUMP_PATH"] = dumpPath
+        app.launchEnvironment["SCOPY_EXPORT_ERROR_DUMP_PATH"] = errorPath
+        app.launch()
+        defer { app.terminate() }
+
+        waitForExport(dumpPath: dumpPath, errorPath: errorPath, timeoutSeconds: 40)
+        try assertNoExportError(errorPath: errorPath)
+
+        let props = try readPNGProperties(atPath: dumpPath)
+        XCTAssertEqual(props.width, 1080, "Expected PNG width to be 1080px")
+        XCTAssertGreaterThan(props.height, 60_000, "Expected tall content to export to a tall PNG")
+        XCTAssertLessThanOrEqual(
+            bottomWhitespaceRows(props.cgImage),
+            48,
+            "Expected bottom marker to remain visible instead of being clipped above a blank tail"
+        )
+    }
+
     func testAutoExportWideTableFitsWidthWithoutOverShrink() throws {
         let htmlPath = "/tmp/scopy_uitest_export_widetable.html"
         let dumpPath = "/tmp/scopy_uitest_export_widetable.png"

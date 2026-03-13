@@ -19,12 +19,12 @@ final class HoverPreviewImageQualityPolicyTests: XCTestCase {
     func testPlanReducesScaleForVeryTallImagesToFitPixelBudget() {
         let plan = HoverPreviewImageQualityPolicy.plan(
             sourceWidthPixels: 2000,
-            sourceHeightPixels: 50_000,
+            sourceHeightPixels: 100_000,
             idealTargetWidthPixels: 1280
         )
         XCTAssertLessThan(plan.scaleFactor, 1.0)
-        XCTAssertGreaterThan(plan.scaleFactor, 0.70)
-        XCTAssertGreaterThan(plan.effectiveTargetWidthPixels, 900)
+        XCTAssertGreaterThan(plan.scaleFactor, 0.85)
+        XCTAssertGreaterThan(plan.effectiveTargetWidthPixels, 1_100)
         XCTAssertLessThanOrEqual(plan.maxPixelSize, HoverPreviewImageQualityPolicy.maxSidePixels)
     }
 
@@ -38,5 +38,16 @@ final class HoverPreviewImageQualityPolicyTests: XCTestCase {
         XCTAssertLessThanOrEqual(plan.maxPixelSize, HoverPreviewImageQualityPolicy.maxSidePixels)
         XCTAssertGreaterThan(plan.maxPixelSize, 10_000)
     }
-}
 
+    func testPlanDoesNotBudgetForUpscalingBeyondSourceWidth() {
+        let plan = HoverPreviewImageQualityPolicy.plan(
+            sourceWidthPixels: 1080,
+            sourceHeightPixels: 61_572,
+            idealTargetWidthPixels: 1280
+        )
+        XCTAssertLessThan(plan.scaleFactor, 1.0)
+        XCTAssertGreaterThan(plan.scaleFactor, 0.95)
+        XCTAssertGreaterThanOrEqual(plan.effectiveTargetWidthPixels, 1_000)
+        XCTAssertLessThanOrEqual(plan.maxPixelSize, HoverPreviewImageQualityPolicy.maxSidePixels)
+    }
+}

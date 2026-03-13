@@ -22,7 +22,9 @@ struct HistoryItemImagePreviewView: View {
             if naturalHeight > maxHeight {
                 ScrollView(.vertical) {
                     content
-                        .frame(width: width, height: naturalHeight)
+                        // Avoid forcing an extremely tall fixed frame: SwiftUI/AppKit can blank out
+                        // ultra-tall image previews when the content view height grows too large.
+                        .frame(width: width)
                 }
                 .scrollIndicators(.visible)
                 .frame(width: width, height: desiredHeight)
