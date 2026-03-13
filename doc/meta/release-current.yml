@@ -1,6 +1,6 @@
-version: v0.60.2
-date: 2026-03-07
-release_doc: doc/releases/history/v0.60.2.md
+version: v0.60.3
+date: 2026-03-13
+release_doc: doc/releases/history/v0.60.3.md
 release_index: doc/releases/README.md
 changelog_file: doc/releases/CHANGELOG.md
 profile_doc: null
@@ -8,8 +8,8 @@ runbook_doc: doc/current/release-runbook.md
 spec_doc: doc/current/product-spec.md
 development_doc: doc/current/development-guide.md
 architecture_doc: doc/current/architecture.md
-last_verified_at: 2026-03-07
-summary: Historical image replay compatibility fix for Codex and temporary image files
+last_verified_at: 2026-03-13
+summary: Explicit Codex image replay action and ultra-tall export and preview hardening
 verification:
   build: pass
   test_unit: pass

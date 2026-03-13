@@ -11,6 +11,33 @@
 
 - No unreleased entries.
 
+## [v0.60.3] - 2026-03-13
+
+### Fix/Clipboard
+
+- 为图片历史项增加显式的 “Paste-optimized for Codex” 动作；普通历史回放继续保持标准 PNG 语义，仅显式优化路径才会给窄读取链路补兼容表示。
+- 普通图片历史回放和 Codex 优化回放的边界拆开，避免为了单一目标应用破坏日常回放语义。
+
+### Fix/Export
+
+- Markdown/LaTeX 导出 PNG 的默认高度预算提升到原始值的 10 倍；导出宽度与布局逻辑保持不变，减少超长内容触发 `exportLimitExceeded` 的概率。
+- 超长导出在必要时改走 file-backed tiled snapshot，并对极长内容跳过脆弱的 PDF 路径。
+- 修复 tiled snapshot 在最后一片被 WebKit clamp 后仍从视口顶部取图，导致底部轻微截断的问题；现在会按实际 scroll 偏移截取最后一片。
+
+### Fix/Preview
+
+- 超长图片 preview 不再因为超大固定高度布局而白屏。
+- 超长图片 preview 的降采样策略放宽：不再围绕超过原图宽度的目标做预算，并提高长边/总像素阈值，减少超长图预览发糊。
+
+### Verification
+
+- `make build`：BUILD SUCCEEDED（2026-03-13）
+- `make test-unit`：Executed 300 tests, 1 skipped, 0 failures（2026-03-13）
+- `make test-strict`：Executed 300 tests, 1 skipped, 0 failures（2026-03-13）
+- `xcodebuild test -project Scopy.xcodeproj -scheme Scopy -destination 'platform=macOS' -only-testing:ScopyUITests/ExportMarkdownPNGUITests/testAutoExportTallContentKeepsBottomContentVisible`：passed（2026-03-13）
+- `make docs-validate`：passed（2026-03-13）
+- `make release-validate`：passed（2026-03-13）
+
 ## [v0.60.2] - 2026-03-07
 
 ### Fix/Clipboard
