@@ -31,6 +31,7 @@ extension ListLiveScrollObserverView {
         private weak var observedScrollView: NSScrollView?
         private weak var cachedWindow: NSWindow?
         private weak var cachedWindowResolvedScrollView: NSScrollView?
+        private var localEventMonitor: Any?
         private var isLiveScrolling = false
 
         override func viewDidMoveToSuperview() {
@@ -60,6 +61,7 @@ extension ListLiveScrollObserverView {
             detach()
             observedScrollView = scrollView
             onScrollViewAttach?(scrollView)
+            installEventMonitorIfNeeded()
 
             NotificationCenter.default.addObserver(
                 self,
@@ -92,6 +94,11 @@ extension ListLiveScrollObserverView {
             observedScrollView = nil
             cachedWindow = nil
             cachedWindowResolvedScrollView = nil
+            removeEventMonitor()
+            if HistoryListScrollState.shared.isPointerInteractionActive {
+                HistoryListScrollState.shared.endPointerInteraction()
+                NotificationCenter.default.post(name: .historyListInteractionDidEnd, object: nil)
+            }
             if isLiveScrolling {
                 isLiveScrolling = false
                 onScrollEnd?()
@@ -108,6 +115,44 @@ extension ListLiveScrollObserverView {
             guard isLiveScrolling else { return }
             isLiveScrolling = false
             onScrollEnd?()
+        }
+
+        private func installEventMonitorIfNeeded() {
+            guard localEventMonitor == nil else { return }
+            localEventMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .leftMouseUp]) { [weak self] event in
+                self?.handlePointerInteractionEvent(event)
+                return event
+            }
+        }
+
+        private func removeEventMonitor() {
+            if let localEventMonitor {
+                NSEvent.removeMonitor(localEventMonitor)
+                self.localEventMonitor = nil
+            }
+        }
+
+        private func handlePointerInteractionEvent(_ event: NSEvent) {
+            guard let scrollView = observedScrollView,
+                  let window = scrollView.window,
+                  event.window === window else { return }
+
+            let pointInScrollView = scrollView.convert(event.locationInWindow, from: nil)
+            let isInsideScrollView = scrollView.bounds.contains(pointInScrollView)
+
+            switch event.type {
+            case .leftMouseDown:
+                guard isInsideScrollView else { return }
+                guard !HistoryListScrollState.shared.isPointerInteractionActive else { return }
+                HistoryListScrollState.shared.beginPointerInteraction()
+                NotificationCenter.default.post(name: .historyListInteractionDidStart, object: nil)
+            case .leftMouseUp:
+                guard HistoryListScrollState.shared.isPointerInteractionActive else { return }
+                HistoryListScrollState.shared.endPointerInteraction()
+                NotificationCenter.default.post(name: .historyListInteractionDidEnd, object: nil)
+            default:
+                break
+            }
         }
 
         private func findEnclosingScrollView() -> NSScrollView? {

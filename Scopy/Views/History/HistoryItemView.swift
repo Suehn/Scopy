@@ -58,7 +58,6 @@ private func runBudgetedDetached<T: Sendable>(
 struct HistoryItemView: View, Equatable {
     let item: ClipboardItemDTO
     let isKeyboardSelected: Bool
-    let isScrolling: Bool
     let settings: SettingsDTO
 
     // 回调闭包 - 不参与 Equatable 比较
@@ -86,7 +85,6 @@ struct HistoryItemView: View, Equatable {
     init(
         item: ClipboardItemDTO,
         isKeyboardSelected: Bool,
-        isScrolling: Bool,
         settings: SettingsDTO,
         onSelect: @escaping () -> Void,
         onSelectOptimizedForCodex: @escaping () -> Void,
@@ -105,7 +103,6 @@ struct HistoryItemView: View, Equatable {
     ) {
         self.item = item
         self.isKeyboardSelected = isKeyboardSelected
-        self.isScrolling = isScrolling
         self.settings = settings
         self.onSelect = onSelect
         self.onSelectOptimizedForCodex = onSelectOptimizedForCodex
@@ -135,12 +132,15 @@ struct HistoryItemView: View, Equatable {
         lhs.item.note == rhs.item.note &&
         lhs.item.fileSizeBytes == rhs.item.fileSizeBytes &&
         lhs.isKeyboardSelected == rhs.isKeyboardSelected &&
-        lhs.isScrolling == rhs.isScrolling &&
         lhs.isImagePreviewPresented == rhs.isImagePreviewPresented &&
         lhs.isTextPreviewPresented == rhs.isTextPreviewPresented &&
         lhs.isFilePreviewPresented == rhs.isFilePreviewPresented &&
         lhs.settings.showImageThumbnails == rhs.settings.showImageThumbnails &&
         lhs.settings.thumbnailHeight == rhs.settings.thumbnailHeight
+    }
+
+    private var isPreviewInteractionSuppressed: Bool {
+        HistoryListScrollState.shared.isHoverPreviewSuppressed
     }
 
     private var isHovering: Bool {
@@ -292,7 +292,7 @@ struct HistoryItemView: View, Equatable {
             let delayNanos = UInt64(previewDelay * 1_000_000_000)
             try? await Task.sleep(nanoseconds: delayNanos)
             guard !Task.isCancelled else { return }
-            guard !isScrolling else { return }
+            guard !isPreviewInteractionSuppressed else { return }
             guard isHovering else { return }
 
             let maxBytes = 200_000
@@ -375,7 +375,7 @@ struct HistoryItemView: View, Equatable {
             }
 
             guard !Task.isCancelled else { return }
-            guard !isScrolling else { return }
+            guard !isPreviewInteractionSuppressed else { return }
             guard isHovering else { return }
 
             guard let rawText = previewText else {
@@ -523,7 +523,7 @@ struct HistoryItemView: View, Equatable {
         case .image where showThumbnails:
             // v0.15.1: 图片有缩略图时，只显示缩略图和大小，不显示 "Image" 标题
             HStack(spacing: ScopySpacing.md) {
-                HistoryItemThumbnailView(thumbnailPath: item.thumbnailPath, height: thumbnailHeight, isScrolling: isScrolling)
+                HistoryItemThumbnailView(thumbnailPath: item.thumbnailPath, height: thumbnailHeight)
                 Text(metadataText)
                     .font(.system(size: 10))
                     .foregroundStyle(ScopyColors.mutedText)
@@ -680,8 +680,8 @@ struct HistoryItemView: View, Equatable {
             }
         }
         // v0.10.3: 添加选中/悬停态过渡动效
-        .animation(isScrolling ? nil : .easeInOut(duration: 0.15), value: isHovering)
-        .animation(isScrolling ? nil : .easeInOut(duration: 0.15), value: isKeyboardSelected)
+        .animation(.easeInOut(duration: 0.15), value: isHovering)
+        .animation(.easeInOut(duration: 0.15), value: isKeyboardSelected)
         .padding(.horizontal, ScopySpacing.md) // Outer padding for floating effect
         .onTapGesture {
             if isUITestTapPreviewEnabled {
@@ -927,15 +927,14 @@ struct HistoryItemView: View, Equatable {
         .onChange(of: previewModel.markdownHasHorizontalOverflow) { _, _ in
             updateMarkdownFilePreviewMetricsCacheIfNeeded()
         }
-        .onChange(of: isScrolling) { _, newValue in
-            if !newValue {
-                updateRelativeTimeText()
-                return
-            }
-            guard shouldResetPreviewOnScroll else { return }
-            isHovering = false
-            cancelHoverTasks()
-            resetPreviewState(hidePopovers: true)
+        .onReceive(NotificationCenter.default.publisher(for: .historyListScrollDidStart)) { _ in
+            handleScrollDidStart()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .historyListInteractionDidStart)) { _ in
+            handleScrollDidStart()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .historyListScrollDidEnd)) { _ in
+            handleScrollDidEnd()
         }
         .background {
             if isImagePreviewPresented || isTextPreviewPresented || isFilePreviewPresented {
@@ -951,7 +950,7 @@ struct HistoryItemView: View, Equatable {
     }
 
     private func handleHover(_ hovering: Bool) {
-        if isScrolling {
+        if isPreviewInteractionSuppressed {
             if isHovering {
                 isHovering = false
             }
@@ -969,7 +968,7 @@ struct HistoryItemView: View, Equatable {
 
         if hovering {
             // 静止 150ms 后才更新全局选中状态
-            if !isScrolling {
+            if !isPreviewInteractionSuppressed {
                 hoverDebounceTask = Task {
                     try? await Task.sleep(nanoseconds: 150_000_000)
                     guard !Task.isCancelled else { return }
@@ -1081,7 +1080,7 @@ struct HistoryItemView: View, Equatable {
                     try? await Task.sleep(nanoseconds: prefetchDelayNanos)
                 }
                 guard !Task.isCancelled else { return nil }
-                guard !isScrolling else { return nil }
+                guard !isPreviewInteractionSuppressed else { return nil }
                 guard isHovering else { return nil }
 
                 if let cached = HoverPreviewImageCache.shared.image(forKey: previewCacheKey) {
@@ -1118,7 +1117,7 @@ struct HistoryItemView: View, Equatable {
                 }
 
                 guard !Task.isCancelled else { return nil }
-                guard !isScrolling else { return nil }
+                guard !isPreviewInteractionSuppressed else { return nil }
                 guard isHovering else { return nil }
                 if let cgImage {
                     HoverPreviewImageCache.shared.setImage(cgImage, forKey: previewCacheKey)
@@ -1130,7 +1129,7 @@ struct HistoryItemView: View, Equatable {
 
             try? await Task.sleep(nanoseconds: delayNanos)
             guard !Task.isCancelled else { return }
-            guard !isScrolling else { return }
+            guard !isPreviewInteractionSuppressed else { return }
             guard isHovering else { return }
 
             self.requestPopover(.image)
@@ -1185,7 +1184,7 @@ struct HistoryItemView: View, Equatable {
                     try? await Task.sleep(nanoseconds: prefetchDelayNanos)
                 }
                 guard !Task.isCancelled else { return nil }
-                guard !isScrolling else { return nil }
+                guard !isPreviewInteractionSuppressed else { return nil }
                 guard isHovering else { return nil }
 
                 if let cached = HoverPreviewImageCache.shared.image(forKey: previewCacheKey) {
@@ -1217,7 +1216,7 @@ struct HistoryItemView: View, Equatable {
 
                 let cgImage = sendable?.image
                 guard !Task.isCancelled else { return nil }
-                guard !isScrolling else { return nil }
+                guard !isPreviewInteractionSuppressed else { return nil }
                 guard isHovering else { return nil }
                 if let cgImage {
                     HoverPreviewImageCache.shared.setImage(cgImage, forKey: previewCacheKey)
@@ -1229,7 +1228,7 @@ struct HistoryItemView: View, Equatable {
 
             try? await Task.sleep(nanoseconds: delayNanos)
             guard !Task.isCancelled else { return }
-            guard !isScrolling else { return }
+            guard !isPreviewInteractionSuppressed else { return }
             guard isHovering else { return }
 
             self.requestPopover(.file)
@@ -1346,7 +1345,7 @@ struct HistoryItemView: View, Equatable {
 
         isHoveringOptimizeButton = false
         guard isHovering else { return }
-        guard !isScrolling else { return }
+        guard !isPreviewInteractionSuppressed else { return }
 
         if item.type == .image && showThumbnails {
             startPreviewTask()
@@ -1491,7 +1490,7 @@ struct HistoryItemView: View, Equatable {
             let delayNanos = UInt64(previewDelay * 1_000_000_000)
             try? await Task.sleep(nanoseconds: delayNanos)
             guard !Task.isCancelled else { return }
-            guard !isScrolling else { return }
+            guard !isPreviewInteractionSuppressed else { return }
             guard isHovering else { return }
 
             let text = item.plainText
@@ -1613,7 +1612,20 @@ struct HistoryItemView: View, Equatable {
     }
 
     private func updateRelativeTimeText() {
-        relativeTimeText = relativeTime
+        let next = relativeTime
+        guard next != relativeTimeText else { return }
+        relativeTimeText = next
+    }
+
+    private func handleScrollDidStart() {
+        guard shouldResetPreviewOnScroll else { return }
+        isHovering = false
+        cancelHoverTasks()
+        resetPreviewState(hidePopovers: true)
+    }
+
+    private func handleScrollDidEnd() {
+        updateRelativeTimeText()
     }
 
     /// v0.12: 使用全局缓存获取应用名称，避免重复调用 NSWorkspace

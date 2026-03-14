@@ -21,6 +21,48 @@ private struct HoverPreviewDismissSnapshot: Equatable {
     let at: CFTimeInterval
 }
 
+@MainActor
+final class HistoryListScrollState {
+    static let shared = HistoryListScrollState()
+    private static let hoverPreviewCooldownAfterScrollSeconds: CFTimeInterval = 0.25
+
+    private(set) var isScrolling = false
+    private(set) var isPointerInteractionActive = false
+    private var lastScrollEndedAt: CFTimeInterval = 0
+
+    var isHoverPreviewSuppressed: Bool {
+        if isScrolling || isPointerInteractionActive {
+            return true
+        }
+        let elapsed = CFAbsoluteTimeGetCurrent() - lastScrollEndedAt
+        return elapsed < Self.hoverPreviewCooldownAfterScrollSeconds
+    }
+
+    func beginScrolling() {
+        isScrolling = true
+    }
+
+    func endScrolling() {
+        isScrolling = false
+        lastScrollEndedAt = CFAbsoluteTimeGetCurrent()
+    }
+
+    func beginPointerInteraction() {
+        isPointerInteractionActive = true
+    }
+
+    func endPointerInteraction() {
+        isPointerInteractionActive = false
+    }
+}
+
+extension Notification.Name {
+    static let historyListScrollDidStart = Notification.Name("HistoryListScrollDidStart")
+    static let historyListScrollDidEnd = Notification.Name("HistoryListScrollDidEnd")
+    static let historyListInteractionDidStart = Notification.Name("HistoryListInteractionDidStart")
+    static let historyListInteractionDidEnd = Notification.Name("HistoryListInteractionDidEnd")
+}
+
 /// 历史列表视图 - 符合 v0.md 的懒加载设计
 @MainActor
 struct HistoryListView: View {
@@ -77,8 +119,7 @@ struct HistoryListView: View {
                         SectionHeader(
                             title: "Pinned",
                             count: pinned.count,
-                            isScrolling: historyViewModel.isScrolling,
-                            isCollapsible: true,
+                                            isCollapsible: true,
                             isCollapsed: historyViewModel.isPinnedCollapsed,
                             onToggle: { historyViewModel.isPinnedCollapsed.toggle() }
                         )
@@ -127,8 +168,18 @@ struct HistoryListView: View {
                 .accessibilityIdentifier("History.List")
                 .background(
                     ListLiveScrollObserverView(
-                        onScrollStart: { historyViewModel.scrollDidStart() },
-                        onScrollEnd: { historyViewModel.scrollDidEnd() },
+                        onScrollStart: {
+                            guard !HistoryListScrollState.shared.isScrolling else { return }
+                            HistoryListScrollState.shared.beginScrolling()
+                            historyViewModel.scrollDidStart()
+                            NotificationCenter.default.post(name: .historyListScrollDidStart, object: nil)
+                        },
+                        onScrollEnd: {
+                            guard HistoryListScrollState.shared.isScrolling else { return }
+                            HistoryListScrollState.shared.endScrolling()
+                            historyViewModel.scrollDidEnd()
+                            NotificationCenter.default.post(name: .historyListScrollDidEnd, object: nil)
+                        },
                         onScrollViewAttach: ScrollPerformanceProfile.isEnabled ? { scrollView in
                             ScrollPerformanceProfile.shared.attachScrollView(scrollView)
                         } : nil
@@ -275,7 +326,6 @@ struct HistoryListView: View {
         let row = HistoryItemView(
             item: item,
             isKeyboardSelected: isSelected,
-            isScrolling: historyViewModel.isScrolling,
             settings: settingsViewModel.settings,
             onSelect: { Task { await historyViewModel.select(item) } },
             onSelectOptimizedForCodex: { Task { await historyViewModel.selectOptimizedForCodex(item) } },
