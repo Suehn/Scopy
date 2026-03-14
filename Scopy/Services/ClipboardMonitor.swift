@@ -765,7 +765,8 @@ public final class ClipboardMonitor {
                     return
                 }
 
-                var payloadData = Self.loadPendingPayload(from: envelope, ingestDirectory: ingestDirectory)
+                let originalPayloadData = Self.loadPendingPayload(from: envelope, ingestDirectory: ingestDirectory)
+                var payloadData = originalPayloadData
                 var plainText = envelope.plainText
                 var sizeBytes = envelope.sizeBytes
 
@@ -788,13 +789,18 @@ public final class ClipboardMonitor {
                     hash = Self.computeHashStatic(Data(plainText.utf8))
                 }
 
+                let preferredPayloadURL: URL? = {
+                    guard payloadData == originalPayloadData else { return nil }
+                    return Self.pendingPayloadURL(for: envelope, ingestDirectory: ingestDirectory)
+                }()
+
                 let payload = Self.buildPayload(
                     type: envelope.type,
                     data: payloadData,
                     sizeBytes: sizeBytes,
                     ingestDirectory: ingestDirectory,
                     spoolThresholdBytes: spoolThresholdBytes,
-                    preferredFileURL: Self.pendingPayloadURL(for: envelope, ingestDirectory: ingestDirectory)
+                    preferredFileURL: preferredPayloadURL
                 )
 
                 let resolvedPlainText = plainText

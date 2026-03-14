@@ -902,6 +902,44 @@ final class ClipboardMonitorTests: XCTestCase {
         }, message: "Replayed ingest envelope should be acknowledged after storage")
     }
 
+    func testLargeTIFFConversionEmitsPNGPayloadFile() async throws {
+        monitor.setPollingInterval(0.1)
+
+        pasteboard.clearContents()
+        pasteboard.setString("Baseline \(UUID())", forType: .string)
+        monitor.startMonitoring()
+
+        let expectation = XCTestExpectation(description: "Large TIFF converted to PNG payload file")
+        let task = Task {
+            for await content in monitor.contentStream where content.type == .image {
+                guard let ingestURL = content.ingestFileURL else { continue }
+                let data = try? Data(contentsOf: ingestURL)
+                XCTAssertTrue(self.isLikelyPNG(data ?? Data()), "Emitted file payload should contain PNG bytes")
+                XCTAssertEqual(content.sizeBytes, data?.count)
+                if let envelopeURL = content.ingestEnvelopeURL {
+                    monitor.acknowledgeIngestEnvelope(at: envelopeURL)
+                }
+                expectation.fulfill()
+                break
+            }
+        }
+        defer { task.cancel() }
+
+        try await Task.sleep(nanoseconds: 100_000_000)
+        guard let tiffData = makeLargeNoisyTIFFData() else {
+            XCTFail("Failed to generate noisy TIFF")
+            return
+        }
+
+        pasteboard.clearContents()
+        pasteboard.setData(tiffData, forType: .tiff)
+
+        await fulfillment(of: [expectation], timeout: 5.0)
+        await assertEventually(timeout: 2.0, pollInterval: 0.05, {
+            self.pendingEnvelopeCount() == 0
+        }, message: "Envelope should be acknowledged after validation")
+    }
+
     // MARK: - App Bundle ID Tests
 
     func testAppBundleIDCapture() {
@@ -971,6 +1009,32 @@ final class ClipboardMonitorTests: XCTestCase {
         NSColor.systemPink.setFill()
         NSBezierPath(rect: NSRect(x: 0, y: 0, width: 640, height: 640)).fill()
         image.unlockFocus()
+        return image.tiffRepresentation
+    }
+
+    private func makeLargeNoisyTIFFData(width: Int = 512, height: Int = 512) -> Data? {
+        guard let rep = NSBitmapImageRep(
+            bitmapDataPlanes: nil,
+            pixelsWide: width,
+            pixelsHigh: height,
+            bitsPerSample: 8,
+            samplesPerPixel: 4,
+            hasAlpha: true,
+            isPlanar: false,
+            colorSpaceName: .deviceRGB,
+            bytesPerRow: 0,
+            bitsPerPixel: 0
+        ), let bitmap = rep.bitmapData else {
+            return nil
+        }
+
+        let count = Int(rep.bytesPerRow) * height
+        for index in 0..<count {
+            bitmap[index] = UInt8.random(in: .min ... .max)
+        }
+
+        let image = NSImage(size: NSSize(width: width, height: height))
+        image.addRepresentation(rep)
         return image.tiffRepresentation
     }
 
