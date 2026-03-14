@@ -78,28 +78,10 @@ struct HistoryItemView: View, Equatable {
     let dismissOtherPopovers: () -> Void
 
     // 局部状态 - 悬停不触发全局重绘
-    @State private var isHovering = false
-    @State private var hoverDebounceTask: Task<Void, Never>?
-    @State private var hoverPreviewTask: Task<Void, Never>?
-    @State private var hoverMarkdownTask: Task<Void, Never>?
-    // v0.24: 延迟隐藏预览，避免 popover 触发 hover false 导致闪烁
-    @State private var hoverExitTask: Task<Void, Never>?
-    @State private var isPopoverHovering = false
-    @State private var imagePopoverToken = UUID()
-    @State private var textPopoverToken = UUID()
-    @State private var filePopoverToken = UUID()
+    @StateObject private var rowController: HistoryItemRowController
     // v0.15: Text preview state
     @StateObject private var previewModel = HoverPreviewModel()
-    @State private var markdownFilePreviewCacheKey: String?
-    @State private var relativeTimeText: String = ""
     @State private var isUITestTapPreviewEnabled: Bool = false
-    @State private var optimizeImageTask: Task<Void, Never>?
-    @State private var optimizeMessageTask: Task<Void, Never>?
-    @State private var isOptimizingImage: Bool = false
-    @State private var optimizeMessage: String?
-    @State private var isHoveringOptimizeButton: Bool = false
-    @State private var isNoteEditorPresented: Bool = false
-    @State private var noteDraft: String = ""
 
     init(
         item: ClipboardItemDTO,
@@ -139,7 +121,8 @@ struct HistoryItemView: View, Equatable {
         self.isFilePreviewPresented = isFilePreviewPresented
         self.requestPopover = requestPopover
         self.dismissOtherPopovers = dismissOtherPopovers
-        _relativeTimeText = State(initialValue: Self.makeRelativeTimeString(for: item.lastUsedAt))
+        let initialRelativeTimeText = Self.makeRelativeTimeString(for: item.lastUsedAt)
+        _rowController = StateObject(wrappedValue: HistoryItemRowController(relativeTimeText: initialRelativeTimeText))
     }
 
     // MARK: - Equatable
@@ -158,6 +141,110 @@ struct HistoryItemView: View, Equatable {
         lhs.isFilePreviewPresented == rhs.isFilePreviewPresented &&
         lhs.settings.showImageThumbnails == rhs.settings.showImageThumbnails &&
         lhs.settings.thumbnailHeight == rhs.settings.thumbnailHeight
+    }
+
+    private var isHovering: Bool {
+        get { rowController.isHovering }
+        nonmutating set { rowController.isHovering = newValue }
+    }
+
+    private var hoverDebounceTask: Task<Void, Never>? {
+        get { rowController.hoverDebounceTask }
+        nonmutating set { rowController.hoverDebounceTask = newValue }
+    }
+
+    private var hoverPreviewTask: Task<Void, Never>? {
+        get { rowController.hoverPreviewTask }
+        nonmutating set { rowController.hoverPreviewTask = newValue }
+    }
+
+    private var hoverMarkdownTask: Task<Void, Never>? {
+        get { rowController.hoverMarkdownTask }
+        nonmutating set { rowController.hoverMarkdownTask = newValue }
+    }
+
+    private var hoverExitTask: Task<Void, Never>? {
+        get { rowController.hoverExitTask }
+        nonmutating set { rowController.hoverExitTask = newValue }
+    }
+
+    private var isPopoverHovering: Bool {
+        get { rowController.isPopoverHovering }
+        nonmutating set { rowController.isPopoverHovering = newValue }
+    }
+
+    private var imagePopoverToken: UUID {
+        get { rowController.imagePopoverToken }
+        nonmutating set { rowController.imagePopoverToken = newValue }
+    }
+
+    private var textPopoverToken: UUID {
+        get { rowController.textPopoverToken }
+        nonmutating set { rowController.textPopoverToken = newValue }
+    }
+
+    private var filePopoverToken: UUID {
+        get { rowController.filePopoverToken }
+        nonmutating set { rowController.filePopoverToken = newValue }
+    }
+
+    private var markdownFilePreviewCacheKey: String? {
+        get { rowController.markdownFilePreviewCacheKey }
+        nonmutating set { rowController.markdownFilePreviewCacheKey = newValue }
+    }
+
+    private var relativeTimeText: String {
+        get { rowController.relativeTimeText }
+        nonmutating set { rowController.relativeTimeText = newValue }
+    }
+
+    private var isOptimizingImage: Bool {
+        get { rowController.isOptimizingImage }
+        nonmutating set { rowController.isOptimizingImage = newValue }
+    }
+
+    private var optimizeMessage: String? {
+        get { rowController.optimizeMessage }
+        nonmutating set { rowController.optimizeMessage = newValue }
+    }
+
+    private var isHoveringOptimizeButton: Bool {
+        get { rowController.isHoveringOptimizeButton }
+        nonmutating set { rowController.isHoveringOptimizeButton = newValue }
+    }
+
+    private var isNoteEditorPresented: Bool {
+        get { rowController.isNoteEditorPresented }
+        nonmutating set { rowController.isNoteEditorPresented = newValue }
+    }
+
+    private var noteDraft: String {
+        get { rowController.noteDraft }
+        nonmutating set { rowController.noteDraft = newValue }
+    }
+
+    private var optimizeImageTask: Task<Void, Never>? {
+        get { rowController.optimizeImageTask }
+        nonmutating set { rowController.optimizeImageTask = newValue }
+    }
+
+    private var isNoteEditorPresentedBinding: Binding<Bool> {
+        Binding(
+            get: { isNoteEditorPresented },
+            set: { isNoteEditorPresented = $0 }
+        )
+    }
+
+    private var noteDraftBinding: Binding<String> {
+        Binding(
+            get: { noteDraft },
+            set: { noteDraft = $0 }
+        )
+    }
+
+    private var optimizeMessageTask: Task<Void, Never>? {
+        get { rowController.optimizeMessageTask }
+        nonmutating set { rowController.optimizeMessageTask = newValue }
     }
 
     // MARK: - Computed Properties
@@ -784,9 +871,9 @@ struct HistoryItemView: View, Equatable {
                 onDelete()
             }
         }
-        .popover(isPresented: $isNoteEditorPresented, arrowEdge: .leading) {
+        .popover(isPresented: isNoteEditorPresentedBinding, arrowEdge: .leading) {
             HistoryItemFileNoteEditorView(
-                note: $noteDraft,
+                note: noteDraftBinding,
                 onSave: { commitNoteDraft() },
                 onCancel: { dismissNoteEditor() }
             )
@@ -1118,31 +1205,23 @@ struct HistoryItemView: View, Equatable {
     }
 
     private func cancelPreviewTask() {
-        hoverPreviewTask?.cancel()
-        hoverPreviewTask = nil
-        hoverMarkdownTask?.cancel()
-        hoverMarkdownTask = nil
+        rowController.cancelPreviewTasks()
     }
 
     private func cancelHoverDebounceTask() {
-        hoverDebounceTask?.cancel()
-        hoverDebounceTask = nil
+        rowController.cancelHoverDebounceTask()
     }
 
     private func cancelHoverExitTask() {
-        hoverExitTask?.cancel()
-        hoverExitTask = nil
+        rowController.cancelHoverExitTask()
     }
 
     private func cancelOptimizeMessageTask() {
-        optimizeMessageTask?.cancel()
-        optimizeMessageTask = nil
+        rowController.cancelOptimizeMessageTask()
     }
 
     private func cancelOptimizeImageTask() {
-        optimizeImageTask?.cancel()
-        optimizeImageTask = nil
-        isOptimizingImage = false
+        rowController.cancelOptimizeImageTask()
     }
 
     private var noteMenuTitle: String {
@@ -1188,8 +1267,7 @@ struct HistoryItemView: View, Equatable {
     }
 
     private func cancelHoverTasks() {
-        cancelHoverDebounceTask()
-        cancelHoverExitTask()
+        rowController.cancelHoverTasks()
     }
 
     private func resetPreviewModel() {
