@@ -12,9 +12,11 @@ final class HistoryItemRowController: ObservableObject {
     @Published var relativeTimeText: String
     @Published var isOptimizingImage = false
     @Published var optimizeMessage: String?
+    @Published var exportMessage: String?
     @Published var isHoveringOptimizeButton = false
     @Published var isNoteEditorPresented = false
     @Published var noteDraft = ""
+    @Published var isExportingPNG = false
 
     var hoverDebounceTask: Task<Void, Never>?
     var hoverPreviewTask: Task<Void, Never>?
@@ -22,6 +24,8 @@ final class HistoryItemRowController: ObservableObject {
     var hoverExitTask: Task<Void, Never>?
     var optimizeImageTask: Task<Void, Never>?
     var optimizeMessageTask: Task<Void, Never>?
+    var exportActionTask: Task<Void, Never>?
+    var exportMessageTask: Task<Void, Never>?
 
     init(relativeTimeText: String) {
         self.relativeTimeText = relativeTimeText
@@ -54,9 +58,20 @@ final class HistoryItemRowController: ObservableObject {
         optimizeMessageTask = nil
     }
 
+    func cancelExportMessageTask() {
+        exportMessageTask?.cancel()
+        exportMessageTask = nil
+    }
+
     func cancelOptimizeImageTask() {
         optimizeImageTask?.cancel()
         optimizeImageTask = nil
         isOptimizingImage = false
+    }
+
+    func cancelExportActionTask() {
+        exportActionTask?.cancel()
+        exportActionTask = nil
+        isExportingPNG = false
     }
 }

@@ -343,16 +343,6 @@ struct HistoryItemTextPreviewView: View {
         guard let html = model.markdownHTML else { return }
 
         let settings = settingsViewModel.settings
-        let pngquantOptions: PngquantService.Options? = {
-            guard settings.pngquantMarkdownExportEnabled else { return nil }
-            return PngquantService.Options(
-                binaryPath: settings.pngquantBinaryPath,
-                qualityMin: settings.pngquantMarkdownExportQualityMin,
-                qualityMax: settings.pngquantMarkdownExportQualityMax,
-                speed: settings.pngquantMarkdownExportSpeed,
-                colors: settings.pngquantMarkdownExportColors
-            )
-        }()
 
         model.isExporting = true
         model.exportSuccess = false
@@ -363,49 +353,47 @@ struct HistoryItemTextPreviewView: View {
 
         let exportResolutionLabel = exportResolution.label
         let exportResolutionScale = exportResolutionScale
+        let markdownSource = model.text ?? html
 
-        MarkdownExportService.exportToPNGClipboard(
-            html: html,
-            targetWidthPixels: MarkdownExportService.defaultTargetWidthPixels,
-            resolutionScale: exportResolutionScale,
-            pngquantOptions: pngquantOptions
-        ) { result in
-            Task { @MainActor in
-                model.isExporting = false
+        Task { @MainActor in
+            let result = await HistoryItemMarkdownExportController.exportMarkdownToClipboard(
+                markdownSource: markdownSource,
+                settings: settings,
+                resolutionScale: exportResolutionScale
+            )
+            model.isExporting = false
 
-                switch result {
-                case .success(let stats):
-                    model.exportSuccess = true
-                    if let percent = stats.percentSaved {
-                        if percent > 0 {
-                            model.exportSuccessMessage = "Exported PNG (\(exportResolutionLabel), pngquant -\(percent)%)"
-                        } else {
-                            model.exportSuccessMessage = "Exported PNG (\(exportResolutionLabel), pngquant no change)"
-                        }
+            switch result {
+            case .success(let stats):
+                model.exportSuccess = true
+                if let percent = stats.percentSaved {
+                    if percent > 0 {
+                        model.exportSuccessMessage = "Exported PNG (\(exportResolutionLabel), pngquant -\(percent)%)"
                     } else {
-                        model.exportSuccessMessage = "Exported PNG (\(exportResolutionLabel))"
+                        model.exportSuccessMessage = "Exported PNG (\(exportResolutionLabel), pngquant no change)"
                     }
-                    model.exportErrorMessage = nil
-                    // Reset success state after 1.5 seconds
-                    exportSuccessResetTask = Task {
-                        try? await Task.sleep(nanoseconds: 1_500_000_000)
-                        guard !Task.isCancelled else { return }
-                        await MainActor.run {
-                            model.exportSuccess = false
-                            model.exportSuccessMessage = nil
-                        }
+                } else {
+                    model.exportSuccessMessage = "Exported PNG (\(exportResolutionLabel))"
+                }
+                model.exportErrorMessage = nil
+                exportSuccessResetTask = Task {
+                    try? await Task.sleep(nanoseconds: 1_500_000_000)
+                    guard !Task.isCancelled else { return }
+                    await MainActor.run {
+                        model.exportSuccess = false
+                        model.exportSuccessMessage = nil
                     }
-                case .failure(let error):
-                    model.exportFailed = true
-                    model.exportErrorMessage = error.localizedDescription
-                    ScopyLog.ui.error("Export failed: \(error.localizedDescription, privacy: .public)")
-                    exportSuccessResetTask = Task {
-                        try? await Task.sleep(nanoseconds: 1_500_000_000)
-                        guard !Task.isCancelled else { return }
-                        await MainActor.run {
-                            model.exportFailed = false
-                            model.exportErrorMessage = nil
-                        }
+                }
+            case .failure(let error):
+                model.exportFailed = true
+                model.exportErrorMessage = error.localizedDescription
+                ScopyLog.ui.error("Export failed: \(error.localizedDescription, privacy: .public)")
+                exportSuccessResetTask = Task {
+                    try? await Task.sleep(nanoseconds: 1_500_000_000)
+                    guard !Task.isCancelled else { return }
+                    await MainActor.run {
+                        model.exportFailed = false
+                        model.exportErrorMessage = nil
                     }
                 }
             }

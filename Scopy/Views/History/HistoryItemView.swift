@@ -228,6 +228,26 @@ struct HistoryItemView: View, Equatable {
         nonmutating set { rowController.optimizeImageTask = newValue }
     }
 
+    private var exportActionTask: Task<Void, Never>? {
+        get { rowController.exportActionTask }
+        nonmutating set { rowController.exportActionTask = newValue }
+    }
+
+    private var exportMessageTask: Task<Void, Never>? {
+        get { rowController.exportMessageTask }
+        nonmutating set { rowController.exportMessageTask = newValue }
+    }
+
+    private var exportMessage: String? {
+        get { rowController.exportMessage }
+        nonmutating set { rowController.exportMessage = newValue }
+    }
+
+    private var isExportingPNG: Bool {
+        get { rowController.isExportingPNG }
+        nonmutating set { rowController.isExportingPNG = newValue }
+    }
+
     private var isNoteEditorPresentedBinding: Binding<Bool> {
         Binding(
             get: { isNoteEditorPresented },
@@ -240,6 +260,12 @@ struct HistoryItemView: View, Equatable {
             get: { noteDraft },
             set: { noteDraft = $0 }
         )
+    }
+
+    private var statusMessage: String? {
+        if isExportingPNG { return "Exporting…" }
+        if let exportMessage, !exportMessage.isEmpty { return exportMessage }
+        return optimizeMessage
     }
 
     private var optimizeMessageTask: Task<Void, Never>? {
@@ -476,6 +502,10 @@ struct HistoryItemView: View, Equatable {
         return FilePreviewSupport.isMarkdownFile(info.url)
     }
 
+    private var canExportPNG: Bool {
+        HistoryItemMarkdownExportController.canExportPNG(item: item, filePreviewInfo: filePreviewInfo)
+    }
+
     private var canShowFileThumbnail: Bool {
         guard showThumbnails, item.type == .file, let info = filePreviewInfo else { return false }
         return FilePreviewSupport.shouldGenerateThumbnail(for: info.url)
@@ -621,8 +651,8 @@ struct HistoryItemView: View, Equatable {
                         .foregroundStyle(.orange)
                 }
 
-                if let optimizeMessage, !optimizeMessage.isEmpty {
-                    Text(optimizeMessage)
+                if let statusMessage, !statusMessage.isEmpty {
+                    Text(statusMessage)
                         .font(ScopyTypography.microMono)
                         .foregroundStyle(ScopyColors.mutedText)
                 }
@@ -852,6 +882,12 @@ struct HistoryItemView: View, Equatable {
                     onSelectOptimizedForCodex()
                 }
             }
+            if canExportPNG {
+                Button("Export PNG") {
+                    startExportPNGTask()
+                }
+                .disabled(isExportingPNG)
+            }
             Button(item.isPinned ? "Unpin" : "Pin") {
                 onTogglePin()
             }
@@ -882,6 +918,7 @@ struct HistoryItemView: View, Equatable {
         .onDisappear {
             cancelHoverTasks()
             resetPreviewState(hidePopovers: true)
+            cancelExportTasks()
             isNoteEditorPresented = false
         }
         .onChange(of: previewModel.markdownContentSize) { _, _ in
@@ -1220,12 +1257,77 @@ struct HistoryItemView: View, Equatable {
         rowController.cancelOptimizeMessageTask()
     }
 
+    private func cancelExportMessageTask() {
+        rowController.cancelExportMessageTask()
+    }
+
     private func cancelOptimizeImageTask() {
         rowController.cancelOptimizeImageTask()
     }
 
+    private func cancelExportActionTask() {
+        rowController.cancelExportActionTask()
+    }
+
+    private func cancelExportTasks() {
+        cancelExportActionTask()
+        cancelExportMessageTask()
+    }
+
     private var noteMenuTitle: String {
         item.note?.isEmpty == false ? "Edit Note..." : "Add Note..."
+    }
+
+    private func startExportPNGTask() {
+        guard !isExportingPNG else { return }
+
+        cancelExportTasks()
+        exportMessage = nil
+        isExportingPNG = true
+
+        let currentItem = item
+        let currentSettings = settings
+        let currentFilePreviewInfo = filePreviewInfo
+
+        exportActionTask = Task { @MainActor in
+            defer {
+                isExportingPNG = false
+                exportActionTask = nil
+            }
+
+            guard let markdownSource = await HistoryItemMarkdownExportController.loadMarkdownSource(
+                item: currentItem,
+                filePreviewInfo: currentFilePreviewInfo
+            ) else {
+                exportMessage = "Export failed"
+                scheduleExportMessageReset()
+                return
+            }
+
+            let result = await HistoryItemMarkdownExportController.exportMarkdownToClipboard(
+                markdownSource: markdownSource,
+                settings: currentSettings
+            )
+            guard !Task.isCancelled else { return }
+
+            switch result {
+            case .success:
+                exportMessage = "PNG copied"
+            case .failure:
+                exportMessage = "Export failed"
+            }
+            scheduleExportMessageReset()
+        }
+    }
+
+    private func scheduleExportMessageReset() {
+        cancelExportMessageTask()
+        exportMessageTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
+            guard !Task.isCancelled else { return }
+            exportMessage = nil
+            exportMessageTask = nil
+        }
     }
 
     private func presentNoteEditor() {
