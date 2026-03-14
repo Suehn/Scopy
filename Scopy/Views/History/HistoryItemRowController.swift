@@ -74,4 +74,44 @@ final class HistoryItemRowController: ObservableObject {
         exportActionTask = nil
         isExportingPNG = false
     }
+
+    func beginExportingPNG() -> Bool {
+        guard !isExportingPNG else { return false }
+        exportMessage = nil
+        isExportingPNG = true
+        return true
+    }
+
+    func finishExportingPNG(message: String) {
+        isExportingPNG = false
+        exportActionTask = nil
+        exportMessage = message
+    }
+
+    func clearExportFeedback() {
+        exportMessage = nil
+        cancelExportMessageTask()
+    }
+
+    func presentNoteEditor(note: String?) {
+        noteDraft = note ?? ""
+        isNoteEditorPresented = true
+    }
+
+    func dismissNoteEditor() {
+        isNoteEditorPresented = false
+    }
+
+    func normalizedNoteDraft() -> String? {
+        let trimmed = noteDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    func invalidatePreviewTokens() {
+        imagePopoverToken = UUID()
+        textPopoverToken = UUID()
+        filePopoverToken = UUID()
+        markdownFilePreviewCacheKey = nil
+        isPopoverHovering = false
+    }
 }

@@ -1279,27 +1279,19 @@ struct HistoryItemView: View, Equatable {
     }
 
     private func startExportPNGTask() {
-        guard !isExportingPNG else { return }
-
         cancelExportTasks()
-        exportMessage = nil
-        isExportingPNG = true
+        guard rowController.beginExportingPNG() else { return }
 
         let currentItem = item
         let currentSettings = settings
         let currentFilePreviewInfo = filePreviewInfo
 
         exportActionTask = Task { @MainActor in
-            defer {
-                isExportingPNG = false
-                exportActionTask = nil
-            }
-
             guard let markdownSource = await HistoryItemMarkdownExportController.loadMarkdownSource(
                 item: currentItem,
                 filePreviewInfo: currentFilePreviewInfo
             ) else {
-                exportMessage = "Export failed"
+                rowController.finishExportingPNG(message: "Export failed")
                 scheduleExportMessageReset()
                 return
             }
@@ -1312,9 +1304,9 @@ struct HistoryItemView: View, Equatable {
 
             switch result {
             case .success:
-                exportMessage = "PNG copied"
+                rowController.finishExportingPNG(message: "PNG copied")
             case .failure:
-                exportMessage = "Export failed"
+                rowController.finishExportingPNG(message: "Export failed")
             }
             scheduleExportMessageReset()
         }
@@ -1325,27 +1317,24 @@ struct HistoryItemView: View, Equatable {
         exportMessageTask = Task { @MainActor in
             try? await Task.sleep(nanoseconds: 1_500_000_000)
             guard !Task.isCancelled else { return }
-            exportMessage = nil
+            rowController.clearExportFeedback()
             exportMessageTask = nil
         }
     }
 
     private func presentNoteEditor() {
-        noteDraft = item.note ?? ""
-        isNoteEditorPresented = true
+        rowController.presentNoteEditor(note: item.note)
         dismissOtherPopovers()
         resetPreviewState(hidePopovers: true)
     }
 
     private func commitNoteDraft() {
-        let trimmed = noteDraft.trimmingCharacters(in: .whitespacesAndNewlines)
-        let normalized = trimmed.isEmpty ? nil : trimmed
-        onUpdateNote(normalized)
+        onUpdateNote(rowController.normalizedNoteDraft())
         dismissNoteEditor()
     }
 
     private func dismissNoteEditor() {
-        isNoteEditorPresented = false
+        rowController.dismissNoteEditor()
     }
 
     private func handleOptimizeButtonHover(_ hovering: Bool) {
@@ -1381,8 +1370,7 @@ struct HistoryItemView: View, Equatable {
         if hidePopovers {
             requestPopover(nil)
         }
-        isPopoverHovering = false
-        markdownFilePreviewCacheKey = nil
+        rowController.invalidatePreviewTokens()
         resetPreviewModel()
     }
 
