@@ -10,29 +10,34 @@ struct ContentView: View {
     @State private var showClearConfirmation = false
 
     var body: some View {
-        @Bindable var bindableHistory = historyViewModel
         ZStack {
             VisualEffectView()
                 .ignoresSafeArea()
 
-            VStack(alignment: .leading, spacing: 0) {
-                HeaderView(
-                    searchQuery: $bindableHistory.searchQuery,
-                    searchFocused: $searchFocused
+            switch appState.startupPhase {
+            case .idle, .starting:
+                StartupLoadingView()
+            case .running:
+                mainContent
+            case .startupFailed(let failure):
+                StartupFailureView(
+                    failure: failure,
+                    onRetry: {
+                        Task { await appState.start() }
+                    },
+                    onCopyDiagnostics: {
+                        appState.copyStartupDiagnosticsToPasteboard()
+                    },
+                    openSettings: appState.openSettingsHandler
                 )
-                .padding(.horizontal, ScopySpacing.md)
-                .padding(.top, ScopySpacing.md)
-                .padding(.bottom, ScopySpacing.sm)
-
-                HistoryListView(searchFocused: $searchFocused)
-
-                FooterView()
             }
         }
         .onAppear {
-            searchFocused = true
-            Task {
-                await historyViewModel.loadIfStale()
+            if appState.startupPhase == .running {
+                searchFocused = true
+                Task {
+                    await historyViewModel.loadIfStale()
+                }
             }
         }
         .onKeyPress { keyPress in
@@ -45,6 +50,24 @@ struct ContentView: View {
             }
         } message: {
             Text("This will permanently delete all clipboard history. This action cannot be undone.")
+        }
+    }
+
+    private var mainContent: some View {
+        @Bindable var bindableHistory = historyViewModel
+
+        return VStack(alignment: .leading, spacing: 0) {
+            HeaderView(
+                searchQuery: $bindableHistory.searchQuery,
+                searchFocused: $searchFocused
+            )
+            .padding(.horizontal, ScopySpacing.md)
+            .padding(.top, ScopySpacing.md)
+            .padding(.bottom, ScopySpacing.sm)
+
+            HistoryListView(searchFocused: $searchFocused)
+
+            FooterView()
         }
     }
 
@@ -81,6 +104,68 @@ struct ContentView: View {
         default:
             return .ignored
         }
+    }
+}
+
+private struct StartupLoadingView: View {
+    var body: some View {
+        VStack(spacing: ScopySpacing.md) {
+            ProgressView()
+                .controlSize(.regular)
+            Text("Starting Scopy…")
+                .font(ScopyTypography.title)
+            Text("Initializing clipboard service and loading recent history")
+                .font(ScopyTypography.caption)
+                .foregroundStyle(ScopyColors.mutedText)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(ScopySpacing.xl)
+    }
+}
+
+private struct StartupFailureView: View {
+    let failure: StartupFailure
+    let onRetry: () -> Void
+    let onCopyDiagnostics: () -> Void
+    let openSettings: (() -> Void)?
+
+    var body: some View {
+        VStack(spacing: ScopySpacing.md) {
+            Image(systemName: "exclamationmark.triangle")
+                .font(.system(size: ScopySize.Icon.empty))
+                .foregroundStyle(.yellow)
+
+            VStack(spacing: ScopySpacing.xs) {
+                Text("Failed to start Scopy")
+                    .font(ScopyTypography.title)
+                Text("Clipboard history is unavailable until the startup issue is resolved.")
+                    .font(ScopyTypography.caption)
+                    .foregroundStyle(ScopyColors.mutedText)
+                    .multilineTextAlignment(.center)
+            }
+
+            Text(failure.message)
+                .font(ScopyTypography.caption)
+                .foregroundStyle(ScopyColors.tertiaryText)
+                .multilineTextAlignment(.center)
+                .textSelection(.enabled)
+                .padding(.horizontal, ScopySpacing.xl)
+
+            HStack(spacing: ScopySpacing.sm) {
+                Button("Retry", action: onRetry)
+                    .buttonStyle(.borderedProminent)
+
+                Button("Copy Diagnostics", action: onCopyDiagnostics)
+                    .buttonStyle(.bordered)
+
+                if let openSettings {
+                    Button("Open Settings", action: openSettings)
+                        .buttonStyle(.bordered)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(ScopySpacing.xl)
     }
 }
 

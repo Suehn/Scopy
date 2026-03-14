@@ -10,6 +10,19 @@ enum SelectionSource {
     case programmatic // 程序设置：不滚动
 }
 
+struct StartupFailure: Equatable {
+    let message: String
+    let diagnostics: String
+    let occurredAt: Date
+}
+
+enum StartupPhase: Equatable {
+    case idle
+    case starting
+    case running
+    case startupFailed(StartupFailure)
+}
+
 /// 应用状态 - 符合 v0.md 的 Observable 架构
 @Observable
 @MainActor
@@ -47,6 +60,9 @@ final class AppState {
     @ObservationIgnored var unregisterHotKeyHandler: (() -> Void)?
 
     @ObservationIgnored private var eventTask: Task<Void, Never>?
+    @ObservationIgnored private let serviceEnvironmentOptions: ServiceEnvironmentOptions
+
+    var startupPhase: StartupPhase = .idle
 
     private struct ServiceEnvironmentOptions {
         let databasePath: String?
@@ -63,6 +79,17 @@ final class AppState {
                 monitorPasteboardName: pasteboard,
                 monitorPollingInterval: interval
             )
+        }
+
+        var debugSummary: String {
+            let database = databasePath ?? "<default>"
+            let pasteboard = monitorPasteboardName ?? NSPasteboard.general.name.rawValue
+            let interval = monitorPollingInterval.map { String(format: "%.3fs", $0) } ?? "<default>"
+            return """
+            databasePath: \(database)
+            monitorPasteboardName: \(pasteboard)
+            monitorPollingInterval: \(interval)
+            """
         }
 
         private static func resolvePollingInterval(env: [String: String]) -> TimeInterval? {
@@ -100,6 +127,7 @@ final class AppState {
     private init(service: ClipboardServiceProtocol? = nil) {
         let resolvedService: ClipboardServiceProtocol
         let envOptions = ServiceEnvironmentOptions.load()
+        self.serviceEnvironmentOptions = envOptions
         if let service {
             resolvedService = service
             ScopyLog.app.info("Using injected Clipboard Service")
@@ -125,24 +153,17 @@ final class AppState {
     // MARK: - Lifecycle
 
     func start() async {
+        guard startupPhase != .running && startupPhase != .starting else { return }
+        startupPhase = .starting
+
         do {
             try await service.start()
             ScopyLog.app.info("Clipboard Service started")
         } catch {
             ScopyLog.app.error("Failed to start Clipboard Service: \(error.localizedDescription, privacy: .private)")
             await service.stopAndWait()
-
-            let fallback = ClipboardServiceFactory.create(useMock: true)
-            service = fallback
-            settingsViewModel.updateService(fallback)
-            historyViewModel.updateService(fallback)
-
-            do {
-                try await fallback.start()
-                ScopyLog.app.warning("Falling back to Mock Clipboard Service (started)")
-            } catch {
-                ScopyLog.app.error("Mock service also failed to start: \(error.localizedDescription, privacy: .private)")
-            }
+            startupPhase = .startupFailed(makeStartupFailure(error: error))
+            return
         }
 
         startEventListener()
@@ -151,6 +172,14 @@ final class AppState {
 
         await historyViewModel.loadRecentApps()
         await historyViewModel.load()
+        startupPhase = .running
+    }
+
+    func copyStartupDiagnosticsToPasteboard() {
+        guard case .startupFailed(let failure) = startupPhase else { return }
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(failure.diagnostics, forType: .string)
     }
 
     func stop() {
@@ -159,6 +188,7 @@ final class AppState {
 
         historyViewModel.stop()
         service.stop()
+        startupPhase = .idle
     }
 
     // MARK: - Settings
@@ -170,6 +200,7 @@ final class AppState {
     // MARK: - Events
 
     func startEventListener() {
+        eventTask?.cancel()
         eventTask = Task { [weak self] in
             guard let self else { return }
             for await event in self.service.eventStream {
@@ -204,6 +235,24 @@ final class AppState {
         } else {
             ScopyLog.app.warning("settingsChanged: applyHotKeyHandler not registered, hotkey may be out of sync")
         }
+    }
+
+    private func makeStartupFailure(error: Error) -> StartupFailure {
+        let serviceName = String(describing: type(of: service))
+        let timestamp = ISO8601DateFormatter().string(from: Date())
+        let diagnostics = """
+        Scopy startup failed
+        timestamp: \(timestamp)
+        service: \(serviceName)
+        error: \(error.localizedDescription)
+        \(serviceEnvironmentOptions.debugSummary)
+        """
+
+        return StartupFailure(
+            message: error.localizedDescription,
+            diagnostics: diagnostics,
+            occurredAt: Date()
+        )
     }
 }
 

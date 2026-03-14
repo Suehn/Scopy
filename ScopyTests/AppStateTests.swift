@@ -1,3 +1,4 @@
+import AppKit
 import XCTest
 import ScopyKit
 
@@ -656,6 +657,9 @@ final class TestMockClipboardService: ClipboardServiceProtocol {
     private var settings: SettingsDTO = .default
     private var eventContinuation: AsyncStream<ClipboardEvent>.Continuation?
 
+    var startCallCount = 0
+    var startFailuresRemaining = 0
+
     // Call tracking
     var searchCallCount = 0
     var lastSearchQuery: String?
@@ -686,7 +690,11 @@ final class TestMockClipboardService: ClipboardServiceProtocol {
     // MARK: - Lifecycle
 
     func start() async throws {
-        // Mock 服务无需启动，空实现
+        startCallCount += 1
+        if startFailuresRemaining > 0 {
+            startFailuresRemaining -= 1
+            throw FailingMockService.TestError.simulatedFailure
+        }
     }
 
     func stop() {
@@ -939,21 +947,61 @@ final class FailingMockService: ClipboardServiceProtocol {
 @MainActor
 final class AppStateFallbackTests: XCTestCase {
 
-    /// Test that start() falls back to a working service when the initial service fails
-    func testStartFallsBackToMockOnFailure() async {
+    func testStartRecordsStartupFailureWithoutFallback() async {
         let failingService = FailingMockService()
         let state = AppState.forTesting(service: failingService)
 
-        // Before start, service is the failing one
         XCTAssertTrue(state.service is FailingMockService)
 
-        // After start, should fall back to a non-failing service
         await state.start()
 
-        // Verify service was replaced (implementation is internal to ScopyKit)
-        XCTAssertFalse(state.service is FailingMockService, "Service should be replaced after fallback")
+        guard case .startupFailed(let failure) = state.startupPhase else {
+            return XCTFail("Expected startup failure state")
+        }
+
+        XCTAssertTrue(state.service is FailingMockService, "Failing service should not be replaced with mock data")
+        XCTAssertEqual(state.items, [])
+        XCTAssertEqual(state.totalCount, 0)
+        XCTAssertTrue(failure.diagnostics.contains("Scopy startup failed"))
+        XCTAssertTrue(failure.diagnostics.contains("FailingMockService"))
 
         state.stop()
+    }
+
+    func testRetryStartRecoversAfterTransientFailure() async {
+        let service = TestMockClipboardService()
+        service.startFailuresRemaining = 1
+        service.setItemCount(3)
+        let state = AppState.forTesting(service: service)
+        defer { state.stop() }
+
+        await state.start()
+        guard case .startupFailed = state.startupPhase else {
+            return XCTFail("Expected first start to fail")
+        }
+        XCTAssertEqual(service.startCallCount, 1)
+        XCTAssertTrue(state.items.isEmpty)
+
+        await state.start()
+
+        await assertEventually(timeout: 1.0, pollInterval: 0.01, {
+            state.startupPhase == .running && state.items.count == 3
+        }, message: "Retry should recover startup and load history")
+
+        XCTAssertEqual(service.startCallCount, 2)
+    }
+
+    func testCopyStartupDiagnosticsWritesFailureDetailsToPasteboard() async {
+        let failingService = FailingMockService()
+        let state = AppState.forTesting(service: failingService)
+        defer { state.stop() }
+
+        await state.start()
+        state.copyStartupDiagnosticsToPasteboard()
+
+        let copied = NSPasteboard.general.string(forType: .string) ?? ""
+        XCTAssertTrue(copied.contains("Scopy startup failed"))
+        XCTAssertTrue(copied.contains("FailingMockService"))
     }
 
     /// Test that settingsChanged event triggers hotkey callback with latest settings
