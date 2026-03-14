@@ -542,7 +542,7 @@ struct HistoryItemView: View, Equatable {
                     interactionCoordinator: interactionCoordinator
                 )
                 Text(metadataText)
-                    .font(.system(size: 10))
+                    .font(ScopyTypography.caption)
                     .foregroundStyle(ScopyColors.mutedText)
                     .lineLimit(1)
             }
@@ -565,7 +565,7 @@ struct HistoryItemView: View, Equatable {
                         .lineLimit(1)
                         .truncationMode(.tail)
                     Text(metadataText)
-                        .font(.system(size: 10))  // v0.15.1: 比主内容小2号
+                        .font(ScopyTypography.caption)
                         .foregroundStyle(ScopyColors.mutedText)
                         .lineLimit(1)
                         .truncationMode(.tail)
@@ -582,7 +582,7 @@ struct HistoryItemView: View, Equatable {
                         .truncationMode(.tail)
                 }
                 Text(metadataText)
-                    .font(.system(size: 10))  // v0.15.1: 比主内容小2号
+                    .font(ScopyTypography.caption)
                     .foregroundStyle(ScopyColors.mutedText)
                     .lineLimit(1)
                     .padding(.leading, ScopySpacing.md)  // v0.15.1: 缩进两格
@@ -594,7 +594,7 @@ struct HistoryItemView: View, Equatable {
                     .lineLimit(1)
                     .truncationMode(.tail)
                 Text(metadataText)
-                    .font(.system(size: 10))  // v0.15: 比主内容小2号
+                    .font(ScopyTypography.caption)
                     .foregroundStyle(ScopyColors.mutedText)
                     .lineLimit(1)
                     .padding(.leading, ScopySpacing.md)  // v0.15: 缩进两格
@@ -609,58 +609,32 @@ struct HistoryItemView: View, Equatable {
         rowContent.onHover(perform: handleHover)
     }
 
-    private var rowContent: some View {
-        let imageToken = imagePopoverToken
-        let textToken = textPopoverToken
-        let fileToken = filePopoverToken
-
-        let needsThumbnailHeight = (item.type == .image && showThumbnails) || canShowFileThumbnail
-
-        return HStack(alignment: .center, spacing: ScopySpacing.sm) {
-            // Pin 标记：左侧颜色条
-            if item.isPinned {
-                Capsule()
-                    .fill(ScopyColors.selectionBorder)
-                    .frame(width: ScopySize.Width.pinIndicator, height: ScopySize.Height.pinIndicator)
-            }
-
-            // App 图标 (v0.15: 保留图标，只移除元数据中的应用名称)
-            if let icon = appIcon {
-                Image(nsImage: icon)
-                    .resizable()
-                    .frame(width: ScopySize.Icon.listApp, height: ScopySize.Icon.listApp)
-                    .cornerRadius(ScopySize.Corner.sm)
-            } else {
-                Image(systemName: ScopyIcons.app)
-                    .font(.system(size: ScopySize.Icon.sm))
-                    .foregroundStyle(ScopyColors.mutedText)
-                    .frame(width: ScopySize.Icon.listApp, height: ScopySize.Icon.listApp)
-            }
-
-            contentView
-
-            Spacer(minLength: ScopySpacing.md)
-
+    private var mainRowButton: some View {
+        Button(action: handlePrimaryAction) {
             HStack(alignment: .center, spacing: ScopySpacing.sm) {
-                if item.type == .image, (isHovering || isKeyboardSelected) {
-                    Button {
-                        startOptimizeImageTask()
-                    } label: {
-                        if isOptimizingImage {
-                            ProgressView()
-                                .controlSize(.small)
-                        } else {
-                            Image(systemName: "wand.and.stars")
-                                .font(.system(size: ScopySize.Icon.pin))
-                        }
-                    }
-                    .buttonStyle(.plain)
-                    .help("优化图片大小（pngquant）")
-                    .disabled(isOptimizingImage)
-                    .onHover { hovering in
-                        handleOptimizeButtonHover(hovering)
-                    }
+                // Pin 标记：左侧颜色条
+                if item.isPinned {
+                    Capsule()
+                        .fill(ScopyColors.selectionBorder)
+                        .frame(width: ScopySize.Width.pinIndicator, height: ScopySize.Height.pinIndicator)
                 }
+
+                // App 图标 (v0.15: 保留图标，只移除元数据中的应用名称)
+                if let icon = appIcon {
+                    Image(nsImage: icon)
+                        .resizable()
+                        .frame(width: ScopySize.Icon.listApp, height: ScopySize.Icon.listApp)
+                        .cornerRadius(ScopySize.Corner.sm)
+                } else {
+                    Image(systemName: ScopyIcons.app)
+                        .font(.system(size: ScopySize.Icon.sm))
+                        .foregroundStyle(ScopyColors.mutedText)
+                        .frame(width: ScopySize.Icon.listApp, height: ScopySize.Icon.listApp)
+                }
+
+                contentView
+
+                Spacer(minLength: ScopySpacing.md)
 
                 if item.isPinned {
                     Image(systemName: ScopyIcons.pin)
@@ -677,6 +651,43 @@ struct HistoryItemView: View, Equatable {
                 Text(relativeTimeText.isEmpty ? relativeTime : relativeTimeText)
                     .font(ScopyTypography.microMono)
                     .foregroundStyle(ScopyColors.mutedText)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityHint("Activate this history item")
+    }
+
+    private var rowContent: some View {
+        let imageToken = imagePopoverToken
+        let textToken = textPopoverToken
+        let fileToken = filePopoverToken
+
+        let needsThumbnailHeight = (item.type == .image && showThumbnails) || canShowFileThumbnail
+
+        return HStack(alignment: .center, spacing: ScopySpacing.sm) {
+            mainRowButton
+
+            if item.type == .image, (isHovering || isKeyboardSelected) {
+                Button {
+                    startOptimizeImageTask()
+                } label: {
+                    if isOptimizingImage {
+                        ProgressView()
+                            .controlSize(.small)
+                    } else {
+                        Image(systemName: "wand.and.stars")
+                            .font(.system(size: ScopySize.Icon.pin))
+                    }
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Optimize image")
+                .help("优化图片大小（pngquant）")
+                .disabled(isOptimizingImage)
+                .onHover { hovering in
+                    handleOptimizeButtonHover(hovering)
+                }
             }
         }
         .padding(.horizontal, ScopySpacing.md)
@@ -700,23 +711,6 @@ struct HistoryItemView: View, Equatable {
         .animation(isScrollInteractionActive ? nil : .easeInOut(duration: 0.15), value: isHovering)
         .animation(isScrollInteractionActive ? nil : .easeInOut(duration: 0.15), value: isKeyboardSelected)
         .padding(.horizontal, ScopySpacing.md) // Outer padding for floating effect
-        .onTapGesture {
-            if isUITestTapPreviewEnabled {
-                // UI 测试预览模式下避免关闭面板，允许预览弹窗出现
-                dismissOtherPopovers()
-                isHovering = true
-                isPopoverHovering = true
-                if item.type == .image && showThumbnails {
-                    startPreviewTask()
-                } else if item.type == .file {
-                    startFilePreviewTask()
-                } else if item.type == .text || item.type == .rtf || item.type == .html {
-                    startTextPreviewTask()
-                }
-            } else {
-                onSelect()
-            }
-        }
         .onAppear {
             if ProcessInfo.processInfo.arguments.contains("--uitesting") {
                 isUITestTapPreviewEnabled = (ProcessInfo.processInfo.environment["SCOPY_UITEST_OPEN_PREVIEW_ON_TAP"] == "1")
@@ -1345,6 +1339,23 @@ struct HistoryItemView: View, Equatable {
 
     private func dismissNoteEditor() {
         rowController.dismissNoteEditor()
+    }
+
+    private func handlePrimaryAction() {
+        if isUITestTapPreviewEnabled {
+            dismissOtherPopovers()
+            isHovering = true
+            isPopoverHovering = true
+            if item.type == .image && showThumbnails {
+                startPreviewTask()
+            } else if item.type == .file {
+                startFilePreviewTask()
+            } else if item.type == .text || item.type == .rtf || item.type == .html {
+                startTextPreviewTask()
+            }
+        } else {
+            onSelect()
+        }
     }
 
     private func registerInteractionObserverIfNeeded() {

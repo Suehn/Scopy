@@ -144,12 +144,15 @@ private struct FTSSortToggleButton: View {
         Button {
             historyViewModel.toggleFTSSortMode()
         } label: {
-            Image(systemName: iconName)
+            Label("Sort", systemImage: iconName)
+                .labelStyle(.iconOnly)
                 .font(.system(size: ScopySize.Icon.filter))
                 .foregroundStyle(ScopyColors.mutedText)
         }
         .buttonStyle(.plain)
         .disabled(!isApplicable)
+        .accessibilityLabel("Search sort mode")
+        .accessibilityValue(accessibilityValue)
         .help(helpText)
     }
 
@@ -183,6 +186,15 @@ private struct FTSSortToggleButton: View {
             modeText = "Recent (last used)"
         }
         return isApplicable ? "Sort: \(modeText)" : "Sort applies to Exact (≥3 chars) and Fuzzy/Fuzzy+ queries"
+    }
+
+    private var accessibilityValue: String {
+        switch historyViewModel.ftsSortMode {
+        case .relevance:
+            return "Relevance"
+        case .recent:
+            return "Recent"
+        }
     }
 }
 
