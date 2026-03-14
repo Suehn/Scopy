@@ -681,6 +681,36 @@ final class SearchHintTests: XCTestCase {
         XCTAssertTrue(hint?.contains("全量校准") ?? false)
     }
 
+    func testRegexSearchStatusChipsShowModeCoverageAndSort() {
+        let service = StubClipboardService()
+        let settings = SettingsViewModel(service: service)
+        let viewModel = HistoryViewModel(service: service, settingsViewModel: settings)
+
+        viewModel.searchMode = .regex
+        viewModel.searchQuery = "Item \\\\d+"
+
+        XCTAssertEqual(
+            viewModel.searchStatusChips,
+            ["Mode: Regex", "Coverage: Recent 2000", "Sort: Recent"]
+        )
+    }
+
+    func testFuzzyStagedSearchStatusChipsShowModeCoverageAndSort() {
+        let service = StubClipboardService()
+        let settings = SettingsViewModel(service: service)
+        let viewModel = HistoryViewModel(service: service, settingsViewModel: settings)
+
+        viewModel.searchMode = .fuzzyPlus
+        viewModel.searchQuery = "cmd"
+        viewModel.searchCoverage = .stagedRefine
+        viewModel.ftsSortMode = .relevance
+
+        XCTAssertEqual(
+            viewModel.searchStatusChips,
+            ["Mode: Fuzzy+", "Coverage: Staged", "Sort: Relevance"]
+        )
+    }
+
     func testApplySettingsUpdatesFollowingSessionSearchMode() {
         let service = StubClipboardService()
         let settings = SettingsViewModel(service: service)

@@ -125,6 +125,24 @@ final class HistoryViewModel {
         }
     }
 
+    var searchStatusChips: [String] {
+        let trimmed = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        var chips = ["Mode: \(searchModeDisplayName(searchMode))"]
+        guard !trimmed.isEmpty else { return chips }
+
+        switch effectiveSearchCoverage(for: trimmed) {
+        case .complete:
+            chips.append("Coverage: Complete")
+        case .stagedRefine:
+            chips.append("Coverage: Staged")
+        case .recentOnly(let limit):
+            chips.append("Coverage: Recent \(limit)")
+        }
+
+        chips.append("Sort: \(searchSortDisplayName(for: trimmed))")
+        return chips
+    }
+
     @ObservationIgnored private var searchTask: Task<Void, Never>?
     @ObservationIgnored private var loadMoreTask: Task<Void, Never>?
     @ObservationIgnored private var refineTask: Task<Void, Never>?
@@ -572,6 +590,50 @@ final class HistoryViewModel {
             return .recentOnly(limit: 2000)
         case .exact, .fuzzy, .fuzzyPlus:
             return searchCoverage
+        }
+    }
+
+    private func searchModeDisplayName(_ mode: SearchMode) -> String {
+        switch mode {
+        case .exact:
+            return "Exact"
+        case .fuzzy:
+            return "Fuzzy"
+        case .fuzzyPlus:
+            return "Fuzzy+"
+        case .regex:
+            return "Regex"
+        }
+    }
+
+    private func searchSortDisplayName(for trimmedQuery: String) -> String {
+        if isFTSSortApplicable(for: trimmedQuery) {
+            switch ftsSortMode {
+            case .relevance:
+                return "Relevance"
+            case .recent:
+                return "Recent"
+            }
+        }
+
+        switch searchMode {
+        case .regex:
+            return "Recent"
+        case .exact where trimmedQuery.count <= 2:
+            return "Recent"
+        case .exact, .fuzzy, .fuzzyPlus:
+            return "Recent"
+        }
+    }
+
+    private func isFTSSortApplicable(for trimmedQuery: String) -> Bool {
+        switch searchMode {
+        case .exact:
+            return trimmedQuery.count >= 3
+        case .fuzzy, .fuzzyPlus:
+            return !trimmedQuery.isEmpty
+        case .regex:
+            return false
         }
     }
 

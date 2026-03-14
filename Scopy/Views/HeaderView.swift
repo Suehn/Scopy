@@ -62,6 +62,8 @@ struct HeaderView: View {
                     .lineLimit(2)
                     .fixedSize(horizontal: false, vertical: true)
             }
+
+            SearchStatusRow(chips: historyViewModel.searchStatusChips)
         }
         .padding(ScopySpacing.md)
         .background(ScopyColors.cardBackground)
@@ -70,6 +72,27 @@ struct HeaderView: View {
             RoundedRectangle(cornerRadius: ScopySize.Corner.xl, style: .continuous)
                 .stroke(ScopyColors.border.opacity(ScopySize.Opacity.medium), lineWidth: ScopySize.Stroke.thin)
         )
+    }
+}
+
+private struct SearchStatusRow: View {
+    let chips: [String]
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: ScopySpacing.xs) {
+                ForEach(chips, id: \.self) { chip in
+                    Text(chip)
+                        .font(ScopyTypography.microMono)
+                        .foregroundStyle(ScopyColors.tertiaryText)
+                        .padding(.horizontal, ScopySpacing.sm)
+                        .padding(.vertical, ScopySpacing.xxs)
+                        .background(ScopyColors.secondaryBackground)
+                        .clipShape(Capsule())
+                }
+            }
+        }
+        .accessibilityIdentifier("History.SearchStatus")
     }
 }
 
