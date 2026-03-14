@@ -8,10 +8,10 @@ import SwiftUI
 final class SettingsWindowCoordinator: NSObject, NSWindowDelegate {
     private var window: NSWindow?
 
-    func show() {
+    func show(appState: AppState) {
         let window = ensureWindow()
         window.contentView = NSHostingView(
-            rootView: makeSettingsView(onDismiss: { [weak self] in
+            rootView: makeSettingsView(appState: appState, onDismiss: { [weak self] in
                 Task { @MainActor in
                     self?.dismiss()
                 }
@@ -61,14 +61,14 @@ final class SettingsWindowCoordinator: NSObject, NSWindowDelegate {
         return window
     }
 
-    private func makeSettingsView(onDismiss: @escaping () -> Void) -> some View {
+    private func makeSettingsView(appState: AppState, onDismiss: @escaping () -> Void) -> some View {
         SettingsView(
-            unregisterHotKeyHandler: AppState.shared.unregisterHotKeyHandler,
-            applyHotKeyHandler: AppState.shared.applyHotKeyHandler,
+            unregisterHotKeyHandler: appState.unregisterHotKeyHandler,
+            applyHotKeyHandler: appState.applyHotKeyHandler,
             onDismiss: onDismiss
         )
-            .environment(AppState.shared)
-            .environment(AppState.shared.historyViewModel)
-            .environment(AppState.shared.settingsViewModel)
+            .environment(appState)
+            .environment(appState.historyViewModel)
+            .environment(appState.settingsViewModel)
     }
 }

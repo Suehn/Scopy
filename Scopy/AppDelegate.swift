@@ -13,6 +13,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var uiTestWindow: NSWindow?
     private(set) var hotKeyService: HotKeyService?
     private lazy var settingsWindowCoordinator = SettingsWindowCoordinator()
+    private lazy var appState = AppState.shared
     private var appliedHotKey: (keyCode: UInt32, modifiers: UInt32)?
     private var isHotKeyRegistered = false
     private let settingsStore: SettingsStore = .shared
@@ -35,7 +36,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
-        let appState = AppState.shared
         let rootView = makeRootView(appState: appState)
 
         if context.isUITesting {
@@ -188,9 +188,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                !flags.contains(.shift),
                (event.keyCode == 51 || event.keyCode == 117),
                (self.panel?.isVisible == true || self.uiTestWindow?.isVisible == true),
-               AppState.shared.historyViewModel.selectedID != nil {
+               self.appState.historyViewModel.selectedID != nil {
                 Task { @MainActor in
-                    await AppState.shared.historyViewModel.deleteSelectedItem()
+                    await self.appState.historyViewModel.deleteSelectedItem()
                 }
                 return nil
             }
@@ -220,7 +220,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             NSEvent.removeMonitor(monitor)
             localEventMonitor = nil
         }
-        AppState.shared.stop()
+        appState.stop()
     }
 
     @objc func togglePanel() {
@@ -378,6 +378,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     /// v0.17: 修复内存泄漏 - 窗口关闭时释放并清空引用
     @MainActor
     func openSettings() {
-        settingsWindowCoordinator.show()
+        settingsWindowCoordinator.show(appState: appState)
     }
 }
