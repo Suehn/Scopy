@@ -54,6 +54,7 @@ public final class ClipboardMonitor {
         public let contentHash: String
         public let sizeBytes: Int
         public let fileSizeBytes: Int?
+        public let ingestEnvelopeURL: URL?
 
         public init(
             type: ClipboardItemType,
@@ -63,7 +64,8 @@ public final class ClipboardMonitor {
             appBundleID: String?,
             contentHash: String,
             sizeBytes: Int,
-            fileSizeBytes: Int? = nil
+            fileSizeBytes: Int? = nil,
+            ingestEnvelopeURL: URL? = nil
         ) {
             self.type = type
             self.plainText = plainText
@@ -73,6 +75,7 @@ public final class ClipboardMonitor {
             self.contentHash = contentHash
             self.sizeBytes = sizeBytes
             self.fileSizeBytes = fileSizeBytes
+            self.ingestEnvelopeURL = ingestEnvelopeURL
         }
 
         public var rawData: Data? {
@@ -126,6 +129,21 @@ public final class ClipboardMonitor {
         }
     }
 
+    private struct PendingIngestEnvelope: Codable, Sendable {
+        let id: UUID
+        let typeRawValue: String
+        let plainText: String
+        let appBundleID: String?
+        let sizeBytes: Int
+        let precomputedHash: String?
+        let imageDataWasTIFF: Bool
+        let payloadFileName: String?
+
+        var type: ClipboardItemType {
+            ClipboardItemType(rawValue: typeRawValue) ?? .other
+        }
+    }
+
     // MARK: - Properties
 
     private let pasteboard: NSPasteboard
@@ -135,7 +153,8 @@ public final class ClipboardMonitor {
     private var monitoringSessionID: UInt64 = 0
     private var isCheckingClipboard = false
 
-    private var pendingLargeContent: [RawClipboardData] = []
+    private var pendingLargeContent: [URL] = []
+    private var trackedPendingEnvelopePaths = Set<String>()
     private var activeIngestTasks: [UUID: Task<Void, Never>] = [:]
     private let maxConcurrentTasks = ScopyThresholds.ingestMaxConcurrentTasks
     private let maxPendingItems = ScopyThresholds.ingestMaxPendingItems
@@ -146,6 +165,8 @@ public final class ClipboardMonitor {
 
     private let ingestSpoolDirectory: URL
 
+    nonisolated(unsafe) public static var testingAsyncProcessingDelayNs: UInt64 = 0
+
     // Configuration
     public private(set) var pollingInterval: TimeInterval = 0.5 // 500ms default
     public private(set) var ignoredApps: Set<String> = []
@@ -154,7 +175,8 @@ public final class ClipboardMonitor {
 
     public init(
         pasteboard: NSPasteboard = .general,
-        pollingInterval: TimeInterval? = nil
+        pollingInterval: TimeInterval? = nil,
+        ingestSpoolDirectory: URL? = nil
     ) {
         self.pasteboard = pasteboard
         self.timerBox = TimerBox()
@@ -162,12 +184,17 @@ public final class ClipboardMonitor {
             self.pollingInterval = max(0.1, min(5.0, pollingInterval))
         }
 
-        let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first ?? {
-            ScopyLog.monitor.warning("Failed to resolve caches directory; falling back to temporary directory")
-            return FileManager.default.temporaryDirectory
-        }()
-        let scopyCaches = caches.appendingPathComponent("Scopy", isDirectory: true)
-        let ingestDir = scopyCaches.appendingPathComponent("ingest", isDirectory: true)
+        let ingestDir: URL
+        if let ingestSpoolDirectory {
+            ingestDir = ingestSpoolDirectory
+        } else {
+            let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first ?? {
+                ScopyLog.monitor.warning("Failed to resolve caches directory; falling back to temporary directory")
+                return FileManager.default.temporaryDirectory
+            }()
+            let scopyCaches = caches.appendingPathComponent("Scopy", isDirectory: true)
+            ingestDir = scopyCaches.appendingPathComponent("ingest", isDirectory: true)
+        }
         do {
             try FileManager.default.createDirectory(at: ingestDir, withIntermediateDirectories: true)
         } catch {
@@ -215,15 +242,8 @@ public final class ClipboardMonitor {
         isMonitoring = true
         monitoringSessionID &+= 1
         lastChangeCount = pasteboard.changeCount
-
-        // Important: schedule on `.common` modes so UI/menu tracking doesn't pause sampling.
-        let timer = Timer(timeInterval: pollingInterval, repeats: true) { [weak self] _ in
-            Task { @MainActor [weak self] in
-                await self?.checkClipboard()
-            }
-        }
-        RunLoop.main.add(timer, forMode: .common)
-        timerBox.set(timer)
+        replayPendingLargeContentFromDisk()
+        installMonitoringTimer()
     }
 
     public func stopMonitoring() {
@@ -241,14 +261,24 @@ public final class ClipboardMonitor {
         activeIngestTasks.values.forEach { $0.cancel() }
         activeIngestTasks.removeAll()
         pendingLargeContent.removeAll()
+        trackedPendingEnvelopePaths.removeAll()
     }
 
     public func setPollingInterval(_ interval: TimeInterval) {
         pollingInterval = max(0.1, min(5.0, interval)) // Clamp between 100ms and 5s
         if isMonitoring {
-            stopMonitoring()
-            startMonitoring()
+            installMonitoringTimer()
         }
+    }
+
+    public func acknowledgeIngestEnvelope(at url: URL) {
+        queueLock.lock()
+        trackedPendingEnvelopePaths.remove(url.path)
+        pendingLargeContent.removeAll { $0.path == url.path }
+        queueLock.unlock()
+
+        let envelope = Self.loadPendingEnvelope(from: url)
+        Self.cleanupEnvelope(url, payloadFileName: envelope?.payloadFileName, ingestDirectory: ingestSpoolDirectory)
     }
 
     public func setIgnoredApps(_ apps: Set<String>) {
@@ -529,18 +559,19 @@ public final class ClipboardMonitor {
         if delta > 1 {
             ScopyLog.monitor.debug("Pasteboard changeCount jumped by \(delta) (prev=\(previousChangeCount), current=\(currentChangeCount))")
         }
-        lastChangeCount = currentChangeCount
 
         // 快速提取原始数据（在主线程）
         guard let rawData = extractRawData(from: pasteboard) else { return }
 
         // Check if we should ignore this app
         if let appID = rawData.appBundleID, ignoredApps.contains(appID) {
+            lastChangeCount = currentChangeCount
             return
         }
 
         // Skip empty content
         guard !rawData.plainText.isEmpty || (rawData.rawData != nil && !rawData.rawData!.isEmpty) else {
+            lastChangeCount = currentChangeCount
             return
         }
 
@@ -550,7 +581,8 @@ public final class ClipboardMonitor {
         // 3. 只有小内容在主线程同步处理
         if rawData.type == .image || rawData.sizeBytes >= ScopyThresholds.ingestHashOffloadBytes {
             // 图片或大内容：异步处理
-            processLargeContentAsync(rawData)
+            guard processLargeContentAsync(rawData) else { return }
+            lastChangeCount = currentChangeCount
             return
         }
 
@@ -565,10 +597,19 @@ public final class ClipboardMonitor {
             sizeBytes: rawData.sizeBytes
         )
         await contentQueue.enqueue(content)
+        lastChangeCount = currentChangeCount
     }
 
     /// 异步处理大内容（在后台线程计算哈希）
-    private func processLargeContentAsync(_ rawData: RawClipboardData) {
+    private func processLargeContentAsync(_ rawData: RawClipboardData) -> Bool {
+        let envelopeURL: URL
+        do {
+            envelopeURL = try persistPendingEnvelope(for: rawData)
+        } catch {
+            ScopyLog.monitor.error("Failed to persist ingest envelope: \(error.localizedDescription, privacy: .private)")
+            return false
+        }
+
         queueLock.lock()
         defer { queueLock.unlock() }
 
@@ -577,20 +618,23 @@ public final class ClipboardMonitor {
             activeIngestTasks = Dictionary(uniqueKeysWithValues: activeIngestTasks.filter { !$0.value.isCancelled })
         }
 
+        let inserted = trackedPendingEnvelopePaths.insert(envelopeURL.path).inserted
+        guard inserted else { return true }
+
         if pendingLargeContent.count >= maxPendingItems {
             ScopyLog.monitor.error(
-                "Ingest backlog full (\(self.maxPendingItems, privacy: .public)), dropping oldest pending item"
+                "Ingest backlog exceeded soft limit (\(self.maxPendingItems, privacy: .public)); keeping durable backlog on disk"
             )
-            pendingLargeContent.removeFirst()
         }
 
-        pendingLargeContent.append(rawData)
+        pendingLargeContent.append(envelopeURL)
         startNextIngestTasksIfNeeded()
+        return true
     }
 
     private func startNextIngestTasksIfNeeded() {
         while activeIngestTasks.count < maxConcurrentTasks, !pendingLargeContent.isEmpty {
-            let next = pendingLargeContent.removeFirst()
+            let envelopeURL = pendingLargeContent.removeFirst()
 
             let taskID = UUID()
             let ingestDirectory = ingestSpoolDirectory
@@ -609,12 +653,23 @@ public final class ClipboardMonitor {
 
                 guard !Task.isCancelled else { return }
 
-                var payloadData = next.rawData
-                var plainText = next.plainText
-                var sizeBytes = next.sizeBytes
+                if Self.testingAsyncProcessingDelayNs > 0 {
+                    try? await Task.sleep(nanoseconds: Self.testingAsyncProcessingDelayNs)
+                }
 
-                if next.type == .image, let imageData = next.rawData {
-                    if next.imageDataWasTIFF, let pngData = Self.convertTIFFToPNG(imageData) {
+                guard let envelope = Self.loadPendingEnvelope(from: envelopeURL) else {
+                    await MainActor.run { [weak self] in
+                        self?.discardIngestEnvelope(at: envelopeURL)
+                    }
+                    return
+                }
+
+                var payloadData = Self.loadPendingPayload(from: envelope, ingestDirectory: ingestDirectory)
+                var plainText = envelope.plainText
+                var sizeBytes = envelope.sizeBytes
+
+                if envelope.type == .image, let imageData = payloadData {
+                    if envelope.imageDataWasTIFF, let pngData = Self.convertTIFFToPNG(imageData) {
                         payloadData = pngData
                     } else {
                         payloadData = imageData
@@ -624,7 +679,7 @@ public final class ClipboardMonitor {
                 }
 
                 let hash: String
-                if let precomputed = next.precomputedHash {
+                if let precomputed = envelope.precomputedHash {
                     hash = precomputed
                 } else if let payloadData {
                     hash = Self.computeHashStatic(payloadData)
@@ -633,17 +688,13 @@ public final class ClipboardMonitor {
                 }
 
                 let payload = Self.buildPayload(
-                    type: next.type,
+                    type: envelope.type,
                     data: payloadData,
                     sizeBytes: sizeBytes,
                     ingestDirectory: ingestDirectory,
-                    spoolThresholdBytes: spoolThresholdBytes
+                    spoolThresholdBytes: spoolThresholdBytes,
+                    preferredFileURL: Self.pendingPayloadURL(for: envelope, ingestDirectory: ingestDirectory)
                 )
-
-                if Task.isCancelled {
-                    Self.cleanupPayloadIfNeeded(payload)
-                    return
-                }
 
                 let resolvedPlainText = plainText
                 let resolvedSizeBytes = sizeBytes
@@ -656,18 +707,16 @@ public final class ClipboardMonitor {
                     return true
                 }
 
-                guard shouldEmit else {
-                    Self.cleanupPayloadIfNeeded(payload)
-                    return
-                }
+                guard shouldEmit else { return }
 
                 let content = ClipboardContent(
-                    type: next.type,
+                    type: envelope.type,
                     plainText: resolvedPlainText,
                     payload: payload,
-                    appBundleID: next.appBundleID,
+                    appBundleID: envelope.appBundleID,
                     contentHash: hash,
-                    sizeBytes: resolvedSizeBytes
+                    sizeBytes: resolvedSizeBytes,
+                    ingestEnvelopeURL: envelopeURL
                 )
 
                 await contentQueue.enqueue(content)
@@ -690,12 +739,17 @@ public final class ClipboardMonitor {
         data: Data?,
         sizeBytes: Int,
         ingestDirectory: URL,
-        spoolThresholdBytes: Int
+        spoolThresholdBytes: Int,
+        preferredFileURL: URL?
     ) -> ClipboardContent.Payload {
         guard let data else { return .none }
 
         guard sizeBytes >= spoolThresholdBytes else {
             return .data(data)
+        }
+
+        if let preferredFileURL, FileManager.default.fileExists(atPath: preferredFileURL.path) {
+            return .file(preferredFileURL)
         }
 
         let ext: String
@@ -719,6 +773,106 @@ public final class ClipboardMonitor {
     nonisolated private static func cleanupPayloadIfNeeded(_ payload: ClipboardContent.Payload) {
         guard case .file(let url) = payload else { return }
         try? FileManager.default.removeItem(at: url)
+    }
+
+    private func installMonitoringTimer() {
+        if let timer = timerBox.take() {
+            timer.invalidate()
+        }
+
+        let timer = Timer(timeInterval: pollingInterval, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                await self?.checkClipboard()
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        timerBox.set(timer)
+    }
+
+    private func replayPendingLargeContentFromDisk() {
+        let persisted = Self.discoverPendingEnvelopeURLs(in: ingestSpoolDirectory)
+        guard !persisted.isEmpty else { return }
+
+        queueLock.lock()
+        defer { queueLock.unlock() }
+
+        for envelopeURL in persisted where trackedPendingEnvelopePaths.insert(envelopeURL.path).inserted {
+            pendingLargeContent.append(envelopeURL)
+        }
+        startNextIngestTasksIfNeeded()
+    }
+
+    private func persistPendingEnvelope(for rawData: RawClipboardData) throws -> URL {
+        let id = UUID()
+        let payloadFileName = rawData.rawData.map { _ in "\(id.uuidString).payload" }
+        if let payloadData = rawData.rawData, let payloadFileName {
+            let payloadURL = ingestSpoolDirectory.appendingPathComponent(payloadFileName)
+            try StorageService.writeAtomically(payloadData, to: payloadURL.path)
+        }
+
+        let envelope = PendingIngestEnvelope(
+            id: id,
+            typeRawValue: rawData.type.rawValue,
+            plainText: rawData.plainText,
+            appBundleID: rawData.appBundleID,
+            sizeBytes: rawData.sizeBytes,
+            precomputedHash: rawData.precomputedHash,
+            imageDataWasTIFF: rawData.imageDataWasTIFF,
+            payloadFileName: payloadFileName
+        )
+
+        let envelopeURL = ingestSpoolDirectory.appendingPathComponent("\(id.uuidString).envelope.json")
+        try Self.writePendingEnvelope(envelope, to: envelopeURL)
+        return envelopeURL
+    }
+
+    private func discardIngestEnvelope(at url: URL) {
+        acknowledgeIngestEnvelope(at: url)
+    }
+
+    nonisolated private static func writePendingEnvelope(_ envelope: PendingIngestEnvelope, to url: URL) throws {
+        let data = try JSONEncoder().encode(envelope)
+        try StorageService.writeAtomically(data, to: url.path)
+    }
+
+    nonisolated private static func loadPendingEnvelope(from url: URL) -> PendingIngestEnvelope? {
+        guard let data = try? Data(contentsOf: url) else { return nil }
+        return try? JSONDecoder().decode(PendingIngestEnvelope.self, from: data)
+    }
+
+    nonisolated private static func discoverPendingEnvelopeURLs(in directory: URL) -> [URL] {
+        guard let urls = try? FileManager.default.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: nil,
+            options: [.skipsHiddenFiles]
+        ) else {
+            return []
+        }
+
+        return urls
+            .filter { $0.lastPathComponent.hasSuffix(".envelope.json") }
+            .sorted { $0.lastPathComponent < $1.lastPathComponent }
+    }
+
+    nonisolated private static func pendingPayloadURL(for envelope: PendingIngestEnvelope, ingestDirectory: URL) -> URL? {
+        guard let payloadFileName = envelope.payloadFileName else { return nil }
+        let url = ingestDirectory.appendingPathComponent(payloadFileName)
+        return FileManager.default.fileExists(atPath: url.path) ? url : nil
+    }
+
+    nonisolated private static func loadPendingPayload(from envelope: PendingIngestEnvelope, ingestDirectory: URL) -> Data? {
+        guard let payloadURL = pendingPayloadURL(for: envelope, ingestDirectory: ingestDirectory) else {
+            return nil
+        }
+        return try? Data(contentsOf: payloadURL, options: [.mappedIfSafe])
+    }
+
+    nonisolated private static func cleanupEnvelope(_ envelopeURL: URL, payloadFileName: String?, ingestDirectory: URL) {
+        try? FileManager.default.removeItem(at: envelopeURL)
+        if let payloadFileName {
+            let payloadURL = ingestDirectory.appendingPathComponent(payloadFileName)
+            try? FileManager.default.removeItem(at: payloadURL)
+        }
     }
 
     /// 快速提取原始数据（不计算哈希，避免阻塞主线程）

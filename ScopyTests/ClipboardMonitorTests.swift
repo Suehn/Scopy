@@ -9,16 +9,26 @@ final class ClipboardMonitorTests: XCTestCase {
 
     var monitor: ClipboardMonitor!
     private var pasteboard: NSPasteboard!
+    private var ingestSpoolDirectory: URL!
 
     override func setUp() async throws {
         pasteboard = NSPasteboard.withUniqueName()
-        monitor = ClipboardMonitor(pasteboard: pasteboard)
+        ingestSpoolDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("scopy-clipboard-monitor-ingest-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: ingestSpoolDirectory, withIntermediateDirectories: true)
+        ClipboardMonitor.testingAsyncProcessingDelayNs = 0
+        monitor = ClipboardMonitor(pasteboard: pasteboard, ingestSpoolDirectory: ingestSpoolDirectory)
     }
 
     override func tearDown() async throws {
         monitor.stopMonitoring()
         monitor = nil
         pasteboard = nil
+        ClipboardMonitor.testingAsyncProcessingDelayNs = 0
+        if let ingestSpoolDirectory {
+            try? FileManager.default.removeItem(at: ingestSpoolDirectory)
+        }
+        ingestSpoolDirectory = nil
     }
 
     // MARK: - Initialization Tests
@@ -813,6 +823,85 @@ final class ClipboardMonitorTests: XCTestCase {
         XCTAssertEqual(receivedContent?.type, .image)
     }
 
+    func testLargeContentSurvivesPollingIntervalChange() async throws {
+        ClipboardMonitor.testingAsyncProcessingDelayNs = 300_000_000
+        monitor.setPollingInterval(0.1)
+
+        pasteboard.clearContents()
+        pasteboard.setString("Baseline \(UUID())", forType: .string)
+        monitor.startMonitoring()
+
+        let expectation = XCTestExpectation(description: "Large content delivered after polling interval change")
+        let task = Task {
+            for await content in monitor.contentStream where content.type == .image {
+                if let envelopeURL = content.ingestEnvelopeURL {
+                    monitor.acknowledgeIngestEnvelope(at: envelopeURL)
+                }
+                expectation.fulfill()
+                break
+            }
+        }
+        defer { task.cancel() }
+
+        try await Task.sleep(nanoseconds: 100_000_000)
+        guard let tiffData = makeLargeSolidColorTIFFData() else {
+            XCTFail("Failed to generate large TIFF")
+            return
+        }
+
+        pasteboard.clearContents()
+        pasteboard.setData(tiffData, forType: .tiff)
+
+        try await Task.sleep(nanoseconds: 150_000_000)
+        monitor.setPollingInterval(0.2)
+
+        await fulfillment(of: [expectation], timeout: 5.0)
+        await assertEventually(timeout: 2.0, pollInterval: 0.05, {
+            self.pendingEnvelopeCount() == 0
+        }, message: "Ingest envelopes should be acknowledged after delivery")
+    }
+
+    func testPendingLargeContentReplaysAfterMonitorRestart() async throws {
+        ClipboardMonitor.testingAsyncProcessingDelayNs = 300_000_000
+        monitor.setPollingInterval(0.1)
+
+        pasteboard.clearContents()
+        pasteboard.setString("Baseline \(UUID())", forType: .string)
+        monitor.startMonitoring()
+
+        try await Task.sleep(nanoseconds: 100_000_000)
+        guard let tiffData = makeLargeSolidColorTIFFData() else {
+            XCTFail("Failed to generate large TIFF")
+            return
+        }
+
+        pasteboard.clearContents()
+        pasteboard.setData(tiffData, forType: .tiff)
+
+        try await Task.sleep(nanoseconds: 150_000_000)
+        monitor.stopMonitoring()
+
+        ClipboardMonitor.testingAsyncProcessingDelayNs = 0
+        let expectation = XCTestExpectation(description: "Pending envelope replayed after restart")
+        let task = Task {
+            for await content in monitor.contentStream where content.type == .image {
+                if let envelopeURL = content.ingestEnvelopeURL {
+                    monitor.acknowledgeIngestEnvelope(at: envelopeURL)
+                }
+                expectation.fulfill()
+                break
+            }
+        }
+        defer { task.cancel() }
+
+        monitor.startMonitoring()
+
+        await fulfillment(of: [expectation], timeout: 5.0)
+        await assertEventually(timeout: 2.0, pollInterval: 0.05, {
+            self.pendingEnvelopeCount() == 0
+        }, message: "Replayed ingest envelope should be acknowledged after storage")
+    }
+
     // MARK: - App Bundle ID Tests
 
     func testAppBundleIDCapture() {
@@ -874,6 +963,15 @@ final class ClipboardMonitorTests: XCTestCase {
         }
 
         return pngData
+    }
+
+    private func makeLargeSolidColorTIFFData() -> Data? {
+        let image = NSImage(size: NSSize(width: 640, height: 640))
+        image.lockFocus()
+        NSColor.systemPink.setFill()
+        NSBezierPath(rect: NSRect(x: 0, y: 0, width: 640, height: 640)).fill()
+        image.unlockFocus()
+        return image.tiffRepresentation
     }
 
     private func makeTemporaryImageFileURL() throws -> URL {
@@ -942,5 +1040,16 @@ final class ClipboardMonitorTests: XCTestCase {
         let signature: [UInt8] = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]
         guard data.count >= signature.count else { return false }
         return data.prefix(signature.count).elementsEqual(signature)
+    }
+
+    private func pendingEnvelopeCount() -> Int {
+        guard let urls = try? FileManager.default.contentsOfDirectory(
+            at: ingestSpoolDirectory,
+            includingPropertiesForKeys: nil,
+            options: [.skipsHiddenFiles]
+        ) else {
+            return 0
+        }
+        return urls.filter { $0.lastPathComponent.hasSuffix(".envelope.json") }.count
     }
 }

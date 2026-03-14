@@ -753,12 +753,14 @@ actor ClipboardService {
             if let ingestURL = content.ingestFileURL {
                 try? FileManager.default.removeItem(at: ingestURL)
             }
+            await acknowledgeIngestEnvelopeIfNeeded(content)
             return
         }
         if content.type == .file && !settings.saveFiles {
             if let ingestURL = content.ingestFileURL {
                 try? FileManager.default.removeItem(at: ingestURL)
             }
+            await acknowledgeIngestEnvelopeIfNeeded(content)
             return
         }
 
@@ -777,6 +779,7 @@ actor ClipboardService {
                 await yieldEvent(.itemUpdated(dto))
             }
 
+            await acknowledgeIngestEnvelopeIfNeeded(preparedContent)
             scheduleCleanup(storage: storage)
         } catch {
             ScopyLog.app.warning("Failed to store clipboard item: \(error.localizedDescription, privacy: .private)")
@@ -813,7 +816,8 @@ actor ClipboardService {
                 appBundleID: content.appBundleID,
                 contentHash: hash,
                 sizeBytes: compressed.count,
-                fileSizeBytes: content.fileSizeBytes
+                fileSizeBytes: content.fileSizeBytes,
+                ingestEnvelopeURL: content.ingestEnvelopeURL
             )
         case .file(let url):
             let replaced = await Task.detached(priority: .utility) {
@@ -842,10 +846,18 @@ actor ClipboardService {
                 appBundleID: content.appBundleID,
                 contentHash: updatedHash,
                 sizeBytes: updatedSize,
-                fileSizeBytes: content.fileSizeBytes
+                fileSizeBytes: content.fileSizeBytes,
+                ingestEnvelopeURL: content.ingestEnvelopeURL
             )
         case .none:
             return content
+        }
+    }
+
+    private func acknowledgeIngestEnvelopeIfNeeded(_ content: ClipboardMonitor.ClipboardContent) async {
+        guard let envelopeURL = content.ingestEnvelopeURL else { return }
+        await MainActor.run { [monitor] in
+            monitor?.acknowledgeIngestEnvelope(at: envelopeURL)
         }
     }
 
