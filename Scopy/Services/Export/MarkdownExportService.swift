@@ -3,21 +3,20 @@ import Darwin
 import Foundation
 import ImageIO
 import os
-import ScopyKit
 import UniformTypeIdentifiers
 import WebKit
 
 /// Service for exporting Markdown preview as PNG image to clipboard
-enum MarkdownExportService {
+public enum MarkdownExportService {
     fileprivate static let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "Scopy", category: "export")
-    static let defaultTargetWidthPixels: CGFloat = 1080
+    public static let defaultTargetWidthPixels: CGFloat = 1080
 
-    struct ExportStats: Sendable, Equatable {
-        let originalPNGBytes: Int
-        let finalPNGBytes: Int
-        let pngquantRequested: Bool
+    public struct ExportStats: Sendable, Equatable {
+        public let originalPNGBytes: Int
+        public let finalPNGBytes: Int
+        public let pngquantRequested: Bool
 
-        var percentSaved: Int? {
+        public var percentSaved: Int? {
             guard pngquantRequested else { return nil }
             guard originalPNGBytes > 0 else { return nil }
             let saved = 1.0 - (Double(finalPNGBytes) / Double(originalPNGBytes))
@@ -51,7 +50,7 @@ enum MarkdownExportService {
     ///   - viewportWidthPoints: The viewport width used to lay out the HTML before snapshotting
     ///   - completion: Completion handler with result
     @MainActor
-    static func exportToPNGClipboard(
+    public static func exportToPNGClipboard(
         html: String,
         targetWidthPixels: CGFloat = defaultTargetWidthPixels,
         resolutionScale: CGFloat = 1,

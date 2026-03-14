@@ -1,7 +1,7 @@
-import XCTest
 import AppKit
+import XCTest
 
-@testable import Scopy
+@testable import ScopyKit
 
 @MainActor
 final class MarkdownExportServiceTests: XCTestCase {

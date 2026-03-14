@@ -1,6 +1,5 @@
 import SwiftUI
 import AppKit
-import ImageIO
 import ScopyKit
 import ScopyUISupport
 
@@ -969,7 +968,7 @@ struct HistoryItemView: View, Equatable {
                 let cgImage: CGImage?
                 if let storageRef, !storageRef.isEmpty {
                     let sendable = await runBudgetedDetached(priority: .userInitiated) { () async -> SendableCGImage? in
-                        guard let image = Self.makePreviewCGImage(
+                        guard let image = HoverPreviewLoader.makePreviewCGImage(
                             fromFileAtPath: storageRef,
                             targetWidthPixels: targetWidthPixels,
                             maxLongSidePixels: maxLongSidePixels
@@ -982,7 +981,7 @@ struct HistoryItemView: View, Equatable {
                 } else {
                     guard let data = await getImageData() else { return nil }
                     let sendable = await runBudgetedDetached(priority: .userInitiated) { () async -> SendableCGImage? in
-                        guard let image = Self.makePreviewCGImage(
+                        guard let image = HoverPreviewLoader.makePreviewCGImage(
                             from: data,
                             targetWidthPixels: targetWidthPixels,
                             maxLongSidePixels: maxLongSidePixels
@@ -1074,7 +1073,7 @@ struct HistoryItemView: View, Equatable {
                     let cgImage: CGImage?
                     switch previewInfo.kind {
                     case .image:
-                        cgImage = Self.makePreviewCGImage(
+                        cgImage = HoverPreviewLoader.makePreviewCGImage(
                             fromFileAtPath: previewInfo.url.path,
                             targetWidthPixels: targetWidthPixels,
                             maxLongSidePixels: maxLongSidePixels
@@ -1116,64 +1115,6 @@ struct HistoryItemView: View, Equatable {
                 previewModel.previewCGImage = cgImage
             }
         }
-    }
-
-    nonisolated private static func makePreviewCGImage(from data: Data, targetWidthPixels: Int, maxLongSidePixels: Int) -> CGImage? {
-        guard targetWidthPixels > 0, maxLongSidePixels > 0 else { return nil }
-        guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
-        return makePreviewCGImage(from: source, targetWidthPixels: targetWidthPixels, maxLongSidePixels: maxLongSidePixels)
-    }
-
-    nonisolated private static func makePreviewCGImage(fromFileAtPath path: String, targetWidthPixels: Int, maxLongSidePixels: Int) -> CGImage? {
-        guard targetWidthPixels > 0, maxLongSidePixels > 0 else { return nil }
-        let url = URL(fileURLWithPath: path)
-        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
-        return makePreviewCGImage(from: source, targetWidthPixels: targetWidthPixels, maxLongSidePixels: maxLongSidePixels)
-    }
-
-    nonisolated private static func makePreviewCGImage(from source: CGImageSource, targetWidthPixels: Int, maxLongSidePixels: Int) -> CGImage? {
-        let requestedMax = computeRequestedMaxPixelSize(
-            source: source,
-            targetWidthPixels: targetWidthPixels,
-            maxLongSidePixels: maxLongSidePixels
-        )
-        let options: [CFString: Any] = [
-            kCGImageSourceCreateThumbnailFromImageAlways: true,
-            kCGImageSourceCreateThumbnailWithTransform: true,
-            kCGImageSourceThumbnailMaxPixelSize: requestedMax,
-            kCGImageSourceShouldCacheImmediately: true
-        ]
-        if ScrollPerformanceProfile.isEnabled {
-            let start = CFAbsoluteTimeGetCurrent()
-            let image = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
-            if image != nil {
-                let elapsed = (CFAbsoluteTimeGetCurrent() - start) * 1000
-                ScrollPerformanceProfile.recordMetric(name: "hover.preview_image_decode_ms", elapsedMs: elapsed)
-            }
-            return image
-        }
-        return CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
-    }
-
-    nonisolated private static func computeRequestedMaxPixelSize(
-        source: CGImageSource,
-        targetWidthPixels: Int,
-        maxLongSidePixels: Int
-    ) -> Int {
-        let fallback = min(maxLongSidePixels, max(targetWidthPixels, 1))
-        guard let props = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any] else {
-            return fallback
-        }
-        let w = props[kCGImagePropertyPixelWidth] as? Int ?? 0
-        let h = props[kCGImagePropertyPixelHeight] as? Int ?? 0
-        guard w > 0, h > 0 else { return fallback }
-        let plan = HoverPreviewImageQualityPolicy.plan(
-            sourceWidthPixels: w,
-            sourceHeightPixels: h,
-            idealTargetWidthPixels: targetWidthPixels,
-            maxSidePixels: maxLongSidePixels
-        )
-        return min(maxLongSidePixels, max(1, plan.maxPixelSize))
     }
 
     private func cancelPreviewTask() {
