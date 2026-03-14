@@ -2249,6 +2249,22 @@ public actor SearchEngineImpl {
         return SearchResult(items: items, total: total, hasMore: hasMore, coverage: coverage, searchTimeMs: 0)
     }
 
+    private func makeZeroTimeSearchResult(
+        items: [ClipboardStoredItem],
+        total: Int,
+        hasMore: Bool,
+        coverage: SearchCoverage = .complete
+    ) -> SearchResult {
+        SearchResult(items: items, total: total, hasMore: hasMore, coverage: coverage, searchTimeMs: 0)
+    }
+
+    private func makeZeroTimeSearchResult(
+        page: (items: [ClipboardStoredItem], total: Int, hasMore: Bool),
+        coverage: SearchCoverage = .complete
+    ) -> SearchResult {
+        makeZeroTimeSearchResult(items: page.items, total: page.total, hasMore: page.hasMore, coverage: coverage)
+    }
+
     private func refreshCacheIfNeeded() throws {
         let now = Date()
         let needsRefresh = recentItemsCache.isEmpty || now.timeIntervalSince(cacheTimestamp) > cacheDuration
@@ -2353,8 +2369,46 @@ public actor SearchEngineImpl {
             return nil
         }
 
-        // Fast-path for long-text corpora: return quick prefilter results first, then let UI refine
-        // with forceFullFuzzy=true to run a full-history scan (progressive search UX).
+        if let fts = try searchInteractiveFTSPrefilter(request: request, ftsQuery: ftsQuery, perf: perf) {
+            return fts
+        }
+
+        if let substringFallback = try searchInteractiveFuzzyPlusSubstringFallback(
+            request: request,
+            trimmedQuery: trimmedQuery,
+            mode: mode,
+            perf: perf
+        ) {
+            return substringFallback
+        }
+
+        if let substringFallback = try searchInteractiveNonASCIISubstringFallback(
+            request: request,
+            trimmedQuery: trimmedQuery,
+            perf: perf
+        ) {
+            return substringFallback
+        }
+
+        if let cacheFallback = try searchInteractiveRecentCacheFallback(
+            request: request,
+            trimmedQuery: trimmedQuery,
+            mode: mode
+        ) {
+            return cacheFallback
+        }
+
+        // Keep the initial (non-forceFullFuzzy) stage fast: even if no prefilter match is found,
+        // return an empty prefilter result quickly and allow UI to refine with a full scan.
+        startFullIndexBuildIfNeeded()
+        return SearchResult(items: [], total: 0, hasMore: false, isPrefilter: true, searchTimeMs: 0)
+    }
+
+    private func searchInteractiveFTSPrefilter(
+        request: SearchRequest,
+        ftsQuery: String,
+        perf: PerfContext?
+    ) throws -> SearchResult? {
         let fts: SearchResult
         if let perf {
             fts = try perf.measure("fts_prefilter") {
@@ -2363,62 +2417,29 @@ public actor SearchEngineImpl {
         } else {
             fts = try searchWithFTS(query: ftsQuery, request: request, isPrefilter: true)
         }
-        if !fts.items.isEmpty {
-            startFullIndexBuildIfNeeded()
-            perf?.addCounter("fts_prefilter_items", value: fts.items.count)
-            return fts
-        }
 
-        if mode == .fuzzyPlus {
-            let tokens = fuzzyPlusTokens(trimmedQuery.lowercased())
-            if shouldUseSubstringOnlyFallbackForFuzzyPlus(tokens: tokens) {
-                let typeFilters = request.typeFilters.map(Array.init)
-                let page: (items: [ClipboardStoredItem], total: Int, hasMore: Bool)
-                if let perf {
-                    page = try perf.measure("sql_substring_only_fallback") {
-                        try searchWithSubstringLike(
-                            tokens: tokens,
-                            sortMode: request.sortMode,
-                            appFilter: request.appFilter,
-                            typeFilter: request.typeFilter,
-                            typeFilters: typeFilters,
-                            limit: request.limit,
-                            offset: request.offset
-                        )
-                    }
-                } else {
-                    page = try searchWithSubstringLike(
-                        tokens: tokens,
-                        sortMode: request.sortMode,
-                        appFilter: request.appFilter,
-                        typeFilter: request.typeFilter,
-                        typeFilters: typeFilters,
-                        limit: request.limit,
-                        offset: request.offset
-                    )
-                }
-                return SearchResult(items: page.items, total: page.total, hasMore: page.hasMore, isPrefilter: false, searchTimeMs: 0)
-            }
-        }
+        guard !fts.items.isEmpty else { return nil }
+        startFullIndexBuildIfNeeded()
+        perf?.addCounter("fts_prefilter_items", value: fts.items.count)
+        return fts
+    }
 
-        if !trimmedQuery.canBeConverted(to: .ascii) {
-            let tokens = substringSearchTokens(trimmedQuery)
-            let typeFilters = request.typeFilters.map(Array.init)
-            let page: (items: [ClipboardStoredItem], total: Int, hasMore: Bool)?
-            if let perf {
-                page = try? perf.measure("sql_substring_fallback_non_ascii") {
-                    try searchWithSubstring(
-                        tokens: tokens,
-                        sortMode: request.sortMode,
-                        appFilter: request.appFilter,
-                        typeFilter: request.typeFilter,
-                        typeFilters: typeFilters,
-                        limit: request.limit,
-                        offset: request.offset
-                    )
-                }
-            } else {
-                page = try? searchWithSubstring(
+    private func searchInteractiveFuzzyPlusSubstringFallback(
+        request: SearchRequest,
+        trimmedQuery: String,
+        mode: SearchMode,
+        perf: PerfContext?
+    ) throws -> SearchResult? {
+        guard mode == .fuzzyPlus else { return nil }
+
+        let tokens = fuzzyPlusTokens(trimmedQuery.lowercased())
+        guard shouldUseSubstringOnlyFallbackForFuzzyPlus(tokens: tokens) else { return nil }
+
+        let typeFilters = request.typeFilters.map(Array.init)
+        let page: (items: [ClipboardStoredItem], total: Int, hasMore: Bool)
+        if let perf {
+            page = try perf.measure("sql_substring_only_fallback") {
+                try searchWithSubstringLike(
                     tokens: tokens,
                     sortMode: request.sortMode,
                     appFilter: request.appFilter,
@@ -2428,25 +2449,70 @@ public actor SearchEngineImpl {
                     offset: request.offset
                 )
             }
-            if let page, !page.items.isEmpty {
-                startFullIndexBuildIfNeeded()
-                perf?.addCounter("substring_fallback_items", value: page.items.count)
-                return SearchResult(items: page.items, total: page.total, hasMore: page.hasMore, isPrefilter: true, searchTimeMs: 0)
+        } else {
+            page = try searchWithSubstringLike(
+                tokens: tokens,
+                sortMode: request.sortMode,
+                appFilter: request.appFilter,
+                typeFilter: request.typeFilter,
+                typeFilters: typeFilters,
+                limit: request.limit,
+                offset: request.offset
+            )
+        }
+        return makeZeroTimeSearchResult(page: page)
+    }
+
+    private func searchInteractiveNonASCIISubstringFallback(
+        request: SearchRequest,
+        trimmedQuery: String,
+        perf: PerfContext?
+    ) throws -> SearchResult? {
+        guard !trimmedQuery.canBeConverted(to: .ascii) else { return nil }
+
+        let tokens = substringSearchTokens(trimmedQuery)
+        let typeFilters = request.typeFilters.map(Array.init)
+        let page: (items: [ClipboardStoredItem], total: Int, hasMore: Bool)?
+        if let perf {
+            page = try? perf.measure("sql_substring_fallback_non_ascii") {
+                try searchWithSubstring(
+                    tokens: tokens,
+                    sortMode: request.sortMode,
+                    appFilter: request.appFilter,
+                    typeFilter: request.typeFilter,
+                    typeFilters: typeFilters,
+                    limit: request.limit,
+                    offset: request.offset
+                )
             }
+        } else {
+            page = try? searchWithSubstring(
+                tokens: tokens,
+                sortMode: request.sortMode,
+                appFilter: request.appFilter,
+                typeFilter: request.typeFilter,
+                typeFilters: typeFilters,
+                limit: request.limit,
+                offset: request.offset
+            )
         }
 
-        if trimmedQuery.count <= 6 {
-            let fallback = try searchFuzzyInRecentCache(request: request, mode: mode, query: trimmedQuery)
-            if !fallback.items.isEmpty {
-                startFullIndexBuildIfNeeded()
-                return fallback
-            }
-        }
-
-        // Keep the initial (non-forceFullFuzzy) stage fast: even if no prefilter match is found,
-        // return an empty prefilter result quickly and allow UI to refine with a full scan.
+        guard let page, !page.items.isEmpty else { return nil }
         startFullIndexBuildIfNeeded()
-        return SearchResult(items: [], total: 0, hasMore: false, isPrefilter: true, searchTimeMs: 0)
+        perf?.addCounter("substring_fallback_items", value: page.items.count)
+        return makeZeroTimeSearchResult(page: page, coverage: .stagedRefine)
+    }
+
+    private func searchInteractiveRecentCacheFallback(
+        request: SearchRequest,
+        trimmedQuery: String,
+        mode: SearchMode
+    ) throws -> SearchResult? {
+        guard trimmedQuery.count <= 6 else { return nil }
+        let fallback = try searchFuzzyInRecentCache(request: request, mode: mode, query: trimmedQuery)
+        guard !fallback.items.isEmpty else { return nil }
+        startFullIndexBuildIfNeeded()
+        return fallback
     }
 
     private func searchShortFuzzyQuery(
@@ -2455,132 +2521,210 @@ public actor SearchEngineImpl {
         mode: SearchMode,
         perf: PerfContext?
     ) async throws -> SearchResult {
-        // Prefer the in-memory full index if it is already available; otherwise, fall back to a SQL substring scan.
-        // This avoids the multi-second "first full scan" penalty on large DBs while keeping match/sort semantics stable.
-        if let index = fullIndex, !fullIndexStale {
-            perf?.addCounter("short_query_path_full_index", value: 1)
-            let normalizedRequest = normalizedSearchRequest(for: request, trimmedQuery: trimmedQuery, mode: mode)
-            let result = try searchInFullIndex(index: index, request: normalizedRequest, mode: mode, perf: perf)
-            return SearchResult(
-                items: result.items,
-                total: result.total,
-                hasMore: result.hasMore,
-                coverage: result.coverage,
-                searchTimeMs: 0
-            )
-        }
-
         let tokenLower = trimmedQuery.lowercased()
         let typeFilters = request.typeFilters.map(Array.init)
 
+        if let result = try searchShortFuzzyInFullIndexIfReady(
+            request: request,
+            trimmedQuery: trimmedQuery,
+            mode: mode,
+            perf: perf
+        ) {
+            return result
+        }
+
+        try await waitForShortQueryIndexIfNeeded(tokenLower: tokenLower, perf: perf)
+
+        if let result = try searchShortFuzzyWithShortIndex(
+            request: request,
+            tokenLower: tokenLower,
+            typeFilters: typeFilters,
+            perf: perf
+        ) {
+            return result
+        }
+
+        return try searchShortFuzzyWithSQLFallback(
+            request: request,
+            tokenLower: tokenLower,
+            typeFilters: typeFilters,
+            perf: perf
+        )
+    }
+
+    private func searchShortFuzzyInFullIndexIfReady(
+        request: SearchRequest,
+        trimmedQuery: String,
+        mode: SearchMode,
+        perf: PerfContext?
+    ) throws -> SearchResult? {
+        guard let index = fullIndex, !fullIndexStale else { return nil }
+
+        perf?.addCounter("short_query_path_full_index", value: 1)
+        let normalizedRequest = normalizedSearchRequest(for: request, trimmedQuery: trimmedQuery, mode: mode)
+        let result = try searchInFullIndex(index: index, request: normalizedRequest, mode: mode, perf: perf)
+        return makeZeroTimeSearchResult(
+            items: result.items,
+            total: result.total,
+            hasMore: result.hasMore,
+            coverage: result.coverage
+        )
+    }
+
+    private func waitForShortQueryIndexIfNeeded(tokenLower: String, perf: PerfContext?) async throws {
         startShortQueryIndexBuildIfNeeded()
 
-        if shortQueryIndex == nil, let task = shortQueryIndexBuildTask {
-            let waitTimeout = shortQueryIndexWaitTimeout(tokenLower: tokenLower)
-            if waitTimeout > 0 {
-                if let perf {
-                    let phaseStart = CFAbsoluteTimeGetCurrent()
-                    try await waitForShortQueryIndexBuild(task: task, timeout: waitTimeout)
-                    let elapsedMs = (CFAbsoluteTimeGetCurrent() - phaseStart) * 1000
-                    perf.addPhase("short_query_index_wait", ms: elapsedMs)
-                } else {
-                    try await waitForShortQueryIndexBuild(task: task, timeout: waitTimeout)
-                }
-            }
+        guard shortQueryIndex == nil, let task = shortQueryIndexBuildTask else { return }
+        let waitTimeout = shortQueryIndexWaitTimeout(tokenLower: tokenLower)
+        guard waitTimeout > 0 else { return }
+
+        if let perf {
+            let phaseStart = CFAbsoluteTimeGetCurrent()
+            try await waitForShortQueryIndexBuild(task: task, timeout: waitTimeout)
+            let elapsedMs = (CFAbsoluteTimeGetCurrent() - phaseStart) * 1000
+            perf.addPhase("short_query_index_wait", ms: elapsedMs)
+        } else {
+            try await waitForShortQueryIndexBuild(task: task, timeout: waitTimeout)
+        }
+    }
+
+    private func searchShortFuzzyWithShortIndex(
+        request: SearchRequest,
+        tokenLower: String,
+        typeFilters: [ClipboardItemType]?,
+        perf: PerfContext?
+    ) throws -> SearchResult? {
+        guard var shortIndex = shortQueryIndex else { return nil }
+
+        if tokenLower.canBeConverted(to: .ascii) {
+            let candidates = shortIndex.candidateIDStrings(for: tokenLower)
+            shortQueryIndex = shortIndex
+            return try searchShortFuzzyWithASCIICandidates(
+                request: request,
+                tokenLower: tokenLower,
+                candidateIDStrings: candidates,
+                typeFilters: typeFilters,
+                perf: perf
+            )
         }
 
-        if var shortIndex = shortQueryIndex {
-            if tokenLower.canBeConverted(to: .ascii) {
-                let candidates = shortIndex.candidateIDStrings(for: tokenLower)
-                shortQueryIndex = shortIndex
-                if candidates.isEmpty {
-                    return SearchResult(items: [], total: 0, hasMore: false, isPrefilter: false, searchTimeMs: 0)
-                }
+        guard let candidates = shortIndex.candidateIDStringsForNonASCIIBigram(tokenLower: tokenLower) else {
+            return nil
+        }
+        shortQueryIndex = shortIndex
+        return try searchShortFuzzyWithNonASCIICandidates(
+            request: request,
+            tokenLower: tokenLower,
+            candidateIDStrings: candidates,
+            typeFilters: typeFilters,
+            perf: perf
+        )
+    }
 
-                if let itemCount = corpusMetrics?.itemCount,
-                   itemCount > 0,
-                   candidates.count > 4096,
-                   Double(candidates.count) / Double(itemCount) > 0.85
-                {
-                    // Extremely broad short query: candidate filtering no longer helps and building a huge
-                    // candidates payload may cost more than a direct SQL scan. Fall back to SQL scan below.
-                } else {
-                    perf?.addCounter("short_query_path_short_index", value: 1)
-                    perf?.addCounter("short_query_short_index_candidates", value: candidates.count)
-                    let page: (items: [ClipboardStoredItem], total: Int, hasMore: Bool)
-                    if let perf {
-                        page = try perf.measure("short_query_short_index_fetch") {
-                            try searchWithShortQuerySubstringCandidates(
-                                tokenLower: tokenLower,
-                                candidateIDStrings: candidates,
-                                sortMode: request.sortMode,
-                                appFilter: request.appFilter,
-                                typeFilter: request.typeFilter,
-                                typeFilters: typeFilters,
-                                limit: request.limit,
-                                offset: request.offset
-                            )
-                        }
-                    } else {
-                        page = try searchWithShortQuerySubstringCandidates(
-                            tokenLower: tokenLower,
-                            candidateIDStrings: candidates,
-                            sortMode: request.sortMode,
-                            appFilter: request.appFilter,
-                            typeFilter: request.typeFilter,
-                            typeFilters: typeFilters,
-                            limit: request.limit,
-                            offset: request.offset
-                        )
-                    }
-                    return SearchResult(items: page.items, total: page.total, hasMore: page.hasMore, isPrefilter: false, searchTimeMs: 0)
-                }
-            } else if let candidates = shortIndex.candidateIDStringsForNonASCIIBigram(tokenLower: tokenLower) {
-                shortQueryIndex = shortIndex
-                if candidates.isEmpty {
-                    return SearchResult(items: [], total: 0, hasMore: false, isPrefilter: false, searchTimeMs: 0)
-                }
-
-                if let itemCount = corpusMetrics?.itemCount,
-                   itemCount > 0,
-                   candidates.count > 4096,
-                   Double(candidates.count) / Double(itemCount) > 0.85
-                {
-                    // Extremely broad short query: candidate filtering no longer helps. Fall back to SQL scan below.
-                } else {
-                    perf?.addCounter("short_query_path_short_index", value: 1)
-                    perf?.addCounter("short_query_short_index_candidates", value: candidates.count)
-                    let page: (items: [ClipboardStoredItem], total: Int, hasMore: Bool)
-                    if let perf {
-                        page = try perf.measure("short_query_short_index_sql_fetch") {
-                            try searchWithShortQuerySubstringCandidatesSQL(
-                                tokenLower: tokenLower,
-                                candidateIDStrings: candidates,
-                                sortMode: request.sortMode,
-                                appFilter: request.appFilter,
-                                typeFilter: request.typeFilter,
-                                typeFilters: typeFilters,
-                                limit: request.limit,
-                                offset: request.offset
-                            )
-                        }
-                    } else {
-                        page = try searchWithShortQuerySubstringCandidatesSQL(
-                            tokenLower: tokenLower,
-                            candidateIDStrings: candidates,
-                            sortMode: request.sortMode,
-                            appFilter: request.appFilter,
-                            typeFilter: request.typeFilter,
-                            typeFilters: typeFilters,
-                            limit: request.limit,
-                            offset: request.offset
-                        )
-                    }
-                    return SearchResult(items: page.items, total: page.total, hasMore: page.hasMore, isPrefilter: false, searchTimeMs: 0)
-                }
-            }
+    private func searchShortFuzzyWithASCIICandidates(
+        request: SearchRequest,
+        tokenLower: String,
+        candidateIDStrings: [String],
+        typeFilters: [ClipboardItemType]?,
+        perf: PerfContext?
+    ) throws -> SearchResult? {
+        if candidateIDStrings.isEmpty {
+            return makeZeroTimeSearchResult(items: [], total: 0, hasMore: false)
         }
 
+        guard !shouldFallbackFromShortQueryCandidates(candidateIDStrings.count) else {
+            return nil
+        }
+
+        perf?.addCounter("short_query_path_short_index", value: 1)
+        perf?.addCounter("short_query_short_index_candidates", value: candidateIDStrings.count)
+        let page: (items: [ClipboardStoredItem], total: Int, hasMore: Bool)
+        if let perf {
+            page = try perf.measure("short_query_short_index_fetch") {
+                try searchWithShortQuerySubstringCandidates(
+                    tokenLower: tokenLower,
+                    candidateIDStrings: candidateIDStrings,
+                    sortMode: request.sortMode,
+                    appFilter: request.appFilter,
+                    typeFilter: request.typeFilter,
+                    typeFilters: typeFilters,
+                    limit: request.limit,
+                    offset: request.offset
+                )
+            }
+        } else {
+            page = try searchWithShortQuerySubstringCandidates(
+                tokenLower: tokenLower,
+                candidateIDStrings: candidateIDStrings,
+                sortMode: request.sortMode,
+                appFilter: request.appFilter,
+                typeFilter: request.typeFilter,
+                typeFilters: typeFilters,
+                limit: request.limit,
+                offset: request.offset
+            )
+        }
+        return makeZeroTimeSearchResult(page: page)
+    }
+
+    private func searchShortFuzzyWithNonASCIICandidates(
+        request: SearchRequest,
+        tokenLower: String,
+        candidateIDStrings: [String],
+        typeFilters: [ClipboardItemType]?,
+        perf: PerfContext?
+    ) throws -> SearchResult? {
+        if candidateIDStrings.isEmpty {
+            return makeZeroTimeSearchResult(items: [], total: 0, hasMore: false)
+        }
+
+        guard !shouldFallbackFromShortQueryCandidates(candidateIDStrings.count) else {
+            return nil
+        }
+
+        perf?.addCounter("short_query_path_short_index", value: 1)
+        perf?.addCounter("short_query_short_index_candidates", value: candidateIDStrings.count)
+        let page: (items: [ClipboardStoredItem], total: Int, hasMore: Bool)
+        if let perf {
+            page = try perf.measure("short_query_short_index_sql_fetch") {
+                try searchWithShortQuerySubstringCandidatesSQL(
+                    tokenLower: tokenLower,
+                    candidateIDStrings: candidateIDStrings,
+                    sortMode: request.sortMode,
+                    appFilter: request.appFilter,
+                    typeFilter: request.typeFilter,
+                    typeFilters: typeFilters,
+                    limit: request.limit,
+                    offset: request.offset
+                )
+            }
+        } else {
+            page = try searchWithShortQuerySubstringCandidatesSQL(
+                tokenLower: tokenLower,
+                candidateIDStrings: candidateIDStrings,
+                sortMode: request.sortMode,
+                appFilter: request.appFilter,
+                typeFilter: request.typeFilter,
+                typeFilters: typeFilters,
+                limit: request.limit,
+                offset: request.offset
+            )
+        }
+        return makeZeroTimeSearchResult(page: page)
+    }
+
+    private func shouldFallbackFromShortQueryCandidates(_ candidateCount: Int) -> Bool {
+        guard let itemCount = corpusMetrics?.itemCount, itemCount > 0 else { return false }
+        guard candidateCount > 4096 else { return false }
+        return Double(candidateCount) / Double(itemCount) > 0.85
+    }
+
+    private func searchShortFuzzyWithSQLFallback(
+        request: SearchRequest,
+        tokenLower: String,
+        typeFilters: [ClipboardItemType]?,
+        perf: PerfContext?
+    ) throws -> SearchResult {
         perf?.addCounter("short_query_path_sql_scan", value: 1)
         let page: (items: [ClipboardStoredItem], total: Int, hasMore: Bool)
         if let perf {
@@ -2606,7 +2750,7 @@ public actor SearchEngineImpl {
                 offset: request.offset
             )
         }
-        return SearchResult(items: page.items, total: page.total, hasMore: page.hasMore, isPrefilter: false, searchTimeMs: 0)
+        return makeZeroTimeSearchResult(page: page)
     }
 
     private func getOrBuildFullIndex(perf: PerfContext?) throws -> FullFuzzyIndex {
