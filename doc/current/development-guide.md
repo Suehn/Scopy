@@ -2,10 +2,10 @@
 doc_type: guide
 status: active
 owner: maintainers
-last_reviewed: 2026-03-07
+last_reviewed: 2026-03-15
 canonical: true
 related_versions:
-  - v0.60.2
+  - v0.60.3
 ---
 
 # Development Guide
@@ -14,7 +14,7 @@ This document is the canonical implementation guide for the current Scopy codeba
 
 ## Reference State
 
-- Reference release: `v0.60.2`
+- Reference release: `v0.60.3`
 - Version metadata: [../meta/release-current.yml](../meta/release-current.yml)
 - Active requirements: [product-spec.md](./product-spec.md)
 - Release workflow: [release-runbook.md](./release-runbook.md)
@@ -81,9 +81,10 @@ Implication: changes to search semantics belong in the request model, search eng
 ### 4. Preview And Export
 
 1. `HistoryItemView` routes hover interactions into image, text, and file preview flows.
-2. Markdown/LaTeX preview rendering is handled in the text preview path and export pipeline.
-3. `MarkdownExportService` produces PNG output and writes it back to the pasteboard.
-4. pngquant settings affect both image history optimization and Markdown/LaTeX export compression where enabled.
+2. `HoverPreviewLoader` owns image/file preview decode and downsampling helpers so the row view does not carry raw ImageIO logic.
+3. Markdown/LaTeX preview rendering is handled in the text preview path and export pipeline.
+4. `MarkdownExportService` now lives under `Scopy/Services/Export` and produces PNG output back to the pasteboard through `ScopyKit`.
+5. pngquant settings affect both image history optimization and Markdown/LaTeX export compression where enabled.
 
 Implication: preview/export work must remain background-safe and should not mutate unrelated persisted content.
 

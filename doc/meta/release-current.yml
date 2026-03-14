@@ -8,12 +8,12 @@ runbook_doc: doc/current/release-runbook.md
 spec_doc: doc/current/product-spec.md
 development_doc: doc/current/development-guide.md
 architecture_doc: doc/current/architecture.md
-last_verified_at: 2026-03-13
+last_verified_at: 2026-03-15
 summary: Explicit Codex image replay action and ultra-tall export and preview hardening
 verification:
   build: pass
   test_unit: pass
   test_strict: pass
-  test_tsan: not_run
+  test_tsan: environment_error_65
   test_perf_heavy: not_run
-  test_snapshot_perf_release: not_run
+  test_snapshot_perf_release: pass

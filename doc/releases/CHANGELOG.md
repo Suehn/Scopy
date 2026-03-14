@@ -7,9 +7,32 @@
 
 ## [Unreleased]
 
-### Notes
+### Refactor/Search
 
-- No unreleased entries.
+- 搜索覆盖状态改为显式 `SearchCoverage` 契约，并把 `Exact <= 2` / `Regex` 正式收口为 recent-only；Header 的模式切换改为当前会话态，避免直接覆盖默认设置。
+- `SearchEngineImpl` 的 fuzzy 主路径开始按 helper 分流，`forceFullFuzzy`、interactive prefilter、short-query path 和 full-index wait 已从单一大函数中拆出。
+
+### Fix/Startup And Ingest
+
+- 启动失败不再静默回退到 mock history，而是进入显式 degraded state，并提供重试与诊断路径。
+- `ClipboardMonitor` 改成 durable replay 语义，修复大内容 replay、polling interval 切换和 transformed payload 复用带来的 silent drop / payload mismatch 风险。
+
+### Refactor/Preview And Export
+
+- 视频 hover preview 改为 `AVPlayerView` 路径，支持默认静音自动播放、退出立即暂停，并修正预览尺寸决策。
+- `MarkdownExportService` 已移入 `Scopy/Services/Export`，预览图片/文件解码 helper 从 `HistoryItemView` 抽到 `HoverPreviewLoader`，减少 row view 对底层解码细节的直接持有。
+
+### Verification
+
+- `make build`：BUILD SUCCEEDED（2026-03-15）
+- `make test-unit`：Executed 318 tests, 1 skipped, 0 failures（2026-03-15）
+- `make test-strict`：Executed 318 tests, 1 skipped, 0 failures（2026-03-15）
+- `make test-tsan`：ScopyTestHost bootstrap early exit, Error 65；继续按环境边界记录（2026-03-15）
+- `make test-snapshot-perf-release`：cmd p95=0.123ms、cm p95=5.160ms（2026-03-15）
+- `xcodebuild test -project Scopy.xcodeproj -scheme Scopy -destination 'platform=macOS' -only-testing:ScopyUITests/HistoryListUITests`：Executed 13 tests, 6 skipped, 0 failures（2026-03-15）
+- `make perf-frontend-profile-standard`：passed；summary=`logs/perf-frontend-profile-2026-03-15_03-17-56/frontend-scroll-profile-summary.{json,md}`（2026-03-15）
+- `make docs-validate`：passed（2026-03-15）
+- `make release-validate`：passed（2026-03-15）
 
 ## [v0.60.3] - 2026-03-13
 
