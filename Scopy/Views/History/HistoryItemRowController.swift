@@ -17,6 +17,7 @@ final class HistoryItemRowController: ObservableObject {
     @Published var isNoteEditorPresented = false
     @Published var noteDraft = ""
     @Published var isExportingPNG = false
+    @Published var isScrollInteractionActive = false
 
     var hoverDebounceTask: Task<Void, Never>?
     var hoverPreviewTask: Task<Void, Never>?
@@ -26,6 +27,7 @@ final class HistoryItemRowController: ObservableObject {
     var optimizeMessageTask: Task<Void, Never>?
     var exportActionTask: Task<Void, Never>?
     var exportMessageTask: Task<Void, Never>?
+    var interactionObserverID: UUID?
 
     init(relativeTimeText: String) {
         self.relativeTimeText = relativeTimeText

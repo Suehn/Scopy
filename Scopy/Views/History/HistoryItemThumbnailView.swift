@@ -6,6 +6,7 @@ import AppKit
 struct HistoryItemThumbnailView: View {
     let thumbnailPath: String?
     let height: CGFloat
+    let interactionCoordinator: HistoryListInteractionCoordinator
 
     @State private var loadedThumbnail: NSImage?
     @State private var lastLoadedPath: String?
@@ -55,7 +56,7 @@ struct HistoryItemThumbnailView: View {
             return
         }
 
-        let priority: TaskPriority = HistoryListScrollState.shared.isScrolling ? .utility : .userInitiated
+        let priority: TaskPriority = interactionCoordinator.isScrolling ? .utility : .userInitiated
         let image = await ThumbnailCache.shared.loadImage(path: path, priority: priority)
         guard !Task.isCancelled else { return }
         guard let image else { return }

@@ -21,48 +21,6 @@ private struct HoverPreviewDismissSnapshot: Equatable {
     let at: CFTimeInterval
 }
 
-@MainActor
-final class HistoryListScrollState {
-    static let shared = HistoryListScrollState()
-    private static let hoverPreviewCooldownAfterScrollSeconds: CFTimeInterval = 0.25
-
-    private(set) var isScrolling = false
-    private(set) var isPointerInteractionActive = false
-    private var lastScrollEndedAt: CFTimeInterval = 0
-
-    var isHoverPreviewSuppressed: Bool {
-        if isScrolling || isPointerInteractionActive {
-            return true
-        }
-        let elapsed = CFAbsoluteTimeGetCurrent() - lastScrollEndedAt
-        return elapsed < Self.hoverPreviewCooldownAfterScrollSeconds
-    }
-
-    func beginScrolling() {
-        isScrolling = true
-    }
-
-    func endScrolling() {
-        isScrolling = false
-        lastScrollEndedAt = CFAbsoluteTimeGetCurrent()
-    }
-
-    func beginPointerInteraction() {
-        isPointerInteractionActive = true
-    }
-
-    func endPointerInteraction() {
-        isPointerInteractionActive = false
-    }
-}
-
-extension Notification.Name {
-    static let historyListScrollDidStart = Notification.Name("HistoryListScrollDidStart")
-    static let historyListScrollDidEnd = Notification.Name("HistoryListScrollDidEnd")
-    static let historyListInteractionDidStart = Notification.Name("HistoryListInteractionDidStart")
-    static let historyListInteractionDidEnd = Notification.Name("HistoryListInteractionDidEnd")
-}
-
 /// 历史列表视图 - 符合 v0.md 的懒加载设计
 @MainActor
 struct HistoryListView: View {
@@ -74,6 +32,7 @@ struct HistoryListView: View {
 
     // Shared Markdown preview controller to avoid repeatedly creating/destroying WebKit views/processes.
     @StateObject private var sharedMarkdownPreviewController = MarkdownPreviewWebViewController()
+    @State private var interactionCoordinator = HistoryListInteractionCoordinator()
 
     // Enforce that at most one hover preview popover is presented at a time.
     @State private var activePopover: HoverPreviewPopoverState?
@@ -168,17 +127,14 @@ struct HistoryListView: View {
                 .accessibilityIdentifier("History.List")
                 .background(
                     ListLiveScrollObserverView(
+                        interactionCoordinator: interactionCoordinator,
                         onScrollStart: {
-                            guard !HistoryListScrollState.shared.isScrolling else { return }
-                            HistoryListScrollState.shared.beginScrolling()
+                            interactionCoordinator.beginScrolling()
                             historyViewModel.scrollDidStart()
-                            NotificationCenter.default.post(name: .historyListScrollDidStart, object: nil)
                         },
                         onScrollEnd: {
-                            guard HistoryListScrollState.shared.isScrolling else { return }
-                            HistoryListScrollState.shared.endScrolling()
+                            interactionCoordinator.endScrolling()
                             historyViewModel.scrollDidEnd()
-                            NotificationCenter.default.post(name: .historyListScrollDidEnd, object: nil)
                         },
                         onScrollViewAttach: ScrollPerformanceProfile.isEnabled ? { scrollView in
                             ScrollPerformanceProfile.shared.attachScrollView(scrollView)
@@ -341,6 +297,7 @@ struct HistoryListView: View {
             onOptimizeImage: { await historyViewModel.optimizeImage(item) },
             getImageData: { try? await historyViewModel.getImageData(itemID: item.id) },
             markdownWebViewController: sharedMarkdownPreviewController,
+            interactionCoordinator: interactionCoordinator,
             isImagePreviewPresented: isImagePreviewPresented,
             isTextPreviewPresented: isTextPreviewPresented,
             isFilePreviewPresented: isFilePreviewPresented,

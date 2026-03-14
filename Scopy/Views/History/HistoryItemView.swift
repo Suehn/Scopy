@@ -70,6 +70,7 @@ struct HistoryItemView: View, Equatable {
     let onOptimizeImage: () async -> ImageOptimizationOutcomeDTO
     let getImageData: () async -> Data?
     let markdownWebViewController: MarkdownPreviewWebViewController
+    let interactionCoordinator: HistoryListInteractionCoordinator
     let isImagePreviewPresented: Bool
     let isTextPreviewPresented: Bool
     let isFilePreviewPresented: Bool
@@ -95,6 +96,7 @@ struct HistoryItemView: View, Equatable {
         onOptimizeImage: @escaping () async -> ImageOptimizationOutcomeDTO,
         getImageData: @escaping () async -> Data?,
         markdownWebViewController: MarkdownPreviewWebViewController,
+        interactionCoordinator: HistoryListInteractionCoordinator,
         isImagePreviewPresented: Bool,
         isTextPreviewPresented: Bool,
         isFilePreviewPresented: Bool,
@@ -113,6 +115,7 @@ struct HistoryItemView: View, Equatable {
         self.onOptimizeImage = onOptimizeImage
         self.getImageData = getImageData
         self.markdownWebViewController = markdownWebViewController
+        self.interactionCoordinator = interactionCoordinator
         self.isImagePreviewPresented = isImagePreviewPresented
         self.isTextPreviewPresented = isTextPreviewPresented
         self.isFilePreviewPresented = isFilePreviewPresented
@@ -140,7 +143,7 @@ struct HistoryItemView: View, Equatable {
     }
 
     private var isPreviewInteractionSuppressed: Bool {
-        HistoryListScrollState.shared.isHoverPreviewSuppressed
+        interactionCoordinator.isHoverPreviewSuppressed
     }
 
     private var isHovering: Bool {
@@ -223,6 +226,11 @@ struct HistoryItemView: View, Equatable {
         nonmutating set { rowController.noteDraft = newValue }
     }
 
+    private var isScrollInteractionActive: Bool {
+        get { rowController.isScrollInteractionActive }
+        nonmutating set { rowController.isScrollInteractionActive = newValue }
+    }
+
     private var optimizeImageTask: Task<Void, Never>? {
         get { rowController.optimizeImageTask }
         nonmutating set { rowController.optimizeImageTask = newValue }
@@ -246,6 +254,11 @@ struct HistoryItemView: View, Equatable {
     private var isExportingPNG: Bool {
         get { rowController.isExportingPNG }
         nonmutating set { rowController.isExportingPNG = newValue }
+    }
+
+    private var interactionObserverID: UUID? {
+        get { rowController.interactionObserverID }
+        nonmutating set { rowController.interactionObserverID = newValue }
     }
 
     private var isNoteEditorPresentedBinding: Binding<Bool> {
@@ -523,7 +536,11 @@ struct HistoryItemView: View, Equatable {
         case .image where showThumbnails:
             // v0.15.1: 图片有缩略图时，只显示缩略图和大小，不显示 "Image" 标题
             HStack(spacing: ScopySpacing.md) {
-                HistoryItemThumbnailView(thumbnailPath: item.thumbnailPath, height: thumbnailHeight)
+                HistoryItemThumbnailView(
+                    thumbnailPath: item.thumbnailPath,
+                    height: thumbnailHeight,
+                    interactionCoordinator: interactionCoordinator
+                )
                 Text(metadataText)
                     .font(.system(size: 10))
                     .foregroundStyle(ScopyColors.mutedText)
@@ -680,8 +697,8 @@ struct HistoryItemView: View, Equatable {
             }
         }
         // v0.10.3: 添加选中/悬停态过渡动效
-        .animation(.easeInOut(duration: 0.15), value: isHovering)
-        .animation(.easeInOut(duration: 0.15), value: isKeyboardSelected)
+        .animation(isScrollInteractionActive ? nil : .easeInOut(duration: 0.15), value: isHovering)
+        .animation(isScrollInteractionActive ? nil : .easeInOut(duration: 0.15), value: isKeyboardSelected)
         .padding(.horizontal, ScopySpacing.md) // Outer padding for floating effect
         .onTapGesture {
             if isUITestTapPreviewEnabled {
@@ -706,6 +723,7 @@ struct HistoryItemView: View, Equatable {
             } else {
                 isUITestTapPreviewEnabled = false
             }
+            registerInteractionObserverIfNeeded()
         }
         .onChange(of: item.lastUsedAt) { _, _ in
             updateRelativeTimeText()
@@ -916,8 +934,10 @@ struct HistoryItemView: View, Equatable {
         }
         // v0.17: 增强任务清理 - 确保视图消失时释放所有任务引用
         .onDisappear {
+            unregisterInteractionObserver()
             cancelHoverTasks()
             resetPreviewState(hidePopovers: true)
+            isScrollInteractionActive = false
             cancelExportTasks()
             isNoteEditorPresented = false
         }
@@ -926,15 +946,6 @@ struct HistoryItemView: View, Equatable {
         }
         .onChange(of: previewModel.markdownHasHorizontalOverflow) { _, _ in
             updateMarkdownFilePreviewMetricsCacheIfNeeded()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .historyListScrollDidStart)) { _ in
-            handleScrollDidStart()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .historyListInteractionDidStart)) { _ in
-            handleScrollDidStart()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .historyListScrollDidEnd)) { _ in
-            handleScrollDidEnd()
         }
         .background {
             if isImagePreviewPresented || isTextPreviewPresented || isFilePreviewPresented {
@@ -1334,6 +1345,34 @@ struct HistoryItemView: View, Equatable {
 
     private func dismissNoteEditor() {
         rowController.dismissNoteEditor()
+    }
+
+    private func registerInteractionObserverIfNeeded() {
+        guard interactionObserverID == nil else { return }
+        interactionObserverID = interactionCoordinator.registerObserver { event in
+            handleInteractionEvent(event)
+        }
+    }
+
+    private func unregisterInteractionObserver() {
+        guard let interactionObserverID else { return }
+        interactionCoordinator.unregisterObserver(interactionObserverID)
+        self.interactionObserverID = nil
+    }
+
+    private func handleInteractionEvent(_ event: HistoryListInteractionCoordinator.Event) {
+        switch event {
+        case .scrollStarted, .pointerInteractionStarted:
+            isScrollInteractionActive = true
+            handleScrollDidStart()
+        case .scrollEnded:
+            isScrollInteractionActive = false
+            handleScrollDidEnd()
+        case .pointerInteractionEnded:
+            if !interactionCoordinator.isScrolling {
+                isScrollInteractionActive = false
+            }
+        }
     }
 
     private func handleOptimizeButtonHover(_ hovering: Bool) {

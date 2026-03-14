@@ -2,12 +2,14 @@ import AppKit
 import SwiftUI
 
 struct ListLiveScrollObserverView: NSViewRepresentable {
+    let interactionCoordinator: HistoryListInteractionCoordinator
     let onScrollStart: () -> Void
     let onScrollEnd: () -> Void
     var onScrollViewAttach: ((NSScrollView) -> Void)? = nil
 
     func makeNSView(context: Context) -> ObserverView {
         let view = ObserverView()
+        view.interactionCoordinator = interactionCoordinator
         view.onScrollStart = onScrollStart
         view.onScrollEnd = onScrollEnd
         view.onScrollViewAttach = onScrollViewAttach
@@ -15,6 +17,7 @@ struct ListLiveScrollObserverView: NSViewRepresentable {
     }
 
     func updateNSView(_ nsView: ObserverView, context: Context) {
+        nsView.interactionCoordinator = interactionCoordinator
         nsView.onScrollStart = onScrollStart
         nsView.onScrollEnd = onScrollEnd
         nsView.onScrollViewAttach = onScrollViewAttach
@@ -24,6 +27,7 @@ struct ListLiveScrollObserverView: NSViewRepresentable {
 
 extension ListLiveScrollObserverView {
     final class ObserverView: NSView {
+        var interactionCoordinator: HistoryListInteractionCoordinator?
         var onScrollStart: (() -> Void)?
         var onScrollEnd: (() -> Void)?
         var onScrollViewAttach: ((NSScrollView) -> Void)?
@@ -95,10 +99,7 @@ extension ListLiveScrollObserverView {
             cachedWindow = nil
             cachedWindowResolvedScrollView = nil
             removeEventMonitor()
-            if HistoryListScrollState.shared.isPointerInteractionActive {
-                HistoryListScrollState.shared.endPointerInteraction()
-                NotificationCenter.default.post(name: .historyListInteractionDidEnd, object: nil)
-            }
+            interactionCoordinator?.endPointerInteraction()
             if isLiveScrolling {
                 isLiveScrolling = false
                 onScrollEnd?()
@@ -143,13 +144,9 @@ extension ListLiveScrollObserverView {
             switch event.type {
             case .leftMouseDown:
                 guard isInsideScrollView else { return }
-                guard !HistoryListScrollState.shared.isPointerInteractionActive else { return }
-                HistoryListScrollState.shared.beginPointerInteraction()
-                NotificationCenter.default.post(name: .historyListInteractionDidStart, object: nil)
+                interactionCoordinator?.beginPointerInteraction()
             case .leftMouseUp:
-                guard HistoryListScrollState.shared.isPointerInteractionActive else { return }
-                HistoryListScrollState.shared.endPointerInteraction()
-                NotificationCenter.default.post(name: .historyListInteractionDidEnd, object: nil)
+                interactionCoordinator?.endPointerInteraction()
             default:
                 break
             }
