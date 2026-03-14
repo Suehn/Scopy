@@ -5,6 +5,92 @@ import Foundation
 import ImageIO
 import UniformTypeIdentifiers
 
+public actor ClipboardIngestMetrics {
+    public static let shared = ClipboardIngestMetrics()
+
+    private var pendingCount = 0
+    private var activeCount = 0
+    private var persistedCount = 0
+    private var softLimitHitCount = 0
+    private var replayCount = 0
+    private var changeJumpCount = 0
+    private var maxObservedChangeDelta = 1
+    private var lastPersistedAt: Date?
+    private var lastAcknowledgedAt: Date?
+    private var lastReplayAt: Date?
+
+    public func recordChangeDelta(_ delta: Int) {
+        guard delta > 1 else { return }
+        changeJumpCount += 1
+        maxObservedChangeDelta = max(maxObservedChangeDelta, delta)
+    }
+
+    public func recordSoftLimitHit() {
+        softLimitHitCount += 1
+    }
+
+    public func recordReplay(count: Int) {
+        guard count > 0 else { return }
+        replayCount += count
+        lastReplayAt = Date()
+    }
+
+    public func recordPersistedEnvelope() {
+        lastPersistedAt = Date()
+    }
+
+    public func recordAcknowledgedEnvelope() {
+        lastAcknowledgedAt = Date()
+    }
+
+    public func updateQueueSnapshot(pendingCount: Int, activeCount: Int, persistedCount: Int) {
+        self.pendingCount = pendingCount
+        self.activeCount = activeCount
+        self.persistedCount = persistedCount
+    }
+
+    public func reset() {
+        pendingCount = 0
+        activeCount = 0
+        persistedCount = 0
+        softLimitHitCount = 0
+        replayCount = 0
+        changeJumpCount = 0
+        maxObservedChangeDelta = 1
+        lastPersistedAt = nil
+        lastAcknowledgedAt = nil
+        lastReplayAt = nil
+    }
+
+    public func getSummary() async -> ClipboardIngestSummary {
+        ClipboardIngestSummary(
+            pendingCount: pendingCount,
+            activeCount: activeCount,
+            persistedCount: persistedCount,
+            softLimitHitCount: softLimitHitCount,
+            replayCount: replayCount,
+            changeJumpCount: changeJumpCount,
+            maxObservedChangeDelta: maxObservedChangeDelta,
+            lastPersistedAt: lastPersistedAt,
+            lastAcknowledgedAt: lastAcknowledgedAt,
+            lastReplayAt: lastReplayAt
+        )
+    }
+}
+
+public struct ClipboardIngestSummary: Sendable {
+    public let pendingCount: Int
+    public let activeCount: Int
+    public let persistedCount: Int
+    public let softLimitHitCount: Int
+    public let replayCount: Int
+    public let changeJumpCount: Int
+    public let maxObservedChangeDelta: Int
+    public let lastPersistedAt: Date?
+    public let lastAcknowledgedAt: Date?
+    public let lastReplayAt: Date?
+}
+
 /// ClipboardMonitor - 系统剪贴板监控服务
 /// 符合 v0.md 第1节：后端只提供结构化数据和命令接口
 @MainActor
@@ -262,6 +348,7 @@ public final class ClipboardMonitor {
         activeIngestTasks.removeAll()
         pendingLargeContent.removeAll()
         trackedPendingEnvelopePaths.removeAll()
+        publishIngestSnapshotLocked()
     }
 
     public func setPollingInterval(_ interval: TimeInterval) {
@@ -275,10 +362,14 @@ public final class ClipboardMonitor {
         queueLock.lock()
         trackedPendingEnvelopePaths.remove(url.path)
         pendingLargeContent.removeAll { $0.path == url.path }
+        publishIngestSnapshotLocked()
         queueLock.unlock()
 
         let envelope = Self.loadPendingEnvelope(from: url)
         Self.cleanupEnvelope(url, payloadFileName: envelope?.payloadFileName, ingestDirectory: ingestSpoolDirectory)
+        Task {
+            await ClipboardIngestMetrics.shared.recordAcknowledgedEnvelope()
+        }
     }
 
     public func setIgnoredApps(_ apps: Set<String>) {
@@ -558,6 +649,9 @@ public final class ClipboardMonitor {
         let delta = currentChangeCount - previousChangeCount
         if delta > 1 {
             ScopyLog.monitor.debug("Pasteboard changeCount jumped by \(delta) (prev=\(previousChangeCount), current=\(currentChangeCount))")
+            Task {
+                await ClipboardIngestMetrics.shared.recordChangeDelta(delta)
+            }
         }
 
         // 快速提取原始数据（在主线程）
@@ -620,14 +714,21 @@ public final class ClipboardMonitor {
 
         let inserted = trackedPendingEnvelopePaths.insert(envelopeURL.path).inserted
         guard inserted else { return true }
+        Task {
+            await ClipboardIngestMetrics.shared.recordPersistedEnvelope()
+        }
 
         if pendingLargeContent.count >= maxPendingItems {
             ScopyLog.monitor.error(
                 "Ingest backlog exceeded soft limit (\(self.maxPendingItems, privacy: .public)); keeping durable backlog on disk"
             )
+            Task {
+                await ClipboardIngestMetrics.shared.recordSoftLimitHit()
+            }
         }
 
         pendingLargeContent.append(envelopeURL)
+        publishIngestSnapshotLocked()
         startNextIngestTasksIfNeeded()
         return true
     }
@@ -723,6 +824,7 @@ public final class ClipboardMonitor {
             }
 
             activeIngestTasks[taskID] = task
+            publishIngestSnapshotLocked()
         }
     }
 
@@ -731,6 +833,7 @@ public final class ClipboardMonitor {
         defer { queueLock.unlock() }
 
         activeIngestTasks.removeValue(forKey: id)
+        publishIngestSnapshotLocked()
         startNextIngestTasksIfNeeded()
     }
 
@@ -796,10 +899,18 @@ public final class ClipboardMonitor {
         queueLock.lock()
         defer { queueLock.unlock() }
 
+        var replayed = 0
         for envelopeURL in persisted where trackedPendingEnvelopePaths.insert(envelopeURL.path).inserted {
             pendingLargeContent.append(envelopeURL)
+            replayed += 1
         }
+        publishIngestSnapshotLocked()
         startNextIngestTasksIfNeeded()
+        if replayed > 0 {
+            Task {
+                await ClipboardIngestMetrics.shared.recordReplay(count: replayed)
+            }
+        }
     }
 
     private func persistPendingEnvelope(for rawData: RawClipboardData) throws -> URL {
@@ -828,6 +939,19 @@ public final class ClipboardMonitor {
 
     private func discardIngestEnvelope(at url: URL) {
         acknowledgeIngestEnvelope(at: url)
+    }
+
+    private func publishIngestSnapshotLocked() {
+        let pendingCount = pendingLargeContent.count
+        let activeCount = activeIngestTasks.count
+        let persistedCount = trackedPendingEnvelopePaths.count
+        Task {
+            await ClipboardIngestMetrics.shared.updateQueueSnapshot(
+                pendingCount: pendingCount,
+                activeCount: activeCount,
+                persistedCount: persistedCount
+            )
+        }
     }
 
     nonisolated private static func writePendingEnvelope(_ envelope: PendingIngestEnvelope, to url: URL) throws {

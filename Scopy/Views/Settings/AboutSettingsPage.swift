@@ -1,8 +1,10 @@
 import AppKit
 import SwiftUI
+import ScopyKit
 
 struct AboutSettingsPage: View {
     @State private var performanceSummary: PerformanceSummary?
+    @State private var ingestSummary: ClipboardIngestSummary?
     @State private var memoryUsageMB: Double = 0
     @State private var autoRefreshTask: Task<Void, Never>?
 
@@ -83,6 +85,47 @@ struct AboutSettingsPage: View {
                 }
             }
 
+            SettingsSection("Ingest 诊断", systemImage: "waveform.path.ecg") {
+                SettingsCardRow {
+                    LabeledContent("队列 / 活跃任务") {
+                        Text("\(ingestPendingValue) / \(ingestActiveValue)")
+                            .monospacedDigit()
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                SettingsCardDivider()
+                SettingsCardRow {
+                    LabeledContent("持久 backlog") {
+                        Text(ingestPersistedValue)
+                            .monospacedDigit()
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                SettingsCardDivider()
+                SettingsCardRow {
+                    LabeledContent("soft limit / replay") {
+                        Text("\(ingestSoftLimitValue) / \(ingestReplayValue)")
+                            .monospacedDigit()
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                SettingsCardDivider()
+                SettingsCardRow {
+                    LabeledContent("changeCount 跳变") {
+                        Text("\(ingestJumpValue) (max Δ\(ingestMaxDeltaValue))")
+                            .monospacedDigit()
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                SettingsCardDivider()
+                SettingsCardRow {
+                    LabeledContent("最近持久化 / ack") {
+                        Text("\(ingestPersistedAtValue) / \(ingestAckAtValue)")
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+
             SettingsSection("链接", systemImage: "link") {
                 SettingsCardRow {
                     Link(destination: URL(string: "https://github.com/Suehn/Scopy")!) {
@@ -121,9 +164,11 @@ struct AboutSettingsPage: View {
     private func refreshPerformance() {
         Task {
             let summary = await PerformanceMetrics.shared.getSummary()
+            let ingest = await ClipboardIngestMetrics.shared.getSummary()
             let currentMemoryUsageMB = readMemoryUsageMB()
             await MainActor.run {
                 performanceSummary = summary
+                ingestSummary = ingest
                 memoryUsageMB = currentMemoryUsageMB
             }
         }
@@ -164,6 +209,47 @@ struct AboutSettingsPage: View {
         } else {
             return String(format: "%.0f ms", ms)
         }
+    }
+
+    private var ingestPendingValue: String {
+        "\(ingestSummary?.pendingCount ?? 0)"
+    }
+
+    private var ingestActiveValue: String {
+        "\(ingestSummary?.activeCount ?? 0)"
+    }
+
+    private var ingestPersistedValue: String {
+        "\(ingestSummary?.persistedCount ?? 0)"
+    }
+
+    private var ingestSoftLimitValue: String {
+        "\(ingestSummary?.softLimitHitCount ?? 0)"
+    }
+
+    private var ingestReplayValue: String {
+        "\(ingestSummary?.replayCount ?? 0)"
+    }
+
+    private var ingestJumpValue: String {
+        "\(ingestSummary?.changeJumpCount ?? 0)"
+    }
+
+    private var ingestMaxDeltaValue: String {
+        "\(ingestSummary?.maxObservedChangeDelta ?? 1)"
+    }
+
+    private var ingestPersistedAtValue: String {
+        formatTimestamp(ingestSummary?.lastPersistedAt)
+    }
+
+    private var ingestAckAtValue: String {
+        formatTimestamp(ingestSummary?.lastAcknowledgedAt)
+    }
+
+    private func formatTimestamp(_ date: Date?) -> String {
+        guard let date else { return "N/A" }
+        return date.formatted(date: .omitted, time: .standard)
     }
 }
 
