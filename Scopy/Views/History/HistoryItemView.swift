@@ -256,9 +256,9 @@ struct HistoryItemView: View, Equatable {
         nonmutating set { rowController.isExportingPNG = newValue }
     }
 
-    private var interactionObserverID: UUID? {
-        get { rowController.interactionObserverID }
-        nonmutating set { rowController.interactionObserverID = newValue }
+    private var interactionObservation: HistoryListInteractionObservation? {
+        get { rowController.interactionObservation }
+        nonmutating set { rowController.interactionObservation = newValue }
     }
 
     private var isNoteEditorPresentedBinding: Binding<Bool> {
@@ -1359,16 +1359,15 @@ struct HistoryItemView: View, Equatable {
     }
 
     private func registerInteractionObserverIfNeeded() {
-        guard interactionObserverID == nil else { return }
-        interactionObserverID = interactionCoordinator.registerObserver { event in
+        guard interactionObservation == nil else { return }
+        interactionObservation = interactionCoordinator.observe { event in
             handleInteractionEvent(event)
         }
     }
 
     private func unregisterInteractionObserver() {
-        guard let interactionObserverID else { return }
-        interactionCoordinator.unregisterObserver(interactionObserverID)
-        self.interactionObserverID = nil
+        interactionObservation?.cancel()
+        interactionObservation = nil
     }
 
     private func handleInteractionEvent(_ event: HistoryListInteractionCoordinator.Event) {

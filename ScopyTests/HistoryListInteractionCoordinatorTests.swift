@@ -8,7 +8,7 @@ final class HistoryListInteractionCoordinatorTests: XCTestCase {
         let coordinator = HistoryListInteractionCoordinator()
         var events: [HistoryListInteractionCoordinator.Event] = []
 
-        let token = coordinator.registerObserver { events.append($0) }
+        let observation = coordinator.observe { events.append($0) }
 
         XCTAssertFalse(coordinator.isScrolling)
         XCTAssertFalse(coordinator.isHoverPreviewSuppressed)
@@ -28,14 +28,14 @@ final class HistoryListInteractionCoordinatorTests: XCTestCase {
         try await Task.sleep(nanoseconds: 300_000_000)
         XCTAssertFalse(coordinator.isHoverPreviewSuppressed)
 
-        coordinator.unregisterObserver(token)
+        observation.cancel()
     }
 
     func testPointerInteractionSuppressesPreviewWithoutChangingScrollState() {
         let coordinator = HistoryListInteractionCoordinator()
         var events: [HistoryListInteractionCoordinator.Event] = []
 
-        let token = coordinator.registerObserver { events.append($0) }
+        let observation = coordinator.observe { events.append($0) }
 
         coordinator.beginPointerInteraction()
 
@@ -50,15 +50,28 @@ final class HistoryListInteractionCoordinatorTests: XCTestCase {
         XCTAssertFalse(coordinator.isHoverPreviewSuppressed)
         XCTAssertEqual(events, [.pointerInteractionStarted, .pointerInteractionEnded])
 
-        coordinator.unregisterObserver(token)
+        observation.cancel()
     }
 
-    func testUnregisterObserverStopsFurtherCallbacks() {
+    func testCancelledObservationStopsFurtherCallbacks() {
         let coordinator = HistoryListInteractionCoordinator()
         var events: [HistoryListInteractionCoordinator.Event] = []
 
-        let token = coordinator.registerObserver { events.append($0) }
-        coordinator.unregisterObserver(token)
+        let observation = coordinator.observe { events.append($0) }
+        observation.cancel()
+
+        coordinator.beginScrolling()
+        coordinator.endScrolling()
+
+        XCTAssertTrue(events.isEmpty)
+    }
+
+    func testObservationDeinitStopsFurtherCallbacks() {
+        let coordinator = HistoryListInteractionCoordinator()
+        var events: [HistoryListInteractionCoordinator.Event] = []
+        var observation: HistoryListInteractionObservation? = coordinator.observe { events.append($0) }
+
+        observation = nil
 
         coordinator.beginScrolling()
         coordinator.endScrolling()

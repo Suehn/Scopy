@@ -25,14 +25,12 @@ final class HistoryListInteractionCoordinator {
         return elapsed < Self.hoverPreviewCooldownAfterScrollSeconds
     }
 
-    func registerObserver(_ observer: @escaping (Event) -> Void) -> UUID {
+    func observe(_ observer: @escaping (Event) -> Void) -> HistoryListInteractionObservation {
         let id = UUID()
         observers[id] = observer
-        return id
-    }
-
-    func unregisterObserver(_ id: UUID) {
-        observers.removeValue(forKey: id)
+        return HistoryListInteractionObservation { [weak self] in
+            self?.observers.removeValue(forKey: id)
+        }
     }
 
     func beginScrolling() {

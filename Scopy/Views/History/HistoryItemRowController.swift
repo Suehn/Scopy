@@ -27,7 +27,7 @@ final class HistoryItemRowController: ObservableObject {
     var optimizeMessageTask: Task<Void, Never>?
     var exportActionTask: Task<Void, Never>?
     var exportMessageTask: Task<Void, Never>?
-    var interactionObserverID: UUID?
+    var interactionObservation: HistoryListInteractionObservation?
 
     init(relativeTimeText: String) {
         self.relativeTimeText = relativeTimeText
