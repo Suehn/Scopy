@@ -275,6 +275,7 @@
 		86DD62086FF07DFB117F798B /* KaTeX_Math-Italic.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 1ADABCABCFD7B7E85F0224D3 /* KaTeX_Math-Italic.ttf */; };
 		873A9F6DEDF8C403C50A8BF2 /* KaTeX_Script-Regular.woff in Resources */ = {isa = PBXBuildFile; fileRef = 024FB47EE00106753C4DB412 /* KaTeX_Script-Regular.woff */; };
 		877A7C4CCD68E76263B6AF19 /* KaTeX_SansSerif-Italic.ttf in Resources */ = {isa = PBXBuildFile; fileRef = CD07D7CE6BE8E39A3AF4651C /* KaTeX_SansSerif-Italic.ttf */; };
+		88F77496CFB21A88BF0D8745 /* AppStateTestCompatibility.swift in Sources */ = {isa = PBXBuildFile; fileRef = C9D55BDCEE3B396CBE2DC623 /* AppStateTestCompatibility.swift */; };
 		8936CEA202269770DD286AC6 /* ShortcutsSettingsPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 961091813A2F9C555BE37BAC /* ShortcutsSettingsPage.swift */; };
 		8984797938585C8B53402D75 /* auto-render.min.js in Resources */ = {isa = PBXBuildFile; fileRef = 274EF0F321B1BFD12ABE670A /* auto-render.min.js */; };
 		89C6F6585F448AF4EAD81976 /* KaTeX_Script-Regular.woff in Resources */ = {isa = PBXBuildFile; fileRef = 024FB47EE00106753C4DB412 /* KaTeX_Script-Regular.woff */; };
@@ -388,6 +389,7 @@
 		BEBA85D7936053124B5A6265 /* KaTeX_Math-Italic.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 1ADABCABCFD7B7E85F0224D3 /* KaTeX_Math-Italic.ttf */; };
 		BF54B8E26A16E46E840CAE76 /* main.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A2BAEF33A56AB9DC5808252 /* main.swift */; };
 		BF5E207263E1819780AFE98E /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61DF2BC8CEEFB6DBC2A87609 /* AppState.swift */; };
+		C04B9C8ED256D30C0771F3E8 /* AppStateTestCompatibility.swift in Sources */ = {isa = PBXBuildFile; fileRef = C9D55BDCEE3B396CBE2DC623 /* AppStateTestCompatibility.swift */; };
 		C0A42F770AF369F8D51E5C49 /* KaTeX_Math-Italic.woff2 in Resources */ = {isa = PBXBuildFile; fileRef = ECF9CB366C11BAFE2E261C4D /* KaTeX_Math-Italic.woff2 */; };
 		C0A51AA7E4BEC084FC3D231D /* ResourceCleanupTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E89CCE301327084364FDFDE1 /* ResourceCleanupTests.swift */; };
 		C0E12FF2817EA6ED14ACC3A2 /* KaTeX_Caligraphic-Regular.woff in Resources */ = {isa = PBXBuildFile; fileRef = D44765DCFEC088D84D51037F /* KaTeX_Caligraphic-Regular.woff */; };
@@ -672,6 +674,7 @@
 		C8E1D7C3153B156AF59F4FBD /* AppStateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppStateTests.swift; sourceTree = "<group>"; };
 		C977DE6F35EC7F84B1462BF9 /* SettingsPageHeader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsPageHeader.swift; sourceTree = "<group>"; };
 		C9A8BEDDFDEC9F506889D126 /* PerfFeatureFlags.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PerfFeatureFlags.swift; sourceTree = "<group>"; };
+		C9D55BDCEE3B396CBE2DC623 /* AppStateTestCompatibility.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppStateTestCompatibility.swift; sourceTree = "<group>"; };
 		CBE2D342D5B027E53089C35D /* KaTeX_Script-Regular.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "KaTeX_Script-Regular.ttf"; sourceTree = "<group>"; };
 		CD07D7CE6BE8E39A3AF4651C /* KaTeX_SansSerif-Italic.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "KaTeX_SansSerif-Italic.ttf"; sourceTree = "<group>"; };
 		CD4A5EB48C1E9F4E3F3926CC /* KaTeX_Main-Bold.woff2 */ = {isa = PBXFileReference; path = "KaTeX_Main-Bold.woff2"; sourceTree = "<group>"; };
@@ -963,6 +966,7 @@
 		A77C60BDFBB9197578D12D5C /* ScopyTests */ = {
 			isa = PBXGroup;
 			children = (
+				C9D55BDCEE3B396CBE2DC623 /* AppStateTestCompatibility.swift */,
 				C8E1D7C3153B156AF59F4FBD /* AppStateTests.swift */,
 				B48DDD4A33C8F8F615B17CA0 /* ClipboardItemDisplayTextTests.swift */,
 				F940F6182C4E298B3511A044 /* ClipboardMonitorTests.swift */,
@@ -1644,6 +1648,7 @@
 				E5270518B011F1F6F8D7F407 /* AboutSettingsPage.swift in Sources */,
 				9661BC22D241C00A9FB7E9D0 /* AppDelegate.swift in Sources */,
 				04D00AA12169910C80C28CF9 /* AppState.swift in Sources */,
+				C04B9C8ED256D30C0771F3E8 /* AppStateTestCompatibility.swift in Sources */,
 				05C95008A01E020F43D3988B /* AppStateTests.swift in Sources */,
 				D4C231881F5CF33E0C69832A /* AppVersion.swift in Sources */,
 				058BFCE0B478C3A010F211C5 /* AppearanceSettingsPage.swift in Sources */,
@@ -1768,6 +1773,7 @@
 				07BD6F621DB2BF7FA767FEFE /* AboutSettingsPage.swift in Sources */,
 				1A2F33F96B65B19147B7E6DA /* AppDelegate.swift in Sources */,
 				BF5E207263E1819780AFE98E /* AppState.swift in Sources */,
+				88F77496CFB21A88BF0D8745 /* AppStateTestCompatibility.swift in Sources */,
 				F57DEF5DFEC07FE9586910EA /* AppStateTests.swift in Sources */,
 				7166E945AC8A16163CC7B924 /* AppVersion.swift in Sources */,
 				9746B0E3394739E5BF814BA8 /* AppearanceSettingsPage.swift in Sources */,
