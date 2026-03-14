@@ -62,8 +62,6 @@ struct HeaderView: View {
                     .lineLimit(2)
                     .fixedSize(horizontal: false, vertical: true)
             }
-
-            SearchStatusRow(chips: historyViewModel.searchStatusChips)
         }
         .padding(ScopySpacing.md)
         .background(ScopyColors.cardBackground)
@@ -72,27 +70,6 @@ struct HeaderView: View {
             RoundedRectangle(cornerRadius: ScopySize.Corner.xl, style: .continuous)
                 .stroke(ScopyColors.border.opacity(ScopySize.Opacity.medium), lineWidth: ScopySize.Stroke.thin)
         )
-    }
-}
-
-private struct SearchStatusRow: View {
-    let chips: [String]
-
-    var body: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: ScopySpacing.xs) {
-                ForEach(chips, id: \.self) { chip in
-                    Text(chip)
-                        .font(ScopyTypography.microMono)
-                        .foregroundStyle(ScopyColors.tertiaryText)
-                        .padding(.horizontal, ScopySpacing.sm)
-                        .padding(.vertical, ScopySpacing.xxs)
-                        .background(ScopyColors.secondaryBackground)
-                        .clipShape(Capsule())
-                }
-            }
-        }
-        .accessibilityIdentifier("History.SearchStatus")
     }
 }
 
@@ -117,12 +94,21 @@ private struct SearchModeMenu: View {
                 }
             }
         } label: {
-            Image(systemName: modeIcon(historyViewModel.searchMode))
-                .font(.system(size: ScopySize.Icon.filter))
-                .foregroundStyle(ScopyColors.mutedText)
+            HStack(spacing: ScopySpacing.xxs) {
+                Image(systemName: modeIcon(historyViewModel.searchMode))
+                    .font(.system(size: ScopySize.Icon.filter))
+                Text(historyViewModel.primarySearchStatusLabel)
+                    .font(ScopyTypography.microMono)
+                    .lineLimit(1)
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 9, weight: .semibold))
+            }
+            .foregroundStyle(ScopyColors.mutedText)
         }
         .menuStyle(.borderlessButton)
-        .help(currentModeHelpText)
+        .accessibilityIdentifier("History.SearchStatusMenu")
+        .accessibilityLabel(historyViewModel.searchStatusSummary)
+        .help(historyViewModel.searchStatusSummary)
     }
 
     private let orderedModes: [SearchMode] = [.fuzzyPlus, .fuzzy, .exact, .regex]
@@ -145,18 +131,6 @@ private struct SearchModeMenu: View {
         }
     }
 
-    private var currentModeHelpText: String {
-        switch historyViewModel.searchMode {
-        case .fuzzyPlus:
-            return "Search mode: Fuzzy+ (recommended full-history path)"
-        case .fuzzy:
-            return "Search mode: Fuzzy"
-        case .exact:
-            return "Search mode: Exact"
-        case .regex:
-            return "Search mode: Regex (recent 2000 only)"
-        }
-    }
 }
 
 // MARK: - FTS Sort Toggle

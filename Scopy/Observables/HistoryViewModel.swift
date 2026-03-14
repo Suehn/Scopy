@@ -125,22 +125,36 @@ final class HistoryViewModel {
         }
     }
 
-    var searchStatusChips: [String] {
+    var primarySearchStatusLabel: String {
         let trimmed = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
-        var chips = ["Mode: \(searchModeDisplayName(searchMode))"]
-        guard !trimmed.isEmpty else { return chips }
+        guard !trimmed.isEmpty else { return searchModeDisplayName(searchMode) }
 
         switch effectiveSearchCoverage(for: trimmed) {
         case .complete:
-            chips.append("Coverage: Complete")
+            return searchModeDisplayName(searchMode)
         case .stagedRefine:
-            chips.append("Coverage: Staged")
+            return "Calibrating"
         case .recentOnly(let limit):
-            chips.append("Coverage: Recent \(limit)")
+            return "Recent \(limit)"
+        }
+    }
+
+    var searchStatusSummary: String {
+        let trimmed = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        let mode = searchModeDisplayName(searchMode)
+        guard !trimmed.isEmpty else { return "Mode: \(mode)" }
+
+        let coverage: String
+        switch effectiveSearchCoverage(for: trimmed) {
+        case .complete:
+            coverage = "Complete"
+        case .stagedRefine:
+            coverage = "Staged"
+        case .recentOnly(let limit):
+            coverage = "Recent \(limit)"
         }
 
-        chips.append("Sort: \(searchSortDisplayName(for: trimmed))")
-        return chips
+        return "Mode: \(mode) · Coverage: \(coverage) · Sort: \(searchSortDisplayName(for: trimmed))"
     }
 
     @ObservationIgnored private var searchTask: Task<Void, Never>?

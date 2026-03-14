@@ -681,7 +681,7 @@ final class SearchHintTests: XCTestCase {
         XCTAssertTrue(hint?.contains("全量校准") ?? false)
     }
 
-    func testRegexSearchStatusChipsShowModeCoverageAndSort() {
+    func testRegexPrimarySearchStatusLabelShowsRecentOnlyLimit() {
         let service = StubClipboardService()
         let settings = SettingsViewModel(service: service)
         let viewModel = HistoryViewModel(service: service, settingsViewModel: settings)
@@ -689,13 +689,11 @@ final class SearchHintTests: XCTestCase {
         viewModel.searchMode = .regex
         viewModel.searchQuery = "Item \\\\d+"
 
-        XCTAssertEqual(
-            viewModel.searchStatusChips,
-            ["Mode: Regex", "Coverage: Recent 2000", "Sort: Recent"]
-        )
+        XCTAssertEqual(viewModel.primarySearchStatusLabel, "Recent 2000")
+        XCTAssertEqual(viewModel.searchStatusSummary, "Mode: Regex · Coverage: Recent 2000 · Sort: Recent")
     }
 
-    func testFuzzyStagedSearchStatusChipsShowModeCoverageAndSort() {
+    func testFuzzyStagedPrimarySearchStatusLabelShowsCalibrating() {
         let service = StubClipboardService()
         let settings = SettingsViewModel(service: service)
         let viewModel = HistoryViewModel(service: service, settingsViewModel: settings)
@@ -705,10 +703,22 @@ final class SearchHintTests: XCTestCase {
         viewModel.searchCoverage = .stagedRefine
         viewModel.ftsSortMode = .relevance
 
-        XCTAssertEqual(
-            viewModel.searchStatusChips,
-            ["Mode: Fuzzy+", "Coverage: Staged", "Sort: Relevance"]
-        )
+        XCTAssertEqual(viewModel.primarySearchStatusLabel, "Calibrating")
+        XCTAssertEqual(viewModel.searchStatusSummary, "Mode: Fuzzy+ · Coverage: Staged · Sort: Relevance")
+    }
+
+    func testCompleteSearchPrimaryStatusFallsBackToModeLabel() {
+        let service = StubClipboardService()
+        let settings = SettingsViewModel(service: service)
+        let viewModel = HistoryViewModel(service: service, settingsViewModel: settings)
+
+        viewModel.searchMode = .fuzzyPlus
+        viewModel.searchQuery = "command"
+        viewModel.searchCoverage = .complete
+        viewModel.ftsSortMode = .relevance
+
+        XCTAssertEqual(viewModel.primarySearchStatusLabel, "Fuzzy+")
+        XCTAssertEqual(viewModel.searchStatusSummary, "Mode: Fuzzy+ · Coverage: Complete · Sort: Relevance")
     }
 
     func testApplySettingsUpdatesFollowingSessionSearchMode() {
