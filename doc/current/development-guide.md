@@ -75,6 +75,7 @@ Implication: clipboard semantics, dedup, cleanup triggering, and safe file handl
 3. `SearchEngineImpl` executes mode-specific behavior for `exact`, `fuzzy`, `fuzzyPlus`, and `regex`.
 4. UI updates are event-driven; the list should not depend on ad hoc full reloads for ordinary mutations.
 5. Search results expose `SearchCoverage` so UI can distinguish complete results, staged fuzzy refinement, and intentional recent-only limits.
+6. Production search paths should construct `SearchCoverage` directly; `isPrefilter` remains a compatibility shim for legacy and test callers only.
 
 Implication: changes to search semantics belong in the request model, search engine, and user-visible docs together.
 
@@ -87,6 +88,14 @@ Implication: changes to search semantics belong in the request model, search eng
 5. pngquant settings affect both image history optimization and Markdown/LaTeX export compression where enabled.
 
 Implication: preview/export work must remain background-safe and should not mutate unrelated persisted content.
+
+### 4.5 List Interaction Coordination
+
+1. `HistoryListView` owns `HistoryListInteractionCoordinator` and passes it into rows / observers as list-scoped state.
+2. Row lifecycle should hold observation tokens, not raw UUID registrations, so observer cleanup is ownership-driven.
+3. Scroll and pointer suppression should stay list-local; do not reintroduce process-global hover/scroll coordination state.
+
+Implication: SwiftUI row rendering should remain decoupled from global singleton churn during fast scroll and preview suppression.
 
 ### 5. Settings And Hotkey Flow
 

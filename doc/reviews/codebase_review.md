@@ -4,7 +4,7 @@
 > 审查日期: 2026-03-15
 > 审查维度: 架构质量、性能、稳定性、功能体验一致性
 > 审查方式: 本地源码深读 + 多轮 subagent 交叉审查 + 当前工作区构建、测试、性能实跑
-> 代码规模: 核心超大文件 7 个，共 14550 行 Swift
+> 代码规模: 热点仍集中在 SearchEngineImpl、HistoryItemView、AppState 等大文件
 
 ---
 
@@ -15,11 +15,11 @@
 | 项目 | 结果 | 备注 |
 |---|---|---|
 | make build | BUILD SUCCEEDED | 当前工作区可构建 |
-| make test-unit | 318 tests, 1 skipped, 0 failures | 单测基线通过 |
-| make test-strict | 318 tests, 1 skipped, 0 failures | 严格并发回归通过 |
+| make test-unit | 335 tests, 1 skipped, 0 failures | 单测基线通过 |
+| make test-strict | 335 tests, 1 skipped, 0 failures | 严格并发回归通过 |
 | make test-tsan | ScopyTestHost bootstrap early exit, Error 65 | 仍按 test-path / 环境边界处理，不作为本轮代码回归证据 |
-| make test-snapshot-perf-release | 通过 | 当前 snapshot release gate: cmd p95 = 0.123ms, cm p95 = 5.160ms |
-| make perf-frontend-profile-standard | 通过 | 产物: logs/perf-frontend-profile-2026-03-15_03-17-56 |
+| make test-snapshot-perf-release | 通过 | 当前 snapshot release gate: cmd p95 = 0.365ms, cm p95 = 7.155ms |
+| make perf-frontend-profile-standard | 通过 | 产物: logs/perf-frontend-profile-2026-03-15_06-29-50 |
 
 ### 结论边界
 
@@ -33,11 +33,11 @@
 
 ### 当前最高优先级问题
 
-1. AppState 仍保留一层 compatibility façade，lifecycle coordinator 和业务状态边界还没有完全收口。
-2. SearchEngineImpl 与 HistoryItemView 仍然偏大，当前 helper/coordinator 抽取只完成了第一刀。
-3. warm-load full-index latency、peak RSS、row-level invalidation 还没有形成长期量化基线。
-4. HistoryItemView 的直接行为测试 / snapshot test 仍然缺位，复杂交互主要靠集成和 UI smoke 兜底。
-5. Export PNG 的发现性仍然偏低，一级入口和成功/失败反馈还可以继续收口。
+1. SearchEngineImpl 与 HistoryItemView 仍然偏大，当前 helper/coordinator 抽取还没有到稳定职责边界。
+2. warm-load full-index latency、peak RSS、row-level invalidation 还没有形成长期量化基线。
+3. AppState 的 production façade 已移出 app target，但 shared coordinator 和依赖注入边界还没有完全收紧。
+4. Preview/AppKit bridge 的 strict-concurrency 与生命周期收口还没有结束，风险主要集中在 QuickLook / AVPlayer 路径。
+5. HistoryItemView 已有 controller 级直接测试，但 view-layer snapshot / accessibility 回归仍然偏弱。
 
 ### 不应排在最前面的事
 
@@ -88,8 +88,12 @@
 [SearchCoverage.swift](/Users/ziyi/Documents/code/Scopy/Scopy/Domain/Models/SearchCoverage.swift#L3)
 [HistoryViewModel.swift](/Users/ziyi/Documents/code/Scopy/Scopy/Observables/HistoryViewModel.swift#L103)
 [HistoryViewModel.swift](/Users/ziyi/Documents/code/Scopy/Scopy/Observables/HistoryViewModel.swift#L128)
+[SearchEngineImpl.swift](/Users/ziyi/Documents/code/Scopy/Scopy/Infrastructure/Search/SearchEngineImpl.swift#L59)
+[SearchEngineImpl.swift](/Users/ziyi/Documents/code/Scopy/Scopy/Infrastructure/Search/SearchEngineImpl.swift#L2141)
+[SearchEngineImpl.swift](/Users/ziyi/Documents/code/Scopy/Scopy/Infrastructure/Search/SearchEngineImpl.swift#L2404)
+[SearchEngineImpl.swift](/Users/ziyi/Documents/code/Scopy/Scopy/Infrastructure/Search/SearchEngineImpl.swift#L3357)
 
-原始模型问题已经关闭；后续要继续盯的是 coverage 与分页、排序、性能证据是否持续一致。
+原始模型问题已经关闭；生产路径现在直接构造 `coverage`，`isPrefilter` 只剩兼容 shim。后续要继续盯的是 coverage 与分页、排序、性能证据是否持续一致。
 
 ### P1.3 已完成: Header Search Mode 不再直接持久化默认值
 
@@ -149,7 +153,7 @@ warm load 时不是简单映射文件，而是：
 
 这里的主风险不只是 steady-state RSS，而是全文字符串集合同时存在于运行时对象和 disk cache，warm-load 成本仍随体积线性增长。
 
-### P1.6 HistoryItemView 已经演化成行级状态机
+### P1.6 HistoryItemView 仍然是偏重的行级状态机，但已开始结构收口
 
 HistoryItemView 不只是 row view，而是同时管理：
 
@@ -160,23 +164,24 @@ HistoryItemView 不只是 row view，而是同时管理：
 - 多套 popover token 与 cleanup 逻辑
   [HistoryItemView.swift](/Users/ziyi/Documents/code/Scopy/Scopy/Views/History/HistoryItemView.swift#L601)
 
-当前唯一比较贴近真实交互的 UI 覆盖是 preview on scroll dismiss：
-[HistoryListUITests.swift](/Users/ziyi/Documents/code/Scopy/ScopyUITests/HistoryListUITests.swift#L257)
+当前直接覆盖已经包含 row controller 行为测试、list interaction coordinator 直接测试，以及 preview on scroll dismiss UI smoke：
+[HistoryItemRowControllerTests.swift](/Users/ziyi/Documents/code/Scopy/ScopyTests/HistoryItemRowControllerTests.swift#L6) [HistoryListInteractionCoordinatorTests.swift](/Users/ziyi/Documents/code/Scopy/ScopyTests/HistoryListInteractionCoordinatorTests.swift#L6) [HistoryListUITests.swift](/Users/ziyi/Documents/code/Scopy/ScopyUITests/HistoryListUITests.swift#L257)
+所以这块的主要风险不再是还没做 Equatable，而是 row-level state machine 仍然过重，view-layer snapshot / accessibility 回归也还不够直接。
 
-所以这块的主要风险不再是还没做 Equatable，而是 row-level state machine 过重。
+### P1.7 已完成: 导出功能已经提升到一级动作，但反馈体系仍可继续统一
 
-### P1.7 导出功能发现性低仍然成立，而且比上一版写得更严重
-
-当前 row context menu 没有 export：
+当前 row context menu 已经暴露 export：
 [HistoryItemView.swift](/Users/ziyi/Documents/code/Scopy/Scopy/Views/History/HistoryItemView.swift#L764)
 
-真正的 export 按钮藏在 hover preview 内部：
+preview 内的 export 按钮继续保留，承担更细的预览态导出入口：
 [HistoryItemTextPreviewView.swift](/Users/ziyi/Documents/code/Scopy/Scopy/Views/History/HistoryItemTextPreviewView.swift#L150)
 
-失败反馈主要依赖 help text：
+row controller 现在也直接管理导出中的状态和反馈：
+[HistoryItemRowControllerTests.swift](/Users/ziyi/Documents/code/Scopy/ScopyTests/HistoryItemRowControllerTests.swift#L7)
+反馈仍偏局部，主要是 row-local transient message，而不是统一的全局反馈体系：
 [HistoryItemTextPreviewView.swift](/Users/ziyi/Documents/code/Scopy/Scopy/Views/History/HistoryItemTextPreviewView.swift#L330)
 
-这意味着普通用户若不知道先 hover 再点 preview 内按钮，基本发现不了这个能力。
+原始“发现不了 export”的问题已经关闭；后续如果继续优化，重点应该放在跨入口反馈一致性，而不是再找入口本身。
 
 ---
 
@@ -185,9 +190,9 @@ HistoryItemView 不只是 row view，而是同时管理：
 ### 4.1 仍然成立的判断
 
 - SearchEngineImpl 仍然过大且职责过多，但 fuzzy 主路径已经开始 helper 化
-- AppState 兼容 façade 仍然存在且边界不清
-- HistoryItemView 仍过于复杂
-- Preview 状态机虽然稳定了，但还没有完全从 row view 中抽离
+- AppState 的 production façade 已迁到 test-only shim，shared coordinator 仍然偏重
+- HistoryItemView 仍过于复杂，但行级 controller、export action 和部分 preview loader 已抽离
+- Preview 状态机虽然稳定了，但还没有完全从 row view / AppKit bridge 中抽离
 
 ### 4.2 已经过时或需要降级的判断
 
@@ -210,10 +215,10 @@ HistoryItemView 不只是 row view，而是同时管理：
 
 | 模式 | 当前覆盖范围 | 是否最终收敛 | 分页语义 | 排序语义 | 评语 |
 |---|---|---|---|---|---|
-| Exact <= 2 | 最近 2000 条 | 否 | 仅对 capped subset 分页 | 排序禁用 | 与契约冲突 |
+| Exact <= 2 | 最近 2000 条 | 否 | 仅对 capped subset 分页 | 排序禁用 | 符合当前产品契约 |
 | Exact >= 3 | 全量 FTS / substring path | 是 | 完整分页 | recent / relevance 可用 | 基本符合契约 |
-| Regex | 最近 2000 条 | 否 | 仅对 capped subset 分页 | 排序禁用 | 与契约冲突 |
-| Fuzzy / Fuzzy+ | 首屏可 prefilter | 是 | loadMore 会强制 full fuzzy 再扩展 | recent / relevance 可用 | staged 但可收敛 |
+| Regex | 最近 2000 条 | 否 | 仅对 capped subset 分页 | 排序禁用 | 符合当前产品契约 |
+| Fuzzy / Fuzzy+ | 首屏可 prefilter | 是 | loadMore 会强制 full fuzzy 再扩展 | recent / relevance 可用 | staged 且可收敛 |
 
 ---
 
@@ -225,6 +230,9 @@ HistoryItemView 不只是 row view，而是同时管理：
   - [FullIndexDiskCacheHardeningTests.swift](/Users/ziyi/Documents/code/Scopy/ScopyTests/FullIndexDiskCacheHardeningTests.swift)
   - [ShortQueryIndexDiskCacheHardeningTests.swift](/Users/ziyi/Documents/code/Scopy/ScopyTests/ShortQueryIndexDiskCacheHardeningTests.swift)
   - [FullIndexTombstoneUpsertStaleTests.swift](/Users/ziyi/Documents/code/Scopy/ScopyTests/FullIndexTombstoneUpsertStaleTests.swift)
+- Row / interaction coordination:
+  - [HistoryItemRowControllerTests.swift](/Users/ziyi/Documents/code/Scopy/ScopyTests/HistoryItemRowControllerTests.swift)
+  - [HistoryListInteractionCoordinatorTests.swift](/Users/ziyi/Documents/code/Scopy/ScopyTests/HistoryListInteractionCoordinatorTests.swift)
 - Clipboard priority rules:
   - [ClipboardMonitorTests.swift](/Users/ziyi/Documents/code/Scopy/ScopyTests/ClipboardMonitorTests.swift#L456)
   - [ClipboardMonitorTests.swift](/Users/ziyi/Documents/code/Scopy/ScopyTests/ClipboardMonitorTests.swift#L717)
@@ -241,7 +249,7 @@ HistoryItemView 不只是 row view，而是同时管理：
 
 ### 6.2 当前真正缺的测试
 
-1. HistoryItemView 的直接行为测试 / snapshot test
+1. HistoryItemView 的 view-layer snapshot / accessibility semantics 回归
 2. Search warm-load / peak RSS 指标测试
 3. 真实前端 profile 与 row-level invalidation 的长期基线比较
 
@@ -252,7 +260,7 @@ HistoryItemView 不只是 row view，而是同时管理：
 ### 7.1 仍然保留
 
 - SearchEngineImpl 超大文件问题
-- AppState 兼容层 / 全局 shared 问题
+- AppState shared coordinator 边界问题（production façade 已迁到 test-only shim）
 - HistoryItemView 复杂度问题
 - 搜索模式覆盖不一致，但当前已经改成显式契约
 
@@ -273,6 +281,7 @@ HistoryItemView 不只是 row view，而是同时管理：
 - Header Search Mode 直接持久化默认值已修复为 session-only
 - ClipboardMonitor silent drop / overflow / interval-change side effects 已经收敛到 durable replay + diagnostics
 - 搜索完成度模型已升级为 SearchCoverage，并完成 UI 契约表达
+- row 主动作按钮语义、排序切换辅助功能，以及 list-scope interaction coordinator 已完成第一轮收口
 - warm-load / multi-copy cache cost 仍然是 P1 性能与架构边界问题
 
 ---
@@ -297,11 +306,11 @@ HistoryItemView 不只是 row view，而是同时管理：
 3. 已完成：Clipboard silent drop / overflow / interval-change 测试
 4. 已完成：Settings 事务与 hotkey 双轨测试
 5. 已完成：startup failure 不展示 synthetic history 的测试
-6. 未完成：HistoryItemView 行为测试 / snapshot test
+6. 部分完成：HistoryItemRowController / list interaction coordinator 单测已补齐；仍缺 HistoryItemView view-layer snapshot / accessibility 回归
 
 ### Phase 3: 再做结构收敛
 
-1. 部分完成：缩小 AppState，让它回到 lifecycle / event coordinator
+1. 部分完成：缩小 AppState，让它回到 lifecycle / event coordinator；production façade 已迁到 test-only shim
 2. 部分完成：重构 SearchEngineImpl，但顺序在契约之后:
    - QueryPlanner
    - CoverageModel
@@ -310,7 +319,7 @@ HistoryItemView 不只是 row view，而是同时管理：
    - FTS / Substring fallback
    - SearchBenchmarks
 3. 部分完成：把 Preview / Export 从 View 结构中拆出来
-4. 未完成：拆 HistoryItemView 行级状态机
+4. 部分完成：拆 HistoryItemView 行级状态机
 
 ### Phase 4: 性能与体验优化
 
@@ -318,18 +327,18 @@ HistoryItemView 不只是 row view，而是同时管理：
 2. full-index build/load 后 peak RSS 指标
 3. full-index / disk-cache schema compaction
 4. memory-pressure / idle-based full-index eviction
-5. Search mode / coverage / sort 的显式联动 UI
-6. Export PNG 一级入口与更直接的成功 / 失败反馈
+5. 已完成：Search mode / coverage 的显式联动 UI；sort 保持 icon-only 呈现并补齐 accessibility 语义
+6. 已完成：Export PNG 一级入口与 row-local 成功 / 失败反馈
 7. Empty state 的 onboarding / hotkey / clear-filters CTA
 
 ---
 
 ## 9. 总结
 
-Scopy 这一轮已经先把产品信任和契约问题收掉了，当前剩下的优先级开始转向结构收敛与证据补齐：
+Scopy 这一轮已经先把产品信任、搜索契约、滚动交互回归和基础可访问性问题收掉了，当前剩下的优先级开始转向结构收敛与证据补齐：
 
-1. 继续压缩 AppState compatibility façade，让 lifecycle 与业务状态彻底解耦。
+1. 继续压缩 AppState shared coordinator 依赖，让 lifecycle 与业务状态彻底解耦。
 2. 继续拆 SearchEngineImpl 和 HistoryItemView，把“大文件”问题变成真实的职责边界，而不是只换目录。
-3. 补齐 HistoryItemView 的直接行为测试 / snapshot test，再把剩余 preview/export 副作用迁出 row view。
+3. 补齐 HistoryItemView 的 view-layer snapshot / accessibility 回归，再把剩余 preview/export 副作用迁出 row view / AppKit bridge。
 
 下一版审查和实施计划，应该从“契约正确、失败诚实”转到“结构边界可维护、测试证据持续可回归”，而不是只做表层 UI 或机械拆文件。
