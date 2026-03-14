@@ -74,6 +74,7 @@ Implication: clipboard semantics, dedup, cleanup triggering, and safe file handl
 2. `HistoryViewModel.search()` builds a `SearchRequest` and calls `search(query:)`.
 3. `SearchEngineImpl` executes mode-specific behavior for `exact`, `fuzzy`, `fuzzyPlus`, and `regex`.
 4. UI updates are event-driven; the list should not depend on ad hoc full reloads for ordinary mutations.
+5. Search results expose `SearchCoverage` so UI can distinguish complete results, staged fuzzy refinement, and intentional recent-only limits.
 
 Implication: changes to search semantics belong in the request model, search engine, and user-visible docs together.
 
@@ -155,6 +156,7 @@ Implication: if you touch settings behavior, preserve the Save/Cancel model and 
 ### Search Behavior
 
 - Touch `SearchRequest`, `SearchMode`, and search engine code together.
+- Re-check `SearchCoverage`, refine behavior, and any recent-only hint paths together.
 - Re-check header controls, search hints, pagination, and requirements docs.
 - Run search-focused performance validation, not only unit tests.
 

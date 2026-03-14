@@ -45,6 +45,22 @@ final class SearchServiceTests: XCTestCase {
         XCTAssertTrue(result.items.contains { $0.plainText.localizedCaseInsensitiveContains("Hello") })
         XCTAssertTrue(result.items.contains { $0.plainText.localizedCaseInsensitiveContains("World") })
         XCTAssertTrue(result.items.contains { $0.plainText.localizedCaseInsensitiveContains("Hello there World") })
+        XCTAssertEqual(result.coverage, .complete)
+    }
+
+    func testExactShortQueryUsesRecentOnlyCoverage() async throws {
+        let target = try await storage.upsertItem(makeContent("ab_target_oldest"))
+        for i in 0..<2001 {
+            _ = try await storage.upsertItem(makeContent("Item \(i)"))
+        }
+        await search.invalidateCache()
+
+        let result = try await search.search(
+            request: SearchRequest(query: "ab", mode: .exact, limit: 50, offset: 0)
+        )
+
+        XCTAssertFalse(result.items.contains(where: { $0.id == target.id }))
+        XCTAssertEqual(result.coverage, .recentOnly(limit: 2000))
     }
 
     func testFuzzySearch() async throws {
@@ -97,6 +113,7 @@ final class SearchServiceTests: XCTestCase {
             let range = NSRange(item.plainText.startIndex..., in: item.plainText)
             XCTAssertNotNil(regex.firstMatch(in: item.plainText, range: range))
         }
+        XCTAssertEqual(result.coverage, .recentOnly(limit: 2000))
     }
 
     func testSearchWithNoResults() async throws {
@@ -374,7 +391,7 @@ final class SearchServiceTests: XCTestCase {
         let result = try await search.search(
             request: SearchRequest(query: "zz", mode: .fuzzyPlus, sortMode: .relevance, limit: 50, offset: 0)
         )
-        XCTAssertFalse(result.isPrefilter)
+        XCTAssertEqual(result.coverage, .complete)
     }
 
     // MARK: - CJK / Substring Fallback
@@ -388,7 +405,7 @@ final class SearchServiceTests: XCTestCase {
         )
         XCTAssertEqual(result.items.count, 1)
         XCTAssertTrue(result.items[0].plainText.contains("逐字稿"))
-        XCTAssertFalse(result.isPrefilter)
+        XCTAssertEqual(result.coverage, .complete)
     }
 
     func testFuzzyPlusFindsOldCJKItemBeyondRecentCacheWhenFTSMisses() async throws {
@@ -408,7 +425,7 @@ final class SearchServiceTests: XCTestCase {
         )
 
         XCTAssertTrue(result.items.contains(where: { $0.id == target.id }))
-        XCTAssertTrue(result.isPrefilter)
+        XCTAssertEqual(result.coverage, .stagedRefine)
     }
 
     func testFuzzyPlusSkipsFullIndexWhenSubstringOnlyQueryHasNoMatches() async throws {
@@ -428,6 +445,7 @@ final class SearchServiceTests: XCTestCase {
         )
 
         XCTAssertEqual(result.items.count, 0)
+        XCTAssertEqual(result.coverage, .complete)
         XCTAssertFalse(result.isPrefilter)
 
 #if DEBUG
@@ -776,13 +794,13 @@ final class SearchServiceTests: XCTestCase {
 
         let result = try await search.search(request: SearchRequest(query: "zz", mode: .fuzzy, limit: 50, offset: 0))
         XCTAssertTrue(result.items.contains(where: { $0.id == target.id }))
-        XCTAssertFalse(result.isPrefilter)
+        XCTAssertEqual(result.coverage, .complete)
 
         let forced = try await search.search(
             request: SearchRequest(query: "zz", mode: .fuzzy, forceFullFuzzy: true, limit: 50, offset: 0)
         )
         XCTAssertTrue(forced.items.contains(where: { $0.id == target.id }))
-        XCTAssertFalse(forced.isPrefilter)
+        XCTAssertEqual(forced.coverage, .complete)
     }
 
     // MARK: - Helpers

@@ -64,7 +64,15 @@ final class HistoryViewModel {
     }
 
     var searchQuery: String = ""
-    var searchMode: SearchMode = SettingsDTO.default.defaultSearchMode
+    var searchMode: SearchMode = SettingsDTO.default.defaultSearchMode {
+        didSet {
+            guard !isApplyingPersistedDefaultSearchMode else {
+                isApplyingPersistedDefaultSearchMode = false
+                return
+            }
+            followsPersistedDefaultSearchMode = false
+        }
+    }
     var isLoading: Bool = false
     var selectedID: UUID?
 
@@ -92,36 +100,28 @@ final class HistoryViewModel {
     var canLoadMore: Bool = false
     var loadedCount: Int = 0
     var totalCount: Int = 0
-    var isPrefilterResult: Bool = false
+    var searchCoverage: SearchCoverage = .complete
 
     var performanceSummary: PerformanceSummary?
 
-    var cacheLimitedSearchHint: String? {
-        let trimmed = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        switch searchMode {
-        case .exact:
-            guard !trimmed.isEmpty, trimmed.count <= 2 else { return nil }
-            return "Exact 短词（≤2）仅搜索最近 2000 条。输入 ≥3 字符或切换到 Fuzzy/Fuzzy+ 以全量搜索。"
-        case .regex:
-            guard !trimmed.isEmpty else { return nil }
-            return "Regex 仅搜索最近 2000 条（性能考虑）。如需全量搜索，请切换到 Exact（≥3 字符）或 Fuzzy/Fuzzy+。"
-        case .fuzzy, .fuzzyPlus:
-            return nil
-        }
-    }
-
-    var progressiveSearchHint: String? {
-        guard isPrefilterResult else { return nil }
-
+    var searchCoverageHint: String? {
         let trimmed = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
 
-        switch searchMode {
-        case .fuzzy, .fuzzyPlus:
-            return "首屏为预筛结果，正在全量校准…（排序/漏项可能会更新）"
-        case .exact, .regex:
+        switch effectiveSearchCoverage(for: trimmed) {
+        case .complete:
             return nil
+        case .stagedRefine:
+            return "首屏为预筛结果，正在全量校准…（排序/漏项可能会更新）"
+        case .recentOnly(let limit):
+            switch searchMode {
+            case .exact:
+                return "Exact 短词（≤2）仅搜索最近 \(limit) 条。输入 ≥3 字符或切换到 Fuzzy+ / Fuzzy。"
+            case .regex:
+                return "Regex 仅搜索最近 \(limit) 条。需要全量搜索时，请改用 Exact（≥3 字符）或 Fuzzy+。"
+            case .fuzzy, .fuzzyPlus:
+                return "当前仅搜索最近 \(limit) 条。"
+            }
         }
     }
 
@@ -129,6 +129,9 @@ final class HistoryViewModel {
     @ObservationIgnored private var loadMoreTask: Task<Void, Never>?
     @ObservationIgnored private var refineTask: Task<Void, Never>?
     @ObservationIgnored private var recentAppsRefreshTask: Task<Void, Never>?
+    @ObservationIgnored private var persistedDefaultSearchMode: SearchMode = SettingsDTO.default.defaultSearchMode
+    @ObservationIgnored private var followsPersistedDefaultSearchMode: Bool = true
+    @ObservationIgnored private var isApplyingPersistedDefaultSearchMode: Bool = false
 
     @ObservationIgnored private var lastLoadedAt: Date = .distantPast
     @ObservationIgnored private let ftsSortModeDefaultsKey = "Scopy.FTSSortMode"
@@ -140,6 +143,7 @@ final class HistoryViewModel {
     init(service: ClipboardServiceProtocol, settingsViewModel: SettingsViewModel) {
         self.service = service
         self.settingsViewModel = settingsViewModel
+        self.persistedDefaultSearchMode = SettingsDTO.default.defaultSearchMode
 
         if let raw = UserDefaults.standard.string(forKey: ftsSortModeDefaultsKey),
            let mode = SearchSortMode(rawValue: raw) {
@@ -270,7 +274,11 @@ final class HistoryViewModel {
     // MARK: - Settings Synchronization
 
     func applySettings(_ settings: SettingsDTO) {
+        persistedDefaultSearchMode = settings.defaultSearchMode
+        guard followsPersistedDefaultSearchMode else { return }
+        isApplyingPersistedDefaultSearchMode = true
         searchMode = settings.defaultSearchMode
+        followsPersistedDefaultSearchMode = true
     }
 
     // MARK: - Apps / Filters
@@ -331,7 +339,7 @@ final class HistoryViewModel {
             items = fetchedItems
             prewarmDisplayText(for: fetchedItems)
             loadedCount = fetchedItems.count
-            isPrefilterResult = false
+            searchCoverage = .complete
             lastLoadedAt = Date()
 
             // Load latency should reflect "first screen ready" rather than unrelated background work.
@@ -384,7 +392,7 @@ final class HistoryViewModel {
             do {
                 if !isUnfilteredList {
                     // When current result is prefilter (total = -1), force full fuzzy before paging.
-                    if isPrefilterResult,
+                    if searchCoverage.isStagedRefine,
                        (searchMode == .fuzzy || searchMode == .fuzzyPlus) {
                         let expectedLimit = loadedCount + 50
                         let request = SearchRequest(
@@ -405,7 +413,7 @@ final class HistoryViewModel {
                         loadedCount = result.items.count
                         totalCount = result.total
                         canLoadMore = result.hasMore
-                        isPrefilterResult = result.isPrefilter
+                        searchCoverage = result.coverage
                         return
                     }
 
@@ -427,7 +435,7 @@ final class HistoryViewModel {
                     loadedCount = items.count
                     totalCount = result.total
                     canLoadMore = result.hasMore
-                    isPrefilterResult = result.isPrefilter
+                    searchCoverage = result.coverage
                 } else {
                     let moreItems = try await service.fetchRecent(limit: 100, offset: loadedCount)
                     guard !Task.isCancelled, currentVersion == searchVersion else { return }
@@ -435,7 +443,7 @@ final class HistoryViewModel {
                     prewarmDisplayText(for: moreItems)
                     loadedCount = items.count
                     canLoadMore = loadedCount < totalCount
-                    isPrefilterResult = false
+                    searchCoverage = .complete
                 }
             } catch {
                 if !Task.isCancelled {
@@ -498,10 +506,10 @@ final class HistoryViewModel {
                 totalCount = result.total
                 loadedCount = result.items.count
                 canLoadMore = result.hasMore
-                isPrefilterResult = result.isPrefilter
+                searchCoverage = result.coverage
 
                 if (searchMode == .fuzzy || searchMode == .fuzzyPlus),
-                   result.isPrefilter,
+                   result.coverage.isStagedRefine,
                    loadedCount <= 50 {
                     let refineQuery = searchQuery
                     let refineMode = searchMode
@@ -539,7 +547,7 @@ final class HistoryViewModel {
                             totalCount = refined.total
                             loadedCount = refined.items.count
                             canLoadMore = refined.hasMore
-                            isPrefilterResult = refined.isPrefilter
+                            searchCoverage = refined.coverage
                         } catch {
                             ScopyLog.app.warning("Refine search failed: \(error.localizedDescription, privacy: .private)")
                         }
@@ -550,8 +558,20 @@ final class HistoryViewModel {
                 await PerformanceMetrics.shared.recordSearchLatency(elapsedMs)
                 performanceSummary = await PerformanceMetrics.shared.getSummary()
             } catch {
+                searchCoverage = .complete
                 ScopyLog.app.error("Search failed: \(error.localizedDescription, privacy: .private)")
             }
+        }
+    }
+
+    private func effectiveSearchCoverage(for trimmedQuery: String) -> SearchCoverage {
+        switch searchMode {
+        case .exact where trimmedQuery.count <= 2:
+            return .recentOnly(limit: 2000)
+        case .regex:
+            return .recentOnly(limit: 2000)
+        case .exact, .fuzzy, .fuzzyPlus:
+            return searchCoverage
         }
     }
 

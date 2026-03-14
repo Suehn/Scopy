@@ -5,16 +5,31 @@ public struct SearchResultPage: Sendable {
     public let items: [ClipboardItemDTO]
     public let total: Int
     public let hasMore: Bool
-    /// Whether this page is a best-effort / partial result set (e.g. cache-limited prefilter).
-    ///
-    /// Notes:
-    /// - UI may choose to refine with a stronger query when `isPrefilter` is true.
-    public let isPrefilter: Bool
+    /// Whether this page is complete, staged for refine, or intentionally limited to recent history.
+    public let coverage: SearchCoverage
 
-    public init(items: [ClipboardItemDTO], total: Int, hasMore: Bool, isPrefilter: Bool = false) {
+    public var isPrefilter: Bool {
+        coverage.isPrefilter
+    }
+
+    public init(
+        items: [ClipboardItemDTO],
+        total: Int,
+        hasMore: Bool,
+        coverage: SearchCoverage = .complete
+    ) {
         self.items = items
         self.total = total
         self.hasMore = hasMore
-        self.isPrefilter = isPrefilter
+        self.coverage = coverage
+    }
+
+    public init(items: [ClipboardItemDTO], total: Int, hasMore: Bool, isPrefilter: Bool) {
+        self.init(
+            items: items,
+            total: total,
+            hasMore: hasMore,
+            coverage: isPrefilter ? .stagedRefine : .complete
+        )
     }
 }

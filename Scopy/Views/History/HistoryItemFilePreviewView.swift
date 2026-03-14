@@ -60,12 +60,15 @@ struct HistoryItemFilePreviewView: View {
 
     @ViewBuilder
     private func previewContent() -> some View {
-        if kind != .image, let filePath, isFileAvailable {
+        if kind == .video, let filePath, isFileAvailable {
+            VideoPlayerPreviewView(url: URL(fileURLWithPath: filePath))
+        } else if usesQuickLookPreview, let filePath, isFileAvailable {
             QuickLookPreviewView(url: URL(fileURLWithPath: filePath))
         } else if let cgImage = model.previewCGImage {
             Image(decorative: cgImage, scale: 1.0)
                 .resizable()
                 .aspectRatio(contentMode: .fit)
+                .overlay(videoPreviewOverlay)
         } else if let thumbnailPath {
             let loaded = lastLoadedPath == thumbnailPath ? loadedThumbnail : nil
             let cached = ThumbnailCache.shared.cachedImage(path: thumbnailPath) ?? loaded
@@ -74,6 +77,7 @@ struct HistoryItemFilePreviewView: View {
                 Image(nsImage: nsImage)
                     .resizable()
                     .aspectRatio(contentMode: .fit)
+                    .overlay(videoPreviewOverlay)
             } else {
                 ProgressView()
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -99,14 +103,45 @@ struct HistoryItemFilePreviewView: View {
         return FilePreviewSupport.isMarkdownFile(URL(fileURLWithPath: filePath))
     }
 
+    private var usesQuickLookPreview: Bool {
+        FilePreviewSupport.shouldUseQuickLookPreview(for: kind)
+    }
+
+    @ViewBuilder
+    private var videoPreviewOverlay: some View {
+        if kind == .video {
+            Image(systemName: "play.circle.fill")
+                .font(.system(size: 40, weight: .medium))
+                .foregroundStyle(.white)
+                .shadow(radius: 3)
+                .padding(8)
+        }
+    }
+
     private var isFileAvailable: Bool {
         guard let filePath else { return false }
         guard cachedFileExistsPath == filePath else { return false }
         return cachedFileExists
     }
 
+    private var videoReferenceSize: CGSize? {
+        guard kind == .video else { return nil }
+        if let videoNaturalSize {
+            return videoNaturalSize
+        }
+        if let cgImage = model.previewCGImage {
+            return CGSize(width: cgImage.width, height: cgImage.height)
+        }
+        if let thumbnailPath {
+            let loaded = lastLoadedPath == thumbnailPath ? loadedThumbnail : nil
+            let cached = ThumbnailCache.shared.cachedImage(path: thumbnailPath) ?? loaded
+            return cached?.size
+        }
+        return nil
+    }
+
     private func previewWidth(maxWidth: CGFloat, maxHeight: CGFloat) -> CGFloat {
-        guard kind == .video, let size = videoNaturalSize else { return maxWidth }
+        guard kind == .video, let size = videoReferenceSize else { return maxWidth }
         let width = max(size.width, 1)
         let height = max(size.height, 1)
         let scale = min(maxWidth / width, maxHeight / height)
@@ -114,12 +149,16 @@ struct HistoryItemFilePreviewView: View {
     }
 
     private func previewHeight(width: CGFloat) -> CGFloat {
-        if kind != .image, isFileAvailable {
-            if kind == .video, let size = videoNaturalSize {
+        if kind == .video {
+            if let size = videoReferenceSize {
                 let naturalWidth = max(size.width, 1)
                 let naturalHeight = max(size.height, 1)
                 return ceil(width * (naturalHeight / naturalWidth))
             }
+            return min(HoverPreviewScreenMetrics.maxPopoverHeightPoints(), ceil(width * 9 / 16))
+        }
+
+        if kind != .image, isFileAvailable {
             return HoverPreviewScreenMetrics.maxPopoverHeightPoints()
         }
 

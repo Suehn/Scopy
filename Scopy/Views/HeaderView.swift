@@ -55,15 +55,7 @@ struct HeaderView: View {
                 }
             }
 
-            if let hint = historyViewModel.cacheLimitedSearchHint {
-                Text(hint)
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            if let hint = historyViewModel.progressiveSearchHint {
+            if let hint = historyViewModel.searchCoverageHint {
                 Text(hint)
                     .font(.footnote)
                     .foregroundStyle(.secondary)
@@ -85,23 +77,13 @@ struct HeaderView: View {
 
 private struct SearchModeMenu: View {
     @Environment(HistoryViewModel.self) private var historyViewModel
-    @Environment(SettingsViewModel.self) private var settingsViewModel
-    /// v0.22: 保存设置任务引用，支持取消，防止内存泄漏
-    @State private var saveTask: Task<Void, Never>?
 
     var body: some View {
         Menu {
-            ForEach(SearchMode.allCases, id: \.self) { mode in
+            ForEach(orderedModes, id: \.self) { mode in
                 Button {
                     historyViewModel.searchMode = mode
                     historyViewModel.search()
-                    // v0.22: 取消之前的保存任务，防止快速切换时任务累积
-                    saveTask?.cancel()
-                    // 持久化到设置
-                    saveTask = Task {
-                        guard !Task.isCancelled else { return }
-                        await settingsViewModel.updateDefaultSearchMode(mode)
-                    }
                 } label: {
                     HStack {
                         if mode == historyViewModel.searchMode {
@@ -117,20 +99,17 @@ private struct SearchModeMenu: View {
                 .foregroundStyle(ScopyColors.mutedText)
         }
         .menuStyle(.borderlessButton)
-        .help("Search mode")
-        .onDisappear {
-            // v0.22: 视图消失时取消未完成的任务
-            saveTask?.cancel()
-            saveTask = nil
-        }
+        .help(currentModeHelpText)
     }
+
+    private let orderedModes: [SearchMode] = [.fuzzyPlus, .fuzzy, .exact, .regex]
 
     private func modeLabel(_ mode: SearchMode) -> String {
         switch mode {
         case .exact: return "Exact"
         case .fuzzy: return "Fuzzy"
-        case .fuzzyPlus: return "Fuzzy+"
-        case .regex: return "Regex"
+        case .fuzzyPlus: return "Fuzzy+ (Recommended)"
+        case .regex: return "Regex (Recent 2000)"
         }
     }
 
@@ -140,6 +119,19 @@ private struct SearchModeMenu: View {
         case .fuzzy: return "text.magnifyingglass"
         case .fuzzyPlus: return "plus.magnifyingglass"
         case .regex: return "asterisk.circle"
+        }
+    }
+
+    private var currentModeHelpText: String {
+        switch historyViewModel.searchMode {
+        case .fuzzyPlus:
+            return "Search mode: Fuzzy+ (recommended full-history path)"
+        case .fuzzy:
+            return "Search mode: Fuzzy"
+        case .exact:
+            return "Search mode: Exact"
+        case .regex:
+            return "Search mode: Regex (recent 2000 only)"
         }
     }
 }

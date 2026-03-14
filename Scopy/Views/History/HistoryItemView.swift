@@ -473,11 +473,7 @@ struct HistoryItemView: View, Equatable {
 
     @ViewBuilder
     var body: some View {
-        if isScrolling {
-            rowContent
-        } else {
-            rowContent.onHover(perform: handleHover)
-        }
+        rowContent.onHover(perform: handleHover)
     }
 
     private var rowContent: some View {
@@ -1038,7 +1034,7 @@ struct HistoryItemView: View, Equatable {
 
         let cacheKeyBase = item.contentHash.isEmpty ? item.id.uuidString : item.contentHash
         let kindToken = previewInfo.kind.rawValue
-        let shouldPrefetchImage = previewInfo.kind == .image
+        let shouldPrefetchImage = previewInfo.kind == .image || previewInfo.kind == .video
 
         if filePreviewIsMarkdown {
             let cacheKey = "file|\(cacheKeyBase)"

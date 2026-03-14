@@ -230,7 +230,7 @@ actor ClipboardService {
             dtos.append(toDTO(item, storage: storage))
         }
 
-        return SearchResultPage(items: dtos, total: result.total, hasMore: result.hasMore, isPrefilter: result.isPrefilter)
+        return SearchResultPage(items: dtos, total: result.total, hasMore: result.hasMore, coverage: result.coverage)
     }
 
     func pin(itemID: UUID) async throws {

@@ -74,7 +74,9 @@ Scopy is a native macOS clipboard manager for users who need durable clipboard h
 | Filters | App filter, single-type filter, grouped multi-type filter |
 | Pagination | Default page size is 50; incremental loading must remain available |
 | Responsiveness | Typing should stay responsive with debounce around `150-200ms` |
-| Short queries | May use staged or recent-first behavior internally, but user-facing search should converge to complete results where the mode semantics require it |
+| Fuzzy / Fuzzy+ | May return a staged first page, but must converge to complete full-history results |
+| Exact | `>= 3` characters search complete history; `<= 2` characters intentionally search only the most recent `2000` items and must say so in the UI |
+| Regex | Intentionally searches only the most recent `2000` items and must say so in the UI |
 
 ## Current Settings Surface
 

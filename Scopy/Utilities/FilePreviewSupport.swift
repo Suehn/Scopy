@@ -169,6 +169,10 @@ public enum FilePreviewSupport {
         return false
     }
 
+    public static func shouldUseQuickLookPreview(for kind: FilePreviewKind) -> Bool {
+        kind == .other
+    }
+
     public static func loadVideoNaturalSize(from url: URL) async -> CGSize? {
         await Task.detached(priority: .utility) {
             let asset = AVURLAsset(url: url)

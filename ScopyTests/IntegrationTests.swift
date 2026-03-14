@@ -638,7 +638,7 @@ final class SearchHintTests: XCTestCase {
         viewModel.searchMode = .exact
         viewModel.searchQuery = "ab"
 
-        let hint = viewModel.cacheLimitedSearchHint
+        let hint = viewModel.searchCoverageHint
         XCTAssertNotNil(hint)
         XCTAssertTrue(hint?.contains("2000") ?? false)
     }
@@ -651,7 +651,7 @@ final class SearchHintTests: XCTestCase {
         viewModel.searchMode = .exact
         viewModel.searchQuery = "abc"
 
-        XCTAssertNil(viewModel.cacheLimitedSearchHint)
+        XCTAssertNil(viewModel.searchCoverageHint)
     }
 
     func testRegexShowsHint() {
@@ -662,8 +662,52 @@ final class SearchHintTests: XCTestCase {
         viewModel.searchMode = .regex
         viewModel.searchQuery = "Item \\\\d+"
 
-        let hint = viewModel.cacheLimitedSearchHint
+        let hint = viewModel.searchCoverageHint
         XCTAssertNotNil(hint)
         XCTAssertTrue(hint?.contains("2000") ?? false)
+    }
+
+    func testFuzzyStagedCoverageShowsProgressHint() {
+        let service = StubClipboardService()
+        let settings = SettingsViewModel(service: service)
+        let viewModel = HistoryViewModel(service: service, settingsViewModel: settings)
+
+        viewModel.searchMode = .fuzzyPlus
+        viewModel.searchQuery = "cmd"
+        viewModel.searchCoverage = .stagedRefine
+
+        let hint = viewModel.searchCoverageHint
+        XCTAssertNotNil(hint)
+        XCTAssertTrue(hint?.contains("全量校准") ?? false)
+    }
+
+    func testApplySettingsUpdatesFollowingSessionSearchMode() {
+        let service = StubClipboardService()
+        let settings = SettingsViewModel(service: service)
+        let viewModel = HistoryViewModel(service: service, settingsViewModel: settings)
+
+        var updated = SettingsDTO.default
+        updated.defaultSearchMode = .exact
+        viewModel.applySettings(updated)
+
+        XCTAssertEqual(viewModel.searchMode, .exact)
+    }
+
+    func testApplySettingsDoesNotOverrideManualSessionSearchMode() {
+        let service = StubClipboardService()
+        let settings = SettingsViewModel(service: service)
+        let viewModel = HistoryViewModel(service: service, settingsViewModel: settings)
+
+        var initial = SettingsDTO.default
+        initial.defaultSearchMode = .exact
+        viewModel.applySettings(initial)
+
+        viewModel.searchMode = .regex
+
+        var updated = SettingsDTO.default
+        updated.defaultSearchMode = .fuzzyPlus
+        viewModel.applySettings(updated)
+
+        XCTAssertEqual(viewModel.searchMode, .regex)
     }
 }

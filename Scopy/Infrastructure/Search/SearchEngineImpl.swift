@@ -56,9 +56,29 @@ public actor SearchEngineImpl {
         public let items: [ClipboardStoredItem]
         public let total: Int
         public let hasMore: Bool
-        public let isPrefilter: Bool
+        public let coverage: SearchCoverage
         public let searchTimeMs: Double
         public let perf: SearchPerfMetrics?
+
+        public var isPrefilter: Bool {
+            coverage.isPrefilter
+        }
+
+        public init(
+            items: [ClipboardStoredItem],
+            total: Int,
+            hasMore: Bool,
+            coverage: SearchCoverage,
+            searchTimeMs: Double,
+            perf: SearchPerfMetrics? = nil
+        ) {
+            self.items = items
+            self.total = total
+            self.hasMore = hasMore
+            self.coverage = coverage
+            self.searchTimeMs = searchTimeMs
+            self.perf = perf
+        }
 
         public init(
             items: [ClipboardStoredItem],
@@ -68,12 +88,14 @@ public actor SearchEngineImpl {
             searchTimeMs: Double,
             perf: SearchPerfMetrics? = nil
         ) {
-            self.items = items
-            self.total = total
-            self.hasMore = hasMore
-            self.isPrefilter = isPrefilter
-            self.searchTimeMs = searchTimeMs
-            self.perf = perf
+            self.init(
+                items: items,
+                total: total,
+                hasMore: hasMore,
+                coverage: isPrefilter ? .stagedRefine : .complete,
+                searchTimeMs: searchTimeMs,
+                perf: perf
+            )
         }
     }
 
@@ -2016,7 +2038,7 @@ public actor SearchEngineImpl {
             items: result.items,
             total: result.total,
             hasMore: result.hasMore,
-            isPrefilter: result.isPrefilter,
+            coverage: result.coverage,
             searchTimeMs: elapsedMs,
             perf: perfContext?.snapshot()
         )
@@ -2057,7 +2079,7 @@ public actor SearchEngineImpl {
         }
 
         if request.query.count <= 2 {
-            return try searchInCache(request: request) { item in
+            return try searchInCache(request: request, coverage: .recentOnly(limit: shortQueryCacheSize)) { item in
                 item.plainText.localizedCaseInsensitiveContains(request.query)
             }
         }
@@ -2108,7 +2130,7 @@ public actor SearchEngineImpl {
             throw SearchError.invalidQuery("Invalid regex pattern")
         }
 
-        return try searchInCache(request: request) { item in
+        return try searchInCache(request: request, coverage: .recentOnly(limit: shortQueryCacheSize)) { item in
             let range = NSRange(item.plainText.startIndex..., in: item.plainText)
             return regex.firstMatch(in: item.plainText, range: range) != nil
         }
@@ -2190,6 +2212,7 @@ public actor SearchEngineImpl {
 
     private func searchInCache(
         request: SearchRequest,
+        coverage: SearchCoverage,
         filter: @escaping (ClipboardStoredItem) -> Bool
     ) throws -> SearchResult {
         try refreshCacheIfNeeded()
@@ -2223,7 +2246,7 @@ public actor SearchEngineImpl {
         }
 
         let total = hasMore ? -1 : request.offset + items.count
-        return SearchResult(items: items, total: total, hasMore: hasMore, isPrefilter: true, searchTimeMs: 0)
+        return SearchResult(items: items, total: total, hasMore: hasMore, coverage: coverage, searchTimeMs: 0)
     }
 
     private func refreshCacheIfNeeded() throws {
@@ -2400,7 +2423,7 @@ public actor SearchEngineImpl {
                     items: result.items,
                     total: result.total,
                     hasMore: result.hasMore,
-                    isPrefilter: result.isPrefilter,
+                    coverage: result.coverage,
                     searchTimeMs: 0
                 )
             }
@@ -2573,7 +2596,7 @@ public actor SearchEngineImpl {
             items: result.items,
             total: result.total,
             hasMore: result.hasMore,
-            isPrefilter: result.isPrefilter,
+            coverage: result.coverage,
             searchTimeMs: 0
         )
     }
