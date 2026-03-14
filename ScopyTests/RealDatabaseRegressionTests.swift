@@ -42,7 +42,7 @@ final class RealDatabaseRegressionTests: XCTestCase {
         defer { Task { await engineA.close() } }
 
         let prefilterA = try await engineA.search(request: requestPrefilter)
-        print("[real-db] prefilter searchTimeMs:", prefilterA.searchTimeMs, "isPrefilter:", prefilterA.isPrefilter)
+        print("[real-db] prefilter searchTimeMs:", prefilterA.searchTimeMs, "coverage:", String(describing: prefilterA.coverage))
         #if DEBUG
         await engineA.debugAwaitFullIndexBuild()
         #else
@@ -64,8 +64,8 @@ final class RealDatabaseRegressionTests: XCTestCase {
         let idsB = refinedB.items.map(\.id)
 
         XCTAssertEqual(idsA, idsB, "Prefilter+prewarm path must not change refine result ordering")
-        XCTAssertFalse(refinedA.isPrefilter)
-        XCTAssertFalse(refinedB.isPrefilter)
+        XCTAssertEqual(refinedA.coverage, .complete)
+        XCTAssertEqual(refinedB.coverage, .complete)
     }
 
     func testFullIndexDiskCacheLoadsAndMatchesRebuild() async throws {

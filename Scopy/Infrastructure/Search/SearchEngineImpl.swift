@@ -2089,7 +2089,7 @@ public actor SearchEngineImpl {
             return try searchAllWithFilters(request: request)
         }
 
-        let fts = try searchWithFTS(query: ftsQuery, request: request, isPrefilter: false)
+        let fts = try searchWithFTS(query: ftsQuery, request: request, coverage: .complete)
         if fts.items.isEmpty,
            !trimmedQuery.isEmpty,
            !trimmedQuery.canBeConverted(to: .ascii) {
@@ -2104,7 +2104,7 @@ public actor SearchEngineImpl {
                 limit: request.limit,
                 offset: request.offset
             ), !page.items.isEmpty {
-                return SearchResult(items: page.items, total: page.total, hasMore: page.hasMore, isPrefilter: false, searchTimeMs: 0)
+                return SearchResult(items: page.items, total: page.total, hasMore: page.hasMore, coverage: .complete, searchTimeMs: 0)
             }
         }
 
@@ -2141,7 +2141,7 @@ public actor SearchEngineImpl {
     private func searchWithFTS(
         query: String,
         request: SearchRequest,
-        isPrefilter: Bool
+        coverage: SearchCoverage
     ) throws -> SearchResult {
         let typeFilters = request.typeFilters.map(Array.init)
         let page = try searchWithFTS(
@@ -2153,7 +2153,7 @@ public actor SearchEngineImpl {
             limit: request.limit,
             offset: request.offset
         )
-        return SearchResult(items: page.items, total: page.total, hasMore: page.hasMore, isPrefilter: isPrefilter, searchTimeMs: 0)
+        return SearchResult(items: page.items, total: page.total, hasMore: page.hasMore, coverage: coverage, searchTimeMs: 0)
     }
 
     private func substringSearchTokens(_ query: String) -> [String] {
@@ -2352,7 +2352,7 @@ public actor SearchEngineImpl {
             limit: request.limit,
             offset: request.offset
         )
-        return SearchResult(items: page.items, total: page.total, hasMore: page.hasMore, isPrefilter: false, searchTimeMs: 0)
+        return SearchResult(items: page.items, total: page.total, hasMore: page.hasMore, coverage: .complete, searchTimeMs: 0)
     }
 
     private func searchInteractiveFuzzyPrefilterIfNeeded(
@@ -2401,7 +2401,7 @@ public actor SearchEngineImpl {
         // Keep the initial (non-forceFullFuzzy) stage fast: even if no prefilter match is found,
         // return an empty prefilter result quickly and allow UI to refine with a full scan.
         startFullIndexBuildIfNeeded()
-        return SearchResult(items: [], total: 0, hasMore: false, isPrefilter: true, searchTimeMs: 0)
+        return SearchResult(items: [], total: 0, hasMore: false, coverage: .stagedRefine, searchTimeMs: 0)
     }
 
     private func searchInteractiveFTSPrefilter(
@@ -2412,10 +2412,10 @@ public actor SearchEngineImpl {
         let fts: SearchResult
         if let perf {
             fts = try perf.measure("fts_prefilter") {
-                try searchWithFTS(query: ftsQuery, request: request, isPrefilter: true)
+                try searchWithFTS(query: ftsQuery, request: request, coverage: .stagedRefine)
             }
         } else {
-            fts = try searchWithFTS(query: ftsQuery, request: request, isPrefilter: true)
+            fts = try searchWithFTS(query: ftsQuery, request: request, coverage: .stagedRefine)
         }
 
         guard !fts.items.isEmpty else { return nil }
@@ -2950,7 +2950,7 @@ public actor SearchEngineImpl {
         }
 
         if candidateSlots.isEmpty {
-            return SearchResult(items: [], total: 0, hasMore: false, isPrefilter: false, searchTimeMs: 0)
+            return SearchResult(items: [], total: 0, hasMore: false, coverage: .complete, searchTimeMs: 0)
         }
         perf?.addCounter("full_index_candidate_slots", value: candidateSlots.count)
 
@@ -3165,7 +3165,7 @@ public actor SearchEngineImpl {
                 } else {
                     resultItems = try fetchItemsByIDs(ids: pageIDs)
                 }
-                return SearchResult(items: resultItems, total: -1, hasMore: hasMore, isPrefilter: true, searchTimeMs: 0)
+                return SearchResult(items: resultItems, total: -1, hasMore: hasMore, coverage: .stagedRefine, searchTimeMs: 0)
             }
 
             var topHeap = BinaryHeap<ScoredSlot>(areSorted: isWorseSlot)
@@ -3221,7 +3221,7 @@ public actor SearchEngineImpl {
             } else {
                 resultItems = try fetchItemsByIDs(ids: pageIDs)
             }
-            return SearchResult(items: resultItems, total: -1, hasMore: hasMore, isPrefilter: true, searchTimeMs: 0)
+            return SearchResult(items: resultItems, total: -1, hasMore: hasMore, coverage: .stagedRefine, searchTimeMs: 0)
         }
 
         func typeFiltersKey(_ set: Set<ClipboardItemType>?) -> String? {
@@ -3247,7 +3247,7 @@ public actor SearchEngineImpl {
             let hasMore = totalMatches > request.offset + request.limit
             let pageIDs = page.compactMap { index.items[$0.slot]?.id }
             let resultItems = try fetchItemsByIDs(ids: pageIDs)
-            return SearchResult(items: resultItems, total: totalMatches, hasMore: hasMore, isPrefilter: false, searchTimeMs: 0)
+            return SearchResult(items: resultItems, total: totalMatches, hasMore: hasMore, coverage: .complete, searchTimeMs: 0)
         }
 
         // Deep paging: cache a bounded "top-K" prefix to avoid repeated rescans without pinning a huge array in memory.
@@ -3354,7 +3354,13 @@ public actor SearchEngineImpl {
 
         let pageIDs = page.compactMap { index.items[$0.slot]?.id }
         let resultItems = try fetchItemsByIDs(ids: pageIDs)
-        return SearchResult(items: resultItems, total: total, hasMore: hasMore, isPrefilter: totalIsUnknown, searchTimeMs: 0)
+        return SearchResult(
+            items: resultItems,
+            total: total,
+            hasMore: hasMore,
+            coverage: totalIsUnknown ? .stagedRefine : .complete,
+            searchTimeMs: 0
+        )
     }
 
     private func shouldPreferFTSForFuzzy(query: String) -> Bool {
@@ -3481,7 +3487,7 @@ public actor SearchEngineImpl {
         }
 
         let items = page.map(\.item)
-        return SearchResult(items: items, total: -1, hasMore: hasMore, isPrefilter: true, searchTimeMs: 0)
+        return SearchResult(items: items, total: -1, hasMore: hasMore, coverage: .stagedRefine, searchTimeMs: 0)
     }
 
     private func ftsPrefilterSlots(index: FullFuzzyIndex, ftsQuery: String, limit: Int) throws -> [Int] {
@@ -4089,7 +4095,7 @@ public actor SearchEngineImpl {
             limit: request.limit,
             offset: request.offset
         )
-        return SearchResult(items: page.items, total: page.total, hasMore: page.hasMore, isPrefilter: false, searchTimeMs: 0)
+        return SearchResult(items: page.items, total: page.total, hasMore: page.hasMore, coverage: .complete, searchTimeMs: 0)
     }
 
     private func searchAllWithFilters(

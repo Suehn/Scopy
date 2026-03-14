@@ -463,7 +463,6 @@ final class SearchServiceTests: XCTestCase {
 
         XCTAssertEqual(result.items.count, 0)
         XCTAssertEqual(result.coverage, .complete)
-        XCTAssertFalse(result.isPrefilter)
 
 #if DEBUG
         let after = await search.debugFullIndexHealth()
