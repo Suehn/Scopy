@@ -16,6 +16,7 @@ final class ClipboardMonitorTests: XCTestCase {
         ingestSpoolDirectory = FileManager.default.temporaryDirectory
             .appendingPathComponent("scopy-clipboard-monitor-ingest-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: ingestSpoolDirectory, withIntermediateDirectories: true)
+        await ClipboardIngestMetrics.shared.reset()
         ClipboardMonitor.testingAsyncProcessingDelayNs = 0
         monitor = ClipboardMonitor(pasteboard: pasteboard, ingestSpoolDirectory: ingestSpoolDirectory)
     }
@@ -25,6 +26,7 @@ final class ClipboardMonitorTests: XCTestCase {
         monitor = nil
         pasteboard = nil
         ClipboardMonitor.testingAsyncProcessingDelayNs = 0
+        await ClipboardIngestMetrics.shared.reset()
         if let ingestSpoolDirectory {
             try? FileManager.default.removeItem(at: ingestSpoolDirectory)
         }
@@ -940,6 +942,34 @@ final class ClipboardMonitorTests: XCTestCase {
         }, message: "Envelope should be acknowledged after validation")
     }
 
+    func testCorruptPendingEnvelopeWithoutPayloadIsDiscardedOnReplay() async throws {
+        let envelopeURL = try writePendingEnvelopeFixture(
+            type: .image,
+            plainText: "[Image: 256 KB]",
+            sizeBytes: 256 * 1024,
+            imageDataWasTIFF: true,
+            payloadFileName: "\(UUID().uuidString).payload"
+        )
+
+        let unexpectedContent = XCTestExpectation(description: "Corrupt pending envelope should not emit content")
+        unexpectedContent.isInverted = true
+        let task = Task {
+            for await _ in monitor.contentStream {
+                unexpectedContent.fulfill()
+                break
+            }
+        }
+        defer { task.cancel() }
+
+        monitor.startMonitoring()
+
+        await fulfillment(of: [unexpectedContent], timeout: 0.6)
+        await assertEventually(timeout: 2.0, pollInterval: 0.05, {
+            self.pendingEnvelopeCount() == 0 &&
+            !FileManager.default.fileExists(atPath: envelopeURL.path)
+        }, message: "Corrupt envelope should be discarded and cleaned up during replay")
+    }
+
     // MARK: - App Bundle ID Tests
 
     func testAppBundleIDCapture() {
@@ -1044,6 +1074,40 @@ final class ClipboardMonitorTests: XCTestCase {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let url = directory.appendingPathComponent("image-\(UUID().uuidString).png")
         try Data([0x89, 0x50, 0x4E, 0x47]).write(to: url, options: .atomic)
+        return url
+    }
+
+    private func writePendingEnvelopeFixture(
+        type: ClipboardItemType,
+        plainText: String,
+        sizeBytes: Int,
+        imageDataWasTIFF: Bool,
+        payloadFileName: String?
+    ) throws -> URL {
+        struct PendingEnvelopeFixture: Codable {
+            let id: UUID
+            let typeRawValue: String
+            let plainText: String
+            let appBundleID: String?
+            let sizeBytes: Int
+            let precomputedHash: String?
+            let imageDataWasTIFF: Bool
+            let payloadFileName: String?
+        }
+
+        let fixture = PendingEnvelopeFixture(
+            id: UUID(),
+            typeRawValue: type.rawValue,
+            plainText: plainText,
+            appBundleID: "com.test.fixture",
+            sizeBytes: sizeBytes,
+            precomputedHash: nil,
+            imageDataWasTIFF: imageDataWasTIFF,
+            payloadFileName: payloadFileName
+        )
+        let url = ingestSpoolDirectory.appendingPathComponent("\(fixture.id.uuidString).envelope.json")
+        let data = try JSONEncoder().encode(fixture)
+        try data.write(to: url, options: .atomic)
         return url
     }
 

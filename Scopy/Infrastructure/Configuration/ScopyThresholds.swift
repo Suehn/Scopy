@@ -12,7 +12,7 @@ enum ScopyThresholds {
     /// ClipboardMonitor: maximum concurrent background ingest tasks.
     static let ingestMaxConcurrentTasks = 3
 
-    /// ClipboardMonitor: maximum pending large ingests before dropping the oldest.
+    /// ClipboardMonitor: soft limit for queued large ingests before surfacing backlog pressure metrics.
     static let ingestMaxPendingItems = 32
 
     /// StorageService: content >= threshold will be stored in external file (not inline DB blob).

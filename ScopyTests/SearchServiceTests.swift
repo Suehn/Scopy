@@ -116,6 +116,23 @@ final class SearchServiceTests: XCTestCase {
         XCTAssertEqual(result.coverage, .recentOnly(limit: 2000))
     }
 
+    func testRegexRecentOnlyExcludesOldMatchesBeyondRecentCache() async throws {
+        let oldest = try await storage.upsertItem(makeContent("Regex note 777"))
+        for i in 0..<2001 {
+            _ = try await storage.upsertItem(makeContent("Filler \(i)"))
+        }
+        let recent = try await storage.upsertItem(makeContent("Regex note 888"))
+        await search.invalidateCache()
+
+        let result = try await search.search(
+            request: SearchRequest(query: "Regex\\s+note\\s+\\d+", mode: .regex, limit: 50, offset: 0)
+        )
+
+        XCTAssertTrue(result.items.contains(where: { $0.id == recent.id }))
+        XCTAssertFalse(result.items.contains(where: { $0.id == oldest.id }))
+        XCTAssertEqual(result.coverage, .recentOnly(limit: 2000))
+    }
+
     func testSearchWithNoResults() async throws {
         try await populateTestData()
 

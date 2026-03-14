@@ -766,6 +766,15 @@ public final class ClipboardMonitor {
                 }
 
                 let originalPayloadData = Self.loadPendingPayload(from: envelope, ingestDirectory: ingestDirectory)
+                if envelope.payloadFileName != nil, originalPayloadData == nil {
+                    ScopyLog.monitor.error(
+                        "Discarding pending ingest envelope because payload file is missing: \(envelopeURL.lastPathComponent, privacy: .public)"
+                    )
+                    await MainActor.run { [weak self] in
+                        self?.discardIngestEnvelope(at: envelopeURL)
+                    }
+                    return
+                }
                 var payloadData = originalPayloadData
                 var plainText = envelope.plainText
                 var sizeBytes = envelope.sizeBytes
