@@ -65,9 +65,12 @@ struct ContentView: View {
             .padding(.top, ScopySpacing.md)
             .padding(.bottom, ScopySpacing.sm)
 
-            HistoryListView(searchFocused: $searchFocused)
+            HistoryListView(
+                searchFocused: $searchFocused,
+                openSettings: appState.openSettingsHandler
+            )
 
-            FooterView()
+            FooterView(openSettings: appState.openSettingsHandler)
         }
     }
 

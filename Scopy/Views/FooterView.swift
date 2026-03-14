@@ -3,9 +3,10 @@ import ScopyKit
 
 /// 底部状态栏视图
 struct FooterView: View {
-    @Environment(AppState.self) private var appState
     @Environment(HistoryViewModel.self) private var historyViewModel
     @Environment(SettingsViewModel.self) private var settingsViewModel
+
+    let openSettings: (() -> Void)?
 
     /// v0.22: 修复 -1 显示 bug - 当 totalCount=-1 时表示"未知"，显示 "50+ items"
     private var summaryText: String {
@@ -70,7 +71,7 @@ struct FooterView: View {
                     .help("Delete Selected")
 
                     FooterButton(icon: "gearshape", shortcut: "⌘,") {
-                        appState.openSettingsHandler?()
+                        openSettings?()
                     }
                     .help("Settings")
 

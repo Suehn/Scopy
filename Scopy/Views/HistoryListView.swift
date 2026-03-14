@@ -25,10 +25,10 @@ private struct HoverPreviewDismissSnapshot: Equatable {
 @MainActor
 struct HistoryListView: View {
     @FocusState.Binding var searchFocused: Bool
-
-    @Environment(AppState.self) private var appState
     @Environment(HistoryViewModel.self) private var historyViewModel
     @Environment(SettingsViewModel.self) private var settingsViewModel
+
+    let openSettings: (() -> Void)?
 
     // Shared Markdown preview controller to avoid repeatedly creating/destroying WebKit views/processes.
     @StateObject private var sharedMarkdownPreviewController = MarkdownPreviewWebViewController()
@@ -48,7 +48,7 @@ struct HistoryListView: View {
         if historyViewModel.items.isEmpty && !historyViewModel.isLoading {
             EmptyStateView(
                 hasFilters: historyViewModel.hasActiveFilters,
-                openSettings: appState.openSettingsHandler
+                openSettings: openSettings
             )
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {

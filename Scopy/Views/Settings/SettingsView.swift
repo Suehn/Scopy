@@ -2,7 +2,6 @@ import SwiftUI
 import ScopyKit
 
 struct SettingsView: View {
-    @Environment(AppState.self) private var appState
     @Environment(SettingsViewModel.self) private var settingsViewModel
 
     @State private var selection: SettingsPage? = .general
@@ -17,9 +16,17 @@ struct SettingsView: View {
     @State private var isLoadingStats = false
     @State private var statsTask: Task<Void, Never>?
 
+    let unregisterHotKeyHandler: (() -> Void)?
+    let applyHotKeyHandler: ((UInt32, UInt32) -> Void)?
     var onDismiss: (() -> Void)?
 
-    init(onDismiss: (() -> Void)? = nil) {
+    init(
+        unregisterHotKeyHandler: (() -> Void)? = nil,
+        applyHotKeyHandler: ((UInt32, UInt32) -> Void)? = nil,
+        onDismiss: (() -> Void)? = nil
+    ) {
+        self.unregisterHotKeyHandler = unregisterHotKeyHandler
+        self.applyHotKeyHandler = applyHotKeyHandler
         self.onDismiss = onDismiss
     }
 
@@ -99,7 +106,11 @@ struct SettingsView: View {
                 case .general:
                     GeneralSettingsPage(tempSettings: settings)
                 case .shortcuts:
-                    ShortcutsSettingsPage(tempSettings: settings)
+                    ShortcutsSettingsPage(
+                        tempSettings: settings,
+                        unregisterHotKeyHandler: unregisterHotKeyHandler,
+                        applyHotKeyHandler: applyHotKeyHandler
+                    )
                 case .clipboard:
                     ClipboardSettingsPage(tempSettings: settings)
                 case .appearance:

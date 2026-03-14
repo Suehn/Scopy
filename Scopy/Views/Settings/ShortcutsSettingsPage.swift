@@ -2,8 +2,9 @@ import SwiftUI
 import ScopyKit
 
 struct ShortcutsSettingsPage: View {
-    @Environment(AppState.self) private var appState
     @Binding var tempSettings: SettingsDTO
+    let unregisterHotKeyHandler: (() -> Void)?
+    let applyHotKeyHandler: ((UInt32, UInt32) -> Void)?
 
     var body: some View {
         SettingsPageContainer(page: .shortcuts) {
@@ -17,8 +18,8 @@ struct ShortcutsSettingsPage: View {
                         HotKeyRecorderView(
                             keyCode: $tempSettings.hotkeyKeyCode,
                             modifiers: $tempSettings.hotkeyModifiers,
-                            unregisterHotKeyHandler: appState.unregisterHotKeyHandler,
-                            applyHotKeyHandler: appState.applyHotKeyHandler
+                            unregisterHotKeyHandler: unregisterHotKeyHandler,
+                            applyHotKeyHandler: applyHotKeyHandler
                         )
                     }
                 }

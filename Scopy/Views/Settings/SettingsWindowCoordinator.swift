@@ -62,10 +62,13 @@ final class SettingsWindowCoordinator: NSObject, NSWindowDelegate {
     }
 
     private func makeSettingsView(onDismiss: @escaping () -> Void) -> some View {
-        SettingsView(onDismiss: onDismiss)
+        SettingsView(
+            unregisterHotKeyHandler: AppState.shared.unregisterHotKeyHandler,
+            applyHotKeyHandler: AppState.shared.applyHotKeyHandler,
+            onDismiss: onDismiss
+        )
             .environment(AppState.shared)
             .environment(AppState.shared.historyViewModel)
             .environment(AppState.shared.settingsViewModel)
     }
 }
-
