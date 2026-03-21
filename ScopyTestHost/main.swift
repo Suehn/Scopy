@@ -8,5 +8,8 @@ final class ScopyTestHostAppDelegate: NSObject, NSApplicationDelegate {
 
 let app = NSApplication.shared
 app.setActivationPolicy(.prohibited)
-app.delegate = ScopyTestHostAppDelegate()
-_ = NSApplicationMain(CommandLine.argc, CommandLine.unsafeArgv)
+let delegate = ScopyTestHostAppDelegate()
+app.delegate = delegate
+withExtendedLifetime(delegate) {
+    _ = NSApplicationMain(CommandLine.argc, CommandLine.unsafeArgv)
+}

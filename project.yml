@@ -315,6 +315,7 @@ targets:
           - "**/*.md"
           - "main.swift"
           - "ScopyApp.swift"
+          - "AppDelegate.swift"
           - "Info.plist"
           - "*.entitlements"
           # Phase 7 (v0.43): Do not compile backend sources into tests; use `ScopyKit` dependency instead.
@@ -330,8 +331,8 @@ targets:
       base:
         PRODUCT_NAME: ScopyTSanTests
         PRODUCT_BUNDLE_IDENTIFIER: com.scopy.tsan.tests
-        GENERATE_INFOPLIST_FILE: true
-        INFOPLIST_KEY_NSPrincipalClass: XCTestCase
+        GENERATE_INFOPLIST_FILE: false
+        INFOPLIST_FILE: ScopyTests/ScopyTSanTests-Info.plist
         TEST_HOST: "$(BUILT_PRODUCTS_DIR)/ScopyTestHost.app/Contents/MacOS/ScopyTestHost"
         BUNDLE_LOADER: "$(TEST_HOST)"
         OTHER_SWIFT_FLAGS: "$(inherited) -DSCOPY_TSAN_TESTS"

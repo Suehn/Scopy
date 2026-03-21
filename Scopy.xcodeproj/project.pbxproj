@@ -299,6 +299,7 @@
 		8E09FFE67101D5769C94AB65 /* HotKeyRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3A1E175FDD120FFDD7F1D4E4 /* HotKeyRecorder.swift */; };
 		8E8A09B77FADE08387078D3B /* ScopyKit in Frameworks */ = {isa = PBXBuildFile; productRef = 600F5F1A8795C728F788B9FC /* ScopyKit */; };
 		8ECF1DA7922DB459156CE8D5 /* StorageStatsSemanticsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2729BCEB53FC3541B6A37BF /* StorageStatsSemanticsTests.swift */; };
+		8FD82826E460D9A0DDA40A19 /* ScopyTSanTests-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = 8C7E1DDFD0D54856F1284221 /* ScopyTSanTests-Info.plist */; };
 		909F863C69BD3A5E197EB685 /* HoverPreviewScreenMetrics.swift in Sources */ = {isa = PBXBuildFile; fileRef = DC7C11B8E94C704C047F77FF /* HoverPreviewScreenMetrics.swift */; };
 		91130AD28128B7601FCDCACC /* LoadMoreTriggerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 568714EFD72C9DC5533473A8 /* LoadMoreTriggerView.swift */; };
 		91572AC4926207BC1B1A2C4B /* HoverPreviewImageCacheTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 747759CE91D4B8639F351272 /* HoverPreviewImageCacheTests.swift */; };
@@ -310,7 +311,6 @@
 		94583F2C87E6468D08FBF28F /* KaTeX_AMS-Regular.woff2 in Resources */ = {isa = PBXBuildFile; fileRef = 6F00D09F6FFB196F3B17E451 /* KaTeX_AMS-Regular.woff2 */; };
 		94A1AF4D8054FA51BD1CA617 /* XCTestExtensions.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA19ACBA28A519AD56F862DE /* XCTestExtensions.swift */; };
 		94AB18BED4E8018E91611810 /* Localization.swift in Sources */ = {isa = PBXBuildFile; fileRef = 64F67E7978679E2B6026F8F5 /* Localization.swift */; };
-		9661BC22D241C00A9FB7E9D0 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47EB28A5AF6B73C0ADB10FA4 /* AppDelegate.swift */; };
 		96769165BC6DF4DAA0507486 /* main.swift in Sources */ = {isa = PBXBuildFile; fileRef = 27D4729DD71F0067DDCA4752 /* main.swift */; };
 		968479DEF4C0FE30B65A7059 /* KaTeX_Main-Bold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = D731CF7F77AA5C6A09962488 /* KaTeX_Main-Bold.ttf */; };
 		96BDC1F393BA6D60D6A75565 /* KaTeX_Main-Italic.woff in Resources */ = {isa = PBXBuildFile; fileRef = 78CD1BD4D4A172EB6DCBA95A /* KaTeX_Main-Italic.woff */; };
@@ -654,6 +654,7 @@
 		89A7A79DE091E0B7690EC16B /* FullIndexPendingEventsCleanupTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FullIndexPendingEventsCleanupTests.swift; sourceTree = "<group>"; };
 		8ACB57C715F93F048BD919DC /* SettingsComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsComponents.swift; sourceTree = "<group>"; };
 		8C25A96207E0DA2587E7AFBB /* HistoryListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryListView.swift; sourceTree = "<group>"; };
+		8C7E1DDFD0D54856F1284221 /* ScopyTSanTests-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = "ScopyTSanTests-Info.plist"; sourceTree = "<group>"; };
 		8D861CAAB54D3FB78AB36051 /* MarkdownPreviewWebView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownPreviewWebView.swift; sourceTree = "<group>"; };
 		9077C012BF49FB5A7F406FDF /* HistoryItemFileNoteEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryItemFileNoteEditorView.swift; sourceTree = "<group>"; };
 		90ABBA09BA409A5DF23C445E /* FTSQueryBuilderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FTSQueryBuilderTests.swift; sourceTree = "<group>"; };
@@ -1027,6 +1028,7 @@
 				48400516AB3B998E1313FBAE /* RealDatabaseRegressionTests.swift */,
 				E89CCE301327084364FDFDE1 /* ResourceCleanupTests.swift */,
 				D09D06477D29F2066855D402 /* ReviewFix24Tests.swift */,
+				8C7E1DDFD0D54856F1284221 /* ScopyTSanTests-Info.plist */,
 				0CACB3776A96E06FA53E387A /* ScrollPerformanceTests.swift */,
 				66A10DAA25261DC94EED1258 /* SearchBackendConsistencyTests.swift */,
 				15EBBE158869225275AB5F98 /* SearchServiceTests.swift */,
@@ -1491,6 +1493,7 @@
 				3752F0D5794DC646C39D6BDD /* KaTeX_Typewriter-Regular.ttf in Resources */,
 				E7B7460372AC3F6EBE32ED38 /* KaTeX_Typewriter-Regular.woff in Resources */,
 				5B71EA3015A2A0AE65642424 /* KaTeX_Typewriter-Regular.woff2 in Resources */,
+				8FD82826E460D9A0DDA40A19 /* ScopyTSanTests-Info.plist in Resources */,
 				99AB9EA619A4E8EE4B409E4C /* auto-render.min.js in Resources */,
 				E5E48BF00A05543D680924B1 /* katex.min.css in Resources */,
 				970ECD13AC74C0C918BC9A32 /* katex.min.js in Resources */,
@@ -1686,7 +1689,6 @@
 			buildActionMask = 2147483647;
 			files = (
 				E5270518B011F1F6F8D7F407 /* AboutSettingsPage.swift in Sources */,
-				9661BC22D241C00A9FB7E9D0 /* AppDelegate.swift in Sources */,
 				04D00AA12169910C80C28CF9 /* AppState.swift in Sources */,
 				C04B9C8ED256D30C0771F3E8 /* AppStateTestCompatibility.swift in Sources */,
 				05C95008A01E020F43D3988B /* AppStateTests.swift in Sources */,
@@ -2061,9 +2063,8 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				COMBINE_HIDPI_IMAGES = YES;
-				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = Scopy/Info.plist;
-				INFOPLIST_KEY_NSPrincipalClass = XCTestCase;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = "ScopyTests/ScopyTSanTests-Info.plist";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
@@ -2230,9 +2231,8 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				COMBINE_HIDPI_IMAGES = YES;
-				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = Scopy/Info.plist;
-				INFOPLIST_KEY_NSPrincipalClass = XCTestCase;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = "ScopyTests/ScopyTSanTests-Info.plist";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
