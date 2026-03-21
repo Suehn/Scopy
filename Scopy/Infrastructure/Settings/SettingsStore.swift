@@ -116,7 +116,7 @@ public actor SettingsStore {
 
         let copyQualityMinRaw = dict["pngquantCopyImageQualityMin"] as? Int ?? SettingsDTO.default.pngquantCopyImageQualityMin
         let copyQualityMaxRaw = dict["pngquantCopyImageQualityMax"] as? Int ?? SettingsDTO.default.pngquantCopyImageQualityMax
-        var copyQualityMin = max(0, min(100, copyQualityMinRaw))
+        let copyQualityMin = max(0, min(100, copyQualityMinRaw))
         var copyQualityMax = max(0, min(100, copyQualityMaxRaw))
         if copyQualityMin > copyQualityMax { copyQualityMax = copyQualityMin }
 
@@ -128,7 +128,7 @@ public actor SettingsStore {
 
         let exportQualityMinRaw = dict["pngquantMarkdownExportQualityMin"] as? Int ?? SettingsDTO.default.pngquantMarkdownExportQualityMin
         let exportQualityMaxRaw = dict["pngquantMarkdownExportQualityMax"] as? Int ?? SettingsDTO.default.pngquantMarkdownExportQualityMax
-        var exportQualityMin = max(0, min(100, exportQualityMinRaw))
+        let exportQualityMin = max(0, min(100, exportQualityMinRaw))
         var exportQualityMax = max(0, min(100, exportQualityMaxRaw))
         if exportQualityMin > exportQualityMax { exportQualityMax = exportQualityMin }
 

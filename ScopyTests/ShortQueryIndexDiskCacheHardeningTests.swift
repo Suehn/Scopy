@@ -34,32 +34,22 @@ final class ShortQueryIndexDiskCacheHardeningTests: XCTestCase {
             let search1 = SearchEngineImpl(dbPath: dbPath)
             try await search1.open()
             let paths: (cachePath: String, checksumPath: String)
-            do {
-                await search1.debugStartShortQueryIndexBuild(force: true)
-                await search1.debugAwaitShortQueryIndexBuild()
-                paths = await search1.debugShortQueryIndexDiskCachePaths()
-                await search1.close()
-            } catch {
-                await search1.close()
-                throw error
-            }
+            await search1.debugStartShortQueryIndexBuild(force: true)
+            await search1.debugAwaitShortQueryIndexBuild()
+            paths = await search1.debugShortQueryIndexDiskCachePaths()
+            await search1.close()
 
             try await Self.waitForFile(at: paths.cachePath, timeoutSeconds: Self.fileWaitTimeoutSeconds)
             try await Self.waitForFile(at: paths.checksumPath, timeoutSeconds: Self.fileWaitTimeoutSeconds)
 
             let search2 = SearchEngineImpl(dbPath: dbPath)
             try await search2.open()
-            do {
-                await search2.debugStartShortQueryIndexBuild(force: true)
-                await search2.debugAwaitShortQueryIndexBuild()
+            await search2.debugStartShortQueryIndexBuild(force: true)
+            await search2.debugAwaitShortQueryIndexBuild()
 
-                let source2 = await search2.debugShortQueryIndexLastSnapshotSource()
-                XCTAssertEqual(source2, "diskCache")
-                await search2.close()
-            } catch {
-                await search2.close()
-                throw error
-            }
+            let source2 = await search2.debugShortQueryIndexLastSnapshotSource()
+            XCTAssertEqual(source2, "diskCache")
+            await search2.close()
 
             await storage.close()
         } catch {
@@ -94,15 +84,10 @@ final class ShortQueryIndexDiskCacheHardeningTests: XCTestCase {
             let search1 = SearchEngineImpl(dbPath: dbPath)
             try await search1.open()
             let paths: (cachePath: String, checksumPath: String)
-            do {
-                await search1.debugStartShortQueryIndexBuild(force: true)
-                await search1.debugAwaitShortQueryIndexBuild()
-                paths = await search1.debugShortQueryIndexDiskCachePaths()
-                await search1.close()
-            } catch {
-                await search1.close()
-                throw error
-            }
+            await search1.debugStartShortQueryIndexBuild(force: true)
+            await search1.debugAwaitShortQueryIndexBuild()
+            paths = await search1.debugShortQueryIndexDiskCachePaths()
+            await search1.close()
 
             try await Self.waitForFile(at: paths.cachePath, timeoutSeconds: Self.fileWaitTimeoutSeconds)
             try await Self.waitForFile(at: paths.checksumPath, timeoutSeconds: Self.fileWaitTimeoutSeconds)
@@ -112,30 +97,20 @@ final class ShortQueryIndexDiskCacheHardeningTests: XCTestCase {
 
             let search2 = SearchEngineImpl(dbPath: dbPath)
             try await search2.open()
-            do {
-                await search2.debugStartShortQueryIndexBuild(force: true)
-                await search2.debugAwaitShortQueryIndexBuild()
-                let source2 = await search2.debugShortQueryIndexLastSnapshotSource()
-                XCTAssertEqual(source2, "database")
-                await search2.close()
-            } catch {
-                await search2.close()
-                throw error
-            }
+            await search2.debugStartShortQueryIndexBuild(force: true)
+            await search2.debugAwaitShortQueryIndexBuild()
+            let source2 = await search2.debugShortQueryIndexLastSnapshotSource()
+            XCTAssertEqual(source2, "database")
+            await search2.close()
 
             // 2) Corrupt cache payload: checksum mismatch must fall back to DB build.
             let search3 = SearchEngineImpl(dbPath: dbPath)
             try await search3.open()
             let paths2: (cachePath: String, checksumPath: String)
-            do {
-                await search3.debugStartShortQueryIndexBuild(force: true)
-                await search3.debugAwaitShortQueryIndexBuild()
-                paths2 = await search3.debugShortQueryIndexDiskCachePaths()
-                await search3.close()
-            } catch {
-                await search3.close()
-                throw error
-            }
+            await search3.debugStartShortQueryIndexBuild(force: true)
+            await search3.debugAwaitShortQueryIndexBuild()
+            paths2 = await search3.debugShortQueryIndexDiskCachePaths()
+            await search3.close()
 
             try await Self.waitForFile(at: paths2.cachePath, timeoutSeconds: Self.fileWaitTimeoutSeconds)
             try await Self.waitForFile(at: paths2.checksumPath, timeoutSeconds: Self.fileWaitTimeoutSeconds)
@@ -148,16 +123,11 @@ final class ShortQueryIndexDiskCacheHardeningTests: XCTestCase {
 
             let search4 = SearchEngineImpl(dbPath: dbPath)
             try await search4.open()
-            do {
-                await search4.debugStartShortQueryIndexBuild(force: true)
-                await search4.debugAwaitShortQueryIndexBuild()
-                let source4 = await search4.debugShortQueryIndexLastSnapshotSource()
-                XCTAssertEqual(source4, "database")
-                await search4.close()
-            } catch {
-                await search4.close()
-                throw error
-            }
+            await search4.debugStartShortQueryIndexBuild(force: true)
+            await search4.debugAwaitShortQueryIndexBuild()
+            let source4 = await search4.debugShortQueryIndexLastSnapshotSource()
+            XCTAssertEqual(source4, "database")
+            await search4.close()
 
             await storage.close()
         } catch {
@@ -192,15 +162,10 @@ final class ShortQueryIndexDiskCacheHardeningTests: XCTestCase {
             let search1 = SearchEngineImpl(dbPath: dbPath)
             try await search1.open()
             let paths: (cachePath: String, checksumPath: String)
-            do {
-                await search1.debugStartShortQueryIndexBuild(force: true)
-                await search1.debugAwaitShortQueryIndexBuild()
-                paths = await search1.debugShortQueryIndexDiskCachePaths()
-                await search1.close()
-            } catch {
-                await search1.close()
-                throw error
-            }
+            await search1.debugStartShortQueryIndexBuild(force: true)
+            await search1.debugAwaitShortQueryIndexBuild()
+            paths = await search1.debugShortQueryIndexDiskCachePaths()
+            await search1.close()
 
             try await Self.waitForFile(at: paths.cachePath, timeoutSeconds: Self.fileWaitTimeoutSeconds)
             try await Self.waitForFile(at: paths.checksumPath, timeoutSeconds: Self.fileWaitTimeoutSeconds)
@@ -239,16 +204,11 @@ final class ShortQueryIndexDiskCacheHardeningTests: XCTestCase {
 
             let search2 = SearchEngineImpl(dbPath: dbPath)
             try await search2.open()
-            do {
-                await search2.debugStartShortQueryIndexBuild(force: true)
-                await search2.debugAwaitShortQueryIndexBuild()
-                let source2 = await search2.debugShortQueryIndexLastSnapshotSource()
-                XCTAssertEqual(source2, "database")
-                await search2.close()
-            } catch {
-                await search2.close()
-                throw error
-            }
+            await search2.debugStartShortQueryIndexBuild(force: true)
+            await search2.debugAwaitShortQueryIndexBuild()
+            let source2 = await search2.debugShortQueryIndexLastSnapshotSource()
+            XCTAssertEqual(source2, "database")
+            await search2.close()
 
             await storage.close()
         } catch {
@@ -284,39 +244,29 @@ final class ShortQueryIndexDiskCacheHardeningTests: XCTestCase {
             let search1 = SearchEngineImpl(dbPath: dbPath)
             try await search1.open()
             let paths: (cachePath: String, checksumPath: String)
-            do {
-                await search1.debugStartShortQueryIndexBuild(force: true)
-                await search1.debugAwaitShortQueryIndexBuild()
-                paths = await search1.debugShortQueryIndexDiskCachePaths()
+            await search1.debugStartShortQueryIndexBuild(force: true)
+            await search1.debugAwaitShortQueryIndexBuild()
+            paths = await search1.debugShortQueryIndexDiskCachePaths()
 
-                // Simulate a common "usage update" path: same contentHash => update lastUsedAt/useCount only.
-                var updated = inserted
-                updated.lastUsedAt = Date()
-                updated.useCount += 1
-                await search1.handleUpsertedItem(updated)
+            // Simulate a common "usage update" path: same contentHash => update lastUsedAt/useCount only.
+            var updated = inserted
+            updated.lastUsedAt = Date()
+            updated.useCount += 1
+            await search1.handleUpsertedItem(updated)
 
-                await search1.close()
-            } catch {
-                await search1.close()
-                throw error
-            }
+            await search1.close()
 
             try await Self.waitForFile(at: paths.cachePath, timeoutSeconds: Self.fileWaitTimeoutSeconds)
             try await Self.waitForFile(at: paths.checksumPath, timeoutSeconds: Self.fileWaitTimeoutSeconds)
 
             let search2 = SearchEngineImpl(dbPath: dbPath)
             try await search2.open()
-            do {
-                await search2.debugStartShortQueryIndexBuild(force: true)
-                await search2.debugAwaitShortQueryIndexBuild()
+            await search2.debugStartShortQueryIndexBuild(force: true)
+            await search2.debugAwaitShortQueryIndexBuild()
 
-                let source2 = await search2.debugShortQueryIndexLastSnapshotSource()
-                XCTAssertEqual(source2, "diskCache")
-                await search2.close()
-            } catch {
-                await search2.close()
-                throw error
-            }
+            let source2 = await search2.debugShortQueryIndexLastSnapshotSource()
+            XCTAssertEqual(source2, "diskCache")
+            await search2.close()
 
             await storage.close()
         } catch {
@@ -416,22 +366,17 @@ final class ShortQueryIndexDiskCacheHardeningTests: XCTestCase {
 
             let search2 = SearchEngineImpl(dbPath: dbPath)
             try await search2.open()
-            do {
-                await search2.debugStartShortQueryIndexBuild(force: true)
-                await search2.debugAwaitShortQueryIndexBuild()
+            await search2.debugStartShortQueryIndexBuild(force: true)
+            await search2.debugAwaitShortQueryIndexBuild()
 
-                let source2 = await search2.debugShortQueryIndexLastSnapshotSource()
-                XCTAssertEqual(source2, "diskCache")
+            let source2 = await search2.debugShortQueryIndexLastSnapshotSource()
+            XCTAssertEqual(source2, "diskCache")
 
-                let stats2 = await search2.debugShortQueryIndexStats()
-                XCTAssertEqual(stats2.live, 1)
-                XCTAssertEqual(stats2.tombstones, 1)
+            let stats2 = await search2.debugShortQueryIndexStats()
+            XCTAssertEqual(stats2.live, 1)
+            XCTAssertEqual(stats2.tombstones, 1)
 
-                await search2.close()
-            } catch {
-                await search2.close()
-                throw error
-            }
+            await search2.close()
 
             await storage.close()
         } catch {
