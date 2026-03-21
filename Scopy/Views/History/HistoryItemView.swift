@@ -656,6 +656,7 @@ struct HistoryItemView: View, Equatable {
         }
         .buttonStyle(.plain)
         .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityIdentifier("HistoryItem.MainAction")
         .accessibilityHint("Activate this history item")
     }
 
@@ -682,6 +683,7 @@ struct HistoryItemView: View, Equatable {
                     }
                 }
                 .buttonStyle(.plain)
+                .accessibilityIdentifier("HistoryItem.OptimizeButton")
                 .accessibilityLabel("Optimize image")
                 .help("优化图片大小（pngquant）")
                 .disabled(isOptimizingImage)
@@ -889,35 +891,42 @@ struct HistoryItemView: View, Equatable {
             Button("Copy") {
                 onSelect()
             }
+            .accessibilityIdentifier("HistoryItem.ContextMenu.Copy")
             if item.type == .image {
                 Button("Paste-optimized for Codex") {
                     onSelectOptimizedForCodex()
                 }
+                .accessibilityIdentifier("HistoryItem.ContextMenu.PasteOptimizedForCodex")
             }
             if canExportPNG {
                 Button("Export PNG") {
                     startExportPNGTask()
                 }
+                .accessibilityIdentifier("HistoryItem.ContextMenu.ExportPNG")
                 .disabled(isExportingPNG)
             }
             Button(item.isPinned ? "Unpin" : "Pin") {
                 onTogglePin()
             }
+            .accessibilityIdentifier(item.isPinned ? "HistoryItem.ContextMenu.Unpin" : "HistoryItem.ContextMenu.Pin")
             if item.type == .file {
                 Divider()
                 Button(noteMenuTitle) {
                     presentNoteEditor()
                 }
+                .accessibilityIdentifier(item.note?.isEmpty == false ? "HistoryItem.ContextMenu.EditNote" : "HistoryItem.ContextMenu.AddNote")
                 if item.note?.isEmpty == false {
                     Button("Clear Note") {
                         onUpdateNote(nil)
                     }
+                    .accessibilityIdentifier("HistoryItem.ContextMenu.ClearNote")
                 }
             }
             Divider()
             Button("Delete", role: .destructive) {
                 onDelete()
             }
+            .accessibilityIdentifier("HistoryItem.ContextMenu.Delete")
         }
         .popover(isPresented: isNoteEditorPresentedBinding, arrowEdge: .leading) {
             HistoryItemFileNoteEditorView(

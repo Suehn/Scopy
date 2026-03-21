@@ -36,6 +36,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
+        if context.isHistoryItemHarness {
+            uiTestWindow = makeHistoryItemHarnessWindow()
+            return
+        }
+
         let rootView = makeRootView(appState: appState)
 
         if context.isUITesting {
@@ -67,12 +72,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private struct LaunchContext {
         let isUITesting: Bool
         let isExportHarness: Bool
+        let isHistoryItemHarness: Bool
     }
 
     private func resolveLaunchContext() -> LaunchContext {
         let isUITesting = ProcessInfo.processInfo.arguments.contains("--uitesting")
         let isExportHarness = isUITesting && ProcessInfo.processInfo.environment["SCOPY_UITEST_EXPORT_HARNESS"] == "1"
-        return LaunchContext(isUITesting: isUITesting, isExportHarness: isExportHarness)
+        let isHistoryItemHarness = isUITesting && ProcessInfo.processInfo.environment["SCOPY_UITEST_HISTORY_ITEM_HARNESS"] == "1"
+        return LaunchContext(
+            isUITesting: isUITesting,
+            isExportHarness: isExportHarness,
+            isHistoryItemHarness: isHistoryItemHarness
+        )
     }
 
     private func makeRootView(appState: AppState) -> some View {
@@ -88,6 +99,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             size: NSSize(width: 820, height: 620),
             styleMask: [.titled, .closable, .resizable, .fullSizeContentView],
             title: "Scopy Export Harness",
+            level: .floating
+        )
+        return window
+    }
+
+    private func makeHistoryItemHarnessWindow() -> NSWindow {
+        let window = makeHostingWindow(
+            rootView: HistoryItemHarnessView(),
+            size: NSSize(width: 880, height: 360),
+            styleMask: [.titled, .closable, .resizable, .fullSizeContentView],
+            title: "Scopy History Item Harness",
             level: .floating
         )
         return window
