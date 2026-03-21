@@ -8,12 +8,12 @@ runbook_doc: doc/current/release-runbook.md
 spec_doc: doc/current/product-spec.md
 development_doc: doc/current/development-guide.md
 architecture_doc: doc/current/architecture.md
-last_verified_at: 2026-03-15
-summary: Search coverage, list interaction, and accessibility hardening across history view and search UI
+last_verified_at: 2026-03-21
+summary: History harness, preview concurrency, search helper coverage, warm-load baselines, and hosted TSan gating on the known-bad Apple runtime
 verification:
   build: pass
   test_unit: pass
   test_strict: pass
-  test_tsan: environment_error_65
+  test_tsan: skipped_known_bad_runtime
   test_perf_heavy: not_run
   test_snapshot_perf_release: pass

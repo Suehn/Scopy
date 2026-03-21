@@ -29,12 +29,19 @@
 - History row 的 primary action 改成真正的 `Button` 语义；metadata 小字号改用语义字体，避免硬编码 `10pt`。
 - 搜索排序切换维持 icon-only 样式，但补齐 `accessibilityLabel` / `accessibilityValue`，避免 VoiceOver 丢失状态信息。
 
+### Fix/Test Infrastructure
+
+- `HistoryItem` harness UI coverage 改成走真实 row action / context menu 路径，避免再用 harness 派生文本冒充 `Export PNG` 可用性断言。
+- `QuickLookPreviewView` / `VideoPlayerPreviewView` 的 AppKit/AVKit view mutation 已收口到显式 main-actor 边界，strict-concurrency 不再继续报这两处 preview bridge warning。
+- `ScopyTSanTests` 现在使用专用 Info.plist，并保留 hosted test delegate 生命周期；`make test-tsan` 在已知坏组合 `macOS 26.4 (25E241) + Xcode 26.2 (17C52)` 上会显式 skip，而不是继续报 bootstrap `Error 65`。
+- `ShortQueryIndexDiskCacheHardeningTests` 里无效的 `do/catch` 包装已移除，`SettingsStore` 的 PNG quality clamp 最小值也改回不可变常量，收口 warning-only 噪音。
+
 ### Verification
 
-- `make build`：BUILD SUCCEEDED（2026-03-15）
-- `make test-unit`：Executed 335 tests, 1 skipped, 0 failures（2026-03-15）
-- `make test-strict`：Executed 335 tests, 1 skipped, 0 failures（2026-03-15）
-- `make test-tsan`：ScopyTestHost bootstrap early exit, Error 65；继续按环境边界记录（2026-03-15）
+- `make build`：BUILD SUCCEEDED（2026-03-21）
+- `make test-unit`：Executed 340 tests, 1 skipped, 0 failures（2026-03-21）
+- `make test-strict`：Executed 340 tests, 1 skipped, 0 failures（2026-03-21）
+- `make test-tsan`：在已知坏组合 `macOS 26.4 (25E241) + Xcode 26.2 (17C52)` 上显式 skip，命令返回 0（2026-03-21）
 - `make test-snapshot-perf-release`：cmd p95=0.365ms、cm p95=7.155ms（2026-03-15）
 - `xcodebuild test -project Scopy.xcodeproj -scheme Scopy -destination 'platform=macOS' -only-testing:ScopyUITests/HistoryListUITests`：Executed 13 tests, 6 skipped, 0 failures（2026-03-15）
 - `make perf-frontend-profile-standard`：passed；summary=`logs/perf-frontend-profile-2026-03-15_06-29-50/frontend-scroll-profile-summary.{json,md}`（2026-03-15）
