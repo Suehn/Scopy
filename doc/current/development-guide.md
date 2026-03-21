@@ -150,10 +150,11 @@ Implication: if you touch settings behavior, preserve the Save/Cancel model and 
 ### Performance Validation
 
 - `make test-snapshot-perf-release` for release-path backend perf gates
+- `make perf-search-warm-load` for backend full-index warm-load latency and peak RSS
 - `make perf-frontend-profile` for daily frontend smoke
 - `make perf-frontend-profile-standard` before stronger local confidence
 - `make perf-frontend-profile-full` before release-grade validation
-- `make perf-unified-table` when correlating frontend and backend evidence
+- `make perf-unified-table` when correlating frontend and backend evidence, including `warm-load-summary.json` when present
 
 ### Documentation And Release Validation
 

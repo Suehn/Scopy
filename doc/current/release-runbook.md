@@ -2,7 +2,7 @@
 doc_type: runbook
 status: active
 owner: maintainers
-last_reviewed: 2026-03-07
+last_reviewed: 2026-03-21
 canonical: true
 related_versions:
   - v0.60.2
@@ -51,8 +51,9 @@ related_versions:
 - Concurrency-sensitive changes: `make test-strict`, and `make test-tsan` when the environment permits
 - Perf-sensitive changes:
   - `make test-snapshot-perf-release`
+  - `make perf-search-warm-load`
   - `make perf-frontend-profile`
-  - `make perf-unified-table` when comparing frontend and backend evidence
+  - `make perf-unified-table` when comparing frontend and backend evidence, including `warm-load-summary.json` from `perf-search-warm-load` / `perf-audit`
 
 ## Homebrew Acceptance
 
