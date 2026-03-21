@@ -23,7 +23,7 @@ This page is the human-facing index for current release state. Automation should
 - Date: `2026-03-13`
 - Release note: [v0.60.3](./history/v0.60.3.md)
 - Changelog: [CHANGELOG.md](./CHANGELOG.md)
-- Profile doc: `none`
+- Profile doc: [v0.60.3-profile.md](../perf/release-profiles/v0.60.3-profile.md)
 <!-- release-current:end -->
 
 ## Recent Releases

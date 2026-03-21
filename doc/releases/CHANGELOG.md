@@ -36,17 +36,24 @@
 - `ScopyTSanTests` 现在使用专用 Info.plist，并保留 hosted test delegate 生命周期；`make test-tsan` 在已知坏组合 `macOS 26.4 (25E241) + Xcode 26.2 (17C52)` 上会显式 skip，而不是继续报 bootstrap `Error 65`。
 - `ShortQueryIndexDiskCacheHardeningTests` 里无效的 `do/catch` 包装已移除，`SettingsStore` 的 PNG quality clamp 最小值也改回不可变常量，收口 warning-only 噪音。
 
+### Perf/Validation
+
+- 当前 release window 已补齐 backend release bench、warm-load / peak RSS、frontend standard profile 与 unified table，并新增 [v0.60.3 profile](../perf/release-profiles/v0.60.3-profile.md) 挂回 metadata。
+- 新增独立 Hosted TSan workflow（`macos-15 + Xcode 16.0`），把真实 hosted TSan 覆盖从当前本机的 Apple runtime gate 中解耦出来。
+
 ### Verification
 
 - `make build`：BUILD SUCCEEDED（2026-03-21）
 - `make test-unit`：Executed 340 tests, 1 skipped, 0 failures（2026-03-21）
 - `make test-strict`：Executed 340 tests, 1 skipped, 0 failures（2026-03-21）
 - `make test-tsan`：在已知坏组合 `macOS 26.4 (25E241) + Xcode 26.2 (17C52)` 上显式 skip，命令返回 0（2026-03-21）
-- `make test-snapshot-perf-release`：cmd p95=0.365ms、cm p95=7.155ms（2026-03-15）
+- `make test-snapshot-perf-release`：cmd p95=0.155ms、cm p95=5.472ms（2026-03-21）
+- `make perf-search-warm-load`：warm-load=2657.135ms、peak RSS=189.88MB（2026-03-21）
 - `xcodebuild test -project Scopy.xcodeproj -scheme Scopy -destination 'platform=macOS' -only-testing:ScopyUITests/HistoryListUITests`：Executed 13 tests, 6 skipped, 0 failures（2026-03-15）
-- `make perf-frontend-profile-standard`：passed；summary=`logs/perf-frontend-profile-2026-03-15_06-29-50/frontend-scroll-profile-summary.{json,md}`（2026-03-15）
-- `make docs-validate`：passed（2026-03-15）
-- `make release-validate`：passed（2026-03-15）
+- `make perf-frontend-profile-standard`：passed；summary=`logs/perf-frontend-profile-2026-03-21_21-09-51/frontend-scroll-profile-summary.{json,md}`（2026-03-21）
+- `make perf-unified-table`：passed；summary=`logs/perf-unified-2026-03-21_21-12-11.{md,json}`（2026-03-21）
+- `make docs-validate`：passed（2026-03-21）
+- `make release-validate`：passed（2026-03-21）
 
 ## [v0.60.3] - 2026-03-13
 
