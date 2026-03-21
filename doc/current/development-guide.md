@@ -145,7 +145,7 @@ Implication: if you touch settings behavior, preserve the Save/Cancel model and 
 - `make build`
 - `make test-unit`
 - `make test-strict` for concurrency-sensitive work
-- `make test-tsan` when the environment supports the hosted test path
+- `make test-tsan` when the environment supports the hosted test path; the command auto-skips the known-bad `macOS 26.4 (25E241) + Xcode 26.2 (17C52)` hosted runtime combination
 
 ### Performance Validation
 

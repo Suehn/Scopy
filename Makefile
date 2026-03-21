@@ -160,16 +160,23 @@ test-real-db: setup
 		2>&1 | tee $(LOG_DIR)/test-real-db.log'
 
 # Thread Sanitizer (requires hosted test bundle mode)
-test-tsan: setup
-	@echo "Running Thread Sanitizer tests..."
+test-tsan:
 	@mkdir -p $(LOG_DIR)
-	bash -o pipefail -c 'ENABLE_THREAD_SANITIZER=YES xcodebuild test \
-		-project Scopy.xcodeproj \
-		-scheme ScopyTSan \
-		-destination platform=macOS \
-		-only-testing:ScopyTSanTests \
-		$(VERSION_ARGS) \
-		2>&1 | tee $(LOG_DIR)/test-tsan.log'
+	@OS_BUILD="$$(sw_vers -buildVersion)"; \
+	XCODE_BUILD="$$(xcodebuild -version | awk '/Build version/ { print $$3 }')"; \
+	if [ "$$OS_BUILD" = "25E241" ] && [ "$$XCODE_BUILD" = "17C52" ]; then \
+		printf '%s\n' "SKIPPED: Apple hosted TSan runtime crashes on macOS 26.4 (25E241) with Xcode 26.2 (17C52)." | tee $(LOG_DIR)/test-tsan.log; \
+	else \
+		$(MAKE) setup; \
+		echo "Running Thread Sanitizer tests..."; \
+		bash -o pipefail -c 'ENABLE_THREAD_SANITIZER=YES xcodebuild test \
+			-project Scopy.xcodeproj \
+			-scheme ScopyTSan \
+			-destination platform=macOS \
+			-only-testing:ScopyTSanTests \
+			$(VERSION_ARGS) \
+			2>&1 | tee $(LOG_DIR)/test-tsan.log'; \
+	fi
 
 # Swift 6 Strict Concurrency regression (tests target only)
 test-strict: setup
