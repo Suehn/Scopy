@@ -57,6 +57,7 @@ Options:
 
 Outputs:
   - ScopyBench JSONL: <out>/scopybench.jsonl
+  - Warm-load summary: <out>/warm-load-summary.json
   - Logs: <out>/*.log
 EOF
 }
@@ -278,6 +279,13 @@ if [[ "${SKIP_BENCH}" -eq 0 ]]; then
     run_service_bench "snapshot:service:fuzzyPlus:relevance:cm:noThumb" "fuzzyPlus" "relevance" "cm" 0 1
 
     echo "ScopyBench service JSONL saved to: ${BENCH_OUT_SERVICE}"
+
+    echo "Measuring full-index warm-load + peak RSS..."
+    bash "${PROJECT_DIR}/scripts/perf-search-warm-load.sh" \
+        --db "${BENCH_DB}" \
+        --out "${OUT_DIR}" \
+        --bench-bin "${BENCH_BIN}" \
+        --skip-build > "${OUT_DIR}/warm-load.log" 2>&1
 
     if [[ "${BENCH_METRICS}" -eq 1 ]]; then
         echo "Running ScopyBench with SCOPY_PERF_METRICS=1 (release)..."

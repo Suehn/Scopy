@@ -127,6 +127,19 @@ def load_backend_metrics(root):
                 metric_map[label] = float(p95)
     return metric_map
 
+def load_warm_load_summary(root):
+    path = os.path.join(root, "warm-load-summary.json")
+    if not os.path.isfile(path):
+        return {}
+    with open(path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    summary = {}
+    if isinstance(data.get("warm_load_ms"), (int, float)):
+        summary["warm_load_ms"] = float(data["warm_load_ms"])
+    if isinstance(data.get("peak_rss_mb"), (int, float)):
+        summary["peak_rss_mb"] = float(data["peak_rss_mb"])
+    return summary
+
 def metric_from_summary(variant_data, scenario, path):
     node = variant_data.get(scenario, {})
     for key in path:
@@ -139,6 +152,8 @@ def metric_from_summary(variant_data, scenario, path):
 
 backend_baseline = load_backend_metrics(backend_baseline_dir)
 backend_current = load_backend_metrics(backend_current_dir)
+backend_warm_baseline = load_warm_load_summary(backend_baseline_dir)
+backend_warm_current = load_warm_load_summary(backend_current_dir)
 
 with open(frontend_summary_path, "r", encoding="utf-8") as f:
     frontend_summary = json.load(f)
@@ -158,6 +173,23 @@ for metric_name, _, label in backend_labels:
         "unit": "ms",
         "source": label,
     })
+
+rows.append({
+    "domain": "backend",
+    "metric": "backend.engine.full_index.warm_load_ms",
+    "baseline": backend_warm_baseline.get("warm_load_ms"),
+    "current": backend_warm_current.get("warm_load_ms"),
+    "unit": "ms",
+    "source": "warm-load-summary.json",
+})
+rows.append({
+    "domain": "backend",
+    "metric": "backend.engine.full_index.peak_rss_mb",
+    "baseline": backend_warm_baseline.get("peak_rss_mb"),
+    "current": backend_warm_current.get("peak_rss_mb"),
+    "unit": "MB",
+    "source": "warm-load-summary.json",
+})
 
 frontend_metric_specs = [
     ("frontend.frame.p95_ms", ("frame_p95_ms", "median"), "ms"),

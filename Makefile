@@ -3,7 +3,7 @@
 
 .PHONY: all setup build run clean xcode test test-unit test-perf test-perf-heavy test-snapshot-perf test-snapshot-perf-release test-tsan test-strict coverage benchmark perf-audit perf-frontend-profile perf-frontend-profile-smoke perf-frontend-profile-standard perf-frontend-profile-full perf-unified-table test-flow test-flow-quick health-check
 .PHONY: test-real-db
-.PHONY: snapshot-perf-db bench-snapshot-search
+.PHONY: snapshot-perf-db bench-snapshot-search perf-search-warm-load
 .PHONY: tag-release push-release release-validate release-bump-patch
 
 VERSION_ARGS := $(shell bash scripts/version.sh --xcodebuild-args 2>/dev/null)
@@ -295,6 +295,10 @@ bench-snapshot-search:
 	@swift run -c release ScopyBench --db perf-db/clipboard.db --mode fuzzy --sort relevance --query abc --force-full-fuzzy --iters 30 --warmup 20
 	@swift run -c release ScopyBench --db perf-db/clipboard.db --mode fuzzy --sort relevance --query cmd --force-full-fuzzy --iters 30 --warmup 20
 
+# 测量 full-index warm-load latency 与 peak RSS
+perf-search-warm-load:
+	@bash scripts/perf-search-warm-load.sh
+
 # 一键性能审计（bench + perf tests；输出落盘到 logs/perf-audit-*）
 perf-audit:
 	@bash scripts/perf-audit.sh
@@ -350,6 +354,7 @@ help:
 	@echo "  make perf-frontend-profile - Run frontend profile smoke (default)"
 	@echo "  make perf-frontend-profile-standard - Run frontend profile standard tier"
 	@echo "  make perf-frontend-profile-full - Run frontend profile full release tier"
+	@echo "  make perf-search-warm-load - Measure backend warm-load latency and peak RSS"
 	@echo "  make perf-unified-table - Merge backend+frontend metrics into one table"
 	@echo ""
 	@echo "Test Flow Automation:"
