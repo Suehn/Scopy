@@ -493,6 +493,74 @@ final class SearchServiceTests: XCTestCase {
 #endif
     }
 
+    func testForceFullFuzzyPlusUsesSubstringFallbackWithoutBuildingFullIndex() async throws {
+        _ = try await storage.upsertItem(makeContent("command center"))
+        _ = try await storage.upsertItem(makeContent("committee notes"))
+        await search.invalidateCache()
+
+#if DEBUG
+        let before = await search.debugFullIndexHealth()
+        XCTAssertFalse(before.isBuilt)
+#endif
+
+        let result = try await search.search(
+            request: SearchRequest(query: "command", mode: .fuzzyPlus, sortMode: .relevance, forceFullFuzzy: true, limit: 50, offset: 0)
+        )
+
+        XCTAssertTrue(result.items.contains(where: { $0.plainText.localizedCaseInsensitiveContains("command") }))
+        XCTAssertEqual(result.coverage, .complete)
+
+#if DEBUG
+        let after = await search.debugFullIndexHealth()
+        XCTAssertFalse(after.isBuilt)
+#endif
+    }
+
+    func testFuzzySearchUsesFTSPrefilterForOldASCIIHitInHeavyCorpus() async throws {
+        let target = try await storage.upsertItem(makeContent("velocityterm archive note"))
+        _ = try await storage.upsertItem(makeContent(String(repeating: "a", count: 120_000)))
+        for i in 0..<2001 {
+            _ = try await storage.upsertItem(makeContent("Filler \(i)"))
+        }
+        await search.invalidateCache()
+
+        let result = try await search.search(
+            request: SearchRequest(query: "velocityterm", mode: .fuzzy, sortMode: .relevance, limit: 50, offset: 0)
+        )
+
+        XCTAssertTrue(result.items.contains(where: { $0.id == target.id }))
+        XCTAssertEqual(result.coverage, .stagedRefine)
+    }
+
+    func testFuzzySearchFallsBackToRecentCacheWhenFTSMisses() async throws {
+        _ = try await storage.upsertItem(makeContent(String(repeating: "a", count: 120_000)))
+        let target = try await storage.upsertItem(makeContent("command center"))
+        await search.invalidateCache()
+
+        let result = try await search.search(
+            request: SearchRequest(query: "cmd", mode: .fuzzy, sortMode: .relevance, limit: 50, offset: 0)
+        )
+
+        XCTAssertTrue(result.items.contains(where: { $0.id == target.id }))
+        XCTAssertEqual(result.coverage, .stagedRefine)
+        XCTAssertEqual(result.total, -1)
+    }
+
+    func testFuzzySearchReturnsEmptyStagedRefineWhenInteractivePrefilterMisses() async throws {
+        _ = try await storage.upsertItem(makeContent(String(repeating: "a", count: 120_000)))
+        _ = try await storage.upsertItem(makeContent("recent item"))
+        await search.invalidateCache()
+
+        let result = try await search.search(
+            request: SearchRequest(query: "zzzzx", mode: .fuzzy, sortMode: .relevance, limit: 50, offset: 0)
+        )
+
+        XCTAssertTrue(result.items.isEmpty)
+        XCTAssertEqual(result.total, 0)
+        XCTAssertFalse(result.hasMore)
+        XCTAssertEqual(result.coverage, .stagedRefine)
+    }
+
     // MARK: - Edge Cases
 
     func testSpecialCharactersInQuery() async throws {

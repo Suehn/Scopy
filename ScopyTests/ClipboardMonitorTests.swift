@@ -40,6 +40,32 @@ final class ClipboardMonitorTests: XCTestCase {
         XCTAssertNotNil(monitor.contentStream)
     }
 
+    func testClipboardIngestMetricsSummaryAggregatesCountersAndTimestamps() async throws {
+        let metrics = ClipboardIngestMetrics.shared
+
+        await metrics.updateQueueSnapshot(pendingCount: 3, activeCount: 2, persistedCount: 7)
+        await metrics.recordSoftLimitHit()
+        await metrics.recordChangeDelta(1)
+        await metrics.recordChangeDelta(5)
+        await metrics.recordReplay(count: 0)
+        await metrics.recordReplay(count: 4)
+        await metrics.recordPersistedEnvelope()
+        await metrics.recordAcknowledgedEnvelope()
+
+        let summary = await metrics.getSummary()
+
+        XCTAssertEqual(summary.pendingCount, 3)
+        XCTAssertEqual(summary.activeCount, 2)
+        XCTAssertEqual(summary.persistedCount, 7)
+        XCTAssertEqual(summary.softLimitHitCount, 1)
+        XCTAssertEqual(summary.replayCount, 4)
+        XCTAssertEqual(summary.changeJumpCount, 1)
+        XCTAssertEqual(summary.maxObservedChangeDelta, 5)
+        XCTAssertNotNil(summary.lastPersistedAt)
+        XCTAssertNotNil(summary.lastAcknowledgedAt)
+        XCTAssertNotNil(summary.lastReplayAt)
+    }
+
     // MARK: - Configuration Tests
 
     func testPollingIntervalConfiguration() {
