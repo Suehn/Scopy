@@ -41,6 +41,7 @@ struct QuickLookPreviewView: NSViewRepresentable {
         private var currentURL: URL?
         private var previewItem: QuickLookPreviewItem?
 
+        @MainActor
         func setPreview(url: URL, in view: QLPreviewView) {
             guard currentURL?.path != url.path else { return }
             currentURL = url

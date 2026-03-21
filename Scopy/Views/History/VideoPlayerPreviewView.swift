@@ -27,6 +27,7 @@ struct VideoPlayerPreviewView: NSViewRepresentable {
         private var endObserver: NSObjectProtocol?
         private weak var player: AVPlayer?
 
+        @MainActor
         func configure(view: AVPlayerView, url: URL) {
             guard currentURL?.path != url.path || view.player == nil else { return }
 
@@ -62,6 +63,7 @@ struct VideoPlayerPreviewView: NSViewRepresentable {
             player.play()
         }
 
+        @MainActor
         func teardown(view: AVPlayerView) {
             if let endObserver {
                 NotificationCenter.default.removeObserver(endObserver)
