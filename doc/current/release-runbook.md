@@ -5,7 +5,7 @@ owner: maintainers
 last_reviewed: 2026-03-21
 canonical: true
 related_versions:
-  - v0.60.2
+  - v0.60.3
 ---
 
 # Release Runbook
@@ -32,7 +32,7 @@ related_versions:
 ## Release Steps
 
 1. Update [../meta/release-current.yml](../meta/release-current.yml), the new release note under [../releases/history/](../releases/history/README.md), [../releases/README.md](../releases/README.md), and [../releases/CHANGELOG.md](../releases/CHANGELOG.md).
-2. Add or explicitly skip a release profile in [../perf/release-profiles/](../perf/release-profiles/README.md).
+2. Add or explicitly skip a release profile in [../perf/release-profiles/](../perf/release-profiles/README.md), and keep `profile_doc` in metadata aligned with that choice.
 3. Run `make docs-validate`.
 4. Run `make release-validate`.
 5. Create the tag with `make tag-release`.
@@ -43,16 +43,17 @@ related_versions:
 ## Release Environment
 
 - Release CI currently targets `macos-15`.
+- Hosted TSan CI also targets `macos-15` with Xcode 16.0 via [../../.github/workflows/tsan.yml](../../.github/workflows/tsan.yml).
 - Project baseline remains `macOS 14.0` and `Xcode 16.0` unless intentionally changed in project configuration and workflows.
 
 ## Verification Expectations
 
 - Baseline build/tests: `make build`, `make test-unit`
-- Concurrency-sensitive changes: `make test-strict`, and `make test-tsan` when the environment permits; on the known-bad `macOS 26.4 (25E241) + Xcode 26.2 (17C52)` combo the command skips because Apple hosted TSan crashes before test bootstrap
+- Concurrency-sensitive changes: `make test-strict`, and `make test-tsan` when the environment permits; on the known-bad `macOS 26.4 (25E241) + Xcode 26.2 (17C52)` combo the command skips because Apple hosted TSan crashes before test bootstrap, while the supported real-coverage path runs in Hosted TSan CI on `macos-15`
 - Perf-sensitive changes:
   - `make test-snapshot-perf-release`
   - `make perf-search-warm-load`
-  - `make perf-frontend-profile`
+  - `make perf-frontend-profile-standard`
   - `make perf-unified-table` when comparing frontend and backend evidence, including `warm-load-summary.json` from `perf-search-warm-load` / `perf-audit`
 
 ## Homebrew Acceptance

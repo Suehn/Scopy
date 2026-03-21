@@ -146,6 +146,7 @@ Implication: if you touch settings behavior, preserve the Save/Cancel model and 
 - `make test-unit`
 - `make test-strict` for concurrency-sensitive work
 - `make test-tsan` when the environment supports the hosted test path; the command auto-skips the known-bad `macOS 26.4 (25E241) + Xcode 26.2 (17C52)` hosted runtime combination
+- Hosted TSan CI lives in `.github/workflows/tsan.yml` on `macos-15 + Xcode 16.0`; treat that workflow as the supported real-coverage path until the local Apple runtime issue is resolved
 
 ### Performance Validation
 
@@ -155,6 +156,7 @@ Implication: if you touch settings behavior, preserve the Save/Cancel model and 
 - `make perf-frontend-profile-standard` before stronger local confidence
 - `make perf-frontend-profile-full` before release-grade validation
 - `make perf-unified-table` when correlating frontend and backend evidence, including `warm-load-summary.json` when present
+- When a profile adds new evidence beyond the release note, add a versioned doc under `doc/perf/release-profiles/` and point `profile_doc` at it
 
 ### Documentation And Release Validation
 
