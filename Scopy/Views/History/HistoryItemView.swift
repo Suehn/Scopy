@@ -31,7 +31,7 @@ private actor PreviewTaskBudget {
         }
     }
 
-    func releaseIfNeeded() {
+    func releaseIfNeeded() async {
         guard PerfFeatureFlags.previewTaskBudgetEnabled else { return }
         if let continuation = waiters.first {
             waiters.removeFirst()
@@ -79,6 +79,7 @@ struct HistoryItemView: View, Equatable {
 
     // 局部状态 - 悬停不触发全局重绘
     @StateObject private var rowController: HistoryItemRowController
+    @StateObject private var previewCoordinator = HistoryItemPreviewCoordinator()
     // v0.15: Text preview state
     @StateObject private var previewModel = HoverPreviewModel()
     @State private var isUITestTapPreviewEnabled: Bool = false
@@ -147,53 +148,50 @@ struct HistoryItemView: View, Equatable {
     }
 
     private var isHovering: Bool {
-        get { rowController.isHovering }
-        nonmutating set { rowController.isHovering = newValue }
+        get { previewCoordinator.isHovering }
+        nonmutating set { previewCoordinator.isHovering = newValue }
     }
 
     private var hoverDebounceTask: Task<Void, Never>? {
-        get { rowController.hoverDebounceTask }
-        nonmutating set { rowController.hoverDebounceTask = newValue }
+        get { previewCoordinator.hoverDebounceTask }
+        nonmutating set { previewCoordinator.hoverDebounceTask = newValue }
     }
 
     private var hoverPreviewTask: Task<Void, Never>? {
-        get { rowController.hoverPreviewTask }
-        nonmutating set { rowController.hoverPreviewTask = newValue }
+        get { previewCoordinator.hoverPreviewTask }
+        nonmutating set { previewCoordinator.hoverPreviewTask = newValue }
     }
 
     private var hoverMarkdownTask: Task<Void, Never>? {
-        get { rowController.hoverMarkdownTask }
-        nonmutating set { rowController.hoverMarkdownTask = newValue }
+        get { previewCoordinator.hoverMarkdownTask }
+        nonmutating set { previewCoordinator.hoverMarkdownTask = newValue }
     }
 
     private var hoverExitTask: Task<Void, Never>? {
-        get { rowController.hoverExitTask }
-        nonmutating set { rowController.hoverExitTask = newValue }
+        get { previewCoordinator.hoverExitTask }
+        nonmutating set { previewCoordinator.hoverExitTask = newValue }
     }
 
     private var isPopoverHovering: Bool {
-        get { rowController.isPopoverHovering }
-        nonmutating set { rowController.isPopoverHovering = newValue }
+        get { previewCoordinator.isPopoverHovering }
+        nonmutating set { previewCoordinator.isPopoverHovering = newValue }
     }
 
     private var imagePopoverToken: UUID {
-        get { rowController.imagePopoverToken }
-        nonmutating set { rowController.imagePopoverToken = newValue }
+        previewCoordinator.imagePopoverToken
     }
 
     private var textPopoverToken: UUID {
-        get { rowController.textPopoverToken }
-        nonmutating set { rowController.textPopoverToken = newValue }
+        previewCoordinator.textPopoverToken
     }
 
     private var filePopoverToken: UUID {
-        get { rowController.filePopoverToken }
-        nonmutating set { rowController.filePopoverToken = newValue }
+        previewCoordinator.filePopoverToken
     }
 
     private var markdownFilePreviewCacheKey: String? {
-        get { rowController.markdownFilePreviewCacheKey }
-        nonmutating set { rowController.markdownFilePreviewCacheKey = newValue }
+        get { previewCoordinator.markdownFilePreviewCacheKey }
+        nonmutating set { previewCoordinator.markdownFilePreviewCacheKey = newValue }
     }
 
     private var relativeTimeText: String {
@@ -286,6 +284,37 @@ struct HistoryItemView: View, Equatable {
         nonmutating set { rowController.optimizeMessageTask = newValue }
     }
 
+    private func handlePopoverDismissRequest(
+        _ presented: Bool,
+        kind: HoverPreviewPopoverKind,
+        token: UUID
+    ) {
+        if presented {
+            requestPopover(kind)
+            return
+        }
+        guard previewCoordinator.isCurrentPopoverToken(token, for: kind) else { return }
+        requestPopover(nil)
+    }
+
+    private func handlePopoverHover(_ hovering: Bool) {
+        previewCoordinator.handlePopoverHover(
+            hovering,
+            isRowHovering: isHovering,
+            cancelHoverExit: cancelHoverExitTask,
+            scheduleHoverExit: scheduleHoverExitCleanup
+        )
+    }
+
+    private func handlePopoverSystemDismiss(kind: HoverPreviewPopoverKind, token: UUID) {
+        previewCoordinator.handleSystemDismiss(
+            for: kind,
+            token: token,
+            isRowHovering: { self.isHovering },
+            resetPreviewState: { self.resetPreviewState(hidePopovers: true) }
+        )
+    }
+
     // MARK: - Computed Properties
 
     private var backgroundColor: Color {
@@ -301,6 +330,7 @@ struct HistoryItemView: View, Equatable {
     private static let markdownFilePreviewCacheTTL: TimeInterval = 3 * 3600
 
     private func startMarkdownFilePreviewTask(url: URL, cacheKey: String) {
+        previewCoordinator.presentPreview(.file, markdownCacheKey: cacheKey)
         hoverPreviewTask = Task(priority: .userInitiated) { @MainActor in
             let delayNanos = UInt64(previewDelay * 1_000_000_000)
             try? await Task.sleep(nanoseconds: delayNanos)
@@ -727,120 +757,45 @@ struct HistoryItemView: View, Equatable {
         .popover(
             isPresented: Binding(
                 get: { isImagePreviewPresented },
-                set: { presented in
-                    if presented {
-                        requestPopover(.image)
-                        return
-                    }
-                    // Ignore delayed dismiss callbacks from a previous popover session.
-                    guard imageToken == imagePopoverToken else { return }
-                    requestPopover(nil)
-                }
+                set: { presented in handlePopoverDismissRequest(presented, kind: .image, token: imageToken) }
             ),
             arrowEdge: .trailing
         ) {
             HistoryItemImagePreviewView(model: previewModel, thumbnailPath: item.thumbnailPath)
                 .background(
                     PopoverWindowCloseObserver {
-                        // `onHover(false)` / `onDisappear` is not guaranteed to run when the system dismisses a popover.
-                        // Observe the underlying popover window close to keep state in sync.
-                        guard imageToken == imagePopoverToken else { return }
-                        isPopoverHovering = false
-                        DispatchQueue.main.async {
-                            guard imageToken == imagePopoverToken else { return }
-                            if !isHovering {
-                                resetPreviewState(hidePopovers: true)
-                            }
-                        }
+                        handlePopoverSystemDismiss(kind: .image, token: imageToken)
                     }
                     .allowsHitTesting(false)
                 )
-                .onHover { hovering in
-                    isPopoverHovering = hovering
-                    if hovering {
-                        cancelHoverExitTask()
-                    } else if !isHovering {
-                        // popover 退出且行未悬停时，触发同样的延迟清理
-                        scheduleHoverExitCleanup()
-                    }
-                }
+                .onHover(perform: handlePopoverHover)
                 .onDisappear {
-                    // `onHover(false)` is not guaranteed to fire when the popover is dismissed by the system.
-                    // Keep local/global state in sync so the same row can be re-presented reliably.
-                    guard imageToken == imagePopoverToken else { return }
-                    isPopoverHovering = false
-                    DispatchQueue.main.async {
-                        guard imageToken == imagePopoverToken else { return }
-                        if !isHovering {
-                            resetPreviewState(hidePopovers: true)
-                        }
-                    }
+                    handlePopoverSystemDismiss(kind: .image, token: imageToken)
                 }
         }
         .popover(
             isPresented: Binding(
                 get: { isTextPreviewPresented },
-                set: { presented in
-                    if presented {
-                        requestPopover(.text)
-                        return
-                    }
-                    // Ignore delayed dismiss callbacks from a previous popover session.
-                    guard textToken == textPopoverToken else { return }
-                    requestPopover(nil)
-                }
+                set: { presented in handlePopoverDismissRequest(presented, kind: .text, token: textToken) }
             ),
             arrowEdge: .trailing
         ) {
             HistoryItemTextPreviewView(model: previewModel, markdownWebViewController: markdownWebViewController)
                 .background(
                     PopoverWindowCloseObserver {
-                        // `onHover(false)` / `onDisappear` is not guaranteed to run when the system dismisses a popover.
-                        // Observe the underlying popover window close to keep state in sync.
-                        guard textToken == textPopoverToken else { return }
-                        isPopoverHovering = false
-                        DispatchQueue.main.async {
-                            guard textToken == textPopoverToken else { return }
-                            if !isHovering {
-                                resetPreviewState(hidePopovers: true)
-                            }
-                        }
+                        handlePopoverSystemDismiss(kind: .text, token: textToken)
                     }
                     .allowsHitTesting(false)
                 )
-                .onHover { hovering in
-                    isPopoverHovering = hovering
-                    if hovering {
-                        cancelHoverExitTask()
-                    } else if !isHovering {
-                        scheduleHoverExitCleanup()
-                    }
-                }
+                .onHover(perform: handlePopoverHover)
                 .onDisappear {
-                    // `onHover(false)` is not guaranteed to fire when the popover is dismissed by the system.
-                    // Keep local/global state in sync so the same row can be re-presented reliably.
-                    guard textToken == textPopoverToken else { return }
-                    isPopoverHovering = false
-                    DispatchQueue.main.async {
-                        guard textToken == textPopoverToken else { return }
-                        if !isHovering {
-                            resetPreviewState(hidePopovers: true)
-                        }
-                    }
+                    handlePopoverSystemDismiss(kind: .text, token: textToken)
                 }
         }
         .popover(
             isPresented: Binding(
                 get: { isFilePreviewPresented },
-                set: { presented in
-                    if presented {
-                        requestPopover(.file)
-                        return
-                    }
-                    // Ignore delayed dismiss callbacks from a previous popover session.
-                    guard fileToken == filePopoverToken else { return }
-                    requestPopover(nil)
-                }
+                set: { presented in handlePopoverDismissRequest(presented, kind: .file, token: fileToken) }
             ),
             arrowEdge: .trailing
         ) {
@@ -853,38 +808,13 @@ struct HistoryItemView: View, Equatable {
             )
             .background(
                 PopoverWindowCloseObserver {
-                    // `onHover(false)` / `onDisappear` is not guaranteed to run when the system dismisses a popover.
-                    // Observe the underlying popover window close to keep state in sync.
-                    guard fileToken == filePopoverToken else { return }
-                    isPopoverHovering = false
-                    DispatchQueue.main.async {
-                        guard fileToken == filePopoverToken else { return }
-                        if !isHovering {
-                            resetPreviewState(hidePopovers: true)
-                        }
-                    }
+                    handlePopoverSystemDismiss(kind: .file, token: fileToken)
                 }
                 .allowsHitTesting(false)
             )
-            .onHover { hovering in
-                isPopoverHovering = hovering
-                if hovering {
-                    cancelHoverExitTask()
-                } else if !isHovering {
-                    scheduleHoverExitCleanup()
-                }
-            }
+            .onHover(perform: handlePopoverHover)
             .onDisappear {
-                // `onHover(false)` is not guaranteed to fire when the popover is dismissed by the system.
-                // Keep local/global state in sync so the same row can be re-presented reliably.
-                guard fileToken == filePopoverToken else { return }
-                isPopoverHovering = false
-                DispatchQueue.main.async {
-                    guard fileToken == filePopoverToken else { return }
-                    if !isHovering {
-                        resetPreviewState(hidePopovers: true)
-                    }
-                }
+                handlePopoverSystemDismiss(kind: .file, token: fileToken)
             }
         }
         .contextMenu {
@@ -1069,13 +999,7 @@ struct HistoryItemView: View, Equatable {
     /// v0.12: 完善取消检查，获取数据后也检查取消状态
     /// v0.22: 确保在创建新任务前取消旧任务，防止快速悬停时任务累积导致内存泄漏
     private func startPreviewTask() {
-        // 在启动新一轮预览任务时立即刷新 token，避免上一轮 popover 的延迟 dismiss 回调
-        // 反过来把新任务/新状态清掉，导致“快速关闭后再打开不弹出”。
-        imagePopoverToken = UUID()
-
-        // 先取消旧任务，防止多个任务同时运行
-        hoverPreviewTask?.cancel()
-        hoverPreviewTask = nil
+        previewCoordinator.presentPreview(.image)
 
         hoverPreviewTask = Task(priority: .userInitiated) { @MainActor in
             let delayNanos = UInt64(previewDelay * 1_000_000_000)
@@ -1159,27 +1083,17 @@ struct HistoryItemView: View, Equatable {
     private func startFilePreviewTask() {
         guard let previewInfo = FilePreviewSupport.previewInfo(from: item.plainText, requireExists: false) else { return }
 
-        // 在启动新一轮预览任务时立即刷新 token，避免上一轮 popover 的延迟 dismiss 回调
-        filePopoverToken = UUID()
-
-        // 先取消旧任务，防止多个任务同时运行
-        hoverPreviewTask?.cancel()
-        hoverPreviewTask = nil
-        hoverMarkdownTask?.cancel()
-        hoverMarkdownTask = nil
-
         let cacheKeyBase = item.contentHash.isEmpty ? item.id.uuidString : item.contentHash
         let kindToken = previewInfo.kind.rawValue
         let shouldPrefetchImage = previewInfo.kind == .image || previewInfo.kind == .video
 
         if filePreviewIsMarkdown {
             let cacheKey = "file|\(cacheKeyBase)"
-            markdownFilePreviewCacheKey = cacheKey
             startMarkdownFilePreviewTask(url: previewInfo.url, cacheKey: cacheKey)
             return
         }
 
-        markdownFilePreviewCacheKey = nil
+        previewCoordinator.presentPreview(.file)
         hoverPreviewTask = Task(priority: .userInitiated) { @MainActor in
             let delayNanos = UInt64(previewDelay * 1_000_000_000)
             let scale = HoverPreviewScreenMetrics.activeBackingScaleFactor()
@@ -1255,15 +1169,15 @@ struct HistoryItemView: View, Equatable {
     }
 
     private func cancelPreviewTask() {
-        rowController.cancelPreviewTasks()
+        previewCoordinator.cancelPreviewTasks()
     }
 
     private func cancelHoverDebounceTask() {
-        rowController.cancelHoverDebounceTask()
+        previewCoordinator.cancelHoverDebounceTask()
     }
 
     private func cancelHoverExitTask() {
-        rowController.cancelHoverExitTask()
+        previewCoordinator.cancelHoverExitTask()
     }
 
     private func cancelOptimizeMessageTask() {
@@ -1354,7 +1268,9 @@ struct HistoryItemView: View, Equatable {
         if isUITestTapPreviewEnabled {
             dismissOtherPopovers()
             isHovering = true
-            isPopoverHovering = true
+            // UITest 点按打开 preview 只需要维持 row hover，不应伪造 popover hover，
+            // 否则滚动关闭路径会被 `isPopoverHovering` 误拦截。
+            isPopoverHovering = false
             if item.type == .image && showThumbnails {
                 startPreviewTask()
             } else if item.type == .file {
@@ -1415,7 +1331,7 @@ struct HistoryItemView: View, Equatable {
     }
 
     private func cancelHoverTasks() {
-        rowController.cancelHoverTasks()
+        previewCoordinator.cancelHoverTasks()
     }
 
     private func resetPreviewModel() {
@@ -1423,12 +1339,11 @@ struct HistoryItemView: View, Equatable {
     }
 
     private func resetPreviewState(hidePopovers: Bool) {
-        cancelPreviewTask()
-        if hidePopovers {
-            requestPopover(nil)
-        }
-        rowController.invalidatePreviewTokens()
-        resetPreviewModel()
+        previewCoordinator.dismissPreview(
+            hidePopovers: hidePopovers,
+            requestPopover: requestPopover,
+            resetPreviewModel: resetPreviewModel
+        )
     }
 
     private func updateMarkdownFilePreviewMetricsCacheIfNeeded() {
@@ -1495,10 +1410,7 @@ struct HistoryItemView: View, Equatable {
         if isHovering || isPopoverHovering || isImagePreviewPresented || isTextPreviewPresented || isFilePreviewPresented {
             return true
         }
-        if hoverPreviewTask != nil || hoverMarkdownTask != nil {
-            return true
-        }
-        if hoverDebounceTask != nil || hoverExitTask != nil {
+        if previewCoordinator.hasActiveHoverWork {
             return true
         }
         if previewModel.previewCGImage != nil || previewModel.text != nil || previewModel.markdownHTML != nil {
@@ -1533,15 +1445,7 @@ struct HistoryItemView: View, Equatable {
     /// v0.15.1: Start text preview task - uses `plainText` (full content) and lazily upgrades to Markdown preview when detected.
     /// v0.22: 确保在创建新任务前取消旧任务，防止快速悬停时任务累积导致内存泄漏
     private func startTextPreviewTask() {
-        // 在启动新一轮预览任务时立即刷新 token，避免上一轮 popover 的延迟 dismiss 回调
-        // 反过来把新任务/新状态清掉，导致“快速关闭后再打开不弹出”。
-        textPopoverToken = UUID()
-
-        // 先取消旧任务，防止多个任务同时运行
-        hoverPreviewTask?.cancel()
-        hoverPreviewTask = nil
-        hoverMarkdownTask?.cancel()
-        hoverMarkdownTask = nil
+        previewCoordinator.presentPreview(.text)
 
         hoverPreviewTask = Task(priority: .userInitiated) { @MainActor in
             // Wait for preview delay

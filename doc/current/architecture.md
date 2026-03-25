@@ -2,10 +2,10 @@
 doc_type: spec
 status: active
 owner: maintainers
-last_reviewed: 2026-03-07
+last_reviewed: 2026-03-25
 canonical: true
 related_versions:
-  - v0.60.2
+  - v0.64
 ---
 
 # Architecture

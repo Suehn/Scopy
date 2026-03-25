@@ -3,12 +3,6 @@ import SwiftUI
 
 @MainActor
 final class HistoryItemRowController: ObservableObject {
-    @Published var isHovering = false
-    @Published var isPopoverHovering = false
-    @Published var imagePopoverToken = UUID()
-    @Published var textPopoverToken = UUID()
-    @Published var filePopoverToken = UUID()
-    @Published var markdownFilePreviewCacheKey: String?
     @Published var relativeTimeText: String
     @Published var isOptimizingImage = false
     @Published var optimizeMessage: String?
@@ -19,10 +13,6 @@ final class HistoryItemRowController: ObservableObject {
     @Published var isExportingPNG = false
     @Published var isScrollInteractionActive = false
 
-    var hoverDebounceTask: Task<Void, Never>?
-    var hoverPreviewTask: Task<Void, Never>?
-    var hoverMarkdownTask: Task<Void, Never>?
-    var hoverExitTask: Task<Void, Never>?
     var optimizeImageTask: Task<Void, Never>?
     var optimizeMessageTask: Task<Void, Never>?
     var exportActionTask: Task<Void, Never>?
@@ -31,28 +21,6 @@ final class HistoryItemRowController: ObservableObject {
 
     init(relativeTimeText: String) {
         self.relativeTimeText = relativeTimeText
-    }
-
-    func cancelPreviewTasks() {
-        hoverPreviewTask?.cancel()
-        hoverPreviewTask = nil
-        hoverMarkdownTask?.cancel()
-        hoverMarkdownTask = nil
-    }
-
-    func cancelHoverDebounceTask() {
-        hoverDebounceTask?.cancel()
-        hoverDebounceTask = nil
-    }
-
-    func cancelHoverExitTask() {
-        hoverExitTask?.cancel()
-        hoverExitTask = nil
-    }
-
-    func cancelHoverTasks() {
-        cancelHoverDebounceTask()
-        cancelHoverExitTask()
     }
 
     func cancelOptimizeMessageTask() {
@@ -107,13 +75,5 @@ final class HistoryItemRowController: ObservableObject {
     func normalizedNoteDraft() -> String? {
         let trimmed = noteDraft.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : trimmed
-    }
-
-    func invalidatePreviewTokens() {
-        imagePopoverToken = UUID()
-        textPopoverToken = UUID()
-        filePopoverToken = UUID()
-        markdownFilePreviewCacheKey = nil
-        isPopoverHovering = false
     }
 }

@@ -65,16 +65,12 @@ actor ClipboardService {
     private var fileSizeComputationInProgress = Set<UUID>()
     private var fileSizeComputationLastAttemptAt: [UUID: Date] = [:]
 
-    private var activeFileSizeComputations = 0
-    private var fileSizeComputationWaiters: [CheckedContinuation<Void, Never>] = []
-    private var fileSizeComputationWaiterHead = 0
+    private let fileSizeComputationPermitPool = AsyncPermitPool(limit: 2)
 
     // MARK: - Thumbnail Generation
 
     private let maxConcurrentThumbnailGenerations = 2
-    private var activeThumbnailGenerations = 0
-    private var thumbnailGenerationWaiters: [CheckedContinuation<Void, Never>] = []
-    private var thumbnailGenerationWaiterHead = 0
+    private let thumbnailGenerationPermitPool = AsyncPermitPool(limit: 2)
 
     // MARK: - Initialization
 
@@ -556,7 +552,12 @@ actor ClipboardService {
 
             do {
                 if FileManager.default.fileExists(atPath: backupURL.path) {
-                    try? FileManager.default.removeItem(at: backupURL)
+                    BestEffortFileOps.removeItem(
+                        at: backupURL,
+                        logger: ScopyLog.app,
+                        operation: "optimizeImage.removeExistingBackup",
+                        itemID: item.id
+                    )
                 }
                 try FileManager.default.copyItem(at: url, to: backupURL)
 
@@ -574,7 +575,12 @@ actor ClipboardService {
 
                 if !PngquantService.isLikelyPNGFile(url), !didTranscodeToPNG {
                     // Unknown/unsupported image format; keep the original payload.
-                    try? FileManager.default.removeItem(at: backupURL)
+                    BestEffortFileOps.removeItem(
+                        at: backupURL,
+                        logger: ScopyLog.app,
+                        operation: "optimizeImage.cleanupBackupAfterUnsupportedFormat",
+                        itemID: item.id
+                    )
                     let currentSize = Self.fileSizeBestEffort(url: url) ?? originalBytes
                     return ImageOptimizationOutcomeDTO(result: .noChange, originalBytes: originalBytes, optimizedBytes: currentSize)
                 }
@@ -585,7 +591,12 @@ actor ClipboardService {
 
                 // If neither transcoding nor pngquant changed the file, return noChange.
                 if !replaced, !didTranscodeToPNG {
-                    try? FileManager.default.removeItem(at: backupURL)
+                    BestEffortFileOps.removeItem(
+                        at: backupURL,
+                        logger: ScopyLog.app,
+                        operation: "optimizeImage.cleanupBackupAfterNoChange",
+                        itemID: item.id
+                    )
                     let currentSize = Self.fileSizeBestEffort(url: url) ?? originalBytes
                     return ImageOptimizationOutcomeDTO(result: .noChange, originalBytes: originalBytes, optimizedBytes: currentSize)
                 }
@@ -594,10 +605,26 @@ actor ClipboardService {
                 if optimizedBytes >= originalBytes {
                     // Don't keep changes that don't reduce size.
                     if FileManager.default.fileExists(atPath: backupURL.path) {
-                        try? FileManager.default.removeItem(at: url)
-                        try? FileManager.default.moveItem(at: backupURL, to: url)
+                        BestEffortFileOps.removeItem(
+                            at: url,
+                            logger: ScopyLog.app,
+                            operation: "optimizeImage.restoreOriginal.removeOptimized",
+                            itemID: item.id
+                        )
+                        BestEffortFileOps.moveItem(
+                            from: backupURL,
+                            to: url,
+                            logger: ScopyLog.app,
+                            operation: "optimizeImage.restoreOriginal.moveBackup",
+                            itemID: item.id
+                        )
                     } else {
-                        try? FileManager.default.removeItem(at: backupURL)
+                        BestEffortFileOps.removeItem(
+                            at: backupURL,
+                            logger: ScopyLog.app,
+                            operation: "optimizeImage.cleanupMissingBackup",
+                            itemID: item.id
+                        )
                     }
                     return ImageOptimizationOutcomeDTO(result: .noChange, originalBytes: originalBytes, optimizedBytes: originalBytes)
                 }
@@ -613,7 +640,12 @@ actor ClipboardService {
                     rawData: nil
                 )
 
-                try? FileManager.default.removeItem(at: backupURL)
+                BestEffortFileOps.removeItem(
+                    at: backupURL,
+                    logger: ScopyLog.app,
+                    operation: "optimizeImage.cleanupBackupAfterSuccess",
+                    itemID: item.id
+                )
 
                 let updated = StorageService.StoredItem(
                     id: item.id,
@@ -641,10 +673,26 @@ actor ClipboardService {
             } catch {
                 // Best-effort restore original file to keep DB/file consistent.
                 if FileManager.default.fileExists(atPath: backupURL.path) {
-                    try? FileManager.default.removeItem(at: url)
-                    try? FileManager.default.moveItem(at: backupURL, to: url)
+                    BestEffortFileOps.removeItem(
+                        at: url,
+                        logger: ScopyLog.app,
+                        operation: "optimizeImage.restoreOriginal.removeFailedOptimized",
+                        itemID: item.id
+                    )
+                    BestEffortFileOps.moveItem(
+                        from: backupURL,
+                        to: url,
+                        logger: ScopyLog.app,
+                        operation: "optimizeImage.restoreOriginal.moveFailedBackup",
+                        itemID: item.id
+                    )
                 } else {
-                    try? FileManager.default.removeItem(at: backupURL)
+                    BestEffortFileOps.removeItem(
+                        at: backupURL,
+                        logger: ScopyLog.app,
+                        operation: "optimizeImage.cleanupFailedBackup",
+                        itemID: item.id
+                    )
                 }
 
                 return ImageOptimizationOutcomeDTO(
@@ -1000,38 +1048,18 @@ actor ClipboardService {
     }
 
     private func acquireFileSizeComputationSlot() async {
-        if activeFileSizeComputations < maxConcurrentFileSizeComputations {
-            activeFileSizeComputations += 1
-            return
-        }
-        await withCheckedContinuation { continuation in
-            fileSizeComputationWaiters.append(continuation)
-        }
+        guard maxConcurrentFileSizeComputations > 0 else { return }
+        _ = await fileSizeComputationPermitPool.acquire()
     }
 
-    private func finishFileSizeComputation(itemID: UUID) {
+    private func finishFileSizeComputation(itemID: UUID) async {
         fileSizeComputationInProgress.remove(itemID)
-        releaseFileSizeComputationSlot()
+        await releaseFileSizeComputationSlot()
     }
 
-    private func releaseFileSizeComputationSlot() {
-        if fileSizeComputationWaiterHead < fileSizeComputationWaiters.count {
-            let continuation = fileSizeComputationWaiters[fileSizeComputationWaiterHead]
-            fileSizeComputationWaiterHead += 1
-            continuation.resume()
-
-            if fileSizeComputationWaiterHead > 32 {
-                fileSizeComputationWaiters.removeFirst(fileSizeComputationWaiterHead)
-                fileSizeComputationWaiterHead = 0
-            }
-            return
-        }
-
-        activeFileSizeComputations = max(0, activeFileSizeComputations - 1)
-        if fileSizeComputationWaiterHead > 0 {
-            fileSizeComputationWaiters.removeAll(keepingCapacity: true)
-            fileSizeComputationWaiterHead = 0
-        }
+    private func releaseFileSizeComputationSlot() async {
+        guard maxConcurrentFileSizeComputations > 0 else { return }
+        await fileSizeComputationPermitPool.release()
     }
 
     private func applyComputedFileSizeBytes(itemID: UUID, fileSizeBytes: Int) async {
@@ -1049,33 +1077,13 @@ actor ClipboardService {
     }
 
     private func acquireThumbnailGenerationSlot() async {
-        if activeThumbnailGenerations < maxConcurrentThumbnailGenerations {
-            activeThumbnailGenerations += 1
-            return
-        }
-        await withCheckedContinuation { continuation in
-            thumbnailGenerationWaiters.append(continuation)
-        }
+        guard maxConcurrentThumbnailGenerations > 0 else { return }
+        _ = await thumbnailGenerationPermitPool.acquire()
     }
 
-    private func releaseThumbnailGenerationSlot() {
-        if thumbnailGenerationWaiterHead < thumbnailGenerationWaiters.count {
-            let continuation = thumbnailGenerationWaiters[thumbnailGenerationWaiterHead]
-            thumbnailGenerationWaiterHead += 1
-            continuation.resume()
-
-            if thumbnailGenerationWaiterHead > 32 {
-                thumbnailGenerationWaiters.removeFirst(thumbnailGenerationWaiterHead)
-                thumbnailGenerationWaiterHead = 0
-            }
-            return
-        }
-
-        activeThumbnailGenerations = max(0, activeThumbnailGenerations - 1)
-        if thumbnailGenerationWaiterHead > 0 {
-            thumbnailGenerationWaiters.removeAll(keepingCapacity: true)
-            thumbnailGenerationWaiterHead = 0
-        }
+    private func releaseThumbnailGenerationSlot() async {
+        guard maxConcurrentThumbnailGenerations > 0 else { return }
+        await thumbnailGenerationPermitPool.release()
     }
 
     private func scheduleThumbnailGeneration(

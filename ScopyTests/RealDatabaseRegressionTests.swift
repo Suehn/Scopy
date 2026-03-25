@@ -85,6 +85,7 @@ final class RealDatabaseRegressionTests: XCTestCase {
 
         let cachePath: String
         let checksumPath: String
+        let metadataPath: String
         #if DEBUG
         // Derive the current cache paths from implementation to avoid hardcoding the version.
         let pathProbeEngine = SearchEngineImpl(dbPath: dbPath)
@@ -92,10 +93,12 @@ final class RealDatabaseRegressionTests: XCTestCase {
         let paths = await pathProbeEngine.debugFullIndexDiskCachePaths()
         cachePath = paths.cachePath
         checksumPath = paths.checksumPath
+        metadataPath = paths.metadataPath
         await pathProbeEngine.close()
         #else
         cachePath = "\(dbPath).fullindex.v3.plist"
         checksumPath = cachePath + ".sha256"
+        metadataPath = cachePath + ".metadata.plist"
         #endif
 
         if FileManager.default.fileExists(atPath: cachePath) {
@@ -103,6 +106,9 @@ final class RealDatabaseRegressionTests: XCTestCase {
         }
         if FileManager.default.fileExists(atPath: checksumPath) {
             try? FileManager.default.removeItem(atPath: checksumPath)
+        }
+        if FileManager.default.fileExists(atPath: metadataPath) {
+            try? FileManager.default.removeItem(atPath: metadataPath)
         }
 
         let requestRefine = SearchRequest(query: "abc", mode: .fuzzy, sortMode: .relevance, forceFullFuzzy: true, limit: 200, offset: 0)
@@ -116,6 +122,7 @@ final class RealDatabaseRegressionTests: XCTestCase {
 
         XCTAssertTrue(FileManager.default.fileExists(atPath: cachePath), "Expected fullIndex cache at: \(cachePath)")
         XCTAssertTrue(FileManager.default.fileExists(atPath: checksumPath), "Expected checksum at: \(checksumPath)")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: metadataPath), "Expected metadata at: \(metadataPath)")
 
         let engineB = SearchEngineImpl(dbPath: dbPath)
         try await engineB.open()

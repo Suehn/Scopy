@@ -2,7 +2,7 @@
 doc_type: portal
 status: active
 owner: maintainers
-last_reviewed: 2026-03-21
+last_reviewed: 2026-03-25
 canonical: true
 ---
 
@@ -19,16 +19,17 @@ This page is the human-facing index for current release state. Automation should
 ## Current Release
 
 <!-- release-current:start -->
-- Version: `v0.60.3`
-- Date: `2026-03-13`
-- Release note: [v0.60.3](./history/v0.60.3.md)
+- Version: `v0.64`
+- Date: `2026-03-25`
+- Release note: [v0.64](./history/v0.64.md)
 - Changelog: [CHANGELOG.md](./CHANGELOG.md)
-- Profile doc: [v0.60.3-profile.md](../perf/release-profiles/v0.60.3-profile.md)
+- Profile doc: [v0.64-profile.md](../perf/release-profiles/v0.64-profile.md)
 <!-- release-current:end -->
 
 ## Recent Releases
 
 <!-- release-recent:start -->
+- `2026-03-25` [v0.64](./history/v0.64.md) - Full-index warm-load latency collapsed to sub-second disk-cache hits with preview lifecycle and observability cleanup
 - `2026-03-13` [v0.60.3](./history/v0.60.3.md) - Explicit Codex image replay action and ultra-tall export and preview hardening
 - `2026-03-07` [v0.60.2](./history/v0.60.2.md) - Historical image replay compatibility fix for Codex and temporary image files
 - `2026-02-28` [v0.60.1](./history/v0.60.1.md) - Perf and release hardening with frontend profile flow, unified perf table, and cleanup-path convergence

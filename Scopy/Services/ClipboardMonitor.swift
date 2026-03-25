@@ -975,8 +975,20 @@ public final class ClipboardMonitor {
     }
 
     nonisolated private static func loadPendingEnvelope(from url: URL) -> PendingIngestEnvelope? {
-        guard let data = try? Data(contentsOf: url) else { return nil }
-        return try? JSONDecoder().decode(PendingIngestEnvelope.self, from: data)
+        guard let data = BestEffortFileOps.loadData(
+            from: url,
+            logger: ScopyLog.monitor,
+            operation: "loadPendingEnvelope.read"
+        ) else {
+            return nil
+        }
+        return BestEffortFileOps.decodeJSON(
+            PendingIngestEnvelope.self,
+            from: data,
+            logger: ScopyLog.monitor,
+            operation: "loadPendingEnvelope.decode",
+            path: url.path
+        )
     }
 
     nonisolated private static func discoverPendingEnvelopeURLs(in directory: URL) -> [URL] {
@@ -1003,14 +1015,27 @@ public final class ClipboardMonitor {
         guard let payloadURL = pendingPayloadURL(for: envelope, ingestDirectory: ingestDirectory) else {
             return nil
         }
-        return try? Data(contentsOf: payloadURL, options: [.mappedIfSafe])
+        return BestEffortFileOps.loadData(
+            from: payloadURL,
+            options: [.mappedIfSafe],
+            logger: ScopyLog.monitor,
+            operation: "loadPendingPayload.read"
+        )
     }
 
     nonisolated private static func cleanupEnvelope(_ envelopeURL: URL, payloadFileName: String?, ingestDirectory: URL) {
-        try? FileManager.default.removeItem(at: envelopeURL)
+        BestEffortFileOps.removeItem(
+            at: envelopeURL,
+            logger: ScopyLog.monitor,
+            operation: "cleanupPendingEnvelope.removeEnvelope"
+        )
         if let payloadFileName {
             let payloadURL = ingestDirectory.appendingPathComponent(payloadFileName)
-            try? FileManager.default.removeItem(at: payloadURL)
+            BestEffortFileOps.removeItem(
+                at: payloadURL,
+                logger: ScopyLog.monitor,
+                operation: "cleanupPendingEnvelope.removePayload"
+            )
         }
     }
 

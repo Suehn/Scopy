@@ -7,53 +7,37 @@
 
 ## [Unreleased]
 
-### Refactor/Search
+## [v0.64] - 2026-03-25
 
-- 搜索覆盖状态改为显式 `SearchCoverage` 契约，并把 `Exact <= 2` / `Regex` 正式收口为 recent-only；Header 的模式切换改为当前会话态，避免直接覆盖默认设置。
-- `SearchEngineImpl` 的 fuzzy 主路径开始按 helper 分流，`forceFullFuzzy`、interactive prefilter、short-query path 和 full-index wait 已从单一大函数中拆出。
-- 生产搜索路径不再继续构造 `isPrefilter` 布尔结果，统一直接写入 `SearchCoverage`；兼容布尔桥接仅保留给旧调用和测试辅助。
+### Perf/Search
 
-### Fix/Startup And Ingest
+- full-index warm-load 的磁盘缓存路径补上 sidecar metadata preflight、failure reason 归因和更轻的 payload decode；warm-load 从上一轮基线 3049.715ms 收敛到 612.389ms，reason 固化为 disk_cache_hit。
+- SearchEngineImpl 内部新增 full-index builder、disk-cache codec、warm-load metrics 边界，保留现有 Exact <= 2 recent-only、Regex recent-only、Fuzzy/Fuzzy+ staged-refine 和 SearchCoverage 契约不变。
+- staged-refine 的后台 full-index build 改成按查询会话去重且可取消，避免查询切换或清空后继续做无意义的 warm-load 成本。
 
-- 启动失败不再静默回退到 mock history，而是进入显式 degraded state，并提供重试与诊断路径。
-- `ClipboardMonitor` 改成 durable replay 语义，修复大内容 replay、polling interval 切换和 transformed payload 复用带来的 silent drop / payload mismatch 风险。
+### Refactor/Preview
 
-### Refactor/Preview And Export
+- HistoryItemView 的 hover、popover、dismiss 生命周期抽到 HistoryItemPreviewCoordinator，统一 image、text、file preview 的 observer、token 与 task 清理。
+- 修复 UITest tap-open preview 场景下滚动不关闭的真实回归，保证 scroll dismiss、hover exit、system dismiss 三条路径的最终状态一致。
+- HistoryItemRowController 移除多余 preview 状态持有，row 层继续只保留布局与轻量交互入口。
 
-- 视频 hover preview 改为 `AVPlayerView` 路径，支持默认静音自动播放、退出立即暂停，并修正预览尺寸决策。
-- `MarkdownExportService` 已移入 `Scopy/Services/Export`，预览图片/文件解码 helper 从 `HistoryItemView` 抽到 `HoverPreviewLoader`，减少 row view 对底层解码细节的直接持有。
-- History 列表滚动交互改成 list-scope `HistoryListInteractionCoordinator`，并用 observation token 自动清理 observer，减少滚动期间的 hover churn 和全局广播耦合。
+### Infra/Observability
 
-### Accessibility/UI
-
-- History row 的 primary action 改成真正的 `Button` 语义；metadata 小字号改用语义字体，避免硬编码 `10pt`。
-- 搜索排序切换维持 icon-only 样式，但补齐 `accessibilityLabel` / `accessibilityValue`，避免 VoiceOver 丢失状态信息。
-
-### Fix/Test Infrastructure
-
-- `HistoryItem` harness UI coverage 改成走真实 row action / context menu 路径，避免再用 harness 派生文本冒充 `Export PNG` 可用性断言。
-- `QuickLookPreviewView` / `VideoPlayerPreviewView` 的 AppKit/AVKit view mutation 已收口到显式 main-actor 边界，strict-concurrency 不再继续报这两处 preview bridge warning。
-- `ScopyTSanTests` 现在使用专用 Info.plist，并保留 hosted test delegate 生命周期；`make test-tsan` 在已知坏组合 `macOS 26.4 (25E241) + Xcode 26.2 (17C52)` 上会显式 skip，而不是继续报 bootstrap `Error 65`。
-- `ShortQueryIndexDiskCacheHardeningTests` 里无效的 `do/catch` 包装已移除，`SettingsStore` 的 PNG quality clamp 最小值也改回不可变常量，收口 warning-only 噪音。
-
-### Perf/Validation
-
-- 当前 release window 已补齐 backend release bench、warm-load / peak RSS、frontend standard profile 与 unified table，并新增 [v0.60.3 profile](../perf/release-profiles/v0.60.3-profile.md) 挂回 metadata。
-- 新增独立 Hosted TSan workflow（`macos-15 + Xcode 16.0`），把真实 hosted TSan 覆盖从当前本机的 Apple runtime gate 中解耦出来。
+- 新增 AsyncPermitPool，收口文件大小计算与缩略图生成的 permit/waiter 队列实现。
+- 新增 BestEffortFileOps，为 ClipboardService、ClipboardMonitor、StorageService 里的 cleanup、restore、pending payload 辅助路径补可检索日志上下文。
+- Tools/ScopyBench 和 scripts/perf-search-warm-load.sh 现在会稳定输出 phase、counter、reason 证据，便于直接定位 warm-load 是 cache hit 还是 fallback rebuild。
 
 ### Verification
 
-- `make build`：BUILD SUCCEEDED（2026-03-21）
-- `make test-unit`：Executed 340 tests, 1 skipped, 0 failures（2026-03-21）
-- `make test-strict`：Executed 340 tests, 1 skipped, 0 failures（2026-03-21）
-- `make test-tsan`：在已知坏组合 `macOS 26.4 (25E241) + Xcode 26.2 (17C52)` 上显式 skip，命令返回 0（2026-03-21）
-- `make test-snapshot-perf-release`：cmd p95=0.155ms、cm p95=5.472ms（2026-03-21）
-- `make perf-search-warm-load`：warm-load=2657.135ms、peak RSS=189.88MB（2026-03-21）
-- `xcodebuild test -project Scopy.xcodeproj -scheme Scopy -destination 'platform=macOS' -only-testing:ScopyUITests/HistoryListUITests`：Executed 13 tests, 6 skipped, 0 failures（2026-03-15）
-- `make perf-frontend-profile-standard`：passed；summary=`logs/perf-frontend-profile-2026-03-21_21-09-51/frontend-scroll-profile-summary.{json,md}`（2026-03-21）
-- `make perf-unified-table`：passed；summary=`logs/perf-unified-2026-03-21_21-12-11.{md,json}`（2026-03-21）
-- `make docs-validate`：passed（2026-03-21）
-- `make release-validate`：passed（2026-03-21）
+- make test-unit：Executed 349 tests, 1 skipped, 0 failures（2026-03-25）
+- make test-strict：Executed 349 tests, 1 skipped, 0 failures（2026-03-25）
+- xcodebuild test -project Scopy.xcodeproj -scheme Scopy -destination 'platform=macOS' -only-testing:ScopyTests/FullIndexDiskCacheHardeningTests：Executed 7 tests, 0 failures（2026-03-25）
+- xcodebuild test -project Scopy.xcodeproj -scheme Scopy -destination 'platform=macOS' -only-testing:ScopyUITests/HistoryItemViewUITests：Executed 4 tests, 0 failures（2026-03-25）
+- xcodebuild test -project Scopy.xcodeproj -scheme Scopy -destination 'platform=macOS' -only-testing:ScopyUITests/HistoryListUITests/testHoverPreviewDismissesOnScroll：passed（2026-03-25）
+- make perf-search-warm-load：warm-load=612.389ms、peak RSS=219.05MB、reason=disk_cache_hit（2026-03-25）
+- make build：BUILD SUCCEEDED（2026-03-25）
+- make docs-validate：passed（2026-03-25）
+- make release-validate：passed（2026-03-25）
 
 ## [v0.60.3] - 2026-03-13
 

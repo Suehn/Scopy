@@ -51,58 +51,23 @@ final class HistoryItemRowControllerTests: XCTestCase {
         XCTAssertFalse(controller.isNoteEditorPresented)
     }
 
-    func testInvalidatePreviewTokensClearsPreviewIdentity() {
-        let controller = HistoryItemRowController(relativeTimeText: "1m")
-        let imageToken = controller.imagePopoverToken
-        let textToken = controller.textPopoverToken
-        let fileToken = controller.filePopoverToken
-        controller.markdownFilePreviewCacheKey = "cache-key"
-        controller.isPopoverHovering = true
-
-        controller.invalidatePreviewTokens()
-
-        XCTAssertNotEqual(controller.imagePopoverToken, imageToken)
-        XCTAssertNotEqual(controller.textPopoverToken, textToken)
-        XCTAssertNotEqual(controller.filePopoverToken, fileToken)
-        XCTAssertNil(controller.markdownFilePreviewCacheKey)
-        XCTAssertFalse(controller.isPopoverHovering)
-    }
-
     func testCancelTaskHelpersClearAndCancelOwnedTasks() {
         let controller = HistoryItemRowController(relativeTimeText: "1m")
-        let hoverDebounce = makeSleepingTask()
-        let hoverExit = makeSleepingTask()
-        let hoverPreview = makeSleepingTask()
-        let hoverMarkdown = makeSleepingTask()
         let optimizeTask = makeSleepingTask()
         let exportTask = makeSleepingTask()
 
-        controller.hoverDebounceTask = hoverDebounce
-        controller.hoverExitTask = hoverExit
-        controller.hoverPreviewTask = hoverPreview
-        controller.hoverMarkdownTask = hoverMarkdown
         controller.optimizeImageTask = optimizeTask
         controller.exportActionTask = exportTask
         controller.isOptimizingImage = true
         controller.isExportingPNG = true
 
-        controller.cancelHoverTasks()
-        controller.cancelPreviewTasks()
         controller.cancelOptimizeImageTask()
         controller.cancelExportActionTask()
 
-        XCTAssertNil(controller.hoverDebounceTask)
-        XCTAssertNil(controller.hoverExitTask)
-        XCTAssertNil(controller.hoverPreviewTask)
-        XCTAssertNil(controller.hoverMarkdownTask)
         XCTAssertNil(controller.optimizeImageTask)
         XCTAssertNil(controller.exportActionTask)
         XCTAssertFalse(controller.isOptimizingImage)
         XCTAssertFalse(controller.isExportingPNG)
-        XCTAssertTrue(hoverDebounce.isCancelled)
-        XCTAssertTrue(hoverExit.isCancelled)
-        XCTAssertTrue(hoverPreview.isCancelled)
-        XCTAssertTrue(hoverMarkdown.isCancelled)
         XCTAssertTrue(optimizeTask.isCancelled)
         XCTAssertTrue(exportTask.isCancelled)
     }

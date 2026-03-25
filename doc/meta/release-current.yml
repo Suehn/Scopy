@@ -1,19 +1,19 @@
-version: v0.60.3
-date: 2026-03-13
-release_doc: doc/releases/history/v0.60.3.md
+version: v0.64
+date: 2026-03-25
+release_doc: doc/releases/history/v0.64.md
 release_index: doc/releases/README.md
 changelog_file: doc/releases/CHANGELOG.md
-profile_doc: doc/perf/release-profiles/v0.60.3-profile.md
+profile_doc: doc/perf/release-profiles/v0.64-profile.md
 runbook_doc: doc/current/release-runbook.md
 spec_doc: doc/current/product-spec.md
 development_doc: doc/current/development-guide.md
 architecture_doc: doc/current/architecture.md
-last_verified_at: 2026-03-21
-summary: History harness, preview concurrency, search helper coverage, warm-load/frontend perf evidence, and hosted TSan recovery on macos-15 with a local known-bad runtime gate
+last_verified_at: 2026-03-25
+summary: Full-index warm-load collapsed to sub-second disk-cache hits, preview lifecycle moved into a coordinator, and best-effort file operations gained shared observability and async permit control
 verification:
   build: pass
   test_unit: pass
   test_strict: pass
-  test_tsan: skipped_known_bad_runtime
+  test_tsan: not_run
   test_perf_heavy: not_run
-  test_snapshot_perf_release: pass
+  test_snapshot_perf_release: not_run

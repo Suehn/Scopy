@@ -210,118 +210,123 @@ enum ScopyBench {
             case .engine:
                 let engine = SearchEngineImpl(dbPath: options.dbPath)
                 try await engine.open()
-                defer { Task { await engine.close() } }
-
-                func runOnce() async throws -> (elapsedMs: Double, perf: SearchEngineImpl.SearchPerfMetrics?) {
-                    let start = CFAbsoluteTimeGetCurrent()
-                    let result = try await engine.search(
-                        request: SearchRequest(
-                            query: options.query,
-                            mode: options.mode,
-                            sortMode: options.sortMode,
-                            forceFullFuzzy: options.forceFullFuzzy,
-                            limit: options.limit,
-                            offset: options.offset
+                do {
+                    func runOnce() async throws -> (elapsedMs: Double, perf: SearchEngineImpl.SearchPerfMetrics?) {
+                        let start = CFAbsoluteTimeGetCurrent()
+                        let result = try await engine.search(
+                            request: SearchRequest(
+                                query: options.query,
+                                mode: options.mode,
+                                sortMode: options.sortMode,
+                                forceFullFuzzy: options.forceFullFuzzy,
+                                limit: options.limit,
+                                offset: options.offset
+                            )
                         )
-                    )
-                    return ((CFAbsoluteTimeGetCurrent() - start) * 1000, result.perf)
-                }
-
-                if options.warmup > 0 {
-                    for _ in 0..<options.warmup {
-                        _ = try await runOnce()
+                        return ((CFAbsoluteTimeGetCurrent() - start) * 1000, result.perf)
                     }
-                }
 
-                var times: [Double] = []
-                times.reserveCapacity(options.iterations)
-                var perfSample: SearchEngineImpl.SearchPerfMetrics?
-                for _ in 0..<options.iterations {
-                    let (elapsedMs, perf) = try await runOnce()
-                    times.append(elapsedMs)
-                    if perfSample == nil, let perf {
-                        perfSample = perf
+                    if options.warmup > 0 {
+                        for _ in 0..<options.warmup {
+                            _ = try await runOnce()
+                        }
                     }
-                }
 
-                times.sort()
-                let avg = times.reduce(0, +) / Double(times.count)
-                let minMs = times.first ?? 0
-                let maxMs = times.last ?? 0
-                let medianMs = times[times.count / 2]
-                let p95Index = min(Int(Double(times.count) * 0.95), times.count - 1)
-                let p95 = times[p95Index]
-                let p99Index = min(Int(Double(times.count) * 0.99), times.count - 1)
-                let p99 = times[p99Index]
+                    var times: [Double] = []
+                    times.reserveCapacity(options.iterations)
+                    var perfSample: SearchEngineImpl.SearchPerfMetrics?
+                    for _ in 0..<options.iterations {
+                        let (elapsedMs, perf) = try await runOnce()
+                        times.append(elapsedMs)
+                        if perfSample == nil, let perf {
+                            perfSample = perf
+                        }
+                    }
 
-                let forceText = options.forceFullFuzzy ? "1" : "0"
-                let requestSummary = "layer=engine mode=\(options.mode.rawValue) sort=\(options.sortMode.rawValue) forceFullFuzzy=\(forceText) limit=\(options.limit) offset=\(options.offset) queryLen=\(options.query.count)"
-                if options.json {
-                    var payload: [String: Any] = [
-                        "tool": "ScopyBench",
-                        "schema_version": 1,
-                        "timestamp": ISO8601DateFormatter().string(from: Date()),
-                        "layer": options.layer.rawValue,
-                        "request": [
-                            "mode": options.mode.rawValue,
-                            "sort": options.sortMode.rawValue,
-                            "forceFullFuzzy": options.forceFullFuzzy,
-                            "limit": options.limit,
-                            "offset": options.offset,
-                            "queryLen": options.query.count
-                        ],
-                        "samples": times.count,
-                        "min_ms": minMs,
-                        "max_ms": maxMs,
-                        "median_ms": medianMs,
-                        "avg_ms": avg,
-                        "p95_ms": p95,
-                        "p99_ms": p99
-                    ]
+                    times.sort()
+                    let avg = times.reduce(0, +) / Double(times.count)
+                    let minMs = times.first ?? 0
+                    let maxMs = times.last ?? 0
+                    let medianMs = times[times.count / 2]
+                    let p95Index = min(Int(Double(times.count) * 0.95), times.count - 1)
+                    let p95 = times[p95Index]
+                    let p99Index = min(Int(Double(times.count) * 0.99), times.count - 1)
+                    let p99 = times[p99Index]
 
-                    if let label = options.label, !label.isEmpty {
-                        payload["label"] = label
-                    }
-                    if let bytes = fileSizeBytes(at: options.dbPath) {
-                        payload["db_bytes"] = bytes
-                    }
-                    if let count = countClipboardItems(dbPath: options.dbPath) {
-                        payload["db_item_count"] = count
-                    }
-                    if let perf = perfSample {
-                        payload["perf"] = [
-                            "phases": perf.phases.map { ["name": $0.name, "ms": $0.ms] },
-                            "counters": perf.counters.map { ["name": $0.name, "value": $0.value] }
+                    let forceText = options.forceFullFuzzy ? "1" : "0"
+                    let requestSummary = "layer=engine mode=\(options.mode.rawValue) sort=\(options.sortMode.rawValue) forceFullFuzzy=\(forceText) limit=\(options.limit) offset=\(options.offset) queryLen=\(options.query.count)"
+                    if options.json {
+                        var payload: [String: Any] = [
+                            "tool": "ScopyBench",
+                            "schema_version": 1,
+                            "timestamp": ISO8601DateFormatter().string(from: Date()),
+                            "layer": options.layer.rawValue,
+                            "request": [
+                                "mode": options.mode.rawValue,
+                                "sort": options.sortMode.rawValue,
+                                "forceFullFuzzy": options.forceFullFuzzy,
+                                "limit": options.limit,
+                                "offset": options.offset,
+                                "queryLen": options.query.count
+                            ],
+                            "samples": times.count,
+                            "min_ms": minMs,
+                            "max_ms": maxMs,
+                            "median_ms": medianMs,
+                            "avg_ms": avg,
+                            "p95_ms": p95,
+                            "p99_ms": p99
                         ]
+
+                        if let label = options.label, !label.isEmpty {
+                            payload["label"] = label
+                        }
+                        if let bytes = fileSizeBytes(at: options.dbPath) {
+                            payload["db_bytes"] = bytes
+                        }
+                        if let count = countClipboardItems(dbPath: options.dbPath) {
+                            payload["db_item_count"] = count
+                        }
+                        if let perf = perfSample {
+                            payload["perf"] = [
+                                "phases": perf.phases.map { ["name": $0.name, "ms": $0.ms] },
+                                "counters": perf.counters.map { ["name": $0.name, "value": $0.value] },
+                                "reasons": perf.reasons.map { ["name": $0.name] }
+                            ]
+                        }
+
+                        let data = try JSONSerialization.data(withJSONObject: payload, options: [])
+                        if let text = String(data: data, encoding: .utf8) {
+                            print(text)
+                        }
+                    } else {
+                        let avgText = String(format: "%.2f", avg)
+                        let p95Text = String(format: "%.2f", p95)
+                        let p99Text = String(format: "%.2f", p99)
+                        let minText = String(format: "%.2f", minMs)
+                        let maxText = String(format: "%.2f", maxMs)
+                        let medianText = String(format: "%.2f", medianMs)
+
+                        if let label = options.label, !label.isEmpty {
+                            print("ScopyBench: [\(label)] \(requestSummary)")
+                        } else {
+                            print("ScopyBench: \(requestSummary)")
+                        }
+
+                        if let bytes = fileSizeBytes(at: options.dbPath), let count = countClipboardItems(dbPath: options.dbPath) {
+                            print("  db_bytes=\(bytes) db_item_count=\(count)")
+                        }
+                        print(
+                            "  samples=\(times.count) min_ms=\(minText) max_ms=\(maxText) " +
+                                "median_ms=\(medianText) avg_ms=\(avgText) p95_ms=\(p95Text) p99_ms=\(p99Text)"
+                        )
                     }
 
-                    let data = try JSONSerialization.data(withJSONObject: payload, options: [])
-                    if let text = String(data: data, encoding: .utf8) {
-                        print(text)
-                    }
-                    return
+                    await engine.close()
+                } catch {
+                    await engine.close()
+                    throw error
                 }
-
-                let avgText = String(format: "%.2f", avg)
-                let p95Text = String(format: "%.2f", p95)
-                let p99Text = String(format: "%.2f", p99)
-                let minText = String(format: "%.2f", minMs)
-                let maxText = String(format: "%.2f", maxMs)
-                let medianText = String(format: "%.2f", medianMs)
-
-                if let label = options.label, !label.isEmpty {
-                    print("ScopyBench: [\(label)] \(requestSummary)")
-                } else {
-                    print("ScopyBench: \(requestSummary)")
-                }
-
-                if let bytes = fileSizeBytes(at: options.dbPath), let count = countClipboardItems(dbPath: options.dbPath) {
-                    print("  db_bytes=\(bytes) db_item_count=\(count)")
-                }
-                print(
-                    "  samples=\(times.count) min_ms=\(minText) max_ms=\(maxText) " +
-                        "median_ms=\(medianText) avg_ms=\(avgText) p95_ms=\(p95Text) p99_ms=\(p99Text)"
-                )
 
             case .service:
                 try await runClipboardServiceBench(options: options)

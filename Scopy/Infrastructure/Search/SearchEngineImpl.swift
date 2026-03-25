@@ -43,12 +43,22 @@ public actor SearchEngineImpl {
             }
         }
 
+        public struct Reason: Sendable {
+            public let name: String
+
+            public init(name: String) {
+                self.name = name
+            }
+        }
+
         public let phases: [Phase]
         public let counters: [Counter]
+        public let reasons: [Reason]
 
-        public init(phases: [Phase], counters: [Counter]) {
+        public init(phases: [Phase], counters: [Counter], reasons: [Reason] = []) {
             self.phases = phases
             self.counters = counters
+            self.reasons = reasons
         }
     }
 
@@ -154,6 +164,7 @@ public actor SearchEngineImpl {
     private final class PerfContext: @unchecked Sendable {
         private(set) var phases: [SearchPerfMetrics.Phase] = []
         private(set) var counters: [SearchPerfMetrics.Counter] = []
+        private(set) var reasons: [SearchPerfMetrics.Reason] = []
 
         func addPhase(_ name: String, ms: Double) {
             phases.append(SearchPerfMetrics.Phase(name: name, ms: ms))
@@ -161,6 +172,10 @@ public actor SearchEngineImpl {
 
         func addCounter(_ name: String, value: Int) {
             counters.append(SearchPerfMetrics.Counter(name: name, value: value))
+        }
+
+        func addReason(_ name: String) {
+            reasons.append(SearchPerfMetrics.Reason(name: name))
         }
 
         func measure<T>(_ name: String, _ block: () throws -> T) rethrows -> T {
@@ -173,7 +188,7 @@ public actor SearchEngineImpl {
         }
 
         func snapshot() -> SearchPerfMetrics {
-            SearchPerfMetrics(phases: phases, counters: counters)
+            SearchPerfMetrics(phases: phases, counters: counters, reasons: reasons)
         }
     }
 
@@ -251,6 +266,15 @@ public actor SearchEngineImpl {
         var tombstoneCount: Int
     }
 
+    private struct DBFileFingerprint: Codable, Sendable, Equatable {
+        let dbSize: UInt64
+        let dbModifiedAt: TimeInterval
+        let walSize: UInt64
+        let walModifiedAt: TimeInterval
+        let shmSize: UInt64
+        let shmModifiedAt: TimeInterval
+    }
+
     private enum FullIndexSnapshotSource: String, Sendable {
         case database
         case diskCache
@@ -261,6 +285,170 @@ public actor SearchEngineImpl {
         let startDataVersion: Int64
         let endDataVersion: Int64
         let source: FullIndexSnapshotSource
+    }
+
+    private enum FullIndexDiskCacheLoadReason: String, Sendable {
+        case metadataMissing = "metadata_missing"
+        case fingerprintMismatch = "fingerprint_mismatch"
+        case tombstoneStale = "tombstone_stale"
+        case checksumMismatch = "checksum_mismatch"
+        case decodeFailed = "decode_failed"
+        case payloadInvalid = "payload_invalid"
+        case diskCacheHit = "disk_cache_hit"
+        case databaseRebuild = "database_rebuild"
+    }
+
+    private struct FullIndexDiskCacheMetadataV1: Codable, Sendable {
+        let version: Int
+        let fingerprint: DBFileFingerprint
+        let itemCount: Int
+        let tombstoneCount: Int
+        let tombstoneRatio: Double
+        let payloadByteSize: UInt64
+    }
+
+    private struct FullIndexDiskCacheLoadCandidate: Sendable {
+        let fingerprint: DBFileFingerprint
+        let metadata: FullIndexDiskCacheMetadataV1?
+        let cachePath: String
+        let checksumPath: String
+        let metadataPath: String
+        let preflightReason: FullIndexDiskCacheLoadReason?
+    }
+
+    private enum FullIndexDiskCachePreflightResult: Sendable {
+        case candidate(FullIndexDiskCacheLoadCandidate)
+        case skip(reason: FullIndexDiskCacheLoadReason, metadata: FullIndexDiskCacheMetadataV1?)
+    }
+
+    private struct FullIndexDiskCacheLoadOutcome: Sendable {
+        let snapshot: FullIndexSnapshot?
+        let reason: FullIndexDiskCacheLoadReason
+        let metadata: FullIndexDiskCacheMetadataV1?
+    }
+
+    private enum FullIndexDiskCachePayloadParseResult: Sendable {
+        case success(FullFuzzyIndex)
+        case decodeFailed
+        case payloadInvalid
+    }
+
+    private struct SearchWarmLoadMetrics: Sendable {
+        struct Phase: Sendable {
+            let name: String
+            let ms: Double
+        }
+
+        struct Counter: Sendable {
+            let name: String
+            let value: Int
+        }
+
+        private(set) var phases: [Phase] = []
+        private(set) var counters: [Counter] = []
+        private(set) var reasons: [String] = []
+        private(set) var source: FullIndexSnapshotSource?
+        private(set) var usedDiskCache = false
+
+        mutating func measure<T>(_ name: String, _ block: () throws -> T) rethrows -> T {
+            let start = CFAbsoluteTimeGetCurrent()
+            defer {
+                let elapsedMs = (CFAbsoluteTimeGetCurrent() - start) * 1000
+                phases.append(Phase(name: name, ms: elapsedMs))
+            }
+            return try block()
+        }
+
+        mutating func markSource(_ source: FullIndexSnapshotSource) {
+            self.source = source
+            if source == .diskCache {
+                usedDiskCache = true
+            }
+        }
+
+        mutating func addCounter(_ name: String, value: Int) {
+            counters.append(Counter(name: name, value: value))
+        }
+
+        mutating func addReason(_ reason: FullIndexDiskCacheLoadReason) {
+            reasons.append(reason.rawValue)
+        }
+
+        var summary: String {
+            var parts = phases.map { "\($0.name)=\(String(format: "%.2f", $0.ms))ms" }
+            if !counters.isEmpty {
+                parts.append(
+                    counters
+                        .map { "\($0.name)=\($0.value)" }
+                        .joined(separator: ", ")
+                )
+            }
+            if !reasons.isEmpty {
+                parts.append("reasons=" + reasons.joined(separator: "|"))
+            }
+            return parts.joined(separator: ", ")
+        }
+    }
+
+    private struct FullIndexWarmupSessionKey: Equatable {
+        let queryLower: String
+        let mode: SearchMode
+        let appFilter: String?
+        let typeFilter: ClipboardItemType?
+        let typeFiltersKey: String?
+    }
+
+    private enum FullIndexBuildTrigger: Equatable {
+        case forced
+        case interactive(FullIndexWarmupSessionKey)
+    }
+
+    private enum FullIndexBuilder {
+        static func buildSnapshot(
+            dbPath: String,
+            reserveSlots: Int,
+            metrics: inout SearchWarmLoadMetrics
+        ) -> FullIndexSnapshot? {
+            metrics.addReason(.databaseRebuild)
+            let snapshot = metrics.measure("full_index_build_from_db") {
+                SearchEngineImpl.buildFullIndexSnapshot(dbPath: dbPath, reserveSlots: reserveSlots)
+            }
+            return snapshot.map { snapshot in
+                metrics.markSource(snapshot.source)
+                return snapshot
+            }
+        }
+    }
+
+    private enum FullIndexDiskCacheCodec {
+        static func loadSnapshot(
+            dbPath: String,
+            metrics: inout SearchWarmLoadMetrics
+        ) -> FullIndexSnapshot? {
+            let preflight = metrics.measure("full_index_disk_cache_preflight") {
+                SearchEngineImpl.preflightFullIndexDiskCache(dbPath: dbPath)
+            }
+
+            switch preflight {
+            case .skip(let reason, let metadata):
+                metrics.addReason(reason)
+                SearchEngineImpl.recordFullIndexDiskCacheMetadataCounters(metadata, metrics: &metrics)
+                return nil
+            case .candidate(let candidate):
+                if let preflightReason = candidate.preflightReason {
+                    metrics.addReason(preflightReason)
+                }
+                SearchEngineImpl.recordFullIndexDiskCacheMetadataCounters(candidate.metadata, metrics: &metrics)
+                let outcome = metrics.measure("full_index_disk_cache_load") {
+                    SearchEngineImpl.loadFullIndexSnapshotFromDiskCacheCandidate(candidate)
+                }
+                SearchEngineImpl.recordFullIndexDiskCacheMetadataCounters(outcome.metadata, metrics: &metrics)
+                metrics.addReason(outcome.reason)
+                guard let snapshot = outcome.snapshot else { return nil }
+                metrics.markSource(snapshot.source)
+                return snapshot
+            }
+        }
     }
 
     private enum ShortQueryIndexSnapshotSource: String, Sendable {
@@ -649,14 +837,7 @@ public actor SearchEngineImpl {
 
         func toDiskCache(
             version: Int,
-            fp: (
-                dbSize: UInt64,
-                dbModifiedAt: TimeInterval,
-                walSize: UInt64,
-                walModifiedAt: TimeInterval,
-                shmSize: UInt64,
-                shmModifiedAt: TimeInterval
-            )
+            fp: DBFileFingerprint
         ) -> ShortQueryIndexDiskCacheV1 {
             var slots: [DiskShortQuerySlot] = []
             slots.reserveCapacity(slotToIDString.count)
@@ -847,6 +1028,7 @@ public actor SearchEngineImpl {
 
 #if DEBUG
     private var debugFullIndexLastSnapshotSourceValue: FullIndexSnapshotSource?
+    private var debugFullIndexLastDiskCacheLoadReasonValue: FullIndexDiskCacheLoadReason?
     private var debugShortQueryIndexLastSnapshotSourceValue: ShortQueryIndexSnapshotSource?
 #endif
 
@@ -860,6 +1042,8 @@ public actor SearchEngineImpl {
     private var fullIndexBuildGeneration: UInt64 = 0
     private var fullIndexPendingEvents: [FullIndexPendingEvent] = []
     private var fullIndexDiskCachePersistTask: Task<Void, Never>?
+    private var fullIndexBuildTrigger: FullIndexBuildTrigger?
+    private var lastFullIndexWarmLoadMetrics: SearchWarmLoadMetrics?
 
     private var shortQueryIndex: ShortQueryIndex?
     private var shortQueryIndexBuildTask: Task<Void, Never>?
@@ -868,9 +1052,9 @@ public actor SearchEngineImpl {
     private var shortQueryIndexPendingDeletions: [UUID] = []
     private var shortQueryIndexDiskCachePersistTask: Task<Void, Never>?
 
-    private let fullIndexTombstoneRatioStaleThreshold: Double = 0.25
-    private let fullIndexTombstoneMinSlotsForStale: Int = 64
-    private let fullIndexTombstoneMinCountForStale: Int = 16
+    private static let fullIndexTombstoneRatioStaleThresholdDefault: Double = 0.25
+    private static let fullIndexTombstoneMinSlotsForStaleDefault: Int = 64
+    private static let fullIndexTombstoneMinCountForStaleDefault: Int = 16
 
     private let shortQueryIndexTombstoneRatioRebuildThreshold: Double = 0.25
     private let shortQueryIndexTombstoneMinSlotsForRebuild: Int = 2000
@@ -908,6 +1092,7 @@ public actor SearchEngineImpl {
     private let initialIndexBuildTimeout: TimeInterval = 30.0
 
     private static let fullIndexDiskCacheVersion: Int = 3
+    private static let fullIndexDiskCacheMetadataVersion: Int = 1
     private static let shortQueryIndexDiskCacheVersion: Int = 1
 
     private var corpusMetrics: CorpusMetrics?
@@ -951,7 +1136,7 @@ public actor SearchEngineImpl {
 
         scheduleFullIndexDiskCachePersistIfPossible()
         if let task = fullIndexDiskCachePersistTask {
-            _ = try? await withTimeout(timeout: 0.25) { await task.value }
+            _ = try? await withTimeout(timeout: 2.0) { await task.value }
         }
 
         statementCache = [:]
@@ -1100,6 +1285,7 @@ public actor SearchEngineImpl {
         fullIndexBuildTask = nil
         fullIndexBuildGeneration &+= 1
         fullIndexPendingEvents = []
+        fullIndexBuildTrigger = nil
         fullIndex = nil
         fullIndexStale = true
         markIndexChanged()
@@ -1200,8 +1386,55 @@ public actor SearchEngineImpl {
         }
     }
 
-    private func startFullIndexBuildIfNeeded(force: Bool = false) {
-        guard fullIndexBuildTask == nil else { return }
+    private func fullIndexWarmupSessionKey(for request: SearchRequest) -> FullIndexWarmupSessionKey? {
+        let trimmedQuery = request.query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedQuery.isEmpty else { return nil }
+        guard request.mode == .fuzzy || request.mode == .fuzzyPlus else { return nil }
+        let typeFiltersKey = request.typeFilters?
+            .map(\.rawValue)
+            .sorted()
+            .joined(separator: "|")
+        return FullIndexWarmupSessionKey(
+            queryLower: trimmedQuery.lowercased(),
+            mode: request.mode,
+            appFilter: request.appFilter,
+            typeFilter: request.typeFilter,
+            typeFiltersKey: typeFiltersKey
+        )
+    }
+
+    private func reconcileInteractiveFullIndexWarmup(for request: SearchRequest) {
+        guard case .interactive(let activeSession)? = fullIndexBuildTrigger else { return }
+        let requestedSession = fullIndexWarmupSessionKey(for: request)
+        guard activeSession != requestedSession else { return }
+        cancelInteractiveFullIndexBuild()
+    }
+
+    private func cancelInteractiveFullIndexBuild() {
+        guard case .interactive = fullIndexBuildTrigger else { return }
+        fullIndexBuildTask?.cancel()
+        fullIndexBuildTask = nil
+        fullIndexBuildGeneration &+= 1
+        fullIndexPendingEvents = []
+        fullIndexBuildTrigger = nil
+    }
+
+    private func startInteractiveFullIndexBuildIfNeeded(for request: SearchRequest) {
+        guard let session = fullIndexWarmupSessionKey(for: request) else { return }
+        startFullIndexBuildIfNeeded(force: false, trigger: .interactive(session))
+    }
+
+    private func startFullIndexBuildIfNeeded(force: Bool = false, trigger: FullIndexBuildTrigger = .forced) {
+        if fullIndexBuildTask != nil {
+            if fullIndexBuildTrigger == trigger {
+                return
+            }
+            if case .interactive = fullIndexBuildTrigger, case .interactive = trigger {
+                cancelInteractiveFullIndexBuild()
+            } else {
+                return
+            }
+        }
         guard fullIndex == nil || fullIndexStale else { return }
 
         let estimatedCount = corpusMetrics?.itemCount ?? 0
@@ -1217,15 +1450,18 @@ public actor SearchEngineImpl {
         fullIndexBuildGeneration &+= 1
         let generation = fullIndexBuildGeneration
         let reserveSlots = estimatedCount
+        fullIndexBuildTrigger = trigger
 
         fullIndexBuildTask = Task.detached(priority: .utility) { [dbPath, startedMutationCounter, startedDBChangeToken] in
-            let snapshot = Self.loadFullIndexSnapshotFromDiskCache(dbPath: dbPath)
-                ?? Self.buildFullIndexSnapshot(dbPath: dbPath, reserveSlots: reserveSlots)
+            var warmLoadMetrics = SearchWarmLoadMetrics()
+            let snapshot = FullIndexDiskCacheCodec.loadSnapshot(dbPath: dbPath, metrics: &warmLoadMetrics)
+                ?? FullIndexBuilder.buildSnapshot(dbPath: dbPath, reserveSlots: reserveSlots, metrics: &warmLoadMetrics)
             await self.finishFullIndexBuild(
                 generation: generation,
                 startedMutationCounter: startedMutationCounter,
                 startedDBChangeToken: startedDBChangeToken,
-                snapshot: snapshot
+                snapshot: snapshot,
+                warmLoadMetrics: warmLoadMetrics
             )
         }
     }
@@ -1423,6 +1659,10 @@ public actor SearchEngineImpl {
         fullIndexDiskCachePath(dbPath: dbPath) + ".sha256"
     }
 
+    private static func fullIndexDiskCacheMetadataPath(dbPath: String) -> String {
+        fullIndexDiskCachePath(dbPath: dbPath) + ".metadata.plist"
+    }
+
     private static func shortQueryIndexDiskCachePath(dbPath: String) -> String {
         "\(dbPath).shortindex.v\(shortQueryIndexDiskCacheVersion).plist"
     }
@@ -1490,14 +1730,7 @@ public actor SearchEngineImpl {
 
     private static func dbFileFingerprint(
         dbPath: String
-    ) -> (
-        dbSize: UInt64,
-        dbModifiedAt: TimeInterval,
-        walSize: UInt64,
-        walModifiedAt: TimeInterval,
-        shmSize: UInt64,
-        shmModifiedAt: TimeInterval
-    )? {
+    ) -> DBFileFingerprint? {
         do {
             let dbAttrs = try FileManager.default.attributesOfItem(atPath: dbPath)
             guard let dbSize = dbAttrs[.size] as? NSNumber,
@@ -1531,7 +1764,7 @@ public actor SearchEngineImpl {
                 shmModifiedAt = modifiedAt.timeIntervalSince1970
             }
 
-            return (
+            return DBFileFingerprint(
                 dbSize: dbSize.uint64Value,
                 dbModifiedAt: dbModifiedAt.timeIntervalSince1970,
                 walSize: walSize,
@@ -1591,120 +1824,354 @@ public actor SearchEngineImpl {
         return ShortQueryIndexSnapshot(index: index, source: .diskCache)
     }
 
-    private static func loadFullIndexSnapshotFromDiskCache(dbPath: String) -> FullIndexSnapshot? {
+    private static func preflightFullIndexDiskCache(dbPath: String) -> FullIndexDiskCachePreflightResult {
+        let cachePath = fullIndexDiskCachePath(dbPath: dbPath)
+        guard FileManager.default.fileExists(atPath: cachePath) else {
+            return .skip(reason: .metadataMissing, metadata: nil)
+        }
+
+        let checksumPath = fullIndexDiskCacheChecksumPath(dbPath: dbPath)
+        let metadataPath = fullIndexDiskCacheMetadataPath(dbPath: dbPath)
+        guard let fp = dbFileFingerprint(dbPath: dbPath) else {
+            return .skip(reason: .payloadInvalid, metadata: nil)
+        }
+
+        guard FileManager.default.fileExists(atPath: metadataPath),
+              let metadataData = try? Data(contentsOf: URL(fileURLWithPath: metadataPath), options: [.mappedIfSafe]) else {
+            guard FileManager.default.fileExists(atPath: checksumPath) else {
+                return .skip(reason: .metadataMissing, metadata: nil)
+            }
+            return .candidate(
+                FullIndexDiskCacheLoadCandidate(
+                    fingerprint: fp,
+                    metadata: nil,
+                    cachePath: cachePath,
+                    checksumPath: checksumPath,
+                    metadataPath: metadataPath,
+                    preflightReason: .metadataMissing
+                )
+            )
+        }
+
+        let decoder = PropertyListDecoder()
+        guard let metadata = try? decoder.decode(FullIndexDiskCacheMetadataV1.self, from: metadataData),
+              metadata.version == fullIndexDiskCacheMetadataVersion else {
+            guard FileManager.default.fileExists(atPath: checksumPath) else {
+                return .skip(reason: .metadataMissing, metadata: nil)
+            }
+            return .candidate(
+                FullIndexDiskCacheLoadCandidate(
+                    fingerprint: fp,
+                    metadata: nil,
+                    cachePath: cachePath,
+                    checksumPath: checksumPath,
+                    metadataPath: metadataPath,
+                    preflightReason: .metadataMissing
+                )
+            )
+        }
+
+        guard fullIndexCacheFingerprintMatches(metadata.fingerprint, fp) else {
+            return .skip(reason: .fingerprintMismatch, metadata: metadata)
+        }
+
+        let isTombstoneStale = shouldMarkFullIndexStaleDueToTombstones(
+            itemCount: metadata.itemCount,
+            tombstoneCount: metadata.tombstoneCount
+        )
+        if isTombstoneStale {
+            return .skip(reason: .tombstoneStale, metadata: metadata)
+        }
+
+        guard FileManager.default.fileExists(atPath: checksumPath) else {
+            return .skip(reason: .payloadInvalid, metadata: metadata)
+        }
+
+        return .candidate(
+            FullIndexDiskCacheLoadCandidate(
+                fingerprint: fp,
+                metadata: metadata,
+                cachePath: cachePath,
+                checksumPath: checksumPath,
+                metadataPath: metadataPath,
+                preflightReason: nil
+            )
+        )
+    }
+
+    private static func loadFullIndexSnapshotFromDiskCacheCandidate(
+        _ candidate: FullIndexDiskCacheLoadCandidate
+    ) -> FullIndexDiskCacheLoadOutcome {
         #if DEBUG
         let loadStart = CFAbsoluteTimeGetCurrent()
         #endif
 
-        guard let fp = dbFileFingerprint(dbPath: dbPath) else { return nil }
-
-        let cachePath = fullIndexDiskCachePath(dbPath: dbPath)
-        guard FileManager.default.fileExists(atPath: cachePath) else { return nil }
-
-        let checksumPath = fullIndexDiskCacheChecksumPath(dbPath: dbPath)
-        guard let checksumRaw = try? String(contentsOfFile: checksumPath, encoding: .utf8) else { return nil }
+        guard let checksumRaw = try? String(contentsOfFile: candidate.checksumPath, encoding: .utf8) else {
+            return FullIndexDiskCacheLoadOutcome(snapshot: nil, reason: .payloadInvalid, metadata: candidate.metadata)
+        }
         let checksum = checksumRaw.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard checksum.count == 64 else { return nil }
-
-        guard let data = try? Data(contentsOf: URL(fileURLWithPath: cachePath), options: [.mappedIfSafe]) else {
-            return nil
+        guard checksum.count == 64 else {
+            return FullIndexDiskCacheLoadOutcome(snapshot: nil, reason: .payloadInvalid, metadata: candidate.metadata)
         }
 
-        #if DEBUG
-        let checksumStart = CFAbsoluteTimeGetCurrent()
-        #endif
+        guard let data = try? Data(contentsOf: URL(fileURLWithPath: candidate.cachePath), options: [.mappedIfSafe]) else {
+            return FullIndexDiskCacheLoadOutcome(snapshot: nil, reason: .payloadInvalid, metadata: candidate.metadata)
+        }
+
         let computedChecksum = sha256Hex(data)
-        #if DEBUG
-        let checksumMs = (CFAbsoluteTimeGetCurrent() - checksumStart) * 1000
-        #endif
-        guard computedChecksum == checksum else { return nil }
-
-        #if DEBUG
-        let decodeStart = CFAbsoluteTimeGetCurrent()
-        #endif
-        let decoder = PropertyListDecoder()
-        guard let cache = try? decoder.decode(FullIndexDiskCacheV3.self, from: data) else { return nil }
-        #if DEBUG
-        let decodeMs = (CFAbsoluteTimeGetCurrent() - decodeStart) * 1000
-        #endif
-        guard cache.version == fullIndexDiskCacheVersion else { return nil }
-        guard cache.dbFileSize == fp.dbSize, cache.dbFileModifiedAt == fp.dbModifiedAt else { return nil }
-        guard cache.walFileSize == fp.walSize, cache.walFileModifiedAt == fp.walModifiedAt else { return nil }
-        guard cache.shmFileSize == fp.shmSize, cache.shmFileModifiedAt == fp.shmModifiedAt else { return nil }
-        guard cache.asciiCharPostings.count == 128 else { return nil }
-
-        // We rely on the .sha256 sidecar to protect against truncated/corrupted cache files.
-        // Keep the remaining validation lightweight to preserve fast startup loads.
-        let itemsCount = cache.items.count
-        for postings in cache.asciiCharPostings {
-            if !validateDiskCachePostings(postings, itemsCount: itemsCount) { return nil }
-        }
-        for postings in cache.nonASCIICharPostings.values {
-            if !validateDiskCachePostings(postings, itemsCount: itemsCount) { return nil }
+        guard computedChecksum == checksum else {
+            return FullIndexDiskCacheLoadOutcome(snapshot: nil, reason: .checksumMismatch, metadata: candidate.metadata)
         }
 
-        guard let index = fullIndexFromDiskCache(cache) else { return nil }
+        let parseResult = decodeFullIndexDiskCachePayload(data, fingerprint: candidate.fingerprint)
+        let index: FullFuzzyIndex
+        switch parseResult {
+        case .success(let parsedIndex):
+            index = parsedIndex
+        case .decodeFailed:
+            return FullIndexDiskCacheLoadOutcome(snapshot: nil, reason: .decodeFailed, metadata: candidate.metadata)
+        case .payloadInvalid:
+            return FullIndexDiskCacheLoadOutcome(snapshot: nil, reason: .payloadInvalid, metadata: candidate.metadata)
+        }
+
+        let metadata = candidate.metadata ?? makeFullIndexDiskCacheMetadata(
+            fingerprint: candidate.fingerprint,
+            index: index,
+            payloadByteSize: data.count
+        )
+        if candidate.metadata == nil {
+            persistFullIndexDiskCacheMetadataIfPossible(metadata, at: candidate.metadataPath)
+        }
+        if Self.shouldMarkFullIndexStaleDueToTombstones(
+            itemCount: index.items.count,
+            tombstoneCount: index.tombstoneCount
+        ) {
+            return FullIndexDiskCacheLoadOutcome(snapshot: nil, reason: .tombstoneStale, metadata: metadata)
+        }
+
         #if DEBUG
         let totalMs = (CFAbsoluteTimeGetCurrent() - loadStart) * 1000
         ScopyLog.search.debug(
-            "Loaded fullIndex disk cache: bytes=\(data.count, privacy: .public) checksumMs=\(checksumMs, privacy: .public) decodeMs=\(decodeMs, privacy: .public) totalMs=\(totalMs, privacy: .public)"
+            "Loaded fullIndex disk cache via metadata preflight: bytes=\(data.count, privacy: .public) totalMs=\(totalMs, privacy: .public)"
         )
         #endif
-        return FullIndexSnapshot(index: index, startDataVersion: 0, endDataVersion: 0, source: .diskCache)
+
+        return FullIndexDiskCacheLoadOutcome(
+            snapshot: FullIndexSnapshot(index: index, startDataVersion: 0, endDataVersion: 0, source: .diskCache),
+            reason: .diskCacheHit,
+            metadata: metadata
+        )
     }
 
-    private static func loadFullIndexFromDiskCache(dbPath: String) -> FullFuzzyIndex? {
-        let snapshot = loadFullIndexSnapshotFromDiskCache(dbPath: dbPath)
-        return snapshot?.index
+    private static func makeFullIndexDiskCacheMetadata(
+        fingerprint: DBFileFingerprint,
+        index: FullFuzzyIndex,
+        payloadByteSize: Int
+    ) -> FullIndexDiskCacheMetadataV1 {
+        FullIndexDiskCacheMetadataV1(
+            version: fullIndexDiskCacheMetadataVersion,
+            fingerprint: fingerprint,
+            itemCount: index.items.count,
+            tombstoneCount: index.tombstoneCount,
+            tombstoneRatio: index.items.isEmpty ? 0 : Double(index.tombstoneCount) / Double(index.items.count),
+            payloadByteSize: UInt64(max(0, payloadByteSize))
+        )
     }
 
-    private static func fullIndexFromDiskCache(_ cache: FullIndexDiskCacheV3) -> FullFuzzyIndex? {
+    private static func persistFullIndexDiskCacheMetadataIfPossible(
+        _ metadata: FullIndexDiskCacheMetadataV1,
+        at path: String
+    ) {
+        do {
+            let encoder = PropertyListEncoder()
+            encoder.outputFormat = .binary
+            let data = try encoder.encode(metadata)
+            try data.write(to: URL(fileURLWithPath: path), options: [.atomic])
+        } catch {
+            // Best-effort cache metadata bootstrap: ignore failures.
+        }
+    }
+
+    private static func fullIndexCacheFingerprintMatches(
+        _ lhs: DBFileFingerprint,
+        _ rhs: DBFileFingerprint
+    ) -> Bool {
+        lhs.dbSize == rhs.dbSize &&
+        lhs.dbModifiedAt == rhs.dbModifiedAt &&
+        lhs.walSize == rhs.walSize &&
+        lhs.walModifiedAt == rhs.walModifiedAt
+    }
+
+    private static func recordFullIndexDiskCacheMetadataCounters(
+        _ metadata: FullIndexDiskCacheMetadataV1?,
+        metrics: inout SearchWarmLoadMetrics
+    ) {
+        guard let metadata else { return }
+        metrics.addCounter("full_index_cache_metadata_item_count", value: metadata.itemCount)
+        metrics.addCounter("full_index_cache_metadata_tombstone_count", value: metadata.tombstoneCount)
+        metrics.addCounter("full_index_cache_metadata_tombstone_ratio_bps", value: Int((metadata.tombstoneRatio * 10_000).rounded()))
+        metrics.addCounter("full_index_cache_metadata_payload_bytes", value: Int(min(metadata.payloadByteSize, UInt64(Int.max))))
+    }
+
+    private static func recordFullIndexDiskCacheMetadataCounters(
+        _ metadata: FullIndexDiskCacheMetadataV1?,
+        perf: PerfContext
+    ) {
+        guard let metadata else { return }
+        perf.addCounter("full_index_cache_metadata_item_count", value: metadata.itemCount)
+        perf.addCounter("full_index_cache_metadata_tombstone_count", value: metadata.tombstoneCount)
+        perf.addCounter("full_index_cache_metadata_tombstone_ratio_bps", value: Int((metadata.tombstoneRatio * 10_000).rounded()))
+        perf.addCounter("full_index_cache_metadata_payload_bytes", value: Int(min(metadata.payloadByteSize, UInt64(Int.max))))
+    }
+
+    private static func decodeFullIndexDiskCachePayload(
+        _ data: Data,
+        fingerprint: DBFileFingerprint
+    ) -> FullIndexDiskCachePayloadParseResult {
+        guard let root = try? PropertyListSerialization.propertyList(from: data, options: [], format: nil) else {
+            return .decodeFailed
+        }
+        guard let payload = root as? [String: Any] else {
+            return .payloadInvalid
+        }
+
+        guard plistInt(payload["version"]) == fullIndexDiskCacheVersion else {
+            return .payloadInvalid
+        }
+        guard plistUInt64(payload["dbFileSize"]) == fingerprint.dbSize,
+              plistTimeInterval(payload["dbFileModifiedAt"]) == fingerprint.dbModifiedAt else {
+            return .payloadInvalid
+        }
+        guard plistUInt64(payload["walFileSize"]) == fingerprint.walSize,
+              plistTimeInterval(payload["walFileModifiedAt"]) == fingerprint.walModifiedAt else {
+            return .payloadInvalid
+        }
+        guard let rawItems = payload["items"] as? [Any],
+              let rawASCIIPostings = payload["asciiCharPostings"] as? [Any],
+              rawASCIIPostings.count == 128,
+              let rawNonASCIIPostings = payload["nonASCIICharPostings"] as? [String: Any] else {
+            return .payloadInvalid
+        }
+
         var items: [IndexedItem?] = []
-        items.reserveCapacity(cache.items.count)
+        items.reserveCapacity(rawItems.count)
 
         var idToSlot: [UUID: Int] = [:]
-        idToSlot.reserveCapacity(cache.items.count)
+        idToSlot.reserveCapacity(rawItems.count)
 
-        for (slot, diskItem) in cache.items.enumerated() {
-            guard let diskItem,
-                  let id = UUID(uuidString: diskItem.id),
-                  let type = ClipboardItemType(rawValue: diskItem.type) else {
+        for (slot, rawItem) in rawItems.enumerated() {
+            if rawItem is NSNull {
                 items.append(nil)
                 continue
+            }
+            guard let diskItem = rawItem as? [String: Any],
+                  let idString = plistString(diskItem["id"]),
+                  let id = UUID(uuidString: idString),
+                  let typeRaw = plistString(diskItem["type"]),
+                  let type = ClipboardItemType(rawValue: typeRaw),
+                  let contentHash = plistString(diskItem["contentHash"]),
+                  let plainTextLower = plistString(diskItem["plainTextLower"]),
+                  let createdAt = plistTimeInterval(diskItem["createdAt"]),
+                  let lastUsedAt = plistTimeInterval(diskItem["lastUsedAt"]),
+                  let useCount = plistInt(diskItem["useCount"]),
+                  let isPinned = plistBool(diskItem["isPinned"]),
+                  let sizeBytes = plistInt(diskItem["sizeBytes"]) else {
+                return .payloadInvalid
             }
 
             let item = IndexedItem(
                 id: id,
                 type: type,
-                contentHash: diskItem.contentHash,
-                plainTextLower: diskItem.plainTextLower,
-                appBundleID: diskItem.appBundleID,
-                createdAt: Date(timeIntervalSince1970: diskItem.createdAt),
-                lastUsedAt: Date(timeIntervalSince1970: diskItem.lastUsedAt),
-                useCount: diskItem.useCount,
-                isPinned: diskItem.isPinned,
-                sizeBytes: diskItem.sizeBytes,
-                storageRef: diskItem.storageRef
+                contentHash: contentHash,
+                plainTextLower: plainTextLower,
+                appBundleID: plistOptionalString(diskItem["appBundleID"]),
+                createdAt: Date(timeIntervalSince1970: createdAt),
+                lastUsedAt: Date(timeIntervalSince1970: lastUsedAt),
+                useCount: useCount,
+                isPinned: isPinned,
+                sizeBytes: sizeBytes,
+                storageRef: plistOptionalString(diskItem["storageRef"])
             )
             items.append(item)
             idToSlot[id] = slot
         }
 
+        let itemsCount = items.count
+
+        var asciiCharPostings: [[Int]] = []
+        asciiCharPostings.reserveCapacity(rawASCIIPostings.count)
+        for rawPostings in rawASCIIPostings {
+            guard let postings = rawPostings as? [Int],
+                  validateDiskCachePostings(postings, itemsCount: itemsCount) else {
+                return .payloadInvalid
+            }
+            asciiCharPostings.append(postings)
+        }
+
         var nonASCIICharPostings: [Character: [Int]] = [:]
-        nonASCIICharPostings.reserveCapacity(cache.nonASCIICharPostings.count)
-        for (rawKey, postings) in cache.nonASCIICharPostings {
-            guard rawKey.count == 1, let ch = rawKey.first else { continue }
-            nonASCIICharPostings[ch] = postings
+        nonASCIICharPostings.reserveCapacity(rawNonASCIIPostings.count)
+        for (rawKey, rawPostings) in rawNonASCIIPostings {
+            guard rawKey.count == 1,
+                  let character = rawKey.first,
+                  let postings = rawPostings as? [Int],
+                  validateDiskCachePostings(postings, itemsCount: itemsCount) else {
+                return .payloadInvalid
+            }
+            nonASCIICharPostings[character] = postings
         }
 
         let tombstones = max(0, items.count - idToSlot.count)
-        return FullFuzzyIndex(
-            items: items,
-            idToSlot: idToSlot,
-            asciiCharPostings: cache.asciiCharPostings,
-            nonASCIICharPostings: nonASCIICharPostings,
-            tombstoneCount: tombstones
+        return .success(
+            FullFuzzyIndex(
+                items: items,
+                idToSlot: idToSlot,
+                asciiCharPostings: asciiCharPostings,
+                nonASCIICharPostings: nonASCIICharPostings,
+                tombstoneCount: tombstones
+            )
         )
+    }
+
+    private static func plistString(_ value: Any?) -> String? {
+        value as? String
+    }
+
+    private static func plistOptionalString(_ value: Any?) -> String? {
+        value as? String
+    }
+
+    private static func plistBool(_ value: Any?) -> Bool? {
+        value as? Bool
+    }
+
+    private static func plistInt(_ value: Any?) -> Int? {
+        if let intValue = value as? Int {
+            return intValue
+        }
+        if let number = value as? NSNumber {
+            return number.intValue
+        }
+        return nil
+    }
+
+    private static func plistUInt64(_ value: Any?) -> UInt64? {
+        if let uint64Value = value as? UInt64 {
+            return uint64Value
+        }
+        if let number = value as? NSNumber {
+            return number.uint64Value
+        }
+        return nil
+    }
+
+    private static func plistTimeInterval(_ value: Any?) -> TimeInterval? {
+        if let timeIntervalValue = value as? TimeInterval {
+            return timeIntervalValue
+        }
+        if let number = value as? NSNumber {
+            return number.doubleValue
+        }
+        return nil
     }
 
     private func scheduleShortQueryIndexDiskCachePersistIfPossible() {
@@ -1766,9 +2233,19 @@ public actor SearchEngineImpl {
             nonASCIICharPostings: nonASCII
         )
 
+        let metadata = FullIndexDiskCacheMetadataV1(
+            version: Self.fullIndexDiskCacheMetadataVersion,
+            fingerprint: fp,
+            itemCount: index.items.count,
+            tombstoneCount: index.tombstoneCount,
+            tombstoneRatio: index.items.isEmpty ? 0 : Double(index.tombstoneCount) / Double(index.items.count),
+            payloadByteSize: 0
+        )
+
         let cachePath = Self.fullIndexDiskCachePath(dbPath: dbPath)
         let checksumPath = Self.fullIndexDiskCacheChecksumPath(dbPath: dbPath)
-        fullIndexDiskCachePersistTask = Task.detached(priority: .utility) { [cache] in
+        let metadataPath = Self.fullIndexDiskCacheMetadataPath(dbPath: dbPath)
+        fullIndexDiskCachePersistTask = Task.detached(priority: .utility) { [cache, metadata] in
             do {
                 let encoder = PropertyListEncoder()
                 encoder.outputFormat = .binary
@@ -1776,6 +2253,16 @@ public actor SearchEngineImpl {
                 try data.write(to: URL(fileURLWithPath: cachePath), options: [.atomic])
                 let checksum = Self.sha256Hex(data)
                 try checksum.write(to: URL(fileURLWithPath: checksumPath), atomically: true, encoding: .utf8)
+                let metadataWithPayloadSize = FullIndexDiskCacheMetadataV1(
+                    version: metadata.version,
+                    fingerprint: metadata.fingerprint,
+                    itemCount: metadata.itemCount,
+                    tombstoneCount: metadata.tombstoneCount,
+                    tombstoneRatio: metadata.tombstoneRatio,
+                    payloadByteSize: UInt64(data.count)
+                )
+                let metadataData = try encoder.encode(metadataWithPayloadSize)
+                try metadataData.write(to: URL(fileURLWithPath: metadataPath), options: [.atomic])
             } catch {
                 // Best-effort cache: ignore failures.
             }
@@ -1822,10 +2309,18 @@ public actor SearchEngineImpl {
         generation: UInt64,
         startedMutationCounter: UInt64,
         startedDBChangeToken: Int64,
-        snapshot: FullIndexSnapshot?
+        snapshot: FullIndexSnapshot?,
+        warmLoadMetrics: SearchWarmLoadMetrics
     ) {
         guard fullIndexBuildGeneration == generation else { return }
         fullIndexBuildTask = nil
+        fullIndexBuildTrigger = nil
+        lastFullIndexWarmLoadMetrics = warmLoadMetrics
+#if DEBUG
+        if let lastReason = warmLoadMetrics.reasons.last {
+            debugFullIndexLastDiskCacheLoadReasonValue = FullIndexDiskCacheLoadReason(rawValue: lastReason)
+        }
+#endif
 
         let pending = fullIndexPendingEvents
         fullIndexPendingEvents = []
@@ -1890,6 +2385,12 @@ public actor SearchEngineImpl {
             startFullIndexBuildIfNeeded(force: true)
         } else if snapshot.source == .database {
             scheduleFullIndexDiskCachePersistIfPossible()
+        }
+
+        if !warmLoadMetrics.summary.isEmpty {
+            ScopyLog.search.debug(
+                "Full-index warm-load source=\(snapshot.source.rawValue, privacy: .public) metrics=\(warmLoadMetrics.summary, privacy: .public)"
+            )
         }
     }
 
@@ -1982,6 +2483,8 @@ public actor SearchEngineImpl {
         let startTime = CFAbsoluteTimeGetCurrent()
         let perfContext = Perf.metricsEnabled ? PerfContext() : nil
         let signpostID = Perf.signpostsEnabled ? OSSignpostID(log: Perf.log) : nil
+
+        reconcileInteractiveFullIndexWarmup(for: request)
 
         if let signpostID {
             os_signpost(
@@ -2400,7 +2903,6 @@ public actor SearchEngineImpl {
 
         // Keep the initial (non-forceFullFuzzy) stage fast: even if no prefilter match is found,
         // return an empty prefilter result quickly and allow UI to refine with a full scan.
-        startFullIndexBuildIfNeeded()
         return SearchResult(items: [], total: 0, hasMore: false, coverage: .stagedRefine, searchTimeMs: 0)
     }
 
@@ -2419,7 +2921,7 @@ public actor SearchEngineImpl {
         }
 
         guard !fts.items.isEmpty else { return nil }
-        startFullIndexBuildIfNeeded()
+        startInteractiveFullIndexBuildIfNeeded(for: request)
         perf?.addCounter("fts_prefilter_items", value: fts.items.count)
         return fts
     }
@@ -2498,7 +3000,7 @@ public actor SearchEngineImpl {
         }
 
         guard let page, !page.items.isEmpty else { return nil }
-        startFullIndexBuildIfNeeded()
+        startInteractiveFullIndexBuildIfNeeded(for: request)
         perf?.addCounter("substring_fallback_items", value: page.items.count)
         return makeZeroTimeSearchResult(page: page, coverage: .stagedRefine)
     }
@@ -2511,7 +3013,7 @@ public actor SearchEngineImpl {
         guard trimmedQuery.count <= 6 else { return nil }
         let fallback = try searchFuzzyInRecentCache(request: request, mode: mode, query: trimmedQuery)
         guard !fallback.items.isEmpty else { return nil }
-        startFullIndexBuildIfNeeded()
+        startInteractiveFullIndexBuildIfNeeded(for: request)
         return fallback
     }
 
@@ -2759,20 +3261,47 @@ public actor SearchEngineImpl {
             return index
         }
 
-        let loaded: FullFuzzyIndex?
+        let loadOutcome: FullIndexDiskCacheLoadOutcome
         if let perf {
-            loaded = perf.measure("full_index_disk_cache_load") {
-                Self.loadFullIndexFromDiskCache(dbPath: dbPath)
+            let preflight = perf.measure("full_index_disk_cache_preflight") {
+                Self.preflightFullIndexDiskCache(dbPath: dbPath)
+            }
+            switch preflight {
+            case .skip(let reason, let metadata):
+                Self.recordFullIndexDiskCacheMetadataCounters(metadata, perf: perf)
+                perf.addReason(reason.rawValue)
+                loadOutcome = FullIndexDiskCacheLoadOutcome(snapshot: nil, reason: reason, metadata: metadata)
+            case .candidate(let candidate):
+                if let preflightReason = candidate.preflightReason {
+                    perf.addReason(preflightReason.rawValue)
+                }
+                Self.recordFullIndexDiskCacheMetadataCounters(candidate.metadata, perf: perf)
+                loadOutcome = perf.measure("full_index_disk_cache_load") {
+                    Self.loadFullIndexSnapshotFromDiskCacheCandidate(candidate)
+                }
+                Self.recordFullIndexDiskCacheMetadataCounters(loadOutcome.metadata, perf: perf)
+                perf.addReason(loadOutcome.reason.rawValue)
             }
         } else {
-            loaded = Self.loadFullIndexFromDiskCache(dbPath: dbPath)
+            let preflight = Self.preflightFullIndexDiskCache(dbPath: dbPath)
+            switch preflight {
+            case .skip(let reason, let metadata):
+                loadOutcome = FullIndexDiskCacheLoadOutcome(snapshot: nil, reason: reason, metadata: metadata)
+            case .candidate(let candidate):
+                loadOutcome = Self.loadFullIndexSnapshotFromDiskCacheCandidate(candidate)
+            }
         }
 
-        if let loaded {
+        #if DEBUG
+        debugFullIndexLastDiskCacheLoadReasonValue = loadOutcome.reason
+        #endif
+
+        if let loaded = loadOutcome.snapshot?.index {
             if shouldMarkFullIndexStaleDueToTombstones(index: loaded) {
                 // A heavily tombstoned disk snapshot can significantly degrade candidate intersections.
                 // Treat it as unusable and rebuild from DB to keep refine latency stable.
                 fullIndexStale = true
+                perf?.addReason(FullIndexDiskCacheLoadReason.tombstoneStale.rawValue)
             } else {
                 fullIndex = loaded
                 fullIndexStale = false
@@ -2787,6 +3316,7 @@ public actor SearchEngineImpl {
         }
 
         let newIndex: FullFuzzyIndex
+        perf?.addReason(FullIndexDiskCacheLoadReason.databaseRebuild.rawValue)
         if let perf {
             let phaseStart = CFAbsoluteTimeGetCurrent()
             newIndex = try buildFullIndex(perf: perf)
@@ -2893,11 +3423,18 @@ public actor SearchEngineImpl {
     }
 
     private func shouldMarkFullIndexStaleDueToTombstones(index: FullFuzzyIndex) -> Bool {
-        guard index.items.count >= fullIndexTombstoneMinSlotsForStale else { return false }
-        guard index.tombstoneCount >= fullIndexTombstoneMinCountForStale else { return false }
+        Self.shouldMarkFullIndexStaleDueToTombstones(
+            itemCount: index.items.count,
+            tombstoneCount: index.tombstoneCount
+        )
+    }
 
-        let ratio = Double(index.tombstoneCount) / Double(index.items.count)
-        return ratio >= fullIndexTombstoneRatioStaleThreshold
+    private static func shouldMarkFullIndexStaleDueToTombstones(itemCount: Int, tombstoneCount: Int) -> Bool {
+        guard itemCount >= fullIndexTombstoneMinSlotsForStaleDefault else { return false }
+        guard tombstoneCount >= fullIndexTombstoneMinCountForStaleDefault else { return false }
+
+        let ratio = Double(tombstoneCount) / Double(itemCount)
+        return ratio >= fullIndexTombstoneRatioStaleThresholdDefault
     }
 
     private func computeCandidateSlots(
@@ -5221,6 +5758,10 @@ public actor SearchEngineImpl {
         debugFullIndexLastSnapshotSourceValue?.rawValue
     }
 
+    func debugFullIndexLastDiskCacheLoadReason() -> String? {
+        debugFullIndexLastDiskCacheLoadReasonValue?.rawValue
+    }
+
     func debugFullIndexBuildHealth() -> (isBuilding: Bool, pendingEvents: Int) {
         let isBuilding = fullIndexBuildTask != nil
         return (isBuilding, fullIndexPendingEvents.count)
@@ -5230,10 +5771,11 @@ public actor SearchEngineImpl {
         fullIndexBuildTask?.cancel()
     }
 
-    func debugFullIndexDiskCachePaths() -> (cachePath: String, checksumPath: String) {
+    func debugFullIndexDiskCachePaths() -> (cachePath: String, checksumPath: String, metadataPath: String) {
         (
             cachePath: Self.fullIndexDiskCachePath(dbPath: dbPath),
-            checksumPath: Self.fullIndexDiskCacheChecksumPath(dbPath: dbPath)
+            checksumPath: Self.fullIndexDiskCacheChecksumPath(dbPath: dbPath),
+            metadataPath: Self.fullIndexDiskCacheMetadataPath(dbPath: dbPath)
         )
     }
 

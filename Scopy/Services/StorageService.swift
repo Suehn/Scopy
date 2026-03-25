@@ -1238,7 +1238,11 @@ public final class StorageService {
         } catch {
             let data = try Data(contentsOf: sourceURL)
             try writeAtomically(data, to: destinationPath)
-            try? FileManager.default.removeItem(at: sourceURL)
+            BestEffortFileOps.removeItem(
+                at: sourceURL,
+                logger: ScopyLog.storage,
+                operation: "moveOrCopyFile.cleanupSourceAfterCopy"
+            )
         }
     }
 

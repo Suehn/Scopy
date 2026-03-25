@@ -127,8 +127,8 @@ if [[ "$FORCE_FULL_FUZZY" -eq 1 ]]; then
   COMMON_ARGS+=(--force-full-fuzzy)
 fi
 
-"$BENCH_BIN" "${COMMON_ARGS[@]}" --label "warm-load:prime" > "$PRIME_JSON"
-/usr/bin/time -l "$BENCH_BIN" "${COMMON_ARGS[@]}" --label "warm-load:engine" > "$RAW_JSON" 2> "$TIME_LOG"
+SCOPY_PERF_METRICS=1 "$BENCH_BIN" "${COMMON_ARGS[@]}" --label "warm-load:prime" > "$PRIME_JSON"
+/usr/bin/time -l env SCOPY_PERF_METRICS=1 "$BENCH_BIN" "${COMMON_ARGS[@]}" --label "warm-load:engine" > "$RAW_JSON" 2> "$TIME_LOG"
 
 python3 - "$DB_PATH" "$QUERY" "$RAW_JSON" "$TIME_LOG" "$SUMMARY_JSON" "$SUMMARY_MD" <<'PY'
 import json
@@ -152,6 +152,18 @@ payload = json.loads(raw_line)
 warm_load_ms = float(payload.get("p95_ms"))
 db_bytes = payload.get("db_bytes")
 db_item_count = payload.get("db_item_count")
+perf = payload.get("perf") or {}
+phases = perf.get("phases") or []
+counters = perf.get("counters") or []
+reasons = perf.get("reasons") or []
+reason_names = [reason.get("name") for reason in reasons if isinstance(reason, dict) and reason.get("name")]
+metadata_counters = {
+    counter.get("name"): counter.get("value")
+    for counter in counters
+    if isinstance(counter, dict)
+    and isinstance(counter.get("name"), str)
+    and counter.get("name", "").startswith("full_index_cache_metadata_")
+}
 
 with open(time_log_path, "r", encoding="utf-8") as f:
     time_text = f.read()
@@ -177,6 +189,10 @@ summary = {
     "peak_rss_bytes": peak_rss_bytes,
     "peak_rss_kb": peak_rss_kb,
     "peak_rss_mb": peak_rss_mb,
+    "perf_phases": phases,
+    "perf_counters": counters,
+    "perf_reasons": reason_names,
+    "perf_metadata": metadata_counters,
     "raw_json_path": raw_json_path,
     "time_log_path": time_log_path,
 }
@@ -200,6 +216,33 @@ if isinstance(db_bytes, int):
     md_lines.append(f"- DB bytes: `{db_bytes}`")
 if isinstance(db_item_count, int):
     md_lines.append(f"- DB items: `{db_item_count}`")
+if phases:
+    md_lines.append("- Perf phases:")
+    for phase in phases:
+        name = phase.get("name", "unknown")
+        ms = phase.get("ms")
+        if isinstance(ms, (int, float)):
+            md_lines.append(f"  - `{name}`: `{ms:.3f} ms`")
+        else:
+            md_lines.append(f"  - `{name}`")
+if counters:
+    md_lines.append("- Perf counters:")
+    for counter in counters:
+        name = counter.get("name", "unknown")
+        value = counter.get("value")
+        if isinstance(value, int):
+            md_lines.append(f"  - `{name}`: `{value}`")
+        else:
+            md_lines.append(f"  - `{name}`")
+if reason_names:
+    md_lines.append("- Perf reasons:")
+    for reason in reason_names:
+        md_lines.append(f"  - `{reason}`")
+if metadata_counters:
+    md_lines.append("- Perf metadata:")
+    for name in sorted(metadata_counters):
+        value = metadata_counters[name]
+        md_lines.append(f"  - `{name}`: `{value}`")
 
 with open(summary_md_path, "w", encoding="utf-8") as f:
     f.write("\n".join(md_lines) + "\n")
