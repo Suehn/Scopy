@@ -1496,7 +1496,23 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
 
             var fonts = 'n/a';
             try { fonts = (document.fonts && document.fonts.status) ? document.fonts.status : 'n/a'; } catch (e) { fonts = 'n/a'; }
-            return JSON.stringify({ hasContent: true, height: Math.ceil(h || 0), fonts: fonts });
+            var renderReady = true;
+            var highlightThemeReady = false;
+            try {
+              if (typeof window.__scopyIsRenderReady === 'function') {
+                renderReady = !!window.__scopyIsRenderReady();
+              }
+            } catch (e) { renderReady = true; }
+            try {
+              highlightThemeReady = !!(window.__scopyRenderState && window.__scopyRenderState.highlightThemeReady);
+            } catch (e) { highlightThemeReady = false; }
+            return JSON.stringify({
+              hasContent: true,
+              height: Math.ceil(h || 0),
+              fonts: fonts,
+              renderReady: renderReady,
+              highlightThemeReady: highlightThemeReady
+            });
           } catch (e) {
             return JSON.stringify({ hasContent: false, height: 0, fonts: 'n/a' });
           }
@@ -1526,8 +1542,9 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
 
             let parsedHeight = Self.parseHeightFromMeasureValue(value)
             let fontsStatus = Self.parseFontsStatusFromMeasureValue(value)
+            let renderReady = Self.parseRenderReadyFromMeasureValue(value)
             if fontsStatus == "loaded" { fontsWereLoaded = true }
-            if parsedHeight <= 0 {
+            if parsedHeight <= 0 || !renderReady {
                 stableSince = nil
                 try? await Task.sleep(nanoseconds: 80_000_000)
                 continue
@@ -1750,6 +1767,20 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
 
         if let status = obj["fonts"] as? String { return status }
         return nil
+    }
+
+    nonisolated private static func parseRenderReadyFromMeasureValue(_ value: String) -> Bool {
+        guard let data = value.data(using: .utf8),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return false }
+
+        if let ready = obj["renderReady"] as? Bool { return ready }
+        if let number = obj["renderReady"] as? NSNumber { return number.boolValue }
+        if let string = obj["renderReady"] as? String {
+            let lowered = string.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            return lowered == "true" || lowered == "1" || lowered == "yes"
+        }
+        return false
     }
 
     private func layoutDebugInfo(webView: WKWebView) async throws -> String {

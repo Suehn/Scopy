@@ -7,6 +7,27 @@
 
 ## [Unreleased]
 
+## [v0.7.1] - 2026-03-26
+
+### Markdown/Footnotes
+
+- `MathNormalizer` no longer mistakes markdown footnote syntax like `[^1]` and `[^1]: ...` for loose math, so release builds and exports preserve real footnote parsing.
+- Footnote references now render as blue superscript digits instead of plain bracket text, and the footnote renderer emits numeric captions directly to keep preview and export output aligned.
+
+### Markdown/Export
+
+- Markdown export no longer depends on external highlight theme timing alone; inline highlight token colors now keep code blocks colored in release builds and PNG output.
+- Export readiness checks now tolerate HTML-only harnesses while still waiting for markdown render completion when available, reducing false-zero height measurements in export preparation.
+
+### Verification
+
+- make build：BUILD SUCCEEDED（2026-03-26）
+- make test-unit：Executed 361 tests, 1 skipped, 0 failures（2026-03-26）
+- make test-strict：Executed 361 tests, 1 skipped, 0 failures（2026-03-26）
+- xcodebuild test -project Scopy.xcodeproj -scheme Scopy -destination 'platform=macOS' -only-testing:ScopyTests/MarkdownMathRenderingTests/testMathNormalizerPreservesMarkdownFootnoteSyntax -only-testing:ScopyTests/KaTeXRenderToStringTests/testMarkdownRendererHighlightsFootnoteRefsAndExposesRenderReadyState -only-testing:ScopyUITests/ExportMarkdownPNGUITests/testAutoExportMarkdownFixtureRendersStandardCase：passed（2026-03-26）
+- make docs-validate：passed（2026-03-26）
+- make release-validate：passed（2026-03-26）
+
 ## [v0.7.0] - 2026-03-26
 
 ### Markdown/Preview

@@ -138,10 +138,33 @@ enum MarkdownHTMLRenderer {
           .footnotes p:last-child {
             margin-bottom: 0;
           }
-          .footnote-ref,
+          sup.footnote-ref {
+            display: inline-block;
+            margin-left: 0.12em;
+            vertical-align: super;
+            line-height: 0;
+          }
+          .footnote-ref a,
           .footnote-backref {
-            font-size: 0.86em;
-            vertical-align: baseline;
+            display: inline-block;
+            font-size: 0.74em;
+            color: #2563eb;
+            font-weight: 700;
+            text-decoration: none;
+          }
+          .footnote-ref a {
+            min-width: 1.15em;
+            padding: 0.08em 0.26em;
+            border-radius: 999px;
+            background: rgba(37, 99, 235, 0.14);
+            box-shadow: inset 0 0 0 1px rgba(37, 99, 235, 0.14);
+          }
+          .footnote-ref a:hover,
+          .footnote-ref a:focus,
+          .footnote-backref:hover,
+          .footnote-backref:focus {
+            color: color-mix(in srgb, var(--scopy-link) 82%, #071a36 18%);
+            text-decoration: underline;
           }
         """ : ""
         let definitionListStyle = featureSet.definitionLists ? """
@@ -324,6 +347,77 @@ enum MarkdownHTMLRenderer {
           .hljs {
             background: transparent;
           }
+          .hljs-doctag,
+          .hljs-keyword,
+          .hljs-meta .hljs-keyword,
+          .hljs-template-tag,
+          .hljs-template-variable,
+          .hljs-type,
+          .hljs-variable.language_ {
+            color: #d73a49;
+          }
+          .hljs-title,
+          .hljs-title.class_,
+          .hljs-title.class_.inherited__,
+          .hljs-title.function_ {
+            color: #6f42c1;
+          }
+          .hljs-attr,
+          .hljs-attribute,
+          .hljs-literal,
+          .hljs-meta,
+          .hljs-number,
+          .hljs-operator,
+          .hljs-selector-attr,
+          .hljs-selector-class,
+          .hljs-selector-id,
+          .hljs-variable,
+          .hljs-section {
+            color: #005cc5;
+          }
+          .hljs-meta .hljs-string,
+          .hljs-regexp,
+          .hljs-string {
+            color: #032f62;
+          }
+          .hljs-built_in,
+          .hljs-symbol {
+            color: #e36209;
+          }
+          .hljs-code,
+          .hljs-comment,
+          .hljs-formula {
+            color: #6a737d;
+          }
+          .hljs-name,
+          .hljs-quote,
+          .hljs-selector-pseudo,
+          .hljs-selector-tag,
+          .hljs-addition {
+            color: #22863a;
+          }
+          .hljs-subst,
+          .hljs-emphasis,
+          .hljs-strong {
+            color: #24292e;
+          }
+          .hljs-bullet {
+            color: #735c0f;
+          }
+          .hljs-emphasis {
+            font-style: italic;
+          }
+          .hljs-strong,
+          .hljs-section {
+            font-weight: 700;
+          }
+          .hljs-addition {
+            background-color: #f0fff4;
+          }
+          .hljs-deletion {
+            color: #b31d28;
+            background-color: #ffeef0;
+          }
           html.scopy-export-mode #content {
             box-shadow: none;
           }
@@ -484,6 +578,17 @@ enum MarkdownHTMLRenderer {
         let footnotesInstallScript = featureSet.footnotes ? """
               if (md && typeof md.use === 'function' && typeof window.markdownitFootnote === 'function') {
                 md.use(window.markdownitFootnote);
+                if (md.renderer && md.renderer.rules) {
+                  md.renderer.rules.footnote_caption = function (tokens, idx) {
+                    try {
+                      var n = Number(tokens[idx].meta.id + 1).toString();
+                      if (tokens[idx].meta.subId > 0) { n += ':' + String(tokens[idx].meta.subId); }
+                      return n;
+                    } catch (e) {
+                      return '';
+                    }
+                  };
+                }
               }
 """ : ""
         let definitionListInstallScript = featureSet.definitionLists ? """
@@ -531,6 +636,78 @@ enum MarkdownHTMLRenderer {
             var lastW = 0;
             var pendingRAF = false;
             var ro = null;
+            window.__scopyRenderState = window.__scopyRenderState || {
+              renderComplete: false,
+              markdownRendered: false,
+              highlightThemeReady: false,
+              requiresHighlightTheme: false,
+              renderPass: 0
+            };
+            function hasLoadedStylesheet(fragment) {
+              try {
+                if (!document || typeof document.querySelectorAll !== 'function') { return false; }
+                var links = document.querySelectorAll('link[rel="stylesheet"]');
+                for (var i = 0; i < links.length; i++) {
+                  var link = links[i];
+                  if (!link) { continue; }
+                  var href = '';
+                  try { href = String(link.getAttribute('href') || ''); } catch (e) { href = ''; }
+                  if (fragment && href.indexOf(fragment) === -1) { continue; }
+                  try {
+                    if (link.sheet) { return true; }
+                  } catch (e) { }
+                }
+              } catch (e) { }
+              return false;
+            }
+            window.__scopyIsRenderReady = function () {
+              try {
+                var state = window.__scopyRenderState || {};
+                return !!state.renderComplete && !!state.markdownRendered;
+              } catch (e) {
+                return false;
+              }
+            };
+            function updateHighlightThemeReady() {
+              try {
+                if (!window.__scopyRenderState) { return false; }
+                var requiresHighlightTheme = !!window.__scopyRenderState.requiresHighlightTheme;
+                var ready = !requiresHighlightTheme || hasLoadedStylesheet('highlight-github.min.css');
+                window.__scopyRenderState.highlightThemeReady = ready;
+                return ready;
+              } catch (e) {
+                return false;
+              }
+            }
+            function finalizeRenderState(remainingPolls) {
+              try {
+                if (!window.__scopyRenderState) { return; }
+                var state = window.__scopyRenderState;
+                if (!state.markdownRendered) { return; }
+                if (!!state.requiresHighlightTheme && !updateHighlightThemeReady() && remainingPolls > 0) {
+                  setTimeout(function () { finalizeRenderState(remainingPolls - 1); }, 30);
+                  return;
+                }
+                state.renderComplete = true;
+              } catch (e) { }
+              scheduleReportHeight();
+            }
+            function normalizeFootnoteReferences(root) {
+              try {
+                if (!root || typeof root.querySelectorAll !== 'function') { return; }
+                var refs = root.querySelectorAll('sup.footnote-ref > a');
+                for (var i = 0; i < refs.length; i++) {
+                  var ref = refs[i];
+                  if (!ref) { continue; }
+                  var text = '';
+                  try { text = String(ref.textContent || ''); } catch (e) { text = ''; }
+                  var match = text.match(/^\\[(.+)\\]$/);
+                  if (match && match[1]) {
+                    try { ref.textContent = match[1]; } catch (e) { }
+                  }
+                }
+              } catch (e) { }
+            }
             var safeHTMLMap = \(safeHTMLLiteral);
             window.__scopyReportHeight = function (force) {
               try {
@@ -586,6 +763,15 @@ enum MarkdownHTMLRenderer {
             function renderMarkdown() {
               var el = document.getElementById('content');
               if (!el) { return; }
+              try {
+                if (window.__scopyRenderState) {
+                  window.__scopyRenderState.renderComplete = false;
+                  window.__scopyRenderState.markdownRendered = false;
+                  window.__scopyRenderState.highlightThemeReady = false;
+                  window.__scopyRenderState.requiresHighlightTheme = false;
+                  window.__scopyRenderState.renderPass = (window.__scopyRenderState.renderPass || 0) + 1;
+                }
+              } catch (e) { }
               if (typeof window.markdownit !== 'function') {
                 setTimeout(renderMarkdown, 30);
                 return;
@@ -684,7 +870,13 @@ enum MarkdownHTMLRenderer {
               html = html.replace(/SCOPYMATHPLACEHOLDER\\d+X/g, function (m) { return map[m] || m; });
               html = applySafeHTMLReplacements(html, md);
               el.innerHTML = html;
+              normalizeFootnoteReferences(el);
               \(taskListApplyScript)\(highlightFinalizeScript)
+              try {
+                if (window.__scopyRenderState) {
+                  window.__scopyRenderState.requiresHighlightTheme = \(featureSet.codeHighlighting ? "true" : "false") && !!el.querySelector('pre code');
+                }
+              } catch (e) { }
 
               // Keep content height in sync as KaTeX renders and fonts load.
               if (typeof ResizeObserver === 'function') {
@@ -701,8 +893,16 @@ enum MarkdownHTMLRenderer {
                 window.__scopyRenderMath();
               }
               try { el.style.opacity = '1'; } catch (e) { }
+              try {
+                if (window.__scopyRenderState) {
+                  window.__scopyRenderState.markdownRendered = true;
+                }
+              } catch (e) { }
               scheduleReportHeight();
               setTimeout(scheduleReportHeight, 120);
+              setTimeout(function () {
+                finalizeRenderState(50);
+              }, 30);
             }
 
             if (document.readyState === 'loading') {

@@ -1,6 +1,18 @@
 import XCTest
 
 final class MarkdownMathRenderingTests: XCTestCase {
+    func testMathNormalizerPreservesMarkdownFootnoteSyntax() {
+        let input = """
+        这是脚注示例[^1]，这里再引用一次脚注[^2]。
+
+        [^1]: 这是一个简短脚注。
+        [^2]: 这是另一个脚注。
+        """
+
+        let normalized = MathNormalizer.wrapLooseLaTeX(input)
+        XCTAssertEqual(normalized, input)
+    }
+
     func testMarkdownRendererSupportsMathAndFootnotesTogether() {
         let html = MarkdownHTMLRenderer.render(markdown: "Inline math: $x^2$.[^1]\n\n[^1]: Footnote text")
         XCTAssertTrue(html.contains("katex.min.js"))

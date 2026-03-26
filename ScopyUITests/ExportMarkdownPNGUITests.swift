@@ -944,6 +944,46 @@ final class ExportMarkdownPNGUITests: XCTestCase {
         XCTAssertLessThan(bottomWhitespaceRows(props.cgImage), 120)
     }
 
+    func testAutoExportCodeHighlightingKeepsColoredTokens() throws {
+        let markdownPath = "/tmp/scopy_uitest_export_code_highlight.md"
+        let dumpPath = "/tmp/scopy_uitest_export_code_highlight.png"
+        let errorPath = "/tmp/scopy_uitest_export_code_highlight_error.txt"
+
+        try? FileManager.default.removeItem(atPath: markdownPath)
+        try? FileManager.default.removeItem(atPath: dumpPath)
+        try? FileManager.default.removeItem(atPath: errorPath)
+
+        let markdown = """
+        # Highlight Export
+
+        ```python
+        def greet(name: str) -> str:
+            return f"Hello, {name}!"
+        ```
+        """
+        try Data(markdown.utf8).write(to: URL(fileURLWithPath: markdownPath), options: [.atomic])
+
+        let app = XCUIApplication()
+        app.launchArguments = ["--uitesting"]
+        app.launchEnvironment["SCOPY_UITEST_AUTO_EXPORT_MARKDOWN"] = "1"
+        app.launchEnvironment["SCOPY_UITEST_AUTO_EXPORT_MARKDOWN_PATH"] = markdownPath
+        app.launchEnvironment["SCOPY_EXPORT_DISABLE_PDF"] = "1"
+        app.launchEnvironment["SCOPY_EXPORT_DUMP_PATH"] = dumpPath
+        app.launchEnvironment["SCOPY_EXPORT_ERROR_DUMP_PATH"] = errorPath
+        app.launch()
+        defer { app.terminate() }
+
+        waitForExport(dumpPath: dumpPath, errorPath: errorPath, timeoutSeconds: 30)
+        try assertNoExportError(errorPath: errorPath)
+
+        let props = try readPNGProperties(atPath: dumpPath)
+        XCTAssertEqual(props.width, 1080)
+        XCTAssertTrue(
+            imageHasMeaningfulNonGrayInk(props.cgImage),
+            "Expected exported highlighted code block to retain colored syntax tokens instead of flattening to gray text"
+        )
+    }
+
     func testAutoExportLongMarkdownDenseLinksKeepsBottomMarkerVisible() throws {
         let markdownPath = "/tmp/scopy_uitest_export_long_markdown.md"
         let dumpPath = "/tmp/scopy_uitest_export_long_markdown.png"
@@ -1757,6 +1797,61 @@ final class ExportMarkdownPNGUITests: XCTestCase {
         }
 
         return false
+    }
+
+    private func imageHasMeaningfulNonGrayInk(_ image: CGImage) -> Bool {
+        let w = image.width
+        let h = image.height
+        guard w > 16, h > 16 else { return false }
+
+        let bytesPerRow = w * 4
+        var pixels = [UInt8](repeating: 0, count: bytesPerRow * h)
+        let cs = CGColorSpaceCreateDeviceRGB()
+        let bitmapInfo = CGImageAlphaInfo.premultipliedLast.rawValue
+        guard let ctx = CGContext(
+            data: &pixels,
+            width: w,
+            height: h,
+            bitsPerComponent: 8,
+            bytesPerRow: bytesPerRow,
+            space: cs,
+            bitmapInfo: bitmapInfo
+        ) else {
+            return false
+        }
+
+        ctx.draw(image, in: CGRect(x: 0, y: 0, width: w, height: h))
+
+        let sampleStepX = max(1, w / 180)
+        let sampleStepY = max(1, h / 140)
+        var colorfulSamples = 0
+        var eligibleSamples = 0
+
+        var y = 0
+        while y < h {
+            var x = 0
+            while x < w {
+                let idx = y * bytesPerRow + x * 4
+                if idx + 2 < pixels.count {
+                    let r = Int(pixels[idx])
+                    let g = Int(pixels[idx + 1])
+                    let b = Int(pixels[idx + 2])
+                    let maxChannel = max(r, g, b)
+                    let minChannel = min(r, g, b)
+                    if maxChannel < 245 {
+                        eligibleSamples += 1
+                        if (maxChannel - minChannel) >= 18 {
+                            colorfulSamples += 1
+                        }
+                    }
+                }
+                x += sampleStepX
+            }
+            y += sampleStepY
+        }
+
+        guard eligibleSamples > 0 else { return false }
+        return colorfulSamples >= max(24, eligibleSamples / 40)
     }
 
     private func solidPNGDataURL(width: Int, height: Int, color: NSColor) throws -> String {

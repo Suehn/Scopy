@@ -21,6 +21,19 @@ final class KaTeXRenderToStringTests: XCTestCase {
         XCTAssertTrue(html.contains("__scopyApplyTaskLists"))
     }
 
+    func testMarkdownRendererHighlightsFootnoteRefsAndExposesRenderReadyState() {
+        let html = MarkdownHTMLRenderer.render(markdown: "Footnote[^1]\n\n[^1]: note")
+        XCTAssertTrue(html.contains(".footnote-ref a,"))
+        XCTAssertTrue(html.contains("vertical-align: super;"))
+        XCTAssertTrue(html.contains("normalizeFootnoteReferences"))
+        XCTAssertTrue(html.contains("md.renderer.rules.footnote_caption"))
+        XCTAssertTrue(html.contains("background: rgba(37, 99, 235, 0.14);"))
+        XCTAssertTrue(html.contains(".hljs-keyword"))
+        XCTAssertTrue(html.contains("window.__scopyIsRenderReady"))
+        XCTAssertTrue(html.contains("requiresHighlightTheme"))
+        XCTAssertTrue(html.contains("highlightThemeReady"))
+    }
+
     func testMarkdownPreviewPreservesSoftLineBreaks() {
         let input = """
         **【试卷二】第 21 题**

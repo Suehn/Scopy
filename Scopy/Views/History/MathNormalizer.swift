@@ -477,6 +477,16 @@ enum MathNormalizer {
 
             let innerStart = text.index(after: i)
             let inner = String(text[innerStart..<closeIndex])
+            let nextIndex = text.index(after: closeIndex)
+            let following = nextIndex < text.endIndex ? text[nextIndex] : nil
+
+            if isMarkdownFootnoteSyntax(open: open, inner: inner, following: following) {
+                result.append(open)
+                result += inner
+                result.append(close)
+                i = nextIndex
+                continue
+            }
 
             if shouldWrapAsMath(inner) {
                 // Prefer wrapping the whole bracket expression as one math segment.
@@ -502,6 +512,20 @@ enum MathNormalizer {
         }
 
         return result
+    }
+
+    private static func isMarkdownFootnoteSyntax(open: Character, inner: String, following: Character?) -> Bool {
+        guard open == "[", inner.first == "^" else { return false }
+
+        let label = inner.dropFirst()
+        guard !label.isEmpty else { return false }
+        if label.contains(where: { $0.isWhitespace }) { return false }
+
+        // Keep [^label] refs and [^label]: definitions intact for markdown-it-footnote.
+        if let following, following == ":" {
+            return true
+        }
+        return true
     }
 
     private static func findUnescapedDollarDelimiter(in text: String, delimiter: String, from index: String.Index) -> String.Index? {
