@@ -119,7 +119,32 @@ struct HistoryItemHarnessView: View {
                 id: UUID(),
                 type: .text,
                 contentHash: "history-item-harness-markdown",
-                plainText: "# Harness\n\n- markdown export eligible",
+                plainText: """
+# Harness
+
+- [x] markdown export eligible
+- [ ] pending follow-up
+  - nested detail
+
+Inline math: $E = mc^2$.[^harness]
+
+<details open>
+<summary>点击展开</summary>
+
+- 列表
+- **强调**
+
+</details>
+
+术语
+: 定义内容
+
+| col | value |
+| --- | --- |
+| alpha | $\\alpha$ |
+
+[^harness]: Footnote text for the history item harness.
+""",
                 note: nil,
                 appBundleID: "com.scopy.tests",
                 createdAt: now.addingTimeInterval(-240),

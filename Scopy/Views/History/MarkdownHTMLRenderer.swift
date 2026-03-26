@@ -2,6 +2,7 @@ import Foundation
 
 enum MarkdownHTMLRenderer {
     static func render(markdown: String) -> String {
+        let featureSet = MarkdownRenderFeatureSet.scopyDefault
         guard !Task.isCancelled else { return "" }
         let latexNormalized = LaTeXDocumentNormalizer.normalize(markdown)
         guard !Task.isCancelled else { return "" }
@@ -10,20 +11,31 @@ enum MarkdownHTMLRenderer {
         let protected = MathProtector.protectMath(in: normalizedMarkdown)
         guard !Task.isCancelled else { return "" }
         let inlineNormalizedMarkdown = LaTeXInlineTextNormalizer.normalize(protected.markdown)
-        let renderMarkdown = normalizeATXHeadings(in: inlineNormalizedMarkdown)
+        let normalizedHeadingsMarkdown = normalizeATXHeadings(in: inlineNormalizedMarkdown)
+        let safeHTMLExtraction = featureSet.safeHTMLSubset
+            ? MarkdownSafeHTMLSubset.extract(from: normalizedHeadingsMarkdown)
+            : MarkdownSafeHTMLExtractionResult(
+                markdown: normalizedHeadingsMarkdown,
+                fallbackMarkdown: normalizedHeadingsMarkdown,
+                replacements: [:]
+            )
+        let renderMarkdown = safeHTMLExtraction.markdown
         let hasMath = MarkdownDetector.containsMath(normalizedMarkdown)
+        let enableMath = featureSet.math && hasMath
 
         let fallbackText = MathProtector.restoreMath(
-            in: renderMarkdown,
+            in: safeHTMLExtraction.fallbackMarkdown,
             placeholders: protected.placeholders,
             escape: { $0 }
         )
 
         guard !Task.isCancelled else { return "" }
         return htmlDocument(
+            featureSet: featureSet,
             markdown: renderMarkdown,
             placeholders: protected.placeholders,
-            enableMath: hasMath,
+            safeHTMLReplacements: safeHTMLExtraction.replacements,
+            enableMath: enableMath,
             fallbackText: fallbackText
         )
     }
@@ -109,86 +121,298 @@ enum MarkdownHTMLRenderer {
     <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src 'self' data:; style-src 'self' 'unsafe-inline' file:; script-src 'self' 'unsafe-inline' file:; font-src 'self' data: file:;">
     """
 
-    private static let baseStyle = """
-    <style>
-      :root { color-scheme: light dark; }
-      body {
-        margin: 0;
-        padding: 0;
-        font: -apple-system-body;
-        line-height: 1.45;
-        background: transparent;
-      }
-      html, body { overflow-x: hidden; }
-      #content {
-        padding: 16px;
-        display: inline-block;
-        max-width: 100%;
-        box-sizing: border-box;
-        word-break: break-word;
-        opacity: 0;
-        transition: opacity 140ms ease-in-out;
-      }
-      pre, code { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
-      pre {
-        padding: 12px;
-        border-radius: 8px;
-        overflow-x: auto;
-        max-width: 100%;
-        box-sizing: border-box;
-      }
-      img { max-width: 100%; height: auto; }
-      a { pointer-events: none; text-decoration: underline; }
-      blockquote { margin: 0; padding-left: 12px; border-left: 3px solid rgba(127,127,127,0.35); }
-      hr { border: 0; border-top: 1px solid rgba(127,127,127,0.35); margin: 12px 0; }
-      .katex-display {
-        max-width: 100%;
-        overflow-x: auto;
-        overflow-y: hidden;
-      }
-      table {
-        display: block;
-        border-collapse: collapse;
-        max-width: 100%;
-        overflow-x: auto;
-        width: 100%;
-        table-layout: auto;
-      }
-      th, td {
-        border: 1px solid rgba(127,127,127,0.25);
-        padding: 6px 8px;
-        vertical-align: top;
-        white-space: nowrap;
-        word-break: normal;
-        overflow-wrap: normal;
-      }
-      thead th { background: rgba(127,127,127,0.10); }
+    private static func baseStyle(featureSet: MarkdownRenderFeatureSet) -> String {
+        let taskListStyle = featureSet.taskLists ? "\n\(MarkdownTaskListRuntime.style)\n" : ""
+        let footnoteStyle = featureSet.footnotes ? """
+          .footnotes {
+            margin-top: 1.5rem;
+            padding-top: 1rem;
+            border-top: 1px solid rgba(127,127,127,0.25);
+          }
+          .footnotes-list {
+            padding-left: 1.5rem;
+          }
+          .footnotes p:first-child {
+            margin-top: 0;
+          }
+          .footnotes p:last-child {
+            margin-bottom: 0;
+          }
+          .footnote-ref,
+          .footnote-backref {
+            font-size: 0.86em;
+            vertical-align: baseline;
+          }
+        """ : ""
+        let definitionListStyle = featureSet.definitionLists ? """
+          dl {
+            display: grid;
+            grid-template-columns: minmax(7rem, max-content) minmax(0, 1fr);
+            column-gap: 1rem;
+            row-gap: 0.5rem;
+          }
+          dt {
+            font-weight: 600;
+          }
+          dd {
+            margin: 0;
+          }
+        """ : ""
+        let safeHTMLStyle = featureSet.safeHTMLSubset ? """
+          details {
+            margin: 0 0 1rem 0;
+            padding: 0.75rem 0.875rem;
+            border: 1px solid rgba(127,127,127,0.22);
+            border-radius: 12px;
+            background: rgba(127,127,127,0.05);
+          }
+          details[open] {
+            padding-bottom: 0.875rem;
+          }
+          details > *:last-child {
+            margin-bottom: 0;
+          }
+          summary {
+            cursor: default;
+            font-weight: 600;
+          }
+          kbd {
+            display: inline-block;
+            min-width: 1.5em;
+            padding: 0.08em 0.45em;
+            border: 1px solid rgba(127,127,127,0.32);
+            border-bottom-width: 2px;
+            border-radius: 6px;
+            background: rgba(127,127,127,0.08);
+            box-shadow: inset 0 -1px 0 rgba(127,127,127,0.15);
+            font: 0.92em ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+          }
+          mark {
+            color: inherit;
+            background: rgba(255, 225, 92, 0.55);
+            border-radius: 0.2em;
+            padding: 0 0.2em;
+          }
+          u {
+            text-underline-offset: 0.16em;
+          }
+          sub,
+          sup {
+            font-size: 0.72em;
+          }
+        """ : ""
 
-      /* Hide scrollbars inside HTML when idle (even if system setting is "always show scroll bars").
-         We show them temporarily while the user is actively scrolling overflow containers (JS toggles the class). */
-      pre::-webkit-scrollbar,
-      table::-webkit-scrollbar,
-      .katex-display::-webkit-scrollbar {
-        width: 0px;
-        height: 0px;
-      }
-      html.scopy-scrollbars-visible pre::-webkit-scrollbar,
-      html.scopy-scrollbars-visible table::-webkit-scrollbar,
-      html.scopy-scrollbars-visible .katex-display::-webkit-scrollbar {
-        width: 8px;
-        height: 8px;
-      }
-    </style>
-    """
+        return """
+        <style>
+          :root {
+            color-scheme: light;
+            --scopy-page-bg: #eef2f7;
+            --scopy-surface-bg: #ffffff;
+            --scopy-surface-border: rgba(15, 23, 42, 0.09);
+            --scopy-surface-shadow: 0 14px 38px rgba(15, 23, 42, 0.08);
+            --scopy-text-primary: #0f172a;
+            --scopy-text-secondary: rgba(15, 23, 42, 0.72);
+            --scopy-code-bg: #f6f8fb;
+            --scopy-inline-code-bg: #e9eef5;
+            --scopy-link: #0a66d9;
+          }
+          body {
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
+            font-size: 15px;
+            line-height: 1.65;
+            color: var(--scopy-text-primary);
+            background: var(--scopy-page-bg);
+          }
+          html, body {
+            overflow-x: hidden;
+            min-height: 100%;
+          }
+          * { box-sizing: border-box; }
+          #content {
+            padding: 20px 18px;
+            display: block;
+            max-width: 100%;
+            box-sizing: border-box;
+            word-break: break-word;
+            color: var(--scopy-text-primary);
+            background: var(--scopy-surface-bg);
+            border: 1px solid var(--scopy-surface-border);
+            border-radius: 18px;
+            box-shadow: var(--scopy-surface-shadow);
+            opacity: 0;
+            transition: opacity 140ms ease-in-out;
+          }
+          p,
+          ul,
+          ol,
+          blockquote,
+          pre,
+          table,
+          dl,
+          details {
+            margin: 0 0 1rem 0;
+          }
+          h1, h2, h3, h4, h5, h6 {
+            line-height: 1.25;
+            font-weight: 700;
+            margin: 1.5rem 0 0.8rem 0;
+          }
+          h1 {
+            font-size: 1.85rem;
+            padding-bottom: 0.3rem;
+            border-bottom: 1px solid rgba(127,127,127,0.22);
+          }
+          h2 {
+            font-size: 1.5rem;
+            padding-bottom: 0.22rem;
+            border-bottom: 1px solid rgba(127,127,127,0.18);
+          }
+          h3 { font-size: 1.28rem; }
+          h4 { font-size: 1.12rem; }
+          h5 { font-size: 1rem; }
+          h6 { font-size: 0.92rem; color: var(--scopy-text-secondary); }
+          h1:first-child,
+          h2:first-child,
+          h3:first-child,
+          h4:first-child,
+          h5:first-child,
+          h6:first-child {
+            margin-top: 0;
+          }
+          ul, ol {
+            padding-left: 1.55rem;
+          }
+          li + li {
+            margin-top: 0.28rem;
+          }
+          li > ul,
+          li > ol {
+            margin-top: 0.38rem;
+          }
+          pre, code { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
+          code {
+            font-size: 0.92em;
+          }
+          :not(pre) > code {
+            padding: 0.15em 0.35em;
+            border-radius: 6px;
+            background: var(--scopy-inline-code-bg);
+          }
+          pre {
+            padding: 14px 16px;
+            border-radius: 12px;
+            border: 1px solid rgba(15, 23, 42, 0.08);
+            overflow-x: auto;
+            max-width: 100%;
+            box-sizing: border-box;
+            color: var(--scopy-text-primary);
+            background: var(--scopy-code-bg);
+            box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.68);
+          }
+          pre code {
+            display: block;
+            padding: 0;
+            background: transparent;
+            white-space: pre;
+            word-break: normal;
+            overflow-wrap: normal;
+            min-width: max-content;
+            line-height: 1.55;
+          }
+          .hljs {
+            background: transparent;
+          }
+          html.scopy-export-mode #content {
+            box-shadow: none;
+          }
+          html.scopy-export-mode pre.scopy-export-wrap-code {
+            overflow: visible;
+          }
+          html.scopy-export-mode pre.scopy-export-wrap-code code {
+            white-space: pre-wrap;
+            word-break: break-word;
+            overflow-wrap: anywhere;
+            min-width: 0;
+          }
+          img { max-width: 100%; height: auto; }
+          a {
+            pointer-events: none;
+            color: var(--scopy-link);
+            text-decoration: underline;
+            text-underline-offset: 0.14em;
+          }
+          blockquote {
+            margin: 0 0 1rem 0;
+            padding: 0.18rem 0 0.18rem 1rem;
+            border-left: 4px solid rgba(127,127,127,0.34);
+            color: var(--scopy-text-secondary);
+          }
+          blockquote > :last-child {
+            margin-bottom: 0;
+          }
+          hr { border: 0; border-top: 1px solid rgba(127,127,127,0.35); margin: 1.2rem 0; }
+          .katex-display {
+            max-width: 100%;
+            overflow-x: auto;
+            overflow-y: hidden;
+            margin: 1rem 0;
+          }
+          table {
+            display: block;
+            border-collapse: collapse;
+            max-width: 100%;
+            overflow-x: auto;
+            width: 100%;
+            table-layout: auto;
+            border-spacing: 0;
+          }
+          th, td {
+            border: 1px solid rgba(127,127,127,0.25);
+            padding: 8px 10px;
+            vertical-align: top;
+            white-space: normal;
+            word-break: break-word;
+            overflow-wrap: anywhere;
+          }
+          thead th {
+            background: rgba(15, 23, 42, 0.06);
+            font-weight: 600;
+          }
+          \(taskListStyle)\(footnoteStyle)\(definitionListStyle)\(safeHTMLStyle)
+          /* Hide scrollbars inside HTML when idle (even if system setting is "always show scroll bars").
+             We show them temporarily while the user is actively scrolling overflow containers (JS toggles the class). */
+          pre::-webkit-scrollbar,
+          table::-webkit-scrollbar,
+          .katex-display::-webkit-scrollbar,
+          .footnotes::-webkit-scrollbar,
+          details::-webkit-scrollbar {
+            width: 0px;
+            height: 0px;
+          }
+          html.scopy-scrollbars-visible pre::-webkit-scrollbar,
+          html.scopy-scrollbars-visible table::-webkit-scrollbar,
+          html.scopy-scrollbars-visible .katex-display::-webkit-scrollbar,
+          html.scopy-scrollbars-visible .footnotes::-webkit-scrollbar,
+          html.scopy-scrollbars-visible details::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+          }
+        </style>
+        """
+    }
 
     private static func htmlDocument(
+        featureSet: MarkdownRenderFeatureSet,
         markdown: String,
         placeholders: [(placeholder: String, original: String)],
+        safeHTMLReplacements: [String: MarkdownSafeHTMLSubset.Replacement],
         enableMath: Bool,
         fallbackText: String
     ) -> String {
         let mathIncludes: String
-        if enableMath {
+        if featureSet.math && enableMath {
             let delimitersLiteral = MathEnvironmentSupport.katexDelimitersJSArrayLiteral()
             mathIncludes = """
             <link rel="stylesheet" href="katex.min.css">
@@ -235,16 +459,79 @@ enum MarkdownHTMLRenderer {
 
         let markdownLiteral = jsonStringLiteral(markdown)
         let placeholderMap: [String: String] = Dictionary(uniqueKeysWithValues: placeholders.map { ($0.placeholder, escapeHTML($0.original)) })
-        let placeholdersLiteral = jsonStringLiteral(placeholderMap)
+        let placeholdersLiteral = jsonLiteral(placeholderMap)
+        let overflowSelectorLiteral = jsonStringLiteral(featureSet.overflowProbeSelector)
+        let safeHTMLLiteral = jsonLiteral(safeHTMLReplacements)
+        let taskListBootstrapScript = featureSet.taskLists ? MarkdownTaskListRuntime.bootstrapScript : ""
+        let footnotesReadyCheck = featureSet.footnotes ? """
+              if (typeof window.markdownitFootnote !== 'function') {
+                setTimeout(renderMarkdown, 30);
+                return;
+              }
+""" : ""
+        let definitionListReadyCheck = featureSet.definitionLists ? """
+              if (typeof window.markdownitDeflist !== 'function') {
+                setTimeout(renderMarkdown, 30);
+                return;
+              }
+""" : ""
+        let highlightReadyCheck = featureSet.codeHighlighting ? """
+              if (typeof window.hljs !== 'object') {
+                setTimeout(renderMarkdown, 30);
+                return;
+              }
+""" : ""
+        let footnotesInstallScript = featureSet.footnotes ? """
+              if (md && typeof md.use === 'function' && typeof window.markdownitFootnote === 'function') {
+                md.use(window.markdownitFootnote);
+              }
+""" : ""
+        let definitionListInstallScript = featureSet.definitionLists ? """
+              if (md && typeof md.use === 'function' && typeof window.markdownitDeflist === 'function') {
+                md.use(window.markdownitDeflist);
+              }
+""" : ""
+        let taskListApplyScript = featureSet.taskLists ? """
+              if (typeof window.__scopyApplyTaskLists === 'function') {
+                window.__scopyApplyTaskLists(el);
+              }
+""" : ""
+        let highlightOptionsScript = featureSet.codeHighlighting ? """
+              mdOptions.highlight = function (str, lang) {
+                if (typeof window.hljs !== 'object') { return ''; }
+                try {
+                  if (lang && typeof window.hljs.getLanguage === 'function' && window.hljs.getLanguage(lang)) {
+                    return window.hljs.highlight(str, { language: lang, ignoreIllegals: true }).value;
+                  }
+                  return window.hljs.highlightAuto(str).value;
+                } catch (e) {
+                  return '';
+                }
+              };
+""" : ""
+        let highlightFinalizeScript = featureSet.codeHighlighting ? """
+              try {
+                var codeBlocks = el.querySelectorAll('pre code');
+                for (var i = 0; i < codeBlocks.length; i++) {
+                  var codeEl = codeBlocks[i];
+                  codeEl.classList.add('hljs');
+                  if (codeEl.parentElement) {
+                    codeEl.parentElement.classList.add('hljs');
+                  }
+                }
+              } catch (e) { }
+""" : ""
 
         let markdownRenderScript = """
-        <script defer src="contrib/markdown-it.min.js"></script>
+        \(featureSet.markdownAssetHeadTags)
+        \(taskListBootstrapScript)
         <script>
           (function () {
             var lastH = 0;
             var lastW = 0;
             var pendingRAF = false;
             var ro = null;
+            var safeHTMLMap = \(safeHTMLLiteral);
             window.__scopyReportHeight = function (force) {
               try {
                 if (!window.webkit || !window.webkit.messageHandlers || !window.webkit.messageHandlers.scopySize) { return; }
@@ -258,7 +545,7 @@ enum MarkdownHTMLRenderer {
                 try {
                   // Detect horizontal scroll requirement inside common overflow containers (KaTeX display, code blocks, tables).
                   // We use this signal to prefer a wider popover, while keeping the outer scroll view's horizontal scroller disabled.
-                  var nodes = el.querySelectorAll('pre, table, .katex-display');
+                  var nodes = el.querySelectorAll(\(overflowSelectorLiteral));
                   for (var i = 0; i < nodes.length; i++) {
                     var n = nodes[i];
                     if (!n) { continue; }
@@ -303,6 +590,7 @@ enum MarkdownHTMLRenderer {
                 setTimeout(renderMarkdown, 30);
                 return;
               }
+              \(footnotesReadyCheck)\(definitionListReadyCheck)\(highlightReadyCheck)
               // Keep it hidden until the final layout (including KaTeX) is applied; SwiftUI shows a text fallback underneath.
               try { el.style.opacity = '0'; } catch (e) { }
 
@@ -323,12 +611,12 @@ enum MarkdownHTMLRenderer {
                   if (!t) { return false; }
                   // Element nodes only. Document scrolling is very high frequency and should not toggle scrollbars.
                   if (t.nodeType !== 1) { return false; }
-                  if (t.matches && t.matches('pre, table, .katex-display')) { return true; }
-                  if (t.closest && t.closest('pre, table, .katex-display')) { return true; }
+                  if (t.matches && t.matches(\(overflowSelectorLiteral))) { return true; }
+                  if (t.closest && t.closest(\(overflowSelectorLiteral))) { return true; }
                 } catch (e) { }
                 return false;
               }
-              // `scroll` doesn't bubble; capture phase catches it from overflow containers (pre/table/katex-display).
+              // `scroll` doesn't bubble; capture phase catches it from overflow containers.
               // Avoid toggling on main document scroll to keep vertical scrolling smooth for long content.
               try {
                 document.addEventListener('scroll', function (ev) {
@@ -351,15 +639,52 @@ enum MarkdownHTMLRenderer {
 
               // Preserve single newlines as hard line breaks. Clipboard/PDF copied text often uses line breaks
               // without blank lines, and the hover preview should respect that formatting.
-              var md = window.markdownit({ html: false, linkify: false, typographer: true, breaks: true });
+              function escapeHTMLText(text) {
+                return String(text || '')
+                  .replace(/&/g, '&amp;')
+                  .replace(/</g, '&lt;')
+                  .replace(/>/g, '&gt;')
+                  .replace(/"/g, '&quot;');
+              }
+              function applySafeHTMLReplacements(html, md) {
+                if (!html) { return html; }
+                function renderSafeHTMLToken(token) {
+                  var item = safeHTMLMap[token];
+                  if (!item) { return token; }
+                  if (item.kind === 'inlineTag') {
+                    var tag = item.tag || 'span';
+                    return '<' + tag + '>' + escapeHTMLText(item.text || '') + '</' + tag + '>';
+                  }
+                  if (item.kind === 'details') {
+                    var summaryHTML = item.summary ? applySafeHTMLReplacements(md.renderInline(item.summary), md) : '';
+                    var bodyHTML = item.body ? applySafeHTMLReplacements(md.render(item.body), md) : '';
+                    return '<details class="scopy-details"' + (item.isOpen ? ' open' : '') + '><summary>' + summaryHTML + '</summary>' + bodyHTML + '</details>';
+                  }
+                  return token;
+                }
+
+                html = html.replace(/<p>\\s*(SCOPYSAFEHTMLPLACEHOLDER\\d+X)\\s*<\\/p>/g, function (_, token) {
+                  return renderSafeHTMLToken(token);
+                });
+                return html.replace(/SCOPYSAFEHTMLPLACEHOLDER\\d+X/g, function (token) {
+                  return renderSafeHTMLToken(token);
+                });
+              }
+
+              var mdOptions = \(featureSet.markdownItOptionsJSLiteral);
+              \(highlightOptionsScript)
+              var md = window.markdownit(mdOptions);
+              \(footnotesInstallScript)\(definitionListInstallScript)
               if (md && typeof md.enable === 'function') {
-                md.enable('table');
+                \(featureSet.markdownItEnableStatementsJS)
               }
               var src = \(markdownLiteral);
               var html = md.render(src);
               var map = \(placeholdersLiteral);
               html = html.replace(/SCOPYMATHPLACEHOLDER\\d+X/g, function (m) { return map[m] || m; });
+              html = applySafeHTMLReplacements(html, md);
               el.innerHTML = html;
+              \(taskListApplyScript)\(highlightFinalizeScript)
 
               // Keep content height in sync as KaTeX renders and fonts load.
               if (typeof ResizeObserver === 'function') {
@@ -406,7 +731,7 @@ enum MarkdownHTMLRenderer {
             \(cspMetaTag)
             \(markdownRenderScript)
             \(mathIncludes)
-            \(baseStyle)
+            \(baseStyle(featureSet: featureSet))
           </head>
           <body>
             <div id="content"><pre>\(escapeHTML(fallbackText))</pre></div>
@@ -427,13 +752,10 @@ enum MarkdownHTMLRenderer {
     private static func jsonStringLiteral(_ value: String) -> String {
         // A JSON literal is a safe JS literal for our use (no interpolation or eval).
         // Use JSONEncoder to avoid NSJSONSerialization raising NSException on top-level fragments.
-        let data = (try? JSONEncoder().encode(value)) ?? Data()
-        let s = String(data: data, encoding: .utf8) ?? "\"\""
-        // Prevent `</script>` from prematurely terminating our inline script tag.
-        return s.replacingOccurrences(of: "</script", with: "<\\/script", options: [.caseInsensitive])
+        jsonLiteral(value)
     }
 
-    private static func jsonStringLiteral(_ value: [String: String]) -> String {
+    private static func jsonLiteral<T: Encodable>(_ value: T) -> String {
         let data = (try? JSONEncoder().encode(value)) ?? Data()
         let s = String(data: data, encoding: .utf8) ?? "{}"
         return s.replacingOccurrences(of: "</script", with: "<\\/script", options: [.caseInsensitive])

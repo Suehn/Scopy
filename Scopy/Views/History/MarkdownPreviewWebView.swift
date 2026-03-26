@@ -105,6 +105,17 @@ private enum MarkdownPreviewMessageParser {
     }
 }
 
+enum MarkdownPreviewNavigationPolicy {
+    static func shouldAllow(navigationType: WKNavigationType, targetFrameIsNil: Bool, url: URL?) -> Bool {
+        if targetFrameIsNil { return false }
+        if navigationType == .linkActivated { return false }
+        if let scheme = url?.scheme?.lowercased(), scheme == "http" || scheme == "https" {
+            return false
+        }
+        return true
+    }
+}
+
 struct MarkdownContentMetrics: Equatable {
     let size: CGSize
     let hasHorizontalOverflow: Bool
@@ -266,24 +277,12 @@ struct MarkdownPreviewWebView: NSViewRepresentable {
             decidePolicyFor navigationAction: WKNavigationAction,
             decisionHandler: @escaping @MainActor (WKNavigationActionPolicy) -> Void
         ) {
-            if navigationAction.targetFrame == nil {
-                decisionHandler(.cancel)
-                return
-            }
-            if navigationAction.navigationType == .linkActivated {
-                decisionHandler(.cancel)
-                return
-            }
-
-            if let url = navigationAction.request.url,
-               let scheme = url.scheme?.lowercased(),
-               scheme == "http" || scheme == "https"
-            {
-                decisionHandler(.cancel)
-                return
-            }
-
-            decisionHandler(.allow)
+            let shouldAllow = MarkdownPreviewNavigationPolicy.shouldAllow(
+                navigationType: navigationAction.navigationType,
+                targetFrameIsNil: navigationAction.targetFrame == nil,
+                url: navigationAction.request.url
+            )
+            decisionHandler(shouldAllow ? .allow : .cancel)
         }
 
         func webView(
@@ -453,24 +452,12 @@ final class MarkdownPreviewWebViewController: NSObject, ObservableObject, WKNavi
         decidePolicyFor navigationAction: WKNavigationAction,
         decisionHandler: @escaping @MainActor (WKNavigationActionPolicy) -> Void
     ) {
-        if navigationAction.targetFrame == nil {
-            decisionHandler(.cancel)
-            return
-        }
-        if navigationAction.navigationType == .linkActivated {
-            decisionHandler(.cancel)
-            return
-        }
-
-        if let url = navigationAction.request.url,
-           let scheme = url.scheme?.lowercased(),
-           scheme == "http" || scheme == "https"
-        {
-            decisionHandler(.cancel)
-            return
-        }
-
-        decisionHandler(.allow)
+        let shouldAllow = MarkdownPreviewNavigationPolicy.shouldAllow(
+            navigationType: navigationAction.navigationType,
+            targetFrameIsNil: navigationAction.targetFrame == nil,
+            url: navigationAction.request.url
+        )
+        decisionHandler(shouldAllow ? .allow : .cancel)
     }
 
     func webView(

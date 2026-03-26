@@ -9,6 +9,18 @@ final class KaTeXRenderToStringTests: XCTestCase {
         XCTAssertTrue(html.contains("markdown-it.min.js"))
     }
 
+    func testMarkdownRendererEnablesGFMFootnotesAndTaskListRuntime() {
+        let html = MarkdownHTMLRenderer.render(markdown: "- [x] done\n\nFootnote[^1]\n\n[^1]: note")
+        XCTAssertTrue(html.contains("linkify: true"))
+        XCTAssertTrue(html.contains("md.enable('strikethrough')"))
+        XCTAssertTrue(html.contains("markdown-it-footnote.js"))
+        XCTAssertTrue(html.contains("markdown-it-deflist.js"))
+        XCTAssertTrue(html.contains("highlight.min.js"))
+        XCTAssertTrue(html.contains("md.use(window.markdownitFootnote)"))
+        XCTAssertTrue(html.contains("md.use(window.markdownitDeflist)"))
+        XCTAssertTrue(html.contains("__scopyApplyTaskLists"))
+    }
+
     func testMarkdownPreviewPreservesSoftLineBreaks() {
         let input = """
         **【试卷二】第 21 题**
@@ -30,8 +42,8 @@ final class KaTeXRenderToStringTests: XCTestCase {
     func testMarkdownTableUsesHorizontalScrollWithBalancedWrapping() {
         let html = MarkdownHTMLRenderer.render(markdown: "| a | b |\n| --- | --- |\n| 1 | 2 |")
         XCTAssertTrue(html.contains("overflow-x: auto;"))
-        XCTAssertTrue(html.contains("white-space: nowrap;"))
-        XCTAssertTrue(html.contains("word-break: normal;"))
+        XCTAssertTrue(html.contains("white-space: normal;"))
+        XCTAssertTrue(html.contains("word-break: break-word;"))
         XCTAssertTrue(html.contains("max-width: 100%;"))
     }
 

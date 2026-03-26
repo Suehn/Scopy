@@ -7,6 +7,30 @@
 
 ## [Unreleased]
 
+## [v0.7.0] - 2026-03-26
+
+### Markdown/Preview
+
+- Markdown preview and PNG export now share a single feature-set driven renderer with `CommonMark + GFM + footnotes + math`, local `highlight.js`, and a safe HTML subset for `details/summary`, `u`, `kbd`, `mark`, `sub`, and `sup`.
+- GFM task lists are rendered by a local runtime instead of a remote/runtime dependency; autolink literals, tables, strikethrough, definition lists, footnotes, and math now ship as first-class supported syntax.
+- Preview navigation policy is centralized so `http/https`, `target=_blank`, and `linkActivated` remain blocked while in-document safe navigation stays allowed.
+
+### Export/Long Content
+
+- Markdown export now aligns layout width with preview, uses a light high-contrast surface for readability, and preserves code-block readability with preview horizontal scroll plus export-only wrap for overwide code.
+- Ultra-tall export paths gained stronger height reconciliation, tile interval stitching, and top/middle/bottom regression coverage to reduce clipping, blank seams, and missing leading content in long PNG exports.
+- Forced PDF export now preflights real PDF page-box raster size and can shrink export scale inside the PDF branch itself, avoiding the historical viewport-vs-page-box mismatch captured by `SCOPY_EXPORT_PDF_GLOBAL_SCALE_MISMATCH`.
+
+### Verification
+
+- make build：BUILD SUCCEEDED（2026-03-26）
+- make test-unit：Executed 359 tests, 1 skipped, 0 failures（2026-03-26）
+- make test-strict：Executed 359 tests, 1 skipped, 0 failures（2026-03-26）
+- xcodebuild test -project Scopy.xcodeproj -scheme Scopy -destination 'platform=macOS' -only-testing:ScopyUITests/ExportMarkdownPNGUITests：Executed 20 tests, 0 failures（2026-03-26）
+- xcodebuild test -project Scopy.xcodeproj -scheme Scopy -destination 'platform=macOS' -only-testing:ScopyUITests/HistoryItemViewUITests：Executed 4 tests, 0 failures（2026-03-26）
+- make docs-validate：passed（2026-03-26）
+- make release-validate：passed（2026-03-26）
+
 ## [v0.64] - 2026-03-25
 
 ### Perf/Search

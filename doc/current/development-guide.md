@@ -87,6 +87,12 @@ Implication: changes to search semantics belong in the request model, search eng
 4. `MarkdownExportService` now lives under `Scopy/Services/Export` and produces PNG output back to the pasteboard through `ScopyKit`.
 5. pngquant settings affect both image history optimization and Markdown/LaTeX export compression where enabled.
 
+Search marker: `SCOPY_EXPORT_PDF_GLOBAL_SCALE_MISMATCH`
+
+- Forced PDF export has an extra failure mode that preview and snapshot export do not have: pre-PDF global-scale budgeting uses the WKWebView viewport width, while PDF rasterization ultimately uses the real PDF page boxes.
+- If the PDF page box is narrower than the viewport, the final raster height becomes larger than the earlier estimate. Long content can then fail only on the PDF path with symptoms such as clipped long exports or `PDF rasterization too large`.
+- When touching Markdown export, keep the PDF preflight/re-scale guard next to this marker and keep `ExportMarkdownPNGUITests.testAutoExportGlobalScalePDFDoesNotLeaveBlankRight()` green.
+
 Implication: preview/export work must remain background-safe and should not mutate unrelated persisted content.
 
 ### 4.5 List Interaction Coordination

@@ -1,15 +1,15 @@
-version: v0.64
-date: 2026-03-25
-release_doc: doc/releases/history/v0.64.md
+version: v0.7.0
+date: 2026-03-26
+release_doc: doc/releases/history/v0.7.0.md
 release_index: doc/releases/README.md
 changelog_file: doc/releases/CHANGELOG.md
-profile_doc: doc/perf/release-profiles/v0.64-profile.md
+profile_doc: null
 runbook_doc: doc/current/release-runbook.md
 spec_doc: doc/current/product-spec.md
 development_doc: doc/current/development-guide.md
 architecture_doc: doc/current/architecture.md
-last_verified_at: 2026-03-25
-summary: Full-index warm-load collapsed to sub-second disk-cache hits, preview lifecycle moved into a coordinator, and best-effort file operations gained shared observability and async permit control
+last_verified_at: 2026-03-26
+summary: Markdown preview and PNG export now share a richer renderer with GFM footnotes math highlighting safe HTML subset support and long-export hardening
 verification:
   build: pass
   test_unit: pass

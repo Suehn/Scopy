@@ -1,6 +1,36 @@
 import XCTest
 
 final class MarkdownMathRenderingTests: XCTestCase {
+    func testMarkdownRendererSupportsMathAndFootnotesTogether() {
+        let html = MarkdownHTMLRenderer.render(markdown: "Inline math: $x^2$.[^1]\n\n[^1]: Footnote text")
+        XCTAssertTrue(html.contains("katex.min.js"))
+        XCTAssertTrue(html.contains("markdown-it-footnote.js"))
+        XCTAssertTrue(html.contains("window.__scopyRenderMath"))
+    }
+
+    func testMarkdownRendererSupportsSafeHTMLDefinitionListsAndHighlighting() {
+        let input = """
+<details open>
+<summary>点击展开</summary>
+
+术语
+: 定义列表
+
+```python
+print("ok")
+```
+</details>
+"""
+
+        let html = MarkdownHTMLRenderer.render(markdown: input)
+
+        XCTAssertTrue(html.contains("markdown-it-deflist.js"))
+        XCTAssertTrue(html.contains("highlight.min.js"))
+        XCTAssertTrue(html.contains("SCOPYSAFEHTMLPLACEHOLDER"))
+        XCTAssertTrue(html.contains("applySafeHTMLReplacements"))
+        XCTAssertTrue(html.contains("mdOptions.highlight"))
+    }
+
     func testParenSubscriptMathWithoutBackslashIsWrapped() {
         let input = """
         * (T_{io}=12.4)ms，(T_{aug}=47.8)ms → (T_{data}=60.2)ms

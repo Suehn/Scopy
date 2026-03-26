@@ -527,6 +527,7 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
 
     private let html: String
     private let layoutWidthPixels: CGFloat
+    private let layoutWidthPoints: CGFloat
     private let outputScale: CGFloat
     private let targetWidthPixels: CGFloat
     private let viewportWidthPoints: CGFloat
@@ -557,12 +558,22 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
         let screen = Self.activeScreen()
         self.targetScreen = screen
         self.backingScaleFactor = screen?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2.0
-        self.layoutWidthPixels = max(1, targetWidthPixels)
+        self.layoutWidthPoints = Self.preferredLayoutWidthPoints(for: screen)
+        self.layoutWidthPixels = max(1, self.layoutWidthPoints * max(1, self.backingScaleFactor))
         self.outputScale = Self.sanitizeOutputScale(resolutionScale)
-        self.targetWidthPixels = max(1, self.layoutWidthPixels * self.outputScale)
-        self.viewportWidthPoints = max(1, self.layoutWidthPixels / max(1, self.backingScaleFactor))
+        self.targetWidthPixels = max(1, targetWidthPixels * self.outputScale)
+        self.viewportWidthPoints = max(1, self.layoutWidthPoints)
         self.pngquantOptions = pngquantOptions
         super.init()
+    }
+
+    private static func preferredLayoutWidthPoints(for screen: NSScreen?) -> CGFloat {
+        let previewMaxWidthPoints: CGFloat = 640
+        let visibleWidth = screen?.visibleFrame.width ?? NSScreen.main?.visibleFrame.width ?? 0
+        if visibleWidth > 0 {
+            return max(1, min(previewMaxWidthPoints, floor(visibleWidth * 0.62)))
+        }
+        return max(1, previewMaxWidthPoints)
     }
 
     private static func sanitizeOutputScale(_ scale: CGFloat) -> CGFloat {
@@ -579,7 +590,8 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
     }
 
     private var outputPixelScaleFactor: CGFloat {
-        backingScaleFactor * outputScale
+        let viewportWidth = max(1, viewportWidthPoints)
+        return max(1, targetWidthPixels / viewportWidth)
     }
 
     func start() {
@@ -691,7 +703,9 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
             /* During export we may scroll programmatically for tiled snapshots; always keep inner scrollbars hidden. */
             html.scopy-scrollbars-visible pre::-webkit-scrollbar,
             html.scopy-scrollbars-visible table::-webkit-scrollbar,
-            html.scopy-scrollbars-visible .katex-display::-webkit-scrollbar {
+            html.scopy-scrollbars-visible .katex-display::-webkit-scrollbar,
+            html.scopy-scrollbars-visible .footnotes::-webkit-scrollbar,
+            html.scopy-scrollbars-visible details::-webkit-scrollbar {
                 width: 0px !important;
                 height: 0px !important;
             }
@@ -797,12 +811,23 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
         await dumpTableMetricsIfRequested(webView: webView)
 
         try await scrollToTop(webView: webView)
+        scrollHeightPoints = try await reconcileExportHeightPoints(
+            webView: webView,
+            estimatedHeightPoints: scrollHeightPoints
+        )
 
         let isUITesting = ProcessInfo.processInfo.arguments.contains("--uitesting")
         let processInfo = ProcessInfo.processInfo
         let pdfExplicitlyRequired = processInfo.environment[ExportEnv.requirePDFExport] == "1"
+        let projectedOutputHeightPixels = max(1, scrollHeightPoints * outputPixelScaleFactor)
+        let projectedOutputTotalPixels = max(1, targetWidthPixels * projectedOutputHeightPixels)
+        let shouldBypassPDFFromRasterBudget = !pdfExplicitlyRequired
+            && projectedOutputTotalPixels > MarkdownExportRenderConstants.maxInMemoryBitmapPixels + 0.5
         let shouldBypassPDFForVeryTallContent = !pdfExplicitlyRequired
-            && scrollHeightPoints > MarkdownExportRenderConstants.maxSafePDFExportHeightPoints
+            && (
+                scrollHeightPoints > MarkdownExportRenderConstants.maxSafePDFExportHeightPoints
+                || shouldBypassPDFFromRasterBudget
+            )
         let requiresPDFExportForResolution = outputScale > 1.001 && !shouldBypassPDFForVeryTallContent
         let shouldAttemptPDF: Bool = {
             let env = processInfo.environment
@@ -817,7 +842,7 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
         }()
         if shouldBypassPDFForVeryTallContent {
             MarkdownExportService.logger.info(
-                "Skipping PDF export for very tall content and falling back to tiled snapshot. heightPt=\(scrollHeightPoints, privacy: .public)"
+                "Skipping PDF export and falling back to snapshot export. heightPt=\(scrollHeightPoints, privacy: .public) projectedPixels=\(projectedOutputTotalPixels, privacy: .public)"
             )
         }
         let requiresPDFExport = requiresPDFExportForResolution || pdfExplicitlyRequired
@@ -858,60 +883,107 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
     }
 
     private func exportPDFRasterizedPNG(webView: WKWebView, heightPoints: CGFloat) async throws -> MarkdownExportService.ExportOutcome {
-        stage = .createPDF
-        let rectPoints = CGRect(
-            x: 0,
-            y: 0,
-            width: viewportWidthPoints,
-            height: max(1, ceil(heightPoints))
-        )
-
-        let pdfData = try await createPDF(webView: webView, rectPoints: rectPoints)
-
-        if let dumpPath = ProcessInfo.processInfo.environment[ExportEnv.dumpPDFPath], !dumpPath.isEmpty {
-            try? pdfData.write(to: URL(fileURLWithPath: dumpPath), options: [.atomic])
-        }
-
-        stage = .rasterizePDF
         let targetWidthPixels = max(1, Int(round(self.targetWidthPixels)))
-        let expectedPageWidthPoints = rectPoints.width
         let pngquantOptions = self.pngquantOptions
         // WebKit's PDF output can embed page contents at a reduced scale (≈1 / devicePixelRatio),
         // which becomes more pronounced as we increase export resolution. Compensate by the full output pixel scale.
         let contentScaleCompensation = max(1, outputPixelScaleFactor)
-        return try await Task.detached(priority: .userInitiated) {
-            let rendered = try Self.rasterizePDFDataToCGImage(
-                pdfData: pdfData,
-                targetWidthPixels: targetWidthPixels,
-                expectedPageWidthPoints: expectedPageWidthPoints,
-                contentScaleCompensation: contentScaleCompensation
+
+        var currentHeightPoints = max(1, heightPoints)
+        var lastLimitReason: String?
+
+        // SCOPY_EXPORT_PDF_GLOBAL_SCALE_MISMATCH:
+        // Pre-PDF global-scale budgeting is based on the WKWebView viewport width, but forced PDF export ultimately
+        // rasterizes against the actual PDF page boxes. Those boxes can be narrower than the viewport, which inflates
+        // the final raster height and can reintroduce long-content clipping only on the PDF path. Before rasterizing,
+        // preflight the generated PDF with its real page boxes and, if needed, apply one more export-scale reduction.
+        for _ in 0..<4 {
+            stage = .createPDF
+            let rectPoints = CGRect(
+                x: 0,
+                y: 0,
+                width: viewportWidthPoints,
+                height: max(1, ceil(currentHeightPoints))
             )
-            let originalData = try Self.pngDataFromCGImage(rendered)
-            let finalData: Data
-            if let pngquantOptions {
-                finalData = PngquantService.compressBestEffort(originalData, options: pngquantOptions)
-            } else {
-                finalData = originalData
-            }
-            return MarkdownExportService.ExportOutcome(
-                pngData: finalData,
-                stats: MarkdownExportService.ExportStats(
-                    originalPNGBytes: originalData.count,
-                    finalPNGBytes: finalData.count,
-                    pngquantRequested: pngquantOptions != nil
+
+            let pdfData = try await createPDF(webView: webView, rectPoints: rectPoints)
+            let metrics = try Self.pdfRasterMetrics(pdfData: pdfData, targetWidthPixels: targetWidthPixels)
+            if metrics.totalPixels > MarkdownExportRenderConstants.maxTotalPixels + 0.5 {
+                lastLimitReason = "PDF rasterization too large (w=\(targetWidthPixels)px, h=\(metrics.totalHeightPixels)px, total=\(Int(metrics.totalPixels))px)"
+                let currentScale = await currentExportScale(webView: webView)
+                let budgetRatio = max(0.01, min(0.98, (MarkdownExportRenderConstants.maxTotalPixels / metrics.totalPixels) * 0.98))
+                let nextScale = currentScale * budgetRatio
+                guard nextScale >= MarkdownExportRenderConstants.minAllowedGlobalScale else {
+                    throw MarkdownExportService.ExportError.exportLimitExceeded(reason: lastLimitReason ?? "PDF rasterization remained above budget")
+                }
+
+                try await applyGlobalScale(webView: webView, scale: nextScale)
+                currentHeightPoints = try await prepareForExportScrollHeightPoints(webView: webView)
+                currentHeightPoints = try await reconcileExportHeightPoints(
+                    webView: webView,
+                    estimatedHeightPoints: currentHeightPoints
                 )
-            )
-        }.value
+                continue
+            }
+
+            if let dumpPath = ProcessInfo.processInfo.environment[ExportEnv.dumpPDFPath], !dumpPath.isEmpty {
+                try? pdfData.write(to: URL(fileURLWithPath: dumpPath), options: [.atomic])
+            }
+
+            stage = .rasterizePDF
+            let expectedPageWidthPoints = rectPoints.width
+            return try await Task.detached(priority: .userInitiated) {
+                let rendered = try Self.rasterizePDFDataToCGImage(
+                    pdfData: pdfData,
+                    targetWidthPixels: targetWidthPixels,
+                    expectedPageWidthPoints: expectedPageWidthPoints,
+                    contentScaleCompensation: contentScaleCompensation
+                )
+                let originalData = try Self.pngDataFromCGImage(rendered)
+                let finalData: Data
+                if let pngquantOptions {
+                    finalData = PngquantService.compressBestEffort(originalData, options: pngquantOptions)
+                } else {
+                    finalData = originalData
+                }
+                return MarkdownExportService.ExportOutcome(
+                    pngData: finalData,
+                    stats: MarkdownExportService.ExportStats(
+                        originalPNGBytes: originalData.count,
+                        finalPNGBytes: finalData.count,
+                        pngquantRequested: pngquantOptions != nil
+                    )
+                )
+            }.value
+        }
+
+        throw MarkdownExportService.ExportError.exportLimitExceeded(
+            reason: lastLimitReason ?? "PDF rasterization remained above budget after export-scale retries"
+        )
     }
 
     private func exportSingleSnapshotPNG(webView: WKWebView, heightPoints: CGFloat) async throws -> MarkdownExportService.ExportOutcome {
         try await resizeWebViewForSnapshot(webView: webView, heightPoints: heightPoints)
+        let effectiveHeightPoints = try await reconcileExportHeightPoints(
+            webView: webView,
+            estimatedHeightPoints: heightPoints,
+            passes: 5,
+            settleNanoseconds: 90_000_000
+        )
+        if effectiveHeightPoints > MarkdownExportRenderConstants.maxSingleSnapshotRectHeightPoints + 1 {
+            let underlying = NSError(
+                domain: "Scopy.MarkdownExport",
+                code: 4,
+                userInfo: [NSLocalizedDescriptionKey: "Content expanded after snapshot resize (height=\(Int(ceil(effectiveHeightPoints)))pt); switching to tiled export"]
+            )
+            throw MarkdownExportService.ExportError.stageFailed(stage: .snapshotOnce, underlying: underlying)
+        }
 
         let rectPoints = CGRect(
             x: 0,
             y: 0,
             width: viewportWidthPoints,
-            height: max(1, ceil(heightPoints))
+            height: max(1, ceil(effectiveHeightPoints))
         )
 
         let config = WKSnapshotConfiguration()
@@ -950,7 +1022,19 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
 
     private func exportTiledPNG(webView: WKWebView, totalHeightPoints: CGFloat) async throws -> MarkdownExportService.ExportOutcome {
         let targetWidthPixelsInt = max(1, Int(round(targetWidthPixels)))
-        let totalHeightPointsInt = max(1, Int(ceil(totalHeightPoints)))
+
+        stage = .snapshotTiles
+        let tileViewportHeightPoints = MarkdownExportRenderConstants.exportViewportHeightPoints
+        try await resizeWebViewForSnapshot(webView: webView, heightPoints: tileViewportHeightPoints)
+        try await scrollToTop(webView: webView)
+
+        let effectiveTotalHeightPoints = try await reconcileExportHeightPoints(
+            webView: webView,
+            estimatedHeightPoints: totalHeightPoints,
+            passes: 6,
+            settleNanoseconds: 100_000_000
+        )
+        let totalHeightPointsInt = max(1, Int(ceil(effectiveTotalHeightPoints)))
         let totalHeightPixelsInt = max(1, Int(ceil(CGFloat(totalHeightPointsInt) * outputPixelScaleFactor)))
 
         // Safety: enforce area limit. (Global zoom already tried to satisfy this, but keep a hard guard.)
@@ -973,10 +1057,6 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
         ctx.setFillColor(CGColor(red: 1, green: 1, blue: 1, alpha: 1))
         ctx.fill(CGRect(x: 0, y: 0, width: CGFloat(targetWidthPixelsInt), height: CGFloat(totalHeightPixelsInt)))
 
-        stage = .snapshotTiles
-        let tileViewportHeightPoints = MarkdownExportRenderConstants.exportViewportHeightPoints
-        try await resizeWebViewForSnapshot(webView: webView, heightPoints: tileViewportHeightPoints)
-
         let overlapPoints = max(0, MarkdownExportRenderConstants.snapshotTileOverlapPoints)
         var scrollYPoints: CGFloat = 0
         let outputScaleFactor = outputPixelScaleFactor
@@ -992,6 +1072,7 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
                     scrollYPoints - actualScrollYPoints
                 )
             )
+            let capturedContentStartPoints = max(0, actualScrollYPoints + captureOffsetPoints)
 
             let rectPoints = CGRect(
                 x: 0,
@@ -1009,14 +1090,16 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
 
             let normalizedTile = Self.scaleCGImageIfNeeded(image: tileCG, targetWidthPixels: targetWidthPixelsInt)
 
-            // Place the tile using scroll offset -> output coordinate mapping.
-            // outputBottomY = totalHeight - (scrollY + captureHeight)
-            let bottomYPoints = CGFloat(totalHeightPointsInt) - (scrollYPoints + captureHeightPoints)
-            var drawY = Int(round(bottomYPoints * outputScaleFactor))
-            if drawY < 0 { drawY = 0 }
-            if drawY + normalizedTile.height > totalHeightPixelsInt {
-                drawY = max(0, totalHeightPixelsInt - normalizedTile.height)
-            }
+            // Place each tile using the exact content interval it represents in the final image.
+            // This avoids cumulative rounding drift between tiles, which can otherwise show up as
+            // 1-2px seams or missing rows in very tall exports.
+            let contentStartPixels = max(0, Int(floor(capturedContentStartPoints * outputScaleFactor)))
+            let contentEndPixels = min(
+                totalHeightPixelsInt,
+                max(contentStartPixels + 1, Int(ceil((capturedContentStartPoints + captureHeightPoints) * outputScaleFactor)))
+            )
+            let destinationHeightPixels = max(1, contentEndPixels - contentStartPixels)
+            let drawY = max(0, totalHeightPixelsInt - contentEndPixels)
 
             stage = .stitchTiles
             ctx.draw(
@@ -1025,7 +1108,7 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
                     x: 0,
                     y: CGFloat(drawY),
                     width: CGFloat(targetWidthPixelsInt),
-                    height: CGFloat(normalizedTile.height)
+                    height: CGFloat(destinationHeightPixels)
                 )
             )
 
@@ -1065,6 +1148,7 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
 
     private func scrollTo(webView: WKWebView, yPoints: CGFloat) async throws -> CGFloat {
         let target = Double(max(0, yPoints))
+        var appKitOffsetY: CGFloat?
         if let scrollView = resolvedScrollView(for: webView),
            let documentView = scrollView.documentView
         {
@@ -1079,6 +1163,7 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
             documentView.layoutSubtreeIfNeeded()
             webView.layoutSubtreeIfNeeded()
             webView.displayIfNeeded()
+            appKitOffsetY = max(0, clipView.bounds.origin.y)
         } else {
             let scrollJS = """
             (function() {
@@ -1088,8 +1173,26 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
             """
             _ = try await evaluateJavaScriptBool(webView: webView, javaScriptString: scrollJS)
         }
+        if appKitOffsetY != nil {
+            let syncScrollJS = """
+            (function() {
+              var y = \(target);
+              try { window.scrollTo(0, y); } catch (e) { }
+              try {
+                if (document && document.documentElement) { document.documentElement.scrollTop = y; }
+                if (document && document.body) { document.body.scrollTop = y; }
+              } catch (e) { }
+              return true;
+            })();
+            """
+            _ = try? await evaluateJavaScriptBool(webView: webView, javaScriptString: syncScrollJS)
+        }
         // Give WebKit a moment to paint after programmatic scroll.
         try? await Task.sleep(nanoseconds: 70_000_000)
+
+        if let appKitOffsetY {
+            return appKitOffsetY
+        }
 
         let actualJS = """
         (function() {
@@ -1143,6 +1246,7 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
         let setupJS = """
         (function() {
           try {
+            try { if (document && document.documentElement && document.documentElement.classList) { document.documentElement.classList.add('scopy-export-mode'); } } catch (e) { }
             var content = document.getElementById('content');
             if (content) {
               try { content.style.opacity = '1'; } catch (e) { }
@@ -1154,7 +1258,7 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
         })();
         """
 
-        let scaleTablesJS = """
+        let adjustWideContentJS = """
         (function() {
           var w = \(widthPoints);
           var minAllowNoWrapScale = 0.35; // below this, wrap to preserve readability
@@ -1239,6 +1343,17 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
             try { scrollW = Math.ceil((table.scrollWidth || 0)); } catch (e) { scrollW = 0; }
             try { offsetW = Math.ceil((table.offsetWidth || 0)); } catch (e) { offsetW = 0; }
             return Math.max(rectW, scrollW, offsetW);
+          }
+
+          function measureBlockWidth(node) {
+            if (!node) { return 0; }
+            try { void node.offsetHeight; } catch (e) { }
+            var rectW = 0, scrollW = 0, offsetW = 0, clientW = 0;
+            try { rectW = Math.ceil((node.getBoundingClientRect().width || 0)); } catch (e) { rectW = 0; }
+            try { scrollW = Math.ceil((node.scrollWidth || 0)); } catch (e) { scrollW = 0; }
+            try { offsetW = Math.ceil((node.offsetWidth || 0)); } catch (e) { offsetW = 0; }
+            try { clientW = Math.ceil((node.clientWidth || 0)); } catch (e) { clientW = 0; }
+            return Math.max(rectW, scrollW, offsetW, clientW);
           }
 
           function scaleWideTables(content, targetWidth) {
@@ -1329,10 +1444,25 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
             }
           }
 
+          function adaptWideCodeBlocks(content, targetWidth) {
+            if (!content || !content.querySelectorAll) { return; }
+            var blocks = content.querySelectorAll('pre');
+            for (var i = 0; i < (blocks.length || 0); i++) {
+              var pre = blocks[i];
+              if (!pre || !pre.classList) { continue; }
+              try { pre.classList.remove('scopy-export-wrap-code'); } catch (e) { }
+              var rawWidth = measureBlockWidth(pre);
+              if (rawWidth > targetWidth + 1) {
+                try { pre.classList.add('scopy-export-wrap-code'); } catch (e) { }
+              }
+            }
+          }
+
           var content = document.getElementById('content');
           if (!content) { return false; }
           var targetWidth = computeTargetWidthPoints(content);
           scaleWideTables(content, targetWidth);
+          adaptWideCodeBlocks(content, targetWidth);
           return true;
         })();
         """
@@ -1382,7 +1512,7 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
         var lastNonZeroHeight: CGFloat = 0
         var stableSince: CFAbsoluteTime?
         var firstNonZeroAt: CFAbsoluteTime?
-        var didScaleTables = false
+        var didAdjustWideContent = false
         var fontsWereLoaded = false
 
         for _ in 0..<60 {
@@ -1411,17 +1541,17 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
                 lastNonZeroHeight = parsedHeight
             }
 
-            // Scale tables once, ideally after fonts are loaded and layout has stopped changing briefly.
-            // This avoids over-scaling caused by late font swaps or delayed DOM updates.
-            if !didScaleTables,
+            // Run export-only wide-content adjustments once, ideally after fonts are loaded and layout has stopped changing briefly.
+            // This avoids measuring code/table widths against a transient layout.
+            if !didAdjustWideContent,
                (fontsWereLoaded || fontsStatus == "n/a" || (firstNonZeroAt != nil && (now - (firstNonZeroAt ?? now)) >= 1.2)),
                let stableStart = stableSince,
                (now - stableStart) >= 0.20
             {
-                let scaled = (try? await evaluateJavaScriptBool(webView: webView, javaScriptString: scaleTablesJS)) ?? false
+                let adjusted = (try? await evaluateJavaScriptBool(webView: webView, javaScriptString: adjustWideContentJS)) ?? false
 
-                if scaled {
-                    didScaleTables = true
+                if adjusted {
+                    didAdjustWideContent = true
                     stableSince = nil
                     lastNonZeroHeight = 0
                     try? await Task.sleep(nanoseconds: 120_000_000)
@@ -1651,6 +1781,102 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
         return try await evaluateJavaScriptString(webView: webView, javaScriptString: js)
     }
 
+    private func reconcileExportHeightPoints(
+        webView: WKWebView,
+        estimatedHeightPoints: CGFloat,
+        passes: Int = 4,
+        settleNanoseconds: UInt64 = 80_000_000
+    ) async throws -> CGFloat {
+        var bestHeight = max(1, estimatedHeightPoints)
+        let iterations = max(1, passes)
+        var unchangedPasses = 0
+
+        for index in 0..<iterations {
+            let liveHeight = await currentLiveExportHeightPoints(webView: webView)
+            if liveHeight > bestHeight + 0.5 {
+                bestHeight = liveHeight
+                unchangedPasses = 0
+            } else {
+                unchangedPasses += 1
+            }
+
+            if unchangedPasses >= 2 { break }
+            if index + 1 < iterations {
+                try? await Task.sleep(nanoseconds: settleNanoseconds)
+            }
+        }
+
+        return bestHeight
+    }
+
+    private func currentLiveExportHeightPoints(webView: WKWebView) async -> CGFloat {
+        if let debug = try? await layoutDebugInfo(webView: webView) {
+            if let exportScale = Self.parseNumberFromLayoutDebugInfo(debug, key: "exportScale"),
+               exportScale > 0,
+               abs(exportScale - 1) > 0.001,
+               let transformedRectHeight = Self.parseNumberFromLayoutDebugInfo(debug, key: "contentRectHeight"),
+               transformedRectHeight > 0
+            {
+                return transformedRectHeight
+            }
+
+            let jsCandidates = Self.parseHeightsFromLayoutDebugInfo(debug)
+            if let jsMax = jsCandidates.max(), jsMax > 0 {
+                return jsMax
+            }
+        }
+
+        if let scrollView = resolvedScrollView(for: webView),
+           let documentView = scrollView.documentView
+        {
+            return max(documentView.bounds.height, documentView.frame.height)
+        }
+
+        return 0
+    }
+
+    private func currentExportScale(webView: WKWebView) async -> CGFloat {
+        guard let debug = try? await layoutDebugInfo(webView: webView),
+              let scale = Self.parseNumberFromLayoutDebugInfo(debug, key: "exportScale"),
+              scale > 0
+        else {
+            return 1
+        }
+
+        return scale
+    }
+
+    nonisolated private static func parseHeightsFromLayoutDebugInfo(_ value: String) -> [CGFloat] {
+        guard let data = value.data(using: .utf8),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return [] }
+
+        let keys = [
+            "contentScrollHeight",
+            "contentRectHeight"
+        ]
+
+        return keys.compactMap { key in
+            if let number = obj[key] as? NSNumber { return max(0, CGFloat(truncating: number)) }
+            if let double = obj[key] as? Double { return max(0, CGFloat(double)) }
+            if let int = obj[key] as? Int { return max(0, CGFloat(int)) }
+            if let string = obj[key] as? String, let value = Double(string) { return max(0, CGFloat(value)) }
+            return nil
+        }
+    }
+
+    nonisolated private static func parseNumberFromLayoutDebugInfo(_ value: String, key: String) -> CGFloat? {
+        guard let data = value.data(using: .utf8),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return nil }
+
+        if let number = obj[key] as? NSNumber { return max(0, CGFloat(truncating: number)) }
+        if let double = obj[key] as? Double { return max(0, CGFloat(double)) }
+        if let int = obj[key] as? Int { return max(0, CGFloat(int)) }
+        if let string = obj[key] as? String, let value = Double(string) { return max(0, CGFloat(value)) }
+        return nil
+    }
+
     private func applyGlobalScale(webView: WKWebView, scale: CGFloat) async throws {
         let js = """
         (function() {
@@ -1722,14 +1948,8 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
     }
 
     private func scrollToTop(webView: WKWebView) async throws {
-        let js = """
-        (function() {
-          try { window.scrollTo(0, 0); } catch (e) { }
-          return true;
-        })();
-        """
         do {
-            _ = try await evaluateJavaScriptBool(webView: webView, javaScriptString: js)
+            _ = try await scrollTo(webView: webView, yPoints: 0)
         } catch {
             // Best-effort: scrolling shouldn't be a hard failure for export.
         }
@@ -2008,6 +2228,52 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
         }
 
         return trimBottomWhitespaceIfNeeded(image: image, contextData: canvas.dataPointer, bytesPerRow: bytesPerRow)
+    }
+
+    private struct PDFRasterMetrics: Sendable {
+        let totalHeightPixels: Int
+        let totalPixels: CGFloat
+    }
+
+    nonisolated private static func pdfRasterMetrics(pdfData: Data, targetWidthPixels: Int) throws -> PDFRasterMetrics {
+        guard targetWidthPixels > 0 else {
+            throw MarkdownExportService.ExportError.stageFailed(stage: .rasterizePDF, underlying: nil)
+        }
+
+        guard let provider = CGDataProvider(data: pdfData as CFData),
+              let doc = CGPDFDocument(provider),
+              doc.numberOfPages >= 1
+        else {
+            throw MarkdownExportService.ExportError.stageFailed(stage: .rasterizePDF, underlying: nil)
+        }
+
+        var maxPageWidthPoints: CGFloat = 0
+        var totalHeightPixels = 0
+        for index in 1...doc.numberOfPages {
+            guard let page = doc.page(at: index) else { continue }
+            let crop = page.getBoxRect(.cropBox)
+            let media = page.getBoxRect(.mediaBox)
+            let box = (crop.width > 0 && crop.height > 0) ? crop : media
+            if box.width > maxPageWidthPoints { maxPageWidthPoints = box.width }
+        }
+
+        guard maxPageWidthPoints > 0 else {
+            throw MarkdownExportService.ExportError.stageFailed(stage: .rasterizePDF, underlying: nil)
+        }
+
+        let scale = CGFloat(targetWidthPixels) / max(1, maxPageWidthPoints)
+        for index in 1...doc.numberOfPages {
+            guard let page = doc.page(at: index) else { continue }
+            let crop = page.getBoxRect(.cropBox)
+            let media = page.getBoxRect(.mediaBox)
+            let box = (crop.width > 0 && crop.height > 0) ? crop : media
+            totalHeightPixels += max(1, Int(ceil(box.height * scale)))
+        }
+
+        return PDFRasterMetrics(
+            totalHeightPixels: totalHeightPixels,
+            totalPixels: CGFloat(targetWidthPixels) * CGFloat(totalHeightPixels)
+        )
     }
 
     nonisolated private static func trimBottomWhitespaceIfNeeded(

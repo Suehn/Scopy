@@ -24,6 +24,34 @@ final class ExportMarkdownPNGUITests: XCTestCase {
         let targetWidth: Int
     }
 
+    func testAutoExportMarkdownFixtureRendersStandardCase() throws {
+        let fixture = fixturePath(relative: "Fixtures/rich_markdown.md")
+        let dumpPath = "/tmp/scopy_uitest_export_rich_markdown.png"
+        let errorPath = "/tmp/scopy_uitest_export_rich_markdown_error.txt"
+
+        try? FileManager.default.removeItem(atPath: dumpPath)
+        try? FileManager.default.removeItem(atPath: errorPath)
+
+        let app = XCUIApplication()
+        app.launchArguments = ["--uitesting"]
+        app.launchEnvironment["SCOPY_UITEST_AUTO_EXPORT_MARKDOWN"] = "1"
+        app.launchEnvironment["SCOPY_UITEST_AUTO_EXPORT_MARKDOWN_PATH"] = fixture
+        app.launchEnvironment["SCOPY_EXPORT_DUMP_PATH"] = dumpPath
+        app.launchEnvironment["SCOPY_EXPORT_ERROR_DUMP_PATH"] = errorPath
+        app.launch()
+        defer { app.terminate() }
+
+        waitForExport(dumpPath: dumpPath, errorPath: errorPath, timeoutSeconds: 20)
+        try assertNoExportError(errorPath: errorPath)
+
+        let props = try readPNGProperties(atPath: dumpPath)
+        XCTAssertEqual(props.width, 1080)
+        XCTAssertGreaterThan(props.height, 1_400)
+        XCTAssertGreaterThan(nonWhiteContentHeight(props.cgImage), 1_100)
+        XCTAssertLessThan(topWhitespaceRows(props.cgImage), 72)
+        XCTAssertLessThan(bottomWhitespaceRows(props.cgImage), 120)
+    }
+
     func testAutoExportMarkdownProducesSinglePNGWidth1080() throws {
         let dumpPath = "/tmp/scopy_uitest_export.png"
         let errorPath = "/tmp/scopy_uitest_export_error.txt"
@@ -531,6 +559,9 @@ final class ExportMarkdownPNGUITests: XCTestCase {
     }
 
     func testAutoExportGlobalScalePDFDoesNotLeaveBlankRight() throws {
+        // SCOPY_EXPORT_PDF_GLOBAL_SCALE_MISMATCH:
+        // Force PDF + low pixel budget so this test catches the historical bug where viewport-based global scale
+        // looked safe, but the actual PDF page boxes produced a taller raster and failed only at PDF export time.
         let htmlPath = "/tmp/scopy_uitest_export_global_scale_pdf.html"
         let dumpPath = "/tmp/scopy_uitest_export_global_scale_pdf.png"
         let errorPath = "/tmp/scopy_uitest_export_global_scale_pdf_error.txt"
@@ -711,7 +742,11 @@ final class ExportMarkdownPNGUITests: XCTestCase {
         let props = try readPNGProperties(atPath: dumpPath)
         XCTAssertEqual(props.width, 1080, "Expected PNG width to be 1080px")
         XCTAssertLessThan(props.height, 900, "Expected short content export to have dynamic (small) height, not a padded large canvas")
-        XCTAssertGreaterThan(props.height, 200, "Expected short content export height to be non-trivial (background + padding)")
+        XCTAssertGreaterThan(
+            props.height,
+            160,
+            "Expected short content export height to remain non-trivial after aligning export layout width with preview"
+        )
     }
 
     func testAutoExportTallContentKeepsBottomContentVisible() throws {
@@ -775,11 +810,199 @@ final class ExportMarkdownPNGUITests: XCTestCase {
 
         let props = try readPNGProperties(atPath: dumpPath)
         XCTAssertEqual(props.width, 1080, "Expected PNG width to be 1080px")
-        XCTAssertGreaterThan(props.height, 60_000, "Expected tall content to export to a tall PNG")
+        XCTAssertGreaterThan(
+            props.height,
+            52_000,
+            "Expected tall content to export to a tall PNG after aligning export layout width with preview"
+        )
+        XCTAssertLessThanOrEqual(
+            topWhitespaceRows(props.cgImage),
+            64,
+            "Expected top marker to remain visible instead of the first tile being clipped"
+        )
         XCTAssertLessThanOrEqual(
             bottomWhitespaceRows(props.cgImage),
             48,
             "Expected bottom marker to remain visible instead of being clipped above a blank tail"
+        )
+    }
+
+    func testAutoExportTallStripedContentDoesNotShowInternalWhiteSeams() throws {
+        let htmlPath = "/tmp/scopy_uitest_export_tall_stripes.html"
+        let dumpPath = "/tmp/scopy_uitest_export_tall_stripes.png"
+        let errorPath = "/tmp/scopy_uitest_export_tall_stripes_error.txt"
+
+        try? FileManager.default.removeItem(atPath: htmlPath)
+        try? FileManager.default.removeItem(atPath: dumpPath)
+        try? FileManager.default.removeItem(atPath: errorPath)
+
+        let stripeColors = [
+            "#111111", "#b91c1c", "#1d4ed8", "#166534",
+            "#7c3aed", "#c2410c", "#0f766e", "#be123c"
+        ]
+        let stripeHTML = (0..<180).map { index in
+            let color = stripeColors[index % stripeColors.count]
+            return "<div class=\"stripe\" style=\"background:\(color)\">\(index)</div>"
+        }.joined(separator: "\n")
+
+        let html = """
+        <!doctype html>
+        <html>
+          <head>
+            <meta charset="utf-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1">
+            <style>
+              :root { color-scheme: light; }
+              html, body { margin: 0; padding: 0; background: #fff; }
+              #content { box-sizing: border-box; width: 100%; margin: 0; padding: 0; background: #fff; }
+              .stripe {
+                height: 180px;
+                width: 100%;
+                margin: 0;
+                padding: 0;
+                color: rgba(255,255,255,0.92);
+                font: 700 48px/180px -apple-system-body;
+                text-align: center;
+              }
+            </style>
+          </head>
+          <body>
+            <div id="content">
+              \(stripeHTML)
+            </div>
+          </body>
+        </html>
+        """
+        try Data(html.utf8).write(to: URL(fileURLWithPath: htmlPath), options: [.atomic])
+
+        let app = XCUIApplication()
+        app.launchArguments = ["--uitesting"]
+        app.launchEnvironment["SCOPY_UITEST_AUTO_EXPORT_MARKDOWN"] = "1"
+        app.launchEnvironment["SCOPY_UITEST_AUTO_EXPORT_HTML_PATH"] = htmlPath
+        app.launchEnvironment["SCOPY_EXPORT_DISABLE_PDF"] = "1"
+        app.launchEnvironment["SCOPY_EXPORT_DUMP_PATH"] = dumpPath
+        app.launchEnvironment["SCOPY_EXPORT_ERROR_DUMP_PATH"] = errorPath
+        app.launch()
+        defer { app.terminate() }
+
+        waitForExport(dumpPath: dumpPath, errorPath: errorPath, timeoutSeconds: 40)
+        try assertNoExportError(errorPath: errorPath)
+
+        let props = try readPNGProperties(atPath: dumpPath)
+        XCTAssertEqual(props.width, 1080)
+        XCTAssertGreaterThan(props.height, 40_000)
+        XCTAssertLessThanOrEqual(topWhitespaceRows(props.cgImage), 8)
+        XCTAssertLessThanOrEqual(bottomWhitespaceRows(props.cgImage), 8)
+        XCTAssertLessThanOrEqual(
+            maxInteriorMostlyWhiteRun(props.cgImage),
+            2,
+            "Expected tall striped export to remain continuous without internal white seams between stitched tiles"
+        )
+    }
+
+    func testAutoExportWideCodeBlockWrapsInsteadOfClipping() throws {
+        let markdownPath = "/tmp/scopy_uitest_export_wide_code.md"
+        let dumpPath = "/tmp/scopy_uitest_export_wide_code.png"
+        let errorPath = "/tmp/scopy_uitest_export_wide_code_error.txt"
+
+        try? FileManager.default.removeItem(atPath: markdownPath)
+        try? FileManager.default.removeItem(atPath: dumpPath)
+        try? FileManager.default.removeItem(atPath: errorPath)
+
+        let longToken = String(repeating: "veryLongIdentifier1234567890", count: 28)
+        let markdown = """
+        # Wide Code Export
+
+        Below should wrap for PNG export, not clip at the right edge.
+
+        ```swift
+        let payload = "\(longToken)"
+        ```
+        """
+        try Data(markdown.utf8).write(to: URL(fileURLWithPath: markdownPath), options: [.atomic])
+
+        let app = XCUIApplication()
+        app.launchArguments = ["--uitesting"]
+        app.launchEnvironment["SCOPY_UITEST_AUTO_EXPORT_MARKDOWN"] = "1"
+        app.launchEnvironment["SCOPY_UITEST_AUTO_EXPORT_MARKDOWN_PATH"] = markdownPath
+        app.launchEnvironment["SCOPY_EXPORT_DISABLE_PDF"] = "1"
+        app.launchEnvironment["SCOPY_EXPORT_DUMP_PATH"] = dumpPath
+        app.launchEnvironment["SCOPY_EXPORT_ERROR_DUMP_PATH"] = errorPath
+        app.launch()
+        defer { app.terminate() }
+
+        waitForExport(dumpPath: dumpPath, errorPath: errorPath, timeoutSeconds: 30)
+        try assertNoExportError(errorPath: errorPath)
+
+        let props = try readPNGProperties(atPath: dumpPath)
+        XCTAssertEqual(props.width, 1080)
+        XCTAssertGreaterThan(
+            props.height,
+            420,
+            "Expected wide code block export to wrap and become meaningfully taller, instead of staying as a clipped single line"
+        )
+        XCTAssertLessThan(bottomWhitespaceRows(props.cgImage), 120)
+    }
+
+    func testAutoExportLongMarkdownDenseLinksKeepsBottomMarkerVisible() throws {
+        let markdownPath = "/tmp/scopy_uitest_export_long_markdown.md"
+        let dumpPath = "/tmp/scopy_uitest_export_long_markdown.png"
+        let errorPath = "/tmp/scopy_uitest_export_long_markdown_error.txt"
+
+        try? FileManager.default.removeItem(atPath: markdownPath)
+        try? FileManager.default.removeItem(atPath: dumpPath)
+        try? FileManager.default.removeItem(atPath: errorPath)
+
+        let longTail = String(repeating: "segment-with-many-words-and-links-", count: 10)
+        let rows = (1...320).map { index in
+            let repoURL = "https://example.com/research/\(index)/\(longTail)\(index)"
+            return """
+            - Item \(index): [\(repoURL)](\(repoURL))
+
+              这一段专门模拟长 Markdown 导出里的长链接、长段落和密集列表。第 \(index) 项会重复说明 export 不应在进入长图 tiled snapshot 后丢失末尾内容；同时保留大量可换行文本，逼近真实聊天导出。
+            """
+        }.joined(separator: "\n\n")
+
+        let markerDataURL = try solidPNGDataURL(width: 1200, height: 96, color: NSColor(calibratedWhite: 0.07, alpha: 1))
+        let markdown = """
+        # Long Markdown Export Regression
+
+        这份回归样本模拟了长对话导出：大量列表、长链接和连续段落会让导出高度在 export 态持续增长。
+
+        \(rows)
+
+        ## Tail Marker
+
+        ![bottom-marker](\(markerDataURL))
+        """
+        try Data(markdown.utf8).write(to: URL(fileURLWithPath: markdownPath), options: [.atomic])
+
+        let app = XCUIApplication()
+        app.launchArguments = ["--uitesting"]
+        app.launchEnvironment["SCOPY_UITEST_AUTO_EXPORT_MARKDOWN"] = "1"
+        app.launchEnvironment["SCOPY_UITEST_AUTO_EXPORT_MARKDOWN_PATH"] = markdownPath
+        app.launchEnvironment["SCOPY_EXPORT_DISABLE_PDF"] = "1"
+        app.launchEnvironment["SCOPY_EXPORT_DUMP_PATH"] = dumpPath
+        app.launchEnvironment["SCOPY_EXPORT_ERROR_DUMP_PATH"] = errorPath
+        app.launch()
+        defer { app.terminate() }
+
+        waitForExport(dumpPath: dumpPath, errorPath: errorPath, timeoutSeconds: 50)
+        try assertNoExportError(errorPath: errorPath)
+
+        let props = try readPNGProperties(atPath: dumpPath)
+        XCTAssertEqual(props.width, 1080)
+        XCTAssertGreaterThan(props.height, 24_000)
+        XCTAssertLessThanOrEqual(topWhitespaceRows(props.cgImage), 72)
+        XCTAssertLessThanOrEqual(bottomWhitespaceRows(props.cgImage), 24)
+        XCTAssertLessThanOrEqual(
+            maxInteriorMostlyWhiteRun(props.cgImage),
+            80,
+            "Expected long markdown export to stay continuous through the middle instead of introducing a large internal blank seam"
+        )
+        XCTAssertTrue(
+            imageHasMostlyDarkBandNearBottom(props.cgImage, searchDepth: 220),
+            "Expected the final dark marker near the end of a long markdown export to remain visible instead of being truncated"
         )
     }
 
@@ -1311,6 +1534,63 @@ final class ExportMarkdownPNGUITests: XCTestCase {
         return max(0, firstNonWhiteFromBottomY)
     }
 
+    private func topWhitespaceRows(_ image: CGImage) -> Int {
+        let w = image.width
+        let h = image.height
+        guard w > 8, h > 8 else { return 0 }
+
+        let bytesPerRow = w * 4
+        var pixels = [UInt8](repeating: 0, count: bytesPerRow * h)
+        let cs = CGColorSpaceCreateDeviceRGB()
+        let bitmapInfo = CGImageAlphaInfo.premultipliedLast.rawValue
+        guard let ctx = CGContext(
+            data: &pixels,
+            width: w,
+            height: h,
+            bitsPerComponent: 8,
+            bytesPerRow: bytesPerRow,
+            space: cs,
+            bitmapInfo: bitmapInfo
+        ) else {
+            return 0
+        }
+
+        ctx.draw(image, in: CGRect(x: 0, y: 0, width: w, height: h))
+
+        let stepX = 8
+        let whiteThreshold: UInt8 = 250
+        func rowIsMostlyWhite(_ y: Int) -> Bool {
+            let start = y * bytesPerRow
+            var darkCount = 0
+            var sampleCount = 0
+
+            var x = 0
+            while x < w {
+                let idx = start + x * 4
+                if idx + 2 < pixels.count {
+                    let r = pixels[idx]
+                    let g = pixels[idx + 1]
+                    let b = pixels[idx + 2]
+                    if r < whiteThreshold || g < whiteThreshold || b < whiteThreshold {
+                        darkCount += 1
+                    }
+                    sampleCount += 1
+                }
+                x += stepX
+            }
+
+            return darkCount <= max(6, sampleCount / 180)
+        }
+
+        for y in stride(from: h - 1, through: 0, by: -1) {
+            if !rowIsMostlyWhite(y) {
+                return max(0, (h - 1) - y)
+            }
+        }
+
+        return h
+    }
+
     private func nonWhiteContentHeight(_ image: CGImage) -> Int {
         let w = image.width
         let h = image.height
@@ -1364,5 +1644,153 @@ final class ExportMarkdownPNGUITests: XCTestCase {
         }
         guard let minY, let maxY else { return 0 }
         return max(0, maxY - minY + 1)
+    }
+
+    private func maxInteriorMostlyWhiteRun(_ image: CGImage) -> Int {
+        let w = image.width
+        let h = image.height
+        guard w > 8, h > 8 else { return 0 }
+
+        let bytesPerRow = w * 4
+        var pixels = [UInt8](repeating: 0, count: bytesPerRow * h)
+        let cs = CGColorSpaceCreateDeviceRGB()
+        let bitmapInfo = CGImageAlphaInfo.premultipliedLast.rawValue
+        guard let ctx = CGContext(
+            data: &pixels,
+            width: w,
+            height: h,
+            bitsPerComponent: 8,
+            bytesPerRow: bytesPerRow,
+            space: cs,
+            bitmapInfo: bitmapInfo
+        ) else {
+            return 0
+        }
+
+        ctx.draw(image, in: CGRect(x: 0, y: 0, width: w, height: h))
+
+        let stepX = 8
+        let whiteThreshold: UInt8 = 250
+        let ignoreMargin = min(16, max(0, h / 40))
+
+        func rowIsMostlyWhite(_ y: Int) -> Bool {
+            let start = y * bytesPerRow
+            var darkCount = 0
+            var sampleCount = 0
+            var x = 0
+            while x < w {
+                let idx = start + x * 4
+                if idx + 2 < pixels.count {
+                    let r = pixels[idx]
+                    let g = pixels[idx + 1]
+                    let b = pixels[idx + 2]
+                    if r < whiteThreshold || g < whiteThreshold || b < whiteThreshold {
+                        darkCount += 1
+                    }
+                    sampleCount += 1
+                }
+                x += stepX
+            }
+            return darkCount <= max(6, sampleCount / 180)
+        }
+
+        var longestRun = 0
+        var currentRun = 0
+        for y in ignoreMargin..<(h - ignoreMargin) {
+            if rowIsMostlyWhite(y) {
+                currentRun += 1
+                longestRun = max(longestRun, currentRun)
+            } else {
+                currentRun = 0
+            }
+        }
+        return longestRun
+    }
+
+    private func imageHasMostlyDarkBandNearBottom(_ image: CGImage, searchDepth: Int) -> Bool {
+        let w = image.width
+        let h = image.height
+        guard w > 16, h > 16 else { return false }
+
+        let bytesPerRow = w * 4
+        var pixels = [UInt8](repeating: 0, count: bytesPerRow * h)
+        let cs = CGColorSpaceCreateDeviceRGB()
+        let bitmapInfo = CGImageAlphaInfo.premultipliedLast.rawValue
+        guard let ctx = CGContext(
+            data: &pixels,
+            width: w,
+            height: h,
+            bitsPerComponent: 8,
+            bytesPerRow: bytesPerRow,
+            space: cs,
+            bitmapInfo: bitmapInfo
+        ) else {
+            return false
+        }
+
+        ctx.draw(image, in: CGRect(x: 0, y: 0, width: w, height: h))
+
+        let depth = max(1, min(searchDepth, h))
+        let startY = max(0, h - depth)
+        let sampleStep = max(1, w / 180)
+        for y in startY..<h {
+            var darkSamples = 0
+            var totalSamples = 0
+            var x = 0
+            while x < w {
+                let idx = y * bytesPerRow + x * 4
+                if idx + 2 < pixels.count {
+                    let r = pixels[idx]
+                    let g = pixels[idx + 1]
+                    let b = pixels[idx + 2]
+                    if r < 48 && g < 48 && b < 48 {
+                        darkSamples += 1
+                    }
+                    totalSamples += 1
+                }
+                x += sampleStep
+            }
+
+            if totalSamples > 0 && Double(darkSamples) / Double(totalSamples) >= 0.60 {
+                return true
+            }
+        }
+
+        return false
+    }
+
+    private func solidPNGDataURL(width: Int, height: Int, color: NSColor) throws -> String {
+        guard let rep = NSBitmapImageRep(
+            bitmapDataPlanes: nil,
+            pixelsWide: width,
+            pixelsHigh: height,
+            bitsPerSample: 8,
+            samplesPerPixel: 4,
+            hasAlpha: true,
+            isPlanar: false,
+            colorSpaceName: .deviceRGB,
+            bytesPerRow: 0,
+            bitsPerPixel: 0
+        ) else {
+            throw NSError(domain: "ScopyUITests", code: 31, userInfo: [NSLocalizedDescriptionKey: "Failed to allocate marker bitmap"])
+        }
+
+        NSGraphicsContext.saveGraphicsState()
+        guard let graphicsContext = NSGraphicsContext(bitmapImageRep: rep) else {
+            NSGraphicsContext.restoreGraphicsState()
+            throw NSError(domain: "ScopyUITests", code: 32, userInfo: [NSLocalizedDescriptionKey: "Failed to create marker graphics context"])
+        }
+
+        NSGraphicsContext.current = graphicsContext
+        color.setFill()
+        NSBezierPath(rect: NSRect(x: 0, y: 0, width: width, height: height)).fill()
+        graphicsContext.flushGraphics()
+        NSGraphicsContext.restoreGraphicsState()
+
+        guard let data = rep.representation(using: .png, properties: [:]) else {
+            throw NSError(domain: "ScopyUITests", code: 33, userInfo: [NSLocalizedDescriptionKey: "Failed to encode marker PNG"])
+        }
+
+        return "data:image/png;base64,\(data.base64EncodedString())"
     }
 }

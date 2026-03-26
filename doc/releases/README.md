@@ -2,7 +2,7 @@
 doc_type: portal
 status: active
 owner: maintainers
-last_reviewed: 2026-03-25
+last_reviewed: 2026-03-26
 canonical: true
 ---
 
@@ -19,16 +19,17 @@ This page is the human-facing index for current release state. Automation should
 ## Current Release
 
 <!-- release-current:start -->
-- Version: `v0.64`
-- Date: `2026-03-25`
-- Release note: [v0.64](./history/v0.64.md)
+- Version: `v0.7.0`
+- Date: `2026-03-26`
+- Release note: [v0.7.0](./history/v0.7.0.md)
 - Changelog: [CHANGELOG.md](./CHANGELOG.md)
-- Profile doc: [v0.64-profile.md](../perf/release-profiles/v0.64-profile.md)
+- Profile doc: `none`
 <!-- release-current:end -->
 
 ## Recent Releases
 
 <!-- release-recent:start -->
+- `2026-03-26` [v0.7.0](./history/v0.7.0.md) - Markdown preview and export now share richer CommonMark plus GFM footnotes math highlighting and long-export hardening
 - `2026-03-25` [v0.64](./history/v0.64.md) - Full-index warm-load latency collapsed to sub-second disk-cache hits with preview lifecycle and observability cleanup
 - `2026-03-13` [v0.60.3](./history/v0.60.3.md) - Explicit Codex image replay action and ultra-tall export and preview hardening
 - `2026-03-07` [v0.60.2](./history/v0.60.2.md) - Historical image replay compatibility fix for Codex and temporary image files
@@ -41,7 +42,6 @@ This page is the human-facing index for current release state. Automation should
 - `2026-01-12` [v0.58.fix2](./history/v0.58.fix2.md) - Two-character Chinese short query optimization
 - `2026-01-11` [v0.58.fix1](./history/v0.58.fix1.md) - Further two-character short query optimization
 - `2026-01-11` [v0.58](./history/v0.58.md) - Large-text fuzzy search speed-up with real DB baseline
-- `2026-01-03` [v0.57.fix2](./history/v0.57.fix2.md) - Excel clipboard semantics fix
 <!-- release-recent:end -->
 
 ## Full History
