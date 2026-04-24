@@ -890,7 +890,7 @@ final class ClipboardMonitorTests: XCTestCase {
     }
 
     func testPendingLargeContentReplaysAfterMonitorRestart() async throws {
-        ClipboardMonitor.testingAsyncProcessingDelayNs = 300_000_000
+        ClipboardMonitor.testingAsyncProcessingDelayNs = 2_000_000_000
         monitor.setPollingInterval(0.1)
 
         pasteboard.clearContents()
@@ -906,7 +906,9 @@ final class ClipboardMonitorTests: XCTestCase {
         pasteboard.clearContents()
         pasteboard.setData(tiffData, forType: .tiff)
 
-        try await Task.sleep(nanoseconds: 150_000_000)
+        await assertEventually(timeout: 5.0, pollInterval: 0.05, {
+            self.pendingEnvelopeCount() > 0
+        }, message: "Pending envelope should be persisted before restart")
         monitor.stopMonitoring()
 
         ClipboardMonitor.testingAsyncProcessingDelayNs = 0
