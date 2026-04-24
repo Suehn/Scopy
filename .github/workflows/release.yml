@@ -229,7 +229,20 @@ jobs:
           TAP_DIR="homebrew-scopy"
           git clone "https://x-access-token:${TAP_GITHUB_TOKEN}@github.com/Suehn/homebrew-scopy.git" "${TAP_DIR}"
 
-          python3 -c "import re; p='${TAP_DIR}/Casks/scopy.rb'; s=open(p,'r',encoding='utf-8').read(); s=re.sub(r'version \"[^\"]+\"', f'version \"{VERSION}\"', s); s=re.sub(r'sha256 \"[^\"]+\"', f'sha256 \"{SHA256}\"', s); open(p,'w',encoding='utf-8').write(s)"
+          VERSION="${VERSION}" SHA256="${SHA256}" CASK_PATH="${TAP_DIR}/Casks/scopy.rb" python3 - <<'PY'
+          import os
+          import re
+
+          path = os.environ["CASK_PATH"]
+          version = os.environ["VERSION"]
+          sha256 = os.environ["SHA256"]
+          with open(path, "r", encoding="utf-8") as handle:
+              source = handle.read()
+          source = re.sub(r'version "[^"]+"', f'version "{version}"', source)
+          source = re.sub(r'sha256 "[^"]+"', f'sha256 "{sha256}"', source)
+          with open(path, "w", encoding="utf-8") as handle:
+              handle.write(source)
+          PY
 
           cd "${TAP_DIR}"
           if git diff --quiet; then
@@ -261,7 +274,20 @@ jobs:
           VERSION="${{ needs.build_release.outputs.version }}"
           SHA256="${{ needs.build_release.outputs.sha256 }}"
 
-          python3 -c "import re; p='Casks/scopy.rb'; s=open(p,'r',encoding='utf-8').read(); s=re.sub(r'version \"[^\"]+\"', f'version \"{VERSION}\"', s); s=re.sub(r'sha256 \"[^\"]+\"', f'sha256 \"{SHA256}\"', s); open(p,'w',encoding='utf-8').write(s)"
+          VERSION="${VERSION}" SHA256="${SHA256}" CASK_PATH="Casks/scopy.rb" python3 - <<'PY'
+          import os
+          import re
+
+          path = os.environ["CASK_PATH"]
+          version = os.environ["VERSION"]
+          sha256 = os.environ["SHA256"]
+          with open(path, "r", encoding="utf-8") as handle:
+              source = handle.read()
+          source = re.sub(r'version "[^"]+"', f'version "{version}"', source)
+          source = re.sub(r'sha256 "[^"]+"', f'sha256 "{sha256}"', source)
+          with open(path, "w", encoding="utf-8") as handle:
+              handle.write(source)
+          PY
 
           if git diff --quiet; then
             echo "Repo cask already up-to-date (scopy ${VERSION})."

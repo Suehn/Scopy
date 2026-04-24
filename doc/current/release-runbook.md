@@ -70,6 +70,8 @@ Verify all of the following after release publication:
 6. `brew fetch --cask scopy -f`
 7. Confirm `/Applications/Scopy.app` exists
 
+If `HOMEBREW_GITHUB_API_TOKEN` is not configured, the workflow skips the external tap update by design. Treat either stale cask surface as a release follow-up blocker: sync the affected cask to the published DMG sha256, push the cask commit, and rerun the acceptance checks above.
+
 ## Historical Material
 
 - Legacy deployment notes are preserved in [../archive/release-runbook-legacy.md](../archive/release-runbook-legacy.md).
