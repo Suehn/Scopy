@@ -1486,13 +1486,13 @@ public final class StorageService {
     }
 
     /// 清空缩略图缓存（设置变更时调用）
-    func clearThumbnailCache() {
+    func clearThumbnailCache() async {
         let path = thumbnailCachePath
-        DispatchQueue.global(qos: .utility).async {
+        await Task.detached(priority: .utility) {
             let fileManager = FileManager.default
             try? fileManager.removeItem(atPath: path)
             try? fileManager.createDirectory(atPath: path, withIntermediateDirectories: true)
-        }
+        }.value
     }
 
     /// 清理缩略图缓存（LRU 策略）

@@ -35,13 +35,33 @@ actor ClipboardService {
 
     private var settings: SettingsDTO = .default
 
-    private struct ThumbnailCacheIndex: Sendable {
+    struct ThumbnailCacheIndex: Sendable {
         let root: String
-        var filenames: Set<String>
+        private(set) var filenames: Set<String>
+
+        mutating func pathIfExists(filename: String) -> String? {
+            pathIfExists(filename: filename, fileExists: FileManager.default.fileExists(atPath:))
+        }
+
+        mutating func pathIfExists(filename: String, fileExists: (String) -> Bool) -> String? {
+            guard filenames.contains(filename) else { return nil }
+
+            let path = (root as NSString).appendingPathComponent(filename)
+            guard fileExists(path) else {
+                filenames.remove(filename)
+                return nil
+            }
+            return path
+        }
+
+        mutating func remember(filename: String) {
+            filenames.insert(filename)
+        }
     }
 
     private var thumbnailCacheIndex: ThumbnailCacheIndex?
     private var thumbnailCacheIndexTask: Task<Void, Never>?
+    private var thumbnailCacheIndexGeneration: UInt64 = 0
 
     private let eventQueue: AsyncBoundedQueue<ClipboardEvent>
     private var monitorTask: Task<Void, Never>?
@@ -456,7 +476,9 @@ actor ClipboardService {
             }
 
             if oldHeight != newSettings.thumbnailHeight || oldShowThumbnails != newSettings.showImageThumbnails {
+                invalidateThumbnailCacheIndex()
                 await storage.clearThumbnailCache()
+                invalidateThumbnailCacheIndex()
             }
 
             do {
@@ -1217,7 +1239,8 @@ extension ClipboardService {
         }
 
         thumbnailCacheIndexTask?.cancel()
-        thumbnailCacheIndexTask = Task.detached(priority: .utility) { [weak self, thumbnailCacheRoot] in
+        let generation = thumbnailCacheIndexGeneration
+        thumbnailCacheIndexTask = Task.detached(priority: .utility) { [weak self, thumbnailCacheRoot, generation] in
             let filenames: [String]
             do {
                 filenames = try FileManager.default.contentsOfDirectory(atPath: thumbnailCacheRoot)
@@ -1225,26 +1248,37 @@ extension ClipboardService {
                 filenames = []
             }
 
+            guard !Task.isCancelled else { return }
+
             let index = ThumbnailCacheIndex(root: thumbnailCacheRoot, filenames: Set(filenames))
-            await self?.setThumbnailCacheIndex(index)
+            await self?.setThumbnailCacheIndex(index, generation: generation)
         }
     }
 
-    private func setThumbnailCacheIndex(_ index: ThumbnailCacheIndex) {
+    private func setThumbnailCacheIndex(_ index: ThumbnailCacheIndex, generation: UInt64) {
+        guard generation == thumbnailCacheIndexGeneration else { return }
         thumbnailCacheIndex = index
     }
 
+    private func invalidateThumbnailCacheIndex() {
+        thumbnailCacheIndexGeneration &+= 1
+        thumbnailCacheIndexTask?.cancel()
+        thumbnailCacheIndexTask = nil
+        thumbnailCacheIndex = nil
+    }
+
     private func thumbnailPathIfExists(filename: String, thumbnailCacheRoot: String) -> String? {
-        if let index = thumbnailCacheIndex, index.root == thumbnailCacheRoot {
-            guard index.filenames.contains(filename) else { return nil }
-            return (thumbnailCacheRoot as NSString).appendingPathComponent(filename)
+        if var index = thumbnailCacheIndex, index.root == thumbnailCacheRoot {
+            let path = index.pathIfExists(filename: filename)
+            thumbnailCacheIndex = index
+            return path
         }
 
         let path = (thumbnailCacheRoot as NSString).appendingPathComponent(filename)
         guard FileManager.default.fileExists(atPath: path) else { return nil }
 
         if var index = thumbnailCacheIndex, index.root == thumbnailCacheRoot {
-            index.filenames.insert(filename)
+            index.remember(filename: filename)
             thumbnailCacheIndex = index
         } else {
             thumbnailCacheIndex = ThumbnailCacheIndex(root: thumbnailCacheRoot, filenames: [filename])
@@ -1261,7 +1295,7 @@ extension ClipboardService {
         guard !filename.isEmpty else { return }
 
         if var index = thumbnailCacheIndex, index.root == root {
-            index.filenames.insert(filename)
+            index.remember(filename: filename)
             thumbnailCacheIndex = index
         } else {
             thumbnailCacheIndex = ThumbnailCacheIndex(root: root, filenames: [filename])

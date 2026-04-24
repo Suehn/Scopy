@@ -361,13 +361,22 @@ final class HistoryViewModel {
     // MARK: - Loading
 
     func load() async {
+        let currentVersion = searchVersion
+        guard shouldApplyLoadResult(version: currentVersion) else { return }
+
         isLoading = true
-        defer { isLoading = false }
+        defer {
+            if currentVersion == searchVersion {
+                isLoading = false
+            }
+        }
 
         do {
             let startTime = CFAbsoluteTimeGetCurrent()
 
             let fetchedItems = try await service.fetchRecent(limit: 50, offset: 0)
+            guard shouldApplyLoadResult(version: currentVersion) else { return }
+
             items = fetchedItems
             prewarmDisplayText(for: fetchedItems)
             loadedCount = fetchedItems.count
@@ -377,9 +386,14 @@ final class HistoryViewModel {
             // Load latency should reflect "first screen ready" rather than unrelated background work.
             let elapsedMs = (CFAbsoluteTimeGetCurrent() - startTime) * 1000
             await PerformanceMetrics.shared.recordLoadLatency(elapsedMs)
+            guard shouldApplyLoadResult(version: currentVersion) else { return }
+
             performanceSummary = await PerformanceMetrics.shared.getSummary()
+            guard shouldApplyLoadResult(version: currentVersion) else { return }
 
             let stats = try await service.getStorageStats()
+            guard shouldApplyLoadResult(version: currentVersion) else { return }
+
             totalCount = stats.itemCount
             canLoadMore = loadedCount < totalCount
 
@@ -389,6 +403,10 @@ final class HistoryViewModel {
         } catch {
             ScopyLog.app.error("Failed to load items: \(error.localizedDescription, privacy: .private)")
         }
+    }
+
+    private func shouldApplyLoadResult(version: Int) -> Bool {
+        !Task.isCancelled && version == searchVersion && isUnfilteredList
     }
 
     func loadIfStale(minIntervalSeconds: TimeInterval = 0.5) async {

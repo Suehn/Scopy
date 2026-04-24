@@ -232,6 +232,37 @@ final class ConcurrencyTests: XCTestCase {
         XCTAssertTrue(appState.items.allSatisfy { $0.plainText.localizedCaseInsensitiveContains("2") })
     }
 
+    /// 测试普通 load 的旧结果不会覆盖后发起的搜索结果
+    func testLoadDoesNotOverwriteNewerSearchResults() async throws {
+        let service = TestMockClipboardService()
+        let appState = AppState.forTesting(service: service)
+        defer { appState.stop() }
+
+        service.setItemCount(200)
+        service.fetchRecentDelayNs = 120_000_000
+
+        let loadTask = Task { await appState.load() }
+        try await Task.sleep(nanoseconds: 10_000_000)
+
+        appState.searchQuery = "199"
+        appState.search()
+
+        await assertEventually(timeout: 1.0, pollInterval: 0.01, {
+            service.lastSearchQuery == "199" &&
+            appState.items.count == 1 &&
+            appState.items.allSatisfy { $0.plainText.localizedCaseInsensitiveContains("199") } &&
+            !appState.isLoading
+        }, message: "Newer search should complete before the delayed load returns")
+
+        await loadTask.value
+
+        XCTAssertEqual(appState.items.count, 1)
+        XCTAssertTrue(appState.items.allSatisfy { $0.plainText.localizedCaseInsensitiveContains("199") })
+        XCTAssertEqual(appState.totalCount, 1)
+        XCTAssertFalse(appState.canLoadMore)
+        XCTAssertFalse(appState.isLoading)
+    }
+
     // MARK: - v0.11 Concurrent Search Stress Tests
 
     /// v0.11: 并发搜索压力测试 - 同时发起 10 个搜索请求

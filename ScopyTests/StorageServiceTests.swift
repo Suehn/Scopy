@@ -109,6 +109,42 @@ final class StorageServiceTests: XCTestCase {
         XCTAssertTrue(remaining[0].isPinned)
     }
 
+    func testClearThumbnailCacheWaitsForDirectoryReset() async throws {
+        let fileManager = FileManager.default
+        let thumbnailDirectory = storage.thumbnailCacheDirectoryPath
+        let thumbnailURL = URL(fileURLWithPath: thumbnailDirectory).appendingPathComponent("stale.png")
+
+        try Data([0x89, 0x50, 0x4E, 0x47]).write(to: thumbnailURL)
+        XCTAssertTrue(fileManager.fileExists(atPath: thumbnailURL.path))
+
+        await storage.clearThumbnailCache()
+
+        var isDirectory: ObjCBool = false
+        XCTAssertTrue(fileManager.fileExists(atPath: thumbnailDirectory, isDirectory: &isDirectory))
+        XCTAssertTrue(isDirectory.boolValue)
+        XCTAssertFalse(fileManager.fileExists(atPath: thumbnailURL.path))
+    }
+
+    func testThumbnailCacheIndexDropsMissingIndexedPath() throws {
+        let fileManager = FileManager.default
+        let rootURL = fileManager.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try fileManager.createDirectory(at: rootURL, withIntermediateDirectories: true)
+        defer { try? fileManager.removeItem(at: rootURL) }
+
+        let filename = "thumb.png"
+        let thumbnailURL = rootURL.appendingPathComponent(filename)
+        try Data([0x89, 0x50, 0x4E, 0x47]).write(to: thumbnailURL)
+
+        var index = ClipboardService.ThumbnailCacheIndex(root: rootURL.path, filenames: [filename])
+        XCTAssertEqual(index.pathIfExists(filename: filename), thumbnailURL.path)
+
+        try fileManager.removeItem(at: thumbnailURL)
+
+        XCTAssertNil(index.pathIfExists(filename: filename))
+        XCTAssertFalse(index.filenames.contains(filename))
+    }
+
     // MARK: - Deduplication Tests (v0.md 3.2)
 
     func testDeduplication() async throws {
