@@ -225,8 +225,12 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.scopy.tests
         GENERATE_INFOPLIST_FILE: true
         INFOPLIST_KEY_NSPrincipalClass: XCTestCase
-        # 不设置 TEST_HOST 和 BUNDLE_LOADER，使用独立测试 bundle 模式
+        # 保持独立测试 bundle 模式；Scopy 依赖只用于构建 @testable import 所需模块。
+        TEST_HOST: ""
+        BUNDLE_LOADER: ""
     dependencies:
+      - target: Scopy
+        link: false
       - sdk: libsqlite3.tbd
       - package: ScopyKit
         product: ScopyKit

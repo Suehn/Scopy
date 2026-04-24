@@ -572,6 +572,13 @@
 			remoteGlobalIDString = 90B6CBB50728B252BCF53636;
 			remoteInfo = Scopy;
 		};
+		C167BDE8B8137A27102623E4 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 881EAC4E17987F3E27B9F996 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 90B6CBB50728B252BCF53636;
+			remoteInfo = Scopy;
+		};
 		D11981CE26BB42085EF77ACB /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 881EAC4E17987F3E27B9F996 /* Project object */;
@@ -1334,6 +1341,7 @@
 			buildRules = (
 			);
 			dependencies = (
+				20C89F60F910C36A30EEF77E /* PBXTargetDependency */,
 			);
 			name = ScopyTests;
 			packageProductDependencies = (
@@ -2140,6 +2148,11 @@
 			target = 9FE7B01C9C96A9A5A0ACFA78 /* ScopyTestHost */;
 			targetProxy = 56FFB96533A3459F239CD4F9 /* PBXContainerItemProxy */;
 		};
+		20C89F60F910C36A30EEF77E /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 90B6CBB50728B252BCF53636 /* Scopy */;
+			targetProxy = C167BDE8B8137A27102623E4 /* PBXContainerItemProxy */;
+		};
 		3C71D3E903E4C30CA84C39C0 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			target = 90B6CBB50728B252BCF53636 /* Scopy */;
@@ -2194,7 +2207,7 @@
 		3124B18EA38DA16E1E9E7FB6 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				BUNDLE_LOADER = "$(TEST_HOST)";
+				BUNDLE_LOADER = "";
 				COMBINE_HIDPI_IMAGES = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Scopy/Info.plist;
@@ -2207,6 +2220,7 @@
 				PRODUCT_BUNDLE_IDENTIFIER = com.scopy.tests;
 				PRODUCT_NAME = ScopyTests;
 				SDKROOT = macosx;
+				TEST_HOST = "";
 			};
 			name = Release;
 		};
@@ -2448,7 +2462,7 @@
 		F0AE10B77432899C6DD11C55 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				BUNDLE_LOADER = "$(TEST_HOST)";
+				BUNDLE_LOADER = "";
 				COMBINE_HIDPI_IMAGES = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Scopy/Info.plist;
@@ -2461,6 +2475,7 @@
 				PRODUCT_BUNDLE_IDENTIFIER = com.scopy.tests;
 				PRODUCT_NAME = ScopyTests;
 				SDKROOT = macosx;
+				TEST_HOST = "";
 			};
 			name = Debug;
 		};
