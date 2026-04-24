@@ -31,9 +31,23 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          TAG="$(bash scripts/release/tag-from-doc.sh --tag)"
+          if git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null; then
+            if [[ "$(git rev-list -n 1 "${TAG}")" == "$(git rev-parse HEAD)" ]]; then
+              echo "Tag ${TAG} already points at HEAD."
+              echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+            else
+              echo "Tag ${TAG} already exists; skipping post-release docs/cask update on main."
+              echo "tag=" >> "$GITHUB_OUTPUT"
+            fi
+            exit 0
+          fi
+
           TAG="$(bash scripts/release/tag-from-doc.sh --ensure)"
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
         id: tag
 
       - name: Push tag
+        if: steps.tag.outputs.tag != ''
         run: git push origin "${{ steps.tag.outputs.tag }}"
