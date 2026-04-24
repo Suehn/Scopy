@@ -205,14 +205,15 @@ final class ConcurrencyTests: XCTestCase {
         service.searchDelayIgnoresCancellation = true
 
         // Make the first query slower, so it completes after the second query.
-        service.searchDelayNsByQuery["1"] = 120_000_000
+        service.searchDelayNsByQuery["1"] = 500_000_000
         service.searchDelayNsByQuery["2"] = 0
 
         appState.searchQuery = "1"
         appState.search()
 
-        // Wait for the first debounce window to elapse so the slow search actually starts.
-        try await Task.sleep(nanoseconds: 30_000_000)
+        await assertEventually(timeout: 2.0, pollInterval: 0.01, {
+            service.searchStartedQueries.contains("1")
+        }, message: "Slow search should start before the newer search cancels the task")
 
         appState.searchQuery = "2"
         appState.search()
@@ -226,7 +227,7 @@ final class ConcurrencyTests: XCTestCase {
         XCTAssertTrue(appState.items.allSatisfy { $0.plainText.localizedCaseInsensitiveContains("2") })
 
         // Slow search completes later, but should not overwrite the latest results.
-        await assertEventually(timeout: 1.0, pollInterval: 0.01, {
+        await assertEventually(timeout: 2.0, pollInterval: 0.01, {
             service.searchCallCount == 2
         }, message: "Slow search should eventually complete")
         XCTAssertTrue(appState.items.allSatisfy { $0.plainText.localizedCaseInsensitiveContains("2") })

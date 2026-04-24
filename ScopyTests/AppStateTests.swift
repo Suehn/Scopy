@@ -675,6 +675,7 @@ final class TestMockClipboardService: ClipboardServiceProtocol {
 
     // Call tracking
     var searchCallCount = 0
+    var searchStartedQueries: [String] = []
     var lastSearchQuery: String?
     var copyCallCount = 0
     var lastCopiedItemID: UUID?
@@ -736,6 +737,7 @@ final class TestMockClipboardService: ClipboardServiceProtocol {
 
     func resetSearchCallCount() {
         searchCallCount = 0
+        searchStartedQueries = []
         lastSearchQuery = nil
         recordedSearchRequests = []
     }
@@ -766,6 +768,7 @@ final class TestMockClipboardService: ClipboardServiceProtocol {
     }
 
     func search(query: SearchRequest) async throws -> SearchResultPage {
+        searchStartedQueries.append(query.query)
         let effectiveDelayNs = searchDelayNsByQuery[query.query] ?? searchDelayNs
         if effectiveDelayNs > 0 {
             if searchDelayIgnoresCancellation {
