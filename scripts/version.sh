@@ -1,12 +1,40 @@
 #!/bin/bash
 set -euo pipefail
 
+release_tag_regex='^v[0-9]+\.[0-9]+(\.[0-9]+)?([-.][0-9A-Za-z]+)?$'
+
+is_valid_release_tag() {
+    local tag="$1"
+    [[ "${tag}" =~ ${release_tag_regex} ]] && [[ ! "${tag}" =~ ^v0\.18\. ]]
+}
+
 tag_on_head() {
-    git tag --points-at HEAD --list 'v[0-9]*' --sort=v:refname | grep -v '^v0\.18\.' | tail -n 1 || true
+    git for-each-ref --points-at HEAD --sort=creatordate --format='%(refname:short)' refs/tags \
+        | while IFS= read -r tag; do
+            if is_valid_release_tag "${tag}"; then
+                echo "${tag}"
+            fi
+        done \
+        | tail -n 1 || true
 }
 
 best_merged_tag() {
-    git tag --merged HEAD --list 'v[0-9]*' --sort=v:refname | grep -v '^v0\.18\.' | tail -n 1 || true
+    local tag
+    tag="$(git describe --tags --abbrev=0 --match 'v[0-9]*' --exclude 'v0.18.*' HEAD 2>/dev/null || true)"
+    if is_valid_release_tag "${tag}"; then
+        echo "${tag}"
+        return 0
+    fi
+
+    git log --decorate=full --simplify-by-decoration --format='%D' HEAD 2>/dev/null \
+        | tr ',' '\n' \
+        | sed -n 's/^ *tag: refs\/tags\///p' \
+        | while IFS= read -r candidate; do
+            if is_valid_release_tag "${candidate}"; then
+                echo "${candidate}"
+            fi
+        done \
+        | head -n 1 || true
 }
 
 resolve_tag() {

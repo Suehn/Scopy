@@ -27,8 +27,8 @@ APP_NAME="Scopy"
 BUILD_DIR=".build/Release"
 DMG_DIR=".build/dmg"
 
-TAG_ON_HEAD="$(git tag --points-at HEAD --list 'v[0-9]*' --sort=v:refname | grep -v '^v0\\.18\\.' | tail -n 1 || true)"
-if [[ -z "${TAG_ON_HEAD}" ]]; then
+TAG_ON_HEAD="$(bash scripts/version.sh --tag 2>/dev/null || true)"
+if [[ -z "${TAG_ON_HEAD}" ]] || [[ "$(git rev-list -n 1 "${TAG_ON_HEAD}" 2>/dev/null || true)" != "$(git rev-parse HEAD)" ]]; then
     echo -e "${RED}✗ 当前 HEAD 没有可用的 release tag（vX.Y.Z）${NC}"
     echo -e "${YELLOW}  建议：make tag-release && git push --follow-tags origin main${NC}"
     exit 1
@@ -36,6 +36,10 @@ fi
 
 VERSION="${TAG_ON_HEAD#v}"
 VERSION_ARGS="$(bash scripts/version.sh --xcodebuild-args 2>/dev/null || true)"
+if [[ "${VERSION_ARGS}" != *"MARKETING_VERSION=${VERSION}"* ]]; then
+    echo -e "${RED}✗ version.sh 与 release tag 解析不一致：${VERSION_ARGS}${NC}"
+    exit 1
+fi
 DMG_NAME="${APP_NAME}-${VERSION}.dmg"
 
 echo -e "${BLUE}================================================${NC}"

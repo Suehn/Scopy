@@ -12,21 +12,25 @@ enum MarkdownHTMLRenderer {
         guard !Task.isCancelled else { return "" }
         let inlineNormalizedMarkdown = LaTeXInlineTextNormalizer.normalize(protected.markdown)
         let normalizedHeadingsMarkdown = normalizeATXHeadings(in: inlineNormalizedMarkdown)
+        let emphasisNormalizedMarkdown = MarkdownCJKEmphasisNormalizer.normalize(normalizedHeadingsMarkdown)
         let safeHTMLExtraction = featureSet.safeHTMLSubset
-            ? MarkdownSafeHTMLSubset.extract(from: normalizedHeadingsMarkdown)
+            ? MarkdownSafeHTMLSubset.extract(from: emphasisNormalizedMarkdown.markdown)
             : MarkdownSafeHTMLExtractionResult(
-                markdown: normalizedHeadingsMarkdown,
-                fallbackMarkdown: normalizedHeadingsMarkdown,
+                markdown: emphasisNormalizedMarkdown.markdown,
+                fallbackMarkdown: emphasisNormalizedMarkdown.markdown,
                 replacements: [:]
             )
         let renderMarkdown = safeHTMLExtraction.markdown
         let hasMath = MarkdownDetector.containsMath(normalizedMarkdown)
         let enableMath = featureSet.math && hasMath
 
-        let fallbackText = MathProtector.restoreMath(
-            in: safeHTMLExtraction.fallbackMarkdown,
-            placeholders: protected.placeholders,
-            escape: { $0 }
+        let fallbackText = MarkdownCJKEmphasisNormalizer.stripRenderSentinel(
+            from: MathProtector.restoreMath(
+                in: safeHTMLExtraction.fallbackMarkdown,
+                placeholders: protected.placeholders,
+                escape: { $0 }
+            ),
+            sentinel: emphasisNormalizedMarkdown.renderSentinel
         )
 
         guard !Task.isCancelled else { return "" }
@@ -36,7 +40,8 @@ enum MarkdownHTMLRenderer {
             placeholders: protected.placeholders,
             safeHTMLReplacements: safeHTMLExtraction.replacements,
             enableMath: enableMath,
-            fallbackText: fallbackText
+            fallbackText: fallbackText,
+            renderSentinel: emphasisNormalizedMarkdown.renderSentinel
         )
     }
 
@@ -503,7 +508,8 @@ enum MarkdownHTMLRenderer {
         placeholders: [(placeholder: String, original: String)],
         safeHTMLReplacements: [String: MarkdownSafeHTMLSubset.Replacement],
         enableMath: Bool,
-        fallbackText: String
+        fallbackText: String,
+        renderSentinel: String?
     ) -> String {
         let mathIncludes: String
         if featureSet.math && enableMath {
@@ -556,6 +562,7 @@ enum MarkdownHTMLRenderer {
         let placeholdersLiteral = jsonLiteral(placeholderMap)
         let overflowSelectorLiteral = jsonStringLiteral(featureSet.overflowProbeSelector)
         let safeHTMLLiteral = jsonLiteral(safeHTMLReplacements)
+        let renderSentinelLiteral = jsonLiteral(renderSentinel)
         let taskListBootstrapScript = featureSet.taskLists ? MarkdownTaskListRuntime.bootstrapScript : ""
         let footnotesReadyCheck = featureSet.footnotes ? """
               if (typeof window.markdownitFootnote !== 'function') {
@@ -858,6 +865,7 @@ enum MarkdownHTMLRenderer {
               }
 
               var mdOptions = \(featureSet.markdownItOptionsJSLiteral);
+              var renderSentinel = \(renderSentinelLiteral);
               \(highlightOptionsScript)
               var md = window.markdownit(mdOptions);
               \(footnotesInstallScript)\(definitionListInstallScript)
@@ -869,6 +877,9 @@ enum MarkdownHTMLRenderer {
               var map = \(placeholdersLiteral);
               html = html.replace(/SCOPYMATHPLACEHOLDER\\d+X/g, function (m) { return map[m] || m; });
               html = applySafeHTMLReplacements(html, md);
+              if (renderSentinel) {
+                html = html.split(renderSentinel).join('');
+              }
               el.innerHTML = html;
               normalizeFootnoteReferences(el);
               \(taskListApplyScript)\(highlightFinalizeScript)

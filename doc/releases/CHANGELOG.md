@@ -7,6 +7,42 @@
 
 ## [Unreleased]
 
+### Notes
+
+- No unreleased entries.
+
+## [v0.7.2] - 2026-04-24
+
+### Fix/Concurrency
+
+- `HistoryViewModel.load()` now guards each awaited writeback with the current search version, cancellation state, and unfiltered-list state, so stale recent-list loads no longer overwrite newer search results or loading state.
+
+### Fix/Thumbnails
+
+- Thumbnail settings changes now invalidate the in-memory thumbnail index before and after disk cache reset, and indexed thumbnail paths are rechecked on disk before being returned.
+- `StorageService.clearThumbnailCache()` now waits for the thumbnail directory to be removed and recreated before returning, making settings-driven cache resets deterministic.
+
+### Markdown/Preview
+
+- Added CJK asterisk-emphasis normalization so cases like `**重要：**请注意` and `这是**《重点》**内容` render as strong emphasis in preview/export while inline code and fenced code stay untouched.
+- Added focused renderer coverage for CJK emphasis normalization using the bundled local `markdown-it` runtime.
+
+### Build/Versioning
+
+- `scripts/version.sh` now falls back to the nearest reachable release tag instead of the highest version-sorted merged tag, so post-release commits after `v0.7.1` no longer build as older `0.64` binaries.
+- `scripts/build-release.sh` now uses `scripts/version.sh --tag` as its single tag resolver and refuses packaging when the resolved marketing version disagrees with the HEAD release tag.
+
+### Verification
+
+- make build：BUILD SUCCEEDED（2026-04-24）
+- make test-unit：Executed 367 tests, 1 skipped, 0 failures（2026-04-24）
+- make test-strict：Executed 367 tests, 1 skipped, 0 failures（2026-04-24）
+- xcodebuild test -scheme Scopy -destination 'platform=macOS' -only-testing:ScopyTests/ConcurrencyTests/testLoadDoesNotOverwriteNewerSearchResults -only-testing:ScopyTests/StorageServiceTests/testClearThumbnailCacheWaitsForDirectoryReset -only-testing:ScopyTests/StorageServiceTests/testThumbnailCacheIndexDropsMissingIndexedPath：passed（2026-04-24）
+- xcodebuild test -scheme Scopy -destination 'platform=macOS' -only-testing:ScopyTests/KaTeXRenderToStringTests/testCJKEmphasisNormalizerFixesTrailingPunctuationAdjacentToCJKText -only-testing:ScopyTests/KaTeXRenderToStringTests/testCJKEmphasisNormalizerFixesBracketWrappedStrongAdjacentToCJKText -only-testing:ScopyTests/KaTeXRenderToStringTests/testCJKEmphasisNormalizerSkipsInlineCodeAndFencedCode：passed（2026-04-24）
+- scripts/version.sh temp-repo resolver smoke：malformed `v0foo` and legacy `v0.18.1` ignored, valid `v0.7.1` resolved（2026-04-24）
+- make docs-validate：passed（2026-04-24）
+- make release-validate：passed（2026-04-24）
+
 ## [v0.7.1] - 2026-03-26
 
 ### Markdown/Footnotes

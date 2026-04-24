@@ -2,10 +2,10 @@
 doc_type: guide
 status: active
 owner: maintainers
-last_reviewed: 2026-03-25
+last_reviewed: 2026-04-24
 canonical: true
 related_versions:
-  - v0.64
+  - v0.7.2
 ---
 
 # Development Guide
@@ -14,7 +14,7 @@ This document is the canonical implementation guide for the current Scopy codeba
 
 ## Reference State
 
-- Reference release: `v0.64`
+- Reference release: `v0.7.2`
 - Version metadata: [../meta/release-current.yml](../meta/release-current.yml)
 - Active requirements: [product-spec.md](./product-spec.md)
 - Release workflow: [release-runbook.md](./release-runbook.md)
@@ -84,8 +84,9 @@ Implication: changes to search semantics belong in the request model, search eng
 1. `HistoryItemView` routes hover interactions into image, text, and file preview flows.
 2. `HoverPreviewLoader` owns image/file preview decode and downsampling helpers so the row view does not carry raw ImageIO logic.
 3. Markdown/LaTeX preview rendering is handled in the text preview path and export pipeline.
-4. `MarkdownExportService` now lives under `Scopy/Services/Export` and produces PNG output back to the pasteboard through `ScopyKit`.
-5. pngquant settings affect both image history optimization and Markdown/LaTeX export compression where enabled.
+4. The renderer normalizes inline LaTeX, ATX headings, safe HTML placeholders, and CJK punctuation-adjacent emphasis before local `markdown-it` rendering, then strips internal placeholders before user-visible HTML or fallback text.
+5. `MarkdownExportService` now lives under `Scopy/Services/Export` and produces PNG output back to the pasteboard through `ScopyKit`.
+6. pngquant settings affect both image history optimization and Markdown/LaTeX export compression where enabled.
 
 Search marker: `SCOPY_EXPORT_PDF_GLOBAL_SCALE_MISMATCH`
 
@@ -130,7 +131,7 @@ Implication: if you touch settings behavior, preserve the Save/Cancel model and 
 
 ### Export And Media
 
-- Markdown/LaTeX render and PNG export
+- Markdown/LaTeX render and PNG export with local CommonMark/GFM, footnote, math, and syntax-highlight assets
 - Optional pngquant compression for exported PNG
 - Optional automatic compression for newly ingested image history
 - Thumbnail display and configurable thumbnail sizing
@@ -193,11 +194,13 @@ Implication: if you touch settings behavior, preserve the Save/Cancel model and 
 ### Preview Or Export Changes
 
 - Touch preview UI, rendering pipeline, and `MarkdownExportService` together.
+- For Markdown renderer fixes, update focused renderer tests such as `KaTeXRenderToStringTests` / `MarkdownMathRenderingTests`, and add export UI coverage when the PNG output contract changes.
 - Re-check pngquant settings interactions, preview latency, and output pasteboard behavior.
 
 ### Release Or Documentation Changes
 
 - Update metadata, release note, release index, changelog, and any active current docs that changed semantically.
+- For release/versioning fixes, test both `scripts/version.sh --tag` and the release packaging path so the app bundle version, DMG name, and release metadata resolve from the same tag.
 - Avoid putting new truth into compatibility directories or legacy archives.
 
 ## Important Invariants

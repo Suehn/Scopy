@@ -2,10 +2,10 @@
 doc_type: spec
 status: active
 owner: maintainers
-last_reviewed: 2026-03-25
+last_reviewed: 2026-04-24
 canonical: true
 related_versions:
-  - v0.64
+  - v0.7.2
 ---
 
 # Architecture
@@ -36,6 +36,7 @@ This document describes the current system shape and operational invariants. For
 ### UI And Preview Path
 
 - App/UI shell manages the menubar icon, floating panel, settings window, and preview/export flows.
+- Markdown preview/export uses local renderer assets for CommonMark/GFM, math, footnotes, syntax highlighting, safe HTML restoration, and CJK emphasis normalization; internal placeholders must not leak into visible HTML or fallback text.
 - Markdown preview assets and bundled tools are staged by build scripts rather than copied ad hoc at runtime.
 - Preview and export flows must treat stored content as source-of-truth input, not a side channel that mutates persisted data.
 

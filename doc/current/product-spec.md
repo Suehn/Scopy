@@ -2,10 +2,10 @@
 doc_type: spec
 status: active
 owner: maintainers
-last_reviewed: 2026-03-25
+last_reviewed: 2026-04-24
 canonical: true
 related_versions:
-  - v0.64
+  - v0.7.2
 ---
 
 # Current Requirements
@@ -14,7 +14,7 @@ This document is the active requirements baseline for Scopy. Historical planning
 
 ## Reference State
 
-- Reference release: `v0.64`
+- Reference release: `v0.7.2`
 - Source of truth for current version metadata: [../meta/release-current.yml](../meta/release-current.yml)
 - Source of truth for development and implementation workflow: [development-guide.md](./development-guide.md)
 
@@ -55,7 +55,7 @@ Scopy is a native macOS clipboard manager for users who need durable clipboard h
 ### Preview, Media, And Export
 
 - Provide hover previews for text, images, and files.
-- Provide Markdown/LaTeX rendering and export-to-PNG.
+- Provide Markdown/LaTeX rendering with local CommonMark/GFM, footnotes, math, syntax highlighting, a safe HTML subset, and export-to-PNG.
 - Allow optional pngquant-based compression for newly ingested images and exported Markdown/LaTeX PNGs.
 - Show image thumbnails in the history list when enabled.
 
@@ -103,6 +103,7 @@ Scopy is a native macOS clipboard manager for users who need durable clipboard h
 - Copying from history must reproduce the stored content type as faithfully as the system pasteboard allows.
 - Cleanup, delete, and optimization paths must not remove or rewrite unrelated files.
 - File notes, image optimization, and export flows must not corrupt the underlying item model.
+- Markdown preview and PNG export should stay aligned for math, footnotes, syntax highlighting, and CJK punctuation-adjacent emphasis.
 - UI refactors must not silently change settings transaction semantics.
 
 ### Performance And UX

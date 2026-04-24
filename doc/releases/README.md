@@ -19,9 +19,9 @@ This page is the human-facing index for current release state. Automation should
 ## Current Release
 
 <!-- release-current:start -->
-- Version: `v0.7.1`
-- Date: `2026-03-26`
-- Release note: [v0.7.1](./history/v0.7.1.md)
+- Version: `v0.7.2`
+- Date: `2026-04-24`
+- Release note: [v0.7.2](./history/v0.7.2.md)
 - Changelog: [CHANGELOG.md](./CHANGELOG.md)
 - Profile doc: `none`
 <!-- release-current:end -->
@@ -29,6 +29,7 @@ This page is the human-facing index for current release state. Automation should
 ## Recent Releases
 
 <!-- release-recent:start -->
+- `2026-04-24` [v0.7.2](./history/v0.7.2.md) - Markdown CJK emphasis rendering stale async load guards thumbnail cache reset consistency and release version resolution are hardened
 - `2026-03-26` [v0.7.1](./history/v0.7.1.md) - Footnote superscripts and export syntax highlighting now stay aligned between preview release builds and PNG output
 - `2026-03-26` [v0.7.0](./history/v0.7.0.md) - Markdown preview and export now share richer CommonMark plus GFM footnotes math highlighting and long-export hardening
 - `2026-03-25` [v0.64](./history/v0.64.md) - Full-index warm-load latency collapsed to sub-second disk-cache hits with preview lifecycle and observability cleanup

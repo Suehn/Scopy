@@ -1,6 +1,6 @@
-version: v0.7.1
-date: 2026-03-26
-release_doc: doc/releases/history/v0.7.1.md
+version: v0.7.2
+date: 2026-04-24
+release_doc: doc/releases/history/v0.7.2.md
 release_index: doc/releases/README.md
 changelog_file: doc/releases/CHANGELOG.md
 profile_doc: null
@@ -8,8 +8,8 @@ runbook_doc: doc/current/release-runbook.md
 spec_doc: doc/current/product-spec.md
 development_doc: doc/current/development-guide.md
 architecture_doc: doc/current/architecture.md
-last_verified_at: 2026-03-26
-summary: Markdown export now preserves footnote superscripts and syntax highlighting more faithfully across preview release builds and PNG output
+last_verified_at: 2026-04-24
+summary: Markdown CJK emphasis rendering, stale async load guards, thumbnail cache reset consistency, and release version resolution are hardened
 verification:
   build: pass
   test_unit: pass

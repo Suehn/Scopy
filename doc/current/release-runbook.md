@@ -2,10 +2,10 @@
 doc_type: runbook
 status: active
 owner: maintainers
-last_reviewed: 2026-03-25
+last_reviewed: 2026-04-24
 canonical: true
 related_versions:
-  - v0.64
+  - v0.7.2
 ---
 
 # Release Runbook
@@ -28,6 +28,8 @@ related_versions:
 - `CFBundleShortVersionString = $(MARKETING_VERSION)`
 - `CFBundleVersion = $(CURRENT_PROJECT_VERSION)`
 - `scripts/version.sh` remains the build-time source for `MARKETING_VERSION` and `CURRENT_PROJECT_VERSION`.
+- For post-release commits after the tagged release commit, version injection should inherit the nearest reachable release tag. Do not infer the current release from highest version-sort order, because historical tags such as `v0.64` can sort after newer chronological releases such as `v0.7.1`.
+- Release packaging must use `scripts/version.sh --tag` as the single resolver for both injected version settings and the DMG filename; if they disagree, stop packaging.
 
 ## Release Steps
 

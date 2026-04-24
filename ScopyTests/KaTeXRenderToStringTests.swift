@@ -52,6 +52,55 @@ final class KaTeXRenderToStringTests: XCTestCase {
         XCTAssertTrue(html.contains("postMessage({ width: w, height: h"))
     }
 
+    func testCJKEmphasisNormalizerFixesTrailingPunctuationAdjacentToCJKText() throws {
+        let normalized = MarkdownCJKEmphasisNormalizer.normalize("**重要：**请注意")
+        guard let sentinel = normalized.renderSentinel else {
+            return XCTFail("Expected render sentinel for CJK emphasis normalization")
+        }
+
+        let html = try MarkdownItEngine.shared().render(normalized.markdown)
+        let stripped = MarkdownCJKEmphasisNormalizer.stripRenderSentinel(
+            from: html.trimmingCharacters(in: .whitespacesAndNewlines),
+            sentinel: sentinel
+        )
+        XCTAssertEqual(stripped, "<p><strong>重要：</strong>请注意</p>")
+    }
+
+    func testCJKEmphasisNormalizerFixesBracketWrappedStrongAdjacentToCJKText() throws {
+        let normalized = MarkdownCJKEmphasisNormalizer.normalize("这是**《重点》**内容")
+        guard let sentinel = normalized.renderSentinel else {
+            return XCTFail("Expected render sentinel for bracket-wrapped CJK emphasis")
+        }
+
+        let html = try MarkdownItEngine.shared().render(normalized.markdown)
+        let stripped = MarkdownCJKEmphasisNormalizer.stripRenderSentinel(
+            from: html.trimmingCharacters(in: .whitespacesAndNewlines),
+            sentinel: sentinel
+        )
+        XCTAssertEqual(stripped, "<p>这是<strong>《重点》</strong>内容</p>")
+    }
+
+    func testCJKEmphasisNormalizerSkipsInlineCodeAndFencedCode() {
+        let input = [
+            "普通 **重要：**请注意",
+            "",
+            "`**重要：**请注意`",
+            "",
+            "```md",
+            "**重要：**请注意",
+            "```"
+        ].joined(separator: "\n")
+
+        let normalized = MarkdownCJKEmphasisNormalizer.normalize(input)
+        guard let sentinel = normalized.renderSentinel else {
+            return XCTFail("Expected render sentinel for mixed markdown input")
+        }
+
+        XCTAssertTrue(normalized.markdown.contains("普通 **重要：\(sentinel)**请注意"))
+        XCTAssertTrue(normalized.markdown.contains("`**重要：**请注意`"))
+        XCTAssertTrue(normalized.markdown.contains("```md\n**重要：**请注意\n```"))
+    }
+
     func testMarkdownTableUsesHorizontalScrollWithBalancedWrapping() {
         let html = MarkdownHTMLRenderer.render(markdown: "| a | b |\n| --- | --- |\n| 1 | 2 |")
         XCTAssertTrue(html.contains("overflow-x: auto;"))
@@ -254,7 +303,7 @@ private final class KaTeXEngine {
             _ = exception
         }
 
-        let baseURL = try Self.markdownPreviewBaseURL()
+        let baseURL = try markdownPreviewBaseURL()
         let katexURL = baseURL.appendingPathComponent("katex.min.js", isDirectory: false)
         let mhchemURL = baseURL.appendingPathComponent("contrib/mhchem.min.js", isDirectory: false)
 
@@ -295,19 +344,72 @@ private final class KaTeXEngine {
         return s
     }
 
-    private static func markdownPreviewBaseURL() throws -> URL {
-        let fm = FileManager.default
-        var dir = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
-        for _ in 0..<12 {
-            let candidate = dir.appendingPathComponent("Scopy/Resources/MarkdownPreview", isDirectory: true)
-            let katex = candidate.appendingPathComponent("katex.min.js", isDirectory: false)
-            if fm.fileExists(atPath: katex.path) {
-                return candidate
-            }
-            let next = dir.deletingLastPathComponent()
-            if next.path == dir.path { break }
-            dir = next
-        }
-        throw NSError(domain: "ScopyTests", code: 6, userInfo: [NSLocalizedDescriptionKey: "Cannot locate Scopy/Resources/MarkdownPreview from test file path."])
+}
+
+private final class MarkdownItEngine {
+    private let context: JSContext
+
+    static func shared() throws -> MarkdownItEngine {
+        try MarkdownItEngine()
     }
+
+    private init() throws {
+        guard let context = JSContext() else {
+            throw NSError(domain: "ScopyTests", code: 7, userInfo: [NSLocalizedDescriptionKey: "Failed to create JSContext for markdown-it"])
+        }
+        self.context = context
+
+        context.exceptionHandler = { _, exception in
+            _ = exception
+        }
+
+        let baseURL = try markdownPreviewBaseURL()
+        let markdownItURL = baseURL.appendingPathComponent("contrib/markdown-it.min.js", isDirectory: false)
+        let source = try String(contentsOf: markdownItURL, encoding: .utf8)
+        context.evaluateScript(source)
+        if let exc = context.exception {
+            throw NSError(domain: "ScopyTests", code: 8, userInfo: [NSLocalizedDescriptionKey: "markdown-it JS exception: \(exc)"])
+        }
+    }
+
+    func render(_ markdown: String) throws -> String {
+        let markdownit = context.objectForKeyedSubscript("markdownit")
+        guard let markdownit, !markdownit.isUndefined else {
+            throw NSError(domain: "ScopyTests", code: 9, userInfo: [NSLocalizedDescriptionKey: "markdown-it not available in JSContext"])
+        }
+
+        let options = JSValue(newObjectIn: context)
+        options?.setValue(false, forProperty: "html")
+        options?.setValue(true, forProperty: "linkify")
+        options?.setValue(true, forProperty: "typographer")
+        options?.setValue(true, forProperty: "breaks")
+
+        let renderer = markdownit.call(withArguments: [options as Any])
+        let result = renderer?.invokeMethod("render", withArguments: [markdown])
+        if let exc = context.exception {
+            context.exception = nil
+            throw NSError(domain: "ScopyTests", code: 10, userInfo: [NSLocalizedDescriptionKey: "markdown-it render exception: \(exc)"])
+        }
+
+        guard let html = result?.toString(), !html.isEmpty else {
+            throw NSError(domain: "ScopyTests", code: 11, userInfo: [NSLocalizedDescriptionKey: "markdown-it returned empty HTML"])
+        }
+        return html
+    }
+}
+
+private func markdownPreviewBaseURL() throws -> URL {
+    let fm = FileManager.default
+    var dir = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+    for _ in 0..<12 {
+        let candidate = dir.appendingPathComponent("Scopy/Resources/MarkdownPreview", isDirectory: true)
+        let katex = candidate.appendingPathComponent("katex.min.js", isDirectory: false)
+        if fm.fileExists(atPath: katex.path) {
+            return candidate
+        }
+        let next = dir.deletingLastPathComponent()
+        if next.path == dir.path { break }
+        dir = next
+    }
+    throw NSError(domain: "ScopyTests", code: 6, userInfo: [NSLocalizedDescriptionKey: "Cannot locate Scopy/Resources/MarkdownPreview from test file path."])
 }
