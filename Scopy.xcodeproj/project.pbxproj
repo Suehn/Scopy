@@ -565,6 +565,13 @@
 			remoteGlobalIDString = 9FE7B01C9C96A9A5A0ACFA78;
 			remoteInfo = ScopyTestHost;
 		};
+		758654CF8038B5B7D8BB2D1B /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 881EAC4E17987F3E27B9F996 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 90B6CBB50728B252BCF53636;
+			remoteInfo = Scopy;
+		};
 		D11981CE26BB42085EF77ACB /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 881EAC4E17987F3E27B9F996 /* Project object */;
@@ -1260,6 +1267,7 @@
 			buildRules = (
 			);
 			dependencies = (
+				3C71D3E903E4C30CA84C39C0 /* PBXTargetDependency */,
 				0838BDCA7C5E382C9A95B379 /* PBXTargetDependency */,
 			);
 			name = ScopyTSanTests;
@@ -2131,6 +2139,11 @@
 			isa = PBXTargetDependency;
 			target = 9FE7B01C9C96A9A5A0ACFA78 /* ScopyTestHost */;
 			targetProxy = 56FFB96533A3459F239CD4F9 /* PBXContainerItemProxy */;
+		};
+		3C71D3E903E4C30CA84C39C0 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 90B6CBB50728B252BCF53636 /* Scopy */;
+			targetProxy = 758654CF8038B5B7D8BB2D1B /* PBXContainerItemProxy */;
 		};
 		C4A110087A80918AC8CD2B5D /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;

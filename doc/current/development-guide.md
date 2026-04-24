@@ -152,7 +152,7 @@ Implication: if you touch settings behavior, preserve the Save/Cancel model and 
 - `make build`
 - `make test-unit`
 - `make test-strict` for concurrency-sensitive work
-- `make test-tsan` when the environment supports the hosted test path; the command auto-skips the known-bad `macOS 26.4 (25E241) + Xcode 26.2 (17C52)` hosted runtime combination
+- `make test-tsan` when the environment supports the hosted test path; the command auto-skips the known-bad `macOS 26.x + Xcode 26.2 (17C52)` hosted runtime combination
 - Hosted TSan CI lives in `.github/workflows/tsan.yml` on `macos-15 + Xcode 16.0`; treat that workflow as the supported real-coverage path until the local Apple runtime issue is resolved
 
 ### Performance Validation

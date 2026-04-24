@@ -11,6 +11,9 @@
 
 - Release workflow cask update steps now pass `version` and `sha256` into the Python updater explicitly, preventing post-release cask sync jobs from failing with missing shell variables.
 - Auto-tag workflow now skips post-release docs/cask commits when the release metadata tag already exists on an earlier release commit, avoiding false retag failures.
+- CI now reports build, unit, and strict-concurrency gates as separate jobs with uploaded logs, and the progressive prefilter tests use explicit refine delays to avoid hosted-runner timing flakes.
+- Hosted TSan now builds the `Scopy` app module before compiling the TSan test bundle, keeping `@testable import Scopy` available under the dedicated test-host scheme.
+- Local `make test-tsan` now skips the known-bad `macOS 26.x + Xcode 26.2 (17C52)` hosted runtime combination while keeping Hosted TSan CI on `macos-15`.
 - Repository cask metadata was synced to `v0.7.2` after release publication.
 
 ## [v0.7.2] - 2026-04-24

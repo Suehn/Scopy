@@ -51,7 +51,7 @@ related_versions:
 ## Verification Expectations
 
 - Baseline build/tests: `make build`, `make test-unit`
-- Concurrency-sensitive changes: `make test-strict`, and `make test-tsan` when the environment permits; on the known-bad `macOS 26.4 (25E241) + Xcode 26.2 (17C52)` combo the command skips because Apple hosted TSan crashes before test bootstrap, while the supported real-coverage path runs in Hosted TSan CI on `macos-15`
+- Concurrency-sensitive changes: `make test-strict`, and `make test-tsan` when the environment permits; on the known-bad `macOS 26.x + Xcode 26.2 (17C52)` combo the command skips because Apple hosted TSan crashes before test bootstrap, while the supported real-coverage path runs in Hosted TSan CI on `macos-15`
 - Perf-sensitive changes:
   - `make test-snapshot-perf-release`
   - `make perf-search-warm-load`

@@ -337,6 +337,7 @@ targets:
         BUNDLE_LOADER: "$(TEST_HOST)"
         OTHER_SWIFT_FLAGS: "$(inherited) -DSCOPY_TSAN_TESTS"
     dependencies:
+      - target: Scopy
       - target: ScopyTestHost
       - sdk: libsqlite3.tbd
       - package: ScopyKit

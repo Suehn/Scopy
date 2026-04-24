@@ -185,6 +185,7 @@ final class AppStateTests: XCTestCase {
     }
 
     func testProgressiveRefineUpdatesAfterPrefilter() async throws {
+        appState.historyViewModel.configureTiming(.testsWithRefineDelay(500_000_000))
         mockService.setItemCount(100)
         await appState.load()
         mockService.resetSearchCallCount()
@@ -204,6 +205,7 @@ final class AppStateTests: XCTestCase {
     }
 
     func testLoadMoreAfterPrefilterForcesFullSearch() async throws {
+        appState.historyViewModel.configureTiming(.testsWithRefineDelay(5_000_000_000))
         mockService.setItemCount(120)
         await appState.load()
         mockService.resetSearchCallCount()
@@ -645,6 +647,17 @@ final class AppStateTests: XCTestCase {
         await appState.updateSettings(newSettings)
 
         XCTAssertEqual(appState.settings.maxItems, 5000)
+    }
+}
+
+private extension HistoryViewModel.Timing {
+    static func testsWithRefineDelay(_ refineDelayNs: UInt64) -> HistoryViewModel.Timing {
+        HistoryViewModel.Timing(
+            searchDebounceNs: 20_000_000,
+            refineShortQueryDelayNs: refineDelayNs,
+            refineLongQueryDelayNs: refineDelayNs,
+            recentAppsRefreshDelayNs: 20_000_000
+        )
     }
 }
 
