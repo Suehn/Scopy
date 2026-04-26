@@ -205,6 +205,16 @@ print("ok")
         XCTAssertFalse(html.contains("<em>u</em>"))
     }
 
+    func testMathPlaceholderDoesNotCollideWithLiteralText() {
+        let literal = "SCOPYMATHPLACEHOLDER0X"
+        let protected = MathProtector.protectMath(in: "\(literal) and $x_1$")
+        let restored = MathProtector.restoreMath(in: protected.markdown, placeholders: protected.placeholders, escape: { $0 })
+
+        XCTAssertTrue(restored.contains(literal))
+        XCTAssertTrue(restored.contains("$x_1$"))
+        XCTAssertFalse(protected.placeholders.contains { $0.placeholder == literal })
+    }
+
     func testAlignEnvironmentSurvivesMarkdownParsing() {
         let input = """
         下面是一个公式块：

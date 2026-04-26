@@ -17,7 +17,7 @@ enum MarkdownSafeHTMLSubset {
     }
 
     static func extract(from markdown: String) -> MarkdownSafeHTMLExtractionResult {
-        Extractor().process(markdown)
+        Extractor(source: markdown).process(markdown)
     }
 
     private final class Extractor {
@@ -25,9 +25,17 @@ enum MarkdownSafeHTMLSubset {
         private let detailsRegex = try! NSRegularExpression(pattern: "<details(\\s+open)?\\s*>([\\s\\S]*?)</details>", options: [.caseInsensitive])
         private let summaryRegex = try! NSRegularExpression(pattern: "<summary\\s*>([\\s\\S]*?)</summary>", options: [.caseInsensitive])
         private let inlineTagRegex = try! NSRegularExpression(pattern: "<(u|kbd|mark|sub|sup)>([\\s\\S]*?)</\\1>", options: [.caseInsensitive])
+        private let placeholderSalt: String
+        private let placeholderPrefix: String
 
         private var counter = 0
         private var replacements: [String: Replacement] = [:]
+
+        init(source: String) {
+            let salt = Self.makePlaceholderSalt(avoiding: source)
+            self.placeholderSalt = salt
+            self.placeholderPrefix = "SCOPYSAFEHTMLPLACEHOLDER\(salt)"
+        }
 
         func process(_ source: String) -> MarkdownSafeHTMLExtractionResult {
             let protectedBlocks = protectFencedCodeBlocks(in: source)
@@ -111,8 +119,8 @@ enum MarkdownSafeHTMLSubset {
                   let wholeRange = Range(match.range(at: 0), in: working),
                   let bodyRange = Range(match.range(at: 2), in: working) {
                 let originalWorking = working
-                let originalFallback = fallback
                 let inner = String(working[bodyRange])
+                let originalBlock = String(originalWorking[wholeRange])
                 let summary: String
                 let summaryFallback: String
                 let body: String
@@ -153,8 +161,8 @@ enum MarkdownSafeHTMLSubset {
                     .filter { !$0.isEmpty }
                     .joined(separator: "\n\n")
 
-                if let fallbackWholeRange = Range(match.range(at: 0), in: originalFallback) {
-                    fallback = originalFallback.replacingCharacters(in: fallbackWholeRange, with: fallbackText)
+                if let fallbackWholeRange = fallback.range(of: originalBlock) {
+                    fallback.replaceSubrange(fallbackWholeRange, with: fallbackText)
                 }
                 working = originalWorking.replacingCharacters(in: wholeRange, with: "\n\n\(token)\n\n")
             }
@@ -215,7 +223,21 @@ enum MarkdownSafeHTMLSubset {
 
         private func nextToken(prefix: String = "SCOPYSAFEHTMLPLACEHOLDER") -> String {
             defer { counter += 1 }
-            return "\(prefix)\(counter)X"
+            if prefix == "SCOPYSAFEHTMLPLACEHOLDER" {
+                return "\(placeholderPrefix)\(counter)X"
+            }
+            return "\(prefix)\(placeholderSalt)\(counter)X"
+        }
+
+        private static func makePlaceholderSalt(avoiding source: String) -> String {
+            for _ in 0..<8 {
+                let salt = UUID().uuidString.replacingOccurrences(of: "-", with: "")
+                if !source.contains("SCOPYSAFEHTMLPLACEHOLDER\(salt)"),
+                   !source.contains("SCOPYSAFECODE\(salt)") {
+                    return salt
+                }
+            }
+            return UUID().uuidString.replacingOccurrences(of: "-", with: "")
         }
     }
 }

@@ -827,6 +827,87 @@ final class ExportMarkdownPNGUITests: XCTestCase {
         )
     }
 
+    func testAutoExportTallDefaultPathBypassesMultiPagePDFBlankTop() throws {
+        let htmlPath = "/tmp/scopy_uitest_export_tall_default_pdf_bypass.html"
+        let dumpPath = "/tmp/scopy_uitest_export_tall_default_pdf_bypass.png"
+        let errorPath = "/tmp/scopy_uitest_export_tall_default_pdf_bypass_error.txt"
+        let pdfPath = "/tmp/scopy_uitest_export_tall_default_pdf_bypass.pdf"
+
+        try? FileManager.default.removeItem(atPath: htmlPath)
+        try? FileManager.default.removeItem(atPath: dumpPath)
+        try? FileManager.default.removeItem(atPath: errorPath)
+        try? FileManager.default.removeItem(atPath: pdfPath)
+
+        let stripeColors = [
+            "#111111", "#b91c1c", "#1d4ed8", "#166534",
+            "#7c3aed", "#c2410c", "#0f766e", "#be123c"
+        ]
+        let stripeHTML = (0..<100).map { index in
+            let color = stripeColors[index % stripeColors.count]
+            return "<div class=\"stripe\" style=\"background:\(color)\">\(index)</div>"
+        }.joined(separator: "\n")
+
+        let html = """
+        <!doctype html>
+        <html>
+          <head>
+            <meta charset="utf-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1">
+            <style>
+              :root { color-scheme: light; }
+              html, body { margin: 0; padding: 0; background: #fff; }
+              #content { box-sizing: border-box; width: 100%; margin: 0; padding: 0; background: #fff; }
+              .stripe {
+                height: 180px;
+                width: 100%;
+                margin: 0;
+                padding: 0;
+                color: rgba(255,255,255,0.92);
+                font: 700 48px/180px -apple-system-body;
+                text-align: center;
+              }
+            </style>
+          </head>
+          <body>
+            <div id="content">
+              \(stripeHTML)
+            </div>
+          </body>
+        </html>
+        """
+        try Data(html.utf8).write(to: URL(fileURLWithPath: htmlPath), options: [.atomic])
+
+        let app = XCUIApplication()
+        app.launchArguments = ["--uitesting"]
+        app.launchEnvironment["SCOPY_UITEST_AUTO_EXPORT_MARKDOWN"] = "1"
+        app.launchEnvironment["SCOPY_UITEST_AUTO_EXPORT_HTML_PATH"] = htmlPath
+        app.launchEnvironment["SCOPY_UITEST_ENABLE_PDF_EXPORT"] = "1"
+        app.launchEnvironment["SCOPY_EXPORT_PDF_DUMP_PATH"] = pdfPath
+        app.launchEnvironment["SCOPY_EXPORT_DUMP_PATH"] = dumpPath
+        app.launchEnvironment["SCOPY_EXPORT_ERROR_DUMP_PATH"] = errorPath
+        app.launch()
+        defer { app.terminate() }
+
+        waitForExport(dumpPath: dumpPath, errorPath: errorPath, timeoutSeconds: 40)
+        try assertNoExportError(errorPath: errorPath)
+
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: pdfPath),
+            "Expected tall automatic export to bypass the multi-page PDF rasterizer"
+        )
+
+        let props = try readPNGProperties(atPath: dumpPath)
+        XCTAssertEqual(props.width, 1080)
+        XCTAssertGreaterThan(props.height, 24_000)
+        XCTAssertLessThanOrEqual(topWhitespaceRows(props.cgImage), 8)
+        XCTAssertLessThanOrEqual(bottomWhitespaceRows(props.cgImage), 8)
+        XCTAssertLessThanOrEqual(
+            maxInteriorMostlyWhiteRun(props.cgImage),
+            2,
+            "Expected tall default export to stay continuous instead of producing a large blank upper region"
+        )
+    }
+
     func testAutoExportTallStripedContentDoesNotShowInternalWhiteSeams() throws {
         let htmlPath = "/tmp/scopy_uitest_export_tall_stripes.html"
         let dumpPath = "/tmp/scopy_uitest_export_tall_stripes.png"

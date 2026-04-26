@@ -1,6 +1,6 @@
-version: v0.7.2
-date: 2026-04-24
-release_doc: doc/releases/history/v0.7.2.md
+version: v0.7.3
+date: 2026-04-26
+release_doc: doc/releases/history/v0.7.3.md
 release_index: doc/releases/README.md
 changelog_file: doc/releases/CHANGELOG.md
 profile_doc: null
@@ -8,12 +8,12 @@ runbook_doc: doc/current/release-runbook.md
 spec_doc: doc/current/product-spec.md
 development_doc: doc/current/development-guide.md
 architecture_doc: doc/current/architecture.md
-last_verified_at: 2026-04-24
-summary: Markdown CJK emphasis rendering, stale async load guards, thumbnail cache reset consistency, and release version resolution are hardened
+last_verified_at: 2026-04-26
+summary: Tall Markdown export PDF bypass, placeholder collision protection, safe anchor navigation, and release CI hardening
 verification:
   build: pass
   test_unit: pass
   test_strict: pass
-  test_tsan: not_run
+  test_tsan: skipped
   test_perf_heavy: not_run
   test_snapshot_perf_release: not_run

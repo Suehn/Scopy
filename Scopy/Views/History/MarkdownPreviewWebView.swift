@@ -106,13 +106,47 @@ private enum MarkdownPreviewMessageParser {
 }
 
 enum MarkdownPreviewNavigationPolicy {
-    static func shouldAllow(navigationType: WKNavigationType, targetFrameIsNil: Bool, url: URL?) -> Bool {
+    static func shouldAllow(
+        navigationType: WKNavigationType,
+        targetFrameIsNil: Bool,
+        url: URL?,
+        currentURL: URL? = nil
+    ) -> Bool {
         if targetFrameIsNil { return false }
-        if navigationType == .linkActivated { return false }
+        if navigationType == .linkActivated {
+            return isSameDocumentFragmentNavigation(url: url, currentURL: currentURL)
+        }
         if let scheme = url?.scheme?.lowercased(), scheme == "http" || scheme == "https" {
             return false
         }
         return true
+    }
+
+    private static func isSameDocumentFragmentNavigation(url: URL?, currentURL: URL?) -> Bool {
+        guard let target = url,
+              let fragment = target.fragment,
+              !fragment.isEmpty
+        else {
+            return false
+        }
+
+        if target.scheme == nil, target.host == nil, target.path.isEmpty {
+            return true
+        }
+
+        guard let current = currentURL,
+              let targetWithoutFragment = removingFragment(from: target),
+              let currentWithoutFragment = removingFragment(from: current)
+        else {
+            return false
+        }
+        return targetWithoutFragment == currentWithoutFragment
+    }
+
+    private static func removingFragment(from url: URL) -> URL? {
+        var components = URLComponents(url: url, resolvingAgainstBaseURL: false)
+        components?.fragment = nil
+        return components?.url
     }
 }
 
@@ -280,7 +314,8 @@ struct MarkdownPreviewWebView: NSViewRepresentable {
             let shouldAllow = MarkdownPreviewNavigationPolicy.shouldAllow(
                 navigationType: navigationAction.navigationType,
                 targetFrameIsNil: navigationAction.targetFrame == nil,
-                url: navigationAction.request.url
+                url: navigationAction.request.url,
+                currentURL: webView.url
             )
             decisionHandler(shouldAllow ? .allow : .cancel)
         }
@@ -455,7 +490,8 @@ final class MarkdownPreviewWebViewController: NSObject, ObservableObject, WKNavi
         let shouldAllow = MarkdownPreviewNavigationPolicy.shouldAllow(
             navigationType: navigationAction.navigationType,
             targetFrameIsNil: navigationAction.targetFrame == nil,
-            url: navigationAction.request.url
+            url: navigationAction.request.url,
+            currentURL: webView.url
         )
         decisionHandler(shouldAllow ? .allow : .cancel)
     }

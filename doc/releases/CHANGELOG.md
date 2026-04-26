@@ -7,6 +7,22 @@
 
 ## [Unreleased]
 
+### Notes
+
+- No unreleased entries.
+
+## [v0.7.3] - 2026-04-26
+
+### Markdown/Export
+
+- Tall Markdown/HTML PNG export now bypasses multi-page PDF rasterization and uses the tiled snapshot path, preventing long notes from rendering with a large blank upper region.
+
+### Markdown/Preview
+
+- Math and safe-HTML placeholders now use salted per-document tokens and literal restoration, preventing user text that looks like an internal placeholder from being rewritten.
+- Same-document fragment link activation is now allowed for preview footnotes and anchors, while HTTP/HTTPS, targetless, and cross-document activations remain blocked.
+- Safe HTML fallback extraction now preserves multiple `<details>` blocks in order instead of drifting when earlier fallback text changes length.
+
 ### Build/Release
 
 - Release workflow cask update steps now pass `version` and `sha256` into the Python updater explicitly, preventing post-release cask sync jobs from failing with missing shell variables.

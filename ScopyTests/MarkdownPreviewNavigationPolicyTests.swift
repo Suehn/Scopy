@@ -24,6 +24,36 @@ final class MarkdownPreviewNavigationPolicyTests: XCTestCase {
         )
     }
 
+    func testAllowsSameDocumentFragmentLinkActivation() {
+        XCTAssertTrue(
+            MarkdownPreviewNavigationPolicy.shouldAllow(
+                navigationType: .linkActivated,
+                targetFrameIsNil: false,
+                url: URL(string: "file:///tmp/test.html#fn1"),
+                currentURL: URL(string: "file:///tmp/test.html")
+            )
+        )
+        XCTAssertTrue(
+            MarkdownPreviewNavigationPolicy.shouldAllow(
+                navigationType: .linkActivated,
+                targetFrameIsNil: false,
+                url: URL(string: "#fn1"),
+                currentURL: URL(string: "file:///tmp/test.html")
+            )
+        )
+    }
+
+    func testCancelsCrossDocumentFragmentLinkActivation() {
+        XCTAssertFalse(
+            MarkdownPreviewNavigationPolicy.shouldAllow(
+                navigationType: .linkActivated,
+                targetFrameIsNil: false,
+                url: URL(string: "file:///tmp/other.html#fn1"),
+                currentURL: URL(string: "file:///tmp/test.html")
+            )
+        )
+    }
+
     func testCancelsHTTPAndHTTPSNavigation() {
         XCTAssertFalse(
             MarkdownPreviewNavigationPolicy.shouldAllow(
@@ -41,7 +71,7 @@ final class MarkdownPreviewNavigationPolicyTests: XCTestCase {
         )
     }
 
-    func testAllowsFileAndAnchorNavigation() {
+    func testAllowsFileAndAnchorProgrammaticNavigation() {
         XCTAssertTrue(
             MarkdownPreviewNavigationPolicy.shouldAllow(
                 navigationType: .other,

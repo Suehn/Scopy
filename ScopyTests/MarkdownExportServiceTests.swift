@@ -93,7 +93,8 @@ final class MarkdownExportServiceTests: XCTestCase {
     }
 
     func testDebugBypassesPDFForVeryTallContent() {
-        XCTAssertFalse(MarkdownExportService.debugShouldBypassPDFForVeryTallContent(heightPoints: 29_000))
+        XCTAssertFalse(MarkdownExportService.debugShouldBypassPDFForVeryTallContent(heightPoints: 14_400))
+        XCTAssertTrue(MarkdownExportService.debugShouldBypassPDFForVeryTallContent(heightPoints: 14_401))
         XCTAssertTrue(MarkdownExportService.debugShouldBypassPDFForVeryTallContent(heightPoints: 29_001))
     }
 

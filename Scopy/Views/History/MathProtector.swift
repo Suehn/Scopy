@@ -33,6 +33,7 @@ enum MathProtector {
 
         var placeholders: [(String, String)] = []
         placeholders.reserveCapacity(16)
+        let placeholderPrefix = makePlaceholderPrefix(avoiding: markdown)
 
         var outputLines: [String] = []
         outputLines.reserveCapacity(markdown.split(separator: "\n", omittingEmptySubsequences: false).count)
@@ -93,7 +94,7 @@ enum MathProtector {
 
                 if line.contains("\\end{\(environmentName)}") {
                     let original = normalizeMathSegment(environmentLines.joined(separator: "\n"))
-                    let placeholder = nextPlaceholder(index: placeholders.count)
+                    let placeholder = nextPlaceholder(index: placeholders.count, prefix: placeholderPrefix)
                     placeholders.append((placeholder, original))
                     let indent = String(repeating: " ", count: environmentIndentSpaces)
                     outputLines.append(indent + placeholder)
@@ -120,7 +121,7 @@ enum MathProtector {
                     environmentUTF16Count += line.utf16.count
                     if line.contains("\\end{\(environmentName)}") {
                         let original = normalizeMathSegment(environmentLines.joined(separator: "\n"))
-                        let placeholder = nextPlaceholder(index: placeholders.count)
+                        let placeholder = nextPlaceholder(index: placeholders.count, prefix: placeholderPrefix)
                         placeholders.append((placeholder, original))
                         let indent = String(repeating: " ", count: environmentIndentSpaces)
                         outputLines.append(indent + placeholder)
@@ -143,7 +144,7 @@ enum MathProtector {
                     displayDollarLines.append(line)
                     displayDollarUTF16Count += line.utf16.count
                     let original = normalizeMathSegment(displayDollarLines.joined(separator: "\n"))
-                    let placeholder = nextPlaceholder(index: placeholders.count)
+                    let placeholder = nextPlaceholder(index: placeholders.count, prefix: placeholderPrefix)
                     placeholders.append((placeholder, original))
                     // Emit with clamped indentation (<= 3 spaces) to avoid Markdown treating it as an indented code block.
                     let indent = String(repeating: " ", count: min(3, max(0, displayDollarIndentSpaces)))
@@ -180,7 +181,7 @@ enum MathProtector {
             }
 
             line = MarkdownCodeSkipper.processInlineCode(in: line) { segment in
-                protectMathInPlainTextSegment(segment, placeholders: &placeholders)
+                protectMathInPlainTextSegment(segment, placeholders: &placeholders, placeholderPrefix: placeholderPrefix)
             }
             outputLines.append(line)
         }
@@ -217,9 +218,20 @@ enum MathProtector {
         line.trimmingCharacters(in: .whitespacesAndNewlines) == "$$"
     }
 
-    private static func nextPlaceholder(index: Int) -> String {
+    private static func nextPlaceholder(index: Int, prefix: String) -> String {
         // Alnum only to avoid Markdown emphasis parsing.
-        "SCOPYMATHPLACEHOLDER\(index)X"
+        "\(prefix)\(index)X"
+    }
+
+    private static func makePlaceholderPrefix(avoiding markdown: String) -> String {
+        for _ in 0..<8 {
+            let salt = UUID().uuidString.replacingOccurrences(of: "-", with: "")
+            let prefix = "SCOPYMATHPLACEHOLDER\(salt)"
+            if !markdown.contains(prefix) {
+                return prefix
+            }
+        }
+        return "SCOPYMATHPLACEHOLDER\(UUID().uuidString.replacingOccurrences(of: "-", with: ""))"
     }
 
     private static func resolveNestedPlaceholders(_ placeholders: [(String, String)]) -> [(String, String)] {
@@ -264,7 +276,11 @@ enum MathProtector {
         return resolved
     }
 
-    private static func protectMathInPlainTextSegment(_ text: String, placeholders: inout [(String, String)]) -> String {
+    private static func protectMathInPlainTextSegment(
+        _ text: String,
+        placeholders: inout [(String, String)],
+        placeholderPrefix: String
+    ) -> String {
         // Fast path.
         guard text.contains("$") || text.contains("\\") else { return text }
 
@@ -274,18 +290,18 @@ enum MathProtector {
         // 1) Protect environments (multi-line variants are usually already line-wrapped from OCR/PDF extract).
         // We do this before $ detection so environments inside $...$ are handled by $ protection.
         for name in MathEnvironmentSupport.supportedEnvironmentNamesInOrder {
-            out = protectEnvironment(out, name: name, placeholders: &placeholders)
+            out = protectEnvironment(out, name: name, placeholders: &placeholders, placeholderPrefix: placeholderPrefix)
         }
 
         // 2) Protect \(...\) and \[...\]
-        out = protectDelimited(out, left: "\\(", right: "\\)", maxInnerUTF16: maxInlineMathUTF16Count, placeholders: &placeholders)
-        out = protectDelimited(out, left: "\\[", right: "\\]", maxInnerUTF16: maxBlockMathUTF16Count, placeholders: &placeholders)
+        out = protectDelimited(out, left: "\\(", right: "\\)", maxInnerUTF16: maxInlineMathUTF16Count, placeholders: &placeholders, placeholderPrefix: placeholderPrefix)
+        out = protectDelimited(out, left: "\\[", right: "\\]", maxInnerUTF16: maxBlockMathUTF16Count, placeholders: &placeholders, placeholderPrefix: placeholderPrefix)
 
         // 3) Protect $$...$$ (same line only here; multi-line $$ in plain-text segment is uncommon)
-        out = protectDollarMath(out, isBlock: true, maxInnerUTF16: maxBlockMathUTF16Count, placeholders: &placeholders)
+        out = protectDollarMath(out, isBlock: true, maxInnerUTF16: maxBlockMathUTF16Count, placeholders: &placeholders, placeholderPrefix: placeholderPrefix)
 
         // 4) Protect $...$
-        out = protectDollarMath(out, isBlock: false, maxInnerUTF16: maxInlineMathUTF16Count, placeholders: &placeholders)
+        out = protectDollarMath(out, isBlock: false, maxInnerUTF16: maxInlineMathUTF16Count, placeholders: &placeholders, placeholderPrefix: placeholderPrefix)
 
         return out
     }
@@ -392,10 +408,15 @@ enum MathProtector {
         }
     }
 
-    private static func protectEnvironment(_ text: String, name: String, placeholders: inout [(String, String)]) -> String {
+    private static func protectEnvironment(
+        _ text: String,
+        name: String,
+        placeholders: inout [(String, String)],
+        placeholderPrefix: String
+    ) -> String {
         let left = "\\begin{\(name)}"
         let right = "\\end{\(name)}"
-        return protectDelimited(text, left: left, right: right, maxInnerUTF16: maxBlockMathUTF16Count, placeholders: &placeholders)
+        return protectDelimited(text, left: left, right: right, maxInnerUTF16: maxBlockMathUTF16Count, placeholders: &placeholders, placeholderPrefix: placeholderPrefix)
     }
 
     private static func protectDelimited(
@@ -403,7 +424,8 @@ enum MathProtector {
         left: String,
         right: String,
         maxInnerUTF16: Int,
-        placeholders: inout [(String, String)]
+        placeholders: inout [(String, String)],
+        placeholderPrefix: String
     ) -> String {
         guard text.contains(left), text.contains(right) else { return text }
 
@@ -434,7 +456,7 @@ enum MathProtector {
             }
 
             let original = normalizeMathSegment(String(text[start..<endRange.upperBound]))
-            let placeholder = nextPlaceholder(index: placeholders.count)
+            let placeholder = nextPlaceholder(index: placeholders.count, prefix: placeholderPrefix)
             placeholders.append((placeholder, original))
             result += placeholder
             i = endRange.upperBound
@@ -447,7 +469,8 @@ enum MathProtector {
         _ text: String,
         isBlock: Bool,
         maxInnerUTF16: Int,
-        placeholders: inout [(String, String)]
+        placeholders: inout [(String, String)],
+        placeholderPrefix: String
     ) -> String {
         let delimiter = isBlock ? "$$" : "$"
         guard text.contains(delimiter) else { return text }
@@ -494,7 +517,7 @@ enum MathProtector {
                     original = "$$\\begin{aligned} \(innerString) \\end{aligned}$$"
                 }
             }
-            let placeholder = nextPlaceholder(index: placeholders.count)
+            let placeholder = nextPlaceholder(index: placeholders.count, prefix: placeholderPrefix)
             placeholders.append((placeholder, normalizeMathSegment(original)))
             result += placeholder
             i = endAfter

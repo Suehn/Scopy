@@ -53,4 +53,45 @@ final class MarkdownSafeHTMLSubsetTests: XCTestCase {
         XCTAssertTrue(result.fallbackMarkdown.contains("<u>inside fence</u>"))
         XCTAssertEqual(result.replacements.count, 1)
     }
+
+    func testExtractDetailsFallbackDoesNotDriftAcrossMultipleBlocks() {
+        let input = """
+Intro
+
+<details>
+<summary>First</summary>
+First body with a much longer fallback payload.
+</details>
+
+Between
+
+<details open>
+<summary>Second</summary>
+Second body.
+</details>
+
+Outro
+"""
+
+        let result = MarkdownSafeHTMLSubset.extract(from: input)
+
+        XCTAssertTrue(result.fallbackMarkdown.contains("First body with a much longer fallback payload."))
+        XCTAssertTrue(result.fallbackMarkdown.contains("Second body."))
+        XCTAssertLessThan(
+            result.fallbackMarkdown.range(of: "First")?.lowerBound ?? result.fallbackMarkdown.endIndex,
+            result.fallbackMarkdown.range(of: "Second")?.lowerBound ?? result.fallbackMarkdown.startIndex
+        )
+        XCTAssertFalse(result.fallbackMarkdown.contains("<details"))
+        XCTAssertEqual(result.replacements.count, 2)
+    }
+
+    func testExtractSafeHTMLPlaceholderDoesNotCollideWithLiteralText() throws {
+        let literal = "SCOPYSAFEHTMLPLACEHOLDER0X"
+        let result = MarkdownSafeHTMLSubset.extract(from: "\(literal) <u>under</u>")
+        let token = try XCTUnwrap(result.replacements.keys.first)
+
+        XCTAssertNotEqual(token, literal)
+        XCTAssertTrue(result.markdown.contains(literal))
+        XCTAssertTrue(result.markdown.contains(token))
+    }
 }

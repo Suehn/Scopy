@@ -841,6 +841,11 @@ enum MarkdownHTMLRenderer {
               }
               function applySafeHTMLReplacements(html, md) {
                 if (!html) { return html; }
+                function escapeRegExp(text) {
+                  return String(text || '')
+                    .replace(/[\\\\^.*+?()[\\]{}|]/g, '\\\\$&')
+                    .replace(/\\$/g, '\\\\$&');
+                }
                 function renderSafeHTMLToken(token) {
                   var item = safeHTMLMap[token];
                   if (!item) { return token; }
@@ -856,12 +861,17 @@ enum MarkdownHTMLRenderer {
                   return token;
                 }
 
-                html = html.replace(/<p>\\s*(SCOPYSAFEHTMLPLACEHOLDER\\d+X)\\s*<\\/p>/g, function (_, token) {
-                  return renderSafeHTMLToken(token);
-                });
-                return html.replace(/SCOPYSAFEHTMLPLACEHOLDER\\d+X/g, function (token) {
-                  return renderSafeHTMLToken(token);
-                });
+                var keys = Object.keys(safeHTMLMap || {}).sort(function (a, b) { return b.length - a.length; });
+                for (var i = 0; i < keys.length; i++) {
+                  var key = keys[i];
+                  var paragraphPattern = new RegExp('<p>\\\\s*' + escapeRegExp(key) + '\\\\s*<\\\\/p>', 'g');
+                  html = html.replace(paragraphPattern, renderSafeHTMLToken(key));
+                }
+                for (var j = 0; j < keys.length; j++) {
+                  var token = keys[j];
+                  html = html.split(token).join(renderSafeHTMLToken(token));
+                }
+                return html;
               }
 
               var mdOptions = \(featureSet.markdownItOptionsJSLiteral);
@@ -875,7 +885,9 @@ enum MarkdownHTMLRenderer {
               var src = \(markdownLiteral);
               var html = md.render(src);
               var map = \(placeholdersLiteral);
-              html = html.replace(/SCOPYMATHPLACEHOLDER\\d+X/g, function (m) { return map[m] || m; });
+              Object.keys(map || {}).sort(function (a, b) { return b.length - a.length; }).forEach(function (key) {
+                html = html.split(key).join(map[key] || key);
+              });
               html = applySafeHTMLReplacements(html, md);
               if (renderSentinel) {
                 html = html.split(renderSentinel).join('');

@@ -224,7 +224,7 @@ public enum MarkdownExportService {
     }
 
     static func debugShouldBypassPDFForVeryTallContent(heightPoints: CGFloat) -> Bool {
-        heightPoints > MarkdownExportRenderConstants.maxSafePDFExportHeightPoints
+        MarkdownExportRenderConstants.shouldBypassPDFForHeight(heightPoints)
     }
 #endif
 }
@@ -236,7 +236,13 @@ private enum MarkdownExportRenderConstants {
     static let minSnapshotHeightPoints: CGFloat = 120
     static let defaultMaxInlineBitmapPixels: CGFloat = 60_000_000
     static let maxHeightBudgetMultiplier: CGFloat = 10
-    static let maxSafePDFExportHeightPoints: CGFloat = 29_000
+    static let maxAutomaticPDFExportHeightPoints: CGFloat = 14_400
+
+    static func shouldBypassPDFForHeight(_ heightPoints: CGFloat) -> Bool {
+        // WebKit/Quartz splits taller captures into multiple PDF pages. The tiled snapshot path is more reliable for
+        // scroll-order preservation in long exports, so keep automatic PDF export to single-page captures.
+        heightPoints > maxAutomaticPDFExportHeightPoints
+    }
 
     // Raise the default height budget 10x while keeping extra-long exports off the heap.
     static var maxTotalPixels: CGFloat {
@@ -823,9 +829,10 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
         let projectedOutputTotalPixels = max(1, targetWidthPixels * projectedOutputHeightPixels)
         let shouldBypassPDFFromRasterBudget = !pdfExplicitlyRequired
             && projectedOutputTotalPixels > MarkdownExportRenderConstants.maxInMemoryBitmapPixels + 0.5
+        let shouldBypassPDFFromHeight = MarkdownExportRenderConstants.shouldBypassPDFForHeight(scrollHeightPoints)
         let shouldBypassPDFForVeryTallContent = !pdfExplicitlyRequired
             && (
-                scrollHeightPoints > MarkdownExportRenderConstants.maxSafePDFExportHeightPoints
+                shouldBypassPDFFromHeight
                 || shouldBypassPDFFromRasterBudget
             )
         let requiresPDFExportForResolution = outputScale > 1.001 && !shouldBypassPDFForVeryTallContent
@@ -841,8 +848,9 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
             return true
         }()
         if shouldBypassPDFForVeryTallContent {
+            let pdfBypassReason = shouldBypassPDFFromHeight ? "height" : "rasterBudget"
             MarkdownExportService.logger.info(
-                "Skipping PDF export and falling back to snapshot export. heightPt=\(scrollHeightPoints, privacy: .public) projectedPixels=\(projectedOutputTotalPixels, privacy: .public)"
+                "Skipping PDF export and falling back to snapshot export. reason=\(pdfBypassReason, privacy: .public) heightPt=\(scrollHeightPoints, privacy: .public) projectedPixels=\(projectedOutputTotalPixels, privacy: .public)"
             )
         }
         let requiresPDFExport = requiresPDFExportForResolution || pdfExplicitlyRequired
