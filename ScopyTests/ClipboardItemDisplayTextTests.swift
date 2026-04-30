@@ -77,6 +77,29 @@ final class ClipboardItemDisplayTextTests: XCTestCase {
         XCTAssertEqual(cachedMetadata, ClipboardItemDisplayText.shared.metadata(for: item))
     }
 
+    @MainActor
+    func testPresentationPrewarmCachesMarkdownCapabilityAndFilePreview() async {
+        let markdownItem = makeTextItem(plainText: "# Title\n\nBody")
+        let fileItem = makeFileItem(plainText: "/tmp/scopy-note.md", note: nil, fileSizeBytes: nil)
+
+        HistoryItemPresentationCache.shared.clearCaches()
+
+        XCTAssertNil(HistoryItemPresentationCache.shared.cachedMarkdownExportCapability(for: markdownItem))
+        XCTAssertNil(HistoryItemPresentationCache.shared.cachedFilePreview(for: fileItem))
+
+        let task = HistoryItemPresentationCache.shared.prewarm(items: [markdownItem, fileItem])
+        await task?.value
+
+        XCTAssertEqual(HistoryItemPresentationCache.shared.cachedMarkdownExportCapability(for: markdownItem), true)
+
+        let cachedFilePreview = HistoryItemPresentationCache.shared.cachedFilePreview(for: fileItem)
+        XCTAssertEqual(cachedFilePreview?.path, "/tmp/scopy-note.md")
+        XCTAssertEqual(cachedFilePreview?.isMarkdown, true)
+
+        XCTAssertTrue(HistoryItemPresentationCache.shared.canExportPNG(for: markdownItem, filePreview: nil))
+        XCTAssertTrue(HistoryItemPresentationCache.shared.canExportPNG(for: fileItem, filePreview: cachedFilePreview))
+    }
+
     private func makeTextItem(plainText: String) -> ClipboardItemDTO {
         ClipboardItemDTO(
             id: UUID(),

@@ -1,6 +1,7 @@
 import AppKit
 import XCTest
 import ScopyKit
+@testable import ScopyUISupport
 
 @MainActor
 final class ScrollPerformanceTests: XCTestCase {
@@ -202,6 +203,98 @@ final class ScrollPerformanceTests: XCTestCase {
             cold.timeMs,
             "Cached metadata access should be faster than cold path"
         )
+    }
+
+    func testLongFrameAttributionUsesOverlappingMetricWindows() throws {
+        let base = Date().timeIntervalSinceReferenceDate
+        let frames = [
+            ScrollPerformanceProfile.FrameSample(
+                index: 0,
+                start: base,
+                end: base + 0.016,
+                intervalMs: 16,
+                offsetDelta: nil,
+                scrollSpeed: nil,
+                isScrolling: false
+            ),
+            ScrollPerformanceProfile.FrameSample(
+                index: 1,
+                start: base + 0.016,
+                end: base + 0.066,
+                intervalMs: 50,
+                offsetDelta: 100,
+                scrollSpeed: 2_000,
+                isScrolling: true
+            ),
+            ScrollPerformanceProfile.FrameSample(
+                index: 2,
+                start: base + 0.066,
+                end: base + 0.146,
+                intervalMs: 80,
+                offsetDelta: nil,
+                scrollSpeed: nil,
+                isScrolling: false
+            )
+        ]
+        let events = [
+            ScrollPerformanceProfile.MetricEvent(
+                name: "row.display_model_ms",
+                start: base + 0.020,
+                end: base + 0.040,
+                durationMs: 20
+            ),
+            ScrollPerformanceProfile.MetricEvent(
+                name: "text.markdown_detect_ms",
+                start: base + 0.025,
+                end: base + 0.035,
+                durationMs: 10
+            ),
+            ScrollPerformanceProfile.MetricEvent(
+                name: "image.thumbnail_imageio_decode_ms",
+                start: base + 0.070,
+                end: base + 0.080,
+                durationMs: 10
+            ),
+            ScrollPerformanceProfile.MetricEvent(
+                name: "idle.metric_ms",
+                start: base + 0.090,
+                end: base + 0.130,
+                durationMs: 40
+            )
+        ]
+
+        let attribution = ScrollPerformanceProfile.buildLongFrameAttribution(
+            frameSamples: frames,
+            metricEvents: events,
+            expectedFrameMs: 16.667,
+            dropThresholdMultiplier: 1.5,
+            maxFrameDetails: 4,
+            timelineStart: base
+        )
+
+        XCTAssertEqual(attribution["long_frame_count"] as? Int, 1)
+        XCTAssertEqual(attribution["total_frame_ms"] as? Double ?? 0, 50, accuracy: 0.1)
+        XCTAssertEqual(attribution["attributed_union_ms"] as? Double ?? 0, 20, accuracy: 0.1)
+        XCTAssertEqual(attribution["unattributed_ms"] as? Double ?? 0, 30, accuracy: 0.1)
+        XCTAssertEqual(attribution["attribution_coverage_ratio"] as? Double ?? 0, 0.4, accuracy: 0.01)
+
+        let topMetrics = try XCTUnwrap(attribution["top_metrics"] as? [[String: Any]])
+        let rowMetric = try XCTUnwrap(topMetrics.first { $0["name"] as? String == "row.display_model_ms" })
+        let markdownMetric = try XCTUnwrap(topMetrics.first { $0["name"] as? String == "text.markdown_detect_ms" })
+        XCTAssertNil(topMetrics.first { $0["name"] as? String == "idle.metric_ms" })
+        XCTAssertEqual(rowMetric["count"] as? Int, 1)
+        XCTAssertEqual(rowMetric["overlap_ms"] as? Double ?? 0, 20, accuracy: 0.1)
+        XCTAssertEqual(markdownMetric["overlap_ms"] as? Double ?? 0, 10, accuracy: 0.1)
+
+        let detailFrames = try XCTUnwrap(attribution["frames"] as? [[String: Any]])
+        let detailFrame = try XCTUnwrap(detailFrames.first)
+        XCTAssertEqual(detailFrame["index"] as? Int, 1)
+        XCTAssertEqual(detailFrame["event_count"] as? Int, 2)
+        XCTAssertEqual(detailFrame["event_overlap_ms"] as? Double ?? 0, 30, accuracy: 0.1)
+        XCTAssertEqual(detailFrame["event_union_overlap_ms"] as? Double ?? 0, 20, accuracy: 0.1)
+        XCTAssertEqual(detailFrame["unattributed_ms"] as? Double ?? 0, 30, accuracy: 0.1)
+        XCTAssertEqual(detailFrame["start_ms"] as? Double ?? 0, 16, accuracy: 0.1)
+        XCTAssertEqual(detailFrame["end_ms"] as? Double ?? 0, 66, accuracy: 0.1)
     }
 
     private func makeObserver() -> (ListLiveScrollObserverView.ObserverView, NSScrollView) {

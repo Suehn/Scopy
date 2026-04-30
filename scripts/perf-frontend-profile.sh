@@ -183,9 +183,19 @@ raw_root = os.path.join(out_dir, "raw")
 variants = ["baseline", "current"]
 
 metric_bucket_keys = [
+    "row.display_model_ms",
+    "row.file_preview_ms",
+    "swiftui.row_body_ms",
+    "swiftui.row_equatable_ms",
     "text.title_ms",
     "text.metadata_ms",
+    "text.markdown_detect_ms",
     "image.thumbnail_decode_ms",
+    "image.thumbnail_queue_wait_ms",
+    "image.thumbnail_inflight_wait_ms",
+    "image.thumbnail_imageio_decode_ms",
+    "image.thumbnail_main_commit_ms",
+    "image.thumbnail_load_total_ms",
     "hover.markdown_render_ms",
     "hover.preview_image_decode_ms",
 ]
@@ -227,6 +237,11 @@ for variant in variants:
             continue
         scenario = payload.get("profile_scenario") or os.path.splitext(name)[0]
         frame = payload.get("frame_ms", {})
+        active_frame = payload.get("active_frame_ms", {})
+        main_runloop = payload.get("main_runloop_active_ms", {})
+        accessibility_tree = payload.get("accessibility_tree") or {}
+        accessibility_view_tree = accessibility_tree.get("view_tree") or {}
+        xctest_accessibility_query = payload.get("xctest_accessibility_query") or {}
         buckets = payload.get("buckets_ms", {})
         records[variant][scenario].append({
             "path": path,
@@ -234,11 +249,84 @@ for variant in variants:
             "frame_avg": frame.get("avg"),
             "frame_count": frame.get("count"),
             "drop_ratio": payload.get("drop_ratio"),
+            "active_frame_p95": active_frame.get("p95"),
+            "active_frame_avg": active_frame.get("avg"),
+            "active_frame_count": active_frame.get("count"),
+            "active_drop_ratio": payload.get("active_drop_ratio"),
+            "main_runloop_active_p95": main_runloop.get("p95"),
+            "main_runloop_active_avg": main_runloop.get("avg"),
+            "main_runloop_active_count": main_runloop.get("count"),
+            "scroll_sample_health": payload.get("scroll_sample_health") or {},
+            "long_frame_attribution": payload.get("long_frame_attribution") or {},
+            "main_thread_long_frame_attribution": payload.get("main_thread_long_frame_attribution") or {},
+            "accessibility_snapshot_ms": accessibility_tree.get("snapshot_ms"),
+            "accessibility_ax_query_ms": accessibility_tree.get("ax_query_ms"),
+            "accessibility_ax_children_count": accessibility_tree.get("ax_children_count"),
+            "accessibility_ax_rows_count": accessibility_tree.get("ax_rows_count"),
+            "accessibility_view_count": accessibility_view_tree.get("view_count"),
+            "xctest_history_item_query_ms": xctest_accessibility_query.get("history_item_query_ms"),
+            "xctest_history_item_count": xctest_accessibility_query.get("history_item_count"),
             "bucket_p95": {
                 key: ((buckets.get(key) or {}).get("p95"))
                 for key in metric_bucket_keys
             },
         })
+
+def scalar_summary(entries, key):
+    vals = [e.get(key) for e in entries if isinstance(e.get(key), (int, float))]
+    return {
+        "median": median(vals),
+        "mean": mean(vals),
+        "min": min_v(vals),
+        "max": max_v(vals),
+    }
+
+def summarize_long_frame_attribution(entries, field="long_frame_attribution"):
+    by_metric = {}
+    long_frame_count = 0
+    metric_event_count = 0
+    total_frame_ms = 0.0
+    attributed_union_ms = 0.0
+    unattributed_ms = 0.0
+    for entry in entries:
+        attribution = entry.get(field) or {}
+        long_frame_count += int(attribution.get("long_frame_count") or 0)
+        metric_event_count += int(attribution.get("metric_event_count") or 0)
+        total_frame_ms += float(attribution.get("total_frame_ms") or 0)
+        attributed_union_ms += float(attribution.get("attributed_union_ms") or 0)
+        unattributed_ms += float(attribution.get("unattributed_ms") or 0)
+        for metric in attribution.get("top_metrics") or []:
+            name = metric.get("name")
+            if not name:
+                continue
+            aggregate = by_metric.setdefault(name, {
+                "name": name,
+                "count": 0,
+                "frame_count": 0,
+                "total_ms": 0.0,
+                "overlap_ms": 0.0,
+                "max_ms": 0.0,
+            })
+            aggregate["count"] += int(metric.get("count") or 0)
+            aggregate["frame_count"] += int(metric.get("frame_count") or 0)
+            aggregate["total_ms"] += float(metric.get("total_ms") or 0)
+            aggregate["overlap_ms"] += float(metric.get("overlap_ms") or 0)
+            aggregate["max_ms"] = max(aggregate["max_ms"], float(metric.get("max_ms") or 0))
+
+    top_metrics = sorted(
+        by_metric.values(),
+        key=lambda item: (item["overlap_ms"], item["total_ms"]),
+        reverse=True,
+    )[:8]
+    return {
+        "long_frame_count": long_frame_count,
+        "metric_event_count": metric_event_count,
+        "total_frame_ms": total_frame_ms,
+        "attributed_union_ms": attributed_union_ms,
+        "unattributed_ms": unattributed_ms,
+        "attribution_coverage_ratio": (attributed_union_ms / total_frame_ms) if total_frame_ms else None,
+        "top_metrics": top_metrics,
+    }
 
 summary = {
     "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -255,6 +343,13 @@ for variant in variants:
         frame_avg = [e["frame_avg"] for e in entries if isinstance(e["frame_avg"], (int, float))]
         frame_count = [e["frame_count"] for e in entries if isinstance(e["frame_count"], (int, float))]
         drop_ratio = [e["drop_ratio"] for e in entries if isinstance(e["drop_ratio"], (int, float))]
+        active_frame_p95 = [e["active_frame_p95"] for e in entries if isinstance(e["active_frame_p95"], (int, float))]
+        active_frame_avg = [e["active_frame_avg"] for e in entries if isinstance(e["active_frame_avg"], (int, float))]
+        active_frame_count = [e["active_frame_count"] for e in entries if isinstance(e["active_frame_count"], (int, float))]
+        active_drop_ratio = [e["active_drop_ratio"] for e in entries if isinstance(e["active_drop_ratio"], (int, float))]
+        main_runloop_active_p95 = [e["main_runloop_active_p95"] for e in entries if isinstance(e["main_runloop_active_p95"], (int, float))]
+        main_runloop_active_avg = [e["main_runloop_active_avg"] for e in entries if isinstance(e["main_runloop_active_avg"], (int, float))]
+        main_runloop_active_count = [e["main_runloop_active_count"] for e in entries if isinstance(e["main_runloop_active_count"], (int, float))]
 
         bucket_summary = {}
         for key in metric_bucket_keys:
@@ -293,7 +388,61 @@ for variant in variants:
                 "min": min_v(drop_ratio),
                 "max": max_v(drop_ratio),
             },
+            "active_frame_p95_ms": {
+                "median": median(active_frame_p95),
+                "mean": mean(active_frame_p95),
+                "min": min_v(active_frame_p95),
+                "max": max_v(active_frame_p95),
+            },
+            "active_frame_avg_ms": {
+                "median": median(active_frame_avg),
+                "mean": mean(active_frame_avg),
+                "min": min_v(active_frame_avg),
+                "max": max_v(active_frame_avg),
+            },
+            "active_frame_sample_count": {
+                "median": median(active_frame_count),
+                "mean": mean(active_frame_count),
+                "min": min_v(active_frame_count),
+                "max": max_v(active_frame_count),
+            },
+            "active_drop_ratio": {
+                "median": median(active_drop_ratio),
+                "mean": mean(active_drop_ratio),
+                "min": min_v(active_drop_ratio),
+                "max": max_v(active_drop_ratio),
+            },
+            "main_runloop_active_p95_ms": {
+                "median": median(main_runloop_active_p95),
+                "mean": mean(main_runloop_active_p95),
+                "min": min_v(main_runloop_active_p95),
+                "max": max_v(main_runloop_active_p95),
+            },
+            "main_runloop_active_avg_ms": {
+                "median": median(main_runloop_active_avg),
+                "mean": mean(main_runloop_active_avg),
+                "min": min_v(main_runloop_active_avg),
+                "max": max_v(main_runloop_active_avg),
+            },
+            "main_runloop_active_count": {
+                "median": median(main_runloop_active_count),
+                "mean": mean(main_runloop_active_count),
+                "min": min_v(main_runloop_active_count),
+                "max": max_v(main_runloop_active_count),
+            },
+            "accessibility_snapshot_ms": scalar_summary(entries, "accessibility_snapshot_ms"),
+            "accessibility_ax_query_ms": scalar_summary(entries, "accessibility_ax_query_ms"),
+            "accessibility_ax_children_count": scalar_summary(entries, "accessibility_ax_children_count"),
+            "accessibility_ax_rows_count": scalar_summary(entries, "accessibility_ax_rows_count"),
+            "accessibility_view_count": scalar_summary(entries, "accessibility_view_count"),
+            "xctest_history_item_query_ms": scalar_summary(entries, "xctest_history_item_query_ms"),
+            "xctest_history_item_count": scalar_summary(entries, "xctest_history_item_count"),
             "bucket_p95_ms": bucket_summary,
+            "long_frame_attribution": summarize_long_frame_attribution(entries),
+            "main_thread_long_frame_attribution": summarize_long_frame_attribution(
+                entries,
+                field="main_thread_long_frame_attribution",
+            ),
         }
     summary["variants"][variant] = scenario_map
 
@@ -350,13 +499,62 @@ for scenario in all_scenarios:
     pairs = [
         ("frame_p95_ms", baseline.get("frame_p95_ms", {}).get("median"), current.get("frame_p95_ms", {}).get("median")),
         ("drop_ratio", baseline.get("drop_ratio", {}).get("median"), current.get("drop_ratio", {}).get("median")),
+        ("active_frame_p95_ms", baseline.get("active_frame_p95_ms", {}).get("median"), current.get("active_frame_p95_ms", {}).get("median")),
+        ("active_drop_ratio", baseline.get("active_drop_ratio", {}).get("median"), current.get("active_drop_ratio", {}).get("median")),
+        ("main_runloop_active_p95_ms", baseline.get("main_runloop_active_p95_ms", {}).get("median"), current.get("main_runloop_active_p95_ms", {}).get("median")),
+        ("swiftui.row_body_ms.p95", baseline.get("bucket_p95_ms", {}).get("swiftui.row_body_ms", {}).get("median"), current.get("bucket_p95_ms", {}).get("swiftui.row_body_ms", {}).get("median")),
+        ("swiftui.row_equatable_ms.p95", baseline.get("bucket_p95_ms", {}).get("swiftui.row_equatable_ms", {}).get("median"), current.get("bucket_p95_ms", {}).get("swiftui.row_equatable_ms", {}).get("median")),
+        ("row.display_model_ms.p95", baseline.get("bucket_p95_ms", {}).get("row.display_model_ms", {}).get("median"), current.get("bucket_p95_ms", {}).get("row.display_model_ms", {}).get("median")),
+        ("row.file_preview_ms.p95", baseline.get("bucket_p95_ms", {}).get("row.file_preview_ms", {}).get("median"), current.get("bucket_p95_ms", {}).get("row.file_preview_ms", {}).get("median")),
+        ("accessibility.snapshot_ms", baseline.get("accessibility_snapshot_ms", {}).get("median"), current.get("accessibility_snapshot_ms", {}).get("median")),
+        ("accessibility.ax_query_ms", baseline.get("accessibility_ax_query_ms", {}).get("median"), current.get("accessibility_ax_query_ms", {}).get("median")),
+        ("accessibility.ax_children_count", baseline.get("accessibility_ax_children_count", {}).get("median"), current.get("accessibility_ax_children_count", {}).get("median")),
+        ("accessibility.ax_rows_count", baseline.get("accessibility_ax_rows_count", {}).get("median"), current.get("accessibility_ax_rows_count", {}).get("median")),
+        ("accessibility.view_count", baseline.get("accessibility_view_count", {}).get("median"), current.get("accessibility_view_count", {}).get("median")),
+        ("xctest.history_item_query_ms", baseline.get("xctest_history_item_query_ms", {}).get("median"), current.get("xctest_history_item_query_ms", {}).get("median")),
+        ("xctest.history_item_count", baseline.get("xctest_history_item_count", {}).get("median"), current.get("xctest_history_item_count", {}).get("median")),
         ("text.metadata_ms.p95", baseline.get("bucket_p95_ms", {}).get("text.metadata_ms", {}).get("median"), current.get("bucket_p95_ms", {}).get("text.metadata_ms", {}).get("median")),
+        ("text.markdown_detect_ms.p95", baseline.get("bucket_p95_ms", {}).get("text.markdown_detect_ms", {}).get("median"), current.get("bucket_p95_ms", {}).get("text.markdown_detect_ms", {}).get("median")),
         ("image.thumbnail_decode_ms.p95", baseline.get("bucket_p95_ms", {}).get("image.thumbnail_decode_ms", {}).get("median"), current.get("bucket_p95_ms", {}).get("image.thumbnail_decode_ms", {}).get("median")),
+        ("image.thumbnail_queue_wait_ms.p95", baseline.get("bucket_p95_ms", {}).get("image.thumbnail_queue_wait_ms", {}).get("median"), current.get("bucket_p95_ms", {}).get("image.thumbnail_queue_wait_ms", {}).get("median")),
+        ("image.thumbnail_imageio_decode_ms.p95", baseline.get("bucket_p95_ms", {}).get("image.thumbnail_imageio_decode_ms", {}).get("median"), current.get("bucket_p95_ms", {}).get("image.thumbnail_imageio_decode_ms", {}).get("median")),
+        ("image.thumbnail_main_commit_ms.p95", baseline.get("bucket_p95_ms", {}).get("image.thumbnail_main_commit_ms", {}).get("median"), current.get("bucket_p95_ms", {}).get("image.thumbnail_main_commit_ms", {}).get("median")),
+        ("image.thumbnail_load_total_ms.p95", baseline.get("bucket_p95_ms", {}).get("image.thumbnail_load_total_ms", {}).get("median"), current.get("bucket_p95_ms", {}).get("image.thumbnail_load_total_ms", {}).get("median")),
     ]
     for metric, base, curr in pairs:
         delta = None if base is None or curr is None else (curr - base)
         md_lines.append(
             f"| {scenario} | {metric} | {fmt(base)} | {fmt(curr)} | {fmt(delta)} | {pct(base, curr)} |"
+        )
+
+md_lines.append("")
+md_lines.append("## Long Frame Attribution")
+md_lines.append("")
+md_lines.append("| Scenario | Variant | Long Frames | App Attributed | App Unattributed | App Coverage | Main Thread Coverage | Top Correlated App Metrics |")
+md_lines.append("|---|---:|---:|---:|---:|---:|---:|---|")
+for scenario in all_scenarios:
+    for variant in variants:
+        scenario_summary = summary["variants"].get(variant, {}).get(scenario, {})
+        attribution = scenario_summary.get("long_frame_attribution", {})
+        main_thread_attribution = scenario_summary.get("main_thread_long_frame_attribution", {})
+        top_metrics = []
+        for metric in attribution.get("top_metrics") or []:
+            name = metric.get("name") or ""
+            overlap = metric.get("overlap_ms")
+            count = metric.get("count")
+            if name and isinstance(overlap, (int, float)):
+                top_metrics.append(f"{name} {overlap:.2f}ms/{int(count or 0)}x")
+        top_text = ", ".join(top_metrics[:5]) if top_metrics else "-"
+        attributed = attribution.get("attributed_union_ms")
+        unattributed = attribution.get("unattributed_ms")
+        coverage = attribution.get("attribution_coverage_ratio")
+        attributed_text = f"{attributed:.2f}ms" if isinstance(attributed, (int, float)) else "-"
+        unattributed_text = f"{unattributed:.2f}ms" if isinstance(unattributed, (int, float)) else "-"
+        coverage_text = f"{coverage * 100:.1f}%" if isinstance(coverage, (int, float)) else "-"
+        main_thread_coverage = main_thread_attribution.get("attribution_coverage_ratio")
+        main_thread_coverage_text = f"{main_thread_coverage * 100:.1f}%" if isinstance(main_thread_coverage, (int, float)) else "-"
+        md_lines.append(
+            f"| {scenario} | {variant} | {int(attribution.get('long_frame_count') or 0)} | {attributed_text} | {unattributed_text} | {coverage_text} | {main_thread_coverage_text} | {top_text} |"
         )
 
 md_out = os.path.join(out_dir, "frontend-scroll-profile-summary.md")

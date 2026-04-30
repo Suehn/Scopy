@@ -9,6 +9,56 @@ private struct SendableCGImage: @unchecked Sendable {
     let image: CGImage
 }
 
+@MainActor
+private struct HistoryItemDisplayModel {
+    let titleText: String
+    let metadataText: String
+    let thumbnailHeight: CGFloat
+    let showThumbnails: Bool
+    let filePreviewInfo: FilePreviewInfo?
+    let filePreviewPath: String?
+    let filePreviewKind: FilePreviewKind?
+    let filePreviewIsMarkdown: Bool
+    let canExportPNG: Bool
+    let canShowFileThumbnail: Bool
+    let needsThumbnailHeight: Bool
+
+    init(item: ClipboardItemDTO, settings: SettingsDTO) {
+        let profileStart = ScrollPerformanceProfile.isEnabled ? CFAbsoluteTimeGetCurrent() : nil
+        defer {
+            if let profileStart {
+                ScrollPerformanceProfile.recordMetric(
+                    name: "row.display_model_ms",
+                    elapsedMs: (CFAbsoluteTimeGetCurrent() - profileStart) * 1000
+                )
+            }
+        }
+
+        let thumbnailHeight = CGFloat(settings.thumbnailHeight)
+        let showThumbnails = settings.showImageThumbnails
+        let presentationCache = HistoryItemPresentationCache.shared
+        let filePreview = presentationCache.filePreview(for: item)
+        let filePreviewInfo = filePreview?.info
+        let filePreviewIsMarkdown = filePreview?.isMarkdown ?? false
+        let canShowFileThumbnail = showThumbnails
+            && item.type == .file
+            && filePreview?.shouldGenerateThumbnail == true
+        let canExportPNG = presentationCache.canExportPNG(for: item, filePreview: filePreview)
+
+        self.titleText = item.title
+        self.metadataText = item.metadata
+        self.thumbnailHeight = thumbnailHeight
+        self.showThumbnails = showThumbnails
+        self.filePreviewInfo = filePreviewInfo
+        self.filePreviewPath = filePreview?.path
+        self.filePreviewKind = filePreview?.kind
+        self.filePreviewIsMarkdown = filePreviewIsMarkdown
+        self.canExportPNG = canExportPNG
+        self.canShowFileThumbnail = canShowFileThumbnail
+        self.needsThumbnailHeight = (item.type == .image && showThumbnails) || canShowFileThumbnail
+    }
+}
+
 private actor PreviewTaskBudget {
     static let shared = PreviewTaskBudget(limit: 4)
 
@@ -76,6 +126,7 @@ struct HistoryItemView: View, Equatable {
     let isFilePreviewPresented: Bool
     let requestPopover: (HoverPreviewPopoverKind?) -> Void
     let dismissOtherPopovers: () -> Void
+    private let displayModel: HistoryItemDisplayModel
 
     // 局部状态 - 悬停不触发全局重绘
     @StateObject private var rowController: HistoryItemRowController
@@ -122,6 +173,7 @@ struct HistoryItemView: View, Equatable {
         self.isFilePreviewPresented = isFilePreviewPresented
         self.requestPopover = requestPopover
         self.dismissOtherPopovers = dismissOtherPopovers
+        self.displayModel = HistoryItemDisplayModel(item: item, settings: settings)
         let initialRelativeTimeText = Self.makeRelativeTimeString(for: item.lastUsedAt)
         _rowController = StateObject(wrappedValue: HistoryItemRowController(relativeTimeText: initialRelativeTimeText))
     }
@@ -129,18 +181,32 @@ struct HistoryItemView: View, Equatable {
     // MARK: - Equatable
 
     nonisolated static func == (lhs: HistoryItemView, rhs: HistoryItemView) -> Bool {
-        lhs.item.id == rhs.item.id &&
-        lhs.item.lastUsedAt == rhs.item.lastUsedAt &&
-        lhs.item.isPinned == rhs.item.isPinned &&
-        lhs.item.thumbnailPath == rhs.item.thumbnailPath &&
-        lhs.item.note == rhs.item.note &&
-        lhs.item.fileSizeBytes == rhs.item.fileSizeBytes &&
-        lhs.isKeyboardSelected == rhs.isKeyboardSelected &&
-        lhs.isImagePreviewPresented == rhs.isImagePreviewPresented &&
-        lhs.isTextPreviewPresented == rhs.isTextPreviewPresented &&
-        lhs.isFilePreviewPresented == rhs.isFilePreviewPresented &&
-        lhs.settings.showImageThumbnails == rhs.settings.showImageThumbnails &&
-        lhs.settings.thumbnailHeight == rhs.settings.thumbnailHeight
+        let profileStart = ScrollPerformanceProfile.isEnabled ? CFAbsoluteTimeGetCurrent() : nil
+        defer {
+            if let profileStart {
+                ScrollPerformanceProfile.recordMetric(
+                    name: "swiftui.row_equatable_ms",
+                    elapsedMs: (CFAbsoluteTimeGetCurrent() - profileStart) * 1000
+                )
+            }
+        }
+
+        return lhs.item.id == rhs.item.id &&
+            lhs.item.type == rhs.item.type &&
+            lhs.item.contentHash == rhs.item.contentHash &&
+            lhs.item.lastUsedAt == rhs.item.lastUsedAt &&
+            lhs.item.isPinned == rhs.item.isPinned &&
+            lhs.item.sizeBytes == rhs.item.sizeBytes &&
+            lhs.item.thumbnailPath == rhs.item.thumbnailPath &&
+            lhs.item.storageRef == rhs.item.storageRef &&
+            lhs.item.note == rhs.item.note &&
+            lhs.item.fileSizeBytes == rhs.item.fileSizeBytes &&
+            lhs.isKeyboardSelected == rhs.isKeyboardSelected &&
+            lhs.isImagePreviewPresented == rhs.isImagePreviewPresented &&
+            lhs.isTextPreviewPresented == rhs.isTextPreviewPresented &&
+            lhs.isFilePreviewPresented == rhs.isFilePreviewPresented &&
+            lhs.settings.showImageThumbnails == rhs.settings.showImageThumbnails &&
+            lhs.settings.thumbnailHeight == rhs.settings.thumbnailHeight
     }
 
     private var isPreviewInteractionSuppressed: Bool {
@@ -516,7 +582,7 @@ struct HistoryItemView: View, Equatable {
     }
 
     private var thumbnailHeight: CGFloat {
-        CGFloat(settings.thumbnailHeight)
+        displayModel.thumbnailHeight
     }
 
     private var previewDelay: TimeInterval {
@@ -524,39 +590,40 @@ struct HistoryItemView: View, Equatable {
     }
 
     private var showThumbnails: Bool {
-        settings.showImageThumbnails
+        displayModel.showThumbnails
     }
 
     private var filePreviewInfo: FilePreviewInfo? {
-        guard item.type == .file else { return nil }
-        return FilePreviewSupport.previewInfo(from: item.plainText, requireExists: false)
+        displayModel.filePreviewInfo
     }
 
     private var filePreviewPath: String? {
-        filePreviewInfo?.url.path
+        displayModel.filePreviewPath
     }
 
     private var filePreviewKind: FilePreviewKind? {
-        filePreviewInfo?.kind
+        displayModel.filePreviewKind
     }
 
     private var filePreviewIsMarkdown: Bool {
-        guard let info = filePreviewInfo else { return false }
-        return FilePreviewSupport.isMarkdownFile(info.url)
+        displayModel.filePreviewIsMarkdown
     }
 
     private var canExportPNG: Bool {
-        HistoryItemMarkdownExportController.canExportPNG(item: item, filePreviewInfo: filePreviewInfo)
+        displayModel.canExportPNG
     }
 
     private var canShowFileThumbnail: Bool {
-        guard showThumbnails, item.type == .file, let info = filePreviewInfo else { return false }
-        return FilePreviewSupport.shouldGenerateThumbnail(for: info.url)
+        displayModel.canShowFileThumbnail
     }
 
     /// v0.21: 使用预计算的 metadata，避免视图渲染时 O(n) 字符串操作
     private var metadataText: String {
-        item.metadata
+        displayModel.metadataText
+    }
+
+    private var titleText: String {
+        displayModel.titleText
     }
 
     /// v0.15: Simplified content view - removed app icon, using new metadata format
@@ -582,7 +649,8 @@ struct HistoryItemView: View, Equatable {
                     HistoryItemFileThumbnailView(
                         thumbnailPath: item.thumbnailPath,
                         height: thumbnailHeight,
-                        kind: filePreviewKind ?? .other
+                        kind: filePreviewKind ?? .other,
+                        interactionCoordinator: interactionCoordinator
                     )
                 } else {
                     Image(systemName: ScopyIcons.file)
@@ -590,7 +658,7 @@ struct HistoryItemView: View, Equatable {
                         .frame(width: thumbnailHeight, height: thumbnailHeight)
                 }
                 VStack(alignment: .leading, spacing: ScopySpacing.xxs) {
-                    Text(item.title)
+                    Text(titleText)
                         .font(ScopyTypography.body)
                         .lineLimit(1)
                         .truncationMode(.tail)
@@ -606,7 +674,7 @@ struct HistoryItemView: View, Equatable {
                 HStack(spacing: ScopySpacing.sm) {
                     Image(systemName: ScopyIcons.image)
                         .foregroundStyle(.green)
-                    Text(item.title)
+                    Text(titleText)
                         .font(ScopyTypography.body)
                         .lineLimit(1)
                         .truncationMode(.tail)
@@ -619,7 +687,7 @@ struct HistoryItemView: View, Equatable {
             }
         default:
             VStack(alignment: .leading, spacing: ScopySpacing.xxs) {
-                Text(item.title)
+                Text(titleText)
                     .font(ScopyTypography.body)
                     .lineLimit(1)
                     .truncationMode(.tail)
@@ -634,9 +702,26 @@ struct HistoryItemView: View, Equatable {
 
     // MARK: - Body
 
-    @ViewBuilder
     var body: some View {
-        rowContent.onHover(perform: handleHover)
+        let profileStart = ScrollPerformanceProfile.isEnabled ? CFAbsoluteTimeGetCurrent() : nil
+        defer {
+            if let profileStart {
+                ScrollPerformanceProfile.recordMetric(
+                    name: "swiftui.row_body_ms",
+                    elapsedMs: (CFAbsoluteTimeGetCurrent() - profileStart) * 1000
+                )
+            }
+        }
+        return scrollAwareRowContent
+    }
+
+    @ViewBuilder
+    private var scrollAwareRowContent: some View {
+        if isScrollInteractionActive {
+            rowContent
+        } else {
+            rowContent.onHover(perform: handleHover)
+        }
     }
 
     private var mainRowButton: some View {
@@ -695,7 +780,7 @@ struct HistoryItemView: View, Equatable {
         let textToken = textPopoverToken
         let fileToken = filePopoverToken
 
-        let needsThumbnailHeight = (item.type == .image && showThumbnails) || canShowFileThumbnail
+        let needsThumbnailHeight = displayModel.needsThumbnailHeight
 
         return HStack(alignment: .center, spacing: ScopySpacing.sm) {
             mainRowButton

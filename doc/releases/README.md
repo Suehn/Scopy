@@ -2,7 +2,7 @@
 doc_type: portal
 status: active
 owner: maintainers
-last_reviewed: 2026-04-26
+last_reviewed: 2026-04-30
 canonical: true
 ---
 
@@ -19,16 +19,17 @@ This page is the human-facing index for current release state. Automation should
 ## Current Release
 
 <!-- release-current:start -->
-- Version: `v0.7.3`
-- Date: `2026-04-26`
-- Release note: [v0.7.3](./history/v0.7.3.md)
+- Version: `v0.7.4`
+- Date: `2026-04-30`
+- Release note: [v0.7.4](./history/v0.7.4.md)
 - Changelog: [CHANGELOG.md](./CHANGELOG.md)
-- Profile doc: `none`
+- Profile doc: [v0.7.4 profile](../perf/release-profiles/v0.7.4-profile.md)
 <!-- release-current:end -->
 
 ## Recent Releases
 
 <!-- release-recent:start -->
+- `2026-04-30` [v0.7.4](./history/v0.7.4.md) - Frontend scroll attribution row presentation prewarm and scroll-time thumbnail throttling
 - `2026-04-26` [v0.7.3](./history/v0.7.3.md) - Tall Markdown export PDF bypass placeholder collision protection safe anchor navigation and release CI hardening
 - `2026-04-24` [v0.7.2](./history/v0.7.2.md) - Markdown CJK emphasis rendering stale async load guards thumbnail cache reset consistency and release version resolution are hardened
 - `2026-03-26` [v0.7.1](./history/v0.7.1.md) - Footnote superscripts and export syntax highlighting now stay aligned between preview release builds and PNG output
@@ -41,10 +42,6 @@ This page is the human-facing index for current release state. Automation should
 - `2026-01-29` [v0.59.fix3](./history/v0.59.fix3.md) - Search and SQLite performance tightening with O(1) stats reads
 - `2026-01-27` [v0.59.fix2](./history/v0.59.fix2.md) - Swift 6 strict-concurrency and test harness compatibility fixes
 - `2026-01-19` [v0.59.fix1](./history/v0.59.fix1.md) - Full-index cache hardening and mutation-seq correctness fallback
-- `2026-01-13` [v0.59](./history/v0.59.md) - Cold-start refine improvements and real DB regression coverage
-- `2026-01-12` [v0.58.fix2](./history/v0.58.fix2.md) - Two-character Chinese short query optimization
-- `2026-01-11` [v0.58.fix1](./history/v0.58.fix1.md) - Further two-character short query optimization
-- `2026-01-11` [v0.58](./history/v0.58.md) - Large-text fuzzy search speed-up with real DB baseline
 <!-- release-recent:end -->
 
 ## Full History

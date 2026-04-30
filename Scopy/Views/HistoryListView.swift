@@ -42,8 +42,9 @@ struct HistoryListView: View {
     private static let popoverReopenCooldownSeconds: CFTimeInterval = 0.25
 
     private static let isUITesting: Bool = ProcessInfo.processInfo.arguments.contains("--uitesting")
+    private static let isScrollProfile: Bool = ProcessInfo.processInfo.environment["SCOPY_SCROLL_PROFILE"] == "1"
     private static let profileAccessibility: Bool = ProcessInfo.processInfo.environment["SCOPY_PROFILE_ACCESSIBILITY"] == "1"
-    private static let shouldExposeAccessibility: Bool = isUITesting || profileAccessibility
+    private static let shouldExposeAccessibility: Bool = isScrollProfile ? profileAccessibility : isUITesting
 
     var body: some View {
         if historyViewModel.items.isEmpty && !historyViewModel.isLoading {
@@ -319,6 +320,8 @@ struct HistoryListView: View {
             if Self.shouldExposeAccessibility {
                 row.accessibilityIdentifier("History.Item.\(item.id.uuidString)")
                     .accessibilityValue(isSelected ? "selected" : "unselected")
+            } else if Self.isScrollProfile {
+                row.accessibilityHidden(true)
             } else {
                 row
             }

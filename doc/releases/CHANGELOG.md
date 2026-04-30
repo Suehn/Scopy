@@ -11,6 +11,32 @@
 
 - No unreleased entries.
 
+## [v0.7.4] - 2026-04-30
+
+### Perf/Frontend
+
+- History rows now prewarm presentation-only derived values for Markdown export capability and file preview metadata, reducing repeated row-time parsing without changing copy, preview, export, or selection behavior.
+- Row rendering now records `swiftui.row_body_ms`, `swiftui.row_equatable_ms`, and `row.display_model_ms`, and the row equality key includes the content fields that affect visible output.
+- Scroll interaction now suppresses hover work and animation churn while scrolling, then restores the existing hover/preview behavior after scrolling settles.
+- Image and file thumbnails now use scroll-aware lower-priority decode work, in-flight decode dedupe, bounded decode concurrency, and delayed main-actor image commits while scrolling.
+
+### Observability
+
+- Frontend profile output now includes automated scroll capture, active scrolling frame/drop metrics, main RunLoop active metrics, long-frame attribution, main-thread coverage, accessibility tree snapshots, and XCTest accessibility query timing.
+- `make perf-frontend-profile-full` now produces release-grade scroll evidence across accessibility, mixed, and text-biased real snapshot scenarios.
+- `make perf-unified-table` now includes the new frontend scroll, row, thumbnail, accessibility, and long-frame attribution metrics alongside backend warm-load/search metrics.
+
+### Verification
+
+- `make build`：BUILD SUCCEEDED（2026-04-30；pre-tag build injected nearest reachable `v0.7.3` as expected）
+- `make test-unit`：Executed 374 tests, 1 skipped, 0 failures（2026-04-30）
+- `make test-strict`：Executed 374 tests, 1 skipped, 0 failures（2026-04-30）
+- `make test-tsan`：skipped locally because macOS 26.5 (25F5058e) with Xcode 26.2 (17C52) hits the known Apple hosted TSan runtime crash guard（2026-04-30）
+- `make test-snapshot-perf-release`：cmd p95 0.249ms <= 50ms；cm p95 5.814ms <= 20ms（2026-04-30）
+- `make perf-search-warm-load`：warm-load 192.177ms；peak RSS 220.66MB；reason `disk_cache_hit`；DB 6421 items / 148647936 bytes（2026-04-30）
+- `make perf-frontend-profile-full`：3 repeats x 10s；active frame p95 41.667ms across real snapshot scenarios；row body p95 0.408-0.507ms；display model p95 1.050-1.291ms（2026-04-30）
+- `make perf-unified-table`：generated `logs/perf-unified-2026-04-30_20-30-30.md` using backend `v0.7.3` baseline, current backend audit, and full frontend summary（2026-04-30）
+
 ## [v0.7.3] - 2026-04-26
 
 ### Markdown/Export

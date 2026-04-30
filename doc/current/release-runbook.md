@@ -2,9 +2,10 @@
 doc_type: runbook
 status: active
 owner: maintainers
-last_reviewed: 2026-04-24
+last_reviewed: 2026-04-30
 canonical: true
 related_versions:
+  - v0.7.4
   - v0.7.2
 ---
 
@@ -55,8 +56,19 @@ related_versions:
 - Perf-sensitive changes:
   - `make test-snapshot-perf-release`
   - `make perf-search-warm-load`
-  - `make perf-frontend-profile-standard`
+  - `make perf-frontend-profile-standard` before commit, or `make perf-frontend-profile-full` before release
   - `make perf-unified-table` when comparing frontend and backend evidence, including `warm-load-summary.json` from `perf-search-warm-load` / `perf-audit`
+
+## Current Performance Evidence
+
+The `v0.7.4` release used the real snapshot DB at `perf-db/clipboard.db`（6421 items / 148647936 bytes）on 2026-04-30.
+
+- `make test-snapshot-perf-release`: cmd p95 0.249ms <= 50ms; cm p95 5.814ms <= 20ms.
+- `make perf-search-warm-load`: warm-load 192.177ms; peak RSS 220.66MB; reason `disk_cache_hit`.
+- `make perf-frontend-profile-full`: 3 repeats x 10s; active frame p95 41.667ms across real snapshot scenarios; row body p95 0.408-0.507ms; display model p95 1.050-1.291ms.
+- `make perf-unified-table`: generated `logs/perf-unified-2026-04-30_20-30-30.md` from `v0.7.3` backend baseline, current backend audit, and the full frontend summary.
+
+The frontend profile distinguishes app-level row/render/thumbnail/accessibility buckets from main-thread and system work. For `v0.7.4`, app-attributed long-frame coverage remains low while main-thread coverage is high, so future scroll investigations should continue with RunLoop/main-thread system attribution rather than assuming row body or thumbnail decode is the only bottleneck.
 
 ## Homebrew Acceptance
 

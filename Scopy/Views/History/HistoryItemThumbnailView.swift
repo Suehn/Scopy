@@ -60,6 +60,15 @@ struct HistoryItemThumbnailView: View {
         let image = await ThumbnailCache.shared.loadImage(path: path, priority: priority)
         guard !Task.isCancelled else { return }
         guard let image else { return }
+        await waitForScrollingToSettleIfNeeded()
+        guard !Task.isCancelled else { return }
         loadedThumbnail = image
+    }
+
+    private func waitForScrollingToSettleIfNeeded() async {
+        for _ in 0..<20 where interactionCoordinator.isScrolling {
+            try? await Task.sleep(nanoseconds: 80_000_000)
+            if Task.isCancelled { return }
+        }
     }
 }

@@ -59,7 +59,9 @@ extension ListLiveScrollObserverView {
         }
 
         func attachIfNeeded() {
-            guard let scrollView = findEnclosingScrollView() ?? findScrollViewInWindow() else { return }
+            guard let scrollView = findEnclosingScrollView()
+                ?? findScrollViewInWindow(allowGenericFallback: onScrollViewAttach != nil)
+            else { return }
             guard observedScrollView !== scrollView else { return }
 
             detach()
@@ -167,7 +169,7 @@ extension ListLiveScrollObserverView {
             return nil
         }
 
-        private func findScrollViewInWindow() -> NSScrollView? {
+        private func findScrollViewInWindow(allowGenericFallback: Bool) -> NSScrollView? {
             guard let window else { return nil }
             if PerfFeatureFlags.scrollResolverCacheEnabled,
                cachedWindow === window,
@@ -176,7 +178,7 @@ extension ListLiveScrollObserverView {
             }
 
             guard let contentView = window.contentView else { return nil }
-            let resolved = findFirstScrollView(in: contentView)
+            let resolved = findFirstScrollView(in: contentView, allowGenericFallback: allowGenericFallback)
             if PerfFeatureFlags.scrollResolverCacheEnabled {
                 cachedWindow = window
                 cachedWindowResolvedScrollView = resolved
@@ -184,14 +186,17 @@ extension ListLiveScrollObserverView {
             return resolved
         }
 
-        private func findFirstScrollView(in view: NSView) -> NSScrollView? {
+        private func findFirstScrollView(in view: NSView, allowGenericFallback: Bool) -> NSScrollView? {
             if let scrollView = view as? NSScrollView {
                 if scrollView.documentView is NSTableView || scrollView.documentView is NSOutlineView {
                     return scrollView
                 }
+                if allowGenericFallback, scrollView.documentView != nil {
+                    return scrollView
+                }
             }
             for subview in view.subviews {
-                if let found = findFirstScrollView(in: subview) {
+                if let found = findFirstScrollView(in: subview, allowGenericFallback: allowGenericFallback) {
                     return found
                 }
             }

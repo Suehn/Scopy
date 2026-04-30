@@ -811,6 +811,7 @@ final class HistoryViewModel {
     private func prewarmDisplayText(for items: [ClipboardItemDTO]) {
         guard !items.isEmpty else { return }
         ClipboardItemDisplayText.shared.prewarm(items: items)
+        HistoryItemPresentationCache.shared.prewarm(items: items)
     }
 
     private func rebuildItemIndexCacheIfNeeded() {

@@ -354,6 +354,8 @@ final class HistoryListUITests: XCTestCase {
         app.launchEnvironment["SCOPY_PROFILE_OUTPUT"] = profilePath
         app.launchEnvironment["SCOPY_PROFILE_ACCESSIBILITY"] = accessibility ? "1" : "0"
         app.launchEnvironment["SCOPY_PROFILE_SCENARIO"] = scenario
+        let autoScroll = envValue("SCOPY_PROFILE_AUTO_SCROLL") ?? "1"
+        app.launchEnvironment["SCOPY_PROFILE_AUTO_SCROLL"] = autoScroll
 
         app.launch()
         _ = prepareMainWindow()
@@ -364,7 +366,11 @@ final class HistoryListUITests: XCTestCase {
             return
         }
 
-        exerciseScroll(durationSeconds: resolvedDuration)
+        if autoScroll == "0" {
+            exerciseScroll(on: list, durationSeconds: resolvedDuration)
+        } else {
+            waitForAutomatedScroll(durationSeconds: resolvedDuration)
+        }
 
         let predicate = NSPredicate { _, _ in
             FileManager.default.fileExists(atPath: profilePath)
@@ -374,16 +380,25 @@ final class HistoryListUITests: XCTestCase {
         XCTAssertEqual(result, .completed, "Profile output not found at \(profilePath)")
 
         let data = try Data(contentsOf: URL(fileURLWithPath: profilePath))
-        let json = try JSONSerialization.jsonObject(with: data, options: []) as? [String: Any]
+        var json = try JSONSerialization.jsonObject(with: data, options: []) as? [String: Any]
+        let accessibilityQuery = measureAccessibilityQuery()
+        json?["xctest_accessibility_query"] = accessibilityQuery
+        if let json,
+           let updatedData = try? JSONSerialization.data(withJSONObject: json, options: [.prettyPrinted]) {
+            try updatedData.write(to: URL(fileURLWithPath: profilePath), options: .atomic)
+        }
         let frame = json?["frame_ms"] as? [String: Any]
         let count = frame?["count"] as? Int ?? 0
         XCTAssertGreaterThan(count, 0, "Expected frame samples in profile output")
+        let activeFrame = json?["active_frame_ms"] as? [String: Any]
+        let activeCount = activeFrame?["count"] as? Int ?? 0
+        XCTAssertGreaterThan(activeCount, 0, "Expected active scrolling frame samples in profile output")
 
         let scenarioName = json?["profile_scenario"] as? String ?? ""
         XCTAssertEqual(scenarioName, scenario, "Profile scenario mismatch")
     }
 
-    private func exerciseScroll(durationSeconds: TimeInterval) {
+    private func exerciseScroll(on list: XCUIElement, durationSeconds: TimeInterval) {
         let window = app.windows.firstMatch
         guard window.waitForExistence(timeout: 5) else { return }
         if window.isHittable {
@@ -399,25 +414,49 @@ final class HistoryListUITests: XCTestCase {
             }
             switch step % 6 {
             case 0, 1, 4:
-                dragScroll(in: window, upward: true)
+                dragScroll(in: list, upward: true)
             case 2:
-                dragScroll(in: window, upward: false)
+                dragScroll(in: list, upward: false)
             case 3:
-                dragScroll(in: window, upward: true)
-                dragScroll(in: window, upward: true)
+                dragScroll(in: list, upward: true)
+                dragScroll(in: list, upward: true)
             default:
-                dragScroll(in: window, upward: false)
+                dragScroll(in: list, upward: false)
             }
             usleep((step % 3 == 0) ? 90_000 : 120_000)
             step += 1
         }
     }
 
-    private func dragScroll(in window: XCUIElement, upward: Bool) {
+    private func waitForAutomatedScroll(durationSeconds: TimeInterval) {
+        let endTime = Date().addingTimeInterval(durationSeconds)
+        while Date() < endTime {
+            usleep(120_000)
+        }
+    }
+
+    private func measureAccessibilityQuery() -> [String: Any] {
+        let listStart = CFAbsoluteTimeGetCurrent()
+        let listExists = app.anyElement("History.List").exists
+        let listQueryMs = (CFAbsoluteTimeGetCurrent() - listStart) * 1000
+
+        let itemStart = CFAbsoluteTimeGetCurrent()
+        let itemCount = app.anyElements(matching: NSPredicate(format: "identifier BEGINSWITH %@", "History.Item.")).count
+        let itemQueryMs = (CFAbsoluteTimeGetCurrent() - itemStart) * 1000
+
+        return [
+            "list_exists": listExists,
+            "list_query_ms": listQueryMs,
+            "history_item_count": itemCount,
+            "history_item_query_ms": itemQueryMs
+        ]
+    }
+
+    private func dragScroll(in element: XCUIElement, upward: Bool) {
         let startY: CGFloat = upward ? 0.78 : 0.22
         let endY: CGFloat = upward ? 0.22 : 0.78
-        let start = window.coordinate(withNormalizedOffset: CGVector(dx: 0.55, dy: startY))
-        let end = window.coordinate(withNormalizedOffset: CGVector(dx: 0.55, dy: endY))
+        let start = element.coordinate(withNormalizedOffset: CGVector(dx: 0.55, dy: startY))
+        let end = element.coordinate(withNormalizedOffset: CGVector(dx: 0.55, dy: endY))
         start.press(forDuration: 0.01, thenDragTo: end)
     }
 
