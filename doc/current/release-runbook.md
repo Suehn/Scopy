@@ -5,6 +5,7 @@ owner: maintainers
 last_reviewed: 2026-04-30
 canonical: true
 related_versions:
+  - v0.7.5
   - v0.7.4
   - v0.7.2
 ---
@@ -61,14 +62,15 @@ related_versions:
 
 ## Current Performance Evidence
 
-The `v0.7.4` release used the real snapshot DB at `perf-db/clipboard.db`（6421 items / 148647936 bytes）on 2026-04-30.
+The `v0.7.5` release used the real snapshot DB at `perf-db/clipboard.db`（6421 items / 148647936 bytes）on 2026-04-30.
 
-- `make test-snapshot-perf-release`: cmd p95 0.249ms <= 50ms; cm p95 5.814ms <= 20ms.
-- `make perf-search-warm-load`: warm-load 192.177ms; peak RSS 220.66MB; reason `disk_cache_hit`.
-- `make perf-frontend-profile-full`: 3 repeats x 10s; active frame p95 41.667ms across real snapshot scenarios; row body p95 0.408-0.507ms; display model p95 1.050-1.291ms.
-- `make perf-unified-table`: generated `logs/perf-unified-2026-04-30_20-30-30.md` from `v0.7.3` backend baseline, current backend audit, and the full frontend summary.
+- `make test-snapshot-perf-release`: cmd p95 0.289ms <= 50ms; cm p95 9.187ms <= 20ms.
+- `bash scripts/perf-audit.sh --skip-tests --bench-db perf-db/clipboard.db --bench-metrics --out logs/perf-audit-perf-opt-2026-04-30_23-19-00`: full fuzzy `abc` p95 improved from 5.672ms to 0.490ms, and full fuzzy `cmd` p95 improved from 6.630ms to 0.884ms versus `logs/perf-audit-v0.7.4-current-2026-04-30_20-19-15`.
+- The same audit recorded `fuzzy_sorted_matches_cache_store_count=2051` in warm-load metrics, confirming the bounded first-page top-K cache path was exercised.
+- `make perf-frontend-profile-standard`: generated `logs/perf-frontend-profile-2026-04-30_23-26-29/frontend-scroll-profile-summary.md`.
+- `make perf-unified-table`: generated `logs/perf-unified-2026-04-30_23-29-33.md` from the `v0.7.4` backend baseline, current backend audit, and the standard frontend summary.
 
-The frontend profile distinguishes app-level row/render/thumbnail/accessibility buckets from main-thread and system work. For `v0.7.4`, app-attributed long-frame coverage remains low while main-thread coverage is high, so future scroll investigations should continue with RunLoop/main-thread system attribution rather than assuming row body or thumbnail decode is the only bottleneck.
+Treat the frontend profile as a real-scroll regression smoke, not a clean pre-change/post-change frontend A/B. The script's `baseline` and `current` variants are feature-flag variants inside the same build, while the backend comparison above uses separate audit directories.
 
 ## Homebrew Acceptance
 

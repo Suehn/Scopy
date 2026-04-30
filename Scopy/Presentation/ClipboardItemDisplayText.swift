@@ -39,6 +39,11 @@ final class ClipboardItemDisplayText {
         let metadata: String
     }
 
+    private struct DisplayTextPair: Sendable {
+        let title: String
+        let metadata: String
+    }
+
     private var titleCache: [TitleCacheKey: String] = [:]
     private var metadataCache: [MetadataCacheKey: String] = [:]
 
@@ -49,50 +54,36 @@ final class ClipboardItemDisplayText {
 
     func title(for item: ClipboardItemDTO) -> String {
         trimCacheIfNeeded()
-        let key = makeTitleCacheKey(for: item)
-        if let cached = titleCache[key] { return cached }
+        let titleKey = makeTitleCacheKey(for: item)
+        if let cached = titleCache[titleKey] { return cached }
 
-        let computed: String
-        if ScrollPerformanceProfile.isEnabled {
-            let start = CFAbsoluteTimeGetCurrent()
-            computed = Self.computeTitle(type: item.type, plainText: item.plainText)
-            let elapsed = (CFAbsoluteTimeGetCurrent() - start) * 1000
-            ScrollPerformanceProfile.recordMetric(name: "text.title_ms", elapsedMs: elapsed)
-        } else {
-            computed = Self.computeTitle(type: item.type, plainText: item.plainText)
-        }
-        titleCache[key] = computed
-        return computed
+        let pair = computeDisplayTextPair(for: item, metricName: "text.title_ms")
+        storeDisplayTextPair(pair, titleKey: titleKey, metadataKey: makeMetadataCacheKey(for: item))
+        return pair.title
     }
 
     func metadata(for item: ClipboardItemDTO) -> String {
         trimCacheIfNeeded()
-        let key = makeMetadataCacheKey(for: item)
-        if let cached = metadataCache[key] { return cached }
+        let metadataKey = makeMetadataCacheKey(for: item)
+        if let cached = metadataCache[metadataKey] { return cached }
 
-        let computed: String
-        if ScrollPerformanceProfile.isEnabled {
-            let start = CFAbsoluteTimeGetCurrent()
-            computed = Self.computeMetadata(
-                type: item.type,
-                plainText: item.plainText,
-                note: item.note,
-                sizeBytes: item.sizeBytes,
-                fileSizeBytes: item.fileSizeBytes
-            )
-            let elapsed = (CFAbsoluteTimeGetCurrent() - start) * 1000
-            ScrollPerformanceProfile.recordMetric(name: "text.metadata_ms", elapsedMs: elapsed)
-        } else {
-            computed = Self.computeMetadata(
-                type: item.type,
-                plainText: item.plainText,
-                note: item.note,
-                sizeBytes: item.sizeBytes,
-                fileSizeBytes: item.fileSizeBytes
-            )
+        let pair = computeDisplayTextPair(for: item, metricName: "text.metadata_ms")
+        storeDisplayTextPair(pair, titleKey: makeTitleCacheKey(for: item), metadataKey: metadataKey)
+        return pair.metadata
+    }
+
+    func displayTexts(for item: ClipboardItemDTO) -> (title: String, metadata: String) {
+        trimCacheIfNeeded()
+        let titleKey = makeTitleCacheKey(for: item)
+        let metadataKey = makeMetadataCacheKey(for: item)
+        if let title = titleCache[titleKey],
+           let metadata = metadataCache[metadataKey] {
+            return (title, metadata)
         }
-        metadataCache[key] = computed
-        return computed
+
+        let pair = computeDisplayTextPair(for: item, metricName: "text.metadata_ms")
+        storeDisplayTextPair(pair, titleKey: titleKey, metadataKey: metadataKey)
+        return (pair.title, pair.metadata)
     }
 
     @discardableResult
@@ -113,8 +104,7 @@ final class ClipboardItemDisplayText {
             var entries: [PrewarmEntry] = []
             entries.reserveCapacity(snapshots.count)
             for snapshot in snapshots {
-                let title = Self.computeTitle(type: snapshot.type, plainText: snapshot.plainText)
-                let metadata = Self.computeMetadata(
+                let pair = Self.computeDisplayTextPair(
                     type: snapshot.type,
                     plainText: snapshot.plainText,
                     note: snapshot.note,
@@ -133,8 +123,8 @@ final class ClipboardItemDisplayText {
                     PrewarmEntry(
                         titleKey: titleKey,
                         metadataKey: metadataKey,
-                        title: title,
-                        metadata: metadata
+                        title: pair.title,
+                        metadata: pair.metadata
                     )
                 )
             }
@@ -205,25 +195,45 @@ final class ClipboardItemDisplayText {
         }
     }
 
+    private func storeDisplayTextPair(_ pair: DisplayTextPair, titleKey: TitleCacheKey, metadataKey: MetadataCacheKey) {
+        if titleCache[titleKey] == nil, titleCache.count < cacheLimit {
+            titleCache[titleKey] = pair.title
+        }
+        if metadataCache[metadataKey] == nil, metadataCache.count < cacheLimit {
+            metadataCache[metadataKey] = pair.metadata
+        }
+    }
+
+    private func computeDisplayTextPair(for item: ClipboardItemDTO, metricName: String) -> DisplayTextPair {
+        if ScrollPerformanceProfile.isEnabled {
+            let start = CFAbsoluteTimeGetCurrent()
+            let pair = Self.computeDisplayTextPair(
+                type: item.type,
+                plainText: item.plainText,
+                note: item.note,
+                sizeBytes: item.sizeBytes,
+                fileSizeBytes: item.fileSizeBytes
+            )
+            let elapsed = (CFAbsoluteTimeGetCurrent() - start) * 1000
+            ScrollPerformanceProfile.recordMetric(name: metricName, elapsedMs: elapsed)
+            return pair
+        }
+
+        return Self.computeDisplayTextPair(
+            type: item.type,
+            plainText: item.plainText,
+            note: item.note,
+            sizeBytes: item.sizeBytes,
+            fileSizeBytes: item.fileSizeBytes
+        )
+    }
+
     private nonisolated static func cacheKeyContent(for item: ClipboardItemDTO) -> String {
         item.contentHash.isEmpty ? item.id.uuidString : item.contentHash
     }
 
     private nonisolated static func computeTitle(type: ClipboardItemType, plainText: String) -> String {
-        switch type {
-        case .file:
-            let summary = summarizeFilePlainText(plainText)
-            let fileCount = summary.fileCount
-            let firstName = URL(fileURLWithPath: summary.firstPath ?? "").lastPathComponent
-            if fileCount <= 1 {
-                return firstName.isEmpty ? plainText : firstName
-            }
-            return "\(firstName) + \(fileCount - 1) more"
-        case .image:
-            return "Image"
-        default:
-            return plainText.isEmpty ? "(No text)" : String(plainText.prefix(100))
-        }
+        computeDisplayTextPair(type: type, plainText: plainText, note: nil, sizeBytes: 0, fileSizeBytes: nil).title
     }
 
     private nonisolated static func computeMetadata(
@@ -233,16 +243,55 @@ final class ClipboardItemDisplayText {
         sizeBytes: Int,
         fileSizeBytes: Int?
     ) -> String {
+        computeDisplayTextPair(
+            type: type,
+            plainText: plainText,
+            note: note,
+            sizeBytes: sizeBytes,
+            fileSizeBytes: fileSizeBytes
+        ).metadata
+    }
+
+    private nonisolated static func computeDisplayTextPair(
+        type: ClipboardItemType,
+        plainText: String,
+        note: String?,
+        sizeBytes: Int,
+        fileSizeBytes: Int?
+    ) -> DisplayTextPair {
         switch type {
         case .text, .rtf, .html:
-            return computeTextMetadata(plainText)
+            return DisplayTextPair(
+                title: plainText.isEmpty ? "(No text)" : String(plainText.prefix(100)),
+                metadata: computeTextMetadata(plainText)
+            )
         case .image:
-            return computeImageMetadata(plainText, sizeBytes: sizeBytes)
+            return DisplayTextPair(
+                title: "Image",
+                metadata: computeImageMetadata(plainText, sizeBytes: sizeBytes)
+            )
         case .file:
-            return computeFileMetadata(plainText, note: note, sizeBytes: sizeBytes, fileSizeBytes: fileSizeBytes)
+            let summary = summarizeFilePlainText(plainText)
+            return DisplayTextPair(
+                title: computeFileTitle(plainText, summary: summary),
+                metadata: computeFileMetadata(summary: summary, note: note, fileSizeBytes: fileSizeBytes)
+            )
         default:
-            return formatBytes(sizeBytes)
+            let metadata = formatBytes(sizeBytes)
+            return DisplayTextPair(title: plainText.isEmpty ? "(No text)" : String(plainText.prefix(100)), metadata: metadata)
         }
+    }
+
+    private nonisolated static func computeFileTitle(
+        _ plainText: String,
+        summary: (firstPath: String?, fileCount: Int)
+    ) -> String {
+        let fileCount = summary.fileCount
+        let firstName = URL(fileURLWithPath: summary.firstPath ?? "").lastPathComponent
+        if fileCount <= 1 {
+            return firstName.isEmpty ? plainText : firstName
+        }
+        return "\(firstName) + \(fileCount - 1) more"
     }
 
     private nonisolated static func computeTextMetadata(_ text: String) -> String {
@@ -315,12 +364,11 @@ final class ClipboardItemDisplayText {
     }
 
     private nonisolated static func computeFileMetadata(
-        _ plainText: String,
+        summary: (firstPath: String?, fileCount: Int),
         note: String?,
-        sizeBytes _: Int,
         fileSizeBytes: Int?
     ) -> String {
-        let fileCount = summarizeFilePlainText(plainText).fileCount
+        let fileCount = summary.fileCount
         var parts: [String] = []
 
         if fileCount > 1 {

@@ -3787,8 +3787,10 @@ public actor SearchEngineImpl {
             return SearchResult(items: resultItems, total: totalMatches, hasMore: hasMore, coverage: .complete, searchTimeMs: 0)
         }
 
-        // Deep paging: cache a bounded "top-K" prefix to avoid repeated rescans without pinning a huge array in memory.
-        if request.offset > 0 {
+        // Cache a bounded "top-K" prefix to avoid repeated rescans without pinning a huge array in memory.
+        // Historically this was only used for deep paging; first-page caching lets the immediate next page reuse
+        // work already paid for by the initial full fuzzy scan.
+        if request.offset > 0 || PerfFeatureFlags.fuzzyFirstPageCacheEnabled {
             let tuning = AdaptiveSearchTuning.current(candidateCount: candidateSlots.count)
             let maxDeepPagingCacheTopMatches = tuning.deepPagingCacheTopMatches
             let deepPagingCachePrefetchExtra = tuning.deepPagingCachePrefetchExtra
@@ -3797,6 +3799,7 @@ public actor SearchEngineImpl {
             if let cached = fuzzySortedMatchesCache,
                cached.key == sortedCacheKey,
                cached.topMatches.count >= desiredTopCount {
+                perf?.addCounter("fuzzy_sorted_matches_cache_hit", value: 1)
                 return try pageFromSortedMatches(cached.topMatches, totalMatches: cached.totalMatches)
             }
 
@@ -3840,6 +3843,7 @@ public actor SearchEngineImpl {
                     totalMatches: totalMatches,
                     topMatches: topItems
                 )
+                perf?.addCounter("fuzzy_sorted_matches_cache_store_count", value: topItems.count)
             } else {
                 fuzzySortedMatchesCache = nil
             }

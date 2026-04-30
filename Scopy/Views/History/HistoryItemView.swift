@@ -44,9 +44,10 @@ private struct HistoryItemDisplayModel {
             && item.type == .file
             && filePreview?.shouldGenerateThumbnail == true
         let canExportPNG = presentationCache.canExportPNG(for: item, filePreview: filePreview)
+        let displayTexts = ClipboardItemDisplayText.shared.displayTexts(for: item)
 
-        self.titleText = item.title
-        self.metadataText = item.metadata
+        self.titleText = displayTexts.title
+        self.metadataText = displayTexts.metadata
         self.thumbnailHeight = thumbnailHeight
         self.showThumbnails = showThumbnails
         self.filePreviewInfo = filePreviewInfo
@@ -206,7 +207,8 @@ struct HistoryItemView: View, Equatable {
             lhs.isTextPreviewPresented == rhs.isTextPreviewPresented &&
             lhs.isFilePreviewPresented == rhs.isFilePreviewPresented &&
             lhs.settings.showImageThumbnails == rhs.settings.showImageThumbnails &&
-            lhs.settings.thumbnailHeight == rhs.settings.thumbnailHeight
+            lhs.settings.thumbnailHeight == rhs.settings.thumbnailHeight &&
+            lhs.settings.imagePreviewDelay == rhs.settings.imagePreviewDelay
     }
 
     private var isPreviewInteractionSuppressed: Bool {
@@ -1166,7 +1168,7 @@ struct HistoryItemView: View, Equatable {
     }
 
     private func startFilePreviewTask() {
-        guard let previewInfo = FilePreviewSupport.previewInfo(from: item.plainText, requireExists: false) else { return }
+        guard let previewInfo = filePreviewInfo else { return }
 
         let cacheKeyBase = item.contentHash.isEmpty ? item.id.uuidString : item.contentHash
         let kindToken = previewInfo.kind.rawValue
@@ -1543,7 +1545,28 @@ struct HistoryItemView: View, Equatable {
             let text = item.plainText
             let preview = text.isEmpty ? "(Empty)" : text
 
-            let isMarkdown = MarkdownDetector.isLikelyMarkdown(preview)
+            let isMarkdown: Bool
+            let presentationCache = HistoryItemPresentationCache.shared
+            if let cached = presentationCache.cachedMarkdownExportCapability(for: item) {
+                isMarkdown = cached
+            } else {
+                let metricsEnabled = ScrollPerformanceProfile.isEnabled
+                let profileStart = metricsEnabled ? CFAbsoluteTimeGetCurrent() : nil
+                let computed = await Task.detached(priority: .utility) {
+                    MarkdownDetector.isLikelyMarkdown(preview)
+                }.value
+                if let profileStart {
+                    ScrollPerformanceProfile.recordMetric(
+                        name: "text.markdown_detect_ms",
+                        elapsedMs: (CFAbsoluteTimeGetCurrent() - profileStart) * 1000
+                    )
+                }
+                guard !Task.isCancelled else { return }
+                guard !isPreviewInteractionSuppressed else { return }
+                guard isHovering else { return }
+                presentationCache.storeMarkdownExportCapability(computed, for: item)
+                isMarkdown = computed
+            }
             if self.isHovering {
                 self.previewModel.text = preview
                 self.previewModel.isMarkdown = isMarkdown

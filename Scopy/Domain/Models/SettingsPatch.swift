@@ -92,4 +92,21 @@ public struct SettingsPatch: Sendable, Equatable {
             && thumbnailHeight == nil
             && imagePreviewDelay == nil
     }
+
+    public var requiresStorageCleanup: Bool {
+        maxItems != nil
+            || maxStorageMB != nil
+            || cleanupImagesOnly != nil
+    }
+
+    public var affectsHistoryReload: Bool {
+        requiresStorageCleanup
+            || showImageThumbnails != nil
+            || thumbnailHeight != nil
+    }
+
+    public var affectsThumbnailCache: Bool {
+        showImageThumbnails != nil
+            || thumbnailHeight != nil
+    }
 }

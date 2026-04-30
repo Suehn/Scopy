@@ -9,7 +9,7 @@ enum HistoryItemMarkdownExportController {
     static func canExportPNG(item: ClipboardItemDTO, filePreviewInfo: FilePreviewInfo?) -> Bool {
         switch item.type {
         case .text, .rtf, .html:
-            return MarkdownDetector.isLikelyMarkdown(item.plainText)
+            return HistoryItemPresentationCache.shared.markdownExportCapability(for: item)
         case .file:
             guard let info = filePreviewInfo else { return false }
             return FilePreviewSupport.isMarkdownFile(info.url)

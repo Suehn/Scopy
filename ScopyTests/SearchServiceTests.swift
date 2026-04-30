@@ -176,6 +176,20 @@ final class SearchServiceTests: XCTestCase {
         XCTAssertTrue(ids1.isDisjoint(with: ids2))
     }
 
+    func testFuzzyExpandedFirstPagePreservesInitialOrdering() async throws {
+        try await populateTestData(count: 120)
+
+        let firstPage = try await search.search(
+            request: SearchRequest(query: "Item", mode: .fuzzy, sortMode: .relevance, forceFullFuzzy: true, limit: 20, offset: 0)
+        )
+        let expandedFirstPage = try await search.search(
+            request: SearchRequest(query: "Item", mode: .fuzzy, sortMode: .relevance, forceFullFuzzy: true, limit: 40, offset: 0)
+        )
+
+        XCTAssertEqual(firstPage.items.map(\.id), Array(expandedFirstPage.items.prefix(20)).map(\.id))
+        XCTAssertTrue(expandedFirstPage.hasMore)
+    }
+
 
     func testHasMoreFlag() async throws {
         try await populateTestData(count: 25)

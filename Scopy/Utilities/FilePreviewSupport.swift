@@ -16,6 +16,28 @@ public struct FilePreviewInfo: Sendable {
     public let kind: FilePreviewKind
 }
 
+public struct FilePreviewSummary: Sendable {
+    public let info: FilePreviewInfo
+    public let path: String
+    public let kind: FilePreviewKind
+    public let isMarkdown: Bool
+    public let shouldGenerateThumbnail: Bool
+
+    public init(
+        info: FilePreviewInfo,
+        path: String,
+        kind: FilePreviewKind,
+        isMarkdown: Bool,
+        shouldGenerateThumbnail: Bool
+    ) {
+        self.info = info
+        self.path = path
+        self.kind = kind
+        self.isMarkdown = isMarkdown
+        self.shouldGenerateThumbnail = shouldGenerateThumbnail
+    }
+}
+
 public enum FilePreviewSupport {
     private static let markdownTypes: [UTType] = {
         var types: [UTType] = []
@@ -46,6 +68,17 @@ public enum FilePreviewSupport {
     public static func previewInfo(from plainText: String, requireExists: Bool = true) -> FilePreviewInfo? {
         guard let url = primaryFileURL(from: plainText, requireExists: requireExists) else { return nil }
         return FilePreviewInfo(url: url, kind: kind(for: url))
+    }
+
+    public static func previewSummary(from plainText: String, requireExists: Bool = true) -> FilePreviewSummary? {
+        guard let info = previewInfo(from: plainText, requireExists: requireExists) else { return nil }
+        return FilePreviewSummary(
+            info: info,
+            path: info.url.path,
+            kind: info.kind,
+            isMarkdown: isMarkdownFile(info.url),
+            shouldGenerateThumbnail: shouldGenerateThumbnail(for: info.url)
+        )
     }
 
     public static func primaryFileURL(from plainText: String, requireExists: Bool = true) -> URL? {

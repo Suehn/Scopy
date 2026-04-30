@@ -2,10 +2,10 @@
 doc_type: guide
 status: active
 owner: maintainers
-last_reviewed: 2026-04-24
+last_reviewed: 2026-04-30
 canonical: true
 related_versions:
-  - v0.7.2
+  - v0.7.5
 ---
 
 # Development Guide
@@ -14,7 +14,7 @@ This document is the canonical implementation guide for the current Scopy codeba
 
 ## Reference State
 
-- Reference release: `v0.7.2`
+- Reference release: `v0.7.5`
 - Version metadata: [../meta/release-current.yml](../meta/release-current.yml)
 - Active requirements: [product-spec.md](./product-spec.md)
 - Release workflow: [release-runbook.md](./release-runbook.md)

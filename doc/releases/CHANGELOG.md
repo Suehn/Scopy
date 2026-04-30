@@ -11,6 +11,26 @@
 
 - No unreleased entries.
 
+## [v0.7.5] - 2026-04-30
+
+### Perf/Internal
+
+- History row presentation now reuses a single display-text derivation for title and metadata, and file entries share one path summary across both fields.
+- File preview metadata, Markdown-export capability checks, and thumbnail eligibility now share cached preview summaries instead of reparsing clipboard file paths on every hot path.
+- Full-index fuzzy search now caches a bounded first-page top-K prefix as well as deep pages, so the immediate next page can reuse the first scan without changing result ordering.
+- Settings updates now use `SettingsPatch` delta checks to avoid no-op history reloads, storage cleanup, and thumbnail cache clears when unrelated preferences change.
+
+### Verification
+
+- `make build`: BUILD SUCCEEDED（2026-04-30）
+- `make test-unit`: Executed 379 tests, 1 skipped, 0 failures（2026-04-30）
+- `make test-strict`: Executed 379 tests, 1 skipped, 0 failures（2026-04-30）
+- `make test-tsan`: skipped locally because macOS 26.5 (25F5058e) with Xcode 26.2 (17C52) hits the known Apple hosted TSan runtime crash guard（2026-04-30）
+- `make test-snapshot-perf-release`: cmd p95 0.289ms <= 50ms；cm p95 9.187ms <= 20ms（2026-04-30）
+- `bash scripts/perf-audit.sh --skip-tests --bench-db perf-db/clipboard.db --bench-metrics --out logs/perf-audit-perf-opt-2026-04-30_23-19-00`: full fuzzy `abc` p95 0.490ms and `cmd` p95 0.884ms; counters include `fuzzy_sorted_matches_cache_store_count=2051`（2026-04-30）
+- `make perf-frontend-profile-standard`: generated `logs/perf-frontend-profile-2026-04-30_23-26-29/frontend-scroll-profile-summary.md`（2026-04-30）
+- `make perf-unified-table`: generated `logs/perf-unified-2026-04-30_23-29-33.md` using `v0.7.4` backend baseline, current backend audit, and the standard frontend summary（2026-04-30）
+
 ## [v0.7.4] - 2026-04-30
 
 ### Perf/Frontend

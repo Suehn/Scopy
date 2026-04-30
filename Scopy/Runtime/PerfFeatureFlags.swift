@@ -37,6 +37,10 @@ enum PerfFeatureFlags {
         bool("SCOPY_PERF_SEARCH_ADAPTIVE_TUNING", defaultValue: true)
     }
 
+    static var fuzzyFirstPageCacheEnabled: Bool {
+        bool("SCOPY_PERF_FUZZY_FIRST_PAGE_CACHE", defaultValue: true)
+    }
+
     private static func bool(_ key: String, defaultValue: Bool) -> Bool {
         guard let raw = ProcessInfo.processInfo.environment[key]?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
               !raw.isEmpty else {

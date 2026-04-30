@@ -61,6 +61,7 @@ final class AppState {
 
     @ObservationIgnored private var eventTask: Task<Void, Never>?
     @ObservationIgnored private let serviceEnvironmentOptions: ServiceEnvironmentOptions
+    @ObservationIgnored private var lastAppliedSettings: SettingsDTO?
 
     var startupPhase: StartupPhase = .idle
 
@@ -215,18 +216,25 @@ final class AppState {
         case .newItem, .itemUpdated, .itemContentUpdated, .thumbnailUpdated, .itemDeleted, .itemPinned, .itemUnpinned, .itemsCleared:
             await historyViewModel.handleEvent(event)
         case .settingsChanged:
-            await refreshSettings(applyHotKey: true)
-            await historyViewModel.load()
+            let patch = await refreshSettings(applyHotKey: true)
+            if patch.affectsHistoryReload {
+                await historyViewModel.load()
+            }
         }
     }
 
-    private func refreshSettings(applyHotKey: Bool) async {
+    @discardableResult
+    private func refreshSettings(applyHotKey: Bool) async -> SettingsPatch {
+        let previousSettings = lastAppliedSettings ?? settingsViewModel.settings
         await settingsViewModel.loadSettings()
         let settings = settingsViewModel.settings
+        let patch = SettingsPatch.from(baseline: previousSettings, draft: settings)
+        lastAppliedSettings = settings
         historyViewModel.applySettings(settings)
         if applyHotKey {
             applyHotKeyIfNeeded(settings: settings)
         }
+        return patch
     }
 
     private func applyHotKeyIfNeeded(settings: SettingsDTO) {

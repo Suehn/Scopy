@@ -19,16 +19,17 @@ This page is the human-facing index for current release state. Automation should
 ## Current Release
 
 <!-- release-current:start -->
-- Version: `v0.7.4`
+- Version: `v0.7.5`
 - Date: `2026-04-30`
-- Release note: [v0.7.4](./history/v0.7.4.md)
+- Release note: [v0.7.5](./history/v0.7.5.md)
 - Changelog: [CHANGELOG.md](./CHANGELOG.md)
-- Profile doc: [v0.7.4 profile](../perf/release-profiles/v0.7.4-profile.md)
+- Profile doc: [v0.7.5 profile](../perf/release-profiles/v0.7.5-profile.md)
 <!-- release-current:end -->
 
 ## Recent Releases
 
 <!-- release-recent:start -->
+- `2026-04-30` [v0.7.5](./history/v0.7.5.md) - Presentation cache reuse fuzzy top-K reuse and settings delta cleanup
 - `2026-04-30` [v0.7.4](./history/v0.7.4.md) - Frontend scroll attribution row presentation prewarm and scroll-time thumbnail throttling
 - `2026-04-26` [v0.7.3](./history/v0.7.3.md) - Tall Markdown export PDF bypass placeholder collision protection safe anchor navigation and release CI hardening
 - `2026-04-24` [v0.7.2](./history/v0.7.2.md) - Markdown CJK emphasis rendering stale async load guards thumbnail cache reset consistency and release version resolution are hardened
@@ -40,8 +41,6 @@ This page is the human-facing index for current release state. Automation should
 - `2026-02-28` [v0.60.1](./history/v0.60.1.md) - Perf and release hardening with frontend profile flow, unified perf table, and cleanup-path convergence
 - `2026-01-30` [v0.60](./history/v0.60.md) - Refactor and stability release for settings persistence, storage deletion, and hotkey concurrency
 - `2026-01-29` [v0.59.fix3](./history/v0.59.fix3.md) - Search and SQLite performance tightening with O(1) stats reads
-- `2026-01-27` [v0.59.fix2](./history/v0.59.fix2.md) - Swift 6 strict-concurrency and test harness compatibility fixes
-- `2026-01-19` [v0.59.fix1](./history/v0.59.fix1.md) - Full-index cache hardening and mutation-seq correctness fallback
 <!-- release-recent:end -->
 
 ## Full History

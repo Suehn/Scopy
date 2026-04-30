@@ -60,6 +60,19 @@ final class ClipboardItemDisplayTextTests: XCTestCase {
     }
 
     @MainActor
+    func testDisplayTextsCachesTitleAndMetadataTogether() {
+        let item = makeFileItem(plainText: "/tmp/a.txt\n/tmp/b.txt", note: "note", fileSizeBytes: 1024)
+        ClipboardItemDisplayText.shared.clearCaches()
+
+        let pair = ClipboardItemDisplayText.shared.displayTexts(for: item)
+
+        XCTAssertEqual(pair.title, legacyFileTitle(item.plainText))
+        XCTAssertEqual(pair.metadata, legacyFileMetadata(item.plainText, note: item.note, fileSizeBytes: item.fileSizeBytes))
+        XCTAssertEqual(ClipboardItemDisplayText.shared.cachedTitle(for: item), pair.title)
+        XCTAssertEqual(ClipboardItemDisplayText.shared.cachedMetadata(for: item), pair.metadata)
+    }
+
+    @MainActor
     func testPrewarmCachesTitleAndMetadata() async {
         let item = makeTextItem(plainText: "hello world")
         ClipboardItemDisplayText.shared.clearCaches()

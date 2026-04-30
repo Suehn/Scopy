@@ -453,8 +453,8 @@ actor ClipboardService {
     }
 
     func updateSettings(_ newSettings: SettingsDTO) async throws {
-        let oldHeight = settings.thumbnailHeight
-        let oldShowThumbnails = settings.showImageThumbnails
+        let oldSettings = settings
+        let patch = SettingsPatch.from(baseline: oldSettings, draft: newSettings)
         let oldPollingMs = settings.clipboardPollingIntervalMs
 
         await settingsStore.save(newSettings)
@@ -475,23 +475,25 @@ actor ClipboardService {
                 storage.cleanupSettings.cleanupImagesOnly = newSettings.cleanupImagesOnly
             }
 
-            if oldHeight != newSettings.thumbnailHeight || oldShowThumbnails != newSettings.showImageThumbnails {
+            if patch.affectsThumbnailCache {
                 invalidateThumbnailCacheIndex()
                 await storage.clearThumbnailCache()
                 invalidateThumbnailCacheIndex()
             }
 
-            do {
-                let beforeCount = try await storage.getItemCount()
-                try await storage.performCleanup()
-                let afterCount = try await storage.getItemCount()
-                if beforeCount != afterCount, let search {
-                    await search.invalidateCache()
+            if patch.requiresStorageCleanup {
+                do {
+                    let beforeCount = try await storage.getItemCount()
+                    try await storage.performCleanup()
+                    let afterCount = try await storage.getItemCount()
+                    if beforeCount != afterCount, let search {
+                        await search.invalidateCache()
+                    }
+                } catch {
+                    ScopyLog.app.warning(
+                        "Cleanup failed after settings update: \(error.localizedDescription, privacy: .private)"
+                    )
                 }
-            } catch {
-                ScopyLog.app.warning(
-                    "Cleanup failed after settings update: \(error.localizedDescription, privacy: .private)"
-                )
             }
         }
 
@@ -992,8 +994,8 @@ actor ClipboardService {
                     )
                 }
             case .file:
-                if let info = FilePreviewSupport.previewInfo(from: item.plainText, requireExists: false),
-                   FilePreviewSupport.shouldGenerateThumbnail(for: info.url) {
+                if let preview = FilePreviewSupport.previewSummary(from: item.plainText, requireExists: false),
+                   preview.shouldGenerateThumbnail {
                     let filename = StorageService.fileThumbnailFilename(for: item.contentHash)
                     if let path = thumbnailPathIfExists(filename: filename, thumbnailCacheRoot: thumbnailCacheRoot) {
                         thumbnailPath = path
@@ -1171,20 +1173,20 @@ actor ClipboardService {
                     pngData = nil
                 }
             case .file:
-                guard let info = FilePreviewSupport.previewInfo(from: item.plainText, requireExists: true),
-                      FilePreviewSupport.shouldGenerateThumbnail(for: info.url) else {
+                guard let preview = FilePreviewSupport.previewSummary(from: item.plainText, requireExists: true),
+                      preview.shouldGenerateThumbnail else {
                     pngData = nil
                     break
                 }
-                switch info.kind {
+                switch preview.kind {
                 case .image:
-                    pngData = StorageService.makeThumbnailPNG(fromFileAtPath: info.url.path, maxHeight: maxHeight)
+                    pngData = StorageService.makeThumbnailPNG(fromFileAtPath: preview.path, maxHeight: maxHeight)
                 case .video:
-                    pngData = FilePreviewSupport.makeVideoThumbnailPNG(from: info.url, maxHeight: maxHeight)
+                    pngData = FilePreviewSupport.makeVideoThumbnailPNG(from: preview.info.url, maxHeight: maxHeight)
                 case .other:
                     let maxSidePixels = max(1, Int(CGFloat(maxHeight) * quickLookScale))
                     pngData = await FilePreviewSupport.makeQuickLookThumbnailPNG(
-                        from: info.url,
+                        from: preview.info.url,
                         maxSidePixels: maxSidePixels,
                         scale: quickLookScale
                     )

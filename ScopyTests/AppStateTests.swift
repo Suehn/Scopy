@@ -683,6 +683,7 @@ final class TestMockClipboardService: ClipboardServiceProtocol {
     var unpinCallCount = 0
     var deleteCallCount = 0
     var clearAllCallCount = 0
+    var fetchRecentCallCount = 0
 
     // Artificial delays (for race-condition tests)
     var fetchRecentDelayNs: UInt64 = 0
@@ -754,6 +755,7 @@ final class TestMockClipboardService: ClipboardServiceProtocol {
     // MARK: - Protocol Implementation
 
     func fetchRecent(limit: Int, offset: Int) async throws -> [ClipboardItemDTO] {
+        fetchRecentCallCount += 1
         if fetchRecentDelayNs > 0 {
             do {
                 try await Task.sleep(nanoseconds: fetchRecentDelayNs)
@@ -1037,6 +1039,7 @@ final class AppStateFallbackTests: XCTestCase {
         }
 
         await state.start()
+        let fetchCountAfterStart = mockService.fetchRecentCallCount
 
         // Emit settingsChanged event
         mockService.emitEvent(.settingsChanged)
@@ -1047,6 +1050,44 @@ final class AppStateFallbackTests: XCTestCase {
 
         XCTAssertEqual(appliedKeyCode, SettingsDTO.default.hotkeyKeyCode)
         XCTAssertEqual(appliedModifiers, SettingsDTO.default.hotkeyModifiers)
+        XCTAssertEqual(mockService.fetchRecentCallCount, fetchCountAfterStart)
+    }
+
+    func testSettingsChangedReloadsHistoryForThumbnailSettingsChange() async throws {
+        let mockService = TestMockClipboardService()
+        mockService.setItemCount(3)
+        let state = AppState.forTesting(service: mockService)
+        defer { state.stop() }
+
+        await state.start()
+        let fetchCountAfterStart = mockService.fetchRecentCallCount
+
+        var settings = SettingsDTO.default
+        settings.thumbnailHeight = SettingsDTO.default.thumbnailHeight + 8
+        try await mockService.updateSettings(settings)
+        mockService.emitEvent(.settingsChanged)
+
+        await assertEventually(timeout: 1.0, pollInterval: 0.01, {
+            mockService.fetchRecentCallCount > fetchCountAfterStart
+        }, message: "thumbnail settings changes should reload history so thumbnail paths are refreshed")
+    }
+
+    func testSettingsChangedDoesNotReloadHistoryForHotkeyOnlyChange() async throws {
+        let mockService = TestMockClipboardService()
+        mockService.setItemCount(3)
+        let state = AppState.forTesting(service: mockService)
+        defer { state.stop() }
+
+        await state.start()
+        let fetchCountAfterStart = mockService.fetchRecentCallCount
+
+        var settings = SettingsDTO.default
+        settings.hotkeyKeyCode = SettingsDTO.default.hotkeyKeyCode + 1
+        try await mockService.updateSettings(settings)
+        mockService.emitEvent(.settingsChanged)
+
+        try await Task.sleep(nanoseconds: 100_000_000)
+        XCTAssertEqual(mockService.fetchRecentCallCount, fetchCountAfterStart)
     }
 
     /// Test that settingsChanged without handler doesn't crash (logs warning instead)

@@ -7,14 +7,6 @@ import ScopyUISupport
 final class HistoryItemPresentationCache {
     static let shared = HistoryItemPresentationCache()
 
-    struct FilePreviewSummary: Sendable {
-        let info: FilePreviewInfo
-        let path: String
-        let kind: FilePreviewKind
-        let isMarkdown: Bool
-        let shouldGenerateThumbnail: Bool
-    }
-
     private struct CacheKey: Hashable, Sendable {
         let type: ClipboardItemType
         let contentKey: String
@@ -138,12 +130,21 @@ final class HistoryItemPresentationCache {
         return markdownCapabilityCache[Self.cacheKey(for: item)]
     }
 
+    func storeMarkdownExportCapability(_ value: Bool, for item: ClipboardItemDTO) {
+        guard Self.isMarkdownCandidate(type: item.type) else { return }
+        trimCachesIfNeeded()
+        let key = Self.cacheKey(for: item)
+        if markdownCapabilityCache.count < cacheLimit || markdownCapabilityCache[key] != nil {
+            markdownCapabilityCache[key] = value
+        }
+    }
+
     func clearCaches() {
         filePreviewCache.removeAll(keepingCapacity: true)
         markdownCapabilityCache.removeAll(keepingCapacity: true)
     }
 
-    private func markdownExportCapability(for item: ClipboardItemDTO) -> Bool {
+    func markdownExportCapability(for item: ClipboardItemDTO) -> Bool {
         guard Self.isMarkdownCandidate(type: item.type) else { return false }
         trimCachesIfNeeded()
 
@@ -207,15 +208,6 @@ final class HistoryItemPresentationCache {
     }
 
     private nonisolated static func computeFilePreview(plainText: String) -> FilePreviewSummary? {
-        guard let info = FilePreviewSupport.previewInfo(from: plainText, requireExists: false) else {
-            return nil
-        }
-        return FilePreviewSummary(
-            info: info,
-            path: info.url.path,
-            kind: info.kind,
-            isMarkdown: FilePreviewSupport.isMarkdownFile(info.url),
-            shouldGenerateThumbnail: FilePreviewSupport.shouldGenerateThumbnail(for: info.url)
-        )
+        FilePreviewSupport.previewSummary(from: plainText, requireExists: false)
     }
 }
