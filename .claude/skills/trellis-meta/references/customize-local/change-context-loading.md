@@ -63,19 +63,24 @@ First determine which mode the platform uses:
 
 In both modes, make sure the agent ultimately reads:
 
-1. active task
-2. `prd.md`
-3. `info.md` if present
-4. the corresponding JSONL
-5. spec/research referenced by the JSONL
+1. explicit `TASK_DIR=<task-dir>` from the parent prompt, if present
+2. active task fallback via `task.py current --source`
+3. `prd.md`
+4. `info.md` if present
+5. the corresponding JSONL
+6. spec/research referenced by the JSONL
+
+For Codex, explicit `TASK_DIR` outranks isolated sub-agent active-task state. Once `<TASK_DIR>/prd.md` verifies, `NO ACTIVE TASK` and `Current task: (none)` are diagnostic only. Exact `trellis-research`, `trellis-implement`, and `trellis-check` agent types are required for TASK_DIR-critical Trellis work; apply GPT-5.5/high/other model overrides to those exact agents. Generic/explorer/default Codex agents do not load the `trellis-*` agent prelude, so use them only for non-authoritative scouting or non-Trellis work. For Trellis TASK_DIR work they are forbidden unless the main session explicitly accepts a known-fallible diagnostic-only path and puts this rule directly in the parent prompt.
 
 ## Troubleshooting Order
 
 ```bash
+# If a parent prompt provides TASK_DIR, verify this first:
+test -f "<task-dir>/prd.md"
 python3 ./.trellis/scripts/task.py current --source
 python3 ./.trellis/scripts/task.py list-context <task>
 python3 ./.trellis/scripts/task.py validate <task>
 python3 ./.trellis/scripts/get_context.py --mode packages
 ```
 
-Confirm the task and JSONL are correct before editing hooks/agents.
+Confirm the explicit task path, PRD, and JSONL are correct before editing hooks/agents. Do not treat `current --source` returning none inside an isolated Codex sub-agent as decisive when explicit `TASK_DIR` verifies.

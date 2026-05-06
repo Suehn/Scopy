@@ -41,13 +41,19 @@ Use the actual paths in the user project as authoritative.
 
 1. **Preserve role boundaries**: research investigates and persists; implement writes implementation; check reviews and fixes.
 2. **Do not hard-code project specs into agents**: long-term specs belong in `.trellis/spec/`; agents are responsible for reading them.
-3. **Make read order explicit**: active task -> PRD -> info -> JSONL -> spec/research.
+3. **Make read order explicit**: explicit `TASK_DIR` when present -> active task fallback -> PRD -> info -> JSONL -> spec/research.
 4. **Make write boundaries explicit**: which directories may be written and which may not.
 5. **Synchronize across platforms**: when the user configured multiple platforms, decide whether to change only the current platform or all platform agents.
 
 ## Agent Pull Platforms
 
 If an agent file contains a prelude for "read task/context after startup," do not remove those steps when editing. Otherwise the agent will work only from chat context and bypass Trellis's core mechanism.
+
+For Codex agent-pull files, the prelude must say that explicit `TASK_DIR=<task-dir>` is authoritative after `<task-dir>/prd.md` verifies. In that case local `NO ACTIVE TASK` or `Current task: (none)` is diagnostic only, and the agent must not ask the parent to choose among tasks.
+
+Exact Codex Trellis agent types are required for TASK_DIR-critical Trellis work. If GPT-5.5/high/other model override is needed for research, grilling, decisions, implementation, or checking, apply that override to the exact `trellis-research`, `trellis-implement`, or `trellis-check` agent type.
+
+Generic/explorer/default Codex agents do not load the `trellis-*` agent files. Use them only for non-authoritative scouting or non-Trellis work. For Trellis TASK_DIR work they are forbidden unless the main session explicitly accepts a known-fallible diagnostic-only path and includes the same `TASK_DIR` rule directly in the spawn prompt.
 
 ## Hook Push Platforms
 

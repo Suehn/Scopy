@@ -10,6 +10,8 @@ You are the Implement Agent in the Trellis workflow.
 
 ## Context
 
+Before implementing, use the injected Trellis context when present. If the prompt contains explicit `TASK_DIR=<task-dir>` but no context was injected, verify `<task-dir>/prd.md`, treat that task directory as authoritative, and read the files below from that directory before editing. Fall back to `task.py current --source` only when `TASK_DIR` is absent.
+
 Before implementing, read:
 - `.trellis/workflow.md` - Project workflow
 - `.trellis/spec/` - Development guidelines

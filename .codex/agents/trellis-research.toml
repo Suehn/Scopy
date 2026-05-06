@@ -13,25 +13,33 @@ through the chat reply is a failure.
 
 ## Workflow
 
-If SessionStart or UserPromptSubmit context says `NO ACTIVE TASK` but this prompt includes `TASK_DIR=<task-dir>`, ignore that no-task status. Verify the directory and proceed from `TASK_DIR`; do not ask the parent to restate the task solely because the isolated session has no active pointer.
+If SessionStart or UserPromptSubmit context says `NO ACTIVE TASK` but this prompt includes `TASK_DIR=<task-dir>`, ignore that no-task status. Verify `<task-dir>/prd.md` and proceed from `TASK_DIR`; do not ask the parent to restate or choose the task solely because the isolated session has no active pointer. A no-task-only reply is incorrect once `prd.md` verifies.
+
+This exact `trellis-research` agent is the authoritative Codex research path for TASK_DIR-critical Trellis work. If the parent needs GPT-5.5/high/another model setting for research or decisions, it should override this agent's model/reasoning effort rather than using a generic/default/explorer agent.
 
 1. First look for an explicit `TASK_DIR=<task-dir>` in the parent/main session
-   prompt. If present, verify `<task-dir>/prd.md` exists and use it. Codex
-   sub-agents run in isolated sessions, so explicit `TASK_DIR` is preferred.
-   If no `TASK_DIR` is present, run `python3 ./.trellis/scripts/task.py current --source`
-   as a fallback. If neither source is available, ask the parent/main session to
-   start the intended task and include `TASK_DIR=<task-dir>`; do not guess.
-2. Run `mkdir -p <TASK_DIR>/research` to ensure the directory exists.
-3. Read `.trellis/workflow.md`, relevant `.trellis/spec/` files, and
+   prompt. If present, verify `<task-dir>/prd.md` exists, set that path as
+   `TASK_DIR`, and use it as the authoritative task context. Do not gate on
+   this isolated session's `task.py current --source` result after `prd.md`
+   verifies.
+2. Only if no `TASK_DIR` is present, run
+   `python3 ./.trellis/scripts/task.py current --source` as a fallback. If it
+   prints `Current task: (none)`, stop and ask the parent/main session to start
+   the intended task and include `TASK_DIR=<task-dir>`; do not guess from active
+   task directories or stale chat context.
+3. Read `<TASK_DIR>/prd.md` and `<TASK_DIR>/info.md` if it exists before
+   researching.
+4. Run `mkdir -p <TASK_DIR>/research` to ensure the directory exists.
+5. Read `.trellis/workflow.md`, relevant `.trellis/spec/` files, and
    target code before forming an opinion.
-4. For each research topic, write `<TASK_DIR>/research/<slug>.md` with:
+6. For each research topic, write `<TASK_DIR>/research/<slug>.md` with:
    - Query, scope, date
    - Files found (path + one-line description)
    - Code patterns (cite file:line)
    - External references (docs, versions)
    - Related specs
    - Caveats / not-found notes
-5. Reply with only: list of files written, one-line summary per file,
+7. Reply with only: list of files written, one-line summary per file,
    any critical caveats. Do not paste full research into the reply.
 
 ## Scope limits

@@ -26,7 +26,12 @@ Then continue directly with the user's request. This notice is one-shot: do not 
 </first-reply-notice>"""
 
 CODEX_TASK_DIR_NOTICE = """<codex-task-dir-notice>
-Codex sub-agents can start in an isolated Trellis session. If the parent prompt contains `TASK_DIR=<task-dir>`, treat that explicit task directory as authoritative even if <task-status> says NO ACTIVE TASK. Verify `<task-dir>/prd.md`, read the matching JSONL context, and proceed. Do not ask the parent to restate the task solely because this isolated session has no active task pointer.
+Codex sub-agents can start in an isolated Trellis session. Apply this `TASK_DIR` contract before trusting local active-task state:
+1. If the parent/main prompt contains `TASK_DIR=<task-dir>`, verify `<task-dir>/prd.md` and treat that directory as the authoritative task source.
+2. Once `prd.md` verifies, SessionStart/UserPromptSubmit `NO ACTIVE TASK` and `task.py current --source` returning `Current task: (none)` are diagnostic only; do not ask the parent to choose or restate a task.
+3. Read `prd.md`, `info.md` if present, and the role-appropriate JSONL/spec context before work. Skip JSONL rows without a `file` field.
+4. For TASK_DIR-critical Trellis work, use exact `trellis-research`, `trellis-implement`, or `trellis-check`. If GPT-5.5/high/other model override is needed, apply that override to the exact Trellis agent type instead of using a generic/default/explorer agent.
+5. Generic/default/explorer Codex agents are allowed only for non-authoritative scouting or non-Trellis work. For Trellis TASK_DIR work they are forbidden unless the main session explicitly accepts a known-fallible diagnostic-only path; in that exception, include this same prelude and do not treat the output as authoritative research, implementation, or checking.
 </codex-task-dir-notice>"""
 
 
@@ -155,8 +160,10 @@ def _get_task_status(trellis_dir: Path, hook_input: dict) -> str:
         return (
             f"Status: NO ACTIVE TASK\nSource: {active.source}\n"
             "Next: If this is a Codex sub-agent and the parent prompt includes "
-            "`TASK_DIR=<task-dir>`, verify `<task-dir>/prd.md` and proceed from "
-            "that explicit task directory. Otherwise describe what you want to work on"
+            "`TASK_DIR=<task-dir>`, verify `<task-dir>/prd.md`, treat this "
+            "no-task state as diagnostic only, and proceed from that explicit "
+            "task directory without asking the parent to choose a task. Otherwise "
+            "describe what you want to work on"
         )
 
     task_ref = active.task_path
@@ -296,10 +303,24 @@ Read and follow all instructions below carefully.
         "Project spec indexes are listed by path below. Each index contains a "
         "**Pre-Development Checklist** listing the specific guideline files to "
         "read before coding.\n\n"
-        "- If you're spawning an implement/check sub-agent, pass the verified "
-        "task path as `TASK_DIR=<task-dir>` in the prompt; the sub-agent then "
-        "loads `{task}/implement.jsonl` / `check.jsonl`. You do NOT need to "
-        "read these indexes yourself.\n"
+        "- If you're spawning a Codex Trellis sub-agent for TASK_DIR-critical "
+        "work, use the exact "
+        "agent types `trellis-research`, `trellis-implement`, or "
+        "`trellis-check`, and pass the verified task path as "
+        "`TASK_DIR=<task-dir>` in the prompt. Exact Trellis agents then load "
+        "the task PRD and role-appropriate JSONL/spec context themselves.\n"
+        "- If GPT-5.5/high/another model override is needed for research, "
+        "grilling, decisions, implementation, or checking, apply the model/"
+        "reasoning override to the exact Trellis agent type. Do not switch to "
+        "generic/default/explorer just to change model strength.\n"
+        "- Generic/explorer/default Codex agents do not receive curated Trellis "
+        "role instructions or JSONL loading contracts. Use them only for non-authoritative scouting or "
+        "non-Trellis work. For Trellis TASK_DIR work they are forbidden unless "
+        "the main session explicitly accepts a known-fallible diagnostic-only "
+        "path; then include a mandatory prelude: `TASK_DIR=<task-dir>; verify "
+        "<task-dir>/prd.md; if it exists, treat TASK_DIR as authoritative and "
+        "treat local NO ACTIVE TASK/current --source none as diagnostic only; "
+        "do not ask for task selection.`\n"
         "- For agent-capable platforms, the default is to dispatch "
         "`trellis-implement` and `trellis-check` (so JSONL context is loaded by "
         "the sub-agents) rather than editing code in the main session. "
@@ -354,7 +375,7 @@ Read and follow all instructions below carefully.
     output.write("""<ready>
 Context loaded. Workflow index, project state, and guidelines are already injected above — do NOT re-read them.
 When the user sends the first message, follow <task-status> and the workflow guide.
-For Codex sub-agents, explicit `TASK_DIR=<task-dir>` in the parent prompt overrides a local NO ACTIVE TASK status.
+For Codex sub-agents, explicit `TASK_DIR=<task-dir>` in the parent prompt overrides a local NO ACTIVE TASK status after `<task-dir>/prd.md` verifies.
 If a task is READY, execute its Next required action without asking whether to continue.
 </ready>""")
 

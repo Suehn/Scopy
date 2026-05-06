@@ -36,7 +36,7 @@ To change "when the AI knows what," inspect hooks/plugins/extensions and setting
 
 ### 2. Agent Prelude / Pull-Based
 
-Some platforms cannot reliably let hooks rewrite sub-agent prompts, so the agent file itself instructs the agent to read the active task, PRD, and JSONL context after startup.
+Some platforms cannot reliably let hooks rewrite sub-agent prompts, so the agent file itself instructs the agent to read task context after startup. If the parent prompt supplies explicit `TASK_DIR=<task-dir>`, the agent should verify `<TASK_DIR>/prd.md` and treat that directory as authoritative before falling back to active-task state, PRD, JSONL context, and related specs. A verified explicit `TASK_DIR` should not be blocked by isolated local no-active-task state.
 
 To change how sub-agents load context, inspect the agent files themselves.
 

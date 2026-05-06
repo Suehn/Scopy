@@ -27,6 +27,7 @@ warnings.filterwarnings("ignore")
 
 import json
 import os
+import re
 import sys
 from pathlib import Path
 from typing import Any
@@ -61,6 +62,8 @@ AGENT_RESEARCH = "trellis-research"
 AGENTS_REQUIRE_TASK = (AGENT_IMPLEMENT, AGENT_CHECK)
 # All supported agents
 AGENTS_ALL = (AGENT_IMPLEMENT, AGENT_CHECK, AGENT_RESEARCH)
+
+TASK_DIR_RE = re.compile(r"\bTASK_DIR=([^\s]+)")
 
 
 def find_repo_root(start_path: str) -> str | None:
@@ -128,6 +131,72 @@ def get_current_task(repo_root: str, input_data: dict) -> str | None:
         platform=_detect_platform(input_data),
     )
     return active.task_path
+
+
+def _normalize_task_ref(task_ref: str) -> str:
+    normalized = task_ref.strip().strip("'\"`.,;")
+    if not normalized:
+        return ""
+    path = Path(normalized)
+    if path.is_absolute():
+        return str(path)
+    normalized = normalized.replace("\\", "/")
+    while normalized.startswith("./"):
+        normalized = normalized[2:]
+    if normalized.startswith("tasks/"):
+        return f"{DIR_WORKFLOW}/{normalized}"
+    return normalized
+
+
+def _task_ref_to_relative(repo_root: str, task_ref: str) -> str | None:
+    normalized = _normalize_task_ref(task_ref)
+    if not normalized:
+        return None
+
+    path = Path(normalized)
+    if path.is_absolute():
+        try:
+            return path.resolve().relative_to(Path(repo_root).resolve()).as_posix()
+        except ValueError:
+            return None
+
+    if normalized.startswith(f"{DIR_WORKFLOW}/"):
+        return normalized
+    return f"{DIR_WORKFLOW}/tasks/{normalized}"
+
+
+def _verified_task_dir(repo_root: str, task_ref: str) -> str | None:
+    relative = _task_ref_to_relative(repo_root, task_ref)
+    if not relative:
+        return None
+    prd_path = Path(repo_root) / relative / "prd.md"
+    if prd_path.is_file():
+        return relative
+    return None
+
+
+def _task_dir_from_prompt(repo_root: str, prompt: str) -> str | None:
+    match = TASK_DIR_RE.search(prompt or "")
+    if not match:
+        return None
+    return _verified_task_dir(repo_root, match.group(1))
+
+
+def resolve_task_dir(repo_root: str, input_data: dict, original_prompt: str) -> str | None:
+    """Resolve task context, preferring explicit TASK_DIR from the prompt.
+
+    Sub-agents can run in isolated sessions. When the parent prompt includes a
+    verified TASK_DIR, that directory is more reliable than local active-task
+    state and should drive PRD/JSONL injection.
+    """
+    prompt_task = _task_dir_from_prompt(repo_root, original_prompt)
+    if prompt_task:
+        return prompt_task
+
+    active_task = get_current_task(repo_root, input_data)
+    if not active_task:
+        return None
+    return _verified_task_dir(repo_root, active_task)
 
 
 def read_file_content(base_path: str, file_path: str) -> str | None:
@@ -438,13 +507,26 @@ Finish checklist and requirements:
 
 def get_research_context(repo_root: str, task_dir: str | None) -> str:
     """
-    Context for Research Agent — project structure overview for spec directories.
+    Context for Research Agent — project structure plus optional task context.
 
     `task_dir` kept for signature parity with get_implement_context / get_check_context
     so the dispatcher can call them uniformly.
     """
-    _ = task_dir
     context_parts = []
+
+    if task_dir:
+        task_parts = [f"## Resolved TASK_DIR\n\n`{task_dir}`"]
+        prd_content = read_file_content(repo_root, f"{task_dir}/prd.md")
+        if prd_content:
+            task_parts.append(f"=== {task_dir}/prd.md (Requirements) ===\n{prd_content}")
+        info_content = read_file_content(repo_root, f"{task_dir}/info.md")
+        if info_content:
+            task_parts.append(f"=== {task_dir}/info.md (Technical Design) ===\n{info_content}")
+        task_parts.append(
+            "Research output for authoritative Trellis work must be written "
+            f"under `{task_dir}/research/`."
+        )
+        context_parts.append("\n\n".join(task_parts))
 
     # 1. Project structure overview (dynamically discover spec directories)
     spec_path = f"{DIR_WORKFLOW}/{DIR_SPEC}"
@@ -490,9 +572,9 @@ You are the Research Agent in the Multi-Agent Pipeline (search researcher).
 
 ## Core Principle
 
-**You do one thing: find and explain information.**
+**You do one thing: find, explain, and persist information for the task.**
 
-You are a documenter, not a reviewer.
+You are a documenter, not a reviewer. For authoritative Trellis research, the deliverable is a markdown file under `{{TASK_DIR}}/research/`, not only a chat reply.
 
 ## Project Info
 
@@ -511,7 +593,7 @@ You are a documenter, not a reviewer.
 1. **Understand query** - Determine search type (internal/external) and scope
 2. **Plan search** - List search steps for complex queries
 3. **Execute search** - Execute multiple independent searches in parallel
-4. **Organize results** - Output structured report
+4. **Persist results** - Write structured findings to `{{TASK_DIR}}/research/<topic-slug>.md` when a task directory is resolved
 
 ## Search Tools
 
@@ -525,21 +607,21 @@ You are a documenter, not a reviewer.
 
 ## Strict Boundaries
 
-**Only allowed**: Describe what exists, where it is, how it works
+**Allowed**: Describe what exists, where it is, how it works. If a task directory is resolved from explicit `TASK_DIR` or active task, create that task's `research/` directory if needed and write research markdown there.
 
 **Forbidden** (unless explicitly asked):
 - Suggest improvements
 - Criticize implementation
 - Recommend refactoring
-- Modify any files
+- Modify code, specs, platform config, or any files outside the resolved task's `research/` directory
+- Treat missing active-task state as decisive when the original prompt contains verified `TASK_DIR=<task-dir>`
 
 ## Report Format
 
-Provide structured search results including:
-- List of files found (with paths)
-- Code pattern analysis (if applicable)
-- Related spec documents
-- External references (if any)"""
+Reply with:
+- List of research files written
+- One-line summary per file
+- Critical caveats only"""
 
 
 def _string_value(value: Any) -> str:
@@ -677,8 +759,9 @@ def main():
     if not repo_root:
         sys.exit(0)
 
-    # Get current task directory (research doesn't require it)
-    task_dir = get_current_task(repo_root, input_data)
+    # Resolve current task directory. Explicit TASK_DIR in the prompt wins over
+    # isolated active-task state after prd.md verifies.
+    task_dir = resolve_task_dir(repo_root, input_data, original_prompt)
 
     # implement/check need task directory
     if subagent_type in AGENTS_REQUIRE_TASK:
@@ -708,7 +791,8 @@ def main():
             context = get_check_context(repo_root, task_dir)
             new_prompt = build_check_prompt(original_prompt, context)
     elif subagent_type == AGENT_RESEARCH:
-        # Research can work without task directory
+        # Research can work without injected task context only for diagnostic
+        # scouting; authoritative Trellis research should receive/verify TASK_DIR.
         context = get_research_context(repo_root, task_dir)
         new_prompt = build_research_prompt(original_prompt, context)
     else:

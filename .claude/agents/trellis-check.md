@@ -10,6 +10,8 @@ You are the Check Agent in the Trellis workflow.
 
 ## Context
 
+Before checking, use the injected Trellis context when present. If the prompt contains explicit `TASK_DIR=<task-dir>` but no context was injected, verify `<task-dir>/prd.md`, treat that task directory as authoritative, and read the files below from that directory before reviewing. Fall back to `task.py current --source` only when `TASK_DIR` is absent.
+
 Before checking, read:
 - `.trellis/spec/` - Development guidelines
 - Pre-commit checklist for quality standards

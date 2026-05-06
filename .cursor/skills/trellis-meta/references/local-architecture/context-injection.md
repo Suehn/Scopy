@@ -39,6 +39,14 @@ Implement and check agents need task context. Trellis has two loading modes:
 
 In both modes, JSONL files in the task directory are the key interface.
 
+### Codex `TASK_DIR` override
+
+Codex sub-agents can start in isolated sessions where their local active task is empty even though the parent session selected a task. For Codex, an explicit `TASK_DIR=<task-dir>` in the parent prompt has higher priority than the sub-agent's local active-task state. The agent must verify `<task-dir>/prd.md`; if it exists, `NO ACTIVE TASK` and `task.py current --source` returning `Current task: (none)` are diagnostic only, not a reason to ask the parent to choose a task.
+
+Exact Trellis Codex agents (`trellis-research`, `trellis-implement`, `trellis-check`) must carry this rule in their agent prelude and are required for TASK_DIR-critical Trellis work. If GPT-5.5/high/other model override is needed for research, grilling, decisions, implementation, or checking, apply that override to the exact Trellis agent type instead of switching to a generic/default/explorer agent.
+
+Generic/explorer/default Codex agents do not receive the curated Trellis role prelude or JSONL loading contract. Use them only for non-authoritative scouting or non-Trellis work. For Trellis TASK_DIR work they are forbidden unless the main session explicitly accepts a known-fallible diagnostic-only path; in that exception, the prompt must include a manual prelude that verifies `TASK_DIR`, treats it as authoritative, and avoids no-task-only replies once `prd.md` verifies.
+
 ## JSONL Reading Rules
 
 `implement.jsonl` and `check.jsonl` contain one JSON object per line:
@@ -65,4 +73,4 @@ If shell commands cannot see the same context key, `task.py current --source` ma
 | Change JSONL validation/display | `.trellis/scripts/common/task_context.py`. |
 | Change active task resolution | `.trellis/scripts/common/active_task.py`. |
 
-When modifying context injection, verify two things: new sessions can see the correct task, and sub-agents can see the correct PRD/spec/research.
+When modifying context injection, verify two things: new sessions can see the correct task, and exact Trellis sub-agents can see the correct PRD/spec/research. For Codex, also smoke-test an isolated exact Trellis sub-agent prompt containing explicit `TASK_DIR=<task-dir>`; success means it verifies `prd.md` and proceeds instead of replying with task-selection or no-active-task guidance. A generic/default/explorer smoke test can only prove the diagnostic fallback path, not authoritative Trellis readiness.

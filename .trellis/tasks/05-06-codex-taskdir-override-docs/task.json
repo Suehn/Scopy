@@ -1,0 +1,32 @@
+{
+  "id": "codex-taskdir-override-docs",
+  "name": "codex-taskdir-override-docs",
+  "title": "fix Codex TASK_DIR override docs",
+  "description": "Harden local Trellis Codex hooks, agent prompts, workflow, and reference docs so isolated Codex sub-agents honor explicit TASK_DIR instead of stopping on local no-task state.",
+  "status": "in_progress",
+  "dev_type": "docs/tooling",
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "ziyi",
+  "assignee": "ziyi",
+  "createdAt": "2026-05-06",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [
+    ".trellis/workflow.md",
+    ".codex/hooks/session-start.py",
+    ".codex/hooks/inject-workflow-state.py",
+    ".codex/agents/",
+    ".agents/skills/trellis-meta/references/"
+  ],
+  "notes": "",
+  "meta": {}
+}

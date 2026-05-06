@@ -56,6 +56,10 @@ The user sees a "current task," but Trellis stores active task state per session
 
 If the platform or shell environment has no stable session identity, `task.py start` may be unable to set the active task. The AI should read the error, inspect the platform hook/session environment, and not fall back to a shared global pointer.
 
+For Codex sub-agents, the parent prompt may include `TASK_DIR=<task-dir>` to bridge isolated session state. After the sub-agent verifies `<task-dir>/prd.md`, that explicit task directory is authoritative and `task.py current --source` inside the sub-agent is fallback/diagnostic only. A local `Current task: (none)` result is not enough to ask the parent to choose a task when `TASK_DIR` verifies.
+
+Use exact Codex Trellis agent types (`trellis-research`, `trellis-implement`, `trellis-check`) for TASK_DIR-critical Trellis work. Apply model or reasoning overrides to those exact agent types when needed. Generic/default/explorer agents are only for non-authoritative scouting or non-Trellis work unless the main session explicitly accepts a known-fallible diagnostic-only path.
+
 ## JSONL Context
 
 `implement.jsonl` and `check.jsonl` are context manifests for sub-agents to read first.

@@ -29,7 +29,9 @@ Conversations get compacted; files don't. Every research output MUST end up as a
 
 ### Step 1: Resolve Current Task
 
-Run `python3 ./.trellis/scripts/task.py current --source` → active task path. If no active task is set, ask the user where to write output; do NOT guess.
+First look for an explicit `TASK_DIR=<task-dir>` in the parent prompt. If present, verify `<task-dir>/prd.md` and use that directory as `TASK_DIR`; local no-active-task state is diagnostic only after this verification.
+
+Only if no explicit `TASK_DIR` is present, run `python3 ./.trellis/scripts/task.py current --source` to find the active task path. If neither source is available, ask the user/main session for the intended task path; do NOT guess from stale context or other active task directories.
 
 Ensure `{TASK_DIR}/research/` exists:
 

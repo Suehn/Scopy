@@ -75,6 +75,8 @@ python3 ./.trellis/scripts/task.py create-pr [name] [--dry-run]
 
 **Current-task mechanism**: `task.py start` writes the task path through the active-task resolver into session/window-scoped runtime state under `.trellis/.runtime/sessions/`. If no context key is available from hook input, `TRELLIS_CONTEXT_ID`, or a platform-native session environment variable, there is no active task and `task.py start` fails with a session identity hint. `task.py finish` deletes the current session file. `task.py archive <task>` also deletes any runtime session files that still point at the archived task.
 
+**Codex sub-agent TASK_DIR contract**: Codex sub-agents can start in isolated Trellis sessions where `task.py current --source` legitimately reports `Current task: (none)`. When the parent prompt contains `TASK_DIR=<task-dir>`, the sub-agent must verify `<task-dir>/prd.md` and then treat that explicit directory as the authoritative task source. In that verified case, local `NO ACTIVE TASK` state is diagnostic only and the sub-agent must not ask the parent to choose or restate a task. Use exact Trellis agent types (`trellis-research`, `trellis-implement`, `trellis-check`) for TASK_DIR-critical Trellis work. If GPT-5.5/high/other model override is needed, apply it to the exact Trellis agent type. Generic/explorer/default Codex agents are only for non-authoritative scouting or non-Trellis work; for Trellis TASK_DIR work they are forbidden unless the main session explicitly accepts a known-fallible diagnostic-only path with a mandatory prelude.
+
 ### Workspace System
 
 Records every AI session for cross-session tracking under `.trellis/workspace/<developer>/`.
@@ -237,6 +239,23 @@ Spawn the research sub-agent:
 - **Task description**: Research <specific question>
 - **Key requirement**: Research output MUST be persisted to `{TASK_DIR}/research/`
 
+For Codex, include `TASK_DIR=<task-dir>` in the prompt. For TASK_DIR-critical
+Trellis research, the exact `trellis-research` agent type is required. If a
+GPT-5.5/high/other model override is needed for grilling or decisions, apply
+that override to `trellis-research`; do not switch to a generic/default/explorer
+agent just to change model strength.
+
+Generic/default/explorer Codex agents are allowed only for non-authoritative
+scouting or non-Trellis work. For Trellis TASK_DIR work they are forbidden unless
+the main session explicitly accepts a known-fallible diagnostic-only path. In
+that exception, prepend this prelude and do not treat the result as authoritative
+research without a follow-up from `trellis-research`:
+
+```text
+TASK_DIR=<task-dir>
+Before doing anything else, verify <task-dir>/prd.md. If it exists, treat TASK_DIR as authoritative even when SessionStart/UserPromptSubmit says NO ACTIVE TASK or task.py current --source returns Current task: (none). Read prd.md and relevant context, then proceed. Do not ask the parent to choose or restate the task.
+```
+
 [/Claude Code, Cursor, OpenCode, Codex, Kiro, Gemini, Qoder, CodeBuddy, Copilot, Droid, Pi]
 
 [Kilo, Antigravity, Windsurf]
@@ -368,6 +387,8 @@ The Codex sub-agent definition auto-handles the context load requirement:
 - First checks for explicit `TASK_DIR=<task-dir>`, verifies `<task-dir>/prd.md`, and treats it as authoritative
 - Falls back to `task.py current --source` only when `TASK_DIR` is absent; `Current task: (none)` in the sub-agent is diagnostic, not proof the main session has no task
 - Reads `implement.jsonl` and requires the agent to load each referenced spec file before coding
+- If GPT-5.5/high/other model override is needed, apply it to this exact `trellis-implement` agent type.
+- Generic/default/explorer Codex agents must not implement TASK_DIR-critical Trellis work. They do not receive this curated JSONL loading contract; use them only for non-authoritative scouting or non-Trellis work, or for a main-session-accepted known-fallible diagnostic path before dispatching `trellis-implement`.
 
 [/Codex]
 
@@ -432,6 +453,8 @@ Spawn the check sub-agent:
 
 - **Agent type**: `trellis-check`
 - **Task description**: Review all code changes against spec and prd; fix any findings directly; ensure lint and type-check pass
+
+The Codex check agent follows the same `TASK_DIR`-first contract as implementation: explicit `TASK_DIR=<task-dir>` plus verified `<task-dir>/prd.md` is authoritative, and local no-task state is diagnostic only. If GPT-5.5/high/other model override is needed, apply it to this exact `trellis-check` agent type. Generic/default/explorer Codex agents must not perform authoritative TASK_DIR-critical checking; use them only for non-authoritative scouting or a main-session-accepted known-fallible diagnostic path before dispatching `trellis-check`.
 
 [/Codex]
 
@@ -555,7 +578,7 @@ After the above, remind the user they can run `/finish-work` to wrap up (archive
 
 [workflow-state:no_task]
 No active task.
-Codex sub-agent override: if the current prompt contains `TASK_DIR=<task-dir>`, treat that explicit directory as authoritative, verify `<task-dir>/prd.md`, and proceed; do not create a new task or ask the parent to restate it solely because the isolated sub-agent session has no active pointer.
+Codex sub-agent override: if the current prompt contains `TASK_DIR=<task-dir>`, verify `<task-dir>/prd.md`, treat that explicit directory as authoritative, and proceed. In that verified case this no-task state and `task.py current --source` returning `Current task: (none)` are diagnostic only; do not create a new task or ask the parent to choose or restate a task.
 Trigger words in the user message that suggest creating a task: 重构 / 抽成 / 独立 / 分发 / 拆出来 / 搞一个 / 做成 / 接入 / 集成 / refactor / rewrite / extract / productize / publish / build X / design Y.
 Task is NOT required if ALL three hold: (a) zero file writes this turn, (b) answer fits in one reply with no multi-round plan, (c) no research beyond reading 1-2 repo files.
 When in doubt and none of the override phrases below apply: prefer creating a task — over-tasking is cheap; under-tasking leaks plans and research into main context.
@@ -573,7 +596,7 @@ Flow: trellis-implement → trellis-check → trellis-update-spec → finish
 Next required action: inspect conversation history + git status, then execute the next uncompleted step in that sequence.
 For agent-capable platforms, the default is to dispatch `trellis-implement` for implementation and `trellis-check` before reporting completion — do not edit code in the main session by default.
 Codex-specific preflight before dispatching `trellis-implement` or `trellis-check`: run `python3 ./.trellis/scripts/task.py start <task-dir>`, then verify `python3 ./.trellis/scripts/task.py current --source` prints the expected task path in the main session. Include the verified task path in the sub-agent prompt as `TASK_DIR=<task-dir>`. Codex sub-agents are isolated; they should trust and verify explicit `TASK_DIR` first, and treat their own `current --source` as fallback/diagnostic only.
-Use the exact Trellis agent type names when spawning sub-agents: `trellis-implement`, `trellis-check`, or `trellis-research`. Generic/default/generalPurpose sub-agents do not receive `implement.jsonl` / `check.jsonl` injection.
+Use the exact Trellis agent type names when spawning sub-agents: `trellis-implement`, `trellis-check`, or `trellis-research`. For TASK_DIR-critical Trellis work these exact types are required. If GPT-5.5/high/another model override is needed, apply it to the exact Trellis agent type instead of switching to a generic/default/explorer agent. Generic/explorer/default/generalPurpose sub-agents do not receive Trellis role preludes or `implement.jsonl` / `check.jsonl` loading contracts; use them only for non-authoritative scouting or non-Trellis work. For Trellis TASK_DIR work they are forbidden unless the main session explicitly accepts a known-fallible diagnostic-only path; then include the mandatory TASK_DIR prelude from Phase 1.2 and forbid no-task-only replies once `<TASK_DIR>/prd.md` verifies.
 User override (per-turn escape hatch): if the user's CURRENT message explicitly tells the main session to handle it directly ("你直接改" / "别派 sub-agent" / "main session 写就行" / "do it inline" / "不用 sub-agent"), honor it for this turn and edit code directly. Per-turn only; do not carry forward; do NOT invent an override the user did not say.
 [/workflow-state:in_progress]
 
