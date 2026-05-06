@@ -2,9 +2,10 @@
 doc_type: runbook
 status: active
 owner: maintainers
-last_reviewed: 2026-04-30
+last_reviewed: 2026-05-07
 canonical: true
 related_versions:
+  - v0.7.6
   - v0.7.5
   - v0.7.4
   - v0.7.2
@@ -62,15 +63,15 @@ related_versions:
 
 ## Current Performance Evidence
 
-The `v0.7.5` release used the real snapshot DB at `perf-db/clipboard.db`（6421 items / 148647936 bytes）on 2026-04-30.
+The `v0.7.6` release used the real snapshot DB at `perf-db/clipboard.db` (6421 items / 148647936 bytes) on 2026-05-07.
 
-- `make test-snapshot-perf-release`: cmd p95 0.289ms <= 50ms; cm p95 9.187ms <= 20ms.
-- `bash scripts/perf-audit.sh --skip-tests --bench-db perf-db/clipboard.db --bench-metrics --out logs/perf-audit-perf-opt-2026-04-30_23-19-00`: full fuzzy `abc` p95 improved from 5.672ms to 0.490ms, and full fuzzy `cmd` p95 improved from 6.630ms to 0.884ms versus `logs/perf-audit-v0.7.4-current-2026-04-30_20-19-15`.
-- The same audit recorded `fuzzy_sorted_matches_cache_store_count=2051` in warm-load metrics, confirming the bounded first-page top-K cache path was exercised.
-- `make perf-frontend-profile-standard`: generated `logs/perf-frontend-profile-2026-04-30_23-26-29/frontend-scroll-profile-summary.md`.
-- `make perf-unified-table`: generated `logs/perf-unified-2026-04-30_23-29-33.md` from the `v0.7.4` backend baseline, current backend audit, and the standard frontend summary.
+- `make perf-frontend-profile`: generated `logs/perf-frontend-profile-2026-05-07_03-18-32/frontend-scroll-profile-summary.md` after isolating Scopy app processes before the script, between variants, and on exit.
+- `make perf-frontend-profile-standard`: generated `logs/perf-frontend-profile-2026-05-07_03-22-16/frontend-scroll-profile-summary.md` with 1 repeat, 6 seconds per scenario, and a 120-sample minimum.
+- Standard profile row display-model p95 stayed effectively flat across real snapshot scenarios: real-snapshot-accessibility -0.19%, real-snapshot-mixed -1.06%, and real-snapshot-text-bias +2.65%.
+- Standard profile thumbnail total-load p95 improved in the same scenarios: real-snapshot-accessibility -36.92%, real-snapshot-mixed -32.32%, and real-snapshot-text-bias -91.55%.
+- The `v0.7.6` evidence is frontend-focused; `make test-snapshot-perf-release` and backend perf audit were not rerun because the release did not intentionally change search, storage, or warm-load behavior.
 
-Treat the frontend profile as a real-scroll regression smoke, not a clean pre-change/post-change frontend A/B. The script's `baseline` and `current` variants are feature-flag variants inside the same build, while the backend comparison above uses separate audit directories.
+Treat the frontend profile as row/thumbnail regression guardrail evidence, not a blanket UI performance win. The script's `baseline` and `current` variants are feature-flag variants inside the same build, and short-run frame/drop counters remain noisy.
 
 ## Homebrew Acceptance
 

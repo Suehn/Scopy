@@ -1,19 +1,19 @@
-version: v0.7.5
-date: 2026-04-30
-release_doc: doc/releases/history/v0.7.5.md
+version: v0.7.6
+date: 2026-05-07
+release_doc: doc/releases/history/v0.7.6.md
 release_index: doc/releases/README.md
 changelog_file: doc/releases/CHANGELOG.md
-profile_doc: doc/perf/release-profiles/v0.7.5-profile.md
+profile_doc: doc/perf/release-profiles/v0.7.6-profile.md
 runbook_doc: doc/current/release-runbook.md
 spec_doc: doc/current/product-spec.md
 development_doc: doc/current/development-guide.md
 architecture_doc: doc/current/architecture.md
-last_verified_at: 2026-04-30
-summary: Presentation cache reuse fuzzy top-K reuse and settings delta cleanup
+last_verified_at: 2026-05-07
+summary: Trellis TASK_DIR hardening row descriptor thumbnail scheduler and frontend profile isolation
 verification:
   build: pass
   test_unit: pass
   test_strict: pass
-  test_tsan: skipped
-  test_perf_heavy: not_run
-  test_snapshot_perf_release: pass
+  test_tsan: not_run
+  test_perf_heavy: perf_frontend_profile_standard_pass
+  test_snapshot_perf_release: not_run

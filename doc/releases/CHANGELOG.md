@@ -11,6 +11,34 @@
 
 - No unreleased entries.
 
+## [v0.7.6] - 2026-05-07
+
+### Architecture/Frontend
+
+- History rows now build row-ready display data through `HistoryItemRowDescriptor`, keeping title, metadata, thumbnail request, and row metric boundaries in the Presentation layer.
+- Visible row thumbnail loading now routes cache-hit checks, cache-miss priority, scroll-settle waits, cancellation, and path-tagged commit results through `HistoryRowThumbnailLifecycleScheduler`.
+- Image and file thumbnail rows use the scheduler-owned production cache facade for render-time cache reads while keeping SwiftUI `@State` and `.task(id:)` cancellation in the row views.
+
+### Infra/Trellis
+
+- Codex, Claude, and Cursor Trellis hooks and exact agents now treat an explicit `TASK_DIR` with an existing `prd.md` as authoritative, even when isolated local task state reports no current task.
+- Trellis meta docs and workflow guidance now document the TASK_DIR-first subagent contract and the requirement to use exact `trellis-research`, `trellis-implement`, and `trellis-check` agents for authoritative task work.
+
+### Perf/Profiling
+
+- `scripts/perf-frontend-profile.sh` now terminates the Scopy app bundle and leftover `Scopy` executable processes before the first run, between baseline/current variants, and on exit.
+- Frontend quality guidance now records that failed profile runs without a generated summary file are not performance evidence.
+
+### Verification
+
+- `make build`: passed (2026-05-07)
+- `make test-unit`: Executed 413 tests, 1 skipped, 0 failures (2026-05-07)
+- `make test-strict`: Executed 413 tests, 1 skipped, 0 failures (2026-05-07)
+- Focused scheduler, thumbnail pipeline, interaction coordinator, and scroll tests: 23 tests, 0 failures (2026-05-07)
+- `xcodebuild test -project Scopy.xcodeproj -scheme Scopy -destination 'platform=macOS' -only-testing:ScopyUITests/HistoryListUITests/testHistoryListExists`: passed (2026-05-07)
+- `make perf-frontend-profile`: generated `logs/perf-frontend-profile-2026-05-07_03-18-32/frontend-scroll-profile-summary.md` (2026-05-07)
+- `make perf-frontend-profile-standard`: generated `logs/perf-frontend-profile-2026-05-07_03-22-16/frontend-scroll-profile-summary.md` (2026-05-07)
+
 ## [v0.7.5] - 2026-04-30
 
 ### Perf/Internal
