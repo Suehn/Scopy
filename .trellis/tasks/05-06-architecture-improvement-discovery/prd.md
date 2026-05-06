@@ -408,3 +408,260 @@ Validation:
 Next candidate after this slice:
 
 Candidate 3, row asset and preview pipeline Module, is the next likely architecture target if the goal remains performance and maintainability. Before implementing it, run another grill-me decision loop and read frontend specs.
+
+## Phase 2 Candidate Decision: RowAssetDescriptor
+
+Question:
+
+For Candidate 3, should the first behavior-preserving slice only produce a row-ready presentation/asset descriptor Module, or should it also move thumbnail async loading plus scroll-settle budget into that Module immediately?
+
+Answer:
+
+Produce only a row-ready presentation/asset descriptor Module in the first slice. Do not move thumbnail async loading, decoded NSImage state, SwiftUI task identity, cancellation, or scroll-settle budget in this slice.
+
+Rationale:
+
+The row descriptor can be a deeper Module because its Interface stays narrow: ClipboardItemDTO plus SettingsDTO in, row-ready title, metadata, thumbnail settings, file preview summary, PNG export capability, thumbnail visibility, and lightweight asset request data out. Its Implementation can hide current calls to HistoryItemPresentationCache, ClipboardItemDisplayText, FilePreviewSupport, settings-derived thumbnail height, and item-type branching.
+
+Thumbnail async loading is a separate lifecycle/scheduling seam. Moving it now would mix descriptor derivation with State, task identity, cancellation, priority selection from HistoryListInteractionCoordinator.isScrolling, delayed commit after scroll settle, and ThumbnailCache decode/cache behavior. That would widen the first Interface and make the Module shallow.
+
+First-slice rules:
+
+* Introduce an internal row descriptor type under Scopy/Presentation.
+* Move the private HistoryItemDisplayModel derivation out of HistoryItemView into that Module.
+* Keep the descriptor free of NSImage, Task, State, StateObject, and scroll coordinator references.
+* Keep HistoryItemThumbnailView, HistoryItemFileThumbnailView, HistoryItemImagePreviewView, and HistoryItemFilePreviewView owning their existing async thumbnail/file-preview tasks.
+* Preserve current row.display_model_ms instrumentation or move it with the descriptor without changing the metric name.
+
+Evidence:
+
+* HistoryItemView currently builds a private HistoryItemDisplayModel and directly reaches into presentation caches for row-ready data.
+* Image and file thumbnail views duplicate async load and scroll-settle behavior, but existing tests do not yet cover cancellation or scroll-settle scheduling well enough to move that lifecycle safely in the first slice.
+* Frontend specs require row/list/thumbnail/preview performance-sensitive work to stay behind caches/controllers and to use perf gates before claiming performance changes.
+
+Next grill question:
+
+Should the row descriptor Module include app icon lookup/caching in the first slice, or should it expose only an app icon request field such as appBundleID and leave IconService lookup in HistoryItemView until a separate icon/asset loader seam is designed?
+
+### Decision: app icon scope
+
+Question:
+
+Should the row descriptor Module include app icon lookup/caching in the first slice, or should it expose only an app icon request field such as appBundleID and leave IconService lookup in HistoryItemView until a separate icon/asset loader seam is designed?
+
+Answer:
+
+Expose only app icon request data in the descriptor, preferably appIconBundleID. Do not include IconService lookup, NSImage state, NSWorkspace access, or icon cache behavior in the first slice.
+
+Rationale:
+
+The descriptor should remain value-like and testable from ClipboardItemDTO, SettingsDTO, and presentation cache data. IconService is already a separate ScopyUISupport Module with MainActor cache and NSWorkspace load-on-miss behavior. Moving it into the descriptor would mix presentation derivation with AppKit resource lookup and would not cover HeaderView, which also uses IconService.
+
+First-slice rule:
+
+HistoryItemView may replace direct item.appBundleID access with descriptor.appIconBundleID, but it should continue calling IconService.shared.icon(bundleID:) and rendering the existing ScopyIcons.app fallback.
+
+### Decision: descriptor placement
+
+Question:
+
+Should the first RowAssetDescriptor implementation be placed in Scopy/Presentation as HistoryItemRowDescriptor with injectable cache dependencies for tests, or should it stay as an internal nested/private type near HistoryItemView until its Interface stabilizes?
+
+Answer:
+
+Place the first implementation in Scopy/Presentation as an internal app-target type named HistoryItemRowDescriptor, with narrow injectable presentation dependencies for focused tests. Do not keep it private inside HistoryItemView, and do not publish it through ScopyKit or ScopyUISupport.
+
+Rationale:
+
+The descriptor is already more than view-local rendering: it adapts ClipboardItemDTO, SettingsDTO, HistoryItemPresentationCache, and ClipboardItemDisplayText into a row-ready contract. Scopy/Presentation is the project-local home for UI-facing formatting and presentation caches, while ScopyKit excludes Presentation and ScopyUISupport should stay focused on reusable support services such as IconService and ThumbnailCache.
+
+Implementation shape:
+
+* Add Scopy/Presentation/HistoryItemRowDescriptor.swift.
+* Move the current HistoryItemDisplayModel fields and initializer logic from HistoryItemView into that internal type.
+* Add a tiny dependency container for display text derivation and presentation derivation, defaulting to ClipboardItemDisplayText.shared and HistoryItemPresentationCache.shared.
+* Keep HistoryItemView responsible for rendering, row interaction, hover/popovers, row controller state, preview coordinator state, icon lookup, and thumbnail view composition.
+* Add ScopyTests/HistoryItemRowDescriptorTests.swift with focused descriptor parity and dependency tests.
+
+### Decision: metric continuity
+
+Question:
+
+Should the descriptor production path keep the existing row.display_model_ms metric name around HistoryItemRowDescriptor construction, or rename it to a new metric such as row.descriptor_ms and update perf analysis scripts/docs in the same slice?
+
+Answer:
+
+Keep row.display_model_ms for the first behavior-preserving extraction.
+
+Rationale:
+
+This slice is an internal ownership refactor, not a measurement taxonomy change. Keeping the metric name preserves continuity with existing perf scripts, unified perf tables, and profile history while still measuring the same row descriptor construction work. A later metric rename can happen only if the descriptor Interface stabilizes and the profiling story needs a clearer name.
+
+## Candidate 3 Implementation Summary
+
+Implemented the first RowAssetDescriptor slice as a behavior-preserving frontend architecture refactor.
+
+Files:
+
+* Scopy/Presentation/HistoryItemRowDescriptor.swift
+* Scopy/Views/History/HistoryItemView.swift
+* ScopyTests/HistoryItemRowDescriptorTests.swift
+* Scopy.xcodeproj/project.pbxproj
+
+What changed:
+
+* Added an internal @MainActor HistoryItemRowDescriptor in Scopy/Presentation.
+* Moved the former private HistoryItemDisplayModel derivation out of HistoryItemView into the descriptor.
+* Descriptor inputs are ClipboardItemDTO, SettingsDTO, and a tiny injectable dependency container for display text, file preview summary, and PNG export capability.
+* Descriptor outputs include titleText, metadataText, thumbnailHeight, showThumbnails, file preview fields, thumbnail flags, PNG export capability, needsThumbnailHeight, and appIconBundleID.
+* HistoryItemView still owns rendering, row interaction, popovers, row controller state, preview coordinator state, IconService.shared.icon(bundleID:), and thumbnail/file-preview view composition.
+* Kept thumbnail async loading, scroll-settle behavior, decoded image state, preview tasks, and popover lifecycle out of the descriptor.
+* Preserved the row.display_model_ms metric name around descriptor construction.
+
+Validation:
+
+* xcodebuild test -project Scopy.xcodeproj -scheme Scopy -destination 'platform=macOS' -only-testing:ScopyTests/HistoryItemRowDescriptorTests: passed, 5 tests.
+* make build: passed.
+* make test-unit: passed, 403 tests, 1 skipped.
+* make test-strict: passed, 403 tests, 1 skipped.
+* make perf-frontend-profile: passed, 3 UI scroll profile tests; summary at logs/perf-frontend-profile-2026-05-07_01-10-56/frontend-scroll-profile-summary.md.
+
+Follow-up:
+
+* Frontend perf smoke was run as a regression guard, but this slice does not claim a performance improvement because it did not move async thumbnail, scroll-settle, preview scheduling, or render lifecycle behavior.
+* A future Candidate 3 slice can design an actual asset-loader seam for icons/thumbnails only after adding lifecycle/cancellation/scroll-settle coverage.
+
+## Phase 2 Candidate Decision: RowThumbnailLifecycleScheduler
+
+Question:
+
+For the next Candidate 3 slice after HistoryItemRowDescriptor, should we implement an actual row asset-loader seam for icons/thumbnails now, or first add/extract a testable thumbnail/icon lifecycle scheduler seam that preserves current loading in the SwiftUI row views?
+
+Answer:
+
+Extract a testable row thumbnail lifecycle scheduler first. Do not implement a broad row asset-loader seam that owns NSImage loading, ThumbnailCache, IconService, or row preview image state in this slice.
+
+Rationale:
+
+ThumbnailCache already owns cache lookup, bounded decode concurrency, in-flight dedupe, ImageIO decode, NSImage creation, cache store, and thumbnail metrics. The duplicated Implementation now lives in the row lifecycle policy: path reset, cache-hit short-circuit, priority selection while scrolling, cache-miss load, delayed commit until scroll settles, cancellation guards, and final state commit.
+
+The useful Module seam is between SwiftUI row lifecycle and ThumbnailCache, not between the row and a new asset-loading service. Keeping the Interface focused on lifecycle scheduling gives Locality for the fragile timing/cancellation rule and Leverage through focused tests.
+
+### Decision: scheduler preview scope
+
+Question:
+
+Should the lifecycle scheduler first slice be scoped only to visible row thumbnails (HistoryItemThumbnailView and HistoryItemFileThumbnailView), or should it also cover preview fallback thumbnails in HistoryItemImagePreviewView and HistoryItemFilePreviewView with a no-scroll-settle policy mode?
+
+Answer:
+
+Scope the first scheduler slice only to visible row thumbnails: HistoryItemThumbnailView and HistoryItemFileThumbnailView. Do not include preview fallback thumbnails in HistoryItemImagePreviewView or HistoryItemFilePreviewView in this slice.
+
+Rationale:
+
+The two row thumbnail views duplicate the same row-list contract almost line for line. Preview fallback thumbnails are related but semantically different: they always use userInitiated priority today, do not wait for scroll settling, and are mixed with popover preview timing, file availability, QuickLook, video sizing, markdown routing, and file icon fallback. Adding a preview mode now would widen the Interface before the row scheduler contract is proven.
+
+### Decision: scheduler Interface
+
+Question:
+
+Should the row thumbnail lifecycle scheduler be implemented as a pure value-returning policy that the views apply to @State, or as an async helper method that owns cache lookup/load/wait and returns a commit result for the current path?
+
+Answer:
+
+Implement an internal @MainActor async helper named HistoryRowThumbnailLifecycleScheduler. It should own cache lookup, cache-miss load, priority selection, scroll-settle waiting, cancellation checks, and return a typed path-tagged commit result. SwiftUI row thumbnail views still own @State loadedThumbnail and lastLoadedPath and perform the final state application guard.
+
+Proposed Interface:
+
+* HistoryRowThumbnailLifecycleScheduler.cachedImage(for:)
+* HistoryRowThumbnailLifecycleScheduler.loadCommitResult(for:)
+* HistoryRowThumbnailLifecycleScheduler.CommitResult(path:image:source:)
+* HistoryRowThumbnailLifecycleScheduler.Dependencies for cachedImage, loadImage, isScrolling, sleep, and isCancelled.
+
+Rules:
+
+* Keep .task(id: thumbnailPath) as the SwiftUI trigger and cancellation boundary.
+* Keep loadedThumbnail, lastLoadedPath, placeholders, video overlay, sizing, padding, and accessibility identifiers in the existing row thumbnail views.
+* Keep cache hits immediate and skip scroll-settle waiting for cache hits.
+* Keep cache misses using .utility while interactionCoordinator.isScrolling is true and .userInitiated otherwise.
+* Keep the bounded 20 x 80 ms scroll-settle behavior before committing cache-miss results.
+* Keep preview fallback views, IconService, ThumbnailCache internals, NSImage cache ownership, QuickLook, video sizing, markdown routing, and file-existence checks out of scope.
+
+Test plan:
+
+* Add ScopyTests/HistoryRowThumbnailLifecycleSchedulerTests.swift.
+* Cover cache hit without load/sleep, cache miss priority while not scrolling, cache miss priority while scrolling, bounded wait, cancellation before load/after load/during scroll-settle, nil load result, and path-tagged commit result.
+* Keep ThumbnailPipelineTests as ThumbnailCache coverage.
+* Run focused scheduler tests plus ThumbnailPipelineTests, HistoryListInteractionCoordinatorTests, HistoryItemRowDescriptorTests, and ScrollPerformanceTests.
+
+Validation plan:
+
+* make build
+* make test-unit
+* make test-strict
+* make perf-frontend-profile at minimum because row/list/thumbnail hot paths are touched.
+* Do not claim a performance win unless fresh profile output shows preservation or improvement.
+
+## Implementation Summary: RowThumbnailLifecycleScheduler
+
+Implemented:
+
+* Added internal @MainActor HistoryRowThumbnailLifecycleScheduler under Scopy/Views/History.
+* Centralized row thumbnail cache lookup, cache-miss priority selection, ThumbnailCache loading, cancellation checks, and bounded 20 x 80 ms scroll-settle waiting.
+* Kept HistoryItemThumbnailView and HistoryItemFileThumbnailView as SwiftUI adapters that own @State loadedThumbnail/lastLoadedPath, render placeholders/overlays/accessibility identifiers, and apply path-tagged commit results only when still current.
+* Left preview fallback thumbnails, IconService, ThumbnailCache internals, QuickLook, markdown routing, file-existence checks, and performance claims out of scope.
+* Added HistoryRowThumbnailLifecycleSchedulerTests for cache-hit no-load/no-sleep behavior, cache-miss priority, scroll-settle waiting, bounded wait, cancellation before load/after load/during wait, nil loads, and path tagging.
+
+Validation:
+
+* xcodebuild test -project Scopy.xcodeproj -scheme Scopy -destination 'platform=macOS' -only-testing:ScopyTests/HistoryRowThumbnailLifecycleSchedulerTests: passed, 9 tests.
+* xcodebuild test -project Scopy.xcodeproj -scheme Scopy -destination 'platform=macOS' -only-testing:ScopyTests/ThumbnailPipelineTests -only-testing:ScopyTests/HistoryListInteractionCoordinatorTests -only-testing:ScopyTests/HistoryItemRowDescriptorTests -only-testing:ScopyTests/ScrollPerformanceTests: passed, 18 tests.
+* make build: passed.
+* make test-unit: passed, 412 tests, 1 skipped.
+* make test-strict: passed, 412 tests, 1 skipped.
+* make perf-frontend-profile: passed, 3 UI scroll profile tests; summary at logs/perf-frontend-profile-2026-05-07_02-05-45/frontend-scroll-profile-summary.md.
+
+Follow-up:
+
+* The frontend perf smoke is a regression guard only. It produced mixed/noisy metric deltas: row/display buckets stayed broadly stable, while thumbnail total/decode buckets worsened in two scenarios and improved in text-bias. Because thumbnail total latency can include scheduling/deferral, do not claim a performance win from this slice.
+
+## Implementation Note: Static Production Cache Facade
+
+Implemented:
+
+* Added HistoryRowThumbnailLifecycleScheduler.productionCachedImage(for:) as the scheduler-owned production facade for synchronous row cache reads.
+* Replaced body-local HistoryRowThumbnailLifecycleScheduler construction in HistoryItemThumbnailView and HistoryItemFileThumbnailView with the static facade, preserving the loaded @State fallback.
+* Kept loadThumbnailIfNeeded(path:) on both row thumbnail views using an instance scheduler for loadCommitResult(for:), including interactionCoordinator priority, scroll-settle waiting, cancellation checks, and final path guards.
+* Left preview fallback views, ThumbnailCache internals, IconService, QuickLook/video sizing, accessibility identifiers, and metric names out of scope.
+* Added focused scheduler coverage that proves productionCachedImage(for:) reads ThumbnailCache.shared.
+
+Validation:
+
+* xcodebuild test -project Scopy.xcodeproj -scheme Scopy -destination 'platform=macOS' -only-testing:ScopyTests/HistoryRowThumbnailLifecycleSchedulerTests -only-testing:ScopyTests/ThumbnailPipelineTests -only-testing:ScopyTests/HistoryListInteractionCoordinatorTests -only-testing:ScopyTests/ScrollPerformanceTests: passed, 23 tests.
+* make build: passed.
+* make test-unit: passed, 413 tests, 1 skipped.
+* make test-strict: passed, 413 tests, 1 skipped.
+* xcodebuild test -project Scopy.xcodeproj -scheme Scopy -destination 'platform=macOS' -only-testing:ScopyUITests/HistoryListUITests/testHistoryListExists: passed after clearing residual Scopy processes, 1 UI test.
+
+Validation stability fix:
+
+* make perf-frontend-profile initially failed before producing a summary at logs/perf-frontend-profile-2026-05-07_02-58-16 because the real-snapshot UI tests could not find Window/History.List; the latest diagnostic report showed the app process crashing in XCTest automation support, faulting on com.apple.dt.xctautomationsupport.automation-session inside XCElementSnapshot recursivelyClearDataSource, not in the descriptor or scheduler code.
+* Added process isolation to scripts/perf-frontend-profile.sh: quit com.scopy.app, clear residual Scopy executable processes before the script, before/after each baseline/current variant run, and on exit. This prevents stale app instances or poisoned XCTest automation state from invalidating the profile gate.
+* Updated .trellis/spec/frontend/quality-guidelines.md with the frontend profile isolation rule and the rule that failed profile runs without a summary are not performance evidence.
+* bash -n scripts/perf-frontend-profile.sh: passed.
+* bash scripts/perf-frontend-profile.sh --repeats 1 --duration 4 --min-samples 60 --skip-setup: passed, 3 baseline UI profile tests and 3 current UI profile tests; summary at logs/perf-frontend-profile-2026-05-07_03-15-51/frontend-scroll-profile-summary.md.
+* make perf-frontend-profile: passed, 3 baseline UI profile tests and 3 current UI profile tests; summary at logs/perf-frontend-profile-2026-05-07_03-18-32/frontend-scroll-profile-summary.md.
+* make perf-frontend-profile-standard: passed, 3 baseline UI profile tests and 3 current UI profile tests; summary at logs/perf-frontend-profile-2026-05-07_03-22-16/frontend-scroll-profile-summary.md.
+* git diff --check: passed after these changes.
+
+Performance interpretation:
+
+* Standard profile evidence shows no row descriptor regression: row.display_model_ms.p95 was stable across real-snapshot scenarios (-0.19%, -1.06%, +2.65%).
+* Standard profile evidence shows thumbnail load total p95 improved across real-snapshot scenarios (-36.92%, -32.32%, -91.55%).
+* Standard profile evidence still shows small/noisy UI sampling variation in frame_p95 for text-bias and main_runloop/row.file_preview buckets, so this slice should be described as architecture/stability/testability improvement with stronger thumbnail-path evidence, not as a blanket UI performance win.
+
+Final check:
+
+* gpt-5.5 high trellis-check final_check_trellis_architecture_hardening reported no findings and made no self-fixes.
+* The check reran/trusted the relevant gates: git diff --check, task validation for both 05-06-architecture-improvement-discovery and 05-06-codex-taskdir-override-docs, bash -n scripts/perf-frontend-profile.sh, Python py_compile on modified Trellis hooks, and Claude/Cursor explicit TASK_DIR hook smoke.
+* The check confirmed Candidate 3 boundaries stayed intact: HistoryItemRowDescriptor remains presentation-only, IconService and preview fallback stay outside the slice, and HistoryRowThumbnailLifecycleScheduler centralizes row thumbnail cache/load/priority/scroll-settle/cancellation without becoming a broad asset loader.

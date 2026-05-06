@@ -1,5 +1,25 @@
-{"file": ".trellis/spec/backend/index.md", "reason": "Backend package entrypoint for ScopyKit search and persistence work."}
-{"file": ".trellis/spec/backend/search-guidelines.md", "reason": "SearchEngineImpl and search index/cache changes must preserve planner and query behavior."}
-{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "Search disk-cache fingerprinting depends on SQLite database/WAL/SHM semantics."}
-{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Architecture refactors must preserve behavior and pass relevant build/test/perf gates."}
+{"file": ".trellis/spec/frontend/index.md", "reason": "Frontend package entrypoint for native macOS UI, presentation caches, and row/list work."}
+{"file": ".trellis/spec/frontend/directory-structure.md", "reason": "Row descriptor placement must follow Scopy UI/Presentation/Support directory boundaries."}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "History row changes must preserve List recycling, row behavior, preview/thumbnail cache boundaries, and accessibility identifiers."}
+{"file": ".trellis/spec/frontend/hook-guidelines.md", "reason": "The first slice must avoid moving view-owned async tasks, cancellation, and scroll-settle lifecycle into the descriptor."}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "SwiftUI row and presentation state changes must respect @MainActor and Observation boundaries."}
+{"file": ".trellis/spec/frontend/type-safety.md", "reason": "Descriptor types should use explicit Swift DTO/value surfaces without widening row interfaces."}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "Row/list/thumbnail/preview hot-path changes require focused tests and frontend perf gates."}
 {"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Architecture slices should deepen existing modules instead of duplicating logic."}
+{"file": ".trellis/tasks/05-06-architecture-improvement-discovery/research/candidate3-row-asset-scope.md", "reason": "GPT-5.5 grill decision for Candidate 3 first-slice scope."}
+{"file": ".trellis/tasks/05-06-architecture-improvement-discovery/research/candidate3-icon-scope.md", "reason": "GPT-5.5 grill decision to keep app icon lookup out of the descriptor first slice."}
+{"file": ".trellis/tasks/05-06-architecture-improvement-discovery/research/candidate3-descriptor-placement.md", "reason": "GPT-5.5 grill decision for descriptor placement and test dependency shape."}
+{"file": ".trellis/tasks/05-06-architecture-improvement-discovery/research/candidate3-descriptor-metric-naming.md", "reason": "GPT-5.5 grill decision to preserve row.display_model_ms metric continuity."}
+{"file": ".trellis/tasks/05-06-architecture-improvement-discovery/research/candidate3-asset-loader-scope.md", "reason": "GPT-5.5 grill decision: extract lifecycle scheduler before broad row asset loader."}
+{"file": ".trellis/tasks/05-06-architecture-improvement-discovery/research/candidate3-scheduler-preview-scope.md", "reason": "GPT-5.5 grill decision: row thumbnail scheduler first, preview fallback out of scope."}
+{"file": ".trellis/tasks/05-06-architecture-improvement-discovery/research/candidate3-scheduler-interface.md", "reason": "GPT-5.5 grill decision: @MainActor async scheduler returning path-tagged commit result."}
+{"file": ".trellis/tasks/05-06-architecture-improvement-discovery/research/candidate3-hot-path-cache-read.md", "reason": "Candidate 3 grill decision for static scheduler-owned production cache read."}
+{"file": "scripts/perf-frontend-profile.sh", "reason": "Frontend profile process isolation fix for reliable real-snapshot UI performance gate"}
+{"file": "doc/meta/release-current.yml", "reason": "Release metadata updated for v0.7.6 architecture and profile evidence"}
+{"file": "doc/releases/history/v0.7.6.md", "reason": "Release note for Trellis TASK_DIR hardening and row descriptor scheduler work"}
+{"file": "doc/releases/README.md", "reason": "Current release index mirrors v0.7.6 metadata"}
+{"file": "doc/releases/CHANGELOG.md", "reason": "Changelog records v0.7.6 architecture profiling and Trellis hardening"}
+{"file": "doc/perf/release-profiles/v0.7.6-profile.md", "reason": "Dedicated frontend profile evidence for row descriptor scheduler and profile isolation"}
+{"file": "doc/perf/README.md", "reason": "Performance portal points at latest v0.7.6 profile"}
+{"file": "doc/perf/release-profiles/README.md", "reason": "Release profile portal points at latest v0.7.6 profile"}
+{"file": "doc/current/release-runbook.md", "reason": "Runbook current performance evidence updated for v0.7.6 frontend profile"}

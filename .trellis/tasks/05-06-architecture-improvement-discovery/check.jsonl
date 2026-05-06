@@ -1,6 +1,25 @@
-{"file": ".trellis/spec/backend/index.md", "reason": "Check agents should start from the backend package spec index."}
-{"file": ".trellis/spec/backend/search-guidelines.md", "reason": "Verify search cache refactors preserve planner decisions, query semantics, and warm-load behavior."}
-{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "Verify disk cache fingerprinting and persistence remain compatible with SQLite file behavior."}
-{"file": ".trellis/spec/backend/error-handling.md", "reason": "Best-effort cache failures must remain non-fatal and not mask search behavior regressions."}
-{"file": ".trellis/spec/backend/logging-guidelines.md", "reason": "Search warm-load/debug logging should stay structured and non-invasive."}
-{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Check agents must enforce build, unit, strict concurrency, and relevant performance gates."}
+{"file": ".trellis/spec/frontend/index.md", "reason": "Check agents should start from the frontend package spec index for row/presentation changes."}
+{"file": ".trellis/spec/frontend/directory-structure.md", "reason": "Verify descriptor placement matches UI/Presentation/Support boundaries."}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "Verify History row behavior, List recycling assumptions, cache boundaries, and accessibility identifiers are preserved."}
+{"file": ".trellis/spec/frontend/hook-guidelines.md", "reason": "Verify descriptor extraction does not accidentally move async task ownership, cancellation, or scroll-settle behavior."}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "Verify MainActor, Swift Observation, and row state boundaries remain correct."}
+{"file": ".trellis/spec/frontend/type-safety.md", "reason": "Verify the new descriptor Interface is explicit and does not widen caller knowledge."}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "Verify focused tests and relevant frontend perf gates for row/list/preview changes."}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Check that this is a deep Module extraction, not a pass-through split."}
+{"file": ".trellis/tasks/05-06-architecture-improvement-discovery/research/candidate3-row-asset-scope.md", "reason": "Check implementation against the GPT-5.5 Candidate 3 scope decision."}
+{"file": ".trellis/tasks/05-06-architecture-improvement-discovery/research/candidate3-icon-scope.md", "reason": "Check that app icon lookup/caching stayed outside the first descriptor slice."}
+{"file": ".trellis/tasks/05-06-architecture-improvement-discovery/research/candidate3-descriptor-placement.md", "reason": "Check descriptor placement and dependency injection shape."}
+{"file": ".trellis/tasks/05-06-architecture-improvement-discovery/research/candidate3-descriptor-metric-naming.md", "reason": "Check that row.display_model_ms metric continuity is preserved."}
+{"file": ".trellis/tasks/05-06-architecture-improvement-discovery/research/candidate3-asset-loader-scope.md", "reason": "Check scheduler implementation against GPT-5.5 lifecycle scheduler scope decision."}
+{"file": ".trellis/tasks/05-06-architecture-improvement-discovery/research/candidate3-scheduler-preview-scope.md", "reason": "Check preview fallback remains out of scheduler first slice."}
+{"file": ".trellis/tasks/05-06-architecture-improvement-discovery/research/candidate3-scheduler-interface.md", "reason": "Check async scheduler Interface, cancellation, path tagging, and view state ownership."}
+{"file": ".trellis/tasks/05-06-architecture-improvement-discovery/research/candidate3-hot-path-cache-read.md", "reason": "Candidate 3 check context for static scheduler-owned cache read cleanup."}
+{"file": "scripts/perf-frontend-profile.sh", "reason": "Verify frontend profile process isolation and performance gate reliability"}
+{"file": "doc/meta/release-current.yml", "reason": "Release metadata updated for v0.7.6 architecture and profile evidence"}
+{"file": "doc/releases/history/v0.7.6.md", "reason": "Release note for Trellis TASK_DIR hardening and row descriptor scheduler work"}
+{"file": "doc/releases/README.md", "reason": "Current release index mirrors v0.7.6 metadata"}
+{"file": "doc/releases/CHANGELOG.md", "reason": "Changelog records v0.7.6 architecture profiling and Trellis hardening"}
+{"file": "doc/perf/release-profiles/v0.7.6-profile.md", "reason": "Dedicated frontend profile evidence for row descriptor scheduler and profile isolation"}
+{"file": "doc/perf/README.md", "reason": "Performance portal points at latest v0.7.6 profile"}
+{"file": "doc/perf/release-profiles/README.md", "reason": "Release profile portal points at latest v0.7.6 profile"}
+{"file": "doc/current/release-runbook.md", "reason": "Runbook current performance evidence updated for v0.7.6 frontend profile"}
