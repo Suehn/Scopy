@@ -6,14 +6,14 @@
 {"file": ".trellis/spec/frontend/type-safety.md", "reason": "Verify the new descriptor Interface is explicit and does not widen caller knowledge."}
 {"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "Verify focused tests and relevant frontend perf gates for row/list/preview changes."}
 {"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Check that this is a deep Module extraction, not a pass-through split."}
-{"file": ".trellis/tasks/05-06-architecture-improvement-discovery/research/candidate3-row-asset-scope.md", "reason": "Check implementation against the GPT-5.5 Candidate 3 scope decision."}
-{"file": ".trellis/tasks/05-06-architecture-improvement-discovery/research/candidate3-icon-scope.md", "reason": "Check that app icon lookup/caching stayed outside the first descriptor slice."}
-{"file": ".trellis/tasks/05-06-architecture-improvement-discovery/research/candidate3-descriptor-placement.md", "reason": "Check descriptor placement and dependency injection shape."}
-{"file": ".trellis/tasks/05-06-architecture-improvement-discovery/research/candidate3-descriptor-metric-naming.md", "reason": "Check that row.display_model_ms metric continuity is preserved."}
-{"file": ".trellis/tasks/05-06-architecture-improvement-discovery/research/candidate3-asset-loader-scope.md", "reason": "Check scheduler implementation against GPT-5.5 lifecycle scheduler scope decision."}
-{"file": ".trellis/tasks/05-06-architecture-improvement-discovery/research/candidate3-scheduler-preview-scope.md", "reason": "Check preview fallback remains out of scheduler first slice."}
-{"file": ".trellis/tasks/05-06-architecture-improvement-discovery/research/candidate3-scheduler-interface.md", "reason": "Check async scheduler Interface, cancellation, path tagging, and view state ownership."}
-{"file": ".trellis/tasks/05-06-architecture-improvement-discovery/research/candidate3-hot-path-cache-read.md", "reason": "Candidate 3 check context for static scheduler-owned cache read cleanup."}
+{"file": ".trellis/tasks/archive/2026-05/05-06-architecture-improvement-discovery/research/candidate3-row-asset-scope.md", "reason": "Check implementation against the GPT-5.5 Candidate 3 scope decision."}
+{"file": ".trellis/tasks/archive/2026-05/05-06-architecture-improvement-discovery/research/candidate3-icon-scope.md", "reason": "Check that app icon lookup/caching stayed outside the first descriptor slice."}
+{"file": ".trellis/tasks/archive/2026-05/05-06-architecture-improvement-discovery/research/candidate3-descriptor-placement.md", "reason": "Check descriptor placement and dependency injection shape."}
+{"file": ".trellis/tasks/archive/2026-05/05-06-architecture-improvement-discovery/research/candidate3-descriptor-metric-naming.md", "reason": "Check that row.display_model_ms metric continuity is preserved."}
+{"file": ".trellis/tasks/archive/2026-05/05-06-architecture-improvement-discovery/research/candidate3-asset-loader-scope.md", "reason": "Check scheduler implementation against GPT-5.5 lifecycle scheduler scope decision."}
+{"file": ".trellis/tasks/archive/2026-05/05-06-architecture-improvement-discovery/research/candidate3-scheduler-preview-scope.md", "reason": "Check preview fallback remains out of scheduler first slice."}
+{"file": ".trellis/tasks/archive/2026-05/05-06-architecture-improvement-discovery/research/candidate3-scheduler-interface.md", "reason": "Check async scheduler Interface, cancellation, path tagging, and view state ownership."}
+{"file": ".trellis/tasks/archive/2026-05/05-06-architecture-improvement-discovery/research/candidate3-hot-path-cache-read.md", "reason": "Candidate 3 check context for static scheduler-owned cache read cleanup."}
 {"file": "scripts/perf-frontend-profile.sh", "reason": "Verify frontend profile process isolation and performance gate reliability"}
 {"file": "doc/meta/release-current.yml", "reason": "Release metadata updated for v0.7.6 architecture and profile evidence"}
 {"file": "doc/releases/history/v0.7.6.md", "reason": "Release note for Trellis TASK_DIR hardening and row descriptor scheduler work"}

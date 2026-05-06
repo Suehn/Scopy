@@ -12,12 +12,15 @@ Provides:
 
 from __future__ import annotations
 
+import json
 import shutil
 import sys
 from datetime import datetime
 from pathlib import Path
 
 from .paths import get_repo_root, get_tasks_dir
+
+_CONTEXT_JSONL_FILES = ("implement.jsonl", "check.jsonl")
 
 
 # =============================================================================
@@ -143,6 +146,114 @@ def archive_task_dir(task_dir_abs: Path, repo_root: Path | None = None) -> Path 
     return dest
 
 
+def _repo_relative_posix(path: Path, repo_root: Path) -> str:
+    """Return a repo-relative POSIX path without requiring the path to exist."""
+    try:
+        return path.relative_to(repo_root).as_posix()
+    except ValueError:
+        try:
+            return path.resolve().relative_to(repo_root.resolve()).as_posix()
+        except ValueError:
+            return path.as_posix()
+
+
+def _normalize_context_path(path: str) -> str:
+    """Normalize JSONL context paths for prefix comparison."""
+    normalized = path.replace("\\", "/")
+    while normalized.startswith("./"):
+        normalized = normalized[2:]
+    return normalized
+
+
+def _rewrite_task_local_path(file_path: str, source_task_rel: str, archive_task_rel: str) -> str | None:
+    """Return the archived path when a context path points inside the source task."""
+    normalized = _normalize_context_path(file_path)
+    if normalized == source_task_rel:
+        return archive_task_rel
+    if normalized.startswith(f"{source_task_rel}/"):
+        return f"{archive_task_rel}{normalized[len(source_task_rel):]}"
+    return None
+
+
+def _split_eol(line: str) -> tuple[str, str]:
+    """Split one line into body and its original end-of-line marker."""
+    if line.endswith("\r\n"):
+        return line[:-2], "\r\n"
+    if line.endswith("\n"):
+        return line[:-1], "\n"
+    return line, ""
+
+
+def _rewrite_context_jsonl_paths(jsonl_file: Path, source_task_rel: str, archive_task_rel: str) -> int:
+    """Rewrite task-local file entries in one context JSONL file."""
+    if not jsonl_file.is_file():
+        return 0
+
+    rewritten = 0
+    output_lines: list[str] = []
+    for line in jsonl_file.read_text(encoding="utf-8").splitlines(keepends=True):
+        body, eol = _split_eol(line)
+        if not body.strip():
+            output_lines.append(line)
+            continue
+
+        try:
+            data = json.loads(body)
+        except json.JSONDecodeError:
+            output_lines.append(line)
+            continue
+
+        if not isinstance(data, dict):
+            output_lines.append(line)
+            continue
+
+        file_path = data.get("file")
+        if not isinstance(file_path, str):
+            output_lines.append(line)
+            continue
+
+        rewritten_path = _rewrite_task_local_path(file_path, source_task_rel, archive_task_rel)
+        if rewritten_path is None:
+            output_lines.append(line)
+            continue
+
+        data["file"] = rewritten_path
+        output_lines.append(json.dumps(data, ensure_ascii=False) + eol)
+        rewritten += 1
+
+    if rewritten:
+        jsonl_file.write_text("".join(output_lines), encoding="utf-8")
+
+    return rewritten
+
+
+def rewrite_archived_task_context_paths(
+    source_task_dir_abs: Path,
+    archive_task_dir_abs: Path,
+    repo_root: Path | None = None,
+) -> int:
+    """Rewrite archived task context JSONL paths that pointed at the source task.
+
+    Only the top-level file field is rewritten, and only when it points at the
+    exact task directory being archived. Specs, docs, sibling tasks, seed rows,
+    reasons, and malformed rows are left untouched.
+    """
+    if repo_root is None:
+        repo_root = get_repo_root()
+
+    source_task_rel = _repo_relative_posix(source_task_dir_abs, repo_root)
+    archive_task_rel = _repo_relative_posix(archive_task_dir_abs, repo_root)
+
+    rewritten = 0
+    for jsonl_name in _CONTEXT_JSONL_FILES:
+        rewritten += _rewrite_context_jsonl_paths(
+            archive_task_dir_abs / jsonl_name,
+            source_task_rel,
+            archive_task_rel,
+        )
+    return rewritten
+
+
 def archive_task_complete(
     task_dir_abs: Path,
     repo_root: Path | None = None
@@ -160,9 +271,13 @@ def archive_task_complete(
         print(f"Error: task directory not found: {task_dir_abs}", file=sys.stderr)
         return {}
 
+    if repo_root is None:
+        repo_root = get_repo_root()
+
     archive_dest = archive_task_dir(task_dir_abs, repo_root)
     if archive_dest:
-        return {"archived_to": str(archive_dest)}
+        rewritten = rewrite_archived_task_context_paths(task_dir_abs, archive_dest, repo_root)
+        return {"archived_to": str(archive_dest), "context_paths_rewritten": str(rewritten)}
 
     return {}
 

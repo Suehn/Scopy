@@ -1,3 +1,3 @@
 {"file":".trellis/spec/backend/quality-guidelines.md","reason":"Check Trellis hook/script prompt changes against tooling quality rules."}
 {"file":".trellis/spec/frontend/quality-guidelines.md","reason":"Check agent workflow changes against UI/task validation expectations."}
-{"file":".trellis/tasks/05-06-codex-taskdir-override-docs/prd.md","reason":"Acceptance criteria for Codex TASK_DIR system hardening."}
+{"file": ".trellis/tasks/archive/2026-05/05-06-codex-taskdir-override-docs/prd.md", "reason": "Acceptance criteria for Codex TASK_DIR system hardening."}

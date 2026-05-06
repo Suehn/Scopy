@@ -1,0 +1,6 @@
+{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/scripts/common/task_store.py", "reason": "Archive command lifecycle implementation"}
+{"file": ".trellis/scripts/common/task_utils.py", "reason": "Archive directory move helper"}
+{"file": ".trellis/scripts/common/task_context.py", "reason": "JSONL validation semantics to preserve"}
+{"file": ".trellis/tasks/archive/2026-05/05-06-architecture-improvement-discovery/prd.md", "reason": "Real failing archived task example"}
+{"file": ".trellis/tasks/05-07-archive-context-path-rewrite/research/archive-context-path-design.md", "reason": "Design grill answers and implementation evidence for archive context path rewriting"}
