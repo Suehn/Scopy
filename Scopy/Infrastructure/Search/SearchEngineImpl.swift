@@ -2564,6 +2564,10 @@ public actor SearchEngineImpl {
         }
         try Task.checkCancellation()
 
+        let plan = SearchPlanner.plan(request: request, state: searchPlannerState(for: request))
+        perf?.addReason("search_plan_path:\(plan.path.rawValue)")
+        perf?.addReason("search_plan_reason:\(plan.reason.rawValue)")
+
         switch request.mode {
         case .exact:
             return try await searchExact(request: request)
@@ -2574,6 +2578,16 @@ public actor SearchEngineImpl {
         case .regex:
             return try await searchRegex(request: request)
         }
+    }
+
+    private func searchPlannerState(for request: SearchRequest) -> SearchPlanner.State {
+        let trimmedQuery = request.query.trimmingCharacters(in: .whitespacesAndNewlines)
+        return SearchPlanner.State(
+            fullIndexReady: fullIndex != nil && !fullIndexStale,
+            shortQueryIndexReady: shortQueryIndex != nil,
+            prefersFTSForFuzzy: shouldPreferFTSForFuzzy(query: trimmedQuery),
+            shortQueryCacheLimit: shortQueryCacheSize
+        )
     }
 
     private func searchExact(request: SearchRequest) async throws -> SearchResult {
@@ -2674,13 +2688,7 @@ public actor SearchEngineImpl {
     }
 
     private func fuzzyPlusTokens(_ queryLower: String) -> [String] {
-        let trimmed = queryLower.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.isEmpty { return [] }
-
-        return trimmed
-            .split(whereSeparator: \.isWhitespace)
-            .map(String.init)
-            .filter { !$0.isEmpty }
+        SearchPlanner.fuzzyPlusTokens(queryLower)
     }
 
     private func buildTrigramFTSQuery(tokens: [String]) -> String? {
@@ -2705,10 +2713,7 @@ public actor SearchEngineImpl {
     }
 
     private func shouldUseSubstringOnlyFallbackForFuzzyPlus(tokens: [String]) -> Bool {
-        guard !tokens.isEmpty else { return false }
-        return tokens.allSatisfy { token in
-            token.count >= 3 && token.canBeConverted(to: .ascii)
-        }
+        SearchPlanner.shouldUseSubstringOnlyFallbackForFuzzyPlus(tokens: tokens)
     }
 
     // MARK: - Cache Search
