@@ -49,3 +49,39 @@ Added Trellis workflow support, fixed Codex sub-agent TASK_DIR handling, and int
 ### Next Steps
 
 - None - task complete
+
+
+## Session 2: Architecture row presentation and Trellis TASK_DIR hardening
+
+**Date**: 2026-05-07
+**Task**: Architecture row presentation and Trellis TASK_DIR hardening
+**Branch**: `main`
+
+### Summary
+
+Hardened Trellis TASK_DIR handling across agent platforms, extracted history row descriptor and thumbnail lifecycle scheduler, documented v0.7.6 release evidence, and recorded architecture task context.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `1ec432d` | (see git log) |
+| `8f5d60b` | (see git log) |
+| `4cdedf3` | (see git log) |
+| `6266249` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

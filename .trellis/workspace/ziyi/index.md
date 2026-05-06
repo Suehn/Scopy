@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 1
-- **Last Active**: 2026-05-06
+- **Total Sessions**: 2
+- **Last Active**: 2026-05-07
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~51 | Active |
+| `journal-1.md` | ~87 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 2 | 2026-05-07 | Architecture row presentation and Trellis TASK_DIR hardening | `1ec432d`, `8f5d60b`, `4cdedf3`, `6266249` | `main` |
 | 1 | 2026-05-06 | Search planner maintainability and Trellis Codex support | `7848df5`, `607a9db` | `main` |
 <!-- @@@/auto:session-history -->
 
