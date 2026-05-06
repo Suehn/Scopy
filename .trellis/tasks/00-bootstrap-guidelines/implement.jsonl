@@ -1,0 +1,14 @@
+{"file":".trellis/spec/backend/index.md","reason":"Backend entry point for ScopyKit, persistence, search, settings, storage, and service implementation conventions."}
+{"file":".trellis/spec/backend/directory-structure.md","reason":"Backend file placement and target-boundary rules."}
+{"file":".trellis/spec/backend/database-guidelines.md","reason":"SQLite, migration, repository, search index, settings, and cleanup/storage rules."}
+{"file":".trellis/spec/backend/error-handling.md","reason":"Thrown error, startup failure, cancellation, and recovery conventions."}
+{"file":".trellis/spec/backend/logging-guidelines.md","reason":"ScopyLog category and privacy rules."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Backend implementation gates and forbidden patterns."}
+{"file":".trellis/spec/frontend/index.md","reason":"Frontend entry point for Scopy native macOS UI conventions."}
+{"file":".trellis/spec/frontend/directory-structure.md","reason":"UI, Observable, Design, Presentation, harness, and ScopyUISupport placement rules."}
+{"file":".trellis/spec/frontend/component-guidelines.md","reason":"SwiftUI/AppKit component, history list, settings, and accessibility patterns."}
+{"file":".trellis/spec/frontend/hook-guidelines.md","reason":"SwiftUI lifecycle callback, Task ownership, AppKit/WebKit bridge, and handler rules."}
+{"file":".trellis/spec/frontend/state-management.md","reason":"Observation, AppState, service boundary, history state, and settings transaction rules."}
+{"file":".trellis/spec/frontend/type-safety.md","reason":"Swift type, DTO, binding, availability, and actor-boundary rules."}
+{"file":".trellis/spec/frontend/quality-guidelines.md","reason":"UI quality, tests, accessibility, performance, settings, and hotkey verification rules."}
+{"file":".trellis/spec/guides/index.md","reason":"Cross-package thinking guide index for reuse and cross-layer checks."}
