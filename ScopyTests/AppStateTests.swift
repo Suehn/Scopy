@@ -1,4 +1,5 @@
 import AppKit
+import Observation
 import XCTest
 import ScopyKit
 
@@ -599,6 +600,49 @@ final class AppStateTests: XCTestCase {
 
         XCTAssertEqual(appState.items.count, initialCount - 1)
         XCTAssertFalse(appState.items.contains { $0.id == itemToDelete.id })
+    }
+
+    func testDeleteUpdatesVisibleCountersAndDeletedEventConverges() async throws {
+        mockService.setItemCount(100)
+        await appState.load()
+
+        let itemToDelete = appState.items[0]
+
+        await appState.delete(itemToDelete)
+
+        XCTAssertEqual(mockService.deleteCallCount, 1)
+        XCTAssertFalse(appState.items.contains { $0.id == itemToDelete.id })
+        XCTAssertEqual(appState.loadedCount, 49)
+        XCTAssertEqual(appState.totalCount, 100)
+        XCTAssertTrue(appState.canLoadMore)
+
+        await appState.historyViewModel.handleEvent(.itemDeleted(itemToDelete.id))
+
+        XCTAssertFalse(appState.items.contains { $0.id == itemToDelete.id })
+        XCTAssertEqual(appState.loadedCount, 49)
+        XCTAssertEqual(appState.totalCount, 99)
+        XCTAssertTrue(appState.canLoadMore)
+    }
+
+    func testHistoryListStatePassthroughsInvalidateObservation() async {
+        mockService.setItemCount(2)
+        await appState.load()
+
+        let itemToPin = appState.unpinnedItems[0]
+        let invalidated = expectation(description: "History list passthrough invalidated observation")
+
+        withObservationTracking {
+            _ = appState.historyViewModel.pinnedItems.count
+            _ = appState.historyViewModel.unpinnedItems.count
+        } onChange: {
+            invalidated.fulfill()
+        }
+
+        await appState.historyViewModel.handleEvent(.itemPinned(itemToPin.id))
+
+        await fulfillment(of: [invalidated], timeout: 1.0)
+        XCTAssertEqual(appState.pinnedItems.map(\.id), [itemToPin.id])
+        XCTAssertEqual(appState.unpinnedItems.count, 1)
     }
 
     // MARK: - Pagination State Tests

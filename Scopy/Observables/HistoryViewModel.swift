@@ -37,30 +37,19 @@ final class HistoryViewModel {
 
     @ObservationIgnored var closePanelHandler: (() -> Void)?
 
-    var items: [ClipboardItemDTO] = [] {
-        didSet {
-            invalidatePinnedCache()
-            itemIndexCacheValid = false
-        }
-    }
-
-    @ObservationIgnored private var pinnedItemsCache: [ClipboardItemDTO]?
-    @ObservationIgnored private var unpinnedItemsCache: [ClipboardItemDTO]?
-    @ObservationIgnored private var itemIndexByID: [UUID: Int] = [:]
-    @ObservationIgnored private var itemIndexCacheValid: Bool = false
+    private var listState = HistoryListState()
 
     var pinnedItems: [ClipboardItemDTO] {
-        if let cached = pinnedItemsCache { return cached }
-        let result = items.filter { $0.isPinned }
-        pinnedItemsCache = result
-        return result
+        listState.pinnedItems
     }
 
     var unpinnedItems: [ClipboardItemDTO] {
-        if let cached = unpinnedItemsCache { return cached }
-        let result = items.filter { !$0.isPinned }
-        unpinnedItemsCache = result
-        return result
+        listState.unpinnedItems
+    }
+
+    var items: [ClipboardItemDTO] {
+        get { listState.items }
+        set { listState.replaceItems(newValue) }
     }
 
     var searchQuery: String = ""
@@ -97,9 +86,15 @@ final class HistoryViewModel {
 
     private var searchVersion: Int = 0
 
-    var canLoadMore: Bool = false
-    var loadedCount: Int = 0
-    var totalCount: Int = 0
+    var canLoadMore: Bool {
+        listState.canLoadMore
+    }
+    var loadedCount: Int {
+        listState.loadedCount
+    }
+    var totalCount: Int {
+        listState.totalCount
+    }
     var searchCoverage: SearchCoverage = .complete
 
     var performanceSummary: PerformanceSummary?
@@ -212,14 +207,10 @@ final class HistoryViewModel {
                 _ = removeItem(withID: item.id)
             }
 
-            loadedCount = items.count
             if didMatchCurrentFilters, totalCount >= 0 {
-                totalCount += 1
+                listState.incrementTotalCount()
             } else if isUnfilteredList, totalCount >= 0 {
-                totalCount += 1
-            }
-            if totalCount >= 0 {
-                canLoadMore = loadedCount < totalCount
+                listState.incrementTotalCount()
             }
 
             if let bundleID = item.appBundleID, !recentApps.contains(bundleID) {
@@ -264,9 +255,8 @@ final class HistoryViewModel {
                 _ = removeItem(withID: item.id)
             }
 
-            loadedCount = items.count
             if totalCount >= 0 {
-                canLoadMore = loadedCount < totalCount
+                listState.recomputeCanLoadMore()
             }
         case .itemContentUpdated(let item):
             guard let index = indexOfItem(withID: item.id) else { return }
@@ -279,13 +269,10 @@ final class HistoryViewModel {
         case .itemDeleted(let id):
             let wasPresent = removeItem(withID: id)
 
-            loadedCount = items.count
-            if totalCount >= 0 {
-                if isUnfilteredList || wasPresent {
-                    totalCount = max(0, totalCount - 1)
-                }
-                canLoadMore = loadedCount < totalCount
-            }
+            listState.decrementTotalCountIfNeeded(
+                wasPresent: wasPresent,
+                isUnfilteredList: isUnfilteredList
+            )
         case .itemPinned(let id):
             if let index = indexOfItem(withID: id) {
                 let updated = items[index].withPinned(true)
@@ -377,9 +364,8 @@ final class HistoryViewModel {
             let fetchedItems = try await service.fetchRecent(limit: 50, offset: 0)
             guard shouldApplyLoadResult(version: currentVersion) else { return }
 
-            items = fetchedItems
+            listState.replaceItems(fetchedItems)
             prewarmDisplayText(for: fetchedItems)
-            loadedCount = fetchedItems.count
             searchCoverage = .complete
             lastLoadedAt = Date()
 
@@ -394,8 +380,7 @@ final class HistoryViewModel {
             let stats = try await service.getStorageStats()
             guard shouldApplyLoadResult(version: currentVersion) else { return }
 
-            totalCount = stats.itemCount
-            canLoadMore = loadedCount < totalCount
+            listState.updateTotalCount(stats.itemCount)
 
             settingsViewModel.storageStats = stats
             await settingsViewModel.refreshDiskSizeIfNeeded()
@@ -458,11 +443,12 @@ final class HistoryViewModel {
                         )
                         let result = try await service.search(query: request)
                         guard !Task.isCancelled, currentVersion == searchVersion else { return }
-                        items = result.items
+                        listState.replacePage(
+                            items: result.items,
+                            total: result.total,
+                            hasMore: result.hasMore
+                        )
                         prewarmDisplayText(for: result.items)
-                        loadedCount = result.items.count
-                        totalCount = result.total
-                        canLoadMore = result.hasMore
                         searchCoverage = result.coverage
                         return
                     }
@@ -480,19 +466,18 @@ final class HistoryViewModel {
                     let result = try await service.search(query: request)
                     guard !Task.isCancelled, currentVersion == searchVersion else { return }
 
-                    items.append(contentsOf: result.items)
+                    listState.appendPage(
+                        items: result.items,
+                        total: result.total,
+                        hasMore: result.hasMore
+                    )
                     prewarmDisplayText(for: result.items)
-                    loadedCount = items.count
-                    totalCount = result.total
-                    canLoadMore = result.hasMore
                     searchCoverage = result.coverage
                 } else {
                     let moreItems = try await service.fetchRecent(limit: 100, offset: loadedCount)
                     guard !Task.isCancelled, currentVersion == searchVersion else { return }
-                    items.append(contentsOf: moreItems)
+                    listState.appendRecentPage(items: moreItems)
                     prewarmDisplayText(for: moreItems)
-                    loadedCount = items.count
-                    canLoadMore = loadedCount < totalCount
                     searchCoverage = .complete
                 }
             } catch {
@@ -551,11 +536,12 @@ final class HistoryViewModel {
                 let result = try await service.search(query: request)
                 guard !Task.isCancelled, currentVersion == searchVersion else { return }
 
-                items = result.items
+                listState.replacePage(
+                    items: result.items,
+                    total: result.total,
+                    hasMore: result.hasMore
+                )
                 prewarmDisplayText(for: result.items)
-                totalCount = result.total
-                loadedCount = result.items.count
-                canLoadMore = result.hasMore
                 searchCoverage = result.coverage
 
                 if (searchMode == .fuzzy || searchMode == .fuzzyPlus),
@@ -592,11 +578,12 @@ final class HistoryViewModel {
 
                             guard loadedCount <= 50 else { return }
 
-                            items = refined.items
+                            listState.replacePage(
+                                items: refined.items,
+                                total: refined.total,
+                                hasMore: refined.hasMore
+                            )
                             prewarmDisplayText(for: refined.items)
-                            totalCount = refined.total
-                            loadedCount = refined.items.count
-                            canLoadMore = refined.hasMore
                             searchCoverage = refined.coverage
                         } catch {
                             ScopyLog.app.warning("Refine search failed: \(error.localizedDescription, privacy: .private)")
@@ -710,7 +697,7 @@ final class HistoryViewModel {
     func delete(_ item: ClipboardItemDTO) async {
         do {
             try await service.delete(itemID: item.id)
-            items.removeAll { $0.id == item.id }
+            _ = removeItem(withID: item.id)
         } catch {
             ScopyLog.app.error("Delete failed: \(error.localizedDescription, privacy: .private)")
         }
@@ -803,62 +790,29 @@ final class HistoryViewModel {
 
     // MARK: - Private
 
-    private func invalidatePinnedCache() {
-        pinnedItemsCache = nil
-        unpinnedItemsCache = nil
-    }
-
     private func prewarmDisplayText(for items: [ClipboardItemDTO]) {
         guard !items.isEmpty else { return }
         ClipboardItemDisplayText.shared.prewarm(items: items)
         HistoryItemPresentationCache.shared.prewarm(items: items)
     }
 
-    private func rebuildItemIndexCacheIfNeeded() {
-        guard PerfFeatureFlags.historyIndexingEnabled else { return }
-        guard !itemIndexCacheValid else { return }
-        var rebuilt: [UUID: Int] = [:]
-        rebuilt.reserveCapacity(items.count)
-        for (index, item) in items.enumerated() {
-            rebuilt[item.id] = index
-        }
-        itemIndexByID = rebuilt
-        itemIndexCacheValid = true
-    }
-
     private func indexOfItem(withID id: UUID) -> Int? {
-        guard PerfFeatureFlags.historyIndexingEnabled else {
-            return items.firstIndex(where: { $0.id == id })
-        }
-        rebuildItemIndexCacheIfNeeded()
-        return itemIndexByID[id]
+        listState.indexOfItem(withID: id)
     }
 
     @discardableResult
     private func setItemIfChanged(at index: Int, to value: ClipboardItemDTO) -> Bool {
-        guard items.indices.contains(index) else { return false }
-        guard items[index] != value else { return false }
-        items[index] = value
-        return true
+        listState.setItemIfChanged(at: index, to: value)
     }
 
     @discardableResult
     private func removeItem(withID id: UUID) -> Bool {
-        guard let index = indexOfItem(withID: id) else { return false }
-        items.remove(at: index)
-        return true
+        listState.removeItem(withID: id)
     }
 
     @discardableResult
     private func insertOrMoveItemToFront(_ item: ClipboardItemDTO) -> Bool {
-        if let existingIndex = indexOfItem(withID: item.id) {
-            if existingIndex == 0 {
-                return setItemIfChanged(at: existingIndex, to: item)
-            }
-            items.remove(at: existingIndex)
-        }
-        items.insert(item, at: 0)
-        return true
+        listState.insertOrMoveItemToFront(item)
     }
 
     private func effectiveSearchDebounceNs(for query: String) -> UInt64 {

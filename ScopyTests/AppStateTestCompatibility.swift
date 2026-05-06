@@ -68,20 +68,9 @@ extension AppState {
         set { historyViewModel.isScrolling = newValue }
     }
 
-    var canLoadMore: Bool {
-        get { historyViewModel.canLoadMore }
-        set { historyViewModel.canLoadMore = newValue }
-    }
-
-    var loadedCount: Int {
-        get { historyViewModel.loadedCount }
-        set { historyViewModel.loadedCount = newValue }
-    }
-
-    var totalCount: Int {
-        get { historyViewModel.totalCount }
-        set { historyViewModel.totalCount = newValue }
-    }
+    var canLoadMore: Bool { historyViewModel.canLoadMore }
+    var loadedCount: Int { historyViewModel.loadedCount }
+    var totalCount: Int { historyViewModel.totalCount }
 
     var performanceSummary: PerformanceSummary? {
         get { historyViewModel.performanceSummary }
