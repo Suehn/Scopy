@@ -1,1 +1,5 @@
-{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend package entrypoint for ScopyKit search and persistence work."}
+{"file": ".trellis/spec/backend/search-guidelines.md", "reason": "SearchEngineImpl and search index/cache changes must preserve planner and query behavior."}
+{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "Search disk-cache fingerprinting depends on SQLite database/WAL/SHM semantics."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Architecture refactors must preserve behavior and pass relevant build/test/perf gates."}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Architecture slices should deepen existing modules instead of duplicating logic."}

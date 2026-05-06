@@ -371,3 +371,40 @@ Validation plan:
 Process note:
 
 Do not implement this second slice until the current HistoryListState slice is isolated. Mixing Candidate 1 and Candidate 2 in one uncommitted change would make review and rollback harder.
+
+## Candidate 2 Implementation Summary
+
+Implemented the SearchIndexDiskCache first slice as a behavior-preserving backend architecture refactor.
+
+Files:
+
+* Scopy/Infrastructure/Search/SearchIndexDiskCache.swift
+* Scopy/Infrastructure/Search/SearchEngineImpl.swift
+
+What changed:
+
+* Added an internal SearchIndexDiskCache Module for full/short search index disk-cache paths, DB/WAL/SHM fingerprinting, checksum validation, metadata preflight, payload decoding, persist request creation, and request writing.
+* SearchEngineImpl now routes background warm-load through SearchIndexDiskCache.loadFullSnapshot(dbPath:metrics:) and short-index warm-load through SearchIndexDiskCache.loadShortSnapshot(dbPath:).
+* On-demand full-index build now reuses SearchIndexDiskCache.preflightFullIndex(dbPath:) and SearchIndexDiskCache.loadFullSnapshot(from:) instead of retaining a second disk-cache codec path.
+* makeFullPersistRequest and makeShortPersistRequest still run synchronously on the SearchEngineImpl actor before detached persistence starts. Detached tasks now only write already-created requests.
+* SearchEngineImpl still owns live lifecycle state: full/short in-memory indexes, build tasks, generation counters, pending event replay, close/cancel sequencing, DB change token stale-write protection, query cache reset, corpus metrics, SearchPlanner state mapping, and query-time wait behavior.
+
+Review result:
+
+The final check agent found no blocking code issue. It confirmed the boundary stays limited to disk-cache Implementation, warm-load and on-demand full-index paths share the new disk-cache API, disk cache versions/path formats remain compatible, and debug path helpers now delegate to SearchIndexDiskCache.
+
+Trellis process correction:
+
+The original implement/check JSONL files still contained seed example rows, which caused sub-agents to fallback or stop on local no-current-task state. Those files now contain real spec entries so future implement/check agents can start from curated backend specs.
+
+Validation:
+
+* make build: passed.
+* xcodebuild test -project Scopy.xcodeproj -scheme Scopy -destination 'platform=macOS' -only-testing:ScopyTests/FullIndexDiskCacheHardeningTests -only-testing:ScopyTests/ShortQueryIndexDiskCacheHardeningTests -only-testing:ScopyTests/FullIndexPendingEventsCleanupTests -only-testing:ScopyTests/SearchPlannerTests: passed, 23 tests.
+* make test-unit: passed, 398 tests, 1 skipped.
+* make test-strict: passed, 398 tests, 1 skipped.
+* make test-snapshot-perf-release: passed; cmd p95=0.11599063873291016 ms target 50, cm p95=5.63502311706543 ms target 20.
+
+Next candidate after this slice:
+
+Candidate 3, row asset and preview pipeline Module, is the next likely architecture target if the goal remains performance and maintainability. Before implementing it, run another grill-me decision loop and read frontend specs.
