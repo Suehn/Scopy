@@ -19,7 +19,10 @@ Added Trellis workflow support, fixed Codex sub-agent TASK_DIR handling, and int
 
 ### Main Changes
 
-- Added Trellis platform support and Codex-specific TASK_DIR handling for isolated sub-agent sessions.\n- Added decision-only SearchPlanner and focused planner tests while preserving SearchEngineImpl as caller-facing search entrypoint.\n- Verified trellis-check and trellis-implement sub-agent context smoke with explicit TASK_DIR.\n- Validation passed: py_compile hooks, isolated hook smoke, git diff --check, SearchPlannerTests, make build, make test-unit, make test-strict, make test-snapshot-perf-release.
+- Added Trellis platform support and Codex-specific TASK_DIR handling for isolated sub-agent sessions.
+- Added decision-only SearchPlanner and focused planner tests while preserving SearchEngineImpl as caller-facing search entrypoint.
+- Verified trellis-check and trellis-implement sub-agent context smoke with explicit TASK_DIR.
+- Captured search planner contracts in `.trellis/spec/backend/search-guidelines.md` and the planner drift gotcha in the code reuse guide.
 
 
 ### Git Commits
@@ -31,7 +34,13 @@ Added Trellis workflow support, fixed Codex sub-agent TASK_DIR handling, and int
 
 ### Testing
 
-- [OK] (Add test results)
+- [OK] `python3 -m py_compile .codex/hooks/session-start.py .codex/hooks/inject-workflow-state.py`
+- [OK] isolated SessionStart/UserPromptSubmit hook smoke for `TASK_DIR=<task-dir>` guidance
+- [OK] `xcodebuild test -scheme Scopy -destination 'platform=macOS' -only-testing:ScopyTests/SearchPlannerTests`
+- [OK] `make build`
+- [OK] `make test-unit`
+- [OK] `make test-strict`
+- [OK] `make test-snapshot-perf-release`
 
 ### Status
 
