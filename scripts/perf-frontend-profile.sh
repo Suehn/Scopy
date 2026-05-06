@@ -101,6 +101,17 @@ fi
 
 mkdir -p "$OUT_DIR/raw/baseline" "$OUT_DIR/raw/current"
 
+terminate_scopy_processes() {
+  if command -v osascript >/dev/null 2>&1; then
+    osascript -e 'tell application id "com.scopy.app" to quit' >/dev/null 2>&1 || true
+  fi
+  sleep 1
+  pkill -x Scopy >/dev/null 2>&1 || true
+}
+
+trap terminate_scopy_processes EXIT
+terminate_scopy_processes
+
 if [[ "$SKIP_SETUP" -eq 0 ]]; then
   bash "$PROJECT_DIR/scripts/xcodegen-generate-if-needed.sh" > "$OUT_DIR/setup.log" 2>&1
 fi
@@ -128,6 +139,7 @@ run_variant_repeat() {
     perf_short_debounce=0
   fi
 
+  terminate_scopy_processes
   if ! env \
     TEST_RUNNER_SCOPY_RUN_PROFILE_UI_TESTS=1 \
     TEST_RUNNER_SCOPY_UI_PROFILE_DB_PATH="$DB_PATH" \
@@ -153,6 +165,7 @@ run_variant_repeat() {
     fi
     return 1
   fi
+  terminate_scopy_processes
 }
 
 echo "Output dir: $OUT_DIR"

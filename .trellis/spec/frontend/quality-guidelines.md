@@ -48,6 +48,8 @@ Before claiming UI performance improved:
 - Include before/after numbers in docs or final notes when requested.
 - Watch for hidden costs in row body recomputation, thumbnail loading, markdown rendering, WebView lifecycle, and QuickLook.
 
+For frontend profile runs, keep the app process state isolated. scripts/perf-frontend-profile.sh must quit the com.scopy.app bundle, clear any remaining Scopy executable process before the first xcodebuild run, between baseline/current variants, and on exit. If a profile run fails before summary generation with missing Window/History.List or an XCElementSnapshot automation crash, first check for residual Scopy/XCTest processes and rerun after cleanup; no summary file means there is no performance evidence to cite.
+
 ---
 
 ## Review Checklist

@@ -27,6 +27,8 @@ When creating a task:
 - Check Task.isCancelled before applying results.
 - Guard against stale search/load versions before mutating visible state.
 
+Visible row thumbnail loading uses SwiftUI .task(id: thumbnailPath) as the cancellation boundary. The row thumbnail views keep loadedThumbnail and lastLoadedPath @State, clear stale state when the path changes, and only commit a scheduler result when its path still matches. Shared row thumbnail scheduling lives in HistoryRowThumbnailLifecycleScheduler: cache hits return immediately, cache misses use utility priority while scrolling and userInitiated otherwise, loaded misses wait through the bounded 20 x 80 ms scroll-settle loop, and cancellation before commit returns nil. Preview fallback thumbnails keep their own immediate preview lifecycle unless a later task explicitly widens that seam with tests.
+
 ---
 
 ## App And Window Handlers

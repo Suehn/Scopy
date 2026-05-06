@@ -9,57 +9,6 @@ private struct SendableCGImage: @unchecked Sendable {
     let image: CGImage
 }
 
-@MainActor
-private struct HistoryItemDisplayModel {
-    let titleText: String
-    let metadataText: String
-    let thumbnailHeight: CGFloat
-    let showThumbnails: Bool
-    let filePreviewInfo: FilePreviewInfo?
-    let filePreviewPath: String?
-    let filePreviewKind: FilePreviewKind?
-    let filePreviewIsMarkdown: Bool
-    let canExportPNG: Bool
-    let canShowFileThumbnail: Bool
-    let needsThumbnailHeight: Bool
-
-    init(item: ClipboardItemDTO, settings: SettingsDTO) {
-        let profileStart = ScrollPerformanceProfile.isEnabled ? CFAbsoluteTimeGetCurrent() : nil
-        defer {
-            if let profileStart {
-                ScrollPerformanceProfile.recordMetric(
-                    name: "row.display_model_ms",
-                    elapsedMs: (CFAbsoluteTimeGetCurrent() - profileStart) * 1000
-                )
-            }
-        }
-
-        let thumbnailHeight = CGFloat(settings.thumbnailHeight)
-        let showThumbnails = settings.showImageThumbnails
-        let presentationCache = HistoryItemPresentationCache.shared
-        let filePreview = presentationCache.filePreview(for: item)
-        let filePreviewInfo = filePreview?.info
-        let filePreviewIsMarkdown = filePreview?.isMarkdown ?? false
-        let canShowFileThumbnail = showThumbnails
-            && item.type == .file
-            && filePreview?.shouldGenerateThumbnail == true
-        let canExportPNG = presentationCache.canExportPNG(for: item, filePreview: filePreview)
-        let displayTexts = ClipboardItemDisplayText.shared.displayTexts(for: item)
-
-        self.titleText = displayTexts.title
-        self.metadataText = displayTexts.metadata
-        self.thumbnailHeight = thumbnailHeight
-        self.showThumbnails = showThumbnails
-        self.filePreviewInfo = filePreviewInfo
-        self.filePreviewPath = filePreview?.path
-        self.filePreviewKind = filePreview?.kind
-        self.filePreviewIsMarkdown = filePreviewIsMarkdown
-        self.canExportPNG = canExportPNG
-        self.canShowFileThumbnail = canShowFileThumbnail
-        self.needsThumbnailHeight = (item.type == .image && showThumbnails) || canShowFileThumbnail
-    }
-}
-
 private actor PreviewTaskBudget {
     static let shared = PreviewTaskBudget(limit: 4)
 
@@ -127,7 +76,7 @@ struct HistoryItemView: View, Equatable {
     let isFilePreviewPresented: Bool
     let requestPopover: (HoverPreviewPopoverKind?) -> Void
     let dismissOtherPopovers: () -> Void
-    private let displayModel: HistoryItemDisplayModel
+    private let descriptor: HistoryItemRowDescriptor
 
     // 局部状态 - 悬停不触发全局重绘
     @StateObject private var rowController: HistoryItemRowController
@@ -174,7 +123,7 @@ struct HistoryItemView: View, Equatable {
         self.isFilePreviewPresented = isFilePreviewPresented
         self.requestPopover = requestPopover
         self.dismissOtherPopovers = dismissOtherPopovers
-        self.displayModel = HistoryItemDisplayModel(item: item, settings: settings)
+        self.descriptor = HistoryItemRowDescriptor(item: item, settings: settings)
         let initialRelativeTimeText = Self.makeRelativeTimeString(for: item.lastUsedAt)
         _rowController = StateObject(wrappedValue: HistoryItemRowController(relativeTimeText: initialRelativeTimeText))
     }
@@ -579,12 +528,12 @@ struct HistoryItemView: View, Equatable {
 
     /// v0.12: 优先使用预加载缓存，避免主线程阻塞
     private var appIcon: NSImage? {
-        guard let bundleID = item.appBundleID else { return nil }
+        guard let bundleID = descriptor.appIconBundleID else { return nil }
         return IconService.shared.icon(bundleID: bundleID)
     }
 
     private var thumbnailHeight: CGFloat {
-        displayModel.thumbnailHeight
+        descriptor.thumbnailHeight
     }
 
     private var previewDelay: TimeInterval {
@@ -592,40 +541,40 @@ struct HistoryItemView: View, Equatable {
     }
 
     private var showThumbnails: Bool {
-        displayModel.showThumbnails
+        descriptor.showThumbnails
     }
 
     private var filePreviewInfo: FilePreviewInfo? {
-        displayModel.filePreviewInfo
+        descriptor.filePreviewInfo
     }
 
     private var filePreviewPath: String? {
-        displayModel.filePreviewPath
+        descriptor.filePreviewPath
     }
 
     private var filePreviewKind: FilePreviewKind? {
-        displayModel.filePreviewKind
+        descriptor.filePreviewKind
     }
 
     private var filePreviewIsMarkdown: Bool {
-        displayModel.filePreviewIsMarkdown
+        descriptor.filePreviewIsMarkdown
     }
 
     private var canExportPNG: Bool {
-        displayModel.canExportPNG
+        descriptor.canExportPNG
     }
 
     private var canShowFileThumbnail: Bool {
-        displayModel.canShowFileThumbnail
+        descriptor.canShowFileThumbnail
     }
 
     /// v0.21: 使用预计算的 metadata，避免视图渲染时 O(n) 字符串操作
     private var metadataText: String {
-        displayModel.metadataText
+        descriptor.metadataText
     }
 
     private var titleText: String {
-        displayModel.titleText
+        descriptor.titleText
     }
 
     /// v0.15: Simplified content view - removed app icon, using new metadata format
@@ -782,7 +731,7 @@ struct HistoryItemView: View, Equatable {
         let textToken = textPopoverToken
         let fileToken = filePopoverToken
 
-        let needsThumbnailHeight = displayModel.needsThumbnailHeight
+        let needsThumbnailHeight = descriptor.needsThumbnailHeight
 
         return HStack(alignment: .center, spacing: ScopySpacing.sm) {
             mainRowButton

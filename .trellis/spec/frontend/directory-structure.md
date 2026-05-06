@@ -29,6 +29,7 @@ The app target includes UI files and excludes backend directories; backend comes
 - Put reusable visual tokens and primitives in Scopy/Design, not duplicated inside feature views.
 - Put view-specific rendering and interaction code near the feature under Scopy/Views/History or Scopy/Views/Settings.
 - Put pure display formatting and row presentation caches in Scopy/Presentation.
+- Put row thumbnail lifecycle helpers that coordinate SwiftUI row tasks, scroll state, and ThumbnailCache near the history thumbnail views under Scopy/Views/History.
 - Put UI-test-only harnesses in Scopy/Views/UITesting and UI-support utilities that compile as a SwiftPM target in ScopyUISupport.
 
 ---

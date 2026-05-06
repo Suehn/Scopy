@@ -1,6 +1,5 @@
 import AppKit
 import ScopyKit
-import ScopyUISupport
 import SwiftUI
 
 struct HistoryItemFileThumbnailView: View {
@@ -15,7 +14,8 @@ struct HistoryItemFileThumbnailView: View {
     var body: some View {
         if let thumbnailPath {
             let loaded = lastLoadedPath == thumbnailPath ? loadedThumbnail : nil
-            let cachedImage = ThumbnailCache.shared.cachedImage(path: thumbnailPath) ?? loaded
+            let cachedImage = HistoryRowThumbnailLifecycleScheduler
+                .productionCachedImage(for: thumbnailPath) ?? loaded
 
             if let nsImage = cachedImage {
                 Image(nsImage: nsImage)
@@ -81,24 +81,13 @@ struct HistoryItemFileThumbnailView: View {
             lastLoadedPath = path
         }
 
-        if let cached = ThumbnailCache.shared.cachedImage(path: path) {
-            loadedThumbnail = cached
+        let scheduler = HistoryRowThumbnailLifecycleScheduler(
+            interactionCoordinator: interactionCoordinator
+        )
+        guard let result = await scheduler.loadCommitResult(for: path) else { return }
+        guard lastLoadedPath == result.path, !Task.isCancelled else {
             return
         }
-
-        let priority: TaskPriority = interactionCoordinator.isScrolling ? .utility : .userInitiated
-        let image = await ThumbnailCache.shared.loadImage(path: path, priority: priority)
-        guard !Task.isCancelled else { return }
-        guard let image else { return }
-        await waitForScrollingToSettleIfNeeded()
-        guard !Task.isCancelled else { return }
-        loadedThumbnail = image
-    }
-
-    private func waitForScrollingToSettleIfNeeded() async {
-        for _ in 0..<20 where interactionCoordinator.isScrolling {
-            try? await Task.sleep(nanoseconds: 80_000_000)
-            if Task.isCancelled { return }
-        }
+        loadedThumbnail = result.image
     }
 }

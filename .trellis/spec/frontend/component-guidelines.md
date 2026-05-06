@@ -18,6 +18,8 @@ The history list intentionally uses List with ScrollViewReader for view recyclin
 
 History row work is performance-sensitive. Keep expensive preview, markdown, thumbnail, and hover behavior behind existing caches/controllers and profile hooks. The list owns one shared markdown preview controller and enforces one active hover popover at a time (Scopy/Views/HistoryListView.swift:26-42, Scopy/Views/HistoryListView.swift:170-249).
 
+History row presentation and thumbnail lifecycle are separate Modules. Put row-ready text/layout/request data in HistoryItemRowDescriptor under Scopy/Presentation. Keep NSImage state, IconService lookup, SwiftUI .task(id:), and final @State thumbnail commits in the row/thumbnail views. For visible row thumbnails, route shared cache-hit/load-priority/scroll-settle/cancellation sequencing through HistoryRowThumbnailLifecycleScheduler; do not mix preview fallback thumbnails, QuickLook/video sizing, markdown preview routing, or file-existence checks into that row scheduler without a separate decision and tests.
+
 ---
 
 ## Settings Components
@@ -46,4 +48,5 @@ Changing identifiers requires updating UI tests in the same task.
 - Do not hard-code colors/spacing if a ScopyColors, ScopySpacing, ScopySize, or typography token exists.
 - Do not create a new AppKit bridge when an existing coordinator/controller owns the behavior.
 - Do not trigger file IO, search, markdown rendering, or thumbnail generation directly from a body recomputation.
+- Do not turn row thumbnail lifecycle helpers into broad asset loaders that own ThumbnailCache, IconService, preview fallback state, or NSImage view state.
 - Do not add visible instructional text to explain controls unless product copy already uses that pattern.
