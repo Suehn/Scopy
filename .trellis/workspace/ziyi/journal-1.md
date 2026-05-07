@@ -120,3 +120,36 @@ Updated Scopy release docs for v0.7.7, added the scopy-release-homebrew skill, p
 ### Next Steps
 
 - None - task complete
+
+
+## Session 4: Release v0.7.8 history actions
+
+**Date**: 2026-05-08
+**Task**: Release v0.7.8 history actions
+**Branch**: `main`
+
+### Summary
+
+Shipped v0.7.8 with pinned pagination fixes, image/file context menu actions, Codex Control-V paste, active docs, release metadata, and Homebrew release workflow start.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `a578f6b` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
