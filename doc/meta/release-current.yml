@@ -1,19 +1,19 @@
-version: v0.7.6
+version: v0.7.7
 date: 2026-05-07
-release_doc: doc/releases/history/v0.7.6.md
+release_doc: doc/releases/history/v0.7.7.md
 release_index: doc/releases/README.md
 changelog_file: doc/releases/CHANGELOG.md
-profile_doc: doc/perf/release-profiles/v0.7.6-profile.md
+profile_doc: null
 runbook_doc: doc/current/release-runbook.md
 spec_doc: doc/current/product-spec.md
 development_doc: doc/current/development-guide.md
 architecture_doc: doc/current/architecture.md
 last_verified_at: 2026-05-07
-summary: Trellis TASK_DIR hardening row descriptor thumbnail scheduler and frontend profile isolation
+summary: Hover preview pipeline storage cleanup exact search quality manifests and archive context path stability
 verification:
   build: pass
   test_unit: pass
   test_strict: pass
   test_tsan: not_run
-  test_perf_heavy: perf_frontend_profile_standard_pass
-  test_snapshot_perf_release: not_run
+  test_perf_heavy: hover_profile_smoke_pass
+  test_snapshot_perf_release: pass

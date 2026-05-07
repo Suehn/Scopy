@@ -19,16 +19,17 @@ This page is the human-facing index for current release state. Automation should
 ## Current Release
 
 <!-- release-current:start -->
-- Version: `v0.7.6`
+- Version: `v0.7.7`
 - Date: `2026-05-07`
-- Release note: [v0.7.6](./history/v0.7.6.md)
+- Release note: [v0.7.7](./history/v0.7.7.md)
 - Changelog: [CHANGELOG.md](./CHANGELOG.md)
-- Profile doc: [v0.7.6 profile](../perf/release-profiles/v0.7.6-profile.md)
+- Profile doc: `none`
 <!-- release-current:end -->
 
 ## Recent Releases
 
 <!-- release-recent:start -->
+- `2026-05-07` [v0.7.7](./history/v0.7.7.md) - Hover preview pipeline storage cleanup exact search quality manifests and archive context path stability
 - `2026-05-07` [v0.7.6](./history/v0.7.6.md) - Trellis TASK_DIR hardening row descriptor thumbnail scheduler and frontend profile isolation
 - `2026-04-30` [v0.7.5](./history/v0.7.5.md) - Presentation cache reuse fuzzy top-K reuse and settings delta cleanup
 - `2026-04-30` [v0.7.4](./history/v0.7.4.md) - Frontend scroll attribution row presentation prewarm and scroll-time thumbnail throttling

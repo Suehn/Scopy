@@ -5,6 +5,7 @@ owner: maintainers
 last_reviewed: 2026-05-07
 canonical: true
 related_versions:
+  - v0.7.7
   - v0.7.6
   - v0.7.5
   - v0.7.4
@@ -63,15 +64,14 @@ related_versions:
 
 ## Current Performance Evidence
 
-The `v0.7.6` release used the real snapshot DB at `perf-db/clipboard.db` (6421 items / 148647936 bytes) on 2026-05-07.
+The current release `v0.7.7` does not add a dedicated release profile. Its release evidence lives in the release note and quality manifests because the changes are split across hover preview pipeline architecture, storage cleanup execution, exact-search normalization, Trellis archive context path stability, and quality evidence tooling.
 
-- `make perf-frontend-profile`: generated `logs/perf-frontend-profile-2026-05-07_03-18-32/frontend-scroll-profile-summary.md` after isolating Scopy app processes before the script, between variants, and on exit.
-- `make perf-frontend-profile-standard`: generated `logs/perf-frontend-profile-2026-05-07_03-22-16/frontend-scroll-profile-summary.md` with 1 repeat, 6 seconds per scenario, and a 120-sample minimum.
-- Standard profile row display-model p95 stayed effectively flat across real snapshot scenarios: real-snapshot-accessibility -0.19%, real-snapshot-mixed -1.06%, and real-snapshot-text-bias +2.65%.
-- Standard profile thumbnail total-load p95 improved in the same scenarios: real-snapshot-accessibility -36.92%, real-snapshot-mixed -32.32%, and real-snapshot-text-bias -91.55%.
-- The `v0.7.6` evidence is frontend-focused; `make test-snapshot-perf-release` and backend perf audit were not rerun because the release did not intentionally change search, storage, or warm-load behavior.
+- `scripts/perf-frontend-profile.sh --include-hover`: passed hover-preview smoke on 2026-05-07 and required `hover.markdown_render_ms` plus `hover.preview_image_decode_ms` buckets for the dedicated hover scenarios.
+- `make test-snapshot-perf-release`: passed for the Storage DeletePlan and SearchExactQueryNormalization slices on 2026-05-07.
+- Quality manifests recorded passed final gates for quality manifest tooling, Storage DeletePlan executor, hover profile gate, HistoryHoverPreviewPipeline, and SearchExactQueryNormalization slices.
+- The latest dedicated profile remains [v0.7.6](../perf/release-profiles/v0.7.6-profile.md), which used the real snapshot DB at `perf-db/clipboard.db` (6421 items / 148647936 bytes) for row descriptor and thumbnail scheduler evidence.
 
-Treat the frontend profile as row/thumbnail regression guardrail evidence, not a blanket UI performance win. The script's `baseline` and `current` variants are feature-flag variants inside the same build, and short-run frame/drop counters remain noisy.
+Do not treat `v0.7.7` as a blanket frontend performance release. Use its hover profile evidence only for hover-preview buckets, and use the v0.7.6 profile for row/thumbnail scheduler regression context.
 
 ## Homebrew Acceptance
 
@@ -86,6 +86,13 @@ Verify all of the following after release publication:
 7. Confirm `/Applications/Scopy.app` exists
 
 If `HOMEBREW_GITHUB_API_TOKEN` is not configured, the workflow skips the external tap update by design. Treat either stale cask surface as a release follow-up blocker: sync the affected cask to the published DMG sha256, push the cask commit, and rerun the acceptance checks above.
+
+Known release pitfalls:
+
+- If `make push-release` fails over SSH because the local proxy closes the transport, retry the release push over HTTPS with `http.version=HTTP/1.1`.
+- If `raw.githubusercontent.com` still shows an old cask right after a push, verify with GitHub API, git refs, a local tap checkout, or `brew info --cask --json=v2 scopy`; raw CDN lag is not authoritative by itself.
+- If `brew fetch --cask scopy -f` fails with `LibreSSL SSL_connect` / `SSL_ERROR_SYSCALL` against `release-assets.githubusercontent.com`, separate local TLS transport failure from cask version or sha drift and rerun install checks when the transport path recovers.
+- Local `make test-tsan` can skip on the known-bad `macOS 26.x + Xcode 26.2 (17C52)` runtime; Hosted TSan on `macos-15 + Xcode 16.0` remains the release concurrency coverage path.
 
 ## Historical Material
 

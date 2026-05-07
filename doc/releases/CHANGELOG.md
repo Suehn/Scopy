@@ -7,6 +7,12 @@
 
 ## [Unreleased]
 
+### Notes
+
+- No unreleased entries.
+
+## [v0.7.7] - 2026-05-07
+
 ### Architecture/Frontend
 
 - Hover preview preparation now routes text, Markdown file, image, and file preview planning through `HistoryHoverPreviewPipeline`, keeping row views focused on rendering, state application, and popover presentation.
@@ -21,6 +27,10 @@
 - Storage cleanup paths now execute repository delete plans through a shared `applyDeletePlan` adapter, keeping database row deletion and external payload cleanup aligned across count, age, size, image-only, and external-storage cleanup.
 - Added `scripts/quality/record-gate-result.py` and `make quality-manifest-self-test` for recording quality gate evidence into JSON and Markdown manifests without replacing existing build/test commands.
 
+### Infra/Trellis
+
+- Archived Trellis task context manifests now rewrite task-local `implement.jsonl` and `check.jsonl` file entries to the archived task directory, keeping PRD and research context paths valid after archival.
+
 ### Verification
 
 - Quality evidence manifests passed for the quality manifest module, Storage DeletePlan executor, hover profile gate, HistoryHoverPreviewPipeline, and SearchExactQueryNormalization slices (2026-05-07).
@@ -30,6 +40,7 @@
 - Focused StorageService, HistoryHoverPreviewPipeline, hover harness, SearchPlanner, and SearchService regression tests passed for their respective slices (2026-05-07).
 - `make test-snapshot-perf-release`: passed for Storage DeletePlan and SearchExactQueryNormalization slices (2026-05-07).
 - `scripts/perf-frontend-profile.sh --include-hover`: passed hover profile smoke for hover-preview scenarios (2026-05-07).
+- `.trellis/scripts/tests/test_task_archive_context_paths.py`: added regression coverage for archived task context path rewriting (2026-05-07).
 
 ## [v0.7.6] - 2026-05-07
 
