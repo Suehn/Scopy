@@ -85,3 +85,38 @@ Hardened Trellis TASK_DIR handling across agent platforms, extracted history row
 ### Next Steps
 
 - None - task complete
+
+
+## Session 3: Release v0.7.7 Homebrew closure
+
+**Date**: 2026-05-07
+**Task**: Release v0.7.7 Homebrew closure
+**Branch**: `main`
+
+### Summary
+
+Updated Scopy release docs for v0.7.7, added the scopy-release-homebrew skill, published the tag, recovered external tap drift, and verified Homebrew installation.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `02b7a7e` | (see git log) |
+| `e148e7c` | (see git log) |
+| `b9a9bb2` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
