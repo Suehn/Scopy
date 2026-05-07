@@ -11,6 +11,16 @@ final class SearchPlannerTests: XCTestCase {
         XCTAssertEqual(plan.requiredCapabilities, [.allItemsSQL])
     }
 
+    func testWhitespaceOnlyExactQueryUsesAllWithFilters() {
+        let query = " \n\t "
+        let plan = SearchPlanner.plan(request: SearchRequest(query: query, mode: .exact))
+
+        XCTAssertEqual(plan.path, .allWithFilters)
+        XCTAssertEqual(plan.coverage, .complete)
+        XCTAssertEqual(plan.reason, .emptyQuery)
+        XCTAssertEqual(plan.requiredCapabilities, [.allItemsSQL])
+    }
+
     func testExactShortQueryUsesRecentOnlyCache() {
         let plan = SearchPlanner.plan(request: SearchRequest(query: "ab", mode: .exact))
 
@@ -20,8 +30,26 @@ final class SearchPlannerTests: XCTestCase {
         XCTAssertEqual(plan.requiredCapabilities, [.recentCache])
     }
 
+    func testWhitespacePaddedShortExactQueryUsesRecentOnlyCache() {
+        let plan = SearchPlanner.plan(request: SearchRequest(query: " ab ", mode: .exact))
+
+        XCTAssertEqual(plan.path, .exactRecentCache)
+        XCTAssertEqual(plan.coverage, .recentOnly(limit: 2_000))
+        XCTAssertEqual(plan.reason, .exactShortQueryRecentOnly)
+        XCTAssertEqual(plan.requiredCapabilities, [.recentCache])
+    }
+
     func testExactLongQueryUsesFTS() {
         let plan = SearchPlanner.plan(request: SearchRequest(query: "alpha", mode: .exact))
+
+        XCTAssertEqual(plan.path, .exactFTS)
+        XCTAssertEqual(plan.coverage, .complete)
+        XCTAssertEqual(plan.reason, .exactLongQueryFTS)
+        XCTAssertEqual(plan.requiredCapabilities, [.fts])
+    }
+
+    func testWhitespacePaddedLongExactQueryUsesFTS() {
+        let plan = SearchPlanner.plan(request: SearchRequest(query: " alpha ", mode: .exact))
 
         XCTAssertEqual(plan.path, .exactFTS)
         XCTAssertEqual(plan.coverage, .complete)

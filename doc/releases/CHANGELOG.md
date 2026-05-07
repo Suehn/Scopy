@@ -7,9 +7,29 @@
 
 ## [Unreleased]
 
-### Notes
+### Architecture/Frontend
 
-- No unreleased entries.
+- Hover preview preparation now routes text, Markdown file, image, and file preview planning through `HistoryHoverPreviewPipeline`, keeping row views focused on rendering, state application, and popover presentation.
+- Hover preview profile smoke runs can opt into dedicated hover scenarios with `scripts/perf-frontend-profile.sh --include-hover`, requiring Markdown render and image decode hover buckets instead of treating scroll-only evidence as preview evidence.
+
+### Fix/Search
+
+- Exact search planning and execution now share `SearchPlanner.normalizedExactQuery(_:)`, so whitespace-only and whitespace-padded exact queries use the same trimmed intent for recent-only versus complete-history behavior.
+
+### Storage/Tooling
+
+- Storage cleanup paths now execute repository delete plans through a shared `applyDeletePlan` adapter, keeping database row deletion and external payload cleanup aligned across count, age, size, image-only, and external-storage cleanup.
+- Added `scripts/quality/record-gate-result.py` and `make quality-manifest-self-test` for recording quality gate evidence into JSON and Markdown manifests without replacing existing build/test commands.
+
+### Verification
+
+- Quality evidence manifests passed for the quality manifest module, Storage DeletePlan executor, hover profile gate, HistoryHoverPreviewPipeline, and SearchExactQueryNormalization slices (2026-05-07).
+- `make build`: passed for the final architecture slice (2026-05-07).
+- `make test-unit`: passed for the final architecture slice (2026-05-07).
+- `make test-strict`: passed for the final architecture slice (2026-05-07).
+- Focused StorageService, HistoryHoverPreviewPipeline, hover harness, SearchPlanner, and SearchService regression tests passed for their respective slices (2026-05-07).
+- `make test-snapshot-perf-release`: passed for Storage DeletePlan and SearchExactQueryNormalization slices (2026-05-07).
+- `scripts/perf-frontend-profile.sh --include-hover`: passed hover profile smoke for hover-preview scenarios (2026-05-07).
 
 ## [v0.7.6] - 2026-05-07
 

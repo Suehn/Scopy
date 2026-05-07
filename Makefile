@@ -1,7 +1,7 @@
 # Scopy Makefile
 # 符合 v0.md 的构建和测试流程
 
-.PHONY: all setup build run clean xcode test test-unit test-perf test-perf-heavy test-snapshot-perf test-snapshot-perf-release test-tsan test-strict coverage benchmark perf-audit perf-frontend-profile perf-frontend-profile-smoke perf-frontend-profile-standard perf-frontend-profile-full perf-unified-table test-flow test-flow-quick health-check
+.PHONY: all setup build run clean xcode test test-unit test-perf test-perf-heavy test-snapshot-perf test-snapshot-perf-release test-tsan test-strict coverage benchmark perf-audit perf-frontend-profile perf-frontend-profile-smoke perf-frontend-profile-standard perf-frontend-profile-full perf-unified-table test-flow test-flow-quick health-check quality-manifest-self-test
 .PHONY: test-real-db
 .PHONY: snapshot-perf-db bench-snapshot-search perf-search-warm-load
 .PHONY: tag-release push-release release-validate release-bump-patch
@@ -255,6 +255,10 @@ test-flow-quick:
 health-check:
 	@bash scripts/health-check.sh
 
+# 运行质量证据 manifest 模块自测（生成 logs/ 下的 JSON + Markdown 示例）
+quality-manifest-self-test:
+	@python3 scripts/quality/record-gate-result.py self-test --output-dir $(LOG_DIR)/quality-manifest-self-test
+
 # =================== 开发工具 ===================
 
 # 代码格式化（如果安装了 swift-format）
@@ -372,6 +376,7 @@ help:
 	@echo "  make test-flow    - Full test flow (kill → build → install → launch → health check)"
 	@echo "  make test-flow-quick - Quick test flow (skip build)"
 	@echo "  make health-check - Run health checks only"
+	@echo "  make quality-manifest-self-test - Run quality manifest fixture self-test"
 	@echo ""
 	@echo "Development:"
 	@echo "  make format       - Format code (requires swift-format)"

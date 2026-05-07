@@ -1,0 +1,18 @@
+{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "required verification gates"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "profile evidence caveats"}
+{"file": ".trellis/spec/backend/logging-guidelines.md", "reason": "structured evidence privacy boundaries"}
+{"file": ".trellis/tasks/05-07-architecture-quality-deepening/research/quality-tooling.md", "reason": "selected candidate acceptance context"}
+{"file": ".trellis/tasks/05-07-architecture-quality-deepening/research/grill-q1-first-candidate.md", "reason": "accepted grill-me decision"}
+{"file": ".trellis/spec/frontend/index.md", "reason": "frontend check context"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "preview component review context"}
+{"file": ".trellis/spec/frontend/hook-guidelines.md", "reason": "hover task lifecycle review context"}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "main actor and observable review context"}
+{"file": ".trellis/spec/frontend/type-safety.md", "reason": "typed pipeline review context"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "reuse review context"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "cross-layer review context"}
+{"file": ".trellis/tasks/05-07-architecture-quality-deepening/research/frontend-hot-paths.md", "reason": "frontend candidate review context"}
+{"file": ".trellis/tasks/05-07-architecture-quality-deepening/research/grill-q3-continue-or-stop.md", "reason": "hover evidence decision review context"}
+{"file": ".trellis/tasks/05-07-architecture-quality-deepening/research/grill-q4-completion-audit-next-candidate.md", "reason": "Q4 selected slice review context"}
+{"file": ".trellis/spec/backend/search-guidelines.md", "reason": "Q5 search parity review constraints"}
+{"file": ".trellis/tasks/05-07-architecture-quality-deepening/research/grill-q5-search-index-lifecycle.md", "reason": "Q5 accepted decision and exact-query normalization review context"}

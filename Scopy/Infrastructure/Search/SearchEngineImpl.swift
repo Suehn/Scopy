@@ -1902,26 +1902,25 @@ public actor SearchEngineImpl {
     }
 
     private func searchExact(request: SearchRequest) async throws -> SearchResult {
-        if request.query.isEmpty {
+        let normalizedQuery = SearchPlanner.normalizedExactQuery(request.query)
+        if normalizedQuery.isEmpty {
             return try searchAllWithFilters(request: request)
         }
 
-        if request.query.count <= 2 {
+        if normalizedQuery.count <= 2 {
             return try searchInCache(request: request, coverage: .recentOnly(limit: shortQueryCacheSize)) { item in
-                item.plainText.localizedCaseInsensitiveContains(request.query)
+                item.plainText.localizedCaseInsensitiveContains(normalizedQuery)
             }
         }
 
-        let trimmedQuery = request.query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let ftsQuery = FTSQueryBuilder.build(userQuery: trimmedQuery) else {
+        guard let ftsQuery = FTSQueryBuilder.build(userQuery: normalizedQuery) else {
             return try searchAllWithFilters(request: request)
         }
 
         let fts = try searchWithFTS(query: ftsQuery, request: request, coverage: .complete)
         if fts.items.isEmpty,
-           !trimmedQuery.isEmpty,
-           !trimmedQuery.canBeConverted(to: .ascii) {
-            let tokens = substringSearchTokens(trimmedQuery)
+           !normalizedQuery.canBeConverted(to: .ascii) {
+            let tokens = substringSearchTokens(normalizedQuery)
             let typeFilters = request.typeFilters.map(Array.init)
             if let page = try? searchWithSubstring(
                 tokens: tokens,

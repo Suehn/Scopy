@@ -17,10 +17,13 @@ DURATION_SEC=10
 MIN_SAMPLES=260
 SKIP_SETUP=0
 DESTINATION="platform=macOS"
+INCLUDE_HOVER=0
 
 TEST_ACCESSIBILITY="ScopyUITests/HistoryListUITests/testScrollProfileRealSnapshotAccessibility"
 TEST_MIXED="ScopyUITests/HistoryListUITests/testScrollProfileRealSnapshotMixed"
 TEST_TEXT_BIAS="ScopyUITests/HistoryListUITests/testScrollProfileRealSnapshotTextBias"
+TEST_HOVER_MARKDOWN="ScopyUITests/HistoryItemViewUITests/testHoverPreviewMarkdownProfileSmoke"
+TEST_HOVER_IMAGE="ScopyUITests/HistoryItemViewUITests/testHoverPreviewImageProfileSmoke"
 
 print_help() {
   cat <<EOF
@@ -36,6 +39,7 @@ Options:
   --duration <sec>       Profile duration per scenario (default: $DURATION_SEC)
   --min-samples <n>      Minimum frame samples (default: $MIN_SAMPLES)
   --skip-setup           Skip xcodegen regenerate check
+  --include-hover        Also run hover-preview profile smoke and require hover buckets
   -h, --help             Show this help
 
 Outputs:
@@ -78,6 +82,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --skip-setup)
       SKIP_SETUP=1
+      shift 1
+      ;;
+    --include-hover)
+      INCLUDE_HOVER=1
       shift 1
       ;;
     -h|--help)
@@ -140,6 +148,18 @@ run_variant_repeat() {
   fi
 
   terminate_scopy_processes
+  local only_testing_args=(
+    -only-testing:"$TEST_ACCESSIBILITY"
+    -only-testing:"$TEST_MIXED"
+    -only-testing:"$TEST_TEXT_BIAS"
+  )
+  if [[ "$INCLUDE_HOVER" -eq 1 ]]; then
+    only_testing_args+=(
+      -only-testing:"$TEST_HOVER_MARKDOWN"
+      -only-testing:"$TEST_HOVER_IMAGE"
+    )
+  fi
+
   if ! env \
     TEST_RUNNER_SCOPY_RUN_PROFILE_UI_TESTS=1 \
     TEST_RUNNER_SCOPY_UI_PROFILE_DB_PATH="$DB_PATH" \
@@ -156,9 +176,7 @@ run_variant_repeat() {
       -project Scopy.xcodeproj \
       -scheme Scopy \
       -destination "$DESTINATION" \
-      -only-testing:"$TEST_ACCESSIBILITY" \
-      -only-testing:"$TEST_MIXED" \
-      -only-testing:"$TEST_TEXT_BIAS" \
+      "${only_testing_args[@]}" \
       2>&1 | tee "$log_file"; then
     if grep -q "Not authorized for performing UI testing actions" "$log_file"; then
       echo "UI testing permission is missing. Enable Automation/Accessibility for XCTest/Xcode and rerun." >&2
@@ -179,7 +197,7 @@ for repeat in $(seq 1 "$REPEATS"); do
   run_variant_repeat "current" "$repeat"
 done
 
-python3 - "$OUT_DIR" "$REPEATS" "$DURATION_SEC" "$MIN_SAMPLES" <<'PY'
+python3 - "$OUT_DIR" "$REPEATS" "$DURATION_SEC" "$MIN_SAMPLES" "$INCLUDE_HOVER" <<'PY'
 import json
 import os
 import statistics
@@ -191,6 +209,7 @@ out_dir = sys.argv[1]
 repeats = int(sys.argv[2])
 duration_sec = float(sys.argv[3])
 min_samples = int(sys.argv[4])
+include_hover = sys.argv[5] == "1"
 
 raw_root = os.path.join(out_dir, "raw")
 variants = ["baseline", "current"]
@@ -256,6 +275,7 @@ for variant in variants:
         accessibility_view_tree = accessibility_tree.get("view_tree") or {}
         xctest_accessibility_query = payload.get("xctest_accessibility_query") or {}
         buckets = payload.get("buckets_ms", {})
+        hover_preview_evidence = payload.get("hover_preview_evidence") or {}
         records[variant][scenario].append({
             "path": path,
             "frame_p95": frame.get("p95"),
@@ -279,6 +299,7 @@ for variant in variants:
             "accessibility_view_count": accessibility_view_tree.get("view_count"),
             "xctest_history_item_query_ms": xctest_accessibility_query.get("history_item_query_ms"),
             "xctest_history_item_count": xctest_accessibility_query.get("history_item_count"),
+            "hover_preview_evidence": hover_preview_evidence,
             "bucket_p95": {
                 key: ((buckets.get(key) or {}).get("p95"))
                 for key in metric_bucket_keys
@@ -341,11 +362,66 @@ def summarize_long_frame_attribution(entries, field="long_frame_attribution"):
         "top_metrics": top_metrics,
     }
 
+def summarize_hover_preview_evidence(entries):
+    required = set()
+    missing = set()
+    bucket_counts = defaultdict(list)
+    data_sources = set()
+    harness_scenarios = set()
+    preview_identifiers = set()
+    preview_triggered = False
+    preview_accessibility_found = False
+
+    for entry in entries:
+        evidence = entry.get("hover_preview_evidence") or {}
+        preview_triggered = preview_triggered or bool(
+            evidence.get("preview_opened")
+            or evidence.get("preview_triggered")
+            or evidence.get("text_preview_opened")
+            or evidence.get("image_preview_opened")
+        )
+        preview_accessibility_found = preview_accessibility_found or bool(evidence.get("preview_accessibility_found"))
+        data_source = evidence.get("data_source")
+        if data_source:
+            data_sources.add(str(data_source))
+        harness_scenario = evidence.get("harness_scenario")
+        if harness_scenario:
+            harness_scenarios.add(str(harness_scenario))
+        preview_identifier = evidence.get("preview_identifier")
+        if preview_identifier:
+            preview_identifiers.add(str(preview_identifier))
+        for name in evidence.get("required_buckets") or []:
+            required.add(str(name))
+        for name in evidence.get("missing_required_buckets") or []:
+            missing.add(str(name))
+        for name, count in (evidence.get("bucket_counts") or {}).items():
+            if isinstance(count, (int, float)):
+                bucket_counts[str(name)].append(int(count))
+
+    return {
+        "preview_triggered": preview_triggered,
+        "preview_accessibility_found": preview_accessibility_found,
+        "harness_scenarios": sorted(harness_scenarios),
+        "preview_identifiers": sorted(preview_identifiers),
+        "required_buckets": sorted(required),
+        "missing_required_buckets": sorted(missing),
+        "bucket_counts": {
+            name: {
+                "median": median(values),
+                "min": min_v(values),
+                "max": max_v(values),
+            }
+            for name, values in sorted(bucket_counts.items())
+        },
+        "data_sources": sorted(data_sources),
+    }
+
 summary = {
     "generated_at": datetime.now(timezone.utc).isoformat(),
     "repeats_requested": repeats,
     "duration_seconds": duration_sec,
     "min_samples": min_samples,
+    "include_hover": include_hover,
     "variants": {},
 }
 
@@ -456,6 +532,7 @@ for variant in variants:
                 entries,
                 field="main_thread_long_frame_attribution",
             ),
+            "hover_preview_evidence": summarize_hover_preview_evidence(entries),
         }
     summary["variants"][variant] = scenario_map
 
@@ -464,6 +541,9 @@ expected_scenarios = {
     "real-snapshot-mixed",
     "real-snapshot-text-bias",
 }
+if include_hover:
+    expected_scenarios.add("hover-preview-markdown-text")
+    expected_scenarios.add("hover-preview-image")
 errors = []
 for variant in variants:
     scenario_map = summary["variants"].get(variant, {})
@@ -474,6 +554,22 @@ for variant in variants:
         runs = int((scenario_map.get(scenario) or {}).get("runs") or 0)
         if runs != repeats:
             errors.append(f"{variant}:{scenario} expected runs={repeats}, got={runs}")
+
+if include_hover:
+    hover_scenarios = ["hover-preview-markdown-text", "hover-preview-image"]
+    for variant in variants:
+        for scenario in hover_scenarios:
+            hover_entries = records[variant].get(scenario, [])
+            if len(hover_entries) != repeats:
+                errors.append(f"{variant}:{scenario} expected raw entries={repeats}, got={len(hover_entries)}")
+            for entry in hover_entries:
+                evidence = entry.get("hover_preview_evidence") or {}
+                source = entry.get("path") or "<unknown>"
+                if not (evidence.get("preview_opened") or evidence.get("preview_triggered")):
+                    errors.append(f"{variant}:{scenario} preview was not triggered in {source}")
+                missing_buckets = evidence.get("missing_required_buckets") or []
+                if missing_buckets:
+                    errors.append(f"{variant}:{scenario} missing hover buckets {missing_buckets} in {source}")
 
 if errors:
     for err in errors:
@@ -501,6 +597,7 @@ md_lines.append(f"- Generated at: {summary['generated_at']}")
 md_lines.append(f"- Repeats requested: {repeats}")
 md_lines.append(f"- Duration per scenario: {duration_sec:.1f}s")
 md_lines.append(f"- Min samples: {min_samples}")
+md_lines.append(f"- Include hover preview smoke: {str(include_hover).lower()}")
 md_lines.append("")
 md_lines.append("| Scenario | Metric | Baseline | Current | Delta | Change |")
 md_lines.append("|---|---:|---:|---:|---:|---:|")
@@ -533,6 +630,8 @@ for scenario in all_scenarios:
         ("image.thumbnail_imageio_decode_ms.p95", baseline.get("bucket_p95_ms", {}).get("image.thumbnail_imageio_decode_ms", {}).get("median"), current.get("bucket_p95_ms", {}).get("image.thumbnail_imageio_decode_ms", {}).get("median")),
         ("image.thumbnail_main_commit_ms.p95", baseline.get("bucket_p95_ms", {}).get("image.thumbnail_main_commit_ms", {}).get("median"), current.get("bucket_p95_ms", {}).get("image.thumbnail_main_commit_ms", {}).get("median")),
         ("image.thumbnail_load_total_ms.p95", baseline.get("bucket_p95_ms", {}).get("image.thumbnail_load_total_ms", {}).get("median"), current.get("bucket_p95_ms", {}).get("image.thumbnail_load_total_ms", {}).get("median")),
+        ("hover.markdown_render_ms.p95", baseline.get("bucket_p95_ms", {}).get("hover.markdown_render_ms", {}).get("median"), current.get("bucket_p95_ms", {}).get("hover.markdown_render_ms", {}).get("median")),
+        ("hover.preview_image_decode_ms.p95", baseline.get("bucket_p95_ms", {}).get("hover.preview_image_decode_ms", {}).get("median"), current.get("bucket_p95_ms", {}).get("hover.preview_image_decode_ms", {}).get("median")),
     ]
     for metric, base, curr in pairs:
         delta = None if base is None or curr is None else (curr - base)
@@ -569,6 +668,27 @@ for scenario in all_scenarios:
         md_lines.append(
             f"| {scenario} | {variant} | {int(attribution.get('long_frame_count') or 0)} | {attributed_text} | {unattributed_text} | {coverage_text} | {main_thread_coverage_text} | {top_text} |"
         )
+
+if include_hover:
+    md_lines.append("")
+    md_lines.append("## Hover Preview Evidence")
+    md_lines.append("")
+    md_lines.append("| Scenario | Variant | Runs | Preview Triggered | Accessibility Found | Missing Buckets | Bucket Counts |")
+    md_lines.append("|---|---|---:|---:|---:|---|---|")
+    for scenario in ["hover-preview-markdown-text", "hover-preview-image"]:
+        for variant in variants:
+            scenario_summary = summary["variants"].get(variant, {}).get(scenario, {})
+            evidence = scenario_summary.get("hover_preview_evidence") or {}
+            counts = []
+            for name, count_summary in (evidence.get("bucket_counts") or {}).items():
+                value = count_summary.get("median")
+                if isinstance(value, (int, float)):
+                    counts.append(f"{name}: {value:.0f}")
+            missing = ", ".join(evidence.get("missing_required_buckets") or []) or "-"
+            count_text = ", ".join(counts) if counts else "-"
+            md_lines.append(
+                f"| {scenario} | {variant} | {int(scenario_summary.get('runs') or 0)} | {evidence.get('preview_triggered')} | {evidence.get('preview_accessibility_found')} | {missing} | {count_text} |"
+            )
 
 md_out = os.path.join(out_dir, "frontend-scroll-profile-summary.md")
 with open(md_out, "w", encoding="utf-8") as f:

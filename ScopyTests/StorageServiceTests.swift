@@ -357,6 +357,192 @@ final class StorageServiceTests: XCTestCase {
         XCTAssertEqual(countAfterCleanup, 5)
     }
 
+    func testCleanupByCountDeletesExternalFilesThroughDeletePlanExecutor() async throws {
+        let probe = RemoveFileProbe()
+        let (routedStorage, baseURL) = try await makeTemporaryStorage(
+            prefix: "scopy-cleanup-count-route",
+            fileOps: makeRecordingFileOps(probe)
+        )
+        defer {
+            Task { @MainActor in
+                await routedStorage.close()
+                try? FileManager.default.removeItem(at: baseURL)
+            }
+        }
+
+        routedStorage.cleanupSettings.maxItems = 1
+        routedStorage.cleanupSettings.maxSmallStorageMB = 200
+        routedStorage.cleanupSettings.maxLargeStorageMB = 800
+
+        _ = try await routedStorage.upsertItem(makeLargeTestContent())
+        try await Task.sleep(nanoseconds: 10_000_000)
+        _ = try await routedStorage.upsertItem(makeLargeTestContent())
+        try await Task.sleep(nanoseconds: 10_000_000)
+        _ = try await routedStorage.upsertItem(makeLargeTestContent())
+
+        try await routedStorage.performCleanup(mode: .light)
+
+        let remaining = try await routedStorage.fetchRecent(limit: 10, offset: 0)
+        XCTAssertEqual(remaining.count, 1)
+        XCTAssertEqual(probe.callCount, 2)
+    }
+
+    func testCleanupImagesOnlyByCountDeletesExternalFilesThroughDeletePlanExecutor() async throws {
+        let probe = RemoveFileProbe()
+        let (routedStorage, baseURL) = try await makeTemporaryStorage(
+            prefix: "scopy-cleanup-images-count-route",
+            fileOps: makeRecordingFileOps(probe)
+        )
+        defer {
+            Task { @MainActor in
+                await routedStorage.close()
+                try? FileManager.default.removeItem(at: baseURL)
+            }
+        }
+
+        routedStorage.cleanupSettings.cleanupImagesOnly = true
+        routedStorage.cleanupSettings.maxItems = 1
+        routedStorage.cleanupSettings.maxSmallStorageMB = 200
+        routedStorage.cleanupSettings.maxLargeStorageMB = 800
+
+        let text = try await routedStorage.upsertItem(makeTestContent(text: "text survives"))
+        let image1 = try await routedStorage.upsertItem(makeLargeTestContent())
+        try await Task.sleep(nanoseconds: 10_000_000)
+        let image2 = try await routedStorage.upsertItem(makeLargeTestContent())
+
+        try await routedStorage.performCleanup(mode: .light)
+
+        let survivingText = try await routedStorage.findByID(text.id)
+        let removedImage1 = try await routedStorage.findByID(image1.id)
+        let removedImage2 = try await routedStorage.findByID(image2.id)
+        XCTAssertNotNil(survivingText)
+        XCTAssertNil(removedImage1)
+        XCTAssertNil(removedImage2)
+        XCTAssertEqual(probe.callCount, 2)
+    }
+
+    func testCleanupByAgeDeletesExternalFilesThroughDeletePlanExecutor() async throws {
+        let probe = RemoveFileProbe()
+        let (routedStorage, baseURL) = try await makeTemporaryStorage(
+            prefix: "scopy-cleanup-age-route",
+            fileOps: makeRecordingFileOps(probe)
+        )
+        defer {
+            Task { @MainActor in
+                await routedStorage.close()
+                try? FileManager.default.removeItem(at: baseURL)
+            }
+        }
+
+        routedStorage.cleanupSettings.maxItems = 10
+        routedStorage.cleanupSettings.maxDaysAge = 0
+        routedStorage.cleanupSettings.maxSmallStorageMB = 200
+        routedStorage.cleanupSettings.maxLargeStorageMB = 800
+
+        let item = try await routedStorage.upsertItem(makeLargeTestContent())
+
+        try await routedStorage.performCleanup(mode: .light)
+
+        let missing = try await routedStorage.findByID(item.id)
+        XCTAssertNil(missing)
+        XCTAssertEqual(probe.callCount, 1)
+    }
+
+    func testCleanupBySizeDeletesExternalFilesThroughDeletePlanExecutor() async throws {
+        let probe = RemoveFileProbe()
+        let (routedStorage, baseURL) = try await makeTemporaryStorage(
+            prefix: "scopy-cleanup-size-route",
+            fileOps: makeRecordingFileOps(probe)
+        )
+        defer {
+            Task { @MainActor in
+                await routedStorage.close()
+                try? FileManager.default.removeItem(at: baseURL)
+            }
+        }
+
+        routedStorage.cleanupSettings.maxItems = 10
+        routedStorage.cleanupSettings.maxSmallStorageMB = 1
+        routedStorage.cleanupSettings.maxLargeStorageMB = 800
+
+        let first = try await routedStorage.upsertItem(makeLargeTestContent())
+        try await Task.sleep(nanoseconds: 10_000_000)
+        let second = try await routedStorage.upsertItem(makeLargeTestContent())
+
+        try await routedStorage.performCleanup(mode: .light)
+
+        let removedFirst = try await routedStorage.findByID(first.id)
+        let removedSecond = try await routedStorage.findByID(second.id)
+        XCTAssertNil(removedFirst)
+        XCTAssertNil(removedSecond)
+        XCTAssertEqual(probe.callCount, 2)
+    }
+
+    func testCleanupExternalStorageDeletesExternalFilesThroughDeletePlanExecutor() async throws {
+        let probe = RemoveFileProbe()
+        let (routedStorage, baseURL) = try await makeTemporaryStorage(
+            prefix: "scopy-cleanup-external-route",
+            fileOps: makeRecordingFileOps(probe)
+        )
+        defer {
+            Task { @MainActor in
+                await routedStorage.close()
+                try? FileManager.default.removeItem(at: baseURL)
+            }
+        }
+
+        routedStorage.cleanupSettings.maxItems = 10
+        routedStorage.cleanupSettings.maxSmallStorageMB = 200
+        routedStorage.cleanupSettings.maxLargeStorageMB = 0
+
+        let item = try await routedStorage.upsertItem(makeLargeTestContent())
+
+        try await routedStorage.performCleanup(mode: .light)
+
+        let missing = try await routedStorage.findByID(item.id)
+        XCTAssertNil(missing)
+        XCTAssertEqual(probe.callCount, 1)
+    }
+
+    func testCleanupSkipsInvalidStorageRefAfterDBDelete() async throws {
+        let probe = RemoveFileProbe()
+        let (routedStorage, baseURL) = try await makeTemporaryStorage(
+            prefix: "scopy-cleanup-invalid-ref",
+            fileOps: makeRecordingFileOps(probe)
+        )
+        defer {
+            Task { @MainActor in
+                await routedStorage.close()
+                try? FileManager.default.removeItem(at: baseURL)
+            }
+        }
+
+        let invalidDirectory = baseURL.appendingPathComponent("outside", isDirectory: true)
+        try FileManager.default.createDirectory(at: invalidDirectory, withIntermediateDirectories: true)
+        let invalidRef = invalidDirectory.appendingPathComponent("\(UUID().uuidString).png")
+        try Data([0x01, 0x02, 0x03]).write(to: invalidRef)
+
+        let item = try await routedStorage.upsertItem(makeLargeTestContent())
+        try await routedStorage.updateItemPayload(
+            id: item.id,
+            contentHash: "invalid-ref-\(UUID().uuidString)",
+            sizeBytes: item.sizeBytes,
+            storageRef: invalidRef.path,
+            rawData: nil
+        )
+
+        routedStorage.cleanupSettings.maxItems = 0
+        routedStorage.cleanupSettings.maxSmallStorageMB = 200
+        routedStorage.cleanupSettings.maxLargeStorageMB = 800
+
+        try await routedStorage.performCleanup(mode: .light)
+
+        let missing = try await routedStorage.findByID(item.id)
+        XCTAssertNil(missing)
+        XCTAssertEqual(probe.callCount, 0)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: invalidRef.path))
+    }
+
     func testExternalStorageIsIsolatedFromUserDataDuringTests() async throws {
         let content = makeLargeTestContent()
         let item = try await storage.upsertItem(content)
@@ -455,6 +641,60 @@ final class StorageServiceTests: XCTestCase {
         XCTAssertEqual(probe.callCount, 0, "File remover should not be called when DB deletion fails")
     }
 
+    func testCleanupByCountDoesNotRemoveExternalFilesWhenDBIsBusy() async throws {
+        let baseURL = try makeTemporaryDirectory(prefix: "scopy-cleanup-busy")
+
+        let probe = RemoveFileProbe()
+        let fileOps = makeRecordingFileOps(probe)
+
+        let dbPath = baseURL.appendingPathComponent("clipboard.db").path
+        let diskStorage = StorageService(databasePath: dbPath, fileOps: fileOps)
+        try await diskStorage.open()
+        defer {
+            Task { @MainActor in
+                await diskStorage.close()
+                try? FileManager.default.removeItem(at: baseURL)
+            }
+        }
+
+        let first = try await diskStorage.upsertItem(makeLargeTestContent())
+        try await Task.sleep(nanoseconds: 10_000_000)
+        let second = try await diskStorage.upsertItem(makeLargeTestContent())
+
+        guard let firstStorageRef = first.storageRef,
+              let secondStorageRef = second.storageRef else {
+            XCTFail("Expected external storageRefs for large content")
+            return
+        }
+
+        diskStorage.cleanupSettings.maxItems = 1
+        diskStorage.cleanupSettings.maxSmallStorageMB = 200
+        diskStorage.cleanupSettings.maxLargeStorageMB = 800
+
+        do {
+            let lockFlags = SQLiteConnection.openFlags(for: dbPath, readOnly: false)
+            let locker = try SQLiteConnection(path: dbPath, flags: lockFlags)
+            try locker.execute("BEGIN IMMEDIATE TRANSACTION")
+            defer {
+                try? locker.execute("ROLLBACK")
+                locker.close()
+            }
+
+            do {
+                try await diskStorage.performCleanup(mode: .light)
+                XCTFail("Expected cleanup to fail while DB is busy")
+            } catch {
+                // Expected
+            }
+        }
+
+        XCTAssertEqual(probe.callCount, 0, "File remover should not be called when cleanup DB deletion fails")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: firstStorageRef))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: secondStorageRef))
+        let countAfterFailedCleanup = try await diskStorage.getItemCount()
+        XCTAssertEqual(countAfterFailedCleanup, 2)
+    }
+
     func testSyncExternalImageSizeBytesFromDiskUpdatesDBSizeBytes() async throws {
         let item = try await storage.upsertItem(makeLargeTestContent())
 
@@ -504,5 +744,29 @@ final class StorageServiceTests: XCTestCase {
             contentHash: "large-\(UUID().uuidString)",
             sizeBytes: data.count
         )
+    }
+
+    private func makeTemporaryStorage(
+        prefix: String,
+        fileOps: StorageService.StorageFileOps
+    ) async throws -> (StorageService, URL) {
+        let baseURL = try makeTemporaryDirectory(prefix: prefix)
+        let storage = StorageService(databasePath: ":memory:", storageRootURL: baseURL, fileOps: fileOps)
+        try await storage.open()
+        return (storage, baseURL)
+    }
+
+    private func makeTemporaryDirectory(prefix: String) throws -> URL {
+        let baseURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("\(prefix)-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: baseURL, withIntermediateDirectories: true)
+        return baseURL
+    }
+
+    private func makeRecordingFileOps(_ probe: RemoveFileProbe) -> StorageService.StorageFileOps {
+        StorageService.StorageFileOps(removeFile: { url in
+            probe.recordCall()
+            try FileManager.default.removeItem(at: url)
+        })
     }
 }

@@ -5,53 +5,6 @@ import ScopyUISupport
 
 // MARK: - History Item View (v0.9.3 - 性能优化版)
 
-private struct SendableCGImage: @unchecked Sendable {
-    let image: CGImage
-}
-
-private actor PreviewTaskBudget {
-    static let shared = PreviewTaskBudget(limit: 4)
-
-    private let limit: Int
-    private var inFlight: Int = 0
-    private var waiters: [CheckedContinuation<Void, Never>] = []
-
-    init(limit: Int) {
-        self.limit = max(1, limit)
-    }
-
-    func acquireIfNeeded() async {
-        guard PerfFeatureFlags.previewTaskBudgetEnabled else { return }
-        if inFlight < limit {
-            inFlight += 1
-            return
-        }
-        await withCheckedContinuation { continuation in
-            waiters.append(continuation)
-        }
-    }
-
-    func releaseIfNeeded() async {
-        guard PerfFeatureFlags.previewTaskBudgetEnabled else { return }
-        if let continuation = waiters.first {
-            waiters.removeFirst()
-            continuation.resume()
-            return
-        }
-        inFlight = max(0, inFlight - 1)
-    }
-}
-
-private func runBudgetedDetached<T: Sendable>(
-    priority: TaskPriority,
-    operation: @escaping @Sendable () async -> T
-) async -> T {
-    await PreviewTaskBudget.shared.acquireIfNeeded()
-    let result = await Task.detached(priority: priority, operation: operation).value
-    await PreviewTaskBudget.shared.releaseIfNeeded()
-    return result
-}
-
 /// 单个历史项视图 - 实现 Equatable 以优化重绘
 /// v0.9.3: 使用局部悬停状态 + 防抖 + Equatable 优化滚动性能
 @MainActor
@@ -341,188 +294,6 @@ struct HistoryItemView: View, Equatable {
             return ScopyColors.hover
         } else {
             return Color.clear
-        }
-    }
-
-    private static let markdownFilePreviewCacheTTL: TimeInterval = 3 * 3600
-
-    private func startMarkdownFilePreviewTask(url: URL, cacheKey: String) {
-        previewCoordinator.presentPreview(.file, markdownCacheKey: cacheKey)
-        hoverPreviewTask = Task(priority: .userInitiated) { @MainActor in
-            let delayNanos = UInt64(previewDelay * 1_000_000_000)
-            try? await Task.sleep(nanoseconds: delayNanos)
-            guard !Task.isCancelled else { return }
-            guard !isPreviewInteractionSuppressed else { return }
-            guard isHovering else { return }
-
-            let maxBytes = 200_000
-            let now = Date()
-            let cachedEntry = MarkdownPreviewCache.shared.filePreview(forKey: cacheKey)
-            if let cachedEntry,
-               now.timeIntervalSince(cachedEntry.fetchedAt) < Self.markdownFilePreviewCacheTTL
-            {
-                let preview = cachedEntry.text
-                previewModel.text = preview
-                previewModel.isMarkdown = true
-                previewModel.markdownHTML = cachedEntry.html
-
-                if let cachedMetrics = cachedEntry.metrics {
-                    let maxWidth: CGFloat = HoverPreviewScreenMetrics.maxPopoverWidthPoints()
-                    let font = NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
-                    let padding: CGFloat = ScopySpacing.md
-                    let fallbackWidth = HoverPreviewTextSizing.preferredWidth(
-                        for: preview,
-                        font: font,
-                        padding: padding,
-                        maxWidth: maxWidth
-                    )
-                    let stableWidth: CGFloat = {
-                        let w = cachedMetrics.size.width
-                        guard w.isFinite, w > 0 else { return fallbackWidth }
-                        if w < 40 { return fallbackWidth }
-                        if fallbackWidth.isFinite, fallbackWidth > 0, w < fallbackWidth * 0.5 { return fallbackWidth }
-                        return min(maxWidth, w)
-                    }()
-                    let stableSize = CGSize(width: max(1, stableWidth), height: cachedMetrics.size.height)
-                    let stableMetrics = MarkdownContentMetrics(size: stableSize, hasHorizontalOverflow: cachedMetrics.hasHorizontalOverflow)
-                    previewModel.markdownContentSize = stableMetrics.size
-                    previewModel.markdownHasHorizontalOverflow = stableMetrics.hasHorizontalOverflow
-                    MarkdownPreviewCache.shared.updateFilePreviewMetrics(stableMetrics, forKey: cacheKey)
-                } else {
-                    previewModel.markdownContentSize = nil
-                    previewModel.markdownHasHorizontalOverflow = false
-                }
-
-                self.requestPopover(.file)
-
-                if cachedEntry.html == nil, preview.utf16.count <= maxBytes {
-                    let markdownSource = preview
-                    hoverMarkdownTask = Task(priority: .utility) { [markdownSource, cacheKey] in
-                        guard !Task.isCancelled else { return }
-                        let html = await runBudgetedDetached(priority: .utility) {
-                            MarkdownHTMLRenderer.render(markdown: markdownSource)
-                        }
-                        guard !Task.isCancelled, !html.isEmpty else { return }
-                        if let current = MarkdownPreviewCache.shared.filePreview(forKey: cacheKey),
-                           current.text == markdownSource
-                        {
-                            MarkdownPreviewCache.shared.updateFilePreviewHTML(html, forKey: cacheKey)
-                        }
-                        await MainActor.run { [markdownSource] in
-                            guard self.isHovering, self.previewModel.text == markdownSource else { return }
-                            self.previewModel.markdownHTML = html
-                        }
-                    }
-                }
-                return
-            } else if let cachedEntry {
-                let preview = cachedEntry.text
-                previewModel.text = preview
-                previewModel.isMarkdown = true
-                previewModel.markdownHTML = cachedEntry.html
-                if let cachedMetrics = cachedEntry.metrics {
-                    previewModel.markdownContentSize = cachedMetrics.size
-                    previewModel.markdownHasHorizontalOverflow = cachedMetrics.hasHorizontalOverflow
-                } else {
-                    previewModel.markdownContentSize = nil
-                    previewModel.markdownHasHorizontalOverflow = false
-                }
-                self.requestPopover(.file)
-            }
-
-            let previewText: String? = await runBudgetedDetached(priority: .utility) {
-                FilePreviewSupport.readTextFile(url: url, maxBytes: maxBytes)
-            }
-
-            guard !Task.isCancelled else { return }
-            guard !isPreviewInteractionSuppressed else { return }
-            guard isHovering else { return }
-
-            guard let rawText = previewText else {
-                if cachedEntry != nil {
-                    MarkdownPreviewCache.shared.updateFilePreviewFetchedAt(now, forKey: cacheKey)
-                } else {
-                    previewModel.text = nil
-                    previewModel.isMarkdown = false
-                    previewModel.markdownHTML = nil
-                    previewModel.markdownContentSize = nil
-                    previewModel.markdownHasHorizontalOverflow = false
-                    self.requestPopover(.file)
-                }
-                return
-            }
-
-            let preview = rawText.isEmpty ? "(Empty)" : rawText
-            previewModel.text = preview
-            previewModel.isMarkdown = true
-            previewModel.markdownHTML = nil
-            previewModel.markdownContentSize = nil
-            previewModel.markdownHasHorizontalOverflow = false
-            self.requestPopover(.file)
-
-            guard preview.utf16.count <= maxBytes else { return }
-
-            let cachedHTML: String? = (cachedEntry?.text == preview) ? cachedEntry?.html : nil
-            let cachedMetrics: MarkdownContentMetrics? = (cachedEntry?.text == preview) ? cachedEntry?.metrics : nil
-
-            MarkdownPreviewCache.shared.setFilePreview(
-                MarkdownPreviewCache.FilePreviewEntry(text: preview, html: cachedHTML, metrics: cachedMetrics, fetchedAt: now),
-                forKey: cacheKey
-            )
-
-            if let cachedHTML {
-                if self.isHovering, self.previewModel.text == preview {
-                    self.previewModel.markdownHTML = cachedHTML
-                    if let cachedMetrics {
-                        let maxWidth: CGFloat = HoverPreviewScreenMetrics.maxPopoverWidthPoints()
-                        let font = NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
-                        let padding: CGFloat = ScopySpacing.md
-                        let fallbackWidth = HoverPreviewTextSizing.preferredWidth(
-                            for: preview,
-                            font: font,
-                            padding: padding,
-                            maxWidth: maxWidth
-                        )
-                        let stableWidth: CGFloat = {
-                            let w = cachedMetrics.size.width
-                            guard w.isFinite, w > 0 else { return fallbackWidth }
-                            if w < 40 { return fallbackWidth }
-                            if fallbackWidth.isFinite, fallbackWidth > 0, w < fallbackWidth * 0.5 { return fallbackWidth }
-                            return min(maxWidth, w)
-                        }()
-                        let stableSize = CGSize(width: max(1, stableWidth), height: cachedMetrics.size.height)
-                        let stableMetrics = MarkdownContentMetrics(size: stableSize, hasHorizontalOverflow: cachedMetrics.hasHorizontalOverflow)
-                        self.previewModel.markdownContentSize = stableMetrics.size
-                        self.previewModel.markdownHasHorizontalOverflow = stableMetrics.hasHorizontalOverflow
-                        MarkdownPreviewCache.shared.updateFilePreviewMetrics(stableMetrics, forKey: cacheKey)
-                    }
-                }
-                return
-            }
-
-            let markdownSource = preview
-            hoverMarkdownTask = Task(priority: .utility) { [markdownSource, cacheKey] in
-                guard !Task.isCancelled else { return }
-                let html: String
-                if ScrollPerformanceProfile.isEnabled {
-                    let start = CFAbsoluteTimeGetCurrent()
-                    html = MarkdownHTMLRenderer.render(markdown: markdownSource)
-                    let elapsed = (CFAbsoluteTimeGetCurrent() - start) * 1000
-                    ScrollPerformanceProfile.recordMetric(name: "hover.markdown_render_ms", elapsedMs: elapsed)
-                } else {
-                    html = MarkdownHTMLRenderer.render(markdown: markdownSource)
-                }
-                guard !Task.isCancelled, !html.isEmpty else { return }
-                if let current = MarkdownPreviewCache.shared.filePreview(forKey: cacheKey),
-                   current.text == markdownSource
-                {
-                    MarkdownPreviewCache.shared.updateFilePreviewHTML(html, forKey: cacheKey)
-                }
-                await MainActor.run { [markdownSource] in
-                    guard self.isHovering, self.previewModel.text == markdownSource else { return }
-                    self.previewModel.markdownHTML = html
-                }
-            }
         }
     }
 
@@ -1036,171 +807,35 @@ struct HistoryItemView: View, Equatable {
     /// v0.22: 确保在创建新任务前取消旧任务，防止快速悬停时任务累积导致内存泄漏
     private func startPreviewTask() {
         previewCoordinator.presentPreview(.image)
-
+        let request = HistoryHoverPreviewPipeline.imageRequest(item: item, delay: previewDelay)
         hoverPreviewTask = Task(priority: .userInitiated) { @MainActor in
-            let delayNanos = UInt64(previewDelay * 1_000_000_000)
-            let scale = HoverPreviewScreenMetrics.activeBackingScaleFactor()
-            let targetWidthPoints = HoverPreviewScreenMetrics.maxPopoverWidthPoints()
-            let targetWidthPixels = max(1, Int(targetWidthPoints * scale))
-            let maxLongSidePixels = HoverPreviewImageQualityPolicy.maxSidePixels
-            let cacheKeyBase = item.contentHash.isEmpty ? item.id.uuidString : item.contentHash
-            let previewCacheKey = "\(cacheKeyBase)|w\(targetWidthPixels)"
-
-            // v0.43.6: 预取 preview 数据（在 hover delay 内完成 IO/downsample），减少 popover 出现后的等待与“重悬停才显示”的体感。
-            let prefetchDelayNanos: UInt64 = min(50_000_000, delayNanos)
-            let storageRef = item.storageRef
-            let preparedPreviewImage: Task<CGImage?, Never> = Task(priority: .userInitiated) { @MainActor () -> CGImage? in
-                if prefetchDelayNanos > 0 {
-                    try? await Task.sleep(nanoseconds: prefetchDelayNanos)
-                }
-                guard !Task.isCancelled else { return nil }
-                guard !isPreviewInteractionSuppressed else { return nil }
-                guard isHovering else { return nil }
-
-                if let cached = HoverPreviewImageCache.shared.image(forKey: previewCacheKey) {
-                    previewModel.previewCGImage = cached
-                    return cached
-                }
-
-                let cgImage: CGImage?
-                if let storageRef, !storageRef.isEmpty {
-                    let sendable = await runBudgetedDetached(priority: .userInitiated) { () async -> SendableCGImage? in
-                        guard let image = HoverPreviewLoader.makePreviewCGImage(
-                            fromFileAtPath: storageRef,
-                            targetWidthPixels: targetWidthPixels,
-                            maxLongSidePixels: maxLongSidePixels
-                        ) else {
-                            return nil
-                        }
-                        return SendableCGImage(image: image)
-                    }
-                    cgImage = sendable?.image
-                } else {
-                    guard let data = await getImageData() else { return nil }
-                    let sendable = await runBudgetedDetached(priority: .userInitiated) { () async -> SendableCGImage? in
-                        guard let image = HoverPreviewLoader.makePreviewCGImage(
-                            from: data,
-                            targetWidthPixels: targetWidthPixels,
-                            maxLongSidePixels: maxLongSidePixels
-                        ) else {
-                            return nil
-                        }
-                        return SendableCGImage(image: image)
-                    }
-                    cgImage = sendable?.image
-                }
-
-                guard !Task.isCancelled else { return nil }
-                guard !isPreviewInteractionSuppressed else { return nil }
-                guard isHovering else { return nil }
-                if let cgImage {
-                    HoverPreviewImageCache.shared.setImage(cgImage, forKey: previewCacheKey)
-                }
-                previewModel.previewCGImage = cgImage
-                return cgImage
-            }
-            defer { preparedPreviewImage.cancel() }
-
-            try? await Task.sleep(nanoseconds: delayNanos)
-            guard !Task.isCancelled else { return }
-            guard !isPreviewInteractionSuppressed else { return }
-            guard isHovering else { return }
-
-            self.requestPopover(.image)
-
-            if let cgImage = await preparedPreviewImage.value {
-                guard !Task.isCancelled else { return }
-                previewModel.previewCGImage = cgImage
-            }
-
+            await HistoryHoverPreviewPipeline.run(
+                request: .image(request),
+                getImageData: getImageData,
+                isCurrent: { !Task.isCancelled && !isPreviewInteractionSuppressed && isHovering },
+                emit: applyHoverPreviewEvent
+            )
         }
     }
 
     private func startFilePreviewTask() {
         guard let previewInfo = filePreviewInfo else { return }
-
-        let cacheKeyBase = item.contentHash.isEmpty ? item.id.uuidString : item.contentHash
-        let kindToken = previewInfo.kind.rawValue
-        let shouldPrefetchImage = previewInfo.kind == .image || previewInfo.kind == .video
-
-        if filePreviewIsMarkdown {
-            let cacheKey = "file|\(cacheKeyBase)"
-            startMarkdownFilePreviewTask(url: previewInfo.url, cacheKey: cacheKey)
-            return
-        }
-
-        previewCoordinator.presentPreview(.file)
+        let request = HistoryHoverPreviewPipeline.fileRequest(
+            item: item,
+            previewInfo: previewInfo,
+            isMarkdown: filePreviewIsMarkdown,
+            delay: previewDelay
+        )
+        let markdownCacheKey = filePreviewIsMarkdown
+            ? HistoryHoverPreviewPipeline.markdownFileCacheKey(itemID: item.id, contentHash: item.contentHash)
+            : nil
+        previewCoordinator.presentPreview(.file, markdownCacheKey: markdownCacheKey)
         hoverPreviewTask = Task(priority: .userInitiated) { @MainActor in
-            let delayNanos = UInt64(previewDelay * 1_000_000_000)
-            let scale = HoverPreviewScreenMetrics.activeBackingScaleFactor()
-            let targetWidthPoints = HoverPreviewScreenMetrics.maxPopoverWidthPoints()
-            let targetWidthPixels = max(1, Int(targetWidthPoints * scale))
-            let targetHeightPoints = HoverPreviewScreenMetrics.maxPopoverHeightPoints()
-            let targetHeightPixels = max(1, Int(targetHeightPoints * scale))
-            let quickLookMaxSidePixels = max(targetWidthPixels, targetHeightPixels)
-            let maxLongSidePixels = HoverPreviewImageQualityPolicy.maxSidePixels
-            let previewCacheKey = "file|\(cacheKeyBase)|\(kindToken)|w\(targetWidthPixels)"
-
-            let prefetchDelayNanos: UInt64 = min(50_000_000, delayNanos)
-            let preparedPreviewImage: Task<CGImage?, Never> = Task(priority: .userInitiated) { @MainActor () -> CGImage? in
-                guard shouldPrefetchImage else { return nil }
-                if prefetchDelayNanos > 0 {
-                    try? await Task.sleep(nanoseconds: prefetchDelayNanos)
-                }
-                guard !Task.isCancelled else { return nil }
-                guard !isPreviewInteractionSuppressed else { return nil }
-                guard isHovering else { return nil }
-
-                if let cached = HoverPreviewImageCache.shared.image(forKey: previewCacheKey) {
-                    previewModel.previewCGImage = cached
-                    return cached
-                }
-
-                let sendable = await runBudgetedDetached(priority: .userInitiated) { () async -> SendableCGImage? in
-                    let cgImage: CGImage?
-                    switch previewInfo.kind {
-                    case .image:
-                        cgImage = HoverPreviewLoader.makePreviewCGImage(
-                            fromFileAtPath: previewInfo.url.path,
-                            targetWidthPixels: targetWidthPixels,
-                            maxLongSidePixels: maxLongSidePixels
-                        )
-                    case .video:
-                        cgImage = FilePreviewSupport.makeVideoPreviewCGImage(from: previewInfo.url, maxSidePixels: maxLongSidePixels)
-                    case .other:
-                        cgImage = await FilePreviewSupport.makeQuickLookPreviewCGImage(
-                            from: previewInfo.url,
-                            maxSidePixels: quickLookMaxSidePixels,
-                            scale: scale
-                        )
-                    }
-                    guard let cgImage else { return nil }
-                    return SendableCGImage(image: cgImage)
-                }
-
-                let cgImage = sendable?.image
-                guard !Task.isCancelled else { return nil }
-                guard !isPreviewInteractionSuppressed else { return nil }
-                guard isHovering else { return nil }
-                if let cgImage {
-                    HoverPreviewImageCache.shared.setImage(cgImage, forKey: previewCacheKey)
-                }
-                previewModel.previewCGImage = cgImage
-                return cgImage
-            }
-            defer { preparedPreviewImage.cancel() }
-
-            try? await Task.sleep(nanoseconds: delayNanos)
-            guard !Task.isCancelled else { return }
-            guard !isPreviewInteractionSuppressed else { return }
-            guard isHovering else { return }
-
-            self.requestPopover(.file)
-
-            if let cgImage = await preparedPreviewImage.value {
-                guard !Task.isCancelled else { return }
-                previewModel.previewCGImage = cgImage
-            }
+            await HistoryHoverPreviewPipeline.run(
+                request: .file(request),
+                isCurrent: { !Task.isCancelled && !isPreviewInteractionSuppressed && isHovering },
+                emit: applyHoverPreviewEvent
+            )
         }
     }
 
@@ -1396,6 +1031,29 @@ struct HistoryItemView: View, Equatable {
         MarkdownPreviewCache.shared.updateFilePreviewMetrics(metrics, forKey: cacheKey)
     }
 
+    private func applyHoverPreviewEvent(_ event: HistoryHoverPreviewPipeline.Event) {
+        switch event {
+        case .present(let kind):
+            requestPopover(kind)
+        case .image(let cgImage):
+            previewModel.previewCGImage = cgImage
+        case .text(let state):
+            previewModel.text = state.text
+            previewModel.isMarkdown = state.isMarkdown
+            previewModel.markdownHTML = state.markdownHTML
+            previewModel.markdownContentSize = state.markdownContentSize
+            previewModel.markdownHasHorizontalOverflow = state.markdownHasHorizontalOverflow
+        case .markdownHTML(let html):
+            previewModel.markdownHTML = html
+        case .renderMarkdown(let request):
+            hoverMarkdownTask = HistoryHoverPreviewPipeline.makeMarkdownRenderTask(
+                request: request,
+                isCurrent: { !Task.isCancelled && !isPreviewInteractionSuppressed && isHovering && previewModel.text == request.source },
+                emit: applyHoverPreviewEvent
+            )
+        }
+    }
+
     private func startOptimizeImageTask() {
         guard item.type == .image else { return }
         guard !isOptimizingImage else { return }
@@ -1482,116 +1140,13 @@ struct HistoryItemView: View, Equatable {
     /// v0.22: 确保在创建新任务前取消旧任务，防止快速悬停时任务累积导致内存泄漏
     private func startTextPreviewTask() {
         previewCoordinator.presentPreview(.text)
-
+        let request = HistoryHoverPreviewPipeline.textRequest(item: item, delay: previewDelay)
         hoverPreviewTask = Task(priority: .userInitiated) { @MainActor in
-            // Wait for preview delay
-            let delayNanos = UInt64(previewDelay * 1_000_000_000)
-            try? await Task.sleep(nanoseconds: delayNanos)
-            guard !Task.isCancelled else { return }
-            guard !isPreviewInteractionSuppressed else { return }
-            guard isHovering else { return }
-
-            let text = item.plainText
-            let preview = text.isEmpty ? "(Empty)" : text
-
-            let isMarkdown: Bool
-            let presentationCache = HistoryItemPresentationCache.shared
-            if let cached = presentationCache.cachedMarkdownExportCapability(for: item) {
-                isMarkdown = cached
-            } else {
-                let metricsEnabled = ScrollPerformanceProfile.isEnabled
-                let profileStart = metricsEnabled ? CFAbsoluteTimeGetCurrent() : nil
-                let computed = await Task.detached(priority: .utility) {
-                    MarkdownDetector.isLikelyMarkdown(preview)
-                }.value
-                if let profileStart {
-                    ScrollPerformanceProfile.recordMetric(
-                        name: "text.markdown_detect_ms",
-                        elapsedMs: (CFAbsoluteTimeGetCurrent() - profileStart) * 1000
-                    )
-                }
-                guard !Task.isCancelled else { return }
-                guard !isPreviewInteractionSuppressed else { return }
-                guard isHovering else { return }
-                presentationCache.storeMarkdownExportCapability(computed, for: item)
-                isMarkdown = computed
-            }
-            if self.isHovering {
-                self.previewModel.text = preview
-                self.previewModel.isMarkdown = isMarkdown
-                self.previewModel.markdownHTML = nil
-                self.previewModel.markdownContentSize = nil
-                self.previewModel.markdownHasHorizontalOverflow = false
-                if !isMarkdown {
-                    self.requestPopover(.text)
-                }
-            }
-
-            guard isMarkdown else { return }
-            // Avoid heavy Markdown -> HTML render for very large clipboard payloads.
-            guard preview.utf16.count <= 200_000 else { return }
-
-            let cacheKey = item.contentHash
-            if !cacheKey.isEmpty,
-               let cachedHTML = MarkdownPreviewCache.shared.html(forKey: cacheKey),
-               let cachedMetrics = MarkdownPreviewCache.shared.metrics(forKey: cacheKey)
-            {
-                if self.isHovering, self.previewModel.text == preview {
-                    // Fast-path: reuse cached metrics to avoid waiting for WebKit to re-emit identical size messages.
-                    let maxWidth: CGFloat = HoverPreviewScreenMetrics.maxPopoverWidthPoints()
-                    let font = NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
-                    let padding: CGFloat = ScopySpacing.md
-                    let fallbackWidth = HoverPreviewTextSizing.preferredWidth(
-                        for: preview,
-                        font: font,
-                        padding: padding,
-                        maxWidth: maxWidth
-                    )
-                    let stableWidth: CGFloat = {
-                        let w = cachedMetrics.size.width
-                        guard w.isFinite, w > 0 else { return fallbackWidth }
-                        if w < 40 { return fallbackWidth }
-                        if fallbackWidth.isFinite, fallbackWidth > 0, w < fallbackWidth * 0.5 { return fallbackWidth }
-                        return min(maxWidth, w)
-                    }()
-                    let stableSize = CGSize(width: max(1, stableWidth), height: cachedMetrics.size.height)
-                    let stableMetrics = MarkdownContentMetrics(size: stableSize, hasHorizontalOverflow: cachedMetrics.hasHorizontalOverflow)
-                    self.previewModel.markdownHTML = cachedHTML
-                    self.previewModel.markdownContentSize = stableMetrics.size
-                    self.previewModel.markdownHasHorizontalOverflow = stableMetrics.hasHorizontalOverflow
-                    MarkdownPreviewCache.shared.setMetrics(stableMetrics, forKey: cacheKey)
-                    self.requestPopover(.text)
-                }
-                return
-            }
-            if let cached = MarkdownPreviewCache.shared.html(forKey: cacheKey) {
-                if self.isHovering, self.previewModel.text == preview {
-                    self.previewModel.markdownHTML = cached
-                }
-                return
-            }
-
-            let previewText = preview
-            hoverMarkdownTask = Task(priority: .utility) { [previewText, cacheKey] in
-                guard !Task.isCancelled else { return }
-                let metricsEnabled = ScrollPerformanceProfile.isEnabled
-                let html = await runBudgetedDetached(priority: .utility) {
-                    if metricsEnabled {
-                        let start = CFAbsoluteTimeGetCurrent()
-                        let html = MarkdownHTMLRenderer.render(markdown: previewText)
-                        let elapsed = (CFAbsoluteTimeGetCurrent() - start) * 1000
-                        ScrollPerformanceProfile.recordMetric(name: "hover.markdown_render_ms", elapsedMs: elapsed)
-                        return html
-                    }
-                    return MarkdownHTMLRenderer.render(markdown: previewText)
-                }
-                guard !Task.isCancelled, !html.isEmpty else { return }
-                MarkdownPreviewCache.shared.setHTML(html, forKey: cacheKey)
-                await MainActor.run { [previewText] in
-                    guard self.isHovering, self.previewModel.text == previewText else { return }
-                    self.previewModel.markdownHTML = html
-                }
-            }
+            await HistoryHoverPreviewPipeline.run(
+                request: .text(request),
+                isCurrent: { !Task.isCancelled && !isPreviewInteractionSuppressed && isHovering },
+                emit: applyHoverPreviewEvent
+            )
         }
     }
 

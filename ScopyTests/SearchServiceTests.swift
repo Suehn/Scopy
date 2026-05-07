@@ -63,6 +63,50 @@ final class SearchServiceTests: XCTestCase {
         XCTAssertEqual(result.coverage, .recentOnly(limit: 2000))
     }
 
+    func testWhitespaceOnlyExactQueryUsesAllItemsWithFilters() async throws {
+        try await populateTestData(count: 5)
+
+        let query = " \n\t "
+        let result = try await search.search(
+            request: SearchRequest(query: query, mode: .exact, limit: 50, offset: 0)
+        )
+
+        XCTAssertEqual(result.items.count, 5)
+        XCTAssertEqual(result.coverage, .complete)
+    }
+
+    func testWhitespacePaddedShortExactQueryStaysRecentOnly() async throws {
+        let oldTarget = try await storage.upsertItem(makeContent("ab_target_oldest"))
+        for i in 0..<2001 {
+            _ = try await storage.upsertItem(makeContent("Item \(i) filler"))
+        }
+        let recentTarget = try await storage.upsertItem(makeContent("ab_target_recent"))
+        await search.invalidateCache()
+
+        let result = try await search.search(
+            request: SearchRequest(query: " ab ", mode: .exact, limit: 50, offset: 0)
+        )
+
+        XCTAssertTrue(result.items.contains(where: { $0.id == recentTarget.id }))
+        XCTAssertFalse(result.items.contains(where: { $0.id == oldTarget.id }))
+        XCTAssertEqual(result.coverage, .recentOnly(limit: 2000))
+    }
+
+    func testWhitespacePaddedLongExactQueryFindsOlderCompleteHistoryMatch() async throws {
+        let oldTarget = try await storage.upsertItem(makeContent("abc_target_oldest"))
+        for i in 0..<2001 {
+            _ = try await storage.upsertItem(makeContent("Item \(i) filler"))
+        }
+        await search.invalidateCache()
+
+        let result = try await search.search(
+            request: SearchRequest(query: " abc ", mode: .exact, limit: 50, offset: 0)
+        )
+
+        XCTAssertTrue(result.items.contains(where: { $0.id == oldTarget.id }))
+        XCTAssertEqual(result.coverage, .complete)
+    }
+
     func testFuzzySearch() async throws {
         try await populateTestData()
 

@@ -2,10 +2,10 @@
 doc_type: spec
 status: active
 owner: maintainers
-last_reviewed: 2026-04-30
+last_reviewed: 2026-05-07
 canonical: true
 related_versions:
-  - v0.7.5
+  - v0.7.6
 ---
 
 # Current Requirements
@@ -14,7 +14,7 @@ This document is the active requirements baseline for Scopy. Historical planning
 
 ## Reference State
 
-- Reference release: `v0.7.5`
+- Reference release: `v0.7.6`
 - Source of truth for current version metadata: [../meta/release-current.yml](../meta/release-current.yml)
 - Source of truth for development and implementation workflow: [development-guide.md](./development-guide.md)
 
@@ -75,7 +75,7 @@ Scopy is a native macOS clipboard manager for users who need durable clipboard h
 | Pagination | Default page size is 50; incremental loading must remain available |
 | Responsiveness | Typing should stay responsive with debounce around `150-200ms` |
 | Fuzzy / Fuzzy+ | May return a staged first page, but must converge to complete full-history results |
-| Exact | `>= 3` characters search complete history; `<= 2` characters intentionally search only the most recent `2000` items and must say so in the UI |
+| Exact | After trimming surrounding whitespace, `>= 3` characters search complete history; `<= 2` characters intentionally search only the most recent `2000` items and must say so in the UI |
 | Regex | Intentionally searches only the most recent `2000` items and must say so in the UI |
 
 ## Current Settings Surface

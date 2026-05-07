@@ -454,6 +454,8 @@ public final class StorageService {
 
     public func deleteAllExceptPinned() async throws {
         // DB-first: capture refs + delete rows in one transaction to avoid racey ref snapshots.
+        // Keep this path separate from DeletePlan execution because the repository must atomically
+        // capture every unpinned ref and delete without materializing every id in StorageService.
         let refs = try await repository.deleteAllExceptPinnedReturningStorageRefs()
 
         // Delete files off-main with bounded concurrency to avoid UI stalls and I/O storms.
@@ -970,25 +972,7 @@ public final class StorageService {
         ScopyLog.storage.info(
             "cleanupByCount: deleting \(plan.ids.count, privacy: .public) items (files=\(plan.storageRefs.count, privacy: .public)) target=\(target, privacy: .public)"
         )
-
-        // DB-first: avoid deleting external files when DB deletion fails.
-        try await repository.deleteItemsBatchInTransaction(ids: plan.ids)
-
-        let fileURLs = validatedExternalFileURLs(from: plan.storageRefs, logContext: "cleanupByCount")
-        guard !fileURLs.isEmpty else {
-            invalidateExternalSizeCache()
-            return
-        }
-        let remover = fileOps.removeFile
-        await Task.detached(priority: .utility) {
-                await Self.deleteFilesBounded(
-                    fileURLs,
-                    maxConcurrent: Self.fileDeletionConcurrency(for: fileURLs.count),
-                    logContext: "cleanupByCount",
-                    removeFile: remover
-                )
-        }.value
-        invalidateExternalSizeCache()
+        try await applyDeletePlan(plan, logContext: "cleanupByCount")
     }
 
     private func cleanupImagesOnlyByCount(deleteCount: Int) async throws {
@@ -997,25 +981,7 @@ public final class StorageService {
         ScopyLog.storage.info(
             "cleanupImagesOnlyByCount: deleting \(plan.ids.count, privacy: .public) images (files=\(plan.storageRefs.count, privacy: .public)) requested=\(deleteCount, privacy: .public)"
         )
-
-        // DB-first: avoid deleting external files when DB deletion fails.
-        try await repository.deleteItemsBatchInTransaction(ids: plan.ids)
-
-        let fileURLs = validatedExternalFileURLs(from: plan.storageRefs, logContext: "cleanupImagesOnlyByCount")
-        guard !fileURLs.isEmpty else {
-            invalidateExternalSizeCache()
-            return
-        }
-        let remover = fileOps.removeFile
-        await Task.detached(priority: .utility) {
-                await Self.deleteFilesBounded(
-                    fileURLs,
-                    maxConcurrent: Self.fileDeletionConcurrency(for: fileURLs.count),
-                    logContext: "cleanupImagesOnlyByCount",
-                    removeFile: remover
-                )
-        }.value
-        invalidateExternalSizeCache()
+        try await applyDeletePlan(plan, logContext: "cleanupImagesOnlyByCount")
     }
 
     /// v0.19: 修复 - 同时删除外部存储文件，避免孤立文件累积
@@ -1026,25 +992,7 @@ public final class StorageService {
         ScopyLog.storage.info(
             "cleanupByAge: deleting \(plan.ids.count, privacy: .public) items (files=\(plan.storageRefs.count, privacy: .public)) maxDays=\(maxDays, privacy: .public) type=\(String(describing: typeFilter), privacy: .public)"
         )
-
-        // DB-first: avoid deleting external files when DB deletion fails.
-        try await repository.deleteItemsBatchInTransaction(ids: plan.ids)
-
-        let fileURLs = validatedExternalFileURLs(from: plan.storageRefs, logContext: "cleanupByAge")
-        guard !fileURLs.isEmpty else {
-            invalidateExternalSizeCache()
-            return
-        }
-        let remover = fileOps.removeFile
-        await Task.detached(priority: .utility) {
-                await Self.deleteFilesBounded(
-                    fileURLs,
-                    maxConcurrent: Self.fileDeletionConcurrency(for: fileURLs.count),
-                    logContext: "cleanupByAge",
-                    removeFile: remover
-                )
-        }.value
-        invalidateExternalSizeCache()
+        try await applyDeletePlan(plan, logContext: "cleanupByAge")
     }
 
     /// v0.14: 深度优化 - 消除循环迭代，单次查询 + 事务批量删除
@@ -1056,25 +1004,7 @@ public final class StorageService {
         ScopyLog.storage.info(
             "cleanupBySize: deleting \(plan.ids.count, privacy: .public) items (files=\(plan.storageRefs.count, privacy: .public)) targetBytes=\(targetBytes, privacy: .public) type=\(String(describing: typeFilter), privacy: .public)"
         )
-
-        // DB-first: avoid deleting external files when DB deletion fails.
-        try await repository.deleteItemsBatchInTransaction(ids: plan.ids)
-
-        let fileURLs = validatedExternalFileURLs(from: plan.storageRefs, logContext: "cleanupBySize")
-        guard !fileURLs.isEmpty else {
-            invalidateExternalSizeCache()
-            return
-        }
-        let remover = fileOps.removeFile
-        await Task.detached(priority: .utility) {
-                await Self.deleteFilesBounded(
-                    fileURLs,
-                    maxConcurrent: Self.fileDeletionConcurrency(for: fileURLs.count),
-                    logContext: "cleanupBySize",
-                    removeFile: remover
-                )
-        }.value
-        invalidateExternalSizeCache()
+        try await applyDeletePlan(plan, logContext: "cleanupBySize")
     }
 
     /// v0.13: 批量删除多个项目（单条 SQL，单事务，避免 N+1 查询）
@@ -1093,23 +1023,7 @@ public final class StorageService {
         ScopyLog.storage.info(
             "cleanupExternalStorage: deleting \(plan.ids.count, privacy: .public) items (files=\(plan.storageRefs.count, privacy: .public)) excessBytes=\(excessBytes, privacy: .public) type=\(String(describing: typeFilter), privacy: .public)"
         )
-
-        // DB-first: avoid deleting external files when DB deletion fails.
-        try await repository.deleteItemsBatchInTransaction(ids: plan.ids)
-
-        let fileURLs = validatedExternalFileURLs(from: plan.storageRefs, logContext: "cleanupExternalStorage")
-        let remover = fileOps.removeFile
-        await Task.detached(priority: .utility) {
-                await Self.deleteFilesBounded(
-                    fileURLs,
-                    maxConcurrent: Self.fileDeletionConcurrency(for: fileURLs.count),
-                    logContext: "cleanupExternalStorage",
-                    removeFile: remover
-                )
-        }.value
-
-        // 清理完成后使缓存失效
-        invalidateExternalSizeCache()
+        try await applyDeletePlan(plan, logContext: "cleanupExternalStorage")
     }
 
     nonisolated static func deleteFilesBounded(

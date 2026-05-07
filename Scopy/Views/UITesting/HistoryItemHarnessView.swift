@@ -1,5 +1,7 @@
+import AppKit
 import SwiftUI
 import ScopyKit
+import ScopyUISupport
 
 @MainActor
 struct HistoryItemHarnessView: View {
@@ -18,7 +20,6 @@ struct HistoryItemHarnessView: View {
     @State private var settings: SettingsDTO
     @State private var isKeyboardSelected: Bool
     @State private var interactionCoordinator = HistoryListInteractionCoordinator()
-
     private let item: ClipboardItemDTO
     private let markdownWebViewController = MarkdownPreviewWebViewController()
 
@@ -88,6 +89,27 @@ struct HistoryItemHarnessView: View {
         }
         .padding(ScopySpacing.lg)
         .frame(minWidth: 880, minHeight: 340, alignment: .topLeading)
+        .background(profileSampler)
+    }
+
+    @ViewBuilder
+    private var profileSampler: some View {
+        if ScrollPerformanceProfile.isEnabled {
+            TimelineView(.animation) { context in
+                Color.clear
+                    .onChange(of: context.date) { _, newValue in
+                        ScrollPerformanceProfile.shared.recordFrameTick(newValue)
+                    }
+            }
+            .onAppear {
+                ScrollPerformanceProfile.shared.scrollDidStart()
+            }
+            .onDisappear {
+                ScrollPerformanceProfile.shared.scrollDidEnd()
+            }
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+        }
     }
 
     private static func scenarioFromEnvironment() -> Scenario {
@@ -99,6 +121,7 @@ struct HistoryItemHarnessView: View {
         let now = Date()
         switch scenario {
         case .image:
+            let path = makeHarnessImagePath()
             return ClipboardItemDTO(
                 id: UUID(),
                 type: .image,
@@ -111,8 +134,8 @@ struct HistoryItemHarnessView: View {
                 isPinned: false,
                 sizeBytes: 2_048,
                 fileSizeBytes: nil,
-                thumbnailPath: nil,
-                storageRef: nil
+                thumbnailPath: path,
+                storageRef: path
             )
         case .markdownText:
             return ClipboardItemDTO(
@@ -172,5 +195,48 @@ Inline math: $E = mc^2$.[^harness]
                 storageRef: nil
             )
         }
+    }
+
+    private static func makeHarnessImagePath() -> String {
+        let directory = URL(fileURLWithPath: "/tmp/scopy_history_item_harness", isDirectory: true)
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let url = directory.appendingPathComponent("hover-profile-image.png")
+        if !FileManager.default.fileExists(atPath: url.path),
+           let data = makeHarnessImageData(size: 256) {
+            try? data.write(to: url, options: .atomic)
+        }
+        return url.path
+    }
+
+    private static func makeHarnessImageData(size: Int) -> Data? {
+        guard let rep = NSBitmapImageRep(
+            bitmapDataPlanes: nil,
+            pixelsWide: size,
+            pixelsHigh: size,
+            bitsPerSample: 8,
+            samplesPerPixel: 4,
+            hasAlpha: true,
+            isPlanar: false,
+            colorSpaceName: .deviceRGB,
+            bytesPerRow: 0,
+            bitsPerPixel: 0
+        ) else {
+            return nil
+        }
+
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
+        NSColor(calibratedHue: 0.58, saturation: 0.55, brightness: 0.92, alpha: 1).setFill()
+        NSRect(x: 0, y: 0, width: size, height: size).fill()
+        NSColor.white.withAlphaComponent(0.6).setStroke()
+        let path = NSBezierPath()
+        path.move(to: NSPoint(x: 24, y: 48))
+        path.line(to: NSPoint(x: 112, y: 206))
+        path.line(to: NSPoint(x: 232, y: 72))
+        path.lineWidth = 12
+        path.stroke()
+        NSGraphicsContext.restoreGraphicsState()
+
+        return rep.representation(using: .png, properties: [:])
     }
 }

@@ -3,6 +3,14 @@ import Foundation
 
 @MainActor
 final class HistoryItemViewUITests: XCTestCase {
+    private static let forwardedPerfKeys: [String] = [
+        "SCOPY_PERF_HISTORY_INDEX",
+        "SCOPY_PERF_SCROLL_RESOLVER_CACHE",
+        "SCOPY_PERF_MARKDOWN_RESOLVER_CACHE",
+        "SCOPY_PERF_PREVIEW_TASK_BUDGET",
+        "SCOPY_PERF_SHORT_QUERY_DEBOUNCE"
+    ]
+
     private var app: XCUIApplication!
 
     override func setUp() async throws {
@@ -67,6 +75,24 @@ final class HistoryItemViewUITests: XCTestCase {
         waitForValue("pin=1", identifier: "UITest.HistoryItemHarness.PinCount")
     }
 
+    func testHoverPreviewMarkdownProfileSmoke() throws {
+        try runHoverPreviewProfileScenario(
+            scenario: "hover-preview-markdown-text",
+            harnessScenario: "markdown-text",
+            previewIdentifier: "History.Preview.Text",
+            requiredBuckets: ["hover.markdown_render_ms"]
+        )
+    }
+
+    func testHoverPreviewImageProfileSmoke() throws {
+        try runHoverPreviewProfileScenario(
+            scenario: "hover-preview-image",
+            harnessScenario: "image",
+            previewIdentifier: "History.Preview.Image",
+            requiredBuckets: ["hover.preview_image_decode_ms"]
+        )
+    }
+
     private func launchHarness(scenario: String, dumpPath: String? = nil, errorPath: String? = nil) {
         app.launchArguments = ["--uitesting"]
         app.launchEnvironment["SCOPY_UITEST_HISTORY_ITEM_HARNESS"] = "1"
@@ -77,6 +103,27 @@ final class HistoryItemViewUITests: XCTestCase {
         }
         if let errorPath {
             app.launchEnvironment["SCOPY_EXPORT_ERROR_DUMP_PATH"] = errorPath
+        }
+        app.launch()
+    }
+
+    private func launchProfileHarness(scenario: String, profileScenario: String, profilePath: String) {
+        app.launchArguments = ["--uitesting"]
+        app.launchEnvironment["SCOPY_UITEST_HISTORY_ITEM_HARNESS"] = "1"
+        app.launchEnvironment["SCOPY_UITEST_HISTORY_ITEM_SCENARIO"] = scenario
+        app.launchEnvironment["SCOPY_UITEST_HISTORY_ITEM_KEYBOARD_SELECTED"] = "1"
+        app.launchEnvironment["SCOPY_UITEST_OPEN_PREVIEW_ON_TAP"] = "1"
+        app.launchEnvironment["SCOPY_SCROLL_PROFILE"] = "1"
+        app.launchEnvironment["SCOPY_PROFILE_DURATION_SEC"] = "\(profileDurationSeconds)"
+        app.launchEnvironment["SCOPY_PROFILE_MIN_SAMPLES"] = "\(profileMinSamples)"
+        app.launchEnvironment["SCOPY_PROFILE_OUTPUT"] = profilePath
+        app.launchEnvironment["SCOPY_PROFILE_SCENARIO"] = profileScenario
+        app.launchEnvironment["SCOPY_PROFILE_AUTO_SCROLL"] = "0"
+        let testEnv = ProcessInfo.processInfo.environment
+        for key in Self.forwardedPerfKeys {
+            if let value = normalized(testEnv[key]) ?? normalized(testEnv["TEST_RUNNER_\(key)"]) {
+                app.launchEnvironment[key] = value
+            }
         }
         app.launch()
     }
@@ -113,6 +160,143 @@ final class HistoryItemViewUITests: XCTestCase {
         let optimize = historyItemButton(identifier: "HistoryItem.OptimizeButton")
         XCTAssertTrue(optimize.waitForExistence(timeout: 5))
         optimize.click()
+    }
+
+    private func runHoverPreviewProfileScenario(
+        scenario: String,
+        harnessScenario: String,
+        previewIdentifier: String,
+        requiredBuckets: [String]
+    ) throws {
+        guard profileTestsEnabled else {
+            throw XCTSkip("Set SCOPY_RUN_PROFILE_UI_TESTS=1 or touch /tmp/scopy_run_profile_ui_tests to enable hover profile UI tests")
+        }
+
+        let profilePath = makeProfileOutputPath(scenario: scenario, runID: profileRunID)
+        launchProfileHarness(scenario: harnessScenario, profileScenario: scenario, profilePath: profilePath)
+
+        XCTAssertTrue(app.anyElement("UITest.HistoryItemHarness").waitForExistence(timeout: 10))
+        let previewAccessibilityFound = triggerPreview(previewIdentifier)
+
+        waitForProfileOutput(atPath: profilePath, timeout: max(12, profileDurationSeconds + 8))
+
+        let data = try Data(contentsOf: URL(fileURLWithPath: profilePath))
+        var json = try JSONSerialization.jsonObject(with: data, options: []) as? [String: Any]
+        let buckets = json?["buckets_ms"] as? [String: Any] ?? [:]
+        let bucketCounts = Dictionary(uniqueKeysWithValues: requiredBuckets.map { key in
+            (key, Self.metricBucketCount(buckets[key]))
+        })
+        let missingBuckets = requiredBuckets.filter { (bucketCounts[$0] ?? 0) <= 0 }
+        json?["hover_preview_evidence"] = [
+            "preview_identifier": previewIdentifier,
+            "preview_triggered": true,
+            "preview_accessibility_found": previewAccessibilityFound,
+            "required_buckets": requiredBuckets,
+            "bucket_counts": bucketCounts,
+            "missing_required_buckets": missingBuckets,
+            "harness_scenario": harnessScenario
+        ]
+
+        if let json,
+           let updatedData = try? JSONSerialization.data(withJSONObject: json, options: [.prettyPrinted]) {
+            try updatedData.write(to: URL(fileURLWithPath: profilePath), options: .atomic)
+        }
+
+        XCTAssertTrue(missingBuckets.isEmpty, "Missing hover profile buckets: \(missingBuckets)")
+        let frame = json?["frame_ms"] as? [String: Any]
+        let count = frame?["count"] as? Int ?? 0
+        XCTAssertGreaterThan(count, 0, "Expected frame samples in hover profile output")
+        let scenarioName = json?["profile_scenario"] as? String ?? ""
+        XCTAssertEqual(scenarioName, scenario, "Profile scenario mismatch")
+    }
+
+    private var profileTestsEnabled: Bool {
+        let envEnabled = envValue("SCOPY_RUN_PROFILE_UI_TESTS") == "1"
+        let flagEnabled = FileManager.default.fileExists(atPath: "/tmp/scopy_run_profile_ui_tests")
+        return envEnabled || flagEnabled
+    }
+
+    private var profileDurationSeconds: TimeInterval {
+        max(4, parseDouble(envValue("SCOPY_UI_PROFILE_DURATION_SEC")) ?? 4)
+    }
+
+    private var profileMinSamples: Int {
+        max(60, parseInt(envValue("SCOPY_UI_PROFILE_MIN_SAMPLES")) ?? 80)
+    }
+
+    private var profileRunID: String {
+        envValue("SCOPY_UI_PROFILE_RUN_ID") ?? UUID().uuidString
+    }
+
+    private var profileOutputDirectory: String? {
+        envValue("SCOPY_UI_PROFILE_OUTPUT_DIR")
+    }
+
+    private func triggerPreview(_ previewIdentifier: String) -> Bool {
+        let action = historyItemButton(identifier: "HistoryItem.MainAction")
+        XCTAssertTrue(action.waitForExistence(timeout: 5))
+        action.coordinate(withNormalizedOffset: CGVector(dx: 0.18, dy: 0.50)).click()
+        return app.anyElement(previewIdentifier).waitForExistence(timeout: 2)
+    }
+
+    private func waitForProfileOutput(atPath path: String, timeout: TimeInterval) {
+        let predicate = NSPredicate { _, _ in
+            FileManager.default.fileExists(atPath: path)
+        }
+        let expectation = XCTNSPredicateExpectation(predicate: predicate, object: nil)
+        let result = XCTWaiter.wait(for: [expectation], timeout: timeout)
+        XCTAssertEqual(result, .completed, "Profile output not found at \(path)")
+    }
+
+    private func makeProfileOutputPath(scenario: String, runID: String) -> String {
+        if let outputDir = profileOutputDirectory {
+            let directory = URL(fileURLWithPath: outputDir, isDirectory: true)
+            try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            let token = safeFileToken(scenario)
+            let runToken = safeFileToken(runID)
+            return directory.appendingPathComponent("\(token)-\(runToken).json").path
+        }
+        return "/tmp/scopy_hover_profile_\(safeFileToken(scenario))_\(UUID().uuidString).json"
+    }
+
+    private func safeFileToken(_ raw: String) -> String {
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "._-"))
+        let scalars = raw.unicodeScalars.map { scalar -> Character in
+            allowed.contains(scalar) ? Character(scalar) : "-"
+        }
+        let token = String(scalars)
+        return token.isEmpty ? "profile" : token
+    }
+
+    private func envValue(_ key: String) -> String? {
+        let env = ProcessInfo.processInfo.environment
+        return normalized(env[key]) ?? normalized(env["TEST_RUNNER_\(key)"])
+    }
+
+    private func normalized(_ value: String?) -> String? {
+        guard let value, !value.isEmpty else { return nil }
+        return value
+    }
+
+    private func parseInt(_ value: String?) -> Int? {
+        guard let value, !value.isEmpty else { return nil }
+        return Int(value)
+    }
+
+    private func parseDouble(_ value: String?) -> Double? {
+        guard let value, !value.isEmpty else { return nil }
+        return Double(value)
+    }
+
+    private static func metricBucketCount(_ raw: Any?) -> Int {
+        guard let bucket = raw as? [String: Any] else { return 0 }
+        if let count = bucket["count"] as? Int {
+            return count
+        }
+        if let count = bucket["count"] as? Double {
+            return Int(count)
+        }
+        return 0
     }
 
     private func openContextMenu() {

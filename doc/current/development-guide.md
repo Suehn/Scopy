@@ -2,10 +2,10 @@
 doc_type: guide
 status: active
 owner: maintainers
-last_reviewed: 2026-04-30
+last_reviewed: 2026-05-07
 canonical: true
 related_versions:
-  - v0.7.5
+  - v0.7.6
 ---
 
 # Development Guide
@@ -14,7 +14,7 @@ This document is the canonical implementation guide for the current Scopy codeba
 
 ## Reference State
 
-- Reference release: `v0.7.5`
+- Reference release: `v0.7.6`
 - Version metadata: [../meta/release-current.yml](../meta/release-current.yml)
 - Active requirements: [product-spec.md](./product-spec.md)
 - Release workflow: [release-runbook.md](./release-runbook.md)
@@ -73,20 +73,22 @@ Implication: clipboard semantics, dedup, cleanup triggering, and safe file handl
 1. `HistoryViewModel.load()` and `loadMore()` use `fetchRecent(limit:offset:)` for plain recent-history pagination.
 2. `HistoryViewModel.search()` builds a `SearchRequest` and calls `search(query:)`.
 3. `SearchEngineImpl` executes mode-specific behavior for `exact`, `fuzzy`, `fuzzyPlus`, and `regex`.
-4. UI updates are event-driven; the list should not depend on ad hoc full reloads for ordinary mutations.
-5. Search results expose `SearchCoverage` so UI can distinguish complete results, staged fuzzy refinement, and intentional recent-only limits.
-6. Production search paths should construct `SearchCoverage` directly; `isPrefilter` remains a compatibility shim for legacy and test callers only.
+4. Exact search planning and execution must share `SearchPlanner.normalizedExactQuery(_:)` so whitespace trimming affects both coverage decisions and matching consistently.
+5. UI updates are event-driven; the list should not depend on ad hoc full reloads for ordinary mutations.
+6. Search results expose `SearchCoverage` so UI can distinguish complete results, staged fuzzy refinement, and intentional recent-only limits.
+7. Production search paths should construct `SearchCoverage` directly; `isPrefilter` remains a compatibility shim for legacy and test callers only.
 
 Implication: changes to search semantics belong in the request model, search engine, and user-visible docs together.
 
 ### 4. Preview And Export
 
-1. `HistoryItemView` routes hover interactions into image, text, and file preview flows.
-2. `HoverPreviewLoader` owns image/file preview decode and downsampling helpers so the row view does not carry raw ImageIO logic.
-3. Markdown/LaTeX preview rendering is handled in the text preview path and export pipeline.
-4. The renderer normalizes inline LaTeX, ATX headings, safe HTML placeholders, and CJK punctuation-adjacent emphasis before local `markdown-it` rendering, then strips internal placeholders before user-visible HTML or fallback text.
-5. `MarkdownExportService` now lives under `Scopy/Services/Export` and produces PNG output back to the pasteboard through `ScopyKit`.
-6. pngquant settings affect both image history optimization and Markdown/LaTeX export compression where enabled.
+1. `HistoryItemView` routes hover interactions into `HistoryHoverPreviewPipeline` request values for image, text, Markdown file, and file preview flows.
+2. `HistoryHoverPreviewPipeline` owns preview planning, cache-hit/cache-miss event emission, suppression checks, and bounded detached preview work before the row applies UI state.
+3. `HoverPreviewLoader` owns image/file preview decode and downsampling helpers so the row view does not carry raw ImageIO logic.
+4. Markdown/LaTeX preview rendering is handled in the text preview path and export pipeline.
+5. The renderer normalizes inline LaTeX, ATX headings, safe HTML placeholders, and CJK punctuation-adjacent emphasis before local `markdown-it` rendering, then strips internal placeholders before user-visible HTML or fallback text.
+6. `MarkdownExportService` now lives under `Scopy/Services/Export` and produces PNG output back to the pasteboard through `ScopyKit`.
+7. pngquant settings affect both image history optimization and Markdown/LaTeX export compression where enabled.
 
 Search marker: `SCOPY_EXPORT_PDF_GLOBAL_SCALE_MISMATCH`
 
@@ -95,6 +97,14 @@ Search marker: `SCOPY_EXPORT_PDF_GLOBAL_SCALE_MISMATCH`
 - When touching Markdown export, keep the PDF preflight/re-scale guard next to this marker and keep `ExportMarkdownPNGUITests.testAutoExportGlobalScalePDFDoesNotLeaveBlankRight()` green.
 
 Implication: preview/export work must remain background-safe and should not mutate unrelated persisted content.
+
+### 4.1 Storage Cleanup Execution
+
+1. `StorageService` builds repository `DeletePlan` values for cleanup-by-count, cleanup-by-age, cleanup-by-size, image-only cleanup, external-storage cleanup, and composite cleanup.
+2. `StorageService.applyDeletePlan` is the single adapter that deletes database rows and removes validated external payloads for those plans.
+3. Repository paths that need atomic row/content deletion can remain separate when they must preserve a tighter transaction boundary.
+
+Implication: new cleanup variants should reuse the delete-plan executor unless they require a documented atomicity exception.
 
 ### 4.5 List Interaction Coordination
 
@@ -162,6 +172,7 @@ Implication: if you touch settings behavior, preserve the Save/Cancel model and 
 - `make perf-frontend-profile` for daily frontend smoke
 - `make perf-frontend-profile-standard` before stronger local confidence
 - `make perf-frontend-profile-full` before release-grade validation
+- `scripts/perf-frontend-profile.sh --include-hover` when preview work needs direct hover-preview bucket evidence
 - `make perf-unified-table` when correlating frontend and backend evidence, including `warm-load-summary.json` when present
 - When a profile adds new evidence beyond the release note, add a versioned doc under `doc/perf/release-profiles/` and point `profile_doc` at it
 
@@ -170,12 +181,14 @@ Implication: if you touch settings behavior, preserve the Save/Cancel model and 
 - `make docs-validate`
 - `make release-validate`
 - `make tag-release`
+- `make quality-manifest-self-test` when changing quality evidence tooling
 
 ## Common Change Playbooks
 
 ### Search Behavior
 
 - Touch `SearchRequest`, `SearchMode`, and search engine code together.
+- Keep exact-search query normalization shared between `SearchPlanner.planExact` and `SearchEngineImpl.searchExact`.
 - Re-check `SearchCoverage`, refine behavior, and any recent-only hint paths together.
 - Re-check header controls, search hints, pagination, and requirements docs.
 - Run search-focused performance validation, not only unit tests.
@@ -184,6 +197,7 @@ Implication: if you touch settings behavior, preserve the Save/Cancel model and 
 
 - Touch `ClipboardMonitor`, `ClipboardService`, and `StorageService` as one flow.
 - Re-check copy/replay semantics, external storage validation, cleanup behavior, and any item-model field assumptions.
+- Route new cleanup variants through `StorageService.applyDeletePlan` unless there is a specific atomicity reason to keep the path separate.
 
 ### Settings Or Hotkey Changes
 
@@ -194,6 +208,8 @@ Implication: if you touch settings behavior, preserve the Save/Cancel model and 
 ### Preview Or Export Changes
 
 - Touch preview UI, rendering pipeline, and `MarkdownExportService` together.
+- Keep hover preview planning in `HistoryHoverPreviewPipeline`; row views should apply typed events rather than own decode/cache/metric policy.
+- For hover-preview work, run a focused test plus `scripts/perf-frontend-profile.sh --include-hover` so Markdown and image hover buckets are present.
 - For Markdown renderer fixes, update focused renderer tests such as `KaTeXRenderToStringTests` / `MarkdownMathRenderingTests`, and add export UI coverage when the PNG output contract changes.
 - Re-check pngquant settings interactions, preview latency, and output pasteboard behavior.
 

@@ -95,11 +95,12 @@ enum SearchPlanner {
     }
 
     private static func planExact(request: SearchRequest, state: State) -> SearchPlan {
-        if request.query.isEmpty {
+        let normalizedQuery = normalizedExactQuery(request.query)
+        if normalizedQuery.isEmpty {
             return allWithFilters(request: request, state: state, reason: .emptyQuery)
         }
 
-        if request.query.count <= 2 {
+        if normalizedQuery.count <= 2 {
             return makePlan(
                 path: .exactRecentCache,
                 coverage: .recentOnly(limit: state.shortQueryCacheLimit),
@@ -110,8 +111,7 @@ enum SearchPlanner {
             )
         }
 
-        let trimmedQuery = request.query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard FTSQueryBuilder.build(userQuery: trimmedQuery) != nil else {
+        guard FTSQueryBuilder.build(userQuery: normalizedQuery) != nil else {
             return allWithFilters(request: request, state: state, reason: .exactFTSQueryUnavailable)
         }
 
@@ -256,6 +256,10 @@ enum SearchPlanner {
             .split(whereSeparator: \.isWhitespace)
             .map(String.init)
             .filter { !$0.isEmpty }
+    }
+
+    static func normalizedExactQuery(_ query: String) -> String {
+        query.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     static func shouldUseSubstringOnlyFallbackForFuzzyPlus(tokens: [String]) -> Bool {

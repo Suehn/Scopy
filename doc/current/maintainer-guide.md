@@ -2,10 +2,10 @@
 doc_type: guide
 status: active
 owner: maintainers
-last_reviewed: 2026-04-30
+last_reviewed: 2026-05-07
 canonical: true
 related_versions:
-  - v0.7.5
+  - v0.7.6
 ---
 
 # Maintainer Guide
@@ -46,6 +46,7 @@ related_versions:
 
 - `make docs-validate`
 - `make release-validate`
+- `make quality-manifest-self-test` when quality evidence tooling changes
 - `bash scripts/release/tag-from-doc.sh --tag`
 
 ## Active Vs Historical Docs
