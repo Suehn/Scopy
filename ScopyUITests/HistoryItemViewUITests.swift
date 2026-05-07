@@ -43,6 +43,49 @@ final class HistoryItemViewUITests: XCTestCase {
         waitForValue("select=0", identifier: "UITest.HistoryItemHarness.SelectCount")
     }
 
+    func testImageScenarioCodexContextMenuTriggersCodexPasteActionOnly() throws {
+        launchHarness(scenario: "image")
+
+        XCTAssertTrue(app.anyElement("UITest.HistoryItemHarness").waitForExistence(timeout: 10))
+        triggerCodexPasteFromContextMenu()
+
+        waitForValue("codexPaste=1", identifier: "UITest.HistoryItemHarness.CodexPasteCount")
+        waitForValue("select=0", identifier: "UITest.HistoryItemHarness.SelectCount")
+    }
+
+    func testImageScenarioShowsAirDropAndOpenContainingFolderActionsForStorageRef() throws {
+        launchHarness(scenario: "image")
+
+        XCTAssertTrue(app.anyElement("UITest.HistoryItemHarness").waitForExistence(timeout: 10))
+        triggerAirDropFromContextMenu()
+        waitForValue("airDrop=1", identifier: "UITest.HistoryItemHarness.AirDropCount")
+
+        triggerOpenContainingFolderFromContextMenu()
+        waitForValue("openFolder=1", identifier: "UITest.HistoryItemHarness.OpenFolderCount")
+    }
+
+    func testInlineImageScenarioShowsAirDropWithoutOpenContainingFolder() throws {
+        launchHarness(scenario: "inline-image")
+
+        XCTAssertTrue(app.anyElement("UITest.HistoryItemHarness").waitForExistence(timeout: 10))
+        triggerAirDropFromContextMenu()
+        waitForValue("airDrop=1", identifier: "UITest.HistoryItemHarness.AirDropCount")
+
+        assertOpenContainingFolderHiddenInContextMenu()
+        waitForValue("openFolder=0", identifier: "UITest.HistoryItemHarness.OpenFolderCount")
+    }
+
+    func testFileScenarioShowsAirDropAndOpenContainingFolderActions() throws {
+        launchHarness(scenario: "file")
+
+        XCTAssertTrue(app.anyElement("UITest.HistoryItemHarness").waitForExistence(timeout: 10))
+        triggerAirDropFromContextMenu()
+        waitForValue("airDrop=1", identifier: "UITest.HistoryItemHarness.AirDropCount")
+
+        triggerOpenContainingFolderFromContextMenu()
+        waitForValue("openFolder=1", identifier: "UITest.HistoryItemHarness.OpenFolderCount")
+    }
+
     func testMarkdownScenarioShowsExportPNGInContextMenu() throws {
         let dumpPath = "/tmp/scopy_uitest_history_item_export.png"
         let errorPath = "/tmp/scopy_uitest_history_item_export_error.txt"
@@ -314,6 +357,69 @@ final class HistoryItemViewUITests: XCTestCase {
         let exportItem = contextMenuItem(identifier: "HistoryItem.ContextMenu.ExportPNG", title: "Export PNG")
         XCTAssertTrue(exportItem.waitForExistence(timeout: 2))
         exportItem.click()
+    }
+
+    private func triggerCodexPasteFromContextMenu() {
+        openContextMenu()
+
+        let copyItem = contextMenuItem(identifier: "HistoryItem.ContextMenu.Copy", title: "Copy")
+        XCTAssertTrue(copyItem.waitForExistence(timeout: 2))
+
+        let codexItem = contextMenuItem(
+            identifier: "HistoryItem.ContextMenu.PasteOptimizedForCodex",
+            title: "Paste-optimized for Codex"
+        )
+        XCTAssertTrue(codexItem.waitForExistence(timeout: 2))
+        codexItem.click()
+    }
+
+    private func triggerAirDropFromContextMenu() {
+        openContextMenu()
+
+        let copyItem = contextMenuItem(identifier: "HistoryItem.ContextMenu.Copy", title: "Copy")
+        XCTAssertTrue(copyItem.waitForExistence(timeout: 2))
+
+        let airDropItem = contextMenuItem(
+            identifier: "HistoryItem.ContextMenu.SendViaAirDrop",
+            title: "Send via AirDrop"
+        )
+        XCTAssertTrue(airDropItem.waitForExistence(timeout: 2))
+        airDropItem.click()
+    }
+
+    private func triggerOpenContainingFolderFromContextMenu() {
+        openContextMenu()
+
+        let copyItem = contextMenuItem(identifier: "HistoryItem.ContextMenu.Copy", title: "Copy")
+        XCTAssertTrue(copyItem.waitForExistence(timeout: 2))
+
+        let folderItem = contextMenuItem(
+            identifier: "HistoryItem.ContextMenu.OpenContainingFolder",
+            title: "Open Containing Folder"
+        )
+        XCTAssertTrue(folderItem.waitForExistence(timeout: 2))
+        folderItem.click()
+    }
+
+    private func assertOpenContainingFolderHiddenInContextMenu() {
+        openContextMenu()
+
+        let copyItem = contextMenuItem(identifier: "HistoryItem.ContextMenu.Copy", title: "Copy")
+        XCTAssertTrue(copyItem.waitForExistence(timeout: 2))
+
+        let airDropItem = contextMenuItem(
+            identifier: "HistoryItem.ContextMenu.SendViaAirDrop",
+            title: "Send via AirDrop"
+        )
+        XCTAssertTrue(airDropItem.waitForExistence(timeout: 2))
+
+        let folderItem = contextMenuItem(
+            identifier: "HistoryItem.ContextMenu.OpenContainingFolder",
+            title: "Open Containing Folder"
+        )
+        XCTAssertFalse(folderItem.waitForExistence(timeout: 1))
+
+        airDropItem.click()
     }
 
     private func assertExportPNGHiddenInContextMenu() {

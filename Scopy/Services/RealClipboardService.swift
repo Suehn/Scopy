@@ -49,6 +49,14 @@ final class RealClipboardService: ClipboardServiceProtocol {
         try await clipboardService.fetchRecent(limit: limit, offset: offset)
     }
 
+    func fetchPinned() async throws -> [ClipboardItemDTO] {
+        try await clipboardService.fetchPinned()
+    }
+
+    func fetchRecentUnpinned(limit: Int, offset: Int) async throws -> [ClipboardItemDTO] {
+        try await clipboardService.fetchRecentUnpinned(limit: limit, offset: offset)
+    }
+
     func search(query: SearchRequest) async throws -> SearchResultPage {
         try await clipboardService.search(query: query)
     }
@@ -79,6 +87,10 @@ final class RealClipboardService: ClipboardServiceProtocol {
 
     func copyToClipboardOptimizedForCodex(itemID: UUID) async throws {
         try await clipboardService.copyToClipboardOptimizedForCodex(itemID: itemID)
+    }
+
+    func fileURLs(itemID: UUID) async throws -> [URL] {
+        try await clipboardService.fileURLs(itemID: itemID)
     }
 
     func updateSettings(_ settings: SettingsDTO) async throws {

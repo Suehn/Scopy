@@ -378,6 +378,44 @@ actor SQLiteClipboardRepository {
         return items
     }
 
+    func fetchPinned() throws -> [ClipboardStoredItem] {
+        let sql = """
+            SELECT id, type, content_hash, plain_text, note, app_bundle_id, created_at, last_used_at,
+                   use_count, is_pinned, size_bytes, storage_ref, raw_data, file_size_bytes
+            FROM clipboard_items
+            WHERE is_pinned = 1
+            ORDER BY last_used_at DESC, id ASC
+        """
+        let stmt = try prepare(sql)
+
+        var items: [ClipboardStoredItem] = []
+        while try stmt.step() {
+            items.append(try parseStoredItem(from: stmt))
+        }
+        return items
+    }
+
+    func fetchRecentUnpinned(limit: Int, offset: Int) throws -> [ClipboardStoredItem] {
+        let sql = """
+            SELECT id, type, content_hash, plain_text, note, app_bundle_id, created_at, last_used_at,
+                   use_count, is_pinned, size_bytes, storage_ref, raw_data, file_size_bytes
+            FROM clipboard_items
+            WHERE is_pinned = 0
+            ORDER BY last_used_at DESC, id ASC
+            LIMIT ? OFFSET ?
+        """
+        let stmt = try prepare(sql)
+        try stmt.bindInt(limit, at: 1)
+        try stmt.bindInt(offset, at: 2)
+
+        var items: [ClipboardStoredItem] = []
+        items.reserveCapacity(limit)
+        while try stmt.step() {
+            items.append(try parseStoredItem(from: stmt))
+        }
+        return items
+    }
+
     func fetchRecentSummaries(limit: Int, offset: Int) throws -> [ClipboardStoredItem] {
         let sql = """
             SELECT id, type, content_hash, plain_text, note, app_bundle_id, created_at, last_used_at,

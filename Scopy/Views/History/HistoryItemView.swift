@@ -16,6 +16,8 @@ struct HistoryItemView: View, Equatable {
     // 回调闭包 - 不参与 Equatable 比较
     let onSelect: () -> Void
     let onSelectOptimizedForCodex: () -> Void
+    let onSendViaAirDrop: () -> Void
+    let onOpenContainingFolder: () -> Void
     let onHoverSelect: (UUID) -> Void
     let onTogglePin: () -> Void
     let onDelete: () -> Void
@@ -44,6 +46,8 @@ struct HistoryItemView: View, Equatable {
         settings: SettingsDTO,
         onSelect: @escaping () -> Void,
         onSelectOptimizedForCodex: @escaping () -> Void,
+        onSendViaAirDrop: @escaping () -> Void,
+        onOpenContainingFolder: @escaping () -> Void,
         onHoverSelect: @escaping (UUID) -> Void,
         onTogglePin: @escaping () -> Void,
         onDelete: @escaping () -> Void,
@@ -63,6 +67,8 @@ struct HistoryItemView: View, Equatable {
         self.settings = settings
         self.onSelect = onSelect
         self.onSelectOptimizedForCodex = onSelectOptimizedForCodex
+        self.onSendViaAirDrop = onSendViaAirDrop
+        self.onOpenContainingFolder = onOpenContainingFolder
         self.onHoverSelect = onHoverSelect
         self.onTogglePin = onTogglePin
         self.onDelete = onDelete
@@ -325,6 +331,41 @@ struct HistoryItemView: View, Equatable {
 
     private var filePreviewKind: FilePreviewKind? {
         descriptor.filePreviewKind
+    }
+
+    private var canSendViaAirDrop: Bool {
+        switch item.type {
+        case .file:
+            return !FilePreviewSupport.fileURLs(from: item.plainText, requireExists: true).isEmpty
+        case .image:
+            return true
+        case .text, .rtf, .html, .other:
+            return false
+        }
+    }
+
+    private var canOpenContainingFolder: Bool {
+        switch item.type {
+        case .file:
+            return !FilePreviewSupport.fileURLs(from: item.plainText, requireExists: true).isEmpty
+        case .image:
+            guard realImageFileURL != nil else { return false }
+            return true
+        case .text, .rtf, .html, .other:
+            return false
+        }
+    }
+
+    private var realImageFileURL: URL? {
+        if let storageRef = item.storageRef, !storageRef.isEmpty {
+            var isDirectory: ObjCBool = false
+            if FileManager.default.fileExists(atPath: storageRef, isDirectory: &isDirectory),
+               !isDirectory.boolValue {
+                return URL(fileURLWithPath: storageRef)
+            }
+        }
+
+        return FilePreviewSupport.fileURLs(from: item.plainText, requireExists: true).first
     }
 
     private var filePreviewIsMarkdown: Bool {
@@ -646,8 +687,23 @@ struct HistoryItemView: View, Equatable {
                 onTogglePin()
             }
             .accessibilityIdentifier(item.isPinned ? "HistoryItem.ContextMenu.Unpin" : "HistoryItem.ContextMenu.Pin")
-            if item.type == .file {
+            if canSendViaAirDrop || canOpenContainingFolder {
                 Divider()
+                if canSendViaAirDrop {
+                    Button("Send via AirDrop") {
+                        onSendViaAirDrop()
+                    }
+                    .accessibilityIdentifier("HistoryItem.ContextMenu.SendViaAirDrop")
+                }
+                if canOpenContainingFolder {
+                    Button("Open Containing Folder") {
+                        onOpenContainingFolder()
+                    }
+                    .accessibilityIdentifier("HistoryItem.ContextMenu.OpenContainingFolder")
+                }
+                Divider()
+            }
+            if item.type == .file {
                 Button(noteMenuTitle) {
                     presentNoteEditor()
                 }

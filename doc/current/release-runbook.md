@@ -2,9 +2,10 @@
 doc_type: runbook
 status: active
 owner: maintainers
-last_reviewed: 2026-05-07
+last_reviewed: 2026-05-08
 canonical: true
 related_versions:
+  - v0.7.8
   - v0.7.7
   - v0.7.6
   - v0.7.5
@@ -64,14 +65,14 @@ related_versions:
 
 ## Current Performance Evidence
 
-The current release `v0.7.7` does not add a dedicated release profile. Its release evidence lives in the release note and quality manifests because the changes are split across hover preview pipeline architecture, storage cleanup execution, exact-search normalization, Trellis archive context path stability, and quality evidence tooling.
+The current release `v0.7.8` does not add a dedicated release profile. Its release evidence lives in the release note because the changes are explicit UI/service action fixes and pagination behavior corrections rather than a broad performance tuning pass.
 
-- `scripts/perf-frontend-profile.sh --include-hover`: passed hover-preview smoke on 2026-05-07 and required `hover.markdown_render_ms` plus `hover.preview_image_decode_ms` buckets for the dedicated hover scenarios.
-- `make test-snapshot-perf-release`: passed for the Storage DeletePlan and SearchExactQueryNormalization slices on 2026-05-07.
-- Quality manifests recorded passed final gates for quality manifest tooling, Storage DeletePlan executor, hover profile gate, HistoryHoverPreviewPipeline, and SearchExactQueryNormalization slices.
+- `make build`, `make test-unit`, and `make test-strict` passed on 2026-05-08 for the history action and pinned-pagination release.
+- Focused UI tests passed for storage-backed image AirDrop/Open Folder, inline-image AirDrop without Open Folder, and file AirDrop/Open Folder context menu visibility on 2026-05-08.
+- Focused unit coverage passed for inline image `fileURLs(itemID:)` temporary PNG generation on 2026-05-08.
 - The latest dedicated profile remains [v0.7.6](../perf/release-profiles/v0.7.6-profile.md), which used the real snapshot DB at `perf-db/clipboard.db` (6421 items / 148647936 bytes) for row descriptor and thumbnail scheduler evidence.
 
-Do not treat `v0.7.7` as a blanket frontend performance release. Use its hover profile evidence only for hover-preview buckets, and use the v0.7.6 profile for row/thumbnail scheduler regression context.
+Do not treat `v0.7.8` as a blanket frontend performance release. Use the v0.7.6 profile for row/thumbnail scheduler regression context and the v0.7.8 release note for file-action and pagination evidence.
 
 ## Homebrew Acceptance
 

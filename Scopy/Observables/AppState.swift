@@ -54,6 +54,9 @@ final class AppState {
     @ObservationIgnored var closePanelHandler: (() -> Void)? {
         didSet { historyViewModel.closePanelHandler = closePanelHandler }
     }
+    @ObservationIgnored var pasteAfterCopyHandler: (() -> Void)? {
+        didSet { historyViewModel.pasteAfterCopyHandler = pasteAfterCopyHandler }
+    }
     @ObservationIgnored var openSettingsHandler: (() -> Void)?
 
     @ObservationIgnored var applyHotKeyHandler: ((UInt32, UInt32) -> Void)?

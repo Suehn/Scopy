@@ -119,6 +119,10 @@ extension AppState {
         await historyViewModel.loadMore()
     }
 
+    func clearSearchForPanelReopen() {
+        historyViewModel.clearSearchForPanelReopen()
+    }
+
     func search() {
         historyViewModel.search()
     }

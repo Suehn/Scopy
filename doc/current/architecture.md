@@ -2,10 +2,10 @@
 doc_type: spec
 status: active
 owner: maintainers
-last_reviewed: 2026-05-07
+last_reviewed: 2026-05-08
 canonical: true
 related_versions:
-  - v0.7.7
+  - v0.7.8
 ---
 
 # Architecture
@@ -36,6 +36,7 @@ This document describes the current system shape and operational invariants. For
 ### UI And Preview Path
 
 - App/UI shell manages the menubar icon, floating panel, settings window, and preview/export flows.
+- History action flows resolve shareable file URLs through backend protocols; UI rows decide visibility from DTO-level capability hints and do not directly read storage internals.
 - Markdown preview/export uses local renderer assets for CommonMark/GFM, math, footnotes, syntax highlighting, safe HTML restoration, and CJK emphasis normalization; internal placeholders must not leak into visible HTML or fallback text.
 - Markdown preview assets and bundled tools are staged by build scripts rather than copied ad hoc at runtime.
 - Preview and export flows must treat stored content as source-of-truth input, not a side channel that mutates persisted data.
@@ -43,6 +44,7 @@ This document describes the current system shape and operational invariants. For
 ## Operational Invariants
 
 - Views must not directly touch database or filesystem persistence; state and protocols remain the integration boundary.
+- System sharing may materialize temporary files for explicit user actions, but file-reveal actions must remain constrained to real user files.
 - Settings retain the explicit Save/Cancel model, while hotkey application still flows through `AppDelegate.applyHotKey` and `.settingsChanged`.
 - Cleanup, external file reads/writes, thumbnail work, and other heavy operations should remain backgrounded and bounded.
 - External storage access continues to require path validation before file operations.

@@ -2,10 +2,10 @@
 doc_type: guide
 status: active
 owner: maintainers
-last_reviewed: 2026-05-07
+last_reviewed: 2026-05-08
 canonical: true
 related_versions:
-  - v0.7.7
+  - v0.7.8
 ---
 
 # Maintainer Guide

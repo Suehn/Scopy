@@ -11,6 +11,37 @@
 
 - No unreleased entries.
 
+## [v0.7.8] - 2026-05-08
+
+### History/Actions
+
+- History loading now fetches pinned items separately from recent unpinned items, so pinned rows no longer consume the `initialPageSize` recent-page budget.
+- Recent unpinned pagination keeps a 50-item initial page and uses 500-item load-more pages, with offsets based on the loaded unpinned count.
+- Image and file history rows now share a service-backed file URL resolver for system actions, keeping views out of persistence details.
+
+### Fix/Sharing
+
+- Send via AirDrop is available for every image row: file-backed images use their original file URL, and inline/stored images generate a temporary PNG when no original file exists.
+- File rows still expose AirDrop and Open Containing Folder when real local files exist; Open Containing Folder intentionally ignores temporary AirDrop PNGs.
+- Non-file text, RTF, HTML, and other rows do not expose file-system actions.
+
+### Fix/Codex
+
+- Paste-optimized for Codex now copies the optimized payload, closes the panel, and sends `Control+V` instead of `Command+V`.
+
+### UX
+
+- Reopening the panel after the stale-search interval clears old search text, while quick toggles preserve the active search.
+- Focusing the search field clears row selection and prevents hover from immediately reselecting a row.
+
+### Verification
+
+- `make build`: passed (2026-05-08).
+- `make test-unit`: Executed 439 tests, 1 skipped, 0 failures (2026-05-08).
+- `make test-strict`: Executed 439 tests, 1 skipped, 0 failures (2026-05-08).
+- Focused UI coverage passed for storage-backed image AirDrop/Open Folder, inline-image AirDrop without Open Folder, and file AirDrop/Open Folder context menus (2026-05-08).
+- Focused unit coverage passed for inline image `fileURLs(itemID:)` temporary PNG generation (2026-05-08).
+
 ## [v0.7.7] - 2026-05-07
 
 ### Architecture/Frontend

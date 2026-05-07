@@ -35,9 +35,15 @@ struct ContentView: View {
         .onAppear {
             if appState.startupPhase == .running {
                 searchFocused = true
+                historyViewModel.clearSelectionForSearchFocus()
                 Task {
                     await historyViewModel.loadIfStale()
                 }
+            }
+        }
+        .onChange(of: searchFocused) { _, focused in
+            if focused {
+                historyViewModel.clearSelectionForSearchFocus()
             }
         }
         .onKeyPress { keyPress in

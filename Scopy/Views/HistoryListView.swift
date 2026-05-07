@@ -286,7 +286,10 @@ struct HistoryListView: View {
             settings: settingsViewModel.settings,
             onSelect: { Task { await historyViewModel.select(item) } },
             onSelectOptimizedForCodex: { Task { await historyViewModel.selectOptimizedForCodex(item) } },
+            onSendViaAirDrop: { Task { await historyViewModel.sendViaAirDrop(item) } },
+            onOpenContainingFolder: { Task { await historyViewModel.openContainingFolder(item) } },
             onHoverSelect: { id in
+                guard !searchFocused else { return }
                 historyViewModel.selectedID = id
                 historyViewModel.lastSelectionSource = .mouse
             },

@@ -1,9 +1,15 @@
 import AppKit
+import CoreGraphics
 import ScopyKit
 import SwiftUI
 
 @MainActor
 class AppDelegate: NSObject, NSApplicationDelegate {
+    struct CodexPasteShortcut {
+        static let virtualKey: CGKeyCode = 9
+        static let flags: CGEventFlags = .maskControl
+    }
+
     /// 单例访问
     static var shared: AppDelegate? {
         NSApp.delegate as? AppDelegate
@@ -170,6 +176,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.panel?.close()
             }
         }
+        appState.pasteAfterCopyHandler = { [weak self] in
+            self?.pasteIntoFrontmostAppAfterPanelCloses()
+        }
         appState.openSettingsHandler = { [weak self] in
             self?.openSettings()
         }
@@ -262,9 +271,39 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     func togglePanelAtMousePosition() {
         // 快捷键触发：窗口在鼠标位置
         if let panel {
+            if !panel.isPresented,
+               panel.wasClosedLongerThan(PanelReopenSearchResetPolicy.staleIntervalSeconds) {
+                appState.historyViewModel.clearSearchForPanelReopen()
+            }
             panel.toggle(positionMode: .mousePosition)
         } else {
             togglePanel()
+        }
+    }
+
+    private func pasteIntoFrontmostAppAfterPanelCloses() {
+        let targetApplication = NSWorkspace.shared.frontmostApplication
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
+            if let targetApplication, targetApplication.bundleIdentifier != Bundle.main.bundleIdentifier {
+                targetApplication.activate(options: [])
+            }
+
+            let source = CGEventSource(stateID: .hidSystemState)
+            let keyDown = CGEvent(
+                keyboardEventSource: source,
+                virtualKey: CodexPasteShortcut.virtualKey,
+                keyDown: true
+            )
+            let keyUp = CGEvent(
+                keyboardEventSource: source,
+                virtualKey: CodexPasteShortcut.virtualKey,
+                keyDown: false
+            )
+            keyDown?.flags = CodexPasteShortcut.flags
+            keyUp?.flags = CodexPasteShortcut.flags
+            keyDown?.post(tap: .cghidEventTap)
+            keyUp?.post(tap: .cghidEventTap)
         }
     }
 

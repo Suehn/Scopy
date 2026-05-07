@@ -21,6 +21,42 @@ final class KeyboardNavigationUITests: XCTestCase {
 
     // MARK: - Arrow Key Navigation
 
+    func testSearchFocusPreventsHoverFromSelectingCandidate() throws {
+        let list = app.anyElement("History.List")
+        guard list.waitForExistence(timeout: 10) else {
+            XCTFail("History list not found")
+            return
+        }
+
+        let searchField = app.anyElement("History.SearchField")
+        guard searchField.waitForExistence(timeout: 10) else {
+            XCTFail("Search field not found")
+            return
+        }
+        searchField.click()
+
+        let firstItem = app.anyElements(matching: NSPredicate(format: "identifier BEGINSWITH %@", "History.Item.")).firstMatch
+        guard firstItem.waitForExistence(timeout: 10) else {
+            XCTFail("No history items found")
+            return
+        }
+
+        firstItem.hover()
+        RunLoop.current.run(until: Date().addingTimeInterval(0.4))
+
+        let selectedItem = app.anyElements(
+            matching: NSPredicate(
+                format: "identifier BEGINSWITH %@ AND value == %@",
+                "History.Item.",
+                "selected"
+            )
+        ).firstMatch
+        XCTAssertFalse(
+            selectedItem.waitForExistence(timeout: 1),
+            "Search input focus should keep candidate rows unselected even when the pointer hovers the list."
+        )
+    }
+
     func testOptionDeleteDeletesSelectedItemEvenWhenSearchFocused() throws {
         let list = app.anyElement("History.List")
         guard list.waitForExistence(timeout: 10) else {

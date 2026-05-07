@@ -22,6 +22,53 @@ History row presentation and thumbnail lifecycle are separate Modules. Put row-r
 
 ---
 
+## Scenario: History Row File Actions
+
+### 1. Scope / Trigger
+
+- Trigger: history row context menus expose cross-layer file-system actions through UI, view model, service protocol, storage, and AppKit sharing.
+
+### 2. Signatures
+
+- `ClipboardServiceProtocol.fileURLs(itemID: UUID) async throws -> [URL]`
+- `HistoryViewModel.sendViaAirDrop(_ item: ClipboardItemDTO) async`
+- `HistoryViewModel.openContainingFolder(_ item: ClipboardItemDTO) async`
+- `HistoryViewModel.selectOptimizedForCodex(_ item: ClipboardItemDTO) async`
+
+### 3. Contracts
+
+- AirDrop visibility: show for every `.image` row and for `.file` rows with resolvable real local files.
+- AirDrop resolution: use `fileURLs(itemID:)`; file-backed images/files return validated non-directory source URLs, and inline/stored images may return a temporary PNG prepared only for the explicit share action.
+- Open Containing Folder visibility: show only when DTO-visible data points to real local files; do not use service-created temporary PNGs for this action.
+- Codex optimized paste: copy through `copyToClipboardOptimizedForCodex(itemID:)`, close the panel, then post `Control+V`.
+
+### 4. Validation & Error Matrix
+
+- Missing AirDrop service -> log and leave history state unchanged.
+- Missing real file for Open Containing Folder -> do not show the menu item and do not reveal a temporary directory.
+- Image payload without original file URL -> generate a temporary PNG for AirDrop, but keep Open Containing Folder hidden unless a real source file exists.
+- Non-file text/RTF/HTML rows -> no AirDrop or Open Containing Folder menu entries.
+
+### 5. Good/Base/Bad Cases
+
+- Good: inline image row shows Send via AirDrop, generates a temporary PNG, and hides Open Containing Folder.
+- Base: file row with existing paths shows Send via AirDrop and Open Containing Folder.
+- Bad: Open Containing Folder reveals `/tmp/Scopy/AirDrop` for an inline image.
+
+### 6. Tests Required
+
+- Unit: service URL resolution covers file payloads, file-backed images, and inline image temporary PNG generation.
+- UI: context menu visibility covers storage-backed image, inline image, file, and text-only scenarios.
+- App: Codex paste shortcut constants assert `Control+V`.
+
+### 7. Wrong vs Correct
+
+Wrong: decide AirDrop and Open Containing Folder from one temporary-file resolver in the row view.
+
+Correct: keep AirDrop on the service-backed share resolver, keep Open Containing Folder on real file URLs only, and assert both contracts in focused UI tests.
+
+---
+
 ## Settings Components
 
 Settings use a transaction model with temporary settings and a baseline. The detail area routes pages through SettingsPage; the bottom action bar owns Reset, Cancel, and Save (Scopy/Views/Settings/SettingsView.swift:89-153, Scopy/Views/Settings/SettingsView.swift:225-263).

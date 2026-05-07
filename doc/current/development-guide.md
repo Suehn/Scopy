@@ -2,10 +2,10 @@
 doc_type: guide
 status: active
 owner: maintainers
-last_reviewed: 2026-05-07
+last_reviewed: 2026-05-08
 canonical: true
 related_versions:
-  - v0.7.7
+  - v0.7.8
 ---
 
 # Development Guide
@@ -14,7 +14,7 @@ This document is the canonical implementation guide for the current Scopy codeba
 
 ## Reference State
 
-- Reference release: `v0.7.7`
+- Reference release: `v0.7.8`
 - Version metadata: [../meta/release-current.yml](../meta/release-current.yml)
 - Active requirements: [product-spec.md](./product-spec.md)
 - Release workflow: [release-runbook.md](./release-runbook.md)
@@ -70,13 +70,14 @@ Implication: clipboard semantics, dedup, cleanup triggering, and safe file handl
 
 ### 3. History Loading And Search
 
-1. `HistoryViewModel.load()` and `loadMore()` use `fetchRecent(limit:offset:)` for plain recent-history pagination.
-2. `HistoryViewModel.search()` builds a `SearchRequest` and calls `search(query:)`.
-3. `SearchEngineImpl` executes mode-specific behavior for `exact`, `fuzzy`, `fuzzyPlus`, and `regex`.
-4. Exact search planning and execution must share `SearchPlanner.normalizedExactQuery(_:)` so whitespace trimming affects both coverage decisions and matching consistently.
-5. UI updates are event-driven; the list should not depend on ad hoc full reloads for ordinary mutations.
-6. Search results expose `SearchCoverage` so UI can distinguish complete results, staged fuzzy refinement, and intentional recent-only limits.
-7. Production search paths should construct `SearchCoverage` directly; `isPrefilter` remains a compatibility shim for legacy and test callers only.
+1. `HistoryViewModel.load()` uses `fetchPinned()` plus `fetchRecentUnpinned(limit:offset:)` so pinned rows do not consume the initial recent-page quota.
+2. `HistoryViewModel.loadMore()` uses `fetchRecentUnpinned(limit:offset:)` with the current unpinned count as offset; the initial recent page is 50 and load-more pages are 500.
+3. `HistoryViewModel.search()` builds a `SearchRequest` and calls `search(query:)`.
+4. `SearchEngineImpl` executes mode-specific behavior for `exact`, `fuzzy`, `fuzzyPlus`, and `regex`.
+5. Exact search planning and execution must share `SearchPlanner.normalizedExactQuery(_:)` so whitespace trimming affects both coverage decisions and matching consistently.
+6. UI updates are event-driven; the list should not depend on ad hoc full reloads for ordinary mutations.
+7. Search results expose `SearchCoverage` so UI can distinguish complete results, staged fuzzy refinement, and intentional recent-only limits.
+8. Production search paths should construct `SearchCoverage` directly; `isPrefilter` remains a compatibility shim for legacy and test callers only.
 
 Implication: changes to search semantics belong in the request model, search engine, and user-visible docs together.
 
@@ -131,10 +132,14 @@ Implication: if you touch settings behavior, preserve the Save/Cancel model and 
 - Keyboard navigation and copy/paste selection
 - Pin/unpin and delete
 - Search box, app filter, type filter, mode switch, and sort switch
+- Search focus clears row selection and suppresses hover reselection while the field is focused
 
 ### Item Actions
 
 - Context menu actions for copy / pin / delete
+- Send via AirDrop for image rows and resolvable file rows
+- Open Containing Folder only for real file-backed rows, not temporary image share files
+- Paste-optimized for Codex copies the optimized payload, closes the panel, and posts `Control+V`
 - File note editing for file items
 - Image optimization for stored image items
 - Hover preview for text, image, and file content
@@ -212,6 +217,12 @@ Implication: if you touch settings behavior, preserve the Save/Cancel model and 
 - For hover-preview work, run a focused test plus `scripts/perf-frontend-profile.sh --include-hover` so Markdown and image hover buckets are present.
 - For Markdown renderer fixes, update focused renderer tests such as `KaTeXRenderToStringTests` / `MarkdownMathRenderingTests`, and add export UI coverage when the PNG output contract changes.
 - Re-check pngquant settings interactions, preview latency, and output pasteboard behavior.
+
+### File Action Or Context Menu Changes
+
+- Keep file-system action resolution behind `ClipboardServiceProtocol.fileURLs(itemID:)`; views should not read persistence or storage paths directly.
+- Treat AirDrop and Open Containing Folder as different contracts: AirDrop may use temporary PNGs for image rows, while Open Containing Folder must only reveal real source files.
+- Update unit coverage for service URL resolution and UI coverage for menu visibility/action identifiers in the same change.
 
 ### Release Or Documentation Changes
 

@@ -7,10 +7,20 @@ enum PanelPositionMode {
     case mousePosition  // 新行为：鼠标位置
 }
 
+enum PanelReopenSearchResetPolicy {
+    static let staleIntervalSeconds: TimeInterval = 180
+
+    static func shouldClearSearch(lastClosedAt: Date?, now: Date = Date()) -> Bool {
+        guard let lastClosedAt else { return false }
+        return now.timeIntervalSince(lastClosedAt) > staleIntervalSeconds
+    }
+}
+
 /// 浮动面板 - 参考 Maccy 的 FloatingPanel 实现
 class FloatingPanel: NSPanel, NSWindowDelegate {
     var isPresented: Bool = false
     var statusBarButton: NSStatusBarButton?
+    private(set) var lastClosedAt: Date?
 
     init<Content: View>(
         contentRect: NSRect,
@@ -76,7 +86,13 @@ class FloatingPanel: NSPanel, NSWindowDelegate {
         orderFrontRegardless()
         makeKey()
         isPresented = true
+        lastClosedAt = nil
         statusBarButton?.isHighlighted = true
+    }
+
+    func wasClosedLongerThan(_ interval: TimeInterval, now: Date = Date()) -> Bool {
+        guard let lastClosedAt else { return false }
+        return now.timeIntervalSince(lastClosedAt) > interval
     }
 
     // MARK: - Position Calculation
@@ -157,6 +173,7 @@ class FloatingPanel: NSPanel, NSWindowDelegate {
     override func close() {
         super.close()
         isPresented = false
+        lastClosedAt = Date()
         statusBarButton?.isHighlighted = false
     }
 

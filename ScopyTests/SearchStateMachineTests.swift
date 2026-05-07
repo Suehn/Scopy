@@ -221,7 +221,7 @@ final class SearchStateMachineTests: XCTestCase {
         XCTAssertEqual(service.recordedSearchRequests.count, 2)
         XCTAssertFalse(service.recordedSearchRequests[1].forceFullFuzzy)
         XCTAssertEqual(service.recordedSearchRequests[1].offset, 2)
-        XCTAssertEqual(service.recordedSearchRequests[1].limit, 50)
+        XCTAssertEqual(service.recordedSearchRequests[1].limit, HistoryViewModel.loadMorePageSize)
         XCTAssertEqual(viewModel.searchCoverage, .recentOnly(limit: 2000))
     }
 
@@ -243,7 +243,7 @@ final class SearchStateMachineTests: XCTestCase {
         XCTAssertEqual(service.recordedSearchRequests.count, 2)
         XCTAssertFalse(service.recordedSearchRequests[1].forceFullFuzzy)
         XCTAssertEqual(service.recordedSearchRequests[1].offset, 2)
-        XCTAssertEqual(service.recordedSearchRequests[1].limit, 50)
+        XCTAssertEqual(service.recordedSearchRequests[1].limit, HistoryViewModel.loadMorePageSize)
         XCTAssertEqual(viewModel.searchCoverage, .recentOnly(limit: 2000))
     }
 }

@@ -50,15 +50,15 @@ final class AppStateTests: XCTestCase {
         XCTAssertTrue(appState.canLoadMore)
     }
 
-    func testLoadMoreAppends100Items() async {
-        mockService.setItemCount(200)
+    func testLoadMoreAppends500Items() async {
+        mockService.setItemCount(700)
         await appState.load()
 
         XCTAssertEqual(appState.loadedCount, 50)
 
         await appState.loadMore()
 
-        XCTAssertEqual(appState.loadedCount, 150, "Should append 100 items")
+        XCTAssertEqual(appState.loadedCount, 550, "Should append 500 items")
         XCTAssertTrue(appState.canLoadMore)
     }
 
@@ -222,7 +222,7 @@ final class AppStateTests: XCTestCase {
         }, message: "Initial prefiltered search should complete")
         XCTAssertEqual(mockService.recordedSearchRequests.count, 1)
 
-        let expectedLimit = appState.loadedCount + 50
+        let expectedLimit = appState.loadedCount + HistoryViewModel.loadMorePageSize
         await appState.loadMore()
 
         XCTAssertEqual(mockService.recordedSearchRequests.count, 2)
@@ -515,6 +515,23 @@ final class AppStateTests: XCTestCase {
         XCTAssertEqual(mockService.lastCopiedItemID, item.id)
     }
 
+    func testSelectOptimizedForCodexCopiesAndRequestsPaste() async {
+        mockService.setItemCount(10)
+        await appState.load()
+
+        let item = appState.items[0]
+        var pasteRequestCount = 0
+        appState.pasteAfterCopyHandler = {
+            pasteRequestCount += 1
+        }
+
+        await appState.historyViewModel.selectOptimizedForCodex(item)
+
+        XCTAssertEqual(mockService.copyCallCount, 1)
+        XCTAssertEqual(mockService.lastCopiedItemID, item.id)
+        XCTAssertEqual(pasteRequestCount, 1)
+    }
+
     func testTogglePinChangesState() async {
         mockService.setItemCount(10)
         await appState.load()
@@ -676,6 +693,54 @@ final class AppStateTests: XCTestCase {
         XCTAssertEqual(appState.items.count, 10)
     }
 
+    func testPinnedItemsDoNotConsumeInitialRecentPageQuota() async {
+        mockService.setItemCount(120, pinnedCount: 30)
+        await appState.load()
+
+        XCTAssertEqual(appState.pinnedItems.count, 30)
+        XCTAssertEqual(appState.unpinnedItems.count, HistoryViewModel.initialPageSize)
+        XCTAssertEqual(appState.loadedCount, 80)
+        XCTAssertTrue(appState.canLoadMore)
+
+        await appState.loadMore()
+
+        XCTAssertEqual(appState.pinnedItems.count, 30)
+        XCTAssertEqual(appState.unpinnedItems.count, 90)
+        XCTAssertEqual(appState.loadedCount, 120)
+        XCTAssertFalse(appState.canLoadMore)
+    }
+
+    func testSearchFocusClearsSelectionAndKeyboardNavigationStillWorks() async {
+        mockService.setItemCount(10)
+        await appState.load()
+
+        appState.selectedID = appState.items[2].id
+        appState.historyViewModel.clearSelectionForSearchFocus()
+
+        XCTAssertNil(appState.selectedID)
+
+        appState.highlightNext()
+        XCTAssertEqual(appState.selectedID, appState.items.first?.id)
+    }
+
+    func testPanelReopenPolicyClearsOnlyAfterThreshold() {
+        let now = Date()
+
+        XCTAssertFalse(PanelReopenSearchResetPolicy.shouldClearSearch(lastClosedAt: nil, now: now))
+        XCTAssertFalse(
+            PanelReopenSearchResetPolicy.shouldClearSearch(
+                lastClosedAt: now.addingTimeInterval(-PanelReopenSearchResetPolicy.staleIntervalSeconds),
+                now: now
+            )
+        )
+        XCTAssertTrue(
+            PanelReopenSearchResetPolicy.shouldClearSearch(
+                lastClosedAt: now.addingTimeInterval(-PanelReopenSearchResetPolicy.staleIntervalSeconds - 1),
+                now: now
+            )
+        )
+    }
+
     // MARK: - Settings Tests
 
     func testLoadSettings() async {
@@ -808,6 +873,19 @@ final class TestMockClipboardService: ClipboardServiceProtocol {
             }
         }
         let sortedItems = items.sorted { $0.lastUsedAt > $1.lastUsedAt }
+        let start = min(offset, sortedItems.count)
+        let end = min(offset + limit, sortedItems.count)
+        return Array(sortedItems[start..<end])
+    }
+
+    func fetchPinned() async throws -> [ClipboardItemDTO] {
+        fetchRecentCallCount += 1
+        return items.filter(\.isPinned).sorted { $0.lastUsedAt > $1.lastUsedAt }
+    }
+
+    func fetchRecentUnpinned(limit: Int, offset: Int) async throws -> [ClipboardItemDTO] {
+        fetchRecentCallCount += 1
+        let sortedItems = items.filter { !$0.isPinned }.sorted { $0.lastUsedAt > $1.lastUsedAt }
         let start = min(offset, sortedItems.count)
         let end = min(offset + limit, sortedItems.count)
         return Array(sortedItems[start..<end])

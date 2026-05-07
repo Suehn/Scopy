@@ -231,7 +231,7 @@ final class ResourceCleanupTests: XCTestCase {
         defer { appState.stop() }
 
         // 初始化
-        service.setItemCount(200)
+        service.setItemCount(700)
         await appState.load()
         XCTAssertTrue(appState.canLoadMore)
 
@@ -241,7 +241,7 @@ final class ResourceCleanupTests: XCTestCase {
         Task { await appState.loadMore() }
 
         await assertEventually(timeout: 1.0, pollInterval: 0.01, {
-            appState.loadedCount == 150
+            appState.loadedCount == 550
         }, message: "loadMore should append exactly one page")
 
         // 验证不会崩溃

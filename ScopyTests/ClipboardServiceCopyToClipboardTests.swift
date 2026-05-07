@@ -309,6 +309,23 @@ final class ClipboardServiceCopyToClipboardTests: XCTestCase {
         XCTAssertNotNil(pasteboard.data(forType: .tiff))
     }
 
+    func testFileURLsForInlineImageReturnsShareablePNGFile() async throws {
+        guard let insertedStandardPNGImageItemID else {
+            XCTFail("Missing inserted standard PNG image item ID")
+            return
+        }
+
+        let urls = try await service.fileURLs(itemID: insertedStandardPNGImageItemID)
+
+        XCTAssertEqual(urls.count, 1)
+        guard let url = urls.first else { return }
+        XCTAssertTrue(FileManager.default.fileExists(atPath: url.path))
+        XCTAssertTrue(url.path.contains("/Scopy/AirDrop/"))
+        XCTAssertEqual(url.pathExtension, "png")
+        let data = try Data(contentsOf: url, options: [.mappedIfSafe])
+        XCTAssertTrue(isLikelyPNG(data))
+    }
+
     func testCopyToClipboardImageWhenStoredPayloadIsPalettedPNGPreservesOriginalPNGBytes() async throws {
         guard let insertedPalettedImageItemID else {
             XCTFail("Missing inserted paletted image item ID")

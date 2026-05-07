@@ -2,10 +2,10 @@
 doc_type: spec
 status: active
 owner: maintainers
-last_reviewed: 2026-05-07
+last_reviewed: 2026-05-08
 canonical: true
 related_versions:
-  - v0.7.7
+  - v0.7.8
 ---
 
 # Current Requirements
@@ -14,7 +14,7 @@ This document is the active requirements baseline for Scopy. Historical planning
 
 ## Reference State
 
-- Reference release: `v0.7.7`
+- Reference release: `v0.7.8`
 - Source of truth for current version metadata: [../meta/release-current.yml](../meta/release-current.yml)
 - Source of truth for development and implementation workflow: [development-guide.md](./development-guide.md)
 
@@ -41,8 +41,8 @@ Scopy is a native macOS clipboard manager for users who need durable clipboard h
 ### History Browsing
 
 - Show recent history in a floating panel driven by a global hotkey.
-- Support incremental loading for large histories instead of blocking on full-history reads.
-- Allow per-item copy, pin/unpin, delete, and contextual actions.
+- Support incremental loading for large histories instead of blocking on full-history reads; pinned rows are loaded separately and do not consume the initial recent-page quota.
+- Allow per-item copy, pin/unpin, delete, and contextual actions, including AirDrop for images/files and Open Containing Folder for real file-backed items.
 - Allow file items to carry editable notes.
 
 ### Search And Filtering
@@ -58,6 +58,7 @@ Scopy is a native macOS clipboard manager for users who need durable clipboard h
 - Provide Markdown/LaTeX rendering with local CommonMark/GFM, footnotes, math, syntax highlighting, a safe HTML subset, and export-to-PNG.
 - Allow optional pngquant-based compression for newly ingested images and exported Markdown/LaTeX PNGs.
 - Show image thumbnails in the history list when enabled.
+- Allow all image history rows to be sent via AirDrop; inline/stored images may be materialized as temporary PNG files for sharing.
 
 ### Settings And Diagnostics
 
@@ -72,7 +73,7 @@ Scopy is a native macOS clipboard manager for users who need durable clipboard h
 | --- | --- |
 | Modes | Exact / Fuzzy / Fuzzy+ / Regex |
 | Filters | App filter, single-type filter, grouped multi-type filter |
-| Pagination | Default page size is 50; incremental loading must remain available |
+| Pagination | Pinned items are independent of recent pagination; default recent unpinned page size is 50 and load-more pages fetch 500 unpinned items |
 | Responsiveness | Typing should stay responsive with debounce around `150-200ms` |
 | Fuzzy / Fuzzy+ | May return a staged first page, but must converge to complete full-history results |
 | Exact | After trimming surrounding whitespace, `>= 3` characters search complete history; `<= 2` characters intentionally search only the most recent `2000` items and must say so in the UI |
@@ -102,6 +103,8 @@ Scopy is a native macOS clipboard manager for users who need durable clipboard h
 
 - Copying from history must reproduce the stored content type as faithfully as the system pasteboard allows.
 - Cleanup, delete, and optimization paths must not remove or rewrite unrelated files.
+- AirDrop should share validated real files when available and may generate temporary PNGs for image rows; Open Containing Folder must only reveal real user files, never temporary share artifacts.
+- Paste-optimized for Codex must post `Control+V` after copying and closing the panel.
 - File notes, image optimization, and export flows must not corrupt the underlying item model.
 - Markdown preview and PNG export should stay aligned for math, footnotes, syntax highlighting, and CJK punctuation-adjacent emphasis.
 - UI refactors must not silently change settings transaction semantics.
@@ -113,6 +116,7 @@ Scopy is a native macOS clipboard manager for users who need durable clipboard h
   - `10k-100k` items: first page P95 `<= 100-150ms`
 - Heavy I/O, hashing, indexing, cleanup, preview preparation, and export work should stay off the main thread.
 - The history view and search UI must remain usable on realistic snapshot databases, not just toy data.
+- Focusing the search field should not leave a stale row selection or allow hover to immediately reselect rows while typing.
 
 ### Operability
 

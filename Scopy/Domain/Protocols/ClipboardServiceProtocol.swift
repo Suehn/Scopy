@@ -22,6 +22,12 @@ public protocol ClipboardServiceProtocol: AnyObject {
     /// 获取最近的剪贴板项
     func fetchRecent(limit: Int, offset: Int) async throws -> [ClipboardItemDTO]
 
+    /// 获取固定项。固定项在 UI 中独立成组，不应占用 recent page 配额。
+    func fetchPinned() async throws -> [ClipboardItemDTO]
+
+    /// 获取未固定的最近项，用于 recent 分页。
+    func fetchRecentUnpinned(limit: Int, offset: Int) async throws -> [ClipboardItemDTO]
+
     /// 搜索剪贴板历史
     func search(query: SearchRequest) async throws -> SearchResultPage
 
@@ -44,6 +50,9 @@ public protocol ClipboardServiceProtocol: AnyObject {
     /// 显式为 Codex 这类窄图片读取路径准备兼容表示。
     /// 该入口只应由明确的用户动作触发，避免影响普通粘贴语义。
     func copyToClipboardOptimizedForCodex(itemID: UUID) async throws
+
+    /// 解析系统分享可用的本地文件 URL。文件项返回原始文件，图片项可返回临时 PNG。
+    func fileURLs(itemID: UUID) async throws -> [URL]
 
     /// 更新设置
     func updateSettings(_ settings: SettingsDTO) async throws
@@ -86,7 +95,21 @@ public extension ClipboardServiceProtocol {
         // Default no-op for backwards compatibility (tests / stubs).
     }
 
+    func fetchPinned() async throws -> [ClipboardItemDTO] {
+        try await fetchRecent(limit: 10_000, offset: 0).filter(\.isPinned)
+    }
+
+    func fetchRecentUnpinned(limit: Int, offset: Int) async throws -> [ClipboardItemDTO] {
+        let fetchLimit = max(limit, min(10_000, offset + limit))
+        let candidates = try await fetchRecent(limit: fetchLimit, offset: 0).filter { !$0.isPinned }
+        return Array(candidates.dropFirst(offset).prefix(limit))
+    }
+
     func copyToClipboardOptimizedForCodex(itemID: UUID) async throws {
         try await copyToClipboard(itemID: itemID)
+    }
+
+    func fileURLs(itemID _: UUID) async throws -> [URL] {
+        []
     }
 }

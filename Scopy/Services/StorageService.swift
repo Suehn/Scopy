@@ -351,6 +351,14 @@ public final class StorageService {
         try await repository.fetchRecent(limit: limit, offset: offset)
     }
 
+    public func fetchPinned() async throws -> [StoredItem] {
+        try await repository.fetchPinned()
+    }
+
+    public func fetchRecentUnpinned(limit: Int, offset: Int) async throws -> [StoredItem] {
+        try await repository.fetchRecentUnpinned(limit: limit, offset: offset)
+    }
+
     func updateItem(_ item: StoredItem) async throws {
         try await repository.updateItemMetadata(
             id: item.id,

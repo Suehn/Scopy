@@ -234,6 +234,28 @@ actor ClipboardService {
         return dtos
     }
 
+    func fetchPinned() async throws -> [ClipboardItemDTO] {
+        let storage = try requireStorage()
+        let items = try await storage.fetchPinned()
+        var dtos: [ClipboardItemDTO] = []
+        dtos.reserveCapacity(items.count)
+        for item in items {
+            dtos.append(toDTO(item, storage: storage))
+        }
+        return dtos
+    }
+
+    func fetchRecentUnpinned(limit: Int, offset: Int) async throws -> [ClipboardItemDTO] {
+        let storage = try requireStorage()
+        let items = try await storage.fetchRecentUnpinned(limit: limit, offset: offset)
+        var dtos: [ClipboardItemDTO] = []
+        dtos.reserveCapacity(items.count)
+        for item in items {
+            dtos.append(toDTO(item, storage: storage))
+        }
+        return dtos
+    }
+
     func search(query: SearchRequest) async throws -> SearchResultPage {
         let storage = try requireStorage()
         let search = try requireSearch()
@@ -306,6 +328,22 @@ actor ClipboardService {
 
     func copyToClipboardOptimizedForCodex(itemID: UUID) async throws {
         try await copyToClipboard(itemID: itemID, imageWriteMode: .codexOptimized)
+    }
+
+    func fileURLs(itemID: UUID) async throws -> [URL] {
+        let storage = try requireStorage()
+        guard let item = try await storage.findByID(itemID) else { return [] }
+        let originalURLs = await resolvedFileURLs(for: item, storage: storage)
+        if !originalURLs.isEmpty {
+            return originalURLs
+        }
+
+        if item.type == .image,
+           let shareableURL = await shareableImageFileURL(for: item, storage: storage) {
+            return [shareableURL]
+        }
+
+        return []
     }
 
     private func copyToClipboard(
@@ -396,25 +434,7 @@ actor ClipboardService {
         storage: StorageService,
         imageWriteMode: ClipboardMonitor.ImagePasteboardWriteMode
     ) async {
-        let urlData = await storage.loadPayloadData(for: item)
-        if let data = urlData,
-           let fileURLs = ClipboardMonitor.deserializeFileURLs(data),
-           !fileURLs.isEmpty {
-            if let pngData = Self.resolvePNGDataForTemporaryImageFileURLs(fileURLs) {
-                await MainActor.run {
-                    monitor.copyToClipboard(data: pngData, type: .png, imageWriteMode: imageWriteMode)
-                }
-                return
-            }
-
-            await MainActor.run {
-                monitor.copyToClipboard(fileURLs: fileURLs)
-            }
-            return
-        }
-
-        let paths = item.plainText.components(separatedBy: "\n")
-        let fileURLs = paths.compactMap { URL(fileURLWithPath: $0) }
+        let fileURLs = await resolvedFileURLs(for: item, storage: storage)
         if !fileURLs.isEmpty {
             if let pngData = Self.resolvePNGDataForTemporaryImageFileURLs(fileURLs) {
                 await MainActor.run {
@@ -429,6 +449,85 @@ actor ClipboardService {
         } else {
             await copyPlainText(item.plainText, monitor: monitor)
         }
+    }
+
+    private func resolvedFileURLs(for item: StorageService.StoredItem, storage: StorageService) async -> [URL] {
+        if item.type == .file || item.type == .image {
+            let urlData = await storage.loadPayloadData(for: item)
+            if let data = urlData,
+               let fileURLs = Self.deserializeExistingFileURLs(data),
+               !fileURLs.isEmpty {
+                return fileURLs
+            }
+        }
+
+        if let storageRef = item.storageRef, !storageRef.isEmpty {
+            var isDirectory: ObjCBool = false
+            if FileManager.default.fileExists(atPath: storageRef, isDirectory: &isDirectory),
+               !isDirectory.boolValue {
+                return [URL(fileURLWithPath: storageRef)]
+            }
+        }
+
+        let paths = item.plainText.components(separatedBy: "\n")
+        return paths.compactMap { path in
+            let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { return nil }
+            let url = URL(fileURLWithPath: trimmed)
+            var isDirectory: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory),
+                  !isDirectory.boolValue else { return nil }
+            return url
+        }
+    }
+
+    private static func deserializeExistingFileURLs(_ data: Data) -> [URL]? {
+        guard let paths = try? JSONDecoder().decode([String].self, from: data) else { return nil }
+        let urls = paths.compactMap { path -> URL? in
+            let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { return nil }
+            let url = URL(fileURLWithPath: trimmed)
+            var isDirectory: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory),
+                  !isDirectory.boolValue else { return nil }
+            return url
+        }
+        return urls.isEmpty ? nil : urls
+    }
+
+    private func shareableImageFileURL(for item: StorageService.StoredItem, storage: StorageService) async -> URL? {
+        if let payloadData = await storage.loadPayloadData(for: item),
+           let imagePayload = ClipboardMonitor.makeImagePasteboardPayloadForWrite(payloadData, imageWriteMode: .standard) {
+            return await writeShareableImagePNG(imagePayload.primaryPNGData, for: item)
+        }
+
+        let thumbnailPath = (storage.thumbnailCacheDirectoryPath as NSString)
+            .appendingPathComponent("\(item.contentHash).png")
+        var isDirectory: ObjCBool = false
+        if FileManager.default.fileExists(atPath: thumbnailPath, isDirectory: &isDirectory),
+           !isDirectory.boolValue {
+            return URL(fileURLWithPath: thumbnailPath)
+        }
+
+        return nil
+    }
+
+    private func writeShareableImagePNG(_ data: Data, for item: StorageService.StoredItem) async -> URL? {
+        await Task.detached(priority: .utility) {
+            let directory = FileManager.default.temporaryDirectory
+                .appendingPathComponent("Scopy", isDirectory: true)
+                .appendingPathComponent("AirDrop", isDirectory: true)
+            let url = directory.appendingPathComponent("scopy-image-\(item.id.uuidString).png")
+
+            do {
+                try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+                try StorageService.writeAtomically(data, to: url.path)
+                return url
+            } catch {
+                ScopyLog.app.warning("Failed to prepare image for AirDrop: \(error.localizedDescription, privacy: .private)")
+                return nil
+            }
+        }.value
     }
 
     nonisolated private static func resolvePlainText(for item: StorageService.StoredItem, data: Data) -> String {

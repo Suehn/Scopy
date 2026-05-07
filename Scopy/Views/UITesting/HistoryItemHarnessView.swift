@@ -7,11 +7,16 @@ import ScopyUISupport
 struct HistoryItemHarnessView: View {
     private enum Scenario: String {
         case image
+        case inlineImage = "inline-image"
+        case file
         case markdownText = "markdown-text"
         case plainText = "plain-text"
     }
 
     @State private var selectCount = 0
+    @State private var codexPasteCount = 0
+    @State private var airDropCount = 0
+    @State private var openFolderCount = 0
     @State private var optimizeCount = 0
     @State private var pinCount = 0
     @State private var updateNoteCount = 0
@@ -29,7 +34,7 @@ struct HistoryItemHarnessView: View {
         let item = Self.makeItem(for: scenario)
         let keyboardSelected = ProcessInfo.processInfo.environment["SCOPY_UITEST_HISTORY_ITEM_KEYBOARD_SELECTED"] != "0"
         var settings = SettingsDTO.default
-        settings.showImageThumbnails = scenario == .image
+        settings.showImageThumbnails = scenario == .image || scenario == .inlineImage
         settings.imagePreviewDelay = 0
 
         self.item = item
@@ -45,7 +50,9 @@ struct HistoryItemHarnessView: View {
                     isKeyboardSelected: isKeyboardSelected,
                     settings: settings,
                     onSelect: { selectCount += 1 },
-                    onSelectOptimizedForCodex: { selectCount += 1 },
+                    onSelectOptimizedForCodex: { codexPasteCount += 1 },
+                    onSendViaAirDrop: { airDropCount += 1 },
+                    onOpenContainingFolder: { openFolderCount += 1 },
                     onHoverSelect: { _ in },
                     onTogglePin: { pinCount += 1 },
                     onDelete: { },
@@ -73,6 +80,12 @@ struct HistoryItemHarnessView: View {
             VStack(alignment: .leading, spacing: ScopySpacing.xs) {
                 Text("select=\(selectCount)")
                     .accessibilityIdentifier("UITest.HistoryItemHarness.SelectCount")
+                Text("codexPaste=\(codexPasteCount)")
+                    .accessibilityIdentifier("UITest.HistoryItemHarness.CodexPasteCount")
+                Text("airDrop=\(airDropCount)")
+                    .accessibilityIdentifier("UITest.HistoryItemHarness.AirDropCount")
+                Text("openFolder=\(openFolderCount)")
+                    .accessibilityIdentifier("UITest.HistoryItemHarness.OpenFolderCount")
                 Text("optimize=\(optimizeCount)")
                     .accessibilityIdentifier("UITest.HistoryItemHarness.OptimizeCount")
                 Text("pin=\(pinCount)")
@@ -137,6 +150,40 @@ struct HistoryItemHarnessView: View {
                 thumbnailPath: path,
                 storageRef: path
             )
+        case .inlineImage:
+            let path = makeHarnessImagePath()
+            return ClipboardItemDTO(
+                id: UUID(),
+                type: .image,
+                contentHash: "history-item-harness-inline-image",
+                plainText: "Harness inline image item",
+                note: nil,
+                appBundleID: "com.scopy.tests",
+                createdAt: now.addingTimeInterval(-150),
+                lastUsedAt: now.addingTimeInterval(-18),
+                isPinned: false,
+                sizeBytes: 2_048,
+                fileSizeBytes: nil,
+                thumbnailPath: path,
+                storageRef: nil
+            )
+        case .file:
+            let path = makeHarnessFilePath()
+            return ClipboardItemDTO(
+                id: UUID(),
+                type: .file,
+                contentHash: "history-item-harness-file",
+                plainText: path,
+                note: nil,
+                appBundleID: "com.scopy.tests",
+                createdAt: now.addingTimeInterval(-180),
+                lastUsedAt: now.addingTimeInterval(-20),
+                isPinned: false,
+                sizeBytes: 64,
+                fileSizeBytes: 64,
+                thumbnailPath: nil,
+                storageRef: path
+            )
         case .markdownText:
             return ClipboardItemDTO(
                 id: UUID(),
@@ -195,6 +242,16 @@ Inline math: $E = mc^2$.[^harness]
                 storageRef: nil
             )
         }
+    }
+
+    private static func makeHarnessFilePath() -> String {
+        let directory = URL(fileURLWithPath: "/tmp/scopy_history_item_harness", isDirectory: true)
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let url = directory.appendingPathComponent("airdrop-folder-action.txt")
+        if !FileManager.default.fileExists(atPath: url.path) {
+            try? "Scopy file menu harness\n".write(to: url, atomically: true, encoding: .utf8)
+        }
+        return url.path
     }
 
     private static func makeHarnessImagePath() -> String {

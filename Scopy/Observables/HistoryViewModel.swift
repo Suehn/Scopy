@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import Observation
 import ScopyKit
@@ -36,6 +37,10 @@ final class HistoryViewModel {
     @ObservationIgnored private var timing: Timing = .production
 
     @ObservationIgnored var closePanelHandler: (() -> Void)?
+    @ObservationIgnored var pasteAfterCopyHandler: (() -> Void)?
+
+    static let initialPageSize = 50
+    static let loadMorePageSize = 500
 
     private var listState = HistoryListState()
 
@@ -361,7 +366,9 @@ final class HistoryViewModel {
         do {
             let startTime = CFAbsoluteTimeGetCurrent()
 
-            let fetchedItems = try await service.fetchRecent(limit: 50, offset: 0)
+            let pinnedItems = try await service.fetchPinned()
+            let recentItems = try await service.fetchRecentUnpinned(limit: Self.initialPageSize, offset: 0)
+            let fetchedItems = pinnedItems + recentItems
             guard shouldApplyLoadResult(version: currentVersion) else { return }
 
             listState.replaceItems(fetchedItems)
@@ -429,7 +436,7 @@ final class HistoryViewModel {
                     // When current result is prefilter (total = -1), force full fuzzy before paging.
                     if searchCoverage.isStagedRefine,
                        (searchMode == .fuzzy || searchMode == .fuzzyPlus) {
-                        let expectedLimit = loadedCount + 50
+                        let expectedLimit = loadedCount + Self.loadMorePageSize
                         let request = SearchRequest(
                             query: searchQuery,
                             mode: searchMode,
@@ -460,7 +467,7 @@ final class HistoryViewModel {
                         appFilter: appFilter,
                         typeFilter: typeFilter,
                         typeFilters: typeFilters,
-                        limit: 50,
+                        limit: Self.loadMorePageSize,
                         offset: loadedCount
                     )
                     let result = try await service.search(query: request)
@@ -474,7 +481,10 @@ final class HistoryViewModel {
                     prewarmDisplayText(for: result.items)
                     searchCoverage = result.coverage
                 } else {
-                    let moreItems = try await service.fetchRecent(limit: 100, offset: loadedCount)
+                    let moreItems = try await service.fetchRecentUnpinned(
+                        limit: Self.loadMorePageSize,
+                        offset: unpinnedItems.count
+                    )
                     guard !Task.isCancelled, currentVersion == searchVersion else { return }
                     listState.appendRecentPage(items: moreItems)
                     prewarmDisplayText(for: moreItems)
@@ -530,7 +540,7 @@ final class HistoryViewModel {
                     appFilter: appFilter,
                     typeFilter: typeFilter,
                     typeFilters: typeFilters,
-                    limit: 50,
+                    limit: Self.initialPageSize,
                     offset: 0
                 )
                 let result = try await service.search(query: request)
@@ -546,7 +556,7 @@ final class HistoryViewModel {
 
                 if (searchMode == .fuzzy || searchMode == .fuzzyPlus),
                    result.coverage.isStagedRefine,
-                   loadedCount <= 50 {
+                   loadedCount <= Self.initialPageSize {
                     let refineQuery = searchQuery
                     let refineMode = searchMode
                     let refineAppFilter = appFilter
@@ -568,7 +578,7 @@ final class HistoryViewModel {
                             typeFilter: refineTypeFilter,
                             typeFilters: refineTypeFilters,
                             forceFullFuzzy: true,
-                            limit: 50,
+                            limit: Self.initialPageSize,
                             offset: 0
                         )
 
@@ -576,7 +586,7 @@ final class HistoryViewModel {
                             let refined = try await service.search(query: refineRequest)
                             guard !Task.isCancelled, refineVersion == searchVersion else { return }
 
-                            guard loadedCount <= 50 else { return }
+                            guard loadedCount <= Self.initialPageSize else { return }
 
                             listState.replacePage(
                                 items: refined.items,
@@ -677,9 +687,39 @@ final class HistoryViewModel {
         do {
             try await service.copyToClipboardOptimizedForCodex(itemID: item.id)
             closePanelHandler?()
+            pasteAfterCopyHandler?()
         } catch {
             ScopyLog.app.error("Codex-optimized copy failed: \(error.localizedDescription, privacy: .private)")
         }
+    }
+
+    func sendViaAirDrop(_ item: ClipboardItemDTO) async {
+        let urls = await resolvedFileURLs(for: item)
+        guard !urls.isEmpty else { return }
+        guard let service = NSSharingService(named: .sendViaAirDrop) else {
+            ScopyLog.app.error("AirDrop sharing service is unavailable")
+            return
+        }
+        service.perform(withItems: urls)
+    }
+
+    func openContainingFolder(_ item: ClipboardItemDTO) async {
+        let urls = realFileURLs(for: item)
+        guard !urls.isEmpty else { return }
+        NSWorkspace.shared.activateFileViewerSelecting(urls)
+    }
+
+    func clearSearchForPanelReopen() {
+        selectedID = nil
+        lastSelectionSource = .programmatic
+        guard !searchQuery.isEmpty else { return }
+        searchQuery = ""
+        search()
+    }
+
+    func clearSelectionForSearchFocus() {
+        selectedID = nil
+        lastSelectionSource = .programmatic
     }
 
     func togglePin(_ item: ClipboardItemDTO) async {
@@ -794,6 +834,31 @@ final class HistoryViewModel {
         guard !items.isEmpty else { return }
         ClipboardItemDisplayText.shared.prewarm(items: items)
         HistoryItemPresentationCache.shared.prewarm(items: items)
+    }
+
+    private func resolvedFileURLs(for item: ClipboardItemDTO) async -> [URL] {
+        if let urls = try? await service.fileURLs(itemID: item.id), !urls.isEmpty {
+            return urls
+        }
+        return FilePreviewSupport.fileURLs(from: item.plainText, requireExists: true)
+    }
+
+    private func realFileURLs(for item: ClipboardItemDTO) -> [URL] {
+        switch item.type {
+        case .file:
+            return FilePreviewSupport.fileURLs(from: item.plainText, requireExists: true)
+        case .image:
+            if let storageRef = item.storageRef, !storageRef.isEmpty {
+                var isDirectory: ObjCBool = false
+                if FileManager.default.fileExists(atPath: storageRef, isDirectory: &isDirectory),
+                   !isDirectory.boolValue {
+                    return [URL(fileURLWithPath: storageRef)]
+                }
+            }
+            return FilePreviewSupport.fileURLs(from: item.plainText, requireExists: true)
+        case .text, .rtf, .html, .other:
+            return []
+        }
     }
 
     private func indexOfItem(withID id: UUID) -> Int? {
