@@ -21,7 +21,7 @@ final class KeyboardNavigationUITests: XCTestCase {
 
     // MARK: - Arrow Key Navigation
 
-    func testSearchFocusPreventsHoverFromSelectingCandidate() throws {
+    func testSearchFocusAllowsHoverSelectionCandidate() throws {
         let list = app.anyElement("History.List")
         guard list.waitForExistence(timeout: 10) else {
             XCTFail("History list not found")
@@ -51,10 +51,7 @@ final class KeyboardNavigationUITests: XCTestCase {
                 "selected"
             )
         ).firstMatch
-        XCTAssertFalse(
-            selectedItem.waitForExistence(timeout: 1),
-            "Search input focus should keep candidate rows unselected even when the pointer hovers the list."
-        )
+        XCTAssertTrue(selectedItem.waitForExistence(timeout: 5), "Hovering the list should still select a row while the search field is focused.")
     }
 
     func testOptionDeleteDeletesSelectedItemEvenWhenSearchFocused() throws {

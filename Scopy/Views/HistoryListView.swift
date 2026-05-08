@@ -289,7 +289,6 @@ struct HistoryListView: View {
             onSendViaAirDrop: { Task { await historyViewModel.sendViaAirDrop(item) } },
             onOpenContainingFolder: { Task { await historyViewModel.openContainingFolder(item) } },
             onHoverSelect: { id in
-                guard !searchFocused else { return }
                 historyViewModel.selectedID = id
                 historyViewModel.lastSelectionSource = .mouse
             },

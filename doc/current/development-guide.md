@@ -132,7 +132,7 @@ Implication: if you touch settings behavior, preserve the Save/Cancel model and 
 - Keyboard navigation and copy/paste selection
 - Pin/unpin and delete
 - Search box, app filter, type filter, mode switch, and sort switch
-- Search focus clears row selection and suppresses hover reselection while the field is focused
+- Search focus and list selection remain independent; hover reselection is allowed while the field is focused
 
 ### Item Actions
 

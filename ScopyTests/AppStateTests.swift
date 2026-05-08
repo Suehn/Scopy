@@ -710,19 +710,6 @@ final class AppStateTests: XCTestCase {
         XCTAssertFalse(appState.canLoadMore)
     }
 
-    func testSearchFocusClearsSelectionAndKeyboardNavigationStillWorks() async {
-        mockService.setItemCount(10)
-        await appState.load()
-
-        appState.selectedID = appState.items[2].id
-        appState.historyViewModel.clearSelectionForSearchFocus()
-
-        XCTAssertNil(appState.selectedID)
-
-        appState.highlightNext()
-        XCTAssertEqual(appState.selectedID, appState.items.first?.id)
-    }
-
     func testPanelReopenPolicyClearsOnlyAfterThreshold() {
         let now = Date()
 

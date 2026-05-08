@@ -116,7 +116,7 @@ Scopy is a native macOS clipboard manager for users who need durable clipboard h
   - `10k-100k` items: first page P95 `<= 100-150ms`
 - Heavy I/O, hashing, indexing, cleanup, preview preparation, and export work should stay off the main thread.
 - The history view and search UI must remain usable on realistic snapshot databases, not just toy data.
-- Focusing the search field should not leave a stale row selection or allow hover to immediately reselect rows while typing.
+- Search typing focus and list selection remain independent: focusing the search field does not clear the selected row, and hover can still update row selection while the field is focused.
 
 ### Operability
 

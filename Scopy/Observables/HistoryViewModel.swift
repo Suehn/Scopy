@@ -717,11 +717,6 @@ final class HistoryViewModel {
         search()
     }
 
-    func clearSelectionForSearchFocus() {
-        selectedID = nil
-        lastSelectionSource = .programmatic
-    }
-
     func togglePin(_ item: ClipboardItemDTO) async {
         do {
             if item.isPinned {

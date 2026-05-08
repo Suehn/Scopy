@@ -29,7 +29,7 @@ When changing history state:
 - Update item arrays and presentation caches together.
 - Keep pinned and recent pagination separate: `initialPageSize` applies only to recent unpinned rows, and load-more offsets must use `unpinnedItems.count` rather than total visible items.
 - Preserve SelectionSource semantics so keyboard navigation can scroll while mouse/programmatic selection does not (Scopy/Observables/AppState.swift:6-11, Scopy/Views/HistoryListView.swift:146-153).
-- Search-field focus should clear visible selection and suppress hover-driven reselection while typing, so text entry does not accidentally act on a stale row.
+- Search-field focus and visible row selection are independent. Do not clear selectedID only because the search field gains focus, and keep hover-driven selection available while the field is focused.
 - Preserve pagination and load-more guards for large histories.
 
 ---

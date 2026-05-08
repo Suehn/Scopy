@@ -19,9 +19,9 @@ This page is the human-facing index for current release state. Automation should
 ## Current Release
 
 <!-- release-current:start -->
-- Version: `v0.7.8`
-- Date: `2026-05-08`
-- Release note: [v0.7.8](./history/v0.7.8.md)
+- Version: `v0.7.9`
+- Date: `2026-05-09`
+- Release note: [v0.7.9](./history/v0.7.9.md)
 - Changelog: [CHANGELOG.md](./CHANGELOG.md)
 - Profile doc: `none`
 <!-- release-current:end -->
@@ -29,6 +29,7 @@ This page is the human-facing index for current release state. Automation should
 ## Recent Releases
 
 <!-- release-recent:start -->
+- `2026-05-09` [v0.7.9](./history/v0.7.9.md) - Search focus selection restoration and TSan host shortcut coverage fix
 - `2026-05-08` [v0.7.8](./history/v0.7.8.md) - History actions pinned pagination Codex Control-V paste and full image AirDrop coverage
 - `2026-05-07` [v0.7.7](./history/v0.7.7.md) - Hover preview pipeline storage cleanup exact search quality manifests and archive context path stability
 - `2026-05-07` [v0.7.6](./history/v0.7.6.md) - Trellis TASK_DIR hardening row descriptor thumbnail scheduler and frontend profile isolation
@@ -40,7 +41,6 @@ This page is the human-facing index for current release state. Automation should
 - `2026-03-26` [v0.7.0](./history/v0.7.0.md) - Markdown preview and export now share richer CommonMark plus GFM footnotes math highlighting and long-export hardening
 - `2026-03-25` [v0.64](./history/v0.64.md) - Full-index warm-load latency collapsed to sub-second disk-cache hits with preview lifecycle and observability cleanup
 - `2026-03-13` [v0.60.3](./history/v0.60.3.md) - Explicit Codex image replay action and ultra-tall export and preview hardening
-- `2026-03-07` [v0.60.2](./history/v0.60.2.md) - Historical image replay compatibility fix for Codex and temporary image files
 - `2026-02-28` [v0.60.1](./history/v0.60.1.md) - Perf and release hardening with frontend profile flow, unified perf table, and cleanup-path convergence
 <!-- release-recent:end -->
 

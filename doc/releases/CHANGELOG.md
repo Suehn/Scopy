@@ -11,6 +11,29 @@
 
 - No unreleased entries.
 
+## [v0.7.9] - 2026-05-09
+
+### UX
+
+- Restored independent search-focus and row-selection behavior: focusing the search field no longer clears selection or suppresses hover-driven row selection.
+- Updated UI coverage so hovering a row while the search field is focused must still produce the selected row state.
+
+### Tests
+
+- Removed the obsolete unit coverage for search-focus-driven selection clearing.
+- Kept the AppDelegate Codex `Control+V` shortcut assertion out of the TSan host bundle because `ScopyTSanTests` intentionally excludes `AppDelegate.swift`.
+
+### Verification
+
+- `git diff --check`: passed (2026-05-09).
+- Focused unit coverage for panel reopen policy passed (2026-05-09).
+- Focused UI coverage for search-focus hover selection passed (2026-05-09).
+- `make build`: passed (2026-05-09).
+- `make test-unit`: Executed 438 tests, 1 skipped, 0 failures (2026-05-09).
+- `make test-strict`: Executed 438 tests, 1 skipped, 0 failures (2026-05-09).
+- `make docs-validate`: Docs OK: v0.7.9 (2026-05-09).
+- `make release-validate`: OK: v0.7.9 (2026-05-09).
+
 ## [v0.7.8] - 2026-05-08
 
 ### History/Actions
