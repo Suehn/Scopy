@@ -201,7 +201,8 @@ print("ok")
             ##INDENT_HEADING
         """
 
-        let html = MarkdownHTMLRenderer.render(markdown: input)
+        let context = MarkdownRenderContextResolver.defaultContext(for: input, flags: .disabled)
+        let html = MarkdownHTMLRenderer.render(markdown: input, context: context).html
 
         XCTAssertTrue(html.contains("## TitleA"))
         XCTAssertTrue(html.contains("### TitleB"))

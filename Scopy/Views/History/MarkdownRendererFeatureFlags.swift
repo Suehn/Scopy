@@ -18,12 +18,16 @@ struct MarkdownRendererFlagSet: Equatable {
 
 enum MarkdownRendererFeatureFlags {
     static var current: MarkdownRendererFlagSet {
-        let environment = ProcessInfo.processInfo.environment
+        resolve(environment: ProcessInfo.processInfo.environment)
+    }
+
+    static func resolve(environment: [String: String]) -> MarkdownRendererFlagSet {
         let rendererMode = environment["SCOPY_MARKDOWN_RENDERER"]?.lowercased() ?? ""
         return MarkdownRendererFlagSet(
             forceLegacy: rendererMode == "legacy",
             forceUnified: rendererMode == "unified",
-            unifiedSafeProfilesEnabled: isEnabled(environment["SCOPY_MARKDOWN_UNIFIED_SAFE_PROFILES"]) || rendererMode == "safe",
+            unifiedSafeProfilesEnabled: rendererMode == "safe" ||
+                boolFlag(environment["SCOPY_MARKDOWN_UNIFIED_SAFE_PROFILES"], defaultValue: true),
             unifiedScientificEnabled: isEnabled(environment["SCOPY_MARKDOWN_UNIFIED_SCIENTIFIC"]),
             shadowUnifiedEnabled: isEnabled(environment["SCOPY_MARKDOWN_UNIFIED_SHADOW"])
         )
@@ -36,6 +40,18 @@ enum MarkdownRendererFeatureFlags {
             return true
         default:
             return false
+        }
+    }
+
+    private static func boolFlag(_ raw: String?, defaultValue: Bool) -> Bool {
+        guard let raw else { return defaultValue }
+        switch raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "1", "true", "yes", "on", "enabled":
+            return true
+        case "0", "false", "no", "off", "disabled":
+            return false
+        default:
+            return defaultValue
         }
     }
 }

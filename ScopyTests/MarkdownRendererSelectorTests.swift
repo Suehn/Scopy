@@ -1,7 +1,7 @@
 import XCTest
 
 final class MarkdownRendererSelectorTests: XCTestCase {
-    func testDefaultFlagsKeepAllProfilesOnLegacy() {
+    func testDisabledFlagsKeepAllProfilesOnLegacy() {
         for profile in allProfiles {
             XCTAssertEqual(
                 MarkdownRendererSelector.rendererKind(for: profile, flags: .disabled),
@@ -47,6 +47,29 @@ final class MarkdownRendererSelectorTests: XCTestCase {
 
         XCTAssertEqual(MarkdownRendererSelector.rendererKind(for: .pdfOCRScientific, flags: forceUnified), .unified)
         XCTAssertEqual(MarkdownRendererSelector.rendererKind(for: .authoredMarkdown, flags: forceLegacy), .legacyMarkdownIt)
+    }
+
+    func testResolvedDefaultsCutOverSafeProfilesOnly() {
+        let flags = MarkdownRendererFeatureFlags.resolve(environment: [:])
+
+        XCTAssertFalse(flags.forceLegacy)
+        XCTAssertFalse(flags.forceUnified)
+        XCTAssertTrue(flags.unifiedSafeProfilesEnabled)
+        XCTAssertFalse(flags.unifiedScientificEnabled)
+        XCTAssertFalse(flags.shadowUnifiedEnabled)
+        XCTAssertEqual(MarkdownRendererSelector.rendererKind(for: .authoredMarkdown, flags: flags), .unified)
+        XCTAssertEqual(MarkdownRendererSelector.rendererKind(for: .chatGPTMarkdown, flags: flags), .unified)
+        XCTAssertEqual(MarkdownRendererSelector.rendererKind(for: .scientificMarkdown, flags: flags), .legacyMarkdownIt)
+    }
+
+    func testSafeProfileCutoverCanBeDisabled() {
+        let flags = MarkdownRendererFeatureFlags.resolve(environment: [
+            "SCOPY_MARKDOWN_UNIFIED_SAFE_PROFILES": "0"
+        ])
+
+        XCTAssertFalse(flags.unifiedSafeProfilesEnabled)
+        XCTAssertEqual(MarkdownRendererSelector.rendererKind(for: .authoredMarkdown, flags: flags), .legacyMarkdownIt)
+        XCTAssertEqual(MarkdownRendererSelector.rendererKind(for: .chatGPTMarkdown, flags: flags), .legacyMarkdownIt)
     }
 
     private var allProfiles: [MarkdownSourceProfile] {

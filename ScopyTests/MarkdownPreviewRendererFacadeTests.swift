@@ -1,14 +1,12 @@
 import XCTest
 
 final class MarkdownPreviewRendererFacadeTests: XCTestCase {
-    func testDefaultRendererReturnsLegacyOutputAndDiagnostics() {
+    func testLegacyContextReturnsMarkdownItOutputAndDiagnostics() {
         let input = "Inline math: $x_1$ and [doc](/Users/alice/a.md:1)"
-        let context = MarkdownRenderContextResolver.defaultContext(for: input)
+        let context = MarkdownRenderContextResolver.defaultContext(for: input, flags: .disabled)
 
-        let directHTML = MarkdownHTMLRenderer.render(markdown: input)
         let output = MarkdownHTMLRenderer.render(markdown: input, context: context)
 
-        XCTAssertFalse(directHTML.isEmpty)
         XCTAssertFalse(output.html.isEmpty)
         XCTAssertTrue(output.html.contains("markdown-it.min.js"))
         XCTAssertTrue(output.html.contains("window.__scopyIsRenderReady"))
@@ -17,6 +15,20 @@ final class MarkdownPreviewRendererFacadeTests: XCTestCase {
         XCTAssertEqual(output.diagnostics.profile, .chatGPTMarkdown)
         XCTAssertGreaterThan(output.diagnostics.protectedIslandCount, 0)
         XCTAssertGreaterThan(output.diagnostics.explicitMathCount, 0)
+    }
+
+    func testDefaultResolverCutsChatGPTMarkdownToUnified() {
+        let input = "Inline math: $x_1$ and [doc](/Users/alice/a.md:1)"
+
+        let context = MarkdownRenderContextResolver.defaultContext(for: input)
+        let directHTML = MarkdownHTMLRenderer.render(markdown: input)
+        let output = MarkdownHTMLRenderer.render(markdown: input, context: context)
+
+        XCTAssertFalse(directHTML.isEmpty)
+        XCTAssertEqual(output.diagnostics.renderer, .unified)
+        XCTAssertEqual(output.diagnostics.profile, .chatGPTMarkdown)
+        XCTAssertTrue(output.html.contains("scopy-unified-renderer.iife.js"))
+        XCTAssertFalse(output.html.contains("markdown-it.min.js"))
     }
 
     func testUnifiedContextUsesUnifiedShellWhenRequested() {
@@ -36,6 +48,24 @@ final class MarkdownPreviewRendererFacadeTests: XCTestCase {
         XCTAssertEqual(output.diagnostics.renderer, .unified)
         XCTAssertNil(output.diagnostics.fallbackReason)
         XCTAssertTrue(output.html.contains("scopy-unified-renderer.iife.js"))
+    }
+
+    func testDefaultResolverCutsAuthoredMarkdownToUnified() {
+        let input = """
+        # Title
+
+        - item
+        """
+
+        let context = MarkdownRenderContextResolver.defaultContext(for: input)
+        let directHTML = MarkdownHTMLRenderer.render(markdown: input)
+        let output = MarkdownHTMLRenderer.render(markdown: input, context: context)
+
+        XCTAssertFalse(directHTML.isEmpty)
+        XCTAssertEqual(output.diagnostics.renderer, .unified)
+        XCTAssertEqual(output.diagnostics.profile, .authoredMarkdown)
+        XCTAssertTrue(output.html.contains("scopy-unified-renderer.iife.js"))
+        XCTAssertFalse(output.html.contains("markdown-it.min.js"))
     }
 
     func testUnifiedContextResolverUsesConservativePolicyAndNamespace() {
