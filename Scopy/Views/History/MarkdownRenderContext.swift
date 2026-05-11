@@ -93,16 +93,28 @@ struct MarkdownRenderContext: Equatable {
 enum MarkdownRenderContextResolver {
     static let legacyPolicyVersion = "legacy-policy-v1"
     static let legacyCacheNamespace = "legacy-markdown-it-v1"
+    static let unifiedPolicyVersion = "unified-policy-v1"
+    static let unifiedCacheNamespace = "unified-renderer-v1"
 
     static func defaultContext(for markdown: String) -> MarkdownRenderContext {
+        defaultContext(for: markdown, flags: MarkdownRendererFeatureFlags.current)
+    }
+
+    static func defaultContext(
+        for markdown: String,
+        flags: MarkdownRendererFlagSet
+    ) -> MarkdownRenderContext {
         let profile = MarkdownSourceProfileDetector.detect(markdown)
-        let renderer = MarkdownRendererSelector.rendererKind(for: profile)
+        let renderer = MarkdownRendererSelector.rendererKind(for: profile, flags: flags)
+        let usesUnified = renderer == .unified
         return MarkdownRenderContext(
             renderer: renderer,
             profile: profile,
-            policy: MarkdownRepairPolicy.legacyCompatible(for: profile),
-            policyVersion: legacyPolicyVersion,
-            cacheNamespace: legacyCacheNamespace
+            policy: usesUnified
+                ? MarkdownRepairPolicy.conservativeDefault(for: profile)
+                : MarkdownRepairPolicy.legacyCompatible(for: profile),
+            policyVersion: usesUnified ? unifiedPolicyVersion : legacyPolicyVersion,
+            cacheNamespace: usesUnified ? unifiedCacheNamespace : legacyCacheNamespace
         )
     }
 }

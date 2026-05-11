@@ -37,4 +37,28 @@ final class MarkdownPreviewRendererFacadeTests: XCTestCase {
         XCTAssertNil(output.diagnostics.fallbackReason)
         XCTAssertTrue(output.html.contains("scopy-unified-renderer.iife.js"))
     }
+
+    func testUnifiedContextResolverUsesConservativePolicyAndNamespace() {
+        let input = """
+        # Title
+
+        - item
+        """
+        let flags = MarkdownRendererFlagSet(
+            forceLegacy: false,
+            forceUnified: false,
+            unifiedSafeProfilesEnabled: true,
+            unifiedScientificEnabled: false,
+            shadowUnifiedEnabled: false
+        )
+
+        let context = MarkdownRenderContextResolver.defaultContext(for: input, flags: flags)
+
+        XCTAssertEqual(context.renderer, .unified)
+        XCTAssertEqual(context.profile, .authoredMarkdown)
+        XCTAssertFalse(context.policy.allowLooseMathRepair)
+        XCTAssertFalse(context.policy.allowLatexDocumentNormalize)
+        XCTAssertEqual(context.policyVersion, MarkdownRenderContextResolver.unifiedPolicyVersion)
+        XCTAssertEqual(context.cacheNamespace, MarkdownRenderContextResolver.unifiedCacheNamespace)
+    }
 }
