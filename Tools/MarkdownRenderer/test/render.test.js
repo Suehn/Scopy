@@ -64,3 +64,40 @@ test("can disable safe HTML subset", () => {
   assert.doesNotMatch(result.html, /<details/);
   assert.doesNotMatch(result.html, /<summary/);
 });
+
+test("repairs loose math only when policy allows it", () => {
+  const source = "The set (\\mathcal{U}) stays readable.";
+  const disabled = render(source, { allowLooseMathRepair: false });
+  const enabled = render(source, { allowLooseMathRepair: true });
+
+  assert.equal(disabled.metadata.repairedMathCount, 0);
+  assert.doesNotMatch(disabled.html, /katex/);
+  assert.equal(enabled.metadata.repairedMathCount, 1);
+  assert.match(enabled.html, /katex/);
+});
+
+test("loose repair skips parsed markdown syntax islands", () => {
+  const result = render(
+    "[\\mathcal{L}](/tmp/file_1.md) `\\mathcal{C}`\n\n| col |\n| --- |\n| (\\mathcal{T}) |\n\nOutside (\\mathcal{S})",
+    { allowLooseMathRepair: true }
+  );
+
+  assert.equal(result.metadata.repairedMathCount, 1);
+  assert.match(result.html, /href="\/tmp\/file_1.md"/);
+  assert.match(result.html, /<code>\\mathcal\{C\}<\/code>/);
+  assert.match(result.html, /\\mathcal\{T\}/);
+  assert.match(result.html, /katex/);
+});
+
+test("loose repair rejects paths urls and currency", () => {
+  const result = render(
+    "Path (/Users/alice/project/file_v2.md:25), url (https://example.com/a_b?q=1), price ($20).",
+    { allowLooseMathRepair: true }
+  );
+
+  assert.equal(result.metadata.repairedMathCount, 0);
+  assert.doesNotMatch(result.html, /katex/);
+  assert.match(result.html, /\/Users\/alice\/project\/file_v2.md:25/);
+  assert.match(result.html, /https:\/\/example.com\/a_b\?q=1/);
+  assert.match(result.html, /\$20/);
+});

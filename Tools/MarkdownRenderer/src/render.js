@@ -8,6 +8,7 @@ import remarkParse from "remark-parse";
 import remarkRehype from "remark-rehype";
 import { unified } from "unified";
 import { preprocessBackslashMath } from "./scopyBackslashMathPreprocessor.js";
+import { remarkScopyLooseMathRepair } from "./remarkScopyLooseMathRepair.js";
 import { applySafeHTMLReplacements, preprocessSafeHTML } from "./scopySafeHTMLPreprocessor.js";
 
 export function render(source, policy = {}) {
@@ -21,9 +22,6 @@ function renderInternal(source, policy = {}, depth = 0) {
   if (normalizedPolicy.allowRawHTML) {
     warnings.push("raw HTML is not enabled in the first unified renderer bundle");
   }
-  if (normalizedPolicy.allowLooseMathRepair) {
-    warnings.push("loose math repair is not enabled in the first unified renderer bundle");
-  }
   const originalSource = String(source || "");
   const safeHTML = normalizedPolicy.allowSafeHTMLSubset
     ? preprocessSafeHTML(originalSource)
@@ -31,11 +29,16 @@ function renderInternal(source, policy = {}, depth = 0) {
   const preprocessed = normalizedPolicy.allowBackslashMath
     ? preprocessBackslashMath(safeHTML.markdown)
     : { markdown: safeHTML.markdown, mathCount: 0 };
+  const repairMetadata = { repairedMathCount: 0 };
   const processor = unified()
     .use(remarkParse)
     .use(remarkGfm)
     .use(remarkBreaks)
-    .use(remarkMath);
+    .use(remarkMath)
+    .use(remarkScopyLooseMathRepair, {
+      policy: normalizedPolicy,
+      metadata: repairMetadata
+    });
   processor
     .use(remarkRehype, { allowDangerousHtml: false })
     .use(rehypeSanitize)
@@ -55,8 +58,8 @@ function renderInternal(source, policy = {}, depth = 0) {
     html,
     metadata: {
       renderer: "unified",
-      mathCount: countDollarMath(originalSource) + preprocessed.mathCount,
-      repairedMathCount: 0,
+      mathCount: countDollarMath(originalSource) + preprocessed.mathCount + repairMetadata.repairedMathCount,
+      repairedMathCount: repairMetadata.repairedMathCount,
       warnings
     }
   };
