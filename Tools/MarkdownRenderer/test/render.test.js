@@ -28,3 +28,23 @@ test("does not allow raw HTML in the first bundle", () => {
   assert.doesNotMatch(result.html, /<script>/);
   assert.doesNotMatch(result.html, /<details>/);
 });
+
+test("renders backslash inline and display math", () => {
+  const result = render("Inline \\(x_1 + y\\)\n\n\\[\\int_0^1 x dx\\]");
+
+  assert.equal(result.metadata.warnings.length, 0);
+  assert.equal(result.metadata.mathCount, 2);
+  assert.match(result.html, /katex/);
+  assert.match(result.html, /katex-display/);
+  assert.doesNotMatch(result.html, /\\\(x_1 \+ y\\\)/);
+});
+
+test("does not rewrite backslash math inside code or links", () => {
+  const result = render("`\\(code\\)` [\\(label\\)](/tmp/\\(path\\).md)\n\nReal \\(x\\)");
+
+  assert.equal(result.metadata.mathCount, 1);
+  assert.match(result.html, /<code>\\\(code\\\)<\/code>/);
+  assert.match(result.html, /href="\/tmp\/\(path\).md"/);
+  assert.match(result.html, />\(label\)<\/a>/);
+  assert.match(result.html, /katex/);
+});

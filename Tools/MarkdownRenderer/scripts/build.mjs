@@ -20,6 +20,11 @@ await esbuild.build({
   legalComments: "none"
 });
 
+const bundled = await readFile(outfile, "utf8");
+const normalized = bundled.replace(/[ \t]+$/gm, "");
+if (normalized !== bundled) {
+  await writeFile(outfile, normalized, "utf8");
+}
 const bytes = await readFile(outfile);
 const hash = createHash("sha256").update(bytes).digest("hex");
 await writeFile(`${outfile}.sha256`, `${hash}\n`, "utf8");

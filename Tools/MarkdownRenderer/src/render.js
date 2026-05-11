@@ -7,6 +7,7 @@ import remarkMath from "remark-math";
 import remarkParse from "remark-parse";
 import remarkRehype from "remark-rehype";
 import { unified } from "unified";
+import { preprocessBackslashMath } from "./scopyBackslashMathPreprocessor.js";
 
 export function render(source, policy = {}) {
   const warnings = [];
@@ -18,26 +19,27 @@ export function render(source, policy = {}) {
   if (normalizedPolicy.allowLooseMathRepair) {
     warnings.push("loose math repair is not enabled in the first unified renderer bundle");
   }
-  if (normalizedPolicy.allowBackslashMath) {
-    warnings.push("backslash math requires a parser extension and is not enabled yet");
-  }
-
+  const originalSource = String(source || "");
+  const preprocessed = normalizedPolicy.allowBackslashMath
+    ? preprocessBackslashMath(originalSource)
+    : { markdown: originalSource, mathCount: 0 };
   const processor = unified()
     .use(remarkParse)
     .use(remarkGfm)
     .use(remarkBreaks)
-    .use(remarkMath)
+    .use(remarkMath);
+  processor
     .use(remarkRehype, { allowDangerousHtml: false })
     .use(rehypeSanitize)
     .use(rehypeKatex, { throwOnError: false, strict: "ignore" })
     .use(rehypeStringify);
 
-  const file = processor.processSync(String(source || ""));
+  const file = processor.processSync(preprocessed.markdown);
   return {
     html: String(file),
     metadata: {
       renderer: "unified",
-      mathCount: countDollarMath(String(source || "")),
+      mathCount: countDollarMath(originalSource) + preprocessed.mathCount,
       repairedMathCount: 0,
       warnings
     }
@@ -59,15 +61,14 @@ function normalizePolicy(policy) {
 function countDollarMath(source) {
   let count = 0;
   for (let i = 0; i < source.length; i += 1) {
-    if (source[i] !== "$") {
-      continue;
-    }
-    if (i > 0 && source[i - 1] === "\\") {
-      continue;
-    }
-    count += 1;
-    if (source[i + 1] === "$") {
-      i += 1;
+    if (source[i] === "$") {
+      if (i > 0 && source[i - 1] === "\\") {
+        continue;
+      }
+      count += 1;
+      if (source[i + 1] === "$") {
+        i += 1;
+      }
     }
   }
   return Math.floor(count / 2);
