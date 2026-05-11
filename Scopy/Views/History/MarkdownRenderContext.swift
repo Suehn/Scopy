@@ -93,6 +93,8 @@ struct MarkdownRenderContext: Equatable {
 enum MarkdownRenderContextResolver {
     static let legacyPolicyVersion = "legacy-policy-v1"
     static let legacyCacheNamespace = "legacy-markdown-it-v1"
+    static let conservativeLegacyPolicyVersion = "legacy-conservative-policy-v1"
+    static let conservativeLegacyCacheNamespace = "legacy-markdown-it-conservative-v1"
     static let unifiedPolicyVersion = "unified-policy-v1"
     static let unifiedCacheNamespace = "unified-renderer-v1"
 
@@ -107,14 +109,21 @@ enum MarkdownRenderContextResolver {
         let profile = MarkdownSourceProfileDetector.detect(markdown)
         let renderer = MarkdownRendererSelector.rendererKind(for: profile, flags: flags)
         let usesUnified = renderer == .unified
+        let usesLegacyRollbackPolicy = flags.forceLegacy
         return MarkdownRenderContext(
             renderer: renderer,
             profile: profile,
-            policy: usesUnified
-                ? MarkdownRepairPolicy.conservativeDefault(for: profile)
-                : MarkdownRepairPolicy.legacyCompatible(for: profile),
-            policyVersion: usesUnified ? unifiedPolicyVersion : legacyPolicyVersion,
-            cacheNamespace: usesUnified ? unifiedCacheNamespace : legacyCacheNamespace
+            policy: usesLegacyRollbackPolicy
+                ? MarkdownRepairPolicy.legacyCompatible(for: profile)
+                : MarkdownRepairPolicy.conservativeDefault(for: profile),
+            policyVersion: {
+                if usesUnified { return unifiedPolicyVersion }
+                return usesLegacyRollbackPolicy ? legacyPolicyVersion : conservativeLegacyPolicyVersion
+            }(),
+            cacheNamespace: {
+                if usesUnified { return unifiedCacheNamespace }
+                return usesLegacyRollbackPolicy ? legacyCacheNamespace : conservativeLegacyCacheNamespace
+            }()
         )
     }
 }

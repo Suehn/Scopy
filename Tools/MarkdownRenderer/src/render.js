@@ -8,6 +8,7 @@ import remarkParse from "remark-parse";
 import remarkRehype from "remark-rehype";
 import { unified } from "unified";
 import { preprocessBackslashMath } from "./scopyBackslashMathPreprocessor.js";
+import { preprocessDollarMathGuards } from "./scopyDollarMathGuards.js";
 import { remarkScopyLooseMathRepair } from "./remarkScopyLooseMathRepair.js";
 import { applySafeHTMLReplacements, preprocessSafeHTML } from "./scopySafeHTMLPreprocessor.js";
 
@@ -26,9 +27,10 @@ function renderInternal(source, policy = {}, depth = 0) {
   const safeHTML = normalizedPolicy.allowSafeHTMLSubset
     ? preprocessSafeHTML(originalSource)
     : { markdown: originalSource, replacements: {} };
+  const dollarGuarded = preprocessDollarMathGuards(safeHTML.markdown);
   const preprocessed = normalizedPolicy.allowBackslashMath
-    ? preprocessBackslashMath(safeHTML.markdown)
-    : { markdown: safeHTML.markdown, mathCount: 0 };
+    ? preprocessBackslashMath(dollarGuarded)
+    : { markdown: dollarGuarded, mathCount: 0 };
   const repairMetadata = { repairedMathCount: 0 };
   const processor = unified()
     .use(remarkParse)
@@ -58,7 +60,7 @@ function renderInternal(source, policy = {}, depth = 0) {
     html,
     metadata: {
       renderer: "unified",
-      mathCount: countDollarMath(originalSource) + preprocessed.mathCount + repairMetadata.repairedMathCount,
+      mathCount: countDollarMath(dollarGuarded) + preprocessed.mathCount + repairMetadata.repairedMathCount,
       repairedMathCount: repairMetadata.repairedMathCount,
       warnings
     }

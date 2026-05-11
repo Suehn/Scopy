@@ -41,6 +41,14 @@ test("renders backslash inline and display math", () => {
   assert.doesNotMatch(result.html, /\\\(x_1 \+ y\\\)/);
 });
 
+test("renders multiline backslash display math", () => {
+  const result = render("\\[\n\\int_0^1 x dx\n\\]");
+
+  assert.equal(result.metadata.mathCount, 1);
+  assert.match(result.html, /katex-display/);
+  assert.doesNotMatch(result.html, /\[<br>/);
+});
+
 test("does not rewrite backslash math inside code or links", () => {
   const result = render("`\\(code\\)` [\\(label\\)](/tmp/\\(path\\).md)\n\nReal \\(x\\)");
 
@@ -100,4 +108,14 @@ test("loose repair rejects paths urls and currency", () => {
   assert.match(result.html, /\/Users\/alice\/project\/file_v2.md:25/);
   assert.match(result.html, /https:\/\/example.com\/a_b\?q=1/);
   assert.match(result.html, /\$20/);
+});
+
+test("does not parse currency or shell variables as dollar math", () => {
+  const result = render("The price is $20 and price=$20. Use $HOME/bin outside code too.");
+
+  assert.equal(result.metadata.mathCount, 0);
+  assert.doesNotMatch(result.html, /katex/);
+  assert.match(result.html, /\$20/);
+  assert.match(result.html, /price=\$20/);
+  assert.match(result.html, /\$HOME\/bin/);
 });

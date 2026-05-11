@@ -1,15 +1,14 @@
 export function preprocessBackslashMath(source) {
   const text = String(source || "");
-  const lines = text.split(/(\n)/);
+  const lines = text.split("\n");
   let inFence = null;
+  let inDisplayBlock = false;
+  let displayLines = [];
   let mathCount = 0;
+  const output = [];
 
-  const markdown = lines.map((part) => {
-    if (part === "\n") {
-      return part;
-    }
-
-    const fence = fenceMarker(part);
+  for (const line of lines) {
+    const fence = fenceMarker(line);
     if (fence) {
       if (inFence) {
         if (fence.marker === inFence.marker && fence.length >= inFence.length) {
@@ -18,19 +17,43 @@ export function preprocessBackslashMath(source) {
       } else {
         inFence = fence;
       }
-      return part;
+      output.push(line);
+      continue;
     }
 
     if (inFence) {
-      return part;
+      output.push(line);
+      continue;
     }
 
-    const processed = preprocessInline(part);
-    mathCount += processed.mathCount;
-    return processed.markdown;
-  }).join("");
+    if (line.trim() === "\\[") {
+      inDisplayBlock = true;
+      displayLines = [];
+      continue;
+    }
 
-  return { markdown, mathCount };
+    if (inDisplayBlock) {
+      if (line.trim() === "\\]") {
+        output.push("$$", ...displayLines, "$$");
+        mathCount += 1;
+        inDisplayBlock = false;
+        displayLines = [];
+      } else {
+        displayLines.push(line);
+      }
+      continue;
+    }
+
+    const processed = preprocessInline(line);
+    mathCount += processed.mathCount;
+    output.push(processed.markdown);
+  }
+
+  if (inDisplayBlock) {
+    output.push("\\[", ...displayLines);
+  }
+
+  return { markdown: output.join("\n"), mathCount };
 }
 
 function fenceMarker(line) {
