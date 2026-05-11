@@ -96,8 +96,9 @@ enum MarkdownRenderContextResolver {
 
     static func defaultContext(for markdown: String) -> MarkdownRenderContext {
         let profile = MarkdownSourceProfileDetector.detect(markdown)
+        let renderer = MarkdownRendererSelector.rendererKind(for: profile)
         return MarkdownRenderContext(
-            renderer: .legacyMarkdownIt,
+            renderer: renderer,
             profile: profile,
             policy: MarkdownRepairPolicy.legacyCompatible(for: profile),
             policyVersion: legacyPolicyVersion,
