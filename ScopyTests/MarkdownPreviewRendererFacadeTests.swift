@@ -1,6 +1,16 @@
 import XCTest
 
 final class MarkdownPreviewRendererFacadeTests: XCTestCase {
+    override func setUp() {
+        super.setUp()
+        UnifiedMarkdownRenderer.bundleAvailabilityOverride = { true }
+    }
+
+    override func tearDown() {
+        UnifiedMarkdownRenderer.bundleAvailabilityOverride = nil
+        super.tearDown()
+    }
+
     func testLegacyContextReturnsMarkdownItOutputAndDiagnostics() {
         let input = "Inline math: $x_1$ and [doc](/Users/alice/a.md:1)"
         let context = MarkdownRenderContextResolver.defaultContext(for: input, flags: .disabled)
