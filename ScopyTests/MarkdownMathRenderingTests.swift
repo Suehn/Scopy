@@ -65,6 +65,23 @@ print("ok")
         XCTAssertFalse(html.contains("$\\left(/Users/ziyi/Documents/code/WebAI2API"))
     }
 
+    func testMarkdownRendererProtectsInlineLinkLabelsFromLooseMathRepair() {
+        let input = """
+        Metrics: [T_{io}=12.4](/Users/alice/docs/file_v2.md:25) and ![plot_{v2}](/Users/alice/img_v2.png)
+        """
+
+        let standaloneNormalized = MathNormalizer.wrapLooseLaTeX(input)
+        XCTAssertTrue(standaloneNormalized.contains("$\\left[T_{io}=12.4\\right]$"))
+        XCTAssertTrue(standaloneNormalized.contains("$\\left[plot_{v2}\\right]$"))
+
+        let html = MarkdownHTMLRenderer.render(markdown: input)
+
+        XCTAssertTrue(html.contains("[T_{io}=12.4](/Users/alice/docs/file_v2.md:25)"))
+        XCTAssertTrue(html.contains("![plot_{v2}](/Users/alice/img_v2.png)"))
+        XCTAssertFalse(html.contains("$\\left[T_{io}=12.4\\right]$"))
+        XCTAssertFalse(html.contains("$\\left[plot_{v2}\\right]$"))
+    }
+
     func testPathLikeParenFragmentsAreNotWrappedAsLooseMath() {
         let input = """
         See (/Users/alice/docs/file_v2.md:25), (../notes/a_b2.md), (./assets/img_v2.png), (file:///Users/alice/a_b2.pdf), and (https://example.com/a_(b)?q=x_y).

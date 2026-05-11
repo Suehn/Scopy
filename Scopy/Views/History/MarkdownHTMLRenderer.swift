@@ -4,9 +4,15 @@ enum MarkdownHTMLRenderer {
     static func render(markdown: String) -> String {
         let featureSet = MarkdownRenderFeatureSet.scopyDefault
         guard !Task.isCancelled else { return "" }
-        let latexNormalized = LaTeXDocumentNormalizer.normalize(markdown)
+        let syntaxProtected = MarkdownSyntaxProtector.protectForLooseMathRepair(markdown)
         guard !Task.isCancelled else { return "" }
-        let normalizedMarkdown = MathNormalizer.wrapLooseLaTeX(latexNormalized)
+        let latexNormalized = LaTeXDocumentNormalizer.normalize(syntaxProtected.markdown)
+        guard !Task.isCancelled else { return "" }
+        let looseMathNormalized = MathNormalizer.wrapLooseLaTeX(latexNormalized)
+        let normalizedMarkdown = MarkdownSyntaxProtector.restore(
+            looseMathNormalized,
+            placeholders: syntaxProtected.placeholders
+        )
         guard !Task.isCancelled else { return "" }
         let protected = MathProtector.protectMath(in: normalizedMarkdown)
         guard !Task.isCancelled else { return "" }
