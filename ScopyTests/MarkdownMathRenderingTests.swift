@@ -65,6 +65,21 @@ print("ok")
         XCTAssertFalse(html.contains("$\\left(/Users/ziyi/Documents/code/WebAI2API"))
     }
 
+    func testPathLikeParenFragmentsAreNotWrappedAsLooseMath() {
+        let input = """
+        See (/Users/alice/docs/file_v2.md:25), (../notes/a_b2.md), (./assets/img_v2.png), (file:///Users/alice/a_b2.pdf), and (https://example.com/a_(b)?q=x_y).
+        """
+
+        let normalized = MathNormalizer.wrapLooseLaTeX(input)
+
+        XCTAssertEqual(normalized, input)
+        XCTAssertFalse(normalized.contains("$\\left(/Users/alice/docs/file_v2.md:25\\right)$"))
+        XCTAssertFalse(normalized.contains("$\\left(../notes/a_b2.md\\right)$"))
+        XCTAssertFalse(normalized.contains("$\\left(./assets/img_v2.png\\right)$"))
+        XCTAssertFalse(normalized.contains("$\\left(file:///Users/alice/a_b2.pdf\\right)$"))
+        XCTAssertFalse(normalized.contains("$\\left(https://example.com"))
+    }
+
     func testParenSubscriptMathWithoutBackslashIsWrapped() {
         let input = """
         * (T_{io}=12.4)ms，(T_{aug}=47.8)ms → (T_{data}=60.2)ms

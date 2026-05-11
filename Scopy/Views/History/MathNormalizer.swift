@@ -756,7 +756,7 @@ enum MathNormalizer {
         if s.contains("$") { return false }
         if s.contains("\\(") || s.contains("\\[") { return false }
         if s.utf16.count > 400 { return false }
-        if s.contains("http://") || s.contains("https://") { return false }
+        if isPathLikeOrURLLike(s) { return false }
 
         // Must contain at least one known TeX command, or strong math signal.
         if containsKnownCommand(in: s) { return true }
@@ -768,6 +768,31 @@ enum MathNormalizer {
             if s.contains("=") { return true }
         }
         return false
+    }
+
+    private static func isPathLikeOrURLLike(_ s: String) -> Bool {
+        let trimmed = s.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty { return false }
+
+        let lower = trimmed.lowercased()
+        if lower.contains("http://") || lower.contains("https://") { return true }
+        if lower.contains("file://") || lower.contains("mailto:") { return true }
+        if lower.contains("://") { return true }
+
+        if trimmed.hasPrefix("~/") || trimmed.hasPrefix("./") || trimmed.hasPrefix("../") { return true }
+        if trimmed.contains("/Users/") || trimmed.contains("/Volumes/") { return true }
+
+        if lower.contains(".md:") || lower.contains(".markdown:") || lower.contains(".tex:") { return true }
+        if lower.contains(".png") || lower.contains(".jpg") || lower.contains(".jpeg") { return true }
+        if lower.contains(".gif") || lower.contains(".webp") || lower.contains(".pdf") { return true }
+
+        if trimmed.contains("?") && trimmed.contains("=") { return true }
+        if trimmed.contains("#") && trimmed.contains("/") { return true }
+
+        let slashCount = trimmed.reduce(into: 0) { count, ch in
+            if ch == "/" { count += 1 }
+        }
+        return slashCount >= 2
     }
 
     private static func containsDigit(in s: String) -> Bool {
