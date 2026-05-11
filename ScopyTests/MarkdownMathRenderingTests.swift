@@ -107,7 +107,14 @@ print("ok")
         XCTAssertTrue(normalized.contains("$\\left(T_{aug}=47.8\\right)$ms"))
         XCTAssertTrue(normalized.contains("$\\left(T_{data}=60.2\\right)$ms"))
 
-        let html = MarkdownHTMLRenderer.render(markdown: input)
+        let context = MarkdownRenderContext(
+            renderer: .legacyMarkdownIt,
+            profile: .pdfOCRScientific,
+            policy: .conservativeDefault(for: .pdfOCRScientific),
+            policyVersion: MarkdownRenderContextResolver.conservativeLegacyPolicyVersion,
+            cacheNamespace: MarkdownRenderContextResolver.conservativeLegacyCacheNamespace
+        )
+        let html = MarkdownHTMLRenderer.render(markdown: input, context: context).html
         XCTAssertTrue(html.contains("katex.min.js"))
         XCTAssertTrue(html.contains("$\\left(T_{io}=12.4\\right)$"))
     }
