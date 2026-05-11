@@ -14,4 +14,15 @@ final class UnifiedMarkdownRendererTests: XCTestCase {
         XCTAssertTrue(output.html.contains("katex.min.css"))
         XCTAssertFalse(output.html.contains("markdown-it.min.js"))
     }
+
+    func testUnifiedDocumentFallsBackWhenBundleAPIIsMissing() {
+        let base = MarkdownRenderContextResolver.defaultContext(for: "# Title")
+        let context = base.withRenderer(.unified)
+
+        let output = MarkdownHTMLRenderer.render(markdown: "# Title", context: context)
+
+        XCTAssertTrue(output.html.contains("maxUnifiedRenderAttempts"))
+        XCTAssertTrue(output.html.contains("unifiedFallbackReason = 'unified api missing'"))
+        XCTAssertTrue(output.html.contains("finish();"))
+    }
 }

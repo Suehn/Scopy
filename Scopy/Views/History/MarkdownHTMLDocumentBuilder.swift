@@ -936,6 +936,8 @@ enum MarkdownHTMLDocumentBuilder {
                 };
                 var lastH = 0;
                 var lastW = 0;
+                var unifiedRenderAttempts = 0;
+                var maxUnifiedRenderAttempts = 100;
                 window.__scopyIsRenderReady = function () {
                   try {
                     var state = window.__scopyRenderState || {};
@@ -987,9 +989,21 @@ enum MarkdownHTMLDocumentBuilder {
                     }
                   } catch (e) { }
                   if (!window.ScopyUnifiedMarkdown || typeof window.ScopyUnifiedMarkdown.render !== 'function') {
+                    unifiedRenderAttempts += 1;
+                    if (unifiedRenderAttempts >= maxUnifiedRenderAttempts) {
+                      try {
+                        if (window.__scopyRenderState) {
+                          window.__scopyRenderState.unifiedFallbackReason = 'unified api missing';
+                        }
+                      } catch (e) { }
+                      el.innerHTML = '<pre>\(fallback)</pre>';
+                      finish();
+                      return;
+                    }
                     setTimeout(renderUnified, 30);
                     return;
                   }
+                  unifiedRenderAttempts = 0;
                   try {
                     var result = window.ScopyUnifiedMarkdown.render(\(markdownLiteral), \(policyLiteral));
                     el.innerHTML = result && result.html ? result.html : '<pre>\(fallback)</pre>';
