@@ -19,7 +19,7 @@ final class MarkdownPreviewRendererFacadeTests: XCTestCase {
         XCTAssertGreaterThan(output.diagnostics.explicitMathCount, 0)
     }
 
-    func testUnifiedContextFallsBackToLegacyUntilBundleExists() {
+    func testUnifiedContextUsesUnifiedShellWhenRequested() {
         let input = "# Title\n\nText"
         let base = MarkdownRenderContextResolver.defaultContext(for: input)
         let unifiedContext = MarkdownRenderContext(
@@ -33,7 +33,8 @@ final class MarkdownPreviewRendererFacadeTests: XCTestCase {
         let output = MarkdownHTMLRenderer.render(markdown: input, context: unifiedContext)
 
         XCTAssertFalse(output.html.isEmpty)
-        XCTAssertEqual(output.diagnostics.renderer, .legacyMarkdownIt)
-        XCTAssertEqual(output.diagnostics.fallbackReason, "unified renderer is not bundled yet")
+        XCTAssertEqual(output.diagnostics.renderer, .unified)
+        XCTAssertNil(output.diagnostics.fallbackReason)
+        XCTAssertTrue(output.html.contains("scopy-unified-renderer.iife.js"))
     }
 }

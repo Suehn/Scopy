@@ -19,6 +19,9 @@ TestResults.xcresult/
 .swiftpm/
 Package.resolved
 
+# Node tools
+node_modules/
+
 # macOS
 .DS_Store
 

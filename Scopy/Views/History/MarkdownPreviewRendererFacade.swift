@@ -6,17 +6,7 @@ enum MarkdownPreviewRendererFacade {
         case .legacyMarkdownIt:
             return LegacyMarkdownItRenderer.render(markdown: markdown, context: context)
         case .unified:
-            let legacyContext = context.withRenderer(.legacyMarkdownIt)
-            let output = LegacyMarkdownItRenderer.render(markdown: markdown, context: legacyContext)
-            let diagnostics = MarkdownRenderDiagnostics.legacy(
-                context: context,
-                protectedIslandCount: output.diagnostics.protectedIslandCount,
-                explicitMathCount: output.diagnostics.explicitMathCount,
-                repairedMathCount: output.diagnostics.repairedMathCount,
-                fallbackReason: "unified renderer is not bundled yet",
-                warnings: output.diagnostics.warnings
-            )
-            return MarkdownRenderOutput(html: output.html, diagnostics: diagnostics)
+            return UnifiedMarkdownRenderer.render(markdown: markdown, context: context)
         }
     }
 }
