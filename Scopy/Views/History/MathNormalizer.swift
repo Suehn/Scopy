@@ -480,6 +480,14 @@ enum MathNormalizer {
             let nextIndex = text.index(after: closeIndex)
             let following = nextIndex < text.endIndex ? text[nextIndex] : nil
 
+            if isMarkdownInlineLinkDestination(open: open, text: text, openIndex: i) {
+                result.append(open)
+                result += inner
+                result.append(close)
+                i = nextIndex
+                continue
+            }
+
             if isMarkdownFootnoteSyntax(open: open, inner: inner, following: following) {
                 result.append(open)
                 result += inner
@@ -512,6 +520,12 @@ enum MathNormalizer {
         }
 
         return result
+    }
+
+    private static func isMarkdownInlineLinkDestination(open: Character, text: String, openIndex: String.Index) -> Bool {
+        guard open == "(" else { return false }
+        guard openIndex > text.startIndex else { return false }
+        return text[text.index(before: openIndex)] == "]"
     }
 
     private static func isMarkdownFootnoteSyntax(open: Character, inner: String, following: Character?) -> Bool {

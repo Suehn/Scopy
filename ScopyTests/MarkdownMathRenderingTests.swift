@@ -43,6 +43,28 @@ print("ok")
         XCTAssertTrue(html.contains("mdOptions.highlight"))
     }
 
+    func testMarkdownInlineLinksAreNotWrappedAsLooseParenMath() {
+        let input = """
+        **你最需要掌握的知识**
+
+        1. `HTTP / SSE / WebSocket`
+        这个 repo 的分层说明写得很清楚：[docs/chatgpt_text_raw_stream_reference.md](/Users/ziyi/Documents/code/WebAI2API/docs/chatgpt_text_raw_stream_reference.md:25)
+
+        2. `浏览器自动化与网络观测`
+        - 这类代码的核心入口就是 [src/backend/adapter/chatgpt_text.js](/Users/ziyi/Documents/code/WebAI2API/src/backend/adapter/chatgpt_text.js:944)
+        """
+
+        let normalized = MathNormalizer.wrapLooseLaTeX(input)
+        XCTAssertEqual(normalized, input)
+        XCTAssertFalse(normalized.contains("$\\left(/Users/ziyi/Documents/code/WebAI2API"))
+        XCTAssertTrue(MarkdownDetector.isLikelyMarkdown(input))
+
+        let html = MarkdownHTMLRenderer.render(markdown: input)
+        XCTAssertTrue(html.contains("[docs/chatgpt_text_raw_stream_reference.md](/Users/ziyi/Documents/code/WebAI2API/docs/chatgpt_text_raw_stream_reference.md:25)"))
+        XCTAssertTrue(html.contains("[src/backend/adapter/chatgpt_text.js](/Users/ziyi/Documents/code/WebAI2API/src/backend/adapter/chatgpt_text.js:944)"))
+        XCTAssertFalse(html.contains("$\\left(/Users/ziyi/Documents/code/WebAI2API"))
+    }
+
     func testParenSubscriptMathWithoutBackslashIsWrapped() {
         let input = """
         * (T_{io}=12.4)ms，(T_{aug}=47.8)ms → (T_{data}=60.2)ms
