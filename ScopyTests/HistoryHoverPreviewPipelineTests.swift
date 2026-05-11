@@ -142,6 +142,35 @@ final class HistoryHoverPreviewPipelineTests: XCTestCase {
         XCTAssertEqual(presentedKinds(events), [.text])
     }
 
+    func testMarkdownTextPreviewPresentsBeforeRenderMetricsArrive() async {
+        let item = makeItem(type: .text, contentHash: "fresh-markdown", plainText: "# Title\n\nBody")
+        HistoryItemPresentationCache.shared.storeMarkdownExportCapability(true, for: item)
+
+        var events: [HistoryHoverPreviewPipeline.Event] = []
+        await HistoryHoverPreviewPipeline.run(
+            request: .text(HistoryHoverPreviewPipeline.textRequest(item: item, delay: 0)),
+            isCurrent: { true },
+            emit: { events.append($0) }
+        )
+
+        let textStates = events.compactMap { event -> HistoryHoverPreviewPipeline.TextPreviewState? in
+            if case .text(let state) = event { return state }
+            return nil
+        }
+        let renderRequests = events.compactMap { event -> HistoryHoverPreviewPipeline.MarkdownRenderRequest? in
+            if case .renderMarkdown(let request) = event { return request }
+            return nil
+        }
+
+        XCTAssertEqual(textStates.count, 1)
+        XCTAssertEqual(textStates.first?.text, "# Title\n\nBody")
+        XCTAssertTrue(textStates.first?.isMarkdown == true)
+        XCTAssertNil(textStates.first?.markdownHTML)
+        XCTAssertEqual(presentedKinds(events), [.text])
+        XCTAssertEqual(renderRequests.count, 1)
+        XCTAssertEqual(renderRequests.first?.source, item.plainText)
+    }
+
     func testSuppressionGatePreventsTextPreviewEvents() async {
         let item = makeItem(type: .text, contentHash: "suppressed", plainText: "plain")
         var events: [HistoryHoverPreviewPipeline.Event] = []

@@ -738,10 +738,10 @@ struct HistoryItemView: View, Equatable {
             isNoteEditorPresented = false
         }
         .onChange(of: previewModel.markdownContentSize) { _, _ in
-            updateMarkdownFilePreviewMetricsCacheIfNeeded()
+            updateMarkdownPreviewMetricsCacheIfNeeded()
         }
         .onChange(of: previewModel.markdownHasHorizontalOverflow) { _, _ in
-            updateMarkdownFilePreviewMetricsCacheIfNeeded()
+            updateMarkdownPreviewMetricsCacheIfNeeded()
         }
         .background {
             if isImagePreviewPresented || isTextPreviewPresented || isFilePreviewPresented {
@@ -1073,17 +1073,26 @@ struct HistoryItemView: View, Equatable {
         )
     }
 
-    private func updateMarkdownFilePreviewMetricsCacheIfNeeded() {
-        guard let cacheKey = markdownFilePreviewCacheKey else { return }
-        guard isFilePreviewPresented else { return }
+    private func updateMarkdownPreviewMetricsCacheIfNeeded() {
         guard previewModel.isMarkdown else { return }
         guard let text = previewModel.text else { return }
         guard let size = previewModel.markdownContentSize else { return }
 
-        guard let current = MarkdownPreviewCache.shared.filePreview(forKey: cacheKey),
-              current.text == text else { return }
+        let contentHash: String
+        if item.type == .file {
+            guard isFilePreviewPresented else { return }
+            guard let cacheKey = markdownFilePreviewCacheKey else { return }
+            guard let current = MarkdownPreviewCache.shared.filePreview(forKey: cacheKey),
+                  current.text == text else { return }
+            contentHash = cacheKey
+        } else if item.type == .text || item.type == .rtf || item.type == .html {
+            guard isTextPreviewPresented else { return }
+            contentHash = item.contentHash
+        } else {
+            return
+        }
 
-        let renderCacheKey = MarkdownRenderCacheKey.make(contentHash: cacheKey, markdown: text)
+        let renderCacheKey = MarkdownRenderCacheKey.make(contentHash: contentHash, markdown: text)
         guard !renderCacheKey.isEmpty else { return }
         let metrics = MarkdownContentMetrics(size: size, hasHorizontalOverflow: previewModel.markdownHasHorizontalOverflow)
         MarkdownPreviewCache.shared.setMetrics(metrics, forKey: renderCacheKey)

@@ -551,6 +551,8 @@ enum HistoryHoverPreviewPipeline {
             return
         }
 
+        emit(.present(.text))
+
         guard preview.utf16.count <= maxMarkdownPreviewBytes else { return }
 
         let cacheKey = item.contentHash
@@ -572,7 +574,6 @@ enum HistoryHoverPreviewPipeline {
                 )
             )
             MarkdownPreviewCache.shared.setMetrics(stableMetrics, forKey: renderCacheKey)
-            emit(.present(.text))
             return
         }
 
