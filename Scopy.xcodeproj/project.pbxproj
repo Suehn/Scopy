@@ -43,6 +43,7 @@
 		0B796482211DC22292E5F203 /* KaTeX_Size3-Regular.woff2 in Resources */ = {isa = PBXBuildFile; fileRef = 6F3688AAE5BBEB37456EEA10 /* KaTeX_Size3-Regular.woff2 */; };
 		0C44A6C59EA5E4CA5D17FB19 /* UnifiedMarkdownRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5C040DA0E0609B1486025BDA /* UnifiedMarkdownRenderer.swift */; };
 		0C968E38F7456C42503E1319 /* ScopyComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F7A2545CE101420AEDEBB8F /* ScopyComponents.swift */; };
+		0CB330FBCC4C6775A05D6839 /* MarkdownRenderShadowComparatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D3D2A939B6DD41E4225C5200 /* MarkdownRenderShadowComparatorTests.swift */; };
 		0CFCF7F166FCEB8D7E7A960C /* PerformanceMetrics.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3ED23D98D74BB412EAFFBE6A /* PerformanceMetrics.swift */; };
 		0D670F5759657DB3499E969F /* KaTeX_Typewriter-Regular.woff in Resources */ = {isa = PBXBuildFile; fileRef = A8242720DB38F21E56D5181F /* KaTeX_Typewriter-Regular.woff */; };
 		0E35E9B208BDFBB26FE28364 /* HistoryViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 18510662ACE6AFE5DEB66283 /* HistoryViewModel.swift */; };
@@ -86,6 +87,8 @@
 		1B38754D12F3BE9B2B2C96BD /* FTSQueryBuilderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90ABBA09BA409A5DF23C445E /* FTSQueryBuilderTests.swift */; };
 		1B6B2AEAA9A30AD8B711819F /* KaTeX_Math-BoldItalic.woff in Resources */ = {isa = PBXBuildFile; fileRef = 54048A8E4F0441B0602C2F0B /* KaTeX_Math-BoldItalic.woff */; };
 		1BCE16F36BABE436365262B6 /* MarkdownRenderFeatureSet.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF60DFBBA4A05F6D1F8AA097 /* MarkdownRenderFeatureSet.swift */; };
+		1C1CC21761A75AE5B1634A57 /* MarkdownRenderShadowComparator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E4C199C5358F30A98725186 /* MarkdownRenderShadowComparator.swift */; };
+		1C5BE21D7D46E150BA790502 /* MarkdownRenderShadowComparator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E4C199C5358F30A98725186 /* MarkdownRenderShadowComparator.swift */; };
 		1D55B8531231065B01EF89B1 /* KaTeX_Fraktur-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = A690791438CF49B62239C05F /* KaTeX_Fraktur-Regular.ttf */; };
 		1E0E5ADCC89282E70BFAF1A9 /* MarkdownRendererFeatureFlags.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00F35AB0D7795D843861D4D3 /* MarkdownRendererFeatureFlags.swift */; };
 		1E85F4747DBBC9C9E985B70A /* katex.min.css in Resources */ = {isa = PBXBuildFile; fileRef = 1F95016417AE5066D641D49C /* katex.min.css */; };
@@ -278,6 +281,7 @@
 		7205559FC328F834C2700177 /* HoverPreviewImageCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2FB682C6821A76CC0DEA73CA /* HoverPreviewImageCache.swift */; };
 		720C4165E6D0145C8F83EBE1 /* scopy-unified-renderer.iife.js.sha256 in Resources */ = {isa = PBXBuildFile; fileRef = 6C44E1EE4C782302992F81F0 /* scopy-unified-renderer.iife.js.sha256 */; };
 		721B08ED96F0637678325967 /* HistoryItemViewUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13DBDC4F836AC20C38FC273F /* HistoryItemViewUITests.swift */; };
+		72284BB72603E2B30AF490EB /* MarkdownRenderShadowComparatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D3D2A939B6DD41E4225C5200 /* MarkdownRenderShadowComparatorTests.swift */; };
 		727F9E0FB017FB736732E883 /* SettingsComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8ACB57C715F93F048BD919DC /* SettingsComponents.swift */; };
 		728C9A64C3B9C089CF9F7A75 /* EmptyStateView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BACD4A1BF6DABAE83D2073AE /* EmptyStateView.swift */; };
 		731C389FA0434EBF4696D6ED /* libsqlite3.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = 6EE4401FFF4C04C3F4498B26 /* libsqlite3.tbd */; };
@@ -340,6 +344,7 @@
 		86DD64F0CE9DA88564D612B3 /* markdown-it-deflist.js in Resources */ = {isa = PBXBuildFile; fileRef = EED4BF9A5AE7B229E946B704 /* markdown-it-deflist.js */; };
 		873A9F6DEDF8C403C50A8BF2 /* KaTeX_Script-Regular.woff in Resources */ = {isa = PBXBuildFile; fileRef = 024FB47EE00106753C4DB412 /* KaTeX_Script-Regular.woff */; };
 		877A7C4CCD68E76263B6AF19 /* KaTeX_SansSerif-Italic.ttf in Resources */ = {isa = PBXBuildFile; fileRef = CD07D7CE6BE8E39A3AF4651C /* KaTeX_SansSerif-Italic.ttf */; };
+		88870BDB3203AFE1286FBE27 /* MarkdownRenderShadowComparator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E4C199C5358F30A98725186 /* MarkdownRenderShadowComparator.swift */; };
 		88F77496CFB21A88BF0D8745 /* AppStateTestCompatibility.swift in Sources */ = {isa = PBXBuildFile; fileRef = C9D55BDCEE3B396CBE2DC623 /* AppStateTestCompatibility.swift */; };
 		8936CEA202269770DD286AC6 /* ShortcutsSettingsPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 961091813A2F9C555BE37BAC /* ShortcutsSettingsPage.swift */; };
 		8984797938585C8B53402D75 /* auto-render.min.js in Resources */ = {isa = PBXBuildFile; fileRef = 274EF0F321B1BFD12ABE670A /* auto-render.min.js */; };
@@ -722,6 +727,7 @@
 		3A1E175FDD120FFDD7F1D4E4 /* HotKeyRecorder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HotKeyRecorder.swift; sourceTree = "<group>"; };
 		3B27D58B30D7E42FD5A09A9F /* KaTeX_AMS-Regular.woff */ = {isa = PBXFileReference; path = "KaTeX_AMS-Regular.woff"; sourceTree = "<group>"; };
 		3D3209F851E4886CFEA36357 /* KnownDataVersionExternalWriteTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KnownDataVersionExternalWriteTests.swift; sourceTree = "<group>"; };
+		3E4C199C5358F30A98725186 /* MarkdownRenderShadowComparator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownRenderShadowComparator.swift; sourceTree = "<group>"; };
 		3E51C0270C21BC4765F97A16 /* MarkdownSourceProfileDetector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownSourceProfileDetector.swift; sourceTree = "<group>"; };
 		3ED23D98D74BB412EAFFBE6A /* PerformanceMetrics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PerformanceMetrics.swift; sourceTree = "<group>"; };
 		402DB00DDC36B589300A4D6C /* MathProtector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MathProtector.swift; sourceTree = "<group>"; };
@@ -868,6 +874,7 @@
 		D0C6646BEAEFFB053C94B22E /* KeyboardNavigationUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardNavigationUITests.swift; sourceTree = "<group>"; };
 		D1FA19B527679120200171BC /* MarkdownCJKEmphasisNormalizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownCJKEmphasisNormalizer.swift; sourceTree = "<group>"; };
 		D38BC14341511B0D98DD1546 /* KaTeX_Caligraphic-Bold.woff */ = {isa = PBXFileReference; path = "KaTeX_Caligraphic-Bold.woff"; sourceTree = "<group>"; };
+		D3D2A939B6DD41E4225C5200 /* MarkdownRenderShadowComparatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownRenderShadowComparatorTests.swift; sourceTree = "<group>"; };
 		D44765DCFEC088D84D51037F /* KaTeX_Caligraphic-Regular.woff */ = {isa = PBXFileReference; path = "KaTeX_Caligraphic-Regular.woff"; sourceTree = "<group>"; };
 		D46D30575F2F7DFC342AA626 /* MarkdownSourceProfileDetectorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownSourceProfileDetectorTests.swift; sourceTree = "<group>"; };
 		D5BB0068AA3C9002124DE49D /* KaTeX_SansSerif-Italic.woff2 */ = {isa = PBXFileReference; path = "KaTeX_SansSerif-Italic.woff2"; sourceTree = "<group>"; };
@@ -1197,6 +1204,7 @@
 				E0CB9635240F4805EC18ACDB /* MarkdownPreviewRendererFacadeTests.swift */,
 				656E37975CBE5720B34E30B4 /* MarkdownRenderCacheKeyTests.swift */,
 				6983F3662E11B947C0A4CBC4 /* MarkdownRendererSelectorTests.swift */,
+				D3D2A939B6DD41E4225C5200 /* MarkdownRenderShadowComparatorTests.swift */,
 				01E3B8A5D72B223A0FBC7C2E /* MarkdownSafeHTMLSubsetTests.swift */,
 				D46D30575F2F7DFC342AA626 /* MarkdownSourceProfileDetectorTests.swift */,
 				A6E587E62AEA336ECC849651 /* MarkdownSyntaxProtectorTests.swift */,
@@ -1274,6 +1282,7 @@
 				E4691EB889BD8853399C89DF /* MarkdownRenderContext.swift */,
 				00F35AB0D7795D843861D4D3 /* MarkdownRendererFeatureFlags.swift */,
 				CF60DFBBA4A05F6D1F8AA097 /* MarkdownRenderFeatureSet.swift */,
+				3E4C199C5358F30A98725186 /* MarkdownRenderShadowComparator.swift */,
 				7D0F88B1990E923EDE9F7D37 /* MarkdownSafeHTMLSubset.swift */,
 				3E51C0270C21BC4765F97A16 /* MarkdownSourceProfileDetector.swift */,
 				33AD448FC3C112E3EC1A82B2 /* MarkdownSyntaxProtector.swift */,
@@ -2000,6 +2009,8 @@
 				A0DF2137FEC5DB14C42E8D2E /* MarkdownRenderCacheKeyTests.swift in Sources */,
 				00A76B4B40C2E0E93DC54232 /* MarkdownRenderContext.swift in Sources */,
 				1B366818A34C7AE2789412D6 /* MarkdownRenderFeatureSet.swift in Sources */,
+				88870BDB3203AFE1286FBE27 /* MarkdownRenderShadowComparator.swift in Sources */,
+				0CB330FBCC4C6775A05D6839 /* MarkdownRenderShadowComparatorTests.swift in Sources */,
 				2D21A8CC82032EE41A3F4FA8 /* MarkdownRendererFeatureFlags.swift in Sources */,
 				03CD961267EAEBE5236D08AF /* MarkdownRendererSelectorTests.swift in Sources */,
 				BFAA653E1F1FEB94D97A8330 /* MarkdownSafeHTMLSubset.swift in Sources */,
@@ -2169,6 +2180,8 @@
 				89A787CE21E06C72A447E3E2 /* MarkdownRenderCacheKeyTests.swift in Sources */,
 				0726EAAD9A5AC1754BD0C117 /* MarkdownRenderContext.swift in Sources */,
 				FA124655183B0FA153529416 /* MarkdownRenderFeatureSet.swift in Sources */,
+				1C5BE21D7D46E150BA790502 /* MarkdownRenderShadowComparator.swift in Sources */,
+				72284BB72603E2B30AF490EB /* MarkdownRenderShadowComparatorTests.swift in Sources */,
 				1E0E5ADCC89282E70BFAF1A9 /* MarkdownRendererFeatureFlags.swift in Sources */,
 				313920785B5EA0CF4BF56477 /* MarkdownRendererSelectorTests.swift in Sources */,
 				75E5AD64EC04F6A56565513E /* MarkdownSafeHTMLSubset.swift in Sources */,
@@ -2298,6 +2311,7 @@
 				3E1AE30002BAC41A3B4710E1 /* MarkdownRenderCacheKey.swift in Sources */,
 				EBFC503BE6005552DBACECFB /* MarkdownRenderContext.swift in Sources */,
 				1BCE16F36BABE436365262B6 /* MarkdownRenderFeatureSet.swift in Sources */,
+				1C1CC21761A75AE5B1634A57 /* MarkdownRenderShadowComparator.swift in Sources */,
 				B9491B362D084F3D719818A6 /* MarkdownRendererFeatureFlags.swift in Sources */,
 				9653245BADD34759BF026CC5 /* MarkdownSafeHTMLSubset.swift in Sources */,
 				01A7326078324CF6CF3012E0 /* MarkdownSourceProfileDetector.swift in Sources */,
