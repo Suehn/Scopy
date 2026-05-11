@@ -112,6 +112,50 @@ final class HistoryHoverPreviewPipelineTests: XCTestCase {
         XCTAssertEqual(markdownRequest.url.path, "/tmp/source.md")
     }
 
+    func testMarkdownFilePreviewPresentsBeforeRenderCompletes() async throws {
+        let markdownURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+            .appendingPathExtension("md")
+        defer { try? FileManager.default.removeItem(at: markdownURL) }
+        try "# File Title\n\nBody".write(to: markdownURL, atomically: true, encoding: .utf8)
+
+        let itemID = UUID(uuidString: "55555555-5555-5555-5555-555555555555")!
+        let request = HistoryHoverPreviewPipeline.FileRequest(
+            itemID: itemID,
+            contentHash: UUID().uuidString,
+            previewInfo: FilePreviewSupport.previewInfo(from: markdownURL.path, requireExists: true)!,
+            isMarkdown: true,
+            delay: 0,
+            scale: 1,
+            targetWidthPoints: 500,
+            targetHeightPoints: 400,
+            maxLongSidePixels: 10_000
+        )
+
+        var events: [HistoryHoverPreviewPipeline.Event] = []
+        await HistoryHoverPreviewPipeline.run(
+            request: .file(request),
+            isCurrent: { true },
+            emit: { events.append($0) }
+        )
+
+        let textStates = events.compactMap { event -> HistoryHoverPreviewPipeline.TextPreviewState? in
+            if case .text(let state) = event { return state }
+            return nil
+        }
+        let renderRequests = events.compactMap { event -> HistoryHoverPreviewPipeline.MarkdownRenderRequest? in
+            if case .renderMarkdown(let request) = event { return request }
+            return nil
+        }
+
+        XCTAssertEqual(textStates.first?.text, "# File Title\n\nBody")
+        XCTAssertTrue(textStates.first?.isMarkdown == true)
+        XCTAssertNil(textStates.first?.markdownHTML)
+        XCTAssertEqual(presentedKinds(events), [.file])
+        XCTAssertEqual(renderRequests.count, 1)
+        XCTAssertEqual(renderRequests.first?.source, "# File Title\n\nBody")
+    }
+
     func testTextPreviewUsesCachedMarkdownCapabilityAndCachedHTMLMetrics() async {
         let item = makeItem(type: .text, contentHash: "cached-markdown", plainText: "# Title\n\nBody")
         let renderCacheKey = MarkdownRenderCacheKey.make(contentHash: item.contentHash, markdown: item.plainText)
@@ -185,7 +229,7 @@ final class HistoryHoverPreviewPipelineTests: XCTestCase {
     }
 
     func testImageCacheHitEmitsImageThenPopoverWithoutLoader() async throws {
-        let itemID = UUID(uuidString: "55555555-5555-5555-5555-555555555555")!
+        let itemID = UUID(uuidString: "66666666-6666-6666-6666-666666666666")!
         let request = HistoryHoverPreviewPipeline.ImageRequest(
             itemID: itemID,
             contentHash: "cached-image",
