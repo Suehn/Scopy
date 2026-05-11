@@ -136,7 +136,15 @@ enum HistoryHoverPreviewPipeline {
         }
 
         let source: String
+        let context: MarkdownRenderContext
         let target: Target
+
+        var renderCacheKey: String {
+            switch target {
+            case .text(let cacheKey), .file(let cacheKey):
+                return MarkdownRenderCacheKey.make(contentHash: cacheKey, context: context)
+            }
+        }
     }
 
     enum Event {
@@ -264,7 +272,7 @@ enum HistoryHoverPreviewPipeline {
         Task(priority: .utility) {
             guard !Task.isCancelled else { return }
             guard await MainActor.run(body: isCurrent) else { return }
-            let html = await renderMarkdownHTML(request.source)
+            let html = await renderMarkdownHTML(request.source, context: request.context)
             guard !Task.isCancelled, !html.isEmpty else { return }
             updateMarkdownCache(html: html, request: request)
             await MainActor.run {
@@ -422,20 +430,27 @@ enum HistoryHoverPreviewPipeline {
         let cachedEntry = MarkdownPreviewCache.shared.filePreview(forKey: request.cacheKey)
         if let cachedEntry,
            now.timeIntervalSince(cachedEntry.fetchedAt) < markdownFilePreviewCacheTTL {
-            emitCachedFilePreview(cachedEntry, cacheKey: request.cacheKey, emit: emit)
-            if cachedEntry.html == nil, cachedEntry.text.utf16.count <= maxMarkdownPreviewBytes {
-                emit(.renderMarkdown(MarkdownRenderRequest(source: cachedEntry.text, target: .file(cacheKey: request.cacheKey))))
+            let context = MarkdownRenderContextResolver.defaultContext(for: cachedEntry.text)
+            let renderCacheKey = MarkdownRenderCacheKey.make(contentHash: request.cacheKey, context: context)
+            let cachedHTML = MarkdownPreviewCache.shared.html(forKey: renderCacheKey)
+            emitCachedFilePreview(cachedEntry, renderCacheKey: renderCacheKey, emit: emit)
+            if cachedHTML == nil, cachedEntry.text.utf16.count <= maxMarkdownPreviewBytes {
+                emit(markdownRenderEvent(source: cachedEntry.text, target: .file(cacheKey: request.cacheKey)))
             }
             return
         } else if let cachedEntry {
+            let context = MarkdownRenderContextResolver.defaultContext(for: cachedEntry.text)
+            let renderCacheKey = MarkdownRenderCacheKey.make(contentHash: request.cacheKey, context: context)
+            let cachedHTML = MarkdownPreviewCache.shared.html(forKey: renderCacheKey)
+            let cachedMetrics = MarkdownPreviewCache.shared.metrics(forKey: renderCacheKey)
             emit(
                 .text(
                     TextPreviewState(
                         text: cachedEntry.text,
                         isMarkdown: true,
-                        markdownHTML: cachedEntry.html,
-                        markdownContentSize: cachedEntry.metrics?.size,
-                        markdownHasHorizontalOverflow: cachedEntry.metrics?.hasHorizontalOverflow ?? false
+                        markdownHTML: cachedHTML,
+                        markdownContentSize: cachedMetrics?.size,
+                        markdownHasHorizontalOverflow: cachedMetrics?.hasHorizontalOverflow ?? false
                     )
                 )
             )
@@ -473,10 +488,12 @@ enum HistoryHoverPreviewPipeline {
 
         guard preview.utf16.count <= maxMarkdownPreviewBytes else { return }
 
-        let cachedHTML: String? = (cachedEntry?.text == preview) ? cachedEntry?.html : nil
-        let cachedMetrics: MarkdownContentMetrics? = (cachedEntry?.text == preview) ? cachedEntry?.metrics : nil
+        let context = MarkdownRenderContextResolver.defaultContext(for: preview)
+        let renderCacheKey = MarkdownRenderCacheKey.make(contentHash: request.cacheKey, context: context)
+        let cachedHTML: String? = (cachedEntry?.text == preview) ? MarkdownPreviewCache.shared.html(forKey: renderCacheKey) : nil
+        let cachedMetrics: MarkdownContentMetrics? = (cachedEntry?.text == preview) ? MarkdownPreviewCache.shared.metrics(forKey: renderCacheKey) : nil
         MarkdownPreviewCache.shared.setFilePreview(
-            MarkdownPreviewCache.FilePreviewEntry(text: preview, html: cachedHTML, metrics: cachedMetrics, fetchedAt: now),
+            MarkdownPreviewCache.FilePreviewEntry(text: preview, html: nil, metrics: nil, fetchedAt: now),
             forKey: request.cacheKey
         )
 
@@ -495,12 +512,12 @@ enum HistoryHoverPreviewPipeline {
                         )
                     )
                 )
-                MarkdownPreviewCache.shared.updateFilePreviewMetrics(stableMetrics, forKey: request.cacheKey)
+                MarkdownPreviewCache.shared.setMetrics(stableMetrics, forKey: renderCacheKey)
             }
             return
         }
 
-        emit(.renderMarkdown(MarkdownRenderRequest(source: preview, target: .file(cacheKey: request.cacheKey))))
+        emit(markdownRenderEvent(source: preview, target: .file(cacheKey: request.cacheKey)))
     }
 
     @MainActor
@@ -537,9 +554,11 @@ enum HistoryHoverPreviewPipeline {
         guard preview.utf16.count <= maxMarkdownPreviewBytes else { return }
 
         let cacheKey = item.contentHash
-        if !cacheKey.isEmpty,
-           let cachedHTML = MarkdownPreviewCache.shared.html(forKey: cacheKey),
-           let cachedMetrics = MarkdownPreviewCache.shared.metrics(forKey: cacheKey) {
+        let context = MarkdownRenderContextResolver.defaultContext(for: preview)
+        let renderCacheKey = MarkdownRenderCacheKey.make(contentHash: cacheKey, context: context)
+        if !renderCacheKey.isEmpty,
+           let cachedHTML = MarkdownPreviewCache.shared.html(forKey: renderCacheKey),
+           let cachedMetrics = MarkdownPreviewCache.shared.metrics(forKey: renderCacheKey) {
             let stableMetrics = stableMetrics(from: cachedMetrics, text: preview)
             emit(
                 .text(
@@ -552,17 +571,17 @@ enum HistoryHoverPreviewPipeline {
                     )
                 )
             )
-            MarkdownPreviewCache.shared.setMetrics(stableMetrics, forKey: cacheKey)
+            MarkdownPreviewCache.shared.setMetrics(stableMetrics, forKey: renderCacheKey)
             emit(.present(.text))
             return
         }
 
-        if let cached = MarkdownPreviewCache.shared.html(forKey: cacheKey) {
+        if !renderCacheKey.isEmpty, let cached = MarkdownPreviewCache.shared.html(forKey: renderCacheKey) {
             emit(.markdownHTML(cached))
             return
         }
 
-        emit(.renderMarkdown(MarkdownRenderRequest(source: preview, target: .text(cacheKey: cacheKey))))
+        emit(markdownRenderEvent(source: preview, target: .text(cacheKey: cacheKey)))
     }
 
     @MainActor
@@ -589,11 +608,12 @@ enum HistoryHoverPreviewPipeline {
     @MainActor
     private static func emitCachedFilePreview(
         _ entry: MarkdownPreviewCache.FilePreviewEntry,
-        cacheKey: String,
+        renderCacheKey: String,
         emit: @escaping @MainActor (Event) -> Void
     ) {
+        let cachedHTML = MarkdownPreviewCache.shared.html(forKey: renderCacheKey)
         let cachedStableMetrics: MarkdownContentMetrics?
-        if let metrics = entry.metrics {
+        if let metrics = MarkdownPreviewCache.shared.metrics(forKey: renderCacheKey) {
             cachedStableMetrics = stableMetrics(from: metrics, text: entry.text)
         } else {
             cachedStableMetrics = nil
@@ -603,40 +623,51 @@ enum HistoryHoverPreviewPipeline {
                 TextPreviewState(
                     text: entry.text,
                     isMarkdown: true,
-                    markdownHTML: entry.html,
+                    markdownHTML: cachedHTML,
                     markdownContentSize: cachedStableMetrics?.size,
                     markdownHasHorizontalOverflow: cachedStableMetrics?.hasHorizontalOverflow ?? false
                 )
             )
         )
         if let cachedStableMetrics {
-            MarkdownPreviewCache.shared.updateFilePreviewMetrics(cachedStableMetrics, forKey: cacheKey)
+            MarkdownPreviewCache.shared.setMetrics(cachedStableMetrics, forKey: renderCacheKey)
         }
         emit(.present(.file))
     }
 
-    private static func renderMarkdownHTML(_ source: String) async -> String {
+    private static func renderMarkdownHTML(_ source: String, context: MarkdownRenderContext) async -> String {
         await runBudgetedDetached(priority: .utility) {
             if ScrollPerformanceProfile.isEnabled {
                 let start = CFAbsoluteTimeGetCurrent()
-                let html = MarkdownHTMLRenderer.render(markdown: source)
+                let html = MarkdownHTMLRenderer.render(markdown: source, context: context).html
                 let elapsed = (CFAbsoluteTimeGetCurrent() - start) * 1000
                 ScrollPerformanceProfile.recordMetric(name: "hover.markdown_render_ms", elapsedMs: elapsed)
                 return html
             }
-            return MarkdownHTMLRenderer.render(markdown: source)
+            return MarkdownHTMLRenderer.render(markdown: source, context: context).html
         }
     }
 
+    private static func markdownRenderEvent(source: String, target: MarkdownRenderRequest.Target) -> Event {
+        Event.renderMarkdown(
+            MarkdownRenderRequest(
+                source: source,
+                context: MarkdownRenderContextResolver.defaultContext(for: source),
+                target: target
+            )
+        )
+    }
+
     private static func updateMarkdownCache(html: String, request: MarkdownRenderRequest) {
+        let renderCacheKey = request.renderCacheKey
+        guard !renderCacheKey.isEmpty else { return }
         switch request.target {
-        case .text(let cacheKey):
-            MarkdownPreviewCache.shared.setHTML(html, forKey: cacheKey)
+        case .text:
+            MarkdownPreviewCache.shared.setHTML(html, forKey: renderCacheKey)
         case .file(let cacheKey):
-            if let current = MarkdownPreviewCache.shared.filePreview(forKey: cacheKey),
-               current.text == request.source {
-                MarkdownPreviewCache.shared.updateFilePreviewHTML(html, forKey: cacheKey)
-            }
+            guard let current = MarkdownPreviewCache.shared.filePreview(forKey: cacheKey),
+                  current.text == request.source else { return }
+            MarkdownPreviewCache.shared.setHTML(html, forKey: renderCacheKey)
         }
     }
 

@@ -114,11 +114,12 @@ final class HistoryHoverPreviewPipelineTests: XCTestCase {
 
     func testTextPreviewUsesCachedMarkdownCapabilityAndCachedHTMLMetrics() async {
         let item = makeItem(type: .text, contentHash: "cached-markdown", plainText: "# Title\n\nBody")
+        let renderCacheKey = MarkdownRenderCacheKey.make(contentHash: item.contentHash, markdown: item.plainText)
         HistoryItemPresentationCache.shared.storeMarkdownExportCapability(true, for: item)
-        MarkdownPreviewCache.shared.setHTML("<h1>Title</h1>", forKey: item.contentHash)
+        MarkdownPreviewCache.shared.setHTML("<h1>Title</h1>", forKey: renderCacheKey)
         MarkdownPreviewCache.shared.setMetrics(
             MarkdownContentMetrics(size: CGSize(width: 12, height: 80), hasHorizontalOverflow: true),
-            forKey: item.contentHash
+            forKey: renderCacheKey
         )
 
         var events: [HistoryHoverPreviewPipeline.Event] = []

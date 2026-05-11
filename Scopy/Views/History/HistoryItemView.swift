@@ -817,7 +817,7 @@ struct HistoryItemView: View, Equatable {
         {
             let maxWidth: CGFloat = HoverPreviewScreenMetrics.maxPopoverWidthPoints()
             let containerWidth = max(1, maxWidth)
-            let cacheKey = item.contentHash
+            let cacheKey = MarkdownRenderCacheKey.make(contentHash: item.contentHash, markdown: text)
             let font = NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
             let padding: CGFloat = ScopySpacing.md
             let fallbackWidth = HoverPreviewTextSizing.preferredWidth(
@@ -1083,8 +1083,10 @@ struct HistoryItemView: View, Equatable {
         guard let current = MarkdownPreviewCache.shared.filePreview(forKey: cacheKey),
               current.text == text else { return }
 
+        let renderCacheKey = MarkdownRenderCacheKey.make(contentHash: cacheKey, markdown: text)
+        guard !renderCacheKey.isEmpty else { return }
         let metrics = MarkdownContentMetrics(size: size, hasHorizontalOverflow: previewModel.markdownHasHorizontalOverflow)
-        MarkdownPreviewCache.shared.updateFilePreviewMetrics(metrics, forKey: cacheKey)
+        MarkdownPreviewCache.shared.setMetrics(metrics, forKey: renderCacheKey)
     }
 
     private func applyHoverPreviewEvent(_ event: HistoryHoverPreviewPipeline.Event) {
