@@ -8,8 +8,13 @@ import remarkParse from "remark-parse";
 import remarkRehype from "remark-rehype";
 import { unified } from "unified";
 import { preprocessBackslashMath } from "./scopyBackslashMathPreprocessor.js";
+import { applySafeHTMLReplacements, preprocessSafeHTML } from "./scopySafeHTMLPreprocessor.js";
 
 export function render(source, policy = {}) {
+  return renderInternal(source, policy, 0);
+}
+
+function renderInternal(source, policy = {}, depth = 0) {
   const warnings = [];
   const normalizedPolicy = normalizePolicy(policy);
 
@@ -20,9 +25,12 @@ export function render(source, policy = {}) {
     warnings.push("loose math repair is not enabled in the first unified renderer bundle");
   }
   const originalSource = String(source || "");
+  const safeHTML = normalizedPolicy.allowSafeHTMLSubset
+    ? preprocessSafeHTML(originalSource)
+    : { markdown: originalSource, replacements: {} };
   const preprocessed = normalizedPolicy.allowBackslashMath
-    ? preprocessBackslashMath(originalSource)
-    : { markdown: originalSource, mathCount: 0 };
+    ? preprocessBackslashMath(safeHTML.markdown)
+    : { markdown: safeHTML.markdown, mathCount: 0 };
   const processor = unified()
     .use(remarkParse)
     .use(remarkGfm)
@@ -35,8 +43,16 @@ export function render(source, policy = {}) {
     .use(rehypeStringify);
 
   const file = processor.processSync(preprocessed.markdown);
+  const html = normalizedPolicy.allowSafeHTMLSubset
+    ? applySafeHTMLReplacements(String(file), safeHTML.replacements, (nestedMarkdown) => {
+        if (depth > 4) {
+          return "";
+        }
+        return renderInternal(nestedMarkdown, normalizedPolicy, depth + 1).html;
+      })
+    : String(file);
   return {
-    html: String(file),
+    html,
     metadata: {
       renderer: "unified",
       mathCount: countDollarMath(originalSource) + preprocessed.mathCount,

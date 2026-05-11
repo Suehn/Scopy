@@ -22,11 +22,13 @@ test("renders GFM links, tables, task lists, and dollar math", () => {
   assert.match(result.html, /katex/);
 });
 
-test("does not allow raw HTML in the first bundle", () => {
+test("preserves safe HTML subset but still removes unsafe raw HTML", () => {
   const result = render("<script>alert(1)</script>\n\n<details><summary>x</summary>y</details>");
 
   assert.doesNotMatch(result.html, /<script>/);
-  assert.doesNotMatch(result.html, /<details>/);
+  assert.match(result.html, /<details class="scopy-details">/);
+  assert.match(result.html, /<summary>x<\/summary>/);
+  assert.match(result.html, /<p>y<\/p>/);
 });
 
 test("renders backslash inline and display math", () => {
@@ -47,4 +49,18 @@ test("does not rewrite backslash math inside code or links", () => {
   assert.match(result.html, /href="\/tmp\/\(path\).md"/);
   assert.match(result.html, />\(label\)<\/a>/);
   assert.match(result.html, /katex/);
+});
+
+test("renders safe inline HTML and does not rewrite fenced raw HTML", () => {
+  const result = render("Text <kbd>Cmd</kbd> and <mark>hot</mark>\n\n```\n<kbd>code</kbd>\n```");
+
+  assert.match(result.html, /Text <kbd>Cmd<\/kbd> and <mark>hot<\/mark>/);
+  assert.match(result.html, /<code>&#x3C;kbd>code&#x3C;\/kbd>/);
+});
+
+test("can disable safe HTML subset", () => {
+  const result = render("<details><summary>x</summary>y</details>", { allowSafeHTMLSubset: false });
+
+  assert.doesNotMatch(result.html, /<details/);
+  assert.doesNotMatch(result.html, /<summary/);
 });
