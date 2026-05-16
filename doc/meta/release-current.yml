@@ -9,7 +9,7 @@ spec_doc: doc/current/product-spec.md
 development_doc: doc/current/development-guide.md
 architecture_doc: doc/current/architecture.md
 last_verified_at: 2026-05-16
-summary: Markdown safe HTML renderer routing and details export fix
+summary: Markdown safe HTML renderer routing and rich HTML fallback hardening
 verification:
   build: pass
   test_unit: pass

@@ -16,28 +16,31 @@
 ### Markdown/Preview
 
 - Routes Markdown documents with safe HTML islands such as `<details>`, `<kbd>`, `<mark>`, `<sub>`, and `<sup>` through the unified renderer when the source has strong Markdown structure.
-- Keeps pure rich HTML on the conservative legacy path, preserving rollback behavior for HTML-like clipboard content that is not authored Markdown.
-- Fixes the legacy safe-HTML `<details>` replacement loop so nested rendering is lazy and no longer recursively renders the outer details placeholder forever.
+- Requires authored safe-HTML Markdown to retain Markdown signal outside safe HTML islands before bypassing rich-HTML fallback, so pure HTML containers with nested Markdown-like text stay on the conservative legacy path.
+- Keeps non-safe raw HTML such as `<div>`, `<span>`, `<table>`, `<pre>`, `<code>`, and `<blockquote>` on the legacy path even when their inner text contains Markdown markers.
+- Fixes safe-HTML placeholder replacement so absent placeholders are never rendered during nested fragment replacement, avoiding recursive details rendering and unrelated placeholder side effects.
 
 ### Markdown/Export
 
 - Adds a safe-HTML Markdown export regression fixture covering headings, nested quotes, inline safe HTML, `<details>`, highlighted code, tables, footnotes, and KaTeX.
+- Registers the safe-HTML export fixture in the Xcode project so clean checkout UI tests package the same resource used during local validation.
 - Verifies the exported PNG is rendered content instead of the raw Markdown fallback previously captured after the legacy renderer stalled.
 
 ### Tests
 
 - Added source-profile and renderer-facade coverage for authored Markdown containing safe HTML islands.
+- Added source-profile and renderer-facade coverage proving HTML containers with nested Markdown stay on the legacy path.
 - Added corpus coverage requiring safe-HTML Markdown to default to the unified renderer.
-- Added legacy details replacement coverage so the old path stays usable when forced.
+- Added lazy safe-HTML placeholder coverage so missing placeholders cannot trigger nested rendering work.
 
 ### Verification
 
-- Markdown renderer Node test suite: 25 tests, 0 failures (2026-05-16).
-- Focused renderer/profile/corpus tests: Executed 10 tests, 0 failures (2026-05-16).
+- Markdown renderer Node test suite: 26 tests, 0 failures (2026-05-16).
+- Focused renderer/profile/corpus tests: Executed 17 tests, 0 failures (2026-05-16).
 - Focused safe-HTML Markdown export UI test: Executed 1 test, 0 failures (2026-05-16).
 - `make build`: passed (2026-05-16).
-- `make test-unit`: Executed 481 tests, 1 skipped, 0 failures (2026-05-16).
-- `make test-strict`: Executed 481 tests, 1 skipped, 0 failures (2026-05-16).
+- `make test-unit`: Executed 484 tests, 1 skipped, 0 failures (2026-05-16).
+- `make test-strict`: Executed 484 tests, 1 skipped, 0 failures (2026-05-16).
 
 ## [v0.8.1] - 2026-05-16
 
