@@ -9,6 +9,7 @@ struct HistoryItemHarnessView: View {
         case image
         case inlineImage = "inline-image"
         case file
+        case markdownFile = "markdown-file"
         case markdownText = "markdown-text"
         case plainText = "plain-text"
     }
@@ -21,6 +22,7 @@ struct HistoryItemHarnessView: View {
     @State private var pinCount = 0
     @State private var updateNoteCount = 0
     @State private var activePopover: HoverPreviewPopoverKind?
+    @State private var popoverRequest = "none"
     @State private var settingsViewModel: SettingsViewModel
     @State private var settings: SettingsDTO
     @State private var isKeyboardSelected: Bool
@@ -71,8 +73,14 @@ struct HistoryItemHarnessView: View {
                     isImagePreviewPresented: activePopover == .image,
                     isTextPreviewPresented: activePopover == .text,
                     isFilePreviewPresented: activePopover == .file,
-                    requestPopover: { kind in activePopover = kind },
-                    dismissOtherPopovers: { activePopover = nil }
+                    requestPopover: { kind in
+                        popoverRequest = Self.popoverName(kind)
+                        activePopover = kind
+                    },
+                    dismissOtherPopovers: {
+                        popoverRequest = "dismiss-other"
+                        activePopover = nil
+                    }
                 )
                 .environment(settingsViewModel)
             }
@@ -92,6 +100,10 @@ struct HistoryItemHarnessView: View {
                     .accessibilityIdentifier("UITest.HistoryItemHarness.PinCount")
                 Text("noteUpdates=\(updateNoteCount)")
                     .accessibilityIdentifier("UITest.HistoryItemHarness.NoteUpdateCount")
+                Text("popover=\(Self.popoverName(activePopover))")
+                    .accessibilityIdentifier("UITest.HistoryItemHarness.ActivePopover")
+                Text("popoverRequest=\(popoverRequest)")
+                    .accessibilityIdentifier("UITest.HistoryItemHarness.PopoverRequest")
             }
             .font(ScopyTypography.caption)
             .foregroundStyle(ScopyColors.mutedText)
@@ -128,6 +140,19 @@ struct HistoryItemHarnessView: View {
     private static func scenarioFromEnvironment() -> Scenario {
         let raw = ProcessInfo.processInfo.environment["SCOPY_UITEST_HISTORY_ITEM_SCENARIO"] ?? ""
         return Scenario(rawValue: raw) ?? .image
+    }
+
+    private static func popoverName(_ kind: HoverPreviewPopoverKind?) -> String {
+        switch kind {
+        case .image:
+            return "image"
+        case .text:
+            return "text"
+        case .file:
+            return "file"
+        case nil:
+            return "none"
+        }
     }
 
     private static func makeItem(for scenario: Scenario) -> ClipboardItemDTO {
@@ -181,6 +206,23 @@ struct HistoryItemHarnessView: View {
                 isPinned: false,
                 sizeBytes: 64,
                 fileSizeBytes: 64,
+                thumbnailPath: nil,
+                storageRef: path
+            )
+        case .markdownFile:
+            let path = makeHarnessMarkdownFilePath()
+            return ClipboardItemDTO(
+                id: UUID(),
+                type: .file,
+                contentHash: "history-item-harness-markdown-file",
+                plainText: path,
+                note: nil,
+                appBundleID: "com.scopy.tests",
+                createdAt: now.addingTimeInterval(-210),
+                lastUsedAt: now.addingTimeInterval(-24),
+                isPinned: false,
+                sizeBytes: 256,
+                fileSizeBytes: 256,
                 thumbnailPath: nil,
                 storageRef: path
             )
@@ -251,6 +293,22 @@ Inline math: $E = mc^2$.[^harness]
         if !FileManager.default.fileExists(atPath: url.path) {
             try? "Scopy file menu harness\n".write(to: url, atomically: true, encoding: .utf8)
         }
+        return url.path
+    }
+
+    private static func makeHarnessMarkdownFilePath() -> String {
+        let directory = URL(fileURLWithPath: "/tmp/scopy_history_item_harness", isDirectory: true)
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let url = directory.appendingPathComponent("hover-preview-markdown-file.md")
+        let markdown = """
+# Markdown File Harness
+
+- file-backed preview
+- should open before render completes
+
+Inline math: $a^2 + b^2 = c^2$
+"""
+        try? markdown.write(to: url, atomically: true, encoding: .utf8)
         return url.path
     }
 

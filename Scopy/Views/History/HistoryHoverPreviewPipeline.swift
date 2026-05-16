@@ -236,6 +236,11 @@ enum HistoryHoverPreviewPipeline {
     static func run(
         request: Request,
         getImageData: @escaping () async -> Data? = { nil },
+        readTextFile: @escaping (URL, Int) async -> String? = { url, maxBytes in
+            await runBudgetedDetached(priority: .utility) {
+                FilePreviewSupport.readTextFile(url: url, maxBytes: maxBytes)
+            }
+        },
         isCurrent: @escaping @MainActor () -> Bool,
         emit: @escaping @MainActor (Event) -> Void
     ) async {
@@ -251,6 +256,7 @@ enum HistoryHoverPreviewPipeline {
             if fileRequest.isMarkdown {
                 await runMarkdownFilePreview(
                     request: markdownFileRequest(fileRequest: fileRequest),
+                    readTextFile: readTextFile,
                     isCurrent: isCurrent,
                     emit: emit
                 )
@@ -258,7 +264,12 @@ enum HistoryHoverPreviewPipeline {
                 await runFilePreview(request: fileRequest, isCurrent: isCurrent, emit: emit)
             }
         case .markdownFile(let request):
-            await runMarkdownFilePreview(request: request, isCurrent: isCurrent, emit: emit)
+            await runMarkdownFilePreview(
+                request: request,
+                readTextFile: readTextFile,
+                isCurrent: isCurrent,
+                emit: emit
+            )
         case .text(let textRequest):
             await runTextPreview(request: textRequest, isCurrent: isCurrent, emit: emit)
         }
@@ -420,6 +431,7 @@ enum HistoryHoverPreviewPipeline {
     @MainActor
     private static func runMarkdownFilePreview(
         request: MarkdownFileRequest,
+        readTextFile: @escaping (URL, Int) async -> String?,
         isCurrent: @escaping @MainActor () -> Bool,
         emit: @escaping @MainActor (Event) -> Void
     ) async {
@@ -455,11 +467,22 @@ enum HistoryHoverPreviewPipeline {
                 )
             )
             emit(.present(.file))
+        } else {
+            emit(
+                .text(
+                    TextPreviewState(
+                        text: nil,
+                        isMarkdown: true,
+                        markdownHTML: nil,
+                        markdownContentSize: nil,
+                        markdownHasHorizontalOverflow: false
+                    )
+                )
+            )
+            emit(.present(.file))
         }
 
-        let previewText: String? = await runBudgetedDetached(priority: .utility) {
-            FilePreviewSupport.readTextFile(url: request.url, maxBytes: maxMarkdownPreviewBytes)
-        }
+        let previewText = await readTextFile(request.url, maxMarkdownPreviewBytes)
 
         guard !Task.isCancelled, isCurrent() else { return }
         guard let rawText = previewText else {
@@ -467,7 +490,6 @@ enum HistoryHoverPreviewPipeline {
                 MarkdownPreviewCache.shared.updateFilePreviewFetchedAt(now, forKey: request.cacheKey)
             } else {
                 emit(.text(.empty))
-                emit(.present(.file))
             }
             return
         }
@@ -484,7 +506,6 @@ enum HistoryHoverPreviewPipeline {
                 )
             )
         )
-        emit(.present(.file))
 
         guard preview.utf16.count <= maxMarkdownPreviewBytes else { return }
 

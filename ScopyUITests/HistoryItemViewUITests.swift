@@ -102,6 +102,21 @@ final class HistoryItemViewUITests: XCTestCase {
         waitForValue("pin=0", identifier: "UITest.HistoryItemHarness.PinCount")
     }
 
+    func testMarkdownFileScenarioShowsPreviewPopover() throws {
+        launchHarness(scenario: "markdown-file", openPreviewOnTap: true)
+
+        XCTAssertTrue(app.anyElement("UITest.HistoryItemHarness").waitForExistence(timeout: 10))
+        let filePreviewFound = triggerPreview("History.Preview.File")
+        let textPreviewFound = app.anyElement("History.Preview.Text").waitForExistence(timeout: 3)
+        let activePopover = displayedText(identifier: "UITest.HistoryItemHarness.ActivePopover") ?? "<missing>"
+        let popoverRequest = displayedText(identifier: "UITest.HistoryItemHarness.PopoverRequest") ?? "<missing>"
+        let selectCount = displayedText(identifier: "UITest.HistoryItemHarness.SelectCount") ?? "<missing>"
+        XCTAssertTrue(
+            filePreviewFound || textPreviewFound,
+            "Expected Markdown file preview popover to appear; activePopover=\(activePopover) popoverRequest=\(popoverRequest) selectCount=\(selectCount)"
+        )
+    }
+
     func testPlainTextScenarioHidesExportPNGInContextMenu() throws {
         let dumpPath = "/tmp/scopy_uitest_history_item_plain_export.png"
         let errorPath = "/tmp/scopy_uitest_history_item_plain_export_error.txt"
@@ -136,11 +151,19 @@ final class HistoryItemViewUITests: XCTestCase {
         )
     }
 
-    private func launchHarness(scenario: String, dumpPath: String? = nil, errorPath: String? = nil) {
+    private func launchHarness(
+        scenario: String,
+        dumpPath: String? = nil,
+        errorPath: String? = nil,
+        openPreviewOnTap: Bool = false
+    ) {
         app.launchArguments = ["--uitesting"]
         app.launchEnvironment["SCOPY_UITEST_HISTORY_ITEM_HARNESS"] = "1"
         app.launchEnvironment["SCOPY_UITEST_HISTORY_ITEM_SCENARIO"] = scenario
         app.launchEnvironment["SCOPY_UITEST_HISTORY_ITEM_KEYBOARD_SELECTED"] = "1"
+        if openPreviewOnTap {
+            app.launchEnvironment["SCOPY_UITEST_OPEN_PREVIEW_ON_TAP"] = "1"
+        }
         if let dumpPath {
             app.launchEnvironment["SCOPY_EXPORT_DUMP_PATH"] = dumpPath
         }
@@ -278,8 +301,20 @@ final class HistoryItemViewUITests: XCTestCase {
     private func triggerPreview(_ previewIdentifier: String) -> Bool {
         let action = historyItemButton(identifier: "HistoryItem.MainAction")
         XCTAssertTrue(action.waitForExistence(timeout: 5))
-        action.coordinate(withNormalizedOffset: CGVector(dx: 0.18, dy: 0.50)).click()
-        return app.anyElement(previewIdentifier).waitForExistence(timeout: 2)
+        let clickTargets: [CGVector] = [
+            CGVector(dx: 0.10, dy: 0.50),
+            CGVector(dx: 0.18, dy: 0.50),
+            CGVector(dx: 0.26, dy: 0.50),
+            CGVector(dx: 0.35, dy: 0.50)
+        ]
+
+        for offset in clickTargets {
+            action.coordinate(withNormalizedOffset: offset).click()
+            if app.anyElement(previewIdentifier).waitForExistence(timeout: 1) {
+                return true
+            }
+        }
+        return false
     }
 
     private func waitForProfileOutput(atPath path: String, timeout: TimeInterval) {

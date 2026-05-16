@@ -148,12 +148,63 @@ final class HistoryHoverPreviewPipelineTests: XCTestCase {
             return nil
         }
 
-        XCTAssertEqual(textStates.first?.text, "# File Title\n\nBody")
+        XCTAssertNil(textStates.first?.text)
         XCTAssertTrue(textStates.first?.isMarkdown == true)
-        XCTAssertNil(textStates.first?.markdownHTML)
+        XCTAssertEqual(textStates.last?.text, "# File Title\n\nBody")
+        XCTAssertTrue(textStates.last?.isMarkdown == true)
+        XCTAssertNil(textStates.last?.markdownHTML)
         XCTAssertEqual(presentedKinds(events), [.file])
         XCTAssertEqual(renderRequests.count, 1)
         XCTAssertEqual(renderRequests.first?.source, "# File Title\n\nBody")
+    }
+
+    func testMarkdownFilePreviewPresentsPlaceholderBeforeFileReadCompletes() async throws {
+        let markdownURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+            .appendingPathExtension("md")
+        let request = HistoryHoverPreviewPipeline.MarkdownFileRequest(
+            cacheKey: "file|delayed-read",
+            url: markdownURL,
+            delay: 0
+        )
+        let readStarted = expectation(description: "markdown file read started")
+        var releaseRead: CheckedContinuation<String?, Never>?
+        var events: [HistoryHoverPreviewPipeline.Event] = []
+
+        let task = Task { @MainActor in
+            await HistoryHoverPreviewPipeline.run(
+                request: .markdownFile(request),
+                readTextFile: { _, _ in
+                    readStarted.fulfill()
+                    return await withCheckedContinuation { continuation in
+                        releaseRead = continuation
+                    }
+                },
+                isCurrent: { true },
+                emit: { events.append($0) }
+            )
+        }
+
+        await fulfillment(of: [readStarted], timeout: 1)
+
+        let initialTextStates = events.compactMap { event -> HistoryHoverPreviewPipeline.TextPreviewState? in
+            if case .text(let state) = event { return state }
+            return nil
+        }
+        XCTAssertNil(initialTextStates.first?.text)
+        XCTAssertTrue(initialTextStates.first?.isMarkdown == true)
+        XCTAssertEqual(presentedKinds(events), [.file])
+
+        releaseRead?.resume(returning: "# Delayed File\n\nBody")
+        await task.value
+
+        let finalTextStates = events.compactMap { event -> HistoryHoverPreviewPipeline.TextPreviewState? in
+            if case .text(let state) = event { return state }
+            return nil
+        }
+        XCTAssertEqual(finalTextStates.last?.text, "# Delayed File\n\nBody")
+        XCTAssertTrue(finalTextStates.last?.isMarkdown == true)
+        XCTAssertEqual(presentedKinds(events), [.file])
     }
 
     func testTextPreviewUsesCachedMarkdownCapabilityAndCachedHTMLMetrics() async {
