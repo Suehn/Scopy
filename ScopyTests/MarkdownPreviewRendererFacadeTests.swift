@@ -102,6 +102,26 @@ final class MarkdownPreviewRendererFacadeTests: XCTestCase {
         XCTAssertFalse(output.html.contains("markdown-it.min.js"))
     }
 
+    func testDefaultResolverKeepsHTMLContainerWithNestedMarkdownOnLegacy() {
+        let input = """
+        <details>
+        <summary>More</summary>
+
+        - item
+        - **bold**
+
+        </details>
+        """
+
+        let context = MarkdownRenderContextResolver.defaultContext(for: input)
+        let output = MarkdownHTMLRenderer.render(markdown: input, context: context)
+
+        XCTAssertEqual(output.diagnostics.renderer, .legacyMarkdownIt)
+        XCTAssertEqual(output.diagnostics.profile, .richHTML)
+        XCTAssertTrue(output.html.contains("markdown-it.min.js"))
+        XCTAssertFalse(output.html.contains("scopy-unified-renderer.iife.js"))
+    }
+
     func testUnifiedContextResolverUsesConservativePolicyAndNamespace() {
         let input = """
         # Title

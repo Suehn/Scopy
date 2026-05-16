@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { render } from "../src/render.js";
+import { applySafeHTMLReplacements } from "../src/scopySafeHTMLPreprocessor.js";
 
 test("renders GFM links, tables, task lists, and dollar math", () => {
   const result = render(`
@@ -110,6 +111,30 @@ test("renders safe inline HTML and does not rewrite fenced raw HTML", () => {
 
   assert.match(result.html, /Text <kbd>Cmd<\/kbd> and <mark>hot<\/mark>/);
   assert.match(result.html, /<code>&#x3C;kbd>code&#x3C;\/kbd>/);
+});
+
+test("lazily renders only safe HTML placeholders present in the current fragment", () => {
+  const result = applySafeHTMLReplacements(
+    "<p>SCOPY_TOKEN_PRESENT</p>",
+    {
+      SCOPY_TOKEN_PRESENT: {
+        kind: "inlineTag",
+        tag: "kbd",
+        text: "Cmd"
+      },
+      SCOPY_TOKEN_ABSENT_DETAILS: {
+        kind: "details",
+        isOpen: false,
+        summary: "should not render",
+        body: "should not render"
+      }
+    },
+    () => {
+      throw new Error("absent placeholders must not render nested Markdown");
+    }
+  );
+
+  assert.equal(result, "<kbd>Cmd</kbd>");
 });
 
 test("can disable safe HTML subset", () => {

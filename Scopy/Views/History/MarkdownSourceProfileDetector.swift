@@ -13,12 +13,14 @@ enum MarkdownSourceProfileDetector {
         if isChatGPTMarkdown(sample) {
             return .chatGPTMarkdown
         }
-        let markdownScore = markdownSignalScore(sample)
-        if markdownScore >= 2 {
-            return .authoredMarkdown
-        }
         if isRichHTML(sample) {
+            if isAuthoredMarkdownWithSafeHTMLIslands(sample) {
+                return .authoredMarkdown
+            }
             return .richHTML
+        }
+        if markdownSignalScore(sample) >= 2 {
+            return .authoredMarkdown
         }
         if isScientificMarkdown(sample) {
             return .scientificMarkdown
@@ -64,10 +66,46 @@ enum MarkdownSourceProfileDetector {
     private static func isRichHTML(_ text: String) -> Bool {
         let lower = text.lowercased()
         let tags = [
-            "<details", "<summary", "<kbd", "<mark", "<sub", "<sup",
+            "<details", "<summary", "<u", "<kbd", "<mark", "<sub", "<sup",
             "<table", "<pre", "<code", "<blockquote", "<span", "<div"
         ]
         return tags.contains { lower.contains($0) }
+    }
+
+    private static func isAuthoredMarkdownWithSafeHTMLIslands(_ text: String) -> Bool {
+        guard !containsNonSafeRichHTMLTag(text) else { return false }
+        return markdownSignalScore(text) >= 2 && markdownSignalScore(markdownOutsideSafeHTMLIslands(text)) >= 1
+    }
+
+    private static func containsNonSafeRichHTMLTag(_ text: String) -> Bool {
+        let lower = text.lowercased()
+        let tags = ["<table", "<pre", "<code", "<blockquote", "<span", "<div"]
+        return tags.contains { lower.contains($0) }
+    }
+
+    private static func markdownOutsideSafeHTMLIslands(_ text: String) -> String {
+        let withoutDetails = replacingRegex(
+            pattern: "<details\\b[\\s\\S]*?</details>",
+            in: text,
+            with: "\n"
+        )
+        return replacingRegex(
+            pattern: "</?(?:summary|u|kbd|mark|sub|sup)\\b[^>]*>",
+            in: withoutDetails,
+            with: ""
+        )
+    }
+
+    private static func replacingRegex(pattern: String, in text: String, with replacement: String) -> String {
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else {
+            return text
+        }
+        return regex.stringByReplacingMatches(
+            in: text,
+            options: [],
+            range: NSRange(text.startIndex..., in: text),
+            withTemplate: replacement
+        )
     }
 
     private static func markdownSignalScore(_ text: String) -> Int {

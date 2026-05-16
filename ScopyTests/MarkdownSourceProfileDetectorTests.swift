@@ -78,6 +78,36 @@ final class MarkdownSourceProfileDetectorTests: XCTestCase {
         XCTAssertEqual(MarkdownSourceProfileDetector.detect(input), .richHTML)
     }
 
+    func testKeepsHTMLContainerWithOnlyNestedMarkdownOnRichHTMLPath() {
+        let input = """
+        <details>
+        <summary>More</summary>
+
+        - item
+        - **bold**
+
+        </details>
+        """
+
+        XCTAssertEqual(MarkdownSourceProfileDetector.detect(input), .richHTML)
+    }
+
+    func testKeepsNonSafeRawHTMLWithMarkdownOnRichHTMLPath() {
+        let input = """
+        # Title
+
+        <div>
+        - item
+        </div>
+
+        ```swift
+        print("ok")
+        ```
+        """
+
+        XCTAssertEqual(MarkdownSourceProfileDetector.detect(input), .richHTML)
+    }
+
     func testDetectsPDFOCRScientificSource() {
         let input = """
         J\\left(x\\right)=\\frac{1}{2}

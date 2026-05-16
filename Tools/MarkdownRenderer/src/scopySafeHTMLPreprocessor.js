@@ -21,11 +21,16 @@ export function applySafeHTMLReplacements(html, replacements, renderMarkdown) {
   let output = String(html || "");
   const keys = Object.keys(replacements || {}).sort((a, b) => b.length - a.length);
   for (const key of keys) {
-    const rendered = renderSafeHTMLToken(replacements[key], renderMarkdown);
+    if (!output.includes(key)) {
+      continue;
+    }
     const paragraphPattern = new RegExp(`<p>\\s*${escapeRegExp(key)}\\s*<\\/p>`, "g");
-    output = output.replace(paragraphPattern, rendered);
+    output = output.replace(paragraphPattern, () => renderSafeHTMLToken(replacements[key], renderMarkdown));
   }
   for (const key of keys) {
+    if (!output.includes(key)) {
+      continue;
+    }
     const rendered = renderSafeHTMLToken(replacements[key], renderMarkdown);
     output = output.split(key).join(rendered);
   }
