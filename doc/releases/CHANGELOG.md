@@ -11,6 +11,32 @@
 
 - No unreleased entries.
 
+## [v0.8.1] - 2026-05-16
+
+### Markdown/Preview
+
+- Restored syntax highlighting in the unified Markdown renderer by adding `rehype-highlight` to the sanitized unified pipeline, producing the same `hljs` token classes already styled by Scopy's preview/export theme.
+- Kept highlighter auto-detection disabled so unlabeled fences, raw HTML examples, paths, shell variables, and prose-like code blocks remain literal instead of being rewritten by language guesses.
+- Added language aliases for common user-facing fence labels such as `sh`, `zsh`, `js`, `ts`, `tsx`, `md`, `py`, `yml`, and Objective-C labels.
+
+### Tests
+
+- Added JavaScript renderer coverage for highlighted fenced code and explicit plain-text fences.
+- Updated corpus expectations for shell code fences and Swift shell assertions for unified highlight-theme availability without reintroducing old `highlight.js` runtime scripts.
+
+### Verification
+
+- Markdown renderer Node test suite: 24 tests, 0 failures (2026-05-16).
+- Focused renderer probe: `swift` fence emits `hljs language-swift`; unlabeled raw HTML and `text` fences remain unhighlighted (2026-05-16).
+- `shasum -a 256 Scopy/Resources/MarkdownPreview/contrib/scopy-unified-renderer.iife.js`: matched `scopy-unified-renderer.iife.js.sha256` (2026-05-16).
+- Focused Swift renderer/corpus tests: Executed 5 tests, 0 failures (2026-05-16).
+- `make build`: passed (2026-05-16).
+- `make test-unit`: Executed 478 tests, 1 skipped, 0 failures (2026-05-16).
+- `make test-strict`: Executed 478 tests, 1 skipped, 0 failures (2026-05-16).
+- Focused Markdown preview/export UI coverage: Executed 2 tests, 0 failures (2026-05-16).
+- `make docs-validate`: Docs OK: v0.8.1 (2026-05-16).
+- `make release-validate`: OK: v0.8.1 (2026-05-16).
+
 ## [v0.8.0] - 2026-05-16
 
 ### Markdown/Preview

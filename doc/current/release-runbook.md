@@ -5,6 +5,8 @@ owner: maintainers
 last_reviewed: 2026-05-08
 canonical: true
 related_versions:
+  - v0.8.1
+  - v0.8.0
   - v0.7.8
   - v0.7.7
   - v0.7.6
@@ -33,6 +35,8 @@ related_versions:
 - `CFBundleShortVersionString = $(MARKETING_VERSION)`
 - `CFBundleVersion = $(CURRENT_PROJECT_VERSION)`
 - `scripts/version.sh` remains the build-time source for `MARKETING_VERSION` and `CURRENT_PROJECT_VERSION`.
+- Before the release tag exists on `HEAD`, `scripts/version.sh` intentionally resolves the nearest reachable release tag. A pre-tag `make release` is therefore only a Release-configuration compile smoke and must not be cited as evidence for the new target version.
+- Target-version release evidence starts after `make tag-release`: first verify `bash scripts/version.sh --xcodebuild-args` contains the target `MARKETING_VERSION`, then trust local tagged release builds or the GitHub tag workflow assets.
 - For post-release commits after the tagged release commit, version injection should inherit the nearest reachable release tag. Do not infer the current release from highest version-sort order, because historical tags such as `v0.64` can sort after newer chronological releases such as `v0.7.1`.
 - Release packaging must use `scripts/version.sh --tag` as the single resolver for both injected version settings and the DMG filename; if they disagree, stop packaging.
 
@@ -65,14 +69,14 @@ related_versions:
 
 ## Current Performance Evidence
 
-The current release `v0.7.8` does not add a dedicated release profile. Its release evidence lives in the release note because the changes are explicit UI/service action fixes and pagination behavior corrections rather than a broad performance tuning pass.
+The current release `v0.8.1` does not add a dedicated release profile. Its release evidence lives in the release note because the changes are constrained to the bundled Markdown renderer pipeline and generated preview/export asset rather than search, storage, thumbnail, or scrolling hot paths.
 
-- `make build`, `make test-unit`, and `make test-strict` passed on 2026-05-08 for the history action and pinned-pagination release.
-- Focused UI tests passed for storage-backed image AirDrop/Open Folder, inline-image AirDrop without Open Folder, and file AirDrop/Open Folder context menu visibility on 2026-05-08.
-- Focused unit coverage passed for inline image `fileURLs(itemID:)` temporary PNG generation on 2026-05-08.
+- `make build`, `make test-unit`, and `make test-strict` passed on 2026-05-16 for the Markdown code highlighting fix.
+- Focused Markdown preview/export UI tests passed on 2026-05-16.
+- The Markdown renderer Node test suite passed on 2026-05-16 and locks explicit-code highlighting without enabling language auto-detection.
 - The latest dedicated profile remains [v0.7.6](../perf/release-profiles/v0.7.6-profile.md), which used the real snapshot DB at `perf-db/clipboard.db` (6421 items / 148647936 bytes) for row descriptor and thumbnail scheduler evidence.
 
-Do not treat `v0.7.8` as a blanket frontend performance release. Use the v0.7.6 profile for row/thumbnail scheduler regression context and the v0.7.8 release note for file-action and pagination evidence.
+Do not treat `v0.8.1` as a blanket frontend performance release. Use the v0.7.6 profile for row/thumbnail scheduler regression context and the v0.8.1 release note for renderer-specific evidence.
 
 ## Homebrew Acceptance
 

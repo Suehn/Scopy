@@ -30,6 +30,23 @@ test("preserves supported custom plugin links without widening file URL links", 
   assert.doesNotMatch(fileURL.html, /href="file:\/\/\/Users\/ziyi\/a.md"/);
 });
 
+test("renders fenced code blocks with highlight.js compatible token classes", () => {
+  const result = render("```js\nconst answer = 42;\nconsole.log(`value=${answer}`);\n```");
+
+  assert.match(result.html, /<pre><code class="hljs language-js">/);
+  assert.match(result.html, /class="hljs-keyword"/);
+  assert.match(result.html, /class="hljs-number"/);
+  assert.match(result.html, /class="hljs-title function_"/);
+  assert.doesNotMatch(result.html, /<script>/);
+});
+
+test("keeps explicit plain text fences unhighlighted", () => {
+  const result = render("```text\nconst answer = 42;\n```");
+
+  assert.match(result.html, /<pre><code class="language-text">const answer = 42;\n<\/code><\/pre>/);
+  assert.doesNotMatch(result.html, /class="hljs/);
+});
+
 test("renders long Chinese reference-style markdown notes", () => {
   const result = render(`
 # 笔记：为什么宽基指数长期往往优于大多数主动投资

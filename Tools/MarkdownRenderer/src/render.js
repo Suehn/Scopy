@@ -1,3 +1,4 @@
+import rehypeHighlight from "rehype-highlight";
 import rehypeKatex from "rehype-katex";
 import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 import rehypeStringify from "rehype-stringify";
@@ -44,6 +45,7 @@ function renderInternal(source, policy = {}, depth = 0) {
   processor
     .use(remarkRehype, { allowDangerousHtml: false })
     .use(rehypeSanitize, scopySanitizeSchema)
+    .use(rehypeHighlight, scopyHighlightOptions)
     .use(rehypeKatex, { throwOnError: false, strict: "ignore" })
     .use(rehypeStringify);
 
@@ -72,6 +74,20 @@ const scopySanitizeSchema = {
   protocols: {
     ...defaultSchema.protocols,
     href: [...(defaultSchema.protocols?.href || []), "plugin"]
+  }
+};
+
+const scopyHighlightOptions = {
+  detect: false,
+  plainText: ["text", "txt", "plain", "plaintext"],
+  aliases: {
+    bash: ["sh", "shell", "zsh"],
+    javascript: ["js", "jsx"],
+    markdown: ["md"],
+    objectivec: ["objc", "objective-c"],
+    python: ["py"],
+    typescript: ["ts", "tsx"],
+    yaml: ["yml"]
   }
 };
 

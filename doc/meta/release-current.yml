@@ -1,6 +1,6 @@
-version: v0.8.0
+version: v0.8.1
 date: 2026-05-16
-release_doc: doc/releases/history/v0.8.0.md
+release_doc: doc/releases/history/v0.8.1.md
 release_index: doc/releases/README.md
 changelog_file: doc/releases/CHANGELOG.md
 profile_doc: null
@@ -9,7 +9,7 @@ spec_doc: doc/current/product-spec.md
 development_doc: doc/current/development-guide.md
 architecture_doc: doc/current/architecture.md
 last_verified_at: 2026-05-16
-summary: Unified Markdown renderer preview and export hardening
+summary: Unified Markdown code highlighting and theme parity fix
 verification:
   build: pass
   test_unit: pass

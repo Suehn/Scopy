@@ -22,7 +22,11 @@ final class UnifiedMarkdownRendererTests: XCTestCase {
         XCTAssertTrue(output.html.contains("window.__scopyIsRenderReady"))
         XCTAssertTrue(output.html.contains("window.__scopyRenderMath"))
         XCTAssertTrue(output.html.contains("katex.min.css"))
+        XCTAssertTrue(output.html.contains("--scopy-code-bg"))
+        XCTAssertTrue(output.html.contains(".hljs-keyword"))
         XCTAssertFalse(output.html.contains("markdown-it.min.js"))
+        XCTAssertFalse(output.html.contains("contrib/highlight.min.js"))
+        XCTAssertFalse(output.html.contains("highlight-github.min.css"))
     }
 
     func testUnifiedDocumentFallsBackWhenBundleAPIIsMissing() {

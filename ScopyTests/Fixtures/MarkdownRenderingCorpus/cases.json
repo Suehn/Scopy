@@ -128,7 +128,8 @@
     "allowLooseMathRepair": false,
     "unifiedContains": [
       "/Users/alice/project/file_v2.md:25",
-      "<code class=\"language-sh\">"
+      "<code class=\"hljs language-sh\">",
+      "class=\"hljs-built_in\">echo</span>"
     ],
     "unifiedNotContains": [
       "katex"

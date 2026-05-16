@@ -13,6 +13,7 @@ Use this skill for Scopy release cutovers. The goal is not just a tag: release c
 - Do not overwrite an existing release tag or replace assets under an existing tag. Bump the version for a repair release.
 - Keep `doc/meta/release-current.yml`, `doc/releases/README.md`, `doc/releases/CHANGELOG.md`, and `doc/releases/history/vX.Y.Z.md` together.
 - If there is no dedicated release profile, set `profile_doc: null` and make the release index current block say `Profile doc: none`.
+- Do not cite a pre-tag `make release` run as target-version release evidence. `make release` uses `scripts/version.sh`, which is tag-driven and resolves the nearest reachable tag before the new tag exists. For target-version release evidence, create the metadata tag first, then verify `bash scripts/version.sh --xcodebuild-args` prints the target `MARKETING_VERSION`, or use the GitHub tag workflow assets.
 - Local `make test-tsan` may skip on the known-bad `macOS 26.x + Xcode 26.2 (17C52)` runtime. Treat Hosted TSan on `macos-15 + Xcode 16.0` as the release concurrency coverage path.
 
 ## Documentation And Local Gates
@@ -56,6 +57,13 @@ Then create and push the tag from metadata:
 ```bash
 make tag-release
 make push-release
+```
+
+After `make tag-release` and before trusting any local release build, verify the tag-driven version resolver has moved to the target version:
+
+```bash
+bash scripts/release/tag-from-doc.sh --tag
+bash scripts/version.sh --xcodebuild-args
 ```
 
 If `make push-release` fails over SSH because the local proxy closes the connection, switch the remote to HTTPS or push over HTTPS with HTTP/1.1:
