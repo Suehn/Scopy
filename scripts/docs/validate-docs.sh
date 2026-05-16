@@ -55,6 +55,7 @@ for file_path in scan_files:
         continue
     text = resolved_path.read_text(encoding="utf-8")
     text = re.sub(r"\`\`\`[\s\S]*?\`\`\`", "", text)
+    text = re.sub(r"`[^`\n]*`", "", text)
     for target in link_re.findall(text):
         if target.startswith(("http://", "https://", "#", "mailto:")):
             continue
