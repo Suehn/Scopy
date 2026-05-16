@@ -13,11 +13,12 @@ enum MarkdownSourceProfileDetector {
         if isChatGPTMarkdown(sample) {
             return .chatGPTMarkdown
         }
+        let markdownScore = markdownSignalScore(sample)
+        if markdownScore >= 2 {
+            return .authoredMarkdown
+        }
         if isRichHTML(sample) {
             return .richHTML
-        }
-        if markdownSignalScore(sample) >= 2 {
-            return .authoredMarkdown
         }
         if isScientificMarkdown(sample) {
             return .scientificMarkdown

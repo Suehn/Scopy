@@ -34,6 +34,24 @@ final class MarkdownSourceProfileDetectorTests: XCTestCase {
         XCTAssertEqual(MarkdownSourceProfileDetector.detect(input), .authoredMarkdown)
     }
 
+    func testDetectsAuthoredMarkdownWithSafeHTMLIslandsBeforeRichHTML() {
+        let input = """
+        # Title
+
+        行内 HTML：<kbd>Cmd</kbd> + <mark>K</mark>
+
+        <details>
+        <summary>More</summary>
+
+        - item
+        - **bold**
+
+        </details>
+        """
+
+        XCTAssertEqual(MarkdownSourceProfileDetector.detect(input), .authoredMarkdown)
+    }
+
     func testDetectsLongReferenceStyleChineseNoteAsAuthoredMarkdown() {
         let input = """
         # 笔记：为什么宽基指数长期往往优于大多数主动投资

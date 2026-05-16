@@ -78,6 +78,30 @@ final class MarkdownPreviewRendererFacadeTests: XCTestCase {
         XCTAssertFalse(output.html.contains("markdown-it.min.js"))
     }
 
+    func testDefaultResolverCutsAuthoredSafeHTMLMarkdownToUnified() {
+        let input = """
+        # Title
+
+        行内 HTML：<kbd>Cmd</kbd> + <mark>K</mark>
+
+        <details>
+        <summary>More</summary>
+
+        - item
+        - **bold**
+
+        </details>
+        """
+
+        let context = MarkdownRenderContextResolver.defaultContext(for: input)
+        let output = MarkdownHTMLRenderer.render(markdown: input, context: context)
+
+        XCTAssertEqual(output.diagnostics.renderer, .unified)
+        XCTAssertEqual(output.diagnostics.profile, .authoredMarkdown)
+        XCTAssertTrue(output.html.contains("scopy-unified-renderer.iife.js"))
+        XCTAssertFalse(output.html.contains("markdown-it.min.js"))
+    }
+
     func testUnifiedContextResolverUsesConservativePolicyAndNamespace() {
         let input = """
         # Title

@@ -743,11 +743,15 @@ enum MarkdownHTMLDocumentBuilder {
                 var keys = Object.keys(safeHTMLMap || {}).sort(function (a, b) { return b.length - a.length; });
                 for (var i = 0; i < keys.length; i++) {
                   var key = keys[i];
+                  if (html.indexOf(key) === -1) { continue; }
                   var paragraphPattern = new RegExp('<p>\\\\s*' + escapeRegExp(key) + '\\\\s*<\\\\/p>', 'g');
-                  html = html.replace(paragraphPattern, renderSafeHTMLToken(key));
+                  html = html.replace(paragraphPattern, function () {
+                    return renderSafeHTMLToken(key);
+                  });
                 }
                 for (var j = 0; j < keys.length; j++) {
                   var token = keys[j];
+                  if (html.indexOf(token) === -1) { continue; }
                   html = html.split(token).join(renderSafeHTMLToken(token));
                 }
                 return html;

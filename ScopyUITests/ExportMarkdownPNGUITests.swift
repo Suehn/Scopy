@@ -1065,6 +1065,36 @@ final class ExportMarkdownPNGUITests: XCTestCase {
         )
     }
 
+    func testAutoExportSafeHTMLMarkdownUsesRenderedUnifiedPath() throws {
+        let markdownPath = fixturePath(relative: "Fixtures/markdown_safe_html_torture.md")
+        let dumpPath = "/tmp/scopy_uitest_export_safe_html_markdown.png"
+        let errorPath = "/tmp/scopy_uitest_export_safe_html_markdown_error.txt"
+
+        try? FileManager.default.removeItem(atPath: dumpPath)
+        try? FileManager.default.removeItem(atPath: errorPath)
+
+        let app = XCUIApplication()
+        app.launchArguments = ["--uitesting"]
+        app.launchEnvironment["SCOPY_UITEST_AUTO_EXPORT_MARKDOWN"] = "1"
+        app.launchEnvironment["SCOPY_UITEST_AUTO_EXPORT_MARKDOWN_PATH"] = markdownPath
+        app.launchEnvironment["SCOPY_EXPORT_DISABLE_PDF"] = "1"
+        app.launchEnvironment["SCOPY_EXPORT_DUMP_PATH"] = dumpPath
+        app.launchEnvironment["SCOPY_EXPORT_ERROR_DUMP_PATH"] = errorPath
+        app.launch()
+        defer { app.terminate() }
+
+        waitForExport(dumpPath: dumpPath, errorPath: errorPath, timeoutSeconds: 30)
+        try assertNoExportError(errorPath: errorPath)
+
+        let props = try readPNGProperties(atPath: dumpPath)
+        XCTAssertEqual(props.width, 1080)
+        XCTAssertGreaterThan(props.height, 1_200)
+        XCTAssertLessThan(props.height, 3_800)
+        XCTAssertGreaterThan(nonWhiteContentHeight(props.cgImage), 1_000)
+        XCTAssertLessThan(topWhitespaceRows(props.cgImage), 72)
+        XCTAssertLessThan(bottomWhitespaceRows(props.cgImage), 160)
+    }
+
     func testAutoExportLongMarkdownDenseLinksKeepsBottomMarkerVisible() throws {
         let markdownPath = "/tmp/scopy_uitest_export_long_markdown.md"
         let dumpPath = "/tmp/scopy_uitest_export_long_markdown.png"

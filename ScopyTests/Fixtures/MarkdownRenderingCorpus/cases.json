@@ -121,6 +121,23 @@
     "expectedRepairedMathCount": 0
   },
   {
+    "name": "safe-html-markdown",
+    "file": "safe-html-markdown.md",
+    "expectedProfile": "authoredMarkdown",
+    "expectedDefaultRenderer": "unified",
+    "allowLooseMathRepair": false,
+    "unifiedContains": [
+      "<details class=\"scopy-details\"",
+      "<summary>More</summary>",
+      "<kbd>Cmd</kbd>",
+      "language-swift"
+    ],
+    "unifiedNotContains": [
+      "<script>"
+    ],
+    "expectedRepairedMathCount": 0
+  },
+  {
     "name": "code-fence-paths",
     "file": "code-fence-paths.md",
     "expectedProfile": "authoredMarkdown",

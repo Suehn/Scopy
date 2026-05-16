@@ -43,6 +43,33 @@ print("ok")
         XCTAssertTrue(html.contains("mdOptions.highlight"))
     }
 
+    func testLegacySafeHTMLDetailsReplacementIsLazyToAvoidRecursiveRendering() {
+        let input = """
+<details>
+<summary>点击展开</summary>
+
+- <kbd>Cmd</kbd>
+- **强调**
+
+</details>
+"""
+
+        let base = MarkdownRenderContextResolver.defaultContext(for: input)
+        let context = MarkdownRenderContext(
+            renderer: .legacyMarkdownIt,
+            profile: .richHTML,
+            policy: base.policy,
+            policyVersion: MarkdownRenderContextResolver.conservativeLegacyPolicyVersion,
+            cacheNamespace: MarkdownRenderContextResolver.conservativeLegacyCacheNamespace
+        )
+
+        let html = MarkdownHTMLRenderer.render(markdown: input, context: context).html
+
+        XCTAssertTrue(html.contains("html.indexOf(key) === -1"))
+        XCTAssertTrue(html.contains("return renderSafeHTMLToken(key);"))
+        XCTAssertTrue(html.contains("<pre>点击展开"))
+    }
+
     func testMarkdownInlineLinksAreNotWrappedAsLooseParenMath() {
         let input = """
         **你最需要掌握的知识**

@@ -19,9 +19,9 @@ This page is the human-facing index for current release state. Automation should
 ## Current Release
 
 <!-- release-current:start -->
-- Version: `v0.8.1`
+- Version: `v0.8.2`
 - Date: `2026-05-16`
-- Release note: [v0.8.1](./history/v0.8.1.md)
+- Release note: [v0.8.2](./history/v0.8.2.md)
 - Changelog: [CHANGELOG.md](./CHANGELOG.md)
 - Profile doc: `none`
 <!-- release-current:end -->
@@ -29,6 +29,7 @@ This page is the human-facing index for current release state. Automation should
 ## Recent Releases
 
 <!-- release-recent:start -->
+- `2026-05-16` [v0.8.2](./history/v0.8.2.md) - Markdown safe HTML renderer routing and details export fix
 - `2026-05-16` [v0.8.1](./history/v0.8.1.md) - Unified Markdown code highlighting and theme parity fix
 - `2026-05-16` [v0.8.0](./history/v0.8.0.md) - Unified Markdown renderer preview and export hardening
 - `2026-05-09` [v0.7.9](./history/v0.7.9.md) - Search focus selection restoration and TSan host shortcut coverage fix
