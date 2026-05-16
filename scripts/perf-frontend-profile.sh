@@ -42,6 +42,12 @@ Options:
   --include-hover        Also run hover-preview profile smoke and require hover buckets
   -h, --help             Show this help
 
+Environment:
+  SCOPY_PROFILE_XCTEST_ITEM_QUERY=1
+                         Enable the extra XCUI row-count diagnostic. It is off
+                         by default because broad accessibility counts can hang
+                         the smoke gate on large real snapshot datasets.
+
 Outputs:
   <out>/raw/<variant>/*.json
   <out>/frontend-scroll-profile-summary.json

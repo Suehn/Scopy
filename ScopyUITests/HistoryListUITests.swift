@@ -381,7 +381,7 @@ final class HistoryListUITests: XCTestCase {
 
         let data = try Data(contentsOf: URL(fileURLWithPath: profilePath))
         var json = try JSONSerialization.jsonObject(with: data, options: []) as? [String: Any]
-        let accessibilityQuery = measureAccessibilityQuery()
+        let accessibilityQuery = measureAccessibilityQuery(listAlreadyFound: true)
         json?["xctest_accessibility_query"] = accessibilityQuery
         if let json,
            let updatedData = try? JSONSerialization.data(withJSONObject: json, options: [.prettyPrinted]) {
@@ -435,21 +435,25 @@ final class HistoryListUITests: XCTestCase {
         }
     }
 
-    private func measureAccessibilityQuery() -> [String: Any] {
-        let listStart = CFAbsoluteTimeGetCurrent()
-        let listExists = app.anyElement("History.List").exists
-        let listQueryMs = (CFAbsoluteTimeGetCurrent() - listStart) * 1000
+    private func measureAccessibilityQuery(listAlreadyFound: Bool) -> [String: Any] {
+        let enableUnboundedItemQuery = envValue("SCOPY_PROFILE_XCTEST_ITEM_QUERY") == "1"
+        var result: [String: Any] = [
+            "list_exists": listAlreadyFound,
+            "history_item_query_skipped": !enableUnboundedItemQuery
+        ]
+
+        guard enableUnboundedItemQuery else {
+            result["history_item_query_skip_reason"] = "disabled_unbounded_xcui_query"
+            return result
+        }
 
         let itemStart = CFAbsoluteTimeGetCurrent()
         let itemCount = app.anyElements(matching: NSPredicate(format: "identifier BEGINSWITH %@", "History.Item.")).count
         let itemQueryMs = (CFAbsoluteTimeGetCurrent() - itemStart) * 1000
 
-        return [
-            "list_exists": listExists,
-            "list_query_ms": listQueryMs,
-            "history_item_count": itemCount,
-            "history_item_query_ms": itemQueryMs
-        ]
+        result["history_item_count"] = itemCount
+        result["history_item_query_ms"] = itemQueryMs
+        return result
     }
 
     private func dragScroll(in element: XCUIElement, upward: Bool) {
