@@ -88,28 +88,7 @@ struct HistoryItemTextPreviewView: View {
                                 html: html,
                                 shouldScroll: shouldScroll,
                                 onContentSizeChange: { metrics in
-                                    guard model.markdownHTML == html else { return }
-                                    let newWidth = metrics.size.width
-                                    let newHeight = metrics.size.height
-                                    if let existing = model.markdownContentSize {
-                                        let existingWidth = existing.width
-                                        var width = existingWidth
-                                        if existingWidth < Self.minSaneMarkdownMeasuredWidth,
-                                           newWidth > existingWidth
-                                        {
-                                            width = newWidth
-                                        } else if newWidth > existingWidth + Self.markdownWidthGrowThreshold {
-                                            width = newWidth
-                                        } else if existingWidth <= 0, newWidth > 0 {
-                                            width = newWidth
-                                        }
-                                        model.markdownContentSize = CGSize(width: width, height: newHeight)
-                                    } else {
-                                        model.markdownContentSize = metrics.size
-                                    }
-                                    if metrics.hasHorizontalOverflow {
-                                        model.markdownHasHorizontalOverflow = true
-                                    }
+                                    applyMarkdownMetrics(metrics, html: html)
                                 }
                             )
                             .frame(width: width, height: clampedHeight)
@@ -119,28 +98,7 @@ struct HistoryItemTextPreviewView: View {
                                 html: html,
                                 shouldScroll: shouldScroll,
                                 onContentSizeChange: { metrics in
-                                    guard model.markdownHTML == html else { return }
-                                    let newWidth = metrics.size.width
-                                    let newHeight = metrics.size.height
-                                    if let existing = model.markdownContentSize {
-                                        let existingWidth = existing.width
-                                        var width = existingWidth
-                                        if existingWidth < Self.minSaneMarkdownMeasuredWidth,
-                                           newWidth > existingWidth
-                                        {
-                                            width = newWidth
-                                        } else if newWidth > existingWidth + Self.markdownWidthGrowThreshold {
-                                            width = newWidth
-                                        } else if existingWidth <= 0, newWidth > 0 {
-                                            width = newWidth
-                                        }
-                                        model.markdownContentSize = CGSize(width: width, height: newHeight)
-                                    } else {
-                                        model.markdownContentSize = metrics.size
-                                    }
-                                    if metrics.hasHorizontalOverflow {
-                                        model.markdownHasHorizontalOverflow = true
-                                    }
+                                    applyMarkdownMetrics(metrics, html: html)
                                 }
                             )
                             .frame(width: width, height: clampedHeight)
@@ -154,6 +112,14 @@ struct HistoryItemTextPreviewView: View {
                             .padding(ScopySpacing.sm)
                     }
                     .accessibilityIdentifier("History.Preview.Container")
+                    .background {
+                        if isUITesting {
+                            Text(model.markdownRenderSucceeded ? "rendered" : (model.markdownRenderErrorReason ?? "pending"))
+                                .font(.system(size: 1))
+                                .opacity(0.001)
+                                .accessibilityIdentifier("History.Preview.RenderStatus")
+                        }
+                    }
                     .accessibilityElement(children: .contain)
                     .frame(width: width, height: clampedHeight)
                 } else {
@@ -199,6 +165,40 @@ struct HistoryItemTextPreviewView: View {
 
     private var isUITesting: Bool {
         ProcessInfo.processInfo.arguments.contains("--uitesting")
+    }
+
+    private func applyMarkdownMetrics(_ metrics: MarkdownContentMetrics, html: String) {
+        guard model.markdownHTML == html else { return }
+        guard metrics.renderSucceeded else {
+            model.markdownRenderSucceeded = false
+            model.markdownRenderErrorReason = metrics.renderErrorReason ?? "markdown render failed"
+            return
+        }
+
+        model.markdownRenderSucceeded = true
+        model.markdownRenderErrorReason = nil
+
+        let newWidth = metrics.size.width
+        let newHeight = metrics.size.height
+        if let existing = model.markdownContentSize {
+            let existingWidth = existing.width
+            var width = existingWidth
+            if existingWidth < Self.minSaneMarkdownMeasuredWidth,
+               newWidth > existingWidth
+            {
+                width = newWidth
+            } else if newWidth > existingWidth + Self.markdownWidthGrowThreshold {
+                width = newWidth
+            } else if existingWidth <= 0, newWidth > 0 {
+                width = newWidth
+            }
+            model.markdownContentSize = CGSize(width: width, height: newHeight)
+        } else {
+            model.markdownContentSize = metrics.size
+        }
+        if metrics.hasHorizontalOverflow {
+            model.markdownHasHorizontalOverflow = true
+        }
     }
 
     private static func initialExportResolutionPercent() -> Int {

@@ -34,6 +34,21 @@ final class MarkdownSourceProfileDetectorTests: XCTestCase {
         XCTAssertEqual(MarkdownSourceProfileDetector.detect(input), .authoredMarkdown)
     }
 
+    func testDetectsLongReferenceStyleChineseNoteAsAuthoredMarkdown() {
+        let input = """
+        # 笔记：为什么宽基指数长期往往优于大多数主动投资
+
+        **先把结论说准确。**
+        更严谨的说法不是“宽基指数在大多数年份都赢主动投资”，而是：**在足够长的持有期里，传统、低成本、宽分散的指数基金，通常会跑赢大多数主动基金。**([投资者.gov][1])
+
+        ## 一、先把概念讲清楚
+
+        [1]: https://www.investor.gov/introduction-investing/investing-basics/glossary/index-fund "Index Fund | Investor.gov"
+        """
+
+        XCTAssertEqual(MarkdownSourceProfileDetector.detect(input), .authoredMarkdown)
+    }
+
     func testDetectsRichHTML() {
         let input = """
         <details open>

@@ -9,6 +9,8 @@ final class HoverPreviewModel: ObservableObject {
     @Published var markdownHTML: String?
     @Published var markdownContentSize: CGSize?
     @Published var markdownHasHorizontalOverflow: Bool = false
+    @Published var markdownRenderSucceeded: Bool = false
+    @Published var markdownRenderErrorReason: String?
     @Published var isMarkdown: Bool = false
 
     // Export state
@@ -24,6 +26,8 @@ final class HoverPreviewModel: ObservableObject {
         markdownHTML = nil
         markdownContentSize = nil
         markdownHasHorizontalOverflow = false
+        markdownRenderSucceeded = false
+        markdownRenderErrorReason = nil
         isMarkdown = false
         isExporting = false
         exportSuccess = false

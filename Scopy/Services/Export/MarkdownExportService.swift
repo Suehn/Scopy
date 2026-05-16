@@ -1505,12 +1505,19 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
             var fonts = 'n/a';
             try { fonts = (document.fonts && document.fonts.status) ? document.fonts.status : 'n/a'; } catch (e) { fonts = 'n/a'; }
             var renderReady = true;
+            var renderFailed = false;
+            var renderErrorReason = '';
             var highlightThemeReady = false;
             try {
               if (typeof window.__scopyIsRenderReady === 'function') {
                 renderReady = !!window.__scopyIsRenderReady();
               }
             } catch (e) { renderReady = true; }
+            try {
+              var state = window.__scopyRenderState || {};
+              renderFailed = !!state.renderFailed;
+              renderErrorReason = state.unifiedErrorReason || '';
+            } catch (e) { renderFailed = false; renderErrorReason = ''; }
             try {
               highlightThemeReady = !!(window.__scopyRenderState && window.__scopyRenderState.highlightThemeReady);
             } catch (e) { highlightThemeReady = false; }
@@ -1519,6 +1526,8 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
               height: Math.ceil(h || 0),
               fonts: fonts,
               renderReady: renderReady,
+              renderFailed: renderFailed,
+              renderErrorReason: renderErrorReason,
               highlightThemeReady: highlightThemeReady
             });
           } catch (e) {
@@ -1552,6 +1561,15 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
             let parsedHeight = Self.parseHeightFromMeasureValue(value)
             let fontsStatus = Self.parseFontsStatusFromMeasureValue(value)
             let renderReady = Self.parseRenderReadyFromMeasureValue(value)
+            if Self.parseRenderFailedFromMeasureValue(value) {
+                let reason = Self.parseRenderErrorReasonFromMeasureValue(value) ?? "Markdown renderer failed"
+                let error = NSError(
+                    domain: "Scopy.MarkdownExport",
+                    code: 1,
+                    userInfo: [NSLocalizedDescriptionKey: reason]
+                )
+                throw MarkdownExportService.ExportError.stageFailed(stage: .prepareLayout, underlying: error)
+            }
             if fontsStatus == "loaded" { fontsWereLoaded = true }
             if parsedHeight > 0 {
                 lastObservedHeight = parsedHeight
@@ -1798,6 +1816,30 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
         return false
     }
 
+    nonisolated private static func parseRenderFailedFromMeasureValue(_ value: String) -> Bool {
+        guard let data = value.data(using: .utf8),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return false }
+
+        if let failed = obj["renderFailed"] as? Bool { return failed }
+        if let number = obj["renderFailed"] as? NSNumber { return number.boolValue }
+        if let string = obj["renderFailed"] as? String {
+            let lowered = string.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            return lowered == "true" || lowered == "1" || lowered == "yes"
+        }
+        return false
+    }
+
+    nonisolated private static func parseRenderErrorReasonFromMeasureValue(_ value: String) -> String? {
+        guard let data = value.data(using: .utf8),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let reason = obj["renderErrorReason"] as? String
+        else { return nil }
+
+        let trimmed = reason.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
     private func layoutDebugInfo(webView: WKWebView) async throws -> String {
         let js = """
         (function() {
@@ -1816,7 +1858,9 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
               bodyScrollHeight: (document.body && document.body.scrollHeight) ? document.body.scrollHeight : 0,
               documentScrollHeight: (document.documentElement && document.documentElement.scrollHeight) ? document.documentElement.scrollHeight : 0,
               contentScrollHeight: (c && c.scrollHeight) ? c.scrollHeight : 0,
-              contentRectHeight: (c && c.getBoundingClientRect) ? Math.ceil(c.getBoundingClientRect().height || 0) : 0
+              contentRectHeight: (c && c.getBoundingClientRect) ? Math.ceil(c.getBoundingClientRect().height || 0) : 0,
+              renderFailed: !!(window.__scopyRenderState && window.__scopyRenderState.renderFailed),
+              renderErrorReason: (window.__scopyRenderState && window.__scopyRenderState.unifiedErrorReason) ? window.__scopyRenderState.unifiedErrorReason : ''
             };
             return JSON.stringify(info);
           } catch (e) {

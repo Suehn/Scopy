@@ -866,7 +866,7 @@ enum MarkdownHTMLDocumentBuilder {
     static func unifiedDocument(markdown: String, context: MarkdownRenderContext) -> String {
         let markdownLiteral = jsonLiteral(markdown)
         let policyLiteral = jsonLiteral(unifiedPolicyPayload(context: context))
-        let fallback = escapeHTML(markdown)
+        let overflowSelectorLiteral = jsonStringLiteral(MarkdownRenderFeatureSet.scopyDefault.overflowProbeSelector)
 
         return """
         <!doctype html>
@@ -877,61 +877,14 @@ enum MarkdownHTMLDocumentBuilder {
             \(cspMetaTag)
             <link rel="stylesheet" href="katex.min.css">
             <script defer src="contrib/scopy-unified-renderer.iife.js"></script>
-            <style>
-              body {
-                margin: 0;
-                padding: 0;
-                font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
-                font-size: 15px;
-                line-height: 1.65;
-                color: #0f172a;
-                background: #eef2f7;
-              }
-              * { box-sizing: border-box; }
-              #content {
-                padding: 20px 18px;
-                max-width: 100%;
-                word-break: break-word;
-                background: #ffffff;
-                border: 1px solid rgba(15, 23, 42, 0.09);
-                border-radius: 18px;
-                box-shadow: 0 14px 38px rgba(15, 23, 42, 0.08);
-              }
-              pre, code { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
-              pre {
-                padding: 14px 16px;
-                border-radius: 12px;
-                overflow-x: auto;
-                background: #f6f8fb;
-              }
-              img { max-width: 100%; height: auto; }
-              a {
-                pointer-events: none;
-                color: #0a66d9;
-                text-decoration: underline;
-                text-underline-offset: 0.14em;
-              }
-              table {
-                display: block;
-                border-collapse: collapse;
-                max-width: 100%;
-                overflow-x: auto;
-              }
-              th, td {
-                border: 1px solid rgba(127,127,127,0.25);
-                padding: 8px 10px;
-              }
-              .katex-display {
-                max-width: 100%;
-                overflow-x: auto;
-                overflow-y: hidden;
-              }
-            </style>
+            \(baseStyle(featureSet: MarkdownRenderFeatureSet.scopyDefault))
             <script>
               (function () {
                 window.__scopyRenderState = window.__scopyRenderState || {
                   renderComplete: false,
                   markdownRendered: false,
+                  renderFailed: false,
+                  unifiedRenderSucceeded: false,
                   renderPass: 0
                 };
                 var lastH = 0;
@@ -941,7 +894,7 @@ enum MarkdownHTMLDocumentBuilder {
                 window.__scopyIsRenderReady = function () {
                   try {
                     var state = window.__scopyRenderState || {};
-                    return !!state.renderComplete && !!state.markdownRendered;
+                    return !!state.renderComplete && !!state.markdownRendered && !state.renderFailed && state.unifiedRenderSucceeded !== false;
                   } catch (e) {
                     return false;
                   }
@@ -958,25 +911,72 @@ enum MarkdownHTMLDocumentBuilder {
                     if (!el) { return; }
                     var rect = el.getBoundingClientRect();
                     var w = Math.ceil(rect.width || 0);
-                    var h = Math.ceil(Math.max(rect.height || 0, el.scrollHeight || 0));
+                    var sh = Math.ceil(el.scrollHeight || 0);
+                    var h = Math.ceil(Math.max(rect.height || 0, sh));
+                    var overflowX = false;
+                    try {
+                      var nodes = el.querySelectorAll(\(overflowSelectorLiteral));
+                      for (var i = 0; i < nodes.length; i++) {
+                        var n = nodes[i];
+                        if (!n) { continue; }
+                        var cw = n.clientWidth || 0;
+                        var sw = n.scrollWidth || 0;
+                        if (cw > 0 && (sw - cw) > 1) {
+                          overflowX = true;
+                          break;
+                        }
+                      }
+                      if (!overflowX) {
+                        var se = document.scrollingElement || document.documentElement;
+                        overflowX = !!se && ((se.scrollWidth || 0) - (se.clientWidth || 0) > 2);
+                      }
+                    } catch (e) {
+                      overflowX = false;
+                    }
                     if (!h) { return; }
                     if (!force && Math.abs(h - lastH) < 1 && Math.abs(w - lastW) < 1) { return; }
                     lastH = h;
                     lastW = w;
-                    window.webkit.messageHandlers.scopySize.postMessage({ width: w, height: h, overflowX: false });
+                    var state = window.__scopyRenderState || {};
+                    window.webkit.messageHandlers.scopySize.postMessage({
+                      width: w,
+                      height: h,
+                      overflowX: overflowX,
+                      renderSucceeded: !state.renderFailed && !!state.markdownRendered && state.unifiedRenderSucceeded !== false,
+                      renderErrorReason: state.unifiedErrorReason || ''
+                    });
                   } catch (e) { }
                 };
-                function finish() {
+                function finish(succeeded) {
+                  var el = document.getElementById('content');
+                  if (el) {
+                    try { el.style.opacity = '1'; } catch (e) { }
+                  }
                   try {
                     if (window.__scopyRenderState) {
-                      window.__scopyRenderState.markdownRendered = true;
+                      window.__scopyRenderState.markdownRendered = !!succeeded;
                       window.__scopyRenderState.renderComplete = true;
                     }
                   } catch (e) { }
                   if (typeof window.__scopyReportHeight === 'function') {
                     window.__scopyReportHeight(true);
-                    setTimeout(function () { window.__scopyReportHeight(true); }, 120);
+                    setTimeout(function () {
+                      window.__scopyReportHeight(true);
+                    }, 120);
                   }
+                }
+                function failUnifiedRender(reason) {
+                  var el = document.getElementById('content');
+                  if (!el) { return; }
+                  try {
+                    if (window.__scopyRenderState) {
+                      window.__scopyRenderState.unifiedErrorReason = reason || 'unified render failed';
+                      window.__scopyRenderState.renderFailed = true;
+                      window.__scopyRenderState.unifiedRenderSucceeded = false;
+                    }
+                  } catch (e) { }
+                  el.innerHTML = '<p class="scopy-render-error">Markdown renderer failed to load.</p>';
+                  finish(false);
                 }
                 function renderUnified() {
                   var el = document.getElementById('content');
@@ -985,19 +985,16 @@ enum MarkdownHTMLDocumentBuilder {
                     if (window.__scopyRenderState) {
                       window.__scopyRenderState.renderComplete = false;
                       window.__scopyRenderState.markdownRendered = false;
+                      window.__scopyRenderState.renderFailed = false;
+                      window.__scopyRenderState.unifiedRenderSucceeded = false;
+                      window.__scopyRenderState.unifiedErrorReason = '';
                       window.__scopyRenderState.renderPass = (window.__scopyRenderState.renderPass || 0) + 1;
                     }
                   } catch (e) { }
                   if (!window.ScopyUnifiedMarkdown || typeof window.ScopyUnifiedMarkdown.render !== 'function') {
                     unifiedRenderAttempts += 1;
                     if (unifiedRenderAttempts >= maxUnifiedRenderAttempts) {
-                      try {
-                        if (window.__scopyRenderState) {
-                          window.__scopyRenderState.unifiedFallbackReason = 'unified api missing';
-                        }
-                      } catch (e) { }
-                      el.innerHTML = '<pre>\(fallback)</pre>';
-                      finish();
+                      failUnifiedRender('unified api missing');
                       return;
                     }
                     setTimeout(renderUnified, 30);
@@ -1006,11 +1003,20 @@ enum MarkdownHTMLDocumentBuilder {
                   unifiedRenderAttempts = 0;
                   try {
                     var result = window.ScopyUnifiedMarkdown.render(\(markdownLiteral), \(policyLiteral));
-                    el.innerHTML = result && result.html ? result.html : '<pre>\(fallback)</pre>';
+                    if (result && result.html) {
+                      el.innerHTML = result.html;
+                      if (window.__scopyRenderState) {
+                        window.__scopyRenderState.unifiedRenderSucceeded = true;
+                      }
+                    } else {
+                      failUnifiedRender('unified returned empty html');
+                      return;
+                    }
                   } catch (e) {
-                    el.innerHTML = '<pre>\(fallback)</pre>';
+                    failUnifiedRender('unified render exception');
+                    return;
                   }
-                  finish();
+                  finish(true);
                 }
                 if (document.readyState === 'loading') {
                   document.addEventListener('DOMContentLoaded', renderUnified);
@@ -1021,7 +1027,7 @@ enum MarkdownHTMLDocumentBuilder {
             </script>
           </head>
           <body>
-            <div id="content"><pre>\(fallback)</pre></div>
+            <div id="content"></div>
           </body>
         </html>
         """

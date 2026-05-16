@@ -11,6 +11,37 @@
 
 - No unreleased entries.
 
+## [v0.8.0] - 2026-05-16
+
+### Markdown/Preview
+
+- Hardened hover Markdown preview so the unified renderer must report successful readiness before Scopy caches or presents rendered Markdown.
+- Fixed the unified sanitizer to preserve trusted `plugin://` deep links while continuing to strip unsafe local file links.
+- Added render-status liveness checks so stale hover work cannot overwrite the currently hovered row or cache a failed render as valid HTML.
+
+### Markdown/Export
+
+- Markdown PNG export now treats unified renderer failures as explicit prepare-layout failures instead of silently exporting raw Markdown fallback content.
+- Export diagnostics now include the renderer success/error state, making preview/export failures traceable to the unified renderer contract.
+
+### Tests
+
+- Added unit coverage for hover-preview liveness policy, long authored Chinese Markdown detection, renderer sanitizer behavior, and unified-renderer failure states.
+- Added UI coverage requiring Markdown preview popovers to reach the rendered status before assertions, including a long text Markdown fixture.
+
+### Verification
+
+- `git diff --check`: passed (2026-05-16).
+- Markdown renderer Node test suite: 22 tests, 0 failures (2026-05-16).
+- `make build`: passed (2026-05-16).
+- `make test-unit`: Executed 478 tests, 1 skipped, 0 failures (2026-05-16).
+- `make test-strict`: Executed 478 tests, 1 skipped, 0 failures (2026-05-16).
+- Focused Markdown preview UI coverage passed for Markdown file and long Markdown text popovers (2026-05-16).
+- Focused Markdown export UI coverage generated a PNG export artifact (2026-05-16).
+- `make release`: release build passed (2026-05-16).
+- `make docs-validate`: Docs OK: v0.8.0 (2026-05-16).
+- `make release-validate`: OK: v0.8.0 (2026-05-16).
+
 ## [v0.7.9] - 2026-05-09
 
 ### UX

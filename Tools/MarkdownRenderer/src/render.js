@@ -1,5 +1,5 @@
 import rehypeKatex from "rehype-katex";
-import rehypeSanitize from "rehype-sanitize";
+import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 import rehypeStringify from "rehype-stringify";
 import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
@@ -43,7 +43,7 @@ function renderInternal(source, policy = {}, depth = 0) {
     });
   processor
     .use(remarkRehype, { allowDangerousHtml: false })
-    .use(rehypeSanitize)
+    .use(rehypeSanitize, scopySanitizeSchema)
     .use(rehypeKatex, { throwOnError: false, strict: "ignore" })
     .use(rehypeStringify);
 
@@ -66,6 +66,14 @@ function renderInternal(source, policy = {}, depth = 0) {
     }
   };
 }
+
+const scopySanitizeSchema = {
+  ...defaultSchema,
+  protocols: {
+    ...defaultSchema.protocols,
+    href: [...(defaultSchema.protocols?.href || []), "plugin"]
+  }
+};
 
 function normalizePolicy(policy) {
   return {

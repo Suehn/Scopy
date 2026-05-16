@@ -58,12 +58,18 @@ private enum MarkdownPreviewMessageParser {
 
         var size: CGSize?
         var overflowX: Bool = false
+        var renderSucceeded: Bool = true
+        var renderErrorReason: String?
         if let dict = message.body as? [String: Any] {
             size = parseSize(from: dict)
             overflowX = parseOverflow(from: dict["overflowX"])
+            renderSucceeded = parseRenderSucceeded(from: dict["renderSucceeded"])
+            renderErrorReason = parseString(from: dict["renderErrorReason"])
         } else if let dict = message.body as? NSDictionary {
             size = CGSize(width: cgFloat(from: dict["width"]), height: cgFloat(from: dict["height"]))
             overflowX = parseOverflow(from: dict["overflowX"])
+            renderSucceeded = parseRenderSucceeded(from: dict["renderSucceeded"])
+            renderErrorReason = parseString(from: dict["renderErrorReason"])
         } else if let n = message.body as? NSNumber {
             // Backward-compatible: height-only payload.
             size = CGSize(width: 0, height: CGFloat(truncating: n))
@@ -72,7 +78,12 @@ private enum MarkdownPreviewMessageParser {
         guard let size else { return nil }
         guard size.width.isFinite, size.height.isFinite else { return nil }
         guard size.height > 0 else { return nil }
-        return MarkdownContentMetrics(size: size, hasHorizontalOverflow: overflowX)
+        return MarkdownContentMetrics(
+            size: size,
+            hasHorizontalOverflow: overflowX,
+            renderSucceeded: renderSucceeded,
+            renderErrorReason: renderErrorReason
+        )
     }
 
     private static func parseSize(from dict: [String: Any]) -> CGSize {
@@ -86,6 +97,16 @@ private enum MarkdownPreviewMessageParser {
         if let n = value as? NSNumber { return n.boolValue }
         if let s = value as? String { return s == "true" || s == "1" }
         return false
+    }
+
+    private static func parseRenderSucceeded(from value: Any?) -> Bool {
+        guard let value else { return true }
+        return parseOverflow(from: value)
+    }
+
+    private static func parseString(from value: Any?) -> String? {
+        guard let s = value as? String else { return nil }
+        return s.isEmpty ? nil : s
     }
 
     private static func cgFloat(from any: Any?) -> CGFloat {
@@ -153,6 +174,20 @@ enum MarkdownPreviewNavigationPolicy {
 struct MarkdownContentMetrics: Equatable {
     let size: CGSize
     let hasHorizontalOverflow: Bool
+    let renderSucceeded: Bool
+    let renderErrorReason: String?
+
+    init(
+        size: CGSize,
+        hasHorizontalOverflow: Bool,
+        renderSucceeded: Bool = true,
+        renderErrorReason: String? = nil
+    ) {
+        self.size = size
+        self.hasHorizontalOverflow = hasHorizontalOverflow
+        self.renderSucceeded = renderSucceeded
+        self.renderErrorReason = renderErrorReason
+    }
 }
 
 struct MarkdownPreviewWebView: NSViewRepresentable {

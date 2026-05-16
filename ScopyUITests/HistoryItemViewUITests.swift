@@ -115,6 +115,29 @@ final class HistoryItemViewUITests: XCTestCase {
             filePreviewFound || textPreviewFound,
             "Expected Markdown file preview popover to appear; activePopover=\(activePopover) popoverRequest=\(popoverRequest) selectCount=\(selectCount)"
         )
+        XCTAssertTrue(
+            app.anyElement("History.Preview.Container").waitForExistence(timeout: 5),
+            "Expected Markdown file preview to upgrade from raw placeholder text into rendered Markdown"
+        )
+        waitForValue("rendered", identifier: "History.Preview.RenderStatus", timeout: 8)
+    }
+
+    func testLongMarkdownTextScenarioShowsRenderedPreviewPopover() throws {
+        launchHarness(scenario: "long-markdown-text", openPreviewOnTap: true)
+
+        XCTAssertTrue(app.anyElement("UITest.HistoryItemHarness").waitForExistence(timeout: 10))
+        let textPreviewFound = triggerPreview("History.Preview.Text")
+        let activePopover = displayedText(identifier: "UITest.HistoryItemHarness.ActivePopover") ?? "<missing>"
+        let popoverRequest = displayedText(identifier: "UITest.HistoryItemHarness.PopoverRequest") ?? "<missing>"
+        XCTAssertTrue(
+            textPreviewFound,
+            "Expected long Markdown text preview popover to appear; activePopover=\(activePopover) popoverRequest=\(popoverRequest)"
+        )
+        XCTAssertTrue(
+            app.anyElement("History.Preview.Container").waitForExistence(timeout: 5),
+            "Expected long Markdown text preview to upgrade into rendered unified Markdown"
+        )
+        waitForValue("rendered", identifier: "History.Preview.RenderStatus", timeout: 8)
     }
 
     func testPlainTextScenarioHidesExportPNGInContextMenu() throws {

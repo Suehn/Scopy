@@ -22,6 +22,35 @@ test("renders GFM links, tables, task lists, and dollar math", () => {
   assert.match(result.html, /katex/);
 });
 
+test("preserves supported custom plugin links without widening file URL links", () => {
+  const plugin = render("[@电脑](plugin://computer-use@openai-bundled)");
+  const fileURL = render("[file](file:///Users/ziyi/a.md)");
+
+  assert.match(plugin.html, /href="plugin:\/\/computer-use@openai-bundled"/);
+  assert.doesNotMatch(fileURL.html, /href="file:\/\/\/Users\/ziyi\/a.md"/);
+});
+
+test("renders long Chinese reference-style markdown notes", () => {
+  const result = render(`
+# 笔记：为什么宽基指数长期往往优于大多数主动投资
+
+**先把结论说准确。**
+更严谨的说法不是“宽基指数在大多数年份都赢主动投资”，而是：**在足够长的持有期里，传统、低成本、宽分散的指数基金，通常会跑赢大多数主动基金。**([投资者.gov][1])
+
+## 一、先把概念讲清楚：这里说的“宽基指数”到底是什么
+
+这份笔记里，我把“宽基指数”限定为：**跟踪传统、覆盖面较广、分散程度较高的市场指数基金**。
+
+[1]: https://www.investor.gov/introduction-investing/investing-basics/glossary/index-fund "Index Fund | Investor.gov"
+`);
+
+  assert.equal(result.metadata.renderer, "unified");
+  assert.match(result.html, /<h1>笔记：为什么宽基指数长期往往优于大多数主动投资<\/h1>/);
+  assert.match(result.html, /<strong>先把结论说准确。<\/strong>/);
+  assert.match(result.html, /href="https:\/\/www.investor.gov\/introduction-investing\/investing-basics\/glossary\/index-fund"/);
+  assert.doesNotMatch(result.html, /^# 笔记/m);
+});
+
 test("preserves safe HTML subset but still removes unsafe raw HTML", () => {
   const result = render("<script>alert(1)</script>\n\n<details><summary>x</summary>y</details>");
 

@@ -11,6 +11,7 @@ struct HistoryItemHarnessView: View {
         case file
         case markdownFile = "markdown-file"
         case markdownText = "markdown-text"
+        case longMarkdownText = "long-markdown-text"
         case plainText = "plain-text"
     }
 
@@ -263,6 +264,39 @@ Inline math: $E = mc^2$.[^harness]
                 lastUsedAt: now.addingTimeInterval(-30),
                 isPinned: false,
                 sizeBytes: 512,
+                fileSizeBytes: nil,
+                thumbnailPath: nil,
+                storageRef: nil
+            )
+        case .longMarkdownText:
+            return ClipboardItemDTO(
+                id: UUID(),
+                type: .text,
+                contentHash: "history-item-harness-long-markdown",
+                plainText: """
+                # 笔记：为什么宽基指数长期往往优于大多数主动投资，但很多人仍然不这么做
+
+                **先把结论说准确。**
+                更严谨的说法不是“宽基指数在大多数年份都赢主动投资”，而是：**在足够长的持有期里，传统、低成本、宽分散的指数基金，通常会跑赢大多数主动基金。**([投资者.gov][1])
+
+                ## 一、先把概念讲清楚：这里说的“宽基指数”到底是什么
+
+                这份笔记里，我把“宽基指数”限定为：**跟踪传统、覆盖面较广、分散程度较高的市场指数基金**。
+
+                ## 二、为什么“宽基指数长期往往优于大多数主动投资”这句话通常成立
+
+                ### 1）这首先是一个**算术事实**，不是一句投资口号
+
+                William Sharpe 那篇极有名的《The Arithmetic of Active Management》讲得很直白。
+
+                [1]: https://www.investor.gov/introduction-investing/investing-basics/glossary/index-fund "Index Fund | Investor.gov"
+                """,
+                note: nil,
+                appBundleID: "com.scopy.tests",
+                createdAt: now.addingTimeInterval(-260),
+                lastUsedAt: now.addingTimeInterval(-32),
+                isPinned: false,
+                sizeBytes: 1_024,
                 fileSizeBytes: nil,
                 thumbnailPath: nil,
                 storageRef: nil

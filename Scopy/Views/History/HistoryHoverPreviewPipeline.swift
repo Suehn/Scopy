@@ -278,12 +278,14 @@ enum HistoryHoverPreviewPipeline {
     static func makeMarkdownRenderTask(
         request: MarkdownRenderRequest,
         isCurrent: @escaping @MainActor () -> Bool,
-        emit: @escaping @MainActor (Event) -> Void
+        emit: @escaping @MainActor (Event) -> Void,
+        renderMarkdownHTML: @escaping @Sendable (String, MarkdownRenderContext) async -> String = { source, context in
+            await HistoryHoverPreviewPipeline.renderMarkdownHTML(source, context: context)
+        }
     ) -> Task<Void, Never> {
         Task(priority: .utility) {
             guard !Task.isCancelled else { return }
-            guard await MainActor.run(body: isCurrent) else { return }
-            let html = await renderMarkdownHTML(request.source, context: request.context)
+            let html = await renderMarkdownHTML(request.source, request.context)
             guard !Task.isCancelled, !html.isEmpty else { return }
             updateMarkdownCache(html: html, request: request)
             await MainActor.run {

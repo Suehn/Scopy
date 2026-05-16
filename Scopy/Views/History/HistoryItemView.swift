@@ -321,6 +321,30 @@ struct HistoryItemView: View, Equatable {
         descriptor.showThumbnails
     }
 
+    private func isHoverPreviewRequestCurrent(allowPresentedPopover: Bool = false) -> Bool {
+        HoverPreviewLivenessPolicy.isRequestCurrent(
+            isTaskCancelled: Task.isCancelled,
+            isPreviewInteractionSuppressed: isPreviewInteractionSuppressed,
+            isRowHovering: isHovering,
+            isPopoverHovering: isPopoverHovering,
+            isTextPreviewPresented: isTextPreviewPresented,
+            isFilePreviewPresented: isFilePreviewPresented,
+            allowPresentedPopover: allowPresentedPopover
+        )
+    }
+
+    private func isMarkdownRenderCurrent(source: String) -> Bool {
+        HoverPreviewLivenessPolicy.isMarkdownRenderCurrent(
+            isTaskCancelled: Task.isCancelled,
+            isPreviewInteractionSuppressed: isPreviewInteractionSuppressed,
+            isRowHovering: isHovering,
+            isPopoverHovering: isPopoverHovering,
+            isTextPreviewPresented: isTextPreviewPresented,
+            isFilePreviewPresented: isFilePreviewPresented,
+            sourceMatchesPreviewText: previewModel.text == source
+        )
+    }
+
     private var filePreviewInfo: FilePreviewInfo? {
         descriptor.filePreviewInfo
     }
@@ -800,7 +824,6 @@ struct HistoryItemView: View, Equatable {
         } else {
             isHoveringOptimizeButton = false
             // v0.24: popover 出现/消失时可能短暂触发 hover false，做 120ms 退出防抖
-            cancelPreviewTask()
             scheduleHoverExitCleanup()
         }
     }
@@ -836,6 +859,11 @@ struct HistoryItemView: View, Equatable {
                     guard self.isHovering else { return }
                     guard self.previewModel.markdownHTML == html else { return }
                     guard self.previewModel.text == text else { return }
+                    guard metrics.renderSucceeded else {
+                        self.previewModel.markdownRenderSucceeded = false
+                        self.previewModel.markdownRenderErrorReason = metrics.renderErrorReason ?? "markdown render failed"
+                        return
+                    }
                     let stableWidth: CGFloat = {
                         let w = metrics.size.width
                         guard w.isFinite, w > 0 else { return fallbackWidth }
@@ -847,6 +875,8 @@ struct HistoryItemView: View, Equatable {
                     let stableMetrics = MarkdownContentMetrics(size: stableSize, hasHorizontalOverflow: metrics.hasHorizontalOverflow)
                     self.previewModel.markdownContentSize = stableMetrics.size
                     self.previewModel.markdownHasHorizontalOverflow = stableMetrics.hasHorizontalOverflow
+                    self.previewModel.markdownRenderSucceeded = true
+                    self.previewModel.markdownRenderErrorReason = nil
                     if !cacheKey.isEmpty {
                         MarkdownPreviewCache.shared.setMetrics(stableMetrics, forKey: cacheKey)
                     }
@@ -868,7 +898,7 @@ struct HistoryItemView: View, Equatable {
             await HistoryHoverPreviewPipeline.run(
                 request: .image(request),
                 getImageData: getImageData,
-                isCurrent: { !Task.isCancelled && !isPreviewInteractionSuppressed && isHovering },
+                isCurrent: { isHoverPreviewRequestCurrent() },
                 emit: applyHoverPreviewEvent
             )
         }
@@ -876,20 +906,21 @@ struct HistoryItemView: View, Equatable {
 
     private func startFilePreviewTask() {
         guard let previewInfo = filePreviewInfo else { return }
+        let isMarkdownFile = filePreviewIsMarkdown
         let request = HistoryHoverPreviewPipeline.fileRequest(
             item: item,
             previewInfo: previewInfo,
-            isMarkdown: filePreviewIsMarkdown,
+            isMarkdown: isMarkdownFile,
             delay: previewDelay
         )
-        let markdownCacheKey = filePreviewIsMarkdown
+        let markdownCacheKey = isMarkdownFile
             ? HistoryHoverPreviewPipeline.markdownFileCacheKey(itemID: item.id, contentHash: item.contentHash)
             : nil
         previewCoordinator.presentPreview(.file, markdownCacheKey: markdownCacheKey)
         hoverPreviewTask = Task(priority: .userInitiated) { @MainActor in
             await HistoryHoverPreviewPipeline.run(
                 request: .file(request),
-                isCurrent: { !Task.isCancelled && !isPreviewInteractionSuppressed && isHovering },
+                isCurrent: { isHoverPreviewRequestCurrent(allowPresentedPopover: isMarkdownFile) },
                 emit: applyHoverPreviewEvent
             )
         }
@@ -1077,6 +1108,7 @@ struct HistoryItemView: View, Equatable {
         guard previewModel.isMarkdown else { return }
         guard let text = previewModel.text else { return }
         guard let size = previewModel.markdownContentSize else { return }
+        guard previewModel.markdownRenderSucceeded else { return }
 
         let contentHash: String
         if item.type == .file {
@@ -1094,7 +1126,11 @@ struct HistoryItemView: View, Equatable {
 
         let renderCacheKey = MarkdownRenderCacheKey.make(contentHash: contentHash, markdown: text)
         guard !renderCacheKey.isEmpty else { return }
-        let metrics = MarkdownContentMetrics(size: size, hasHorizontalOverflow: previewModel.markdownHasHorizontalOverflow)
+        let metrics = MarkdownContentMetrics(
+            size: size,
+            hasHorizontalOverflow: previewModel.markdownHasHorizontalOverflow,
+            renderSucceeded: true
+        )
         MarkdownPreviewCache.shared.setMetrics(metrics, forKey: renderCacheKey)
     }
 
@@ -1110,12 +1146,16 @@ struct HistoryItemView: View, Equatable {
             previewModel.markdownHTML = state.markdownHTML
             previewModel.markdownContentSize = state.markdownContentSize
             previewModel.markdownHasHorizontalOverflow = state.markdownHasHorizontalOverflow
+            previewModel.markdownRenderSucceeded = state.markdownHTML != nil && state.markdownContentSize != nil
+            previewModel.markdownRenderErrorReason = nil
         case .markdownHTML(let html):
             previewModel.markdownHTML = html
+            previewModel.markdownRenderSucceeded = false
+            previewModel.markdownRenderErrorReason = nil
         case .renderMarkdown(let request):
             hoverMarkdownTask = HistoryHoverPreviewPipeline.makeMarkdownRenderTask(
                 request: request,
-                isCurrent: { !Task.isCancelled && !isPreviewInteractionSuppressed && isHovering && previewModel.text == request.source },
+                isCurrent: { isMarkdownRenderCurrent(source: request.source) },
                 emit: applyHoverPreviewEvent
             )
         }
@@ -1211,7 +1251,7 @@ struct HistoryItemView: View, Equatable {
         hoverPreviewTask = Task(priority: .userInitiated) { @MainActor in
             await HistoryHoverPreviewPipeline.run(
                 request: .text(request),
-                isCurrent: { !Task.isCancelled && !isPreviewInteractionSuppressed && isHovering },
+                isCurrent: { isHoverPreviewRequestCurrent(allowPresentedPopover: true) },
                 emit: applyHoverPreviewEvent
             )
         }

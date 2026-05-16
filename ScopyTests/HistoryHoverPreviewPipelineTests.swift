@@ -266,6 +266,63 @@ final class HistoryHoverPreviewPipelineTests: XCTestCase {
         XCTAssertEqual(renderRequests.first?.source, item.plainText)
     }
 
+    func testMarkdownRenderTaskRendersBeforeFinalLivenessGate() async {
+        let probe = RenderProbe()
+        let request = HistoryHoverPreviewPipeline.MarkdownRenderRequest(
+            source: "# Title\n\nBody",
+            context: MarkdownRenderContextResolver.defaultContext(for: "# Title\n\nBody"),
+            target: .text(cacheKey: "render-before-liveness")
+        )
+        var emittedHTML: [String] = []
+
+        let task = HistoryHoverPreviewPipeline.makeMarkdownRenderTask(
+            request: request,
+            isCurrent: { probe.hasRendered },
+            emit: { event in
+                if case .markdownHTML(let html) = event {
+                    emittedHTML.append(html)
+                }
+            },
+            renderMarkdownHTML: { _, _ in
+                probe.markRendered()
+                return "<h1>Title</h1>"
+            }
+        )
+
+        await task.value
+
+        XCTAssertEqual(emittedHTML, ["<h1>Title</h1>"])
+    }
+
+    func testMarkdownRenderTaskDropsHTMLWhenFinalLivenessFails() async {
+        let probe = RenderProbe()
+        let request = HistoryHoverPreviewPipeline.MarkdownRenderRequest(
+            source: "# Stale\n\nBody",
+            context: MarkdownRenderContextResolver.defaultContext(for: "# Stale\n\nBody"),
+            target: .text(cacheKey: "stale-markdown")
+        )
+        var emittedHTML: [String] = []
+
+        let task = HistoryHoverPreviewPipeline.makeMarkdownRenderTask(
+            request: request,
+            isCurrent: { false },
+            emit: { event in
+                if case .markdownHTML(let html) = event {
+                    emittedHTML.append(html)
+                }
+            },
+            renderMarkdownHTML: { _, _ in
+                probe.markRendered()
+                return "<h1>Stale</h1>"
+            }
+        )
+
+        await task.value
+
+        XCTAssertTrue(probe.hasRendered)
+        XCTAssertTrue(emittedHTML.isEmpty)
+    }
+
     func testSuppressionGatePreventsTextPreviewEvents() async {
         let item = makeItem(type: .text, contentHash: "suppressed", plainText: "plain")
         var events: [HistoryHoverPreviewPipeline.Event] = []
@@ -356,5 +413,22 @@ final class HistoryHoverPreviewPipelineTests: XCTestCase {
         context.setFillColor(CGColor(red: 0.1, green: 0.2, blue: 0.8, alpha: 1))
         context.fill(CGRect(x: 0, y: 0, width: 2, height: 2))
         return context.makeImage()
+    }
+}
+
+private final class RenderProbe: @unchecked Sendable {
+    private let lock = NSLock()
+    private var rendered = false
+
+    var hasRendered: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return rendered
+    }
+
+    func markRendered() {
+        lock.lock()
+        rendered = true
+        lock.unlock()
     }
 }
