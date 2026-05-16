@@ -1534,6 +1534,7 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
         }
 
         var lastNonZeroHeight: CGFloat = 0
+        var lastObservedHeight: CGFloat = 0
         var stableSince: CFAbsoluteTime?
         var firstNonZeroAt: CFAbsoluteTime?
         var didAdjustWideContent = false
@@ -1552,6 +1553,9 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
             let fontsStatus = Self.parseFontsStatusFromMeasureValue(value)
             let renderReady = Self.parseRenderReadyFromMeasureValue(value)
             if fontsStatus == "loaded" { fontsWereLoaded = true }
+            if parsedHeight > 0 {
+                lastObservedHeight = parsedHeight
+            }
             if parsedHeight <= 0 || !renderReady {
                 stableSince = nil
                 try? await Task.sleep(nanoseconds: 80_000_000)
@@ -1601,7 +1605,10 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
             try? await Task.sleep(nanoseconds: 80_000_000)
         }
 
-        return lastNonZeroHeight
+        // If the page rendered measurable content but the readiness hook never flipped, prefer exporting the
+        // observed DOM height over failing with a zero-height layout. This keeps export resilient to renderer-hook
+        // races while preserving the normal stable-height path above.
+        return lastNonZeroHeight > 0 ? lastNonZeroHeight : lastObservedHeight
     }
 
     private func dumpTableMetricsIfRequested(webView: WKWebView) async {
