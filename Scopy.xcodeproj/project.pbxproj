@@ -196,6 +196,7 @@
 		44EBE5E12D8C25ACA32DB1B8 /* KaTeX_Size3-Regular.woff in Resources */ = {isa = PBXBuildFile; fileRef = B1D884F45B497E86587BF725 /* KaTeX_Size3-Regular.woff */; };
 		45A67ACA0458C45D6ADB7A7D /* KaTeX_AMS-Regular.woff2 in Resources */ = {isa = PBXBuildFile; fileRef = 6F00D09F6FFB196F3B17E451 /* KaTeX_AMS-Regular.woff2 */; };
 		45DB5C84486FE70FDAECC1D1 /* FooterView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 21D905D4EC55C2920DDD4A26 /* FooterView.swift */; };
+		46FC01D8322547FAF7C2C553 /* markdown_safe_html_torture.md in Resources */ = {isa = PBXBuildFile; fileRef = 9E57493DEBD8670CDF52F04B /* markdown_safe_html_torture.md */; };
 		480DE178551C6CBB23BC546E /* MathProtector.swift in Sources */ = {isa = PBXBuildFile; fileRef = 402DB00DDC36B589300A4D6C /* MathProtector.swift */; };
 		48CA21D8D95B02785B7A5249 /* HistoryListInteractionCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE65E2E804A2670FCF17404B /* HistoryListInteractionCoordinator.swift */; };
 		48FEF6C0924CC035D973568E /* KaTeX_Main-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = CDF347C5B482D70864B12C4E /* KaTeX_Main-Regular.ttf */; };
@@ -829,6 +830,7 @@
 		9AEC8FA54B302D9E64AEDD8F /* MarkdownCodeSkipper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownCodeSkipper.swift; sourceTree = "<group>"; };
 		9B9FF3E3F61A7EAAF6CA767B /* HistoryItemHarnessView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryItemHarnessView.swift; sourceTree = "<group>"; };
 		9CFA9E9A2101790657BF92E8 /* HoverPreviewImageQualityPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HoverPreviewImageQualityPolicy.swift; sourceTree = "<group>"; };
+		9E57493DEBD8670CDF52F04B /* markdown_safe_html_torture.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = markdown_safe_html_torture.md; sourceTree = "<group>"; };
 		9EFEC5C5952694258B5B6FF4 /* GeneralSettingsPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeneralSettingsPage.swift; sourceTree = "<group>"; };
 		A05F0116766E863DCEFF29C9 /* HoverPreviewLivenessPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HoverPreviewLivenessPolicy.swift; sourceTree = "<group>"; };
 		A07BE2D7E32049F721CA02A8 /* ExportMarkdownPNGUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExportMarkdownPNGUITests.swift; sourceTree = "<group>"; };
@@ -1402,6 +1404,7 @@
 		F5B3B2D2A177E7AF63CCAB2C /* Fixtures */ = {
 			isa = PBXGroup;
 			children = (
+				9E57493DEBD8670CDF52F04B /* markdown_safe_html_torture.md */,
 				78C694E7F8CA4BC030CEB9A0 /* resolution_scale.md */,
 				D97F17C245BCC541ADD97F99 /* rich_markdown.md */,
 				0369BFC689675CC6D741D885 /* temp.txt */,
@@ -1582,6 +1585,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				46FC01D8322547FAF7C2C553 /* markdown_safe_html_torture.md in Resources */,
 				3E0EFA5878B55F14BCE746CF /* resolution_scale.md in Resources */,
 				DA3FD88C0191F89C444DBC70 /* rich_markdown.md in Resources */,
 				7F7930C54C6210D50C0A32D4 /* temp.txt in Resources */,
