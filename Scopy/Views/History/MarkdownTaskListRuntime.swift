@@ -3,32 +3,50 @@ import Foundation
 enum MarkdownTaskListRuntime {
     static let style = """
       .task-list-container {
-        padding-left: 0;
+        list-style-type: disc;
+        padding-left: 26px;
+        margin-top: 0;
+        margin-bottom: 0;
       }
       .task-list-item {
-        list-style: none;
+        list-style-type: disc;
+        padding-left: 6px;
+      }
+      .task-list-item::marker {
+        font-size: 16px;
+        line-height: 26px;
+        font-weight: 700;
+        color: rgb(13, 13, 13);
       }
       .task-list-item > p:first-child {
+        display: inline;
         margin-top: 0;
+        margin-bottom: 0;
       }
       .task-list-item-checkbox {
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        width: 1.05em;
-        height: 1.05em;
-        margin-right: 0.5em;
-        border: 1px solid rgba(127,127,127,0.55);
-        border-radius: 0.22em;
+        display: inline-block;
+        position: static;
+        width: 16px;
+        height: 16px;
+        margin: 0 0.35em 0 0;
+        border: 1px solid rgb(142, 142, 142);
+        border-radius: 4px;
+        background: transparent;
         box-sizing: border-box;
-        vertical-align: text-top;
-        transform: translateY(0.08em);
-        flex: 0 0 auto;
+        vertical-align: -3px;
       }
       .task-list-item-checkbox[data-checked="true"]::after {
         content: "✓";
-        font-size: 0.78em;
-        line-height: 1;
+        display: block;
+        width: 14px;
+        height: 14px;
+        color: #fff;
+        background: rgb(0, 79, 153);
+        border-radius: 3px;
+        font-size: 12px;
+        line-height: 14px;
+        text-align: center;
+        transform: translate(-1px, -1px);
       }
       .task-list-item-checkbox + input[type="checkbox"] {
         display: none !important;

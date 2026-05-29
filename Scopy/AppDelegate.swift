@@ -318,13 +318,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
            !markdownPath.isEmpty,
            let markdown = try? String(contentsOfFile: markdownPath, encoding: .utf8),
            !markdown.isEmpty {
-            let html = MarkdownHTMLRenderer.render(markdown: markdown)
-            MarkdownExportService.exportToPNGClipboard(html: html, targetWidthPixels: MarkdownExportService.defaultTargetWidthPixels) { result in
-                if case .failure(let error) = result, !errorPath.isEmpty {
-                    try? Data(String(describing: error).utf8).write(to: URL(fileURLWithPath: errorPath), options: [.atomic])
-                } else if case .success = result, !dumpPath.isEmpty {
-                    // exportToPNGClipboard already writes the dump; nothing else needed.
-                }
+            let settings = await uiTestMarkdownExportSettings()
+            let result = await HistoryItemMarkdownExportController.exportMarkdownToClipboard(
+                markdownSource: markdown,
+                settings: settings
+            )
+            if case .failure(let error) = result, !errorPath.isEmpty {
+                try? Data(String(describing: error).utf8).write(to: URL(fileURLWithPath: errorPath), options: [.atomic])
             }
             return
         }
@@ -333,11 +333,19 @@ class AppDelegate: NSObject, NSApplicationDelegate {
            !htmlPath.isEmpty,
            let html = try? String(contentsOfFile: htmlPath, encoding: .utf8),
            !html.isEmpty {
-            MarkdownExportService.exportToPNGClipboard(html: html, targetWidthPixels: MarkdownExportService.defaultTargetWidthPixels) { result in
-                if case .failure(let error) = result, !errorPath.isEmpty {
-                    try? Data(String(describing: error).utf8).write(to: URL(fileURLWithPath: errorPath), options: [.atomic])
-                } else if case .success = result, !dumpPath.isEmpty {
-                    // exportToPNGClipboard already writes the dump; nothing else needed.
+            let settings = await uiTestMarkdownExportSettings()
+            let pngquantOptions = uiTestPngquantOptions(settings: settings)
+            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                MarkdownExportService.exportToPNGClipboard(
+                    html: html,
+                    targetWidthPixels: MarkdownExportService.defaultTargetWidthPixels,
+                    resolutionScale: HistoryItemMarkdownExportController.defaultResolutionScale(),
+                    pngquantOptions: pngquantOptions
+                ) { result in
+                    if case .failure(let error) = result, !errorPath.isEmpty {
+                        try? Data(String(describing: error).utf8).write(to: URL(fileURLWithPath: errorPath), options: [.atomic])
+                    }
+                    continuation.resume()
                 }
             }
             return
@@ -365,6 +373,28 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 // exportToPNGClipboard already writes the dump; nothing else needed.
             }
         }
+    }
+
+    private func uiTestMarkdownExportSettings() async -> SettingsDTO {
+        var settings = await settingsStore.load()
+        let env = ProcessInfo.processInfo.environment
+        if env["SCOPY_UITEST_FORCE_PNGQUANT_MARKDOWN_EXPORT"] == "0" {
+            settings.pngquantMarkdownExportEnabled = false
+        } else if env["SCOPY_UITEST_FORCE_PNGQUANT_MARKDOWN_EXPORT"] != nil {
+            settings.pngquantMarkdownExportEnabled = true
+        }
+        return settings
+    }
+
+    private func uiTestPngquantOptions(settings: SettingsDTO) -> PngquantService.Options? {
+        guard settings.pngquantMarkdownExportEnabled else { return nil }
+        return PngquantService.Options(
+            binaryPath: settings.pngquantBinaryPath,
+            qualityMin: settings.pngquantMarkdownExportQualityMin,
+            qualityMax: settings.pngquantMarkdownExportQualityMax,
+            speed: settings.pngquantMarkdownExportSpeed,
+            colors: settings.pngquantMarkdownExportColors
+        )
     }
 
     // MARK: - Hotkey Settings

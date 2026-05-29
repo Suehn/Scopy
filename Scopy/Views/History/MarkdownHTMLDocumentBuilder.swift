@@ -1,20 +1,161 @@
 import Foundation
+import ScopyKit
 
 enum MarkdownHTMLDocumentBuilder {
+    private static let layout = MarkdownRenderLayoutConstants.self
+
     private static let cspMetaTag = """
     <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src 'self' data:; style-src 'self' 'unsafe-inline' file:; script-src 'self' 'unsafe-inline' file:; font-src 'self' data: file:;">
+    """
+
+    private static let tableWrapFunctionScript = """
+            function wrapChatGPTTables(root) {
+              try {
+                if (!root || typeof root.querySelectorAll !== 'function') { return; }
+                var tables = root.querySelectorAll('table');
+                for (var i = 0; i < (tables.length || 0); i++) {
+                  var table = tables[i];
+                  if (!table || !table.parentNode) { continue; }
+                  var parent = table.parentElement;
+                  if (parent && parent.classList && parent.classList.contains('scopy-chatgpt-table-container')) { continue; }
+                  var wrapper = document.createElement('div');
+                  wrapper.className = 'scopy-chatgpt-table-container';
+                  table.parentNode.insertBefore(wrapper, table);
+                  wrapper.appendChild(table);
+                }
+              } catch (e) { }
+            }
+            function resetChatGPTTableScale(container, table) {
+              try {
+                if (table && table.style && table.dataset && table.dataset.scopyTableScaled === 'true') {
+                  table.style.transform = '';
+                  table.style.transformOrigin = '';
+                  delete table.dataset.scopyTableScaled;
+                }
+                if (container && container.style && container.dataset && container.dataset.scopyTableScaled === 'true') {
+                  container.style.height = '';
+                  container.style.overflowX = '';
+                  delete container.dataset.scopyTableScaled;
+                }
+              } catch (e) { }
+            }
+            function measureChatGPTTableWidth(node) {
+              if (!node) { return 0; }
+              try { void node.offsetHeight; } catch (e) { }
+              var rectW = 0, scrollW = 0, offsetW = 0, clientW = 0;
+              try { rectW = Math.ceil(node.getBoundingClientRect().width || 0); } catch (e) { rectW = 0; }
+              try { scrollW = Math.ceil(node.scrollWidth || 0); } catch (e) { scrollW = 0; }
+              try { offsetW = Math.ceil(node.offsetWidth || 0); } catch (e) { offsetW = 0; }
+              try { clientW = Math.ceil(node.clientWidth || 0); } catch (e) { clientW = 0; }
+              return Math.max(rectW, scrollW, offsetW, clientW);
+            }
+            function readCSSPixelVariable(root, name, fallback) {
+              try {
+                var raw = window.getComputedStyle(root).getPropertyValue(name);
+                var value = parseFloat(raw);
+                if (value && isFinite(value) && value > 0) { return value; }
+              } catch (e) { }
+              return fallback;
+            }
+            function currentChatGPTPreviewScale() {
+              try {
+                var root = document.documentElement;
+                var raw = window.getComputedStyle(root).getPropertyValue('--scopy-chatgpt-preview-scale');
+                var value = parseFloat(raw);
+                if (value && isFinite(value) && value > 0) { return value; }
+              } catch (e) { }
+              return 1;
+            }
+            function updateChatGPTPreviewScale(content) {
+              try {
+                var root = document.documentElement;
+                if (!root || !content) { return 1; }
+                var shell = document.getElementById('content-scale-shell');
+                var renderWidth = readCSSPixelVariable(root, '--scopy-chatgpt-render-width', 816);
+                var isExport = !!(root.classList && root.classList.contains('scopy-export-mode'));
+                var scale = 1;
+                if (!isExport) {
+                  var available = 0;
+                  try { available = Math.floor(window.innerWidth || document.documentElement.clientWidth || renderWidth); } catch (e) { available = renderWidth; }
+                  if (available && isFinite(available) && available > 0) {
+                    scale = Math.max(0.01, Math.min(1, available / renderWidth));
+                  }
+                }
+                root.style.setProperty('--scopy-chatgpt-preview-scale', String(scale));
+                if (shell && shell.style) {
+                  if (isExport) {
+                    shell.style.width = renderWidth + 'px';
+                    shell.style.maxWidth = 'none';
+                    shell.style.height = '';
+                  } else {
+                    shell.style.width = Math.ceil(renderWidth * scale) + 'px';
+                    shell.style.maxWidth = '100%';
+                    var rawHeight = 0;
+                    try { rawHeight = Math.ceil(content.offsetHeight || content.scrollHeight || 0); } catch (e) { rawHeight = 0; }
+                    if (rawHeight && rawHeight > 0) {
+                      shell.style.height = Math.ceil(rawHeight * scale + 1) + 'px';
+                    }
+                  }
+                }
+                return scale;
+              } catch (e) {
+                return 1;
+              }
+            }
+            function scaleChatGPTTables(root, explicitTargetWidth) {
+              try {
+                if (!root || typeof root.querySelectorAll !== 'function') { return; }
+                wrapChatGPTTables(root);
+                var shouldScale = false;
+                var targetWidth = Number(explicitTargetWidth || 0);
+                if (targetWidth && isFinite(targetWidth) && targetWidth > 0) {
+                  shouldScale = true;
+                }
+                var containers = root.querySelectorAll('.scopy-chatgpt-table-container');
+                for (var i = 0; i < (containers.length || 0); i++) {
+                  var container = containers[i];
+                  if (!container) { continue; }
+                  var table = container.querySelector('table');
+                  if (!table) { continue; }
+                  resetChatGPTTableScale(container, table);
+                  if (!shouldScale) { continue; }
+                  var available = targetWidth;
+                  if (!available || !isFinite(available) || available <= 0) { continue; }
+                  var rawWidth = measureChatGPTTableWidth(table);
+                  if (!rawWidth || rawWidth <= available + 1) { continue; }
+                  var scale = Math.max(0.01, Math.min(1, (available - 1) / rawWidth));
+                  if (!scale || !isFinite(scale) || scale >= 0.999) { continue; }
+                  var rawHeight = 0;
+                  try { rawHeight = Math.ceil(table.offsetHeight || table.scrollHeight || table.getBoundingClientRect().height || 0); } catch (e) { rawHeight = 0; }
+                  try {
+                    table.style.transform = 'scale(' + scale + ')';
+                    table.style.transformOrigin = 'top left';
+                    table.dataset.scopyTableScaled = 'true';
+                    container.style.overflowX = 'visible';
+                    container.dataset.scopyTableScaled = 'true';
+                    if (rawHeight && rawHeight > 0) {
+                      container.style.height = Math.ceil(rawHeight * scale + 1) + 'px';
+                    }
+                  } catch (e) { }
+                }
+              } catch (e) { }
+            }
+            try { window.__scopyScaleChatGPTTables = scaleChatGPTTables; } catch (e) { }
     """
 
     private static func baseStyle(featureSet: MarkdownRenderFeatureSet) -> String {
         let taskListStyle = featureSet.taskLists ? "\n\(MarkdownTaskListRuntime.style)\n" : ""
         let footnoteStyle = featureSet.footnotes ? """
           .footnotes {
-            margin-top: 1.5rem;
-            padding-top: 1rem;
-            border-top: 1px solid rgba(127,127,127,0.25);
+            margin-top: 16px;
+            padding-top: 0;
+            border-top: 0;
+            font-size: 16px;
+            line-height: 26px;
           }
           .footnotes-list {
-            padding-left: 1.5rem;
+            margin: 0;
+            padding-left: 26px;
           }
           .footnotes p:first-child {
             margin-top: 0;
@@ -23,32 +164,49 @@ enum MarkdownHTMLDocumentBuilder {
             margin-bottom: 0;
           }
           sup.footnote-ref {
-            display: inline-block;
-            margin-left: 0.12em;
-            vertical-align: super;
-            line-height: 0;
+            display: inline-flex;
+            position: static;
+            top: auto;
+            margin-left: 4px;
+            font-size: 12px;
+            line-height: 20px;
+            font-weight: 500;
+            vertical-align: baseline;
+          }
+          sup:has(> a[data-footnote-ref]) {
+            display: inline-flex;
+            position: static;
+            top: auto;
+            margin-left: 4px;
+            font-size: 12px;
+            line-height: 20px;
+            font-weight: 500;
+            vertical-align: baseline;
           }
           .footnote-ref a,
+          a[data-footnote-ref],
           .footnote-backref {
-            display: inline-block;
-            font-size: 0.74em;
-            color: #2563eb;
-            font-weight: 700;
+            color: rgb(95, 95, 95);
+            font-weight: 500;
             text-decoration: none;
           }
-          .footnote-ref a {
-            min-width: 1.15em;
-            padding: 0.08em 0.26em;
+          .footnote-ref a,
+          a[data-footnote-ref] {
+            display: inline-flex;
+            align-items: center;
+            min-width: 0;
+            min-height: 20px;
+            padding: 1px 8px;
             border-radius: 999px;
-            background: rgba(37, 99, 235, 0.14);
-            box-shadow: inset 0 0 0 1px rgba(37, 99, 235, 0.14);
+            background: rgb(244, 244, 244);
+            box-shadow: none;
+            white-space: nowrap;
           }
-          .footnote-ref a:hover,
-          .footnote-ref a:focus,
-          .footnote-backref:hover,
-          .footnote-backref:focus {
-            color: color-mix(in srgb, var(--scopy-link) 82%, #071a36 18%);
-            text-decoration: underline;
+          .footnote-ref a::after,
+          a[data-footnote-ref]::after,
+          .footnote-backref::after,
+          [data-footnote-backref]::after {
+            content: none;
           }
         """ : ""
         let definitionListStyle = featureSet.definitionLists ? """
@@ -113,22 +271,35 @@ enum MarkdownHTMLDocumentBuilder {
         <style>
           :root {
             color-scheme: light;
-            --scopy-page-bg: #eef2f7;
-            --scopy-surface-bg: #ffffff;
-            --scopy-surface-border: rgba(15, 23, 42, 0.09);
-            --scopy-surface-shadow: 0 14px 38px rgba(15, 23, 42, 0.08);
-            --scopy-text-primary: #0f172a;
-            --scopy-text-secondary: rgba(15, 23, 42, 0.72);
-            --scopy-code-bg: #f6f8fb;
-            --scopy-inline-code-bg: #e9eef5;
-            --scopy-link: #0a66d9;
+            --scopy-chatgpt-font: -apple-system-body, ui-sans-serif, -apple-system, "system-ui", "Segoe UI", Helvetica, "Apple Color Emoji", Arial, "sans-serif", "Segoe UI Emoji", "Segoe UI Symbol";
+            --scopy-chatgpt-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+            --scopy-text-primary: rgb(13, 13, 13);
+            --scopy-page-bg: #ffffff;
+            --scopy-code-bg: rgb(236, 236, 236);
+            --scopy-code-card-bg: rgb(249, 249, 249);
+            --scopy-code-card-border: rgba(13, 13, 13, 0.05);
+            --scopy-border: rgba(0, 0, 0, 0.15);
+            --scopy-syntax-operator: rgb(186, 67, 122);
+            --scopy-syntax-name: rgb(107, 58, 180);
+            --scopy-syntax-string: rgb(0, 134, 53);
+            --scopy-syntax-number: rgb(185, 72, 13);
+            --scopy-syntax-meta: rgb(0, 79, 153);
+            --scopy-syntax-option: rgb(186, 142, 0);
+            --scopy-chatgpt-thread-content-width: \(Self.layout.chatGPTThreadContentWidth)px;
+            --scopy-chatgpt-content-inline-padding: \(Self.layout.chatGPTContentInlinePadding)px;
+            --scopy-chatgpt-content-top-padding: \(Self.layout.chatGPTContentTopPadding)px;
+            --scopy-chatgpt-content-bottom-padding: \(Self.layout.chatGPTContentBottomPadding)px;
+            --scopy-chatgpt-render-width: calc(var(--scopy-chatgpt-thread-content-width) + (var(--scopy-chatgpt-content-inline-padding) * 2));
+            --scopy-chatgpt-table-breakout-width: max(var(--scopy-chatgpt-thread-content-width), calc(100vw - (var(--scopy-chatgpt-content-inline-padding) * 2)));
+            --scopy-chatgpt-preview-scale: 1;
           }
           body {
             margin: 0;
             padding: 0;
-            font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
-            font-size: 15px;
-            line-height: 1.65;
+            font-family: var(--scopy-chatgpt-font);
+            font-size: 16px;
+            line-height: 26px;
+            font-weight: 400;
             color: var(--scopy-text-primary);
             background: var(--scopy-page-bg);
           }
@@ -137,99 +308,215 @@ enum MarkdownHTMLDocumentBuilder {
             min-height: 100%;
           }
           * { box-sizing: border-box; }
-          #content {
-            padding: 20px 18px;
+          #content-scale-shell {
             display: block;
+            width: 100%;
             max-width: 100%;
+            margin: 0;
+            padding: 0;
+            overflow: visible;
+          }
+          #content {
+            display: block;
+            width: var(--scopy-chatgpt-render-width);
+            max-width: none;
+            padding: var(--scopy-chatgpt-content-top-padding) var(--scopy-chatgpt-content-inline-padding) var(--scopy-chatgpt-content-bottom-padding) var(--scopy-chatgpt-content-inline-padding);
             box-sizing: border-box;
-            word-break: break-word;
+            overflow-wrap: break-word;
+            word-break: normal;
             color: var(--scopy-text-primary);
-            background: var(--scopy-surface-bg);
-            border: 1px solid var(--scopy-surface-border);
-            border-radius: 18px;
-            box-shadow: var(--scopy-surface-shadow);
+            background: var(--scopy-page-bg);
+            border: 0;
+            border-radius: 0;
+            box-shadow: none;
             opacity: 0;
             transition: opacity 140ms ease-in-out;
-          }
-          p,
-          ul,
-          ol,
-          blockquote,
-          pre,
-          table,
-          dl,
-          details {
-            margin: 0 0 1rem 0;
+            transform: scale(var(--scopy-chatgpt-preview-scale));
+            transform-origin: top left;
           }
           h1, h2, h3, h4, h5, h6 {
-            line-height: 1.25;
-            font-weight: 700;
-            margin: 1.5rem 0 0.8rem 0;
+            color: var(--scopy-text-primary);
+            font-family: var(--scopy-chatgpt-font);
+            font-weight: 600;
+            padding: 0;
+            border: 0;
           }
           h1 {
-            font-size: 1.85rem;
-            padding-bottom: 0.3rem;
-            border-bottom: 1px solid rgba(127,127,127,0.22);
+            font-size: 24px;
+            line-height: 32px;
+            margin: 0 0 8px 0;
           }
           h2 {
-            font-size: 1.5rem;
-            padding-bottom: 0.22rem;
-            border-bottom: 1px solid rgba(127,127,127,0.18);
+            font-size: 20px;
+            line-height: 28px;
+            margin: 16px 0 4px 0;
           }
-          h3 { font-size: 1.28rem; }
-          h4 { font-size: 1.12rem; }
-          h5 { font-size: 1rem; }
-          h6 { font-size: 0.92rem; color: var(--scopy-text-secondary); }
-          h1:first-child,
-          h2:first-child,
-          h3:first-child,
-          h4:first-child,
-          h5:first-child,
-          h6:first-child {
-            margin-top: 0;
+          h3 {
+            font-size: 18px;
+            line-height: 28px;
+            margin: 16px 0 4px 0;
+          }
+          h4 {
+            font-size: 16px;
+            line-height: 24px;
+            margin: 16px 0 0 0;
+          }
+          h5 {
+            font-size: 16px;
+            line-height: 26px;
+            margin: 0;
+          }
+          h6 {
+            font-size: 16px;
+            line-height: 26px;
+            font-weight: 400;
+            margin: 0;
+          }
+          p {
+            margin: 8px 0 4px 0;
+            font-size: 16px;
+            line-height: 26px;
+            font-weight: 400;
+            color: var(--scopy-text-primary);
           }
           ul, ol {
-            padding-left: 1.55rem;
+            margin: 0;
+            padding-left: 26px;
+            font-size: 16px;
+            line-height: 26px;
+            font-weight: 400;
           }
-          li + li {
-            margin-top: 0.28rem;
+          ul {
+            list-style-type: disc;
+          }
+          ol {
+            list-style-type: decimal;
+          }
+          li {
+            margin: 0;
+            padding-left: 6px;
+            font-size: 16px;
+            line-height: 26px;
+            font-weight: 400;
+          }
+          li::marker {
+            font-size: 16px;
+            line-height: 26px;
+            font-weight: 700;
+            color: var(--scopy-text-primary);
+          }
+          li > p {
+            margin-top: 0;
+            margin-bottom: 0;
+            line-height: 26px;
           }
           li > ul,
           li > ol {
-            margin-top: 0.38rem;
+            margin-top: 0;
+            margin-bottom: 0;
+            padding-left: 26px;
           }
-          pre, code { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
-          code {
-            font-size: 0.92em;
+          strong {
+            font-weight: 600;
           }
-          :not(pre) > code {
-            padding: 0.15em 0.35em;
-            border-radius: 6px;
-            background: var(--scopy-inline-code-bg);
+          em {
+            font-style: italic;
+          }
+          del, s {
+            text-decoration-line: line-through;
+          }
+          pre, code {
+            font-family: var(--scopy-chatgpt-mono);
+          }
+          p code,
+          li code,
+          td code,
+          th code,
+          blockquote code {
+            padding: 2.4px 4.8px;
+            border-radius: 4px;
+            background: var(--scopy-code-bg);
+            font-size: 14px;
+            line-height: 26px;
+            font-weight: 500;
+            white-space: nowrap;
           }
           pre {
-            padding: 14px 16px;
-            border-radius: 12px;
-            border: 1px solid rgba(15, 23, 42, 0.08);
+            position: relative;
+            margin: 16px 0 4px 0;
+            padding: 48px 20px 12px 20px;
+            border: 1px solid var(--scopy-code-card-border);
+            border-radius: 24px;
             overflow-x: auto;
             max-width: 100%;
             box-sizing: border-box;
             color: var(--scopy-text-primary);
-            background: var(--scopy-code-bg);
-            box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.68);
+            background: var(--scopy-code-card-bg);
+            box-shadow: none;
+            font-size: 12.25px;
+            line-height: 20px;
+            font-weight: 400;
+            white-space: pre;
           }
+          pre::before {
+            content: "</>";
+            position: absolute;
+            left: 20px;
+            right: 6px;
+            top: 6px;
+            height: 24px;
+            font-family: var(--scopy-chatgpt-font);
+            font-size: 14px;
+            line-height: 24px;
+            font-weight: 400;
+            color: var(--scopy-text-primary);
+            white-space: nowrap;
+          }
+          pre:has(> code.language-bash)::before,
+          pre:has(> code.language-sh)::before,
+          pre:has(> code.language-shell)::before,
+          pre:has(> code.language-zsh)::before { content: "</> Bash"; }
+          pre:has(> code.language-cpp)::before,
+          pre:has(> code.language-cxx)::before { content: "</> C++"; }
+          pre:has(> code.language-diff)::before { content: "</> Diff"; }
+          pre:has(> code.language-env)::before { content: "</> env"; }
+          pre:has(> code.language-html)::before { content: "</> HTML"; }
+          pre:has(> code.language-java)::before { content: "</> Java"; }
+          pre:has(> code.language-javascript)::before,
+          pre:has(> code.language-js)::before,
+          pre:has(> code.language-jsx)::before { content: "</> JavaScript"; }
+          pre:has(> code.language-json)::before { content: "</> JSON"; }
+          pre:has(> code.language-markdown)::before,
+          pre:has(> code.language-md)::before { content: "</> Markdown"; }
+          pre:has(> code.language-mermaid)::before { content: "</> Mermaid"; }
+          pre:has(> code.language-python)::before,
+          pre:has(> code.language-py)::before { content: "</> Python"; }
+          pre:has(> code.language-sql)::before { content: "</> SQL"; }
+          pre:has(> code.language-text)::before,
+          pre:has(> code.language-txt)::before,
+          pre:has(> code.language-plain)::before,
+          pre:has(> code.language-plaintext)::before { content: "</> text"; }
+          pre:has(> code.language-yaml)::before,
+          pre:has(> code.language-yml)::before { content: "</> YAML"; }
           pre code {
             display: block;
             padding: 0;
             background: transparent;
+            border-radius: 0;
+            font-size: 12.25px;
+            line-height: 20px;
             white-space: pre;
             word-break: normal;
             overflow-wrap: normal;
             min-width: max-content;
-            line-height: 1.55;
+          }
+          pre span {
+            background: transparent;
+            padding: 0;
           }
           .hljs {
             background: transparent;
+            color: var(--scopy-text-primary);
           }
           .hljs-doctag,
           .hljs-keyword,
@@ -238,18 +525,17 @@ enum MarkdownHTMLDocumentBuilder {
           .hljs-template-variable,
           .hljs-type,
           .hljs-variable.language_ {
-            color: #d73a49;
+            color: var(--scopy-syntax-operator);
           }
           .hljs-title,
           .hljs-title.class_,
           .hljs-title.class_.inherited__,
           .hljs-title.function_ {
-            color: #6f42c1;
+            color: var(--scopy-syntax-name);
           }
           .hljs-attr,
           .hljs-attribute,
           .hljs-literal,
-          .hljs-meta,
           .hljs-number,
           .hljs-operator,
           .hljs-selector-attr,
@@ -257,36 +543,40 @@ enum MarkdownHTMLDocumentBuilder {
           .hljs-selector-id,
           .hljs-variable,
           .hljs-section {
-            color: #005cc5;
+            color: var(--scopy-syntax-number);
+          }
+          .hljs-meta,
+          .hljs-tag,
+          .hljs-name,
+          .hljs-selector-tag {
+            color: var(--scopy-syntax-meta);
           }
           .hljs-meta .hljs-string,
           .hljs-regexp,
           .hljs-string {
-            color: #032f62;
+            color: var(--scopy-syntax-string);
           }
           .hljs-built_in,
           .hljs-symbol {
-            color: #e36209;
+            color: var(--scopy-syntax-number);
           }
           .hljs-code,
           .hljs-comment,
           .hljs-formula {
             color: #6a737d;
           }
-          .hljs-name,
           .hljs-quote,
-          .hljs-selector-pseudo,
-          .hljs-selector-tag,
           .hljs-addition {
-            color: #22863a;
+            color: var(--scopy-syntax-string);
+          }
+          .hljs-selector-pseudo,
+          .hljs-bullet {
+            color: var(--scopy-syntax-option);
           }
           .hljs-subst,
           .hljs-emphasis,
           .hljs-strong {
-            color: #24292e;
-          }
-          .hljs-bullet {
-            color: #735c0f;
+            color: var(--scopy-text-primary);
           }
           .hljs-emphasis {
             font-style: italic;
@@ -299,11 +589,18 @@ enum MarkdownHTMLDocumentBuilder {
             background-color: #f0fff4;
           }
           .hljs-deletion {
-            color: #b31d28;
+            color: var(--scopy-syntax-operator);
             background-color: #ffeef0;
+          }
+          html.scopy-export-mode #content-scale-shell {
+            width: var(--scopy-chatgpt-render-width);
+            max-width: none;
           }
           html.scopy-export-mode #content {
             box-shadow: none;
+            border: 0;
+            border-radius: 0;
+            transform: none;
           }
           html.scopy-export-mode pre.scopy-export-wrap-code {
             overflow: visible;
@@ -317,51 +614,154 @@ enum MarkdownHTMLDocumentBuilder {
           img { max-width: 100%; height: auto; }
           a {
             pointer-events: none;
-            color: var(--scopy-link);
-            text-decoration: underline;
-            text-underline-offset: 0.14em;
+            color: var(--scopy-text-primary);
+            text-decoration-line: underline;
+            text-decoration-style: dotted;
+            text-decoration-color: rgb(143, 143, 143);
+            text-underline-offset: 2px;
+          }
+          a::after {
+            content: "↗";
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            margin-left: 0.125rem;
+            font-size: 16px;
+            line-height: 16px;
+            vertical-align: middle;
+            text-decoration: none;
           }
           blockquote {
-            margin: 0 0 1rem 0;
-            padding: 0.18rem 0 0.18rem 1rem;
-            border-left: 4px solid rgba(127,127,127,0.34);
-            color: var(--scopy-text-secondary);
+            position: relative;
+            margin: 0 0 8px 0;
+            padding: 8px 0 8px 24px;
+            border: 0;
+            color: var(--scopy-text-primary);
+            font-size: 16px;
+            line-height: 24px;
+            font-weight: 500;
           }
-          blockquote > :last-child {
+          blockquote::after {
+            content: "";
+            display: block;
+            position: absolute;
+            left: 0;
+            top: 8px;
+            bottom: 8px;
+            width: 4px;
+            background-color: var(--scopy-border);
+            border-radius: 2px;
+          }
+          blockquote > p {
+            margin-top: 0;
+            margin-bottom: 4px;
+            font-size: 16px;
+            line-height: 24px;
+            font-weight: 400;
+          }
+          blockquote ul,
+          blockquote ol {
+            margin-top: 0;
             margin-bottom: 0;
+            padding-left: 26px;
+            font-size: 16px;
+            line-height: 24px;
+            font-weight: 500;
           }
-          hr { border: 0; border-top: 1px solid rgba(127,127,127,0.35); margin: 1.2rem 0; }
+          hr {
+            border: 0;
+            border-top: 1px solid var(--scopy-border);
+            margin: 28px 0;
+          }
+          .katex {
+            color: var(--scopy-text-primary);
+          }
           .katex-display {
             max-width: 100%;
             overflow-x: auto;
             overflow-y: hidden;
-            margin: 1rem 0;
+            margin: 16px 0;
+            font-size: 16px;
+            line-height: 26px;
+          }
+          .scopy-chatgpt-table-container {
+            display: block;
+            overflow-x: auto;
+            overflow-y: hidden;
+            margin-top: 0;
+            margin-bottom: 0;
+            width: var(--scopy-chatgpt-table-breakout-width);
+            max-width: none;
           }
           table {
-            display: block;
-            border-collapse: collapse;
-            max-width: 100%;
-            overflow-x: auto;
-            width: 100%;
-            table-layout: auto;
+            display: table;
+            border-collapse: separate;
             border-spacing: 0;
+            min-width: var(--scopy-chatgpt-thread-content-width);
+            width: max-content;
+            max-width: none;
+            table-layout: auto;
+            overflow: visible;
+            border: 0;
+            margin: 0;
+            font-family: var(--scopy-chatgpt-font);
+            font-size: 14px;
+            line-height: 24px;
           }
           th, td {
-            border: 1px solid rgba(127,127,127,0.25);
-            padding: 8px 10px;
-            vertical-align: top;
+            border: 0;
+            min-width: 128px;
+            max-width: 192px;
+            padding-inline-start: 8px;
+            padding-inline-end: 24px;
+            text-align: start;
             white-space: normal;
-            word-break: break-word;
-            overflow-wrap: anywhere;
+            word-break: normal;
+            overflow-wrap: break-word;
+          }
+          th:first-child,
+          td:first-child {
+            padding-inline-start: 0;
+          }
+          th:last-child,
+          td:last-child {
+            min-width: 192px;
+            max-width: 256px;
+          }
+          th:last-child {
+            padding-inline-end: 40px;
+          }
+          td:last-child {
+            padding-inline-end: 0;
           }
           thead th {
-            background: rgba(15, 23, 42, 0.06);
+            border-bottom: 1px solid var(--scopy-border);
+            color: var(--scopy-text-primary);
             font-weight: 600;
+            line-height: 16px;
+            padding-block: 8px;
+            vertical-align: bottom;
+          }
+          tbody td {
+            border-bottom: 1px solid var(--scopy-code-card-border);
+          }
+          tbody tr:last-child td {
+            border-bottom: 0;
+          }
+          tbody td {
+            padding-block: 10px;
+            vertical-align: baseline;
+          }
+          tfoot td {
+            border-top: 1px solid var(--scopy-border);
+            border-bottom: 0;
+            vertical-align: top;
           }
           \(taskListStyle)\(footnoteStyle)\(definitionListStyle)\(safeHTMLStyle)
           /* Hide scrollbars inside HTML when idle (even if system setting is "always show scroll bars").
              We show them temporarily while the user is actively scrolling overflow containers (JS toggles the class). */
           pre::-webkit-scrollbar,
+          .scopy-chatgpt-table-container::-webkit-scrollbar,
           table::-webkit-scrollbar,
           .katex-display::-webkit-scrollbar,
           .footnotes::-webkit-scrollbar,
@@ -370,6 +770,7 @@ enum MarkdownHTMLDocumentBuilder {
             height: 0px;
           }
           html.scopy-scrollbars-visible pre::-webkit-scrollbar,
+          html.scopy-scrollbars-visible .scopy-chatgpt-table-container::-webkit-scrollbar,
           html.scopy-scrollbars-visible table::-webkit-scrollbar,
           html.scopy-scrollbars-visible .katex-display::-webkit-scrollbar,
           html.scopy-scrollbars-visible .footnotes::-webkit-scrollbar,
@@ -467,7 +868,8 @@ enum MarkdownHTMLDocumentBuilder {
                 if (md.renderer && md.renderer.rules) {
                   md.renderer.rules.footnote_caption = function (tokens, idx) {
                     try {
-                      var n = Number(tokens[idx].meta.id + 1).toString();
+                      var label = tokens[idx].meta && tokens[idx].meta.label ? String(tokens[idx].meta.label) : '';
+                      var n = label || Number(tokens[idx].meta.id + 1).toString();
                       if (tokens[idx].meta.subId > 0) { n += ':' + String(tokens[idx].meta.subId); }
                       return n;
                     } catch (e) {
@@ -581,7 +983,7 @@ enum MarkdownHTMLDocumentBuilder {
             function normalizeFootnoteReferences(root) {
               try {
                 if (!root || typeof root.querySelectorAll !== 'function') { return; }
-                var refs = root.querySelectorAll('sup.footnote-ref > a');
+                var refs = root.querySelectorAll('sup.footnote-ref > a, sup > a[data-footnote-ref]');
                 for (var i = 0; i < refs.length; i++) {
                   var ref = refs[i];
                   if (!ref) { continue; }
@@ -595,15 +997,19 @@ enum MarkdownHTMLDocumentBuilder {
               } catch (e) { }
             }
             var safeHTMLMap = \(safeHTMLLiteral);
+            \(tableWrapFunctionScript)
             window.__scopyReportHeight = function (force) {
               try {
                 if (!window.webkit || !window.webkit.messageHandlers || !window.webkit.messageHandlers.scopySize) { return; }
                 var el = document.getElementById('content');
                 if (!el) { return; }
-                var rect = el.getBoundingClientRect();
+                scaleChatGPTTables(el);
+                var previewScale = updateChatGPTPreviewScale(el);
+                var box = document.getElementById('content-scale-shell') || el;
+                var rect = box.getBoundingClientRect();
                 var w = Math.ceil(rect.width || 0);
                 var sh = Math.ceil(el.scrollHeight || 0);
-                var h = Math.ceil(Math.max(rect.height || 0, sh));
+                var h = Math.ceil(Math.max(rect.height || 0, sh * previewScale));
                 var overflowX = false;
                 try {
                   // Detect horizontal scroll requirement inside common overflow containers (KaTeX display, code blocks, tables).
@@ -612,11 +1018,12 @@ enum MarkdownHTMLDocumentBuilder {
                   for (var i = 0; i < nodes.length; i++) {
                     var n = nodes[i];
                     if (!n) { continue; }
+                    if (n.classList && n.classList.contains('scopy-chatgpt-table-container') && n.dataset && n.dataset.scopyTableScaled === 'true') { continue; }
                     var cw = n.clientWidth || 0;
                     var sw = n.scrollWidth || 0;
                     if (cw > 0 && (sw - cw) > 1) { overflowX = true; break; }
                   }
-                  if (!overflowX) {
+                  if (!overflowX && previewScale >= 0.999) {
                     var se = document.scrollingElement || document.documentElement;
                     overflowX = !!se && ((se.scrollWidth || 0) - (se.clientWidth || 0) > 2);
                   }
@@ -776,6 +1183,8 @@ enum MarkdownHTMLDocumentBuilder {
                 html = html.split(renderSentinel).join('');
               }
               el.innerHTML = html;
+              wrapChatGPTTables(el);
+              scaleChatGPTTables(el);
               normalizeFootnoteReferences(el);
               \(taskListApplyScript)\(highlightFinalizeScript)
               try {
@@ -787,12 +1196,12 @@ enum MarkdownHTMLDocumentBuilder {
               // Keep content height in sync as KaTeX renders and fonts load.
               if (typeof ResizeObserver === 'function') {
                 if (ro) { try { ro.disconnect(); } catch (e) { } }
-                ro = new ResizeObserver(function () { scheduleReportHeight(); });
+                ro = new ResizeObserver(function () { scaleChatGPTTables(el); scheduleReportHeight(); });
                 try { ro.observe(el); } catch (e) { }
               }
 
               if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === 'function') {
-                document.fonts.ready.then(function () { scheduleReportHeight(); }).catch(function () { });
+                document.fonts.ready.then(function () { scaleChatGPTTables(el); scheduleReportHeight(); }).catch(function () { });
               }
 
               if (typeof window.__scopyRenderMath === 'function') {
@@ -823,6 +1232,10 @@ enum MarkdownHTMLDocumentBuilder {
                 scheduleReportHeight();
                 setTimeout(scheduleReportHeight, 120);
               });
+              window.addEventListener('resize', function () {
+                scheduleReportHeight();
+                setTimeout(scheduleReportHeight, 60);
+              });
             }
           })();
         </script>
@@ -840,7 +1253,7 @@ enum MarkdownHTMLDocumentBuilder {
             \(baseStyle(featureSet: featureSet))
           </head>
           <body>
-            <div id="content"><pre>\(escapeHTML(fallbackText))</pre></div>
+            <div id="content-scale-shell"><div id="content"><pre>\(escapeHTML(fallbackText))</pre></div></div>
           </body>
         </html>
         """
@@ -908,21 +1321,26 @@ enum MarkdownHTMLDocumentBuilder {
                     window.__scopyReportHeight();
                   }
                 };
+                \(tableWrapFunctionScript)
                 window.__scopyReportHeight = function (force) {
                   try {
                     if (!window.webkit || !window.webkit.messageHandlers || !window.webkit.messageHandlers.scopySize) { return; }
                     var el = document.getElementById('content');
                     if (!el) { return; }
-                    var rect = el.getBoundingClientRect();
+                    scaleChatGPTTables(el);
+                    var previewScale = updateChatGPTPreviewScale(el);
+                    var box = document.getElementById('content-scale-shell') || el;
+                    var rect = box.getBoundingClientRect();
                     var w = Math.ceil(rect.width || 0);
                     var sh = Math.ceil(el.scrollHeight || 0);
-                    var h = Math.ceil(Math.max(rect.height || 0, sh));
+                    var h = Math.ceil(Math.max(rect.height || 0, sh * previewScale));
                     var overflowX = false;
                     try {
                       var nodes = el.querySelectorAll(\(overflowSelectorLiteral));
                       for (var i = 0; i < nodes.length; i++) {
                         var n = nodes[i];
                         if (!n) { continue; }
+                        if (n.classList && n.classList.contains('scopy-chatgpt-table-container') && n.dataset && n.dataset.scopyTableScaled === 'true') { continue; }
                         var cw = n.clientWidth || 0;
                         var sw = n.scrollWidth || 0;
                         if (cw > 0 && (sw - cw) > 1) {
@@ -930,7 +1348,7 @@ enum MarkdownHTMLDocumentBuilder {
                           break;
                         }
                       }
-                      if (!overflowX) {
+                      if (!overflowX && previewScale >= 0.999) {
                         var se = document.scrollingElement || document.documentElement;
                         overflowX = !!se && ((se.scrollWidth || 0) - (se.clientWidth || 0) > 2);
                       }
@@ -1009,6 +1427,8 @@ enum MarkdownHTMLDocumentBuilder {
                     var result = window.ScopyUnifiedMarkdown.render(\(markdownLiteral), \(policyLiteral));
                     if (result && result.html) {
                       el.innerHTML = result.html;
+                      wrapChatGPTTables(el);
+                      scaleChatGPTTables(el);
                       if (window.__scopyRenderState) {
                         window.__scopyRenderState.unifiedRenderSucceeded = true;
                       }
@@ -1027,11 +1447,25 @@ enum MarkdownHTMLDocumentBuilder {
                 } else {
                   renderUnified();
                 }
+                if (window && typeof window.addEventListener === 'function') {
+                  window.addEventListener('load', function () {
+                    if (typeof window.__scopyReportHeight === 'function') {
+                      window.__scopyReportHeight(true);
+                      setTimeout(function () { window.__scopyReportHeight(true); }, 120);
+                    }
+                  });
+                  window.addEventListener('resize', function () {
+                    if (typeof window.__scopyReportHeight === 'function') {
+                      window.__scopyReportHeight(true);
+                      setTimeout(function () { window.__scopyReportHeight(true); }, 60);
+                    }
+                  });
+                }
               })();
             </script>
           </head>
           <body>
-            <div id="content"></div>
+            <div id="content-scale-shell"><div id="content"></div></div>
           </body>
         </html>
         """

@@ -24,10 +24,18 @@ final class KaTeXRenderToStringTests: XCTestCase {
     func testMarkdownRendererHighlightsFootnoteRefsAndExposesRenderReadyState() {
         let html = MarkdownHTMLRenderer.render(markdown: "Footnote[^1]\n\n[^1]: note")
         XCTAssertTrue(html.contains(".footnote-ref a,"))
-        XCTAssertTrue(html.contains("vertical-align: super;"))
+        XCTAssertTrue(html.contains("sup.footnote-ref {"))
+        XCTAssertTrue(html.contains("top: auto;"))
+        XCTAssertTrue(html.contains("font-size: 12px;"))
+        XCTAssertTrue(html.contains("line-height: 20px;"))
+        XCTAssertTrue(html.contains("vertical-align: baseline;"))
+        XCTAssertTrue(html.contains("a[data-footnote-ref]"))
         XCTAssertTrue(html.contains("normalizeFootnoteReferences"))
         XCTAssertTrue(html.contains("md.renderer.rules.footnote_caption"))
-        XCTAssertTrue(html.contains("background: rgba(37, 99, 235, 0.14);"))
+        XCTAssertTrue(html.contains("var label = tokens[idx].meta && tokens[idx].meta.label ? String(tokens[idx].meta.label) : '';"))
+        XCTAssertTrue(html.contains("border-radius: 999px;"))
+        XCTAssertTrue(html.contains("background: rgb(244, 244, 244);"))
+        XCTAssertFalse(html.contains("background: rgba(37, 99, 235, 0.14);"))
         XCTAssertTrue(html.contains(".hljs-keyword"))
         XCTAssertTrue(html.contains("window.__scopyIsRenderReady"))
         XCTAssertTrue(html.contains("requiresHighlightTheme"))
@@ -101,12 +109,131 @@ final class KaTeXRenderToStringTests: XCTestCase {
         XCTAssertTrue(normalized.markdown.contains("```md\n**重要：**请注意\n```"))
     }
 
-    func testMarkdownTableUsesHorizontalScrollWithBalancedWrapping() {
+    func testMarkdownTableUsesChatGPTStyleWithExistingOverflowSupport() {
         let html = MarkdownHTMLRenderer.render(markdown: "| a | b |\n| --- | --- |\n| 1 | 2 |")
+        XCTAssertTrue(html.contains("wrapChatGPTTables(el);"))
+        XCTAssertTrue(html.contains("scaleChatGPTTables(el);"))
+        XCTAssertTrue(html.contains("window.__scopyScaleChatGPTTables = scaleChatGPTTables"))
+        XCTAssertTrue(html.contains(".scopy-chatgpt-table-container"))
+        XCTAssertTrue(MarkdownRenderFeatureSet.scopyDefault.overflowProbeSelector.contains(".scopy-chatgpt-table-container"))
         XCTAssertTrue(html.contains("overflow-x: auto;"))
-        XCTAssertTrue(html.contains("white-space: normal;"))
-        XCTAssertTrue(html.contains("word-break: break-word;"))
-        XCTAssertTrue(html.contains("max-width: 100%;"))
+        XCTAssertTrue(html.contains("--scopy-chatgpt-thread-content-width: 768.0px;"))
+        XCTAssertTrue(html.contains("--scopy-chatgpt-render-width: calc(var(--scopy-chatgpt-thread-content-width) + (var(--scopy-chatgpt-content-inline-padding) * 2));"))
+        XCTAssertTrue(html.contains("--scopy-chatgpt-preview-scale: 1;"))
+        XCTAssertTrue(html.contains("#content-scale-shell"))
+        XCTAssertTrue(html.contains("width: var(--scopy-chatgpt-render-width);"))
+        XCTAssertTrue(html.contains("transform: scale(var(--scopy-chatgpt-preview-scale));"))
+        XCTAssertTrue(html.contains("updateChatGPTPreviewScale(el);"))
+        XCTAssertTrue(html.contains("width: var(--scopy-chatgpt-table-breakout-width);"))
+        XCTAssertTrue(html.contains("max-width: none;"))
+        XCTAssertTrue(html.contains("display: table;"))
+        XCTAssertTrue(html.contains("border-collapse: separate;"))
+        XCTAssertTrue(html.contains("border: 0;"))
+        XCTAssertTrue(html.contains("min-width: var(--scopy-chatgpt-thread-content-width);"))
+        XCTAssertTrue(html.contains("width: max-content;"))
+        XCTAssertTrue(html.contains("table-layout: auto;"))
+        XCTAssertTrue(html.contains("dataset.scopyTableScaled"))
+        XCTAssertTrue(html.contains("font-family: var(--scopy-chatgpt-font);"))
+        XCTAssertTrue(html.contains("font-size: 14px;"))
+        XCTAssertTrue(html.contains("line-height: 24px;"))
+        XCTAssertFalse(html.contains("html.scopy-export-mode .scopy-chatgpt-table-container"))
+        XCTAssertTrue(html.contains("text-align: start;"))
+        XCTAssertTrue(html.contains("word-break: normal;"))
+        XCTAssertTrue(html.contains("overflow-wrap: break-word;"))
+        XCTAssertTrue(html.contains("min-width: 128px;"))
+        XCTAssertTrue(html.contains("max-width: 192px;"))
+        XCTAssertTrue(html.contains("td:last-child"))
+        XCTAssertTrue(html.contains("min-width: 192px;"))
+        XCTAssertTrue(html.contains("max-width: 256px;"))
+        XCTAssertTrue(html.contains("padding-block: 8px;"))
+        XCTAssertTrue(html.contains("line-height: 16px;"))
+        XCTAssertTrue(html.contains("tbody td {"))
+        XCTAssertTrue(html.contains("border-bottom: 1px solid var(--scopy-code-card-border);"))
+        XCTAssertTrue(html.contains("padding-block: 10px;"))
+        XCTAssertTrue(html.contains("padding-inline-end: 24px;"))
+        XCTAssertTrue(html.contains("tbody tr:last-child td"))
+        XCTAssertFalse(html.contains("display: block;\n            border-collapse: separate;"))
+        XCTAssertFalse(html.contains("border-radius: 10px;"))
+        XCTAssertFalse(html.contains("background: var(--scopy-table-header-bg);"))
+        XCTAssertFalse(html.contains("border-left: 1px solid"))
+    }
+
+    func testMarkdownThemeUsesWACZChatGPTNonTableStyles() {
+        let markdown = """
+        # Title
+        ## Section
+
+        Paragraph with `code`, **strong**, *emphasis*, [link](https://example.com), and footnote.[^1]
+
+        > Quote
+
+        - [x] done
+        - nested
+
+        ```python
+        def hello():
+            print("hi")
+        ```
+
+        [^1]: note
+        """
+
+        let html = MarkdownHTMLRenderer.render(markdown: markdown)
+        XCTAssertTrue(html.contains("--scopy-chatgpt-font:"))
+        XCTAssertTrue(html.contains("--scopy-chatgpt-mono:"))
+        XCTAssertTrue(html.contains("--scopy-text-primary: rgb(13, 13, 13);"))
+        XCTAssertTrue(html.contains("font-size: 16px;"))
+        XCTAssertTrue(html.contains("line-height: 26px;"))
+        XCTAssertTrue(html.contains("h1 {"))
+        XCTAssertTrue(html.contains("font-size: 24px;"))
+        XCTAssertTrue(html.contains("line-height: 32px;"))
+        XCTAssertTrue(html.contains("h2 {"))
+        XCTAssertTrue(html.contains("font-size: 20px;"))
+        XCTAssertTrue(html.contains("p {"))
+        XCTAssertTrue(html.contains("margin: 8px 0 4px 0;"))
+        XCTAssertTrue(html.contains("p code,"))
+        XCTAssertTrue(html.contains("background: var(--scopy-code-bg);"))
+        XCTAssertTrue(html.contains("white-space: nowrap;"))
+        XCTAssertTrue(html.contains("pre {"))
+        XCTAssertTrue(html.contains("border-radius: 24px;"))
+        XCTAssertTrue(html.contains("padding: 48px 20px 12px 20px;"))
+        XCTAssertTrue(html.contains("pre:has(> code.language-python)::before"))
+        XCTAssertTrue(html.contains(".hljs-keyword"))
+        XCTAssertTrue(html.contains("color: var(--scopy-syntax-operator);"))
+        XCTAssertTrue(html.contains("blockquote::after"))
+        XCTAssertTrue(html.contains("background-color: var(--scopy-border);"))
+        XCTAssertTrue(html.contains("li::marker"))
+        XCTAssertTrue(html.contains("font-weight: 700;"))
+        XCTAssertTrue(html.contains(".task-list-item-checkbox"))
+        XCTAssertTrue(html.contains("width: 16px;"))
+        XCTAssertTrue(html.contains("vertical-align: -3px;"))
+        XCTAssertTrue(html.contains("a::after"))
+        XCTAssertTrue(html.contains("content: \"↗\";"))
+        XCTAssertTrue(html.contains("sup.footnote-ref"))
+        XCTAssertTrue(html.contains("background: rgb(244, 244, 244);"))
+        XCTAssertFalse(html.contains("--scopy-surface-shadow"))
+        XCTAssertFalse(html.contains("border-radius: 18px;"))
+        XCTAssertFalse(html.contains("#eef2f7"))
+        XCTAssertFalse(html.contains("#d73a49"))
+    }
+
+    func testMarkdownPreviewAndExportShareSafeContentInset() {
+        let html = MarkdownHTMLRenderer.render(markdown: "# H1")
+        XCTAssertTrue(html.contains("#content {"))
+        XCTAssertTrue(html.contains("--scopy-chatgpt-content-top-padding: 20.0px;"))
+        XCTAssertTrue(html.contains("--scopy-chatgpt-content-inline-padding: 24.0px;"))
+        XCTAssertTrue(html.contains("padding: var(--scopy-chatgpt-content-top-padding) var(--scopy-chatgpt-content-inline-padding) var(--scopy-chatgpt-content-bottom-padding) var(--scopy-chatgpt-content-inline-padding);"))
+        XCTAssertTrue(html.contains("html.scopy-export-mode #content-scale-shell {"))
+        XCTAssertTrue(html.contains("html.scopy-export-mode #content {"))
+        XCTAssertTrue(html.contains("transform: none;"))
+        XCTAssertFalse(html.contains("""
+          html.scopy-export-mode #content {
+            box-shadow: none;
+            border: 0;
+            border-radius: 0;
+            padding: 0;
+          }
+        """))
     }
 
     func testKaTeXRenderToStringForTableSnippetMathSegments() throws {

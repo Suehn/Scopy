@@ -62,6 +62,7 @@ struct MarkdownRenderFeatureSet: Equatable {
     var overflowProbeSelector: String {
         [
             "pre",
+            ".scopy-chatgpt-table-container",
             "table",
             ".katex-display",
             ".footnotes",

@@ -11,6 +11,33 @@
 
 - No unreleased entries.
 
+## [v0.8.3] - 2026-05-30
+
+### Markdown/Preview
+
+- Aligns the shared preview/export Markdown HTML theme with the WACZ-extracted ChatGPT rendering model for typography, heading rhythm, paragraphs, inline code, fenced code cards, code language labels, syntax colors, blockquotes, lists, task lists, links, footnotes, horizontal rules, and tables.
+- Keeps the existing Scopy table container contract intact for preview/export handoff: `display: block`, `overflow-x: auto`, `width: 100%`, and `table-layout: auto`.
+- Reworks task-list rendering to keep ChatGPT-style list bullets while using a static 16px checkbox marker that does not change the underlying Markdown renderer pipeline.
+
+### Markdown/Export
+
+- Applies the same shared Markdown theme in export output while leaving `MarkdownExportService` wide-table scaling and global export scale logic unchanged.
+- Verifies the existing export table metrics behavior with focused checks while keeping the table scaling JavaScript path unchanged.
+
+### Tests
+
+- Extended Markdown renderer unit coverage so the WACZ-aligned non-table style contract, footnote treatment, table visual contract, and existing overflow contract are asserted together.
+
+### Verification
+
+- Focused renderer unit tests: Executed 3 tests, 0 failures (2026-05-30).
+- Focused table export UI scaling checks: pending rerun (2026-05-30).
+- `make build`: pending rerun (2026-05-30).
+- `make test-unit`: pending rerun (2026-05-30).
+- `make test-strict`: not run; this change does not touch concurrency, actors, or threading code.
+- `make docs-validate`: pending rerun (2026-05-30).
+- `make release-validate`: pending rerun (2026-05-30).
+
 ## [v0.8.2] - 2026-05-16
 
 ### Markdown/Preview

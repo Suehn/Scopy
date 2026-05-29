@@ -573,13 +573,8 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
         super.init()
     }
 
-    private static func preferredLayoutWidthPoints(for screen: NSScreen?) -> CGFloat {
-        let previewMaxWidthPoints: CGFloat = 640
-        let visibleWidth = screen?.visibleFrame.width ?? NSScreen.main?.visibleFrame.width ?? 0
-        if visibleWidth > 0 {
-            return max(1, min(previewMaxWidthPoints, floor(visibleWidth * 0.62)))
-        }
-        return max(1, previewMaxWidthPoints)
+    private static func preferredLayoutWidthPoints(for _: NSScreen?) -> CGFloat {
+        CGFloat(MarkdownRenderLayoutConstants.chatGPTRenderWidth)
     }
 
     private static func sanitizeOutputScale(_ scale: CGFloat) -> CGFloat {
@@ -684,7 +679,15 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
         // Insert export-specific styles before </head>
         let exportStyles = """
         <style id="scopy-export-style">
-            :root { color-scheme: light !important; }
+            :root {
+                color-scheme: light !important;
+                --scopy-chatgpt-thread-content-width: \(MarkdownRenderLayoutConstants.chatGPTThreadContentWidth)px;
+                --scopy-chatgpt-content-inline-padding: \(MarkdownRenderLayoutConstants.chatGPTContentInlinePadding)px;
+                --scopy-chatgpt-content-top-padding: \(MarkdownRenderLayoutConstants.chatGPTContentTopPadding)px;
+                --scopy-chatgpt-content-bottom-padding: \(MarkdownRenderLayoutConstants.chatGPTContentBottomPadding)px;
+                --scopy-chatgpt-render-width: calc(var(--scopy-chatgpt-thread-content-width) + (var(--scopy-chatgpt-content-inline-padding) * 2));
+                --scopy-chatgpt-table-breakout-width: max(var(--scopy-chatgpt-thread-content-width), calc(100vw - (var(--scopy-chatgpt-content-inline-padding) * 2)));
+            }
             @page { margin: 0 !important; }
             html, body {
                 background: #FFFFFF !important;
@@ -700,8 +703,8 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
             #content {
                 background: #FFFFFF !important;
                 display: block;
-                width: 100%;
-                max-width: 100%;
+                width: var(--scopy-chatgpt-render-width) !important;
+                max-width: none !important;
                 opacity: 1 !important;
                 transition: none !important;
             }
@@ -1269,7 +1272,6 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
         let adjustWideContentJS = """
         (function() {
           var w = \(widthPoints);
-          var minAllowNoWrapScale = 0.35; // below this, wrap to preserve readability
           var exportScale = 1;
           try {
             if (window && window.__scopyExportUsesTransform && window.__scopyExportScale) {
@@ -1293,64 +1295,70 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
             }
             return Math.max(1, Math.floor(effectiveWidth - padL - padR));
           }
-          function unwrapIfNeeded(table) {
+          function isExportTableWrapper(node) {
+            return !!(node && node.classList && node.classList.contains('scopy-export-table-wrapper'));
+          }
+          function unwrapIfNeeded(block) {
             try {
-              var p = table && table.parentElement;
+              var p = block && block.parentElement;
               if (!p) { return; }
-              if (!p.classList || !p.classList.contains('scopy-export-table-wrapper')) { return; }
+              if (!isExportTableWrapper(p)) { return; }
               var gp = p.parentNode;
               if (!gp) { return; }
-              gp.insertBefore(table, p);
+              gp.insertBefore(block, p);
               gp.removeChild(p);
             } catch (e) { }
           }
-          function applyNoWrap(table) {
+          function previewTableBlock(table) {
             try {
-              var cells = table.querySelectorAll('th, td');
-              for (var j = 0; j < (cells.length || 0); j++) {
-                var cell = cells[j];
-                if (!cell || !cell.style) { continue; }
-                cell.style.maxWidth = 'none';
-                cell.style.minWidth = '0';
-                cell.style.whiteSpace = 'nowrap';
-                cell.style.overflowWrap = 'normal';
-                cell.style.wordBreak = 'normal';
+              var p = table && table.parentElement;
+              if (p && p.classList && p.classList.contains('scopy-chatgpt-table-container')) {
+                return p;
+              }
+              if (table && table.parentNode && document && typeof document.createElement === 'function') {
+                var wrapper = document.createElement('div');
+                wrapper.className = 'scopy-chatgpt-table-container';
+                table.parentNode.insertBefore(wrapper, table);
+                wrapper.appendChild(table);
+                return wrapper;
               }
             } catch (e) { }
-            try {
-              table.style.tableLayout = 'auto';
-              table.style.width = 'auto';
-              table.style.maxWidth = 'none';
-            } catch (e) { }
+            return table;
           }
-
-          function applyWrap(table) {
+          function resetExportScale(node) {
             try {
-              var cells = table.querySelectorAll('th, td');
-              for (var j = 0; j < (cells.length || 0); j++) {
-                var cell = cells[j];
-                if (!cell || !cell.style) { continue; }
-                cell.style.maxWidth = 'none';
-                cell.style.minWidth = '0';
-                cell.style.whiteSpace = 'normal';
-                cell.style.overflowWrap = 'anywhere';
-                cell.style.wordBreak = 'break-word';
+              if (!node || !node.dataset || node.dataset.scopyExportScaled !== 'true') { return; }
+              if (node.style) {
+                node.style.transform = '';
+                node.style.transformOrigin = '';
               }
-            } catch (e) { }
-            try {
-              table.style.tableLayout = 'fixed';
-              table.style.width = '100%';
-              table.style.maxWidth = '100%';
+              delete node.dataset.scopyExportScaled;
             } catch (e) { }
           }
-
-          function measureTableWidth(table) {
-            try { void table.offsetHeight; } catch (e) { }
-            var rectW = 0, scrollW = 0, offsetW = 0;
-            try { rectW = Math.ceil((table.getBoundingClientRect().width || 0)); } catch (e) { rectW = 0; }
-            try { scrollW = Math.ceil((table.scrollWidth || 0)); } catch (e) { scrollW = 0; }
-            try { offsetW = Math.ceil((table.offsetWidth || 0)); } catch (e) { offsetW = 0; }
-            return Math.max(rectW, scrollW, offsetW);
+          function applyExportScale(node, scale) {
+            try {
+              node.style.transform = 'scale(' + scale + ')';
+              node.style.transformOrigin = 'top left';
+              if (node.dataset) { node.dataset.scopyExportScaled = 'true'; }
+            } catch (e) { }
+          }
+          function measureLayoutWidth(node) {
+            if (!node) { return 0; }
+            try { void node.offsetHeight; } catch (e) { }
+            var rectW = 0, scrollW = 0, offsetW = 0, clientW = 0;
+            try {
+              rectW = Math.ceil((node.getBoundingClientRect().width || 0));
+              if (exportScale && isFinite(exportScale) && exportScale > 0 && exportScale !== 1) {
+                rectW = Math.ceil(rectW / exportScale);
+              }
+            } catch (e) { rectW = 0; }
+            try { scrollW = Math.ceil((node.scrollWidth || 0)); } catch (e) { scrollW = 0; }
+            try { offsetW = Math.ceil((node.offsetWidth || 0)); } catch (e) { offsetW = 0; }
+            try { clientW = Math.ceil((node.clientWidth || 0)); } catch (e) { clientW = 0; }
+            return Math.max(rectW, scrollW, offsetW, clientW);
+          }
+          function measurePreviewTableWidth(table, block) {
+            return Math.max(measureLayoutWidth(block), measureLayoutWidth(table));
           }
 
           function measureBlockWidth(node) {
@@ -1366,87 +1374,37 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
 
           function scaleWideTables(content, targetWidth) {
             if (!content || !content.querySelectorAll) { return; }
+            try {
+              if (typeof window.__scopyScaleChatGPTTables === 'function') {
+                window.__scopyScaleChatGPTTables(content, targetWidth);
+                return;
+              }
+            } catch (e) { }
             var tables = content.querySelectorAll('table');
             for (var i = 0; i < (tables.length || 0); i++) {
               var table = tables[i];
               if (!table) { continue; }
-              unwrapIfNeeded(table);
+              var block = previewTableBlock(table);
+              unwrapIfNeeded(block);
+              resetExportScale(block);
+              resetExportScale(table);
 
-              try { table.style.transform = 'none'; } catch (e) { }
-              try { table.style.transformOrigin = 'top left'; } catch (e) { }
-              try {
-                table.style.display = 'table';
-                table.style.overflow = 'visible';
-              } catch (e) { }
-
-              applyNoWrap(table);
-
-              var rawWidth = measureTableWidth(table);
-              if (!rawWidth || rawWidth <= targetWidth + 1) {
-                // Under global export scaling (transform), keep "fits" tables stretched so they don't become tiny.
-                if (exportScale !== 1) {
-                  try {
-                    table.style.width = '100%';
-                    table.style.maxWidth = '100%';
-                    table.style.tableLayout = 'auto';
-                  } catch (e) { }
-                }
-                continue;
-              }
+              var rawWidth = measurePreviewTableWidth(table, block);
+              if (!rawWidth || rawWidth <= targetWidth + 1) { continue; }
 
               var scale = targetWidth / rawWidth;
-              var useWrap = false;
-
-              if (scale > 0 && scale < minAllowNoWrapScale) {
-                // Preserve readability: cap minimum scale at 0.35, and enable wrapping to avoid truncation.
-                applyWrap(table);
-                useWrap = true;
-                scale = minAllowNoWrapScale;
-                rawWidth = Math.ceil(targetWidth / minAllowNoWrapScale);
-              }
               if (!scale || !isFinite(scale) || scale >= 0.999) { continue; }
               if (scale <= 0) { continue; }
 
-              // Expand the table to its raw width, then scale down inside a fixed-width wrapper.
+              // Preserve the preview table layout. Fallback HTML that was not produced by the Markdown renderer still
+              // scales the table itself and reserves the scaled height on its table container.
+              applyExportScale(table, scale);
               try {
-                table.style.tableLayout = useWrap ? 'fixed' : 'auto';
-                table.style.width = Math.ceil(rawWidth) + 'px';
-                table.style.maxWidth = 'none';
-                table.style.overflow = 'visible';
-              } catch (e) { }
-
-              var wrapper = document.createElement('div');
-              wrapper.className = 'scopy-export-table-wrapper';
-              wrapper.style.display = 'block';
-              wrapper.style.width = targetWidth + 'px';
-              wrapper.style.height = '1px';
-              wrapper.style.overflow = 'visible';
-              wrapper.style.margin = '0';
-              wrapper.style.padding = '0';
-
-              try {
-                table.style.transform = 'scale(' + scale + ')';
-                table.style.transformOrigin = 'top left';
-              } catch (e) { }
-
-              var parent = table.parentNode;
-              if (!parent) { continue; }
-              parent.insertBefore(wrapper, table);
-              wrapper.appendChild(table);
-
-              // Force layout and set wrapper height to preserve document flow.
-              try { void table.offsetHeight; } catch (e) { }
-              try {
-                var scaledRect = table.getBoundingClientRect();
-                var scaledH = Math.ceil(scaledRect.height || table.offsetHeight || 0);
-                if (scaledH && scaledH > 0) {
-                  // getBoundingClientRect() includes ancestor transforms (global exportScale). Wrapper height is in the
-                  // unscaled coordinate system, so compensate to avoid over-shrinking (which can overlap content in PDF).
-                  var wrapperH = scaledH;
-                  if (exportScale && isFinite(exportScale) && exportScale > 0 && exportScale !== 1) {
-                    wrapperH = Math.ceil(wrapperH / exportScale);
-                  }
-                  wrapper.style.height = (wrapperH + 2) + 'px';
+                var rawH = Math.ceil(table.offsetHeight || table.scrollHeight || table.getBoundingClientRect().height || 0);
+                if (rawH && rawH > 0 && block && block.style) {
+                  block.style.height = Math.ceil(rawH * scale + 1) + 'px';
+                  block.style.overflowX = 'visible';
+                  if (block.dataset) { block.dataset.scopyExportScaled = 'true'; }
                 }
               } catch (e) { }
             }
@@ -1665,6 +1623,13 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
             for (var i = 0; i < (tables.length || 0); i++) {
               var t = tables[i];
               if (!t) { continue; }
+              var block = t;
+              try {
+                var directParent = t.parentElement;
+                if (directParent && directParent.classList && directParent.classList.contains('scopy-chatgpt-table-container')) {
+                  block = directParent;
+                }
+              } catch (e) { block = t; }
               var rect = t.getBoundingClientRect();
               var w = Math.ceil(rect.width || 0);
               var sw = 0, cw = 0;
@@ -1674,7 +1639,7 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
               var wrapped = false;
               var wrapperW = 0;
               try {
-                var p = t.parentElement;
+                var p = block.parentElement;
                 wrapped = !!(p && p.classList && p.classList.contains('scopy-export-table-wrapper'));
                 if (wrapped) {
                   var pr = p.getBoundingClientRect();
@@ -1690,8 +1655,12 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
 
               var scale = 1;
               try {
-                var tr = window.getComputedStyle(t).transform;
+                var tr = window.getComputedStyle(block).transform;
                 scale = parseScale(tr);
+                if (scale === 1) {
+                  tr = window.getComputedStyle(t).transform;
+                  scale = parseScale(tr);
+                }
               } catch (e) { scale = 1; }
 
               out.push({

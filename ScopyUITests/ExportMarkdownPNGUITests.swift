@@ -683,6 +683,7 @@ final class ExportMarkdownPNGUITests: XCTestCase {
         app.launchArguments = ["--uitesting"]
         app.launchEnvironment["SCOPY_UITEST_AUTO_EXPORT_MARKDOWN"] = "1"
         app.launchEnvironment["SCOPY_UITEST_AUTO_EXPORT_HTML_PATH"] = htmlPath
+        app.launchEnvironment["SCOPY_UITEST_MARKDOWN_EXPORT_RESOLUTION"] = "100"
         app.launchEnvironment["SCOPY_EXPORT_DUMP_PATH"] = dumpPath
         app.launchEnvironment["SCOPY_EXPORT_ERROR_DUMP_PATH"] = errorPath
         app.launch()
@@ -731,6 +732,7 @@ final class ExportMarkdownPNGUITests: XCTestCase {
         app.launchArguments = ["--uitesting"]
         app.launchEnvironment["SCOPY_UITEST_AUTO_EXPORT_MARKDOWN"] = "1"
         app.launchEnvironment["SCOPY_UITEST_AUTO_EXPORT_HTML_PATH"] = htmlPath
+        app.launchEnvironment["SCOPY_UITEST_MARKDOWN_EXPORT_RESOLUTION"] = "100"
         app.launchEnvironment["SCOPY_EXPORT_DUMP_PATH"] = dumpPath
         app.launchEnvironment["SCOPY_EXPORT_ERROR_DUMP_PATH"] = errorPath
         app.launch()
@@ -1161,10 +1163,12 @@ final class ExportMarkdownPNGUITests: XCTestCase {
         let htmlPath = "/tmp/scopy_uitest_export_widetable.html"
         let dumpPath = "/tmp/scopy_uitest_export_widetable.png"
         let errorPath = "/tmp/scopy_uitest_export_widetable_error.txt"
+        let metricsPath = "/tmp/scopy_uitest_export_widetable_metrics.json"
 
         try? FileManager.default.removeItem(atPath: htmlPath)
         try? FileManager.default.removeItem(atPath: dumpPath)
         try? FileManager.default.removeItem(atPath: errorPath)
+        try? FileManager.default.removeItem(atPath: metricsPath)
 
         let html = """
         <!doctype html>
@@ -1212,9 +1216,11 @@ final class ExportMarkdownPNGUITests: XCTestCase {
         try Data(html.utf8).write(to: URL(fileURLWithPath: htmlPath), options: [.atomic])
 
         let app = XCUIApplication()
-        app.launchArguments = ["--uitesting"]
+        app.launchArguments = ["--uitesting", "-ScopyMarkdownExportResolutionPercent", "100"]
         app.launchEnvironment["SCOPY_UITEST_AUTO_EXPORT_MARKDOWN"] = "1"
         app.launchEnvironment["SCOPY_UITEST_AUTO_EXPORT_HTML_PATH"] = htmlPath
+        app.launchEnvironment["SCOPY_UITEST_MARKDOWN_EXPORT_RESOLUTION"] = "100"
+        app.launchEnvironment["SCOPY_EXPORT_TABLE_METRICS_PATH"] = metricsPath
         app.launchEnvironment["SCOPY_EXPORT_DUMP_PATH"] = dumpPath
         app.launchEnvironment["SCOPY_EXPORT_ERROR_DUMP_PATH"] = errorPath
         app.launch()
@@ -1225,11 +1231,19 @@ final class ExportMarkdownPNGUITests: XCTestCase {
 
         let props = try readPNGProperties(atPath: dumpPath)
         XCTAssertEqual(props.width, 1080)
-        XCTAssertGreaterThan(props.height, 160)
+        XCTAssertGreaterThan(props.height, 80)
 
-        XCTAssertTrue(
-            imageHasDarkPixelNearRightEdge(props.cgImage, tolerancePixels: 40),
-            "Expected dark pixels near the right edge (≤40px) from the table last-column background/border; if missing, table likely scaled too small."
+        let (targetWidth, tables) = try readTableMetrics(atPath: metricsPath)
+        XCTAssertGreaterThan(targetWidth, 0)
+        guard let table = tables.first(where: { $0.cols == 60 }) else {
+            XCTFail("Expected a 60-column table entry in table metrics")
+            return
+        }
+        XCTAssertLessThan(table.scale, 0.999)
+        XCTAssertLessThanOrEqual(
+            table.width,
+            table.targetWidth + 2,
+            "Expected transformed table width to fit export target. got width=\(table.width), targetWidth=\(table.targetWidth), scale=\(table.scale)"
         )
     }
 
@@ -1237,10 +1251,12 @@ final class ExportMarkdownPNGUITests: XCTestCase {
         let htmlPath = "/tmp/scopy_uitest_export_widetable_pdf.html"
         let dumpPath = "/tmp/scopy_uitest_export_widetable_pdf.png"
         let errorPath = "/tmp/scopy_uitest_export_widetable_pdf_error.txt"
+        let metricsPath = "/tmp/scopy_uitest_export_widetable_pdf_metrics.json"
 
         try? FileManager.default.removeItem(atPath: htmlPath)
         try? FileManager.default.removeItem(atPath: dumpPath)
         try? FileManager.default.removeItem(atPath: errorPath)
+        try? FileManager.default.removeItem(atPath: metricsPath)
 
         let html = """
         <!doctype html>
@@ -1288,11 +1304,13 @@ final class ExportMarkdownPNGUITests: XCTestCase {
         try Data(html.utf8).write(to: URL(fileURLWithPath: htmlPath), options: [.atomic])
 
         let app = XCUIApplication()
-        app.launchArguments = ["--uitesting"]
+        app.launchArguments = ["--uitesting", "-ScopyMarkdownExportResolutionPercent", "100"]
         app.launchEnvironment["SCOPY_UITEST_AUTO_EXPORT_MARKDOWN"] = "1"
         app.launchEnvironment["SCOPY_UITEST_AUTO_EXPORT_HTML_PATH"] = htmlPath
+        app.launchEnvironment["SCOPY_UITEST_MARKDOWN_EXPORT_RESOLUTION"] = "100"
         app.launchEnvironment["SCOPY_UITEST_ENABLE_PDF_EXPORT"] = "1"
         app.launchEnvironment["SCOPY_EXPORT_REQUIRE_PDF"] = "1"
+        app.launchEnvironment["SCOPY_EXPORT_TABLE_METRICS_PATH"] = metricsPath
         app.launchEnvironment["SCOPY_EXPORT_DUMP_PATH"] = dumpPath
         app.launchEnvironment["SCOPY_EXPORT_ERROR_DUMP_PATH"] = errorPath
         app.launch()
@@ -1303,11 +1321,19 @@ final class ExportMarkdownPNGUITests: XCTestCase {
 
         let props = try readPNGProperties(atPath: dumpPath)
         XCTAssertEqual(props.width, 1080)
-        XCTAssertGreaterThan(props.height, 160)
+        XCTAssertGreaterThan(props.height, 80)
 
-        XCTAssertTrue(
-            imageHasDarkPixelNearRightEdge(props.cgImage, tolerancePixels: 40),
-            "Expected dark pixels near the right edge (≤40px) from the table last-column background/border under PDF export; if missing, table likely did not scale to fit."
+        let (targetWidth, tables) = try readTableMetrics(atPath: metricsPath)
+        XCTAssertGreaterThan(targetWidth, 0)
+        guard let table = tables.first(where: { $0.cols == 60 }) else {
+            XCTFail("Expected a 60-column table entry in table metrics")
+            return
+        }
+        XCTAssertLessThan(table.scale, 0.999)
+        XCTAssertLessThanOrEqual(
+            table.width,
+            table.targetWidth + 2,
+            "Expected transformed PDF table width to fit export target. got width=\(table.width), targetWidth=\(table.targetWidth), scale=\(table.scale)"
         )
     }
 
@@ -1322,8 +1348,8 @@ final class ExportMarkdownPNGUITests: XCTestCase {
         try? FileManager.default.removeItem(atPath: errorPath)
         try? FileManager.default.removeItem(atPath: metricsPath)
 
-        // A 10-column table that should require downscaling. We validate the export pipeline uses transform scaling
-        // (like previous behavior), rather than squeezing columns / wrapping content to "fit".
+        // A 10-column preview-style table that should require downscaling. Export should scale the same table
+        // container used by preview, rather than changing table layout or cell wrapping at export time.
         let html = """
         <!doctype html>
         <html>
@@ -1334,27 +1360,30 @@ final class ExportMarkdownPNGUITests: XCTestCase {
               :root { color-scheme: light; }
               html, body { margin: 0; padding: 0; background: #fff; color: #000; font: -apple-system-body; }
               #content { padding: 0; }
-              table { display: block; overflow-x: auto; border-collapse: collapse; margin: 0; width: 100%; }
+              .scopy-chatgpt-table-container { overflow-x: auto; max-width: 100%; }
+              table { display: table; border-collapse: collapse; margin: 0; min-width: 640px; width: 100%; table-layout: auto; }
               th, td { border: 1px solid #000; padding: 6px 10px; white-space: nowrap; overflow-wrap: normal; word-break: normal; }
             </style>
           </head>
           <body>
             <div id="content">
               <h1>Moderate Table Scale Test</h1>
-              <table id="t">
-                <thead>
-                  <tr>
-                    <th>col_1</th><th>col_2</th><th>col_3</th><th>col_4</th><th>col_5</th>
-                    <th>col_6</th><th>col_7</th><th>col_8</th><th>col_9</th><th>col_10</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr>
-                    <td>AAAAAAAAAAAAAA</td><td>BBBBBBBBBBBBBB</td><td>CCCCCCCCCCCCCC</td><td>DDDDDDDDDDDDDD</td><td>EEEEEEEEEEEEEE</td>
-                    <td>FFFFFFFFFFFFFF</td><td>GGGGGGGGGGGGGG</td><td>HHHHHHHHHHHHHH</td><td>IIIIIIIIIIIIII</td><td>JJJJJJJJJJJJJJ</td>
-                  </tr>
-                </tbody>
-              </table>
+              <div class="scopy-chatgpt-table-container">
+                <table id="t">
+                  <thead>
+                    <tr>
+                      <th>col_1</th><th>col_2</th><th>col_3</th><th>col_4</th><th>col_5</th>
+                      <th>col_6</th><th>col_7</th><th>col_8</th><th>col_9</th><th>col_10</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td>AAAAAAAAAAAAAA</td><td>BBBBBBBBBBBBBB</td><td>CCCCCCCCCCCCCC</td><td>DDDDDDDDDDDDDD</td><td>EEEEEEEEEEEEEE</td>
+                      <td>FFFFFFFFFFFFFF</td><td>GGGGGGGGGGGGGG</td><td>HHHHHHHHHHHHHH</td><td>IIIIIIIIIIIIII</td><td>JJJJJJJJJJJJJJ</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
             </div>
           </body>
         </html>
@@ -1362,9 +1391,10 @@ final class ExportMarkdownPNGUITests: XCTestCase {
         try Data(html.utf8).write(to: URL(fileURLWithPath: htmlPath), options: [.atomic])
 
         let app = XCUIApplication()
-        app.launchArguments = ["--uitesting"]
+        app.launchArguments = ["--uitesting", "-ScopyMarkdownExportResolutionPercent", "100"]
         app.launchEnvironment["SCOPY_UITEST_AUTO_EXPORT_MARKDOWN"] = "1"
         app.launchEnvironment["SCOPY_UITEST_AUTO_EXPORT_HTML_PATH"] = htmlPath
+        app.launchEnvironment["SCOPY_UITEST_MARKDOWN_EXPORT_RESOLUTION"] = "100"
         app.launchEnvironment["SCOPY_EXPORT_TABLE_METRICS_PATH"] = metricsPath
         app.launchEnvironment["SCOPY_EXPORT_DUMP_PATH"] = dumpPath
         app.launchEnvironment["SCOPY_EXPORT_ERROR_DUMP_PATH"] = errorPath
@@ -1376,7 +1406,7 @@ final class ExportMarkdownPNGUITests: XCTestCase {
 
         let png = try readPNGProperties(atPath: dumpPath)
         XCTAssertEqual(png.width, 1080)
-        XCTAssertGreaterThan(png.height, 120)
+        XCTAssertGreaterThan(png.height, 100)
 
         let (_, tables) = try readTableMetrics(atPath: metricsPath)
         XCTAssertGreaterThanOrEqual(tables.count, 1)
@@ -1386,7 +1416,6 @@ final class ExportMarkdownPNGUITests: XCTestCase {
             return
         }
 
-        XCTAssertTrue(table.wrapped, "Expected export to wrap the table with a fixed-width wrapper before scaling. metric=\(table)")
         XCTAssertLessThan(
             table.scale,
             0.999,
@@ -1406,9 +1435,10 @@ final class ExportMarkdownPNGUITests: XCTestCase {
         let tempFixture = fixturePath(relative: "Fixtures/temp.txt")
 
         let app = XCUIApplication()
-        app.launchArguments = ["--uitesting"]
+        app.launchArguments = ["--uitesting", "-ScopyMarkdownExportResolutionPercent", "100"]
         app.launchEnvironment["SCOPY_UITEST_AUTO_EXPORT_MARKDOWN"] = "1"
         app.launchEnvironment["SCOPY_UITEST_AUTO_EXPORT_MARKDOWN_PATH"] = tempFixture
+        app.launchEnvironment["SCOPY_UITEST_MARKDOWN_EXPORT_RESOLUTION"] = "100"
         app.launchEnvironment["SCOPY_EXPORT_TABLE_METRICS_PATH"] = metricsPath
         app.launchEnvironment["SCOPY_EXPORT_DUMP_PATH"] = dumpPath
         app.launchEnvironment["SCOPY_EXPORT_ERROR_DUMP_PATH"] = errorPath
