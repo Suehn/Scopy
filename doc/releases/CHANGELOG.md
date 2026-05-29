@@ -19,12 +19,15 @@
 - Keeps inline code nested directly inside headings visually merged with heading typography, while preserving the gray inline-code pill for paragraphs, lists, tables, and quotes.
 - Tightens the AssistantMessage-derived spacing and color contract for headings, paragraphs, lists, blockquotes, inline code, horizontal rules, and table borders.
 - Keeps the existing Scopy table container contract intact for preview/export handoff: preview tables scroll inside the fixed content width, while export starts from the same table layout before applying fit-to-PNG scaling.
-- Reworks task-list rendering to keep ChatGPT-style list bullets while using a static 16px checkbox marker that does not change the underlying Markdown renderer pipeline.
+- Reworks task-list rendering to match the AssistantMessage source contract: no list bullets, baseline flex rows, an 8px marker/text gap, and one CSS-painted visual marker path for both generated checkbox inputs and raw `[x]` text markers in WKWebView.
+- Aligns light-theme `hljs` syntax token colors with the WACZ root stylesheet instead of Scopy's earlier approximate palette.
+- Removes export-prone table last-column special sizing and restores source-like 8px inline cell padding while keeping the same preview/export table-scaling boundary.
 
 ### Markdown/Export
 
 - Applies the same shared Markdown theme in export output and keeps normal text wrapping tied to the shared content width even when global export scale is needed for very tall PNGs.
 - Verifies the existing export table metrics behavior with focused checks while keeping wide-table export as a transform applied to the preview-equivalent table layout.
+- Keeps global export scale compatible with the injected export stylesheet by overriding `#content` width at the same CSS priority, while preserving the Scopy Markdown `#content-scale-shell` layout width before bitmap scaling.
 
 ### Tests
 
@@ -38,7 +41,8 @@
 
 - Focused renderer unit tests: Executed 3 tests, 0 failures (2026-05-30).
 - Focused heading inline-code style regression: Executed 1 test, 0 failures (2026-05-30).
-- Focused table export UI scaling checks: pending rerun (2026-05-30).
+- Focused Scopy Markdown export smoke: generated `/tmp/scopy-chatgpt-style-regression.png` at 2160x2335 with 200% resolution and verified the shared heading/task-list/table visual contract (2026-05-30).
+- Focused export UI global-scale regression: `ExportMarkdownPNGUITests/testExportResolution2xDoesNotLeaveBlankRightWhenGlobalScaleApplies` passed (2026-05-30).
 - `make build`: BUILD SUCCEEDED (2026-05-30).
 - `make test-unit`: Executed 486 tests, 1 skipped, 0 failures (2026-05-30).
 - `make test-strict`: not run; this change does not touch concurrency, actors, or threading code.

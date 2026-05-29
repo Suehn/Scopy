@@ -282,12 +282,15 @@ enum MarkdownHTMLDocumentBuilder {
             --scopy-border: rgba(13, 13, 13, 0.15);
             --scopy-border-subtle: rgba(13, 13, 13, 0.10);
             --scopy-text-secondary: rgb(93, 93, 93);
-            --scopy-syntax-operator: rgb(186, 67, 122);
-            --scopy-syntax-name: rgb(107, 58, 180);
-            --scopy-syntax-string: rgb(0, 134, 53);
-            --scopy-syntax-number: rgb(185, 72, 13);
-            --scopy-syntax-meta: rgb(0, 79, 153);
-            --scopy-syntax-option: rgb(186, 142, 0);
+            --scopy-syntax-base: #383a42;
+            --scopy-syntax-comment: #a0a1a7;
+            --scopy-syntax-keyword: #a626a4;
+            --scopy-syntax-name: #e45649;
+            --scopy-syntax-literal: #0184bb;
+            --scopy-syntax-string: #50a14f;
+            --scopy-syntax-built-in: #c18401;
+            --scopy-syntax-number: #986801;
+            --scopy-syntax-symbol: #4078f2;
             --scopy-chatgpt-thread-content-width: \(Self.layout.chatGPTThreadContentWidth)px;
             --scopy-chatgpt-content-inline-padding: \(Self.layout.chatGPTContentInlinePadding)px;
             --scopy-chatgpt-content-top-padding: \(Self.layout.chatGPTContentTopPadding)px;
@@ -538,81 +541,70 @@ enum MarkdownHTMLDocumentBuilder {
           }
           .hljs {
             background: transparent;
-            color: var(--scopy-text-primary);
+            color: var(--scopy-syntax-base);
           }
           .hljs-doctag,
           .hljs-keyword,
-          .hljs-meta .hljs-keyword,
-          .hljs-template-tag,
-          .hljs-template-variable,
-          .hljs-type,
-          .hljs-variable.language_ {
-            color: var(--scopy-syntax-operator);
+          .hljs-formula,
+          .hljs-meta .hljs-keyword {
+            color: var(--scopy-syntax-keyword);
           }
-          .hljs-title,
-          .hljs-title.class_,
-          .hljs-title.class_.inherited__,
-          .hljs-title.function_ {
+          .hljs-section,
+          .hljs-name,
+          .hljs-selector-tag,
+          .hljs-deletion,
+          .hljs-subst {
             color: var(--scopy-syntax-name);
           }
-          .hljs-attr,
-          .hljs-attribute,
-          .hljs-literal,
-          .hljs-number,
-          .hljs-operator,
-          .hljs-selector-attr,
-          .hljs-selector-class,
-          .hljs-selector-id,
-          .hljs-variable,
-          .hljs-section {
-            color: var(--scopy-syntax-number);
-          }
-          .hljs-meta,
-          .hljs-tag,
-          .hljs-name,
-          .hljs-selector-tag {
-            color: var(--scopy-syntax-meta);
+          .hljs-literal {
+            color: var(--scopy-syntax-literal);
           }
           .hljs-meta .hljs-string,
           .hljs-regexp,
-          .hljs-string {
+          .hljs-string,
+          .hljs-addition,
+          .hljs-attribute {
             color: var(--scopy-syntax-string);
           }
           .hljs-built_in,
-          .hljs-symbol {
+          .hljs-class .hljs-title {
+            color: var(--scopy-syntax-built-in);
+          }
+          .hljs-attr,
+          .hljs-selector-attr,
+          .hljs-selector-class,
+          .hljs-selector-pseudo,
+          .hljs-template-variable,
+          .hljs-type,
+          .hljs-variable,
+          .hljs-number {
             color: var(--scopy-syntax-number);
+          }
+          .hljs-symbol,
+          .hljs-bullet,
+          .hljs-link,
+          .hljs-meta,
+          .hljs-selector-id,
+          .hljs-title {
+            color: var(--scopy-syntax-symbol);
           }
           .hljs-code,
           .hljs-comment,
-          .hljs-formula {
-            color: #6a737d;
+          .hljs-quote {
+            color: var(--scopy-syntax-comment);
+            font-style: italic;
           }
-          .hljs-quote,
-          .hljs-addition {
-            color: var(--scopy-syntax-string);
-          }
-          .hljs-selector-pseudo,
-          .hljs-bullet {
-            color: var(--scopy-syntax-option);
-          }
-          .hljs-subst,
-          .hljs-emphasis,
-          .hljs-strong {
-            color: var(--scopy-text-primary);
+          .hljs-operator,
+          .hljs-tag,
+          .hljs-template-tag,
+          .hljs-variable.language_ {
+            color: var(--scopy-syntax-base);
           }
           .hljs-emphasis {
             font-style: italic;
           }
-          .hljs-strong,
-          .hljs-section {
+          .hljs-strong {
             font-weight: 700;
-          }
-          .hljs-addition {
-            background-color: #f0fff4;
-          }
-          .hljs-deletion {
-            color: var(--scopy-syntax-operator);
-            background-color: #ffeef0;
           }
           html.scopy-export-mode #content-scale-shell {
             width: var(--scopy-chatgpt-render-width);
@@ -733,8 +725,7 @@ enum MarkdownHTMLDocumentBuilder {
             border: 0;
             min-width: 128px;
             max-width: 288px;
-            padding-inline-start: 8px;
-            padding-inline-end: 24px;
+            padding-inline: 8px;
             text-align: start;
             white-space: normal;
             word-break: normal;
@@ -745,13 +736,6 @@ enum MarkdownHTMLDocumentBuilder {
             padding-inline-start: 0;
           }
           th:last-child,
-          td:last-child {
-            min-width: 224px;
-            max-width: 416px;
-          }
-          th:last-child {
-            padding-inline-end: 40px;
-          }
           td:last-child {
             padding-inline-end: 0;
           }
@@ -1305,6 +1289,7 @@ enum MarkdownHTMLDocumentBuilder {
         let markdownLiteral = jsonLiteral(markdown)
         let policyLiteral = jsonLiteral(unifiedPolicyPayload(context: context))
         let overflowSelectorLiteral = jsonStringLiteral(MarkdownRenderFeatureSet.scopyDefault.overflowProbeSelector)
+        let taskListBootstrapScript = MarkdownTaskListRuntime.bootstrapScript
 
         return """
         <!doctype html>
@@ -1316,6 +1301,7 @@ enum MarkdownHTMLDocumentBuilder {
             <link rel="stylesheet" href="katex.min.css">
             <script defer src="contrib/scopy-unified-renderer.iife.js"></script>
             \(baseStyle(featureSet: MarkdownRenderFeatureSet.scopyDefault))
+            \(taskListBootstrapScript)
             <script>
               (function () {
                 window.__scopyRenderState = window.__scopyRenderState || {
@@ -1448,6 +1434,9 @@ enum MarkdownHTMLDocumentBuilder {
                     var result = window.ScopyUnifiedMarkdown.render(\(markdownLiteral), \(policyLiteral));
                     if (result && result.html) {
                       el.innerHTML = result.html;
+                      if (typeof window.__scopyApplyTaskLists === 'function') {
+                        window.__scopyApplyTaskLists(el);
+                      }
                       wrapChatGPTTables(el);
                       scaleChatGPTTables(el);
                       if (window.__scopyRenderState) {

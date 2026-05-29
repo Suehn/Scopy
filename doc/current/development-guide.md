@@ -92,6 +92,8 @@ Implication: changes to search semantics belong in the request model, search eng
 7. pngquant settings affect both image history optimization and Markdown/LaTeX export compression where enabled.
 8. The ChatGPT-aligned Markdown theme treats `code` inside headings as heading typography, not as the paragraph inline-code pill; keep this selector separate from paragraph/list/table/quote inline-code styling.
 9. Markdown preview keeps the ChatGPT text layout width stable at the shared render width. Wide tables must scroll inside the existing preview width; PNG export may transform-scale those same tables to fit a bitmap, but must not change table CSS or widen normal text layout.
+10. Task lists follow the AssistantMessage source contract: the list container has no bullet markers and each task row is a baseline-aligned flex row with an 8px gap. Markdown-generated checkbox inputs are hidden after their checked state is read, and raw `[x]` text markers feed the same path. Scopy renders one CSS-painted visual marker instead of relying on WebKit's native checkbox tint so preview and PNG export share the same checked/unchecked colors.
+11. Markdown table cells use the source 8px inline padding with first/last edge padding removed; do not add export-only last-column width or padding rules to solve bitmap clipping.
 
 Search marker: `SCOPY_EXPORT_PDF_GLOBAL_SCALE_MISMATCH`
 

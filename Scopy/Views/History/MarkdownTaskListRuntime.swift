@@ -3,53 +3,53 @@ import Foundation
 enum MarkdownTaskListRuntime {
     static let style = """
       .task-list-container {
-        list-style-type: disc;
-        padding-left: 26px;
-        margin-top: 0;
-        margin-bottom: 0;
+        list-style-type: none;
+        padding-left: 4px;
+        margin: 8px 0 16px 0;
       }
       .task-list-item {
-        list-style-type: disc;
-        padding-left: 6px;
+        display: flex;
+        align-items: baseline;
+        gap: 8px;
+        list-style: none;
+        padding-left: 0;
+        margin: 8px 0;
+        min-height: 24px;
       }
       .task-list-item::marker {
-        font-size: 16px;
-        line-height: 26px;
-        font-weight: 500;
-        color: rgb(93, 93, 93);
+        content: "";
       }
-      .task-list-item > p:first-child {
-        display: inline;
+      .task-list-item > p {
+        display: block;
         margin-top: 0;
         margin-bottom: 0;
       }
-      .task-list-item-checkbox {
-        display: inline-block;
-        position: static;
+      .task-list-item-marker {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        flex: none;
         width: 16px;
         height: 16px;
-        margin: 0 0.35em 0 0;
+        margin: 0;
         border: 1px solid rgb(142, 142, 142);
         border-radius: 4px;
-        background: transparent;
+        background-color: transparent;
         box-sizing: border-box;
-        vertical-align: -3px;
+        transform: translateY(2px);
+        pointer-events: none;
       }
-      .task-list-item-checkbox[data-checked="true"]::after {
-        content: "✓";
-        display: block;
-        width: 14px;
-        height: 14px;
-        color: #fff;
-        background: rgb(0, 79, 153);
-        border-radius: 3px;
-        font-size: 12px;
-        line-height: 14px;
-        text-align: center;
-        transform: translate(-1px, -1px);
+      .task-list-item-marker[data-checked="true"] {
+        border-color: rgb(0, 122, 255);
+        background-color: rgb(0, 122, 255);
       }
-      .task-list-item-checkbox + input[type="checkbox"] {
-        display: none !important;
+      .task-list-item-marker[data-checked="true"]::after {
+        content: "";
+        width: 8px;
+        height: 5px;
+        border-left: 2px solid #fff;
+        border-bottom: 2px solid #fff;
+        transform: rotate(-45deg) translate(1px, -1px);
       }
     """
 
@@ -95,8 +95,74 @@ enum MarkdownTaskListRuntime {
               return null;
             }
 
+            function firstTaskInput(node) {
+              if (!node) { return null; }
+              var child = node.firstChild;
+              while (child) {
+                if (child.nodeType === Node.ELEMENT_NODE) {
+                  var tag = child.tagName;
+                  if (tag === 'UL' || tag === 'OL') { break; }
+                  if (tag === 'INPUT' && (child.getAttribute('type') || '').toLowerCase() === 'checkbox') {
+                    return child;
+                  }
+                  var nested = firstTaskInput(child);
+                  if (nested) { return nested; }
+                }
+                child = child.nextSibling;
+              }
+              return null;
+            }
+
+            function createTaskMarker(checked) {
+              var marker = document.createElement('span');
+              marker.className = 'task-list-item-marker';
+              marker.setAttribute('role', 'checkbox');
+              marker.setAttribute('aria-checked', checked ? 'true' : 'false');
+              marker.setAttribute('data-checked', checked ? 'true' : 'false');
+              return marker;
+            }
+
+            function hideNativeTaskInput(input) {
+              input.setAttribute('hidden', 'hidden');
+              input.setAttribute('aria-hidden', 'true');
+              input.setAttribute('tabindex', '-1');
+            }
+
+            function markTaskListContainer(item) {
+              item.classList.add('task-list-item');
+              var list = item.parentElement;
+              if (list && (list.tagName === 'UL' || list.tagName === 'OL')) {
+                list.classList.add('task-list-container');
+              }
+            }
+
+            function normalizeExistingTaskInput(item) {
+              var existingMarker = item.querySelector('.task-list-item-marker');
+              if (existingMarker) {
+                markTaskListContainer(item);
+                return true;
+              }
+
+              var nativeInput = firstTaskInput(item);
+              if (!nativeInput) { return false; }
+
+              var checked = nativeInput.checked || nativeInput.hasAttribute('checked');
+              hideNativeTaskInput(nativeInput);
+              var marker = createTaskMarker(checked);
+
+              var anchor = nativeInput;
+              if (nativeInput.parentElement && nativeInput.parentElement !== item && nativeInput.parentElement.parentElement === item) {
+                anchor = nativeInput.parentElement;
+              }
+              item.insertBefore(marker, anchor);
+              markTaskListContainer(item);
+              return true;
+            }
+
             function applyTaskListItem(item) {
-              if (!item || item.classList.contains('task-list-item')) { return; }
+              if (!item) { return; }
+              if (normalizeExistingTaskInput(item)) { return; }
+
               var target = markerTargetForListItem(item);
               if (!target || !target.node) { return; }
               var value = target.node.nodeValue || '';
@@ -105,24 +171,18 @@ enum MarkdownTaskListRuntime {
 
               target.node.nodeValue = (match[1] || '') + value.slice(match[0].length);
 
-              var checkbox = document.createElement('span');
-              checkbox.className = 'task-list-item-checkbox';
-              checkbox.setAttribute('role', 'checkbox');
-              checkbox.setAttribute('aria-checked', /[xX]/.test(match[2]) ? 'true' : 'false');
-              checkbox.setAttribute('data-checked', /[xX]/.test(match[2]) ? 'true' : 'false');
+              var marker = createTaskMarker(/[xX]/.test(match[2]));
 
-              target.container.insertBefore(checkbox, target.node);
-              item.classList.add('task-list-item');
-
-              var list = item.parentElement;
-              if (list && (list.tagName === 'UL' || list.tagName === 'OL')) {
-                list.classList.add('task-list-container');
+              if (target.container === item) {
+                item.insertBefore(marker, target.node);
+              } else {
+                item.insertBefore(marker, target.container);
               }
+              markTaskListContainer(item);
 
               var nativeInputs = item.querySelectorAll('input[type="checkbox"]');
               for (var i = 0; i < nativeInputs.length; i++) {
-                nativeInputs[i].setAttribute('hidden', 'hidden');
-                nativeInputs[i].setAttribute('aria-hidden', 'true');
+                hideNativeTaskInput(nativeInputs[i]);
               }
             }
 

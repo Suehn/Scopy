@@ -1977,12 +1977,12 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
                 }
               }
               if (widthPx > 0) {
-                content.style.width = widthPx + 'px';
-                content.style.maxWidth = widthPx + 'px';
+                content.style.setProperty('width', widthPx + 'px', 'important');
+                content.style.setProperty('max-width', widthPx + 'px', 'important');
               } else {
                 var widthPercent = (preservesScopyLayoutWidth || nextScale === 1) ? 100 : Math.max(1, (100 / nextScale));
-                content.style.width = widthPercent + '%';
-                content.style.maxWidth = widthPercent + '%';
+                content.style.setProperty('width', widthPercent + '%', 'important');
+                content.style.setProperty('max-width', widthPercent + '%', 'important');
               }
               content.style.display = 'block';
             } catch (e) { return false; }
