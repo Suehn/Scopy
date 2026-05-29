@@ -16,6 +16,7 @@
 ### Markdown/Preview
 
 - Aligns the shared preview/export Markdown HTML theme with the WACZ-extracted ChatGPT rendering model for typography, heading rhythm, paragraphs, inline code, fenced code cards, code language labels, syntax colors, blockquotes, lists, task lists, links, footnotes, horizontal rules, and tables.
+- Keeps inline code nested directly inside headings visually merged with heading typography, while preserving the gray inline-code pill for paragraphs, lists, tables, and quotes.
 - Keeps the existing Scopy table container contract intact for preview/export handoff: `display: block`, `overflow-x: auto`, `width: 100%`, and `table-layout: auto`.
 - Reworks task-list rendering to keep ChatGPT-style list bullets while using a static 16px checkbox marker that does not change the underlying Markdown renderer pipeline.
 
@@ -28,15 +29,20 @@
 
 - Extended Markdown renderer unit coverage so the WACZ-aligned non-table style contract, footnote treatment, table visual contract, and existing overflow contract are asserted together.
 
+### Tooling/Project
+
+- Keeps resource-staging run script phases correctness-first, but avoids repeated full MarkdownPreview asset copies and unnecessary pngquant recopy work during no-op builds.
+
 ### Verification
 
 - Focused renderer unit tests: Executed 3 tests, 0 failures (2026-05-30).
+- Focused heading inline-code style regression: Executed 1 test, 0 failures (2026-05-30).
 - Focused table export UI scaling checks: pending rerun (2026-05-30).
-- `make build`: pending rerun (2026-05-30).
-- `make test-unit`: pending rerun (2026-05-30).
+- `make build`: BUILD SUCCEEDED (2026-05-30).
+- `make test-unit`: Executed 486 tests, 1 skipped, 0 failures (2026-05-30).
 - `make test-strict`: not run; this change does not touch concurrency, actors, or threading code.
-- `make docs-validate`: pending rerun (2026-05-30).
-- `make release-validate`: pending rerun (2026-05-30).
+- `make docs-validate`: passed (2026-05-30).
+- `make release-validate`: passed (2026-05-30).
 
 ## [v0.8.2] - 2026-05-16
 

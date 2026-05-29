@@ -90,6 +90,7 @@ Implication: changes to search semantics belong in the request model, search eng
 5. The renderer normalizes inline LaTeX, ATX headings, safe HTML placeholders, and CJK punctuation-adjacent emphasis before local `markdown-it` rendering, then strips internal placeholders before user-visible HTML or fallback text.
 6. `MarkdownExportService` now lives under `Scopy/Services/Export` and produces PNG output back to the pasteboard through `ScopyKit`.
 7. pngquant settings affect both image history optimization and Markdown/LaTeX export compression where enabled.
+8. The ChatGPT-aligned Markdown theme treats `code` inside headings as heading typography, not as the paragraph inline-code pill; keep this selector separate from paragraph/list/table/quote inline-code styling.
 
 Search marker: `SCOPY_EXPORT_PDF_GLOBAL_SCALE_MISMATCH`
 
@@ -169,6 +170,7 @@ Implication: if you touch settings behavior, preserve the Save/Cancel model and 
 - `make test-strict` for concurrency-sensitive work
 - `make test-tsan` when the environment supports the hosted test path; the command auto-skips the known-bad `macOS 26.x + Xcode 26.2 (17C52)` hosted runtime combination
 - Hosted TSan CI lives in `.github/workflows/tsan.yml` on `macos-15 + Xcode 16.0`; treat that workflow as the supported real-coverage path until the local Apple runtime issue is resolved
+- Resource staging scripts in `project.yml` intentionally stay correctness-first for SwiftPM bundles and app resources. Optimize their internal work with idempotent/differential copy behavior; do not skip dynamic staging by enabling dependency analysis unless the input/output contract is fully explicit.
 
 ### Performance Validation
 

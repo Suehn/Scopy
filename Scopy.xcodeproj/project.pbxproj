@@ -1851,7 +1851,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "set -euo pipefail\nSRC_TOOL=\"${SRCROOT}/Scopy/Resources/Tools/pngquant\"\nDST_TOOL_DIR=\"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/Tools\"\nDST_TOOL=\"${DST_TOOL_DIR}/pngquant\"\nif [ ! -f \"$SRC_TOOL\" ]; then\n  echo \"Missing bundled tool: $SRC_TOOL\" >&2\n  if [ \"${CONFIGURATION:-Debug}\" = \"Release\" ]; then\n    exit 1\n  fi\n  exit 0\nfi\nmkdir -p \"$DST_TOOL_DIR\"\nditto \"$SRC_TOOL\" \"$DST_TOOL\"\nchmod +x \"$DST_TOOL\" || true\n\nSRC_TP_DIR=\"${SRCROOT}/Scopy/Resources/ThirdParty/pngquant\"\nDST_TP_PARENT=\"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/ThirdParty\"\nDST_TP_DIR=\"${DST_TP_PARENT}/pngquant\"\nif [ -d \"$SRC_TP_DIR\" ]; then\n  mkdir -p \"$DST_TP_PARENT\"\n  rm -rf \"$DST_TP_DIR\"\n  ditto \"$SRC_TP_DIR\" \"$DST_TP_DIR\"\nfi\nSTAMP_FILE=\"${DERIVED_FILE_DIR}/fix_bundled_tool_permissions.stamp\"\nmkdir -p \"$(dirname \"$STAMP_FILE\")\"\ntouch \"$STAMP_FILE\"\n";
+			shellScript = "set -euo pipefail\nSRC_TOOL=\"${SRCROOT}/Scopy/Resources/Tools/pngquant\"\nDST_TOOL_DIR=\"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/Tools\"\nDST_TOOL=\"${DST_TOOL_DIR}/pngquant\"\nif [ ! -f \"$SRC_TOOL\" ]; then\n  echo \"Missing bundled tool: $SRC_TOOL\" >&2\n  if [ \"${CONFIGURATION:-Debug}\" = \"Release\" ]; then\n    exit 1\n  fi\n  exit 0\nfi\nmkdir -p \"$DST_TOOL_DIR\"\nif [ ! -f \"$DST_TOOL\" ] || ! cmp -s \"$SRC_TOOL\" \"$DST_TOOL\"; then\n  ditto \"$SRC_TOOL\" \"$DST_TOOL\"\nfi\nchmod +x \"$DST_TOOL\" || true\n\nSRC_TP_DIR=\"${SRCROOT}/Scopy/Resources/ThirdParty/pngquant\"\nDST_TP_PARENT=\"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/ThirdParty\"\nDST_TP_DIR=\"${DST_TP_PARENT}/pngquant\"\nif [ -d \"$SRC_TP_DIR\" ]; then\n  mkdir -p \"$DST_TP_PARENT\"\n  mkdir -p \"$DST_TP_DIR\"\n  rsync -a --delete \"$SRC_TP_DIR\"/ \"$DST_TP_DIR\"/\nfi\nSTAMP_FILE=\"${DERIVED_FILE_DIR}/fix_bundled_tool_permissions.stamp\"\nmkdir -p \"$(dirname \"$STAMP_FILE\")\"\ntouch \"$STAMP_FILE\"\n";
 		};
 		38A68C0F6991A8F75E8A1C87 /* Stage SwiftPM Resource Bundles */ = {
 			isa = PBXShellScriptBuildPhase;
@@ -1932,7 +1932,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "set -euo pipefail\nSRC_DIR=\"${SRCROOT}/Scopy/Resources/MarkdownPreview\"\nDST_DIR=\"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/MarkdownPreview\"\nif [ ! -d \"$SRC_DIR\" ]; then\n  echo \"Missing MarkdownPreview assets: $SRC_DIR\" >&2\n  if [ \"${CONFIGURATION:-Debug}\" = \"Release\" ]; then\n    exit 1\n  fi\n  exit 0\nfi\nrm -rf \"$DST_DIR\"\nditto \"$SRC_DIR\" \"$DST_DIR\"\nSTAMP_FILE=\"${DERIVED_FILE_DIR}/stage_markdown_preview_assets.stamp\"\nmkdir -p \"$(dirname \"$STAMP_FILE\")\"\ntouch \"$STAMP_FILE\"\n";
+			shellScript = "set -euo pipefail\nSRC_DIR=\"${SRCROOT}/Scopy/Resources/MarkdownPreview\"\nDST_DIR=\"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/MarkdownPreview\"\nif [ ! -d \"$SRC_DIR\" ]; then\n  echo \"Missing MarkdownPreview assets: $SRC_DIR\" >&2\n  if [ \"${CONFIGURATION:-Debug}\" = \"Release\" ]; then\n    exit 1\n  fi\n  exit 0\nfi\nmkdir -p \"$DST_DIR\"\nrsync -a --delete \"$SRC_DIR\"/ \"$DST_DIR\"/\nSTAMP_FILE=\"${DERIVED_FILE_DIR}/stage_markdown_preview_assets.stamp\"\nmkdir -p \"$(dirname \"$STAMP_FILE\")\"\ntouch \"$STAMP_FILE\"\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 

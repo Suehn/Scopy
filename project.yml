@@ -147,8 +147,8 @@ targets:
             fi
             exit 0
           fi
-          rm -rf "$DST_DIR"
-          ditto "$SRC_DIR" "$DST_DIR"
+          mkdir -p "$DST_DIR"
+          rsync -a --delete "$SRC_DIR"/ "$DST_DIR"/
           STAMP_FILE="${DERIVED_FILE_DIR}/stage_markdown_preview_assets.stamp"
           mkdir -p "$(dirname "$STAMP_FILE")"
           touch "$STAMP_FILE"
@@ -171,7 +171,9 @@ targets:
             exit 0
           fi
           mkdir -p "$DST_TOOL_DIR"
-          ditto "$SRC_TOOL" "$DST_TOOL"
+          if [ ! -f "$DST_TOOL" ] || ! cmp -s "$SRC_TOOL" "$DST_TOOL"; then
+            ditto "$SRC_TOOL" "$DST_TOOL"
+          fi
           chmod +x "$DST_TOOL" || true
 
           SRC_TP_DIR="${SRCROOT}/Scopy/Resources/ThirdParty/pngquant"
@@ -179,8 +181,8 @@ targets:
           DST_TP_DIR="${DST_TP_PARENT}/pngquant"
           if [ -d "$SRC_TP_DIR" ]; then
             mkdir -p "$DST_TP_PARENT"
-            rm -rf "$DST_TP_DIR"
-            ditto "$SRC_TP_DIR" "$DST_TP_DIR"
+            mkdir -p "$DST_TP_DIR"
+            rsync -a --delete "$SRC_TP_DIR"/ "$DST_TP_DIR"/
           fi
           STAMP_FILE="${DERIVED_FILE_DIR}/fix_bundled_tool_permissions.stamp"
           mkdir -p "$(dirname "$STAMP_FILE")"

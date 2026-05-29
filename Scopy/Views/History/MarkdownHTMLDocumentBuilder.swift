@@ -428,6 +428,22 @@ enum MarkdownHTMLDocumentBuilder {
           pre, code {
             font-family: var(--scopy-chatgpt-mono);
           }
+          h1 code,
+          h2 code,
+          h3 code,
+          h4 code,
+          h5 code,
+          h6 code {
+            padding: 0;
+            border-radius: 0;
+            background: transparent;
+            color: inherit;
+            font-family: inherit;
+            font-size: inherit;
+            line-height: inherit;
+            font-weight: inherit;
+            white-space: normal;
+          }
           p code,
           li code,
           td code,
