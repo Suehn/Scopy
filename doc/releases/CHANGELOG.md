@@ -17,13 +17,14 @@
 
 - Aligns the shared preview/export Markdown HTML theme with the WACZ-extracted ChatGPT rendering model for typography, heading rhythm, paragraphs, inline code, fenced code cards, code language labels, syntax colors, blockquotes, lists, task lists, links, footnotes, horizontal rules, and tables.
 - Keeps inline code nested directly inside headings visually merged with heading typography, while preserving the gray inline-code pill for paragraphs, lists, tables, and quotes.
-- Keeps the existing Scopy table container contract intact for preview/export handoff: `display: block`, `overflow-x: auto`, `width: 100%`, and `table-layout: auto`.
+- Tightens the AssistantMessage-derived spacing and color contract for headings, paragraphs, lists, blockquotes, inline code, horizontal rules, and table borders.
+- Keeps the existing Scopy table container contract intact for preview/export handoff: preview tables scroll inside the fixed content width, while export starts from the same table layout before applying fit-to-PNG scaling.
 - Reworks task-list rendering to keep ChatGPT-style list bullets while using a static 16px checkbox marker that does not change the underlying Markdown renderer pipeline.
 
 ### Markdown/Export
 
-- Applies the same shared Markdown theme in export output while leaving `MarkdownExportService` wide-table scaling and global export scale logic unchanged.
-- Verifies the existing export table metrics behavior with focused checks while keeping the table scaling JavaScript path unchanged.
+- Applies the same shared Markdown theme in export output and keeps normal text wrapping tied to the shared content width even when global export scale is needed for very tall PNGs.
+- Verifies the existing export table metrics behavior with focused checks while keeping wide-table export as a transform applied to the preview-equivalent table layout.
 
 ### Tests
 

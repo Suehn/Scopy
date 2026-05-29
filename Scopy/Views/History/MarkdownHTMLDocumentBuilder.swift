@@ -275,10 +275,13 @@ enum MarkdownHTMLDocumentBuilder {
             --scopy-chatgpt-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
             --scopy-text-primary: rgb(13, 13, 13);
             --scopy-page-bg: #ffffff;
-            --scopy-code-bg: rgb(236, 236, 236);
+            --scopy-code-bg: rgba(13, 13, 13, 0.04);
+            --scopy-code-border: rgba(13, 13, 13, 0.08);
             --scopy-code-card-bg: rgb(249, 249, 249);
             --scopy-code-card-border: rgba(13, 13, 13, 0.05);
-            --scopy-border: rgba(0, 0, 0, 0.15);
+            --scopy-border: rgba(13, 13, 13, 0.15);
+            --scopy-border-subtle: rgba(13, 13, 13, 0.10);
+            --scopy-text-secondary: rgb(93, 93, 93);
             --scopy-syntax-operator: rgb(186, 67, 122);
             --scopy-syntax-name: rgb(107, 58, 180);
             --scopy-syntax-string: rgb(0, 134, 53);
@@ -290,7 +293,7 @@ enum MarkdownHTMLDocumentBuilder {
             --scopy-chatgpt-content-top-padding: \(Self.layout.chatGPTContentTopPadding)px;
             --scopy-chatgpt-content-bottom-padding: \(Self.layout.chatGPTContentBottomPadding)px;
             --scopy-chatgpt-render-width: calc(var(--scopy-chatgpt-thread-content-width) + (var(--scopy-chatgpt-content-inline-padding) * 2));
-            --scopy-chatgpt-table-breakout-width: max(var(--scopy-chatgpt-thread-content-width), calc(100vw - (var(--scopy-chatgpt-content-inline-padding) * 2)));
+            --scopy-chatgpt-table-breakout-width: var(--scopy-chatgpt-thread-content-width);
             --scopy-chatgpt-preview-scale: 1;
           }
           body {
@@ -322,7 +325,7 @@ enum MarkdownHTMLDocumentBuilder {
             max-width: none;
             padding: var(--scopy-chatgpt-content-top-padding) var(--scopy-chatgpt-content-inline-padding) var(--scopy-chatgpt-content-bottom-padding) var(--scopy-chatgpt-content-inline-padding);
             box-sizing: border-box;
-            overflow-wrap: break-word;
+            overflow-wrap: anywhere;
             word-break: normal;
             color: var(--scopy-text-primary);
             background: var(--scopy-page-bg);
@@ -342,45 +345,46 @@ enum MarkdownHTMLDocumentBuilder {
             border: 0;
           }
           h1 {
-            font-size: 24px;
-            line-height: 32px;
+            font-size: 28px;
+            line-height: 34px;
+            letter-spacing: -0.64px;
             margin: 0 0 8px 0;
           }
           h2 {
-            font-size: 20px;
-            line-height: 28px;
-            margin: 16px 0 4px 0;
+            font-size: 24px;
+            line-height: 29px;
+            margin: 32px 0 16px 0;
           }
           h3 {
-            font-size: 18px;
-            line-height: 28px;
-            margin: 16px 0 4px 0;
+            font-size: 20px;
+            line-height: 26px;
+            margin: 18px 0 10px 0;
           }
           h4 {
             font-size: 16px;
             line-height: 24px;
-            margin: 16px 0 0 0;
+            margin: 16px 0 8px 0;
           }
           h5 {
             font-size: 16px;
-            line-height: 26px;
+            line-height: 24px;
             margin: 0;
           }
           h6 {
             font-size: 16px;
-            line-height: 26px;
+            line-height: 24px;
             font-weight: 400;
             margin: 0;
           }
           p {
-            margin: 8px 0 4px 0;
+            margin: 16px 0;
             font-size: 16px;
             line-height: 26px;
             font-weight: 400;
             color: var(--scopy-text-primary);
           }
           ul, ol {
-            margin: 0;
+            margin: 8px 0 16px 0;
             padding-left: 26px;
             font-size: 16px;
             line-height: 26px;
@@ -393,7 +397,8 @@ enum MarkdownHTMLDocumentBuilder {
             list-style-type: decimal;
           }
           li {
-            margin: 0;
+            min-height: 24px;
+            margin: 8px 0;
             padding-left: 6px;
             font-size: 16px;
             line-height: 26px;
@@ -402,8 +407,8 @@ enum MarkdownHTMLDocumentBuilder {
           li::marker {
             font-size: 16px;
             line-height: 26px;
-            font-weight: 700;
-            color: var(--scopy-text-primary);
+            font-weight: 500;
+            color: var(--scopy-text-secondary);
           }
           li > p {
             margin-top: 0;
@@ -412,7 +417,7 @@ enum MarkdownHTMLDocumentBuilder {
           }
           li > ul,
           li > ol {
-            margin-top: 0;
+            margin-top: 4px;
             margin-bottom: 0;
             padding-left: 26px;
           }
@@ -452,6 +457,7 @@ enum MarkdownHTMLDocumentBuilder {
             padding: 2.4px 4.8px;
             border-radius: 4px;
             background: var(--scopy-code-bg);
+            box-shadow: inset 0 0 0 1px var(--scopy-code-border);
             font-size: 14px;
             line-height: 26px;
             font-weight: 500;
@@ -649,45 +655,45 @@ enum MarkdownHTMLDocumentBuilder {
           }
           blockquote {
             position: relative;
-            margin: 0 0 8px 0;
-            padding: 8px 0 8px 24px;
+            margin: 8px 0 16px 0;
+            padding: 4px 0 4px 24px;
             border: 0;
             color: var(--scopy-text-primary);
             font-size: 16px;
             line-height: 24px;
-            font-weight: 500;
+            font-weight: 400;
           }
           blockquote::after {
             content: "";
             display: block;
             position: absolute;
             left: 0;
-            top: 8px;
-            bottom: 8px;
+            top: 0;
+            bottom: 0;
             width: 4px;
             background-color: var(--scopy-border);
             border-radius: 2px;
           }
           blockquote > p {
             margin-top: 0;
-            margin-bottom: 4px;
+            margin-bottom: 0;
             font-size: 16px;
             line-height: 24px;
             font-weight: 400;
           }
           blockquote ul,
           blockquote ol {
-            margin-top: 0;
+            margin-top: 8px;
             margin-bottom: 0;
             padding-left: 26px;
             font-size: 16px;
             line-height: 24px;
-            font-weight: 500;
+            font-weight: 400;
           }
           hr {
             border: 0;
-            border-top: 1px solid var(--scopy-border);
-            margin: 28px 0;
+            border-top: 1px solid var(--scopy-border-subtle);
+            margin: 32px 0;
           }
           .katex {
             color: var(--scopy-text-primary);
@@ -704,16 +710,15 @@ enum MarkdownHTMLDocumentBuilder {
             display: block;
             overflow-x: auto;
             overflow-y: hidden;
-            margin-top: 0;
-            margin-bottom: 0;
-            width: var(--scopy-chatgpt-table-breakout-width);
-            max-width: none;
+            margin: 32px 0;
+            width: 100%;
+            max-width: 100%;
           }
           table {
             display: table;
             border-collapse: separate;
             border-spacing: 0;
-            min-width: var(--scopy-chatgpt-thread-content-width);
+            min-width: 100%;
             width: max-content;
             max-width: none;
             table-layout: auto;
@@ -727,13 +732,13 @@ enum MarkdownHTMLDocumentBuilder {
           th, td {
             border: 0;
             min-width: 128px;
-            max-width: 192px;
+            max-width: 288px;
             padding-inline-start: 8px;
             padding-inline-end: 24px;
             text-align: start;
             white-space: normal;
             word-break: normal;
-            overflow-wrap: break-word;
+            overflow-wrap: anywhere;
           }
           th:first-child,
           td:first-child {
@@ -741,8 +746,8 @@ enum MarkdownHTMLDocumentBuilder {
           }
           th:last-child,
           td:last-child {
-            min-width: 192px;
-            max-width: 256px;
+            min-width: 224px;
+            max-width: 416px;
           }
           th:last-child {
             padding-inline-end: 40px;
@@ -754,12 +759,12 @@ enum MarkdownHTMLDocumentBuilder {
             border-bottom: 1px solid var(--scopy-border);
             color: var(--scopy-text-primary);
             font-weight: 600;
-            line-height: 16px;
+            line-height: 20px;
             padding-block: 8px;
             vertical-align: bottom;
           }
           tbody td {
-            border-bottom: 1px solid var(--scopy-code-card-border);
+            border-bottom: 1px solid var(--scopy-border-subtle);
           }
           tbody tr:last-child td {
             border-bottom: 0;

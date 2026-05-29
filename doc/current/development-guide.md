@@ -91,12 +91,14 @@ Implication: changes to search semantics belong in the request model, search eng
 6. `MarkdownExportService` now lives under `Scopy/Services/Export` and produces PNG output back to the pasteboard through `ScopyKit`.
 7. pngquant settings affect both image history optimization and Markdown/LaTeX export compression where enabled.
 8. The ChatGPT-aligned Markdown theme treats `code` inside headings as heading typography, not as the paragraph inline-code pill; keep this selector separate from paragraph/list/table/quote inline-code styling.
+9. Markdown preview keeps the ChatGPT text layout width stable at the shared render width. Wide tables must scroll inside the existing preview width; PNG export may transform-scale those same tables to fit a bitmap, but must not change table CSS or widen normal text layout.
 
 Search marker: `SCOPY_EXPORT_PDF_GLOBAL_SCALE_MISMATCH`
 
 - Forced PDF export has an extra failure mode that preview and snapshot export do not have: pre-PDF global-scale budgeting uses the WKWebView viewport width, while PDF rasterization ultimately uses the real PDF page boxes.
 - If the PDF page box is narrower than the viewport, the final raster height becomes larger than the earlier estimate. Long content can then fail only on the PDF path with symptoms such as clipped long exports or `PDF rasterization too large`.
 - When touching Markdown export, keep the PDF preflight/re-scale guard next to this marker and keep `ExportMarkdownPNGUITests.testAutoExportGlobalScalePDFDoesNotLeaveBlankRight()` green.
+- Global export scale must preserve the already-laid-out content width. Do not compensate by widening `#content` by `1 / scale`; that changes paragraph line breaks and table column measurement instead of scaling the preview-equivalent layout.
 
 Implication: preview/export work must remain background-safe and should not mutate unrelated persisted content.
 

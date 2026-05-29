@@ -15,8 +15,8 @@ enum MarkdownTaskListRuntime {
       .task-list-item::marker {
         font-size: 16px;
         line-height: 26px;
-        font-weight: 700;
-        color: rgb(13, 13, 13);
+        font-weight: 500;
+        color: rgb(93, 93, 93);
       }
       .task-list-item > p:first-child {
         display: inline;

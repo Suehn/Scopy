@@ -606,6 +606,7 @@ final class ExportMarkdownPNGUITests: XCTestCase {
         app.launchEnvironment["SCOPY_UITEST_AUTO_EXPORT_HTML_PATH"] = htmlPath
         app.launchEnvironment["SCOPY_UITEST_ENABLE_PDF_EXPORT"] = "1"
         app.launchEnvironment["SCOPY_EXPORT_REQUIRE_PDF"] = "1"
+        app.launchEnvironment["SCOPY_UITEST_MARKDOWN_EXPORT_RESOLUTION"] = "100"
         // Force global-scale in a controlled way while keeping the export reasonably fast.
         // Keep a small buffer above 10M to avoid rounding pushing rasterization just over the limit.
         app.launchEnvironment["SCOPY_UITEST_EXPORT_MAX_TOTAL_PIXELS"] = "10000000"

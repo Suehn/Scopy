@@ -686,7 +686,7 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
                 --scopy-chatgpt-content-top-padding: \(MarkdownRenderLayoutConstants.chatGPTContentTopPadding)px;
                 --scopy-chatgpt-content-bottom-padding: \(MarkdownRenderLayoutConstants.chatGPTContentBottomPadding)px;
                 --scopy-chatgpt-render-width: calc(var(--scopy-chatgpt-thread-content-width) + (var(--scopy-chatgpt-content-inline-padding) * 2));
-                --scopy-chatgpt-table-breakout-width: max(var(--scopy-chatgpt-thread-content-width), calc(100vw - (var(--scopy-chatgpt-content-inline-padding) * 2)));
+                --scopy-chatgpt-table-breakout-width: var(--scopy-chatgpt-thread-content-width);
             }
             @page { margin: 0 !important; }
             html, body {
@@ -1287,13 +1287,9 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
               padR = parseFloat(cs.paddingRight) || 0;
             } catch (e) { padL = 0; padR = 0; }
 
-            // When we apply a global export scale via transform, we widen #content (100/scale %) to keep the
-            // scaled visual width stable. Table wrapper widths must use the widened (unscaled) coordinate system.
-            var effectiveWidth = w;
-            if (exportScale !== 1) {
-              effectiveWidth = w / exportScale;
-            }
-            return Math.max(1, Math.floor(effectiveWidth - padL - padR));
+            // Table export starts from the same unscaled content box as preview. A later global transform may shrink
+            // the entire rendered surface for PNG area limits, but it must not change text/table layout widths.
+            return Math.max(1, Math.floor(w - padL - padR));
           }
           function isExportTableWrapper(node) {
             return !!(node && node.classList && node.classList.contains('scopy-export-table-wrapper'));
@@ -1955,8 +1951,13 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
             var nextScale = \(Double(scale));
             if (!nextScale || !isFinite(nextScale) || nextScale <= 0) { nextScale = 1; }
 
-            // Scale the entire content (including images) via transform and compensate width.
+            // Scopy-rendered Markdown has an explicit fixed-width layout shell. Keep that width stable while applying
+            // export scale so paragraph wrapping and table column measurement stay aligned with preview/ChatGPT.
+            // Legacy raw HTML exports do not have the shell, so keep their historical width compensation to avoid
+            // blank right margins in WebKit's PDF rasterization path.
             try {
+              var preservesScopyLayoutWidth = false;
+              try { preservesScopyLayoutWidth = !!document.getElementById('content-scale-shell'); } catch (e) { preservesScopyLayoutWidth = false; }
               content.style.transformOrigin = 'top left';
               content.style.transform = 'scale(' + nextScale + ')';
 
@@ -1968,14 +1969,18 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
                 try { viewportW = Math.ceil((document.documentElement && document.documentElement.clientWidth) ? document.documentElement.clientWidth : 0); } catch (e) { viewportW = 0; }
               }
               var widthPx = 0;
-              if (viewportW && isFinite(viewportW) && viewportW > 0 && nextScale !== 1) {
-                widthPx = Math.max(1, Math.ceil(viewportW / nextScale));
+              if (viewportW && isFinite(viewportW) && viewportW > 0) {
+                if (preservesScopyLayoutWidth || nextScale === 1) {
+                  widthPx = Math.max(1, Math.ceil(viewportW));
+                } else {
+                  widthPx = Math.max(1, Math.ceil(viewportW / nextScale));
+                }
               }
               if (widthPx > 0) {
                 content.style.width = widthPx + 'px';
                 content.style.maxWidth = widthPx + 'px';
               } else {
-                var widthPercent = Math.max(1, (100 / nextScale));
+                var widthPercent = (preservesScopyLayoutWidth || nextScale === 1) ? 100 : Math.max(1, (100 / nextScale));
                 content.style.width = widthPercent + '%';
                 content.style.maxWidth = widthPercent + '%';
               }
