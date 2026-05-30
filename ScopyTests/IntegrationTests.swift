@@ -598,7 +598,25 @@ final class SettingsStorePersistenceTests: XCTestCase {
         )
 
         let loaded = await store.load()
-        XCTAssertEqual(loaded.markdownChatGPTLayoutScalePercent, 100)
+        XCTAssertEqual(loaded.markdownChatGPTLayoutScalePercent, 175)
+
+        defaults.set(
+            [
+                "markdownChatGPTLayoutScalePercent": 50
+            ],
+            forKey: "ScopySettings"
+        )
+        let minLoaded = await store.load()
+        XCTAssertEqual(minLoaded.markdownChatGPTLayoutScalePercent, 80)
+
+        defaults.set(
+            [
+                "markdownChatGPTLayoutScalePercent": 250
+            ],
+            forKey: "ScopySettings"
+        )
+        let maxLoaded = await store.load()
+        XCTAssertEqual(maxLoaded.markdownChatGPTLayoutScalePercent, 200)
     }
 
     func testPngquantSettingsClampedWhenDecoding() async {

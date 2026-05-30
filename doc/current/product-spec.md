@@ -56,7 +56,7 @@ Scopy is a native macOS clipboard manager for users who need durable clipboard h
 
 - Provide hover previews for text, images, and files.
 - Provide Markdown/LaTeX rendering with local CommonMark/GFM, footnotes, math, syntax highlighting, a safe HTML subset, and export-to-PNG.
-- Allow Markdown hover previews to switch between ChatGPT 100% and 125% layout profiles from the preview itself; the selected preview profile also controls PNG export launched from that preview.
+- Allow Markdown hover previews to adjust ChatGPT layout scale continuously from 80% to 200% from the preview itself, with light magnetic snapping at each 5% stop; the selected preview scale also controls PNG export launched from that preview. The preview control should stay compact until hover or drag interaction and should keep the last rendered Markdown visible while the new layout profile is prepared.
 - Allow optional pngquant-based compression for newly ingested images and exported Markdown/LaTeX PNGs.
 - Show image thumbnails in the history list when enabled.
 - Allow all image history rows to be sent via AirDrop; inline/stored images may be materialized as temporary PNG files for sharing.
@@ -94,7 +94,7 @@ Scopy is a native macOS clipboard manager for users who need durable clipboard h
 | Appearance | Show image thumbnails | `true` | Users can hide thumbnails for a denser list |
 | Appearance | Thumbnail height | `40 px` | Users can pick supported thumbnail sizes |
 | Appearance | Hover preview delay | `1.0 s` | Users can slow down or speed up preview trigger timing |
-| Appearance | Markdown ChatGPT layout scale | `100%` | Users can set the default Markdown preview/export layout profile; hover preview also provides a quick local 100%/125% switch |
+| Appearance | Markdown ChatGPT layout scale | `100%` | Users can set the default Markdown preview/export layout scale from 80% to 200%; hover preview also provides the same local scale slider |
 | Storage | Max items | `10,000` | History retention remains policy-controlled, not architecturally capped |
 | Storage | Content budget | `200 MB` | Budget applies to content estimate, not raw DB file size |
 | Storage | Cleanup images only | `false` | When enabled, auto-cleanup should preserve text/rich text while removing image items |

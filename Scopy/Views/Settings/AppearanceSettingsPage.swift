@@ -57,16 +57,37 @@ struct AppearanceSettingsPage: View {
             ) {
                 SettingsCardRow {
                     LabeledContent("ChatGPT 页面比例") {
-                        Picker("", selection: $tempSettings.markdownChatGPTLayoutScalePercent) {
-                            Text("100%").tag(MarkdownChatGPTLayoutScalePercent.percent100.rawValue)
-                            Text("125%").tag(MarkdownChatGPTLayoutScalePercent.percent125.rawValue)
+                        HStack(spacing: ScopySpacing.sm) {
+                            Text(MarkdownChatGPTLayoutScalePercent(settingsValue: tempSettings.markdownChatGPTLayoutScalePercent).label)
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundColor(ScopyColors.mutedText)
+                                .monospacedDigit()
+                                .frame(width: 42, alignment: .trailing)
+
+                            Slider(
+                                value: markdownLayoutScaleBinding,
+                                in: Double(MarkdownChatGPTLayoutScalePercent.minimumRawValue)...Double(MarkdownChatGPTLayoutScalePercent.maximumRawValue)
+                            )
+                            .frame(width: 170)
+                            .accessibilityIdentifier("Settings.MarkdownLayoutScaleSlider")
+                            .accessibilityLabel("Markdown ChatGPT layout scale")
+                            .accessibilityValue(MarkdownChatGPTLayoutScalePercent(settingsValue: tempSettings.markdownChatGPTLayoutScalePercent).label)
                         }
-                        .labelsHidden()
-                        .pickerStyle(.segmented)
-                        .frame(width: 150)
                     }
                 }
             }
         }
+    }
+
+    private var markdownLayoutScaleBinding: Binding<Double> {
+        Binding(
+            get: {
+                Double(MarkdownChatGPTLayoutScalePercent(settingsValue: tempSettings.markdownChatGPTLayoutScalePercent).rawValue)
+            },
+            set: { value in
+                tempSettings.markdownChatGPTLayoutScalePercent = MarkdownChatGPTLayoutScalePercent
+                    .magneticValue(from: value)
+            }
+        )
     }
 }

@@ -84,6 +84,11 @@ final class MarkdownPreviewRendererFacadeTests: XCTestCase {
         XCTAssertEqual(MarkdownChatGPTLayoutScalePercent.percent125.layoutViewportWidth(outputSurfaceWidth: 816), 652.8, accuracy: 0.001)
         XCTAssertEqual(MarkdownRenderLayoutConstants.renderWidth(for: .percent100), 816)
         XCTAssertEqual(MarkdownRenderLayoutConstants.renderWidth(for: .percent125), 816)
+        XCTAssertEqual(MarkdownChatGPTLayoutScalePercent(settingsValue: 79).rawValue, 80)
+        XCTAssertEqual(MarkdownChatGPTLayoutScalePercent(settingsValue: 175).rawValue, 175)
+        XCTAssertEqual(MarkdownChatGPTLayoutScalePercent(settingsValue: 201).rawValue, 200)
+        XCTAssertEqual(MarkdownChatGPTLayoutScalePercent.magneticValue(from: 123.9), 125)
+        XCTAssertEqual(MarkdownChatGPTLayoutScalePercent.magneticValue(from: 122.0), 122)
     }
 
     func testDefaultResolverCutsAuthoredMarkdownToUnified() {

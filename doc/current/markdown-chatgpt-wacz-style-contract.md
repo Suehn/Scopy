@@ -57,14 +57,14 @@ Scopy's preview/export implementation mirrors that principle while keeping outpu
 
 - the output/preview surface stays anchored to the desktop message branch: `48rem`/`768px`
 - the default `100%` ChatGPT profile lays out in the full `816px` visual surface with normal `1.0x` CSS font metrics
-- the `125%` profile keeps the same visual surface but lays out in an internal CSS viewport of `816px / 1.25`, then applies WebKit layout zoom back to the fixed surface; it must not grow the canvas or reuse the `100%` line breaks
+- supported scale values are clamped to `80%...200%`; each non-100% scale keeps the same visual surface but lays out in an internal CSS viewport of `816px / scale`, then applies WebKit layout zoom back to the fixed surface; it must not grow the canvas or reuse another scale's line breaks
 - safe inline padding stays `24px` on each side
 - the preview/export surface stays fixed at `768px + 48px = 816px` when the screen allows it
 - the active text column is `min(48rem, renderWidth - 48px)`, where `renderWidth` is the internal layout viewport before zoom
-- the layout profile is part of the Markdown render context and cache key, so 100% and 125% previews cannot reuse stale HTML
+- the layout profile is part of the Markdown render context and cache key, so different scale percentages cannot reuse stale HTML
 - hover preview width is owned by Scopy's shared preview-frame policy, matching image and file previews; Markdown layout profiles control only the content's font metrics and wrapping, and the internal `renderWidth` must not read the popover's `100vw`
 - live hover preview may fit-scale the already-laid-out `816px` visual surface into the shared popover frame; that fit scale is display-only and must not feed back into line breaking
-- the hover-preview 100%/125% switch must rerender Markdown with the selected layout profile instead of changing only CSS variables on an already-rendered document
+- the hover-preview scale slider must rerender Markdown with the selected layout profile instead of changing only CSS variables on an already-rendered document
 - WebView measurements may update height and overflow state, but they must not shrink or grow the outer Markdown popover
 - text wrapping follows `wrap-break-word`: `overflow-wrap: break-word` with normal `word-break`
 

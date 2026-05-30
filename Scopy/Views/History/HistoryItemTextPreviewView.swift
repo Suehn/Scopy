@@ -29,11 +29,13 @@ struct HistoryItemTextPreviewView: View {
     @State private var hasInitializedPreviewLayoutScale = false
     @State private var overrideMarkdownHTML: String?
     @State private var overrideMarkdownRenderKey: String?
-    @State private var isRenderingOverrideMarkdown = false
+    @State private var isMarkdownLayoutScaleControlHovered = false
+    @State private var isMarkdownLayoutScaleEditing = false
 
     private static let exportResolutionPercentUserDefaultsKey = "ScopyMarkdownExportResolutionPercent"
     private static let previewLayoutScalePercentUserDefaultsKey = "ScopyMarkdownPreviewLayoutScalePercent"
     private static let uiTestExportResolutionEnvKey = "SCOPY_UITEST_MARKDOWN_EXPORT_RESOLUTION"
+    private static let markdownLayoutScaleRenderDebounceNanoseconds: UInt64 = 90_000_000
 
     var body: some View {
         let maxWidth: CGFloat = model.isMarkdown
@@ -80,33 +82,33 @@ struct HistoryItemTextPreviewView: View {
                 } else if model.isMarkdown, let html = model.markdownHTML {
                     let layoutScale = activeMarkdownLayoutScale
                     let renderKey = markdownRenderKey(source: text, layoutScale: layoutScale)
-                    let displayedHTML = displayedMarkdownHTML(
-                        source: text,
+                    let defaultRenderKey = markdownRenderKey(source: text, layoutScale: settingsMarkdownLayoutScale)
+                    let displayedDocument = displayedMarkdownDocument(
                         defaultHTML: html,
+                        defaultRenderKey: defaultRenderKey,
                         layoutScale: layoutScale,
-                        renderKey: renderKey
+                        activeRenderKey: renderKey
                     )
                     ZStack(alignment: .topTrailing) {
-                        if isRenderingOverrideMarkdown || displayedHTML == nil {
-                            ProgressView()
-                                .frame(width: width, height: clampedHeight)
-                        } else if let displayedHTML, let controller = markdownWebViewController {
+                        if let controller = markdownWebViewController {
                             ReusableMarkdownPreviewWebView(
                                 controller: controller,
-                                html: displayedHTML,
+                                html: displayedDocument.html,
                                 shouldScroll: shouldScroll,
                                 onContentSizeChange: { metrics in
-                                    applyMarkdownMetrics(metrics, renderKey: renderKey)
+                                    guard !displayedDocument.isPendingActiveScale else { return }
+                                    applyMarkdownMetrics(metrics, renderKey: displayedDocument.renderKey)
                                 }
                             )
                             .frame(width: width, height: clampedHeight)
                             .accessibilityHidden(isUITesting)
-                        } else if let displayedHTML {
+                        } else {
                             MarkdownPreviewWebView(
-                                html: displayedHTML,
+                                html: displayedDocument.html,
                                 shouldScroll: shouldScroll,
                                 onContentSizeChange: { metrics in
-                                    applyMarkdownMetrics(metrics, renderKey: renderKey)
+                                    guard !displayedDocument.isPendingActiveScale else { return }
+                                    applyMarkdownMetrics(metrics, renderKey: displayedDocument.renderKey)
                                 }
                             )
                             .frame(width: width, height: clampedHeight)
@@ -155,6 +157,12 @@ struct HistoryItemTextPreviewView: View {
 
     // MARK: - Export Button
 
+    private struct MarkdownDisplayDocument {
+        let html: String
+        let renderKey: String
+        let isPendingActiveScale: Bool
+    }
+
     private enum MarkdownExportResolution: Int, CaseIterable, Identifiable {
         case x1 = 100
         case x1_5 = 150
@@ -195,6 +203,10 @@ struct HistoryItemTextPreviewView: View {
         )
     }
 
+    private var isMarkdownLayoutScaleControlExpanded: Bool {
+        isMarkdownLayoutScaleControlHovered || isMarkdownLayoutScaleEditing
+    }
+
     private func applyMarkdownMetrics(_ metrics: MarkdownContentMetrics, renderKey: String) {
         guard let text = model.text else { return }
         guard markdownRenderKey(source: text, layoutScale: activeMarkdownLayoutScale) == renderKey else { return }
@@ -216,9 +228,9 @@ struct HistoryItemTextPreviewView: View {
     }
 
     private static func initialPreviewLayoutScalePercent() -> Int {
-        let stored = UserDefaults.standard.integer(forKey: previewLayoutScalePercentUserDefaultsKey)
-        if MarkdownChatGPTLayoutScalePercent(settingsValue: stored).rawValue == stored {
-            return stored
+        if UserDefaults.standard.object(forKey: previewLayoutScalePercentUserDefaultsKey) != nil {
+            let stored = UserDefaults.standard.integer(forKey: previewLayoutScalePercentUserDefaultsKey)
+            return MarkdownChatGPTLayoutScalePercent(settingsValue: stored).rawValue
         }
         return MarkdownRenderLayoutConstants.defaultChatGPTLayoutScale.rawValue
     }
@@ -231,15 +243,14 @@ struct HistoryItemTextPreviewView: View {
         }
     }
 
-    private func selectPreviewLayoutScale(_ scale: MarkdownChatGPTLayoutScalePercent) {
-        guard previewLayoutScalePercent != scale.rawValue else { return }
-        previewLayoutScalePercent = scale.rawValue
-        UserDefaults.standard.set(scale.rawValue, forKey: Self.previewLayoutScalePercentUserDefaultsKey)
-        resetMarkdownPreviewMeasurement()
+    private func selectPreviewLayoutScalePercent(_ percent: Int) {
+        let normalized = MarkdownChatGPTLayoutScalePercent(settingsValue: percent).rawValue
+        guard previewLayoutScalePercent != normalized else { return }
+        previewLayoutScalePercent = normalized
+        UserDefaults.standard.set(normalized, forKey: Self.previewLayoutScalePercentUserDefaultsKey)
     }
 
-    private func resetMarkdownPreviewMeasurement() {
-        model.markdownContentSize = nil
+    private func markMarkdownPreviewAwaitingMetrics() {
         model.markdownHasHorizontalOverflow = false
         model.markdownRenderSucceeded = false
         model.markdownRenderErrorReason = nil
@@ -252,17 +263,38 @@ struct HistoryItemTextPreviewView: View {
         "\(layoutScale.cacheKey)|\(source.count)|\(source.hashValue)"
     }
 
-    private func displayedMarkdownHTML(
-        source _: String,
+    private func displayedMarkdownDocument(
         defaultHTML: String,
+        defaultRenderKey: String,
         layoutScale: MarkdownChatGPTLayoutScalePercent,
-        renderKey: String
-    ) -> String? {
+        activeRenderKey: String
+    ) -> MarkdownDisplayDocument {
         if layoutScale == settingsMarkdownLayoutScale {
-            return defaultHTML
+            return MarkdownDisplayDocument(
+                html: defaultHTML,
+                renderKey: activeRenderKey,
+                isPendingActiveScale: false
+            )
         }
-        guard overrideMarkdownRenderKey == renderKey else { return nil }
-        return overrideMarkdownHTML
+        if overrideMarkdownRenderKey == activeRenderKey, let overrideMarkdownHTML {
+            return MarkdownDisplayDocument(
+                html: overrideMarkdownHTML,
+                renderKey: activeRenderKey,
+                isPendingActiveScale: false
+            )
+        }
+        if let overrideMarkdownHTML, let overrideMarkdownRenderKey {
+            return MarkdownDisplayDocument(
+                html: overrideMarkdownHTML,
+                renderKey: overrideMarkdownRenderKey,
+                isPendingActiveScale: true
+            )
+        }
+        return MarkdownDisplayDocument(
+            html: defaultHTML,
+            renderKey: defaultRenderKey,
+            isPendingActiveScale: true
+        )
     }
 
     private func prepareOverrideMarkdownHTMLIfNeeded(
@@ -274,16 +306,15 @@ struct HistoryItemTextPreviewView: View {
         if layoutScale == settingsMarkdownLayoutScale {
             overrideMarkdownHTML = nil
             overrideMarkdownRenderKey = nil
-            isRenderingOverrideMarkdown = false
             return
         }
         if overrideMarkdownRenderKey == renderKey, overrideMarkdownHTML != nil {
-            isRenderingOverrideMarkdown = false
             return
         }
 
-        resetMarkdownPreviewMeasurement()
-        isRenderingOverrideMarkdown = true
+        try? await Task.sleep(nanoseconds: Self.markdownLayoutScaleRenderDebounceNanoseconds)
+        guard !Task.isCancelled else { return }
+
         let html = await Task.detached(priority: .userInitiated) {
             let context = MarkdownRenderContextResolver.defaultContext(
                 for: source,
@@ -291,11 +322,12 @@ struct HistoryItemTextPreviewView: View {
             )
             return MarkdownHTMLRenderer.render(markdown: source, context: context).html
         }.value
+        guard !Task.isCancelled else { return }
 
         guard markdownRenderKey(source: source, layoutScale: activeMarkdownLayoutScale) == renderKey else { return }
         overrideMarkdownHTML = html
         overrideMarkdownRenderKey = renderKey
-        isRenderingOverrideMarkdown = false
+        markMarkdownPreviewAwaitingMetrics()
     }
 
     private static func initialExportResolutionPercent() -> Int {
@@ -341,38 +373,62 @@ struct HistoryItemTextPreviewView: View {
 
     @ViewBuilder
     private func markdownLayoutScaleControl() -> some View {
-        HStack(spacing: 0) {
-            ForEach(MarkdownChatGPTLayoutScalePercent.allCases, id: \.rawValue) { scale in
-                Button {
-                    selectPreviewLayoutScale(scale)
-                } label: {
-                    Text("\(scale.rawValue)%")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundColor(previewLayoutScalePercent == scale.rawValue ? ScopyColors.text : ScopyColors.mutedText)
-                        .frame(height: 24)
-                        .padding(.horizontal, 7)
-                        .background {
-                            if previewLayoutScalePercent == scale.rawValue {
-                                Capsule()
-                                    .fill(ScopyColors.background.opacity(0.95))
-                            }
-                        }
-                }
-                .buttonStyle(.plain)
-                .accessibilityIdentifier("History.Preview.MarkdownLayoutScale.\(scale.rawValue)")
-                .accessibilityLabel("Markdown preview layout scale \(scale.rawValue)%")
-                .accessibilityValue(previewLayoutScalePercent == scale.rawValue ? "selected" : "not selected")
+        let isExpanded = isMarkdownLayoutScaleControlExpanded
+
+        HStack(spacing: ScopySpacing.xs) {
+            Image(systemName: "text.magnifyingglass")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundColor(ScopyColors.mutedText)
+                .frame(width: 14, height: 14)
+
+            Text(activeMarkdownLayoutScale.label)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundColor(ScopyColors.mutedText)
+                .monospacedDigit()
+                .frame(width: 38, alignment: .leading)
+
+            if isExpanded {
+                Slider(
+                    value: markdownLayoutScaleBinding,
+                    in: Double(MarkdownChatGPTLayoutScalePercent.minimumRawValue)...Double(MarkdownChatGPTLayoutScalePercent.maximumRawValue),
+                    onEditingChanged: { isEditing in
+                        isMarkdownLayoutScaleEditing = isEditing
+                    }
+                )
+                .frame(width: 126)
+                .accessibilityIdentifier("History.Preview.MarkdownLayoutScaleSlider")
+                .accessibilityLabel("Markdown preview layout scale")
+                .accessibilityValue(activeMarkdownLayoutScale.label)
+                .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .trailing)))
             }
         }
+        .frame(height: 28)
+        .padding(.horizontal, isExpanded ? 10 : 8)
         .background(
             Capsule()
-                .fill(ScopyColors.secondaryBackground.opacity(0.9))
+                .fill(ScopyColors.secondaryBackground.opacity(isExpanded ? 0.92 : 0.72))
         )
         .overlay(
             Capsule()
-                .stroke(ScopyColors.separator.opacity(0.5), lineWidth: 0.5)
+                .stroke(ScopyColors.separator.opacity(isExpanded ? 0.65 : 0.35), lineWidth: 0.5)
         )
-        .help("Markdown preview layout scale")
+        .shadow(color: .black.opacity(isExpanded ? 0.12 : 0.06), radius: isExpanded ? 8 : 4, y: 2)
+        .opacity(isExpanded ? 0.98 : 0.82)
+        .animation(.easeOut(duration: 0.16), value: isExpanded)
+        .onHover { isMarkdownLayoutScaleControlHovered = $0 }
+        .help("Markdown preview layout scale (\(activeMarkdownLayoutScale.label))")
+    }
+
+    private var markdownLayoutScaleBinding: Binding<Double> {
+        Binding(
+            get: {
+                Double(activeMarkdownLayoutScale.rawValue)
+            },
+            set: { value in
+                let percent = MarkdownChatGPTLayoutScalePercent.magneticValue(from: value)
+                selectPreviewLayoutScalePercent(percent)
+            }
+        )
     }
 
     @ViewBuilder

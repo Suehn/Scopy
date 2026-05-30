@@ -7,6 +7,12 @@
 
 ## [Unreleased]
 
+### Notes
+
+- No unreleased entries.
+
+## [v0.8.4] - 2026-05-30
+
 ### Markdown/Preview
 
 - Re-anchors heading, paragraph, list, and blockquote rhythm to the captured `markdown-new-styling` DOM instead of the older AssistantMessage class scale, keeps root text wrapping on the source `wrap-break-word` path, restores the captured 8px-inset quote bar, and keeps table-local scroll from widening the hover preview frame.
@@ -16,7 +22,9 @@
 - Promotes explicit parenthesized source-reference links such as `([AP News][1])` into ChatGPT-style 18px citation pills in both preview and PNG export, collapses grouped source references such as `([AP News][1], [Reuters][2])` to the first source plus a `+1` suffix, and leaves ordinary parenthesized links on the normal dotted-underlined link path.
 - Splits ChatGPT Markdown layout scale from output size: Scopy keeps the desktop `48rem`/`768px` content column inside an `816px` visual render surface, maps the default `100%` profile to the full CSS layout viewport, maps the `125%` profile to a `surface / 1.25` internal layout viewport with WebKit layout zoom, and keeps PNG target pixels plus hover-preview shell width stable across profiles.
 - Pins Markdown hover-preview width to Scopy's shared preview-frame policy, matching image/file previews, while keeping Markdown layout profiles responsible only for font metrics and line breaks; live preview fit-scales the already-laid-out ChatGPT surface into that frame without feeding the frame width back into wrapping.
-- Adds a Markdown hover-preview 100%/125% segmented switch. The switch rerenders the active preview with the chosen ChatGPT layout profile, remembers the last preview choice, and makes the hover export button use the same profile as the visible preview.
+- Replaces the Markdown hover-preview 100%/125% segmented switch with an 80%-200% scale slider. The slider rerenders the active preview with the chosen ChatGPT layout profile, lightly snaps near each 5% stop, remembers the last preview choice, and makes the hover export button use the same profile as the visible preview.
+- Smooths Markdown preview scale dragging by keeping the previous rendered surface visible while a short debounced rerender prepares the newly selected layout profile, avoiding blank-frame flashes during continuous slider movement.
+- Compacts the Markdown preview scale control into a lighter hover-expanded pill so it normally occupies less of the reading area while still exposing the full 80%-200% slider during interaction.
 - Shares ATX heading normalization across legacy and unified renderers so malformed source such as `#标题` is parsed as a heading before style application, preventing path-specific paragraph fallback, gray inline-code pills, and changed line breaks.
 - Normalizes unescaped `|` characters inside table-row one- or two-backtick inline code spans before GFM parsing, so examples such as `` `| A | B |` `` remain in their source cell instead of expanding into extra columns, while three-backtick fence-marker examples such as ```` ```python ```` stay literal cell text.
 - Bumps Markdown render context policy/cache namespaces after the parser and bundled renderer semantics changed, forcing old hover-preview HTML for exploded table rows to be regenerated instead of reused.

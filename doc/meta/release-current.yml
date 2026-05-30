@@ -1,6 +1,6 @@
-version: v0.8.3
+version: v0.8.4
 date: 2026-05-30
-release_doc: doc/releases/history/v0.8.3.md
+release_doc: doc/releases/history/v0.8.4.md
 release_index: doc/releases/README.md
 changelog_file: doc/releases/CHANGELOG.md
 profile_doc: null
@@ -9,7 +9,7 @@ spec_doc: doc/current/product-spec.md
 development_doc: doc/current/development-guide.md
 architecture_doc: doc/current/architecture.md
 last_verified_at: 2026-05-30
-summary: WACZ-aligned Markdown rendering theme
+summary: Markdown preview scaling and WACZ parity polish
 verification:
   build: pass
   test_unit: pass
