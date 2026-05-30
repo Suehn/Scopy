@@ -220,7 +220,7 @@ final class KaTeXRenderToStringTests: XCTestCase {
         XCTAssertTrue(html.contains("--scopy-chatgpt-font:"))
         XCTAssertTrue(html.contains("--scopy-chatgpt-mono:"))
         XCTAssertTrue(html.contains("--scopy-text-primary: rgb(13, 13, 13);"))
-        XCTAssertTrue(html.contains("--scopy-chatgpt-layout-font-scale: 1.0;"))
+        XCTAssertTrue(html.contains("--scopy-chatgpt-layout-font-scale: 0.8;"))
         XCTAssertTrue(html.contains("--scopy-chatgpt-body-font-size: calc(16px * var(--scopy-chatgpt-layout-font-scale));"))
         XCTAssertTrue(html.contains("--scopy-chatgpt-body-line-height: calc(26px * var(--scopy-chatgpt-layout-font-scale));"))
         XCTAssertTrue(html.contains("h1 {"))

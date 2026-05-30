@@ -14,16 +14,16 @@ public enum MarkdownChatGPTLayoutScalePercent: Int, CaseIterable, Sendable, Equa
     }
 
     public var fontScale: Double {
-        Double(rawValue) / 100.0
+        switch self {
+        case .percent100:
+            return 0.8
+        case .percent125:
+            return 1.0
+        }
     }
 
     public var threadContentWidth: Double {
-        switch self {
-        case .percent100:
-            return 768
-        case .percent125:
-            return 640
-        }
+        768
     }
 
     public var cacheKey: String {

@@ -51,14 +51,15 @@ ChatGPT does not use one fixed text width at every viewport. The table component
 --thread-gutter-size: calc((100cqw - var(--thread-content-width)) / 2)
 ```
 
-Live Browser inspection against the current ChatGPT conversation at an `880px` CSS viewport showed the Markdown root at `640px`, with a parent class setting `[--thread-content-max-width:40rem]` and a larger-container branch of `@w-lg/main:[--thread-content-max-width:48rem]`. Line breaks therefore come from the active container variable, not from a post-layout transform or a static screenshot width.
+Live Browser inspection against the current ChatGPT conversation at an `880px` CSS viewport showed the Markdown root at `640px`, with a parent class setting `[--thread-content-max-width:40rem]` and a larger-container branch of `@w-lg/main:[--thread-content-max-width:48rem]`. That capture proves ChatGPT uses responsive content variables, but it is not a reason to emulate browser zoom by post-layout scaling, canvas growth, or a hard-coded `40rem` export column. Line breaks come from the active layout metrics, not from a static screenshot width.
 
 Scopy's preview/export implementation mirrors that principle while keeping output size separate from layout scale:
 
-- the default `100%` ChatGPT profile uses the current desktop branch: `48rem`/`768px`
-- the `125%` profile uses the narrower measured branch: `40rem`/`640px`
+- the text column stays anchored to the desktop message branch: `48rem`/`768px`
+- the default `100%` ChatGPT profile uses `0.8x` font and line-height metrics because Scopy's captured unscaled CSS-pixel baseline matches the browser's physical `125%` evidence
+- the `125%` profile uses the same column with `1.0x` font and line-height metrics; it must not apply a second `1.25x` multiplier or narrow the column to `40rem`
 - safe inline padding stays `24px` on each side
-- the preview/export surface stays fixed at the `100%` profile width (`768px + 48px = 816px`) when the screen allows it
+- the preview/export surface stays fixed at `768px + 48px = 816px` when the screen allows it
 - the active text column is `min(profileColumn, 100vw - 48px, outputSurface - 48px)`
 - the layout profile is part of the Markdown render context and cache key, so 100% and 125% previews cannot reuse stale HTML
 - text wrapping follows `wrap-break-word`: `overflow-wrap: break-word` with normal `word-break`
