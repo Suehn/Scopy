@@ -430,46 +430,49 @@ enum MarkdownHTMLDocumentBuilder {
             border: 0;
           }
           h1 {
-            font-size: 28px;
-            line-height: 34px;
-            letter-spacing: -0.64px;
+            font-size: 24px;
+            line-height: 32px;
+            letter-spacing: normal;
             margin: 0 0 8px 0;
           }
           h2 {
-            font-size: 24px;
-            line-height: 29px;
-            margin: 32px 0 16px 0;
+            font-size: 20px;
+            line-height: 28px;
+            margin: 16px 0 4px 0;
           }
           h3 {
-            font-size: 20px;
-            line-height: 26px;
-            margin: 18px 0 10px 0;
+            font-size: 18px;
+            line-height: 28px;
+            margin: 16px 0 4px 0;
           }
           h4 {
             font-size: 16px;
             line-height: 24px;
-            margin: 16px 0 8px 0;
+            margin: 16px 0 0 0;
           }
           h5 {
             font-size: 16px;
-            line-height: 24px;
+            line-height: 26px;
             margin: 0;
           }
           h6 {
             font-size: 16px;
-            line-height: 24px;
+            line-height: 26px;
             font-weight: 400;
             margin: 0;
           }
           p {
-            margin: 16px 0;
+            margin: 8px 0 4px 0;
             font-size: 16px;
             line-height: 26px;
             font-weight: 400;
             color: var(--scopy-text-primary);
           }
+          p + p {
+            margin: 16px 0;
+          }
           ul, ol {
-            margin: 8px 0 16px 0;
+            margin: 0 0 16px 0;
             padding-left: 26px;
             font-size: 16px;
             line-height: 26px;
@@ -482,8 +485,8 @@ enum MarkdownHTMLDocumentBuilder {
             list-style-type: decimal;
           }
           li {
-            min-height: 24px;
-            margin: 8px 0;
+            min-height: 26px;
+            margin: 0;
             padding-left: 6px;
             font-size: 16px;
             line-height: 26px;
@@ -502,7 +505,7 @@ enum MarkdownHTMLDocumentBuilder {
           }
           li > ul,
           li > ol {
-            margin-top: 4px;
+            margin-top: 0;
             margin-bottom: 0;
             padding-left: 26px;
           }
@@ -742,12 +745,12 @@ enum MarkdownHTMLDocumentBuilder {
           }
           blockquote {
             position: relative;
-            margin: 8px 0 16px 0;
-            padding: 4px 0 4px 24px;
+            margin: 0 0 8px 0;
+            padding: 8px 0 8px 24px;
             border: 0;
             color: var(--scopy-text-primary);
             font-size: 16px;
-            line-height: 26px;
+            line-height: 24px;
             font-weight: 400;
           }
           blockquote::after {
@@ -755,8 +758,8 @@ enum MarkdownHTMLDocumentBuilder {
             display: block;
             position: absolute;
             left: 0;
-            top: 0;
-            bottom: 0;
+            top: 8px;
+            bottom: 8px;
             width: 4px;
             background-color: var(--scopy-border);
             border-radius: 2px;
@@ -765,16 +768,16 @@ enum MarkdownHTMLDocumentBuilder {
             margin-top: 0;
             margin-bottom: 0;
             font-size: 16px;
-            line-height: 26px;
+            line-height: 24px;
             font-weight: 400;
           }
           blockquote ul,
           blockquote ol {
-            margin-top: 8px;
+            margin-top: 0;
             margin-bottom: 0;
             padding-left: 26px;
             font-size: 16px;
-            line-height: 26px;
+            line-height: 24px;
             font-weight: 400;
           }
           hr {

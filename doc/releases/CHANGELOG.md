@@ -9,6 +9,7 @@
 
 ### Markdown/Preview
 
+- Re-anchors heading, paragraph, list, and blockquote rhythm to the captured `markdown-new-styling` DOM instead of the older AssistantMessage class scale, and keeps table-local scroll from widening the hover preview frame.
 - Restores standard Markdown tables to the WACZ MarkdownContent `width: 100%` natural layout path, while reserving the TableContainer-style `fit-content` and per-column `xs/sm/md/lg/xl` sizing for tables that the shared renderer classifies as wide.
 - Hardens heading-contained inline code so it cannot inherit the gray inline-code pill in preview/export, and aligns footnote/source pills with the 25px ChatGPT SourceItem metric.
 
@@ -20,7 +21,11 @@
 
 - Focused renderer unit tests: `KaTeXRenderToStringTests/testMarkdownTableUsesChatGPTStyleWithExistingOverflowSupport` and `testMarkdownThemeUsesWACZChatGPTNonTableStyles` passed (2026-05-30).
 - Focused table export UI regressions: `ExportMarkdownPNGUITests/testAutoExportWideTableFitsWidthWithoutOverShrink`, `testAutoExportModeratelyWideTableScalesDownInsteadOfWrapping`, and `testAutoExportTempFixtureTablesAreNotOverScaled` passed (2026-05-30).
-- Focused Scopy Markdown export smoke: generated `/tmp/scopy-rich-markdown-post-table-fix.png` at 2160x8558 with 200% resolution (2026-05-30).
+- Focused Scopy Markdown export smoke: generated `/tmp/scopy-rich-markdown-after-styling-fix.png` at 2160x7914 with 200% resolution (2026-05-30).
+- `make build`: BUILD SUCCEEDED (2026-05-30).
+- `make test-unit`: Executed 486 tests, 1 skipped, 0 failures (2026-05-30).
+- `make docs-validate`: passed (2026-05-30).
+- `make release-validate`: passed (2026-05-30).
 
 ## [v0.8.3] - 2026-05-30
 
