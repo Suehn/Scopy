@@ -1,4 +1,5 @@
 import XCTest
+import ScopyKit
 
 final class MarkdownPreviewRendererFacadeTests: XCTestCase {
     override func setUp() {
@@ -49,7 +50,8 @@ final class MarkdownPreviewRendererFacadeTests: XCTestCase {
             profile: base.profile,
             policy: base.policy,
             policyVersion: base.policyVersion,
-            cacheNamespace: base.cacheNamespace
+            cacheNamespace: base.cacheNamespace,
+            layoutScale: base.layoutScale
         )
 
         let output = MarkdownHTMLRenderer.render(markdown: input, context: unifiedContext)
@@ -58,6 +60,20 @@ final class MarkdownPreviewRendererFacadeTests: XCTestCase {
         XCTAssertEqual(output.diagnostics.renderer, .unified)
         XCTAssertNil(output.diagnostics.fallbackReason)
         XCTAssertTrue(output.html.contains("scopy-unified-renderer.iife.js"))
+    }
+
+    func testLayoutScaleControlsCSSColumnAndFontScaleWithoutChangingSurfaceWidth() {
+        let input = "# Title\n\nMarkdown 是一种轻量标记语言。"
+        let context = MarkdownRenderContextResolver.defaultContext(for: input, layoutScale: .percent125)
+
+        let output = MarkdownHTMLRenderer.render(markdown: input, context: context)
+
+        XCTAssertEqual(context.layoutScale, .percent125)
+        XCTAssertTrue(output.html.contains("--scopy-chatgpt-layout-font-scale: 1.25;"))
+        XCTAssertTrue(output.html.contains("--scopy-chatgpt-thread-content-max-width: 640.0px;"))
+        XCTAssertTrue(output.html.contains("--scopy-chatgpt-output-surface-width: 816.0px;"))
+        XCTAssertEqual(MarkdownRenderLayoutConstants.renderWidth(for: .percent100), 816)
+        XCTAssertEqual(MarkdownRenderLayoutConstants.renderWidth(for: .percent125), 816)
     }
 
     func testDefaultResolverCutsAuthoredMarkdownToUnified() {

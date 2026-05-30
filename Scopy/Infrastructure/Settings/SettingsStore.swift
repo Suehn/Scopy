@@ -101,7 +101,10 @@ public actor SettingsStore {
             "hotkeyModifiers": settings.hotkeyModifiers,
             "showImageThumbnails": settings.showImageThumbnails,
             "thumbnailHeight": settings.thumbnailHeight,
-            "imagePreviewDelay": settings.imagePreviewDelay
+            "imagePreviewDelay": settings.imagePreviewDelay,
+            "markdownChatGPTLayoutScalePercent": MarkdownChatGPTLayoutScalePercent(
+                settingsValue: settings.markdownChatGPTLayoutScalePercent
+            ).rawValue
         ]
     }
 
@@ -137,6 +140,9 @@ public actor SettingsStore {
 
         let exportColorsRaw = dict["pngquantMarkdownExportColors"] as? Int ?? SettingsDTO.default.pngquantMarkdownExportColors
         let exportColors = max(2, min(256, exportColorsRaw))
+        let markdownLayoutScaleRaw = dict["markdownChatGPTLayoutScalePercent"] as? Int
+            ?? SettingsDTO.default.markdownChatGPTLayoutScalePercent
+        let markdownLayoutScale = MarkdownChatGPTLayoutScalePercent(settingsValue: markdownLayoutScaleRaw).rawValue
 
         return SettingsDTO(
             maxItems: dict["maxItems"] as? Int ?? SettingsDTO.default.maxItems,
@@ -161,7 +167,8 @@ public actor SettingsStore {
             hotkeyModifiers: (dict["hotkeyModifiers"] as? NSNumber)?.uint32Value ?? SettingsDTO.default.hotkeyModifiers,
             showImageThumbnails: dict["showImageThumbnails"] as? Bool ?? SettingsDTO.default.showImageThumbnails,
             thumbnailHeight: dict["thumbnailHeight"] as? Int ?? SettingsDTO.default.thumbnailHeight,
-            imagePreviewDelay: dict["imagePreviewDelay"] as? Double ?? SettingsDTO.default.imagePreviewDelay
+            imagePreviewDelay: dict["imagePreviewDelay"] as? Double ?? SettingsDTO.default.imagePreviewDelay,
+            markdownChatGPTLayoutScalePercent: markdownLayoutScale
         )
     }
 

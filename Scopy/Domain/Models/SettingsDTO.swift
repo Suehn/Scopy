@@ -33,6 +33,8 @@ public struct SettingsDTO: Sendable, Equatable {
     public var showImageThumbnails: Bool
     public var thumbnailHeight: Int
     public var imagePreviewDelay: Double  // 悬浮预览延迟（秒）
+    /// Markdown 预览/导出使用的 ChatGPT 排版比例。只影响字体度量与换行，不改变 PNG 目标像素宽度。
+    public var markdownChatGPTLayoutScalePercent: Int
 
     public static let `default` = SettingsDTO(
         maxItems: 10000,
@@ -57,6 +59,7 @@ public struct SettingsDTO: Sendable, Equatable {
         hotkeyModifiers: 0x0300,  // shiftKey (0x0200) | cmdKey (0x0100)
         showImageThumbnails: true,
         thumbnailHeight: 40,
-        imagePreviewDelay: 1.0
+        imagePreviewDelay: 1.0,
+        markdownChatGPTLayoutScalePercent: MarkdownRenderLayoutConstants.defaultChatGPTLayoutScale.rawValue
     )
 }

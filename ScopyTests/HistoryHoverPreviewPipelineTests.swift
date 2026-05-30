@@ -65,6 +65,7 @@ final class HistoryHoverPreviewPipelineTests: XCTestCase {
                 previewInfo: imageInfo,
                 isMarkdown: false,
                 delay: 0.1,
+                markdownLayoutScale: MarkdownRenderLayoutConstants.defaultChatGPTLayoutScale,
                 scale: 2,
                 targetWidthPoints: 500,
                 targetHeightPoints: 300,
@@ -78,6 +79,7 @@ final class HistoryHoverPreviewPipelineTests: XCTestCase {
                 previewInfo: otherInfo,
                 isMarkdown: false,
                 delay: 0.1,
+                markdownLayoutScale: MarkdownRenderLayoutConstants.defaultChatGPTLayoutScale,
                 scale: 2,
                 targetWidthPoints: 500,
                 targetHeightPoints: 300,
@@ -100,6 +102,7 @@ final class HistoryHoverPreviewPipelineTests: XCTestCase {
             previewInfo: FilePreviewSupport.previewInfo(from: "/tmp/source.md", requireExists: false)!,
             isMarkdown: true,
             delay: 0,
+            markdownLayoutScale: .percent125,
             scale: 1,
             targetWidthPoints: 500,
             targetHeightPoints: 400,
@@ -110,6 +113,7 @@ final class HistoryHoverPreviewPipelineTests: XCTestCase {
 
         XCTAssertEqual(markdownRequest.cacheKey, "file|markdown-hash")
         XCTAssertEqual(markdownRequest.url.path, "/tmp/source.md")
+        XCTAssertEqual(markdownRequest.markdownLayoutScale, .percent125)
     }
 
     func testMarkdownFilePreviewPresentsBeforeRenderCompletes() async throws {
@@ -126,6 +130,7 @@ final class HistoryHoverPreviewPipelineTests: XCTestCase {
             previewInfo: FilePreviewSupport.previewInfo(from: markdownURL.path, requireExists: true)!,
             isMarkdown: true,
             delay: 0,
+            markdownLayoutScale: MarkdownRenderLayoutConstants.defaultChatGPTLayoutScale,
             scale: 1,
             targetWidthPoints: 500,
             targetHeightPoints: 400,
@@ -165,7 +170,8 @@ final class HistoryHoverPreviewPipelineTests: XCTestCase {
         let request = HistoryHoverPreviewPipeline.MarkdownFileRequest(
             cacheKey: "file|delayed-read",
             url: markdownURL,
-            delay: 0
+            delay: 0,
+            markdownLayoutScale: MarkdownRenderLayoutConstants.defaultChatGPTLayoutScale
         )
         let readStarted = expectation(description: "markdown file read started")
         var releaseRead: CheckedContinuation<String?, Never>?

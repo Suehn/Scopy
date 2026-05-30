@@ -1,4 +1,5 @@
 import XCTest
+import ScopyKit
 
 final class MarkdownRenderShadowComparatorTests: XCTestCase {
     func testShouldShadowOnlySafeLegacyProfilesWhenFlagEnabled() {
@@ -97,7 +98,8 @@ final class MarkdownRenderShadowComparatorTests: XCTestCase {
             profile: profile,
             policy: MarkdownRepairPolicy.legacyCompatible(for: profile),
             policyVersion: MarkdownRenderContextResolver.legacyPolicyVersion,
-            cacheNamespace: MarkdownRenderContextResolver.legacyCacheNamespace
+            cacheNamespace: MarkdownRenderContextResolver.legacyCacheNamespace,
+            layoutScale: MarkdownRenderLayoutConstants.defaultChatGPTLayoutScale
         )
     }
 

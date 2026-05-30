@@ -54,7 +54,8 @@ enum UnifiedMarkdownRenderer: MarkdownPreviewRenderer {
             profile: context.profile,
             policy: context.policy,
             policyVersion: context.policyVersion,
-            cacheNamespace: context.cacheNamespace
+            cacheNamespace: context.cacheNamespace,
+            layoutScale: context.layoutScale
         )
         let output = LegacyMarkdownItRenderer.render(markdown: markdown, context: legacyContext)
         let diagnostics = MarkdownRenderDiagnostics.legacy(

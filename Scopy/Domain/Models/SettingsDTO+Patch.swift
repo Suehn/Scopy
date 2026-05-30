@@ -27,6 +27,9 @@ public extension SettingsDTO {
         if let value = patch.showImageThumbnails { updated.showImageThumbnails = value }
         if let value = patch.thumbnailHeight { updated.thumbnailHeight = value }
         if let value = patch.imagePreviewDelay { updated.imagePreviewDelay = value }
+        if let value = patch.markdownChatGPTLayoutScalePercent {
+            updated.markdownChatGPTLayoutScalePercent = MarkdownChatGPTLayoutScalePercent(settingsValue: value).rawValue
+        }
 
         return updated
     }

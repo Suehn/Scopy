@@ -574,7 +574,7 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
     }
 
     private static func preferredLayoutWidthPoints(for _: NSScreen?) -> CGFloat {
-        CGFloat(MarkdownRenderLayoutConstants.chatGPTRenderWidth)
+        CGFloat(MarkdownRenderLayoutConstants.chatGPTOutputSurfaceWidth)
     }
 
     private static func sanitizeOutputScale(_ scale: CGFloat) -> CGFloat {
@@ -681,15 +681,16 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
         <style id="scopy-export-style">
             :root {
                 color-scheme: light !important;
-                --scopy-chatgpt-thread-content-max-width: \(MarkdownRenderLayoutConstants.chatGPTThreadContentWidth)px;
+                --scopy-chatgpt-output-surface-width: \(MarkdownRenderLayoutConstants.chatGPTOutputSurfaceWidth)px;
                 --scopy-chatgpt-content-inline-padding: \(MarkdownRenderLayoutConstants.chatGPTContentInlinePadding)px;
                 --scopy-chatgpt-content-top-padding: \(MarkdownRenderLayoutConstants.chatGPTContentTopPadding)px;
                 --scopy-chatgpt-content-bottom-padding: \(MarkdownRenderLayoutConstants.chatGPTContentBottomPadding)px;
                 --scopy-chatgpt-thread-content-width: min(
                     var(--scopy-chatgpt-thread-content-max-width),
+                    max(1px, calc(var(--scopy-chatgpt-output-surface-width) - (var(--scopy-chatgpt-content-inline-padding) * 2))),
                     max(1px, calc(100vw - (var(--scopy-chatgpt-content-inline-padding) * 2)))
                 );
-                --scopy-chatgpt-render-width: calc(var(--scopy-chatgpt-thread-content-width) + (var(--scopy-chatgpt-content-inline-padding) * 2));
+                --scopy-chatgpt-render-width: min(var(--scopy-chatgpt-output-surface-width), max(1px, 100vw));
                 --scopy-chatgpt-table-breakout-width: var(--scopy-chatgpt-thread-content-width);
             }
             @page { margin: 0 !important; }

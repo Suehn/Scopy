@@ -49,6 +49,24 @@ struct AppearanceSettingsPage: View {
                     }
                 }
             }
+
+            SettingsSection(
+                "Markdown",
+                systemImage: "doc.richtext",
+                footer: "渲染比例只影响 Markdown 预览和 PNG 导出的字体度量与换行；导出图片宽度仍保持固定。"
+            ) {
+                SettingsCardRow {
+                    LabeledContent("ChatGPT 页面比例") {
+                        Picker("", selection: $tempSettings.markdownChatGPTLayoutScalePercent) {
+                            Text("100%").tag(MarkdownChatGPTLayoutScalePercent.percent100.rawValue)
+                            Text("125%").tag(MarkdownChatGPTLayoutScalePercent.percent125.rawValue)
+                        }
+                        .labelsHidden()
+                        .pickerStyle(.segmented)
+                        .frame(width: 150)
+                    }
+                }
+            }
         }
     }
 }

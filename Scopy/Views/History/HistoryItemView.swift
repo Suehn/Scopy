@@ -116,7 +116,8 @@ struct HistoryItemView: View, Equatable {
             lhs.isFilePreviewPresented == rhs.isFilePreviewPresented &&
             lhs.settings.showImageThumbnails == rhs.settings.showImageThumbnails &&
             lhs.settings.thumbnailHeight == rhs.settings.thumbnailHeight &&
-            lhs.settings.imagePreviewDelay == rhs.settings.imagePreviewDelay
+            lhs.settings.imagePreviewDelay == rhs.settings.imagePreviewDelay &&
+            lhs.settings.markdownChatGPTLayoutScalePercent == rhs.settings.markdownChatGPTLayoutScalePercent
     }
 
     private var isPreviewInteractionSuppressed: Bool {
@@ -911,7 +912,8 @@ struct HistoryItemView: View, Equatable {
             item: item,
             previewInfo: previewInfo,
             isMarkdown: isMarkdownFile,
-            delay: previewDelay
+            delay: previewDelay,
+            settings: settings
         )
         let markdownCacheKey = isMarkdownFile
             ? HistoryHoverPreviewPipeline.markdownFileCacheKey(itemID: item.id, contentHash: item.contentHash)
@@ -1247,7 +1249,11 @@ struct HistoryItemView: View, Equatable {
     /// v0.22: 确保在创建新任务前取消旧任务，防止快速悬停时任务累积导致内存泄漏
     private func startTextPreviewTask() {
         previewCoordinator.presentPreview(.text)
-        let request = HistoryHoverPreviewPipeline.textRequest(item: item, delay: previewDelay)
+        let request = HistoryHoverPreviewPipeline.textRequest(
+            item: item,
+            delay: previewDelay,
+            settings: settings
+        )
         hoverPreviewTask = Task(priority: .userInitiated) { @MainActor in
             await HistoryHoverPreviewPipeline.run(
                 request: .text(request),

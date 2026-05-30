@@ -57,7 +57,14 @@ enum HistoryItemMarkdownExportController {
         settings: SettingsDTO,
         resolutionScale: CGFloat? = nil
         ) async -> Result<MarkdownExportService.ExportStats, Error> {
-        let html = MarkdownHTMLRenderer.render(markdown: markdownSource)
+        let layoutScale = MarkdownChatGPTLayoutScalePercent(
+            settingsValue: settings.markdownChatGPTLayoutScalePercent
+        )
+        let context = MarkdownRenderContextResolver.defaultContext(
+            for: markdownSource,
+            layoutScale: layoutScale
+        )
+        let html = MarkdownHTMLRenderer.render(markdown: markdownSource, context: context).html
         let pngquantOptions: PngquantService.Options? = {
             guard settings.pngquantMarkdownExportEnabled else { return nil }
             return PngquantService.Options(

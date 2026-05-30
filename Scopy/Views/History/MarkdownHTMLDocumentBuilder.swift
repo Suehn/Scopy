@@ -364,15 +364,21 @@ enum MarkdownHTMLDocumentBuilder {
             try { window.__scopyScaleChatGPTTables = scaleChatGPTTables; } catch (e) { }
     """
 
-    private static func baseStyle(featureSet: MarkdownRenderFeatureSet) -> String {
+    private static func baseStyle(
+        featureSet: MarkdownRenderFeatureSet,
+        layoutScale: MarkdownChatGPTLayoutScalePercent
+    ) -> String {
+        let threadContentWidth = layoutScale.threadContentWidth
+        let outputSurfaceWidth = Self.layout.chatGPTOutputSurfaceWidth
+        let fontScale = layoutScale.fontScale
         let taskListStyle = featureSet.taskLists ? "\n\(MarkdownTaskListRuntime.style)\n" : ""
         let footnoteStyle = featureSet.footnotes ? """
           .footnotes {
             margin-top: 16px;
             padding-top: 0;
             border-top: 0;
-            font-size: 16px;
-            line-height: 26px;
+            font-size: var(--scopy-chatgpt-body-font-size);
+            line-height: var(--scopy-chatgpt-body-line-height);
           }
           .footnotes-list {
             margin: 0;
@@ -389,8 +395,8 @@ enum MarkdownHTMLDocumentBuilder {
             position: static;
             top: auto;
             margin-left: 4px;
-            font-size: 12px;
-            line-height: 20px;
+            font-size: calc(12px * var(--scopy-chatgpt-layout-font-scale));
+            line-height: calc(20px * var(--scopy-chatgpt-layout-font-scale));
             font-weight: 500;
             vertical-align: baseline;
           }
@@ -399,8 +405,8 @@ enum MarkdownHTMLDocumentBuilder {
             position: static;
             top: auto;
             margin-left: 4px;
-            font-size: 12px;
-            line-height: 20px;
+            font-size: calc(12px * var(--scopy-chatgpt-layout-font-scale));
+            line-height: calc(20px * var(--scopy-chatgpt-layout-font-scale));
             font-weight: 500;
             vertical-align: baseline;
           }
@@ -417,8 +423,8 @@ enum MarkdownHTMLDocumentBuilder {
             align-items: center;
             gap: 4px;
             min-width: 0;
-            height: 25px;
-            min-height: 25px;
+            height: calc(25px * var(--scopy-chatgpt-layout-font-scale));
+            min-height: calc(25px * var(--scopy-chatgpt-layout-font-scale));
             padding: 0 8px;
             border-radius: 999px;
             background: rgba(13, 13, 13, 0.04);
@@ -517,15 +523,31 @@ enum MarkdownHTMLDocumentBuilder {
             --scopy-syntax-attribute: #ba8e00;
             --scopy-syntax-tag: #004f99;
             --scopy-syntax-invalid: #ba2623;
-            --scopy-chatgpt-thread-content-max-width: \(Self.layout.chatGPTThreadContentWidth)px;
+            --scopy-chatgpt-layout-font-scale: \(fontScale);
+            --scopy-chatgpt-output-surface-width: \(outputSurfaceWidth)px;
+            --scopy-chatgpt-thread-content-max-width: \(threadContentWidth)px;
             --scopy-chatgpt-content-inline-padding: \(Self.layout.chatGPTContentInlinePadding)px;
             --scopy-chatgpt-content-top-padding: \(Self.layout.chatGPTContentTopPadding)px;
             --scopy-chatgpt-content-bottom-padding: \(Self.layout.chatGPTContentBottomPadding)px;
+            --scopy-chatgpt-body-font-size: calc(16px * var(--scopy-chatgpt-layout-font-scale));
+            --scopy-chatgpt-body-line-height: calc(26px * var(--scopy-chatgpt-layout-font-scale));
+            --scopy-chatgpt-quote-line-height: calc(24px * var(--scopy-chatgpt-layout-font-scale));
+            --scopy-chatgpt-h1-font-size: calc(24px * var(--scopy-chatgpt-layout-font-scale));
+            --scopy-chatgpt-h1-line-height: calc(32px * var(--scopy-chatgpt-layout-font-scale));
+            --scopy-chatgpt-h2-font-size: calc(20px * var(--scopy-chatgpt-layout-font-scale));
+            --scopy-chatgpt-h2-line-height: calc(28px * var(--scopy-chatgpt-layout-font-scale));
+            --scopy-chatgpt-h3-font-size: calc(18px * var(--scopy-chatgpt-layout-font-scale));
+            --scopy-chatgpt-h3-line-height: calc(28px * var(--scopy-chatgpt-layout-font-scale));
+            --scopy-chatgpt-h4-font-size: calc(16px * var(--scopy-chatgpt-layout-font-scale));
+            --scopy-chatgpt-h4-line-height: calc(24px * var(--scopy-chatgpt-layout-font-scale));
+            --scopy-chatgpt-code-card-font-size: calc(12.25px * var(--scopy-chatgpt-layout-font-scale));
+            --scopy-chatgpt-code-card-line-height: calc(20px * var(--scopy-chatgpt-layout-font-scale));
             --scopy-chatgpt-thread-content-width: min(
               var(--scopy-chatgpt-thread-content-max-width),
+              max(1px, calc(var(--scopy-chatgpt-output-surface-width) - (var(--scopy-chatgpt-content-inline-padding) * 2))),
               max(1px, calc(100vw - (var(--scopy-chatgpt-content-inline-padding) * 2)))
             );
-            --scopy-chatgpt-render-width: calc(var(--scopy-chatgpt-thread-content-width) + (var(--scopy-chatgpt-content-inline-padding) * 2));
+            --scopy-chatgpt-render-width: min(var(--scopy-chatgpt-output-surface-width), max(1px, 100vw));
             --scopy-chatgpt-table-breakout-width: var(--scopy-chatgpt-thread-content-width);
             --scopy-chatgpt-preview-scale: 1;
           }
@@ -533,8 +555,8 @@ enum MarkdownHTMLDocumentBuilder {
             margin: 0;
             padding: 0;
             font-family: var(--scopy-chatgpt-font);
-            font-size: 16px;
-            line-height: 26px;
+            font-size: var(--scopy-chatgpt-body-font-size);
+            line-height: var(--scopy-chatgpt-body-line-height);
             font-weight: 400;
             color: var(--scopy-text-primary);
             background: var(--scopy-page-bg);
@@ -568,6 +590,9 @@ enum MarkdownHTMLDocumentBuilder {
             opacity: 0;
             transition: opacity 140ms ease-in-out;
           }
+          #content > :not(.scopy-chatgpt-table-container) {
+            max-width: var(--scopy-chatgpt-thread-content-width);
+          }
           h1, h2, h3, h4, h5, h6 {
             color: var(--scopy-text-primary);
             font-family: var(--scopy-chatgpt-font);
@@ -576,41 +601,41 @@ enum MarkdownHTMLDocumentBuilder {
             border: 0;
           }
           h1 {
-            font-size: 24px;
-            line-height: 32px;
+            font-size: var(--scopy-chatgpt-h1-font-size);
+            line-height: var(--scopy-chatgpt-h1-line-height);
             letter-spacing: normal;
             margin: 0 0 8px 0;
           }
           h2 {
-            font-size: 20px;
-            line-height: 28px;
+            font-size: var(--scopy-chatgpt-h2-font-size);
+            line-height: var(--scopy-chatgpt-h2-line-height);
             margin: 16px 0 4px 0;
           }
           h3 {
-            font-size: 18px;
-            line-height: 28px;
+            font-size: var(--scopy-chatgpt-h3-font-size);
+            line-height: var(--scopy-chatgpt-h3-line-height);
             margin: 16px 0 4px 0;
           }
           h4 {
-            font-size: 16px;
-            line-height: 24px;
+            font-size: var(--scopy-chatgpt-h4-font-size);
+            line-height: var(--scopy-chatgpt-h4-line-height);
             margin: 16px 0 0 0;
           }
           h5 {
-            font-size: 16px;
-            line-height: 26px;
+            font-size: var(--scopy-chatgpt-body-font-size);
+            line-height: var(--scopy-chatgpt-body-line-height);
             margin: 0;
           }
           h6 {
-            font-size: 16px;
-            line-height: 26px;
+            font-size: var(--scopy-chatgpt-body-font-size);
+            line-height: var(--scopy-chatgpt-body-line-height);
             font-weight: 400;
             margin: 0;
           }
           p {
             margin: 8px 0 4px 0;
-            font-size: 16px;
-            line-height: 26px;
+            font-size: var(--scopy-chatgpt-body-font-size);
+            line-height: var(--scopy-chatgpt-body-line-height);
             font-weight: 400;
             color: var(--scopy-text-primary);
           }
@@ -620,8 +645,8 @@ enum MarkdownHTMLDocumentBuilder {
           ul, ol {
             margin: 0;
             padding-left: 26px;
-            font-size: 16px;
-            line-height: 26px;
+            font-size: var(--scopy-chatgpt-body-font-size);
+            line-height: var(--scopy-chatgpt-body-line-height);
             font-weight: 400;
           }
           ul {
@@ -631,23 +656,23 @@ enum MarkdownHTMLDocumentBuilder {
             list-style-type: decimal;
           }
           li {
-            min-height: 26px;
+            min-height: var(--scopy-chatgpt-body-line-height);
             margin: 0;
             padding-left: 6px;
-            font-size: 16px;
-            line-height: 26px;
+            font-size: var(--scopy-chatgpt-body-font-size);
+            line-height: var(--scopy-chatgpt-body-line-height);
             font-weight: 400;
           }
           li::marker {
-            font-size: 16px;
-            line-height: 26px;
+            font-size: var(--scopy-chatgpt-body-font-size);
+            line-height: var(--scopy-chatgpt-body-line-height);
             font-weight: 700;
             color: currentColor;
           }
           li > p {
             margin-top: 0;
             margin-bottom: 0;
-            line-height: 26px;
+            line-height: var(--scopy-chatgpt-body-line-height);
           }
           li > ul,
           li > ol {
@@ -704,8 +729,8 @@ enum MarkdownHTMLDocumentBuilder {
             color: var(--scopy-text-primary);
             background: var(--scopy-code-card-bg);
             box-shadow: none;
-            font-size: 12.25px;
-            line-height: 20px;
+            font-size: var(--scopy-chatgpt-code-card-font-size);
+            line-height: var(--scopy-chatgpt-code-card-line-height);
             font-weight: 400;
             white-space: pre;
           }
@@ -715,10 +740,10 @@ enum MarkdownHTMLDocumentBuilder {
             left: 20px;
             right: 6px;
             top: 6px;
-            height: 24px;
+            height: calc(24px * var(--scopy-chatgpt-layout-font-scale));
             font-family: var(--scopy-chatgpt-font);
-            font-size: 14px;
-            line-height: 24px;
+            font-size: calc(14px * var(--scopy-chatgpt-layout-font-scale));
+            line-height: calc(24px * var(--scopy-chatgpt-layout-font-scale));
             font-weight: 400;
             color: var(--scopy-text-primary);
             white-space: nowrap;
@@ -754,8 +779,8 @@ enum MarkdownHTMLDocumentBuilder {
             padding: 0;
             background: transparent;
             border-radius: 0;
-            font-size: 12.25px;
-            line-height: 20px;
+            font-size: var(--scopy-chatgpt-code-card-font-size);
+            line-height: var(--scopy-chatgpt-code-card-line-height);
             white-space: pre;
             word-break: normal;
             overflow-wrap: normal;
@@ -870,11 +895,11 @@ enum MarkdownHTMLDocumentBuilder {
           a::after {
             content: "↗";
             display: inline-block;
-            width: 12px;
-            height: 12px;
+            width: calc(12px * var(--scopy-chatgpt-layout-font-scale));
+            height: calc(12px * var(--scopy-chatgpt-layout-font-scale));
             margin-left: 0.125rem;
-            font-size: 16px;
-            line-height: 16px;
+            font-size: var(--scopy-chatgpt-body-font-size);
+            line-height: var(--scopy-chatgpt-body-font-size);
             vertical-align: middle;
             text-decoration: none;
           }
@@ -882,8 +907,8 @@ enum MarkdownHTMLDocumentBuilder {
             display: inline-flex;
             align-items: center;
             max-width: 15ch;
-            height: 18px;
-            min-height: 18px;
+            height: calc(18px * var(--scopy-chatgpt-layout-font-scale));
+            min-height: calc(18px * var(--scopy-chatgpt-layout-font-scale));
             padding: 0 8px;
             margin-left: 4px;
             position: relative;
@@ -892,8 +917,8 @@ enum MarkdownHTMLDocumentBuilder {
             overflow: hidden;
             color: rgb(93, 93, 93);
             background: rgb(244, 244, 244);
-            font-size: 9px;
-            line-height: 18px;
+            font-size: calc(9px * var(--scopy-chatgpt-layout-font-scale));
+            line-height: calc(18px * var(--scopy-chatgpt-layout-font-scale));
             font-weight: 400;
             text-align: center;
             text-decoration: none;
@@ -908,13 +933,13 @@ enum MarkdownHTMLDocumentBuilder {
             display: inline-flex;
             align-items: center;
             width: auto;
-            height: 16px;
+            height: calc(16px * var(--scopy-chatgpt-layout-font-scale));
             margin-left: 3px;
             margin-right: -4px;
             padding: 0 4px;
             color: rgb(143, 143, 143);
-            font-size: 9px;
-            line-height: 16px;
+            font-size: calc(9px * var(--scopy-chatgpt-layout-font-scale));
+            line-height: calc(16px * var(--scopy-chatgpt-layout-font-scale));
             text-decoration: none;
             vertical-align: baseline;
           }
@@ -924,8 +949,8 @@ enum MarkdownHTMLDocumentBuilder {
             padding: 8px 0 8px 24px;
             border: 0;
             color: var(--scopy-text-primary);
-            font-size: 16px;
-            line-height: 24px;
+            font-size: var(--scopy-chatgpt-body-font-size);
+            line-height: var(--scopy-chatgpt-quote-line-height);
             font-weight: 400;
           }
           blockquote::after {
@@ -942,8 +967,8 @@ enum MarkdownHTMLDocumentBuilder {
           blockquote > p {
             margin-top: 0;
             margin-bottom: 0;
-            font-size: 16px;
-            line-height: 24px;
+            font-size: var(--scopy-chatgpt-body-font-size);
+            line-height: var(--scopy-chatgpt-quote-line-height);
             font-weight: 400;
           }
           blockquote ul,
@@ -951,8 +976,8 @@ enum MarkdownHTMLDocumentBuilder {
             margin-top: 0;
             margin-bottom: 0;
             padding-left: 26px;
-            font-size: 16px;
-            line-height: 24px;
+            font-size: var(--scopy-chatgpt-body-font-size);
+            line-height: var(--scopy-chatgpt-quote-line-height);
             font-weight: 400;
           }
           hr {
@@ -968,8 +993,8 @@ enum MarkdownHTMLDocumentBuilder {
             overflow-x: auto;
             overflow-y: hidden;
             margin: 16px 0;
-            font-size: 16px;
-            line-height: 26px;
+            font-size: var(--scopy-chatgpt-body-font-size);
+            line-height: var(--scopy-chatgpt-body-line-height);
           }
           .scopy-chatgpt-table-container {
             display: block;
@@ -997,8 +1022,8 @@ enum MarkdownHTMLDocumentBuilder {
             border: 0;
             margin: 0;
             font-family: var(--scopy-chatgpt-font);
-            font-size: 14px;
-            line-height: 24px;
+            font-size: calc(14px * var(--scopy-chatgpt-layout-font-scale));
+            line-height: calc(24px * var(--scopy-chatgpt-layout-font-scale));
           }
           th, td {
             border: 0;
@@ -1048,7 +1073,7 @@ enum MarkdownHTMLDocumentBuilder {
             border-bottom: 1px solid var(--scopy-border);
             color: var(--scopy-text-primary);
             font-weight: 600;
-            line-height: 16px;
+            line-height: var(--scopy-chatgpt-body-font-size);
             padding-block: 8px;
             vertical-align: bottom;
           }
@@ -1100,7 +1125,8 @@ enum MarkdownHTMLDocumentBuilder {
         safeHTMLReplacements: [String: MarkdownSafeHTMLSubset.Replacement],
         enableMath: Bool,
         fallbackText: String,
-        renderSentinel: String?
+        renderSentinel: String?,
+        layoutScale: MarkdownChatGPTLayoutScalePercent = MarkdownRenderLayoutConstants.defaultChatGPTLayoutScale
     ) -> String {
         let mathIncludes: String
         if featureSet.math && enableMath {
@@ -1562,7 +1588,10 @@ enum MarkdownHTMLDocumentBuilder {
             \(cspMetaTag)
             \(markdownRenderScript)
             \(mathIncludes)
-            \(baseStyle(featureSet: featureSet))
+            \(baseStyle(
+                featureSet: featureSet,
+                layoutScale: layoutScale
+            ))
           </head>
           <body>
             <div id="content-scale-shell"><div id="content"><pre>\(escapeHTML(fallbackText))</pre></div></div>
@@ -1607,7 +1636,7 @@ enum MarkdownHTMLDocumentBuilder {
             \(cspMetaTag)
             <link rel="stylesheet" href="katex.min.css">
             <script defer src="contrib/scopy-unified-renderer.iife.js"></script>
-            \(baseStyle(featureSet: MarkdownRenderFeatureSet.scopyDefault))
+            \(baseStyle(featureSet: MarkdownRenderFeatureSet.scopyDefault, layoutScale: context.layoutScale))
             \(taskListBootstrapScript)
             <script>
               (function () {

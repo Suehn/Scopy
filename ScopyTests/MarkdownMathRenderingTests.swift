@@ -1,4 +1,5 @@
 import XCTest
+import ScopyKit
 
 final class MarkdownMathRenderingTests: XCTestCase {
     func testMathNormalizerPreservesMarkdownFootnoteSyntax() {
@@ -60,7 +61,8 @@ print("ok")
             profile: .richHTML,
             policy: base.policy,
             policyVersion: MarkdownRenderContextResolver.conservativeLegacyPolicyVersion,
-            cacheNamespace: MarkdownRenderContextResolver.conservativeLegacyCacheNamespace
+            cacheNamespace: MarkdownRenderContextResolver.conservativeLegacyCacheNamespace,
+            layoutScale: base.layoutScale
         )
 
         let html = MarkdownHTMLRenderer.render(markdown: input, context: context).html
@@ -139,7 +141,8 @@ print("ok")
             profile: .pdfOCRScientific,
             policy: .conservativeDefault(for: .pdfOCRScientific),
             policyVersion: MarkdownRenderContextResolver.conservativeLegacyPolicyVersion,
-            cacheNamespace: MarkdownRenderContextResolver.conservativeLegacyCacheNamespace
+            cacheNamespace: MarkdownRenderContextResolver.conservativeLegacyCacheNamespace,
+            layoutScale: MarkdownRenderLayoutConstants.defaultChatGPTLayoutScale
         )
         let html = MarkdownHTMLRenderer.render(markdown: input, context: context).html
         XCTAssertTrue(html.contains("katex.min.js"))

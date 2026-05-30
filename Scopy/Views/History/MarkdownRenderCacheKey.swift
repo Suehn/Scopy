@@ -9,6 +9,7 @@ enum MarkdownRenderCacheKey {
             context.cacheNamespace,
             context.profile.rawValue,
             context.policyVersion,
+            context.layoutScale.cacheKey,
             contentHash
         ].joined(separator: "|")
     }

@@ -486,6 +486,10 @@ final class SettingsStorePersistenceTests: XCTestCase {
         XCTAssertTrue(SettingsDTO.default.pngquantMarkdownExportEnabled)
     }
 
+    func testDefaultSettingsUsesChatGPTMarkdownLayout100Percent() {
+        XCTAssertEqual(SettingsDTO.default.markdownChatGPTLayoutScalePercent, 100)
+    }
+
     func testSaveAndLoadPollingIntervalPersists() async {
         let suiteName = "scopy-settingsstore-\(UUID().uuidString)"
         defer { UserDefaults.standard.removePersistentDomain(forName: suiteName) }
@@ -499,6 +503,21 @@ final class SettingsStorePersistenceTests: XCTestCase {
 
         let loaded = await store.load()
         XCTAssertEqual(loaded.clipboardPollingIntervalMs, 1200)
+    }
+
+    func testSaveAndLoadMarkdownLayoutScalePersists() async {
+        let suiteName = "scopy-settingsstore-markdown-layout-\(UUID().uuidString)"
+        defer { UserDefaults.standard.removePersistentDomain(forName: suiteName) }
+        UserDefaults.standard.removePersistentDomain(forName: suiteName)
+
+        let store = SettingsStore(suiteName: suiteName)
+
+        var settings = await store.load()
+        settings.markdownChatGPTLayoutScalePercent = 125
+        await store.save(settings)
+
+        let loaded = await store.load()
+        XCTAssertEqual(loaded.markdownChatGPTLayoutScalePercent, 125)
     }
 
     func testSaveAndLoadPngquantSettingsPersist() async {
@@ -561,6 +580,25 @@ final class SettingsStorePersistenceTests: XCTestCase {
         )
         let maxLoaded = await store.load()
         XCTAssertEqual(maxLoaded.clipboardPollingIntervalMs, 2000)
+    }
+
+    func testMarkdownLayoutScaleClampedWhenDecoding() async {
+        let suiteName = "scopy-settingsstore-markdown-layout-clamp-\(UUID().uuidString)"
+        defer { UserDefaults.standard.removePersistentDomain(forName: suiteName) }
+        UserDefaults.standard.removePersistentDomain(forName: suiteName)
+
+        let defaults = UserDefaults(suiteName: suiteName)!
+        let store = SettingsStore(suiteName: suiteName)
+
+        defaults.set(
+            [
+                "markdownChatGPTLayoutScalePercent": 175
+            ],
+            forKey: "ScopySettings"
+        )
+
+        let loaded = await store.load()
+        XCTAssertEqual(loaded.markdownChatGPTLayoutScalePercent, 100)
     }
 
     func testPngquantSettingsClampedWhenDecoding() async {

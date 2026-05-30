@@ -63,7 +63,8 @@ enum MarkdownHTMLRenderer {
             safeHTMLReplacements: safeHTMLExtraction.replacements,
             enableMath: enableMath,
             fallbackText: fallbackText,
-            renderSentinel: emphasisNormalizedMarkdown.renderSentinel
+            renderSentinel: emphasisNormalizedMarkdown.renderSentinel,
+            layoutScale: context.layoutScale
         )
         let diagnostics = MarkdownRenderDiagnostics.legacy(
             context: context,

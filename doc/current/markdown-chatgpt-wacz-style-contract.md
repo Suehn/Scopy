@@ -53,16 +53,17 @@ ChatGPT does not use one fixed text width at every viewport. The table component
 
 Live Browser inspection against the current ChatGPT conversation at an `880px` CSS viewport showed the Markdown root at `640px`, with a parent class setting `[--thread-content-max-width:40rem]` and a larger-container branch of `@w-lg/main:[--thread-content-max-width:48rem]`. Line breaks therefore come from the active container variable, not from a post-layout transform or a static screenshot width.
 
-Scopy's preview/export implementation mirrors that principle:
+Scopy's preview/export implementation mirrors that principle while keeping output size separate from layout scale:
 
-- the default ChatGPT content column is `40rem`/`640px`
-- the safe inline padding is `24px` on each side, so the default render surface is `688px`
-- the actual content column is `min(640px, 100vw - 48px)`
-- preview no longer transform-scales normal Markdown text to fit a narrower popover
-- Markdown popovers may grow to the 688px render surface when the screen allows it
+- the default `100%` ChatGPT profile uses the current desktop branch: `48rem`/`768px`
+- the `125%` profile uses the narrower measured branch: `40rem`/`640px`
+- safe inline padding stays `24px` on each side
+- the preview/export surface stays fixed at the `100%` profile width (`768px + 48px = 816px`) when the screen allows it
+- the active text column is `min(profileColumn, 100vw - 48px, outputSurface - 48px)`
+- the layout profile is part of the Markdown render context and cache key, so 100% and 125% previews cannot reuse stale HTML
 - text wrapping follows `wrap-break-word`: `overflow-wrap: break-word` with normal `word-break`
 
-Wide tables still get a scroll container that can break out to the render surface, but they do not change the text-column width. PNG export starts from the same laid-out surface; table fitting is a bitmap/export transform after layout, not a second table stylesheet. A future `48rem` branch must be implemented from measured ChatGPT container breakpoints, not by treating every desktop popover as `768px` wide.
+This separation is intentional: changing the ChatGPT layout scale must change font metrics and line breaks, but it must not change PNG target pixels or the hover-preview shell width. Wide tables still get a scroll container that can break out to the stable render surface, but they do not change the text-column width. PNG export starts from the same laid-out surface; table fitting is a bitmap/export transform after layout, not a second table stylesheet.
 
 ## Typography Rhythm
 

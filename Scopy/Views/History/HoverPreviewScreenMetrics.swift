@@ -29,7 +29,7 @@ enum HoverPreviewScreenMetrics {
     }
 
     static func maxMarkdownPopoverWidthPoints() -> CGFloat {
-        let chatGPTRenderWidth = CGFloat(MarkdownRenderLayoutConstants.chatGPTRenderWidth)
+        let chatGPTRenderWidth = CGFloat(MarkdownRenderLayoutConstants.chatGPTOutputSurfaceWidth)
         let visibleWidth = activeVisibleFrame().width
         if visibleWidth > 0 {
             return min(chatGPTRenderWidth, floor(visibleWidth * 0.62))

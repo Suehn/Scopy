@@ -1,4 +1,5 @@
 import XCTest
+import ScopyKit
 
 final class MarkdownRenderCacheKeyTests: XCTestCase {
     func testCacheKeyIncludesRendererProfilePolicyAndNamespace() {
@@ -8,12 +9,13 @@ final class MarkdownRenderCacheKeyTests: XCTestCase {
             profile: profile,
             policy: MarkdownRepairPolicy.legacyCompatible(for: profile),
             policyVersion: "policy-x",
-            cacheNamespace: "namespace-y"
+            cacheNamespace: "namespace-y",
+            layoutScale: .percent125
         )
 
         let key = MarkdownRenderCacheKey.make(contentHash: "hash-z", context: context)
 
-        XCTAssertEqual(key, "md|legacyMarkdownIt|namespace-y|chatGPTMarkdown|policy-x|hash-z")
+        XCTAssertEqual(key, "md|legacyMarkdownIt|namespace-y|chatGPTMarkdown|policy-x|chatgpt-layout-125|hash-z")
     }
 
     func testEmptyContentHashReturnsEmptyKey() {

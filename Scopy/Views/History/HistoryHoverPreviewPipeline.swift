@@ -71,6 +71,7 @@ enum HistoryHoverPreviewPipeline {
         let previewInfo: FilePreviewInfo
         let isMarkdown: Bool
         let delay: TimeInterval
+        let markdownLayoutScale: MarkdownChatGPTLayoutScalePercent
         let scale: CGFloat
         let targetWidthPoints: CGFloat
         let targetHeightPoints: CGFloat
@@ -80,12 +81,14 @@ enum HistoryHoverPreviewPipeline {
     struct TextRequest {
         let item: ClipboardItemDTO
         let delay: TimeInterval
+        let markdownLayoutScale: MarkdownChatGPTLayoutScalePercent
     }
 
     struct MarkdownFileRequest {
         let cacheKey: String
         let url: URL
         let delay: TimeInterval
+        let markdownLayoutScale: MarkdownChatGPTLayoutScalePercent
     }
 
     enum Request {
@@ -173,7 +176,8 @@ enum HistoryHoverPreviewPipeline {
         item: ClipboardItemDTO,
         previewInfo: FilePreviewInfo,
         isMarkdown: Bool,
-        delay: TimeInterval
+        delay: TimeInterval,
+        settings: SettingsDTO = .default
     ) -> FileRequest {
         FileRequest(
             itemID: item.id,
@@ -181,6 +185,9 @@ enum HistoryHoverPreviewPipeline {
             previewInfo: previewInfo,
             isMarkdown: isMarkdown,
             delay: delay,
+            markdownLayoutScale: MarkdownChatGPTLayoutScalePercent(
+                settingsValue: settings.markdownChatGPTLayoutScalePercent
+            ),
             scale: HoverPreviewScreenMetrics.activeBackingScaleFactor(),
             targetWidthPoints: HoverPreviewScreenMetrics.maxPopoverWidthPoints(),
             targetHeightPoints: HoverPreviewScreenMetrics.maxPopoverHeightPoints(),
@@ -188,15 +195,26 @@ enum HistoryHoverPreviewPipeline {
         )
     }
 
-    static func textRequest(item: ClipboardItemDTO, delay: TimeInterval) -> TextRequest {
-        TextRequest(item: item, delay: delay)
+    static func textRequest(
+        item: ClipboardItemDTO,
+        delay: TimeInterval,
+        settings: SettingsDTO = .default
+    ) -> TextRequest {
+        TextRequest(
+            item: item,
+            delay: delay,
+            markdownLayoutScale: MarkdownChatGPTLayoutScalePercent(
+                settingsValue: settings.markdownChatGPTLayoutScalePercent
+            )
+        )
     }
 
     static func markdownFileRequest(fileRequest: FileRequest) -> MarkdownFileRequest {
         MarkdownFileRequest(
             cacheKey: markdownFileCacheKey(itemID: fileRequest.itemID, contentHash: fileRequest.contentHash),
             url: fileRequest.previewInfo.url,
-            delay: fileRequest.delay
+            delay: fileRequest.delay,
+            markdownLayoutScale: fileRequest.markdownLayoutScale
         )
     }
 
@@ -444,16 +462,26 @@ enum HistoryHoverPreviewPipeline {
         let cachedEntry = MarkdownPreviewCache.shared.filePreview(forKey: request.cacheKey)
         if let cachedEntry,
            now.timeIntervalSince(cachedEntry.fetchedAt) < markdownFilePreviewCacheTTL {
-            let context = MarkdownRenderContextResolver.defaultContext(for: cachedEntry.text)
+            let context = MarkdownRenderContextResolver.defaultContext(
+                for: cachedEntry.text,
+                layoutScale: request.markdownLayoutScale
+            )
             let renderCacheKey = MarkdownRenderCacheKey.make(contentHash: request.cacheKey, context: context)
             let cachedHTML = MarkdownPreviewCache.shared.html(forKey: renderCacheKey)
             emitCachedFilePreview(cachedEntry, renderCacheKey: renderCacheKey, emit: emit)
             if cachedHTML == nil, cachedEntry.text.utf16.count <= maxMarkdownPreviewBytes {
-                emit(markdownRenderEvent(source: cachedEntry.text, target: .file(cacheKey: request.cacheKey)))
+                emit(markdownRenderEvent(
+                    source: cachedEntry.text,
+                    target: .file(cacheKey: request.cacheKey),
+                    layoutScale: request.markdownLayoutScale
+                ))
             }
             return
         } else if let cachedEntry {
-            let context = MarkdownRenderContextResolver.defaultContext(for: cachedEntry.text)
+            let context = MarkdownRenderContextResolver.defaultContext(
+                for: cachedEntry.text,
+                layoutScale: request.markdownLayoutScale
+            )
             let renderCacheKey = MarkdownRenderCacheKey.make(contentHash: request.cacheKey, context: context)
             let cachedHTML = MarkdownPreviewCache.shared.html(forKey: renderCacheKey)
             let cachedMetrics = MarkdownPreviewCache.shared.metrics(forKey: renderCacheKey)
@@ -511,7 +539,10 @@ enum HistoryHoverPreviewPipeline {
 
         guard preview.utf16.count <= maxMarkdownPreviewBytes else { return }
 
-        let context = MarkdownRenderContextResolver.defaultContext(for: preview)
+        let context = MarkdownRenderContextResolver.defaultContext(
+            for: preview,
+            layoutScale: request.markdownLayoutScale
+        )
         let renderCacheKey = MarkdownRenderCacheKey.make(contentHash: request.cacheKey, context: context)
         let cachedHTML: String? = (cachedEntry?.text == preview) ? MarkdownPreviewCache.shared.html(forKey: renderCacheKey) : nil
         let cachedMetrics: MarkdownContentMetrics? = (cachedEntry?.text == preview) ? MarkdownPreviewCache.shared.metrics(forKey: renderCacheKey) : nil
@@ -540,7 +571,11 @@ enum HistoryHoverPreviewPipeline {
             return
         }
 
-        emit(markdownRenderEvent(source: preview, target: .file(cacheKey: request.cacheKey)))
+        emit(markdownRenderEvent(
+            source: preview,
+            target: .file(cacheKey: request.cacheKey),
+            layoutScale: request.markdownLayoutScale
+        ))
     }
 
     @MainActor
@@ -579,7 +614,10 @@ enum HistoryHoverPreviewPipeline {
         guard preview.utf16.count <= maxMarkdownPreviewBytes else { return }
 
         let cacheKey = item.contentHash
-        let context = MarkdownRenderContextResolver.defaultContext(for: preview)
+        let context = MarkdownRenderContextResolver.defaultContext(
+            for: preview,
+            layoutScale: request.markdownLayoutScale
+        )
         let renderCacheKey = MarkdownRenderCacheKey.make(contentHash: cacheKey, context: context)
         if !renderCacheKey.isEmpty,
            let cachedHTML = MarkdownPreviewCache.shared.html(forKey: renderCacheKey),
@@ -605,7 +643,11 @@ enum HistoryHoverPreviewPipeline {
             return
         }
 
-        emit(markdownRenderEvent(source: preview, target: .text(cacheKey: cacheKey)))
+        emit(markdownRenderEvent(
+            source: preview,
+            target: .text(cacheKey: cacheKey),
+            layoutScale: request.markdownLayoutScale
+        ))
     }
 
     @MainActor
@@ -672,11 +714,18 @@ enum HistoryHoverPreviewPipeline {
         }
     }
 
-    private static func markdownRenderEvent(source: String, target: MarkdownRenderRequest.Target) -> Event {
+    private static func markdownRenderEvent(
+        source: String,
+        target: MarkdownRenderRequest.Target,
+        layoutScale: MarkdownChatGPTLayoutScalePercent
+    ) -> Event {
         Event.renderMarkdown(
             MarkdownRenderRequest(
                 source: source,
-                context: MarkdownRenderContextResolver.defaultContext(for: source),
+                context: MarkdownRenderContextResolver.defaultContext(
+                    for: source,
+                    layoutScale: layoutScale
+                ),
                 target: target
             )
         )

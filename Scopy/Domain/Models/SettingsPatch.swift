@@ -29,6 +29,7 @@ public struct SettingsPatch: Sendable, Equatable {
     public var showImageThumbnails: Bool?
     public var thumbnailHeight: Int?
     public var imagePreviewDelay: Double?
+    public var markdownChatGPTLayoutScalePercent: Int?
 
     public static func from(baseline: SettingsDTO, draft: SettingsDTO) -> SettingsPatch {
         var patch = SettingsPatch()
@@ -56,6 +57,9 @@ public struct SettingsPatch: Sendable, Equatable {
         if draft.showImageThumbnails != baseline.showImageThumbnails { patch.showImageThumbnails = draft.showImageThumbnails }
         if draft.thumbnailHeight != baseline.thumbnailHeight { patch.thumbnailHeight = draft.thumbnailHeight }
         if draft.imagePreviewDelay != baseline.imagePreviewDelay { patch.imagePreviewDelay = draft.imagePreviewDelay }
+        if draft.markdownChatGPTLayoutScalePercent != baseline.markdownChatGPTLayoutScalePercent {
+            patch.markdownChatGPTLayoutScalePercent = draft.markdownChatGPTLayoutScalePercent
+        }
 
         return patch
     }
@@ -91,6 +95,7 @@ public struct SettingsPatch: Sendable, Equatable {
             && showImageThumbnails == nil
             && thumbnailHeight == nil
             && imagePreviewDelay == nil
+            && markdownChatGPTLayoutScalePercent == nil
     }
 
     public var requiresStorageCleanup: Bool {

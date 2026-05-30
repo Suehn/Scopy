@@ -1,4 +1,5 @@
 import Foundation
+import ScopyKit
 
 enum MarkdownRendererKind: String, Equatable {
     case legacyMarkdownIt
@@ -78,6 +79,7 @@ struct MarkdownRenderContext: Equatable {
     let policy: MarkdownRepairPolicy
     let policyVersion: String
     let cacheNamespace: String
+    let layoutScale: MarkdownChatGPTLayoutScalePercent
 
     func withRenderer(_ renderer: MarkdownRendererKind) -> MarkdownRenderContext {
         MarkdownRenderContext(
@@ -85,7 +87,8 @@ struct MarkdownRenderContext: Equatable {
             profile: profile,
             policy: policy,
             policyVersion: policyVersion,
-            cacheNamespace: cacheNamespace
+            cacheNamespace: cacheNamespace,
+            layoutScale: layoutScale
         )
     }
 }
@@ -104,7 +107,26 @@ enum MarkdownRenderContextResolver {
 
     static func defaultContext(
         for markdown: String,
+        layoutScale: MarkdownChatGPTLayoutScalePercent
+    ) -> MarkdownRenderContext {
+        defaultContext(for: markdown, flags: MarkdownRendererFeatureFlags.current, layoutScale: layoutScale)
+    }
+
+    static func defaultContext(
+        for markdown: String,
         flags: MarkdownRendererFlagSet
+    ) -> MarkdownRenderContext {
+        defaultContext(
+            for: markdown,
+            flags: flags,
+            layoutScale: MarkdownRenderLayoutConstants.defaultChatGPTLayoutScale
+        )
+    }
+
+    static func defaultContext(
+        for markdown: String,
+        flags: MarkdownRendererFlagSet,
+        layoutScale: MarkdownChatGPTLayoutScalePercent
     ) -> MarkdownRenderContext {
         let profile = MarkdownSourceProfileDetector.detect(markdown)
         let renderer = MarkdownRendererSelector.rendererKind(for: profile, flags: flags)
@@ -123,7 +145,8 @@ enum MarkdownRenderContextResolver {
             cacheNamespace: {
                 if usesUnified { return unifiedCacheNamespace }
                 return usesLegacyRollbackPolicy ? legacyCacheNamespace : conservativeLegacyCacheNamespace
-            }()
+            }(),
+            layoutScale: layoutScale
         )
     }
 }
