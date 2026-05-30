@@ -7,9 +7,9 @@
 
 ## [Unreleased]
 
-### Notes
+### Documentation
 
-- No unreleased entries.
+- Reworks the repository README around real Scopy `FloatingPanel` screenshots, a non-empty app icon, a privacy-safe rich fixture history, an editorial split hero, clean white-gray Markdown preview scroll demo, capability showcase, and performance evidence visual.
 
 ## [v0.8.4] - 2026-05-30
 
