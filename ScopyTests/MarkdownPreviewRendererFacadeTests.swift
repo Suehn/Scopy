@@ -62,7 +62,7 @@ final class MarkdownPreviewRendererFacadeTests: XCTestCase {
         XCTAssertTrue(output.html.contains("scopy-unified-renderer.iife.js"))
     }
 
-    func testLayoutScaleControlsFontMetricsWithoutChangingSurfaceWidth() {
+    func testLayoutScaleControlsLayoutViewportWithoutChangingSurfaceWidth() {
         let input = "# Title\n\nMarkdown 是一种轻量标记语言。"
         let context = MarkdownRenderContextResolver.defaultContext(for: input, layoutScale: .percent125)
 
@@ -70,10 +70,18 @@ final class MarkdownPreviewRendererFacadeTests: XCTestCase {
 
         XCTAssertEqual(context.layoutScale, .percent125)
         XCTAssertTrue(output.html.contains("--scopy-chatgpt-layout-font-scale: 1.0;"))
+        XCTAssertTrue(output.html.contains("--scopy-chatgpt-browser-zoom: 1.25;"))
+        XCTAssertTrue(output.html.contains("--scopy-chatgpt-inverse-browser-zoom: 0.8;"))
         XCTAssertTrue(output.html.contains("--scopy-chatgpt-thread-content-max-width: 768.0px;"))
         XCTAssertTrue(output.html.contains("--scopy-chatgpt-output-surface-width: 816.0px;"))
-        XCTAssertEqual(MarkdownChatGPTLayoutScalePercent.percent100.fontScale, 0.8)
+        XCTAssertTrue(output.html.contains("--scopy-chatgpt-layout-viewport-width:"))
+        XCTAssertTrue(output.html.contains("--scopy-chatgpt-render-width: var(--scopy-chatgpt-layout-viewport-width);"))
+        XCTAssertTrue(output.html.contains("width: calc(var(--scopy-chatgpt-render-width) * var(--scopy-chatgpt-preview-scale));"))
+        XCTAssertTrue(output.html.contains("transform: scale(var(--scopy-chatgpt-preview-scale));"))
+        XCTAssertTrue(output.html.contains("Math.max(1, Math.round(renderWidth * scale)) + 'px'"))
+        XCTAssertEqual(MarkdownChatGPTLayoutScalePercent.percent100.fontScale, 1.0)
         XCTAssertEqual(MarkdownChatGPTLayoutScalePercent.percent125.fontScale, 1.0)
+        XCTAssertEqual(MarkdownChatGPTLayoutScalePercent.percent125.layoutViewportWidth(outputSurfaceWidth: 816), 652.8, accuracy: 0.001)
         XCTAssertEqual(MarkdownRenderLayoutConstants.renderWidth(for: .percent100), 816)
         XCTAssertEqual(MarkdownRenderLayoutConstants.renderWidth(for: .percent125), 816)
     }

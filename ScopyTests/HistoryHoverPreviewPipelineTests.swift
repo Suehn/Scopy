@@ -13,6 +13,14 @@ final class HistoryHoverPreviewPipelineTests: XCTestCase {
         super.tearDown()
     }
 
+    func testMarkdownPopoverWidthUsesSharedPreviewFramePolicy() {
+        XCTAssertEqual(
+            HoverPreviewScreenMetrics.maxMarkdownPopoverWidthPoints(),
+            HoverPreviewScreenMetrics.maxPopoverWidthPoints(),
+            accuracy: 0.5
+        )
+    }
+
     func testImagePlanUsesContentHashWidthAndDelay() {
         let itemID = UUID(uuidString: "11111111-1111-1111-1111-111111111111")!
         let request = HistoryHoverPreviewPipeline.ImageRequest(
@@ -239,7 +247,11 @@ final class HistoryHoverPreviewPipelineTests: XCTestCase {
         XCTAssertTrue(textStates.first?.isMarkdown == true)
         XCTAssertNil(textStates.first?.markdownHTML)
         XCTAssertEqual(textStates.last?.markdownHTML, "<h1>Title</h1>")
-        XCTAssertGreaterThan(textStates.last?.markdownContentSize?.width ?? 0, 12)
+        XCTAssertEqual(
+            textStates.last?.markdownContentSize?.width ?? 0,
+            HoverPreviewScreenMetrics.maxMarkdownPopoverWidthPoints(),
+            accuracy: 0.5
+        )
         XCTAssertEqual(presentedKinds(events), [.text])
     }
 

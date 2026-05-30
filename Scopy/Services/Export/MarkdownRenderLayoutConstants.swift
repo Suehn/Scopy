@@ -14,16 +14,23 @@ public enum MarkdownChatGPTLayoutScalePercent: Int, CaseIterable, Sendable, Equa
     }
 
     public var fontScale: Double {
-        switch self {
-        case .percent100:
-            return 0.8
-        case .percent125:
-            return 1.0
-        }
+        1.0
+    }
+
+    public var browserZoomScale: Double {
+        Double(rawValue) / 100.0
+    }
+
+    public var inverseBrowserZoomScale: Double {
+        1.0 / browserZoomScale
     }
 
     public var threadContentWidth: Double {
         768
+    }
+
+    public func layoutViewportWidth(outputSurfaceWidth: Double) -> Double {
+        outputSurfaceWidth * inverseBrowserZoomScale
     }
 
     public var cacheKey: String {

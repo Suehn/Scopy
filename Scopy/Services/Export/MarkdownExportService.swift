@@ -687,10 +687,9 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
                 --scopy-chatgpt-content-bottom-padding: \(MarkdownRenderLayoutConstants.chatGPTContentBottomPadding)px;
                 --scopy-chatgpt-thread-content-width: min(
                     var(--scopy-chatgpt-thread-content-max-width),
-                    max(1px, calc(var(--scopy-chatgpt-output-surface-width) - (var(--scopy-chatgpt-content-inline-padding) * 2))),
-                    max(1px, calc(100vw - (var(--scopy-chatgpt-content-inline-padding) * 2)))
+                    max(1px, calc(var(--scopy-chatgpt-render-width) - (var(--scopy-chatgpt-content-inline-padding) * 2)))
                 );
-                --scopy-chatgpt-render-width: min(var(--scopy-chatgpt-output-surface-width), max(1px, 100vw));
+                --scopy-chatgpt-render-width: var(--scopy-chatgpt-layout-viewport-width);
                 --scopy-chatgpt-table-breakout-width: var(--scopy-chatgpt-thread-content-width);
             }
             @page { margin: 0 !important; }
@@ -1267,6 +1266,7 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
             if (content) {
               try { content.style.opacity = '1'; } catch (e) { }
               try { content.style.transition = 'none'; } catch (e) { }
+              try { if (typeof window.syncChatGPTZoomShell === 'function') { window.syncChatGPTZoomShell(content); } } catch (e) { }
             }
             try { if (typeof window.__scopyRenderMath === 'function') { window.__scopyRenderMath(); } } catch (e) { }
           } catch (e) { }
@@ -1291,10 +1291,19 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
               padL = parseFloat(cs.paddingLeft) || 0;
               padR = parseFloat(cs.paddingRight) || 0;
             } catch (e) { padL = 0; padR = 0; }
+            var layoutW = 0;
+            try { layoutW = Math.ceil(content.clientWidth || content.offsetWidth || 0); } catch (e) { layoutW = 0; }
+            if (!layoutW || !isFinite(layoutW) || layoutW <= 0) {
+              try {
+                var raw = window.getComputedStyle(document.documentElement).getPropertyValue('--scopy-chatgpt-render-width');
+                layoutW = Math.ceil(parseFloat(raw) || 0);
+              } catch (e) { layoutW = 0; }
+            }
+            if (!layoutW || !isFinite(layoutW) || layoutW <= 0) { layoutW = w; }
 
             // Table export starts from the same unscaled content box as preview. A later global transform may shrink
             // the entire rendered surface for PNG area limits, but it must not change text/table layout widths.
-            return Math.max(1, Math.floor(w - padL - padR));
+            return Math.max(1, Math.floor(layoutW - padL - padR));
           }
           function isExportTableWrapper(node) {
             return !!(node && node.classList && node.classList.contains('scopy-export-table-wrapper'));
@@ -1349,6 +1358,14 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
             var rectW = 0, scrollW = 0, offsetW = 0, clientW = 0;
             try {
               rectW = Math.ceil((node.getBoundingClientRect().width || 0));
+              var browserZoom = 1;
+              try {
+                var rawZoom = window.getComputedStyle(document.documentElement).getPropertyValue('--scopy-chatgpt-browser-zoom');
+                browserZoom = parseFloat(rawZoom) || 1;
+              } catch (e) { browserZoom = 1; }
+              if (browserZoom && isFinite(browserZoom) && browserZoom > 0 && browserZoom !== 1) {
+                rectW = Math.ceil(rectW / browserZoom);
+              }
               if (exportScale && isFinite(exportScale) && exportScale > 0 && exportScale !== 1) {
                 rectW = Math.ceil(rectW / exportScale);
               }
@@ -1366,7 +1383,17 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
             if (!node) { return 0; }
             try { void node.offsetHeight; } catch (e) { }
             var rectW = 0, scrollW = 0, offsetW = 0, clientW = 0;
-            try { rectW = Math.ceil((node.getBoundingClientRect().width || 0)); } catch (e) { rectW = 0; }
+            try {
+              rectW = Math.ceil((node.getBoundingClientRect().width || 0));
+              var browserZoom = 1;
+              try {
+                var rawZoom = window.getComputedStyle(document.documentElement).getPropertyValue('--scopy-chatgpt-browser-zoom');
+                browserZoom = parseFloat(rawZoom) || 1;
+              } catch (e) { browserZoom = 1; }
+              if (browserZoom && isFinite(browserZoom) && browserZoom > 0 && browserZoom !== 1) {
+                rectW = Math.ceil(rectW / browserZoom);
+              }
+            } catch (e) { rectW = 0; }
             try { scrollW = Math.ceil((node.scrollWidth || 0)); } catch (e) { scrollW = 0; }
             try { offsetW = Math.ceil((node.offsetWidth || 0)); } catch (e) { offsetW = 0; }
             try { clientW = Math.ceil((node.clientWidth || 0)); } catch (e) { clientW = 0; }
@@ -1428,8 +1455,10 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
           var content = document.getElementById('content');
           if (!content) { return false; }
           var targetWidth = computeTargetWidthPoints(content);
+          try { if (typeof window.syncChatGPTZoomShell === 'function') { window.syncChatGPTZoomShell(content); } } catch (e) { }
           scaleWideTables(content, targetWidth);
           adaptWideCodeBlocks(content, targetWidth);
+          try { if (typeof window.syncChatGPTZoomShell === 'function') { window.syncChatGPTZoomShell(content); } } catch (e) { }
           return true;
         })();
         """
@@ -1442,8 +1471,9 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
 
             var rectH = 0;
             try {
-              if (typeof c.getBoundingClientRect === 'function') {
-                var r = c.getBoundingClientRect();
+              var shell = document.getElementById('content-scale-shell') || c;
+              if (shell && typeof shell.getBoundingClientRect === 'function') {
+                var r = shell.getBoundingClientRect();
                 rectH = Math.ceil(r.height || 0);
               }
             } catch (e) { rectH = 0; }
@@ -1955,6 +1985,12 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
 
             var nextScale = \(Double(scale));
             if (!nextScale || !isFinite(nextScale) || nextScale <= 0) { nextScale = 1; }
+            var browserZoom = 1;
+            try {
+              var rawZoom = window.getComputedStyle(document.documentElement).getPropertyValue('--scopy-chatgpt-browser-zoom');
+              browserZoom = parseFloat(rawZoom) || 1;
+            } catch (e) { browserZoom = 1; }
+            if (!browserZoom || !isFinite(browserZoom) || browserZoom <= 0) { browserZoom = 1; }
 
             // Scopy-rendered Markdown has an explicit fixed-width layout shell. Keep that width stable while applying
             // export scale so paragraph wrapping and table column measurement stay aligned with preview/ChatGPT.
@@ -1964,7 +2000,7 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
               var preservesScopyLayoutWidth = false;
               try { preservesScopyLayoutWidth = !!document.getElementById('content-scale-shell'); } catch (e) { preservesScopyLayoutWidth = false; }
               content.style.transformOrigin = 'top left';
-              content.style.transform = 'scale(' + nextScale + ')';
+              content.style.transform = 'scale(' + (browserZoom * nextScale) + ')';
 
               // Prefer an explicit pixel width for the unscaled layout. Very large percentage widths can be clamped or
               // handled inconsistently by WebKit's PDF pipeline, resulting in a blank right margin after scaling.
@@ -1975,7 +2011,18 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
               }
               var widthPx = 0;
               if (viewportW && isFinite(viewportW) && viewportW > 0) {
-                if (preservesScopyLayoutWidth || nextScale === 1) {
+                if (preservesScopyLayoutWidth) {
+                  try { widthPx = Math.max(1, Math.ceil(content.clientWidth || content.offsetWidth || 0)); } catch (e) { widthPx = 0; }
+                  if (!widthPx || !isFinite(widthPx) || widthPx <= 0) {
+                    try {
+                      var rawRenderWidth = window.getComputedStyle(document.documentElement).getPropertyValue('--scopy-chatgpt-render-width');
+                      widthPx = Math.max(1, Math.ceil(parseFloat(rawRenderWidth) || 0));
+                    } catch (e) { widthPx = 0; }
+                  }
+                  if (!widthPx || !isFinite(widthPx) || widthPx <= 0) {
+                    widthPx = Math.max(1, Math.ceil(viewportW));
+                  }
+                } else if (nextScale === 1) {
                   widthPx = Math.max(1, Math.ceil(viewportW));
                 } else {
                   widthPx = Math.max(1, Math.ceil(viewportW / nextScale));
@@ -1990,6 +2037,15 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
                 content.style.setProperty('max-width', widthPercent + '%', 'important');
               }
               content.style.display = 'block';
+              try {
+                var shell = document.getElementById('content-scale-shell');
+                if (shell && shell.style) {
+                  var rawHeight = Math.ceil(content.scrollHeight || content.offsetHeight || 0);
+                  if (rawHeight && isFinite(rawHeight) && rawHeight > 0) {
+                    shell.style.height = Math.ceil(rawHeight * browserZoom * nextScale) + 'px';
+                  }
+                }
+              } catch (e) { }
             } catch (e) { return false; }
 
             // Ensure font-size reset so we don't double-scale text.

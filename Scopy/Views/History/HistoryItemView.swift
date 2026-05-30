@@ -839,17 +839,9 @@ struct HistoryItemView: View, Equatable {
            let html = previewModel.markdownHTML,
            let text = previewModel.text
         {
-            let maxWidth: CGFloat = HoverPreviewScreenMetrics.maxPopoverWidthPoints()
+            let maxWidth: CGFloat = HoverPreviewScreenMetrics.maxMarkdownPopoverWidthPoints()
             let containerWidth = max(1, maxWidth)
             let cacheKey = MarkdownRenderCacheKey.make(contentHash: item.contentHash, markdown: text)
-            let font = NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
-            let padding: CGFloat = ScopySpacing.md
-            let fallbackWidth = HoverPreviewTextSizing.preferredWidth(
-                for: text,
-                font: font,
-                padding: padding,
-                maxWidth: maxWidth
-            )
 
             MarkdownPreviewMeasurer(
                 controller: markdownWebViewController,
@@ -865,14 +857,7 @@ struct HistoryItemView: View, Equatable {
                         self.previewModel.markdownRenderErrorReason = metrics.renderErrorReason ?? "markdown render failed"
                         return
                     }
-                    let stableWidth: CGFloat = {
-                        let w = metrics.size.width
-                        guard w.isFinite, w > 0 else { return fallbackWidth }
-                        if w < 40 { return fallbackWidth }
-                        if fallbackWidth.isFinite, fallbackWidth > 0, w < fallbackWidth * 0.5 { return fallbackWidth }
-                        return min(maxWidth, w)
-                    }()
-                    let stableSize = CGSize(width: max(1, stableWidth), height: metrics.size.height)
+                    let stableSize = CGSize(width: max(1, maxWidth), height: metrics.size.height)
                     let stableMetrics = MarkdownContentMetrics(size: stableSize, hasHorizontalOverflow: metrics.hasHorizontalOverflow)
                     self.previewModel.markdownContentSize = stableMetrics.size
                     self.previewModel.markdownHasHorizontalOverflow = stableMetrics.hasHorizontalOverflow

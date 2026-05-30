@@ -55,14 +55,15 @@ enum HistoryItemMarkdownExportController {
     static func exportMarkdownToClipboard(
         markdownSource: String,
         settings: SettingsDTO,
+        layoutScale: MarkdownChatGPTLayoutScalePercent? = nil,
         resolutionScale: CGFloat? = nil
         ) async -> Result<MarkdownExportService.ExportStats, Error> {
-        let layoutScale = MarkdownChatGPTLayoutScalePercent(
+        let resolvedLayoutScale = layoutScale ?? MarkdownChatGPTLayoutScalePercent(
             settingsValue: settings.markdownChatGPTLayoutScalePercent
         )
         let context = MarkdownRenderContextResolver.defaultContext(
             for: markdownSource,
-            layoutScale: layoutScale
+            layoutScale: resolvedLayoutScale
         )
         let html = MarkdownHTMLRenderer.render(markdown: markdownSource, context: context).html
         let pngquantOptions: PngquantService.Options? = {

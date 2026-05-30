@@ -55,13 +55,17 @@ Live Browser inspection against the current ChatGPT conversation at an `880px` C
 
 Scopy's preview/export implementation mirrors that principle while keeping output size separate from layout scale:
 
-- the text column stays anchored to the desktop message branch: `48rem`/`768px`
-- the default `100%` ChatGPT profile uses `0.8x` font and line-height metrics because Scopy's captured unscaled CSS-pixel baseline matches the browser's physical `125%` evidence
-- the `125%` profile uses the same column with `1.0x` font and line-height metrics; it must not apply a second `1.25x` multiplier or narrow the column to `40rem`
+- the output/preview surface stays anchored to the desktop message branch: `48rem`/`768px`
+- the default `100%` ChatGPT profile lays out in the full `816px` visual surface with normal `1.0x` CSS font metrics
+- the `125%` profile keeps the same visual surface but lays out in an internal CSS viewport of `816px / 1.25`, then applies WebKit layout zoom back to the fixed surface; it must not grow the canvas or reuse the `100%` line breaks
 - safe inline padding stays `24px` on each side
 - the preview/export surface stays fixed at `768px + 48px = 816px` when the screen allows it
-- the active text column is `min(profileColumn, 100vw - 48px, outputSurface - 48px)`
+- the active text column is `min(48rem, renderWidth - 48px)`, where `renderWidth` is the internal layout viewport before zoom
 - the layout profile is part of the Markdown render context and cache key, so 100% and 125% previews cannot reuse stale HTML
+- hover preview width is owned by Scopy's shared preview-frame policy, matching image and file previews; Markdown layout profiles control only the content's font metrics and wrapping, and the internal `renderWidth` must not read the popover's `100vw`
+- live hover preview may fit-scale the already-laid-out `816px` visual surface into the shared popover frame; that fit scale is display-only and must not feed back into line breaking
+- the hover-preview 100%/125% switch must rerender Markdown with the selected layout profile instead of changing only CSS variables on an already-rendered document
+- WebView measurements may update height and overflow state, but they must not shrink or grow the outer Markdown popover
 - text wrapping follows `wrap-break-word`: `overflow-wrap: break-word` with normal `word-break`
 
 This separation is intentional: changing the ChatGPT layout scale must change font metrics and line breaks, but it must not change PNG target pixels or the hover-preview shell width. Wide tables still get a scroll container that can break out to the stable render surface, but they do not change the text-column width. PNG export starts from the same laid-out surface; table fitting is a bitmap/export transform after layout, not a second table stylesheet.

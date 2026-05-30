@@ -283,7 +283,11 @@ enum MarkdownHTMLDocumentBuilder {
               if (!node) { return 0; }
               try { void node.offsetHeight; } catch (e) { }
               var rectW = 0, scrollW = 0, offsetW = 0, clientW = 0;
-              try { rectW = Math.ceil(node.getBoundingClientRect().width || 0); } catch (e) { rectW = 0; }
+              try {
+                rectW = Math.ceil(node.getBoundingClientRect().width || 0);
+                var zoom = currentChatGPTPreviewScale();
+                if (zoom && isFinite(zoom) && zoom > 0 && zoom !== 1) { rectW = Math.ceil(rectW / zoom); }
+              } catch (e) { rectW = 0; }
               try { scrollW = Math.ceil(node.scrollWidth || 0); } catch (e) { scrollW = 0; }
               try { offsetW = Math.ceil(node.offsetWidth || 0); } catch (e) { offsetW = 0; }
               try { clientW = Math.ceil(node.clientWidth || 0); } catch (e) { clientW = 0; }
@@ -306,22 +310,52 @@ enum MarkdownHTMLDocumentBuilder {
               } catch (e) { }
               return 1;
             }
-            function updateChatGPTPreviewScale(content) {
+            function syncChatGPTZoomShell(content) {
               try {
                 var root = document.documentElement;
                 if (!root || !content) { return 1; }
                 var shell = document.getElementById('content-scale-shell');
-                var scale = 1;
+                var zoom = readCSSPixelVariable(root, '--scopy-chatgpt-browser-zoom', 1);
+                var renderWidth = readCSSPixelVariable(root, '--scopy-chatgpt-render-width', 0);
+                var visualWidth = (renderWidth && isFinite(renderWidth) && renderWidth > 0) ? renderWidth * zoom : 0;
+                var fit = 1;
+                var isExportMode = false;
+                try { isExportMode = root.classList && root.classList.contains('scopy-export-mode'); } catch (e) { isExportMode = false; }
+                if (!isExportMode && visualWidth && isFinite(visualWidth) && visualWidth > 0) {
+                  var viewportWidth = 0;
+                  try { viewportWidth = Math.ceil(window.innerWidth || 0); } catch (e) { viewportWidth = 0; }
+                  if (!viewportWidth || !isFinite(viewportWidth) || viewportWidth <= 0) {
+                    try { viewportWidth = Math.ceil(root.clientWidth || 0); } catch (e) { viewportWidth = 0; }
+                  }
+                  if (viewportWidth && isFinite(viewportWidth) && viewportWidth > 0 && viewportWidth < visualWidth) {
+                    fit = Math.max(0.01, viewportWidth / visualWidth);
+                  }
+                }
+                var scale = zoom * fit;
+                root.style.setProperty('--scopy-chatgpt-preview-fit-scale', String(fit));
                 root.style.setProperty('--scopy-chatgpt-preview-scale', String(scale));
                 if (shell && shell.style) {
-                  shell.style.width = '';
+                  if (renderWidth && isFinite(renderWidth) && renderWidth > 0) {
+                    shell.style.width = Math.max(1, Math.round(renderWidth * scale)) + 'px';
+                  } else {
+                    shell.style.width = '';
+                  }
                   shell.style.maxWidth = '';
-                  shell.style.height = '';
+                  var rawHeight = 0;
+                  try { rawHeight = Math.ceil(content.scrollHeight || content.offsetHeight || 0); } catch (e) { rawHeight = 0; }
+                  if (rawHeight && isFinite(rawHeight) && rawHeight > 0) {
+                    shell.style.height = Math.ceil(rawHeight * scale) + 'px';
+                  } else {
+                    shell.style.height = '';
+                  }
                 }
                 return scale;
               } catch (e) {
                 return 1;
               }
+            }
+            function updateChatGPTPreviewScale(content) {
+              return syncChatGPTZoomShell(content);
             }
             function scaleChatGPTTables(root, explicitTargetWidth) {
               try {
@@ -370,7 +404,10 @@ enum MarkdownHTMLDocumentBuilder {
     ) -> String {
         let threadContentWidth = layoutScale.threadContentWidth
         let outputSurfaceWidth = Self.layout.chatGPTOutputSurfaceWidth
+        let layoutViewportWidth = layoutScale.layoutViewportWidth(outputSurfaceWidth: outputSurfaceWidth)
         let fontScale = layoutScale.fontScale
+        let browserZoomScale = layoutScale.browserZoomScale
+        let inverseBrowserZoomScale = layoutScale.inverseBrowserZoomScale
         let taskListStyle = featureSet.taskLists ? "\n\(MarkdownTaskListRuntime.style)\n" : ""
         let footnoteStyle = featureSet.footnotes ? """
           .footnotes {
@@ -524,7 +561,10 @@ enum MarkdownHTMLDocumentBuilder {
             --scopy-syntax-tag: #004f99;
             --scopy-syntax-invalid: #ba2623;
             --scopy-chatgpt-layout-font-scale: \(fontScale);
+            --scopy-chatgpt-browser-zoom: \(browserZoomScale);
+            --scopy-chatgpt-inverse-browser-zoom: \(inverseBrowserZoomScale);
             --scopy-chatgpt-output-surface-width: \(outputSurfaceWidth)px;
+            --scopy-chatgpt-layout-viewport-width: \(layoutViewportWidth)px;
             --scopy-chatgpt-thread-content-max-width: \(threadContentWidth)px;
             --scopy-chatgpt-content-inline-padding: \(Self.layout.chatGPTContentInlinePadding)px;
             --scopy-chatgpt-content-top-padding: \(Self.layout.chatGPTContentTopPadding)px;
@@ -544,12 +584,12 @@ enum MarkdownHTMLDocumentBuilder {
             --scopy-chatgpt-code-card-line-height: calc(20px * var(--scopy-chatgpt-layout-font-scale));
             --scopy-chatgpt-thread-content-width: min(
               var(--scopy-chatgpt-thread-content-max-width),
-              max(1px, calc(var(--scopy-chatgpt-output-surface-width) - (var(--scopy-chatgpt-content-inline-padding) * 2))),
-              max(1px, calc(100vw - (var(--scopy-chatgpt-content-inline-padding) * 2)))
+              max(1px, calc(var(--scopy-chatgpt-render-width) - (var(--scopy-chatgpt-content-inline-padding) * 2)))
             );
-            --scopy-chatgpt-render-width: min(var(--scopy-chatgpt-output-surface-width), max(1px, 100vw));
+            --scopy-chatgpt-render-width: var(--scopy-chatgpt-layout-viewport-width);
             --scopy-chatgpt-table-breakout-width: var(--scopy-chatgpt-thread-content-width);
-            --scopy-chatgpt-preview-scale: 1;
+            --scopy-chatgpt-preview-scale: var(--scopy-chatgpt-browser-zoom);
+            --scopy-chatgpt-preview-fit-scale: 1;
           }
           body {
             margin: 0;
@@ -568,11 +608,12 @@ enum MarkdownHTMLDocumentBuilder {
           * { box-sizing: border-box; }
           #content-scale-shell {
             display: block;
-            width: 100%;
-            max-width: 100%;
+            width: calc(var(--scopy-chatgpt-render-width) * var(--scopy-chatgpt-preview-scale));
+            max-width: none;
             margin: 0;
             padding: 0;
             overflow: visible;
+            transform-origin: top left;
           }
           #content {
             display: block;
@@ -589,6 +630,8 @@ enum MarkdownHTMLDocumentBuilder {
             box-shadow: none;
             opacity: 0;
             transition: opacity 140ms ease-in-out;
+            transform: scale(var(--scopy-chatgpt-preview-scale));
+            transform-origin: top left;
           }
           #content > :not(.scopy-chatgpt-table-container) {
             max-width: var(--scopy-chatgpt-thread-content-width);
@@ -865,14 +908,15 @@ enum MarkdownHTMLDocumentBuilder {
             font-weight: 700;
           }
           html.scopy-export-mode #content-scale-shell {
-            width: var(--scopy-chatgpt-render-width);
+            width: calc(var(--scopy-chatgpt-render-width) * var(--scopy-chatgpt-preview-scale));
             max-width: none;
           }
           html.scopy-export-mode #content {
             box-shadow: none;
             border: 0;
             border-radius: 0;
-            transform: none;
+            transform: scale(var(--scopy-chatgpt-preview-scale));
+            transform-origin: top left;
           }
           html.scopy-export-mode pre.scopy-export-wrap-code {
             overflow: visible;
@@ -1342,12 +1386,11 @@ enum MarkdownHTMLDocumentBuilder {
                 var el = document.getElementById('content');
                 if (!el) { return; }
                 scaleChatGPTTables(el);
-                var previewScale = updateChatGPTPreviewScale(el);
+                updateChatGPTPreviewScale(el);
                 var box = document.getElementById('content-scale-shell') || el;
                 var rect = box.getBoundingClientRect();
                 var w = Math.ceil(rect.width || 0);
-                var sh = Math.ceil(el.scrollHeight || 0);
-                var h = Math.ceil(Math.max(rect.height || 0, sh * previewScale));
+                var h = Math.ceil(rect.height || 0);
                 var overflowX = false;
                 try {
                   // Detect horizontal scroll requirement inside common overflow containers (KaTeX display, code blocks, tables).
@@ -1672,12 +1715,11 @@ enum MarkdownHTMLDocumentBuilder {
                     var el = document.getElementById('content');
                     if (!el) { return; }
                     scaleChatGPTTables(el);
-                    var previewScale = updateChatGPTPreviewScale(el);
+                    updateChatGPTPreviewScale(el);
                     var box = document.getElementById('content-scale-shell') || el;
                     var rect = box.getBoundingClientRect();
                     var w = Math.ceil(rect.width || 0);
-                    var sh = Math.ceil(el.scrollHeight || 0);
-                    var h = Math.ceil(Math.max(rect.height || 0, sh * previewScale));
+                    var h = Math.ceil(rect.height || 0);
                     var overflowX = false;
                     try {
                       var nodes = el.querySelectorAll(\(overflowSelectorLiteral));

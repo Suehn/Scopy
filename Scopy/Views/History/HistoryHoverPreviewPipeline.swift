@@ -55,6 +55,11 @@ enum HistoryHoverPreviewPipeline {
     static let maxMarkdownPreviewBytes = 200_000
     static let markdownFilePreviewCacheTTL: TimeInterval = 3 * 3600
 
+    private struct MarkdownRenderCallbacks: @unchecked Sendable {
+        let isCurrent: @MainActor () -> Bool
+        let emit: @MainActor (Event) -> Void
+    }
+
     struct ImageRequest {
         let itemID: UUID
         let contentHash: String
@@ -301,15 +306,14 @@ enum HistoryHoverPreviewPipeline {
             await HistoryHoverPreviewPipeline.renderMarkdownHTML(source, context: context)
         }
     ) -> Task<Void, Never> {
-        Task(priority: .utility) {
+        let callbacks = MarkdownRenderCallbacks(isCurrent: isCurrent, emit: emit)
+        return Task(priority: .utility) { @MainActor in
             guard !Task.isCancelled else { return }
             let html = await renderMarkdownHTML(request.source, request.context)
             guard !Task.isCancelled, !html.isEmpty else { return }
             updateMarkdownCache(html: html, request: request)
-            await MainActor.run {
-                guard isCurrent() else { return }
-                emit(.markdownHTML(html))
-            }
+            guard callbacks.isCurrent() else { return }
+            callbacks.emit(.markdownHTML(html))
         }
     }
 
@@ -744,24 +748,9 @@ enum HistoryHoverPreviewPipeline {
         }
     }
 
-    static func stableMetrics(from metrics: MarkdownContentMetrics, text: String) -> MarkdownContentMetrics {
-        let maxWidth: CGFloat = HoverPreviewScreenMetrics.maxPopoverWidthPoints()
-        let font = NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
-        let padding: CGFloat = ScopySpacing.md
-        let fallbackWidth = HoverPreviewTextSizing.preferredWidth(
-            for: text,
-            font: font,
-            padding: padding,
-            maxWidth: maxWidth
-        )
-        let stableWidth: CGFloat = {
-            let width = metrics.size.width
-            guard width.isFinite, width > 0 else { return fallbackWidth }
-            if width < 40 { return fallbackWidth }
-            if fallbackWidth.isFinite, fallbackWidth > 0, width < fallbackWidth * 0.5 { return fallbackWidth }
-            return min(maxWidth, width)
-        }()
-        let stableSize = CGSize(width: max(1, stableWidth), height: metrics.size.height)
+    static func stableMetrics(from metrics: MarkdownContentMetrics, text _: String) -> MarkdownContentMetrics {
+        let maxWidth: CGFloat = HoverPreviewScreenMetrics.maxMarkdownPopoverWidthPoints()
+        let stableSize = CGSize(width: max(1, maxWidth), height: metrics.size.height)
         return MarkdownContentMetrics(size: stableSize, hasHorizontalOverflow: metrics.hasHorizontalOverflow)
     }
 
