@@ -7,6 +7,16 @@
 
 ## [Unreleased]
 
+### Notes
+
+- No unreleased entries.
+
+## [v0.8.5] - 2026-05-30
+
+### Clipboard
+
+- Replays managed file-backed image history items as file URLs with PNG fallback data, so apps that preserve file transfers can avoid bitmap re-encoding while image-only targets still receive PNG data.
+
 ### Documentation
 
 - Reworks the repository README around real Scopy `FloatingPanel` screenshots, a non-empty app icon, a rich fixture history, unified editorial split visuals, quick install links, a denser feature matrix, distinct capability/detail showcases, a performance evidence visual, and a constrained contributors section.

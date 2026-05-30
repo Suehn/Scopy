@@ -422,6 +422,10 @@ actor ClipboardService {
             if itemType == .rtf || itemType == .html {
                 let plainText = Self.resolvePlainText(for: item, data: data)
                 monitor.copyToClipboard(text: plainText, data: data, type: pasteboardType)
+            } else if itemType == .image,
+                      imageWriteMode == .standard,
+                      let fileURL = Self.managedImageFileURL(for: item, storage: storage) {
+                monitor.copyToClipboard(imageData: data, fileURL: fileURL, imageWriteMode: imageWriteMode)
             } else {
                 monitor.copyToClipboard(data: data, type: pasteboardType, imageWriteMode: imageWriteMode)
             }
@@ -449,6 +453,26 @@ actor ClipboardService {
         } else {
             await copyPlainText(item.plainText, monitor: monitor)
         }
+    }
+
+    nonisolated private static func managedImageFileURL(
+        for item: StorageService.StoredItem,
+        storage: StorageService
+    ) -> URL? {
+        guard item.type == .image,
+              let storageRef = item.storageRef,
+              !storageRef.isEmpty,
+              StorageService.validateStorageRef(storageRef, externalStoragePath: storage.externalStorageDirectoryPath) else {
+            return nil
+        }
+
+        let url = URL(fileURLWithPath: storageRef)
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory),
+              !isDirectory.boolValue else {
+            return nil
+        }
+        return url
     }
 
     private func resolvedFileURLs(for item: StorageService.StoredItem, storage: StorageService) async -> [URL] {

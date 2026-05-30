@@ -14,6 +14,7 @@ final class ClipboardServiceCopyToClipboardTests: XCTestCase {
     private var insertedLegacyImageItemID: UUID?
     private var insertedStandardPNGImageItemID: UUID?
     private var insertedPalettedImageItemID: UUID?
+    private var insertedExternalPalettedImageItemID: UUID?
     private var insertedMisclassifiedTempImageFileItemID: UUID?
     private var insertedFinderImageFileItemID: UUID?
     private var insertedSingleTextFileItemID: UUID?
@@ -105,6 +106,18 @@ final class ClipboardServiceCopyToClipboardTests: XCTestCase {
         )
         insertedPalettedImageItemID = palettedImageItem.id
 
+        let externalPalettedImageItem = try await storage.upsertItem(
+            ClipboardMonitor.ClipboardContent(
+                type: .image,
+                plainText: "[Image]",
+                payload: .data(palettedPNGData),
+                appBundleID: "com.test.app",
+                contentHash: UUID().uuidString,
+                sizeBytes: ScopyThresholds.externalStorageBytes
+            )
+        )
+        insertedExternalPalettedImageItemID = externalPalettedImageItem.id
+
         let temporaryImageFileURL = baseURL.appendingPathComponent("wechat-\(UUID().uuidString).png")
         try makeSolidColorPNGData().write(to: temporaryImageFileURL, options: .atomic)
         let serializedFileURLs = try JSONEncoder().encode([temporaryImageFileURL.path])
@@ -182,6 +195,7 @@ final class ClipboardServiceCopyToClipboardTests: XCTestCase {
         insertedLegacyImageItemID = nil
         insertedStandardPNGImageItemID = nil
         insertedPalettedImageItemID = nil
+        insertedExternalPalettedImageItemID = nil
         insertedMisclassifiedTempImageFileItemID = nil
         insertedFinderImageFileItemID = nil
         insertedSingleTextFileItemID = nil
@@ -346,6 +360,36 @@ final class ClipboardServiceCopyToClipboardTests: XCTestCase {
         XCTAssertTrue(isLikelyPNG(pngData))
         XCTAssertEqual(pngData, insertedPalettedImageData)
         XCTAssertNotNil(NSImage(pasteboard: pasteboard))
+    }
+
+    func testCopyToClipboardFileBackedImagePublishesFileURLBeforePNGFallback() async throws {
+        guard let insertedExternalPalettedImageItemID else {
+            XCTFail("Missing inserted external paletted image item ID")
+            return
+        }
+        guard let insertedPalettedImageData else {
+            XCTFail("Missing inserted paletted image data")
+            return
+        }
+
+        try await service.copyToClipboard(itemID: insertedExternalPalettedImageItemID)
+
+        let fileListType = NSPasteboard.PasteboardType("NSFilenamesPboardType")
+        let fileList = pasteboard.propertyList(forType: fileListType) as? [String]
+        XCTAssertEqual(fileList?.count, 1)
+        guard let filePath = fileList?.first else {
+            XCTFail("Expected a file path on pasteboard")
+            return
+        }
+        XCTAssertTrue(FileManager.default.fileExists(atPath: filePath))
+        XCTAssertEqual(try Data(contentsOf: URL(fileURLWithPath: filePath)), insertedPalettedImageData)
+
+        let pastedFileURLs = pasteboard.readObjects(
+            forClasses: [NSURL.self],
+            options: [.urlReadingFileURLsOnly: true]
+        ) as? [URL]
+        XCTAssertEqual(pastedFileURLs?.map(\.path), [filePath])
+        XCTAssertEqual(pasteboard.data(forType: .png), insertedPalettedImageData)
     }
 
     func testCopyToClipboardOptimizedForCodexWhenStoredPayloadIsPalettedPNGAddsCompatibilityTIFF() async throws {

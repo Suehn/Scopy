@@ -423,6 +423,40 @@ public final class ClipboardMonitor {
         lastChangeCount = pasteboard.changeCount
     }
 
+    public func copyToClipboard(
+        imageData data: Data,
+        fileURL: URL,
+        imageWriteMode: ImagePasteboardWriteMode = .standard
+    ) {
+        guard let imagePayload = Self.makeImagePasteboardPayloadForWrite(data, imageWriteMode: imageWriteMode) else {
+            ScopyLog.monitor.error("Failed to normalize file-backed image payload before pasteboard write")
+            return
+        }
+
+        pasteboard.clearContents()
+        guard pasteboard.writeObjects([fileURL as NSURL]) else {
+            ScopyLog.monitor.warning("Failed to write image file URL to pasteboard; falling back to PNG payload")
+            copyToClipboard(data: data, type: .png, imageWriteMode: imageWriteMode)
+            return
+        }
+
+        let fileListType = NSPasteboard.PasteboardType("NSFilenamesPboardType")
+        pasteboard.setPropertyList([fileURL.path], forType: fileListType)
+
+        guard pasteboard.setData(imagePayload.primaryPNGData, forType: .png) else {
+            ScopyLog.monitor.warning("Failed to add PNG fallback for file-backed image pasteboard payload")
+            lastChangeCount = pasteboard.changeCount
+            return
+        }
+
+        if let tiffData = imagePayload.compatibilityTIFFData,
+           !pasteboard.setData(tiffData, forType: .tiff) {
+            ScopyLog.monitor.warning("Failed to add TIFF fallback for file-backed image pasteboard payload")
+        }
+
+        lastChangeCount = pasteboard.changeCount
+    }
+
     public func copyToClipboard(text: String, data: Data, type: NSPasteboard.PasteboardType) {
         pasteboard.clearContents()
 

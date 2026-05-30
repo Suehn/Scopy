@@ -19,9 +19,9 @@ This page is the human-facing index for current release state. Automation should
 ## Current Release
 
 <!-- release-current:start -->
-- Version: `v0.8.4`
+- Version: `v0.8.5`
 - Date: `2026-05-30`
-- Release note: [v0.8.4](./history/v0.8.4.md)
+- Release note: [v0.8.5](./history/v0.8.5.md)
 - Changelog: [CHANGELOG.md](./CHANGELOG.md)
 - Profile doc: `none`
 <!-- release-current:end -->
@@ -29,6 +29,7 @@ This page is the human-facing index for current release state. Automation should
 ## Recent Releases
 
 <!-- release-recent:start -->
+- `2026-05-30` [v0.8.5](./history/v0.8.5.md) - File-backed image paste preservation and README visual polish
 - `2026-05-30` [v0.8.4](./history/v0.8.4.md) - Markdown preview scaling and WACZ parity polish
 - `2026-05-30` [v0.8.3](./history/v0.8.3.md) - WACZ-aligned Markdown rendering theme
 - `2026-05-16` [v0.8.2](./history/v0.8.2.md) - Markdown safe HTML renderer routing and rich HTML fallback hardening
@@ -40,7 +41,6 @@ This page is the human-facing index for current release state. Automation should
 - `2026-05-07` [v0.7.6](./history/v0.7.6.md) - Trellis TASK_DIR hardening row descriptor thumbnail scheduler and frontend profile isolation
 - `2026-04-30` [v0.7.5](./history/v0.7.5.md) - Presentation cache reuse fuzzy top-K reuse and settings delta cleanup
 - `2026-04-30` [v0.7.4](./history/v0.7.4.md) - Frontend scroll attribution row presentation prewarm and scroll-time thumbnail throttling
-- `2026-04-26` [v0.7.3](./history/v0.7.3.md) - Tall Markdown export PDF bypass placeholder collision protection safe anchor navigation and release CI hardening
 <!-- release-recent:end -->
 
 ## Full History
