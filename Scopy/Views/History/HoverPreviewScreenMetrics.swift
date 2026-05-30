@@ -1,5 +1,6 @@
 import AppKit
 import CoreGraphics
+import ScopyKit
 
 enum HoverPreviewScreenMetrics {
     static func activeVisibleFrame() -> CGRect {
@@ -25,6 +26,15 @@ enum HoverPreviewScreenMetrics {
             return min(ScopySize.Width.previewMax, floor(visibleWidth * 0.62))
         }
         return ScopySize.Width.previewMax
+    }
+
+    static func maxMarkdownPopoverWidthPoints() -> CGFloat {
+        let chatGPTRenderWidth = CGFloat(MarkdownRenderLayoutConstants.chatGPTRenderWidth)
+        let visibleWidth = activeVisibleFrame().width
+        if visibleWidth > 0 {
+            return min(chatGPTRenderWidth, floor(visibleWidth * 0.62))
+        }
+        return chatGPTRenderWidth
     }
 
     static func maxPopoverHeightPoints() -> CGFloat {

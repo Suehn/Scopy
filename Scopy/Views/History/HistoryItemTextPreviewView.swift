@@ -32,7 +32,9 @@ struct HistoryItemTextPreviewView: View {
     private static let uiTestExportResolutionEnvKey = "SCOPY_UITEST_MARKDOWN_EXPORT_RESOLUTION"
 
     var body: some View {
-        let maxWidth: CGFloat = HoverPreviewScreenMetrics.maxPopoverWidthPoints()
+        let maxWidth: CGFloat = model.isMarkdown
+            ? HoverPreviewScreenMetrics.maxMarkdownPopoverWidthPoints()
+            : HoverPreviewScreenMetrics.maxPopoverWidthPoints()
         let maxHeight: CGFloat = HoverPreviewScreenMetrics.maxPopoverHeightPoints()
         let font = NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
         let padding: CGFloat = ScopySpacing.md
@@ -53,9 +55,7 @@ struct HistoryItemTextPreviewView: View {
                 }()
                 let width: CGFloat = {
                     if model.isMarkdown {
-                        // Prefer shrink-to-fit for small Markdown payloads, while snapping to max width when near-max or when
-                        // horizontal scrolling is detected (e.g. long KaTeX / code blocks).
-                        let measured = markdownMeasuredWidth ?? fallbackWidth
+                        let measured = markdownMeasuredWidth ?? maxWidth
                         let desired = max(1, min(maxWidth, ceil(measured + 2)))
                         if model.markdownHasHorizontalOverflow { return maxWidth }
                         return (desired >= maxWidth * 0.92) ? maxWidth : desired

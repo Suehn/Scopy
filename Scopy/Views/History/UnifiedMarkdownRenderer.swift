@@ -9,7 +9,9 @@ enum UnifiedMarkdownRenderer: MarkdownPreviewRenderer {
             return legacyFallback(markdown: markdown, context: context, reason: "unified bundle missing")
         }
 
-        let normalizedMarkdown = MarkdownATXHeadingNormalizer.normalize(markdown)
+        let normalizedMarkdown = MarkdownTableCodeSpanPipeNormalizer.normalize(
+            MarkdownATXHeadingNormalizer.normalize(markdown)
+        )
         let html = MarkdownHTMLDocumentBuilder.unifiedDocument(markdown: normalizedMarkdown, context: context)
         guard !html.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             return legacyFallback(markdown: markdown, context: context, reason: "unified document empty")

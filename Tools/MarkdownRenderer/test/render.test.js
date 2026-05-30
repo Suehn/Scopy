@@ -23,6 +23,44 @@ test("renders GFM links, tables, task lists, and dollar math", () => {
   assert.match(result.html, /katex/);
 });
 
+test("keeps table code spans with pipe examples inside their source cells", () => {
+  const result = render(`
+| Example | Notes |
+| --- | --- |
+| \`| A | B |\` | ok |
+| \`A | B\` | ok |
+`);
+
+  assert.match(result.html, /<td><code>\| A \| B \|<\/code><\/td>\s*<td>ok<\/td>/);
+  assert.match(result.html, /<td><code>A \| B<\/code><\/td>\s*<td>ok<\/td>/);
+  assert.doesNotMatch(result.html, /<td>`<\/td>/);
+  assert.doesNotMatch(result.html, /<td>`A<\/td>/);
+});
+
+test("leaves escaped table code-span pipes and non-table paragraphs stable", () => {
+  const result = render([
+    "Paragraph `A | B` should stay literal.",
+    "",
+    "| Example | Notes |",
+    "| --- | --- |",
+    "| `A \\| B` | ok |"
+  ].join("\n"));
+
+  assert.match(result.html, /<p>Paragraph <code>A \| B<\/code> should stay literal.<\/p>/);
+  assert.match(result.html, /<td><code>A \| B<\/code><\/td>\s*<td>ok<\/td>/);
+});
+
+test("keeps table fence-marker examples as cell text", () => {
+  const result = render([
+    "| 模块 | 示例 1 | 示例 2 | 推荐 |",
+    "| --- | --- | --- | --- |",
+    "| 代码块 | ```python | ```bash | 高 |"
+  ].join("\n"));
+
+  assert.match(result.html, /<td>```python<\/td>\s*<td>```bash<\/td>\s*<td>高<\/td>/);
+  assert.doesNotMatch(result.html, /```python \| ```bash/);
+});
+
 test("preserves supported custom plugin links without widening file URL links", () => {
   const plugin = render("[@电脑](plugin://computer-use@openai-bundled)");
   const fileURL = render("[file](file:///Users/ziyi/a.md)");

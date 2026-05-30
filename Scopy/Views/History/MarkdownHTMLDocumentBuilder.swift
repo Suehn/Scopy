@@ -36,10 +36,10 @@ enum MarkdownHTMLDocumentBuilder {
               return lengths;
             }
             function chatGPTWideTableColumnSize(length) {
-              if (length <= 18) { return 'sm'; }
-              if (length <= 40) { return 'md'; }
-              if (length <= 80) { return 'lg'; }
-              return 'xl';
+              if (length > 160) { return 'xl'; }
+              if (length > 100) { return 'lg'; }
+              if (length > 40) { return 'md'; }
+              return 'sm';
             }
             function classifyChatGPTTable(wrapper, table) {
               try {
@@ -150,31 +150,12 @@ enum MarkdownHTMLDocumentBuilder {
                 var root = document.documentElement;
                 if (!root || !content) { return 1; }
                 var shell = document.getElementById('content-scale-shell');
-                var renderWidth = readCSSPixelVariable(root, '--scopy-chatgpt-render-width', 816);
-                var isExport = !!(root.classList && root.classList.contains('scopy-export-mode'));
                 var scale = 1;
-                if (!isExport) {
-                  var available = 0;
-                  try { available = Math.floor(window.innerWidth || document.documentElement.clientWidth || renderWidth); } catch (e) { available = renderWidth; }
-                  if (available && isFinite(available) && available > 0) {
-                    scale = Math.max(0.01, Math.min(1, available / renderWidth));
-                  }
-                }
                 root.style.setProperty('--scopy-chatgpt-preview-scale', String(scale));
                 if (shell && shell.style) {
-                  if (isExport) {
-                    shell.style.width = renderWidth + 'px';
-                    shell.style.maxWidth = 'none';
-                    shell.style.height = '';
-                  } else {
-                    shell.style.width = Math.ceil(renderWidth * scale) + 'px';
-                    shell.style.maxWidth = '100%';
-                    var rawHeight = 0;
-                    try { rawHeight = Math.ceil(content.offsetHeight || content.scrollHeight || 0); } catch (e) { rawHeight = 0; }
-                    if (rawHeight && rawHeight > 0) {
-                      shell.style.height = Math.ceil(rawHeight * scale + 1) + 'px';
-                    }
-                  }
+                  shell.style.width = '';
+                  shell.style.maxWidth = '';
+                  shell.style.height = '';
                 }
                 return scale;
               } catch (e) {
@@ -363,19 +344,26 @@ enum MarkdownHTMLDocumentBuilder {
             --scopy-border: rgba(13, 13, 13, 0.15);
             --scopy-border-subtle: rgba(13, 13, 13, 0.10);
             --scopy-text-secondary: rgb(93, 93, 93);
-            --scopy-syntax-base: #383a42;
-            --scopy-syntax-comment: #a0a1a7;
-            --scopy-syntax-keyword: #a626a4;
-            --scopy-syntax-name: #e45649;
-            --scopy-syntax-literal: #0184bb;
-            --scopy-syntax-string: #50a14f;
-            --scopy-syntax-built-in: #c18401;
-            --scopy-syntax-number: #986801;
-            --scopy-syntax-symbol: #4078f2;
-            --scopy-chatgpt-thread-content-width: \(Self.layout.chatGPTThreadContentWidth)px;
+            --scopy-syntax-base: rgb(13, 13, 13);
+            --scopy-syntax-comment: #4f4f4f;
+            --scopy-syntax-meta: #004f99;
+            --scopy-syntax-keyword: #ba437a;
+            --scopy-syntax-heading: #ba8e00;
+            --scopy-syntax-atom: #b9480d;
+            --scopy-syntax-string: #008635;
+            --scopy-syntax-standard-name: #b9480d;
+            --scopy-syntax-name: #6b3ab4;
+            --scopy-syntax-attribute: #ba8e00;
+            --scopy-syntax-tag: #004f99;
+            --scopy-syntax-invalid: #ba2623;
+            --scopy-chatgpt-thread-content-max-width: \(Self.layout.chatGPTThreadContentWidth)px;
             --scopy-chatgpt-content-inline-padding: \(Self.layout.chatGPTContentInlinePadding)px;
             --scopy-chatgpt-content-top-padding: \(Self.layout.chatGPTContentTopPadding)px;
             --scopy-chatgpt-content-bottom-padding: \(Self.layout.chatGPTContentBottomPadding)px;
+            --scopy-chatgpt-thread-content-width: min(
+              var(--scopy-chatgpt-thread-content-max-width),
+              max(1px, calc(100vw - (var(--scopy-chatgpt-content-inline-padding) * 2)))
+            );
             --scopy-chatgpt-render-width: calc(var(--scopy-chatgpt-thread-content-width) + (var(--scopy-chatgpt-content-inline-padding) * 2));
             --scopy-chatgpt-table-breakout-width: var(--scopy-chatgpt-thread-content-width);
             --scopy-chatgpt-preview-scale: 1;
@@ -418,8 +406,6 @@ enum MarkdownHTMLDocumentBuilder {
             box-shadow: none;
             opacity: 0;
             transition: opacity 140ms ease-in-out;
-            transform: scale(var(--scopy-chatgpt-preview-scale));
-            transform-origin: top left;
           }
           h1, h2, h3, h4, h5, h6 {
             color: var(--scopy-text-primary);
@@ -526,29 +512,6 @@ enum MarkdownHTMLDocumentBuilder {
           h4 code,
           h5 code,
           h6 code,
-          #content h1 code,
-          #content h2 code,
-          #content h3 code,
-          #content h4 code,
-          #content h5 code,
-          #content h6 code,
-          h1 .qN-_1G_InlineCode,
-          h2 .qN-_1G_InlineCode,
-          h3 .qN-_1G_InlineCode,
-          h4 .qN-_1G_InlineCode,
-          h5 .qN-_1G_InlineCode,
-          h6 .qN-_1G_InlineCode {
-            padding: 0;
-            border-radius: 0;
-            background: transparent;
-            box-shadow: none;
-            color: inherit;
-            font-family: inherit;
-            font-size: inherit;
-            line-height: inherit;
-            font-weight: inherit;
-            white-space: normal;
-          }
           p code,
           li code,
           td code,
@@ -558,10 +521,15 @@ enum MarkdownHTMLDocumentBuilder {
             border-radius: 4px;
             background: var(--scopy-code-bg);
             box-shadow: inset 0 0 0 1px var(--scopy-code-border);
-            font-size: 14px;
-            line-height: 26px;
+            font-size: 0.875em;
+            line-height: inherit;
             font-weight: 500;
-            white-space: nowrap;
+            white-space: normal;
+            word-break: normal;
+            overflow-wrap: break-word;
+          }
+          h3 code {
+            font-size: 0.9em;
           }
           pre {
             position: relative;
@@ -642,48 +610,57 @@ enum MarkdownHTMLDocumentBuilder {
           }
           .hljs-doctag,
           .hljs-keyword,
+          .hljs-operator,
+          .hljs-template-tag,
           .hljs-formula,
           .hljs-meta .hljs-keyword {
             color: var(--scopy-syntax-keyword);
           }
           .hljs-section,
-          .hljs-name,
-          .hljs-selector-tag,
-          .hljs-deletion,
-          .hljs-subst {
-            color: var(--scopy-syntax-name);
+          .hljs-title {
+            color: var(--scopy-syntax-heading);
           }
-          .hljs-literal {
-            color: var(--scopy-syntax-literal);
+          .hljs-deletion {
+            color: var(--scopy-syntax-invalid);
+          }
+          .hljs-literal,
+          .hljs-number,
+          .hljs-symbol,
+          .hljs-bullet {
+            color: var(--scopy-syntax-atom);
           }
           .hljs-meta .hljs-string,
           .hljs-regexp,
           .hljs-string,
-          .hljs-addition,
-          .hljs-attribute {
+          .hljs-addition {
             color: var(--scopy-syntax-string);
           }
           .hljs-built_in,
-          .hljs-class .hljs-title {
-            color: var(--scopy-syntax-built-in);
+          .hljs-class .hljs-title,
+          .hljs-title.function_,
+          .hljs-variable,
+          .hljs-template-variable,
+          .hljs-type {
+            color: var(--scopy-syntax-name);
           }
           .hljs-attr,
-          .hljs-selector-attr,
+          .hljs-property,
+          .hljs-subst,
           .hljs-selector-class,
-          .hljs-selector-pseudo,
-          .hljs-template-variable,
-          .hljs-type,
-          .hljs-variable,
-          .hljs-number {
-            color: var(--scopy-syntax-number);
+          .hljs-class {
+            color: var(--scopy-syntax-standard-name);
           }
-          .hljs-symbol,
-          .hljs-bullet,
+          .hljs-attribute,
+          .hljs-selector-attr {
+            color: var(--scopy-syntax-attribute);
+          }
+          .hljs-name,
+          .hljs-selector-tag,
+          .hljs-selector-pseudo,
           .hljs-link,
           .hljs-meta,
-          .hljs-selector-id,
-          .hljs-title {
-            color: var(--scopy-syntax-symbol);
+          .hljs-selector-id {
+            color: var(--scopy-syntax-tag);
           }
           .hljs-code,
           .hljs-comment,
@@ -691,9 +668,7 @@ enum MarkdownHTMLDocumentBuilder {
             color: var(--scopy-syntax-comment);
             font-style: italic;
           }
-          .hljs-operator,
           .hljs-tag,
-          .hljs-template-tag,
           .hljs-variable.language_ {
             color: var(--scopy-syntax-base);
           }
@@ -781,8 +756,8 @@ enum MarkdownHTMLDocumentBuilder {
           }
           hr {
             border: 0;
-            border-top: 1px solid var(--scopy-border-subtle);
-            margin: 32px 0;
+            border-top: 1px solid var(--scopy-border);
+            margin: 28px 0;
           }
           .katex {
             color: var(--scopy-text-primary);
@@ -799,9 +774,12 @@ enum MarkdownHTMLDocumentBuilder {
             display: block;
             overflow-x: auto;
             overflow-y: hidden;
-            margin: 32px 0;
-            width: 100%;
-            max-width: 100%;
+            margin-block: 0;
+            margin-inline: calc(-1 * var(--scopy-chatgpt-content-inline-padding));
+            padding-inline: var(--scopy-chatgpt-content-inline-padding);
+            width: var(--scopy-chatgpt-render-width);
+            max-width: none;
+            box-sizing: border-box;
             -webkit-overflow-scrolling: touch;
             scrollbar-width: none;
             --scopy-chatgpt-wide-table-col-baseline: var(--scopy-chatgpt-thread-content-width);
@@ -828,6 +806,10 @@ enum MarkdownHTMLDocumentBuilder {
             white-space: normal;
             word-break: normal;
             overflow-wrap: break-word;
+          }
+          th:not(:first-child),
+          td:not(:first-child) {
+            padding-inline-start: 8px;
           }
           .scopy-chatgpt-table-container.scopy-chatgpt-wide-table > table {
             width: fit-content;
@@ -857,11 +839,15 @@ enum MarkdownHTMLDocumentBuilder {
           td:not(:last-child) {
             padding-inline-end: 24px;
           }
+          th:last-child,
+          td:last-child {
+            padding-inline-end: 40px;
+          }
           thead th {
             border-bottom: 1px solid var(--scopy-border);
             color: var(--scopy-text-primary);
             font-weight: 600;
-            line-height: 20px;
+            line-height: 16px;
             padding-block: 8px;
             vertical-align: bottom;
           }
@@ -870,6 +856,7 @@ enum MarkdownHTMLDocumentBuilder {
           }
           tbody tr:last-child td {
             border-bottom: 0;
+            padding-bottom: 24px;
           }
           tbody td {
             padding-block: 10px;

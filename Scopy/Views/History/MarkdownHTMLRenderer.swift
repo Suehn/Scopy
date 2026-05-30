@@ -33,7 +33,8 @@ enum MarkdownHTMLRenderer {
             ? LaTeXInlineTextNormalizer.normalize(protected.markdown)
             : protected.markdown
         let normalizedHeadingsMarkdown = MarkdownATXHeadingNormalizer.normalize(inlineNormalizedMarkdown)
-        let emphasisNormalizedMarkdown = MarkdownCJKEmphasisNormalizer.normalize(normalizedHeadingsMarkdown)
+        let tablePipeNormalizedMarkdown = MarkdownTableCodeSpanPipeNormalizer.normalize(normalizedHeadingsMarkdown)
+        let emphasisNormalizedMarkdown = MarkdownCJKEmphasisNormalizer.normalize(tablePipeNormalizedMarkdown)
         let safeHTMLExtraction = featureSet.safeHTMLSubset && context.policy.allowSafeHTMLSubset
             ? MarkdownSafeHTMLSubset.extract(from: emphasisNormalizedMarkdown.markdown)
             : MarkdownSafeHTMLExtractionResult(

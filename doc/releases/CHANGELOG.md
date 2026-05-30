@@ -11,23 +11,34 @@
 
 - Re-anchors heading, paragraph, list, and blockquote rhythm to the captured `markdown-new-styling` DOM instead of the older AssistantMessage class scale, keeps root text wrapping on the source `wrap-break-word` path, restores the captured 8px-inset quote bar, and keeps table-local scroll from widening the hover preview frame.
 - Restores standard Markdown tables to the WACZ MarkdownContent `width: 100%` natural layout path, while reserving the TableContainer-style `fit-content` and per-column `sm/md/lg/xl` sizing for tables that the shared renderer classifies as wide.
-- Hardens heading-contained inline code so it cannot inherit the gray inline-code pill in preview/export, and aligns footnote/source pills with the 25px ChatGPT SourceItem metric.
+- Updates the wide-table scroll container from the latest `ui-全面.wacz` table-components capture: tables now scroll across the full responsive render surface while remaining anchored at the normal message-column inset, and table headers/last-row spacing follow the 16px/24px `markdown-new-styling` contract.
+- Preserves heading-contained inline code as the ChatGPT inline-code pill with relative sizing and normal wrapping, and aligns footnote/source pills with the 25px ChatGPT SourceItem metric.
 - Shares ATX heading normalization across legacy and unified renderers so malformed source such as `#标题` is parsed as a heading before style application, preventing path-specific paragraph fallback, gray inline-code pills, and changed line breaks.
-- Documents the WACZ-derived Markdown style contract in `doc/current/markdown-chatgpt-wacz-style-contract.md`, including evidence priority, 768px content width, 816px Scopy render width, text wrapping, heading rhythm, inline code, blockquotes, lists, standard tables, and wide-table behavior.
+- Normalizes unescaped `|` characters inside table-row one- or two-backtick inline code spans before GFM parsing, so examples such as `` `| A | B |` `` remain in their source cell instead of expanding into extra columns, while three-backtick fence-marker examples such as ```` ```python ```` stay literal cell text.
+- Bumps Markdown render context policy/cache namespaces after the parser and bundled renderer semantics changed, forcing old hover-preview HTML for exploded table rows to be regenerated instead of reused.
+- Re-anchors the default ChatGPT width model to the current captured `40rem`/`640px` content column plus 24px side padding (`688px` render surface), with the larger `48rem` path documented as a measured-container breakpoint rather than Scopy's default.
+- Maps both preview and export `hljs` tokens onto the WACZ CodeBlock semantic color set (`#ba437a`, `#008635`, `#6b3ab4`, and related captured colors) and strengthens inline-code contrast with the captured alpha-08 inset stroke.
+- Adds a dependency-free WACZ analysis script that extracts ChatGPT response bodies, assistant Markdown, CSS/JS evidence lines, and a table inventory that handles escaped pipes, inline-code pipes, and fence-marker examples correctly.
+- Documents the WACZ-derived Markdown style contract in `doc/current/markdown-chatgpt-wacz-style-contract.md`, including evidence priority, responsive content width, 688px default Scopy render width, text wrapping, heading rhythm, inline code, blockquotes, lists, standard tables, current table-container breakout, and wide-table behavior.
 
 ### Markdown/Export
 
-- Keeps PNG table fitting as a transform on the same preview-equivalent table layout instead of using a second export-only table style.
+- Keeps PNG table fitting as a transform on the same preview-equivalent responsive table layout instead of using a second export-only table style.
 
 ### Verification
 
 - Focused renderer unit tests: `KaTeXRenderToStringTests/testMarkdownTableUsesChatGPTStyleWithExistingOverflowSupport` and `testMarkdownThemeUsesWACZChatGPTNonTableStyles` passed (2026-05-30).
+- Focused table pipe normalization tests: `MarkdownTableCodeSpanPipeNormalizerTests` plus the two WACZ style assertions passed; executed 6 tests, 0 failures (2026-05-30).
+- WACZ analyzer smoke: `scripts/quality/analyze-chatgpt-wacz-markdown.py /Users/ziyi/Downloads/ui-全面.wacz --out-dir /tmp/scopy-wacz-extract/ui-full-20260530-script --force` extracted 546 response bodies and 6 Markdown tables, including the 16-column/10-data-row wide table (2026-05-30).
 - Focused ATX heading normalization tests: `MarkdownATXHeadingNormalizerTests`, `UnifiedMarkdownRendererTests`, and `KaTeXRenderToStringTests/testMarkdownThemeUsesWACZChatGPTNonTableStyles` passed; executed 8 tests, 0 failures (2026-05-30).
 - Focused table export UI regressions: `ExportMarkdownPNGUITests/testAutoExportWideTableFitsWidthWithoutOverShrink`, `testAutoExportModeratelyWideTableScalesDownInsteadOfWrapping`, and `testAutoExportTempFixtureTablesAreNotOverScaled` passed (2026-05-30).
 - Focused Scopy Markdown export smoke: generated `/tmp/scopy-heading-wrap-after.png` at 1080x1342 with 100% resolution and checked heading inline-code, blockquote, ordinary wrapping, standard table, and wide-table export surface behavior (2026-05-30).
-- Focused Scopy ATX heading export smoke: generated `/tmp/scopy-atx-heading-regression.png` at 2160x1193 with 200% resolution and verified heading-contained code inherits heading typography while table/paragraph inline code remains a gray pill (2026-05-30).
+- Focused Scopy ATX heading export smoke: generated `/tmp/scopy-atx-heading-regression.png` at 2160x1193 with 200% resolution and verified ATX heading parsing while table/paragraph inline code remains a gray pill (2026-05-30).
+- Focused Scopy WACZ render export smoke: generated `/tmp/scopy-wacz-render-regression.png` at 2160x1578 with 200% resolution and verified exported syntax colors, inline-code contrast, table code-span pipes, and three-backtick fence-marker cells (2026-05-30).
+- Focused Scopy exact WACZ wide-table export smoke after the 40rem/cache-namespace fix: generated `/tmp/scopy-wacz-wide-table-exact-rootfix.png` at 2160x1015 with 200% resolution and verified the 16-column table keeps code-span pipe examples in their source cells instead of exploding into extra columns (2026-05-30).
+- Markdown renderer Node suite: 19 tests, 0 failures, including table code-span pipe and fence-marker regressions (2026-05-30).
 - `make build`: BUILD SUCCEEDED (2026-05-30).
-- `make test-unit`: Executed 489 tests, 1 skipped, 0 failures (2026-05-30).
+- `make test-unit`: Executed 493 tests, 1 skipped, 0 failures (2026-05-30).
 - `make docs-validate`: passed (2026-05-30).
 - `make release-validate`: passed (2026-05-30).
 
@@ -36,12 +47,12 @@
 ### Markdown/Preview
 
 - Aligns the shared preview/export Markdown HTML theme with the WACZ-extracted ChatGPT rendering model for typography, heading rhythm, paragraphs, inline code, fenced code cards, code language labels, syntax colors, blockquotes, lists, task lists, links, footnotes, horizontal rules, and tables.
-- Keeps inline code nested directly inside headings visually merged with heading typography, while preserving the gray inline-code pill for paragraphs, lists, tables, and quotes.
+- Keeps inline code nested directly inside headings on the same gray inline-code pill path as paragraphs, lists, tables, and quotes, with relative heading-aware sizing.
 - Tightens the AssistantMessage-derived spacing and color contract for headings, paragraphs, lists, blockquotes, inline code, horizontal rules, and table borders.
-- Keeps the existing Scopy table container contract intact for preview/export handoff: preview tables scroll inside the fixed content width, while export starts from the same table layout before applying fit-to-PNG scaling.
+- Keeps the Scopy table container contract aligned with responsive preview/export handoff: preview tables scroll inside the available content width, while export starts from the same table layout before applying fit-to-PNG scaling.
 - Reworks task-list rendering to match the AssistantMessage source contract: no list bullets, baseline flex rows, an 8px marker/text gap, and one CSS-painted visual marker path for both generated checkbox inputs and raw `[x]` text markers in WKWebView.
 - Aligns light-theme `hljs` syntax token colors with the WACZ root stylesheet instead of Scopy's earlier approximate palette.
-- Removes export-prone table last-column special sizing and restores source-like 8px inline cell padding while keeping the same preview/export table-scaling boundary.
+- Removes export-prone table last-column special sizing and restores source-like 8px non-first-column start padding plus 40px last-column end padding while keeping the same preview/export table-scaling boundary.
 
 ### Markdown/Export
 

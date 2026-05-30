@@ -91,12 +91,12 @@ struct MarkdownRenderContext: Equatable {
 }
 
 enum MarkdownRenderContextResolver {
-    static let legacyPolicyVersion = "legacy-policy-v1"
-    static let legacyCacheNamespace = "legacy-markdown-it-v1"
-    static let conservativeLegacyPolicyVersion = "legacy-conservative-policy-v1"
-    static let conservativeLegacyCacheNamespace = "legacy-markdown-it-conservative-v1"
-    static let unifiedPolicyVersion = "unified-policy-v1"
-    static let unifiedCacheNamespace = "unified-renderer-v1"
+    static let legacyPolicyVersion = "legacy-policy-v2"
+    static let legacyCacheNamespace = "legacy-markdown-it-v2"
+    static let conservativeLegacyPolicyVersion = "legacy-conservative-policy-v2"
+    static let conservativeLegacyCacheNamespace = "legacy-markdown-it-conservative-v2"
+    static let unifiedPolicyVersion = "unified-policy-v2"
+    static let unifiedCacheNamespace = "unified-renderer-v2"
 
     static func defaultContext(for markdown: String) -> MarkdownRenderContext {
         defaultContext(for: markdown, flags: MarkdownRendererFeatureFlags.current)
