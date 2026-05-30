@@ -29,6 +29,32 @@ final class UnifiedMarkdownRendererTests: XCTestCase {
         XCTAssertFalse(output.html.contains("highlight-github.min.css"))
     }
 
+    func testUnifiedRendererNormalizesATXHeadingsBeforeEmbeddingSource() {
+        let markdown = """
+        #一级标题 `# H1`
+
+        ##二级标题 `## H2`
+
+            #indented code stays code
+
+        ```markdown
+        ###fenced code stays code
+        ```
+        """
+        let base = MarkdownRenderContextResolver.defaultContext(for: markdown)
+        let context = base.withRenderer(.unified)
+
+        let output = MarkdownHTMLRenderer.render(markdown: markdown, context: context)
+
+        XCTAssertEqual(output.diagnostics.renderer, .unified)
+        XCTAssertTrue(output.html.contains("# 一级标题 `# H1`"))
+        XCTAssertTrue(output.html.contains("## 二级标题 `## H2`"))
+        XCTAssertTrue(output.html.contains("#indented code stays code"))
+        XCTAssertTrue(output.html.contains("###fenced code stays code"))
+        XCTAssertFalse(output.html.contains("#一级标题 `# H1`"))
+        XCTAssertFalse(output.html.contains("##二级标题 `## H2`"))
+    }
+
     func testUnifiedDocumentFallsBackWhenBundleAPIIsMissing() {
         let base = MarkdownRenderContextResolver.defaultContext(for: "# Title")
         let context = base.withRenderer(.unified)
