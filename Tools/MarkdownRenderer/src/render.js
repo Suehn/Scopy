@@ -11,6 +11,7 @@ import { unified } from "unified";
 import { preprocessBackslashMath } from "./scopyBackslashMathPreprocessor.js";
 import { preprocessDollarMathGuards } from "./scopyDollarMathGuards.js";
 import { remarkScopyLooseMathRepair } from "./remarkScopyLooseMathRepair.js";
+import { remarkScopySourceCitations } from "./remarkScopySourceCitations.js";
 import { applySafeHTMLReplacements, preprocessSafeHTML } from "./scopySafeHTMLPreprocessor.js";
 
 export function render(source, policy = {}) {
@@ -42,10 +43,12 @@ function renderInternal(source, policy = {}, depth = 0) {
     .use(remarkScopyLooseMathRepair, {
       policy: normalizedPolicy,
       metadata: repairMetadata
-    });
+    })
+    .use(remarkScopySourceCitations);
   processor
     .use(remarkRehype, { allowDangerousHtml: false })
     .use(rehypeSanitize, scopySanitizeSchema)
+    .use(rehypeScopySourceCitationClass)
     .use(rehypeHighlight, scopyHighlightOptions)
     .use(rehypeKatex, { throwOnError: false, strict: "ignore" })
     .use(rehypeStringify);
@@ -75,6 +78,15 @@ const scopySanitizeSchema = {
   protocols: {
     ...defaultSchema.protocols,
     href: [...(defaultSchema.protocols?.href || []), "plugin"]
+  },
+  attributes: {
+    ...defaultSchema.attributes,
+    a: [
+      ...(defaultSchema.attributes?.a || []),
+      "className",
+      ["dataScopySourceCitation", "true"],
+      "dataScopySourceCount"
+    ]
   }
 };
 
@@ -91,6 +103,41 @@ const scopyHighlightOptions = {
     yaml: ["yml"]
   }
 };
+
+function rehypeScopySourceCitationClass() {
+  return function transformer(tree) {
+    visitElements(tree, (node) => {
+      if (!node || node.tagName !== "a" || !node.properties) {
+        return;
+      }
+      if (node.properties.dataScopySourceCitation !== "true") {
+        return;
+      }
+      const className = Array.isArray(node.properties.className)
+        ? node.properties.className
+        : [];
+      if (!className.includes("scopy-source-citation-link")) {
+        className.push("scopy-source-citation-link");
+      }
+      node.properties.className = className;
+    });
+  };
+}
+
+function visitElements(node, visitor) {
+  if (!node) {
+    return;
+  }
+  if (node.type === "element") {
+    visitor(node);
+  }
+  if (!Array.isArray(node.children)) {
+    return;
+  }
+  for (const child of node.children) {
+    visitElements(child, visitor);
+  }
+}
 
 function normalizePolicy(policy) {
   return {

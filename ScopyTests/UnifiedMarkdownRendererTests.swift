@@ -96,6 +96,28 @@ final class UnifiedMarkdownRendererTests: XCTestCase {
         XCTAssertTrue(output.html.contains("renderSucceeded"))
     }
 
+    func testUnifiedDocumentInstallsSourceCitationNormalizer() {
+        let markdown = """
+        **今天要闻**
+
+        1. **美国在印太对华措辞转温和**：美国防长重申印太承诺。([AP News][1], [Reuters][2])
+
+        [1]: https://apnews.com/article/d6cf2b964940f47a83f0a6f587c7e0c3?utm_source=chatgpt.com "Hegseth reassures Pacific allies"
+        [2]: https://www.reuters.com/markets/example?utm_source=chatgpt.com "Reuters source"
+        """
+        let base = MarkdownRenderContextResolver.defaultContext(for: markdown)
+        let context = base.withRenderer(.unified)
+
+        let output = MarkdownHTMLRenderer.render(markdown: markdown, context: context)
+
+        XCTAssertTrue(output.html.contains("normalizeSourceCitations(el,"))
+        XCTAssertTrue(output.html.contains("extractScopySourceCitations(markdown)"))
+        XCTAssertTrue(output.html.contains("scopy-source-citation-link"))
+        XCTAssertTrue(output.html.contains("data-scopy-source-citation"))
+        XCTAssertTrue(output.html.contains("data-scopy-source-count"))
+        XCTAssertTrue(output.html.contains("AP News"))
+    }
+
     private var referenceStyleNote: String {
         """
         # 笔记：为什么宽基指数长期往往优于大多数主动投资

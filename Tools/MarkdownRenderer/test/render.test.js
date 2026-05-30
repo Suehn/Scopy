@@ -107,6 +107,45 @@ test("renders long Chinese reference-style markdown notes", () => {
   assert.doesNotMatch(result.html, /^# 笔记/m);
 });
 
+test("promotes parenthesized reference-style source links to citation pills", () => {
+  const result = render(`
+**今天要闻**
+
+1. **美国在印太对华措辞转温和**：美国防长重申印太承诺。([AP News][1])
+2. **油价与通胀受伊朗局势牵动**：市场关注霍尔木兹海峡。([Reuters][2])
+
+[1]: https://apnews.com/article/d6cf2b964940f47a83f0a6f587c7e0c3?utm_source=chatgpt.com "Hegseth reassures Pacific allies"
+[2]: https://www.reuters.com/markets/example?utm_source=chatgpt.com "Reuters source"
+`);
+
+  assert.equal(result.metadata.renderer, "unified");
+  assert.match(result.html, /<a href="https:\/\/apnews\.com\/article\/d6cf2b964940f47a83f0a6f587c7e0c3\?utm_source=chatgpt\.com" title="Hegseth reassures Pacific allies" class="scopy-source-citation-link" data-scopy-source-citation="true">AP News<\/a>/);
+  assert.match(result.html, /class="scopy-source-citation-link" data-scopy-source-citation="true">Reuters<\/a>/);
+  assert.doesNotMatch(result.html, /\(<a href="https:\/\/apnews\.com/);
+  assert.doesNotMatch(result.html, /AP News<\/a>\)/);
+});
+
+test("keeps ordinary parenthesized markdown links as normal links", () => {
+  const result = render("Read the docs ([guide][1]) before changing code.\n\n[1]: https://example.com/guide");
+
+  assert.match(result.html, /\(<a href="https:\/\/example\.com\/guide">guide<\/a>\)/);
+  assert.doesNotMatch(result.html, /scopy-source-citation-link/);
+});
+
+test("collapses multi-source citation groups to first source plus count", () => {
+  const result = render(`
+1. Item with two sources.([AP News][1], [Reuters][2])
+2. Item with explicit count.([AP News +1][1])
+
+[1]: https://apnews.com/article/cac5206df0f0c7b79fe9321c08d63096?utm_source=chatgpt.com
+[2]: https://www.reuters.com/markets/example?utm_source=chatgpt.com
+`);
+
+  assert.match(result.html, /class="scopy-source-citation-link" data-scopy-source-citation="true" data-scopy-source-count="\+1">AP News<\/a>/);
+  assert.doesNotMatch(result.html, /Reuters<\/a>/);
+  assert.doesNotMatch(result.html, /AP News \+1<\/a>/);
+});
+
 test("preserves safe HTML subset but still removes unsafe raw HTML", () => {
   const result = render("<script>alert(1)</script>\n\n<details><summary>x</summary>y</details>");
 

@@ -137,6 +137,32 @@ The shared preview/export theme maps `hljs` output onto the captured CodeBlock s
 
 Both legacy `markdown-it` and unified `rehype-highlight` must emit or preserve `hljs` token classes before export readiness flips. PNG export waits for the same rendered DOM state as preview, so code colors must not depend on a preview-only stylesheet or late post-processing step.
 
+## Links And Source Citations
+
+Ordinary Markdown links remain text links:
+
+- text color inherits the primary text color
+- underline style is dotted with `rgb(143, 143, 143)`
+- the local export surface appends the external-link arrow for normal links
+
+ChatGPT source citations are not ordinary links. The live DOM for the selected `AP News` source uses an inline wrapper with `data-testid="webpage-citation-pill"` and a nested source anchor:
+
+- wrapper display: `inline-flex`
+- wrapper margin-left: 4px
+- wrapper top offset: `-0.094rem`
+- anchor display: `flex`
+- anchor height: 18px
+- anchor padding: `0 8px`
+- anchor font-size: 9px
+- anchor color: `rgb(93, 93, 93)`
+- anchor background: `rgb(244, 244, 244)`
+- anchor border-radius: 12px
+- no underline and no external-link arrow
+
+For grouped citations such as live `AP News +1`, the source label and count are separate parts of the same pill. The measured selected example uses a 70px wrapper, an `AP News` text span, and a `+1` suffix span with `rgb(143, 143, 143)`, 4px horizontal padding, and a -4px right margin inside the same 18px-high anchor.
+
+Scopy may promote Markdown source-reference syntax to the same visual class when the source carries explicit citation semantics, such as `([AP News][1])` plus a `[1]: https://...` definition, or the same parenthesized HTTP inline-link shape. The promotion removes the literal parentheses and marks the anchor as `data-scopy-source-citation="true"`; it must not rewrite ordinary parenthesized links such as `([guide][1])`. A parenthesized citation group such as `([AP News][1], [Reuters][2])` collapses to the first source with `data-scopy-source-count="+1"` so the visible form follows ChatGPT's `AP News +1` pill instead of rendering multiple ordinary links.
+
 ## Blockquotes
 
 Blockquotes use the root Markdown rule:

@@ -8,6 +8,167 @@ enum MarkdownHTMLDocumentBuilder {
     <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src 'self' data:; style-src 'self' 'unsafe-inline' file:; script-src 'self' 'unsafe-inline' file:; font-src 'self' data: file:;">
     """
 
+    private static let sourceCitationFunctionScript = """
+            function normalizeCitationURL(url) {
+              try {
+                var a = document.createElement('a');
+                a.href = String(url || '');
+                return a.href;
+              } catch (e) {
+                return String(url || '');
+              }
+            }
+            function scopySourceCitationLabelAllowed(label) {
+              var text = String(label || '').trim();
+              if (!text || text.length > 48 || /[\\r\\n\\[\\]\\(\\)]/.test(text)) { return false; }
+              return /[A-Z]/.test(text) || /[\\u3400-\\u9fff\\uf900-\\ufaff]/u.test(text) || text.indexOf('.') !== -1;
+            }
+            function splitScopySourceCitationCount(label) {
+              var text = String(label || '').trim();
+              var match = /^(.*\\S)\\s+\\+([1-9]\\d{0,2})$/.exec(text);
+              if (!match) { return { label: text, count: 0 }; }
+              return { label: String(match[1] || '').trim(), count: parseInt(match[2] || '0', 10) || 0 };
+            }
+            function scopySourceCitationKey(label, url) {
+              return String(label || '').trim() + '\\n' + normalizeCitationURL(url);
+            }
+            function rememberScopyCitation(citations, label, url, count) {
+              var parts = splitScopySourceCitationCount(label);
+              if (!scopySourceCitationLabelAllowed(parts.label)) { return; }
+              var sourceURL = String(url || '');
+              if (!/^https?:\\/\\//i.test(sourceURL)) { return; }
+              var existing = citations[scopySourceCitationKey(parts.label, sourceURL)];
+              citations[scopySourceCitationKey(parts.label, sourceURL)] = Math.max(existing || 0, count || parts.count || 0);
+            }
+            function extractScopySourceCitations(markdown) {
+              var source = String(markdown || '');
+              if (source.indexOf(']') === -1 || source.indexOf('http') === -1) { return {}; }
+              var definitions = {};
+              var definitionPattern = /^ {0,3}\\[([^\\]\\n]{1,48})\\]:\\s+<?(https?:\\/\\/[^\\s>]+)>?(?:\\s+("[^"\\n]*"|'[^'\\n]*'|\\([^\\)\\n]*\\)))?\\s*$/gmi;
+              var definitionMatch = null;
+              while ((definitionMatch = definitionPattern.exec(source)) !== null) {
+                var id = String(definitionMatch[1] || '').trim().replace(/\\s+/g, ' ').toUpperCase();
+                if (!id || definitions[id]) { continue; }
+                definitions[id] = String(definitionMatch[2] || '');
+              }
+              var citations = {};
+              var referenceGroupPattern = /\\(([^\\(\\)\\n]*\\[[^\\]\\n]{1,48}\\]\\[[^\\]\\n]{0,48}\\][^\\(\\)\\n]*)\\)/g;
+              var referenceGroupMatch = null;
+              while ((referenceGroupMatch = referenceGroupPattern.exec(source)) !== null) {
+                var group = String(referenceGroupMatch[1] || '');
+                var links = [];
+                var linkPattern = /\\[([^\\]\\n]{1,48})\\]\\[([^\\]\\n]{0,48})\\]/g;
+                var linkMatch = null;
+                while ((linkMatch = linkPattern.exec(group)) !== null) {
+                  var rawLabel = String(linkMatch[1] || '').trim();
+                  var ref = String(linkMatch[2] || rawLabel).trim().replace(/\\s+/g, ' ').toUpperCase();
+                  var url = definitions[ref];
+                  if (!url) { continue; }
+                  links.push({ label: rawLabel, url: url });
+                }
+                if (!links.length) { continue; }
+                var separatorsOnly = group.replace(/\\[[^\\]\\n]{1,48}\\]\\[[^\\]\\n]{0,48}\\]/g, '');
+                if (!/^[\\s,;，、]*$/.test(separatorsOnly)) { continue; }
+                rememberScopyCitation(citations, links[0].label, links[0].url, Math.max(0, links.length - 1));
+              }
+              var inlinePattern = /\\(\\[([^\\]\\n]{1,48})\\]\\((https?:\\/\\/[^\\s\\)]+)(?:\\s+("[^"\\n]*"|'[^'\\n]*'|\\([^\\)\\n]*\\)))?\\)\\)/g;
+              var inlineMatch = null;
+              while ((inlineMatch = inlinePattern.exec(source)) !== null) {
+                rememberScopyCitation(citations, inlineMatch[1] || '', inlineMatch[2] || '', 0);
+              }
+              return citations;
+            }
+            function previousCitationTextNode(anchor) {
+              var n = anchor ? anchor.previousSibling : null;
+              while (n) {
+                if (n.nodeType === 3) { return n; }
+                if (String(n.textContent || '').trim()) { return null; }
+                n = n.previousSibling;
+              }
+              return null;
+            }
+            function nextCitationTextNode(anchor) {
+              var n = anchor ? anchor.nextSibling : null;
+              while (n) {
+                if (n.nodeType === 3) { return n; }
+                if (String(n.textContent || '').trim()) { return null; }
+                n = n.nextSibling;
+              }
+              return null;
+            }
+            function stripSourceCitationParentheses(anchor) {
+              var before = previousCitationTextNode(anchor);
+              var after = nextCitationTextNode(anchor);
+              if (!before || !after) { return false; }
+              var beforeValue = String(before.nodeValue || '');
+              var afterValue = String(after.nodeValue || '');
+              if (!/\\s*\\($/.test(beforeValue) || !/^\\)/.test(afterValue)) { return false; }
+              before.nodeValue = beforeValue.replace(/\\s*\\($/, '');
+              after.nodeValue = afterValue.replace(/^\\)/, '');
+              return true;
+            }
+            function stripSourceCitationGroup(anchor) {
+              var before = previousCitationTextNode(anchor);
+              if (!before) { return false; }
+              var beforeValue = String(before.nodeValue || '');
+              if (!/\\s*\\($/.test(beforeValue)) { return false; }
+              before.nodeValue = beforeValue.replace(/\\s*\\($/, '');
+              var n = anchor ? anchor.nextSibling : null;
+              while (n) {
+                var next = n.nextSibling;
+                if (n.nodeType === 3) {
+                  var value = String(n.nodeValue || '');
+                  if (/^[\\s,;，、]*\\)/.test(value)) {
+                    n.nodeValue = value.replace(/^[\\s,;，、]*\\)/, '');
+                    return true;
+                  }
+                  if (/^[\\s,;，、]*$/.test(value)) {
+                    if (n.parentNode) { n.parentNode.removeChild(n); }
+                    n = next;
+                    continue;
+                  }
+                  return false;
+                }
+                if (n.nodeType === 1 && n.tagName === 'A') {
+                  if (n.parentNode) { n.parentNode.removeChild(n); }
+                  n = next;
+                  continue;
+                }
+                if (String(n.textContent || '').trim()) { return false; }
+                n = next;
+              }
+              return false;
+            }
+            function normalizeSourceCitations(root, markdown) {
+              try {
+                if (!root || typeof root.querySelectorAll !== 'function') { return; }
+                var citations = extractScopySourceCitations(markdown);
+                var keys = Object.keys(citations || {});
+                if (!keys.length) { return; }
+                var anchors = root.querySelectorAll('a[href]');
+                for (var i = 0; i < anchors.length; i++) {
+                  var anchor = anchors[i];
+                  if (!anchor) { continue; }
+                  var labelParts = splitScopySourceCitationCount(String(anchor.textContent || '').trim());
+                  var href = String(anchor.getAttribute('href') || '');
+                  var count = citations[scopySourceCitationKey(labelParts.label, href)];
+                  if (typeof count !== 'number') { continue; }
+                  if (count > 0) {
+                    stripSourceCitationGroup(anchor);
+                    anchor.setAttribute('data-scopy-source-count', '+' + count);
+                  } else {
+                    stripSourceCitationParentheses(anchor);
+                  }
+                  if (String(anchor.textContent || '').trim() !== labelParts.label) {
+                    anchor.textContent = labelParts.label;
+                  }
+                  anchor.classList.add('scopy-source-citation-link');
+                  anchor.setAttribute('data-scopy-source-citation', 'true');
+                }
+              } catch (e) { }
+            }
+    """
+
     private static let tableWrapFunctionScript = """
             function readChatGPTTableColumnCount(table) {
               try {
@@ -717,6 +878,46 @@ enum MarkdownHTMLDocumentBuilder {
             vertical-align: middle;
             text-decoration: none;
           }
+          a.scopy-source-citation-link {
+            display: inline-flex;
+            align-items: center;
+            max-width: 15ch;
+            height: 18px;
+            min-height: 18px;
+            padding: 0 8px;
+            margin-left: 4px;
+            position: relative;
+            top: -0.094rem;
+            border-radius: 12px;
+            overflow: hidden;
+            color: rgb(93, 93, 93);
+            background: rgb(244, 244, 244);
+            font-size: 9px;
+            line-height: 18px;
+            font-weight: 400;
+            text-align: center;
+            text-decoration: none;
+            white-space: nowrap;
+            vertical-align: baseline;
+          }
+          a.scopy-source-citation-link::after {
+            content: none;
+          }
+          a.scopy-source-citation-link[data-scopy-source-count]::after {
+            content: attr(data-scopy-source-count);
+            display: inline-flex;
+            align-items: center;
+            width: auto;
+            height: 16px;
+            margin-left: 3px;
+            margin-right: -4px;
+            padding: 0 4px;
+            color: rgb(143, 143, 143);
+            font-size: 9px;
+            line-height: 16px;
+            text-decoration: none;
+            vertical-align: baseline;
+          }
           blockquote {
             position: relative;
             margin: 0 0 8px 0;
@@ -1106,6 +1307,7 @@ enum MarkdownHTMLDocumentBuilder {
                 }
               } catch (e) { }
             }
+            \(sourceCitationFunctionScript)
             var safeHTMLMap = \(safeHTMLLiteral);
             \(tableWrapFunctionScript)
             window.__scopyReportHeight = function (force) {
@@ -1292,6 +1494,7 @@ enum MarkdownHTMLDocumentBuilder {
                 html = html.split(renderSentinel).join('');
               }
               el.innerHTML = html;
+              normalizeSourceCitations(el, src);
               wrapChatGPTTables(el);
               scaleChatGPTTables(el);
               normalizeFootnoteReferences(el);
@@ -1433,6 +1636,7 @@ enum MarkdownHTMLDocumentBuilder {
                   }
                 };
                 \(tableWrapFunctionScript)
+                \(sourceCitationFunctionScript)
                 window.__scopyReportHeight = function (force) {
                   try {
                     if (!window.webkit || !window.webkit.messageHandlers || !window.webkit.messageHandlers.scopySize) { return; }
@@ -1537,6 +1741,7 @@ enum MarkdownHTMLDocumentBuilder {
                     var result = window.ScopyUnifiedMarkdown.render(\(markdownLiteral), \(policyLiteral));
                     if (result && result.html) {
                       el.innerHTML = result.html;
+                      normalizeSourceCitations(el, \(markdownLiteral));
                       if (typeof window.__scopyApplyTaskLists === 'function') {
                         window.__scopyApplyTaskLists(el);
                       }

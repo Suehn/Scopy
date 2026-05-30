@@ -13,6 +13,7 @@
 - Restores standard Markdown tables to the WACZ MarkdownContent `width: 100%` natural layout path, while reserving the TableContainer-style `fit-content` and per-column `sm/md/lg/xl` sizing for tables that the shared renderer classifies as wide.
 - Updates the wide-table scroll container from the latest `ui-全面.wacz` table-components capture: tables now scroll across the full responsive render surface while remaining anchored at the normal message-column inset, and table headers/last-row spacing follow the 16px/24px `markdown-new-styling` contract.
 - Preserves heading-contained inline code as the ChatGPT inline-code pill with relative sizing and normal wrapping, and aligns footnote/source pills with the 25px ChatGPT SourceItem metric.
+- Promotes explicit parenthesized source-reference links such as `([AP News][1])` into ChatGPT-style 18px citation pills in both preview and PNG export, collapses grouped source references such as `([AP News][1], [Reuters][2])` to the first source plus a `+1` suffix, and leaves ordinary parenthesized links on the normal dotted-underlined link path.
 - Shares ATX heading normalization across legacy and unified renderers so malformed source such as `#标题` is parsed as a heading before style application, preventing path-specific paragraph fallback, gray inline-code pills, and changed line breaks.
 - Normalizes unescaped `|` characters inside table-row one- or two-backtick inline code spans before GFM parsing, so examples such as `` `| A | B |` `` remain in their source cell instead of expanding into extra columns, while three-backtick fence-marker examples such as ```` ```python ```` stay literal cell text.
 - Bumps Markdown render context policy/cache namespaces after the parser and bundled renderer semantics changed, forcing old hover-preview HTML for exploded table rows to be regenerated instead of reused.
@@ -36,9 +37,12 @@
 - Focused Scopy ATX heading export smoke: generated `/tmp/scopy-atx-heading-regression.png` at 2160x1193 with 200% resolution and verified ATX heading parsing while table/paragraph inline code remains a gray pill (2026-05-30).
 - Focused Scopy WACZ render export smoke: generated `/tmp/scopy-wacz-render-regression.png` at 2160x1578 with 200% resolution and verified exported syntax colors, inline-code contrast, table code-span pipes, and three-backtick fence-marker cells (2026-05-30).
 - Focused Scopy exact WACZ wide-table export smoke after the 40rem/cache-namespace fix: generated `/tmp/scopy-wacz-wide-table-exact-rootfix.png` at 2160x1015 with 200% resolution and verified the 16-column table keeps code-span pipe examples in their source cells instead of exploding into extra columns (2026-05-30).
-- Markdown renderer Node suite: 19 tests, 0 failures, including table code-span pipe and fence-marker regressions (2026-05-30).
+- Markdown renderer Node suite: 32 tests, 0 failures, including source-reference citation pill promotion, grouped `+N` source counts, and ordinary parenthesized link preservation (2026-05-30).
+- Focused source-citation renderer regression: `UnifiedMarkdownRendererTests/testUnifiedDocumentInstallsSourceCitationNormalizer` plus the unified context resolver test passed; executed 2 tests, 0 failures (2026-05-30).
+- Focused Scopy source-citation export smoke: generated `/tmp/scopy-source-citation-news.png` at 2160x1170 with 200% resolution and verified AP News/Reuters/华尔街日报 source-reference links render as gray ChatGPT-style pills without literal parentheses or external-link arrows (2026-05-30).
+- Focused Scopy grouped source-citation export smoke: generated `/tmp/scopy-source-citation-count.png` at 2160x436 with 200% resolution and verified `AP News +1` renders as one gray source pill while the single-source citation remains a single pill (2026-05-30).
 - `make build`: BUILD SUCCEEDED (2026-05-30).
-- `make test-unit`: Executed 493 tests, 1 skipped, 0 failures (2026-05-30).
+- `make test-unit`: Executed 494 tests, 1 skipped, 0 failures (2026-05-30).
 - `make docs-validate`: passed (2026-05-30).
 - `make release-validate`: passed (2026-05-30).
 
