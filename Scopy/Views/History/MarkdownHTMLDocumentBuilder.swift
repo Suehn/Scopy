@@ -746,7 +746,7 @@ enum MarkdownHTMLDocumentBuilder {
           blockquote {
             position: relative;
             margin: 0 0 8px 0;
-            padding: 8px 0 8px 24px;
+            padding: 4px 0 4px 24px;
             border: 0;
             color: var(--scopy-text-primary);
             font-size: 16px;
@@ -758,8 +758,8 @@ enum MarkdownHTMLDocumentBuilder {
             display: block;
             position: absolute;
             left: 0;
-            top: 8px;
-            bottom: 8px;
+            top: 0;
+            bottom: 0;
             width: 4px;
             background-color: var(--scopy-border);
             border-radius: 2px;
@@ -1156,10 +1156,9 @@ enum MarkdownHTMLDocumentBuilder {
                     var sw = n.scrollWidth || 0;
                     if (cw > 0 && (sw - cw) > 1) { overflowX = true; break; }
                   }
-                  if (!overflowX && previewScale >= 0.999) {
-                    var se = document.scrollingElement || document.documentElement;
-                    overflowX = !!se && ((se.scrollWidth || 0) - (se.clientWidth || 0) > 2);
-                  }
+                  // Table-local overflow should not request a wider Swift popover. ChatGPT keeps wide tables inside
+                  // the message column and scrolls the table container itself; non-table overflow is detected by the
+                  // explicit selector above.
                 } catch (e) { overflowX = false; }
                 if (!h) { return; }
                 if (!force && Math.abs(h - lastH) < 1 && Math.abs(w - lastW) < 1) { return; }
@@ -1483,10 +1482,9 @@ enum MarkdownHTMLDocumentBuilder {
                           break;
                         }
                       }
-                      if (!overflowX && previewScale >= 0.999) {
-                        var se = document.scrollingElement || document.documentElement;
-                        overflowX = !!se && ((se.scrollWidth || 0) - (se.clientWidth || 0) > 2);
-                      }
+                      // Table-local overflow should not request a wider Swift popover. ChatGPT keeps wide tables inside
+                      // the message column and scrolls the table container itself; non-table overflow is detected by the
+                      // explicit selector above.
                     } catch (e) {
                       overflowX = false;
                     }

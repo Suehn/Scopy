@@ -9,7 +9,7 @@
 
 ### Markdown/Preview
 
-- Re-anchors heading, paragraph, list, and blockquote rhythm to the captured `markdown-new-styling` DOM instead of the older AssistantMessage class scale, and keeps table-local scroll from widening the hover preview frame.
+- Re-anchors heading, paragraph, list, and blockquote rhythm to the captured `markdown-new-styling` DOM instead of the older AssistantMessage class scale, keeps the quote bar full-height with the source 4px vertical padding, and keeps table-local scroll from widening the hover preview frame.
 - Restores standard Markdown tables to the WACZ MarkdownContent `width: 100%` natural layout path, while reserving the TableContainer-style `fit-content` and per-column `xs/sm/md/lg/xl` sizing for tables that the shared renderer classifies as wide.
 - Hardens heading-contained inline code so it cannot inherit the gray inline-code pill in preview/export, and aligns footnote/source pills with the 25px ChatGPT SourceItem metric.
 
