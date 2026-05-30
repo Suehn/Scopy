@@ -9,8 +9,8 @@
 
 ### Markdown/Preview
 
-- Re-anchors heading, paragraph, list, and blockquote rhythm to the captured `markdown-new-styling` DOM instead of the older AssistantMessage class scale, keeps the quote bar full-height with the source 4px vertical padding, and keeps table-local scroll from widening the hover preview frame.
-- Restores standard Markdown tables to the WACZ MarkdownContent `width: 100%` natural layout path, while reserving the TableContainer-style `fit-content` and per-column `xs/sm/md/lg/xl` sizing for tables that the shared renderer classifies as wide.
+- Re-anchors heading, paragraph, list, and blockquote rhythm to the captured `markdown-new-styling` DOM instead of the older AssistantMessage class scale, keeps root text wrapping on the source `wrap-break-word` path, restores the captured 8px-inset quote bar, and keeps table-local scroll from widening the hover preview frame.
+- Restores standard Markdown tables to the WACZ MarkdownContent `width: 100%` natural layout path, while reserving the TableContainer-style `fit-content` and per-column `sm/md/lg/xl` sizing for tables that the shared renderer classifies as wide.
 - Hardens heading-contained inline code so it cannot inherit the gray inline-code pill in preview/export, and aligns footnote/source pills with the 25px ChatGPT SourceItem metric.
 
 ### Markdown/Export
@@ -21,7 +21,7 @@
 
 - Focused renderer unit tests: `KaTeXRenderToStringTests/testMarkdownTableUsesChatGPTStyleWithExistingOverflowSupport` and `testMarkdownThemeUsesWACZChatGPTNonTableStyles` passed (2026-05-30).
 - Focused table export UI regressions: `ExportMarkdownPNGUITests/testAutoExportWideTableFitsWidthWithoutOverShrink`, `testAutoExportModeratelyWideTableScalesDownInsteadOfWrapping`, and `testAutoExportTempFixtureTablesAreNotOverScaled` passed (2026-05-30).
-- Focused Scopy Markdown export smoke: generated `/tmp/scopy-rich-markdown-after-styling-fix.png` at 2160x7914 with 200% resolution (2026-05-30).
+- Focused Scopy Markdown export smoke: generated `/tmp/scopy-heading-wrap-after.png` at 1080x1342 with 100% resolution and checked heading inline-code, blockquote, ordinary wrapping, standard table, and wide-table export surface behavior (2026-05-30).
 - `make build`: BUILD SUCCEEDED (2026-05-30).
 - `make test-unit`: Executed 486 tests, 1 skipped, 0 failures (2026-05-30).
 - `make docs-validate`: passed (2026-05-30).

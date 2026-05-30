@@ -36,7 +36,6 @@ enum MarkdownHTMLDocumentBuilder {
               return lengths;
             }
             function chatGPTWideTableColumnSize(length) {
-              if (length <= 8) { return 'xs'; }
               if (length <= 18) { return 'sm'; }
               if (length <= 40) { return 'md'; }
               if (length <= 80) { return 'lg'; }
@@ -410,7 +409,7 @@ enum MarkdownHTMLDocumentBuilder {
             max-width: none;
             padding: var(--scopy-chatgpt-content-top-padding) var(--scopy-chatgpt-content-inline-padding) var(--scopy-chatgpt-content-bottom-padding) var(--scopy-chatgpt-content-inline-padding);
             box-sizing: border-box;
-            overflow-wrap: anywhere;
+            overflow-wrap: break-word;
             word-break: normal;
             color: var(--scopy-text-primary);
             background: var(--scopy-page-bg);
@@ -472,7 +471,7 @@ enum MarkdownHTMLDocumentBuilder {
             margin: 16px 0;
           }
           ul, ol {
-            margin: 0 0 16px 0;
+            margin: 0;
             padding-left: 26px;
             font-size: 16px;
             line-height: 26px;
@@ -495,8 +494,8 @@ enum MarkdownHTMLDocumentBuilder {
           li::marker {
             font-size: 16px;
             line-height: 26px;
-            font-weight: 500;
-            color: var(--scopy-text-secondary);
+            font-weight: 700;
+            color: currentColor;
           }
           li > p {
             margin-top: 0;
@@ -746,7 +745,7 @@ enum MarkdownHTMLDocumentBuilder {
           blockquote {
             position: relative;
             margin: 0 0 8px 0;
-            padding: 4px 0 4px 24px;
+            padding: 8px 0 8px 24px;
             border: 0;
             color: var(--scopy-text-primary);
             font-size: 16px;
@@ -758,8 +757,8 @@ enum MarkdownHTMLDocumentBuilder {
             display: block;
             position: absolute;
             left: 0;
-            top: 0;
-            bottom: 0;
+            top: 8px;
+            bottom: 8px;
             width: 4px;
             background-color: var(--scopy-border);
             border-radius: 2px;
@@ -824,20 +823,15 @@ enum MarkdownHTMLDocumentBuilder {
           }
           th, td {
             border: 0;
-            padding-inline: 8px;
+            padding-inline: 0;
             text-align: start;
             white-space: normal;
             word-break: normal;
-            overflow-wrap: anywhere;
+            overflow-wrap: break-word;
           }
           .scopy-chatgpt-table-container.scopy-chatgpt-wide-table > table {
             width: fit-content;
             min-width: 100%;
-          }
-          .scopy-chatgpt-table-container.scopy-chatgpt-wide-table th[data-scopy-col-size="xs"],
-          .scopy-chatgpt-table-container.scopy-chatgpt-wide-table td[data-scopy-col-size="xs"] {
-            min-width: calc(var(--scopy-chatgpt-wide-table-col-baseline) * 2 / 24);
-            max-width: calc(var(--scopy-chatgpt-wide-table-col-baseline) * 4 / 24);
           }
           .scopy-chatgpt-table-container.scopy-chatgpt-wide-table th[data-scopy-col-size="sm"],
           .scopy-chatgpt-table-container.scopy-chatgpt-wide-table td[data-scopy-col-size="sm"] {
@@ -846,26 +840,22 @@ enum MarkdownHTMLDocumentBuilder {
           }
           .scopy-chatgpt-table-container.scopy-chatgpt-wide-table th[data-scopy-col-size="md"],
           .scopy-chatgpt-table-container.scopy-chatgpt-wide-table td[data-scopy-col-size="md"] {
-            min-width: calc(var(--scopy-chatgpt-wide-table-col-baseline) * 7 / 24);
-            max-width: calc(var(--scopy-chatgpt-wide-table-col-baseline) * 9 / 24);
+            min-width: calc(var(--scopy-chatgpt-wide-table-col-baseline) * 6 / 24);
+            max-width: calc(var(--scopy-chatgpt-wide-table-col-baseline) * 8 / 24);
           }
           .scopy-chatgpt-table-container.scopy-chatgpt-wide-table th[data-scopy-col-size="lg"],
           .scopy-chatgpt-table-container.scopy-chatgpt-wide-table td[data-scopy-col-size="lg"] {
-            min-width: calc(var(--scopy-chatgpt-wide-table-col-baseline) * 9 / 24);
-            max-width: calc(var(--scopy-chatgpt-wide-table-col-baseline) * 13 / 24);
+            min-width: calc(var(--scopy-chatgpt-wide-table-col-baseline) * 8 / 24);
+            max-width: calc(var(--scopy-chatgpt-wide-table-col-baseline) * 12 / 24);
           }
           .scopy-chatgpt-table-container.scopy-chatgpt-wide-table th[data-scopy-col-size="xl"],
           .scopy-chatgpt-table-container.scopy-chatgpt-wide-table td[data-scopy-col-size="xl"] {
             min-width: calc(var(--scopy-chatgpt-wide-table-col-baseline) * 14 / 24);
             max-width: calc(var(--scopy-chatgpt-wide-table-col-baseline) * 18 / 24);
           }
-          th:first-child,
-          td:first-child {
-            padding-inline-start: 0;
-          }
-          th:last-child,
-          td:last-child {
-            padding-inline-end: 0;
+          th:not(:last-child),
+          td:not(:last-child) {
+            padding-inline-end: 24px;
           }
           thead th {
             border-bottom: 1px solid var(--scopy-border);
