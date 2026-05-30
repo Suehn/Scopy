@@ -9,7 +9,7 @@
 
 ### Documentation
 
-- Reworks the repository README around real Scopy `FloatingPanel` screenshots, a non-empty app icon, a privacy-safe rich fixture history, an editorial split hero, clean white-gray Markdown preview scroll demo, capability showcase, and performance evidence visual.
+- Reworks the repository README around real Scopy `FloatingPanel` screenshots, a non-empty app icon, a rich fixture history, unified editorial split visuals, quick install links, a denser feature matrix, distinct capability/detail showcases, a performance evidence visual, and a constrained contributors section.
 
 ## [v0.8.4] - 2026-05-30
 

@@ -25,7 +25,8 @@ let package = Package(
                 "Design",
                 "Observables",
                 "Presentation",
-                "Views"
+                "Views",
+                "Assets.xcassets"
             ],
             linkerSettings: [
                 .linkedLibrary("sqlite3")

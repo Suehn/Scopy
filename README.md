@@ -7,34 +7,23 @@
 
   [![macOS 14+](https://img.shields.io/badge/macOS-14+-111827)](#requirements)
   [![Swift 5.9](https://img.shields.io/badge/Swift-5.9-f97316)](#build-from-source)
-  [![SwiftUI Native](https://img.shields.io/badge/SwiftUI-native-2563eb)](#why-scopy)
+  [![SwiftUI Native](https://img.shields.io/badge/SwiftUI-native-2563eb)](#feature-matrix)
   [![Homebrew](https://img.shields.io/badge/Homebrew-cask-f59e0b)](#installation)
   [![License MIT](https://img.shields.io/badge/License-MIT-16a34a)](#license)
 </div>
 
 <img src="assets/preview/scopy-hero.png" alt="Scopy native macOS clipboard history with ChatGPT-style Markdown preview" width="100%">
 
-Scopy is a Maccy-inspired macOS clipboard manager for people who copy AI answers, research notes, code, screenshots, formatted text, and files all day. It keeps the instant native Mac workflow of a menu bar clipboard tool, then adds a richer preview and export surface for modern Markdown-heavy work.
+Scopy is a Maccy-inspired macOS clipboard manager for people who copy long answers, research notes, code, screenshots, formatted text, and files all day. It keeps the instant native Mac workflow of a menu bar clipboard tool, then adds a richer preview and export surface for Markdown-heavy work.
 
-The product screenshots in this README are captured from Scopy's real native `FloatingPanel` and hover preview with a temporary privacy-safe fixture database on a clean white-gray background. The product UI is not redrawn or approximated.
+The screenshots use Scopy's real native `FloatingPanel` and hover preview with a temporary fixture database on a clean light background, so the app chrome stays visible without personal clipboard data.
 
-## At A Glance
+**Quick start:** [Install with Homebrew](#installation) · [Download from Releases](https://github.com/Suehn/Scopy/releases) · [Preview the UI](#preview) · [Read the Markdown/LaTeX details](#markdownlatex-is-the-differentiator) · [Check performance evidence](#performance-evidence)
 
-| Need | Scopy answer |
-| --- | --- |
-| Native Mac clipboard history | SwiftUI menu bar app, global hotkey, translucent floating panel, keyboard navigation, Settings, context menus |
-| Maccy-style speed with richer workflows | Small first page, explicit load-more, pinned rows, deduplication, Exact/Fuzzy/Fuzzy+/Regex search |
-| AI clipboard post-processing | ChatGPT-style Markdown/LaTeX preview, 80%-200% scale, shared preview/export renderer, PNG export |
-| Mixed content history | Plain text, RTF, HTML, images, files, thumbnails, external payload storage, AirDrop and Finder actions |
-| Evidence-backed performance | Snapshot DB benchmarks, frontend profiles, strict concurrency tests, release validation |
-
-## Why Scopy
-
-- **Native Mac, restrained by default**: menu bar app, global hotkey, translucent floating panel, keyboard navigation, Settings, context menus, AirDrop, Finder reveal, and predictable Save/Cancel settings.
-- **Built for long history**: text, RTF, HTML, images, and files are persisted with deduplication, inline/external storage, thumbnails, notes, and policy-controlled retention.
-- **Fast recall**: Exact, Fuzzy, Fuzzy+, Regex, app filters, type filters, pinned rows, and incremental loading keep search responsive while typing.
-- **AI-output workflow**: copy a ChatGPT answer, hover to inspect Markdown/LaTeX with a ChatGPT-like reading surface, tune the 80%-200% preview scale, then export PNG from the same rendered layout.
-- **Preview more than text**: image previews, file previews, rich text/HTML preservation, Markdown tables, footnotes, code blocks, math, source pills, and optional pngquant compression.
+```bash
+brew tap Suehn/scopy
+brew install --cask scopy && xattr -dr com.apple.quarantine /Applications/Scopy.app
+```
 
 ## Preview
 
@@ -42,9 +31,17 @@ The product screenshots in this README are captured from Scopy's real native `Fl
 
 <img src="assets/preview/scopy-capabilities.png" alt="Scopy real clipboard panel showing rich history, Markdown preview, and supported content types" width="100%">
 
-<img src="assets/video/scopy-markdown-scroll.gif" alt="Scopy Markdown hover preview scrolling through headings, lists, tables, math, and footnotes" width="100%">
+## Feature Matrix
 
-[Download the MP4 version](assets/video/scopy-markdown-scroll.mp4)
+| Area | What Scopy gives you | Why it matters |
+| --- | --- | --- |
+| Native macOS shell | SwiftUI menu bar app, global hotkey, translucent `FloatingPanel`, keyboard navigation, context menus, Settings | Feels like a Mac utility instead of a web wrapper |
+| Deep Mac actions | Copy, paste, pin, delete, AirDrop, Open Containing Folder, file notes, image optimization | Clipboard history stays actionable, not just searchable |
+| Long history | Text, RTF, HTML, images, files, pins, deduplication, inline/external payload storage, thumbnails | Store research, code, screenshots, documents, and long answers together |
+| Search | Exact, Fuzzy, Fuzzy+, Regex, app filters, type filters, grouped rich-text filters, explicit load-more | Fast recall without making the panel feel heavy |
+| Markdown preview | ChatGPT-style Markdown/LaTeX preview, 80%-200% scale, shared preview/export renderer, PNG export | Copy a long answer, inspect it locally, export the same rendered surface |
+| Renderer depth | Headings, lists, blockquotes, code, tables, footnotes, definition lists, task lists, safe HTML islands, inline/block math | Long Markdown stays readable and exportable |
+| Operability | `make build`, unit/strict tests, snapshot perf gates, frontend profiles, release metadata validation | Performance and release claims have repeatable evidence |
 
 ## Markdown/LaTeX Is The Differentiator
 
@@ -86,18 +83,6 @@ Representative recorded evidence:
 | v0.7.6 frontend standard profile, real snapshot row display-model P95 | about `0.56ms` |
 
 See [doc/current/product-spec.md](doc/current/product-spec.md), [doc/perf/baselines/perf-baseline-2026-01-27.md](doc/perf/baselines/perf-baseline-2026-01-27.md), and [doc/perf/release-profiles/](doc/perf/release-profiles/) for the evidence trail.
-
-## Feature Map
-
-| Area | Details |
-| --- | --- |
-| Native shell | Menu bar app, SwiftUI views, floating panel, global hotkey, keyboard navigation, Settings pages |
-| History | Text, RTF, HTML, images, files, pins, deduplication, inline/external payload storage |
-| Search | Exact, Fuzzy, Fuzzy+, Regex, app filters, type filters, grouped rich-text filters |
-| Preview | Text, image, file, Markdown, LaTeX, safe HTML islands, syntax highlighting, math, footnotes, source pills |
-| Export | Markdown/LaTeX to PNG, preview-scale-aware export, optional pngquant compression |
-| macOS actions | Copy, paste, pin, delete, AirDrop, Open Containing Folder, file notes, image optimization |
-| Operability | Makefile build/test targets, strict concurrency tests, snapshot performance gates, release metadata validation |
 
 ## Installation
 
@@ -201,6 +186,11 @@ Important boundaries:
 - [Release docs](doc/releases/README.md)
 - [Changelog](doc/releases/CHANGELOG.md)
 - [Performance evidence](doc/perf/README.md)
+
+## Contributors
+
+- [Suehn](https://github.com/Suehn)
+- Codex
 
 ## License
 
