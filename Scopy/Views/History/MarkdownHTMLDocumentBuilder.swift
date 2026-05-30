@@ -9,6 +9,82 @@ enum MarkdownHTMLDocumentBuilder {
     """
 
     private static let tableWrapFunctionScript = """
+            function readChatGPTTableColumnCount(table) {
+              try {
+                var row = table && table.querySelector && table.querySelector('tr');
+                if (!row || !row.children) { return 0; }
+                return row.children.length || 0;
+              } catch (e) {
+                return 0;
+              }
+            }
+            function readChatGPTTableColumnLengths(table, columns) {
+              var lengths = [];
+              for (var i = 0; i < columns; i++) { lengths.push(0); }
+              try {
+                var rows = table.querySelectorAll('tr');
+                for (var r = 0; r < (rows.length || 0); r++) {
+                  var cells = rows[r] && rows[r].children;
+                  if (!cells) { continue; }
+                  for (var c = 0; c < cells.length && c < columns; c++) {
+                    var text = '';
+                    try { text = String(cells[c].textContent || '').replace(/\\s+/g, ' ').trim(); } catch (e) { text = ''; }
+                    lengths[c] = Math.max(lengths[c] || 0, text.length || 0);
+                  }
+                }
+              } catch (e) { }
+              return lengths;
+            }
+            function chatGPTWideTableColumnSize(length) {
+              if (length <= 8) { return 'xs'; }
+              if (length <= 18) { return 'sm'; }
+              if (length <= 40) { return 'md'; }
+              if (length <= 80) { return 'lg'; }
+              return 'xl';
+            }
+            function classifyChatGPTTable(wrapper, table) {
+              try {
+                if (!wrapper || !table || !table.querySelectorAll) { return; }
+                var columns = readChatGPTTableColumnCount(table);
+                var lengths = readChatGPTTableColumnLengths(table, columns);
+                var totalLength = 0;
+                var maxLength = 0;
+                for (var i = 0; i < lengths.length; i++) {
+                  totalLength += lengths[i] || 0;
+                  maxLength = Math.max(maxLength, lengths[i] || 0);
+                }
+                var measuredOverflow = false;
+                try {
+                  var available = Math.ceil(wrapper.clientWidth || 0);
+                  var raw = measureChatGPTTableWidth(table);
+                  measuredOverflow = !!(available && raw && raw > available + 1);
+                } catch (e) { measuredOverflow = false; }
+                var isWide = !!(
+                  columns >= 4 ||
+                  (columns >= 3 && (maxLength >= 40 || totalLength >= 96)) ||
+                  measuredOverflow
+                );
+                if (isWide) {
+                  wrapper.classList.add('scopy-chatgpt-wide-table');
+                  table.classList.add('scopy-chatgpt-wide-table');
+                } else {
+                  wrapper.classList.remove('scopy-chatgpt-wide-table');
+                  table.classList.remove('scopy-chatgpt-wide-table');
+                }
+                var rows = table.querySelectorAll('tr');
+                for (var r = 0; r < (rows.length || 0); r++) {
+                  var cells = rows[r] && rows[r].children;
+                  if (!cells) { continue; }
+                  for (var c = 0; c < cells.length; c++) {
+                    if (isWide && c < lengths.length) {
+                      cells[c].setAttribute('data-scopy-col-size', chatGPTWideTableColumnSize(lengths[c] || 0));
+                    } else {
+                      cells[c].removeAttribute('data-scopy-col-size');
+                    }
+                  }
+                }
+              } catch (e) { }
+            }
             function wrapChatGPTTables(root) {
               try {
                 if (!root || typeof root.querySelectorAll !== 'function') { return; }
@@ -17,11 +93,15 @@ enum MarkdownHTMLDocumentBuilder {
                   var table = tables[i];
                   if (!table || !table.parentNode) { continue; }
                   var parent = table.parentElement;
-                  if (parent && parent.classList && parent.classList.contains('scopy-chatgpt-table-container')) { continue; }
+                  if (parent && parent.classList && parent.classList.contains('scopy-chatgpt-table-container')) {
+                    classifyChatGPTTable(parent, table);
+                    continue;
+                  }
                   var wrapper = document.createElement('div');
                   wrapper.className = 'scopy-chatgpt-table-container';
                   table.parentNode.insertBefore(wrapper, table);
                   wrapper.appendChild(table);
+                  classifyChatGPTTable(wrapper, table);
                 }
               } catch (e) { }
             }
@@ -194,11 +274,13 @@ enum MarkdownHTMLDocumentBuilder {
           a[data-footnote-ref] {
             display: inline-flex;
             align-items: center;
+            gap: 4px;
             min-width: 0;
-            min-height: 20px;
-            padding: 1px 8px;
+            height: 25px;
+            min-height: 25px;
+            padding: 0 8px;
             border-radius: 999px;
-            background: rgb(244, 244, 244);
+            background: rgba(13, 13, 13, 0.04);
             box-shadow: none;
             white-space: nowrap;
           }
@@ -441,10 +523,23 @@ enum MarkdownHTMLDocumentBuilder {
           h3 code,
           h4 code,
           h5 code,
-          h6 code {
+          h6 code,
+          #content h1 code,
+          #content h2 code,
+          #content h3 code,
+          #content h4 code,
+          #content h5 code,
+          #content h6 code,
+          h1 .qN-_1G_InlineCode,
+          h2 .qN-_1G_InlineCode,
+          h3 .qN-_1G_InlineCode,
+          h4 .qN-_1G_InlineCode,
+          h5 .qN-_1G_InlineCode,
+          h6 .qN-_1G_InlineCode {
             padding: 0;
             border-radius: 0;
             background: transparent;
+            box-shadow: none;
             color: inherit;
             font-family: inherit;
             font-size: inherit;
@@ -652,7 +747,7 @@ enum MarkdownHTMLDocumentBuilder {
             border: 0;
             color: var(--scopy-text-primary);
             font-size: 16px;
-            line-height: 24px;
+            line-height: 26px;
             font-weight: 400;
           }
           blockquote::after {
@@ -670,7 +765,7 @@ enum MarkdownHTMLDocumentBuilder {
             margin-top: 0;
             margin-bottom: 0;
             font-size: 16px;
-            line-height: 24px;
+            line-height: 26px;
             font-weight: 400;
           }
           blockquote ul,
@@ -679,7 +774,7 @@ enum MarkdownHTMLDocumentBuilder {
             margin-bottom: 0;
             padding-left: 26px;
             font-size: 16px;
-            line-height: 24px;
+            line-height: 26px;
             font-weight: 400;
           }
           hr {
@@ -705,13 +800,16 @@ enum MarkdownHTMLDocumentBuilder {
             margin: 32px 0;
             width: 100%;
             max-width: 100%;
+            -webkit-overflow-scrolling: touch;
+            scrollbar-width: none;
+            --scopy-chatgpt-wide-table-col-baseline: var(--scopy-chatgpt-thread-content-width);
           }
           table {
             display: table;
             border-collapse: separate;
             border-spacing: 0;
             min-width: 100%;
-            width: max-content;
+            width: 100%;
             max-width: none;
             table-layout: auto;
             overflow: visible;
@@ -723,13 +821,40 @@ enum MarkdownHTMLDocumentBuilder {
           }
           th, td {
             border: 0;
-            min-width: 128px;
-            max-width: 288px;
             padding-inline: 8px;
             text-align: start;
             white-space: normal;
             word-break: normal;
             overflow-wrap: anywhere;
+          }
+          .scopy-chatgpt-table-container.scopy-chatgpt-wide-table > table {
+            width: fit-content;
+            min-width: 100%;
+          }
+          .scopy-chatgpt-table-container.scopy-chatgpt-wide-table th[data-scopy-col-size="xs"],
+          .scopy-chatgpt-table-container.scopy-chatgpt-wide-table td[data-scopy-col-size="xs"] {
+            min-width: calc(var(--scopy-chatgpt-wide-table-col-baseline) * 2 / 24);
+            max-width: calc(var(--scopy-chatgpt-wide-table-col-baseline) * 4 / 24);
+          }
+          .scopy-chatgpt-table-container.scopy-chatgpt-wide-table th[data-scopy-col-size="sm"],
+          .scopy-chatgpt-table-container.scopy-chatgpt-wide-table td[data-scopy-col-size="sm"] {
+            min-width: calc(var(--scopy-chatgpt-wide-table-col-baseline) * 4 / 24);
+            max-width: calc(var(--scopy-chatgpt-wide-table-col-baseline) * 6 / 24);
+          }
+          .scopy-chatgpt-table-container.scopy-chatgpt-wide-table th[data-scopy-col-size="md"],
+          .scopy-chatgpt-table-container.scopy-chatgpt-wide-table td[data-scopy-col-size="md"] {
+            min-width: calc(var(--scopy-chatgpt-wide-table-col-baseline) * 7 / 24);
+            max-width: calc(var(--scopy-chatgpt-wide-table-col-baseline) * 9 / 24);
+          }
+          .scopy-chatgpt-table-container.scopy-chatgpt-wide-table th[data-scopy-col-size="lg"],
+          .scopy-chatgpt-table-container.scopy-chatgpt-wide-table td[data-scopy-col-size="lg"] {
+            min-width: calc(var(--scopy-chatgpt-wide-table-col-baseline) * 9 / 24);
+            max-width: calc(var(--scopy-chatgpt-wide-table-col-baseline) * 13 / 24);
+          }
+          .scopy-chatgpt-table-container.scopy-chatgpt-wide-table th[data-scopy-col-size="xl"],
+          .scopy-chatgpt-table-container.scopy-chatgpt-wide-table td[data-scopy-col-size="xl"] {
+            min-width: calc(var(--scopy-chatgpt-wide-table-col-baseline) * 14 / 24);
+            max-width: calc(var(--scopy-chatgpt-wide-table-col-baseline) * 18 / 24);
           }
           th:first-child,
           td:first-child {

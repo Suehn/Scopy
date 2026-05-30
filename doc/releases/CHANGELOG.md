@@ -7,9 +7,20 @@
 
 ## [Unreleased]
 
-### Notes
+### Markdown/Preview
 
-- No unreleased entries.
+- Restores standard Markdown tables to the WACZ MarkdownContent `width: 100%` natural layout path, while reserving the TableContainer-style `fit-content` and per-column `xs/sm/md/lg/xl` sizing for tables that the shared renderer classifies as wide.
+- Hardens heading-contained inline code so it cannot inherit the gray inline-code pill in preview/export, and aligns footnote/source pills with the 25px ChatGPT SourceItem metric.
+
+### Markdown/Export
+
+- Keeps PNG table fitting as a transform on the same preview-equivalent table layout instead of using a second export-only table style.
+
+### Verification
+
+- Focused renderer unit tests: `KaTeXRenderToStringTests/testMarkdownTableUsesChatGPTStyleWithExistingOverflowSupport` and `testMarkdownThemeUsesWACZChatGPTNonTableStyles` passed (2026-05-30).
+- Focused table export UI regressions: `ExportMarkdownPNGUITests/testAutoExportWideTableFitsWidthWithoutOverShrink`, `testAutoExportModeratelyWideTableScalesDownInsteadOfWrapping`, and `testAutoExportTempFixtureTablesAreNotOverScaled` passed (2026-05-30).
+- Focused Scopy Markdown export smoke: generated `/tmp/scopy-rich-markdown-post-table-fix.png` at 2160x8558 with 200% resolution (2026-05-30).
 
 ## [v0.8.3] - 2026-05-30
 
