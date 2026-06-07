@@ -196,26 +196,30 @@ enum MarkdownHTMLDocumentBuilder {
               } catch (e) { }
               return lengths;
             }
-            function chatGPTTableColumnSize(length) {
+            function chatGPTMarkdownTableColumnSize(length) {
               if (length > 160) { return 'xl'; }
               if (length > 100) { return 'lg'; }
               if (length > 40) { return 'md'; }
-              if (length > 4) { return 'sm'; }
-              return 'xs';
+              return 'sm';
             }
-            function sizeChatGPTTableColumns(wrapper, table) {
+            function sizeChatGPTMarkdownTableColumns(wrapper, table) {
               try {
                 if (!wrapper || !table || !table.querySelectorAll) { return; }
                 var columns = readChatGPTTableColumnCount(table);
                 var lengths = readChatGPTTableColumnLengths(table, columns);
                 wrapper.classList.add('scopy-chatgpt-sized-table');
+                wrapper.classList.add('scopy-chatgpt-markdown-table');
+                wrapper.setAttribute('data-scopy-table-model', 'markdown-pipe');
                 table.classList.add('scopy-chatgpt-sized-table');
+                table.classList.add('scopy-chatgpt-markdown-table');
+                table.setAttribute('data-scopy-table-model', 'markdown-pipe');
                 var rows = table.querySelectorAll('tr');
                 for (var r = 0; r < (rows.length || 0); r++) {
                   var cells = rows[r] && rows[r].children;
                   if (!cells) { continue; }
                   for (var c = 0; c < cells.length; c++) {
-                    var size = c < lengths.length ? chatGPTTableColumnSize(lengths[c] || 0) : 'xs';
+                    var size = c < lengths.length ? chatGPTMarkdownTableColumnSize(lengths[c] || 0) : 'sm';
+                    cells[c].setAttribute('data-col-size', size);
                     cells[c].setAttribute('data-scopy-col-size', size);
                   }
                 }
@@ -232,7 +236,7 @@ enum MarkdownHTMLDocumentBuilder {
                   if (parent && parent.classList && parent.classList.contains('scopy-chatgpt-table-wrapper')) {
                     var existingContainer = parent.parentElement;
                     if (existingContainer && existingContainer.classList && existingContainer.classList.contains('scopy-chatgpt-table-container')) {
-                      sizeChatGPTTableColumns(existingContainer, table);
+                      sizeChatGPTMarkdownTableColumns(existingContainer, table);
                       continue;
                     }
                   }
@@ -241,7 +245,7 @@ enum MarkdownHTMLDocumentBuilder {
                     existingWrapper.className = 'scopy-chatgpt-table-wrapper';
                     parent.insertBefore(existingWrapper, table);
                     existingWrapper.appendChild(table);
-                    sizeChatGPTTableColumns(parent, table);
+                    sizeChatGPTMarkdownTableColumns(parent, table);
                     continue;
                   }
                   var wrapper = document.createElement('div');
@@ -251,7 +255,7 @@ enum MarkdownHTMLDocumentBuilder {
                   table.parentNode.insertBefore(wrapper, table);
                   wrapper.appendChild(tableWrapper);
                   tableWrapper.appendChild(table);
-                  sizeChatGPTTableColumns(wrapper, table);
+                  sizeChatGPTMarkdownTableColumns(wrapper, table);
                 }
               } catch (e) { }
             }
@@ -593,6 +597,7 @@ enum MarkdownHTMLDocumentBuilder {
               max(1px, calc(var(--scopy-chatgpt-render-width) - (var(--scopy-chatgpt-content-inline-padding) * 2)))
             );
             --scopy-chatgpt-render-width: var(--scopy-chatgpt-layout-viewport-width);
+            --scopy-chatgpt-markdown-table-col-baseline: var(--scopy-chatgpt-thread-content-max-width);
             --scopy-chatgpt-table-breakout-width: var(--scopy-chatgpt-thread-content-width);
             --scopy-chatgpt-preview-scale: var(--scopy-chatgpt-browser-zoom);
             --scopy-chatgpt-preview-fit-scale: 1;
@@ -1058,12 +1063,6 @@ enum MarkdownHTMLDocumentBuilder {
             box-sizing: border-box;
             -webkit-overflow-scrolling: touch;
             scrollbar-width: none;
-            --scopy-chatgpt-table-col-baseline: 640px;
-          }
-          @media (min-width: 1024px) {
-            .scopy-chatgpt-table-container {
-              --scopy-chatgpt-table-col-baseline: 768px;
-            }
           }
           .scopy-chatgpt-table-wrapper {
             width: fit-content;
@@ -1081,49 +1080,40 @@ enum MarkdownHTMLDocumentBuilder {
             border: 0;
             margin: 0;
             font-family: var(--scopy-chatgpt-font);
-            font-size: calc(14px * var(--scopy-chatgpt-layout-font-scale));
-            line-height: calc(24px * var(--scopy-chatgpt-layout-font-scale));
+            font-size: var(--scopy-chatgpt-body-font-size);
+            line-height: var(--scopy-chatgpt-body-line-height);
           }
           th, td {
             border: 0;
-            padding-inline: 8px;
+            padding-inline: 0;
             text-align: start;
             white-space: normal;
             word-break: normal;
             overflow-wrap: break-word;
           }
-          th:first-child,
-          td:first-child {
-            padding-inline-start: 0;
+          th:not(:last-child),
+          td:not(:last-child) {
+            padding-inline-end: 24px;
           }
-          th:last-child,
-          td:last-child {
-            padding-inline-end: 0;
+          .scopy-chatgpt-table-container[data-scopy-table-model="markdown-pipe"] th[data-col-size="sm"],
+          .scopy-chatgpt-table-container[data-scopy-table-model="markdown-pipe"] td[data-col-size="sm"] {
+            min-width: calc(var(--scopy-chatgpt-markdown-table-col-baseline) * 4 / 24);
+            max-width: calc(var(--scopy-chatgpt-markdown-table-col-baseline) * 6 / 24);
           }
-          .scopy-chatgpt-table-container th[data-scopy-col-size="xs"],
-          .scopy-chatgpt-table-container td[data-scopy-col-size="xs"] {
-            min-width: calc(var(--scopy-chatgpt-table-col-baseline) * 2 / 24);
-            max-width: calc(var(--scopy-chatgpt-table-col-baseline) * 4 / 24);
+          .scopy-chatgpt-table-container[data-scopy-table-model="markdown-pipe"] th[data-col-size="md"],
+          .scopy-chatgpt-table-container[data-scopy-table-model="markdown-pipe"] td[data-col-size="md"] {
+            min-width: calc(var(--scopy-chatgpt-markdown-table-col-baseline) * 6 / 24);
+            max-width: calc(var(--scopy-chatgpt-markdown-table-col-baseline) * 8 / 24);
           }
-          .scopy-chatgpt-table-container th[data-scopy-col-size="sm"],
-          .scopy-chatgpt-table-container td[data-scopy-col-size="sm"] {
-            min-width: calc(var(--scopy-chatgpt-table-col-baseline) * 4 / 24);
-            max-width: calc(var(--scopy-chatgpt-table-col-baseline) * 6 / 24);
+          .scopy-chatgpt-table-container[data-scopy-table-model="markdown-pipe"] th[data-col-size="lg"],
+          .scopy-chatgpt-table-container[data-scopy-table-model="markdown-pipe"] td[data-col-size="lg"] {
+            min-width: calc(var(--scopy-chatgpt-markdown-table-col-baseline) * 8 / 24);
+            max-width: calc(var(--scopy-chatgpt-markdown-table-col-baseline) * 12 / 24);
           }
-          .scopy-chatgpt-table-container th[data-scopy-col-size="md"],
-          .scopy-chatgpt-table-container td[data-scopy-col-size="md"] {
-            min-width: calc(var(--scopy-chatgpt-table-col-baseline) * 7 / 24);
-            max-width: calc(var(--scopy-chatgpt-table-col-baseline) * 9 / 24);
-          }
-          .scopy-chatgpt-table-container th[data-scopy-col-size="lg"],
-          .scopy-chatgpt-table-container td[data-scopy-col-size="lg"] {
-            min-width: calc(var(--scopy-chatgpt-table-col-baseline) * 9 / 24);
-            max-width: calc(var(--scopy-chatgpt-table-col-baseline) * 13 / 24);
-          }
-          .scopy-chatgpt-table-container th[data-scopy-col-size="xl"],
-          .scopy-chatgpt-table-container td[data-scopy-col-size="xl"] {
-            min-width: calc(var(--scopy-chatgpt-table-col-baseline) * 14 / 24);
-            max-width: calc(var(--scopy-chatgpt-table-col-baseline) * 18 / 24);
+          .scopy-chatgpt-table-container[data-scopy-table-model="markdown-pipe"] th[data-col-size="xl"],
+          .scopy-chatgpt-table-container[data-scopy-table-model="markdown-pipe"] td[data-col-size="xl"] {
+            min-width: calc(var(--scopy-chatgpt-markdown-table-col-baseline) * 14 / 24);
+            max-width: calc(var(--scopy-chatgpt-markdown-table-col-baseline) * 18 / 24);
           }
           thead th {
             border-bottom: 1px solid var(--scopy-border);
@@ -1138,6 +1128,7 @@ enum MarkdownHTMLDocumentBuilder {
           }
           tbody tr:last-child td {
             border-bottom: 0;
+            padding-bottom: 24px;
           }
           tbody td {
             padding-block: 10px;

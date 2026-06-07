@@ -690,6 +690,7 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
                     max(1px, calc(var(--scopy-chatgpt-render-width) - (var(--scopy-chatgpt-content-inline-padding) * 2)))
                 );
                 --scopy-chatgpt-render-width: var(--scopy-chatgpt-layout-viewport-width);
+                --scopy-chatgpt-markdown-table-col-baseline: var(--scopy-chatgpt-thread-content-max-width);
                 --scopy-chatgpt-table-breakout-width: var(--scopy-chatgpt-thread-content-width);
             }
             @page { margin: 0 !important; }
@@ -1322,14 +1323,23 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
           function previewTableBlock(table) {
             try {
               var p = table && table.parentElement;
+              if (p && p.classList && p.classList.contains('scopy-chatgpt-table-wrapper')) {
+                var gp = p.parentElement;
+                if (gp && gp.classList && gp.classList.contains('scopy-chatgpt-table-container')) {
+                  return gp;
+                }
+              }
               if (p && p.classList && p.classList.contains('scopy-chatgpt-table-container')) {
                 return p;
               }
               if (table && table.parentNode && document && typeof document.createElement === 'function') {
                 var wrapper = document.createElement('div');
                 wrapper.className = 'scopy-chatgpt-table-container';
+                var tableWrapper = document.createElement('div');
+                tableWrapper.className = 'scopy-chatgpt-table-wrapper';
                 table.parentNode.insertBefore(wrapper, table);
-                wrapper.appendChild(table);
+                wrapper.appendChild(tableWrapper);
+                tableWrapper.appendChild(table);
                 return wrapper;
               }
             } catch (e) { }
@@ -1657,7 +1667,12 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
               var block = t;
               try {
                 var directParent = t.parentElement;
-                if (directParent && directParent.classList && directParent.classList.contains('scopy-chatgpt-table-container')) {
+                if (directParent && directParent.classList && directParent.classList.contains('scopy-chatgpt-table-wrapper')) {
+                  var containerParent = directParent.parentElement;
+                  if (containerParent && containerParent.classList && containerParent.classList.contains('scopy-chatgpt-table-container')) {
+                    block = containerParent;
+                  }
+                } else if (directParent && directParent.classList && directParent.classList.contains('scopy-chatgpt-table-container')) {
                   block = directParent;
                 }
               } catch (e) { block = t; }

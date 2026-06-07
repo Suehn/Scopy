@@ -1,33 +1,104 @@
-# ChatGPT WACZ Markdown Style Contract
+# ChatGPT WACZ Markdown Rendering Contract
 
-This document records the source-derived rendering contract used by Scopy's ChatGPT-aligned Markdown preview and export path.
+This document is the source-derived model for Scopy's ChatGPT-aligned Markdown preview and PNG export path. It exists to prevent screenshot-driven fixes: when WACZ, live DOM, Scopy preview, and export disagree, this contract defines the evidence order, the rendering layers, and which part of Scopy is allowed to adapt each layer.
 
 ## Evidence Priority
 
+Use evidence in this order:
+
 1. WACZ conversation JSON is the semantic source for Markdown input examples.
-2. WACZ extracted CSS and JS chunks are the source for cascade, component classes, table-column sizing, and responsive width formulas.
-3. Live `chatgpt.com` DOM metrics are used to confirm the current product surface and responsive behavior. They must not override archived source evidence unless the capture is refreshed.
-4. Browser screenshots are visual verification only. They are not the source for changing constants.
+2. WACZ extracted JS and CSS chunks are the source for component structure, cascade, table-column sizing, and responsive width formulas.
+3. Scopy implementation files show how the official model is adapted into local WKWebView preview and PNG export.
+4. Live `chatgpt.com` DOM metrics can confirm whether the product has drifted after the WACZ capture. They must not override WACZ source evidence unless a new capture is recorded.
+5. Screenshots are visual verification only. They are not the source for constants, thresholds, or layout rules.
 
-Current primary captures:
+Current primary capture:
 
-- `/Users/ziyi/Downloads/ui-全面.wacz`
-- `/tmp/scopy-wacz-extract/ui-full-20260530-script/wacz-markdown-rendering-model.json`
-- `/tmp/scopy-wacz-extract/ui-full-20260530-script/assistant-message.md`
-- `/tmp/scopy-wacz-extract/ui-full-20260530-script/relevant-css-js-lines.txt`
-- `/tmp/scopy-wacz-extract/ui/0035_chatgpt.com_backend-api_conversation_6a19ad01-18d8-83ea-b945-71f803842646.json`
-- `/tmp/scopy-wacz-extract/ui/0121_chatgpt.com_c_6a19ad01-18d8-83ea-b945-71f803842646.html`
-- `/tmp/scopy-wacz-extract/ui/1114-root-l30w6n1j.css`
-- `/tmp/scopy-wacz-extract/ui/0676-AssistantMessage-6zxhctcg.css`
-- `/tmp/scopy-wacz-extract/ui-表格超宽2/0169_chatgpt.com_backend-api_conversation_6a19f0d5-06c4-83ea-bddc-a2068f6bbc2f.json`
-- `/tmp/scopy-wacz-extract/ui-表格超宽2/1182-root-gqg5932l.css`
-- `/tmp/scopy-wacz-extract/ui-表格超宽2/0766-AssistantMessage-6zxhctcg.css`
-- `/tmp/scopy-wacz-extract/ui-full-20260530/summary.json`
-- `/tmp/scopy-wacz-extract/ui-full-20260530/0496_chatgpt.com_cdn_assets_root-n0p757yt.css.css`
-- `/tmp/scopy-wacz-extract/ui-full-20260530/0500_chatgpt.com_cdn_assets_table-components-ca43bz4f.css.css`
-- `/tmp/scopy-wacz-extract/ui-full-20260530/0300_chatgpt.com_cdn_assets_AssistantMessage-6zxhctcg.css.css`
+- WACZ archive: `/Users/ziyi/Downloads/ui-全面.wacz`
+- Regenerated local extraction: `/tmp/scopy-wacz-extract/ui-full-20260607-doc-model`
+- Conversation JSON: `/tmp/scopy-wacz-extract/ui-full-20260607-doc-model/0020_chatgpt.com__backend-api_conversation_6a1a5353-d0fc-83ea-a133-d2a21add48bb.json`
+- Assistant Markdown: `/tmp/scopy-wacz-extract/ui-full-20260607-doc-model/assistant-message.md`
+- All assistant Markdown messages: `/tmp/scopy-wacz-extract/ui-full-20260607-doc-model/assistant-messages`
+- Model summary: `/tmp/scopy-wacz-extract/ui-full-20260607-doc-model/wacz-markdown-rendering-model.md`
+- CSS/JS evidence index: `/tmp/scopy-wacz-extract/ui-full-20260607-doc-model/relevant-css-js-lines.txt`
+- CSS/JS pattern coverage: `/tmp/scopy-wacz-extract/ui-full-20260607-doc-model/markdown-css-js-coverage.json`
+- Current component JS evidence: `/tmp/scopy-wacz-extract/ui-full-20260607-doc-model/0293_chatgpt.com__cdn_assets_98bbfa68-hicd499v3j2r4yyb.js.js`
+- Current AssistantMessage component CSS: `/tmp/scopy-wacz-extract/ui-full-20260607-doc-model/0303_chatgpt.com__cdn_assets_AssistantMessage-6zxhctcg.css.css`
+- Current root Markdown CSS: `/tmp/scopy-wacz-extract/ui-full-20260607-doc-model/0499_chatgpt.com__cdn_assets_root-n0p757yt.css.css`
+- Current breakout table CSS: `/tmp/scopy-wacz-extract/ui-full-20260607-doc-model/0503_chatgpt.com__cdn_assets_table-components-ca43bz4f.css.css`
 
-Use `scripts/quality/analyze-chatgpt-wacz-markdown.py /Users/ziyi/Downloads/ui-全面.wacz --out-dir /tmp/scopy-wacz-extract/ui-full-20260530-script --force` to regenerate the current local extraction. The script parses the WARC directly and its table inventory ignores escaped pipes and pipes inside code spans; it also treats table-cell fence-marker examples such as ```` ```python ```` as text markers rather than as row-spanning code spans.
+Regenerate the extraction with:
+
+```bash
+python3 scripts/quality/analyze-chatgpt-wacz-markdown.py /Users/ziyi/Downloads/ui-全面.wacz --out-dir /tmp/scopy-wacz-extract/ui-full-20260607-doc-model --force
+```
+
+The script parses the WARC directly and extracts response/resource bodies, every assistant Markdown message, CSS/JS evidence lines, CSS/JS pattern coverage, and table inventory. Treat the generated inventory as an audit aid, not as a higher authority than WACZ JS/CSS. If the script summary ever disagrees with extracted JS, fix the script and regenerate before updating this contract.
+
+## Completeness Audit
+
+For the current WACZ, "no omission" is scoped to content that exists inside `/Users/ziyi/Downloads/ui-全面.wacz`, not to future ChatGPT deployments or runtime network state outside the archive.
+
+The regenerated extraction proves:
+
+| Audit item | Current evidence |
+| --- | --- |
+| WARC records counted | `{"request": 551, "resource": 2, "response": 546, "revisit": 5, "warcinfo": 1}` |
+| Content bodies extracted | 548 `response`/`resource` bodies |
+| Non-extracted WARC types | `request`, `revisit`, and `warcinfo`; these are counted but are not response/resource bodies |
+| Resource records | 2 PNG visual resources: WACZ thumbnail and view image |
+| Conversation JSON files | 4 extracted JSON responses under `/backend-api/conversation/` |
+| Assistant Markdown messages | 1 total, written under `assistant-messages/` and mirrored as `assistant-message.md` for compatibility |
+| Markdown pipe tables | 6 total across all assistant Markdown messages |
+| CSS files | 30 extracted CSS files |
+| JS files | 431 extracted JS files |
+| Markdown-related CSS/JS coverage | 267 CSS/JS files matched at least one tracked Markdown/rendering pattern |
+
+The primary Markdown model and the all-assistant model are the same for this WACZ because there is only one assistant Markdown message. That is an evidence-backed property of this archive, not an assumption baked into the parser.
+
+The coverage audit is intentionally broader than the style contract. It counts patterns such as `.markdown`, `.prose`, `markdown-new-styling`, `wrap-break-word`, `blockquote`, `code`, `pre`, `hljs`, `katex`, `citation`, `webpage-citation-pill`, `task`, `checkbox`, `table`, `TableContainer`, `TableWrapper`, `Jc7teW`, `TyagGW_tableContainer`, `thread-content`, `min-w-(--thread-content-width)`, and `data-col-size`. These counts identify files that require manual review; they do not automatically make every matching file part of the Scopy model.
+
+This contract is complete for the captured Markdown rendering surface when:
+
+- every content-bearing WARC record is extracted or explicitly counted as non-content metadata
+- every conversation JSON and assistant Markdown message is enumerated
+- all assistant Markdown tables are inventoried
+- all CSS/JS assets are preserved on disk
+- Markdown-related CSS/JS pattern coverage is generated
+- the contract explains which evidence becomes a Scopy rendering invariant and which evidence remains audit context
+
+## Principle Model
+
+The ChatGPT Markdown renderer is not one stylesheet applied to a static HTML blob. It is a layered system:
+
+| Layer | ChatGPT source | Scopy adaptation |
+| --- | --- | --- |
+| Semantic input | Conversation JSON message parts | Markdown source enters Scopy renderer after source-profile routing |
+| Parse normalization | ChatGPT parser/editor pipeline behavior, inferred from rendered output and source chunks | Shared pre-parse normalizers for ATX headings, table-row inline-code pipes, source citations, safe HTML placeholders, and CJK emphasis |
+| Root Markdown surface | `markdown prose ... wrap-break-word ... markdown-new-styling` root | `#content` and non-table direct children emulate the root typography and text wrapping |
+| Component islands | TableContainer, code card, source citation pill, task row components | Scopy emits equivalent local classes and data attributes instead of copying obfuscated class names |
+| Responsive layout | CSS variables such as `--thread-content-max-width`, `--thread-content-width`, component baselines, and container-query behavior | Fixed PNG/preview visual surface plus scale-specific internal layout viewport |
+| Runtime measurement | React component JS, especially table column measurement | Local JS wraps tables, measures text columns, and assigns local data attributes before preview/export readiness |
+| Export adaptation | Not part of ChatGPT web UI | PNG-only transform layer after the preview-equivalent layout has completed |
+
+Two rules follow from this model:
+
+- If a bug is caused by parse semantics, fix the pre-parse/shared renderer path. CSS cannot repair the wrong DOM.
+- If a bug is caused by preview/export adaptation, fix the Scopy boundary. Do not change the WACZ-equivalent component model to hide export or popover constraints.
+
+## Scopy Implementation Map
+
+The current implementation surfaces are:
+
+- `Scopy/Views/History/MarkdownHTMLDocumentBuilder.swift`: builds the preview/export HTML, root CSS variables, ChatGPT-like CSS, table wrapper JS, table column sizing, preview fit scale, and export table scaling hook.
+- `Scopy/Services/Export/MarkdownRenderLayoutConstants.swift`: defines allowed layout-scale values, fixed visual surface width, content padding, and scale-to-layout viewport mapping.
+- `Scopy/Services/Export/MarkdownExportService.swift`: prepares WKWebView output and invokes the export-only table scaling hook after layout.
+- `Scopy/Views/History/UnifiedMarkdownRenderer.swift`: unified Markdown rendering bridge.
+- `Scopy/Views/History/MarkdownTaskListRuntime.swift`: task-list checkbox-to-painted-marker runtime.
+- `scripts/quality/analyze-chatgpt-wacz-markdown.py`: WACZ extraction and evidence inventory helper.
+- `ScopyTests/KaTeXRenderToStringTests.swift`: focused contract assertions for ChatGPT table layout, width model, scale model, and table/export boundaries.
+
+When changing behavior, update the contract and tests in the same direction. A local class name such as `.scopy-chatgpt-table-container` is acceptable only when its geometry and lifecycle are mapped to the captured official component.
 
 ## Source Model
 
@@ -37,11 +108,17 @@ The rendered assistant Markdown root uses:
 markdown prose dark:prose-invert wrap-break-word w-full light markdown-new-styling
 ```
 
-The light/dark class changes with theme, but `markdown-new-styling` remains the authoritative branch for heading rhythm, paragraph rhythm, table rules, and root wrapping. The older AssistantMessage class family, including `qN-_1G_MarkdownContent`, is kept only for component-specific details when the root DOM still emits those components.
+The light/dark class changes with theme, but `markdown-new-styling` remains the authoritative root branch for heading rhythm, paragraph rhythm, list rhythm, blockquotes, and ordinary root Markdown table rules. The older AssistantMessage class family, including `qN-_1G_MarkdownContent`, is evidence only when the current DOM still emits that component path.
+
+The root CSS and component CSS can both contain table rules. They are not interchangeable:
+
+- Root `.markdown table` rules describe native Markdown table styling under the root cascade.
+- Current TableContainer component rules describe the interactive measured table path with wrapper scroll, `fit-content`, `data-col-size`, and fixed component baselines.
+- Scopy uses the root Markdown pipe-table sizing model for ordinary Markdown tables. It keeps a local scroll wrapper for preview/export containment, but that wrapper must not switch pipe tables onto the component `xs`/baseline model.
 
 ## Width And Wrapping
 
-ChatGPT does not use one fixed text width at every viewport. The table component capture defines the core width model:
+ChatGPT does not use one fixed text width at every viewport. The breakout table component capture defines the responsive content model:
 
 ```text
 --thread-content-width: min(
@@ -51,24 +128,28 @@ ChatGPT does not use one fixed text width at every viewport. The table component
 --thread-gutter-size: calc((100cqw - var(--thread-content-width)) / 2)
 ```
 
-Live Browser inspection against the current ChatGPT conversation at an `880px` CSS viewport showed the Markdown root at `640px`, with a parent class setting `[--thread-content-max-width:40rem]` and a larger-container branch of `@w-lg/main:[--thread-content-max-width:48rem]`. That capture proves ChatGPT uses responsive content variables, but it is not a reason to emulate browser zoom by post-layout scaling, canvas growth, or a hard-coded `40rem` export column. Line breaks come from the active layout metrics, not from a static screenshot width.
+Live inspection of the same product family showed a smaller branch around `40rem` and a larger branch around `48rem`. That proves the official renderer is responsive. It does not justify post-layout bitmap scaling, canvas growth, or reusing line breaks from another scale.
 
-Scopy's preview/export implementation mirrors that principle while keeping output size separate from layout scale:
+Scopy mirrors the principle while keeping output size separate from layout scale:
 
-- the output/preview surface stays anchored to the desktop message branch: `48rem`/`768px`
-- the default `100%` ChatGPT profile lays out in the full `816px` visual surface with normal `1.0x` CSS font metrics
-- supported scale values are clamped to `80%...200%`; each non-100% scale keeps the same visual surface but lays out in an internal CSS viewport of `816px / scale`, then applies WebKit layout zoom back to the fixed surface; it must not grow the canvas or reuse another scale's line breaks
-- safe inline padding stays `24px` on each side
-- the preview/export surface stays fixed at `768px + 48px = 816px` when the screen allows it
-- the active text column is `min(48rem, renderWidth - 48px)`, where `renderWidth` is the internal layout viewport before zoom
-- the layout profile is part of the Markdown render context and cache key, so different scale percentages cannot reuse stale HTML
-- hover preview width is owned by Scopy's shared preview-frame policy, matching image and file previews; Markdown layout profiles control only the content's font metrics and wrapping, and the internal `renderWidth` must not read the popover's `100vw`
-- live hover preview may fit-scale the already-laid-out `816px` visual surface into the shared popover frame; that fit scale is display-only and must not feed back into line breaking
-- the hover-preview scale slider must rerender Markdown with the selected layout profile instead of changing only CSS variables on an already-rendered document
-- WebView measurements may update height and overflow state, but they must not shrink or grow the outer Markdown popover
-- text wrapping follows `wrap-break-word`: `overflow-wrap: break-word` with normal `word-break`
+- the visual preview/PNG surface is fixed at `816px` when screen space allows it
+- the desktop message content branch is `48rem` / `768px`
+- safe inline padding is `24px` on each side
+- the default `100%` profile lays out in an `816px` internal viewport
+- a non-100% profile lays out in an internal viewport of `816px / scale`
+- WebKit visual scaling then maps that layout back onto the fixed surface
+- the active text column is `min(768px, renderWidth - 48px)` where `renderWidth` is the internal layout viewport before zoom
+- the layout scale is part of the render context and cache key
+- the hover-preview frame is owned by Scopy's shared preview-frame policy, not Markdown content width
+- live preview may fit-scale the already-laid-out surface into the shared popover frame; that fit scale is display-only
+- WebView measurement may update height and overflow state, but must not shrink or grow the outer Markdown popover
+- normal text wrapping follows `wrap-break-word`: `overflow-wrap: break-word` with `word-break: normal`
 
-This separation is intentional: changing the ChatGPT layout scale must change font metrics and line breaks, but it must not change PNG target pixels or the hover-preview shell width. Wide tables still get a scroll container that can break out to the stable render surface, but they do not change the text-column width. PNG export starts from the same laid-out surface; table fitting is a bitmap/export transform after layout, not a second table stylesheet.
+This is the main distinction between preview and export:
+
+- Preview must look like ChatGPT at the chosen layout profile inside Scopy's preview shell.
+- PNG export must start from that same layout and then may apply export-only scaling for bitmap constraints.
+- Export may not substitute a different table stylesheet, different text column, or different Markdown parse result.
 
 ## Typography Rhythm
 
@@ -85,13 +166,30 @@ Measured from the WACZ rendered `markdown-new-styling` DOM:
 | h6 | 16px | 26px | 400 | 0 |
 | p | 16px | 26px | 400 | 8px top, 4px bottom; adjacent paragraphs use 16px block separation |
 
+Do not fall back to the older AssistantMessage heading scale unless a new WACZ capture proves the DOM has changed again.
+
+## Markdown Input Normalization
+
+Scopy normalizes input before both legacy and unified renderers where ChatGPT behavior depends on parse semantics:
+
+- `#标题` becomes `# 标题`
+- `##标题` becomes `## 标题`
+- valid ATX headings are unchanged
+- fenced and indented code blocks are unchanged
+- shebang-like lines such as `#! /usr/bin/env bash` are unchanged
+- table-row one- or two-backtick inline code spans escape their internal unescaped `|`
+- table-row runs of three or more backticks are treated as fence-marker examples inside cells, not as inline code spans
+- source-reference citations are promoted only when the reference shape and URL prove citation intent
+
+The parser boundary is strict. A malformed heading or exploded table row must be fixed before Markdown parsing; CSS must not be used to mimic the correct visual output after the DOM is already wrong.
+
 ## Inline Code
 
 Inline code uses the root `.prose :where(code)` contract:
 
 - color: root text `rgb(13, 13, 13)`
 - background: alpha-04 in light mode
-- inset 1px alpha-08 stroke, matching the WACZ contrast instead of relying on background alone
+- inset 1px alpha-08 stroke
 - radius: 4px
 - padding: `0.15rem 0.3rem`
 - font size: `0.875em`; in a 16px paragraph this computes to 14px
@@ -99,20 +197,7 @@ Inline code uses the root `.prose :where(code)` contract:
 - line height: inherit
 - wrapping remains normal with `overflow-wrap: break-word`
 
-Heading-contained code is still inline code. The WACZ root CSS applies the same `code` pill inside headings; heading rules only adjust details such as inherited color and the `h3 code` relative size. Do not strip the pill from `h1 code`, `h2 code`, or other heading code spans. If malformed source such as `#标题` falls back to a paragraph, the renderer must normalize it before Markdown parsing so the heading structure and heading inline-code cascade are both preserved.
-
-## Markdown Input Normalization
-
-Scopy normalizes ATX heading markers before both legacy and unified renderers:
-
-- `#标题` becomes `# 标题`
-- `##标题` becomes `## 标题`
-- existing valid headings are unchanged
-- fenced code blocks are unchanged
-- indented code blocks are unchanged
-- shebang-like lines such as `#! /usr/bin/env bash` are unchanged
-
-This shared pre-parse step prevents renderer-path drift: legacy and unified output must start from the same heading semantics.
+Heading-contained code is still inline code. Do not strip the pill from `h1 code`, `h2 code`, or other heading code spans.
 
 ## Code Blocks
 
@@ -123,9 +208,9 @@ Code blocks use the ChatGPT rounded code-card surface:
 - background: neutral alpha surface
 - top language label area before code text
 - monospace font from the captured `ui-monospace, SFMono-Regular, ...` stack
-- language labels are display chrome and are not part of reusable Markdown content
+- language labels are display chrome and are not reusable Markdown content
 
-Syntax coloring is language-dependent and comes from the WACZ root stylesheet token colors, not a hand-picked Scopy palette.
+Syntax coloring is language-dependent and comes from WACZ root stylesheet token colors, not a hand-picked Scopy palette.
 
 The shared preview/export theme maps `hljs` output onto the captured CodeBlock semantic colors:
 
@@ -141,7 +226,7 @@ The shared preview/export theme maps `hljs` output onto the captured CodeBlock s
 | name | `#6b3ab4` |
 | invalid | `#ba2623` |
 
-Both legacy `markdown-it` and unified `rehype-highlight` must emit or preserve `hljs` token classes before export readiness flips. PNG export waits for the same rendered DOM state as preview, so code colors must not depend on a preview-only stylesheet or late post-processing step.
+Both legacy `markdown-it` and unified `rehype-highlight` must emit or preserve `hljs` token classes before export readiness flips. PNG export waits for the same rendered DOM state as preview.
 
 ## Links And Source Citations
 
@@ -151,7 +236,7 @@ Ordinary Markdown links remain text links:
 - underline style is dotted with `rgb(143, 143, 143)`
 - the local export surface appends the external-link arrow for normal links
 
-ChatGPT source citations are not ordinary links. The live DOM for the selected `AP News` source uses an inline wrapper with `data-testid="webpage-citation-pill"` and a nested source anchor:
+ChatGPT source citations are a separate visual component. The captured `AP News` citation uses an inline wrapper with `data-testid="webpage-citation-pill"` and a nested source anchor:
 
 - wrapper display: `inline-flex`
 - wrapper margin-left: 4px
@@ -165,9 +250,7 @@ ChatGPT source citations are not ordinary links. The live DOM for the selected `
 - anchor border-radius: 12px
 - no underline and no external-link arrow
 
-For grouped citations such as live `AP News +1`, the source label and count are separate parts of the same pill. The measured selected example uses a 70px wrapper, an `AP News` text span, and a `+1` suffix span with `rgb(143, 143, 143)`, 4px horizontal padding, and a -4px right margin inside the same 18px-high anchor.
-
-Scopy may promote Markdown source-reference syntax to the same visual class when the source carries explicit citation semantics, such as `([AP News][1])` plus a `[1]: https://...` definition, or the same parenthesized HTTP inline-link shape. The promotion removes the literal parentheses and marks the anchor as `data-scopy-source-citation="true"`; it must not rewrite ordinary parenthesized links such as `([guide][1])`. A parenthesized citation group such as `([AP News][1], [Reuters][2])` collapses to the first source with `data-scopy-source-count="+1"` so the visible form follows ChatGPT's `AP News +1` pill instead of rendering multiple ordinary links.
+Scopy may promote Markdown source-reference syntax to the same visual class only when the source carries explicit citation semantics, such as `([AP News][1])` plus a `[1]: https://...` definition. It must not rewrite ordinary parenthesized links such as `([guide][1])`. A grouped citation such as `([AP News][1], [Reuters][2])` collapses to the first source with `data-scopy-source-count="+1"` so the visible form follows ChatGPT's single-pill `AP News +1` shape.
 
 ## Blockquotes
 
@@ -185,36 +268,184 @@ Blockquotes use the root Markdown rule:
 - `ul` and `ol` use zero block margin and 26px left padding.
 - nested lists retain the same local padding model.
 - normal list markers are bold and current-color in the captured DOM.
-- task lists do not rely on native checkbox rendering. Scopy paints the marker so preview and export share the same checked/unchecked geometry and colors.
+- task lists do not rely on native checkbox rendering.
+- Scopy paints one marker path so preview and export share the same checked/unchecked geometry and colors.
 
-## Tables
+## Table System
 
-Markdown tables use the WACZ TableContainer/component path even when they have only two columns:
+Markdown pipe tables use the WACZ root Markdown table path. There is still no separate "standard table" versus "wide table" heuristic branch: every pipe table receives the same root Markdown column-size model, and overflow is the natural result when the measured table is wider than the active content area.
 
-- `border-collapse: separate`
-- `border-spacing: 0`
-- the wrapper owns horizontal overflow and preserves the preview frame width
-- the wrapper contains an inner table wrapper with `width: fit-content` and `min-width: 100%`
-- the table itself is `width: fit-content` with `min-width: 100%`
-- every column receives `data-col-size` after text-length measurement
-- the component table column baseline is `640px`, switching to `768px` at `min-width: 1024px`; it is not the current message/content width
-- base cell horizontal padding is 8px on both sides
-- the first cell has zero start padding
-- the last cell has zero end padding
-- header-row block padding: 8px
-- `th` line-height: 16px
-- body-row block padding: 10px
-- the last row removes the bottom border but does not add extra bottom padding
+The WACZ also contains a separate TableContainer/component path. That path is real official evidence, but it is not the default path for ordinary Markdown pipe tables in Scopy.
 
-Wide behavior is an outcome of the same container model, not a separate stylesheet or a column-count heuristic:
+### Official Component Structure
 
-- the preview frame does not widen
-- the scroll container can expand to the full render surface rather than being trapped inside the text column
-- the table surface is wider than the text column when needed, but starts at the same message-column x position
-- preview scrolls the table container horizontally
-- export scales the same table surface; it does not substitute a second table stylesheet
-- preview must not transform-scale individual tables; transform fitting is an export-only layer applied after this TableContainer layout
+The current WACZ JS defines these component classes:
 
-The Markdown table JS assigns column sizes by rendered text length: `>160 -> xl`, `>100 -> lg`, `>40 -> md`, `>4 -> sm`, otherwise `xs`. Component CSS maps `xs/sm/md/lg/xl` to `2-4`, `4-6`, `7-9`, `9-13`, and `14-18` twenty-fourths of the component baseline. The `ui-全面.wacz` assistant Markdown contains six pipe tables; the 16-column wide table starts at line 290 and has 10 data rows. Do not use naive pipe counts for table analysis: escaped pipes and pipes inside one- or two-backtick inline code spans must not create columns, while the source's fence-marker examples such as ```` ```python ```` remain cell text and still split at real table delimiters.
+| Component | WACZ class | Role |
+| --- | --- | --- |
+| table container | `Jc7teW_TableContainer` | horizontal scroll owner and component baseline owner |
+| table wrapper | `Jc7teW_TableWrapper` | `fit-content` wrapper with `min-width: 100%` |
+| table | `Jc7teW_Table` | measured table surface |
+| row | `Jc7teW_Row` | `tr`, plus `data-w-header-row` for header rows |
+| cell | `Jc7teW_Cell` | `td`, plus `data-col-size` |
 
-The implementation rule is pre-parse and shared: table-row code spans with one or two backticks get their internal unescaped `|` characters escaped before GFM parsing, but runs of three or more backticks are treated as fence-marker examples inside table cells, not as inline code spans. This keeps `` `| A | B |` `` in a single cell without merging cells like ` ```python | ```bash `.
+Scopy maps those concepts to local names:
+
+| ChatGPT concept | Scopy local class/attribute |
+| --- | --- |
+| TableContainer | `.scopy-chatgpt-table-container` |
+| TableWrapper | `.scopy-chatgpt-table-wrapper` |
+| column size | `data-col-size` plus local mirror `data-scopy-col-size` |
+| export-scaled table marker | `data-scopy-table-scaled="true"` |
+
+The name changes are intentional. The geometry and lifecycle must match; copying obfuscated class names is not required.
+
+### Markdown Pipe-Table Measurement Lifecycle
+
+The captured Markdown/rehype table plugin:
+
+- walks rendered `table` nodes before HTML output
+- measures text-node length in the header and body cells
+- assigns `data-col-size` to each header/body cell
+- assigns column sizes with `>160 -> xl`, `>100 -> lg`, `>40 -> md`, otherwise `sm`
+- has no `xs` bucket for Markdown pipe tables
+
+Scopy mirrors this path after local Markdown rendering by measuring the table DOM, assigning official `data-col-size`, and preserving a local `data-scopy-col-size` mirror for diagnostics.
+
+### Official Component Measurement Lifecycle
+
+The separate TableContainer component JS:
+
+- renders cells with `data-col-size`
+- measures `textContent.length` in table body rows during `useLayoutEffect`
+- respects `colSpan` by distributing a spanned cell length across the covered column positions
+- merges explicit column sizes when present
+- keeps the table hidden until measurement is ready
+- assigns column sizes with `>160 -> xl`, `>100 -> lg`, `>40 -> md`, `>4 -> sm`, otherwise `xs`
+
+Do not apply this component-only `xs` bucket to ordinary Markdown pipe tables.
+
+### Official Component CSS
+
+The current AssistantMessage component CSS defines:
+
+- container `--w-table-col-baseline: 640px`
+- at `min-width: 1024px`, baseline becomes `768px`
+- container `overflow-x: auto`
+- inner wrapper `width: fit-content; min-width: 100%`
+- table `border-collapse: separate; border-spacing: 0; table-layout: auto; border: 0; width: fit-content; min-width: 100%`
+- cell base border: bottom 1px
+- body cell padding block: `10px`
+- header cell padding block: `8px`
+- base cell padding inline: `8px`
+- first cell start padding: `0`
+- last cell end padding: `0`
+- last row removes bottom border only
+
+Column size ranges are fractions of the component baseline:
+
+| Size | Text length rule | Min width | Max width |
+| --- | ---: | ---: | ---: |
+| `xs` | `<= 4` | `2 / 24` | `4 / 24` |
+| `sm` | `> 4` | `4 / 24` | `6 / 24` |
+| `md` | `> 40` | `7 / 24` | `9 / 24` |
+| `lg` | `> 100` | `9 / 24` | `13 / 24` |
+| `xl` | `> 160` | `14 / 24` | `18 / 24` |
+
+This is why a table may overflow horizontally as the layout viewport narrows under browser zoom: the columns are constrained against a component baseline, not always squeezed into the current text column.
+
+### Root Markdown Table Rules
+
+The WACZ root stylesheet contains `.markdown table` rules with `data-col-size=sm/md/lg/xl` ranges based on `--thread-content-max-width`.
+
+Column size ranges are fractions of the root thread content max width:
+
+| Size | Text length rule | Min width | Max width |
+| --- | ---: | ---: | ---: |
+| `sm` | `<= 40` | `4 / 24` | `6 / 24` |
+| `md` | `> 40` | `6 / 24` | `8 / 24` |
+| `lg` | `> 100` | `8 / 24` | `12 / 24` |
+| `xl` | `> 160` | `14 / 24` | `18 / 24` |
+
+Use this distinction when debugging:
+
+- If the DOM is a native Markdown table without the TableContainer component, root rules describe that surface.
+- If the DOM has TableContainer measurement and component classes, component CSS wins for layout behavior.
+- Scopy ordinary pipe tables must remain on the root Markdown model even though Scopy wraps them in a local scroll container.
+
+### Scopy Preview Rules
+
+Preview must:
+
+- wrap every table in `.scopy-chatgpt-table-container > .scopy-chatgpt-table-wrapper`
+- mark ordinary tables with `data-scopy-table-model="markdown-pipe"`
+- assign official `data-col-size` and local mirror `data-scopy-col-size` to every visible cell
+- never assign `xs` for Markdown pipe tables
+- size Markdown pipe-table columns from `--scopy-chatgpt-thread-content-max-width`, not the narrowed current content width
+- keep `.scopy-chatgpt-table-container` out of the overflow probe that widens the Swift hover popover
+- preserve local horizontal scroll
+- never transform-scale tables
+- never switch to a separate stylesheet for two-column tables
+- allow browser-zoom-like layout narrowing to produce horizontal overflow when the root Markdown column model requires it
+
+### Scopy PNG Export Rules
+
+PNG export must:
+
+- start from the same DOM and CSS as preview
+- invoke `window.__scopyScaleChatGPTTablesForExport` only after WACZ-equivalent layout has completed
+- measure the laid-out table width
+- apply a transform to the table surface only when it exceeds the bitmap target width
+- reserve scaled height on the container to avoid clipping
+- never change the Markdown parse result, text column, table model baseline, or cell padding to make the bitmap fit
+
+This export layer is intentionally extra. It is not part of official ChatGPT rendering; it exists because Scopy exports a single PNG.
+
+### Table Inventory From Current WACZ
+
+The current `ui-全面.wacz` assistant Markdown contains six pipe tables:
+
+| Start line | Columns | Data rows | Column sizes after fixed analyzer | Max cell text lengths |
+| ---: | ---: | ---: | --- | --- |
+| 256 | 3 | 5 | `sm, xs, sm` | `8, 4, 12` |
+| 268 | 3 | 3 | `sm, sm, xs` | `6, 6, 4` |
+| 278 | 3 | 5 | `xs, sm, sm` | `4, 25, 25` |
+| 290 | 16 | 10 | `xs, xs, sm, sm, sm, sm, sm, sm, sm, xs, sm, sm, sm, sm, sm, xs` | `2, 4, 11, 13, 9, 10, 9, 11, 7, 4, 7, 12, 28, 21, 17, 4` |
+| 463 | 2 | 19 | `sm, sm` | `7, 11` |
+| 489 | 2 | 8 | `sm, sm` | `8, 37` |
+
+Do not use naive pipe counts for table analysis. Escaped pipes and pipes inside one- or two-backtick inline code spans must not create columns, while fence-marker examples such as ```` ```python ```` remain cell text and still split at real table delimiters.
+
+## Preview/Export Boundary Checklist
+
+Use this checklist before changing Markdown preview/export:
+
+- Does the source Markdown parse to the same semantic structure on legacy and unified paths?
+- Does the root surface still use `wrap-break-word` semantics?
+- Does the active layout scale cause reflow before visual scaling?
+- Is the Swift popover width independent from Markdown line breaking?
+- Are all pipe tables on the root Markdown pipe-table model?
+- Are table column sizes based on text length and `thread-content-max-width`, not current content width?
+- Is table overflow local to the table scroll container in preview?
+- Is any transform scaling limited to PNG export after layout?
+- Are code, task-list, citation, and table component rules shared between preview and export where applicable?
+- Did tests assert the absence of old heuristics, not only the presence of new CSS?
+
+## Known Drift Risks
+
+- Obfuscated WACZ class names can change without changing behavior. Prefer behavior and CSS declarations over class-name stability.
+- Root Markdown table rules and component TableContainer rules can coexist. Do not collapse them into one mental model.
+- The WACZ analyzer is a helper. It must be kept aligned with extracted JS thresholds.
+- Live ChatGPT can ship a new renderer after this WACZ. Refresh WACZ before changing constants.
+- Browser zoom, Scopy layout scale, live preview fit scale, and PNG export scale are different layers. Mixing them is the common source of "looks like ChatGPT at 100% but diverges at 145%" bugs.
+
+## Verification Matrix
+
+| Change type | Required checks |
+| --- | --- |
+| WACZ evidence or analyzer logic | Regenerate WACZ model, inspect CSS/JS evidence lines, run `make docs-validate` |
+| Markdown parse normalization | Node renderer tests and focused Swift renderer tests |
+| Table layout or table CSS | `KaTeXRenderToStringTests/testMarkdownTableUsesChatGPTStyleWithExistingOverflowSupport` plus preview/export visual smoke when behavior changes |
+| Layout scale or preview shell | `MarkdownPreviewRendererFacadeTests`, hover-preview tests, and a scale-specific preview smoke |
+| PNG export adaptation | focused export UI tests for wide table/global-scale behavior |
+| Documentation-only edits | `make docs-validate` and `git diff --check` |

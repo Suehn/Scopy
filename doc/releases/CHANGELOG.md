@@ -11,6 +11,20 @@
 
 - No unreleased entries.
 
+## [v0.8.7] - 2026-06-07
+
+### Markdown/Preview
+
+- Realigns ordinary Markdown pipe tables with the WACZ root Markdown table path instead of the separate TableContainer component path: pipe tables now use `sm/md/lg/xl` only, root `thread-content-max-width` column fractions, root table padding rhythm, and preview-only local scrolling before PNG export applies any bitmap fitting.
+
+### Documentation
+
+- Expands the ChatGPT WACZ Markdown rendering contract into a source-priority, layered rendering model covering root Markdown CSS, TableContainer component behavior, Scopy preview/export boundaries, WACZ regeneration paths, completeness-audit counts, drift risks, and verification expectations.
+
+### Tooling
+
+- Aligns the WACZ Markdown analyzer's table column-size summary with the extracted ChatGPT Markdown pipe-table JS `sm/md/lg/xl` thresholds, extracts every assistant Markdown message plus response/resource content bodies, emits all-assistant table inventory and CSS/JS coverage counts, and renames its static wide-table summary to an inventory-only overflow hint so it is not confused with an official renderer branch.
+
 ## [v0.8.6] - 2026-06-07
 
 ### Markdown/Preview
