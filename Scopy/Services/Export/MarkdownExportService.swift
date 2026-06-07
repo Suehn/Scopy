@@ -1403,8 +1403,8 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
           function scaleWideTables(content, targetWidth) {
             if (!content || !content.querySelectorAll) { return; }
             try {
-              if (typeof window.__scopyScaleChatGPTTables === 'function') {
-                window.__scopyScaleChatGPTTables(content, targetWidth);
+              if (typeof window.__scopyScaleChatGPTTablesForExport === 'function') {
+                window.__scopyScaleChatGPTTablesForExport(content, targetWidth);
                 return;
               }
             } catch (e) { }

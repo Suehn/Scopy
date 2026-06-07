@@ -189,27 +189,32 @@ Blockquotes use the root Markdown rule:
 
 ## Tables
 
-Standard Markdown tables keep the `markdown-new-styling` natural table path:
+Markdown tables use the WACZ TableContainer/component path even when they have only two columns:
 
 - `border-collapse: separate`
 - `border-spacing: 0`
-- table width is `100%` for standard tables
-- `th` block padding: 8px
+- the wrapper owns horizontal overflow and preserves the preview frame width
+- the wrapper contains an inner table wrapper with `width: fit-content` and `min-width: 100%`
+- the table itself is `width: fit-content` with `min-width: 100%`
+- every column receives `data-col-size` after text-length measurement
+- the component table column baseline is `640px`, switching to `768px` at `min-width: 1024px`; it is not the current message/content width
+- base cell horizontal padding is 8px on both sides
+- the first cell has zero start padding
+- the last cell has zero end padding
+- header-row block padding: 8px
 - `th` line-height: 16px
-- `td` block padding: 10px
-- last-row `td` bottom padding: 24px
-- non-first columns get 8px start padding
-- non-last columns get 24px end padding
-- the last column gets 40px end padding from the captured `last:pe-10` rule
+- body-row block padding: 10px
+- the last row removes the bottom border but does not add extra bottom padding
 
-Wide tables use a container model derived from the WACZ table container rules:
+Wide behavior is an outcome of the same container model, not a separate stylesheet or a column-count heuristic:
 
 - the preview frame does not widen
 - the scroll container can expand to the full render surface rather than being trapped inside the text column
 - the table surface is wider than the text column when needed, but starts at the same message-column x position
 - preview scrolls the table container horizontally
 - export scales the same table surface; it does not substitute a second table stylesheet
+- preview must not transform-scale individual tables; transform fitting is an export-only layer applied after this TableContainer layout
 
-The Markdown table JS assigns column sizes by rendered text length: `>160 -> xl`, `>100 -> lg`, `>40 -> md`, otherwise `sm`. The `ui-全面.wacz` assistant Markdown contains six pipe tables; the 16-column wide table starts at line 290 and has 10 data rows, with every column classified as `sm` by the captured thresholds. Do not use naive pipe counts for table analysis: escaped pipes and pipes inside one- or two-backtick inline code spans must not create columns, while the source's fence-marker examples such as ```` ```python ```` remain cell text and still split at real table delimiters.
+The Markdown table JS assigns column sizes by rendered text length: `>160 -> xl`, `>100 -> lg`, `>40 -> md`, `>4 -> sm`, otherwise `xs`. Component CSS maps `xs/sm/md/lg/xl` to `2-4`, `4-6`, `7-9`, `9-13`, and `14-18` twenty-fourths of the component baseline. The `ui-全面.wacz` assistant Markdown contains six pipe tables; the 16-column wide table starts at line 290 and has 10 data rows. Do not use naive pipe counts for table analysis: escaped pipes and pipes inside one- or two-backtick inline code spans must not create columns, while the source's fence-marker examples such as ```` ```python ```` remain cell text and still split at real table delimiters.
 
 The implementation rule is pre-parse and shared: table-row code spans with one or two backticks get their internal unescaped `|` characters escaped before GFM parsing, but runs of three or more backticks are treated as fence-marker examples inside table cells, not as inline code spans. This keeps `` `| A | B |` `` in a single cell without merging cells like ` ```python | ```bash `.

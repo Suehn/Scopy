@@ -196,51 +196,27 @@ enum MarkdownHTMLDocumentBuilder {
               } catch (e) { }
               return lengths;
             }
-            function chatGPTWideTableColumnSize(length) {
+            function chatGPTTableColumnSize(length) {
               if (length > 160) { return 'xl'; }
               if (length > 100) { return 'lg'; }
               if (length > 40) { return 'md'; }
-              return 'sm';
+              if (length > 4) { return 'sm'; }
+              return 'xs';
             }
-            function classifyChatGPTTable(wrapper, table) {
+            function sizeChatGPTTableColumns(wrapper, table) {
               try {
                 if (!wrapper || !table || !table.querySelectorAll) { return; }
                 var columns = readChatGPTTableColumnCount(table);
                 var lengths = readChatGPTTableColumnLengths(table, columns);
-                var totalLength = 0;
-                var maxLength = 0;
-                for (var i = 0; i < lengths.length; i++) {
-                  totalLength += lengths[i] || 0;
-                  maxLength = Math.max(maxLength, lengths[i] || 0);
-                }
-                var measuredOverflow = false;
-                try {
-                  var available = Math.ceil(wrapper.clientWidth || 0);
-                  var raw = measureChatGPTTableWidth(table);
-                  measuredOverflow = !!(available && raw && raw > available + 1);
-                } catch (e) { measuredOverflow = false; }
-                var isWide = !!(
-                  columns >= 4 ||
-                  (columns >= 3 && (maxLength >= 40 || totalLength >= 96)) ||
-                  measuredOverflow
-                );
-                if (isWide) {
-                  wrapper.classList.add('scopy-chatgpt-wide-table');
-                  table.classList.add('scopy-chatgpt-wide-table');
-                } else {
-                  wrapper.classList.remove('scopy-chatgpt-wide-table');
-                  table.classList.remove('scopy-chatgpt-wide-table');
-                }
+                wrapper.classList.add('scopy-chatgpt-sized-table');
+                table.classList.add('scopy-chatgpt-sized-table');
                 var rows = table.querySelectorAll('tr');
                 for (var r = 0; r < (rows.length || 0); r++) {
                   var cells = rows[r] && rows[r].children;
                   if (!cells) { continue; }
                   for (var c = 0; c < cells.length; c++) {
-                    if (isWide && c < lengths.length) {
-                      cells[c].setAttribute('data-scopy-col-size', chatGPTWideTableColumnSize(lengths[c] || 0));
-                    } else {
-                      cells[c].removeAttribute('data-scopy-col-size');
-                    }
+                    var size = c < lengths.length ? chatGPTTableColumnSize(lengths[c] || 0) : 'xs';
+                    cells[c].setAttribute('data-scopy-col-size', size);
                   }
                 }
               } catch (e) { }
@@ -253,15 +229,29 @@ enum MarkdownHTMLDocumentBuilder {
                   var table = tables[i];
                   if (!table || !table.parentNode) { continue; }
                   var parent = table.parentElement;
+                  if (parent && parent.classList && parent.classList.contains('scopy-chatgpt-table-wrapper')) {
+                    var existingContainer = parent.parentElement;
+                    if (existingContainer && existingContainer.classList && existingContainer.classList.contains('scopy-chatgpt-table-container')) {
+                      sizeChatGPTTableColumns(existingContainer, table);
+                      continue;
+                    }
+                  }
                   if (parent && parent.classList && parent.classList.contains('scopy-chatgpt-table-container')) {
-                    classifyChatGPTTable(parent, table);
+                    var existingWrapper = document.createElement('div');
+                    existingWrapper.className = 'scopy-chatgpt-table-wrapper';
+                    parent.insertBefore(existingWrapper, table);
+                    existingWrapper.appendChild(table);
+                    sizeChatGPTTableColumns(parent, table);
                     continue;
                   }
                   var wrapper = document.createElement('div');
                   wrapper.className = 'scopy-chatgpt-table-container';
+                  var tableWrapper = document.createElement('div');
+                  tableWrapper.className = 'scopy-chatgpt-table-wrapper';
                   table.parentNode.insertBefore(wrapper, table);
-                  wrapper.appendChild(table);
-                  classifyChatGPTTable(wrapper, table);
+                  wrapper.appendChild(tableWrapper);
+                  tableWrapper.appendChild(table);
+                  sizeChatGPTTableColumns(wrapper, table);
                 }
               } catch (e) { }
             }
@@ -357,15 +347,13 @@ enum MarkdownHTMLDocumentBuilder {
             function updateChatGPTPreviewScale(content) {
               return syncChatGPTZoomShell(content);
             }
-            function scaleChatGPTTables(root, explicitTargetWidth) {
+            function layoutChatGPTTables(root) {
               try {
                 if (!root || typeof root.querySelectorAll !== 'function') { return; }
                 wrapChatGPTTables(root);
-                var shouldScale = false;
-                var targetWidth = Number(explicitTargetWidth || 0);
-                if (targetWidth && isFinite(targetWidth) && targetWidth > 0) {
-                  shouldScale = true;
-                }
+                var isExportMode = false;
+                try { isExportMode = document.documentElement && document.documentElement.classList && document.documentElement.classList.contains('scopy-export-mode'); } catch (e) { isExportMode = false; }
+                if (isExportMode) { return; }
                 var containers = root.querySelectorAll('.scopy-chatgpt-table-container');
                 for (var i = 0; i < (containers.length || 0); i++) {
                   var container = containers[i];
@@ -373,7 +361,22 @@ enum MarkdownHTMLDocumentBuilder {
                   var table = container.querySelector('table');
                   if (!table) { continue; }
                   resetChatGPTTableScale(container, table);
-                  if (!shouldScale) { continue; }
+                }
+              } catch (e) { }
+            }
+            function scaleChatGPTTablesForExport(root, explicitTargetWidth) {
+              try {
+                if (!root || typeof root.querySelectorAll !== 'function') { return; }
+                wrapChatGPTTables(root);
+                var targetWidth = Number(explicitTargetWidth || 0);
+                if (!targetWidth || !isFinite(targetWidth) || targetWidth <= 0) { return; }
+                var containers = root.querySelectorAll('.scopy-chatgpt-table-container');
+                for (var i = 0; i < (containers.length || 0); i++) {
+                  var container = containers[i];
+                  if (!container) { continue; }
+                  var table = container.querySelector('table');
+                  if (!table) { continue; }
+                  resetChatGPTTableScale(container, table);
                   var available = targetWidth;
                   if (!available || !isFinite(available) || available <= 0) { continue; }
                   var rawWidth = measureChatGPTTableWidth(table);
@@ -395,7 +398,10 @@ enum MarkdownHTMLDocumentBuilder {
                 }
               } catch (e) { }
             }
-            try { window.__scopyScaleChatGPTTables = scaleChatGPTTables; } catch (e) { }
+            try {
+              window.__scopyLayoutChatGPTTables = layoutChatGPTTables;
+              window.__scopyScaleChatGPTTablesForExport = scaleChatGPTTablesForExport;
+            } catch (e) { }
     """
 
     private static func baseStyle(
@@ -1052,14 +1058,23 @@ enum MarkdownHTMLDocumentBuilder {
             box-sizing: border-box;
             -webkit-overflow-scrolling: touch;
             scrollbar-width: none;
-            --scopy-chatgpt-wide-table-col-baseline: var(--scopy-chatgpt-thread-content-width);
+            --scopy-chatgpt-table-col-baseline: 640px;
+          }
+          @media (min-width: 1024px) {
+            .scopy-chatgpt-table-container {
+              --scopy-chatgpt-table-col-baseline: 768px;
+            }
+          }
+          .scopy-chatgpt-table-wrapper {
+            width: fit-content;
+            min-width: 100%;
           }
           table {
             display: table;
             border-collapse: separate;
             border-spacing: 0;
             min-width: 100%;
-            width: 100%;
+            width: fit-content;
             max-width: none;
             table-layout: auto;
             overflow: visible;
@@ -1071,47 +1086,44 @@ enum MarkdownHTMLDocumentBuilder {
           }
           th, td {
             border: 0;
-            padding-inline: 0;
+            padding-inline: 8px;
             text-align: start;
             white-space: normal;
             word-break: normal;
             overflow-wrap: break-word;
           }
-          th:not(:first-child),
-          td:not(:first-child) {
-            padding-inline-start: 8px;
-          }
-          .scopy-chatgpt-table-container.scopy-chatgpt-wide-table > table {
-            width: fit-content;
-            min-width: 100%;
-          }
-          .scopy-chatgpt-table-container.scopy-chatgpt-wide-table th[data-scopy-col-size="sm"],
-          .scopy-chatgpt-table-container.scopy-chatgpt-wide-table td[data-scopy-col-size="sm"] {
-            min-width: calc(var(--scopy-chatgpt-wide-table-col-baseline) * 4 / 24);
-            max-width: calc(var(--scopy-chatgpt-wide-table-col-baseline) * 6 / 24);
-          }
-          .scopy-chatgpt-table-container.scopy-chatgpt-wide-table th[data-scopy-col-size="md"],
-          .scopy-chatgpt-table-container.scopy-chatgpt-wide-table td[data-scopy-col-size="md"] {
-            min-width: calc(var(--scopy-chatgpt-wide-table-col-baseline) * 6 / 24);
-            max-width: calc(var(--scopy-chatgpt-wide-table-col-baseline) * 8 / 24);
-          }
-          .scopy-chatgpt-table-container.scopy-chatgpt-wide-table th[data-scopy-col-size="lg"],
-          .scopy-chatgpt-table-container.scopy-chatgpt-wide-table td[data-scopy-col-size="lg"] {
-            min-width: calc(var(--scopy-chatgpt-wide-table-col-baseline) * 8 / 24);
-            max-width: calc(var(--scopy-chatgpt-wide-table-col-baseline) * 12 / 24);
-          }
-          .scopy-chatgpt-table-container.scopy-chatgpt-wide-table th[data-scopy-col-size="xl"],
-          .scopy-chatgpt-table-container.scopy-chatgpt-wide-table td[data-scopy-col-size="xl"] {
-            min-width: calc(var(--scopy-chatgpt-wide-table-col-baseline) * 14 / 24);
-            max-width: calc(var(--scopy-chatgpt-wide-table-col-baseline) * 18 / 24);
-          }
-          th:not(:last-child),
-          td:not(:last-child) {
-            padding-inline-end: 24px;
+          th:first-child,
+          td:first-child {
+            padding-inline-start: 0;
           }
           th:last-child,
           td:last-child {
-            padding-inline-end: 40px;
+            padding-inline-end: 0;
+          }
+          .scopy-chatgpt-table-container th[data-scopy-col-size="xs"],
+          .scopy-chatgpt-table-container td[data-scopy-col-size="xs"] {
+            min-width: calc(var(--scopy-chatgpt-table-col-baseline) * 2 / 24);
+            max-width: calc(var(--scopy-chatgpt-table-col-baseline) * 4 / 24);
+          }
+          .scopy-chatgpt-table-container th[data-scopy-col-size="sm"],
+          .scopy-chatgpt-table-container td[data-scopy-col-size="sm"] {
+            min-width: calc(var(--scopy-chatgpt-table-col-baseline) * 4 / 24);
+            max-width: calc(var(--scopy-chatgpt-table-col-baseline) * 6 / 24);
+          }
+          .scopy-chatgpt-table-container th[data-scopy-col-size="md"],
+          .scopy-chatgpt-table-container td[data-scopy-col-size="md"] {
+            min-width: calc(var(--scopy-chatgpt-table-col-baseline) * 7 / 24);
+            max-width: calc(var(--scopy-chatgpt-table-col-baseline) * 9 / 24);
+          }
+          .scopy-chatgpt-table-container th[data-scopy-col-size="lg"],
+          .scopy-chatgpt-table-container td[data-scopy-col-size="lg"] {
+            min-width: calc(var(--scopy-chatgpt-table-col-baseline) * 9 / 24);
+            max-width: calc(var(--scopy-chatgpt-table-col-baseline) * 13 / 24);
+          }
+          .scopy-chatgpt-table-container th[data-scopy-col-size="xl"],
+          .scopy-chatgpt-table-container td[data-scopy-col-size="xl"] {
+            min-width: calc(var(--scopy-chatgpt-table-col-baseline) * 14 / 24);
+            max-width: calc(var(--scopy-chatgpt-table-col-baseline) * 18 / 24);
           }
           thead th {
             border-bottom: 1px solid var(--scopy-border);
@@ -1126,7 +1138,6 @@ enum MarkdownHTMLDocumentBuilder {
           }
           tbody tr:last-child td {
             border-bottom: 0;
-            padding-bottom: 24px;
           }
           tbody td {
             padding-block: 10px;
@@ -1385,7 +1396,7 @@ enum MarkdownHTMLDocumentBuilder {
                 if (!window.webkit || !window.webkit.messageHandlers || !window.webkit.messageHandlers.scopySize) { return; }
                 var el = document.getElementById('content');
                 if (!el) { return; }
-                scaleChatGPTTables(el);
+                layoutChatGPTTables(el);
                 updateChatGPTPreviewScale(el);
                 var box = document.getElementById('content-scale-shell') || el;
                 var rect = box.getBoundingClientRect();
@@ -1564,8 +1575,7 @@ enum MarkdownHTMLDocumentBuilder {
               }
               el.innerHTML = html;
               normalizeSourceCitations(el, src);
-              wrapChatGPTTables(el);
-              scaleChatGPTTables(el);
+              layoutChatGPTTables(el);
               normalizeFootnoteReferences(el);
               \(taskListApplyScript)\(highlightFinalizeScript)
               try {
@@ -1577,12 +1587,12 @@ enum MarkdownHTMLDocumentBuilder {
               // Keep content height in sync as KaTeX renders and fonts load.
               if (typeof ResizeObserver === 'function') {
                 if (ro) { try { ro.disconnect(); } catch (e) { } }
-                ro = new ResizeObserver(function () { scaleChatGPTTables(el); scheduleReportHeight(); });
+                ro = new ResizeObserver(function () { layoutChatGPTTables(el); scheduleReportHeight(); });
                 try { ro.observe(el); } catch (e) { }
               }
 
               if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === 'function') {
-                document.fonts.ready.then(function () { scaleChatGPTTables(el); scheduleReportHeight(); }).catch(function () { });
+                document.fonts.ready.then(function () { layoutChatGPTTables(el); scheduleReportHeight(); }).catch(function () { });
               }
 
               if (typeof window.__scopyRenderMath === 'function') {
@@ -1714,7 +1724,7 @@ enum MarkdownHTMLDocumentBuilder {
                     if (!window.webkit || !window.webkit.messageHandlers || !window.webkit.messageHandlers.scopySize) { return; }
                     var el = document.getElementById('content');
                     if (!el) { return; }
-                    scaleChatGPTTables(el);
+                    layoutChatGPTTables(el);
                     updateChatGPTPreviewScale(el);
                     var box = document.getElementById('content-scale-shell') || el;
                     var rect = box.getBoundingClientRect();
@@ -1816,8 +1826,7 @@ enum MarkdownHTMLDocumentBuilder {
                       if (typeof window.__scopyApplyTaskLists === 'function') {
                         window.__scopyApplyTaskLists(el);
                       }
-                      wrapChatGPTTables(el);
-                      scaleChatGPTTables(el);
+                      layoutChatGPTTables(el);
                       if (window.__scopyRenderState) {
                         window.__scopyRenderState.unifiedRenderSucceeded = true;
                       }

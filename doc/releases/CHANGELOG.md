@@ -11,6 +11,17 @@
 
 - No unreleased entries.
 
+## [v0.8.6] - 2026-06-07
+
+### Markdown/Preview
+
+- Applies the WACZ TableContainer column-sizing model to every Markdown table instead of only inferred-wide tables, so two-column ChatGPT-style summary tables receive the same `xs/sm/md/lg/xl` column constraints as the official renderer and avoid prematurely narrow first columns.
+- Keeps preview tables on the WACZ layout path while reserving table transform fitting for PNG export only; table column widths now use the component `640px`/`768px` baseline, `md/lg` component ranges, the inner fit-content table wrapper, and the component cell padding model so browser-zoomed previews can overflow horizontally instead of being forced into extra wrapping.
+
+### Verification
+
+- Focused renderer regression updated: `KaTeXRenderToStringTests/testMarkdownTableUsesChatGPTStyleWithExistingOverflowSupport` now asserts that table column sizing is unconditional, the old inferred-wide heuristic is absent, preview uses the layout-only table path, and export owns the extra table scaling function.
+
 ## [v0.8.5] - 2026-05-30
 
 ### Clipboard
