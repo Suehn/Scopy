@@ -8,21 +8,51 @@ import ScopyKit
 final class HistoryItemMarkdownExportControllerTests: XCTestCase {
     private let exportResolutionPercentUserDefaultsKey = "ScopyMarkdownExportResolutionPercent"
 
+    override func setUp() {
+        super.setUp()
+        HistoryItemPresentationCache.shared.clearCaches()
+    }
+
     override func tearDown() {
         UserDefaults.standard.removeObject(forKey: exportResolutionPercentUserDefaultsKey)
+        HistoryItemPresentationCache.shared.clearCaches()
         super.tearDown()
     }
 
     func testCanExportPNGForMarkdownTextItem() {
         let item = makeItem(type: .text, plainText: "# Title\n\n- bullet")
 
+        XCTAssertNil(HistoryItemPresentationCache.shared.cachedMarkdownExportCapability(for: item))
         XCTAssertTrue(HistoryItemMarkdownExportController.canExportPNG(item: item, filePreviewInfo: nil))
+        XCTAssertEqual(HistoryItemPresentationCache.shared.cachedMarkdownExportCapability(for: item), true)
     }
 
     func testCanExportPNGRejectsPlainTextItem() {
         let item = makeItem(type: .text, plainText: "just a plain sentence")
 
         XCTAssertFalse(HistoryItemMarkdownExportController.canExportPNG(item: item, filePreviewInfo: nil))
+    }
+
+    func testCanOfferPNGMenuItemUsesFastSignalWithoutCachingMarkdownCapability() {
+        let item = makeItem(type: .text, plainText: "# Title\n\n- bullet")
+
+        XCTAssertNil(HistoryItemPresentationCache.shared.cachedMarkdownExportCapability(for: item))
+        XCTAssertTrue(HistoryItemMarkdownExportController.canOfferPNGMenuItem(item: item, filePreviewInfo: nil))
+        XCTAssertNil(HistoryItemPresentationCache.shared.cachedMarkdownExportCapability(for: item))
+    }
+
+    func testCanOfferPNGMenuItemRejectsPlainTextWithoutCachingMarkdownCapability() {
+        let item = makeItem(type: .text, plainText: "just a plain sentence")
+
+        XCTAssertFalse(HistoryItemMarkdownExportController.canOfferPNGMenuItem(item: item, filePreviewInfo: nil))
+        XCTAssertNil(HistoryItemPresentationCache.shared.cachedMarkdownExportCapability(for: item))
+    }
+
+    func testCanOfferPNGMenuItemUsesCachedMarkdownCapabilityWhenAvailable() {
+        let item = makeItem(type: .text, plainText: "plain text after preview cache")
+        HistoryItemPresentationCache.shared.storeMarkdownExportCapability(true, for: item)
+
+        XCTAssertTrue(HistoryItemMarkdownExportController.canOfferPNGMenuItem(item: item, filePreviewInfo: nil))
     }
 
     func testCanExportPNGForMarkdownFilePreview() throws {

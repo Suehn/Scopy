@@ -8,14 +8,11 @@ internal struct HistoryItemRowDescriptor {
     struct Dependencies {
         var displayTexts: @MainActor (ClipboardItemDTO) -> (title: String, metadata: String)
         var filePreview: @MainActor (ClipboardItemDTO) -> FilePreviewSummary?
-        var canExportPNG: @MainActor (ClipboardItemDTO, FilePreviewSummary?) -> Bool
 
+        @MainActor
         static let live = Dependencies(
             displayTexts: { ClipboardItemDisplayText.shared.displayTexts(for: $0) },
-            filePreview: { HistoryItemPresentationCache.shared.filePreview(for: $0) },
-            canExportPNG: { item, filePreview in
-                HistoryItemPresentationCache.shared.canExportPNG(for: item, filePreview: filePreview)
-            }
+            filePreview: { HistoryItemPresentationCache.shared.filePreview(for: $0) }
         )
     }
 
@@ -27,7 +24,6 @@ internal struct HistoryItemRowDescriptor {
     let filePreviewPath: String?
     let filePreviewKind: FilePreviewKind?
     let filePreviewIsMarkdown: Bool
-    let canExportPNG: Bool
     let canShowFileThumbnail: Bool
     let needsThumbnailHeight: Bool
     let appIconBundleID: String?
@@ -35,8 +31,9 @@ internal struct HistoryItemRowDescriptor {
     init(
         item: ClipboardItemDTO,
         settings: SettingsDTO,
-        dependencies: Dependencies = .live
+        dependencies: Dependencies? = nil
     ) {
+        let dependencies = dependencies ?? .live
         let profileStart = ScrollPerformanceProfile.isEnabled ? CFAbsoluteTimeGetCurrent() : nil
         defer {
             if let profileStart {
@@ -53,7 +50,6 @@ internal struct HistoryItemRowDescriptor {
         let canShowFileThumbnail = showThumbnails
             && item.type == .file
             && filePreview?.shouldGenerateThumbnail == true
-        let canExportPNG = dependencies.canExportPNG(item, filePreview)
         let displayTexts = dependencies.displayTexts(item)
 
         self.titleText = displayTexts.title
@@ -64,7 +60,6 @@ internal struct HistoryItemRowDescriptor {
         self.filePreviewPath = filePreview?.path
         self.filePreviewKind = filePreview?.kind
         self.filePreviewIsMarkdown = filePreview?.isMarkdown ?? false
-        self.canExportPNG = canExportPNG
         self.canShowFileThumbnail = canShowFileThumbnail
         self.needsThumbnailHeight = (item.type == .image && showThumbnails) || canShowFileThumbnail
         self.appIconBundleID = item.appBundleID

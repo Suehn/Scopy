@@ -1,6 +1,37 @@
 import Foundation
 
 enum MarkdownDetector {
+    static func hasFastMarkdownSignal(_ text: String, maxScanCharacters: Int = 4_096) -> Bool {
+        if text.isEmpty { return false }
+        let sample = text.count > maxScanCharacters ? String(text.prefix(maxScanCharacters)) : text
+
+        if sample.contains("$$") { return true }
+        if sample.contains("\\(") || sample.contains("\\)") { return true }
+        if sample.contains("\\[") || sample.contains("\\]") { return true }
+        if sample.contains("\\begin{") || sample.contains("\\end{") { return true }
+        if sample.contains("\\section{") || sample.contains("\\subsection{") || sample.contains("\\subsubsection{") { return true }
+        if containsKnownLaTeXCommand(sample) { return true }
+
+        if sample.contains("```") { return true }
+        if sample.contains("\n#") || sample.hasPrefix("#") { return true }
+        if sample.contains("\n- ") || sample.hasPrefix("- ") { return true }
+        if sample.contains("\n* ") || sample.hasPrefix("* ") { return true }
+        if sample.contains("\n1. ") { return true }
+        if sample.contains("](") && sample.contains("[") { return true }
+        if sample.contains("**") || sample.contains("__") { return true }
+        if sample.contains("`") { return true }
+        if sample.contains("> ") || sample.contains("\n> ") { return true }
+        if sample.contains("---") || sample.contains("\n---\n") { return true }
+
+        if sample.contains("|"),
+           sample.contains("\n|"),
+           sample.contains("| ---") || sample.contains("|---") || sample.contains("--- |") {
+            return true
+        }
+
+        return false
+    }
+
     static func isLikelyMarkdown(_ text: String) -> Bool {
         if text.isEmpty { return false }
         // Hover preview never renders Markdown for extremely large payloads anyway; keep detection cheap.

@@ -6,7 +6,7 @@ import ScopyKit
 
 @MainActor
 final class HistoryItemRowDescriptorTests: XCTestCase {
-    func testInjectedDependenciesDriveDisplayPreviewAndExportFields() throws {
+    func testInjectedDependenciesDriveDisplayAndPreviewFields() throws {
         let item = makeItem(
             type: .file,
             plainText: "/tmp/source.md",
@@ -19,7 +19,6 @@ final class HistoryItemRowDescriptorTests: XCTestCase {
             isMarkdown: true,
             shouldGenerateThumbnail: true
         )
-        var exportReceivedPreviewPath: String?
         let descriptor = HistoryItemRowDescriptor(
             item: item,
             settings: settings(showThumbnails: true, thumbnailHeight: 72),
@@ -31,11 +30,6 @@ final class HistoryItemRowDescriptorTests: XCTestCase {
                 filePreview: { received in
                     XCTAssertEqual(received.id, item.id)
                     return preview
-                },
-                canExportPNG: { received, filePreview in
-                    XCTAssertEqual(received.id, item.id)
-                    exportReceivedPreviewPath = filePreview?.path
-                    return true
                 }
             )
         )
@@ -49,11 +43,9 @@ final class HistoryItemRowDescriptorTests: XCTestCase {
         XCTAssertEqual(descriptor.filePreviewPath, "/tmp/source.md")
         XCTAssertEqual(descriptor.filePreviewKind, .other)
         XCTAssertTrue(descriptor.filePreviewIsMarkdown)
-        XCTAssertTrue(descriptor.canExportPNG)
         XCTAssertTrue(descriptor.canShowFileThumbnail)
         XCTAssertTrue(descriptor.needsThumbnailHeight)
         XCTAssertEqual(descriptor.appIconBundleID, "com.scopy.source")
-        XCTAssertEqual(exportReceivedPreviewPath, "/tmp/source.md")
     }
 
     func testTextItemDoesNotUseFileThumbnailHeightAndMirrorsAppIconBundleID() {
@@ -65,8 +57,7 @@ final class HistoryItemRowDescriptorTests: XCTestCase {
             dependencies: dependencies(
                 title: "Text title",
                 metadata: "Text metadata",
-                filePreview: nil,
-                canExportPNG: false
+                filePreview: nil
             )
         )
 
@@ -79,7 +70,6 @@ final class HistoryItemRowDescriptorTests: XCTestCase {
         XCTAssertNil(descriptor.filePreviewPath)
         XCTAssertNil(descriptor.filePreviewKind)
         XCTAssertFalse(descriptor.filePreviewIsMarkdown)
-        XCTAssertFalse(descriptor.canExportPNG)
         XCTAssertFalse(descriptor.canShowFileThumbnail)
         XCTAssertFalse(descriptor.needsThumbnailHeight)
     }
@@ -155,7 +145,7 @@ final class HistoryItemRowDescriptorTests: XCTestCase {
         XCTAssertEqual(disabledByPreview.filePreviewKind, .other)
     }
 
-    func testMarkdownFilePreviewAndTextExportCapabilityStaySeparate() {
+    func testMarkdownFilePreviewAndTextPreviewFieldsStaySeparate() {
         let markdownFile = makeItem(type: .file, plainText: "/tmp/note.md")
         let markdownPreview = makePreviewSummary(
             path: "/tmp/note.md",
@@ -166,36 +156,115 @@ final class HistoryItemRowDescriptorTests: XCTestCase {
         let fileDescriptor = HistoryItemRowDescriptor(
             item: markdownFile,
             settings: settings(),
-            dependencies: dependencies(filePreview: markdownPreview, canExportPNG: true)
+            dependencies: dependencies(filePreview: markdownPreview)
         )
 
         let markdownText = makeItem(type: .text, plainText: "# Title")
         let textDescriptor = HistoryItemRowDescriptor(
             item: markdownText,
             settings: settings(),
-            dependencies: dependencies(filePreview: nil, canExportPNG: true)
+            dependencies: dependencies(filePreview: nil)
         )
 
         XCTAssertTrue(fileDescriptor.filePreviewIsMarkdown)
         XCTAssertEqual(fileDescriptor.filePreviewPath, "/tmp/note.md")
-        XCTAssertTrue(fileDescriptor.canExportPNG)
         XCTAssertFalse(fileDescriptor.canShowFileThumbnail)
 
         XCTAssertFalse(textDescriptor.filePreviewIsMarkdown)
         XCTAssertNil(textDescriptor.filePreviewPath)
-        XCTAssertTrue(textDescriptor.canExportPNG)
+    }
+
+    func testPresentationCacheReusesRowDescriptorForSameItemAndSettings() {
+        let item = makeItem(type: .text, plainText: "cached descriptor")
+        var displayCallCount = 0
+        var filePreviewCallCount = 0
+        HistoryItemPresentationCache.shared.clearCaches()
+
+        let cachedSettings = settings()
+        let dependencies = HistoryItemRowDescriptor.Dependencies(
+            displayTexts: { _ in
+                displayCallCount += 1
+                return (title: "Cached title", metadata: "Cached metadata")
+            },
+            filePreview: { _ in
+                filePreviewCallCount += 1
+                return nil
+            }
+        )
+
+        let first = HistoryItemPresentationCache.shared.rowDescriptor(
+            for: item,
+            settings: cachedSettings,
+            dependencies: dependencies
+        )
+        let second = HistoryItemPresentationCache.shared.rowDescriptor(
+            for: item,
+            settings: cachedSettings,
+            dependencies: HistoryItemRowDescriptor.Dependencies(
+                displayTexts: { _ in
+                    XCTFail("Expected cached row descriptor to skip display text recomputation")
+                    return (title: "Unexpected", metadata: "Unexpected")
+                },
+                filePreview: { _ in
+                    XCTFail("Expected cached row descriptor to skip file preview recomputation")
+                    return nil
+                }
+            )
+        )
+
+        XCTAssertEqual(first.titleText, "Cached title")
+        XCTAssertEqual(second.titleText, "Cached title")
+        XCTAssertEqual(second.metadataText, "Cached metadata")
+        XCTAssertEqual(displayCallCount, 1)
+        XCTAssertEqual(filePreviewCallCount, 1)
+    }
+
+    func testPresentationCacheSeparatesRowDescriptorsByThumbnailSettings() {
+        let item = makeItem(type: .image, plainText: "image")
+        var displayCallCount = 0
+        HistoryItemPresentationCache.shared.clearCaches()
+
+        let dependencies = HistoryItemRowDescriptor.Dependencies(
+            displayTexts: { _ in
+                displayCallCount += 1
+                return (title: "Image", metadata: "10 KB")
+            },
+            filePreview: { _ in nil }
+        )
+
+        let compact = HistoryItemPresentationCache.shared.rowDescriptor(
+            for: item,
+            settings: settings(showThumbnails: true, thumbnailHeight: 40),
+            dependencies: dependencies
+        )
+        let large = HistoryItemPresentationCache.shared.rowDescriptor(
+            for: item,
+            settings: settings(showThumbnails: true, thumbnailHeight: 80),
+            dependencies: dependencies
+        )
+
+        XCTAssertEqual(compact.thumbnailHeight, 40)
+        XCTAssertEqual(large.thumbnailHeight, 80)
+        XCTAssertEqual(displayCallCount, 2)
+    }
+
+    func testRowDescriptorDoesNotPopulateMarkdownExportCapability() {
+        let item = makeItem(type: .text, plainText: "# Title\n\nBody")
+        HistoryItemPresentationCache.shared.clearCaches()
+
+        _ = HistoryItemPresentationCache.shared.rowDescriptor(for: item, settings: settings())
+
+        XCTAssertNil(HistoryItemPresentationCache.shared.cachedMarkdownExportCapability(for: item))
     }
 
     private func dependencies(
         title: String = "Title",
         metadata: String = "Metadata",
-        filePreview: FilePreviewSummary? = nil,
-        canExportPNG: Bool = false
+        filePreview: FilePreviewSummary? = nil
     ) -> HistoryItemRowDescriptor.Dependencies {
         HistoryItemRowDescriptor.Dependencies(
             displayTexts: { _ in (title: title, metadata: metadata) },
-            filePreview: { _ in filePreview },
-            canExportPNG: { _, _ in canExportPNG }
+            filePreview: { _ in filePreview }
         )
     }
 

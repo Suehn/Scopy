@@ -6,6 +6,21 @@ enum HistoryItemMarkdownExportController {
     private static let exportResolutionPercentUserDefaultsKey = "ScopyMarkdownExportResolutionPercent"
     private static let uiTestExportResolutionEnvKey = "SCOPY_UITEST_MARKDOWN_EXPORT_RESOLUTION"
 
+    static func canOfferPNGMenuItem(item: ClipboardItemDTO, filePreviewInfo: FilePreviewInfo?) -> Bool {
+        switch item.type {
+        case .text, .rtf, .html:
+            if let cached = HistoryItemPresentationCache.shared.cachedMarkdownExportCapability(for: item) {
+                return cached
+            }
+            return MarkdownDetector.hasFastMarkdownSignal(item.plainText)
+        case .file:
+            guard let info = filePreviewInfo else { return false }
+            return FilePreviewSupport.isMarkdownFile(info.url)
+        default:
+            return false
+        }
+    }
+
     static func canExportPNG(item: ClipboardItemDTO, filePreviewInfo: FilePreviewInfo?) -> Bool {
         switch item.type {
         case .text, .rtf, .html:

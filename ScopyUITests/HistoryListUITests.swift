@@ -25,7 +25,6 @@ final class HistoryListUITests: XCTestCase {
         app = XCUIApplication()
         app.launchArguments = ["--uitesting"]
         app.launch()
-        _ = prepareMainWindow()
     }
 
     override func tearDown() async throws {
@@ -58,6 +57,10 @@ final class HistoryListUITests: XCTestCase {
 
     private var profileSnapshotDBPath: String? {
         envValue("SCOPY_UI_PROFILE_DB_PATH")
+    }
+
+    private var profileSkipAXListQuery: Bool {
+        envValue("SCOPY_PROFILE_SKIP_AX_LIST_QUERY") == "1"
     }
 
     // MARK: - List Display Tests
@@ -358,18 +361,27 @@ final class HistoryListUITests: XCTestCase {
         app.launchEnvironment["SCOPY_PROFILE_AUTO_SCROLL"] = autoScroll
 
         app.launch()
-        _ = prepareMainWindow()
 
-        let list = app.anyElement("History.List")
-        guard list.waitForExistence(timeout: 15) else {
-            XCTFail("List not found")
-            return
-        }
-
-        if autoScroll == "0" {
-            exerciseScroll(on: list, durationSeconds: resolvedDuration)
-        } else {
+        let skippedAXListQuery = profileSkipAXListQuery
+        if skippedAXListQuery {
+            if autoScroll == "0" {
+                throw XCTSkip("Manual scroll profile requires AX list access")
+            }
             waitForAutomatedScroll(durationSeconds: resolvedDuration)
+        } else {
+            _ = prepareMainWindow()
+
+            let list = app.anyElement("History.List")
+            guard list.waitForExistence(timeout: 15) else {
+                XCTFail("List not found")
+                return
+            }
+
+            if autoScroll == "0" {
+                exerciseScroll(on: list, durationSeconds: resolvedDuration)
+            } else {
+                waitForAutomatedScroll(durationSeconds: resolvedDuration)
+            }
         }
 
         let predicate = NSPredicate { _, _ in
@@ -381,7 +393,17 @@ final class HistoryListUITests: XCTestCase {
 
         let data = try Data(contentsOf: URL(fileURLWithPath: profilePath))
         var json = try JSONSerialization.jsonObject(with: data, options: []) as? [String: Any]
-        let accessibilityQuery = measureAccessibilityQuery(listAlreadyFound: true)
+        let accessibilityQuery: [String: Any]
+        if skippedAXListQuery {
+            accessibilityQuery = [
+                "list_exists": NSNull(),
+                "list_query_skipped": true,
+                "history_item_query_skipped": true,
+                "history_item_query_skip_reason": "disabled_xcode27_ax_list_query"
+            ]
+        } else {
+            accessibilityQuery = measureAccessibilityQuery(listAlreadyFound: true)
+        }
         json?["xctest_accessibility_query"] = accessibilityQuery
         if let json,
            let updatedData = try? JSONSerialization.data(withJSONObject: json, options: [.prettyPrinted]) {
@@ -399,16 +421,15 @@ final class HistoryListUITests: XCTestCase {
     }
 
     private func exerciseScroll(on list: XCUIElement, durationSeconds: TimeInterval) {
-        let window = app.windows.firstMatch
-        guard window.waitForExistence(timeout: 5) else { return }
-        if window.isHittable {
-            window.click()
+        guard list.waitForExistence(timeout: 5) else { return }
+        if list.isHittable {
+            list.click()
         }
 
         let endTime = Date().addingTimeInterval(durationSeconds)
         var step = 0
         while Date() < endTime {
-            guard window.exists else {
+            guard list.exists else {
                 usleep(120_000)
                 continue
             }

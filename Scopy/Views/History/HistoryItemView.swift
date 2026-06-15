@@ -82,7 +82,7 @@ struct HistoryItemView: View, Equatable {
         self.isFilePreviewPresented = isFilePreviewPresented
         self.requestPopover = requestPopover
         self.dismissOtherPopovers = dismissOtherPopovers
-        self.descriptor = HistoryItemRowDescriptor(item: item, settings: settings)
+        self.descriptor = HistoryItemPresentationCache.shared.rowDescriptor(for: item, settings: settings)
         let initialRelativeTimeText = Self.makeRelativeTimeString(for: item.lastUsedAt)
         _rowController = StateObject(wrappedValue: HistoryItemRowController(relativeTimeText: initialRelativeTimeText))
     }
@@ -397,8 +397,8 @@ struct HistoryItemView: View, Equatable {
         descriptor.filePreviewIsMarkdown
     }
 
-    private var canExportPNG: Bool {
-        descriptor.canExportPNG
+    private var canOfferPNGExport: Bool {
+        HistoryItemMarkdownExportController.canOfferPNGMenuItem(item: item, filePreviewInfo: filePreviewInfo)
     }
 
     private var canShowFileThumbnail: Bool {
@@ -701,7 +701,7 @@ struct HistoryItemView: View, Equatable {
                 }
                 .accessibilityIdentifier("HistoryItem.ContextMenu.PasteOptimizedForCodex")
             }
-            if canExportPNG {
+            if canOfferPNGExport {
                 Button("Export PNG") {
                     startExportPNGTask()
                 }
@@ -957,6 +957,15 @@ struct HistoryItemView: View, Equatable {
         let currentItem = item
         let currentSettings = settings
         let currentFilePreviewInfo = filePreviewInfo
+
+        guard HistoryItemMarkdownExportController.canExportPNG(
+            item: currentItem,
+            filePreviewInfo: currentFilePreviewInfo
+        ) else {
+            rowController.finishExportingPNG(message: "Export failed")
+            scheduleExportMessageReset()
+            return
+        }
 
         exportActionTask = Task { @MainActor in
             guard let markdownSource = await HistoryItemMarkdownExportController.loadMarkdownSource(

@@ -19,16 +19,17 @@ This page is the human-facing index for current release state. Automation should
 ## Current Release
 
 <!-- release-current:start -->
-- Version: `v0.8.7`
-- Date: `2026-06-07`
-- Release note: [v0.8.7](./history/v0.8.7.md)
+- Version: `v0.8.8`
+- Date: `2026-06-15`
+- Release note: [v0.8.8](./history/v0.8.8.md)
 - Changelog: [CHANGELOG.md](./CHANGELOG.md)
-- Profile doc: `none`
+- Profile doc: [v0.8.8 profile](../perf/release-profiles/v0.8.8-profile.md)
 <!-- release-current:end -->
 
 ## Recent Releases
 
 <!-- release-recent:start -->
+- `2026-06-15` [v0.8.8](./history/v0.8.8.md) - Scroll row cache and lazy Markdown export checks
 - `2026-06-07` [v0.8.7](./history/v0.8.7.md) - WACZ root Markdown table parity
 - `2026-06-07` [v0.8.6](./history/v0.8.6.md) - WACZ TableContainer Markdown table parity
 - `2026-05-30` [v0.8.5](./history/v0.8.5.md) - File-backed image paste preservation and README visual polish
@@ -39,7 +40,6 @@ This page is the human-facing index for current release state. Automation should
 - `2026-05-16` [v0.8.0](./history/v0.8.0.md) - Unified Markdown renderer preview and export hardening
 - `2026-05-09` [v0.7.9](./history/v0.7.9.md) - Search focus selection restoration and TSan host shortcut coverage fix
 - `2026-05-08` [v0.7.8](./history/v0.7.8.md) - History actions pinned pagination Codex Control-V paste and full image AirDrop coverage
-- `2026-05-07` [v0.7.7](./history/v0.7.7.md) - Hover preview pipeline storage cleanup exact search quality manifests and archive context path stability
 - `2026-04-30` [v0.7.5](./history/v0.7.5.md) - Presentation cache reuse fuzzy top-K reuse and settings delta cleanup
 <!-- release-recent:end -->
 

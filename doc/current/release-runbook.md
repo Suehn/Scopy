@@ -2,9 +2,10 @@
 doc_type: runbook
 status: active
 owner: maintainers
-last_reviewed: 2026-05-08
+last_reviewed: 2026-06-15
 canonical: true
 related_versions:
+  - v0.8.8
   - v0.8.1
   - v0.8.0
   - v0.7.8
@@ -69,14 +70,11 @@ related_versions:
 
 ## Current Performance Evidence
 
-The current release `v0.8.1` does not add a dedicated release profile. Its release evidence lives in the release note because the changes are constrained to the bundled Markdown renderer pipeline and generated preview/export asset rather than search, storage, thumbnail, or scrolling hot paths.
+The current release `v0.8.8` is a frontend scroll performance patch with a dedicated profile: [v0.8.8](../perf/release-profiles/v0.8.8-profile.md).
 
-- `make build`, `make test-unit`, and `make test-strict` passed on 2026-05-16 for the Markdown code highlighting fix.
-- Focused Markdown preview/export UI tests passed on 2026-05-16.
-- The Markdown renderer Node test suite passed on 2026-05-16 and locks explicit-code highlighting without enabling language auto-detection.
-- The latest dedicated profile remains [v0.7.6](../perf/release-profiles/v0.7.6-profile.md), which used the real snapshot DB at `perf-db/clipboard.db` (6421 items / 148647936 bytes) for row descriptor and thumbnail scheduler evidence.
-
-Do not treat `v0.8.1` as a blanket frontend performance release. Use the v0.7.6 profile for row/thumbnail scheduler regression context and the v0.8.1 release note for renderer-specific evidence.
+- `make build`, `make test-unit`, `make test-strict`, and `make test-snapshot-perf-release` passed on 2026-06-15 with Xcode 27 beta.
+- The real snapshot smoke profile removed `text.markdown_detect_ms` from long-frame attribution and reduced the text-bias scenario to `frame_p95_ms=16.667`, `drop_ratio=0`, and zero long frames.
+- The release was cut before refreshing `perf-frontend-profile-standard` because the macOS session was locked and Xcode recorded only the lock screen. Rerun the standard and hover profiles after unlock before using v0.8.8 as final frontend benchmark baseline.
 
 ## Homebrew Acceptance
 

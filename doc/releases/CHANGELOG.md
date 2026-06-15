@@ -11,6 +11,26 @@
 
 - No unreleased entries.
 
+## [v0.8.8] - 2026-06-15
+
+### Performance
+
+- Caches history row descriptors in the shared presentation cache, keyed by item identity and relevant display settings, so scroll rendering does not rebuild the same row display model repeatedly.
+- Removes exact Markdown PNG export capability detection from row descriptor construction and makes the row context menu use a fast Markdown signal before the exact export check runs only when the action is invoked.
+- Keeps text prewarm focused on file preview metadata instead of populating text Markdown capability during scroll-facing prewarm work.
+- Leaves thumbnail decoding and scheduling unchanged for a later optimization pass.
+
+### Tooling
+
+- Replaces the hidden SwiftUI `MenuBarExtra` placeholder scene with a `Settings` scene so Xcode 27 beta UI automation no longer sees an internal `Item-0` menu-bar window while profiling.
+- Skips the profile-only unbounded XCUITest list query in the frontend profile harness to avoid Xcode 27 beta recursive accessibility snapshot failures; app-side scroll metrics remain the source of profile evidence.
+
+### Verification
+
+- Xcode 27 beta local gates passed: `make build`, `make test-unit`, `make test-strict`, and `make test-snapshot-perf-release`.
+- Frontend scroll smoke profile on the real snapshot DB shows the text-bias scenario at `frame_p95_ms=16.667`, `drop_ratio=0`, `main_runloop_active_p95_ms=11.600`, and zero long frames after the row/Markdown changes.
+- `perf-frontend-profile-standard` was not rerun before tagging because the active macOS session was locked; the release uses the saved smoke profile and will refresh the standard profile after unlock.
+
 ## [v0.8.7] - 2026-06-07
 
 ### Markdown/Preview

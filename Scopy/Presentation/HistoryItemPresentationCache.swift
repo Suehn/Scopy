@@ -13,6 +13,16 @@ final class HistoryItemPresentationCache {
         let textLength: Int
     }
 
+    private struct RowDescriptorCacheKey: Hashable {
+        let itemKey: CacheKey
+        let note: String?
+        let sizeBytes: Int
+        let fileSizeBytes: Int?
+        let appBundleID: String?
+        let showImageThumbnails: Bool
+        let thumbnailHeight: Int
+    }
+
     private struct FilePreviewCacheValue: Sendable {
         let summary: FilePreviewSummary?
     }
@@ -23,18 +33,41 @@ final class HistoryItemPresentationCache {
     }
 
     private struct PrewarmEntry: Sendable {
-        let filePreviewKey: CacheKey?
-        let filePreviewValue: FilePreviewCacheValue?
-        let markdownKey: CacheKey?
-        let markdownValue: Bool?
+        let filePreviewKey: CacheKey
+        let filePreviewValue: FilePreviewCacheValue
     }
 
     private let cacheLimit = 4_096
 
+    private var rowDescriptorCache: [RowDescriptorCacheKey: HistoryItemRowDescriptor] = [:]
     private var filePreviewCache: [CacheKey: FilePreviewCacheValue] = [:]
     private var markdownCapabilityCache: [CacheKey: Bool] = [:]
 
     private init() {
+    }
+
+    func rowDescriptor(
+        for item: ClipboardItemDTO,
+        settings: SettingsDTO,
+        dependencies: HistoryItemRowDescriptor.Dependencies? = nil
+    ) -> HistoryItemRowDescriptor {
+        let dependencies = dependencies ?? .live
+        trimCachesIfNeeded()
+
+        let key = Self.rowDescriptorCacheKey(for: item, settings: settings)
+        if let cached = rowDescriptorCache[key] {
+            return cached
+        }
+
+        let descriptor = HistoryItemRowDescriptor(
+            item: item,
+            settings: settings,
+            dependencies: dependencies
+        )
+        if rowDescriptorCache.count < cacheLimit || rowDescriptorCache[key] != nil {
+            rowDescriptorCache[key] = descriptor
+        }
+        return descriptor
     }
 
     func filePreview(for item: ClipboardItemDTO) -> FilePreviewSummary? {
@@ -72,12 +105,9 @@ final class HistoryItemPresentationCache {
     @discardableResult
     func prewarm(items: [ClipboardItemDTO]) -> Task<Void, Never>? {
         let snapshots = items.compactMap { item -> PrewarmSnapshot? in
-            switch item.type {
-            case .file, .text, .rtf, .html:
-                return PrewarmSnapshot(key: Self.cacheKey(for: item), plainText: item.plainText)
-            default:
-                return nil
-            }
+            item.type == .file
+                ? PrewarmSnapshot(key: Self.cacheKey(for: item), plainText: item.plainText)
+                : nil
         }
         guard !snapshots.isEmpty else { return nil }
 
@@ -86,34 +116,19 @@ final class HistoryItemPresentationCache {
             entries.reserveCapacity(snapshots.count)
 
             for snapshot in snapshots {
-                switch snapshot.key.type {
-                case .file:
-                    entries.append(
-                        PrewarmEntry(
-                            filePreviewKey: snapshot.key,
-                            filePreviewValue: FilePreviewCacheValue(
-                                summary: Self.computeFilePreview(plainText: snapshot.plainText)
-                            ),
-                            markdownKey: nil,
-                            markdownValue: nil
+                entries.append(
+                    PrewarmEntry(
+                        filePreviewKey: snapshot.key,
+                        filePreviewValue: FilePreviewCacheValue(
+                            summary: Self.computeFilePreview(plainText: snapshot.plainText)
                         )
                     )
-                case .text, .rtf, .html:
-                    entries.append(
-                        PrewarmEntry(
-                            filePreviewKey: nil,
-                            filePreviewValue: nil,
-                            markdownKey: snapshot.key,
-                            markdownValue: MarkdownDetector.isLikelyMarkdown(snapshot.plainText)
-                        )
-                    )
-                default:
-                    break
-                }
+                )
             }
 
+            let preparedEntries = entries
             await MainActor.run {
-                HistoryItemPresentationCache.shared.storePrewarmEntries(entries)
+                HistoryItemPresentationCache.shared.storePrewarmEntries(preparedEntries)
             }
         }
 
@@ -123,6 +138,10 @@ final class HistoryItemPresentationCache {
     func cachedFilePreview(for item: ClipboardItemDTO) -> FilePreviewSummary? {
         guard item.type == .file else { return nil }
         return filePreviewCache[Self.cacheKey(for: item)]?.summary
+    }
+
+    func cachedRowDescriptor(for item: ClipboardItemDTO, settings: SettingsDTO) -> HistoryItemRowDescriptor? {
+        rowDescriptorCache[Self.rowDescriptorCacheKey(for: item, settings: settings)]
     }
 
     func cachedMarkdownExportCapability(for item: ClipboardItemDTO) -> Bool? {
@@ -140,6 +159,7 @@ final class HistoryItemPresentationCache {
     }
 
     func clearCaches() {
+        rowDescriptorCache.removeAll(keepingCapacity: true)
         filePreviewCache.removeAll(keepingCapacity: true)
         markdownCapabilityCache.removeAll(keepingCapacity: true)
     }
@@ -173,16 +193,16 @@ final class HistoryItemPresentationCache {
         trimCachesIfNeeded()
 
         for entry in entries {
-            if let key = entry.filePreviewKey, let value = entry.filePreviewValue, filePreviewCache.count < cacheLimit {
-                filePreviewCache[key] = value
-            }
-            if let key = entry.markdownKey, let value = entry.markdownValue, markdownCapabilityCache.count < cacheLimit {
-                markdownCapabilityCache[key] = value
+            if filePreviewCache.count < cacheLimit {
+                filePreviewCache[entry.filePreviewKey] = entry.filePreviewValue
             }
         }
     }
 
     private func trimCachesIfNeeded() {
+        if rowDescriptorCache.count > cacheLimit {
+            rowDescriptorCache.removeAll(keepingCapacity: true)
+        }
         if filePreviewCache.count > cacheLimit {
             filePreviewCache.removeAll(keepingCapacity: true)
         }
@@ -196,6 +216,21 @@ final class HistoryItemPresentationCache {
             ? "\(item.id.uuidString)-\(item.plainText.hashValue)"
             : item.contentHash
         return CacheKey(type: item.type, contentKey: contentKey, textLength: item.plainText.utf16.count)
+    }
+
+    private static func rowDescriptorCacheKey(
+        for item: ClipboardItemDTO,
+        settings: SettingsDTO
+    ) -> RowDescriptorCacheKey {
+        RowDescriptorCacheKey(
+            itemKey: cacheKey(for: item),
+            note: item.note,
+            sizeBytes: item.sizeBytes,
+            fileSizeBytes: item.fileSizeBytes,
+            appBundleID: item.appBundleID,
+            showImageThumbnails: settings.showImageThumbnails,
+            thumbnailHeight: settings.thumbnailHeight
+        )
     }
 
     private nonisolated static func isMarkdownCandidate(type: ClipboardItemType) -> Bool {
