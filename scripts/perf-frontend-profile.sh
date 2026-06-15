@@ -18,6 +18,7 @@ MIN_SAMPLES=260
 SKIP_SETUP=0
 DESTINATION="platform=macOS"
 INCLUDE_HOVER=0
+SKIP_AX_LIST_QUERY="${SCOPY_PROFILE_SKIP_AX_LIST_QUERY:-0}"
 
 TEST_ACCESSIBILITY="ScopyUITests/HistoryListUITests/testScrollProfileRealSnapshotAccessibility"
 TEST_MIXED="ScopyUITests/HistoryListUITests/testScrollProfileRealSnapshotMixed"
@@ -47,6 +48,9 @@ Environment:
                          Enable the extra XCUI row-count diagnostic. It is off
                          by default because broad accessibility counts can hang
                          the smoke gate on large real snapshot datasets.
+  SCOPY_PROFILE_SKIP_AX_LIST_QUERY=1
+                         Skip the XCUI list lookup and rely on app-side
+                         automated scrolling. Default: 0.
 
 Outputs:
   <out>/raw/<variant>/*.json
@@ -153,43 +157,107 @@ run_variant_repeat() {
     perf_short_debounce=0
   fi
 
-  terminate_scopy_processes
-  local only_testing_args=(
-    -only-testing:"$TEST_ACCESSIBILITY"
-    -only-testing:"$TEST_MIXED"
-    -only-testing:"$TEST_TEXT_BIAS"
+  local profile_scenarios=(
+    "real-snapshot-accessibility"
+    "real-snapshot-mixed"
+    "real-snapshot-text-bias"
+  )
+  local profile_tests=(
+    "$TEST_ACCESSIBILITY"
+    "$TEST_MIXED"
+    "$TEST_TEXT_BIAS"
   )
   if [[ "$INCLUDE_HOVER" -eq 1 ]]; then
-    only_testing_args+=(
-      -only-testing:"$TEST_HOVER_MARKDOWN"
-      -only-testing:"$TEST_HOVER_IMAGE"
+    profile_scenarios+=(
+      "hover-preview-markdown-text"
+      "hover-preview-image"
+    )
+    profile_tests+=(
+      "$TEST_HOVER_MARKDOWN"
+      "$TEST_HOVER_IMAGE"
     )
   fi
 
-  if ! env \
-    TEST_RUNNER_SCOPY_RUN_PROFILE_UI_TESTS=1 \
-    TEST_RUNNER_SCOPY_UI_PROFILE_DB_PATH="$DB_PATH" \
-    TEST_RUNNER_SCOPY_UI_PROFILE_OUTPUT_DIR="$profile_dir" \
-    TEST_RUNNER_SCOPY_UI_PROFILE_RUN_ID="$run_id" \
-    TEST_RUNNER_SCOPY_UI_PROFILE_DURATION_SEC="$DURATION_SEC" \
-    TEST_RUNNER_SCOPY_UI_PROFILE_MIN_SAMPLES="$MIN_SAMPLES" \
-    TEST_RUNNER_SCOPY_PROFILE_SKIP_AX_LIST_QUERY=1 \
-    TEST_RUNNER_SCOPY_PERF_HISTORY_INDEX="$perf_index" \
-    TEST_RUNNER_SCOPY_PERF_SCROLL_RESOLVER_CACHE="$perf_scroll_cache" \
-    TEST_RUNNER_SCOPY_PERF_MARKDOWN_RESOLVER_CACHE="$perf_markdown_cache" \
-    TEST_RUNNER_SCOPY_PERF_PREVIEW_TASK_BUDGET="$perf_preview_budget" \
-    TEST_RUNNER_SCOPY_PERF_SHORT_QUERY_DEBOUNCE="$perf_short_debounce" \
-    xcodebuild test \
-      -project Scopy.xcodeproj \
-      -scheme Scopy \
-      -destination "$DESTINATION" \
-      "${only_testing_args[@]}" \
-      2>&1 | tee "$log_file"; then
+  run_profile_tests() {
+    local run_log="$1"
+    shift
+    local only_testing_args=()
+    local test_name
+    for test_name in "$@"; do
+      only_testing_args+=(-only-testing:"$test_name")
+    done
+
+    env \
+      TEST_RUNNER_SCOPY_RUN_PROFILE_UI_TESTS=1 \
+      TEST_RUNNER_SCOPY_UI_PROFILE_DB_PATH="$DB_PATH" \
+      TEST_RUNNER_SCOPY_UI_PROFILE_OUTPUT_DIR="$profile_dir" \
+      TEST_RUNNER_SCOPY_UI_PROFILE_RUN_ID="$run_id" \
+      TEST_RUNNER_SCOPY_UI_PROFILE_DURATION_SEC="$DURATION_SEC" \
+      TEST_RUNNER_SCOPY_UI_PROFILE_MIN_SAMPLES="$MIN_SAMPLES" \
+      TEST_RUNNER_SCOPY_PROFILE_SKIP_AX_LIST_QUERY="$SKIP_AX_LIST_QUERY" \
+      TEST_RUNNER_SCOPY_PERF_HISTORY_INDEX="$perf_index" \
+      TEST_RUNNER_SCOPY_PERF_SCROLL_RESOLVER_CACHE="$perf_scroll_cache" \
+      TEST_RUNNER_SCOPY_PERF_MARKDOWN_RESOLVER_CACHE="$perf_markdown_cache" \
+      TEST_RUNNER_SCOPY_PERF_PREVIEW_TASK_BUDGET="$perf_preview_budget" \
+      TEST_RUNNER_SCOPY_PERF_SHORT_QUERY_DEBOUNCE="$perf_short_debounce" \
+      xcodebuild test \
+        -project Scopy.xcodeproj \
+        -scheme Scopy \
+        -destination "$DESTINATION" \
+        "${only_testing_args[@]}" \
+        2>&1 | tee "$run_log"
+  }
+
+  missing_profile_indexes() {
+    local index
+    for index in "${!profile_scenarios[@]}"; do
+      local scenario="${profile_scenarios[$index]}"
+      local profile_path="$profile_dir/$scenario-$run_id.json"
+      if [[ ! -f "$profile_path" ]]; then
+        printf '%s\n' "$index"
+      fi
+    done
+  }
+
+  retry_missing_profiles_once() {
+    local missing
+    local retried=0
+    while IFS= read -r missing; do
+      [[ -n "$missing" ]] || continue
+      retried=1
+      local scenario="${profile_scenarios[$missing]}"
+      local test_name="${profile_tests[$missing]}"
+      local retry_log="$OUT_DIR/xcodebuild.$variant.$run_id.retry.$scenario.log"
+      echo "Retrying missing profile output: $variant/$scenario $run_id"
+      terminate_scopy_processes
+      run_profile_tests "$retry_log" "$test_name" || return 1
+    done < <(missing_profile_indexes)
+
+    if [[ "$retried" -eq 0 ]]; then
+      return 0
+    fi
+
+    local remaining
+    remaining="$(missing_profile_indexes)"
+    if [[ -n "$remaining" ]]; then
+      echo "Missing profile outputs after retry:" >&2
+      printf '%s\n' "$remaining" >&2
+      return 1
+    fi
+  }
+
+  terminate_scopy_processes
+  if ! run_profile_tests "$log_file" "${profile_tests[@]}"; then
     if grep -q "Not authorized for performing UI testing actions" "$log_file"; then
       echo "UI testing permission is missing. Enable Automation/Accessibility for XCTest/Xcode and rerun." >&2
     fi
-    return 1
+    if grep -q "Profile output not found" "$log_file"; then
+      retry_missing_profiles_once || return 1
+    else
+      return 1
+    fi
   fi
+  retry_missing_profiles_once || return 1
   terminate_scopy_processes
 }
 

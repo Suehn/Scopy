@@ -74,7 +74,10 @@ The current release `v0.8.8` is a frontend scroll performance patch with a dedic
 
 - `make build`, `make test-unit`, `make test-strict`, and `make test-snapshot-perf-release` passed on 2026-06-15 with Xcode 27 beta.
 - The real snapshot smoke profile removed `text.markdown_detect_ms` from long-frame attribution and reduced the text-bias scenario to `frame_p95_ms=16.667`, `drop_ratio=0`, and zero long frames.
-- The release was cut before refreshing `perf-frontend-profile-standard` because the macOS session was locked and Xcode recorded only the lock screen. Rerun the standard and hover profiles after unlock before using v0.8.8 as final frontend benchmark baseline.
+- The post-unlock full frontend profile passed with Xcode 27 beta and generated `logs/perf-frontend-profile-2026-06-15_14-10-22/frontend-scroll-profile-summary.json`. It has 18 raw JSON outputs: 3 repeats x 3 real snapshot scenarios x baseline/current.
+- The post-unlock unified table is `logs/perf-unified-2026-06-15_14-17-36.md`.
+- The post-unlock include-hover smoke profile passed and generated `logs/perf-frontend-profile-2026-06-15_14-19-43/frontend-scroll-profile-summary.json`.
+- The profile harness defaults to the XCUI list path. Use `SCOPY_PROFILE_SKIP_AX_LIST_QUERY=1` only as an escape hatch when investigating app-side automated scrolling.
 
 ## Homebrew Acceptance
 

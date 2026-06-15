@@ -7,9 +7,13 @@
 
 ## [Unreleased]
 
-### Notes
+### Tooling
 
-- No unreleased entries.
+- Stabilizes the frontend profile harness after the v0.8.8 release by defaulting unlocked runs back to the XCUI list path, exposing `SCOPY_PROFILE_SKIP_AX_LIST_QUERY=1` as an escape hatch, and retrying once when Xcode/XCUI finishes without writing the expected profile JSON.
+
+### Documentation
+
+- Records the post-unlock Xcode 27 beta `perf-frontend-profile-standard`, `perf-frontend-profile-full`, include-hover smoke, and unified-table evidence for v0.8.8.
 
 ## [v0.8.8] - 2026-06-15
 
