@@ -4,7 +4,7 @@
 .PHONY: all setup build run clean xcode test test-unit test-perf test-perf-heavy test-snapshot-perf test-snapshot-perf-release test-tsan test-strict coverage benchmark perf-audit perf-frontend-profile perf-frontend-profile-smoke perf-frontend-profile-standard perf-frontend-profile-full perf-unified-table test-flow test-flow-quick health-check quality-manifest-self-test
 .PHONY: test-real-db
 .PHONY: snapshot-perf-db bench-snapshot-search perf-search-warm-load perf-warm-scroll-ab
-.PHONY: tag-release push-release release-validate release-bump-patch
+.PHONY: tag-release push-release release-validate release-bump-patch test-release-policy
 
 VERSION_ARGS := $(shell bash scripts/version.sh --xcodebuild-args 2>/dev/null)
 LOG_DIR := logs
@@ -392,6 +392,7 @@ help:
 	@echo "  make tag-release  - Tag HEAD from doc/meta/release-current.yml"
 	@echo "  make push-release - Push main + current tag"
 	@echo "  make docs-validate - Validate canonical docs, metadata, and links"
+	@echo "  make test-release-policy - Test that workflows cannot create or push tags"
 	@echo ""
 	@echo "Requirements:"
 	@echo "  - Xcode 16.0+"
@@ -414,6 +415,9 @@ push-release:
 
 release-validate:
 	@bash scripts/release/validate-release-docs.sh
+
+test-release-policy:
+	@python3 -m unittest discover -s scripts/release/tests -p 'test_validate_workflow_tag_policy.py'
 
 docs-validate:
 	@bash scripts/docs/validate-docs.sh

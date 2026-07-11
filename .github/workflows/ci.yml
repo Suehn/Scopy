@@ -12,6 +12,23 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  release_policy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate canonical docs
+        run: make docs-validate
+
+      - name: Validate release metadata and workflow policy
+        run: make release-validate
+
+      - name: Test release workflow policy
+        run: make test-release-policy
+
   build:
     runs-on: macos-15
     env:

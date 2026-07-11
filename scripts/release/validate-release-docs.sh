@@ -36,5 +36,6 @@ if ! grep -Fq "## [${TAG}]" "${CHANGELOG}"; then
     exit 1
 fi
 
-echo "OK: ${TAG}"
+python3 scripts/release/validate_workflow_tag_policy.py
 
+echo "OK: ${TAG}"
