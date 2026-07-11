@@ -7,13 +7,56 @@
 
 ## [Unreleased]
 
+### Notes
+
+- No unreleased entries.
+
+## [v0.65.0] - 2026-07-10
+
+### Preview/Interaction
+
+- Adds a direction-aware safe triangle between a history row and its active preview popover, supporting every placement direction, diagonal placement, and negative multi-display screen coordinates.
+- Dismisses promptly when pointer intent leaves the corridor, reverses, stalls, loses its target, or reaches the bounded timeout.
+- Keeps popover-to-row handoff on the existing short fixed grace and prevents row re-entry from restarting an already-presented preview.
+- Adds list-level transfer ownership and parent-level presentation guards so adjacent rows cannot steal the active popover during a valid screen-edge corridor crossing.
+
+### Architecture/Performance
+
+- Separates pure hover-intent geometry from the bounded sampling controller and the narrow AppKit popover-window observer.
+- Samples pointer position only during row-to-popover transfer, for at most `500ms`, without publishing per-sample SwiftUI state.
+- Caches triangle geometry until the target window frame changes, leaving the steady-state sample path allocation-free.
+- Guards popover geometry and close callbacks with preview kind/token identity and tears down observers, sampling, and list ownership on every dismissal path.
+- Keeps idle history rows passive through one optional lazy interaction session instead of eager preview, note, export, and optimization controllers.
+- Replaces visible-row scroll broadcasts with one tokenized active slot and suppressed-hover candidate, restores stationary hover after cooldown, and limits pointer suppression to actual scrollbar interaction.
+- Carries explicit content revisions through asynchronous row work and centralizes bounded presentation/relative-time caching.
+- Removes a trace-selected row-body hotspot by caching positive and negative Markdown context-menu fast signals by content revision, while keeping exact PNG-export capability separate and authoritative.
+- Prewarms menu signals at utility priority with in-flight deduplication, bounded capacity, and cache-generation rejection so stale detached work cannot repopulate cleared presentation state.
+
+### Tests
+
+- Adds unit coverage for geometry, timing, malformed values, delayed/lost targets, controller cancellation and replacement, stale tokens, and list-level ownership.
+- Adds real Core Graphics mouse trajectories for progressive safe-corridor retention, outside-corridor dismissal, and popover-to-row reuse.
+- Adds lifecycle, content-revision, stale-token, hover restoration, scrollbar hit-testing, cache, relative-time, and metric-semantic coverage for passive rows.
+
 ### Tooling
 
-- Stabilizes the frontend profile harness after the v0.8.8 release by defaulting unlocked runs back to the XCUI list path, exposing `SCOPY_PROFILE_SKIP_AX_LIST_QUERY=1` as an escape hatch, and retrying once when Xcode/XCUI finishes without writing the expected profile JSON.
+- Makes the frontend profile deterministic and unattended: app-side scrolling starts from one post-launch notification, drives the production scroll view with `NSScreen CADisplayLink`, and does not depend on manual pointer movement or window activation.
+- Stages profile databases and in-progress JSON under `/tmp`, copying only completed evidence back to repository logs, and loads unit-test fixtures/assets from the test bundle to avoid Documents file-coordination stalls.
+- Separates Xcode app/test products into DerivedData while reserving `.build` for SwiftPM and final DMG artifacts, preventing repeat Release CodeSign failures caused by stale Finder/resource-fork metadata.
+- Makes `deploy.sh` options composable, including `release --no-launch`, and prints the retained build-log tail on failure instead of hiding the compiler or signer error.
 
 ### Documentation
 
 - Records the post-unlock Xcode 27 beta `perf-frontend-profile-standard`, `perf-frontend-profile-full`, include-hover smoke, and unified-table evidence for v0.8.8.
+- Resumes the Homebrew-monotonic version line at `v0.65.0` because `0.64` compares newer than `0.8.8`.
+- Adds a dedicated v0.65.0 profile that separates five-pair fixed AB/BA causal evidence from real-snapshot composite regression sampling, records the three-repeat text-biased variance without a false pass claim, and explicitly avoids FPS claims from callback intervals.
+
+### Verification
+
+- Fixed Release passive-row AB/BA passed all five pairs for equal work: whole-run row-body count `-66.49%`, row-body total `-61.07%`, main-run-loop total `-3.77%`, and main-run-loop p95 `-4.94%` at the medians.
+- The passive/passive Markdown menu-cache AB/BA passed all five pairs with equal row-body counts: row-body total `-92.09%`, main-run-loop total `-9.61%`, and main-run-loop p95 `-12.93%`; current had cache hits with zero measurement misses/uncached scans.
+- `make build`, `make test-unit` (701 executed, 1 skipped), `make test-strict` (701 executed, 1 skipped), and `make test-tsan` (681 executed, 1 skipped) passed with zero failures.
+- Snapshot Release, both fixed frontend AB/BA axes, backend control audit, and the unified performance table passed against the final 7,807-row snapshot DB. Final-source frontend smoke/standard outputs are complete; an earlier three-repeat full guard and its text-biased variance remain recorded without a causal pass claim.
 
 ## [v0.8.8] - 2026-06-15
 

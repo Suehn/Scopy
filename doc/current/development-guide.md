@@ -2,10 +2,10 @@
 doc_type: guide
 status: active
 owner: maintainers
-last_reviewed: 2026-05-08
+last_reviewed: 2026-07-11
 canonical: true
 related_versions:
-  - v0.7.8
+  - v0.65.0
 ---
 
 # Development Guide
@@ -14,7 +14,7 @@ This document is the canonical implementation guide for the current Scopy codeba
 
 ## Reference State
 
-- Reference release: `v0.7.8`
+- Reference release: `v0.65.0`
 - Version metadata: [../meta/release-current.yml](../meta/release-current.yml)
 - Active requirements: [product-spec.md](./product-spec.md)
 - Release workflow: [release-runbook.md](./release-runbook.md)
@@ -108,6 +108,17 @@ Search marker: `SCOPY_EXPORT_PDF_GLOBAL_SCALE_MISMATCH`
 
 Implication: preview/export work must remain background-safe and should not mutate unrelated persisted content.
 
+#### Hover Transfer Contract
+
+- `HistoryItemPreviewCoordinator` owns preview kind/token state, active popover screen geometry, fixed popover-exit cleanup, and the hover-intent controller. `HistoryItemView` starts and cancels transfer lifecycle but does not own geometry math.
+- `HoverPreviewIntentPolicy` is the pure geometry/time state machine. Keep it independent of AppKit, SwiftUI, wall-clock reads, and async scheduling so every placement direction and edge case stays deterministic.
+- `HoverPreviewIntentController` owns one cancellable `@MainActor` task, samples `NSEvent.mouseLocation` at approximately `16.67ms` only during row-to-popover transfer, and stops no later than `500ms`. It must not become observable.
+- `PopoverWindowObserver` is the narrow AppKit bridge. It reports `NSWindow.frame` in screen coordinates on attach, move, resize, and screen change; emits `nil` on close; deduplicates unchanged frames; and removes every notification observer during teardown.
+- Safe-triangle geometry is rebuilt only when the target frame changes. The steady-state sample path must not allocate collections or recompute angular tangents.
+- `HistoryListInteractionCoordinator` owns the active transfer item ID. Other rows may show visual hover, but must defer selection, dismissal, and preview work until the transfer ends; `HistoryListView` also guards cross-row dismissal/presentation to tolerate AppKit exit/enter ordering at screen edges.
+- The coordinator must reject stale geometry and close callbacks by preview kind and token. Row re-entry, target arrival, replacement, scroll, system close, explicit dismissal, invalidation, and teardown must release transfer ownership and cancel both fixed-delay and intent tasks exactly once.
+- Row-to-popover uses directional intent. Popover-to-row keeps the fixed `120ms` grace and does not reuse the triangle policy.
+
 ### 4.1 Storage Cleanup Execution
 
 1. `StorageService` builds repository `DeletePlan` values for cleanup-by-count, cleanup-by-age, cleanup-by-size, image-only cleanup, external-storage cleanup, and composite cleanup.
@@ -119,8 +130,13 @@ Implication: new cleanup variants should reuse the delete-plan executor unless t
 ### 4.5 List Interaction Coordination
 
 1. `HistoryListView` owns `HistoryListInteractionCoordinator` and passes it into rows / observers as list-scoped state.
-2. Row lifecycle should hold observation tokens, not raw UUID registrations, so observer cleanup is ownership-driven.
-3. Scroll and pointer suppression should stay list-local; do not reintroduce process-global hover/scroll coordination state.
+2. `HistoryItemView` keeps its passive descriptor and content revision directly, but creates one optional `HistoryItemInteractionState` only for a real hover/action or owned asynchronous lifetime. Do not restore eager row controllers.
+3. The coordinator owns one tokenized active slot and one suppressed-hover candidate. Row lifecycle holds ownership tokens, not broadcast observers or raw UUID registrations.
+4. Scroll-end cooldown may restore a stationary pointer only when item, revision, token, pointer location, and visibility still match.
+5. The AppKit adapter starts pointer suppression only when `NSScroller.testPart(_:)` identifies an actionable vertical or horizontal scroller part; mouse-up must match the originating token.
+6. Stable context-menu predicates belong in `HistoryItemPresentationCache`, keyed by `ClipboardItemContentRevision`. Keep `markdownMenuSignalCache` separate from the exact Markdown export-capability cache: exact `true` or `false` always wins, while the heuristic caches both outcomes, prewarms off-main, deduplicates in-flight work, and rejects stale generation completion.
+7. `HistoryRelativeTimeClock` and `HistoryItemPresentationCache` remain list/presentation concerns: pause ticking while scrolling or hidden, keep caches bounded, and invalidate by content revision.
+8. Scroll and pointer suppression stay list-local; do not reintroduce process-global hover/scroll coordination state.
 
 Implication: SwiftUI row rendering should remain decoupled from global singleton churn during fast scroll and preview suppression.
 
@@ -174,6 +190,7 @@ Implication: if you touch settings behavior, preserve the Save/Cancel model and 
 ### Baseline Build/Test
 
 - `make build`
+- `./deploy.sh release --no-launch` for a repeatable local Release build and `/Applications` install; Xcode products stay in isolated DerivedData while SwiftPM continues to own `.build`
 - `make test-unit`
 - `make test-strict` for concurrency-sensitive work
 - `make test-tsan` when the environment supports the hosted test path; the command auto-skips the known-bad `macOS 26.x + Xcode 26.2 (17C52)` hosted runtime combination
@@ -184,12 +201,15 @@ Implication: if you touch settings behavior, preserve the Save/Cancel model and 
 
 - `make test-snapshot-perf-release` for release-path backend perf gates
 - `make perf-search-warm-load` for backend full-index warm-load latency and peak RSS
+- `scripts/perf-warm-scroll-ab.sh` for causal fixed-workload comparisons. The default `passive-row` axis changes only `SCOPY_PERF_PASSIVE_ROW`; `--axis markdown-menu-cache` keeps both variants passive and changes only `SCOPY_PERF_MARKDOWN_MENU_SIGNAL_CACHE`. Require at least two repeats, exact AB/BA order validation, equal observed work, Release configuration, axis-specific counters, and all-pair improvement gates.
 - `make perf-frontend-profile` for daily frontend smoke
 - `make perf-frontend-profile-standard` before stronger local confidence
 - `make perf-frontend-profile-full` before release-grade validation
 - `scripts/perf-frontend-profile.sh --include-hover` when preview work needs direct hover-preview bucket evidence
 - `make perf-unified-table` when correlating frontend and backend evidence, including `warm-load-summary.json` when present
 - When a profile adds new evidence beyond the release note, add a versioned doc under `doc/perf/release-profiles/` and point `profile_doc` at it
+- XCTest performance inputs and in-progress outputs must use the test bundle, DerivedData, or `/tmp`, not runtime `#filePath` or direct repository paths under `~/Documents`. Copy only completed evidence back to `logs/` after the test succeeds.
+- Display-link callback intervals describe callback cadence, not presented frames. Never relabel them FPS without compositor-backed evidence.
 
 ### Documentation And Release Validation
 
@@ -225,6 +245,8 @@ Implication: if you touch settings behavior, preserve the Save/Cancel model and 
 - Touch preview UI, rendering pipeline, and `MarkdownExportService` together.
 - Keep hover preview planning in `HistoryHoverPreviewPipeline`; row views should apply typed events rather than own decode/cache/metric policy.
 - For hover-preview work, run a focused test plus `scripts/perf-frontend-profile.sh --include-hover` so Markdown and image hover buckets are present.
+- For hover-transfer changes, cover pure geometry/session behavior, controller cancellation and generation replacement, list-level transfer ownership, stale popover-token geometry, and XCUI trajectories both through and outside the real corridor.
+- Run strict-concurrency coverage because the controller lifecycle is task-based. Treat the include-hover frontend profile as a broad rendering regression smoke; do not claim it measures safe-triangle travel unless its automation explicitly crosses row-to-popover geometry.
 - For Markdown renderer fixes, update focused renderer tests such as `KaTeXRenderToStringTests` / `MarkdownMathRenderingTests`, and add export UI coverage when the PNG output contract changes.
 - Re-check pngquant settings interactions, preview latency, and output pasteboard behavior.
 

@@ -2,10 +2,10 @@
 doc_type: spec
 status: active
 owner: maintainers
-last_reviewed: 2026-05-08
+last_reviewed: 2026-07-11
 canonical: true
 related_versions:
-  - v0.7.8
+  - v0.65.0
 ---
 
 # Current Requirements
@@ -14,7 +14,7 @@ This document is the active requirements baseline for Scopy. Historical planning
 
 ## Reference State
 
-- Reference release: `v0.7.8`
+- Reference release: `v0.65.0`
 - Source of truth for current version metadata: [../meta/release-current.yml](../meta/release-current.yml)
 - Source of truth for development and implementation workflow: [development-guide.md](./development-guide.md)
 
@@ -42,6 +42,9 @@ Scopy is a native macOS clipboard manager for users who need durable clipboard h
 
 - Show recent history in a floating panel driven by a global hotkey.
 - Support incremental loading for large histories instead of blocking on full-history reads; pinned rows are loaded separately and do not consume the initial recent-page quota.
+- Keep an idle history row passive: preview, note, Markdown export, image optimization, popover, and feedback state should be created only for real interaction or owned work, then released when every owned task is idle.
+- Keep stable context-menu content predicates out of repeated row-body work. Cache the fast Markdown menu signal by content revision, keep it bounded, and preserve separately cached exact export capability as the authoritative result.
+- Coordinate scrolling with one list-owned active slot and one tokenized suppressed-hover candidate rather than broadcasting scroll state through every visible row. A stationary pointer should regain its valid hover after scroll cooldown, while stale tokens must never revive another row.
 - Allow per-item copy, pin/unpin, delete, and contextual actions, including AirDrop for images/files and Open Containing Folder for real file-backed items.
 - Allow file items to carry editable notes.
 
@@ -55,6 +58,9 @@ Scopy is a native macOS clipboard manager for users who need durable clipboard h
 ### Preview, Media, And Export
 
 - Provide hover previews for text, images, and files.
+- Keep an already-open preview stable while the pointer intentionally crosses from its history row to the preview, regardless of which side or corner hosts the popover. Retention applies only inside the directional corridor and while progress toward the preview continues; leaving the corridor, reversing, stalling, target loss, scroll/dismiss, or the `500ms` cap must close it promptly.
+- Returning from the preview to its row keeps only a short fixed handoff grace. Re-entering a row whose preview is already open must not restart preview preparation or flicker the popover.
+- Hover intent affects only transfer after a preview is open; it must not alter the user-configured hover preview trigger delay. While a transfer is active, adjacent rows must defer selection and preview ownership so screen-edge popover placement cannot steal the source preview.
 - Provide Markdown/LaTeX rendering with local CommonMark/GFM, footnotes, math, syntax highlighting, a safe HTML subset, and export-to-PNG.
 - Allow Markdown hover previews to adjust ChatGPT layout scale continuously from 80% to 200% from the preview itself, with light magnetic snapping at each 5% stop; the selected preview scale also controls PNG export launched from that preview. The preview control should stay compact until hover or drag interaction and should keep the last rendered Markdown visible while the new layout profile is prepared.
 - Allow optional pngquant-based compression for newly ingested images and exported Markdown/LaTeX PNGs.
@@ -117,6 +123,10 @@ Scopy is a native macOS clipboard manager for users who need durable clipboard h
   - `<= 5k` items: P95 `<= 50ms`
   - `10k-100k` items: first page P95 `<= 100-150ms`
 - Heavy I/O, hashing, indexing, cleanup, preview preparation, and export work should stay off the main thread.
+- Hover-intent sampling must be absolutely bounded, must not invalidate SwiftUI at sampling frequency, and must remain correct for negative screen coordinates, multi-display placement, live popover movement or resize, delayed geometry, adjacent-row crossings, and teardown.
+- Same-ID content replacement must invalidate stale preview, note, export, and presentation work. Image optimization may survive only the revision transition explicitly owned by its result.
+- Context-menu availability must preserve keyboard and accessibility behavior; performance work may cache stable predicates but must not defer menu availability until hover or conflate a heuristic Markdown signal with exact PNG-export capability.
+- Normal row/button/context-menu pointer events must not be classified as scrollbar interaction; suppression begins only for an actionable vertical or horizontal scroller part with matched down/up ownership.
 - The history view and search UI must remain usable on realistic snapshot databases, not just toy data.
 - Search typing focus and list selection remain independent: focusing the search field does not clear the selected row, and hover can still update row selection while the field is focused.
 

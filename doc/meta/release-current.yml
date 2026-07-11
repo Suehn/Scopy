@@ -1,20 +1,20 @@
-version: v0.8.8
-date: 2026-06-15
-release_doc: doc/releases/history/v0.8.8.md
+version: v0.65.0
+date: 2026-07-10
+release_doc: doc/releases/history/v0.65.0.md
 release_index: doc/releases/README.md
 changelog_file: doc/releases/CHANGELOG.md
-profile_doc: doc/perf/release-profiles/v0.8.8-profile.md
+profile_doc: doc/perf/release-profiles/v0.65.0-profile.md
 runbook_doc: doc/current/release-runbook.md
 spec_doc: doc/current/product-spec.md
 development_doc: doc/current/development-guide.md
 architecture_doc: doc/current/architecture.md
-last_verified_at: 2026-06-15
-summary: Scroll row cache and lazy Markdown export checks
+last_verified_at: 2026-07-11
+summary: Direction-aware preview, passive rows, and trace-selected menu caching
 verification:
   build: pass
   test_unit: pass
   test_strict: pass
-  test_tsan: not_run
+  test_tsan: pass
   test_perf_heavy: not_run
   test_snapshot_perf_release: pass
-  perf_frontend_profile: pass_smoke
+  perf_frontend_profile: pass_two_fixed_ab_axes_full_guard_variance_recorded

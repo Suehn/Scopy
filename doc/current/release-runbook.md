@@ -2,9 +2,10 @@
 doc_type: runbook
 status: active
 owner: maintainers
-last_reviewed: 2026-06-15
+last_reviewed: 2026-07-11
 canonical: true
 related_versions:
+  - v0.65.0
   - v0.8.8
   - v0.8.1
   - v0.8.0
@@ -39,6 +40,7 @@ related_versions:
 - Before the release tag exists on `HEAD`, `scripts/version.sh` intentionally resolves the nearest reachable release tag. A pre-tag `make release` is therefore only a Release-configuration compile smoke and must not be cited as evidence for the new target version.
 - Target-version release evidence starts after `make tag-release`: first verify `bash scripts/version.sh --xcodebuild-args` contains the target `MARKETING_VERSION`, then trust local tagged release builds or the GitHub tag workflow assets.
 - For post-release commits after the tagged release commit, version injection should inherit the nearest reachable release tag. Do not infer the current release from highest version-sort order, because historical tags such as `v0.64` can sort after newer chronological releases such as `v0.7.1`.
+- Homebrew version comparison is numeric, not chronological: `0.8.8 < 0.64 < 0.65.0`. Because historical `v0.64` shipped, the next distributable version is `v0.65.0`; do not publish `v0.8.9`, which Homebrew would still treat as older than `0.64`. Continue from `v0.65.x` or later after this repair.
 - Release packaging must use `scripts/version.sh --tag` as the single resolver for both injected version settings and the DMG filename; if they disagree, stop packaging.
 
 ## Release Steps
@@ -57,6 +59,10 @@ related_versions:
 - Release CI currently targets `macos-15`.
 - Hosted TSan CI also targets `macos-15` with Xcode 16.0 via [../../.github/workflows/tsan.yml](../../.github/workflows/tsan.yml).
 - Project baseline remains `macOS 14.0` and `Xcode 16.0` unless intentionally changed in project configuration and workflows.
+- Xcode app/test products use Xcode DerivedData; SwiftPM products and benchmark binaries use repository `.build`. Do not point Xcode `BUILD_DIR` at `.build`: mixing both build systems can retain file-provider/Finder metadata in an app bundle and make CodeSign fail with `resource fork, Finder information, or similar detritus not allowed`.
+- `./deploy.sh release --no-launch` uses an isolated DerivedData root at `~/Library/Developer/Xcode/DerivedData/Scopy-Deploy` by default. Override it only with `SCOPY_XCODE_DERIVED_DATA=<absolute-path>`; a failed build prints the retained log path and its last 80 lines.
+- `scripts/build-release.sh` uses the same isolation and retained-log contract for tagged packaging while keeping the final DMG under `.build/`.
+- XCTest runtime fixtures belong in the test bundle. Performance DB copies and in-progress JSON belong under `/tmp` or DerivedData; shell wrappers may copy completed evidence into repository `logs/` only after `xcodebuild` succeeds. This avoids file-coordination/TCC stalls in Documents-hosted worktrees.
 
 ## Verification Expectations
 
@@ -65,19 +71,31 @@ related_versions:
 - Perf-sensitive changes:
   - `make test-snapshot-perf-release`
   - `make perf-search-warm-load`
+  - `scripts/perf-warm-scroll-ab.sh` when a fixed frontend causal comparison exists
   - `make perf-frontend-profile-standard` before commit, or `make perf-frontend-profile-full` before release
   - `make perf-unified-table` when comparing frontend and backend evidence, including `warm-load-summary.json` from `perf-search-warm-load` / `perf-audit`
 
 ## Current Performance Evidence
 
-The current release `v0.8.8` is a frontend scroll performance patch with a dedicated profile: [v0.8.8](../perf/release-profiles/v0.8.8-profile.md).
+The current release `v0.65.0` adds direction-aware hover transfer and passive history rows without introducing a continuous pointer monitor or visible-row scroll broadcast.
 
-- `make build`, `make test-unit`, `make test-strict`, and `make test-snapshot-perf-release` passed on 2026-06-15 with Xcode 27 beta.
-- The real snapshot smoke profile removed `text.markdown_detect_ms` from long-frame attribution and reduced the text-bias scenario to `frame_p95_ms=16.667`, `drop_ratio=0`, and zero long frames.
-- The post-unlock full frontend profile passed with Xcode 27 beta and generated `logs/perf-frontend-profile-2026-06-15_14-10-22/frontend-scroll-profile-summary.json`. It has 18 raw JSON outputs: 3 repeats x 3 real snapshot scenarios x baseline/current.
-- The post-unlock unified table is `logs/perf-unified-2026-06-15_14-17-36.md`.
-- The post-unlock include-hover smoke profile passed and generated `logs/perf-frontend-profile-2026-06-15_14-19-43/frontend-scroll-profile-summary.json`.
-- The profile harness defaults to the XCUI list path. Use `SCOPY_PROFILE_SKIP_AX_LIST_QUERY=1` only as an escape hatch when investigating app-side automated scrolling.
+- Environment: Apple M3 Pro, arm64, macOS 15.7.3 (`24G419`), Xcode 26.1.1 (`17B100`).
+- The focused strict-concurrency performance test runs 100,000 cached `SafeTriangle.contains` checks in about `9.4ms` on average across five runs (`~94ns` per call, `1.617%` relative standard deviation).
+- One transfer samples for at most `500ms` at approximately `60Hz`, or about 31 checks; triangle construction runs only on initial geometry acquisition or a real popover frame change.
+- The Core Graphics UI trajectory stays outside the popover beyond the former `120ms` grace while making forward progress, then enters the preview; outside-corridor and popover-to-row paths are separate regressions.
+- Focused safe-triangle strict coverage: 37 passed; UI trajectory coverage: 3 passed; dedicated Markdown/image hover profile smoke: 2 passed with both expected JSON outputs.
+- The final five-pair Release fixed workload ran both AB and BA order automatically with identical observed work on all ten runs. Passive medians improved whole-run row-body count `66.49%`, row-body total `61.07%`, main-run-loop total `3.77%`, and main-run-loop p95 `4.94%`; every pair improved row-body count, row-body total, and run-loop total.
+- All fixed runs used `NSScreen CADisplayLink` and required no manual pointer movement. Callback cadence is not presented as FPS.
+- A live Release sample selected the follow-on bottleneck: 411 of 457 sampled row-body stacks entered the uncached Markdown context-menu signal scan. The implemented cache is revision-keyed, bounded, prewarmed off-main, generation-guarded, and semantically separate from exact export capability.
+- The final five-pair passive/passive `markdown-menu-cache` AB/BA completed the same 51,270px observed path in all ten runs with 1,135 row bodies per side. Current recorded 1,135 cache hits and zero measurement misses/uncached scans; median row-body total improved `92.09%`, main-run-loop total `9.61%`, and main-run-loop p95 `12.93%`, with row-body and run-loop totals improving in every pair.
+- Final-source 7,807-row real-snapshot smoke and standard profiles completed unattended. Standard main-run-loop p95 changed `-17.55%` for accessibility, `-13.85%` for mixed, and `+5.29%` for text-biased, while other metrics remained noisy. An earlier three-repeat full guard against 7,794 rows changed the same metric by `-5.19%`, `+3.16%`, and `+11.69%`; text-biased improved in two pairwise repeats and regressed in the third. Both remain explicit broad-profile observations, not pass claims.
+- The real-snapshot baseline disables five older feature flags together and is not an old-revision comparison; both variants retain passive rows and the Markdown menu cache. Use the two fixed AB/BA axes for causal v0.65.0 claims and do not attribute the full-profile variance to either new slice.
+- Full unit and strict-concurrency suites each executed 701 tests with 1 skip and 0 failures; TSan executed 681 tests with 1 skip, 0 failures, and no race reports.
+- Snapshot Release search: `cmd p95 0.092983ms` against 50ms and `cm p95 1.811981ms` against 20ms.
+- Release deployment succeeded twice consecutively without cleanup after moving Xcode products to DerivedData; `make build` also passed.
+- The backend columns in the final unified table intentionally use the same audit because this frontend task changed no backend algorithm: warm load `162.567ms`, peak RSS `131.938MB`; final artifact `logs/perf-unified-2026-07-11_15-32-45.md`.
+- Dedicated evidence and caveats are in [v0.65.0 Frontend Scroll Profile](../perf/release-profiles/v0.65.0-profile.md).
+- Full build, unit, strict-concurrency, TSan, snapshot-performance, documentation, and release validation results are mirrored in `doc/meta/release-current.yml` and the `v0.65.0` release note.
 
 ## Homebrew Acceptance
 
