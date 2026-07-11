@@ -177,7 +177,12 @@ struct HistoryListView: View {
                 .accessibilityHidden(true)
         )
         .onAppear {
-            relativeTimeClock.start()
+            // The fixed driver scrolls NSClipView directly, so AppKit does not publish the live-
+            // scroll notifications that normally pause this clock. Freeze its launch bucket for
+            // the controlled workload to keep a 30-second boundary out of the measurement window.
+            relativeTimeClock.start(
+                pausedForScrolling: ScrollPerformanceProfile.shared.usesFixedDriverAnimationSampler
+            )
             interactionSessionStore.reconcile(
                 snapshot: historyViewModel.contentRevisionReconciliationSnapshot
             )

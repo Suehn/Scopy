@@ -50,9 +50,14 @@ final class HistoryRelativeTimeClock {
         scheduledTick != nil
     }
 
-    func start() {
+    func start(pausedForScrolling: Bool = false) {
         guard !isRunning else { return }
         isRunning = true
+        if pausedForScrolling {
+            isScrolling = true
+            cancelScheduledTick()
+            return
+        }
         refreshAndSchedule()
     }
 

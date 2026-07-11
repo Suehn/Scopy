@@ -95,6 +95,26 @@ final class HistoryRelativeTimeClockTests: XCTestCase {
         XCTAssertTrue(clock.hasScheduledTick)
     }
 
+    func testPausedStartFreezesInitialBucketAcrossBoundaryUntilScrollEnds() {
+        let scheduler = ManualScheduler(timestamp: 29)
+        let clock = makeClock(scheduler)
+
+        clock.start(pausedForScrolling: true)
+        clock.setWindowVisible(true)
+        XCTAssertTrue(clock.isScrolling)
+        XCTAssertFalse(clock.hasScheduledTick)
+        XCTAssertEqual(clock.bucket, 0)
+
+        scheduler.advance(by: 31)
+        XCTAssertEqual(clock.bucket, 0)
+        XCTAssertFalse(clock.hasScheduledTick)
+
+        clock.scrollDidEnd()
+        XCTAssertFalse(clock.isScrolling)
+        XCTAssertEqual(clock.bucket, 2)
+        XCTAssertTrue(clock.hasScheduledTick)
+    }
+
     func testRelativeTimeCacheRetainsOneGenerationPerItem() {
         let item = makeItem()
         let cache = HistoryItemPresentationCache.shared
