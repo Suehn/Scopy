@@ -136,7 +136,7 @@ final class SQLiteStatement {
     }
 
     func bindInt(_ value: Int, at index: Int32) throws {
-        guard sqlite3_bind_int(statement, index, Int32(value)) == SQLITE_OK else {
+        guard sqlite3_bind_int64(statement, index, Int64(value)) == SQLITE_OK else {
             throw SQLiteConnection.SQLiteConnectionError.bindFailed(connection.errorMessage())
         }
     }
@@ -190,14 +190,14 @@ final class SQLiteStatement {
     }
 
     func columnInt(_ index: Int32) -> Int {
-        Int(sqlite3_column_int(statement, index))
+        Int(sqlite3_column_int64(statement, index))
     }
 
     func columnIntOptional(_ index: Int32) -> Int? {
         if sqlite3_column_type(statement, index) == SQLITE_NULL {
             return nil
         }
-        return Int(sqlite3_column_int(statement, index))
+        return Int(sqlite3_column_int64(statement, index))
     }
 
     func columnInt64(_ index: Int32) -> Int64 {

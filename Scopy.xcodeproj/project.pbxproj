@@ -321,6 +321,7 @@
 		6F43D8697DA17D09E5FDB74D /* cases.json in Resources */ = {isa = PBXBuildFile; fileRef = A5BFA4CCE67918642BDD2DB1 /* cases.json */; };
 		6F896CA05E16FE9004C9235E /* ThumbnailPipelineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4DC3860748ED4F3133AF0914 /* ThumbnailPipelineTests.swift */; };
 		6FFDEA0CB89B07D48CB3612B /* HoverPreviewIntentController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2A1B869A2AD61B9EF2050898 /* HoverPreviewIntentController.swift */; };
+		701C081E4034F9772B3E1F8D /* SQLiteIntegerWidthTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA1C5C44C2A823612D31233D /* SQLiteIntegerWidthTests.swift */; };
 		70D5747F23695105E2867484 /* ResourceCleanupTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E89CCE301327084364FDFDE1 /* ResourceCleanupTests.swift */; };
 		7166E945AC8A16163CC7B924 /* AppVersion.swift in Sources */ = {isa = PBXBuildFile; fileRef = 31ACAD6A6B51FB60D22EA0DA /* AppVersion.swift */; };
 		71EAAA7CEFEBB43FBF1D9E88 /* AppDelegateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 844C4C084D60F319E545D8E0 /* AppDelegateTests.swift */; };
@@ -500,6 +501,7 @@
 		A91C52F48BFDC092FB56BD9D /* SectionHeader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 72C7E22A4D3725C49208C650 /* SectionHeader.swift */; };
 		A91F181A47B2BA511885BD3B /* EmptyStateView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BACD4A1BF6DABAE83D2073AE /* EmptyStateView.swift */; };
 		A9AE6F48018DDCD6AE955F0A /* MathEnvironmentSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = BBD2BD25B039DA8458E6884A /* MathEnvironmentSupport.swift */; };
+		A9F4E5621B86D59B53860CDC /* SQLiteIntegerWidthTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA1C5C44C2A823612D31233D /* SQLiteIntegerWidthTests.swift */; };
 		AA3B37A2E08FAC18D1F53021 /* ListLiveScrollObserverIntegrationUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 589D482D1D1B7F07F2972244 /* ListLiveScrollObserverIntegrationUITests.swift */; };
 		AACCC380F7C71B1A9AF5317A /* SettingsConcurrencyMergeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 141E9CECE7EA4C7ADD332905 /* SettingsConcurrencyMergeTests.swift */; };
 		ABA499280CA058A9514EC4A0 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 15AD12EB1E64621C175C997C /* SettingsView.swift */; };
@@ -970,6 +972,7 @@
 		A8D5E0B70D410EE4F7B531FA /* history-replay-real-screenshot-paletted.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "history-replay-real-screenshot-paletted.png"; sourceTree = "<group>"; };
 		A96F37D2ACE3A8A3BC7F0BE9 /* VideoPlayerPreviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VideoPlayerPreviewView.swift; sourceTree = "<group>"; };
 		A9D3AC27CB4291833F0B994C /* loose-latex.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = "loose-latex.md"; sourceTree = "<group>"; };
+		AA1C5C44C2A823612D31233D /* SQLiteIntegerWidthTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SQLiteIntegerWidthTests.swift; sourceTree = "<group>"; };
 		AB54E903D484FE44C7F78B86 /* KaTeX_AMS-Regular.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "KaTeX_AMS-Regular.ttf"; sourceTree = "<group>"; };
 		ADE11D7F3EEE23CE6073C7DD /* SnapshotPerformanceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SnapshotPerformanceTests.swift; sourceTree = "<group>"; };
 		AE65E2E804A2670FCF17404B /* HistoryListInteractionCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryListInteractionCoordinator.swift; sourceTree = "<group>"; };
@@ -1402,6 +1405,7 @@
 				141E9CECE7EA4C7ADD332905 /* SettingsConcurrencyMergeTests.swift */,
 				CF519408C137227E5F1B8226 /* ShortQueryIndexDiskCacheHardeningTests.swift */,
 				ADE11D7F3EEE23CE6073C7DD /* SnapshotPerformanceTests.swift */,
+				AA1C5C44C2A823612D31233D /* SQLiteIntegerWidthTests.swift */,
 				6146C28BE595B15CFD414140 /* StorageServiceTests.swift */,
 				F2729BCEB53FC3541B6A37BF /* StorageStatsSemanticsTests.swift */,
 				510AFDDE66625F1864B6A793 /* TestFixture.swift */,
@@ -2302,6 +2306,7 @@
 				8D36A0AA429718DE7A55C83A /* RealDatabaseRegressionTests.swift in Sources */,
 				70D5747F23695105E2867484 /* ResourceCleanupTests.swift in Sources */,
 				DEEA24997C244EFA23B8C608 /* ReviewFix24Tests.swift in Sources */,
+				701C081E4034F9772B3E1F8D /* SQLiteIntegerWidthTests.swift in Sources */,
 				35F9DA552D86FB9CBF6A3C81 /* ScopyColors.swift in Sources */,
 				BA2B70C2C4C86E278C2FC773 /* ScopyComponents.swift in Sources */,
 				E5753C5D865B5BB6A6F5F11E /* ScopyIcons.swift in Sources */,
@@ -2505,6 +2510,7 @@
 				B44A609E8ADAB5EC0EDA9BAC /* RealDatabaseRegressionTests.swift in Sources */,
 				C0A51AA7E4BEC084FC3D231D /* ResourceCleanupTests.swift in Sources */,
 				FE96B78665F159342116C6D5 /* ReviewFix24Tests.swift in Sources */,
+				A9F4E5621B86D59B53860CDC /* SQLiteIntegerWidthTests.swift in Sources */,
 				57C1FB3E5765F41546C7AD5E /* ScopyColors.swift in Sources */,
 				4F98B4BEB7AEE0ED458F28D0 /* ScopyComponents.swift in Sources */,
 				C81A97FB9F42D01C3A7D4731 /* ScopyIcons.swift in Sources */,

@@ -31,11 +31,13 @@ final class ClipboardItemDisplayTextTests: XCTestCase {
 
     @MainActor
     func testFileTitleAndMetadataMatchLegacyImplementation() {
+        let fiveGiB = 5 * 1024 * 1024 * 1024
         let samples: [(plainText: String, note: String?, fileSizeBytes: Int?)] = [
             ("/tmp/a.txt", nil, nil),
             ("/tmp/a.txt", "hello", nil),
             ("/tmp/a.txt", nil, 0),
             ("/tmp/a.txt", nil, 123),
+            ("/tmp/five-gib.dat", nil, fiveGiB),
             ("/tmp/a.txt\n/tmp/b.txt", nil, nil),
             ("/tmp/a.txt\n/tmp/b.txt", "note", 1024),
             ("\n/tmp/a.txt\n\n/tmp/b.txt\n", nil, 2048)
@@ -56,6 +58,9 @@ final class ClipboardItemDisplayTextTests: XCTestCase {
 
             XCTAssertEqual(actualTitle, expectedTitle, "title mismatch for file plainText: \(String(reflecting: sample.plainText))")
             XCTAssertEqual(actualMetadata, expectedMetadata, "metadata mismatch for file plainText: \(String(reflecting: sample.plainText))")
+            if sample.fileSizeBytes == fiveGiB {
+                XCTAssertEqual(actualMetadata, "5120.0 MB")
+            }
         }
     }
 

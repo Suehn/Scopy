@@ -137,15 +137,21 @@ public enum FilePreviewSupport {
     public static func totalFileSizeBytes(from plainText: String) -> Int? {
         let urls = fileURLs(from: plainText, requireExists: true)
         guard !urls.isEmpty else { return nil }
-        var total = 0
-        var didRead = false
-        for url in urls {
-            if let size = (try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize {
-                total += size
-                didRead = true
-            }
+        let sizes = urls.lazy.compactMap {
+            (try? $0.resourceValues(forKeys: [.fileSizeKey]))?.fileSize
         }
-        return didRead ? total : nil
+        return checkedTotalFileSizeBytes(sizes)
+    }
+
+    static func checkedTotalFileSizeBytes<S: Sequence>(_ sizes: S) -> Int? where S.Element == Int {
+        var iterator = sizes.makeIterator()
+        guard var total = iterator.next() else { return nil }
+        while let size = iterator.next() {
+            let (nextTotal, overflow) = total.addingReportingOverflow(size)
+            guard !overflow else { return nil }
+            total = nextTotal
+        }
+        return total
     }
 
     public static func readTextFile(url: URL, maxBytes: Int) -> String? {

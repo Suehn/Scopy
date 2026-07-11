@@ -511,6 +511,231 @@ final class StorageServiceTests: XCTestCase {
         XCTAssertEqual(size, 5)
     }
 
+    func testLargeByteCountsPersistAcrossDiskReopenAndMetadataUpdates() async throws {
+        let directory = try makeTemporaryDirectory(prefix: "scopy-large-byte-count")
+        let databasePath = directory.appendingPathComponent("clipboard.db").path
+        let initialSize = Int(Int32.max) + 1_337
+        let initialFileSize = 5 * 1024 * 1024 * 1024
+
+        let initialStorage = StorageService(databasePath: databasePath)
+        raceStorages.append(initialStorage)
+        raceStorageDirectories.append(directory)
+        try await initialStorage.open()
+
+        let inserted = try await initialStorage.upsertItem(
+            ClipboardMonitor.ClipboardContent(
+                type: .file,
+                plainText: "/tmp/scopy-synthetic-large-file",
+                payload: .none,
+                appBundleID: "com.test.large-file",
+                contentHash: "large-file-\(UUID().uuidString)",
+                sizeBytes: initialSize,
+                fileSizeBytes: initialFileSize
+            )
+        )
+        XCTAssertEqual(inserted.sizeBytes, initialSize)
+        XCTAssertEqual(inserted.fileSizeBytes, initialFileSize)
+        let initialTotalSize = try await initialStorage.getTotalSize()
+        XCTAssertEqual(initialTotalSize, initialSize)
+        await initialStorage.close()
+
+        let reopenedStorage = StorageService(databasePath: databasePath)
+        raceStorages.append(reopenedStorage)
+        try await reopenedStorage.open()
+
+        let reopenedResult = try await reopenedStorage.findByID(inserted.id)
+        let reopened = try XCTUnwrap(reopenedResult)
+        XCTAssertEqual(reopened.sizeBytes, initialSize)
+        XCTAssertEqual(reopened.fileSizeBytes, initialFileSize)
+
+        let updatedSize = initialSize + 4_096
+        try await reopenedStorage.updateItemPayload(
+            id: reopened.id,
+            contentHash: reopened.contentHash,
+            sizeBytes: updatedSize,
+            storageRef: nil,
+            rawData: nil
+        )
+        let payloadUpdatedResult = try await reopenedStorage.findByID(reopened.id)
+        let payloadUpdated = try XCTUnwrap(payloadUpdatedResult)
+        let updatedFileSize = initialFileSize + 8_192
+        let metadataUpdatedResult = try await reopenedStorage.updateFileSizeBytes(
+            expected: payloadUpdated,
+            fileSizeBytes: updatedFileSize
+        )
+        let metadataUpdated = try XCTUnwrap(metadataUpdatedResult)
+
+        XCTAssertEqual(metadataUpdated.sizeBytes, updatedSize)
+        XCTAssertEqual(metadataUpdated.fileSizeBytes, updatedFileSize)
+        let updatedTotalSize = try await reopenedStorage.getTotalSize()
+        XCTAssertEqual(updatedTotalSize, updatedSize)
+        await reopenedStorage.close()
+
+        let finalStorage = StorageService(databasePath: databasePath)
+        raceStorages.append(finalStorage)
+        try await finalStorage.open()
+        let finalItemResult = try await finalStorage.findByID(inserted.id)
+        let finalItem = try XCTUnwrap(finalItemResult)
+        XCTAssertEqual(finalItem.sizeBytes, updatedSize)
+        XCTAssertEqual(finalItem.fileSizeBytes, updatedFileSize)
+        let recent = try await finalStorage.fetchRecent(limit: 1, offset: 0)
+        XCTAssertEqual(recent.first?.sizeBytes, updatedSize)
+        let finalTotalSize = try await finalStorage.getTotalSize()
+        XCTAssertEqual(finalTotalSize, updatedSize)
+    }
+
+    func testLargePayloadCASAndBatchSizeReconciliationRemainExactAndRejectStaleSnapshots() async throws {
+        let repository = storage.repository
+        let id = UUID()
+        let storageRef = "/tmp/scopy-large-size-\(UUID().uuidString).bin"
+        let initialHash = "large-initial-\(UUID().uuidString)"
+        let initialSize = Int(Int32.max) + 4_096
+        let now = Date()
+
+        try await repository.insertItem(
+            id: id,
+            type: .image,
+            contentHash: initialHash,
+            plainText: "synthetic large payload",
+            note: nil,
+            appBundleID: "com.test.large-payload",
+            createdAt: now,
+            lastUsedAt: now,
+            sizeBytes: initialSize,
+            fileSizeBytes: nil,
+            storageRef: storageRef,
+            rawData: nil
+        )
+        let initialResult = try await repository.fetchItemByID(id)
+        let initial = try XCTUnwrap(initialResult)
+
+        let casHash = "large-cas-\(UUID().uuidString)"
+        let casSize = initialSize + 8_192
+        let casResult = try await repository.compareAndSwapItemPayload(
+            expected: initial,
+            contentHash: casHash,
+            sizeBytes: casSize,
+            storageRef: storageRef,
+            rawData: nil
+        )
+        let casItem = try XCTUnwrap(casResult)
+        XCTAssertEqual(casItem.sizeBytes, casSize)
+
+        let staleCAS = try await repository.compareAndSwapItemPayload(
+            expected: initial,
+            contentHash: "must-not-commit",
+            sizeBytes: casSize + 1,
+            storageRef: storageRef,
+            rawData: nil
+        )
+        XCTAssertNil(staleCAS)
+
+        let batchSize = casSize + 16_384
+        let batchUpdate = SQLiteClipboardRepository.SizeBytesUpdate(
+            id: id,
+            expectedContentHash: casHash,
+            expectedSizeBytes: casSize,
+            expectedStorageRef: storageRef,
+            sizeBytes: batchSize
+        )
+        let updatedCount = try await repository.updateItemSizeBytesBatchInTransaction(
+            updates: [batchUpdate]
+        )
+        XCTAssertEqual(updatedCount, 1)
+        let staleUpdatedCount = try await repository.updateItemSizeBytesBatchInTransaction(
+            updates: [batchUpdate]
+        )
+        XCTAssertEqual(staleUpdatedCount, 0, "A stale expected large size must not overwrite the committed value")
+
+        let persistedResult = try await repository.fetchItemByID(id)
+        let persisted = try XCTUnwrap(persistedResult)
+        XCTAssertEqual(persisted.contentHash, casHash)
+        XCTAssertEqual(persisted.sizeBytes, batchSize)
+        let totalSize = try await repository.getTotalSize()
+        XCTAssertEqual(totalSize, batchSize)
+    }
+
+    func testCleanupPlannerStopsAfterRawInjectedLargeRowSatisfiesTarget() async throws {
+        let directory = try makeTemporaryDirectory(prefix: "scopy-large-cleanup-read")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let databasePath = directory.appendingPathComponent("clipboard.db").path
+
+        let bootstrapRepository = SQLiteClipboardRepository(dbPath: databasePath)
+        try await bootstrapRepository.open()
+        await bootstrapRepository.close()
+
+        let largeID = UUID()
+        let smallID = UUID()
+        let largeSize = Int64(Int32.max) + 1
+        let smallSize: Int64 = 64
+        let rawConnection = try SQLiteConnection(
+            path: databasePath,
+            flags: SQLiteConnection.openFlags(for: databasePath, readOnly: false)
+        )
+        do {
+            let insert = try rawConnection.prepare(
+                """
+                INSERT INTO clipboard_items
+                (id, type, content_hash, plain_text, created_at, last_used_at,
+                 use_count, is_pinned, size_bytes, storage_ref, raw_data, file_size_bytes)
+                VALUES (?, ?, ?, ?, ?, ?, 1, 0, ?, NULL, NULL, NULL)
+                """
+            )
+
+            func insertRow(id: UUID, hash: String, lastUsedAt: Double, sizeBytes: Int64) throws {
+                insert.reset()
+                try insert.bindText(id.uuidString, at: 1)
+                try insert.bindText(ClipboardItemType.text.rawValue, at: 2)
+                try insert.bindText(hash, at: 3)
+                try insert.bindText(hash, at: 4)
+                try insert.bindDouble(lastUsedAt, at: 5)
+                try insert.bindDouble(lastUsedAt, at: 6)
+                try insert.bindInt64(sizeBytes, at: 7)
+                XCTAssertFalse(try insert.step())
+            }
+
+            try insertRow(id: largeID, hash: "raw-large", lastUsedAt: 1, sizeBytes: largeSize)
+            try insertRow(id: smallID, hash: "raw-small", lastUsedAt: 2, sizeBytes: smallSize)
+        } catch {
+            rawConnection.close()
+            throw error
+        }
+        rawConnection.close()
+
+        let repository = SQLiteClipboardRepository(dbPath: databasePath)
+        do {
+            try await repository.open()
+            let totalSize = try await repository.getTotalSize()
+            let plan = try await repository.planCleanupByTotalSize(targetBytes: Int(smallSize))
+            await repository.close()
+
+            XCTAssertEqual(totalSize, Int(largeSize + smallSize))
+            XCTAssertEqual(plan.ids, [largeID])
+            XCTAssertFalse(plan.ids.contains(smallID))
+        } catch {
+            await repository.close()
+            throw error
+        }
+    }
+
+    func testSparseFiveGiBFileMetadataAndCheckedAggregation() throws {
+        let directory = try makeTemporaryDirectory(prefix: "scopy-sparse-file")
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let fileURL = directory.appendingPathComponent("five-gib.dat")
+        XCTAssertTrue(FileManager.default.createFile(atPath: fileURL.path, contents: nil))
+        let fiveGiB = 5 * 1024 * 1024 * 1024
+        do {
+            let handle = try FileHandle(forWritingTo: fileURL)
+            defer { try? handle.close() }
+            try handle.truncate(atOffset: UInt64(fiveGiB))
+        }
+
+        XCTAssertEqual(FilePreviewSupport.totalFileSizeBytes(from: fileURL.path), fiveGiB)
+        XCTAssertEqual(FilePreviewSupport.checkedTotalFileSizeBytes([fiveGiB, 1]), fiveGiB + 1)
+        XCTAssertNil(FilePreviewSupport.checkedTotalFileSizeBytes([Int.max, 1]))
+    }
+
     // MARK: - Cleanup Tests (v0.md 2.3)
 
     func testOptimizationStageCleanupPreservesRecentAndReclaimsOnlyStaleStages() throws {
