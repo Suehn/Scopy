@@ -37,7 +37,7 @@ internal struct HistoryItemRowDescriptor {
         let profileStart = ScrollPerformanceProfile.isEnabled ? CFAbsoluteTimeGetCurrent() : nil
         defer {
             if let profileStart {
-                ScrollPerformanceProfile.recordMetric(
+                ScrollPerformanceProfile.recordTiming(
                     name: "row.display_model_ms",
                     elapsedMs: (CFAbsoluteTimeGetCurrent() - profileStart) * 1000
                 )

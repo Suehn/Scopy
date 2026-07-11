@@ -91,19 +91,126 @@ final class ClipboardItemDisplayTextTests: XCTestCase {
     }
 
     @MainActor
-    func testPresentationPrewarmCachesFilePreviewWithoutMarkdownCapability() async {
+    func testDisplayCacheSeparatesSameIDMissingHashEqualLengthContent() {
+        let itemID = UUID(uuidString: "77777777-7777-7777-7777-777777777777")!
+        let first = makeTextItem(id: itemID, contentHash: "", plainText: "AB")
+        let replacement = makeTextItem(id: itemID, contentHash: "", plainText: "CD")
+        ClipboardItemDisplayText.shared.clearCaches()
+
+        XCTAssertEqual(ClipboardItemDisplayText.shared.title(for: first), "AB")
+        XCTAssertNil(ClipboardItemDisplayText.shared.cachedTitle(for: replacement))
+        XCTAssertEqual(ClipboardItemDisplayText.shared.title(for: replacement), "CD")
+    }
+
+    @MainActor
+    func testDisplayCachesEvictOldestRevisionAndAdmitReplacementAtExactCapacity() {
+        let cache = ClipboardItemDisplayText.shared
+        cache.configureCacheCapacityForTesting(2)
+        defer { cache.restoreDefaultCacheCapacityForTesting() }
+
+        let replacedID = UUID(uuidString: "11111111-1111-1111-1111-111111111111")!
+        let first = makeTextItem(id: replacedID, contentHash: "", plainText: "first")
+        let second = makeTextItem(plainText: "second")
+        let replacement = makeTextItem(id: replacedID, contentHash: "", plainText: "replacement")
+
+        _ = cache.displayTexts(for: first)
+        _ = cache.displayTexts(for: second)
+        XCTAssertEqual(cache.cacheEntryCountsForTesting.title, 2)
+        XCTAssertEqual(cache.cacheEntryCountsForTesting.metadata, 2)
+
+        _ = cache.displayTexts(for: replacement)
+
+        XCTAssertNil(cache.cachedTitle(for: first))
+        XCTAssertNil(cache.cachedMetadata(for: first))
+        XCTAssertEqual(cache.cachedTitle(for: second), "second")
+        XCTAssertEqual(cache.cachedTitle(for: replacement), "replacement")
+        XCTAssertEqual(cache.cacheEntryCountsForTesting.title, 2)
+        XCTAssertEqual(cache.cacheEntryCountsForTesting.metadata, 2)
+    }
+
+    @MainActor
+    func testDisplayPrewarmCoalescesRapidSupersessionAndCleansBookkeeping() async {
+        let cache = ClipboardItemDisplayText.shared
+        cache.configureCacheCapacityForTesting(2)
+        defer { cache.restoreDefaultCacheCapacityForTesting() }
+
+        let staleItems = [
+            makeTextItem(plainText: "stale-one"),
+            makeTextItem(plainText: "stale-two")
+        ]
+        let latestItems = [
+            makeTextItem(plainText: "latest-one"),
+            makeTextItem(plainText: "latest-two")
+        ]
+
+        let firstWorker = cache.prewarm(items: staleItems)
+        let coalescedWorker = cache.prewarm(items: latestItems)
+        XCTAssertNotNil(firstWorker)
+        XCTAssertNotNil(coalescedWorker)
+
+        await coalescedWorker?.value
+
+        XCTAssertNil(cache.cachedTitle(for: staleItems[0]))
+        XCTAssertNil(cache.cachedMetadata(for: staleItems[1]))
+        XCTAssertEqual(cache.cachedTitle(for: latestItems[0]), "latest-one")
+        XCTAssertNotNil(cache.cachedMetadata(for: latestItems[1]))
+        XCTAssertEqual(cache.prewarmInFlightCountForTesting, 0)
+        XCTAssertFalse(cache.hasActivePrewarmWorkerForTesting)
+        XCTAssertEqual(cache.cacheEntryCountsForTesting.title, 2)
+        XCTAssertEqual(cache.cacheEntryCountsForTesting.metadata, 2)
+    }
+
+    @MainActor
+    func testAllCachedLatestPrewarmCancelsStaleWorkWithoutAdmission() async {
+        let cache = ClipboardItemDisplayText.shared
+        cache.configureCacheCapacityForTesting(2)
+        defer { cache.restoreDefaultCacheCapacityForTesting() }
+
+        let latestItems = [
+            makeTextItem(plainText: "cached-latest-one"),
+            makeTextItem(plainText: "cached-latest-two")
+        ]
+        for item in latestItems {
+            _ = cache.displayTexts(for: item)
+        }
+        let staleItems = [
+            makeTextItem(plainText: "stale-old-search-one"),
+            makeTextItem(plainText: "stale-old-search-two")
+        ]
+
+        let worker = cache.prewarm(items: staleItems)
+        XCTAssertNotNil(worker)
+        XCTAssertNil(cache.prewarm(items: latestItems))
+        await worker?.value
+
+        XCTAssertNil(cache.cachedTitle(for: staleItems[0]))
+        XCTAssertNil(cache.cachedMetadata(for: staleItems[1]))
+        XCTAssertEqual(cache.cachedTitle(for: latestItems[0]), "cached-latest-one")
+        XCTAssertNotNil(cache.cachedMetadata(for: latestItems[1]))
+        XCTAssertEqual(cache.prewarmInFlightCountForTesting, 0)
+        XCTAssertFalse(cache.hasActivePrewarmWorkerForTesting)
+    }
+
+    @MainActor
+    func testPresentationPrewarmCachesFilePreviewAndMenuSignalWithoutExactCapability() async {
         let markdownItem = makeTextItem(plainText: "# Title\n\nBody")
+        let plainItem = makeTextItem(plainText: "plain sentence")
         let fileItem = makeFileItem(plainText: "/tmp/scopy-note.md", note: nil, fileSizeBytes: nil)
 
         HistoryItemPresentationCache.shared.clearCaches()
 
         XCTAssertNil(HistoryItemPresentationCache.shared.cachedMarkdownExportCapability(for: markdownItem))
+        XCTAssertNil(HistoryItemPresentationCache.shared.cachedMarkdownMenuSignal(for: markdownItem))
+        XCTAssertNil(HistoryItemPresentationCache.shared.cachedMarkdownMenuSignal(for: plainItem))
         XCTAssertNil(HistoryItemPresentationCache.shared.cachedFilePreview(for: fileItem))
 
-        let task = HistoryItemPresentationCache.shared.prewarm(items: [markdownItem, fileItem])
+        let task = HistoryItemPresentationCache.shared.prewarm(items: [markdownItem, plainItem, fileItem])
         await task?.value
 
         XCTAssertNil(HistoryItemPresentationCache.shared.cachedMarkdownExportCapability(for: markdownItem))
+        XCTAssertNil(HistoryItemPresentationCache.shared.cachedMarkdownExportCapability(for: plainItem))
+        XCTAssertEqual(HistoryItemPresentationCache.shared.cachedMarkdownMenuSignal(for: markdownItem), true)
+        XCTAssertEqual(HistoryItemPresentationCache.shared.cachedMarkdownMenuSignal(for: plainItem), false)
 
         let cachedFilePreview = HistoryItemPresentationCache.shared.cachedFilePreview(for: fileItem)
         XCTAssertEqual(cachedFilePreview?.path, "/tmp/scopy-note.md")
@@ -115,11 +222,15 @@ final class ClipboardItemDisplayTextTests: XCTestCase {
         XCTAssertTrue(HistoryItemPresentationCache.shared.canExportPNG(for: fileItem, filePreview: cachedFilePreview))
     }
 
-    private func makeTextItem(plainText: String) -> ClipboardItemDTO {
+    private func makeTextItem(
+        id: UUID = UUID(),
+        contentHash: String = UUID().uuidString,
+        plainText: String
+    ) -> ClipboardItemDTO {
         ClipboardItemDTO(
-            id: UUID(),
+            id: id,
             type: .text,
-            contentHash: UUID().uuidString,
+            contentHash: contentHash,
             plainText: plainText,
             appBundleID: nil,
             createdAt: Date(),

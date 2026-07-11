@@ -4,9 +4,238 @@ import Observation
 import ScopyKit
 import ScopyUISupport
 
+struct HistoryContentRevisionReconciliationSnapshot {
+    let knownRevisionsByItemID: [UUID: ClipboardItemContentRevision]
+    let deletedItemIDs: Set<UUID>
+    let clearGeneration: UInt64
+    let clearSurvivingItemIDs: Set<UUID>
+    let clearSurvivorSetIsAuthoritative: Bool
+    let deletionEvictionGeneration: UInt64
+
+    func revision(for itemID: UUID) -> ClipboardItemContentRevision? {
+        knownRevisionsByItemID[itemID]
+    }
+
+    func wasDeleted(_ itemID: UUID) -> Bool {
+        deletedItemIDs.contains(itemID)
+    }
+}
+
+struct BoundedHistoryContentRevisionRegistry {
+    private struct RevisionEntry {
+        let revision: ClipboardItemContentRevision
+        let isPinned: Bool
+        let stamp: UInt64
+    }
+
+    private struct DeletionEntry {
+        let stamp: UInt64
+    }
+
+    private let capacity: Int
+    private var nextStamp: UInt64 = 0
+    private var revisionsByItemID: [UUID: RevisionEntry] = [:]
+    private var revisionOrder: [(itemID: UUID, stamp: UInt64)] = []
+    private var revisionOrderCursor = 0
+    private var deletionsByItemID: [UUID: DeletionEntry] = [:]
+    private var deletionOrder: [(itemID: UUID, stamp: UInt64)] = []
+    private var deletionOrderCursor = 0
+    private(set) var clearGeneration: UInt64 = 0
+    private(set) var clearSurvivingItemIDs: Set<UUID> = []
+    private(set) var clearSurvivorSetIsAuthoritative = true
+    private(set) var deletionEvictionGeneration: UInt64 = 0
+
+    init(capacity: Int) {
+        self.capacity = max(1, capacity)
+    }
+
+    var snapshot: HistoryContentRevisionReconciliationSnapshot {
+        HistoryContentRevisionReconciliationSnapshot(
+            knownRevisionsByItemID: revisionsByItemID.mapValues(\.revision),
+            deletedItemIDs: Set(deletionsByItemID.keys),
+            clearGeneration: clearGeneration,
+            clearSurvivingItemIDs: clearSurvivingItemIDs,
+            clearSurvivorSetIsAuthoritative: clearSurvivorSetIsAuthoritative,
+            deletionEvictionGeneration: deletionEvictionGeneration
+        )
+    }
+
+    var testingQueueCounts: (revision: Int, deletion: Int) {
+        (revisionOrder.count, deletionOrder.count)
+    }
+
+    func revision(for itemID: UUID) -> ClipboardItemContentRevision? {
+        revisionsByItemID[itemID]?.revision
+    }
+
+    func isDeleted(itemID: UUID) -> Bool {
+        deletionsByItemID[itemID] != nil
+    }
+
+    func acceptsProjection(itemID: UUID) -> Bool {
+        !isDeleted(itemID: itemID)
+    }
+
+    @discardableResult
+    mutating func merge(
+        items: [ClipboardItemDTO],
+        allowRevivingDeletedItems: Bool
+    ) -> Bool {
+        var changed = false
+        for item in items {
+            let revision = ClipboardItemContentRevision(item: item)
+            if deletionsByItemID[item.id] != nil {
+                guard allowRevivingDeletedItems else { continue }
+                deletionsByItemID.removeValue(forKey: item.id)
+                changed = true
+            }
+            if let existing = revisionsByItemID[item.id],
+               existing.revision == revision,
+               existing.isPinned == item.isPinned {
+                continue
+            }
+
+            let stamp = makeStamp()
+            revisionsByItemID[item.id] = RevisionEntry(
+                revision: revision,
+                isPinned: item.isPinned,
+                stamp: stamp
+            )
+            revisionOrder.append((item.id, stamp))
+            changed = true
+        }
+        evictRevisionsIfNeeded()
+        compactQueuesIfNeeded()
+        return changed
+    }
+
+    @discardableResult
+    mutating func invalidate(itemID: UUID) -> Bool {
+        var changed = revisionsByItemID.removeValue(forKey: itemID) != nil
+        if deletionsByItemID[itemID] == nil {
+            let stamp = makeStamp()
+            deletionsByItemID[itemID] = DeletionEntry(stamp: stamp)
+            deletionOrder.append((itemID, stamp))
+            changed = true
+        }
+        evictDeletionsIfNeeded()
+        compactQueuesIfNeeded()
+        return changed
+    }
+
+    @discardableResult
+    mutating func setPinned(itemID: UUID, isPinned: Bool) -> Bool {
+        guard let existing = revisionsByItemID[itemID],
+              existing.isPinned != isPinned else { return false }
+        let stamp = makeStamp()
+        revisionsByItemID[itemID] = RevisionEntry(
+            revision: existing.revision,
+            isPinned: isPinned,
+            stamp: stamp
+        )
+        revisionOrder.append((itemID, stamp))
+        compactQueuesIfNeeded()
+        return true
+    }
+
+    mutating func clear(
+        survivingPinnedItems: [ClipboardItemDTO],
+        survivorSetIsAuthoritative: Bool = true
+    ) {
+        guard !survivingPinnedItems.isEmpty || !survivorSetIsAuthoritative else {
+            clearSurvivingItemIDs = []
+            clearSurvivorSetIsAuthoritative = true
+            revisionsByItemID.removeAll(keepingCapacity: true)
+            revisionOrder.removeAll(keepingCapacity: true)
+            revisionOrderCursor = 0
+            deletionsByItemID.removeAll(keepingCapacity: true)
+            deletionOrder.removeAll(keepingCapacity: true)
+            deletionOrderCursor = 0
+            clearGeneration &+= 1
+            return
+        }
+
+        var survivingPinnedItemIDs = Set(survivingPinnedItems.map(\.id))
+        if !survivorSetIsAuthoritative {
+            survivingPinnedItemIDs.formUnion(
+                revisionsByItemID.compactMap { itemID, entry in
+                    entry.isPinned ? itemID : nil
+                }
+            )
+        }
+        let removedItemIDs = revisionsByItemID.keys.filter {
+            !survivingPinnedItemIDs.contains($0)
+        }
+        for itemID in removedItemIDs {
+            _ = invalidate(itemID: itemID)
+        }
+        _ = merge(
+            items: survivingPinnedItems,
+            allowRevivingDeletedItems: true
+        )
+        // Keep the clear survivor proof separate from the bounded revision registry. A successful
+        // fetch is authoritative even when not every pinned revision fits; a failed fetch records
+        // only best-known survivors and tells retained sessions to preserve capacity-unknown rows.
+        clearSurvivingItemIDs = survivingPinnedItemIDs
+        clearSurvivorSetIsAuthoritative = survivorSetIsAuthoritative
+        clearGeneration &+= 1
+    }
+
+    private mutating func makeStamp() -> UInt64 {
+        nextStamp &+= 1
+        return nextStamp
+    }
+
+    private mutating func evictRevisionsIfNeeded() {
+        while revisionsByItemID.count > capacity, revisionOrderCursor < revisionOrder.count {
+            let candidate = revisionOrder[revisionOrderCursor]
+            revisionOrderCursor += 1
+            guard revisionsByItemID[candidate.itemID]?.stamp == candidate.stamp else { continue }
+            revisionsByItemID.removeValue(forKey: candidate.itemID)
+        }
+    }
+
+    private mutating func evictDeletionsIfNeeded() {
+        while deletionsByItemID.count > capacity, deletionOrderCursor < deletionOrder.count {
+            let candidate = deletionOrder[deletionOrderCursor]
+            deletionOrderCursor += 1
+            guard deletionsByItemID[candidate.itemID]?.stamp == candidate.stamp else { continue }
+            deletionsByItemID.removeValue(forKey: candidate.itemID)
+            deletionEvictionGeneration &+= 1
+        }
+    }
+
+    private mutating func compactQueuesIfNeeded() {
+        if revisionOrder.count > capacity * 4 {
+            revisionOrder = revisionsByItemID.map { itemID, entry in
+                (itemID: itemID, stamp: entry.stamp)
+            }.sorted { $0.stamp < $1.stamp }
+            revisionOrderCursor = 0
+        } else if revisionOrderCursor > capacity,
+                  revisionOrderCursor * 2 > revisionOrder.count {
+            revisionOrder.removeFirst(revisionOrderCursor)
+            revisionOrderCursor = 0
+        }
+        if deletionOrder.count > capacity * 4 {
+            deletionOrder = deletionsByItemID.map { itemID, entry in
+                (itemID: itemID, stamp: entry.stamp)
+            }.sorted { $0.stamp < $1.stamp }
+            deletionOrderCursor = 0
+        } else if deletionOrderCursor > capacity,
+                  deletionOrderCursor * 2 > deletionOrder.count {
+            deletionOrder.removeFirst(deletionOrderCursor)
+            deletionOrderCursor = 0
+        }
+    }
+}
+
 @Observable
 @MainActor
 final class HistoryViewModel {
+    private struct PinnedSurvivorResolution {
+        let items: [ClipboardItemDTO]
+        let isAuthoritative: Bool
+    }
     struct Timing: Sendable {
         var searchDebounceNs: UInt64
         var refineShortQueryDelayNs: UInt64
@@ -41,8 +270,29 @@ final class HistoryViewModel {
 
     static let initialPageSize = 50
     static let loadMorePageSize = 500
+    static let knownContentRevisionCapacity = 4096
 
     private var listState = HistoryListState()
+    @ObservationIgnored private var contentRevisionRegistry =
+        BoundedHistoryContentRevisionRegistry(capacity: knownContentRevisionCapacity)
+
+    private(set) var contentRevisionReconciliationToken: UInt64 = 0
+
+    var contentRevisionReconciliationSnapshot: HistoryContentRevisionReconciliationSnapshot {
+        contentRevisionRegistry.snapshot
+    }
+
+    func isContentRevisionCurrent(
+        itemID: UUID,
+        revision: ClipboardItemContentRevision
+    ) -> Bool {
+        guard !contentRevisionRegistry.isDeleted(itemID: itemID) else { return false }
+        if let knownRevision = contentRevisionRegistry.revision(for: itemID) {
+            return knownRevision == revision
+        }
+        guard let projectedItem = listState.item(withID: itemID) else { return false }
+        return ClipboardItemContentRevision(item: projectedItem) == revision
+    }
 
     var pinnedItems: [ClipboardItemDTO] {
         listState.pinnedItems
@@ -54,7 +304,11 @@ final class HistoryViewModel {
 
     var items: [ClipboardItemDTO] {
         get { listState.items }
-        set { listState.replaceItems(newValue) }
+        set {
+            let currentItems = excludingKnownDeletedItems(newValue)
+            listState.replaceItems(currentItems)
+            mergeKnownContentRevisions(currentItems)
+        }
     }
 
     var searchQuery: String = ""
@@ -203,6 +457,7 @@ final class HistoryViewModel {
     func handleEvent(_ event: ClipboardEvent) async {
         switch event {
         case .newItem(let item):
+            mergeKnownContentRevisions([item], allowRevivingDeletedItems: true)
             let didMatchCurrentFilters = matchesCurrentFilters(item)
 
             if didMatchCurrentFilters {
@@ -251,6 +506,8 @@ final class HistoryViewModel {
             )
             setItemIfChanged(at: index, to: updated)
         case .itemUpdated(let item):
+            mergeKnownContentRevisions([item])
+            guard !contentRevisionRegistry.isDeleted(itemID: item.id) else { return }
             if !searchQuery.isEmpty {
                 if let index = indexOfItem(withID: item.id) {
                     setItemIfChanged(at: index, to: item)
@@ -271,6 +528,8 @@ final class HistoryViewModel {
                 listState.recomputeCanLoadMore()
             }
         case .itemContentUpdated(let item):
+            mergeKnownContentRevisions([item])
+            guard !contentRevisionRegistry.isDeleted(itemID: item.id) else { return }
             guard let index = indexOfItem(withID: item.id) else { return }
             let existing = items[index]
             if existing.thumbnailPath != item.thumbnailPath, let oldPath = existing.thumbnailPath {
@@ -279,24 +538,37 @@ final class HistoryViewModel {
             setItemIfChanged(at: index, to: item)
             prewarmDisplayText(for: [item])
         case .itemDeleted(let id):
+            invalidateKnownContentRevision(itemID: id)
+            invalidateInFlightProjectionWorkForDeletion()
             let wasPresent = removeItem(withID: id)
 
             listState.decrementTotalCountIfNeeded(
                 wasPresent: wasPresent,
                 isUnfilteredList: isUnfilteredList
             )
+            if hasActiveFilters {
+                search()
+            }
         case .itemPinned(let id):
+            setKnownContentPinned(itemID: id, isPinned: true)
             if let index = indexOfItem(withID: id) {
                 let updated = items[index].withPinned(true)
                 setItemIfChanged(at: index, to: updated)
+                mergeKnownContentRevisions([updated])
             }
         case .itemUnpinned(let id):
+            setKnownContentPinned(itemID: id, isPinned: false)
             if let index = indexOfItem(withID: id) {
                 let updated = items[index].withPinned(false)
                 setItemIfChanged(at: index, to: updated)
+                mergeKnownContentRevisions([updated])
             }
-        case .itemsCleared:
-            await load()
+        case .itemsCleared(let keepPinned):
+            let pinnedSurvivors = await resolvePinnedSurvivors(
+                keepPinned: keepPinned
+            )
+            prepareForItemsCleared(pinnedSurvivors: pinnedSurvivors)
+            await refreshAfterItemsCleared()
         case .settingsChanged:
             break
         }
@@ -375,10 +647,11 @@ final class HistoryViewModel {
 
             let pinnedItems = try await service.fetchPinned()
             let recentItems = try await service.fetchRecentUnpinned(limit: Self.initialPageSize, offset: 0)
-            let fetchedItems = pinnedItems + recentItems
+            let fetchedItems = excludingKnownDeletedItems(pinnedItems + recentItems)
             guard shouldApplyLoadResult(version: currentVersion) else { return }
 
             listState.replaceItems(fetchedItems)
+            mergeKnownContentRevisions(fetchedItems)
             prewarmDisplayText(for: fetchedItems)
             searchCoverage = .complete
             lastLoadedAt = Date()
@@ -427,6 +700,7 @@ final class HistoryViewModel {
     }
 
     func loadMore() async {
+        ScrollPerformanceProfile.shared.incrementCounter(name: "list.load_more_attempt")
         cancelTask(&loadMoreTask)
 
         loadMoreTask = Task {
@@ -455,14 +729,19 @@ final class HistoryViewModel {
                             limit: expectedLimit,
                             offset: 0
                         )
+                        ScrollPerformanceProfile.shared.incrementCounter(
+                            name: "list.pagination_request"
+                        )
                         let result = try await service.search(query: request)
                         guard !Task.isCancelled, currentVersion == searchVersion else { return }
+                        let resultItems = excludingKnownDeletedItems(result.items)
                         listState.replacePage(
-                            items: result.items,
+                            items: resultItems,
                             total: result.total,
                             hasMore: result.hasMore
                         )
-                        prewarmDisplayText(for: result.items)
+                        mergeKnownContentRevisions(resultItems)
+                        prewarmDisplayText(for: resultItems)
                         searchCoverage = result.coverage
                         return
                     }
@@ -477,24 +756,34 @@ final class HistoryViewModel {
                         limit: Self.loadMorePageSize,
                         offset: loadedCount
                     )
+                    ScrollPerformanceProfile.shared.incrementCounter(
+                        name: "list.pagination_request"
+                    )
                     let result = try await service.search(query: request)
                     guard !Task.isCancelled, currentVersion == searchVersion else { return }
+                    let resultItems = excludingKnownDeletedItems(result.items)
 
                     listState.appendPage(
-                        items: result.items,
+                        items: resultItems,
                         total: result.total,
                         hasMore: result.hasMore
                     )
-                    prewarmDisplayText(for: result.items)
+                    mergeKnownContentRevisions(resultItems)
+                    prewarmDisplayText(for: resultItems)
                     searchCoverage = result.coverage
                 } else {
+                    ScrollPerformanceProfile.shared.incrementCounter(
+                        name: "list.pagination_request"
+                    )
                     let moreItems = try await service.fetchRecentUnpinned(
                         limit: Self.loadMorePageSize,
                         offset: unpinnedItems.count
                     )
                     guard !Task.isCancelled, currentVersion == searchVersion else { return }
-                    listState.appendRecentPage(items: moreItems)
-                    prewarmDisplayText(for: moreItems)
+                    let currentItems = excludingKnownDeletedItems(moreItems)
+                    listState.appendRecentPage(items: currentItems)
+                    mergeKnownContentRevisions(currentItems)
+                    prewarmDisplayText(for: currentItems)
                     searchCoverage = .complete
                 }
             } catch {
@@ -552,13 +841,15 @@ final class HistoryViewModel {
                 )
                 let result = try await service.search(query: request)
                 guard !Task.isCancelled, currentVersion == searchVersion else { return }
+                let resultItems = excludingKnownDeletedItems(result.items)
 
                 listState.replacePage(
-                    items: result.items,
+                    items: resultItems,
                     total: result.total,
                     hasMore: result.hasMore
                 )
-                prewarmDisplayText(for: result.items)
+                mergeKnownContentRevisions(resultItems)
+                prewarmDisplayText(for: resultItems)
                 searchCoverage = result.coverage
 
                 if (searchMode == .fuzzy || searchMode == .fuzzyPlus),
@@ -594,13 +885,15 @@ final class HistoryViewModel {
                             guard !Task.isCancelled, refineVersion == searchVersion else { return }
 
                             guard loadedCount <= Self.initialPageSize else { return }
+                            let refinedItems = excludingKnownDeletedItems(refined.items)
 
                             listState.replacePage(
-                                items: refined.items,
+                                items: refinedItems,
                                 total: refined.total,
                                 hasMore: refined.hasMore
                             )
-                            prewarmDisplayText(for: refined.items)
+                            mergeKnownContentRevisions(refinedItems)
+                            prewarmDisplayText(for: refinedItems)
                             searchCoverage = refined.coverage
                         } catch {
                             ScopyLog.app.warning("Refine search failed: \(error.localizedDescription, privacy: .private)")
@@ -731,6 +1024,7 @@ final class HistoryViewModel {
             } else {
                 try await service.pin(itemID: item.id)
             }
+            mergeKnownContentRevisions([item.withPinned(!item.isPinned)])
         } catch {
             ScopyLog.app.error("Pin toggle failed: \(error.localizedDescription, privacy: .private)")
         }
@@ -739,24 +1033,29 @@ final class HistoryViewModel {
     func delete(_ item: ClipboardItemDTO) async {
         do {
             try await service.delete(itemID: item.id)
+            invalidateKnownContentRevision(itemID: item.id)
             _ = removeItem(withID: item.id)
         } catch {
             ScopyLog.app.error("Delete failed: \(error.localizedDescription, privacy: .private)")
         }
     }
 
-    func updateNote(_ item: ClipboardItemDTO, note: String?) async {
+    func updateNote(_ item: ClipboardItemDTO, note: String?) async -> Bool {
         do {
             try await service.updateNote(itemID: item.id, note: note)
+            return true
         } catch {
             ScopyLog.app.error("Update note failed: \(error.localizedDescription, privacy: .private)")
+            return false
         }
     }
 
     func clearAll() async {
         do {
             try await service.clearAll()
-            await load()
+            let pinnedSurvivors = await resolvePinnedSurvivors(keepPinned: true)
+            prepareForItemsCleared(pinnedSurvivors: pinnedSurvivors)
+            await refreshAfterItemsCleared()
         } catch {
             ScopyLog.app.error("Clear failed: \(error.localizedDescription, privacy: .private)")
         }
@@ -836,6 +1135,111 @@ final class HistoryViewModel {
         guard !items.isEmpty else { return }
         ClipboardItemDisplayText.shared.prewarm(items: items)
         HistoryItemPresentationCache.shared.prewarm(items: items)
+    }
+
+    private func excludingKnownDeletedItems(
+        _ items: [ClipboardItemDTO]
+    ) -> [ClipboardItemDTO] {
+        items.filter { contentRevisionRegistry.acceptsProjection(itemID: $0.id) }
+    }
+
+    private func mergeKnownContentRevisions(
+        _ items: [ClipboardItemDTO],
+        allowRevivingDeletedItems: Bool = false
+    ) {
+        guard !items.isEmpty,
+              contentRevisionRegistry.merge(
+                  items: items,
+                  allowRevivingDeletedItems: allowRevivingDeletedItems
+              ) else { return }
+        contentRevisionReconciliationToken &+= 1
+    }
+
+    private func invalidateKnownContentRevision(itemID: UUID) {
+        guard contentRevisionRegistry.invalidate(itemID: itemID) else { return }
+        contentRevisionReconciliationToken &+= 1
+    }
+
+    private func setKnownContentPinned(itemID: UUID, isPinned: Bool) {
+        guard contentRevisionRegistry.setPinned(
+            itemID: itemID,
+            isPinned: isPinned
+        ) else { return }
+        contentRevisionReconciliationToken &+= 1
+    }
+
+    private func clearKnownContentRevisions(
+        pinnedSurvivors: PinnedSurvivorResolution
+    ) {
+        contentRevisionRegistry.clear(
+            survivingPinnedItems: pinnedSurvivors.items,
+            survivorSetIsAuthoritative: pinnedSurvivors.isAuthoritative
+        )
+        contentRevisionReconciliationToken &+= 1
+    }
+
+    private func invalidateInFlightProjectionWorkForDeletion() {
+        cancelTask(&searchTask)
+        cancelTask(&loadMoreTask)
+        cancelTask(&refineTask)
+        searchVersion &+= 1
+        isLoading = false
+    }
+
+    private func resolvePinnedSurvivors(
+        keepPinned: Bool
+    ) async -> PinnedSurvivorResolution {
+        guard keepPinned else {
+            return PinnedSurvivorResolution(items: [], isAuthoritative: true)
+        }
+        do {
+            return PinnedSurvivorResolution(
+                items: try await service.fetchPinned(),
+                isAuthoritative: true
+            )
+        } catch {
+            ScopyLog.app.error(
+                "Failed to verify pinned items after clear: \(error.localizedDescription, privacy: .private)"
+            )
+            // A transient read failure is not proof that every pinned row disappeared. Preserve
+            // the loaded projection plus registry-known pinned IDs; known unpinned rows still get
+            // tombstoned by the non-authoritative clear boundary.
+            return PinnedSurvivorResolution(
+                items: listState.pinnedItems,
+                isAuthoritative: false
+            )
+        }
+    }
+
+    private func prepareForItemsCleared(
+        pinnedSurvivors: PinnedSurvivorResolution
+    ) {
+        cancelTask(&searchTask)
+        cancelTask(&loadMoreTask)
+        cancelTask(&refineTask)
+        searchVersion &+= 1
+        isLoading = false
+        selectedID = nil
+        lastSelectionSource = .programmatic
+        let preservedItems = isUnfilteredList ? pinnedSurvivors.items : []
+        listState.replacePage(
+            items: preservedItems,
+            total: preservedItems.count,
+            hasMore: false
+        )
+        searchCoverage = .complete
+        lastLoadedAt = .distantPast
+        clearKnownContentRevisions(pinnedSurvivors: pinnedSurvivors)
+    }
+
+    private func refreshAfterItemsCleared() async {
+        if isUnfilteredList {
+            await load()
+            return
+        }
+
+        search()
+        await searchTask?.value
     }
 
     private func resolvedFileURLs(for item: ClipboardItemDTO) async -> [URL] {

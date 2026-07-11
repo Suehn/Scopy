@@ -248,6 +248,305 @@ final class HistoryItemRowDescriptorTests: XCTestCase {
         XCTAssertEqual(displayCallCount, 2)
     }
 
+    func testPresentationCacheSeparatesSameIDMissingHashEqualLengthContent() {
+        let itemID = UUID(uuidString: "88888888-8888-8888-8888-888888888888")!
+        let first = makeItem(id: itemID, contentHash: "", type: .text, plainText: "AB")
+        let replacement = makeItem(id: itemID, contentHash: "", type: .text, plainText: "CD")
+        var displayCallCount = 0
+        HistoryItemPresentationCache.shared.clearCaches()
+
+        let firstDescriptor = HistoryItemPresentationCache.shared.rowDescriptor(
+            for: first,
+            settings: settings(),
+            dependencies: HistoryItemRowDescriptor.Dependencies(
+                displayTexts: { _ in
+                    displayCallCount += 1
+                    return (title: "AB", metadata: "first")
+                },
+                filePreview: { _ in nil }
+            )
+        )
+        let replacementDescriptor = HistoryItemPresentationCache.shared.rowDescriptor(
+            for: replacement,
+            settings: settings(),
+            dependencies: HistoryItemRowDescriptor.Dependencies(
+                displayTexts: { _ in
+                    displayCallCount += 1
+                    return (title: "CD", metadata: "replacement")
+                },
+                filePreview: { _ in nil }
+            )
+        )
+
+        XCTAssertEqual(firstDescriptor.titleText, "AB")
+        XCTAssertEqual(replacementDescriptor.titleText, "CD")
+        XCTAssertEqual(displayCallCount, 2)
+    }
+
+    func testMarkdownCapabilityCacheInvalidatesForSameIDContentRevision() {
+        let itemID = UUID(uuidString: "abababab-abab-abab-abab-abababababab")!
+        let first = makeItem(id: itemID, contentHash: "", type: .text, plainText: "#A")
+        let replacement = makeItem(id: itemID, contentHash: "", type: .text, plainText: "AB")
+        HistoryItemPresentationCache.shared.clearCaches()
+
+        HistoryItemPresentationCache.shared.storeMarkdownExportCapability(true, for: first)
+
+        XCTAssertEqual(HistoryItemPresentationCache.shared.cachedMarkdownExportCapability(for: first), true)
+        XCTAssertNil(HistoryItemPresentationCache.shared.cachedMarkdownExportCapability(for: replacement))
+    }
+
+    func testMarkdownMenuSignalCacheInvalidatesForSameIDContentRevision() {
+        let itemID = UUID(uuidString: "cdcdcdcd-cdcd-cdcd-cdcd-cdcdcdcdcdcd")!
+        let first = makeItem(id: itemID, contentHash: "", type: .text, plainText: "#A")
+        let replacement = makeItem(id: itemID, contentHash: "", type: .text, plainText: "AB")
+        HistoryItemPresentationCache.shared.clearCaches()
+
+        XCTAssertTrue(HistoryItemPresentationCache.shared.markdownMenuSignal(for: first))
+        XCTAssertEqual(HistoryItemPresentationCache.shared.cachedMarkdownMenuSignal(for: first), true)
+        XCTAssertNil(HistoryItemPresentationCache.shared.cachedMarkdownMenuSignal(for: replacement))
+        XCTAssertFalse(HistoryItemPresentationCache.shared.markdownMenuSignal(for: replacement))
+    }
+
+    func testPresentationCachesEvictFIFOAndAdmitNewValuesAtExactCapacity() {
+        let cache = HistoryItemPresentationCache.shared
+        cache.configureCacheCapacityForTesting(2)
+        defer { cache.restoreDefaultCacheCapacityForTesting() }
+
+        let replacedID = UUID(uuidString: "12121212-1212-1212-1212-121212121212")!
+        let firstText = makeItem(
+            id: replacedID,
+            contentHash: "",
+            type: .text,
+            plainText: "plain first"
+        )
+        let secondText = makeItem(type: .text, plainText: "# second")
+        let replacementText = makeItem(
+            id: replacedID,
+            contentHash: "",
+            type: .text,
+            plainText: "plain replacement"
+        )
+        let cachedSettings = settings()
+
+        _ = cache.rowDescriptor(for: firstText, settings: cachedSettings)
+        _ = cache.rowDescriptor(for: secondText, settings: cachedSettings)
+        _ = cache.rowDescriptor(for: replacementText, settings: cachedSettings)
+
+        XCTAssertNil(cache.cachedRowDescriptor(for: firstText, settings: cachedSettings))
+        XCTAssertNotNil(cache.cachedRowDescriptor(for: secondText, settings: cachedSettings))
+        XCTAssertNotNil(cache.cachedRowDescriptor(for: replacementText, settings: cachedSettings))
+
+        let firstFile = makeItem(type: .file, plainText: "/tmp/first.md")
+        let secondFile = makeItem(type: .file, plainText: "/tmp/second.md")
+        let thirdFile = makeItem(type: .file, plainText: "/tmp/third.md")
+        _ = cache.filePreview(for: firstFile)
+        _ = cache.filePreview(for: secondFile)
+        _ = cache.filePreview(for: thirdFile)
+
+        XCTAssertNil(cache.cachedFilePreview(for: firstFile))
+        XCTAssertEqual(cache.cachedFilePreview(for: thirdFile)?.path, "/tmp/third.md")
+
+        cache.storeMarkdownExportCapability(false, for: firstText)
+        cache.storeMarkdownExportCapability(true, for: secondText)
+        cache.storeMarkdownExportCapability(false, for: replacementText)
+        XCTAssertNil(cache.cachedMarkdownExportCapability(for: firstText))
+        XCTAssertEqual(cache.cachedMarkdownExportCapability(for: replacementText), false)
+
+        XCTAssertFalse(cache.markdownMenuSignal(for: firstText))
+        XCTAssertTrue(cache.markdownMenuSignal(for: secondText))
+        XCTAssertFalse(cache.markdownMenuSignal(for: replacementText))
+        XCTAssertNil(cache.cachedMarkdownMenuSignal(for: firstText))
+        XCTAssertEqual(cache.cachedMarkdownMenuSignal(for: replacementText), false)
+
+        let relativeFirst = makeItem(type: .text, plainText: "relative first")
+        let relativeSecond = makeItem(type: .text, plainText: "relative second")
+        let relativeThird = makeItem(type: .text, plainText: "relative third")
+        _ = cache.relativeTimeText(for: relativeFirst, bucket: 100)
+        _ = cache.relativeTimeText(for: relativeSecond, bucket: 100)
+        _ = cache.relativeTimeText(for: relativeThird, bucket: 100)
+        XCTAssertNil(cache.relativeTimeBucketForTesting(itemID: relativeFirst.id))
+        XCTAssertEqual(cache.relativeTimeBucketForTesting(itemID: relativeThird.id), 100)
+
+        let counts = cache.cacheEntryCountsForTesting
+        XCTAssertEqual(counts.rowDescriptor, 2)
+        XCTAssertEqual(counts.filePreview, 2)
+        XCTAssertEqual(counts.markdownMenuSignal, 2)
+        XCTAssertEqual(counts.markdownCapability, 2)
+        XCTAssertEqual(counts.relativeTime, 2)
+    }
+
+    func testPresentationPrewarmCoalescesRapidSupersessionAndCleansBookkeeping() async {
+        let cache = HistoryItemPresentationCache.shared
+        cache.configureCacheCapacityForTesting(2)
+        defer { cache.restoreDefaultCacheCapacityForTesting() }
+
+        let staleItems = [
+            makeItem(type: .text, plainText: "# stale one"),
+            makeItem(type: .file, plainText: "/tmp/stale.md")
+        ]
+        let latestItems = [
+            makeItem(type: .text, plainText: "latest plain text"),
+            makeItem(type: .file, plainText: "/tmp/latest.md")
+        ]
+
+        let firstWorker = cache.prewarm(items: staleItems)
+        let coalescedWorker = cache.prewarm(items: latestItems)
+        XCTAssertNotNil(firstWorker)
+        XCTAssertNotNil(coalescedWorker)
+
+        await coalescedWorker?.value
+
+        XCTAssertNil(cache.cachedMarkdownMenuSignal(for: staleItems[0]))
+        XCTAssertNil(cache.cachedFilePreview(for: staleItems[1]))
+        XCTAssertEqual(cache.cachedMarkdownMenuSignal(for: latestItems[0]), false)
+        XCTAssertEqual(cache.cachedFilePreview(for: latestItems[1])?.path, "/tmp/latest.md")
+        XCTAssertEqual(cache.prewarmInFlightCountForTesting, 0)
+        XCTAssertFalse(cache.hasActivePrewarmWorkerForTesting)
+    }
+
+    func testAllCachedLatestPresentationPrewarmCancelsStaleWorkWithoutAdmission() async {
+        let cache = HistoryItemPresentationCache.shared
+        cache.configureCacheCapacityForTesting(2)
+        defer { cache.restoreDefaultCacheCapacityForTesting() }
+
+        let latestItems = [
+            makeItem(type: .text, plainText: "cached latest plain"),
+            makeItem(type: .file, plainText: "/tmp/cached-latest.md")
+        ]
+        _ = cache.markdownMenuSignal(for: latestItems[0])
+        _ = cache.filePreview(for: latestItems[1])
+
+        let staleItems = [
+            makeItem(type: .text, plainText: "# stale old search"),
+            makeItem(type: .file, plainText: "/tmp/stale-old-search.md")
+        ]
+        let worker = cache.prewarm(items: staleItems)
+        XCTAssertNotNil(worker)
+        XCTAssertNil(cache.prewarm(items: latestItems))
+        await worker?.value
+
+        XCTAssertNil(cache.cachedMarkdownMenuSignal(for: staleItems[0]))
+        XCTAssertNil(cache.cachedFilePreview(for: staleItems[1]))
+        XCTAssertEqual(cache.cachedMarkdownMenuSignal(for: latestItems[0]), false)
+        XCTAssertEqual(cache.cachedFilePreview(for: latestItems[1])?.path, "/tmp/cached-latest.md")
+        XCTAssertEqual(cache.prewarmInFlightCountForTesting, 0)
+        XCTAssertFalse(cache.hasActivePrewarmWorkerForTesting)
+    }
+
+    func testAllCachedLatestPresentationPrewarmCancelsAlreadyActiveStaleWork() async {
+        let cache = HistoryItemPresentationCache.shared
+        cache.configureCacheCapacityForTesting(4_096)
+        defer { cache.restoreDefaultCacheCapacityForTesting() }
+
+        let latestText = makeItem(type: .text, plainText: "cached active latest plain")
+        let latestFile = makeItem(type: .file, plainText: "/tmp/cached-active-latest.md")
+        _ = cache.markdownMenuSignal(for: latestText)
+        _ = cache.filePreview(for: latestFile)
+
+        let scanText = String(repeating: "plain text without markdown marker ", count: 160)
+        let staleItems = (0..<4_096).map { index in
+            makeItem(
+                contentHash: "active-stale-\(index)",
+                type: .text,
+                plainText: scanText
+            )
+        }
+        let worker = cache.prewarm(items: staleItems)
+        XCTAssertNotNil(worker)
+
+        for _ in 0..<1_000 {
+            if cache.activePrewarmInFlightCountForTesting > 0 { break }
+            await Task.yield()
+        }
+        XCTAssertGreaterThan(cache.activePrewarmInFlightCountForTesting, 0)
+
+        XCTAssertNil(cache.prewarm(items: [latestText, latestFile]))
+        await worker?.value
+
+        XCTAssertNil(cache.cachedMarkdownMenuSignal(for: staleItems[0]))
+        XCTAssertEqual(cache.cachedMarkdownMenuSignal(for: latestText), false)
+        XCTAssertEqual(cache.cachedFilePreview(for: latestFile)?.path, "/tmp/cached-active-latest.md")
+        XCTAssertEqual(cache.prewarmInFlightCountForTesting, 0)
+        XCTAssertFalse(cache.hasActivePrewarmWorkerForTesting)
+    }
+
+    func testMarkdownMenuSignalPrewarmIsBoundedAndClearedWithPresentationCaches() async {
+        HistoryItemPresentationCache.shared.clearCaches()
+
+        let items = (0...4_096).map { index in
+            makeItem(
+                contentHash: "menu-signal-\(index)",
+                type: .text,
+                plainText: index.isMultiple(of: 2) ? "# title" : "plain"
+            )
+        }
+        let task = HistoryItemPresentationCache.shared.prewarm(items: items)
+        await task?.value
+
+        XCTAssertEqual(HistoryItemPresentationCache.shared.markdownMenuSignalEntryCountForTesting, 4_096)
+        HistoryItemPresentationCache.shared.clearCaches()
+        XCTAssertEqual(HistoryItemPresentationCache.shared.markdownMenuSignalEntryCountForTesting, 0)
+    }
+
+    func testMarkdownMenuSignalPrewarmDeduplicatesInFlightRevision() async {
+        HistoryItemPresentationCache.shared.clearCaches()
+        let item = makeItem(
+            contentHash: "menu-signal-in-flight",
+            type: .text,
+            plainText: "# title"
+        )
+
+        let first = HistoryItemPresentationCache.shared.prewarm(items: [item])
+        let duplicate = HistoryItemPresentationCache.shared.prewarm(items: [item])
+
+        XCTAssertNotNil(first)
+        XCTAssertNil(duplicate)
+        await first?.value
+        XCTAssertEqual(HistoryItemPresentationCache.shared.cachedMarkdownMenuSignal(for: item), true)
+    }
+
+    func testClearCachesRejectsInFlightMarkdownMenuSignalPrewarm() async {
+        HistoryItemPresentationCache.shared.clearCaches()
+        let item = makeItem(
+            contentHash: "menu-signal-stale-generation",
+            type: .text,
+            plainText: "# title"
+        )
+
+        let stale = HistoryItemPresentationCache.shared.prewarm(items: [item])
+        HistoryItemPresentationCache.shared.clearCaches()
+        await stale?.value
+
+        XCTAssertNil(HistoryItemPresentationCache.shared.cachedMarkdownMenuSignal(for: item))
+    }
+
+    func testFilePreviewCacheSeparatesSameIDContentRevision() {
+        let fileID = UUID(uuidString: "99999999-9999-9999-9999-999999999999")!
+        let firstFile = makeItem(
+            id: fileID,
+            contentHash: "",
+            type: .file,
+            plainText: "/tmp/a.md"
+        )
+        let replacementFile = makeItem(
+            id: fileID,
+            contentHash: "",
+            type: .file,
+            plainText: "/tmp/b.md"
+        )
+        HistoryItemPresentationCache.shared.clearCaches()
+
+        XCTAssertEqual(
+            HistoryItemPresentationCache.shared.filePreview(for: firstFile)?.path,
+            "/tmp/a.md"
+        )
+        XCTAssertNil(HistoryItemPresentationCache.shared.cachedFilePreview(for: replacementFile))
+        XCTAssertEqual(
+            HistoryItemPresentationCache.shared.filePreview(for: replacementFile)?.path,
+            "/tmp/b.md"
+        )
+    }
+
     func testRowDescriptorDoesNotPopulateMarkdownExportCapability() {
         let item = makeItem(type: .text, plainText: "# Title\n\nBody")
         HistoryItemPresentationCache.shared.clearCaches()
@@ -294,6 +593,8 @@ final class HistoryItemRowDescriptorTests: XCTestCase {
     }
 
     private func makeItem(
+        id: UUID = UUID(),
+        contentHash: String = UUID().uuidString,
         type: ClipboardItemType,
         plainText: String,
         appBundleID: String? = nil,
@@ -301,9 +602,9 @@ final class HistoryItemRowDescriptorTests: XCTestCase {
         storageRef: String? = nil
     ) -> ClipboardItemDTO {
         ClipboardItemDTO(
-            id: UUID(),
+            id: id,
             type: type,
-            contentHash: UUID().uuidString,
+            contentHash: contentHash,
             plainText: plainText,
             appBundleID: appBundleID,
             createdAt: Date(),

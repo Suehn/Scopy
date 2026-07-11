@@ -2,6 +2,80 @@ import Foundation
 import ScopyKit
 import ScopyUISupport
 
+/// A deterministic FIFO cache that always admits the newest key while keeping storage bounded.
+/// Main-actor presentation caches own instances of this value; it has no internal synchronization.
+struct BoundedPresentationCache<Key: Hashable, Value> {
+    private let capacity: Int
+    private var values: [Key: Value] = [:]
+    private var insertionOrder: [Key] = []
+    private var firstLiveOrderIndex = 0
+
+    init(capacity: Int) {
+        precondition(capacity > 0)
+        self.capacity = capacity
+        values.reserveCapacity(capacity)
+        insertionOrder.reserveCapacity(capacity)
+    }
+
+    var count: Int {
+        values.count
+    }
+
+    subscript(key: Key) -> Value? {
+        values[key]
+    }
+
+    mutating func insert(_ value: Value, forKey key: Key) {
+        if values[key] != nil {
+            values[key] = value
+            return
+        }
+
+        evictOldestIfFull()
+        values[key] = value
+        insertionOrder.append(key)
+    }
+
+    mutating func removeAll() {
+        values.removeAll(keepingCapacity: true)
+        insertionOrder.removeAll(keepingCapacity: true)
+        firstLiveOrderIndex = 0
+    }
+
+    private mutating func evictOldestIfFull() {
+        while values.count >= capacity, firstLiveOrderIndex < insertionOrder.count {
+            let oldestKey = insertionOrder[firstLiveOrderIndex]
+            firstLiveOrderIndex += 1
+            if values.removeValue(forKey: oldestKey) != nil {
+                break
+            }
+        }
+
+        if firstLiveOrderIndex >= capacity,
+           firstLiveOrderIndex * 2 >= insertionOrder.count {
+            insertionOrder.removeFirst(firstLiveOrderIndex)
+            firstLiveOrderIndex = 0
+        }
+    }
+}
+
+final class PresentationPrewarmCancellationFlag: @unchecked Sendable {
+    private let lock = NSLock()
+    private var cancelled = false
+
+    var isCancelled: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return cancelled
+    }
+
+    func cancel() {
+        lock.lock()
+        cancelled = true
+        lock.unlock()
+    }
+}
+
 /// Presentation-only helpers for deriving display strings from `ClipboardItemDTO`.
 ///
 /// Domain model should not carry UI-specific derived fields (e.g. title/metadata).
@@ -10,22 +84,18 @@ import ScopyUISupport
 final class ClipboardItemDisplayText {
     static let shared = ClipboardItemDisplayText()
 
-    private struct TitleCacheKey: Hashable {
-        let type: ClipboardItemType
-        let contentKey: String
+    private struct TitleCacheKey: Hashable, Sendable {
+        let revision: ClipboardItemContentRevision
     }
 
-    private struct MetadataCacheKey: Hashable {
-        let type: ClipboardItemType
-        let contentKey: String
+    private struct MetadataCacheKey: Hashable, Sendable {
+        let revision: ClipboardItemContentRevision
         let note: String?
-        let sizeBytes: Int
-        let fileSizeBytes: Int?
     }
 
     private struct PrewarmSnapshot: Sendable {
         let type: ClipboardItemType
-        let contentKey: String
+        let revision: ClipboardItemContentRevision
         let plainText: String
         let note: String?
         let sizeBytes: Int
@@ -39,21 +109,45 @@ final class ClipboardItemDisplayText {
         let metadata: String
     }
 
+    private struct PrewarmIdentity: Hashable, Sendable {
+        let revision: ClipboardItemContentRevision
+        let note: String?
+    }
+
+    private struct PrewarmWork: Sendable {
+        let token: UInt64
+        let cacheGeneration: UInt64
+        let cancellation: PresentationPrewarmCancellationFlag
+        let identities: Set<PrewarmIdentity>
+        let snapshots: [PrewarmSnapshot]
+    }
+
     private struct DisplayTextPair: Sendable {
         let title: String
         let metadata: String
     }
 
-    private var titleCache: [TitleCacheKey: String] = [:]
-    private var metadataCache: [MetadataCacheKey: String] = [:]
+    private static let defaultCacheLimit = 20_000
+    private static let defaultPrewarmBatchLimit = 1_024
 
-    private let cacheLimit: Int = 20_000
+    private var prewarmBatchLimit: Int
+    private var titleCache: BoundedPresentationCache<TitleCacheKey, String>
+    private var metadataCache: BoundedPresentationCache<MetadataCacheKey, String>
+    private var cacheGeneration: UInt64 = 0
+    private var prewarmToken: UInt64 = 0
+    private var prewarmWorkerTask: Task<Void, Never>?
+    private var pendingPrewarmWork: PrewarmWork?
+    private var activePrewarmToken: UInt64?
+    private var activePrewarmCancellation: PresentationPrewarmCancellationFlag?
+    private var activePrewarmIdentities: Set<PrewarmIdentity> = []
 
     private init() {
+        prewarmBatchLimit = Self.defaultPrewarmBatchLimit
+        titleCache = BoundedPresentationCache(capacity: Self.defaultCacheLimit)
+        metadataCache = BoundedPresentationCache(capacity: Self.defaultCacheLimit)
     }
 
     func title(for item: ClipboardItemDTO) -> String {
-        trimCacheIfNeeded()
         let titleKey = makeTitleCacheKey(for: item)
         if let cached = titleCache[titleKey] { return cached }
 
@@ -63,7 +157,6 @@ final class ClipboardItemDisplayText {
     }
 
     func metadata(for item: ClipboardItemDTO) -> String {
-        trimCacheIfNeeded()
         let metadataKey = makeMetadataCacheKey(for: item)
         if let cached = metadataCache[metadataKey] { return cached }
 
@@ -73,7 +166,6 @@ final class ClipboardItemDisplayText {
     }
 
     func displayTexts(for item: ClipboardItemDTO) -> (title: String, metadata: String) {
-        trimCacheIfNeeded()
         let titleKey = makeTitleCacheKey(for: item)
         let metadataKey = makeMetadataCacheKey(for: item)
         if let title = titleCache[titleKey],
@@ -88,51 +180,106 @@ final class ClipboardItemDisplayText {
 
     @discardableResult
     func prewarm(items: [ClipboardItemDTO]) -> Task<Void, Never>? {
-        guard !items.isEmpty else { return nil }
-        let snapshots = items.map { item in
-            PrewarmSnapshot(
-                type: item.type,
-                contentKey: Self.cacheKeyContent(for: item),
-                plainText: item.plainText,
-                note: item.note,
-                sizeBytes: item.sizeBytes,
-                fileSizeBytes: item.fileSizeBytes
-            )
+        guard !items.isEmpty else {
+            cancelSupersededPrewarm(pendingReplacement: nil)
+            return nil
         }
 
-        let task = Task.detached(priority: .utility) { [snapshots] in
-            var entries: [PrewarmEntry] = []
-            entries.reserveCapacity(snapshots.count)
-            for snapshot in snapshots {
-                let pair = Self.computeDisplayTextPair(
-                    type: snapshot.type,
-                    plainText: snapshot.plainText,
-                    note: snapshot.note,
-                    sizeBytes: snapshot.sizeBytes,
-                    fileSizeBytes: snapshot.fileSizeBytes
-                )
-                let titleKey = TitleCacheKey(type: snapshot.type, contentKey: snapshot.contentKey)
-                let metadataKey = MetadataCacheKey(
-                    type: snapshot.type,
-                    contentKey: snapshot.contentKey,
-                    note: snapshot.note,
-                    sizeBytes: snapshot.sizeBytes,
-                    fileSizeBytes: snapshot.fileSizeBytes
-                )
-                entries.append(
-                    PrewarmEntry(
-                        titleKey: titleKey,
-                        metadataKey: metadataKey,
-                        title: pair.title,
-                        metadata: pair.metadata
-                    )
-                )
+        var identities: Set<PrewarmIdentity> = []
+        var snapshots: [PrewarmSnapshot] = []
+        snapshots.reserveCapacity(min(items.count, prewarmBatchLimit))
+
+        for item in items where snapshots.count < prewarmBatchLimit {
+            let revision = ClipboardItemContentRevision(item: item)
+            let identity = PrewarmIdentity(revision: revision, note: item.note)
+            guard identities.insert(identity).inserted else { continue }
+
+            let titleKey = TitleCacheKey(revision: revision)
+            let metadataKey = MetadataCacheKey(revision: revision, note: item.note)
+            guard titleCache[titleKey] == nil || metadataCache[metadataKey] == nil else {
+                identities.remove(identity)
+                continue
             }
-            let preparedEntries = entries
-            await MainActor.run {
-                ClipboardItemDisplayText.shared.storePrewarmEntries(preparedEntries)
+
+            snapshots.append(
+                PrewarmSnapshot(
+                    type: item.type,
+                    revision: revision,
+                    plainText: item.plainText,
+                    note: item.note,
+                    sizeBytes: item.sizeBytes,
+                    fileSizeBytes: item.fileSizeBytes
+                )
+            )
+        }
+        guard !snapshots.isEmpty else {
+            cancelSupersededPrewarm(pendingReplacement: nil)
+            return nil
+        }
+
+        if activePrewarmIdentities == identities,
+           activePrewarmCancellation?.isCancelled == false {
+            pendingPrewarmWork?.cancellation.cancel()
+            pendingPrewarmWork = nil
+            return nil
+        }
+        if pendingPrewarmWork?.identities == identities {
+            return nil
+        }
+
+        prewarmToken &+= 1
+        let work = PrewarmWork(
+            token: prewarmToken,
+            cacheGeneration: cacheGeneration,
+            cancellation: PresentationPrewarmCancellationFlag(),
+            identities: identities,
+            snapshots: snapshots
+        )
+        cancelSupersededPrewarm(pendingReplacement: work)
+
+        if let prewarmWorkerTask {
+            return prewarmWorkerTask
+        }
+
+        let task = Task.detached(priority: .utility) {
+            while let work = await MainActor.run(body: {
+                ClipboardItemDisplayText.shared.takeNextPrewarmWork()
+            }) {
+                var entries: [PrewarmEntry] = []
+                entries.reserveCapacity(work.snapshots.count)
+                for snapshot in work.snapshots {
+                    guard !work.cancellation.isCancelled else { break }
+                    let pair = Self.computeDisplayTextPair(
+                        type: snapshot.type,
+                        plainText: snapshot.plainText,
+                        note: snapshot.note,
+                        sizeBytes: snapshot.sizeBytes,
+                        fileSizeBytes: snapshot.fileSizeBytes
+                    )
+                    guard !work.cancellation.isCancelled else { break }
+                    entries.append(
+                        PrewarmEntry(
+                            titleKey: TitleCacheKey(revision: snapshot.revision),
+                            metadataKey: MetadataCacheKey(
+                                revision: snapshot.revision,
+                                note: snapshot.note
+                            ),
+                            title: pair.title,
+                            metadata: pair.metadata
+                        )
+                    )
+                }
+
+                let preparedEntries = entries
+                await MainActor.run {
+                    ClipboardItemDisplayText.shared.completePrewarm(
+                        work: work,
+                        entries: preparedEntries
+                    )
+                }
             }
         }
+        prewarmWorkerTask = task
 
         return task
     }
@@ -146,62 +293,95 @@ final class ClipboardItemDisplayText {
     }
 
     func clearCaches() {
-        titleCache.removeAll(keepingCapacity: true)
-        metadataCache.removeAll(keepingCapacity: true)
-    }
-
-    private func trimCacheIfNeeded() {
-        if titleCache.count > cacheLimit {
-            titleCache.removeAll(keepingCapacity: true)
-        }
-        if metadataCache.count > cacheLimit {
-            metadataCache.removeAll(keepingCapacity: true)
-        }
+        cacheGeneration &+= 1
+        prewarmToken &+= 1
+        activePrewarmCancellation?.cancel()
+        pendingPrewarmWork?.cancellation.cancel()
+        pendingPrewarmWork = nil
+        activePrewarmToken = nil
+        activePrewarmCancellation = nil
+        activePrewarmIdentities.removeAll(keepingCapacity: true)
+        titleCache.removeAll()
+        metadataCache.removeAll()
     }
 
     private func makeTitleCacheKey(for item: ClipboardItemDTO) -> TitleCacheKey {
-        TitleCacheKey(type: item.type, contentKey: Self.cacheKeyContent(for: item))
+        TitleCacheKey(revision: ClipboardItemContentRevision(item: item))
     }
 
     private func makeMetadataCacheKey(for item: ClipboardItemDTO) -> MetadataCacheKey {
         MetadataCacheKey(
-            type: item.type,
-            contentKey: Self.cacheKeyContent(for: item),
-            note: item.note,
-            sizeBytes: item.sizeBytes,
-            fileSizeBytes: item.fileSizeBytes
+            revision: ClipboardItemContentRevision(item: item),
+            note: item.note
         )
     }
 
     private func storePrewarmEntries(_ entries: [PrewarmEntry]) {
-        guard !entries.isEmpty else { return }
-        trimCacheIfNeeded()
-        var titleCount = titleCache.count
-        var metadataCount = metadataCache.count
-
         for entry in entries {
-            if titleCount >= cacheLimit || metadataCount >= cacheLimit {
-                break
-            }
-
-            if titleCache[entry.titleKey] == nil {
-                titleCache[entry.titleKey] = entry.title
-                titleCount += 1
-            }
-            if metadataCache[entry.metadataKey] == nil {
-                metadataCache[entry.metadataKey] = entry.metadata
-                metadataCount += 1
-            }
+            titleCache.insert(entry.title, forKey: entry.titleKey)
+            metadataCache.insert(entry.metadata, forKey: entry.metadataKey)
         }
     }
 
     private func storeDisplayTextPair(_ pair: DisplayTextPair, titleKey: TitleCacheKey, metadataKey: MetadataCacheKey) {
-        if titleCache[titleKey] == nil, titleCache.count < cacheLimit {
-            titleCache[titleKey] = pair.title
+        titleCache.insert(pair.title, forKey: titleKey)
+        metadataCache.insert(pair.metadata, forKey: metadataKey)
+    }
+
+    private func cancelSupersededPrewarm(pendingReplacement: PrewarmWork?) {
+        activePrewarmCancellation?.cancel()
+        pendingPrewarmWork?.cancellation.cancel()
+        pendingPrewarmWork = pendingReplacement
+    }
+
+    private func takeNextPrewarmWork() -> PrewarmWork? {
+        guard let work = pendingPrewarmWork else {
+            prewarmWorkerTask = nil
+            return nil
         }
-        if metadataCache[metadataKey] == nil, metadataCache.count < cacheLimit {
-            metadataCache[metadataKey] = pair.metadata
-        }
+        pendingPrewarmWork = nil
+        activePrewarmToken = work.token
+        activePrewarmCancellation = work.cancellation
+        activePrewarmIdentities = work.identities
+        return work
+    }
+
+    private func completePrewarm(work: PrewarmWork, entries: [PrewarmEntry]) {
+        guard activePrewarmToken == work.token else { return }
+        activePrewarmToken = nil
+        activePrewarmCancellation = nil
+        activePrewarmIdentities.removeAll(keepingCapacity: true)
+
+        guard !work.cancellation.isCancelled,
+              cacheGeneration == work.cacheGeneration else { return }
+        storePrewarmEntries(entries)
+    }
+
+    func configureCacheCapacityForTesting(_ capacity: Int) {
+        precondition(capacity > 0)
+        clearCaches()
+        prewarmBatchLimit = capacity
+        titleCache = BoundedPresentationCache(capacity: capacity)
+        metadataCache = BoundedPresentationCache(capacity: capacity)
+    }
+
+    func restoreDefaultCacheCapacityForTesting() {
+        clearCaches()
+        prewarmBatchLimit = Self.defaultPrewarmBatchLimit
+        titleCache = BoundedPresentationCache(capacity: Self.defaultCacheLimit)
+        metadataCache = BoundedPresentationCache(capacity: Self.defaultCacheLimit)
+    }
+
+    var cacheEntryCountsForTesting: (title: Int, metadata: Int) {
+        (titleCache.count, metadataCache.count)
+    }
+
+    var prewarmInFlightCountForTesting: Int {
+        activePrewarmIdentities.count + (pendingPrewarmWork?.identities.count ?? 0)
+    }
+
+    var hasActivePrewarmWorkerForTesting: Bool {
+        prewarmWorkerTask != nil
     }
 
     private func computeDisplayTextPair(for item: ClipboardItemDTO, metricName: String) -> DisplayTextPair {
@@ -215,7 +395,7 @@ final class ClipboardItemDisplayText {
                 fileSizeBytes: item.fileSizeBytes
             )
             let elapsed = (CFAbsoluteTimeGetCurrent() - start) * 1000
-            ScrollPerformanceProfile.recordMetric(name: metricName, elapsedMs: elapsed)
+            ScrollPerformanceProfile.recordTiming(name: metricName, elapsedMs: elapsed)
             return pair
         }
 
@@ -226,10 +406,6 @@ final class ClipboardItemDisplayText {
             sizeBytes: item.sizeBytes,
             fileSizeBytes: item.fileSizeBytes
         )
-    }
-
-    private nonisolated static func cacheKeyContent(for item: ClipboardItemDTO) -> String {
-        item.contentHash.isEmpty ? item.id.uuidString : item.contentHash
     }
 
     private nonisolated static func computeTitle(type: ClipboardItemType, plainText: String) -> String {
