@@ -23,6 +23,7 @@ Before changing backend code, read:
 | [Error Handling](./error-handling.md) | New thrown errors, startup failures, recovery paths, async task failures |
 | [Logging Guidelines](./logging-guidelines.md) | Any logging, diagnostics, privacy, or hotkey/storage/search observability |
 | [Search Guidelines](./search-guidelines.md) | Search planner, path selection, FTS/full-index/short-query fallback behavior, search performance |
+| [Build And Release Outputs](./build-release-guidelines.md) | XcodeGen/build-directory, deploy script, tagged packaging, or CI release changes |
 | [Quality Guidelines](./quality-guidelines.md) | Always before implementation and before final handoff |
 
 If a backend change affects UI state, user flows, settings pages, previews, or performance presentation, also read ../frontend/index.md.

@@ -34,8 +34,6 @@ settings:
     DEVELOPMENT_TEAM: ""
     CODE_SIGN_ENTITLEMENTS: Scopy/Scopy.entitlements
     PRODUCT_BUNDLE_IDENTIFIER: com.scopy.app
-    BUILD_DIR: $(SRCROOT)/.build
-    CONFIGURATION_BUILD_DIR: $(BUILD_DIR)/$(CONFIGURATION)
     # SwiftPM packages still build into DerivedData; add search paths so App/Test targets can `import ScopyKit`
     SWIFT_INCLUDE_PATHS: "$(inherited) $(OBJROOT)/../Products/$(CONFIGURATION)"
     FRAMEWORK_SEARCH_PATHS: "$(inherited) $(OBJROOT)/../Products/$(CONFIGURATION)"

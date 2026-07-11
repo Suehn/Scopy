@@ -1,13 +1,13 @@
 #!/bin/bash
 
 # Scopy 快速部署脚本
-# 编译到 .build 目录，然后部署到 /Applications
+# 编译到独立的 Xcode DerivedData，然后部署到 /Applications
 #
 # 用法:
 #   ./deploy.sh              # Debug 版本
-#   ./deploy.sh release      # Release 版本
-#   ./deploy.sh clean        # 清理后重新部署
-#   ./deploy.sh --no-launch  # 部署但不启动应用
+#   ./deploy.sh release                 # Release 版本
+#   ./deploy.sh clean                   # 清理后重新部署 Debug
+#   ./deploy.sh release --no-launch     # 部署 Release 但不启动应用
 
 set -e
 
@@ -22,24 +22,45 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 # 配置
-CONFIGURATION="${1:-Debug}"
+CONFIGURATION="Debug"
 DO_CLEAN=false
 LAUNCH_APP=true
+XCODE_DERIVED_DATA="${SCOPY_XCODE_DERIVED_DATA:-$HOME/Library/Developer/Xcode/DerivedData/Scopy-Deploy}"
 
-# 解析参数
-case "$1" in
-    clean)
-        CONFIGURATION="Debug"
-        DO_CLEAN=true
-        ;;
-    release)
-        CONFIGURATION="Release"
-        ;;
-    --no-launch)
-        CONFIGURATION="Debug"
-        LAUNCH_APP=false
+case "$XCODE_DERIVED_DATA" in
+    /*) ;;
+    *)
+        echo "SCOPY_XCODE_DERIVED_DATA 必须是绝对路径: $XCODE_DERIVED_DATA" >&2
+        exit 2
         ;;
 esac
+if [[ "$XCODE_DERIVED_DATA" == "/" || "$XCODE_DERIVED_DATA" == "$HOME" || "$XCODE_DERIVED_DATA" == "$PROJECT_DIR" ]]; then
+    echo "拒绝使用不安全的 DerivedData 路径: $XCODE_DERIVED_DATA" >&2
+    exit 2
+fi
+
+# 解析参数
+for argument in "$@"; do
+    case "$argument" in
+        clean)
+            DO_CLEAN=true
+            ;;
+        release|Release)
+            CONFIGURATION="Release"
+            ;;
+        debug|Debug)
+            CONFIGURATION="Debug"
+            ;;
+        --no-launch)
+            LAUNCH_APP=false
+            ;;
+        *)
+            echo "未知参数: $argument" >&2
+            echo "用法: ./deploy.sh [debug|release] [clean] [--no-launch]" >&2
+            exit 2
+            ;;
+    esac
+done
 
 echo -e "${BLUE}================================================${NC}"
 echo -e "${BLUE}   Scopy 快速部署脚本${NC}"
@@ -47,7 +68,7 @@ echo -e "${BLUE}================================================${NC}"
 echo ""
 echo -e "配置: ${YELLOW}$CONFIGURATION${NC}"
 echo -e "项目路径: ${YELLOW}$PROJECT_DIR${NC}"
-echo -e "输出目录: ${YELLOW}$PROJECT_DIR/.build${NC}"
+echo -e "输出目录: ${YELLOW}$XCODE_DERIVED_DATA/Build/Products${NC}"
 
 VERSION_ARGS="$(bash "$PROJECT_DIR/scripts/version.sh" --xcodebuild-args 2>/dev/null || true)"
 if [[ -n "${VERSION_ARGS}" ]]; then
@@ -58,8 +79,9 @@ echo ""
 # Step 1: 清理 (可选)
 if [ "$DO_CLEAN" = true ]; then
     echo -e "${BLUE}[1/6]${NC} 清理项目..."
-    rm -rf "$PROJECT_DIR/.build"
-    xcodebuild clean -scheme Scopy -configuration "$CONFIGURATION" > /dev/null 2>&1 || true
+    rm -rf "$XCODE_DERIVED_DATA"
+    xcodebuild clean -project Scopy.xcodeproj -scheme Scopy -configuration "$CONFIGURATION" \
+        -derivedDataPath "$XCODE_DERIVED_DATA" > /dev/null 2>&1 || true
     echo -e "${GREEN}✓ 清理完成${NC}"
     echo ""
 fi
@@ -75,22 +97,26 @@ fi
 echo -e "${GREEN}✓ 项目生成完成${NC}"
 echo ""
 
-# Step 3: 创建 .build 目录
+# Step 3: 创建 Xcode DerivedData 目录
 echo -e "${BLUE}[3/6]${NC} 准备构建目录..."
-mkdir -p "$PROJECT_DIR/.build"
-echo -e "${GREEN}✓ .build 目录就绪${NC}"
+mkdir -p "$XCODE_DERIVED_DATA"
+echo -e "${GREEN}✓ Xcode DerivedData 目录就绪${NC}"
 echo ""
 
 # Step 4: 编译应用
 echo -e "${BLUE}[4/6]${NC} 编译应用 ($CONFIGURATION 模式)..."
+BUILD_LOG="$XCODE_DERIVED_DATA/deploy-${CONFIGURATION}.log"
 if ! xcodebuild build \
+    -project Scopy.xcodeproj \
     -scheme Scopy \
     -configuration "$CONFIGURATION" \
+    -derivedDataPath "$XCODE_DERIVED_DATA" \
     ${VERSION_ARGS} \
-    > /dev/null 2>&1; then
+    > "$BUILD_LOG" 2>&1; then
     echo -e "${RED}✗ 编译失败${NC}"
-    echo "    运行以下命令查看详情:"
-    echo "    xcodebuild build -scheme Scopy -configuration $CONFIGURATION ${VERSION_ARGS}"
+    echo "    日志: $BUILD_LOG"
+    echo "    最后 80 行:"
+    tail -n 80 "$BUILD_LOG"
     exit 1
 fi
 echo -e "${GREEN}✓ 编译成功${NC}"
@@ -99,8 +125,8 @@ echo ""
 # Step 5: 验证应用位置
 echo -e "${BLUE}[5/6]${NC} 验证应用位置..."
 
-# 应用直接构建到 .build/$CONFIGURATION/Scopy.app (由 project.yml 的 BUILD_DIR 设置)
-BUILD_APP="$PROJECT_DIR/.build/$CONFIGURATION/Scopy.app"
+# 应用构建到显式 DerivedData，避免与 SwiftPM `.build` 及文件同步元数据互相污染。
+BUILD_APP="$XCODE_DERIVED_DATA/Build/Products/$CONFIGURATION/Scopy.app"
 if [ ! -d "$BUILD_APP" ]; then
     echo -e "${RED}✗ 应用包不存在: $BUILD_APP${NC}"
     exit 1

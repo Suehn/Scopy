@@ -12,7 +12,7 @@
 set -e
 
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-PROJECT_DIR="$SCRIPT_DIR/.."
+PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$PROJECT_DIR"
 
 # 颜色输出
@@ -24,8 +24,22 @@ NC='\033[0m'
 
 # 配置
 APP_NAME="Scopy"
-BUILD_DIR=".build/Release"
+XCODE_DERIVED_DATA="${SCOPY_XCODE_DERIVED_DATA:-$HOME/Library/Developer/Xcode/DerivedData/Scopy-Release}"
+BUILD_DIR="$XCODE_DERIVED_DATA/Build/Products/Release"
 DMG_DIR=".build/dmg"
+BUILD_LOG="$XCODE_DERIVED_DATA/build-release.log"
+
+case "$XCODE_DERIVED_DATA" in
+    /*) ;;
+    *)
+        echo "SCOPY_XCODE_DERIVED_DATA must be an absolute path: $XCODE_DERIVED_DATA" >&2
+        exit 2
+        ;;
+esac
+if [[ "$XCODE_DERIVED_DATA" == "/" || "$XCODE_DERIVED_DATA" == "$HOME" || "$XCODE_DERIVED_DATA" == "$PROJECT_DIR" ]]; then
+    echo "Refusing unsafe DerivedData path: $XCODE_DERIVED_DATA" >&2
+    exit 2
+fi
 
 TAG_ON_HEAD="$(bash scripts/version.sh --tag 2>/dev/null || true)"
 if [[ -z "${TAG_ON_HEAD}" ]] || [[ "$(git rev-list -n 1 "${TAG_ON_HEAD}" 2>/dev/null || true)" != "$(git rev-parse HEAD)" ]]; then
@@ -61,10 +75,13 @@ echo -e "${GREEN}✓ 项目生成完成${NC}"
 
 # Step 2: 构建 Release
 echo -e "${BLUE}[2/5]${NC} 构建 Release 版本..."
-if ! xcodebuild -scheme Scopy -configuration Release build ${VERSION_ARGS} > /dev/null 2>&1; then
+mkdir -p "$XCODE_DERIVED_DATA"
+if ! xcodebuild -project Scopy.xcodeproj -scheme Scopy -configuration Release \
+    -derivedDataPath "$XCODE_DERIVED_DATA" build ${VERSION_ARGS} > "$BUILD_LOG" 2>&1; then
     echo -e "${RED}✗ 构建失败${NC}"
-    echo "    运行以下命令查看详情:"
-    echo "    xcodebuild -scheme Scopy -configuration Release build ${VERSION_ARGS}"
+    echo "    Log: $BUILD_LOG"
+    echo "    Last 80 lines:"
+    tail -n 80 "$BUILD_LOG"
     exit 1
 fi
 echo -e "${GREEN}✓ 构建成功${NC}"
