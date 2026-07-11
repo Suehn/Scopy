@@ -1,8 +1,33 @@
 import Foundation
 
 enum UnifiedMarkdownRenderer: MarkdownPreviewRenderer {
+    private final class BundleAvailabilityOverrideStorage: @unchecked Sendable {
+        typealias Override = @Sendable () -> Bool
+
+        private let lock = NSLock()
+        private var storedValue: Override?
+
+        func value() -> Override? {
+            lock.lock()
+            defer { lock.unlock() }
+            return storedValue
+        }
+
+        func setValue(_ value: Override?) {
+            lock.lock()
+            storedValue = value
+            lock.unlock()
+        }
+    }
+
     static let kind: MarkdownRendererKind = .unified
-    static var bundleAvailabilityOverride: (() -> Bool)?
+    private static let bundleAvailabilityOverrideStorage = BundleAvailabilityOverrideStorage()
+
+    static func setBundleAvailabilityOverride(
+        _ override: (@Sendable () -> Bool)?
+    ) {
+        bundleAvailabilityOverrideStorage.setValue(override)
+    }
 
     static func render(markdown: String, context: MarkdownRenderContext) -> MarkdownRenderOutput {
         guard isUnifiedBundleAvailable() else {
@@ -31,7 +56,7 @@ enum UnifiedMarkdownRenderer: MarkdownPreviewRenderer {
     }
 
     private static func isUnifiedBundleAvailable() -> Bool {
-        if let bundleAvailabilityOverride {
+        if let bundleAvailabilityOverride = bundleAvailabilityOverrideStorage.value() {
             return bundleAvailabilityOverride()
         }
         if Bundle.main.url(

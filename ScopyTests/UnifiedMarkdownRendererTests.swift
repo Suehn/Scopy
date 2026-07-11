@@ -3,11 +3,11 @@ import XCTest
 final class UnifiedMarkdownRendererTests: XCTestCase {
     override func setUp() {
         super.setUp()
-        UnifiedMarkdownRenderer.bundleAvailabilityOverride = { true }
+        UnifiedMarkdownRenderer.setBundleAvailabilityOverride { true }
     }
 
     override func tearDown() {
-        UnifiedMarkdownRenderer.bundleAvailabilityOverride = nil
+        UnifiedMarkdownRenderer.setBundleAvailabilityOverride(nil)
         super.tearDown()
     }
 
@@ -68,8 +68,8 @@ final class UnifiedMarkdownRendererTests: XCTestCase {
     }
 
     func testUnifiedRendererFallsBackToLegacyWhenBundleIsMissing() {
-        UnifiedMarkdownRenderer.bundleAvailabilityOverride = { false }
-        defer { UnifiedMarkdownRenderer.bundleAvailabilityOverride = nil }
+        UnifiedMarkdownRenderer.setBundleAvailabilityOverride { false }
+        defer { UnifiedMarkdownRenderer.setBundleAvailabilityOverride(nil) }
         let base = MarkdownRenderContextResolver.defaultContext(for: "# Title")
         let context = base.withRenderer(.unified)
 

@@ -536,9 +536,7 @@ private final class KaTeXEngine {
             _ = exception
         }
 
-        let baseURL = try markdownPreviewBaseURL()
-        let katexURL = baseURL.appendingPathComponent("katex.min.js", isDirectory: false)
-        let mhchemURL = baseURL.appendingPathComponent("contrib/mhchem.min.js", isDirectory: false)
+        let katexURL = try TestFixture.url("katex.min.js")
 
         let katexSource = try String(contentsOf: katexURL, encoding: .utf8)
         context.evaluateScript(katexSource)
@@ -547,7 +545,7 @@ private final class KaTeXEngine {
         }
 
         // mhchem is optional; load best-effort to match app runtime.
-        if FileManager.default.fileExists(atPath: mhchemURL.path) {
+        if let mhchemURL = try? TestFixture.url("mhchem.min.js") {
             let mhchemSource = try String(contentsOf: mhchemURL, encoding: .utf8)
             context.evaluateScript(mhchemSource)
             context.exception = nil
@@ -596,8 +594,7 @@ private final class MarkdownItEngine {
             _ = exception
         }
 
-        let baseURL = try markdownPreviewBaseURL()
-        let markdownItURL = baseURL.appendingPathComponent("contrib/markdown-it.min.js", isDirectory: false)
+        let markdownItURL = try TestFixture.url("markdown-it.min.js")
         let source = try String(contentsOf: markdownItURL, encoding: .utf8)
         context.evaluateScript(source)
         if let exc = context.exception {
@@ -629,20 +626,4 @@ private final class MarkdownItEngine {
         }
         return html
     }
-}
-
-private func markdownPreviewBaseURL() throws -> URL {
-    let fm = FileManager.default
-    var dir = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
-    for _ in 0..<12 {
-        let candidate = dir.appendingPathComponent("Scopy/Resources/MarkdownPreview", isDirectory: true)
-        let katex = candidate.appendingPathComponent("katex.min.js", isDirectory: false)
-        if fm.fileExists(atPath: katex.path) {
-            return candidate
-        }
-        let next = dir.deletingLastPathComponent()
-        if next.path == dir.path { break }
-        dir = next
-    }
-    throw NSError(domain: "ScopyTests", code: 6, userInfo: [NSLocalizedDescriptionKey: "Cannot locate Scopy/Resources/MarkdownPreview from test file path."])
 }

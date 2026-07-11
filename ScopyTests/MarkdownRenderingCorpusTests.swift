@@ -3,11 +3,11 @@ import XCTest
 final class MarkdownRenderingCorpusTests: XCTestCase {
     override func setUp() {
         super.setUp()
-        UnifiedMarkdownRenderer.bundleAvailabilityOverride = { true }
+        UnifiedMarkdownRenderer.setBundleAvailabilityOverride { true }
     }
 
     override func tearDown() {
-        UnifiedMarkdownRenderer.bundleAvailabilityOverride = nil
+        UnifiedMarkdownRenderer.setBundleAvailabilityOverride(nil)
         super.tearDown()
     }
 
@@ -37,19 +37,13 @@ final class MarkdownRenderingCorpusTests: XCTestCase {
     }
 
     private func loadCases() throws -> [CorpusCase] {
-        let data = try Data(contentsOf: corpusDirectory.appendingPathComponent("cases.json"))
+        let data = try TestFixture.data("MarkdownRenderingCorpus/cases.json")
         return try JSONDecoder().decode([CorpusCase].self, from: data)
     }
 
     private func loadSource(file: String) throws -> String {
-        let data = try Data(contentsOf: corpusDirectory.appendingPathComponent(file))
+        let data = try TestFixture.data("MarkdownRenderingCorpus/\(file)")
         return String(decoding: data, as: UTF8.self)
-    }
-
-    private var corpusDirectory: URL {
-        URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()
-            .appendingPathComponent("Fixtures/MarkdownRenderingCorpus")
     }
 }
 

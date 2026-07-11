@@ -4,11 +4,11 @@ import ScopyKit
 final class MarkdownPreviewRendererFacadeTests: XCTestCase {
     override func setUp() {
         super.setUp()
-        UnifiedMarkdownRenderer.bundleAvailabilityOverride = { true }
+        UnifiedMarkdownRenderer.setBundleAvailabilityOverride { true }
     }
 
     override func tearDown() {
-        UnifiedMarkdownRenderer.bundleAvailabilityOverride = nil
+        UnifiedMarkdownRenderer.setBundleAvailabilityOverride(nil)
         super.tearDown()
     }
 
