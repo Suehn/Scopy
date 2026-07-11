@@ -61,8 +61,8 @@ enum HistoryHoverPreviewPipeline {
     }
 
     struct ImageRequest {
-        let itemID: UUID
-        let contentHash: String
+        /// The future lazy interaction session can compare this value before committing work.
+        let revision: ClipboardItemContentRevision
         let storageRef: String?
         let delay: TimeInterval
         let scale: CGFloat
@@ -71,8 +71,8 @@ enum HistoryHoverPreviewPipeline {
     }
 
     struct FileRequest {
-        let itemID: UUID
-        let contentHash: String
+        /// The future lazy interaction session can compare this value before committing work.
+        let revision: ClipboardItemContentRevision
         let previewInfo: FilePreviewInfo
         let isMarkdown: Bool
         let delay: TimeInterval
@@ -85,6 +85,8 @@ enum HistoryHoverPreviewPipeline {
 
     struct TextRequest {
         let item: ClipboardItemDTO
+        /// Captured with `item` so cache identity and the later session guard share one snapshot.
+        let revision: ClipboardItemContentRevision
         let delay: TimeInterval
         let markdownLayoutScale: MarkdownChatGPTLayoutScalePercent
     }
@@ -166,8 +168,7 @@ enum HistoryHoverPreviewPipeline {
     @MainActor
     static func imageRequest(item: ClipboardItemDTO, delay: TimeInterval) -> ImageRequest {
         ImageRequest(
-            itemID: item.id,
-            contentHash: item.contentHash,
+            revision: ClipboardItemContentRevision(item: item),
             storageRef: item.storageRef,
             delay: delay,
             scale: HoverPreviewScreenMetrics.activeBackingScaleFactor(),
@@ -185,8 +186,7 @@ enum HistoryHoverPreviewPipeline {
         settings: SettingsDTO = .default
     ) -> FileRequest {
         FileRequest(
-            itemID: item.id,
-            contentHash: item.contentHash,
+            revision: ClipboardItemContentRevision(item: item),
             previewInfo: previewInfo,
             isMarkdown: isMarkdown,
             delay: delay,
@@ -207,6 +207,7 @@ enum HistoryHoverPreviewPipeline {
     ) -> TextRequest {
         TextRequest(
             item: item,
+            revision: ClipboardItemContentRevision(item: item),
             delay: delay,
             markdownLayoutScale: MarkdownChatGPTLayoutScalePercent(
                 settingsValue: settings.markdownChatGPTLayoutScalePercent
@@ -216,7 +217,7 @@ enum HistoryHoverPreviewPipeline {
 
     static func markdownFileRequest(fileRequest: FileRequest) -> MarkdownFileRequest {
         MarkdownFileRequest(
-            cacheKey: markdownFileCacheKey(itemID: fileRequest.itemID, contentHash: fileRequest.contentHash),
+            cacheKey: markdownFileCacheKey(revision: fileRequest.revision),
             url: fileRequest.previewInfo.url,
             delay: fileRequest.delay,
             markdownLayoutScale: fileRequest.markdownLayoutScale
@@ -229,7 +230,7 @@ enum HistoryHoverPreviewPipeline {
         return ImagePlan(
             delayNanos: delay,
             prefetchDelayNanos: min(50_000_000, delay),
-            cacheKey: "\(cacheKeyBase(itemID: request.itemID, contentHash: request.contentHash))|w\(targetWidthPixels)",
+            cacheKey: "\(request.revision.cacheKey)|w\(targetWidthPixels)",
             targetWidthPixels: targetWidthPixels,
             maxLongSidePixels: request.maxLongSidePixels
         )
@@ -243,7 +244,7 @@ enum HistoryHoverPreviewPipeline {
         return FilePlan(
             delayNanos: delay,
             prefetchDelayNanos: min(50_000_000, delay),
-            cacheKey: "file|\(cacheKeyBase(itemID: request.itemID, contentHash: request.contentHash))|\(kindToken)|w\(targetWidthPixels)",
+            cacheKey: "file|\(request.revision.cacheKey)|\(kindToken)|w\(targetWidthPixels)",
             targetWidthPixels: targetWidthPixels,
             quickLookMaxSidePixels: max(targetWidthPixels, targetHeightPixels),
             maxLongSidePixels: request.maxLongSidePixels,
@@ -251,8 +252,8 @@ enum HistoryHoverPreviewPipeline {
         )
     }
 
-    static func markdownFileCacheKey(itemID: UUID, contentHash: String) -> String {
-        "file|\(cacheKeyBase(itemID: itemID, contentHash: contentHash))"
+    static func markdownFileCacheKey(revision: ClipboardItemContentRevision) -> String {
+        "file|\(revision.cacheKey)"
     }
 
     @MainActor
@@ -617,7 +618,7 @@ enum HistoryHoverPreviewPipeline {
 
         guard preview.utf16.count <= maxMarkdownPreviewBytes else { return }
 
-        let cacheKey = item.contentHash
+        let cacheKey = request.revision.cacheKey
         let context = MarkdownRenderContextResolver.defaultContext(
             for: preview,
             layoutScale: request.markdownLayoutScale
@@ -667,7 +668,7 @@ enum HistoryHoverPreviewPipeline {
             MarkdownDetector.isLikelyMarkdown(preview)
         }.value
         if let profileStart {
-            ScrollPerformanceProfile.recordMetric(
+            ScrollPerformanceProfile.recordTiming(
                 name: "text.markdown_detect_ms",
                 elapsedMs: (CFAbsoluteTimeGetCurrent() - profileStart) * 1000
             )
@@ -711,7 +712,7 @@ enum HistoryHoverPreviewPipeline {
                 let start = CFAbsoluteTimeGetCurrent()
                 let html = MarkdownHTMLRenderer.render(markdown: source, context: context).html
                 let elapsed = (CFAbsoluteTimeGetCurrent() - start) * 1000
-                ScrollPerformanceProfile.recordMetric(name: "hover.markdown_render_ms", elapsedMs: elapsed)
+                ScrollPerformanceProfile.recordTiming(name: "hover.markdown_render_ms", elapsedMs: elapsed)
                 return html
             }
             return MarkdownHTMLRenderer.render(markdown: source, context: context).html
@@ -759,7 +760,4 @@ enum HistoryHoverPreviewPipeline {
         return UInt64(delay * 1_000_000_000)
     }
 
-    private static func cacheKeyBase(itemID: UUID, contentHash: String) -> String {
-        contentHash.isEmpty ? itemID.uuidString : contentHash
-    }
 }

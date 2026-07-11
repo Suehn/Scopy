@@ -1,5 +1,6 @@
 import XCTest
 import Foundation
+import CoreGraphics
 
 @MainActor
 final class HistoryItemViewUITests: XCTestCase {
@@ -138,6 +139,68 @@ final class HistoryItemViewUITests: XCTestCase {
             "Expected long Markdown text preview to upgrade into rendered unified Markdown"
         )
         waitForValue("rendered", identifier: "History.Preview.RenderStatus", timeout: 8)
+    }
+
+    func testHoverPreviewSafeTriangleKeepsPopoverOpenAcrossGap() throws {
+        launchHarness(scenario: "plain-text")
+
+        XCTAssertTrue(app.anyElement("UITest.HistoryItemHarness").waitForExistence(timeout: 10))
+        let row = historyItemButton(identifier: "HistoryItem.MainAction")
+        XCTAssertTrue(row.waitForExistence(timeout: 5))
+        row.hover()
+
+        let preview = app.anyElement("History.Preview.Text")
+        XCTAssertTrue(
+            hoverUntilPreviewExists(preview, from: row),
+            "Hover preview did not appear after a bounded retry"
+        )
+
+        exerciseSafeCorridor(from: row, to: preview)
+        pumpEvents(for: 0.15)
+        XCTAssertTrue(preview.exists, "Preview closed while the pointer crossed the safe corridor")
+    }
+
+    func testHoverPreviewDismissesWhenPointerMovesAwayFromPopover() throws {
+        launchHarness(scenario: "plain-text")
+
+        XCTAssertTrue(app.anyElement("UITest.HistoryItemHarness").waitForExistence(timeout: 10))
+        let row = historyItemButton(identifier: "HistoryItem.MainAction")
+        XCTAssertTrue(row.waitForExistence(timeout: 5))
+        row.hover()
+
+        let preview = app.anyElement("History.Preview.Text")
+        XCTAssertTrue(preview.waitForExistence(timeout: 5))
+
+        let rowCenter = center(of: row.frame)
+        let previewCenter = center(of: preview.frame)
+        let towardPreview = CGVector(dx: previewCenter.x - rowCenter.x, dy: previewCenter.y - rowCenter.y)
+        let length = max(1, hypot(towardPreview.dx, towardPreview.dy))
+        let outsideDistance = hypot(row.frame.width / 2, row.frame.height / 2) + 80
+        let outsidePoint = CGPoint(
+            x: rowCenter.x - (towardPreview.dx / length) * outsideDistance,
+            y: rowCenter.y - (towardPreview.dy / length) * outsideDistance
+        )
+
+        hover(at: outsidePoint, relativeTo: row)
+        waitForDisappearance(preview, timeout: 2)
+    }
+
+    func testHoverPreviewReturningToRowKeepsExistingPopoverOpen() throws {
+        launchHarness(scenario: "plain-text")
+
+        XCTAssertTrue(app.anyElement("UITest.HistoryItemHarness").waitForExistence(timeout: 10))
+        let row = historyItemButton(identifier: "HistoryItem.MainAction")
+        XCTAssertTrue(row.waitForExistence(timeout: 5))
+        row.hover()
+
+        let preview = app.anyElement("History.Preview.Text")
+        XCTAssertTrue(preview.waitForExistence(timeout: 5))
+        hover(at: center(of: preview.frame), relativeTo: row)
+        XCTAssertTrue(preview.exists)
+
+        row.hover()
+        pumpEvents(for: 0.15)
+        XCTAssertTrue(preview.exists, "Returning to the row should reuse the existing popover without flicker")
     }
 
     func testPlainTextScenarioHidesExportPNGInContextMenu() throws {
@@ -338,6 +401,121 @@ final class HistoryItemViewUITests: XCTestCase {
             }
         }
         return false
+    }
+
+    private func hoverUntilPreviewExists(
+        _ preview: XCUIElement,
+        from row: XCUIElement
+    ) -> Bool {
+        for attempt in 0..<2 {
+            row.hover()
+            if preview.waitForExistence(timeout: attempt == 0 ? 3 : 5) {
+                return true
+            }
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.02, dy: 0.02)).hover()
+            pumpEvents(for: 0.1)
+        }
+        return false
+    }
+
+    private func center(of frame: CGRect) -> CGPoint {
+        CGPoint(x: frame.midX, y: frame.midY)
+    }
+
+    private func hover(at screenPoint: CGPoint, relativeTo element: XCUIElement) {
+        let elementCenter = center(of: element.frame)
+        element
+            .coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+            .withOffset(CGVector(dx: screenPoint.x - elementCenter.x, dy: screenPoint.y - elementCenter.y))
+            .hover()
+    }
+
+    private func exerciseSafeCorridor(from row: XCUIElement, to preview: XCUIElement) {
+        let rowCenter = row.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).screenPoint
+        let previewCenter = preview.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).screenPoint
+        let delta = CGVector(dx: previewCenter.x - rowCenter.x, dy: previewCenter.y - rowCenter.y)
+        let length = hypot(delta.dx, delta.dy)
+        XCTAssertGreaterThan(length, 0)
+        guard length > 0 else { return }
+
+        let direction = CGVector(dx: delta.dx / length, dy: delta.dy / length)
+        let reverse = CGVector(dx: -direction.dx, dy: -direction.dy)
+        let rowBoundary = offset(
+            rowCenter,
+            along: direction,
+            by: rayDistance(for: row.frame.size, direction: direction)
+        )
+        let previewBoundary = offset(
+            previewCenter,
+            along: reverse,
+            by: rayDistance(for: preview.frame.size, direction: reverse)
+        )
+        let gap = hypot(previewBoundary.x - rowBoundary.x, previewBoundary.y - rowBoundary.y)
+        XCTAssertGreaterThan(gap, 6, "The UI harness must expose a real row-to-popover gap")
+        guard gap > 6 else { return }
+
+        let source = CGEventSource(stateID: .hidSystemState)
+        source?.localEventsSuppressionInterval = 0
+        XCTAssertNotNil(source)
+
+        // Enter the gap from inside the row, then spend ~200 ms making continuous forward
+        // progress before entering the popover. A fixed 120 ms grace would close at step 10.
+        postMouseMove(to: offset(rowBoundary, along: reverse, by: 2), source: source)
+        let gapStart = offset(rowBoundary, along: direction, by: 1)
+        let gapEnd = offset(previewBoundary, along: reverse, by: 1)
+        postMouseMove(to: gapStart, source: source)
+        for step in 1...12 {
+            let progress = CGFloat(step) / 12
+            postMouseMove(
+                to: CGPoint(
+                    x: gapStart.x + ((gapEnd.x - gapStart.x) * progress),
+                    y: gapStart.y + ((gapEnd.y - gapStart.y) * progress)
+                ),
+                source: source
+            )
+            if step == 10 {
+                XCTAssertTrue(preview.exists, "Preview closed after the old fixed grace despite forward intent")
+            }
+        }
+        postMouseMove(to: offset(previewBoundary, along: direction, by: 6), source: source)
+    }
+
+    private func rayDistance(for size: CGSize, direction: CGVector) -> CGFloat {
+        let horizontal = abs(direction.dx) > .ulpOfOne
+            ? size.width / 2 / abs(direction.dx)
+            : CGFloat.greatestFiniteMagnitude
+        let vertical = abs(direction.dy) > .ulpOfOne
+            ? size.height / 2 / abs(direction.dy)
+            : CGFloat.greatestFiniteMagnitude
+        return min(horizontal, vertical)
+    }
+
+    private func offset(_ point: CGPoint, along vector: CGVector, by distance: CGFloat) -> CGPoint {
+        CGPoint(x: point.x + (vector.dx * distance), y: point.y + (vector.dy * distance))
+    }
+
+    private func postMouseMove(to point: CGPoint, source: CGEventSource?) {
+        let event = CGEvent(
+            mouseEventSource: source,
+            mouseType: .mouseMoved,
+            mouseCursorPosition: point,
+            mouseButton: .left
+        )
+        XCTAssertNotNil(event)
+        event?.post(tap: .cghidEventTap)
+        pumpEvents(for: 0.016)
+    }
+
+    private func pumpEvents(for duration: TimeInterval) {
+        RunLoop.current.run(until: Date().addingTimeInterval(duration))
+    }
+
+    private func waitForDisappearance(_ element: XCUIElement, timeout: TimeInterval) {
+        let deadline = Date().addingTimeInterval(timeout)
+        while element.exists, Date() < deadline {
+            pumpEvents(for: 0.02)
+        }
+        XCTAssertFalse(element.exists, "Expected preview to close after the pointer left the safe corridor")
     }
 
     private func waitForProfileOutput(atPath path: String, timeout: TimeInterval) {

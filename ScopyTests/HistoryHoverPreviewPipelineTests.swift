@@ -8,8 +8,10 @@ import ScopyKit
 @MainActor
 final class HistoryHoverPreviewPipelineTests: XCTestCase {
     override func tearDown() {
-        HoverPreviewImageCache.shared.removeAll()
-        HistoryItemPresentationCache.shared.clearCaches()
+        MainActor.assumeIsolated {
+            HoverPreviewImageCache.shared.removeAll()
+            HistoryItemPresentationCache.shared.clearCaches()
+        }
         super.tearDown()
     }
 
@@ -23,9 +25,9 @@ final class HistoryHoverPreviewPipelineTests: XCTestCase {
 
     func testImagePlanUsesContentHashWidthAndDelay() {
         let itemID = UUID(uuidString: "11111111-1111-1111-1111-111111111111")!
+        let item = makeItem(id: itemID, type: .image, contentHash: "hash-a", plainText: "Image")
         let request = HistoryHoverPreviewPipeline.ImageRequest(
-            itemID: itemID,
-            contentHash: "hash-a",
+            revision: ClipboardItemContentRevision(item: item),
             storageRef: "/tmp/image.png",
             delay: 0.25,
             scale: 2,
@@ -39,14 +41,23 @@ final class HistoryHoverPreviewPipelineTests: XCTestCase {
         XCTAssertEqual(plan.prefetchDelayNanos, 50_000_000)
         XCTAssertEqual(plan.targetWidthPixels, 1_280)
         XCTAssertEqual(plan.maxLongSidePixels, 12_000)
-        XCTAssertEqual(plan.cacheKey, "hash-a|w1280")
+        XCTAssertEqual(plan.cacheKey, "\(request.revision.cacheKey)|w1280")
     }
 
-    func testImagePlanFallsBackToItemIDWhenContentHashIsMissing() {
+    func testImagePlanSeparatesSameIDMissingHashEqualLengthContent() {
         let itemID = UUID(uuidString: "22222222-2222-2222-2222-222222222222")!
-        let request = HistoryHoverPreviewPipeline.ImageRequest(
-            itemID: itemID,
-            contentHash: "",
+        let firstItem = makeItem(id: itemID, type: .image, contentHash: "", plainText: "AB")
+        let replacementItem = makeItem(id: itemID, type: .image, contentHash: "", plainText: "CD")
+        let firstRequest = HistoryHoverPreviewPipeline.ImageRequest(
+            revision: ClipboardItemContentRevision(item: firstItem),
+            storageRef: nil,
+            delay: 0,
+            scale: 1,
+            targetWidthPoints: 320,
+            maxLongSidePixels: 8_000
+        )
+        let replacementRequest = HistoryHoverPreviewPipeline.ImageRequest(
+            revision: ClipboardItemContentRevision(item: replacementItem),
             storageRef: nil,
             delay: 0,
             scale: 1,
@@ -54,22 +65,35 @@ final class HistoryHoverPreviewPipelineTests: XCTestCase {
             maxLongSidePixels: 8_000
         )
 
-        let plan = HistoryHoverPreviewPipeline.imagePlan(for: request)
+        let firstPlan = HistoryHoverPreviewPipeline.imagePlan(for: firstRequest)
+        let replacementPlan = HistoryHoverPreviewPipeline.imagePlan(for: replacementRequest)
 
-        XCTAssertEqual(plan.delayNanos, 0)
-        XCTAssertEqual(plan.prefetchDelayNanos, 0)
-        XCTAssertEqual(plan.cacheKey, "\(itemID.uuidString)|w320")
+        XCTAssertEqual(firstPlan.delayNanos, 0)
+        XCTAssertEqual(firstPlan.prefetchDelayNanos, 0)
+        XCTAssertNotEqual(firstPlan.cacheKey, replacementPlan.cacheKey)
+    }
+
+    func testTextRequestCapturesSameIDContentRevision() {
+        let itemID = UUID(uuidString: "22222222-2222-2222-2222-222222222222")!
+        let first = makeItem(id: itemID, type: .text, contentHash: "", plainText: "AB")
+        let replacement = makeItem(id: itemID, type: .text, contentHash: "", plainText: "CD")
+
+        let firstRequest = HistoryHoverPreviewPipeline.textRequest(item: first, delay: 0)
+        let replacementRequest = HistoryHoverPreviewPipeline.textRequest(item: replacement, delay: 0)
+
+        XCTAssertEqual(firstRequest.revision, ClipboardItemContentRevision(item: first))
+        XCTAssertNotEqual(firstRequest.revision, replacementRequest.revision)
     }
 
     func testFilePlansPreserveKindSpecificCacheAndPrefetchPolicy() {
         let itemID = UUID(uuidString: "33333333-3333-3333-3333-333333333333")!
+        let item = makeItem(id: itemID, type: .file, contentHash: "file-hash", plainText: "/tmp/picture.png")
         let imageInfo = FilePreviewSupport.previewInfo(from: "/tmp/picture.png", requireExists: false)!
         let otherInfo = FilePreviewSupport.previewInfo(from: "/tmp/document.pdf", requireExists: false)!
 
         let imagePlan = HistoryHoverPreviewPipeline.filePlan(
             for: HistoryHoverPreviewPipeline.FileRequest(
-                itemID: itemID,
-                contentHash: "file-hash",
+                revision: ClipboardItemContentRevision(item: item),
                 previewInfo: imageInfo,
                 isMarkdown: false,
                 delay: 0.1,
@@ -82,8 +106,7 @@ final class HistoryHoverPreviewPipelineTests: XCTestCase {
         )
         let otherPlan = HistoryHoverPreviewPipeline.filePlan(
             for: HistoryHoverPreviewPipeline.FileRequest(
-                itemID: itemID,
-                contentHash: "file-hash",
+                revision: ClipboardItemContentRevision(item: item),
                 previewInfo: otherInfo,
                 isMarkdown: false,
                 delay: 0.1,
@@ -96,17 +119,17 @@ final class HistoryHoverPreviewPipelineTests: XCTestCase {
         )
 
         XCTAssertTrue(imagePlan.shouldPrefetchImage)
-        XCTAssertEqual(imagePlan.cacheKey, "file|file-hash|image|w1000")
+        XCTAssertEqual(imagePlan.cacheKey, "file|\(ClipboardItemContentRevision(item: item).cacheKey)|image|w1000")
         XCTAssertEqual(imagePlan.quickLookMaxSidePixels, 1_000)
         XCTAssertFalse(otherPlan.shouldPrefetchImage)
-        XCTAssertEqual(otherPlan.cacheKey, "file|file-hash|other|w1000")
+        XCTAssertEqual(otherPlan.cacheKey, "file|\(ClipboardItemContentRevision(item: item).cacheKey)|other|w1000")
     }
 
     func testMarkdownFileRequestUsesSharedCacheKeyShape() {
         let itemID = UUID(uuidString: "44444444-4444-4444-4444-444444444444")!
+        let item = makeItem(id: itemID, type: .file, contentHash: "markdown-hash", plainText: "/tmp/source.md")
         let request = HistoryHoverPreviewPipeline.FileRequest(
-            itemID: itemID,
-            contentHash: "markdown-hash",
+            revision: ClipboardItemContentRevision(item: item),
             previewInfo: FilePreviewSupport.previewInfo(from: "/tmp/source.md", requireExists: false)!,
             isMarkdown: true,
             delay: 0,
@@ -119,7 +142,7 @@ final class HistoryHoverPreviewPipelineTests: XCTestCase {
 
         let markdownRequest = HistoryHoverPreviewPipeline.markdownFileRequest(fileRequest: request)
 
-        XCTAssertEqual(markdownRequest.cacheKey, "file|markdown-hash")
+        XCTAssertEqual(markdownRequest.cacheKey, "file|\(request.revision.cacheKey)")
         XCTAssertEqual(markdownRequest.url.path, "/tmp/source.md")
         XCTAssertEqual(markdownRequest.markdownLayoutScale, .percent125)
     }
@@ -132,9 +155,14 @@ final class HistoryHoverPreviewPipelineTests: XCTestCase {
         try "# File Title\n\nBody".write(to: markdownURL, atomically: true, encoding: .utf8)
 
         let itemID = UUID(uuidString: "55555555-5555-5555-5555-555555555555")!
-        let request = HistoryHoverPreviewPipeline.FileRequest(
-            itemID: itemID,
+        let item = makeItem(
+            id: itemID,
+            type: .file,
             contentHash: UUID().uuidString,
+            plainText: markdownURL.path
+        )
+        let request = HistoryHoverPreviewPipeline.FileRequest(
+            revision: ClipboardItemContentRevision(item: item),
             previewInfo: FilePreviewSupport.previewInfo(from: markdownURL.path, requireExists: true)!,
             isMarkdown: true,
             delay: 0,
@@ -223,7 +251,10 @@ final class HistoryHoverPreviewPipelineTests: XCTestCase {
 
     func testTextPreviewUsesCachedMarkdownCapabilityAndCachedHTMLMetrics() async {
         let item = makeItem(type: .text, contentHash: "cached-markdown", plainText: "# Title\n\nBody")
-        let renderCacheKey = MarkdownRenderCacheKey.make(contentHash: item.contentHash, markdown: item.plainText)
+        let renderCacheKey = MarkdownRenderCacheKey.make(
+            contentHash: ClipboardItemContentRevision(item: item).cacheKey,
+            markdown: item.plainText
+        )
         HistoryItemPresentationCache.shared.storeMarkdownExportCapability(true, for: item)
         MarkdownPreviewCache.shared.setHTML("<h1>Title</h1>", forKey: renderCacheKey)
         MarkdownPreviewCache.shared.setMetrics(
@@ -356,9 +387,9 @@ final class HistoryHoverPreviewPipelineTests: XCTestCase {
 
     func testImageCacheHitEmitsImageThenPopoverWithoutLoader() async throws {
         let itemID = UUID(uuidString: "66666666-6666-6666-6666-666666666666")!
+        let item = makeItem(id: itemID, type: .image, contentHash: "cached-image", plainText: "Image")
         let request = HistoryHoverPreviewPipeline.ImageRequest(
-            itemID: itemID,
-            contentHash: "cached-image",
+            revision: ClipboardItemContentRevision(item: item),
             storageRef: nil,
             delay: 0,
             scale: 1,
@@ -395,12 +426,13 @@ final class HistoryHoverPreviewPipelineTests: XCTestCase {
     }
 
     private func makeItem(
+        id: UUID = UUID(),
         type: ClipboardItemType,
         contentHash: String,
         plainText: String
     ) -> ClipboardItemDTO {
         ClipboardItemDTO(
-            id: UUID(),
+            id: id,
             type: type,
             contentHash: contentHash,
             plainText: plainText,

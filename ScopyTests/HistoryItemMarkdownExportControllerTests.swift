@@ -10,12 +10,16 @@ final class HistoryItemMarkdownExportControllerTests: XCTestCase {
 
     override func setUp() {
         super.setUp()
-        HistoryItemPresentationCache.shared.clearCaches()
+        MainActor.assumeIsolated {
+            HistoryItemPresentationCache.shared.clearCaches()
+        }
     }
 
     override func tearDown() {
         UserDefaults.standard.removeObject(forKey: exportResolutionPercentUserDefaultsKey)
-        HistoryItemPresentationCache.shared.clearCaches()
+        MainActor.assumeIsolated {
+            HistoryItemPresentationCache.shared.clearCaches()
+        }
         super.tearDown()
     }
 
@@ -33,26 +37,56 @@ final class HistoryItemMarkdownExportControllerTests: XCTestCase {
         XCTAssertFalse(HistoryItemMarkdownExportController.canExportPNG(item: item, filePreviewInfo: nil))
     }
 
-    func testCanOfferPNGMenuItemUsesFastSignalWithoutCachingMarkdownCapability() {
+    func testCanOfferPNGMenuItemCachesFastSignalWithoutCachingMarkdownCapability() {
         let item = makeItem(type: .text, plainText: "# Title\n\n- bullet")
 
         XCTAssertNil(HistoryItemPresentationCache.shared.cachedMarkdownExportCapability(for: item))
+        XCTAssertNil(HistoryItemPresentationCache.shared.cachedMarkdownMenuSignal(for: item))
         XCTAssertTrue(HistoryItemMarkdownExportController.canOfferPNGMenuItem(item: item, filePreviewInfo: nil))
         XCTAssertNil(HistoryItemPresentationCache.shared.cachedMarkdownExportCapability(for: item))
+        XCTAssertEqual(HistoryItemPresentationCache.shared.cachedMarkdownMenuSignal(for: item), true)
     }
 
-    func testCanOfferPNGMenuItemRejectsPlainTextWithoutCachingMarkdownCapability() {
+    func testCanOfferPNGMenuItemCachesNegativeFastSignalWithoutCachingMarkdownCapability() {
         let item = makeItem(type: .text, plainText: "just a plain sentence")
 
         XCTAssertFalse(HistoryItemMarkdownExportController.canOfferPNGMenuItem(item: item, filePreviewInfo: nil))
         XCTAssertNil(HistoryItemPresentationCache.shared.cachedMarkdownExportCapability(for: item))
+        XCTAssertEqual(HistoryItemPresentationCache.shared.cachedMarkdownMenuSignal(for: item), false)
     }
 
-    func testCanOfferPNGMenuItemUsesCachedMarkdownCapabilityWhenAvailable() {
+    func testCanOfferPNGMenuItemExactTrueOverridesNegativeFastSignal() {
         let item = makeItem(type: .text, plainText: "plain text after preview cache")
+        XCTAssertFalse(HistoryItemPresentationCache.shared.markdownMenuSignal(for: item))
         HistoryItemPresentationCache.shared.storeMarkdownExportCapability(true, for: item)
 
         XCTAssertTrue(HistoryItemMarkdownExportController.canOfferPNGMenuItem(item: item, filePreviewInfo: nil))
+    }
+
+    func testCanOfferPNGMenuItemExactFalseOverridesPositiveFastSignal() {
+        let item = makeItem(type: .text, plainText: "# heuristic signal")
+        XCTAssertTrue(HistoryItemPresentationCache.shared.markdownMenuSignal(for: item))
+        HistoryItemPresentationCache.shared.storeMarkdownExportCapability(false, for: item)
+
+        XCTAssertFalse(HistoryItemMarkdownExportController.canOfferPNGMenuItem(item: item, filePreviewInfo: nil))
+    }
+
+    func testCanOfferPNGMenuItemAcceptsPrecomputedContentRevision() {
+        let item = makeItem(type: .html, plainText: "**cached**")
+        let revision = ClipboardItemContentRevision(item: item)
+
+        XCTAssertTrue(
+            HistoryItemMarkdownExportController.canOfferPNGMenuItem(
+                item: item,
+                contentRevision: revision,
+                filePreviewInfo: nil
+            )
+        )
+        XCTAssertEqual(
+            HistoryItemPresentationCache.shared.cachedMarkdownMenuSignal(for: revision),
+            true
+        )
+        XCTAssertNil(HistoryItemPresentationCache.shared.cachedMarkdownExportCapability(for: revision))
     }
 
     func testCanExportPNGForMarkdownFilePreview() throws {

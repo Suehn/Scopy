@@ -33,7 +33,7 @@ enum HoverPreviewLoader {
             let image = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
             if image != nil {
                 let elapsed = (CFAbsoluteTimeGetCurrent() - start) * 1000
-                ScrollPerformanceProfile.recordMetric(name: "hover.preview_image_decode_ms", elapsedMs: elapsed)
+                ScrollPerformanceProfile.recordTiming(name: "hover.preview_image_decode_ms", elapsedMs: elapsed)
             }
             return image
         }

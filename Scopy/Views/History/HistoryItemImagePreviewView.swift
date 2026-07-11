@@ -4,7 +4,7 @@ import ScopyUISupport
 import AppKit
 
 struct HistoryItemImagePreviewView: View {
-    @ObservedObject var model: HoverPreviewModel
+    let model: HoverPreviewModel
     let thumbnailPath: String?
 
     @State private var loadedThumbnail: NSImage?

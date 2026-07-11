@@ -40,7 +40,7 @@ enum MarkdownRenderShadowComparator {
         shadowRenderMs: Double? = nil
     ) -> MarkdownRenderShadowReport {
         if let shadowRenderMs {
-            ScrollPerformanceProfile.recordMetric(
+            ScrollPerformanceProfile.recordTiming(
                 name: "markdown.shadow_unified_render_ms",
                 elapsedMs: shadowRenderMs
             )

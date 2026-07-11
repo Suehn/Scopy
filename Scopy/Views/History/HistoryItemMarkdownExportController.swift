@@ -7,12 +7,30 @@ enum HistoryItemMarkdownExportController {
     private static let uiTestExportResolutionEnvKey = "SCOPY_UITEST_MARKDOWN_EXPORT_RESOLUTION"
 
     static func canOfferPNGMenuItem(item: ClipboardItemDTO, filePreviewInfo: FilePreviewInfo?) -> Bool {
+        canOfferPNGMenuItem(
+            item: item,
+            contentRevision: ClipboardItemContentRevision(item: item),
+            filePreviewInfo: filePreviewInfo
+        )
+    }
+
+    /// Hot-path overload for rows that already own the deterministic content revision.
+    static func canOfferPNGMenuItem(
+        item: ClipboardItemDTO,
+        contentRevision: ClipboardItemContentRevision,
+        filePreviewInfo: FilePreviewInfo?
+    ) -> Bool {
         switch item.type {
         case .text, .rtf, .html:
-            if let cached = HistoryItemPresentationCache.shared.cachedMarkdownExportCapability(for: item) {
+            if let cached = HistoryItemPresentationCache.shared.cachedMarkdownExportCapability(
+                for: contentRevision
+            ) {
                 return cached
             }
-            return MarkdownDetector.hasFastMarkdownSignal(item.plainText)
+            return HistoryItemPresentationCache.shared.markdownMenuSignal(
+                for: contentRevision,
+                plainText: item.plainText
+            )
         case .file:
             guard let info = filePreviewInfo else { return false }
             return FilePreviewSupport.isMarkdownFile(info.url)
@@ -71,7 +89,9 @@ enum HistoryItemMarkdownExportController {
         markdownSource: String,
         settings: SettingsDTO,
         layoutScale: MarkdownChatGPTLayoutScalePercent? = nil,
-        resolutionScale: CGFloat? = nil
+        resolutionScale: CGFloat? = nil,
+        pasteboardWriteLease: MarkdownExportService.PasteboardWriteLease? = nil,
+        authorizePasteboardWrite: @escaping @MainActor () -> Bool = { true }
         ) async -> Result<MarkdownExportService.ExportStats, Error> {
         let resolvedLayoutScale = layoutScale ?? MarkdownChatGPTLayoutScalePercent(
             settingsValue: settings.markdownChatGPTLayoutScalePercent
@@ -92,16 +112,24 @@ enum HistoryItemMarkdownExportController {
             )
         }()
 
-        return await withCheckedContinuation { continuation in
-            MarkdownExportService.exportToPNGClipboard(
-                html: html,
-                targetWidthPixels: MarkdownExportService.defaultTargetWidthPixels,
-                resolutionScale: resolutionScale ?? defaultResolutionScale(),
-                pngquantOptions: pngquantOptions
-            ) { result in
-                continuation.resume(returning: result)
+        let cancellationRelay = MarkdownExportCancellationRelay()
+        return await withTaskCancellationHandler(operation: {
+            await withCheckedContinuation { continuation in
+                let handle = MarkdownExportService.exportToPNGClipboard(
+                    html: html,
+                    targetWidthPixels: MarkdownExportService.defaultTargetWidthPixels,
+                    resolutionScale: resolutionScale ?? defaultResolutionScale(),
+                    pngquantOptions: pngquantOptions,
+                    pasteboardWriteLease: pasteboardWriteLease,
+                    authorizePasteboardWrite: authorizePasteboardWrite
+                ) { result in
+                    continuation.resume(returning: result)
+                }
+                cancellationRelay.install(handle)
             }
-        }
+        }, onCancel: {
+            cancellationRelay.cancel()
+        })
     }
 
     private static func parseExportResolutionPercent(from raw: String?) -> Int? {
@@ -127,5 +155,33 @@ enum HistoryItemMarkdownExportController {
             }
         }
         return nil
+    }
+}
+
+private final class MarkdownExportCancellationRelay: @unchecked Sendable {
+    private let lock = NSLock()
+    private var handle: MarkdownExportService.CancellationHandle?
+    private var cancellationRequested = false
+
+    func install(_ handle: MarkdownExportService.CancellationHandle) {
+        lock.lock()
+        if cancellationRequested {
+            lock.unlock()
+            Task { @MainActor in handle.cancel() }
+            return
+        }
+        self.handle = handle
+        lock.unlock()
+    }
+
+    func cancel() {
+        lock.lock()
+        cancellationRequested = true
+        let handle = self.handle
+        self.handle = nil
+        lock.unlock()
+
+        guard let handle else { return }
+        Task { @MainActor in handle.cancel() }
     }
 }

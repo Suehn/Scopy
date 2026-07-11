@@ -34,6 +34,27 @@ final class HistoryItemRowControllerTests: XCTestCase {
         XCTAssertTrue(task.isCancelled)
     }
 
+    func testExportAuthorizationRequiresExactLiveTokenAndIsInvalidatedByCancellation() throws {
+        let controller = HistoryItemRowController(relativeTimeText: "1m")
+        XCTAssertTrue(controller.beginExportingPNG())
+        let firstToken = try XCTUnwrap(controller.exportAuthorizationToken)
+        controller.exportActionTask = makeSleepingTask()
+        XCTAssertTrue(controller.authorizesExport(token: firstToken))
+
+        controller.cancelExportActionTask()
+        XCTAssertFalse(controller.authorizesExport(token: firstToken))
+        XCTAssertNil(controller.exportAuthorizationToken)
+
+        XCTAssertTrue(controller.beginExportingPNG())
+        let replacementToken = try XCTUnwrap(controller.exportAuthorizationToken)
+        controller.exportActionTask = makeSleepingTask()
+        XCTAssertNotEqual(replacementToken, firstToken)
+        XCTAssertFalse(controller.finishExportingPNG(message: "stale", token: firstToken))
+        XCTAssertTrue(controller.authorizesExport(token: replacementToken))
+        XCTAssertTrue(controller.finishExportingPNG(message: "PNG copied", token: replacementToken))
+        XCTAssertEqual(controller.exportMessage, "PNG copied")
+    }
+
     func testPresentDismissAndNormalizeNoteDraft() {
         let controller = HistoryItemRowController(relativeTimeText: "1m")
 
@@ -49,6 +70,72 @@ final class HistoryItemRowControllerTests: XCTestCase {
 
         controller.dismissNoteEditor()
         XCTAssertFalse(controller.isNoteEditorPresented)
+    }
+
+    func testSuccessfulNoteSaveDismissesOnlyTheUnchangedDraft() throws {
+        let controller = HistoryItemRowController(relativeTimeText: "1m")
+        controller.presentNoteEditor(note: "draft")
+        let request = try XCTUnwrap(controller.beginNoteSave())
+        let task = makeSleepingTask()
+        XCTAssertTrue(controller.installNoteSaveTask(task, token: request.token))
+
+        XCTAssertEqual(
+            controller.finishNoteSave(succeeded: true, request: request),
+            .savedAndDismissed
+        )
+        XCTAssertFalse(controller.isNoteEditorPresented)
+        XCTAssertFalse(controller.isSavingNote)
+        XCTAssertTrue(controller.noteDraft.isEmpty)
+        XCTAssertNil(controller.noteSaveError)
+    }
+
+    func testFailedNoteSaveKeepsEditorAndDraftForRetry() throws {
+        let controller = HistoryItemRowController(relativeTimeText: "1m")
+        controller.presentNoteEditor(note: "important draft")
+        let request = try XCTUnwrap(controller.beginNoteSave())
+
+        XCTAssertEqual(
+            controller.finishNoteSave(succeeded: false, request: request),
+            .failed
+        )
+        XCTAssertTrue(controller.isNoteEditorPresented)
+        XCTAssertFalse(controller.isSavingNote)
+        XCTAssertEqual(controller.noteDraft, "important draft")
+        XCTAssertNotNil(controller.noteSaveError)
+    }
+
+    func testSuccessfulOldSaveCannotClearDraftEditedWhileRequestWasInFlight() throws {
+        let controller = HistoryItemRowController(relativeTimeText: "1m")
+        controller.presentNoteEditor(note: "first")
+        let request = try XCTUnwrap(controller.beginNoteSave())
+
+        controller.noteDraft = "newer unsaved draft"
+
+        XCTAssertEqual(
+            controller.finishNoteSave(succeeded: true, request: request),
+            .savedWithNewerDraft
+        )
+        XCTAssertTrue(controller.isNoteEditorPresented)
+        XCTAssertEqual(controller.noteDraft, "newer unsaved draft")
+        XCTAssertFalse(controller.isSavingNote)
+    }
+
+    func testCancelledOldSaveCannotClearDraftFromReopenedEditor() throws {
+        let controller = HistoryItemRowController(relativeTimeText: "1m")
+        controller.presentNoteEditor(note: "first")
+        let oldRequest = try XCTUnwrap(controller.beginNoteSave())
+
+        controller.dismissNoteEditor(discardDraft: true)
+        controller.presentNoteEditor(note: "replacement")
+        let replacementRequest = try XCTUnwrap(controller.beginNoteSave())
+
+        XCTAssertEqual(
+            controller.finishNoteSave(succeeded: true, request: oldRequest),
+            .stale
+        )
+        XCTAssertTrue(controller.isNoteEditorPresented)
+        XCTAssertEqual(controller.noteDraft, "replacement")
+        XCTAssertTrue(controller.authorizesNoteSave(token: replacementRequest.token))
     }
 
     func testCancelTaskHelpersClearAndCancelOwnedTasks() {

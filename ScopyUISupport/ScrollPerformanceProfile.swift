@@ -588,6 +588,7 @@ public final class ScrollPerformanceProfile {
         let payload: QueuedRecordPayload
     }
 
+    @available(*, deprecated, renamed: "TimingEvent")
     typealias MetricEvent = TimingEvent
 
     struct AnimationCallbackSample: Sendable {
@@ -618,6 +619,7 @@ public final class ScrollPerformanceProfile {
         }
     }
 
+    @available(*, deprecated, renamed: "AnimationCallbackSample")
     typealias FrameSample = AnimationCallbackSample
 
     private struct MetricAggregate {
@@ -996,6 +998,7 @@ public final class ScrollPerformanceProfile {
         maybeFinalize(now: now)
     }
 
+    @available(*, deprecated, renamed: "recordAnimationCallback(_:)")
     public func recordFrameTick(_ date: Date) {
         recordAnimationCallback(date)
     }
@@ -1009,6 +1012,7 @@ public final class ScrollPerformanceProfile {
         recordTiming(event)
     }
 
+    @available(*, deprecated, renamed: "recordTiming(name:elapsedMs:)")
     public func recordMetric(name: String, elapsedMs: Double) {
         recordTiming(name: name, elapsedMs: elapsedMs)
     }
@@ -1052,6 +1056,7 @@ public final class ScrollPerformanceProfile {
         enqueue(.timing(event))
     }
 
+    @available(*, deprecated, renamed: "recordTiming(name:elapsedMs:)")
     public nonisolated static func recordMetric(name: String, elapsedMs: Double) {
         recordTiming(name: name, elapsedMs: elapsedMs)
     }
@@ -1627,6 +1632,7 @@ public final class ScrollPerformanceProfile {
         ]
     }
 
+    @available(*, deprecated, message: "Use buildLongAnimationCallbackAttribution(callbackSamples:timingEvents:expectedCallbackIntervalMs:thresholdMultiplier:maxCallbackDetails:timelineStart:)")
     static func buildLongFrameAttribution(
         frameSamples: [FrameSample],
         metricEvents: [MetricEvent],

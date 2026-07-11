@@ -28,6 +28,7 @@ struct HistoryItemHarnessView: View {
     @State private var settings: SettingsDTO
     @State private var isKeyboardSelected: Bool
     @State private var interactionCoordinator = HistoryListInteractionCoordinator()
+    @State private var interactionSessionStore = HistoryItemInteractionSessionStore()
     private let item: ClipboardItemDTO
     private let markdownWebViewController = MarkdownPreviewWebViewController()
 
@@ -59,18 +60,26 @@ struct HistoryItemHarnessView: View {
                     onHoverSelect: { _ in },
                     onTogglePin: { pinCount += 1 },
                     onDelete: { },
-                    onUpdateNote: { _ in updateNoteCount += 1 },
+                    onUpdateNote: { _ in
+                        updateNoteCount += 1
+                        return true
+                    },
                     onOptimizeImage: {
                         optimizeCount += 1
                         return ImageOptimizationOutcomeDTO(
                             result: .optimized,
                             originalBytes: 2_048,
-                            optimizedBytes: 1_024
+                            optimizedBytes: 1_024,
+                            resultingContentHash: "history-item-harness-image-optimized"
                         )
                     },
                     getImageData: { nil },
                     markdownWebViewController: markdownWebViewController,
                     interactionCoordinator: interactionCoordinator,
+                    interactionSessionStore: interactionSessionStore,
+                    isContentRevisionCurrent: { itemID, revision in
+                        itemID == item.id && ClipboardItemContentRevision(item: item) == revision
+                    },
                     isImagePreviewPresented: activePopover == .image,
                     isTextPreviewPresented: activePopover == .text,
                     isFilePreviewPresented: activePopover == .file,
@@ -80,7 +89,7 @@ struct HistoryItemHarnessView: View {
                     },
                     dismissOtherPopovers: {
                         popoverRequest = "dismiss-other"
-                        activePopover = nil
+                        // A single-row harness has no other item's popover to dismiss.
                     }
                 )
                 .environment(settingsViewModel)
@@ -124,7 +133,7 @@ struct HistoryItemHarnessView: View {
             TimelineView(.animation) { context in
                 Color.clear
                     .onChange(of: context.date) { _, newValue in
-                        ScrollPerformanceProfile.shared.recordFrameTick(newValue)
+                        ScrollPerformanceProfile.shared.recordAnimationCallback(newValue)
                     }
             }
             .onAppear {

@@ -783,6 +783,7 @@ final class TestMockClipboardService: ClipboardServiceProtocol {
 
     // Artificial delays (for race-condition tests)
     var fetchRecentDelayNs: UInt64 = 0
+    var fetchPinnedFailuresRemaining = 0
     var searchDelayNs: UInt64 = 0
     var searchDelayNsByQuery: [String: UInt64] = [:]
     /// When true, the artificial search delay will not be interrupted by task cancellation (simulates a backend that can't cancel promptly).
@@ -867,6 +868,10 @@ final class TestMockClipboardService: ClipboardServiceProtocol {
 
     func fetchPinned() async throws -> [ClipboardItemDTO] {
         fetchRecentCallCount += 1
+        if fetchPinnedFailuresRemaining > 0 {
+            fetchPinnedFailuresRemaining -= 1
+            throw FailingMockService.TestError.simulatedFailure
+        }
         return items.filter(\.isPinned).sorted { $0.lastUsedAt > $1.lastUsedAt }
     }
 

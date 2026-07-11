@@ -3,6 +3,8 @@ import ScopyUISupport
 
 struct HistoryItemFileNoteEditorView: View {
     @Binding var note: String
+    let isSaving: Bool
+    let errorMessage: String?
     let onSave: () -> Void
     let onCancel: () -> Void
 
@@ -24,11 +26,28 @@ struct HistoryItemFileNoteEditorView: View {
                         .stroke(ScopyColors.separator.opacity(0.6), lineWidth: ScopySize.Stroke.thin)
                 )
                 .focused($isFocused)
+                .disabled(isSaving)
+                .accessibilityIdentifier("HistoryItem.NoteEditor.Text")
+            if let errorMessage, !errorMessage.isEmpty {
+                Text(errorMessage)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.red)
+                    .accessibilityIdentifier("HistoryItem.NoteEditor.Error")
+            }
             HStack(spacing: ScopySpacing.sm) {
+                if isSaving {
+                    ProgressView()
+                        .controlSize(.small)
+                        .accessibilityIdentifier("HistoryItem.NoteEditor.Progress")
+                }
                 Spacer()
                 Button("Cancel") { onCancel() }
+                    .disabled(isSaving)
+                    .accessibilityIdentifier("HistoryItem.NoteEditor.Cancel")
                 Button("Save") { onSave() }
                     .keyboardShortcut(.defaultAction)
+                    .disabled(isSaving)
+                    .accessibilityIdentifier("HistoryItem.NoteEditor.Save")
             }
         }
         .padding(ScopySpacing.md)
@@ -40,6 +59,7 @@ struct HistoryItemFileNoteEditorView: View {
             RoundedRectangle(cornerRadius: ScopySize.Corner.md)
                 .stroke(ScopyColors.separator.opacity(0.5), lineWidth: ScopySize.Stroke.thin)
         )
+        .accessibilityIdentifier("HistoryItem.NoteEditor")
         .onAppear { isFocused = true }
     }
 }

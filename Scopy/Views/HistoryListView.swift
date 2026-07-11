@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import SwiftUI
 import ScopyKit
@@ -33,6 +34,8 @@ struct HistoryListView: View {
     // Shared Markdown preview controller to avoid repeatedly creating/destroying WebKit views/processes.
     @StateObject private var sharedMarkdownPreviewController = MarkdownPreviewWebViewController()
     @State private var interactionCoordinator = HistoryListInteractionCoordinator()
+    @State private var interactionSessionStore = HistoryItemInteractionSessionStore()
+    @State private var relativeTimeClock = HistoryRelativeTimeClock()
 
     // Enforce that at most one hover preview popover is presented at a time.
     @State private var activePopover: HoverPreviewPopoverState?
@@ -47,13 +50,14 @@ struct HistoryListView: View {
     private static let shouldExposeAccessibility: Bool = isScrollProfile ? profileAccessibility : isUITesting
 
     var body: some View {
-        if historyViewModel.items.isEmpty && !historyViewModel.isLoading {
-            EmptyStateView(
-                hasFilters: historyViewModel.hasActiveFilters,
-                openSettings: openSettings
-            )
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-        } else {
+        Group {
+            if historyViewModel.items.isEmpty && !historyViewModel.isLoading {
+                EmptyStateView(
+                    hasFilters: historyViewModel.hasActiveFilters,
+                    openSettings: openSettings
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
             // v0.18: 使用 List 替代 ScrollView+LazyVStack 实现真正的视图回收
             // List 基于 NSTableView，具有视图回收能力，10k 项目内存从 ~500MB 降至 ~50MB
             ScrollViewReader { proxy in
@@ -96,11 +100,9 @@ struct HistoryListView: View {
                     }
 
                     // Recent Section Header
-                    SectionHeader(
-                        title: "Recent",
+                    RecentSectionHeader(
                         count: unpinned.count,
-                        performanceSummary: historyViewModel.performanceSummary,
-                        isScrolling: historyViewModel.isScrolling
+                        performanceSummary: historyViewModel.performanceSummary
                     )
                     .listRowInsets(EdgeInsets())
                     .listRowBackground(Color.clear)
@@ -131,15 +133,21 @@ struct HistoryListView: View {
                         interactionCoordinator: interactionCoordinator,
                         onScrollStart: {
                             interactionCoordinator.beginScrolling()
+                            relativeTimeClock.scrollDidStart()
                             historyViewModel.scrollDidStart()
+                            if HistoryListUITestRuntime.isEnabled {
+                                HistoryListUITestProbe.shared.recordProductionScrollStart()
+                            }
                         },
                         onScrollEnd: {
                             interactionCoordinator.endScrolling()
+                            relativeTimeClock.scrollDidEnd()
                             historyViewModel.scrollDidEnd()
+                            if HistoryListUITestRuntime.isEnabled {
+                                HistoryListUITestProbe.shared.recordProductionScrollEnd()
+                            }
                         },
-                        onScrollViewAttach: ScrollPerformanceProfile.isEnabled ? { scrollView in
-                            ScrollPerformanceProfile.shared.attachScrollView(scrollView)
-                        } : nil
+                        onScrollViewAttach: scrollViewAttachHandler
                     )
                 )
                 .background(ScrollFrameSamplerView())
@@ -161,9 +169,111 @@ struct HistoryListView: View {
                 }
             }
         }
+        }
+        .environment(\.historyRelativeTimeClock, relativeTimeClock)
+        .background(
+            HistoryWindowVisibilityObserver(clock: relativeTimeClock)
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
+        )
+        .onAppear {
+            relativeTimeClock.start()
+            interactionSessionStore.reconcile(
+                snapshot: historyViewModel.contentRevisionReconciliationSnapshot
+            )
+            updateProfileWorkloadMetadata()
+        }
+        .onChange(of: historyViewModel.loadedCount) { _, _ in updateProfileWorkloadMetadata() }
+        .onChange(of: historyViewModel.totalCount) { _, _ in updateProfileWorkloadMetadata() }
+        .onChange(of: historyViewModel.canLoadMore) { _, _ in updateProfileWorkloadMetadata() }
+        .onChange(of: historyViewModel.items) { _, _ in
+            updateProfileWorkloadMetadata()
+            recordHistoryListIntegrationModelNoteIfNeeded()
+        }
+        .onChange(of: historyViewModel.contentRevisionReconciliationToken) { _, _ in
+            interactionSessionStore.reconcile(
+                snapshot: historyViewModel.contentRevisionReconciliationSnapshot
+            )
+        }
+        .onDisappear {
+            relativeTimeClock.stop()
+            interactionCoordinator.tearDownPassivePath()
+        }
+        .overlay(alignment: .topLeading) {
+            if HistoryListUITestRuntime.isEnabled {
+                HistoryListUITestProbeAccessibilityView(
+                    probe: HistoryListUITestProbe.shared
+                )
+            }
+        }
     }
 
     // MARK: - Preview Popover Coordination
+
+    private func updateProfileWorkloadMetadata() {
+        guard ScrollPerformanceProfile.isEnabled else { return }
+        let profile = ScrollPerformanceProfile.shared
+        let datasetMetadata: ScrollProfileDatasetMetadata? = {
+            let environment = ProcessInfo.processInfo.environment
+            guard profile.usesFixedDriverAnimationSampler,
+                  let datasetID = environment["SCOPY_MOCK_DATASET_ID"]?.trimmingCharacters(
+                    in: .whitespacesAndNewlines
+                  ),
+                  !datasetID.isEmpty
+            else { return nil }
+
+            let orderedItems = historyViewModel.pinnedItems + historyViewModel.unpinnedItems
+            let metadata = HistoryProfileDatasetFingerprint.make(
+                datasetID: datasetID,
+                items: orderedItems
+            )
+            return ScrollProfileDatasetMetadata(
+                schema: metadata.schema,
+                datasetID: metadata.datasetID,
+                fingerprint: metadata.fingerprint,
+                itemCount: metadata.itemCount,
+                textItemCount: metadata.textItemCount,
+                imageItemCount: metadata.imageItemCount,
+                pinnedItemCount: metadata.pinnedItemCount,
+                uniqueItemIDCount: metadata.uniqueItemIDCount,
+                minimumTextUTF8Bytes: metadata.minimumTextUTF8Bytes,
+                maximumTextUTF8Bytes: metadata.maximumTextUTF8Bytes
+            )
+        }()
+        profile.setListWorkloadMetadata(
+            loadedCount: historyViewModel.loadedCount,
+            totalCount: historyViewModel.totalCount,
+            canLoadMore: historyViewModel.canLoadMore,
+            dataset: datasetMetadata
+        )
+        let snapshot = interactionCoordinator.passivePathSnapshot
+        profile.recordPassivePathSnapshot(
+            activeSlotCount: snapshot.activeRowCount,
+            suppressedCandidateCount: snapshot.suppressedHoverCandidateCount
+        )
+    }
+
+    private var scrollViewAttachHandler: ((NSScrollView) -> Void)? {
+        guard ScrollPerformanceProfile.isEnabled || HistoryListUITestRuntime.isEnabled else {
+            return nil
+        }
+        return { scrollView in
+            if ScrollPerformanceProfile.isEnabled {
+                ScrollPerformanceProfile.shared.attachScrollView(scrollView)
+            }
+            if HistoryListUITestRuntime.isEnabled {
+                HistoryListUITestProbe.shared.attach(scrollView: scrollView)
+            }
+        }
+    }
+
+    private func recordHistoryListIntegrationModelNoteIfNeeded() {
+        guard HistoryListUITestRuntime.isEnabled,
+              let note = historyViewModel.items.first(where: {
+                  $0.id == HistoryListUITestRuntime.fileTargetID
+              })?.note else { return }
+        HistoryListUITestProbe.shared.recordModelPersistedNote(note)
+    }
 
     @MainActor
     private func detachSharedMarkdownWebViewIfAttached() {
@@ -178,12 +288,24 @@ struct HistoryListView: View {
             return
         }
 
-        if let existing = activePopover {
-            recordPopoverDismiss(itemID: existing.itemID)
+        // AppKit normally delivers the source row's exit before the adjacent row's enter, but
+        // defer one turn so the source can claim hover-transfer ownership even if that ordering
+        // flips at a window/screen edge.
+        let expectedActive = activePopover
+        let expectedPending = pendingPopover
+        DispatchQueue.main.async {
+            guard activePopover == expectedActive, pendingPopover == expectedPending else { return }
+            if let existing = activePopover,
+               interactionCoordinator.hoverPreviewTransferOwnerID == existing.itemID {
+                return
+            }
+            if let existing = activePopover {
+                recordPopoverDismiss(itemID: existing.itemID)
+            }
+            pendingPopover = nil
+            activePopover = nil
+            detachSharedMarkdownWebViewIfAttached()
         }
-        pendingPopover = nil
-        activePopover = nil
-        detachSharedMarkdownWebViewIfAttached()
     }
 
     @MainActor
@@ -221,6 +343,11 @@ struct HistoryListView: View {
     @MainActor
     private func presentPopover(itemID: UUID, kind: HoverPreviewPopoverKind) {
         let next = HoverPreviewPopoverState(itemID: itemID, kind: kind)
+        if let existing = activePopover,
+           existing.itemID != itemID,
+           interactionCoordinator.hoverPreviewTransferOwnerID == existing.itemID {
+            return
+        }
         if activePopover == next {
             // SwiftUI's popover binding can occasionally get out-of-sync on macOS (popover dismissed by the system
             // without driving the `isPresented` binding back to `false`). In that case, re-hovering the same row
@@ -295,12 +422,16 @@ struct HistoryListView: View {
             onTogglePin: { Task { await historyViewModel.togglePin(item) } },
             onDelete: { Task { await historyViewModel.delete(item) } },
             onUpdateNote: { note in
-                Task { await historyViewModel.updateNote(item, note: note) }
+                await historyViewModel.updateNote(item, note: note)
             },
             onOptimizeImage: { await historyViewModel.optimizeImage(item) },
             getImageData: { try? await historyViewModel.getImageData(itemID: item.id) },
             markdownWebViewController: sharedMarkdownPreviewController,
             interactionCoordinator: interactionCoordinator,
+            interactionSessionStore: interactionSessionStore,
+            isContentRevisionCurrent: { itemID, revision in
+                historyViewModel.isContentRevisionCurrent(itemID: itemID, revision: revision)
+            },
             isImagePreviewPresented: isImagePreviewPresented,
             isTextPreviewPresented: isTextPreviewPresented,
             isFilePreviewPresented: isFilePreviewPresented,
@@ -334,13 +465,33 @@ struct HistoryListView: View {
     }
 }
 
+/// Keeps the high-frequency scroll flag out of `HistoryListView.body`'s Observation dependency
+/// set. Only this small header redraws when scrolling starts or ends; row construction remains
+/// driven by item/selection/popover changes.
+private struct RecentSectionHeader: View {
+    @Environment(HistoryViewModel.self) private var historyViewModel
+
+    let count: Int
+    let performanceSummary: PerformanceSummary?
+
+    var body: some View {
+        SectionHeader(
+            title: "Recent",
+            count: count,
+            performanceSummary: performanceSummary,
+            isScrolling: historyViewModel.isScrolling
+        )
+    }
+}
+
 private struct ScrollFrameSamplerView: View {
     var body: some View {
-        if ScrollPerformanceProfile.isEnabled {
+        if ScrollPerformanceProfile.isEnabled,
+           !ScrollPerformanceProfile.shared.usesFixedDriverAnimationSampler {
             TimelineView(.animation) { context in
                 Color.clear
                     .onChange(of: context.date) { _, newValue in
-                        ScrollPerformanceProfile.shared.recordFrameTick(newValue)
+                        ScrollPerformanceProfile.shared.recordAnimationCallback(newValue)
                     }
             }
             .allowsHitTesting(false)

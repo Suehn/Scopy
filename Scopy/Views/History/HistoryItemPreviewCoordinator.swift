@@ -1,25 +1,35 @@
 import Foundation
-import SwiftUI
+import Observation
 
+@Observable
 @MainActor
-final class HistoryItemPreviewCoordinator: ObservableObject {
-    @Published var isHovering = false
-    @Published var isPopoverHovering = false
-    @Published private(set) var imagePopoverToken = UUID()
-    @Published private(set) var textPopoverToken = UUID()
-    @Published private(set) var filePopoverToken = UUID()
-    @Published var markdownFilePreviewCacheKey: String?
+final class HistoryItemPreviewCoordinator {
+    var isHovering = false
+    var isPopoverHovering = false
+    private(set) var imagePopoverToken = UUID()
+    private(set) var textPopoverToken = UUID()
+    private(set) var filePopoverToken = UUID()
+    var markdownFilePreviewCacheKey: String?
 
-    var hoverDebounceTask: Task<Void, Never>?
-    var hoverPreviewTask: Task<Void, Never>?
-    var hoverMarkdownTask: Task<Void, Never>?
-    var hoverExitTask: Task<Void, Never>?
+    @ObservationIgnored var hoverDebounceTask: Task<Void, Never>?
+    @ObservationIgnored var hoverPreviewTask: Task<Void, Never>?
+    @ObservationIgnored var hoverMarkdownTask: Task<Void, Never>?
+    @ObservationIgnored var hoverExitTask: Task<Void, Never>?
+    @ObservationIgnored private let hoverIntentController: HoverPreviewIntentController
+    @ObservationIgnored private var popoverScreenFrame: CGRect?
+
+    init(hoverIntentController: HoverPreviewIntentController? = nil) {
+        self.hoverIntentController = hoverIntentController ?? HoverPreviewIntentController()
+    }
 
     var hasActiveHoverWork: Bool {
-        hoverPreviewTask != nil || hoverMarkdownTask != nil || hoverDebounceTask != nil || hoverExitTask != nil
+        hoverPreviewTask != nil || hoverMarkdownTask != nil || hoverDebounceTask != nil ||
+            hoverExitTask != nil || hoverIntentController.isActive
     }
 
     func presentPreview(_ kind: HoverPreviewPopoverKind, markdownCacheKey: String? = nil) {
+        cancelHoverExitTask()
+        popoverScreenFrame = nil
         refreshPopoverToken(for: kind)
         if kind == .file {
             markdownFilePreviewCacheKey = markdownCacheKey
@@ -34,6 +44,7 @@ final class HistoryItemPreviewCoordinator: ObservableObject {
         requestPopover: (HoverPreviewPopoverKind?) -> Void,
         resetPreviewModel: () -> Void
     ) {
+        cancelHoverExitTask()
         cancelPreviewTasks()
         if hidePopovers {
             requestPopover(nil)
@@ -63,6 +74,8 @@ final class HistoryItemPreviewCoordinator: ObservableObject {
         resetPreviewState: @escaping @MainActor () -> Void
     ) {
         guard popoverToken(for: kind) == token else { return }
+        cancelHoverExitTask()
+        popoverScreenFrame = nil
         isPopoverHovering = false
         Task { @MainActor [weak self] in
             guard let self else { return }
@@ -88,6 +101,40 @@ final class HistoryItemPreviewCoordinator: ObservableObject {
         }
     }
 
+    func updatePopoverScreenFrame(
+        _ frame: CGRect?,
+        for kind: HoverPreviewPopoverKind,
+        token: UUID
+    ) {
+        guard popoverToken(for: kind) == token else { return }
+        popoverScreenFrame = frame
+    }
+
+    func startRowExitIntent(
+        from exitPoint: CGPoint,
+        onDismiss: @escaping @MainActor () -> Void,
+        onFinish: @escaping @MainActor () -> Void
+    ) {
+        hoverIntentController.start(
+            exitPoint: exitPoint,
+            targetFrame: { [weak self] in self?.popoverScreenFrame },
+            shouldKeepAlive: { [weak self] in
+                guard let self else { return false }
+                return self.isHovering || self.isPopoverHovering
+            },
+            onDismiss: onDismiss,
+            onFinish: onFinish
+        )
+    }
+
+    var isHoverIntentActive: Bool {
+        hoverIntentController.isActive
+    }
+
+    var currentPopoverScreenFrame: CGRect? {
+        popoverScreenFrame
+    }
+
     func cancelPreviewTasks() {
         hoverPreviewTask?.cancel()
         hoverPreviewTask = nil
@@ -103,6 +150,7 @@ final class HistoryItemPreviewCoordinator: ObservableObject {
     func cancelHoverExitTask() {
         hoverExitTask?.cancel()
         hoverExitTask = nil
+        hoverIntentController.cancel()
     }
 
     func cancelHoverTasks() {
@@ -111,10 +159,12 @@ final class HistoryItemPreviewCoordinator: ObservableObject {
     }
 
     func invalidatePreviewTokens() {
+        cancelHoverExitTask()
         imagePopoverToken = UUID()
         textPopoverToken = UUID()
         filePopoverToken = UUID()
         markdownFilePreviewCacheKey = nil
+        popoverScreenFrame = nil
         isPopoverHovering = false
     }
 

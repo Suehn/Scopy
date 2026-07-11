@@ -36,6 +36,91 @@ final class HistoryItemPreviewCoordinatorTests: XCTestCase {
         XCTAssertNotEqual(coordinator.filePopoverToken, fileToken)
         XCTAssertNil(coordinator.markdownFilePreviewCacheKey)
         XCTAssertFalse(coordinator.isPopoverHovering)
+        XCTAssertNil(coordinator.currentPopoverScreenFrame)
+    }
+
+    func testPopoverFrameUpdateRequiresCurrentKindToken() {
+        let coordinator = HistoryItemPreviewCoordinator()
+        let currentToken = coordinator.imagePopoverToken
+        let staleToken = UUID()
+        let currentFrame = CGRect(x: 100, y: 200, width: 300, height: 240)
+
+        coordinator.updatePopoverScreenFrame(currentFrame, for: .image, token: staleToken)
+        XCTAssertNil(coordinator.currentPopoverScreenFrame)
+
+        coordinator.updatePopoverScreenFrame(currentFrame, for: .image, token: currentToken)
+        XCTAssertEqual(coordinator.currentPopoverScreenFrame, currentFrame)
+
+        coordinator.updatePopoverScreenFrame(nil, for: .image, token: staleToken)
+        XCTAssertEqual(coordinator.currentPopoverScreenFrame, currentFrame)
+    }
+
+    func testPresentingNewPreviewClearsPreviousPopoverGeometry() {
+        let coordinator = HistoryItemPreviewCoordinator()
+        coordinator.updatePopoverScreenFrame(
+            CGRect(x: 10, y: 20, width: 30, height: 40),
+            for: .text,
+            token: coordinator.textPopoverToken
+        )
+
+        coordinator.presentPreview(.text)
+
+        XCTAssertNil(coordinator.currentPopoverScreenFrame)
+    }
+
+    func testCancellingRowExitIntentRunsFinishExactlyOnce() {
+        let coordinator = HistoryItemPreviewCoordinator()
+        var finishCount = 0
+
+        coordinator.startRowExitIntent(
+            from: .zero,
+            onDismiss: { },
+            onFinish: { finishCount += 1 }
+        )
+        XCTAssertTrue(coordinator.isHoverIntentActive)
+
+        coordinator.cancelHoverExitTask()
+        coordinator.cancelHoverExitTask()
+
+        XCTAssertFalse(coordinator.isHoverIntentActive)
+        XCTAssertEqual(finishCount, 1)
+    }
+
+    func testDeinitFinishesActiveRowExitIntentExactlyOnce() async {
+        let interactionCoordinator = HistoryListInteractionCoordinator()
+        let itemID = UUID()
+        let finished = expectation(description: "active row-exit intent finished during teardown")
+        var finishCount = 0
+        var coordinator: HistoryItemPreviewCoordinator? = HistoryItemPreviewCoordinator(
+            hoverIntentController: HoverPreviewIntentController(
+                dependencies: .init(
+                    cursorLocation: { .zero },
+                    uptime: { 0 },
+                    sleep: { _ in
+                        try await Task.sleep(nanoseconds: 10_000_000_000)
+                    }
+                )
+            )
+        )
+        weak var weakCoordinator = coordinator
+
+        XCTAssertTrue(interactionCoordinator.beginHoverPreviewTransfer(for: itemID))
+        coordinator?.startRowExitIntent(
+            from: .zero,
+            onDismiss: { },
+            onFinish: {
+                finishCount += 1
+                interactionCoordinator.endHoverPreviewTransfer(for: itemID)
+                finished.fulfill()
+            }
+        )
+
+        coordinator = nil
+
+        XCTAssertNil(weakCoordinator)
+        await fulfillment(of: [finished], timeout: 1)
+        XCTAssertNil(interactionCoordinator.hoverPreviewTransferOwnerID)
+        XCTAssertEqual(finishCount, 1)
     }
 
     func testHandlePopoverHoverCoordinatesExitScheduling() {

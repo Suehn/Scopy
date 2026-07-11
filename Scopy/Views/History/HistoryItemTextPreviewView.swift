@@ -5,24 +5,33 @@ import Foundation
 
 struct HistoryItemTextPreviewView: View {
     @Environment(SettingsViewModel.self) private var settingsViewModel
-    @ObservedObject var model: HoverPreviewModel
+    let model: HoverPreviewModel
     let markdownWebViewController: MarkdownPreviewWebViewController?
     let showMarkdownPlaceholder: Bool
+    let isContentCurrent: @MainActor () -> Bool
+    let isExportContentCurrent: @MainActor () -> Bool
+    let retainExplicitExport: @MainActor () -> Bool
+    let onInteractionLifecycleChange: @MainActor () -> Void
 
     init(
         model: HoverPreviewModel,
         markdownWebViewController: MarkdownPreviewWebViewController?,
-        showMarkdownPlaceholder: Bool = false
+        showMarkdownPlaceholder: Bool = false,
+        isContentCurrent: @escaping @MainActor () -> Bool = { true },
+        isExportContentCurrent: @escaping @MainActor () -> Bool = { true },
+        retainExplicitExport: @escaping @MainActor () -> Bool = { true },
+        onInteractionLifecycleChange: @escaping @MainActor () -> Void = {}
     ) {
-        self._model = ObservedObject(wrappedValue: model)
+        self.model = model
         self.markdownWebViewController = markdownWebViewController
         self.showMarkdownPlaceholder = showMarkdownPlaceholder
+        self.isContentCurrent = isContentCurrent
+        self.isExportContentCurrent = isExportContentCurrent
+        self.retainExplicitExport = retainExplicitExport
+        self.onInteractionLifecycleChange = onInteractionLifecycleChange
         self._exportResolutionPercent = State(initialValue: Self.initialExportResolutionPercent())
         self._previewLayoutScalePercent = State(initialValue: Self.initialPreviewLayoutScalePercent())
     }
-
-    // Export success feedback reset task
-    @State private var exportSuccessResetTask: Task<Void, Never>?
 
     @State private var exportResolutionPercent: Int
     @State private var previewLayoutScalePercent: Int
@@ -208,6 +217,7 @@ struct HistoryItemTextPreviewView: View {
     }
 
     private func applyMarkdownMetrics(_ metrics: MarkdownContentMetrics, renderKey: String) {
+        guard isContentCurrent() else { return }
         guard let text = model.text else { return }
         guard markdownRenderKey(source: text, layoutScale: activeMarkdownLayoutScale) == renderKey else { return }
         guard metrics.renderSucceeded else {
@@ -260,7 +270,7 @@ struct HistoryItemTextPreviewView: View {
         source: String,
         layoutScale: MarkdownChatGPTLayoutScalePercent
     ) -> String {
-        "\(layoutScale.cacheKey)|\(source.count)|\(source.hashValue)"
+        "\(layoutScale.cacheKey)|\(ClipboardItemContentRevision.deterministicTextCacheKey(source))"
     }
 
     private func displayedMarkdownDocument(
@@ -303,6 +313,7 @@ struct HistoryItemTextPreviewView: View {
         layoutScale: MarkdownChatGPTLayoutScalePercent,
         renderKey: String
     ) async {
+        guard isContentCurrent() else { return }
         if layoutScale == settingsMarkdownLayoutScale {
             overrideMarkdownHTML = nil
             overrideMarkdownRenderKey = nil
@@ -323,6 +334,7 @@ struct HistoryItemTextPreviewView: View {
             return MarkdownHTMLRenderer.render(markdown: source, context: context).html
         }.value
         guard !Task.isCancelled else { return }
+        guard isContentCurrent() else { return }
 
         guard markdownRenderKey(source: source, layoutScale: activeMarkdownLayoutScale) == renderKey else { return }
         overrideMarkdownHTML = html
@@ -506,14 +518,6 @@ struct HistoryItemTextPreviewView: View {
         )
         .help(exportButtonHelpText)
         .disabled(model.isExporting)
-        .onDisappear {
-            exportSuccessResetTask?.cancel()
-            exportSuccessResetTask = nil
-            model.exportSuccess = false
-            model.exportSuccessMessage = nil
-            model.exportFailed = false
-            model.exportErrorMessage = nil
-        }
     }
 
     private var exportButtonHelpText: String {
@@ -528,30 +532,43 @@ struct HistoryItemTextPreviewView: View {
     }
 
     private func exportToPNG() {
+        guard isContentCurrent() else { return }
         guard !model.isExporting else { return }
         guard let html = model.markdownHTML else { return }
 
         let settings = settingsViewModel.settings
 
-        model.isExporting = true
-        model.exportSuccess = false
-        model.exportSuccessMessage = nil
-        model.exportFailed = false
-        model.exportErrorMessage = nil
-        exportSuccessResetTask?.cancel()
-
+        guard let exportToken = model.beginExportAction() else { return }
+        guard retainExplicitExport() else {
+            model.cancelExportTasks()
+            onInteractionLifecycleChange()
+            return
+        }
         let exportResolutionLabel = exportResolution.label
         let exportResolutionScale = exportResolutionScale
         let markdownSource = model.text ?? html
+        let pasteboardWriteLease = MarkdownExportService.capturePasteboardWriteLease()
 
-        Task { @MainActor in
+        let expectedCurrent = isExportContentCurrent
+        model.exportActionTask = Task { @MainActor in
             let result = await HistoryItemMarkdownExportController.exportMarkdownToClipboard(
                 markdownSource: markdownSource,
                 settings: settings,
                 layoutScale: activeMarkdownLayoutScale,
-                resolutionScale: exportResolutionScale
+                resolutionScale: exportResolutionScale,
+                pasteboardWriteLease: pasteboardWriteLease,
+                authorizePasteboardWrite: {
+                    model.authorizesExportAction(token: exportToken) && expectedCurrent()
+                }
             )
-            model.isExporting = false
+            guard !Task.isCancelled,
+                  expectedCurrent(),
+                  model.authorizesExportAction(token: exportToken),
+                  model.finishExportAction(token: exportToken) else {
+                _ = model.finishExportAction(token: exportToken)
+                onInteractionLifecycleChange()
+                return
+            }
 
             switch result {
             case .success(let stats):
@@ -566,28 +583,32 @@ struct HistoryItemTextPreviewView: View {
                     model.exportSuccessMessage = "Exported PNG (\(exportResolutionLabel))"
                 }
                 model.exportErrorMessage = nil
-                exportSuccessResetTask = Task {
+                model.exportFeedbackTask?.cancel()
+                model.exportFeedbackTask = Task { @MainActor in
                     try? await Task.sleep(nanoseconds: 1_500_000_000)
-                    guard !Task.isCancelled else { return }
-                    await MainActor.run {
-                        model.exportSuccess = false
-                        model.exportSuccessMessage = nil
-                    }
+                    guard !Task.isCancelled, expectedCurrent() else { return }
+                    model.exportSuccess = false
+                    model.exportSuccessMessage = nil
+                    model.exportFeedbackTask = nil
+                    onInteractionLifecycleChange()
                 }
             case .failure(let error):
                 model.exportFailed = true
                 model.exportErrorMessage = error.localizedDescription
                 ScopyLog.ui.error("Export failed: \(error.localizedDescription, privacy: .public)")
-                exportSuccessResetTask = Task {
+                model.exportFeedbackTask?.cancel()
+                model.exportFeedbackTask = Task { @MainActor in
                     try? await Task.sleep(nanoseconds: 1_500_000_000)
-                    guard !Task.isCancelled else { return }
-                    await MainActor.run {
-                        model.exportFailed = false
-                        model.exportErrorMessage = nil
-                    }
+                    guard !Task.isCancelled, expectedCurrent() else { return }
+                    model.exportFailed = false
+                    model.exportErrorMessage = nil
+                    model.exportFeedbackTask = nil
+                    onInteractionLifecycleChange()
                 }
             }
+            onInteractionLifecycleChange()
         }
+        onInteractionLifecycleChange()
     }
 }
 

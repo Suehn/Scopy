@@ -4,11 +4,37 @@ import ScopyUISupport
 import SwiftUI
 
 struct HistoryItemFilePreviewView: View {
-    @ObservedObject var model: HoverPreviewModel
+    let model: HoverPreviewModel
     let thumbnailPath: String?
     let kind: FilePreviewKind
     let filePath: String?
     let markdownWebViewController: MarkdownPreviewWebViewController?
+    let isContentCurrent: @MainActor () -> Bool
+    let isExportContentCurrent: @MainActor () -> Bool
+    let retainExplicitExport: @MainActor () -> Bool
+    let onInteractionLifecycleChange: @MainActor () -> Void
+
+    init(
+        model: HoverPreviewModel,
+        thumbnailPath: String?,
+        kind: FilePreviewKind,
+        filePath: String?,
+        markdownWebViewController: MarkdownPreviewWebViewController?,
+        isContentCurrent: @escaping @MainActor () -> Bool = { true },
+        isExportContentCurrent: @escaping @MainActor () -> Bool = { true },
+        retainExplicitExport: @escaping @MainActor () -> Bool = { true },
+        onInteractionLifecycleChange: @escaping @MainActor () -> Void = {}
+    ) {
+        self.model = model
+        self.thumbnailPath = thumbnailPath
+        self.kind = kind
+        self.filePath = filePath
+        self.markdownWebViewController = markdownWebViewController
+        self.isContentCurrent = isContentCurrent
+        self.isExportContentCurrent = isExportContentCurrent
+        self.retainExplicitExport = retainExplicitExport
+        self.onInteractionLifecycleChange = onInteractionLifecycleChange
+    }
 
     @State private var loadedThumbnail: NSImage?
     @State private var lastLoadedPath: String?
@@ -21,7 +47,11 @@ struct HistoryItemFilePreviewView: View {
             HistoryItemTextPreviewView(
                 model: model,
                 markdownWebViewController: markdownWebViewController,
-                showMarkdownPlaceholder: true
+                showMarkdownPlaceholder: true,
+                isContentCurrent: isContentCurrent,
+                isExportContentCurrent: isExportContentCurrent,
+                retainExplicitExport: retainExplicitExport,
+                onInteractionLifecycleChange: onInteractionLifecycleChange
             )
                 .accessibilityIdentifier("History.Preview.File")
                 .accessibilityElement(children: .contain)

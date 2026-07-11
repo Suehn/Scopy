@@ -6,7 +6,7 @@ import ScopyKit
 /// XCUITest will click near the top-right corner via coordinates (popover/overlay buttons can be hard to query reliably).
 @MainActor
 struct ExportPreviewHarnessView: View {
-    @StateObject private var model: HoverPreviewModel
+    @State private var model: HoverPreviewModel
     @State private var settingsViewModel: SettingsViewModel
     @State private var isExporting = false
     private let controller = MarkdownPreviewWebViewController()
@@ -31,7 +31,7 @@ struct ExportPreviewHarnessView: View {
         m.exportSuccess = false
         m.exportFailed = false
         m.exportErrorMessage = nil
-        _model = StateObject(wrappedValue: m)
+        _model = State(initialValue: m)
         _settingsViewModel = State(initialValue: SettingsViewModel(service: ClipboardServiceFactory.create(useMock: true)))
     }
 

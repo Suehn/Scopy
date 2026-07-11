@@ -1,6 +1,7 @@
 import AppKit
 import CoreGraphics
 import ScopyKit
+import ScopyUISupport
 import SwiftUI
 
 @MainActor
@@ -35,6 +36,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        if ScrollPerformanceProfile.isEnabled {
+            ScrollPerformanceProfile.shared.prepareForLaunch()
+        }
         let context = resolveLaunchContext()
 
         if context.isExportHarness {
@@ -44,6 +48,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         if context.isHistoryItemHarness {
             uiTestWindow = makeHistoryItemHarnessWindow()
+            return
+        }
+
+        if context.isListLiveScrollObserverHarness {
+            uiTestWindow = makeListLiveScrollObserverHarnessWindow()
             return
         }
 
@@ -79,16 +88,21 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let isUITesting: Bool
         let isExportHarness: Bool
         let isHistoryItemHarness: Bool
+        let isListLiveScrollObserverHarness: Bool
     }
 
     private func resolveLaunchContext() -> LaunchContext {
         let isUITesting = ProcessInfo.processInfo.arguments.contains("--uitesting")
         let isExportHarness = isUITesting && ProcessInfo.processInfo.environment["SCOPY_UITEST_EXPORT_HARNESS"] == "1"
         let isHistoryItemHarness = isUITesting && ProcessInfo.processInfo.environment["SCOPY_UITEST_HISTORY_ITEM_HARNESS"] == "1"
+        let isListLiveScrollObserverHarness = isUITesting
+            && ProcessInfo.processInfo.arguments.contains("--list-live-scroll-observer-harness")
+            && ProcessInfo.processInfo.environment["SCOPY_UITEST_LIST_LIVE_SCROLL_OBSERVER_HARNESS"] == "1"
         return LaunchContext(
             isUITesting: isUITesting,
             isExportHarness: isExportHarness,
-            isHistoryItemHarness: isHistoryItemHarness
+            isHistoryItemHarness: isHistoryItemHarness,
+            isListLiveScrollObserverHarness: isListLiveScrollObserverHarness
         )
     }
 
@@ -119,6 +133,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             level: .floating
         )
         return window
+    }
+
+    private func makeListLiveScrollObserverHarnessWindow() -> NSWindow {
+        makeHostingWindow(
+            rootView: ListLiveScrollObserverHarnessView(),
+            size: NSSize(width: 920, height: 700),
+            styleMask: [.titled, .closable, .resizable, .fullSizeContentView],
+            title: "Scopy List Live Scroll Observer Harness",
+            level: .floating
+        )
     }
 
     private func makeUITestWindow<V: View>(rootView: V) -> NSWindow {

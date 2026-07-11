@@ -1,26 +1,75 @@
-import Combine
 import CoreGraphics
 import Foundation
+import Observation
 
+@Observable
 @MainActor
-final class HoverPreviewModel: ObservableObject {
-    @Published var previewCGImage: CGImage?
-    @Published var text: String?
-    @Published var markdownHTML: String?
-    @Published var markdownContentSize: CGSize?
-    @Published var markdownHasHorizontalOverflow: Bool = false
-    @Published var markdownRenderSucceeded: Bool = false
-    @Published var markdownRenderErrorReason: String?
-    @Published var isMarkdown: Bool = false
+final class HoverPreviewModel {
+    var previewCGImage: CGImage?
+    var text: String?
+    var markdownHTML: String?
+    var markdownContentSize: CGSize?
+    var markdownHasHorizontalOverflow: Bool = false
+    var markdownRenderSucceeded: Bool = false
+    var markdownRenderErrorReason: String?
+    var isMarkdown: Bool = false
 
     // Export state
-    @Published var isExporting: Bool = false
-    @Published var exportSuccess: Bool = false
-    @Published var exportSuccessMessage: String?
-    @Published var exportFailed: Bool = false
-    @Published var exportErrorMessage: String?
+    var isExporting: Bool = false
+    var exportSuccess: Bool = false
+    var exportSuccessMessage: String?
+    var exportFailed: Bool = false
+    var exportErrorMessage: String?
 
-    func reset() {
+    @ObservationIgnored var exportActionTask: Task<Void, Never>?
+    @ObservationIgnored var exportFeedbackTask: Task<Void, Never>?
+    @ObservationIgnored private(set) var exportAuthorizationToken: UUID?
+
+    var hasContentOrFeedback: Bool {
+        previewCGImage != nil || text != nil || markdownHTML != nil ||
+            markdownContentSize != nil || markdownHasHorizontalOverflow ||
+            markdownRenderSucceeded || markdownRenderErrorReason != nil || isMarkdown ||
+            isExporting || exportSuccess || exportSuccessMessage != nil ||
+            exportFailed || exportErrorMessage != nil
+    }
+
+    func cancelExportTasks() {
+        exportAuthorizationToken = nil
+        exportActionTask?.cancel()
+        exportActionTask = nil
+        exportFeedbackTask?.cancel()
+        exportFeedbackTask = nil
+        isExporting = false
+    }
+
+    func beginExportAction() -> UUID? {
+        guard !isExporting else { return nil }
+        let token = UUID()
+        exportAuthorizationToken = token
+        isExporting = true
+        exportSuccess = false
+        exportSuccessMessage = nil
+        exportFailed = false
+        exportErrorMessage = nil
+        return token
+    }
+
+    func authorizesExportAction(token: UUID) -> Bool {
+        isExporting && exportAuthorizationToken == token && exportActionTask != nil
+    }
+
+    @discardableResult
+    func finishExportAction(token: UUID) -> Bool {
+        guard exportAuthorizationToken == token else { return false }
+        exportAuthorizationToken = nil
+        exportActionTask = nil
+        isExporting = false
+        return true
+    }
+
+    /// Clears view-owned preview payload while allowing a user-started export to finish after the
+    /// popover or its virtualized row disappears.
+    func resetPreviewContent() {
         previewCGImage = nil
         text = nil
         markdownHTML = nil
@@ -29,6 +78,11 @@ final class HoverPreviewModel: ObservableObject {
         markdownRenderSucceeded = false
         markdownRenderErrorReason = nil
         isMarkdown = false
+    }
+
+    func reset() {
+        cancelExportTasks()
+        resetPreviewContent()
         isExporting = false
         exportSuccess = false
         exportSuccessMessage = nil

@@ -118,6 +118,106 @@ final class ClipboardItemContentRevisionTests: XCTestCase {
             ClipboardItemContentRevision(item: replacement)
         )
     }
+
+    func testThumbnailGenerationDoesNotChangeContentRevisionButInvalidatesRowPresentation() {
+        let itemID = UUID(uuidString: "11111111-2222-3333-4444-555555555555")!
+        let original = makeItem(
+            id: itemID,
+            contentHash: "image-hash",
+            plainText: "Image",
+            thumbnailPath: nil,
+            storageRef: "/tmp/original.png"
+        )
+        let thumbnailGenerated = makeItem(
+            id: itemID,
+            contentHash: "image-hash",
+            plainText: "Image",
+            thumbnailPath: "/tmp/generated-thumbnail.png",
+            storageRef: "/tmp/original.png"
+        )
+
+        let originalRevision = ClipboardItemContentRevision(item: original)
+        let generatedRevision = ClipboardItemContentRevision(item: thumbnailGenerated)
+        XCTAssertEqual(originalRevision, generatedRevision)
+        XCTAssertEqual(originalRevision.cacheKey, generatedRevision.cacheKey)
+        XCTAssertFalse(makeView(item: original) == makeView(item: thumbnailGenerated))
+
+        HistoryItemPresentationCache.shared.clearCaches()
+        var displayTextCallCount = 0
+        let dependencies = HistoryItemRowDescriptor.Dependencies(
+            displayTexts: { _ in
+                displayTextCallCount += 1
+                return ("Image", "metadata")
+            },
+            filePreview: { _ in nil }
+        )
+        _ = HistoryItemPresentationCache.shared.rowDescriptor(
+            for: original,
+            settings: .default,
+            dependencies: dependencies
+        )
+        _ = HistoryItemPresentationCache.shared.rowDescriptor(
+            for: thumbnailGenerated,
+            settings: .default,
+            dependencies: dependencies
+        )
+        _ = HistoryItemPresentationCache.shared.rowDescriptor(
+            for: thumbnailGenerated,
+            settings: .default,
+            dependencies: dependencies
+        )
+        XCTAssertEqual(displayTextCallCount, 2)
+    }
+
+    func testHistoryItemViewEqualityRejectsSameIDMissingHashReplacement() {
+        let itemID = UUID(uuidString: "99999999-9999-9999-9999-999999999999")!
+        let first = makeItem(id: itemID, contentHash: "", plainText: "AB")
+        let replacement = makeItem(id: itemID, contentHash: "", plainText: "CD")
+
+        XCTAssertFalse(makeView(item: first) == makeView(item: replacement))
+    }
+
+    func testHistoryItemViewEqualityRejectsEveryMarkdownExportSettingChange() {
+        let item = makeItem(id: UUID(), contentHash: "hash", plainText: "# Markdown")
+        let baseline = SettingsDTO.default
+        var variants: [SettingsDTO] = []
+
+        var binaryPath = baseline
+        binaryPath.pngquantBinaryPath = "/tmp/pngquant-other"
+        variants.append(binaryPath)
+
+        var enabled = baseline
+        enabled.pngquantMarkdownExportEnabled.toggle()
+        variants.append(enabled)
+
+        var qualityMin = baseline
+        qualityMin.pngquantMarkdownExportQualityMin += 1
+        variants.append(qualityMin)
+
+        var qualityMax = baseline
+        qualityMax.pngquantMarkdownExportQualityMax += 1
+        variants.append(qualityMax)
+
+        var speed = baseline
+        speed.pngquantMarkdownExportSpeed += 1
+        variants.append(speed)
+
+        var colors = baseline
+        colors.pngquantMarkdownExportColors -= 1
+        variants.append(colors)
+
+        var layoutScale = baseline
+        layoutScale.markdownChatGPTLayoutScalePercent += 1
+        variants.append(layoutScale)
+
+        for variant in variants {
+            XCTAssertFalse(
+                makeView(item: item, settings: baseline) ==
+                    makeView(item: item, settings: variant)
+            )
+        }
+    }
+
     private func makeItem(
         id: UUID,
         contentHash: String,
@@ -147,5 +247,37 @@ final class ClipboardItemContentRevisionTests: XCTestCase {
 
     private func assertSendable<T: Sendable>(_ value: T) {
         _ = value
+    }
+
+    private func makeView(
+        item: ClipboardItemDTO,
+        settings: SettingsDTO = .default
+    ) -> HistoryItemView {
+        HistoryItemView(
+            item: item,
+            isKeyboardSelected: false,
+            settings: settings,
+            onSelect: {},
+            onSelectOptimizedForCodex: {},
+            onSendViaAirDrop: {},
+            onOpenContainingFolder: {},
+            onHoverSelect: { _ in },
+            onTogglePin: {},
+            onDelete: {},
+            onUpdateNote: { _ in true },
+            onOptimizeImage: { fatalError("unused test callback") },
+            getImageData: { nil },
+            markdownWebViewController: MarkdownPreviewWebViewController(),
+            interactionCoordinator: HistoryListInteractionCoordinator(),
+            interactionSessionStore: HistoryItemInteractionSessionStore(),
+            isContentRevisionCurrent: { itemID, revision in
+                itemID == item.id && ClipboardItemContentRevision(item: item) == revision
+            },
+            isImagePreviewPresented: false,
+            isTextPreviewPresented: false,
+            isFilePreviewPresented: false,
+            requestPopover: { _ in },
+            dismissOtherPopovers: {}
+        )
     }
 }

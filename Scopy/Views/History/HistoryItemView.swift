@@ -9,6 +9,8 @@ import ScopyUISupport
 /// v0.9.3: 使用局部悬停状态 + 防抖 + Equatable 优化滚动性能
 @MainActor
 struct HistoryItemView: View, Equatable {
+    @Environment(\.historyRelativeTimeClock) private var relativeTimeClock
+
     let item: ClipboardItemDTO
     let isKeyboardSelected: Bool
     let settings: SettingsDTO
@@ -21,24 +23,31 @@ struct HistoryItemView: View, Equatable {
     let onHoverSelect: (UUID) -> Void
     let onTogglePin: () -> Void
     let onDelete: () -> Void
-    let onUpdateNote: (String?) -> Void
+    let onUpdateNote: (String?) async -> Bool
     let onOptimizeImage: () async -> ImageOptimizationOutcomeDTO
     let getImageData: () async -> Data?
     let markdownWebViewController: MarkdownPreviewWebViewController
     let interactionCoordinator: HistoryListInteractionCoordinator
+    let interactionSessionStore: HistoryItemInteractionSessionStore
+    let isContentRevisionCurrent: (UUID, ClipboardItemContentRevision) -> Bool
     let isImagePreviewPresented: Bool
     let isTextPreviewPresented: Bool
     let isFilePreviewPresented: Bool
     let requestPopover: (HoverPreviewPopoverKind?) -> Void
     let dismissOtherPopovers: () -> Void
+    private let contentRevision: ClipboardItemContentRevision
     private let descriptor: HistoryItemRowDescriptor
 
-    // 局部状态 - 悬停不触发全局重绘
-    @StateObject private var rowController: HistoryItemRowController
-    @StateObject private var previewCoordinator = HistoryItemPreviewCoordinator()
-    // v0.15: Text preview state
-    @StateObject private var previewModel = HoverPreviewModel()
+    // Idle rows retain only lightweight SwiftUI value state. The controller/model graph is
+    // created as one session after a real interaction and released as a unit when idle.
+    @State private var interactionState: HistoryItemInteractionState?
+    @State private var passiveRowToken: HistoryListInteractionCoordinator.PassiveRowToken?
+    @State private var sessionAttachmentToken: HistoryItemInteractionSessionStore.AttachmentToken?
+    @State private var isPointerInsideRow = false
+    @State private var isAppeared = false
     @State private var isUITestTapPreviewEnabled: Bool = false
+
+    private static let inactivePopoverToken = UUID(uuidString: "00000000-0000-0000-0000-000000000000")!
 
     init(
         item: ClipboardItemDTO,
@@ -51,11 +60,13 @@ struct HistoryItemView: View, Equatable {
         onHoverSelect: @escaping (UUID) -> Void,
         onTogglePin: @escaping () -> Void,
         onDelete: @escaping () -> Void,
-        onUpdateNote: @escaping (String?) -> Void,
+        onUpdateNote: @escaping (String?) async -> Bool,
         onOptimizeImage: @escaping () async -> ImageOptimizationOutcomeDTO,
         getImageData: @escaping () async -> Data?,
         markdownWebViewController: MarkdownPreviewWebViewController,
         interactionCoordinator: HistoryListInteractionCoordinator,
+        interactionSessionStore: HistoryItemInteractionSessionStore,
+        isContentRevisionCurrent: @escaping (UUID, ClipboardItemContentRevision) -> Bool,
         isImagePreviewPresented: Bool,
         isTextPreviewPresented: Bool,
         isFilePreviewPresented: Bool,
@@ -77,14 +88,15 @@ struct HistoryItemView: View, Equatable {
         self.getImageData = getImageData
         self.markdownWebViewController = markdownWebViewController
         self.interactionCoordinator = interactionCoordinator
+        self.interactionSessionStore = interactionSessionStore
+        self.isContentRevisionCurrent = isContentRevisionCurrent
         self.isImagePreviewPresented = isImagePreviewPresented
         self.isTextPreviewPresented = isTextPreviewPresented
         self.isFilePreviewPresented = isFilePreviewPresented
         self.requestPopover = requestPopover
         self.dismissOtherPopovers = dismissOtherPopovers
+        self.contentRevision = ClipboardItemContentRevision(item: item)
         self.descriptor = HistoryItemPresentationCache.shared.rowDescriptor(for: item, settings: settings)
-        let initialRelativeTimeText = Self.makeRelativeTimeString(for: item.lastUsedAt)
-        _rowController = StateObject(wrappedValue: HistoryItemRowController(relativeTimeText: initialRelativeTimeText))
     }
 
     // MARK: - Equatable
@@ -93,23 +105,19 @@ struct HistoryItemView: View, Equatable {
         let profileStart = ScrollPerformanceProfile.isEnabled ? CFAbsoluteTimeGetCurrent() : nil
         defer {
             if let profileStart {
-                ScrollPerformanceProfile.recordMetric(
+                ScrollPerformanceProfile.recordTiming(
                     name: "swiftui.row_equatable_ms",
                     elapsedMs: (CFAbsoluteTimeGetCurrent() - profileStart) * 1000
                 )
             }
         }
 
-        return lhs.item.id == rhs.item.id &&
-            lhs.item.type == rhs.item.type &&
-            lhs.item.contentHash == rhs.item.contentHash &&
+        return lhs.contentRevision == rhs.contentRevision &&
             lhs.item.lastUsedAt == rhs.item.lastUsedAt &&
             lhs.item.isPinned == rhs.item.isPinned &&
-            lhs.item.sizeBytes == rhs.item.sizeBytes &&
-            lhs.item.thumbnailPath == rhs.item.thumbnailPath &&
-            lhs.item.storageRef == rhs.item.storageRef &&
             lhs.item.note == rhs.item.note &&
-            lhs.item.fileSizeBytes == rhs.item.fileSizeBytes &&
+            lhs.item.appBundleID == rhs.item.appBundleID &&
+            lhs.item.thumbnailPath == rhs.item.thumbnailPath &&
             lhs.isKeyboardSelected == rhs.isKeyboardSelected &&
             lhs.isImagePreviewPresented == rhs.isImagePreviewPresented &&
             lhs.isTextPreviewPresented == rhs.isTextPreviewPresented &&
@@ -117,129 +125,153 @@ struct HistoryItemView: View, Equatable {
             lhs.settings.showImageThumbnails == rhs.settings.showImageThumbnails &&
             lhs.settings.thumbnailHeight == rhs.settings.thumbnailHeight &&
             lhs.settings.imagePreviewDelay == rhs.settings.imagePreviewDelay &&
-            lhs.settings.markdownChatGPTLayoutScalePercent == rhs.settings.markdownChatGPTLayoutScalePercent
+            lhs.settings.markdownChatGPTLayoutScalePercent == rhs.settings.markdownChatGPTLayoutScalePercent &&
+            lhs.settings.pngquantBinaryPath == rhs.settings.pngquantBinaryPath &&
+            lhs.settings.pngquantMarkdownExportEnabled == rhs.settings.pngquantMarkdownExportEnabled &&
+            lhs.settings.pngquantMarkdownExportQualityMin == rhs.settings.pngquantMarkdownExportQualityMin &&
+            lhs.settings.pngquantMarkdownExportQualityMax == rhs.settings.pngquantMarkdownExportQualityMax &&
+            lhs.settings.pngquantMarkdownExportSpeed == rhs.settings.pngquantMarkdownExportSpeed &&
+            lhs.settings.pngquantMarkdownExportColors == rhs.settings.pngquantMarkdownExportColors
     }
 
     private var isPreviewInteractionSuppressed: Bool {
         interactionCoordinator.isHoverPreviewSuppressed
     }
 
+    private var isAnyPreviewPresented: Bool {
+        isImagePreviewPresented || isTextPreviewPresented || isFilePreviewPresented
+    }
+
     private var isHovering: Bool {
-        get { previewCoordinator.isHovering }
-        nonmutating set { previewCoordinator.isHovering = newValue }
+        get { interactionState?.previewCoordinator.isHovering ?? false }
+        nonmutating set { interactionState?.previewCoordinator.isHovering = newValue }
     }
 
     private var hoverDebounceTask: Task<Void, Never>? {
-        get { previewCoordinator.hoverDebounceTask }
-        nonmutating set { previewCoordinator.hoverDebounceTask = newValue }
+        get { interactionState?.previewCoordinator.hoverDebounceTask }
+        nonmutating set { interactionState?.previewCoordinator.hoverDebounceTask = newValue }
     }
 
     private var hoverPreviewTask: Task<Void, Never>? {
-        get { previewCoordinator.hoverPreviewTask }
-        nonmutating set { previewCoordinator.hoverPreviewTask = newValue }
+        get { interactionState?.previewCoordinator.hoverPreviewTask }
+        nonmutating set { interactionState?.previewCoordinator.hoverPreviewTask = newValue }
     }
 
     private var hoverMarkdownTask: Task<Void, Never>? {
-        get { previewCoordinator.hoverMarkdownTask }
-        nonmutating set { previewCoordinator.hoverMarkdownTask = newValue }
+        get { interactionState?.previewCoordinator.hoverMarkdownTask }
+        nonmutating set { interactionState?.previewCoordinator.hoverMarkdownTask = newValue }
     }
 
     private var hoverExitTask: Task<Void, Never>? {
-        get { previewCoordinator.hoverExitTask }
-        nonmutating set { previewCoordinator.hoverExitTask = newValue }
+        get { interactionState?.previewCoordinator.hoverExitTask }
+        nonmutating set { interactionState?.previewCoordinator.hoverExitTask = newValue }
     }
 
     private var isPopoverHovering: Bool {
-        get { previewCoordinator.isPopoverHovering }
-        nonmutating set { previewCoordinator.isPopoverHovering = newValue }
+        get { interactionState?.previewCoordinator.isPopoverHovering ?? false }
+        nonmutating set { interactionState?.previewCoordinator.isPopoverHovering = newValue }
     }
 
     private var imagePopoverToken: UUID {
-        previewCoordinator.imagePopoverToken
+        interactionState?.previewCoordinator.imagePopoverToken ?? Self.inactivePopoverToken
     }
 
     private var textPopoverToken: UUID {
-        previewCoordinator.textPopoverToken
+        interactionState?.previewCoordinator.textPopoverToken ?? Self.inactivePopoverToken
     }
 
     private var filePopoverToken: UUID {
-        previewCoordinator.filePopoverToken
+        interactionState?.previewCoordinator.filePopoverToken ?? Self.inactivePopoverToken
     }
 
     private var markdownFilePreviewCacheKey: String? {
-        get { previewCoordinator.markdownFilePreviewCacheKey }
-        nonmutating set { previewCoordinator.markdownFilePreviewCacheKey = newValue }
+        get { interactionState?.previewCoordinator.markdownFilePreviewCacheKey }
+        nonmutating set { interactionState?.previewCoordinator.markdownFilePreviewCacheKey = newValue }
     }
 
     private var relativeTimeText: String {
-        get { rowController.relativeTimeText }
-        nonmutating set { rowController.relativeTimeText = newValue }
+        get { interactionState?.rowController.relativeTimeText ?? relativeTime }
+        nonmutating set { interactionState?.rowController.relativeTimeText = newValue }
     }
 
     private var isOptimizingImage: Bool {
-        get { rowController.isOptimizingImage }
-        nonmutating set { rowController.isOptimizingImage = newValue }
+        get { interactionState?.rowController.isOptimizingImage ?? false }
+        nonmutating set { interactionState?.rowController.isOptimizingImage = newValue }
     }
 
     private var optimizeMessage: String? {
-        get { rowController.optimizeMessage }
-        nonmutating set { rowController.optimizeMessage = newValue }
+        get { interactionState?.rowController.optimizeMessage }
+        nonmutating set { interactionState?.rowController.optimizeMessage = newValue }
     }
 
     private var isHoveringOptimizeButton: Bool {
-        get { rowController.isHoveringOptimizeButton }
-        nonmutating set { rowController.isHoveringOptimizeButton = newValue }
+        get { interactionState?.rowController.isHoveringOptimizeButton ?? false }
+        nonmutating set { interactionState?.rowController.isHoveringOptimizeButton = newValue }
     }
 
     private var isNoteEditorPresented: Bool {
-        get { rowController.isNoteEditorPresented }
-        nonmutating set { rowController.isNoteEditorPresented = newValue }
+        get { interactionState?.rowController.isNoteEditorPresented ?? false }
+        nonmutating set { interactionState?.rowController.isNoteEditorPresented = newValue }
     }
 
     private var noteDraft: String {
-        get { rowController.noteDraft }
-        nonmutating set { rowController.noteDraft = newValue }
+        get { interactionState?.rowController.noteDraft ?? "" }
+        nonmutating set { interactionState?.rowController.noteDraft = newValue }
+    }
+
+    private var isSavingNote: Bool {
+        interactionState?.rowController.isSavingNote ?? false
+    }
+
+    private var noteSaveError: String? {
+        interactionState?.rowController.noteSaveError
     }
 
     private var isScrollInteractionActive: Bool {
-        get { rowController.isScrollInteractionActive }
-        nonmutating set { rowController.isScrollInteractionActive = newValue }
+        get { interactionState?.rowController.isScrollInteractionActive ?? false }
+        nonmutating set { interactionState?.rowController.isScrollInteractionActive = newValue }
     }
 
     private var optimizeImageTask: Task<Void, Never>? {
-        get { rowController.optimizeImageTask }
-        nonmutating set { rowController.optimizeImageTask = newValue }
+        get { interactionState?.rowController.optimizeImageTask }
+        nonmutating set { interactionState?.rowController.optimizeImageTask = newValue }
     }
 
     private var exportActionTask: Task<Void, Never>? {
-        get { rowController.exportActionTask }
-        nonmutating set { rowController.exportActionTask = newValue }
+        get { interactionState?.rowController.exportActionTask }
+        nonmutating set { interactionState?.rowController.exportActionTask = newValue }
     }
 
     private var exportMessageTask: Task<Void, Never>? {
-        get { rowController.exportMessageTask }
-        nonmutating set { rowController.exportMessageTask = newValue }
+        get { interactionState?.rowController.exportMessageTask }
+        nonmutating set { interactionState?.rowController.exportMessageTask = newValue }
     }
 
     private var exportMessage: String? {
-        get { rowController.exportMessage }
-        nonmutating set { rowController.exportMessage = newValue }
+        get { interactionState?.rowController.exportMessage }
+        nonmutating set { interactionState?.rowController.exportMessage = newValue }
     }
 
     private var isExportingPNG: Bool {
-        get { rowController.isExportingPNG }
-        nonmutating set { rowController.isExportingPNG = newValue }
-    }
-
-    private var interactionObservation: HistoryListInteractionObservation? {
-        get { rowController.interactionObservation }
-        nonmutating set { rowController.interactionObservation = newValue }
+        get { interactionState?.rowController.isExportingPNG ?? false }
+        nonmutating set { interactionState?.rowController.isExportingPNG = newValue }
     }
 
     private var isNoteEditorPresentedBinding: Binding<Bool> {
         Binding(
             get: { isNoteEditorPresented },
-            set: { isNoteEditorPresented = $0 }
+            set: { presented in
+                if presented {
+                    isNoteEditorPresented = true
+                } else {
+                    // A popover host can write `false` while its List row is being recycled.
+                    // Scrolling and an authorized save are session-owned transitions, not Cancel.
+                    if interactionCoordinator.isScrolling || isSavingNote {
+                        return
+                    }
+                    scheduleNoteEditorDismissIfStillAttached()
+                }
+            }
         )
     }
 
@@ -257,8 +289,236 @@ struct HistoryItemView: View, Equatable {
     }
 
     private var optimizeMessageTask: Task<Void, Never>? {
-        get { rowController.optimizeMessageTask }
-        nonmutating set { rowController.optimizeMessageTask = newValue }
+        get { interactionState?.rowController.optimizeMessageTask }
+        nonmutating set { interactionState?.rowController.optimizeMessageTask = newValue }
+    }
+
+    private enum InteractionActivation {
+        case hover
+        case explicitAction
+        case presentedPopover
+        case legacyAppearance
+
+        var needsScrollBoundaryOwnership: Bool {
+            switch self {
+            case .hover, .presentedPopover:
+                return true
+            case .explicitAction, .legacyAppearance:
+                return false
+            }
+        }
+    }
+
+    private var usesPassiveRowArchitecture: Bool {
+        PerfFeatureFlags.passiveHistoryRowEnabled
+    }
+
+    @discardableResult
+    private func ensureInteractionState(
+        for activation: InteractionActivation,
+        preferredToken: HistoryListInteractionCoordinator.PassiveRowToken? = nil
+    ) -> HistoryItemInteractionState? {
+        if activation.needsScrollBoundaryOwnership, usesPassiveRowArchitecture {
+            let token = preferredToken ?? passiveRowToken ?? interactionCoordinator.makePassiveRowToken()
+            passiveRowToken = token
+            guard claimPassiveRow(token: token) else { return nil }
+        }
+
+        if let current = interactionState {
+            guard current.itemID == item.id, !current.isTornDown else {
+                interactionSessionStore.release(current)
+                current.tearDown()
+                interactionState = nil
+                return ensureInteractionState(for: activation, preferredToken: preferredToken)
+            }
+            if let sessionAttachmentToken {
+                guard interactionSessionStore.authorizesViewAttachment(
+                    current,
+                    attachmentToken: sessionAttachmentToken
+                ) else { return nil }
+                current.activateViewAttachment(sessionAttachmentToken)
+            }
+            current.reconcile(to: contentRevision, relativeTimeText: relativeTime)
+            registerLegacyInteractionObserverIfNeeded(on: current)
+            return current
+        }
+
+        let created = HistoryItemInteractionState(
+            revision: contentRevision,
+            relativeTimeText: relativeTime
+        )
+        if let sessionAttachmentToken {
+            created.activateViewAttachment(sessionAttachmentToken)
+        }
+        interactionState = created
+        ScrollPerformanceProfile.incrementCounter(name: "interaction.session_init")
+        registerLegacyInteractionObserverIfNeeded(on: created)
+        return created
+    }
+
+    private func registerLegacyInteractionObserverIfNeeded(on state: HistoryItemInteractionState) {
+        guard !usesPassiveRowArchitecture, state.rowController.interactionObservation == nil else {
+            return
+        }
+        state.rowController.interactionObservation = interactionCoordinator.observe { event in
+            guard self.isAppeared else { return }
+            self.handleInteractionEvent(event)
+        }
+        ScrollPerformanceProfile.incrementCounter(name: "interaction.observer_install")
+    }
+
+    @discardableResult
+    private func claimPassiveRow(
+        token: HistoryListInteractionCoordinator.PassiveRowToken
+    ) -> Bool {
+        let expectedItemID = item.id
+        let expectedRevision = contentRevision
+        return interactionCoordinator.claimActiveRow(
+            token: token,
+            onEvent: { event in
+                guard self.isAppeared,
+                      self.item.id == expectedItemID,
+                      self.passiveRowToken == token else { return }
+                self.reconcileInteractionStateIfNeeded(restartHover: false)
+                self.handleInteractionEvent(event)
+            },
+            restore: {
+                guard self.isAppeared,
+                      self.item.id == expectedItemID,
+                      self.contentRevision == expectedRevision,
+                      self.passiveRowToken == token,
+                      self.isPointerInsideRow else {
+                    self.interactionCoordinator.releasePassiveRow(token: token)
+                    return
+                }
+                self.restoreSuppressedHover(token: token)
+            }
+        )
+    }
+
+    private func restoreSuppressedHover(
+        token: HistoryListInteractionCoordinator.PassiveRowToken
+    ) {
+        guard isAppeared, isPointerInsideRow, passiveRowToken == token else { return }
+        guard let state = ensureInteractionState(for: .hover, preferredToken: token) else { return }
+        state.previewCoordinator.isHovering = true
+        activateHoverActionsIfAllowed(state: state)
+        ScrollPerformanceProfile.incrementCounter(name: "interaction.suppressed_hover_restore")
+    }
+
+    private func releasePassiveOwnership() {
+        guard let passiveRowToken else { return }
+        interactionCoordinator.releasePassiveRow(token: passiveRowToken)
+        self.passiveRowToken = nil
+    }
+
+    private func reconcileInteractionStateIfNeeded(restartHover: Bool = true) {
+        guard let state = interactionState,
+              isAppeared,
+              interactionSessionStore.authorizesViewAttachment(
+                  state,
+                  attachmentToken: sessionAttachmentToken
+              ),
+              state.ownsViewAttachment(sessionAttachmentToken) else { return }
+        let changed = state.reconcile(to: contentRevision, relativeTimeText: relativeTime)
+        guard changed else { return }
+
+        requestPopover(nil)
+        if usesPassiveRowArchitecture {
+            releasePassiveOwnership()
+            guard restartHover, isAppeared, isPointerInsideRow else {
+                releaseInteractionStateIfIdle(expected: state)
+                return
+            }
+            handleHover(true)
+        } else if restartHover, isPointerInsideRow {
+            state.previewCoordinator.isHovering = true
+            activateHoverActionsIfAllowed(state: state)
+        }
+    }
+
+    private func releaseInteractionStateIfIdle(
+        expected state: HistoryItemInteractionState? = nil
+    ) {
+        guard usesPassiveRowArchitecture else { return }
+        let retainedExpected = state.flatMap {
+            interactionSessionStore.contains($0) ? $0 : nil
+        }
+        guard let current = retainedExpected ?? interactionState else { return }
+        if let state, current !== state { return }
+        if !current.hasExplicitUserOwnedWork {
+            interactionSessionStore.release(current)
+        }
+        if !isAppeared, !current.hasOwnedWork {
+            current.tearDown()
+            interactionSessionStore.release(current)
+            if interactionState === current {
+                interactionState = nil
+            }
+            ScrollPerformanceProfile.incrementCounter(name: "interaction.session_release")
+            return
+        }
+        let ownsRestorationCandidate = passiveRowToken.map {
+            interactionCoordinator.ownsSuppressedHoverCandidate(token: $0)
+        } ?? false
+        guard (!isPointerInsideRow || ownsRestorationCandidate),
+              !isAnyPreviewPresented,
+              interactionCoordinator.hoverPreviewTransferOwnerID != item.id,
+              !current.hasOwnedWork else { return }
+
+        current.tearDown()
+        interactionSessionStore.release(current)
+        if interactionState === current {
+            interactionState = nil
+        }
+        if !ownsRestorationCandidate {
+            releasePassiveOwnership()
+        }
+        ScrollPerformanceProfile.incrementCounter(name: "interaction.session_release")
+    }
+
+    private func tearDownInteractionStateOnDisappear() {
+        releasePassiveOwnership()
+        guard let state = interactionState else {
+            ScrollPerformanceProfile.incrementCounter(name: "interaction.idle_disappear_fast_path")
+            return
+        }
+        let attachmentToken = sessionAttachmentToken
+        let detachResult = interactionSessionStore.detach(
+            state,
+            attachmentToken: attachmentToken
+        )
+        sessionAttachmentToken = nil
+        if detachResult == .staleAttachment {
+            // A newer virtualized row instance already owns this same explicit session.
+            return
+        }
+
+        _ = state.deactivateViewAttachment(attachmentToken)
+        state.suspendForRowDisappearance()
+        if detachResult == .retained, state.hasExplicitUserOwnedWork {
+            return
+        }
+
+        state.tearDown()
+        interactionSessionStore.release(state)
+        interactionState = nil
+        ScrollPerformanceProfile.incrementCounter(name: "interaction.session_release")
+    }
+
+    private func attachRetainedInteractionStateIfNeeded() {
+        let token = interactionSessionStore.makeAttachmentToken()
+        sessionAttachmentToken = token
+        guard let retained = interactionSessionStore.attach(
+            itemID: item.id,
+            attachmentToken: token
+        ) else { return }
+
+        if let current = interactionState, current !== retained {
+            current.tearDown()
+        }
+        interactionState = retained
+        retained.reconcile(to: contentRevision, relativeTimeText: relativeTime)
     }
 
     private func handlePopoverDismissRequest(
@@ -267,28 +527,55 @@ struct HistoryItemView: View, Equatable {
         token: UUID
     ) {
         if presented {
+            guard isAppeared,
+                  let state = ensureInteractionState(for: .presentedPopover),
+                  isViewInteractionCurrent(state, revision: state.revision) else { return }
             requestPopover(kind)
             return
         }
-        guard previewCoordinator.isCurrentPopoverToken(token, for: kind) else { return }
+        guard let state = interactionState,
+              isViewInteractionCurrent(state, revision: state.revision) else { return }
+        let coordinator = state.previewCoordinator
+        guard coordinator.isCurrentPopoverToken(token, for: kind) else { return }
         requestPopover(nil)
+        releaseInteractionStateIfIdle()
     }
 
     private func handlePopoverHover(_ hovering: Bool) {
-        previewCoordinator.handlePopoverHover(
+        guard let state = interactionState,
+              isViewInteractionCurrent(state, revision: state.revision) else { return }
+        state.previewCoordinator.handlePopoverHover(
             hovering,
             isRowHovering: isHovering,
             cancelHoverExit: cancelHoverExitTask,
-            scheduleHoverExit: scheduleHoverExitCleanup
+            scheduleHoverExit: schedulePopoverHoverExitCleanup
         )
+        if !hovering {
+            releaseInteractionStateIfIdle(expected: state)
+        }
+    }
+
+    private func handlePopoverFrameChange(
+        _ frame: CGRect?,
+        kind: HoverPreviewPopoverKind,
+        token: UUID
+    ) {
+        guard let state = interactionState,
+              isViewInteractionCurrent(state, revision: state.revision) else { return }
+        state.previewCoordinator.updatePopoverScreenFrame(frame, for: kind, token: token)
     }
 
     private func handlePopoverSystemDismiss(kind: HoverPreviewPopoverKind, token: UUID) {
-        previewCoordinator.handleSystemDismiss(
+        guard let state = interactionState,
+              isViewInteractionCurrent(state, revision: state.revision) else { return }
+        state.previewCoordinator.handleSystemDismiss(
             for: kind,
             token: token,
             isRowHovering: { self.isHovering },
-            resetPreviewState: { self.resetPreviewState(hidePopovers: true) }
+            resetPreviewState: {
+                self.resetPreviewState(hidePopovers: true)
+                self.releaseInteractionStateIfIdle(expected: state)
+            }
         )
     }
 
@@ -322,8 +609,44 @@ struct HistoryItemView: View, Equatable {
         descriptor.showThumbnails
     }
 
-    private func isHoverPreviewRequestCurrent(allowPresentedPopover: Bool = false) -> Bool {
-        HoverPreviewLivenessPolicy.isRequestCurrent(
+    private func isViewInteractionCurrent(
+        _ state: HistoryItemInteractionState,
+        revision: ClipboardItemContentRevision,
+        attachmentToken: HistoryItemInteractionSessionStore.AttachmentToken? = nil
+    ) -> Bool {
+        let expectedAttachmentToken = attachmentToken ?? sessionAttachmentToken
+        return isAppeared && interactionState === state &&
+            interactionSessionStore.authorizesViewAttachment(
+                state,
+                attachmentToken: expectedAttachmentToken
+            ) &&
+            state.ownsViewAttachment(expectedAttachmentToken) &&
+            state.revision == revision && contentRevision == revision
+    }
+
+    /// Explicit export is retained by the list-owned session store and may finish after its row is
+    /// virtualized. It deliberately does not depend on a live row attachment.
+    private func isExplicitExportCurrent(
+        _ state: HistoryItemInteractionState,
+        revision: ClipboardItemContentRevision
+    ) -> Bool {
+        interactionSessionStore.contains(state) && !state.isTornDown &&
+            state.revision == revision &&
+            isContentRevisionCurrent(item.id, revision)
+    }
+
+    private func isHoverPreviewRequestCurrent(
+        state: HistoryItemInteractionState,
+        revision: ClipboardItemContentRevision,
+        attachmentToken: HistoryItemInteractionSessionStore.AttachmentToken,
+        allowPresentedPopover: Bool = false
+    ) -> Bool {
+        guard isViewInteractionCurrent(
+            state,
+            revision: revision,
+            attachmentToken: attachmentToken
+        ) else { return false }
+        return HoverPreviewLivenessPolicy.isRequestCurrent(
             isTaskCancelled: Task.isCancelled,
             isPreviewInteractionSuppressed: isPreviewInteractionSuppressed,
             isRowHovering: isHovering,
@@ -334,15 +657,25 @@ struct HistoryItemView: View, Equatable {
         )
     }
 
-    private func isMarkdownRenderCurrent(source: String) -> Bool {
-        HoverPreviewLivenessPolicy.isMarkdownRenderCurrent(
+    private func isMarkdownRenderCurrent(
+        state: HistoryItemInteractionState,
+        revision: ClipboardItemContentRevision,
+        attachmentToken: HistoryItemInteractionSessionStore.AttachmentToken,
+        source: String
+    ) -> Bool {
+        guard isViewInteractionCurrent(
+            state,
+            revision: revision,
+            attachmentToken: attachmentToken
+        ) else { return false }
+        return HoverPreviewLivenessPolicy.isMarkdownRenderCurrent(
             isTaskCancelled: Task.isCancelled,
             isPreviewInteractionSuppressed: isPreviewInteractionSuppressed,
             isRowHovering: isHovering,
             isPopoverHovering: isPopoverHovering,
             isTextPreviewPresented: isTextPreviewPresented,
             isFilePreviewPresented: isFilePreviewPresented,
-            sourceMatchesPreviewText: previewModel.text == source
+            sourceMatchesPreviewText: state.previewModel.text == source
         )
     }
 
@@ -398,7 +731,11 @@ struct HistoryItemView: View, Equatable {
     }
 
     private var canOfferPNGExport: Bool {
-        HistoryItemMarkdownExportController.canOfferPNGMenuItem(item: item, filePreviewInfo: filePreviewInfo)
+        HistoryItemMarkdownExportController.canOfferPNGMenuItem(
+            item: item,
+            contentRevision: contentRevision,
+            filePreviewInfo: filePreviewInfo
+        )
     }
 
     private var canShowFileThumbnail: Bool {
@@ -494,7 +831,7 @@ struct HistoryItemView: View, Equatable {
         let profileStart = ScrollPerformanceProfile.isEnabled ? CFAbsoluteTimeGetCurrent() : nil
         defer {
             if let profileStart {
-                ScrollPerformanceProfile.recordMetric(
+                ScrollPerformanceProfile.recordTiming(
                     name: "swiftui.row_body_ms",
                     elapsedMs: (CFAbsoluteTimeGetCurrent() - profileStart) * 1000
                 )
@@ -505,7 +842,11 @@ struct HistoryItemView: View, Equatable {
 
     @ViewBuilder
     private var scrollAwareRowContent: some View {
-        if isScrollInteractionActive {
+        if usesPassiveRowArchitecture {
+            // Keep the lightweight hover detector installed through live scrolling so the final
+            // stationary row can become the coordinator's single restoration candidate.
+            rowContent.onHover(perform: handleHover)
+        } else if isScrollInteractionActive {
             rowContent
         } else {
             rowContent.onHover(perform: handleHover)
@@ -551,7 +892,7 @@ struct HistoryItemView: View, Equatable {
                         .foregroundStyle(ScopyColors.mutedText)
                 }
 
-                Text(relativeTimeText.isEmpty ? relativeTime : relativeTimeText)
+                Text(relativeTime)
                     .font(ScopyTypography.microMono)
                     .foregroundStyle(ScopyColors.mutedText)
             }
@@ -563,11 +904,7 @@ struct HistoryItemView: View, Equatable {
         .accessibilityHint("Activate this history item")
     }
 
-    private var rowContent: some View {
-        let imageToken = imagePopoverToken
-        let textToken = textPopoverToken
-        let fileToken = filePopoverToken
-
+    private var rowVisualContent: some View {
         let needsThumbnailHeight = descriptor.needsThumbnailHeight
 
         return HStack(alignment: .center, spacing: ScopySpacing.sm) {
@@ -616,17 +953,46 @@ struct HistoryItemView: View, Equatable {
         .animation(isScrollInteractionActive ? nil : .easeInOut(duration: 0.15), value: isHovering)
         .animation(isScrollInteractionActive ? nil : .easeInOut(duration: 0.15), value: isKeyboardSelected)
         .padding(.horizontal, ScopySpacing.md) // Outer padding for floating effect
+    }
+
+    private var rowLifecycleContent: some View {
+        rowVisualContent
         .onAppear {
+            isAppeared = true
+            if HistoryListUITestRuntime.isEnabled {
+                HistoryListUITestProbe.shared.recordRowAppeared(itemID: item.id)
+            }
+            attachRetainedInteractionStateIfNeeded()
             if ProcessInfo.processInfo.arguments.contains("--uitesting") {
                 isUITestTapPreviewEnabled = (ProcessInfo.processInfo.environment["SCOPY_UITEST_OPEN_PREVIEW_ON_TAP"] == "1")
             } else {
                 isUITestTapPreviewEnabled = false
             }
-            registerInteractionObserverIfNeeded()
+            if !usesPassiveRowArchitecture {
+                _ = ensureInteractionState(for: .legacyAppearance)
+            }
         }
         .onChange(of: item.lastUsedAt) { _, _ in
             updateRelativeTimeText()
         }
+        .onChange(of: contentRevision) { _, _ in
+            reconcileInteractionStateIfNeeded()
+        }
+        .onChange(of: isAnyPreviewPresented) { _, presented in
+            if presented {
+                _ = ensureInteractionState(for: .presentedPopover)
+            } else {
+                releaseInteractionStateIfIdle()
+            }
+        }
+    }
+
+    private var rowPreviewPopoverContent: some View {
+        let imageToken = imagePopoverToken
+        let textToken = textPopoverToken
+        let fileToken = filePopoverToken
+
+        return rowLifecycleContent
         .popover(
             isPresented: Binding(
                 get: { isImagePreviewPresented },
@@ -634,17 +1000,24 @@ struct HistoryItemView: View, Equatable {
             ),
             arrowEdge: .trailing
         ) {
-            HistoryItemImagePreviewView(model: previewModel, thumbnailPath: item.thumbnailPath)
+            if let state = interactionState {
+                HistoryItemImagePreviewView(model: state.previewModel, thumbnailPath: item.thumbnailPath)
                 .background(
-                    PopoverWindowCloseObserver {
-                        handlePopoverSystemDismiss(kind: .image, token: imageToken)
-                    }
+                    PopoverWindowObserver(
+                        onFrameChange: { frame in
+                            handlePopoverFrameChange(frame, kind: .image, token: imageToken)
+                        },
+                        onClose: {
+                            handlePopoverSystemDismiss(kind: .image, token: imageToken)
+                        }
+                    )
                     .allowsHitTesting(false)
                 )
                 .onHover(perform: handlePopoverHover)
                 .onDisappear {
                     handlePopoverSystemDismiss(kind: .image, token: imageToken)
                 }
+            }
         }
         .popover(
             isPresented: Binding(
@@ -653,17 +1026,49 @@ struct HistoryItemView: View, Equatable {
             ),
             arrowEdge: .trailing
         ) {
-            HistoryItemTextPreviewView(model: previewModel, markdownWebViewController: markdownWebViewController)
-                .background(
-                    PopoverWindowCloseObserver {
-                        handlePopoverSystemDismiss(kind: .text, token: textToken)
+            if let state = interactionState {
+                let expectedRevision = state.revision
+                let expectedAttachmentToken = sessionAttachmentToken
+                HistoryItemTextPreviewView(
+                    model: state.previewModel,
+                    markdownWebViewController: markdownWebViewController,
+                    isContentCurrent: {
+                        self.isViewInteractionCurrent(
+                            state,
+                            revision: expectedRevision,
+                            attachmentToken: expectedAttachmentToken
+                        ) &&
+                            self.isContentRevisionCurrent(item.id, expectedRevision)
+                    },
+                    isExportContentCurrent: {
+                        self.isExplicitExportCurrent(state, revision: expectedRevision)
+                    },
+                    retainExplicitExport: {
+                        self.interactionSessionStore.registerExplicitWork(
+                            state,
+                            attachmentToken: expectedAttachmentToken
+                        )
+                    },
+                    onInteractionLifecycleChange: {
+                        self.releaseInteractionStateIfIdle(expected: state)
                     }
+                )
+                .background(
+                    PopoverWindowObserver(
+                        onFrameChange: { frame in
+                            handlePopoverFrameChange(frame, kind: .text, token: textToken)
+                        },
+                        onClose: {
+                            handlePopoverSystemDismiss(kind: .text, token: textToken)
+                        }
+                    )
                     .allowsHitTesting(false)
                 )
                 .onHover(perform: handlePopoverHover)
                 .onDisappear {
                     handlePopoverSystemDismiss(kind: .text, token: textToken)
                 }
+            }
         }
         .popover(
             isPresented: Binding(
@@ -672,24 +1077,57 @@ struct HistoryItemView: View, Equatable {
             ),
             arrowEdge: .trailing
         ) {
-            HistoryItemFilePreviewView(
-                model: previewModel,
-                thumbnailPath: item.thumbnailPath,
-                kind: filePreviewKind ?? .other,
-                filePath: filePreviewPath,
-                markdownWebViewController: markdownWebViewController
-            )
-            .background(
-                PopoverWindowCloseObserver {
+            if let state = interactionState {
+                let expectedRevision = state.revision
+                let expectedAttachmentToken = sessionAttachmentToken
+                HistoryItemFilePreviewView(
+                    model: state.previewModel,
+                    thumbnailPath: item.thumbnailPath,
+                    kind: filePreviewKind ?? .other,
+                    filePath: filePreviewPath,
+                    markdownWebViewController: markdownWebViewController,
+                    isContentCurrent: {
+                        self.isViewInteractionCurrent(
+                            state,
+                            revision: expectedRevision,
+                            attachmentToken: expectedAttachmentToken
+                        ) &&
+                            self.isContentRevisionCurrent(item.id, expectedRevision)
+                    },
+                    isExportContentCurrent: {
+                        self.isExplicitExportCurrent(state, revision: expectedRevision)
+                    },
+                    retainExplicitExport: {
+                        self.interactionSessionStore.registerExplicitWork(
+                            state,
+                            attachmentToken: expectedAttachmentToken
+                        )
+                    },
+                    onInteractionLifecycleChange: {
+                        self.releaseInteractionStateIfIdle(expected: state)
+                    }
+                )
+                .background(
+                    PopoverWindowObserver(
+                        onFrameChange: { frame in
+                            handlePopoverFrameChange(frame, kind: .file, token: fileToken)
+                        },
+                        onClose: {
+                            handlePopoverSystemDismiss(kind: .file, token: fileToken)
+                        }
+                    )
+                    .allowsHitTesting(false)
+                )
+                .onHover(perform: handlePopoverHover)
+                .onDisappear {
                     handlePopoverSystemDismiss(kind: .file, token: fileToken)
                 }
-                .allowsHitTesting(false)
-            )
-            .onHover(perform: handlePopoverHover)
-            .onDisappear {
-                handlePopoverSystemDismiss(kind: .file, token: fileToken)
             }
         }
+    }
+
+    private var rowMenuContent: some View {
+        rowPreviewPopoverContent
         .contextMenu {
             Button("Copy") {
                 onSelect()
@@ -735,7 +1173,9 @@ struct HistoryItemView: View, Equatable {
                 .accessibilityIdentifier(item.note?.isEmpty == false ? "HistoryItem.ContextMenu.EditNote" : "HistoryItem.ContextMenu.AddNote")
                 if item.note?.isEmpty == false {
                     Button("Clear Note") {
-                        onUpdateNote(nil)
+                        Task { @MainActor in
+                            _ = await onUpdateNote(nil)
+                        }
                     }
                     .accessibilityIdentifier("HistoryItem.ContextMenu.ClearNote")
                 }
@@ -749,25 +1189,39 @@ struct HistoryItemView: View, Equatable {
         .popover(isPresented: isNoteEditorPresentedBinding, arrowEdge: .leading) {
             HistoryItemFileNoteEditorView(
                 note: noteDraftBinding,
+                isSaving: isSavingNote,
+                errorMessage: noteSaveError,
                 onSave: { commitNoteDraft() },
                 onCancel: { dismissNoteEditor() }
             )
         }
+    }
+
+    private var rowTeardownContent: some View {
+        rowMenuContent
         // v0.17: 增强任务清理 - 确保视图消失时释放所有任务引用
         .onDisappear {
-            unregisterInteractionObserver()
-            cancelHoverTasks()
-            resetPreviewState(hidePopovers: true)
-            isScrollInteractionActive = false
-            cancelExportTasks()
-            isNoteEditorPresented = false
+            if let state = interactionState,
+               state.ownsViewAttachment(sessionAttachmentToken) {
+                requestPopover(nil)
+            }
+            if HistoryListUITestRuntime.isEnabled {
+                HistoryListUITestProbe.shared.recordRowDisappeared(itemID: item.id)
+            }
+            isAppeared = false
+            isPointerInsideRow = false
+            tearDownInteractionStateOnDisappear()
         }
-        .onChange(of: previewModel.markdownContentSize) { _, _ in
+        .onChange(of: interactionState?.previewModel.markdownContentSize) { _, _ in
             updateMarkdownPreviewMetricsCacheIfNeeded()
         }
-        .onChange(of: previewModel.markdownHasHorizontalOverflow) { _, _ in
+        .onChange(of: interactionState?.previewModel.markdownHasHorizontalOverflow) { _, _ in
             updateMarkdownPreviewMetricsCacheIfNeeded()
         }
+    }
+
+    private var rowContent: some View {
+        rowTeardownContent
         .background {
             if isImagePreviewPresented || isTextPreviewPresented || isFilePreviewPresented {
                 ScrollWheelDismissMonitor(
@@ -782,66 +1236,119 @@ struct HistoryItemView: View, Equatable {
     }
 
     private func handleHover(_ hovering: Bool) {
-        if isPreviewInteractionSuppressed {
-            if isHovering {
-                isHovering = false
+        isPointerInsideRow = hovering
+
+        if !hovering {
+            if let token = passiveRowToken,
+               interactionCoordinator.ownsSuppressedHoverCandidate(token: token) {
+                releasePassiveOwnership()
             }
-            isHoveringOptimizeButton = false
+            guard let state = interactionState else { return }
+            state.previewCoordinator.isHovering = false
+            state.rowController.isHoveringOptimizeButton = false
+            state.previewCoordinator.cancelHoverDebounceTask()
+            state.previewCoordinator.cancelHoverExitTask()
+            scheduleRowHoverExitCleanup(state: state)
             return
         }
 
-        if hovering {
-            dismissOtherPopovers()
+        if usesPassiveRowArchitecture, isPreviewInteractionSuppressed {
+            if let state = interactionState {
+                state.previewCoordinator.isHovering = false
+                state.rowController.isHoveringOptimizeButton = false
+                state.previewCoordinator.cancelHoverDebounceTask()
+                state.previewCoordinator.cancelHoverExitTask()
+                resetPreviewState(hidePopovers: true, state: state)
+                releaseInteractionStateIfIdle(expected: state)
+            }
+
+            let token = passiveRowToken ?? interactionCoordinator.makePassiveRowToken()
+            passiveRowToken = token
+            let expectedItemID = item.id
+            let expectedRevision = contentRevision
+            _ = interactionCoordinator.setSuppressedHoverCandidate(token: token) {
+                guard self.isAppeared,
+                      self.isPointerInsideRow,
+                      self.item.id == expectedItemID,
+                      self.contentRevision == expectedRevision,
+                      self.passiveRowToken == token else {
+                    self.interactionCoordinator.releasePassiveRow(token: token)
+                    return
+                }
+                self.restoreSuppressedHover(token: token)
+            }
+            if let state = interactionState {
+                releaseInteractionStateIfIdle(expected: state)
+            }
+            return
         }
-        isHovering = hovering
 
-        cancelHoverDebounceTask()
-        cancelHoverExitTask()
+        guard let state = ensureInteractionState(for: .hover) else { return }
+        state.previewCoordinator.isHovering = true
+        state.previewCoordinator.cancelHoverDebounceTask()
+        state.previewCoordinator.cancelHoverExitTask()
+        activateHoverActionsIfAllowed(state: state)
+    }
 
-        if hovering {
-            // 静止 150ms 后才更新全局选中状态
-            if !isPreviewInteractionSuppressed {
-                hoverDebounceTask = Task {
-                    try? await Task.sleep(nanoseconds: 150_000_000)
-                    guard !Task.isCancelled else { return }
-                    await MainActor.run {
-                        onHoverSelect(item.id)
-                    }
-                }
-            }
+    private func activateHoverActionsIfAllowed(state: HistoryItemInteractionState) {
+        guard let attachmentToken = sessionAttachmentToken,
+              isViewInteractionCurrent(
+                  state,
+                  revision: contentRevision,
+                  attachmentToken: attachmentToken
+              ) else { return }
+        guard state.previewCoordinator.isHovering else { return }
+        guard !isPreviewInteractionSuppressed else { return }
+        guard !interactionCoordinator.isHoverPreviewTransferBlocked(for: item.id) else { return }
 
-            if !isHoveringOptimizeButton && !isNoteEditorPresented {
-                // 图片预览任务
-                if item.type == .image && showThumbnails {
-                    startPreviewTask()
-                } else if item.type == .file {
-                    startFilePreviewTask()
-                }
-                // v0.15: 文本预览任务
-                else if item.type == .text || item.type == .rtf || item.type == .html {
-                    startTextPreviewTask()
-                }
-            }
-        } else {
-            isHoveringOptimizeButton = false
-            // v0.24: popover 出现/消失时可能短暂触发 hover false，做 120ms 退出防抖
-            scheduleHoverExitCleanup()
+        dismissOtherPopovers()
+
+        // 静止 150ms 后才更新全局选中状态
+        state.previewCoordinator.cancelHoverDebounceTask()
+        let expectedRevision = state.revision
+        state.previewCoordinator.hoverDebounceTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 150_000_000)
+            guard !Task.isCancelled,
+                  self.isViewInteractionCurrent(
+                      state,
+                      revision: expectedRevision,
+                      attachmentToken: attachmentToken
+                  ),
+                  state.previewCoordinator.isHovering else { return }
+            onHoverSelect(item.id)
+        }
+
+        // Returning from the safe corridor must reuse the existing popover. Restarting the
+        // pipeline would refresh its token and force SwiftUI to close/reopen the same window.
+        guard !isAnyPreviewPresented else { return }
+        guard !state.rowController.isHoveringOptimizeButton,
+              !state.rowController.isNoteEditorPresented else { return }
+
+        if item.type == .image && showThumbnails {
+            startPreviewTask(state: state)
+        } else if item.type == .file {
+            startFilePreviewTask(state: state)
+        } else if item.type == .text || item.type == .rtf || item.type == .html {
+            startTextPreviewTask(state: state)
         }
     }
 
     @ViewBuilder
     private var markdownPreMeasureView: some View {
-        if isHovering,
+        if let state = interactionState,
+           isHovering,
            (item.type == .text || item.type == .rtf || item.type == .html),
-           previewModel.isMarkdown,
+           state.previewModel.isMarkdown,
            (!isTextPreviewPresented || markdownWebViewController.webView.superview == nil),
-           previewModel.markdownContentSize == nil,
-           let html = previewModel.markdownHTML,
-           let text = previewModel.text
+           state.previewModel.markdownContentSize == nil,
+           let html = state.previewModel.markdownHTML,
+           let text = state.previewModel.text,
+           let attachmentToken = sessionAttachmentToken
         {
+            let expectedRevision = state.revision
             let maxWidth: CGFloat = HoverPreviewScreenMetrics.maxMarkdownPopoverWidthPoints()
             let containerWidth = max(1, maxWidth)
-            let cacheKey = MarkdownRenderCacheKey.make(contentHash: item.contentHash, markdown: text)
+            let cacheKey = MarkdownRenderCacheKey.make(contentHash: contentRevision.cacheKey, markdown: text)
 
             MarkdownPreviewMeasurer(
                 controller: markdownWebViewController,
@@ -849,20 +1356,25 @@ struct HistoryItemView: View, Equatable {
                 containerWidth: containerWidth,
                 settleNanoseconds: 90_000_000,
                 onStableMetrics: { metrics in
-                    guard self.isHovering else { return }
-                    guard self.previewModel.markdownHTML == html else { return }
-                    guard self.previewModel.text == text else { return }
+                    guard self.isViewInteractionCurrent(
+                        state,
+                        revision: expectedRevision,
+                        attachmentToken: attachmentToken
+                    ) else { return }
+                    guard state.previewCoordinator.isHovering else { return }
+                    guard state.previewModel.markdownHTML == html else { return }
+                    guard state.previewModel.text == text else { return }
                     guard metrics.renderSucceeded else {
-                        self.previewModel.markdownRenderSucceeded = false
-                        self.previewModel.markdownRenderErrorReason = metrics.renderErrorReason ?? "markdown render failed"
+                        state.previewModel.markdownRenderSucceeded = false
+                        state.previewModel.markdownRenderErrorReason = metrics.renderErrorReason ?? "markdown render failed"
                         return
                     }
                     let stableSize = CGSize(width: max(1, maxWidth), height: metrics.size.height)
                     let stableMetrics = MarkdownContentMetrics(size: stableSize, hasHorizontalOverflow: metrics.hasHorizontalOverflow)
-                    self.previewModel.markdownContentSize = stableMetrics.size
-                    self.previewModel.markdownHasHorizontalOverflow = stableMetrics.hasHorizontalOverflow
-                    self.previewModel.markdownRenderSucceeded = true
-                    self.previewModel.markdownRenderErrorReason = nil
+                    state.previewModel.markdownContentSize = stableMetrics.size
+                    state.previewModel.markdownHasHorizontalOverflow = stableMetrics.hasHorizontalOverflow
+                    state.previewModel.markdownRenderSucceeded = true
+                    state.previewModel.markdownRenderErrorReason = nil
                     if !cacheKey.isEmpty {
                         MarkdownPreviewCache.shared.setMetrics(stableMetrics, forKey: cacheKey)
                     }
@@ -877,20 +1389,47 @@ struct HistoryItemView: View, Equatable {
 
     /// v0.12: 完善取消检查，获取数据后也检查取消状态
     /// v0.22: 确保在创建新任务前取消旧任务，防止快速悬停时任务累积导致内存泄漏
-    private func startPreviewTask() {
-        previewCoordinator.presentPreview(.image)
+    private func startPreviewTask(state: HistoryItemInteractionState) {
+        guard let attachmentToken = sessionAttachmentToken,
+              isViewInteractionCurrent(
+                  state,
+                  revision: contentRevision,
+                  attachmentToken: attachmentToken
+              ) else { return }
+        let expectedRevision = state.revision
+        state.previewCoordinator.presentPreview(.image)
         let request = HistoryHoverPreviewPipeline.imageRequest(item: item, delay: previewDelay)
-        hoverPreviewTask = Task(priority: .userInitiated) { @MainActor in
+        state.previewCoordinator.hoverPreviewTask = Task(priority: .userInitiated) { @MainActor in
             await HistoryHoverPreviewPipeline.run(
                 request: .image(request),
                 getImageData: getImageData,
-                isCurrent: { isHoverPreviewRequestCurrent() },
-                emit: applyHoverPreviewEvent
+                isCurrent: {
+                    isHoverPreviewRequestCurrent(
+                        state: state,
+                        revision: expectedRevision,
+                        attachmentToken: attachmentToken
+                    )
+                },
+                emit: { event in
+                    applyHoverPreviewEvent(
+                        event,
+                        state: state,
+                        revision: expectedRevision,
+                        attachmentToken: attachmentToken
+                    )
+                }
             )
         }
     }
 
-    private func startFilePreviewTask() {
+    private func startFilePreviewTask(state: HistoryItemInteractionState) {
+        guard let attachmentToken = sessionAttachmentToken,
+              isViewInteractionCurrent(
+                  state,
+                  revision: contentRevision,
+                  attachmentToken: attachmentToken
+              ) else { return }
+        let expectedRevision = state.revision
         guard let previewInfo = filePreviewInfo else { return }
         let isMarkdownFile = filePreviewIsMarkdown
         let request = HistoryHoverPreviewPipeline.fileRequest(
@@ -901,44 +1440,58 @@ struct HistoryItemView: View, Equatable {
             settings: settings
         )
         let markdownCacheKey = isMarkdownFile
-            ? HistoryHoverPreviewPipeline.markdownFileCacheKey(itemID: item.id, contentHash: item.contentHash)
+            ? HistoryHoverPreviewPipeline.markdownFileCacheKey(revision: request.revision)
             : nil
-        previewCoordinator.presentPreview(.file, markdownCacheKey: markdownCacheKey)
-        hoverPreviewTask = Task(priority: .userInitiated) { @MainActor in
+        state.previewCoordinator.presentPreview(.file, markdownCacheKey: markdownCacheKey)
+        state.previewCoordinator.hoverPreviewTask = Task(priority: .userInitiated) { @MainActor in
             await HistoryHoverPreviewPipeline.run(
                 request: .file(request),
-                isCurrent: { isHoverPreviewRequestCurrent(allowPresentedPopover: isMarkdownFile) },
-                emit: applyHoverPreviewEvent
+                isCurrent: {
+                    isHoverPreviewRequestCurrent(
+                        state: state,
+                        revision: expectedRevision,
+                        attachmentToken: attachmentToken,
+                        allowPresentedPopover: isMarkdownFile
+                    )
+                },
+                emit: { event in
+                    applyHoverPreviewEvent(
+                        event,
+                        state: state,
+                        revision: expectedRevision,
+                        attachmentToken: attachmentToken
+                    )
+                }
             )
         }
     }
 
     private func cancelPreviewTask() {
-        previewCoordinator.cancelPreviewTasks()
+        interactionState?.previewCoordinator.cancelPreviewTasks()
     }
 
     private func cancelHoverDebounceTask() {
-        previewCoordinator.cancelHoverDebounceTask()
+        interactionState?.previewCoordinator.cancelHoverDebounceTask()
     }
 
     private func cancelHoverExitTask() {
-        previewCoordinator.cancelHoverExitTask()
+        interactionState?.previewCoordinator.cancelHoverExitTask()
     }
 
     private func cancelOptimizeMessageTask() {
-        rowController.cancelOptimizeMessageTask()
+        interactionState?.rowController.cancelOptimizeMessageTask()
     }
 
     private func cancelExportMessageTask() {
-        rowController.cancelExportMessageTask()
+        interactionState?.rowController.cancelExportMessageTask()
     }
 
     private func cancelOptimizeImageTask() {
-        rowController.cancelOptimizeImageTask()
+        interactionState?.rowController.cancelOptimizeImageTask()
     }
 
     private func cancelExportActionTask() {
-        rowController.cancelExportActionTask()
+        interactionState?.rowController.cancelExportActionTask()
     }
 
     private func cancelExportTasks() {
@@ -951,160 +1504,251 @@ struct HistoryItemView: View, Equatable {
     }
 
     private func startExportPNGTask() {
+        guard let state = ensureInteractionState(for: .explicitAction) else { return }
         cancelExportTasks()
-        guard rowController.beginExportingPNG() else { return }
+        guard state.rowController.beginExportingPNG(),
+              let exportToken = state.rowController.exportAuthorizationToken else { return }
+        guard interactionSessionStore.registerExplicitWork(
+            state,
+            attachmentToken: sessionAttachmentToken
+        ) else {
+            state.rowController.cancelExportActionTask()
+            releaseInteractionStateIfIdle(expected: state)
+            return
+        }
 
+        let expectedRevision = state.revision
         let currentItem = item
         let currentSettings = settings
         let currentFilePreviewInfo = filePreviewInfo
+        let pasteboardWriteLease = MarkdownExportService.capturePasteboardWriteLease()
 
         guard HistoryItemMarkdownExportController.canExportPNG(
             item: currentItem,
             filePreviewInfo: currentFilePreviewInfo
         ) else {
-            rowController.finishExportingPNG(message: "Export failed")
-            scheduleExportMessageReset()
+            state.rowController.finishExportingPNG(message: "Export failed", token: exportToken)
+            scheduleExportMessageReset(state: state, revision: expectedRevision)
             return
         }
 
-        exportActionTask = Task { @MainActor in
+        state.rowController.exportActionTask = Task { @MainActor in
             guard let markdownSource = await HistoryItemMarkdownExportController.loadMarkdownSource(
                 item: currentItem,
                 filePreviewInfo: currentFilePreviewInfo
             ) else {
-                rowController.finishExportingPNG(message: "Export failed")
-                scheduleExportMessageReset()
+                guard self.interactionSessionStore.contains(state),
+                      state.revision == expectedRevision,
+                      state.rowController.authorizesExport(token: exportToken) else { return }
+                state.rowController.finishExportingPNG(
+                    message: "Export failed",
+                    token: exportToken
+                )
+                scheduleExportMessageReset(state: state, revision: expectedRevision)
                 return
             }
 
             let result = await HistoryItemMarkdownExportController.exportMarkdownToClipboard(
                 markdownSource: markdownSource,
-                settings: currentSettings
+                settings: currentSettings,
+                pasteboardWriteLease: pasteboardWriteLease,
+                authorizePasteboardWrite: {
+                    self.interactionSessionStore.contains(state) &&
+                        !state.isTornDown &&
+                        state.revision == expectedRevision &&
+                        state.rowController.authorizesExport(token: exportToken) &&
+                        self.isContentRevisionCurrent(currentItem.id, expectedRevision)
+                }
             )
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled,
+                  self.interactionSessionStore.contains(state),
+                  state.revision == expectedRevision,
+                  state.rowController.authorizesExport(token: exportToken),
+                  self.isContentRevisionCurrent(currentItem.id, expectedRevision) else { return }
 
             switch result {
             case .success:
-                rowController.finishExportingPNG(message: "PNG copied")
+                state.rowController.finishExportingPNG(message: "PNG copied", token: exportToken)
             case .failure:
-                rowController.finishExportingPNG(message: "Export failed")
+                state.rowController.finishExportingPNG(message: "Export failed", token: exportToken)
             }
-            scheduleExportMessageReset()
+            scheduleExportMessageReset(state: state, revision: expectedRevision)
         }
     }
 
-    private func scheduleExportMessageReset() {
-        cancelExportMessageTask()
-        exportMessageTask = Task { @MainActor in
+    private func scheduleExportMessageReset(
+        state: HistoryItemInteractionState,
+        revision: ClipboardItemContentRevision
+    ) {
+        state.rowController.cancelExportMessageTask()
+        state.rowController.exportMessageTask = Task { @MainActor in
             try? await Task.sleep(nanoseconds: 1_500_000_000)
-            guard !Task.isCancelled else { return }
-            rowController.clearExportFeedback()
-            exportMessageTask = nil
+            guard !Task.isCancelled,
+                  self.interactionSessionStore.contains(state),
+                  !state.isTornDown,
+                  state.revision == revision else { return }
+            state.rowController.clearExportFeedback()
+            self.releaseInteractionStateIfIdle(expected: state)
         }
     }
 
     private func presentNoteEditor() {
-        rowController.presentNoteEditor(note: item.note)
+        guard let state = ensureInteractionState(for: .explicitAction) else { return }
+        state.rowController.presentNoteEditor(note: item.note)
+        guard interactionSessionStore.registerExplicitWork(
+            state,
+            attachmentToken: sessionAttachmentToken
+        ) else {
+            state.rowController.dismissNoteEditor(discardDraft: true)
+            releaseInteractionStateIfIdle(expected: state)
+            return
+        }
         dismissOtherPopovers()
-        resetPreviewState(hidePopovers: true)
+        resetPreviewState(hidePopovers: true, state: state)
     }
 
     private func commitNoteDraft() {
-        onUpdateNote(rowController.normalizedNoteDraft())
-        dismissNoteEditor()
+        guard let state = interactionState,
+              isViewInteractionCurrent(state, revision: state.revision),
+              isContentRevisionCurrent(item.id, state.revision) else { return }
+        guard let request = state.rowController.beginNoteSave() else { return }
+        guard interactionSessionStore.registerExplicitWork(
+            state,
+            attachmentToken: sessionAttachmentToken
+        ) else {
+            state.rowController.cancelNoteSave()
+            return
+        }
+
+        let task = Task { @MainActor in
+            let succeeded = await onUpdateNote(request.normalizedNote)
+            guard !Task.isCancelled,
+                  interactionSessionStore.contains(state),
+                  !state.isTornDown else { return }
+
+            let completion = state.rowController.finishNoteSave(
+                succeeded: succeeded,
+                request: request
+            )
+            if completion == .savedAndDismissed {
+                releaseInteractionStateIfIdle(expected: state)
+            }
+        }
+        _ = state.rowController.installNoteSaveTask(task, token: request.token)
     }
 
     private func dismissNoteEditor() {
-        rowController.dismissNoteEditor()
+        guard let state = interactionState else { return }
+        state.rowController.dismissNoteEditor(discardDraft: true)
+        releaseInteractionStateIfIdle(expected: state)
+    }
+
+    private func scheduleNoteEditorDismissIfStillAttached() {
+        guard let state = interactionState,
+              let attachmentToken = sessionAttachmentToken else { return }
+        DispatchQueue.main.async {
+            guard self.isAppeared,
+                  self.interactionState === state,
+                  self.interactionSessionStore.authorizesViewAttachment(
+                      state,
+                      attachmentToken: attachmentToken
+                  ),
+                  state.ownsViewAttachment(attachmentToken) else { return }
+            self.dismissNoteEditor()
+        }
     }
 
     private func handlePrimaryAction() {
         if isUITestTapPreviewEnabled {
             dismissOtherPopovers()
-            isHovering = true
+            isPointerInsideRow = true
+            guard let state = ensureInteractionState(for: .presentedPopover) else { return }
+            state.previewCoordinator.isHovering = true
             // UITest 点按打开 preview 只需要维持 row hover，不应伪造 popover hover，
             // 否则滚动关闭路径会被 `isPopoverHovering` 误拦截。
-            isPopoverHovering = false
+            state.previewCoordinator.isPopoverHovering = false
             if item.type == .image && showThumbnails {
-                startPreviewTask()
+                startPreviewTask(state: state)
             } else if item.type == .file {
-                startFilePreviewTask()
+                startFilePreviewTask(state: state)
             } else if item.type == .text || item.type == .rtf || item.type == .html {
-                startTextPreviewTask()
+                startTextPreviewTask(state: state)
             }
         } else {
             onSelect()
         }
     }
 
-    private func registerInteractionObserverIfNeeded() {
-        guard interactionObservation == nil else { return }
-        interactionObservation = interactionCoordinator.observe { event in
-            handleInteractionEvent(event)
-        }
-    }
-
-    private func unregisterInteractionObserver() {
-        interactionObservation?.cancel()
-        interactionObservation = nil
-    }
-
     private func handleInteractionEvent(_ event: HistoryListInteractionCoordinator.Event) {
+        guard let state = interactionState else { return }
         switch event {
         case .scrollStarted, .pointerInteractionStarted:
-            isScrollInteractionActive = true
-            handleScrollDidStart()
+            state.rowController.isScrollInteractionActive = true
+            handleScrollDidStart(state: state)
         case .scrollEnded:
-            isScrollInteractionActive = false
-            handleScrollDidEnd()
+            state.rowController.isScrollInteractionActive = false
+            handleScrollDidEnd(state: state)
         case .pointerInteractionEnded:
             if !interactionCoordinator.isScrolling {
-                isScrollInteractionActive = false
+                state.rowController.isScrollInteractionActive = false
             }
+        case .hoverPreviewTransferEnded(let sourceItemID):
+            guard sourceItemID != item.id, state.previewCoordinator.isHovering else { return }
+            activateHoverActionsIfAllowed(state: state)
         }
     }
 
     private func handleOptimizeButtonHover(_ hovering: Bool) {
+        guard let state = ensureInteractionState(for: .explicitAction) else { return }
         if hovering {
-            isHoveringOptimizeButton = true
-            resetPreviewState(hidePopovers: true)
+            state.rowController.isHoveringOptimizeButton = true
+            resetPreviewState(hidePopovers: true, state: state)
             return
         }
 
-        isHoveringOptimizeButton = false
-        guard isHovering else { return }
+        state.rowController.isHoveringOptimizeButton = false
+        guard state.previewCoordinator.isHovering else {
+            releaseInteractionStateIfIdle(expected: state)
+            return
+        }
         guard !isPreviewInteractionSuppressed else { return }
 
         if item.type == .image && showThumbnails {
-            startPreviewTask()
+            startPreviewTask(state: state)
         } else if item.type == .file {
-            startFilePreviewTask()
+            startFilePreviewTask(state: state)
         } else if item.type == .text || item.type == .rtf || item.type == .html {
-            startTextPreviewTask()
+            startTextPreviewTask(state: state)
         }
     }
 
     private func cancelHoverTasks() {
-        previewCoordinator.cancelHoverTasks()
+        interactionState?.previewCoordinator.cancelHoverTasks()
     }
 
-    private func resetPreviewModel() {
-        previewModel.reset()
+    private func resetPreviewModel(state: HistoryItemInteractionState) {
+        state.previewModel.resetPreviewContent()
     }
 
-    private func resetPreviewState(hidePopovers: Bool) {
-        previewCoordinator.dismissPreview(
+    private func resetPreviewState(
+        hidePopovers: Bool,
+        state: HistoryItemInteractionState? = nil
+    ) {
+        guard let state = state ?? interactionState else { return }
+        state.previewCoordinator.dismissPreview(
             hidePopovers: hidePopovers,
             requestPopover: requestPopover,
-            resetPreviewModel: resetPreviewModel
+            resetPreviewModel: { resetPreviewModel(state: state) }
         )
     }
 
     private func updateMarkdownPreviewMetricsCacheIfNeeded() {
-        guard previewModel.isMarkdown else { return }
-        guard let text = previewModel.text else { return }
-        guard let size = previewModel.markdownContentSize else { return }
-        guard previewModel.markdownRenderSucceeded else { return }
+        guard let state = interactionState,
+              isViewInteractionCurrent(state, revision: state.revision),
+              state.previewModel.isMarkdown,
+              let text = state.previewModel.text,
+              let size = state.previewModel.markdownContentSize,
+              state.previewModel.markdownRenderSucceeded else { return }
 
         let contentHash: String
         if item.type == .file {
@@ -1115,7 +1759,7 @@ struct HistoryItemView: View, Equatable {
             contentHash = cacheKey
         } else if item.type == .text || item.type == .rtf || item.type == .html {
             guard isTextPreviewPresented else { return }
-            contentHash = item.contentHash
+            contentHash = contentRevision.cacheKey
         } else {
             return
         }
@@ -1124,60 +1768,105 @@ struct HistoryItemView: View, Equatable {
         guard !renderCacheKey.isEmpty else { return }
         let metrics = MarkdownContentMetrics(
             size: size,
-            hasHorizontalOverflow: previewModel.markdownHasHorizontalOverflow,
+            hasHorizontalOverflow: state.previewModel.markdownHasHorizontalOverflow,
             renderSucceeded: true
         )
         MarkdownPreviewCache.shared.setMetrics(metrics, forKey: renderCacheKey)
     }
 
-    private func applyHoverPreviewEvent(_ event: HistoryHoverPreviewPipeline.Event) {
+    private func applyHoverPreviewEvent(
+        _ event: HistoryHoverPreviewPipeline.Event,
+        state: HistoryItemInteractionState,
+        revision: ClipboardItemContentRevision,
+        attachmentToken: HistoryItemInteractionSessionStore.AttachmentToken
+    ) {
+        guard isViewInteractionCurrent(
+            state,
+            revision: revision,
+            attachmentToken: attachmentToken
+        ) else { return }
         switch event {
         case .present(let kind):
             requestPopover(kind)
         case .image(let cgImage):
-            previewModel.previewCGImage = cgImage
-        case .text(let state):
-            previewModel.text = state.text
-            previewModel.isMarkdown = state.isMarkdown
-            previewModel.markdownHTML = state.markdownHTML
-            previewModel.markdownContentSize = state.markdownContentSize
-            previewModel.markdownHasHorizontalOverflow = state.markdownHasHorizontalOverflow
-            previewModel.markdownRenderSucceeded = state.markdownHTML != nil && state.markdownContentSize != nil
-            previewModel.markdownRenderErrorReason = nil
+            state.previewModel.previewCGImage = cgImage
+        case .text(let previewState):
+            state.previewModel.text = previewState.text
+            state.previewModel.isMarkdown = previewState.isMarkdown
+            state.previewModel.markdownHTML = previewState.markdownHTML
+            state.previewModel.markdownContentSize = previewState.markdownContentSize
+            state.previewModel.markdownHasHorizontalOverflow = previewState.markdownHasHorizontalOverflow
+            state.previewModel.markdownRenderSucceeded =
+                previewState.markdownHTML != nil && previewState.markdownContentSize != nil
+            state.previewModel.markdownRenderErrorReason = nil
         case .markdownHTML(let html):
-            previewModel.markdownHTML = html
-            previewModel.markdownRenderSucceeded = false
-            previewModel.markdownRenderErrorReason = nil
+            state.previewModel.markdownHTML = html
+            state.previewModel.markdownRenderSucceeded = false
+            state.previewModel.markdownRenderErrorReason = nil
         case .renderMarkdown(let request):
-            hoverMarkdownTask = HistoryHoverPreviewPipeline.makeMarkdownRenderTask(
+            state.previewCoordinator.hoverMarkdownTask = HistoryHoverPreviewPipeline.makeMarkdownRenderTask(
                 request: request,
-                isCurrent: { isMarkdownRenderCurrent(source: request.source) },
-                emit: applyHoverPreviewEvent
+                isCurrent: {
+                    isMarkdownRenderCurrent(
+                        state: state,
+                        revision: revision,
+                        attachmentToken: attachmentToken,
+                        source: request.source
+                    )
+                },
+                emit: { nextEvent in
+                    applyHoverPreviewEvent(
+                        nextEvent,
+                        state: state,
+                        revision: revision,
+                        attachmentToken: attachmentToken
+                    )
+                }
             )
         }
     }
 
     private func startOptimizeImageTask() {
         guard item.type == .image else { return }
-        guard !isOptimizingImage else { return }
+        guard let state = ensureInteractionState(for: .explicitAction) else { return }
+        guard !state.rowController.isOptimizingImage else { return }
 
-        cancelOptimizeImageTask()
-        cancelOptimizeMessageTask()
+        state.rowController.cancelOptimizeImageTask()
+        state.rowController.cancelOptimizeMessageTask()
+        guard let startRevision = state.beginOptimization() else { return }
 
-        isOptimizingImage = true
-        optimizeImageTask = Task { @MainActor in
+        state.rowController.isOptimizingImage = true
+        guard interactionSessionStore.registerExplicitWork(
+            state,
+            attachmentToken: sessionAttachmentToken
+        ) else {
+            state.rowController.isOptimizingImage = false
+            state.finishOptimizationWithoutFeedback(startedAt: startRevision)
+            releaseInteractionStateIfIdle(expected: state)
+            return
+        }
+        state.rowController.optimizeImageTask = Task { @MainActor in
             defer {
-                isOptimizingImage = false
+                state.rowController.isOptimizingImage = false
+                state.rowController.optimizeImageTask = nil
+                state.finishOptimizationWithoutFeedback(startedAt: startRevision)
+                self.releaseInteractionStateIfIdle(expected: state)
             }
 
             let outcome = await onOptimizeImage()
-            optimizeMessage = Self.makeOptimizeMessage(outcome)
-            guard optimizeMessage != nil else { return }
+            guard self.interactionSessionStore.contains(state), !state.isTornDown else { return }
+            guard state.acceptsOptimizationOutcome(outcome, startedAt: startRevision) else { return }
+            state.rowController.optimizeMessage = Self.makeOptimizeMessage(outcome)
+            guard state.rowController.optimizeMessage != nil else { return }
 
-            optimizeMessageTask = Task { @MainActor in
+            state.rowController.optimizeMessageTask = Task { @MainActor in
                 try? await Task.sleep(nanoseconds: 2_000_000_000)
-                guard !Task.isCancelled else { return }
-                optimizeMessage = nil
+                guard !Task.isCancelled,
+                      self.interactionSessionStore.contains(state),
+                      !state.isTornDown else { return }
+                state.rowController.optimizeMessage = nil
+                state.rowController.optimizeMessageTask = nil
+                self.releaseInteractionStateIfIdle(expected: state)
             }
         }
     }
@@ -1204,92 +1893,138 @@ struct HistoryItemView: View, Equatable {
     }
 
     private var shouldResetPreviewOnScroll: Bool {
-        if isHovering || isPopoverHovering || isImagePreviewPresented || isTextPreviewPresented || isFilePreviewPresented {
+        guard let state = interactionState else { return false }
+        if state.previewCoordinator.isHovering || state.previewCoordinator.isPopoverHovering ||
+            isImagePreviewPresented || isTextPreviewPresented || isFilePreviewPresented {
             return true
         }
-        if previewCoordinator.hasActiveHoverWork {
+        if state.previewCoordinator.hasActiveHoverWork {
             return true
         }
-        if previewModel.previewCGImage != nil || previewModel.text != nil || previewModel.markdownHTML != nil {
+        if state.previewModel.previewCGImage != nil || state.previewModel.text != nil ||
+            state.previewModel.markdownHTML != nil {
             return true
         }
-        if previewModel.isExporting || previewModel.exportSuccess || previewModel.exportFailed || previewModel.exportErrorMessage != nil {
+        if state.previewModel.isExporting || state.previewModel.exportSuccess ||
+            state.previewModel.exportFailed || state.previewModel.exportErrorMessage != nil {
             return true
         }
         return false
     }
 
-    private func scheduleHoverExitCleanup() {
-        cancelHoverExitTask()
-        hoverExitTask = Task { @MainActor in
+    private func scheduleRowHoverExitCleanup(state: HistoryItemInteractionState) {
+        guard interactionState === state,
+              let attachmentToken = sessionAttachmentToken else { return }
+        state.previewCoordinator.cancelHoverExitTask()
+        guard isAnyPreviewPresented else {
+            resetPreviewState(hidePopovers: true, state: state)
+            releaseInteractionStateIfIdle(expected: state)
+            return
+        }
+        guard let transferToken = interactionCoordinator.beginHoverPreviewTransferToken(for: item.id) else {
+            resetPreviewState(hidePopovers: true, state: state)
+            releaseInteractionStateIfIdle(expected: state)
+            return
+        }
+
+        let expectedRevision = state.revision
+        let exitPoint = NSEvent.mouseLocation
+        state.previewCoordinator.startRowExitIntent(
+            from: exitPoint,
+            onDismiss: {
+                guard self.isViewInteractionCurrent(
+                    state,
+                    revision: expectedRevision,
+                    attachmentToken: attachmentToken
+                ),
+                      !state.previewCoordinator.isHovering,
+                      !state.previewCoordinator.isPopoverHovering else { return }
+                self.resetPreviewState(hidePopovers: true, state: state)
+            },
+            onFinish: { [weak interactionCoordinator] in
+                interactionCoordinator?.endHoverPreviewTransfer(token: transferToken)
+                self.releaseInteractionStateIfIdle(expected: state)
+            }
+        )
+    }
+
+    /// Popover-to-row transfer does not need direction inference. Keep the small symmetric grace
+    /// for AppKit's transient hover changes while the popover opens, closes, or hands focus back.
+    private func schedulePopoverHoverExitCleanup() {
+        guard let state = interactionState,
+              let attachmentToken = sessionAttachmentToken else { return }
+        let expectedRevision = state.revision
+        state.previewCoordinator.cancelHoverExitTask()
+        state.previewCoordinator.hoverExitTask = Task { @MainActor in
             try? await Task.sleep(nanoseconds: 120_000_000)
-            guard !Task.isCancelled else { return }
-            guard !self.isHovering, !self.isPopoverHovering else { return }
-            self.resetPreviewState(hidePopovers: true)
+            guard !Task.isCancelled,
+                  self.isViewInteractionCurrent(
+                      state,
+                      revision: expectedRevision,
+                      attachmentToken: attachmentToken
+                  ),
+                  !state.previewCoordinator.isHovering,
+                  !state.previewCoordinator.isPopoverHovering else { return }
+            self.resetPreviewState(hidePopovers: true, state: state)
+            self.releaseInteractionStateIfIdle(expected: state)
         }
     }
 
     private func dismissPreviewForScrollWheel() {
-        guard shouldResetPreviewOnScroll else { return }
-        guard !isPopoverHovering else { return }
-        isHovering = false
-        cancelHoverTasks()
-        resetPreviewState(hidePopovers: true)
+        guard let state = interactionState, shouldResetPreviewOnScroll else { return }
+        guard !state.previewCoordinator.isPopoverHovering else { return }
+        state.previewCoordinator.isHovering = false
+        state.previewCoordinator.cancelHoverTasks()
+        resetPreviewState(hidePopovers: true, state: state)
+        releaseInteractionStateIfIdle(expected: state)
     }
 
     // MARK: - Text Preview (v0.15)
 
     /// v0.15.1: Start text preview task - uses `plainText` (full content) and lazily upgrades to Markdown preview when detected.
     /// v0.22: 确保在创建新任务前取消旧任务，防止快速悬停时任务累积导致内存泄漏
-    private func startTextPreviewTask() {
-        previewCoordinator.presentPreview(.text)
+    private func startTextPreviewTask(state: HistoryItemInteractionState) {
+        guard let attachmentToken = sessionAttachmentToken,
+              isViewInteractionCurrent(
+                  state,
+                  revision: contentRevision,
+                  attachmentToken: attachmentToken
+              ) else { return }
+        let expectedRevision = state.revision
+        state.previewCoordinator.presentPreview(.text)
         let request = HistoryHoverPreviewPipeline.textRequest(
             item: item,
             delay: previewDelay,
             settings: settings
         )
-        hoverPreviewTask = Task(priority: .userInitiated) { @MainActor in
+        state.previewCoordinator.hoverPreviewTask = Task(priority: .userInitiated) { @MainActor in
             await HistoryHoverPreviewPipeline.run(
                 request: .text(request),
-                isCurrent: { isHoverPreviewRequestCurrent(allowPresentedPopover: true) },
-                emit: applyHoverPreviewEvent
+                isCurrent: {
+                    isHoverPreviewRequestCurrent(
+                        state: state,
+                        revision: expectedRevision,
+                        attachmentToken: attachmentToken,
+                        allowPresentedPopover: true
+                    )
+                },
+                emit: { event in
+                    applyHoverPreviewEvent(
+                        event,
+                        state: state,
+                        revision: expectedRevision,
+                        attachmentToken: attachmentToken
+                    )
+                }
             )
         }
     }
 
     // MARK: - Relative Time Formatting
 
-    private static let relativeFormatter: RelativeDateTimeFormatter = {
-        let formatter = RelativeDateTimeFormatter()
-        formatter.unitsStyle = .short
-        return formatter
-    }()
-
-    /// v0.21: 缓存当前时间引用，避免每次渲染创建新 Date
-    /// v0.23: 修复缓存实现 - 在锁外获取时间戳，锁内只做比较和更新
-    private static var cachedNow: Date = Date()
-    private static var cachedNowTimestamp: TimeInterval = Date().timeIntervalSince1970
-    private static let relativeTimeLock = NSLock()
-
-    private static func makeRelativeTimeString(for lastUsedAt: Date) -> String {
-        // v0.23: 在锁外获取当前时间戳，避免在锁内创建 Date 对象
-        let currentTimestamp = Date().timeIntervalSince1970
-
-        // 使用锁保护静态缓存的读写
-        let now = Self.relativeTimeLock.withLock { () -> Date in
-            // 每 30 秒更新一次 cachedNow
-            if currentTimestamp - Self.cachedNowTimestamp > 30 {
-                Self.cachedNow = Date(timeIntervalSince1970: currentTimestamp)
-                Self.cachedNowTimestamp = currentTimestamp
-            }
-            return Self.cachedNow
-        }
-
-        return Self.relativeFormatter.localizedString(for: lastUsedAt, relativeTo: now)
-    }
-
     private var relativeTime: String {
-        Self.makeRelativeTimeString(for: item.lastUsedAt)
+        let bucket = relativeTimeClock?.bucket ?? HistoryRelativeTimeClock.bucket(for: Date())
+        return HistoryItemPresentationCache.shared.relativeTimeText(for: item, bucket: bucket)
     }
 
     private func updateRelativeTimeText() {
@@ -1298,15 +2033,17 @@ struct HistoryItemView: View, Equatable {
         relativeTimeText = next
     }
 
-    private func handleScrollDidStart() {
+    private func handleScrollDidStart(state: HistoryItemInteractionState) {
         guard shouldResetPreviewOnScroll else { return }
-        isHovering = false
-        cancelHoverTasks()
-        resetPreviewState(hidePopovers: true)
+        state.previewCoordinator.isHovering = false
+        state.previewCoordinator.cancelHoverTasks()
+        resetPreviewState(hidePopovers: true, state: state)
+        releaseInteractionStateIfIdle(expected: state)
     }
 
-    private func handleScrollDidEnd() {
+    private func handleScrollDidEnd(state: HistoryItemInteractionState) {
         updateRelativeTimeText()
+        releaseInteractionStateIfIdle(expected: state)
     }
 
     /// v0.12: 使用全局缓存获取应用名称，避免重复调用 NSWorkspace
@@ -1399,107 +2136,6 @@ private struct ScrollWheelDismissMonitor: NSViewRepresentable {
             if let monitor {
                 NSEvent.removeMonitor(monitor)
             }
-        }
-    }
-}
-
-/// Observes the popover window closing event.
-/// SwiftUI's `.popover(isPresented:)` can get out-of-sync on macOS when the system dismisses the popover without
-/// driving the binding back to `false`. This observer provides a best-effort signal to reset local/global state.
-private struct PopoverWindowCloseObserver: NSViewRepresentable {
-    let onClose: () -> Void
-
-    func makeCoordinator() -> Coordinator {
-        Coordinator(onClose: onClose)
-    }
-
-    func makeNSView(context: Context) -> WindowObservingView {
-        let view = WindowObservingView(frame: .zero)
-        view.onWindowDidChange = { [weak coordinator = context.coordinator] window in
-            coordinator?.attach(to: window)
-        }
-        view.onWindowWillClear = { [weak coordinator = context.coordinator] in
-            coordinator?.emitClose()
-        }
-        return view
-    }
-
-    func updateNSView(_ nsView: WindowObservingView, context: Context) {
-        context.coordinator.onClose = onClose
-        nsView.onWindowDidChange = { [weak coordinator = context.coordinator] window in
-            coordinator?.attach(to: window)
-        }
-        nsView.onWindowWillClear = { [weak coordinator = context.coordinator] in
-            coordinator?.emitClose()
-        }
-        context.coordinator.attach(to: nsView.window)
-    }
-
-    final class Coordinator: NSObject {
-        var onClose: () -> Void
-        private weak var observedWindow: NSWindow?
-        private var hasEmittedClose = false
-
-        init(onClose: @escaping () -> Void) {
-            self.onClose = onClose
-            super.init()
-        }
-
-        func attach(to window: NSWindow?) {
-            guard let window else { return }
-            if observedWindow === window { return }
-            detach()
-            observedWindow = window
-            hasEmittedClose = false
-            NotificationCenter.default.addObserver(
-                self,
-                selector: #selector(handleWindowWillClose(_:)),
-                name: NSWindow.willCloseNotification,
-                object: window
-            )
-        }
-
-        private func detach() {
-            if let observedWindow {
-                NotificationCenter.default.removeObserver(
-                    self,
-                    name: NSWindow.willCloseNotification,
-                    object: observedWindow
-                )
-            }
-            observedWindow = nil
-        }
-
-        @objc private func handleWindowWillClose(_ notification: Notification) {
-            emitClose()
-        }
-
-        func emitClose() {
-            guard !hasEmittedClose else { return }
-            hasEmittedClose = true
-            onClose()
-            detach()
-        }
-
-        deinit {
-            detach()
-        }
-    }
-
-    final class WindowObservingView: NSView {
-        var onWindowDidChange: ((NSWindow?) -> Void)?
-        var onWindowWillClear: (() -> Void)?
-
-        override func viewDidMoveToWindow() {
-            super.viewDidMoveToWindow()
-            onWindowDidChange?(window)
-        }
-
-        override func viewWillMove(toWindow newWindow: NSWindow?) {
-            if newWindow == nil, window != nil {
-                onWindowWillClear?()
-            }
-            super.viewWillMove(toWindow: newWindow)
         }
     }
 }
