@@ -12,5 +12,5 @@
 {"file":".trellis/spec/guides/high-leverage-change-guide.md","reason":"Keep implementation focused on the proven P0 integrity failures."}
 {"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Trace commit results through files, SQLite, search, and UI."}
 {"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"Reuse existing immutable publication and containment mechanisms."}
-{"file":".trellis/tasks/07-11-storage-commit-protocol/research/current-storage-failure-map.md","reason":"Authoritative current dataflow, races, existing protections, and missing tests."}
-{"file":".trellis/tasks/07-11-storage-commit-protocol/research/crash-consistent-protocols.md","reason":"Protocol alternatives, durability vocabulary, failure matrix, and rollback research."}
+{"file": ".trellis/tasks/archive/2026-07/07-11-storage-commit-protocol/research/current-storage-failure-map.md", "reason": "Authoritative current dataflow, races, existing protections, and missing tests."}
+{"file": ".trellis/tasks/archive/2026-07/07-11-storage-commit-protocol/research/crash-consistent-protocols.md", "reason": "Protocol alternatives, durability vocabulary, failure matrix, and rollback research."}

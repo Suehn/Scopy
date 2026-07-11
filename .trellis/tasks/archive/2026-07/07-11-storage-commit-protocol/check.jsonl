@@ -10,5 +10,5 @@
 {"file":".trellis/spec/guides/high-leverage-change-guide.md","reason":"Detect scope drift into low-return refactors or speculative infrastructure."}
 {"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Verify end-to-end authority across files, DB, search, events, and restart."}
 {"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"Verify existing safe primitives are reused instead of duplicated."}
-{"file":".trellis/tasks/07-11-storage-commit-protocol/research/current-storage-failure-map.md","reason":"Check fixes against every confirmed current failure and existing protection."}
-{"file":".trellis/tasks/07-11-storage-commit-protocol/research/crash-consistent-protocols.md","reason":"Check durability claims, fault coverage, and rollback boundaries."}
+{"file": ".trellis/tasks/archive/2026-07/07-11-storage-commit-protocol/research/current-storage-failure-map.md", "reason": "Check fixes against every confirmed current failure and existing protection."}
+{"file": ".trellis/tasks/archive/2026-07/07-11-storage-commit-protocol/research/crash-consistent-protocols.md", "reason": "Check durability claims, fault coverage, and rollback boundaries."}
