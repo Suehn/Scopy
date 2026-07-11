@@ -69,6 +69,12 @@ struct HistoryListState {
         recomputeCanLoadMore()
     }
 
+    mutating func decrementTotalCount(by count: Int) {
+        guard totalCount >= 0, count > 0 else { return }
+        totalCount = max(0, totalCount - count)
+        recomputeCanLoadMore()
+    }
+
     mutating func recomputeCanLoadMore() {
         guard totalCount >= 0 else { return }
         canLoadMore = loadedCount < totalCount
@@ -108,6 +114,20 @@ struct HistoryListState {
         rebuildDerivedState()
         recomputeCanLoadMore()
         return true
+    }
+
+    /// One filter + one derived-state rebuild keeps bulk cleanup O(loaded items + deleted IDs).
+    @discardableResult
+    mutating func removeItems(withIDs ids: Set<UUID>) -> Int {
+        guard !ids.isEmpty, !items.isEmpty else { return 0 }
+        let previousCount = items.count
+        items.removeAll { ids.contains($0.id) }
+        let removedCount = previousCount - items.count
+        guard removedCount > 0 else { return 0 }
+        loadedCount = items.count
+        rebuildDerivedState()
+        recomputeCanLoadMore()
+        return removedCount
     }
 
     @discardableResult

@@ -685,6 +685,49 @@ final class AppStateTests: XCTestCase {
         XCTAssertTrue(appState.canLoadMore)
     }
 
+    func testBulkCleanupEventConvergesWithoutResettingLoadedPagination() async {
+        mockService.setItemCount(100)
+        await appState.load()
+
+        let firstDeletedID = appState.items[3].id
+        let secondDeletedID = appState.items[31].id
+        let unloadedDeletedID = mockService.itemID(at: 70)
+        let committedIDs = [firstDeletedID, secondDeletedID, unloadedDeletedID]
+        mockService.removeItemsForTesting(committedIDs)
+
+        await appState.historyViewModel.handleEvent(
+            .itemsRemoved(committedIDs)
+        )
+
+        XCTAssertFalse(appState.items.contains { $0.id == firstDeletedID })
+        XCTAssertFalse(appState.items.contains { $0.id == secondDeletedID })
+        XCTAssertEqual(appState.loadedCount, 48)
+        XCTAssertEqual(appState.totalCount, 97)
+        XCTAssertTrue(appState.canLoadMore)
+    }
+
+    func testBulkCleanupEventDoesNotDoubleDecrementAfterPostCommitReload() async {
+        mockService.setItemCount(100)
+        await appState.load()
+
+        let committedIDs = [
+            appState.items[3].id,
+            appState.items[31].id,
+            mockService.itemID(at: 70)
+        ]
+        mockService.removeItemsForTesting(committedIDs)
+        await appState.load()
+        XCTAssertEqual(appState.totalCount, 97)
+
+        await appState.historyViewModel.handleEvent(.itemsRemoved(committedIDs))
+
+        XCTAssertEqual(appState.totalCount, 97)
+        XCTAssertEqual(appState.loadedCount, 50)
+        XCTAssertTrue(committedIDs.allSatisfy { id in
+            !appState.items.contains { $0.id == id }
+        })
+    }
+
     func testHistoryListStatePassthroughsInvalidateObservation() async {
         mockService.setItemCount(2)
         await appState.load()
@@ -875,6 +918,15 @@ final class TestMockClipboardService: ClipboardServiceProtocol {
                 storageRef: nil
             )
         }
+    }
+
+    func itemID(at index: Int) -> UUID {
+        items[index].id
+    }
+
+    func removeItemsForTesting(_ itemIDs: [UUID]) {
+        let removed = Set(itemIDs)
+        items.removeAll { removed.contains($0.id) }
     }
 
     func resetSearchCallCount() {

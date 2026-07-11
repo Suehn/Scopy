@@ -315,6 +315,35 @@ final class ThumbnailPipelineTests: XCTestCase {
         await queue.finish()
     }
 
+    func testClipboardEventQueueBulkRemovalUsesOneSlotAndInvalidatesOlderItemPublications() async {
+        let queue = ClipboardEventQueue(capacity: 1)
+        let firstID = UUID()
+        let secondID = UUID()
+        let firstOldToken = await queue.reservePublication(itemID: firstID)
+        let secondOldToken = await queue.reservePublication(itemID: secondID)
+
+        await queue.invalidatePublications(itemIDs: [firstID, secondID])
+        let acceptedBulk = await queue.enqueue(.itemsRemoved([firstID, secondID]))
+        XCTAssertTrue(acceptedBulk)
+
+        guard case .itemsRemoved(let deliveredIDs)? = await queue.dequeue() else {
+            return XCTFail("Expected one bulk removal event")
+        }
+        XCTAssertEqual(Set(deliveredIDs), [firstID, secondID])
+
+        let acceptedFirstOld = await queue.enqueue(
+            .itemDeleted(firstID),
+            publication: firstOldToken
+        )
+        let acceptedSecondOld = await queue.enqueue(
+            .itemDeleted(secondID),
+            publication: secondOldToken
+        )
+        XCTAssertFalse(acceptedFirstOld)
+        XCTAssertFalse(acceptedSecondOld)
+        await queue.finish()
+    }
+
     func testThumbnailDecodeCoordinatorBoundsUniqueWorkAndSharesDuplicatePath() async throws {
         let gate = AsyncExecutionGate<String>()
         let coordinator = ThumbnailDecodeCoordinator(

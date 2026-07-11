@@ -12,6 +12,7 @@ public enum ClipboardEvent: Sendable {
         thumbnailPath: String
     )
     case itemDeleted(UUID)
+    case itemsRemoved([UUID])
     case itemPinned(UUID)
     case itemUnpinned(UUID)
     case itemsCleared(keepPinned: Bool)

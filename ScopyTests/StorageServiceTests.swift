@@ -72,6 +72,38 @@ private actor StorageIntBox {
     }
 }
 
+private actor CleanupFailureProbe {
+    private var committedBatches: [[UUID]] = []
+    private var didInstallFailureTrigger = false
+    private var triggerError: String?
+
+    func recordAndInstallFailure(after result: StorageService.CleanupResult, dbPath: String) {
+        committedBatches.append(result.deletedItemIDs)
+        guard !didInstallFailureTrigger else { return }
+        didInstallFailureTrigger = true
+        do {
+            let flags = SQLiteConnection.openFlags(for: dbPath, readOnly: false)
+            let connection = try SQLiteConnection(path: dbPath, flags: flags)
+            defer { connection.close() }
+            try connection.execute(
+                """
+                CREATE TRIGGER fail_later_cleanup_delete
+                BEFORE DELETE ON clipboard_items
+                BEGIN
+                    SELECT RAISE(ABORT, 'injected later cleanup failure');
+                END
+                """
+            )
+        } catch {
+            triggerError = error.localizedDescription
+        }
+    }
+
+    func snapshot() -> (batches: [[UUID]], triggerError: String?) {
+        (committedBatches, triggerError)
+    }
+}
+
 /// StorageService 单元测试
 /// 验证 v0.md 第2、3节的存储和去重要求
 @MainActor
@@ -795,6 +827,194 @@ final class StorageServiceTests: XCTestCase {
         // Should have max 5 items
         let countAfterCleanup = try await storage.getItemCount()
         XCTAssertLessThanOrEqual(countAfterCleanup, 5)
+    }
+
+    func testCleanupCommitSkipsCandidatePinnedAfterPlanning() async throws {
+        let directory = try makeTemporaryDirectory(prefix: "cleanup-pin-revalidation")
+        let databasePath = directory.appendingPathComponent("clipboard.db").path
+        let probe = RemoveFileProbe()
+        let primary = StorageService(
+            databasePath: databasePath,
+            fileOps: makeRecordingFileOps(probe)
+        )
+        let competing = StorageService(databasePath: databasePath)
+        try await primary.open()
+        try await competing.open()
+        raceStorages.append(primary)
+        raceStorages.append(competing)
+        raceStorageDirectories.append(directory)
+
+        let candidate = try await primary.upsertItem(makeLargeTestContent())
+        try await Task.sleep(nanoseconds: 10_000_000)
+        _ = try await primary.upsertItem(makeLargeTestContent())
+        let candidateRef = try XCTUnwrap(candidate.storageRef)
+
+        primary.cleanupSettings.maxItems = 1
+        primary.cleanupSettings.maxSmallStorageMB = 200
+        primary.cleanupSettings.maxLargeStorageMB = 800
+        let gate = StorageMetadataUpdateGate()
+        primary.setCleanupInterlockForTesting { point in
+            guard case .afterPlanBeforeCommit(let itemIDs) = point,
+                  itemIDs.contains(candidate.id) else { return }
+            await gate.pause()
+        }
+
+        let cleanup = Task { try await primary.performCleanup(mode: .light) }
+        await gate.waitUntilPaused()
+        try await competing.setPin(candidate.id, pinned: true)
+        await gate.release()
+        let result = try await cleanup.value
+
+        let persistedResult = try await primary.findByID(candidate.id)
+        let persisted = try XCTUnwrap(persistedResult)
+        XCTAssertTrue(persisted.isPinned)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: candidateRef))
+        XCTAssertEqual(result.plannedItemCount, 1)
+        XCTAssertEqual(result.deletedItemIDs, [])
+        XCTAssertEqual(result.skippedItemCount, 1)
+        XCTAssertEqual(probe.callCount, 0)
+    }
+
+    func testCleanupCommitSkipsCandidateWhosePayloadWasReplacedAfterPlanning() async throws {
+        let directory = try makeTemporaryDirectory(prefix: "cleanup-payload-revalidation")
+        let databasePath = directory.appendingPathComponent("clipboard.db").path
+        let probe = RemoveFileProbe()
+        let primary = StorageService(
+            databasePath: databasePath,
+            fileOps: makeRecordingFileOps(probe)
+        )
+        let competing = StorageService(databasePath: databasePath)
+        try await primary.open()
+        try await competing.open()
+        raceStorages.append(primary)
+        raceStorages.append(competing)
+        raceStorageDirectories.append(directory)
+
+        let candidate = try await primary.upsertItem(makeLargeTestContent())
+        try await Task.sleep(nanoseconds: 10_000_000)
+        _ = try await primary.upsertItem(makeLargeTestContent())
+        let oldRef = try XCTUnwrap(candidate.storageRef)
+
+        primary.cleanupSettings.maxItems = 1
+        primary.cleanupSettings.maxSmallStorageMB = 200
+        primary.cleanupSettings.maxLargeStorageMB = 800
+        let gate = StorageMetadataUpdateGate()
+        primary.setCleanupInterlockForTesting { point in
+            guard case .afterPlanBeforeCommit(let itemIDs) = point,
+                  itemIDs.contains(candidate.id) else { return }
+            await gate.pause()
+        }
+
+        let cleanup = Task { try await primary.performCleanup(mode: .light) }
+        await gate.waitUntilPaused()
+
+        let replacementData = Data(repeating: 0x3C, count: 256 * 1024)
+        let stageURL = URL(fileURLWithPath: oldRef)
+            .deletingLastPathComponent()
+            .appendingPathComponent(".scopy-cleanup-payload-race.stage")
+        try replacementData.write(to: stageURL, options: .atomic)
+        let replacementHash = "cleanup-replacement-\(UUID().uuidString)"
+        let replacedResult = try await competing.commitOptimizedExternalImagePayload(
+            expected: candidate,
+            stagedURL: stageURL,
+            contentHash: replacementHash,
+            sizeBytes: replacementData.count
+        )
+        let replaced = try XCTUnwrap(replacedResult)
+        await gate.release()
+        let result = try await cleanup.value
+
+        let persistedResult = try await primary.findByID(candidate.id)
+        let persisted = try XCTUnwrap(persistedResult)
+        XCTAssertEqual(persisted.contentHash, replacementHash)
+        XCTAssertEqual(persisted.storageRef, replaced.storageRef)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: try XCTUnwrap(replaced.storageRef)))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: oldRef))
+        XCTAssertEqual(result.plannedItemCount, 1)
+        XCTAssertEqual(result.deletedItemIDs, [])
+        XCTAssertEqual(result.skippedItemCount, 1)
+        XCTAssertEqual(probe.callCount, 0)
+    }
+
+    func testCleanupReportsEarlierCommittedBatchBeforeLaterPhaseFails() async throws {
+        let directory = try makeTemporaryDirectory(prefix: "cleanup-partial-result")
+        let databasePath = directory.appendingPathComponent("clipboard.db").path
+        let diskStorage = StorageService(databasePath: databasePath)
+        try await diskStorage.open()
+        raceStorages.append(diskStorage)
+        raceStorageDirectories.append(directory)
+
+        let oldest = try await diskStorage.upsertItem(makeTestContent(text: "oldest"))
+        try await Task.sleep(nanoseconds: 10_000_000)
+        _ = try await diskStorage.upsertItem(makeTestContent(text: "middle"))
+        try await Task.sleep(nanoseconds: 10_000_000)
+        _ = try await diskStorage.upsertItem(makeTestContent(text: "newest"))
+
+        diskStorage.cleanupSettings.maxItems = 2
+        diskStorage.cleanupSettings.maxDaysAge = 0
+        diskStorage.cleanupSettings.maxSmallStorageMB = 200
+        diskStorage.cleanupSettings.maxLargeStorageMB = 800
+
+        let probe = CleanupFailureProbe()
+        do {
+            _ = try await diskStorage.performCleanup(
+                mode: .light,
+                onCommitted: { result in
+                    await probe.recordAndInstallFailure(after: result, dbPath: databasePath)
+                }
+            )
+            XCTFail("Expected the injected later cleanup phase to fail")
+        } catch {
+            // The first count phase is already committed and must already have been reported.
+        }
+
+        let snapshot = await probe.snapshot()
+        XCTAssertNil(snapshot.triggerError)
+        XCTAssertEqual(snapshot.batches, [[oldest.id]])
+        let deletedItem = try await diskStorage.findByID(oldest.id)
+        let remainingCount = try await diskStorage.getItemCount()
+        XCTAssertNil(deletedItem)
+        XCTAssertEqual(remainingCount, 2)
+    }
+
+    func testCleanupDoesNotUnlinkCommittedRefStillOwnedBySurvivingRow() async throws {
+        let probe = RemoveFileProbe()
+        let (diskStorage, baseURL) = try await makeTemporaryStorage(
+            prefix: "cleanup-shared-ref",
+            fileOps: makeRecordingFileOps(probe)
+        )
+        defer {
+            Task { @MainActor in
+                await diskStorage.close()
+                try? FileManager.default.removeItem(at: baseURL)
+            }
+        }
+
+        let oldest = try await diskStorage.upsertItem(makeLargeTestContent())
+        try await Task.sleep(nanoseconds: 10_000_000)
+        let survivor = try await diskStorage.upsertItem(makeLargeTestContent())
+        let sharedRef = try XCTUnwrap(oldest.storageRef)
+        try await diskStorage.updateItemPayload(
+            id: survivor.id,
+            contentHash: "shared-ref-survivor-\(UUID().uuidString)",
+            sizeBytes: survivor.sizeBytes,
+            storageRef: sharedRef,
+            rawData: nil
+        )
+
+        diskStorage.cleanupSettings.maxItems = 1
+        diskStorage.cleanupSettings.maxSmallStorageMB = 200
+        diskStorage.cleanupSettings.maxLargeStorageMB = 800
+        let result = try await diskStorage.performCleanup(mode: .light)
+
+        XCTAssertEqual(result.deletedItemIDs, [oldest.id])
+        XCTAssertEqual(result.fileDeletionCandidateCount, 1)
+        XCTAssertEqual(result.fileDeletionAttemptCount, 0)
+        XCTAssertEqual(result.fileCleanupFailureCount, 0)
+        XCTAssertEqual(probe.callCount, 0)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: sharedRef))
+        let persistedSurvivor = try await diskStorage.findByID(survivor.id)
+        XCTAssertEqual(persistedSurvivor?.storageRef, sharedRef)
     }
 
     func testCleanupPreservesPinned() async throws {

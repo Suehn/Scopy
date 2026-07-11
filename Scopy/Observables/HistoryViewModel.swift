@@ -122,6 +122,23 @@ struct BoundedHistoryContentRevisionRegistry {
         compactQueuesIfNeeded()
         return changed
     }
+    @discardableResult
+    mutating func invalidate(itemIDs: Set<UUID>) -> Int {
+        guard !itemIDs.isEmpty else { return 0 }
+        var newlyDeletedCount = 0
+        for itemID in itemIDs {
+            revisionsByItemID.removeValue(forKey: itemID)
+            if deletionsByItemID[itemID] == nil {
+                let stamp = makeStamp()
+                deletionsByItemID[itemID] = DeletionEntry(stamp: stamp)
+                deletionOrder.append((itemID, stamp))
+                newlyDeletedCount += 1
+            }
+        }
+        evictDeletionsIfNeeded()
+        compactQueuesIfNeeded()
+        return newlyDeletedCount
+    }
 
     @discardableResult
     mutating func setPinned(itemID: UUID, isPinned: Bool) -> Bool {
@@ -547,6 +564,34 @@ final class HistoryViewModel {
                 isUnfilteredList: isUnfilteredList
             )
             if hasActiveFilters {
+                search()
+            }
+        case .itemsRemoved(let itemIDs):
+            let deletedIDs = Set(itemIDs)
+            guard !deletedIDs.isEmpty else { return }
+            let newlyDeletedCount = invalidateKnownContentRevisions(itemIDs: deletedIDs)
+            invalidateInFlightProjectionWorkForDeletion()
+            _ = listState.removeItems(withIDs: deletedIDs)
+
+            if isUnfilteredList {
+                // Refresh only the authoritative count. Re-fetching the first page here would
+                // collapse a user's already-loaded pagination depth back to the initial 50 rows.
+                let projectionVersion = searchVersion
+                do {
+                    let stats = try await service.getStorageStats()
+                    guard projectionVersion == searchVersion, isUnfilteredList else { return }
+                    listState.updateTotalCount(stats.itemCount)
+                    settingsViewModel.storageStats = stats
+                } catch {
+                    guard projectionVersion == searchVersion, isUnfilteredList else { return }
+                    // Exact committed IDs are still the best available authority on a transient
+                    // stats read failure; duplicate bulk events do not decrement twice.
+                    listState.decrementTotalCount(by: newlyDeletedCount)
+                    ScopyLog.app.error(
+                        "Failed to refresh history count after cleanup: \(error.localizedDescription, privacy: .private)"
+                    )
+                }
+            } else {
                 search()
             }
         case .itemPinned(let id):
@@ -1158,6 +1203,14 @@ final class HistoryViewModel {
     private func invalidateKnownContentRevision(itemID: UUID) {
         guard contentRevisionRegistry.invalidate(itemID: itemID) else { return }
         contentRevisionReconciliationToken &+= 1
+    }
+
+    @discardableResult
+    private func invalidateKnownContentRevisions(itemIDs: Set<UUID>) -> Int {
+        let newlyDeletedCount = contentRevisionRegistry.invalidate(itemIDs: itemIDs)
+        guard newlyDeletedCount > 0 else { return 0 }
+        contentRevisionReconciliationToken &+= 1
+        return newlyDeletedCount
     }
 
     private func setKnownContentPinned(itemID: UUID, isPinned: Bool) {

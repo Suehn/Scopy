@@ -236,7 +236,7 @@ final class AppState {
 
     private func handleEvent(_ event: ClipboardEvent) async {
         switch event {
-        case .newItem, .itemUpdated, .itemContentUpdated, .thumbnailUpdated, .itemDeleted, .itemPinned, .itemUnpinned, .itemsCleared:
+        case .newItem, .itemUpdated, .itemContentUpdated, .thumbnailUpdated, .itemDeleted, .itemsRemoved, .itemPinned, .itemUnpinned, .itemsCleared:
             await historyViewModel.handleEvent(event)
         case .settingsChanged:
             let patch = await refreshSettings(applyHotKey: true)

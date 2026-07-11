@@ -86,6 +86,26 @@ final class HistoryListStateTests: XCTestCase {
         XCTAssertTrue(state.canLoadMore)
     }
 
+    func testRemoveItemsFiltersOnceAndRebuildsDerivedStateForBulkCleanup() {
+        let first = makeItem(text: "first", isPinned: true)
+        let second = makeItem(text: "second")
+        let third = makeItem(text: "third")
+        let fourth = makeItem(text: "fourth")
+        var state = HistoryListState()
+        state.replacePage(items: [first, second, third, fourth], total: 7, hasMore: true)
+
+        let removedCount = state.removeItems(withIDs: [second.id, fourth.id, UUID()])
+
+        XCTAssertEqual(removedCount, 2)
+        XCTAssertEqual(state.items.map(\.id), [first.id, third.id])
+        XCTAssertEqual(state.pinnedItems.map(\.id), [first.id])
+        XCTAssertEqual(state.unpinnedItems.map(\.id), [third.id])
+        XCTAssertEqual(state.indexOfItem(withID: third.id), 1)
+        XCTAssertEqual(state.loadedCount, 2)
+        XCTAssertEqual(state.totalCount, 7)
+        XCTAssertTrue(state.canLoadMore)
+    }
+
     func testInsertOrMoveItemToFrontPreservesMoveBehavior() {
         let first = makeItem(text: "first")
         let second = makeItem(text: "second")

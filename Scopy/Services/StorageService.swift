@@ -149,6 +149,11 @@ public final class StorageService {
         case afterFinalOwnershipValidationBeforeRemove(path: String)
     }
 
+    enum CleanupInterlockPoint: Sendable {
+        case afterPlanBeforeCommit(plannedItemIDs: [UUID])
+        case afterCommitBeforeFileCleanup(deletedItemIDs: [UUID])
+    }
+
     enum IngestCommitInterlockPoint: Sendable {
         case beforeReceiptResolution(candidatePath: String?)
     }
@@ -204,6 +209,51 @@ public final class StorageService {
         public init() {}
     }
 
+    public struct CleanupResult: Sendable, Equatable {
+        public let plannedItemCount: Int
+        public let deletedItemIDs: [UUID]
+        public let skippedItemCount: Int
+        public let fileDeletionCandidateCount: Int
+        public let fileDeletionAttemptCount: Int
+        public let fileCleanupFailureCount: Int
+
+        public static let empty = CleanupResult(
+            plannedItemCount: 0,
+            deletedItemIDs: [],
+            skippedItemCount: 0,
+            fileDeletionCandidateCount: 0,
+            fileDeletionAttemptCount: 0,
+            fileCleanupFailureCount: 0
+        )
+
+        fileprivate func merging(_ other: CleanupResult) -> CleanupResult {
+            var seen = Set(deletedItemIDs)
+            let uniqueAdditionalIDs = other.deletedItemIDs.filter { seen.insert($0).inserted }
+            return CleanupResult(
+                plannedItemCount: plannedItemCount + other.plannedItemCount,
+                deletedItemIDs: deletedItemIDs + uniqueAdditionalIDs,
+                skippedItemCount: skippedItemCount + other.skippedItemCount,
+                fileDeletionCandidateCount: fileDeletionCandidateCount + other.fileDeletionCandidateCount,
+                fileDeletionAttemptCount: fileDeletionAttemptCount + other.fileDeletionAttemptCount,
+                fileCleanupFailureCount: fileCleanupFailureCount + other.fileCleanupFailureCount
+            )
+        }
+    }
+
+    private struct FileDeletionSummary: Sendable {
+        let candidateCount: Int
+        let attemptedCount: Int
+        let cleanupFailureCount: Int
+
+        static let empty = FileDeletionSummary(
+            candidateCount: 0,
+            attemptedCount: 0,
+            cleanupFailureCount: 0
+        )
+    }
+
+    typealias CleanupCommitHandler = @Sendable (CleanupResult) async -> Void
+
     // MARK: - Properties
 
     private let dbPath: String
@@ -235,6 +285,7 @@ public final class StorageService {
     private var externalSizeSyncInterlock: (@Sendable (ExternalSizeSyncInterlockPoint) async -> Void)?
     private var orphanCleanupInterlock: (@Sendable (OrphanCleanupInterlockPoint) async -> Void)?
     private var ingestCommitInterlock: (@Sendable (IngestCommitInterlockPoint) async -> Void)?
+    private var cleanupInterlock: (@Sendable (CleanupInterlockPoint) async -> Void)?
 
     /// 数据库文件路径（用于设置窗口显示）
     public var databaseFilePath: String { dbPath }
@@ -285,6 +336,12 @@ public final class StorageService {
         _ interlock: (@Sendable (IngestCommitInterlockPoint) async -> Void)?
     ) {
         ingestCommitInterlock = interlock
+    }
+
+    func setCleanupInterlockForTesting(
+        _ interlock: (@Sendable (CleanupInterlockPoint) async -> Void)?
+    ) {
+        cleanupInterlock = interlock
     }
 
     private static func resolveRootDirectory(databasePath: String?, storageRootURL: URL?) -> URL {
@@ -1295,7 +1352,18 @@ public final class StorageService {
         case full    // 低频：完整清理
     }
 
-    public func performCleanup(mode: CleanupMode = .full) async throws {
+    @discardableResult
+    public func performCleanup(mode: CleanupMode = .full) async throws -> CleanupResult {
+        try await performCleanup(mode: mode, onCommitted: nil)
+    }
+
+    /// `onCommitted` is invoked after every independently committed delete phase. This prevents a
+    /// later policy/read failure from hiding IDs that an earlier phase already removed from SQLite.
+    @discardableResult
+    func performCleanup(
+        mode: CleanupMode,
+        onCommitted: CleanupCommitHandler?
+    ) async throws -> CleanupResult {
         let cleanupImagesOnly = cleanupSettings.cleanupImagesOnly
         let modeText = (mode == .full) ? "full" : "light"
         let maxItems = cleanupSettings.maxItems
@@ -1305,6 +1373,7 @@ public final class StorageService {
         ScopyLog.storage.info(
             "Cleanup start: mode=\(modeText, privacy: .public) imagesOnly=\(cleanupImagesOnly, privacy: .public) maxItems=\(maxItems, privacy: .public) maxTotalMB=\(maxTotalMB, privacy: .public) maxExternalMB=\(maxExternalMB, privacy: .public)"
         )
+        var aggregateResult = CleanupResult.empty
 
         // 0. Composite path (count + external): reduce duplicated DB scans and delete passes.
         var currentCount = try await getItemCount()
@@ -1312,14 +1381,16 @@ public final class StorageService {
            currentCount > maxItems {
             let currentExternalSize = try await getExternalStorageSize()
             if currentExternalSize > maxLargeBytes {
-                let didCleanupComposite = try await cleanupCountAndExternalIfNeeded(
+                let compositeResult = try await cleanupCountAndExternalIfNeeded(
                     currentCount: currentCount,
                     externalSize: currentExternalSize,
                     maxItems: maxItems,
                     maxLargeBytes: maxLargeBytes,
-                    cleanupImagesOnly: cleanupImagesOnly
+                    cleanupImagesOnly: cleanupImagesOnly,
+                    onCommitted: onCommitted
                 )
-                if didCleanupComposite {
+                aggregateResult = aggregateResult.merging(compositeResult)
+                if !compositeResult.deletedItemIDs.isEmpty {
                     currentCount = try await getItemCount()
                 }
             }
@@ -1331,12 +1402,20 @@ public final class StorageService {
                 ScopyLog.storage.info(
                     "Cleanup by count (imagesOnly): current=\(currentCount, privacy: .public) max=\(maxItems, privacy: .public) delete=\(currentCount - maxItems, privacy: .public)"
                 )
-                try await cleanupImagesOnlyByCount(deleteCount: currentCount - maxItems)
+                let phaseResult = try await cleanupImagesOnlyByCount(
+                    deleteCount: currentCount - maxItems,
+                    onCommitted: onCommitted
+                )
+                aggregateResult = aggregateResult.merging(phaseResult)
             } else {
                 ScopyLog.storage.info(
                     "Cleanup by count: current=\(currentCount, privacy: .public) max=\(maxItems, privacy: .public) target=\(maxItems, privacy: .public)"
                 )
-                try await cleanupByCount(target: maxItems)
+                let phaseResult = try await cleanupByCount(
+                    target: maxItems,
+                    onCommitted: onCommitted
+                )
+                aggregateResult = aggregateResult.merging(phaseResult)
             }
         }
 
@@ -1346,9 +1425,19 @@ public final class StorageService {
                 "Cleanup by age: maxDays=\(maxDays, privacy: .public) imagesOnly=\(cleanupImagesOnly, privacy: .public)"
             )
             if cleanupImagesOnly {
-                try await cleanupByAge(maxDays: maxDays, typeFilter: .image)
+                let phaseResult = try await cleanupByAge(
+                    maxDays: maxDays,
+                    typeFilter: .image,
+                    onCommitted: onCommitted
+                )
+                aggregateResult = aggregateResult.merging(phaseResult)
             } else {
-                try await cleanupByAge(maxDays: maxDays, typeFilter: nil)
+                let phaseResult = try await cleanupByAge(
+                    maxDays: maxDays,
+                    typeFilter: nil,
+                    onCommitted: onCommitted
+                )
+                aggregateResult = aggregateResult.merging(phaseResult)
             }
         }
 
@@ -1360,9 +1449,19 @@ public final class StorageService {
                 "Cleanup by size: currentBytes=\(dbSize, privacy: .public) maxBytes=\(maxSmallBytes, privacy: .public) imagesOnly=\(cleanupImagesOnly, privacy: .public)"
             )
             if cleanupImagesOnly {
-                try await cleanupBySize(targetBytes: maxSmallBytes, typeFilter: .image)
+                let phaseResult = try await cleanupBySize(
+                    targetBytes: maxSmallBytes,
+                    typeFilter: .image,
+                    onCommitted: onCommitted
+                )
+                aggregateResult = aggregateResult.merging(phaseResult)
             } else {
-                try await cleanupBySize(targetBytes: maxSmallBytes, typeFilter: nil)
+                let phaseResult = try await cleanupBySize(
+                    targetBytes: maxSmallBytes,
+                    typeFilter: nil,
+                    onCommitted: onCommitted
+                )
+                aggregateResult = aggregateResult.merging(phaseResult)
             }
         }
 
@@ -1373,13 +1472,23 @@ public final class StorageService {
                 "Cleanup external storage: currentBytes=\(externalSize, privacy: .public) maxBytes=\(maxLargeBytes, privacy: .public) imagesOnly=\(cleanupImagesOnly, privacy: .public)"
             )
             if cleanupImagesOnly {
-                try await cleanupExternalStorage(targetBytes: maxLargeBytes, typeFilter: .image)
+                let phaseResult = try await cleanupExternalStorage(
+                    targetBytes: maxLargeBytes,
+                    typeFilter: .image,
+                    onCommitted: onCommitted
+                )
+                aggregateResult = aggregateResult.merging(phaseResult)
             } else {
-                try await cleanupExternalStorage(targetBytes: maxLargeBytes, typeFilter: nil)
+                let phaseResult = try await cleanupExternalStorage(
+                    targetBytes: maxLargeBytes,
+                    typeFilter: nil,
+                    onCommitted: onCommitted
+                )
+                aggregateResult = aggregateResult.merging(phaseResult)
             }
         }
 
-        guard mode == .full else { return }
+        guard mode == .full else { return aggregateResult }
 
         // 5. SQLite housekeeping (v0.md 2.3)
         // v0.29: 仅在 WAL 体积明显膨胀时执行 vacuum，减少非敏感时段外的磁盘抖动
@@ -1390,6 +1499,7 @@ public final class StorageService {
 
         // 6. v0.15: Clean up orphaned files (files not referenced in database)
         try await cleanupOrphanedFiles()
+        return aggregateResult
     }
 
     private func getWALFileSize() -> Int {
@@ -1549,13 +1659,14 @@ public final class StorageService {
         externalSize: Int,
         maxItems: Int,
         maxLargeBytes: Int,
-        cleanupImagesOnly: Bool
-    ) async throws -> Bool {
-        guard PerfFeatureFlags.cleanupCompositePlanEnabled else { return false }
+        cleanupImagesOnly: Bool,
+        onCommitted: CleanupCommitHandler?
+    ) async throws -> CleanupResult {
+        guard PerfFeatureFlags.cleanupCompositePlanEnabled else { return .empty }
 
         let deleteCount = max(0, currentCount - maxItems)
         let excessBytes = max(0, externalSize - maxLargeBytes)
-        guard deleteCount > 0 || excessBytes > 0 else { return false }
+        guard deleteCount > 0 || excessBytes > 0 else { return .empty }
 
         let countPlan: SQLiteClipboardRepository.DeletePlan
         if deleteCount > 0 {
@@ -1565,7 +1676,7 @@ public final class StorageService {
                 countPlan = try await repository.planCleanupByCount(target: maxItems)
             }
         } else {
-            countPlan = SQLiteClipboardRepository.DeletePlan(ids: [], storageRefs: [])
+            countPlan = .empty
         }
 
         let estimatedFreedByCount = try await repository.sumExternalBytes(ids: countPlan.ids)
@@ -1578,7 +1689,7 @@ public final class StorageService {
                 excludingIDs: Set(countPlan.ids)
             )
         } else {
-            externalPlan = SQLiteClipboardRepository.DeletePlan(ids: [], storageRefs: [])
+            externalPlan = .empty
         }
 
         if PerfFeatureFlags.cleanupShadowCompareEnabled {
@@ -1588,99 +1699,187 @@ public final class StorageService {
         }
 
         let merged = SQLiteClipboardRepository.mergeDeletePlans([countPlan, externalPlan])
-        guard !merged.ids.isEmpty else { return false }
+        guard !merged.ids.isEmpty else { return .empty }
 
         ScopyLog.storage.info(
             "cleanupComposite: deleting \(merged.ids.count, privacy: .public) items (count=\(countPlan.ids.count, privacy: .public), external=\(externalPlan.ids.count, privacy: .public), files=\(merged.storageRefs.count, privacy: .public), remainingExcess=\(remainingExcess, privacy: .public))"
         )
-        try await applyDeletePlan(merged, logContext: "cleanupComposite")
-        return true
+        return try await applyDeletePlan(
+            merged,
+            logContext: "cleanupComposite",
+            onCommitted: onCommitted
+        )
     }
 
-    private func applyDeletePlan(_ plan: SQLiteClipboardRepository.DeletePlan, logContext: StaticString) async throws {
-        guard !plan.ids.isEmpty else { return }
+    private func applyDeletePlan(
+        _ plan: SQLiteClipboardRepository.DeletePlan,
+        logContext: StaticString,
+        onCommitted: CleanupCommitHandler?
+    ) async throws -> CleanupResult {
+        guard !plan.ids.isEmpty else { return .empty }
 
-        // DB-first: avoid deleting external files when DB deletion fails.
-        try await repository.deleteItemsBatchInTransaction(ids: plan.ids)
+        await cleanupInterlock?(.afterPlanBeforeCommit(plannedItemIDs: plan.ids))
 
-        let fileURLs = validatedExternalFileURLs(from: plan.storageRefs, logContext: logContext)
+        // DB-first: commit-time revalidation, ref capture, and deletion share one write transaction.
+        let committed = try await repository.commitDeletePlan(plan)
+        await cleanupInterlock?(
+            .afterCommitBeforeFileCleanup(deletedItemIDs: committed.deletedItemIDs)
+        )
+
+        let committedResult = CleanupResult(
+            plannedItemCount: committed.plannedCount,
+            deletedItemIDs: committed.deletedItemIDs,
+            skippedItemCount: committed.skippedCount,
+            fileDeletionCandidateCount: 0,
+            fileDeletionAttemptCount: 0,
+            fileCleanupFailureCount: 0
+        )
+        if !committed.deletedItemIDs.isEmpty {
+            await onCommitted?(committedResult)
+        }
+
+        let fileURLs = validatedExternalFileURLs(from: committed.storageRefs, logContext: logContext)
+        let fileSummary: FileDeletionSummary
         guard !fileURLs.isEmpty else {
             invalidateExternalSizeCache()
-            return
+            ScopyLog.storage.info(
+                "[\(logContext)] Cleanup committed: planned=\(committed.plannedCount, privacy: .public) committed=\(committed.deletedItemIDs.count, privacy: .public) skipped=\(committed.skippedCount, privacy: .public) fileCandidates=0 fileAttempts=0 fileCleanupFailures=0"
+            )
+            return CleanupResult(
+                plannedItemCount: committed.plannedCount,
+                deletedItemIDs: committed.deletedItemIDs,
+                skippedItemCount: committed.skippedCount,
+                fileDeletionCandidateCount: 0,
+                fileDeletionAttemptCount: 0,
+                fileCleanupFailureCount: 0
+            )
         }
         let remover = fileOps.removeFile
-        await Task.detached(priority: .utility) {
-            await Self.deleteFilesBounded(
+        let repository = repository
+        let reservations = sharedExternalFileReservations
+        fileSummary = await Task.detached(priority: .utility) {
+            await Self.deleteCleanupFilesBounded(
                 fileURLs,
                 maxConcurrent: Self.fileDeletionConcurrency(for: fileURLs.count),
+                repository: repository,
+                reservations: reservations,
                 logContext: logContext,
                 removeFile: remover
             )
         }.value
         invalidateExternalSizeCache()
+        ScopyLog.storage.info(
+            "[\(logContext)] Cleanup committed: planned=\(committed.plannedCount, privacy: .public) committed=\(committed.deletedItemIDs.count, privacy: .public) skipped=\(committed.skippedCount, privacy: .public) fileCandidates=\(fileSummary.candidateCount, privacy: .public) fileAttempts=\(fileSummary.attemptedCount, privacy: .public) fileCleanupFailures=\(fileSummary.cleanupFailureCount, privacy: .public)"
+        )
+        return CleanupResult(
+            plannedItemCount: committed.plannedCount,
+            deletedItemIDs: committed.deletedItemIDs,
+            skippedItemCount: committed.skippedCount,
+            fileDeletionCandidateCount: fileSummary.candidateCount,
+            fileDeletionAttemptCount: fileSummary.attemptedCount,
+            fileCleanupFailureCount: fileSummary.cleanupFailureCount
+        )
     }
 
     /// v0.14: 深度优化 - 消除子查询 COUNT，使用单次查询 + 事务批量删除
     /// 原理：先计算当前非 pin 数量，再用 OFFSET 直接定位要删除的记录
     /// 收益：消除 O(n) 子查询，50k 数据下节省 ~200ms
-    private func cleanupByCount(target: Int) async throws {
+    private func cleanupByCount(
+        target: Int,
+        onCommitted: CleanupCommitHandler?
+    ) async throws -> CleanupResult {
         let plan = try await repository.planCleanupByCount(target: target)
-        guard !plan.ids.isEmpty else { return }
+        guard !plan.ids.isEmpty else { return .empty }
         ScopyLog.storage.info(
             "cleanupByCount: deleting \(plan.ids.count, privacy: .public) items (files=\(plan.storageRefs.count, privacy: .public)) target=\(target, privacy: .public)"
         )
-        try await applyDeletePlan(plan, logContext: "cleanupByCount")
+        return try await applyDeletePlan(
+            plan,
+            logContext: "cleanupByCount",
+            onCommitted: onCommitted
+        )
     }
 
-    private func cleanupImagesOnlyByCount(deleteCount: Int) async throws {
+    private func cleanupImagesOnlyByCount(
+        deleteCount: Int,
+        onCommitted: CleanupCommitHandler?
+    ) async throws -> CleanupResult {
         let plan = try await repository.planCleanupUnpinnedImages(limit: deleteCount)
-        guard !plan.ids.isEmpty else { return }
+        guard !plan.ids.isEmpty else { return .empty }
         ScopyLog.storage.info(
             "cleanupImagesOnlyByCount: deleting \(plan.ids.count, privacy: .public) images (files=\(plan.storageRefs.count, privacy: .public)) requested=\(deleteCount, privacy: .public)"
         )
-        try await applyDeletePlan(plan, logContext: "cleanupImagesOnlyByCount")
+        return try await applyDeletePlan(
+            plan,
+            logContext: "cleanupImagesOnlyByCount",
+            onCommitted: onCommitted
+        )
     }
 
     /// v0.19: 修复 - 同时删除外部存储文件，避免孤立文件累积
-    private func cleanupByAge(maxDays: Int, typeFilter: ClipboardItemType?) async throws {
+    private func cleanupByAge(
+        maxDays: Int,
+        typeFilter: ClipboardItemType?,
+        onCommitted: CleanupCommitHandler?
+    ) async throws -> CleanupResult {
         let cutoff = Date().addingTimeInterval(-Double(maxDays * 24 * 3600))
         let plan = try await repository.planCleanupByAge(cutoff: cutoff, typeFilter: typeFilter)
-        guard !plan.ids.isEmpty else { return }
+        guard !plan.ids.isEmpty else { return .empty }
         ScopyLog.storage.info(
             "cleanupByAge: deleting \(plan.ids.count, privacy: .public) items (files=\(plan.storageRefs.count, privacy: .public)) maxDays=\(maxDays, privacy: .public) type=\(String(describing: typeFilter), privacy: .public)"
         )
-        try await applyDeletePlan(plan, logContext: "cleanupByAge")
+        return try await applyDeletePlan(
+            plan,
+            logContext: "cleanupByAge",
+            onCommitted: onCommitted
+        )
     }
 
     /// v0.14: 深度优化 - 消除循环迭代，单次查询 + 事务批量删除
     /// 原理：一次性获取所有待删除项目，累加 size 直到达到目标，单事务删除
     /// 收益：消除多次迭代的 SQL 开销，9000 条删除从 ~4500ms 降到 ~200ms
-    private func cleanupBySize(targetBytes: Int, typeFilter: ClipboardItemType?) async throws {
+    private func cleanupBySize(
+        targetBytes: Int,
+        typeFilter: ClipboardItemType?,
+        onCommitted: CleanupCommitHandler?
+    ) async throws -> CleanupResult {
         let plan = try await repository.planCleanupByTotalSize(targetBytes: targetBytes, typeFilter: typeFilter)
-        guard !plan.ids.isEmpty else { return }
+        guard !plan.ids.isEmpty else { return .empty }
         ScopyLog.storage.info(
             "cleanupBySize: deleting \(plan.ids.count, privacy: .public) items (files=\(plan.storageRefs.count, privacy: .public)) targetBytes=\(targetBytes, privacy: .public) type=\(String(describing: typeFilter), privacy: .public)"
         )
-        try await applyDeletePlan(plan, logContext: "cleanupBySize")
+        return try await applyDeletePlan(
+            plan,
+            logContext: "cleanupBySize",
+            onCommitted: onCommitted
+        )
     }
 
     /// v0.13: 批量删除多个项目（单条 SQL，单事务，避免 N+1 查询）
     /// v0.14: 深度优化 - 消除循环迭代，单次查询 + 事务批量删除
     /// 原理：一次性获取所有外部存储项目，累加 size 直到达到目标，单事务删除
     /// 收益：消除多次迭代的 SQL 和文件系统开销
-    private func cleanupExternalStorage(targetBytes: Int, typeFilter: ClipboardItemType?) async throws {
+    private func cleanupExternalStorage(
+        targetBytes: Int,
+        typeFilter: ClipboardItemType?,
+        onCommitted: CleanupCommitHandler?
+    ) async throws -> CleanupResult {
         // 使缓存失效，确保获取最新大小
         invalidateExternalSizeCache()
         let currentSize = try await getExternalStorageSize()
-        if currentSize <= targetBytes { return }
+        if currentSize <= targetBytes { return .empty }
 
         let excessBytes = currentSize - targetBytes
         let plan = try await repository.planCleanupExternalStorage(excessBytes: excessBytes, typeFilter: typeFilter)
-        guard !plan.ids.isEmpty else { return }
+        guard !plan.ids.isEmpty else { return .empty }
         ScopyLog.storage.info(
             "cleanupExternalStorage: deleting \(plan.ids.count, privacy: .public) items (files=\(plan.storageRefs.count, privacy: .public)) excessBytes=\(excessBytes, privacy: .public) type=\(String(describing: typeFilter), privacy: .public)"
         )
-        try await applyDeletePlan(plan, logContext: "cleanupExternalStorage")
+        return try await applyDeletePlan(
+            plan,
+            logContext: "cleanupExternalStorage",
+            onCommitted: onCommitted
+        )
     }
 
     nonisolated static func deleteFilesBounded(
@@ -1730,6 +1929,101 @@ public final class StorageService {
                     }
                 }
             }
+        }
+    }
+
+    /// Deletes only refs still unowned after the cleanup transaction. Each bounded chunk holds
+    /// process-wide path reservations and performs one batch repository lookup, preserving orphan
+    /// safety without two serialized SQLite actor hops per file.
+    private nonisolated static func deleteCleanupFilesBounded(
+        _ fileURLs: [URL],
+        maxConcurrent: Int,
+        repository: SQLiteClipboardRepository,
+        reservations: ExternalFileReservationRegistry,
+        logContext: StaticString,
+        removeFile: @escaping FileRemover
+    ) async -> FileDeletionSummary {
+        guard !fileURLs.isEmpty else { return .empty }
+        let uniqueURLs = Dictionary(
+            fileURLs.map { ($0.path, $0) },
+            uniquingKeysWith: { first, _ in first }
+        ).values.sorted { $0.path < $1.path }
+        let workerCount = min(max(1, maxConcurrent), uniqueURLs.count)
+        let chunkSize = max(128, (uniqueURLs.count + workerCount - 1) / workerCount)
+
+        return await withTaskGroup(of: FileDeletionSummary.self) { group in
+            for start in stride(from: 0, to: uniqueURLs.count, by: chunkSize) {
+                let end = min(start + chunkSize, uniqueURLs.count)
+                let chunk = Array(uniqueURLs[start..<end])
+                group.addTask {
+                    let reservationKeys = chunk.map { externalReservationKey(forPath: $0.path) }
+                    guard let reservation = await reservations.acquire(resourceKeys: reservationKeys) else {
+                        return FileDeletionSummary(
+                            candidateCount: chunk.count,
+                            attemptedCount: 0,
+                            cleanupFailureCount: chunk.count
+                        )
+                    }
+
+                    let unreferenced: Set<String>
+                    do {
+                        unreferenced = try await repository.unreferencedStorageRefs(chunk.map(\.path))
+                    } catch {
+                        await reservations.release(reservation)
+                        ScopyLog.storage.warning(
+                            "[\(logContext)] Failed to verify cleanup file ownership: \(error.localizedDescription, privacy: .private)"
+                        )
+                        return FileDeletionSummary(
+                            candidateCount: chunk.count,
+                            attemptedCount: 0,
+                            cleanupFailureCount: chunk.count
+                        )
+                    }
+
+                    var attemptedCount = 0
+                    var cleanupFailureCount = 0
+                    for fileURL in chunk where unreferenced.contains(fileURL.path) {
+                        attemptedCount += 1
+                        do {
+                            try removeFile(fileURL)
+                        } catch let error as NSError {
+                            if error.domain == NSCocoaErrorDomain &&
+                                error.code == NSFileNoSuchFileError {
+                                continue
+                            }
+                            cleanupFailureCount += 1
+                            ScopyLog.storage.warning(
+                                "[\(logContext)] Failed to delete file '\(fileURL.path, privacy: .private)': \(error.localizedDescription, privacy: .private)"
+                            )
+                        } catch {
+                            cleanupFailureCount += 1
+                            ScopyLog.storage.warning(
+                                "[\(logContext)] Failed to delete file '\(fileURL.path, privacy: .private)': \(error.localizedDescription, privacy: .private)"
+                            )
+                        }
+                    }
+                    await reservations.release(reservation)
+                    return FileDeletionSummary(
+                        candidateCount: chunk.count,
+                        attemptedCount: attemptedCount,
+                        cleanupFailureCount: cleanupFailureCount
+                    )
+                }
+            }
+
+            var candidateCount = 0
+            var attemptedCount = 0
+            var cleanupFailureCount = 0
+            for await summary in group {
+                candidateCount += summary.candidateCount
+                attemptedCount += summary.attemptedCount
+                cleanupFailureCount += summary.cleanupFailureCount
+            }
+            return FileDeletionSummary(
+                candidateCount: candidateCount,
+                attemptedCount: attemptedCount,
+                cleanupFailureCount: cleanupFailureCount
+            )
         }
     }
 

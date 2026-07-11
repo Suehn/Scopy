@@ -420,6 +420,15 @@ actor ClipboardEventQueue {
         publications.removeAll(keepingCapacity: true)
     }
 
+    /// Invalidates only publications for rows a bulk cleanup actually deleted. Older suspended
+    /// per-item senders then fail `isLatest`, while unrelated item publications remain intact.
+    func invalidatePublications(itemIDs: [UUID]) {
+        guard !itemIDs.isEmpty else { return }
+        for itemID in Set(itemIDs) {
+            publications.removeValue(forKey: itemID)
+        }
+    }
+
     func discardPublication(_ token: PublicationToken) {
         completePublication(token)
     }
@@ -1440,12 +1449,10 @@ actor ClipboardService {
 
             if patch.requiresStorageCleanup {
                 do {
-                    let beforeCount = try await storage.getItemCount()
-                    try await storage.performCleanup()
-                    let afterCount = try await storage.getItemCount()
-                    if beforeCount != afterCount, let search {
-                        await search.invalidateCache()
-                    }
+                    _ = try await storage.performCleanup(
+                        mode: .full,
+                        onCommitted: cleanupCommitHandler()
+                    )
                 } catch {
                     ScopyLog.app.warning(
                         "Cleanup failed after settings update: \(error.localizedDescription, privacy: .private)"
@@ -1459,6 +1466,15 @@ actor ClipboardService {
 
     func getSettings() async -> SettingsDTO {
         await settingsStore.load()
+    }
+
+    func setCleanupInterlockForTesting(
+        _ interlock: (@Sendable (StorageService.CleanupInterlockPoint) async -> Void)?
+    ) async {
+        let storage = self.storage
+        await MainActor.run {
+            storage?.setCleanupInterlockForTesting(interlock)
+        }
     }
 
     func getStorageStats() async throws -> (itemCount: Int, sizeBytes: Int) {
@@ -2265,6 +2281,40 @@ actor ClipboardService {
         await eventQueue.enqueue(event)
     }
 
+    private func cleanupCommitHandler() -> StorageService.CleanupCommitHandler {
+        { [weak self] result in
+            guard let self else { return }
+            await self.handoffCommittedCleanup(result)
+        }
+    }
+
+    /// The caller may be a debounce task that becomes cancelled after SQLite commits. A detached
+    /// handoff gives the already-committed search/UI convergence work an independent cancellation
+    /// lifetime; cancellation remains meaningful only before a cleanup commit.
+    private func handoffCommittedCleanup(_ result: StorageService.CleanupResult) async {
+        guard !result.deletedItemIDs.isEmpty else { return }
+        let handoff = Task.detached(priority: .utility) { [weak self] in
+            guard let self else { return }
+            await self.publishCommittedCleanup(result)
+        }
+        await handoff.value
+    }
+
+    private func publishCommittedCleanup(_ result: StorageService.CleanupResult) async {
+        var seen: Set<UUID> = []
+        let deletedItemIDs = result.deletedItemIDs.filter { seen.insert($0).inserted }
+        guard !deletedItemIDs.isEmpty else { return }
+        let deletedSet = Set(deletedItemIDs)
+
+        if let search {
+            await search.invalidateCache()
+        }
+        fileSizeComputationLastAttemptAt.remove { deletedSet.contains($0.itemID) }
+        await fileSizeComputationQueue?.cancelPending { deletedSet.contains($0.itemID) }
+        await eventQueue.invalidatePublications(itemIDs: deletedItemIDs)
+        await yieldEvent(.itemsRemoved(deletedItemIDs))
+    }
+
     private func reservePublication(for itemID: UUID) async -> ClipboardEventQueue.PublicationToken {
         await eventQueue.reservePublication(itemID: itemID)
     }
@@ -2299,12 +2349,10 @@ actor ClipboardService {
 
         let mode: StorageService.CleanupMode = needsFull ? .full : .light
         do {
-            let beforeCount = try await storage.getItemCount()
-            try await storage.performCleanup(mode: mode)
-            let afterCount = try await storage.getItemCount()
-            if beforeCount != afterCount, let search {
-                await search.invalidateCache()
-            }
+            _ = try await storage.performCleanup(
+                mode: mode,
+                onCommitted: cleanupCommitHandler()
+            )
             lastLightCleanupAt = now
             if needsFull { lastFullCleanupAt = now }
         } catch {

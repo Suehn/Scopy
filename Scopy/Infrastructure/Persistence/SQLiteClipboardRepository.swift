@@ -16,9 +16,30 @@ actor SQLiteClipboardRepository {
         }
     }
 
+    struct DeleteCandidate: Sendable {
+        let id: UUID
+        let type: ClipboardItemType
+        let contentHash: String
+        let lastUsedAt: Date
+        let sizeBytes: Int
+        let storageRef: String?
+    }
+
     struct DeletePlan: Sendable {
-        let ids: [UUID]
+        let candidates: [DeleteCandidate]
+
+        var ids: [UUID] { candidates.map(\.id) }
+        var storageRefs: [String] { candidates.compactMap(\.storageRef) }
+
+        static let empty = DeletePlan(candidates: [])
+    }
+
+    struct DeleteCommitResult: Sendable {
+        let plannedCount: Int
+        let deletedItemIDs: [UUID]
         let storageRefs: [String]
+
+        var skippedCount: Int { max(0, plannedCount - deletedItemIDs.count) }
     }
 
     enum IngestReceiptLookup: Sendable {
@@ -39,22 +60,17 @@ actor SQLiteClipboardRepository {
     }
 
     static func mergeDeletePlans(_ plans: [DeletePlan]) -> DeletePlan {
-        guard !plans.isEmpty else { return DeletePlan(ids: [], storageRefs: []) }
+        guard !plans.isEmpty else { return .empty }
 
-        var mergedIDs: [UUID] = []
+        var mergedCandidates: [DeleteCandidate] = []
         var seenIDs: Set<UUID> = []
-        var mergedRefs: [String] = []
-        var seenRefs: Set<String> = []
 
         for plan in plans {
-            for id in plan.ids where seenIDs.insert(id).inserted {
-                mergedIDs.append(id)
-            }
-            for ref in plan.storageRefs where seenRefs.insert(ref).inserted {
-                mergedRefs.append(ref)
+            for candidate in plan.candidates where seenIDs.insert(candidate.id).inserted {
+                mergedCandidates.append(candidate)
             }
         }
-        return DeletePlan(ids: mergedIDs, storageRefs: mergedRefs)
+        return DeletePlan(candidates: mergedCandidates)
     }
 
     struct ExternalStorageSizeRecord: Sendable {
@@ -952,45 +968,72 @@ actor SQLiteClipboardRepository {
         return try stmt.step()
     }
 
+    /// Batch ownership check for post-commit cleanup. Callers hold process-wide file reservations
+    /// for these exact paths while this query and unlink run, avoiding per-file actor round trips.
+    func unreferencedStorageRefs(_ storageRefs: [String]) throws -> Set<String> {
+        guard !storageRefs.isEmpty else { return [] }
+        var unreferenced = Set(storageRefs)
+        let batchSize = 900
+
+        for batchStart in stride(from: 0, to: storageRefs.count, by: batchSize) {
+            let batchEnd = min(batchStart + batchSize, storageRefs.count)
+            let batch = Array(storageRefs[batchStart..<batchEnd])
+            let placeholders = batch.map { _ in "?" }.joined(separator: ",")
+            let stmt = try prepare(
+                """
+                SELECT DISTINCT storage_ref
+                FROM clipboard_items
+                WHERE storage_ref IN (\(placeholders))
+                """
+            )
+            for (index, storageRef) in batch.enumerated() {
+                try stmt.bindText(storageRef, at: Int32(index + 1))
+            }
+            while try stmt.step() {
+                if let referenced = stmt.columnText(0) {
+                    unreferenced.remove(referenced)
+                }
+            }
+        }
+        return unreferenced
+    }
+
     func planCleanupByCount(target: Int) throws -> DeletePlan {
         let currentCount: Int
         do {
             let stmt = try prepare("SELECT unpinned_count FROM scopy_meta WHERE id = 1")
-            guard try stmt.step() else { return DeletePlan(ids: [], storageRefs: []) }
+            guard try stmt.step() else { return .empty }
             currentCount = stmt.columnInt(0)
         } catch {
             let countSQL = "SELECT COUNT(*) FROM clipboard_items WHERE is_pinned = 0"
             let countStmt = try prepare(countSQL)
-            guard try countStmt.step() else { return DeletePlan(ids: [], storageRefs: []) }
+            guard try countStmt.step() else { return .empty }
             currentCount = countStmt.columnInt(0)
         }
 
         let deleteCount = currentCount - target
-        guard deleteCount > 0 else { return DeletePlan(ids: [], storageRefs: []) }
+        guard deleteCount > 0 else { return .empty }
 
         let selectSQL = """
-            SELECT id, storage_ref FROM clipboard_items
+            SELECT id, type, content_hash, last_used_at, size_bytes, storage_ref
+            FROM clipboard_items
             WHERE is_pinned = 0
-            ORDER BY last_used_at ASC
+            ORDER BY last_used_at ASC, id ASC
             LIMIT ?
         """
         let selectStmt = try prepare(selectSQL)
         try selectStmt.bindInt(deleteCount, at: 1)
 
-        var ids: [UUID] = []
-        var refs: [String] = []
-        ids.reserveCapacity(deleteCount)
+        var candidates: [DeleteCandidate] = []
+        candidates.reserveCapacity(deleteCount)
 
         while try selectStmt.step() {
-            guard let idString = selectStmt.columnText(0),
-                  let id = UUID(uuidString: idString) else { continue }
-            ids.append(id)
-            if let ref = selectStmt.columnText(1) {
-                refs.append(ref)
+            if let candidate = try parseDeleteCandidate(from: selectStmt) {
+                candidates.append(candidate)
             }
         }
 
-        return DeletePlan(ids: ids, storageRefs: refs)
+        return DeletePlan(candidates: candidates)
     }
 
     func planCleanupByAge(cutoff: Date) throws -> DeletePlan {
@@ -999,7 +1042,8 @@ actor SQLiteClipboardRepository {
 
     func planCleanupByAge(cutoff: Date, typeFilter: ClipboardItemType?) throws -> DeletePlan {
         var selectSQL = """
-            SELECT id, storage_ref FROM clipboard_items
+            SELECT id, type, content_hash, last_used_at, size_bytes, storage_ref
+            FROM clipboard_items
             WHERE is_pinned = 0 AND created_at < ?
         """
         if typeFilter != nil {
@@ -1011,17 +1055,13 @@ actor SQLiteClipboardRepository {
             try stmt.bindText(typeFilter.rawValue, at: 2)
         }
 
-        var ids: [UUID] = []
-        var refs: [String] = []
+        var candidates: [DeleteCandidate] = []
         while try stmt.step() {
-            guard let idString = stmt.columnText(0),
-                  let id = UUID(uuidString: idString) else { continue }
-            ids.append(id)
-            if let ref = stmt.columnText(1) {
-                refs.append(ref)
+            if let candidate = try parseDeleteCandidate(from: stmt) {
+                candidates.append(candidate)
             }
         }
-        return DeletePlan(ids: ids, storageRefs: refs)
+        return DeletePlan(candidates: candidates)
     }
 
     func planCleanupByTotalSize(targetBytes: Int) throws -> DeletePlan {
@@ -1030,12 +1070,13 @@ actor SQLiteClipboardRepository {
 
     func planCleanupByTotalSize(targetBytes: Int, typeFilter: ClipboardItemType?) throws -> DeletePlan {
         let currentSize = try getTotalSize()
-        guard currentSize > targetBytes else { return DeletePlan(ids: [], storageRefs: []) }
+        guard currentSize > targetBytes else { return .empty }
 
         let excessBytes = currentSize - targetBytes
 
         var sql = """
-            SELECT id, size_bytes, storage_ref FROM clipboard_items
+            SELECT id, type, content_hash, last_used_at, size_bytes, storage_ref
+            FROM clipboard_items
             WHERE is_pinned = 0
         """
         if typeFilter != nil {
@@ -1051,29 +1092,20 @@ actor SQLiteClipboardRepository {
             try stmt.bindText(typeFilter.rawValue, at: 1)
         }
 
-        var ids: [UUID] = []
-        var refs: [String] = []
+        var candidates: [DeleteCandidate] = []
         var accumulatedSize = 0
 
         while try stmt.step() {
-            guard let idString = stmt.columnText(0),
-                  let id = UUID(uuidString: idString) else { continue }
-
-            let size = stmt.columnInt(1)
-            let ref = stmt.columnText(2)
-
-            ids.append(id)
-            accumulatedSize += size
-            if let ref {
-                refs.append(ref)
-            }
+            guard let candidate = try parseDeleteCandidate(from: stmt) else { continue }
+            candidates.append(candidate)
+            accumulatedSize += candidate.sizeBytes
 
             if accumulatedSize >= excessBytes {
                 break
             }
         }
 
-        return DeletePlan(ids: ids, storageRefs: refs)
+        return DeletePlan(candidates: candidates)
     }
 
     func sumExternalBytes(ids: [UUID]) throws -> Int {
@@ -1117,7 +1149,8 @@ actor SQLiteClipboardRepository {
         excludingIDs: Set<UUID>
     ) throws -> DeletePlan {
         var sql = """
-            SELECT id, size_bytes, storage_ref FROM clipboard_items
+            SELECT id, type, content_hash, last_used_at, size_bytes, storage_ref
+            FROM clipboard_items
             WHERE is_pinned = 0 AND storage_ref IS NOT NULL
         """
         if typeFilter != nil {
@@ -1130,21 +1163,17 @@ actor SQLiteClipboardRepository {
             try stmt.bindText(typeFilter.rawValue, at: 1)
         }
 
-        var ids: [UUID] = []
-        var refs: [String] = []
+        var candidates: [DeleteCandidate] = []
         var accumulatedSize: Int64 = 0
         let targetBytes = Int64(max(0, excessBytes))
 
         while try stmt.step() {
-            guard let idString = stmt.columnText(0),
-                  let id = UUID(uuidString: idString),
-                  let ref = stmt.columnText(2) else { continue }
-            if excludingIDs.contains(id) { continue }
+            guard let candidate = try parseDeleteCandidate(from: stmt),
+                  candidate.storageRef != nil else { continue }
+            if excludingIDs.contains(candidate.id) { continue }
 
-            let size = max(Int64(0), stmt.columnInt64(1))
-
-            ids.append(id)
-            refs.append(ref)
+            candidates.append(candidate)
+            let size = max(Int64(0), Int64(candidate.sizeBytes))
             accumulatedSize += size
 
             if accumulatedSize >= targetBytes {
@@ -1152,48 +1181,72 @@ actor SQLiteClipboardRepository {
             }
         }
 
-        return DeletePlan(ids: ids, storageRefs: refs)
+        return DeletePlan(candidates: candidates)
     }
 
     func planCleanupUnpinnedImages(limit: Int) throws -> DeletePlan {
-        guard limit > 0 else { return DeletePlan(ids: [], storageRefs: []) }
+        guard limit > 0 else { return .empty }
 
         let sql = """
-            SELECT id, storage_ref FROM clipboard_items
+            SELECT id, type, content_hash, last_used_at, size_bytes, storage_ref
+            FROM clipboard_items
             WHERE is_pinned = 0 AND type = ?
-            ORDER BY last_used_at ASC
+            ORDER BY last_used_at ASC, id ASC
             LIMIT ?
         """
         let stmt = try prepare(sql)
         try stmt.bindText(ClipboardItemType.image.rawValue, at: 1)
         try stmt.bindInt(limit, at: 2)
 
-        var ids: [UUID] = []
-        var refs: [String] = []
-        ids.reserveCapacity(limit)
+        var candidates: [DeleteCandidate] = []
+        candidates.reserveCapacity(limit)
 
         while try stmt.step() {
-            guard let idString = stmt.columnText(0),
-                  let id = UUID(uuidString: idString) else { continue }
-            ids.append(id)
-            if let ref = stmt.columnText(1) {
-                refs.append(ref)
+            if let candidate = try parseDeleteCandidate(from: stmt) {
+                candidates.append(candidate)
             }
         }
 
-        return DeletePlan(ids: ids, storageRefs: refs)
+        return DeletePlan(candidates: candidates)
     }
 
-    func deleteItemsBatchInTransaction(ids: [UUID]) throws {
-        guard !ids.isEmpty else { return }
-        try performWriteTransaction {
-            let batchSize = 999
-            for batchStart in stride(from: 0, to: ids.count, by: batchSize) {
-                let batchEnd = min(batchStart + batchSize, ids.count)
-                let batch = Array(ids[batchStart..<batchEnd])
-                try deleteItemsBatch(ids: batch)
-            }
+    /// Commits only candidates whose cleanup-relevant snapshot is still current. Planning remains
+    /// an advisory read for fast policy selection; pin/payload/recency revalidation, ref capture,
+    /// and deletion share one write transaction so actor reentrancy cannot delete a newer row.
+    func commitDeletePlan(_ plan: DeletePlan) throws -> DeleteCommitResult {
+        guard !plan.candidates.isEmpty else {
+            return DeleteCommitResult(plannedCount: 0, deletedItemIDs: [], storageRefs: [])
         }
+
+        var deletedItemIDs: [UUID] = []
+        var deletedStorageRefs: [String] = []
+        _ = try performConditionalWriteTransaction {
+            let batchSize = 900
+            for batchStart in stride(from: 0, to: plan.candidates.count, by: batchSize) {
+                let batchEnd = min(batchStart + batchSize, plan.candidates.count)
+                let batch = Array(plan.candidates[batchStart..<batchEnd])
+                let currentCandidates = try fetchCurrentDeleteCandidates(ids: batch.map(\.id))
+                let plannedByID = Dictionary(
+                    uniqueKeysWithValues: batch.map { ($0.id, $0) }
+                )
+                let committed = currentCandidates.filter { current in
+                    guard let planned = plannedByID[current.id] else { return false }
+                    return Self.hasSameCleanupSnapshot(current, as: planned)
+                }
+                guard !committed.isEmpty else { continue }
+
+                try deleteItemsBatch(ids: committed.map(\.id))
+                deletedItemIDs.append(contentsOf: committed.map(\.id))
+                deletedStorageRefs.append(contentsOf: committed.compactMap(\.storageRef))
+            }
+            return !deletedItemIDs.isEmpty
+        }
+
+        return DeleteCommitResult(
+            plannedCount: plan.candidates.count,
+            deletedItemIDs: deletedItemIDs,
+            storageRefs: deletedStorageRefs
+        )
     }
 
     func incrementalVacuum(pages: Int) throws {
@@ -1395,6 +1448,63 @@ actor SQLiteClipboardRepository {
             lhs.fileSizeBytes == rhs.fileSizeBytes &&
             lhs.storageRef == rhs.storageRef &&
             lhs.rawData == rhs.rawData
+    }
+
+    private static func hasSameCleanupSnapshot(
+        _ lhs: DeleteCandidate,
+        as rhs: DeleteCandidate
+    ) -> Bool {
+        lhs.id == rhs.id &&
+            lhs.type == rhs.type &&
+            lhs.contentHash == rhs.contentHash &&
+            lhs.lastUsedAt == rhs.lastUsedAt &&
+            lhs.sizeBytes == rhs.sizeBytes &&
+            lhs.storageRef == rhs.storageRef
+    }
+
+    /// Expected columns: id, type, content_hash, last_used_at, size_bytes, storage_ref.
+    private func parseDeleteCandidate(from stmt: SQLiteStatement) throws -> DeleteCandidate? {
+        guard let idString = stmt.columnText(0),
+              let id = UUID(uuidString: idString),
+              let typeString = stmt.columnText(1),
+              let type = ClipboardItemType(rawValue: typeString),
+              let contentHash = stmt.columnText(2) else {
+            return nil
+        }
+        return DeleteCandidate(
+            id: id,
+            type: type,
+            contentHash: contentHash,
+            lastUsedAt: Date(timeIntervalSince1970: stmt.columnDouble(3)),
+            sizeBytes: stmt.columnInt(4),
+            storageRef: stmt.columnText(5)
+        )
+    }
+
+    /// The explicit pin predicate is part of the commit-time read. Because this executes after
+    /// BEGIN IMMEDIATE, no writer can change a matched row before the following batch delete.
+    private func fetchCurrentDeleteCandidates(ids: [UUID]) throws -> [DeleteCandidate] {
+        guard !ids.isEmpty else { return [] }
+        let placeholders = ids.map { _ in "?" }.joined(separator: ",")
+        let stmt = try prepare(
+            """
+            SELECT id, type, content_hash, last_used_at, size_bytes, storage_ref
+            FROM clipboard_items
+            WHERE is_pinned = 0 AND id IN (\(placeholders))
+            """
+        )
+        for (index, id) in ids.enumerated() {
+            try stmt.bindText(id.uuidString, at: Int32(index + 1))
+        }
+
+        var candidates: [DeleteCandidate] = []
+        candidates.reserveCapacity(ids.count)
+        while try stmt.step() {
+            if let candidate = try parseDeleteCandidate(from: stmt) {
+                candidates.append(candidate)
+            }
+        }
+        return candidates
     }
 
     private func execute(_ sql: String) throws {
