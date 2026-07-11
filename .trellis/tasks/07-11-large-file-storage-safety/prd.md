@@ -34,19 +34,19 @@ Eliminate deterministic crashes and truncation when Scopy encounters a legitimat
 
 ## Acceptance Criteria
 
-- [ ] `SQLiteStatement.bindInt` uses a 64-bit SQLite binding and `columnInt`/optional read through the 64-bit SQLite column API.
-- [ ] Focused statement coverage round-trips at least `Int32.max + 1`, `5 * 1024^3`, and ordinary pagination/bool values, including nullable integers.
-- [ ] A disk-backed repository test inserts, closes, reopens, fetches, updates, and totals an item whose byte fields exceed `Int32.max` with exact equality.
-- [ ] A cleanup regression proves that one large old row satisfies the target without selecting unrelated later rows.
-- [ ] A display/search-facing regression keeps a 5 GiB size positive and exact after hydration.
-- [ ] A sparse 5 GiB file is created with `FileHandle.truncate(atOffset:)`; `FilePreviewSupport.totalFileSizeBytes` returns exactly 5 GiB without materializing 5 GiB of data.
-- [ ] Multi-file aggregation has an explicit overflow test seam and returns `nil` on overflow rather than trapping or saturating silently.
-- [ ] No migration or public DTO/protocol shape changes are introduced.
-- [ ] `make build` and `make test-unit` pass.
-- [ ] `make test-strict` passes because the storage actor and async metadata path are covered, even though no new concurrency mechanism is added.
-- [ ] `make test-snapshot-perf-release` passes on a fresh snapshot; no performance improvement is claimed from a correctness-only change.
-- [ ] `make docs-validate`, `make release-validate`, and `git diff --check` pass.
-- [ ] Changes are split into coherent, reversible local commits; no push or tag is performed.
+- [x] `SQLiteStatement.bindInt` uses a 64-bit SQLite binding and `columnInt`/optional read through the 64-bit SQLite column API.
+- [x] Focused statement coverage round-trips at least `Int32.max + 1`, `5 * 1024^3`, and ordinary pagination/bool values, including nullable integers.
+- [x] A disk-backed repository test inserts, closes, reopens, fetches, updates, and totals an item whose byte fields exceed `Int32.max` with exact equality.
+- [x] A cleanup regression proves that one large old row satisfies the target without selecting unrelated later rows.
+- [x] A display/search-facing regression keeps a 5 GiB size positive and exact after hydration.
+- [x] A sparse 5 GiB file is created with `FileHandle.truncate(atOffset:)`; `FilePreviewSupport.totalFileSizeBytes` returns exactly 5 GiB without materializing 5 GiB of data.
+- [x] Multi-file aggregation has an explicit overflow test seam and returns `nil` on overflow rather than trapping or saturating silently.
+- [x] No migration or public DTO/protocol shape changes are introduced.
+- [x] `make build` and `make test-unit` pass.
+- [x] `make test-strict` passes because the storage actor and async metadata path are covered, even though no new concurrency mechanism is added.
+- [x] `make test-snapshot-perf-release` passes on a fresh snapshot; no performance improvement is claimed from a correctness-only change.
+- [x] `make docs-validate`, `make release-validate`, and `git diff --check` pass.
+- [x] Changes are split into coherent, reversible local commits; no push or tag is performed.
 
 ## Definition Of Done
 
@@ -100,3 +100,4 @@ Eliminate deterministic crashes and truncation when Scopy encounters a legitimat
 ## Research References
 
 - [`research/large-file-persistence-audit.md`](research/large-file-persistence-audit.md) — end-to-end crash, truncation, cleanup, schema, and test-boundary audit from the current worktree.
+- [`verification.md`](verification.md) — requirement-by-requirement evidence, exact gate results, snapshot identity, commits, and rollback boundary.
