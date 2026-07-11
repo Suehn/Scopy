@@ -863,7 +863,7 @@ final class ClipboardMonitorTests: XCTestCase {
         let task = Task {
             for await content in monitor.contentStream where content.type == .image {
                 if let envelopeURL = content.ingestEnvelopeURL {
-                    monitor.acknowledgeIngestEnvelope(at: envelopeURL)
+                    self.acknowledgeAndCompleteEnvelope(envelopeURL)
                 }
                 expectation.fulfill()
                 break
@@ -916,7 +916,7 @@ final class ClipboardMonitorTests: XCTestCase {
         let task = Task {
             for await content in monitor.contentStream where content.type == .image {
                 if let envelopeURL = content.ingestEnvelopeURL {
-                    monitor.acknowledgeIngestEnvelope(at: envelopeURL)
+                    self.acknowledgeAndCompleteEnvelope(envelopeURL)
                 }
                 expectation.fulfill()
                 break
@@ -947,7 +947,7 @@ final class ClipboardMonitorTests: XCTestCase {
                 XCTAssertTrue(self.isLikelyPNG(data ?? Data()), "Emitted file payload should contain PNG bytes")
                 XCTAssertEqual(content.sizeBytes, data?.count)
                 if let envelopeURL = content.ingestEnvelopeURL {
-                    monitor.acknowledgeIngestEnvelope(at: envelopeURL)
+                    self.acknowledgeAndCompleteEnvelope(envelopeURL)
                 }
                 expectation.fulfill()
                 break
@@ -1207,5 +1207,17 @@ final class ClipboardMonitorTests: XCTestCase {
             return 0
         }
         return urls.filter { $0.lastPathComponent.hasSuffix(".envelope.json") }.count
+    }
+
+    private func acknowledgeAndCompleteEnvelope(_ envelopeURL: URL) {
+        switch monitor.acknowledgeIngestEnvelope(at: envelopeURL) {
+        case .terminal(let acknowledgement):
+            XCTAssertTrue(
+                monitor.completeTerminalIngestAcknowledgement(acknowledgement),
+                "Terminal acknowledgement artifacts should be drained by the caller"
+            )
+        case .rejected:
+            XCTFail("Owned ingest envelope should transition to terminal state")
+        }
     }
 }

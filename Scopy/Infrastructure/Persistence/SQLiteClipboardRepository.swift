@@ -21,6 +21,23 @@ actor SQLiteClipboardRepository {
         let storageRefs: [String]
     }
 
+    enum IngestReceiptLookup: Sendable {
+        case missing
+        case alreadyApplied(ClipboardStoredItem?)
+    }
+
+    enum IngestUpsertOutcome: Sendable {
+        case inserted(ClipboardStoredItem)
+        case updated(ClipboardStoredItem)
+        case alreadyApplied(ClipboardStoredItem?)
+    }
+
+    enum ExistingIngestCommitOutcome: Sendable {
+        case needsInsert
+        case updated(ClipboardStoredItem)
+        case alreadyApplied(ClipboardStoredItem?)
+    }
+
     static func mergeDeletePlans(_ plans: [DeletePlan]) -> DeletePlan {
         guard !plans.isEmpty else { return DeletePlan(ids: [], storageRefs: []) }
 
@@ -160,32 +177,138 @@ actor SQLiteClipboardRepository {
         rawData: Data?
     ) throws {
         try performWriteTransaction {
-            let sql = """
-                INSERT INTO clipboard_items
-                (id, type, content_hash, plain_text, note, app_bundle_id, created_at, last_used_at, use_count, is_pinned, size_bytes, storage_ref, raw_data, file_size_bytes)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?, ?, ?, ?)
-            """
-            let stmt = try prepare(sql)
+            try insertItemRow(
+                id: id,
+                type: type,
+                contentHash: contentHash,
+                plainText: plainText,
+                note: note,
+                appBundleID: appBundleID,
+                createdAt: createdAt,
+                lastUsedAt: lastUsedAt,
+                sizeBytes: sizeBytes,
+                fileSizeBytes: fileSizeBytes,
+                storageRef: storageRef,
+                rawData: rawData
+            )
+        }
+    }
 
-            try stmt.bindText(id.uuidString, at: 1)
-            try stmt.bindText(type.rawValue, at: 2)
-            try stmt.bindText(contentHash, at: 3)
-            try stmt.bindText(plainText, at: 4)
-            try stmt.bindText(note, at: 5)
-            try stmt.bindText(appBundleID, at: 6)
-            try stmt.bindDouble(createdAt.timeIntervalSince1970, at: 7)
-            try stmt.bindDouble(lastUsedAt.timeIntervalSince1970, at: 8)
-            try stmt.bindInt(sizeBytes, at: 9)
-            try stmt.bindText(storageRef, at: 10)
-            try stmt.bindBlob(rawData, at: 11)
-            if let fileSizeBytes {
-                try stmt.bindInt(fileSizeBytes, at: 12)
-            } else {
-                try stmt.bindNull(12)
+    /// Resolves an existing receipt under BEGIN IMMEDIATE before external file work. A missing
+    /// result is only advisory; the final receipt/hash decision is repeated by
+    /// `upsertItemForIngest` after candidate publication.
+    func resolveExistingIngestReceipt(_ ingestID: UUID) throws -> IngestReceiptLookup {
+        var result: IngestReceiptLookup = .missing
+        try performMaintenanceWriteTransaction {
+            guard let itemID = try fetchIngestReceiptItemID(ingestID) else { return }
+            result = .alreadyApplied(try fetchItemByID(itemID))
+        }
+        return result
+    }
+
+    /// Read-only hint. Callers must never publish or acknowledge from this result; it only avoids
+    /// taking a write transaction for the common new-content path.
+    func mightResolveIngestWithoutFileWork(ingestID: UUID, contentHash: String) throws -> Bool {
+        if try fetchIngestReceiptItemID(ingestID) != nil { return true }
+        return try fetchItemByHash(contentHash) != nil
+    }
+
+    /// Finalizes only receipt replay or an existing-hash use. If the advisory row disappeared,
+    /// returns `needsInsert`; the caller then publishes a candidate and uses the full final upsert.
+    func commitExistingIngestIfPossible(
+        ingestID: UUID,
+        contentHash: String,
+        lastUsedAt: Date
+    ) throws -> ExistingIngestCommitOutcome {
+        var outcome: ExistingIngestCommitOutcome = .needsInsert
+        _ = try performConditionalWriteTransaction {
+            if let receiptItemID = try fetchIngestReceiptItemID(ingestID) {
+                outcome = .alreadyApplied(try fetchItemByID(receiptItemID))
+                return false
+            }
+            guard let existing = try fetchItemByHash(contentHash) else { return false }
+            let updated = try incrementUsageRow(existing.id, lastUsedAt: lastUsedAt)
+            try insertIngestReceipt(ingestID: ingestID, itemID: updated.id, committedAt: lastUsedAt)
+            outcome = .updated(updated)
+            return true
+        }
+        return outcome
+    }
+
+    /// Atomically applies one durable envelope. Receipt lookup, final hash recheck, item mutation,
+    /// and receipt insertion share the same write transaction so replay cannot increment usage
+    /// twice or resurrect a later-deleted row.
+    func upsertItemForIngest(
+        ingestID: UUID,
+        id: UUID,
+        type: ClipboardItemType,
+        contentHash: String,
+        plainText: String,
+        note: String?,
+        appBundleID: String?,
+        createdAt: Date,
+        lastUsedAt: Date,
+        sizeBytes: Int,
+        fileSizeBytes: Int?,
+        storageRef: String?,
+        rawData: Data?
+    ) throws -> IngestUpsertOutcome {
+        var outcome: IngestUpsertOutcome?
+        _ = try performConditionalWriteTransaction {
+            if let receiptItemID = try fetchIngestReceiptItemID(ingestID) {
+                outcome = .alreadyApplied(try fetchItemByID(receiptItemID))
+                return false
             }
 
+            if let existing = try fetchItemByHash(contentHash) {
+                let updated = try incrementUsageRow(existing.id, lastUsedAt: lastUsedAt)
+                try insertIngestReceipt(ingestID: ingestID, itemID: updated.id, committedAt: lastUsedAt)
+                outcome = .updated(updated)
+                return true
+            }
+
+            try insertItemRow(
+                id: id,
+                type: type,
+                contentHash: contentHash,
+                plainText: plainText,
+                note: note,
+                appBundleID: appBundleID,
+                createdAt: createdAt,
+                lastUsedAt: lastUsedAt,
+                sizeBytes: sizeBytes,
+                fileSizeBytes: fileSizeBytes,
+                storageRef: storageRef,
+                rawData: rawData
+            )
+            try insertIngestReceipt(ingestID: ingestID, itemID: id, committedAt: lastUsedAt)
+            guard let inserted = try fetchItemByID(id) else {
+                throw RepositoryError.queryFailed("Inserted ingest row could not be read back")
+            }
+            outcome = .inserted(inserted)
+            return true
+        }
+
+        guard let outcome else {
+            throw RepositoryError.queryFailed("Ingest transaction produced no outcome")
+        }
+        return outcome
+    }
+
+    /// Receipt cleanup is maintenance metadata: it intentionally does not advance mutation_seq
+    /// because item/search authority is unchanged.
+    func removeIngestReceipt(_ ingestID: UUID) throws {
+        try performMaintenanceWriteTransaction {
+            let stmt = try prepare("DELETE FROM ingest_receipts WHERE ingest_id = ?")
+            try stmt.bindText(ingestID.uuidString, at: 1)
             _ = try stmt.step()
         }
+    }
+
+    func ingestReceiptCount() throws -> Int {
+        let stmt = try prepare("SELECT COUNT(*) FROM ingest_receipts")
+        guard try stmt.step() else { return 0 }
+        return stmt.columnInt(0)
     }
 
     /// Atomically records one use and returns the complete row that won the transaction. Using an
@@ -1130,6 +1253,99 @@ actor SQLiteClipboardRepository {
         }
     }
 
+    private func performMaintenanceWriteTransaction(_ body: () throws -> Void) throws {
+        try execute("BEGIN IMMEDIATE TRANSACTION")
+        do {
+            try body()
+            try execute("COMMIT")
+        } catch {
+            do {
+                try execute("ROLLBACK")
+            } catch {
+                isDatabaseCorrupted = true
+                try recoverDatabase()
+            }
+            throw error
+        }
+    }
+
+    private func insertItemRow(
+        id: UUID,
+        type: ClipboardItemType,
+        contentHash: String,
+        plainText: String,
+        note: String?,
+        appBundleID: String?,
+        createdAt: Date,
+        lastUsedAt: Date,
+        sizeBytes: Int,
+        fileSizeBytes: Int?,
+        storageRef: String?,
+        rawData: Data?
+    ) throws {
+        let stmt = try prepare(
+            """
+            INSERT INTO clipboard_items
+            (id, type, content_hash, plain_text, note, app_bundle_id, created_at, last_used_at, use_count, is_pinned, size_bytes, storage_ref, raw_data, file_size_bytes)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?, ?, ?, ?)
+            """
+        )
+        try stmt.bindText(id.uuidString, at: 1)
+        try stmt.bindText(type.rawValue, at: 2)
+        try stmt.bindText(contentHash, at: 3)
+        try stmt.bindText(plainText, at: 4)
+        try stmt.bindText(note, at: 5)
+        try stmt.bindText(appBundleID, at: 6)
+        try stmt.bindDouble(createdAt.timeIntervalSince1970, at: 7)
+        try stmt.bindDouble(lastUsedAt.timeIntervalSince1970, at: 8)
+        try stmt.bindInt(sizeBytes, at: 9)
+        try stmt.bindText(storageRef, at: 10)
+        try stmt.bindBlob(rawData, at: 11)
+        if let fileSizeBytes {
+            try stmt.bindInt(fileSizeBytes, at: 12)
+        } else {
+            try stmt.bindNull(12)
+        }
+        _ = try stmt.step()
+    }
+
+    private func fetchIngestReceiptItemID(_ ingestID: UUID) throws -> UUID? {
+        let stmt = try prepare("SELECT item_id FROM ingest_receipts WHERE ingest_id = ? LIMIT 1")
+        try stmt.bindText(ingestID.uuidString, at: 1)
+        guard try stmt.step() else { return nil }
+        guard let rawID = stmt.columnText(0), let itemID = UUID(uuidString: rawID) else {
+            throw RepositoryError.queryFailed("Invalid item id in ingest receipt")
+        }
+        return itemID
+    }
+
+    private func insertIngestReceipt(ingestID: UUID, itemID: UUID, committedAt: Date) throws {
+        let stmt = try prepare(
+            "INSERT INTO ingest_receipts (ingest_id, item_id, committed_at) VALUES (?, ?, ?)"
+        )
+        try stmt.bindText(ingestID.uuidString, at: 1)
+        try stmt.bindText(itemID.uuidString, at: 2)
+        try stmt.bindDouble(committedAt.timeIntervalSince1970, at: 3)
+        _ = try stmt.step()
+    }
+
+    private func incrementUsageRow(_ id: UUID, lastUsedAt: Date) throws -> ClipboardStoredItem {
+        let stmt = try prepare(
+            """
+            UPDATE clipboard_items
+            SET last_used_at = MAX(last_used_at, ?), use_count = use_count + 1
+            WHERE id = ?
+            """
+        )
+        try stmt.bindDouble(lastUsedAt.timeIntervalSince1970, at: 1)
+        try stmt.bindText(id.uuidString, at: 2)
+        _ = try stmt.step()
+        guard let updated = try fetchItemByID(id) else {
+            throw RepositoryError.queryFailed("Ingest dedup row disappeared inside write transaction")
+        }
+        return updated
+    }
+
     private func updateMetadataAndReturnCurrent(
         id: UUID,
         update: MetadataUpdate
@@ -1210,6 +1426,13 @@ actor SQLiteClipboardRepository {
         let ftsStmt = try connection.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='clipboard_fts'")
         guard try ftsStmt.step() else {
             throw RepositoryError.migrationFailed("FTS table 'clipboard_fts' not found")
+        }
+
+        let receiptStmt = try connection.prepare(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='ingest_receipts'"
+        )
+        guard try receiptStmt.step() else {
+            throw RepositoryError.migrationFailed("Receipt table 'ingest_receipts' not found")
         }
     }
 

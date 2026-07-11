@@ -876,6 +876,21 @@ actor ClipboardService {
 
         let pasteboardName = monitorPasteboardName
         let pollingInterval = monitorPollingInterval ?? (TimeInterval(loadedSettings.clipboardPollingIntervalMs) / 1000.0)
+        let storage = await MainActor.run { StorageService(databasePath: databasePath) }
+        let ingestSpoolDirectory = URL(
+            fileURLWithPath: storage.ingestSpoolDirectoryPath,
+            isDirectory: true
+        )
+        let legacyIngestSpoolDirectory = databasePath == nil
+            ? ClipboardMonitor.defaultLegacyIngestSpoolDirectory()
+            : nil
+
+        await Task.detached(priority: .utility) {
+            ClipboardMonitor.prepareIngestSpoolDirectory(
+                ingestSpoolDirectory,
+                legacyDirectory: legacyIngestSpoolDirectory
+            )
+        }.value
 
         let monitor = await MainActor.run {
             let pasteboard: NSPasteboard
@@ -884,16 +899,50 @@ actor ClipboardService {
             } else {
                 pasteboard = .general
             }
-            return ClipboardMonitor(pasteboard: pasteboard, pollingInterval: pollingInterval)
+            return ClipboardMonitor(
+                pasteboard: pasteboard,
+                pollingInterval: pollingInterval,
+                ingestSpoolDirectory: ingestSpoolDirectory,
+                legacyIngestSpoolDirectory: legacyIngestSpoolDirectory,
+                spoolAlreadyPrepared: true
+            )
         }
 
-        let storage = await MainActor.run { StorageService(databasePath: databasePath) }
         let dbPath = await storage.databaseFilePath
         let search = SearchEngineImpl(dbPath: dbPath)
 
         do {
             try await storage.open()
             try await search.open()
+
+            var deferredTerminalIngestIDs = Set<UUID>()
+            while true {
+                let excludedIDs = deferredTerminalIngestIDs
+                let terminalAcknowledgements = await MainActor.run {
+                    monitor.pendingTerminalIngestAcknowledgements(
+                        limit: 256,
+                        excluding: excludedIDs
+                    )
+                }
+                guard !terminalAcknowledgements.isEmpty else { break }
+                for acknowledgement in terminalAcknowledgements {
+                    do {
+                        try await storage.removeIngestReceipt(acknowledgement.ingestID)
+                        let completed = await MainActor.run {
+                            monitor.completeTerminalIngestAcknowledgement(acknowledgement)
+                        }
+                        if !completed {
+                            deferredTerminalIngestIDs.insert(acknowledgement.ingestID)
+                        }
+                    } catch {
+                        deferredTerminalIngestIDs.insert(acknowledgement.ingestID)
+                        ScopyLog.app.warning(
+                            "Failed to finish terminal ingest recovery: \(error.localizedDescription, privacy: .private)"
+                        )
+                    }
+                }
+                await Task.yield()
+            }
 
             await MainActor.run {
                 storage.cleanupSettings.maxItems = loadedSettings.maxItems
@@ -2054,17 +2103,17 @@ actor ClipboardService {
         guard let storage, search != nil else { return }
 
         if content.type == .image && !settings.saveImages {
-            if let ingestURL = content.ingestFileURL {
+            if content.fileOwnership == .transient, let ingestURL = content.ingestFileURL {
                 try? FileManager.default.removeItem(at: ingestURL)
             }
-            await acknowledgeIngestEnvelopeIfNeeded(content)
+            await acknowledgeIngestEnvelopeIfNeeded(content, storage: storage)
             return
         }
         if content.type == .file && !settings.saveFiles {
-            if let ingestURL = content.ingestFileURL {
+            if content.fileOwnership == .transient, let ingestURL = content.ingestFileURL {
                 try? FileManager.default.removeItem(at: ingestURL)
             }
-            await acknowledgeIngestEnvelopeIfNeeded(content)
+            await acknowledgeIngestEnvelopeIfNeeded(content, storage: storage)
             return
         }
 
@@ -2072,26 +2121,26 @@ actor ClipboardService {
 
         do {
             let outcome = try await storage.upsertItemWithOutcome(preparedContent)
-            let storedItem = outcome.item
-
             switch outcome {
-            case .inserted:
+            case .inserted(let storedItem):
                 _ = await publishAuthoritativeItemState(
                     id: storedItem.id,
                     storage: storage,
                     priority: .userInitiated,
                     kind: .newItem
                 )
-            case .updated:
+            case .updated(let storedItem):
                 _ = await publishAuthoritativeItemState(
                     id: storedItem.id,
                     storage: storage,
                     priority: .userInitiated,
                     kind: .itemUpdated
                 )
+            case .alreadyApplied:
+                break
             }
 
-            await acknowledgeIngestEnvelopeIfNeeded(preparedContent)
+            await acknowledgeIngestEnvelopeIfNeeded(preparedContent, storage: storage)
             scheduleCleanup(storage: storage)
         } catch {
             ScopyLog.app.warning("Failed to store clipboard item: \(error.localizedDescription, privacy: .private)")
@@ -2129,22 +2178,45 @@ actor ClipboardService {
                 contentHash: hash,
                 sizeBytes: compressed.count,
                 fileSizeBytes: content.fileSizeBytes,
-                ingestEnvelopeURL: content.ingestEnvelopeURL
+                ingestEnvelopeURL: content.ingestEnvelopeURL,
+                ingestID: content.ingestID,
+                fileOwnership: content.fileOwnership
             )
         case .file(let url):
-            let replaced = await Task.detached(priority: .utility) {
-                PngquantService.compressFileBestEffort(url, options: options)
-            }.value
-            guard replaced else { return content }
+            let preparedURL: URL
+            let preparedOwnership: ClipboardMonitor.ClipboardContent.FileOwnership
+            if content.fileOwnership == .durableSpool {
+                guard let copiedURL = await Task.detached(priority: .utility, operation: {
+                    try? ClipboardMonitor.createTransientWorkCopy(for: content)
+                }).value else {
+                    return content
+                }
+                let replaced = await Task.detached(priority: .utility) {
+                    PngquantService.compressFileBestEffort(copiedURL, options: options)
+                }.value
+                guard replaced else {
+                    try? FileManager.default.removeItem(at: copiedURL)
+                    return content
+                }
+                preparedURL = copiedURL
+                preparedOwnership = .transient
+            } else {
+                let replaced = await Task.detached(priority: .utility) {
+                    PngquantService.compressFileBestEffort(url, options: options)
+                }.value
+                guard replaced else { return content }
+                preparedURL = url
+                preparedOwnership = content.fileOwnership
+            }
 
             let updatedSize: Int = {
-                guard let attrs = try? FileManager.default.attributesOfItem(atPath: url.path),
+                guard let attrs = try? FileManager.default.attributesOfItem(atPath: preparedURL.path),
                       let size = attrs[.size] as? Int else { return content.sizeBytes }
                 return size
             }()
 
             let updatedHash: String = {
-                guard let data = try? Data(contentsOf: url, options: [.mappedIfSafe]) else {
+                guard let data = try? Data(contentsOf: preparedURL, options: [.mappedIfSafe]) else {
                     return content.contentHash
                 }
                 return ClipboardMonitor.computeHashStatic(data)
@@ -2153,23 +2225,39 @@ actor ClipboardService {
             return ClipboardMonitor.ClipboardContent(
                 type: content.type,
                 plainText: content.plainText,
-                payload: .file(url),
+                payload: .file(preparedURL),
                 note: content.note,
                 appBundleID: content.appBundleID,
                 contentHash: updatedHash,
                 sizeBytes: updatedSize,
                 fileSizeBytes: content.fileSizeBytes,
-                ingestEnvelopeURL: content.ingestEnvelopeURL
+                ingestEnvelopeURL: content.ingestEnvelopeURL,
+                ingestID: content.ingestID,
+                fileOwnership: preparedOwnership
             )
         case .none:
             return content
         }
     }
 
-    private func acknowledgeIngestEnvelopeIfNeeded(_ content: ClipboardMonitor.ClipboardContent) async {
+    private func acknowledgeIngestEnvelopeIfNeeded(
+        _ content: ClipboardMonitor.ClipboardContent,
+        storage: StorageService
+    ) async {
         guard let envelopeURL = content.ingestEnvelopeURL else { return }
-        await MainActor.run { [monitor] in
+        let outcome = await MainActor.run { [monitor] in
             monitor?.acknowledgeIngestEnvelope(at: envelopeURL)
+        }
+        guard case .terminal(let acknowledgement) = outcome else { return }
+        do {
+            try await storage.removeIngestReceipt(acknowledgement.ingestID)
+            _ = await MainActor.run { [monitor] in
+                monitor?.completeTerminalIngestAcknowledgement(acknowledgement)
+            }
+        } catch {
+            ScopyLog.app.warning(
+                "Failed to complete ingest acknowledgement: \(error.localizedDescription, privacy: .private)"
+            )
         }
     }
 

@@ -132,6 +132,11 @@ public final class ClipboardMonitor {
             case file(URL)
         }
 
+        public enum FileOwnership: Sendable, Equatable {
+            case transient
+            case durableSpool
+        }
+
         public let type: ClipboardItemType
         public let plainText: String
         public let payload: Payload
@@ -141,6 +146,8 @@ public final class ClipboardMonitor {
         public let sizeBytes: Int
         public let fileSizeBytes: Int?
         public let ingestEnvelopeURL: URL?
+        public let ingestID: UUID?
+        public let fileOwnership: FileOwnership
 
         public init(
             type: ClipboardItemType,
@@ -151,7 +158,9 @@ public final class ClipboardMonitor {
             contentHash: String,
             sizeBytes: Int,
             fileSizeBytes: Int? = nil,
-            ingestEnvelopeURL: URL? = nil
+            ingestEnvelopeURL: URL? = nil,
+            ingestID: UUID? = nil,
+            fileOwnership: FileOwnership = .transient
         ) {
             self.type = type
             self.plainText = plainText
@@ -162,6 +171,8 @@ public final class ClipboardMonitor {
             self.sizeBytes = sizeBytes
             self.fileSizeBytes = fileSizeBytes
             self.ingestEnvelopeURL = ingestEnvelopeURL
+            self.ingestID = ingestID
+            self.fileOwnership = fileOwnership
         }
 
         public var rawData: Data? {
@@ -230,6 +241,17 @@ public final class ClipboardMonitor {
         }
     }
 
+    public struct TerminalIngestAcknowledgement: Sendable {
+        public let ingestID: UUID
+        fileprivate let markerURL: URL
+        fileprivate let payloadFileName: String?
+    }
+
+    public enum IngestAcknowledgementOutcome: Sendable {
+        case terminal(TerminalIngestAcknowledgement)
+        case rejected
+    }
+
     // MARK: - Properties
 
     private let pasteboard: NSPasteboard
@@ -250,6 +272,12 @@ public final class ClipboardMonitor {
     public let contentStream: AsyncStream<ClipboardContent>
 
     private let ingestSpoolDirectory: URL
+    nonisolated private static let terminalEnvelopeSuffix = ".envelope.acked"
+    nonisolated private static let pendingEnvelopeSuffix = ".envelope.json"
+    nonisolated private static let transientWorkPrefix = ".ingest-work-"
+    nonisolated private static let corruptEnvelopeSuffix = ".quarantine"
+    nonisolated private static let staleControlledArtifactAge: TimeInterval = 24 * 60 * 60
+    nonisolated private static let maxControlledArtifactsPerSweep = 256
 
     nonisolated(unsafe) public static var testingAsyncProcessingDelayNs: UInt64 = 0
 
@@ -259,10 +287,27 @@ public final class ClipboardMonitor {
 
     // MARK: - Initialization
 
-    public init(
+    public convenience init(
         pasteboard: NSPasteboard = .general,
         pollingInterval: TimeInterval? = nil,
-        ingestSpoolDirectory: URL? = nil
+        ingestSpoolDirectory: URL? = nil,
+        legacyIngestSpoolDirectory: URL? = nil
+    ) {
+        self.init(
+            pasteboard: pasteboard,
+            pollingInterval: pollingInterval,
+            ingestSpoolDirectory: ingestSpoolDirectory,
+            legacyIngestSpoolDirectory: legacyIngestSpoolDirectory,
+            spoolAlreadyPrepared: false
+        )
+    }
+
+    init(
+        pasteboard: NSPasteboard,
+        pollingInterval: TimeInterval?,
+        ingestSpoolDirectory: URL?,
+        legacyIngestSpoolDirectory: URL?,
+        spoolAlreadyPrepared: Bool
     ) {
         self.pasteboard = pasteboard
         self.timerBox = TimerBox()
@@ -271,27 +316,62 @@ public final class ClipboardMonitor {
         }
 
         let ingestDir: URL
+        let legacyIngestDir: URL?
         if let ingestSpoolDirectory {
             ingestDir = ingestSpoolDirectory
+            legacyIngestDir = legacyIngestSpoolDirectory
         } else {
-            let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first ?? {
-                ScopyLog.monitor.warning("Failed to resolve caches directory; falling back to temporary directory")
+            let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first ?? {
+                ScopyLog.monitor.warning("Failed to resolve Application Support; falling back to temporary directory")
                 return FileManager.default.temporaryDirectory
             }()
-            let scopyCaches = caches.appendingPathComponent("Scopy", isDirectory: true)
-            ingestDir = scopyCaches.appendingPathComponent("ingest", isDirectory: true)
-        }
-        do {
-            try FileManager.default.createDirectory(at: ingestDir, withIntermediateDirectories: true)
-        } catch {
-            ScopyLog.monitor.warning("Failed to create ingest spool directory: \(error.localizedDescription, privacy: .private)")
+            ingestDir = appSupport
+                .appendingPathComponent("Scopy", isDirectory: true)
+                .appendingPathComponent("ingest", isDirectory: true)
+
+            legacyIngestDir = legacyIngestSpoolDirectory ?? Self.defaultLegacyIngestSpoolDirectory()
         }
         self.ingestSpoolDirectory = ingestDir
+        if !spoolAlreadyPrepared {
+            Self.prepareIngestSpoolDirectory(
+                ingestDir,
+                legacyDirectory: legacyIngestDir
+            )
+        }
 
         let queue = AsyncBoundedQueue<ClipboardContent>(capacity: ScopyThresholds.monitorContentStreamMaxBufferedItems)
         self.contentQueue = queue
         self.contentStream = AsyncStream(unfolding: { await queue.dequeue() })
         self.lastChangeCount = pasteboard.changeCount
+    }
+
+    nonisolated static func defaultLegacyIngestSpoolDirectory() -> URL? {
+        FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first?
+            .appendingPathComponent("Scopy", isDirectory: true)
+            .appendingPathComponent("ingest", isDirectory: true)
+    }
+
+    /// Performs potentially large legacy copies and artifact enumeration outside the monitor's
+    /// main-actor lifecycle in production. The public initializer keeps a synchronous fallback for
+    /// standalone callers that cannot participate in ClipboardService startup orchestration.
+    nonisolated static func prepareIngestSpoolDirectory(
+        _ ingestDirectory: URL,
+        legacyDirectory: URL?
+    ) {
+        do {
+            try FileManager.default.createDirectory(
+                at: ingestDirectory,
+                withIntermediateDirectories: true
+            )
+        } catch {
+            ScopyLog.monitor.warning(
+                "Failed to create ingest spool directory: \(error.localizedDescription, privacy: .private)"
+            )
+        }
+        if let legacyDirectory {
+            migrateLegacyPendingEnvelopes(from: legacyDirectory, to: ingestDirectory)
+        }
+        cleanupStaleControlledArtifacts(in: ingestDirectory)
     }
 
     deinit {
@@ -358,18 +438,51 @@ public final class ClipboardMonitor {
         }
     }
 
-    public func acknowledgeIngestEnvelope(at url: URL) {
+    @discardableResult
+    public func acknowledgeIngestEnvelope(at url: URL) -> IngestAcknowledgementOutcome {
+        guard let acknowledgement = Self.transitionEnvelopeToTerminal(
+            at: url,
+            ingestDirectory: ingestSpoolDirectory
+        ) else {
+            return .rejected
+        }
+
         queueLock.lock()
         trackedPendingEnvelopePaths.remove(url.path)
         pendingLargeContent.removeAll { $0.path == url.path }
         publishIngestSnapshotLocked()
         queueLock.unlock()
-
-        let envelope = Self.loadPendingEnvelope(from: url)
-        Self.cleanupEnvelope(url, payloadFileName: envelope?.payloadFileName, ingestDirectory: ingestSpoolDirectory)
         Task {
             await ClipboardIngestMetrics.shared.recordAcknowledgedEnvelope()
         }
+        return .terminal(acknowledgement)
+    }
+
+    public func pendingTerminalIngestAcknowledgements(
+        limit: Int = 256,
+        excluding excludedIDs: Set<UUID> = []
+    ) -> [TerminalIngestAcknowledgement] {
+        Self.discoverTerminalAcknowledgements(
+            in: ingestSpoolDirectory,
+            limit: max(0, limit),
+            excluding: excludedIDs
+        )
+    }
+
+    @discardableResult
+    public func completeTerminalIngestAcknowledgement(
+        _ acknowledgement: TerminalIngestAcknowledgement
+    ) -> Bool {
+        guard Self.validateTerminalAcknowledgement(
+            acknowledgement,
+            ingestDirectory: ingestSpoolDirectory
+        ) else {
+            return false
+        }
+        return Self.cleanupTerminalAcknowledgement(
+            acknowledgement,
+            ingestDirectory: ingestSpoolDirectory
+        )
     }
 
     public func setIgnoredApps(_ apps: Set<String>) {
@@ -792,7 +905,11 @@ public final class ClipboardMonitor {
                     try? await Task.sleep(nanoseconds: Self.testingAsyncProcessingDelayNs)
                 }
 
-                guard let envelope = Self.loadPendingEnvelope(from: envelopeURL) else {
+                guard let envelope = Self.loadValidatedEnvelope(
+                    from: envelopeURL,
+                    ingestDirectory: ingestDirectory,
+                    suffix: Self.pendingEnvelopeSuffix
+                ) else {
                     await MainActor.run { [weak self] in
                         self?.discardIngestEnvelope(at: envelopeURL)
                     }
@@ -837,7 +954,7 @@ public final class ClipboardMonitor {
                     return Self.pendingPayloadURL(for: envelope, ingestDirectory: ingestDirectory)
                 }()
 
-                let payload = Self.buildPayload(
+                let builtPayload = Self.buildPayload(
                     type: envelope.type,
                     data: payloadData,
                     sizeBytes: sizeBytes,
@@ -857,16 +974,24 @@ public final class ClipboardMonitor {
                     return true
                 }
 
-                guard shouldEmit else { return }
+                guard shouldEmit else {
+                    Self.cleanupPayloadIfNeeded(
+                        builtPayload.payload,
+                        ownership: builtPayload.ownership
+                    )
+                    return
+                }
 
                 let content = ClipboardContent(
                     type: envelope.type,
                     plainText: resolvedPlainText,
-                    payload: payload,
+                    payload: builtPayload.payload,
                     appBundleID: envelope.appBundleID,
                     contentHash: hash,
                     sizeBytes: resolvedSizeBytes,
-                    ingestEnvelopeURL: envelopeURL
+                    ingestEnvelopeURL: envelopeURL,
+                    ingestID: envelope.id,
+                    fileOwnership: builtPayload.ownership
                 )
 
                 await contentQueue.enqueue(content)
@@ -886,6 +1011,11 @@ public final class ClipboardMonitor {
         startNextIngestTasksIfNeeded()
     }
 
+    private struct BuiltPayload: Sendable {
+        let payload: ClipboardContent.Payload
+        let ownership: ClipboardContent.FileOwnership
+    }
+
     nonisolated private static func buildPayload(
         type: ClipboardItemType,
         data: Data?,
@@ -893,15 +1023,15 @@ public final class ClipboardMonitor {
         ingestDirectory: URL,
         spoolThresholdBytes: Int,
         preferredFileURL: URL?
-    ) -> ClipboardContent.Payload {
-        guard let data else { return .none }
+    ) -> BuiltPayload {
+        guard let data else { return BuiltPayload(payload: .none, ownership: .transient) }
 
         guard sizeBytes >= spoolThresholdBytes else {
-            return .data(data)
+            return BuiltPayload(payload: .data(data), ownership: .transient)
         }
 
         if let preferredFileURL, FileManager.default.fileExists(atPath: preferredFileURL.path) {
-            return .file(preferredFileURL)
+            return BuiltPayload(payload: .file(preferredFileURL), ownership: .durableSpool)
         }
 
         let ext: String
@@ -912,17 +1042,23 @@ public final class ClipboardMonitor {
         default: ext = "dat"
         }
 
-        let fileURL = ingestDirectory.appendingPathComponent("\(UUID().uuidString).\(ext)")
+        let fileURL = ingestDirectory.appendingPathComponent(
+            "\(transientWorkPrefix)\(UUID().uuidString).\(ext)"
+        )
         do {
             try StorageService.writeAtomically(data, to: fileURL.path)
-            return .file(fileURL)
+            return BuiltPayload(payload: .file(fileURL), ownership: .transient)
         } catch {
             ScopyLog.monitor.warning("Failed to spool ingest payload: \(error.localizedDescription, privacy: .private)")
-            return .data(data)
+            return BuiltPayload(payload: .data(data), ownership: .transient)
         }
     }
 
-    nonisolated private static func cleanupPayloadIfNeeded(_ payload: ClipboardContent.Payload) {
+    nonisolated private static func cleanupPayloadIfNeeded(
+        _ payload: ClipboardContent.Payload,
+        ownership: ClipboardContent.FileOwnership
+    ) {
+        guard ownership == .transient else { return }
         guard case .file(let url) = payload else { return }
         try? FileManager.default.removeItem(at: url)
     }
@@ -965,9 +1101,17 @@ public final class ClipboardMonitor {
     private func persistPendingEnvelope(for rawData: RawClipboardData) throws -> URL {
         let id = UUID()
         let payloadFileName = rawData.rawData.map { _ in "\(id.uuidString).payload" }
+        var payloadURL: URL?
+        var envelopeCommitted = false
+        defer {
+            if !envelopeCommitted, let payloadURL {
+                try? FileManager.default.removeItem(at: payloadURL)
+            }
+        }
         if let payloadData = rawData.rawData, let payloadFileName {
-            let payloadURL = ingestSpoolDirectory.appendingPathComponent(payloadFileName)
-            try StorageService.writeAtomically(payloadData, to: payloadURL.path)
+            let url = ingestSpoolDirectory.appendingPathComponent(payloadFileName)
+            payloadURL = url
+            try StorageService.writeAtomically(payloadData, to: url.path)
         }
 
         let envelope = PendingIngestEnvelope(
@@ -983,11 +1127,22 @@ public final class ClipboardMonitor {
 
         let envelopeURL = ingestSpoolDirectory.appendingPathComponent("\(id.uuidString).envelope.json")
         try Self.writePendingEnvelope(envelope, to: envelopeURL)
+        envelopeCommitted = true
         return envelopeURL
     }
 
     private func discardIngestEnvelope(at url: URL) {
-        acknowledgeIngestEnvelope(at: url)
+        switch acknowledgeIngestEnvelope(at: url) {
+        case .terminal(let acknowledgement):
+            completeTerminalIngestAcknowledgement(acknowledgement)
+        case .rejected:
+            Self.quarantinePendingEnvelope(at: url, ingestDirectory: ingestSpoolDirectory)
+            queueLock.lock()
+            trackedPendingEnvelopePaths.remove(url.path)
+            pendingLargeContent.removeAll { $0.path == url.path }
+            publishIngestSnapshotLocked()
+            queueLock.unlock()
+        }
     }
 
     private func publishIngestSnapshotLocked() {
@@ -1041,8 +1196,16 @@ public final class ClipboardMonitor {
 
     nonisolated private static func pendingPayloadURL(for envelope: PendingIngestEnvelope, ingestDirectory: URL) -> URL? {
         guard let payloadFileName = envelope.payloadFileName else { return nil }
+        guard payloadFileName == "\(envelope.id.uuidString).payload" else { return nil }
         let url = ingestDirectory.appendingPathComponent(payloadFileName)
-        return FileManager.default.fileExists(atPath: url.path) ? url : nil
+        guard validateOwnedRegularFile(
+            url,
+            in: ingestDirectory,
+            expectedFileName: payloadFileName
+        ) else {
+            return nil
+        }
+        return url
     }
 
     nonisolated private static func loadPendingPayload(from envelope: PendingIngestEnvelope, ingestDirectory: URL) -> Data? {
@@ -1057,18 +1220,442 @@ public final class ClipboardMonitor {
         )
     }
 
-    nonisolated private static func cleanupEnvelope(_ envelopeURL: URL, payloadFileName: String?, ingestDirectory: URL) {
-        BestEffortFileOps.removeItem(
-            at: envelopeURL,
-            logger: ScopyLog.monitor,
-            operation: "cleanupPendingEnvelope.removeEnvelope"
+    nonisolated private static func loadValidatedEnvelope(
+        from url: URL,
+        ingestDirectory: URL,
+        suffix: String
+    ) -> PendingIngestEnvelope? {
+        guard let pathID = validateOwnedEnvelopeURL(
+            url,
+            in: ingestDirectory,
+            suffix: suffix,
+            requireExistingRegularFile: true
+        ), let envelope = loadPendingEnvelope(from: url), envelope.id == pathID else {
+            return nil
+        }
+        if let payloadFileName = envelope.payloadFileName,
+           payloadFileName != "\(envelope.id.uuidString).payload" {
+            return nil
+        }
+        return envelope
+    }
+
+    nonisolated private static func validateOwnedEnvelopeURL(
+        _ url: URL,
+        in ingestDirectory: URL,
+        suffix: String,
+        requireExistingRegularFile: Bool
+    ) -> UUID? {
+        let directory = ingestDirectory.standardizedFileURL
+        let candidate = url.standardizedFileURL
+        guard candidate.deletingLastPathComponent().path == directory.path else { return nil }
+        guard candidate.lastPathComponent.hasSuffix(suffix) else { return nil }
+        let idText = String(candidate.lastPathComponent.dropLast(suffix.count))
+        guard let id = UUID(uuidString: idText) else { return nil }
+        guard !requireExistingRegularFile || validateOwnedRegularFile(
+            candidate,
+            in: directory,
+            expectedFileName: candidate.lastPathComponent
+        ) else {
+            return nil
+        }
+        return id
+    }
+
+    nonisolated private static func validateOwnedRegularFile(
+        _ url: URL,
+        in directory: URL,
+        expectedFileName: String
+    ) -> Bool {
+        let ownedRoot = directory.standardizedFileURL
+        let candidate = url.standardizedFileURL
+        guard candidate.lastPathComponent == expectedFileName,
+              candidate.deletingLastPathComponent().path == ownedRoot.path else {
+            return false
+        }
+        guard FileManager.default.fileExists(atPath: candidate.path) else { return false }
+        guard let attributes = try? FileManager.default.attributesOfItem(atPath: candidate.path),
+              let fileType = attributes[.type] as? FileAttributeType,
+              fileType == .typeRegular else {
+            return false
+        }
+        let resolvedRoot = ownedRoot.resolvingSymlinksInPath().path
+        let resolvedCandidate = candidate.resolvingSymlinksInPath()
+        return resolvedCandidate.deletingLastPathComponent().path == resolvedRoot
+    }
+
+    nonisolated private static func transitionEnvelopeToTerminal(
+        at pendingURL: URL,
+        ingestDirectory: URL
+    ) -> TerminalIngestAcknowledgement? {
+        guard let pathID = validateOwnedEnvelopeURL(
+            pendingURL,
+            in: ingestDirectory,
+            suffix: pendingEnvelopeSuffix,
+            requireExistingRegularFile: false
+        ) else {
+            return nil
+        }
+        let markerURL = ingestDirectory.appendingPathComponent(
+            "\(pathID.uuidString)\(terminalEnvelopeSuffix)"
         )
-        if let payloadFileName {
+
+        if FileManager.default.fileExists(atPath: pendingURL.path) {
+            guard loadValidatedEnvelope(
+                from: pendingURL,
+                ingestDirectory: ingestDirectory,
+                suffix: pendingEnvelopeSuffix
+            ) != nil else {
+                return nil
+            }
+            guard !FileManager.default.fileExists(atPath: markerURL.path) else { return nil }
+            do {
+                try FileManager.default.moveItem(at: pendingURL, to: markerURL)
+            } catch {
+                ScopyLog.monitor.warning(
+                    "Failed to transition ingest envelope to terminal state: \(error.localizedDescription, privacy: .private)"
+                )
+                return nil
+            }
+        }
+
+        guard let envelope = loadValidatedEnvelope(
+            from: markerURL,
+            ingestDirectory: ingestDirectory,
+            suffix: terminalEnvelopeSuffix
+        ) else {
+            return nil
+        }
+        return TerminalIngestAcknowledgement(
+            ingestID: envelope.id,
+            markerURL: markerURL,
+            payloadFileName: envelope.payloadFileName
+        )
+    }
+
+    nonisolated private static func discoverTerminalAcknowledgements(
+        in directory: URL,
+        limit: Int,
+        excluding excludedIDs: Set<UUID>
+    ) -> [TerminalIngestAcknowledgement] {
+        guard limit > 0,
+              let urls = try? FileManager.default.contentsOfDirectory(
+                at: directory,
+                includingPropertiesForKeys: nil,
+                options: [.skipsHiddenFiles]
+              ) else {
+            return []
+        }
+        return Array(urls
+            .filter { $0.lastPathComponent.hasSuffix(terminalEnvelopeSuffix) }
+            .sorted { $0.lastPathComponent < $1.lastPathComponent }
+            .compactMap { markerURL in
+                guard let envelope = loadValidatedEnvelope(
+                    from: markerURL,
+                    ingestDirectory: directory,
+                    suffix: terminalEnvelopeSuffix
+                ) else {
+                    return nil
+                }
+                return TerminalIngestAcknowledgement(
+                    ingestID: envelope.id,
+                    markerURL: markerURL,
+                    payloadFileName: envelope.payloadFileName
+                )
+            }
+            .filter { !excludedIDs.contains($0.ingestID) }
+            .prefix(limit))
+    }
+
+    nonisolated private static func validateTerminalAcknowledgement(
+        _ acknowledgement: TerminalIngestAcknowledgement,
+        ingestDirectory: URL
+    ) -> Bool {
+        guard let envelope = loadValidatedEnvelope(
+            from: acknowledgement.markerURL,
+            ingestDirectory: ingestDirectory,
+            suffix: terminalEnvelopeSuffix
+        ) else {
+            return false
+        }
+        return envelope.id == acknowledgement.ingestID &&
+            envelope.payloadFileName == acknowledgement.payloadFileName
+    }
+
+    nonisolated private static func cleanupTerminalAcknowledgement(
+        _ acknowledgement: TerminalIngestAcknowledgement,
+        ingestDirectory: URL
+    ) -> Bool {
+        if let payloadFileName = acknowledgement.payloadFileName,
+           payloadFileName == "\(acknowledgement.ingestID.uuidString).payload" {
             let payloadURL = ingestDirectory.appendingPathComponent(payloadFileName)
-            BestEffortFileOps.removeItem(
-                at: payloadURL,
-                logger: ScopyLog.monitor,
-                operation: "cleanupPendingEnvelope.removePayload"
+            if FileManager.default.fileExists(atPath: payloadURL.path) {
+                guard validateOwnedRegularFile(
+                    payloadURL,
+                    in: ingestDirectory,
+                    expectedFileName: payloadFileName
+                ) else {
+                    return false
+                }
+                do {
+                    try FileManager.default.removeItem(at: payloadURL)
+                } catch {
+                    ScopyLog.monitor.warning(
+                        "Failed to remove terminal ingest payload: \(error.localizedDescription, privacy: .private)"
+                    )
+                    return false
+                }
+                guard !FileManager.default.fileExists(atPath: payloadURL.path) else { return false }
+            }
+        }
+        guard validateOwnedRegularFile(
+            acknowledgement.markerURL,
+            in: ingestDirectory,
+            expectedFileName: acknowledgement.markerURL.lastPathComponent
+        ) else {
+            return false
+        }
+        BestEffortFileOps.removeItem(
+            at: acknowledgement.markerURL,
+            logger: ScopyLog.monitor,
+            operation: "cleanupTerminalIngest.removeMarker"
+        )
+        return !FileManager.default.fileExists(atPath: acknowledgement.markerURL.path)
+    }
+
+    nonisolated private static func quarantinePendingEnvelope(
+        at url: URL,
+        ingestDirectory: URL
+    ) {
+        guard validateOwnedEnvelopeURL(
+            url,
+            in: ingestDirectory,
+            suffix: pendingEnvelopeSuffix,
+            requireExistingRegularFile: true
+        ) != nil else {
+            return
+        }
+        let quarantineURL = ingestDirectory.appendingPathComponent(
+            url.lastPathComponent + corruptEnvelopeSuffix
+        )
+        guard !FileManager.default.fileExists(atPath: quarantineURL.path) else { return }
+        do {
+            try FileManager.default.moveItem(at: url, to: quarantineURL)
+        } catch {
+            ScopyLog.monitor.warning(
+                "Failed to quarantine corrupt ingest envelope: \(error.localizedDescription, privacy: .private)"
+            )
+        }
+    }
+
+    nonisolated static func createTransientWorkCopy(
+        for content: ClipboardContent,
+        preferredExtension: String = "png"
+    ) throws -> URL {
+        guard content.fileOwnership == .durableSpool,
+              case .file(let sourceURL) = content.payload,
+              let ingestID = content.ingestID,
+              let envelopeURL = content.ingestEnvelopeURL else {
+            throw CocoaError(.fileReadInvalidFileName)
+        }
+        let directory = envelopeURL.deletingLastPathComponent()
+        guard validateOwnedEnvelopeURL(
+            envelopeURL,
+            in: directory,
+            suffix: pendingEnvelopeSuffix,
+            requireExistingRegularFile: true
+        ) == ingestID,
+        validateOwnedRegularFile(
+            sourceURL,
+            in: directory,
+            expectedFileName: "\(ingestID.uuidString).payload"
+        ) else {
+            throw CocoaError(.fileReadNoPermission)
+        }
+
+        let safeExtension = preferredExtension.lowercased().allSatisfy { $0.isLetter || $0.isNumber }
+            ? preferredExtension.lowercased()
+            : "dat"
+        let workURL = directory.appendingPathComponent(
+            "\(transientWorkPrefix)\(UUID().uuidString).\(safeExtension)"
+        )
+        try FileManager.default.copyItem(at: sourceURL, to: workURL)
+        return workURL
+    }
+
+    nonisolated private static func migrateLegacyPendingEnvelopes(
+        from legacyDirectory: URL,
+        to destinationDirectory: URL
+    ) {
+        guard legacyDirectory.standardizedFileURL.path != destinationDirectory.standardizedFileURL.path,
+              FileManager.default.fileExists(atPath: legacyDirectory.path) else {
+            return
+        }
+        let pendingURLs = discoverPendingEnvelopeURLs(in: legacyDirectory)
+        for legacyEnvelopeURL in pendingURLs {
+            guard let envelope = loadValidatedEnvelope(
+                from: legacyEnvelopeURL,
+                ingestDirectory: legacyDirectory,
+                suffix: pendingEnvelopeSuffix
+            ) else {
+                continue
+            }
+
+            var legacyPayloadURL: URL?
+            if envelope.payloadFileName != nil {
+                guard let payloadURL = pendingPayloadURL(
+                    for: envelope,
+                    ingestDirectory: legacyDirectory
+                ) else {
+                    continue
+                }
+                legacyPayloadURL = payloadURL
+                let destinationPayloadURL = destinationDirectory.appendingPathComponent(
+                    payloadURL.lastPathComponent
+                )
+                guard copyOwnedMigrationFileIfNeeded(
+                    from: payloadURL,
+                    to: destinationPayloadURL,
+                    destinationDirectory: destinationDirectory
+                ) else {
+                    continue
+                }
+            }
+
+            let destinationEnvelopeURL = destinationDirectory.appendingPathComponent(
+                legacyEnvelopeURL.lastPathComponent
+            )
+            guard copyOwnedMigrationFileIfNeeded(
+                from: legacyEnvelopeURL,
+                to: destinationEnvelopeURL,
+                destinationDirectory: destinationDirectory
+            ), loadValidatedEnvelope(
+                from: destinationEnvelopeURL,
+                ingestDirectory: destinationDirectory,
+                suffix: pendingEnvelopeSuffix
+            ) != nil else {
+                continue
+            }
+
+            if let legacyPayloadURL {
+                try? FileManager.default.removeItem(at: legacyPayloadURL)
+            }
+            try? FileManager.default.removeItem(at: legacyEnvelopeURL)
+        }
+    }
+
+    nonisolated private static func copyOwnedMigrationFileIfNeeded(
+        from sourceURL: URL,
+        to destinationURL: URL,
+        destinationDirectory: URL
+    ) -> Bool {
+        if FileManager.default.fileExists(atPath: destinationURL.path) {
+            guard validateOwnedRegularFile(
+                destinationURL,
+                in: destinationDirectory,
+                expectedFileName: destinationURL.lastPathComponent
+            ) else {
+                return false
+            }
+            return FileManager.default.contentsEqual(
+                atPath: sourceURL.path,
+                andPath: destinationURL.path
+            )
+        }
+
+        let temporaryURL = destinationDirectory.appendingPathComponent(
+            "\(transientWorkPrefix)\(UUID().uuidString).migration.tmp"
+        )
+        defer { try? FileManager.default.removeItem(at: temporaryURL) }
+        do {
+            try FileManager.default.copyItem(at: sourceURL, to: temporaryURL)
+            try FileManager.default.moveItem(at: temporaryURL, to: destinationURL)
+            guard validateOwnedRegularFile(
+                destinationURL,
+                in: destinationDirectory,
+                expectedFileName: destinationURL.lastPathComponent
+            ) else {
+                return false
+            }
+            return FileManager.default.contentsEqual(
+                atPath: sourceURL.path,
+                andPath: destinationURL.path
+            )
+        } catch {
+            ScopyLog.monitor.warning(
+                "Failed to migrate a legacy ingest artifact: \(error.localizedDescription, privacy: .private)"
+            )
+            return false
+        }
+    }
+
+    nonisolated private static func cleanupStaleControlledArtifacts(in directory: URL) {
+        guard let urls = try? FileManager.default.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: [.contentModificationDateKey, .isRegularFileKey],
+            options: []
+        ) else {
+            return
+        }
+        let cutoff = Date().addingTimeInterval(-staleControlledArtifactAge)
+        var removed = 0
+        for url in urls.sorted(by: { $0.lastPathComponent < $1.lastPathComponent }) {
+            guard removed < maxControlledArtifactsPerSweep else { break }
+            let name = url.lastPathComponent
+            let orphanPayloadID = standalonePayloadID(from: name)
+            guard isControlledTransientArtifactName(name) || orphanPayloadID != nil else { continue }
+            if let orphanPayloadID,
+               hasEnvelopeAuthority(for: orphanPayloadID, in: directory) {
+                continue
+            }
+            guard let values = try? url.resourceValues(forKeys: [.contentModificationDateKey, .isRegularFileKey]),
+                  values.isRegularFile == true,
+                  let modifiedAt = values.contentModificationDate,
+                  modifiedAt < cutoff,
+                  validateOwnedRegularFile(url, in: directory, expectedFileName: name) else {
+                continue
+            }
+            do {
+                try FileManager.default.removeItem(at: url)
+                removed += 1
+            } catch {
+                ScopyLog.monitor.warning(
+                    "Failed to remove stale ingest work artifact: \(error.localizedDescription, privacy: .private)"
+                )
+            }
+        }
+    }
+
+    nonisolated private static func isControlledTransientArtifactName(_ name: String) -> Bool {
+        if name.hasPrefix(transientWorkPrefix) { return true }
+        guard name.hasSuffix(".tmp") else { return false }
+        let base = String(name.dropLast(4))
+        if base.hasSuffix(".payload") {
+            return UUID(uuidString: String(base.dropLast(".payload".count))) != nil
+        }
+        if base.hasSuffix(pendingEnvelopeSuffix) {
+            return UUID(uuidString: String(base.dropLast(pendingEnvelopeSuffix.count))) != nil
+        }
+        return false
+    }
+
+    nonisolated private static func standalonePayloadID(from name: String) -> UUID? {
+        guard name.hasSuffix(".payload") else { return nil }
+        return UUID(uuidString: String(name.dropLast(".payload".count)))
+    }
+
+    /// A pending, terminal, or quarantined envelope remains the conservative authority for its
+    /// payload. Only an aged UUID payload with no such sibling is an owned crash orphan.
+    nonisolated private static func hasEnvelopeAuthority(for id: UUID, in directory: URL) -> Bool {
+        let base = id.uuidString
+        let authorityNames = [
+            base + pendingEnvelopeSuffix,
+            base + terminalEnvelopeSuffix,
+            base + pendingEnvelopeSuffix + corruptEnvelopeSuffix
+        ]
+        return authorityNames.contains { name in
+            FileManager.default.fileExists(
+                atPath: directory.appendingPathComponent(name).path
             )
         }
     }

@@ -1,7 +1,7 @@
 import Foundation
 
 enum SQLiteMigrations {
-    static let currentUserVersion: Int32 = 7
+    static let currentUserVersion: Int32 = 8
 
     static func migrateIfNeeded(_ connection: SQLiteConnection) throws {
         let userVersion = try readUserVersion(connection)
@@ -30,6 +30,9 @@ enum SQLiteMigrations {
         }
         if userVersion < 7 {
             try setupMetaExternalSizeCounter(connection)
+        }
+        if userVersion < 8 {
+            try setupIngestReceipts(connection)
         }
 
         try connection.execute("PRAGMA user_version = \(currentUserVersion)")
@@ -72,6 +75,21 @@ enum SQLiteMigrations {
             """
         )
         try connection.execute("INSERT OR IGNORE INTO schema_version (version) VALUES (1)")
+    }
+
+    private static func setupIngestReceipts(_ connection: SQLiteConnection) throws {
+        try connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS ingest_receipts (
+                ingest_id TEXT PRIMARY KEY,
+                item_id TEXT NOT NULL,
+                committed_at REAL NOT NULL
+            )
+            """
+        )
+        try connection.execute(
+            "CREATE INDEX IF NOT EXISTS idx_ingest_receipts_committed_at ON ingest_receipts(committed_at)"
+        )
     }
 
     private static func setupMetaTable(_ connection: SQLiteConnection) throws {

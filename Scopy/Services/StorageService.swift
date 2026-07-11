@@ -128,11 +128,13 @@ public final class StorageService {
     enum UpsertOutcome: Sendable {
         case inserted(StoredItem)
         case updated(StoredItem)
+        case alreadyApplied(StoredItem?)
 
-        var item: StoredItem {
+        var item: StoredItem? {
             switch self {
             case .inserted(let item): return item
             case .updated(let item): return item
+            case .alreadyApplied(let item): return item
             }
         }
     }
@@ -145,6 +147,10 @@ public final class StorageService {
         case afterEnumerationBeforeOwnershipValidation
         case afterOwnershipValidationBeforeRemove(path: String)
         case afterFinalOwnershipValidationBeforeRemove(path: String)
+    }
+
+    enum IngestCommitInterlockPoint: Sendable {
+        case beforeReceiptResolution(candidatePath: String?)
     }
 
     enum ExternalSourceReconciliationResult: Sendable, Equatable {
@@ -209,6 +215,7 @@ public final class StorageService {
     /// Exposed as immutable values so non-`@MainActor` contexts can safely validate/read paths without capturing `StorageService`.
     nonisolated let externalStorageDirectoryPath: String
     nonisolated let thumbnailCacheDirectoryPath: String
+    nonisolated let ingestSpoolDirectoryPath: String
 
     let repository: SQLiteClipboardRepository
 
@@ -227,6 +234,7 @@ public final class StorageService {
     ] = [:]
     private var externalSizeSyncInterlock: (@Sendable (ExternalSizeSyncInterlockPoint) async -> Void)?
     private var orphanCleanupInterlock: (@Sendable (OrphanCleanupInterlockPoint) async -> Void)?
+    private var ingestCommitInterlock: (@Sendable (IngestCommitInterlockPoint) async -> Void)?
 
     /// 数据库文件路径（用于设置窗口显示）
     public var databaseFilePath: String { dbPath }
@@ -252,6 +260,7 @@ public final class StorageService {
         self.thumbnailCachePath = thumbnailPath
         self.externalStorageDirectoryPath = externalPath
         self.thumbnailCacheDirectoryPath = thumbnailPath
+        self.ingestSpoolDirectoryPath = rootURL.appendingPathComponent("ingest", isDirectory: true).path
         self.fileOps = fileOps
 
         Self.createDirectoryIfNeeded(at: URL(fileURLWithPath: externalStoragePath), description: "external storage directory")
@@ -270,6 +279,12 @@ public final class StorageService {
         _ interlock: (@Sendable (OrphanCleanupInterlockPoint) async -> Void)?
     ) {
         orphanCleanupInterlock = interlock
+    }
+
+    func setIngestCommitInterlockForTesting(
+        _ interlock: (@Sendable (IngestCommitInterlockPoint) async -> Void)?
+    ) {
+        ingestCommitInterlock = interlock
     }
 
     private static func resolveRootDirectory(databasePath: String?, storageRootURL: URL?) -> URL {
@@ -375,19 +390,53 @@ public final class StorageService {
     /// Insert or update item (handles deduplication per v0.md 3.2)
     /// v0.29: 大内容外部写入后台化，避免阻塞主线程
     public func upsertItem(_ content: ClipboardMonitor.ClipboardContent) async throws -> StoredItem {
-        try await upsertItemWithOutcome(content).item
+        let outcome = try await upsertItemWithOutcome(content)
+        guard let item = outcome.item else {
+            throw StorageError.queryFailed("Previously applied ingest item no longer exists")
+        }
+        return item
     }
 
     func upsertItemWithOutcome(_ content: ClipboardMonitor.ClipboardContent) async throws -> UpsertOutcome {
-        // Check for duplicate by content hash (v0.md 3.2)
-        if let existing = try await repository.fetchItemByHash(content.contentHash) {
+        if let ingestID = content.ingestID {
+            do {
+                if try await repository.mightResolveIngestWithoutFileWork(
+                    ingestID: ingestID,
+                    contentHash: content.contentHash
+                ) {
+                    switch try await repository.commitExistingIngestIfPossible(
+                        ingestID: ingestID,
+                        contentHash: content.contentHash,
+                        lastUsedAt: Date()
+                    ) {
+                    case .needsInsert:
+                        break
+                    case .updated(let item):
+                        if content.fileOwnership == .transient, let ingestURL = content.ingestFileURL {
+                            try? FileManager.default.removeItem(at: ingestURL)
+                        }
+                        return .updated(item)
+                    case .alreadyApplied(let item):
+                        if content.fileOwnership == .transient, let ingestURL = content.ingestFileURL {
+                            try? FileManager.default.removeItem(at: ingestURL)
+                        }
+                        return .alreadyApplied(item)
+                    }
+                }
+            } catch {
+                if content.fileOwnership == .transient, let ingestURL = content.ingestFileURL {
+                    try? FileManager.default.removeItem(at: ingestURL)
+                }
+                throw error
+            }
+        } else if let existing = try await repository.fetchItemByHash(content.contentHash) {
             // Update lastUsedAt and useCount instead of creating new. If deletion won after the
             // hash lookup, keep the ingest payload and continue through the insert path.
             if let updated = try await repository.incrementUsageReturningCurrent(
                 id: existing.id,
                 lastUsedAt: Date()
             ) {
-                if let ingestURL = content.ingestFileURL {
+                if content.fileOwnership == .transient, let ingestURL = content.ingestFileURL {
                     try? FileManager.default.removeItem(at: ingestURL)
                 }
                 return .updated(updated)
@@ -400,6 +449,7 @@ public final class StorageService {
         var inlineData: Data? = nil
         var externalReservation: ExternalFileReservationRegistry.Reservation?
         var protectedExternalFilename: String?
+        var repositoryCommitAttempted = false
 
         do {
             // Decide storage location based on size (v0.md 2.1). An external path is reserved
@@ -451,73 +501,164 @@ public final class StorageService {
                     protectedExternalFilename = filename
                     beginProtectingExternalFilename(filename)
                     try await Task.detached(priority: .utility) {
-                        try StorageService.moveOrCopyFile(from: url, to: path)
+                        if content.fileOwnership == .durableSpool {
+                            try StorageService.copyFileRetainingSource(from: url, to: path)
+                        } else {
+                            try StorageService.moveOrCopyFile(from: url, to: path)
+                        }
                     }.value
                 } else {
                     let data = try await Task.detached(priority: .utility) {
                         try Data(contentsOf: url)
                     }.value
                     inlineData = data
-                    try? FileManager.default.removeItem(at: url)
+                    if content.fileOwnership == .transient {
+                        try? FileManager.default.removeItem(at: url)
+                    }
                 }
             }
 
             guard !Task.isCancelled else { throw CancellationError() }
-            try await repository.insertItem(
-                id: id,
-                type: content.type,
-                contentHash: content.contentHash,
-                plainText: content.plainText,
-                note: content.note,
-                appBundleID: content.appBundleID,
-                createdAt: now,
-                lastUsedAt: now,
-                sizeBytes: content.sizeBytes,
-                fileSizeBytes: content.fileSizeBytes,
-                storageRef: storageRef,
-                rawData: inlineData
+            let outcome: UpsertOutcome
+            if let ingestID = content.ingestID {
+                repositoryCommitAttempted = true
+                switch try await repository.upsertItemForIngest(
+                    ingestID: ingestID,
+                    id: id,
+                    type: content.type,
+                    contentHash: content.contentHash,
+                    plainText: content.plainText,
+                    note: content.note,
+                    appBundleID: content.appBundleID,
+                    createdAt: now,
+                    lastUsedAt: now,
+                    sizeBytes: content.sizeBytes,
+                    fileSizeBytes: content.fileSizeBytes,
+                    storageRef: storageRef,
+                    rawData: inlineData
+                ) {
+                case .inserted(let item):
+                    outcome = .inserted(item)
+                case .updated(let item):
+                    if let storageRef { try? FileManager.default.removeItem(atPath: storageRef) }
+                    outcome = .updated(item)
+                case .alreadyApplied(let item):
+                    if let storageRef { try? FileManager.default.removeItem(atPath: storageRef) }
+                    outcome = .alreadyApplied(item)
+                }
+            } else {
+                try await repository.insertItem(
+                    id: id,
+                    type: content.type,
+                    contentHash: content.contentHash,
+                    plainText: content.plainText,
+                    note: content.note,
+                    appBundleID: content.appBundleID,
+                    createdAt: now,
+                    lastUsedAt: now,
+                    sizeBytes: content.sizeBytes,
+                    fileSizeBytes: content.fileSizeBytes,
+                    storageRef: storageRef,
+                    rawData: inlineData
+                )
+                outcome = .inserted(
+                    StoredItem(
+                        id: id,
+                        type: content.type,
+                        contentHash: content.contentHash,
+                        plainText: content.plainText,
+                        note: content.note,
+                        appBundleID: content.appBundleID,
+                        createdAt: now,
+                        lastUsedAt: now,
+                        useCount: 1,
+                        isPinned: false,
+                        sizeBytes: content.sizeBytes,
+                        fileSizeBytes: content.fileSizeBytes,
+                        storageRef: storageRef,
+                        rawData: inlineData
+                    )
+                )
+            }
+            await releaseExternalPublicationGuards(
+                protectedFilename: protectedExternalFilename,
+                reservation: externalReservation
             )
-            if let protectedExternalFilename {
-                endProtectingExternalFilename(protectedExternalFilename)
-            }
-            if let externalReservation {
-                await sharedExternalFileReservations.release(externalReservation)
-            }
+            return outcome
         } catch {
-            if let protectedExternalFilename {
-                endProtectingExternalFilename(protectedExternalFilename)
-            }
-            if let externalReservation {
-                await sharedExternalFileReservations.release(externalReservation)
+            // A COMMIT error is not proof that SQLite rejected the transaction. Resolve by the
+            // durable receipt before reclaiming the unique candidate, otherwise an ambiguous
+            // success could leave a committed row pointing at a removed file. Keep both the
+            // process-wide reservation and cleanup generation guard until that resolution is
+            // complete so a reentrant orphan-cleanup pass cannot remove the candidate first.
+            if let ingestID = content.ingestID, repositoryCommitAttempted {
+                await ingestCommitInterlock?(
+                    .beforeReceiptResolution(candidatePath: storageRef)
+                )
+                do {
+                    switch try await repository.resolveExistingIngestReceipt(ingestID) {
+                    case .missing:
+                        break
+                    case .alreadyApplied(let item):
+                        if let storageRef, item?.storageRef != storageRef {
+                            try? FileManager.default.removeItem(atPath: storageRef)
+                        }
+                        if content.fileOwnership == .transient,
+                           let ingestURL = content.ingestFileURL,
+                           ingestURL.path != item?.storageRef {
+                            try? FileManager.default.removeItem(at: ingestURL)
+                        }
+                        await releaseExternalPublicationGuards(
+                            protectedFilename: protectedExternalFilename,
+                            reservation: externalReservation
+                        )
+                        guard let item else { return .alreadyApplied(nil) }
+                        return item.id == id ? .inserted(item) : .updated(item)
+                    }
+                } catch {
+                    // Preserve an unresolved candidate. The retained envelope and managed orphan
+                    // reconciliation are safer than deleting bytes that an uncertain commit may own.
+                    if content.fileOwnership == .transient,
+                       let ingestURL = content.ingestFileURL,
+                       ingestURL.path != storageRef {
+                        try? FileManager.default.removeItem(at: ingestURL)
+                    }
+                    await releaseExternalPublicationGuards(
+                        protectedFilename: protectedExternalFilename,
+                        reservation: externalReservation
+                    )
+                    throw error
+                }
             }
             // Best-effort rollback: DB insert failed after writing external payload.
             if let storageRef {
                 try? FileManager.default.removeItem(atPath: storageRef)
             }
-            if let ingestURL = content.ingestFileURL {
+            if content.fileOwnership == .transient, let ingestURL = content.ingestFileURL {
                 try? FileManager.default.removeItem(at: ingestURL)
             }
+            await releaseExternalPublicationGuards(
+                protectedFilename: protectedExternalFilename,
+                reservation: externalReservation
+            )
             throw error
         }
+    }
 
-        return .inserted(
-            StoredItem(
-                id: id,
-                type: content.type,
-                contentHash: content.contentHash,
-                plainText: content.plainText,
-                note: content.note,
-                appBundleID: content.appBundleID,
-                createdAt: now,
-                lastUsedAt: now,
-                useCount: 1,
-                isPinned: false,
-                sizeBytes: content.sizeBytes,
-                fileSizeBytes: content.fileSizeBytes,
-                storageRef: storageRef,
-                rawData: inlineData
-            )
-        )
+    private func releaseExternalPublicationGuards(
+        protectedFilename: String?,
+        reservation: ExternalFileReservationRegistry.Reservation?
+    ) async {
+        if let protectedFilename {
+            endProtectingExternalFilename(protectedFilename)
+        }
+        if let reservation {
+            await sharedExternalFileReservations.release(reservation)
+        }
+    }
+
+    func removeIngestReceipt(_ ingestID: UUID) async throws {
+        try await repository.removeIngestReceipt(ingestID)
     }
 
     public func findByHash(_ hash: String) async throws -> StoredItem? {
@@ -1370,9 +1511,9 @@ public final class StorageService {
         return orphanedFiles
     }
 
-    /// Hidden optimization stages are deliberately invisible to ordinary orphan enumeration so a
-    /// live transform cannot be deleted. Reclaim only the narrow filename pattern after a 24-hour
-    /// crash-recovery horizon.
+    /// Hidden optimization and retained-source ingest stages are deliberately invisible to
+    /// ordinary orphan enumeration so live work cannot be deleted. Reclaim only narrow filename
+    /// patterns after a 24-hour crash-recovery horizon.
     nonisolated static func staleImageOptimizationStageFiles(
         externalStoragePath: String,
         now: Date,
@@ -1388,7 +1529,9 @@ public final class StorageService {
         let cutoff = now.addingTimeInterval(-max(1, maximumAge))
         return files.filter { url in
             let name = url.lastPathComponent
-            guard name.hasPrefix(".scopy-optimize-"), name.hasSuffix(".stage") else {
+            let isOwnedStage = name.hasPrefix(".scopy-optimize-") ||
+                name.hasPrefix(".scopy-ingest-")
+            guard isOwnedStage, name.hasSuffix(".stage") else {
                 return false
             }
             guard let values = try? url.resourceValues(
@@ -1760,6 +1903,24 @@ public final class StorageService {
                 operation: "moveOrCopyFile.cleanupSourceAfterCopy"
             )
         }
+    }
+
+    /// Publishes a complete candidate while keeping a durable replay source untouched until the
+    /// caller has committed and terminally acknowledged its ingest envelope.
+    nonisolated static func copyFileRetainingSource(
+        from sourceURL: URL,
+        to destinationPath: String
+    ) throws {
+        let destinationURL = URL(fileURLWithPath: destinationPath)
+        let stagedURL = destinationURL.deletingLastPathComponent().appendingPathComponent(
+            ".scopy-ingest-\(UUID().uuidString).stage"
+        )
+        defer { try? FileManager.default.removeItem(at: stagedURL) }
+        guard !FileManager.default.fileExists(atPath: destinationPath) else {
+            throw StorageError.fileOperationFailed("Managed ingest destination already exists")
+        }
+        try FileManager.default.copyItem(at: sourceURL, to: stagedURL)
+        try replaceFileAtomically(from: stagedURL, to: destinationURL)
     }
 
     private func makeExternalPath(id: UUID, type: ClipboardItemType) -> String {

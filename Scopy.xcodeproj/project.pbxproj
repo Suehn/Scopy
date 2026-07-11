@@ -184,6 +184,7 @@
 		3A02C38CC8FE16847AF9472B /* KaTeX_Script-Regular.woff2 in Resources */ = {isa = PBXBuildFile; fileRef = FF66BCA00380B574D43BB7A5 /* KaTeX_Script-Regular.woff2 */; };
 		3A42CAD8024E8E18987EE27A /* FullIndexDiskCacheHardeningTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2DD68D65AAE34804297FB3A7 /* FullIndexDiskCacheHardeningTests.swift */; };
 		3B9AFBF4400247DE93225D7B /* HistoryItemView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5901BA87F11FC6F4D1E7C673 /* HistoryItemView.swift */; };
+		3BB5109BA4558651C5EE7DB2 /* StorageCommitProtocolTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 439622504A6684CD4427F6FE /* StorageCommitProtocolTests.swift */; };
 		3C2370D659CE232C0FC1005A /* katex.min.js in Resources */ = {isa = PBXBuildFile; fileRef = 6C2AD2CE0AA48137C50F5FA1 /* katex.min.js */; };
 		3C4F4677B5CF320CC47AC7BD /* scopy-unified-renderer.iife.js in Resources */ = {isa = PBXBuildFile; fileRef = 21A1BCB1D999A11487793A6D /* scopy-unified-renderer.iife.js */; };
 		3DD125A7B394E3601A8EDA22 /* HistoryListInteractionObservation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2CE8424AAA4AF537809D9147 /* HistoryListInteractionObservation.swift */; };
@@ -417,6 +418,7 @@
 		8BE426A1F9634674C78210D8 /* KaTeX_SansSerif-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 6119B6CED24CEDFCE2AA9419 /* KaTeX_SansSerif-Regular.ttf */; };
 		8BF41D1CE8981749994EFDFC /* HoverPreviewIntentPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7E56E5F337D3748313865480 /* HoverPreviewIntentPolicy.swift */; };
 		8C4DA4A5FA52F17486FAE143 /* HistoryItemRowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1CD2C0D1A2BF40256A0620F5 /* HistoryItemRowController.swift */; };
+		8C6479CA9D1282C2950C4F2A /* StorageCommitProtocolTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 439622504A6684CD4427F6FE /* StorageCommitProtocolTests.swift */; };
 		8D36A0AA429718DE7A55C83A /* RealDatabaseRegressionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 48400516AB3B998E1313FBAE /* RealDatabaseRegressionTests.swift */; };
 		8D5D46A01D0CA160688F934C /* KaTeX_Caligraphic-Bold.woff2 in Resources */ = {isa = PBXBuildFile; fileRef = EFFB5A8F8CB41B987173626B /* KaTeX_Caligraphic-Bold.woff2 */; };
 		8D97DFF3F3FF7D3AEEB5CF51 /* HistoryRowThumbnailLifecycleScheduler.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5AC24893A200F18B7ADA495 /* HistoryRowThumbnailLifecycleScheduler.swift */; };
@@ -855,6 +857,7 @@
 		4196431EE6371BEE9C6BED01 /* ClipboardServiceCopyToClipboardTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipboardServiceCopyToClipboardTests.swift; sourceTree = "<group>"; };
 		42D411B91F0A819854835FBE /* KaTeX_Caligraphic-Bold.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "KaTeX_Caligraphic-Bold.ttf"; sourceTree = "<group>"; };
 		4363B3275C036B26FBD9F5A3 /* pngquant */ = {isa = PBXFileReference; path = pngquant; sourceTree = "<group>"; };
+		439622504A6684CD4427F6FE /* StorageCommitProtocolTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StorageCommitProtocolTests.swift; sourceTree = "<group>"; };
 		46AA93A615D012F4473CD3BE /* MarkdownPreviewRendererFacade.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownPreviewRendererFacade.swift; sourceTree = "<group>"; };
 		47EB28A5AF6B73C0ADB10FA4 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		48400516AB3B998E1313FBAE /* RealDatabaseRegressionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RealDatabaseRegressionTests.swift; sourceTree = "<group>"; };
@@ -1406,6 +1409,7 @@
 				CF519408C137227E5F1B8226 /* ShortQueryIndexDiskCacheHardeningTests.swift */,
 				ADE11D7F3EEE23CE6073C7DD /* SnapshotPerformanceTests.swift */,
 				AA1C5C44C2A823612D31233D /* SQLiteIntegerWidthTests.swift */,
+				439622504A6684CD4427F6FE /* StorageCommitProtocolTests.swift */,
 				6146C28BE595B15CFD414140 /* StorageServiceTests.swift */,
 				F2729BCEB53FC3541B6A37BF /* StorageStatsSemanticsTests.swift */,
 				510AFDDE66625F1864B6A793 /* TestFixture.swift */,
@@ -2330,6 +2334,7 @@
 				137ABDD7D22A3B37EEAC3AEF /* ShortQueryIndexDiskCacheHardeningTests.swift in Sources */,
 				8936CEA202269770DD286AC6 /* ShortcutsSettingsPage.swift in Sources */,
 				374BBA5450BC7E111343E688 /* SnapshotPerformanceTests.swift in Sources */,
+				3BB5109BA4558651C5EE7DB2 /* StorageCommitProtocolTests.swift in Sources */,
 				7D547894B05F8069CA7A3DD2 /* StorageServiceTests.swift in Sources */,
 				25EAB1843BC73ADEDF662E4A /* StorageSettingsPage.swift in Sources */,
 				8ECF1DA7922DB459156CE8D5 /* StorageStatsSemanticsTests.swift in Sources */,
@@ -2534,6 +2539,7 @@
 				52349B93FE20FDACBA2992A8 /* ShortQueryIndexDiskCacheHardeningTests.swift in Sources */,
 				7D69F4EFE1199AC3FB188867 /* ShortcutsSettingsPage.swift in Sources */,
 				18637C156D85757153BECD04 /* SnapshotPerformanceTests.swift in Sources */,
+				8C6479CA9D1282C2950C4F2A /* StorageCommitProtocolTests.swift in Sources */,
 				83B5EE1F7FAB659097712B82 /* StorageServiceTests.swift in Sources */,
 				68DCB77F6F20942281A5E05B /* StorageSettingsPage.swift in Sources */,
 				65703A6C2D18BB8C9698EC76 /* StorageStatsSemanticsTests.swift in Sources */,
