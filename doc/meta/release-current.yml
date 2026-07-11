@@ -1,15 +1,15 @@
-version: v0.65.0
+version: v0.65.1
 date: 2026-07-11
-release_doc: doc/releases/history/v0.65.0.md
+release_doc: doc/releases/history/v0.65.1.md
 release_index: doc/releases/README.md
 changelog_file: doc/releases/CHANGELOG.md
-profile_doc: doc/perf/release-profiles/v0.65.0-profile.md
+profile_doc: null
 runbook_doc: doc/current/release-runbook.md
 spec_doc: doc/current/product-spec.md
 development_doc: doc/current/development-guide.md
 architecture_doc: doc/current/architecture.md
 last_verified_at: 2026-07-11
-summary: Crash-consistent clipboard ingest, race-safe cleanup, passive-row performance, lossless storage accounting, and explicit release tag authority
+summary: Unify GitHub and local tagged packaging on the DerivedData-aware release script
 verification:
   build: pass
   test_unit: pass
@@ -18,4 +18,5 @@ verification:
   test_perf_heavy: pass_targeted_cleanup_2_tests
   test_snapshot_perf_release: pass
   perf_frontend_profile: pass_two_fixed_ab_axes_full_three_repeat_and_hover_smoke_variance_recorded
-  release_policy: pass_14_tests
+  release_policy: pass_15_tests
+  release_package: pass_local_tagged_dmg_sha256

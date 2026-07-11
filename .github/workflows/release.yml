@@ -98,30 +98,11 @@ jobs:
         if: ${{ steps.existing.outputs.has_assets != 'true' }}
         run: brew install xcodegen
 
-      - name: Generate Xcode project
+      - name: Build and package Release
         if: ${{ steps.existing.outputs.has_assets != 'true' }}
-        run: xcodegen generate
-
-      - name: Build Release
-        if: ${{ steps.existing.outputs.has_assets != 'true' }}
-        run: |
-          VERSION="${{ steps.version.outputs.version }}"
-          BUILD="${{ steps.version.outputs.build }}"
-          xcodebuild -scheme Scopy -configuration Release build MARKETING_VERSION="${VERSION}" CURRENT_PROJECT_VERSION="${BUILD}"
-
-      - name: Create DMG
-        if: ${{ steps.existing.outputs.has_assets != 'true' }}
-        run: |
-          VERSION="${{ steps.version.outputs.version }}"
-          mkdir -p dmg
-          cp -r .build/Release/Scopy.app dmg/
-          hdiutil create -volname "Scopy" \
-            -srcfolder dmg \
-            -ov -format UDZO \
-            "Scopy-${VERSION}.dmg"
-
-          # 计算 SHA256
-          shasum -a 256 "Scopy-${VERSION}.dmg" > "Scopy-${VERSION}.dmg.sha256"
+        env:
+          SCOPY_XCODE_DERIVED_DATA: ${{ runner.temp }}/Scopy-Release
+        run: ./scripts/build-release.sh
 
       - name: Generate Release Notes (from CHANGELOG)
         if: ${{ steps.existing.outputs.has_assets != 'true' }}
@@ -182,23 +163,24 @@ jobs:
           tag_name: ${{ steps.version.outputs.tag }}
           name: ${{ steps.version.outputs.tag }}
           files: |
-            Scopy-*.dmg
-            Scopy-*.dmg.sha256
+            .build/Scopy-*.dmg
+            .build/Scopy-*.dmg.sha256
           body_path: release_body.md
 
       - name: Fetch SHA256 file (reuse existing)
         if: ${{ steps.existing.outputs.has_assets == 'true' }}
         run: |
           VERSION="${{ steps.version.outputs.version }}"
-          curl -fsSL "${{ steps.existing.outputs.sha_url }}" -o "Scopy-${VERSION}.dmg.sha256"
+          mkdir -p .build
+          curl -fsSL "${{ steps.existing.outputs.sha_url }}" -o ".build/Scopy-${VERSION}.dmg.sha256"
 
       - name: Resolve SHA256
         id: sha
         run: |
           VERSION="${{ steps.version.outputs.version }}"
-          SHA256="$(awk '{print $1}' "Scopy-${VERSION}.dmg.sha256")"
+          SHA256="$(awk '{print $1}' ".build/Scopy-${VERSION}.dmg.sha256")"
           if [[ -z "${SHA256}" ]]; then
-            echo "Failed to resolve SHA256 from Scopy-${VERSION}.dmg.sha256" >&2
+            echo "Failed to resolve SHA256 from .build/Scopy-${VERSION}.dmg.sha256" >&2
             exit 1
           fi
           echo "sha256=${SHA256}" >> "$GITHUB_OUTPUT"

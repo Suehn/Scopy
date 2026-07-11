@@ -11,6 +11,21 @@
 
 - No unreleased entries.
 
+## [v0.65.1] - 2026-07-11
+
+### Release/Packaging
+
+- Makes the GitHub tag workflow execute the same `scripts/build-release.sh` packager as local releases, eliminating the divergent `.build/Release/Scopy.app` assumption after Xcode products moved to DerivedData.
+- Sets CI DerivedData explicitly under `${{ runner.temp }}` while keeping only final DMG/SHA artifacts under repository `.build`.
+- Makes the shared packager emit `Scopy-<version>.dmg.sha256` beside the DMG and aligns new-build, existing-release reuse, SHA resolution, and upload paths.
+- Adds a 15th release-policy regression that rejects the stale app path and proves the real workflow, packager, DMG, and checksum contract stay aligned.
+
+### Verification
+
+- The failed [v0.65.0 tag run](https://github.com/Suehn/Scopy/actions/runs/29150976451) built successfully and failed only in the stale `Create DMG` step; `v0.65.1` supersedes it without moving the public tag.
+- `bash -n scripts/build-release.sh`, `make build`, `make test-unit`, `make test-strict`, `make test-release-policy`, `make docs-validate`, and `make release-validate` passed.
+- Tagged local packaging produced `Scopy-0.65.1.dmg` and its matching SHA256 sidecar from the explicit DerivedData app path before publication.
+
 ## [v0.65.0] - 2026-07-11
 
 ### Preview/Interaction

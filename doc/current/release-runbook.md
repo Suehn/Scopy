@@ -51,6 +51,14 @@ related_versions:
 - Homebrew version comparison is numeric, not chronological: `0.8.8 < 0.64 < 0.65.0`. Because historical `v0.64` shipped, the next distributable version is `v0.65.0`; do not publish `v0.8.9`, which Homebrew would still treat as older than `0.64`. Continue from `v0.65.x` or later after this repair.
 - Release packaging must use `scripts/version.sh --tag` as the single resolver for both injected version settings and the DMG filename; if they disagree, stop packaging.
 
+## Tagged Packaging Output Contract
+
+- Local and GitHub tagged packaging both execute `scripts/build-release.sh`. The script owns XcodeGen, the explicit DerivedData root, app existence validation, DMG creation, and the `.sha256` sidecar; the workflow must not duplicate those paths.
+- GitHub sets `SCOPY_XCODE_DERIVED_DATA=${{ runner.temp }}/Scopy-Release`. The app stays under `<DerivedData>/Build/Products/Release/Scopy.app`; only final `Scopy-<version>.dmg` and `.dmg.sha256` artifacts live under repository `.build/`.
+- `softprops/action-gh-release` uploads `.build/Scopy-*.dmg` and `.build/Scopy-*.dmg.sha256`. The existing-release reuse path downloads the checksum to the same `.build` location before resolving the cask SHA.
+- `make test-release-policy` includes a packaging-path regression: the real workflow must call the shared packager, must not reference `.build/Release/Scopy.app`, and the packager must emit both artifacts.
+- Failure evidence: [v0.65.0 run 29150976451](https://github.com/Suehn/Scopy/actions/runs/29150976451) built the Release app successfully, then failed immediately in `Create DMG` because the workflow still copied the pre-isolation `.build/Release/Scopy.app` path. `v0.65.1` supersedes that failed tag; do not move or reuse `v0.65.0`.
+
 ## Release Steps
 
 1. Update [../meta/release-current.yml](../meta/release-current.yml), the new release note under [../releases/history/](../releases/history/README.md), [../releases/README.md](../releases/README.md), and [../releases/CHANGELOG.md](../releases/CHANGELOG.md).
@@ -87,7 +95,7 @@ related_versions:
 
 ## Current Performance Evidence
 
-The current release `v0.65.0` adds direction-aware hover transfer and passive history rows without introducing a continuous pointer monitor or visible-row scroll broadcast.
+The product/performance baseline shipped by `v0.65.1` is the verified `v0.65.0` source: direction-aware hover transfer, passive history rows, and the crash-consistent storage protocol. `v0.65.1` changes only the tagged packaging path and carries the same runtime evidence below.
 
 It also makes external clipboard ingest restart-replayable/exactly-once and cleanup commit-time conditional. Schema v8 adds content-free ingest receipts; durable sources remain in the Application Support spool through commit, and cleanup preserves rows that became pinned or changed payload identity after planning. This is a D1 process-restart correctness change, not a D2/D3 power-loss guarantee.
 
@@ -131,6 +139,7 @@ If `HOMEBREW_GITHUB_API_TOKEN` is not configured, the workflow skips the externa
 Known release pitfalls:
 
 - If `make push-release` fails over SSH because the local proxy closes the transport, retry the release push over HTTPS with `http.version=HTTP/1.1`.
+- If the Xcode build succeeds but `Create DMG` fails immediately, search the workflow for `.build/Release/Scopy.app`. Xcode products must remain in DerivedData and the workflow must delegate to `scripts/build-release.sh`; bump the patch version before republishing instead of moving the failed tag.
 - If `raw.githubusercontent.com` still shows an old cask right after a push, verify with GitHub API, git refs, a local tap checkout, or `brew info --cask --json=v2 scopy`; raw CDN lag is not authoritative by itself.
 - If `brew fetch --cask scopy -f` fails with `LibreSSL SSL_connect` / `SSL_ERROR_SYSCALL` against `release-assets.githubusercontent.com`, separate local TLS transport failure from cask version or sha drift and rerun install checks when the transport path recovers.
 - Local `make test-tsan` can skip on the known-bad `macOS 26.x + Xcode 26.2 (17C52)` runtime; Hosted TSan on `macos-15 + Xcode 16.0` remains the release concurrency coverage path.

@@ -56,6 +56,19 @@ class WorkflowTagPolicyTests(unittest.TestCase):
         self.assertIn("  workflow_dispatch:", trigger_header)
         self.assertNotIn("branches:", trigger_header)
 
+    def test_release_workflow_uses_the_derived_data_aware_packager(self) -> None:
+        workflow = (REPO_ROOT / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
+        packager = (REPO_ROOT / "scripts" / "build-release.sh").read_text(encoding="utf-8")
+
+        self.assertIn("SCOPY_XCODE_DERIVED_DATA: ${{ runner.temp }}/Scopy-Release", workflow)
+        self.assertIn("run: ./scripts/build-release.sh", workflow)
+        self.assertIn(".build/Scopy-*.dmg.sha256", workflow)
+        self.assertNotIn(".build/Release/Scopy.app", workflow)
+        self.assertIn('BUILD_DIR="$XCODE_DERIVED_DATA/Build/Products/Release"', packager)
+        self.assertIn('SHA_FILE="${DMG_PATH}.sha256"', packager)
+        self.assertIn('SHA256=$(shasum -a 256 "$DMG_PATH"', packager)
+        self.assertIn('"$SHA256" "$DMG_NAME" > "$SHA_FILE"', packager)
+
     def test_safe_tag_trigger_and_branch_only_cask_push_are_allowed(self) -> None:
         violations = self.validate_fixture(
             """
