@@ -1,4 +1,5 @@
 import AppKit
+import CryptoKit
 import Foundation
 
 /// Mock 剪贴板服务 - 用于 UI 开发和测试
@@ -6,30 +7,63 @@ import Foundation
 @MainActor
 final class MockClipboardService: ClipboardServiceProtocol {
     private struct MockConfig {
+        let datasetID: String?
         let itemCount: Int
         let imageCount: Int
         let showThumbnails: Bool?
         let imagePreviewDelay: Double?
         let thumbnailSize: Int
         let textLength: Int
+        let historyListIntegrationNamespace: String?
+        let noteUpdateDelayMilliseconds: Int?
 
         static func load() -> MockConfig {
             let env = ProcessInfo.processInfo.environment
+            let datasetID = normalized(env["SCOPY_MOCK_DATASET_ID"])
             let itemCount = max(0, parseInt(env["SCOPY_MOCK_ITEM_COUNT"]) ?? 100)
             let imageCount = max(0, parseInt(env["SCOPY_MOCK_IMAGE_COUNT"]) ?? 0)
             let showThumbnails = parseBool(env["SCOPY_MOCK_SHOW_THUMBNAILS"])
             let imagePreviewDelay = parseDouble(env["SCOPY_MOCK_IMAGE_PREVIEW_DELAY"])
             let thumbnailSize = max(16, parseInt(env["SCOPY_MOCK_THUMBNAIL_SIZE"]) ?? 64)
             let textLength = max(0, parseInt(env["SCOPY_MOCK_TEXT_LENGTH"]) ?? 0)
+            let historyListIntegrationNamespace = historyListIntegrationNamespace(
+                environment: env,
+                arguments: ProcessInfo.processInfo.arguments
+            )
+            let noteUpdateDelayMilliseconds = historyListIntegrationNamespace.map { _ in
+                MockClipboardService.boundedUITestNoteDelayMilliseconds(
+                    env["SCOPY_MOCK_UPDATE_NOTE_DELAY_MS"]
+                )
+            }
 
             return MockConfig(
+                datasetID: datasetID,
                 itemCount: itemCount,
                 imageCount: imageCount,
                 showThumbnails: showThumbnails,
                 imagePreviewDelay: imagePreviewDelay,
                 thumbnailSize: thumbnailSize,
-                textLength: textLength
+                textLength: textLength,
+                historyListIntegrationNamespace: historyListIntegrationNamespace,
+                noteUpdateDelayMilliseconds: noteUpdateDelayMilliseconds
             )
+        }
+
+        private static func historyListIntegrationNamespace(
+            environment: [String: String],
+            arguments: [String]
+        ) -> String? {
+            guard arguments.contains("--uitesting"),
+                  arguments.contains("--history-list-retained-interaction"),
+                  environment["SCOPY_UITEST_HISTORY_LIST_INTEGRATION"] == "1"
+            else { return nil }
+            return normalized(environment["SCOPY_UITEST_HISTORY_LIST_NAMESPACE"])
+        }
+
+        private static func normalized(_ value: String?) -> String? {
+            guard let value else { return nil }
+            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? nil : trimmed
         }
 
         private static func parseInt(_ value: String?) -> Int? {
@@ -56,6 +90,18 @@ final class MockClipboardService: ClipboardServiceProtocol {
     }
 
     private static let config = MockConfig.load()
+    static let fixedWarmTextDatasetID = "fixed-warm-text-v1"
+    static let fixedWarmTextItemCount = 50
+    static let fixedWarmTextLength = 4_096
+    static let fixedWarmTextPinnedCount = 2
+    static let historyListIntegrationDatasetID = "history-list-retained-interaction-v1"
+    static let historyListIntegrationItemCount = 50
+    static let historyListIntegrationImageTargetID = UUID(
+        uuidString: "53504359-1001-4000-8000-000000000001"
+    )!
+    static let historyListIntegrationFileTargetID = UUID(
+        uuidString: "53504359-1001-4000-8000-000000000002"
+    )!
 
     private var items: [ClipboardItemDTO] = []
     private var settings: SettingsDTO
@@ -99,6 +145,17 @@ final class MockClipboardService: ClipboardServiceProtocol {
     // MARK: - Private
 
     private func generateMockData(config: MockConfig) {
+        if config.historyListIntegrationNamespace != nil,
+           config.datasetID == Self.historyListIntegrationDatasetID {
+            items = Self.makeHistoryListIntegrationDataset()
+            return
+        }
+
+        if config.datasetID == Self.fixedWarmTextDatasetID {
+            items = Self.makeFixedWarmTextDataset()
+            return
+        }
+
         let sampleTexts = [
             """
             # SCOPY_EXPORT_TEST_MARKDOWN
@@ -280,6 +337,130 @@ final class MockClipboardService: ClipboardServiceProtocol {
         return "Test item #\(index) - Some random text content for testing pagination and scrolling behavior."
     }
 
+    static func makeFixedWarmTextDataset() -> [ClipboardItemDTO] {
+        let referenceTime = Date(timeIntervalSince1970: 1_700_000_000)
+        var result: [ClipboardItemDTO] = []
+        result.reserveCapacity(fixedWarmTextItemCount)
+
+        for index in 0..<fixedWarmTextItemCount {
+            let plainText = makeFixedWarmTextPayload(index: index)
+            let lastUsedAt = referenceTime.addingTimeInterval(Double(-index * 60))
+            result.append(
+                ClipboardItemDTO(
+                    id: fixedWarmTextUUID(index: index),
+                    type: .text,
+                    contentHash: sha256Hex(plainText),
+                    plainText: plainText,
+                    note: nil,
+                    appBundleID: "com.scopy.profile.fixture",
+                    createdAt: lastUsedAt.addingTimeInterval(-30),
+                    lastUsedAt: lastUsedAt,
+                    isPinned: index < fixedWarmTextPinnedCount,
+                    sizeBytes: plainText.utf8.count,
+                    fileSizeBytes: nil,
+                    thumbnailPath: nil,
+                    storageRef: nil
+                )
+            )
+        }
+
+        return result
+    }
+
+    static func makeHistoryListIntegrationDataset() -> [ClipboardItemDTO] {
+        let referenceTime = Date(timeIntervalSince1970: 1_710_000_000)
+        var result: [ClipboardItemDTO] = [
+            ClipboardItemDTO(
+                id: historyListIntegrationImageTargetID,
+                type: .image,
+                contentHash: sha256Hex("history-list-image-target"),
+                plainText: "640x480",
+                note: nil,
+                appBundleID: "com.scopy.uitest.fixture",
+                createdAt: referenceTime.addingTimeInterval(-30),
+                lastUsedAt: referenceTime,
+                isPinned: false,
+                sizeBytes: 4_096,
+                fileSizeBytes: nil,
+                thumbnailPath: nil,
+                storageRef: nil
+            ),
+            ClipboardItemDTO(
+                id: historyListIntegrationFileTargetID,
+                type: .file,
+                contentHash: sha256Hex("history-list-file-target"),
+                plainText: "/tmp/scopy-history-list-note-target.txt",
+                note: nil,
+                appBundleID: "com.scopy.uitest.fixture",
+                createdAt: referenceTime.addingTimeInterval(-90),
+                lastUsedAt: referenceTime.addingTimeInterval(-60),
+                isPinned: false,
+                sizeBytes: 1_024,
+                fileSizeBytes: 1_024,
+                thumbnailPath: nil,
+                storageRef: nil
+            )
+        ]
+        result.reserveCapacity(historyListIntegrationItemCount)
+
+        for index in 2..<historyListIntegrationItemCount {
+            let plainText = String(format: "History list integration filler row %02d", index)
+            let lastUsedAt = referenceTime.addingTimeInterval(Double(-index * 60))
+            result.append(
+                ClipboardItemDTO(
+                    id: historyListIntegrationUUID(index: index),
+                    type: .text,
+                    contentHash: sha256Hex(plainText),
+                    plainText: plainText,
+                    note: nil,
+                    appBundleID: "com.scopy.uitest.fixture",
+                    createdAt: lastUsedAt.addingTimeInterval(-30),
+                    lastUsedAt: lastUsedAt,
+                    isPinned: false,
+                    sizeBytes: plainText.utf8.count,
+                    fileSizeBytes: nil,
+                    thumbnailPath: nil,
+                    storageRef: nil
+                )
+            )
+        }
+
+        return result
+    }
+
+    nonisolated static func boundedUITestNoteDelayMilliseconds(_ rawValue: String?) -> Int {
+        let requested = rawValue.flatMap(Int.init) ?? 700
+        return min(750, max(600, requested))
+    }
+
+    private static func makeFixedWarmTextPayload(index: Int) -> String {
+        let seed = String(format: "scopy fixed row %02d word word word ", index)
+        let repeats = max(1, fixedWarmTextLength / seed.utf8.count + 1)
+        return String(String(repeating: seed, count: repeats).prefix(fixedWarmTextLength))
+    }
+
+    private static func fixedWarmTextUUID(index: Int) -> UUID {
+        let rawValue = String(format: "53504359-0001-4000-8000-%012X", index)
+        guard let value = UUID(uuidString: rawValue) else {
+            preconditionFailure("Invalid fixed warm-text UUID: \(rawValue)")
+        }
+        return value
+    }
+
+    private static func historyListIntegrationUUID(index: Int) -> UUID {
+        let rawValue = String(format: "53504359-1001-4000-8000-%012X", index + 1)
+        guard let value = UUID(uuidString: rawValue) else {
+            preconditionFailure("Invalid history-list integration UUID: \(rawValue)")
+        }
+        return value
+    }
+
+    private static func sha256Hex(_ text: String) -> String {
+        SHA256.hash(data: Data(text.utf8))
+            .map { String(format: "%02x", $0) }
+            .joined()
+    }
+
     func fetchRecent(limit: Int, offset: Int) async throws -> [ClipboardItemDTO] {
         // 模拟网络延迟
         try await Task.sleep(nanoseconds: 50_000_000)  // 50ms
@@ -373,6 +554,11 @@ final class MockClipboardService: ClipboardServiceProtocol {
     }
 
     func updateNote(itemID: UUID, note: String?) async throws {
+        if let delayMilliseconds = Self.config.noteUpdateDelayMilliseconds {
+            try await Task.sleep(
+                nanoseconds: UInt64(delayMilliseconds) * 1_000_000
+            )
+        }
         guard let index = items.firstIndex(where: { $0.id == itemID }) else { return }
         let trimmed = note?.trimmingCharacters(in: .whitespacesAndNewlines)
         let normalized = (trimmed?.isEmpty ?? true) ? nil : trimmed
@@ -393,6 +579,7 @@ final class MockClipboardService: ClipboardServiceProtocol {
             storageRef: item.storageRef
         )
         items[index] = updated
+        postHistoryListIntegrationPersistedNoteIfNeeded(itemID: itemID, note: normalized)
         await yieldEvent(.itemContentUpdated(updated))
     }
 
@@ -472,7 +659,12 @@ final class MockClipboardService: ClipboardServiceProtocol {
         )
         items[index] = updated
         await yieldEvent(.itemContentUpdated(updated))
-        return ImageOptimizationOutcomeDTO(result: .optimized, originalBytes: original, optimizedBytes: optimized)
+        return ImageOptimizationOutcomeDTO(
+            result: .optimized,
+            originalBytes: original,
+            optimizedBytes: optimized,
+            resultingContentHash: updated.contentHash
+        )
     }
 
     func syncExternalImageSizeBytesFromDisk() async throws -> Int {
@@ -511,5 +703,21 @@ final class MockClipboardService: ClipboardServiceProtocol {
 
     private func yieldEvent(_ event: ClipboardEvent) async {
         await eventQueue.enqueue(event)
+    }
+
+    private func postHistoryListIntegrationPersistedNoteIfNeeded(
+        itemID: UUID,
+        note: String?
+    ) {
+        guard let namespace = Self.config.historyListIntegrationNamespace,
+              itemID == Self.historyListIntegrationFileTargetID else { return }
+        DistributedNotificationCenter.default().postNotificationName(
+            Notification.Name(
+                "org.scopy.uitest.history-list.\(namespace).mock-note-persisted"
+            ),
+            object: itemID.uuidString,
+            userInfo: ["note": note ?? ""],
+            deliverImmediately: true
+        )
     }
 }

@@ -122,11 +122,31 @@ final class AppState {
 
     private static let useMockService: Bool = {
         #if DEBUG
-        return ProcessInfo.processInfo.environment["USE_MOCK_SERVICE"] != "0"
+        let isDebugBuild = true
         #else
-        return false
+        let isDebugBuild = false
         #endif
+        return shouldUseMockService(
+            arguments: ProcessInfo.processInfo.arguments,
+            environment: ProcessInfo.processInfo.environment,
+            isDebugBuild: isDebugBuild
+        )
     }()
+
+    /// UI-test launches are mock-safe by default in every configuration. A real-snapshot test must
+    /// opt out explicitly with `USE_MOCK_SERVICE=0`; ordinary Release launches cannot enable the
+    /// mock through an environment variable alone because they lack `--uitesting`.
+    static func shouldUseMockService(
+        arguments: [String],
+        environment: [String: String],
+        isDebugBuild: Bool
+    ) -> Bool {
+        if isDebugBuild {
+            return environment["USE_MOCK_SERVICE"] != "0"
+        }
+        guard arguments.contains("--uitesting") else { return false }
+        return environment["USE_MOCK_SERVICE"] != "0"
+    }
 
     private init(service: ClipboardServiceProtocol? = nil) {
         let resolvedService: ClipboardServiceProtocol

@@ -22,6 +22,50 @@ final class AppStateTests: XCTestCase {
         mockService = nil
     }
 
+    func testReleaseUITestingDefaultsToMockUnlessExplicitlyDisabled() {
+        XCTAssertTrue(
+            AppState.shouldUseMockService(
+                arguments: ["Scopy", "--uitesting"],
+                environment: [:],
+                isDebugBuild: false
+            )
+        )
+        XCTAssertFalse(
+            AppState.shouldUseMockService(
+                arguments: ["Scopy", "--uitesting"],
+                environment: ["USE_MOCK_SERVICE": "0"],
+                isDebugBuild: false
+            )
+        )
+    }
+
+    func testOrdinaryReleaseLaunchCannotEnableMockFromEnvironmentAlone() {
+        XCTAssertFalse(
+            AppState.shouldUseMockService(
+                arguments: ["Scopy"],
+                environment: ["USE_MOCK_SERVICE": "1"],
+                isDebugBuild: false
+            )
+        )
+    }
+
+    func testDebugMockOverridePreservesExistingOptOut() {
+        XCTAssertTrue(
+            AppState.shouldUseMockService(
+                arguments: ["Scopy"],
+                environment: [:],
+                isDebugBuild: true
+            )
+        )
+        XCTAssertFalse(
+            AppState.shouldUseMockService(
+                arguments: ["Scopy"],
+                environment: ["USE_MOCK_SERVICE": "0"],
+                isDebugBuild: true
+            )
+        )
+    }
+
     // MARK: - Initialization Tests
 
     func testInitializationWithMockService() {
