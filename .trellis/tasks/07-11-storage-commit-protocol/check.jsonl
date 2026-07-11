@@ -1,0 +1,14 @@
+{"file":".trellis/spec/backend/index.md","reason":"Check backend architecture and authoritative references."}
+{"file":".trellis/spec/backend/database-guidelines.md","reason":"Verify transaction boundaries, affected-row authority, and migration safety."}
+{"file":".trellis/spec/backend/error-handling.md","reason":"Verify every partial failure retains a recoverable authority."}
+{"file":".trellis/spec/backend/logging-guidelines.md","reason":"Verify useful logs do not expose clipboard content or arbitrary paths."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Verify concurrency, fault tests, migration tests, and performance gates."}
+{"file":".trellis/spec/backend/search-guidelines.md","reason":"Verify durable and in-memory search convergence after commits."}
+{"file":".trellis/spec/frontend/state-management.md","reason":"Verify open history converges after bulk cleanup."}
+{"file":".trellis/spec/frontend/quality-guidelines.md","reason":"Verify bounded UI events and regression coverage."}
+{"file":".trellis/spec/frontend/type-safety.md","reason":"Verify ownership and repository outcomes are structurally explicit."}
+{"file":".trellis/spec/guides/high-leverage-change-guide.md","reason":"Detect scope drift into low-return refactors or speculative infrastructure."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Verify end-to-end authority across files, DB, search, events, and restart."}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"Verify existing safe primitives are reused instead of duplicated."}
+{"file":".trellis/tasks/07-11-storage-commit-protocol/research/current-storage-failure-map.md","reason":"Check fixes against every confirmed current failure and existing protection."}
+{"file":".trellis/tasks/07-11-storage-commit-protocol/research/crash-consistent-protocols.md","reason":"Check durability claims, fault coverage, and rollback boundaries."}
