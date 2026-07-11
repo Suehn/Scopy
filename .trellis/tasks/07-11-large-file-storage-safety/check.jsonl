@@ -1,0 +1,6 @@
+{"file":".trellis/spec/backend/index.md","reason":"Audit final placement, baselines, and required backend gates."}
+{"file":".trellis/spec/backend/database-guidelines.md","reason":"Verify lossless SQLite mapping, unchanged schema/user version, metadata triggers, and cleanup consistency."}
+{"file":".trellis/spec/backend/error-handling.md","reason":"Verify no fatal narrowing, silent clamp, or swallowed persistence failure remains."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Check focused boundary coverage and full build/unit/strict/snapshot performance evidence."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Audit exact values across filesystem, storage, persistence, search/recent hydration, cleanup, and display."}
+{"file":".trellis/tasks/07-11-large-file-storage-safety/research/large-file-persistence-audit.md","reason":"Check every confirmed crash/truncation/over-delete path against the implemented fix and tests."}
