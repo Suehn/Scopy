@@ -21,12 +21,22 @@ These guides help you **ask the right questions before coding**.
 
 | Guide | Purpose | When to Use |
 |-------|---------|-------------|
+| [High-Leverage Change Selection Guide](./high-leverage-change-guide.md) | Rank systemic impact before implementation polish | Choosing the next performance, reliability, architecture, or release task |
 | [Code Reuse Thinking Guide](./code-reuse-thinking-guide.md) | Identify patterns and reduce duplication | When you notice repeated patterns |
 | [Cross-Layer Thinking Guide](./cross-layer-thinking-guide.md) | Think through data flow across layers | Features spanning multiple layers |
 
 ---
 
 ## Quick Reference: Thinking Triggers
+
+### When to Re-rank Work By Impact
+
+- [ ] Several technically valid tasks compete for attention
+- [ ] A proposed change is mostly cleanup or micro-optimization
+- [ ] A crash, data-integrity, release-safety, or measured hot-path issue exists
+- [ ] The next roadmap item lacks current evidence or a rollback boundary
+
+→ Read [High-Leverage Change Selection Guide](./high-leverage-change-guide.md)
 
 ### When to Think About Cross-Layer Issues
 
