@@ -3,7 +3,7 @@
 
 .PHONY: all setup build run clean xcode test test-unit test-perf test-perf-heavy test-snapshot-perf test-snapshot-perf-release test-tsan test-strict coverage benchmark perf-audit perf-frontend-profile perf-frontend-profile-smoke perf-frontend-profile-standard perf-frontend-profile-full perf-unified-table test-flow test-flow-quick health-check quality-manifest-self-test
 .PHONY: test-real-db
-.PHONY: snapshot-perf-db bench-snapshot-search perf-search-warm-load
+.PHONY: snapshot-perf-db bench-snapshot-search perf-search-warm-load perf-warm-scroll-ab
 .PHONY: tag-release push-release release-validate release-bump-patch
 
 VERSION_ARGS := $(shell bash scripts/version.sh --xcodebuild-args 2>/dev/null)
@@ -332,6 +332,11 @@ perf-frontend-profile-standard:
 # 全量档：发布前基准（最慢，结果最稳定）
 perf-frontend-profile-full:
 	@bash scripts/perf-frontend-profile.sh $(FRONTEND_PROFILE_FULL_ARGS)
+
+# Release fixed-workload causal A/B; defaults to the formal shared-build two-axis 20-run suite.
+# Set WARM_SCROLL_AB_ARGS="--axis passive-row" (or markdown-menu-cache) for diagnostic single-axis runs.
+perf-warm-scroll-ab:
+	@bash scripts/perf-warm-scroll-ab.sh $(WARM_SCROLL_AB_ARGS)
 
 # 汇总前后端同表对比（需传 BACKEND_BASELINE/BACKEND_CURRENT/FRONTEND_SUMMARY）
 perf-unified-table:

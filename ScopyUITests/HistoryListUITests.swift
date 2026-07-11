@@ -1,3 +1,4 @@
+import CoreGraphics
 import XCTest
 
 /// History List UI Tests
@@ -15,7 +16,16 @@ final class HistoryListUITests: XCTestCase {
         "SCOPY_PERF_SCROLL_RESOLVER_CACHE",
         "SCOPY_PERF_MARKDOWN_RESOLVER_CACHE",
         "SCOPY_PERF_PREVIEW_TASK_BUDGET",
-        "SCOPY_PERF_SHORT_QUERY_DEBOUNCE"
+        "SCOPY_PERF_SHORT_QUERY_DEBOUNCE",
+        "SCOPY_PERF_PASSIVE_ROW",
+        "SCOPY_PERF_MARKDOWN_MENU_SIGNAL_CACHE",
+        "SCOPY_MOCK_DATASET_ID",
+        "SCOPY_PROFILE_SOURCE_FINGERPRINT",
+        "SCOPY_PROFILE_EXECUTABLE_FINGERPRINT",
+        "SCOPY_PROFILE_MAX_SAMPLES",
+        "SCOPY_PROFILE_FIXED_COMMAND_COUNT",
+        "SCOPY_PROFILE_WARM_ROUNDS",
+        "SCOPY_PROFILE_AUTO_SCROLL_STEP_PX"
     ]
 
     var app: XCUIApplication!
@@ -24,6 +34,9 @@ final class HistoryListUITests: XCTestCase {
         continueAfterFailure = false
         app = XCUIApplication()
         app.launchArguments = ["--uitesting"]
+        // Release UI-test builds must never perform the setUp launch against the user's real
+        // clipboard/database before a scenario relaunches with its own environment.
+        app.launchEnvironment["USE_MOCK_SERVICE"] = "1"
         app.launch()
     }
 
@@ -176,6 +189,19 @@ final class HistoryListUITests: XCTestCase {
             showThumbnails: false,
             textLength: 4096,
             accessibility: false
+        )
+    }
+
+    func testScrollProfileFixedWarmText() throws {
+        try runScrollProfileScenario(
+            scenario: "fixed-warm-text",
+            itemCount: 50,
+            imageCount: 0,
+            showThumbnails: false,
+            textLength: 4096,
+            accessibility: false,
+            durationSeconds: 12,
+            minSamples: 120
         )
     }
 
@@ -359,7 +385,27 @@ final class HistoryListUITests: XCTestCase {
         app.launchEnvironment["SCOPY_PROFILE_SCENARIO"] = scenario
         let autoScroll = envValue("SCOPY_PROFILE_AUTO_SCROLL") ?? "1"
         app.launchEnvironment["SCOPY_PROFILE_AUTO_SCROLL"] = autoScroll
+        let fixedCommandCount = parseInt(envValue("SCOPY_PROFILE_FIXED_COMMAND_COUNT")) ?? 0
+        if fixedCommandCount > 0, fixedCommandCount < resolvedMinSamples {
+            XCTFail(
+                "Fixed profile command count (\(fixedCommandCount)) must be at least "
+                    + "the resolved minimum sample count (\(resolvedMinSamples))"
+            )
+            return
+        }
+        let startNotificationName: Notification.Name? = fixedCommandCount > 0
+            ? Notification.Name("org.scopy.profile.start.\(safeFileToken(profileRunID))")
+            : nil
+        if let startNotificationName {
+            app.launchEnvironment["SCOPY_PROFILE_START_NOTIFICATION"] = startNotificationName.rawValue
+        }
 
+        if fixedCommandCount > 0 {
+            // The fixed workload is an idle-scroll benchmark. Moving the pointer to the screen
+            // corner prevents rows scrolling underneath a stationary cursor from becoming real
+            // hover interactions and contaminating the passive-row lifecycle counters.
+            CGWarpMouseCursorPosition(.zero)
+        }
         app.launch()
 
         let skippedAXListQuery = profileSkipAXListQuery
@@ -367,6 +413,7 @@ final class HistoryListUITests: XCTestCase {
             if autoScroll == "0" {
                 throw XCTSkip("Manual scroll profile requires AX list access")
             }
+            postProfileStartNotification(startNotificationName)
             waitForAutomatedScroll(durationSeconds: resolvedDuration)
         } else {
             _ = prepareMainWindow()
@@ -376,7 +423,7 @@ final class HistoryListUITests: XCTestCase {
                 XCTFail("List not found")
                 return
             }
-
+            postProfileStartNotification(startNotificationName)
             if autoScroll == "0" {
                 exerciseScroll(on: list, durationSeconds: resolvedDuration)
             } else {
@@ -388,11 +435,21 @@ final class HistoryListUITests: XCTestCase {
             FileManager.default.fileExists(atPath: profilePath)
         }
         let expectation = XCTNSPredicateExpectation(predicate: predicate, object: nil)
-        let result = XCTWaiter.wait(for: [expectation], timeout: max(12, resolvedDuration + 6))
+        let profileTimeout = fixedCommandCount > 0
+            ? max(45, resolvedDuration + 30)
+            : max(12, resolvedDuration + 6)
+        let result = XCTWaiter.wait(for: [expectation], timeout: profileTimeout)
         XCTAssertEqual(result, .completed, "Profile output not found at \(profilePath)")
 
         let data = try Data(contentsOf: URL(fileURLWithPath: profilePath))
         var json = try JSONSerialization.jsonObject(with: data, options: []) as? [String: Any]
+        if fixedCommandCount > 0 {
+            guard let rawProfile = json else {
+                XCTFail("Fixed profile output is not a JSON object")
+                return
+            }
+            assertFixedWorkloadRawSchema(rawProfile)
+        }
         let accessibilityQuery: [String: Any]
         if skippedAXListQuery {
             accessibilityQuery = [
@@ -418,6 +475,134 @@ final class HistoryListUITests: XCTestCase {
 
         let scenarioName = json?["profile_scenario"] as? String ?? ""
         XCTAssertEqual(scenarioName, scenario, "Profile scenario mismatch")
+    }
+
+    private func assertFixedWorkloadRawSchema(_ profile: [String: Any]) {
+        let requiredCounters = [
+            "interaction.session_init",
+            "interaction.observer_install",
+            "interaction.idle_disappear_fast_path",
+            "row.descriptor_cache_hit",
+            "row.descriptor_cache_miss",
+            "row.relative_time_cache_hit",
+            "row.relative_time_cache_miss",
+            "list.load_more_attempt",
+            "list.pagination_request",
+            "row.markdown_menu_signal_cache_hit",
+            "row.markdown_menu_signal_cache_miss",
+            "row.markdown_menu_signal_uncached",
+            "profile.ingress_coalesced",
+            "profile.ingress_dropped"
+        ]
+        let requiredGauges = [
+            "active_slot_current",
+            "active_slot_max",
+            "suppressed_candidate_current",
+            "suppressed_candidate_max"
+        ]
+
+        guard let config = profile["config"] as? [String: Any],
+              let workload = profile["fixed_workload"] as? [String: Any],
+              let dataset = workload["dataset"] as? [String: Any],
+              let counters = profile["counters"] as? [String: Any],
+              let gauges = profile["gauges"] as? [String: Any],
+              let buckets = profile["timing_buckets_ms"] as? [String: Any],
+              let rowBucket = buckets["swiftui.row_body_ms"] as? [String: Any],
+              let runLoop = profile["main_runloop_active_ms"] as? [String: Any],
+              let callback = profile["animation_callback_interval_ms"] as? [String: Any],
+              let sampleHealth = profile["scroll_sample_health"] as? [String: Any],
+              let timingEventRetention = profile["timing_event_retention"] as? [String: Any],
+              let runLoopEventRetention = profile["main_runloop_event_retention"] as? [String: Any]
+        else {
+            XCTFail("Fixed profile is missing its config, workload, retention, or structural schema")
+            return
+        }
+
+        let datasetID = app.launchEnvironment["SCOPY_MOCK_DATASET_ID"] ?? ""
+        let sourceFingerprint = app.launchEnvironment["SCOPY_PROFILE_SOURCE_FINGERPRINT"] ?? ""
+        let executableFingerprint = app.launchEnvironment["SCOPY_PROFILE_EXECUTABLE_FINGERPRINT"] ?? ""
+        let commandCount = Int(app.launchEnvironment["SCOPY_PROFILE_FIXED_COMMAND_COUNT"] ?? "") ?? 0
+        XCTAssertFalse(datasetID.isEmpty, "Fixed profile requires SCOPY_MOCK_DATASET_ID")
+        XCTAssertTrue(isSHA256Fingerprint(sourceFingerprint), "Fixed profile requires a source fingerprint")
+        XCTAssertTrue(
+            isSHA256Fingerprint(executableFingerprint),
+            "Fixed profile requires an executable fingerprint"
+        )
+        XCTAssertEqual(config["mock_dataset_id"] as? String, datasetID)
+        XCTAssertEqual(config["source_fingerprint"] as? String, sourceFingerprint)
+        XCTAssertEqual(config["executable_fingerprint"] as? String, executableFingerprint)
+        XCTAssertEqual(config["runner_executable_fingerprint"] as? String, executableFingerprint)
+        XCTAssertEqual(config["build_configuration"] as? String, "Release")
+        XCTAssertEqual(
+            config["max_samples"] as? Int,
+            Int(app.launchEnvironment["SCOPY_PROFILE_MAX_SAMPLES"] ?? "")
+        )
+        for key in [
+            "SCOPY_PERF_HISTORY_INDEX",
+            "SCOPY_PERF_SCROLL_RESOLVER_CACHE",
+            "SCOPY_PERF_MARKDOWN_RESOLVER_CACHE",
+            "SCOPY_PERF_PREVIEW_TASK_BUDGET",
+            "SCOPY_PERF_SHORT_QUERY_DEBOUNCE"
+        ] {
+            XCTAssertEqual(config[key] as? String, "1", "Fixed profile requires config.\(key)=1")
+        }
+
+        XCTAssertEqual(dataset["schema"] as? String, "history-profile-dataset-v1")
+        XCTAssertEqual(dataset["id"] as? String, datasetID)
+        XCTAssertTrue(
+            isSHA256Fingerprint(dataset["fingerprint"] as? String ?? ""),
+            "Fixed profile requires a dataset fingerprint"
+        )
+        XCTAssertEqual(dataset["item_count"] as? Int, 50)
+        XCTAssertEqual(dataset["text_item_count"] as? Int, 50)
+        XCTAssertEqual(dataset["image_item_count"] as? Int, 0)
+        XCTAssertEqual(dataset["pinned_item_count"] as? Int, 2)
+        XCTAssertEqual(dataset["unique_item_id_count"] as? Int, 50)
+        XCTAssertEqual(dataset["text_utf8_bytes_min"] as? Int, 4_096)
+        XCTAssertEqual(dataset["text_utf8_bytes_max"] as? Int, 4_096)
+
+        XCTAssertEqual(workload["issued_command_count"] as? Int, commandCount)
+        XCTAssertEqual(workload["measured_command_response_count"] as? Int, commandCount)
+        XCTAssertEqual(workload["pre_measurement_settle_callback_count"] as? Int, 1)
+        XCTAssertEqual(workload["post_measurement_settle_callback_count"] as? Int, 1)
+        XCTAssertEqual(workload["finalization_state"] as? String, "response_captured_and_drained")
+        XCTAssertEqual(callback["retained_count"] as? Int, commandCount)
+        XCTAssertEqual(callback["total_count"] as? Int, commandCount)
+        XCTAssertEqual(callback["overwritten_count"] as? Int, 0)
+        XCTAssertEqual(sampleHealth["animation_callback_total_count"] as? Int, commandCount)
+        XCTAssertEqual(sampleHealth["animation_callback_overwritten_count"] as? Int, 0)
+        assertUntruncatedMetric(rowBucket, label: "swiftui.row_body_ms")
+        assertUntruncatedMetric(runLoop, label: "main_runloop_active_ms")
+        assertUntruncatedRetention(timingEventRetention, label: "timing events")
+        assertUntruncatedRetention(runLoopEventRetention, label: "main-run-loop events")
+
+        for key in requiredCounters {
+            XCTAssertNotNil(counters[key] as? NSNumber, "Missing explicit counter: \(key)")
+        }
+        for key in requiredGauges {
+            XCTAssertNotNil(gauges[key] as? NSNumber, "Missing explicit gauge: \(key)")
+        }
+    }
+
+    private func assertUntruncatedMetric(_ metric: [String: Any], label: String) {
+        let retainedCount = metric["retained_count"] as? Int ?? -1
+        let totalCount = metric["total_count"] as? Int ?? -1
+        XCTAssertGreaterThan(totalCount, 0, "\(label) requires whole-run samples")
+        XCTAssertEqual(retainedCount, totalCount, "\(label) must retain its full formal run")
+        XCTAssertEqual(metric["overwritten_count"] as? Int, 0, "\(label) was truncated")
+        XCTAssertNotNil(metric["total_ms"] as? NSNumber, "\(label) requires an O(1) whole-run total")
+        XCTAssertNotNil(metric["p95"] as? NSNumber, "\(label) p95 requires an untruncated run")
+    }
+
+    private func assertUntruncatedRetention(_ retention: [String: Any], label: String) {
+        let retainedCount = retention["retained_count"] as? Int ?? -1
+        let totalCount = retention["total_count"] as? Int ?? -1
+        XCTAssertEqual(retainedCount, totalCount, "\(label) must retain its full formal run")
+        XCTAssertEqual(retention["overwritten_count"] as? Int, 0, "\(label) was truncated")
+    }
+
+    private func isSHA256Fingerprint(_ value: String) -> Bool {
+        value.range(of: #"^sha256:[0-9a-f]{64}$"#, options: .regularExpression) != nil
     }
 
     private func exerciseScroll(on list: XCUIElement, durationSeconds: TimeInterval) {
@@ -454,6 +639,16 @@ final class HistoryListUITests: XCTestCase {
         while Date() < endTime {
             usleep(120_000)
         }
+    }
+
+    private func postProfileStartNotification(_ name: Notification.Name?) {
+        guard let name else { return }
+        DistributedNotificationCenter.default().postNotificationName(
+            name,
+            object: nil,
+            userInfo: nil,
+            deliverImmediately: true
+        )
     }
 
     private func measureAccessibilityQuery(listAlreadyFound: Bool) -> [String: Any] {
@@ -533,6 +728,7 @@ final class HistoryListUITests: XCTestCase {
         guard window.waitForExistence(timeout: timeout) else {
             return nil
         }
+        app.activate()
         if window.isHittable {
             window.click()
         }

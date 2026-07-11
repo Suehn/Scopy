@@ -118,6 +118,13 @@ if [[ ! -f "$DB_PATH" ]]; then
 fi
 
 mkdir -p "$OUT_DIR/raw/baseline" "$OUT_DIR/raw/current"
+RUNNER_OUTPUT_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/scopy-frontend-profile.XXXXXX")"
+RUNNER_DB_PATH="$RUNNER_OUTPUT_ROOT/clipboard.db"
+# Keep XCTest and the profiled app away from Documents-backed repo paths. On macOS, opening
+# inputs or outputs there can block in file coordination/TCC until unrelated UI activity occurs.
+# The immutable source snapshot remains the auditable input; each profile invocation uses this
+# disposable copy so migrations or WAL files cannot mutate it.
+cp "$DB_PATH" "$RUNNER_DB_PATH"
 
 terminate_scopy_processes() {
   if command -v osascript >/dev/null 2>&1; then
@@ -127,7 +134,11 @@ terminate_scopy_processes() {
   pkill -x Scopy >/dev/null 2>&1 || true
 }
 
-trap terminate_scopy_processes EXIT
+cleanup() {
+  terminate_scopy_processes
+  rm -rf "$RUNNER_OUTPUT_ROOT"
+}
+trap cleanup EXIT
 terminate_scopy_processes
 
 if [[ "$SKIP_SETUP" -eq 0 ]]; then
@@ -141,7 +152,9 @@ run_variant_repeat() {
   local repeat="$2"
   local run_id="r$repeat"
   local profile_dir="$OUT_DIR/raw/$variant"
+  local runner_profile_dir="$RUNNER_OUTPUT_ROOT/raw/$variant"
   local log_file="$OUT_DIR/xcodebuild.$variant.$run_id.log"
+  mkdir -p "$runner_profile_dir"
 
   local perf_index=1
   local perf_scroll_cache=1
@@ -178,6 +191,13 @@ run_variant_repeat() {
     )
   fi
 
+  local scenario
+  for scenario in "${profile_scenarios[@]}"; do
+    rm -f \
+      "$runner_profile_dir/$scenario-$run_id.json" \
+      "$profile_dir/$scenario-$run_id.json"
+  done
+
   run_profile_tests() {
     local run_log="$1"
     shift
@@ -189,8 +209,8 @@ run_variant_repeat() {
 
     env \
       TEST_RUNNER_SCOPY_RUN_PROFILE_UI_TESTS=1 \
-      TEST_RUNNER_SCOPY_UI_PROFILE_DB_PATH="$DB_PATH" \
-      TEST_RUNNER_SCOPY_UI_PROFILE_OUTPUT_DIR="$profile_dir" \
+      TEST_RUNNER_SCOPY_UI_PROFILE_DB_PATH="$RUNNER_DB_PATH" \
+      TEST_RUNNER_SCOPY_UI_PROFILE_OUTPUT_DIR="$runner_profile_dir" \
       TEST_RUNNER_SCOPY_UI_PROFILE_RUN_ID="$run_id" \
       TEST_RUNNER_SCOPY_UI_PROFILE_DURATION_SEC="$DURATION_SEC" \
       TEST_RUNNER_SCOPY_UI_PROFILE_MIN_SAMPLES="$MIN_SAMPLES" \
@@ -200,7 +220,7 @@ run_variant_repeat() {
       TEST_RUNNER_SCOPY_PERF_MARKDOWN_RESOLVER_CACHE="$perf_markdown_cache" \
       TEST_RUNNER_SCOPY_PERF_PREVIEW_TASK_BUDGET="$perf_preview_budget" \
       TEST_RUNNER_SCOPY_PERF_SHORT_QUERY_DEBOUNCE="$perf_short_debounce" \
-      xcodebuild test \
+      xcodebuild -quiet test \
         -project Scopy.xcodeproj \
         -scheme Scopy \
         -destination "$DESTINATION" \
@@ -212,7 +232,7 @@ run_variant_repeat() {
     local index
     for index in "${!profile_scenarios[@]}"; do
       local scenario="${profile_scenarios[$index]}"
-      local profile_path="$profile_dir/$scenario-$run_id.json"
+      local profile_path="$runner_profile_dir/$scenario-$run_id.json"
       if [[ ! -f "$profile_path" ]]; then
         printf '%s\n' "$index"
       fi
@@ -258,6 +278,11 @@ run_variant_repeat() {
     fi
   fi
   retry_missing_profiles_once || return 1
+  for scenario in "${profile_scenarios[@]}"; do
+    cp \
+      "$runner_profile_dir/$scenario-$run_id.json" \
+      "$profile_dir/$scenario-$run_id.json"
+  done
   terminate_scopy_processes
 }
 

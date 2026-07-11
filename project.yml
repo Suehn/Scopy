@@ -17,6 +17,19 @@ schemes:
       targets:
         - ScopyTests
         - ScopyUITests
+  ScopyWarmProfile:
+    build:
+      targets:
+        Scopy: all
+        ScopyUITests: [test]
+    test:
+      config: Release
+      targets:
+        - ScopyUITests
+    run:
+      config: Release
+    profile:
+      config: Release
   ScopyTSan:
     build:
       targets:
