@@ -1230,9 +1230,17 @@ final class AppStateFallbackTests: XCTestCase {
 
         let originalOrder = state.items.map(\.id)
         let targetID = state.items[2].id
+        let target = try XCTUnwrap(state.items.first(where: { $0.id == targetID }))
         let thumbnailPath = "/tmp/scopy-test-thumbnail-\(UUID().uuidString).png"
 
-        mockService.emitEvent(.thumbnailUpdated(itemID: targetID, thumbnailPath: thumbnailPath))
+        mockService.emitEvent(
+            .thumbnailUpdated(
+                itemID: targetID,
+                expectedType: target.type,
+                expectedContentHash: target.contentHash,
+                thumbnailPath: thumbnailPath
+            )
+        )
         await assertEventually(timeout: 1.0, pollInterval: 0.01, {
             state.items.first(where: { $0.id == targetID })?.thumbnailPath == thumbnailPath
         }, message: "Thumbnail path should be updated in place")
@@ -1242,6 +1250,50 @@ final class AppStateFallbackTests: XCTestCase {
             state.items.first(where: { $0.id == targetID })?.thumbnailPath,
             thumbnailPath,
             "Thumbnail path should be updated in place"
+        )
+    }
+
+    func testThumbnailUpdatedRejectsAStaleContentRevision() async throws {
+        let mockService = TestMockClipboardService()
+        mockService.setItemCount(5)
+        let state = AppState.forTesting(service: mockService)
+        defer { state.stop() }
+
+        await state.start()
+
+        let target = try XCTUnwrap(state.items.first(where: { !$0.isPinned }))
+        let validPath = "/tmp/scopy-current-thumbnail-\(UUID().uuidString).png"
+        mockService.emitEvent(
+            .thumbnailUpdated(
+                itemID: target.id,
+                expectedType: target.type,
+                expectedContentHash: target.contentHash,
+                thumbnailPath: validPath
+            )
+        )
+        await assertEventually(timeout: 1.0, pollInterval: 0.01, {
+            state.items.first(where: { $0.id == target.id })?.thumbnailPath == validPath
+        }, message: "Current thumbnail should be applied")
+
+        mockService.emitEvent(
+            .thumbnailUpdated(
+                itemID: target.id,
+                expectedType: target.type,
+                expectedContentHash: "superseded-\(target.contentHash)",
+                thumbnailPath: "/tmp/scopy-stale-thumbnail.png"
+            )
+        )
+        // A following event is the ordering sentinel: once pinning is visible, the stale thumbnail
+        // event ahead of it in the stream has also been handled.
+        mockService.emitEvent(.itemPinned(target.id))
+        await assertEventually(timeout: 1.0, pollInterval: 0.01, {
+            state.items.first(where: { $0.id == target.id })?.isPinned == true
+        }, message: "Sentinel event should be processed")
+
+        XCTAssertEqual(
+            state.items.first(where: { $0.id == target.id })?.thumbnailPath,
+            validPath,
+            "A thumbnail generated for an older content hash must not attach to the replacement"
         )
     }
 }

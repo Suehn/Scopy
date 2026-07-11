@@ -1,6 +1,628 @@
 import AppKit
 import Foundation
 
+enum BackgroundWorkPriority: Int, Sendable, Comparable {
+    case utility
+    case userInitiated
+
+    static func < (lhs: BackgroundWorkPriority, rhs: BackgroundWorkPriority) -> Bool {
+        lhs.rawValue < rhs.rawValue
+    }
+
+    var taskPriority: TaskPriority {
+        switch self {
+        case .utility:
+            return .utility
+        case .userInitiated:
+            return .userInitiated
+        }
+    }
+}
+
+/// Fixed-worker, finite-pending work ownership for background item enrichment.
+/// Submitting work never creates a Task; only the configured workers own Tasks.
+actor BoundedCoalescingWorkerQueue<Key: Hashable & Sendable, Work: Sendable, Output: Sendable> {
+    enum Admission: Sendable {
+        case accepted
+        case coalescedPending(upgradedPriority: Bool)
+        case coalescedActive
+        case replacedOldestUtility(Key)
+        case rejectedFull
+        case rejectedStopped
+    }
+
+    struct Snapshot: Sendable {
+        let isRunning: Bool
+        let activeCount: Int
+        let pendingCount: Int
+        let workerCount: Int
+        let waitingWorkerCount: Int
+        let maxActiveCount: Int
+        let maxPendingCount: Int
+        let workerLimit: Int
+        let pendingLimit: Int
+        let activeKeys: [Key]
+        let pendingKeys: [Key]
+        let pendingPriorities: [BackgroundWorkPriority]
+    }
+
+    private struct Entry {
+        let key: Key
+        var work: Work
+        var priority: BackgroundWorkPriority
+        let sequence: UInt64
+    }
+
+    private struct WorkerWaiter {
+        let id: UUID
+        let generation: UInt64
+        let continuation: CheckedContinuation<Bool, Never>
+    }
+
+    typealias Merge = @Sendable (_ existing: Work, _ incoming: Work) -> Work
+    typealias Operation = @Sendable (_ work: Work, _ priority: BackgroundWorkPriority) async -> Output
+    typealias Completion = @Sendable (_ mergedWork: Work, _ output: Output) async -> Void
+
+    private let workerLimit: Int
+    private let pendingLimit: Int
+    private let merge: Merge
+    private let operation: Operation
+    private let completion: Completion
+
+    private var isRunning = false
+    private var generation: UInt64 = 0
+    private var sequence: UInt64 = 0
+    private var pendingOrder: [Key] = []
+    private var pendingByKey: [Key: Entry] = [:]
+    private var activeByKey: [Key: Entry] = [:]
+    private var workerTasks: [UUID: Task<Void, Never>] = [:]
+    private var workerWaiters: [WorkerWaiter] = []
+    private var maxObservedActiveCount = 0
+    private var maxObservedPendingCount = 0
+
+    init(
+        workerLimit: Int,
+        pendingLimit: Int,
+        merge: @escaping Merge,
+        operation: @escaping Operation,
+        completion: @escaping Completion
+    ) {
+        self.workerLimit = max(1, workerLimit)
+        self.pendingLimit = max(1, pendingLimit)
+        self.merge = merge
+        self.operation = operation
+        self.completion = completion
+    }
+
+    deinit {
+        workerTasks.values.forEach { $0.cancel() }
+        workerWaiters.forEach { $0.continuation.resume(returning: false) }
+    }
+
+    func start() {
+        guard !isRunning else { return }
+        isRunning = true
+        generation &+= 1
+        let workerGeneration = generation
+
+        for _ in 0..<workerLimit {
+            let workerID = UUID()
+            workerTasks[workerID] = Task(priority: .utility) { [weak self] in
+                await self?.workerLoop(id: workerID, generation: workerGeneration)
+            }
+        }
+    }
+
+    @discardableResult
+    func submit(key: Key, work: Work, priority: BackgroundWorkPriority) -> Admission {
+        guard isRunning else { return .rejectedStopped }
+
+        if var active = activeByKey[key] {
+            active.work = merge(active.work, work)
+            active.priority = max(active.priority, priority)
+            activeByKey[key] = active
+            return .coalescedActive
+        }
+
+        if var pending = pendingByKey[key] {
+            let upgraded = priority > pending.priority
+            pending.work = merge(pending.work, work)
+            pending.priority = max(pending.priority, priority)
+            pendingByKey[key] = pending
+            return .coalescedPending(upgradedPriority: upgraded)
+        }
+
+        var replacedKey: Key?
+        if pendingByKey.count >= pendingLimit {
+            guard priority == .userInitiated,
+                  let utilityIndex = pendingOrder.firstIndex(where: { pendingByKey[$0]?.priority == .utility }) else {
+                return .rejectedFull
+            }
+            let oldestUtilityKey = pendingOrder.remove(at: utilityIndex)
+            pendingByKey.removeValue(forKey: oldestUtilityKey)
+            replacedKey = oldestUtilityKey
+        }
+
+        sequence &+= 1
+        let entry = Entry(key: key, work: work, priority: priority, sequence: sequence)
+        pendingOrder.append(key)
+        pendingByKey[key] = entry
+        maxObservedPendingCount = max(maxObservedPendingCount, pendingByKey.count)
+        wakeOneWorker()
+
+        if let replacedKey {
+            return .replacedOldestUtility(replacedKey)
+        }
+        return .accepted
+    }
+
+    @discardableResult
+    func cancelPending(key: Key) -> Bool {
+        guard pendingByKey.removeValue(forKey: key) != nil else { return false }
+        pendingOrder.removeAll { $0 == key }
+        return true
+    }
+
+    @discardableResult
+    func cancelPending(where shouldCancel: @Sendable (Key) -> Bool) -> [Key] {
+        let cancelledKeys = pendingOrder.filter(shouldCancel)
+        guard !cancelledKeys.isEmpty else { return [] }
+        let cancelledSet = Set(cancelledKeys)
+        pendingOrder.removeAll { cancelledSet.contains($0) }
+        for key in cancelledKeys {
+            pendingByKey.removeValue(forKey: key)
+        }
+        return cancelledKeys
+    }
+
+    func discardPending() {
+        pendingOrder.removeAll(keepingCapacity: true)
+        pendingByKey.removeAll(keepingCapacity: true)
+    }
+
+    func stop() async {
+        guard isRunning || !workerTasks.isEmpty else {
+            pendingOrder.removeAll(keepingCapacity: true)
+            pendingByKey.removeAll(keepingCapacity: true)
+            activeByKey.removeAll(keepingCapacity: true)
+            return
+        }
+
+        isRunning = false
+        generation &+= 1
+        pendingOrder.removeAll(keepingCapacity: true)
+        pendingByKey.removeAll(keepingCapacity: true)
+        activeByKey.removeAll(keepingCapacity: true)
+
+        let waiters = workerWaiters
+        workerWaiters.removeAll(keepingCapacity: true)
+        waiters.forEach { $0.continuation.resume(returning: false) }
+
+        let tasks = Array(workerTasks.values)
+        workerTasks.removeAll(keepingCapacity: true)
+        tasks.forEach { $0.cancel() }
+        for task in tasks {
+            await task.value
+        }
+    }
+
+    func snapshot() -> Snapshot {
+        let orderedEntries = pendingOrder.compactMap { pendingByKey[$0] }
+        return Snapshot(
+            isRunning: isRunning,
+            activeCount: activeByKey.count,
+            pendingCount: pendingByKey.count,
+            workerCount: workerTasks.count,
+            waitingWorkerCount: workerWaiters.count,
+            maxActiveCount: maxObservedActiveCount,
+            maxPendingCount: maxObservedPendingCount,
+            workerLimit: workerLimit,
+            pendingLimit: pendingLimit,
+            activeKeys: Array(activeByKey.keys),
+            pendingKeys: orderedEntries.map(\.key),
+            pendingPriorities: orderedEntries.map(\.priority)
+        )
+    }
+
+    private func workerLoop(id: UUID, generation workerGeneration: UInt64) async {
+        while !Task.isCancelled,
+              let entry = await nextEntry(workerID: id, generation: workerGeneration) {
+            let output = await operation(entry.work, entry.priority)
+            guard let mergedEntry = finishEntry(key: entry.key, generation: workerGeneration) else {
+                continue
+            }
+            await completion(mergedEntry.work, output)
+        }
+        workerTasks.removeValue(forKey: id)
+    }
+
+    private func nextEntry(workerID: UUID, generation workerGeneration: UInt64) async -> Entry? {
+        while isRunning, workerGeneration == generation, !Task.isCancelled {
+            if let entry = popNextEntry() {
+                activeByKey[entry.key] = entry
+                maxObservedActiveCount = max(maxObservedActiveCount, activeByKey.count)
+                return entry
+            }
+
+            let shouldContinue = await suspendWorker(id: workerID, generation: workerGeneration)
+            guard shouldContinue else { return nil }
+        }
+        return nil
+    }
+
+    private func popNextEntry() -> Entry? {
+        guard !pendingOrder.isEmpty else { return nil }
+        let nextIndex = pendingOrder.firstIndex(where: { pendingByKey[$0]?.priority == .userInitiated }) ?? 0
+        let key = pendingOrder.remove(at: nextIndex)
+        return pendingByKey.removeValue(forKey: key)
+    }
+
+    private func finishEntry(key: Key, generation workerGeneration: UInt64) -> Entry? {
+        guard isRunning, workerGeneration == generation else { return nil }
+        return activeByKey.removeValue(forKey: key)
+    }
+
+    private func suspendWorker(id: UUID, generation workerGeneration: UInt64) async -> Bool {
+        guard isRunning, workerGeneration == generation, !Task.isCancelled else { return false }
+        let waiterID = UUID()
+        return await withTaskCancellationHandler(operation: {
+            await withCheckedContinuation { continuation in
+                guard isRunning, workerGeneration == generation, !Task.isCancelled else {
+                    continuation.resume(returning: false)
+                    return
+                }
+                workerWaiters.append(
+                    WorkerWaiter(id: waiterID, generation: workerGeneration, continuation: continuation)
+                )
+            }
+        }, onCancel: {
+            Task { await self.cancelWorkerWaiter(id: waiterID) }
+        })
+    }
+
+    private func wakeOneWorker() {
+        while !workerWaiters.isEmpty {
+            let waiter = workerWaiters.removeFirst()
+            guard waiter.generation == generation else {
+                waiter.continuation.resume(returning: false)
+                continue
+            }
+            waiter.continuation.resume(returning: true)
+            return
+        }
+    }
+
+    private func cancelWorkerWaiter(id: UUID) {
+        guard let index = workerWaiters.firstIndex(where: { $0.id == id }) else { return }
+        let waiter = workerWaiters.remove(at: index)
+        waiter.continuation.resume(returning: false)
+    }
+}
+
+struct BoundedRetryTimestamps<Key: Hashable & Sendable>: Sendable {
+    private let capacity: Int
+    private var timestamps: [Key: Date] = [:]
+    private var order: [Key] = []
+
+    init(capacity: Int) {
+        self.capacity = max(1, capacity)
+    }
+
+    var count: Int { timestamps.count }
+
+    mutating func containsRecent(_ key: Key, now: Date, interval: TimeInterval) -> Bool {
+        prune(olderThan: now.addingTimeInterval(-max(0, interval)))
+        guard let timestamp = timestamps[key] else { return false }
+        return now.timeIntervalSince(timestamp) < interval
+    }
+
+    mutating func record(_ key: Key, at timestamp: Date) {
+        if timestamps[key] != nil {
+            order.removeAll { $0 == key }
+        }
+        timestamps[key] = timestamp
+        order.append(key)
+
+        while timestamps.count > capacity, !order.isEmpty {
+            let evicted = order.removeFirst()
+            timestamps.removeValue(forKey: evicted)
+        }
+    }
+
+    mutating func remove(_ key: Key) {
+        timestamps.removeValue(forKey: key)
+        order.removeAll { $0 == key }
+    }
+
+    mutating func remove(where shouldRemove: (Key) -> Bool) {
+        let removedKeys = order.filter(shouldRemove)
+        guard !removedKeys.isEmpty else { return }
+        let removedSet = Set(removedKeys)
+        order.removeAll { removedSet.contains($0) }
+        for key in removedKeys {
+            timestamps.removeValue(forKey: key)
+        }
+    }
+
+    mutating func prune(olderThan cutoff: Date) {
+        while let oldest = order.first,
+              let timestamp = timestamps[oldest],
+              timestamp < cutoff {
+            order.removeFirst()
+            timestamps.removeValue(forKey: oldest)
+        }
+    }
+
+    mutating func removeAll() {
+        timestamps.removeAll(keepingCapacity: true)
+        order.removeAll(keepingCapacity: true)
+    }
+}
+
+actor ClipboardEventQueue {
+    struct PublicationToken: Sendable, Equatable {
+        let itemID: UUID
+        let sequence: UInt64
+        let clearGeneration: UInt64
+    }
+
+    private struct PublicationState {
+        var highestSequence: UInt64
+        var outstanding: Set<UInt64>
+    }
+
+    private struct ReceiverWaiter {
+        let id: UUID
+        let continuation: CheckedContinuation<ClipboardEvent?, Never>
+    }
+
+    private struct SenderWaiter {
+        let id: UUID
+        let continuation: CheckedContinuation<Void, Never>
+    }
+
+    private let capacity: Int
+    private var buffer: [ClipboardEvent?]
+    private var headIndex = 0
+    private var tailIndex = 0
+    private var bufferedCount = 0
+    private var isFinished = false
+    private var nextSequence: UInt64 = 0
+    private var clearGeneration: UInt64 = 0
+    private var publications: [UUID: PublicationState] = [:]
+    private var waitingReceivers: [ReceiverWaiter] = []
+    private var waitingSenders: [SenderWaiter] = []
+
+    init(capacity: Int) {
+        self.capacity = max(1, capacity)
+        self.buffer = Array(repeating: nil, count: max(1, capacity))
+    }
+
+    func reservePublication(itemID: UUID) -> PublicationToken {
+        nextSequence &+= 1
+        let token = PublicationToken(
+            itemID: itemID,
+            sequence: nextSequence,
+            clearGeneration: clearGeneration
+        )
+        var state = publications[itemID] ?? PublicationState(
+            highestSequence: token.sequence,
+            outstanding: []
+        )
+        state.highestSequence = max(state.highestSequence, token.sequence)
+        state.outstanding.insert(token.sequence)
+        publications[itemID] = state
+        return token
+    }
+
+    func advanceClearGeneration() {
+        clearGeneration &+= 1
+        publications.removeAll(keepingCapacity: true)
+    }
+
+    func discardPublication(_ token: PublicationToken) {
+        completePublication(token)
+    }
+
+    @discardableResult
+    func enqueue(_ event: ClipboardEvent, publication token: PublicationToken? = nil) async -> Bool {
+        guard !isFinished, !Task.isCancelled else {
+            if let token { completePublication(token) }
+            return false
+        }
+
+        while bufferedCount >= capacity, !isFinished {
+            guard !Task.isCancelled else {
+                if let token { completePublication(token) }
+                return false
+            }
+            let waiterID = UUID()
+            await withTaskCancellationHandler(operation: {
+                await withCheckedContinuation { continuation in
+                    waitingSenders.append(SenderWaiter(id: waiterID, continuation: continuation))
+                }
+            }, onCancel: {
+                Task { await self.cancelSender(id: waiterID) }
+            })
+        }
+
+        guard !isFinished, !Task.isCancelled else {
+            if let token { completePublication(token) }
+            return false
+        }
+        if let token, !isLatest(token) {
+            completePublication(token)
+            wakeOneSenderIfCapacityAvailable()
+            return false
+        }
+
+        if !waitingReceivers.isEmpty {
+            let receiver = waitingReceivers.removeFirst()
+            receiver.continuation.resume(returning: event)
+        } else {
+            buffer[tailIndex] = event
+            tailIndex = (tailIndex + 1) % capacity
+            bufferedCount += 1
+        }
+        if let token { completePublication(token) }
+        return true
+    }
+
+    func dequeue() async -> ClipboardEvent? {
+        if bufferedCount > 0 {
+            let event = buffer[headIndex]
+            buffer[headIndex] = nil
+            headIndex = (headIndex + 1) % capacity
+            bufferedCount -= 1
+            wakeOneSenderIfCapacityAvailable()
+            return event
+        }
+        guard !isFinished, !Task.isCancelled else { return nil }
+
+        let waiterID = UUID()
+        return await withTaskCancellationHandler(operation: {
+            await withCheckedContinuation { continuation in
+                waitingReceivers.append(ReceiverWaiter(id: waiterID, continuation: continuation))
+            }
+        }, onCancel: {
+            Task { await self.cancelReceiver(id: waiterID) }
+        })
+    }
+
+    func finish() {
+        guard !isFinished else { return }
+        isFinished = true
+        publications.removeAll(keepingCapacity: false)
+        let receivers = waitingReceivers
+        waitingReceivers.removeAll()
+        receivers.forEach { $0.continuation.resume(returning: nil) }
+        let senders = waitingSenders
+        waitingSenders.removeAll()
+        senders.forEach { $0.continuation.resume() }
+    }
+
+    private func isLatest(_ token: PublicationToken) -> Bool {
+        guard token.clearGeneration == clearGeneration,
+              let state = publications[token.itemID] else { return false }
+        return token.sequence == state.highestSequence && state.outstanding.contains(token.sequence)
+    }
+
+    private func completePublication(_ token: PublicationToken) {
+        guard var state = publications[token.itemID] else { return }
+        state.outstanding.remove(token.sequence)
+        if state.outstanding.isEmpty {
+            publications.removeValue(forKey: token.itemID)
+        } else {
+            publications[token.itemID] = state
+        }
+    }
+
+    private func wakeOneSenderIfCapacityAvailable() {
+        guard bufferedCount < capacity, !waitingSenders.isEmpty else { return }
+        let sender = waitingSenders.removeFirst()
+        sender.continuation.resume()
+    }
+
+    private func cancelReceiver(id: UUID) {
+        guard let index = waitingReceivers.firstIndex(where: { $0.id == id }) else { return }
+        let waiter = waitingReceivers.remove(at: index)
+        waiter.continuation.resume(returning: nil)
+    }
+
+    private func cancelSender(id: UUID) {
+        guard let index = waitingSenders.firstIndex(where: { $0.id == id }) else { return }
+        let waiter = waitingSenders.remove(at: index)
+        waiter.continuation.resume()
+    }
+}
+
+/// Serializes the small set of same-item mutations whose semantic events are derived from final
+/// state (currently pin/unpin). The lease is cancellation-safe and leaves no per-item entry once
+/// the owner and its waiters are gone.
+private actor ClipboardItemMutationGate {
+    struct Lease: Sendable {
+        let id: UUID
+        let itemID: UUID
+    }
+
+    private struct Waiter {
+        let id: UUID
+        let itemID: UUID
+        let continuation: CheckedContinuation<Lease?, Never>
+    }
+
+    private var owners: [UUID: UUID] = [:]
+    private var waitersByItemID: [UUID: [Waiter]] = [:]
+    private let maxPendingCount = 64
+    private var pendingCount = 0
+
+    func acquire(itemID: UUID) async -> Lease? {
+        guard !Task.isCancelled else { return nil }
+        let requestID = UUID()
+        let lease: Lease? = await withTaskCancellationHandler(operation: {
+            await withCheckedContinuation { continuation in
+                guard !Task.isCancelled else {
+                    continuation.resume(returning: nil)
+                    return
+                }
+                if owners[itemID] == nil {
+                    owners[itemID] = requestID
+                    continuation.resume(returning: Lease(id: requestID, itemID: itemID))
+                } else {
+                    guard pendingCount < maxPendingCount else {
+                        continuation.resume(returning: nil)
+                        return
+                    }
+                    waitersByItemID[itemID, default: []].append(
+                        Waiter(id: requestID, itemID: itemID, continuation: continuation)
+                    )
+                    pendingCount += 1
+                }
+            }
+        }, onCancel: {
+            Task { await self.cancelWaiter(id: requestID, itemID: itemID) }
+        })
+
+        guard let lease else { return nil }
+        guard !Task.isCancelled else {
+            release(lease)
+            return nil
+        }
+        return lease
+    }
+
+    func release(_ lease: Lease) {
+        guard owners[lease.itemID] == lease.id else { return }
+        if var waiters = waitersByItemID[lease.itemID], !waiters.isEmpty {
+            let next = waiters.removeFirst()
+            pendingCount = max(0, pendingCount - 1)
+            if waiters.isEmpty {
+                waitersByItemID.removeValue(forKey: lease.itemID)
+            } else {
+                waitersByItemID[lease.itemID] = waiters
+            }
+            owners[lease.itemID] = next.id
+            next.continuation.resume(returning: Lease(id: next.id, itemID: next.itemID))
+        } else {
+            owners.removeValue(forKey: lease.itemID)
+            waitersByItemID.removeValue(forKey: lease.itemID)
+        }
+    }
+
+    private func cancelWaiter(id: UUID, itemID: UUID) {
+        guard var waiters = waitersByItemID[itemID],
+              let index = waiters.firstIndex(where: { $0.id == id }) else { return }
+        let waiter = waiters.remove(at: index)
+        pendingCount = max(0, pendingCount - 1)
+        if waiters.isEmpty {
+            waitersByItemID.removeValue(forKey: itemID)
+        } else {
+            waitersByItemID[itemID] = waiters
+        }
+        waiter.continuation.resume(returning: nil)
+    }
+}
+
 /// Application 层门面（vNext）：统一组合 monitor/storage/search/settings，并由 actor 持有事件 continuation。
 ///
 /// 说明（Phase 4 约束）：
@@ -11,14 +633,119 @@ actor ClipboardService {
 
     enum ClipboardServiceError: Error, LocalizedError {
         case notStarted
+        case itemNotFoundOrSuperseded
 
         var errorDescription: String? {
             switch self {
             case .notStarted:
                 return "ClipboardService is not started"
+            case .itemNotFoundOrSuperseded:
+                return "Clipboard item no longer exists or was superseded"
             }
         }
     }
+
+    enum ImageOptimizationInterlockPoint: Sendable {
+        case afterExternalSourceLeaseBeforeValidation
+        case afterExternalPayloadCommit
+        case afterExternalSourceAdoptionBeforeVerification(attempt: Int)
+        case beforeSearchPublication
+    }
+
+    enum MetadataPublicationInterlockPoint: Sendable {
+        case afterNoteCommit
+        case afterNoteDTOConstructionBeforeEvent
+        case afterFileSizeCommit
+        case afterFileSizeDTOConstructionBeforeEvent
+    }
+
+    private enum ExternalSourceReconciliationResult: Sendable {
+        case adopted
+        case sourceUnavailable
+        case failedOrUnstable
+    }
+
+    private enum AuthoritativePublicationKind: Sendable {
+        case newItem
+        case itemUpdated
+        case contentUpdated
+        case pinState
+    }
+
+    struct ImageOptimizationAdmissionSnapshot: Sendable, Equatable {
+        let admittedRequestCount: Int
+        let activeProcessCount: Int
+        let queuedRequestCount: Int
+        let requestCapacity: Int
+    }
+
+    struct BackgroundMediaSchedulingSnapshot: Sendable, Equatable {
+        let thumbnailActiveCount: Int
+        let thumbnailPendingCount: Int
+        let thumbnailWorkerCount: Int
+        let thumbnailMaxActiveCount: Int
+        let thumbnailMaxPendingCount: Int
+        let fileSizeActiveCount: Int
+        let fileSizePendingCount: Int
+        let fileSizeWorkerCount: Int
+        let fileSizeMaxActiveCount: Int
+        let fileSizeMaxPendingCount: Int
+        let fileSizeRetryTimestampCount: Int
+    }
+
+    private struct ThumbnailGenerationKey: Hashable, Sendable {
+        let typeNamespace: String
+        let contentHash: String
+    }
+
+    private struct ThumbnailGenerationWork: Sendable {
+        let item: StorageService.StoredItem
+        let itemIDs: Set<UUID>
+        let maxHeight: Int
+        let externalStorageRoot: String
+        let thumbnailCacheRoot: String
+    }
+
+    private typealias ThumbnailWorkQueue = BoundedCoalescingWorkerQueue<
+        ThumbnailGenerationKey,
+        ThumbnailGenerationWork,
+        String?
+    >
+
+    private struct FileSizeComputationWork: Sendable {
+        let expected: StorageService.StoredItem
+    }
+
+    private struct FileSizeComputationKey: Hashable, Sendable {
+        let itemID: UUID
+        let typeNamespace: String
+        let contentHash: String
+        let plainText: String
+        let sizeBytes: Int
+        let storageRef: String?
+        let rawData: Data?
+
+        init(expected: StorageService.StoredItem) {
+            self.itemID = expected.id
+            self.typeNamespace = expected.type.rawValue
+            self.contentHash = expected.contentHash
+            self.plainText = expected.plainText
+            self.sizeBytes = expected.sizeBytes
+            self.storageRef = expected.storageRef
+            self.rawData = expected.rawData
+        }
+    }
+
+    private struct FileSizeComputationResult: Sendable {
+        let expected: StorageService.StoredItem
+        let fileSizeBytes: Int
+    }
+
+    private typealias FileSizeWorkQueue = BoundedCoalescingWorkerQueue<
+        FileSizeComputationKey,
+        FileSizeComputationWork,
+        FileSizeComputationResult?
+    >
 
     // MARK: - Properties
 
@@ -28,6 +755,8 @@ actor ClipboardService {
     private let settingsStore: SettingsStore
     private let monitorPasteboardName: String?
     private let monitorPollingInterval: TimeInterval?
+    private let imageOptimizationInterlock: (@Sendable (ImageOptimizationInterlockPoint, UUID) async -> Void)?
+    private let metadataPublicationInterlock: (@Sendable (MetadataPublicationInterlockPoint, UUID) async -> Void)?
 
     private var monitor: ClipboardMonitor?
     private var storage: StorageService?
@@ -63,7 +792,8 @@ actor ClipboardService {
     private var thumbnailCacheIndexTask: Task<Void, Never>?
     private var thumbnailCacheIndexGeneration: UInt64 = 0
 
-    private let eventQueue: AsyncBoundedQueue<ClipboardEvent>
+    private let eventQueue: ClipboardEventQueue
+    private let itemMutationGate = ClipboardItemMutationGate()
     private var monitorTask: Task<Void, Never>?
     private var isStarted = false
 
@@ -81,16 +811,21 @@ actor ClipboardService {
 
     private let fileSizeComputationRetryInterval: TimeInterval = 3 * 3600
     private let maxConcurrentFileSizeComputations = 2
-
-    private var fileSizeComputationInProgress = Set<UUID>()
-    private var fileSizeComputationLastAttemptAt: [UUID: Date] = [:]
-
-    private let fileSizeComputationPermitPool = AsyncPermitPool(limit: 2)
+    private let maxPendingFileSizeComputations = 256
+    private var fileSizeComputationQueue: FileSizeWorkQueue?
+    private var fileSizeComputationLastAttemptAt = BoundedRetryTimestamps<FileSizeComputationKey>(capacity: 512)
 
     // MARK: - Thumbnail Generation
 
     private let maxConcurrentThumbnailGenerations = 2
-    private let thumbnailGenerationPermitPool = AsyncPermitPool(limit: 2)
+    private let maxPendingThumbnailGenerations = 128
+    private var thumbnailGenerationQueue: ThumbnailWorkQueue?
+
+    // MARK: - Image Optimization
+
+    private let maxActiveImageOptimizationRequests = 6
+    private let imageOptimizationPermitPool = AsyncPermitPool(limit: 2, maxPending: 4)
+    private var imageOptimizationInProgress = Set<UUID>()
 
     // MARK: - Initialization
 
@@ -98,14 +833,18 @@ actor ClipboardService {
         databasePath: String? = nil,
         settingsStore: SettingsStore = .shared,
         monitorPasteboardName: String? = nil,
-        monitorPollingInterval: TimeInterval? = nil
+        monitorPollingInterval: TimeInterval? = nil,
+        imageOptimizationInterlock: (@Sendable (ImageOptimizationInterlockPoint, UUID) async -> Void)? = nil,
+        metadataPublicationInterlock: (@Sendable (MetadataPublicationInterlockPoint, UUID) async -> Void)? = nil
     ) {
         self.databasePath = databasePath
         self.settingsStore = settingsStore
         self.monitorPasteboardName = monitorPasteboardName
         self.monitorPollingInterval = monitorPollingInterval
+        self.imageOptimizationInterlock = imageOptimizationInterlock
+        self.metadataPublicationInterlock = metadataPublicationInterlock
 
-        let queue = AsyncBoundedQueue<ClipboardEvent>(capacity: ScopyThresholds.clipboardEventStreamMaxBufferedItems)
+        let queue = ClipboardEventQueue(capacity: ScopyThresholds.clipboardEventStreamMaxBufferedItems)
         self.eventQueue = queue
         self.eventStream = AsyncStream(unfolding: { await queue.dequeue() })
     }
@@ -113,6 +852,16 @@ actor ClipboardService {
     deinit {
         monitorTask?.cancel()
         cleanupTask?.cancel()
+        if let thumbnailGenerationQueue {
+            Task.detached {
+                await thumbnailGenerationQueue.stop()
+            }
+        }
+        if let fileSizeComputationQueue {
+            Task.detached {
+                await fileSizeComputationQueue.stop()
+            }
+        }
         Task { [eventQueue] in
             await eventQueue.finish()
         }
@@ -169,6 +918,8 @@ actor ClipboardService {
             self.monitorTask = monitorTask
             self.isStarted = true
 
+            await startBackgroundMediaQueuesIfNeeded()
+
             scheduleThumbnailCacheIndexBuildIfNeeded(thumbnailCacheRoot: storage.thumbnailCacheDirectoryPath)
 
             Task { [storage] in
@@ -191,6 +942,8 @@ actor ClipboardService {
         let monitor = monitor
         let storage = storage
         let search = search
+
+        await stopBackgroundMediaQueues()
 
         self.monitor = nil
         self.storage = nil
@@ -229,7 +982,7 @@ actor ClipboardService {
         var dtos: [ClipboardItemDTO] = []
         dtos.reserveCapacity(items.count)
         for item in items {
-            dtos.append(toDTO(item, storage: storage))
+            dtos.append(await toDTO(item, storage: storage))
         }
         return dtos
     }
@@ -240,7 +993,7 @@ actor ClipboardService {
         var dtos: [ClipboardItemDTO] = []
         dtos.reserveCapacity(items.count)
         for item in items {
-            dtos.append(toDTO(item, storage: storage))
+            dtos.append(await toDTO(item, storage: storage))
         }
         return dtos
     }
@@ -251,7 +1004,7 @@ actor ClipboardService {
         var dtos: [ClipboardItemDTO] = []
         dtos.reserveCapacity(items.count)
         for item in items {
-            dtos.append(toDTO(item, storage: storage))
+            dtos.append(await toDTO(item, storage: storage))
         }
         return dtos
     }
@@ -265,43 +1018,65 @@ actor ClipboardService {
         var dtos: [ClipboardItemDTO] = []
         dtos.reserveCapacity(result.items.count)
         for item in result.items {
-            dtos.append(toDTO(item, storage: storage))
+            dtos.append(await toDTO(item, storage: storage))
         }
 
         return SearchResultPage(items: dtos, total: result.total, hasMore: result.hasMore, coverage: result.coverage)
     }
 
     func pin(itemID: UUID) async throws {
-        let storage = try requireStorage()
-        let search = try requireSearch()
-
-        try await storage.setPin(itemID, pinned: true)
-        await search.handlePinnedChange(id: itemID, pinned: true)
-        await yieldEvent(.itemPinned(itemID))
+        try await setPinned(itemID: itemID, pinned: true)
     }
 
     func unpin(itemID: UUID) async throws {
+        try await setPinned(itemID: itemID, pinned: false)
+    }
+
+    private func setPinned(itemID: UUID, pinned: Bool) async throws {
         let storage = try requireStorage()
         let search = try requireSearch()
+        guard let lease = await itemMutationGate.acquire(itemID: itemID) else {
+            throw CancellationError()
+        }
 
-        try await storage.setPin(itemID, pinned: false)
-        await search.handlePinnedChange(id: itemID, pinned: false)
-        await yieldEvent(.itemUnpinned(itemID))
+        do {
+            guard !Task.isCancelled else { throw CancellationError() }
+            try await storage.setPin(itemID, pinned: pinned)
+            await search.handlePinnedChange(id: itemID, pinned: pinned)
+            _ = await publishAuthoritativeItemState(
+                id: itemID,
+                storage: storage,
+                priority: .userInitiated,
+                kind: .pinState
+            )
+            await itemMutationGate.release(lease)
+        } catch {
+            await itemMutationGate.release(lease)
+            throw error
+        }
     }
 
     func updateNote(itemID: UUID, note: String?) async throws {
         let storage = try requireStorage()
-        let search = try requireSearch()
+        _ = try requireSearch()
 
-        guard let existing = try await storage.findByID(itemID) else { return }
+        guard let existing = try await storage.findByID(itemID) else {
+            throw ClipboardServiceError.itemNotFoundOrSuperseded
+        }
         let trimmed = note?.trimmingCharacters(in: .whitespacesAndNewlines)
         let normalized = (trimmed?.isEmpty ?? true) ? nil : trimmed
         guard existing.note != normalized else { return }
 
-        guard let updated = try await storage.updateNote(id: itemID, note: normalized) else { return }
-        await search.handleUpsertedItem(updated)
-        let dto = toDTO(updated, storage: storage, thumbnailGenerationPriority: .userInitiated)
-        await yieldEvent(.itemContentUpdated(dto))
+        guard try await storage.updateNote(id: itemID, note: normalized) != nil else {
+            throw ClipboardServiceError.itemNotFoundOrSuperseded
+        }
+        await metadataPublicationInterlock?(.afterNoteCommit, itemID)
+        _ = await publishAuthoritativeItemState(
+            id: itemID,
+            storage: storage,
+            priority: .userInitiated,
+            metadataInterlockPoint: .afterNoteDTOConstructionBeforeEvent
+        )
     }
 
     func delete(itemID: UUID) async throws {
@@ -310,7 +1085,10 @@ actor ClipboardService {
 
         try await storage.deleteItem(itemID)
         await search.handleDeletion(id: itemID)
-        await yieldEvent(.itemDeleted(itemID))
+        fileSizeComputationLastAttemptAt.remove { $0.itemID == itemID }
+        await fileSizeComputationQueue?.cancelPending { $0.itemID == itemID }
+        let publication = await reservePublication(for: itemID)
+        await yieldEvent(.itemDeleted(itemID), publication: publication)
     }
 
     func clearAll() async throws {
@@ -319,6 +1097,10 @@ actor ClipboardService {
 
         try await storage.deleteAllExceptPinned()
         await search.handleClearAll()
+        fileSizeComputationLastAttemptAt.removeAll()
+        await fileSizeComputationQueue?.discardPending()
+        await thumbnailGenerationQueue?.discardPending()
+        await eventQueue.advanceClearGeneration()
         await yieldEvent(.itemsCleared(keepPinned: true))
     }
 
@@ -352,7 +1134,7 @@ actor ClipboardService {
     ) async throws {
         let monitor = try requireMonitor()
         let storage = try requireStorage()
-        let search = try requireSearch()
+        _ = try requireSearch()
 
         guard let item = try await storage.findByID(itemID) else { return }
 
@@ -363,17 +1145,18 @@ actor ClipboardService {
             imageWriteMode: imageWriteMode
         )
 
-        var updated = item
-        updated.lastUsedAt = Date()
-        updated.useCount += 1
         do {
-            try await storage.updateItem(updated)
+            _ = try await storage.incrementUsage(id: item.id, at: Date())
         } catch {
             ScopyLog.app.warning("Failed to update item usage stats: \(error.localizedDescription, privacy: .private)")
         }
 
-        await search.handleUpsertedItem(updated)
-        await yieldEvent(.itemUpdated(toDTO(updated, storage: storage, thumbnailGenerationPriority: .userInitiated)))
+        _ = await publishAuthoritativeItemState(
+            id: item.id,
+            storage: storage,
+            priority: .userInitiated,
+            kind: .itemUpdated
+        )
     }
 
     private func performClipboardCopy(
@@ -599,9 +1382,11 @@ actor ClipboardService {
             }
 
             if patch.affectsThumbnailCache {
+                await stopThumbnailGenerationQueue()
                 invalidateThumbnailCacheIndex()
                 await storage.clearThumbnailCache()
                 invalidateThumbnailCacheIndex()
+                await startThumbnailGenerationQueueIfNeeded()
             }
 
             if patch.requiresStorageCleanup {
@@ -669,6 +1454,23 @@ actor ClipboardService {
 
     func optimizeImage(itemID: UUID) async throws -> ImageOptimizationOutcomeDTO {
         let storage = try requireStorage()
+        guard !Task.isCancelled else {
+            return Self.cancelledImageOptimizationOutcome(originalBytes: 0)
+        }
+        guard !imageOptimizationInProgress.contains(itemID) else {
+            return Self.busyImageOptimizationOutcome(
+                message: "Image optimization is already running for this item"
+            )
+        }
+        guard imageOptimizationInProgress.count < maxActiveImageOptimizationRequests else {
+            return Self.busyImageOptimizationOutcome(message: "Image optimization queue is busy")
+        }
+
+        imageOptimizationInProgress.insert(itemID)
+        defer {
+            imageOptimizationInProgress.remove(itemID)
+        }
+
         guard let item = try await storage.findByID(itemID) else {
             return ImageOptimizationOutcomeDTO(result: .noChange, originalBytes: 0, optimizedBytes: 0)
         }
@@ -684,228 +1486,541 @@ actor ClipboardService {
             colors: settings.pngquantCopyImageColors
         )
 
+        guard await imageOptimizationPermitPool.acquire() else {
+            if Task.isCancelled {
+                return Self.cancelledImageOptimizationOutcome(originalBytes: item.sizeBytes)
+            }
+            return Self.busyImageOptimizationOutcome(message: "Image optimization queue is busy")
+        }
+        guard !Task.isCancelled else {
+            await imageOptimizationPermitPool.release()
+            return Self.cancelledImageOptimizationOutcome(originalBytes: item.sizeBytes)
+        }
+
+        let outcome: ImageOptimizationOutcomeDTO
         if let storageRef = item.storageRef, !storageRef.isEmpty {
-            guard StorageService.validateStorageRef(storageRef, externalStoragePath: storage.externalStorageDirectoryPath) else {
+            outcome = await optimizeExternalImage(
+                item,
+                storageRef: storageRef,
+                storage: storage,
+                options: options
+            )
+        } else if let rawData = item.rawData {
+            outcome = await optimizeInlineImage(
+                item,
+                rawData: rawData,
+                storage: storage,
+                options: options
+            )
+        } else {
+            // Fallback: item has no inline data and no storageRef (unexpected)
+            outcome = ImageOptimizationOutcomeDTO(
+                result: .noChange,
+                originalBytes: item.sizeBytes,
+                optimizedBytes: item.sizeBytes
+            )
+        }
+        await imageOptimizationPermitPool.release()
+        return outcome
+    }
+
+    func imageOptimizationAdmissionSnapshot() async -> ImageOptimizationAdmissionSnapshot {
+        let permitSnapshot = await imageOptimizationPermitPool.snapshot()
+        return ImageOptimizationAdmissionSnapshot(
+            admittedRequestCount: imageOptimizationInProgress.count,
+            activeProcessCount: permitSnapshot.activeCount,
+            queuedRequestCount: permitSnapshot.queuedCount,
+            requestCapacity: maxActiveImageOptimizationRequests
+        )
+    }
+
+    private func optimizeInlineImage(
+        _ item: StorageService.StoredItem,
+        rawData: Data,
+        storage: StorageService,
+        options: PngquantService.Options
+    ) async -> ImageOptimizationOutcomeDTO {
+        let originalBytes = rawData.count
+        do {
+            let compressionTask = Task.detached(priority: .utility) {
+                try PngquantService.compressPNGData(rawData, options: options)
+            }
+            let compressed = try await withTaskCancellationHandler(operation: {
+                try await compressionTask.value
+            }, onCancel: {
+                compressionTask.cancel()
+            })
+
+            guard compressed != rawData else {
                 return ImageOptimizationOutcomeDTO(
-                    result: .failed(message: "Invalid storageRef"),
-                    originalBytes: item.sizeBytes,
-                    optimizedBytes: item.sizeBytes
+                    result: .noChange,
+                    originalBytes: originalBytes,
+                    optimizedBytes: originalBytes
                 )
             }
+            guard !Task.isCancelled else {
+                return Self.cancelledImageOptimizationOutcome(originalBytes: originalBytes)
+            }
 
-            let url = URL(fileURLWithPath: storageRef)
-            let originalBytes = Self.fileSizeBestEffort(url: url) ?? item.sizeBytes
-            let backupURL = URL(fileURLWithPath: storageRef + ".scopy-backup-\(UUID().uuidString)")
+            let newHash = ClipboardMonitor.computeHashStatic(compressed)
+            let optimizedBytes = compressed.count
+            guard let updated = try await storage.compareAndSwapItemPayload(
+                expected: item,
+                contentHash: newHash,
+                sizeBytes: optimizedBytes,
+                storageRef: nil,
+                rawData: compressed
+            ) else {
+                return Self.supersededImageOptimizationOutcome(originalBytes: originalBytes)
+            }
+            guard let published = await publishOptimizedItem(updated, storage: storage),
+                  Self.hasSamePayload(published, as: updated) else {
+                return Self.supersededImageOptimizationOutcome(originalBytes: originalBytes)
+            }
+            return ImageOptimizationOutcomeDTO(
+                result: .optimized,
+                originalBytes: originalBytes,
+                optimizedBytes: optimizedBytes,
+                resultingContentHash: newHash
+            )
+        } catch {
+            return ImageOptimizationOutcomeDTO(
+                result: .failed(message: error.localizedDescription),
+                originalBytes: originalBytes,
+                optimizedBytes: originalBytes
+            )
+        }
+    }
 
-            do {
-                if FileManager.default.fileExists(atPath: backupURL.path) {
-                    BestEffortFileOps.removeItem(
-                        at: backupURL,
-                        logger: ScopyLog.app,
-                        operation: "optimizeImage.removeExistingBackup",
-                        itemID: item.id
-                    )
-                }
-                try FileManager.default.copyItem(at: url, to: backupURL)
+    private func optimizeExternalImage(
+        _ item: StorageService.StoredItem,
+        storageRef: String,
+        storage: StorageService,
+        options: PngquantService.Options
+    ) async -> ImageOptimizationOutcomeDTO {
+        guard StorageService.validateStorageRef(
+            storageRef,
+            externalStoragePath: storage.externalStorageDirectoryPath
+        ) else {
+            return ImageOptimizationOutcomeDTO(
+                result: .failed(message: "Invalid storageRef"),
+                originalBytes: item.sizeBytes,
+                optimizedBytes: item.sizeBytes
+            )
+        }
 
-                // Legacy safety: older builds may have stored TIFF (or other) payload under a .png path.
-                // Ensure the file is a real PNG before invoking pngquant, otherwise pngquant will hard-fail.
-                var didTranscodeToPNG = false
-                if !PngquantService.isLikelyPNGFile(url) {
-                    didTranscodeToPNG = try await Task.detached(priority: .utility) { () throws -> Bool in
-                        let data = try Data(contentsOf: url, options: [.mappedIfSafe])
-                        guard let pngData = ClipboardMonitor.convertTIFFToPNG(data) else { return false }
-                        try StorageService.writeAtomically(pngData, to: url.path)
-                        return true
-                    }.value
-                }
+        let sourceURL = URL(fileURLWithPath: storageRef)
+        // Hidden staging files are skipped by full orphan enumeration. The storage commit moves
+        // this complete payload to a new random managed path immediately before CAS.
+        let stagedURL = sourceURL.deletingLastPathComponent().appendingPathComponent(
+            ".scopy-optimize-\(UUID().uuidString).stage"
+        )
+        defer {
+            try? FileManager.default.removeItem(at: stagedURL)
+        }
 
-                if !PngquantService.isLikelyPNGFile(url), !didTranscodeToPNG {
-                    // Unknown/unsupported image format; keep the original payload.
-                    BestEffortFileOps.removeItem(
-                        at: backupURL,
-                        logger: ScopyLog.app,
-                        operation: "optimizeImage.cleanupBackupAfterUnsupportedFormat",
-                        itemID: item.id
-                    )
-                    let currentSize = Self.fileSizeBestEffort(url: url) ?? originalBytes
-                    return ImageOptimizationOutcomeDTO(result: .noChange, originalBytes: originalBytes, optimizedBytes: currentSize)
-                }
+        var originalBytes = max(0, item.sizeBytes)
+        do {
+            let stagedOriginalData = try await Task.detached(priority: .utility) { () throws -> Data in
+                try FileManager.default.copyItem(at: sourceURL, to: stagedURL)
+                return try Data(contentsOf: stagedURL, options: [.mappedIfSafe])
+            }.value
+            originalBytes = stagedOriginalData.count
+            // External payload bytes may legitimately have been edited out of band while the DB
+            // hash remains stale. Fingerprint the bytes actually staged instead of assuming the
+            // persisted content hash is current.
+            let sourceFingerprint = ClipboardMonitor.computeHashStatic(stagedOriginalData)
 
-                let replaced = try await Task.detached(priority: .utility) {
-                    try PngquantService.compressPNGFileInPlace(url, options: options)
-                }.value
-
-                // If neither transcoding nor pngquant changed the file, return noChange.
-                if !replaced, !didTranscodeToPNG {
-                    BestEffortFileOps.removeItem(
-                        at: backupURL,
-                        logger: ScopyLog.app,
-                        operation: "optimizeImage.cleanupBackupAfterNoChange",
-                        itemID: item.id
-                    )
-                    let currentSize = Self.fileSizeBestEffort(url: url) ?? originalBytes
-                    return ImageOptimizationOutcomeDTO(result: .noChange, originalBytes: originalBytes, optimizedBytes: currentSize)
-                }
-
-                let optimizedBytes = Self.fileSizeBestEffort(url: url) ?? originalBytes
-                if optimizedBytes >= originalBytes {
-                    // Don't keep changes that don't reduce size.
-                    if FileManager.default.fileExists(atPath: backupURL.path) {
-                        BestEffortFileOps.removeItem(
-                            at: url,
-                            logger: ScopyLog.app,
-                            operation: "optimizeImage.restoreOriginal.removeOptimized",
-                            itemID: item.id
-                        )
-                        BestEffortFileOps.moveItem(
-                            from: backupURL,
-                            to: url,
-                            logger: ScopyLog.app,
-                            operation: "optimizeImage.restoreOriginal.moveBackup",
-                            itemID: item.id
-                        )
-                    } else {
-                        BestEffortFileOps.removeItem(
-                            at: backupURL,
-                            logger: ScopyLog.app,
-                            operation: "optimizeImage.cleanupMissingBackup",
-                            itemID: item.id
-                        )
+            var didTranscodeToPNG = false
+            if !PngquantService.isLikelyPNG(stagedOriginalData) {
+                didTranscodeToPNG = try await Task.detached(priority: .utility) { () throws -> Bool in
+                    guard let pngData = ClipboardMonitor.convertTIFFToPNG(stagedOriginalData) else {
+                        return false
                     }
-                    return ImageOptimizationOutcomeDTO(result: .noChange, originalBytes: originalBytes, optimizedBytes: originalBytes)
-                }
-
-                let data = try Data(contentsOf: url, options: [.mappedIfSafe])
-                let newHash = ClipboardMonitor.computeHashStatic(data)
-
-                try await storage.updateItemPayload(
-                    id: item.id,
-                    contentHash: newHash,
-                    sizeBytes: optimizedBytes,
-                    storageRef: storageRef,
-                    rawData: nil
-                )
-
-                BestEffortFileOps.removeItem(
-                    at: backupURL,
-                    logger: ScopyLog.app,
-                    operation: "optimizeImage.cleanupBackupAfterSuccess",
-                    itemID: item.id
-                )
-
-                let updated = StorageService.StoredItem(
-                    id: item.id,
-                    type: item.type,
-                    contentHash: newHash,
-                    plainText: item.plainText,
-                    note: item.note,
-                    appBundleID: item.appBundleID,
-                    createdAt: item.createdAt,
-                    lastUsedAt: item.lastUsedAt,
-                    useCount: item.useCount,
-                    isPinned: item.isPinned,
-                    sizeBytes: optimizedBytes,
-                    fileSizeBytes: item.fileSizeBytes,
-                    storageRef: storageRef,
-                    rawData: nil
-                )
-                if let search {
-                    await search.handleUpsertedItem(updated)
-                }
-                let dto = toDTO(updated, storage: storage, thumbnailGenerationPriority: .userInitiated)
-                await yieldEvent(.itemContentUpdated(dto))
-
-                return ImageOptimizationOutcomeDTO(result: .optimized, originalBytes: originalBytes, optimizedBytes: optimizedBytes)
-            } catch {
-                // Best-effort restore original file to keep DB/file consistent.
-                if FileManager.default.fileExists(atPath: backupURL.path) {
-                    BestEffortFileOps.removeItem(
-                        at: url,
-                        logger: ScopyLog.app,
-                        operation: "optimizeImage.restoreOriginal.removeFailedOptimized",
-                        itemID: item.id
-                    )
-                    BestEffortFileOps.moveItem(
-                        from: backupURL,
-                        to: url,
-                        logger: ScopyLog.app,
-                        operation: "optimizeImage.restoreOriginal.moveFailedBackup",
-                        itemID: item.id
-                    )
-                } else {
-                    BestEffortFileOps.removeItem(
-                        at: backupURL,
-                        logger: ScopyLog.app,
-                        operation: "optimizeImage.cleanupFailedBackup",
-                        itemID: item.id
-                    )
-                }
-
-                return ImageOptimizationOutcomeDTO(
-                    result: .failed(message: error.localizedDescription),
-                    originalBytes: originalBytes,
-                    optimizedBytes: originalBytes
-                )
-            }
-        }
-
-        if let rawData = item.rawData {
-            let originalBytes = rawData.count
-            do {
-                let compressed = try await Task.detached(priority: .utility) {
-                    try PngquantService.compressPNGData(rawData, options: options)
+                    try StorageService.writeAtomically(pngData, to: stagedURL.path)
+                    return true
                 }.value
+            }
 
-                guard compressed != rawData else {
-                    return ImageOptimizationOutcomeDTO(result: .noChange, originalBytes: originalBytes, optimizedBytes: originalBytes)
-                }
-
-                let newHash = ClipboardMonitor.computeHashStatic(compressed)
-                let optimizedBytes = compressed.count
-
-                try await storage.updateItemPayload(
-                    id: item.id,
-                    contentHash: newHash,
-                    sizeBytes: optimizedBytes,
-                    storageRef: nil,
-                    rawData: compressed
-                )
-
-                let updated = StorageService.StoredItem(
-                    id: item.id,
-                    type: item.type,
-                    contentHash: newHash,
-                    plainText: item.plainText,
-                    note: item.note,
-                    appBundleID: item.appBundleID,
-                    createdAt: item.createdAt,
-                    lastUsedAt: item.lastUsedAt,
-                    useCount: item.useCount,
-                    isPinned: item.isPinned,
-                    sizeBytes: optimizedBytes,
-                    fileSizeBytes: item.fileSizeBytes,
-                    storageRef: nil,
-                    rawData: compressed
-                )
-                if let search {
-                    await search.handleUpsertedItem(updated)
-                }
-                let dto = toDTO(updated, storage: storage, thumbnailGenerationPriority: .userInitiated)
-                await yieldEvent(.itemContentUpdated(dto))
-
-                return ImageOptimizationOutcomeDTO(result: .optimized, originalBytes: originalBytes, optimizedBytes: optimizedBytes)
-            } catch {
+            guard PngquantService.isLikelyPNGFile(stagedURL) else {
                 return ImageOptimizationOutcomeDTO(
-                    result: .failed(message: error.localizedDescription),
+                    result: .noChange,
                     originalBytes: originalBytes,
                     optimizedBytes: originalBytes
                 )
             }
+
+            let compressionTask = Task.detached(priority: .utility) {
+                try PngquantService.compressPNGFileInPlace(stagedURL, options: options)
+            }
+            let replaced = try await withTaskCancellationHandler(operation: {
+                try await compressionTask.value
+            }, onCancel: {
+                compressionTask.cancel()
+            })
+            guard replaced || didTranscodeToPNG else {
+                return ImageOptimizationOutcomeDTO(
+                    result: .noChange,
+                    originalBytes: originalBytes,
+                    optimizedBytes: originalBytes
+                )
+            }
+
+            let optimizedData = try await Task.detached(priority: .utility) {
+                try Data(contentsOf: stagedURL, options: [.mappedIfSafe])
+            }.value
+            let optimizedBytes = optimizedData.count
+            guard optimizedBytes < originalBytes else {
+                return ImageOptimizationOutcomeDTO(
+                    result: .noChange,
+                    originalBytes: originalBytes,
+                    optimizedBytes: originalBytes
+                )
+            }
+            guard !Task.isCancelled else {
+                return Self.cancelledImageOptimizationOutcome(originalBytes: originalBytes)
+            }
+
+            let newHash = ClipboardMonitor.computeHashStatic(optimizedData)
+            let stableOriginalBytes = originalBytes
+            let leasedOutcome = await storage.withExternalImageSourceLease(
+                sourceURL: sourceURL
+            ) { [self] sourceLease in
+                await commitOptimizedExternalImageUnderLease(
+                    item: item,
+                    sourceURL: sourceURL,
+                    stagedURL: stagedURL,
+                    stagedOriginalData: stagedOriginalData,
+                    sourceFingerprint: sourceFingerprint,
+                    optimizedBytes: optimizedBytes,
+                    newHash: newHash,
+                    originalBytes: stableOriginalBytes,
+                    storage: storage,
+                    sourceLease: sourceLease
+                )
+            }
+            return leasedOutcome ?? Self.supersededImageOptimizationOutcome(originalBytes: stableOriginalBytes)
+        } catch {
+            return ImageOptimizationOutcomeDTO(
+                result: .failed(message: error.localizedDescription),
+                originalBytes: originalBytes,
+                optimizedBytes: originalBytes
+            )
+        }
+    }
+
+    private func commitOptimizedExternalImageUnderLease(
+        item: StorageService.StoredItem,
+        sourceURL: URL,
+        stagedURL: URL,
+        stagedOriginalData: Data,
+        sourceFingerprint: String,
+        optimizedBytes: Int,
+        newHash: String,
+        originalBytes: Int,
+        storage: StorageService,
+        sourceLease: StorageService.ExternalImageSourceLease
+    ) async -> ImageOptimizationOutcomeDTO {
+        await imageOptimizationInterlock?(.afterExternalSourceLeaseBeforeValidation, item.id)
+        let liveSourceStillMatches = await externalSourceMatches(
+            sourceURL,
+            expectedData: stagedOriginalData,
+            expectedFingerprint: sourceFingerprint
+        )
+        guard liveSourceStillMatches, !Task.isCancelled else {
+            return Self.supersededImageOptimizationOutcome(originalBytes: originalBytes)
         }
 
-        // Fallback: item has no inline data and no storageRef (unexpected)
-        return ImageOptimizationOutcomeDTO(result: .noChange, originalBytes: item.sizeBytes, optimizedBytes: item.sizeBytes)
+        let updated: StorageService.StoredItem
+        do {
+            guard let value = try await storage.commitOptimizedExternalImagePayload(
+                expected: item,
+                stagedURL: stagedURL,
+                contentHash: newHash,
+                sizeBytes: optimizedBytes
+            ) else {
+                return Self.supersededImageOptimizationOutcome(originalBytes: originalBytes)
+            }
+            updated = value
+        } catch {
+            return ImageOptimizationOutcomeDTO(
+                result: .failed(message: error.localizedDescription),
+                originalBytes: originalBytes,
+                optimizedBytes: originalBytes
+            )
+        }
+
+        await imageOptimizationInterlock?(.afterExternalPayloadCommit, item.id)
+        let postCommitSourceMatches = await externalSourceMatches(
+            sourceURL,
+            expectedData: stagedOriginalData,
+            expectedFingerprint: sourceFingerprint
+        )
+        if !postCommitSourceMatches {
+            let reconciliation = await reconcileExternalSourceOwnership(
+                sourceURL: sourceURL,
+                committedItem: updated,
+                storage: storage,
+                sourceLease: sourceLease
+            )
+
+            switch reconciliation {
+            case .sourceUnavailable:
+                    let current = try? await storage.findByID(item.id)
+                    guard let current,
+                          Self.hasSamePayload(current, as: updated) else {
+                        _ = await publishAuthoritativeItemState(
+                            id: item.id,
+                            storage: storage,
+                            priority: .userInitiated
+                        )
+                        return Self.supersededImageOptimizationOutcome(originalBytes: originalBytes)
+                    }
+                case .adopted, .failedOrUnstable:
+                    _ = await publishAuthoritativeItemState(
+                        id: item.id,
+                        storage: storage,
+                        priority: .userInitiated
+                    )
+                    return Self.supersededImageOptimizationOutcome(originalBytes: originalBytes)
+                }
+        }
+
+        guard let published = await publishOptimizedItem(updated, storage: storage),
+              Self.hasSamePayload(published, as: updated) else {
+            return Self.supersededImageOptimizationOutcome(originalBytes: originalBytes)
+        }
+        return ImageOptimizationOutcomeDTO(
+            result: .optimized,
+            originalBytes: originalBytes,
+            optimizedBytes: optimizedBytes,
+            resultingContentHash: newHash
+        )
+    }
+
+    private func publishOptimizedItem(
+        _ updated: StorageService.StoredItem,
+        storage: StorageService
+    ) async -> StorageService.StoredItem? {
+        await imageOptimizationInterlock?(.beforeSearchPublication, updated.id)
+        guard let current = await publishAuthoritativeItemState(
+            id: updated.id,
+            storage: storage,
+            priority: .userInitiated
+        ), Self.hasSamePayload(current, as: updated) else {
+            return nil
+        }
+        return current
+    }
+
+    @discardableResult
+    private func publishAuthoritativeItemState(
+        id: UUID,
+        storage: StorageService,
+        priority: TaskPriority,
+        kind: AuthoritativePublicationKind = .contentUpdated,
+        metadataInterlockPoint: MetadataPublicationInterlockPoint? = nil
+    ) async -> StorageService.StoredItem? {
+        let publication = await reservePublication(for: id)
+        guard let current = await synchronizeSearchWithCurrentItem(id: id, storage: storage) else {
+            let latest: StorageService.StoredItem?
+            do {
+                latest = try await storage.findByID(id)
+            } catch {
+                await eventQueue.discardPublication(publication)
+                return nil
+            }
+            guard latest == nil else {
+                await eventQueue.discardPublication(publication)
+                return nil
+            }
+            let accepted = await yieldEvent(.itemDeleted(id), publication: publication)
+            guard accepted else { return nil }
+            return nil
+        }
+
+        let event: ClipboardEvent
+        switch kind {
+        case .newItem:
+            let dto = await toDTO(
+                current,
+                storage: storage,
+                thumbnailGenerationPriority: priority
+            )
+            event = .newItem(dto)
+        case .itemUpdated:
+            let dto = await toDTO(
+                current,
+                storage: storage,
+                thumbnailGenerationPriority: priority
+            )
+            event = .itemUpdated(dto)
+        case .contentUpdated:
+            let dto = await toDTO(
+                current,
+                storage: storage,
+                thumbnailGenerationPriority: priority
+            )
+            event = .itemContentUpdated(dto)
+        case .pinState:
+            event = current.isPinned ? .itemPinned(id) : .itemUnpinned(id)
+        }
+        if let metadataInterlockPoint {
+            await metadataPublicationInterlock?(metadataInterlockPoint, id)
+        }
+        let accepted = await yieldEvent(event, publication: publication)
+        guard accepted else { return nil }
+        return current
+    }
+
+    /// Search publication is an awaited actor hop, so every pass validates the row both before
+    /// and after applying the candidate. A bounded repair loop prevents an older full DTO from
+    /// escaping when a same-ID replacement, metadata update, or deletion wins during that hop.
+    private func synchronizeSearchWithCurrentItem(
+        id: UUID,
+        storage: StorageService
+    ) async -> StorageService.StoredItem? {
+        guard let search else { return nil }
+
+        let initial: StorageService.StoredItem?
+        do {
+            initial = try await storage.findByID(id)
+        } catch {
+            await search.invalidateCache()
+            return nil
+        }
+
+        var candidate = initial
+        for _ in 0..<3 {
+            guard let candidateItem = candidate else {
+                await search.handleDeletion(id: id)
+                return nil
+            }
+
+            await search.handleUpsertedItem(candidateItem)
+
+            let latest: StorageService.StoredItem?
+            do {
+                latest = try await storage.findByID(id)
+            } catch {
+                await search.invalidateCache()
+                return nil
+            }
+
+            guard let latest else {
+                await search.handleDeletion(id: id)
+                return nil
+            }
+            if Self.hasSameItemState(latest, as: candidateItem) {
+                return latest
+            }
+            candidate = latest
+        }
+
+        await search.invalidateCache()
+        return nil
+    }
+
+    private func externalSourceMatches(
+        _ sourceURL: URL,
+        expectedData: Data,
+        expectedFingerprint: String
+    ) async -> Bool {
+        await Task.detached(priority: .utility) {
+            guard let liveData = try? Data(contentsOf: sourceURL, options: [.mappedIfSafe]) else {
+                return false
+            }
+            return liveData.count == expectedData.count &&
+                ClipboardMonitor.computeHashStatic(liveData) == expectedFingerprint
+        }.value
+    }
+
+    /// If an uncooperative external writer changes the source during the commit window, return
+    /// DB ownership to that live source only while the just-committed payload is still the winner.
+    /// Re-read and advance the fingerprint a few times so a second in-place write does not leave
+    /// the row describing bytes that were already superseded.
+    private func reconcileExternalSourceOwnership(
+        sourceURL: URL,
+        committedItem: StorageService.StoredItem,
+        storage: StorageService,
+        sourceLease: StorageService.ExternalImageSourceLease
+    ) async -> ExternalSourceReconciliationResult {
+        let result = await storage.reconcileExternalImageSourceOwnership(
+            committedItem: committedItem,
+            sourceURL: sourceURL,
+            sourceLease: sourceLease,
+            verificationInterlock: { [imageOptimizationInterlock] attempt in
+                await imageOptimizationInterlock?(
+                    .afterExternalSourceAdoptionBeforeVerification(attempt: attempt),
+                    committedItem.id
+                )
+            }
+        )
+        switch result {
+        case .adopted:
+            return .adopted
+        case .sourceUnavailable:
+            return .sourceUnavailable
+        case .failedOrUnstable:
+            return .failedOrUnstable
+        }
+    }
+
+    private static func hasSamePayload(
+        _ lhs: StorageService.StoredItem,
+        as rhs: StorageService.StoredItem
+    ) -> Bool {
+        lhs.id == rhs.id &&
+            lhs.type == rhs.type &&
+            lhs.contentHash == rhs.contentHash &&
+            lhs.plainText == rhs.plainText &&
+            lhs.sizeBytes == rhs.sizeBytes &&
+            lhs.fileSizeBytes == rhs.fileSizeBytes &&
+            lhs.storageRef == rhs.storageRef &&
+            lhs.rawData == rhs.rawData
+    }
+
+    private static func hasSameItemState(
+        _ lhs: StorageService.StoredItem,
+        as rhs: StorageService.StoredItem
+    ) -> Bool {
+        hasSamePayload(lhs, as: rhs) &&
+            lhs.note == rhs.note &&
+            lhs.appBundleID == rhs.appBundleID &&
+            lhs.createdAt == rhs.createdAt &&
+            lhs.lastUsedAt == rhs.lastUsedAt &&
+            lhs.useCount == rhs.useCount &&
+            lhs.isPinned == rhs.isPinned
+    }
+
+    private static func supersededImageOptimizationOutcome(
+        originalBytes: Int
+    ) -> ImageOptimizationOutcomeDTO {
+        ImageOptimizationOutcomeDTO(
+            result: .failed(message: "Image changed while optimization was running"),
+            originalBytes: originalBytes,
+            optimizedBytes: originalBytes
+        )
+    }
+
+    private static func cancelledImageOptimizationOutcome(
+        originalBytes: Int
+    ) -> ImageOptimizationOutcomeDTO {
+        ImageOptimizationOutcomeDTO(
+            result: .failed(message: "Image optimization was cancelled"),
+            originalBytes: originalBytes,
+            optimizedBytes: originalBytes
+        )
+    }
+
+    private static func busyImageOptimizationOutcome(
+        message: String
+    ) -> ImageOptimizationOutcomeDTO {
+        ImageOptimizationOutcomeDTO(
+            result: .failed(message: message),
+            originalBytes: 0,
+            optimizedBytes: 0
+        )
     }
 
     func getRecentApps(limit: Int) async throws -> [String] {
@@ -930,19 +2045,13 @@ actor ClipboardService {
         return search
     }
 
-    nonisolated private static func fileSizeBestEffort(url: URL) -> Int? {
-        guard let attrs = try? FileManager.default.attributesOfItem(atPath: url.path),
-              let size = attrs[.size] as? Int else { return nil }
-        return size
-    }
-
     private func getMonitorStream() async -> AsyncStream<ClipboardMonitor.ClipboardContent>? {
         guard let monitor else { return nil }
         return monitor.contentStream
     }
 
     private func handleNewContent(_ content: ClipboardMonitor.ClipboardContent) async {
-        guard let storage, let search else { return }
+        guard let storage, search != nil else { return }
 
         if content.type == .image && !settings.saveImages {
             if let ingestURL = content.ingestFileURL {
@@ -965,13 +2074,21 @@ actor ClipboardService {
             let outcome = try await storage.upsertItemWithOutcome(preparedContent)
             let storedItem = outcome.item
 
-            await search.handleUpsertedItem(storedItem)
-            let dto = toDTO(storedItem, storage: storage, thumbnailGenerationPriority: .userInitiated)
             switch outcome {
             case .inserted:
-                await yieldEvent(.newItem(dto))
+                _ = await publishAuthoritativeItemState(
+                    id: storedItem.id,
+                    storage: storage,
+                    priority: .userInitiated,
+                    kind: .newItem
+                )
             case .updated:
-                await yieldEvent(.itemUpdated(dto))
+                _ = await publishAuthoritativeItemState(
+                    id: storedItem.id,
+                    storage: storage,
+                    priority: .userInitiated,
+                    kind: .itemUpdated
+                )
             }
 
             await acknowledgeIngestEnvelopeIfNeeded(preparedContent)
@@ -1060,6 +2177,18 @@ actor ClipboardService {
         await eventQueue.enqueue(event)
     }
 
+    private func reservePublication(for itemID: UUID) async -> ClipboardEventQueue.PublicationToken {
+        await eventQueue.reservePublication(itemID: itemID)
+    }
+
+    @discardableResult
+    private func yieldEvent(
+        _ event: ClipboardEvent,
+        publication: ClipboardEventQueue.PublicationToken
+    ) async -> Bool {
+        await eventQueue.enqueue(event, publication: publication)
+    }
+
     private func scheduleCleanup(storage: StorageService) {
         cleanupTask?.cancel()
         cleanupTask = Task { [weak self] in
@@ -1095,11 +2224,103 @@ actor ClipboardService {
         }
     }
 
+    private func startBackgroundMediaQueuesIfNeeded() async {
+        await startThumbnailGenerationQueueIfNeeded()
+        await startFileSizeComputationQueueIfNeeded()
+    }
+
+    private func startThumbnailGenerationQueueIfNeeded() async {
+        guard isStarted, thumbnailGenerationQueue == nil else { return }
+
+        let queue = ThumbnailWorkQueue(
+            workerLimit: maxConcurrentThumbnailGenerations,
+            pendingLimit: maxPendingThumbnailGenerations,
+            merge: { existing, incoming in
+                var itemIDs = existing.itemIDs
+                itemIDs.formUnion(incoming.itemIDs)
+                return ThumbnailGenerationWork(
+                    item: incoming.item,
+                    itemIDs: itemIDs,
+                    maxHeight: incoming.maxHeight,
+                    externalStorageRoot: incoming.externalStorageRoot,
+                    thumbnailCacheRoot: incoming.thumbnailCacheRoot
+                )
+            },
+            operation: { [weak self] work, priority in
+                guard let self else { return nil }
+                return await self.performThumbnailGeneration(work, priority: priority)
+            },
+            completion: { [weak self] work, thumbnailPath in
+                guard let self, let thumbnailPath else { return }
+                await self.publishGeneratedThumbnail(work, thumbnailPath: thumbnailPath)
+            }
+        )
+        thumbnailGenerationQueue = queue
+        await queue.start()
+    }
+
+    private func startFileSizeComputationQueueIfNeeded() async {
+        guard isStarted, fileSizeComputationQueue == nil else { return }
+
+        let queue = FileSizeWorkQueue(
+            workerLimit: maxConcurrentFileSizeComputations,
+            pendingLimit: maxPendingFileSizeComputations,
+            merge: { _, incoming in incoming },
+            operation: { [weak self] work, _ in
+                guard let self else { return nil }
+                return await self.performFileSizeComputation(work)
+            },
+            completion: { [weak self] _, result in
+                guard let self, let result else { return }
+                await self.applyComputedFileSizeBytes(
+                    expected: result.expected,
+                    fileSizeBytes: result.fileSizeBytes
+                )
+            }
+        )
+        fileSizeComputationQueue = queue
+        await queue.start()
+    }
+
+    private func stopThumbnailGenerationQueue() async {
+        let queue = thumbnailGenerationQueue
+        thumbnailGenerationQueue = nil
+        await queue?.stop()
+    }
+
+    private func stopBackgroundMediaQueues() async {
+        let thumbnailQueue = thumbnailGenerationQueue
+        let fileSizeQueue = fileSizeComputationQueue
+        thumbnailGenerationQueue = nil
+        fileSizeComputationQueue = nil
+        await thumbnailQueue?.stop()
+        await fileSizeQueue?.stop()
+        fileSizeComputationLastAttemptAt.removeAll()
+    }
+
+    func backgroundMediaSchedulingSnapshot() async -> BackgroundMediaSchedulingSnapshot {
+        let thumbnail = await thumbnailGenerationQueue?.snapshot()
+        let fileSize = await fileSizeComputationQueue?.snapshot()
+        return BackgroundMediaSchedulingSnapshot(
+            thumbnailActiveCount: thumbnail?.activeCount ?? 0,
+            thumbnailPendingCount: thumbnail?.pendingCount ?? 0,
+            thumbnailWorkerCount: thumbnail?.workerCount ?? 0,
+            thumbnailMaxActiveCount: thumbnail?.maxActiveCount ?? 0,
+            thumbnailMaxPendingCount: thumbnail?.maxPendingCount ?? 0,
+            fileSizeActiveCount: fileSize?.activeCount ?? 0,
+            fileSizePendingCount: fileSize?.pendingCount ?? 0,
+            fileSizeWorkerCount: fileSize?.workerCount ?? 0,
+            fileSizeMaxActiveCount: fileSize?.maxActiveCount ?? 0,
+            fileSizeMaxPendingCount: fileSize?.maxPendingCount ?? 0,
+            fileSizeRetryTimestampCount: fileSizeComputationLastAttemptAt.count
+        )
+    }
+
     private func toDTO(
         _ item: StorageService.StoredItem,
         storage: StorageService,
         thumbnailGenerationPriority: TaskPriority = .utility
-    ) -> ClipboardItemDTO {
+    ) async -> ClipboardItemDTO {
         var thumbnailPath: String? = nil
         let fileSizeBytes: Int? = item.fileSizeBytes
         if settings.showImageThumbnails {
@@ -1110,7 +2331,7 @@ actor ClipboardService {
                 if let path = thumbnailPathIfExists(filename: filename, thumbnailCacheRoot: thumbnailCacheRoot) {
                     thumbnailPath = path
                 } else if shouldScheduleImageThumbnailGeneration(for: item, externalStorageRoot: storage.externalStorageDirectoryPath) {
-                    scheduleThumbnailGenerationIfNeeded(
+                    await scheduleThumbnailGenerationIfNeeded(
                         for: item,
                         storage: storage,
                         priority: thumbnailGenerationPriority
@@ -1123,7 +2344,7 @@ actor ClipboardService {
                     if let path = thumbnailPathIfExists(filename: filename, thumbnailCacheRoot: thumbnailCacheRoot) {
                         thumbnailPath = path
                     } else {
-                        scheduleThumbnailGenerationIfNeeded(
+                        await scheduleThumbnailGenerationIfNeeded(
                             for: item,
                             storage: storage,
                             priority: thumbnailGenerationPriority
@@ -1136,7 +2357,7 @@ actor ClipboardService {
         }
 
         if item.type == .file, fileSizeBytes == nil {
-            scheduleFileSizeComputationIfNeeded(itemID: item.id, plainText: item.plainText)
+            await scheduleFileSizeComputationIfNeeded(expected: item)
         }
 
         return ClipboardItemDTO(
@@ -1160,154 +2381,176 @@ actor ClipboardService {
         for item: StorageService.StoredItem,
         storage: StorageService,
         priority: TaskPriority
-    ) {
-        Task { [weak self, item, storage] in
-            guard let self else { return }
-            await self.scheduleThumbnailGeneration(for: item, storage: storage, priority: priority)
-        }
+    ) async {
+        guard let queue = thumbnailGenerationQueue else { return }
+        let typeNamespace = item.type == .file ? "file" : "image"
+        let key = ThumbnailGenerationKey(typeNamespace: typeNamespace, contentHash: item.contentHash)
+        let work = ThumbnailGenerationWork(
+            item: item,
+            itemIDs: [item.id],
+            maxHeight: settings.thumbnailHeight,
+            externalStorageRoot: storage.externalStorageDirectoryPath,
+            thumbnailCacheRoot: storage.thumbnailCacheDirectoryPath
+        )
+        _ = await queue.submit(
+            key: key,
+            work: work,
+            priority: Self.backgroundWorkPriority(from: priority)
+        )
     }
 
-    private func scheduleFileSizeComputationIfNeeded(itemID: UUID, plainText: String) {
+    private func scheduleFileSizeComputationIfNeeded(expected: StorageService.StoredItem) async {
+        let key = FileSizeComputationKey(expected: expected)
         let now = Date()
-        if let lastAttempt = fileSizeComputationLastAttemptAt[itemID],
-           now.timeIntervalSince(lastAttempt) < fileSizeComputationRetryInterval
-        {
+        if fileSizeComputationLastAttemptAt.containsRecent(
+            key,
+            now: now,
+            interval: fileSizeComputationRetryInterval
+        ) {
             return
         }
-        if fileSizeComputationInProgress.contains(itemID) {
-            return
+        guard let queue = fileSizeComputationQueue else { return }
+        _ = await queue.cancelPending { pendingKey in
+            pendingKey.itemID == expected.id && pendingKey != key
         }
+        _ = await queue.submit(
+            key: key,
+            work: FileSizeComputationWork(expected: expected),
+            priority: .utility
+        )
+    }
 
-        fileSizeComputationInProgress.insert(itemID)
-        fileSizeComputationLastAttemptAt[itemID] = now
+    private func performFileSizeComputation(_ work: FileSizeComputationWork) async -> FileSizeComputationResult? {
+        guard isStarted, !Task.isCancelled else { return nil }
+        let key = FileSizeComputationKey(expected: work.expected)
+        fileSizeComputationLastAttemptAt.record(key, at: Date())
 
-        Task.detached(priority: .utility) { [weak self, itemID, plainText] in
-            guard let self else { return }
-
-            await self.acquireFileSizeComputationSlot()
-            let computed = Task.isCancelled ? nil : FilePreviewSupport.totalFileSizeBytes(from: plainText)
-            await self.finishFileSizeComputation(itemID: itemID)
-
-            guard !Task.isCancelled else { return }
-            guard let computed else { return }
-            await self.applyComputedFileSizeBytes(itemID: itemID, fileSizeBytes: computed)
+        let task = Task.detached(priority: .utility) {
+            guard !Task.isCancelled,
+                  let fileSizeBytes = FilePreviewSupport.totalFileSizeBytes(from: work.expected.plainText) else {
+                return nil as FileSizeComputationResult?
+            }
+            return FileSizeComputationResult(expected: work.expected, fileSizeBytes: fileSizeBytes)
         }
+        return await withTaskCancellationHandler(operation: {
+            await task.value
+        }, onCancel: {
+            task.cancel()
+        })
     }
 
-    private func acquireFileSizeComputationSlot() async {
-        guard maxConcurrentFileSizeComputations > 0 else { return }
-        _ = await fileSizeComputationPermitPool.acquire()
-    }
-
-    private func finishFileSizeComputation(itemID: UUID) async {
-        fileSizeComputationInProgress.remove(itemID)
-        await releaseFileSizeComputationSlot()
-    }
-
-    private func releaseFileSizeComputationSlot() async {
-        guard maxConcurrentFileSizeComputations > 0 else { return }
-        await fileSizeComputationPermitPool.release()
-    }
-
-    private func applyComputedFileSizeBytes(itemID: UUID, fileSizeBytes: Int) async {
-        guard let storage else { return }
+    func applyComputedFileSizeBytes(
+        expected: StorageService.StoredItem,
+        fileSizeBytes: Int
+    ) async {
+        guard isStarted, let storage else { return }
+        let key = FileSizeComputationKey(expected: expected)
 
         do {
-            let updated = try await storage.updateFileSizeBytes(id: itemID, fileSizeBytes: fileSizeBytes)
-            fileSizeComputationLastAttemptAt.removeValue(forKey: itemID)
-            guard let updated else { return }
-            let dto = toDTO(updated, storage: storage, thumbnailGenerationPriority: .utility)
-            await yieldEvent(.itemContentUpdated(dto))
+            guard try await storage.updateFileSizeBytes(
+                expected: expected,
+                fileSizeBytes: fileSizeBytes
+            ) != nil else {
+                fileSizeComputationLastAttemptAt.remove(key)
+                return
+            }
+            fileSizeComputationLastAttemptAt.remove(key)
+            await metadataPublicationInterlock?(.afterFileSizeCommit, expected.id)
+            _ = await publishAuthoritativeItemState(
+                id: expected.id,
+                storage: storage,
+                priority: .utility,
+                metadataInterlockPoint: .afterFileSizeDTOConstructionBeforeEvent
+            )
         } catch {
-            ScopyLog.app.warning("Failed to update fileSizeBytes for item \(itemID.uuidString, privacy: .private): \(error.localizedDescription, privacy: .private)")
+            ScopyLog.app.warning("Failed to update fileSizeBytes for item \(expected.id.uuidString, privacy: .private): \(error.localizedDescription, privacy: .private)")
         }
     }
 
-    private func acquireThumbnailGenerationSlot() async {
-        guard maxConcurrentThumbnailGenerations > 0 else { return }
-        _ = await thumbnailGenerationPermitPool.acquire()
-    }
-
-    private func releaseThumbnailGenerationSlot() async {
-        guard maxConcurrentThumbnailGenerations > 0 else { return }
-        await thumbnailGenerationPermitPool.release()
-    }
-
-    private func scheduleThumbnailGeneration(
-        for item: StorageService.StoredItem,
-        storage: StorageService,
-        priority: TaskPriority = .utility
-    ) async {
-        let itemID = item.id
-        let contentHash = item.contentHash
-        let itemType = item.type
-        let maxHeight = settings.thumbnailHeight
+    private func performThumbnailGeneration(
+        _ work: ThumbnailGenerationWork,
+        priority: BackgroundWorkPriority
+    ) async -> String? {
+        guard isStarted, !Task.isCancelled, let storage else { return nil }
+        let item = work.item
         let quickLookScale = await MainActor.run { NSScreen.main?.backingScaleFactor ?? 2.0 }
-
-        let externalStorageRoot = storage.externalStorageDirectoryPath
-        let thumbnailCacheRoot = storage.thumbnailCacheDirectoryPath
-
         let storagePath = item.storageRef
         let rawData = item.rawData
         let fallbackImageData: Data?
-        if itemType == .image, (storagePath == nil || storagePath?.isEmpty == true), rawData == nil {
+        if item.type == .image,
+           (storagePath == nil || storagePath?.isEmpty == true),
+           rawData == nil,
+           !Task.isCancelled {
             fallbackImageData = await storage.loadPayloadData(for: item)
         } else {
             fallbackImageData = nil
         }
+        guard !Task.isCancelled else { return nil }
 
-        Task.detached(priority: priority) { [weak self, itemID, contentHash, itemType, maxHeight, quickLookScale, storagePath, rawData, fallbackImageData, externalStorageRoot, thumbnailCacheRoot] in
-            guard let self else { return }
+        let generationTask = Task.detached(priority: priority.taskPriority) {
+            await Self.generateAndPersistThumbnail(
+                work: work,
+                quickLookScale: quickLookScale,
+                fallbackImageData: fallbackImageData
+            )
+        }
+        return await withTaskCancellationHandler(operation: {
+            await generationTask.value
+        }, onCancel: {
+            generationTask.cancel()
+        })
+    }
 
-            let trackerKey: String
-            if itemType == .file {
-                trackerKey = "file_\(contentHash)"
-            } else {
-                trackerKey = contentHash
-            }
-
-            let shouldGenerate = await ThumbnailGenerationTracker.shared.tryMarkInProgress(trackerKey)
-            guard shouldGenerate else { return }
-
-            await self.acquireThumbnailGenerationSlot()
-            defer {
-                Task {
-                    await ThumbnailGenerationTracker.shared.markCompleted(trackerKey)
-                }
-                Task {
-                    await self.releaseThumbnailGenerationSlot()
-                }
-            }
-
-            let pngData: Data?
-            switch itemType {
+    nonisolated private static func generateAndPersistThumbnail(
+        work: ThumbnailGenerationWork,
+        quickLookScale: CGFloat,
+        fallbackImageData: Data?
+    ) async -> String? {
+        guard !Task.isCancelled else { return nil }
+        let item = work.item
+        let pngData: Data?
+        switch item.type {
             case .image:
-                if let storagePath, !storagePath.isEmpty {
-                    guard StorageService.validateStorageRef(storagePath, externalStoragePath: externalStorageRoot) else {
+                if let storagePath = item.storageRef, !storagePath.isEmpty {
+                    guard StorageService.validateStorageRef(
+                        storagePath,
+                        externalStoragePath: work.externalStorageRoot
+                    ) else {
                         ScopyLog.app.warning("Thumbnail skipped: invalid storageRef (possible traversal)")
-                        return
+                        return nil
                     }
-                    pngData = StorageService.makeThumbnailPNG(fromFileAtPath: storagePath, maxHeight: maxHeight)
-                } else if let rawData {
-                    pngData = StorageService.makeThumbnailPNG(from: rawData, maxHeight: maxHeight)
+                    pngData = StorageService.makeThumbnailPNG(
+                        fromFileAtPath: storagePath,
+                        maxHeight: work.maxHeight
+                    )
+                } else if let rawData = item.rawData {
+                    pngData = StorageService.makeThumbnailPNG(from: rawData, maxHeight: work.maxHeight)
                 } else if let fallbackImageData {
-                    pngData = StorageService.makeThumbnailPNG(from: fallbackImageData, maxHeight: maxHeight)
+                    pngData = StorageService.makeThumbnailPNG(
+                        from: fallbackImageData,
+                        maxHeight: work.maxHeight
+                    )
                 } else {
                     pngData = nil
                 }
             case .file:
                 guard let preview = FilePreviewSupport.previewSummary(from: item.plainText, requireExists: true),
                       preview.shouldGenerateThumbnail else {
-                    pngData = nil
-                    break
+                    return nil
                 }
                 switch preview.kind {
                 case .image:
-                    pngData = StorageService.makeThumbnailPNG(fromFileAtPath: preview.path, maxHeight: maxHeight)
+                    pngData = StorageService.makeThumbnailPNG(
+                        fromFileAtPath: preview.path,
+                        maxHeight: work.maxHeight
+                    )
                 case .video:
-                    pngData = FilePreviewSupport.makeVideoThumbnailPNG(from: preview.info.url, maxHeight: maxHeight)
+                    pngData = FilePreviewSupport.makeVideoThumbnailPNG(
+                        from: preview.info.url,
+                        maxHeight: work.maxHeight
+                    )
                 case .other:
-                    let maxSidePixels = max(1, Int(CGFloat(maxHeight) * quickLookScale))
+                    let maxSidePixels = max(1, Int(CGFloat(work.maxHeight) * quickLookScale))
                     pngData = await FilePreviewSupport.makeQuickLookThumbnailPNG(
                         from: preview.info.url,
                         maxSidePixels: maxSidePixels,
@@ -1316,39 +2559,64 @@ actor ClipboardService {
                 }
             default:
                 pngData = nil
-            }
+        }
 
-            guard let pngData else { return }
-
-            let filename: String
-            if itemType == .file {
-                filename = StorageService.fileThumbnailFilename(for: contentHash)
-            } else {
-                filename = "\(contentHash).png"
-            }
-            let thumbnailPath = (thumbnailCacheRoot as NSString).appendingPathComponent(filename)
-            if !FileManager.default.fileExists(atPath: thumbnailCacheRoot) {
-                try? FileManager.default.createDirectory(
-                    atPath: thumbnailCacheRoot,
-                    withIntermediateDirectories: true,
-                    attributes: nil
-                )
-            }
-            do {
-                try StorageService.writeAtomically(pngData, to: thumbnailPath)
-            } catch {
-                ScopyLog.app.warning("Failed to write thumbnail: \(error.localizedDescription, privacy: .private)")
-                return
-            }
-
-            await self.yieldThumbnailUpdated(itemID: itemID, thumbnailPath: thumbnailPath)
+        guard !Task.isCancelled, let pngData else { return nil }
+        let filename = item.type == .file
+            ? StorageService.fileThumbnailFilename(for: item.contentHash)
+            : "\(item.contentHash).png"
+        let thumbnailPath = (work.thumbnailCacheRoot as NSString).appendingPathComponent(filename)
+        if FileManager.default.fileExists(atPath: thumbnailPath) {
+            return thumbnailPath
+        }
+        if !FileManager.default.fileExists(atPath: work.thumbnailCacheRoot) {
+            try? FileManager.default.createDirectory(
+                atPath: work.thumbnailCacheRoot,
+                withIntermediateDirectories: true,
+                attributes: nil
+            )
+        }
+        guard !Task.isCancelled else { return nil }
+        do {
+            try StorageService.writeAtomically(pngData, to: thumbnailPath)
+            return Task.isCancelled ? nil : thumbnailPath
+        } catch {
+            ScopyLog.app.warning("Failed to write thumbnail: \(error.localizedDescription, privacy: .private)")
+            return nil
         }
     }
 
-    private func yieldThumbnailUpdated(itemID: UUID, thumbnailPath: String) async {
-        guard settings.showImageThumbnails else { return }
+    private func publishGeneratedThumbnail(
+        _ work: ThumbnailGenerationWork,
+        thumbnailPath: String
+    ) async {
+        guard isStarted, settings.showImageThumbnails, let storage else { return }
         rememberThumbnailExists(thumbnailPath: thumbnailPath)
-        await yieldEvent(.thumbnailUpdated(itemID: itemID, thumbnailPath: thumbnailPath))
+        let itemIDs = work.itemIDs.sorted { $0.uuidString < $1.uuidString }
+        for itemID in itemIDs {
+            let publication = await reservePublication(for: itemID)
+            guard let current = try? await storage.findByID(itemID),
+                  current.type == work.item.type,
+                  current.contentHash == work.item.contentHash else {
+                await eventQueue.discardPublication(publication)
+                continue
+            }
+            await yieldEvent(
+                .thumbnailUpdated(
+                    itemID: itemID,
+                    expectedType: work.item.type,
+                    expectedContentHash: work.item.contentHash,
+                    thumbnailPath: thumbnailPath
+                ),
+                publication: publication
+            )
+        }
+    }
+
+    nonisolated private static func backgroundWorkPriority(
+        from taskPriority: TaskPriority
+    ) -> BackgroundWorkPriority {
+        taskPriority == .userInitiated || taskPriority == .high ? .userInitiated : .utility
     }
 
 }

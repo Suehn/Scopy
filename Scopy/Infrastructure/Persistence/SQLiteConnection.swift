@@ -93,6 +93,11 @@ final class SQLiteConnection {
         guard let db = handle else { return }
         sqlite3_wal_checkpoint_v2(db, nil, SQLITE_CHECKPOINT_PASSIVE, nil, nil)
     }
+
+    func changeCount() -> Int {
+        guard let db = handle else { return 0 }
+        return Int(sqlite3_changes(db))
+    }
 }
 
 final class SQLiteStatement {

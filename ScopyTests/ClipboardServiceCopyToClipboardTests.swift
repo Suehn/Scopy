@@ -502,10 +502,6 @@ final class ClipboardServiceCopyToClipboardTests: XCTestCase {
     private func makePalettedPNGData() throws -> Data {
         // Safe real screenshot fixture that reproduces Codex/arboard failure when
         // a historical palette PNG is replayed without a rasterized TIFF fallback.
-        let fixtureURL = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()
-            .appendingPathComponent("Fixtures/history-replay-real-screenshot-paletted.png")
-
-        return try Data(contentsOf: fixtureURL, options: [.mappedIfSafe])
+        try TestFixture.data("history-replay-real-screenshot-paletted.png")
     }
 }

@@ -268,7 +268,12 @@ final class ReusableMockClipboardService: ClipboardServiceProtocol {
         )
         items[index] = updated
         emitEvent(.itemContentUpdated(updated))
-        return ImageOptimizationOutcomeDTO(result: .optimized, originalBytes: original, optimizedBytes: optimized)
+        return ImageOptimizationOutcomeDTO(
+            result: .optimized,
+            originalBytes: original,
+            optimizedBytes: optimized,
+            resultingContentHash: updated.contentHash
+        )
     }
 
     func syncExternalImageSizeBytesFromDisk() async throws -> Int { 0 }

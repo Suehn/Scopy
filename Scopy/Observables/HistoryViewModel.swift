@@ -221,10 +221,17 @@ final class HistoryViewModel {
             if let bundleID = item.appBundleID, !recentApps.contains(bundleID) {
                 scheduleRecentAppsRefresh()
             }
-        case .thumbnailUpdated(let itemID, let thumbnailPath):
+        case .thumbnailUpdated(
+            let itemID,
+            let expectedType,
+            let expectedContentHash,
+            let thumbnailPath
+        ):
             ThumbnailCache.shared.remove(path: thumbnailPath)
             guard let index = indexOfItem(withID: itemID) else { return }
             let existing = items[index]
+            guard existing.type == expectedType,
+                  existing.contentHash == expectedContentHash else { return }
             guard existing.thumbnailPath != thumbnailPath else { return }
 
             let updated = ClipboardItemDTO(

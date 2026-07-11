@@ -1,27 +1,62 @@
 import Foundation
 
 actor AsyncPermitPool {
+    struct Snapshot: Sendable, Equatable {
+        let activeCount: Int
+        let queuedCount: Int
+        let limit: Int
+        let maxPending: Int?
+    }
+
     private let limit: Int
+    private let maxPending: Int?
+    private let afterQueuedGrant: (@Sendable () async -> Void)?
     private var inUse = 0
     private var waitOrder: [UUID] = []
     private var waiters: [UUID: CheckedContinuation<Bool, Never>] = [:]
 
-    init(limit: Int) {
+    init(
+        limit: Int,
+        maxPending: Int? = nil,
+        afterQueuedGrant: (@Sendable () async -> Void)? = nil
+    ) {
         self.limit = max(1, limit)
+        if let maxPending {
+            self.maxPending = max(0, maxPending)
+        } else {
+            self.maxPending = nil
+        }
+        self.afterQueuedGrant = afterQueuedGrant
     }
 
     func acquire() async -> Bool {
+        guard !Task.isCancelled else { return false }
+
         if inUse < limit {
             inUse += 1
             return true
         }
 
+        if let maxPending, waiters.count >= maxPending {
+            return false
+        }
+
         let waiterID = UUID()
-        return await withTaskCancellationHandler(operation: {
+        let granted = await withTaskCancellationHandler(operation: {
             await withCheckedContinuation { continuation in
+                guard !Task.isCancelled else {
+                    continuation.resume(returning: false)
+                    return
+                }
+
                 if inUse < limit {
                     inUse += 1
                     continuation.resume(returning: true)
+                    return
+                }
+
+                if let maxPending, waiters.count >= maxPending {
+                    continuation.resume(returning: false)
                     return
                 }
 
@@ -31,6 +66,29 @@ actor AsyncPermitPool {
         }, onCancel: {
             Task { await self.cancelWaiter(id: waiterID) }
         })
+        guard granted else { return false }
+
+        if let afterQueuedGrant {
+            await afterQueuedGrant()
+        }
+        guard !Task.isCancelled else {
+            release()
+            return false
+        }
+        return true
+    }
+
+    func queuedWaiterCount() -> Int {
+        waiters.count
+    }
+
+    func snapshot() -> Snapshot {
+        Snapshot(
+            activeCount: inUse,
+            queuedCount: waiters.count,
+            limit: limit,
+            maxPending: maxPending
+        )
     }
 
     func release() {

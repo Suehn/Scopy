@@ -4,6 +4,97 @@ import Foundation
 import ImageIO
 import UniformTypeIdentifiers
 
+private actor ExternalFileReservationRegistry {
+    struct Reservation: Sendable {
+        let id: UUID
+        let resourceKeys: [String]
+    }
+
+    private struct Waiter {
+        let id: UUID
+        let resourceKeys: [String]
+        let continuation: CheckedContinuation<Reservation?, Never>
+    }
+
+    private var owners: [String: UUID] = [:]
+    private var waiters: [Waiter] = []
+
+    deinit {
+        waiters.forEach { $0.continuation.resume(returning: nil) }
+    }
+
+    func acquire(resourceKeys: [String]) async -> Reservation? {
+        let normalized = Array(Set(resourceKeys.filter { !$0.isEmpty })).sorted()
+        guard !normalized.isEmpty, !Task.isCancelled else { return nil }
+        let requestID = UUID()
+
+        let reservation: Reservation? = await withTaskCancellationHandler(operation: {
+            await withCheckedContinuation { continuation in
+                guard !Task.isCancelled else {
+                    continuation.resume(returning: nil)
+                    return
+                }
+                if canAcquire(normalized) {
+                    let reservation = Reservation(id: requestID, resourceKeys: normalized)
+                    markOwned(reservation)
+                    continuation.resume(returning: reservation)
+                } else {
+                    waiters.append(
+                        Waiter(id: requestID, resourceKeys: normalized, continuation: continuation)
+                    )
+                }
+            }
+        }, onCancel: {
+            Task { await self.cancelWaiter(id: requestID) }
+        })
+
+        guard let reservation else { return nil }
+        guard !Task.isCancelled else {
+            release(reservation)
+            return nil
+        }
+        return reservation
+    }
+
+    func release(_ reservation: Reservation) {
+        for resourceKey in reservation.resourceKeys where owners[resourceKey] == reservation.id {
+            owners.removeValue(forKey: resourceKey)
+        }
+        grantWaitersInOrder()
+    }
+
+    private func canAcquire(_ resourceKeys: [String]) -> Bool {
+        resourceKeys.allSatisfy { owners[$0] == nil }
+    }
+
+    private func markOwned(_ reservation: Reservation) {
+        for resourceKey in reservation.resourceKeys {
+            owners[resourceKey] = reservation.id
+        }
+    }
+
+    private func grantWaitersInOrder() {
+        while let waiter = waiters.first, canAcquire(waiter.resourceKeys) {
+            waiters.removeFirst()
+            let reservation = Reservation(id: waiter.id, resourceKeys: waiter.resourceKeys)
+            markOwned(reservation)
+            waiter.continuation.resume(returning: reservation)
+        }
+    }
+
+    private func cancelWaiter(id: UUID) {
+        guard let index = waiters.firstIndex(where: { $0.id == id }) else { return }
+        let waiter = waiters.remove(at: index)
+        waiter.continuation.resume(returning: nil)
+        grantWaitersInOrder()
+    }
+}
+
+/// Process-wide because multiple `StorageService` instances can legitimately target the same
+/// content root (tests, restart handoff, or overlapping service lifetimes). Resource keys include
+/// the canonical full path, so unrelated roots do not block each other.
+private let sharedExternalFileReservations = ExternalFileReservationRegistry()
+
 /// StorageService - 数据持久化服务
 /// 符合 v0.md 第2节：分级存储（小内容SQLite内联，大内容外部文件）
 @MainActor
@@ -44,6 +135,33 @@ public final class StorageService {
             case .updated(let item): return item
             }
         }
+    }
+
+    enum ExternalSizeSyncInterlockPoint: Sendable {
+        case afterStatBeforeCommit
+    }
+
+    enum OrphanCleanupInterlockPoint: Sendable {
+        case afterEnumerationBeforeOwnershipValidation
+        case afterOwnershipValidationBeforeRemove(path: String)
+        case afterFinalOwnershipValidationBeforeRemove(path: String)
+    }
+
+    enum ExternalSourceReconciliationResult: Sendable, Equatable {
+        case adopted
+        case sourceUnavailable
+        case failedOrUnstable
+    }
+
+    private enum OptimizedPayloadRepairResult {
+        case restored(StoredItem)
+        case independentlySuperseded
+        case failed
+    }
+
+    struct ExternalImageSourceLease: Sendable {
+        fileprivate let id: UUID
+        fileprivate let sourceReservationKey: String
     }
 
     // MARK: - Configuration
@@ -102,6 +220,13 @@ public final class StorageService {
 
     /// v0.22: 保护 cachedExternalSize 的锁，防止后台线程和主线程之间的数据竞争
     private let externalSizeCacheLock = NSLock()
+    private var protectedExternalFilenameRefCounts: [String: Int] = [:]
+    private var externalPayloadCommitGeneration: UInt64 = 0
+    private var externalImageSourceLeaseReservations: [
+        UUID: ExternalFileReservationRegistry.Reservation
+    ] = [:]
+    private var externalSizeSyncInterlock: (@Sendable (ExternalSizeSyncInterlockPoint) async -> Void)?
+    private var orphanCleanupInterlock: (@Sendable (OrphanCleanupInterlockPoint) async -> Void)?
 
     /// 数据库文件路径（用于设置窗口显示）
     public var databaseFilePath: String { dbPath }
@@ -133,6 +258,18 @@ public final class StorageService {
         Self.createDirectoryIfNeeded(at: URL(fileURLWithPath: thumbnailCachePath), description: "thumbnail cache directory")
 
         self.repository = SQLiteClipboardRepository(dbPath: self.dbPath)
+    }
+
+    func setExternalSizeSyncInterlockForTesting(
+        _ interlock: (@Sendable (ExternalSizeSyncInterlockPoint) async -> Void)?
+    ) {
+        externalSizeSyncInterlock = interlock
+    }
+
+    func setOrphanCleanupInterlockForTesting(
+        _ interlock: (@Sendable (OrphanCleanupInterlockPoint) async -> Void)?
+    ) {
+        orphanCleanupInterlock = interlock
     }
 
     private static func resolveRootDirectory(databasePath: String?, storageRootURL: URL?) -> URL {
@@ -244,54 +381,88 @@ public final class StorageService {
     func upsertItemWithOutcome(_ content: ClipboardMonitor.ClipboardContent) async throws -> UpsertOutcome {
         // Check for duplicate by content hash (v0.md 3.2)
         if let existing = try await repository.fetchItemByHash(content.contentHash) {
-            if let ingestURL = content.ingestFileURL {
-                try? FileManager.default.removeItem(at: ingestURL)
+            // Update lastUsedAt and useCount instead of creating new. If deletion won after the
+            // hash lookup, keep the ingest payload and continue through the insert path.
+            if let updated = try await repository.incrementUsageReturningCurrent(
+                id: existing.id,
+                lastUsedAt: Date()
+            ) {
+                if let ingestURL = content.ingestFileURL {
+                    try? FileManager.default.removeItem(at: ingestURL)
+                }
+                return .updated(updated)
             }
-
-            // Update lastUsedAt and useCount instead of creating new
-            var updated = existing
-            updated.lastUsedAt = Date()
-            updated.useCount += 1
-            try await repository.updateUsage(id: updated.id, lastUsedAt: updated.lastUsedAt, useCount: updated.useCount)
-            return .updated(updated)
         }
 
         let id = UUID()
         let now = Date()
         var storageRef: String? = nil
         var inlineData: Data? = nil
-
-        // Decide storage location based on size (v0.md 2.1)
-        switch content.payload {
-        case .none:
-            inlineData = nil
-        case .data(let data):
-            if content.sizeBytes >= Self.externalStorageThreshold {
-                let path = makeExternalPath(id: id, type: content.type)
-                try await Task.detached(priority: .utility) {
-                    try StorageService.writeAtomically(data, to: path)
-                }.value
-                storageRef = path
-            } else {
-                inlineData = data
-            }
-        case .file(let url):
-            if content.sizeBytes >= Self.externalStorageThreshold {
-                let path = makeExternalPath(id: id, type: content.type)
-                try await Task.detached(priority: .utility) {
-                    try StorageService.moveOrCopyFile(from: url, to: path)
-                }.value
-                storageRef = path
-            } else {
-                let data = try await Task.detached(priority: .utility) {
-                    try Data(contentsOf: url)
-                }.value
-                inlineData = data
-                try? FileManager.default.removeItem(at: url)
-            }
-        }
+        var externalReservation: ExternalFileReservationRegistry.Reservation?
+        var protectedExternalFilename: String?
 
         do {
+            // Decide storage location based on size (v0.md 2.1). An external path is reserved
+            // before publishing bytes and remains reserved through the DB insert, so orphan
+            // cleanup cannot validate it as unreferenced and remove it in between.
+            switch content.payload {
+            case .none:
+                inlineData = nil
+            case .data(let data):
+                if content.sizeBytes >= Self.externalStorageThreshold {
+                    let path = makeExternalPath(id: id, type: content.type)
+                    storageRef = path
+                    let reservationKey = Self.externalReservationKey(forPath: path)
+                    guard let reservation = await sharedExternalFileReservations.acquire(
+                        resourceKeys: [reservationKey]
+                    ) else {
+                        throw CancellationError()
+                    }
+                    guard !Task.isCancelled else {
+                        await sharedExternalFileReservations.release(reservation)
+                        throw CancellationError()
+                    }
+                    externalReservation = reservation
+                    let filename = URL(fileURLWithPath: path).lastPathComponent
+                    protectedExternalFilename = filename
+                    beginProtectingExternalFilename(filename)
+                    try await Task.detached(priority: .utility) {
+                        try StorageService.writeAtomically(data, to: path)
+                    }.value
+                } else {
+                    inlineData = data
+                }
+            case .file(let url):
+                if content.sizeBytes >= Self.externalStorageThreshold {
+                    let path = makeExternalPath(id: id, type: content.type)
+                    storageRef = path
+                    let reservationKey = Self.externalReservationKey(forPath: path)
+                    guard let reservation = await sharedExternalFileReservations.acquire(
+                        resourceKeys: [reservationKey]
+                    ) else {
+                        throw CancellationError()
+                    }
+                    guard !Task.isCancelled else {
+                        await sharedExternalFileReservations.release(reservation)
+                        throw CancellationError()
+                    }
+                    externalReservation = reservation
+                    let filename = URL(fileURLWithPath: path).lastPathComponent
+                    protectedExternalFilename = filename
+                    beginProtectingExternalFilename(filename)
+                    try await Task.detached(priority: .utility) {
+                        try StorageService.moveOrCopyFile(from: url, to: path)
+                    }.value
+                } else {
+                    let data = try await Task.detached(priority: .utility) {
+                        try Data(contentsOf: url)
+                    }.value
+                    inlineData = data
+                    try? FileManager.default.removeItem(at: url)
+                }
+            }
+
+            guard !Task.isCancelled else { throw CancellationError() }
             try await repository.insertItem(
                 id: id,
                 type: content.type,
@@ -306,7 +477,19 @@ public final class StorageService {
                 storageRef: storageRef,
                 rawData: inlineData
             )
+            if let protectedExternalFilename {
+                endProtectingExternalFilename(protectedExternalFilename)
+            }
+            if let externalReservation {
+                await sharedExternalFileReservations.release(externalReservation)
+            }
         } catch {
+            if let protectedExternalFilename {
+                endProtectingExternalFilename(protectedExternalFilename)
+            }
+            if let externalReservation {
+                await sharedExternalFileReservations.release(externalReservation)
+            }
             // Best-effort rollback: DB insert failed after writing external payload.
             if let storageRef {
                 try? FileManager.default.removeItem(atPath: storageRef)
@@ -359,55 +542,21 @@ public final class StorageService {
         try await repository.fetchRecentUnpinned(limit: limit, offset: offset)
     }
 
-    func updateItem(_ item: StoredItem) async throws {
-        try await repository.updateItemMetadata(
-            id: item.id,
-            lastUsedAt: item.lastUsedAt,
-            useCount: item.useCount,
-            isPinned: item.isPinned
-        )
+    func incrementUsage(id: UUID, at timestamp: Date) async throws -> StoredItem? {
+        try await repository.incrementUsageReturningCurrent(id: id, lastUsedAt: timestamp)
     }
 
     func updateNote(id: UUID, note: String?) async throws -> StoredItem? {
-        guard let existing = try await repository.fetchItemByID(id) else { return nil }
-        try await repository.updateItemNote(id: id, note: note)
-        return StoredItem(
-            id: existing.id,
-            type: existing.type,
-            contentHash: existing.contentHash,
-            plainText: existing.plainText,
-            note: note,
-            appBundleID: existing.appBundleID,
-            createdAt: existing.createdAt,
-            lastUsedAt: existing.lastUsedAt,
-            useCount: existing.useCount,
-            isPinned: existing.isPinned,
-            sizeBytes: existing.sizeBytes,
-            fileSizeBytes: existing.fileSizeBytes,
-            storageRef: existing.storageRef,
-            rawData: existing.rawData
-        )
+        try await repository.updateItemNoteReturningItem(id: id, note: note)
     }
 
-    func updateFileSizeBytes(id: UUID, fileSizeBytes: Int?) async throws -> StoredItem? {
-        guard let existing = try await repository.fetchItemByID(id) else { return nil }
-        guard existing.fileSizeBytes != fileSizeBytes else { return nil }
-        try await repository.updateItemFileSizeBytes(id: id, fileSizeBytes: fileSizeBytes)
-        return StoredItem(
-            id: existing.id,
-            type: existing.type,
-            contentHash: existing.contentHash,
-            plainText: existing.plainText,
-            note: existing.note,
-            appBundleID: existing.appBundleID,
-            createdAt: existing.createdAt,
-            lastUsedAt: existing.lastUsedAt,
-            useCount: existing.useCount,
-            isPinned: existing.isPinned,
-            sizeBytes: existing.sizeBytes,
-            fileSizeBytes: fileSizeBytes,
-            storageRef: existing.storageRef,
-            rawData: existing.rawData
+    func updateFileSizeBytes(
+        expected: StoredItem,
+        fileSizeBytes: Int?
+    ) async throws -> StoredItem? {
+        try await repository.updateItemFileSizeBytesReturningItem(
+            expected: expected,
+            fileSizeBytes: fileSizeBytes
         )
     }
 
@@ -425,6 +574,302 @@ public final class StorageService {
             storageRef: storageRef,
             rawData: rawData
         )
+    }
+
+    /// Commits an asynchronously transformed payload only while the persisted row still matches
+    /// the transform's input snapshot. Returns `nil` for deletion or same-ID replacement.
+    func compareAndSwapItemPayload(
+        expected: StoredItem,
+        contentHash: String,
+        sizeBytes: Int,
+        storageRef: String?,
+        rawData: Data?
+    ) async throws -> StoredItem? {
+        try await repository.compareAndSwapItemPayload(
+            expected: expected,
+            contentHash: contentHash,
+            sizeBytes: sizeBytes,
+            storageRef: storageRef,
+            rawData: rawData
+        )
+    }
+
+    /// Publishes a complete staged image through a unique managed path and then atomically swaps
+    /// the database row from the caller's input snapshot to that path.
+    ///
+    /// The old shared path is never modified or eagerly deleted. Before CAS the new file is only
+    /// an orphan; after CAS the row points to fully written immutable bytes. Full orphan cleanup
+    /// owns eventual reclamation of the old path.
+    func commitOptimizedExternalImagePayload(
+        expected: StoredItem,
+        stagedURL: URL,
+        contentHash: String,
+        sizeBytes: Int
+    ) async throws -> StoredItem? {
+        let finalURL = URL(fileURLWithPath: externalStoragePath, isDirectory: true)
+            .appendingPathComponent("\(UUID().uuidString).png")
+        let finalFilename = finalURL.lastPathComponent
+
+        let finalReservationKey = Self.externalReservationKey(forPath: finalURL.path)
+        guard let reservation = await sharedExternalFileReservations.acquire(
+            resourceKeys: [finalReservationKey]
+        ) else {
+            throw CancellationError()
+        }
+        guard !Task.isCancelled else {
+            await sharedExternalFileReservations.release(reservation)
+            throw CancellationError()
+        }
+        beginProtectingExternalFilename(finalFilename)
+        do {
+            try Self.replaceFileAtomically(from: stagedURL, to: finalURL)
+            let committedItem = try await repository.compareAndSwapItemPayload(
+                expected: expected,
+                contentHash: contentHash,
+                sizeBytes: sizeBytes,
+                storageRef: finalURL.path,
+                rawData: nil
+            )
+            endProtectingExternalFilename(finalFilename)
+            await sharedExternalFileReservations.release(reservation)
+
+            guard let committedItem else {
+                try? FileManager.default.removeItem(at: finalURL)
+                return nil
+            }
+
+            invalidateExternalSizeCache()
+            return committedItem
+        } catch {
+            endProtectingExternalFilename(finalFilename)
+            await sharedExternalFileReservations.release(reservation)
+            try? FileManager.default.removeItem(at: finalURL)
+            throw error
+        }
+    }
+
+    func withExternalImageSourceLease<Result: Sendable>(
+        sourceURL: URL,
+        operation: @Sendable (ExternalImageSourceLease) async -> Result
+    ) async -> Result? {
+        guard Self.validateStorageRef(
+            sourceURL.path,
+            externalStoragePath: externalStorageDirectoryPath
+        ) else {
+            return nil
+        }
+        let filename = sourceURL.lastPathComponent
+        let sourceReservationKey = Self.externalReservationKey(forPath: sourceURL.path)
+        guard let reservation = await sharedExternalFileReservations.acquire(
+            resourceKeys: [sourceReservationKey]
+        ) else {
+            return nil
+        }
+        guard !Task.isCancelled else {
+            await sharedExternalFileReservations.release(reservation)
+            return nil
+        }
+        let lease = ExternalImageSourceLease(
+            id: UUID(),
+            sourceReservationKey: sourceReservationKey
+        )
+        externalImageSourceLeaseReservations[lease.id] = reservation
+        beginProtectingExternalFilename(filename)
+
+        let result = await operation(lease)
+
+        externalImageSourceLeaseReservations.removeValue(forKey: lease.id)
+        endProtectingExternalFilename(filename)
+        await sharedExternalFileReservations.release(reservation)
+        return result
+    }
+
+    /// Reconciles an externally changed source while reserving both the source and the committed
+    /// optimized file against orphan deletion. Every failed post-CAS verification restores the
+    /// valid committed payload before another attempt or return.
+    func reconcileExternalImageSourceOwnership(
+        committedItem: StoredItem,
+        sourceURL: URL,
+        sourceLease: ExternalImageSourceLease,
+        verificationInterlock: (@Sendable (_ attempt: Int) async -> Void)? = nil
+    ) async -> ExternalSourceReconciliationResult {
+        guard Self.validateStorageRef(
+            sourceURL.path,
+            externalStoragePath: externalStorageDirectoryPath
+        ) else {
+            return .failedOrUnstable
+        }
+        guard let optimizedRef = committedItem.storageRef,
+              Self.validateStorageRef(
+                optimizedRef,
+                externalStoragePath: externalStorageDirectoryPath
+              ) else {
+            return .failedOrUnstable
+        }
+
+        guard sourceLease.sourceReservationKey == Self.externalReservationKey(forPath: sourceURL.path),
+              externalImageSourceLeaseReservations[sourceLease.id] != nil else {
+            return .failedOrUnstable
+        }
+        let protectedFilenames = [URL(fileURLWithPath: optimizedRef).lastPathComponent]
+        let optimizedReservationKey = Self.externalReservationKey(forPath: optimizedRef)
+        guard let reservation = await sharedExternalFileReservations.acquire(
+            resourceKeys: [optimizedReservationKey]
+        ) else {
+            return .failedOrUnstable
+        }
+        guard !Task.isCancelled else {
+            await sharedExternalFileReservations.release(reservation)
+            return .failedOrUnstable
+        }
+        for filename in protectedFilenames {
+            beginProtectingExternalFilename(filename)
+        }
+
+        let result = await performExternalSourceReconciliation(
+            committedItem: committedItem,
+            sourceURL: sourceURL,
+            verificationInterlock: verificationInterlock
+        )
+
+        for filename in protectedFilenames {
+            endProtectingExternalFilename(filename)
+        }
+        await sharedExternalFileReservations.release(reservation)
+        return result
+    }
+
+    private func performExternalSourceReconciliation(
+        committedItem: StoredItem,
+        sourceURL: URL,
+        verificationInterlock: (@Sendable (_ attempt: Int) async -> Void)?
+    ) async -> ExternalSourceReconciliationResult {
+        var expectedOptimized = committedItem
+        for attempt in 0..<3 {
+            let liveData: Data
+            do {
+                liveData = try await Task.detached(priority: .utility) {
+                    try Data(contentsOf: sourceURL, options: [.mappedIfSafe])
+                }.value
+            } catch {
+                var isDirectory: ObjCBool = false
+                let exists = FileManager.default.fileExists(
+                    atPath: sourceURL.path,
+                    isDirectory: &isDirectory
+                )
+                if exists {
+                    return .failedOrUnstable
+                }
+                // Only an initially absent source can prove that optimized bytes won without a
+                // competing external write. Once any source adoption occurred, later removal is
+                // part of an unstable race and must suppress optimized success proof.
+                return attempt == 0 ? .sourceUnavailable : .failedOrUnstable
+            }
+
+            let liveHash = ClipboardMonitor.computeHashStatic(liveData)
+            let reconciled: StoredItem
+            do {
+                guard let value = try await repository.compareAndSwapItemPayload(
+                    expected: expectedOptimized,
+                    contentHash: liveHash,
+                    sizeBytes: liveData.count,
+                    storageRef: sourceURL.path,
+                    rawData: nil
+                ) else {
+                    return .failedOrUnstable
+                }
+                reconciled = value
+            } catch {
+                return .failedOrUnstable
+            }
+
+            await verificationInterlock?(attempt)
+            let sourceIsStable: Bool
+            do {
+                let afterData = try await Task.detached(priority: .utility) {
+                    try Data(contentsOf: sourceURL, options: [.mappedIfSafe])
+                }.value
+                sourceIsStable = afterData.count == liveData.count &&
+                    ClipboardMonitor.computeHashStatic(afterData) == liveHash
+            } catch {
+                sourceIsStable = false
+            }
+
+            if sourceIsStable {
+                return .adopted
+            }
+
+            // The source changed or disappeared after its payload won the CAS. Restore the known
+            // valid optimized payload before retrying so the DB never exits pointing at an
+            // unverified source.
+            switch await restoreOptimizedPayloadAfterUnstableSource(
+                reconciled: reconciled,
+                committedItem: committedItem,
+                sourceURL: sourceURL
+            ) {
+            case .restored(let repaired):
+                expectedOptimized = repaired
+            case .independentlySuperseded, .failed:
+                return .failedOrUnstable
+            }
+        }
+        ScopyLog.storage.warning("External image source kept changing during optimization reconciliation")
+        return .failedOrUnstable
+    }
+
+    /// A size reconciliation can legitimately update `size_bytes` after source adoption but
+    /// before the stability check finishes. Retry the repair from that newer source-lineage row;
+    /// never leave a known-unstable source as the DB winner merely because the first CAS lost.
+    private func restoreOptimizedPayloadAfterUnstableSource(
+        reconciled: StoredItem,
+        committedItem: StoredItem,
+        sourceURL: URL
+    ) async -> OptimizedPayloadRepairResult {
+        var expected = reconciled
+        for _ in 0..<8 {
+            do {
+                if let repaired = try await repository.compareAndSwapItemPayload(
+                    expected: expected,
+                    contentHash: committedItem.contentHash,
+                    sizeBytes: committedItem.sizeBytes,
+                    storageRef: committedItem.storageRef,
+                    rawData: committedItem.rawData
+                ) {
+                    return .restored(repaired)
+                }
+
+                guard let current = try await repository.fetchItemByID(reconciled.id) else {
+                    return .independentlySuperseded
+                }
+                guard current.type == reconciled.type,
+                      current.plainText == reconciled.plainText,
+                      current.storageRef == sourceURL.path else {
+                    return .independentlySuperseded
+                }
+                expected = current
+            } catch {
+                return .failed
+            }
+        }
+        return .failed
+    }
+
+    private func beginProtectingExternalFilename(_ filename: String) {
+        protectedExternalFilenameRefCounts[filename, default: 0] += 1
+        externalPayloadCommitGeneration &+= 1
+    }
+
+    private func endProtectingExternalFilename(_ filename: String) {
+        guard let count = protectedExternalFilenameRefCounts[filename] else {
+            externalPayloadCommitGeneration &+= 1
+            return
+        }
+        if count <= 1 {
+            protectedExternalFilenameRefCounts.removeValue(forKey: filename)
+        } else {
+            protectedExternalFilenameRefCounts[filename] = count - 1
+        }
+        externalPayloadCommitGeneration &+= 1
     }
 
     public func deleteItem(_ id: UUID) async throws {
@@ -553,16 +998,27 @@ public final class StorageService {
                 }
 
                 guard fileSize != record.sizeBytes else { continue }
-                pending.append(SQLiteClipboardRepository.SizeBytesUpdate(id: record.id, sizeBytes: fileSize))
+                pending.append(
+                    SQLiteClipboardRepository.SizeBytesUpdate(
+                        id: record.id,
+                        expectedContentHash: record.contentHash,
+                        expectedSizeBytes: record.sizeBytes,
+                        expectedStorageRef: record.storageRef,
+                        sizeBytes: fileSize
+                    )
+                )
             }
 
             return pending
         }.value
 
         guard !updates.isEmpty else { return 0 }
-        try await repository.updateItemSizeBytesBatchInTransaction(updates: updates)
-        invalidateExternalSizeCache()
-        return updates.count
+        await externalSizeSyncInterlock?(.afterStatBeforeCommit)
+        let updatedCount = try await repository.updateItemSizeBytesBatchInTransaction(updates: updates)
+        if updatedCount > 0 {
+            invalidateExternalSizeCache()
+        }
+        return updatedCount
     }
 
     /// v0.10.8: 使用缓存避免重复遍历文件系统
@@ -818,26 +1274,45 @@ public final class StorageService {
             return
         }
 
-        // 1. Get all storage_ref filenames from database
-        let validRefs = try await repository.fetchExternalRefFilenames()
+        // 1. Get all storage_ref filenames from database. Include a unique final file while its
+        // payload CAS is awaiting the repository actor.
+        let cleanupGeneration = externalPayloadCommitGeneration
+        var validRefs = try await repository.fetchExternalRefFilenames()
+        validRefs.formUnion(protectedExternalFilenameRefCounts.keys)
 
         // 2. Enumerate all files in content directory off-main (may traverse many files)
         let contentPath = externalStoragePath
         let orphanedFiles = await Task.detached(priority: .utility) {
             Self.findOrphanedExternalFiles(validRefs: validRefs, externalStoragePath: contentPath)
         }.value
-        guard !orphanedFiles.isEmpty else { return }
+        let staleOptimizationStages = await Task.detached(priority: .utility) {
+            Self.staleImageOptimizationStageFiles(
+                externalStoragePath: contentPath,
+                now: Date(),
+                maximumAge: 24 * 60 * 60
+            )
+        }.value
+        await orphanCleanupInterlock?(.afterEnumerationBeforeOwnershipValidation)
+        // A commit that began after this cleanup snapshot may have published a new unique file.
+        // Abort this pass rather than deleting against stale ownership evidence.
+        guard cleanupGeneration == externalPayloadCommitGeneration else { return }
+        let filesToDelete = Array(Set(orphanedFiles + staleOptimizationStages))
+        guard !filesToDelete.isEmpty else { return }
 
         // 3. Delete orphaned files with bounded concurrency (avoid I/O storms).
-        let filesToDelete = orphanedFiles
         let remover = fileOps.removeFile
+        let reservations = sharedExternalFileReservations
+        let repository = repository
+        let removeInterlock = orphanCleanupInterlock
         await Task.detached(priority: .utility) {
-                await Self.deleteFilesBounded(
-                    filesToDelete,
-                    maxConcurrent: Self.fileDeletionConcurrency(for: filesToDelete.count),
-                    logContext: "orphanCleanup",
-                    removeFile: remover
-                )
+            await Self.deleteOrphanFilesBounded(
+                filesToDelete,
+                maxConcurrent: Self.fileDeletionConcurrency(for: filesToDelete.count),
+                repository: repository,
+                reservations: reservations,
+                beforeRemove: removeInterlock,
+                removeFile: remover
+            )
         }.value
 
         // 4. Invalidate cache after cleanup
@@ -893,6 +1368,37 @@ public final class StorageService {
             }
         }
         return orphanedFiles
+    }
+
+    /// Hidden optimization stages are deliberately invisible to ordinary orphan enumeration so a
+    /// live transform cannot be deleted. Reclaim only the narrow filename pattern after a 24-hour
+    /// crash-recovery horizon.
+    nonisolated static func staleImageOptimizationStageFiles(
+        externalStoragePath: String,
+        now: Date,
+        maximumAge: TimeInterval
+    ) -> [URL] {
+        let contentURL = URL(fileURLWithPath: externalStoragePath, isDirectory: true)
+        guard let files = try? FileManager.default.contentsOfDirectory(
+            at: contentURL,
+            includingPropertiesForKeys: [.contentModificationDateKey, .isRegularFileKey],
+            options: []
+        ) else { return [] }
+
+        let cutoff = now.addingTimeInterval(-max(1, maximumAge))
+        return files.filter { url in
+            let name = url.lastPathComponent
+            guard name.hasPrefix(".scopy-optimize-"), name.hasSuffix(".stage") else {
+                return false
+            }
+            guard let values = try? url.resourceValues(
+                forKeys: [.contentModificationDateKey, .isRegularFileKey]
+            ), values.isRegularFile == true,
+            let modifiedAt = values.contentModificationDate else {
+                return false
+            }
+            return modifiedAt <= cutoff
+        }
     }
 
     private func cleanupCountAndExternalIfNeeded(
@@ -1084,6 +1590,76 @@ public final class StorageService {
         }
     }
 
+    private nonisolated static func deleteOrphanFilesBounded(
+        _ fileURLs: [URL],
+        maxConcurrent: Int,
+        repository: SQLiteClipboardRepository,
+        reservations: ExternalFileReservationRegistry,
+        beforeRemove: (@Sendable (OrphanCleanupInterlockPoint) async -> Void)?,
+        removeFile: @escaping FileRemover
+    ) async {
+        guard !fileURLs.isEmpty else { return }
+        let uniqueURLs = Dictionary(
+            fileURLs.map { ($0.path, $0) },
+            uniquingKeysWith: { first, _ in first }
+        ).values.sorted { $0.path < $1.path }
+        let workerCount = min(max(1, maxConcurrent), uniqueURLs.count)
+        let chunkSize = max(1, (uniqueURLs.count + workerCount - 1) / workerCount)
+
+        await withTaskGroup(of: Void.self) { group in
+            for start in stride(from: 0, to: uniqueURLs.count, by: chunkSize) {
+                let end = min(start + chunkSize, uniqueURLs.count)
+                let chunk = Array(uniqueURLs[start..<end])
+                group.addTask {
+                    for fileURL in chunk {
+                        let reservationKey = externalReservationKey(forPath: fileURL.path)
+                        guard let reservation = await reservations.acquire(
+                            resourceKeys: [reservationKey]
+                        ) else {
+                            continue
+                        }
+                        guard !Task.isCancelled else {
+                            await reservations.release(reservation)
+                            continue
+                        }
+
+                        let wasReferenced = (try? await repository.isStorageRefReferenced(fileURL.path)) ?? true
+                        if !wasReferenced {
+                            await beforeRemove?(
+                                .afterOwnershipValidationBeforeRemove(path: fileURL.path)
+                            )
+                            let isNowReferenced = (try? await repository.isStorageRefReferenced(fileURL.path)) ?? true
+                            if !isNowReferenced {
+                                await beforeRemove?(
+                                    .afterFinalOwnershipValidationBeforeRemove(path: fileURL.path)
+                                )
+                                do {
+                                    try removeFile(fileURL)
+                                } catch let error as NSError {
+                                    if !(error.domain == NSCocoaErrorDomain &&
+                                        error.code == NSFileNoSuchFileError) {
+                                        ScopyLog.storage.warning(
+                                            "[orphanCleanup] Failed to delete file '\(fileURL.path, privacy: .private)': \(error.localizedDescription, privacy: .private)"
+                                        )
+                                    }
+                                } catch {
+                                    ScopyLog.storage.warning(
+                                        "[orphanCleanup] Failed to delete file '\(fileURL.path, privacy: .private)': \(error.localizedDescription, privacy: .private)"
+                                    )
+                                }
+                            }
+                        }
+                        await reservations.release(reservation)
+                    }
+                }
+            }
+        }
+    }
+
+    private nonisolated static func externalReservationKey(forPath path: String) -> String {
+        URL(fileURLWithPath: path).resolvingSymlinksInPath().standardizedFileURL.path
+    }
+
     nonisolated static func fileDeletionConcurrency(for fileCount: Int) -> Int {
         let base = max(1, maxConcurrentFileDeletions)
         guard fileCount > 0 else { return base }
@@ -1146,6 +1722,24 @@ public final class StorageService {
 
         // 原子重命名
         try FileManager.default.moveItem(at: tempURL, to: finalURL)
+    }
+
+    /// Atomically moves a fully prepared file to its unique managed destination on the same
+    /// filesystem.
+    nonisolated static func replaceFileAtomically(
+        from stagedURL: URL,
+        to destinationURL: URL
+    ) throws {
+        guard Darwin.rename(stagedURL.path, destinationURL.path) == 0 else {
+            throw NSError(
+                domain: NSPOSIXErrorDomain,
+                code: Int(errno),
+                userInfo: [
+                    NSFilePathErrorKey: destinationURL.path,
+                    NSDebugDescriptionErrorKey: "Failed to atomically publish staged payload"
+                ]
+            )
+        }
     }
 
     nonisolated static func moveOrCopyFile(from sourceURL: URL, to destinationPath: String) throws {

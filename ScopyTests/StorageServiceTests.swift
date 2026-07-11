@@ -1,12 +1,87 @@
 import XCTest
 @testable import ScopyKit
 
+private actor StorageMetadataUpdateGate {
+    private var isPaused = false
+    private var arrivalWaiters: [CheckedContinuation<Void, Never>] = []
+    private var releaseWaiter: CheckedContinuation<Void, Never>?
+
+    func pause() async {
+        isPaused = true
+        let waiters = arrivalWaiters
+        arrivalWaiters.removeAll()
+        for waiter in waiters {
+            waiter.resume()
+        }
+        await withCheckedContinuation { continuation in
+            releaseWaiter = continuation
+        }
+    }
+
+    func waitUntilPaused() async {
+        if isPaused { return }
+        await withCheckedContinuation { continuation in
+            arrivalWaiters.append(continuation)
+        }
+    }
+
+    func release() {
+        releaseWaiter?.resume()
+        releaseWaiter = nil
+    }
+}
+
+private actor FirstMetadataDTOGate {
+    private var didPause = false
+    private var arrivalWaiters: [CheckedContinuation<Void, Never>] = []
+    private var releaseWaiter: CheckedContinuation<Void, Never>?
+
+    func pauseFirst() async {
+        guard !didPause else { return }
+        didPause = true
+        let waiters = arrivalWaiters
+        arrivalWaiters.removeAll()
+        waiters.forEach { $0.resume() }
+        await withCheckedContinuation { continuation in
+            releaseWaiter = continuation
+        }
+    }
+
+    func waitUntilPaused() async {
+        if didPause { return }
+        await withCheckedContinuation { continuation in
+            arrivalWaiters.append(continuation)
+        }
+    }
+
+    func release() {
+        releaseWaiter?.resume()
+        releaseWaiter = nil
+    }
+}
+
+private actor StorageIntBox {
+    private var value = 0
+
+    func set(_ newValue: Int) {
+        value = newValue
+    }
+
+    func get() -> Int {
+        value
+    }
+}
+
 /// StorageService 单元测试
 /// 验证 v0.md 第2、3节的存储和去重要求
 @MainActor
 final class StorageServiceTests: XCTestCase {
 
     var storage: StorageService!
+    private var raceStorages: [StorageService] = []
+    private var raceStorageDirectories: [URL] = []
+    private var clipboardServices: [ClipboardService] = []
+    private var settingsSuiteNames: [String] = []
 
     private final class RemoveFileProbe: @unchecked Sendable {
         private let lock = NSLock()
@@ -32,8 +107,24 @@ final class StorageServiceTests: XCTestCase {
     }
 
     override func tearDown() async throws {
+        for service in clipboardServices.reversed() {
+            await service.stop()
+        }
+        clipboardServices.removeAll()
+        for raceStorage in raceStorages.reversed() {
+            await raceStorage.close()
+        }
+        raceStorages.removeAll()
         await storage.close()
         storage = nil
+        for directory in raceStorageDirectories {
+            try? FileManager.default.removeItem(at: directory)
+        }
+        raceStorageDirectories.removeAll()
+        for suiteName in settingsSuiteNames {
+            UserDefaults.standard.removePersistentDomain(forName: suiteName)
+        }
+        settingsSuiteNames.removeAll()
     }
 
     // MARK: - Basic CRUD Tests
@@ -86,6 +177,144 @@ final class StorageServiceTests: XCTestCase {
         // Verify deleted
         let missing = try await storage.findByID(item.id)
         XCTAssertNil(missing)
+    }
+
+    func testAtomicNoteUpdateReturnsPayloadReplacementThatWonBeforeTransaction() async throws {
+        let (primary, competing) = try await makeCompetingDiskStorages(prefix: "note-payload-race")
+        let item = try await primary.upsertItem(makeTestContent(text: "note race"))
+        let gate = StorageMetadataUpdateGate()
+        await primary.repository.setMetadataUpdateInterlockForTesting { kind, id in
+            guard case .note = kind, id == item.id else { return }
+            await gate.pause()
+        }
+
+        let noteUpdate = Task {
+            try await primary.updateNote(id: item.id, note: "latest note")
+        }
+        await gate.waitUntilPaused()
+
+        let replacementData = Data("replacement payload".utf8)
+        let replacementHash = "replacement-\(UUID().uuidString)"
+        do {
+            try await competing.updateItemPayload(
+                id: item.id,
+                contentHash: replacementHash,
+                sizeBytes: replacementData.count,
+                storageRef: nil,
+                rawData: replacementData
+            )
+        } catch {
+            await gate.release()
+            throw error
+        }
+        await gate.release()
+
+        let noteUpdateResult = try await noteUpdate.value
+        let updated = try XCTUnwrap(noteUpdateResult)
+        XCTAssertEqual(updated.note, "latest note")
+        XCTAssertEqual(updated.contentHash, replacementHash)
+        XCTAssertEqual(updated.sizeBytes, replacementData.count)
+        XCTAssertEqual(updated.rawData, replacementData)
+
+        let persistedResult = try await primary.findByID(item.id)
+        let persisted = try XCTUnwrap(persistedResult)
+        XCTAssertEqual(persisted.note, "latest note")
+        XCTAssertEqual(persisted.contentHash, replacementHash)
+        XCTAssertEqual(persisted.rawData, replacementData)
+    }
+
+    func testAtomicNoteUpdateReturnsNilWhenDeleteWinsBeforeTransaction() async throws {
+        let (primary, competing) = try await makeCompetingDiskStorages(prefix: "note-delete-race")
+        let item = try await primary.upsertItem(makeTestContent(text: "note delete race"))
+        let gate = StorageMetadataUpdateGate()
+        await primary.repository.setMetadataUpdateInterlockForTesting { kind, id in
+            guard case .note = kind, id == item.id else { return }
+            await gate.pause()
+        }
+
+        let noteUpdate = Task {
+            try await primary.updateNote(id: item.id, note: "must not become a ghost")
+        }
+        await gate.waitUntilPaused()
+        do {
+            try await competing.deleteItem(item.id)
+        } catch {
+            await gate.release()
+            throw error
+        }
+        await gate.release()
+
+        let noteUpdateResult = try await noteUpdate.value
+        let persisted = try await primary.findByID(item.id)
+        XCTAssertNil(noteUpdateResult)
+        XCTAssertNil(persisted)
+    }
+
+    func testAtomicFileSizeUpdateRejectsPayloadReplacementThatWonBeforeTransaction() async throws {
+        let (primary, competing) = try await makeCompetingDiskStorages(prefix: "file-size-payload-race")
+        let item = try await primary.upsertItem(makeTestContent(text: "file size race", type: .file))
+        let gate = StorageMetadataUpdateGate()
+        await primary.repository.setMetadataUpdateInterlockForTesting { kind, id in
+            guard case .fileSizeBytes = kind, id == item.id else { return }
+            await gate.pause()
+        }
+
+        let fileSizeUpdate = Task {
+            try await primary.updateFileSizeBytes(expected: item, fileSizeBytes: 4_096)
+        }
+        await gate.waitUntilPaused()
+
+        let replacementData = Data("new file payload".utf8)
+        let replacementHash = "replacement-\(UUID().uuidString)"
+        do {
+            try await competing.updateItemPayload(
+                id: item.id,
+                contentHash: replacementHash,
+                sizeBytes: replacementData.count,
+                storageRef: nil,
+                rawData: replacementData
+            )
+        } catch {
+            await gate.release()
+            throw error
+        }
+        await gate.release()
+
+        let fileSizeUpdateResult = try await fileSizeUpdate.value
+        XCTAssertNil(fileSizeUpdateResult)
+
+        let persistedResult = try await primary.findByID(item.id)
+        let persisted = try XCTUnwrap(persistedResult)
+        XCTAssertNil(persisted.fileSizeBytes)
+        XCTAssertEqual(persisted.contentHash, replacementHash)
+        XCTAssertEqual(persisted.rawData, replacementData)
+    }
+
+    func testAtomicFileSizeUpdateReturnsNilWhenDeleteWinsBeforeTransaction() async throws {
+        let (primary, competing) = try await makeCompetingDiskStorages(prefix: "file-size-delete-race")
+        let item = try await primary.upsertItem(makeTestContent(text: "file size delete race", type: .file))
+        let gate = StorageMetadataUpdateGate()
+        await primary.repository.setMetadataUpdateInterlockForTesting { kind, id in
+            guard case .fileSizeBytes = kind, id == item.id else { return }
+            await gate.pause()
+        }
+
+        let fileSizeUpdate = Task {
+            try await primary.updateFileSizeBytes(expected: item, fileSizeBytes: 8_192)
+        }
+        await gate.waitUntilPaused()
+        do {
+            try await competing.deleteItem(item.id)
+        } catch {
+            await gate.release()
+            throw error
+        }
+        await gate.release()
+
+        let fileSizeUpdateResult = try await fileSizeUpdate.value
+        let persisted = try await primary.findByID(item.id)
+        XCTAssertNil(fileSizeUpdateResult)
+        XCTAssertNil(persisted)
     }
 
     func testDeleteAllExceptPinned() async throws {
@@ -165,6 +394,35 @@ final class StorageServiceTests: XCTestCase {
         // Total count should be 1
         let count = try await storage.getItemCount()
         XCTAssertEqual(count, 1)
+    }
+
+    func testConcurrentUsageIncrementsAccumulateAndPreserveCurrentMetadata() async throws {
+        let (primary, competing) = try await makeCompetingDiskStorages(
+            prefix: "usage-increment-race"
+        )
+        let item = try await primary.upsertItem(makeTestContent(text: "usage race"))
+        try await primary.setPin(item.id, pinned: true)
+        let newerTimestamp = Date().addingTimeInterval(10)
+
+        let olderIncrement = Task {
+            try await primary.incrementUsage(id: item.id, at: Date(timeIntervalSince1970: 1))
+        }
+        let newerIncrement = Task {
+            try await competing.incrementUsage(id: item.id, at: newerTimestamp)
+        }
+        _ = try await olderIncrement.value
+        _ = try await newerIncrement.value
+
+        let persistedResult = try await primary.findByID(item.id)
+        let persisted = try XCTUnwrap(persistedResult)
+        XCTAssertEqual(persisted.useCount, item.useCount + 2)
+        XCTAssertTrue(persisted.isPinned)
+        XCTAssertEqual(
+            persisted.lastUsedAt.timeIntervalSince1970,
+            newerTimestamp.timeIntervalSince1970,
+            accuracy: 0.000_001
+        )
+        XCTAssertEqual(persisted.contentHash, item.contentHash)
     }
 
     func testDeduplicationWithNormalization() async throws {
@@ -254,6 +512,44 @@ final class StorageServiceTests: XCTestCase {
     }
 
     // MARK: - Cleanup Tests (v0.md 2.3)
+
+    func testOptimizationStageCleanupPreservesRecentAndReclaimsOnlyStaleStages() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("scopy-stage-cleanup-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let now = Date(timeIntervalSince1970: 2_000_000)
+        let recentStage = directory.appendingPathComponent(".scopy-optimize-recent.stage")
+        let staleStage = directory.appendingPathComponent(".scopy-optimize-stale.stage")
+        let unrelatedHiddenFile = directory.appendingPathComponent(".unrelated.stage")
+        try Data([1]).write(to: recentStage)
+        try Data([2]).write(to: staleStage)
+        try Data([3]).write(to: unrelatedHiddenFile)
+        try FileManager.default.setAttributes(
+            [.modificationDate: now.addingTimeInterval(-60)],
+            ofItemAtPath: recentStage.path
+        )
+        try FileManager.default.setAttributes(
+            [.modificationDate: now.addingTimeInterval(-(25 * 60 * 60))],
+            ofItemAtPath: staleStage.path
+        )
+        try FileManager.default.setAttributes(
+            [.modificationDate: now.addingTimeInterval(-(25 * 60 * 60))],
+            ofItemAtPath: unrelatedHiddenFile.path
+        )
+
+        let stale = StorageService.staleImageOptimizationStageFiles(
+            externalStoragePath: directory.path,
+            now: now,
+            maximumAge: 24 * 60 * 60
+        )
+
+        let resolvedStale = Set(stale.map { $0.resolvingSymlinksInPath() })
+        XCTAssertEqual(resolvedStale, [staleStage.resolvingSymlinksInPath()])
+        XCTAssertFalse(resolvedStale.contains(recentStage.resolvingSymlinksInPath()))
+        XCTAssertFalse(resolvedStale.contains(unrelatedHiddenFile.resolvingSymlinksInPath()))
+    }
 
     func testCleanupByCount() async throws {
         storage.cleanupSettings.maxItems = 5
@@ -714,6 +1010,203 @@ final class StorageServiceTests: XCTestCase {
         XCTAssertEqual(refreshed?.sizeBytes, smallerData.count)
     }
 
+    func testSyncExternalImageSizeRejectsStaleStatAfterPayloadCAS() async throws {
+        let (primary, competing) = try await makeCompetingDiskStorages(prefix: "size-sync-cas-race")
+        let item = try await primary.upsertItem(makeLargeTestContent())
+        let oldURL = URL(fileURLWithPath: try XCTUnwrap(item.storageRef))
+        let staleStatData = Data(repeating: 0x31, count: 1_111)
+        try staleStatData.write(to: oldURL, options: .atomic)
+
+        let gate = StorageMetadataUpdateGate()
+        primary.setExternalSizeSyncInterlockForTesting { point in
+            guard case .afterStatBeforeCommit = point else { return }
+            await gate.pause()
+        }
+        let sync = Task { try await primary.syncExternalImageSizeBytesFromDisk() }
+        await gate.waitUntilPaused()
+
+        let optimizedData = Data(repeating: 0x52, count: 777)
+        let stagedURL = oldURL.deletingLastPathComponent()
+            .appendingPathComponent(".scopy-size-sync-test.stage")
+        try optimizedData.write(to: stagedURL, options: .atomic)
+        let optimizedHash = "optimized-\(UUID().uuidString)"
+        let committed: StorageService.StoredItem?
+        do {
+            committed = try await competing.commitOptimizedExternalImagePayload(
+                expected: item,
+                stagedURL: stagedURL,
+                contentHash: optimizedHash,
+                sizeBytes: optimizedData.count
+            )
+        } catch {
+            await gate.release()
+            throw error
+        }
+        await gate.release()
+
+        XCTAssertNotNil(committed)
+        let updatedCount = try await sync.value
+        XCTAssertEqual(updatedCount, 0)
+        let persistedResult = try await primary.findByID(item.id)
+        let persisted = try XCTUnwrap(persistedResult)
+        XCTAssertEqual(persisted.contentHash, optimizedHash)
+        XCTAssertEqual(persisted.sizeBytes, optimizedData.count)
+        XCTAssertEqual(persisted.storageRef, committed?.storageRef)
+        XCTAssertNotEqual(persisted.storageRef, oldURL.path)
+    }
+
+    func testOrphanCleanupAbortsWhenOldSourceIsRestoredAfterSnapshot() async throws {
+        let (diskStorage, baseURL) = try await makeTemporaryStorage(
+            prefix: "cleanup-restore-race",
+            fileOps: .live
+        )
+        raceStorages.append(diskStorage)
+        raceStorageDirectories.append(baseURL)
+        let item = try await diskStorage.upsertItem(makeLargeTestContent())
+        let oldURL = URL(fileURLWithPath: try XCTUnwrap(item.storageRef))
+        let oldData = try Data(contentsOf: oldURL)
+
+        let stagedURL = oldURL.deletingLastPathComponent()
+            .appendingPathComponent(".scopy-cleanup-restore-test.stage")
+        let optimizedData = Data(repeating: 0x63, count: 512)
+        try optimizedData.write(to: stagedURL, options: .atomic)
+        let optimizedResult = try await diskStorage.commitOptimizedExternalImagePayload(
+            expected: item,
+            stagedURL: stagedURL,
+            contentHash: "cleanup-optimized-\(UUID().uuidString)",
+            sizeBytes: optimizedData.count
+        )
+        let optimized = try XCTUnwrap(optimizedResult)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: oldURL.path))
+
+        let gate = StorageMetadataUpdateGate()
+        diskStorage.setOrphanCleanupInterlockForTesting { point in
+            guard case .afterEnumerationBeforeOwnershipValidation = point else { return }
+            await gate.pause()
+        }
+        let cleanup = Task { try await diskStorage.cleanupOrphanedFiles() }
+        await gate.waitUntilPaused()
+
+        let restored: StorageService.ExternalSourceReconciliationResult? = await diskStorage.withExternalImageSourceLease(sourceURL: oldURL) { lease in
+            await diskStorage.reconcileExternalImageSourceOwnership(
+                committedItem: optimized,
+                sourceURL: oldURL,
+                sourceLease: lease
+            )
+        }
+        await gate.release()
+        try await cleanup.value
+
+        XCTAssertEqual(restored, StorageService.ExternalSourceReconciliationResult.adopted)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: oldURL.path))
+        XCTAssertEqual(try Data(contentsOf: oldURL), oldData)
+        let persistedResult = try await diskStorage.findByID(item.id)
+        let persisted = try XCTUnwrap(persistedResult)
+        XCTAssertEqual(persisted.storageRef, oldURL.path)
+    }
+
+    func testOrphanCleanupReservationSerializesReconcileAfterDeleteGuard() async throws {
+        let (diskStorage, competingStorage) = try await makeCompetingDiskStorages(
+            prefix: "cleanup-remove-reservation"
+        )
+        let item = try await diskStorage.upsertItem(makeLargeTestContent())
+        let oldURL = URL(fileURLWithPath: try XCTUnwrap(item.storageRef))
+        let oldReservationKey = oldURL.resolvingSymlinksInPath().standardizedFileURL.path
+        let stagedURL = oldURL.deletingLastPathComponent()
+            .appendingPathComponent(".scopy-cleanup-reservation.stage")
+        let optimizedData = Data(repeating: 0x71, count: 640)
+        try optimizedData.write(to: stagedURL, options: .atomic)
+        let optimizedResult = try await diskStorage.commitOptimizedExternalImagePayload(
+            expected: item,
+            stagedURL: stagedURL,
+            contentHash: "reservation-optimized-\(UUID().uuidString)",
+            sizeBytes: optimizedData.count
+        )
+        let optimized = try XCTUnwrap(optimizedResult)
+
+        let gate = StorageMetadataUpdateGate()
+        diskStorage.setOrphanCleanupInterlockForTesting { point in
+            guard case .afterOwnershipValidationBeforeRemove(let path) = point,
+                  URL(fileURLWithPath: path).resolvingSymlinksInPath().standardizedFileURL.path == oldReservationKey else { return }
+            await gate.pause()
+        }
+        let cleanup = Task { try await diskStorage.cleanupOrphanedFiles() }
+        await gate.waitUntilPaused()
+
+        let reconcile = Task {
+            await competingStorage.withExternalImageSourceLease(sourceURL: oldURL) { lease in
+                await competingStorage.reconcileExternalImageSourceOwnership(
+                    committedItem: optimized,
+                    sourceURL: oldURL,
+                    sourceLease: lease
+                )
+            }
+        }
+        await Task.yield()
+        await gate.release()
+        try await cleanup.value
+        let reconciliation: StorageService.ExternalSourceReconciliationResult? = await reconcile.value
+
+        XCTAssertEqual(
+            reconciliation,
+            StorageService.ExternalSourceReconciliationResult.sourceUnavailable
+        )
+        XCTAssertFalse(FileManager.default.fileExists(atPath: oldURL.path))
+        let persistedResult = try await diskStorage.findByID(item.id)
+        let persisted = try XCTUnwrap(persistedResult)
+        XCTAssertEqual(persisted.storageRef, optimized.storageRef)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: try XCTUnwrap(persisted.storageRef)))
+    }
+
+    func testReconciliationRepairsAfterConcurrentExternalSizeUpdateThenAdoptsStableSource() async throws {
+        let (primary, competing) = try await makeCompetingDiskStorages(
+            prefix: "reconcile-size-update-race"
+        )
+        let item = try await primary.upsertItem(makeLargeTestContent())
+        let sourceURL = URL(fileURLWithPath: try XCTUnwrap(item.storageRef))
+
+        let stagedURL = sourceURL.deletingLastPathComponent()
+            .appendingPathComponent(".scopy-reconcile-size-race.stage")
+        let optimizedData = Data(repeating: 0x41, count: 1_024)
+        try optimizedData.write(to: stagedURL, options: .atomic)
+        let committedResult = try await primary.commitOptimizedExternalImagePayload(
+            expected: item,
+            stagedURL: stagedURL,
+            contentHash: "optimized-\(UUID().uuidString)",
+            sizeBytes: optimizedData.count
+        )
+        let committed = try XCTUnwrap(committedResult)
+
+        let firstLiveData = Data(repeating: 0x52, count: item.sizeBytes - 257)
+        let stableLiveData = Data(repeating: 0x63, count: firstLiveData.count - 257)
+        try firstLiveData.write(to: sourceURL, options: .atomic)
+        let sizeSyncCount = StorageIntBox()
+        let reconciliation = await primary.withExternalImageSourceLease(sourceURL: sourceURL) { lease in
+            await primary.reconcileExternalImageSourceOwnership(
+                committedItem: committed,
+                sourceURL: sourceURL,
+                sourceLease: lease,
+                verificationInterlock: { attempt in
+                    guard attempt == 0 else { return }
+                    try? stableLiveData.write(to: sourceURL, options: .atomic)
+                    await sizeSyncCount.set(
+                        (try? await competing.syncExternalImageSizeBytesFromDisk()) ?? -1
+                    )
+                }
+            )
+        }
+
+        let observedSizeSyncCount = await sizeSyncCount.get()
+        XCTAssertEqual(observedSizeSyncCount, 1)
+        XCTAssertEqual(reconciliation, .adopted)
+        let persistedResult = try await primary.findByID(item.id)
+        let persisted = try XCTUnwrap(persistedResult)
+        XCTAssertEqual(persisted.storageRef, sourceURL.path)
+        XCTAssertEqual(persisted.contentHash, ClipboardMonitor.computeHashStatic(stableLiveData))
+        XCTAssertEqual(persisted.sizeBytes, stableLiveData.count)
+        XCTAssertEqual(try Data(contentsOf: sourceURL), stableLiveData)
+    }
+
     // MARK: - Helpers
 
     private func makeTestContent(text: String, type: ClipboardItemType = .text) -> ClipboardMonitor.ClipboardContent {
@@ -761,6 +1254,28 @@ final class StorageServiceTests: XCTestCase {
             .appendingPathComponent("\(prefix)-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: baseURL, withIntermediateDirectories: true)
         return baseURL
+    }
+
+    private func makeCompetingDiskStorages(
+        prefix: String
+    ) async throws -> (primary: StorageService, competing: StorageService) {
+        let directory = try makeTemporaryDirectory(prefix: prefix)
+        let databasePath = directory.appendingPathComponent("clipboard.db").path
+        let primary = StorageService(databasePath: databasePath)
+        let competing = StorageService(databasePath: databasePath)
+        do {
+            try await primary.open()
+            try await competing.open()
+        } catch {
+            await competing.close()
+            await primary.close()
+            try? FileManager.default.removeItem(at: directory)
+            throw error
+        }
+        raceStorages.append(primary)
+        raceStorages.append(competing)
+        raceStorageDirectories.append(directory)
+        return (primary, competing)
     }
 
     private func makeRecordingFileOps(_ probe: RemoveFileProbe) -> StorageService.StorageFileOps {

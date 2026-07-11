@@ -42,17 +42,32 @@ actor SQLiteClipboardRepository {
 
     struct ExternalStorageSizeRecord: Sendable {
         let id: UUID
+        let contentHash: String
         let sizeBytes: Int
         let storageRef: String
     }
 
     struct SizeBytesUpdate: Sendable {
         let id: UUID
+        let expectedContentHash: String
+        let expectedSizeBytes: Int
+        let expectedStorageRef: String
         let sizeBytes: Int
+    }
+
+    enum MetadataUpdateKind: Sendable {
+        case note
+        case fileSizeBytes
+    }
+
+    private enum MetadataUpdate {
+        case note(String?)
+        case fileSizeBytes(expected: ClipboardStoredItem, value: Int?)
     }
 
     private let dbPath: String
     private var connection: SQLiteConnection?
+    private var metadataUpdateInterlock: (@Sendable (MetadataUpdateKind, UUID) async -> Void)?
 
     private(set) var isDatabaseCorrupted: Bool = false
 
@@ -92,6 +107,12 @@ actor SQLiteClipboardRepository {
 
     func walCheckpointPassive() {
         connection?.walCheckpointPassive()
+    }
+
+    func setMetadataUpdateInterlockForTesting(
+        _ interlock: (@Sendable (MetadataUpdateKind, UUID) async -> Void)?
+    ) {
+        metadataUpdateInterlock = interlock
     }
 
     func fetchItemByHash(_ hash: String) throws -> ClipboardStoredItem? {
@@ -167,35 +188,28 @@ actor SQLiteClipboardRepository {
         }
     }
 
-    func updateUsage(id: UUID, lastUsedAt: Date, useCount: Int) throws {
-        try performWriteTransaction {
-            let sql = """
-                UPDATE clipboard_items
-                SET last_used_at = ?, use_count = ?
-                WHERE id = ?
-            """
-            let stmt = try prepare(sql)
-            try stmt.bindDouble(lastUsedAt.timeIntervalSince1970, at: 1)
-            try stmt.bindInt(useCount, at: 2)
-            try stmt.bindText(id.uuidString, at: 3)
-            _ = try stmt.step()
-        }
-    }
+    /// Atomically records one use and returns the complete row that won the transaction. Using an
+    /// increment in SQL prevents concurrent callers from overwriting each other's counts, while
+    /// `MAX` prevents an older suspended command from moving `last_used_at` backwards.
+    func incrementUsageReturningCurrent(id: UUID, lastUsedAt: Date) throws -> ClipboardStoredItem? {
+        var updatedItem: ClipboardStoredItem?
+        _ = try performConditionalWriteTransaction {
+            guard try fetchItemByID(id) != nil else { return false }
 
-    func updateItemMetadata(id: UUID, lastUsedAt: Date, useCount: Int, isPinned: Bool) throws {
-        try performWriteTransaction {
-            let sql = """
+            let stmt = try prepare(
+                """
                 UPDATE clipboard_items
-                SET last_used_at = ?, use_count = ?, is_pinned = ?
+                SET last_used_at = MAX(last_used_at, ?), use_count = use_count + 1
                 WHERE id = ?
-            """
-            let stmt = try prepare(sql)
+                """
+            )
             try stmt.bindDouble(lastUsedAt.timeIntervalSince1970, at: 1)
-            try stmt.bindInt(useCount, at: 2)
-            try stmt.bindInt(isPinned ? 1 : 0, at: 3)
-            try stmt.bindText(id.uuidString, at: 4)
+            try stmt.bindText(id.uuidString, at: 2)
             _ = try stmt.step()
+            updatedItem = try fetchItemByID(id)
+            return updatedItem != nil
         }
+        return updatedItem
     }
 
     func updatePin(id: UUID, pinned: Bool) throws {
@@ -231,28 +245,74 @@ actor SQLiteClipboardRepository {
         }
     }
 
-    func updateItemNote(id: UUID, note: String?) throws {
-        try performWriteTransaction {
-            let sql = "UPDATE clipboard_items SET note = ? WHERE id = ?"
+    /// Replaces only the payload columns when the row still owns the exact payload snapshot that
+    /// the caller read before doing asynchronous work. Metadata-only changes (pin, note, usage)
+    /// intentionally do not invalidate payload ownership.
+    ///
+    /// The read/compare/write sequence runs inside one `BEGIN IMMEDIATE` transaction, so another
+    /// repository writer cannot replace the same row between validation and mutation. This is a
+    /// schema-free optimistic-concurrency boundary for image optimization and similar transforms.
+    func compareAndSwapItemPayload(
+        expected: ClipboardStoredItem,
+        contentHash: String,
+        sizeBytes: Int,
+        storageRef: String?,
+        rawData: Data?
+    ) throws -> ClipboardStoredItem? {
+        var committedItem: ClipboardStoredItem?
+        _ = try performConditionalWriteTransaction {
+            guard let current = try fetchItemByID(expected.id),
+                  Self.hasSamePayload(current, as: expected) else {
+                return false
+            }
+
+            let sql = """
+                UPDATE clipboard_items
+                SET content_hash = ?, size_bytes = ?, storage_ref = ?, raw_data = ?
+                WHERE id = ?
+            """
             let stmt = try prepare(sql)
-            try stmt.bindText(note, at: 1)
-            try stmt.bindText(id.uuidString, at: 2)
+            try stmt.bindText(contentHash, at: 1)
+            try stmt.bindInt(sizeBytes, at: 2)
+            try stmt.bindText(storageRef, at: 3)
+            try stmt.bindBlob(rawData, at: 4)
+            try stmt.bindText(expected.id.uuidString, at: 5)
             _ = try stmt.step()
+            committedItem = ClipboardStoredItem(
+                id: current.id,
+                type: current.type,
+                contentHash: contentHash,
+                plainText: current.plainText,
+                note: current.note,
+                appBundleID: current.appBundleID,
+                createdAt: current.createdAt,
+                lastUsedAt: current.lastUsedAt,
+                useCount: current.useCount,
+                isPinned: current.isPinned,
+                sizeBytes: sizeBytes,
+                fileSizeBytes: current.fileSizeBytes,
+                storageRef: storageRef,
+                rawData: rawData
+            )
+            return true
         }
+        return committedItem
     }
 
-    func updateItemFileSizeBytes(id: UUID, fileSizeBytes: Int?) throws {
-        try performWriteTransaction {
-            let sql = "UPDATE clipboard_items SET file_size_bytes = ? WHERE id = ?"
-            let stmt = try prepare(sql)
-            if let fileSizeBytes {
-                try stmt.bindInt(fileSizeBytes, at: 1)
-            } else {
-                try stmt.bindNull(1)
-            }
-            try stmt.bindText(id.uuidString, at: 2)
-            _ = try stmt.step()
-        }
+    func updateItemNoteReturningItem(id: UUID, note: String?) async throws -> ClipboardStoredItem? {
+        await metadataUpdateInterlock?(.note, id)
+        return try updateMetadataAndReturnCurrent(id: id, update: .note(note))
+    }
+
+    func updateItemFileSizeBytesReturningItem(
+        expected: ClipboardStoredItem,
+        fileSizeBytes: Int?
+    ) async throws -> ClipboardStoredItem? {
+        await metadataUpdateInterlock?(.fileSizeBytes, expected.id)
+        return try updateMetadataAndReturnCurrent(
+            id: expected.id,
+            update: .fileSizeBytes(expected: expected, value: fileSizeBytes)
+        )
     }
 
     func deleteItem(id: UUID) throws {
@@ -326,7 +386,7 @@ actor SQLiteClipboardRepository {
 
     func fetchExternalStorageSizeRecords(typeFilter: ClipboardItemType?) throws -> [ExternalStorageSizeRecord] {
         var sql = """
-            SELECT id, size_bytes, storage_ref
+            SELECT id, content_hash, size_bytes, storage_ref
             FROM clipboard_items
             WHERE storage_ref IS NOT NULL AND storage_ref != ''
         """
@@ -344,13 +404,15 @@ actor SQLiteClipboardRepository {
         while try stmt.step() {
             guard let idString = stmt.columnText(0),
                   let id = UUID(uuidString: idString),
-                  let storageRef = stmt.columnText(2),
+                  let contentHash = stmt.columnText(1),
+                  let storageRef = stmt.columnText(3),
                   !storageRef.isEmpty else { continue }
 
             records.append(
                 ExternalStorageSizeRecord(
                     id: id,
-                    sizeBytes: stmt.columnInt(1),
+                    contentHash: contentHash,
+                    sizeBytes: stmt.columnInt(2),
                     storageRef: storageRef
                 )
             )
@@ -545,17 +607,30 @@ actor SQLiteClipboardRepository {
         }
     }
 
-    func updateItemSizeBytesBatchInTransaction(updates: [SizeBytesUpdate]) throws {
-        guard !updates.isEmpty else { return }
-        try performWriteTransaction {
-            let stmt = try prepare("UPDATE clipboard_items SET size_bytes = ? WHERE id = ?")
+    func updateItemSizeBytesBatchInTransaction(updates: [SizeBytesUpdate]) throws -> Int {
+        guard !updates.isEmpty else { return 0 }
+        var updatedCount = 0
+        _ = try performConditionalWriteTransaction {
+            let stmt = try prepare(
+                """
+                UPDATE clipboard_items
+                SET size_bytes = ?
+                WHERE id = ? AND content_hash = ? AND size_bytes = ? AND storage_ref = ?
+                """
+            )
             for update in updates {
                 stmt.reset()
                 try stmt.bindInt(update.sizeBytes, at: 1)
                 try stmt.bindText(update.id.uuidString, at: 2)
+                try stmt.bindText(update.expectedContentHash, at: 3)
+                try stmt.bindInt(update.expectedSizeBytes, at: 4)
+                try stmt.bindText(update.expectedStorageRef, at: 5)
                 _ = try stmt.step()
+                updatedCount += connection?.changeCount() ?? 0
             }
+            return updatedCount > 0
         }
+        return updatedCount
     }
 
     func searchAllWithFilters(
@@ -733,6 +808,25 @@ actor SQLiteClipboardRepository {
             filenames.insert(filename)
         }
         return filenames
+    }
+
+    func isStorageRefReferenced(_ storageRef: String) throws -> Bool {
+        let filename = (storageRef as NSString).lastPathComponent
+        let escapedFilename = filename
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "%", with: "\\%")
+            .replacingOccurrences(of: "_", with: "\\_")
+        let stmt = try prepare(
+            """
+            SELECT 1
+            FROM clipboard_items
+            WHERE storage_ref = ? OR storage_ref LIKE ? ESCAPE '\\'
+            LIMIT 1
+            """
+        )
+        try stmt.bindText(storageRef, at: 1)
+        try stmt.bindText("%/\(escapedFilename)", at: 2)
+        return try stmt.step()
     }
 
     func planCleanupByCount(target: Int) throws -> DeletePlan {
@@ -1012,6 +1106,79 @@ actor SQLiteClipboardRepository {
             }
             throw error
         }
+    }
+
+    private func performConditionalWriteTransaction(
+        _ body: () throws -> Bool
+    ) throws -> Bool {
+        try execute("BEGIN IMMEDIATE TRANSACTION")
+        do {
+            let didWrite = try body()
+            if didWrite {
+                try bumpMutationSeq()
+            }
+            try execute("COMMIT")
+            return didWrite
+        } catch {
+            do {
+                try execute("ROLLBACK")
+            } catch {
+                isDatabaseCorrupted = true
+                try recoverDatabase()
+            }
+            throw error
+        }
+    }
+
+    private func updateMetadataAndReturnCurrent(
+        id: UUID,
+        update: MetadataUpdate
+    ) throws -> ClipboardStoredItem? {
+        var updatedItem: ClipboardStoredItem?
+        _ = try performConditionalWriteTransaction {
+            guard let current = try fetchItemByID(id) else { return false }
+
+            switch update {
+            case .note(let note):
+                do {
+                    let stmt = try prepare("UPDATE clipboard_items SET note = ? WHERE id = ?")
+                    try stmt.bindText(note, at: 1)
+                    try stmt.bindText(id.uuidString, at: 2)
+                    _ = try stmt.step()
+                }
+            case .fileSizeBytes(let expected, let fileSizeBytes):
+                guard Self.hasSamePayload(current, as: expected) else { return false }
+                guard current.fileSizeBytes != fileSizeBytes else { return false }
+                do {
+                    let stmt = try prepare("UPDATE clipboard_items SET file_size_bytes = ? WHERE id = ?")
+                    if let fileSizeBytes {
+                        try stmt.bindInt(fileSizeBytes, at: 1)
+                    } else {
+                        try stmt.bindNull(1)
+                    }
+                    try stmt.bindText(id.uuidString, at: 2)
+                    _ = try stmt.step()
+                }
+            }
+
+            updatedItem = try fetchItemByID(id)
+            return updatedItem != nil
+        }
+        return updatedItem
+    }
+
+    private static func hasSamePayload(
+        _ lhs: ClipboardStoredItem,
+        as rhs: ClipboardStoredItem
+    ) -> Bool {
+        lhs.id == rhs.id &&
+            lhs.type == rhs.type &&
+            lhs.contentHash == rhs.contentHash &&
+            lhs.plainText == rhs.plainText &&
+            lhs.sizeBytes == rhs.sizeBytes &&
+            lhs.fileSizeBytes == rhs.fileSizeBytes &&
+            lhs.storageRef == rhs.storageRef &&
+            lhs.rawData == rhs.rawData
     }
 
     private func execute(_ sql: String) throws {

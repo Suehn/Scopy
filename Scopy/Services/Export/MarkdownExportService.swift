@@ -24,6 +24,35 @@ public enum MarkdownExportService {
         }
     }
 
+    @MainActor
+    public final class CancellationHandle: @unchecked Sendable {
+        private var cancelAction: (@MainActor () -> Void)?
+
+        init(cancelAction: @escaping @MainActor () -> Void) {
+            self.cancelAction = cancelAction
+        }
+
+        public func cancel() {
+            let action = cancelAction
+            cancelAction = nil
+            action?()
+        }
+    }
+
+    public struct PasteboardWriteLease: Equatable, Sendable {
+        let expectedChangeCount: Int
+
+        @MainActor
+        init(pasteboard: NSPasteboard) {
+            expectedChangeCount = pasteboard.changeCount
+        }
+
+        @MainActor
+        func isCurrent(for pasteboard: NSPasteboard) -> Bool {
+            pasteboard.changeCount == expectedChangeCount
+        }
+    }
+
     struct ExportOutcome: Sendable {
         let pngData: Data
         let stats: ExportStats
@@ -50,51 +79,65 @@ public enum MarkdownExportService {
     ///   - viewportWidthPoints: The viewport width used to lay out the HTML before snapshotting
     ///   - completion: Completion handler with result
     @MainActor
+    @discardableResult
     public static func exportToPNGClipboard(
         html: String,
         targetWidthPixels: CGFloat = defaultTargetWidthPixels,
         resolutionScale: CGFloat = 1,
         pngquantOptions: PngquantService.Options? = nil,
+        pasteboardWriteLease: PasteboardWriteLease? = nil,
+        authorizePasteboardWrite: @escaping @MainActor () -> Bool = { true },
         completion: @escaping (Result<ExportStats, Error>) -> Void
-    ) {
-        exportToPNGData(html: html, targetWidthPixels: targetWidthPixels, resolutionScale: resolutionScale, pngquantOptions: pngquantOptions) { result in
+    ) -> CancellationHandle {
+        let pasteboard = resolvedPasteboardForExport()
+        let pasteboardLease = pasteboardWriteLease ?? PasteboardWriteLease(pasteboard: pasteboard)
+        let dumpURL = environmentURL(forKey: "SCOPY_EXPORT_DUMP_PATH")
+        let errorDumpURL = environmentURL(forKey: "SCOPY_EXPORT_ERROR_DUMP_PATH")
+
+        return exportToPNGData(html: html, targetWidthPixels: targetWidthPixels, resolutionScale: resolutionScale, pngquantOptions: pngquantOptions) { result in
             switch result {
             case .success(let outcome):
-                do {
-                    if let dumpPath = ProcessInfo.processInfo.environment["SCOPY_EXPORT_DUMP_PATH"], !dumpPath.isEmpty {
-                        try? outcome.pngData.write(to: URL(fileURLWithPath: dumpPath), options: [.atomic])
-                    }
-                    try writePNGToPasteboard(pngData: outcome.pngData, pasteboard: resolvedPasteboardForExport())
-
+                let committed = commitRenderedExport(
+                    outcome,
+                    pasteboard: pasteboard,
+                    lease: pasteboardLease,
+                    authorizePasteboardWrite: authorizePasteboardWrite,
+                    dumpURL: dumpURL,
+                    errorDumpURL: errorDumpURL
+                )
+                if case .success = committed {
                     if let percent = outcome.stats.percentSaved {
                         logger.info(
                             "Exported PNG with pngquant: saved \(percent, privacy: .public)% (\(outcome.stats.originalPNGBytes, privacy: .public) -> \(outcome.stats.finalPNGBytes, privacy: .public) bytes)"
                         )
                     }
-
-                    completion(.success(outcome.stats))
-                } catch {
-                    completion(.failure(error))
                 }
+                completion(committed)
             case .failure(let error):
-                if let errorPath = ProcessInfo.processInfo.environment["SCOPY_EXPORT_ERROR_DUMP_PATH"], !errorPath.isEmpty {
-                    try? Data(String(describing: error).utf8).write(to: URL(fileURLWithPath: errorPath), options: [.atomic])
-                }
+                writeErrorDump(error, to: errorDumpURL)
                 completion(.failure(error))
             }
         }
     }
 
+    /// Captures pasteboard ownership at the user-command boundary, before file loading or WebKit
+    /// rendering can suspend. A later clipboard change invalidates the lease.
+    @MainActor
+    public static func capturePasteboardWriteLease() -> PasteboardWriteLease {
+        PasteboardWriteLease(pasteboard: resolvedPasteboardForExport())
+    }
+
     /// Export Markdown HTML as a white-background PNG data blob.
     /// This is the core export path and is used by clipboard export and tests.
     @MainActor
+    @discardableResult
     static func exportToPNGData(
         html: String,
         targetWidthPixels: CGFloat = defaultTargetWidthPixels,
         resolutionScale: CGFloat = 1,
         pngquantOptions: PngquantService.Options? = nil,
         completion: @escaping (Result<ExportOutcome, Error>) -> Void
-    ) {
+    ) -> CancellationHandle {
         let coordinator = ExportCoordinator(
             html: html,
             targetWidthPixels: targetWidthPixels,
@@ -102,13 +145,18 @@ public enum MarkdownExportService {
             pngquantOptions: pngquantOptions,
             completion: completion
         )
+        let cancellationHandle = CancellationHandle { [weak coordinator] in
+            coordinator?.cancel()
+        }
         coordinator.start()
+        return cancellationHandle
     }
 
     enum ExportError: LocalizedError {
         case stageFailed(stage: ExportStage, underlying: Error?)
         case renderingTimeout(stage: ExportStage)
         case exportLimitExceeded(reason: String)
+        case pasteboardWriteNotAuthorized
 
         var errorDescription: String? {
             switch self {
@@ -121,8 +169,72 @@ public enum MarkdownExportService {
                 return "Rendering timed out at \(stage.rawValue)"
             case .exportLimitExceeded(let reason):
                 return "Export limit exceeded: \(reason)"
+            case .pasteboardWriteNotAuthorized:
+                return "Export was cancelled before writing to the pasteboard"
             }
         }
+    }
+
+    @MainActor
+    static func commitRenderedExport(
+        _ outcome: ExportOutcome,
+        pasteboard: NSPasteboard,
+        lease: PasteboardWriteLease,
+        authorizePasteboardWrite: @escaping @MainActor () -> Bool,
+        dumpURL: URL?,
+        errorDumpURL: URL?
+    ) -> Result<ExportStats, Error> {
+        do {
+            let didWrite = try writePNGToPasteboard(
+                pngData: outcome.pngData,
+                pasteboard: pasteboard,
+                authorization: {
+                    authorizePasteboardWrite() && lease.isCurrent(for: pasteboard)
+                }
+            )
+            guard didWrite else {
+                throw ExportError.pasteboardWriteNotAuthorized
+            }
+
+            if let dumpURL {
+                try? outcome.pngData.write(to: dumpURL, options: [.atomic])
+            }
+            return .success(outcome.stats)
+        } catch {
+            writeErrorDump(error, to: errorDumpURL)
+            return .failure(error)
+        }
+    }
+
+    private static func environmentURL(forKey key: String) -> URL? {
+        guard let path = ProcessInfo.processInfo.environment[key], !path.isEmpty else { return nil }
+        return URL(fileURLWithPath: path)
+    }
+
+    private static func writeErrorDump(_ error: Error, to url: URL?) {
+        guard let url else { return }
+        try? Data(String(describing: error).utf8).write(to: url, options: [.atomic])
+    }
+
+    /// Performs the irreversible pasteboard mutation only after a caller-owned liveness check.
+    /// Returning `false` leaves every existing pasteboard representation untouched.
+    @MainActor
+    @discardableResult
+    static func writePNGToPasteboard(
+        pngData: Data,
+        pasteboard: NSPasteboard,
+        authorization: () -> Bool
+    ) throws -> Bool {
+        guard authorization() else { return false }
+        guard let imagePayload = makeStandardImagePayloadForPasteboardWrite(pngData) else {
+            logger.error("Failed to normalize PNG payload before pasteboard export")
+            throw ExportError.stageFailed(stage: .pasteboardWrite, underlying: nil)
+        }
+        // Normalization can be non-trivial for legacy image encodings. Recheck immediately before
+        // the irreversible pasteboard clear so a newer user copy always wins.
+        guard authorization() else { return false }
+        try writeImagePayloadToPasteboard(imagePayload, pasteboard: pasteboard)
+        return true
     }
 
     @MainActor
@@ -132,6 +244,14 @@ public enum MarkdownExportService {
             throw ExportError.stageFailed(stage: .pasteboardWrite, underlying: nil)
         }
 
+        try writeImagePayloadToPasteboard(imagePayload, pasteboard: pasteboard)
+    }
+
+    @MainActor
+    private static func writeImagePayloadToPasteboard(
+        _ imagePayload: ImagePasteboardPayload,
+        pasteboard: NSPasteboard
+    ) throws {
         pasteboard.clearContents()
         pasteboard.declareTypes([.png], owner: nil)
 
@@ -230,6 +350,63 @@ public enum MarkdownExportService {
 }
 
 // MARK: - Export Coordinator
+
+@MainActor
+final class MarkdownExportConcurrencyGate {
+    enum Submission: Equatable {
+        case started
+        case queued
+        case rejected
+    }
+
+    private struct PendingWork {
+        let id: UUID
+        let start: @MainActor () -> Void
+    }
+
+    let limit: Int
+    let maximumPendingCount: Int
+    private(set) var activeIDs: Set<UUID> = []
+    private var pending: [PendingWork] = []
+
+    init(limit: Int, maximumPendingCount: Int) {
+        self.limit = max(1, limit)
+        self.maximumPendingCount = max(0, maximumPendingCount)
+    }
+
+    var activeCount: Int { activeIDs.count }
+    var pendingCount: Int { pending.count }
+
+    func submit(id: UUID, start: @escaping @MainActor () -> Void) -> Submission {
+        guard !activeIDs.contains(id), !pending.contains(where: { $0.id == id }) else {
+            return .rejected
+        }
+        if activeIDs.count < limit {
+            activeIDs.insert(id)
+            start()
+            return .started
+        }
+        guard pending.count < maximumPendingCount else { return .rejected }
+        pending.append(PendingWork(id: id, start: start))
+        return .queued
+    }
+
+    func finish(id: UUID) {
+        if activeIDs.remove(id) != nil {
+            promotePendingWorkIfPossible()
+            return
+        }
+        pending.removeAll(where: { $0.id == id })
+    }
+
+    private func promotePendingWorkIfPossible() {
+        while activeIDs.count < limit, !pending.isEmpty {
+            let next = pending.removeFirst()
+            activeIDs.insert(next.id)
+            next.start()
+        }
+    }
+}
 
 private enum MarkdownExportRenderConstants {
     static let exportViewportHeightPoints: CGFloat = 1000
@@ -548,9 +725,14 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
     private var exportTask: Task<Void, Never>?
     private var stage: MarkdownExportService.ExportStage = .loadHTML
     private var didDumpTableMetrics = false
+    private let concurrencyID = UUID()
 
     // Keep a strong reference to self until export completes
     private static var activeCoordinators: Set<ExportCoordinator> = []
+    private static let concurrencyGate = MarkdownExportConcurrencyGate(
+        limit: 2,
+        maximumPendingCount: 8
+    )
 
     init(
         html: String,
@@ -596,6 +778,27 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
     }
 
     func start() {
+        let submission = Self.concurrencyGate.submit(id: concurrencyID) {
+            self.startAfterAcquiringConcurrencySlot()
+        }
+        if submission == .rejected {
+            completeWithError(
+                MarkdownExportService.ExportError.exportLimitExceeded(
+                    reason: "Too many Markdown exports are already active or queued"
+                )
+            )
+        }
+    }
+
+    func cancel() {
+        completeWithError(CancellationError())
+    }
+
+    private func startAfterAcquiringConcurrencySlot() {
+        guard !isCompleted else {
+            Self.concurrencyGate.finish(id: concurrencyID)
+            return
+        }
         // Retain self
         Self.activeCoordinators.insert(self)
 
@@ -2544,6 +2747,7 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
         hostWindow?.orderOut(nil)
         hostWindow = nil
         Self.activeCoordinators.remove(self)
+        Self.concurrencyGate.finish(id: concurrencyID)
     }
 
 }
