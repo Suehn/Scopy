@@ -127,6 +127,17 @@ Implication: preview/export work must remain background-safe and should not muta
 
 Implication: new cleanup variants should reuse the delete-plan executor unless they require a documented atomicity exception.
 
+### 4.2 Lossless Storage Byte Accounting
+
+1. `SQLiteStatement.bindInt(_:at:)`, `columnInt(_:)`, and `columnIntOptional(_:)` represent Swift `Int`, not C `int`; on the supported 64-bit macOS baseline they must use `sqlite3_bind_int64` and `sqlite3_column_int64`.
+2. Keep `Int32` only for SQLite parameter/column indexes and other APIs whose declared contract is 32-bit. Do not narrow payload sizes, file sizes, limits, offsets, booleans, or use counts through `Int32(value)`.
+3. Keep explicit `bindInt64`/`columnInt64` for row IDs and SQL aggregates whose durable contract is intentionally `Int64`.
+4. SQLite `INTEGER` already stores signed 64-bit values. An adapter correction does not require a migration or `PRAGMA user_version` bump when column semantics are unchanged.
+5. File-size aggregation must use checked addition and return `nil` when no exact `Int` result exists. Do not wrap, saturate, or materialize file contents to measure a logical size.
+6. Any byte-accounting change must cover ordinary values plus `Int32.max + 1`, a sparse 5 GiB file, disk reopen, CAS/batch update, cleanup stopping, nullable values, and overflow behavior.
+
+Implication: storage, search hydration, cleanup planning, and presentation must observe the same exact positive byte count without changing the public DTO shape.
+
 ### 4.5 List Interaction Coordination
 
 1. `HistoryListView` owns `HistoryListInteractionCoordinator` and passes it into rows / observers as list-scoped state.
@@ -233,6 +244,7 @@ Implication: if you touch settings behavior, preserve the Save/Cancel model and 
 - Touch `ClipboardMonitor`, `ClipboardService`, and `StorageService` as one flow.
 - Re-check copy/replay semantics, external storage validation, cleanup behavior, and any item-model field assumptions.
 - Route new cleanup variants through `StorageService.applyDeletePlan` unless there is a specific atomicity reason to keep the path separate.
+- Preserve the lossless Swift-`Int` SQLite adapter. For byte-count changes, test values above `Int32.max`, disk reopen, cleanup stopping, and checked filesystem aggregation.
 
 ### Settings Or Hotkey Changes
 
@@ -269,10 +281,12 @@ Implication: if you touch settings behavior, preserve the Save/Cancel model and 
 - Legacy directories under `doc/implementation`, `doc/profiles`, and `doc/specs` are compatibility entrypoints only.
 - Heavy work should stay off the main thread; correctness beats opportunistic speedups.
 - Views should not directly become persistence clients.
+- Select roadmap work by evidenced severity, affected surface, recurrence/likelihood, and confidence relative to implementation/rollback cost. Prefer crashes, data-integrity failures, unsafe release paths, and measured systemic bottlenecks over cosmetic cleanup or speculative micro-optimization.
 
 ## Related Docs
 
 - Active requirements: [product-spec.md](./product-spec.md)
+- High-leverage task selection: [high-leverage-change-guide.md](../../.trellis/spec/guides/high-leverage-change-guide.md)
 - Release workflow: [release-runbook.md](./release-runbook.md)
 - Short maintainer navigation: [maintainer-guide.md](./maintainer-guide.md)
 - Current release window: [../releases/README.md](../releases/README.md)

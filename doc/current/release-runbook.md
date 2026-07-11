@@ -79,6 +79,8 @@ related_versions:
 
 The current release `v0.65.0` adds direction-aware hover transfer and passive history rows without introducing a continuous pointer monitor or visible-row scroll broadcast.
 
+It also corrects storage byte accounting above the signed 32-bit range without a schema migration. This is a correctness and deletion-safety change; the fresh snapshot benchmark is a regression gate, not a performance-improvement claim.
+
 - Environment: Apple M3 Pro, arm64, macOS 15.7.3 (`24G419`), Xcode 26.1.1 (`17B100`).
 - The focused strict-concurrency performance test runs 100,000 cached `SafeTriangle.contains` checks in about `9.4ms` on average across five runs (`~94ns` per call, `1.617%` relative standard deviation).
 - One transfer samples for at most `500ms` at approximately `60Hz`, or about 31 checks; triangle construction runs only on initial geometry acquisition or a real popover frame change.
@@ -90,8 +92,9 @@ The current release `v0.65.0` adds direction-aware hover transfer and passive hi
 - The final five-pair passive/passive `markdown-menu-cache` AB/BA completed the same 51,270px observed path in all ten runs with 1,135 row bodies per side. Current recorded 1,135 cache hits and zero measurement misses/uncached scans; median row-body total improved `92.09%`, main-run-loop total `9.61%`, and main-run-loop p95 `12.93%`, with row-body and run-loop totals improving in every pair.
 - Final-source 7,807-row real-snapshot smoke and standard profiles completed unattended. Standard main-run-loop p95 changed `-17.55%` for accessibility, `-13.85%` for mixed, and `+5.29%` for text-biased, while other metrics remained noisy. An earlier three-repeat full guard against 7,794 rows changed the same metric by `-5.19%`, `+3.16%`, and `+11.69%`; text-biased improved in two pairwise repeats and regressed in the third. Both remain explicit broad-profile observations, not pass claims.
 - The real-snapshot baseline disables five older feature flags together and is not an old-revision comparison; both variants retain passive rows and the Markdown menu cache. Use the two fixed AB/BA axes for causal v0.65.0 claims and do not attribute the full-profile variance to either new slice.
-- Full unit and strict-concurrency suites each executed 701 tests with 1 skip and 0 failures; TSan executed 681 tests with 1 skip, 0 failures, and no race reports.
-- Snapshot Release search: `cmd p95 0.092983ms` against 50ms and `cm p95 1.811981ms` against 20ms.
+- Full unit and strict-concurrency suites each executed 706 tests with 1 skip and 0 failures; TSan executed 686 tests with 1 skip, 0 failures, and no race reports.
+- The refreshed real snapshot has 7,807 rows, schema version 7, size 98,922,496 bytes, and `PRAGMA integrity_check = ok`.
+- Snapshot Release search: `cmd p95 0.133991ms` against 50ms and `cm p95 1.874924ms` against 20ms.
 - Release deployment succeeded twice consecutively without cleanup after moving Xcode products to DerivedData; `make build` also passed.
 - The backend columns in the final unified table intentionally use the same audit because this frontend task changed no backend algorithm: warm load `162.567ms`, peak RSS `131.938MB`; final artifact `logs/perf-unified-2026-07-11_15-32-45.md`.
 - Dedicated evidence and caveats are in [v0.65.0 Frontend Scroll Profile](../perf/release-profiles/v0.65.0-profile.md).

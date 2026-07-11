@@ -9,7 +9,7 @@ spec_doc: doc/current/product-spec.md
 development_doc: doc/current/development-guide.md
 architecture_doc: doc/current/architecture.md
 last_verified_at: 2026-07-11
-summary: Direction-aware preview, passive rows, and trace-selected menu caching
+summary: Direction-aware preview, passive rows, menu caching, and lossless storage byte accounting
 verification:
   build: pass
   test_unit: pass

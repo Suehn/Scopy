@@ -32,6 +32,13 @@
 - Removes a trace-selected row-body hotspot by caching positive and negative Markdown context-menu fast signals by content revision, while keeping exact PNG-export capability separate and authoritative.
 - Prewarms menu signals at utility priority with in-flight deduplication, bounded capacity, and cache-generation rejection so stale detached work cannot repopulate cleared presentation state.
 
+### Storage/Correctness
+
+- Makes the shared Swift `Int` SQLite adapter use SQLite's signed 64-bit bind/read APIs, preventing legitimate payload and file sizes above `Int32.max` from crashing, becoming negative, or becoming zero.
+- Keeps the existing SQLite schema, `PRAGMA user_version = 7`, DTOs, protocols, cleanup budgets, and user-visible formatting unchanged.
+- Makes multi-file logical-size aggregation return `nil` on integer overflow instead of trapping or publishing a wrapped value.
+- Adds disk-reopen, compare-and-swap, batch reconciliation, cleanup-target, sparse 5 GiB file, nullable integer, and display-format regressions.
+
 ### Tests
 
 - Adds unit coverage for geometry, timing, malformed values, delayed/lost targets, controller cancellation and replacement, stale tokens, and list-level ownership.
@@ -55,8 +62,8 @@
 
 - Fixed Release passive-row AB/BA passed all five pairs for equal work: whole-run row-body count `-66.49%`, row-body total `-61.07%`, main-run-loop total `-3.77%`, and main-run-loop p95 `-4.94%` at the medians.
 - The passive/passive Markdown menu-cache AB/BA passed all five pairs with equal row-body counts: row-body total `-92.09%`, main-run-loop total `-9.61%`, and main-run-loop p95 `-12.93%`; current had cache hits with zero measurement misses/uncached scans.
-- `make build`, `make test-unit` (701 executed, 1 skipped), `make test-strict` (701 executed, 1 skipped), and `make test-tsan` (681 executed, 1 skipped) passed with zero failures.
-- Snapshot Release, both fixed frontend AB/BA axes, backend control audit, and the unified performance table passed against the final 7,807-row snapshot DB. Final-source frontend smoke/standard outputs are complete; an earlier three-repeat full guard and its text-biased variance remain recorded without a causal pass claim.
+- `make build`, `make test-unit` (706 executed, 1 skipped), `make test-strict` (706 executed, 1 skipped), and `make test-tsan` (686 executed, 1 skipped) passed with zero failures.
+- The fresh 7,807-row, schema-v7 snapshot passed `PRAGMA integrity_check`; Snapshot Release measured `cmd p95 0.133991ms` against 50ms and `cm p95 1.874924ms` against 20ms. Both fixed frontend AB/BA axes, backend control audit, and the unified performance table remain recorded; the earlier full-profile text-biased variance remains a non-causal observation.
 
 ## [v0.8.8] - 2026-06-15
 

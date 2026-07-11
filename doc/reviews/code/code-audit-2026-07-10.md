@@ -10,6 +10,8 @@ canonical: false
 
 > 时间边界：本报告冻结在安全三角与 DerivedData 隔离完成之后、`v0.65.0` passive-row / menu-cache 工作开始之前。文中的测试数值与待办只代表该审查切片；后续已关闭或改写的结论以 [v0.65.0 Frontend Scroll Profile](../../perf/release-profiles/v0.65.0-profile.md) 和当前规格为准。
 
+> 后续关闭状态（2026-07-11）：P0.1 已由 `ecc8a83` 关闭。共享 Swift `Int` SQLite 适配器改用 64 位接口，并由 5 GiB sparse file、磁盘重启、CAS/批量对账、清理停止、溢出和全量/Strict/TSan/真实快照门禁覆盖。P0.2 自动 tag 发布可信度仍是下一项高收益 P0。
+
 ## 结论先行
 
 Scopy 已具备不错的工程基础：服务与仓储普遍采用 actor 隔离，搜索和真实数据库性能门禁完整度较高，剪贴板采集已有 durable envelope、背压和并发上限，删除路径也有集中式计划。当前主要问题不是“整体不可维护”，而是少数跨数据库、文件系统和 UI 状态的契约还没有闭环。
@@ -19,7 +21,7 @@ Scopy 已具备不错的工程基础：服务与仓储普遍采用 actor 隔离�
 1. 预览 row-to-popover 使用方向感知安全三角，支持任意方位、多屏负坐标、窗口移动/缩放、相邻行转移所有权及完整取消生命周期。
 2. Xcode 产物恢复到 DerivedData，与 SwiftPM `.build` 分离；`deploy.sh release --no-launch` 已连续两次无清理构建并部署成功，消除了 Finder/resource-fork 元数据导致的 CodeSign 重复失败。
 
-剩余风险中有两个真正的 P0：合法的 `>2 GiB` 文件大小会触发整数转换崩溃；自动打 tag 流程不等待完整质量门禁。后续迭代应先修正确性和发布可信度，再做大文件拆分。
+该冻结切片识别出两个真正的 P0：合法的 `>2 GiB` 文件大小会触发整数转换崩溃；自动打 tag 流程不等待完整质量门禁。前者已在 2026-07-11 关闭，后者仍应先于低收益重构或微优化处理。
 
 ## 证据基线
 
@@ -58,6 +60,8 @@ Scopy 已具备不错的工程基础：服务与仓储普遍采用 actor 隔离�
 ## P0 — 立即处理
 
 ### P0.1 合法大文件可确定性崩溃
+
+状态：**已关闭（2026-07-11，`ecc8a83`）**。历史证据保留如下；当前可执行契约见 `.trellis/spec/backend/database-guidelines.md`。
 
 `Scopy/Infrastructure/Persistence/SQLiteConnection.swift:133` 的 `bindInt` 将 Swift `Int` 直接转为 `Int32`。文件项会在 `Scopy/Utilities/FilePreviewSupport.swift:137` 计算真实总大小，并经 `Scopy/Application/ClipboardService.swift:1138`、`Scopy/Infrastructure/Persistence/SQLiteClipboardRepository.swift:244` 写回。任一正常的 4K 视频、磁盘镜像或多文件总计超过 2 GiB 时都会 runtime trap；项目已经入库，重启后可能再次计算并形成重复崩溃。
 
@@ -146,7 +150,7 @@ Scopy 已具备不错的工程基础：服务与仓储普遍采用 actor 隔离�
 
 ### Sprint 0 — 发布可信度与崩溃热修（1–2 天）
 
-1. Int64 文件大小迁移 + 5 GiB sparse-file 回归。
+1. ~~Int64 文件大小迁移 + 5 GiB sparse-file 回归。~~ 已完成；实现选择保持 Swift `Int` 公共契约并修正共享 SQLite 64 位适配层，避免无收益的跨层类型 churn。
 2. 关闭/重构 auto-tag；把 docs/release/build/unit/strict 变为 tag 前置条件。
 3. 合并本轮 safe-triangle 与 DerivedData 构建隔离，锁定 release metadata。
 

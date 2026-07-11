@@ -37,6 +37,7 @@ Scopy is a native macOS clipboard manager for users who need durable clipboard h
 - Persist history using a mix of inline database storage and external payload files as needed.
 - Deduplicate equivalent content instead of blindly creating duplicate rows.
 - Keep image/file payload handling safe by validating external storage references before filesystem operations.
+- Preserve exact logical byte counts across filesystem metadata, persistence, reload, search/recent hydration, cleanup planning, and display, including legitimate files above 2 GiB. An unrepresentable aggregate must fail safely rather than crash or wrap.
 
 ### History Browsing
 
@@ -111,6 +112,7 @@ Scopy is a native macOS clipboard manager for users who need durable clipboard h
 
 - Copying from history must reproduce the stored content type as faithfully as the system pasteboard allows.
 - Cleanup, delete, and optimization paths must not remove or rewrite unrelated files.
+- Cleanup decisions must use exact nonnegative persisted byte counts; a large row that satisfies a cleanup target must not cause later unrelated rows to be selected because of integer narrowing or overflow.
 - AirDrop should share validated real files when available and may generate temporary PNGs for image rows; Open Containing Folder must only reveal real user files, never temporary share artifacts.
 - Paste-optimized for Codex must post `Control+V` after copying and closing the panel.
 - File notes, image optimization, and export flows must not corrupt the underlying item model.
