@@ -31,17 +31,17 @@ Eliminate the push-triggered path that can create a release tag before Scopy's r
 
 ## Acceptance Criteria
 
-- [ ] `.github/workflows/auto-tag.yml` is removed.
-- [ ] No workflow contains `tag-from-doc.sh`, `git tag`, `git push --tags`, `git push --follow-tags`, or a direct `refs/tags` creation command.
-- [ ] `.github/workflows/release.yml` still accepts only `push.tags: v*` and `workflow_dispatch` as release entrypoints.
-- [ ] A dependency-free validator scans all workflow files by content, not only the old filename, and exits nonzero for representative unsafe fixtures.
-- [ ] The validator accepts the real safe workflows and a synthetic tag-trigger-only release workflow.
-- [ ] CI has a lightweight release-policy job that runs `make docs-validate`, `make release-validate`, and the focused validator tests.
-- [ ] Existing build, unit, strict-concurrency, TSan, release packaging, version, and Homebrew workflow semantics are otherwise unchanged.
-- [ ] `make release-validate` includes the workflow policy and passes.
-- [ ] Focused validator tests, `make build`, `make test-unit`, `make test-strict`, `make docs-validate`, and `git diff --check` pass.
-- [ ] Current docs identify explicit maintainer tag creation as the only authority and explain why workflow-created tags are forbidden.
-- [ ] Changes are split into coherent local commits; no tag, push, dispatch, publication, or Homebrew mutation occurs.
+- [x] `.github/workflows/auto-tag.yml` is removed.
+- [x] No workflow contains `tag-from-doc.sh`, `git tag`, `git push --tags`, `git push --follow-tags`, or a direct `refs/tags` creation command.
+- [x] `.github/workflows/release.yml` still accepts only `push.tags: v*` and `workflow_dispatch` as release entrypoints.
+- [x] A dependency-free validator scans all workflow files by content, not only the old filename, and exits nonzero for representative unsafe fixtures.
+- [x] The validator accepts the real safe workflows and a synthetic tag-trigger-only release workflow.
+- [x] CI has a lightweight release-policy job that runs `make docs-validate`, `make release-validate`, and the focused validator tests.
+- [x] Existing build, unit, strict-concurrency, TSan, release packaging, version, and Homebrew workflow semantics are otherwise unchanged.
+- [x] `make release-validate` includes the workflow policy and passes.
+- [x] Focused validator tests, `make build`, `make test-unit`, `make test-strict`, `make docs-validate`, and `git diff --check` pass.
+- [x] Current docs identify explicit maintainer tag creation as the only authority and explain why workflow-created tags are forbidden.
+- [x] Changes are split into coherent local commits; no tag, push, dispatch, publication, or Homebrew mutation occurs.
 
 ## Definition Of Done
 
@@ -89,7 +89,7 @@ Eliminate the push-triggered path that can create a release tag before Scopy's r
 - Can centralize remote attestation but introduces API/token/commit-selection complexity and privileged cross-workflow trust boundaries.
 - Better treated as a future enhancement only if explicit maintainer tagging becomes an operational bottleneck.
 
-## Decision (ADR-lite, Provisional)
+## Decision (ADR-lite, Accepted)
 
 **Context**: The current automatic path is weaker than the documented release process, races with the explicit push script, and relies on cross-workflow trigger behavior that is not a stable `GITHUB_TOKEN` contract. Conditional performance and UI gates also cannot be inferred safely from a generic push-trigger job.
 
@@ -115,4 +115,5 @@ Eliminate the push-triggered path that can create a release tag before Scopy's r
 
 ## Research References
 
-- [`research/release-tag-gating.md`](research/release-tag-gating.md) — pending bounded Trellis research on current workflow evidence, official GitHub contracts, remote history, alternatives, and recommendation.
+- [`research/release-tag-gating.md`](research/release-tag-gating.md) — bounded research on current workflow evidence, official GitHub contracts, remote history, alternatives, and recommendation.
+- [`verification.md`](verification.md) — final gates, unchanged boundaries, commits, rollback, and non-mutation evidence.
