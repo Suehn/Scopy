@@ -2,10 +2,10 @@
 doc_type: spec
 status: active
 owner: maintainers
-last_reviewed: 2026-05-08
+last_reviewed: 2026-07-11
 canonical: true
 related_versions:
-  - v0.7.8
+  - v0.65.0
 ---
 
 # Architecture
@@ -24,8 +24,10 @@ This document describes the current system shape and operational invariants. For
 ### Clipboard Path
 
 - `ClipboardMonitor` observes pasteboard changes and normalizes incoming clipboard content.
-- `ClipboardService` coordinates ingest, deduplication, cleanup scheduling, and event emission.
-- `StorageService` persists structured items, external payloads, and thumbnail-related artifacts.
+- `ClipboardMonitor` publishes durable external captures to an Application Support-owned ingest spool before handing work to the service. Pending envelopes remain replayable across process restart; terminal markers make acknowledgement restart-safe.
+- `ClipboardService` coordinates ingest, deduplication, cleanup scheduling, and event emission. It publishes search/UI changes only from committed storage outcomes and hands committed cleanup events to an independent cancellation lifetime.
+- `StorageService` persists structured items, external payloads, and thumbnail-related artifacts. For a durable ingest ID it retains the source, publishes a unique managed candidate, and commits the item mutation plus the schema-v8 `ingest_receipts` row in one `BEGIN IMMEDIATE` transaction.
+- Cleanup planning is advisory. `SQLiteClipboardRepository.commitDeletePlan` revalidates the candidate snapshot and deletes matching rows in one write transaction, then returns the exact committed IDs and storage refs used by bounded file cleanup, search invalidation, and one bulk history event.
 
 ### Search Path
 
@@ -48,6 +50,9 @@ This document describes the current system shape and operational invariants. For
 - Settings retain the explicit Save/Cancel model, while hotkey application still flows through `AppDelegate.applyHotKey` and `.settingsChanged`.
 - Cleanup, external file reads/writes, thumbnail work, and other heavy operations should remain backgrounded and bounded.
 - External storage access continues to require path validation before file operations.
+- A durable ingest source is not moved or deleted before the database commit. Receipt replay is an internal no-op, including after the committed item has since been deleted, and acknowledgement reaches a non-replay terminal marker before receipt removal.
+- File deletion is DB-first and consumes only commit-time validated refs. Planned rows that became pinned or changed payload identity are skipped, and shared refs are rechecked under path reservations before unlink.
+- The storage protocol claims D1 process-crash/restart consistency only; WAL `synchronous=NORMAL` and unsynced rename/write paths are not a D2/D3 power-loss guarantee.
 - Documentation/release automation reads [release-current.yml](../meta/release-current.yml) as the machine-readable source of truth.
 
 ## Stability Priorities

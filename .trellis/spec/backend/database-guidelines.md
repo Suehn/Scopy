@@ -98,6 +98,124 @@ Int(sqlite3_column_int64(statement, index))
 
 ---
 
+## Scenario: Crash-Consistent Ingest And Conditional Cleanup
+
+### 1. Scope / Trigger
+
+- Trigger: a clipboard ingest uses a durable external payload, or a retention policy plans deletion separately from the final database write.
+- The contract covers D1 process termination and restart. It does not claim D2/D3 power-loss durability while SQLite uses WAL `synchronous=NORMAL` and file publication does not issue `fsync`/`F_FULLFSYNC`.
+- Inline payloads without an ingest ID keep the ordinary fast path; do not add spool I/O or receipt lookups to that path.
+
+### 2. Signatures
+
+```swift
+enum StorageService.UpsertOutcome {
+    case inserted(ClipboardStoredItem)
+    case updated(ClipboardStoredItem)
+    case alreadyApplied(ClipboardStoredItem?)
+}
+
+struct SQLiteClipboardRepository.DeleteCandidate {
+    let id: UUID
+    let type: ClipboardItemType
+    let contentHash: String
+    let lastUsedAt: Date
+    let sizeBytes: Int
+    let storageRef: String?
+}
+
+struct SQLiteClipboardRepository.DeleteCommitResult {
+    let plannedCount: Int
+    let deletedItemIDs: [UUID]
+    let storageRefs: [String]
+}
+
+struct StorageService.CleanupResult {
+    let plannedItemCount: Int
+    let deletedItemIDs: [UUID]
+    let skippedItemCount: Int
+    let fileDeletionCandidateCount: Int
+    let fileDeletionAttemptCount: Int
+    let fileCleanupFailureCount: Int
+}
+
+func commitDeletePlan(_ plan: DeletePlan) throws -> DeleteCommitResult
+case ClipboardEvent.itemsRemoved([UUID])
+```
+
+- Schema v8 adds content-free `ingest_receipts(ingest_id PRIMARY KEY, item_id, committed_at)` without a cascading foreign key.
+- The ingest ID is the durable envelope UUID. Repository receipt lookup, item insert/dedup mutation, and receipt insert belong to one `BEGIN IMMEDIATE` transaction.
+
+### 3. Contracts
+
+- Write the owned payload and pending envelope under the Application Support spool before queueing ingest work. Validate decoded filenames and acknowledgement URLs against that root; traversal, symlinks, and foreign paths fail closed.
+- Retain a durable spool source through candidate publication and database commit. Derived transforms use separately owned, bounded work files.
+- An existing receipt returns `alreadyApplied` without a second insert, use-count increment, or success publication. Keep the receipt after item deletion so an old envelope cannot resurrect the item.
+- Acknowledgement atomically transitions pending envelope -> terminal marker before receipt removal. Restart finishes terminal-marker cleanup idempotently.
+- A `DeletePlan` is an advisory snapshot. `commitDeletePlan` must reload candidates and revalidate unpinned state plus type, content hash, recency, size, and storage ref in one write transaction before deletion.
+- Return only exact committed item IDs and refs. File cleanup must be DB-first, containment-validated, shared-ref-safe, bounded, and failure-tolerant.
+- Invoke the committed cleanup callback immediately after the DB commit. Search invalidation and one bulk `.itemsRemoved(ids)` event must survive caller cancellation after commit; history removes those IDs without resetting pagination and refreshes the authoritative total.
+
+### 4. Validation & Error Matrix
+
+| Condition | Required behavior |
+|-----------|-------------------|
+| Payload written, envelope creation fails | Reclaim only the proven-owned orphan; never touch a foreign path |
+| Process stops with a pending envelope | Source and envelope remain restart-replayable |
+| SQLite upsert rolls back | Source/envelope remain; no item event; candidate is safely reclaimable |
+| Commit succeeds before acknowledgement | Receipt makes replay `alreadyApplied`; usage and events remain exactly-once |
+| Terminal rename fails | Pending envelope and receipt remain for retry |
+| Terminal rename succeeds before cleanup | Marker is never replayed; receipt/artifact cleanup resumes idempotently |
+| Committed item is later deleted | Receipt still prevents resurrection |
+| Envelope/payload path traverses or resolves through a symlink | Reject without reading/deleting outside the owned spool |
+| Planned row becomes pinned | Skip row and file; exclude from committed IDs/refs |
+| Planned row changes payload identity or cleanup snapshot | Skip current row/current ref |
+| Shared storage ref still has a live owner | Do not unlink it |
+| Caller is cancelled after DB cleanup commit | Deliver exact search/UI convergence from independent handoff |
+| External unlink fails | Keep row deleted, count the failure, allow orphan reconciliation |
+
+### 5. Good / Base / Bad Cases
+
+- Good: a 10 MiB external image has a durable pending envelope, commits once with its receipt, then an acknowledgement retry returns `alreadyApplied` and only finishes terminal cleanup.
+- Good: cleanup plans 10,000 rows; one row is pinned and another replaces its payload before commit. Both survive, while the returned IDs/refs contain only rows deleted from their still-matching snapshots.
+- Base: inline text without an ingest ID uses the existing direct transaction and product event behavior; ordinary user delete remains DB-first.
+- Bad: move the only spool payload into managed storage before SQLite commits, or delete planned IDs unconditionally after actor reentrancy. Either loses retryable data or overwrites a newer pin/payload decision.
+
+### 6. Tests Required
+
+- Ingest fault/restart tests: envelope-write failure, candidate-publication failure, transaction rollback, duplicate receipt replay, existing-hash replay, item-deleted-after-receipt, terminal-marker recovery, bounded orphan cleanup, and legacy cache migration.
+- Containment tests: traversal, foreign acknowledgement URL, symlink destination/source, malformed payload name, and terminal marker ownership.
+- Migration test: copy a real schema-v7 snapshot, open through current code, assert `user_version = 8`, `ingest_receipts` exists and is empty, row count is unchanged, and `PRAGMA integrity_check = ok`.
+- Cleanup races: post-plan pin, payload replacement, recency/size/ref mismatch, shared ref, file-removal failure, multi-stage partial success, cancellation after commit, bounded bulk queue, stale publication tokens, pagination preservation, and authoritative total refresh.
+- Performance: representative 10k inline/external cleanup, `make test-snapshot-perf-release`, and frontend/unified profiling when projection/event code changes.
+- Required gates: `make build`, `make test-unit`, `make test-strict`, and `make test-tsan`.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```swift
+let source = try moveSpoolPayloadIntoManagedStorage()
+try await repository.insertItem(itemUsing: source) // rollback loses the only replay source
+
+let ids = try await repository.planCleanup()
+try await repository.deleteItems(ids: ids) // plan may be stale after actor suspension
+```
+
+#### Correct
+
+```swift
+let candidate = try copyDurableSourceToUniqueManagedStorage()
+let outcome = try await repository.upsert(itemUsing: candidate, ingestID: envelope.id)
+// item mutation + receipt commit atomically; acknowledge only after commit
+
+let plan = try await repository.planCleanup()
+let committed = try await repository.commitDeletePlan(plan)
+// clean files and projections from committed.deletedItemIDs/storageRefs only
+```
+
+---
+
 ## Migrations
 
 Schema changes belong in SQLiteMigrations. Current schema version is tracked by currentUserVersion and PRAGMA user_version (Scopy/Infrastructure/Persistence/SQLiteMigrations.swift:4-39). Migrations must be idempotent and safe for existing user databases.
@@ -125,7 +243,7 @@ When changing search:
 
 ## Deletion And Cleanup
 
-External file deletion is DB-first. Existing delete paths capture/delete DB rows before deleting files and validate storageRef before touching disk (Scopy/Services/StorageService.swift:422-449, Scopy/Services/StorageService.swift:455-486). Preserve this ordering.
+External file deletion is DB-first. Cleanup planning is advisory; `commitDeletePlan` revalidates the candidate snapshot and captures exact refs in the deleting transaction. StorageService validates containment and surviving ownership before unlink. Preserve this ordering.
 
 Cleanup logic is performance-sensitive and has feature-flagged fast paths. If changing cleanup count, age, size, external size, or image-only behavior, run unit tests plus snapshot performance tests.
 

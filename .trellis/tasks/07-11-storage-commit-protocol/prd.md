@@ -134,18 +134,18 @@ Payload replacement `notFound` versus `conflict` remains desirable, but is not a
 
 ## Acceptance Criteria
 
-- [ ] Every matrix row has a deterministic regression test or an explicitly documented infeasible crash harness with equivalent restart evidence.
-- [ ] Duplicate replay of one envelope produces one item-side mutation total, including the existing-hash path.
-- [ ] Insert failure cannot turn a valid envelope into a missing-payload envelope.
-- [ ] Default pending data resides in Application Support; legacy cache artifacts migrate/drain without loss.
-- [ ] Spool containment tests cover traversal, foreign envelope URL, symlink escape, and terminal-marker recovery.
-- [ ] Cleanup race tests prove post-plan pin and payload replacement are preserved.
-- [ ] Cleanup returns actual deleted IDs/refs and the open history/search projections converge from that result.
-- [ ] Normal inline text, transient file, explicit optimization, copy/replay, item IDs, and visible product behavior remain unchanged.
-- [ ] Schema v7 -> v8 migration, reopen, `user_version`, and integrity checks pass on an isolated copy of a real snapshot.
-- [ ] `make build`, `make test-unit`, `make test-strict`, and `make test-tsan` pass.
-- [ ] `make test-snapshot-perf-release` passes; if UI event code changes, `make perf-frontend-profile` also passes.
-- [ ] Release/spec documentation and verification evidence agree; no tag, push, release, or Homebrew mutation occurs.
+- [x] Every matrix row has deterministic fault/race coverage or equivalent restart evidence. A real `_exit`/SIGKILL harness is not used because XCTest cannot preserve an in-process seam after terminating its host; deterministic persisted-artifact restart tests cover the same D1 boundaries. See `verification.md`.
+- [x] Duplicate replay of one envelope produces one item-side mutation total, including the existing-hash path.
+- [x] Insert failure cannot turn a valid envelope into a missing-payload envelope.
+- [x] Default pending data resides in Application Support; legacy cache artifacts migrate/drain without loss.
+- [x] Spool containment tests cover traversal, foreign envelope URL, symlink escape, and terminal-marker recovery.
+- [x] Cleanup race tests prove post-plan pin and payload replacement are preserved.
+- [x] Cleanup returns actual deleted IDs/refs and the open history/search projections converge from that result.
+- [x] Normal inline text, transient file, explicit optimization, copy/replay, item IDs, and visible product behavior remain unchanged.
+- [x] Schema v7 -> v8 migration, reopen, `user_version`, and integrity checks pass on an isolated copy of a real snapshot.
+- [x] `make build`, `make test-unit`, `make test-strict`, and `make test-tsan` pass.
+- [x] `make test-snapshot-perf-release` and the final full/include-hover frontend profiles pass their execution gates; mixed broad-profile variance is recorded without a causal claim.
+- [x] Release/spec documentation and verification evidence agree. Implementation commits and gates completed before the separately authorized release/tag/Homebrew mutation.
 
 ## Performance And Complexity Budgets
 

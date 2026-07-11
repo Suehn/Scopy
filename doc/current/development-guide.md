@@ -61,12 +61,13 @@ Implication: app shell code should stay orchestration-only; backend initializati
 
 ### 2. Clipboard Ingest
 
-1. `ClipboardMonitor` observes pasteboard changes and normalizes clipboard payloads.
-2. `ClipboardService.handleNewContent(_:)` decides how to ingest, deduplicate, and schedule cleanup.
-3. `StorageService` persists inline/external payloads and validates any external storage paths.
-4. `ClipboardService` emits events so state/view models update reactively.
+1. `ClipboardMonitor` observes pasteboard changes and normalizes clipboard payloads. Externally backed captures are first written as owned payload + pending envelope artifacts under the Application Support ingest spool; legacy cache envelopes are migrated or drained without overwriting a replayable destination.
+2. `ClipboardService.handleNewContent(_:)` decides how to ingest, deduplicate, and schedule cleanup. The envelope UUID is the ingest idempotency key.
+3. `StorageService` retains durable spool sources, validates every path against the owned root, and publishes any managed candidate to a unique destination without consuming the source.
+4. `SQLiteClipboardRepository` resolves the receipt, item insert/dedup mutation, and content-free `ingest_receipts` write in one `BEGIN IMMEDIATE` transaction. Outcomes are `inserted`, `updated`, or `alreadyApplied`; only the first two publish product events.
+5. Acknowledgement moves the pending envelope to a non-replay terminal marker before receipt removal and bounded artifact cleanup. Failure before that transition leaves enough evidence for restart replay.
 
-Implication: clipboard semantics, dedup, cleanup triggering, and safe file handling are backend responsibilities, not view responsibilities.
+Implication: clipboard semantics, dedup, cleanup triggering, and safe file handling are backend responsibilities, not view responsibilities. This protocol guarantees D1 process-restart consistency, not power-loss durability.
 
 ### 3. History Loading And Search
 
@@ -121,11 +122,13 @@ Implication: preview/export work must remain background-safe and should not muta
 
 ### 4.1 Storage Cleanup Execution
 
-1. `StorageService` builds repository `DeletePlan` values for cleanup-by-count, cleanup-by-age, cleanup-by-size, image-only cleanup, external-storage cleanup, and composite cleanup.
-2. `StorageService.applyDeletePlan` is the single adapter that deletes database rows and removes validated external payloads for those plans.
-3. Repository paths that need atomic row/content deletion can remain separate when they must preserve a tighter transaction boundary.
+1. `StorageService` builds repository `DeletePlan` values whose `DeleteCandidate` snapshots include item ID, type, content hash, recency, size, and storage ref for cleanup-by-count, cleanup-by-age, cleanup-by-size, image-only cleanup, external-storage cleanup, and composite cleanup.
+2. Planning is advisory. `SQLiteClipboardRepository.commitDeletePlan(_:)` starts `BEGIN IMMEDIATE`, reloads each candidate, revalidates the full cleanup snapshot plus unpinned state, deletes only matching rows, and captures exact storage refs from those rows in the same transaction.
+3. `StorageService.applyDeletePlan` immediately reports the committed `CleanupResult` before bounded file cleanup. External refs are containment-validated, reserved by canonical path, and batch-checked for surviving owners before unlink; a file failure never rolls the database deletion back.
+4. `ClipboardService` invalidates stale publications/search state and emits one `.itemsRemoved([UUID])` event from the exact committed IDs. The handoff survives cancellation of the debounce/caller task after commit.
+5. `HistoryViewModel` removes those IDs in linear time, preserves pagination state, and refreshes the authoritative total instead of full-reloading the list.
 
-Implication: new cleanup variants should reuse the delete-plan executor unless they require a documented atomicity exception.
+Implication: new cleanup variants must use the commit-time revalidating executor. A pre-transaction plan is never authority to delete a row or file.
 
 ### 4.2 Lossless Storage Byte Accounting
 
@@ -244,8 +247,11 @@ Implication: if you touch settings behavior, preserve the Save/Cancel model and 
 
 - Touch `ClipboardMonitor`, `ClipboardService`, and `StorageService` as one flow.
 - Re-check copy/replay semantics, external storage validation, cleanup behavior, and any item-model field assumptions.
-- Route new cleanup variants through `StorageService.applyDeletePlan` unless there is a specific atomicity reason to keep the path separate.
+- Preserve the durable-spool contract: retain source through commit, make receipt + mutation atomic, transition the envelope to terminal before receipt removal, and treat receipt replay as a no-op even when the item was later deleted.
+- Route new cleanup variants through `StorageService.applyDeletePlan`; extend `DeleteCandidate` when a new policy predicate affects eligibility so commit-time revalidation remains complete.
+- Test post-plan pin and payload replacement, shared storage refs, caller cancellation after commit, bulk queue delivery, and history pagination/total convergence.
 - Preserve the lossless Swift-`Int` SQLite adapter. For byte-count changes, test values above `Int32.max`, disk reopen, cleanup stopping, and checked filesystem aggregation.
+- For release-grade storage changes run `make build`, `make test-unit`, `make test-strict`, `make test-tsan`, `make test-snapshot-perf-release`, the applicable heavy cleanup tests, and frontend/unified profiling when event or projection code changes.
 
 ### Settings Or Hotkey Changes
 
