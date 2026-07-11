@@ -264,7 +264,7 @@ actor ThumbnailDecodeCoordinator {
         while !Task.isCancelled,
               let job = await nextJob(workerID: id, generation: workerGeneration) {
             if let queuedAt = job.queuedAt {
-                ScrollPerformanceProfile.recordMetric(
+                ScrollPerformanceProfile.recordTiming(
                     name: "image.thumbnail_queue_wait_ms",
                     elapsedMs: (CFAbsoluteTimeGetCurrent() - queuedAt) * 1000
                 )
@@ -273,7 +273,7 @@ actor ThumbnailDecodeCoordinator {
             let decodeStart = ScrollPerformanceProfile.isEnabled ? CFAbsoluteTimeGetCurrent() : nil
             let result = await decodeOperation(job.path, job.priority)
             if let decodeStart {
-                ScrollPerformanceProfile.recordMetric(
+                ScrollPerformanceProfile.recordTiming(
                     name: "image.thumbnail_imageio_decode_ms",
                     elapsedMs: (CFAbsoluteTimeGetCurrent() - decodeStart) * 1000
                 )
@@ -314,7 +314,7 @@ actor ThumbnailDecodeCoordinator {
         waiterCount -= job.waiters.count
         for waiter in job.waiters.values {
             if let coalescedAt = waiter.coalescedAt {
-                ScrollPerformanceProfile.recordMetric(
+                ScrollPerformanceProfile.recordTiming(
                     name: "image.thumbnail_inflight_wait_ms",
                     elapsedMs: (CFAbsoluteTimeGetCurrent() - coalescedAt) * 1000
                 )
@@ -455,19 +455,19 @@ public final class ThumbnailCache {
 
         if let profileStart {
             let elapsed = (CFAbsoluteTimeGetCurrent() - profileStart) * 1000
-            ScrollPerformanceProfile.recordMetric(name: "image.thumbnail_decode_ms", elapsedMs: elapsed)
+            ScrollPerformanceProfile.recordTiming(name: "image.thumbnail_decode_ms", elapsedMs: elapsed)
         }
         let commitStart = ScrollPerformanceProfile.isEnabled ? CFAbsoluteTimeGetCurrent() : nil
         let image = NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
         store(image, forPath: path)
         if let commitStart {
-            ScrollPerformanceProfile.recordMetric(
+            ScrollPerformanceProfile.recordTiming(
                 name: "image.thumbnail_main_commit_ms",
                 elapsedMs: (CFAbsoluteTimeGetCurrent() - commitStart) * 1000
             )
         }
         if let profileStart {
-            ScrollPerformanceProfile.recordMetric(
+            ScrollPerformanceProfile.recordTiming(
                 name: "image.thumbnail_load_total_ms",
                 elapsedMs: (CFAbsoluteTimeGetCurrent() - profileStart) * 1000
             )
