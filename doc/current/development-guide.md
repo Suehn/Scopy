@@ -5,6 +5,7 @@ owner: maintainers
 last_reviewed: 2026-07-11
 canonical: true
 related_versions:
+  - v0.65.2
   - v0.65.0
 ---
 
@@ -201,6 +202,15 @@ Implication: if you touch settings behavior, preserve the Save/Cancel model and 
 
 ## Build, Test, And Validation Workflow
 
+### Lightweight Development Workflow
+
+- Trellis tasks, PRDs, JSONL context, developer journals, and Trellis-specific agents or skills are not required.
+- For a small, well-bounded change, inspect the relevant code and canonical docs, implement it directly, run scope-appropriate validation, and report the result.
+- For a complex, cross-module, or high-risk change, write a short working plan. Add a document under `doc/proposals/` only when the design needs durable review, staged implementation, or future reuse.
+- Use sub-agents only when work can be split into genuinely independent investigations or reviews. They are optional, and the primary agent remains responsible for integration and validation.
+- Existing task artifacts may be consulted as historical input, but they do not define active workflow state or completion. Current contracts live in `project.yml`, source, tests, and canonical `doc/current/` documents.
+- Match validation to risk: documentation-only changes need relevant documentation checks; functional code normally needs build and unit coverage; concurrency, performance, release, UI, and hotkey changes add their scope-specific gates below.
+
 ### Baseline Build/Test
 
 - `make build`
@@ -293,10 +303,17 @@ Implication: if you touch settings behavior, preserve the Save/Cancel model and 
 - Release publication consumes a deliberate existing tag; ordinary CI must never create or push one.
 - Select roadmap work by evidenced severity, affected surface, recurrence/likelihood, and confidence relative to implementation/rollback cost. Prefer crashes, data-integrity failures, unsafe release paths, and measured systemic bottlenecks over cosmetic cleanup or speculative micro-optimization.
 
+## Logging And Privacy
+
+- Use the subsystem-specific `ScopyLog` categories (`app`, `monitor`, `storage`, `persistence`, `search`, `ui`, and `hotkey`) instead of ad hoc `print` or `NSLog` calls in production paths.
+- Treat clipboard text, query strings, file paths, bundle identifiers, note contents, raw payloads, and unfiltered error descriptions as private by default. Never log clipboard bodies, image bytes, note contents, or file contents.
+- Counts, durations, thresholds, and feature-state values may be public only when they cannot reveal user content.
+- Avoid per-item logging in clipboard polling, list rendering, search candidates, or other hot loops unless it is sampled or guarded by an explicit diagnostic/profile flag.
+
 ## Related Docs
 
 - Active requirements: [product-spec.md](./product-spec.md)
-- High-leverage task selection: [high-leverage-change-guide.md](../../.trellis/spec/guides/high-leverage-change-guide.md)
+- High-leverage task selection: [high-leverage-change-guide.md](./high-leverage-change-guide.md)
 - Release workflow: [release-runbook.md](./release-runbook.md)
 - Short maintainer navigation: [maintainer-guide.md](./maintainer-guide.md)
 - Current release window: [../releases/README.md](../releases/README.md)

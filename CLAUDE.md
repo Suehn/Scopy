@@ -16,9 +16,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - 不要凭记忆编 Apple API：先用 MCP `cupertino` 搜索/阅读 Apple Developer Documentation 或 sample code，确认**精确签名**与平台可用性再写代码。
 - 当文档与编译器提示冲突，以编译器为最终裁判；提交前必须能本地编译通过。
 
-### 验证闭环（改代码后必跑）
+### 验证闭环（按风险）
 
-- 基线：`make build` + `make test-unit`
+- 纯文档或元数据修改只跑相关校验，不强制构建应用。
+- 功能代码修改默认跑 `make build` + `make test-unit`；局部、低风险修改可先跑定向测试，交付时说明未跑的门禁及原因。
 - 并发/actor/线程相关：额外跑 `make test-strict`；需要时跑 `make test-tsan`
 - 性能改动（搜索/清理/滚动）：
   - 后端至少跑 `make test-snapshot-perf-release`
@@ -28,25 +29,22 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - 热键相关：自查 `/tmp/scopy_hotkey.log`（按下仅触发一次，且包含 `updateHotKey()`）
 - 注意：`make build/test*` 会触发 `make setup`；若缺 `xcodegen` 可能会尝试 `brew install xcodegen`，在无法联网或未授权时先询问。
 
-## 开发工作流 (必读)
+## 轻量开发工作流
 
-### 每次对话开始时
+### 默认做法
 
-1. **读取** `doc/meta/release-current.yml` - 了解当前版本和 canonical 文档入口
-2. **读取** `doc/releases/README.md` / `doc/releases/CHANGELOG.md` - 了解最新 release 状态
-3. **参考** `doc/current/product-spec.md` - 当前需求基线
-4. **参考** `doc/current/development-guide.md` - 当前开发与实现指南
+- 不要求创建 Trellis task、PRD、JSONL context、developer journal，也不要求使用 Trellis 专用 sub-agent/skill。
+- 简单、边界明确的任务直接检查、修改、验证并交付。
+- 复杂、跨模块或高风险任务先写一个短计划；只有设计需要长期保存、多人评审或分阶段实施时，才在 `doc/proposals/` 新建 proposal。
+- sub-agent 只在任务可独立并行且确有收益时按需使用，不作为开发前置条件。
+- 开始时先看 `doc/meta/release-current.yml` 提供的 canonical 入口，再按改动范围读取 `doc/current/product-spec.md`、`doc/current/development-guide.md` 或其他相关文档；只有涉及近期 release 状态时才读取 release index 和 changelog。
 
-### 每次开发完成后
+### 文档收尾
 
-必须更新以下文档:
-
-1. **更新 release metadata** `doc/meta/release-current.yml`
-2. **创建/更新版本文档** `doc/releases/history/vX.Y.Z.md`
-3. **更新索引** `doc/releases/README.md`
-4. **更新变更日志** `doc/releases/CHANGELOG.md`
-5. **更新部署文档** `doc/current/release-runbook.md` (如有性能/部署变化，必须包含具体数值)
-6. **版本发布一律用 git tag**：发布版本号不得由 commit count 自动生成；tag 作为发布单一事实来源（详见 `AGENTS.md` 与 `doc/current/release-runbook.md`）。
+- 普通开发只更新被改动语义直接影响的 canonical 文档，不为流程完整性机械创建 release 文档。
+- 准备 release、改变当前发布事实或用户明确要求时，才更新 `doc/meta/release-current.yml`、版本文档、release index 和 CHANGELOG。
+- 性能或部署语义变化必须更新 `doc/current/release-runbook.md`，并记录环境与具体数值。
+- 版本发布一律用 git tag：发布版本号不得由 commit count 自动生成；tag 作为发布单一事实来源（详见 `AGENTS.md` 与 `doc/current/release-runbook.md`）。
 
 ### 版本命名规范
 

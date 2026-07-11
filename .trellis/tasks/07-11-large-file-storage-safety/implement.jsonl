@@ -1,8 +1,0 @@
-{"file":".trellis/spec/backend/index.md","reason":"Apply the ScopyKit backend boundary, baseline, and mandatory validation contract."}
-{"file":".trellis/spec/backend/directory-structure.md","reason":"Keep the SQLite adapter and file metadata logic in their existing backend layers without public API churn."}
-{"file":".trellis/spec/backend/database-guidelines.md","reason":"Preserve SQLite prepared statements, actor isolation, schema version, triggers, cleanup semantics, and migration safety."}
-{"file":".trellis/spec/backend/error-handling.md","reason":"Avoid fatal or silent narrowing; preserve typed propagation and cancellation behavior."}
-{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Require focused large-value tests plus build, unit, strict, and snapshot performance gates."}
-{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"Correct the shared integer adapter instead of duplicating per-column 64-bit patches."}
-{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Trace filesystem metadata through service, repository, SQLite, cleanup, search hydration, and presentation."}
-{"file":".trellis/tasks/07-11-large-file-storage-safety/research/large-file-persistence-audit.md","reason":"Use the current-worktree crash/truncation evidence, exact call sites, schema conclusion, and regression matrix."}

@@ -11,6 +11,23 @@
 
 - No unreleased entries.
 
+## [v0.65.2] - 2026-07-11
+
+### Tooling
+
+- Removes the project-level Trellis runtime, task store, generated agent/command adapters, and automatic workflow-context hooks from the repository.
+- Replaces the mandatory Trellis task lifecycle with a lightweight repository-native AI workflow centered on `AGENTS.md`, `CLAUDE.md`, canonical `doc/current` guidance, scoped inspection, implementation, and proportional verification.
+- Keeps the independent Scopy release skill while removing Trellis-specific skills that previously triggered task creation, phase tracking, spec injection, and finish-work bookkeeping.
+
+### Documentation
+
+- Preserves durable engineering guidance outside `.trellis` and moves the active Markdown preview architecture proposal into the normal documentation tree before removing Trellis-owned storage.
+- Keeps product behavior, performance baselines, build baselines, and deployment behavior unchanged; no performance profile or release-runbook update is required.
+
+### Verification
+
+- The active-dependency scan found no remaining project-level Trellis hook, command, agent, skill, workflow, or canonical-document dependency. `make docs-validate`, `make release-validate`, and `make build` passed; `make test-unit` passed with 727 tests executed, 1 skipped, and 0 failures.
+
 ## [v0.65.1] - 2026-07-11
 
 ### Release/Packaging

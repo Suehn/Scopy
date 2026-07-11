@@ -1,3 +1,0 @@
-{"file":".trellis/spec/backend/build-release-guidelines.md","reason":"Validate output isolation, error behavior, unsafe override rejection, and repeatability acceptance."}
-{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Verify build, unit, performance, and release gates."}
-{"file":".trellis/spec/frontend/quality-guidelines.md","reason":"Verify final app build and focused preview UI behavior remain intact."}

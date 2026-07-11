@@ -1,6 +1,0 @@
-{"file":".trellis/spec/backend/index.md","reason":"Apply Scopy repository baselines and release-sensitive backend/tooling gates."}
-{"file":".trellis/spec/backend/build-release-guidelines.md","reason":"Preserve the tag-driven packaging, version, output, and release validation contracts."}
-{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Require risk-proportional build, unit, strict, documentation, and release validation."}
-{"file":".trellis/spec/guides/high-leverage-change-guide.md","reason":"Keep the implementation focused on the confirmed release-trust P0 and a small rollback surface."}
-{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"Extend the existing release validator and Make/CI paths instead of creating a competing gate system."}
-{"file":".trellis/tasks/07-11-release-tag-quality-gate/research/release-tag-gating.md","reason":"Use current workflow evidence, official GitHub contracts, failure matrix, alternatives, and the chosen explicit-tag approach."}

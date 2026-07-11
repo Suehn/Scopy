@@ -61,7 +61,7 @@ Scopy 已具备不错的工程基础：服务与仓储普遍采用 actor 隔离�
 
 ### P0.1 合法大文件可确定性崩溃
 
-状态：**已关闭（2026-07-11，`ecc8a83`）**。历史证据保留如下；当前可执行契约见 `.trellis/spec/backend/database-guidelines.md`。
+状态：**已关闭（2026-07-11，`ecc8a83`）**。历史证据保留如下；当前可执行数据库契约见 [development-guide.md](../../current/development-guide.md)。
 
 `Scopy/Infrastructure/Persistence/SQLiteConnection.swift:133` 的 `bindInt` 将 Swift `Int` 直接转为 `Int32`。文件项会在 `Scopy/Utilities/FilePreviewSupport.swift:137` 计算真实总大小，并经 `Scopy/Application/ClipboardService.swift:1138`、`Scopy/Infrastructure/Persistence/SQLiteClipboardRepository.swift:244` 写回。任一正常的 4K 视频、磁盘镜像或多文件总计超过 2 GiB 时都会 runtime trap；项目已经入库，重启后可能再次计算并形成重复崩溃。
 

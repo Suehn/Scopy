@@ -1,6 +1,6 @@
-version: v0.65.1
+version: v0.65.2
 date: 2026-07-11
-release_doc: doc/releases/history/v0.65.1.md
+release_doc: doc/releases/history/v0.65.2.md
 release_index: doc/releases/README.md
 changelog_file: doc/releases/CHANGELOG.md
 profile_doc: null
@@ -9,14 +9,10 @@ spec_doc: doc/current/product-spec.md
 development_doc: doc/current/development-guide.md
 architecture_doc: doc/current/architecture.md
 last_verified_at: 2026-07-11
-summary: Unify GitHub and local tagged packaging on the DerivedData-aware release script
+summary: Replace project-level Trellis orchestration with a lightweight repository-native AI workflow
 verification:
+  trellis_reference_scan: pass_no_active_project_dependencies
+  docs_validate: pass
+  release_validate: pass
   build: pass
-  test_unit: pass
-  test_strict: pass
-  test_tsan: pass
-  test_perf_heavy: pass_targeted_cleanup_2_tests
-  test_snapshot_perf_release: pass
-  perf_frontend_profile: pass_two_fixed_ab_axes_full_three_repeat_and_hover_smoke_variance_recorded
-  release_policy: pass_15_tests
-  release_package: pass_local_tagged_dmg_sha256
+  test_unit: pass_727_executed_1_skipped_0_failures

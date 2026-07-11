@@ -19,9 +19,9 @@ This page is the human-facing index for current release state. Automation should
 ## Current Release
 
 <!-- release-current:start -->
-- Version: `v0.65.1`
+- Version: `v0.65.2`
 - Date: `2026-07-11`
-- Release note: [v0.65.1](./history/v0.65.1.md)
+- Release note: [v0.65.2](./history/v0.65.2.md)
 - Changelog: [CHANGELOG.md](./CHANGELOG.md)
 - Profile doc: `none`
 <!-- release-current:end -->
@@ -29,6 +29,7 @@ This page is the human-facing index for current release state. Automation should
 ## Recent Releases
 
 <!-- release-recent:start -->
+- `2026-07-11` [v0.65.2](./history/v0.65.2.md) - Replace project-level Trellis orchestration with a lightweight repository-native AI workflow
 - `2026-07-11` [v0.65.1](./history/v0.65.1.md) - Unify GitHub and local tagged packaging on the DerivedData-aware release script
 - `2026-07-11` [v0.65.0](./history/v0.65.0.md) - Crash-consistent clipboard ingest, race-safe cleanup, passive-row performance, lossless storage accounting, and explicit release tag authority
 - `2026-06-15` [v0.8.8](./history/v0.8.8.md) - Scroll row cache and lazy Markdown export checks
@@ -40,7 +41,6 @@ This page is the human-facing index for current release state. Automation should
 - `2026-05-16` [v0.8.2](./history/v0.8.2.md) - Markdown safe HTML renderer routing and rich HTML fallback hardening
 - `2026-05-16` [v0.8.1](./history/v0.8.1.md) - Unified Markdown code highlighting and theme parity fix
 - `2026-05-16` [v0.8.0](./history/v0.8.0.md) - Unified Markdown renderer preview and export hardening
-- `2026-05-09` [v0.7.9](./history/v0.7.9.md) - Search focus selection restoration and TSan host shortcut coverage fix
 <!-- release-recent:end -->
 
 ## Full History

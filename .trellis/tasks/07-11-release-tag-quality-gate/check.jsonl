@@ -1,5 +1,0 @@
-{"file":".trellis/spec/backend/index.md","reason":"Audit final scope, package boundaries, baselines, and required quality gates."}
-{"file":".trellis/spec/backend/build-release-guidelines.md","reason":"Verify the explicit tag-driven release and packaging contracts remain intact."}
-{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Check focused policy tests plus build, unit, strict, docs, and release validation evidence."}
-{"file":".trellis/spec/guides/high-leverage-change-guide.md","reason":"Reject unrelated cleanup and confirm the change closes the evidenced P0 with coherent rollback."}
-{"file":".trellis/tasks/07-11-release-tag-quality-gate/research/release-tag-gating.md","reason":"Check every confirmed bypass, race, token-trigger, rename, and false-positive case against implementation and tests."}

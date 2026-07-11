@@ -11,11 +11,19 @@
 
 - 不要凭记忆编 Apple / Swift API：先用 MCP `cupertino` 搜索/阅读 Apple 文档或 sample code，确认**精确签名**与平台可用性再落代码。
 - 文档仍以编译器为裁判：写完立刻本地编译/测试，不留“占位实现”。
-- 复杂/跨模块任务优先**并行**调用 sub-agents 分区探索与风险 review（例如 UI/搜索/存储/工具链/测试），主代理负责汇总结论并落地实现/验证；sub-agent 产出需落到可引用的 `file:line`，并在完成后及时关闭以释放资源。
 
-### 验证闭环（改代码后必跑）
+### 轻量工作流（默认）
 
-- 基线：`make build` + `make test-unit`
+- 不要求创建 Trellis task、PRD、JSONL context、developer journal，也不要求调用 Trellis 专用 sub-agent/skill。
+- 简单、边界明确的任务直接检查、修改、验证并交付，不为流程本身创建额外文档。
+- 复杂、跨模块或高风险任务先写一个短计划；只有需要长期保存设计取舍、多人评审或分阶段实施时，才在 `doc/proposals/` 新建 proposal。
+- sub-agent 仅在可独立并行、确实能降低风险或等待时间时按需使用，不是完成任务的前置条件；主代理仍负责整合、实现与验证。
+- 既有任务材料只是参考资料，不是运行时状态或完成门禁。项目级事实以 `project.yml`、源码、测试和 `doc/current/` 的 canonical 文档为准。
+
+### 验证闭环（按风险）
+
+- 纯文档或元数据修改只跑相关校验，不强制构建应用。
+- 功能代码修改默认跑 `make build` + `make test-unit`；局部、低风险修改可先跑定向测试，交付时说明未跑的门禁及原因。
 - 并发/actor/线程相关：额外跑 `make test-strict`；需要时跑 `make test-tsan`
 - 性能改动（搜索/清理/滚动）：
   - 后端至少跑 `make test-snapshot-perf-release`
@@ -28,8 +36,8 @@
 ## 必读文档
 
 - 行为准则要同时参考 @CLAUDE.md 的说法准则
-- 启动前依次阅读：`doc/meta/release-current.yml`（当前版本与入口）、`doc/releases/README.md`/`doc/releases/CHANGELOG.md`（近期改动）、`doc/current/product-spec.md`（需求）、`doc/current/development-guide.md`（开发指南）。
-- CLAUDE 约定：完成开发必须更新 release metadata、版本文档、索引、CHANGELOG；性能/部署变更需写入 `doc/current/release-runbook.md`，含环境与具体数值。
+- 开始任务时按需读取：先看 `doc/meta/release-current.yml` 的 canonical 入口，再读取与改动相关的 `doc/current/` 文档；涉及近期发布状态时再看 `doc/releases/README.md` / `doc/releases/CHANGELOG.md`。
+- 普通开发不要求为每次改动更新 release metadata 或新建版本文档。只有准备 release、改变当前发布事实或用户明确要求时才更新 release metadata、版本文档、索引和 CHANGELOG；性能/部署变化仍需写入 `doc/current/release-runbook.md`，含环境与具体数值。
 
 ## 项目结构
 
