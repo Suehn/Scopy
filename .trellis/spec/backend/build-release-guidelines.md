@@ -93,3 +93,98 @@ xcodebuild build \
   -configuration Release \
   -derivedDataPath "$XCODE_DERIVED_DATA"
 ```
+
+## Scenario: Keep Release Tag Authority Explicit
+
+### 1. Scope / Trigger
+
+Apply this contract when changing `.github/workflows/`, `scripts/release/`, release-related Make targets, or the tag-driven packaging flow. A push to `main` may validate a release candidate, but it must never create or push a Git tag. Conditional performance, concurrency, UI, and packaging gates depend on the change scope and cannot be inferred safely by a generic push-triggered tag job.
+
+### 2. Signatures
+
+```bash
+make release-validate
+make test-release-policy
+make tag-release
+make push-release
+
+python3 scripts/release/validate_workflow_tag_policy.py \
+  [--workflow-dir /path/to/workflows]
+```
+
+Only the explicit maintainer commands `make tag-release` and `make push-release` may invoke `scripts/release/tag-from-doc.sh` and create the metadata-derived tag.
+
+### 3. Contracts
+
+- Every non-release workflow declares top-level `permissions: contents: read` (or `read-all`) so all jobs remain read-only even if repository defaults drift.
+- `.github/workflows/release.yml` is the only workflow allowed `contents: write`; its entrypoints are exactly `push.tags: ["v*"]` and `workflow_dispatch`.
+- Workflows may consume an existing tag, parse a tag name, publish an existing tag's assets, and push the branch-only cask update as the exact command `git push origin HEAD:main`.
+- No workflow may invoke `tag-from-doc.sh`, execute `git tag`, create `refs/tags/*`, create a release tag through `gh`/`hub`, use a known tag-creation action, or perform any other `git push` form.
+- `make release-validate` must run `validate_workflow_tag_policy.py`; the validator uses only the Python standard library and scans both `.yml` and `.yaml` workflow files by content.
+- A release tag is created only after the maintainer has completed the gates required by `doc/current/release-runbook.md`; pushing release documents alone is validation-only.
+
+### 4. Validation And Error Matrix
+
+| Condition | Required behavior |
+|---|---|
+| Non-release workflow omits top-level read-only permissions | Policy exits 1 before any job can inherit repository defaults |
+| Non-release workflow grants `contents: write` or `write-all` | Policy exits 1 and reports file, line, and reason |
+| Any workflow creates or pushes a tag | Policy exits 1, even if the workflow was renamed |
+| Release workflow adds a branch, path, PR, schedule, or `workflow_run` trigger | Policy exits 1 |
+| Release workflow loses `v*` tag or explicit dispatch entrypoint | Policy exits 1 |
+| Workflow directory is missing or empty | Policy exits 2 |
+| Existing tag-driven release plus exact `HEAD:main` cask update | Policy exits 0 |
+| Release metadata/document mismatch | `make release-validate` exits nonzero before any explicit tag command |
+
+### 5. Good / Base / Bad Cases
+
+- Good: CI validates docs, release metadata, policy fixtures, build, unit tests, and strict concurrency while retaining read-only repository permission.
+- Base: a maintainer runs the required gates, commits the release candidate, then deliberately runs `make tag-release` or `make push-release`.
+- Bad: a `main`-push workflow runs `tag-from-doc.sh --ensure` after only validating release-document shape.
+- Bad: a renamed workflow uses `git push --follow-tags`, a direct `refs/tags/...` API call, or a third-party tag action.
+- Bad: relying on a tag pushed with the repository `GITHUB_TOKEN` to recursively trigger the release workflow.
+
+### 6. Tests Required
+
+1. `make test-release-policy`; assert the real workflows and safe tag-trigger fixture pass.
+2. Assert missing top-level read permission, renamed helper, `git tag`, non-allowlisted push, direct tag-ref API, release-creation CLI, known tag action, write permission, forbidden release trigger, and folded-scalar fixtures fail for the intended reason.
+3. `make release-validate` and `make docs-validate`; assert both exit 0.
+4. Parse every workflow as YAML and run `python3 -m py_compile` on the validator/tests.
+5. Run `make build`, `make test-unit`, and `make test-strict` for workflow-policy changes.
+6. Assert `scripts/release/tag-from-doc.sh`, `scripts/release/push-main.sh`, `.github/workflows/release.yml`, and `project.yml` are unchanged unless explicitly in task scope.
+7. Assert the candidate tag is absent locally and remotely; never exercise tag, push, dispatch, release, or Homebrew mutation during policy tests.
+
+### 7. Wrong Vs Correct
+
+#### Wrong
+
+```yaml
+on:
+  push:
+    branches: [main]
+permissions:
+  contents: write
+steps:
+  - run: bash scripts/release/tag-from-doc.sh --ensure
+  - run: git push origin "$TAG"
+```
+
+#### Correct
+
+```yaml
+# ci.yml validates but cannot publish.
+permissions:
+  contents: read
+steps:
+  - run: make release-validate
+  - run: make test-release-policy
+```
+
+```yaml
+# release.yml consumes a deliberate existing tag.
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+```
