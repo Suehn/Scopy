@@ -52,20 +52,20 @@
 ### P0.1 已完成: 启动失败不再回退到 Mock History
 
 当前实现只在 `DEBUG` 且显式启用 `USE_MOCK_SERVICE` 时才允许 mock service；真实服务启动失败会进入 `startupFailed`，并暴露重试与诊断复制路径，而不是伪装成一份可用的假历史：
-[AppState.swift](/Users/ziyi/Documents/code/Scopy/Scopy/Observables/AppState.swift#L119)
-[AppState.swift](/Users/ziyi/Documents/code/Scopy/Scopy/Observables/AppState.swift#L155)
-[AppState.swift](/Users/ziyi/Documents/code/Scopy/Scopy/Observables/AppState.swift#L179)
+[AppState.swift](../../Scopy/Observables/AppState.swift#L119)
+[AppState.swift](../../Scopy/Observables/AppState.swift#L155)
+[AppState.swift](../../Scopy/Observables/AppState.swift#L179)
 
 原始风险已经关闭；这里保留 P0 的目的，是提醒后续版本不要重新引入 silent fallback。
 
 ### P0.2 已完成: Exact 小于等于 2 与 Regex 明确收口为 recent-only 契约
 
 当前实现已经把 `SearchCoverage` 升级为显式契约；`Exact <= 2` 与 `Regex` 明确走 `.recentOnly(limit: 2000)`，并由 UI 文案直接表达限制，而不是再借 `isPrefilter` 隐含表示：
-[SearchCoverage.swift](/Users/ziyi/Documents/code/Scopy/Scopy/Domain/Models/SearchCoverage.swift#L3)
-[SearchEngineImpl.swift](/Users/ziyi/Documents/code/Scopy/Scopy/Infrastructure/Search/SearchEngineImpl.swift#L2082)
-[SearchEngineImpl.swift](/Users/ziyi/Documents/code/Scopy/Scopy/Infrastructure/Search/SearchEngineImpl.swift#L2133)
-[HistoryViewModel.swift](/Users/ziyi/Documents/code/Scopy/Scopy/Observables/HistoryViewModel.swift#L107)
-[product-spec.md](/Users/ziyi/Documents/code/Scopy/doc/current/product-spec.md#L69)
+[SearchCoverage.swift](../../Scopy/Domain/Models/SearchCoverage.swift#L3)
+[SearchEngineImpl.swift](../../Scopy/Infrastructure/Search/SearchEngineImpl.swift#L2082)
+[SearchEngineImpl.swift](../../Scopy/Infrastructure/Search/SearchEngineImpl.swift#L2133)
+[HistoryViewModel.swift](../../Scopy/Observables/HistoryViewModel.swift#L107)
+[product-spec.md](../../doc/current/product-spec.md#L69)
 
 原始风险已经关闭；保留这一项，是为了强调 recent-only 必须始终作为产品契约而不是隐藏实现细节。
 
@@ -76,31 +76,31 @@
 ### P1.1 已完成: Clipboard ingest 的 silent drop 风险已收敛
 
 当前实现已经把大内容 ingest 改成 envelope + durable replay 路径；monitor 启动时会 replay disk 上的 pending 内容，并把 replay / soft-limit / active ingest 暴露到诊断面板，避免 silent drop 继续藏在内部状态里：
-[ClipboardMonitor.swift](/Users/ziyi/Documents/code/Scopy/Scopy/Services/ClipboardMonitor.swift#L331)
-[ClipboardMonitor.swift](/Users/ziyi/Documents/code/Scopy/Scopy/Services/ClipboardMonitor.swift#L910)
-[AboutSettingsPage.swift](/Users/ziyi/Documents/code/Scopy/Scopy/Views/Settings/AboutSettingsPage.swift#L106)
+[ClipboardMonitor.swift](../../Scopy/Services/ClipboardMonitor.swift#L331)
+[ClipboardMonitor.swift](../../Scopy/Services/ClipboardMonitor.swift#L910)
+[AboutSettingsPage.swift](../../Scopy/Views/Settings/AboutSettingsPage.swift#L106)
 
 原始风险已经关闭；这里保留 P1 的目的，是提醒后续不要回退到“满了就丢、失败就算”的 best-effort ingest。
 
 ### P1.2 已完成: 搜索完成度模型已升级为 SearchCoverage
 
 `SearchCoverage` 现在显式区分 `complete`、`stagedRefine` 和 `recentOnly(limit:)`；ViewModel 也直接基于 coverage 生成状态文本和限制提示，不再让一个布尔值同时表达多种结果语义：
-[SearchCoverage.swift](/Users/ziyi/Documents/code/Scopy/Scopy/Domain/Models/SearchCoverage.swift#L3)
-[HistoryViewModel.swift](/Users/ziyi/Documents/code/Scopy/Scopy/Observables/HistoryViewModel.swift#L103)
-[HistoryViewModel.swift](/Users/ziyi/Documents/code/Scopy/Scopy/Observables/HistoryViewModel.swift#L128)
-[SearchEngineImpl.swift](/Users/ziyi/Documents/code/Scopy/Scopy/Infrastructure/Search/SearchEngineImpl.swift#L59)
-[SearchEngineImpl.swift](/Users/ziyi/Documents/code/Scopy/Scopy/Infrastructure/Search/SearchEngineImpl.swift#L2141)
-[SearchEngineImpl.swift](/Users/ziyi/Documents/code/Scopy/Scopy/Infrastructure/Search/SearchEngineImpl.swift#L2404)
-[SearchEngineImpl.swift](/Users/ziyi/Documents/code/Scopy/Scopy/Infrastructure/Search/SearchEngineImpl.swift#L3357)
+[SearchCoverage.swift](../../Scopy/Domain/Models/SearchCoverage.swift#L3)
+[HistoryViewModel.swift](../../Scopy/Observables/HistoryViewModel.swift#L103)
+[HistoryViewModel.swift](../../Scopy/Observables/HistoryViewModel.swift#L128)
+[SearchEngineImpl.swift](../../Scopy/Infrastructure/Search/SearchEngineImpl.swift#L59)
+[SearchEngineImpl.swift](../../Scopy/Infrastructure/Search/SearchEngineImpl.swift#L2141)
+[SearchEngineImpl.swift](../../Scopy/Infrastructure/Search/SearchEngineImpl.swift#L2404)
+[SearchEngineImpl.swift](../../Scopy/Infrastructure/Search/SearchEngineImpl.swift#L3357)
 
 原始模型问题已经关闭；生产路径现在直接构造 `coverage`，`isPrefilter` 只剩兼容 shim。后续要继续盯的是 coverage 与分页、排序、性能证据是否持续一致。
 
 ### P1.3 已完成: Header Search Mode 不再直接持久化默认值
 
 当前 Header 的模式切换只更新当前会话的 `historyViewModel.searchMode` 并立即重新搜索；默认模式仍然只在设置页管理，二者的用户心智已经拆开：
-[HeaderView.swift](/Users/ziyi/Documents/code/Scopy/Scopy/Views/HeaderView.swift#L82)
-[HeaderView.swift](/Users/ziyi/Documents/code/Scopy/Scopy/Views/HeaderView.swift#L109)
-[GeneralSettingsPage.swift](/Users/ziyi/Documents/code/Scopy/Scopy/Views/Settings/GeneralSettingsPage.swift#L15)
+[HeaderView.swift](../../Scopy/Views/HeaderView.swift#L82)
+[HeaderView.swift](../../Scopy/Views/HeaderView.swift#L109)
+[GeneralSettingsPage.swift](../../Scopy/Views/Settings/GeneralSettingsPage.swift#L15)
 
 原始心智冲突已经关闭；后续可继续优化的是模式命名、提示密度和 discoverability，而不是再把 default/session 混回一起。
 
@@ -112,35 +112,35 @@
 - Hotkey 录制完成后立即生效并持久化
 
 证据：
-[product-spec.md](/Users/ziyi/Documents/code/Scopy/doc/current/product-spec.md#L64)
-[development-guide.md](/Users/ziyi/Documents/code/Scopy/doc/current/development-guide.md#L89)
+[product-spec.md](../../doc/current/product-spec.md#L64)
+[development-guide.md](../../doc/current/development-guide.md#L89)
 
 实现上：
 
 - Settings dirty 计算和保存都显式 droppingHotkey():
-  [SettingsView.swift](/Users/ziyi/Documents/code/Scopy/Scopy/Views/Settings/SettingsView.swift#L82)
-  [SettingsView.swift](/Users/ziyi/Documents/code/Scopy/Scopy/Views/Settings/SettingsView.swift#L168)
+  [SettingsView.swift](../../Scopy/Views/Settings/SettingsView.swift#L82)
+  [SettingsView.swift](../../Scopy/Views/Settings/SettingsView.swift#L168)
 - Shortcuts 页文案明确写了录制完成后立即生效并持久化：
-  [ShortcutsSettingsPage.swift](/Users/ziyi/Documents/code/Scopy/Scopy/Views/Settings/ShortcutsSettingsPage.swift#L10)
+  [ShortcutsSettingsPage.swift](../../Scopy/Views/Settings/ShortcutsSettingsPage.swift#L10)
 - HotKeyRecorderView 在录制成功后立刻调用 runtime apply，再等待持久化回读：
-  [HotKeyRecorderView.swift](/Users/ziyi/Documents/code/Scopy/Scopy/Views/Settings/HotKeyRecorderView.swift#L37)
-  [HotKeyRecorderView.swift](/Users/ziyi/Documents/code/Scopy/Scopy/Views/Settings/HotKeyRecorderView.swift#L74)
+  [HotKeyRecorderView.swift](../../Scopy/Views/Settings/HotKeyRecorderView.swift#L37)
+  [HotKeyRecorderView.swift](../../Scopy/Views/Settings/HotKeyRecorderView.swift#L74)
 
 这条链是工程上自洽的。真正的问题是：
 
 - 改 hotkey 再点 Cancel，不会回滚 hotkey
 - 恢复默认也不会恢复 hotkey 默认值，而是保留当前 hotkey
-  [SettingsView.swift](/Users/ziyi/Documents/code/Scopy/Scopy/Views/Settings/SettingsView.swift#L125)
+  [SettingsView.swift](../../Scopy/Views/Settings/SettingsView.swift#L125)
 
 ### P1.5 冷启动与 warm-load 成本被当前文档低估
 
 上一版报告把搜索性能风险主要框成内存压力，但当前更需要前置的是冷启动与 warm-load 的真实成本。
 
 FullFuzzyIndex 在内存中保留 plainTextLower：
-[SearchEngineImpl.swift](/Users/ziyi/Documents/code/Scopy/Scopy/Infrastructure/Search/SearchEngineImpl.swift#L163)
+[SearchEngineImpl.swift](../../Scopy/Infrastructure/Search/SearchEngineImpl.swift#L163)
 
 full-index disk cache 也会持久化同样的 plainTextLower：
-[SearchEngineImpl.swift](/Users/ziyi/Documents/code/Scopy/Scopy/Infrastructure/Search/SearchEngineImpl.swift#L299)
+[SearchEngineImpl.swift](../../Scopy/Infrastructure/Search/SearchEngineImpl.swift#L299)
 
 warm load 时不是简单映射文件，而是：
 
@@ -149,7 +149,7 @@ warm load 时不是简单映射文件，而是：
 - PropertyListDecoder 解码完整 cache
 
 证据：
-[SearchEngineImpl.swift](/Users/ziyi/Documents/code/Scopy/Scopy/Infrastructure/Search/SearchEngineImpl.swift#L1572)
+[SearchEngineImpl.swift](../../Scopy/Infrastructure/Search/SearchEngineImpl.swift#L1572)
 
 这里的主风险不只是 steady-state RSS，而是全文字符串集合同时存在于运行时对象和 disk cache，warm-load 成本仍随体积线性增长。
 
@@ -158,28 +158,28 @@ warm load 时不是简单映射文件，而是：
 HistoryItemView 不只是 row view，而是同时管理：
 
 - PreviewTaskBudget
-  [HistoryItemView.swift](/Users/ziyi/Documents/code/Scopy/Scopy/Views/History/HistoryItemView.swift#L13)
+  [HistoryItemView.swift](../../Scopy/Views/History/HistoryItemView.swift#L13)
 - 多组 hover、preview、markdown、optimize、exit task
-  [HistoryItemView.swift](/Users/ziyi/Documents/code/Scopy/Scopy/Views/History/HistoryItemView.swift#L83)
+  [HistoryItemView.swift](../../Scopy/Views/History/HistoryItemView.swift#L83)
 - 多套 popover token 与 cleanup 逻辑
-  [HistoryItemView.swift](/Users/ziyi/Documents/code/Scopy/Scopy/Views/History/HistoryItemView.swift#L601)
+  [HistoryItemView.swift](../../Scopy/Views/History/HistoryItemView.swift#L601)
 
 当前直接覆盖已经包含 row controller 行为测试、list interaction coordinator 直接测试，以及 preview on scroll dismiss UI smoke：
-[HistoryItemRowControllerTests.swift](/Users/ziyi/Documents/code/Scopy/ScopyTests/HistoryItemRowControllerTests.swift#L6) [HistoryListInteractionCoordinatorTests.swift](/Users/ziyi/Documents/code/Scopy/ScopyTests/HistoryListInteractionCoordinatorTests.swift#L6) [HistoryListUITests.swift](/Users/ziyi/Documents/code/Scopy/ScopyUITests/HistoryListUITests.swift#L257)
+[HistoryItemRowControllerTests.swift](../../ScopyTests/HistoryItemRowControllerTests.swift#L6) [HistoryListInteractionCoordinatorTests.swift](../../ScopyTests/HistoryListInteractionCoordinatorTests.swift#L6) [HistoryListUITests.swift](../../ScopyUITests/HistoryListUITests.swift#L257)
 所以这块的主要风险不再是还没做 Equatable，而是 row-level state machine 仍然过重，view-layer snapshot / accessibility 回归也还不够直接。
 
 ### P1.7 已完成: 导出功能已经提升到一级动作，但反馈体系仍可继续统一
 
 当前 row context menu 已经暴露 export：
-[HistoryItemView.swift](/Users/ziyi/Documents/code/Scopy/Scopy/Views/History/HistoryItemView.swift#L764)
+[HistoryItemView.swift](../../Scopy/Views/History/HistoryItemView.swift#L764)
 
 preview 内的 export 按钮继续保留，承担更细的预览态导出入口：
-[HistoryItemTextPreviewView.swift](/Users/ziyi/Documents/code/Scopy/Scopy/Views/History/HistoryItemTextPreviewView.swift#L150)
+[HistoryItemTextPreviewView.swift](../../Scopy/Views/History/HistoryItemTextPreviewView.swift#L150)
 
 row controller 现在也直接管理导出中的状态和反馈：
-[HistoryItemRowControllerTests.swift](/Users/ziyi/Documents/code/Scopy/ScopyTests/HistoryItemRowControllerTests.swift#L7)
+[HistoryItemRowControllerTests.swift](../../ScopyTests/HistoryItemRowControllerTests.swift#L7)
 反馈仍偏局部，主要是 row-local transient message，而不是统一的全局反馈体系：
-[HistoryItemTextPreviewView.swift](/Users/ziyi/Documents/code/Scopy/Scopy/Views/History/HistoryItemTextPreviewView.swift#L330)
+[HistoryItemTextPreviewView.swift](../../Scopy/Views/History/HistoryItemTextPreviewView.swift#L330)
 
 原始“发现不了 export”的问题已经关闭；后续如果继续优化，重点应该放在跨入口反馈一致性，而不是再找入口本身。
 
@@ -227,25 +227,25 @@ row controller 现在也直接管理导出中的状态和反馈：
 ### 6.1 已有覆盖比上一版报告写得更强的地方
 
 - Search hardening:
-  - [FullIndexDiskCacheHardeningTests.swift](/Users/ziyi/Documents/code/Scopy/ScopyTests/FullIndexDiskCacheHardeningTests.swift)
-  - [ShortQueryIndexDiskCacheHardeningTests.swift](/Users/ziyi/Documents/code/Scopy/ScopyTests/ShortQueryIndexDiskCacheHardeningTests.swift)
-  - [FullIndexTombstoneUpsertStaleTests.swift](/Users/ziyi/Documents/code/Scopy/ScopyTests/FullIndexTombstoneUpsertStaleTests.swift)
+  - [FullIndexDiskCacheHardeningTests.swift](../../ScopyTests/FullIndexDiskCacheHardeningTests.swift)
+  - [ShortQueryIndexDiskCacheHardeningTests.swift](../../ScopyTests/ShortQueryIndexDiskCacheHardeningTests.swift)
+  - [FullIndexTombstoneUpsertStaleTests.swift](../../ScopyTests/FullIndexTombstoneUpsertStaleTests.swift)
 - Row / interaction coordination:
-  - [HistoryItemRowControllerTests.swift](/Users/ziyi/Documents/code/Scopy/ScopyTests/HistoryItemRowControllerTests.swift)
-  - [HistoryListInteractionCoordinatorTests.swift](/Users/ziyi/Documents/code/Scopy/ScopyTests/HistoryListInteractionCoordinatorTests.swift)
+  - [HistoryItemRowControllerTests.swift](../../ScopyTests/HistoryItemRowControllerTests.swift)
+  - [HistoryListInteractionCoordinatorTests.swift](../../ScopyTests/HistoryListInteractionCoordinatorTests.swift)
 - Clipboard priority rules:
-  - [ClipboardMonitorTests.swift](/Users/ziyi/Documents/code/Scopy/ScopyTests/ClipboardMonitorTests.swift#L456)
-  - [ClipboardMonitorTests.swift](/Users/ziyi/Documents/code/Scopy/ScopyTests/ClipboardMonitorTests.swift#L717)
-  - [ClipboardMonitorTests.swift](/Users/ziyi/Documents/code/Scopy/ScopyTests/ClipboardMonitorTests.swift#L774)
+  - [ClipboardMonitorTests.swift](../../ScopyTests/ClipboardMonitorTests.swift#L456)
+  - [ClipboardMonitorTests.swift](../../ScopyTests/ClipboardMonitorTests.swift#L717)
+  - [ClipboardMonitorTests.swift](../../ScopyTests/ClipboardMonitorTests.swift#L774)
 - Settings merge / hotkey protection:
-  - [SettingsConcurrencyMergeTests.swift](/Users/ziyi/Documents/code/Scopy/ScopyTests/SettingsConcurrencyMergeTests.swift#L9)
-  - [SettingsConcurrencyMergeTests.swift](/Users/ziyi/Documents/code/Scopy/ScopyTests/SettingsConcurrencyMergeTests.swift#L28)
+  - [SettingsConcurrencyMergeTests.swift](../../ScopyTests/SettingsConcurrencyMergeTests.swift#L9)
+  - [SettingsConcurrencyMergeTests.swift](../../ScopyTests/SettingsConcurrencyMergeTests.swift#L28)
 - UI tests 面比只有导出相关测试更广:
-  - [ScopyUITests/SettingsUITests.swift](/Users/ziyi/Documents/code/Scopy/ScopyUITests/SettingsUITests.swift)
-  - [ScopyUITests/ContextMenuUITests.swift](/Users/ziyi/Documents/code/Scopy/ScopyUITests/ContextMenuUITests.swift)
-  - [ScopyUITests/HistoryListUITests.swift](/Users/ziyi/Documents/code/Scopy/ScopyUITests/HistoryListUITests.swift)
-  - [ScopyUITests/KeyboardNavigationUITests.swift](/Users/ziyi/Documents/code/Scopy/ScopyUITests/KeyboardNavigationUITests.swift)
-  - [ScopyUITests/MainWindowUITests.swift](/Users/ziyi/Documents/code/Scopy/ScopyUITests/MainWindowUITests.swift)
+  - [ScopyUITests/SettingsUITests.swift](../../ScopyUITests/SettingsUITests.swift)
+  - [ScopyUITests/ContextMenuUITests.swift](../../ScopyUITests/ContextMenuUITests.swift)
+  - [ScopyUITests/HistoryListUITests.swift](../../ScopyUITests/HistoryListUITests.swift)
+  - [ScopyUITests/KeyboardNavigationUITests.swift](../../ScopyUITests/KeyboardNavigationUITests.swift)
+  - [ScopyUITests/MainWindowUITests.swift](../../ScopyUITests/MainWindowUITests.swift)
 
 ### 6.2 当前真正缺的测试
 
