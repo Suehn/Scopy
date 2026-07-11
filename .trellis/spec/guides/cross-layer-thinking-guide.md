@@ -38,6 +38,7 @@ For each arrow, ask:
 | Service ↔ Database | Format conversions, null handling |
 | Backend ↔ Frontend | Serialization, date formats |
 | Component ↔ Component | Props shape changes |
+| XCTest ↔ Filesystem ↔ App | File coordination, partial outputs, launch/scroll ownership |
 
 ### Step 3: Define Contracts
 
@@ -82,6 +83,7 @@ After implementation:
 - [ ] Tested with edge cases (null, empty, invalid)
 - [ ] Verified error handling at each boundary
 - [ ] Checked data survives round-trip
+- [ ] For UI/performance tests, separated app work completion from runner filesystem I/O and kept runtime files in the bundle, `/tmp`, or DerivedData
 
 ---
 

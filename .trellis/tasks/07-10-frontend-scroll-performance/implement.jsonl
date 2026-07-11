@@ -1,0 +1,17 @@
+{"file":".trellis/spec/frontend/component-guidelines.md","reason":"Preserve passive component boundaries, explicit ownership, and stable SwiftUI composition while extracting the lazy row session."}
+{"file":".trellis/spec/frontend/state-management.md","reason":"Apply repository state-lifetime and data-flow rules to content revisions, optional interaction sessions, coordinator tokens, and the list clock."}
+{"file":".trellis/spec/frontend/hook-guidelines.md","reason":"Keep lifecycle hooks idempotent and bounded across hover, appearance, live scroll, popover, task, and teardown transitions."}
+{"file":".trellis/spec/frontend/type-safety.md","reason":"Use explicit revision, token, phase, metric, and ownership types rather than unstructured flags or identifiers."}
+{"file":".trellis/spec/frontend/quality-guidelines.md","reason":"Maintain accessibility, behavior compatibility, focused coverage, and measurable performance evidence."}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"Reuse existing preview, safe-triangle, cache, and list-level ownership instead of duplicating behavior in the lazy session."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Trace same-ID updates and async results across storage/view-model/list/row/cache/export layers before changing ownership."}
+{"file":".trellis/tasks/07-10-frontend-scroll-performance/research/current-row-architecture.md","reason":"Current-worktree authority for eager row objects, broadcast observers, revision gaps, cache gaps, and preserved behavior."}
+{"file":".trellis/tasks/07-10-frontend-scroll-performance/research/scroll-interaction-risks.md","reason":"State-machine contract for token-safe active/candidate ownership, stationary-hover restoration, and scroller-only pointer pairing."}
+{"file":".trellis/tasks/07-10-frontend-scroll-performance/research/performance-harness-and-gates.md","reason":"Measurement contract, fixed workload, AB/BA ordering, realistic snapshot gates, and trace-led follow-on sequence."}
+{"file":".trellis/tasks/07-10-frontend-scroll-performance/research/apple-api-contracts.md","reason":"Compiler-backed Apple API signatures and availability for display-link driving, event monitoring, live scroll, and scroller hit testing."}
+{"file":".trellis/tasks/07-10-frontend-scroll-performance/research/lazy-session-design.md","reason":"Authoritative ownership, activation, revision, suppression, release, list invalidation, and relative-time invariants for the row refactor."}
+{"file":".trellis/tasks/07-10-frontend-scroll-performance/research/next-bottleneck-markdown-menu-signal.md","reason":"Trace-backed post-reproduction bottleneck, separate cache semantics, prewarm design, and causal A/B contract."}
+{"file":".trellis/spec/backend/directory-structure.md","reason":"Keep any optimization-result proof field in the existing DTO/service/application boundary rather than leaking backend details into the row."}
+{"file":".trellis/spec/backend/error-handling.md","reason":"Preserve cancellation versus failure semantics while adding revision-safe optimization completion."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Keep protocol/DTO/actor boundaries and strict-concurrency coverage when proving optimization-owned revisions."}
+{"file":".trellis/tasks/07-10-frontend-scroll-performance/research/final-audit-gaps.md","reason":"Close the reopened optimistic-concurrency, stale-side-effect, virtualization ownership, profiler drain, and final-source evidence gaps before completion."}
