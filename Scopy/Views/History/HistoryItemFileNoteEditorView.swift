@@ -2,9 +2,7 @@ import SwiftUI
 import ScopyUISupport
 
 struct HistoryItemFileNoteEditorView: View {
-    @Binding var note: String
-    let isSaving: Bool
-    let errorMessage: String?
+    @Bindable var controller: HistoryItemRowController
     let onSave: () -> Void
     let onCancel: () -> Void
 
@@ -14,7 +12,7 @@ struct HistoryItemFileNoteEditorView: View {
         VStack(alignment: .leading, spacing: ScopySpacing.sm) {
             Text("Note")
                 .font(.system(size: 12, weight: .semibold))
-            TextEditor(text: $note)
+            TextEditor(text: $controller.noteDraft)
                 .font(.system(size: 12))
                 .frame(width: 260, height: 90)
                 .scrollContentBackground(.hidden)
@@ -26,27 +24,27 @@ struct HistoryItemFileNoteEditorView: View {
                         .stroke(ScopyColors.separator.opacity(0.6), lineWidth: ScopySize.Stroke.thin)
                 )
                 .focused($isFocused)
-                .disabled(isSaving)
+                .disabled(controller.isSavingNote)
                 .accessibilityIdentifier("HistoryItem.NoteEditor.Text")
-            if let errorMessage, !errorMessage.isEmpty {
+            if let errorMessage = controller.noteSaveError, !errorMessage.isEmpty {
                 Text(errorMessage)
                     .font(.system(size: 11))
                     .foregroundStyle(.red)
                     .accessibilityIdentifier("HistoryItem.NoteEditor.Error")
             }
             HStack(spacing: ScopySpacing.sm) {
-                if isSaving {
+                if controller.isSavingNote {
                     ProgressView()
                         .controlSize(.small)
                         .accessibilityIdentifier("HistoryItem.NoteEditor.Progress")
                 }
                 Spacer()
                 Button("Cancel") { onCancel() }
-                    .disabled(isSaving)
+                    .disabled(controller.isSavingNote)
                     .accessibilityIdentifier("HistoryItem.NoteEditor.Cancel")
                 Button("Save") { onSave() }
                     .keyboardShortcut(.defaultAction)
-                    .disabled(isSaving)
+                    .disabled(controller.isSavingNote)
                     .accessibilityIdentifier("HistoryItem.NoteEditor.Save")
             }
         }
@@ -60,6 +58,13 @@ struct HistoryItemFileNoteEditorView: View {
                 .stroke(ScopyColors.separator.opacity(0.5), lineWidth: ScopySize.Stroke.thin)
         )
         .accessibilityIdentifier("HistoryItem.NoteEditor")
+        .interactiveDismissDisabled(
+            controller.isNoteDraftDirty || controller.isSavingNote
+        )
         .onAppear { isFocused = true }
+        .onExitCommand {
+            guard !controller.isSavingNote else { return }
+            onCancel()
+        }
     }
 }

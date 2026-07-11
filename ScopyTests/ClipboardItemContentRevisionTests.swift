@@ -218,6 +218,41 @@ final class ClipboardItemContentRevisionTests: XCTestCase {
         }
     }
 
+    func testOptimizeButtonPolicyHonorsScrollSuppressionForHoverAndSelection() {
+        XCTAssertTrue(
+            HistoryItemView.shouldShowOptimizeButton(
+                itemType: .image,
+                isHovering: true,
+                isKeyboardSelected: false,
+                isInteractionSuppressed: false
+            )
+        )
+        XCTAssertTrue(
+            HistoryItemView.shouldShowOptimizeButton(
+                itemType: .image,
+                isHovering: false,
+                isKeyboardSelected: true,
+                isInteractionSuppressed: false
+            )
+        )
+        XCTAssertFalse(
+            HistoryItemView.shouldShowOptimizeButton(
+                itemType: .image,
+                isHovering: true,
+                isKeyboardSelected: true,
+                isInteractionSuppressed: true
+            )
+        )
+        XCTAssertFalse(
+            HistoryItemView.shouldShowOptimizeButton(
+                itemType: .text,
+                isHovering: true,
+                isKeyboardSelected: true,
+                isInteractionSuppressed: false
+            )
+        )
+    }
+
     private func makeItem(
         id: UUID,
         contentHash: String,

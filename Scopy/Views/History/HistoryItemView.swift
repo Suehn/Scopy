@@ -134,6 +134,17 @@ struct HistoryItemView: View, Equatable {
             lhs.settings.pngquantMarkdownExportColors == rhs.settings.pngquantMarkdownExportColors
     }
 
+    nonisolated static func shouldShowOptimizeButton(
+        itemType: ClipboardItemType,
+        isHovering: Bool,
+        isKeyboardSelected: Bool,
+        isInteractionSuppressed: Bool
+    ) -> Bool {
+        itemType == .image &&
+            !isInteractionSuppressed &&
+            (isHovering || isKeyboardSelected)
+    }
+
     private var isPreviewInteractionSuppressed: Bool {
         interactionCoordinator.isHoverPreviewSuppressed
     }
@@ -214,17 +225,8 @@ struct HistoryItemView: View, Equatable {
         nonmutating set { interactionState?.rowController.isNoteEditorPresented = newValue }
     }
 
-    private var noteDraft: String {
-        get { interactionState?.rowController.noteDraft ?? "" }
-        nonmutating set { interactionState?.rowController.noteDraft = newValue }
-    }
-
     private var isSavingNote: Bool {
         interactionState?.rowController.isSavingNote ?? false
-    }
-
-    private var noteSaveError: String? {
-        interactionState?.rowController.noteSaveError
     }
 
     private var isScrollInteractionActive: Bool {
@@ -272,13 +274,6 @@ struct HistoryItemView: View, Equatable {
                     scheduleNoteEditorDismissIfStillAttached()
                 }
             }
-        )
-    }
-
-    private var noteDraftBinding: Binding<String> {
-        Binding(
-            get: { noteDraft },
-            set: { noteDraft = $0 }
         )
     }
 
@@ -910,7 +905,12 @@ struct HistoryItemView: View, Equatable {
         return HStack(alignment: .center, spacing: ScopySpacing.sm) {
             mainRowButton
 
-            if item.type == .image, (isHovering || isKeyboardSelected) {
+            if Self.shouldShowOptimizeButton(
+                itemType: item.type,
+                isHovering: isHovering,
+                isKeyboardSelected: isKeyboardSelected,
+                isInteractionSuppressed: isScrollInteractionActive || isPreviewInteractionSuppressed
+            ) {
                 Button {
                     startOptimizeImageTask()
                 } label: {
@@ -1187,13 +1187,13 @@ struct HistoryItemView: View, Equatable {
             .accessibilityIdentifier("HistoryItem.ContextMenu.Delete")
         }
         .popover(isPresented: isNoteEditorPresentedBinding, arrowEdge: .leading) {
-            HistoryItemFileNoteEditorView(
-                note: noteDraftBinding,
-                isSaving: isSavingNote,
-                errorMessage: noteSaveError,
-                onSave: { commitNoteDraft() },
-                onCancel: { dismissNoteEditor() }
-            )
+            if let state = interactionState {
+                HistoryItemFileNoteEditorView(
+                    controller: state.rowController,
+                    onSave: { commitNoteDraft() },
+                    onCancel: { dismissNoteEditor() }
+                )
+            }
         }
     }
 

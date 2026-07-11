@@ -60,16 +60,23 @@ final class HistoryItemRowControllerTests: XCTestCase {
 
         controller.presentNoteEditor(note: "  hello world  ")
         XCTAssertTrue(controller.isNoteEditorPresented)
+        XCTAssertFalse(controller.isNoteDraftDirty)
         XCTAssertEqual(controller.noteDraft, "  hello world  ")
 
+        controller.noteDraft = "hello world"
+        XCTAssertFalse(controller.isNoteDraftDirty)
+
         controller.noteDraft = "   "
+        XCTAssertTrue(controller.isNoteDraftDirty)
         XCTAssertNil(controller.normalizedNoteDraft())
 
         controller.noteDraft = "  updated note  "
+        XCTAssertTrue(controller.isNoteDraftDirty)
         XCTAssertEqual(controller.normalizedNoteDraft(), "updated note")
 
         controller.dismissNoteEditor()
         XCTAssertFalse(controller.isNoteEditorPresented)
+        XCTAssertFalse(controller.isNoteDraftDirty)
     }
 
     func testSuccessfulNoteSaveDismissesOnlyTheUnchangedDraft() throws {
@@ -84,6 +91,7 @@ final class HistoryItemRowControllerTests: XCTestCase {
             .savedAndDismissed
         )
         XCTAssertFalse(controller.isNoteEditorPresented)
+        XCTAssertFalse(controller.isNoteDraftDirty)
         XCTAssertFalse(controller.isSavingNote)
         XCTAssertTrue(controller.noteDraft.isEmpty)
         XCTAssertNil(controller.noteSaveError)

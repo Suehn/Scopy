@@ -430,7 +430,7 @@ final class MockClipboardService: ClipboardServiceProtocol {
 
     nonisolated static func boundedUITestNoteDelayMilliseconds(_ rawValue: String?) -> Int {
         let requested = rawValue.flatMap(Int.init) ?? 700
-        return min(750, max(600, requested))
+        return min(2_000, max(600, requested))
     }
 
     private static func makeFixedWarmTextPayload(index: Int) -> String {

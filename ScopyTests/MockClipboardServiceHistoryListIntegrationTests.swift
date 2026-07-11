@@ -27,7 +27,8 @@ final class MockClipboardServiceHistoryListIntegrationTests: XCTestCase {
         XCTAssertEqual(MockClipboardService.boundedUITestNoteDelayMilliseconds(nil), 700)
         XCTAssertEqual(MockClipboardService.boundedUITestNoteDelayMilliseconds("10"), 600)
         XCTAssertEqual(MockClipboardService.boundedUITestNoteDelayMilliseconds("675"), 675)
-        XCTAssertEqual(MockClipboardService.boundedUITestNoteDelayMilliseconds("900"), 750)
+        XCTAssertEqual(MockClipboardService.boundedUITestNoteDelayMilliseconds("900"), 900)
+        XCTAssertEqual(MockClipboardService.boundedUITestNoteDelayMilliseconds("2500"), 2_000)
         XCTAssertEqual(MockClipboardService.boundedUITestNoteDelayMilliseconds("invalid"), 700)
     }
 }

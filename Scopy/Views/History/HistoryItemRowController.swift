@@ -44,6 +44,7 @@ final class HistoryItemRowController {
     @ObservationIgnored private(set) var exportAuthorizationToken: UUID?
     @ObservationIgnored private(set) var noteSaveToken: UUID?
     @ObservationIgnored private var noteDraftGeneration: UInt64 = 0
+    private var originalNormalizedNote: String?
 
     init(relativeTimeText: String) {
         self.relativeTimeText = relativeTimeText
@@ -104,6 +105,7 @@ final class HistoryItemRowController {
     func presentNoteEditor(note: String?) {
         cancelNoteSave()
         noteDraft = note ?? ""
+        originalNormalizedNote = normalizedNoteDraft()
         noteSaveError = nil
         isNoteEditorPresented = true
     }
@@ -111,6 +113,7 @@ final class HistoryItemRowController {
     func dismissNoteEditor(discardDraft: Bool = false) {
         cancelNoteSave()
         isNoteEditorPresented = false
+        originalNormalizedNote = nil
         noteSaveError = nil
         if discardDraft {
             noteDraft = ""
@@ -170,6 +173,7 @@ final class HistoryItemRowController {
         }
 
         isNoteEditorPresented = false
+        originalNormalizedNote = nil
         noteDraft = ""
         return .savedAndDismissed
     }
@@ -184,5 +188,9 @@ final class HistoryItemRowController {
     func normalizedNoteDraft() -> String? {
         let trimmed = noteDraft.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : trimmed
+    }
+
+    var isNoteDraftDirty: Bool {
+        isNoteEditorPresented && normalizedNoteDraft() != originalNormalizedNote
     }
 }
