@@ -81,6 +81,8 @@ class WorkflowTagPolicyTests(unittest.TestCase):
             """
             name: Safe policy documentation
             on: workflow_dispatch
+            permissions:
+              contents: read
             jobs:
               explain:
                 runs-on: ubuntu-latest
@@ -92,6 +94,22 @@ class WorkflowTagPolicyTests(unittest.TestCase):
             """
         )
         self.assertEqual(violations, [])
+
+    def test_non_release_workflow_requires_top_level_read_only_permission(self) -> None:
+        violations = self.validate_fixture(
+            """
+            name: Inherited repository permissions
+            on: workflow_dispatch
+            jobs:
+              inspect:
+                runs-on: ubuntu-latest
+                permissions:
+                  contents: read
+                steps:
+                  - run: echo "job-level permission does not constrain sibling jobs"
+            """
+        )
+        self.assertTrue(any("top-level read-only permissions" in violation.reason for violation in violations))
 
     def test_tag_helper_is_rejected_after_workflow_rename(self) -> None:
         self.assert_rejected(

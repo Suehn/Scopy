@@ -36,6 +36,12 @@ WRITE_ALL = re.compile(
     r"^[ \t]*permissions:[ \t]*(?:['\"])?write-all(?:['\"])?[ \t]*(?:#.*)?$",
     re.IGNORECASE | re.MULTILINE,
 )
+TOP_LEVEL_READ_PERMISSIONS = re.compile(
+    r"^(?:permissions:[ \t]*(?:['\"])?read-all(?:['\"])?[ \t]*(?:#.*)?$|"
+    r"permissions:[ \t]*\{[^}\n]*\bcontents[ \t]*:[ \t]*read\b[^}\n]*\}[ \t]*$|"
+    r"permissions:[ \t]*(?:#.*)?\n  contents:[ \t]*read[ \t]*(?:#.*)?$)",
+    re.IGNORECASE | re.MULTILINE,
+)
 
 
 @dataclass(frozen=True)
@@ -168,6 +174,15 @@ def validate_workflow_file(path: Path) -> list[Violation]:
             if match is not None:
                 line_number = source.count("\n", 0, match.start()) + 1
                 violations.append(Violation(path, line_number, reason, match.group(0).strip()))
+        if TOP_LEVEL_READ_PERMISSIONS.search(source) is None:
+            violations.append(
+                Violation(
+                    path,
+                    1,
+                    "non-release workflow must declare top-level read-only permissions",
+                    "permissions:\n  contents: read",
+                )
+            )
 
     if path.name == "release.yml":
         trigger_header = source.split("\njobs:\n", maxsplit=1)[0]
