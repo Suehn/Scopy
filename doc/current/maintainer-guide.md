@@ -2,10 +2,10 @@
 doc_type: guide
 status: active
 owner: maintainers
-last_reviewed: 2026-05-08
+last_reviewed: 2026-07-11
 canonical: true
 related_versions:
-  - v0.7.8
+  - v0.65.0
 ---
 
 # Maintainer Guide
@@ -26,6 +26,7 @@ related_versions:
 
 - Start with [release-runbook.md](./release-runbook.md).
 - Then confirm [../meta/release-current.yml](../meta/release-current.yml), [../releases/README.md](../releases/README.md), and [../releases/CHANGELOG.md](../releases/CHANGELOG.md).
+- Treat `make tag-release` / `make push-release` as the only tag authority. CI validates `main` and pull requests but cannot create or push a tag.
 
 ### Product Or Architecture Work
 
@@ -46,8 +47,9 @@ related_versions:
 
 - `make docs-validate`
 - `make release-validate`
+- `make test-release-policy`
 - `make quality-manifest-self-test` when quality evidence tooling changes
-- `bash scripts/release/tag-from-doc.sh --tag`
+- `bash scripts/release/tag-from-doc.sh --tag` reads the metadata tag without creating it
 
 ## Active Vs Historical Docs
 
@@ -60,3 +62,4 @@ related_versions:
 
 - Legacy paths are preserved only for inbound compatibility. New links should target canonical locations under `doc/current`, `doc/releases`, `doc/perf`, `doc/reviews`, `doc/proposals`, and `doc/meta`.
 - Do not add new automation that scrapes Markdown tables for release state.
+- Do not grant non-release workflows write permission or add workflow-owned tag creation. Keep publication downstream of a deliberate existing tag or explicit dispatch.

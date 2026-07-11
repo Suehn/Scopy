@@ -32,6 +32,14 @@ related_versions:
 - `doc/releases/README.md` is the human-friendly portal that mirrors the current metadata window.
 - Do not hand-maintain current version/date in multiple active docs.
 
+## Tag Authority And Workflow Boundary
+
+- Only a maintainer running the explicit metadata-driven `make tag-release` or `make push-release` flow may create a release tag. A push to `main`, including release metadata, notes, scripts, or profile changes, is validation-only.
+- `.github/workflows/ci.yml` and `.github/workflows/tsan.yml` declare top-level `contents: read`. `.github/workflows/release.yml` is the only write-capable workflow and may start only from an existing `v*` tag or explicit `workflow_dispatch`.
+- `make release-validate` runs the content-based workflow policy; `make test-release-policy` proves representative safe and unsafe workflows. Renaming a workflow must not evade this check.
+- Do not reintroduce a push-triggered tag job. Fixed build/unit/strict jobs cannot infer every conditional TSan, UI, performance, packaging, or deployment gate required by the change scope.
+- Do not rely on a tag pushed with the repository `GITHUB_TOKEN` to recursively start another workflow. GitHub documents that repository-token events generally do not create a new workflow run except dispatch events: [Triggering workflows with `GITHUB_TOKEN`](https://docs.github.com/en/actions/concepts/security/github_token#when-github_token-triggers-workflow-runs).
+
 ## Build Injection
 
 - `CFBundleShortVersionString = $(MARKETING_VERSION)`
@@ -47,12 +55,13 @@ related_versions:
 
 1. Update [../meta/release-current.yml](../meta/release-current.yml), the new release note under [../releases/history/](../releases/history/README.md), [../releases/README.md](../releases/README.md), and [../releases/CHANGELOG.md](../releases/CHANGELOG.md).
 2. Add or explicitly skip a release profile in [../perf/release-profiles/](../perf/release-profiles/README.md), and keep `profile_doc` in metadata aligned with that choice.
-3. Run `make docs-validate`.
-4. Run `make release-validate`.
-5. Create the tag with `make tag-release`.
-6. Push `main` and the tag with `make push-release`.
-7. Wait for the `Build and Release` workflow to publish `Scopy-<version>.dmg` and `.sha256`.
-8. Verify Homebrew sync and installation.
+3. Run `make build`, `make test-unit`, and `make test-strict`; add TSan, UI, snapshot/backend, frontend, packaging, and deployment gates required by the change scope.
+4. Run `make docs-validate`, `make release-validate`, and `make test-release-policy`.
+5. Commit the coherent release candidate and confirm the worktree is clean. Do not tag an uncommitted or partially verified tree.
+6. Create the tag deliberately with `make tag-release`.
+7. Push `main` and the tag with `make push-release`.
+8. Wait for the `Build and Release` workflow to publish `Scopy-<version>.dmg` and `.sha256`.
+9. Verify Homebrew sync and installation.
 
 ## Release Environment
 
@@ -67,6 +76,7 @@ related_versions:
 ## Verification Expectations
 
 - Baseline build/tests: `make build`, `make test-unit`
+- Release workflow policy: `make release-validate`, `make test-release-policy`; ordinary workflows must remain top-level read-only and unable to create or push tags
 - Concurrency-sensitive changes: `make test-strict`, and `make test-tsan` when the environment permits; on the known-bad `macOS 26.x + Xcode 26.2 (17C52)` combo the command skips because Apple hosted TSan crashes before test bootstrap, while the supported real-coverage path runs in Hosted TSan CI on `macos-15`
 - Perf-sensitive changes:
   - `make test-snapshot-perf-release`

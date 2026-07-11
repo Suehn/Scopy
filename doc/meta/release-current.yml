@@ -9,7 +9,7 @@ spec_doc: doc/current/product-spec.md
 development_doc: doc/current/development-guide.md
 architecture_doc: doc/current/architecture.md
 last_verified_at: 2026-07-11
-summary: Direction-aware preview, passive rows, menu caching, and lossless storage byte accounting
+summary: Direction-aware preview, passive rows, menu caching, lossless storage byte accounting, and explicit release tag authority
 verification:
   build: pass
   test_unit: pass
@@ -18,3 +18,4 @@ verification:
   test_perf_heavy: not_run
   test_snapshot_perf_release: pass
   perf_frontend_profile: pass_two_fixed_ab_axes_full_guard_variance_recorded
+  release_policy: pass_14_tests

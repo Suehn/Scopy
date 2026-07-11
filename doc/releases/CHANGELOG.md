@@ -47,6 +47,9 @@
 
 ### Tooling
 
+- Removes the `main`-push auto-tag workflow so a release-document or release-script edit can validate in CI but cannot publish a tag before the maintainer completes the required gates.
+- Adds a dependency-free workflow policy with 14 regression cases; it scans every workflow by content, rejects tag creation/push commands and unsafe release triggers, and is part of `make release-validate` plus ordinary CI.
+- Pins all non-release workflows to top-level read-only repository permissions while keeping `Build and Release` limited to an existing `v*` tag or explicit dispatch.
 - Makes the frontend profile deterministic and unattended: app-side scrolling starts from one post-launch notification, drives the production scroll view with `NSScreen CADisplayLink`, and does not depend on manual pointer movement or window activation.
 - Stages profile databases and in-progress JSON under `/tmp`, copying only completed evidence back to repository logs, and loads unit-test fixtures/assets from the test bundle to avoid Documents file-coordination stalls.
 - Separates Xcode app/test products into DerivedData while reserving `.build` for SwiftPM and final DMG artifacts, preventing repeat Release CodeSign failures caused by stale Finder/resource-fork metadata.
@@ -60,6 +63,7 @@
 
 ### Verification
 
+- Release-policy suite: 14 tests, 0 failures; all three workflows parsed as YAML, the real workflow set passed the content policy, and local/remote `v0.65.0` remained absent.
 - Fixed Release passive-row AB/BA passed all five pairs for equal work: whole-run row-body count `-66.49%`, row-body total `-61.07%`, main-run-loop total `-3.77%`, and main-run-loop p95 `-4.94%` at the medians.
 - The passive/passive Markdown menu-cache AB/BA passed all five pairs with equal row-body counts: row-body total `-92.09%`, main-run-loop total `-9.61%`, and main-run-loop p95 `-12.93%`; current had cache hits with zero measurement misses/uncached scans.
 - `make build`, `make test-unit` (706 executed, 1 skipped), `make test-strict` (706 executed, 1 skipped), and `make test-tsan` (686 executed, 1 skipped) passed with zero failures.

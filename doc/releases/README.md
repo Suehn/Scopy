@@ -29,7 +29,7 @@ This page is the human-facing index for current release state. Automation should
 ## Recent Releases
 
 <!-- release-recent:start -->
-- `2026-07-10` [v0.65.0](./history/v0.65.0.md) - Direction-aware preview, passive rows, menu caching, and lossless storage byte accounting
+- `2026-07-10` [v0.65.0](./history/v0.65.0.md) - Direction-aware preview, passive rows, menu caching, lossless storage byte accounting, and explicit release tag authority
 - `2026-06-15` [v0.8.8](./history/v0.8.8.md) - Scroll row cache and lazy Markdown export checks
 - `2026-06-07` [v0.8.7](./history/v0.8.7.md) - WACZ root Markdown table parity
 - `2026-06-07` [v0.8.6](./history/v0.8.6.md) - WACZ TableContainer Markdown table parity

@@ -10,7 +10,7 @@ canonical: false
 
 > 时间边界：本报告冻结在安全三角与 DerivedData 隔离完成之后、`v0.65.0` passive-row / menu-cache 工作开始之前。文中的测试数值与待办只代表该审查切片；后续已关闭或改写的结论以 [v0.65.0 Frontend Scroll Profile](../../perf/release-profiles/v0.65.0-profile.md) 和当前规格为准。
 
-> 后续关闭状态（2026-07-11）：P0.1 已由 `ecc8a83` 关闭。共享 Swift `Int` SQLite 适配器改用 64 位接口，并由 5 GiB sparse file、磁盘重启、CAS/批量对账、清理停止、溢出和全量/Strict/TSan/真实快照门禁覆盖。P0.2 自动 tag 发布可信度仍是下一项高收益 P0。
+> 后续关闭状态（2026-07-11）：P0.1 已由 `ecc8a83` 关闭。共享 Swift `Int` SQLite 适配器改用 64 位接口，并由 5 GiB sparse file、磁盘重启、CAS/批量对账、清理停止、溢出和全量/Strict/TSan/真实快照门禁覆盖。P0.2 已由 `2f15994`、`9f8304e` 关闭：删除 push-trigger auto-tag，普通工作流顶层只读，并以内容策略和 14 个回归用例阻止重命名后的旁路。
 
 ## 结论先行
 
@@ -21,7 +21,7 @@ Scopy 已具备不错的工程基础：服务与仓储普遍采用 actor 隔离�
 1. 预览 row-to-popover 使用方向感知安全三角，支持任意方位、多屏负坐标、窗口移动/缩放、相邻行转移所有权及完整取消生命周期。
 2. Xcode 产物恢复到 DerivedData，与 SwiftPM `.build` 分离；`deploy.sh release --no-launch` 已连续两次无清理构建并部署成功，消除了 Finder/resource-fork 元数据导致的 CodeSign 重复失败。
 
-该冻结切片识别出两个真正的 P0：合法的 `>2 GiB` 文件大小会触发整数转换崩溃；自动打 tag 流程不等待完整质量门禁。前者已在 2026-07-11 关闭，后者仍应先于低收益重构或微优化处理。
+该冻结切片识别出的两个 P0 均已在 2026-07-11 关闭：合法的 `>2 GiB` 文件大小不再触发整数转换崩溃，push-trigger 工作流也不再具备创建 tag 的权限。下一阶段转向跨文件系统/数据库一致性与有界外部进程执行，仍先于低收益重构或微优化。
 
 ## 证据基线
 
@@ -76,6 +76,8 @@ Scopy 已具备不错的工程基础：服务与仓储普遍采用 actor 隔离�
 改进：优先取消自动 tag，保留显式 `make tag-release`；若必须自动化，使用 `workflow_dispatch + commit SHA`，在同一 workflow 的完整 required jobs 成功后才创建 tag。
 
 验收：故意制造 build 失败、broken docs 或 metadata/index 漂移时绝不产生 tag；成功路径只产生一个目标 tag。
+
+关闭（2026-07-11）：`2f15994` 删除 `.github/workflows/auto-tag.yml`，把文档、release metadata、workflow policy 和 14 个 fixture 回归接入普通 CI；`9f8304e` 进一步将 CI/TSan 顶层权限固定为 `contents: read`，阻断仓库默认权限漂移。`release.yml` 只消费已有 `v*` tag 或显式 dispatch；本任务未创建本地/远端 tag、未 push、未 dispatch、未发布。显式 maintainer tag 仍要求先完成 build/unit/strict、docs/release 及变更范围对应的 TSan/UI/perf 门禁。
 
 ## P1 — 正确性、性能和一致性
 
@@ -151,7 +153,7 @@ Scopy 已具备不错的工程基础：服务与仓储普遍采用 actor 隔离�
 ### Sprint 0 — 发布可信度与崩溃热修（1–2 天）
 
 1. ~~Int64 文件大小迁移 + 5 GiB sparse-file 回归。~~ 已完成；实现选择保持 Swift `Int` 公共契约并修正共享 SQLite 64 位适配层，避免无收益的跨层类型 churn。
-2. 关闭/重构 auto-tag；把 docs/release/build/unit/strict 变为 tag 前置条件。
+2. ~~关闭/重构 auto-tag；把 docs/release/build/unit/strict 变为 tag 前置条件。~~ 已完成；自动路径删除，普通工作流只读，tag 权限收敛到完成适用门禁后的显式 maintainer 流程。
 3. 合并本轮 safe-triangle 与 DerivedData 构建隔离，锁定 release metadata。
 
 ### Sprint 1 — 存储事务与有界执行（约 1 周）

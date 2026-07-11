@@ -226,7 +226,8 @@ Implication: if you touch settings behavior, preserve the Save/Cancel model and 
 
 - `make docs-validate`
 - `make release-validate`
-- `make tag-release`
+- `make test-release-policy`
+- `make tag-release` only after the applicable build, unit, strict-concurrency, scope-specific, documentation, and release gates have passed and the release candidate is committed
 - `make quality-manifest-self-test` when changing quality evidence tooling
 
 ## Common Change Playbooks
@@ -271,6 +272,8 @@ Implication: if you touch settings behavior, preserve the Save/Cancel model and 
 ### Release Or Documentation Changes
 
 - Update metadata, release note, release index, changelog, and any active current docs that changed semantically.
+- Keep ordinary workflows top-level read-only. A release/documentation push validates only; only the explicit maintainer `make tag-release` / `make push-release` path may create a tag.
+- Run `make test-release-policy` whenever `.github/workflows/`, release scripts, or release Make targets change.
 - For release/versioning fixes, test both `scripts/version.sh --tag` and the release packaging path so the app bundle version, DMG name, and release metadata resolve from the same tag.
 - Avoid putting new truth into compatibility directories or legacy archives.
 
@@ -281,6 +284,7 @@ Implication: if you touch settings behavior, preserve the Save/Cancel model and 
 - Legacy directories under `doc/implementation`, `doc/profiles`, and `doc/specs` are compatibility entrypoints only.
 - Heavy work should stay off the main thread; correctness beats opportunistic speedups.
 - Views should not directly become persistence clients.
+- Release publication consumes a deliberate existing tag; ordinary CI must never create or push one.
 - Select roadmap work by evidenced severity, affected surface, recurrence/likelihood, and confidence relative to implementation/rollback cost. Prefer crashes, data-integrity failures, unsafe release paths, and measured systemic bottlenecks over cosmetic cleanup or speculative micro-optimization.
 
 ## Related Docs
