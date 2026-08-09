@@ -15,6 +15,15 @@ public struct SearchRequest: Sendable {
     public let limit: Int
     public let offset: Int
 
+    public var hasSemanticQuery: Bool {
+        switch mode {
+        case .regex:
+            return !query.isEmpty
+        case .exact, .fuzzy, .fuzzyPlus:
+            return !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
+    }
+
     public init(
         query: String,
         mode: SearchMode = SettingsDTO.default.defaultSearchMode,

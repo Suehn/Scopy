@@ -2,7 +2,7 @@
 doc_type: runbook
 status: active
 owner: maintainers
-last_reviewed: 2026-07-11
+last_reviewed: 2026-08-09
 canonical: true
 related_versions:
   - v0.65.0
@@ -121,6 +121,21 @@ Storage byte accounting above the signed 32-bit range remains lossless. The stor
 - The final unified table compares the pre-storage audit with the final source: warm load `162.567ms -> 169.693ms`, peak RSS `131.938MB -> 132.328MB`, with mixed search movements still far below SLOs. Artifact: `logs/perf-unified-2026-07-11_19-10-16.md`.
 - Dedicated evidence and caveats are in [v0.65.0 Release Performance Profile](../perf/release-profiles/v0.65.0-profile.md).
 - Full build, unit, strict-concurrency, TSan, snapshot-performance, documentation, and release validation results are mirrored in `doc/meta/release-current.yml` and the `v0.65.0` release note.
+
+## Search Match Evidence Release Evidence (2026-08-09)
+
+This section records the final `v0.65.2` release evidence for source-aware search match snippets.
+
+- Environment: Apple M3, arm64, macOS 27.0 (`26A5388g`), Xcode 26.5 (`17F42`), project Swift 5.9, and deployment target macOS 14.0.
+- Real snapshot: schema v8, 6,421 items, 148,647,936 bytes (142 MiB).
+- `make test-snapshot-perf-release` passed after match evidence construction was included in the search service's end-to-end timing: `cmd p95 0.947952ms` against `50ms`, and `cm p95 9.274006ms` against `20ms`, over 30 samples per workload.
+- The final full frontend profile ran three repeats of 10 seconds and waited for the active regex query (`.`) before measurement. Every baseline/current search run loaded 550 rows, verified 550 search-evidence contexts, and passed the readiness gate; a missing context fails the scenario instead of silently measuring the empty-query path.
+- The current search-evidence variant recorded callback-interval p95 `16.666651ms`, callback over-threshold ratio `0.6734%`, SwiftUI row-body p95 `0.810027ms`, and display-model p95 `1.736045ms`. Full-profile main-run-loop p95 is intentionally absent because the 10-second event stream exceeded the 2,000-event retention cap; the shorter final standard run recorded `4.053950ms`. Callback cadence and the frontend baseline/current flags remain environment-sensitive regression observations, not frame-rate or pre-feature causal claims.
+- The same-host, same-snapshot backend audit compares tagged `v0.65.1` with the final candidate. Service P95 changed from `4.490ms` to `9.449ms` for `cm`, `8.307ms` to `15.174ms` for `数学`, `0.124ms` to `0.927ms` for `cmd`, and `4.561ms` to `9.289ms` for `cm` without thumbnails. The bounded evidence work is the expected source of this cost; the absolute results remain below the release SLOs.
+- Full-index warm load stayed effectively flat at `188.216ms -> 187.971ms`, while peak RSS changed from `222.391MB -> 220.391MB`.
+- `make perf-unified-table` produced `logs/perf-unified-2026-08-09_20-03-12.md`. Its backend columns are a causal revision comparison; its frontend columns compare existing runtime feature-flag variants within the candidate and must not be presented as a before/after search-evidence speedup.
+- The optional include-hover smoke was attempted. Both Markdown and image cases stopped at harness discovery because the locked host reported the Scopy application as disabled and omitted the harness window from the accessibility tree. No hover bucket was produced, so this run is recorded as environment-blocked rather than passed.
+- Retained evidence: `logs/snapshot-release-cmd.jsonl`, `logs/snapshot-release-cm.jsonl`, `logs/perf-frontend-profile-2026-08-09_19-36-44/frontend-scroll-profile-summary.json`, `logs/perf-audit-v0.65.1-baseline-2026-08-09_20-01-14/`, `logs/perf-audit-v0.65.2-current-2026-08-09_20-02-20/`, and `logs/perf-unified-2026-08-09_20-03-12.md`.
 
 ## Homebrew Acceptance
 

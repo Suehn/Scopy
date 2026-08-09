@@ -92,7 +92,8 @@ final class IntegrationTests: XCTestCase {
         let request = SearchRequest(query: "Search test", mode: .fuzzy, limit: 50, offset: 0)
         let result = try await service.search(query: request)
 
-        XCTAssertGreaterThanOrEqual(result.items.count, 1)
+        XCTAssertGreaterThanOrEqual(result.hits.count, 1)
+        XCTAssertTrue(result.hits.allSatisfy { $0.matchContext != nil })
     }
 
     func testPinUnpinIntegration() async throws {
@@ -352,7 +353,7 @@ final class IntegrationTests: XCTestCase {
         }
         let first = try await service.search(
             query: SearchRequest(query: uniqueText, mode: .exact, limit: 1, offset: 0)
-        ).items.first
+        ).hits.first?.item
         let firstLastUsedAt = first?.lastUsedAt
 
         // Same content again
@@ -364,7 +365,7 @@ final class IntegrationTests: XCTestCase {
                 let result = try? await service.search(
                     query: SearchRequest(query: uniqueText, mode: .exact, limit: 1, offset: 0)
                 )
-                guard let latest = result?.items.first else { return false }
+                guard let latest = result?.hits.first?.item else { return false }
                 return latest.lastUsedAt > firstLastUsedAt
             }
         }
@@ -373,7 +374,8 @@ final class IntegrationTests: XCTestCase {
         let request = SearchRequest(query: uniqueText, mode: .exact, limit: 50, offset: 0)
         let result = try await service.search(query: request)
 
-        XCTAssertEqual(result.items.count, 1)
+        XCTAssertEqual(result.hits.count, 1)
+        XCTAssertNotNil(result.hits.first?.matchContext)
     }
 
     // MARK: - Pagination Integration Tests
@@ -659,7 +661,9 @@ final class SearchHintTests: XCTestCase {
         func stop() {}
         func stopAndWait() async {}
         func fetchRecent(limit: Int, offset: Int) async throws -> [ClipboardItemDTO] { [] }
-        func search(query: SearchRequest) async throws -> SearchResultPage { SearchResultPage(items: [], total: 0, hasMore: false) }
+        func search(query: SearchRequest) async throws -> SearchResultPage {
+            SearchResultPage(hits: [], total: 0, hasMore: false, coverage: .complete)
+        }
         func pin(itemID: UUID) async throws {}
         func unpin(itemID: UUID) async throws {}
         func delete(itemID: UUID) async throws {}

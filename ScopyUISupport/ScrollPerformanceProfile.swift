@@ -846,6 +846,10 @@ public final class ScrollPerformanceProfile {
     private var workloadLoadedCount = 0
     private var workloadTotalCount = 0
     private var workloadCanLoadMore = false
+    private var workloadSearchEvidenceCount = 0
+    private var workloadSearchQuery = ""
+    private var workloadSearchMode = ""
+    private var workloadSearchReady = false
     private var workloadDatasetMetadata: ScrollProfileDatasetMetadata?
     private var latestActiveSlotCount = 0
     private var latestSuppressedCandidateCount = 0
@@ -908,13 +912,37 @@ public final class ScrollPerformanceProfile {
         loadedCount: Int,
         totalCount: Int,
         canLoadMore: Bool,
+        searchEvidenceCount: Int = 0,
+        searchQuery: String = "",
+        searchMode: String = "",
+        searchReady: Bool = false,
         dataset: ScrollProfileDatasetMetadata? = nil
     ) {
         guard config.enabled else { return }
         workloadLoadedCount = max(0, loadedCount)
         workloadTotalCount = max(0, totalCount)
         workloadCanLoadMore = canLoadMore
+        workloadSearchEvidenceCount = max(0, searchEvidenceCount)
+        workloadSearchQuery = searchQuery
+        workloadSearchMode = searchMode
+        workloadSearchReady = searchReady
         workloadDatasetMetadata = dataset
+    }
+
+    /// Releases a configured start barrier only after the owning view has verified that its
+    /// asynchronous setup is complete. This is intentionally separate from attachment so a
+    /// profile cannot sample the unfiltered list while an active-search workload is still loading.
+    public func beginAutoScrollAfterReadiness() {
+        guard config.enabled,
+              config.startNotificationName != nil,
+              !didReceiveStartNotification else { return }
+        didReceiveStartNotification = true
+        removeStartNotificationObserverIfNeeded()
+        if config.fixedCommandCount == nil {
+            beginReadinessBoundMeasurement()
+        }
+        guard let scrollView else { return }
+        startAutoScrollIfNeeded(scrollView)
     }
 
     /// Publishes both the latest coordinator ownership and the maximum observed during the active
@@ -1181,7 +1209,7 @@ public final class ScrollPerformanceProfile {
 
     private func applyQueuedRecords(_ records: [QueuedRecord]) {
         for record in records {
-            if config.fixedCommandCount != nil {
+            if config.startNotificationName != nil {
                 guard record.generation == measurementGeneration,
                       let startTimestamp,
                       record.recordedAt >= startTimestamp else {
@@ -1226,6 +1254,9 @@ public final class ScrollPerformanceProfile {
         hasWritten = true
         stopAutoScrollIfNeeded()
         stopMainRunLoopObserverIfNeeded(at: Date().timeIntervalSinceReferenceDate)
+        if config.fixedCommandCount == nil, config.startNotificationName != nil {
+            closeMeasurementIngressAndDrainQueuedRecords()
+        }
         let callbackIntervalsMs = animationCallbackIntervalsMs.chronologicalValues
         let callbackSamples = animationCallbackSamples.chronologicalValues
         let retainedTimingEvents = timingEvents.chronologicalValues
@@ -1397,7 +1428,11 @@ public final class ScrollPerformanceProfile {
             "completed": fixedWorkloadCompleted,
             "loaded_count": workloadLoadedCount,
             "total_count": workloadTotalCount,
-            "can_load_more": workloadCanLoadMore
+            "can_load_more": workloadCanLoadMore,
+            "search_evidence_count": workloadSearchEvidenceCount,
+            "search_query": workloadSearchQuery,
+            "search_mode": workloadSearchMode,
+            "search_ready": workloadSearchReady
         ]
         if let workloadDatasetMetadata {
             fixedWorkloadPayload["dataset"] = workloadDatasetMetadata.jsonPayload
@@ -1722,11 +1757,7 @@ public final class ScrollPerformanceProfile {
     }
 
     @objc private func handleStartNotification(_ notification: Notification) {
-        guard !didReceiveStartNotification else { return }
-        didReceiveStartNotification = true
-        removeStartNotificationObserverIfNeeded()
-        guard let scrollView else { return }
-        startAutoScrollIfNeeded(scrollView)
+        beginAutoScrollAfterReadiness()
     }
 
     private func removeStartNotificationObserverIfNeeded() {
@@ -1789,7 +1820,7 @@ public final class ScrollPerformanceProfile {
                 Self.queuedRecords.reopenDiscardingPending()
             }
         )
-        resetMeasurementStateForFixedWorkload()
+        resetMeasurementState()
         measurementGeneration = ingressTransition.snapshot.generation
         fixedWorkloadCommandCount = 0
         fixedWorkloadObservedPathPx = 0
@@ -1838,7 +1869,21 @@ public final class ScrollPerformanceProfile {
         )
     }
 
-    private func resetMeasurementStateForFixedWorkload() {
+    private func beginReadinessBoundMeasurement() {
+        let timestamp = Date().timeIntervalSinceReferenceDate
+        let ingressTransition = Self.measurementEpoch.begin(
+            at: timestamp,
+            whileLocked: {
+                _ = Self.queuedRecords.closeAndTakePendingForFinalization()
+                Self.queuedRecords.reopenDiscardingPending()
+            }
+        )
+        resetMeasurementState()
+        measurementGeneration = ingressTransition.snapshot.generation
+        startTimestamp = timestamp
+    }
+
+    private func resetMeasurementState() {
         stopMainRunLoopObserverIfNeeded(at: Date().timeIntervalSinceReferenceDate)
         startTimestamp = nil
         lastAnimationCallbackTimestamp = nil

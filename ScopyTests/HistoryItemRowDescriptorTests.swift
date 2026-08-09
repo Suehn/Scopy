@@ -25,7 +25,11 @@ final class HistoryItemRowDescriptorTests: XCTestCase {
             dependencies: HistoryItemRowDescriptor.Dependencies(
                 displayTexts: { received in
                     XCTAssertEqual(received.id, item.id)
-                    return (title: "Injected title", metadata: "Injected metadata")
+                    return (
+                        title: "Injected title",
+                        metadata: "Injected metadata",
+                        searchMetadataPrefix: nil
+                    )
                 },
                 filePreview: { received in
                     XCTAssertEqual(received.id, item.id)
@@ -72,6 +76,26 @@ final class HistoryItemRowDescriptorTests: XCTestCase {
         XCTAssertFalse(descriptor.filePreviewIsMarkdown)
         XCTAssertFalse(descriptor.canShowFileThumbnail)
         XCTAssertFalse(descriptor.needsThumbnailHeight)
+    }
+
+    func testSearchMetadataPrefixComesFromStructuredDisplayText() {
+        let item = makeItem(type: .text, plainText: "body · tail")
+        let descriptor = HistoryItemRowDescriptor(
+            item: item,
+            settings: settings(),
+            dependencies: HistoryItemRowDescriptor.Dependencies(
+                displayTexts: { _ in
+                    (
+                        title: "body · tail",
+                        metadata: "11字 · 1行 · body · tail",
+                        searchMetadataPrefix: "11字 · 1行"
+                    )
+                },
+                filePreview: { _ in nil }
+            )
+        )
+
+        XCTAssertEqual(descriptor.searchMetadataPrefix, "11字 · 1行")
     }
 
     func testImageItemNeedsThumbnailHeightOnlyWhenThumbnailsAreEnabled() {
@@ -184,7 +208,11 @@ final class HistoryItemRowDescriptorTests: XCTestCase {
         let dependencies = HistoryItemRowDescriptor.Dependencies(
             displayTexts: { _ in
                 displayCallCount += 1
-                return (title: "Cached title", metadata: "Cached metadata")
+                return (
+                    title: "Cached title",
+                    metadata: "Cached metadata",
+                    searchMetadataPrefix: nil
+                )
             },
             filePreview: { _ in
                 filePreviewCallCount += 1
@@ -203,7 +231,11 @@ final class HistoryItemRowDescriptorTests: XCTestCase {
             dependencies: HistoryItemRowDescriptor.Dependencies(
                 displayTexts: { _ in
                     XCTFail("Expected cached row descriptor to skip display text recomputation")
-                    return (title: "Unexpected", metadata: "Unexpected")
+                    return (
+                        title: "Unexpected",
+                        metadata: "Unexpected",
+                        searchMetadataPrefix: nil
+                    )
                 },
                 filePreview: { _ in
                     XCTFail("Expected cached row descriptor to skip file preview recomputation")
@@ -227,7 +259,7 @@ final class HistoryItemRowDescriptorTests: XCTestCase {
         let dependencies = HistoryItemRowDescriptor.Dependencies(
             displayTexts: { _ in
                 displayCallCount += 1
-                return (title: "Image", metadata: "10 KB")
+                return (title: "Image", metadata: "10 KB", searchMetadataPrefix: nil)
             },
             filePreview: { _ in nil }
         )
@@ -261,7 +293,7 @@ final class HistoryItemRowDescriptorTests: XCTestCase {
             dependencies: HistoryItemRowDescriptor.Dependencies(
                 displayTexts: { _ in
                     displayCallCount += 1
-                    return (title: "AB", metadata: "first")
+                    return (title: "AB", metadata: "first", searchMetadataPrefix: nil)
                 },
                 filePreview: { _ in nil }
             )
@@ -272,7 +304,7 @@ final class HistoryItemRowDescriptorTests: XCTestCase {
             dependencies: HistoryItemRowDescriptor.Dependencies(
                 displayTexts: { _ in
                     displayCallCount += 1
-                    return (title: "CD", metadata: "replacement")
+                    return (title: "CD", metadata: "replacement", searchMetadataPrefix: nil)
                 },
                 filePreview: { _ in nil }
             )
@@ -562,7 +594,9 @@ final class HistoryItemRowDescriptorTests: XCTestCase {
         filePreview: FilePreviewSummary? = nil
     ) -> HistoryItemRowDescriptor.Dependencies {
         HistoryItemRowDescriptor.Dependencies(
-            displayTexts: { _ in (title: title, metadata: metadata) },
+            displayTexts: {
+                _ in (title: title, metadata: metadata, searchMetadataPrefix: nil)
+            },
             filePreview: { _ in filePreview }
         )
     }

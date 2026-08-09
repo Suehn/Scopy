@@ -476,24 +476,16 @@ final class MockClipboardService: ClipboardServiceProtocol {
         try await Task.sleep(nanoseconds: 30_000_000)  // 30ms
 
         let filtered: [ClipboardItemDTO]
-        if query.query.isEmpty {
+        let matcher = try SearchMatchContextBuilder.prepare(request: query, coverage: .complete)
+
+        if !query.hasSemanticQuery {
             filtered = items
         } else {
-            filtered = items.filter { item in
-                let searchable = item.plainText + (item.note.map { " \($0)" } ?? "")
-                switch query.mode {
-                case .exact:
-                    return searchable.localizedCaseInsensitiveContains(query.query)
-                case .fuzzy, .fuzzyPlus:
-                    // 简单的模糊匹配（Mock 服务不区分 fuzzy 和 fuzzyPlus）
-                    return searchable.localizedCaseInsensitiveContains(query.query)
-                case .regex:
-                    if let regex = try? NSRegularExpression(pattern: query.query, options: .caseInsensitive) {
-                        let range = NSRange(searchable.startIndex..., in: searchable)
-                        return regex.firstMatch(in: searchable, range: range) != nil
-                    }
-                    return false
-                }
+            filtered = try items.filter { item in
+                try matcher.makeContext(
+                    plainText: item.plainText,
+                    note: item.note
+                ) != nil
             }
         }
 
@@ -502,10 +494,21 @@ final class MockClipboardService: ClipboardServiceProtocol {
         let end = min(query.offset + query.limit, total)
         let pageItems = Array(filtered[start..<end])
 
+        let hits = try pageItems.map { item in
+            SearchResultHit(
+                item: item,
+                matchContext: try matcher.makeContext(
+                    plainText: item.plainText,
+                    note: item.note
+                )
+            )
+        }
+
         return SearchResultPage(
-            items: pageItems,
+            hits: hits,
             total: total,
-            hasMore: end < total
+            hasMore: end < total,
+            coverage: .complete
         )
     }
 

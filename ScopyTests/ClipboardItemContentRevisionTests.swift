@@ -147,7 +147,7 @@ final class ClipboardItemContentRevisionTests: XCTestCase {
         let dependencies = HistoryItemRowDescriptor.Dependencies(
             displayTexts: { _ in
                 displayTextCallCount += 1
-                return ("Image", "metadata")
+                return ("Image", "metadata", nil)
             },
             filePreview: { _ in nil }
         )
@@ -284,14 +284,49 @@ final class ClipboardItemContentRevisionTests: XCTestCase {
         _ = value
     }
 
+    func testHistoryItemViewEqualityIncludesSearchMatchContext() throws {
+        let item = makeItem(
+            id: UUID(),
+            contentHash: "search-equality",
+            plainText: "alpha and beta"
+        )
+        let alpha = try XCTUnwrap(
+            SearchMatchContextBuilder.makeContext(
+                plainText: item.plainText,
+                note: item.note,
+                request: SearchRequest(query: "alpha", mode: .exact),
+                coverage: .complete
+            )
+        )
+        let beta = try XCTUnwrap(
+            SearchMatchContextBuilder.makeContext(
+                plainText: item.plainText,
+                note: item.note,
+                request: SearchRequest(query: "beta", mode: .exact),
+                coverage: .complete
+            )
+        )
+
+        XCTAssertNotEqual(
+            makeView(item: item, searchMatchContext: alpha),
+            makeView(item: item, searchMatchContext: beta)
+        )
+        XCTAssertNotEqual(
+            makeView(item: item, searchMatchContext: alpha),
+            makeView(item: item, searchMatchContext: nil)
+        )
+    }
+
     private func makeView(
         item: ClipboardItemDTO,
-        settings: SettingsDTO = .default
+        settings: SettingsDTO = .default,
+        searchMatchContext: SearchMatchContext? = nil
     ) -> HistoryItemView {
         HistoryItemView(
             item: item,
             isKeyboardSelected: false,
             settings: settings,
+            searchMatchContext: searchMatchContext,
             onSelect: {},
             onSelectOptimizedForCodex: {},
             onSendViaAirDrop: {},

@@ -399,8 +399,9 @@ enum ScopyBench {
             times.append(elapsedMs)
 
             if i == 0 {
-                sampleResultCount = result.items.count
-                for item in result.items {
+                sampleResultCount = result.hits.count
+                for hit in result.hits {
+                    let item = hit.item
                     typeCounts[item.type.rawValue, default: 0] += 1
                     if item.thumbnailPath != nil {
                         thumbnailHits += 1

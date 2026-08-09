@@ -10,6 +10,7 @@ struct SearchPlan: Sendable, Equatable {
 
 enum SearchPlanPath: String, Sendable, Equatable {
     case allWithFilters = "all_with_filters"
+    case noMatches = "no_matches"
     case exactRecentCache = "exact_recent_cache"
     case exactFTS = "exact_fts"
     case regexRecentCache = "regex_recent_cache"
@@ -112,7 +113,14 @@ enum SearchPlanner {
         }
 
         guard FTSQueryBuilder.build(userQuery: normalizedQuery) != nil else {
-            return allWithFilters(request: request, state: state, reason: .exactFTSQueryUnavailable)
+            return makePlan(
+                path: .noMatches,
+                coverage: .complete,
+                reason: .exactFTSQueryUnavailable,
+                requiredCapabilities: [],
+                request: request,
+                state: state
+            )
         }
 
         return makePlan(

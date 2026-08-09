@@ -106,7 +106,7 @@ final class ClipboardItemDisplayText {
         let titleKey: TitleCacheKey
         let metadataKey: MetadataCacheKey
         let title: String
-        let metadata: String
+        let metadata: CachedMetadata
     }
 
     private struct PrewarmIdentity: Hashable, Sendable {
@@ -125,6 +125,12 @@ final class ClipboardItemDisplayText {
     private struct DisplayTextPair: Sendable {
         let title: String
         let metadata: String
+        let searchMetadataPrefix: String?
+    }
+
+    private struct CachedMetadata: Sendable {
+        let text: String
+        let searchMetadataPrefix: String?
     }
 
     private static let defaultCacheLimit = 20_000
@@ -132,7 +138,7 @@ final class ClipboardItemDisplayText {
 
     private var prewarmBatchLimit: Int
     private var titleCache: BoundedPresentationCache<TitleCacheKey, String>
-    private var metadataCache: BoundedPresentationCache<MetadataCacheKey, String>
+    private var metadataCache: BoundedPresentationCache<MetadataCacheKey, CachedMetadata>
     private var cacheGeneration: UInt64 = 0
     private var prewarmToken: UInt64 = 0
     private var prewarmWorkerTask: Task<Void, Never>?
@@ -158,24 +164,26 @@ final class ClipboardItemDisplayText {
 
     func metadata(for item: ClipboardItemDTO) -> String {
         let metadataKey = makeMetadataCacheKey(for: item)
-        if let cached = metadataCache[metadataKey] { return cached }
+        if let cached = metadataCache[metadataKey] { return cached.text }
 
         let pair = computeDisplayTextPair(for: item, metricName: "text.metadata_ms")
         storeDisplayTextPair(pair, titleKey: makeTitleCacheKey(for: item), metadataKey: metadataKey)
         return pair.metadata
     }
 
-    func displayTexts(for item: ClipboardItemDTO) -> (title: String, metadata: String) {
+    func displayTexts(
+        for item: ClipboardItemDTO
+    ) -> (title: String, metadata: String, searchMetadataPrefix: String?) {
         let titleKey = makeTitleCacheKey(for: item)
         let metadataKey = makeMetadataCacheKey(for: item)
         if let title = titleCache[titleKey],
            let metadata = metadataCache[metadataKey] {
-            return (title, metadata)
+            return (title, metadata.text, metadata.searchMetadataPrefix)
         }
 
         let pair = computeDisplayTextPair(for: item, metricName: "text.metadata_ms")
         storeDisplayTextPair(pair, titleKey: titleKey, metadataKey: metadataKey)
-        return (pair.title, pair.metadata)
+        return (pair.title, pair.metadata, pair.searchMetadataPrefix)
     }
 
     @discardableResult
@@ -265,7 +273,10 @@ final class ClipboardItemDisplayText {
                                 note: snapshot.note
                             ),
                             title: pair.title,
-                            metadata: pair.metadata
+                            metadata: CachedMetadata(
+                                text: pair.metadata,
+                                searchMetadataPrefix: pair.searchMetadataPrefix
+                            )
                         )
                     )
                 }
@@ -289,7 +300,7 @@ final class ClipboardItemDisplayText {
     }
 
     func cachedMetadata(for item: ClipboardItemDTO) -> String? {
-        metadataCache[makeMetadataCacheKey(for: item)]
+        metadataCache[makeMetadataCacheKey(for: item)]?.text
     }
 
     func clearCaches() {
@@ -325,7 +336,13 @@ final class ClipboardItemDisplayText {
 
     private func storeDisplayTextPair(_ pair: DisplayTextPair, titleKey: TitleCacheKey, metadataKey: MetadataCacheKey) {
         titleCache.insert(pair.title, forKey: titleKey)
-        metadataCache.insert(pair.metadata, forKey: metadataKey)
+        metadataCache.insert(
+            CachedMetadata(
+                text: pair.metadata,
+                searchMetadataPrefix: pair.searchMetadataPrefix
+            ),
+            forKey: metadataKey
+        )
     }
 
     private func cancelSupersededPrewarm(pendingReplacement: PrewarmWork?) {
@@ -437,24 +454,32 @@ final class ClipboardItemDisplayText {
     ) -> DisplayTextPair {
         switch type {
         case .text, .rtf, .html:
+            let textMetadata = computeTextMetadata(plainText)
             return DisplayTextPair(
                 title: plainText.isEmpty ? "(No text)" : String(plainText.prefix(100)),
-                metadata: computeTextMetadata(plainText)
+                metadata: textMetadata.text,
+                searchMetadataPrefix: textMetadata.searchPrefix
             )
         case .image:
             return DisplayTextPair(
                 title: "Image",
-                metadata: computeImageMetadata(plainText, sizeBytes: sizeBytes)
+                metadata: computeImageMetadata(plainText, sizeBytes: sizeBytes),
+                searchMetadataPrefix: nil
             )
         case .file:
             let summary = summarizeFilePlainText(plainText)
             return DisplayTextPair(
                 title: computeFileTitle(plainText, summary: summary),
-                metadata: computeFileMetadata(summary: summary, note: note, fileSizeBytes: fileSizeBytes)
+                metadata: computeFileMetadata(summary: summary, note: note, fileSizeBytes: fileSizeBytes),
+                searchMetadataPrefix: nil
             )
         default:
             let metadata = formatBytes(sizeBytes)
-            return DisplayTextPair(title: plainText.isEmpty ? "(No text)" : String(plainText.prefix(100)), metadata: metadata)
+            return DisplayTextPair(
+                title: plainText.isEmpty ? "(No text)" : String(plainText.prefix(100)),
+                metadata: metadata,
+                searchMetadataPrefix: nil
+            )
         }
     }
 
@@ -470,7 +495,9 @@ final class ClipboardItemDisplayText {
         return "\(firstName) + \(fileCount - 1) more"
     }
 
-    private nonisolated static func computeTextMetadata(_ text: String) -> String {
+    private nonisolated static func computeTextMetadata(
+        _ text: String
+    ) -> (text: String, searchPrefix: String) {
         let summary = TextMetrics.displayWordUnitCountAndLineCount(for: text)
 
         // Match previous behavior:
@@ -481,7 +508,8 @@ final class ClipboardItemDisplayText {
 
         let (suffix, needsEllipsis) = cleanTailAndEllipsis(text, maxTailChars: maxTailChars)
         let lastChars = needsEllipsis ? "...\(suffix)" : suffix
-        return "\(summary.wordUnitCount)字 · \(summary.lineCount)行 · \(lastChars)"
+        let searchPrefix = "\(summary.wordUnitCount)字 · \(summary.lineCount)行"
+        return ("\(searchPrefix) · \(lastChars)", searchPrefix)
     }
 
     private nonisolated static func cleanTailAndEllipsis(_ text: String, maxTailChars: Int) -> (suffix: String, needsEllipsis: Bool) {

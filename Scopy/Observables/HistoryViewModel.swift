@@ -325,7 +325,16 @@ final class HistoryViewModel {
             let currentItems = excludingKnownDeletedItems(newValue)
             listState.replaceItems(currentItems)
             mergeKnownContentRevisions(currentItems)
+            if isUnfilteredList {
+                searchMatchContexts.removeAll(keepingCapacity: true)
+            }
         }
+    }
+
+    private(set) var searchMatchContexts: [UUID: SearchMatchContext] = [:]
+
+    func searchMatchContext(for itemID: UUID) -> SearchMatchContext? {
+        searchMatchContexts[itemID]
     }
 
     var searchQuery: String = ""
@@ -348,8 +357,12 @@ final class HistoryViewModel {
     var typeFilters: Set<ClipboardItemType>?
     var recentApps: [String] = []
 
+    private var hasSemanticSearchQuery: Bool {
+        SearchRequest(query: searchQuery, mode: searchMode).hasSemanticQuery
+    }
+
     var hasActiveFilters: Bool {
-        !searchQuery.isEmpty || appFilter != nil || typeFilter != nil || typeFilters != nil
+        hasSemanticSearchQuery || appFilter != nil || typeFilter != nil || typeFilters != nil
     }
 
     private var isUnfilteredList: Bool {
@@ -377,7 +390,7 @@ final class HistoryViewModel {
 
     var searchCoverageHint: String? {
         let trimmed = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return nil }
+        guard hasSemanticSearchQuery else { return nil }
 
         switch effectiveSearchCoverage(for: trimmed) {
         case .complete:
@@ -398,7 +411,7 @@ final class HistoryViewModel {
 
     var primarySearchStatusLabel: String {
         let trimmed = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return searchModeDisplayName(searchMode) }
+        guard hasSemanticSearchQuery else { return searchModeDisplayName(searchMode) }
 
         switch effectiveSearchCoverage(for: trimmed) {
         case .complete:
@@ -413,7 +426,7 @@ final class HistoryViewModel {
     var searchStatusSummary: String {
         let trimmed = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
         let mode = searchModeDisplayName(searchMode)
-        guard !trimmed.isEmpty else { return "Mode: \(mode)" }
+        guard hasSemanticSearchQuery else { return "Mode: \(mode)" }
 
         let coverage: String
         switch effectiveSearchCoverage(for: trimmed) {
@@ -435,6 +448,7 @@ final class HistoryViewModel {
     @ObservationIgnored private var persistedDefaultSearchMode: SearchMode = SettingsDTO.default.defaultSearchMode
     @ObservationIgnored private var followsPersistedDefaultSearchMode: Bool = true
     @ObservationIgnored private var isApplyingPersistedDefaultSearchMode: Bool = false
+    @ObservationIgnored private var didApplyScrollProfileSearch = false
 
     @ObservationIgnored private var lastLoadedAt: Date = .distantPast
     @ObservationIgnored private let ftsSortModeDefaultsKey = "Scopy.FTSSortMode"
@@ -460,6 +474,23 @@ final class HistoryViewModel {
 
     func updateService(_ service: ClipboardServiceProtocol) {
         self.service = service
+    }
+
+    func applyScrollProfileSearchIfNeeded() async {
+        let environment = ProcessInfo.processInfo.environment
+        guard !didApplyScrollProfileSearch,
+              environment["SCOPY_SCROLL_PROFILE"] == "1",
+              let query = environment["SCOPY_PROFILE_SEARCH_QUERY"],
+              !query.isEmpty else { return }
+
+        didApplyScrollProfileSearch = true
+        if let rawMode = environment["SCOPY_PROFILE_SEARCH_MODE"],
+           let mode = SearchMode(rawValue: rawMode) {
+            searchMode = mode
+        }
+        searchQuery = query
+        search()
+        await searchTask?.value
     }
 
     func stop() {
@@ -525,11 +556,13 @@ final class HistoryViewModel {
         case .itemUpdated(let item):
             mergeKnownContentRevisions([item])
             guard !contentRevisionRegistry.isDeleted(itemID: item.id) else { return }
-            if !searchQuery.isEmpty {
-                if let index = indexOfItem(withID: item.id) {
-                    setItemIfChanged(at: index, to: item)
-                    prewarmDisplayText(for: [item])
-                }
+
+            // Usage and last-used updates (including copy) keep their current search position
+            // and evidence. Content mutations arrive through itemContentUpdated and re-search.
+            if hasSemanticSearchQuery {
+                guard let index = indexOfItem(withID: item.id) else { return }
+                setItemIfChanged(at: index, to: item)
+                prewarmDisplayText(for: [item])
                 return
             }
 
@@ -547,6 +580,10 @@ final class HistoryViewModel {
         case .itemContentUpdated(let item):
             mergeKnownContentRevisions([item])
             guard !contentRevisionRegistry.isDeleted(itemID: item.id) else { return }
+            if hasSemanticSearchQuery {
+                search()
+                return
+            }
             guard let index = indexOfItem(withID: item.id) else { return }
             let existing = items[index]
             if existing.thumbnailPath != item.thumbnailPath, let oldPath = existing.thumbnailPath {
@@ -572,6 +609,9 @@ final class HistoryViewModel {
             let newlyDeletedCount = invalidateKnownContentRevisions(itemIDs: deletedIDs)
             invalidateInFlightProjectionWorkForDeletion()
             _ = listState.removeItems(withIDs: deletedIDs)
+            for id in deletedIDs {
+                searchMatchContexts.removeValue(forKey: id)
+            }
 
             if isUnfilteredList {
                 // Refresh only the authoritative count. Re-fetching the first page here would
@@ -624,9 +664,13 @@ final class HistoryViewModel {
     func applySettings(_ settings: SettingsDTO) {
         persistedDefaultSearchMode = settings.defaultSearchMode
         guard followsPersistedDefaultSearchMode else { return }
+        let previousMode = searchMode
         isApplyingPersistedDefaultSearchMode = true
         searchMode = settings.defaultSearchMode
         followsPersistedDefaultSearchMode = true
+        if previousMode != searchMode, hasSemanticSearchQuery {
+            search()
+        }
     }
 
     // MARK: - Apps / Filters
@@ -668,7 +712,7 @@ final class HistoryViewModel {
         if let appFilter = appFilter, item.appBundleID != appFilter {
             return false
         }
-        if !searchQuery.isEmpty {
+        if hasSemanticSearchQuery {
             return false
         }
         return true
@@ -696,6 +740,7 @@ final class HistoryViewModel {
             guard shouldApplyLoadResult(version: currentVersion) else { return }
 
             listState.replaceItems(fetchedItems)
+            searchMatchContexts.removeAll(keepingCapacity: true)
             mergeKnownContentRevisions(fetchedItems)
             prewarmDisplayText(for: fetchedItems)
             searchCoverage = .complete
@@ -755,7 +800,11 @@ final class HistoryViewModel {
             let currentVersion = searchVersion
 
             isLoading = true
-            defer { isLoading = false }
+            defer {
+                if currentVersion == searchVersion {
+                    isLoading = false
+                }
+            }
 
             do {
                 if !isUnfilteredList {
@@ -779,14 +828,7 @@ final class HistoryViewModel {
                         )
                         let result = try await service.search(query: request)
                         guard !Task.isCancelled, currentVersion == searchVersion else { return }
-                        let resultItems = excludingKnownDeletedItems(result.items)
-                        listState.replacePage(
-                            items: resultItems,
-                            total: result.total,
-                            hasMore: result.hasMore
-                        )
-                        mergeKnownContentRevisions(resultItems)
-                        prewarmDisplayText(for: resultItems)
+                        replaceSearchPage(with: result)
                         searchCoverage = result.coverage
                         return
                     }
@@ -806,15 +848,7 @@ final class HistoryViewModel {
                     )
                     let result = try await service.search(query: request)
                     guard !Task.isCancelled, currentVersion == searchVersion else { return }
-                    let resultItems = excludingKnownDeletedItems(result.items)
-
-                    listState.appendPage(
-                        items: resultItems,
-                        total: result.total,
-                        hasMore: result.hasMore
-                    )
-                    mergeKnownContentRevisions(resultItems)
-                    prewarmDisplayText(for: resultItems)
+                    appendSearchPage(with: result)
                     searchCoverage = result.coverage
                 } else {
                     ScrollPerformanceProfile.shared.incrementCounter(
@@ -851,6 +885,7 @@ final class HistoryViewModel {
         let currentVersion = searchVersion
 
         cancelTask(&loadMoreTask)
+        clearSearchProjection()
 
         if isUnfilteredList {
             searchTask = Task {
@@ -861,15 +896,21 @@ final class HistoryViewModel {
             return
         }
 
+        // The current projection is cleared immediately so stale rows never appear under the new
+        // query. Own the loading state across the debounce as well, avoiding a transient empty-state
+        // flash before the replacement page begins.
+        isLoading = true
         searchTask = Task {
+            defer {
+                if currentVersion == searchVersion {
+                    isLoading = false
+                }
+            }
             let query = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
             let debounceNs = effectiveSearchDebounceNs(for: query)
             try? await Task.sleep(nanoseconds: debounceNs)
             guard !Task.isCancelled else { return }
             guard currentVersion == searchVersion else { return }
-
-            isLoading = true
-            defer { isLoading = false }
 
             do {
                 let startTime = CFAbsoluteTimeGetCurrent()
@@ -886,15 +927,7 @@ final class HistoryViewModel {
                 )
                 let result = try await service.search(query: request)
                 guard !Task.isCancelled, currentVersion == searchVersion else { return }
-                let resultItems = excludingKnownDeletedItems(result.items)
-
-                listState.replacePage(
-                    items: resultItems,
-                    total: result.total,
-                    hasMore: result.hasMore
-                )
-                mergeKnownContentRevisions(resultItems)
-                prewarmDisplayText(for: resultItems)
+                replaceSearchPage(with: result)
                 searchCoverage = result.coverage
 
                 if (searchMode == .fuzzy || searchMode == .fuzzyPlus),
@@ -930,15 +963,7 @@ final class HistoryViewModel {
                             guard !Task.isCancelled, refineVersion == searchVersion else { return }
 
                             guard loadedCount <= Self.initialPageSize else { return }
-                            let refinedItems = excludingKnownDeletedItems(refined.items)
-
-                            listState.replacePage(
-                                items: refinedItems,
-                                total: refined.total,
-                                hasMore: refined.hasMore
-                            )
-                            mergeKnownContentRevisions(refinedItems)
-                            prewarmDisplayText(for: refinedItems)
+                            replaceSearchPage(with: refined)
                             searchCoverage = refined.coverage
                         } catch {
                             ScopyLog.app.warning("Refine search failed: \(error.localizedDescription, privacy: .private)")
@@ -950,6 +975,8 @@ final class HistoryViewModel {
                 await PerformanceMetrics.shared.recordSearchLatency(elapsedMs)
                 performanceSummary = await PerformanceMetrics.shared.getSummary()
             } catch {
+                guard !Task.isCancelled, currentVersion == searchVersion else { return }
+                clearSearchProjection()
                 searchCoverage = .complete
                 ScopyLog.app.error("Search failed: \(error.localizedDescription, privacy: .private)")
             }
@@ -1280,6 +1307,7 @@ final class HistoryViewModel {
             total: preservedItems.count,
             hasMore: false
         )
+        searchMatchContexts.removeAll(keepingCapacity: true)
         searchCoverage = .complete
         lastLoadedAt = .distantPast
         clearKnownContentRevisions(pinnedSurvivors: pinnedSurvivors)
@@ -1324,6 +1352,52 @@ final class HistoryViewModel {
         listState.indexOfItem(withID: id)
     }
 
+    private func acceptedSearchHits(_ hits: [SearchResultHit]) -> [SearchResultHit] {
+        hits.filter { contentRevisionRegistry.acceptsProjection(itemID: $0.item.id) }
+    }
+
+    private func replaceSearchPage(with result: SearchResultPage) {
+        let hits = acceptedSearchHits(result.hits)
+        let resultItems = hits.map(\.item)
+        listState.replacePage(
+            items: resultItems,
+            total: result.total,
+            hasMore: result.hasMore
+        )
+        searchMatchContexts = Dictionary(
+            uniqueKeysWithValues: hits.compactMap { hit in
+                hit.matchContext.map { (hit.item.id, $0) }
+            }
+        )
+        mergeKnownContentRevisions(resultItems)
+        prewarmDisplayText(for: resultItems)
+    }
+
+    private func appendSearchPage(with result: SearchResultPage) {
+        let hits = acceptedSearchHits(result.hits)
+        let resultItems = hits.map(\.item)
+        listState.appendPage(
+            items: resultItems,
+            total: result.total,
+            hasMore: result.hasMore
+        )
+        var mergedContexts = searchMatchContexts
+        for hit in hits {
+            if let matchContext = hit.matchContext {
+                mergedContexts[hit.item.id] = matchContext
+            }
+        }
+        searchMatchContexts = mergedContexts
+        mergeKnownContentRevisions(resultItems)
+        prewarmDisplayText(for: resultItems)
+    }
+
+    private func clearSearchProjection() {
+        listState.replacePage(items: [], total: 0, hasMore: false)
+        searchMatchContexts.removeAll(keepingCapacity: true)
+        selectedID = nil
+    }
+
     @discardableResult
     private func setItemIfChanged(at index: Int, to value: ClipboardItemDTO) -> Bool {
         listState.setItemIfChanged(at: index, to: value)
@@ -1331,7 +1405,8 @@ final class HistoryViewModel {
 
     @discardableResult
     private func removeItem(withID id: UUID) -> Bool {
-        listState.removeItem(withID: id)
+        searchMatchContexts.removeValue(forKey: id)
+        return listState.removeItem(withID: id)
     }
 
     @discardableResult

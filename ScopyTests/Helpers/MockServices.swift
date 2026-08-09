@@ -131,9 +131,12 @@ final class ReusableMockClipboardService: ClipboardServiceProtocol {
 
         if let customResults = customSearchResults {
             return SearchResultPage(
-                items: Array(customResults.prefix(query.limit)),
+                hits: customResults.prefix(query.limit).map {
+                    SearchResultHit(item: $0, matchContext: nil)
+                },
                 total: customResults.count,
-                hasMore: customResults.count > query.limit
+                hasMore: customResults.count > query.limit,
+                coverage: .complete
             )
         }
 
@@ -151,9 +154,10 @@ final class ReusableMockClipboardService: ClipboardServiceProtocol {
         let pageItems = Array(filtered[startIndex..<endIndex])
 
         return SearchResultPage(
-            items: pageItems,
+            hits: pageItems.map { SearchResultHit(item: $0, matchContext: nil) },
             total: filtered.count,
-            hasMore: endIndex < filtered.count
+            hasMore: endIndex < filtered.count,
+            coverage: .complete
         )
     }
 
@@ -332,9 +336,10 @@ final class MockInMemorySearchService {
         }
 
         return SearchResultPage(
-            items: searchResults,
+            hits: searchResults.map { SearchResultHit(item: $0, matchContext: nil) },
             total: searchResults.count,
-            hasMore: false
+            hasMore: false,
+            coverage: .complete
         )
     }
 }

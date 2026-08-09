@@ -6,7 +6,11 @@ import ScopyUISupport
 @MainActor
 internal struct HistoryItemRowDescriptor {
     struct Dependencies {
-        var displayTexts: @MainActor (ClipboardItemDTO) -> (title: String, metadata: String)
+        var displayTexts: @MainActor (ClipboardItemDTO) -> (
+            title: String,
+            metadata: String,
+            searchMetadataPrefix: String?
+        )
         var filePreview: @MainActor (ClipboardItemDTO) -> FilePreviewSummary?
 
         @MainActor
@@ -18,6 +22,7 @@ internal struct HistoryItemRowDescriptor {
 
     let titleText: String
     let metadataText: String
+    let searchMetadataPrefix: String?
     let thumbnailHeight: CGFloat
     let showThumbnails: Bool
     let filePreviewInfo: FilePreviewInfo?
@@ -54,6 +59,7 @@ internal struct HistoryItemRowDescriptor {
 
         self.titleText = displayTexts.title
         self.metadataText = displayTexts.metadata
+        self.searchMetadataPrefix = displayTexts.searchMetadataPrefix
         self.thumbnailHeight = thumbnailHeight
         self.showThumbnails = showThumbnails
         self.filePreviewInfo = filePreview?.info

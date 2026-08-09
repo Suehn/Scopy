@@ -78,6 +78,16 @@ final class ClipboardItemDisplayTextTests: XCTestCase {
     }
 
     @MainActor
+    func testTextSearchMetadataPrefixIsStructuredIndependentlyFromTailSeparators() {
+        let item = makeTextItem(plainText: "first · second · third")
+
+        let display = ClipboardItemDisplayText.shared.displayTexts(for: item)
+
+        XCTAssertEqual(display.searchMetadataPrefix, "3字 · 1行")
+        XCTAssertTrue(display.metadata.hasPrefix("3字 · 1行 · "))
+    }
+
+    @MainActor
     func testPrewarmCachesTitleAndMetadata() async {
         let item = makeTextItem(plainText: "hello world")
         ClipboardItemDisplayText.shared.clearCaches()

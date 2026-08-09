@@ -195,6 +195,12 @@ struct HistoryListView: View {
             updateProfileWorkloadMetadata()
             recordHistoryListIntegrationModelNoteIfNeeded()
         }
+        .onChange(of: historyViewModel.searchMatchContexts.count) { _, _ in
+            updateProfileWorkloadMetadata()
+        }
+        .onChange(of: historyViewModel.isLoading) { _, _ in
+            updateProfileWorkloadMetadata()
+        }
         .onChange(of: historyViewModel.contentRevisionReconciliationToken) { _, _ in
             interactionSessionStore.reconcile(
                 snapshot: historyViewModel.contentRevisionReconciliationSnapshot
@@ -203,6 +209,10 @@ struct HistoryListView: View {
         .onDisappear {
             relativeTimeClock.stop()
             interactionCoordinator.tearDownPassivePath()
+        }
+        .task {
+            await historyViewModel.applyScrollProfileSearchIfNeeded()
+            updateProfileWorkloadMetadata()
         }
         .overlay(alignment: .topLeading) {
             if HistoryListUITestRuntime.isEnabled {
@@ -218,8 +228,20 @@ struct HistoryListView: View {
     private func updateProfileWorkloadMetadata() {
         guard ScrollPerformanceProfile.isEnabled else { return }
         let profile = ScrollPerformanceProfile.shared
+        let environment = ProcessInfo.processInfo.environment
+        let expectedSearchQuery = environment["SCOPY_PROFILE_SEARCH_QUERY"] ?? ""
+        let expectedSearchMode = environment["SCOPY_PROFILE_SEARCH_MODE"] ?? ""
+        let isSearchProfile = !expectedSearchQuery.isEmpty
+        let searchReady = isSearchProfile
+            && historyViewModel.searchQuery == expectedSearchQuery
+            && historyViewModel.searchMode.rawValue == expectedSearchMode
+            && !historyViewModel.isLoading
+            && !historyViewModel.items.isEmpty
+            && historyViewModel.searchMatchContexts.count == historyViewModel.items.count
+            && historyViewModel.items.allSatisfy {
+                historyViewModel.searchMatchContext(for: $0.id) != nil
+            }
         let datasetMetadata: ScrollProfileDatasetMetadata? = {
-            let environment = ProcessInfo.processInfo.environment
             guard profile.usesFixedDriverAnimationSampler,
                   let datasetID = environment["SCOPY_MOCK_DATASET_ID"]?.trimmingCharacters(
                     in: .whitespacesAndNewlines
@@ -249,8 +271,15 @@ struct HistoryListView: View {
             loadedCount: historyViewModel.loadedCount,
             totalCount: historyViewModel.totalCount,
             canLoadMore: historyViewModel.canLoadMore,
+            searchEvidenceCount: historyViewModel.searchMatchContexts.count,
+            searchQuery: isSearchProfile ? historyViewModel.searchQuery : "",
+            searchMode: isSearchProfile ? historyViewModel.searchMode.rawValue : "",
+            searchReady: searchReady,
             dataset: datasetMetadata
         )
+        if searchReady {
+            profile.beginAutoScrollAfterReadiness()
+        }
         let snapshot = interactionCoordinator.passivePathSnapshot
         profile.recordPassivePathSnapshot(
             activeSlotCount: snapshot.activeRowCount,
@@ -416,6 +445,7 @@ struct HistoryListView: View {
             item: item,
             isKeyboardSelected: isSelected,
             settings: settingsViewModel.settings,
+            searchMatchContext: historyViewModel.searchMatchContext(for: item.id),
             onSelect: { Task { await historyViewModel.select(item) } },
             onSelectOptimizedForCodex: { Task { await historyViewModel.selectOptimizedForCodex(item) } },
             onSendViaAirDrop: { Task { await historyViewModel.sendViaAirDrop(item) } },
@@ -455,13 +485,14 @@ struct HistoryListView: View {
         .id(item.id)
 
         Group {
-            if Self.shouldExposeAccessibility {
+            if Self.isScrollProfile && !Self.profileAccessibility {
+                row.accessibilityHidden(true)
+            } else if Self.shouldExposeAccessibility {
                 row.accessibilityIdentifier("History.Item.\(item.id.uuidString)")
                     .accessibilityValue(isSelected ? "selected" : "unselected")
-            } else if Self.isScrollProfile {
-                row.accessibilityHidden(true)
+                    .accessibilityAddTraits(isSelected ? .isSelected : [])
             } else {
-                row
+                row.accessibilityAddTraits(isSelected ? .isSelected : [])
             }
         }
         .listRowInsets(EdgeInsets())      // 移除默认内边距

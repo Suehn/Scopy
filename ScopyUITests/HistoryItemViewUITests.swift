@@ -141,6 +141,25 @@ final class HistoryItemViewUITests: XCTestCase {
         waitForValue("rendered", identifier: "History.Preview.RenderStatus", timeout: 8)
     }
 
+    func testSearchEvidenceExplainsMultipleDistantMatches() throws {
+        launchHarness(
+            scenario: "long-markdown-text",
+            searchQuery: "指数",
+            searchMode: "exact"
+        )
+
+        XCTAssertTrue(app.anyElement("UITest.HistoryItemHarness").waitForExistence(timeout: 10))
+        let evidence = app.staticTexts["HistoryItem.MatchEvidence"]
+        XCTAssertTrue(evidence.waitForExistence(timeout: 5))
+        XCTAssertTrue(evidence.label.contains("7 处"), "Expected occurrence count in: \(evidence.label)")
+        XCTAssertTrue(evidence.label.contains("指数"), "Expected matched excerpt in: \(evidence.label)")
+
+        let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        attachment.name = "search-evidence-multiple-matches"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+
     func testHoverPreviewSafeTriangleKeepsPopoverOpenAcrossGap() throws {
         launchHarness(scenario: "plain-text")
 
@@ -241,7 +260,9 @@ final class HistoryItemViewUITests: XCTestCase {
         scenario: String,
         dumpPath: String? = nil,
         errorPath: String? = nil,
-        openPreviewOnTap: Bool = false
+        openPreviewOnTap: Bool = false,
+        searchQuery: String? = nil,
+        searchMode: String? = nil
     ) {
         app.launchArguments = ["--uitesting"]
         app.launchEnvironment["SCOPY_UITEST_HISTORY_ITEM_HARNESS"] = "1"
@@ -249,6 +270,12 @@ final class HistoryItemViewUITests: XCTestCase {
         app.launchEnvironment["SCOPY_UITEST_HISTORY_ITEM_KEYBOARD_SELECTED"] = "1"
         if openPreviewOnTap {
             app.launchEnvironment["SCOPY_UITEST_OPEN_PREVIEW_ON_TAP"] = "1"
+        }
+        if let searchQuery {
+            app.launchEnvironment["SCOPY_UITEST_HISTORY_ITEM_SEARCH_QUERY"] = searchQuery
+        }
+        if let searchMode {
+            app.launchEnvironment["SCOPY_UITEST_HISTORY_ITEM_SEARCH_MODE"] = searchMode
         }
         if let dumpPath {
             app.launchEnvironment["SCOPY_EXPORT_DUMP_PATH"] = dumpPath

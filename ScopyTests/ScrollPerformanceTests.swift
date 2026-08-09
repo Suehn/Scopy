@@ -52,7 +52,7 @@ final class ScrollPerformanceTests: XCTestCase {
         func stopAndWait() async {}
         func fetchRecent(limit: Int, offset: Int) async throws -> [ClipboardItemDTO] { [] }
         func search(query: SearchRequest) async throws -> SearchResultPage {
-            SearchResultPage(items: [], total: 0, hasMore: false)
+            SearchResultPage(hits: [], total: 0, hasMore: false, coverage: .complete)
         }
         func pin(itemID: UUID) async throws {}
         func unpin(itemID: UUID) async throws {}

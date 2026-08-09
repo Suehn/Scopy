@@ -30,6 +30,8 @@ struct HistoryItemHarnessView: View {
     @State private var interactionCoordinator = HistoryListInteractionCoordinator()
     @State private var interactionSessionStore = HistoryItemInteractionSessionStore()
     private let item: ClipboardItemDTO
+    private let searchMatchContext: SearchMatchContext?
+    private let compactWidth: Bool
     private let markdownWebViewController = MarkdownPreviewWebViewController()
 
     init() {
@@ -41,7 +43,20 @@ struct HistoryItemHarnessView: View {
         settings.showImageThumbnails = scenario == .image || scenario == .inlineImage
         settings.imagePreviewDelay = 0
 
+        let environment = ProcessInfo.processInfo.environment
+        self.compactWidth = environment["SCOPY_UITEST_HISTORY_ITEM_COMPACT_WIDTH"] == "1"
+        let searchQuery = environment["SCOPY_UITEST_HISTORY_ITEM_SEARCH_QUERY"] ?? ""
+        let searchMode = environment["SCOPY_UITEST_HISTORY_ITEM_SEARCH_MODE"]
+            .flatMap(SearchMode.init(rawValue:)) ?? .exact
+        let searchRequest = SearchRequest(query: searchQuery, mode: searchMode)
+
         self.item = item
+        self.searchMatchContext = try! SearchMatchContextBuilder.makeContext(
+            plainText: item.plainText,
+            note: item.note,
+            request: searchRequest,
+            coverage: .complete
+        )
         _settings = State(initialValue: settings)
         _isKeyboardSelected = State(initialValue: keyboardSelected)
     }
@@ -53,6 +68,7 @@ struct HistoryItemHarnessView: View {
                     item: item,
                     isKeyboardSelected: isKeyboardSelected,
                     settings: settings,
+                    searchMatchContext: searchMatchContext,
                     onSelect: { selectCount += 1 },
                     onSelectOptimizedForCodex: { codexPasteCount += 1 },
                     onSendViaAirDrop: { airDropCount += 1 },
@@ -123,7 +139,7 @@ struct HistoryItemHarnessView: View {
                 .accessibilityIdentifier("UITest.HistoryItemHarness")
         }
         .padding(ScopySpacing.lg)
-        .frame(minWidth: 880, minHeight: 340, alignment: .topLeading)
+        .frame(minWidth: compactWidth ? 480 : 880, minHeight: 340, alignment: .topLeading)
         .background(profileSampler)
     }
 

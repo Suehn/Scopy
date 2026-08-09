@@ -68,10 +68,7 @@ public actor SearchEngineImpl {
         public let coverage: SearchCoverage
         public let searchTimeMs: Double
         public let perf: SearchPerfMetrics?
-
-        public var isPrefilter: Bool {
-            coverage.isPrefilter
-        }
+        public let matchContexts: [UUID: SearchMatchContext]
 
         public init(
             items: [ClipboardStoredItem],
@@ -79,7 +76,8 @@ public actor SearchEngineImpl {
             hasMore: Bool,
             coverage: SearchCoverage,
             searchTimeMs: Double,
-            perf: SearchPerfMetrics? = nil
+            perf: SearchPerfMetrics? = nil,
+            matchContexts: [UUID: SearchMatchContext] = [:]
         ) {
             self.items = items
             self.total = total
@@ -87,25 +85,9 @@ public actor SearchEngineImpl {
             self.coverage = coverage
             self.searchTimeMs = searchTimeMs
             self.perf = perf
+            self.matchContexts = matchContexts
         }
 
-        public init(
-            items: [ClipboardStoredItem],
-            total: Int,
-            hasMore: Bool,
-            isPrefilter: Bool,
-            searchTimeMs: Double,
-            perf: SearchPerfMetrics? = nil
-        ) {
-            self.init(
-                items: items,
-                total: total,
-                hasMore: hasMore,
-                coverage: isPrefilter ? .stagedRefine : .complete,
-                searchTimeMs: searchTimeMs,
-                perf: perf
-            )
-        }
     }
 
     private struct SQLiteInterruptHandle: @unchecked Sendable {
@@ -1831,7 +1813,22 @@ public actor SearchEngineImpl {
         do {
             result = try await withTaskCancellationHandler(operation: {
                 try await withTimeout(timeout: timeout) {
-                    try await self.searchInternal(request: request, perf: perfContext)
+                    let rawResult = try await self.searchInternal(
+                        request: request,
+                        perf: perfContext
+                    )
+                    if let perfContext {
+                        return try perfContext.measure("match_evidence") {
+                            try Self.attachingMatchContexts(
+                                to: rawResult,
+                                request: request
+                            )
+                        }
+                    }
+                    return try Self.attachingMatchContexts(
+                        to: rawResult,
+                        request: request
+                    )
                 }
             }, onCancel: {
                 if let interruptHandle {
@@ -1848,13 +1845,64 @@ public actor SearchEngineImpl {
         let elapsedMs = (CFAbsoluteTimeGetCurrent() - startTime) * 1000
         perfContext?.addPhase("search_total", ms: elapsedMs)
         perfContext?.addCounter("returned_items", value: result.items.count)
+        perfContext?.addCounter("match_evidence_items", value: result.matchContexts.count)
         return SearchResult(
             items: result.items,
             total: result.total,
             hasMore: result.hasMore,
             coverage: result.coverage,
             searchTimeMs: elapsedMs,
-            perf: perfContext?.snapshot()
+            perf: perfContext?.snapshot(),
+            matchContexts: result.matchContexts
+        )
+    }
+
+    private static func attachingMatchContexts(
+        to result: SearchResult,
+        request: SearchRequest
+    ) throws -> SearchResult {
+        guard request.hasSemanticQuery, !result.items.isEmpty else { return result }
+
+        let matcher = try SearchMatchContextBuilder.prepare(
+            request: request,
+            coverage: result.coverage,
+            cancellationCheck: { try Task.checkCancellation() }
+        )
+        var contexts: [UUID: SearchMatchContext] = [:]
+        contexts.reserveCapacity(result.items.count)
+
+        do {
+            for item in result.items {
+                try Task.checkCancellation()
+                guard let context = try matcher.makeContext(
+                    plainText: item.plainText,
+                    note: item.note,
+                    cancellationCheck: { try Task.checkCancellation() }
+                ) else {
+                    throw SearchError.searchFailed(
+                        "Search result did not contain renderable match evidence"
+                    )
+                }
+                contexts[item.id] = context
+            }
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch let error as SearchError {
+            throw error
+        } catch {
+            throw SearchError.searchFailed(
+                "Search evidence generation failed: \(error.localizedDescription)"
+            )
+        }
+
+        return SearchResult(
+            items: result.items,
+            total: result.total,
+            hasMore: result.hasMore,
+            coverage: result.coverage,
+            searchTimeMs: result.searchTimeMs,
+            perf: result.perf,
+            matchContexts: contexts
         )
     }
 
@@ -1914,7 +1962,13 @@ public actor SearchEngineImpl {
         }
 
         guard let ftsQuery = FTSQueryBuilder.build(userQuery: normalizedQuery) else {
-            return try searchAllWithFilters(request: request)
+            return SearchResult(
+                items: [],
+                total: 0,
+                hasMore: false,
+                coverage: .complete,
+                searchTimeMs: 0
+            )
         }
 
         let fts = try searchWithFTS(query: ftsQuery, request: request, coverage: .complete)
@@ -1958,9 +2012,39 @@ public actor SearchEngineImpl {
         }
 
         return try searchInCache(request: request, coverage: .recentOnly(limit: shortQueryCacheSize)) { item in
-            let range = NSRange(item.plainText.startIndex..., in: item.plainText)
-            return regex.firstMatch(in: item.plainText, range: range) != nil
+            try Self.hasRegexMatch(regex, in: item.plainText)
         }
+    }
+
+    private static func hasRegexMatch(
+        _ regex: NSRegularExpression,
+        in text: String
+    ) throws -> Bool {
+        let range = NSRange(text.startIndex..., in: text)
+        var found = false
+        var cancellationError: Error?
+
+        regex.enumerateMatches(
+            in: text,
+            options: [.reportProgress],
+            range: range
+        ) { match, _, stop in
+            do {
+                try Task.checkCancellation()
+            } catch {
+                cancellationError = error
+                stop.pointee = true
+                return
+            }
+            if match != nil {
+                found = true
+                stop.pointee = true
+            }
+        }
+
+        if let cancellationError { throw cancellationError }
+        try Task.checkCancellation()
+        return found
     }
 
     // MARK: - FTS
@@ -2031,7 +2115,7 @@ public actor SearchEngineImpl {
     private func searchInCache(
         request: SearchRequest,
         coverage: SearchCoverage,
-        filter: @escaping (ClipboardStoredItem) -> Bool
+        filter: @escaping (ClipboardStoredItem) throws -> Bool
     ) throws -> SearchResult {
         try refreshCacheIfNeeded()
 
@@ -2039,8 +2123,9 @@ public actor SearchEngineImpl {
         filtered.reserveCapacity(min(recentItemsCache.count, request.limit + 1))
 
         for cached in recentItemsCache {
+            try Task.checkCancellation()
             let item = cached.item
-            if !filter(item) { continue }
+            if try !filter(item) { continue }
 
             if let appFilter = request.appFilter, item.appBundleID != appFilter { continue }
             if let typeFilters = request.typeFilters, !typeFilters.isEmpty {
@@ -2810,10 +2895,7 @@ public actor SearchEngineImpl {
         let preparedQuery = prepareFuzzyQuery(queryLower: queryLower, queryLowerIsASCII: queryLowerIsASCII)
         let plusWords: [(word: String, isASCII: Bool)]
         if mode == .fuzzyPlus {
-            plusWords = queryLower
-                .split(separator: " ")
-                .map(String.init)
-                .filter { !$0.isEmpty }
+            plusWords = fuzzyPlusTokens(queryLower)
                 .map { (word: $0, isASCII: $0.canBeConverted(to: .ascii)) }
         } else {
             plusWords = []
@@ -3234,10 +3316,7 @@ public actor SearchEngineImpl {
 
         let plusWords: [(word: String, isASCII: Bool)]
         if mode == .fuzzyPlus {
-            plusWords = queryLower
-                .split(separator: " ")
-                .map(String.init)
-                .filter { !$0.isEmpty }
+            plusWords = fuzzyPlusTokens(queryLower)
                 .map { (word: $0, isASCII: $0.canBeConverted(to: .ascii)) }
         } else {
             plusWords = []

@@ -11,7 +11,23 @@
 
 - No unreleased entries.
 
-## [v0.65.2] - 2026-07-11
+## [v0.65.2] - 2026-08-09
+
+### Search/Readability
+
+- Explains every non-empty text-search result with a compact, source-aware excerpt instead of relying on the thumbnail and title alone.
+- Highlights the actual matched ranges and identifies whether evidence came from clipboard content, a note, a file path, or image metadata.
+- Shows up to two excerpts when matches span multiple places, plus an occurrence count or lower bound when additional matches are omitted.
+- Keeps exact, fuzzy, fuzzy-plus, regex, staged refinement, pagination, filtering, sorting, selection, copy, and metadata-update behavior intact.
+- Represents zero-width regular-expression matches as positional evidence and never invents a highlight for text that the backend did not match.
+
+### Correctness/Performance
+
+- Builds FTS evidence with SQLite's own `unicode61` tokenizer so highlighted ranges follow the same token and diacritic semantics as candidate selection.
+- Prepares reusable matchers once per search request, keeps evidence generation inside the search timeout and performance metric, and cooperatively cancels long scans and regular-expression enumeration.
+- Rejects stale evidence across query or mode changes, preserves complete evidence through pagination, and prevents cancelled older pages from mutating the loading state of a newer query.
+- Adds an active-search frontend profile scenario that does not begin scrolling until all 550 loaded rows have matching evidence.
+- The cross-version backend audit records the intended evidence cost without a speedup claim: service P95 changed from `4.490ms` to `9.449ms` for `cm`, `8.307ms` to `15.174ms` for `数学`, and `0.124ms` to `0.927ms` for `cmd`; all remain below the release SLOs. Full-index warm load stayed effectively flat (`188.216ms` to `187.971ms`) and peak RSS changed from `222.391MB` to `220.391MB`.
 
 ### Tooling
 
@@ -22,11 +38,15 @@
 ### Documentation
 
 - Preserves durable engineering guidance outside `.trellis` and moves the active Markdown preview architecture proposal into the normal documentation tree before removing Trellis-owned storage.
-- Keeps product behavior, performance baselines, build baselines, and deployment behavior unchanged; no performance profile or release-runbook update is required.
+- Defines the search-result evidence contract and records final snapshot, full frontend, cross-version backend, and unified performance evidence in the release runbook.
 
 ### Verification
 
-- The active-dependency scan found no remaining project-level Trellis hook, command, agent, skill, workflow, or canonical-document dependency. `make docs-validate`, `make release-validate`, and `make build` passed; `make test-unit` passed with 727 tests executed, 1 skipped, and 0 failures.
+- `make build` passed. Unit and strict-concurrency suites each passed with 787 tests executed, 2 skipped, and 0 failures; TSan passed with 767 tests executed, 2 skipped, 0 failures, and no race report.
+- Snapshot Release passed at `cmd p95 0.947952ms` against `50ms` and `cm p95 9.274006ms` against `20ms` on the 6,421-item real snapshot.
+- The three-repeat, 10-second full frontend profile completed with 550 loaded rows and 550 evidence contexts in every active-search run. Current search frame p95 was `16.667ms`, row-body p95 `0.810ms`, and display-model p95 `1.736ms`.
+- The local include-hover UI smoke could not access the harness because the host application was reported as disabled in the locked accessibility session. It is recorded as an environment limitation, not as a passing UI result.
+- The active-dependency scan found no remaining project-level Trellis hook, command, agent, skill, workflow, or canonical-document dependency. `make docs-validate` and `make release-validate` passed.
 
 ## [v0.65.1] - 2026-07-11
 

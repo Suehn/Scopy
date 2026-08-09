@@ -21,6 +21,7 @@ enum ScopyColors {
     static let selection = highlightBase.opacity(0.25)  // 键盘选中：更明显的蓝色
     static let hover = Color(nsColor: .unemphasizedSelectedContentBackgroundColor).opacity(0.5)  // 鼠标悬停：淡灰色
     static let selectionBorder = highlightBase.opacity(0.4) // 键盘选中边框
+    static let searchMatch = Color(nsColor: .findHighlightColor)
     
     // MARK: - Text
     static let text = Color.primary

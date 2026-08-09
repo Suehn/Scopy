@@ -144,6 +144,117 @@ final class SearchServiceTests: XCTestCase {
         XCTAssertFalse(result.items.contains { $0.type == .file }, "ASCII long-word fuzzyPlus should not match gappy file paths")
     }
 
+    func testFuzzyPlusTabTokensMatchIdenticallyInFullIndexAndForcedSearch() async throws {
+        let target = try await storage.upsertItem(makeContent("alpha bridge beta"))
+        _ = try await storage.upsertItem(makeContent("alpha only"))
+        _ = try await storage.upsertItem(makeContent("beta only"))
+        await search.invalidateCache()
+
+        let query = "alpha\tbeta"
+        let complete = try await search.search(
+            request: SearchRequest(
+                query: query,
+                mode: .fuzzyPlus,
+                forceFullFuzzy: false,
+                limit: 50,
+                offset: 0
+            )
+        )
+        let forced = try await search.search(
+            request: SearchRequest(
+                query: query,
+                mode: .fuzzyPlus,
+                forceFullFuzzy: true,
+                limit: 50,
+                offset: 0
+            )
+        )
+
+        XCTAssertEqual(complete.coverage, .complete)
+        XCTAssertEqual(forced.coverage, .complete)
+        XCTAssertEqual(Set(complete.items.map(\.id)), [target.id])
+        XCTAssertEqual(Set(forced.items.map(\.id)), [target.id])
+        let context = try XCTUnwrap(complete.matchContexts[target.id])
+        XCTAssertEqual(Set(context.fragments.flatMap(highlightedText).map { $0.lowercased() }), ["alpha", "beta"])
+    }
+
+    func testFuzzyPlusNewlineTokensStayConsistentAcrossStagedAndRefinedSearch() async throws {
+        let target = try await storage.upsertItem(makeContent("gamma bridge delta"))
+        _ = try await storage.upsertItem(makeContent("gamma only"))
+        _ = try await storage.upsertItem(makeContent("delta only"))
+        _ = try await storage.upsertItem(makeContent(String(repeating: "a", count: 120_000)))
+        await search.invalidateCache()
+
+        let query = "gamma\ndelta"
+        let staged = try await search.search(
+            request: SearchRequest(
+                query: query,
+                mode: .fuzzyPlus,
+                forceFullFuzzy: false,
+                limit: 50,
+                offset: 0
+            )
+        )
+        let refined = try await search.search(
+            request: SearchRequest(
+                query: query,
+                mode: .fuzzyPlus,
+                forceFullFuzzy: true,
+                limit: 50,
+                offset: 0
+            )
+        )
+
+        XCTAssertEqual(staged.coverage, .stagedRefine)
+        XCTAssertEqual(refined.coverage, .complete)
+        XCTAssertEqual(Set(staged.items.map(\.id)), [target.id])
+        XCTAssertEqual(Set(refined.items.map(\.id)), [target.id])
+        XCTAssertNotNil(staged.matchContexts[target.id])
+        XCTAssertNotNil(refined.matchContexts[target.id])
+    }
+
+    func testExactEvidenceUsesSQLiteUnicode61RangesForFullwidthAndGreekText() async throws {
+        let fullwidth = try await storage.upsertItem(makeContent("ＡＢＣ marker ABC"))
+        let greek = try await storage.upsertItem(makeContent("άλφα marker αλφα"))
+        await search.invalidateCache()
+
+        let asciiResult = try await search.search(
+            request: SearchRequest(query: "ABC", mode: .exact, limit: 50, offset: 0)
+        )
+        let asciiContext = try XCTUnwrap(asciiResult.matchContexts[fullwidth.id])
+        XCTAssertEqual(asciiContext.occurrenceCount, 1)
+        XCTAssertEqual(asciiContext.fragments.flatMap(highlightedText), ["ABC"])
+
+        let greekResult = try await search.search(
+            request: SearchRequest(query: "αλφα", mode: .exact, limit: 50, offset: 0)
+        )
+        let greekContext = try XCTUnwrap(greekResult.matchContexts[greek.id])
+        XCTAssertEqual(greekContext.occurrenceCount, 1)
+        XCTAssertEqual(greekContext.fragments.flatMap(highlightedText), ["αλφα"])
+    }
+
+    func testPerfMetricsIncludeMatchEvidenceInsideSearchTotal() async throws {
+        guard ProcessInfo.processInfo.environment["SCOPY_PERF_METRICS"] == "1" else {
+            throw XCTSkip("Requires SCOPY_PERF_METRICS=1")
+        }
+        let target = try await storage.upsertItem(makeContent("timed evidence needle"))
+        await search.invalidateCache()
+
+        let result = try await search.search(
+            request: SearchRequest(query: "needle", mode: .exact, limit: 50, offset: 0)
+        )
+        let metrics = try XCTUnwrap(result.perf)
+        let evidence = try XCTUnwrap(metrics.phases.first { $0.name == "match_evidence" })
+        let total = try XCTUnwrap(metrics.phases.first { $0.name == "search_total" })
+
+        XCTAssertNotNil(result.matchContexts[target.id])
+        XCTAssertLessThanOrEqual(evidence.ms, total.ms)
+        XCTAssertEqual(
+            metrics.counters.first { $0.name == "match_evidence_items" }?.value,
+            result.items.count
+        )
+    }
+
     func testRegexSearch() async throws {
         try await populateTestData()
 
@@ -158,6 +269,35 @@ final class SearchServiceTests: XCTestCase {
             XCTAssertNotNil(regex.firstMatch(in: item.plainText, range: range))
         }
         XCTAssertEqual(result.coverage, .recentOnly(limit: 2000))
+    }
+
+    func testRegexEvidenceCancellationStopsCatastrophicBacktracking() async throws {
+        let text = "x" + String(repeating: "a", count: 30) + "!"
+        _ = try await storage.upsertItem(makeContent(text))
+        await search.invalidateCache()
+
+        let task = Task {
+            try await search.search(
+                request: SearchRequest(
+                    query: "^x|(a+)+$",
+                    mode: .regex,
+                    limit: 50,
+                    offset: 0
+                )
+            )
+        }
+
+        try await Task.sleep(nanoseconds: 50_000_000)
+        let cancellationStart = CFAbsoluteTimeGetCurrent()
+        task.cancel()
+
+        do {
+            _ = try await task.value
+            XCTFail("Cancelled catastrophic regex search unexpectedly completed")
+        } catch is CancellationError {
+            // Expected: progress callbacks make Foundation's synchronous matcher cooperative.
+        }
+        XCTAssertLessThan(CFAbsoluteTimeGetCurrent() - cancellationStart, 1.0)
     }
 
     func testRegexRecentOnlyExcludesOldMatchesBeyondRecentCache() async throws {
@@ -186,6 +326,19 @@ final class SearchServiceTests: XCTestCase {
         XCTAssertEqual(result.items.count, 0)
         XCTAssertEqual(result.total, 0)
         XCTAssertFalse(result.hasMore)
+    }
+
+    func testExactQueryWithoutSearchableTokensReturnsNoResults() async throws {
+        try await populateTestData()
+
+        let result = try await search.search(
+            request: SearchRequest(query: "***", mode: .exact, limit: 50, offset: 0)
+        )
+
+        XCTAssertTrue(result.items.isEmpty)
+        XCTAssertEqual(result.total, 0)
+        XCTAssertFalse(result.hasMore)
+        XCTAssertEqual(result.coverage, .complete)
     }
 
     func testEmptyQuery() async throws {
@@ -979,6 +1132,13 @@ final class SearchServiceTests: XCTestCase {
             contentHash: String(text.hashValue),
             sizeBytes: text.utf8.count
         )
+    }
+
+    private func highlightedText(_ fragment: SearchMatchFragment) -> [String] {
+        let characters = Array(fragment.text)
+        return fragment.highlightedRanges.map { range in
+            String(characters[range.offset..<(range.offset + range.length)])
+        }
     }
 
     private func queryExactFTSIDsOrderedByRelevance(ftsQuery: String, limit: Int) throws -> [UUID] {

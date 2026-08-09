@@ -23,6 +23,7 @@ SKIP_AX_LIST_QUERY="${SCOPY_PROFILE_SKIP_AX_LIST_QUERY:-0}"
 TEST_ACCESSIBILITY="ScopyUITests/HistoryListUITests/testScrollProfileRealSnapshotAccessibility"
 TEST_MIXED="ScopyUITests/HistoryListUITests/testScrollProfileRealSnapshotMixed"
 TEST_TEXT_BIAS="ScopyUITests/HistoryListUITests/testScrollProfileRealSnapshotTextBias"
+TEST_SEARCH_EVIDENCE="ScopyUITests/HistoryListUITests/testScrollProfileRealSnapshotSearchEvidence"
 TEST_HOVER_MARKDOWN="ScopyUITests/HistoryItemViewUITests/testHoverPreviewMarkdownProfileSmoke"
 TEST_HOVER_IMAGE="ScopyUITests/HistoryItemViewUITests/testHoverPreviewImageProfileSmoke"
 
@@ -174,11 +175,13 @@ run_variant_repeat() {
     "real-snapshot-accessibility"
     "real-snapshot-mixed"
     "real-snapshot-text-bias"
+    "real-snapshot-search-evidence"
   )
   local profile_tests=(
     "$TEST_ACCESSIBILITY"
     "$TEST_MIXED"
     "$TEST_TEXT_BIAS"
+    "$TEST_SEARCH_EVIDENCE"
   )
   if [[ "$INCLUDE_HOVER" -eq 1 ]]; then
     profile_scenarios+=(
@@ -376,6 +379,7 @@ for variant in variants:
         xctest_accessibility_query = payload.get("xctest_accessibility_query") or {}
         buckets = payload.get("buckets_ms", {})
         hover_preview_evidence = payload.get("hover_preview_evidence") or {}
+        fixed_workload = payload.get("fixed_workload") or {}
         records[variant][scenario].append({
             "path": path,
             "frame_p95": frame.get("p95"),
@@ -400,6 +404,11 @@ for variant in variants:
             "xctest_history_item_query_ms": xctest_accessibility_query.get("history_item_query_ms"),
             "xctest_history_item_count": xctest_accessibility_query.get("history_item_count"),
             "hover_preview_evidence": hover_preview_evidence,
+            "workload_loaded_count": fixed_workload.get("loaded_count"),
+            "workload_search_evidence_count": fixed_workload.get("search_evidence_count"),
+            "workload_search_query": fixed_workload.get("search_query"),
+            "workload_search_mode": fixed_workload.get("search_mode"),
+            "workload_search_ready": fixed_workload.get("search_ready"),
             "bucket_p95": {
                 key: ((buckets.get(key) or {}).get("p95"))
                 for key in metric_bucket_keys
@@ -626,6 +635,23 @@ for variant in variants:
             "accessibility_view_count": scalar_summary(entries, "accessibility_view_count"),
             "xctest_history_item_query_ms": scalar_summary(entries, "xctest_history_item_query_ms"),
             "xctest_history_item_count": scalar_summary(entries, "xctest_history_item_count"),
+            "search_workload": {
+                "loaded_count": scalar_summary(entries, "workload_loaded_count"),
+                "evidence_count": scalar_summary(entries, "workload_search_evidence_count"),
+                "queries": sorted({
+                    e["workload_search_query"]
+                    for e in entries
+                    if isinstance(e.get("workload_search_query"), str)
+                    and e["workload_search_query"]
+                }),
+                "modes": sorted({
+                    e["workload_search_mode"]
+                    for e in entries
+                    if isinstance(e.get("workload_search_mode"), str)
+                    and e["workload_search_mode"]
+                }),
+                "ready_runs": sum(e.get("workload_search_ready") is True for e in entries),
+            },
             "bucket_p95_ms": bucket_summary,
             "long_frame_attribution": summarize_long_frame_attribution(entries),
             "main_thread_long_frame_attribution": summarize_long_frame_attribution(
@@ -640,6 +666,7 @@ expected_scenarios = {
     "real-snapshot-accessibility",
     "real-snapshot-mixed",
     "real-snapshot-text-bias",
+    "real-snapshot-search-evidence",
 }
 if include_hover:
     expected_scenarios.add("hover-preview-markdown-text")
@@ -654,6 +681,24 @@ for variant in variants:
         runs = int((scenario_map.get(scenario) or {}).get("runs") or 0)
         if runs != repeats:
             errors.append(f"{variant}:{scenario} expected runs={repeats}, got={runs}")
+
+    search_entries = records[variant].get("real-snapshot-search-evidence", [])
+    for entry in search_entries:
+        source = entry.get("path") or "<unknown>"
+        loaded_count = entry.get("workload_loaded_count")
+        evidence_count = entry.get("workload_search_evidence_count")
+        if entry.get("workload_search_query") != ".":
+            errors.append(f"{variant}:search query mismatch in {source}")
+        if entry.get("workload_search_mode") != "regex":
+            errors.append(f"{variant}:search mode mismatch in {source}")
+        if entry.get("workload_search_ready") is not True:
+            errors.append(f"{variant}:search workload was not ready in {source}")
+        if not isinstance(loaded_count, int) or loaded_count <= 0:
+            errors.append(f"{variant}:search workload loaded no rows in {source}")
+        if evidence_count != loaded_count:
+            errors.append(
+                f"{variant}:search evidence {evidence_count} != loaded rows {loaded_count} in {source}"
+            )
 
 if include_hover:
     hover_scenarios = ["hover-preview-markdown-text", "hover-preview-image"]

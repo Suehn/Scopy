@@ -1073,13 +1073,26 @@ actor ClipboardService {
 
         let result = try await search.search(request: query)
 
-        var dtos: [ClipboardItemDTO] = []
-        dtos.reserveCapacity(result.items.count)
+        var hits: [SearchResultHit] = []
+        hits.reserveCapacity(result.items.count)
         for item in result.items {
-            dtos.append(await toDTO(item, storage: storage))
+            try Task.checkCancellation()
+            let matchContext = result.matchContexts[item.id]
+            if query.hasSemanticQuery, matchContext == nil {
+                throw SearchEngineImpl.SearchError.searchFailed(
+                    "Search result did not contain renderable match evidence"
+                )
+            }
+            let dto = await toDTO(item, storage: storage)
+            hits.append(SearchResultHit(item: dto, matchContext: matchContext))
         }
 
-        return SearchResultPage(items: dtos, total: result.total, hasMore: result.hasMore, coverage: result.coverage)
+        return SearchResultPage(
+            hits: hits,
+            total: result.total,
+            hasMore: result.hasMore,
+            coverage: result.coverage
+        )
     }
 
     func pin(itemID: UUID) async throws {

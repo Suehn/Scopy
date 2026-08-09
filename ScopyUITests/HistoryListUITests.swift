@@ -258,6 +258,22 @@ final class HistoryListUITests: XCTestCase {
         )
     }
 
+    func testScrollProfileRealSnapshotSearchEvidence() throws {
+        try runScrollProfileScenario(
+            scenario: "real-snapshot-search-evidence",
+            itemCount: 0,
+            imageCount: 0,
+            showThumbnails: true,
+            textLength: 0,
+            accessibility: false,
+            dataSource: .realSnapshot,
+            durationSeconds: 10,
+            minSamples: 260,
+            searchQuery: ".",
+            searchMode: "regex"
+        )
+    }
+
     func testHoverPreviewDismissesOnScroll() throws {
         app.terminate()
         app.launchEnvironment = [:]
@@ -335,7 +351,9 @@ final class HistoryListUITests: XCTestCase {
         accessibility: Bool,
         dataSource: ScrollProfileDataSource = .mock,
         durationSeconds: TimeInterval = 6,
-        minSamples: Int = 180
+        minSamples: Int = 180,
+        searchQuery: String? = nil,
+        searchMode: String? = nil
     ) throws {
         guard profileTestsEnabled else {
             throw XCTSkip("Set SCOPY_RUN_PROFILE_UI_TESTS=1 or touch /tmp/scopy_run_profile_ui_tests to enable scroll profiling UI tests")
@@ -383,6 +401,12 @@ final class HistoryListUITests: XCTestCase {
         app.launchEnvironment["SCOPY_PROFILE_OUTPUT"] = profilePath
         app.launchEnvironment["SCOPY_PROFILE_ACCESSIBILITY"] = accessibility ? "1" : "0"
         app.launchEnvironment["SCOPY_PROFILE_SCENARIO"] = scenario
+        if let searchQuery {
+            app.launchEnvironment["SCOPY_PROFILE_SEARCH_QUERY"] = searchQuery
+        }
+        if let searchMode {
+            app.launchEnvironment["SCOPY_PROFILE_SEARCH_MODE"] = searchMode
+        }
         let autoScroll = envValue("SCOPY_PROFILE_AUTO_SCROLL") ?? "1"
         app.launchEnvironment["SCOPY_PROFILE_AUTO_SCROLL"] = autoScroll
         let fixedCommandCount = parseInt(envValue("SCOPY_PROFILE_FIXED_COMMAND_COUNT")) ?? 0
@@ -393,7 +417,7 @@ final class HistoryListUITests: XCTestCase {
             )
             return
         }
-        let startNotificationName: Notification.Name? = fixedCommandCount > 0
+        let startNotificationName: Notification.Name? = fixedCommandCount > 0 || searchQuery != nil
             ? Notification.Name("org.scopy.profile.start.\(safeFileToken(profileRunID))")
             : nil
         if let startNotificationName {
@@ -413,7 +437,9 @@ final class HistoryListUITests: XCTestCase {
             if autoScroll == "0" {
                 throw XCTSkip("Manual scroll profile requires AX list access")
             }
-            postProfileStartNotification(startNotificationName)
+            if searchQuery == nil {
+                postProfileStartNotification(startNotificationName)
+            }
             waitForAutomatedScroll(durationSeconds: resolvedDuration)
         } else {
             _ = prepareMainWindow()
@@ -423,7 +449,9 @@ final class HistoryListUITests: XCTestCase {
                 XCTFail("List not found")
                 return
             }
-            postProfileStartNotification(startNotificationName)
+            if searchQuery == nil {
+                postProfileStartNotification(startNotificationName)
+            }
             if autoScroll == "0" {
                 exerciseScroll(on: list, durationSeconds: resolvedDuration)
             } else {
@@ -472,6 +500,25 @@ final class HistoryListUITests: XCTestCase {
         let activeFrame = json?["active_frame_ms"] as? [String: Any]
         let activeCount = activeFrame?["count"] as? Int ?? 0
         XCTAssertGreaterThan(activeCount, 0, "Expected active scrolling frame samples in profile output")
+
+        if let searchQuery {
+            let workload = json?["fixed_workload"] as? [String: Any]
+            let evidenceCount = workload?["search_evidence_count"] as? Int ?? 0
+            let loadedCount = workload?["loaded_count"] as? Int ?? 0
+            XCTAssertGreaterThan(
+                loadedCount,
+                0,
+                "Search profile must load at least one result row"
+            )
+            XCTAssertEqual(
+                evidenceCount,
+                loadedCount,
+                "Every profiled search result must render backend-provided evidence"
+            )
+            XCTAssertEqual(workload?["search_query"] as? String, searchQuery)
+            XCTAssertEqual(workload?["search_mode"] as? String, searchMode)
+            XCTAssertEqual(workload?["search_ready"] as? Bool, true)
+        }
 
         let scenarioName = json?["profile_scenario"] as? String ?? ""
         XCTAssertEqual(scenarioName, scenario, "Profile scenario mismatch")

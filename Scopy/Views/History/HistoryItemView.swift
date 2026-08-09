@@ -14,6 +14,7 @@ struct HistoryItemView: View, Equatable {
     let item: ClipboardItemDTO
     let isKeyboardSelected: Bool
     let settings: SettingsDTO
+    let searchMatchContext: SearchMatchContext?
 
     // 回调闭包 - 不参与 Equatable 比较
     let onSelect: () -> Void
@@ -37,6 +38,8 @@ struct HistoryItemView: View, Equatable {
     let dismissOtherPopovers: () -> Void
     private let contentRevision: ClipboardItemContentRevision
     private let descriptor: HistoryItemRowDescriptor
+    private let searchEvidenceText: AttributedString?
+    private let searchEvidenceAccessibilityText: String?
 
     // Idle rows retain only lightweight SwiftUI value state. The controller/model graph is
     // created as one session after a real interaction and released as a unit when idle.
@@ -53,6 +56,7 @@ struct HistoryItemView: View, Equatable {
         item: ClipboardItemDTO,
         isKeyboardSelected: Bool,
         settings: SettingsDTO,
+        searchMatchContext: SearchMatchContext?,
         onSelect: @escaping () -> Void,
         onSelectOptimizedForCodex: @escaping () -> Void,
         onSendViaAirDrop: @escaping () -> Void,
@@ -76,6 +80,7 @@ struct HistoryItemView: View, Equatable {
         self.item = item
         self.isKeyboardSelected = isKeyboardSelected
         self.settings = settings
+        self.searchMatchContext = searchMatchContext
         self.onSelect = onSelect
         self.onSelectOptimizedForCodex = onSelectOptimizedForCodex
         self.onSendViaAirDrop = onSendViaAirDrop
@@ -96,7 +101,23 @@ struct HistoryItemView: View, Equatable {
         self.requestPopover = requestPopover
         self.dismissOtherPopovers = dismissOtherPopovers
         self.contentRevision = ClipboardItemContentRevision(item: item)
-        self.descriptor = HistoryItemPresentationCache.shared.rowDescriptor(for: item, settings: settings)
+        let descriptor = HistoryItemPresentationCache.shared.rowDescriptor(for: item, settings: settings)
+        self.descriptor = descriptor
+        if let searchMatchContext {
+            let searchEvidenceText = SearchMatchPresentation.attributedText(
+                context: searchMatchContext,
+                itemType: item.type,
+                metadataPrefix: descriptor.searchMetadataPrefix
+            )
+            self.searchEvidenceText = searchEvidenceText
+            self.searchEvidenceAccessibilityText = SearchMatchPresentation.accessibilityDescription(
+                context: searchMatchContext,
+                itemType: item.type
+            )
+        } else {
+            self.searchEvidenceText = nil
+            self.searchEvidenceAccessibilityText = nil
+        }
     }
 
     // MARK: - Equatable
@@ -118,6 +139,7 @@ struct HistoryItemView: View, Equatable {
             lhs.item.note == rhs.item.note &&
             lhs.item.appBundleID == rhs.item.appBundleID &&
             lhs.item.thumbnailPath == rhs.item.thumbnailPath &&
+            lhs.searchMatchContext == rhs.searchMatchContext &&
             lhs.isKeyboardSelected == rhs.isKeyboardSelected &&
             lhs.isImagePreviewPresented == rhs.isImagePreviewPresented &&
             lhs.isTextPreviewPresented == rhs.isTextPreviewPresented &&
@@ -746,6 +768,17 @@ struct HistoryItemView: View, Equatable {
         descriptor.titleText
     }
 
+    @ViewBuilder
+    private var secondaryLine: some View {
+        if let searchEvidenceText {
+            Text(searchEvidenceText)
+                .accessibilityLabel(searchEvidenceAccessibilityText ?? "")
+                .accessibilityIdentifier("HistoryItem.MatchEvidence")
+        } else {
+            Text(metadataText)
+        }
+    }
+
     /// v0.15: Simplified content view - removed app icon, using new metadata format
     @ViewBuilder
     private var contentView: some View {
@@ -758,10 +791,11 @@ struct HistoryItemView: View, Equatable {
                     height: thumbnailHeight,
                     interactionCoordinator: interactionCoordinator
                 )
-                Text(metadataText)
+                secondaryLine
                     .font(ScopyTypography.caption)
                     .foregroundStyle(ScopyColors.mutedText)
                     .lineLimit(1)
+                    .truncationMode(.tail)
             }
         case .file:
             HStack(spacing: ScopySpacing.sm) {
@@ -782,7 +816,7 @@ struct HistoryItemView: View, Equatable {
                         .font(ScopyTypography.body)
                         .lineLimit(1)
                         .truncationMode(.tail)
-                    Text(metadataText)
+                    secondaryLine
                         .font(ScopyTypography.caption)
                         .foregroundStyle(ScopyColors.mutedText)
                         .lineLimit(1)
@@ -799,7 +833,7 @@ struct HistoryItemView: View, Equatable {
                         .lineLimit(1)
                         .truncationMode(.tail)
                 }
-                Text(metadataText)
+                secondaryLine
                     .font(ScopyTypography.caption)
                     .foregroundStyle(ScopyColors.mutedText)
                     .lineLimit(1)
@@ -811,7 +845,7 @@ struct HistoryItemView: View, Equatable {
                     .font(ScopyTypography.body)
                     .lineLimit(1)
                     .truncationMode(.tail)
-                Text(metadataText)
+                secondaryLine
                     .font(ScopyTypography.caption)
                     .foregroundStyle(ScopyColors.mutedText)
                     .lineLimit(1)

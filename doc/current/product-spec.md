@@ -2,7 +2,7 @@
 doc_type: spec
 status: active
 owner: maintainers
-last_reviewed: 2026-07-11
+last_reviewed: 2026-08-09
 canonical: true
 related_versions:
   - v0.65.0
@@ -56,6 +56,10 @@ Scopy is a native macOS clipboard manager for users who need durable clipboard h
 - Support app-based filtering and content-type filtering from the header.
 - Support multi-type filtering for grouped categories such as rich text.
 - Keep result ordering user-relevant: pinned items stay prominent, with matching quality and recency driving the remainder.
+- Explain every result produced by a non-empty text search with bounded, source-aware match evidence generated alongside the result rather than rescanning full item content in the row UI.
+- Keep each result title stable. In search state, use the existing second line for an occurrence count and one or two short excerpts centered on the best matches; highlight every visible match with the adaptive system find color and a non-color emphasis cue.
+- Label evidence from notes and file paths explicitly. If matches are distant or span body and note, show at most two excerpts and keep the existing one-line secondary-row height; a capped count is shown as a lower bound.
+- Accessibility must announce the selected row, the match count, each visible excerpt's source and context, and its highlighted terms so candidates remain distinguishable without color or sight.
 
 ### Preview, Media, And Export
 
@@ -87,6 +91,7 @@ Scopy is a native macOS clipboard manager for users who need durable clipboard h
 | Fuzzy / Fuzzy+ | May return a staged first page, but must converge to complete full-history results |
 | Exact | After trimming surrounding whitespace, `>= 3` characters search complete history; `<= 2` characters intentionally search only the most recent `2000` items and must say so in the UI |
 | Regex | Intentionally searches only the most recent `2000` items and must say so in the UI |
+| Match evidence | Every candidate from a non-empty semantic query carries the real matched excerpt and source. Multiple matches show a count plus at most two excerpts; zero-width regex matches are described as positional evidence. Empty/filter-only searches preserve the normal row metadata. |
 
 ## Current Settings Surface
 

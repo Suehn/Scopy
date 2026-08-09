@@ -1,5 +1,5 @@
 version: v0.65.2
-date: 2026-07-11
+date: 2026-08-09
 release_doc: doc/releases/history/v0.65.2.md
 release_index: doc/releases/README.md
 changelog_file: doc/releases/CHANGELOG.md
@@ -8,11 +8,17 @@ runbook_doc: doc/current/release-runbook.md
 spec_doc: doc/current/product-spec.md
 development_doc: doc/current/development-guide.md
 architecture_doc: doc/current/architecture.md
-last_verified_at: 2026-07-11
-summary: Replace project-level Trellis orchestration with a lightweight repository-native AI workflow
+last_verified_at: 2026-08-09
+summary: Explain every search result with source-aware highlighted match evidence
 verification:
   trellis_reference_scan: pass_no_active_project_dependencies
   docs_validate: pass
   release_validate: pass
   build: pass
-  test_unit: pass_727_executed_1_skipped_0_failures
+  test_unit: pass_787_executed_2_skipped_0_failures
+  test_strict: pass_787_executed_2_skipped_0_failures
+  test_tsan: pass_767_executed_2_skipped_0_failures
+  snapshot_perf_release: pass_cmd_p95_0.947952ms_cm_p95_9.274006ms
+  frontend_profile_full: pass_3_repeats_search_evidence_550_of_550
+  unified_perf: pass_absolute_slos
+  hover_profile: blocked_host_accessibility_application_disabled

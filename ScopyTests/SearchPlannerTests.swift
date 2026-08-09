@@ -2,6 +2,13 @@ import XCTest
 @testable import ScopyKit
 
 final class SearchPlannerTests: XCTestCase {
+    func testFuzzyPlusTokenizationUsesEveryWhitespaceSeparator() {
+        XCTAssertEqual(
+            SearchPlanner.fuzzyPlusTokens("alpha\tbeta\ngamma  delta"),
+            ["alpha", "beta", "gamma", "delta"]
+        )
+    }
+
     func testEmptyQueryUsesAllWithFilters() {
         let plan = SearchPlanner.plan(request: SearchRequest(query: "", mode: .exact))
 
@@ -55,6 +62,15 @@ final class SearchPlannerTests: XCTestCase {
         XCTAssertEqual(plan.coverage, .complete)
         XCTAssertEqual(plan.reason, .exactLongQueryFTS)
         XCTAssertEqual(plan.requiredCapabilities, [.fts])
+    }
+
+    func testExactQueryWithoutSearchableTokensReturnsNoMatches() {
+        let plan = SearchPlanner.plan(request: SearchRequest(query: "***", mode: .exact))
+
+        XCTAssertEqual(plan.path, .noMatches)
+        XCTAssertEqual(plan.coverage, .complete)
+        XCTAssertEqual(plan.reason, .exactFTSQueryUnavailable)
+        XCTAssertEqual(plan.requiredCapabilities, [])
     }
 
     func testRegexUsesRecentOnlyCache() {
