@@ -2,7 +2,7 @@
 doc_type: portal
 status: active
 owner: maintainers
-last_reviewed: 2026-08-09
+last_reviewed: 2026-08-22
 canonical: true
 ---
 
@@ -19,16 +19,17 @@ This page is the human-facing index for current release state. Automation should
 ## Current Release
 
 <!-- release-current:start -->
-- Version: `v0.65.2`
-- Date: `2026-08-09`
-- Release note: [v0.65.2](./history/v0.65.2.md)
+- Version: `v0.65.3`
+- Date: `2026-08-22`
+- Release note: [v0.65.3](./history/v0.65.3.md)
 - Changelog: [CHANGELOG.md](./CHANGELOG.md)
-- Profile doc: `none`
+- Profile doc: [v0.65.3-profile.md](../perf/release-profiles/v0.65.3-profile.md)
 <!-- release-current:end -->
 
 ## Recent Releases
 
 <!-- release-recent:start -->
+- `2026-08-22` [v0.65.3](./history/v0.65.3.md) - Restart-surviving search index caches, typing-safe warm-up, and index-only corpus metrics
 - `2026-08-09` [v0.65.2](./history/v0.65.2.md) - Explain every search result with source-aware highlighted match evidence
 - `2026-07-11` [v0.65.1](./history/v0.65.1.md) - Unify GitHub and local tagged packaging on the DerivedData-aware release script
 - `2026-07-11` [v0.65.0](./history/v0.65.0.md) - Crash-consistent clipboard ingest, race-safe cleanup, passive-row performance, lossless storage accounting, and explicit release tag authority

@@ -191,7 +191,7 @@ struct HistoryListView: View {
         .onChange(of: historyViewModel.loadedCount) { _, _ in updateProfileWorkloadMetadata() }
         .onChange(of: historyViewModel.totalCount) { _, _ in updateProfileWorkloadMetadata() }
         .onChange(of: historyViewModel.canLoadMore) { _, _ in updateProfileWorkloadMetadata() }
-        .onChange(of: historyViewModel.items) { _, _ in
+        .onChange(of: historyViewModel.itemsRevision) { _, _ in
             updateProfileWorkloadMetadata()
             recordHistoryListIntegrationModelNoteIfNeeded()
         }

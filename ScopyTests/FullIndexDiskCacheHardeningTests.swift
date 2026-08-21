@@ -50,14 +50,24 @@ final class FullIndexDiskCacheHardeningTests: XCTestCase {
         }
     }
 
-    func testSHMDriftDoesNotInvalidateFullIndexDiskCache() async throws {
+    func testFileChurnWithoutMutationDoesNotInvalidateFullIndexDiskCache() async throws {
         try await withSeededDatabase { dbPath, _ in
-            let paths = try await buildFullIndexDiskCache(dbPath: dbPath)
-            try mutateMetadata(at: paths.metadataPath) { root in
-                guard var fingerprint = root["fingerprint"] as? [String: Any] else { return }
-                fingerprint["shmModifiedAt"] = (fingerprint["shmModifiedAt"] as? Double ?? 0) + 1234
-                fingerprint["shmSize"] = (fingerprint["shmSize"] as? Int ?? 0) + 1
-                root["fingerprint"] = fingerprint
+            _ = try await buildFullIndexDiskCache(dbPath: dbPath)
+
+            // Simulate quit-time file churn: a WAL checkpoint plus attribute drift on every DB
+            // file. Logical content (scopy_meta.mutation_seq) is unchanged, so the cache must
+            // stay valid — invalidating here was the production cold-start-rebuild bug.
+            let connection = try SQLiteConnection(
+                path: dbPath,
+                flags: SQLiteConnection.openFlags(for: dbPath, readOnly: false)
+            )
+            connection.walCheckpointPassive()
+            connection.close()
+            for path in [dbPath, "\(dbPath)-wal", "\(dbPath)-shm"] where FileManager.default.fileExists(atPath: path) {
+                try FileManager.default.setAttributes(
+                    [.modificationDate: Date().addingTimeInterval(1234)],
+                    ofItemAtPath: path
+                )
             }
 
             let result = try await runRefineSearch(dbPath: dbPath)

@@ -9,6 +9,9 @@ struct HistoryListState {
     private(set) var loadedCount: Int = 0
     private(set) var totalCount: Int = 0
     private(set) var canLoadMore: Bool = false
+    /// Bumped on every `items` mutation. Observing this instead of `items` avoids SwiftUI's
+    /// element-wise array comparison (O(loaded plain-text bytes)) on the main thread.
+    private(set) var itemsRevision: UInt64 = 0
 
     private var itemIndexByID: [UUID: Int] = [:]
 
@@ -146,6 +149,7 @@ struct HistoryListState {
     }
 
     private mutating func rebuildDerivedState() {
+        itemsRevision &+= 1
         pinnedItems = []
         unpinnedItems = []
         pinnedItems.reserveCapacity(items.count)

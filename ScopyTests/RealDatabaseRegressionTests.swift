@@ -96,7 +96,7 @@ final class RealDatabaseRegressionTests: XCTestCase {
         metadataPath = paths.metadataPath
         await pathProbeEngine.close()
         #else
-        cachePath = "\(dbPath).fullindex.v3.plist"
+        cachePath = "\(dbPath).fullindex.v4.plist"
         checksumPath = cachePath + ".sha256"
         metadataPath = cachePath + ".metadata.plist"
         #endif

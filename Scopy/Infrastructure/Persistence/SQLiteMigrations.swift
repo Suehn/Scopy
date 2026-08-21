@@ -1,7 +1,7 @@
 import Foundation
 
 enum SQLiteMigrations {
-    static let currentUserVersion: Int32 = 8
+    static let currentUserVersion: Int32 = 9
 
     static func migrateIfNeeded(_ connection: SQLiteConnection) throws {
         let userVersion = try readUserVersion(connection)
@@ -33,6 +33,9 @@ enum SQLiteMigrations {
         }
         if userVersion < 8 {
             try setupIngestReceipts(connection)
+        }
+        if userVersion < 9 {
+            try setupPlainTextBytesIndex(connection)
         }
 
         try connection.execute("PRAGMA user_version = \(currentUserVersion)")
@@ -75,6 +78,15 @@ enum SQLiteMigrations {
             """
         )
         try connection.execute("INSERT OR IGNORE INTO schema_version (version) VALUES (1)")
+    }
+
+    private static func setupPlainTextBytesIndex(_ connection: SQLiteConnection) throws {
+        // Expression index so corpus-metrics aggregates (COUNT/AVG/MAX over plain-text byte
+        // length) run as an index-only scan instead of reading every row's text payload.
+        // The expression must stay byte-identical to the one in SearchEngineImpl.computeCorpusMetrics.
+        try connection.execute(
+            "CREATE INDEX IF NOT EXISTS idx_plain_text_bytes ON clipboard_items(LENGTH(CAST(plain_text AS BLOB)))"
+        )
     }
 
     private static func setupIngestReceipts(_ connection: SQLiteConnection) throws {

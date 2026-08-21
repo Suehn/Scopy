@@ -2,7 +2,7 @@
 doc_type: runbook
 status: active
 owner: maintainers
-last_reviewed: 2026-08-09
+last_reviewed: 2026-08-22
 canonical: true
 related_versions:
   - v0.65.0
@@ -136,6 +136,22 @@ This section records the final `v0.65.2` release evidence for source-aware searc
 - `make perf-unified-table` produced `logs/perf-unified-2026-08-09_20-03-12.md`. Its backend columns are a causal revision comparison; its frontend columns compare existing runtime feature-flag variants within the candidate and must not be presented as a before/after search-evidence speedup.
 - The optional include-hover smoke was attempted. Both Markdown and image cases stopped at harness discovery because the locked host reported the Scopy application as disabled and omitted the harness window from the accessibility tree. No hover bucket was produced, so this run is recorded as environment-blocked rather than passed.
 - Retained evidence: `logs/snapshot-release-cmd.jsonl`, `logs/snapshot-release-cm.jsonl`, `logs/perf-frontend-profile-2026-08-09_19-36-44/frontend-scroll-profile-summary.json`, `logs/perf-audit-v0.65.1-baseline-2026-08-09_20-01-14/`, `logs/perf-audit-v0.65.2-current-2026-08-09_20-02-20/`, and `logs/perf-unified-2026-08-09_20-03-12.md`.
+
+## Search Cache And Metrics Release Evidence (2026-08-22)
+
+This section records the final `v0.65.3` release evidence for restart-surviving index caches, typing-safe warm-up, index-only corpus metrics, and the history-list revision token.
+
+- Environment: Apple M3 Pro, arm64, macOS 15.7.3 (`24G419`), Xcode 26.1.1 (`17B100`), project Swift 5.9, deployment target macOS 14.0.
+- Real snapshot (same-day): 9,566 items, 146,255,872 bytes, schema v8 at snapshot time; the current service migrated an isolated copy to schema v9, creating `idx_plain_text_bytes` with unchanged aggregate results.
+- Disk-cache invalidation is now keyed by `scopy_meta.mutation_seq` plus a live item-count tripwire; cache formats are `fullindex.v4` / `shortindex.v2` and older cache files are removed at engine open. File-attribute churn (WAL checkpoint, mtime drift) no longer invalidates a logically unchanged cache; this is covered by a dedicated regression test.
+- Real-database regression (isolated same-day copy, 9,559 items): rebuild refine `1789.7ms` vs disk-cache refine `271.6ms` with identical ordering; prefilter `2.3ms`; prewarmed refine `32.3ms` vs cold no-prewarm `1903.2ms`.
+- Corpus-metrics aggregate on the real database: `268ms` full scan -> `<1ms` index-only scan with identical results; one-time warm index build `14ms`.
+- `make test-snapshot-perf-release`: `cmd p95 0.612020ms` against `50ms`, `cm p95 5.352020ms` against `20ms`, 30 samples per workload.
+- Same-host, same-snapshot backend audit vs `v0.65.2`: service P95 `cm 5.237ms -> 5.246ms`, `数学 24.801ms -> 24.379ms`, `cmd 0.565ms -> 0.634ms`, `cm:noThumb 5.375ms -> 4.763ms`; peak RSS `191.03MB -> 155.03MB`; cold full-index warm load `234.7ms -> 254.0ms` (run-to-run variance; the release claim is cache validity across restarts, not a faster cold build). Engine `cm` audit movement re-measured below baseline (`5.100ms` / `5.209ms`) and is recorded as variance.
+- Frontend standard profile: frame p95 `-34.8%` accessibility, `-38.1%` mixed, `-90.9%` search-evidence, `0.0%` text-bias; row-body p95 down in all scenarios. Baseline/current compare runtime feature-flag variants within one revision and are regression observations.
+- Full frontend profile (three repeats of 10 seconds): frame p95 flat at `0.00%` in mixed, search-evidence, and text-bias; the accessibility scenario moved one 8.333ms frame bucket (`33.333ms -> 41.667ms`) with long-frame attribution dominated by `19.2s` of cold thumbnail decodes in that variant, outside this release's paths. Row-body p95 decreased in all four scenarios.
+- `make perf-unified-table` produced `logs/perf-unified-2026-08-22_02-50-57.md` from the two same-day backend audits plus the full frontend summary.
+- Retained evidence: `logs/perf-audit-v0.65.2-baseline-2026-08-22_02-37-42/`, `logs/perf-audit-v0.65.3-current-2026-08-22_02-39-07/`, `logs/perf-frontend-profile-2026-08-22_02-28-30/`, `logs/perf-frontend-profile-2026-08-22_02-40-40/`, `logs/perf-unified-2026-08-22_02-50-57.md`, `logs/test-real-db.log`, and [v0.65.3 Release Performance Profile](../perf/release-profiles/v0.65.3-profile.md).
 
 ## Homebrew Acceptance
 

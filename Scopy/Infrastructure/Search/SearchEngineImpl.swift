@@ -247,13 +247,14 @@ public actor SearchEngineImpl {
         var tombstoneCount: Int
     }
 
-    struct DBFileFingerprint: Codable, Sendable, Equatable {
-        let dbSize: UInt64
-        let dbModifiedAt: TimeInterval
-        let walSize: UInt64
-        let walModifiedAt: TimeInterval
-        let shmSize: UInt64
-        let shmModifiedAt: TimeInterval
+    /// Logical DB state stamp for disk-cache invalidation. `scopy_meta.mutation_seq` advances
+    /// exactly once per storage commit, so sequence equality means the cached index still matches
+    /// the database regardless of file-level churn (WAL growth, checkpoints on quit). `itemCount`
+    /// (from the same `scopy_meta` row) is a cheap tripwire against a swapped-in database that
+    /// happens to share the same sequence number.
+    struct DBContentStamp: Sendable, Equatable {
+        let mutationSeq: Int64
+        let itemCount: Int
     }
 
     enum FullIndexSnapshotSource: String, Sendable {
@@ -279,9 +280,9 @@ public actor SearchEngineImpl {
         case databaseRebuild = "database_rebuild"
     }
 
-    struct FullIndexDiskCacheMetadataV1: Codable, Sendable {
+    struct FullIndexDiskCacheMetadataV2: Codable, Sendable {
         let version: Int
-        let fingerprint: DBFileFingerprint
+        let mutationSeq: Int64
         let itemCount: Int
         let tombstoneCount: Int
         let tombstoneRatio: Double
@@ -289,8 +290,8 @@ public actor SearchEngineImpl {
     }
 
     struct FullIndexDiskCacheLoadCandidate: Sendable {
-        let fingerprint: DBFileFingerprint
-        let metadata: FullIndexDiskCacheMetadataV1?
+        let stamp: DBContentStamp
+        let metadata: FullIndexDiskCacheMetadataV2?
         let cachePath: String
         let checksumPath: String
         let metadataPath: String
@@ -299,13 +300,13 @@ public actor SearchEngineImpl {
 
     enum FullIndexDiskCachePreflightResult: Sendable {
         case candidate(FullIndexDiskCacheLoadCandidate)
-        case skip(reason: FullIndexDiskCacheLoadReason, metadata: FullIndexDiskCacheMetadataV1?)
+        case skip(reason: FullIndexDiskCacheLoadReason, metadata: FullIndexDiskCacheMetadataV2?)
     }
 
     struct FullIndexDiskCacheLoadOutcome: Sendable {
         let snapshot: FullIndexSnapshot?
         let reason: FullIndexDiskCacheLoadReason
-        let metadata: FullIndexDiskCacheMetadataV1?
+        let metadata: FullIndexDiskCacheMetadataV2?
     }
 
     struct SearchWarmLoadMetrics: Sendable {
@@ -365,17 +366,9 @@ public actor SearchEngineImpl {
         }
     }
 
-    private struct FullIndexWarmupSessionKey: Equatable {
-        let queryLower: String
-        let mode: SearchMode
-        let appFilter: String?
-        let typeFilter: ClipboardItemType?
-        let typeFiltersKey: String?
-    }
-
     private enum FullIndexBuildTrigger: Equatable {
         case forced
-        case interactive(FullIndexWarmupSessionKey)
+        case interactive
     }
 
     private enum FullIndexBuilder {
@@ -708,8 +701,8 @@ public actor SearchEngineImpl {
 
         func toDiskCache(
             version: Int,
-            fp: DBFileFingerprint
-        ) -> SearchIndexDiskCache.ShortQueryIndexDiskCacheV1 {
+            mutationSeq: Int64
+        ) -> SearchIndexDiskCache.ShortQueryIndexDiskCacheV2 {
             var slots: [SearchIndexDiskCache.DiskShortQuerySlot] = []
             slots.reserveCapacity(slotToIDString.count)
             for i in 0..<slotToIDString.count {
@@ -738,14 +731,9 @@ public actor SearchEngineImpl {
                 nonASCIIBigram.append(SearchIndexDiskCache.DiskUInt32Postings(key: key, postings: nonASCIIBigramPostings[key] ?? []))
             }
 
-            return SearchIndexDiskCache.ShortQueryIndexDiskCacheV1(
+            return SearchIndexDiskCache.ShortQueryIndexDiskCacheV2(
                 version: version,
-                dbFileSize: fp.dbSize,
-                dbFileModifiedAt: fp.dbModifiedAt,
-                walFileSize: fp.walSize,
-                walFileModifiedAt: fp.walModifiedAt,
-                shmFileSize: fp.shmSize,
-                shmFileModifiedAt: fp.shmModifiedAt,
+                mutationSeq: mutationSeq,
                 slots: slots,
                 asciiCharPostings: asciiCharPostings,
                 asciiBigramPostings: asciiBigram,
@@ -753,7 +741,7 @@ public actor SearchEngineImpl {
             )
         }
 
-        init?(diskCache: SearchIndexDiskCache.ShortQueryIndexDiskCacheV1) {
+        init?(diskCache: SearchIndexDiskCache.ShortQueryIndexDiskCacheV2) {
             let slotCount = diskCache.slots.count
             self = ShortQueryIndex(reserveSlots: slotCount)
 
@@ -1253,27 +1241,16 @@ public actor SearchEngineImpl {
         }
     }
 
-    private func fullIndexWarmupSessionKey(for request: SearchRequest) -> FullIndexWarmupSessionKey? {
-        let trimmedQuery = request.query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedQuery.isEmpty else { return nil }
-        guard request.mode == .fuzzy || request.mode == .fuzzyPlus else { return nil }
-        let typeFiltersKey = request.typeFilters?
-            .map(\.rawValue)
-            .sorted()
-            .joined(separator: "|")
-        return FullIndexWarmupSessionKey(
-            queryLower: trimmedQuery.lowercased(),
-            mode: request.mode,
-            appFilter: request.appFilter,
-            typeFilter: request.typeFilter,
-            typeFiltersKey: typeFiltersKey
-        )
+    /// The full index is independent of query and filters, so any interactive fuzzy request keeps
+    /// one shared warm-up session alive; only leaving the fuzzy-search context ends it.
+    private func isInteractiveFullIndexWarmupRequest(_ request: SearchRequest) -> Bool {
+        guard request.mode == .fuzzy || request.mode == .fuzzyPlus else { return false }
+        return !request.query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     private func reconcileInteractiveFullIndexWarmup(for request: SearchRequest) {
-        guard case .interactive(let activeSession)? = fullIndexBuildTrigger else { return }
-        let requestedSession = fullIndexWarmupSessionKey(for: request)
-        guard activeSession != requestedSession else { return }
+        guard case .interactive? = fullIndexBuildTrigger else { return }
+        guard !isInteractiveFullIndexWarmupRequest(request) else { return }
         cancelInteractiveFullIndexBuild()
     }
 
@@ -1287,21 +1264,12 @@ public actor SearchEngineImpl {
     }
 
     private func startInteractiveFullIndexBuildIfNeeded(for request: SearchRequest) {
-        guard let session = fullIndexWarmupSessionKey(for: request) else { return }
-        startFullIndexBuildIfNeeded(force: false, trigger: .interactive(session))
+        guard isInteractiveFullIndexWarmupRequest(request) else { return }
+        startFullIndexBuildIfNeeded(force: false, trigger: .interactive)
     }
 
     private func startFullIndexBuildIfNeeded(force: Bool = false, trigger: FullIndexBuildTrigger = .forced) {
-        if fullIndexBuildTask != nil {
-            if fullIndexBuildTrigger == trigger {
-                return
-            }
-            if case .interactive = fullIndexBuildTrigger, case .interactive = trigger {
-                cancelInteractiveFullIndexBuild()
-            } else {
-                return
-            }
-        }
+        guard fullIndexBuildTask == nil else { return }
         guard fullIndex == nil || fullIndexStale else { return }
 
         let estimatedCount = corpusMetrics?.itemCount ?? 0
@@ -1519,7 +1487,7 @@ public actor SearchEngineImpl {
     }
 
     private static func recordFullIndexDiskCacheMetadataCounters(
-        _ metadata: FullIndexDiskCacheMetadataV1?,
+        _ metadata: FullIndexDiskCacheMetadataV2?,
         perf: PerfContext
     ) {
         guard let metadata else { return }
@@ -1533,7 +1501,14 @@ public actor SearchEngineImpl {
         guard shortQueryIndexDiskCachePersistTask == nil else { return }
         invalidateInMemoryIndexesIfDBChangedExternally()
         guard let index = shortQueryIndex else { return }
-        guard let request = SearchIndexDiskCache.makeShortPersistRequest(index: index, dbPath: dbPath) else { return }
+        // `knownDBChangeToken` is the mutation_seq the in-memory index content corresponds to;
+        // stamping the cache with it (rather than re-reading the DB) keeps the two atomic.
+        guard usesMutationSeq, let mutationSeq = knownDBChangeToken else { return }
+        guard let request = SearchIndexDiskCache.makeShortPersistRequest(
+            index: index,
+            dbPath: dbPath,
+            mutationSeq: mutationSeq
+        ) else { return }
         shortQueryIndexDiskCachePersistTask = Task.detached(priority: .utility) { [request] in
             do {
                 try SearchIndexDiskCache.writeShortPersistRequest(request)
@@ -1552,7 +1527,12 @@ public actor SearchEngineImpl {
         guard fullIndexDiskCachePersistTask == nil else { return }
         invalidateInMemoryIndexesIfDBChangedExternally()
         guard let index = fullIndex, !fullIndexStale else { return }
-        guard let request = SearchIndexDiskCache.makeFullPersistRequest(index: index, dbPath: dbPath) else { return }
+        guard usesMutationSeq, let mutationSeq = knownDBChangeToken else { return }
+        guard let request = SearchIndexDiskCache.makeFullPersistRequest(
+            index: index,
+            dbPath: dbPath,
+            mutationSeq: mutationSeq
+        ) else { return }
         fullIndexDiskCachePersistTask = Task.detached(priority: .utility) { [request] in
             do {
                 try SearchIndexDiskCache.writeFullPersistRequest(request)
@@ -3839,6 +3819,7 @@ public actor SearchEngineImpl {
         statementCache = [:]
         statementCacheLRU = []
         fuzzySortedMatchesCache = nil
+        SearchIndexDiskCache.removeStaleCacheFiles(dbPath: dbPath)
         refreshCorpusMetricsIfNeeded(force: true)
         refreshKnownDBChangeTokenIfPossible()
         startShortQueryIndexBuildIfNeeded()
@@ -3862,6 +3843,8 @@ public actor SearchEngineImpl {
     }
 
     private func computeCorpusMetrics() throws -> CorpusMetrics {
+        // Served as an index-only scan by idx_plain_text_bytes (see SQLiteMigrations); the
+        // aggregate expression must stay byte-identical to that index's expression.
         let sql = """
             SELECT COUNT(*), AVG(LENGTH(CAST(plain_text AS BLOB))), MAX(LENGTH(CAST(plain_text AS BLOB)))
             FROM clipboard_items
@@ -5181,6 +5164,10 @@ public actor SearchEngineImpl {
 
     func debugStartFullIndexBuild(force: Bool = true) {
         startFullIndexBuildIfNeeded(force: force)
+    }
+
+    func debugFullIndexBuildGeneration() -> UInt64 {
+        fullIndexBuildGeneration
     }
 
     func debugAwaitFullIndexBuild() async {

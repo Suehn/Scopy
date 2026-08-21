@@ -381,6 +381,9 @@ final class HistoryViewModel {
     var loadedCount: Int {
         listState.loadedCount
     }
+    var itemsRevision: UInt64 {
+        listState.itemsRevision
+    }
     var totalCount: Int {
         listState.totalCount
     }

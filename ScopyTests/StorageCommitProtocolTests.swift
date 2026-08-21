@@ -240,7 +240,7 @@ final class StorageCommitProtocolTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: sourceURL), sourceData)
     }
 
-    func testSchemaVersionSevenMigratesToReceiptVersionEight() async throws {
+    func testSchemaVersionSevenMigratesForwardAndRecreatesIngestReceipts() async throws {
         let directory = try makeTemporaryDirectory(prefix: "scopy-ingest-v8-migration")
         let databasePath = directory.appendingPathComponent("clipboard.db").path
         let initial = StorageService(databasePath: databasePath, storageRootURL: directory)
@@ -265,7 +265,7 @@ final class StorageCommitProtocolTests: XCTestCase {
         )
         let version = try inspector.prepare("PRAGMA user_version")
         XCTAssertTrue(try version.step())
-        XCTAssertEqual(version.columnInt(0), 8)
+        XCTAssertEqual(Int32(version.columnInt(0)), SQLiteMigrations.currentUserVersion)
         let receiptTable = try inspector.prepare(
             "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='ingest_receipts'"
         )

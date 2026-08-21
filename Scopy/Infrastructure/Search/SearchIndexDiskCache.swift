@@ -3,9 +3,9 @@ import Foundation
 import os
 
 enum SearchIndexDiskCache {
-    private static let fullIndexDiskCacheVersion: Int = 3
-    private static let fullIndexDiskCacheMetadataVersion: Int = 1
-    private static let shortQueryIndexDiskCacheVersion: Int = 1
+    private static let fullIndexDiskCacheVersion: Int = 4
+    private static let fullIndexDiskCacheMetadataVersion: Int = 2
+    private static let shortQueryIndexDiskCacheVersion: Int = 2
 
     struct FullPaths: Sendable {
         let cachePath: String
@@ -19,40 +19,30 @@ enum SearchIndexDiskCache {
     }
 
     struct FullPersistRequest: Sendable {
-        fileprivate let cache: FullIndexDiskCacheV3
-        fileprivate let metadata: SearchEngineImpl.FullIndexDiskCacheMetadataV1
+        fileprivate let cache: FullIndexDiskCacheV4
+        fileprivate let metadata: SearchEngineImpl.FullIndexDiskCacheMetadataV2
         fileprivate let cachePath: String
         fileprivate let checksumPath: String
         fileprivate let metadataPath: String
     }
 
     struct ShortPersistRequest: Sendable {
-        fileprivate let cache: ShortQueryIndexDiskCacheV1
+        fileprivate let cache: ShortQueryIndexDiskCacheV2
         fileprivate let cachePath: String
         fileprivate let checksumPath: String
     }
 
-    fileprivate struct FullIndexDiskCacheV3: Codable, Sendable {
+    fileprivate struct FullIndexDiskCacheV4: Codable, Sendable {
         let version: Int
-        let dbFileSize: UInt64
-        let dbFileModifiedAt: TimeInterval
-        let walFileSize: UInt64
-        let walFileModifiedAt: TimeInterval
-        let shmFileSize: UInt64
-        let shmFileModifiedAt: TimeInterval
+        let mutationSeq: Int64
         let items: [DiskIndexedItem?]
         let asciiCharPostings: [[Int]]
         let nonASCIICharPostings: [String: [Int]]
     }
 
-    struct ShortQueryIndexDiskCacheV1: Codable, Sendable {
+    struct ShortQueryIndexDiskCacheV2: Codable, Sendable {
         let version: Int
-        let dbFileSize: UInt64
-        let dbFileModifiedAt: TimeInterval
-        let walFileSize: UInt64
-        let walFileModifiedAt: TimeInterval
-        let shmFileSize: UInt64
-        let shmFileModifiedAt: TimeInterval
+        let mutationSeq: Int64
         let slots: [DiskShortQuerySlot]
         let asciiCharPostings: [[Int]]
         let asciiBigramPostings: [DiskUInt16Postings]
@@ -130,8 +120,26 @@ enum SearchIndexDiskCache {
         return digest.map { String(format: "%02x", $0) }.joined()
     }
 
+    /// Deletes cache files written by other (older) cache versions next to the database.
+    static func removeStaleCacheFiles(dbPath: String) {
+        let dbURL = URL(fileURLWithPath: dbPath)
+        let directory = dbURL.deletingLastPathComponent()
+        let dbName = dbURL.lastPathComponent
+        let full = fullPaths(dbPath: dbPath)
+        let short = shortPaths(dbPath: dbPath)
+        let currentPrefixes = [full.cachePath, short.cachePath].map { URL(fileURLWithPath: $0).lastPathComponent }
+        let stalePrefixes = ["\(dbName).fullindex.", "\(dbName).shortindex."]
+
+        guard let names = try? FileManager.default.contentsOfDirectory(atPath: directory.path) else { return }
+        for name in names {
+            guard stalePrefixes.contains(where: { name.hasPrefix($0) }) else { continue }
+            guard !currentPrefixes.contains(where: { name.hasPrefix($0) }) else { continue }
+            try? FileManager.default.removeItem(at: directory.appendingPathComponent(name))
+        }
+    }
+
     static func loadShortSnapshot(dbPath: String) -> SearchEngineImpl.ShortQueryIndexSnapshot? {
-        guard let fp = dbFileFingerprint(dbPath: dbPath) else { return nil }
+        guard let stamp = dbContentStamp(dbPath: dbPath) else { return nil }
         let paths = shortPaths(dbPath: dbPath)
         guard FileManager.default.fileExists(atPath: paths.cachePath) else { return nil }
 
@@ -147,16 +155,11 @@ enum SearchIndexDiskCache {
         guard computedChecksum == checksum else { return nil }
 
         let decoder = PropertyListDecoder()
-        guard let cache = try? decoder.decode(ShortQueryIndexDiskCacheV1.self, from: data) else { return nil }
+        guard let cache = try? decoder.decode(ShortQueryIndexDiskCacheV2.self, from: data) else { return nil }
         guard cache.version == shortQueryIndexDiskCacheVersion else { return nil }
-        guard cache.dbFileSize == fp.dbSize,
-              cache.dbFileModifiedAt == fp.dbModifiedAt,
-              cache.walFileSize == fp.walSize,
-              cache.walFileModifiedAt == fp.walModifiedAt,
-              cache.shmFileSize == fp.shmSize,
-              cache.shmFileModifiedAt == fp.shmModifiedAt else {
-            return nil
-        }
+        guard cache.mutationSeq == stamp.mutationSeq else { return nil }
+        let liveSlotCount = cache.slots.lazy.filter { $0.id != nil }.count
+        guard liveSlotCount == stamp.itemCount else { return nil }
 
         guard cache.asciiCharPostings.count == 128 else { return nil }
 
@@ -211,8 +214,8 @@ enum SearchIndexDiskCache {
             return .skip(reason: .metadataMissing, metadata: nil)
         }
 
-        guard let fp = dbFileFingerprint(dbPath: dbPath) else {
-            return .skip(reason: .payloadInvalid, metadata: nil)
+        guard let stamp = dbContentStamp(dbPath: dbPath) else {
+            return .skip(reason: .fingerprintMismatch, metadata: nil)
         }
 
         guard FileManager.default.fileExists(atPath: paths.metadataPath),
@@ -222,7 +225,7 @@ enum SearchIndexDiskCache {
             }
             return .candidate(
                 SearchEngineImpl.FullIndexDiskCacheLoadCandidate(
-                    fingerprint: fp,
+                    stamp: stamp,
                     metadata: nil,
                     cachePath: paths.cachePath,
                     checksumPath: paths.checksumPath,
@@ -233,14 +236,14 @@ enum SearchIndexDiskCache {
         }
 
         let decoder = PropertyListDecoder()
-        guard let metadata = try? decoder.decode(SearchEngineImpl.FullIndexDiskCacheMetadataV1.self, from: metadataData),
+        guard let metadata = try? decoder.decode(SearchEngineImpl.FullIndexDiskCacheMetadataV2.self, from: metadataData),
               metadata.version == fullIndexDiskCacheMetadataVersion else {
             guard FileManager.default.fileExists(atPath: paths.checksumPath) else {
                 return .skip(reason: .metadataMissing, metadata: nil)
             }
             return .candidate(
                 SearchEngineImpl.FullIndexDiskCacheLoadCandidate(
-                    fingerprint: fp,
+                    stamp: stamp,
                     metadata: nil,
                     cachePath: paths.cachePath,
                     checksumPath: paths.checksumPath,
@@ -250,7 +253,7 @@ enum SearchIndexDiskCache {
             )
         }
 
-        guard fullIndexCacheFingerprintMatches(metadata.fingerprint, fp) else {
+        guard metadata.mutationSeq == stamp.mutationSeq else {
             return .skip(reason: .fingerprintMismatch, metadata: metadata)
         }
 
@@ -262,13 +265,19 @@ enum SearchIndexDiskCache {
             return .skip(reason: .tombstoneStale, metadata: metadata)
         }
 
+        // Live count must line up with scopy_meta: guards against a swapped-in database whose
+        // mutation_seq happens to collide with the cached one.
+        guard metadata.itemCount - metadata.tombstoneCount == stamp.itemCount else {
+            return .skip(reason: .fingerprintMismatch, metadata: metadata)
+        }
+
         guard FileManager.default.fileExists(atPath: paths.checksumPath) else {
             return .skip(reason: .payloadInvalid, metadata: metadata)
         }
 
         return .candidate(
             SearchEngineImpl.FullIndexDiskCacheLoadCandidate(
-                fingerprint: fp,
+                stamp: stamp,
                 metadata: metadata,
                 cachePath: paths.cachePath,
                 checksumPath: paths.checksumPath,
@@ -302,7 +311,7 @@ enum SearchIndexDiskCache {
             return SearchEngineImpl.FullIndexDiskCacheLoadOutcome(snapshot: nil, reason: .checksumMismatch, metadata: candidate.metadata)
         }
 
-        let parseResult = decodeFullIndexDiskCachePayload(data, fingerprint: candidate.fingerprint)
+        let parseResult = decodeFullIndexDiskCachePayload(data, stamp: candidate.stamp)
         let index: SearchEngineImpl.FullFuzzyIndex
         switch parseResult {
         case .success(let parsedIndex):
@@ -314,7 +323,7 @@ enum SearchIndexDiskCache {
         }
 
         let metadata = candidate.metadata ?? makeFullIndexDiskCacheMetadata(
-            fingerprint: candidate.fingerprint,
+            mutationSeq: candidate.stamp.mutationSeq,
             index: index,
             payloadByteSize: data.count
         )
@@ -326,6 +335,12 @@ enum SearchIndexDiskCache {
             tombstoneCount: index.tombstoneCount
         ) {
             return SearchEngineImpl.FullIndexDiskCacheLoadOutcome(snapshot: nil, reason: .tombstoneStale, metadata: metadata)
+        }
+
+        // Same invariant as preflight for the metadata-bootstrap path: a cache is valid only
+        // when its mutation_seq AND live item count both match scopy_meta.
+        guard index.idToSlot.count == candidate.stamp.itemCount else {
+            return SearchEngineImpl.FullIndexDiskCacheLoadOutcome(snapshot: nil, reason: .fingerprintMismatch, metadata: metadata)
         }
 
         #if DEBUG
@@ -344,13 +359,13 @@ enum SearchIndexDiskCache {
 
     static func makeShortPersistRequest(
         index: SearchEngineImpl.ShortQueryIndex,
-        dbPath: String
+        dbPath: String,
+        mutationSeq: Int64
     ) -> ShortPersistRequest? {
         guard index.asciiCharPostingsCount == 128 else { return nil }
-        guard let fp = dbFileFingerprint(dbPath: dbPath) else { return nil }
         let paths = shortPaths(dbPath: dbPath)
         return ShortPersistRequest(
-            cache: index.toDiskCache(version: shortQueryIndexDiskCacheVersion, fp: fp),
+            cache: index.toDiskCache(version: shortQueryIndexDiskCacheVersion, mutationSeq: mutationSeq),
             cachePath: paths.cachePath,
             checksumPath: paths.checksumPath
         )
@@ -367,10 +382,10 @@ enum SearchIndexDiskCache {
 
     static func makeFullPersistRequest(
         index: SearchEngineImpl.FullFuzzyIndex,
-        dbPath: String
+        dbPath: String,
+        mutationSeq: Int64
     ) -> FullPersistRequest? {
         guard index.asciiCharPostings.count == 128 else { return nil }
-        guard let fp = dbFileFingerprint(dbPath: dbPath) else { return nil }
 
         var nonASCII: [String: [Int]] = [:]
         nonASCII.reserveCapacity(index.nonASCIICharPostings.count)
@@ -378,19 +393,14 @@ enum SearchIndexDiskCache {
             nonASCII[String(ch)] = postings
         }
 
-        let cache = FullIndexDiskCacheV3(
+        let cache = FullIndexDiskCacheV4(
             version: fullIndexDiskCacheVersion,
-            dbFileSize: fp.dbSize,
-            dbFileModifiedAt: fp.dbModifiedAt,
-            walFileSize: fp.walSize,
-            walFileModifiedAt: fp.walModifiedAt,
-            shmFileSize: fp.shmSize,
-            shmFileModifiedAt: fp.shmModifiedAt,
+            mutationSeq: mutationSeq,
             items: index.items.map { $0.map(DiskIndexedItem.init(from:)) },
             asciiCharPostings: index.asciiCharPostings,
             nonASCIICharPostings: nonASCII
         )
-        let metadata = makeFullIndexDiskCacheMetadata(fingerprint: fp, index: index, payloadByteSize: 0)
+        let metadata = makeFullIndexDiskCacheMetadata(mutationSeq: mutationSeq, index: index, payloadByteSize: 0)
         let paths = fullPaths(dbPath: dbPath)
         return FullPersistRequest(
             cache: cache,
@@ -408,9 +418,9 @@ enum SearchIndexDiskCache {
         try data.write(to: URL(fileURLWithPath: request.cachePath), options: [.atomic])
         let checksum = sha256Hex(data)
         try checksum.write(to: URL(fileURLWithPath: request.checksumPath), atomically: true, encoding: .utf8)
-        let metadataWithPayloadSize = SearchEngineImpl.FullIndexDiskCacheMetadataV1(
+        let metadataWithPayloadSize = SearchEngineImpl.FullIndexDiskCacheMetadataV2(
             version: request.metadata.version,
-            fingerprint: request.metadata.fingerprint,
+            mutationSeq: request.metadata.mutationSeq,
             itemCount: request.metadata.itemCount,
             tombstoneCount: request.metadata.tombstoneCount,
             tombstoneRatio: request.metadata.tombstoneRatio,
@@ -472,49 +482,22 @@ enum SearchIndexDiskCache {
         return true
     }
 
-    private static func dbFileFingerprint(
-        dbPath: String
-    ) -> SearchEngineImpl.DBFileFingerprint? {
+    /// Reads the logical content stamp from `scopy_meta`. Databases without that table
+    /// (never migrated by StorageService) simply don't participate in disk caching.
+    private static func dbContentStamp(dbPath: String) -> SearchEngineImpl.DBContentStamp? {
+        guard FileManager.default.fileExists(atPath: dbPath) else { return nil }
+        let flags = SQLiteConnection.openFlags(for: dbPath, readOnly: true)
+        guard let conn = try? SQLiteConnection(path: dbPath, flags: flags) else { return nil }
+        defer { conn.close() }
+
         do {
-            let dbAttrs = try FileManager.default.attributesOfItem(atPath: dbPath)
-            guard let dbSize = dbAttrs[.size] as? NSNumber,
-                  let dbModifiedAt = dbAttrs[.modificationDate] as? Date else {
-                return nil
-            }
-
-            let walPath = "\(dbPath)-wal"
-            var walSize: UInt64 = 0
-            var walModifiedAt: TimeInterval = 0
-            if FileManager.default.fileExists(atPath: walPath) {
-                let walAttrs = try FileManager.default.attributesOfItem(atPath: walPath)
-                guard let size = walAttrs[.size] as? NSNumber,
-                      let modifiedAt = walAttrs[.modificationDate] as? Date else {
-                    return nil
-                }
-                walSize = size.uint64Value
-                walModifiedAt = modifiedAt.timeIntervalSince1970
-            }
-
-            let shmPath = "\(dbPath)-shm"
-            var shmSize: UInt64 = 0
-            var shmModifiedAt: TimeInterval = 0
-            if FileManager.default.fileExists(atPath: shmPath) {
-                let shmAttrs = try FileManager.default.attributesOfItem(atPath: shmPath)
-                guard let size = shmAttrs[.size] as? NSNumber,
-                      let modifiedAt = shmAttrs[.modificationDate] as? Date else {
-                    return nil
-                }
-                shmSize = size.uint64Value
-                shmModifiedAt = modifiedAt.timeIntervalSince1970
-            }
-
-            return SearchEngineImpl.DBFileFingerprint(
-                dbSize: dbSize.uint64Value,
-                dbModifiedAt: dbModifiedAt.timeIntervalSince1970,
-                walSize: walSize,
-                walModifiedAt: walModifiedAt,
-                shmSize: shmSize,
-                shmModifiedAt: shmModifiedAt
+            try conn.execute("PRAGMA query_only = 1")
+            try conn.execute("PRAGMA busy_timeout = 500")
+            let stmt = try conn.prepare("SELECT mutation_seq, item_count FROM scopy_meta WHERE id = 1")
+            guard try stmt.step() else { return nil }
+            return SearchEngineImpl.DBContentStamp(
+                mutationSeq: stmt.columnInt64(0),
+                itemCount: stmt.columnInt(1)
             )
         } catch {
             return nil
@@ -522,13 +505,13 @@ enum SearchIndexDiskCache {
     }
 
     private static func makeFullIndexDiskCacheMetadata(
-        fingerprint: SearchEngineImpl.DBFileFingerprint,
+        mutationSeq: Int64,
         index: SearchEngineImpl.FullFuzzyIndex,
         payloadByteSize: Int
-    ) -> SearchEngineImpl.FullIndexDiskCacheMetadataV1 {
-        SearchEngineImpl.FullIndexDiskCacheMetadataV1(
+    ) -> SearchEngineImpl.FullIndexDiskCacheMetadataV2 {
+        SearchEngineImpl.FullIndexDiskCacheMetadataV2(
             version: fullIndexDiskCacheMetadataVersion,
-            fingerprint: fingerprint,
+            mutationSeq: mutationSeq,
             itemCount: index.items.count,
             tombstoneCount: index.tombstoneCount,
             tombstoneRatio: index.items.isEmpty ? 0 : Double(index.tombstoneCount) / Double(index.items.count),
@@ -537,7 +520,7 @@ enum SearchIndexDiskCache {
     }
 
     private static func persistFullIndexDiskCacheMetadataIfPossible(
-        _ metadata: SearchEngineImpl.FullIndexDiskCacheMetadataV1,
+        _ metadata: SearchEngineImpl.FullIndexDiskCacheMetadataV2,
         at path: String
     ) {
         do {
@@ -550,18 +533,8 @@ enum SearchIndexDiskCache {
         }
     }
 
-    private static func fullIndexCacheFingerprintMatches(
-        _ lhs: SearchEngineImpl.DBFileFingerprint,
-        _ rhs: SearchEngineImpl.DBFileFingerprint
-    ) -> Bool {
-        lhs.dbSize == rhs.dbSize &&
-        lhs.dbModifiedAt == rhs.dbModifiedAt &&
-        lhs.walSize == rhs.walSize &&
-        lhs.walModifiedAt == rhs.walModifiedAt
-    }
-
     private static func recordFullIndexDiskCacheMetadataCounters(
-        _ metadata: SearchEngineImpl.FullIndexDiskCacheMetadataV1?,
+        _ metadata: SearchEngineImpl.FullIndexDiskCacheMetadataV2?,
         metrics: inout SearchEngineImpl.SearchWarmLoadMetrics
     ) {
         guard let metadata else { return }
@@ -573,7 +546,7 @@ enum SearchIndexDiskCache {
 
     private static func decodeFullIndexDiskCachePayload(
         _ data: Data,
-        fingerprint: SearchEngineImpl.DBFileFingerprint
+        stamp: SearchEngineImpl.DBContentStamp
     ) -> FullIndexDiskCachePayloadParseResult {
         guard let root = try? PropertyListSerialization.propertyList(from: data, options: [], format: nil) else {
             return .decodeFailed
@@ -585,12 +558,7 @@ enum SearchIndexDiskCache {
         guard plistInt(payload["version"]) == fullIndexDiskCacheVersion else {
             return .payloadInvalid
         }
-        guard plistUInt64(payload["dbFileSize"]) == fingerprint.dbSize,
-              plistTimeInterval(payload["dbFileModifiedAt"]) == fingerprint.dbModifiedAt else {
-            return .payloadInvalid
-        }
-        guard plistUInt64(payload["walFileSize"]) == fingerprint.walSize,
-              plistTimeInterval(payload["walFileModifiedAt"]) == fingerprint.walModifiedAt else {
+        guard plistInt64(payload["mutationSeq"]) == stamp.mutationSeq else {
             return .payloadInvalid
         }
         guard let rawItems = payload["items"] as? [Any],
@@ -701,12 +669,12 @@ enum SearchIndexDiskCache {
         return nil
     }
 
-    private static func plistUInt64(_ value: Any?) -> UInt64? {
-        if let uint64Value = value as? UInt64 {
-            return uint64Value
+    private static func plistInt64(_ value: Any?) -> Int64? {
+        if let int64Value = value as? Int64 {
+            return int64Value
         }
         if let number = value as? NSNumber {
-            return number.uint64Value
+            return number.int64Value
         }
         return nil
     }

@@ -11,6 +11,22 @@
 
 - No unreleased entries.
 
+## [v0.65.3] - 2026-08-22
+
+### Performance
+
+- Search-index disk caches (full index and short-query index) now survive app restarts: invalidation is keyed by the logical `scopy_meta.mutation_seq` content stamp instead of DB/WAL/SHM file attributes, which the quit-time WAL checkpoint invalidated on every restart. Cold-start deep fuzzy refine on the real 9.5k-item database drops from `1789.7ms` (full rebuild) to `271.6ms` (cache hit) with identical result ordering.
+- Typing no longer cancels the interactive full-index warm-up build. The warm-up session is no longer keyed by the query string, so one background build survives consecutive keystrokes and the post-typing refine takes `32.3ms` instead of the `1903.2ms` cold synchronous path.
+- The first search after every clipboard write no longer pays a full-table aggregate: schema v9 adds the `idx_plain_text_bytes` expression index, serving the unchanged corpus-metrics query as an index-only scan (`268ms -> <1ms` on the real database).
+- The history list observes a cheap `itemsRevision` token instead of deep-comparing the items array on the main thread (previously O(loaded plain-text bytes) per items change).
+
+### Correctness/Architecture
+
+- Cache persistence stamps the engine's own `knownDBChangeToken`, closing the old fingerprint's time-of-check/time-of-use race; a live item-count tripwire guards against sequence collisions across swapped databases.
+- Cache formats bumped to `fullindex.v4` / `shortindex.v2`; stale older cache files are cleaned up at engine open. The legacy file-attribute fingerprint path is removed entirely.
+- New regression tests cover cache validity under WAL-checkpoint/file-attribute churn and warm-up continuity across consecutive queries.
+- No user-visible behavior, ranking, or interaction change; snapshot Release gate `cmd p95 0.612ms / 50ms`, `cm p95 5.352ms / 20ms`.
+
 ## [v0.65.2] - 2026-08-09
 
 ### Search/Readability
