@@ -11,6 +11,21 @@
 
 - No unreleased entries.
 
+## [v0.65.4] - 2026-08-28
+
+### Markdown/Preview
+
+- Replaces the legacy renderer selector, fallback, feature flags, shadow comparison, duplicated normalizers, and obsolete assets with one local CommonMark/GFM pipeline shared by hover preview and PNG export.
+- Aligns completed-response typography, paragraph/list/blockquote rhythm, 640px/768px logical thread widths, overflow ownership, tables, code, tasks, citations, stable footnotes, and HTML-only KaTeX to the captured ChatGPT WACZ contract.
+- Handles CJK, RTL, Unicode, malformed headings, code-span pipes in tables, raw HTML as literal text, protected math-adjacent URLs/paths, and long export content through explicit regression cases.
+- Hardens WebView lifecycle state with per-navigation render IDs, main-frame validation, and error-aware metric identity so stale or same-sized failed loads cannot replace current preview state.
+
+### Architecture/Documentation
+
+- Removes obsolete compatibility code instead of retaining alternate behavior, and updates `AGENTS.md`, `CLAUDE.md`, and canonical renderer/product/architecture/development documentation around the single long-term contract.
+- Records 44 passing renderer tests, 756 passing normal and strict Swift tests with 27 skips and no failures, successful app build/docs/release policy gates, and a visually accepted 1080 x 4571 real-app PNG export. The optional include-hover UI harness remained environment-blocked and is not counted as a pass.
+
+
 ## [v0.65.3] - 2026-08-22
 
 ### Performance

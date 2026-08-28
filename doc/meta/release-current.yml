@@ -1,24 +1,22 @@
-version: v0.65.3
-date: 2026-08-22
-release_doc: doc/releases/history/v0.65.3.md
+version: v0.65.4
+date: 2026-08-28
+release_doc: doc/releases/history/v0.65.4.md
 release_index: doc/releases/README.md
 changelog_file: doc/releases/CHANGELOG.md
-profile_doc: doc/perf/release-profiles/v0.65.3-profile.md
+profile_doc: null
 runbook_doc: doc/current/release-runbook.md
 spec_doc: doc/current/product-spec.md
 development_doc: doc/current/development-guide.md
 architecture_doc: doc/current/architecture.md
-last_verified_at: 2026-08-22
-summary: Restart-surviving search index caches, typing-safe warm-up, and index-only corpus metrics
+last_verified_at: 2026-08-28
+summary: ChatGPT-aligned Markdown preview and PNG export rendering
 verification:
   docs_validate: pass
   release_validate: pass
+  release_policy: pass_15_cases
   build: pass
-  test_unit: pass_786_executed_0_failures
-  test_strict: pass_786_executed_0_failures
-  test_tsan: pass_766_executed_0_failures_no_races
-  test_real_db: pass_2_regressions_disk_cache_refine_271.6ms_vs_rebuild_1789.7ms
-  snapshot_perf_release: pass_cmd_p95_0.612020ms_cm_p95_5.352020ms
-  frontend_profile_standard: pass_frame_p95_improved_3_of_4_scenarios_flat_1
-  frontend_profile_full: pass_3_repeats_frame_p95_flat_3_of_4_row_body_down_4_of_4
-  unified_perf: pass_absolute_slos
+  renderer_js: pass_44_executed_0_failures
+  test_unit: pass_756_executed_27_skipped_0_failures
+  test_strict: pass_756_executed_27_skipped_0_failures
+  real_app_png_export: pass_1080x4571_visual_acceptance
+  include_hover_ui: blocked_accessibility_harness_unavailable_not_counted_as_pass

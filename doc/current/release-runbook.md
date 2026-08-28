@@ -2,9 +2,10 @@
 doc_type: runbook
 status: active
 owner: maintainers
-last_reviewed: 2026-08-22
+last_reviewed: 2026-08-28
 canonical: true
 related_versions:
+  - v0.65.4
   - v0.65.0
   - v0.8.8
   - v0.8.1
@@ -152,6 +153,16 @@ This section records the final `v0.65.3` release evidence for restart-surviving 
 - Full frontend profile (three repeats of 10 seconds): frame p95 flat at `0.00%` in mixed, search-evidence, and text-bias; the accessibility scenario moved one 8.333ms frame bucket (`33.333ms -> 41.667ms`) with long-frame attribution dominated by `19.2s` of cold thumbnail decodes in that variant, outside this release's paths. Row-body p95 decreased in all four scenarios.
 - `make perf-unified-table` produced `logs/perf-unified-2026-08-22_02-50-57.md` from the two same-day backend audits plus the full frontend summary.
 - Retained evidence: `logs/perf-audit-v0.65.2-baseline-2026-08-22_02-37-42/`, `logs/perf-audit-v0.65.3-current-2026-08-22_02-39-07/`, `logs/perf-frontend-profile-2026-08-22_02-28-30/`, `logs/perf-frontend-profile-2026-08-22_02-40-40/`, `logs/perf-unified-2026-08-22_02-50-57.md`, `logs/test-real-db.log`, and [v0.65.3 Release Performance Profile](../perf/release-profiles/v0.65.3-profile.md).
+
+## ChatGPT-Aligned Markdown Renderer Release Evidence (2026-08-28)
+
+This section records the `v0.65.4` release evidence for the single preview/PNG renderer aligned to the completed-response contract captured in `my-archiving-session.wacz`.
+
+- Renderer boundary: preview and PNG export both consume the output of `MarkdownHTMLRenderer -> MarkdownHTMLDocumentBuilder`; the legacy selector, shadow renderer, feature flags, fallback parser, duplicate normalizers, and obsolete assets are removed.
+- Semantic/visual coverage: local CommonMark/GFM, stable footnotes, HTML-only KaTeX, syntax highlighting, tasks, citations, table sizing/overflow, literal raw HTML, CJK, RTL, Unicode, malformed ATX headings, protected URLs/file paths, and long-document export.
+- Automated evidence: the JavaScript renderer suite passed 44/44; normal and strict Swift executions each completed 756 tests with 27 skips and zero failures; app build, docs validation, release validation, and the 15-case workflow policy passed.
+- End-to-end evidence: the real application exported the long fixture to a visually accepted 1080 x 4571 PNG with the tail present. The optional include-hover XCUITest path could not establish the host accessibility harness and is recorded as environment-blocked, not passed.
+- No performance improvement is claimed and no dedicated profile was created; release metadata intentionally sets `profile_doc: null`.
 
 ## Homebrew Acceptance
 

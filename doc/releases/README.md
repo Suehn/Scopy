@@ -19,16 +19,17 @@ This page is the human-facing index for current release state. Automation should
 ## Current Release
 
 <!-- release-current:start -->
-- Version: `v0.65.3`
-- Date: `2026-08-22`
-- Release note: [v0.65.3](./history/v0.65.3.md)
+- Version: `v0.65.4`
+- Date: `2026-08-28`
+- Release note: [v0.65.4](./history/v0.65.4.md)
 - Changelog: [CHANGELOG.md](./CHANGELOG.md)
-- Profile doc: [v0.65.3-profile.md](../perf/release-profiles/v0.65.3-profile.md)
+- Profile doc: `none`
 <!-- release-current:end -->
 
 ## Recent Releases
 
 <!-- release-recent:start -->
+- `2026-08-28` [v0.65.4](./history/v0.65.4.md) - ChatGPT-aligned Markdown preview and PNG export rendering
 - `2026-08-22` [v0.65.3](./history/v0.65.3.md) - Restart-surviving search index caches, typing-safe warm-up, and index-only corpus metrics
 - `2026-08-09` [v0.65.2](./history/v0.65.2.md) - Explain every search result with source-aware highlighted match evidence
 - `2026-07-11` [v0.65.1](./history/v0.65.1.md) - Unify GitHub and local tagged packaging on the DerivedData-aware release script
@@ -40,8 +41,6 @@ This page is the human-facing index for current release state. Automation should
 - `2026-05-30` [v0.8.4](./history/v0.8.4.md) - Markdown preview scaling and WACZ parity polish
 - `2026-05-30` [v0.8.3](./history/v0.8.3.md) - WACZ-aligned Markdown rendering theme
 - `2026-05-16` [v0.8.2](./history/v0.8.2.md) - Markdown safe HTML renderer routing and rich HTML fallback hardening
-- `2026-05-16` [v0.8.1](./history/v0.8.1.md) - Unified Markdown code highlighting and theme parity fix
-- `2026-05-16` [v0.8.0](./history/v0.8.0.md) - Unified Markdown renderer preview and export hardening
 <!-- release-recent:end -->
 
 ## Full History
