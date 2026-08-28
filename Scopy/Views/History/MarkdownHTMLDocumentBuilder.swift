@@ -3,6 +3,7 @@ import ScopyKit
 
 enum MarkdownHTMLDocumentBuilder {
     private static let layout = MarkdownRenderLayoutConstants.self
+    private static let overflowProbeSelector = "pre, .katex, .footnotes"
 
     private static let cspMetaTag = """
     <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src 'self' data:; style-src 'self' 'unsafe-inline' file:; script-src 'self' 'unsafe-inline' file:; font-src 'self' data: file:;">
@@ -408,18 +409,17 @@ enum MarkdownHTMLDocumentBuilder {
             } catch (e) { }
     """
 
-    private static func baseStyle(
-        featureSet: MarkdownRenderFeatureSet,
-        layoutScale: MarkdownChatGPTLayoutScalePercent
-    ) -> String {
-        let threadContentWidth = layoutScale.threadContentWidth
+    private static func baseStyle(layoutScale: MarkdownChatGPTLayoutScalePercent) -> String {
         let outputSurfaceWidth = Self.layout.chatGPTOutputSurfaceWidth
         let layoutViewportWidth = layoutScale.layoutViewportWidth(outputSurfaceWidth: outputSurfaceWidth)
+        let threadContentWidth = Self.layout.threadContentWidth(
+            forLayoutViewportWidth: layoutViewportWidth
+        )
         let fontScale = layoutScale.fontScale
         let browserZoomScale = layoutScale.browserZoomScale
         let inverseBrowserZoomScale = layoutScale.inverseBrowserZoomScale
-        let taskListStyle = featureSet.taskLists ? "\n\(MarkdownTaskListRuntime.style)\n" : ""
-        let footnoteStyle = featureSet.footnotes ? """
+        let taskListStyle = "\n\(MarkdownTaskListRuntime.style)\n"
+        let footnoteStyle = """
           .footnotes {
             margin-top: 16px;
             padding-top: 0;
@@ -429,7 +429,7 @@ enum MarkdownHTMLDocumentBuilder {
           }
           .footnotes-list {
             margin: 0;
-            padding-left: 26px;
+            padding-inline-start: 26px;
           }
           .footnotes p:first-child {
             margin-top: 0;
@@ -441,7 +441,7 @@ enum MarkdownHTMLDocumentBuilder {
             display: inline-flex;
             position: static;
             top: auto;
-            margin-left: 4px;
+            margin-inline-start: 4px;
             font-size: calc(12px * var(--scopy-chatgpt-layout-font-scale));
             line-height: calc(20px * var(--scopy-chatgpt-layout-font-scale));
             font-weight: 500;
@@ -451,7 +451,7 @@ enum MarkdownHTMLDocumentBuilder {
             display: inline-flex;
             position: static;
             top: auto;
-            margin-left: 4px;
+            margin-inline-start: 4px;
             font-size: calc(12px * var(--scopy-chatgpt-layout-font-scale));
             line-height: calc(20px * var(--scopy-chatgpt-layout-font-scale));
             font-weight: 500;
@@ -484,65 +484,7 @@ enum MarkdownHTMLDocumentBuilder {
           [data-footnote-backref]::after {
             content: none;
           }
-        """ : ""
-        let definitionListStyle = featureSet.definitionLists ? """
-          dl {
-            display: grid;
-            grid-template-columns: minmax(7rem, max-content) minmax(0, 1fr);
-            column-gap: 1rem;
-            row-gap: 0.5rem;
-          }
-          dt {
-            font-weight: 600;
-          }
-          dd {
-            margin: 0;
-          }
-        """ : ""
-        let safeHTMLStyle = featureSet.safeHTMLSubset ? """
-          details {
-            margin: 0 0 1rem 0;
-            padding: 0.75rem 0.875rem;
-            border: 1px solid rgba(127,127,127,0.22);
-            border-radius: 12px;
-            background: rgba(127,127,127,0.05);
-          }
-          details[open] {
-            padding-bottom: 0.875rem;
-          }
-          details > *:last-child {
-            margin-bottom: 0;
-          }
-          summary {
-            cursor: default;
-            font-weight: 600;
-          }
-          kbd {
-            display: inline-block;
-            min-width: 1.5em;
-            padding: 0.08em 0.45em;
-            border: 1px solid rgba(127,127,127,0.32);
-            border-bottom-width: 2px;
-            border-radius: 6px;
-            background: rgba(127,127,127,0.08);
-            box-shadow: inset 0 -1px 0 rgba(127,127,127,0.15);
-            font: 0.92em ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-          }
-          mark {
-            color: inherit;
-            background: rgba(255, 225, 92, 0.55);
-            border-radius: 0.2em;
-            padding: 0 0.2em;
-          }
-          u {
-            text-underline-offset: 0.16em;
-          }
-          sub,
-          sup {
-            font-size: 0.72em;
-          }
-        """ : ""
-
+        """
         return """
         <style>
           :root {
@@ -590,7 +532,7 @@ enum MarkdownHTMLDocumentBuilder {
             --scopy-chatgpt-h3-line-height: calc(28px * var(--scopy-chatgpt-layout-font-scale));
             --scopy-chatgpt-h4-font-size: calc(16px * var(--scopy-chatgpt-layout-font-scale));
             --scopy-chatgpt-h4-line-height: calc(24px * var(--scopy-chatgpt-layout-font-scale));
-            --scopy-chatgpt-code-card-font-size: calc(12.25px * var(--scopy-chatgpt-layout-font-scale));
+            --scopy-chatgpt-code-card-font-size: calc(14px * var(--scopy-chatgpt-layout-font-scale));
             --scopy-chatgpt-code-card-line-height: calc(20px * var(--scopy-chatgpt-layout-font-scale));
             --scopy-chatgpt-thread-content-width: min(
               var(--scopy-chatgpt-thread-content-max-width),
@@ -632,7 +574,7 @@ enum MarkdownHTMLDocumentBuilder {
             max-width: none;
             padding: var(--scopy-chatgpt-content-top-padding) var(--scopy-chatgpt-content-inline-padding) var(--scopy-chatgpt-content-bottom-padding) var(--scopy-chatgpt-content-inline-padding);
             box-sizing: border-box;
-            overflow-wrap: break-word;
+            overflow-wrap: anywhere;
             word-break: normal;
             color: var(--scopy-text-primary);
             background: var(--scopy-page-bg);
@@ -645,7 +587,9 @@ enum MarkdownHTMLDocumentBuilder {
             transform-origin: top left;
           }
           #content > :not(.scopy-chatgpt-table-container) {
+            width: 100%;
             max-width: var(--scopy-chatgpt-thread-content-width);
+            margin-inline: auto;
           }
           h1, h2, h3, h4, h5, h6 {
             color: var(--scopy-text-primary);
@@ -687,7 +631,7 @@ enum MarkdownHTMLDocumentBuilder {
             margin: 0;
           }
           p {
-            margin: 8px 0 4px 0;
+            margin: 4px 0;
             font-size: var(--scopy-chatgpt-body-font-size);
             line-height: var(--scopy-chatgpt-body-line-height);
             font-weight: 400;
@@ -698,7 +642,7 @@ enum MarkdownHTMLDocumentBuilder {
           }
           ul, ol {
             margin: 0;
-            padding-left: 26px;
+            padding-inline-start: 26px;
             font-size: var(--scopy-chatgpt-body-font-size);
             line-height: var(--scopy-chatgpt-body-line-height);
             font-weight: 400;
@@ -712,7 +656,7 @@ enum MarkdownHTMLDocumentBuilder {
           li {
             min-height: var(--scopy-chatgpt-body-line-height);
             margin: 0;
-            padding-left: 6px;
+            padding-inline-start: 6px;
             font-size: var(--scopy-chatgpt-body-font-size);
             line-height: var(--scopy-chatgpt-body-line-height);
             font-weight: 400;
@@ -732,7 +676,7 @@ enum MarkdownHTMLDocumentBuilder {
           li > ol {
             margin-top: 0;
             margin-bottom: 0;
-            padding-left: 26px;
+            padding-inline-start: 26px;
           }
           strong {
             font-weight: 600;
@@ -766,10 +710,7 @@ enum MarkdownHTMLDocumentBuilder {
             font-weight: 500;
             white-space: normal;
             word-break: normal;
-            overflow-wrap: break-word;
-          }
-          h3 code {
-            font-size: 0.9em;
+            overflow-wrap: anywhere;
           }
           pre {
             position: relative;
@@ -787,12 +728,15 @@ enum MarkdownHTMLDocumentBuilder {
             line-height: var(--scopy-chatgpt-code-card-line-height);
             font-weight: 400;
             white-space: pre;
+            direction: ltr;
+            unicode-bidi: isolate;
+            text-align: left;
           }
           pre::before {
             content: "</>";
             position: absolute;
-            left: 20px;
-            right: 6px;
+            inset-inline-start: 20px;
+            inset-inline-end: 6px;
             top: 6px;
             height: calc(24px * var(--scopy-chatgpt-layout-font-scale));
             font-family: var(--scopy-chatgpt-font);
@@ -952,7 +896,7 @@ enum MarkdownHTMLDocumentBuilder {
             display: inline-block;
             width: calc(12px * var(--scopy-chatgpt-layout-font-scale));
             height: calc(12px * var(--scopy-chatgpt-layout-font-scale));
-            margin-left: 0.125rem;
+            margin-inline-start: 0.125rem;
             font-size: var(--scopy-chatgpt-body-font-size);
             line-height: var(--scopy-chatgpt-body-font-size);
             vertical-align: middle;
@@ -965,7 +909,7 @@ enum MarkdownHTMLDocumentBuilder {
             height: calc(18px * var(--scopy-chatgpt-layout-font-scale));
             min-height: calc(18px * var(--scopy-chatgpt-layout-font-scale));
             padding: 0 8px;
-            margin-left: 4px;
+            margin-inline-start: 4px;
             position: relative;
             top: -0.094rem;
             border-radius: 12px;
@@ -989,8 +933,8 @@ enum MarkdownHTMLDocumentBuilder {
             align-items: center;
             width: auto;
             height: calc(16px * var(--scopy-chatgpt-layout-font-scale));
-            margin-left: 3px;
-            margin-right: -4px;
+            margin-inline-start: 3px;
+            margin-inline-end: -4px;
             padding: 0 4px;
             color: rgb(143, 143, 143);
             font-size: calc(9px * var(--scopy-chatgpt-layout-font-scale));
@@ -1001,7 +945,9 @@ enum MarkdownHTMLDocumentBuilder {
           blockquote {
             position: relative;
             margin: 0 0 8px 0;
-            padding: 8px 0 8px 24px;
+            padding-block: 8px;
+            padding-inline: 0;
+            padding-inline-start: 24px;
             border: 0;
             color: var(--scopy-text-primary);
             font-size: var(--scopy-chatgpt-body-font-size);
@@ -1012,7 +958,7 @@ enum MarkdownHTMLDocumentBuilder {
             content: "";
             display: block;
             position: absolute;
-            left: 0;
+            inset-inline-start: 0;
             top: 8px;
             bottom: 8px;
             width: 4px;
@@ -1030,7 +976,7 @@ enum MarkdownHTMLDocumentBuilder {
           blockquote ol {
             margin-top: 0;
             margin-bottom: 0;
-            padding-left: 26px;
+            padding-inline-start: 26px;
             font-size: var(--scopy-chatgpt-body-font-size);
             line-height: var(--scopy-chatgpt-quote-line-height);
             font-weight: 400;
@@ -1042,14 +988,19 @@ enum MarkdownHTMLDocumentBuilder {
           }
           .katex {
             color: var(--scopy-text-primary);
+            font-size: 1.21em;
+            line-height: 1.2;
+            direction: ltr;
+            unicode-bidi: isolate;
           }
           .katex-display {
+            display: block;
             max-width: 100%;
             overflow-x: auto;
             overflow-y: hidden;
             margin: 16px 0;
-            font-size: var(--scopy-chatgpt-body-font-size);
-            line-height: var(--scopy-chatgpt-body-line-height);
+            text-align: center;
+            white-space: nowrap;
           }
           .scopy-chatgpt-table-container {
             display: block;
@@ -1066,13 +1017,14 @@ enum MarkdownHTMLDocumentBuilder {
           }
           .scopy-chatgpt-table-wrapper {
             width: fit-content;
-            min-width: 100%;
+            min-width: var(--scopy-chatgpt-thread-content-width);
+            margin-inline: auto;
           }
           table {
             display: table;
             border-collapse: separate;
             border-spacing: 0;
-            min-width: 100%;
+            min-width: var(--scopy-chatgpt-thread-content-width);
             width: fit-content;
             max-width: none;
             table-layout: auto;
@@ -1080,8 +1032,8 @@ enum MarkdownHTMLDocumentBuilder {
             border: 0;
             margin: 0;
             font-family: var(--scopy-chatgpt-font);
-            font-size: var(--scopy-chatgpt-body-font-size);
-            line-height: var(--scopy-chatgpt-body-line-height);
+            font-size: calc(14px * var(--scopy-chatgpt-layout-font-scale));
+            line-height: calc(24px * var(--scopy-chatgpt-layout-font-scale));
           }
           th, td {
             border: 0;
@@ -1089,7 +1041,7 @@ enum MarkdownHTMLDocumentBuilder {
             text-align: start;
             white-space: normal;
             word-break: normal;
-            overflow-wrap: break-word;
+            overflow-wrap: anywhere;
           }
           th:not(:last-child),
           td:not(:last-child) {
@@ -1119,7 +1071,7 @@ enum MarkdownHTMLDocumentBuilder {
             border-bottom: 1px solid var(--scopy-border);
             color: var(--scopy-text-primary);
             font-weight: 600;
-            line-height: var(--scopy-chatgpt-body-font-size);
+            line-height: calc(16px * var(--scopy-chatgpt-layout-font-scale));
             padding-block: 8px;
             vertical-align: bottom;
           }
@@ -1139,7 +1091,7 @@ enum MarkdownHTMLDocumentBuilder {
             border-bottom: 0;
             vertical-align: top;
           }
-          \(taskListStyle)\(footnoteStyle)\(definitionListStyle)\(safeHTMLStyle)
+          \(taskListStyle)\(footnoteStyle)
           /* Hide scrollbars inside HTML when idle (even if system setting is "always show scroll bars").
              We show them temporarily while the user is actively scrolling overflow containers (JS toggles the class). */
           pre::-webkit-scrollbar,
@@ -1164,495 +1116,6 @@ enum MarkdownHTMLDocumentBuilder {
         """
     }
 
-    static func legacyDocument(
-        featureSet: MarkdownRenderFeatureSet,
-        markdown: String,
-        placeholders: [(placeholder: String, original: String)],
-        safeHTMLReplacements: [String: MarkdownSafeHTMLSubset.Replacement],
-        enableMath: Bool,
-        fallbackText: String,
-        renderSentinel: String?,
-        layoutScale: MarkdownChatGPTLayoutScalePercent = MarkdownRenderLayoutConstants.defaultChatGPTLayoutScale
-    ) -> String {
-        let mathIncludes: String
-        if featureSet.math && enableMath {
-            let delimitersLiteral = MathEnvironmentSupport.katexDelimitersJSArrayLiteral()
-            mathIncludes = """
-            <link rel="stylesheet" href="katex.min.css">
-            <script defer src="katex.min.js"></script>
-            <script defer src="contrib/mhchem.min.js"></script>
-            <script defer src="contrib/auto-render.min.js"></script>
-            <script>
-              (function () {
-                window.__scopyRenderMath = function () {
-                  var el = document.getElementById('content');
-                  if (!el) { return; }
-                  if (typeof renderMathInElement !== 'function') { return; }
-                  renderMathInElement(el, {
-                    delimiters: \(delimitersLiteral),
-                    throwOnError: false,
-                    strict: 'ignore',
-                    ignoredTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code']
-                  });
-                  if (typeof window.__scopyReportHeight === 'function') {
-                    window.__scopyReportHeight();
-                  }
-                };
-
-                function tryRender() {
-                  if (typeof window.__scopyRenderMath !== 'function') { return; }
-                  if (typeof renderMathInElement !== 'function') {
-                    setTimeout(tryRender, 30);
-                    return;
-                  }
-                  window.__scopyRenderMath();
-                }
-
-                if (document.readyState === 'loading') {
-                  document.addEventListener('DOMContentLoaded', tryRender);
-                } else {
-                  tryRender();
-                }
-              })();
-            </script>
-            """
-        } else {
-            mathIncludes = ""
-        }
-
-        let markdownLiteral = jsonStringLiteral(markdown)
-        let placeholderMap: [String: String] = Dictionary(uniqueKeysWithValues: placeholders.map { ($0.placeholder, escapeHTML($0.original)) })
-        let placeholdersLiteral = jsonLiteral(placeholderMap)
-        let overflowSelectorLiteral = jsonStringLiteral(featureSet.overflowProbeSelector)
-        let safeHTMLLiteral = jsonLiteral(safeHTMLReplacements)
-        let renderSentinelLiteral = jsonLiteral(renderSentinel)
-        let taskListBootstrapScript = featureSet.taskLists ? MarkdownTaskListRuntime.bootstrapScript : ""
-        let footnotesReadyCheck = featureSet.footnotes ? """
-              if (typeof window.markdownitFootnote !== 'function') {
-                setTimeout(renderMarkdown, 30);
-                return;
-              }
-""" : ""
-        let definitionListReadyCheck = featureSet.definitionLists ? """
-              if (typeof window.markdownitDeflist !== 'function') {
-                setTimeout(renderMarkdown, 30);
-                return;
-              }
-""" : ""
-        let highlightReadyCheck = featureSet.codeHighlighting ? """
-              if (typeof window.hljs !== 'object') {
-                setTimeout(renderMarkdown, 30);
-                return;
-              }
-""" : ""
-        let footnotesInstallScript = featureSet.footnotes ? """
-              if (md && typeof md.use === 'function' && typeof window.markdownitFootnote === 'function') {
-                md.use(window.markdownitFootnote);
-                if (md.renderer && md.renderer.rules) {
-                  md.renderer.rules.footnote_caption = function (tokens, idx) {
-                    try {
-                      var label = tokens[idx].meta && tokens[idx].meta.label ? String(tokens[idx].meta.label) : '';
-                      var n = label || Number(tokens[idx].meta.id + 1).toString();
-                      if (tokens[idx].meta.subId > 0) { n += ':' + String(tokens[idx].meta.subId); }
-                      return n;
-                    } catch (e) {
-                      return '';
-                    }
-                  };
-                }
-              }
-""" : ""
-        let definitionListInstallScript = featureSet.definitionLists ? """
-              if (md && typeof md.use === 'function' && typeof window.markdownitDeflist === 'function') {
-                md.use(window.markdownitDeflist);
-              }
-""" : ""
-        let taskListApplyScript = featureSet.taskLists ? """
-              if (typeof window.__scopyApplyTaskLists === 'function') {
-                window.__scopyApplyTaskLists(el);
-              }
-""" : ""
-        let highlightOptionsScript = featureSet.codeHighlighting ? """
-              mdOptions.highlight = function (str, lang) {
-                if (typeof window.hljs !== 'object') { return ''; }
-                try {
-                  if (lang && typeof window.hljs.getLanguage === 'function' && window.hljs.getLanguage(lang)) {
-                    return window.hljs.highlight(str, { language: lang, ignoreIllegals: true }).value;
-                  }
-                  return window.hljs.highlightAuto(str).value;
-                } catch (e) {
-                  return '';
-                }
-              };
-""" : ""
-        let highlightFinalizeScript = featureSet.codeHighlighting ? """
-              try {
-                var codeBlocks = el.querySelectorAll('pre code');
-                for (var i = 0; i < codeBlocks.length; i++) {
-                  var codeEl = codeBlocks[i];
-                  codeEl.classList.add('hljs');
-                  if (codeEl.parentElement) {
-                    codeEl.parentElement.classList.add('hljs');
-                  }
-                }
-              } catch (e) { }
-""" : ""
-
-        let markdownRenderScript = """
-        \(featureSet.markdownAssetHeadTags)
-        \(taskListBootstrapScript)
-        <script>
-          (function () {
-            var lastH = 0;
-            var lastW = 0;
-            var pendingRAF = false;
-            var ro = null;
-            window.__scopyRenderState = window.__scopyRenderState || {
-              renderComplete: false,
-              markdownRendered: false,
-              highlightThemeReady: false,
-              requiresHighlightTheme: false,
-              renderPass: 0
-            };
-            function hasLoadedStylesheet(fragment) {
-              try {
-                if (!document || typeof document.querySelectorAll !== 'function') { return false; }
-                var links = document.querySelectorAll('link[rel="stylesheet"]');
-                for (var i = 0; i < links.length; i++) {
-                  var link = links[i];
-                  if (!link) { continue; }
-                  var href = '';
-                  try { href = String(link.getAttribute('href') || ''); } catch (e) { href = ''; }
-                  if (fragment && href.indexOf(fragment) === -1) { continue; }
-                  try {
-                    if (link.sheet) { return true; }
-                  } catch (e) { }
-                }
-              } catch (e) { }
-              return false;
-            }
-            window.__scopyIsRenderReady = function () {
-              try {
-                var state = window.__scopyRenderState || {};
-                return !!state.renderComplete && !!state.markdownRendered;
-              } catch (e) {
-                return false;
-              }
-            };
-            function updateHighlightThemeReady() {
-              try {
-                if (!window.__scopyRenderState) { return false; }
-                var requiresHighlightTheme = !!window.__scopyRenderState.requiresHighlightTheme;
-                var ready = !requiresHighlightTheme || hasLoadedStylesheet('highlight-github.min.css');
-                window.__scopyRenderState.highlightThemeReady = ready;
-                return ready;
-              } catch (e) {
-                return false;
-              }
-            }
-            function finalizeRenderState(remainingPolls) {
-              try {
-                if (!window.__scopyRenderState) { return; }
-                var state = window.__scopyRenderState;
-                if (!state.markdownRendered) { return; }
-                if (!!state.requiresHighlightTheme && !updateHighlightThemeReady() && remainingPolls > 0) {
-                  setTimeout(function () { finalizeRenderState(remainingPolls - 1); }, 30);
-                  return;
-                }
-                state.renderComplete = true;
-              } catch (e) { }
-              scheduleReportHeight();
-            }
-            function normalizeFootnoteReferences(root) {
-              try {
-                if (!root || typeof root.querySelectorAll !== 'function') { return; }
-                var refs = root.querySelectorAll('sup.footnote-ref > a, sup > a[data-footnote-ref]');
-                for (var i = 0; i < refs.length; i++) {
-                  var ref = refs[i];
-                  if (!ref) { continue; }
-                  var text = '';
-                  try { text = String(ref.textContent || ''); } catch (e) { text = ''; }
-                  var match = text.match(/^\\[(.+)\\]$/);
-                  if (match && match[1]) {
-                    try { ref.textContent = match[1]; } catch (e) { }
-                  }
-                }
-              } catch (e) { }
-            }
-            \(sourceCitationFunctionScript)
-            var safeHTMLMap = \(safeHTMLLiteral);
-            \(tableWrapFunctionScript)
-            window.__scopyReportHeight = function (force) {
-              try {
-                if (!window.webkit || !window.webkit.messageHandlers || !window.webkit.messageHandlers.scopySize) { return; }
-                var el = document.getElementById('content');
-                if (!el) { return; }
-                layoutChatGPTTables(el);
-                updateChatGPTPreviewScale(el);
-                var box = document.getElementById('content-scale-shell') || el;
-                var rect = box.getBoundingClientRect();
-                var w = Math.ceil(rect.width || 0);
-                var h = Math.ceil(rect.height || 0);
-                var overflowX = false;
-                try {
-                  // Detect horizontal scroll requirement inside common overflow containers (KaTeX display, code blocks, tables).
-                  // We use this signal to prefer a wider popover, while keeping the outer scroll view's horizontal scroller disabled.
-                  var nodes = el.querySelectorAll(\(overflowSelectorLiteral));
-                  for (var i = 0; i < nodes.length; i++) {
-                    var n = nodes[i];
-                    if (!n) { continue; }
-                    if (n.classList && n.classList.contains('scopy-chatgpt-table-container') && n.dataset && n.dataset.scopyTableScaled === 'true') { continue; }
-                    var cw = n.clientWidth || 0;
-                    var sw = n.scrollWidth || 0;
-                    if (cw > 0 && (sw - cw) > 1) { overflowX = true; break; }
-                  }
-                  // Table-local overflow should not request a wider Swift popover. ChatGPT keeps wide tables inside
-                  // the message column and scrolls the table container itself; non-table overflow is detected by the
-                  // explicit selector above.
-                } catch (e) { overflowX = false; }
-                if (!h) { return; }
-                if (!force && Math.abs(h - lastH) < 1 && Math.abs(w - lastW) < 1) { return; }
-                lastH = h;
-                lastW = w;
-                window.webkit.messageHandlers.scopySize.postMessage({ width: w, height: h, overflowX: overflowX });
-              } catch (e) { }
-            };
-
-            function scheduleReportHeight() {
-              if (typeof window.__scopyReportHeight !== 'function') { return; }
-              if (pendingRAF) { return; }
-              pendingRAF = true;
-              if (typeof window.requestAnimationFrame === 'function') {
-                window.requestAnimationFrame(function () {
-                  pendingRAF = false;
-                  window.__scopyReportHeight();
-                });
-              } else {
-                setTimeout(function () {
-                  pendingRAF = false;
-                  window.__scopyReportHeight();
-                }, 0);
-              }
-            }
-
-            function renderMarkdown() {
-              var el = document.getElementById('content');
-              if (!el) { return; }
-              try {
-                if (window.__scopyRenderState) {
-                  window.__scopyRenderState.renderComplete = false;
-                  window.__scopyRenderState.markdownRendered = false;
-                  window.__scopyRenderState.highlightThemeReady = false;
-                  window.__scopyRenderState.requiresHighlightTheme = false;
-                  window.__scopyRenderState.renderPass = (window.__scopyRenderState.renderPass || 0) + 1;
-                }
-              } catch (e) { }
-              if (typeof window.markdownit !== 'function') {
-                setTimeout(renderMarkdown, 30);
-                return;
-              }
-              \(footnotesReadyCheck)\(definitionListReadyCheck)\(highlightReadyCheck)
-              // Keep it hidden until the final layout (including KaTeX) is applied; SwiftUI shows a text fallback underneath.
-              try { el.style.opacity = '0'; } catch (e) { }
-
-              var scrollbarHideTimer = null;
-              function showScrollbarsTemporarily() {
-                try {
-                  var root = document.documentElement;
-                  if (!root) { return; }
-                  root.classList.add('scopy-scrollbars-visible');
-                  if (scrollbarHideTimer) { clearTimeout(scrollbarHideTimer); }
-                  scrollbarHideTimer = setTimeout(function () {
-                    try { root.classList.remove('scopy-scrollbars-visible'); } catch (e) { }
-                  }, 700);
-                } catch (e) { }
-              }
-              function isOverflowContainerEventTarget(t) {
-                try {
-                  if (!t) { return false; }
-                  // Element nodes only. Document scrolling is very high frequency and should not toggle scrollbars.
-                  if (t.nodeType !== 1) { return false; }
-                  if (t.matches && t.matches(\(overflowSelectorLiteral))) { return true; }
-                  if (t.closest && t.closest(\(overflowSelectorLiteral))) { return true; }
-                } catch (e) { }
-                return false;
-              }
-              // `scroll` doesn't bubble; capture phase catches it from overflow containers.
-              // Avoid toggling on main document scroll to keep vertical scrolling smooth for long content.
-              try {
-                document.addEventListener('scroll', function (ev) {
-                  try {
-                    if (!ev) { return; }
-                    if (!isOverflowContainerEventTarget(ev.target)) { return; }
-                    showScrollbarsTemporarily();
-                  } catch (e) { }
-                }, true);
-              } catch (e) { }
-              try {
-                document.addEventListener('wheel', function (ev) {
-                  try {
-                    if (!ev) { return; }
-                    if (!isOverflowContainerEventTarget(ev.target)) { return; }
-                    showScrollbarsTemporarily();
-                  } catch (e) { }
-                }, { passive: true });
-              } catch (e) { }
-
-              // Preserve single newlines as hard line breaks. Clipboard/PDF copied text often uses line breaks
-              // without blank lines, and the hover preview should respect that formatting.
-              function escapeHTMLText(text) {
-                return String(text || '')
-                  .replace(/&/g, '&amp;')
-                  .replace(/</g, '&lt;')
-                  .replace(/>/g, '&gt;')
-                  .replace(/"/g, '&quot;');
-              }
-              function applySafeHTMLReplacements(html, md) {
-                if (!html) { return html; }
-                function escapeRegExp(text) {
-                  return String(text || '')
-                    .replace(/[\\\\^.*+?()[\\]{}|]/g, '\\\\$&')
-                    .replace(/\\$/g, '\\\\$&');
-                }
-                function renderSafeHTMLToken(token) {
-                  var item = safeHTMLMap[token];
-                  if (!item) { return token; }
-                  if (item.kind === 'inlineTag') {
-                    var tag = item.tag || 'span';
-                    return '<' + tag + '>' + escapeHTMLText(item.text || '') + '</' + tag + '>';
-                  }
-                  if (item.kind === 'details') {
-                    var summaryHTML = item.summary ? applySafeHTMLReplacements(md.renderInline(item.summary), md) : '';
-                    var bodyHTML = item.body ? applySafeHTMLReplacements(md.render(item.body), md) : '';
-                    return '<details class="scopy-details"' + (item.isOpen ? ' open' : '') + '><summary>' + summaryHTML + '</summary>' + bodyHTML + '</details>';
-                  }
-                  return token;
-                }
-
-                var keys = Object.keys(safeHTMLMap || {}).sort(function (a, b) { return b.length - a.length; });
-                for (var i = 0; i < keys.length; i++) {
-                  var key = keys[i];
-                  if (html.indexOf(key) === -1) { continue; }
-                  var paragraphPattern = new RegExp('<p>\\\\s*' + escapeRegExp(key) + '\\\\s*<\\\\/p>', 'g');
-                  html = html.replace(paragraphPattern, function () {
-                    return renderSafeHTMLToken(key);
-                  });
-                }
-                for (var j = 0; j < keys.length; j++) {
-                  var token = keys[j];
-                  if (html.indexOf(token) === -1) { continue; }
-                  html = html.split(token).join(renderSafeHTMLToken(token));
-                }
-                return html;
-              }
-
-              var mdOptions = \(featureSet.markdownItOptionsJSLiteral);
-              var renderSentinel = \(renderSentinelLiteral);
-              \(highlightOptionsScript)
-              var md = window.markdownit(mdOptions);
-              \(footnotesInstallScript)\(definitionListInstallScript)
-              if (md && typeof md.enable === 'function') {
-                \(featureSet.markdownItEnableStatementsJS)
-              }
-              var src = \(markdownLiteral);
-              var html = md.render(src);
-              var map = \(placeholdersLiteral);
-              Object.keys(map || {}).sort(function (a, b) { return b.length - a.length; }).forEach(function (key) {
-                html = html.split(key).join(map[key] || key);
-              });
-              html = applySafeHTMLReplacements(html, md);
-              if (renderSentinel) {
-                html = html.split(renderSentinel).join('');
-              }
-              el.innerHTML = html;
-              normalizeSourceCitations(el, src);
-              layoutChatGPTTables(el);
-              normalizeFootnoteReferences(el);
-              \(taskListApplyScript)\(highlightFinalizeScript)
-              try {
-                if (window.__scopyRenderState) {
-                  window.__scopyRenderState.requiresHighlightTheme = \(featureSet.codeHighlighting ? "true" : "false") && !!el.querySelector('pre code');
-                }
-              } catch (e) { }
-
-              // Keep content height in sync as KaTeX renders and fonts load.
-              if (typeof ResizeObserver === 'function') {
-                if (ro) { try { ro.disconnect(); } catch (e) { } }
-                ro = new ResizeObserver(function () { layoutChatGPTTables(el); scheduleReportHeight(); });
-                try { ro.observe(el); } catch (e) { }
-              }
-
-              if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === 'function') {
-                document.fonts.ready.then(function () { layoutChatGPTTables(el); scheduleReportHeight(); }).catch(function () { });
-              }
-
-              if (typeof window.__scopyRenderMath === 'function') {
-                window.__scopyRenderMath();
-              }
-              try { el.style.opacity = '1'; } catch (e) { }
-              try {
-                if (window.__scopyRenderState) {
-                  window.__scopyRenderState.markdownRendered = true;
-                }
-              } catch (e) { }
-              scheduleReportHeight();
-              setTimeout(scheduleReportHeight, 120);
-              setTimeout(function () {
-                finalizeRenderState(50);
-              }, 30);
-            }
-
-            if (document.readyState === 'loading') {
-              document.addEventListener('DOMContentLoaded', renderMarkdown);
-            } else {
-              renderMarkdown();
-            }
-
-            // Some layout changes may only settle after full load.
-            if (window && typeof window.addEventListener === 'function') {
-              window.addEventListener('load', function () {
-                scheduleReportHeight();
-                setTimeout(scheduleReportHeight, 120);
-              });
-              window.addEventListener('resize', function () {
-                scheduleReportHeight();
-                setTimeout(scheduleReportHeight, 60);
-              });
-            }
-          })();
-        </script>
-        """
-
-        return """
-        <!doctype html>
-        <html>
-          <head>
-            <meta charset="utf-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1">
-            \(cspMetaTag)
-            \(markdownRenderScript)
-            \(mathIncludes)
-            \(baseStyle(
-                featureSet: featureSet,
-                layoutScale: layoutScale
-            ))
-          </head>
-          <body>
-            <div id="content-scale-shell"><div id="content"><pre>\(escapeHTML(fallbackText))</pre></div></div>
-          </body>
-        </html>
-        """
-    }
-
-    private static func escapeHTML(_ text: String) -> String {
-        var s = text
-        s = s.replacingOccurrences(of: "&", with: "&amp;")
-        s = s.replacingOccurrences(of: "<", with: "&lt;")
-        s = s.replacingOccurrences(of: ">", with: "&gt;")
-        s = s.replacingOccurrences(of: "\"", with: "&quot;")
-        return s
-    }
-
     private static func jsonStringLiteral(_ value: String) -> String {
         // A JSON literal is a safe JS literal for our use (no interpolation or eval).
         // Use JSONEncoder to avoid NSJSONSerialization raising NSException on top-level fragments.
@@ -1665,22 +1128,22 @@ enum MarkdownHTMLDocumentBuilder {
         return s.replacingOccurrences(of: "</script", with: "<\\/script", options: [.caseInsensitive])
     }
 
-    static func unifiedDocument(markdown: String, context: MarkdownRenderContext) -> String {
+    static func document(markdown: String, context: MarkdownRenderContext) -> String {
         let markdownLiteral = jsonLiteral(markdown)
         let policyLiteral = jsonLiteral(unifiedPolicyPayload(context: context))
-        let overflowSelectorLiteral = jsonStringLiteral(MarkdownRenderFeatureSet.scopyDefault.overflowProbeSelector)
+        let overflowSelectorLiteral = jsonStringLiteral(overflowProbeSelector)
         let taskListBootstrapScript = MarkdownTaskListRuntime.bootstrapScript
 
         return """
         <!doctype html>
-        <html>
+        <html data-scopy-render-id="\(MarkdownPreviewRenderIdentity.placeholder)">
           <head>
             <meta charset="utf-8">
             <meta name="viewport" content="width=device-width, initial-scale=1">
             \(cspMetaTag)
             <link rel="stylesheet" href="katex.min.css">
             <script defer src="contrib/scopy-unified-renderer.iife.js"></script>
-            \(baseStyle(featureSet: MarkdownRenderFeatureSet.scopyDefault, layoutScale: context.layoutScale))
+            \(baseStyle(layoutScale: context.layoutScale))
             \(taskListBootstrapScript)
             <script>
               (function () {
@@ -1693,6 +1156,9 @@ enum MarkdownHTMLDocumentBuilder {
                 };
                 var lastH = 0;
                 var lastW = 0;
+                var lastOverflowX = false;
+                var lastRenderSucceeded = false;
+                var lastRenderErrorReason = '';
                 var unifiedRenderAttempts = 0;
                 var maxUnifiedRenderAttempts = 100;
                 window.__scopyIsRenderReady = function () {
@@ -1742,16 +1208,27 @@ enum MarkdownHTMLDocumentBuilder {
                       overflowX = false;
                     }
                     if (!h) { return; }
-                    if (!force && Math.abs(h - lastH) < 1 && Math.abs(w - lastW) < 1) { return; }
+                    var state = window.__scopyRenderState || {};
+                    var renderSucceeded = !state.renderFailed && !!state.markdownRendered && state.unifiedRenderSucceeded !== false;
+                    var renderErrorReason = state.unifiedErrorReason || '';
+                    if (!force &&
+                        Math.abs(h - lastH) < 1 &&
+                        Math.abs(w - lastW) < 1 &&
+                        overflowX === lastOverflowX &&
+                        renderSucceeded === lastRenderSucceeded &&
+                        renderErrorReason === lastRenderErrorReason) { return; }
                     lastH = h;
                     lastW = w;
-                    var state = window.__scopyRenderState || {};
+                    lastOverflowX = overflowX;
+                    lastRenderSucceeded = renderSucceeded;
+                    lastRenderErrorReason = renderErrorReason;
                     window.webkit.messageHandlers.scopySize.postMessage({
+                      renderID: document.documentElement.getAttribute('data-scopy-render-id') || '',
                       width: w,
                       height: h,
                       overflowX: overflowX,
-                      renderSucceeded: !state.renderFailed && !!state.markdownRendered && state.unifiedRenderSucceeded !== false,
-                      renderErrorReason: state.unifiedErrorReason || ''
+                      renderSucceeded: renderSucceeded,
+                      renderErrorReason: renderErrorReason
                     });
                   } catch (e) { }
                 };
@@ -1854,7 +1331,7 @@ enum MarkdownHTMLDocumentBuilder {
             </script>
           </head>
           <body>
-            <div id="content-scale-shell"><div id="content"></div></div>
+            <div id="content-scale-shell"><div id="content" dir="auto"></div></div>
           </body>
         </html>
         """
@@ -1863,12 +1340,8 @@ enum MarkdownHTMLDocumentBuilder {
     private static func unifiedPolicyPayload(context: MarkdownRenderContext) -> [String: AnyEncodable] {
         [
             "profile": AnyEncodable(context.profile.rawValue),
-            "allowExplicitMath": AnyEncodable(context.policy.allowExplicitMath),
-            "allowBackslashMath": AnyEncodable(context.policy.allowBackslashMath),
             "allowLooseMathRepair": AnyEncodable(context.policy.allowLooseMathRepair),
-            "allowSafeHTMLSubset": AnyEncodable(context.policy.allowSafeHTMLSubset),
-            "allowRawHTML": AnyEncodable(context.policy.allowRawHTML),
-            "policyVersion": AnyEncodable(context.policyVersion)
+            "policyVersion": AnyEncodable(MarkdownRenderContextResolver.rendererVersion)
         ]
     }
 }

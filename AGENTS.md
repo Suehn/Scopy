@@ -22,6 +22,15 @@
 - 不要凭记忆编 Apple / Swift API：先用 MCP `cupertino` 搜索/阅读 Apple 文档或 sample code，确认**精确签名**与平台可用性再落代码。
 - 文档仍以编译器为裁判：写完立刻本地编译/测试，不留“占位实现”。
 
+### Markdown / 富文本渲染原则
+
+- `doc/current/markdown-chatgpt-wacz-style-contract.md` 是 ChatGPT 风格 Markdown、GFM、代码、表格、KaTeX、字体、间距、响应式和 Unicode/RTL 行为的唯一 canonical 契约。WACZ 中的源码或资源只能证明对应代码路径；没有 hydrated final DOM、computed style 或新截图时，不得声称像素级一致、暗色一致或某个字体实际生效。
+- 运行时只允许 `MarkdownHTMLRenderer -> MarkdownHTMLDocumentBuilder` 一条 Markdown 到 standalone HTML 的链路。预览与 PNG 导出必须消费同一 parse result、HTML、基础 CSS 和本地资源；不得增加 renderer selector、feature flag、shadow renderer、markdown-it fallback 或第二套 export parser。
+- 保持契约语义：单 `~` 与单 `$` 为字面量，成对删除线和显式数学才解析；raw HTML 必须显示为字面文本；代码区域不得二次解析；未转义 table pipe 仍是分隔符；脚注 ID 和每次 WebView render ID 必须稳定且互不混用。
+- 布局缩放使用 `816 / scale` 的逻辑视口选择 40rem/48rem thread width，不得用物理 WKWebView 的 media query 代替。代码、公式和表格拥有局部横向溢出，不能扩宽外层 popover；公式宿主不得使用会导致离屏导出漏绘的 `content-visibility:auto`。
+- 字体以可靠的 macOS 系统 sans/mono 栈和项目内 KaTeX 字体为准；不要因为归档中存在某个字体文件就推断正文 computed font。
+- 改动渲染器时同步维护 Node 契约测试、`ScopyTests/ChatGPTMarkdownRendererTests.swift` 和相关真实导出 fixture；至少运行 `npm test && npm run build`、应用构建、单测、严格并发测试和一张真实应用 PNG 视觉检查。自动化宿主若未启动场景，必须记录为 environment-blocked，不能记为通过。
+
 ### 轻量工作流（默认）
 
 - 不要求创建 Trellis task、PRD、JSONL context、developer journal，也不要求调用 Trellis 专用 sub-agent/skill。

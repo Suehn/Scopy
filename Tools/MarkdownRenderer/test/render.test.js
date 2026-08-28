@@ -1,9 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { render } from "../src/render.js";
-import { applySafeHTMLReplacements } from "../src/scopySafeHTMLPreprocessor.js";
 
-test("renders GFM links, tables, task lists, and dollar math", () => {
+test("renders GFM links, tables, task lists, and explicit math", () => {
   const result = render(`
 # Title
 
@@ -12,10 +11,9 @@ test("renders GFM links, tables, task lists, and dollar math", () => {
 
 | a | b |
 | --- | --- |
-| $x_1$ | 2 |
+| \\(x_1\\) | 2 |
 `);
 
-  assert.equal(result.metadata.renderer, "unified");
   assert.match(result.html, /<h1>Title<\/h1>/);
   assert.match(result.html, /class="contains-task-list"/);
   assert.match(result.html, /href="\/Users\/alice\/project\/file.md:25"/);
@@ -100,7 +98,6 @@ test("renders long Chinese reference-style markdown notes", () => {
 [1]: https://www.investor.gov/introduction-investing/investing-basics/glossary/index-fund "Index Fund | Investor.gov"
 `);
 
-  assert.equal(result.metadata.renderer, "unified");
   assert.match(result.html, /<h1>笔记：为什么宽基指数长期往往优于大多数主动投资<\/h1>/);
   assert.match(result.html, /<strong>先把结论说准确。<\/strong>/);
   assert.match(result.html, /href="https:\/\/www.investor.gov\/introduction-investing\/investing-basics\/glossary\/index-fund"/);
@@ -118,7 +115,6 @@ test("promotes parenthesized reference-style source links to citation pills", ()
 [2]: https://www.reuters.com/markets/example?utm_source=chatgpt.com "Reuters source"
 `);
 
-  assert.equal(result.metadata.renderer, "unified");
   assert.match(result.html, /<a href="https:\/\/apnews\.com\/article\/d6cf2b964940f47a83f0a6f587c7e0c3\?utm_source=chatgpt\.com" title="Hegseth reassures Pacific allies" class="scopy-source-citation-link" data-scopy-source-citation="true">AP News<\/a>/);
   assert.match(result.html, /class="scopy-source-citation-link" data-scopy-source-citation="true">Reuters<\/a>/);
   assert.doesNotMatch(result.html, /\(<a href="https:\/\/apnews\.com/);
@@ -146,13 +142,13 @@ test("collapses multi-source citation groups to first source plus count", () => 
   assert.doesNotMatch(result.html, /AP News \+1<\/a>/);
 });
 
-test("preserves safe HTML subset but still removes unsafe raw HTML", () => {
+test("renders every raw HTML tag as visible literal text", () => {
   const result = render("<script>alert(1)</script>\n\n<details><summary>x</summary>y</details>");
 
-  assert.doesNotMatch(result.html, /<script>/);
-  assert.match(result.html, /<details class="scopy-details">/);
-  assert.match(result.html, /<summary>x<\/summary>/);
-  assert.match(result.html, /<p>y<\/p>/);
+  assert.match(result.html, /&#x3C;script>alert\(1\)&#x3C;\/script>/);
+  assert.match(result.html, /&#x3C;details>&#x3C;summary>x&#x3C;\/summary>y&#x3C;\/details>/);
+  assert.doesNotMatch(result.html, /<script(?:\s|>)/i);
+  assert.doesNotMatch(result.html, /<details(?:\s|>)/i);
 });
 
 test("renders backslash inline and display math", () => {
@@ -170,7 +166,38 @@ test("renders multiline backslash display math", () => {
 
   assert.equal(result.metadata.mathCount, 1);
   assert.match(result.html, /katex-display/);
+  assert.doesNotMatch(result.html, /content-visibility|contain-intrinsic-size/);
   assert.doesNotMatch(result.html, /\[<br>/);
+});
+
+test("preserves malformed and empty backslash delimiters literally", () => {
+  const result = render("before \\(x after\n\nempty \\(\\)\n\nclose \\) and \\]\n\n\\[\nunclosed");
+
+  assert.equal(result.metadata.mathCount, 0);
+  assert.ok(result.html.includes("before \\(x after"));
+  assert.ok(result.html.includes("empty \\(\\)"));
+  assert.ok(result.html.includes("close \\) and \\]"));
+  assert.ok(result.html.includes("\\[<br>\nunclosed"));
+});
+
+test("keeps the complete long math source on its semantic host", () => {
+  const source = `x${" ".repeat(4_200)}z`;
+  const result = render(`\\(${source}\\)`);
+  const match = /data-math-source="([^"]*)"/.exec(result.html);
+
+  assert.equal(result.metadata.mathCount, 1);
+  assert.ok(match);
+  assert.equal(match[1], source);
+});
+
+test("caps user-declared KaTeX geometry without truncating source semantics", () => {
+  const source = String.raw`\rule{100000em}{100000em}`;
+  const result = render(`\\[${source}\\]`);
+
+  assert.equal(result.metadata.mathCount, 1);
+  assert.match(result.html, /data-math-source="\\rule\{100000em\}\{100000em\}"/);
+  assert.doesNotMatch(result.html, /(?:height|width):100000em/);
+  assert.match(result.html, /(?:height|width):20em/);
 });
 
 test("does not rewrite backslash math inside code or links", () => {
@@ -183,42 +210,13 @@ test("does not rewrite backslash math inside code or links", () => {
   assert.match(result.html, /katex/);
 });
 
-test("renders safe inline HTML and does not rewrite fenced raw HTML", () => {
+test("renders inline HTML and fenced HTML as literal text", () => {
   const result = render("Text <kbd>Cmd</kbd> and <mark>hot</mark>\n\n```\n<kbd>code</kbd>\n```");
 
-  assert.match(result.html, /Text <kbd>Cmd<\/kbd> and <mark>hot<\/mark>/);
+  assert.match(result.html, /Text &#x3C;kbd>Cmd&#x3C;\/kbd> and &#x3C;mark>hot&#x3C;\/mark>/);
   assert.match(result.html, /<code>&#x3C;kbd>code&#x3C;\/kbd>/);
-});
-
-test("lazily renders only safe HTML placeholders present in the current fragment", () => {
-  const result = applySafeHTMLReplacements(
-    "<p>SCOPY_TOKEN_PRESENT</p>",
-    {
-      SCOPY_TOKEN_PRESENT: {
-        kind: "inlineTag",
-        tag: "kbd",
-        text: "Cmd"
-      },
-      SCOPY_TOKEN_ABSENT_DETAILS: {
-        kind: "details",
-        isOpen: false,
-        summary: "should not render",
-        body: "should not render"
-      }
-    },
-    () => {
-      throw new Error("absent placeholders must not render nested Markdown");
-    }
-  );
-
-  assert.equal(result, "<kbd>Cmd</kbd>");
-});
-
-test("can disable safe HTML subset", () => {
-  const result = render("<details><summary>x</summary>y</details>", { allowSafeHTMLSubset: false });
-
-  assert.doesNotMatch(result.html, /<details/);
-  assert.doesNotMatch(result.html, /<summary/);
+  assert.doesNotMatch(result.html, /<kbd(?:\s|>)/i);
+  assert.doesNotMatch(result.html, /<mark(?:\s|>)/i);
 });
 
 test("repairs loose math only when policy allows it", () => {

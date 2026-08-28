@@ -13,20 +13,15 @@ for (const testCase of cases) {
     const source = readFileSync(new URL(testCase.file, corpusRoot), "utf8");
     const result = render(source, {
       profile: testCase.expectedProfile,
-      allowExplicitMath: true,
-      allowBackslashMath: true,
       allowLooseMathRepair: testCase.allowLooseMathRepair,
-      allowSafeHTMLSubset: true,
-      allowRawHTML: false,
       policyVersion: "corpus-test"
     });
 
-    assert.equal(result.metadata.renderer, "unified");
     assert.equal(result.metadata.repairedMathCount, testCase.expectedRepairedMathCount);
-    for (const expected of testCase.unifiedContains) {
+    for (const expected of testCase.renderedContains) {
       assert.match(result.html, new RegExp(escapeRegExp(expected)), expected);
     }
-    for (const unexpected of testCase.unifiedNotContains) {
+    for (const unexpected of testCase.renderedNotContains) {
       assert.doesNotMatch(result.html, new RegExp(escapeRegExp(unexpected)), unexpected);
     }
   });

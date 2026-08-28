@@ -4,6 +4,17 @@ import AppKit
 import WebKit
 import ScopyUISupport
 
+enum MarkdownPreviewRenderIdentity {
+    static let placeholder = "__SCOPY_RENDER_ID__"
+
+    static func injecting(_ renderID: String, into html: String) -> String {
+        guard let markerRange = html.range(of: placeholder) else { return html }
+        var document = html
+        document.replaceSubrange(markerRange, with: renderID)
+        return document
+    }
+}
+
 @MainActor
 private enum MarkdownPreviewScrollViewResolver {
     private final class WeakScrollViewBox {
@@ -60,29 +71,30 @@ private enum MarkdownPreviewMessageParser {
         var overflowX: Bool = false
         var renderSucceeded: Bool = true
         var renderErrorReason: String?
+        var renderID: String?
         if let dict = message.body as? [String: Any] {
             size = parseSize(from: dict)
             overflowX = parseOverflow(from: dict["overflowX"])
             renderSucceeded = parseRenderSucceeded(from: dict["renderSucceeded"])
             renderErrorReason = parseString(from: dict["renderErrorReason"])
+            renderID = parseString(from: dict["renderID"])
         } else if let dict = message.body as? NSDictionary {
             size = CGSize(width: cgFloat(from: dict["width"]), height: cgFloat(from: dict["height"]))
             overflowX = parseOverflow(from: dict["overflowX"])
             renderSucceeded = parseRenderSucceeded(from: dict["renderSucceeded"])
             renderErrorReason = parseString(from: dict["renderErrorReason"])
-        } else if let n = message.body as? NSNumber {
-            // Backward-compatible: height-only payload.
-            size = CGSize(width: 0, height: CGFloat(truncating: n))
+            renderID = parseString(from: dict["renderID"])
         }
 
-        guard let size else { return nil }
+        guard let size, let renderID else { return nil }
         guard size.width.isFinite, size.height.isFinite else { return nil }
         guard size.height > 0 else { return nil }
         return MarkdownContentMetrics(
             size: size,
             hasHorizontalOverflow: overflowX,
             renderSucceeded: renderSucceeded,
-            renderErrorReason: renderErrorReason
+            renderErrorReason: renderErrorReason,
+            renderID: renderID
         )
     }
 
@@ -176,17 +188,29 @@ struct MarkdownContentMetrics: Equatable {
     let hasHorizontalOverflow: Bool
     let renderSucceeded: Bool
     let renderErrorReason: String?
+    let renderID: String
 
     init(
         size: CGSize,
         hasHorizontalOverflow: Bool,
         renderSucceeded: Bool = true,
-        renderErrorReason: String? = nil
+        renderErrorReason: String? = nil,
+        renderID: String = ""
     ) {
         self.size = size
         self.hasHorizontalOverflow = hasHorizontalOverflow
         self.renderSucceeded = renderSucceeded
         self.renderErrorReason = renderErrorReason
+        self.renderID = renderID
+    }
+
+    func isEquivalent(to other: MarkdownContentMetrics) -> Bool {
+        abs(size.width - other.size.width) < 1 &&
+            abs(size.height - other.size.height) < 1 &&
+            hasHorizontalOverflow == other.hasHorizontalOverflow &&
+            renderSucceeded == other.renderSucceeded &&
+            renderErrorReason == other.renderErrorReason &&
+            renderID == other.renderID
     }
 }
 
@@ -240,7 +264,7 @@ struct MarkdownPreviewWebView: NSViewRepresentable {
         if context.coordinator.lastHTML != html {
             context.coordinator.lastHTML = html
             let baseURL = Bundle.main.resourceURL?.appendingPathComponent("MarkdownPreview", isDirectory: true)
-            webView.loadHTMLString(html, baseURL: baseURL)
+            context.coordinator.load(html: html, in: webView, baseURL: baseURL)
         }
     }
 
@@ -310,12 +334,21 @@ struct MarkdownPreviewWebView: NSViewRepresentable {
         var lastHTML: String = ""
         var onContentSizeChange: (@MainActor (MarkdownContentMetrics) -> Void)?
         private var lastReportedMetrics: MarkdownContentMetrics = MarkdownContentMetrics(size: .zero, hasHorizontalOverflow: false)
+        private var currentRenderID: String = ""
+        private var currentNavigation: WKNavigation?
         let scrollbarAutoHider = ScrollbarAutoHider()
         let sizeMessageHandlerProxy = WeakScriptMessageHandler()
 
         override init() {
             super.init()
             sizeMessageHandlerProxy.delegate = self
+        }
+
+        func load(html: String, in webView: WKWebView, baseURL: URL?) {
+            currentRenderID = UUID().uuidString
+            lastReportedMetrics = MarkdownContentMetrics(size: .zero, hasHorizontalOverflow: false)
+            let document = MarkdownPreviewRenderIdentity.injecting(currentRenderID, into: html)
+            currentNavigation = webView.loadHTMLString(document, baseURL: baseURL)
         }
 
         func attachScrollbarAutoHiderIfPossible(for webView: WKWebView) {
@@ -365,6 +398,8 @@ struct MarkdownPreviewWebView: NSViewRepresentable {
         }
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            guard navigation === currentNavigation else { return }
+            currentNavigation = nil
             // Best-effort: ensure math render runs even if DOMContentLoaded timing varies.
             attachScrollbarAutoHiderIfPossible(for: webView)
             webView.evaluateJavaScript("typeof window.__scopyRenderMath === 'function'") { result, _ in
@@ -379,12 +414,8 @@ struct MarkdownPreviewWebView: NSViewRepresentable {
 
         func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
             guard let metrics = MarkdownPreviewMessageParser.metrics(from: message) else { return }
-            if abs(metrics.size.width - lastReportedMetrics.size.width) < 1,
-               abs(metrics.size.height - lastReportedMetrics.size.height) < 1,
-               metrics.hasHorizontalOverflow == lastReportedMetrics.hasHorizontalOverflow
-            {
-                return
-            }
+            guard message.frameInfo.isMainFrame, metrics.renderID == currentRenderID else { return }
+            if metrics.isEquivalent(to: lastReportedMetrics) { return }
             lastReportedMetrics = metrics
 
             if let wk = message.webView {
@@ -406,6 +437,8 @@ final class MarkdownPreviewWebViewController: NSObject, ObservableObject, WKNavi
     private var lastKnownMetrics: MarkdownContentMetrics?
     private var lastDeliveredMetrics: MarkdownContentMetrics = MarkdownContentMetrics(size: .zero, hasHorizontalOverflow: false)
     private var lastLoadFinished: Bool = false
+    private var currentRenderID: String = ""
+    private var currentNavigation: WKNavigation?
     private var pendingContentRefreshTask: Task<Void, Never>?
     private let scrollbarAutoHider = ScrollbarAutoHider()
     private let sizeMessageHandlerProxy = WeakScriptMessageHandler()
@@ -443,6 +476,8 @@ final class MarkdownPreviewWebViewController: NSObject, ObservableObject, WKNavi
     func detachWebView() {
         pendingContentRefreshTask?.cancel()
         pendingContentRefreshTask = nil
+        if currentNavigation != nil { lastLoadFinished = false }
+        currentNavigation = nil
         webView.stopLoading()
         webView.navigationDelegate = nil
         webView.uiDelegate = nil
@@ -473,14 +508,24 @@ final class MarkdownPreviewWebViewController: NSObject, ObservableObject, WKNavi
         attachWebViewIfNeeded()
 
         if lastHTML == html {
+            if !lastLoadFinished {
+                pendingContentRefreshTask?.cancel()
+                pendingContentRefreshTask = nil
+                lastKnownMetrics = nil
+                lastDeliveredMetrics = MarkdownContentMetrics(size: .zero, hasHorizontalOverflow: false)
+                // A detached consumer may have stopped the prior navigation after an early metrics message.
+                // Restart before considering any cached metrics from that incomplete document.
+                let baseURL = Bundle.main.resourceURL?.appendingPathComponent("MarkdownPreview", isDirectory: true)
+                beginLoad(html: html, baseURL: baseURL)
+                return
+            }
+
             // Important: When reusing the same WKWebView across hovers, WebKit may not re-run load callbacks and the
             // page may not automatically re-post the same size message. Prefer replaying the cached metrics to the
             // current consumer (popover / measurer) to avoid expensive JS re-measurement during transient layout.
             if let metrics = lastKnownMetrics,
                metrics.size.height > 0,
-               abs(metrics.size.width - lastDeliveredMetrics.size.width) >= 1 ||
-                abs(metrics.size.height - lastDeliveredMetrics.size.height) >= 1 ||
-                metrics.hasHorizontalOverflow != lastDeliveredMetrics.hasHorizontalOverflow
+               !metrics.isEquivalent(to: lastDeliveredMetrics)
             {
                 lastDeliveredMetrics = metrics
                 Task { @MainActor in
@@ -490,17 +535,9 @@ final class MarkdownPreviewWebViewController: NSObject, ObservableObject, WKNavi
                 return
             }
 
-            if !lastLoadFinished {
-                pendingContentRefreshTask?.cancel()
-                pendingContentRefreshTask = nil
-                // If the last navigation never finished (e.g. hover exited mid-load), retry the load.
-                let baseURL = Bundle.main.resourceURL?.appendingPathComponent("MarkdownPreview", isDirectory: true)
-                webView.loadHTMLString(html, baseURL: baseURL)
-            } else {
-                // If we have no known metrics for this HTML (e.g. prior load was interrupted), request one.
-                if lastKnownMetrics == nil {
-                    scheduleContentRefresh(for: webView, forceSizeReport: true)
-                }
+            // If WebKit finished but no metrics arrived, explicitly request a fresh report.
+            if lastKnownMetrics == nil {
+                scheduleContentRefresh(for: webView, forceSizeReport: true)
             }
             return
         }
@@ -512,7 +549,7 @@ final class MarkdownPreviewWebViewController: NSObject, ObservableObject, WKNavi
         lastKnownMetrics = nil
         lastDeliveredMetrics = MarkdownContentMetrics(size: .zero, hasHorizontalOverflow: false)
         let baseURL = Bundle.main.resourceURL?.appendingPathComponent("MarkdownPreview", isDirectory: true)
-        webView.loadHTMLString(html, baseURL: baseURL)
+        beginLoad(html: html, baseURL: baseURL)
     }
 
     // MARK: - WKNavigationDelegate / WKUIDelegate
@@ -541,6 +578,8 @@ final class MarkdownPreviewWebViewController: NSObject, ObservableObject, WKNavi
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        guard navigation === currentNavigation else { return }
+        currentNavigation = nil
         lastLoadFinished = true
         scheduleContentRefresh(for: webView, forceSizeReport: false)
     }
@@ -549,14 +588,10 @@ final class MarkdownPreviewWebViewController: NSObject, ObservableObject, WKNavi
 
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
         guard let metrics = MarkdownPreviewMessageParser.metrics(from: message) else { return }
+        guard message.frameInfo.isMainFrame, metrics.renderID == currentRenderID else { return }
         lastKnownMetrics = metrics
 
-        if abs(metrics.size.width - lastDeliveredMetrics.size.width) < 1,
-           abs(metrics.size.height - lastDeliveredMetrics.size.height) < 1,
-           metrics.hasHorizontalOverflow == lastDeliveredMetrics.hasHorizontalOverflow
-        {
-            return
-        }
+        if metrics.isEquivalent(to: lastDeliveredMetrics) { return }
         lastDeliveredMetrics = metrics
 
         if let scrollView = MarkdownPreviewScrollViewResolver.resolve(for: webView) {
@@ -570,6 +605,13 @@ final class MarkdownPreviewWebViewController: NSObject, ObservableObject, WKNavi
         Task { @MainActor in
             self.onContentSizeChange?(metrics)
         }
+    }
+
+    private func beginLoad(html: String, baseURL: URL?) {
+        currentRenderID = UUID().uuidString
+        lastLoadFinished = false
+        let document = MarkdownPreviewRenderIdentity.injecting(currentRenderID, into: html)
+        currentNavigation = webView.loadHTMLString(document, baseURL: baseURL)
     }
 
     private func scheduleContentRefresh(for webView: WKWebView, forceSizeReport: Bool) {

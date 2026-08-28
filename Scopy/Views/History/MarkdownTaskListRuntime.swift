@@ -4,7 +4,7 @@ enum MarkdownTaskListRuntime {
     static let style = """
       .task-list-container {
         list-style-type: none;
-        padding-left: 4px;
+        padding-inline-start: 4px;
         margin: 8px 0 16px 0;
       }
       .task-list-item {
@@ -12,7 +12,7 @@ enum MarkdownTaskListRuntime {
         align-items: baseline;
         gap: 8px;
         list-style: none;
-        padding-left: 0;
+        padding-inline-start: 0;
         margin: 8px 0;
         min-height: 24px;
       }

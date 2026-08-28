@@ -1404,7 +1404,13 @@ struct HistoryItemView: View, Equatable {
                         return
                     }
                     let stableSize = CGSize(width: max(1, maxWidth), height: metrics.size.height)
-                    let stableMetrics = MarkdownContentMetrics(size: stableSize, hasHorizontalOverflow: metrics.hasHorizontalOverflow)
+                    let stableMetrics = MarkdownContentMetrics(
+                        size: stableSize,
+                        hasHorizontalOverflow: metrics.hasHorizontalOverflow,
+                        renderSucceeded: metrics.renderSucceeded,
+                        renderErrorReason: metrics.renderErrorReason,
+                        renderID: metrics.renderID
+                    )
                     state.previewModel.markdownContentSize = stableMetrics.size
                     state.previewModel.markdownHasHorizontalOverflow = stableMetrics.hasHorizontalOverflow
                     state.previewModel.markdownRenderSucceeded = true

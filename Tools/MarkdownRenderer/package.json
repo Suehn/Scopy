@@ -8,8 +8,10 @@
     "test": "node --test"
   },
   "dependencies": {
+    "hast-util-from-html-isomorphic": "^2.0.0",
+    "hast-util-to-text": "^4.0.2",
+    "katex": "^0.16.45",
     "rehype-highlight": "^7.0.2",
-    "rehype-katex": "^7.0.1",
     "rehype-sanitize": "^6.0.0",
     "rehype-stringify": "^10.0.1",
     "remark-breaks": "^4.0.0",
@@ -17,7 +19,8 @@
     "remark-math": "^6.0.0",
     "remark-parse": "^11.0.0",
     "remark-rehype": "^11.1.2",
-    "unified": "^11.0.5"
+    "unified": "^11.0.5",
+    "unist-util-visit-parents": "^6.0.2"
   },
   "devDependencies": {
     "esbuild": "^0.25.12"

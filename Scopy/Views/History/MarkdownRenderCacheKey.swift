@@ -5,10 +5,8 @@ enum MarkdownRenderCacheKey {
         guard !contentHash.isEmpty else { return "" }
         return [
             "md",
-            context.renderer.rawValue,
-            context.cacheNamespace,
+            MarkdownRenderContextResolver.rendererVersion,
             context.profile.rawValue,
-            context.policyVersion,
             context.layoutScale.cacheKey,
             contentHash
         ].joined(separator: "|")

@@ -39,8 +39,9 @@ This document describes the current system shape and operational invariants. For
 
 - App/UI shell manages the menubar icon, floating panel, settings window, and preview/export flows.
 - History action flows resolve shareable file URLs through backend protocols; UI rows decide visibility from DTO-level capability hints and do not directly read storage internals.
-- Markdown preview/export uses local renderer assets for CommonMark/GFM, math, footnotes, syntax highlighting, safe HTML restoration, and CJK emphasis normalization; internal placeholders must not leak into visible HTML or fallback text.
+- Markdown preview/export uses one local CommonMark/GFM-to-HTML pipeline for preview and PNG: stable footnote IDs, HTML-only KaTeX, syntax highlighting, tasks/tables/citations, literal raw HTML, and bounded source-profile repair. Missing assets are an explicit render failure; there is no alternate renderer or silent fallback. The normative semantics, typography, responsive layout, evidence boundary, and verification matrix live in [markdown-chatgpt-wacz-style-contract.md](./markdown-chatgpt-wacz-style-contract.md).
 - Markdown preview assets and bundled tools are staged by build scripts rather than copied ad hoc at runtime.
+- Each Markdown WebView navigation has a render ID. Only current main-frame readiness/metrics may update preview state, and metric equality includes overflow plus success/error state as well as geometry.
 - Preview and export flows must treat stored content as source-of-truth input, not a side channel that mutates persisted data.
 
 ## Operational Invariants

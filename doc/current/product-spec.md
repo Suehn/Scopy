@@ -67,7 +67,7 @@ Scopy is a native macOS clipboard manager for users who need durable clipboard h
 - Keep an already-open preview stable while the pointer intentionally crosses from its history row to the preview, regardless of which side or corner hosts the popover. Retention applies only inside the directional corridor and while progress toward the preview continues; leaving the corridor, reversing, stalling, target loss, scroll/dismiss, or the `500ms` cap must close it promptly.
 - Returning from the preview to its row keeps only a short fixed handoff grace. Re-entering a row whose preview is already open must not restart preview preparation or flicker the popover.
 - Hover intent affects only transfer after a preview is open; it must not alter the user-configured hover preview trigger delay. While a transfer is active, adjacent rows must defer selection and preview ownership so screen-edge popover placement cannot steal the source preview.
-- Provide Markdown/LaTeX rendering with local CommonMark/GFM, footnotes, math, syntax highlighting, a safe HTML subset, and export-to-PNG.
+- Provide Markdown/LaTeX rendering and PNG export through one fully local CommonMark/GFM pipeline with stable footnote IDs, HTML-only KaTeX, syntax highlighting, source citations, task/table layout, and user-authored raw HTML shown literally rather than executed.
 - Allow Markdown hover previews to adjust ChatGPT layout scale continuously from 80% to 200% from the preview itself, with light magnetic snapping at each 5% stop; the selected preview scale also controls PNG export launched from that preview. The preview control should stay compact until hover or drag interaction and should keep the last rendered Markdown visible while the new layout profile is prepared.
 - Allow optional pngquant-based compression for newly ingested images and exported Markdown/LaTeX PNGs.
 - Show image thumbnails in the history list when enabled.
@@ -125,7 +125,7 @@ Scopy is a native macOS clipboard manager for users who need durable clipboard h
 - AirDrop should share validated real files when available and may generate temporary PNGs for image rows; Open Containing Folder must only reveal real user files, never temporary share artifacts.
 - Paste-optimized for Codex must post `Control+V` after copying and closing the panel.
 - File notes, image optimization, and export flows must not corrupt the underlying item model.
-- Markdown preview and PNG export should stay aligned for math, footnotes, syntax highlighting, and CJK punctuation-adjacent emphasis.
+- Markdown preview and PNG export must use the same parsed HTML and base CSS for math, footnotes, syntax highlighting, tables, tasks, citations, CJK/RTL text, and Unicode; export-only fitting may run only after preview-equivalent layout is ready.
 - UI refactors must not silently change settings transaction semantics.
 
 ### Performance And UX

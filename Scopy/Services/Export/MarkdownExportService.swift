@@ -1817,7 +1817,7 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
 
             // Consider layout stable only if height has been unchanged for long enough.
             // This prevents returning early when #content starts at a small non-zero height (e.g. padding-only),
-            // then gets populated asynchronously (markdown-it / KaTeX / delayed scripts).
+            // then gets populated asynchronously by the local renderer bundle and delayed font layout.
             if let stableStart = stableSince, (now - stableStart) >= 0.45 {
                 return parsedHeight
             }

@@ -1,5 +1,4 @@
 import rehypeHighlight from "rehype-highlight";
-import rehypeKatex from "rehype-katex";
 import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 import rehypeStringify from "rehype-stringify";
 import remarkBreaks from "remark-breaks";
@@ -8,65 +7,54 @@ import remarkMath from "remark-math";
 import remarkParse from "remark-parse";
 import remarkRehype from "remark-rehype";
 import { unified } from "unified";
+import { rehypeScopyKatex } from "./rehypeScopyKatex.js";
+import { remarkLiteralHTML } from "./remarkLiteralHTML.js";
 import { preprocessBackslashMath } from "./scopyBackslashMathPreprocessor.js";
-import { preprocessDollarMathGuards } from "./scopyDollarMathGuards.js";
 import { remarkScopyLooseMathRepair } from "./remarkScopyLooseMathRepair.js";
 import { remarkScopySourceCitations } from "./remarkScopySourceCitations.js";
-import { applySafeHTMLReplacements, preprocessSafeHTML } from "./scopySafeHTMLPreprocessor.js";
 
 export function render(source, policy = {}) {
   return renderInternal(source, policy, 0);
 }
 
-function renderInternal(source, policy = {}, depth = 0) {
+function renderInternal(source, policy = {}) {
   const warnings = [];
   const normalizedPolicy = normalizePolicy(policy);
-
-  if (normalizedPolicy.allowRawHTML) {
-    warnings.push("raw HTML is not enabled in the first unified renderer bundle");
-  }
   const originalSource = String(source || "");
   const tableCodeSpanGuarded = protectTableCodeSpanPipes(originalSource);
-  const safeHTML = normalizedPolicy.allowSafeHTMLSubset
-    ? preprocessSafeHTML(tableCodeSpanGuarded)
-    : { markdown: tableCodeSpanGuarded, replacements: {} };
-  const dollarGuarded = preprocessDollarMathGuards(safeHTML.markdown);
-  const preprocessed = normalizedPolicy.allowBackslashMath
-    ? preprocessBackslashMath(dollarGuarded)
-    : { markdown: dollarGuarded, mathCount: 0 };
+  const preprocessed = preprocessBackslashMath(tableCodeSpanGuarded);
   const repairMetadata = { repairedMathCount: 0 };
   const processor = unified()
     .use(remarkParse)
-    .use(remarkGfm)
+    .use(remarkGfm, { singleTilde: false })
     .use(remarkBreaks)
-    .use(remarkMath)
+    .use(remarkMath, { singleDollarTextMath: false })
     .use(remarkScopyLooseMathRepair, {
       policy: normalizedPolicy,
       metadata: repairMetadata
     })
-    .use(remarkScopySourceCitations);
+    .use(remarkScopySourceCitations)
+    .use(remarkLiteralHTML);
   processor
-    .use(remarkRehype, { allowDangerousHtml: false })
+    .use(remarkRehype, {
+      allowDangerousHtml: false,
+      clobberPrefix: "scopy-"
+    })
     .use(rehypeSanitize, scopySanitizeSchema)
     .use(rehypeScopySourceCitationClass)
+    .use(rehypeScopyKatex, { failureMode: "relaxed" })
     .use(rehypeHighlight, scopyHighlightOptions)
-    .use(rehypeKatex, { throwOnError: false, strict: "ignore" })
     .use(rehypeStringify);
 
   const file = processor.processSync(preprocessed.markdown);
-  const html = normalizedPolicy.allowSafeHTMLSubset
-    ? applySafeHTMLReplacements(String(file), safeHTML.replacements, (nestedMarkdown) => {
-        if (depth > 4) {
-          return "";
-        }
-        return renderInternal(nestedMarkdown, normalizedPolicy, depth + 1).html;
-      })
-    : String(file);
+  const html = String(file);
+  for (const message of file.messages) {
+    warnings.push(String(message.reason || message));
+  }
   return {
     html,
     metadata: {
-      renderer: "unified",
-      mathCount: countDollarMath(dollarGuarded) + preprocessed.mathCount + repairMetadata.repairedMathCount,
+      mathCount: Number(file.data.scopyMathCount || 0),
       repairedMathCount: repairMetadata.repairedMathCount,
       warnings
     }
@@ -75,6 +63,9 @@ function renderInternal(source, policy = {}, depth = 0) {
 
 const scopySanitizeSchema = {
   ...defaultSchema,
+  // remark-rehype already namespaces every renderer-generated footnote ID.
+  // A second sanitizer prefix would break href/id pairs.
+  clobberPrefix: "",
   protocols: {
     ...defaultSchema.protocols,
     href: [...(defaultSchema.protocols?.href || []), "plugin"]
@@ -142,29 +133,9 @@ function visitElements(node, visitor) {
 function normalizePolicy(policy) {
   return {
     profile: String(policy.profile || "plainTextUnknown"),
-    allowExplicitMath: policy.allowExplicitMath !== false,
-    allowBackslashMath: policy.allowBackslashMath !== false,
     allowLooseMathRepair: policy.allowLooseMathRepair === true,
-    allowSafeHTMLSubset: policy.allowSafeHTMLSubset !== false,
-    allowRawHTML: policy.allowRawHTML === true,
     policyVersion: String(policy.policyVersion || "")
   };
-}
-
-function countDollarMath(source) {
-  let count = 0;
-  for (let i = 0; i < source.length; i += 1) {
-    if (source[i] === "$") {
-      if (i > 0 && source[i - 1] === "\\") {
-        continue;
-      }
-      count += 1;
-      if (source[i + 1] === "$") {
-        i += 1;
-      }
-    }
-  }
-  return Math.floor(count / 2);
 }
 
 function protectTableCodeSpanPipes(source) {

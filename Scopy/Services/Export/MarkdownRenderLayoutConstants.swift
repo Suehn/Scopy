@@ -50,10 +50,6 @@ public struct MarkdownChatGPTLayoutScalePercent: RawRepresentable, Sendable, Equ
         1.0 / browserZoomScale
     }
 
-    public var threadContentWidth: Double {
-        768
-    }
-
     public func layoutViewportWidth(outputSurfaceWidth: Double) -> Double {
         outputSurfaceWidth * inverseBrowserZoomScale
     }
@@ -69,10 +65,9 @@ public enum MarkdownRenderLayoutConstants {
     public static let chatGPTContentTopPadding: Double = 20
     public static let chatGPTContentBottomPadding: Double = 24
     public static let chatGPTOutputSurfaceWidth: Double = 816
-
-    public static var chatGPTThreadContentWidth: Double {
-        defaultChatGPTLayoutScale.threadContentWidth
-    }
+    public static let chatGPTDefaultThreadContentWidth: Double = 640
+    public static let chatGPTWideThreadContentWidth: Double = 768
+    public static let chatGPTWideThreadMinimumViewportWidth: Double = 856
 
     public static var chatGPTRenderWidth: Double {
         chatGPTOutputSurfaceWidth
@@ -81,5 +76,16 @@ public enum MarkdownRenderLayoutConstants {
     public static func renderWidth(for profile: MarkdownChatGPTLayoutScalePercent) -> Double {
         _ = profile
         return chatGPTOutputSurfaceWidth
+    }
+
+    public static func threadContentWidth(
+        forLayoutViewportWidth layoutViewportWidth: Double
+    ) -> Double {
+        guard layoutViewportWidth.isFinite else {
+            return chatGPTDefaultThreadContentWidth
+        }
+        return layoutViewportWidth >= chatGPTWideThreadMinimumViewportWidth
+            ? chatGPTWideThreadContentWidth
+            : chatGPTDefaultThreadContentWidth
     }
 }

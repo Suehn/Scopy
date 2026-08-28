@@ -14,7 +14,7 @@ enum MarkdownSourceProfileDetector {
             return .chatGPTMarkdown
         }
         if isRichHTML(sample) {
-            if isAuthoredMarkdownWithSafeHTMLIslands(sample) {
+            if isAuthoredMarkdownWithRawHTML(sample) {
                 return .authoredMarkdown
             }
             return .richHTML
@@ -72,18 +72,18 @@ enum MarkdownSourceProfileDetector {
         return tags.contains { lower.contains($0) }
     }
 
-    private static func isAuthoredMarkdownWithSafeHTMLIslands(_ text: String) -> Bool {
-        guard !containsNonSafeRichHTMLTag(text) else { return false }
-        return markdownSignalScore(text) >= 2 && markdownSignalScore(markdownOutsideSafeHTMLIslands(text)) >= 1
+    private static func isAuthoredMarkdownWithRawHTML(_ text: String) -> Bool {
+        guard !containsContainerHTMLTag(text) else { return false }
+        return markdownSignalScore(text) >= 2 && markdownSignalScore(markdownOutsideRawHTML(text)) >= 1
     }
 
-    private static func containsNonSafeRichHTMLTag(_ text: String) -> Bool {
+    private static func containsContainerHTMLTag(_ text: String) -> Bool {
         let lower = text.lowercased()
         let tags = ["<table", "<pre", "<code", "<blockquote", "<span", "<div"]
         return tags.contains { lower.contains($0) }
     }
 
-    private static func markdownOutsideSafeHTMLIslands(_ text: String) -> String {
+    private static func markdownOutsideRawHTML(_ text: String) -> String {
         let withoutDetails = replacingRegex(
             pattern: "<details\\b[\\s\\S]*?</details>",
             in: text,

@@ -128,3 +128,26 @@ $$
 
 [ref-link]: https://example.com
 [inline-image]: data:image/gif;base64,R0lGODlhAQABAIABAP///wAAACwAAAAAAQABAAACAkQBADs=
+
+## ChatGPT 渲染边缘案例
+
+行内公式：\(E = mc^2\)，块级公式：
+
+\[
+\sum_{i=1}^{n} i = \frac{n(n+1)}{2}
+\]
+
+损坏的公式分隔符必须保留为普通文本：\(not closed
+
+RTL 自动方向：مرحبا بالعالم، وهذه جملة عربية طويلة لاختبار اتجاه الفقرة。
+
+混排方向：中文 English العربية עברית 12345。
+
+超长不可断词：abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789
+
+管道边缘案例（未转义的 `|` 会按 GFM 表格语法解释）：
+
+| 表达式 | 说明 |
+| --- | --- |
+| `\|r\|` | 代码中的管道 |
+| \(\lvert r \rvert\) | 数学绝对值 |

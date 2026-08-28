@@ -34,7 +34,7 @@ final class MarkdownSourceProfileDetectorTests: XCTestCase {
         XCTAssertEqual(MarkdownSourceProfileDetector.detect(input), .authoredMarkdown)
     }
 
-    func testDetectsAuthoredMarkdownWithSafeHTMLIslandsBeforeRichHTML() {
+    func testDetectsAuthoredMarkdownWithRawHTMLBeforeRichHTML() {
         let input = """
         # Title
 
@@ -92,7 +92,7 @@ final class MarkdownSourceProfileDetectorTests: XCTestCase {
         XCTAssertEqual(MarkdownSourceProfileDetector.detect(input), .richHTML)
     }
 
-    func testKeepsNonSafeRawHTMLWithMarkdownOnRichHTMLPath() {
+    func testKeepsContainerRawHTMLWithMarkdownOnRichHTMLPath() {
         let input = """
         # Title
 

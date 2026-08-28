@@ -96,11 +96,19 @@ enum HistoryItemMarkdownExportController {
         let resolvedLayoutScale = layoutScale ?? MarkdownChatGPTLayoutScalePercent(
             settingsValue: settings.markdownChatGPTLayoutScalePercent
         )
-        let context = MarkdownRenderContextResolver.defaultContext(
-            for: markdownSource,
-            layoutScale: resolvedLayoutScale
-        )
-        let html = MarkdownHTMLRenderer.render(markdown: markdownSource, context: context).html
+        let renderTask = Task.detached(priority: .userInitiated) {
+            let context = MarkdownRenderContextResolver.defaultContext(
+                for: markdownSource,
+                layoutScale: resolvedLayoutScale
+            )
+            return MarkdownHTMLRenderer.render(markdown: markdownSource, context: context).html
+        }
+        let html = await withTaskCancellationHandler(operation: {
+            await renderTask.value
+        }, onCancel: {
+            renderTask.cancel()
+        })
+        guard !Task.isCancelled else { return .failure(CancellationError()) }
         let pngquantOptions: PngquantService.Options? = {
             guard settings.pngquantMarkdownExportEnabled else { return nil }
             return PngquantService.Options(

@@ -34,6 +34,7 @@ final class ExportMarkdownPNGUITests: XCTestCase {
 
         let app = XCUIApplication()
         app.launchArguments = ["--uitesting"]
+        app.launchEnvironment["SCOPY_EXPORT_PASTEBOARD_NAME"] = "ScopyUITests.ChatGPTRendering.\(UUID().uuidString)"
         app.launchEnvironment["SCOPY_UITEST_AUTO_EXPORT_MARKDOWN"] = "1"
         app.launchEnvironment["SCOPY_UITEST_AUTO_EXPORT_MARKDOWN_PATH"] = fixture
         app.launchEnvironment["SCOPY_EXPORT_DUMP_PATH"] = dumpPath

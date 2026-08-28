@@ -14,7 +14,6 @@ enum MarkdownSyntaxIslandKind: Equatable {
     case shortcutReference
     case referenceDefinition
     case autolink
-    case safeHTML
     case url
     case filePath
 }

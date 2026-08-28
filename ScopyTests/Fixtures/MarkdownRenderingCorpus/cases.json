@@ -3,14 +3,13 @@
     "name": "chatgpt-file-links",
     "file": "chatgpt-file-links.md",
     "expectedProfile": "chatGPTMarkdown",
-    "expectedDefaultRenderer": "unified",
     "allowLooseMathRepair": false,
-    "unifiedContains": [
+    "renderedContains": [
       "href=\"/Users/alice/project/docs/guide_v2.md:25\"",
       "href=\"/Users/alice/project/src/backend/adapter/chatgpt_text.js:944\"",
       "<code>main SSE + handoff + websocket + snapshot</code>"
     ],
-    "unifiedNotContains": [
+    "renderedNotContains": [
       "katex"
     ],
     "expectedRepairedMathCount": 0
@@ -19,13 +18,12 @@
     "name": "image-path",
     "file": "image-path.md",
     "expectedProfile": "chatGPTMarkdown",
-    "expectedDefaultRenderer": "unified",
     "allowLooseMathRepair": false,
-    "unifiedContains": [
+    "renderedContains": [
       "<img src=\"/Users/alice/Pictures/diagram_v2.png\"",
       "alt=\"diagram\""
     ],
-    "unifiedNotContains": [
+    "renderedNotContains": [
       "katex"
     ],
     "expectedRepairedMathCount": 0
@@ -34,13 +32,12 @@
     "name": "reference-link",
     "file": "reference-link.md",
     "expectedProfile": "authoredMarkdown",
-    "expectedDefaultRenderer": "unified",
     "allowLooseMathRepair": false,
-    "unifiedContains": [
+    "renderedContains": [
       "href=\"/Users/alice/papers/file_v2.md:25\"",
       "Reference target"
     ],
-    "unifiedNotContains": [
+    "renderedNotContains": [
       "katex"
     ],
     "expectedRepairedMathCount": 0
@@ -49,25 +46,23 @@
     "name": "explicit-math",
     "file": "explicit-math.md",
     "expectedProfile": "scientificMarkdown",
-    "expectedDefaultRenderer": "legacyMarkdownIt",
     "allowLooseMathRepair": false,
-    "unifiedContains": [
+    "renderedContains": [
       "katex",
       "katex-display"
     ],
-    "unifiedNotContains": [],
+    "renderedNotContains": [],
     "expectedRepairedMathCount": 0
   },
   {
     "name": "loose-latex",
     "file": "loose-latex.md",
     "expectedProfile": "pdfOCRScientific",
-    "expectedDefaultRenderer": "legacyMarkdownIt",
     "allowLooseMathRepair": true,
-    "unifiedContains": [
+    "renderedContains": [
       "katex"
     ],
-    "unifiedNotContains": [
+    "renderedNotContains": [
       "href="
     ],
     "expectedRepairedMathCount": 3
@@ -76,14 +71,13 @@
     "name": "currency-shell-vars",
     "file": "currency-shell-vars.md",
     "expectedProfile": "authoredMarkdown",
-    "expectedDefaultRenderer": "unified",
     "allowLooseMathRepair": false,
-    "unifiedContains": [
+    "renderedContains": [
       "$20",
       "<code>$HOME/bin:$PATH</code>",
       "price=$20"
     ],
-    "unifiedNotContains": [
+    "renderedNotContains": [
       "katex"
     ],
     "expectedRepairedMathCount": 0
@@ -92,47 +86,49 @@
     "name": "cjk-mixed-markdown",
     "file": "cjk-mixed-markdown.md",
     "expectedProfile": "chatGPTMarkdown",
-    "expectedDefaultRenderer": "unified",
     "allowLooseMathRepair": false,
-    "unifiedContains": [
+    "renderedContains": [
       "中文路径",
       "href=\"/Users/alice/%E8%AE%BA%E6%96%87/%E7%AC%AC1%E7%AB%A0_v2.md:25\"",
       "<strong>重点</strong>"
     ],
-    "unifiedNotContains": [
+    "renderedNotContains": [
       "katex"
     ],
     "expectedRepairedMathCount": 0
   },
   {
-    "name": "safe-html",
-    "file": "safe-html.md",
+    "name": "raw-html-literal",
+    "file": "raw-html-literal.md",
     "expectedProfile": "richHTML",
-    "expectedDefaultRenderer": "legacyMarkdownIt",
     "allowLooseMathRepair": false,
-    "unifiedContains": [
-      "<details class=\"scopy-details\"",
-      "<summary>More</summary>",
-      "<kbd>Cmd</kbd>"
+    "renderedContains": [
+      "&#x3C;details>",
+      "&#x3C;summary>More&#x3C;/summary>",
+      "&#x3C;kbd>Cmd&#x3C;/kbd>",
+      "&#x3C;script>alert(1)&#x3C;/script>"
     ],
-    "unifiedNotContains": [
+    "renderedNotContains": [
+      "<details class=\"scopy-details\"",
+      "<kbd>Cmd</kbd>",
       "<script>"
     ],
     "expectedRepairedMathCount": 0
   },
   {
-    "name": "safe-html-markdown",
-    "file": "safe-html-markdown.md",
+    "name": "raw-html-literal-markdown",
+    "file": "raw-html-literal-markdown.md",
     "expectedProfile": "authoredMarkdown",
-    "expectedDefaultRenderer": "unified",
     "allowLooseMathRepair": false,
-    "unifiedContains": [
-      "<details class=\"scopy-details\"",
-      "<summary>More</summary>",
-      "<kbd>Cmd</kbd>",
+    "renderedContains": [
+      "&#x3C;details>",
+      "&#x3C;summary>More&#x3C;/summary>",
+      "&#x3C;kbd>Cmd&#x3C;/kbd>",
       "language-swift"
     ],
-    "unifiedNotContains": [
+    "renderedNotContains": [
+      "<details class=\"scopy-details\"",
+      "<kbd>Cmd</kbd>",
       "<script>"
     ],
     "expectedRepairedMathCount": 0
@@ -141,14 +137,13 @@
     "name": "code-fence-paths",
     "file": "code-fence-paths.md",
     "expectedProfile": "authoredMarkdown",
-    "expectedDefaultRenderer": "unified",
     "allowLooseMathRepair": false,
-    "unifiedContains": [
+    "renderedContains": [
       "/Users/alice/project/file_v2.md:25",
       "<code class=\"hljs language-sh\">",
       "class=\"hljs-built_in\">echo</span>"
     ],
-    "unifiedNotContains": [
+    "renderedNotContains": [
       "katex"
     ],
     "expectedRepairedMathCount": 0

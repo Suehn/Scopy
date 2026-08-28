@@ -1,4 +1,4 @@
-# Safe HTML Markdown
+# Raw HTML Literal Markdown
 
 行内 HTML：<kbd>Cmd</kbd> + <mark>K</mark>
 

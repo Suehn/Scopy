@@ -6,6 +6,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## AI 工程化护栏（防幻觉 / 可验证）
 
+### Required engineering principles
+
+- Do not preserve backward compatibility. Remove obsolete paths instead of adding compatibility layers, fallbacks, or migrations.
+- Choose the simplest implementation that fully meets the current requirements. Avoid speculative abstractions, configuration, and indirection.
+- Grow the system in layers. Start from the smallest version that works end to end, and add each new capability on top of a product that already works. Never trade a working product for unfinished complexity.
+- Keep components modular and concerns clearly separated.
+- Prefer established, well-maintained libraries when they reduce overall complexity or improve reliability. Do not reimplement common functionality without a clear reason.
+- Lean on the dependencies already in the project before writing your own implementation or adding packages. Do not assume a library lacks a capability without checking its documentation and types.
+- Make architectural decisions for the long term. Do not accept a stopgap that only works for now and is meant to be replaced later.
+
 ### 真实约束（不要猜）
 
 - 以 `project.yml` 为单一事实来源：当前 `SWIFT_VERSION=5.9`、`MACOSX_DEPLOYMENT_TARGET=14.0`；除非明确要求，不要擅自升级语言版本/最低系统版本。
@@ -15,6 +25,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 - 不要凭记忆编 Apple API：先用 MCP `cupertino` 搜索/阅读 Apple Developer Documentation 或 sample code，确认**精确签名**与平台可用性再写代码。
 - 当文档与编译器提示冲突，以编译器为最终裁判；提交前必须能本地编译通过。
+
+### Markdown / 富文本渲染原则
+
+- 先读 `doc/current/markdown-chatgpt-wacz-style-contract.md`；它是 ChatGPT 风格 Markdown、GFM、代码、表格、KaTeX、字体、间距、响应式和 Unicode/RTL 行为的唯一 canonical 契约。归档源码/资源不等于 hydrated final DOM 或 computed style，不得据此虚构像素级、暗色或字体结论。
+- 只维护 `MarkdownHTMLRenderer -> MarkdownHTMLDocumentBuilder` 一条 Markdown 到 standalone HTML 的运行时链路。预览和 PNG 导出共享同一 parse result、HTML、基础 CSS 与本地资源；禁止 renderer selector、feature flag、shadow renderer、markdown-it fallback 和第二套 export parser。
+- 单 `~`、单 `$`、raw HTML、代码语法岛、table pipe、脚注 ID、WebView render ID 等语义必须遵守 canonical 契约；不要用 CSS 或启发式修复改变 parser 含义。
+- 40rem/48rem thread width 由 `816 / scale` 的逻辑视口决定。代码、公式、表格只做局部 overflow，不能扩宽 popover；公式宿主禁止使用会让离屏 PNG 漏绘的 `content-visibility:auto`。
+- 正文字体使用可靠的 macOS 系统 sans/mono 栈，公式使用项目内 KaTeX 字体；归档里存在字体文件不等于正文实际使用它。
+- 渲染改动必须同步更新 Node 契约测试、`ScopyTests/ChatGPTMarkdownRendererTests.swift` 和真实导出 fixture，并完成 Node build/test、应用构建、单测、严格并发测试和真实 PNG 视觉检查。测试宿主没有进入 Scopy 场景时只能记录 environment-blocked。
 
 ### 验证闭环（按风险）
 
@@ -144,7 +163,7 @@ Scopy follows a **strict front-end/back-end separation** pattern to enable compo
 ### 快速开始
 
 ```bash
-cd /Users/ziyi/Documents/code/Scopy
+cd /Users/hh/Documents/code/Scopy
 
 # 构建（推荐，自动注入版本号）
 make build

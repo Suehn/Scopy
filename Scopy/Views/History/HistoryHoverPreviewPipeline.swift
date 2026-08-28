@@ -752,7 +752,13 @@ enum HistoryHoverPreviewPipeline {
     static func stableMetrics(from metrics: MarkdownContentMetrics, text _: String) -> MarkdownContentMetrics {
         let maxWidth: CGFloat = HoverPreviewScreenMetrics.maxMarkdownPopoverWidthPoints()
         let stableSize = CGSize(width: max(1, maxWidth), height: metrics.size.height)
-        return MarkdownContentMetrics(size: stableSize, hasHorizontalOverflow: metrics.hasHorizontalOverflow)
+        return MarkdownContentMetrics(
+            size: stableSize,
+            hasHorizontalOverflow: metrics.hasHorizontalOverflow,
+            renderSucceeded: metrics.renderSucceeded,
+            renderErrorReason: metrics.renderErrorReason,
+            renderID: metrics.renderID
+        )
     }
 
     private static func delayNanos(for delay: TimeInterval) -> UInt64 {
