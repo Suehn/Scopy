@@ -47,7 +47,7 @@ struct MarkdownRenderContext: Equatable, Sendable {
 }
 
 enum MarkdownRenderContextResolver {
-    static let rendererVersion = "chatgpt-renderer-v4"
+    static let rendererVersion = "chatgpt-renderer-v5"
 
     static func defaultContext(for markdown: String) -> MarkdownRenderContext {
         defaultContext(

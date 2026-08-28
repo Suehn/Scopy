@@ -15,13 +15,14 @@ This page is the human-facing index for current release state. Automation should
 - Treat the current release block as a human mirror of metadata.
 - Use the recent release list as the operational window.
 - Use [history/README.md](./history/README.md) for immutable release notes beyond the current window.
+- Release titles and notes describe behavior at that version; they never override the current Markdown contract in [markdown-chatgpt-wacz-style-contract.md](../current/markdown-chatgpt-wacz-style-contract.md).
 
 ## Current Release
 
 <!-- release-current:start -->
-- Version: `v0.65.4`
+- Version: `v0.70.0`
 - Date: `2026-08-28`
-- Release note: [v0.65.4](./history/v0.65.4.md)
+- Release note: [v0.70.0](./history/v0.70.0.md)
 - Changelog: [CHANGELOG.md](./CHANGELOG.md)
 - Profile doc: `none`
 <!-- release-current:end -->
@@ -29,6 +30,7 @@ This page is the human-facing index for current release state. Automation should
 ## Recent Releases
 
 <!-- release-recent:start -->
+- `2026-08-28` [v0.70.0](./history/v0.70.0.md) - Interactive ChatGPT-style rich surfaces and stable Markdown preview lifecycle
 - `2026-08-28` [v0.65.4](./history/v0.65.4.md) - ChatGPT-aligned Markdown preview and PNG export rendering
 - `2026-08-22` [v0.65.3](./history/v0.65.3.md) - Restart-surviving search index caches, typing-safe warm-up, and index-only corpus metrics
 - `2026-08-09` [v0.65.2](./history/v0.65.2.md) - Explain every search result with source-aware highlighted match evidence
@@ -40,7 +42,6 @@ This page is the human-facing index for current release state. Automation should
 - `2026-05-30` [v0.8.5](./history/v0.8.5.md) - File-backed image paste preservation and README visual polish
 - `2026-05-30` [v0.8.4](./history/v0.8.4.md) - Markdown preview scaling and WACZ parity polish
 - `2026-05-30` [v0.8.3](./history/v0.8.3.md) - WACZ-aligned Markdown rendering theme
-- `2026-05-16` [v0.8.2](./history/v0.8.2.md) - Markdown safe HTML renderer routing and rich HTML fallback hardening
 <!-- release-recent:end -->
 
 ## Full History

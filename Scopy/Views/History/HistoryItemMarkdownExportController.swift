@@ -109,16 +109,7 @@ enum HistoryItemMarkdownExportController {
             renderTask.cancel()
         })
         guard !Task.isCancelled else { return .failure(CancellationError()) }
-        let pngquantOptions: PngquantService.Options? = {
-            guard settings.pngquantMarkdownExportEnabled else { return nil }
-            return PngquantService.Options(
-                binaryPath: settings.pngquantBinaryPath,
-                qualityMin: settings.pngquantMarkdownExportQualityMin,
-                qualityMax: settings.pngquantMarkdownExportQualityMax,
-                speed: settings.pngquantMarkdownExportSpeed,
-                colors: settings.pngquantMarkdownExportColors
-            )
-        }()
+        let pngquantOptions = pngquantOptions(settings: settings, renderedHTML: html)
 
         let cancellationRelay = MarkdownExportCancellationRelay()
         return await withTaskCancellationHandler(operation: {
@@ -163,6 +154,23 @@ enum HistoryItemMarkdownExportController {
             }
         }
         return nil
+    }
+
+    static func pngquantOptions(
+        settings: SettingsDTO,
+        renderedHTML: String
+    ) -> PngquantService.Options? {
+        guard settings.pngquantMarkdownExportEnabled else { return nil }
+        // Data-rich surfaces rely on subtle chart gradients and source imagery. Palette reduction can
+        // collapse those colors even when the DOM/CSS is correct, so their canonical export stays lossless.
+        guard !renderedHTML.contains("data-scopy-version=\"2\"") else { return nil }
+        return PngquantService.Options(
+            binaryPath: settings.pngquantBinaryPath,
+            qualityMin: settings.pngquantMarkdownExportQualityMin,
+            qualityMax: settings.pngquantMarkdownExportQualityMax,
+            speed: settings.pngquantMarkdownExportSpeed,
+            colors: settings.pngquantMarkdownExportColors
+        )
     }
 }
 

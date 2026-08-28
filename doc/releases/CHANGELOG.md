@@ -4,6 +4,7 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
+下列版本条目只记录当时行为，不是当前实现契约；与 `doc/current/` canonical 文档或当前源码/测试冲突时，以后者为准，不得恢复旧兼容路径。
 
 ## [Unreleased]
 
@@ -11,12 +12,32 @@
 
 - No unreleased entries.
 
+## [v0.70.0] - 2026-08-28
+
+### Rich Rendering And Interaction
+
+- Adds strict `scopy-rich` v2 surfaces for web results, search-image groups, news, weather, finance, and currency using validated frozen data and a closed local asset allowlist; invalid, unknown, oversized, or older envelopes remain visible code fences instead of being guessed into UI.
+- Makes supported controls interactive in hover preview while freezing the same DOM for deterministic PNG export. Preview and export continue to share one parse result, standalone HTML document, base CSS, runtime, fonts, and local assets.
+- Separates ordinary HTTP(S) links, Codex absolute file links with optional line/column suffixes, and grouped source citations. Native opening occurs only after an explicit preview click and strict destination validation; export remains inert.
+
+### Preview Stability And Real-World Coverage
+
+- Fixes first-hover blank previews by removing the hidden premeasurement owner of the reusable `WKWebView` and enforcing an owner lease so stale SwiftUI teardown cannot detach the current popover.
+- Stops repeated identical updates from restarting navigation or reattaching the script bridge, and retries scroll configuration when WebKit creates its internal scroll view after the initial update, eliminating the observed scroll flicker path.
+- Adds the user's complete 2,728-line Markdown/math/table/Unicode stress fixture and copied ChatGPT visible-text fixture. Authored Markdown in related dual-MIME clipboard content is preserved, while lossy visible text never synthesizes unavailable rich-card metadata.
+
+### Evidence And Verification
+
+- Documents the WACZ boundary: archived runtime/resources and saved fields are evidence, but they are not a hydrated final assistant DOM, computed-style snapshot, dark-mode proof, or computed-font measurement.
+- JavaScript renderer tests passed 77/77. Normal and strict Swift suites each passed 749 tests with 2 skips and no failures. App build, documentation, release validation, and the 15-case release policy passed.
+- The real application exported the full user fixtures at 2160 x 141619 and 1080 x 8653 with top, middle, and tail content visually inspected. The optional hover UI harness timed out while enabling macOS automation mode and is recorded as environment-blocked, not passed.
+
 ## [v0.65.4] - 2026-08-28
 
 ### Markdown/Preview
 
 - Replaces the legacy renderer selector, fallback, feature flags, shadow comparison, duplicated normalizers, and obsolete assets with one local CommonMark/GFM pipeline shared by hover preview and PNG export.
-- Aligns completed-response typography, paragraph/list/blockquote rhythm, 640px/768px logical thread widths, overflow ownership, tables, code, tasks, citations, stable footnotes, and HTML-only KaTeX to the captured ChatGPT WACZ contract.
+- Aligns completed-response typography, paragraph/list/blockquote rhythm, 640px/768px logical thread widths, overflow ownership, tables, code, tasks, citations, stable footnotes, and HTML-only KaTeX to the canonical runtime-path-derived contract; the WACZ was not treated as a hydrated final-DOM measurement.
 - Handles CJK, RTL, Unicode, malformed headings, code-span pipes in tables, raw HTML as literal text, protected math-adjacent URLs/paths, and long export content through explicit regression cases.
 - Hardens WebView lifecycle state with per-navigation render IDs, main-frame validation, and error-aware metric identity so stale or same-sized failed loads cannot replace current preview state.
 

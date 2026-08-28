@@ -29,6 +29,7 @@
 - 保持契约语义：单 `~` 与单 `$` 为字面量，成对删除线和显式数学才解析；raw HTML 必须显示为字面文本；代码区域不得二次解析；未转义 table pipe 仍是分隔符；脚注 ID 和每次 WebView render ID 必须稳定且互不混用。
 - 布局缩放使用 `816 / scale` 的逻辑视口选择 40rem/48rem thread width，不得用物理 WKWebView 的 media query 代替。代码、公式和表格拥有局部横向溢出，不能扩宽外层 popover；公式宿主不得使用会导致离屏导出漏绘的 `content-visibility:auto`。
 - 字体以可靠的 macOS 系统 sans/mono 栈和项目内 KaTeX 字体为准；不要因为归档中存在某个字体文件就推断正文 computed font。
+- 任何旧 release note、archive、proposal、注释或历史契约若与上述 canonical 契约或当前源码/测试冲突，均为非规范历史材料；删除或改正仍标为 active 的冲突文本，不得为旧说法保留兼容路径。
 - 改动渲染器时同步维护 Node 契约测试、`ScopyTests/ChatGPTMarkdownRendererTests.swift` 和相关真实导出 fixture；至少运行 `npm test && npm run build`、应用构建、单测、严格并发测试和一张真实应用 PNG 视觉检查。自动化宿主若未启动场景，必须记录为 environment-blocked，不能记为通过。
 
 ### 轻量工作流（默认）

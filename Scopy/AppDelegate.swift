@@ -402,6 +402,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private func uiTestMarkdownExportSettings() async -> SettingsDTO {
         var settings = await settingsStore.load()
         let env = ProcessInfo.processInfo.environment
+        if let rawLayoutScale = env["SCOPY_UITEST_MARKDOWN_LAYOUT_SCALE"],
+           let layoutScale = Int(rawLayoutScale.trimmingCharacters(in: .whitespacesAndNewlines)) {
+            settings.markdownChatGPTLayoutScalePercent = MarkdownChatGPTLayoutScalePercent(
+                settingsValue: layoutScale
+            ).rawValue
+        }
         if env["SCOPY_UITEST_FORCE_PNGQUANT_MARKDOWN_EXPORT"] == "0" {
             settings.pngquantMarkdownExportEnabled = false
         } else if env["SCOPY_UITEST_FORCE_PNGQUANT_MARKDOWN_EXPORT"] != nil {

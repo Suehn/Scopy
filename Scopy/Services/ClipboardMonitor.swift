@@ -2070,6 +2070,16 @@ public final class ClipboardMonitor {
             return candidate
         }
 
+        // Some producers place the authored Markdown in `text/plain` and its rendered copy in `text/html`.
+        // Preserve that source representation when it is clearly Markdown and the HTML-derived text confirms
+        // that both payloads describe the same content. The HTML payload itself remains the stored rich payload.
+        if type == .html, isClearlyStructuredMarkdown(candidate) {
+            if textRepresentationsAreRelated(candidate, extracted) {
+                return candidate
+            }
+            return extracted
+        }
+
         // If the extracted text is TeX-heavy and the pasteboard `.string` differs materially from it, prefer the
         // extracted version to avoid storing a transformed/Markdown-converted representation.
         if containsTeXCommands(extracted) {
@@ -2077,6 +2087,191 @@ public final class ClipboardMonitor {
         }
 
         return candidate
+    }
+
+    private func isClearlyStructuredMarkdown(_ text: String) -> Bool {
+        // This is intentionally stricter than preview eligibility. Clipboard MIME selection should only override
+        // rich-text extraction for unambiguous source Markdown, not prose that happens to contain punctuation.
+        let sample = text.count > 64_000 ? String(text.prefix(64_000)) : text
+        let lines = sample.split(separator: "\n", omittingEmptySubsequences: false)
+
+        var score = 0
+        var listItemCount = 0
+        var blockquoteCount = 0
+        var fenceCount = 0
+        var sawTableRow = false
+        var sawTableDelimiter = false
+
+        for rawLine in lines {
+            let line = rawLine.trimmingCharacters(in: .whitespaces)
+            guard !line.isEmpty else { continue }
+
+            if line.hasPrefix("```") || line.hasPrefix("~~~") {
+                fenceCount += 1
+            }
+            if isATXHeading(line) {
+                score += 2
+            }
+            if isMarkdownListItem(line) {
+                listItemCount += 1
+            }
+            if line.hasPrefix("> ") {
+                blockquoteCount += 1
+            }
+            if line.contains("|") {
+                sawTableRow = true
+                if isMarkdownTableDelimiter(line) {
+                    sawTableDelimiter = true
+                }
+            }
+        }
+
+        if fenceCount >= 2 { score += 2 }
+        if listItemCount >= 2 { score += 2 } else if listItemCount == 1 { score += 1 }
+        if blockquoteCount >= 2 { score += 2 } else if blockquoteCount == 1 { score += 1 }
+        if sawTableRow && sawTableDelimiter { score += 2 }
+        if containsPairedMarkdownMarker("**", in: sample) || containsPairedMarkdownMarker("__", in: sample) {
+            score += 1
+        }
+        if containsMarkdownLink(in: sample) { score += 2 }
+        if containsPairedMarkdownMarker("$$", in: sample)
+            || (sample.contains("\\(") && sample.contains("\\)"))
+            || (sample.contains("\\[") && sample.contains("\\]")) {
+            score += 2
+        }
+
+        return score >= 2
+    }
+
+    private func isATXHeading(_ line: String) -> Bool {
+        let markerCount = line.prefix { $0 == "#" }.count
+        guard (1...6).contains(markerCount), line.count > markerCount else { return false }
+        return line[line.index(line.startIndex, offsetBy: markerCount)].isWhitespace
+    }
+
+    private func isMarkdownListItem(_ line: String) -> Bool {
+        if line.hasPrefix("- ") || line.hasPrefix("* ") || line.hasPrefix("+ ") {
+            return true
+        }
+
+        var index = line.startIndex
+        var digitCount = 0
+        while index < line.endIndex, line[index].isNumber, digitCount < 9 {
+            digitCount += 1
+            index = line.index(after: index)
+        }
+        guard digitCount > 0, index < line.endIndex, line[index] == "." else { return false }
+        index = line.index(after: index)
+        return index < line.endIndex && line[index].isWhitespace
+    }
+
+    private func isMarkdownTableDelimiter(_ line: String) -> Bool {
+        let cells = line.split(separator: "|", omittingEmptySubsequences: true)
+        guard !cells.isEmpty else { return false }
+        return cells.allSatisfy { cell in
+            let trimmed = cell.trimmingCharacters(in: .whitespaces)
+            let core = trimmed.trimmingCharacters(in: CharacterSet(charactersIn: ":"))
+            return core.count >= 3 && core.allSatisfy { $0 == "-" }
+        }
+    }
+
+    private func containsPairedMarkdownMarker(_ marker: String, in text: String) -> Bool {
+        guard let first = text.range(of: marker) else { return false }
+        return text[first.upperBound...].range(of: marker) != nil
+    }
+
+    private func containsMarkdownLink(in text: String) -> Bool {
+        guard let closeBracket = text.range(of: "](") else { return false }
+        return text[..<closeBracket.lowerBound].contains("[")
+            && text[closeBracket.upperBound...].contains(")")
+    }
+
+    private func textRepresentationsAreRelated(_ candidate: String, _ extracted: String) -> Bool {
+        let candidateTokens = comparisonTokens(in: candidate)
+        let extractedTokens = comparisonTokens(in: extracted)
+        guard candidateTokens.count >= 2, extractedTokens.count >= 2 else { return false }
+
+        var candidateCounts: [String: Int] = [:]
+        candidateCounts.reserveCapacity(candidateTokens.count)
+        for token in candidateTokens {
+            candidateCounts[token, default: 0] += 1
+        }
+
+        var commonCount = 0
+        for token in extractedTokens {
+            guard let count = candidateCounts[token], count > 0 else { continue }
+            commonCount += 1
+            candidateCounts[token] = count - 1
+        }
+
+        let extractedCoverage = Double(commonCount) / Double(extractedTokens.count)
+        let candidateCoverage = Double(commonCount) / Double(candidateTokens.count)
+        return extractedCoverage >= 0.75 && candidateCoverage >= 0.65
+    }
+
+    private func comparisonTokens(in text: String) -> [String] {
+        let bounded = text.count > 64_000 ? String(text.prefix(64_000)) : text
+        let sample = strippingInlineMarkdownDestinations(bounded)
+        var tokens: [String] = []
+        tokens.reserveCapacity(min(sample.count / 5, 8_192))
+        var current = ""
+
+        for character in sample.lowercased() {
+            if character.isLetter || character.isNumber {
+                current.append(character)
+            } else if !current.isEmpty {
+                tokens.append(current)
+                current.removeAll(keepingCapacity: true)
+            }
+        }
+        if !current.isEmpty {
+            tokens.append(current)
+        }
+        return tokens
+    }
+
+    private func strippingInlineMarkdownDestinations(_ text: String) -> String {
+        var result = ""
+        result.reserveCapacity(text.count)
+        var index = text.startIndex
+
+        while index < text.endIndex {
+            let next = text.index(after: index)
+            if text[index] == "]", next < text.endIndex, text[next] == "(" {
+                var cursor = text.index(after: next)
+                var depth = 1
+                var isEscaped = false
+
+                while cursor < text.endIndex {
+                    let character = text[cursor]
+                    let after = text.index(after: cursor)
+                    if isEscaped {
+                        isEscaped = false
+                    } else if character == "\\" {
+                        isEscaped = true
+                    } else if character == "(" {
+                        depth += 1
+                    } else if character == ")" {
+                        depth -= 1
+                        if depth == 0 {
+                            result.append("]")
+                            index = after
+                            break
+                        }
+                    }
+                    cursor = after
+                }
+
+                if depth == 0 {
+                    continue
+                }
+            }
+
+            result.append(text[index])
+            index = next
+        }
+
+        return result
     }
 
     private func containsTeXCommands(_ text: String) -> Bool {

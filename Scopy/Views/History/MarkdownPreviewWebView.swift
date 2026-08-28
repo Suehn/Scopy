@@ -139,20 +139,68 @@ private enum MarkdownPreviewMessageParser {
 }
 
 enum MarkdownPreviewNavigationPolicy {
-    static func shouldAllow(
+    enum Decision: Equatable {
+        case allowInWebView
+        case openExternally(URL)
+        case cancel
+    }
+
+    static func decision(
         navigationType: WKNavigationType,
         targetFrameIsNil: Bool,
         url: URL?,
         currentURL: URL? = nil
-    ) -> Bool {
-        if targetFrameIsNil { return false }
+    ) -> Decision {
         if navigationType == .linkActivated {
-            return isSameDocumentFragmentNavigation(url: url, currentURL: currentURL)
+            if isSameDocumentFragmentNavigation(url: url, currentURL: currentURL) {
+                return .allowInWebView
+            }
+            if let url, let fileURL = validatedLocalFileURL(from: url) {
+                return .openExternally(fileURL)
+            }
+            if let url, isValidExternalURL(url) {
+                return .openExternally(url)
+            }
+            return .cancel
         }
-        if let scheme = url?.scheme?.lowercased(), scheme == "http" || scheme == "https" {
-            return false
+
+        if targetFrameIsNil { return .cancel }
+        guard let url else { return .cancel }
+        if url.isFileURL { return .allowInWebView }
+        if url.scheme?.lowercased() == "about", url.absoluteString == "about:blank" {
+            return .allowInWebView
         }
-        return true
+        return .cancel
+    }
+
+    @MainActor
+    static func handle(
+        _ navigationAction: WKNavigationAction,
+        in webView: WKWebView,
+        decisionHandler: @escaping @MainActor (WKNavigationActionPolicy) -> Void
+    ) {
+        let targetFrameIsNil = navigationAction.targetFrame == nil
+        let policyDecision = decision(
+            navigationType: navigationAction.navigationType,
+            targetFrameIsNil: targetFrameIsNil,
+            url: navigationAction.request.url,
+            currentURL: webView.url
+        )
+
+        switch policyDecision {
+        case .allowInWebView:
+            if targetFrameIsNil {
+                webView.load(navigationAction.request)
+                decisionHandler(.cancel)
+            } else {
+                decisionHandler(.allow)
+            }
+        case .openExternally(let url):
+            _ = NSWorkspace.shared.open(url)
+            decisionHandler(.cancel)
+        case .cancel:
+            decisionHandler(.cancel)
+        }
     }
 
     private static func isSameDocumentFragmentNavigation(url: URL?, currentURL: URL?) -> Bool {
@@ -180,6 +228,78 @@ enum MarkdownPreviewNavigationPolicy {
         var components = URLComponents(url: url, resolvingAgainstBaseURL: false)
         components?.fragment = nil
         return components?.url
+    }
+
+    private static func isValidExternalURL(_ url: URL) -> Bool {
+        let absoluteString = url.absoluteString
+        guard absoluteString.utf8.count <= 8_192,
+              !containsControlCharacters(absoluteString),
+              let decodedAbsoluteString = absoluteString.removingPercentEncoding,
+              !containsControlCharacters(decodedAbsoluteString),
+              let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              let scheme = components.scheme?.lowercased(),
+              scheme == "http" || scheme == "https",
+              let host = components.host,
+              !host.isEmpty,
+              host.unicodeScalars.allSatisfy({ scalar in
+                  scalar.isASCII && (
+                      CharacterSet.alphanumerics.contains(scalar) ||
+                          scalar == "." || scalar == "-" || scalar == ":"
+                  )
+              }),
+              host.unicodeScalars.contains(where: { $0.isASCII && CharacterSet.alphanumerics.contains($0) }),
+              components.user == nil,
+              components.password == nil
+        else {
+            return false
+        }
+        return true
+    }
+
+    private static func validatedLocalFileURL(from url: URL) -> URL? {
+        let absoluteString = url.absoluteString
+        guard absoluteString.utf8.count <= 8_192,
+              !containsControlCharacters(absoluteString),
+              let decodedAbsoluteString = absoluteString.removingPercentEncoding,
+              !containsControlCharacters(decodedAbsoluteString),
+              let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              components.scheme?.lowercased() == "scopy-file",
+              components.host == nil,
+              components.user == nil,
+              components.password == nil,
+              components.port == nil,
+              components.query == nil,
+              components.fragment == nil
+        else {
+            return nil
+        }
+
+        var path = strippingTextPosition(from: components.path)
+        guard path.hasPrefix("/"), !path.hasPrefix("//") else { return nil }
+
+        if path == "/~" {
+            path = FileManager.default.homeDirectoryForCurrentUser.path
+        } else if path.hasPrefix("/~/") {
+            path = FileManager.default.homeDirectoryForCurrentUser
+                .appendingPathComponent(String(path.dropFirst(3)))
+                .path
+        }
+
+        return URL(fileURLWithPath: path).standardizedFileURL
+    }
+
+    private static func strippingTextPosition(from path: String) -> String {
+        guard let positionRange = path.range(
+            of: #":[1-9][0-9]*(?::[1-9][0-9]*)?$"#,
+            options: .regularExpression
+        ) else {
+            return path
+        }
+        return String(path[..<positionRange.lowerBound])
+    }
+
+    private static func containsControlCharacters(_ string: String) -> Bool {
+        string.unicodeScalars.contains { CharacterSet.controlCharacters.contains($0) }
     }
 }
 
@@ -379,13 +499,11 @@ struct MarkdownPreviewWebView: NSViewRepresentable {
             decidePolicyFor navigationAction: WKNavigationAction,
             decisionHandler: @escaping @MainActor (WKNavigationActionPolicy) -> Void
         ) {
-            let shouldAllow = MarkdownPreviewNavigationPolicy.shouldAllow(
-                navigationType: navigationAction.navigationType,
-                targetFrameIsNil: navigationAction.targetFrame == nil,
-                url: navigationAction.request.url,
-                currentURL: webView.url
+            MarkdownPreviewNavigationPolicy.handle(
+                navigationAction,
+                in: webView,
+                decisionHandler: decisionHandler
             )
-            decisionHandler(shouldAllow ? .allow : .cancel)
         }
 
         func webView(
@@ -440,10 +558,23 @@ final class MarkdownPreviewWebViewController: NSObject, ObservableObject, WKNavi
     private var currentRenderID: String = ""
     private var currentNavigation: WKNavigation?
     private var pendingContentRefreshTask: Task<Void, Never>?
+    private var pendingScrollConfigurationTask: Task<Void, Never>?
+    private var bridgeIsAttached = false
+    private var currentOwnerID: UUID?
+    private var desiredShouldScroll: Bool?
+    private var lastShouldScroll: Bool?
+    private(set) var bridgeAttachmentCount = 0
+    private(set) var scrollConfigurationCount = 0
+    private(set) var navigationStartCount = 0
+    private let scrollViewResolver: @MainActor (NSView) -> NSScrollView?
     private let scrollbarAutoHider = ScrollbarAutoHider()
     private let sizeMessageHandlerProxy = WeakScriptMessageHandler()
 
-    override init() {
+    init(
+        scrollViewResolver: @escaping @MainActor (NSView) -> NSScrollView? = {
+            MarkdownPreviewScrollViewResolver.resolve(for: $0)
+        }
+    ) {
         let config = WKWebViewConfiguration()
         config.websiteDataStore = .nonPersistent()
         config.defaultWebpagePreferences.allowsContentJavaScript = true
@@ -454,6 +585,7 @@ final class MarkdownPreviewWebViewController: NSObject, ObservableObject, WKNavi
         wv.allowsMagnification = false
         wv.setValue(false, forKey: "drawsBackground")
         self.webView = wv
+        self.scrollViewResolver = scrollViewResolver
         super.init()
 
         // Reuse the same network blocker & message handler semantics as the one-shot web view.
@@ -464,18 +596,37 @@ final class MarkdownPreviewWebViewController: NSObject, ObservableObject, WKNavi
         attachWebViewIfNeeded()
     }
 
-    func attachWebViewIfNeeded() {
+    func beginOwnership(_ ownerID: UUID) {
+        currentOwnerID = ownerID
+        attachWebViewIfNeeded()
+    }
+
+    func owns(_ ownerID: UUID) -> Bool {
+        currentOwnerID == ownerID
+    }
+
+    func endOwnership(_ ownerID: UUID) {
+        guard currentOwnerID == ownerID else { return }
+        detachWebView()
+    }
+
+    private func attachWebViewIfNeeded() {
+        guard !bridgeIsAttached else { return }
         let controller = webView.configuration.userContentController
         controller.removeScriptMessageHandler(forName: MarkdownPreviewWebView.sizeMessageHandlerName)
         controller.add(sizeMessageHandlerProxy, name: MarkdownPreviewWebView.sizeMessageHandlerName)
 
         webView.navigationDelegate = self
         webView.uiDelegate = self
+        bridgeIsAttached = true
+        bridgeAttachmentCount += 1
     }
 
     func detachWebView() {
         pendingContentRefreshTask?.cancel()
         pendingContentRefreshTask = nil
+        pendingScrollConfigurationTask?.cancel()
+        pendingScrollConfigurationTask = nil
         if currentNavigation != nil { lastLoadFinished = false }
         currentNavigation = nil
         webView.stopLoading()
@@ -484,13 +635,47 @@ final class MarkdownPreviewWebViewController: NSObject, ObservableObject, WKNavi
         webView.configuration.userContentController.removeScriptMessageHandler(forName: MarkdownPreviewWebView.sizeMessageHandlerName)
         scrollbarAutoHider.detach()
         onContentSizeChange = nil
+        bridgeIsAttached = false
+        currentOwnerID = nil
+        desiredShouldScroll = nil
+        lastShouldScroll = nil
         // Allow the next consumer (popover / measurer) to receive a fresh metrics callback even if the size is unchanged.
         lastDeliveredMetrics = MarkdownContentMetrics(size: .zero, hasHorizontalOverflow: false)
     }
 
     func setShouldScroll(_ shouldScroll: Bool) {
         attachWebViewIfNeeded()
-        guard let scrollView = MarkdownPreviewScrollViewResolver.resolve(for: webView) else { return }
+        desiredShouldScroll = shouldScroll
+        guard lastShouldScroll != shouldScroll else { return }
+        if applyScrollConfigurationIfPossible(shouldScroll) { return }
+
+        pendingScrollConfigurationTask?.cancel()
+        pendingScrollConfigurationTask = Task { @MainActor [weak self] in
+            for _ in 0..<12 {
+                guard let self,
+                      !Task.isCancelled,
+                      self.desiredShouldScroll == shouldScroll
+                else {
+                    return
+                }
+                if self.applyScrollConfigurationIfPossible(shouldScroll) {
+                    self.pendingScrollConfigurationTask = nil
+                    return
+                }
+                try? await Task.sleep(nanoseconds: 16_000_000)
+            }
+            self?.pendingScrollConfigurationTask = nil
+        }
+    }
+
+    private func applyScrollConfigurationIfPossible(_ shouldScroll: Bool) -> Bool {
+        guard lastShouldScroll != shouldScroll,
+              let scrollView = scrollViewResolver(webView)
+        else {
+            return lastShouldScroll == shouldScroll
+        }
+        lastShouldScroll = shouldScroll
+        scrollConfigurationCount += 1
         scrollView.hasVerticalScroller = shouldScroll
         scrollView.autohidesScrollers = true
         scrollView.scrollerStyle = .overlay
@@ -502,6 +687,7 @@ final class MarkdownPreviewWebViewController: NSObject, ObservableObject, WKNavi
             await Task.yield()
             scrollbarAutoHider?.applyHiddenState()
         }
+        return true
     }
 
     func loadHTMLIfNeeded(_ html: String) {
@@ -509,6 +695,9 @@ final class MarkdownPreviewWebViewController: NSObject, ObservableObject, WKNavi
 
         if lastHTML == html {
             if !lastLoadFinished {
+                // Repeated SwiftUI updates while the same navigation is in flight must not restart it.
+                // A restart is only needed after an owner detached and stopped that navigation.
+                if currentNavigation != nil { return }
                 pendingContentRefreshTask?.cancel()
                 pendingContentRefreshTask = nil
                 lastKnownMetrics = nil
@@ -559,13 +748,11 @@ final class MarkdownPreviewWebViewController: NSObject, ObservableObject, WKNavi
         decidePolicyFor navigationAction: WKNavigationAction,
         decisionHandler: @escaping @MainActor (WKNavigationActionPolicy) -> Void
     ) {
-        let shouldAllow = MarkdownPreviewNavigationPolicy.shouldAllow(
-            navigationType: navigationAction.navigationType,
-            targetFrameIsNil: navigationAction.targetFrame == nil,
-            url: navigationAction.request.url,
-            currentURL: webView.url
+        MarkdownPreviewNavigationPolicy.handle(
+            navigationAction,
+            in: webView,
+            decisionHandler: decisionHandler
         )
-        decisionHandler(shouldAllow ? .allow : .cancel)
     }
 
     func webView(
@@ -610,6 +797,7 @@ final class MarkdownPreviewWebViewController: NSObject, ObservableObject, WKNavi
     private func beginLoad(html: String, baseURL: URL?) {
         currentRenderID = UUID().uuidString
         lastLoadFinished = false
+        navigationStartCount += 1
         let document = MarkdownPreviewRenderIdentity.injecting(currentRenderID, into: html)
         currentNavigation = webView.loadHTMLString(document, baseURL: baseURL)
     }
@@ -654,14 +842,31 @@ struct ReusableMarkdownPreviewWebView: NSViewRepresentable {
     let onContentSizeChange: @MainActor (MarkdownContentMetrics) -> Void
 
     @MainActor
+    final class Coordinator {
+        let ownerID = UUID()
+        weak var controller: MarkdownPreviewWebViewController?
+
+        init(controller: MarkdownPreviewWebViewController) {
+            self.controller = controller
+        }
+    }
+
+    @MainActor
+    func makeCoordinator() -> Coordinator {
+        Coordinator(controller: controller)
+    }
+
+    @MainActor
     func makeNSView(context: Context) -> WKWebView {
-        controller.attachWebViewIfNeeded()
+        context.coordinator.controller = controller
+        controller.beginOwnership(context.coordinator.ownerID)
         return controller.webView
     }
 
     @MainActor
     func updateNSView(_ webView: WKWebView, context: Context) {
-        controller.attachWebViewIfNeeded()
+        context.coordinator.controller = controller
+        guard controller.owns(context.coordinator.ownerID) else { return }
         controller.onContentSizeChange = onContentSizeChange
         controller.setShouldScroll(shouldScroll)
         controller.loadHTMLIfNeeded(html)
@@ -674,16 +879,10 @@ struct ReusableMarkdownPreviewWebView: NSViewRepresentable {
     }
 
     @MainActor
-    static func dismantleNSView(_ nsView: WKWebView, coordinator: ()) {
-        // Ensure the controller does not keep WebKit delegates/handlers alive when the view is removed.
-        if let controller = (nsView.navigationDelegate as? MarkdownPreviewWebViewController) {
-            controller.detachWebView()
-        } else {
-            nsView.stopLoading()
-            nsView.navigationDelegate = nil
-            nsView.uiDelegate = nil
-            nsView.configuration.userContentController.removeScriptMessageHandler(forName: MarkdownPreviewWebView.sizeMessageHandlerName)
-        }
+    static func dismantleNSView(_ nsView: WKWebView, coordinator: Coordinator) {
+        // A stale SwiftUI representable may dismantle after the shared WKWebView has already moved
+        // to a newer popover. Only the current ownership lease may stop or detach that WebView.
+        coordinator.controller?.endOwnership(coordinator.ownerID)
     }
 }
 

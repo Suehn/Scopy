@@ -5,8 +5,8 @@
     "expectedProfile": "chatGPTMarkdown",
     "allowLooseMathRepair": false,
     "renderedContains": [
-      "href=\"/Users/alice/project/docs/guide_v2.md:25\"",
-      "href=\"/Users/alice/project/src/backend/adapter/chatgpt_text.js:944\"",
+      "href=\"scopy-file:/Users/alice/project/docs/guide_v2.md:25\"",
+      "href=\"scopy-file:/Users/alice/project/src/backend/adapter/chatgpt_text.js:944\"",
       "<code>main SSE + handoff + websocket + snapshot</code>"
     ],
     "renderedNotContains": [
@@ -34,7 +34,7 @@
     "expectedProfile": "authoredMarkdown",
     "allowLooseMathRepair": false,
     "renderedContains": [
-      "href=\"/Users/alice/papers/file_v2.md:25\"",
+      "href=\"scopy-file:/Users/alice/papers/file_v2.md:25\"",
       "Reference target"
     ],
     "renderedNotContains": [
@@ -89,7 +89,7 @@
     "allowLooseMathRepair": false,
     "renderedContains": [
       "中文路径",
-      "href=\"/Users/alice/%E8%AE%BA%E6%96%87/%E7%AC%AC1%E7%AB%A0_v2.md:25\"",
+      "href=\"scopy-file:/Users/alice/%E8%AE%BA%E6%96%87/%E7%AC%AC1%E7%AB%A0_v2.md:25\"",
       "<strong>重点</strong>"
     ],
     "renderedNotContains": [

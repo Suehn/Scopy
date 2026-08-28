@@ -1,6 +1,6 @@
-version: v0.65.4
+version: v0.70.0
 date: 2026-08-28
-release_doc: doc/releases/history/v0.65.4.md
+release_doc: doc/releases/history/v0.70.0.md
 release_index: doc/releases/README.md
 changelog_file: doc/releases/CHANGELOG.md
 profile_doc: null
@@ -9,14 +9,14 @@ spec_doc: doc/current/product-spec.md
 development_doc: doc/current/development-guide.md
 architecture_doc: doc/current/architecture.md
 last_verified_at: 2026-08-28
-summary: ChatGPT-aligned Markdown preview and PNG export rendering
+summary: Interactive ChatGPT-style rich surfaces and stable Markdown preview lifecycle
 verification:
   docs_validate: pass
   release_validate: pass
   release_policy: pass_15_cases
   build: pass
-  renderer_js: pass_44_executed_0_failures
-  test_unit: pass_756_executed_27_skipped_0_failures
-  test_strict: pass_756_executed_27_skipped_0_failures
-  real_app_png_export: pass_1080x4571_visual_acceptance
-  include_hover_ui: blocked_accessibility_harness_unavailable_not_counted_as_pass
+  renderer_js: pass_77_executed_0_failures
+  test_unit: pass_749_executed_2_skipped_0_failures
+  test_strict: pass_749_executed_2_skipped_0_failures
+  real_app_png_export: pass_user_stress_2160x141619_and_visible_copy_1080x8653
+  include_hover_ui: blocked_automation_mode_timeout_not_counted_as_pass

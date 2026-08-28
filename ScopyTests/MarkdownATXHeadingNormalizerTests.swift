@@ -34,4 +34,10 @@ final class MarkdownATXHeadingNormalizerTests: XCTestCase {
 
         XCTAssertEqual(MarkdownATXHeadingNormalizer.normalize(markdown), markdown)
     }
+
+    func testDoesNotPromoteFlattenedHashColumnIntoGiantHeading() {
+        let flattenedRow = "#" + String(repeating: "实际对象本回答是否真的使用1Markdown heading✅", count: 12)
+
+        XCTAssertEqual(MarkdownATXHeadingNormalizer.normalize(flattenedRow), flattenedRow)
+    }
 }

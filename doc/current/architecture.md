@@ -5,6 +5,7 @@ owner: maintainers
 last_reviewed: 2026-07-11
 canonical: true
 related_versions:
+  - v0.70.0
   - v0.65.0
 ---
 
@@ -39,9 +40,12 @@ This document describes the current system shape and operational invariants. For
 
 - App/UI shell manages the menubar icon, floating panel, settings window, and preview/export flows.
 - History action flows resolve shareable file URLs through backend protocols; UI rows decide visibility from DTO-level capability hints and do not directly read storage internals.
-- Markdown preview/export uses one local CommonMark/GFM-to-HTML pipeline for preview and PNG: stable footnote IDs, HTML-only KaTeX, syntax highlighting, tasks/tables/citations, literal raw HTML, and bounded source-profile repair. Missing assets are an explicit render failure; there is no alternate renderer or silent fallback. The normative semantics, typography, responsive layout, evidence boundary, and verification matrix live in [markdown-chatgpt-wacz-style-contract.md](./markdown-chatgpt-wacz-style-contract.md).
+- Markdown preview/export uses one local CommonMark/GFM-to-HTML pipeline for preview and PNG: stable footnote IDs, HTML-only KaTeX, syntax highlighting, tasks/tables/citations, literal raw HTML, bounded source-profile repair, and strict `scopy-rich` v2 web/image/news/weather/finance/currency envelopes. Missing assets and invalid rich envelopes fail visibly; there is no alternate renderer, silent fallback, or prose-to-card inference. The normative semantics, typography, responsive layout, evidence boundary, and verification matrix live in [markdown-chatgpt-wacz-style-contract.md](./markdown-chatgpt-wacz-style-contract.md).
 - Markdown preview assets and bundled tools are staged by build scripts rather than copied ad hoc at runtime.
+- Rich cards may resolve only assets from the bundled closed allowlist. Preview hydrates deterministic controls from frozen envelope data; export freezes the same DOM before PDF or snapshot capture. No renderer path fetches remote images, live weather, market data, exchange rates, or hidden citation targets.
+- Navigation is split by destination class. Fragment links stay inside the WebView; validated HTTP(S) and strict Codex absolute-file links cross the native boundary only after explicit user activation; every other scheme/path form is cancelled.
 - Each Markdown WebView navigation has a render ID. Only current main-frame readiness/metrics may update preview state, and metric equality includes overflow plus success/error state as well as geometry.
+- The shared preview controller also carries an owner lease. Only the current SwiftUI representable may attach, navigate, configure scrolling, or detach it; identical in-flight HTML is a no-op, and scroll setup retries until WebKit's internal `NSScrollView` exists. Hidden premeasurement must not share the controller.
 - Preview and export flows must treat stored content as source-of-truth input, not a side channel that mutates persisted data.
 
 ## Operational Invariants

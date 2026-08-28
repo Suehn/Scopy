@@ -17,6 +17,18 @@ final class ChatGPTMarkdownRendererTests: XCTestCase {
         XCTAssertFalse(html.contains("katex.min.js"))
     }
 
+    func testRendererWaitsForImagesToReachATerminalState() {
+        let html = MarkdownHTMLRenderer.render(markdown: "![diagram](data:image/png;base64,broken)")
+
+        XCTAssertTrue(html.contains("function settleRenderedImages(root, completion)"))
+        XCTAssertTrue(html.contains("image.decode().then("))
+        XCTAssertTrue(html.contains("data-scopy-image-state"))
+        XCTAssertTrue(html.contains("scopy-image-terminal-fallback"))
+        XCTAssertTrue(html.contains("img:not([data-scopy-deferred-image])"))
+        XCTAssertTrue(html.contains("settleRenderedImages(el, function () { finish(true); });"))
+        XCTAssertFalse(html.contains("content-visibility: auto"))
+    }
+
     func testRendererNormalizesATXHeadingsWithoutTouchingCode() {
         let markdown = """
         #一级标题 `# H1`
@@ -86,6 +98,62 @@ final class ChatGPTMarkdownRendererTests: XCTestCase {
         XCTAssertTrue(html.contains("white-space: nowrap;"))
         XCTAssertTrue(html.contains("overflow-wrap: anywhere;"))
         XCTAssertFalse(html.contains("overflow-wrap: break-word;"))
+    }
+
+    func testRichSurfacesUseOneOfflineResponsiveStyleContract() {
+        let html = MarkdownHTMLRenderer.render(markdown: "```scopy-rich\n{\"version\":2,\"type\":\"currency\",\"state\":\"ready\",\"from\":{\"code\":\"USD\"},\"to\":{\"code\":\"CNY\"},\"amount\":100,\"rate\":6.7199,\"fractionDigits\":2}\n```")
+
+        XCTAssertTrue(html.contains(".scopy-rich {"))
+        XCTAssertTrue(html.contains("#content > .scopy-rich"))
+        XCTAssertTrue(html.contains("width: min(var(--scopy-chatgpt-thread-content-max-width)"))
+        XCTAssertTrue(html.contains("container-type: inline-size;"))
+        XCTAssertTrue(html.contains("border-radius: var(--scopy-rich-card-radius);"))
+        XCTAssertTrue(html.contains(".scopy-rich-news-card"))
+        XCTAssertTrue(html.contains("--scopy-rich-news-card-ideal-width: 15.33rem;"))
+        XCTAssertTrue(html.contains("flex: 0 0 min(var(--scopy-rich-news-card-ideal-width), calc(100% - 24px));"))
+        XCTAssertTrue(html.contains("@container (min-width: 48rem)"))
+        XCTAssertTrue(html.contains("flex-basis: calc((100% - (var(--scopy-rich-column-gap) * 2)) / 3);"))
+        XCTAssertFalse(html.contains("min-height: 293px;"))
+        XCTAssertTrue(html.contains(".scopy-rich-image-layout-search"))
+        XCTAssertTrue(html.contains(".scopy-rich-image-layout-carousel"))
+        XCTAssertTrue(html.contains("@container (min-width: 24.5rem)"))
+        XCTAssertTrue(html.contains("flex-basis: calc((100% - (var(--scopy-rich-image-gap) * 2)) / 3);"))
+        XCTAssertTrue(html.contains(".scopy-rich-weather-card"))
+        XCTAssertTrue(html.contains(".scopy-rich-weather-days"))
+        XCTAssertTrue(html.contains("flex: 1 0 90px;"))
+        XCTAssertTrue(html.contains(".scopy-rich-weather-chart-title .scopy-icon"))
+        XCTAssertTrue(html.contains(".scopy-rich-finance-ranges"))
+        XCTAssertTrue(html.contains("grid-auto-columns: minmax(var(--scopy-rich-range-min-width), 1fr);"))
+        XCTAssertTrue(html.contains("--scopy-rich-range-min-width: 4.5rem;"))
+        XCTAssertTrue(html.contains(".scopy-rich-finance-chart svg"))
+        XCTAssertTrue(html.contains("height: clamp(200px, 31.25cqi, 240px);"))
+        XCTAssertTrue(html.contains("grid-template-columns: repeat(auto-fit, minmax(min(12rem, 100%), 1fr));"))
+        XCTAssertTrue(html.contains(".scopy-rich-currency-card"))
+        XCTAssertTrue(html.contains("min-height: 199px;"))
+        XCTAssertTrue(html.contains("window.ScopyUnifiedMarkdown.hydrateRich"))
+        XCTAssertTrue(html.contains("{ exportMode: exportMode }"))
+        XCTAssertTrue(html.contains("html.scopy-export-mode .scopy-rich-lightbox"))
+        XCTAssertTrue(html.contains("unicode-bidi: isolate;"))
+        XCTAssertTrue(html.contains("overflow-x: auto;"))
+        XCTAssertFalse(html.contains("content-visibility: auto"))
+        XCTAssertFalse(html.contains(".scopy-rich-weather-daily"))
+        XCTAssertFalse(html.contains(".scopy-rich-currency-pair"))
+    }
+
+    func testCitationCountAndSupportingSourcesAreRealAccessibleDOM() {
+        let html = MarkdownHTMLRenderer.render(markdown: "([Primary][p], [Secondary][s])\n\n[p]: https://primary.example/a\n[s]: https://secondary.example/b")
+
+        XCTAssertTrue(html.contains(".scopy-source-citation-count"))
+        XCTAssertTrue(html.contains(".scopy-source-citation-supporting"))
+        XCTAssertTrue(html.contains("left: var(--scopy-source-popup-left, 0px);"))
+        XCTAssertTrue(html.contains("--scopy-source-popup-max-width"))
+        XCTAssertTrue(html.contains("inset-block-start: calc(100% - 1px);"))
+        XCTAssertTrue(html.contains(":focus-within"))
+        XCTAssertTrue(html.contains("inset-block-start: calc(100% - 1px);"))
+        XCTAssertTrue(html.contains("width: min(320px, var(--scopy-source-popup-max-width, calc(100vw - 24px)));"))
+        XCTAssertFalse(html.contains("content: attr(data-scopy-source-count)"))
+        XCTAssertFalse(html.contains("function normalizeSourceCitations"))
+        XCTAssertFalse(html.contains("extractScopySourceCitations"))
     }
 
     func testThreadWidthUsesLogicalLayoutViewportThreshold() {
@@ -189,6 +257,25 @@ final class ChatGPTMarkdownRendererTests: XCTestCase {
         XCTAssertTrue(html.contains("padding-inline-start: 24px;"))
         XCTAssertTrue(html.contains("inset-inline-start: 0;"))
         XCTAssertFalse(html.contains("padding-left: 26px;"))
+    }
+
+    func testPreviewLinksAreInteractiveButExportsRemainInert() {
+        let html = MarkdownHTMLRenderer.render(markdown: "[OpenAI](https://openai.com)")
+
+        XCTAssertTrue(html.contains("a.scopy-link--external,"))
+        XCTAssertTrue(html.contains("a.scopy-link--file-resolvable,"))
+        XCTAssertTrue(html.contains("pointer-events: auto;"))
+        XCTAssertTrue(html.contains("--scopy-link-color: rgb(46, 131, 210);"))
+        XCTAssertTrue(html.contains("a.scopy-link:focus-visible"))
+        XCTAssertTrue(html.contains(".scopy-icon--external-link"))
+        XCTAssertTrue(html.contains(".scopy-file-icon"))
+        XCTAssertTrue(html.contains("a[data-footnote-backref]"))
+        XCTAssertTrue(html.contains("html.scopy-export-mode a"))
+        XCTAssertTrue(html.contains("pointer-events: none;"))
+        XCTAssertFalse(html.contains("content: \"↗\""))
+        XCTAssertFalse(html.contains("a.scopy-external-link"))
+        XCTAssertTrue(html.contains("base-uri 'none'"))
+        XCTAssertTrue(html.contains("connect-src 'none'"))
     }
 
     func testMetricsDedupeIncludesRenderOutcomeAndGeneration() {

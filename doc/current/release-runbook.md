@@ -5,6 +5,7 @@ owner: maintainers
 last_reviewed: 2026-08-28
 canonical: true
 related_versions:
+  - v0.70.0
   - v0.65.4
   - v0.65.0
   - v0.8.8
@@ -156,13 +157,25 @@ This section records the final `v0.65.3` release evidence for restart-surviving 
 
 ## ChatGPT-Aligned Markdown Renderer Release Evidence (2026-08-28)
 
-This section records the `v0.65.4` release evidence for the single preview/PNG renderer aligned to the completed-response contract captured in `my-archiving-session.wacz`.
+This section records the `v0.65.4` release evidence for the single preview/PNG renderer aligned to the canonical contract derived from captured runtime code paths plus explicitly labeled Scopy stability adaptations. `my-archiving-session.wacz` did not contain a hydrated completed-answer DOM or computed-style snapshot.
 
 - Renderer boundary: preview and PNG export both consume the output of `MarkdownHTMLRenderer -> MarkdownHTMLDocumentBuilder`; the legacy selector, shadow renderer, feature flags, fallback parser, duplicate normalizers, and obsolete assets are removed.
-- Semantic/visual coverage: local CommonMark/GFM, stable footnotes, HTML-only KaTeX, syntax highlighting, tasks, citations, table sizing/overflow, literal raw HTML, CJK, RTL, Unicode, malformed ATX headings, protected URLs/file paths, and long-document export.
+- Semantic/source-path coverage: local CommonMark/GFM, stable footnotes, HTML-only KaTeX, syntax highlighting, tasks, citations, table sizing/overflow, literal raw HTML, CJK, RTL, Unicode, malformed ATX headings, protected URLs/file paths, and long-document export. Visual claims are limited to the real-application PNG evidence below.
 - Automated evidence: the JavaScript renderer suite passed 44/44; normal and strict Swift executions each completed 756 tests with 27 skips and zero failures; app build, docs validation, release validation, and the 15-case workflow policy passed.
 - End-to-end evidence: the real application exported the long fixture to a visually accepted 1080 x 4571 PNG with the tail present. The optional include-hover XCUITest path could not establish the host accessibility harness and is recorded as environment-blocked, not passed.
 - No performance improvement is claimed and no dedicated profile was created; release metadata intentionally sets `profile_doc: null`.
+
+## Interactive Rich Rendering And Preview Stability Release Evidence (v0.70.0, 2026-08-28)
+
+- Product boundary: strict `scopy-rich` v2 supports web results, image groups, news, weather, finance, and currency with frozen input and a bundled asset allowlist. Promotions, merchant cards, and maps remain out of scope. Invalid or unsupported envelopes stay visible code fences, and copied prose never manufactures private metadata.
+- One-chain guarantee: preview and export use the same parse result, HTML, base CSS, runtime, fonts, and local assets. Preview hydrates deterministic controls; export freezes the same DOM and cancels links/actions before capture.
+- Link boundary: explicit preview clicks may open only validated HTTP(S) or strict Codex absolute-file destinations. Source pills retain only supplied URLs and expose supporting sources in a focusable popup. Export and programmatic navigation remain inert.
+- Lifecycle repair: hidden premeasurement no longer competes for the shared `WKWebView`; an owner lease prevents stale teardown, identical in-flight HTML is not reloaded, bridge/scroll setup is idempotent, and scroll configuration retries when the internal WebKit scroll view appears late.
+- Real fixtures: `user_markdown_stress.md` is the complete 47,419-byte, 2,728-line user stress input; `chatgpt_rich_copy_sample.md` is the user's lossy visible-text copy and must remain ordinary Markdown; `chatgpt_rich_surfaces.md` is the separate deterministic structured fixture.
+- Automated evidence: Node renderer and runtime tests passed 77/77; normal and strict Swift executions each passed 749 tests with 2 skips and zero failures; app build, docs validation, release validation, and the 15-case release policy passed.
+- End-to-end evidence: the real app exported the user stress fixture at 2160 x 141619 and the copied-text fixture at 1080 x 8653. Top, middle, and tail crops were visually inspected with content present and no synthetic cards in the lossy copy.
+- UI automation boundary: the optional hover run timed out while enabling macOS automation mode before the scenario began. It is environment-blocked, not passed. First-load/navigation/scroll ownership is covered by focused lifecycle tests plus real application export.
+- Archive boundary: the WACZ proves captured runtime/resources and limited saved structure, not hydrated final DOM, computed style, dark mode, or computed fonts. No performance improvement is claimed; `profile_doc` remains `null`.
 
 ## Homebrew Acceptance
 

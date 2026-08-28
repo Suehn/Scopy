@@ -5,6 +5,7 @@ owner: maintainers
 last_reviewed: 2026-07-11
 canonical: true
 related_versions:
+  - v0.70.0
   - v0.65.2
   - v0.65.0
 ---
@@ -15,7 +16,7 @@ This document is the canonical implementation guide for the current Scopy codeba
 
 ## Reference State
 
-- Reference release: `v0.65.0`
+- Reference release: `v0.70.0`
 - Version metadata: [../meta/release-current.yml](../meta/release-current.yml)
 - Active requirements: [product-spec.md](./product-spec.md)
 - Release workflow: [release-runbook.md](./release-runbook.md)
@@ -91,7 +92,7 @@ Implication: changes to search semantics belong in the request model, search eng
 4. Markdown/LaTeX preview and PNG export consume one standalone HTML document from `MarkdownHTMLRenderer` and `MarkdownHTMLDocumentBuilder.document`. There is no renderer selector, feature-flag branch, shadow renderer, markdown-it fallback, or second export parse result.
 5. Before the one local unified/remark/rehype renderer runs, bounded syntax-aware normalization handles explicit/backslash LaTeX, missing ATX-heading whitespace, and table-row code-span pipes. Loose OCR/scientific math repair is profile-gated and protects code, links, images, URLs, file paths, and reference definitions. User-authored raw HTML is escaped and displayed literally; it is never restored as executable HTML. Footnote IDs use one `scopy-fn-*` / `scopy-fnref-*` namespace so fragment targets survive sanitization.
 6. `MarkdownExportService` now lives under `Scopy/Services/Export` and produces PNG output back to the pasteboard through `ScopyKit`.
-7. pngquant settings affect both image history optimization and Markdown/LaTeX export compression where enabled.
+7. pngquant settings affect image history optimization and ordinary Markdown/LaTeX export compression where enabled. Validated rich-v2 documents bypass palette reduction so chart gradients, weather icons, and source imagery remain true-color.
 8. The ChatGPT-aligned theme follows the captured completed `markdown prose markdown-new-styling` path: body 16/26, h1 24/32, h2 20/28, h3 18/28, h4 16/24, 4px paragraph rhythm, 16px adjacent-paragraph separation, 26px list inset, and the 24px/8px/4px blockquote geometry. Ordinary content uses `overflow-wrap: anywhere` with `word-break: normal`; code, display math, and tables own local horizontal overflow. Do not mix in the alternate SmoothedMarkdown/legacy code-card scale merely because those assets are archived. The evidence boundary and complete matrix live in `doc/current/markdown-chatgpt-wacz-style-contract.md`.
 9. The theme treats `code` inside headings as real inline code. Keep the ChatGPT gray pill, relative `em` sizing, inherited heading line height, and normal wrapping; do not replace heading code with a transparent inherited-text override.
 10. Markdown preview must reflow at the active ChatGPT layout profile rather than reuse a fixed layout. The output surface stays 816px with 24px side padding; thread content is 40rem/640px by default and conditionally 48rem/768px at a logical layout viewport of at least 856px. The document builder selects that width from `816 / scale`; do not use a CSS media query against the physical WKWebView because preview and export surfaces are both narrower than 856px. Supported layout scale values are clamped to 80%...200%; each profile lays out in the logical viewport and then maps that layout to the fixed surface. Preview fit scale is display-only, while the profile is part of the render context/cache key. Never enlarge the canvas, multiply fonts after layout, or reuse another scale's line breaks. The Swift hover frame remains independent from Markdown content width. Table-local overflow must not widen the popover; code/KaTeX/footnote overflow may be reported without mutating the outer frame.
@@ -99,8 +100,11 @@ Implication: changes to search semantics belong in the request model, search eng
 11. Task lists follow the AssistantMessage source contract: the list container has no bullet markers and each task row is a baseline-aligned flex row with an 8px gap. Markdown-generated checkbox inputs are hidden after their checked state is read, and raw `[x]` text markers feed the same path. Scopy renders one CSS-painted visual marker instead of relying on WebKit's native checkbox tint so preview and PNG export share the same checked/unchecked colors.
 12. Markdown tables use 14/24 text and one captured pipe-table model. Header padding is 8px, body padding is 10px, non-last cells keep 24px end padding, and the last row keeps 24px bottom padding. The inner wrapper stays `width: fit-content`, uses the current thread width as its minimum, and is centered inside the full-width local scroll container. Column sizes are `sm/md/lg/xl` at `<=40`, `41...100`, `101...160`, and `>160`, with no Markdown `xs` bucket. Width fractions are based on thread max width; there is no special two-column or "wide table" renderer.
 13. Table parsing must not be repaired from CSS. Normalize only table-row one- or two-backtick code spans by escaping their internal unescaped `|` before GFM parsing. Leave three-or-more-backtick fence markers such as ```` ```python ```` as literal cell text so real table delimiters still split columns.
-14. Source citations are a separate visual path from ordinary Markdown links. Promote only explicit parenthesized source-reference links such as `([AP News][1])` when the referenced definition resolves to HTTP(S) and the label looks like a source name; collapse grouped source references such as `([AP News][1], [Reuters][2])` to the first source plus `+1`; keep normal parenthesized links like `([guide][1])` on the ordinary dotted-underlined link path.
-15. Every WebView load has a unique render ID. Accept readiness/metric messages only from the current main-frame navigation and matching ID. Metric deduplication includes size, overflow, success/failure, error reason, and render ID; a late old load or same-size error must not update or disappear into the current preview.
+14. Source citations are a separate visual path from ordinary Markdown links. Promote only explicit parenthesized source-reference links such as `([AP News][1])` when the referenced definition resolves to HTTP(S) and the label looks like a source name; collapse grouped source references such as `([AP News][1], [Reuters][2])` to the first source plus `+1` while keeping real supporting URLs in the preview popup. A normal parenthesized link like `([guide][1])` remains an ordinary link. Only validated absolute HTTP(S) ordinary links receive the blue external-link treatment and local arrow; preview opens them with the native workspace handler, export is inert, and relative/`plugin:` destinations receive no external affordance.
+15. Codex file links use an absolute Markdown destination plus optional one-based `:line[:column]`. Keep this classification separate from external links and citations. The native preview boundary accepts only explicit link activation and rejects raw `file:`, remote or empty hosts, relative/double-slash paths, query/fragment/credentials/control characters, and programmatic navigation.
+16. Strict `scopy-rich` v2 envelopes are the only card entrypoint. Validate the version, surface type, size, identity, local asset name, required state, and numeric bounds before promotion; invalid input remains a code fence. Rich preview controls operate only on frozen pre-rendered state. Export freezes the same DOM and must not refetch, reconstruct, or infer missing data.
+17. Every WebView load has a unique render ID. Accept readiness/metric messages only from the current main-frame navigation and matching ID. Metric deduplication includes size, overflow, success/failure, error reason, and render ID; a late old load or same-size error must not update or disappear into the current preview.
+18. `MarkdownPreviewWebViewController` is a single-owner reusable bridge. A representable must acquire an owner lease before attachment and may detach only while it still owns the controller. Never restore the hidden premeasurement view. Repeated updates with identical in-flight HTML must not restart navigation or reinstall the message bridge, and scroll configuration must retry when WebKit's internal scroll view appears late.
 
 Search marker: `SCOPY_EXPORT_PDF_GLOBAL_SCALE_MISMATCH`
 
@@ -183,11 +187,11 @@ Implication: if you touch settings behavior, preserve the Save/Cancel model and 
 - Paste-optimized for Codex copies the optimized payload, closes the panel, and posts `Control+V`
 - File note editing for file items
 - Image optimization for stored image items
-- Hover preview for text, image, and file content
+- Hover preview for text, image, file, Markdown, and supported interactive rich content
 
 ### Export And Media
 
-- Markdown/LaTeX render and PNG export with one local CommonMark/GFM pipeline, stable footnote IDs, HTML-only KaTeX, syntax highlighting, and literal raw HTML
+- Markdown/LaTeX render and PNG export with one local CommonMark/GFM pipeline, stable footnote IDs, HTML-only KaTeX, syntax highlighting, literal raw HTML, strict rich-v2 cards, grouped source citations, and validated HTTP/Codex file links
 - Optional pngquant compression for exported PNG
 - Optional automatic compression for newly ingested image history
 - Thumbnail display and configurable thumbnail sizing
@@ -298,7 +302,7 @@ Implication: if you touch settings behavior, preserve the Save/Cancel model and 
 
 - `project.yml` is the baseline source for Swift/Xcode/deployment targets.
 - Active docs live under `doc/current`, `doc/releases`, and `doc/meta`.
-- Legacy directories under `doc/implementation`, `doc/profiles`, and `doc/specs` are compatibility entrypoints only.
+- Historical directories under `doc/implementation`, `doc/profiles`, and `doc/specs` are non-normative evidence only, not compatibility entrypoints. Remove obsolete active links and paths instead of adding redirects, aliases, or compatibility stubs.
 - Heavy work should stay off the main thread; correctness beats opportunistic speedups.
 - Views should not directly become persistence clients.
 - Release publication consumes a deliberate existing tag; ordinary CI must never create or push one.

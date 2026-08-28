@@ -16,7 +16,8 @@ test("renders GFM links, tables, task lists, and explicit math", () => {
 
   assert.match(result.html, /<h1>Title<\/h1>/);
   assert.match(result.html, /class="contains-task-list"/);
-  assert.match(result.html, /href="\/Users\/alice\/project\/file.md:25"/);
+  assert.match(result.html, /href="scopy-file:\/Users\/alice\/project\/file.md:25"/);
+  assert.match(result.html, /data-scopy-file-kind="document"/);
   assert.match(result.html, /<table>/);
   assert.match(result.html, /katex/);
 });
@@ -64,7 +65,68 @@ test("preserves supported custom plugin links without widening file URL links", 
   const fileURL = render("[file](file:///Users/ziyi/a.md)");
 
   assert.match(plugin.html, /href="plugin:\/\/computer-use@openai-bundled"/);
+  assert.doesNotMatch(plugin.html, /scopy-link--external|scopy-icon--external-link/);
   assert.doesNotMatch(fileURL.html, /href="file:\/\/\/Users\/ziyi\/a.md"/);
+});
+
+test("sanitizes network link protocols to http, https, and explicit plugin only", () => {
+  const result = render("[web](https://example.com) [mail](mailto:test@example.com) [script](javascript:alert(1)) [plugin](plugin:asset)");
+
+  assert.match(result.html, /href="https:\/\/example\.com"/);
+  assert.match(result.html, /href="https:\/\/example\.com" class="scopy-link scopy-link--external"/);
+  assert.match(result.html, /<svg class="scopy-icon scopy-icon--external-link"[^>]*><path d="[^"]+" fill="currentColor"><\/path><\/svg>/);
+  assert.match(result.html, /href="plugin:asset"/);
+  assert.doesNotMatch(result.html, /href="plugin:asset"[^>]*scopy-link--external/);
+  assert.doesNotMatch(result.html, /href="mailto:/);
+  assert.doesNotMatch(result.html, /href="javascript:/);
+});
+
+test("placeholder URL prose is not promoted to an external link", () => {
+  const result = render("目标不是 https://...，而是这次会话沙箱里生成的附件。");
+
+  assert.doesNotMatch(result.html, /scopy-link--external|scopy-icon--external-link/);
+  assert.match(result.html, /class="scopy-link scopy-link--inert"/);
+  assert.match(result.html, />https:\/\/\.\.\.，而是这次会话沙箱里生成的附件。<\/a>/);
+});
+
+test("Codex links add real SVG affordance, resolve absolute and tilde files, and keep relative files inert", () => {
+  const result = render([
+    "[web](https://example.com/path)",
+    "[relative](docs/guide.md)",
+    "[dot-relative](./docs/guide.md)",
+    "[fragment](#section)",
+    "[local](/Users/alice/file.md:4)",
+    "[tilde](~/Documents/tool.swift:3:9)",
+    "[plugin](plugin:asset)",
+    "[credentials](https://user:password@example.com/private)",
+    "[encoded-control](https://example.com/line%0Abreak)",
+    `[utf8-oversized](https://example.com/${"界".repeat(2_725)})`
+  ].join(" "));
+
+  assert.match(result.html, /href="https:\/\/example\.com\/path" class="scopy-link scopy-link--external"/);
+  assert.match(result.html, /class="scopy-icon scopy-icon--external-link"[^>]+aria-hidden="true"/);
+  assert.doesNotMatch(result.html, /↗|&#x2197;|&#8599;/);
+  assert.match(result.html, /<a class="scopy-link scopy-link--file scopy-link--file-inert" data-scopy-file-kind="document" aria-disabled="true">[^<]*<svg[^>]*scopy-icon--file-text[^>]*>/);
+  assert.doesNotMatch(result.html, /href="(?:\.\/)?docs\/guide\.md"/);
+  assert.match(result.html, /href="#section" class="scopy-link scopy-link--internal"/);
+  assert.match(result.html, /href="scopy-file:\/Users\/alice\/file\.md:4" class="scopy-link scopy-link--file scopy-link--file-resolvable" data-scopy-file-kind="document"/);
+  assert.match(result.html, /href="scopy-file:\/~\/Documents\/tool\.swift:3:9" class="scopy-link scopy-link--file scopy-link--file-resolvable" data-scopy-file-kind="code"/);
+  assert.match(result.html, /href="plugin:asset" class="scopy-link scopy-link--plugin"/);
+  assert.match(result.html, /href="https:\/\/user:password@example\.com\/private" class="scopy-link scopy-link--inert"/);
+  assert.match(result.html, /href="https:\/\/example\.com\/line%0Abreak" class="scopy-link scopy-link--inert"/);
+  assert.equal((result.html.match(/scopy-icon--external-link/g) || []).length, 1);
+});
+
+test("raw scopy-file, file, and javascript schemes cannot inject navigable links", () => {
+  const result = render([
+    "[raw-scopy](scopy-file:/etc/passwd)",
+    "[raw-file](file:///etc/passwd)",
+    "[raw-javascript](javascript:alert(1))"
+  ].join(" "));
+
+  assert.doesNotMatch(result.html, /href="(?:scopy-file|file|javascript):/i);
+  assert.equal((result.html.match(/class="scopy-link scopy-link--inert"/g) || []).length, 3);
+  assert.doesNotMatch(result.html, /scopy-link--file|scopy-file-icon|scopy-icon--external-link/);
 });
 
 test("renders fenced code blocks with highlight.js compatible token classes", () => {
@@ -115,16 +177,27 @@ test("promotes parenthesized reference-style source links to citation pills", ()
 [2]: https://www.reuters.com/markets/example?utm_source=chatgpt.com "Reuters source"
 `);
 
-  assert.match(result.html, /<a href="https:\/\/apnews\.com\/article\/d6cf2b964940f47a83f0a6f587c7e0c3\?utm_source=chatgpt\.com" title="Hegseth reassures Pacific allies" class="scopy-source-citation-link" data-scopy-source-citation="true">AP News<\/a>/);
-  assert.match(result.html, /class="scopy-source-citation-link" data-scopy-source-citation="true">Reuters<\/a>/);
+  assert.match(result.html, /<a href="https:\/\/apnews\.com\/article\/d6cf2b964940f47a83f0a6f587c7e0c3\?utm_source=chatgpt\.com" title="Hegseth reassures Pacific allies" class="scopy-source-citation-link" data-scopy-source-citation="true" aria-label="AP News">/);
+  assert.match(result.html, /class="scopy-source-citation-label">AP News<\/span>/);
+  assert.match(result.html, /class="scopy-source-citation-label">Reuters<\/span>/);
+  assert.match(result.html, /class="scopy-icon scopy-icon--globe scopy-source-citation-origin-icon"/);
+  assert.doesNotMatch(result.html, /scopy-link--external|scopy-icon--external-link|scopy-link__label/);
   assert.doesNotMatch(result.html, /\(<a href="https:\/\/apnews\.com/);
   assert.doesNotMatch(result.html, /AP News<\/a>\)/);
+});
+
+test("does not promote encoded-control citation destinations", () => {
+  const result = render("Unsafe source.([AP News](https://example.com/line%0Abreak))");
+
+  assert.doesNotMatch(result.html, /scopy-source-citation-link/);
+  assert.doesNotMatch(result.html, /scopy-link--external|scopy-icon--external-link/);
+  assert.match(result.html, />AP News<\/a>/);
 });
 
 test("keeps ordinary parenthesized markdown links as normal links", () => {
   const result = render("Read the docs ([guide][1]) before changing code.\n\n[1]: https://example.com/guide");
 
-  assert.match(result.html, /\(<a href="https:\/\/example\.com\/guide">guide<\/a>\)/);
+  assert.match(result.html, /\(<a href="https:\/\/example\.com\/guide" class="scopy-link scopy-link--external"><span class="scopy-link__label">guide<\/span><svg class="scopy-icon scopy-icon--external-link"/);
   assert.doesNotMatch(result.html, /scopy-source-citation-link/);
 });
 
@@ -137,9 +210,26 @@ test("collapses multi-source citation groups to first source plus count", () => 
 [2]: https://www.reuters.com/markets/example?utm_source=chatgpt.com
 `);
 
-  assert.match(result.html, /class="scopy-source-citation-link" data-scopy-source-citation="true" data-scopy-source-count="\+1">AP News<\/a>/);
-  assert.doesNotMatch(result.html, /Reuters<\/a>/);
+  assert.match(result.html, /class="scopy-source-citation-count" aria-label="1 additional source">\+1<\/span>/);
+  assert.match(result.html, /class="scopy-source-citation-supporting" role="list" aria-label="Supporting sources"/);
+  assert.match(result.html, /class="scopy-source-citation-supporting-link" aria-label="Supporting source: Reuters"/);
+  assert.match(result.html, />Reuters<\/a>/);
   assert.doesNotMatch(result.html, /AP News \+1<\/a>/);
+  assert.doesNotMatch(result.html, /data-scopy-source-count/);
+});
+
+test("renders the captured domain-style source label as a compact plus-count pill", () => {
+  const result = render(`
+QQQ quote.([investing.com][1], [Google Finance][2])
+
+[1]: https://www.investing.com/etfs/powershares-qqqq
+[2]: https://www.google.com/finance/quote/QQQ:NASDAQ
+`);
+
+  assert.match(result.html, /class="scopy-source-citation-label">investing\.com<\/span>/);
+  assert.match(result.html, /class="scopy-source-citation-count" aria-label="1 additional source">\+1<\/span>/);
+  assert.match(result.html, /class="scopy-source-citation-supporting-link" aria-label="Supporting source: Google Finance"/);
+  assert.doesNotMatch(result.html, />Google Finance<\/a>\)/);
 });
 
 test("renders every raw HTML tag as visible literal text", () => {
@@ -205,8 +295,8 @@ test("does not rewrite backslash math inside code or links", () => {
 
   assert.equal(result.metadata.mathCount, 1);
   assert.match(result.html, /<code>\\\(code\\\)<\/code>/);
-  assert.match(result.html, /href="\/tmp\/\(path\).md"/);
-  assert.match(result.html, />\(label\)<\/a>/);
+  assert.match(result.html, /href="scopy-file:\/tmp\/\(path\).md"/);
+  assert.match(result.html, /<span class="scopy-link__label">\(label\)<\/span><\/a>/);
   assert.match(result.html, /katex/);
 });
 
@@ -237,7 +327,7 @@ test("loose repair skips parsed markdown syntax islands", () => {
   );
 
   assert.equal(result.metadata.repairedMathCount, 1);
-  assert.match(result.html, /href="\/tmp\/file_1.md"/);
+  assert.match(result.html, /href="scopy-file:\/tmp\/file_1.md"/);
   assert.match(result.html, /<code>\\mathcal\{C\}<\/code>/);
   assert.match(result.html, /\\mathcal\{T\}/);
   assert.match(result.html, /katex/);

@@ -37,6 +37,7 @@ final class ExportMarkdownPNGUITests: XCTestCase {
         app.launchEnvironment["SCOPY_EXPORT_PASTEBOARD_NAME"] = "ScopyUITests.ChatGPTRendering.\(UUID().uuidString)"
         app.launchEnvironment["SCOPY_UITEST_AUTO_EXPORT_MARKDOWN"] = "1"
         app.launchEnvironment["SCOPY_UITEST_AUTO_EXPORT_MARKDOWN_PATH"] = fixture
+        app.launchEnvironment["SCOPY_UITEST_MARKDOWN_EXPORT_RESOLUTION"] = "100"
         app.launchEnvironment["SCOPY_EXPORT_DUMP_PATH"] = dumpPath
         app.launchEnvironment["SCOPY_EXPORT_ERROR_DUMP_PATH"] = errorPath
         app.launch()
@@ -51,6 +52,56 @@ final class ExportMarkdownPNGUITests: XCTestCase {
         XCTAssertGreaterThan(nonWhiteContentHeight(props.cgImage), 1_100)
         XCTAssertLessThan(topWhitespaceRows(props.cgImage), 72)
         XCTAssertLessThan(bottomWhitespaceRows(props.cgImage), 120)
+    }
+
+    func testAutoExportChatGPTRichSurfacesFixtureProducesSubstantialOfflinePNG() throws {
+        let fixture = fixturePath(relative: "Fixtures/chatgpt_rich_surfaces.md")
+        let dumpPath = "/tmp/scopy_uitest_export_chatgpt_rich_surfaces.png"
+        let errorPath = "/tmp/scopy_uitest_export_chatgpt_rich_surfaces_error.txt"
+
+        try? FileManager.default.removeItem(atPath: dumpPath)
+        try? FileManager.default.removeItem(atPath: errorPath)
+
+        let app = XCUIApplication()
+        app.launchArguments = ["--uitesting"]
+        app.launchEnvironment["SCOPY_EXPORT_PASTEBOARD_NAME"] = "ScopyUITests.ChatGPTRichSurfaces.\(UUID().uuidString)"
+        app.launchEnvironment["SCOPY_UITEST_AUTO_EXPORT_MARKDOWN"] = "1"
+        app.launchEnvironment["SCOPY_UITEST_AUTO_EXPORT_MARKDOWN_PATH"] = fixture
+        app.launchEnvironment["SCOPY_UITEST_MARKDOWN_EXPORT_RESOLUTION"] = "100"
+        app.launchEnvironment["SCOPY_EXPORT_DUMP_PATH"] = dumpPath
+        app.launchEnvironment["SCOPY_EXPORT_ERROR_DUMP_PATH"] = errorPath
+        app.launch()
+        defer { app.terminate() }
+
+        waitForExport(dumpPath: dumpPath, errorPath: errorPath, timeoutSeconds: 30)
+        try assertNoExportError(errorPath: errorPath)
+
+        let props = try readPNGProperties(atPath: dumpPath)
+        XCTAssertEqual(props.width, 1080)
+        XCTAssertGreaterThan(props.height, 1_500)
+        XCTAssertGreaterThan(nonWhiteContentHeight(props.cgImage), 1_200)
+        XCTAssertLessThan(topWhitespaceRows(props.cgImage), 72)
+        XCTAssertLessThan(bottomWhitespaceRows(props.cgImage), 120)
+    }
+
+    func testAutoExportUserMarkdownStressFixtureCompletesWithoutBlankOrTruncation() throws {
+        try assertUserFixtureExport(
+            fixtureName: "user_markdown_stress.md",
+            dumpStem: "user_markdown_stress",
+            timeoutSeconds: 90,
+            minimumHeight: 8_000,
+            minimumContentHeight: 6_000
+        )
+    }
+
+    func testAutoExportCopiedChatGPTRichProseFixtureCompletesAsOrdinaryMarkdown() throws {
+        try assertUserFixtureExport(
+            fixtureName: "chatgpt_rich_copy_sample.md",
+            dumpStem: "chatgpt_rich_copy_sample",
+            timeoutSeconds: 45,
+            minimumHeight: 1_200,
+            minimumContentHeight: 900
+        )
     }
 
     func testAutoExportMarkdownProducesSinglePNGWidth1080() throws {
@@ -1532,6 +1583,42 @@ final class ExportMarkdownPNGUITests: XCTestCase {
     }
 
     // MARK: - Helpers
+
+    private func assertUserFixtureExport(
+        fixtureName: String,
+        dumpStem: String,
+        timeoutSeconds: TimeInterval,
+        minimumHeight: Int,
+        minimumContentHeight: Int
+    ) throws {
+        let fixture = fixturePath(relative: "Fixtures/\(fixtureName)")
+        let dumpPath = "/tmp/scopy_uitest_export_\(dumpStem).png"
+        let errorPath = "/tmp/scopy_uitest_export_\(dumpStem)_error.txt"
+
+        try? FileManager.default.removeItem(atPath: dumpPath)
+        try? FileManager.default.removeItem(atPath: errorPath)
+
+        let app = XCUIApplication()
+        app.launchArguments = ["--uitesting"]
+        app.launchEnvironment["SCOPY_EXPORT_PASTEBOARD_NAME"] = "ScopyUITests.UserFixture.\(UUID().uuidString)"
+        app.launchEnvironment["SCOPY_UITEST_AUTO_EXPORT_MARKDOWN"] = "1"
+        app.launchEnvironment["SCOPY_UITEST_AUTO_EXPORT_MARKDOWN_PATH"] = fixture
+        app.launchEnvironment["SCOPY_UITEST_MARKDOWN_EXPORT_RESOLUTION"] = "100"
+        app.launchEnvironment["SCOPY_EXPORT_DUMP_PATH"] = dumpPath
+        app.launchEnvironment["SCOPY_EXPORT_ERROR_DUMP_PATH"] = errorPath
+        app.launch()
+        defer { app.terminate() }
+
+        waitForExport(dumpPath: dumpPath, errorPath: errorPath, timeoutSeconds: timeoutSeconds)
+        try assertNoExportError(errorPath: errorPath)
+
+        let props = try readPNGProperties(atPath: dumpPath)
+        XCTAssertEqual(props.width, 1080)
+        XCTAssertGreaterThan(props.height, minimumHeight)
+        XCTAssertGreaterThan(nonWhiteContentHeight(props.cgImage), minimumContentHeight)
+        XCTAssertLessThan(topWhitespaceRows(props.cgImage), 72)
+        XCTAssertLessThan(bottomWhitespaceRows(props.cgImage), 160)
+    }
 
     private func waitForExport(dumpPath: String, errorPath: String, timeoutSeconds: TimeInterval) {
         let deadline = Date().addingTimeInterval(timeoutSeconds)

@@ -1266,7 +1266,6 @@ struct HistoryItemView: View, Equatable {
                 .accessibilityHidden(true)
             }
         }
-        .background(markdownPreMeasureView)
     }
 
     private func handleHover(_ hovering: Bool) {
@@ -1364,63 +1363,6 @@ struct HistoryItemView: View, Equatable {
             startFilePreviewTask(state: state)
         } else if item.type == .text || item.type == .rtf || item.type == .html {
             startTextPreviewTask(state: state)
-        }
-    }
-
-    @ViewBuilder
-    private var markdownPreMeasureView: some View {
-        if let state = interactionState,
-           isHovering,
-           (item.type == .text || item.type == .rtf || item.type == .html),
-           state.previewModel.isMarkdown,
-           (!isTextPreviewPresented || markdownWebViewController.webView.superview == nil),
-           state.previewModel.markdownContentSize == nil,
-           let html = state.previewModel.markdownHTML,
-           let text = state.previewModel.text,
-           let attachmentToken = sessionAttachmentToken
-        {
-            let expectedRevision = state.revision
-            let maxWidth: CGFloat = HoverPreviewScreenMetrics.maxMarkdownPopoverWidthPoints()
-            let containerWidth = max(1, maxWidth)
-            let cacheKey = MarkdownRenderCacheKey.make(contentHash: contentRevision.cacheKey, markdown: text)
-
-            MarkdownPreviewMeasurer(
-                controller: markdownWebViewController,
-                html: html,
-                containerWidth: containerWidth,
-                settleNanoseconds: 90_000_000,
-                onStableMetrics: { metrics in
-                    guard self.isViewInteractionCurrent(
-                        state,
-                        revision: expectedRevision,
-                        attachmentToken: attachmentToken
-                    ) else { return }
-                    guard state.previewCoordinator.isHovering else { return }
-                    guard state.previewModel.markdownHTML == html else { return }
-                    guard state.previewModel.text == text else { return }
-                    guard metrics.renderSucceeded else {
-                        state.previewModel.markdownRenderSucceeded = false
-                        state.previewModel.markdownRenderErrorReason = metrics.renderErrorReason ?? "markdown render failed"
-                        return
-                    }
-                    let stableSize = CGSize(width: max(1, maxWidth), height: metrics.size.height)
-                    let stableMetrics = MarkdownContentMetrics(
-                        size: stableSize,
-                        hasHorizontalOverflow: metrics.hasHorizontalOverflow,
-                        renderSucceeded: metrics.renderSucceeded,
-                        renderErrorReason: metrics.renderErrorReason,
-                        renderID: metrics.renderID
-                    )
-                    state.previewModel.markdownContentSize = stableMetrics.size
-                    state.previewModel.markdownHasHorizontalOverflow = stableMetrics.hasHorizontalOverflow
-                    state.previewModel.markdownRenderSucceeded = true
-                    state.previewModel.markdownRenderErrorReason = nil
-                    if !cacheKey.isEmpty {
-                        MarkdownPreviewCache.shared.setMetrics(stableMetrics, forKey: cacheKey)
-                    }
-                    self.requestPopover(.text)
-                }
-            )
         }
     }
 
@@ -2093,42 +2035,6 @@ struct HistoryItemView: View, Equatable {
 
     private func formatBytes(_ bytes: Int) -> String {
         Localization.formatBytes(bytes)
-    }
-}
-
-private struct MarkdownPreviewMeasurer: View {
-    let controller: MarkdownPreviewWebViewController
-    let html: String
-    let containerWidth: CGFloat
-    let settleNanoseconds: UInt64
-    let onStableMetrics: @MainActor (MarkdownContentMetrics) -> Void
-
-    @State private var pendingMetrics: MarkdownContentMetrics?
-    @State private var settleTask: Task<Void, Never>?
-
-    var body: some View {
-        ReusableMarkdownPreviewWebView(
-            controller: controller,
-            html: html,
-            shouldScroll: false,
-            onContentSizeChange: { metrics in
-                pendingMetrics = metrics
-                settleTask?.cancel()
-                settleTask = Task { @MainActor in
-                    try? await Task.sleep(nanoseconds: settleNanoseconds)
-                    guard !Task.isCancelled else { return }
-                    guard let final = pendingMetrics else { return }
-                    onStableMetrics(final)
-                }
-            }
-        )
-        .frame(width: max(1, containerWidth), height: 1)
-        .opacity(0.001)
-        .allowsHitTesting(false)
-        .onDisappear {
-            settleTask?.cancel()
-            settleTask = nil
-        }
     }
 }
 

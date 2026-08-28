@@ -5,6 +5,7 @@ owner: maintainers
 last_reviewed: 2026-08-09
 canonical: true
 related_versions:
+  - v0.70.0
   - v0.65.0
 ---
 
@@ -14,7 +15,7 @@ This document is the active requirements baseline for Scopy. Historical planning
 
 ## Reference State
 
-- Reference release: `v0.65.0`
+- Reference release: `v0.70.0`
 - Source of truth for current version metadata: [../meta/release-current.yml](../meta/release-current.yml)
 - Source of truth for development and implementation workflow: [development-guide.md](./development-guide.md)
 
@@ -68,6 +69,10 @@ Scopy is a native macOS clipboard manager for users who need durable clipboard h
 - Returning from the preview to its row keeps only a short fixed handoff grace. Re-entering a row whose preview is already open must not restart preview preparation or flicker the popover.
 - Hover intent affects only transfer after a preview is open; it must not alter the user-configured hover preview trigger delay. While a transfer is active, adjacent rows must defer selection and preview ownership so screen-edge popover placement cannot steal the source preview.
 - Provide Markdown/LaTeX rendering and PNG export through one fully local CommonMark/GFM pipeline with stable footnote IDs, HTML-only KaTeX, syntax highlighting, source citations, task/table layout, and user-authored raw HTML shown literally rather than executed.
+- Recognize only validated `scopy-rich` v2 envelopes for web results, search-image groups, news, weather, finance, and currency. Rich surfaces use frozen source data and bundled allowlisted assets; invalid or unsupported input remains a visible code fence, and ordinary copied prose must never be guessed into private card metadata.
+- Keep supported weather/day, finance/range, currency, chart, local-image, and grouped-source controls interactive in preview. PNG export freezes those same elements before capture; it must not switch to a second parser, document, stylesheet, asset source, or data model.
+- Distinguish ordinary validated HTTP(S) links, Codex absolute file links with optional line/column suffixes, and source citations. Native opening requires an explicit preview click and strict validation; raw `file:` URLs, unsafe paths, programmatic navigation, and export activation are rejected.
+- The reusable Markdown `WKWebView` must have one current visible owner. Hidden premeasurement is forbidden; stale teardown cannot detach a newer owner, identical in-flight HTML cannot restart navigation, and scroll configuration must tolerate WebKit creating its internal scroll view after the initial update.
 - Allow Markdown hover previews to adjust ChatGPT layout scale continuously from 80% to 200% from the preview itself, with light magnetic snapping at each 5% stop; the selected preview scale also controls PNG export launched from that preview. The preview control should stay compact until hover or drag interaction and should keep the last rendered Markdown visible while the new layout profile is prepared.
 - Allow optional pngquant-based compression for newly ingested images and exported Markdown/LaTeX PNGs.
 - Show image thumbnails in the history list when enabled.
@@ -117,6 +122,7 @@ Scopy is a native macOS clipboard manager for users who need durable clipboard h
 ### Correctness And Safety
 
 - Copying from history must reproduce the stored content type as faithfully as the system pasteboard allows.
+- When HTML and plain-text clipboard representations are demonstrably related, preserve authored Markdown structure from the plain-text representation while retaining the HTML payload. Unrelated or suspicious side-channel text must not replace the trustworthy rich-content extraction.
 - Cleanup, delete, and optimization paths must not remove or rewrite unrelated files.
 - Cleanup must revalidate each planned row inside the deleting transaction. A row pinned after planning, or whose content identity, recency, size, type, or storage ownership changed, must remain untouched; history and search must converge from the exact committed deletion set.
 - Durable ingest artifacts must stay inside the owned Application Support spool. Traversal, foreign acknowledgement URLs, symlinks, and malformed artifact names fail closed without reading or deleting outside that root.

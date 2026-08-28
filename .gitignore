@@ -22,6 +22,10 @@ Package.resolved
 # Node tools
 node_modules/
 
+# Python tooling caches
+__pycache__/
+*.pyc
+
 # macOS
 .DS_Store
 

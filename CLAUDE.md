@@ -33,6 +33,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - 单 `~`、单 `$`、raw HTML、代码语法岛、table pipe、脚注 ID、WebView render ID 等语义必须遵守 canonical 契约；不要用 CSS 或启发式修复改变 parser 含义。
 - 40rem/48rem thread width 由 `816 / scale` 的逻辑视口决定。代码、公式、表格只做局部 overflow，不能扩宽 popover；公式宿主禁止使用会让离屏 PNG 漏绘的 `content-visibility:auto`。
 - 正文字体使用可靠的 macOS 系统 sans/mono 栈，公式使用项目内 KaTeX 字体；归档里存在字体文件不等于正文实际使用它。
+- 任何旧 release note、archive、proposal、注释或历史契约若与上述 canonical 契约或当前源码/测试冲突，均为非规范历史材料；删除或改正仍标为 active 的冲突文本，不得为旧说法保留兼容路径。
 - 渲染改动必须同步更新 Node 契约测试、`ScopyTests/ChatGPTMarkdownRendererTests.swift` 和真实导出 fixture，并完成 Node build/test、应用构建、单测、严格并发测试和真实 PNG 视觉检查。测试宿主没有进入 Scopy 场景时只能记录 environment-blocked。
 
 ### 验证闭环（按风险）

@@ -142,6 +142,25 @@ final class HistoryItemMarkdownExportControllerTests: XCTestCase {
         XCTAssertEqual(HistoryItemMarkdownExportController.defaultResolutionScale(), 1.0)
     }
 
+    func testRichSurfaceExportsBypassPaletteReduction() {
+        var settings = SettingsDTO.default
+        settings.pngquantMarkdownExportEnabled = true
+        settings.pngquantMarkdownExportColors = 16
+
+        XCTAssertNil(
+            HistoryItemMarkdownExportController.pngquantOptions(
+                settings: settings,
+                renderedHTML: "<section data-scopy-version=\"2\"></section>"
+            )
+        )
+        XCTAssertNotNil(
+            HistoryItemMarkdownExportController.pngquantOptions(
+                settings: settings,
+                renderedHTML: "<p>Ordinary Markdown</p>"
+            )
+        )
+    }
+
     private func makeItem(type: ClipboardItemType, plainText: String) -> ClipboardItemDTO {
         ClipboardItemDTO(
             id: UUID(),

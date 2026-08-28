@@ -9,9 +9,22 @@ import remarkRehype from "remark-rehype";
 import { unified } from "unified";
 import { rehypeScopyKatex } from "./rehypeScopyKatex.js";
 import { remarkLiteralHTML } from "./remarkLiteralHTML.js";
+import { scopyIcon } from "./scopyIcons.js";
 import { preprocessBackslashMath } from "./scopyBackslashMathPreprocessor.js";
+import { remarkScopyImageGroups } from "./remarkScopyImageGroups.js";
 import { remarkScopyLooseMathRepair } from "./remarkScopyLooseMathRepair.js";
-import { remarkScopySourceCitations } from "./remarkScopySourceCitations.js";
+import { isValidExternalHTTPURL } from "./scopyExternalURLPolicy.js";
+import {
+  isRenderableDataImage,
+  remarkScopyRich,
+  remarkScopyRichOrdinals,
+  scopyImageGroupHandler,
+  scopyRichHandler
+} from "./remarkScopyRich.js";
+import {
+  remarkScopySourceCitations,
+  scopySourceCitationHandler
+} from "./remarkScopySourceCitations.js";
 
 export function render(source, policy = {}) {
   return renderInternal(source, policy, 0);
@@ -34,14 +47,23 @@ function renderInternal(source, policy = {}) {
       metadata: repairMetadata
     })
     .use(remarkScopySourceCitations)
+    .use(remarkScopyRich)
+    .use(remarkScopyImageGroups)
+    .use(remarkScopyRichOrdinals)
     .use(remarkLiteralHTML);
   processor
     .use(remarkRehype, {
       allowDangerousHtml: false,
-      clobberPrefix: "scopy-"
+      clobberPrefix: "scopy-",
+      handlers: {
+        scopyImageGroup: scopyImageGroupHandler,
+        scopyRich: scopyRichHandler,
+        scopySourceCitation: scopySourceCitationHandler
+      }
     })
+    .use(rehypeGuardDataImages)
     .use(rehypeSanitize, scopySanitizeSchema)
-    .use(rehypeScopySourceCitationClass)
+    .use(rehypeScopyLinkSemantics)
     .use(rehypeScopyKatex, { failureMode: "relaxed" })
     .use(rehypeHighlight, scopyHighlightOptions)
     .use(rehypeStringify);
@@ -61,25 +83,186 @@ function renderInternal(source, policy = {}) {
   };
 }
 
+const scopySanitizeRequired = { ...(defaultSchema.required || {}) };
+delete scopySanitizeRequired.input;
+
 const scopySanitizeSchema = {
   ...defaultSchema,
+  required: scopySanitizeRequired,
   // remark-rehype already namespaces every renderer-generated footnote ID.
   // A second sanitizer prefix would break href/id pairs.
   clobberPrefix: "",
   protocols: {
     ...defaultSchema.protocols,
-    href: [...(defaultSchema.protocols?.href || []), "plugin"]
+    href: ["http", "https", "plugin"],
+    src: [...(defaultSchema.protocols?.src || []), "data"]
   },
+  tagNames: [...new Set([
+    ...(defaultSchema.tagNames || []),
+    "article", "button", "circle", "dd", "defs", "div", "dl", "dt", "figcaption", "figure", "footer",
+    "g", "header", "input", "label", "linearGradient", "output", "path", "polygon", "polyline",
+    "section", "span", "stop", "svg", "text", "time", "title"
+  ])],
   attributes: {
     ...defaultSchema.attributes,
     a: [
-      ...(defaultSchema.attributes?.a || []),
-      "className",
+      ...withoutClassName(defaultSchema.attributes?.a),
+      ["className", /^scopy-/],
       ["dataScopySourceCitation", "true"],
-      "dataScopySourceCount"
-    ]
+      "ariaLabel",
+      "ariaDescribedBy"
+    ],
+    article: ["className", "id"],
+    button: [
+      "id",
+      ["className", /^scopy-/],
+      ["type", "button"],
+      ["dataScopyAction", "currency-input", "weather-unit", "weather-day", "finance-range", "lightbox-open", "lightbox-close", "lightbox-prev", "lightbox-next", "chart-probe"],
+      ["dataScopyCurrencySide", "from", "to"],
+      ["dataScopyUnit", "F", "C"],
+      ["dataScopyIndex", /^\d+$/],
+      "dataScopyLightboxTitle",
+      "dataScopyLightboxSource",
+      "ariaLabel",
+      "ariaPressed",
+      "ariaSelected",
+      "ariaChecked",
+      "ariaControls",
+      "ariaDisabled",
+      "tabIndex",
+      "disabled"
+    ],
+    circle: [
+      "id", "className", "cx", "cy", "r", "fill", "stroke", "strokeWidth", "tabIndex",
+      ["dataScopyChartPoint", "true"],
+      ["dataScopyIndex", /^\d+$/],
+      ["dataScopyPointIndex", /^\d+$/],
+      ["dataScopyX", /^-?\d+(?:\.\d+)?$/],
+      "dataScopyLabel",
+      "dataScopyDisplay"
+    ],
+    dd: ["className"],
+    div: [
+      ["className", /^scopy-/],
+      "id",
+      "role",
+      "hidden",
+      "ariaLabel",
+      "ariaLabelledBy",
+      "ariaHidden",
+      "ariaModal",
+      "ariaLive",
+      ["dataScopyWeatherPanel", /^\d+$/],
+      ["dataScopyFinancePanel", /^\d+$/],
+      ["dataScopyIndex", /^\d+$/],
+      ["dataScopyLightbox", "true"],
+      ["dataScopyLightboxMetaPanel", /^\d+$/],
+      ["dataScopyChartTooltip", "true"]
+    ],
+    dl: ["className", "ariaLabel"],
+    dt: ["className"],
+    figcaption: ["className"],
+    figure: [
+      ["className", /^scopy-/],
+      "id",
+      "hidden",
+      "role",
+      "ariaLabel",
+      "ariaHidden",
+      "tabIndex",
+      ["dataScopyAction", "chart-probe"],
+      ["dataScopyChartCount", /^\d+$/],
+      ["dataScopyUnitValue", "F", "C"]
+    ],
+    footer: ["className"],
+    g: ["className"],
+    h3: [...(defaultSchema.attributes?.h3 || []), "className"],
+    h4: [...(defaultSchema.attributes?.h4 || []), "className"],
+    img: [
+      ...(defaultSchema.attributes?.img || []),
+      ["className", /^scopy-/],
+      ["dataScopyDeferredImage", "true"],
+      ["dataScopyLightboxImage", "true"]
+    ],
+    input: [
+      ...withoutAttributes(defaultSchema.attributes?.input, ["disabled", "type"]),
+      ["className", /^scopy-/],
+      ["type", "text", "checkbox"],
+      "checked",
+      "disabled",
+      ["inputMode", "decimal"],
+      "maxLength",
+      ["autoComplete", "off"],
+      ["spellCheck", "false"],
+      ["dataScopyAction", "currency-input"],
+      ["dataScopyCurrencySide", "from", "to"],
+      "value",
+      "ariaLabel",
+      "ariaInvalid"
+    ],
+    label: [...(defaultSchema.attributes?.label || []), ["className", /^scopy-/], "htmlFor"],
+    linearGradient: ["id", "x1", "x2", "y1", "y2", "gradientUnits"],
+    li: [...withoutClassName(defaultSchema.attributes?.li), ["className", "task-list-item", /^scopy-/]],
+    ol: [...withoutClassName(defaultSchema.attributes?.ol), ["className", "contains-task-list", /^scopy-/], "ariaLabel"],
+    p: [
+      ...(defaultSchema.attributes?.p || []),
+      ["className", /^scopy-/],
+      ["dataScopyLightboxCounter", "true"],
+      ["dataScopyLightboxSource", "true"],
+      ["dataScopyLightboxTitle", "true"],
+      "ariaLive"
+    ],
+    path: ["className", "d", "fill", "stroke", "strokeWidth", "strokeLinecap", "strokeLinejoin", "opacity"],
+    polygon: ["points", "fill", "opacity"],
+    polyline: ["points", "fill", "stroke", "strokeWidth"],
+    section: [
+      ["className", /^scopy-/],
+      ["dataType", "news", "web_results", "image_group", "weather", "finance", "currency"],
+      ["dataState", "ready", "partial", "empty", "error"],
+      ["dataScopyVersion", "2"],
+      ["dataScopyInteractive", "true", "false"],
+      ["dataScopyUnit", "F", "C"],
+      ["dataScopyDayIndex", /^\d+$/],
+      ["dataScopyRangeIndex", /^\d+$/],
+      ["dataScopyLightboxIndex", /^\d+$/],
+      ["dataScopyRate", /^\d+(?:\.\d+)?(?:e[+-]?\d+)?$/i],
+      ["dataScopyFractionDigits", /^\d+$/],
+      "role",
+      "ariaLabel",
+      ["dir", "auto"]
+    ],
+    span: [
+      ["className", /^scopy-/],
+      "role",
+      "ariaLabel",
+      "ariaHidden",
+      "hidden",
+      ["dataScopyUnitValue", "F", "C"],
+      ["dataScopyUnitLabel", "F", "C"],
+      ["dataScopyImageTitle", "true"],
+      ["dataScopyTooltipLabel", "true"],
+      ["dataScopyTooltipDisplay", "true"]
+    ],
+    stop: ["offset", "stopColor", "stopOpacity"],
+    strong: [...(defaultSchema.attributes?.strong || []), ["dataScopyTooltipDisplay", "true"]],
+    svg: ["className", "viewBox", "width", "height", "role", "ariaLabel", "ariaHidden", "focusable"],
+    text: ["className", "x", "y", "dx", "dy", "textAnchor", "dominantBaseline"],
+    time: ["className", "dateTime"],
+    ul: [...withoutClassName(defaultSchema.attributes?.ul), ["className", "contains-task-list", /^scopy-/], "ariaLabel"]
   }
 };
+
+function withoutClassName(attributes = []) {
+  return attributes.filter((attribute) => attribute !== "className" && !(Array.isArray(attribute) && attribute[0] === "className"));
+}
+
+function withoutAttributes(attributes = [], names = []) {
+  const blocked = new Set(names);
+  return attributes.filter((attribute) => {
+    const name = Array.isArray(attribute) ? attribute[0] : attribute;
+    return !blocked.has(name);
+  });
+}
 
 const scopyHighlightOptions = {
   detect: false,
@@ -95,22 +278,121 @@ const scopyHighlightOptions = {
   }
 };
 
-function rehypeScopySourceCitationClass() {
+function rehypeScopyLinkSemantics() {
   return function transformer(tree) {
     visitElements(tree, (node) => {
       if (!node || node.tagName !== "a" || !node.properties) {
         return;
       }
-      if (node.properties.dataScopySourceCitation !== "true") {
-        return;
-      }
       const className = Array.isArray(node.properties.className)
         ? node.properties.className
         : [];
-      if (!className.includes("scopy-source-citation-link")) {
-        className.push("scopy-source-citation-link");
+      if (node.properties.dataFootnoteRef != null ||
+          node.properties.dataFootnoteBackref != null ||
+          className.some((name) => String(name).startsWith("data-footnote-") || String(name).startsWith("footnote-"))) {
+        return;
       }
+      if (className.some((name) => String(name).startsWith("scopy-rich-") || String(name).startsWith("scopy-source-citation-"))) {
+        return;
+      }
+      const href = String(node.properties.href || "");
+      if (isSameDocumentFragment(href)) {
+        className.push("scopy-link", "scopy-link--internal");
+        node.properties.className = className;
+        return;
+      }
+      if (isValidExternalHTTPURL(href)) {
+        className.push("scopy-link", "scopy-link--external");
+        node.properties.className = className;
+        node.children = [
+          elementNode("span", { className: ["scopy-link__label"] }, node.children || []),
+          scopyIcon("external-link")
+        ];
+        return;
+      }
+      if (isLocalPathTarget(href)) {
+        const kind = localFileKind(href);
+        const resolvable = href.startsWith("/") || href.startsWith("~/");
+        className.push("scopy-link", "scopy-link--file");
+        className.push(resolvable ? "scopy-link--file-resolvable" : "scopy-link--file-inert");
+        node.properties.className = className;
+        node.properties.dataScopyFileKind = kind;
+        if (resolvable) {
+          node.properties.href = scopyFileURL(href);
+        } else {
+          delete node.properties.href;
+          node.properties.ariaDisabled = "true";
+        }
+        const icon = scopyIcon(iconNameForFileKind(kind));
+        icon.properties.className.push("scopy-file-icon");
+        node.children = [
+          icon,
+          elementNode("span", { className: ["scopy-link__label"] }, node.children || [])
+        ];
+        return;
+      }
+      className.push("scopy-link", href.startsWith("plugin:") ? "scopy-link--plugin" : "scopy-link--inert");
       node.properties.className = className;
+    });
+  };
+}
+
+function isSameDocumentFragment(value) {
+  return /^#[^\u0000-\u0020\u007f]+$/u.test(value);
+}
+
+function isLocalPathTarget(value) {
+  if (!value || /[\u0000-\u001f\u007f]/u.test(value) || value.startsWith("#") || value.startsWith("//")) {
+    return false;
+  }
+  if (/^[a-z][a-z0-9+.-]*:/i.test(value)) return false;
+  return value.startsWith("/") ||
+    value.startsWith("~/") ||
+    value.startsWith("./") ||
+    value.startsWith("../") ||
+    /^[^?#]+(?:\/[^?#]+)+(?::\d+(?::\d+)?)?(?:[?#].*)?$/u.test(value);
+}
+
+function localFileKind(value) {
+  const clean = String(value).split(/[?#]/, 1)[0].replace(/:\d+(?::\d+)?$/, "").toLowerCase();
+  if (/\.(?:md|markdown|txt|rtf)$/.test(clean)) return "document";
+  if (/\.(?:js|jsx|mjs|cjs)$/.test(clean)) return "javascript";
+  if (/\.(?:png|jpe?g|gif|webp|svg|heic|tiff?)$/.test(clean)) return "image";
+  if (/\.(?:swift|html?|css|json|py|ts|tsx|java|kt|kts|c|cc|cpp|h|hpp|rs|go|rb|php|sh|zsh|bash|sql|ya?ml|toml|xml)$/.test(clean)) {
+    return "code";
+  }
+  return "document";
+}
+
+function iconNameForFileKind(kind) {
+  if (kind === "javascript") return "javascript";
+  if (kind === "image") return "image";
+  if (kind === "code") return "code";
+  return "document";
+}
+
+function scopyFileURL(path) {
+  const normalized = path.startsWith("~/") ? "/~/" + path.slice(2) : path;
+  const encoded = encodeURI(normalized)
+    .replace(/%25(?=[0-9a-f]{2})/gi, "%")
+    .replace(/#/g, "%23")
+    .replace(/\?/g, "%3F");
+  return "scopy-file:" + encoded;
+}
+
+function elementNode(tagName, properties, children) {
+  return { type: "element", tagName, properties, children };
+}
+
+function rehypeGuardDataImages() {
+  return function transformer(tree) {
+    visitElements(tree, (node) => {
+      if (node.tagName !== "img" || !node.properties) return;
+      const src = String(node.properties.src || "");
+      if (src.startsWith("data:") && (node.properties.dataScopyTrustedImage !== "true" || !isRenderableDataImage(src))) {
+        delete node.properties.src;
+      }
+      delete node.properties.dataScopyTrustedImage;
     });
   };
 }

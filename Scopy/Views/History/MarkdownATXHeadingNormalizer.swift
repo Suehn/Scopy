@@ -71,9 +71,16 @@ enum MarkdownATXHeadingNormalizer {
                 continue
             }
 
+            // Limit the relaxed no-space extension to heading-sized lines. Flattened copied tables can begin
+            // with a `#` column label followed by an entire row; promoting that long line creates a false giant H1.
+            let rest = line[j...]
+            guard rest.count <= 200 else {
+                out.append(line)
+                continue
+            }
+
             let prefix = String(line[..<j])
-            let rest = String(line[j...])
-            out.append(prefix + " " + rest)
+            out.append(prefix + " " + String(rest))
         }
 
         return out.joined(separator: "\n")

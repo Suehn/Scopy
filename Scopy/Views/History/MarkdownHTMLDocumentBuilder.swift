@@ -6,169 +6,9 @@ enum MarkdownHTMLDocumentBuilder {
     private static let overflowProbeSelector = "pre, .katex, .footnotes"
 
     private static let cspMetaTag = """
-    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src 'self' data:; style-src 'self' 'unsafe-inline' file:; script-src 'self' 'unsafe-inline' file:; font-src 'self' data: file:;">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; base-uri 'none'; form-action 'none'; object-src 'none'; frame-src 'none'; connect-src 'none'; img-src 'self' data:; style-src 'self' 'unsafe-inline' file:; script-src 'self' 'unsafe-inline' file:; font-src 'self' data: file:;">
     """
 
-    private static let sourceCitationFunctionScript = """
-            function normalizeCitationURL(url) {
-              try {
-                var a = document.createElement('a');
-                a.href = String(url || '');
-                return a.href;
-              } catch (e) {
-                return String(url || '');
-              }
-            }
-            function scopySourceCitationLabelAllowed(label) {
-              var text = String(label || '').trim();
-              if (!text || text.length > 48 || /[\\r\\n\\[\\]\\(\\)]/.test(text)) { return false; }
-              return /[A-Z]/.test(text) || /[\\u3400-\\u9fff\\uf900-\\ufaff]/u.test(text) || text.indexOf('.') !== -1;
-            }
-            function splitScopySourceCitationCount(label) {
-              var text = String(label || '').trim();
-              var match = /^(.*\\S)\\s+\\+([1-9]\\d{0,2})$/.exec(text);
-              if (!match) { return { label: text, count: 0 }; }
-              return { label: String(match[1] || '').trim(), count: parseInt(match[2] || '0', 10) || 0 };
-            }
-            function scopySourceCitationKey(label, url) {
-              return String(label || '').trim() + '\\n' + normalizeCitationURL(url);
-            }
-            function rememberScopyCitation(citations, label, url, count) {
-              var parts = splitScopySourceCitationCount(label);
-              if (!scopySourceCitationLabelAllowed(parts.label)) { return; }
-              var sourceURL = String(url || '');
-              if (!/^https?:\\/\\//i.test(sourceURL)) { return; }
-              var existing = citations[scopySourceCitationKey(parts.label, sourceURL)];
-              citations[scopySourceCitationKey(parts.label, sourceURL)] = Math.max(existing || 0, count || parts.count || 0);
-            }
-            function extractScopySourceCitations(markdown) {
-              var source = String(markdown || '');
-              if (source.indexOf(']') === -1 || source.indexOf('http') === -1) { return {}; }
-              var definitions = {};
-              var definitionPattern = /^ {0,3}\\[([^\\]\\n]{1,48})\\]:\\s+<?(https?:\\/\\/[^\\s>]+)>?(?:\\s+("[^"\\n]*"|'[^'\\n]*'|\\([^\\)\\n]*\\)))?\\s*$/gmi;
-              var definitionMatch = null;
-              while ((definitionMatch = definitionPattern.exec(source)) !== null) {
-                var id = String(definitionMatch[1] || '').trim().replace(/\\s+/g, ' ').toUpperCase();
-                if (!id || definitions[id]) { continue; }
-                definitions[id] = String(definitionMatch[2] || '');
-              }
-              var citations = {};
-              var referenceGroupPattern = /\\(([^\\(\\)\\n]*\\[[^\\]\\n]{1,48}\\]\\[[^\\]\\n]{0,48}\\][^\\(\\)\\n]*)\\)/g;
-              var referenceGroupMatch = null;
-              while ((referenceGroupMatch = referenceGroupPattern.exec(source)) !== null) {
-                var group = String(referenceGroupMatch[1] || '');
-                var links = [];
-                var linkPattern = /\\[([^\\]\\n]{1,48})\\]\\[([^\\]\\n]{0,48})\\]/g;
-                var linkMatch = null;
-                while ((linkMatch = linkPattern.exec(group)) !== null) {
-                  var rawLabel = String(linkMatch[1] || '').trim();
-                  var ref = String(linkMatch[2] || rawLabel).trim().replace(/\\s+/g, ' ').toUpperCase();
-                  var url = definitions[ref];
-                  if (!url) { continue; }
-                  links.push({ label: rawLabel, url: url });
-                }
-                if (!links.length) { continue; }
-                var separatorsOnly = group.replace(/\\[[^\\]\\n]{1,48}\\]\\[[^\\]\\n]{0,48}\\]/g, '');
-                if (!/^[\\s,;，、]*$/.test(separatorsOnly)) { continue; }
-                rememberScopyCitation(citations, links[0].label, links[0].url, Math.max(0, links.length - 1));
-              }
-              var inlinePattern = /\\(\\[([^\\]\\n]{1,48})\\]\\((https?:\\/\\/[^\\s\\)]+)(?:\\s+("[^"\\n]*"|'[^'\\n]*'|\\([^\\)\\n]*\\)))?\\)\\)/g;
-              var inlineMatch = null;
-              while ((inlineMatch = inlinePattern.exec(source)) !== null) {
-                rememberScopyCitation(citations, inlineMatch[1] || '', inlineMatch[2] || '', 0);
-              }
-              return citations;
-            }
-            function previousCitationTextNode(anchor) {
-              var n = anchor ? anchor.previousSibling : null;
-              while (n) {
-                if (n.nodeType === 3) { return n; }
-                if (String(n.textContent || '').trim()) { return null; }
-                n = n.previousSibling;
-              }
-              return null;
-            }
-            function nextCitationTextNode(anchor) {
-              var n = anchor ? anchor.nextSibling : null;
-              while (n) {
-                if (n.nodeType === 3) { return n; }
-                if (String(n.textContent || '').trim()) { return null; }
-                n = n.nextSibling;
-              }
-              return null;
-            }
-            function stripSourceCitationParentheses(anchor) {
-              var before = previousCitationTextNode(anchor);
-              var after = nextCitationTextNode(anchor);
-              if (!before || !after) { return false; }
-              var beforeValue = String(before.nodeValue || '');
-              var afterValue = String(after.nodeValue || '');
-              if (!/\\s*\\($/.test(beforeValue) || !/^\\)/.test(afterValue)) { return false; }
-              before.nodeValue = beforeValue.replace(/\\s*\\($/, '');
-              after.nodeValue = afterValue.replace(/^\\)/, '');
-              return true;
-            }
-            function stripSourceCitationGroup(anchor) {
-              var before = previousCitationTextNode(anchor);
-              if (!before) { return false; }
-              var beforeValue = String(before.nodeValue || '');
-              if (!/\\s*\\($/.test(beforeValue)) { return false; }
-              before.nodeValue = beforeValue.replace(/\\s*\\($/, '');
-              var n = anchor ? anchor.nextSibling : null;
-              while (n) {
-                var next = n.nextSibling;
-                if (n.nodeType === 3) {
-                  var value = String(n.nodeValue || '');
-                  if (/^[\\s,;，、]*\\)/.test(value)) {
-                    n.nodeValue = value.replace(/^[\\s,;，、]*\\)/, '');
-                    return true;
-                  }
-                  if (/^[\\s,;，、]*$/.test(value)) {
-                    if (n.parentNode) { n.parentNode.removeChild(n); }
-                    n = next;
-                    continue;
-                  }
-                  return false;
-                }
-                if (n.nodeType === 1 && n.tagName === 'A') {
-                  if (n.parentNode) { n.parentNode.removeChild(n); }
-                  n = next;
-                  continue;
-                }
-                if (String(n.textContent || '').trim()) { return false; }
-                n = next;
-              }
-              return false;
-            }
-            function normalizeSourceCitations(root, markdown) {
-              try {
-                if (!root || typeof root.querySelectorAll !== 'function') { return; }
-                var citations = extractScopySourceCitations(markdown);
-                var keys = Object.keys(citations || {});
-                if (!keys.length) { return; }
-                var anchors = root.querySelectorAll('a[href]');
-                for (var i = 0; i < anchors.length; i++) {
-                  var anchor = anchors[i];
-                  if (!anchor) { continue; }
-                  var labelParts = splitScopySourceCitationCount(String(anchor.textContent || '').trim());
-                  var href = String(anchor.getAttribute('href') || '');
-                  var count = citations[scopySourceCitationKey(labelParts.label, href)];
-                  if (typeof count !== 'number') { continue; }
-                  if (count > 0) {
-                    stripSourceCitationGroup(anchor);
-                    anchor.setAttribute('data-scopy-source-count', '+' + count);
-                  } else {
-                    stripSourceCitationParentheses(anchor);
-                  }
-                  if (String(anchor.textContent || '').trim() !== labelParts.label) {
-                    anchor.textContent = labelParts.label;
-                  }
-                  anchor.classList.add('scopy-source-citation-link');
-                  anchor.setAttribute('data-scopy-source-citation', 'true');
-                }
-              } catch (e) { }
-            }
-    """
 
     private static let tableWrapFunctionScript = """
             function readChatGPTTableColumnCount(table) {
@@ -459,10 +299,13 @@ enum MarkdownHTMLDocumentBuilder {
           }
           .footnote-ref a,
           a[data-footnote-ref],
-          .footnote-backref {
+          .footnote-backref,
+          a[data-footnote-backref] {
+            pointer-events: auto;
             color: rgb(95, 95, 95);
             font-weight: 500;
             text-decoration: none;
+            cursor: pointer;
           }
           .footnote-ref a,
           a[data-footnote-ref] {
@@ -492,7 +335,20 @@ enum MarkdownHTMLDocumentBuilder {
             --scopy-chatgpt-font: -apple-system-body, ui-sans-serif, -apple-system, "system-ui", "Segoe UI", Helvetica, "Apple Color Emoji", Arial, "sans-serif", "Segoe UI Emoji", "Segoe UI Symbol";
             --scopy-chatgpt-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
             --scopy-text-primary: rgb(13, 13, 13);
-            --scopy-page-bg: #ffffff;
+            --scopy-page-bg: #fcfcfc;
+            --scopy-surface-bg: #ffffff;
+            --scopy-text-weak: rgb(143, 143, 143);
+            --scopy-rich-border: rgba(0, 0, 0, 0.10);
+            --scopy-rich-border-strong: rgba(0, 0, 0, 0.10);
+            --scopy-rich-card-radius: 20px;
+            --scopy-rich-card-padding: 20px;
+            --scopy-rich-control-radius: 10px;
+            --scopy-rich-column-gap: 16px;
+            --scopy-rich-image-gap: 4px;
+            --scopy-rich-news-card-ideal-width: 15.33rem;
+            --scopy-rich-image-slot-min-width: 8rem;
+            --scopy-rich-range-min-width: 4.5rem;
+            --scopy-link-color: rgb(46, 131, 210);
             --scopy-code-bg: rgba(13, 13, 13, 0.04);
             --scopy-code-border: rgba(13, 13, 13, 0.08);
             --scopy-code-card-bg: rgb(249, 249, 249);
@@ -883,37 +739,86 @@ enum MarkdownHTMLDocumentBuilder {
             min-width: 0;
           }
           img { max-width: 100%; height: auto; }
+          .scopy-icon {
+            display: inline-block;
+            flex: 0 0 auto;
+            width: 1em;
+            height: 1em;
+            color: currentColor;
+            vertical-align: -0.125em;
+          }
           a {
             pointer-events: none;
-            color: var(--scopy-text-primary);
-            text-decoration-line: underline;
-            text-decoration-style: dotted;
-            text-decoration-color: rgb(143, 143, 143);
+            color: inherit;
+            text-decoration: none;
+            cursor: default;
+          }
+          a.scopy-link--external,
+          a.scopy-link--file-resolvable,
+          a.scopy-link--internal,
+          a.scopy-source-citation-link,
+          a.scopy-source-citation-supporting-link,
+          .scopy-rich a {
+            pointer-events: auto;
+            cursor: pointer;
+          }
+          a.scopy-link--external,
+          a.scopy-link--file,
+          a.scopy-link--plugin {
+            color: var(--scopy-link-color);
+            font-weight: 400;
+            text-decoration: none;
+          }
+          a.scopy-link--external:hover .scopy-link__label,
+          a.scopy-link--file-resolvable:hover .scopy-link__label {
+            text-decoration: underline;
             text-underline-offset: 2px;
           }
-          a::after {
-            content: "↗";
-            display: inline-block;
-            width: calc(12px * var(--scopy-chatgpt-layout-font-scale));
-            height: calc(12px * var(--scopy-chatgpt-layout-font-scale));
-            margin-inline-start: 0.125rem;
-            font-size: var(--scopy-chatgpt-body-font-size);
-            line-height: var(--scopy-chatgpt-body-font-size);
-            vertical-align: middle;
-            text-decoration: none;
+          a.scopy-link--external .scopy-icon--external-link {
+            width: 0.75em;
+            height: 0.75em;
+            margin-inline-start: 0.16em;
+            vertical-align: -0.01em;
+          }
+          a.scopy-link--file {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            max-width: 100%;
+            vertical-align: -0.16em;
+          }
+          a.scopy-link--file .scopy-file-icon {
+            width: 1em;
+            height: 1em;
+          }
+          a.scopy-link--file .scopy-link__label {
+            min-width: 0;
+            overflow-wrap: anywhere;
+          }
+          a.scopy-link--file-inert,
+          a.scopy-link--inert,
+          a.scopy-link--plugin {
+            pointer-events: none;
+          }
+          a.scopy-link--file-inert {
+            cursor: default;
+          }
+          html.scopy-export-mode a {
+            pointer-events: none;
           }
           a.scopy-source-citation-link {
             display: inline-flex;
             align-items: center;
-            max-width: 15ch;
+            pointer-events: auto;
+            gap: 4px;
+            max-width: none;
             height: calc(18px * var(--scopy-chatgpt-layout-font-scale));
             min-height: calc(18px * var(--scopy-chatgpt-layout-font-scale));
-            padding: 0 8px;
+            padding: 0 8px 0 4px;
             margin-inline-start: 4px;
             position: relative;
-            top: -0.094rem;
             border-radius: 12px;
-            overflow: hidden;
+            overflow: visible;
             color: rgb(93, 93, 93);
             background: rgb(244, 244, 244);
             font-size: calc(9px * var(--scopy-chatgpt-layout-font-scale));
@@ -922,25 +827,832 @@ enum MarkdownHTMLDocumentBuilder {
             text-align: center;
             text-decoration: none;
             white-space: nowrap;
-            vertical-align: baseline;
+            vertical-align: middle;
+            cursor: pointer;
           }
           a.scopy-source-citation-link::after {
             content: none;
           }
-          a.scopy-source-citation-link[data-scopy-source-count]::after {
-            content: attr(data-scopy-source-count);
+          .scopy-source-citation-group {
             display: inline-flex;
             align-items: center;
-            width: auto;
-            height: calc(16px * var(--scopy-chatgpt-layout-font-scale));
-            margin-inline-start: 3px;
-            margin-inline-end: -4px;
-            padding: 0 4px;
+            position: relative;
+            margin-inline-start: 4px;
+            line-height: 1;
+            vertical-align: -0.12em;
+          }
+          .scopy-source-citation-group > a.scopy-source-citation-link {
+            margin-inline-start: 0;
+          }
+          .scopy-source-citation-favicon-fallback,
+          .scopy-source-citation-origin-icon {
+            flex: 0 0 auto;
+            width: calc(12px * var(--scopy-chatgpt-layout-font-scale));
+            height: calc(12px * var(--scopy-chatgpt-layout-font-scale));
+            color: rgb(93, 93, 93);
+          }
+          .scopy-source-citation-label {
+            max-width: 15ch;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+          }
+          .scopy-source-citation-count {
+            flex: 0 0 auto;
             color: rgb(143, 143, 143);
             font-size: calc(9px * var(--scopy-chatgpt-layout-font-scale));
-            line-height: calc(16px * var(--scopy-chatgpt-layout-font-scale));
+            line-height: calc(18px * var(--scopy-chatgpt-layout-font-scale));
+          }
+          .scopy-source-citation-supporting {
+            display: none;
+            position: absolute;
+            z-index: 20;
+            inset-block-start: calc(100% - 1px);
+            inset-inline-start: auto;
+            inset-inline-end: auto;
+            left: var(--scopy-source-popup-left, 0px);
+            width: min(320px, var(--scopy-source-popup-max-width, calc(100vw - 24px)));
+            min-width: min(200px, var(--scopy-source-popup-max-width, calc(100vw - 24px)));
+            max-width: var(--scopy-chatgpt-thread-content-width);
+            padding: 6px;
+            border: 1px solid var(--scopy-border-subtle);
+            border-radius: 12px;
+            color: var(--scopy-text-primary);
+            background: var(--scopy-page-bg);
+            box-shadow: 0 8px 24px rgba(13, 13, 13, 0.12);
+          }
+          .scopy-source-citation-group:hover .scopy-source-citation-supporting,
+          .scopy-source-citation-group:focus-within .scopy-source-citation-supporting {
+            display: grid;
+            gap: 2px;
+          }
+          .scopy-source-citation-supporting-item {
+            display: block;
+          }
+          a.scopy-source-citation-supporting-link {
+            display: flex;
+            align-items: center;
+            pointer-events: auto;
+            gap: 6px;
+            min-width: 0;
+            padding: 6px 8px;
+            border-radius: 8px;
+            color: var(--scopy-text-primary);
+            font-size: calc(12px * var(--scopy-chatgpt-layout-font-scale));
+            line-height: calc(18px * var(--scopy-chatgpt-layout-font-scale));
             text-decoration: none;
-            vertical-align: baseline;
+            cursor: pointer;
+          }
+          a.scopy-source-citation-supporting-link:hover {
+            background: rgb(244, 244, 244);
+          }
+          a.scopy-source-citation-link:focus-visible,
+          a.scopy-source-citation-supporting-link:focus-visible,
+          a.scopy-link:focus-visible,
+          .scopy-rich button:focus-visible,
+          .scopy-rich input:focus-visible,
+          .scopy-rich a:focus-visible,
+          .footnote-ref a:focus-visible,
+          a[data-footnote-ref]:focus-visible,
+          .footnote-backref:focus-visible,
+          a[data-footnote-backref]:focus-visible {
+            outline: 2px solid rgb(10, 132, 255);
+            outline-offset: 2px;
+            border-radius: 3px;
+          }
+          a.scopy-source-citation-supporting-link::after {
+            content: none;
+          }
+          html.scopy-export-mode .scopy-source-citation-supporting {
+            display: none;
+          }
+          .scopy-visually-hidden {
+            position: absolute !important;
+            width: 1px !important;
+            height: 1px !important;
+            padding: 0 !important;
+            margin: -1px !important;
+            overflow: hidden !important;
+            clip: rect(0, 0, 0, 0) !important;
+            white-space: nowrap !important;
+            border: 0 !important;
+          }
+          #content > .scopy-rich {
+            width: min(var(--scopy-chatgpt-thread-content-max-width), calc(var(--scopy-chatgpt-render-width) - (var(--scopy-chatgpt-content-inline-padding) * 2)));
+            max-width: min(var(--scopy-chatgpt-thread-content-max-width), calc(var(--scopy-chatgpt-render-width) - (var(--scopy-chatgpt-content-inline-padding) * 2)));
+          }
+          .scopy-rich {
+            display: block;
+            margin: 16px 0;
+            padding: 0;
+            border: 0;
+            border-radius: 0;
+            position: relative;
+            overflow: visible;
+            color: var(--scopy-text-primary);
+            background: transparent;
+            font-family: var(--scopy-chatgpt-font);
+            font-size: var(--scopy-chatgpt-body-font-size);
+            line-height: var(--scopy-chatgpt-body-line-height);
+            container-type: inline-size;
+          }
+          .scopy-rich[data-state="partial"] {
+            opacity: 0.92;
+          }
+          .scopy-rich[data-state="empty"],
+          .scopy-rich[data-state="error"] {
+            padding: 16px 20px;
+            border: 1px solid var(--scopy-rich-border);
+            border-radius: 16px;
+            background: var(--scopy-surface-bg);
+          }
+          .scopy-rich-state-message,
+          .scopy-rich-boundary {
+            margin: 0 0 8px;
+            color: var(--scopy-text-secondary);
+            font-size: calc(14px * var(--scopy-chatgpt-layout-font-scale));
+            line-height: calc(20px * var(--scopy-chatgpt-layout-font-scale));
+          }
+          .scopy-rich button,
+          .scopy-rich input {
+            font-family: inherit;
+          }
+          .scopy-rich button {
+            appearance: none;
+            border: 0;
+            color: inherit;
+            background: transparent;
+          }
+          .scopy-rich-web-results {
+            display: grid;
+            gap: 16px;
+            margin: 0;
+            padding: 0;
+            list-style: none;
+          }
+          .scopy-rich-web-result {
+            min-height: 0;
+            margin: 0;
+            padding: 0;
+            list-style: none;
+          }
+          .scopy-rich-web-result-source {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin: 0;
+            color: var(--scopy-text-secondary);
+            font-size: calc(13px * var(--scopy-chatgpt-layout-font-scale));
+            line-height: calc(20px * var(--scopy-chatgpt-layout-font-scale));
+          }
+          .scopy-rich-web-result-source time::before {
+            content: "·";
+            margin-inline: 2px 8px;
+          }
+          .scopy-rich-web-result-title {
+            margin: 2px 0 0;
+            font-size: calc(16px * var(--scopy-chatgpt-layout-font-scale));
+            line-height: calc(24px * var(--scopy-chatgpt-layout-font-scale));
+            font-weight: 500;
+          }
+          .scopy-rich-web-result-link {
+            color: var(--scopy-link-color);
+          }
+          .scopy-rich-web-result-snippet {
+            margin: 2px 0 0;
+            color: var(--scopy-text-primary);
+            font-size: calc(14px * var(--scopy-chatgpt-layout-font-scale));
+            line-height: calc(22px * var(--scopy-chatgpt-layout-font-scale));
+          }
+          .scopy-rich-origin-icon {
+            width: calc(14px * var(--scopy-chatgpt-layout-font-scale));
+            height: calc(14px * var(--scopy-chatgpt-layout-font-scale));
+            border-radius: 50%;
+          }
+          .scopy-rich-news-track {
+            display: flex;
+            gap: var(--scopy-rich-column-gap);
+            width: 100%;
+            margin: 0;
+            padding: 8px 0;
+            overflow-x: auto;
+            overscroll-behavior-inline: contain;
+            scroll-snap-type: inline proximity;
+            list-style: none;
+            scrollbar-width: none;
+          }
+          .scopy-rich-news-item {
+            display: flex;
+            flex: 0 0 min(var(--scopy-rich-news-card-ideal-width), calc(100% - 24px));
+            min-height: 0;
+            margin: 0;
+            padding: 0;
+            scroll-snap-align: start;
+            list-style: none;
+          }
+          .scopy-rich-news-card {
+            width: 100%;
+            overflow: hidden;
+            border: 1px solid var(--scopy-rich-border-strong);
+            border-radius: 12px;
+            background: var(--scopy-surface-bg);
+          }
+          .scopy-rich-news-link {
+            display: flex;
+            height: 100%;
+            gap: 16px;
+            padding-bottom: 24px;
+            flex-direction: column;
+            color: var(--scopy-text-primary);
+          }
+          .scopy-rich-news-media {
+            display: block;
+            width: 100%;
+            height: 144px;
+            flex: 0 0 144px;
+            border: 0;
+            border-radius: 0;
+            object-fit: cover;
+          }
+          .scopy-rich-news-body {
+            display: flex;
+            min-width: 0;
+            padding: 0 16px;
+            gap: 8px;
+            flex: 1 1 auto;
+            flex-direction: column;
+            overflow: hidden;
+          }
+          .scopy-rich-news-source {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            color: var(--scopy-text-primary);
+            font-size: calc(12px * var(--scopy-chatgpt-layout-font-scale));
+            line-height: calc(16px * var(--scopy-chatgpt-layout-font-scale));
+          }
+          .scopy-rich-news-source .scopy-rich-origin-icon {
+            width: calc(12px * var(--scopy-chatgpt-layout-font-scale));
+            height: calc(12px * var(--scopy-chatgpt-layout-font-scale));
+          }
+          .scopy-rich-news-title {
+            display: -webkit-box;
+            margin: 0;
+            overflow: hidden;
+            font-size: calc(14px * var(--scopy-chatgpt-layout-font-scale));
+            line-height: calc(20px * var(--scopy-chatgpt-layout-font-scale));
+            font-weight: 500;
+            -webkit-box-orient: vertical;
+            -webkit-line-clamp: 5;
+          }
+          .scopy-rich-news-date {
+            display: block;
+            margin: 0;
+            color: var(--scopy-text-secondary);
+            font-size: calc(12px * var(--scopy-chatgpt-layout-font-scale));
+            line-height: calc(16px * var(--scopy-chatgpt-layout-font-scale));
+          }
+          .scopy-rich-image-grid {
+            display: flex;
+            width: 100%;
+            min-width: 0;
+            min-height: 144px;
+            gap: var(--scopy-rich-image-gap);
+            margin: 4px 0 20px;
+            overflow-x: auto;
+            overscroll-behavior-inline: contain;
+            scrollbar-width: none;
+          }
+          .scopy-rich-image-layout-search {
+            flex-flow: row nowrap;
+          }
+          .scopy-rich-image-layout-carousel {
+            flex-flow: row nowrap;
+          }
+          .scopy-rich-image-layout-full_width {
+            display: block;
+          }
+          .scopy-rich-image-item {
+            flex: 0 0 128px;
+            min-width: 0;
+            margin: 0;
+            aspect-ratio: 5 / 4;
+            overflow: hidden;
+            border: 1px solid var(--scopy-rich-border-strong);
+            border-radius: 12px;
+            background: rgb(244, 244, 244);
+          }
+          .scopy-rich-image-layout-full_width .scopy-rich-image-item {
+            width: 100%;
+          }
+          @container (min-width: 24.5rem) {
+            .scopy-rich-image-layout-search,
+            .scopy-rich-image-layout-carousel {
+              overflow-x: hidden;
+            }
+            .scopy-rich-image-layout-search .scopy-rich-image-item,
+            .scopy-rich-image-layout-carousel .scopy-rich-image-item {
+              flex-basis: calc((100% - (var(--scopy-rich-image-gap) * 2)) / 3);
+            }
+          }
+          @container (min-width: 48rem) {
+            .scopy-rich-news-item {
+              flex-basis: calc((100% - (var(--scopy-rich-column-gap) * 2)) / 3);
+            }
+          }
+          .scopy-rich-image-button {
+            display: block;
+            width: 100%;
+            height: 100%;
+            padding: 0;
+            cursor: zoom-in;
+          }
+          .scopy-rich-image,
+          .scopy-rich-image-placeholder {
+            display: flex;
+            width: 100%;
+            height: 100%;
+            align-items: center;
+            justify-content: center;
+            border: 0;
+            border-radius: 0;
+            color: var(--scopy-text-secondary);
+            background: rgb(244, 244, 244);
+            font-size: calc(13px * var(--scopy-chatgpt-layout-font-scale));
+            line-height: calc(20px * var(--scopy-chatgpt-layout-font-scale));
+            text-align: center;
+          }
+          img.scopy-rich-image {
+            object-fit: cover;
+          }
+          .scopy-rich-lightbox {
+            position: fixed;
+            z-index: 1000;
+            inset: 0;
+            width: 100vw;
+            height: 100vh;
+            color: #ffffff;
+            background: rgba(0, 0, 0, 0.96);
+          }
+          .scopy-rich-lightbox-stage {
+            position: absolute;
+            inset: clamp(48px, 7vh, 56px) clamp(48px, 8vw, 72px) clamp(72px, 10vh, 86px);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+          }
+          .scopy-rich-lightbox-image {
+            display: block;
+            max-width: 100%;
+            max-height: 100%;
+            object-fit: contain;
+          }
+          .scopy-rich-lightbox-close,
+          .scopy-rich-lightbox-previous,
+          .scopy-rich-lightbox-next {
+            position: absolute;
+            z-index: 2;
+            display: grid;
+            width: 40px;
+            height: 40px;
+            padding: 0;
+            place-items: center;
+            border-radius: 999px;
+            color: #ffffff;
+            background: rgba(255, 255, 255, 0.12);
+            cursor: pointer;
+          }
+          .scopy-rich-lightbox-close { top: 16px; right: 16px; }
+          .scopy-rich-lightbox-previous { top: 50%; left: 16px; transform: translateY(-50%); }
+          .scopy-rich-lightbox-next { top: 50%; right: 16px; transform: translateY(-50%); }
+          .scopy-rich-lightbox-counter {
+            position: absolute;
+            top: 16px;
+            left: 20px;
+            margin: 0;
+            color: #ffffff;
+            font-size: 14px;
+            line-height: 40px;
+          }
+          .scopy-rich-lightbox-meta {
+            position: absolute;
+            right: clamp(48px, 8vw, 72px);
+            bottom: clamp(14px, 3vh, 22px);
+            left: clamp(48px, 8vw, 72px);
+            text-align: center;
+          }
+          .scopy-rich-lightbox-meta p {
+            margin: 0;
+            color: #ffffff;
+            font-size: 14px;
+            line-height: 20px;
+          }
+          .scopy-rich-lightbox-meta p:first-child {
+            color: rgba(255, 255, 255, 0.65);
+          }
+          .scopy-rich-weather-card,
+          .scopy-rich-finance-card,
+          .scopy-rich-currency-card {
+            width: 100%;
+            overflow: hidden;
+            border: 1px solid var(--scopy-rich-border);
+            border-radius: var(--scopy-rich-card-radius);
+            background: var(--scopy-surface-bg);
+          }
+          .scopy-rich-weather-card {
+            padding: var(--scopy-rich-card-padding) var(--scopy-rich-card-padding) 12px;
+          }
+          .scopy-rich-weather-location {
+            margin: 0;
+            font-size: calc(14px * var(--scopy-chatgpt-layout-font-scale));
+            line-height: calc(20px * var(--scopy-chatgpt-layout-font-scale));
+            font-weight: 500;
+          }
+          .scopy-rich-weather-current-panel {
+            margin-top: 20px;
+          }
+          .scopy-rich-weather-current-row {
+            display: flex;
+            align-items: flex-start;
+          }
+          .scopy-rich-weather-current-value {
+            margin: 0;
+            font-size: calc(48px * var(--scopy-chatgpt-layout-font-scale));
+            line-height: calc(48px * var(--scopy-chatgpt-layout-font-scale));
+            font-weight: 500;
+            letter-spacing: -0.02em;
+          }
+          .scopy-rich-weather-unit {
+            display: flex;
+            margin: 2px 0 0 8px;
+            color: var(--scopy-text-weak);
+            font-size: calc(14px * var(--scopy-chatgpt-layout-font-scale));
+            line-height: calc(20px * var(--scopy-chatgpt-layout-font-scale));
+          }
+          .scopy-rich-weather-unit-option {
+            padding: 0 2px;
+            color: var(--scopy-text-weak);
+            cursor: pointer;
+          }
+          .scopy-rich-weather-unit-option[aria-pressed="true"] {
+            color: var(--scopy-text-primary);
+            font-weight: 600;
+          }
+          .scopy-rich-weather-summary {
+            margin: 12px 0 0;
+            font-size: calc(16px * var(--scopy-chatgpt-layout-font-scale));
+            line-height: calc(26px * var(--scopy-chatgpt-layout-font-scale));
+          }
+          .scopy-rich-weather-days {
+            display: flex;
+            width: auto;
+            height: 122px;
+            margin: 22px calc(-1 * var(--scopy-rich-card-padding)) 0;
+            padding: 0 var(--scopy-rich-card-padding);
+            overflow-x: auto;
+            overscroll-behavior-inline: contain;
+            scrollbar-width: none;
+          }
+          .scopy-rich-weather-day {
+            display: grid;
+            grid-template-rows: 20px 28px 26px 20px;
+            row-gap: 4px;
+            flex: 1 0 90px;
+            min-width: 90px;
+            height: 122px;
+            padding: 8px;
+            justify-items: center;
+            border-radius: var(--scopy-rich-control-radius);
+            text-align: center;
+            cursor: pointer;
+          }
+          .scopy-rich-weather-day[aria-selected="true"] {
+            background: rgba(140, 195, 235, 0.13);
+          }
+          .scopy-rich-weather-day-name {
+            font-size: calc(14px * var(--scopy-chatgpt-layout-font-scale));
+            line-height: calc(20px * var(--scopy-chatgpt-layout-font-scale));
+            font-weight: 500;
+          }
+          .scopy-rich-weather-day-icon,
+          .scopy-rich-weather-day-icon-placeholder {
+            display: block;
+            width: 28px;
+            height: 28px;
+            object-fit: contain;
+          }
+          .scopy-rich-weather-day-high {
+            font-size: calc(16px * var(--scopy-chatgpt-layout-font-scale));
+            line-height: calc(26px * var(--scopy-chatgpt-layout-font-scale));
+            font-weight: 600;
+          }
+          .scopy-rich-weather-day-low {
+            color: var(--scopy-text-weak);
+            font-size: calc(14px * var(--scopy-chatgpt-layout-font-scale));
+            line-height: calc(20px * var(--scopy-chatgpt-layout-font-scale));
+          }
+          .scopy-rich-weather-chart-title {
+            display: flex;
+            width: auto;
+            height: 28px;
+            margin: 20px calc(-1 * var(--scopy-rich-card-padding)) 0;
+            padding: 0 12px;
+            align-items: center;
+            gap: 8px;
+            font-size: calc(14px * var(--scopy-chatgpt-layout-font-scale));
+            line-height: calc(28px * var(--scopy-chatgpt-layout-font-scale));
+            font-weight: 500;
+          }
+          .scopy-rich-weather-chart-title .scopy-icon {
+            width: 7px;
+            height: 11px;
+            color: var(--scopy-text-weak);
+          }
+          .scopy-rich-weather-chart {
+            position: relative;
+            width: auto;
+            height: 128px;
+            margin: 8px calc(-1 * var(--scopy-rich-card-padding)) 0;
+            padding-bottom: 8px;
+            overflow-x: auto;
+            overflow-y: hidden;
+            overscroll-behavior-inline: contain;
+            scrollbar-width: none;
+          }
+          .scopy-rich-weather-chart svg {
+            display: block;
+            width: auto;
+            min-width: 100%;
+            max-width: none;
+            height: 120px;
+          }
+          .scopy-rich-weather-chart-line {
+            stroke: rgb(17, 17, 17);
+            stroke-width: 2;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+          }
+          .scopy-rich-chart-dot {
+            fill: rgb(17, 17, 17);
+            stroke: #ffffff;
+            stroke-width: 2;
+          }
+          .scopy-rich-weather-chart-value {
+            fill: var(--scopy-text-primary);
+            font-size: 14px;
+            font-weight: 600;
+          }
+          .scopy-rich-weather-chart-time {
+            fill: var(--scopy-text-secondary);
+            font-size: 12px;
+          }
+          .scopy-rich-finance-card {
+            padding: 0;
+          }
+          .scopy-rich-finance-header {
+            padding: 20px 20px 12px;
+            border-bottom: 1px solid var(--scopy-rich-border);
+          }
+          .scopy-rich-finance-asset {
+            margin: 0;
+            color: var(--scopy-text-secondary);
+            font-size: calc(14px * var(--scopy-chatgpt-layout-font-scale));
+            line-height: calc(20px * var(--scopy-chatgpt-layout-font-scale));
+          }
+          .scopy-rich-finance-price {
+            margin: 4px 0 0;
+            font-size: calc(24px * var(--scopy-chatgpt-layout-font-scale));
+            line-height: calc(32px * var(--scopy-chatgpt-layout-font-scale));
+            font-weight: 500;
+          }
+          .scopy-rich-finance-summary {
+            margin-top: 4px;
+          }
+          .scopy-rich-finance-summary p,
+          .scopy-rich-finance-after-hours {
+            margin: 0;
+            font-size: calc(14px * var(--scopy-chatgpt-layout-font-scale));
+            line-height: calc(20px * var(--scopy-chatgpt-layout-font-scale));
+          }
+          .scopy-rich-finance-change,
+          .scopy-rich-finance-after-hours {
+            font-weight: 500;
+          }
+          .scopy-rich-finance-date-range,
+          .scopy-rich-finance-after-hours {
+            margin-top: 4px;
+          }
+          .scopy-rich-finance-date-range,
+          .scopy-rich-finance-after-hours-label {
+            color: var(--scopy-text-secondary);
+            font-weight: 400;
+          }
+          .scopy-rich-trend-up .scopy-rich-finance-change,
+          .scopy-rich-trend-up.scopy-rich-finance-after-hours {
+            color: rgb(38, 112, 46);
+          }
+          .scopy-rich-trend-down .scopy-rich-finance-change,
+          .scopy-rich-trend-down.scopy-rich-finance-after-hours {
+            color: rgb(239, 65, 70);
+          }
+          .scopy-rich-trend-flat .scopy-rich-finance-change,
+          .scopy-rich-trend-flat.scopy-rich-finance-after-hours {
+            color: var(--scopy-text-secondary);
+          }
+          .scopy-rich-finance-after-hours-price {
+            color: var(--scopy-text-primary);
+            font-weight: 500;
+          }
+          .scopy-rich-finance-chart.scopy-rich-trend-up { color: rgb(75, 158, 83); }
+          .scopy-rich-finance-chart.scopy-rich-trend-down { color: rgb(239, 65, 70); }
+          .scopy-rich-finance-chart.scopy-rich-trend-flat { color: var(--scopy-text-secondary); }
+          .scopy-rich-finance-ranges {
+            display: grid;
+            grid-auto-flow: column;
+            grid-auto-columns: minmax(var(--scopy-rich-range-min-width), 1fr);
+            width: 100%;
+            max-width: 100%;
+            height: 32px;
+            gap: 2px;
+            margin-top: 20px;
+            padding: 2px 20px;
+            overflow-x: auto;
+            overscroll-behavior-inline: contain;
+            scrollbar-width: none;
+          }
+          .scopy-rich-finance-range {
+            position: relative;
+            width: 100%;
+            height: 28px;
+            padding: 0 8px;
+            border-radius: 999px;
+            color: var(--scopy-text-weak);
+            font-size: calc(14px * var(--scopy-chatgpt-layout-font-scale));
+            line-height: calc(14px * var(--scopy-chatgpt-layout-font-scale));
+            font-weight: 600;
+            cursor: pointer;
+          }
+          .scopy-rich-finance-range[aria-checked="true"] {
+            color: var(--scopy-text-primary);
+            background: rgb(244, 244, 244);
+          }
+          .scopy-rich-finance-chart {
+            position: relative;
+            width: 100%;
+            height: clamp(200px, 31.25cqi, 240px);
+            margin: 0;
+            overflow: visible;
+          }
+          .scopy-rich-finance-charts {
+            margin: 16px 8px 0 20px;
+          }
+          .scopy-rich-finance-chart svg {
+            display: block;
+            width: 100%;
+            height: 100%;
+          }
+          .scopy-rich-finance-grid-line {
+            stroke: rgb(226, 226, 226);
+            stroke-width: 1;
+            stroke-dasharray: 3 4;
+          }
+          .scopy-rich-finance-chart-line {
+            stroke: currentColor;
+            stroke-width: 2;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+          }
+          .scopy-rich-finance-axis-label {
+            fill: var(--scopy-text-secondary);
+            font-size: 12px;
+          }
+          .scopy-rich-finance-hit-point {
+            fill: transparent;
+            stroke: transparent;
+          }
+          .scopy-rich-chart-tooltip {
+            position: absolute;
+            z-index: 4;
+            top: 12px;
+            left: 50%;
+            display: flex;
+            gap: 8px;
+            padding: 8px 12px;
+            border: 1px solid var(--scopy-rich-border);
+            border-radius: 10px;
+            color: var(--scopy-text-primary);
+            background: var(--scopy-surface-bg);
+            box-shadow: 0 4px 16px rgba(13, 13, 13, 0.12);
+            font-size: 13px;
+            line-height: 18px;
+            transform: translateX(-50%);
+            max-width: calc(100% - 24px);
+            white-space: normal;
+            pointer-events: none;
+          }
+          .scopy-rich-finance-metrics {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(min(12rem, 100%), 1fr));
+            gap: 8px 32px;
+            margin: 16px 20px 20px;
+          }
+          .scopy-rich-finance-metrics > div {
+            display: flex;
+            min-width: 0;
+            align-items: baseline;
+            justify-content: space-between;
+            gap: 2px;
+          }
+          .scopy-rich-finance-metrics dt,
+          .scopy-rich-finance-metrics dd {
+            font-size: calc(14px * var(--scopy-chatgpt-layout-font-scale));
+            line-height: calc(20px * var(--scopy-chatgpt-layout-font-scale));
+          }
+          .scopy-rich-finance-metrics dt {
+            color: var(--scopy-text-secondary);
+          }
+          .scopy-rich-finance-metrics dd {
+            margin: 0;
+            text-align: end;
+          }
+          @container (max-width: 32rem) {
+            .scopy-rich-weather-day {
+              flex-grow: 0;
+            }
+            .scopy-rich-finance-metrics {
+              grid-template-columns: minmax(0, 1fr);
+            }
+          }
+          .scopy-rich-currency-card {
+            min-height: 199px;
+            display: grid;
+            grid-template-rows: repeat(2, minmax(0, 1fr));
+          }
+          .scopy-rich-currency-row {
+            position: relative;
+            display: flex;
+            min-width: 0;
+            padding: 0 20px;
+            flex-direction: column;
+            justify-content: center;
+            gap: 4px;
+          }
+          .scopy-rich-currency-row + .scopy-rich-currency-row::before {
+            content: "";
+            position: absolute;
+            top: 0;
+            right: 20px;
+            left: 20px;
+            height: 1px;
+            background: var(--scopy-rich-border);
+          }
+          .scopy-rich-currency-label {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            color: var(--scopy-text-secondary);
+            font-size: calc(16px * var(--scopy-chatgpt-layout-font-scale));
+            line-height: calc(20px * var(--scopy-chatgpt-layout-font-scale));
+          }
+          .scopy-rich-currency-flag {
+            font-size: calc(14px * var(--scopy-chatgpt-layout-font-scale));
+          }
+          .scopy-rich-currency-value {
+            display: flex;
+            min-width: 0;
+            align-items: baseline;
+          }
+          .scopy-rich-currency-symbol {
+            margin-inline-end: 4px;
+            color: var(--scopy-text-secondary);
+            font-size: calc(18px * var(--scopy-chatgpt-layout-font-scale));
+            line-height: calc(32px * var(--scopy-chatgpt-layout-font-scale));
+          }
+          .scopy-rich-currency-input {
+            min-width: 0;
+            width: min(18ch, calc(100% - 28px));
+            margin: 0;
+            padding: 0;
+            border: 0;
+            outline: 0;
+            color: var(--scopy-text-primary);
+            background: transparent;
+            font-size: calc(24px * var(--scopy-chatgpt-layout-font-scale));
+            line-height: calc(32px * var(--scopy-chatgpt-layout-font-scale));
+            font-weight: 400;
+            direction: ltr;
+            unicode-bidi: isolate;
+          }
+          .scopy-rich-currency-input[aria-invalid="true"] {
+            color: rgb(239, 65, 70);
+          }
+          html.scopy-export-mode .scopy-rich-lightbox,
+          html.scopy-export-mode .scopy-rich-chart-tooltip {
+            display: none !important;
+          }
+          html.scopy-export-mode .scopy-rich button,
+          html.scopy-export-mode .scopy-rich input {
+            pointer-events: none;
           }
           blockquote {
             position: relative;
@@ -1175,7 +1887,6 @@ enum MarkdownHTMLDocumentBuilder {
                   }
                 };
                 \(tableWrapFunctionScript)
-                \(sourceCitationFunctionScript)
                 window.__scopyReportHeight = function (force) {
                   try {
                     if (!window.webkit || !window.webkit.messageHandlers || !window.webkit.messageHandlers.scopySize) { return; }
@@ -1232,6 +1943,73 @@ enum MarkdownHTMLDocumentBuilder {
                     });
                   } catch (e) { }
                 };
+                function replaceFailedImage(image) {
+                  try {
+                    if (!image || !image.parentNode) { return; }
+                    var fallback = document.createElement('span');
+                    var label = String(image.getAttribute('alt') || '').trim();
+                    fallback.className = 'scopy-image-terminal-fallback';
+                    fallback.setAttribute('role', 'img');
+                    fallback.setAttribute('aria-label', label || '图片无法显示');
+                    fallback.setAttribute('data-scopy-image-state', 'error');
+                    fallback.textContent = label ? label + ' · 图片无法显示' : '图片无法显示';
+                    image.parentNode.replaceChild(fallback, image);
+                  } catch (e) { }
+                }
+                function settleRenderedImages(root, completion) {
+                  var images = [];
+                  try {
+                    images = root && root.querySelectorAll ? Array.prototype.slice.call(root.querySelectorAll('img:not([data-scopy-deferred-image])')) : [];
+                  } catch (e) {
+                    images = [];
+                  }
+                  if (!images.length) {
+                    completion();
+                    return;
+                  }
+                  var remaining = images.length;
+                  var completed = false;
+                  var settled = [];
+                  function finishAll() {
+                    if (completed || remaining > 0) { return; }
+                    completed = true;
+                    completion();
+                  }
+                  function finishImage(image, succeeded) {
+                    var index = images.indexOf(image);
+                    if (index < 0 || settled[index]) { return; }
+                    settled[index] = true;
+                    remaining -= 1;
+                    try {
+                      image.setAttribute('data-scopy-image-state', succeeded ? 'ready' : 'error');
+                    } catch (e) { }
+                    if (!succeeded) { replaceFailedImage(image); }
+                    finishAll();
+                  }
+                  for (var i = 0; i < images.length; i++) {
+                    (function (image) {
+                      try {
+                        image.addEventListener('load', function () { finishImage(image, true); }, { once: true });
+                        image.addEventListener('error', function () { finishImage(image, false); }, { once: true });
+                        if (image.complete) {
+                          setTimeout(function () { finishImage(image, (image.naturalWidth || 0) > 0); }, 0);
+                        } else if (typeof image.decode === 'function') {
+                          image.decode().then(
+                            function () { finishImage(image, true); },
+                            function () { finishImage(image, false); }
+                          );
+                        }
+                      } catch (e) {
+                        finishImage(image, false);
+                      }
+                    })(images[i]);
+                  }
+                  setTimeout(function () {
+                    for (var i = 0; i < images.length; i++) {
+                      if (!settled[i]) { finishImage(images[i], false); }
+                    }
+                  }, 1500);
+                }
                 function finish(succeeded) {
                   var el = document.getElementById('content');
                   if (el) {
@@ -1290,7 +2068,10 @@ enum MarkdownHTMLDocumentBuilder {
                     var result = window.ScopyUnifiedMarkdown.render(\(markdownLiteral), \(policyLiteral));
                     if (result && result.html) {
                       el.innerHTML = result.html;
-                      normalizeSourceCitations(el, \(markdownLiteral));
+                      if (typeof window.ScopyUnifiedMarkdown.hydrateRich === 'function') {
+                        var exportMode = !!(document.documentElement && document.documentElement.classList && document.documentElement.classList.contains('scopy-export-mode'));
+                        window.ScopyUnifiedMarkdown.hydrateRich(el, { exportMode: exportMode });
+                      }
                       if (typeof window.__scopyApplyTaskLists === 'function') {
                         window.__scopyApplyTaskLists(el);
                       }
@@ -1306,7 +2087,7 @@ enum MarkdownHTMLDocumentBuilder {
                     failUnifiedRender('unified render exception');
                     return;
                   }
-                  finish(true);
+                  settleRenderedImages(el, function () { finish(true); });
                 }
                 if (document.readyState === 'loading') {
                   document.addEventListener('DOMContentLoaded', renderUnified);

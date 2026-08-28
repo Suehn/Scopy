@@ -210,6 +210,162 @@ final class ClipboardMonitorTests: XCTestCase {
         XCTAssertFalse(text.contains("katex"))
     }
 
+    func testReadCurrentClipboardHTMLPrefersRelatedStructuredMarkdownPlainTextAndKeepsHTMLPayload() {
+        let markdown = """
+        # Portfolio construction
+
+        The **allocation rule** has two parts:
+
+        - Keep a liquid reserve.
+        - Size risk with $w_i = \\frac{1}{N}$.
+
+        Extra source detail retained only by the authored Markdown.
+        """
+        let html = """
+        <html><body>
+        <h1>Portfolio construction</h1>
+        <p>The <strong>allocation rule</strong> has two parts:</p>
+        <ul><li>Keep a liquid reserve.</li><li>Size risk with
+        <span class="katex"><span class="katex-mathml"><math><semantics>
+        <annotation encoding="application/x-tex">w_i = \\frac{1}{N}</annotation>
+        </semantics></math></span><span class="katex-html" aria-hidden="true">...</span></span>.</li></ul>
+        </body></html>
+        """
+        let htmlData = Data(html.utf8)
+
+        pasteboard.clearContents()
+        let item = NSPasteboardItem()
+        item.setString(markdown, forType: .string)
+        item.setData(htmlData, forType: .html)
+        pasteboard.writeObjects([item])
+
+        let content = monitor.readCurrentClipboard()
+        XCTAssertEqual(content?.type, .html)
+        XCTAssertEqual(content?.plainText, markdown)
+        XCTAssertEqual(content?.rawData, htmlData)
+        XCTAssertEqual(content?.contentHash, ClipboardMonitor.computeHashStatic(Data(markdown.utf8)))
+    }
+
+    func testReadCurrentClipboardHTMLPrefersRelatedSingleMarkdownLink() {
+        let markdown = "Read the [Open Codex community renderer](https://github.com/open-codex/opencode) for implementation details."
+        let html = "<html><body><p>Read the <a href=\"https://github.com/open-codex/opencode\">Open Codex community renderer</a> for implementation details.</p></body></html>"
+
+        pasteboard.clearContents()
+        let item = NSPasteboardItem()
+        item.setString(markdown, forType: .string)
+        item.setData(Data(html.utf8), forType: .html)
+        pasteboard.writeObjects([item])
+
+        let content = monitor.readCurrentClipboard()
+        XCTAssertEqual(content?.type, .html)
+        XCTAssertEqual(content?.plainText, markdown)
+    }
+
+    func testReadCurrentClipboardHTMLPrefersRelatedConsecutiveMarkdownImages() {
+        let markdown = """
+        Reference images:
+
+        ![Stock chart](https://example.com/stock.png)
+        ![Weather card](https://example.com/weather.png)
+        """
+        let html = "<html><body><p>Reference images:</p><p>Stock chart<br>Weather card</p></body></html>"
+
+        pasteboard.clearContents()
+        let item = NSPasteboardItem()
+        item.setString(markdown, forType: .string)
+        item.setData(Data(html.utf8), forType: .html)
+        pasteboard.writeObjects([item])
+
+        let content = monitor.readCurrentClipboard()
+        XCTAssertEqual(content?.type, .html)
+        XCTAssertEqual(content?.plainText, markdown)
+    }
+
+    func testReadCurrentClipboardHTMLRejectsStructuredMarkdownWithLargeUnrelatedTail() {
+        let shared = "Quarterly summary confirms stable demand and improving service quality."
+        let unrelatedTail = Array(repeating: "Unrelated appendix discusses gardening soil irrigation pruning and seeds.", count: 24)
+            .joined(separator: "\n")
+        let markdown = "# Quarterly summary\n\n\(shared)\n\n## Unrelated appendix\n\n\(unrelatedTail)"
+        let html = "<html><body><h1>Quarterly summary</h1><p>\(shared)</p></body></html>"
+
+        pasteboard.clearContents()
+        let item = NSPasteboardItem()
+        item.setString(markdown, forType: .string)
+        item.setData(Data(html.utf8), forType: .html)
+        pasteboard.writeObjects([item])
+
+        let content = monitor.readCurrentClipboard()
+        XCTAssertEqual(content?.type, .html)
+        XCTAssertNotEqual(content?.plainText, markdown)
+        XCTAssertTrue(content?.plainText.contains(shared) ?? false)
+        XCTAssertFalse(content?.plainText.contains("gardening soil") ?? true)
+    }
+
+    func testReadCurrentClipboardHTMLDoesNotPreferUnrelatedStructuredMarkdownOverKaTeXHTML() {
+        let unrelatedMarkdown = """
+        # Completely unrelated note
+
+        - Apples are red.
+        - Oceans are blue.
+        """
+        let html = """
+        <html><body><p>Equation:
+        <span class="katex"><span class="katex-mathml"><math><semantics>
+        <annotation encoding="application/x-tex">E = mc^2</annotation>
+        </semantics></math></span><span class="katex-html" aria-hidden="true">...</span></span>
+        </p></body></html>
+        """
+
+        pasteboard.clearContents()
+        let item = NSPasteboardItem()
+        item.setString(unrelatedMarkdown, forType: .string)
+        item.setData(Data(html.utf8), forType: .html)
+        pasteboard.writeObjects([item])
+
+        let content = monitor.readCurrentClipboard()
+        XCTAssertEqual(content?.type, .html)
+        XCTAssertNotEqual(content?.plainText, unrelatedMarkdown)
+        XCTAssertTrue(content?.plainText.contains("$E = mc^2$") ?? false)
+    }
+
+    func testReadCurrentClipboardHTMLKeepsKaTeXExtractionForRelatedNonMarkdownPlainText() {
+        let plainText = "Equation E equals m c squared"
+        let html = """
+        <html><body><p>Equation
+        <span class="katex"><span class="katex-mathml"><math><semantics>
+        <annotation encoding="application/x-tex">E = mc^2</annotation>
+        </semantics></math></span><span class="katex-html" aria-hidden="true">...</span></span>
+        </p></body></html>
+        """
+
+        pasteboard.clearContents()
+        let item = NSPasteboardItem()
+        item.setString(plainText, forType: .string)
+        item.setData(Data(html.utf8), forType: .html)
+        pasteboard.writeObjects([item])
+
+        let content = monitor.readCurrentClipboard()
+        XCTAssertEqual(content?.type, .html)
+        XCTAssertNotEqual(content?.plainText, plainText)
+        XCTAssertTrue(content?.plainText.contains("$E = mc^2$") ?? false)
+    }
+
+    func testReadCurrentClipboardHTMLWithoutPlainTextStillUsesHTMLExtraction() {
+        let html = """
+        <html><body><h2>Only HTML</h2><p>No plain-text MIME was provided.</p></body></html>
+        """
+        let htmlData = Data(html.utf8)
+
+        pasteboard.clearContents()
+        pasteboard.setData(htmlData, forType: .html)
+
+        let content = monitor.readCurrentClipboard()
+        XCTAssertEqual(content?.type, .html)
+        XCTAssertTrue(content?.plainText.contains("Only HTML") ?? false)
+        XCTAssertTrue(content?.plainText.contains("No plain-text MIME was provided.") ?? false)
+        XCTAssertEqual(content?.rawData, htmlData)
+    }
+
     func testReadCurrentClipboardRTFPrefersKaTeXAnnotationFromHTMLWhenAvailable() throws {
         let html = """
         <html><body>
@@ -807,6 +963,51 @@ final class ClipboardMonitorTests: XCTestCase {
         XCTAssertNotNil(receivedContent)
         XCTAssertEqual(receivedContent?.type, .html)
         XCTAssertEqual(receivedContent?.plainText, expectedText)
+    }
+
+    func testMonitorEmitsStructuredMarkdownFromRelatedHTMLDualMIME() async {
+        let markdown = """
+        ## Emitted answer
+
+        - Preserve this Markdown.
+        - Keep $x = \\frac{1}{2}$ intact.
+        """
+        let html = """
+        <html><body><h2>Emitted answer</h2><ul><li>Preserve this Markdown.</li><li>Keep
+        <span class="katex"><span class="katex-mathml"><math><semantics>
+        <annotation encoding="application/x-tex">x = \\frac{1}{2}</annotation>
+        </semantics></math></span><span class="katex-html" aria-hidden="true">...</span></span> intact.</li></ul></body></html>
+        """
+        let htmlData = Data(html.utf8)
+        var receivedContent: ClipboardMonitor.ClipboardContent?
+
+        monitor.setPollingInterval(0.1)
+        pasteboard.clearContents()
+        pasteboard.setString("Baseline \(UUID())", forType: .string)
+        monitor.startMonitoring()
+
+        let expectation = XCTestExpectation(description: "Structured Markdown emitted from dual MIME")
+        let task = Task {
+            for await content in monitor.contentStream {
+                if content.type == .html, content.plainText == markdown {
+                    receivedContent = content
+                    expectation.fulfill()
+                    break
+                }
+            }
+        }
+        defer { task.cancel() }
+
+        try? await Task.sleep(nanoseconds: 100_000_000)
+        pasteboard.clearContents()
+        let item = NSPasteboardItem()
+        item.setString(markdown, forType: .string)
+        item.setData(htmlData, forType: .html)
+        pasteboard.writeObjects([item])
+
+        await fulfillment(of: [expectation], timeout: 3.0)
+        XCTAssertEqual(receivedContent?.plainText, markdown)
+        XCTAssertEqual(receivedContent?.rawData, htmlData)
     }
 
     func testMonitorPrefersImageWhenTemporaryImageFileURLAndImageBothExist() async throws {

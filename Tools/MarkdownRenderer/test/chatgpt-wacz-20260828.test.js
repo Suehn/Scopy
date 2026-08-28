@@ -97,6 +97,9 @@ test("Scopy stability contract: footnote hrefs and IDs share one namespace", () 
   assert.match(result.html, /href="#scopy-fn-a" id="scopy-fnref-a-2"/);
   assert.match(result.html, /<li id="scopy-fn-a">/);
   assert.match(result.html, /href="#scopy-fnref-a"/);
+  assert.equal((result.html.match(/data-footnote-ref/g) || []).length, 2);
+  assert.equal((result.html.match(/data-footnote-backref/g) || []).length, 2);
+  assert.doesNotMatch(result.html, /scopy-link--(?:internal|external|file)|scopy-icon--external-link/);
   assert.doesNotMatch(result.html, /user-content-user-content/);
 });
 

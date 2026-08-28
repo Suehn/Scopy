@@ -5,6 +5,7 @@ owner: maintainers
 last_reviewed: 2026-07-11
 canonical: true
 related_versions:
+  - v0.70.0
   - v0.65.0
 ---
 
@@ -16,6 +17,7 @@ related_versions:
 - Release index: [../releases/README.md](../releases/README.md)
 - Release changelog: [../releases/CHANGELOG.md](../releases/CHANGELOG.md)
 - Development guide: [development-guide.md](./development-guide.md)
+- Markdown/rich rendering contract: [markdown-chatgpt-wacz-style-contract.md](./markdown-chatgpt-wacz-style-contract.md)
 - Release runbook: [release-runbook.md](./release-runbook.md)
 - Requirements: [product-spec.md](./product-spec.md)
 - Architecture/optimization guidance: [architecture.md](./architecture.md)
@@ -58,8 +60,8 @@ related_versions:
 - `doc/perf/` and `doc/reviews/` contain evidence, not source-of-truth product requirements.
 - `doc/archive/` preserves pre-reorg material; use it for traceability, not day-to-day navigation.
 
-## Compatibility Policy
+## Obsolete-Path Policy
 
-- Legacy paths are preserved only for inbound compatibility. New links should target canonical locations under `doc/current`, `doc/releases`, `doc/perf`, `doc/reviews`, `doc/proposals`, and `doc/meta`.
+- Do not preserve legacy paths for inbound compatibility. Historical files may remain only as non-normative evidence under `doc/archive`; remove obsolete active paths and update callers to canonical locations under `doc/current`, `doc/releases`, `doc/perf`, `doc/reviews`, `doc/proposals`, and `doc/meta`.
 - Do not add new automation that scrapes Markdown tables for release state.
 - Do not grant non-release workflows write permission or add workflow-owned tag creation. Keep publication downstream of a deliberate existing tag or explicit dispatch.

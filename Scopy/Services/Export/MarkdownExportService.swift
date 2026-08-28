@@ -1470,6 +1470,11 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
             if (content) {
               try { content.style.opacity = '1'; } catch (e) { }
               try { content.style.transition = 'none'; } catch (e) { }
+              try {
+                if (window.ScopyUnifiedMarkdown && typeof window.ScopyUnifiedMarkdown.freezeRichForExport === 'function') {
+                  window.ScopyUnifiedMarkdown.freezeRichForExport(content);
+                }
+              } catch (e) { }
               try { if (typeof window.syncChatGPTZoomShell === 'function') { window.syncChatGPTZoomShell(content); } } catch (e) { }
             }
             try { if (typeof window.__scopyRenderMath === 'function') { window.__scopyRenderMath(); } } catch (e) { }
