@@ -10,6 +10,9 @@ Selected SVG path data comes from `@phosphor-icons/core` 2.1.1:
 - `assets/regular/image.svg`
 - `assets/regular/arrow-up-right.svg`
 - `assets/regular/globe.svg`
+- `assets/fill/star-fill.svg`
+- `assets/fill/map-pin-fill.svg`
+- `assets/fill/play-fill.svg`
 - `assets/regular/x.svg`
 - `assets/regular/caret-left.svg`
 - `assets/regular/caret-right.svg`

@@ -295,10 +295,20 @@ final class ChatGPTMarkdownRendererTests: XCTestCase {
 
         XCTAssertEqual(
             key,
-            "md|\(MarkdownRenderContextResolver.rendererVersion)|chatGPTMarkdown|chatgpt-layout-125|hash-z"
+            "md|\(MarkdownRenderContextResolver.rendererVersion)|chatGPTMarkdown|chatgpt-layout-125|plain|hash-z"
         )
         XCTAssertFalse(key.contains("legacy"))
         XCTAssertEqual(MarkdownRenderCacheKey.make(contentHash: "", context: context), "")
+
+        var enriched = context
+        enriched.linkEnrichment = LinkEnrichmentPayload(
+            version: LinkEnrichmentPayload.formatVersion,
+            fetchedAt: Date(),
+            entries: ["https://example.com": .init(title: "T")]
+        )
+        let enrichedKey = MarkdownRenderCacheKey.make(contentHash: "hash-z", context: enriched)
+        XCTAssertNotEqual(enrichedKey, key, "the enrichment fingerprint participates in the cache key")
+        XCTAssertFalse(enrichedKey.contains("|plain|"))
     }
 
     func testRenderIdentityInjectionIsPerLoadAndEscapesNoContent() {

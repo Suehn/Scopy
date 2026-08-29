@@ -68,9 +68,21 @@ test("renders the complete strict-v2 rich fixture with its rejection example int
       ["weather", "ready"],
       ["currency", "ready"],
       ["web_results", "ready"],
+      ["video", "ready"],
+      ["product", "ready"],
+      ["product_carousel", "ready"],
+      ["entity", "ready"],
+      ["map", "ready"],
       ["news", "empty"]
     ]
   );
+  assert.match(result.html, /scopy-rich-video-play/);
+  assert.match(result.html, /scopy-rich-product-original-price">\$99\.99</);
+  assert.equal(countMatches(result.html, /scopy-rich-product-card--carousel/g), 3);
+  assert.match(result.html, /data-scopy-rating-halves="9"/);
+  assert.match(result.html, /scopy-rich-entity-detail-label">Hours</);
+  assert.equal(countMatches(result.html, /scopy-rich-map-pin"/g), 3);
+  assert.match(result.html, /scopy-rich-map-image/);
   assert.equal(countMatches(result.html, /class="scopy-source-citation-link"/g), 1);
   assert.equal(countMatches(result.html, /<pre>/g), 1);
   assert.match(result.html, /<pre><code class="language-text">```scopy-rich\n\{"version":3,"type":"news","items":\[\]\}/);
@@ -117,10 +129,27 @@ test("renders the exact public ChatGPT Markdown copy without reconstructing priv
   );
 
   assert.doesNotMatch(result.html, /<img[^>]+src="https?:\/\//i);
+  // Field-preserving public adapters: the image group, one YouTube video, three copied
+  // product blocks, and three copied place blocks become cards from visible fields only.
   assert.deepEqual(
     Array.from(result.html.matchAll(/class="scopy-rich scopy-rich-([^"\s]+)/g), (match) => match[1]),
-    ["image-group"]
+    ["image-group", "video", "product", "product", "product", "entity", "entity", "entity"]
   );
+  assert.match(result.html, /scopy-rich-video-title">OpenAI — Search: 12 Days of OpenAI, Day 8</);
+  assert.deepEqual(
+    Array.from(result.html.matchAll(/scopy-rich-product-title">([^<]+)</g), (match) => match[1]),
+    ["Logitech MX Master 3S", "Keychron Q1 Max", "Sony WH-1000XM6"]
+  );
+  assert.deepEqual(
+    Array.from(result.html.matchAll(/scopy-rich-product-price">([^<]+)</g), (match) => match[1]),
+    ["$79.99", "$209.99", "$398.00"]
+  );
+  assert.deepEqual(
+    Array.from(result.html.matchAll(/scopy-rich-entity-name[^>]*>([^<]+)</g), (match) => match[1]),
+    ["Blue Bottle Coffee", "Sightglass Coffee", "Four Barrel Coffee"]
+  );
+  assert.match(result.html, /scopy-rich-entity-detail-label">Address</);
+  assert.doesNotMatch(result.html, /scopy-rich-rating/, "no adapter invents ratings the copy does not carry");
   assert.match(
     result.html,
     /<a class="scopy-link scopy-link--inert">chatgpt_render_reference_demo\.txt<\/a>/

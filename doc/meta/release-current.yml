@@ -1,6 +1,6 @@
-version: v0.71.0
+version: v0.72.0
 date: 2026-08-29
-release_doc: doc/releases/history/v0.71.0.md
+release_doc: doc/releases/history/v0.72.0.md
 release_index: doc/releases/README.md
 changelog_file: doc/releases/CHANGELOG.md
 profile_doc: null
@@ -9,16 +9,16 @@ spec_doc: doc/current/product-spec.md
 development_doc: doc/current/development-guide.md
 architecture_doc: doc/current/architecture.md
 last_verified_at: 2026-08-29
-summary: Renderer hardening gate and desktop-wide rich fidelity
+summary: All rich surface types, opt-in link enrichment, and Sparkle auto-update
 verification:
   docs_validate: pass
   release_validate: pass
   release_policy: pass_15_cases
   build: pass
-  renderer_js: pass_100_executed_0_failures
-  assets_verify: pass_renderer_11727ec7_katex_0_16_45_fonts_60
-  test_unit: pass_762_executed_2_skipped_0_failures
-  test_strict: pass_762_executed_2_skipped_0_failures
-  real_app_png_export: pass_rich_surfaces_1080x5740_public_copy_1080x14027_stress_1080x69304_safe_html_1080x1526
-  preview_harness: pass_terminal_rendered_at_80_100_200_scales
+  renderer_js: pass_106_executed_0_failures
+  assets_verify: pass_renderer_b5e67dd9_katex_0_16_45_fonts_60
+  test_unit: pass_767_executed_3_skipped_0_failures
+  test_strict: pass_767_executed_3_skipped_0_failures
+  real_app_png_export: pass_rich_all_types_1080x8423_public_copy_adapters_1080x14769_enrichment_e2e_1080x664
+  live_network_fetch: pass_gated_openai_com_2_58s
   xcuitest_wrapper: blocked_accessibility_not_loaded_not_counted_as_pass

@@ -2,6 +2,7 @@ import AppKit
 import CoreGraphics
 import ScopyKit
 import ScopyUISupport
+import Sparkle
 import SwiftUI
 
 @MainActor
@@ -24,6 +25,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var appliedHotKey: (keyCode: UInt32, modifiers: UInt32)?
     private var isHotKeyRegistered = false
     private let settingsStore: SettingsStore = .shared
+    /// Sparkle auto-update: checks the appcast daily, reminds the user when a new version
+    /// exists, and installs + relaunches on confirmation. Disabled in UI-test harnesses.
+    private(set) var updaterController: SPUStandardUpdaterController?
     /// v0.22: 存储事件监视器引用，以便在应用退出时移除
     private var localEventMonitor: Any?
 
@@ -40,6 +44,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             ScrollPerformanceProfile.shared.prepareForLaunch()
         }
         let context = resolveLaunchContext()
+
+        if !context.isUITesting {
+            updaterController = SPUStandardUpdaterController(
+                startingUpdater: true,
+                updaterDelegate: nil,
+                userDriverDelegate: nil
+            )
+        }
 
         if context.isExportHarness {
             uiTestWindow = makeExportHarnessWindow()

@@ -8,6 +8,7 @@ enum MarkdownRenderCacheKey {
             MarkdownRenderContextResolver.rendererVersion,
             context.profile.rawValue,
             context.layoutScale.cacheKey,
+            context.linkEnrichment?.fingerprint ?? "plain",
             contentHash
         ].joined(separator: "|")
     }

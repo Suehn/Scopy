@@ -8,6 +8,14 @@
     <string>$(EXECUTABLE_NAME)</string>
     <key>CFBundleIdentifier</key>
     <string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+    <key>SUFeedURL</key>
+    <string>https://github.com/Suehn/Scopy/releases/latest/download/appcast.xml</string>
+    <key>SUPublicEDKey</key>
+    <string>m+zaTiF3IVCocCvE0EFNM0EoFQWwcD9Qw1GjSVGDJC4=</string>
+    <key>SUEnableAutomaticChecks</key>
+    <true/>
+    <key>SUScheduledCheckInterval</key>
+    <integer>86400</integer>
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>CFBundleName</key>

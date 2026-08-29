@@ -5,6 +5,9 @@ import Foundation
 
 struct HistoryItemTextPreviewView: View {
     @Environment(SettingsViewModel.self) private var settingsViewModel
+    /// Bumped when a link-enrichment sidecar lands for the current text so the body
+    /// recomputes its render key and rebuilds the enriched document.
+    @State private var linkEnrichmentRevision = 0
     let model: HoverPreviewModel
     let markdownWebViewController: MarkdownPreviewWebViewController?
     let showMarkdownPlaceholder: Bool
@@ -96,11 +99,14 @@ struct HistoryItemTextPreviewView: View {
                         layoutScale: settingsMarkdownLayoutScale
                     )
                     let isLiveRender = model.isMarkdownRenderLive(for: renderKey)
+                    let defaultHTMLIsFresh = model.markdownHTMLEnrichmentFingerprint
+                        == HoverPreviewModel.enrichmentFingerprint(for: text)
                     let displayedDocument = displayedMarkdownDocument(
                         defaultHTML: html,
                         defaultRenderKey: defaultRenderKey,
                         layoutScale: layoutScale,
-                        activeRenderKey: renderKey
+                        activeRenderKey: renderKey,
+                        defaultHTMLIsFresh: defaultHTMLIsFresh
                     )
                     ZStack(alignment: .topTrailing) {
                         if let controller = markdownWebViewController {
@@ -143,6 +149,12 @@ struct HistoryItemTextPreviewView: View {
                     }
                     .task(id: renderKey) {
                         initializePreviewLayoutScaleFromSettingsIfNeeded()
+                        if settingsViewModel.settings.linkEnrichmentEnabled {
+                            let markdown = text
+                            Task.detached(priority: .utility) {
+                                await LinkEnrichmentCoordinator.shared.ensureEnrichment(markdown: markdown)
+                            }
+                        }
                         model.prepareMarkdownRender(for: renderKey)
                         if model.markdownMetricsLayoutScalePercent != layoutScale.rawValue {
                             markMarkdownPreviewAwaitingMetrics()
@@ -155,6 +167,13 @@ struct HistoryItemTextPreviewView: View {
                         )
                     }
                     .accessibilityIdentifier("History.Preview.Container")
+                    .onReceive(NotificationCenter.default.publisher(for: .scopyLinkEnrichmentDidUpdate)) { notification in
+                        guard let key = notification.userInfo?[LinkEnrichmentNotificationKey.contentKey] as? String,
+                              key == LinkEnrichmentContentKey.make(for: text)
+                        else { return }
+                        markMarkdownPreviewAwaitingMetrics()
+                        linkEnrichmentRevision += 1
+                    }
                     .background {
                         if isUITesting {
                             Text(
@@ -340,9 +359,10 @@ struct HistoryItemTextPreviewView: View {
         defaultHTML: String,
         defaultRenderKey: String,
         layoutScale: MarkdownChatGPTLayoutScalePercent,
-        activeRenderKey: String
+        activeRenderKey: String,
+        defaultHTMLIsFresh: Bool
     ) -> MarkdownDisplayDocument {
-        if layoutScale == settingsMarkdownLayoutScale {
+        if layoutScale == settingsMarkdownLayoutScale, defaultHTMLIsFresh {
             return MarkdownDisplayDocument(
                 html: defaultHTML,
                 renderKey: activeRenderKey,
@@ -377,7 +397,9 @@ struct HistoryItemTextPreviewView: View {
         renderKey: String
     ) async {
         guard isContentCurrent() else { return }
-        if layoutScale == settingsMarkdownLayoutScale {
+        let defaultHTMLIsFresh = model.markdownHTMLEnrichmentFingerprint
+            == HoverPreviewModel.enrichmentFingerprint(for: source)
+        if layoutScale == settingsMarkdownLayoutScale, defaultHTMLIsFresh {
             overrideMarkdownHTML = nil
             overrideMarkdownRenderKey = nil
             return

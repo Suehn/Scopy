@@ -35,6 +35,9 @@ public struct SettingsDTO: Sendable, Equatable {
     public var imagePreviewDelay: Double  // 悬浮预览延迟（秒）
     /// Markdown 预览/导出使用的 ChatGPT 排版比例。只影响字体度量与换行，不改变 PNG 目标像素宽度。
     public var markdownChatGPTLayoutScalePercent: Int
+    /// 当启用时，助手内容（ChatGPT/Codex 等）里的裸链接会联网抓取 Open Graph 标题与缩略图，
+    /// 冻结为本地 sidecar 后渲染成卡片。默认关闭；渲染层永不联网，此开关只门控抓取。
+    public var linkEnrichmentEnabled: Bool
 
     public static let `default` = SettingsDTO(
         maxItems: 10000,
@@ -60,6 +63,7 @@ public struct SettingsDTO: Sendable, Equatable {
         showImageThumbnails: true,
         thumbnailHeight: 40,
         imagePreviewDelay: 1.0,
-        markdownChatGPTLayoutScalePercent: MarkdownRenderLayoutConstants.defaultChatGPTLayoutScale.rawValue
+        markdownChatGPTLayoutScalePercent: MarkdownRenderLayoutConstants.defaultChatGPTLayoutScale.rawValue,
+        linkEnrichmentEnabled: false
     )
 }

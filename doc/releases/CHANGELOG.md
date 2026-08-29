@@ -12,6 +12,18 @@
 
 - No unreleased entries.
 
+## [v0.72.0] - 2026-08-29
+
+### Complete Rich Surface Vocabulary
+
+- Adds strict v2 `video`, `product`, `product_carousel`, `entity`, and `map` cards with the same closed validation, limits, and fail-closed fences as every other surface; three Phosphor glyphs join the closed icon set byte-identical to upstream.
+- Promotes exact visible public-copy shapes — lone YouTube links, link-plus-price blocks, and name/link/address blocks — into cards through the same validator; surfaces whose copy lacks data stay prose by contract.
+
+### Opt-In Link Enrichment And Auto-Update
+
+- Adds a default-off setting that fetches Open Graph titles and downscaled imagery for the bare links of recognized assistant content (ChatGPT web, Codex, citation-structured markdown) in the backend only, freezing results into content-hash sidecars whose fingerprints join every render cache key; the renderer, preview, and export never perform network access.
+- Integrates Sparkle 2.9.6 automatic updates: daily checks, a reminder prompt, install-and-relaunch, a manual check button in About, and a signed `appcast.xml` attached by the release workflow.
+
 ## [v0.71.0] - 2026-08-29
 
 ### Renderer Hardening

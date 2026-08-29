@@ -167,6 +167,39 @@ jobs:
             .build/Scopy-*.dmg.sha256
           body_path: release_body.md
 
+      - name: Generate and upload Sparkle appcast
+        if: ${{ steps.existing.outputs.has_assets != 'true' }}
+        env:
+          SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${SPARKLE_ED_PRIVATE_KEY:-}" ]]; then
+            echo "::warning title=Sparkle appcast skipped::SPARKLE_ED_PRIVATE_KEY secret is not set; auto-update feed was NOT published for this release."
+            exit 0
+          fi
+          VERSION="${{ steps.version.outputs.version }}"
+          TAG="${{ steps.version.outputs.tag }}"
+          SPARKLE_VERSION="2.9.6"
+          curl -fsSL -o /tmp/sparkle.tar.xz \
+            "https://github.com/sparkle-project/Sparkle/releases/download/${SPARKLE_VERSION}/Sparkle-${SPARKLE_VERSION}.tar.xz"
+          mkdir -p /tmp/sparkle-dist /tmp/appcast
+          tar -xf /tmp/sparkle.tar.xz -C /tmp/sparkle-dist
+          cp ".build/Scopy-${VERSION}.dmg" /tmp/appcast/
+          printf '%s' "${SPARKLE_ED_PRIVATE_KEY}" > /tmp/sparkle_ed_key
+          /tmp/sparkle-dist/bin/generate_appcast /tmp/appcast \
+            --ed-key-file /tmp/sparkle_ed_key \
+            --download-url-prefix "https://github.com/Suehn/Scopy/releases/download/${TAG}/" \
+            --maximum-versions 1
+          rm -f /tmp/sparkle_ed_key
+          cp /tmp/appcast/appcast.xml .build/appcast.xml
+
+      - name: Attach appcast to release
+        if: ${{ steps.existing.outputs.has_assets != 'true' && hashFiles('.build/appcast.xml') != '' }}
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          files: .build/appcast.xml
+
       - name: Fetch SHA256 file (reuse existing)
         if: ${{ steps.existing.outputs.has_assets == 'true' }}
         run: |

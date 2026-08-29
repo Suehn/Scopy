@@ -43,7 +43,7 @@ The ordinary ChatGPT Copy action observed alongside this capture writes both `te
 - weather, currency, and finance/stock cards disappear rather than becoming reconstructable card data;
 - an `image_group` becomes consecutive ordinary Markdown images;
 - news becomes ordinary links;
-- no consumer may rebuild a missing card from surrounding prose, private reference syntax, archived runtime bundles, or current network data.
+- the renderer may never rebuild a missing card from private reference syntax, archived runtime bundles, or network data; the closed field-preserving adapters defined below present only visible copied text. The sole network path is the opt-in producer-side link enrichment defined below, which freezes fetched metadata into ordinary v2 input before any rendering happens.
 
 Therefore this contract distinguishes five evidence levels:
 
@@ -96,6 +96,7 @@ Authoritative implementation surfaces:
 - `Tools/MarkdownRenderer/src/remarkScopySafeHTML.js`: the closed user-authored safe-HTML recognizer; unsupported or malformed forms fail to literal text.
 - `Tools/MarkdownRenderer/src/scopyLocalImageAssets.js`: the closed bundled-image allowlist and exact public-URL mappings used by fixtures.
 - `Tools/MarkdownRenderer/src/remarkScopyRich.js`: strict v2 validation and the only trusted rich-surface HAST builders.
+- `Tools/MarkdownRenderer/src/remarkScopyPublicCards.js`: the closed public-copy shape adapters that promote exact visible video/product/place blocks through the same v2 validator.
 - `Tools/MarkdownRenderer/src/richInteractionRuntime.js`: one delegated preview hydrator and deterministic export freeze.
 - `Tools/MarkdownRenderer/src/scopyIcons.js`: closed official Phosphor icon paths used by Codex-style links and rich controls.
 - `Tools/MarkdownRenderer/src/rehypeScopyKatex.js`: HTML-only math rendering and stable failure behavior.
@@ -109,7 +110,16 @@ There is no legacy renderer selection, feature flag, shadow renderer, silent mar
 
 Ordinary Markdown remains the public interchange fallback. When the producer actually possesses a complete structured surface, it may place one strict JSON object in a fenced block whose info string is exactly `scopy-rich`. The envelope freezes all source data needed for rendering and interaction; it is never a prompt to query, scrape, refresh, or infer. The same `MarkdownHTMLRenderer -> MarkdownHTMLDocumentBuilder` flow recognizes and validates it while building the same Markdown AST/HTML document. Preview hydration and PNG export are two modes of that one document, not separate card renderers or source fetches.
 
-Strict v2 is the only structured-data card input. One narrower public-copy presentation adapter is allowed: two or more consecutive image-only Markdown paragraphs may be grouped into the existing image-grid/lightbox shell using only the parsed images' visible `src`, `alt`, and `title`. This adapter does not reconstruct a missing ChatGPT `image_group` payload, promote surrounding prose, or invent source, date, citation, article, or private metadata. Exact known URLs may resolve to the closed bundled asset map; every other URL keeps only its public provenance and offline fallback. The internal handler may reuse the v2 image-group DOM for shared styling/export behavior, but that implementation detail does not turn the public Markdown into a recovered private envelope.
+Strict v2 is the only structured-data card input, and a closed set of public-copy presentation adapters may promote exact visible shapes into it (every candidate passes the same `normalizeRichSurface` authority; a failed candidate stays prose):
+
+- two or more consecutive image-only paragraphs reuse the image-grid/lightbox shell from visible `src`/`alt`/`title` (exact known URLs may resolve to the closed bundled asset map; every other URL keeps only its public provenance and offline fallback);
+- a paragraph that is exactly one YouTube-host link becomes a `video` card whose title is the link text;
+- a link-only paragraph or `### [title](url)` heading immediately followed by a price-only paragraph becomes a `product` card;
+- a paragraph of `Name` / single-link / `Address: …` (plus optional `Phone: …` / `Hours: …`) lines becomes an `entity` card, folding a duplicated bare-name paragraph above it.
+
+**Opt-in link enrichment (default off).** The backend `LinkEnrichmentService` may fetch Open Graph metadata for the bare links of assistant-shaped content (recognized by `utm_source=chatgpt.com` link rewriting, Codex absolute-file destinations, or reference-citation structure) and freeze it as a per-content sidecar: titles, source names, dates, snippets, and imagery downscaled into data URIs within the same strict v2 data-image limits. Requests are cookie-less, size- and time-capped, restricted to public HTTP(S) hosts, and happen only in that service — the renderer, preview WebView, and export never fetch, and the document CSP is unchanged. The setting gates fetching only: rendering always consumes whatever frozen sidecar already exists, the sidecar fingerprint participates in every render/metric cache key, and enriched bare-link runs render through the ordinary v2 `news`/`web_results` validators. Without a sidecar the degraded links render exactly as before.
+
+No adapter invents fields the copy does not carry: adapter cards have no thumbnails, ratings, or dates unless the source text contains them. This is also the honest ceiling of public-copy fidelity: ChatGPT's Copy action strips card payloads at the source (news collapses to bare source links; stock, weather, and exchange values may not survive as text at all), so surfaces whose visible copy lacks the data remain ordinary prose rather than fabricated cards. Full official-look cards require a producer that still possesses the structured data and writes a strict v2 envelope.
 
 ```text
 Markdown source
@@ -135,13 +145,18 @@ Display strings are already formatted and remain literal. The renderer does not 
 | `weather` | `location`; `selectedUnit` is `F` or `C`; `selectedDay`; `days[] { label, condition, icon, current, high, low, hourly }`. Each temperature display pair is `{ f, c }`; each hourly numeric pair is `{ f, c }`. |
 | `finance` | `asset { name, ticker }`; `quote { price, afterHours }`; `selectedRange`; unique `series[] { label, dateRange, change, changePercent, trend, points[] }`; `metrics[]`. A point is `{ label, value, displayValue }`. |
 | `currency` | `from` and `to` identities; frozen numeric `amount` and positive `rate`; integer `fractionDigits`. Preview may calculate the other input in either direction from only these frozen values. |
+| `video` | Required safe HTTP(S) `url` and common `title`; optional `channel`, `duration`, and `thumbnail` image reference. Renders a play-badged media card; nothing embeds or fetches a player. |
+| `product` | One `product` object: required `title`; optional safe `url`, display `price`/`originalPrice`/`merchant`/`ratingCount`/`badge`, numeric `rating` 0–5 (drawn as half-star-quantized local stars), and an `image` reference. |
+| `product_carousel` | `items[]` of the same product object, 2–10, rendered as a locally scrolling four-per-row track in the wide state. |
+| `entity` | Required `name`; optional safe `url`, display `category`/`ratingCount`/`address`/`phone`/`hours`, `priceLevel` matching `^\$$`{1,4}, numeric `rating` 0–5, and an `image` reference. |
+| `map` | Required `image` reference (a frozen static map picture; nothing fetches tiles); optional safe `url` and `pins[]` 1–12 of `{ label, detail? }` rendered as a numbered local pin list. |
 
 An image reference contains exactly one of:
 
 - `asset`: an ID in the renderer's closed bundled-asset allowlist, plus optional `alt`; or
 - `src`: a sanitized HTTP(S) provenance URL or an allowed bounded raster data URL, plus optional `alt`.
 
-`merchant`, `product`, `map`, and `entity` are deliberately unsupported. Unknown types or assets, unknown keys, type mismatches, invalid JSON, any version other than `2`, a non-empty fence meta string, or a fence containing more than one JSON value leave the original fence rendered as ordinary code. Validation is all-or-nothing; there is no legacy-version compatibility or partial card assembled from valid-looking fragments.
+Unknown types or assets, unknown keys, type mismatches, invalid JSON, any version other than `2`, a non-empty fence meta string, or a fence containing more than one JSON value leave the original fence rendered as ordinary code. Validation is all-or-nothing; there is no legacy-version compatibility or partial card assembled from valid-looking fragments.
 
 ### State, missingness, and limits
 
@@ -161,6 +176,8 @@ To keep one clipboard item and one export bounded, v2 applies these hard limits 
 | any display string / any URL | 4,096 / 2,048 Unicode scalars; base64 image payloads use the byte limits below |
 | `news.items` / `web_results.items` | 20 each |
 | `image_group.images` | 12 |
+| `product_carousel.items` | 10 |
+| `map.pins` | 12 |
 | `weather.days` / one day's `hourly` | 10 / 24; each day has at least two hourly points |
 | `finance.series` / points per series / all series points / `finance.metrics` | 8 / 256 / 1,024 / 16; each series has at least two points |
 | one inline raster data image / all inline data images | 256 KiB decoded / 512 KiB decoded |
@@ -431,6 +448,8 @@ PNG export builds the same HTML off the main thread, then owns WebKit work on th
 | same-size failure | delivered because outcome/error participates in deduplication |
 | preview vs PNG | identical parse result, HTML, base CSS, local assets, and runtime; preview hydrates, export freezes before capture |
 | `scopy-rich` validity | strict v2 object renders a supported card; every other version and invalid/unknown/oversized input remains a code fence |
+| video/product/entity/map validity | missing required url/title/name/image, out-of-range rating or priceLevel, oversized carousels or pin lists invalidate the envelope into a code fence |
+| public-copy card adapters | only the exact video-link, link-plus-price, and name/link/address shapes promote; near misses (trailing prose, missing address, non-price second paragraph) stay ordinary Markdown |
 | consecutive public images | two or more image-only paragraphs may share the image-grid/lightbox presentation; only `src`/`alt`/`title` survive and no missing card metadata is inferred |
 | rich state | zero, empty, partial, missing `—`, and error remain visibly distinct |
 | rich image source | allowlisted asset renders bundled bytes; remote URL never fetches; unknown or ambiguous asset/source input invalidates the envelope |

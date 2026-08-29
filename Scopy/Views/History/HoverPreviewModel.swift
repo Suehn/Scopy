@@ -40,7 +40,25 @@ final class HoverPreviewModel {
         source: String,
         layoutScale: MarkdownChatGPTLayoutScalePercent
     ) -> String {
-        "\(layoutScale.cacheKey)|\(ClipboardItemContentRevision.deterministicTextCacheKey(source))"
+        let enrichment = LinkEnrichmentStore.shared.payload(
+            forContentKey: LinkEnrichmentContentKey.make(for: source)
+        )
+        return [
+            layoutScale.cacheKey,
+            enrichment?.fingerprint ?? "plain",
+            ClipboardItemContentRevision.deterministicTextCacheKey(source)
+        ].joined(separator: "|")
+    }
+
+    /// The link-enrichment fingerprint `markdownHTML` was built with. When a frozen
+    /// sidecar lands after the pipeline render, the live fingerprint moves ahead of this
+    /// stamp and the preview rebuilds the document instead of showing stale default HTML.
+    private(set) var markdownHTMLEnrichmentFingerprint: String?
+
+    nonisolated static func enrichmentFingerprint(for source: String) -> String {
+        LinkEnrichmentStore.shared.payload(
+            forContentKey: LinkEnrichmentContentKey.make(for: source)
+        )?.fingerprint ?? "plain"
     }
 
     /// Cached HTML and metrics may seed the popover geometry, but they do not describe the
@@ -58,12 +76,16 @@ final class HoverPreviewModel {
         self.markdownHTML = markdownHTML
         self.markdownContentSize = markdownContentSize
         self.markdownHasHorizontalOverflow = markdownHasHorizontalOverflow
+        markdownHTMLEnrichmentFingerprint = text.flatMap { source in
+            markdownHTML == nil ? nil : Self.enrichmentFingerprint(for: source)
+        }
         invalidateMarkdownLiveRender()
     }
 
     func setMarkdownHTMLAwaitingLiveRender(_ html: String) {
         markdownMetricsLayoutScalePercent = nil
         markdownHTML = html
+        markdownHTMLEnrichmentFingerprint = text.map { Self.enrichmentFingerprint(for: $0) }
         invalidateMarkdownLiveRender()
     }
 
@@ -143,6 +165,7 @@ final class HoverPreviewModel {
         previewCGImage = nil
         text = nil
         markdownHTML = nil
+        markdownHTMLEnrichmentFingerprint = nil
         markdownContentSize = nil
         markdownMetricsLayoutScalePercent = nil
         markdownHasHorizontalOverflow = false

@@ -17,6 +17,8 @@ import {
 import { scopyIcon } from "./scopyIcons.js";
 import { preprocessBackslashMath } from "./scopyBackslashMathPreprocessor.js";
 import { remarkScopyImageGroups } from "./remarkScopyImageGroups.js";
+import { remarkScopyPublicCards } from "./remarkScopyPublicCards.js";
+import { remarkScopyLinkEnrichment } from "./remarkScopyLinkEnrichment.js";
 import { remarkScopyLooseMathRepair } from "./remarkScopyLooseMathRepair.js";
 import { isValidExternalHTTPURL } from "./scopyExternalURLPolicy.js";
 import {
@@ -54,6 +56,8 @@ function renderInternal(source, policy = {}) {
     .use(remarkScopySourceCitations)
     .use(remarkScopyRich)
     .use(remarkScopyImageGroups)
+    .use(remarkScopyPublicCards)
+    .use(remarkScopyLinkEnrichment, normalizedPolicy.linkEnrichment)
     .use(remarkScopyRichOrdinals)
     .use(remarkScopySafeHTML)
     .use(remarkLiteralHTML);
@@ -229,7 +233,7 @@ const scopySanitizeSchema = {
     polyline: ["points", "fill", "stroke", "strokeWidth"],
     section: [
       ["className", /^scopy-/],
-      ["dataType", "news", "web_results", "image_group", "weather", "finance", "currency"],
+      ["dataType", "news", "web_results", "image_group", "weather", "finance", "currency", "video", "product", "product_carousel", "entity", "map"],
       ["dataState", "ready", "partial", "empty", "error"],
       ["dataScopyVersion", "2"],
       ["dataScopyInteractive", "true", "false"],
@@ -253,7 +257,8 @@ const scopySanitizeSchema = {
       ["dataScopyUnitLabel", "F", "C"],
       ["dataScopyImageTitle", "true"],
       ["dataScopyTooltipLabel", "true"],
-      ["dataScopyTooltipDisplay", "true"]
+      ["dataScopyTooltipDisplay", "true"],
+      ["dataScopyRatingHalves", /^(?:10|[0-9])$/]
     ],
     stop: ["offset", "stopColor", "stopOpacity"],
     sub: [["className", "scopy-safe-html-sub"]],
@@ -437,7 +442,10 @@ function normalizePolicy(policy) {
   return {
     profile: String(policy.profile || "plainTextUnknown"),
     allowLooseMathRepair: policy.allowLooseMathRepair === true,
-    policyVersion: String(policy.policyVersion || "")
+    policyVersion: String(policy.policyVersion || ""),
+    linkEnrichment: policy.linkEnrichment && typeof policy.linkEnrichment === "object" && !Array.isArray(policy.linkEnrichment)
+      ? policy.linkEnrichment
+      : null
   };
 }
 

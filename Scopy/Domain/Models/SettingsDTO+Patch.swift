@@ -11,6 +11,7 @@ public extension SettingsDTO {
         if let value = patch.saveFiles { updated.saveFiles = value }
         if let value = patch.pngquantBinaryPath { updated.pngquantBinaryPath = value }
         if let value = patch.pngquantCopyImageEnabled { updated.pngquantCopyImageEnabled = value }
+        if let value = patch.linkEnrichmentEnabled { updated.linkEnrichmentEnabled = value }
         if let value = patch.pngquantCopyImageQualityMin { updated.pngquantCopyImageQualityMin = value }
         if let value = patch.pngquantCopyImageQualityMax { updated.pngquantCopyImageQualityMax = value }
         if let value = patch.pngquantCopyImageSpeed { updated.pngquantCopyImageSpeed = value }

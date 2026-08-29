@@ -22,8 +22,16 @@ const VALID_TYPES = new Set([
   "image_group",
   "weather",
   "finance",
-  "currency"
+  "currency",
+  "video",
+  "product",
+  "product_carousel",
+  "entity",
+  "map"
 ]);
+const MAX_CAROUSEL_PRODUCTS = 10;
+const MAX_MAP_PINS = 12;
+const MAX_ENTITY_DETAILS = 6;
 const VALID_STATES = new Set(["ready", "partial", "empty", "error"]);
 const VALID_IMAGE_LAYOUTS = new Set(["search", "carousel", "full_width"]);
 const VALID_UNITS = new Set(["F", "C"]);
@@ -114,6 +122,12 @@ function parseRichSurface(value) {
   } catch {
     return null;
   }
+  return normalizeRichSurface(input);
+}
+
+// The one strict v2 validation authority. Fenced envelopes and the public-copy
+// presentation adapters both pass through here; there is no second schema.
+export function normalizeRichSurface(input) {
   if (!isRecord(input) ||
       exceedsJSONDepth(input, MAX_JSON_DEPTH) ||
       input.version !== 2 ||
@@ -145,6 +159,21 @@ function parseRichSurface(value) {
       break;
     case "currency":
       surface = normalizeCurrency(input, common);
+      break;
+    case "video":
+      surface = normalizeVideo(input, common);
+      break;
+    case "product":
+      surface = normalizeProduct(input, common);
+      break;
+    case "product_carousel":
+      surface = normalizeProductCarousel(input, common);
+      break;
+    case "entity":
+      surface = normalizeEntity(input, common);
+      break;
+    case "map":
+      surface = normalizeMap(input, common);
       break;
     default:
       return null;
@@ -334,6 +363,122 @@ function normalizeCurrency(input, common) {
     : { ...common, from, to, amount, rate, fractionDigits };
 }
 
+function normalizeVideo(input, common) {
+  if (!isSafeHTTPURL(input.url)) return null;
+  const result = { ...common, url: input.url };
+  if (!result.title) return null;
+  for (const key of ["channel", "duration"]) {
+    if (input[key] === undefined) continue;
+    const value = boundedString(input[key]);
+    if (value == null) return null;
+    result[key] = value;
+  }
+  if (input.thumbnail !== undefined) {
+    const thumbnail = normalizeImageReference(input.thumbnail);
+    if (!thumbnail) return null;
+    result.thumbnail = thumbnail;
+  }
+  return result;
+}
+
+function normalizeProduct(input, common) {
+  const product = normalizeProductItem(input.product);
+  return product ? { ...common, product } : null;
+}
+
+function normalizeProductCarousel(input, common) {
+  const items = normalizeArray(input.items, MAX_CAROUSEL_PRODUCTS, normalizeProductItem, 2);
+  return items ? { ...common, items } : null;
+}
+
+function normalizeProductItem(item) {
+  if (!isRecord(item) ||
+      !hasOnlyKeys(item, ["title", "url", "price", "originalPrice", "merchant", "rating", "ratingCount", "badge", "image"])) {
+    return null;
+  }
+  const result = requiredStrings(item, ["title"]);
+  if (!result) return null;
+  if (item.url !== undefined) {
+    if (!isSafeHTTPURL(item.url)) return null;
+    result.url = item.url;
+  }
+  for (const key of ["price", "originalPrice", "merchant", "ratingCount", "badge"]) {
+    if (item[key] === undefined) continue;
+    const value = boundedString(item[key]);
+    if (value == null) return null;
+    result[key] = value;
+  }
+  if (item.rating !== undefined) {
+    const rating = boundedNumber(item.rating, 0, 5);
+    if (rating == null) return null;
+    result.rating = rating;
+  }
+  if (item.image !== undefined) {
+    const image = normalizeImageReference(item.image);
+    if (!image) return null;
+    result.image = image;
+  }
+  return result;
+}
+
+function normalizeEntity(input, common) {
+  const result = { ...common };
+  const name = boundedString(input.name);
+  if (name == null || !name) return null;
+  result.name = name;
+  if (input.url !== undefined) {
+    if (!isSafeHTTPURL(input.url)) return null;
+    result.url = input.url;
+  }
+  for (const key of ["category", "ratingCount", "address", "phone", "hours"]) {
+    if (input[key] === undefined) continue;
+    const value = boundedString(input[key]);
+    if (value == null) return null;
+    result[key] = value;
+  }
+  if (input.priceLevel !== undefined) {
+    if (typeof input.priceLevel !== "string" || !/^\${1,4}$/.test(input.priceLevel)) return null;
+    result.priceLevel = input.priceLevel;
+  }
+  if (input.rating !== undefined) {
+    const rating = boundedNumber(input.rating, 0, 5);
+    if (rating == null) return null;
+    result.rating = rating;
+  }
+  if (input.image !== undefined) {
+    const image = normalizeImageReference(input.image);
+    if (!image) return null;
+    result.image = image;
+  }
+  return result;
+}
+
+function normalizeMap(input, common) {
+  const image = normalizeImageReference(input.image);
+  if (!image) return null;
+  const result = { ...common, image };
+  if (input.url !== undefined) {
+    if (!isSafeHTTPURL(input.url)) return null;
+    result.url = input.url;
+  }
+  if (input.pins !== undefined) {
+    const pins = normalizeArray(input.pins, MAX_MAP_PINS, (pin) => {
+      if (!isRecord(pin) || !hasOnlyKeys(pin, ["label", "detail"])) return null;
+      const normalized = requiredStrings(pin, ["label"]);
+      if (!normalized) return null;
+      if (pin.detail !== undefined) {
+        const detail = boundedString(pin.detail);
+        if (detail == null) return null;
+        normalized.detail = detail;
+      }
+      return normalized;
+    }, 1);
+    if (!pins) return null;
+    result.pins = pins;
+  }
+  return result;
+}
+
 function normalizeCurrencyIdentity(input) {
   if (!hasOnlyKeys(input, ["code", "name", "symbol", "flag"])) return null;
   const result = requiredStrings(input, ["code"]);
@@ -433,9 +578,160 @@ function renderSurface(surface) {
       return renderFinance(surface);
     case "currency":
       return renderCurrency(surface);
+    case "video":
+      return renderVideo(surface);
+    case "product":
+      return richSection(surface, [renderProductCard(surface.product, surface.rootID, 0, "hero")],
+        surface.product.title);
+    case "product_carousel":
+      return renderProductCarousel(surface);
+    case "entity":
+      return renderEntity(surface);
+    case "map":
+      return renderMap(surface);
     default:
       return text("");
   }
+}
+
+function renderVideo(surface) {
+  const media = element("span", { className: ["scopy-rich-video-media"] }, [
+    surface.thumbnail
+      ? renderImageVisual(surface.thumbnail, surface.title, ["scopy-rich-video-thumbnail"])
+      : null,
+    element("span", { className: ["scopy-rich-video-play"], ariaHidden: "true" }, [scopyIcon("play-fill")])
+  ].filter(Boolean));
+  const meta = [surface.channel, surface.duration].filter(Boolean).join(" · ");
+  const body = element("span", { className: ["scopy-rich-video-body"] }, [
+    element("span", { className: ["scopy-rich-video-title"] }, [text(surface.title)]),
+    element("span", { className: ["scopy-rich-video-meta"] }, [text(meta || hostLabel(surface.url))])
+  ]);
+  return richSection(surface, [
+    element("a", {
+      href: surface.url,
+      className: ["scopy-rich-video-card"],
+      ariaLabel: "Video: " + surface.title
+    }, [media, body])
+  ], "Video: " + surface.title);
+}
+
+function renderRatingStars(rating, ratingCount) {
+  if (rating == null) return null;
+  // Half-star quantization keeps the fill width a closed 11-value set the stylesheet can
+  // express without inline styles ever entering the sanitized document.
+  const halfSteps = Math.round(Math.max(0, Math.min(5, rating)) * 2);
+  const row = (className) => element("span", { className: [className], ariaHidden: "true" },
+    [0, 1, 2, 3, 4].map(() => scopyIcon("star-fill")));
+  return element("span", {
+    className: ["scopy-rich-rating"],
+    role: "img",
+    ariaLabel: rating + " out of 5 stars" + (ratingCount ? ", " + ratingCount : "")
+  }, [
+    element("span", { className: ["scopy-rich-rating-track"] }, [
+      row("scopy-rich-rating-base"),
+      element("span", {
+        className: ["scopy-rich-rating-filled"],
+        dataScopyRatingHalves: String(halfSteps)
+      }, [row("scopy-rich-rating-overlay")])
+    ]),
+    ratingCount ? element("span", { className: ["scopy-rich-rating-count"] }, [text(ratingCount)]) : null
+  ].filter(Boolean));
+}
+
+function renderProductCard(item, rootID, index, variant) {
+  const id = rootID + "-product-" + index;
+  const media = element("span", { className: ["scopy-rich-product-media"] }, [
+    item.image
+      ? renderImageVisual(item.image, item.title, ["scopy-rich-product-image"])
+      : element("span", { className: ["scopy-rich-product-image-placeholder"], ariaHidden: "true" }, [scopyIcon("image")])
+  ]);
+  const price = item.price
+    ? element("span", { className: ["scopy-rich-product-price-row"] }, [
+        element("span", { className: ["scopy-rich-product-price"] }, [text(item.price)]),
+        item.originalPrice
+          ? element("span", { className: ["scopy-rich-product-original-price"] }, [text(item.originalPrice)])
+          : null
+      ].filter(Boolean))
+    : null;
+  const body = element("span", { className: ["scopy-rich-product-body"] }, [
+    item.badge ? element("span", { className: ["scopy-rich-product-badge"] }, [text(item.badge)]) : null,
+    element("span", { className: ["scopy-rich-product-title"] }, [text(item.title)]),
+    price,
+    renderRatingStars(item.rating, item.ratingCount),
+    item.merchant ? element("span", { className: ["scopy-rich-product-merchant"] }, [text(item.merchant)]) : null
+  ].filter(Boolean));
+  const children = [media, body];
+  const className = ["scopy-rich-product-card", "scopy-rich-product-card--" + variant];
+  return item.url
+    ? element("a", { id, href: item.url, className, ariaLabel: "Product: " + item.title }, children)
+    : element("span", { id, className }, children);
+}
+
+function renderProductCarousel(surface) {
+  const items = surface.items.map((item, index) =>
+    element("li", { className: ["scopy-rich-product-item"] },
+      [renderProductCard(item, surface.rootID, index, "carousel")]));
+  return richSection(surface, [
+    element("ul", {
+      className: ["scopy-rich-product-track"],
+      ariaLabel: "Products with " + surface.items.length + " items"
+    }, items)
+  ], "Products");
+}
+
+function renderEntity(surface) {
+  const metaParts = [
+    surface.category ? element("span", {}, [text(surface.category)]) : null,
+    renderRatingStars(surface.rating, surface.ratingCount),
+    surface.priceLevel ? element("span", {}, [text(surface.priceLevel)]) : null
+  ].filter(Boolean);
+  const details = [
+    surface.address ? ["Address", surface.address] : null,
+    surface.phone ? ["Phone", surface.phone] : null,
+    surface.hours ? ["Hours", surface.hours] : null
+  ].filter(Boolean).slice(0, MAX_ENTITY_DETAILS).map(([label, value]) =>
+    element("span", { className: ["scopy-rich-entity-detail"] }, [
+      element("span", { className: ["scopy-rich-entity-detail-label"] }, [text(label)]),
+      element("span", {}, [text(value)])
+    ]));
+  const heading = surface.url
+    ? element("a", { href: surface.url, className: ["scopy-rich-entity-name"] }, [text(surface.name)])
+    : element("span", { className: ["scopy-rich-entity-name"] }, [text(surface.name)]);
+  const body = element("span", { className: ["scopy-rich-entity-body"] }, [
+    heading,
+    metaParts.length > 0
+      ? element("span", { className: ["scopy-rich-entity-meta"] }, metaParts)
+      : null,
+    ...details
+  ].filter(Boolean));
+  const media = surface.image
+    ? element("span", { className: ["scopy-rich-entity-media"] },
+        [renderImageVisual(surface.image, surface.name, ["scopy-rich-entity-image"])])
+    : null;
+  return richSection(surface, [
+    element("span", { className: ["scopy-rich-entity-card"] }, [body, media].filter(Boolean))
+  ], "Place: " + surface.name);
+}
+
+function renderMap(surface) {
+  const pins = Array.isArray(surface.pins) && surface.pins.length > 0
+    ? element("ol", { className: ["scopy-rich-map-pins"] }, surface.pins.map((pin, index) =>
+        element("li", { className: ["scopy-rich-map-pin"] }, [
+          element("span", { className: ["scopy-rich-map-pin-marker"], ariaHidden: "true" }, [
+            scopyIcon("map-pin"),
+            element("span", { className: ["scopy-rich-map-pin-index"] }, [text(String(index + 1))])
+          ]),
+          element("span", { className: ["scopy-rich-map-pin-body"] }, [
+            element("span", { className: ["scopy-rich-map-pin-label"] }, [text(pin.label)]),
+            pin.detail ? element("span", { className: ["scopy-rich-map-pin-detail"] }, [text(pin.detail)]) : null
+          ].filter(Boolean))
+        ])))
+    : null;
+  const media = renderImageVisual(surface.image, surface.title || "Map", ["scopy-rich-map-image"]);
+  const framedMedia = surface.url
+    ? element("a", { href: surface.url, className: ["scopy-rich-map-frame"], ariaLabel: surface.title || "Map" }, [media])
+    : element("span", { className: ["scopy-rich-map-frame"] }, [media]);
+  return richSection(surface, [framedMedia, pins].filter(Boolean), "Map");
 }
 
 function richSection(surface, children, label, properties = {}) {
@@ -1174,7 +1470,12 @@ function surfaceLabel(type) {
     image_group: "Image group",
     weather: "Weather",
     finance: "Finance",
-    currency: "Currency conversion"
+    currency: "Currency conversion",
+    video: "Video",
+    product: "Product",
+    product_carousel: "Products",
+    entity: "Place",
+    map: "Map"
   })[type] || "Rich content";
 }
 
@@ -1191,6 +1492,16 @@ function rootKeysForType(type) {
       return [...COMMON_KEYS, "asset", "quote", "selectedRange", "series", "metrics"];
     case "currency":
       return [...COMMON_KEYS, "from", "to", "amount", "rate", "fractionDigits"];
+    case "video":
+      return [...COMMON_KEYS, "url", "channel", "duration", "thumbnail"];
+    case "product":
+      return [...COMMON_KEYS, "product"];
+    case "product_carousel":
+      return [...COMMON_KEYS, "items"];
+    case "entity":
+      return [...COMMON_KEYS, "name", "url", "category", "rating", "ratingCount", "priceLevel", "address", "phone", "hours", "image"];
+    case "map":
+      return [...COMMON_KEYS, "image", "url", "pins"];
     default:
       return COMMON_KEYS;
   }

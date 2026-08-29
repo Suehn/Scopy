@@ -423,6 +423,31 @@ Provenance split: the `1 USD = 6.7199 CNY` rate was read from the live Edge DOM.
 }
 ~~~
 
+## Deterministic video, product, place, and map envelopes
+
+These five surfaces exercise the remaining strict v2 card types with fully frozen fields. The
+video thumbnail and map image reuse captured bundled assets; ratings are frozen display data.
+
+```scopy-rich
+{"version":2,"type":"video","state":"ready","title":"Search: 12 Days of OpenAI, Day 8","channel":"OpenAI","duration":"18:32","url":"https://www.youtube.com/watch?v=lRRoz44Njjs","thumbnail":{"asset":"news-openai-kiro","alt":"OpenAI search demo video"}}
+```
+
+```scopy-rich
+{"version":2,"type":"product","state":"ready","source":"Deterministic fixture pricing","product":{"title":"Logitech MX Master 3S Wireless Performance Mouse","url":"https://www.walmart.com/ip/731473988","price":"$79.99","originalPrice":"$99.99","merchant":"Walmart","rating":4.5,"ratingCount":"1,024 reviews","badge":"Best seller","image":{"asset":"image-group-chatgpt-search-button","alt":"Product photo"}}}
+```
+
+```scopy-rich
+{"version":2,"type":"product_carousel","state":"ready","title":"Keyboards and headphones","items":[{"title":"Keychron Q1 Max","url":"https://www.keychron.com/products/keychron-q1-max","price":"$209.99","merchant":"Keychron","rating":5},{"title":"Sony WH-1000XM6","url":"https://electronics.sony.com/audio/headphones/p/wh1000xm6-b","price":"$398.00","merchant":"Sony","rating":4.5,"ratingCount":"2,310"},{"title":"Logitech MX Keys S","url":"https://www.logitech.com/products/keyboards/mx-keys-s","price":"$109.99","merchant":"Logitech"}]}
+```
+
+```scopy-rich
+{"version":2,"type":"entity","state":"ready","name":"Blue Bottle Coffee","url":"https://bluebottlecoffee.com","category":"Coffee shop","rating":4.5,"ratingCount":"1,214","priceLevel":"$$","address":"315 Linden St, San Francisco, CA 94102, United States","phone":"+1 510-661-3510","hours":"Open until 6 PM"}
+```
+
+```scopy-rich
+{"version":2,"type":"map","state":"ready","title":"San Francisco coffee","image":{"asset":"image-group-chatgpt-search-results","alt":"Static map preview"},"url":"https://maps.apple.com/?q=Blue+Bottle+Coffee","pins":[{"label":"Blue Bottle Coffee","detail":"315 Linden St"},{"label":"Sightglass Coffee","detail":"270 7th St"},{"label":"Four Barrel Coffee","detail":"375 Valencia St"}]}
+```
+
 ## Strict v2 state and rejection edges
 
 This explicit empty state is valid and must remain visibly different from a zero, a literal `—`, a partial snapshot, and an acquisition error:

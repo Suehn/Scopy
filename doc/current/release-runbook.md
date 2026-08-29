@@ -195,6 +195,12 @@ This section records historical `v0.65.4` release evidence for the single previe
 - Rich fidelity verification on this host (MacBook Pro, macOS 15.x Darwin 24.6.0, 2026-08-29): Node contract tests 100/100; `npm run build` + `npm run verify:assets` passed with renderer `11727ec7…`, KaTeX 0.16.45, 60 fonts; `make build` passed; `make test-unit` and `make test-strict` each 762 executed / 2 skipped / 0 failures (one transient `ThumbnailPipelineTests` CGImageSource failure in a single strict run was excluded after passing in isolation and in a full green rerun; it is unrelated to renderer changes).
 - Final Debug build direct exports at 100%: `chatgpt_rich_surfaces.md` 1080 x 5740 with three uncropped news cards, all eight weather days plus a complete hourly chart, three-column reference-ordered finance metrics, and live bundled favicon citation pills; `chatgpt_public_copy_markdown_sample.md` 1080 x 14027 with the OpenAI favicon pill and the 48rem text column. Evidence crops live under the ignored `artifacts/render-validation/` directory.
 
+## Rich Type Completion, Link Enrichment, And Auto-Update Release Evidence (v0.72.0, 2026-08-29)
+
+- Strict v2 now covers `video`, `product`, `product_carousel`, `entity`, and `map`, and the closed public-copy adapters promote exact visible video/product/place shapes; the honest ceiling (surfaces whose copy lacks data stay prose) is contract-recorded. Verified by Node 106/106, both Swift suites green, and reviewed direct exports (`rich-surfaces-all-types.png` 1080x8423, `public-copy-with-adapters.png` 1080x14769 under `artifacts/render-validation/`).
+- Opt-in, default-off link enrichment fetches Open Graph metadata for assistant-shaped bare links in the backend only (cookie-less, size/time-capped, public hosts, imagery frozen as v2-limit data URIs into content-hash sidecars under Application Support/Scopy/LinkEnrichment). The renderer/CSP never fetch; sidecar fingerprints participate in every render/metric cache key; rendererVersion bumped to v6. The live-network test is gated behind `SCOPY_NETWORK_TESTS=1`.
+- Sparkle 2.9.6 auto-update: daily checks with reminder + install-and-relaunch, "检查更新…" in About, feed at `releases/latest/download/appcast.xml`, EdDSA public key in Info.plist. The release workflow signs and attaches `appcast.xml` when the `SPARKLE_ED_PRIVATE_KEY` secret exists and emits a loud warning when it does not; the one-time secret setup is documented in `.secrets/README.md` (gitignored).
+
 ## Homebrew Acceptance
 
 Verify all of the following after release publication:

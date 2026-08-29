@@ -58,6 +58,9 @@ settings:
 packages:
   ScopyKit:
     path: .
+  Sparkle:
+    url: https://github.com/sparkle-project/Sparkle
+    exactVersion: 2.9.6
 
 targets:
   Scopy:
@@ -92,6 +95,8 @@ targets:
         product: ScopyKit
       - package: ScopyKit
         product: ScopyUISupport
+      - package: Sparkle
+        product: Sparkle
     postBuildScripts:
       - name: "Stage MarkdownPreview Assets"
         script: |

@@ -53,7 +53,7 @@ struct AppearanceSettingsPage: View {
             SettingsSection(
                 "Markdown",
                 systemImage: "doc.richtext",
-                footer: "渲染比例只影响 Markdown 预览和 PNG 导出的字体度量与换行；导出图片宽度仍保持固定。"
+                footer: "渲染比例只影响 Markdown 预览和 PNG 导出的字体度量与换行；导出图片宽度仍保持固定。链接预览增强默认关闭：开启后，ChatGPT/Codex 等助手内容里的裸链接会联网抓取标题与缩略图并冻结为本地数据渲染成卡片；渲染与导出本身始终离线。"
             ) {
                 SettingsCardRow {
                     LabeledContent("ChatGPT 页面比例") {
@@ -74,6 +74,13 @@ struct AppearanceSettingsPage: View {
                             .accessibilityValue(MarkdownChatGPTLayoutScalePercent(settingsValue: tempSettings.markdownChatGPTLayoutScalePercent).label)
                         }
                     }
+                }
+
+                SettingsCardDivider()
+
+                SettingsCardRow {
+                    Toggle("链接预览增强（联网）", isOn: $tempSettings.linkEnrichmentEnabled)
+                        .accessibilityIdentifier("Settings.LinkEnrichmentToggle")
                 }
             }
         }

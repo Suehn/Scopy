@@ -44,10 +44,14 @@ struct MarkdownRenderContext: Equatable, Sendable {
     let profile: MarkdownSourceProfile
     let policy: MarkdownRepairPolicy
     let layoutScale: MarkdownChatGPTLayoutScalePercent
+    /// Frozen link-enrichment sidecar for this exact markdown content, when one exists.
+    /// The enrichment setting gates fetching only; rendering always consumes whatever
+    /// frozen payload is already stored so preview and export stay deterministic.
+    var linkEnrichment: LinkEnrichmentPayload? = nil
 }
 
 enum MarkdownRenderContextResolver {
-    static let rendererVersion = "chatgpt-renderer-v5"
+    static let rendererVersion = "chatgpt-renderer-v6"
 
     static func defaultContext(for markdown: String) -> MarkdownRenderContext {
         defaultContext(
@@ -64,7 +68,10 @@ enum MarkdownRenderContextResolver {
         return MarkdownRenderContext(
             profile: profile,
             policy: MarkdownRepairPolicy.conservativeDefault(for: profile),
-            layoutScale: layoutScale
+            layoutScale: layoutScale,
+            linkEnrichment: LinkEnrichmentStore.shared.payload(
+                forContentKey: LinkEnrichmentContentKey.make(for: markdown)
+            )
         )
     }
 }

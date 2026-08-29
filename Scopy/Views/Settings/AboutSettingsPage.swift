@@ -33,6 +33,12 @@ struct AboutSettingsPage: View {
                             .foregroundStyle(.secondary)
                         }
                         Spacer()
+
+                        Button("检查更新…") {
+                            AppDelegate.shared?.updaterController?.checkForUpdates(nil)
+                        }
+                        .disabled(AppDelegate.shared?.updaterController == nil)
+                        .accessibilityIdentifier("Settings.CheckForUpdates")
                     }
                 }
             }

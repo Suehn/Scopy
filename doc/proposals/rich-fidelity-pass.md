@@ -103,3 +103,31 @@ audience: implementing agent (Codex/GPT) + maintainer review
 - **D6**：`scopyLocalImageAssets.js` 新增 `CITATION_FAVICON_HOSTS`（7 个精确 host → 4 个已打包 favicon）与 `bundledFaviconAssetForCitationHost`；`citationOriginIcon(url)` 命中才渲 `<img src="rich/favicon-*">`，否则 globe；新增 CSS `img.scopy-source-citation-favicon`；契约与开发指南第 14 条同步；新增 Node 测试（命中/未命中/绝不远程）+ 公共拷贝 fixture 断言（favicon>0 且所有带 src 图均为本地资产，放过无 src 的 lightbox 延迟占位）。
 - **D7**：`a.scopy-link--file .scopy-file-icon { transform: scale(1.15) }` 光学补偿（作用于 svg 元素整体、无内部裁剪、不改授权路径数据），附注释；JS 徽章实心重绘按方案记为可选未做。
 - 验证：Node 100/100；`npm run build` + `verify:assets` 通过（renderer `11727ec7…`）；Swift 构建/单测/导出验证见 runbook 与本会话记录。
+
+## 4. 全类型补全与公共拷贝适配（2026-08-29 第二批实现记录）
+
+用户升级需求：商品/地图/视频/实体不再排除，"都做到和官网一致"。实机取证先行（另一台机器的 1080×16752 真实公共拷贝渲染 + WACZ 会话 JSON）得出诊断：**那台机器渲染无 bug——ChatGPT Copy 在源头剥离卡片数据**（新闻只剩裸链接、股价是字面 `$xxx.xx`、天气无数据），输入里没有的数据渲染器不可能恢复。据此落地两条线：
+
+- **五个新 strict v2 类型**：`video`（播放徽章媒体卡）、`product`（badge/删除线原价/半星量化本地星级/商家）、`product_carousel`（宽态四列轨道，2–10 项）、`entity`（名称/类别/评分/价位/地址/电话/营业时间）、`map`（冻结静态地图图 + 编号 pin 列表 1–12，绝不取瓦片）。全部走 `rootKeysForType`/normalizer 闭合校验，fail-closed；评分条用 `data-scopy-rating-halves` 11 档 CSS（sanitizer 无 inline style）；新增 Phosphor `star-fill`/`map-pin-fill`/`play-fill`（与官方 2.1.1 逐字节一致，已记 THIRD_PARTY_NOTICES）。
+- **公共拷贝形状适配器**（`remarkScopyPublicCards.js`）：仅三种精确形状——单独 YouTube 链接段、链接段（或 `### [标题](url)` 标题）+ 纯价格段、名称/单链接/`Address:`（可选 `Phone:`/`Hours:`）块——全部经同一 `normalizeRichSurface` 权威（从 `parseRichSurface` 拆出导出），未命中保持散文；实体卡吸收其上方的重复裸名段。真实公共拷贝 fixture 由 1 卡变 **8 卡**（图组+视频+3 商品+3 实体）。
+- **诚实天花板已写入契约**：可见数据不完整的 surface（裸链接新闻、无数据的股票/天气/汇率）保持散文，不伪造卡片；完整官网样式需要仍持有结构化数据的生产者写 v2 envelope。
+- 文档同步：契约（删除 deliberately-unsupported、五类型行、限额、适配器清单与天花板段、authoritative surfaces + edge 矩阵）、product-spec、development-guide #16。
+- 验证：Node 105/105（新 public-cards.test.js 5 项 + fixture 序列断言更新）；bundle `776ebd93…` 同步校验；`make build` + `test-unit`/`test-strict` 各 762/2/0；实机导出 rich fixture 1080×8423（12 surfaces 全部目检）与公共拷贝 1080×14769（8 卡目检），证据收档 `artifacts/render-validation/`。
+- 待校准（不阻塞）：product/map/video 官方像素样式当前按已知 ChatGPT 设计语言 + 既有卡片 token 体系实现并标注 Scopy adaptation；用户提供这三类卡在其会话中的官方截图后按 D2 同法取样校准（星色/图标 pin 色 token 已单点化：`--scopy-rich-rating-star`/`--scopy-rich-map-pin`/`--scopy-rich-media-bg`）。
+
+## 5. 链接增强与自动更新（2026-08-29 第三批实现记录）
+
+用户拍板：链接增强默认关、两种形状（新闻裸链接列表 + 孤立文章链接）都做、识别覆盖 GPT 网页/Codex/类 GPT 内容；另加 Sparkle 自动更新提醒。
+
+**链接增强（入库数据的唯一网络例外，生产者侧）**：
+- 架构缝隙：抓取只发生在可选的后端 `LinkEnrichmentFetcher/Coordinator`；渲染器/WebView/导出零网络、CSP 不变。抓取结果冻结为按内容哈希寻址的 sidecar（`~/Library/Application Support/Scopy/LinkEnrichment/`，LRU 500 个，可再生缓存语义、免 schema 迁移）。
+- 识别门（`LinkEnrichmentEligibility`）：`utm_source=chatgpt.com` 链接改写（GPT 网页拷贝的强指纹）∨ Codex 绝对本地文件链接 ∨（引用式定义/引用组 ∧ 标题结构）；普通散文不触发。候选=精确裸链接行（列表项或独立段），排除 YouTube（已有视频卡）与本地主机，≤13 个。
+- 抓取边界：无 cookie、6s/12s 超时、HTML ≤512KB、并发 3、公网 http(s) 且拒绝私网/回环字面地址；og/twitter/title 解析；og:image → ≤576px JPEG data URI（≤192KB）、favicon → ≤64px PNG（≤32KB）、单项总解码预算 480KB——全部落在 v2 数据图限额内并经 `normalizeRichSurface` 复核。
+- 渲染整合：`MarkdownRenderContext.linkEnrichment` 冻结载荷经 policy 传入 `remarkScopyLinkEnrichment`（整组链接全部命中才升级为 `news`，孤立链接升级为单条 `web_results`；部分命中保持散文）；指纹参与 render/metric 缓存键与 `markdownRenderKey`；rendererVersion v5→v6。预览触发（悬停时幂等 ensure）+ 通知驱动的实时重渲（`markdownHTMLEnrichmentFingerprint` 过期检测使默认 scale 也会重建文档）。设置开关只门控抓取；已冻结的 sidecar 始终参与渲染（确定性优先）。设置项走完整 SettingsDTO/Patch/Store/UI 链（Appearance 页 Markdown 节）。
+- 测试：Node 106/106（新增整组/部分/无数据三态断言）；Swift `LinkEnrichmentTests`（识别门/候选提取/指纹序无关性/store 往返 + `SCOPY_NETWORK_TESTS=1` 门控的真网抓取用例）。
+
+**Sparkle 自动更新**：
+- SPM 精确锁 `Sparkle 2.9.6`；`SPUStandardUpdaterController` 于非 UI-test 启动时挂载（每日自动检查、提醒、确认后安装并重启——Sparkle 标准流）；About 页新增"检查更新…"。
+- Info.plist：`SUFeedURL=https://github.com/Suehn/Scopy/releases/latest/download/appcast.xml`、`SUPublicEDKey`（本机新生成 EdDSA 公钥）、自动检查开、间隔 86400。
+- Release workflow 新增步骤：下载 Sparkle 2.9.6 工具、用 `SPARKLE_ED_PRIVATE_KEY` secret 签名 `generate_appcast`、把 `appcast.xml` 附到当次 release；secret 缺失时打 `::warning` 醒目跳过（吸取 tap 静默跳过教训）。
+- **一次性人工步骤**：把 `.secrets/sparkle_ed25519_private_key`（已 gitignore）内容配置为仓库 secret `SPARKLE_ED_PRIVATE_KEY`（说明见 `.secrets/README.md`）；配置前应用照常发布、仅更新源不生效。

@@ -356,6 +356,10 @@ enum MarkdownHTMLDocumentBuilder {
             --scopy-rich-trend-up-stroke: rgb(75, 158, 83);
             --scopy-rich-trend-down: rgb(239, 65, 70);
             --scopy-rich-weather-chart-warm: rgb(238, 147, 64);
+            /* Scopy stability adaptations pending a captured reference for these hues. */
+            --scopy-rich-rating-star: rgb(242, 153, 45);
+            --scopy-rich-map-pin: rgb(217, 72, 58);
+            --scopy-rich-media-bg: rgb(247, 247, 248);
             --scopy-link-color: rgb(46, 131, 210);
             --scopy-code-bg: rgba(13, 13, 13, 0.04);
             --scopy-code-border: rgba(13, 13, 13, 0.08);
@@ -1720,6 +1724,314 @@ enum MarkdownHTMLDocumentBuilder {
           .scopy-rich-currency-input[aria-invalid="true"] {
             color: var(--scopy-rich-trend-down);
           }
+          .scopy-rich-video-card {
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            border: 1px solid var(--scopy-rich-border);
+            border-radius: 16px;
+            background: var(--scopy-surface-bg);
+            color: inherit;
+            text-decoration: none;
+          }
+          .scopy-rich-video-media {
+            position: relative;
+            display: block;
+            aspect-ratio: 16 / 9;
+            overflow: hidden;
+            background: rgb(23, 23, 23);
+          }
+          .scopy-rich-video-media img,
+          .scopy-rich-video-thumbnail {
+            display: block;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+          }
+          .scopy-rich-video-play {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #ffffff;
+          }
+          .scopy-rich-video-play .scopy-icon {
+            width: 48px;
+            height: 48px;
+            padding: 14px;
+            border-radius: 50%;
+            background: rgba(13, 13, 13, 0.62);
+            box-sizing: border-box;
+          }
+          .scopy-rich-video-body {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            padding: 12px 16px 14px;
+          }
+          .scopy-rich-video-title {
+            font-size: calc(16px * var(--scopy-chatgpt-layout-font-scale));
+            line-height: calc(22px * var(--scopy-chatgpt-layout-font-scale));
+            font-weight: 600;
+          }
+          .scopy-rich-video-meta {
+            color: var(--scopy-text-secondary);
+            font-size: calc(13px * var(--scopy-chatgpt-layout-font-scale));
+            line-height: calc(18px * var(--scopy-chatgpt-layout-font-scale));
+          }
+          .scopy-rich-rating {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+          }
+          .scopy-rich-rating-track {
+            position: relative;
+            display: inline-flex;
+          }
+          .scopy-rich-rating-base,
+          .scopy-rich-rating-overlay {
+            display: inline-flex;
+            gap: 1px;
+          }
+          .scopy-rich-rating-base { color: rgba(13, 13, 13, 0.18); }
+          .scopy-rich-rating-overlay { color: var(--scopy-rich-rating-star); }
+          .scopy-rich-rating .scopy-icon { width: 12px; height: 12px; }
+          .scopy-rich-rating-filled {
+            position: absolute;
+            inset-block: 0;
+            inset-inline-start: 0;
+            overflow: hidden;
+            white-space: nowrap;
+          }
+          .scopy-rich-rating-filled[data-scopy-rating-halves="0"] { width: 0; }
+          .scopy-rich-rating-filled[data-scopy-rating-halves="1"] { width: 10%; }
+          .scopy-rich-rating-filled[data-scopy-rating-halves="2"] { width: 20%; }
+          .scopy-rich-rating-filled[data-scopy-rating-halves="3"] { width: 30%; }
+          .scopy-rich-rating-filled[data-scopy-rating-halves="4"] { width: 40%; }
+          .scopy-rich-rating-filled[data-scopy-rating-halves="5"] { width: 50%; }
+          .scopy-rich-rating-filled[data-scopy-rating-halves="6"] { width: 60%; }
+          .scopy-rich-rating-filled[data-scopy-rating-halves="7"] { width: 70%; }
+          .scopy-rich-rating-filled[data-scopy-rating-halves="8"] { width: 80%; }
+          .scopy-rich-rating-filled[data-scopy-rating-halves="9"] { width: 90%; }
+          .scopy-rich-rating-filled[data-scopy-rating-halves="10"] { width: 100%; }
+          .scopy-rich-rating-count {
+            color: var(--scopy-text-secondary);
+            font-size: calc(12px * var(--scopy-chatgpt-layout-font-scale));
+            line-height: 1;
+          }
+          .scopy-rich-product-card {
+            display: flex;
+            gap: 16px;
+            box-sizing: border-box;
+            border: 1px solid var(--scopy-rich-border);
+            border-radius: 16px;
+            background: var(--scopy-surface-bg);
+            color: inherit;
+            text-decoration: none;
+          }
+          .scopy-rich-product-card--hero { padding: 16px; }
+          .scopy-rich-product-card--carousel {
+            flex-direction: column;
+            gap: 10px;
+            width: 100%;
+            padding: 12px;
+          }
+          .scopy-rich-product-media {
+            display: flex;
+            flex: 0 0 auto;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+            border-radius: 10px;
+            background: var(--scopy-rich-media-bg);
+          }
+          .scopy-rich-product-card--hero .scopy-rich-product-media { width: 96px; height: 96px; }
+          .scopy-rich-product-card--carousel .scopy-rich-product-media {
+            width: 100%;
+            aspect-ratio: 1 / 1;
+          }
+          .scopy-rich-product-media img,
+          .scopy-rich-product-image {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+          }
+          .scopy-rich-product-image-placeholder { color: var(--scopy-text-weak); }
+          .scopy-rich-product-image-placeholder .scopy-icon { width: 24px; height: 24px; }
+          .scopy-rich-product-body {
+            display: flex;
+            min-width: 0;
+            flex-direction: column;
+            gap: 4px;
+          }
+          .scopy-rich-product-badge {
+            align-self: flex-start;
+            padding: 2px 8px;
+            border-radius: 999px;
+            background: rgba(13, 13, 13, 0.06);
+            color: var(--scopy-text-secondary);
+            font-size: calc(11px * var(--scopy-chatgpt-layout-font-scale));
+            line-height: calc(16px * var(--scopy-chatgpt-layout-font-scale));
+            font-weight: 500;
+          }
+          .scopy-rich-product-title {
+            font-size: calc(15px * var(--scopy-chatgpt-layout-font-scale));
+            line-height: calc(20px * var(--scopy-chatgpt-layout-font-scale));
+            font-weight: 500;
+          }
+          .scopy-rich-product-price-row {
+            display: flex;
+            align-items: baseline;
+            gap: 8px;
+          }
+          .scopy-rich-product-price {
+            font-size: calc(16px * var(--scopy-chatgpt-layout-font-scale));
+            line-height: calc(22px * var(--scopy-chatgpt-layout-font-scale));
+            font-weight: 600;
+          }
+          .scopy-rich-product-original-price {
+            color: var(--scopy-text-secondary);
+            font-size: calc(13px * var(--scopy-chatgpt-layout-font-scale));
+            text-decoration: line-through;
+          }
+          .scopy-rich-product-merchant {
+            color: var(--scopy-text-secondary);
+            font-size: calc(13px * var(--scopy-chatgpt-layout-font-scale));
+            line-height: calc(18px * var(--scopy-chatgpt-layout-font-scale));
+          }
+          .scopy-rich-product-track {
+            display: flex;
+            gap: var(--scopy-rich-column-gap);
+            width: 100%;
+            margin: 0;
+            padding: 8px 0;
+            overflow-x: auto;
+            overscroll-behavior-inline: contain;
+            scroll-snap-type: inline proximity;
+            list-style: none;
+            scrollbar-width: none;
+          }
+          .scopy-rich-product-track::-webkit-scrollbar { display: none; }
+          .scopy-rich-product-item {
+            display: flex;
+            flex: 0 0 min(11.5rem, calc(100% - 24px));
+            min-height: 0;
+            margin: 0;
+            padding: 0;
+            scroll-snap-align: start;
+            list-style: none;
+          }
+          .scopy-rich-entity-card {
+            display: flex;
+            justify-content: space-between;
+            gap: 16px;
+            padding: 16px;
+            border: 1px solid var(--scopy-rich-border);
+            border-radius: 16px;
+            background: var(--scopy-surface-bg);
+          }
+          .scopy-rich-entity-body {
+            display: flex;
+            min-width: 0;
+            flex-direction: column;
+            gap: 4px;
+          }
+          .scopy-rich-entity-name {
+            color: var(--scopy-text-primary);
+            font-size: calc(16px * var(--scopy-chatgpt-layout-font-scale));
+            line-height: calc(22px * var(--scopy-chatgpt-layout-font-scale));
+            font-weight: 600;
+            text-decoration: none;
+          }
+          a.scopy-rich-entity-name:hover { text-decoration: underline; }
+          .scopy-rich-entity-meta {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 8px;
+            color: var(--scopy-text-secondary);
+            font-size: calc(13px * var(--scopy-chatgpt-layout-font-scale));
+            line-height: calc(18px * var(--scopy-chatgpt-layout-font-scale));
+          }
+          .scopy-rich-entity-detail {
+            display: flex;
+            gap: 6px;
+            color: var(--scopy-text-secondary);
+            font-size: calc(13px * var(--scopy-chatgpt-layout-font-scale));
+            line-height: calc(19px * var(--scopy-chatgpt-layout-font-scale));
+          }
+          .scopy-rich-entity-detail-label { color: var(--scopy-text-weak); flex: 0 0 auto; }
+          .scopy-rich-entity-detail-label::after { content: ":"; }
+          .scopy-rich-entity-media {
+            display: flex;
+            flex: 0 0 auto;
+            width: 72px;
+            height: 72px;
+            overflow: hidden;
+            border-radius: 10px;
+            background: var(--scopy-rich-media-bg);
+          }
+          .scopy-rich-entity-media img,
+          .scopy-rich-entity-image {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+          }
+          .scopy-rich-map-frame {
+            display: block;
+            overflow: hidden;
+            border: 1px solid var(--scopy-rich-border);
+            border-radius: 16px;
+            background: var(--scopy-rich-media-bg);
+          }
+          .scopy-rich-map-image,
+          .scopy-rich-map-frame img {
+            display: block;
+            width: 100%;
+            height: auto;
+          }
+          .scopy-rich-map-pins {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            margin: 12px 0 0;
+            padding: 0;
+            list-style: none;
+          }
+          .scopy-rich-map-pin {
+            display: flex;
+            align-items: flex-start;
+            gap: 10px;
+            font-size: calc(14px * var(--scopy-chatgpt-layout-font-scale));
+            line-height: calc(20px * var(--scopy-chatgpt-layout-font-scale));
+          }
+          .scopy-rich-map-pin-marker {
+            position: relative;
+            display: inline-flex;
+            flex: 0 0 auto;
+            color: var(--scopy-rich-map-pin);
+          }
+          .scopy-rich-map-pin-marker .scopy-icon { width: 22px; height: 22px; }
+          .scopy-rich-map-pin-index {
+            position: absolute;
+            top: 3px;
+            left: 0;
+            width: 22px;
+            color: #ffffff;
+            font-size: 10px;
+            font-weight: 600;
+            line-height: 10px;
+            text-align: center;
+          }
+          .scopy-rich-map-pin-body { display: flex; min-width: 0; flex-direction: column; }
+          .scopy-rich-map-pin-label { font-weight: 500; }
+          .scopy-rich-map-pin-detail { color: var(--scopy-text-secondary); }
+          @container (min-width: 48rem) {
+            .scopy-rich-product-item {
+              flex-basis: calc((100% - (var(--scopy-rich-column-gap) * 3)) / 4);
+            }
+          }
           html.scopy-export-mode .scopy-rich-lightbox,
           html.scopy-export-mode .scopy-rich-chart-tooltip {
             display: none !important;
@@ -2454,11 +2766,15 @@ enum MarkdownHTMLDocumentBuilder {
     }
 
     private static func unifiedPolicyPayload(context: MarkdownRenderContext) -> [String: AnyEncodable] {
-        [
+        var payload: [String: AnyEncodable] = [
             "profile": AnyEncodable(context.profile.rawValue),
             "allowLooseMathRepair": AnyEncodable(context.policy.allowLooseMathRepair),
             "policyVersion": AnyEncodable(MarkdownRenderContextResolver.rendererVersion)
         ]
+        if let enrichment = context.linkEnrichment, !enrichment.entries.isEmpty {
+            payload["linkEnrichment"] = AnyEncodable(enrichment.entries)
+        }
+        return payload
     }
 }
 

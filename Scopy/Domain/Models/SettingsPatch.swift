@@ -13,6 +13,7 @@ public struct SettingsPatch: Sendable, Equatable {
     public var saveFiles: Bool?
     public var pngquantBinaryPath: String?
     public var pngquantCopyImageEnabled: Bool?
+    public var linkEnrichmentEnabled: Bool?
     public var pngquantCopyImageQualityMin: Int?
     public var pngquantCopyImageQualityMax: Int?
     public var pngquantCopyImageSpeed: Int?
@@ -41,6 +42,7 @@ public struct SettingsPatch: Sendable, Equatable {
         if draft.saveFiles != baseline.saveFiles { patch.saveFiles = draft.saveFiles }
         if draft.pngquantBinaryPath != baseline.pngquantBinaryPath { patch.pngquantBinaryPath = draft.pngquantBinaryPath }
         if draft.pngquantCopyImageEnabled != baseline.pngquantCopyImageEnabled { patch.pngquantCopyImageEnabled = draft.pngquantCopyImageEnabled }
+        if draft.linkEnrichmentEnabled != baseline.linkEnrichmentEnabled { patch.linkEnrichmentEnabled = draft.linkEnrichmentEnabled }
         if draft.pngquantCopyImageQualityMin != baseline.pngquantCopyImageQualityMin { patch.pngquantCopyImageQualityMin = draft.pngquantCopyImageQualityMin }
         if draft.pngquantCopyImageQualityMax != baseline.pngquantCopyImageQualityMax { patch.pngquantCopyImageQualityMax = draft.pngquantCopyImageQualityMax }
         if draft.pngquantCopyImageSpeed != baseline.pngquantCopyImageSpeed { patch.pngquantCopyImageSpeed = draft.pngquantCopyImageSpeed }
@@ -79,6 +81,7 @@ public struct SettingsPatch: Sendable, Equatable {
             && saveFiles == nil
             && pngquantBinaryPath == nil
             && pngquantCopyImageEnabled == nil
+            && linkEnrichmentEnabled == nil
             && pngquantCopyImageQualityMin == nil
             && pngquantCopyImageQualityMax == nil
             && pngquantCopyImageSpeed == nil

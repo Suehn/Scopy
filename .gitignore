@@ -56,3 +56,4 @@ artifacts/render-validation/
 
 # Local performance DB snapshot (never commit)
 perf-db/
+.secrets/
