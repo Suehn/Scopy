@@ -30,11 +30,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 - 先读 `doc/current/markdown-chatgpt-wacz-style-contract.md`；它是 ChatGPT 风格 Markdown、GFM、代码、表格、KaTeX、字体、间距、响应式和 Unicode/RTL 行为的唯一 canonical 契约。归档源码/资源不等于 hydrated final DOM 或 computed style，不得据此虚构像素级、暗色或字体结论。
 - 只维护 `MarkdownHTMLRenderer -> MarkdownHTMLDocumentBuilder` 一条 Markdown 到 standalone HTML 的运行时链路。预览和 PNG 导出共享同一 parse result、HTML、基础 CSS 与本地资源；禁止 renderer selector、feature flag、shadow renderer、markdown-it fallback 和第二套 export parser。
-- 单 `~`、单 `$`、raw HTML、代码语法岛、table pipe、脚注 ID、WebView render ID 等语义必须遵守 canonical 契约；不要用 CSS 或启发式修复改变 parser 含义。
+- 单 `~`、单 `$`、safe HTML、代码语法岛、table pipe、脚注 ID、WebView render ID 等语义必须遵守 canonical 契约。raw HTML 仅有无属性闭合的 `u`、`kbd`、`mark`、`sub`、`sup`、`details`/`summary` 安全子集能进入受信 AST，完整注释隐藏，其余内容字面化；不要用 CSS 或启发式修复改变 parser 含义。
 - 40rem/48rem thread width 由 `816 / scale` 的逻辑视口决定。代码、公式、表格只做局部 overflow，不能扩宽 popover；公式宿主禁止使用会让离屏 PNG 漏绘的 `content-visibility:auto`。
 - 正文字体使用可靠的 macOS 系统 sans/mono 栈，公式使用项目内 KaTeX 字体；归档里存在字体文件不等于正文实际使用它。
 - 任何旧 release note、archive、proposal、注释或历史契约若与上述 canonical 契约或当前源码/测试冲突，均为非规范历史材料；删除或改正仍标为 active 的冲突文本，不得为旧说法保留兼容路径。
-- 渲染改动必须同步更新 Node 契约测试、`ScopyTests/ChatGPTMarkdownRendererTests.swift` 和真实导出 fixture，并完成 Node build/test、应用构建、单测、严格并发测试和真实 PNG 视觉检查。测试宿主没有进入 Scopy 场景时只能记录 environment-blocked。
+- 渲染改动必须同步更新 Node 契约测试、`ScopyTests/ChatGPTMarkdownRendererTests.swift` 和真实导出 fixture，并完成 Node build/test、原子资产校验、应用构建、单测、严格并发测试和真实 PNG 视觉检查。renderer bundle、KaTeX CSS、KaTeX 字体与 manifest 必须一同更新并校验，应用包不得保留扁平重复资源。测试宿主没有进入 Scopy 场景时只能记录 environment-blocked。
 
 ### 验证闭环（按风险）
 

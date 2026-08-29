@@ -103,14 +103,12 @@
     "expectedProfile": "richHTML",
     "allowLooseMathRepair": false,
     "renderedContains": [
-      "&#x3C;details>",
-      "&#x3C;summary>More&#x3C;/summary>",
-      "&#x3C;kbd>Cmd&#x3C;/kbd>",
+      "<details class=\"scopy-safe-details\">",
+      "<summary class=\"scopy-safe-summary\">More</summary>",
+      "<kbd class=\"scopy-safe-html-kbd\">Cmd</kbd>",
       "&#x3C;script>alert(1)&#x3C;/script>"
     ],
     "renderedNotContains": [
-      "<details class=\"scopy-details\"",
-      "<kbd>Cmd</kbd>",
       "<script>"
     ],
     "expectedRepairedMathCount": 0
@@ -121,14 +119,13 @@
     "expectedProfile": "authoredMarkdown",
     "allowLooseMathRepair": false,
     "renderedContains": [
-      "&#x3C;details>",
-      "&#x3C;summary>More&#x3C;/summary>",
-      "&#x3C;kbd>Cmd&#x3C;/kbd>",
+      "<details class=\"scopy-safe-details\">",
+      "<summary class=\"scopy-safe-summary\">More</summary>",
+      "<kbd class=\"scopy-safe-html-kbd\">Cmd</kbd>",
+      "<mark class=\"scopy-safe-html-mark\">K</mark>",
       "language-swift"
     ],
     "renderedNotContains": [
-      "<details class=\"scopy-details\"",
-      "<kbd>Cmd</kbd>",
       "<script>"
     ],
     "expectedRepairedMathCount": 0

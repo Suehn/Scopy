@@ -16,7 +16,7 @@ const CHART_POINT_SELECTOR = "[data-scopy-point-index], [data-scopy-chart-point]
 const CHART_TOOLTIP_SELECTOR = "[data-scopy-chart-tooltip]";
 const SOURCE_CITATION_GROUP_SELECTOR = ".scopy-source-citation-group";
 const SOURCE_CITATION_SUPPORTING_SELECTOR = ".scopy-source-citation-supporting";
-const EXPORT_FOCUSABLE_SELECTOR = "a, [data-scopy-action]";
+const EXPORT_FOCUSABLE_SELECTOR = "a, .scopy-safe-summary, [data-scopy-action]";
 
 const DECIMAL_PATTERN = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/;
 const MAX_DECIMAL_LENGTH = 128;
@@ -56,6 +56,11 @@ export function freezeRichForExport(root) {
   for (const surface of surfacesWithin(root)) {
     closeLightbox(surface, { restoreFocus: false });
     hideChartTooltips(surface);
+  }
+
+  for (const details of queryAll(root, ".scopy-safe-details")) {
+    setAttribute(details, "open", "");
+    details.open = true;
   }
 
   for (const control of queryAll(root, EXPORT_FOCUSABLE_SELECTOR)) {

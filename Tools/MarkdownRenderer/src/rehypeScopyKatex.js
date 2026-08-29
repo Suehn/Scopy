@@ -11,6 +11,9 @@ export function rehypeScopyKatex(options = {}) {
 
   return function transformer(tree, file) {
     let renderedCount = 0;
+    let strictCount = 0;
+    let relaxedCount = 0;
+    let errorCount = 0;
     visitParents(tree, "element", (element, parents) => {
       const classes = Array.isArray(element.properties?.className)
         ? element.properties.className
@@ -45,12 +48,16 @@ export function rehypeScopyKatex(options = {}) {
         type: "element",
         tagName: "span",
         properties: {
+          className: [
+            "scopy-math-host",
+            displayMode ? "scopy-math-display-host" : "scopy-math-inline-host"
+          ],
           role: "math",
           ariaLabel: source,
           dataMathSource: source,
           dataClientKatexLayout: ""
         },
-        children: rendered
+        children: rendered.children
       };
       const index = parent.children.indexOf(scope);
       if (index === -1) {
@@ -58,24 +65,31 @@ export function rehypeScopyKatex(options = {}) {
       }
       parent.children.splice(index, 1, host);
       renderedCount += 1;
+      if (rendered.outcome === "strict") strictCount += 1;
+      else if (rendered.outcome === "relaxed") relaxedCount += 1;
+      else errorCount += 1;
       return SKIP;
     });
     file.data.scopyMathCount = renderedCount;
+    file.data.scopyMathStrictCount = strictCount;
+    file.data.scopyMathRelaxedCount = relaxedCount;
+    file.data.scopyMathErrorCount = errorCount;
   };
 }
 
 function renderMath(source, displayMode, failureMode, file, parents, element) {
   try {
-    return parseRenderedHTML(
-      katex.renderToString(source, {
+    return {
+      outcome: "strict",
+      children: parseRenderedHTML(katex.renderToString(source, {
         displayMode,
         output: "html",
         strict: "error",
         throwOnError: true,
         trust: false,
         maxSize: maximumUserSpecifiedSizeEm
-      })
-    );
+      }))
+    };
   } catch (error) {
     file.message("Could not render math with KaTeX", {
       ancestors: [...parents, element],
@@ -86,22 +100,24 @@ function renderMath(source, displayMode, failureMode, file, parents, element) {
     });
     if (failureMode === "relaxed") {
       try {
-        return parseRenderedHTML(
-          katex.renderToString(source, {
+        return {
+          outcome: "relaxed",
+          children: parseRenderedHTML(katex.renderToString(source, {
             displayMode,
             output: "html",
             strict: "ignore",
-            throwOnError: false,
+            throwOnError: true,
             trust: false,
             maxSize: maximumUserSpecifiedSizeEm
-          })
-        );
+          }))
+        };
       } catch {
         // Fall through to the stable literal error surface.
       }
     }
-    return [
-      {
+    return {
+      outcome: "error",
+      children: [{
         type: "element",
         tagName: "span",
         properties: {
@@ -109,8 +125,8 @@ function renderMath(source, displayMode, failureMode, file, parents, element) {
           title: String(error)
         },
         children: [{ type: "text", value: source }]
-      }
-    ];
+      }]
+    };
   }
 }
 

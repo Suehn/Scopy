@@ -4,22 +4,13 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { render } from "../src/render.js";
 import { isRenderableDataImage } from "../src/remarkScopyRich.js";
+import {
+  BUNDLED_IMAGE_ASSETS,
+  bundledImageAssetForExactRemoteURL
+} from "../src/scopyLocalImageAssets.js";
 
 const CODE_FENCE = /<pre><code class="(?:hljs )?language-scopy-rich">/;
 const DATA_IMAGE = "data:image/png;base64,aGVsbG8=";
-const BUNDLED_ASSETS = Object.freeze({
-  "news-openai-hugging-face": "rich/news-openai-hugging-face.jpg",
-  "news-openai-jalapeno": "rich/news-openai-jalapeno.jpg",
-  "news-openai-kiro": "rich/news-openai-kiro.jpg",
-  "image-group-chatgpt-search-button": "rich/image-group-chatgpt-search-button.jpg",
-  "image-group-chatgpt-search-results": "rich/image-group-chatgpt-search-results.jpg",
-  "weather-mostly-cloudy-light": "rich/weather-mostly-cloudy-light.png",
-  "weather-sun-shower-light": "rich/weather-sun-shower-light.png",
-  "favicon-help-openai-32": "rich/favicon-help-openai-32.png",
-  "favicon-investing-32": "rich/favicon-investing-32.png",
-  "favicon-openai-32": "rich/favicon-openai-32.png",
-  "favicon-reuters-32": "rich/favicon-reuters-32.png"
-});
 const previewAssetRoot = fileURLToPath(new URL("../../../Scopy/Resources/MarkdownPreview/", import.meta.url));
 
 function rich(value) {
@@ -206,8 +197,9 @@ test("strict v2 finance renders precomputed ranges, SVG charts, and probe metada
   assert.match(html, /data-scopy-display="\$9\.00"/);
   assert.match(html, /<svg viewBox="0 0 738 240" aria-hidden="true" focusable="false">/);
   assert.match(html, /<linearGradient[^>]+x1="0%" x2="0%" y1="0%" y2="100%" gradientUnits="objectBoundingBox">/);
-  assert.match(html, /<stop offset="0%" stop-color="#4b9e53" stop-opacity="0\.24"><\/stop>/);
-  assert.match(html, /<stop offset="100%" stop-color="#4b9e53" stop-opacity="0"><\/stop>/);
+  assert.match(html, /<stop offset="0%" stop-color="currentColor" stop-opacity="0\.24"><\/stop>/);
+  assert.match(html, /<stop offset="100%" stop-color="currentColor" stop-opacity="0"><\/stop>/);
+  assert.doesNotMatch(html, /stop-color="#/);
   assert.match(html, /<dt>Volume<\/dt><dd>1\.2M<\/dd>/);
 });
 
@@ -226,10 +218,10 @@ test("the bundled image asset map is closed and every mapped file is real", () =
     version: 2,
     type: "image_group",
     layout: "carousel",
-    images: Object.keys(BUNDLED_ASSETS).map((asset) => ({ asset, alt: asset }))
+    images: Object.keys(BUNDLED_IMAGE_ASSETS).map((asset) => ({ asset, alt: asset }))
   });
 
-  for (const [asset, relativePath] of Object.entries(BUNDLED_ASSETS)) {
+  for (const [asset, relativePath] of Object.entries(BUNDLED_IMAGE_ASSETS)) {
     assert.equal(existsSync(previewAssetRoot + relativePath), true, `${asset} file exists`);
     assert.match(html, new RegExp(`src="${relativePath.replaceAll(".", "\\.")}"`));
   }
@@ -336,6 +328,27 @@ test("adjacent ordinary images use the v2 image-group path while one image stays
   assert.match(single, /^<p><img src="https:\/\/example.com\/one.png" alt="one"><\/p>$/);
   assert.doesNotMatch(single, /scopy-rich-image-group/);
   assert.doesNotMatch(separated, /scopy-rich-image-group/);
+});
+
+test("only the two verified public-copy image URLs resolve to bundled assets", () => {
+  const sourcesURL = "https://images.ctfassets.net/kftzwdyauwt9/1lzvjTVvojn23RPUeYr51u/9e11ca889ec10a05e5601919b98c54d2/Sources_Sidebar.png?fm=webp&q=90&w=3840";
+  const entryURL = "https://images.ctfassets.net/kftzwdyauwt9/7LzxdzMcijUYHtIES6rmub/1dd3bc9f423a6b1cd5176936dbb029aa/Entry_Point.png?fm=webp&q=90&w=3840";
+
+  assert.equal(bundledImageAssetForExactRemoteURL(sourcesURL), "image-group-chatgpt-search-results");
+  assert.equal(bundledImageAssetForExactRemoteURL(entryURL), "image-group-chatgpt-search-button");
+  assert.equal(bundledImageAssetForExactRemoteURL(sourcesURL.replace("w=3840", "w=2048")), null);
+  assert.equal(bundledImageAssetForExactRemoteURL("https://example.com/unknown.png"), null);
+
+  const html = render(`![Sources sidebar](${sourcesURL})\n\n![Entry point](${entryURL})`).html;
+  assert.equal((html.match(/class="scopy-rich scopy-rich-image-group"/g) || []).length, 1);
+  assert.match(html, /<img src="rich\/image-group-chatgpt-search-results\.jpg" alt="Sources sidebar" class="scopy-rich-image">/);
+  assert.match(html, /<img src="rich\/image-group-chatgpt-search-button\.jpg" alt="Entry point" class="scopy-rich-image">/);
+  assert.doesNotMatch(html, /<img[^>]+src="https?:\/\//i);
+
+  const unknown = render("![near miss](https://images.ctfassets.net/kftzwdyauwt9/1lzvjTVvojn23RPUeYr51u/9e11ca889ec10a05e5601919b98c54d2/Sources_Sidebar.png?fm=webp&q=90&w=2048)\n\n![unknown](https://example.com/unknown.png)").html;
+  assert.equal((unknown.match(/class="scopy-rich-image-placeholder scopy-rich-image"/g) || []).length, 2);
+  assert.doesNotMatch(unknown, /src="rich\/image-group-chatgpt-search-results\.jpg"/);
+  assert.doesNotMatch(unknown, /<img[^>]+src="https?:\/\//i);
 });
 
 test("rich IDs are stable zero-based AST ordinals and invalid fences retain slots", () => {

@@ -1,3 +1,5 @@
+import { bundledImageAssetForExactRemoteURL } from "./scopyLocalImageAssets.js";
+
 export function remarkScopyImageGroups() {
   return function transformer(tree) {
     visitParents(tree, (parent) => {
@@ -35,13 +37,26 @@ export function remarkScopyImageGroups() {
             continue;
           }
           const count = Math.min(12, remaining);
-          replacements.push({ type: "scopyImageGroup", images: images.slice(start, start + count) });
+          replacements.push({
+            type: "scopyImageGroup",
+            images: images.slice(start, start + count).map(groupedImage)
+          });
           start += count;
         }
         children.splice(index, end - index, ...replacements);
         index += replacements.length;
       }
     });
+  };
+}
+
+function groupedImage(image) {
+  const asset = bundledImageAssetForExactRemoteURL(image.src);
+  if (!asset) return image;
+  return {
+    asset,
+    alt: image.alt,
+    ...(image.title === undefined ? {} : { title: image.title })
   };
 }
 

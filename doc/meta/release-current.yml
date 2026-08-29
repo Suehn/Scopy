@@ -1,6 +1,6 @@
-version: v0.70.0
-date: 2026-08-28
-release_doc: doc/releases/history/v0.70.0.md
+version: v0.71.0
+date: 2026-08-29
+release_doc: doc/releases/history/v0.71.0.md
 release_index: doc/releases/README.md
 changelog_file: doc/releases/CHANGELOG.md
 profile_doc: null
@@ -8,15 +8,17 @@ runbook_doc: doc/current/release-runbook.md
 spec_doc: doc/current/product-spec.md
 development_doc: doc/current/development-guide.md
 architecture_doc: doc/current/architecture.md
-last_verified_at: 2026-08-28
-summary: Interactive ChatGPT-style rich surfaces and stable Markdown preview lifecycle
+last_verified_at: 2026-08-29
+summary: Renderer hardening gate and desktop-wide rich fidelity
 verification:
   docs_validate: pass
   release_validate: pass
   release_policy: pass_15_cases
   build: pass
-  renderer_js: pass_77_executed_0_failures
-  test_unit: pass_749_executed_2_skipped_0_failures
-  test_strict: pass_749_executed_2_skipped_0_failures
-  real_app_png_export: pass_user_stress_2160x141619_and_visible_copy_1080x8653
-  include_hover_ui: blocked_automation_mode_timeout_not_counted_as_pass
+  renderer_js: pass_100_executed_0_failures
+  assets_verify: pass_renderer_11727ec7_katex_0_16_45_fonts_60
+  test_unit: pass_762_executed_2_skipped_0_failures
+  test_strict: pass_762_executed_2_skipped_0_failures
+  real_app_png_export: pass_rich_surfaces_1080x5740_public_copy_1080x14027_stress_1080x69304_safe_html_1080x1526
+  preview_harness: pass_terminal_rendered_at_80_100_200_scales
+  xcuitest_wrapper: blocked_accessibility_not_loaded_not_counted_as_pass

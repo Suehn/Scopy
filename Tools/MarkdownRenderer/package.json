@@ -5,6 +5,9 @@
   "type": "module",
   "scripts": {
     "build": "node scripts/build.mjs",
+    "sync:katex-assets": "node scripts/sync-katex-assets.mjs",
+    "verify:assets": "node scripts/verify-assets.mjs",
+    "verify:assets:checked-in": "node scripts/verify-assets.mjs --skip-source-bundle",
     "test": "node --test"
   },
   "dependencies": {

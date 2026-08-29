@@ -186,3 +186,86 @@ final class HistoryItemPreviewCoordinatorTests: XCTestCase {
         }
     }
 }
+
+@MainActor
+final class HoverPreviewModelTests: XCTestCase {
+    func testCachedMarkdownGeometryDoesNotMakeReusableWebViewLive() {
+        let model = HoverPreviewModel()
+        let source = "# Cached preview"
+        let renderKey = HoverPreviewModel.markdownRenderKey(
+            source: source,
+            layoutScale: .percent100
+        )
+        let cachedSize = CGSize(width: 816, height: 420)
+
+        model.primeTextPreview(
+            text: source,
+            isMarkdown: true,
+            markdownHTML: "<p>Cached preview</p>",
+            markdownContentSize: cachedSize,
+            markdownHasHorizontalOverflow: true
+        )
+
+        XCTAssertEqual(model.markdownContentSize, cachedSize)
+        XCTAssertTrue(model.markdownHasHorizontalOverflow)
+        XCTAssertNil(model.markdownMetricsLayoutScalePercent)
+        XCTAssertFalse(model.isMarkdownRenderLive(for: renderKey))
+    }
+
+    func testRenderKeyChangeRestoresShieldUntilCurrentWebViewSucceeds() {
+        let model = HoverPreviewModel()
+        let sourceA = "# A"
+        let sourceB = "# B"
+        let renderKeyA = HoverPreviewModel.markdownRenderKey(
+            source: sourceA,
+            layoutScale: .percent100
+        )
+        let renderKeyB = HoverPreviewModel.markdownRenderKey(
+            source: sourceB,
+            layoutScale: .percent100
+        )
+
+        model.prepareMarkdownRender(for: renderKeyA)
+        model.markMarkdownRenderSucceeded(for: renderKeyA)
+        XCTAssertTrue(model.isMarkdownRenderLive(for: renderKeyA))
+
+        model.primeTextPreview(
+            text: sourceB,
+            isMarkdown: true,
+            markdownHTML: "<p>B</p>",
+            markdownContentSize: CGSize(width: 816, height: 180),
+            markdownHasHorizontalOverflow: false
+        )
+        model.prepareMarkdownRender(for: renderKeyB)
+
+        XCTAssertFalse(model.isMarkdownRenderLive(for: renderKeyA))
+        XCTAssertFalse(model.isMarkdownRenderLive(for: renderKeyB))
+
+        model.markMarkdownRenderSucceeded(for: renderKeyB)
+
+        XCTAssertTrue(model.isMarkdownRenderLive(for: renderKeyB))
+        XCTAssertFalse(model.isMarkdownRenderLive(for: renderKeyA))
+    }
+
+    func testRenderFailureFeedbackIsScopedToCurrentRenderKey() {
+        let model = HoverPreviewModel()
+        let renderKeyA = HoverPreviewModel.markdownRenderKey(
+            source: "A",
+            layoutScale: .percent100
+        )
+        let renderKeyB = HoverPreviewModel.markdownRenderKey(
+            source: "B",
+            layoutScale: .percent125
+        )
+
+        model.markMarkdownRenderFailed(for: renderKeyA, reason: "A failed")
+
+        XCTAssertEqual(model.markdownRenderErrorReason(for: renderKeyA), "A failed")
+        XCTAssertNil(model.markdownRenderErrorReason(for: renderKeyB))
+
+        model.prepareMarkdownRender(for: renderKeyB)
+
+        XCTAssertNil(model.markdownRenderErrorReason(for: renderKeyA))
+        XCTAssertNil(model.markdownRenderErrorReason(for: renderKeyB))
+    }
+}

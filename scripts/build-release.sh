@@ -66,8 +66,17 @@ echo -e "版本: ${YELLOW}${TAG_ON_HEAD}${NC}"
 echo -e "输出: ${YELLOW}${DMG_PATH}${NC}"
 echo ""
 
-# Step 1: 生成项目
-echo -e "${BLUE}[1/5]${NC} 生成 Xcode 项目..."
+# Step 1: 验证仓库内 MarkdownPreview 发布资产
+echo -e "${BLUE}[1/6]${NC} 验证 MarkdownPreview 发布资产..."
+if ! make markdown-assets-gate; then
+    echo -e "${RED}✗ MarkdownPreview 发布资产不是同一锁定版本${NC}"
+    echo "    renderer source、IIFE、sidecar、KaTeX CSS/fonts 与 manifest 必须全部同步"
+    exit 1
+fi
+echo -e "${GREEN}✓ MarkdownPreview 发布资产验证完成${NC}"
+
+# Step 2: 生成项目
+echo -e "${BLUE}[2/6]${NC} 生成 Xcode 项目..."
 if ! xcodegen generate > /dev/null 2>&1; then
     echo -e "${RED}✗ xcodegen 失败${NC}"
     echo "    请确保安装了 xcodegen: brew install xcodegen"
@@ -75,8 +84,8 @@ if ! xcodegen generate > /dev/null 2>&1; then
 fi
 echo -e "${GREEN}✓ 项目生成完成${NC}"
 
-# Step 2: 构建 Release
-echo -e "${BLUE}[2/5]${NC} 构建 Release 版本..."
+# Step 3: 构建 Release
+echo -e "${BLUE}[3/6]${NC} 构建 Release 版本..."
 mkdir -p "$XCODE_DERIVED_DATA"
 if ! xcodebuild -project Scopy.xcodeproj -scheme Scopy -configuration Release \
     -derivedDataPath "$XCODE_DERIVED_DATA" build ${VERSION_ARGS} > "$BUILD_LOG" 2>&1; then
@@ -88,16 +97,32 @@ if ! xcodebuild -project Scopy.xcodeproj -scheme Scopy -configuration Release \
 fi
 echo -e "${GREEN}✓ 构建成功${NC}"
 
-# Step 3: 验证应用
-echo -e "${BLUE}[3/5]${NC} 验证应用..."
+# Step 4: 验证应用与最终资源副本
+echo -e "${BLUE}[4/6]${NC} 验证应用与最终 MarkdownPreview 资源..."
 if [ ! -d "${BUILD_DIR}/${APP_NAME}.app" ]; then
     echo -e "${RED}✗ 应用不存在: ${BUILD_DIR}/${APP_NAME}.app${NC}"
     exit 1
 fi
-echo -e "${GREEN}✓ 应用已构建${NC}"
+BUILT_ASSET_ROOT="${BUILD_DIR}/${APP_NAME}.app/Contents/Resources/MarkdownPreview"
+if ! node Tools/MarkdownRenderer/scripts/verify-assets.mjs --asset-root "$BUILT_ASSET_ROOT"; then
+    echo -e "${RED}✗ 最终应用内 MarkdownPreview 资源验证失败${NC}"
+    exit 1
+fi
+BUILT_RESOURCE_ROOT="${BUILD_DIR}/${APP_NAME}.app/Contents/Resources"
+for duplicate in katex.min.css scopy-unified-renderer.iife.js scopy-unified-renderer.iife.js.sha256; do
+    if [ -e "${BUILT_RESOURCE_ROOT}/${duplicate}" ]; then
+        echo -e "${RED}✗ 检测到扁平化的重复 MarkdownPreview 资源: ${duplicate}${NC}"
+        exit 1
+    fi
+done
+if find "$BUILT_RESOURCE_ROOT" -maxdepth 1 -name 'KaTeX_*' -print -quit | grep -q .; then
+    echo -e "${RED}✗ 检测到扁平化的重复 KaTeX 字体${NC}"
+    exit 1
+fi
+echo -e "${GREEN}✓ 应用及最终 MarkdownPreview 资源已验证${NC}"
 
-# Step 4: 创建 DMG
-echo -e "${BLUE}[4/5]${NC} 创建 DMG..."
+# Step 5: 创建 DMG
+echo -e "${BLUE}[5/6]${NC} 创建 DMG..."
 
 # 清理旧文件
 rm -rf "$DMG_DIR"
@@ -121,8 +146,8 @@ rm -rf "$DMG_DIR"
 
 echo -e "${GREEN}✓ DMG 创建成功${NC}"
 
-# Step 5: 计算 SHA256
-echo -e "${BLUE}[5/5]${NC} 计算 SHA256..."
+# Step 6: 计算 SHA256
+echo -e "${BLUE}[6/6]${NC} 计算 SHA256..."
 SHA256=$(shasum -a 256 "$DMG_PATH" | awk '{print $1}')
 printf '%s  %s\n' "$SHA256" "$DMG_NAME" > "$SHA_FILE"
 echo -e "${GREEN}✓ SHA256 计算完成${NC}"

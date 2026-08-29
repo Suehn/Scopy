@@ -920,6 +920,7 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
             /* During export we may scroll programmatically for tiled snapshots; always keep inner scrollbars hidden. */
             html.scopy-scrollbars-visible pre::-webkit-scrollbar,
             html.scopy-scrollbars-visible table::-webkit-scrollbar,
+            html.scopy-scrollbars-visible .scopy-math-inline-host::-webkit-scrollbar,
             html.scopy-scrollbars-visible .katex-display::-webkit-scrollbar,
             html.scopy-scrollbars-visible .footnotes::-webkit-scrollbar,
             html.scopy-scrollbars-visible details::-webkit-scrollbar {
@@ -1670,11 +1671,62 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
             }
           }
 
+          function scaleWideMath(content, targetWidth) {
+            if (!content || !content.querySelectorAll) { return; }
+            var displays = content.querySelectorAll('.katex-display');
+            for (var i = 0; i < (displays.length || 0); i++) {
+              var display = displays[i];
+              var math = display && display.querySelector ? display.querySelector('.katex') : null;
+              if (!display || !math || !math.style) { continue; }
+              var available = 0;
+              try { available = Math.floor(display.clientWidth || 0); } catch (e) { available = 0; }
+              if (!available || available <= 0) { available = targetWidth; }
+              available = Math.min(targetWidth, available);
+              var rawWidth = measureBlockWidth(math);
+              if (!rawWidth || rawWidth <= available + 1) { continue; }
+              var scale = available / rawWidth;
+              if (!scale || !isFinite(scale) || scale <= 0 || scale >= 0.999) { continue; }
+              var rawHeight = 0;
+              try { rawHeight = Math.ceil(math.offsetHeight || math.scrollHeight || math.getBoundingClientRect().height || 0); } catch (e) { rawHeight = 0; }
+              math.style.transform = 'scale(' + scale + ')';
+              math.style.transformOrigin = 'top center';
+              display.style.overflow = 'visible';
+              display.style.maxWidth = '100%';
+              if (rawHeight > 0) { display.style.height = Math.ceil(rawHeight * scale + 1) + 'px'; }
+              if (display.dataset) { display.dataset.scopyExportMathScaled = 'true'; }
+            }
+
+            var inlineHosts = content.querySelectorAll('.scopy-math-inline-host');
+            for (var j = 0; j < (inlineHosts.length || 0); j++) {
+              var host = inlineHosts[j];
+              var inlineMath = host && host.querySelector ? host.querySelector('.katex') : null;
+              if (!host || !inlineMath || !inlineMath.style || !host.style) { continue; }
+              var inlineAvailable = 0;
+              try { inlineAvailable = Math.floor(host.clientWidth || 0); } catch (e) { inlineAvailable = 0; }
+              if (!inlineAvailable || inlineAvailable <= 0) { inlineAvailable = targetWidth; }
+              inlineAvailable = Math.min(targetWidth, inlineAvailable);
+              var inlineRawWidth = measureBlockWidth(inlineMath);
+              if (!inlineRawWidth || inlineRawWidth <= inlineAvailable + 1) { continue; }
+              var inlineScale = inlineAvailable / inlineRawWidth;
+              if (!inlineScale || !isFinite(inlineScale) || inlineScale <= 0 || inlineScale >= 0.999) { continue; }
+              var inlineRawHeight = 0;
+              try { inlineRawHeight = Math.ceil(inlineMath.offsetHeight || inlineMath.scrollHeight || inlineMath.getBoundingClientRect().height || 0); } catch (e) { inlineRawHeight = 0; }
+              inlineMath.style.transform = 'scale(' + inlineScale + ')';
+              inlineMath.style.transformOrigin = 'left center';
+              host.style.overflow = 'visible';
+              host.style.maxWidth = '100%';
+              host.style.width = Math.ceil(inlineRawWidth * inlineScale + 1) + 'px';
+              if (inlineRawHeight > 0) { host.style.height = Math.ceil(inlineRawHeight * inlineScale + 1) + 'px'; }
+              if (host.dataset) { host.dataset.scopyExportMathScaled = 'true'; }
+            }
+          }
+
           var content = document.getElementById('content');
           if (!content) { return false; }
           var targetWidth = computeTargetWidthPoints(content);
           try { if (typeof window.syncChatGPTZoomShell === 'function') { window.syncChatGPTZoomShell(content); } } catch (e) { }
           scaleWideTables(content, targetWidth);
+          scaleWideMath(content, targetWidth);
           adaptWideCodeBlocks(content, targetWidth);
           try { if (typeof window.syncChatGPTZoomShell === 'function') { window.syncChatGPTZoomShell(content); } } catch (e) { }
           return true;
@@ -1756,7 +1808,8 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
         var didAdjustWideContent = false
         var fontsWereLoaded = false
 
-        for _ in 0..<60 {
+        let readinessDeadline = CFAbsoluteTimeGetCurrent() + 12.0
+        while CFAbsoluteTimeGetCurrent() < readinessDeadline {
             let now = CFAbsoluteTimeGetCurrent()
             let value: String
             do {
@@ -1830,10 +1883,15 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
             try? await Task.sleep(nanoseconds: 80_000_000)
         }
 
-        // If the page rendered measurable content but the readiness hook never flipped, prefer exporting the
-        // observed DOM height over failing with a zero-height layout. This keeps export resilient to renderer-hook
-        // races while preserving the normal stable-height path above.
-        return lastNonZeroHeight > 0 ? lastNonZeroHeight : lastObservedHeight
+        let error = NSError(
+            domain: "Scopy.MarkdownExport",
+            code: 2,
+            userInfo: [
+                NSLocalizedDescriptionKey:
+                    "Markdown did not reach terminal render readiness (last height: \(max(lastNonZeroHeight, lastObservedHeight)))."
+            ]
+        )
+        throw MarkdownExportService.ExportError.stageFailed(stage: .prepareLayout, underlying: error)
     }
 
     private func dumpTableMetricsIfRequested(webView: WKWebView) async {

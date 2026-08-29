@@ -141,6 +141,25 @@ final class HistoryItemViewUITests: XCTestCase {
         waitForValue("rendered", identifier: "History.Preview.RenderStatus", timeout: 8)
     }
 
+    func testLongMarkdownPreviewFirstOpenAndScrollStayTerminallyRendered() throws {
+        launchHarness(scenario: "long-markdown-text", openPreviewOnTap: true)
+
+        XCTAssertTrue(app.anyElement("UITest.HistoryItemHarness").waitForExistence(timeout: 10))
+        XCTAssertTrue(triggerPreview("History.Preview.Text"))
+        waitForValue("rendered", identifier: "History.Preview.RenderStatus", timeout: 8)
+
+        let preview = app.anyElement("History.Preview.Text")
+        let initialFrame = preview.frame
+        preview.swipeUp()
+        preview.swipeUp()
+        pumpEvents(for: 0.25)
+
+        XCTAssertTrue(preview.exists)
+        waitForValue("rendered", identifier: "History.Preview.RenderStatus", timeout: 3)
+        XCTAssertEqual(preview.frame.width, initialFrame.width, accuracy: 1)
+        XCTAssertEqual(preview.frame.height, initialFrame.height, accuracy: 1)
+    }
+
     func testSearchEvidenceExplainsMultipleDistantMatches() throws {
         launchHarness(
             scenario: "long-markdown-text",

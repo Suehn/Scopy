@@ -192,6 +192,7 @@ enum MarkdownHTMLDocumentBuilder {
             function updateChatGPTPreviewScale(content) {
               return syncChatGPTZoomShell(content);
             }
+            window.syncChatGPTZoomShell = syncChatGPTZoomShell;
             function layoutChatGPTTables(root) {
               try {
                 if (!root || typeof root.querySelectorAll !== 'function') { return; }
@@ -348,6 +349,13 @@ enum MarkdownHTMLDocumentBuilder {
             --scopy-rich-news-card-ideal-width: 15.33rem;
             --scopy-rich-image-slot-min-width: 8rem;
             --scopy-rich-range-min-width: 4.5rem;
+            /* Trend palette sampled from the 2026-08-28 ChatGPT desktop reference screenshots
+               (live/runtime-derived). SVG chart gradients inherit these through currentColor,
+               so this block is the single color authority for every trend-colored surface. */
+            --scopy-rich-trend-up-text: rgb(38, 112, 46);
+            --scopy-rich-trend-up-stroke: rgb(75, 158, 83);
+            --scopy-rich-trend-down: rgb(239, 65, 70);
+            --scopy-rich-weather-chart-warm: rgb(238, 147, 64);
             --scopy-link-color: rgb(46, 131, 210);
             --scopy-code-bg: rgba(13, 13, 13, 0.04);
             --scopy-code-border: rgba(13, 13, 13, 0.08);
@@ -437,8 +445,8 @@ enum MarkdownHTMLDocumentBuilder {
             border: 0;
             border-radius: 0;
             box-shadow: none;
-            opacity: 0;
-            transition: opacity 140ms ease-in-out;
+            opacity: 1;
+            transition: none;
             transform: scale(var(--scopy-chatgpt-preview-scale));
             transform-origin: top left;
           }
@@ -739,6 +747,61 @@ enum MarkdownHTMLDocumentBuilder {
             min-width: 0;
           }
           img { max-width: 100%; height: auto; }
+          u.scopy-safe-html-u {
+            text-decoration-line: underline;
+            text-decoration-thickness: from-font;
+            text-underline-offset: 0.12em;
+          }
+          kbd.scopy-safe-html-kbd {
+            display: inline-flex;
+            align-items: center;
+            min-height: 1.55em;
+            padding: 0 0.38em;
+            border: 1px solid var(--scopy-border-subtle);
+            border-radius: 5px;
+            color: var(--scopy-text-primary);
+            background: rgb(247, 247, 247);
+            box-shadow: inset 0 -1px 0 rgba(13, 13, 13, 0.12);
+            font-family: var(--scopy-chatgpt-mono);
+            font-size: 0.82em;
+            line-height: 1.45;
+            vertical-align: 0.08em;
+            white-space: nowrap;
+          }
+          mark.scopy-safe-html-mark {
+            padding: 0.02em 0.16em;
+            border-radius: 3px;
+            color: inherit;
+            background: rgba(250, 204, 21, 0.28);
+          }
+          sub.scopy-safe-html-sub,
+          sup.scopy-safe-html-sup {
+            position: relative;
+            font-size: 0.72em;
+            line-height: 0;
+            vertical-align: baseline;
+          }
+          sub.scopy-safe-html-sub { inset-block-end: -0.25em; }
+          sup.scopy-safe-html-sup { inset-block-start: -0.48em; }
+          details.scopy-safe-details {
+            margin: 12px 0;
+            padding: 0 14px;
+            border: 1px solid var(--scopy-border-subtle);
+            border-radius: 12px;
+            background: var(--scopy-page-bg);
+          }
+          summary.scopy-safe-summary {
+            padding: 10px 0;
+            font-weight: 600;
+            line-height: 1.45;
+            cursor: pointer;
+          }
+          details.scopy-safe-details[open] > summary.scopy-safe-summary {
+            margin-block-end: 10px;
+            border-block-end: 1px solid var(--scopy-border-subtle);
+          }
+          details.scopy-safe-details > :last-child { margin-block-end: 12px; }
+          html.scopy-export-mode summary.scopy-safe-summary { cursor: default; }
           .scopy-icon {
             display: inline-block;
             flex: 0 0 auto;
@@ -790,6 +853,10 @@ enum MarkdownHTMLDocumentBuilder {
           a.scopy-link--file .scopy-file-icon {
             width: 1em;
             height: 1em;
+            /* Phosphor glyphs keep ~13% grid padding inside their 256 viewBox; scaling the whole
+               svg element (no internal clipping) restores the full-bleed optical size of the
+               Codex reference file icons without editing licensed path data. */
+            transform: scale(1.15);
           }
           a.scopy-link--file .scopy-link__label {
             min-width: 0;
@@ -850,6 +917,10 @@ enum MarkdownHTMLDocumentBuilder {
             width: calc(12px * var(--scopy-chatgpt-layout-font-scale));
             height: calc(12px * var(--scopy-chatgpt-layout-font-scale));
             color: rgb(93, 93, 93);
+          }
+          img.scopy-source-citation-favicon {
+            border-radius: 3px;
+            object-fit: contain;
           }
           .scopy-source-citation-label {
             max-width: 15ch;
@@ -1372,6 +1443,8 @@ enum MarkdownHTMLDocumentBuilder {
             position: relative;
             width: auto;
             height: 128px;
+            /* currentColor feeds the SVG gradient stops; line/label colors stay explicit. */
+            color: var(--scopy-rich-weather-chart-warm);
             margin: 8px calc(-1 * var(--scopy-rich-card-padding)) 0;
             padding-bottom: 8px;
             overflow-x: auto;
@@ -1449,11 +1522,11 @@ enum MarkdownHTMLDocumentBuilder {
           }
           .scopy-rich-trend-up .scopy-rich-finance-change,
           .scopy-rich-trend-up.scopy-rich-finance-after-hours {
-            color: rgb(38, 112, 46);
+            color: var(--scopy-rich-trend-up-text);
           }
           .scopy-rich-trend-down .scopy-rich-finance-change,
           .scopy-rich-trend-down.scopy-rich-finance-after-hours {
-            color: rgb(239, 65, 70);
+            color: var(--scopy-rich-trend-down);
           }
           .scopy-rich-trend-flat .scopy-rich-finance-change,
           .scopy-rich-trend-flat.scopy-rich-finance-after-hours {
@@ -1463,8 +1536,8 @@ enum MarkdownHTMLDocumentBuilder {
             color: var(--scopy-text-primary);
             font-weight: 500;
           }
-          .scopy-rich-finance-chart.scopy-rich-trend-up { color: rgb(75, 158, 83); }
-          .scopy-rich-finance-chart.scopy-rich-trend-down { color: rgb(239, 65, 70); }
+          .scopy-rich-finance-chart.scopy-rich-trend-up { color: var(--scopy-rich-trend-up-stroke); }
+          .scopy-rich-finance-chart.scopy-rich-trend-down { color: var(--scopy-rich-trend-down); }
           .scopy-rich-finance-chart.scopy-rich-trend-flat { color: var(--scopy-text-secondary); }
           .scopy-rich-finance-ranges {
             display: grid;
@@ -1639,12 +1712,13 @@ enum MarkdownHTMLDocumentBuilder {
             background: transparent;
             font-size: calc(24px * var(--scopy-chatgpt-layout-font-scale));
             line-height: calc(32px * var(--scopy-chatgpt-layout-font-scale));
-            font-weight: 400;
+            font-weight: 500;
+            font-variant-numeric: tabular-nums;
             direction: ltr;
             unicode-bidi: isolate;
           }
           .scopy-rich-currency-input[aria-invalid="true"] {
-            color: rgb(239, 65, 70);
+            color: var(--scopy-rich-trend-down);
           }
           html.scopy-export-mode .scopy-rich-lightbox,
           html.scopy-export-mode .scopy-rich-chart-tooltip {
@@ -1697,6 +1771,21 @@ enum MarkdownHTMLDocumentBuilder {
             border: 0;
             border-top: 1px solid var(--scopy-border);
             margin: 28px 0;
+          }
+          .scopy-math-host {
+            direction: ltr;
+            unicode-bidi: isolate;
+          }
+          .scopy-math-inline-host {
+            display: inline-block;
+            max-width: 100%;
+            overflow-x: auto;
+            overflow-y: hidden;
+            white-space: nowrap;
+          }
+          .scopy-math-display-host {
+            display: block;
+            max-width: 100%;
           }
           .katex {
             color: var(--scopy-text-primary);
@@ -1809,6 +1898,7 @@ enum MarkdownHTMLDocumentBuilder {
           pre::-webkit-scrollbar,
           .scopy-chatgpt-table-container::-webkit-scrollbar,
           table::-webkit-scrollbar,
+          .scopy-math-inline-host::-webkit-scrollbar,
           .katex-display::-webkit-scrollbar,
           .footnotes::-webkit-scrollbar,
           details::-webkit-scrollbar {
@@ -1818,6 +1908,7 @@ enum MarkdownHTMLDocumentBuilder {
           html.scopy-scrollbars-visible pre::-webkit-scrollbar,
           html.scopy-scrollbars-visible .scopy-chatgpt-table-container::-webkit-scrollbar,
           html.scopy-scrollbars-visible table::-webkit-scrollbar,
+          html.scopy-scrollbars-visible .scopy-math-inline-host::-webkit-scrollbar,
           html.scopy-scrollbars-visible .katex-display::-webkit-scrollbar,
           html.scopy-scrollbars-visible .footnotes::-webkit-scrollbar,
           html.scopy-scrollbars-visible details::-webkit-scrollbar {
@@ -1853,7 +1944,7 @@ enum MarkdownHTMLDocumentBuilder {
             <meta charset="utf-8">
             <meta name="viewport" content="width=device-width, initial-scale=1">
             \(cspMetaTag)
-            <link rel="stylesheet" href="katex.min.css">
+            <link id="scopy-katex-stylesheet" rel="stylesheet" href="katex.min.css">
             <script defer src="contrib/scopy-unified-renderer.iife.js"></script>
             \(baseStyle(layoutScale: context.layoutScale))
             \(taskListBootstrapScript)
@@ -1864,7 +1955,13 @@ enum MarkdownHTMLDocumentBuilder {
                   markdownRendered: false,
                   renderFailed: false,
                   unifiedRenderSucceeded: false,
-                  renderPass: 0
+                  renderPass: 0,
+                  stylesheetReady: false,
+                  fontsReady: false,
+                  imagesReady: false,
+                  paintReady: false,
+                  layoutEpoch: 0,
+                  hydrationWarning: ''
                 };
                 var lastH = 0;
                 var lastW = 0;
@@ -1873,10 +1970,18 @@ enum MarkdownHTMLDocumentBuilder {
                 var lastRenderErrorReason = '';
                 var unifiedRenderAttempts = 0;
                 var maxUnifiedRenderAttempts = 100;
+                var pendingHeightReportHandle = 0;
+                var pendingHeightReportForce = false;
+                var layoutObserver = null;
+                function currentRenderGeneration() {
+                  try { return document.documentElement.getAttribute('data-scopy-render-id') || ''; } catch (e) { return ''; }
+                }
                 window.__scopyIsRenderReady = function () {
                   try {
                     var state = window.__scopyRenderState || {};
-                    return !!state.renderComplete && !!state.markdownRendered && !state.renderFailed && state.unifiedRenderSucceeded !== false;
+                    return !!state.renderComplete && !!state.markdownRendered &&
+                      !!state.stylesheetReady && !!state.fontsReady && !!state.imagesReady && !!state.paintReady &&
+                      !state.renderFailed && state.unifiedRenderSucceeded !== false;
                   } catch (e) {
                     return false;
                   }
@@ -1887,11 +1992,13 @@ enum MarkdownHTMLDocumentBuilder {
                   }
                 };
                 \(tableWrapFunctionScript)
-                window.__scopyReportHeight = function (force) {
+                function reportHeightNow(force) {
                   try {
                     if (!window.webkit || !window.webkit.messageHandlers || !window.webkit.messageHandlers.scopySize) { return; }
                     var el = document.getElementById('content');
                     if (!el) { return; }
+                    var state = window.__scopyRenderState || {};
+                    if (!state.renderComplete) { return; }
                     layoutChatGPTTables(el);
                     updateChatGPTPreviewScale(el);
                     var box = document.getElementById('content-scale-shell') || el;
@@ -1919,7 +2026,6 @@ enum MarkdownHTMLDocumentBuilder {
                       overflowX = false;
                     }
                     if (!h) { return; }
-                    var state = window.__scopyRenderState || {};
                     var renderSucceeded = !state.renderFailed && !!state.markdownRendered && state.unifiedRenderSucceeded !== false;
                     var renderErrorReason = state.unifiedErrorReason || '';
                     if (!force &&
@@ -1942,7 +2048,53 @@ enum MarkdownHTMLDocumentBuilder {
                       renderErrorReason: renderErrorReason
                     });
                   } catch (e) { }
+                }
+                window.__scopyReportHeight = function (force) {
+                  pendingHeightReportForce = pendingHeightReportForce || !!force;
+                  if (pendingHeightReportHandle) { return; }
+                  var scheduledGeneration = currentRenderGeneration();
+                  var deliver = function () {
+                    pendingHeightReportHandle = 0;
+                    var shouldForce = pendingHeightReportForce;
+                    pendingHeightReportForce = false;
+                    if (currentRenderGeneration() !== scheduledGeneration) { return; }
+                    reportHeightNow(shouldForce);
+                  };
+                  if (typeof window.requestAnimationFrame === 'function') {
+                    pendingHeightReportHandle = window.requestAnimationFrame(deliver);
+                  } else {
+                    pendingHeightReportHandle = window.setTimeout(deliver, 0);
+                  }
                 };
+                function installGenerationScopedLayoutObserver() {
+                  var el = document.getElementById('content');
+                  if (!el || layoutObserver) { return; }
+                  var observedGeneration = currentRenderGeneration();
+                  if (typeof window.ResizeObserver === 'function') {
+                    layoutObserver = new window.ResizeObserver(function () {
+                      if (currentRenderGeneration() !== observedGeneration) { return; }
+                      window.__scopyReportHeight(false);
+                    });
+                    layoutObserver.observe(el);
+                  }
+                  el.addEventListener('toggle', function (event) {
+                    if (currentRenderGeneration() !== observedGeneration) { return; }
+                    var target = event && event.target;
+                    if (!target || String(target.tagName || '').toLowerCase() !== 'details') { return; }
+                    window.__scopyReportHeight(true);
+                  }, true);
+                  el.addEventListener('keydown', function () {
+                    if (currentRenderGeneration() !== observedGeneration) { return; }
+                    window.__scopyReportHeight(true);
+                  }, true);
+                  try {
+                    if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === 'function') {
+                      document.fonts.ready.then(function () {
+                        if (currentRenderGeneration() === observedGeneration) { window.__scopyReportHeight(true); }
+                      });
+                    }
+                  } catch (e) { }
+                }
                 function replaceFailedImage(image) {
                   try {
                     if (!image || !image.parentNode) { return; }
@@ -2010,6 +2162,167 @@ enum MarkdownHTMLDocumentBuilder {
                     }
                   }, 1500);
                 }
+                function awaitStylesheetReady(completion) {
+                  var link = document.getElementById('scopy-katex-stylesheet');
+                  if (!link) {
+                    completion('stylesheet missing');
+                    return;
+                  }
+                  try {
+                    if (link.sheet) {
+                      completion('');
+                      return;
+                    }
+                  } catch (e) { }
+                  var settled = false;
+                  var timer = 0;
+                  function done(reason) {
+                    if (settled) { return; }
+                    settled = true;
+                    if (timer) { clearTimeout(timer); }
+                    try {
+                      link.removeEventListener('load', loaded);
+                      link.removeEventListener('error', failed);
+                    } catch (e) { }
+                    completion(reason || '');
+                  }
+                  function loaded() { done(''); }
+                  function failed() { done('stylesheet failed'); }
+                  link.addEventListener('load', loaded, { once: true });
+                  link.addEventListener('error', failed, { once: true });
+                  timer = setTimeout(function () { done('stylesheet timeout'); }, 2500);
+                }
+                function awaitFontsReady(completion) {
+                  function failedKatexFaceReason() {
+                    try {
+                      if (!document.fonts || typeof document.fonts.forEach !== 'function') { return ''; }
+                      var reason = '';
+                      document.fonts.forEach(function (face) {
+                        if (reason || !face) { return; }
+                        var family = String(face.family || '').replace(/["']/g, '');
+                        if (family.indexOf('KaTeX_') === 0 && face.status === 'error') {
+                          reason = 'KaTeX font failed: ' + family;
+                        }
+                      });
+                      return reason;
+                    } catch (e) {
+                      return 'font verification failed';
+                    }
+                  }
+                  try {
+                    if (!document.fonts || !document.fonts.ready || typeof document.fonts.ready.then !== 'function') {
+                      completion('');
+                      return;
+                    }
+                    var settled = false;
+                    var timer = setTimeout(function () {
+                      if (settled) { return; }
+                      settled = true;
+                      completion('font timeout');
+                    }, 3000);
+                    document.fonts.ready.then(function () {
+                      if (settled) { return; }
+                      settled = true;
+                      clearTimeout(timer);
+                      completion(failedKatexFaceReason());
+                    }, function () {
+                      if (settled) { return; }
+                      settled = true;
+                      clearTimeout(timer);
+                      completion('font failed');
+                    });
+                  } catch (e) {
+                    completion('font exception');
+                  }
+                }
+                function awaitTwoPaintFrames(completion) {
+                  var remaining = 2;
+                  var settled = false;
+                  var generation = currentRenderGeneration();
+                  var watchdog = setTimeout(function () {
+                    if (settled) { return; }
+                    settled = true;
+                    completion('paint timeout');
+                  }, 1500);
+                  function done(reason) {
+                    if (settled) { return; }
+                    settled = true;
+                    clearTimeout(watchdog);
+                    completion(reason || '');
+                  }
+                  function step() {
+                    if (currentRenderGeneration() !== generation) {
+                      done('stale paint generation');
+                      return;
+                    }
+                    try {
+                      var state = window.__scopyRenderState || {};
+                      state.layoutEpoch = (state.layoutEpoch || 0) + 1;
+                    } catch (e) { }
+                    remaining -= 1;
+                    if (remaining <= 0) {
+                      done('');
+                      return;
+                    }
+                    if (typeof window.requestAnimationFrame === 'function') {
+                      window.requestAnimationFrame(step);
+                    } else {
+                      setTimeout(step, 16);
+                    }
+                  }
+                  if (typeof window.requestAnimationFrame === 'function') {
+                    window.requestAnimationFrame(step);
+                  } else {
+                    setTimeout(step, 16);
+                  }
+                }
+                function awaitTerminalReadiness(root) {
+                  var terminal = false;
+                  var pending = 3;
+                  function fail(reason) {
+                    if (terminal) { return; }
+                    terminal = true;
+                    failUnifiedRender(reason);
+                  }
+                  function ready(kind) {
+                    if (terminal) { return; }
+                    var state = window.__scopyRenderState || {};
+                    if (kind === 'images') { state.imagesReady = true; }
+                    if (kind === 'stylesheet') { state.stylesheetReady = true; }
+                    if (kind === 'fonts') { state.fontsReady = true; }
+                    pending -= 1;
+                    if (pending > 0) { return; }
+                    layoutChatGPTTables(root);
+                    updateChatGPTPreviewScale(root);
+                    awaitTwoPaintFrames(function (paintError) {
+                      if (terminal) { return; }
+                      if (paintError) {
+                        fail(paintError);
+                        return;
+                      }
+                      terminal = true;
+                      state.paintReady = true;
+                      finish(true);
+                    });
+                  }
+                  settleRenderedImages(root, function () {
+                    ready('images');
+                  });
+                  awaitStylesheetReady(function (stylesheetError) {
+                    if (stylesheetError) {
+                      fail(stylesheetError);
+                      return;
+                    }
+                    ready('stylesheet');
+                  });
+                  awaitFontsReady(function (fontError) {
+                    if (fontError) {
+                      fail(fontError);
+                      return;
+                    }
+                    ready('fonts');
+                  });
+                }
                 function finish(succeeded) {
                   var el = document.getElementById('content');
                   if (el) {
@@ -2019,6 +2332,7 @@ enum MarkdownHTMLDocumentBuilder {
                     if (window.__scopyRenderState) {
                       window.__scopyRenderState.markdownRendered = !!succeeded;
                       window.__scopyRenderState.renderComplete = true;
+                      if (!succeeded) { window.__scopyRenderState.paintReady = false; }
                     }
                   } catch (e) { }
                   if (typeof window.__scopyReportHeight === 'function') {
@@ -2051,6 +2365,12 @@ enum MarkdownHTMLDocumentBuilder {
                       window.__scopyRenderState.renderFailed = false;
                       window.__scopyRenderState.unifiedRenderSucceeded = false;
                       window.__scopyRenderState.unifiedErrorReason = '';
+                      window.__scopyRenderState.stylesheetReady = false;
+                      window.__scopyRenderState.fontsReady = false;
+                      window.__scopyRenderState.imagesReady = false;
+                      window.__scopyRenderState.paintReady = false;
+                      window.__scopyRenderState.layoutEpoch = 0;
+                      window.__scopyRenderState.hydrationWarning = '';
                       window.__scopyRenderState.renderPass = (window.__scopyRenderState.renderPass || 0) + 1;
                     }
                   } catch (e) { }
@@ -2064,34 +2384,49 @@ enum MarkdownHTMLDocumentBuilder {
                     return;
                   }
                   unifiedRenderAttempts = 0;
+                  var result = null;
                   try {
-                    var result = window.ScopyUnifiedMarkdown.render(\(markdownLiteral), \(policyLiteral));
-                    if (result && result.html) {
-                      el.innerHTML = result.html;
-                      if (typeof window.ScopyUnifiedMarkdown.hydrateRich === 'function') {
-                        var exportMode = !!(document.documentElement && document.documentElement.classList && document.documentElement.classList.contains('scopy-export-mode'));
-                        window.ScopyUnifiedMarkdown.hydrateRich(el, { exportMode: exportMode });
-                      }
-                      if (typeof window.__scopyApplyTaskLists === 'function') {
-                        window.__scopyApplyTaskLists(el);
-                      }
-                      layoutChatGPTTables(el);
-                      if (window.__scopyRenderState) {
-                        window.__scopyRenderState.unifiedRenderSucceeded = true;
-                      }
-                    } else {
-                      failUnifiedRender('unified returned empty html');
-                      return;
-                    }
+                    result = window.ScopyUnifiedMarkdown.render(\(markdownLiteral), \(policyLiteral));
                   } catch (e) {
                     failUnifiedRender('unified render exception');
                     return;
                   }
-                  settleRenderedImages(el, function () { finish(true); });
+                  if (!result || !result.html) {
+                    failUnifiedRender('unified returned empty html');
+                    return;
+                  }
+                  el.innerHTML = result.html;
+                  if (window.__scopyRenderState) {
+                    window.__scopyRenderState.unifiedRenderSucceeded = true;
+                  }
+                  try {
+                    if (typeof window.__scopyApplyTaskLists === 'function') {
+                      window.__scopyApplyTaskLists(el);
+                    }
+                  } catch (e) {
+                    if (window.__scopyRenderState) { window.__scopyRenderState.hydrationWarning = 'task-list hydration failed'; }
+                  }
+                  try {
+                    if (typeof window.ScopyUnifiedMarkdown.hydrateRich === 'function') {
+                      var exportMode = !!(document.documentElement && document.documentElement.classList && document.documentElement.classList.contains('scopy-export-mode'));
+                      window.ScopyUnifiedMarkdown.hydrateRich(el, { exportMode: exportMode });
+                    }
+                  } catch (e) {
+                    if (window.__scopyRenderState) {
+                      var priorWarning = window.__scopyRenderState.hydrationWarning || '';
+                      window.__scopyRenderState.hydrationWarning = priorWarning ? priorWarning + '; rich hydration failed' : 'rich hydration failed';
+                    }
+                  }
+                  layoutChatGPTTables(el);
+                  awaitTerminalReadiness(el);
                 }
                 if (document.readyState === 'loading') {
-                  document.addEventListener('DOMContentLoaded', renderUnified);
+                  document.addEventListener('DOMContentLoaded', function () {
+                    installGenerationScopedLayoutObserver();
+                    renderUnified();
+                  });
                 } else {
+                  installGenerationScopedLayoutObserver();
                   renderUnified();
                 }
                 if (window && typeof window.addEventListener === 'function') {

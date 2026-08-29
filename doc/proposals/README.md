@@ -16,6 +16,8 @@ Once a proposal is implemented, move its lasting contracts into the appropriate 
 
 ## Current Contents
 
+- [Rich fidelity pass: root causes and surgical fixes](./rich-fidelity-pass.md)
+- [Renderer hardening gate: review and implementation plan](./renderer-hardening-gate-plan.md)
 - [Markdown preview and clipboard architecture](./markdown-preview-architecture/proposal.md)
 - `search-backend-performance-optimization.md`
 - `semantic-search-offline-v1.md`

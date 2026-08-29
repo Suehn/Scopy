@@ -52,6 +52,7 @@ plan/
 
 # Profiling / tracing artifacts
 trace/
+artifacts/render-validation/
 
 # Local performance DB snapshot (never commit)
 perf-db/

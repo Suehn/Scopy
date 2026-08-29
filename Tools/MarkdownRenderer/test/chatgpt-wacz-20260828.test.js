@@ -42,7 +42,7 @@ test("ChatGPT contract: language-math fences render as display math", () => {
   assert.doesNotMatch(result.html, /<pre><code/);
 });
 
-test("ChatGPT contract: raw HTML tags are visible text and scripts never survive as elements", () => {
+test("raw HTML blocks remain literal and scripts never survive as elements", () => {
   const source = "<div>box</div> <span>inline</span> <kbd>Cmd</kbd> <script>globalThis.__scopyPwned = true</script>";
   const result = render(source);
 

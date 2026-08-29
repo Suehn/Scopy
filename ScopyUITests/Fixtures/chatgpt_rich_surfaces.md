@@ -253,8 +253,8 @@ Provenance split: the QQQ quote, after-hours line, one-day axis/domain, headline
     { "label": "市值", "value": "343.79B" },
     { "label": "当日最低价", "value": "714.54" },
     { "label": "年度最低价", "value": "555.6" },
-    { "label": "当日最高价", "value": "721.4" },
     { "label": "每股收益（滚动 12 个月）", "value": "—" },
+    { "label": "当日最高价", "value": "721.4" },
     { "label": "年度最高价", "value": "748.65" },
     { "label": "市盈率", "value": "—" }
   ]

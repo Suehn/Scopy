@@ -90,8 +90,12 @@ struct HistoryItemTextPreviewView: View {
                         .frame(width: width, height: clampedHeight)
                 } else if model.isMarkdown, let html = model.markdownHTML {
                     let layoutScale = activeMarkdownLayoutScale
-                    let renderKey = markdownRenderKey(source: text, layoutScale: layoutScale)
-                    let defaultRenderKey = markdownRenderKey(source: text, layoutScale: settingsMarkdownLayoutScale)
+                    let renderKey = HoverPreviewModel.markdownRenderKey(source: text, layoutScale: layoutScale)
+                    let defaultRenderKey = HoverPreviewModel.markdownRenderKey(
+                        source: text,
+                        layoutScale: settingsMarkdownLayoutScale
+                    )
+                    let isLiveRender = model.isMarkdownRenderLive(for: renderKey)
                     let displayedDocument = displayedMarkdownDocument(
                         defaultHTML: html,
                         defaultRenderKey: defaultRenderKey,
@@ -124,15 +128,25 @@ struct HistoryItemTextPreviewView: View {
                             .accessibilityHidden(isUITesting)
                         }
 
+                        if !isLiveRender {
+                            markdownReadinessShield(source: text, renderKey: renderKey)
+                                .zIndex(1)
+                        }
+
                         HStack(spacing: ScopySpacing.xs) {
                             markdownLayoutScaleControl()
                             exportResolutionMenu()
                             exportButton()
                         }
                             .padding(ScopySpacing.sm)
+                            .zIndex(2)
                     }
                     .task(id: renderKey) {
                         initializePreviewLayoutScaleFromSettingsIfNeeded()
+                        model.prepareMarkdownRender(for: renderKey)
+                        if model.markdownMetricsLayoutScalePercent != layoutScale.rawValue {
+                            markMarkdownPreviewAwaitingMetrics()
+                        }
                         await prepareOverrideMarkdownHTMLIfNeeded(
                             source: text,
                             defaultHTML: html,
@@ -143,7 +157,11 @@ struct HistoryItemTextPreviewView: View {
                     .accessibilityIdentifier("History.Preview.Container")
                     .background {
                         if isUITesting {
-                            Text(model.markdownRenderSucceeded ? "rendered" : (model.markdownRenderErrorReason ?? "pending"))
+                            Text(
+                                isLiveRender
+                                    ? "rendered"
+                                    : (model.markdownRenderErrorReason(for: renderKey) ?? "pending")
+                            )
                                 .font(.system(size: 1))
                                 .opacity(0.001)
                                 .accessibilityIdentifier("History.Preview.RenderStatus")
@@ -219,15 +237,21 @@ struct HistoryItemTextPreviewView: View {
     private func applyMarkdownMetrics(_ metrics: MarkdownContentMetrics, renderKey: String) {
         guard isContentCurrent() else { return }
         guard let text = model.text else { return }
-        guard markdownRenderKey(source: text, layoutScale: activeMarkdownLayoutScale) == renderKey else { return }
+        guard HoverPreviewModel.markdownRenderKey(
+            source: text,
+            layoutScale: activeMarkdownLayoutScale
+        ) == renderKey else { return }
         guard metrics.renderSucceeded else {
-            model.markdownRenderSucceeded = false
-            model.markdownRenderErrorReason = metrics.renderErrorReason ?? "markdown render failed"
+            model.markdownMetricsLayoutScalePercent = nil
+            model.markMarkdownRenderFailed(
+                for: renderKey,
+                reason: metrics.renderErrorReason ?? "markdown render failed"
+            )
             return
         }
 
-        model.markdownRenderSucceeded = true
-        model.markdownRenderErrorReason = nil
+        model.markdownMetricsLayoutScalePercent = activeMarkdownLayoutScale.rawValue
+        model.markMarkdownRenderSucceeded(for: renderKey)
 
         let newHeight = metrics.size.height
         let fixedWidth = HoverPreviewScreenMetrics.maxMarkdownPopoverWidthPoints()
@@ -249,28 +273,67 @@ struct HistoryItemTextPreviewView: View {
         guard !hasInitializedPreviewLayoutScale else { return }
         hasInitializedPreviewLayoutScale = true
         if UserDefaults.standard.object(forKey: Self.previewLayoutScalePercentUserDefaultsKey) == nil {
-            previewLayoutScalePercent = settingsMarkdownLayoutScale.rawValue
+            let settingsScale = settingsMarkdownLayoutScale
+            if previewLayoutScalePercent != settingsScale.rawValue, let text = model.text {
+                model.prepareMarkdownRender(
+                    for: HoverPreviewModel.markdownRenderKey(source: text, layoutScale: settingsScale)
+                )
+                previewLayoutScalePercent = settingsScale.rawValue
+            }
         }
     }
 
     private func selectPreviewLayoutScalePercent(_ percent: Int) {
         let normalized = MarkdownChatGPTLayoutScalePercent(settingsValue: percent).rawValue
         guard previewLayoutScalePercent != normalized else { return }
+        if let text = model.text {
+            model.prepareMarkdownRender(
+                for: HoverPreviewModel.markdownRenderKey(
+                    source: text,
+                    layoutScale: MarkdownChatGPTLayoutScalePercent(settingsValue: normalized)
+                )
+            )
+        } else {
+            model.invalidateMarkdownLiveRender()
+        }
         previewLayoutScalePercent = normalized
         UserDefaults.standard.set(normalized, forKey: Self.previewLayoutScalePercentUserDefaultsKey)
     }
 
     private func markMarkdownPreviewAwaitingMetrics() {
+        model.markdownMetricsLayoutScalePercent = nil
         model.markdownHasHorizontalOverflow = false
-        model.markdownRenderSucceeded = false
-        model.markdownRenderErrorReason = nil
+        model.invalidateMarkdownLiveRender()
     }
 
-    private func markdownRenderKey(
-        source: String,
-        layoutScale: MarkdownChatGPTLayoutScalePercent
-    ) -> String {
-        "\(layoutScale.cacheKey)|\(ClipboardItemContentRevision.deterministicTextCacheKey(source))"
+    @ViewBuilder
+    private func markdownReadinessShield(source: String, renderKey: String) -> some View {
+        ZStack {
+            Color(nsColor: .textBackgroundColor)
+            if let reason = model.markdownRenderErrorReason(for: renderKey), !reason.isEmpty {
+                VStack(alignment: .leading, spacing: ScopySpacing.sm) {
+                    Text("Preview unavailable")
+                        .font(.system(size: 13, weight: .semibold))
+                    Text(reason)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                    ScrollView {
+                        Text(source)
+                            .font(.system(size: 11, design: .monospaced))
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .textSelection(.enabled)
+                    }
+                }
+                .padding(ScopySpacing.md)
+            } else {
+                VStack(spacing: ScopySpacing.sm) {
+                    ProgressView()
+                    Text("Rendering preview…")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
     }
 
     private func displayedMarkdownDocument(
@@ -336,7 +399,10 @@ struct HistoryItemTextPreviewView: View {
         guard !Task.isCancelled else { return }
         guard isContentCurrent() else { return }
 
-        guard markdownRenderKey(source: source, layoutScale: activeMarkdownLayoutScale) == renderKey else { return }
+        guard HoverPreviewModel.markdownRenderKey(
+            source: source,
+            layoutScale: activeMarkdownLayoutScale
+        ) == renderKey else { return }
         overrideMarkdownHTML = html
         overrideMarkdownRenderKey = renderKey
         markMarkdownPreviewAwaitingMetrics()

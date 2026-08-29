@@ -1,4 +1,5 @@
 import { scopyIcon } from "./scopyIcons.js";
+import { bundledImagePath } from "./scopyLocalImageAssets.js";
 
 const RICH_LANGUAGE = "scopy-rich";
 const MAX_BLOCK_BYTES = 1_024 * 1_024;
@@ -28,20 +29,6 @@ const VALID_IMAGE_LAYOUTS = new Set(["search", "carousel", "full_width"]);
 const VALID_UNITS = new Set(["F", "C"]);
 const VALID_TRENDS = new Set(["up", "down", "flat"]);
 const COMMON_KEYS = ["version", "type", "title", "state", "message", "source", "sourceUrl", "asOf"];
-
-const BUNDLED_IMAGE_ASSETS = Object.freeze({
-  "news-openai-hugging-face": "rich/news-openai-hugging-face.jpg",
-  "news-openai-jalapeno": "rich/news-openai-jalapeno.jpg",
-  "news-openai-kiro": "rich/news-openai-kiro.jpg",
-  "image-group-chatgpt-search-button": "rich/image-group-chatgpt-search-button.jpg",
-  "image-group-chatgpt-search-results": "rich/image-group-chatgpt-search-results.jpg",
-  "weather-mostly-cloudy-light": "rich/weather-mostly-cloudy-light.png",
-  "weather-sun-shower-light": "rich/weather-sun-shower-light.png",
-  "favicon-help-openai-32": "rich/favicon-help-openai-32.png",
-  "favicon-investing-32": "rich/favicon-investing-32.png",
-  "favicon-openai-32": "rich/favicon-openai-32.png",
-  "favicon-reuters-32": "rich/favicon-reuters-32.png"
-});
 
 export function remarkScopyRich() {
   return function transformer(tree) {
@@ -403,7 +390,7 @@ function normalizeImageReference(input) {
   if (hasSource === hasAsset) return null;
   const result = {};
   if (hasAsset) {
-    if (!Object.hasOwn(BUNDLED_IMAGE_ASSETS, input.asset)) return null;
+    if (!bundledImagePath(input.asset)) return null;
     result.asset = input.asset;
   } else {
     if (!isSafeHTTPURL(input.src) && !isRenderableDataImage(input.src)) return null;
@@ -420,7 +407,8 @@ function normalizeImageReference(input) {
 function normalizeAutomaticImage(input) {
   if (!isRecord(input)) return null;
   return normalizeImageItem({
-    src: String(input.src || ""),
+    ...(input.src === undefined ? {} : { src: String(input.src) }),
+    ...(input.asset === undefined ? {} : { asset: String(input.asset) }),
     alt: String(input.alt || ""),
     ...(input.title === undefined ? {} : { title: String(input.title) })
   });
@@ -782,7 +770,7 @@ function renderWeatherChart(day, unit, rootID, dayIndex, selectedUnit) {
       ariaHidden: "true",
       focusable: "false"
     }, [
-      renderChartGradient(gradientID, "#ee9340", 0.24),
+      renderChartGradient(gradientID, 0.24),
       element("path", {
         d: geometry.areaPath,
         fill: "url(#" + gradientID + ")",
@@ -887,9 +875,6 @@ function renderFinanceChart(series, rootID, seriesIndex, assetHeading) {
     { left: 8, right: 46, top: 14, bottom: 28 },
     { min: yTicks[0], max: yTicks.at(-1) }
   );
-  const chartColor = series.trend === "up"
-    ? "#4b9e53"
-    : series.trend === "down" ? "#ef4146" : "#8f8f8f";
   const gradientID = rootID + "-finance-gradient-" + seriesIndex;
   const xTickIndexes = sampledIndexes(series.points.length, 7);
   const yLabels = yTicks.map((value) => {
@@ -939,7 +924,7 @@ function renderFinanceChart(series, rootID, seriesIndex, assetHeading) {
     ariaLabel: assetHeading + " " + series.label + " chart"
   }, [
     element("svg", { viewBox: "0 0 738 240", ariaHidden: "true", focusable: "false" }, [
-      renderChartGradient(gradientID, chartColor, 0.24),
+      renderChartGradient(gradientID, 0.24),
       ...yLabels,
       element("path", {
         d: geometry.areaPath,
@@ -959,7 +944,9 @@ function renderFinanceChart(series, rootID, seriesIndex, assetHeading) {
   ]);
 }
 
-function renderChartGradient(id, color, topOpacity) {
+function renderChartGradient(id, topOpacity) {
+  // The stops inherit the chart figure's currentColor, so the CSS trend/weather tokens in
+  // MarkdownHTMLDocumentBuilder remain the single color authority for every chart fill.
   return element("defs", {}, [
     element("linearGradient", {
       id,
@@ -969,8 +956,8 @@ function renderChartGradient(id, color, topOpacity) {
       y2: "100%",
       gradientUnits: "objectBoundingBox"
     }, [
-      element("stop", { offset: "0%", stopColor: color, stopOpacity: String(topOpacity) }, []),
-      element("stop", { offset: "100%", stopColor: color, stopOpacity: "0" }, [])
+      element("stop", { offset: "0%", stopColor: "currentColor", stopOpacity: String(topOpacity) }, []),
+      element("stop", { offset: "100%", stopColor: "currentColor", stopOpacity: "0" }, [])
     ])
   ]);
 }
@@ -1067,9 +1054,8 @@ function renderImageVisual(image, fallbackAlt, classNames) {
 }
 
 function imageRenderSource(image) {
-  if (image?.asset && Object.hasOwn(BUNDLED_IMAGE_ASSETS, image.asset)) {
-    return BUNDLED_IMAGE_ASSETS[image.asset];
-  }
+  const assetPath = bundledImagePath(image?.asset);
+  if (assetPath) return assetPath;
   return image?.src && isRenderableDataImage(image.src) ? image.src : "";
 }
 

@@ -1,6 +1,7 @@
 import CoreGraphics
 import Foundation
 import Observation
+import ScopyKit
 
 @Observable
 @MainActor
@@ -9,9 +10,11 @@ final class HoverPreviewModel {
     var text: String?
     var markdownHTML: String?
     var markdownContentSize: CGSize?
+    var markdownMetricsLayoutScalePercent: Int?
     var markdownHasHorizontalOverflow: Bool = false
-    var markdownRenderSucceeded: Bool = false
-    var markdownRenderErrorReason: String?
+    private(set) var markdownLiveRenderKey: String?
+    private var markdownRenderErrorKey: String?
+    private var markdownRenderErrorReason: String?
     var isMarkdown: Bool = false
 
     // Export state
@@ -28,9 +31,76 @@ final class HoverPreviewModel {
     var hasContentOrFeedback: Bool {
         previewCGImage != nil || text != nil || markdownHTML != nil ||
             markdownContentSize != nil || markdownHasHorizontalOverflow ||
-            markdownRenderSucceeded || markdownRenderErrorReason != nil || isMarkdown ||
+            markdownLiveRenderKey != nil || markdownRenderErrorReason != nil || isMarkdown ||
             isExporting || exportSuccess || exportSuccessMessage != nil ||
             exportFailed || exportErrorMessage != nil
+    }
+
+    nonisolated static func markdownRenderKey(
+        source: String,
+        layoutScale: MarkdownChatGPTLayoutScalePercent
+    ) -> String {
+        "\(layoutScale.cacheKey)|\(ClipboardItemContentRevision.deterministicTextCacheKey(source))"
+    }
+
+    /// Cached HTML and metrics may seed the popover geometry, but they do not describe the
+    /// readiness of the reusable WebView currently owned by this preview.
+    func primeTextPreview(
+        text: String?,
+        isMarkdown: Bool,
+        markdownHTML: String?,
+        markdownContentSize: CGSize?,
+        markdownHasHorizontalOverflow: Bool
+    ) {
+        markdownMetricsLayoutScalePercent = nil
+        self.text = text
+        self.isMarkdown = isMarkdown
+        self.markdownHTML = markdownHTML
+        self.markdownContentSize = markdownContentSize
+        self.markdownHasHorizontalOverflow = markdownHasHorizontalOverflow
+        invalidateMarkdownLiveRender()
+    }
+
+    func setMarkdownHTMLAwaitingLiveRender(_ html: String) {
+        markdownMetricsLayoutScalePercent = nil
+        markdownHTML = html
+        invalidateMarkdownLiveRender()
+    }
+
+    func prepareMarkdownRender(for renderKey: String) {
+        guard markdownLiveRenderKey != renderKey else { return }
+        markdownLiveRenderKey = nil
+        if markdownRenderErrorKey != renderKey {
+            markdownRenderErrorKey = nil
+            markdownRenderErrorReason = nil
+        }
+    }
+
+    func invalidateMarkdownLiveRender() {
+        markdownLiveRenderKey = nil
+        markdownRenderErrorKey = nil
+        markdownRenderErrorReason = nil
+    }
+
+    func markMarkdownRenderSucceeded(for renderKey: String) {
+        markdownLiveRenderKey = renderKey
+        markdownRenderErrorKey = nil
+        markdownRenderErrorReason = nil
+    }
+
+    func markMarkdownRenderFailed(for renderKey: String, reason: String) {
+        markdownLiveRenderKey = nil
+        markdownRenderErrorKey = renderKey
+        markdownRenderErrorReason = reason
+    }
+
+    func isMarkdownRenderLive(for renderKey: String) -> Bool {
+        markdownLiveRenderKey == renderKey
+    }
+
+    func markdownRenderErrorReason(for renderKey: String) -> String? {
+        guard markdownRenderErrorKey == renderKey else { return nil }
+        return markdownRenderErrorReason
     }
 
     func cancelExportTasks() {
@@ -74,9 +144,9 @@ final class HoverPreviewModel {
         text = nil
         markdownHTML = nil
         markdownContentSize = nil
+        markdownMetricsLayoutScalePercent = nil
         markdownHasHorizontalOverflow = false
-        markdownRenderSucceeded = false
-        markdownRenderErrorReason = nil
+        invalidateMarkdownLiveRender()
         isMarkdown = false
     }
 

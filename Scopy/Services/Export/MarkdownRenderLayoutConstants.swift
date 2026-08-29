@@ -67,7 +67,10 @@ public enum MarkdownRenderLayoutConstants {
     public static let chatGPTOutputSurfaceWidth: Double = 816
     public static let chatGPTDefaultThreadContentWidth: Double = 640
     public static let chatGPTWideThreadContentWidth: Double = 768
-    public static let chatGPTWideThreadMinimumViewportWidth: Double = 856
+    /// The 816px output surface is defined as the canonical wide (48rem) desktop state, so the
+    /// wide threshold equals the surface width: 100% scale and zoom-out render the 48rem column,
+    /// while zooming in (logical viewport < 816) falls back to the narrow 40rem reading column.
+    public static let chatGPTWideThreadMinimumViewportWidth: Double = chatGPTOutputSurfaceWidth
 
     public static var chatGPTRenderWidth: Double {
         chatGPTOutputSurfaceWidth

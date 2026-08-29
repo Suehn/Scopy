@@ -104,6 +104,16 @@ final class ExportMarkdownPNGUITests: XCTestCase {
         )
     }
 
+    func testAutoExportExactPublicChatGPTCopyCompletesWithLocalImagesAndMath() throws {
+        try assertUserFixtureExport(
+            fixtureName: "chatgpt_public_copy_markdown_sample.md",
+            dumpStem: "chatgpt_public_copy_markdown_sample",
+            timeoutSeconds: 60,
+            minimumHeight: 10_000,
+            minimumContentHeight: 8_000
+        )
+    }
+
     func testAutoExportMarkdownProducesSinglePNGWidth1080() throws {
         let dumpPath = "/tmp/scopy_uitest_export.png"
         let errorPath = "/tmp/scopy_uitest_export_error.txt"
@@ -1791,17 +1801,14 @@ final class ExportMarkdownPNGUITests: XCTestCase {
             return darkCount <= max(6, sampleCount / 180)
         }
 
-        // Scan from the bottom (bitmap context origin is bottom-left) until we find content.
-        var firstNonWhiteFromBottomY: Int?
-        for y in 0..<h {
+        // CGBitmapContext row 0 is the visual top; scan backward from the visual bottom.
+        for y in stride(from: h - 1, through: 0, by: -1) {
             if !rowIsMostlyWhite(y) {
-                firstNonWhiteFromBottomY = y
-                break
+                return max(0, (h - 1) - y)
             }
         }
 
-        guard let firstNonWhiteFromBottomY else { return h }
-        return max(0, firstNonWhiteFromBottomY)
+        return h
     }
 
     private func topWhitespaceRows(_ image: CGImage) -> Int {
@@ -1852,9 +1859,10 @@ final class ExportMarkdownPNGUITests: XCTestCase {
             return darkCount <= max(6, sampleCount / 180)
         }
 
-        for y in stride(from: h - 1, through: 0, by: -1) {
+        // CGBitmapContext row 0 is the visual top.
+        for y in 0..<h {
             if !rowIsMostlyWhite(y) {
-                return max(0, (h - 1) - y)
+                return y
             }
         }
 

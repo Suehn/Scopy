@@ -77,6 +77,8 @@ targets:
           - "Protocols/**"
           - "Services/**"
           - "Utilities/**"
+          # These runtime assets are staged as one verified folder by the post-build scripts below.
+          - "Resources/**"
     settings:
       base:
         PRODUCT_NAME: Scopy
@@ -206,9 +208,6 @@ targets:
           - "$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/Tools/pngquant"
           - "$(DERIVED_FILE_DIR)/fix_bundled_tool_permissions.stamp"
         basedOnDependencyAnalysis: false
-    resources:
-      - path: Scopy/Resources
-
   ScopyTests:
     type: bundle.unit-test
     platform: macOS

@@ -195,8 +195,11 @@ test("export freeze disables all actions and closes transient overlays and toolt
   const tooltipProbe = element("div", { "data-scopy-action": "chart-probe" });
   const tooltip = element("div", { "data-scopy-chart-tooltip": "" });
   const link = element("a", { href: "https://example.com" });
+  const details = element("details", { class: "scopy-safe-details" });
+  const summary = element("summary", { class: "scopy-safe-summary" });
+  details.append(summary);
   tooltipProbe.append(tooltip);
-  surface.append(c, f, overlay, tooltipProbe, link);
+  surface.append(c, f, overlay, tooltipProbe, link, details);
   root.append(surface);
 
   hydrateRich(root);
@@ -214,6 +217,10 @@ test("export freeze disables all actions and closes transient overlays and toolt
   }
   assert.equal(link.getAttribute("aria-disabled"), "true");
   assert.equal(link.getAttribute("tabindex"), "-1");
+  assert.equal(details.getAttribute("open"), "");
+  assert.equal(details.open, true);
+  assert.equal(summary.getAttribute("aria-disabled"), "true");
+  assert.equal(summary.getAttribute("tabindex"), "-1");
 
   const frozenAction = root.emit("click", f);
   assert.equal(surface.getAttribute("data-scopy-unit"), "c", "frozen documents ignore delegated actions");

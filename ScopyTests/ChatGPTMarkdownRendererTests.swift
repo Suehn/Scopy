@@ -25,8 +25,47 @@ final class ChatGPTMarkdownRendererTests: XCTestCase {
         XCTAssertTrue(html.contains("data-scopy-image-state"))
         XCTAssertTrue(html.contains("scopy-image-terminal-fallback"))
         XCTAssertTrue(html.contains("img:not([data-scopy-deferred-image])"))
-        XCTAssertTrue(html.contains("settleRenderedImages(el, function () { finish(true); });"))
+        XCTAssertTrue(html.contains("function awaitTerminalReadiness(root)"))
+        XCTAssertTrue(html.contains("state.imagesReady = true"))
+        XCTAssertTrue(html.contains("awaitTerminalReadiness(el)"))
         XCTAssertFalse(html.contains("content-visibility: auto"))
+    }
+
+    func testRendererPublishesReadinessOnlyAfterLocalAssetsFontsAndPaint() {
+        let html = MarkdownHTMLRenderer.render(markdown: "$$E=mc^2$$")
+
+        XCTAssertTrue(html.contains("id=\"scopy-katex-stylesheet\""))
+        XCTAssertTrue(html.contains("function awaitStylesheetReady(completion)"))
+        XCTAssertTrue(html.contains("function awaitFontsReady(completion)"))
+        XCTAssertTrue(html.contains("function awaitTwoPaintFrames(completion)"))
+        XCTAssertTrue(html.contains("KaTeX font failed:"))
+        XCTAssertTrue(html.contains("completion('paint timeout')"))
+        XCTAssertTrue(html.contains("var pending = 3"))
+        XCTAssertTrue(html.contains("!!state.stylesheetReady && !!state.fontsReady && !!state.imagesReady && !!state.paintReady"))
+        XCTAssertTrue(html.contains("state.paintReady = true;"))
+        XCTAssertTrue(html.contains("finish(true);"))
+        XCTAssertTrue(html.contains("window.syncChatGPTZoomShell = syncChatGPTZoomShell"))
+    }
+
+    func testRichHydrationFailureCannotReplaceSuccessfullyRenderedStaticDOM() {
+        let html = MarkdownHTMLRenderer.render(markdown: "```scopy-rich\n{\"version\":2,\"type\":\"currency\",\"state\":\"ready\",\"from\":{\"code\":\"USD\"},\"to\":{\"code\":\"CNY\"},\"amount\":1,\"rate\":7}\n```")
+
+        XCTAssertTrue(html.contains("el.innerHTML = result.html;"))
+        XCTAssertTrue(html.contains("window.__scopyRenderState.hydrationWarning"))
+        XCTAssertTrue(html.contains("rich hydration failed"))
+        XCTAssertTrue(html.contains("awaitTerminalReadiness(el)"))
+    }
+
+    func testClosedSafeHTMLExtensionHasOneResponsiveStyleAndExportContract() {
+        let html = MarkdownHTMLRenderer.render(markdown: "<u>u</u> <kbd>K</kbd> <mark>m</mark> H<sub>2</sub> x<sup>2</sup>\n\n<details><summary>More</summary>\n\nBody\n\n</details>")
+
+        XCTAssertTrue(html.contains("u.scopy-safe-html-u"))
+        XCTAssertTrue(html.contains("kbd.scopy-safe-html-kbd"))
+        XCTAssertTrue(html.contains("mark.scopy-safe-html-mark"))
+        XCTAssertTrue(html.contains("sub.scopy-safe-html-sub"))
+        XCTAssertTrue(html.contains("details.scopy-safe-details"))
+        XCTAssertTrue(html.contains("summary.scopy-safe-summary"))
+        XCTAssertTrue(html.contains("html.scopy-export-mode summary.scopy-safe-summary"))
     }
 
     func testRendererNormalizesATXHeadingsWithoutTouchingCode() {
@@ -95,6 +134,9 @@ final class ChatGPTMarkdownRendererTests: XCTestCase {
         XCTAssertTrue(html.contains("font-size: 1.21em;"))
         XCTAssertTrue(html.contains("line-height: 1.2;"))
         XCTAssertTrue(html.contains("unicode-bidi: isolate;"))
+        XCTAssertTrue(html.contains(".scopy-math-inline-host {"))
+        XCTAssertTrue(html.contains("display: inline-block;"))
+        XCTAssertTrue(html.contains(".scopy-math-inline-host::-webkit-scrollbar"))
         XCTAssertTrue(html.contains("white-space: nowrap;"))
         XCTAssertTrue(html.contains("overflow-wrap: anywhere;"))
         XCTAssertFalse(html.contains("overflow-wrap: break-word;"))
@@ -163,7 +205,7 @@ final class ChatGPTMarkdownRendererTests: XCTestCase {
         )
         let wideContext = MarkdownRenderContextResolver.defaultContext(
             for: "Text",
-            layoutScale: MarkdownChatGPTLayoutScalePercent(rawValue: 95)
+            layoutScale: .percent100
         )
         let narrowOutput = MarkdownHTMLRenderer.render(markdown: "Text", context: narrowContext)
         let wideOutput = MarkdownHTMLRenderer.render(markdown: "Text", context: wideContext)
@@ -180,13 +222,26 @@ final class ChatGPTMarkdownRendererTests: XCTestCase {
         XCTAssertTrue(narrowOutput.html.contains("--scopy-chatgpt-browser-zoom: 1.25;"))
         XCTAssertEqual(narrowContext.layoutScale, .percent125)
         XCTAssertEqual(MarkdownRenderLayoutConstants.renderWidth(for: .percent125), 816)
+        // The 816px output surface is the canonical wide desktop state: 100% scale renders the
+        // 48rem column, and only zooming in (logical viewport < 816) selects the 40rem column.
         XCTAssertEqual(
-            MarkdownRenderLayoutConstants.threadContentWidth(forLayoutViewportWidth: 855.999),
+            MarkdownRenderLayoutConstants.chatGPTWideThreadMinimumViewportWidth,
+            MarkdownRenderLayoutConstants.chatGPTOutputSurfaceWidth
+        )
+        XCTAssertEqual(
+            MarkdownRenderLayoutConstants.threadContentWidth(forLayoutViewportWidth: 815.999),
             640
         )
         XCTAssertEqual(
-            MarkdownRenderLayoutConstants.threadContentWidth(forLayoutViewportWidth: 856),
+            MarkdownRenderLayoutConstants.threadContentWidth(forLayoutViewportWidth: 816),
             768
+        )
+        XCTAssertEqual(
+            MarkdownRenderLayoutConstants.threadContentWidth(
+                forLayoutViewportWidth: MarkdownChatGPTLayoutScalePercent.percent125
+                    .layoutViewportWidth(outputSurfaceWidth: 816)
+            ),
+            640
         )
         XCTAssertEqual(
             MarkdownRenderLayoutConstants.threadContentWidth(forLayoutViewportWidth: .infinity),
@@ -211,6 +266,23 @@ final class ChatGPTMarkdownRendererTests: XCTestCase {
         XCTAssertTrue(latex.policy.allowLooseMathRepair)
         XCTAssertEqual(ocr.profile, .pdfOCRScientific)
         XCTAssertTrue(ocr.policy.allowLooseMathRepair)
+    }
+
+    func testAuthoredAndChatGPTSourcesBypassScientificMathPreprocessing() throws {
+        let source = #"Literal $\text{drop_last}$, $\label{kept}$, $\mathbb{R}\setminus\{0\}$, and \\text stay byte-for-byte."#
+        let contexts = [MarkdownSourceProfile.authoredMarkdown, .chatGPTMarkdown].map { profile in
+            MarkdownRenderContext(
+                profile: profile,
+                policy: .conservativeDefault(for: profile),
+                layoutScale: MarkdownRenderLayoutConstants.defaultChatGPTLayoutScale
+            )
+        }
+        let sourceLiteral = String(data: try JSONEncoder().encode(source), encoding: .utf8)!
+
+        for context in contexts {
+            let html = MarkdownHTMLRenderer.render(markdown: source, context: context).html
+            XCTAssertTrue(html.contains("ScopyUnifiedMarkdown.render(\(sourceLiteral),"), "profile=\(context.profile)")
+        }
     }
 
     func testCacheKeyHasOneRendererVersionAndLayoutScale() {
@@ -247,6 +319,20 @@ final class ChatGPTMarkdownRendererTests: XCTestCase {
         XCTAssertTrue(html.contains("overflowX === lastOverflowX"))
         XCTAssertTrue(html.contains("renderSucceeded === lastRenderSucceeded"))
         XCTAssertTrue(html.contains("renderErrorReason === lastRenderErrorReason"))
+    }
+
+    func testMetricsScriptCoalescesGenerationScopedLayoutAndInteractionReports() {
+        let html = MarkdownHTMLRenderer.render(markdown: "<details><summary>More</summary>Body</details>")
+
+        XCTAssertTrue(html.contains("if (!state.renderComplete) { return; }"))
+        XCTAssertTrue(html.contains("pendingHeightReportForce = pendingHeightReportForce || !!force"))
+        XCTAssertTrue(html.contains("window.requestAnimationFrame(deliver)"))
+        XCTAssertTrue(html.contains("currentRenderGeneration() !== scheduledGeneration"))
+        XCTAssertTrue(html.contains("new window.ResizeObserver"))
+        XCTAssertTrue(html.contains("currentRenderGeneration() !== observedGeneration"))
+        XCTAssertTrue(html.contains("el.addEventListener('toggle'"))
+        XCTAssertTrue(html.contains("el.addEventListener('keydown'"))
+        XCTAssertTrue(html.contains("document.fonts.ready.then"))
     }
 
     func testAnswerDirectionAndDirectionalSpacingUseLogicalCSS() {

@@ -201,6 +201,21 @@ test("keeps ordinary parenthesized markdown links as normal links", () => {
   assert.doesNotMatch(result.html, /scopy-source-citation-link/);
 });
 
+test("citations use the closed bundled favicon map by exact host and never fetch", () => {
+  const result = render(`
+Mapped hosts.([OpenAI][1], [Reuters][2]) Unknown host.([AP News][3])
+
+[1]: https://help.openai.com/en/articles/9237897?utm_source=chatgpt.com
+[2]: https://www.reuters.com/markets/example?utm_source=chatgpt.com
+[3]: https://apnews.com/article/example?utm_source=chatgpt.com
+`);
+
+  assert.match(result.html, /<img src="rich\/favicon-help-openai-32\.png" alt="" class="scopy-source-citation-origin-icon scopy-source-citation-favicon">/);
+  assert.match(result.html, /<img src="rich\/favicon-reuters-32\.png" alt="" class="scopy-source-citation-origin-icon scopy-source-citation-favicon">/);
+  assert.match(result.html, /class="scopy-icon scopy-icon--globe scopy-source-citation-origin-icon"/);
+  assert.doesNotMatch(result.html, /<img[^>]+src="https?:\/\//i);
+});
+
 test("collapses multi-source citation groups to first source plus count", () => {
   const result = render(`
 1. Item with two sources.([AP News][1], [Reuters][2])
@@ -232,7 +247,7 @@ QQQ quote.([investing.com][1], [Google Finance][2])
   assert.doesNotMatch(result.html, />Google Finance<\/a>\)/);
 });
 
-test("renders every raw HTML tag as visible literal text", () => {
+test("keeps unsupported and compact raw HTML as visible literal text", () => {
   const result = render("<script>alert(1)</script>\n\n<details><summary>x</summary>y</details>");
 
   assert.match(result.html, /&#x3C;script>alert\(1\)&#x3C;\/script>/);
@@ -248,7 +263,52 @@ test("renders backslash inline and display math", () => {
   assert.equal(result.metadata.mathCount, 2);
   assert.match(result.html, /katex/);
   assert.match(result.html, /katex-display/);
+  assert.match(result.html, /class="scopy-math-host scopy-math-inline-host"/);
+  assert.match(result.html, /class="scopy-math-host scopy-math-display-host"/);
   assert.doesNotMatch(result.html, /\\\(x_1 \+ y\\\)/);
+});
+
+test("keeps single-line double-dollar math inline", () => {
+  const result = render("$$E=mc^2$$");
+
+  assert.equal(result.metadata.mathCount, 1);
+  assert.match(result.html, /class="scopy-math-host scopy-math-inline-host"/);
+  assert.doesNotMatch(result.html, /katex-display/);
+});
+
+test("renders standalone multiline double-dollar math as display", () => {
+  const result = render("$$\nE=mc^2\n$$");
+
+  assert.equal(result.metadata.mathCount, 1);
+  assert.match(result.html, /class="scopy-math-host scopy-math-display-host"/);
+  assert.match(result.html, /katex-display/);
+});
+
+test("classifies strict, relaxed, and malformed math by final KaTeX outcome", () => {
+  const strict = render(String.raw`\(x + y\)`);
+  const relaxed = render(String.raw`\(emoji 😀\)`);
+  const malformed = render(String.raw`\[\frac{\]`);
+  const unknown = render(String.raw`\[\doesnotexist{x}\]`);
+
+  assert.deepEqual(
+    [strict.metadata.mathStrictCount, strict.metadata.mathRelaxedCount, strict.metadata.mathErrorCount],
+    [1, 0, 0]
+  );
+  assert.deepEqual(
+    [relaxed.metadata.mathStrictCount, relaxed.metadata.mathRelaxedCount, relaxed.metadata.mathErrorCount],
+    [0, 1, 0]
+  );
+  for (const result of [malformed, unknown]) {
+    assert.deepEqual(
+      [result.metadata.mathStrictCount, result.metadata.mathRelaxedCount, result.metadata.mathErrorCount],
+      [0, 0, 1]
+    );
+    assert.equal(
+      result.metadata.mathStrictCount + result.metadata.mathRelaxedCount + result.metadata.mathErrorCount,
+      result.metadata.mathCount
+    );
+    assert.match(result.html, /class="katex-error"/);
+  }
 });
 
 test("renders multiline backslash display math", () => {
@@ -300,13 +360,13 @@ test("does not rewrite backslash math inside code or links", () => {
   assert.match(result.html, /katex/);
 });
 
-test("renders inline HTML and fenced HTML as literal text", () => {
+test("renders the closed inline safe-tag extension without parsing code fences", () => {
   const result = render("Text <kbd>Cmd</kbd> and <mark>hot</mark>\n\n```\n<kbd>code</kbd>\n```");
 
-  assert.match(result.html, /Text &#x3C;kbd>Cmd&#x3C;\/kbd> and &#x3C;mark>hot&#x3C;\/mark>/);
+  assert.match(result.html, /Text <kbd class="scopy-safe-html-kbd">Cmd<\/kbd> and <mark class="scopy-safe-html-mark">hot<\/mark>/);
   assert.match(result.html, /<code>&#x3C;kbd>code&#x3C;\/kbd>/);
-  assert.doesNotMatch(result.html, /<kbd(?:\s|>)/i);
-  assert.doesNotMatch(result.html, /<mark(?:\s|>)/i);
+  assert.equal((result.html.match(/<kbd class=/g) || []).length, 1);
+  assert.equal((result.html.match(/<mark class=/g) || []).length, 1);
 });
 
 test("repairs loose math only when policy allows it", () => {

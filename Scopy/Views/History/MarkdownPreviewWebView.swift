@@ -334,6 +334,17 @@ struct MarkdownContentMetrics: Equatable {
     }
 }
 
+struct MarkdownPreviewMetricDeliveryIdentity: Equatable {
+    let ownerID: UUID?
+    let renderID: String
+    let renderKey: String
+}
+
+struct MarkdownPreviewOneShotMetricDeliveryIdentity: Equatable {
+    let renderID: String
+    let callbackID: UUID
+}
+
 struct MarkdownPreviewWebView: NSViewRepresentable {
     let html: String
     let shouldScroll: Bool
@@ -455,6 +466,7 @@ struct MarkdownPreviewWebView: NSViewRepresentable {
         var onContentSizeChange: (@MainActor (MarkdownContentMetrics) -> Void)?
         private var lastReportedMetrics: MarkdownContentMetrics = MarkdownContentMetrics(size: .zero, hasHorizontalOverflow: false)
         private var currentRenderID: String = ""
+        private var currentCallbackID = UUID()
         private var currentNavigation: WKNavigation?
         let scrollbarAutoHider = ScrollbarAutoHider()
         let sizeMessageHandlerProxy = WeakScriptMessageHandler()
@@ -466,7 +478,9 @@ struct MarkdownPreviewWebView: NSViewRepresentable {
 
         func load(html: String, in webView: WKWebView, baseURL: URL?) {
             currentRenderID = UUID().uuidString
+            currentCallbackID = UUID()
             lastReportedMetrics = MarkdownContentMetrics(size: .zero, hasHorizontalOverflow: false)
+            webView.alphaValue = 0
             let document = MarkdownPreviewRenderIdentity.injecting(currentRenderID, into: html)
             currentNavigation = webView.loadHTMLString(document, baseURL: baseURL)
         }
@@ -474,20 +488,12 @@ struct MarkdownPreviewWebView: NSViewRepresentable {
         func attachScrollbarAutoHiderIfPossible(for webView: WKWebView) {
             if let scrollView = MarkdownPreviewScrollViewResolver.resolve(for: webView) {
                 scrollbarAutoHider.attach(to: scrollView)
-                scrollbarAutoHider.applyHiddenState()
-                Task { @MainActor [weak scrollbarAutoHider] in
-                    await Task.yield()
-                    scrollbarAutoHider?.applyHiddenState()
-                }
             } else {
                 Task { @MainActor [weak self, weak webView] in
                     await Task.yield()
                     guard let self, let webView else { return }
                     if let scrollView = MarkdownPreviewScrollViewResolver.resolve(for: webView) {
                         self.scrollbarAutoHider.attach(to: scrollView)
-                        self.scrollbarAutoHider.applyHiddenState()
-                        await Task.yield()
-                        self.scrollbarAutoHider.applyHiddenState()
                     }
                 }
             }
@@ -530,17 +536,68 @@ struct MarkdownPreviewWebView: NSViewRepresentable {
             }
         }
 
+        func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+            handleNavigationFailure(navigation, in: webView, reason: error.localizedDescription)
+        }
+
+        func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+            handleNavigationFailure(navigation, in: webView, reason: error.localizedDescription)
+        }
+
+        func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+            handleNavigationFailure(nil, in: webView, reason: "Web content process terminated")
+        }
+
         func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
             guard let metrics = MarkdownPreviewMessageParser.metrics(from: message) else { return }
             guard message.frameInfo.isMainFrame, metrics.renderID == currentRenderID else { return }
             if metrics.isEquivalent(to: lastReportedMetrics) { return }
             lastReportedMetrics = metrics
-
             if let wk = message.webView {
+                wk.alphaValue = metrics.renderSucceeded ? 1 : 0
                 attachScrollbarAutoHiderIfPossible(for: wk)
             }
-            Task { @MainActor in
-                self.onContentSizeChange?(metrics)
+            scheduleMetricsDelivery(metrics, capturedIdentity: metricDeliveryIdentity)
+        }
+
+        private func handleNavigationFailure(_ navigation: WKNavigation?, in webView: WKWebView, reason: String) {
+            if let navigation {
+                guard navigation === currentNavigation else { return }
+            }
+            currentNavigation = nil
+            webView.alphaValue = 0
+            let metrics = MarkdownContentMetrics(
+                size: CGSize(width: max(1, webView.bounds.width), height: max(1, webView.bounds.height)),
+                hasHorizontalOverflow: false,
+                renderSucceeded: false,
+                renderErrorReason: reason,
+                renderID: currentRenderID
+            )
+            guard !metrics.isEquivalent(to: lastReportedMetrics) else { return }
+            lastReportedMetrics = metrics
+            scheduleMetricsDelivery(metrics, capturedIdentity: metricDeliveryIdentity)
+        }
+
+        var metricDeliveryIdentity: MarkdownPreviewOneShotMetricDeliveryIdentity {
+            MarkdownPreviewOneShotMetricDeliveryIdentity(
+                renderID: currentRenderID,
+                callbackID: currentCallbackID
+            )
+        }
+
+        func scheduleMetricsDelivery(
+            _ metrics: MarkdownContentMetrics,
+            capturedIdentity: MarkdownPreviewOneShotMetricDeliveryIdentity
+        ) {
+            guard metrics.renderID == capturedIdentity.renderID,
+                  let callback = onContentSizeChange
+            else {
+                return
+            }
+
+            Task { @MainActor [weak self] in
+                guard let self, self.metricDeliveryIdentity == capturedIdentity else { return }
+                callback(metrics)
             }
         }
     }
@@ -556,7 +613,9 @@ final class MarkdownPreviewWebViewController: NSObject, ObservableObject, WKNavi
     private var lastDeliveredMetrics: MarkdownContentMetrics = MarkdownContentMetrics(size: .zero, hasHorizontalOverflow: false)
     private var lastLoadFinished: Bool = false
     private var currentRenderID: String = ""
+    private var currentRenderKey: String = ""
     private var currentNavigation: WKNavigation?
+    private var failedOwnerID: UUID?
     private var pendingContentRefreshTask: Task<Void, Never>?
     private var pendingScrollConfigurationTask: Task<Void, Never>?
     private var bridgeIsAttached = false
@@ -597,6 +656,12 @@ final class MarkdownPreviewWebViewController: NSObject, ObservableObject, WKNavi
     }
 
     func beginOwnership(_ ownerID: UUID) {
+        if currentOwnerID != ownerID {
+            // A callback is part of the ownership lease. Leave an ownership-transfer gap silent until the new
+            // representable installs its callback in updateNSView.
+            onContentSizeChange = nil
+            lastDeliveredMetrics = MarkdownContentMetrics(size: .zero, hasHorizontalOverflow: false)
+        }
         currentOwnerID = ownerID
         attachWebViewIfNeeded()
     }
@@ -651,7 +716,7 @@ final class MarkdownPreviewWebViewController: NSObject, ObservableObject, WKNavi
 
         pendingScrollConfigurationTask?.cancel()
         pendingScrollConfigurationTask = Task { @MainActor [weak self] in
-            for _ in 0..<12 {
+            for _ in 0..<60 {
                 guard let self,
                       !Task.isCancelled,
                       self.desiredShouldScroll == shouldScroll
@@ -682,11 +747,6 @@ final class MarkdownPreviewWebViewController: NSObject, ObservableObject, WKNavi
         scrollView.drawsBackground = false
         scrollView.hasHorizontalScroller = false
         scrollbarAutoHider.attach(to: scrollView)
-        scrollbarAutoHider.applyHiddenState()
-        Task { @MainActor [weak scrollbarAutoHider] in
-            await Task.yield()
-            scrollbarAutoHider?.applyHiddenState()
-        }
         return true
     }
 
@@ -695,6 +755,8 @@ final class MarkdownPreviewWebViewController: NSObject, ObservableObject, WKNavi
 
         if lastHTML == html {
             if !lastLoadFinished {
+                // A terminal failure remains visible for the current owner. A new owner may retry the same document.
+                guard failedOwnerID != currentOwnerID else { return }
                 // Repeated SwiftUI updates while the same navigation is in flight must not restart it.
                 // A restart is only needed after an owner detached and stopped that navigation.
                 if currentNavigation != nil { return }
@@ -717,9 +779,7 @@ final class MarkdownPreviewWebViewController: NSObject, ObservableObject, WKNavi
                !metrics.isEquivalent(to: lastDeliveredMetrics)
             {
                 lastDeliveredMetrics = metrics
-                Task { @MainActor in
-                    self.onContentSizeChange?(metrics)
-                }
+                scheduleMetricsDelivery(metrics, capturedIdentity: metricDeliveryIdentity)
                 // Do not force JS re-measurement here; the cached metrics are sufficient to size the popover/measurer.
                 return
             }
@@ -768,7 +828,23 @@ final class MarkdownPreviewWebViewController: NSObject, ObservableObject, WKNavi
         guard navigation === currentNavigation else { return }
         currentNavigation = nil
         lastLoadFinished = true
+        failedOwnerID = nil
+        if let desiredShouldScroll {
+            _ = applyScrollConfigurationIfPossible(desiredShouldScroll)
+        }
         scheduleContentRefresh(for: webView, forceSizeReport: false)
+    }
+
+    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+        handleNavigationFailure(navigation, in: webView, reason: error.localizedDescription)
+    }
+
+    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+        handleNavigationFailure(navigation, in: webView, reason: error.localizedDescription)
+    }
+
+    func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+        handleNavigationFailure(nil, in: webView, reason: "Web content process terminated")
     }
 
     // MARK: - WKScriptMessageHandler
@@ -777,29 +853,79 @@ final class MarkdownPreviewWebViewController: NSObject, ObservableObject, WKNavi
         guard let metrics = MarkdownPreviewMessageParser.metrics(from: message) else { return }
         guard message.frameInfo.isMainFrame, metrics.renderID == currentRenderID else { return }
         lastKnownMetrics = metrics
+        webView.alphaValue = metrics.renderSucceeded ? 1 : 0
 
         if metrics.isEquivalent(to: lastDeliveredMetrics) { return }
         lastDeliveredMetrics = metrics
 
-        if let scrollView = MarkdownPreviewScrollViewResolver.resolve(for: webView) {
-            scrollbarAutoHider.attach(to: scrollView)
-            scrollbarAutoHider.applyHiddenState()
-            Task { @MainActor [weak scrollbarAutoHider] in
-                await Task.yield()
-                scrollbarAutoHider?.applyHiddenState()
-            }
-        }
-        Task { @MainActor in
-            self.onContentSizeChange?(metrics)
-        }
+        reconcileScrollbarAttachmentAfterMetrics()
+        scheduleMetricsDelivery(metrics, capturedIdentity: metricDeliveryIdentity)
+    }
+
+    func reconcileScrollbarAttachmentAfterMetrics() {
+        guard let scrollView = MarkdownPreviewScrollViewResolver.resolve(for: webView) else { return }
+        scrollbarAutoHider.attach(to: scrollView)
     }
 
     private func beginLoad(html: String, baseURL: URL?) {
         currentRenderID = UUID().uuidString
+        currentRenderKey = html
+        failedOwnerID = nil
         lastLoadFinished = false
         navigationStartCount += 1
+        webView.alphaValue = 0
         let document = MarkdownPreviewRenderIdentity.injecting(currentRenderID, into: html)
         currentNavigation = webView.loadHTMLString(document, baseURL: baseURL)
+    }
+
+    var metricDeliveryIdentity: MarkdownPreviewMetricDeliveryIdentity {
+        MarkdownPreviewMetricDeliveryIdentity(
+            ownerID: currentOwnerID,
+            renderID: currentRenderID,
+            renderKey: currentRenderKey
+        )
+    }
+
+    func scheduleMetricsDelivery(
+        _ metrics: MarkdownContentMetrics,
+        capturedIdentity: MarkdownPreviewMetricDeliveryIdentity
+    ) {
+        guard metrics.renderID == capturedIdentity.renderID,
+              let callback = onContentSizeChange
+        else {
+            return
+        }
+
+        Task { @MainActor [weak self] in
+            guard let self, self.metricDeliveryIdentity == capturedIdentity else { return }
+            callback(metrics)
+        }
+    }
+
+    private func handleNavigationFailure(_ navigation: WKNavigation?, in webView: WKWebView, reason: String) {
+        if let navigation {
+            guard navigation === currentNavigation else { return }
+        }
+        guard !currentRenderID.isEmpty else { return }
+
+        pendingContentRefreshTask?.cancel()
+        pendingContentRefreshTask = nil
+        currentNavigation = nil
+        lastLoadFinished = false
+        failedOwnerID = currentOwnerID
+        lastKnownMetrics = nil
+        webView.alphaValue = 0
+
+        let metrics = MarkdownContentMetrics(
+            size: CGSize(width: max(1, webView.bounds.width), height: max(1, webView.bounds.height)),
+            hasHorizontalOverflow: false,
+            renderSucceeded: false,
+            renderErrorReason: reason,
+            renderID: currentRenderID
+        )
+        guard !metrics.isEquivalent(to: lastDeliveredMetrics) else { return }
+        lastDeliveredMetrics = metrics
+        scheduleMetricsDelivery(metrics, capturedIdentity: metricDeliveryIdentity)
     }
 
     private func scheduleContentRefresh(for webView: WKWebView, forceSizeReport: Bool) {
@@ -809,7 +935,7 @@ final class MarkdownPreviewWebViewController: NSObject, ObservableObject, WKNavi
             // Avoid forcing `__scopyReportHeight` while the web view is still in a transient 0-width layout state,
             // otherwise we may cache a bogus tiny width and poison future popover sizing.
             var attempts = 0
-            while attempts < 12 {
+            while attempts < 60 {
                 if webView.bounds.width > 1 { break }
                 attempts += 1
                 try? await Task.sleep(nanoseconds: 16_000_000)
@@ -920,12 +1046,14 @@ final class ScrollbarAutoHider: NSObject {
     nonisolated private let hideTimerBox = HideTimerBox()
     private var hideDeadline: CFAbsoluteTime = 0
     private var scrollersVisible: Bool = false
+    private var lastObservedScrollOrigin: NSPoint?
 
     func attach(to scrollView: NSScrollView) {
         if self.scrollView === scrollView { return }
         detach()
         self.scrollView = scrollView
         self.contentView = scrollView.contentView
+        lastObservedScrollOrigin = scrollView.contentView.bounds.origin
         scrollView.contentView.postsBoundsChangedNotifications = true
 
         if let contentView = scrollView.contentView as NSClipView? {
@@ -940,7 +1068,8 @@ final class ScrollbarAutoHider: NSObject {
         applyHiddenState()
         Task { @MainActor [weak self] in
             await Task.yield()
-            self?.applyHiddenState()
+            guard let self, !self.scrollersVisible else { return }
+            self.applyHiddenState()
         }
     }
 
@@ -952,6 +1081,7 @@ final class ScrollbarAutoHider: NSObject {
         }
         scrollView = nil
         contentView = nil
+        lastObservedScrollOrigin = nil
         scrollersVisible = false
     }
 
@@ -974,6 +1104,16 @@ final class ScrollbarAutoHider: NSObject {
     }
 
     @objc private func handleAnyScroll(_ notification: Notification) {
+        guard let contentView,
+              let observedView = notification.object as? NSClipView,
+              observedView === contentView
+        else {
+            return
+        }
+        let origin = contentView.bounds.origin
+        defer { lastObservedScrollOrigin = origin }
+        guard let previousOrigin = lastObservedScrollOrigin else { return }
+        guard abs(origin.x - previousOrigin.x) > 0.5 || abs(origin.y - previousOrigin.y) > 0.5 else { return }
         showScrollersIfNeeded()
         hideDeadline = CFAbsoluteTimeGetCurrent() + 0.75
         startHideTimerIfNeeded()

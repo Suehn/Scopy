@@ -1730,7 +1730,11 @@ struct HistoryItemView: View, Equatable {
               state.previewModel.isMarkdown,
               let text = state.previewModel.text,
               let size = state.previewModel.markdownContentSize,
-              state.previewModel.markdownRenderSucceeded else { return }
+              let layoutScalePercent = state.previewModel.markdownMetricsLayoutScalePercent else { return }
+
+        let layoutScale = MarkdownChatGPTLayoutScalePercent(settingsValue: layoutScalePercent)
+        let renderKey = HoverPreviewModel.markdownRenderKey(source: text, layoutScale: layoutScale)
+        guard state.previewModel.isMarkdownRenderLive(for: renderKey) else { return }
 
         let contentHash: String
         if item.type == .file {
@@ -1746,7 +1750,11 @@ struct HistoryItemView: View, Equatable {
             return
         }
 
-        let renderCacheKey = MarkdownRenderCacheKey.make(contentHash: contentHash, markdown: text)
+        let context = MarkdownRenderContextResolver.defaultContext(
+            for: text,
+            layoutScale: layoutScale
+        )
+        let renderCacheKey = MarkdownRenderCacheKey.make(contentHash: contentHash, context: context)
         guard !renderCacheKey.isEmpty else { return }
         let metrics = MarkdownContentMetrics(
             size: size,
@@ -1773,18 +1781,15 @@ struct HistoryItemView: View, Equatable {
         case .image(let cgImage):
             state.previewModel.previewCGImage = cgImage
         case .text(let previewState):
-            state.previewModel.text = previewState.text
-            state.previewModel.isMarkdown = previewState.isMarkdown
-            state.previewModel.markdownHTML = previewState.markdownHTML
-            state.previewModel.markdownContentSize = previewState.markdownContentSize
-            state.previewModel.markdownHasHorizontalOverflow = previewState.markdownHasHorizontalOverflow
-            state.previewModel.markdownRenderSucceeded =
-                previewState.markdownHTML != nil && previewState.markdownContentSize != nil
-            state.previewModel.markdownRenderErrorReason = nil
+            state.previewModel.primeTextPreview(
+                text: previewState.text,
+                isMarkdown: previewState.isMarkdown,
+                markdownHTML: previewState.markdownHTML,
+                markdownContentSize: previewState.markdownContentSize,
+                markdownHasHorizontalOverflow: previewState.markdownHasHorizontalOverflow
+            )
         case .markdownHTML(let html):
-            state.previewModel.markdownHTML = html
-            state.previewModel.markdownRenderSucceeded = false
-            state.previewModel.markdownRenderErrorReason = nil
+            state.previewModel.setMarkdownHTMLAwaitingLiveRender(html)
         case .renderMarkdown(let request):
             state.previewCoordinator.hoverMarkdownTask = HistoryHoverPreviewPipeline.makeMarkdownRenderTask(
                 request: request,

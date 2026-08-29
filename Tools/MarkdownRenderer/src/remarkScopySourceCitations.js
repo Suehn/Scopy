@@ -1,5 +1,6 @@
 import { isValidExternalHTTPURL } from "./scopyExternalURLPolicy.js";
 import { scopyIcon } from "./scopyIcons.js";
+import { bundledFaviconAssetForCitationHost, bundledImagePath } from "./scopyLocalImageAssets.js";
 
 export function remarkScopySourceCitations() {
   return function transformer(tree) {
@@ -16,7 +17,7 @@ export function scopySourceCitationHandler(_state, node) {
   if (!primary) return text("");
   const count = Math.max(0, Number(node.count) || 0);
   const primaryChildren = [
-    citationOriginIcon(),
+    citationOriginIcon(primary.url),
     element("span", { className: ["scopy-source-citation-label"] }, [text(primary.label)])
   ];
   if (count > 0) {
@@ -47,7 +48,7 @@ export function scopySourceCitationHandler(_state, node) {
           title: citation.title || undefined,
           className: ["scopy-source-citation-supporting-link"],
           ariaLabel: `Supporting source: ${citation.label}`
-        }, [citationOriginIcon(), text(citation.label)])
+        }, [citationOriginIcon(citation.url), text(citation.label)])
       ])))
     : null;
   return element("span", { className: ["scopy-source-citation-group"] }, [primaryLink, supportingList].filter(Boolean));
@@ -173,12 +174,31 @@ function normalizeIdentifier(value) {
   return String(value || "").trim().replace(/\s+/g, " ").toUpperCase();
 }
 
-function citationOriginIcon() {
+function citationOriginIcon(url) {
+  // A citation may show a real favicon only through the closed bundled map keyed by the
+  // destination's exact host; every other citation keeps the deterministic globe. No fetching.
+  const asset = bundledFaviconAssetForCitationHost(citationHost(url));
+  const path = bundledImagePath(asset);
+  if (path) {
+    return element("img", {
+      src: path,
+      alt: "",
+      className: ["scopy-source-citation-origin-icon", "scopy-source-citation-favicon"]
+    }, []);
+  }
   const icon = scopyIcon("globe");
   icon.properties.className.push("scopy-source-citation-origin-icon");
   icon.properties.width = 12;
   icon.properties.height = 12;
   return icon;
+}
+
+function citationHost(url) {
+  try {
+    return new URL(String(url || "")).hostname.toLowerCase();
+  } catch {
+    return null;
+  }
 }
 
 function element(tagName, properties = {}, children = []) {

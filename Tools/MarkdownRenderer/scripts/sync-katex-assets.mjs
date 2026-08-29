@@ -1,29 +1,26 @@
 import {
-  buildRendererBytes,
   defaultAssetRoot,
   formatVerification,
   synchronizeReleaseAssets,
   verifyReleaseAssets
 } from "./asset-contract.mjs";
 
-const rendererBytes = await buildRendererBytes();
 const { manifest, removedFonts } = await synchronizeReleaseAssets({
   assetRoot: defaultAssetRoot,
-  rendererBytes,
-  writeRenderer: true
+  writeRenderer: false
 });
 const result = await verifyReleaseAssets({
   assetRoot: defaultAssetRoot,
-  expectedRendererBytes: rendererBytes
+  verifySourceBundle: false
 });
 if (result.failures.length > 0) {
   console.error(formatVerification(result));
   process.exit(1);
 }
 
-console.log(`wrote atomic MarkdownPreview asset set at ${defaultAssetRoot}`);
-console.log(`renderer sha256 ${manifest.renderer.sha256}`);
-console.log(`katex ${manifest.katex.version}, fonts ${manifest.katex.fonts.length}`);
+console.log(`synchronized katex ${manifest.katex.version} CSS and fonts`);
+console.log(`recorded renderer sha256 ${manifest.renderer.sha256}`);
 if (removedFonts.length > 0) {
   console.log(`removed obsolete fonts: ${removedFonts.join(", ")}`);
 }
+console.log(formatVerification(result));

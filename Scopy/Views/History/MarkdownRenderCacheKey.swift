@@ -11,9 +11,4 @@ enum MarkdownRenderCacheKey {
             contentHash
         ].joined(separator: "|")
     }
-
-    static func make(contentHash: String, markdown: String) -> String {
-        let context = MarkdownRenderContextResolver.defaultContext(for: markdown)
-        return make(contentHash: contentHash, context: context)
-    }
 }

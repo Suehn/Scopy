@@ -53,8 +53,12 @@ enum HistoryItemMarkdownExportController {
 
     static func defaultResolutionScale() -> CGFloat {
         let processInfo = ProcessInfo.processInfo
-        if processInfo.arguments.contains("--uitesting"),
-           let percent = parseExportResolutionPercent(from: processInfo.environment[uiTestExportResolutionEnvKey]) {
+        if processInfo.arguments.contains("--uitesting") {
+            guard let percent = parseExportResolutionPercent(
+                from: processInfo.environment[uiTestExportResolutionEnvKey]
+            ) else {
+                return 1
+            }
             return CGFloat(percent) / 100
         }
 

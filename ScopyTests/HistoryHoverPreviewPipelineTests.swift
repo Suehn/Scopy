@@ -253,7 +253,7 @@ final class HistoryHoverPreviewPipelineTests: XCTestCase {
         let item = makeItem(type: .text, contentHash: "cached-markdown", plainText: "# Title\n\nBody")
         let renderCacheKey = MarkdownRenderCacheKey.make(
             contentHash: ClipboardItemContentRevision(item: item).cacheKey,
-            markdown: item.plainText
+            context: MarkdownRenderContextResolver.defaultContext(for: item.plainText)
         )
         HistoryItemPresentationCache.shared.storeMarkdownExportCapability(true, for: item)
         MarkdownPreviewCache.shared.setHTML("<h1>Title</h1>", forKey: renderCacheKey)

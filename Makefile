@@ -5,6 +5,7 @@
 .PHONY: test-real-db
 .PHONY: snapshot-perf-db bench-snapshot-search perf-search-warm-load perf-warm-scroll-ab
 .PHONY: tag-release push-release release-validate release-bump-patch test-release-policy
+.PHONY: markdown-renderer-deps markdown-assets-sync markdown-assets-verify test-markdown-renderer-assets markdown-assets-gate
 
 VERSION_ARGS := $(shell bash scripts/version.sh --xcodebuild-args 2>/dev/null)
 LOG_DIR := logs
@@ -26,12 +27,12 @@ xcode: setup
 	open Scopy.xcodeproj
 
 # 构建项目
-build: setup
+build: markdown-assets-verify setup
 	@echo "Building Scopy..."
 	xcodebuild -project Scopy.xcodeproj -scheme Scopy -configuration Debug build $(VERSION_ARGS)
 
 # 构建 Release 版本
-release: setup
+release: markdown-assets-gate setup
 	@echo "Building Scopy (Release)..."
 	xcodebuild -project Scopy.xcodeproj -scheme Scopy -configuration Release build $(VERSION_ARGS)
 
@@ -50,7 +51,7 @@ clean:
 	rm -rf Scopy.xcodeproj
 
 # 快速构建（跳过 xcodegen 如果项目已存在）
-quick-build:
+quick-build: markdown-assets-verify
 	@if [ ! -f "Scopy.xcodeproj/project.pbxproj" ]; then \
 		$(MAKE) setup; \
 	fi
@@ -59,7 +60,7 @@ quick-build:
 # =================== 测试命令 ===================
 
 # 运行所有测试
-test: setup
+test: markdown-assets-verify setup
 	@echo "Running all tests..."
 	@mkdir -p $(LOG_DIR)
 	bash -o pipefail -c 'xcodebuild test \
@@ -71,7 +72,7 @@ test: setup
 		2>&1 | tee $(LOG_DIR)/test.log'
 
 # 仅运行单元测试（排除性能测试）
-test-unit: setup
+test-unit: markdown-assets-verify setup
 	@echo "Running unit tests..."
 	@mkdir -p $(LOG_DIR)
 	bash -o pipefail -c 'xcodebuild test \
@@ -183,7 +184,7 @@ test-tsan:
 	esac
 
 # Swift 6 Strict Concurrency regression (tests target only)
-test-strict: setup
+test-strict: markdown-assets-verify setup
 	@echo "Running Strict Concurrency tests..."
 	@mkdir -p $(LOG_DIR)
 	bash -o pipefail -c 'xcodebuild test \
@@ -258,6 +259,24 @@ health-check:
 # 运行质量证据 manifest 模块自测（生成 logs/ 下的 JSON + Markdown 示例）
 quality-manifest-self-test:
 	@python3 scripts/quality/record-gate-result.py self-test --output-dir $(LOG_DIR)/quality-manifest-self-test
+
+# MarkdownPreview 的 renderer、KaTeX CSS/fonts、sidecar 与 manifest 必须来自同一锁定资产集。
+markdown-renderer-deps:
+	@test -d Tools/MarkdownRenderer/node_modules/katex -a -d Tools/MarkdownRenderer/node_modules/esbuild || npm ci --prefix Tools/MarkdownRenderer
+
+markdown-assets-sync: markdown-renderer-deps
+	@npm run sync:katex-assets --prefix Tools/MarkdownRenderer
+
+markdown-assets-verify: markdown-renderer-deps
+	@npm run verify:assets --prefix Tools/MarkdownRenderer
+
+test-markdown-renderer-assets:
+	@cd Tools/MarkdownRenderer && node --test test/asset-contract.test.js
+
+markdown-assets-gate:
+	@npm ci --prefix Tools/MarkdownRenderer
+	@cd Tools/MarkdownRenderer && node --test test/asset-contract.test.js
+	@npm run verify:assets --prefix Tools/MarkdownRenderer
 
 # =================== 开发工具 ===================
 
@@ -382,11 +401,14 @@ help:
 	@echo "  make test-flow-quick - Quick test flow (skip build)"
 	@echo "  make health-check - Run health checks only"
 	@echo "  make quality-manifest-self-test - Run quality manifest fixture self-test"
+	@echo "  make test-markdown-renderer-assets - Test the MarkdownPreview asset contract"
 	@echo ""
 	@echo "Development:"
 	@echo "  make format       - Format code (requires swift-format)"
 	@echo "  make lint         - Lint code (requires swiftlint)"
 	@echo "  make stats        - Show project statistics"
+	@echo "  make markdown-assets-sync - Sync locked KaTeX CSS/fonts without rebuilding renderer"
+	@echo "  make markdown-assets-verify - Verify renderer/CSS/fonts/sidecar/manifest atomically"
 	@echo ""
 	@echo "Release:"
 	@echo "  make tag-release  - Tag HEAD from doc/meta/release-current.yml"
@@ -402,10 +424,10 @@ help:
 
 # =================== Release Helpers ===================
 
-tag-release:
+tag-release: markdown-assets-gate
 	@bash scripts/release/tag-from-doc.sh
 
-push-release:
+push-release: markdown-assets-gate
 	@bash scripts/release/push-main.sh
 	@echo ""
 	@echo "Performance Targets (v0.md):"

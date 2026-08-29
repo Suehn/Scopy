@@ -12,6 +12,22 @@
 
 - No unreleased entries.
 
+## [v0.71.0] - 2026-08-29
+
+### Renderer Hardening
+
+- Adds the closed safe-HTML extension: attribute-free paired `u`/`kbd`/`mark`/`sub`/`sup` and the exact `details`/`summary` block become trusted semantic nodes, complete comments disappear, and every other raw HTML form stays visible literal text.
+- Groups two or more consecutive image-only paragraphs into the image-grid/lightbox presentation using only visible `src`/`alt`/`title`, and renders the two exact public ChatGPT Search image URLs from bundled local assets; the document CSP keeps every other remote image on the deterministic offline fallback.
+- Locks the renderer IIFE, KaTeX 0.16.45 CSS, all 60 KaTeX fonts, sidecar, and `asset-manifest.json` into one lockfile-derived verified set gating `make build`, tests, and the release script; flat duplicate bundle resources fail the build.
+- Makes preview readiness terminal only after renderer, stylesheet, fonts, local images, hydration, two paint frames, and the current layout epoch resolve; failures stay visible with the source and reason, cached metrics require the exact layout scale, and export throws on a non-terminal DOM instead of snapshotting partial output.
+- Reports `mathStrictCount`/`mathRelaxedCount`/`mathErrorCount` from real KaTeX outcomes, routes failed relaxed retries to the literal `.katex-error` surface, and passes authored/ChatGPT sources to the parser byte-for-byte.
+
+### Rich Fidelity
+
+- Renders the 48rem desktop column at 100% scale (the wide threshold now equals the 816px output surface), so news cards, all eight weather days, the hourly chart, and three-column finance metrics match the captured ChatGPT desktop references instead of the narrow mobile-style state; zooming in still selects the 40rem reading column.
+- Defines chart trend and weather-warm colors once as `--scopy-rich-*` tokens (sampled against the reference screenshots; values unchanged) with SVG gradients inheriting `currentColor`.
+- Shows bundled favicons on source citations only through a closed exact-host map, orders finance metrics like the reference grid, sets currency amounts in medium-weight tabular numerals, and optically scales Codex file-link icons to full bleed.
+
 ## [v0.70.0] - 2026-08-28
 
 ### Rich Rendering And Interaction

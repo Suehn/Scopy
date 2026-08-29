@@ -9,6 +9,11 @@ import remarkRehype from "remark-rehype";
 import { unified } from "unified";
 import { rehypeScopyKatex } from "./rehypeScopyKatex.js";
 import { remarkLiteralHTML } from "./remarkLiteralHTML.js";
+import {
+  remarkScopySafeHTML,
+  scopySafeHTMLDetailsHandler,
+  scopySafeHTMLInlineHandler
+} from "./remarkScopySafeHTML.js";
 import { scopyIcon } from "./scopyIcons.js";
 import { preprocessBackslashMath } from "./scopyBackslashMathPreprocessor.js";
 import { remarkScopyImageGroups } from "./remarkScopyImageGroups.js";
@@ -50,6 +55,7 @@ function renderInternal(source, policy = {}) {
     .use(remarkScopyRich)
     .use(remarkScopyImageGroups)
     .use(remarkScopyRichOrdinals)
+    .use(remarkScopySafeHTML)
     .use(remarkLiteralHTML);
   processor
     .use(remarkRehype, {
@@ -58,6 +64,8 @@ function renderInternal(source, policy = {}) {
       handlers: {
         scopyImageGroup: scopyImageGroupHandler,
         scopyRich: scopyRichHandler,
+        scopySafeHTMLDetails: scopySafeHTMLDetailsHandler,
+        scopySafeHTMLInline: scopySafeHTMLInlineHandler,
         scopySourceCitation: scopySourceCitationHandler
       }
     })
@@ -77,6 +85,9 @@ function renderInternal(source, policy = {}) {
     html,
     metadata: {
       mathCount: Number(file.data.scopyMathCount || 0),
+      mathStrictCount: Number(file.data.scopyMathStrictCount || 0),
+      mathRelaxedCount: Number(file.data.scopyMathRelaxedCount || 0),
+      mathErrorCount: Number(file.data.scopyMathErrorCount || 0),
       repairedMathCount: repairMetadata.repairedMathCount,
       warnings
     }
@@ -99,9 +110,9 @@ const scopySanitizeSchema = {
   },
   tagNames: [...new Set([
     ...(defaultSchema.tagNames || []),
-    "article", "button", "circle", "dd", "defs", "div", "dl", "dt", "figcaption", "figure", "footer",
+    "article", "button", "circle", "dd", "defs", "details", "div", "dl", "dt", "figcaption", "figure", "footer",
     "g", "header", "input", "label", "linearGradient", "output", "path", "polygon", "polyline",
-    "section", "span", "stop", "svg", "text", "time", "title"
+    "section", "span", "stop", "sub", "summary", "sup", "svg", "text", "time", "title", "u", "kbd", "mark"
   ])],
   attributes: {
     ...defaultSchema.attributes,
@@ -142,6 +153,7 @@ const scopySanitizeSchema = {
       "dataScopyDisplay"
     ],
     dd: ["className"],
+    details: [["className", "scopy-safe-details"], "open"],
     div: [
       ["className", /^scopy-/],
       "id",
@@ -244,10 +256,19 @@ const scopySanitizeSchema = {
       ["dataScopyTooltipDisplay", "true"]
     ],
     stop: ["offset", "stopColor", "stopOpacity"],
+    sub: [["className", "scopy-safe-html-sub"]],
+    summary: [["className", "scopy-safe-summary"]],
     strong: [...(defaultSchema.attributes?.strong || []), ["dataScopyTooltipDisplay", "true"]],
+    sup: [
+      ...(defaultSchema.attributes?.sup || []),
+      ["className", "scopy-safe-html-sup"]
+    ],
     svg: ["className", "viewBox", "width", "height", "role", "ariaLabel", "ariaHidden", "focusable"],
     text: ["className", "x", "y", "dx", "dy", "textAnchor", "dominantBaseline"],
     time: ["className", "dateTime"],
+    u: [["className", "scopy-safe-html-u"]],
+    kbd: [["className", "scopy-safe-html-kbd"]],
+    mark: [["className", "scopy-safe-html-mark"]],
     ul: [...withoutClassName(defaultSchema.attributes?.ul), ["className", "contains-task-list", /^scopy-/], "ariaLabel"]
   }
 };

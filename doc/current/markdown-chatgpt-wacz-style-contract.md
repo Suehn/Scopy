@@ -34,7 +34,7 @@ Secondary capture:
 - captured page: `https://chatgpt.com/c/6a90ea40-c6e4-83ea-8a59-fb00f791fa25`
 - archive time: 2026-08-28
 
-This recording reached the named conversation, but the assistant message was still `in_progress` while the archive was being written. It does not contain a final hydrated assistant DOM or computed-style snapshot. A live Microsoft Edge inspection can therefore supply measured layout facts for the same visible surfaces, but those measurements must be labeled `live/runtime-derived`; they are not WACZ payload evidence and cannot establish what the unfinished archived answer would finally have contained.
+This recording reached the named conversation, but the assistant message was still `in_progress` while the archive was being written. It does not contain a final hydrated assistant DOM or computed-style snapshot. A successful live Microsoft Edge inspection may separately supply measured layout facts for the same visible surfaces, but those measurements must be labeled `live/runtime-derived`; they are not WACZ payload evidence and cannot establish what the unfinished archived answer would finally have contained. In the 2026-08-28 hardening run, Edge tab discovery succeeded but repeated content/claim reads timed out, so that run contributes no new live-DOM or computed-style evidence.
 
 The secondary WACZ does preserve one complete structured `search_result_group` at `messages[17].metadata.search_result_groups[0]`, including frozen titles, destinations, `openai.com` attribution, publication timestamps, thumbnail URLs, and the three thumbnail PNG responses. Scopy may map those exact visual fields into a `news` fixture while labeling the mapping: the backend objects themselves are `search_result_group` / `search_result`, not a literal `news` payload. The linked article pages were not archived, so this evidence validates card fields and thumbnail provenance, not article bodies or factual claims.
 
@@ -93,18 +93,23 @@ Authoritative implementation surfaces:
 - `Scopy/Views/History/MarkdownHTMLRenderer.swift`: bounded, code-aware source normalization and the only document entrypoint.
 - `Scopy/Views/History/MarkdownHTMLDocumentBuilder.swift`: local assets, CSS, table/runtime measurement, readiness, and export hooks.
 - `Tools/MarkdownRenderer/src/render.js`: Markdown AST/HTML AST pipeline.
+- `Tools/MarkdownRenderer/src/remarkScopySafeHTML.js`: the closed user-authored safe-HTML recognizer; unsupported or malformed forms fail to literal text.
+- `Tools/MarkdownRenderer/src/scopyLocalImageAssets.js`: the closed bundled-image allowlist and exact public-URL mappings used by fixtures.
 - `Tools/MarkdownRenderer/src/remarkScopyRich.js`: strict v2 validation and the only trusted rich-surface HAST builders.
 - `Tools/MarkdownRenderer/src/richInteractionRuntime.js`: one delegated preview hydrator and deterministic export freeze.
 - `Tools/MarkdownRenderer/src/scopyIcons.js`: closed official Phosphor icon paths used by Codex-style links and rich controls.
 - `Tools/MarkdownRenderer/src/rehypeScopyKatex.js`: HTML-only math rendering and stable failure behavior.
 - `Scopy/Views/History/MarkdownPreviewWebView.swift`: generation-safe WebView lifecycle and metrics.
 - `Scopy/Services/Export/MarkdownExportService.swift`: PNG reliability strategies applied to the same HTML.
+- `Scopy/Resources/MarkdownPreview/asset-manifest.json` plus `Tools/MarkdownRenderer/scripts/verify-assets.mjs`: the lockfile-derived renderer/KaTeX asset contract.
 
 There is no legacy renderer selection, feature flag, shadow renderer, silent markdown-it fallback, or second preview/export parse result. Missing renderer assets are a render failure, not permission to display a semantically different document.
 
 ## `scopy-rich` v2 Structured Snapshot
 
 Ordinary Markdown remains the public interchange fallback. When the producer actually possesses a complete structured surface, it may place one strict JSON object in a fenced block whose info string is exactly `scopy-rich`. The envelope freezes all source data needed for rendering and interaction; it is never a prompt to query, scrape, refresh, or infer. The same `MarkdownHTMLRenderer -> MarkdownHTMLDocumentBuilder` flow recognizes and validates it while building the same Markdown AST/HTML document. Preview hydration and PNG export are two modes of that one document, not separate card renderers or source fetches.
+
+Strict v2 is the only structured-data card input. One narrower public-copy presentation adapter is allowed: two or more consecutive image-only Markdown paragraphs may be grouped into the existing image-grid/lightbox shell using only the parsed images' visible `src`, `alt`, and `title`. This adapter does not reconstruct a missing ChatGPT `image_group` payload, promote surrounding prose, or invent source, date, citation, article, or private metadata. Exact known URLs may resolve to the closed bundled asset map; every other URL keeps only its public provenance and offline fallback. The internal handler may reuse the v2 image-group DOM for shared styling/export behavior, but that implementation detail does not turn the public Markdown into a recovered private envelope.
 
 ```text
 Markdown source
@@ -171,11 +176,11 @@ Exceeding a limit invalidates that fence and preserves it as code; the renderer 
 
 ### Captured light-state design rules
 
-The supplied 2026-08-28 captures and live Edge computed styles establish reusable layout rules, not screenshot-specific width/height overrides. The WACZ is a valid ZIP/WACZ with indexed WARC responses, CSS, JavaScript, fonts, images, conversation data, and GenUI traffic, but it does not contain the hydrated final component DOM. WACZ evidence therefore supplies data/resources/code paths while live Edge supplies final geometry and computed style.
+The supplied 2026-08-28 screenshots, captured runtime paths, and any separately labeled successful live measurements establish reusable layout rules, not screenshot-specific width/height overrides. The WACZ is a valid ZIP/WACZ with indexed WARC responses, CSS, JavaScript, fonts, images, conversation data, and GenUI traffic, but it does not contain the hydrated final component DOM. WACZ evidence therefore supplies data/resources/code paths; only a successful live inspection may supply final geometry and computed style.
 
 | Surface | Responsive rule and wide-reference state |
 | --- | --- |
-| Rich thread | The logical layout viewport selects the canonical 40rem or 48rem thread column; the current 816px output surface reaches the 48rem state. Cards fill that column, stay on `#fcfcfc`, and use a 10% black hairline plus the shared 20px radius. No component may key behavior off the physical WKWebView width. |
+| Rich thread | The logical layout viewport selects the canonical 40rem or 48rem thread column, and the wide threshold equals the 816px output surface: 100% scale and zoom-out render the 48rem desktop column (matching the captured desktop references), while zooming in past 100% (logical viewport < 816) selects the narrow 40rem reading column, whose card tracks keep their contractual local horizontal scroll. Cards fill that column, stay on `#fcfcfc`, and use a 10% black hairline plus the shared 20px radius. No component may key behavior off the physical WKWebView width. |
 | News | A horizontal snap track uses 16px gaps and `calc((100% - 2 * gap) / 3)` item basis; narrow containers retain a locally scrolling card width. Each card has a 144px media slot, 12px radius, 16px horizontal copy inset, 12/16 source and date text, and a 14/20 five-line title. The wide reference resolves to three approximately 245px columns without storing that resolved width. |
 | Search images | The group occupies the thread width as a reserved three-slot search rail rather than stretching a short result set. Each item takes one flexible 5:4 slot with 4px gaps, so the captured two-result state fills two slots and deliberately leaves the third available. Narrow containers use 128px locally scrolling items. Source raster assets and the fullscreen preview lightbox are shared by preview/export. |
 | Finance | The card height is content-derived: padded quote header, range controls whose 4.5rem minimum slots distribute across available width and locally scroll only when needed, a chart whose height clamps between compact and wide states, and an auto-fit metric grid. The chart uses a vertical fade, stable nice-number ticks, and rounded trend strokes. Metrics resolve to three, two, or one label/value columns from a 12rem minimum column rule rather than a screenshot-width branch. |
@@ -217,7 +222,8 @@ Rich v2 exports remain true-color PNGs. Palette reduction is skipped whenever th
 | Links/images/autolinks | Parsed by CommonMark/GFM, then sanitized. HTTP(S), normal relative/absolute local paths, Codex-style absolute file paths with an optional `:line` suffix, and the explicit local `plugin:` integration path are preserved according to the sanitizer schema. A `file:` URL is not widened into an allowed source merely because it names a local file. |
 | Lists/tasks | Ordered/unordered and nested lists; GFM tasks retain disabled checked/unchecked inputs which the document runtime paints consistently for preview and PNG. |
 | Tables | GFM pipe tables; alignment markers are supported. Unescaped `|` is a column delimiter even inside mathematical text. |
-| Raw HTML | Every user-authored raw tag becomes visible escaped text. `<script>` can never survive as an executable element. Trusted renderer plugins may still create structural elements. |
+| Safe HTML extension | Attribute-free, correctly paired `u`, `kbd`, `mark`, `sub`, and `sup` may wrap phrasing Markdown; exact block `details` with optional bare `open` and one plain, non-empty `summary` may wrap flow Markdown. Complete HTML comments disappear. |
+| Residual raw HTML | Unsupported, attributed, malformed, mismatched, flow-wrapping inline, excessive-depth, or otherwise unrecognized HTML remains visible escaped text. `<script>` can never survive as an executable element. |
 | Thematic breaks | CommonMark thematic breaks become `<hr>`. |
 | Footnotes | GFM footnotes are supported. Renderer-generated IDs use exactly one namespace: definition `scopy-fn-<normalized-id>`, reference `scopy-fnref-<normalized-id>`, and repeated references append `-2`, `-3`, etc. Heading IDs are not synthesized. |
 
@@ -231,13 +237,16 @@ All source normalization is syntax-aware:
 
 ### IDs and fragment stability
 
-The renderer owns only IDs it generates. Raw HTML is literal, headings have no slugging plugin, and source content cannot inject arbitrary elements or IDs. Footnote `href` and `id` values are generated in the same `scopy-` namespace before sanitization; the sanitizer must not add a second clobber prefix. This prevents visually valid but broken footnote navigation.
+The renderer owns only IDs it generates. The safe-HTML subset accepts no source attributes or IDs, all residual raw HTML is literal, and headings have no slugging plugin. Footnote `href` and `id` values are generated in the same `scopy-` namespace before sanitization; the sanitizer must not add a second clobber prefix. This prevents visually valid but broken footnote navigation.
 
 ### HTML and sanitizer boundary
 
-`remarkLiteralHTML` converts Markdown AST `html` nodes to text before the HTML AST exists. `remark-rehype` runs with `allowDangerousHtml: false`, followed by `rehype-sanitize`. This means:
+`remarkScopySafeHTML` first folds only a closed, source-attribute-free subset into explicit custom Markdown AST nodes. `remarkLiteralHTML` then converts every remaining Markdown AST `html` node to text before the HTML AST exists. `remark-rehype` runs with `allowDangerousHtml: false`, explicit handlers for the safe nodes, and then `rehype-sanitize`. This means:
 
-- user-authored `<details>`, `<kbd>`, `<mark>`, `<sub>`, `<sup>`, `<div>`, `<br>`, and `<script>` are displayed as literal tags;
+- paired `u`, `kbd`, `mark`, `sub`, and `sup` may contain ordinary phrasing Markdown and nest with a single well-formed stack; a mismatch literalizes the whole phrasing region;
+- a `details` block must start with exactly `<details>` or `<details open>` and one plain, non-empty, maximum-4,096-character `<summary>...</summary>` header, then close in the same flow container; preview toggles it while export deterministically opens it and removes interaction;
+- attributes, compact one-line details bodies, missing/empty/unclosed summaries, flow content inside an inline safe tag, unsupported tags such as `<div>`/`<br>`, scripts, and malformed comments remain literal;
+- complete valid HTML comments are removed outside code; inline/fenced code preserves comment source as code;
 - the existence of CSS rules for an element is not permission for raw source to create that element;
 - syntax highlighting, KaTeX, tasks, footnotes, and source citations remain trusted renderer-generated structures;
 - source is JSON-encoded into the standalone document, so `</script>` cannot break out of the payload script.
@@ -250,7 +259,8 @@ Supported explicit math forms:
 | --- | --- |
 | `\(...\)` | inline |
 | `\[...\]` | display |
-| `$$...$$` | display |
+| single-line `$$...$$` | inline |
+| standalone multiline `$$` / body / `$$` block | display |
 | fenced `math` block | display |
 
 A single-dollar pair such as `$20` or `$x + 1$` remains literal. Currency, shell variables (`$HOME`, `$PATH`), code spans, code fences, links, URLs, and file paths must never be reinterpreted as math.
@@ -258,13 +268,15 @@ A single-dollar pair such as `$20` or `$x + 1$` remains literal. Currency, shell
 KaTeX behavior:
 
 1. Render with `displayMode` from the parsed node, `output: "html"`, `strict: "error"`, `throwOnError: true`, and `trust: false`.
-2. On a strict/parse failure, emit a warning and retry with `strict: "ignore"`, `throwOnError: false`, and `trust: false`.
-3. If the retry cannot produce output, emit a stable `.katex-error` span containing the original literal source.
+2. On a strict/parse failure, emit a warning and retry with `strict: "ignore"`, `throwOnError: true`, and `trust: false`.
+3. If the retry throws, emit a stable `.katex-error` span containing the original literal source.
 4. Load `mhchem` locally for chemistry syntax; never load runtime assets from the network.
 5. Wrap each formula in a semantic host with `role="math"`, `aria-label=<full source>`, `data-math-source=<full source>`, and `data-client-katex-layout`.
 6. Cap user-declared KaTeX geometry at 20em so inputs such as `\\rule{100000em}{100000em}` cannot expand preview or PNG height without bound. This is a Scopy stability guard; it is not claimed as an observed ChatGPT runtime option.
 7. Do not put `content-visibility:auto` on formula hosts. WebKit can omit off-viewport formulas from a full-document PNG snapshot even though their intrinsic placeholders remain. Scopy keeps every formula paintable; this is an export-stability guard.
 8. The main answer path is HTML-only KaTeX. CSS or auxiliary code mentioning `.katex-mathml` does not prove that the captured main answer used a MathML+HTML pair.
+9. The renderer reports `mathStrictCount`, `mathRelaxedCount`, and `mathErrorCount` from the actual render outcome. Authored/ChatGPT source bytes bypass loose formula normalization; only the explicitly selected OCR/scientific profile may repair source before this one parser runs.
+10. The renderer IIFE, KaTeX CSS, and every CSS-referenced KaTeX font are one lockfile-derived asset set. The manifest records exact hashes and KaTeX version; build/test reject a mixed, missing, stale, or flat-duplicated app-bundle layout instead of falling back to host fonts or another renderer.
 
 The optional loose-math repair is a Scopy input adaptation for clearly detected OCR/scientific or LaTeX-document profiles. It is disabled for ordinary ChatGPT/authored Markdown, and profile selection may change only bounded source repair—not the renderer, CSS, or output architecture.
 
@@ -316,7 +328,9 @@ Ordinary links receive the external-link treatment only when their sanitized des
 
 A Codex file link such as `[render.js](/Users/hh/Documents/code/Scopy/Tools/MarkdownRenderer/src/render.js:25)` retains the absolute path and one-based `:25` suffix as its Markdown destination. It is local, receives a file-kind icon rather than an external affordance, and never becomes a source citation. An explicit preview click may hand only that validated absolute path plus optional one-based line/column suffix to the native workspace opener; programmatic navigation, remote hosts, relative paths, double-slash paths, queries, fragments, credentials, and control characters are rejected. Relative paths and `plugin:` destinations retain the non-HTTP visual classification but remain inert. Same-document footnote/fragment links alone retain in-WebView navigation. Raw `file:` URLs are sanitized away rather than treated as an alias for the Codex absolute-path form.
 
-Ordinary links do not fetch or guess favicons. Rich v2 results may request only an explicitly named bundled favicon asset from the closed allowlist; any other brand icon falls back to deterministic local renderer SVG.
+Ordinary links do not fetch or guess favicons. Rich v2 results may request only an explicitly named bundled favicon asset from the closed allowlist; any other brand icon falls back to deterministic local renderer SVG. A source citation may additionally show a bundled favicon only when its destination's exact lowercase host appears in the closed citation host map (`scopyLocalImageAssets.js`); every other citation keeps the deterministic globe icon, and no path fetches, guesses, or widens a host into a pattern.
+
+Ordinary Markdown images also never trigger network access. The two exact ChatGPT Search documentation URLs present in `chatgpt_public_copy_markdown_sample.md` map to their corresponding bundled raster assets so that public-copy rendering is deterministic across machines. Matching is full-string exact, including query parameters; every other HTTP(S) image retains provenance/alt text and the deterministic offline fallback rather than being fetched or inferred.
 
 Source citations are separate. Only a parenthesized source-like HTTP(S) reference such as `([AP News][1])` is promoted to an inline citation pill. A concrete group such as `([AP News][1], [Reuters][2])` becomes the first source plus `+1` while retaining a focusable supporting-source list in preview. If copied text literally says `AP News +1` but exposes only one URL, Scopy may preserve that count but must not invent a supporting destination. A normal `([guide][1])`, local path, or Codex file link remains ordinary. Saved WACZ text can prove label survival, not this final citation DOM or its computed layout; those require current renderer tests or a labeled live inspection.
 
@@ -389,7 +403,7 @@ Each WebView load receives a new opaque render ID inserted into `data-scopy-rend
 
 Metric deduplication compares width, height, horizontal-overflow state, success/failure state, error reason, and render ID. A same-size failure cannot be swallowed as a duplicate success, and a late message from an earlier document cannot resize or mark the new preview ready.
 
-The document remains hidden until the renderer, KaTeX, highlighting, task/table/rich runtime, local fonts/assets, and layout measurement reach a terminal ready state. Renderer failure is reported as failure; it does not silently switch engines.
+The document remains hidden until the renderer, canonical stylesheet, `document.fonts`, every local image load/error outcome, task/table/rich runtime, two paint frames, and a current layout epoch reach a terminal ready state. ResizeObserver and interactive-details/rich-control changes are coalesced through requestAnimationFrame. The reusable WebView becomes opaque only for a current-owner terminal success; a terminal failure leaves the static source/DOM available behind a visible reason instead of producing a blank first hover. Renderer failure is reported as failure; it does not silently switch engines.
 
 PNG export builds the same HTML off the main thread, then owns WebKit work on the main actor. Its PDF, one-shot snapshot, and tiled snapshot paths are reliability strategies for one frozen DOM, not alternate renderers. The export freeze closes transient overlays/tooltips, disables rich controls and links, removes them from the tab order, and cancels activation. Export-only code wrapping or table scaling may run only after preview-equivalent layout is ready and only to fit bitmap constraints; it may not change Markdown parsing, typography, content width, table/card models, or frozen source data.
 
@@ -401,7 +415,8 @@ PNG export builds the same HTML off the main thread, then owns WebKit work on th
 | `$` currency/shell/math ambiguity | single-dollar literal; explicit backslash/double-dollar/fence math only |
 | code syntax islands | no Markdown/math repair inside inline/fenced/indented code |
 | nested fences | longer outer fence preserves shorter inner fence text |
-| raw HTML/script | visible escaped source; no executable element |
+| safe HTML | exact attribute-free paired subset becomes semantic nodes; valid complete comments disappear; details is interactive in preview and frozen open in export |
+| residual raw HTML/script | malformed, attributed, unsupported, or unsafe source is visible escaped text; no executable element |
 | escaped table pipe | remains in the cell |
 | unescaped table pipe | splits cells; source author must escape or use LaTeX delimiters |
 | empty/aligned/wide tables | semantic cells preserved; one column model; local horizontal overflow |
@@ -411,17 +426,18 @@ PNG export builds the same HTML off the main thread, then owns WebKit work on th
 | CJK/RTL/combining/emoji | exact character preservation; visual shaping requires WebView verification |
 | long unbroken text | no renderer truncation; `anywhere` wrapping outside code |
 | long code/math/table | local overflow rather than page/popover width mutation |
-| KaTeX parse failure | strict warning, relaxed retry, then literal error surface |
+| KaTeX outcomes | strict success, relaxed retry, and literal error surface are counted separately; no silent source truncation or alternate renderer |
 | stale WebView message | ignored by render ID/navigation/main-frame gates |
 | same-size failure | delivered because outcome/error participates in deduplication |
 | preview vs PNG | identical parse result, HTML, base CSS, local assets, and runtime; preview hydrates, export freezes before capture |
 | `scopy-rich` validity | strict v2 object renders a supported card; every other version and invalid/unknown/oversized input remains a code fence |
+| consecutive public images | two or more image-only paragraphs may share the image-grid/lightbox presentation; only `src`/`alt`/`title` survive and no missing card metadata is inferred |
 | rich state | zero, empty, partial, missing `—`, and error remain visibly distinct |
 | rich image source | allowlisted asset renders bundled bytes; remote URL never fetches; unknown or ambiguous asset/source input invalidates the envelope |
 | rich interaction | weather/day, finance/range, currency, chart, and local-image controls use only pre-rendered frozen data; export disables all actions |
 | rich identity/a11y/RTL | content-derived stable IDs, labeled semantics, LTR numeric isolation, and local overflow |
 
-The primary archived page exercised 103 broad edge families. Its saved-text evidence directly supports escape preservation, code preventing secondary parsing, nested fences, raw-HTML literalization, combining/emoji character survival, and no long-content truncation. It directly exposes only one parser/source failure: the unescaped `|r|` table case. Final DOM semantics, checkbox paint, RTL visual ordering, exact wrapping, and actual overflow remain unprovable from that WACZ alone.
+The primary archived page exercised 103 broad edge families. Its saved-text evidence directly supports escape preservation, code preventing secondary parsing, nested fences, residual-HTML literalization, combining/emoji character survival, and no long-content truncation. The safe-HTML extension is a user-required Scopy behavior verified by local parser/WebView tests, not a claim that the incomplete archive proved those semantic nodes. The archive directly exposes only one parser/source failure: the unescaped `|r|` table case. Final DOM semantics, checkbox paint, RTL visual ordering, exact wrapping, and actual overflow remain unprovable from that WACZ alone.
 
 ## Required Verification
 
@@ -431,6 +447,7 @@ After renderer or preview/export changes:
 cd Tools/MarkdownRenderer
 npm test
 npm run build
+npm run verify:assets
 
 cd ../..
 make build
@@ -445,6 +462,8 @@ Focused renderer assertions live in:
 
 - `Tools/MarkdownRenderer/test/chatgpt-wacz-20260828.test.js`
 - `Tools/MarkdownRenderer/test/render.test.js`
+- `Tools/MarkdownRenderer/test/safe-html.test.js`
+- `Tools/MarkdownRenderer/test/asset-contract.test.js`
 - `ScopyTests/ChatGPTMarkdownRendererTests.swift`
 - `ScopyTests/WebViewLifecycleTests.swift`
 
@@ -452,6 +471,7 @@ Real user fixtures, rich-surface provenance, and strict v2 examples live in:
 
 - `ScopyUITests/Fixtures/user_markdown_stress.md` (the complete 2,728-line Markdown/math/table/Unicode stress input)
 - `ScopyUITests/Fixtures/chatgpt_rich_copy_sample.md` (copied visible text; ordinary-Markdown degradation, never synthesized cards)
+- `ScopyUITests/Fixtures/chatgpt_public_copy_markdown_sample.md` (exact public copy; ordinary images may receive the field-preserving image-group presentation adapter)
 - `ScopyUITests/Fixtures/chatgpt_rich_surfaces.md`
 - `ScopyUITests/Fixtures/README.md`
 
