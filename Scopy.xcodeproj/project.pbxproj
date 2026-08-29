@@ -1584,7 +1584,6 @@
 			isa = PBXNativeTarget;
 			buildConfigurationList = B807E77DD1B5A208550B6A13 /* Build configuration list for PBXNativeTarget "ScopyTSanTests" */;
 			buildPhases = (
-				BBA2B9413D38EC411FE6ACAF /* Stage SwiftPM Resource Bundles */,
 				06C3BE488CCE045049CC3304 /* Sources */,
 				DE07B547604136545CAD1ECD /* Resources */,
 				2A773C7CE420C9A6B4BFF2B0 /* Frameworks */,
@@ -1627,7 +1626,6 @@
 			isa = PBXNativeTarget;
 			buildConfigurationList = EA0CA6D87E4589F4380CEA0D /* Build configuration list for PBXNativeTarget "Scopy" */;
 			buildPhases = (
-				38A68C0F6991A8F75E8A1C87 /* Stage SwiftPM Resource Bundles */,
 				99FDC9A6CBC7EE430A224BD5 /* Sources */,
 				399DA51422110B651484A2D0 /* Resources */,
 				62362C964D4D0789861392E4 /* Frameworks */,
@@ -1651,7 +1649,6 @@
 			isa = PBXNativeTarget;
 			buildConfigurationList = A4A46480BCF8DF70DDE8D6C8 /* Build configuration list for PBXNativeTarget "ScopyTests" */;
 			buildPhases = (
-				9B33460A9631D965805D8C23 /* Stage SwiftPM Resource Bundles */,
 				2ED89F6DC5E15F3772E50A92 /* Sources */,
 				B9134140B5301BB5754A39E4 /* Resources */,
 				A8FE7C83E4A1CF67897D4D62 /* Frameworks */,
@@ -1999,66 +1996,6 @@
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
 			shellScript = "set -euo pipefail\nSRC_TOOL=\"${SRCROOT}/Scopy/Resources/Tools/pngquant\"\nDST_TOOL_DIR=\"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/Tools\"\nDST_TOOL=\"${DST_TOOL_DIR}/pngquant\"\nif [ ! -f \"$SRC_TOOL\" ]; then\n  echo \"Missing bundled tool: $SRC_TOOL\" >&2\n  if [ \"${CONFIGURATION:-Debug}\" = \"Release\" ]; then\n    exit 1\n  fi\n  exit 0\nfi\nmkdir -p \"$DST_TOOL_DIR\"\nif [ ! -f \"$DST_TOOL\" ] || ! cmp -s \"$SRC_TOOL\" \"$DST_TOOL\"; then\n  ditto \"$SRC_TOOL\" \"$DST_TOOL\"\nfi\nchmod +x \"$DST_TOOL\" || true\n\nSRC_TP_DIR=\"${SRCROOT}/Scopy/Resources/ThirdParty/pngquant\"\nDST_TP_PARENT=\"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/ThirdParty\"\nDST_TP_DIR=\"${DST_TP_PARENT}/pngquant\"\nif [ -d \"$SRC_TP_DIR\" ]; then\n  mkdir -p \"$DST_TP_PARENT\"\n  mkdir -p \"$DST_TP_DIR\"\n  rsync -a --delete \"$SRC_TP_DIR\"/ \"$DST_TP_DIR\"/\nfi\nSTAMP_FILE=\"${DERIVED_FILE_DIR}/fix_bundled_tool_permissions.stamp\"\nmkdir -p \"$(dirname \"$STAMP_FILE\")\"\ntouch \"$STAMP_FILE\"\n";
-		};
-		38A68C0F6991A8F75E8A1C87 /* Stage SwiftPM Resource Bundles */ = {
-			isa = PBXShellScriptBuildPhase;
-			alwaysOutOfDate = 1;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			inputFileListPaths = (
-			);
-			inputPaths = (
-			);
-			name = "Stage SwiftPM Resource Bundles";
-			outputFileListPaths = (
-			);
-			outputPaths = (
-				"$(DERIVED_FILE_DIR)/stage_spm_bundles_scopy.stamp",
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-			shellPath = /bin/sh;
-			shellScript = "set -euo pipefail\npick_src_dir_once() {\n  for dir in \"${OBJROOT}/../Products/${CONFIGURATION}\" \"${SYMROOT:-}/${CONFIGURATION}\"; do\n    if [ ! -d \"$dir\" ]; then\n      continue\n    fi\n    for bundle in \"$dir\"/*.bundle; do\n      if [ -e \"$bundle\" ]; then\n        echo \"$dir\"\n        return 0\n      fi\n    done\n  done\n  return 1\n}\nSRC_DIR=\"\"\nfor _ in 1 2 3 4 5 6 7 8 9 10 \\\n         11 12 13 14 15 16 17 18 19 20 \\\n         21 22 23 24 25 26 27 28 29 30 \\\n         31 32 33 34 35 36 37 38 39 40 \\\n         41 42 43 44 45 46 47 48 49 50; do\n  SRC_DIR=\"$(pick_src_dir_once || true)\"\n  if [ -n \"$SRC_DIR\" ]; then\n    break\n  fi\n  sleep 0.05\ndone\nDST_DIR=\"${CONFIGURATION_BUILD_DIR}\"\nif [ -z \"$SRC_DIR\" ] || [ ! -d \"$SRC_DIR\" ]; then\n  exit 0\nfi\nmkdir -p \"$DST_DIR\"\nLOCK_DIR=\"$DST_DIR/.spm_bundle_stage.lock\"\nwhile ! mkdir \"$LOCK_DIR\" 2>/dev/null; do\n  sleep 0.05\ndone\ntrap 'rmdir \"$LOCK_DIR\" 2>/dev/null || true' EXIT\nfor bundle in \"$SRC_DIR\"/*.bundle; do\n  if [ ! -e \"$bundle\" ]; then\n    continue\n  fi\n  name=\"$(basename \"$bundle\")\"\n  if [ -d \"$DST_DIR/$name\" ]; then\n    continue\n  fi\n  ditto \"$bundle\" \"$DST_DIR/$name\"\ndone\nSTAMP_FILE=\"${DERIVED_FILE_DIR}/stage_spm_bundles_scopy.stamp\"\nmkdir -p \"$(dirname \"$STAMP_FILE\")\"\ntouch \"$STAMP_FILE\"\n";
-		};
-		9B33460A9631D965805D8C23 /* Stage SwiftPM Resource Bundles */ = {
-			isa = PBXShellScriptBuildPhase;
-			alwaysOutOfDate = 1;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			inputFileListPaths = (
-			);
-			inputPaths = (
-			);
-			name = "Stage SwiftPM Resource Bundles";
-			outputFileListPaths = (
-			);
-			outputPaths = (
-				"$(DERIVED_FILE_DIR)/stage_spm_bundles_scopytests.stamp",
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-			shellPath = /bin/sh;
-			shellScript = "set -euo pipefail\npick_src_dir_once() {\n  for dir in \"${OBJROOT}/../Products/${CONFIGURATION}\" \"${SYMROOT:-}/${CONFIGURATION}\"; do\n    if [ ! -d \"$dir\" ]; then\n      continue\n    fi\n    for bundle in \"$dir\"/*.bundle; do\n      if [ -e \"$bundle\" ]; then\n        echo \"$dir\"\n        return 0\n      fi\n    done\n  done\n  return 1\n}\nSRC_DIR=\"\"\nfor _ in 1 2 3 4 5 6 7 8 9 10 \\\n         11 12 13 14 15 16 17 18 19 20 \\\n         21 22 23 24 25 26 27 28 29 30 \\\n         31 32 33 34 35 36 37 38 39 40 \\\n         41 42 43 44 45 46 47 48 49 50; do\n  SRC_DIR=\"$(pick_src_dir_once || true)\"\n  if [ -n \"$SRC_DIR\" ]; then\n    break\n  fi\n  sleep 0.05\ndone\nDST_DIR=\"${CONFIGURATION_BUILD_DIR}\"\nif [ -z \"$SRC_DIR\" ] || [ ! -d \"$SRC_DIR\" ]; then\n  exit 0\nfi\nmkdir -p \"$DST_DIR\"\nLOCK_DIR=\"$DST_DIR/.spm_bundle_stage.lock\"\nwhile ! mkdir \"$LOCK_DIR\" 2>/dev/null; do\n  sleep 0.05\ndone\ntrap 'rmdir \"$LOCK_DIR\" 2>/dev/null || true' EXIT\nfor bundle in \"$SRC_DIR\"/*.bundle; do\n  if [ ! -e \"$bundle\" ]; then\n    continue\n  fi\n  name=\"$(basename \"$bundle\")\"\n  if [ -d \"$DST_DIR/$name\" ]; then\n    continue\n  fi\n  ditto \"$bundle\" \"$DST_DIR/$name\"\ndone\nSTAMP_FILE=\"${DERIVED_FILE_DIR}/stage_spm_bundles_scopytests.stamp\"\nmkdir -p \"$(dirname \"$STAMP_FILE\")\"\ntouch \"$STAMP_FILE\"\n";
-		};
-		BBA2B9413D38EC411FE6ACAF /* Stage SwiftPM Resource Bundles */ = {
-			isa = PBXShellScriptBuildPhase;
-			alwaysOutOfDate = 1;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			inputFileListPaths = (
-			);
-			inputPaths = (
-			);
-			name = "Stage SwiftPM Resource Bundles";
-			outputFileListPaths = (
-			);
-			outputPaths = (
-				"$(DERIVED_FILE_DIR)/stage_spm_bundles_scopytsan.stamp",
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-			shellPath = /bin/sh;
-			shellScript = "set -euo pipefail\npick_src_dir_once() {\n  for dir in \"${OBJROOT}/../Products/${CONFIGURATION}\" \"${SYMROOT:-}/${CONFIGURATION}\"; do\n    if [ ! -d \"$dir\" ]; then\n      continue\n    fi\n    for bundle in \"$dir\"/*.bundle; do\n      if [ -e \"$bundle\" ]; then\n        echo \"$dir\"\n        return 0\n      fi\n    done\n  done\n  return 1\n}\nSRC_DIR=\"\"\nfor _ in 1 2 3 4 5 6 7 8 9 10 \\\n         11 12 13 14 15 16 17 18 19 20 \\\n         21 22 23 24 25 26 27 28 29 30 \\\n         31 32 33 34 35 36 37 38 39 40 \\\n         41 42 43 44 45 46 47 48 49 50; do\n  SRC_DIR=\"$(pick_src_dir_once || true)\"\n  if [ -n \"$SRC_DIR\" ]; then\n    break\n  fi\n  sleep 0.05\ndone\nDST_DIR=\"${CONFIGURATION_BUILD_DIR}\"\nif [ -z \"$SRC_DIR\" ] || [ ! -d \"$SRC_DIR\" ]; then\n  exit 0\nfi\nmkdir -p \"$DST_DIR\"\nLOCK_DIR=\"$DST_DIR/.spm_bundle_stage.lock\"\nwhile ! mkdir \"$LOCK_DIR\" 2>/dev/null; do\n  sleep 0.05\ndone\ntrap 'rmdir \"$LOCK_DIR\" 2>/dev/null || true' EXIT\nfor bundle in \"$SRC_DIR\"/*.bundle; do\n  if [ ! -e \"$bundle\" ]; then\n    continue\n  fi\n  name=\"$(basename \"$bundle\")\"\n  if [ -d \"$DST_DIR/$name\" ]; then\n    continue\n  fi\n  ditto \"$bundle\" \"$DST_DIR/$name\"\ndone\nSTAMP_FILE=\"${DERIVED_FILE_DIR}/stage_spm_bundles_scopytsan.stamp\"\nmkdir -p \"$(dirname \"$STAMP_FILE\")\"\ntouch \"$STAMP_FILE\"\n";
 		};
 		F0C3468392507EFD43747E33 /* Stage MarkdownPreview Assets */ = {
 			isa = PBXShellScriptBuildPhase;

@@ -9,6 +9,11 @@
 
 VERSION_ARGS := $(shell bash scripts/version.sh --xcodebuild-args 2>/dev/null)
 LOG_DIR := logs
+
+# Each Swift-flag variant gets its own DerivedData so switching between plain builds,
+# strict concurrency, sanitizers, and perf defines never invalidates another variant's
+# incremental state. Plain build/test/test-unit share Xcode's default DerivedData.
+DERIVED_DATA_BASE := $(HOME)/Library/Developer/Xcode/DerivedData
 FRONTEND_PROFILE_SMOKE_ARGS := --skip-setup --repeats 1 --duration 3 --min-samples 50
 FRONTEND_PROFILE_STANDARD_ARGS := --skip-setup --repeats 1 --duration 6 --min-samples 120
 FRONTEND_PROFILE_FULL_ARGS := --repeats 3 --duration 10 --min-samples 260
@@ -94,6 +99,7 @@ test-perf: setup
 		-scheme Scopy \
 		-destination platform=macOS \
 		-only-testing:ScopyTests/PerformanceTests \
+		-derivedDataPath $(DERIVED_DATA_BASE)/Scopy-Perf \
 		OTHER_SWIFT_FLAGS="\$$(inherited) -DSCOPY_PERF_TESTS" \
 		$(VERSION_ARGS) \
 		2>&1 | tee $(LOG_DIR)/test-perf.log'
@@ -107,6 +113,7 @@ test-perf-heavy: setup
 		-scheme Scopy \
 		-destination platform=macOS \
 		-only-testing:ScopyTests/PerformanceTests \
+		-derivedDataPath $(DERIVED_DATA_BASE)/Scopy-PerfHeavy \
 		OTHER_SWIFT_FLAGS="\$$(inherited) -DSCOPY_PERF_TESTS -DSCOPY_HEAVY_PERF_TESTS" \
 		$(VERSION_ARGS) \
 		2>&1 | tee $(LOG_DIR)/test-perf-heavy.log'
@@ -121,6 +128,7 @@ test-snapshot-perf: setup
 		-scheme Scopy \
 		-destination platform=macOS \
 		-only-testing:ScopyTests/SnapshotPerformanceTests \
+		-derivedDataPath $(DERIVED_DATA_BASE)/Scopy-SnapshotPerf \
 		OTHER_SWIFT_FLAGS="\$$(inherited) -DSCOPY_SNAPSHOT_PERF_TESTS" \
 		$(VERSION_ARGS) \
 		; } 2>&1 | tee $(LOG_DIR)/test-snapshot-perf.log'
@@ -156,6 +164,7 @@ test-real-db: setup
 		-scheme Scopy \
 		-destination platform=macOS \
 		-only-testing:ScopyTests/RealDatabaseRegressionTests \
+		-derivedDataPath $(DERIVED_DATA_BASE)/Scopy-RealDB \
 		OTHER_SWIFT_FLAGS="\$$(inherited) -DSCOPY_REAL_DB_TESTS" \
 		$(VERSION_ARGS) \
 		2>&1 | tee $(LOG_DIR)/test-real-db.log'
@@ -178,6 +187,7 @@ test-tsan:
 			-scheme ScopyTSan \
 			-destination platform=macOS \
 			-only-testing:ScopyTSanTests \
+			-derivedDataPath $(DERIVED_DATA_BASE)/Scopy-TSan \
 			$(VERSION_ARGS) \
 			2>&1 | tee $(LOG_DIR)/test-tsan.log'; \
 		;; \
@@ -194,6 +204,7 @@ test-strict: markdown-assets-verify setup
 		-only-testing:ScopyTests \
 		-skip-testing:ScopyTests/IntegrationTests \
 		-skip-testing:ScopyTests/PerformanceTests \
+		-derivedDataPath $(DERIVED_DATA_BASE)/Scopy-Strict \
 		SWIFT_STRICT_CONCURRENCY=complete \
 		$(VERSION_ARGS) \
 		2>&1 | tee $(LOG_DIR)/strict-concurrency-test.log'
@@ -236,6 +247,7 @@ benchmark: setup
 		-scheme Scopy \
 		-destination platform=macOS \
 		-only-testing:ScopyTests/PerformanceTests \
+		-derivedDataPath $(DERIVED_DATA_BASE)/Scopy-Perf \
 		OTHER_SWIFT_FLAGS="\$$(inherited) -DSCOPY_PERF_TESTS" \
 		$(VERSION_ARGS) \
 		2>&1 | tee $(LOG_DIR)/benchmark-output.log'
