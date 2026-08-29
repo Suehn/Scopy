@@ -1,16 +1,20 @@
-import { normalizeRichSurface } from "./remarkScopyRich.js";
+import { hostLabel, normalizeRichSurface } from "./remarkScopyRich.js";
 
 // Frozen link-enrichment presentation. The backend LinkEnrichmentService may fetch Open
 // Graph metadata and downscaled data-URI imagery for links in an assistant copy, freeze
 // them, and pass the result into the render policy. This plugin never fetches anything:
 // it only maps that frozen per-URL data onto two exact degraded shapes —
 //
-//   1. a run of two or more bare-link-only paragraphs or a bare-link list  -> news card
-//   2. a lone link-only paragraph                                          -> single web result
+//   1. a run of two or more bare-link-only paragraphs or a bare-link list  -> news cards
+//   2. a lone link-only paragraph                                          -> one wide news card
 //
-// A run is promoted only when every link in it has an enrichment entry; anything else
-// stays ordinary prose. Every candidate passes the strict v2 `normalizeRichSurface`
-// authority, so string, URL, image, and byte limits stay single-sourced.
+// A run is promoted only when every link has an enrichment entry AND the visible labels
+// are degradation artifacts rather than authored descriptions: either all labels in the
+// run are identical (ChatGPT's news degradation repeats the bare source name) or each
+// label matches its link's source/host. A lone link is promoted only when its label is
+// URL-ish, source-ish, or a prefix relationship with the fetched title — descriptive
+// authored labels stay ordinary links, matching the official presentation. Every
+// candidate passes the strict v2 `normalizeRichSurface` authority.
 
 const MAX_ENRICHED_ITEMS = 12;
 
@@ -82,9 +86,11 @@ function adaptLoneLink(children, index, entries) {
   if (!link) return null;
   const entry = entries.get(String(link.url || ""));
   if (!entry) return null;
+  const label = plainText(link).trim();
+  if (!isDegradedLoneLabel(label, link.url, entry)) return null;
   const surface = normalizeRichSurface({
     version: 2,
-    type: "web_results",
+    type: "news",
     state: "ready",
     items: [resultItem(link, entry)]
   });
@@ -96,12 +102,35 @@ function adaptLoneLink(children, index, entries) {
 function newsSurface(links, entries) {
   if (links.length > MAX_ENRICHED_ITEMS) return null;
   const items = [];
+  const labels = [];
   for (const link of links) {
     const entry = entries.get(String(link.url || ""));
     if (!entry) return null;
+    labels.push({ label: plainText(link).trim(), url: link.url, entry });
     items.push(resultItem(link, entry));
   }
+  const identical = labels.every(({ label }) => normalized(label) === normalized(labels[0].label));
+  const sourceLike = labels.every(({ label, url, entry }) => isSourceLabel(label, url, entry));
+  if (!identical && !sourceLike) return null;
   return normalizeRichSurface({ version: 2, type: "news", state: "ready", items });
+}
+
+function normalized(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function isSourceLabel(label, url, entry) {
+  const value = normalized(label);
+  if (!value) return false;
+  return value === normalized(entry.source) || value === normalized(hostLabel(String(url || "")));
+}
+
+function isDegradedLoneLabel(label, url, entry) {
+  if (isSourceLabel(label, url, entry)) return true;
+  const value = normalized(label);
+  if (/^https?:\/\//.test(value)) return true;
+  const title = normalized(entry.title);
+  return Boolean(title && value.length >= 8 && (title.startsWith(value) || value.startsWith(title)));
 }
 
 function resultItem(link, entry) {
@@ -138,6 +167,12 @@ function soleLink(node) {
     return null;
   }
   return link;
+}
+
+function plainText(node) {
+  if (!node) return "";
+  if (node.type === "text" || node.type === "inlineCode") return String(node.value || "");
+  return Array.isArray(node.children) ? node.children.map(plainText).join("") : "";
 }
 
 function visitParents(node, visitor) {

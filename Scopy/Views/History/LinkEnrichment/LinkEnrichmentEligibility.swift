@@ -11,9 +11,10 @@ enum LinkEnrichmentEligibility {
         var seen = Set<String>()
         var results: [String] = []
         for line in markdown.split(separator: "\n", omittingEmptySubsequences: false) {
-            guard let url = bareLinkURL(onLine: String(line)) else { continue }
-            guard !isNonArticleHost(url), seen.insert(url).inserted else { continue }
-            results.append(url)
+            guard let link = bareLink(onLine: String(line)) else { continue }
+            guard !isNonArticleHost(link.url), seen.insert(link.url).inserted else { continue }
+            guard link.label.unicodeScalars.count <= 64 else { continue }
+            results.append(link.url)
             if results.count == maximumCandidateURLs { break }
         }
         return results
@@ -37,12 +38,39 @@ enum LinkEnrichmentEligibility {
 
     /// A line that is exactly one markdown link (optionally as a `-`/`*` list item):
     /// the degraded shape ChatGPT's Copy leaves behind for news and lone articles.
-    private static func bareLinkURL(onLine line: String) -> String? {
-        let pattern = #"^\s*(?:[-*]\s+)?\[[^\]\[]+\]\((https?://[^\s()]+)\)\s*$"#
-        guard let match = line.range(of: pattern, options: .regularExpression) else { return nil }
-        let matched = String(line[match])
-        guard let urlRange = matched.range(of: #"https?://[^\s()]+"#, options: .regularExpression) else { return nil }
-        return String(matched[urlRange])
+    /// Markdown backslash escapes inside the destination (ChatGPT copies commonly write
+    /// `\&` in query strings) are unescaped so the fetched URL matches the parsed AST URL.
+    private static func bareLink(onLine line: String) -> (label: String, url: String)? {
+        let pattern = #"^\s*(?:[-*]\s+)?\[([^\]\[]+)\]\((https?://[^\s()]+)\)\s*$"#
+        guard let regex = try? NSRegularExpression(pattern: pattern),
+              let match = regex.firstMatch(in: line, range: NSRange(line.startIndex..., in: line)),
+              match.numberOfRanges == 3,
+              let labelRange = Range(match.range(at: 1), in: line),
+              let urlRange = Range(match.range(at: 2), in: line)
+        else { return nil }
+        let url = unescapeMarkdownPunctuation(String(line[urlRange]))
+        return (String(line[labelRange]), url)
+    }
+
+    private static func unescapeMarkdownPunctuation(_ value: String) -> String {
+        var result = ""
+        result.reserveCapacity(value.count)
+        var previousWasBackslash = false
+        for character in value {
+            if previousWasBackslash {
+                if !character.isASCII || character.isLetter || character.isNumber {
+                    result.append("\\")
+                }
+                result.append(character)
+                previousWasBackslash = false
+            } else if character == "\\" {
+                previousWasBackslash = true
+            } else {
+                result.append(character)
+            }
+        }
+        if previousWasBackslash { result.append("\\") }
+        return result
     }
 
     /// Hosts whose lone links already have a dedicated presentation (video cards) or are

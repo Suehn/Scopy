@@ -123,7 +123,7 @@ audience: implementing agent (Codex/GPT) + maintainer review
 - 架构缝隙：抓取只发生在可选的后端 `LinkEnrichmentFetcher/Coordinator`；渲染器/WebView/导出零网络、CSP 不变。抓取结果冻结为按内容哈希寻址的 sidecar（`~/Library/Application Support/Scopy/LinkEnrichment/`，LRU 500 个，可再生缓存语义、免 schema 迁移）。
 - 识别门（`LinkEnrichmentEligibility`）：`utm_source=chatgpt.com` 链接改写（GPT 网页拷贝的强指纹）∨ Codex 绝对本地文件链接 ∨（引用式定义/引用组 ∧ 标题结构）；普通散文不触发。候选=精确裸链接行（列表项或独立段），排除 YouTube（已有视频卡）与本地主机，≤13 个。
 - 抓取边界：无 cookie、6s/12s 超时、HTML ≤512KB、并发 3、公网 http(s) 且拒绝私网/回环字面地址；og/twitter/title 解析；og:image → ≤576px JPEG data URI（≤192KB）、favicon → ≤64px PNG（≤32KB）、单项总解码预算 480KB——全部落在 v2 数据图限额内并经 `normalizeRichSurface` 复核。
-- 渲染整合：`MarkdownRenderContext.linkEnrichment` 冻结载荷经 policy 传入 `remarkScopyLinkEnrichment`（整组链接全部命中才升级为 `news`，孤立链接升级为单条 `web_results`；部分命中保持散文）；指纹参与 render/metric 缓存键与 `markdownRenderKey`；rendererVersion v5→v6。预览触发（悬停时幂等 ensure）+ 通知驱动的实时重渲（`markdownHTMLEnrichmentFingerprint` 过期检测使默认 scale 也会重建文档）。设置开关只门控抓取；已冻结的 sidecar 始终参与渲染（确定性优先）。设置项走完整 SettingsDTO/Patch/Store/UI 链（Appearance 页 Markdown 节）。
+- 渲染整合：`MarkdownRenderContext.linkEnrichment` 冻结载荷经 policy 传入 `remarkScopyLinkEnrichment`（整组链接全部命中才升级为 `news`，孤立链接升级为单条 `news`（第 6 节起为宽卡呈现）；部分命中保持散文）；指纹参与 render/metric 缓存键与 `markdownRenderKey`；rendererVersion v5→v6。预览触发（悬停时幂等 ensure）+ 通知驱动的实时重渲（`markdownHTMLEnrichmentFingerprint` 过期检测使默认 scale 也会重建文档）。设置开关只门控抓取；已冻结的 sidecar 始终参与渲染（确定性优先）。设置项走完整 SettingsDTO/Patch/Store/UI 链（Appearance 页 Markdown 节）。
 - 测试：Node 106/106（新增整组/部分/无数据三态断言）；Swift `LinkEnrichmentTests`（识别门/候选提取/指纹序无关性/store 往返 + `SCOPY_NETWORK_TESTS=1` 门控的真网抓取用例）。
 
 **Sparkle 自动更新**：
@@ -131,3 +131,24 @@ audience: implementing agent (Codex/GPT) + maintainer review
 - Info.plist：`SUFeedURL=https://github.com/Suehn/Scopy/releases/latest/download/appcast.xml`、`SUPublicEDKey`（本机新生成 EdDSA 公钥）、自动检查开、间隔 86400。
 - Release workflow 新增步骤：下载 Sparkle 2.9.6 工具、用 `SPARKLE_ED_PRIVATE_KEY` secret 签名 `generate_appcast`、把 `appcast.xml` 附到当次 release；secret 缺失时打 `::warning` 醒目跳过（吸取 tap 静默跳过教训）。
 - **一次性人工步骤**：把 `.secrets/sparkle_ed25519_private_key`（已 gitignore）内容配置为仓库 secret `SPARKLE_ED_PRIVATE_KEY`（说明见 `.secrets/README.md`）；配置前应用照常发布、仅更新源不生效。
+
+## 6. 增强呈现精修：重渲/观感/链接三类问题（2026-08-29 第四批实现记录）
+
+用户反馈三个症状：经常重新渲染、格式不如官方漂亮、链接有时有问题。逐一定位到根因并修复：
+
+**重渲（闪烁）三个根因**：
+- 空 sidecar 曾产生非 `"plain"` 指纹 → 视觉完全相同的文档因缓存键不同被强制重建。修复：`LinkEnrichmentPayload.fingerprint` 对空 entries 恒返回 `"plain"`，与无 sidecar 世界共享缓存键。
+- 增强通知一到就 `markMarkdownPreviewAwaitingMetrics()` → 可见内容被就绪盾遮住再换页。修复：通知只 bump `linkEnrichmentRevision` 触发重算；就绪盾仅在 `!isLiveRender && !displayedDocument.isPendingActiveScale` 时挂载，旧内容保持可见直到新文档就绪（一次换页而非白屏等待）。
+- Swift 候选提取未反转义 `\&` → 抓取键与 mdast 解码后的 URL 不匹配，sidecar 永远"部分命中"反复触发。修复：`unescapeMarkdownPunctuation` 对齐两侧 URL（新增测试钉死）。
+
+**观感（对齐官方新闻卡语言）**：
+- 孤立文章链接从 `web_results` 列表项改为**单条宽新闻卡**（`--wide` 变体：行式布局、可见两行 snippet、卡片撑满行宽不横向滚动；有缩略图时置于文字右侧 144px 列，无图时纯文本行卡，不留灰槽）。
+- 轨道内无 `image` 的新闻项渲染居中的中性占位媒体槽（`scopy-rich-news-media-placeholder`，`--scopy-rich-media-bg` 底 + Phosphor image 图标），保持轨道几何一致、杜绝塌陷卡。
+- 抓取侧标题/描述新增命名+数字 HTML 实体解码（`&#8217;` 等不再漏到卡面），恶意/越界数字引用保持字面。
+
+**链接（过度升级）**：升级门收紧为"仅降级痕迹"——整组升级要求所有标签全同或各自等于其链接的 source/host；孤立链接要求标签 URL 形、source 形或与抓取标题 ≥8 字符前缀关系。作者写的描述性链接文字一律保持普通链接（负例已入 Node 测试）。
+
+- 同步：契约 enrichment 段与 `news` 行更新；`remarkScopyLinkEnrichment` 头注释重写为两形状+门语义。
+- 缓存正确性：渲染输出形状变化随 `rendererVersion` v6→v7 失效旧持久化 metrics。
+- 验证：Node 106/106、bundle + verify:assets 同步；`make build` + `test-unit` 769/3/0 + `test-strict` 通过；实机导出目检（news 轨道 + 宽文本卡 + 宽图卡 DOM 序）收档 `artifacts/render-validation/link-enrichment-e2e.png`。
+

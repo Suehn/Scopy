@@ -753,10 +753,20 @@ function richSection(surface, children, label, properties = {}) {
 }
 
 function renderNews(surface) {
+  // A single result renders as one wide horizontal card whose thumbnail sits after the
+  // text (and is simply omitted when there is none); multi-result sets keep the
+  // three-per-row track, where a missing thumbnail keeps a placeholder media slot so
+  // every card in a track shares the same geometry.
+  const wide = surface.items.length === 1;
   const cards = surface.items.map((item, index) => {
     const media = item.image
       ? renderImageVisual(item.image, item.title, ["scopy-rich-news-media"])
-      : null;
+      : wide
+        ? null
+        : element("span", {
+            className: ["scopy-rich-news-media", "scopy-rich-news-media-placeholder"],
+            ariaHidden: "true"
+          }, [scopyIcon("image")]);
     const source = element("span", { className: ["scopy-rich-news-source"] }, [
       renderOriginIcon(item.favicon, item.source || "Source"),
       element("span", {}, [text(item.source || hostLabel(item.url))])
@@ -764,24 +774,32 @@ function renderNews(surface) {
     const body = element("span", { className: ["scopy-rich-news-body"] }, [
       source,
       element("span", { className: ["scopy-rich-news-title"] }, [text(item.title)]),
+      wide && item.snippet
+        ? element("span", { className: ["scopy-rich-news-snippet"] }, [text(item.snippet)])
+        : null,
       item.date ? element("time", { className: ["scopy-rich-news-date"] }, [text(item.date)]) : null,
-      item.snippet
+      !wide && item.snippet
         ? element("span", { className: ["scopy-visually-hidden"] }, [text(item.snippet)])
         : null
     ].filter(Boolean));
+    const cardClassName = wide
+      ? ["scopy-rich-news-card", "scopy-rich-news-card--wide"]
+      : ["scopy-rich-news-card"];
     return element("li", { className: ["scopy-rich-news-item"] }, [
-      element("article", { id: surface.rootID + "-item-" + index, className: ["scopy-rich-news-card"] }, [
+      element("article", { id: surface.rootID + "-item-" + index, className: cardClassName }, [
         element("a", {
           href: item.url,
           className: ["scopy-rich-news-link"],
           ariaLabel: item.title
-        }, [media, body].filter(Boolean))
+        }, (wide ? [body, media] : [media, body]).filter(Boolean))
       ])
     ]);
   });
   return richSection(surface, [
     element("ol", {
-      className: ["scopy-rich-news-track"],
+      className: wide
+        ? ["scopy-rich-news-track", "scopy-rich-news-track--wide"]
+        : ["scopy-rich-news-track"],
       ariaLabel: surface.title || "News"
     }, cards)
   ], "News");
@@ -1455,7 +1473,7 @@ function definitionList(entries, className) {
   ));
 }
 
-function hostLabel(url) {
+export function hostLabel(url) {
   try {
     return new URL(url).hostname.replace(/^www\./, "");
   } catch {

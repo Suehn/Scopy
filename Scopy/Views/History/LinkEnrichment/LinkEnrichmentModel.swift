@@ -25,6 +25,9 @@ struct LinkEnrichmentPayload: Codable, Equatable, Sendable {
     /// Participates in render and metric cache keys so a pre-enrichment DOM is never
     /// mistaken for the enriched one.
     var fingerprint: String {
+        // An empty result set renders identically to no sidecar at all, so it must not
+        // perturb render keys and force a visually identical re-render.
+        guard !entries.isEmpty else { return "plain" }
         var hasher = SHA256()
         for key in entries.keys.sorted() {
             hasher.update(data: Data(key.utf8))

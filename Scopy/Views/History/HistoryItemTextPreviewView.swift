@@ -134,7 +134,10 @@ struct HistoryItemTextPreviewView: View {
                             .accessibilityHidden(isUITesting)
                         }
 
-                        if !isLiveRender {
+                        // The shield covers first paints and real reloads only. While a stale
+                        // document intentionally stays on screen (scale change or enrichment
+                        // upgrade in flight), the last rendered content remains visible.
+                        if !isLiveRender && !displayedDocument.isPendingActiveScale {
                             markdownReadinessShield(source: text, renderKey: renderKey)
                                 .zIndex(1)
                         }
@@ -171,7 +174,6 @@ struct HistoryItemTextPreviewView: View {
                         guard let key = notification.userInfo?[LinkEnrichmentNotificationKey.contentKey] as? String,
                               key == LinkEnrichmentContentKey.make(for: text)
                         else { return }
-                        markMarkdownPreviewAwaitingMetrics()
                         linkEnrichmentRevision += 1
                     }
                     .background {

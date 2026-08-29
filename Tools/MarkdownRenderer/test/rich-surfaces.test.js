@@ -130,7 +130,7 @@ test("strict v2 renders distinct news and web-results DOM without generic-link p
   assert.match(news, /class="scopy-rich scopy-rich-news"/);
   assert.match(news, /id="scopy-rich-news-0"/);
   assert.match(news, /data-type="news" data-state="partial" data-scopy-version="2"/);
-  assert.match(news, /class="scopy-rich-news-track"/);
+  assert.match(news, /class="scopy-rich-news-track(?: scopy-rich-news-track--wide)?"/);
   assert.match(news, /class="scopy-rich-news-link" aria-label="A story"/);
   assert.match(news, /src="rich\/news-openai-hugging-face.jpg"/);
   assert.match(news, /src="rich\/favicon-openai-32.png"/);

@@ -1,6 +1,6 @@
-version: v0.72.0
+version: v0.72.1
 date: 2026-08-29
-release_doc: doc/releases/history/v0.72.0.md
+release_doc: doc/releases/history/v0.72.1.md
 release_index: doc/releases/README.md
 changelog_file: doc/releases/CHANGELOG.md
 profile_doc: null
@@ -9,16 +9,16 @@ spec_doc: doc/current/product-spec.md
 development_doc: doc/current/development-guide.md
 architecture_doc: doc/current/architecture.md
 last_verified_at: 2026-08-29
-summary: All rich surface types, opt-in link enrichment, and Sparkle auto-update
+summary: Link enrichment re-render fixes, official news-card presentation, and precise promotion gates
 verification:
   docs_validate: pass
   release_validate: pass
   release_policy: pass_15_cases
   build: pass
   renderer_js: pass_106_executed_0_failures
-  assets_verify: pass_renderer_b5e67dd9_katex_0_16_45_fonts_60
-  test_unit: pass_767_executed_3_skipped_0_failures
-  test_strict: pass_767_executed_3_skipped_0_failures
-  real_app_png_export: pass_rich_all_types_1080x8423_public_copy_adapters_1080x14769_enrichment_e2e_1080x664
-  live_network_fetch: pass_gated_openai_com_2_58s
+  assets_verify: pass_renderer_7869c093_katex_0_16_45_fonts_60
+  test_unit: pass_769_executed_3_skipped_0_failures
+  test_strict: pass_769_executed_3_skipped_0_failures
+  real_app_png_export: pass_enrichment_e2e_1080x748_news_track_and_wide_card
+  live_network_fetch: pass_gated_openai_com_v0_72_0
   xcuitest_wrapper: blocked_accessibility_not_loaded_not_counted_as_pass

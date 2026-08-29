@@ -103,14 +103,14 @@ struct LinkEnrichmentFetcher: Sendable {
             return nil
         }
         guard let rawTitle = meta(["og:title", "twitter:title"]) ?? htmlTitle(in: head) else { return nil }
-        let title = decodeEntities(rawTitle).trimmingCharacters(in: .whitespacesAndNewlines)
+        let title = Self.decodeEntities(rawTitle).trimmingCharacters(in: .whitespacesAndNewlines)
         guard !title.isEmpty else { return nil }
 
         let base = http.url ?? url
         var metadata = PageMetadata(title: String(title.prefix(300)))
-        metadata.siteName = meta(["og:site_name"]).map { String(decodeEntities($0).prefix(80)) } ?? base.host
+        metadata.siteName = meta(["og:site_name"]).map { String(Self.decodeEntities($0).prefix(80)) } ?? base.host
         metadata.description = meta(["og:description", "twitter:description", "description"])
-            .map { String(decodeEntities($0).prefix(280)) }
+            .map { String(Self.decodeEntities($0).prefix(280)) }
         metadata.publishedDate = meta(["article:published_time", "og:updated_time"])
             .map { String($0.prefix(10)) }
         metadata.imageURL = meta(["og:image", "og:image:url", "twitter:image"])
@@ -155,14 +155,29 @@ struct LinkEnrichmentFetcher: Sendable {
         return String(text[range])
     }
 
-    private func decodeEntities(_ value: String) -> String {
-        value
-            .replacingOccurrences(of: "&amp;", with: "&")
+    /// Decodes the named and numeric HTML entities that commonly appear in Open Graph
+    /// titles and descriptions. Internal so tests can pin the behavior without a network.
+    static func decodeEntities(_ value: String) -> String {
+        var result = value
             .replacingOccurrences(of: "&lt;", with: "<")
             .replacingOccurrences(of: "&gt;", with: ">")
             .replacingOccurrences(of: "&quot;", with: "\"")
-            .replacingOccurrences(of: "&#39;", with: "'")
-            .replacingOccurrences(of: "&#x27;", with: "'")
+            .replacingOccurrences(of: "&nbsp;", with: "\u{00A0}")
+        if result.contains("&#"),
+           let regex = try? NSRegularExpression(pattern: #"&#(x[0-9a-fA-F]{1,6}|[0-9]{1,7});"#) {
+            let matches = regex.matches(in: result, range: NSRange(result.startIndex..., in: result))
+            for match in matches.reversed() {
+                guard let whole = Range(match.range, in: result),
+                      let bodyRange = Range(match.range(at: 1), in: result) else { continue }
+                let body = result[bodyRange]
+                let scalarValue = body.hasPrefix("x")
+                    ? UInt32(body.dropFirst(), radix: 16)
+                    : UInt32(body)
+                guard let scalarValue, scalarValue >= 0x20, let scalar = Unicode.Scalar(scalarValue) else { continue }
+                result.replaceSubrange(whole, with: String(Character(scalar)))
+            }
+        }
+        return result.replacingOccurrences(of: "&amp;", with: "&")
     }
 
     private func resolve(_ href: String, against base: URL) -> String? {

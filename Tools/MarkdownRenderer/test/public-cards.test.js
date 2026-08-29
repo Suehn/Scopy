@@ -110,19 +110,22 @@ test("adapter output and fenced envelopes share one ordinal namespace", () => {
 });
 
 test("frozen link enrichment upgrades bare-link runs through the v2 validators", () => {
-  const source = "- [OpenAI](https://openai.com/index/a/)\n- [OpenAI](https://openai.com/index/b/)\n\n[Solo](https://example.com/story)\n";
+  const source = "- [OpenAI](https://openai.com/index/a/)\n- [OpenAI](https://openai.com/index/b/)\n\n[Introducing ChatGPT search](https://example.com/story)\n";
   const enrichment = {
     "https://openai.com/index/a/": { title: "Article A", source: "OpenAI", date: "Yesterday" },
     "https://openai.com/index/b/": { title: "Article B", source: "OpenAI", image: "data:image/png;base64,aGVsbG8=" },
-    "https://example.com/story": { title: "Solo article", source: "example.com", snippet: "Short." }
+    "https://example.com/story": { title: "Introducing ChatGPT search | OpenAI", source: "example.com", snippet: "Short." }
   };
   const enriched = render(source, { linkEnrichment: enrichment }).html;
   assert.deepEqual(
     Array.from(enriched.matchAll(/data-type="([^"]+)"/g), (m) => m[1]),
-    ["news", "web_results"]
+    ["news", "news"]
   );
   assert.match(enriched, /scopy-rich-news-title">Article A</);
-  assert.match(enriched, /Solo article/);
+  assert.match(enriched, /scopy-rich-news-card--wide/);
+  assert.match(enriched, /scopy-rich-news-snippet">Short\.</);
+  const wideCard = enriched.slice(enriched.indexOf("scopy-rich-news-card--wide"));
+  assert.ok(!wideCard.includes("scopy-rich-news-media"), "imageless wide card is text-only, no media slot");
 
   const plain = render(source).html;
   assert.doesNotMatch(plain, /class="scopy-rich /);
@@ -132,4 +135,22 @@ test("frozen link enrichment upgrades bare-link runs through the v2 validators",
     linkEnrichment: { "https://openai.com/index/a/": { title: "Only A" } }
   }).html;
   assert.doesNotMatch(partial, /data-type="news"/, "a run promotes only when every link is enriched");
+
+  const descriptive = render(
+    "- [社区版 OpenCode](https://github.com/anomalyco/opencode)\n- [官方渲染器](https://github.com/openai/codex)\n",
+    { linkEnrichment: {
+      "https://github.com/anomalyco/opencode": { title: "GitHub - opencode", source: "GitHub" },
+      "https://github.com/openai/codex": { title: "GitHub - codex", source: "GitHub" }
+    } }
+  ).html;
+  assert.doesNotMatch(descriptive, /data-type="news"/, "authored descriptive labels stay ordinary links");
+  assert.match(descriptive, /scopy-link--external/);
+
+  const descriptiveLone = render(
+    "[打开：ChatGPT Search 官方帮助中心](https://help.openai.com/en/articles/9237897)\n",
+    { linkEnrichment: {
+      "https://help.openai.com/en/articles/9237897": { title: "ChatGPT Search | OpenAI Help Center", source: "OpenAI Help Center" }
+    } }
+  ).html;
+  assert.doesNotMatch(descriptiveLone, /data-type="news"/, "a labeled lone link keeps its authored presentation");
 });

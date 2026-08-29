@@ -12,6 +12,18 @@
 
 - No unreleased entries.
 
+## [v0.72.1] - 2026-08-29
+
+### Fixed
+
+- Link enrichment no longer forces re-renders: an empty sidecar shares the `"plain"` cache fingerprint, the enrichment notification swaps content once without covering the visible preview with the readiness shield, and Swift candidate extraction unescapes `\&` in copied destinations so fetch keys match parsed URLs. `rendererVersion` bumps v6 → v7 so stale persisted metrics cannot apply old card geometry.
+- Fetched Open Graph titles/descriptions decode named and numeric HTML entities; malformed or out-of-range references stay literal.
+- Promotion gates tightened: bare-link runs upgrade only when labels are degradation artifacts (all identical or source/host names), lone links only when the label is URL-ish, source-ish, or a ≥8-character prefix relation with the fetched title. Authored descriptive link text always stays an ordinary link.
+
+### Changed
+
+- A lone enriched article link renders one wide horizontal news card (favicon + source, title, two-line snippet; thumbnail in a 144px column after the text, text-only when there is no image) instead of a web-results row. Track cards without an image keep a centered neutral placeholder media slot so track geometry stays uniform.
+
 ## [v0.72.0] - 2026-08-29
 
 ### Complete Rich Surface Vocabulary

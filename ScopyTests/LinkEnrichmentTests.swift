@@ -40,6 +40,19 @@ final class LinkEnrichmentTests: XCTestCase {
         ])
     }
 
+    func testCandidateURLsUnescapeMarkdownPunctuationSoFetchedAndParsedURLsMatch() {
+        let markdown = """
+        # 图
+
+        - [Image](https://images.example.com/a.png?fm=webp\\&q=90\\&w=3840&utm_source=chatgpt.com)
+        - [Image](https://images.example.com/b.png?fm=webp\\&q=90&utm_source=chatgpt.com)
+        """
+        XCTAssertEqual(LinkEnrichmentEligibility.candidateURLs(in: markdown), [
+            "https://images.example.com/a.png?fm=webp&q=90&w=3840&utm_source=chatgpt.com",
+            "https://images.example.com/b.png?fm=webp&q=90&utm_source=chatgpt.com"
+        ], "backslash-escaped ampersands must unescape to match the parsed AST URL")
+    }
+
     func testPayloadFingerprintIsOrderIndependentAndContentSensitive() {
         let a = LinkEnrichmentPayload(
             version: 1, fetchedAt: Date(timeIntervalSince1970: 0),
@@ -72,6 +85,18 @@ final class LinkEnrichmentTests: XCTestCase {
 
         let fresh = LinkEnrichmentStore(directory: directory)
         XCTAssertEqual(fresh.payload(forContentKey: "key1"), payload)
+    }
+
+    func testDecodeEntitiesHandlesNamedAndNumericForms() {
+        XCTAssertEqual(
+            LinkEnrichmentFetcher.decodeEntities("Apple&#8217;s &#x201C;M5&#x201D; &amp; beyond&nbsp;&#8212; a&#32;test"),
+            "Apple\u{2019}s \u{201C}M5\u{201D} & beyond\u{00A0}\u{2014} a test"
+        )
+        XCTAssertEqual(
+            LinkEnrichmentFetcher.decodeEntities("&lt;tag&gt; &quot;q&quot; &#39;a&#39; &#xh; &#; &#2000000000;"),
+            "<tag> \"q\" 'a' &#xh; &#; &#2000000000;",
+            "malformed or out-of-range references stay literal"
+        )
     }
 
     /// Live-network verification, excluded from regular suites.

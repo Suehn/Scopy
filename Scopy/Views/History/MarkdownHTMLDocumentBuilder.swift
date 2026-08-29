@@ -1149,6 +1149,46 @@ enum MarkdownHTMLDocumentBuilder {
             border-radius: 0;
             object-fit: cover;
           }
+          .scopy-rich-news-media-placeholder {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: var(--scopy-rich-media-bg);
+            color: var(--scopy-text-weak);
+          }
+          .scopy-rich-news-media-placeholder .scopy-icon { width: 24px; height: 24px; }
+          .scopy-rich-news-snippet {
+            display: -webkit-box;
+            -webkit-box-orient: vertical;
+            -webkit-line-clamp: 2;
+            overflow: hidden;
+            color: var(--scopy-text-secondary);
+            font-size: calc(13px * var(--scopy-chatgpt-layout-font-scale));
+            line-height: calc(19px * var(--scopy-chatgpt-layout-font-scale));
+          }
+          .scopy-rich-news-track--wide { overflow-x: visible; }
+          .scopy-rich-news-track--wide .scopy-rich-news-item {
+            flex: 1 1 auto;
+            max-width: 100%;
+          }
+          .scopy-rich-news-card--wide .scopy-rich-news-link {
+            padding: 0;
+            gap: 0;
+            flex-direction: row;
+            align-items: stretch;
+          }
+          .scopy-rich-news-card--wide .scopy-rich-news-media {
+            width: 144px;
+            height: auto;
+            min-height: 116px;
+            flex: 0 0 144px;
+          }
+          .scopy-rich-news-card--wide .scopy-rich-news-body {
+            flex: 1 1 auto;
+            min-width: 0;
+            padding: 14px 16px;
+            justify-content: center;
+          }
           .scopy-rich-news-body {
             display: flex;
             min-width: 0;
