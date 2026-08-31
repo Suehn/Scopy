@@ -152,22 +152,24 @@ struct HistoryItemTextPreviewView: View {
                     }
                     .task(id: renderKey) {
                         initializePreviewLayoutScaleFromSettingsIfNeeded()
-                        if settingsViewModel.settings.linkEnrichmentEnabled {
-                            let markdown = text
-                            Task.detached(priority: .utility) {
-                                await LinkEnrichmentCoordinator.shared.ensureEnrichment(markdown: markdown)
+                        await withTaskGroup(of: Void.self) { group in
+                            if settingsViewModel.settings.linkEnrichmentEnabled {
+                                let markdown = text
+                                group.addTask(priority: .utility) {
+                                    await LinkEnrichmentCoordinator.shared.ensureEnrichment(markdown: markdown)
+                                }
                             }
+                            model.prepareMarkdownRender(for: renderKey)
+                            if model.markdownMetricsLayoutScalePercent != layoutScale.rawValue {
+                                markMarkdownPreviewAwaitingMetrics()
+                            }
+                            await prepareOverrideMarkdownHTMLIfNeeded(
+                                source: text,
+                                defaultHTML: html,
+                                layoutScale: layoutScale,
+                                renderKey: renderKey
+                            )
                         }
-                        model.prepareMarkdownRender(for: renderKey)
-                        if model.markdownMetricsLayoutScalePercent != layoutScale.rawValue {
-                            markMarkdownPreviewAwaitingMetrics()
-                        }
-                        await prepareOverrideMarkdownHTMLIfNeeded(
-                            source: text,
-                            defaultHTML: html,
-                            layoutScale: layoutScale,
-                            renderKey: renderKey
-                        )
                     }
                     .accessibilityIdentifier("History.Preview.Container")
                     .onReceive(NotificationCenter.default.publisher(for: .scopyLinkEnrichmentDidUpdate)) { notification in

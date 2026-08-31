@@ -484,6 +484,7 @@ public enum SearchMatchContextBuilder {
             matchSet = try regexMatches(
                 regex: regex,
                 plainText: plainText,
+                note: note,
                 cancellationCheck: cancellationCheck
             )
         }
@@ -521,7 +522,7 @@ public enum SearchMatchContextBuilder {
         if query.count <= 2 {
             return try literalMatches(
                 query,
-                sources: [(.content, plainText)],
+                sources: searchableSources(plainText: plainText, note: note),
                 termIndex: 0,
                 cancellationCheck: cancellationCheck
             )
@@ -649,38 +650,46 @@ public enum SearchMatchContextBuilder {
     private static func regexMatches(
         regex: NSRegularExpression,
         plainText: String,
+        note: String?,
         cancellationCheck: @escaping () throws -> Void
     ) throws -> MatchSet {
         try cancellationCheck()
-        let nsText = plainText as NSString
-        let fullRange = NSRange(plainText.startIndex..., in: plainText)
         var result = MatchSet()
-        var cancellationError: Error?
-        regex.enumerateMatches(
-            in: plainText,
-            options: [.reportProgress],
-            range: fullRange
-        ) { match, _, stop in
-            do {
-                try cancellationCheck()
-            } catch {
-                cancellationError = error
-                stop.pointee = true
-                return
+        for (source, text) in searchableSources(plainText: plainText, note: note) {
+            try cancellationCheck()
+            let nsText = text as NSString
+            let fullRange = NSRange(text.startIndex..., in: text)
+            var sourceOccurrenceCount = 0
+            var cancellationError: Error?
+            regex.enumerateMatches(
+                in: text,
+                options: [.reportProgress],
+                range: fullRange
+            ) { match, _, stop in
+                do {
+                    try cancellationCheck()
+                } catch {
+                    cancellationError = error
+                    stop.pointee = true
+                    return
+                }
+                guard let match else { return }
+                if sourceOccurrenceCount >= Constants.maxOccurrencesPerTerm {
+                    result.isTruncated = true
+                    stop.pointee = true
+                    return
+                }
+                let displayRange = match.range.length == 0
+                    ? match.range
+                    : nsText.rangeOfComposedCharacterSequences(for: match.range)
+                result.matches.append(
+                    RawMatch(source: source, range: displayRange, termIndex: 0)
+                )
+                result.occurrenceCount += 1
+                sourceOccurrenceCount += 1
             }
-            guard let match else { return }
-            if result.occurrenceCount >= Constants.maxOccurrencesPerTerm {
-                result.isTruncated = true
-                stop.pointee = true
-                return
-            }
-            let displayRange = match.range.length == 0
-                ? match.range
-                : nsText.rangeOfComposedCharacterSequences(for: match.range)
-            result.matches.append(RawMatch(source: .content, range: displayRange, termIndex: 0))
-            result.occurrenceCount += 1
+            if let cancellationError { throw cancellationError }
         }
-        if let cancellationError { throw cancellationError }
         try cancellationCheck()
         return result
     }

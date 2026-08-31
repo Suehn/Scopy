@@ -50,7 +50,7 @@ related_versions:
 - Before the release tag exists on `HEAD`, `scripts/version.sh` intentionally resolves the nearest reachable release tag. A pre-tag `make release` is therefore only a Release-configuration compile smoke and must not be cited as evidence for the new target version.
 - Target-version release evidence starts after `make tag-release`: first verify `bash scripts/version.sh --xcodebuild-args` contains the target `MARKETING_VERSION`, then trust local tagged release builds or the GitHub tag workflow assets.
 - For post-release commits after the tagged release commit, version injection should inherit the nearest reachable release tag. Do not infer the current release from highest version-sort order, because historical tags such as `v0.64` can sort after newer chronological releases such as `v0.7.1`.
-- Homebrew version comparison is numeric, not chronological: `0.8.8 < 0.64 < 0.65.0`. Because historical `v0.64` shipped, the next distributable version is `v0.65.0`; do not publish `v0.8.9`, which Homebrew would still treat as older than `0.64`. Continue from `v0.65.x` or later after this repair.
+- Homebrew version comparison is numeric, not chronological: `0.8.8 < 0.64 < 0.65.0`. Continue monotonically from the current metadata release and never publish a version Homebrew would compare below an already published version.
 - Release packaging must use `scripts/version.sh --tag` as the single resolver for both injected version settings and the DMG filename; if they disagree, stop packaging.
 
 ## Tagged Packaging Output Contract
@@ -200,6 +200,18 @@ This section records historical `v0.65.4` release evidence for the single previe
 - Strict v2 now covers `video`, `product`, `product_carousel`, `entity`, and `map`, and the closed public-copy adapters promote exact visible video/product/place shapes; the honest ceiling (surfaces whose copy lacks data stay prose) is contract-recorded. Verified by Node 106/106, both Swift suites green, and reviewed direct exports (`rich-surfaces-all-types.png` 1080x8423, `public-copy-with-adapters.png` 1080x14769 under `artifacts/render-validation/`).
 - Opt-in, default-off link enrichment fetches Open Graph metadata for assistant-shaped bare links in the backend only (cookie-less, size/time-capped, public hosts, imagery frozen as v2-limit data URIs into content-hash sidecars under Application Support/Scopy/LinkEnrichment). The renderer/CSP never fetch; sidecar fingerprints participate in every render/metric cache key; rendererVersion bumped to v6. The live-network test is gated behind `SCOPY_NETWORK_TESTS=1`.
 - Sparkle 2.9.6 auto-update: daily checks with reminder + install-and-relaunch, "检查更新…" in About, feed at `releases/latest/download/appcast.xml`, EdDSA public key in Info.plist. The release workflow signs and attaches `appcast.xml` when the `SPARKLE_ED_PRIVATE_KEY` secret exists and emits a loud warning when it does not; the one-time secret setup is documented in `.secrets/README.md` (gitignored).
+
+## Architecture And Short-Query Release Evidence (v0.72.2, 2026-08-31)
+
+- Environment: Apple M3 Pro, 36GB, arm64, macOS 15.7.3 (`24G419`), Xcode 26.1.1 (`17B100`), project Swift 5.9, deployment target macOS 14.0.
+- Real snapshot: schema v9, 9,566 items, 146,255,872 bytes, SHA256 `bdd4da11e68e47607b188ca75f6582e40a8a6a126b9017f1ceaffd98d5c88976`, `integrity_check=ok`.
+- The Release gate now separates service `cmd`, explicitly prepared engine `cm`, and one cold service `cm` observation. Results: `0.682ms / 50ms`, `5.458ms / 20ms`, and `103.974ms` observation-only respectively.
+- The same-snapshot immutable diagnostic compared tagged `v0.72.1` with the candidate. Service `cmd` p95 moved `0.630ms -> 1.314ms`; first `cm` observation `732.886ms -> 50.390ms`; service warm `cm` p95 `6.302ms -> 47.684ms` while the candidate median remained `6.119ms`. The URI disables normal path-keyed cache reuse and the host was busy, so these are build-contention diagnostics, not causal release percentages.
+- The design chooses immediate SQL fallback over awaiting a non-cancellation-aware index task. It therefore avoids a long first-query stall but can show a temporary 47-68ms tail while building; explicit prepared steady state remains `5.458ms`.
+- Default performance suite: 27 executed, 7 heavy-only skips, 0 failures; 5k p95 `4.95ms`, 10k p95 `30.86ms`, disk-backed service 10k p95 `29.07ms`, exact long-document p95 `99.56ms`.
+- Unit and strict suites each executed 780 with 3 skips and 0 failures; TSan executed 761 with 3 skips and 0 failures; integration executed 15 with 0 failures.
+- Frontend profiling reached the UI runner but timed out while enabling automation mode before any scenario. No summary or unified table was generated; this is `environment-blocked`, not a pass or frontend speedup claim.
+- Detailed comparison and scope boundaries: [v0.72.2 Release Performance Profile](../perf/release-profiles/v0.72.2-profile.md).
 
 ## Homebrew Acceptance
 

@@ -661,14 +661,19 @@ final class SearchHintTests: XCTestCase {
         func stop() {}
         func stopAndWait() async {}
         func fetchRecent(limit: Int, offset: Int) async throws -> [ClipboardItemDTO] { [] }
+        func fetchPinned() async throws -> [ClipboardItemDTO] { [] }
+        func fetchRecentUnpinned(limit: Int, offset: Int) async throws -> [ClipboardItemDTO] { [] }
         func search(query: SearchRequest) async throws -> SearchResultPage {
             SearchResultPage(hits: [], total: 0, hasMore: false, coverage: .complete)
         }
         func pin(itemID: UUID) async throws {}
         func unpin(itemID: UUID) async throws {}
+        func updateNote(itemID: UUID, note: String?) async throws {}
         func delete(itemID: UUID) async throws {}
         func clearAll() async throws {}
         func copyToClipboard(itemID: UUID) async throws {}
+        func copyToClipboardOptimizedForCodex(itemID: UUID) async throws {}
+        func fileURLs(itemID: UUID) async throws -> [URL] { [] }
         func updateSettings(_ settings: SettingsDTO) async throws {}
         func getSettings() async throws -> SettingsDTO { .default }
         func getStorageStats() async throws -> (itemCount: Int, sizeBytes: Int) { (0, 0) }

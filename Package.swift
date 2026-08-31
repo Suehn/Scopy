@@ -25,6 +25,7 @@ let package = Package(
                 "Design",
                 "Observables",
                 "Presentation",
+                "Resources",
                 "Views",
                 "Assets.xcassets"
             ],

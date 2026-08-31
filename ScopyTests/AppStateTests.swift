@@ -49,8 +49,8 @@ final class AppStateTests: XCTestCase {
         )
     }
 
-    func testDebugMockOverridePreservesExistingOptOut() {
-        XCTAssertTrue(
+    func testOrdinaryDebugLaunchUsesRealServiceUnlessMockIsExplicitlyEnabled() {
+        XCTAssertFalse(
             AppState.shouldUseMockService(
                 arguments: ["Scopy"],
                 environment: [:],
@@ -61,6 +61,13 @@ final class AppStateTests: XCTestCase {
             AppState.shouldUseMockService(
                 arguments: ["Scopy"],
                 environment: ["USE_MOCK_SERVICE": "0"],
+                isDebugBuild: true
+            )
+        )
+        XCTAssertTrue(
+            AppState.shouldUseMockService(
+                arguments: ["Scopy"],
+                environment: ["USE_MOCK_SERVICE": "1"],
                 isDebugBuild: true
             )
         )
@@ -295,6 +302,22 @@ final class AppStateTests: XCTestCase {
         }, message: "Empty search should reload")
 
         XCTAssertEqual(appState.items.count, 50, "Should reload all items on empty search")
+    }
+
+    func testHasActiveFiltersIncludesFilterOnlyStates() {
+        XCTAssertTrue(appState.searchQuery.isEmpty)
+        XCTAssertFalse(appState.hasActiveFilters)
+
+        appState.appFilter = "com.example.editor"
+        XCTAssertTrue(appState.hasActiveFilters)
+
+        appState.appFilter = nil
+        appState.typeFilter = .text
+        XCTAssertTrue(appState.hasActiveFilters)
+
+        appState.typeFilter = nil
+        appState.typeFilters = [.rtf, .html]
+        XCTAssertTrue(appState.hasActiveFilters)
     }
 
     // MARK: - Keyboard Navigation Tests
@@ -610,13 +633,24 @@ final class AppStateTests: XCTestCase {
         XCTAssertFalse(appState.items.contains { $0.id == itemToDelete.id })
     }
 
-    func testClearAllRemovesUnpinned() async {
-        mockService.setItemCount(10)
-        await appState.load()
+    func testClearAllRefreshesOnceFromPublishedEvent() async throws {
+        mockService.setItemCount(3, pinnedCount: 1)
+        let subscribed = expectation(description: "Event listener subscribed")
+        mockService.onEventStreamSubscribed = { subscribed.fulfill() }
+        await appState.start()
+        await fulfillment(of: [subscribed], timeout: 1.0)
+        let pinnedID = try XCTUnwrap(appState.pinnedItems.first?.id)
+        let refreshCountBeforeClear = mockService.fetchRecentUnpinnedCallCount
+        let clearHandled = expectation(description: "Clear event handled before sentinel")
+        appState.applyHotKeyHandler = { _, _ in clearHandled.fulfill() }
 
         await appState.clearAll()
+        mockService.emitEvent(.settingsChanged)
+        await fulfillment(of: [clearHandled], timeout: 1.0)
 
         XCTAssertEqual(mockService.clearAllCallCount, 1)
+        XCTAssertEqual(mockService.fetchRecentUnpinnedCallCount, refreshCountBeforeClear + 1)
+        XCTAssertEqual(appState.items.map(\.id), [pinnedID])
     }
 
     // MARK: - Event Stream Tests
@@ -839,7 +873,8 @@ private extension HistoryViewModel.Timing {
             searchDebounceNs: 20_000_000,
             refineShortQueryDelayNs: refineDelayNs,
             refineLongQueryDelayNs: refineDelayNs,
-            recentAppsRefreshDelayNs: 20_000_000
+            recentAppsRefreshDelayNs: 20_000_000,
+            staleLoadRetryDelayNs: 20_000_000
         )
     }
 }
@@ -867,6 +902,8 @@ final class TestMockClipboardService: ClipboardServiceProtocol {
     var deleteCallCount = 0
     var clearAllCallCount = 0
     var fetchRecentCallCount = 0
+    var fetchRecentUnpinnedCallCount = 0
+    var onEventStreamSubscribed: (() -> Void)?
 
     // Artificial delays (for race-condition tests)
     var fetchRecentDelayNs: UInt64 = 0
@@ -883,6 +920,7 @@ final class TestMockClipboardService: ClipboardServiceProtocol {
     var eventStream: AsyncStream<ClipboardEvent> {
         AsyncStream { continuation in
             self.eventContinuation = continuation
+            self.onEventStreamSubscribed?()
         }
     }
 
@@ -898,6 +936,10 @@ final class TestMockClipboardService: ClipboardServiceProtocol {
 
     func stop() {
         eventContinuation?.finish()
+    }
+
+    func stopAndWait() async {
+        stop()
     }
 
     // MARK: - Setup Helpers
@@ -973,6 +1015,7 @@ final class TestMockClipboardService: ClipboardServiceProtocol {
 
     func fetchRecentUnpinned(limit: Int, offset: Int) async throws -> [ClipboardItemDTO] {
         fetchRecentCallCount += 1
+        fetchRecentUnpinnedCallCount += 1
         let sortedItems = items.filter { !$0.isPinned }.sorted { $0.lastUsedAt > $1.lastUsedAt }
         let start = min(offset, sortedItems.count)
         let end = min(offset + limit, sortedItems.count)
@@ -1068,6 +1111,8 @@ final class TestMockClipboardService: ClipboardServiceProtocol {
         }
     }
 
+    func updateNote(itemID _: UUID, note _: String?) async throws {}
+
     func delete(itemID: UUID) async throws {
         deleteCallCount += 1
         items.removeAll { $0.id == itemID }
@@ -1076,12 +1121,19 @@ final class TestMockClipboardService: ClipboardServiceProtocol {
     func clearAll() async throws {
         clearAllCallCount += 1
         items = items.filter { $0.isPinned }
+        eventContinuation?.yield(.itemsCleared(keepPinned: true))
     }
 
     func copyToClipboard(itemID: UUID) async throws {
         copyCallCount += 1
         lastCopiedItemID = itemID
     }
+
+    func copyToClipboardOptimizedForCodex(itemID: UUID) async throws {
+        try await copyToClipboard(itemID: itemID)
+    }
+
+    func fileURLs(itemID _: UUID) async throws -> [URL] { [] }
 
     func updateSettings(_ newSettings: SettingsDTO) async throws {
         settings = newSettings
@@ -1154,15 +1206,24 @@ final class FailingMockService: ClipboardServiceProtocol {
         eventContinuation?.finish()
     }
 
+    func stopAndWait() async {
+        stop()
+    }
+
     func fetchRecent(limit: Int, offset: Int) async throws -> [ClipboardItemDTO] { [] }
+    func fetchPinned() async throws -> [ClipboardItemDTO] { [] }
+    func fetchRecentUnpinned(limit: Int, offset: Int) async throws -> [ClipboardItemDTO] { [] }
     func search(query: SearchRequest) async throws -> SearchResultPage {
         SearchResultPage(hits: [], total: 0, hasMore: false, coverage: .complete)
     }
     func pin(itemID: UUID) async throws {}
     func unpin(itemID: UUID) async throws {}
+    func updateNote(itemID: UUID, note: String?) async throws {}
     func delete(itemID: UUID) async throws {}
     func clearAll() async throws {}
     func copyToClipboard(itemID: UUID) async throws {}
+    func copyToClipboardOptimizedForCodex(itemID: UUID) async throws {}
+    func fileURLs(itemID: UUID) async throws -> [URL] { [] }
     func updateSettings(_ newSettings: SettingsDTO) async throws {}
     func getSettings() async throws -> SettingsDTO { .default }
     func getStorageStats() async throws -> (itemCount: Int, sizeBytes: Int) { (0, 0) }

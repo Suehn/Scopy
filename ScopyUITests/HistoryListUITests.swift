@@ -15,7 +15,6 @@ final class HistoryListUITests: XCTestCase {
         "SCOPY_PERF_HISTORY_INDEX",
         "SCOPY_PERF_SCROLL_RESOLVER_CACHE",
         "SCOPY_PERF_MARKDOWN_RESOLVER_CACHE",
-        "SCOPY_PERF_PREVIEW_TASK_BUDGET",
         "SCOPY_PERF_SHORT_QUERY_DEBOUNCE",
         "SCOPY_PERF_PASSIVE_ROW",
         "SCOPY_PERF_MARKDOWN_MENU_SIGNAL_CACHE",
@@ -588,7 +587,6 @@ final class HistoryListUITests: XCTestCase {
             "SCOPY_PERF_HISTORY_INDEX",
             "SCOPY_PERF_SCROLL_RESOLVER_CACHE",
             "SCOPY_PERF_MARKDOWN_RESOLVER_CACHE",
-            "SCOPY_PERF_PREVIEW_TASK_BUDGET",
             "SCOPY_PERF_SHORT_QUERY_DEBOUNCE"
         ] {
             XCTAssertEqual(config[key] as? String, "1", "Fixed profile requires config.\(key)=1")

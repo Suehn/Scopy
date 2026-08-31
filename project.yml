@@ -105,10 +105,7 @@ targets:
           DST_DIR="${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/MarkdownPreview"
           if [ ! -d "$SRC_DIR" ]; then
             echo "Missing MarkdownPreview assets: $SRC_DIR" >&2
-            if [ "${CONFIGURATION:-Debug}" = "Release" ]; then
-              exit 1
-            fi
-            exit 0
+            exit 1
           fi
           mkdir -p "$DST_DIR"
           rsync -a --delete "$SRC_DIR"/ "$DST_DIR"/
@@ -219,6 +216,7 @@ targets:
         excludes:
           - "Fixtures/**"
           - "IntegrationTests.swift"
+          - "ClipboardServiceContentFilteringIntegrationTests.swift"
           - "PerformanceTests.swift"
       - path: ScopyTests/Fixtures
         buildPhase: resources

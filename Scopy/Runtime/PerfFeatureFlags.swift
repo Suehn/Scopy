@@ -27,10 +27,6 @@ enum PerfFeatureFlags {
         bool("SCOPY_PERF_MARKDOWN_RESOLVER_CACHE", defaultValue: true)
     }
 
-    static var previewTaskBudgetEnabled: Bool {
-        bool("SCOPY_PERF_PREVIEW_TASK_BUDGET", defaultValue: true)
-    }
-
     static var shortQueryDebounceEnabled: Bool {
         bool("SCOPY_PERF_SHORT_QUERY_DEBOUNCE", defaultValue: true)
     }

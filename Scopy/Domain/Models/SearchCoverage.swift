@@ -3,6 +3,7 @@ import Foundation
 public enum SearchCoverage: Sendable, Equatable {
     case complete
     case stagedRefine
+    case incomplete
     case recentOnly(limit: Int)
 
     public var isPrefilter: Bool {

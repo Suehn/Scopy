@@ -78,7 +78,7 @@ echo ""
 
 # Step 1: 清理 (可选)
 if [ "$DO_CLEAN" = true ]; then
-    echo -e "${BLUE}[1/6]${NC} 清理项目..."
+    echo -e "${BLUE}[1/7]${NC} 清理项目..."
     rm -rf "$XCODE_DERIVED_DATA"
     xcodebuild clean -project Scopy.xcodeproj -scheme Scopy -configuration "$CONFIGURATION" \
         -derivedDataPath "$XCODE_DERIVED_DATA" > /dev/null 2>&1 || true
@@ -87,7 +87,7 @@ if [ "$DO_CLEAN" = true ]; then
 fi
 
 # Step 2: 生成项目
-echo -e "${BLUE}[2/6]${NC} 生成 Xcode 项目..."
+echo -e "${BLUE}[2/7]${NC} 生成 Xcode 项目..."
 cd "$PROJECT_DIR"
 if ! xcodegen generate > /dev/null 2>&1; then
     echo -e "${RED}✗ xcodegen 失败${NC}"
@@ -98,13 +98,27 @@ echo -e "${GREEN}✓ 项目生成完成${NC}"
 echo ""
 
 # Step 3: 创建 Xcode DerivedData 目录
-echo -e "${BLUE}[3/6]${NC} 准备构建目录..."
+echo -e "${BLUE}[3/7]${NC} 准备构建目录..."
 mkdir -p "$XCODE_DERIVED_DATA"
 echo -e "${GREEN}✓ Xcode DerivedData 目录就绪${NC}"
 echo ""
 
-# Step 4: 编译应用
-echo -e "${BLUE}[4/6]${NC} 编译应用 ($CONFIGURATION 模式)..."
+# Step 4: 验证 Markdown 资产
+if [ "$CONFIGURATION" = "Release" ]; then
+    MARKDOWN_ASSET_TARGET="markdown-assets-gate"
+else
+    MARKDOWN_ASSET_TARGET="markdown-assets-verify"
+fi
+echo -e "${BLUE}[4/7]${NC} 验证 Markdown renderer/KaTeX 资产..."
+if ! make -C "$PROJECT_DIR" "$MARKDOWN_ASSET_TARGET"; then
+    echo -e "${RED}✗ Markdown renderer/KaTeX 资产验证失败${NC}"
+    exit 1
+fi
+echo -e "${GREEN}✓ Markdown renderer/KaTeX 资产验证通过${NC}"
+echo ""
+
+# Step 5: 编译应用
+echo -e "${BLUE}[5/7]${NC} 编译应用 ($CONFIGURATION 模式)..."
 BUILD_LOG="$XCODE_DERIVED_DATA/deploy-${CONFIGURATION}.log"
 if ! xcodebuild build \
     -project Scopy.xcodeproj \
@@ -122,8 +136,8 @@ fi
 echo -e "${GREEN}✓ 编译成功${NC}"
 echo ""
 
-# Step 5: 验证应用位置
-echo -e "${BLUE}[5/6]${NC} 验证应用位置..."
+# Step 6: 验证应用位置
+echo -e "${BLUE}[6/7]${NC} 验证应用位置..."
 
 # 应用构建到显式 DerivedData，避免与 SwiftPM `.build` 及文件同步元数据互相污染。
 BUILD_APP="$XCODE_DERIVED_DATA/Build/Products/$CONFIGURATION/Scopy.app"
@@ -134,8 +148,8 @@ fi
 echo -e "${GREEN}✓ 应用已构建: $BUILD_APP${NC}"
 echo ""
 
-# Step 6: 部署到 /Applications
-echo -e "${BLUE}[6/6]${NC} 部署应用到 /Applications..."
+# Step 7: 部署到 /Applications
+echo -e "${BLUE}[7/7]${NC} 部署应用到 /Applications..."
 
 # 关闭运行中的应用
 killall Scopy 2>/dev/null || true

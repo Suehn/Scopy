@@ -148,15 +148,18 @@ final class SearchMatchContextBuilderTests: XCTestCase {
         XCTAssertEqual(highlightedText(context.fragments[1]), ["needle"])
     }
 
-    func testShortExactDoesNotInventNoteEvidence() throws {
-        XCTAssertNil(
-            try makeContext(
+    func testShortExactUsesRealNoteOnlyEvidence() throws {
+        let context = try XCTUnwrap(
+            makeContext(
                 query: "ab",
                 mode: .exact,
                 text: "unrelated body",
                 note: "ab exists only in the note"
             )
         )
+
+        XCTAssertEqual(context.fragments.map(\.source), [.note])
+        XCTAssertEqual(highlightedText(context.fragments[0]), ["ab"])
     }
 
     func testFuzzyMatchHighlightsGreedySubsequenceWitness() throws {
@@ -229,6 +232,20 @@ final class SearchMatchContextBuilderTests: XCTestCase {
 
         XCTAssertEqual(context.occurrenceCount, 2)
         XCTAssertEqual(highlightedText(context.fragments[0]), ["foo1", "foo2"])
+    }
+
+    func testRegexUsesRealNoteOnlyEvidence() throws {
+        let context = try XCTUnwrap(
+            makeContext(
+                query: #"R-\d+"#,
+                mode: .regex,
+                text: "unrelated body",
+                note: "ticket R-42 is saved here"
+            )
+        )
+
+        XCTAssertEqual(context.fragments.map(\.source), [.note])
+        XCTAssertEqual(highlightedText(context.fragments[0]), ["R-42"])
     }
 
     func testZeroWidthRegexProducesPositionEvidence() throws {

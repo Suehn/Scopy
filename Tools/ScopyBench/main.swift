@@ -35,6 +35,7 @@ enum ScopyBench {
         var offset: Int
         var iterations: Int
         var warmup: Int
+        var prepareShortIndex: Bool
         var json: Bool
         var showThumbnails: Bool
 
@@ -50,6 +51,7 @@ enum ScopyBench {
             var offset: Int = 0
             var iterations: Int = 20
             var warmup: Int = 3
+            var prepareShortIndex = false
             var json: Bool = false
             var showThumbnails: Bool = true
 
@@ -116,6 +118,8 @@ enum ScopyBench {
                         throw BenchError.invalidArgument("Invalid --warmup: \(raw)")
                     }
                     warmup = parsed
+                case "--prepare-short-index":
+                    prepareShortIndex = true
                 case "--json":
                     json = true
                 case "--no-thumbnails":
@@ -147,6 +151,7 @@ enum ScopyBench {
                 offset: offset,
                 iterations: iterations,
                 warmup: warmup,
+                prepareShortIndex: prepareShortIndex,
                 json: json,
                 showThumbnails: showThumbnails
             )
@@ -169,6 +174,7 @@ enum ScopyBench {
               --offset <n>                           Default: 0
               --iters <n>                            Default: 20
               --warmup <n>                           Default: 3
+              --prepare-short-index                  Await explicit 1/2-character index readiness (engine layer)
               --json                                Output a single JSON line (no query text included)
               --no-thumbnails                        (service layer only) Disable thumbnail scheduling + thumbnailPath
             """
@@ -211,6 +217,10 @@ enum ScopyBench {
                 let engine = SearchEngineImpl(dbPath: options.dbPath)
                 try await engine.open()
                 do {
+                    if options.prepareShortIndex {
+                        try await engine.prepareShortQueryIndex()
+                    }
+
                     func runOnce() async throws -> (elapsedMs: Double, perf: SearchEngineImpl.SearchPerfMetrics?) {
                         let start = CFAbsoluteTimeGetCurrent()
                         let result = try await engine.search(
@@ -267,7 +277,8 @@ enum ScopyBench {
                                 "forceFullFuzzy": options.forceFullFuzzy,
                                 "limit": options.limit,
                                 "offset": options.offset,
-                                "queryLen": options.query.count
+                                "queryLen": options.query.count,
+                                "preparedShortIndex": options.prepareShortIndex
                             ],
                             "samples": times.count,
                             "min_ms": minMs,
@@ -329,6 +340,9 @@ enum ScopyBench {
                 }
 
             case .service:
+                guard !options.prepareShortIndex else {
+                    throw BenchError.invalidArgument("--prepare-short-index requires --layer engine")
+                }
                 try await runClipboardServiceBench(options: options)
             }
         } catch {

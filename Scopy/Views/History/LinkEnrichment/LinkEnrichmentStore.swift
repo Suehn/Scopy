@@ -9,10 +9,16 @@ import os
 final class LinkEnrichmentStore: @unchecked Sendable {
     static let shared = LinkEnrichmentStore()
 
-    private static let maximumStoredFiles = 500
+    static let maximumEntries = 500
+
+    private enum MemoryEntry {
+        case payload(LinkEnrichmentPayload)
+        case miss
+    }
 
     private let lock = NSLock()
-    private var memory: [String: LinkEnrichmentPayload?] = [:]
+    private var memory: [String: MemoryEntry] = [:]
+    private var memoryOrder: [String] = []
     private let directory: URL
     private static let logger = Logger(subsystem: "com.scopy.app", category: "LinkEnrichment")
 
@@ -25,16 +31,22 @@ final class LinkEnrichmentStore: @unchecked Sendable {
     func payload(forContentKey key: String) -> LinkEnrichmentPayload? {
         lock.lock()
         defer { lock.unlock() }
-        if let cached = memory[key] { return cached }
+        if let cached = memory[key] {
+            touchMemoryEntryLocked(key)
+            switch cached {
+            case .payload(let payload): return payload
+            case .miss: return nil
+            }
+        }
         let loaded = readFromDisk(key: key)
-        memory[key] = loaded
+        cacheLocked(loaded.map(MemoryEntry.payload) ?? .miss, key: key)
         return loaded
     }
 
     func write(_ payload: LinkEnrichmentPayload, forContentKey key: String) {
         lock.lock()
         defer { lock.unlock() }
-        memory[key] = payload
+        cacheLocked(.payload(payload), key: key)
         do {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
             let data = try JSONEncoder().encode(payload)
@@ -61,14 +73,29 @@ final class LinkEnrichmentStore: @unchecked Sendable {
         guard let entries = try? FileManager.default.contentsOfDirectory(
             at: directory,
             includingPropertiesForKeys: [.contentModificationDateKey]
-        ), entries.count > Self.maximumStoredFiles else { return }
+        ), entries.count > Self.maximumEntries else { return }
         let sorted = entries.sorted { lhs, rhs in
             let l = (try? lhs.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
             let r = (try? rhs.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
             return l < r
         }
-        for stale in sorted.prefix(entries.count - Self.maximumStoredFiles) {
+        for stale in sorted.prefix(entries.count - Self.maximumEntries) {
             try? FileManager.default.removeItem(at: stale)
         }
+    }
+
+    private func cacheLocked(_ entry: MemoryEntry, key: String) {
+        memory[key] = entry
+        touchMemoryEntryLocked(key)
+        while memoryOrder.count > Self.maximumEntries {
+            memory.removeValue(forKey: memoryOrder.removeFirst())
+        }
+    }
+
+    private func touchMemoryEntryLocked(_ key: String) {
+        if let index = memoryOrder.firstIndex(of: key) {
+            memoryOrder.remove(at: index)
+        }
+        memoryOrder.append(key)
     }
 }

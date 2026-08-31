@@ -15,7 +15,6 @@ This document is the active requirements baseline for Scopy. Historical planning
 
 ## Reference State
 
-- Reference release: `v0.70.0`
 - Source of truth for current version metadata: [../meta/release-current.yml](../meta/release-current.yml)
 - Source of truth for development and implementation workflow: [development-guide.md](./development-guide.md)
 
@@ -94,7 +93,7 @@ Scopy is a native macOS clipboard manager for users who need durable clipboard h
 | Modes | Exact / Fuzzy / Fuzzy+ / Regex |
 | Filters | App filter, single-type filter, grouped multi-type filter |
 | Pagination | Pinned items are independent of recent pagination; default recent unpinned page size is 50 and load-more pages fetch 500 unpinned items |
-| Responsiveness | Typing should stay responsive with debounce around `150-200ms` |
+| Responsiveness | Production search dispatch uses `0ms` debounce; queries of at most two characters use a minimum `16ms` coalescing delay |
 | Fuzzy / Fuzzy+ | May return a staged first page, but must converge to complete full-history results |
 | Exact | After trimming surrounding whitespace, `>= 3` characters search complete history; `<= 2` characters intentionally search only the most recent `2000` items and must say so in the UI |
 | Regex | Intentionally searches only the most recent `2000` items and must say so in the UI |

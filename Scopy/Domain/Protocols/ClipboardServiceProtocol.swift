@@ -41,7 +41,7 @@ public protocol ClipboardServiceProtocol: AnyObject {
     /// 删除项目
     func delete(itemID: UUID) async throws
 
-    /// 清空历史
+    /// 清空历史。成功返回前必须发布或转发 `.itemsCleared`；视图状态由该事件驱动。
     func clearAll() async throws
 
     /// 复制到系统剪贴板
@@ -84,32 +84,4 @@ public protocol ClipboardServiceProtocol: AnyObject {
 
     /// 事件观察 - 新增条目、删除、设置变更等
     var eventStream: AsyncStream<ClipboardEvent> { get }
-}
-
-public extension ClipboardServiceProtocol {
-    func stopAndWait() async {
-        stop()
-    }
-
-    func updateNote(itemID _: UUID, note _: String?) async throws {
-        // Default no-op for backwards compatibility (tests / stubs).
-    }
-
-    func fetchPinned() async throws -> [ClipboardItemDTO] {
-        try await fetchRecent(limit: 10_000, offset: 0).filter(\.isPinned)
-    }
-
-    func fetchRecentUnpinned(limit: Int, offset: Int) async throws -> [ClipboardItemDTO] {
-        let fetchLimit = max(limit, min(10_000, offset + limit))
-        let candidates = try await fetchRecent(limit: fetchLimit, offset: 0).filter { !$0.isPinned }
-        return Array(candidates.dropFirst(offset).prefix(limit))
-    }
-
-    func copyToClipboardOptimizedForCodex(itemID: UUID) async throws {
-        try await copyToClipboard(itemID: itemID)
-    }
-
-    func fileURLs(itemID _: UUID) async throws -> [URL] {
-        []
-    }
 }

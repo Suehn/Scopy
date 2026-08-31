@@ -12,8 +12,8 @@ Per-release profiles live here when a release merits its own comparison document
 
 ## Current Coverage
 
-- Latest profile file: [v0.65.3-profile.md](./v0.65.3-profile.md)
-- Latest release without dedicated profile: `v0.65.2`
+- Latest profile file: [v0.72.2-profile.md](./v0.72.2-profile.md)
+- Latest release without dedicated profile: `v0.72.1`
 
 ## Rule
 

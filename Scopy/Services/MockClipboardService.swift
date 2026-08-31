@@ -471,6 +471,23 @@ final class MockClipboardService: ClipboardServiceProtocol {
         return Array(sortedItems[start..<end])
     }
 
+    func fetchPinned() async throws -> [ClipboardItemDTO] {
+        try await Task.sleep(nanoseconds: 50_000_000)
+        return items
+            .filter(\.isPinned)
+            .sorted { $0.lastUsedAt > $1.lastUsedAt }
+    }
+
+    func fetchRecentUnpinned(limit: Int, offset: Int) async throws -> [ClipboardItemDTO] {
+        try await Task.sleep(nanoseconds: 50_000_000)
+        let sortedItems = items
+            .filter { !$0.isPinned }
+            .sorted { $0.lastUsedAt > $1.lastUsedAt }
+        let start = min(offset, sortedItems.count)
+        let end = min(offset + limit, sortedItems.count)
+        return Array(sortedItems[start..<end])
+    }
+
     func search(query: SearchRequest) async throws -> SearchResultPage {
         // 模拟搜索延迟
         try await Task.sleep(nanoseconds: 30_000_000)  // 30ms
@@ -601,6 +618,14 @@ final class MockClipboardService: ClipboardServiceProtocol {
         guard let item = items.first(where: { $0.id == itemID }) else { return }
         // 在真实实现中，这里会复制到系统剪贴板
         ScopyLog.app.info("Copied to clipboard: \(String(item.plainText.prefix(50)), privacy: .private)...")
+    }
+
+    func copyToClipboardOptimizedForCodex(itemID: UUID) async throws {
+        try await copyToClipboard(itemID: itemID)
+    }
+
+    func fileURLs(itemID _: UUID) async throws -> [URL] {
+        []
     }
 
     func updateSettings(_ newSettings: SettingsDTO) async throws {

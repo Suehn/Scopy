@@ -71,7 +71,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ```
 v0.x       - 大版本 (新功能模块)
 v0.x.x     - 小版本 (功能增强/完善)
-v0.x.fix   - 修复版本 (bug fix/hotfix)
+v0.x.x     - 修复版本 (bug fix/hotfix)
 ```
 
 ### 版本文档模板
@@ -118,7 +118,7 @@ doc/current/release-runbook.md 中的性能测试要求必须包含:
 
 - **版本号来源**：仅允许来自 git tag（例如 `v0.43.14`），禁止用 commit count 自动生成版本（历史遗留 tag 例：`v0.18.*` 不再作为发布口径）。
 - **构建注入**：本地与 CI 构建需要注入 `MARKETING_VERSION` / `CURRENT_PROJECT_VERSION`（统一入口 `scripts/version.sh`）。
-- **CI 行为**：GitHub Actions `Build and Release` 只从 tag 构建并产出 DMG；Cask 更新通过 PR 合入，workflow 不直接 push main。
+- **CI 行为**：GitHub Actions `Build and Release` 只发布已存在的 `v*` tag（tag push 或显式 dispatch 指定 tag）并产出 DMG；workflow 直接更新本仓库 `main` 的 `Casks/scopy.rb`，并在 `HOMEBREW_GITHUB_API_TOKEN` 存在时直接更新 `Suehn/homebrew-scopy` 的 `main`。
 - **发布检查表（必须过）**：
   - 版本提交：更新 `doc/meta/release-current.yml` + `doc/releases/history/vX.Y.Z.md` + `doc/releases/README.md` + `doc/releases/CHANGELOG.md`（性能/部署变化则同步 `doc/current/release-runbook.md`，含环境与数值）。
   - 校验：`make release-validate`（确保索引里的 **当前版本** 对应的版本文档/CHANGELOG 条目齐全）。
@@ -221,7 +221,7 @@ make perf-unified-table BACKEND_BASELINE=... BACKEND_CURRENT=... FRONTEND_SUMMAR
 
 - ≤5k items: search latency ≤ 50ms
 - 10k-100k items: first 50 results within 100-150ms
-- Search debounce: 150-200ms during continuous input
+- Search coalescing: production dispatches normal queries with `0ms` debounce and applies a minimum `16ms` delay only to queries of at most two characters
 
 ### Data Management
 

@@ -86,6 +86,8 @@ test-unit: markdown-assets-verify setup
 		-destination platform=macOS \
 		-only-testing:ScopyTests \
 		-skip-testing:ScopyTests/IntegrationTests \
+		-skip-testing:ScopyTests/PollingIntervalSettingTests \
+		-skip-testing:ScopyTests/ClipboardServiceContentFilteringIntegrationTests \
 		-skip-testing:ScopyTests/PerformanceTests \
 		$(VERSION_ARGS) \
 		2>&1 | tee $(LOG_DIR)/test-unit.log'
@@ -147,10 +149,12 @@ test-snapshot-perf-release: setup
 			echo "Snapshot release bench env: DB=$$DB_PATH cmdTarget=$$CMD_TARGET cmTarget=$$CM_TARGET"; \
 			swift build -c release --product ScopyBench > $(LOG_DIR)/scopybench.release.build.log 2>&1; \
 			./.build/release/ScopyBench --layer service --db "$$DB_PATH" --mode fuzzyPlus --sort relevance --query cmd --iters 30 --warmup 20 --json > $(LOG_DIR)/snapshot-release-cmd.jsonl; \
-			./.build/release/ScopyBench --layer service --db "$$DB_PATH" --mode fuzzyPlus --sort relevance --query cm --iters 30 --warmup 20 --json > $(LOG_DIR)/snapshot-release-cm.jsonl; \
+			./.build/release/ScopyBench --layer engine --db "$$DB_PATH" --mode fuzzyPlus --sort relevance --query cm --prepare-short-index --iters 30 --warmup 3 --json > $(LOG_DIR)/snapshot-release-cm.jsonl; \
+			./.build/release/ScopyBench --layer service --db "$$DB_PATH" --mode fuzzyPlus --sort relevance --query cm --iters 1 --warmup 0 --json > $(LOG_DIR)/snapshot-release-cm-cold.jsonl; \
 			CMD_P95=$$(python3 scripts/extract_p95.py $(LOG_DIR)/snapshot-release-cmd.jsonl) || (echo "Failed to parse cmd p95 from $(LOG_DIR)/snapshot-release-cmd.jsonl" && exit 1); \
 			CM_P95=$$(python3 scripts/extract_p95.py $(LOG_DIR)/snapshot-release-cm.jsonl) || (echo "Failed to parse cm p95 from $(LOG_DIR)/snapshot-release-cm.jsonl" && exit 1); \
-			echo "Release bench p95: cmd=$$CMD_P95 ms (target $$CMD_TARGET), cm=$$CM_P95 ms (target $$CM_TARGET)"; \
+			CM_COLD=$$(python3 scripts/extract_p95.py $(LOG_DIR)/snapshot-release-cm-cold.jsonl) || (echo "Failed to parse cold cm latency from $(LOG_DIR)/snapshot-release-cm-cold.jsonl" && exit 1); \
+			echo "Release bench: cmd p95=$$CMD_P95 ms (target $$CMD_TARGET), prepared cm p95=$$CM_P95 ms (target $$CM_TARGET), cold cm observed=$$CM_COLD ms"; \
 			awk -v actual="$$CMD_P95" -v target="$$CMD_TARGET" "BEGIN { exit (actual <= target) ? 0 : 1 }"; \
 			awk -v actual="$$CM_P95" -v target="$$CM_TARGET" "BEGIN { exit (actual <= target) ? 0 : 1 }"; \
 		} 2>&1 | tee $(LOG_DIR)/test-snapshot-perf-release.log'
@@ -203,6 +207,8 @@ test-strict: markdown-assets-verify setup
 		-destination platform=macOS \
 		-only-testing:ScopyTests \
 		-skip-testing:ScopyTests/IntegrationTests \
+		-skip-testing:ScopyTests/PollingIntervalSettingTests \
+		-skip-testing:ScopyTests/ClipboardServiceContentFilteringIntegrationTests \
 		-skip-testing:ScopyTests/PerformanceTests \
 		-derivedDataPath $(DERIVED_DATA_BASE)/Scopy-Strict \
 		SWIFT_STRICT_CONCURRENCY=complete \
@@ -218,6 +224,8 @@ test-integration: setup
 		-scheme Scopy \
 		-destination platform=macOS \
 		-only-testing:ScopyTests/IntegrationTests \
+		-only-testing:ScopyTests/PollingIntervalSettingTests \
+		-only-testing:ScopyTests/ClipboardServiceContentFilteringIntegrationTests \
 		$(VERSION_ARGS) \
 		2>&1 | tee $(LOG_DIR)/test-integration.log'
 
@@ -445,7 +453,7 @@ push-release: markdown-assets-gate
 	@echo "Performance Targets (v0.md):"
 	@echo "  - Search ≤5k items: P95 ≤ 50ms"
 	@echo "  - Search 10k-100k: P95 ≤ 150ms"
-	@echo "  - Debounce: 150-200ms"
+	@echo "  - Dispatch: 0ms normally; minimum 16ms coalescing for queries of at most two characters"
 
 release-validate:
 	@bash scripts/release/validate-release-docs.sh

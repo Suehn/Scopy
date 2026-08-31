@@ -3,6 +3,8 @@ import SwiftUI
 import ScopyKit
 
 struct AboutSettingsPage: View {
+    let checkForUpdates: (() -> Void)?
+
     @State private var performanceSummary: PerformanceSummary?
     @State private var ingestSummary: ClipboardIngestSummary?
     @State private var memoryUsageMB: Double = 0
@@ -35,9 +37,9 @@ struct AboutSettingsPage: View {
                         Spacer()
 
                         Button("检查更新…") {
-                            AppDelegate.shared?.updaterController?.checkForUpdates(nil)
+                            checkForUpdates?()
                         }
-                        .disabled(AppDelegate.shared?.updaterController == nil)
+                        .disabled(checkForUpdates == nil)
                         .accessibilityIdentifier("Settings.CheckForUpdates")
                     }
                 }

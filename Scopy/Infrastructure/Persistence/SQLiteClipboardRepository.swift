@@ -1085,7 +1085,6 @@ actor SQLiteClipboardRepository {
         sql += """
 
             ORDER BY last_used_at ASC
-            LIMIT 10000
         """
         let stmt = try prepare(sql)
         if let typeFilter {

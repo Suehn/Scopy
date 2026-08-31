@@ -18,15 +18,18 @@ struct SettingsView: View {
 
     let unregisterHotKeyHandler: (() -> Void)?
     let applyHotKeyHandler: ((UInt32, UInt32) -> Void)?
+    let checkForUpdates: (() -> Void)?
     var onDismiss: (() -> Void)?
 
     init(
         unregisterHotKeyHandler: (() -> Void)? = nil,
         applyHotKeyHandler: ((UInt32, UInt32) -> Void)? = nil,
+        checkForUpdates: (() -> Void)? = nil,
         onDismiss: (() -> Void)? = nil
     ) {
         self.unregisterHotKeyHandler = unregisterHotKeyHandler
         self.applyHotKeyHandler = applyHotKeyHandler
+        self.checkForUpdates = checkForUpdates
         self.onDismiss = onDismiss
     }
 
@@ -123,7 +126,7 @@ struct SettingsView: View {
                         onRefresh: refreshStats
                     )
                 case .about:
-                    AboutSettingsPage()
+                    AboutSettingsPage(checkForUpdates: checkForUpdates)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)

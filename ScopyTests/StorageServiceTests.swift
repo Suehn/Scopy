@@ -750,6 +750,64 @@ final class StorageServiceTests: XCTestCase {
         }
     }
 
+    func testCleanupPlannerCanReachTargetBeyondTenThousandRows() async throws {
+        let directory = try makeTemporaryDirectory(prefix: "scopy-cleanup-over-ten-thousand")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let databasePath = directory.appendingPathComponent("clipboard.db").path
+
+        let bootstrapRepository = SQLiteClipboardRepository(dbPath: databasePath)
+        try await bootstrapRepository.open()
+        await bootstrapRepository.close()
+
+        let rowCount = 10_001
+        let rawConnection = try SQLiteConnection(
+            path: databasePath,
+            flags: SQLiteConnection.openFlags(for: databasePath, readOnly: false)
+        )
+        do {
+            try rawConnection.execute("BEGIN IMMEDIATE TRANSACTION")
+            let insert = try rawConnection.prepare(
+                """
+                INSERT INTO clipboard_items
+                (id, type, content_hash, plain_text, created_at, last_used_at,
+                 use_count, is_pinned, size_bytes, storage_ref, raw_data, file_size_bytes)
+                VALUES (?, ?, ?, ?, ?, ?, 1, 0, 1, NULL, NULL, NULL)
+                """
+            )
+            for index in 0..<rowCount {
+                let id = UUID()
+                let hash = "cleanup-over-ten-thousand-\(index)"
+                insert.reset()
+                try insert.bindText(id.uuidString, at: 1)
+                try insert.bindText(ClipboardItemType.text.rawValue, at: 2)
+                try insert.bindText(hash, at: 3)
+                try insert.bindText(hash, at: 4)
+                try insert.bindDouble(Double(index), at: 5)
+                try insert.bindDouble(Double(index), at: 6)
+                _ = try insert.step()
+            }
+            try rawConnection.execute("COMMIT")
+        } catch {
+            try? rawConnection.execute("ROLLBACK")
+            rawConnection.close()
+            throw error
+        }
+        rawConnection.close()
+
+        let repository = SQLiteClipboardRepository(dbPath: databasePath)
+        do {
+            try await repository.open()
+            let plan = try await repository.planCleanupByTotalSize(targetBytes: 0)
+            await repository.close()
+
+            XCTAssertEqual(plan.ids.count, rowCount)
+            XCTAssertEqual(plan.candidates.reduce(0) { $0 + $1.sizeBytes }, rowCount)
+        } catch {
+            await repository.close()
+            throw error
+        }
+    }
+
     func testSparseFiveGiBFileMetadataAndCheckedAggregation() throws {
         let directory = try makeTemporaryDirectory(prefix: "scopy-sparse-file")
         defer { try? FileManager.default.removeItem(at: directory) }

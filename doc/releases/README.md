@@ -20,16 +20,17 @@ This page is the human-facing index for current release state. Automation should
 ## Current Release
 
 <!-- release-current:start -->
-- Version: `v0.72.1`
-- Date: `2026-08-29`
-- Release note: [v0.72.1](./history/v0.72.1.md)
+- Version: `v0.72.2`
+- Date: `2026-08-31`
+- Release note: [v0.72.2](./history/v0.72.2.md)
 - Changelog: [CHANGELOG.md](./CHANGELOG.md)
-- Profile doc: `none`
+- Profile doc: [v0.72.2 performance profile](../perf/release-profiles/v0.72.2-profile.md)
 <!-- release-current:end -->
 
 ## Recent Releases
 
 <!-- release-recent:start -->
+- `2026-08-31` [v0.72.2](./history/v0.72.2.md) - Architecture, correctness, safety, and performance hardening without UX changes
 - `2026-08-29` [v0.72.1](./history/v0.72.1.md) - Link enrichment re-render fixes, official news-card presentation, and precise promotion gates
 - `2026-08-29` [v0.72.0](./history/v0.72.0.md) - All rich surface types, opt-in link enrichment, and Sparkle auto-update
 - `2026-08-29` [v0.71.0](./history/v0.71.0.md) - Renderer hardening gate and desktop-wide rich fidelity
@@ -41,10 +42,6 @@ This page is the human-facing index for current release state. Automation should
 - `2026-07-11` [v0.65.0](./history/v0.65.0.md) - Crash-consistent clipboard ingest, race-safe cleanup, passive-row performance, lossless storage accounting, and explicit release tag authority
 - `2026-06-15` [v0.8.8](./history/v0.8.8.md) - Scroll row cache and lazy Markdown export checks
 - `2026-06-07` [v0.8.7](./history/v0.8.7.md) - WACZ root Markdown table parity
-- `2026-06-07` [v0.8.6](./history/v0.8.6.md) - WACZ TableContainer Markdown table parity
-- `2026-05-30` [v0.8.5](./history/v0.8.5.md) - File-backed image paste preservation and README visual polish
-- `2026-05-30` [v0.8.4](./history/v0.8.4.md) - Markdown preview scaling and WACZ parity polish
-- `2026-05-30` [v0.8.3](./history/v0.8.3.md) - WACZ-aligned Markdown rendering theme
 <!-- release-recent:end -->
 
 ## Full History

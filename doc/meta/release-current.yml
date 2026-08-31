@@ -1,24 +1,25 @@
-version: v0.72.1
-date: 2026-08-29
-release_doc: doc/releases/history/v0.72.1.md
+version: v0.72.2
+date: 2026-08-31
+release_doc: doc/releases/history/v0.72.2.md
 release_index: doc/releases/README.md
 changelog_file: doc/releases/CHANGELOG.md
-profile_doc: null
+profile_doc: doc/perf/release-profiles/v0.72.2-profile.md
 runbook_doc: doc/current/release-runbook.md
 spec_doc: doc/current/product-spec.md
 development_doc: doc/current/development-guide.md
 architecture_doc: doc/current/architecture.md
-last_verified_at: 2026-08-29
-summary: Link enrichment re-render fixes, official news-card presentation, and precise promotion gates
+last_verified_at: 2026-08-31
+summary: Architecture, correctness, safety, and performance hardening without UX changes
 verification:
   docs_validate: pass
   release_validate: pass
   release_policy: pass_15_cases
   build: pass
-  renderer_js: pass_106_executed_0_failures
   assets_verify: pass_renderer_7869c093_katex_0_16_45_fonts_60
-  test_unit: pass_769_executed_3_skipped_0_failures
-  test_strict: pass_769_executed_3_skipped_0_failures
-  real_app_png_export: pass_enrichment_e2e_1080x748_news_track_and_wide_card
-  live_network_fetch: pass_gated_openai_com_v0_72_0
-  xcuitest_wrapper: blocked_accessibility_not_loaded_not_counted_as_pass
+  test_unit: pass_780_executed_3_skipped_0_failures
+  test_strict: pass_780_executed_3_skipped_0_failures
+  test_tsan: pass_761_executed_3_skipped_0_failures
+  test_integration: pass_15_executed_0_failures
+  test_performance: pass_27_executed_7_heavy_skipped_0_failures
+  snapshot_release: pass_cmd_0_682ms_prepared_cm_5_458ms_cold_cm_observed_103_974ms
+  frontend_profile_full: environment_blocked_automation_mode_timeout_not_counted_as_pass

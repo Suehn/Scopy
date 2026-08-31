@@ -239,7 +239,6 @@
 		56499299AE17ABA9BCB5E396 /* SectionHeader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 72C7E22A4D3725C49208C650 /* SectionHeader.swift */; };
 		56DD95C12F4A8CD6DCD8C837 /* HistoryListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8C25A96207E0DA2587E7AFBB /* HistoryListView.swift */; };
 		5711A88FD03C9BA2150E7B36 /* ClipboardSettingsPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = C024D86793381AE9A95300E8 /* ClipboardSettingsPage.swift */; };
-		574CBC1092D1BC6891FF64C0 /* PerformanceProfilerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 81E3E40D7B7A01720DF737E2 /* PerformanceProfilerTests.swift */; };
 		57886C4E259289B12F0A3C37 /* HoverPreviewLivenessPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = A05F0116766E863DCEFF29C9 /* HoverPreviewLivenessPolicy.swift */; };
 		57C1FB3E5765F41546C7AD5E /* ScopyColors.swift in Sources */ = {isa = PBXBuildFile; fileRef = 493362158599490B2914D1A5 /* ScopyColors.swift */; };
 		581E100F0C019A1FC5F55926 /* KaTeX_Main-Bold.woff2 in Resources */ = {isa = PBXBuildFile; fileRef = CD4A5EB48C1E9F4E3F3926CC /* KaTeX_Main-Bold.woff2 */; };
@@ -312,6 +311,7 @@
 		731C389FA0434EBF4696D6ED /* libsqlite3.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = 6EE4401FFF4C04C3F4498B26 /* libsqlite3.tbd */; };
 		73912DB0D7AA2626E0F36049 /* KaTeX_AMS-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = AB54E903D484FE44C7F78B86 /* KaTeX_AMS-Regular.ttf */; };
 		739CA7545B002CEB718E4EEE /* SearchBackendConsistencyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 66A10DAA25261DC94EED1258 /* SearchBackendConsistencyTests.swift */; };
+		73F2B8A5F7BE64F94ED77F6F /* ClipboardServiceContentFilteringIntegrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7D762743BEF2D1B59E4E9808 /* ClipboardServiceContentFilteringIntegrationTests.swift */; };
 		7411E82D82153F4FD1F02B17 /* PerformanceHelpers.swift in Sources */ = {isa = PBXBuildFile; fileRef = 21D8D06A8582ECBC98830C7E /* PerformanceHelpers.swift */; };
 		74216586C5DB28A55AC3D70B /* HotKeyRecorderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10A8A6276630C764728D88F6 /* HotKeyRecorderView.swift */; };
 		7439D47010B02F0697319E57 /* KaTeX_SansSerif-Bold.woff in Resources */ = {isa = PBXBuildFile; fileRef = F4F9D4349691447CC4244642 /* KaTeX_SansSerif-Bold.woff */; };
@@ -363,6 +363,7 @@
 		84545D8DEA775E702773B41A /* MockClipboardServiceFixedDatasetTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 04BBAB06BBBEFAD9C75F1425 /* MockClipboardServiceFixedDatasetTests.swift */; };
 		847904181954981532FFE71E /* SectionHeader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 72C7E22A4D3725C49208C650 /* SectionHeader.swift */; };
 		849089F007FB3D528DFDF598 /* HistoryItemMarkdownExportController.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5A9EE21DB9627ADA27E99B3 /* HistoryItemMarkdownExportController.swift */; };
+		8490E8B273E3D76DA6B8BAEA /* HistoryViewModelRegressionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6BE3CC7D9AF7FCC5B679F92 /* HistoryViewModelRegressionTests.swift */; };
 		84A84247DBA36409F8803B21 /* HistoryItemInteractionStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4F69EDE05A9181A2C8FE7EE2 /* HistoryItemInteractionStateTests.swift */; };
 		84FBAA65ABD2DD114AFF5531 /* HistoryItemInteractionState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 514610AEEA6EF3C593119BDE /* HistoryItemInteractionState.swift */; };
 		8523D35465AD9E7E4E77DAA6 /* KaTeX_Main-Bold.woff2 in Resources */ = {isa = PBXBuildFile; fileRef = CD4A5EB48C1E9F4E3F3926CC /* KaTeX_Main-Bold.woff2 */; };
@@ -382,7 +383,6 @@
 		89206DFC41EE5CF428FA8868 /* README.md in Resources */ = {isa = PBXBuildFile; fileRef = D022F8113E684307FAD99300 /* README.md */; };
 		8936CEA202269770DD286AC6 /* ShortcutsSettingsPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 961091813A2F9C555BE37BAC /* ShortcutsSettingsPage.swift */; };
 		89C6F6585F448AF4EAD81976 /* KaTeX_Script-Regular.woff in Resources */ = {isa = PBXBuildFile; fileRef = 024FB47EE00106753C4DB412 /* KaTeX_Script-Regular.woff */; };
-		89FF6438C2FC385E81DD98CB /* PerformanceProfilerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 81E3E40D7B7A01720DF737E2 /* PerformanceProfilerTests.swift */; };
 		8A298D2E08FBEF86C5D9398F /* README.md in Resources */ = {isa = PBXBuildFile; fileRef = 6CA7DBA24F4EBA39B8AF76DE /* README.md */; };
 		8A5E6E0E80B3372923159B82 /* history-replay-real-screenshot-paletted.png in Resources */ = {isa = PBXBuildFile; fileRef = A8D5E0B70D410EE4F7B531FA /* history-replay-real-screenshot-paletted.png */; };
 		8AD7CFA2E292CA3F5C884040 /* image-group-chatgpt-search-results.jpg in Resources */ = {isa = PBXBuildFile; fileRef = 5198384EBFCABFD921F2BAAC /* image-group-chatgpt-search-results.jpg */; };
@@ -494,6 +494,7 @@
 		B30749B2C013AFC0516644ED /* HistoryListRetainedInteractionUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 29488D9B883A9FC09B596141 /* HistoryListRetainedInteractionUITests.swift */; };
 		B3C734CCAE60F3A7E0BDA924 /* MockClipboardServiceHistoryListIntegrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B3FCCDA93A7993C6B7B2BD7 /* MockClipboardServiceHistoryListIntegrationTests.swift */; };
 		B44A609E8ADAB5EC0EDA9BAC /* RealDatabaseRegressionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 48400516AB3B998E1313FBAE /* RealDatabaseRegressionTests.swift */; };
+		B482798191935F54DE9F7DE1 /* SettingsWindowCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 36F2E1F457E9164BB4772826 /* SettingsWindowCoordinatorTests.swift */; };
 		B4ADD9D45E76589E4B83DBE3 /* katex.min.css in Resources */ = {isa = PBXBuildFile; fileRef = 1F95016417AE5066D641D49C /* katex.min.css */; };
 		B5416974ED765C7FBC1CD835 /* KaTeX_Main-Regular.woff2 in Resources */ = {isa = PBXBuildFile; fileRef = 0C442EB6B998A8961A987D12 /* KaTeX_Main-Regular.woff2 */; };
 		B5CE155F884FE740D84A7973 /* MarkdownSyntaxProtectorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A6E587E62AEA336ECC849651 /* MarkdownSyntaxProtectorTests.swift */; };
@@ -574,6 +575,7 @@
 		D212EF1D4BFD4BD21EBFC815 /* ExportPreviewHarnessView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9550452B2B104A57045B6269 /* ExportPreviewHarnessView.swift */; };
 		D2FE58267F3FCB1C5696CED6 /* MockServices.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2D09BA0550F18A7F9EF6A074 /* MockServices.swift */; };
 		D355A252516F85A8BC9B367B /* FullIndexTombstoneUpsertStaleTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3D590E28618E8B08B464342 /* FullIndexTombstoneUpsertStaleTests.swift */; };
+		D3C97191D6D55F583EFEAC9C /* SettingsWindowCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 36F2E1F457E9164BB4772826 /* SettingsWindowCoordinatorTests.swift */; };
 		D4C231881F5CF33E0C69832A /* AppVersion.swift in Sources */ = {isa = PBXBuildFile; fileRef = 31ACAD6A6B51FB60D22EA0DA /* AppVersion.swift */; };
 		D4F07DA09367824E29248B63 /* HoverPreviewIntentPolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03865B5A388CC531994D0492 /* HoverPreviewIntentPolicyTests.swift */; };
 		D625C6FCB576A9DBEB789705 /* MarkdownPreviewCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B47012368E8607A49B45194 /* MarkdownPreviewCache.swift */; };
@@ -628,6 +630,7 @@
 		E99063FFC60142653E956159 /* KaTeX_Math-Italic.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 1ADABCABCFD7B7E85F0224D3 /* KaTeX_Math-Italic.ttf */; };
 		E9BACFF205BFA960AE6194FD /* HoverPreviewImageQualityPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9CFA9E9A2101790657BF92E8 /* HoverPreviewImageQualityPolicy.swift */; };
 		EA8BC40FFFAD778CAF278A04 /* ClipboardItemContentRevision.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2BA9830C77C791D330AD2523 /* ClipboardItemContentRevision.swift */; };
+		EB332D5EDFB4358652AFBBA7 /* HistoryViewModelRegressionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6BE3CC7D9AF7FCC5B679F92 /* HistoryViewModelRegressionTests.swift */; };
 		EB43D7CBC2F788C69B949939 /* SearchMatchPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = C684A1DE13F8FF6F342C6341 /* SearchMatchPresentation.swift */; };
 		EBF2E6EC8FB4C45EF7926005 /* KaTeX_SansSerif-Regular.woff2 in Resources */ = {isa = PBXBuildFile; fileRef = F16334487FE981B66D0438B5 /* KaTeX_SansSerif-Regular.woff2 */; };
 		EBFC503BE6005552DBACECFB /* MarkdownRenderContext.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4691EB889BD8853399C89DF /* MarkdownRenderContext.swift */; };
@@ -786,6 +789,7 @@
 		33AD448FC3C112E3EC1A82B2 /* MarkdownSyntaxProtector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownSyntaxProtector.swift; sourceTree = "<group>"; };
 		3527EAD22A82840AEDF3F820 /* ConcurrencyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConcurrencyTests.swift; sourceTree = "<group>"; };
 		36EED97B0F997DD960108413 /* KaTeX_Main-Regular.woff */ = {isa = PBXFileReference; path = "KaTeX_Main-Regular.woff"; sourceTree = "<group>"; };
+		36F2E1F457E9164BB4772826 /* SettingsWindowCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsWindowCoordinatorTests.swift; sourceTree = "<group>"; };
 		373B2F77284B3AF79F40DCDB /* favicon-reuters-32.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "favicon-reuters-32.png"; sourceTree = "<group>"; };
 		376534903F32D2F1C94CAA53 /* favicon-openai-32.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "favicon-openai-32.png"; sourceTree = "<group>"; };
 		3A173A25023331BD475CAC8A /* image-path.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = "image-path.md"; sourceTree = "<group>"; };
@@ -873,9 +877,9 @@
 		7B47012368E8607A49B45194 /* MarkdownPreviewCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownPreviewCache.swift; sourceTree = "<group>"; };
 		7C24E103BDCF71EDB9EA8167 /* KaTeX_SansSerif-Italic.woff */ = {isa = PBXFileReference; path = "KaTeX_SansSerif-Italic.woff"; sourceTree = "<group>"; };
 		7CE948DFDB9CA6E77C80DDC4 /* KaTeX_Size2-Regular.woff */ = {isa = PBXFileReference; path = "KaTeX_Size2-Regular.woff"; sourceTree = "<group>"; };
+		7D762743BEF2D1B59E4E9808 /* ClipboardServiceContentFilteringIntegrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipboardServiceContentFilteringIntegrationTests.swift; sourceTree = "<group>"; };
 		7E56E5F337D3748313865480 /* HoverPreviewIntentPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HoverPreviewIntentPolicy.swift; sourceTree = "<group>"; };
 		7FA791FEADD9346CE7CA8217 /* KaTeX_Typewriter-Regular.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "KaTeX_Typewriter-Regular.ttf"; sourceTree = "<group>"; };
-		81E3E40D7B7A01720DF737E2 /* PerformanceProfilerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PerformanceProfilerTests.swift; sourceTree = "<group>"; };
 		822D1AD4571728338CDD265C /* MarkdownATXHeadingNormalizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownATXHeadingNormalizer.swift; sourceTree = "<group>"; };
 		82CFF8877261ED83C85EA933 /* KaTeX_Size1-Regular.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "KaTeX_Size1-Regular.ttf"; sourceTree = "<group>"; };
 		844C4C084D60F319E545D8E0 /* AppDelegateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegateTests.swift; sourceTree = "<group>"; };
@@ -1009,6 +1013,7 @@
 		F2729BCEB53FC3541B6A37BF /* StorageStatsSemanticsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StorageStatsSemanticsTests.swift; sourceTree = "<group>"; };
 		F3D590E28618E8B08B464342 /* FullIndexTombstoneUpsertStaleTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FullIndexTombstoneUpsertStaleTests.swift; sourceTree = "<group>"; };
 		F4F9D4349691447CC4244642 /* KaTeX_SansSerif-Bold.woff */ = {isa = PBXFileReference; path = "KaTeX_SansSerif-Bold.woff"; sourceTree = "<group>"; };
+		F6BE3CC7D9AF7FCC5B679F92 /* HistoryViewModelRegressionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryViewModelRegressionTests.swift; sourceTree = "<group>"; };
 		F8199B08299A36E64A90129A /* HistoryListUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryListUITests.swift; sourceTree = "<group>"; };
 		F938D6BFB8E6529D580A5BDB /* MarkdownATXHeadingNormalizerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownATXHeadingNormalizerTests.swift; sourceTree = "<group>"; };
 		F940F6182C4E298B3511A044 /* ClipboardMonitorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipboardMonitorTests.swift; sourceTree = "<group>"; };
@@ -1335,6 +1340,7 @@
 				B48DDD4A33C8F8F615B17CA0 /* ClipboardItemDisplayTextTests.swift */,
 				F940F6182C4E298B3511A044 /* ClipboardMonitorTests.swift */,
 				DD904A65C1DC7FE485A48945 /* ClipboardServiceCleanupTests.swift */,
+				7D762743BEF2D1B59E4E9808 /* ClipboardServiceContentFilteringIntegrationTests.swift */,
 				4196431EE6371BEE9C6BED01 /* ClipboardServiceCopyToClipboardTests.swift */,
 				27993FA7FAE364786E325686 /* ClipboardServiceImageOptimizationTests.swift */,
 				3527EAD22A82840AEDF3F820 /* ConcurrencyTests.swift */,
@@ -1356,6 +1362,7 @@
 				0E5BC3C78931E99A757A8DCD /* HistoryProfileDatasetFingerprintTests.swift */,
 				97AEC3DECAB492AFD333ADA1 /* HistoryRelativeTimeClockTests.swift */,
 				DCAFF6323AF4A9FC1D16EA57 /* HistoryRowThumbnailLifecycleSchedulerTests.swift */,
+				F6BE3CC7D9AF7FCC5B679F92 /* HistoryViewModelRegressionTests.swift */,
 				FF08A6073418036ABAC09144 /* HotKeyServiceTests.swift */,
 				747759CE91D4B8639F351272 /* HoverPreviewImageCacheTests.swift */,
 				C209900B7E5E934B26F5B7AC /* HoverPreviewImageQualityPolicyTests.swift */,
@@ -1375,7 +1382,6 @@
 				4191DF443254AEB1B0B02054 /* MarkdownTableCodeSpanPipeNormalizerTests.swift */,
 				04BBAB06BBBEFAD9C75F1425 /* MockClipboardServiceFixedDatasetTests.swift */,
 				5B3FCCDA93A7993C6B7B2BD7 /* MockClipboardServiceHistoryListIntegrationTests.swift */,
-				81E3E40D7B7A01720DF737E2 /* PerformanceProfilerTests.swift */,
 				1C176E09A1997AD49E566273 /* PerformanceTests.swift */,
 				32D999A7588A12D89B127388 /* PngquantServiceTests.swift */,
 				48400516AB3B998E1313FBAE /* RealDatabaseRegressionTests.swift */,
@@ -1390,6 +1396,7 @@
 				15EBBE158869225275AB5F98 /* SearchServiceTests.swift */,
 				2B74B9321A306FE81A60891D /* SearchStateMachineTests.swift */,
 				141E9CECE7EA4C7ADD332905 /* SettingsConcurrencyMergeTests.swift */,
+				36F2E1F457E9164BB4772826 /* SettingsWindowCoordinatorTests.swift */,
 				CF519408C137227E5F1B8226 /* ShortQueryIndexDiskCacheHardeningTests.swift */,
 				ADE11D7F3EEE23CE6073C7DD /* SnapshotPerformanceTests.swift */,
 				AA1C5C44C2A823612D31233D /* SQLiteIntegerWidthTests.swift */,
@@ -2057,7 +2064,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "set -euo pipefail\nSRC_DIR=\"${SRCROOT}/Scopy/Resources/MarkdownPreview\"\nDST_DIR=\"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/MarkdownPreview\"\nif [ ! -d \"$SRC_DIR\" ]; then\n  echo \"Missing MarkdownPreview assets: $SRC_DIR\" >&2\n  if [ \"${CONFIGURATION:-Debug}\" = \"Release\" ]; then\n    exit 1\n  fi\n  exit 0\nfi\nmkdir -p \"$DST_DIR\"\nrsync -a --delete \"$SRC_DIR\"/ \"$DST_DIR\"/\nSTAMP_FILE=\"${DERIVED_FILE_DIR}/stage_markdown_preview_assets.stamp\"\nmkdir -p \"$(dirname \"$STAMP_FILE\")\"\ntouch \"$STAMP_FILE\"\n";
+			shellScript = "set -euo pipefail\nSRC_DIR=\"${SRCROOT}/Scopy/Resources/MarkdownPreview\"\nDST_DIR=\"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/MarkdownPreview\"\nif [ ! -d \"$SRC_DIR\" ]; then\n  echo \"Missing MarkdownPreview assets: $SRC_DIR\" >&2\n  exit 1\nfi\nmkdir -p \"$DST_DIR\"\nrsync -a --delete \"$SRC_DIR\"/ \"$DST_DIR\"/\nSTAMP_FILE=\"${DERIVED_FILE_DIR}/stage_markdown_preview_assets.stamp\"\nmkdir -p \"$(dirname \"$STAMP_FILE\")\"\ntouch \"$STAMP_FILE\"\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 
@@ -2134,6 +2141,7 @@
 				FB3E2869AFC1A526CCFB26EC /* HistoryRowThumbnailLifecycleScheduler.swift in Sources */,
 				F1736ED3E5D923DFA48453E0 /* HistoryRowThumbnailLifecycleSchedulerTests.swift in Sources */,
 				22CAC8D2216EF5F939B413B0 /* HistoryViewModel.swift in Sources */,
+				EB332D5EDFB4358652AFBBA7 /* HistoryViewModelRegressionTests.swift in Sources */,
 				8E09FFE67101D5769C94AB65 /* HotKeyRecorder.swift in Sources */,
 				0F2B4AFBDEADB8BFC90399E7 /* HotKeyRecorderView.swift in Sources */,
 				B0F8C23D7B1B5DBE7FDB6F6B /* HotKeyServiceTests.swift in Sources */,
@@ -2194,7 +2202,6 @@
 				B150FC0506C002C5CE3D8900 /* PerfFeatureFlags.swift in Sources */,
 				C78B2351A13DD052B3C17FB0 /* PerformanceHelpers.swift in Sources */,
 				0AD305C3B070786AC4309A0C /* PerformanceMetrics.swift in Sources */,
-				574CBC1092D1BC6891FF64C0 /* PerformanceProfilerTests.swift in Sources */,
 				B97A1DF11C8D378164FCE007 /* PngquantServiceTests.swift in Sources */,
 				9E08F46F86F54188CAA098BE /* PopoverWindowObserver.swift in Sources */,
 				BA3261E96493B569E993FB95 /* QuickLookPreviewView.swift in Sources */,
@@ -2225,6 +2232,7 @@
 				ABA499280CA058A9514EC4A0 /* SettingsView.swift in Sources */,
 				507578187BE947202BD63D0B /* SettingsViewModel.swift in Sources */,
 				22107A1DE9889D19C5DF2F19 /* SettingsWindowCoordinator.swift in Sources */,
+				D3C97191D6D55F583EFEAC9C /* SettingsWindowCoordinatorTests.swift in Sources */,
 				137ABDD7D22A3B37EEAC3AEF /* ShortQueryIndexDiskCacheHardeningTests.swift in Sources */,
 				8936CEA202269770DD286AC6 /* ShortcutsSettingsPage.swift in Sources */,
 				374BBA5450BC7E111343E688 /* SnapshotPerformanceTests.swift in Sources */,
@@ -2279,6 +2287,7 @@
 				5E7CE158A9A7BB0AD50CA392 /* ClipboardItemDisplayTextTests.swift in Sources */,
 				43B8612CECC8A1768F74742B /* ClipboardMonitorTests.swift in Sources */,
 				DC60D5410064AC244B3AA028 /* ClipboardServiceCleanupTests.swift in Sources */,
+				73F2B8A5F7BE64F94ED77F6F /* ClipboardServiceContentFilteringIntegrationTests.swift in Sources */,
 				A38DCE579215B40A6617DFF0 /* ClipboardServiceCopyToClipboardTests.swift in Sources */,
 				B76CC617E19751D7E70FCB84 /* ClipboardServiceImageOptimizationTests.swift in Sources */,
 				5711A88FD03C9BA2150E7B36 /* ClipboardSettingsPage.swift in Sources */,
@@ -2332,6 +2341,7 @@
 				8D97DFF3F3FF7D3AEEB5CF51 /* HistoryRowThumbnailLifecycleScheduler.swift in Sources */,
 				4D8AE220728D3AE17D6674EE /* HistoryRowThumbnailLifecycleSchedulerTests.swift in Sources */,
 				18A0B29008644A161F357EEA /* HistoryViewModel.swift in Sources */,
+				8490E8B273E3D76DA6B8BAEA /* HistoryViewModelRegressionTests.swift in Sources */,
 				0FD74D15059EA77E63270E96 /* HotKeyRecorder.swift in Sources */,
 				DC47D328E3CF656FBF9EB59A /* HotKeyRecorderView.swift in Sources */,
 				6290407CDC493685A38B5DED /* HotKeyServiceTests.swift in Sources */,
@@ -2393,7 +2403,6 @@
 				338203C71A3D78E1DE905A59 /* PerfFeatureFlags.swift in Sources */,
 				7411E82D82153F4FD1F02B17 /* PerformanceHelpers.swift in Sources */,
 				06DE2B57F5979778D2F7F1A1 /* PerformanceMetrics.swift in Sources */,
-				89FF6438C2FC385E81DD98CB /* PerformanceProfilerTests.swift in Sources */,
 				A316443B51B7C38263A0682C /* PerformanceTests.swift in Sources */,
 				C6F05F1F87787839541AC518 /* PngquantServiceTests.swift in Sources */,
 				B1D3FEB5196D0AA077944AB0 /* PopoverWindowObserver.swift in Sources */,
@@ -2425,6 +2434,7 @@
 				D12737BAE66E7C1773F02933 /* SettingsView.swift in Sources */,
 				5ADA570A1558437A10DE516C /* SettingsViewModel.swift in Sources */,
 				F8E5700A1914D36DDF1A279A /* SettingsWindowCoordinator.swift in Sources */,
+				B482798191935F54DE9F7DE1 /* SettingsWindowCoordinatorTests.swift in Sources */,
 				52349B93FE20FDACBA2992A8 /* ShortQueryIndexDiskCacheHardeningTests.swift in Sources */,
 				7D69F4EFE1199AC3FB188867 /* ShortcutsSettingsPage.swift in Sources */,
 				18637C156D85757153BECD04 /* SnapshotPerformanceTests.swift in Sources */,

@@ -8,52 +8,12 @@ private struct SendableCGImage: @unchecked Sendable {
     let image: CGImage
 }
 
-private actor PreviewTaskBudget {
-    static let shared = PreviewTaskBudget(limit: 4)
-
-    private let limit: Int
-    private var inFlight: Int = 0
-    private var waiters: [CheckedContinuation<Void, Never>] = []
-
-    init(limit: Int) {
-        self.limit = max(1, limit)
-    }
-
-    func acquireIfNeeded() async {
-        guard PerfFeatureFlags.previewTaskBudgetEnabled else { return }
-        if inFlight < limit {
-            inFlight += 1
-            return
-        }
-        await withCheckedContinuation { continuation in
-            waiters.append(continuation)
-        }
-    }
-
-    func releaseIfNeeded() async {
-        guard PerfFeatureFlags.previewTaskBudgetEnabled else { return }
-        if let continuation = waiters.first {
-            waiters.removeFirst()
-            continuation.resume()
-            return
-        }
-        inFlight = max(0, inFlight - 1)
-    }
-}
-
-private func runBudgetedDetached<T: Sendable>(
-    priority: TaskPriority,
-    operation: @escaping @Sendable () async -> T
-) async -> T {
-    await PreviewTaskBudget.shared.acquireIfNeeded()
-    let result = await Task.detached(priority: priority, operation: operation).value
-    await PreviewTaskBudget.shared.releaseIfNeeded()
-    return result
-}
-
 enum HistoryHoverPreviewPipeline {
     static let maxMarkdownPreviewBytes = 200_000
     static let markdownFilePreviewCacheTTL: TimeInterval = 3 * 3600
+
+    // Bound queued decode, read, and render work so cancelled hover sessions cannot accumulate.
+    private static let previewTaskPool = AsyncPermitPool(limit: 4, maxPending: 8)
 
     private struct MarkdownRenderCallbacks: @unchecked Sendable {
         let isCurrent: @MainActor () -> Bool
@@ -263,7 +223,7 @@ enum HistoryHoverPreviewPipeline {
         readTextFile: @escaping (URL, Int) async -> String? = { url, maxBytes in
             await runBudgetedDetached(priority: .utility) {
                 FilePreviewSupport.readTextFile(url: url, maxBytes: maxBytes)
-            }
+            } ?? nil
         },
         isCurrent: @escaping @MainActor () -> Bool,
         emit: @escaping @MainActor (Event) -> Void
@@ -350,7 +310,7 @@ enum HistoryHoverPreviewPipeline {
                         return nil
                     }
                     return SendableCGImage(image: image)
-                }
+                } ?? nil
                 cgImage = sendable?.image
             } else {
                 guard let data = await getImageData() else { return nil }
@@ -363,7 +323,7 @@ enum HistoryHoverPreviewPipeline {
                         return nil
                     }
                     return SendableCGImage(image: image)
-                }
+                } ?? nil
                 cgImage = sendable?.image
             }
 
@@ -431,7 +391,7 @@ enum HistoryHoverPreviewPipeline {
                 }
                 guard let cgImage else { return nil }
                 return SendableCGImage(image: cgImage)
-            }
+            } ?? nil
 
             let cgImage = sendable?.image
             guard !Task.isCancelled, isCurrent() else { return nil }
@@ -716,7 +676,30 @@ enum HistoryHoverPreviewPipeline {
                 return html
             }
             return MarkdownHTMLRenderer.render(markdown: source, context: context).html
+        } ?? ""
+    }
+
+    private static func runBudgetedDetached<T: Sendable>(
+        priority: TaskPriority,
+        operation: @escaping @Sendable () async -> T
+    ) async -> T? {
+        await runBudgetedDetached(using: previewTaskPool, priority: priority, operation: operation)
+    }
+
+    static func runBudgetedDetached<T: Sendable>(
+        using pool: AsyncPermitPool,
+        priority: TaskPriority,
+        operation: @escaping @Sendable () async -> T
+    ) async -> T? {
+        guard await pool.acquire() else { return nil }
+        guard !Task.isCancelled else {
+            await pool.release()
+            return nil
         }
+
+        let result = await Task.detached(priority: priority, operation: operation).value
+        await pool.release()
+        return result
     }
 
     private static func markdownRenderEvent(

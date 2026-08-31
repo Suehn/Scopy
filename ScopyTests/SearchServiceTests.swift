@@ -63,6 +63,22 @@ final class SearchServiceTests: XCTestCase {
         XCTAssertEqual(result.coverage, .recentOnly(limit: 2000))
     }
 
+    func testTwoCharacterExactFindsRecentNoteOnlyMatchWithEvidence() async throws {
+        let target = try await storage.upsertItem(makeContent("unrelated body"))
+        _ = try await storage.updateNote(id: target.id, note: "saved under ab")
+        await search.invalidateCache()
+
+        let result = try await search.search(
+            request: SearchRequest(query: "ab", mode: .exact, limit: 50, offset: 0)
+        )
+
+        XCTAssertEqual(result.items.map(\.id), [target.id])
+        let context = try XCTUnwrap(result.matchContexts[target.id])
+        XCTAssertEqual(context.fragments.map(\.source), [.note])
+        XCTAssertEqual(context.fragments.flatMap(highlightedText), ["ab"])
+        XCTAssertEqual(result.coverage, .recentOnly(limit: 2000))
+    }
+
     func testWhitespaceOnlyExactQueryUsesAllItemsWithFilters() async throws {
         try await populateTestData(count: 5)
 
@@ -255,6 +271,101 @@ final class SearchServiceTests: XCTestCase {
         )
     }
 
+    func testSearchDeadlineInterruptsActiveSQLiteQueryPromptly() async throws {
+        await search.close()
+
+        var db: OpaquePointer?
+        let flags = SQLITE_OPEN_READWRITE | SQLITE_OPEN_URI
+        XCTAssertEqual(sqlite3_open_v2(storage.databaseFilePath, &db, flags, nil), SQLITE_OK)
+        guard let db else {
+            XCTFail("Failed to open timeout fixture database")
+            return
+        }
+        defer { sqlite3_close(db) }
+
+        func execute(_ sql: String) throws {
+            var message: UnsafeMutablePointer<CChar>?
+            let code = sqlite3_exec(db, sql, nil, nil, &message)
+            defer { sqlite3_free(message) }
+            guard code == SQLITE_OK else {
+                throw NSError(
+                    domain: "SQLiteTimeoutFixture",
+                    code: Int(code),
+                    userInfo: [NSLocalizedDescriptionKey: message.map { String(cString: $0) } ?? "SQLite error"]
+                )
+            }
+        }
+
+        try execute("DROP TRIGGER IF EXISTS clipboard_trigram_ai")
+        try execute("DROP TRIGGER IF EXISTS clipboard_trigram_ad")
+        try execute("DROP TRIGGER IF EXISTS clipboard_trigram_au")
+        try execute("DROP TABLE IF EXISTS clipboard_fts_trigram")
+
+        let terms = (0..<128).map { "deadline_token_\($0)" }
+        let searchableText = terms.joined(separator: " ")
+        let insertSQL = """
+            WITH RECURSIVE seq(i) AS (
+                SELECT 1
+                UNION ALL
+                SELECT i + 1 FROM seq WHERE i < ?1
+            )
+            INSERT INTO clipboard_items (
+                id, type, content_hash, plain_text, app_bundle_id,
+                created_at, last_used_at, use_count, is_pinned, size_bytes
+            )
+            SELECT
+                printf('%08x-0000-4000-8000-%012x', i, i),
+                'text',
+                printf('deadline-hash-%d', i),
+                ?2,
+                'com.test.timeout',
+                i,
+                i,
+                1,
+                0,
+                length(?2)
+            FROM seq
+            """
+        var statement: OpaquePointer?
+        XCTAssertEqual(sqlite3_prepare_v2(db, insertSQL, -1, &statement, nil), SQLITE_OK)
+        guard let statement else {
+            XCTFail("Failed to prepare timeout fixture insert")
+            return
+        }
+        defer { sqlite3_finalize(statement) }
+        XCTAssertEqual(sqlite3_bind_int(statement, 1, 40_000), SQLITE_OK)
+        let sqliteTransient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
+        XCTAssertEqual(sqlite3_bind_text(statement, 2, searchableText, -1, sqliteTransient), SQLITE_OK)
+        XCTAssertEqual(sqlite3_step(statement), SQLITE_DONE)
+        try execute("UPDATE scopy_meta SET mutation_seq = mutation_seq + 1 WHERE id = 1")
+
+        search = SearchEngineImpl(dbPath: storage.databaseFilePath, searchTimeout: 0.02)
+        try await search.open()
+
+        let startedAt = CFAbsoluteTimeGetCurrent()
+        do {
+            _ = try await search.search(
+                request: SearchRequest(
+                    query: searchableText,
+                    mode: .exact,
+                    sortMode: .relevance,
+                    limit: 50,
+                    offset: 0
+                )
+            )
+            XCTFail("Expected the controlled SQLite query to exceed its search deadline")
+        } catch SearchEngineImpl.SearchError.timeout {
+            // The deadline child interrupts sqlite3_step before structured task-group teardown waits.
+        }
+        let timeoutElapsed = CFAbsoluteTimeGetCurrent() - startedAt
+        print("SQLite timeout interrupt returned in \(String(format: "%.1f", timeoutElapsed * 1_000))ms")
+        XCTAssertLessThan(
+            timeoutElapsed,
+            1.0,
+            "Timed-out SQLite work should be interrupted instead of delaying search return"
+        )
+    }
+
     func testRegexSearch() async throws {
         try await populateTestData()
 
@@ -268,6 +379,22 @@ final class SearchServiceTests: XCTestCase {
             let range = NSRange(item.plainText.startIndex..., in: item.plainText)
             XCTAssertNotNil(regex.firstMatch(in: item.plainText, range: range))
         }
+        XCTAssertEqual(result.coverage, .recentOnly(limit: 2000))
+    }
+
+    func testRegexFindsRecentNoteOnlyMatchWithEvidence() async throws {
+        let target = try await storage.upsertItem(makeContent("unrelated body"))
+        _ = try await storage.updateNote(id: target.id, note: "ticket R-42 is saved here")
+        await search.invalidateCache()
+
+        let result = try await search.search(
+            request: SearchRequest(query: #"R-\d+"#, mode: .regex, limit: 50, offset: 0)
+        )
+
+        XCTAssertEqual(result.items.map(\.id), [target.id])
+        let context = try XCTUnwrap(result.matchContexts[target.id])
+        XCTAssertEqual(context.fragments.map(\.source), [.note])
+        XCTAssertEqual(context.fragments.flatMap(highlightedText), ["R-42"])
         XCTAssertEqual(result.coverage, .recentOnly(limit: 2000))
     }
 
@@ -398,6 +525,30 @@ final class SearchServiceTests: XCTestCase {
         let request2 = SearchRequest(query: "Item", mode: .fuzzy, limit: 10, offset: 20)
         let result2 = try await search.search(request: request2)
         XCTAssertFalse(result2.hasMore) // Only 5 items left (25 - 20)
+    }
+
+    func testFuzzyTopKCapDoesNotAdvertiseUnreachableNextPage() {
+        XCTAssertTrue(
+            SearchEngineImpl.hasReachableNextFuzzyPage(
+                availableTopMatches: 50_000,
+                offset: 49_900,
+                limit: 50
+            )
+        )
+        XCTAssertFalse(
+            SearchEngineImpl.hasReachableNextFuzzyPage(
+                availableTopMatches: 50_000,
+                offset: 49_950,
+                limit: 50
+            )
+        )
+        XCTAssertFalse(
+            SearchEngineImpl.hasReachableNextFuzzyPage(
+                availableTopMatches: 50_000,
+                offset: 50_000,
+                limit: 50
+            )
+        )
     }
 
     func testFTSUpdateTriggerOnlyFiresOnPlainTextChange() async throws {
@@ -860,6 +1011,28 @@ final class SearchServiceTests: XCTestCase {
         let expectedIDs = [19, 18, 17, 16, 15].map { inserted[$0].id }
         XCTAssertEqual(result.items.map(\.id), expectedIDs)
         XCTAssertTrue(result.hasMore)
+    }
+
+    func testShortQueryUsesBoundedFallbackWhileIndexBuildRemainsPending() async throws {
+#if DEBUG
+        let target = try await storage.upsertItem(makeContent("ab immediate SQL fallback"))
+        let pendingBuild = Task.detached(priority: .utility) { () -> Void in
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+        }
+        defer { pendingBuild.cancel() }
+        await search.debugInstallPendingShortQueryIndexBuild(pendingBuild)
+
+        let startedAt = CFAbsoluteTimeGetCurrent()
+        let result = try await search.search(
+            request: SearchRequest(query: "ab", mode: .fuzzyPlus, sortMode: .relevance, limit: 10, offset: 0)
+        )
+        let elapsed = CFAbsoluteTimeGetCurrent() - startedAt
+
+        XCTAssertTrue(result.items.contains(where: { $0.id == target.id }))
+        XCTAssertLessThan(elapsed, 0.5, "Short queries must not wait for an indefinitely pending index build")
+#else
+        throw XCTSkip("Requires DEBUG build for controlled index-build state")
+#endif
     }
 
     func testShortQueryCJKPinnedItemsRankFirst() async throws {

@@ -947,8 +947,8 @@ public actor SearchEngineImpl {
 
     private var fuzzySortedMatchesCache: FuzzySortedMatchesCacheValue?
 
-    private let searchTimeout: TimeInterval = 5.0
-    private let initialIndexBuildTimeout: TimeInterval = 30.0
+    private let searchTimeout: TimeInterval
+    private let initialIndexBuildTimeout: TimeInterval
 
     private var corpusMetrics: CorpusMetrics?
     private var corpusMetricsUpdatedAt: Date = .distantPast
@@ -962,12 +962,33 @@ public actor SearchEngineImpl {
 
     public init(dbPath: String) {
         self.dbPath = dbPath
+        searchTimeout = 5.0
+        initialIndexBuildTimeout = 30.0
+    }
+
+    init(dbPath: String, searchTimeout: TimeInterval) {
+        self.dbPath = dbPath
+        self.searchTimeout = searchTimeout
+        initialIndexBuildTimeout = 30.0
     }
 
     // MARK: - Lifecycle
 
     public func open() throws {
         try openIfNeeded()
+    }
+
+    /// Explicitly prepares the complete one- and two-character search index for callers that
+    /// require steady-state readiness before issuing latency-sensitive work.
+    public func prepareShortQueryIndex() async throws {
+        try openIfNeeded()
+        startShortQueryIndexBuildIfNeeded(force: true)
+        if let task = shortQueryIndexBuildTask {
+            await task.value
+        }
+        guard shortQueryIndex != nil else {
+            throw SearchError.searchFailed("Failed to prepare short-query index")
+        }
     }
 
     public func close() async {
@@ -1220,24 +1241,6 @@ public actor SearchEngineImpl {
             let snapshot = SearchIndexDiskCache.loadShortSnapshot(dbPath: dbPath)
                 ?? Self.buildShortQueryIndexSnapshot(dbPath: dbPath, reserveSlots: reserveSlots)
             await self.finishShortQueryIndexBuild(generation: generation, snapshot: snapshot)
-        }
-    }
-
-    private func shortQueryIndexWaitTimeout(tokenLower: String) -> TimeInterval {
-        guard let metrics = corpusMetrics else { return 0 }
-        guard metrics.isHeavyPlainTextCorpus else { return 0 }
-        if tokenLower.canBeConverted(to: .ascii) {
-            return 0.005
-        }
-        return 0.01
-    }
-
-    private func waitForShortQueryIndexBuild(task: Task<Void, Never>, timeout: TimeInterval) async throws {
-        do {
-            try await withTimeout(timeout: timeout) { await task.value }
-        } catch {
-            if case SearchError.timeout = error { return }
-            throw error
         }
     }
 
@@ -1789,38 +1792,37 @@ public actor SearchEngineImpl {
         try openIfNeeded()
         let interruptHandle = connection?.handle.map { SQLiteInterruptHandle(handle: $0) }
 
-        let result: SearchResult
-        do {
-            result = try await withTaskCancellationHandler(operation: {
-                try await withTimeout(timeout: timeout) {
-                    let rawResult = try await self.searchInternal(
-                        request: request,
-                        perf: perfContext
-                    )
-                    if let perfContext {
-                        return try perfContext.measure("match_evidence") {
-                            try Self.attachingMatchContexts(
-                                to: rawResult,
-                                request: request
-                            )
-                        }
+        let result = try await withTaskCancellationHandler(operation: {
+            try await withTimeout(
+                timeout: timeout,
+                onTimeout: {
+                    if let interruptHandle {
+                        sqlite3_interrupt(interruptHandle.handle)
                     }
-                    return try Self.attachingMatchContexts(
-                        to: rawResult,
-                        request: request
-                    )
                 }
-            }, onCancel: {
-                if let interruptHandle {
-                    sqlite3_interrupt(interruptHandle.handle)
+            ) {
+                let rawResult = try await self.searchInternal(
+                    request: request,
+                    perf: perfContext
+                )
+                if let perfContext {
+                    return try perfContext.measure("match_evidence") {
+                        try Self.attachingMatchContexts(
+                            to: rawResult,
+                            request: request
+                        )
+                    }
                 }
-            })
-        } catch {
-            if case SearchError.timeout = error, let interruptHandle {
+                return try Self.attachingMatchContexts(
+                    to: rawResult,
+                    request: request
+                )
+            }
+        }, onCancel: {
+            if let interruptHandle {
                 sqlite3_interrupt(interruptHandle.handle)
             }
-            throw error
-        }
+        })
 
         let elapsedMs = (CFAbsoluteTimeGetCurrent() - startTime) * 1000
         perfContext?.addPhase("search_total", ms: elapsedMs)
@@ -1938,6 +1940,7 @@ public actor SearchEngineImpl {
         if normalizedQuery.count <= 2 {
             return try searchInCache(request: request, coverage: .recentOnly(limit: shortQueryCacheSize)) { item in
                 item.plainText.localizedCaseInsensitiveContains(normalizedQuery)
+                    || item.note?.localizedCaseInsensitiveContains(normalizedQuery) == true
             }
         }
 
@@ -1992,7 +1995,10 @@ public actor SearchEngineImpl {
         }
 
         return try searchInCache(request: request, coverage: .recentOnly(limit: shortQueryCacheSize)) { item in
-            try Self.hasRegexMatch(regex, in: item.plainText)
+            if try Self.hasRegexMatch(regex, in: item.plainText) {
+                return true
+            }
+            return try item.note.map { try Self.hasRegexMatch(regex, in: $0) } ?? false
         }
     }
 
@@ -2194,7 +2200,7 @@ public actor SearchEngineImpl {
         }
 
         if trimmedQuery.count <= 2 {
-            return try await searchShortFuzzyQuery(
+            return try searchShortFuzzyQuery(
                 request: request,
                 trimmedQuery: trimmedQuery,
                 mode: mode,
@@ -2402,7 +2408,7 @@ public actor SearchEngineImpl {
         trimmedQuery: String,
         mode: SearchMode,
         perf: PerfContext?
-    ) async throws -> SearchResult {
+    ) throws -> SearchResult {
         let tokenLower = trimmedQuery.lowercased()
         let typeFilters = request.typeFilters.map(Array.init)
 
@@ -2415,7 +2421,7 @@ public actor SearchEngineImpl {
             return result
         }
 
-        try await waitForShortQueryIndexIfNeeded(tokenLower: tokenLower, perf: perf)
+        startShortQueryIndexBuildIfNeeded()
 
         if let result = try searchShortFuzzyWithShortIndex(
             request: request,
@@ -2451,23 +2457,6 @@ public actor SearchEngineImpl {
             hasMore: result.hasMore,
             coverage: result.coverage
         )
-    }
-
-    private func waitForShortQueryIndexIfNeeded(tokenLower: String, perf: PerfContext?) async throws {
-        startShortQueryIndexBuildIfNeeded()
-
-        guard shortQueryIndex == nil, let task = shortQueryIndexBuildTask else { return }
-        let waitTimeout = shortQueryIndexWaitTimeout(tokenLower: tokenLower)
-        guard waitTimeout > 0 else { return }
-
-        if let perf {
-            let phaseStart = CFAbsoluteTimeGetCurrent()
-            try await waitForShortQueryIndexBuild(task: task, timeout: waitTimeout)
-            let elapsedMs = (CFAbsoluteTimeGetCurrent() - phaseStart) * 1000
-            perf.addPhase("short_query_index_wait", ms: elapsedMs)
-        } else {
-            try await waitForShortQueryIndexBuild(task: task, timeout: waitTimeout)
-        }
     }
 
     private func searchShortFuzzyWithShortIndex(
@@ -3158,7 +3147,11 @@ public actor SearchEngineImpl {
             let start = min(request.offset, sortedTop.count)
             let end = min(start + request.limit, sortedTop.count)
             let page: [ScoredSlot] = (start < end) ? Array(sortedTop[start..<end]) : []
-            let hasMore = totalMatches > request.offset + request.limit
+            let hasMore = Self.hasReachableNextFuzzyPage(
+                availableTopMatches: sortedTop.count,
+                offset: request.offset,
+                limit: request.limit
+            )
             let pageIDs = page.compactMap { index.items[$0.slot]?.id }
             let resultItems = try fetchItemsByIDs(ids: pageIDs)
             return SearchResult(items: resultItems, total: totalMatches, hasMore: hasMore, coverage: .complete, searchTimeMs: 0)
@@ -3279,6 +3272,15 @@ public actor SearchEngineImpl {
             coverage: totalIsUnknown ? .stagedRefine : .complete,
             searchTimeMs: 0
         )
+    }
+
+    static func hasReachableNextFuzzyPage(
+        availableTopMatches: Int,
+        offset: Int,
+        limit: Int
+    ) -> Bool {
+        guard availableTopMatches > offset, offset >= 0, limit > 0 else { return false }
+        return availableTopMatches - offset > limit
     }
 
     private func shouldPreferFTSForFuzzy(query: String) -> Bool {
@@ -3763,6 +3765,7 @@ public actor SearchEngineImpl {
 
     private func withTimeout<T: Sendable>(
         timeout: TimeInterval,
+        onTimeout: @escaping @Sendable () -> Void = {},
         _ work: @escaping @Sendable () async throws -> T
     ) async throws -> T {
         try await withThrowingTaskGroup(of: T.self) { group in
@@ -3771,6 +3774,7 @@ public actor SearchEngineImpl {
             }
             group.addTask {
                 try await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+                onTimeout()
                 throw SearchError.timeout
             }
 
@@ -5197,6 +5201,15 @@ public actor SearchEngineImpl {
 
     func debugStartShortQueryIndexBuild(force: Bool = true) {
         startShortQueryIndexBuildIfNeeded(force: force)
+    }
+
+    func debugInstallPendingShortQueryIndexBuild(_ task: Task<Void, Never>) {
+        shortQueryIndexBuildTask?.cancel()
+        shortQueryIndexBuildGeneration &+= 1
+        shortQueryIndex = nil
+        shortQueryIndexPendingUpserts = []
+        shortQueryIndexPendingDeletions = []
+        shortQueryIndexBuildTask = task
     }
 
     func debugAwaitShortQueryIndexBuild() async {

@@ -12,11 +12,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         static let flags: CGEventFlags = .maskControl
     }
 
-    /// 单例访问
-    static var shared: AppDelegate? {
-        NSApp.delegate as? AppDelegate
-    }
-
     var panel: FloatingPanel?
     private var uiTestWindow: NSWindow?
     private(set) var hotKeyService: HotKeyService?
@@ -511,6 +506,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     /// v0.17: 修复内存泄漏 - 窗口关闭时释放并清空引用
     @MainActor
     func openSettings() {
-        settingsWindowCoordinator.show(appState: appState)
+        settingsWindowCoordinator.show(
+            appState: appState,
+            checkForUpdates: updaterController.map { updaterController in
+                { updaterController.checkForUpdates(nil) }
+            }
+        )
     }
 }

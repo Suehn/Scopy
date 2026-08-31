@@ -10,7 +10,7 @@ struct FooterView: View {
 
     /// v0.22: 修复 -1 显示 bug - 当 totalCount=-1 时表示"未知"，显示 "50+ items"
     private var summaryText: String {
-        if !historyViewModel.searchQuery.isEmpty {
+        if historyViewModel.hasActiveFilters {
             // 搜索模式：显示当前结果数
             if historyViewModel.totalCount < 0 {
                 return "\(historyViewModel.items.count)+ results"
@@ -44,7 +44,7 @@ struct FooterView: View {
                         .lineLimit(1)
                         .fixedSize()
 
-                    if historyViewModel.canLoadMore && !historyViewModel.searchQuery.isEmpty {
+                    if historyViewModel.canLoadMore && historyViewModel.hasActiveFilters {
                         Text("·")
                         if historyViewModel.isLoading {
                             ProgressView()

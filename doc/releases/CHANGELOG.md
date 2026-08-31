@@ -12,6 +12,25 @@
 
 - No unreleased entries.
 
+## [v0.72.2] - 2026-08-31
+
+### Fixed
+
+- Prevents an older clipboard-monitor session from overwriting a restarted session, keeps large-content persistence off the main actor, and separates file identity from equal-looking plain text.
+- Makes SQLite search deadlines and cancellation interrupt active queries; restores note evidence for recent short exact/regex searches; and reports incomplete or staged search coverage honestly after refresh, refinement, or pagination failures.
+- Rejects stale history snapshots on every fetch attempt, coalesces one trailing reload after repeated event collisions, joins duplicate load-more requests, and advances selection only after deletion succeeds.
+- Prevents an old Settings save/dismiss task from hiding a reopened window and removes About-page access to the global app delegate.
+
+### Security And Reliability
+
+- Bounds link-enrichment concurrency, queue depth, response sizes, redirects, cache size, and HTML/image work; validates every initial, redirected, and asset host against public-address policy while preserving named-host Clash/Mihomo Fake-IP routing.
+- Reuses one bounded async permit pool for hover preview work and makes queued cancellation authoritative.
+
+### Performance And Tooling
+
+- Keeps first short queries on the non-blocking SQL fallback while the index loads, exposes explicit steady-state index preparation to the release benchmark, and records cold fallback separately instead of warming by guesswork.
+- Removes the obsolete 315-line runtime profiler, its 246-line test suite, warning-only assertions, dead flags, compatibility defaults, and decorative performance tests; real integration and performance coverage remains in the appropriate gates.
+
 ## [v0.72.1] - 2026-08-29
 
 ### Fixed

@@ -1,7 +1,8 @@
 import CoreGraphics
 import Foundation
 import XCTest
-import ScopyKit
+
+@testable import ScopyKit
 
 @testable import Scopy
 
@@ -21,6 +22,31 @@ final class HistoryHoverPreviewPipelineTests: XCTestCase {
             HoverPreviewScreenMetrics.maxPopoverWidthPoints(),
             accuracy: 0.5
         )
+    }
+
+    func testCancelledQueuedPreviewTaskDoesNotRunOperation() async {
+        let pool = AsyncPermitPool(limit: 1, maxPending: 1)
+        let probe = RenderProbe()
+        let initialPermit = await pool.acquire()
+        XCTAssertTrue(initialPermit)
+
+        let task = Task {
+            await HistoryHoverPreviewPipeline.runBudgetedDetached(
+                using: pool,
+                priority: .utility
+            ) {
+                probe.markRendered()
+            }
+        }
+        while await pool.queuedWaiterCount() == 0 {
+            await Task.yield()
+        }
+
+        task.cancel()
+        _ = await task.value
+
+        XCTAssertFalse(probe.hasRendered)
+        await pool.release()
     }
 
     func testImagePlanUsesContentHashWidthAndDelay() {

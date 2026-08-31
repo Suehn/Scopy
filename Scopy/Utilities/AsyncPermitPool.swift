@@ -1,6 +1,6 @@
 import Foundation
 
-actor AsyncPermitPool {
+public actor AsyncPermitPool {
     struct Snapshot: Sendable, Equatable {
         let activeCount: Int
         let queuedCount: Int
@@ -15,7 +15,7 @@ actor AsyncPermitPool {
     private var waitOrder: [UUID] = []
     private var waiters: [UUID: CheckedContinuation<Bool, Never>] = [:]
 
-    init(
+    public init(
         limit: Int,
         maxPending: Int? = nil,
         afterQueuedGrant: (@Sendable () async -> Void)? = nil
@@ -29,7 +29,7 @@ actor AsyncPermitPool {
         self.afterQueuedGrant = afterQueuedGrant
     }
 
-    func acquire() async -> Bool {
+    public func acquire() async -> Bool {
         guard !Task.isCancelled else { return false }
 
         if inUse < limit {
@@ -91,7 +91,7 @@ actor AsyncPermitPool {
         )
     }
 
-    func release() {
+    public func release() {
         while let waiterID = waitOrder.first {
             waitOrder.removeFirst()
             guard let continuation = waiters.removeValue(forKey: waiterID) else {

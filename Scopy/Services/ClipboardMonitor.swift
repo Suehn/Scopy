@@ -786,6 +786,7 @@ public final class ClipboardMonitor {
     private func checkClipboard() async {
         guard isMonitoring else { return }
         guard !isCheckingClipboard else { return }
+        let sessionID = monitoringSessionID
         isCheckingClipboard = true
         defer { isCheckingClipboard = false }
 
@@ -821,9 +822,14 @@ public final class ClipboardMonitor {
         // 2. 所有大内容（包括非图片）都异步处理，避免主线程阻塞
         // 3. 只有小内容在主线程同步处理
         if rawData.type == .image || rawData.sizeBytes >= ScopyThresholds.ingestHashOffloadBytes {
-            // 图片或大内容：异步处理
-            guard processLargeContentAsync(rawData) else { return }
-            lastChangeCount = currentChangeCount
+            // Persist the durable envelope off the main actor before scheduling ingest work.
+            guard await processLargeContentAsync(rawData) else { return }
+            // A stop/start while persistence was suspended owns its own pasteboard baseline.
+            // The committed envelope is still queued (or replayed on the next start), but the
+            // older poll must not overwrite the new session's change count.
+            if monitoringSessionID == sessionID {
+                lastChangeCount = currentChangeCount
+            }
             return
         }
 
@@ -841,16 +847,29 @@ public final class ClipboardMonitor {
         lastChangeCount = currentChangeCount
     }
 
-    /// 异步处理大内容（在后台线程计算哈希）
-    private func processLargeContentAsync(_ rawData: RawClipboardData) -> Bool {
+    /// Persists large content away from the main actor, then registers the durable envelope.
+    private func processLargeContentAsync(_ rawData: RawClipboardData) async -> Bool {
         let envelopeURL: URL
+        let ingestDirectory = ingestSpoolDirectory
         do {
-            envelopeURL = try persistPendingEnvelope(for: rawData)
+            envelopeURL = try await Task.detached(priority: .userInitiated) {
+                try Self.persistPendingEnvelope(for: rawData, in: ingestDirectory)
+            }.value
         } catch {
             ScopyLog.monitor.error("Failed to persist ingest envelope: \(error.localizedDescription, privacy: .private)")
             return false
         }
 
+        await ClipboardIngestMetrics.shared.recordPersistedEnvelope()
+
+        // A completed envelope is durable. If monitoring stopped while the write was in flight,
+        // leave it on disk for the next replay instead of starting work in a stopped session.
+        guard isMonitoring else { return true }
+
+        return registerPersistedEnvelope(envelopeURL)
+    }
+
+    private func registerPersistedEnvelope(_ envelopeURL: URL) -> Bool {
         queueLock.lock()
         defer { queueLock.unlock() }
 
@@ -861,9 +880,6 @@ public final class ClipboardMonitor {
 
         let inserted = trackedPendingEnvelopePaths.insert(envelopeURL.path).inserted
         guard inserted else { return true }
-        Task {
-            await ClipboardIngestMetrics.shared.recordPersistedEnvelope()
-        }
 
         if pendingLargeContent.count >= maxPendingItems {
             ScopyLog.monitor.error(
@@ -940,14 +956,12 @@ public final class ClipboardMonitor {
                     plainText = "[Image: \(Self.formatBytes(sizeBytes))]"
                 }
 
-                let hash: String
-                if let precomputed = envelope.precomputedHash {
-                    hash = precomputed
-                } else if let payloadData {
-                    hash = Self.computeHashStatic(payloadData)
-                } else {
-                    hash = Self.computeHashStatic(Data(plainText.utf8))
-                }
+                let hash = Self.contentHash(
+                    type: envelope.type,
+                    plainText: plainText,
+                    payloadData: payloadData,
+                    precomputedHash: envelope.precomputedHash
+                )
 
                 let preferredPayloadURL: URL? = {
                     guard payloadData == originalPayloadData else { return nil }
@@ -1098,7 +1112,10 @@ public final class ClipboardMonitor {
         }
     }
 
-    private func persistPendingEnvelope(for rawData: RawClipboardData) throws -> URL {
+    nonisolated private static func persistPendingEnvelope(
+        for rawData: RawClipboardData,
+        in ingestDirectory: URL
+    ) throws -> URL {
         let id = UUID()
         let payloadFileName = rawData.rawData.map { _ in "\(id.uuidString).payload" }
         var payloadURL: URL?
@@ -1109,7 +1126,7 @@ public final class ClipboardMonitor {
             }
         }
         if let payloadData = rawData.rawData, let payloadFileName {
-            let url = ingestSpoolDirectory.appendingPathComponent(payloadFileName)
+            let url = ingestDirectory.appendingPathComponent(payloadFileName)
             payloadURL = url
             try StorageService.writeAtomically(payloadData, to: url.path)
         }
@@ -1125,7 +1142,7 @@ public final class ClipboardMonitor {
             payloadFileName: payloadFileName
         )
 
-        let envelopeURL = ingestSpoolDirectory.appendingPathComponent("\(id.uuidString).envelope.json")
+        let envelopeURL = ingestDirectory.appendingPathComponent("\(id.uuidString).envelope.json")
         try Self.writePendingEnvelope(envelope, to: envelopeURL)
         envelopeCommitted = true
         return envelopeURL
@@ -1776,37 +1793,49 @@ public final class ClipboardMonitor {
 
     /// 为 RawClipboardData 计算哈希（用于小内容，在主线程同步执行）
     private func computeHash(_ rawData: RawClipboardData) -> String {
-        // 如果有预计算的指纹（如图片轻量指纹），直接使用
-        if let precomputed = rawData.precomputedHash {
-            return precomputed
+        Self.contentHash(
+            type: rawData.type,
+            plainText: rawData.plainText,
+            payloadData: rawData.rawData,
+            precomputedHash: rawData.precomputedHash
+        )
+    }
+
+    /// Central dedup key policy, shared by immediate reads and durable ingest replay.
+    nonisolated private static func contentHash(
+        type: ClipboardItemType,
+        plainText: String,
+        payloadData: Data?,
+        precomputedHash: String?
+    ) -> String {
+        if let precomputedHash {
+            return precomputedHash
         }
-        // 否则计算 SHA256
-        //
-        // v0.md 3.2：文本去重以“标准化后的主文本”为准（去首尾空白、统一换行）。
-        // - text / rtf / html：以 plainText 计算 hash，避免 RTF/HTML payload 中的可变 metadata 造成“看起来一样但 hash 不同”。
-        // - image：以二进制数据计算 hash。
-        // - file：以路径文本计算 hash（序列化 URL 数据可能含可变字段）。
-        switch rawData.type {
+
+        // Text, RTF and HTML intentionally deduplicate by normalized visible text. File
+        // captures need a distinct namespace because the same path string has different
+        // replay semantics when copied as plain text.
+        switch type {
         case .text, .rtf, .html:
-            if !rawData.plainText.isEmpty {
-                return computeHash(rawData.plainText)
+            if !plainText.isEmpty {
+                return computeHashStatic(Data(plainText.utf8))
             }
-            if let data = rawData.rawData {
-                return computeHash(data)
+            if let payloadData {
+                return computeHashStatic(payloadData)
             }
-            return computeHash(rawData.plainText)
+            return computeHashStatic(Data())
         case .file:
-            return computeHash(rawData.plainText)
+            return "file:" + computeHashStatic(Data(plainText.utf8))
         case .image:
-            if let data = rawData.rawData {
-                return computeHash(data)
+            if let payloadData {
+                return computeHashStatic(payloadData)
             }
-            return computeHash(rawData.plainText)
+            return computeHashStatic(Data(plainText.utf8))
         case .other:
-            if let data = rawData.rawData {
-                return computeHash(data)
+            if let payloadData {
+                return computeHashStatic(payloadData)
             }
-            return computeHash(rawData.plainText)
+            return computeHashStatic(Data(plainText.utf8))
         }
     }
 
@@ -1831,7 +1860,12 @@ public final class ClipboardMonitor {
         // 例外：临时图片路径与图片二进制并存时（常见于聊天/IM 客户端）优先按图片处理。
         if !fileURLs.isEmpty, !shouldPreferImageOverFileURLs {
             let paths = fileURLs.map { $0.path }.joined(separator: "\n")
-            let hash = computeHash(paths)
+            let hash = Self.contentHash(
+                type: .file,
+                plainText: paths,
+                payloadData: nil,
+                precomputedHash: nil
+            )
             // 序列化文件 URL 以便后续恢复
             let urlData = Self.serializeFileURLs(fileURLs)
             return ClipboardContent(

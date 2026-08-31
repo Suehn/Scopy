@@ -486,11 +486,9 @@ final class HistoryItemRowDescriptorTests: XCTestCase {
         let worker = cache.prewarm(items: staleItems)
         XCTAssertNotNil(worker)
 
-        for _ in 0..<1_000 {
-            if cache.activePrewarmInFlightCountForTesting > 0 { break }
-            await Task.yield()
-        }
-        XCTAssertGreaterThan(cache.activePrewarmInFlightCountForTesting, 0)
+        await assertEventually(pollInterval: 0.001, {
+            cache.activePrewarmInFlightCountForTesting > 0
+        }, message: "The stale prewarm should be admitted before it is superseded")
 
         XCTAssertNil(cache.prewarm(items: [latestText, latestFile]))
         await worker?.value

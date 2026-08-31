@@ -176,7 +176,10 @@ final class HistoryContentRevisionRegistryTests: XCTestCase {
         service.setItemCount(2, pinnedCount: 1)
         let appState = AppState.forTesting(service: service)
         defer { appState.stop() }
-        await appState.load()
+        let subscribed = expectation(description: "Event listener subscribed")
+        service.onEventStreamSubscribed = { subscribed.fulfill() }
+        await appState.start()
+        await fulfillment(of: [subscribed], timeout: 1.0)
 
         let pinnedItem = try! XCTUnwrap(appState.pinnedItems.first)
         let unpinnedItem = try! XCTUnwrap(appState.unpinnedItems.first)
@@ -201,7 +204,11 @@ final class HistoryContentRevisionRegistryTests: XCTestCase {
             snapshot: appState.historyViewModel.contentRevisionReconciliationSnapshot
         )
 
+        let clearHandled = expectation(description: "Clear event handled before sentinel")
+        appState.applyHotKeyHandler = { _, _ in clearHandled.fulfill() }
         await appState.clearAll()
+        service.emitEvent(.settingsChanged)
+        await fulfillment(of: [clearHandled], timeout: 1.0)
         store.reconcile(
             snapshot: appState.historyViewModel.contentRevisionReconciliationSnapshot
         )

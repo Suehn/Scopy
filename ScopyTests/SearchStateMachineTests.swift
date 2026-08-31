@@ -19,6 +19,10 @@ final class SearchStateMachineTests: XCTestCase {
         func stop() {}
         func stopAndWait() async {}
         func fetchRecent(limit _: Int, offset _: Int) async throws -> [ClipboardItemDTO] { [] }
+        func fetchPinned() async throws -> [ClipboardItemDTO] { [] }
+        func fetchRecentUnpinned(limit: Int, offset: Int) async throws -> [ClipboardItemDTO] {
+            try await fetchRecent(limit: limit, offset: offset)
+        }
 
         func search(query: SearchRequest) async throws -> SearchResultPage {
             recordedSearchRequests.append(query)
@@ -47,9 +51,14 @@ final class SearchStateMachineTests: XCTestCase {
 
         func pin(itemID _: UUID) async throws {}
         func unpin(itemID _: UUID) async throws {}
+        func updateNote(itemID _: UUID, note _: String?) async throws {}
         func delete(itemID _: UUID) async throws {}
         func clearAll() async throws {}
         func copyToClipboard(itemID _: UUID) async throws {}
+        func copyToClipboardOptimizedForCodex(itemID: UUID) async throws {
+            try await copyToClipboard(itemID: itemID)
+        }
+        func fileURLs(itemID _: UUID) async throws -> [URL] { [] }
         func updateSettings(_ settings: SettingsDTO) async throws {}
         func getSettings() async throws -> SettingsDTO { .default }
         func getStorageStats() async throws -> (itemCount: Int, sizeBytes: Int) { (0, 0) }
@@ -149,6 +158,10 @@ final class SearchStateMachineTests: XCTestCase {
         func stop() {}
         func stopAndWait() async {}
         func fetchRecent(limit _: Int, offset _: Int) async throws -> [ClipboardItemDTO] { [] }
+        func fetchPinned() async throws -> [ClipboardItemDTO] { [] }
+        func fetchRecentUnpinned(limit: Int, offset: Int) async throws -> [ClipboardItemDTO] {
+            try await fetchRecent(limit: limit, offset: offset)
+        }
 
         func search(query: SearchRequest) async throws -> SearchResultPage {
             recordedSearchRequests.append(query)
@@ -188,9 +201,14 @@ final class SearchStateMachineTests: XCTestCase {
 
         func pin(itemID _: UUID) async throws {}
         func unpin(itemID _: UUID) async throws {}
+        func updateNote(itemID _: UUID, note _: String?) async throws {}
         func delete(itemID _: UUID) async throws {}
         func clearAll() async throws {}
         func copyToClipboard(itemID _: UUID) async throws {}
+        func copyToClipboardOptimizedForCodex(itemID: UUID) async throws {
+            try await copyToClipboard(itemID: itemID)
+        }
+        func fileURLs(itemID _: UUID) async throws -> [URL] { [] }
         func updateSettings(_ settings: SettingsDTO) async throws {}
         func getSettings() async throws -> SettingsDTO { .default }
         func getStorageStats() async throws -> (itemCount: Int, sizeBytes: Int) { (0, 0) }
@@ -223,6 +241,11 @@ final class SearchStateMachineTests: XCTestCase {
 
         func fetchRecent(limit: Int, offset: Int) async throws -> [ClipboardItemDTO] {
             Array(recentItems.dropFirst(offset).prefix(limit))
+        }
+
+        func fetchPinned() async throws -> [ClipboardItemDTO] { [] }
+        func fetchRecentUnpinned(limit: Int, offset: Int) async throws -> [ClipboardItemDTO] {
+            try await fetchRecent(limit: limit, offset: offset)
         }
 
         func search(query: SearchRequest) async throws -> SearchResultPage {
@@ -265,9 +288,14 @@ final class SearchStateMachineTests: XCTestCase {
 
         func pin(itemID: UUID) async throws {}
         func unpin(itemID: UUID) async throws {}
+        func updateNote(itemID: UUID, note: String?) async throws {}
         func delete(itemID: UUID) async throws {}
         func clearAll() async throws {}
         func copyToClipboard(itemID: UUID) async throws {}
+        func copyToClipboardOptimizedForCodex(itemID: UUID) async throws {
+            try await copyToClipboard(itemID: itemID)
+        }
+        func fileURLs(itemID: UUID) async throws -> [URL] { [] }
         func updateSettings(_ settings: SettingsDTO) async throws {}
         func getSettings() async throws -> SettingsDTO { .default }
         func getStorageStats() async throws -> (itemCount: Int, sizeBytes: Int) { (recentItems.count, 0) }
@@ -334,6 +362,11 @@ final class SearchStateMachineTests: XCTestCase {
             Array(recentItems.dropFirst(offset).prefix(limit))
         }
 
+        func fetchPinned() async throws -> [ClipboardItemDTO] { [] }
+        func fetchRecentUnpinned(limit: Int, offset: Int) async throws -> [ClipboardItemDTO] {
+            try await fetchRecent(limit: limit, offset: offset)
+        }
+
         func search(query: SearchRequest) async throws -> SearchResultPage {
             recordedSearchRequests.append(query)
             let suffix = query.offset == 0 ? "first" : "more"
@@ -351,9 +384,14 @@ final class SearchStateMachineTests: XCTestCase {
 
         func pin(itemID: UUID) async throws {}
         func unpin(itemID: UUID) async throws {}
+        func updateNote(itemID: UUID, note: String?) async throws {}
         func delete(itemID: UUID) async throws {}
         func clearAll() async throws {}
         func copyToClipboard(itemID: UUID) async throws {}
+        func copyToClipboardOptimizedForCodex(itemID: UUID) async throws {
+            try await copyToClipboard(itemID: itemID)
+        }
+        func fileURLs(itemID: UUID) async throws -> [URL] { [] }
         func updateSettings(_ settings: SettingsDTO) async throws {}
         func getSettings() async throws -> SettingsDTO { .default }
         func getStorageStats() async throws -> (itemCount: Int, sizeBytes: Int) { (recentItems.count, 0) }

@@ -1396,7 +1396,6 @@ public final class ScrollPerformanceProfile {
             "SCOPY_PERF_HISTORY_INDEX": env["SCOPY_PERF_HISTORY_INDEX"] ?? "",
             "SCOPY_PERF_SCROLL_RESOLVER_CACHE": env["SCOPY_PERF_SCROLL_RESOLVER_CACHE"] ?? "",
             "SCOPY_PERF_MARKDOWN_RESOLVER_CACHE": env["SCOPY_PERF_MARKDOWN_RESOLVER_CACHE"] ?? "",
-            "SCOPY_PERF_PREVIEW_TASK_BUDGET": env["SCOPY_PERF_PREVIEW_TASK_BUDGET"] ?? "",
             "SCOPY_PERF_SHORT_QUERY_DEBOUNCE": env["SCOPY_PERF_SHORT_QUERY_DEBOUNCE"] ?? "",
             "source_fingerprint": env["SCOPY_PROFILE_SOURCE_FINGERPRINT"] ?? "",
             "executable_fingerprint": Self.currentExecutableFingerprint(),

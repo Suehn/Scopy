@@ -160,14 +160,12 @@ run_variant_repeat() {
   local perf_index=1
   local perf_scroll_cache=1
   local perf_markdown_cache=1
-  local perf_preview_budget=1
   local perf_short_debounce=1
 
   if [[ "$variant" == "baseline" ]]; then
     perf_index=0
     perf_scroll_cache=0
     perf_markdown_cache=0
-    perf_preview_budget=0
     perf_short_debounce=0
   fi
 
@@ -221,7 +219,6 @@ run_variant_repeat() {
       TEST_RUNNER_SCOPY_PERF_HISTORY_INDEX="$perf_index" \
       TEST_RUNNER_SCOPY_PERF_SCROLL_RESOLVER_CACHE="$perf_scroll_cache" \
       TEST_RUNNER_SCOPY_PERF_MARKDOWN_RESOLVER_CACHE="$perf_markdown_cache" \
-      TEST_RUNNER_SCOPY_PERF_PREVIEW_TASK_BUDGET="$perf_preview_budget" \
       TEST_RUNNER_SCOPY_PERF_SHORT_QUERY_DEBOUNCE="$perf_short_debounce" \
       xcodebuild -quiet test \
         -project Scopy.xcodeproj \

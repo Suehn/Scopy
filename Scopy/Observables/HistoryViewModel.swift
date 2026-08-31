@@ -258,6 +258,7 @@ final class HistoryViewModel {
         var refineShortQueryDelayNs: UInt64
         var refineLongQueryDelayNs: UInt64
         var recentAppsRefreshDelayNs: UInt64
+        var staleLoadRetryDelayNs: UInt64
 
         static let production = Timing(
             // v0.29+: 更快的首屏反馈（10ms 级）
@@ -265,14 +266,16 @@ final class HistoryViewModel {
             // v0.57+: 长词全量校准足够快，refine 立即执行；短词保留极短 delay 避免抖动
             refineShortQueryDelayNs: 10_000_000,
             refineLongQueryDelayNs: 0,
-            recentAppsRefreshDelayNs: 500_000_000
+            recentAppsRefreshDelayNs: 500_000_000,
+            staleLoadRetryDelayNs: 100_000_000
         )
 
         static let tests = Timing(
             searchDebounceNs: 20_000_000,
             refineShortQueryDelayNs: 40_000_000,
             refineLongQueryDelayNs: 40_000_000,
-            recentAppsRefreshDelayNs: 20_000_000
+            recentAppsRefreshDelayNs: 20_000_000,
+            staleLoadRetryDelayNs: 20_000_000
         )
     }
 
@@ -400,6 +403,8 @@ final class HistoryViewModel {
             return nil
         case .stagedRefine:
             return "首屏为预筛结果，正在全量校准…（排序/漏项可能会更新）"
+        case .incomplete:
+            return "结果未完成（排序/漏项可能不完整）"
         case .recentOnly(let limit):
             switch searchMode {
             case .exact:
@@ -421,6 +426,8 @@ final class HistoryViewModel {
             return searchModeDisplayName(searchMode)
         case .stagedRefine:
             return "Calibrating"
+        case .incomplete:
+            return "Partial"
         case .recentOnly(let limit):
             return "Recent \(limit)"
         }
@@ -437,6 +444,8 @@ final class HistoryViewModel {
             coverage = "Complete"
         case .stagedRefine:
             coverage = "Staged"
+        case .incomplete:
+            coverage = "Partial"
         case .recentOnly(let limit):
             coverage = "Recent \(limit)"
         }
@@ -447,6 +456,8 @@ final class HistoryViewModel {
     @ObservationIgnored private var searchTask: Task<Void, Never>?
     @ObservationIgnored private var loadMoreTask: Task<Void, Never>?
     @ObservationIgnored private var refineTask: Task<Void, Never>?
+    @ObservationIgnored private var staleLoadRetryTask: Task<Void, Never>?
+    @ObservationIgnored private var storageDetailsTask: Task<Void, Never>?
     @ObservationIgnored private var recentAppsRefreshTask: Task<Void, Never>?
     @ObservationIgnored private var persistedDefaultSearchMode: SearchMode = SettingsDTO.default.defaultSearchMode
     @ObservationIgnored private var followsPersistedDefaultSearchMode: Bool = true
@@ -476,6 +487,8 @@ final class HistoryViewModel {
     }
 
     func updateService(_ service: ClipboardServiceProtocol) {
+        cancelTask(&staleLoadRetryTask)
+        cancelTask(&storageDetailsTask)
         self.service = service
     }
 
@@ -500,6 +513,8 @@ final class HistoryViewModel {
         cancelTask(&searchTask)
         cancelTask(&loadMoreTask)
         cancelTask(&refineTask)
+        cancelTask(&staleLoadRetryTask)
+        cancelTask(&storageDetailsTask)
         cancelTask(&recentAppsRefreshTask)
     }
 
@@ -509,6 +524,15 @@ final class HistoryViewModel {
         switch event {
         case .newItem(let item):
             mergeKnownContentRevisions([item], allowRevivingDeletedItems: true)
+            if let bundleID = item.appBundleID, !recentApps.contains(bundleID) {
+                scheduleRecentAppsRefresh()
+            }
+
+            if hasSemanticSearchQuery {
+                refreshSemanticSearchProjection()
+                return
+            }
+
             let didMatchCurrentFilters = matchesCurrentFilters(item)
 
             if didMatchCurrentFilters {
@@ -522,10 +546,6 @@ final class HistoryViewModel {
                 listState.incrementTotalCount()
             } else if isUnfilteredList, totalCount >= 0 {
                 listState.incrementTotalCount()
-            }
-
-            if let bundleID = item.appBundleID, !recentApps.contains(bundleID) {
-                scheduleRecentAppsRefresh()
             }
         case .thumbnailUpdated(
             let itemID,
@@ -584,7 +604,7 @@ final class HistoryViewModel {
             mergeKnownContentRevisions([item])
             guard !contentRevisionRegistry.isDeleted(itemID: item.id) else { return }
             if hasSemanticSearchQuery {
-                search()
+                refreshSemanticSearchProjection()
                 return
             }
             guard let index = indexOfItem(withID: item.id) else { return }
@@ -724,6 +744,8 @@ final class HistoryViewModel {
     // MARK: - Loading
 
     func load() async {
+        cancelTask(&staleLoadRetryTask)
+        cancelTask(&storageDetailsTask)
         let currentVersion = searchVersion
         guard shouldApplyLoadResult(version: currentVersion) else { return }
 
@@ -737,10 +759,26 @@ final class HistoryViewModel {
         do {
             let startTime = CFAbsoluteTimeGetCurrent()
 
-            let pinnedItems = try await service.fetchPinned()
-            let recentItems = try await service.fetchRecentUnpinned(limit: Self.initialPageSize, offset: 0)
-            let fetchedItems = excludingKnownDeletedItems(pinnedItems + recentItems)
+            var fetchedItems: [ClipboardItemDTO] = []
+            var hasStableSnapshot = false
+            for _ in 0..<2 {
+                let revisionBeforeFetch = itemsRevision
+                let pinnedItems = try await service.fetchPinned()
+                let recentItems = try await service.fetchRecentUnpinned(
+                    limit: Self.initialPageSize,
+                    offset: 0
+                )
+                guard shouldApplyLoadResult(version: currentVersion) else { return }
+                guard itemsRevision == revisionBeforeFetch else { continue }
+                fetchedItems = excludingKnownDeletedItems(pinnedItems + recentItems)
+                hasStableSnapshot = true
+                break
+            }
             guard shouldApplyLoadResult(version: currentVersion) else { return }
+            guard hasStableSnapshot else {
+                scheduleLoadAfterStaleSnapshot(version: currentVersion)
+                return
+            }
 
             listState.replaceItems(fetchedItems)
             searchMatchContexts.removeAll(keepingCapacity: true)
@@ -763,8 +801,7 @@ final class HistoryViewModel {
             listState.updateTotalCount(stats.itemCount)
 
             settingsViewModel.storageStats = stats
-            await settingsViewModel.refreshDiskSizeIfNeeded()
-            settingsViewModel.syncExternalImageSizeBytesFromDiskIfNeeded()
+            scheduleStorageDetailsRefresh(version: currentVersion)
         } catch {
             ScopyLog.app.error("Failed to load items: \(error.localizedDescription, privacy: .private)")
         }
@@ -772,6 +809,45 @@ final class HistoryViewModel {
 
     private func shouldApplyLoadResult(version: Int) -> Bool {
         !Task.isCancelled && version == searchVersion && isUnfilteredList
+    }
+
+    private func scheduleLoadAfterStaleSnapshot(version: Int) {
+        guard staleLoadRetryTask == nil else { return }
+        staleLoadRetryTask = Task {
+            do {
+                try await Task.sleep(nanoseconds: timing.staleLoadRetryDelayNs)
+            } catch {
+                return
+            }
+            guard !Task.isCancelled else { return }
+            guard version == searchVersion, isUnfilteredList else {
+                staleLoadRetryTask = nil
+                return
+            }
+
+            // Clear ownership before reloading so another double collision can schedule
+            // exactly one successor instead of being blocked by this completed task.
+            staleLoadRetryTask = nil
+            await load()
+        }
+    }
+
+    private func scheduleStorageDetailsRefresh(version: Int) {
+        cancelTask(&storageDetailsTask)
+        storageDetailsTask = Task {
+            do {
+                let details = try await service.getDetailedStorageStats()
+                guard shouldApplyLoadResult(version: version) else { return }
+
+                settingsViewModel.diskSizeBytes = details.totalSizeBytes
+                settingsViewModel.syncExternalImageSizeBytesFromDiskIfNeeded()
+            } catch {
+                guard shouldApplyLoadResult(version: version) else { return }
+                ScopyLog.app.error(
+                    "Failed to get disk size: \(error.localizedDescription, privacy: .private)"
+                )
+            }
+        }
     }
 
     func loadIfStale(minIntervalSeconds: TimeInterval = 0.5) async {
@@ -794,13 +870,21 @@ final class HistoryViewModel {
 
     func loadMore() async {
         ScrollPerformanceProfile.shared.incrementCounter(name: "list.load_more_attempt")
-        cancelTask(&loadMoreTask)
+        if let inFlightTask = loadMoreTask {
+            await inFlightTask.value
+            return
+        }
 
-        loadMoreTask = Task {
+        let currentVersion = searchVersion
+
+        let task = Task {
+            defer {
+                if currentVersion == searchVersion {
+                    loadMoreTask = nil
+                }
+            }
             guard !Task.isCancelled else { return }
             guard canLoadMore, !isLoading else { return }
-
-            let currentVersion = searchVersion
 
             isLoading = true
             defer {
@@ -812,7 +896,7 @@ final class HistoryViewModel {
             do {
                 if !isUnfilteredList {
                     // When current result is prefilter (total = -1), force full fuzzy before paging.
-                    if searchCoverage.isStagedRefine,
+                    if (searchCoverage == .stagedRefine || searchCoverage == .incomplete),
                        (searchMode == .fuzzy || searchMode == .fuzzyPlus) {
                         let expectedLimit = loadedCount + Self.loadMorePageSize
                         let request = SearchRequest(
@@ -875,20 +959,33 @@ final class HistoryViewModel {
             }
         }
 
-        await loadMoreTask?.value
+        loadMoreTask = task
+        await task.value
     }
 
     // MARK: - Search
 
     func search() {
+        startSearch(preservingCurrentProjection: false)
+    }
+
+    private func refreshSemanticSearchProjection() {
+        startSearch(preservingCurrentProjection: true)
+    }
+
+    private func startSearch(preservingCurrentProjection: Bool) {
         cancelTask(&searchTask)
         cancelTask(&refineTask)
+        cancelTask(&staleLoadRetryTask)
+        cancelTask(&storageDetailsTask)
 
         searchVersion += 1
         let currentVersion = searchVersion
 
         cancelTask(&loadMoreTask)
-        clearSearchProjection()
+        if !preservingCurrentProjection {
+            clearSearchProjection()
+        }
 
         if isUnfilteredList {
             searchTask = Task {
@@ -899,9 +996,9 @@ final class HistoryViewModel {
             return
         }
 
-        // The current projection is cleared immediately so stale rows never appear under the new
-        // query. Own the loading state across the debounce as well, avoiding a transient empty-state
-        // flash before the replacement page begins.
+        // User-initiated query changes clear stale rows above. Event-driven refreshes retain the
+        // current projection until the versioned replacement arrives. Own the loading state across
+        // the debounce in both cases.
         isLoading = true
         searchTask = Task {
             defer {
@@ -969,6 +1066,9 @@ final class HistoryViewModel {
                             replaceSearchPage(with: refined)
                             searchCoverage = refined.coverage
                         } catch {
+                            guard !Task.isCancelled, refineVersion == searchVersion else { return }
+                            guard searchCoverage.isStagedRefine else { return }
+                            searchCoverage = .incomplete
                             ScopyLog.app.warning("Refine search failed: \(error.localizedDescription, privacy: .private)")
                         }
                     }
@@ -979,8 +1079,12 @@ final class HistoryViewModel {
                 performanceSummary = await PerformanceMetrics.shared.getSummary()
             } catch {
                 guard !Task.isCancelled, currentVersion == searchVersion else { return }
-                clearSearchProjection()
-                searchCoverage = .complete
+                if preservingCurrentProjection {
+                    searchCoverage = .incomplete
+                } else {
+                    clearSearchProjection()
+                    searchCoverage = .complete
+                }
                 ScopyLog.app.error("Search failed: \(error.localizedDescription, privacy: .private)")
             }
         }
@@ -1105,13 +1209,16 @@ final class HistoryViewModel {
         }
     }
 
-    func delete(_ item: ClipboardItemDTO) async {
+    @discardableResult
+    func delete(_ item: ClipboardItemDTO) async -> Bool {
         do {
             try await service.delete(itemID: item.id)
             invalidateKnownContentRevision(itemID: item.id)
             _ = removeItem(withID: item.id)
+            return true
         } catch {
             ScopyLog.app.error("Delete failed: \(error.localizedDescription, privacy: .private)")
+            return false
         }
     }
 
@@ -1128,9 +1235,6 @@ final class HistoryViewModel {
     func clearAll() async {
         do {
             try await service.clearAll()
-            let pinnedSurvivors = await resolvePinnedSurvivors(keepPinned: true)
-            prepareForItemsCleared(pinnedSurvivors: pinnedSurvivors)
-            await refreshAfterItemsCleared()
         } catch {
             ScopyLog.app.error("Clear failed: \(error.localizedDescription, privacy: .private)")
         }
@@ -1191,7 +1295,7 @@ final class HistoryViewModel {
             nextID = nil
         }
 
-        await delete(items[index])
+        guard await delete(items[index]) else { return }
 
         selectedID = nextID
         lastSelectionSource = .programmatic
@@ -1265,6 +1369,8 @@ final class HistoryViewModel {
         cancelTask(&searchTask)
         cancelTask(&loadMoreTask)
         cancelTask(&refineTask)
+        cancelTask(&staleLoadRetryTask)
+        cancelTask(&storageDetailsTask)
         searchVersion &+= 1
         isLoading = false
     }
@@ -1300,6 +1406,8 @@ final class HistoryViewModel {
         cancelTask(&searchTask)
         cancelTask(&loadMoreTask)
         cancelTask(&refineTask)
+        cancelTask(&staleLoadRetryTask)
+        cancelTask(&storageDetailsTask)
         searchVersion &+= 1
         isLoading = false
         selectedID = nil
@@ -1374,6 +1482,7 @@ final class HistoryViewModel {
         )
         mergeKnownContentRevisions(resultItems)
         prewarmDisplayText(for: resultItems)
+        reconcileSelectionAfterProjectionReplacement()
     }
 
     private func appendSearchPage(with result: SearchResultPage) {
@@ -1401,6 +1510,12 @@ final class HistoryViewModel {
         selectedID = nil
     }
 
+    private func reconcileSelectionAfterProjectionReplacement() {
+        guard let selectedID, indexOfItem(withID: selectedID) == nil else { return }
+        self.selectedID = nil
+        lastSelectionSource = .programmatic
+    }
+
     @discardableResult
     private func setItemIfChanged(at index: Int, to value: ClipboardItemDTO) -> Bool {
         listState.setItemIfChanged(at: index, to: value)
@@ -1409,6 +1524,10 @@ final class HistoryViewModel {
     @discardableResult
     private func removeItem(withID id: UUID) -> Bool {
         searchMatchContexts.removeValue(forKey: id)
+        if selectedID == id {
+            selectedID = nil
+            lastSelectionSource = .programmatic
+        }
         return listState.removeItem(withID: id)
     }
 

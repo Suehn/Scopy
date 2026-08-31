@@ -627,6 +627,47 @@ final class ClipboardMonitorTests: XCTestCase {
         XCTAssertTrue(content?.plainText.contains(tempTextURL.path) ?? false)
     }
 
+    func testFileCaptureRemainsDistinctFromEqualPathText() async throws {
+        let fileURL = try makeTemporaryTextFileURL()
+        defer { try? FileManager.default.removeItem(at: fileURL.deletingLastPathComponent()) }
+
+        pasteboard.clearContents()
+        pasteboard.setString(fileURL.path, forType: .string)
+        let textContent = try XCTUnwrap(monitor.readCurrentClipboard())
+
+        pasteboard.clearContents()
+        pasteboard.writeObjects([fileURL as NSURL])
+        let fileContent = try XCTUnwrap(monitor.readCurrentClipboard())
+
+        XCTAssertEqual(textContent.type, .text)
+        XCTAssertEqual(fileContent.type, .file)
+        XCTAssertNotEqual(textContent.contentHash, fileContent.contentHash)
+
+        let storageRoot = ingestSpoolDirectory.appendingPathComponent("dedup-storage", isDirectory: true)
+        try FileManager.default.createDirectory(at: storageRoot, withIntermediateDirectories: true)
+        let storage = StorageService(
+            databasePath: storageRoot.appendingPathComponent("clipboard.db").path,
+            storageRootURL: storageRoot
+        )
+        try await storage.open()
+        do {
+            _ = try await storage.upsertItem(textContent)
+            _ = try await storage.upsertItem(fileContent)
+        } catch {
+            await storage.close()
+            throw error
+        }
+        let itemCount = try await storage.getItemCount()
+        let storedItems = try await storage.fetchRecent(limit: 10, offset: 0)
+        await storage.close()
+
+        XCTAssertEqual(itemCount, 2)
+        XCTAssertEqual(
+            Set(storedItems.map { $0.type.rawValue }),
+            Set([ClipboardItemType.text.rawValue, ClipboardItemType.file.rawValue])
+        )
+    }
+
     func testNonTemporaryImageFileURLWithFileListTypeStillDetectedAsFile() throws {
         guard let tiffData = makeSolidColorTIFFData() else {
             XCTFail("Failed to generate image data")

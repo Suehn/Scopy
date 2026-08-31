@@ -54,6 +54,10 @@ final class ReusableMockClipboardService: ClipboardServiceProtocol {
         eventContinuation?.finish()
     }
 
+    func stopAndWait() async {
+        stop()
+    }
+
     // MARK: - Setup Helpers
 
     func setItems(_ items: [ClipboardItemDTO]) {
@@ -114,6 +118,15 @@ final class ReusableMockClipboardService: ClipboardServiceProtocol {
         let startIndex = min(offset, sortedItems.count)
         let endIndex = min(offset + limit, sortedItems.count)
         return Array(sortedItems[startIndex..<endIndex])
+    }
+
+    func fetchPinned() async throws -> [ClipboardItemDTO] {
+        items.filter(\.isPinned).sorted { $0.lastUsedAt > $1.lastUsedAt }
+    }
+
+    func fetchRecentUnpinned(limit: Int, offset: Int) async throws -> [ClipboardItemDTO] {
+        let sortedItems = items.filter { !$0.isPinned }.sorted { $0.lastUsedAt > $1.lastUsedAt }
+        return Array(sortedItems.dropFirst(offset).prefix(limit))
     }
 
     func search(query: SearchRequest) async throws -> SearchResultPage {
@@ -201,6 +214,8 @@ final class ReusableMockClipboardService: ClipboardServiceProtocol {
         }
     }
 
+    func updateNote(itemID _: UUID, note _: String?) async throws {}
+
     func delete(itemID: UUID) async throws {
         deleteCallCount += 1
         items.removeAll { $0.id == itemID }
@@ -215,6 +230,12 @@ final class ReusableMockClipboardService: ClipboardServiceProtocol {
         copyCallCount += 1
         lastCopiedItemID = itemID
     }
+
+    func copyToClipboardOptimizedForCodex(itemID: UUID) async throws {
+        try await copyToClipboard(itemID: itemID)
+    }
+
+    func fileURLs(itemID _: UUID) async throws -> [URL] { [] }
 
     func updateSettings(_ newSettings: SettingsDTO) async throws {
         settings = newSettings

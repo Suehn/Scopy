@@ -184,8 +184,6 @@ final class ResourceCleanupTests: XCTestCase {
 
         // 验证任务可以正常结束
         let _ = await eventTask.value
-        // 如果能到这里，说明停止 + 取消路径不会卡住
-        XCTAssertTrue(true, "Event stream listener should be cancellable after stop")
     }
 
     private static func makeSharedInMemoryDatabasePath() -> String {
@@ -220,8 +218,6 @@ final class ResourceCleanupTests: XCTestCase {
 
         // 验证状态一致性（不应该有旧搜索的结果）
         XCTAssertTrue(appState.items.allSatisfy { $0.plainText.localizedCaseInsensitiveContains("2") })
-        // 主要验证不会崩溃
-        XCTAssertTrue(true, "Search cancellation should not cause issues")
     }
 
     /// 测试 loadMore 任务取消
@@ -243,8 +239,5 @@ final class ResourceCleanupTests: XCTestCase {
         await assertEventually(timeout: 1.0, pollInterval: 0.01, {
             appState.loadedCount == 550
         }, message: "loadMore should append exactly one page")
-
-        // 验证不会崩溃
-        XCTAssertTrue(true, "Multiple loadMore calls should not cause issues")
     }
 }
