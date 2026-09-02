@@ -89,6 +89,8 @@ enum HistoryHoverPreviewPipeline {
         let markdownHTML: String?
         let markdownContentSize: CGSize?
         let markdownHasHorizontalOverflow: Bool
+        /// Layout scale `markdownHTML` was rendered at.
+        var layoutScale: MarkdownChatGPTLayoutScalePercent? = nil
 
         static let empty = TextPreviewState(
             text: nil,
@@ -121,9 +123,16 @@ enum HistoryHoverPreviewPipeline {
         case present(HoverPreviewPopoverKind)
         case image(CGImage?)
         case text(TextPreviewState)
-        case markdownHTML(String)
+        case markdownHTML(String, MarkdownChatGPTLayoutScalePercent)
         case renderMarkdown(MarkdownRenderRequest)
+        /// The document is ready before the preview delay elapsed; the shared WebView may load it
+        /// offscreen so the popover opens with the final layout.
+        case prewarmMarkdownHTML(html: String, renderCacheKey: String)
     }
+
+    /// Hovering starts preview work only after this long, so passing over rows costs nothing;
+    /// the popover itself still waits for the configured preview delay.
+    static let prefetchDelayNanos: UInt64 = 300_000_000
 
     @MainActor
     static func imageRequest(item: ClipboardItemDTO, delay: TimeInterval) -> ImageRequest {
@@ -150,9 +159,7 @@ enum HistoryHoverPreviewPipeline {
             previewInfo: previewInfo,
             isMarkdown: isMarkdown,
             delay: delay,
-            markdownLayoutScale: MarkdownChatGPTLayoutScalePercent(
-                settingsValue: settings.markdownChatGPTLayoutScalePercent
-            ),
+            markdownLayoutScale: MarkdownPreviewLayoutScalePreference.active(settings: settings),
             scale: HoverPreviewScreenMetrics.activeBackingScaleFactor(),
             targetWidthPoints: HoverPreviewScreenMetrics.maxPopoverWidthPoints(),
             targetHeightPoints: HoverPreviewScreenMetrics.maxPopoverHeightPoints(),
@@ -169,9 +176,7 @@ enum HistoryHoverPreviewPipeline {
             item: item,
             revision: ClipboardItemContentRevision(item: item),
             delay: delay,
-            markdownLayoutScale: MarkdownChatGPTLayoutScalePercent(
-                settingsValue: settings.markdownChatGPTLayoutScalePercent
-            )
+            markdownLayoutScale: MarkdownPreviewLayoutScalePreference.active(settings: settings)
         )
     }
 
@@ -189,7 +194,7 @@ enum HistoryHoverPreviewPipeline {
         let targetWidthPixels = max(1, Int(request.targetWidthPoints * request.scale))
         return ImagePlan(
             delayNanos: delay,
-            prefetchDelayNanos: min(50_000_000, delay),
+            prefetchDelayNanos: min(prefetchDelayNanos, delay),
             cacheKey: "\(request.revision.cacheKey)|w\(targetWidthPixels)",
             targetWidthPixels: targetWidthPixels,
             maxLongSidePixels: request.maxLongSidePixels
@@ -203,7 +208,7 @@ enum HistoryHoverPreviewPipeline {
         let kindToken = request.previewInfo.kind.rawValue
         return FilePlan(
             delayNanos: delay,
-            prefetchDelayNanos: min(50_000_000, delay),
+            prefetchDelayNanos: min(prefetchDelayNanos, delay),
             cacheKey: "file|\(request.revision.cacheKey)|\(kindToken)|w\(targetWidthPixels)",
             targetWidthPixels: targetWidthPixels,
             quickLookMaxSidePixels: max(targetWidthPixels, targetHeightPixels),
@@ -272,9 +277,10 @@ enum HistoryHoverPreviewPipeline {
             guard !Task.isCancelled else { return }
             let html = await renderMarkdownHTML(request.source, request.context)
             guard !Task.isCancelled, !html.isEmpty else { return }
+            logHoverStage("html rendered \(html.utf8.count) bytes")
             updateMarkdownCache(html: html, request: request)
             guard callbacks.isCurrent() else { return }
-            callbacks.emit(.markdownHTML(html))
+            callbacks.emit(.markdownHTML(html, request.context.layoutScale))
         }
     }
 
@@ -433,7 +439,7 @@ enum HistoryHoverPreviewPipeline {
             )
             let renderCacheKey = MarkdownRenderCacheKey.make(contentHash: request.cacheKey, context: context)
             let cachedHTML = MarkdownPreviewCache.shared.html(forKey: renderCacheKey)
-            emitCachedFilePreview(cachedEntry, renderCacheKey: renderCacheKey, emit: emit)
+            emitCachedFilePreview(cachedEntry, renderCacheKey: renderCacheKey, layoutScale: request.markdownLayoutScale, emit: emit)
             if cachedHTML == nil, cachedEntry.text.utf16.count <= maxMarkdownPreviewBytes {
                 emit(markdownRenderEvent(
                     source: cachedEntry.text,
@@ -457,7 +463,8 @@ enum HistoryHoverPreviewPipeline {
                         isMarkdown: true,
                         markdownHTML: cachedHTML,
                         markdownContentSize: cachedMetrics?.size,
-                        markdownHasHorizontalOverflow: cachedMetrics?.hasHorizontalOverflow ?? false
+                        markdownHasHorizontalOverflow: cachedMetrics?.hasHorizontalOverflow ?? false,
+                        layoutScale: request.markdownLayoutScale
                     )
                 )
             )
@@ -470,7 +477,8 @@ enum HistoryHoverPreviewPipeline {
                         isMarkdown: true,
                         markdownHTML: nil,
                         markdownContentSize: nil,
-                        markdownHasHorizontalOverflow: false
+                        markdownHasHorizontalOverflow: false,
+                        layoutScale: request.markdownLayoutScale
                     )
                 )
             )
@@ -497,7 +505,8 @@ enum HistoryHoverPreviewPipeline {
                     isMarkdown: true,
                     markdownHTML: nil,
                     markdownContentSize: nil,
-                    markdownHasHorizontalOverflow: false
+                    markdownHasHorizontalOverflow: false,
+                    layoutScale: request.markdownLayoutScale
                 )
             )
         )
@@ -517,7 +526,7 @@ enum HistoryHoverPreviewPipeline {
         )
 
         if let cachedHTML {
-            emit(.markdownHTML(cachedHTML))
+            emit(.markdownHTML(cachedHTML, request.markdownLayoutScale))
             if let cachedMetrics {
                 let stableMetrics = stableMetrics(from: cachedMetrics, text: preview)
                 emit(
@@ -527,7 +536,8 @@ enum HistoryHoverPreviewPipeline {
                             isMarkdown: true,
                             markdownHTML: cachedHTML,
                             markdownContentSize: stableMetrics.size,
-                            markdownHasHorizontalOverflow: stableMetrics.hasHorizontalOverflow
+                            markdownHasHorizontalOverflow: stableMetrics.hasHorizontalOverflow,
+                            layoutScale: request.markdownLayoutScale
                         )
                     )
                 )
@@ -543,76 +553,105 @@ enum HistoryHoverPreviewPipeline {
         ))
     }
 
+    /// Uptime when the current text/Markdown hover started; the WebView logs its stages against it.
+    @MainActor static private(set) var textHoverStartedAt: CFTimeInterval = 0
+
+    @MainActor
+    static func logHoverStage(_ stage: String) {
+        let elapsed = (ProcessInfo.processInfo.systemUptime - textHoverStartedAt) * 1000
+        ScopyLog.ui.info("Hover preview \(stage, privacy: .public) at \(elapsed, format: .fixed(precision: 0), privacy: .public) ms")
+    }
+
     @MainActor
     private static func runTextPreview(
         request: TextRequest,
         isCurrent: @escaping @MainActor () -> Bool,
         emit: @escaping @MainActor (Event) -> Void
     ) async {
-        try? await Task.sleep(nanoseconds: delayNanos(for: request.delay))
+        textHoverStartedAt = ProcessInfo.processInfo.systemUptime
+        logHoverStage("start text \(request.item.plainText.utf8.count) bytes")
+        let delay = delayNanos(for: request.delay)
+        try? await Task.sleep(nanoseconds: min(prefetchDelayNanos, delay))
         guard !Task.isCancelled, isCurrent() else { return }
 
         let item = request.item
         let preview = item.plainText.isEmpty ? "(Empty)" : item.plainText
         let isMarkdown = await resolveMarkdownCapability(item: item, preview: preview)
         guard !Task.isCancelled, isCurrent() else { return }
+        logHoverStage("detected markdown=\(isMarkdown)")
         HistoryItemPresentationCache.shared.storeMarkdownExportCapability(isMarkdown, for: item)
 
+        // Build the document during the remaining delay: context and render off the main actor,
+        // then let the shared WebView lay it out offscreen so the popover opens at its final size.
+        var preparedHTML: String?
+        var renderCacheKey = ""
+        let layoutScale = request.markdownLayoutScale
+        if isMarkdown, preview.utf16.count <= maxMarkdownPreviewBytes {
+            let contentHash = request.revision.cacheKey
+            let (context, key) = await Task.detached(priority: .userInitiated) {
+                let context = MarkdownRenderContextResolver.defaultContext(for: preview, layoutScale: layoutScale)
+                return (context, MarkdownRenderCacheKey.make(contentHash: contentHash, context: context))
+            }.value
+            guard !Task.isCancelled, isCurrent() else { return }
+            renderCacheKey = key
+            if !key.isEmpty, let cached = MarkdownPreviewCache.shared.html(forKey: key) {
+                logHoverStage("html cache hit")
+                preparedHTML = cached
+            } else {
+                let html = await renderMarkdownHTML(preview, context: context)
+                guard !Task.isCancelled, isCurrent() else { return }
+                if !html.isEmpty {
+                    logHoverStage("html rendered \(html.utf8.count) bytes")
+                    if !key.isEmpty { MarkdownPreviewCache.shared.setHTML(html, forKey: key) }
+                    preparedHTML = html
+                }
+            }
+            if let preparedHTML, !key.isEmpty, MarkdownPreviewCache.shared.metrics(forKey: key) == nil {
+                emit(.prewarmMarkdownHTML(html: preparedHTML, renderCacheKey: key))
+            }
+        }
+
+        let elapsedNanos = UInt64(max(0, ProcessInfo.processInfo.systemUptime - textHoverStartedAt) * 1_000_000_000)
+        if delay > elapsedNanos {
+            try? await Task.sleep(nanoseconds: delay - elapsedNanos)
+        }
+        guard !Task.isCancelled, isCurrent() else { return }
+        logHoverStage("delay elapsed")
+
+        var contentSize: CGSize?
+        var hasHorizontalOverflow = false
+        if preparedHTML != nil, !renderCacheKey.isEmpty,
+           let cachedMetrics = MarkdownPreviewCache.shared.metrics(forKey: renderCacheKey) {
+            let stable = stableMetrics(from: cachedMetrics, text: preview)
+            contentSize = stable.size
+            hasHorizontalOverflow = stable.hasHorizontalOverflow
+            MarkdownPreviewCache.shared.setMetrics(stable, forKey: renderCacheKey)
+            logHoverStage("metrics ready height=\(Int(stable.size.height))")
+        }
         emit(
             .text(
                 TextPreviewState(
                     text: preview,
                     isMarkdown: isMarkdown,
-                    markdownHTML: nil,
-                    markdownContentSize: nil,
-                    markdownHasHorizontalOverflow: false
+                    markdownHTML: preparedHTML,
+                    markdownContentSize: contentSize,
+                    markdownHasHorizontalOverflow: hasHorizontalOverflow,
+                    layoutScale: request.markdownLayoutScale
                 )
             )
         )
-        if !isMarkdown {
-            emit(.present(.text))
-            return
-        }
-
         emit(.present(.text))
+        logHoverStage("popover requested")
 
-        guard preview.utf16.count <= maxMarkdownPreviewBytes else { return }
-
-        let cacheKey = request.revision.cacheKey
-        let context = MarkdownRenderContextResolver.defaultContext(
-            for: preview,
-            layoutScale: request.markdownLayoutScale
-        )
-        let renderCacheKey = MarkdownRenderCacheKey.make(contentHash: cacheKey, context: context)
-        if !renderCacheKey.isEmpty,
-           let cachedHTML = MarkdownPreviewCache.shared.html(forKey: renderCacheKey),
-           let cachedMetrics = MarkdownPreviewCache.shared.metrics(forKey: renderCacheKey) {
-            let stableMetrics = stableMetrics(from: cachedMetrics, text: preview)
-            emit(
-                .text(
-                    TextPreviewState(
-                        text: preview,
-                        isMarkdown: true,
-                        markdownHTML: cachedHTML,
-                        markdownContentSize: stableMetrics.size,
-                        markdownHasHorizontalOverflow: stableMetrics.hasHorizontalOverflow
-                    )
-                )
-            )
-            MarkdownPreviewCache.shared.setMetrics(stableMetrics, forKey: renderCacheKey)
-            return
+        // The render pool was saturated during the delay: fall back to the on-demand render.
+        if isMarkdown, preparedHTML == nil, preview.utf16.count <= maxMarkdownPreviewBytes {
+            logHoverStage("render requested after present")
+            emit(markdownRenderEvent(
+                source: preview,
+                target: .text(cacheKey: request.revision.cacheKey),
+                layoutScale: request.markdownLayoutScale
+            ))
         }
-
-        if !renderCacheKey.isEmpty, let cached = MarkdownPreviewCache.shared.html(forKey: renderCacheKey) {
-            emit(.markdownHTML(cached))
-            return
-        }
-
-        emit(markdownRenderEvent(
-            source: preview,
-            target: .text(cacheKey: cacheKey),
-            layoutScale: request.markdownLayoutScale
-        ))
     }
 
     @MainActor
@@ -640,6 +679,7 @@ enum HistoryHoverPreviewPipeline {
     private static func emitCachedFilePreview(
         _ entry: MarkdownPreviewCache.FilePreviewEntry,
         renderCacheKey: String,
+        layoutScale: MarkdownChatGPTLayoutScalePercent,
         emit: @escaping @MainActor (Event) -> Void
     ) {
         let cachedHTML = MarkdownPreviewCache.shared.html(forKey: renderCacheKey)

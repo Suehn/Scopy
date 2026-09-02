@@ -845,7 +845,10 @@ final class HistoryViewModel {
         cancelTask(&storageDetailsTask)
         storageDetailsTask = Task {
             do {
+                let walkStart = ProcessInfo.processInfo.systemUptime
                 let details = try await service.getDetailedStorageStats()
+                let walkMs = (ProcessInfo.processInfo.systemUptime - walkStart) * 1000
+                ScopyLog.app.info("Storage details walk took \(walkMs, format: .fixed(precision: 0), privacy: .public) ms")
                 guard shouldApplyLoadResult(version: version) else { return }
 
                 settingsViewModel.diskSizeBytes = details.totalSizeBytes
@@ -876,6 +879,20 @@ final class HistoryViewModel {
         isScrolling = false
         ScrollPerformanceProfile.shared.scrollDidEnd()
     }
+
+    /// Rows before the end of the loaded page start the next fetch, so the page is usually applied
+    /// before the user reaches the end trigger.
+    static let loadMorePrefetchRows = 40
+
+    func rowDidAppear(itemID: UUID) {
+        guard canLoadMore, !isLoading, loadMoreTask == nil else { return }
+        guard let index = indexOfItem(withID: itemID), index >= loadedCount - Self.loadMorePrefetchRows else { return }
+        Task { await loadMore() }
+    }
+
+    /// Rows a page is applied in per run-loop turn, so a 100-row page costs four small List
+    /// updates instead of one long one while the user is still scrolling.
+    static let loadMoreApplyChunkRows = 20
 
     func loadMore() async {
         ScrollPerformanceProfile.shared.incrementCounter(name: "list.load_more_attempt")
@@ -956,9 +973,19 @@ final class HistoryViewModel {
                     )
                     guard !Task.isCancelled, currentVersion == searchVersion else { return }
                     let currentItems = excludingKnownDeletedItems(moreItems)
-                    listState.appendRecentPage(items: currentItems)
-                    mergeKnownContentRevisions(currentItems)
-                    prewarmDisplayText(for: currentItems)
+                    var start = 0
+                    while start < currentItems.count {
+                        let chunk = Array(currentItems[start..<min(currentItems.count, start + Self.loadMoreApplyChunkRows)])
+                        listState.appendRecentPage(items: chunk)
+                        mergeKnownContentRevisions(chunk)
+                        prewarmDisplayText(for: chunk)
+                        start += chunk.count
+                        if start < currentItems.count {
+                            // One chunk per display frame: SwiftUI commits it before the next arrives.
+                            try? await Task.sleep(nanoseconds: 20_000_000)
+                            guard !Task.isCancelled, currentVersion == searchVersion else { return }
+                        }
+                    }
                     searchCoverage = .complete
                 }
             } catch {
@@ -975,14 +1002,18 @@ final class HistoryViewModel {
     // MARK: - Search
 
     func search() {
-        startSearch(preservingCurrentProjection: false)
+        startSearch(clearsProjectionOnFailure: true)
     }
 
     private func refreshSemanticSearchProjection() {
-        startSearch(preservingCurrentProjection: true)
+        startSearch(clearsProjectionOnFailure: false)
     }
 
-    private func startSearch(preservingCurrentProjection: Bool) {
+    /// The current rows stay on screen until the versioned replacement arrives: clearing them per
+    /// keystroke emptied the List and rebuilt it twice more when the results landed. A failed
+    /// user-initiated search clears them (no candidates without evidence); a failed event-driven
+    /// refresh keeps them and marks coverage incomplete.
+    private func startSearch(clearsProjectionOnFailure: Bool) {
         cancelTask(&searchTask)
         cancelTask(&refineTask)
         cancelTask(&staleLoadRetryTask)
@@ -992,9 +1023,6 @@ final class HistoryViewModel {
         let currentVersion = searchVersion
 
         cancelTask(&loadMoreTask)
-        if !preservingCurrentProjection {
-            clearSearchProjection()
-        }
 
         if isUnfilteredList {
             searchTask = Task {
@@ -1005,9 +1033,7 @@ final class HistoryViewModel {
             return
         }
 
-        // User-initiated query changes clear stale rows above. Event-driven refreshes retain the
-        // current projection until the versioned replacement arrives. Own the loading state across
-        // the debounce in both cases.
+        // Own the loading state across the debounce.
         isLoading = true
         searchTask = Task {
             defer {
@@ -1072,7 +1098,7 @@ final class HistoryViewModel {
                             guard !Task.isCancelled, refineVersion == searchVersion else { return }
 
                             guard loadedCount <= Self.initialPageSize else { return }
-                            replaceSearchPage(with: refined)
+                            replaceSearchPage(with: refined, skippingIdenticalRefine: true)
                             searchCoverage = refined.coverage
                         } catch {
                             guard !Task.isCancelled, refineVersion == searchVersion else { return }
@@ -1088,11 +1114,11 @@ final class HistoryViewModel {
                 performanceSummary = await PerformanceMetrics.shared.getSummary()
             } catch {
                 guard !Task.isCancelled, currentVersion == searchVersion else { return }
-                if preservingCurrentProjection {
-                    searchCoverage = .incomplete
-                } else {
+                if clearsProjectionOnFailure {
                     clearSearchProjection()
                     searchCoverage = .complete
+                } else {
+                    searchCoverage = .incomplete
                 }
                 ScopyLog.app.error("Search failed: \(error.localizedDescription, privacy: .private)")
             }
@@ -1480,19 +1506,28 @@ final class HistoryViewModel {
         hits.filter { contentRevisionRegistry.acceptsProjection(itemID: $0.item.id) }
     }
 
-    private func replaceSearchPage(with result: SearchResultPage) {
+    private func replaceSearchPage(with result: SearchResultPage, skippingIdenticalRefine: Bool = false) {
         let hits = acceptedSearchHits(result.hits)
         let resultItems = hits.map(\.item)
+        let contexts = Dictionary(
+            uniqueKeysWithValues: hits.compactMap { hit in
+                hit.matchContext.map { (hit.item.id, $0) }
+            }
+        )
+        // A refine pass that reproduces the prefilter page must not rebuild the List.
+        if skippingIdenticalRefine,
+           resultItems == items,
+           contexts == searchMatchContexts,
+           listState.totalCount == result.total,
+           listState.canLoadMore == result.hasMore {
+            return
+        }
         listState.replacePage(
             items: resultItems,
             total: result.total,
             hasMore: result.hasMore
         )
-        searchMatchContexts = Dictionary(
-            uniqueKeysWithValues: hits.compactMap { hit in
-                hit.matchContext.map { (hit.item.id, $0) }
-            }
-        )
+        searchMatchContexts = contexts
         mergeKnownContentRevisions(resultItems)
         prewarmDisplayText(for: resultItems)
         reconcileSelectionAfterProjectionReplacement()

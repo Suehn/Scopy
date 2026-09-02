@@ -277,6 +277,7 @@
 		648EB5C877953074709BAF1B /* KaTeX_Caligraphic-Bold.woff in Resources */ = {isa = PBXBuildFile; fileRef = D38BC14341511B0D98DD1546 /* KaTeX_Caligraphic-Bold.woff */; };
 		6493EDDA8DBBF0FC13699EF2 /* image-group-chatgpt-search-button.jpg in Resources */ = {isa = PBXBuildFile; fileRef = 4E5A308F69DAE3C079BC814F /* image-group-chatgpt-search-button.jpg */; };
 		65703A6C2D18BB8C9698EC76 /* StorageStatsSemanticsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2729BCEB53FC3541B6A37BF /* StorageStatsSemanticsTests.swift */; };
+		65763AA7217322384C4559DB /* MarkdownPreviewLayoutScalePreference.swift in Sources */ = {isa = PBXBuildFile; fileRef = 74EE7FAABB8A5254A7DD0645 /* MarkdownPreviewLayoutScalePreference.swift */; };
 		65814A64FFC5205DC6EA1A5B /* MarkdownPreviewNavigationPolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 69C8E31A934581C57B87146A /* MarkdownPreviewNavigationPolicyTests.swift */; };
 		6694D337867337FF5925549D /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 62C29361DE1A42C04AB601DE /* ContentView.swift */; };
 		670250EC5E1C6592C3671314 /* reference-link.md in Resources */ = {isa = PBXBuildFile; fileRef = E15DF921CD907AE377BF0826 /* reference-link.md */; };
@@ -417,6 +418,7 @@
 		92A8E5E27E0CDB272DEA864A /* KaTeX_AMS-Regular.woff in Resources */ = {isa = PBXBuildFile; fileRef = 3B27D58B30D7E42FD5A09A9F /* KaTeX_AMS-Regular.woff */; };
 		92E10C004FCC3E06C222C455 /* HistoryItemFilePreviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4DC6A7ACEAFAAAF77066A68F /* HistoryItemFilePreviewView.swift */; };
 		92E7AE42405491EDD1FCD685 /* code-fence-paths.md in Resources */ = {isa = PBXBuildFile; fileRef = 7836A2D126F3A98770E8FE98 /* code-fence-paths.md */; };
+		932A3EBA14192FCDB4E41F48 /* MarkdownPreviewLayoutScalePreference.swift in Sources */ = {isa = PBXBuildFile; fileRef = 74EE7FAABB8A5254A7DD0645 /* MarkdownPreviewLayoutScalePreference.swift */; };
 		93693CEB09B31F9D903B2B54 /* HistoryListInteractionObservation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2CE8424AAA4AF537809D9147 /* HistoryListInteractionObservation.swift */; };
 		94583F2C87E6468D08FBF28F /* KaTeX_AMS-Regular.woff2 in Resources */ = {isa = PBXBuildFile; fileRef = 6F00D09F6FFB196F3B17E451 /* KaTeX_AMS-Regular.woff2 */; };
 		94A1AF4D8054FA51BD1CA617 /* XCTestExtensions.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA19ACBA28A519AD56F862DE /* XCTestExtensions.swift */; };
@@ -442,6 +444,7 @@
 		9BD0FAEC9573A2D5396A6798 /* MarkdownRenderCacheKey.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5BEF0EDA5682AECFF608778 /* MarkdownRenderCacheKey.swift */; };
 		9BD786560A73DC3C4CE8D4D6 /* HistoryItemThumbnailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20DE268ED91DDC33CB05EFB3 /* HistoryItemThumbnailView.swift */; };
 		9C53587D96359D0519DF9817 /* KaTeX_Caligraphic-Bold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 42D411B91F0A819854835FBE /* KaTeX_Caligraphic-Bold.ttf */; };
+		9C54B266E09C0158762F2BDF /* MarkdownPreviewLayoutScalePreference.swift in Sources */ = {isa = PBXBuildFile; fileRef = 74EE7FAABB8A5254A7DD0645 /* MarkdownPreviewLayoutScalePreference.swift */; };
 		9C5C05A36DFEF4AED2785BA6 /* news-openai-jalapeno.jpg in Resources */ = {isa = PBXBuildFile; fileRef = 75C7B838EED36545B77362F5 /* news-openai-jalapeno.jpg */; };
 		9D128E7E6690F185B9D230AD /* HistoryItemFileNoteEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9077C012BF49FB5A7F406FDF /* HistoryItemFileNoteEditorView.swift */; };
 		9D8B49C0A6038B9530F0DCC4 /* KaTeX_SansSerif-Italic.woff in Resources */ = {isa = PBXBuildFile; fileRef = 7C24E103BDCF71EDB9EA8167 /* KaTeX_SansSerif-Italic.woff */; };
@@ -877,6 +880,7 @@
 		74563B8569159BF7E9365CEA /* HistoryListState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryListState.swift; sourceTree = "<group>"; };
 		747759CE91D4B8639F351272 /* HoverPreviewImageCacheTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HoverPreviewImageCacheTests.swift; sourceTree = "<group>"; };
 		74C9D67BDF3FC3265BE88014 /* Scopy.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Scopy.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		74EE7FAABB8A5254A7DD0645 /* MarkdownPreviewLayoutScalePreference.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownPreviewLayoutScalePreference.swift; sourceTree = "<group>"; };
 		75C7B838EED36545B77362F5 /* news-openai-jalapeno.jpg */ = {isa = PBXFileReference; lastKnownFileType = image.jpeg; path = "news-openai-jalapeno.jpg"; sourceTree = "<group>"; };
 		7836A2D126F3A98770E8FE98 /* code-fence-paths.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = "code-fence-paths.md"; sourceTree = "<group>"; };
 		7854D4BF872E9A35EDC0F3E2 /* HistoryItemPreviewCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryItemPreviewCoordinator.swift; sourceTree = "<group>"; };
@@ -1475,6 +1479,7 @@
 				E671677DECEAFE931657E79D /* MarkdownHTMLDocumentBuilder.swift */,
 				56B7BF6CBDB5580664B77B40 /* MarkdownHTMLRenderer.swift */,
 				7B47012368E8607A49B45194 /* MarkdownPreviewCache.swift */,
+				74EE7FAABB8A5254A7DD0645 /* MarkdownPreviewLayoutScalePreference.swift */,
 				14057F59F7229BC91F12015F /* MarkdownPreviewRenderer.swift */,
 				8D861CAAB54D3FB78AB36051 /* MarkdownPreviewWebView.swift */,
 				A5BEF0EDA5682AECFF608778 /* MarkdownRenderCacheKey.swift */,
@@ -2198,6 +2203,7 @@
 				08C8AD849C0EC181764970E4 /* MarkdownHTMLDocumentBuilder.swift in Sources */,
 				62B85960B71ABB85BEEC2FA6 /* MarkdownHTMLRenderer.swift in Sources */,
 				D625C6FCB576A9DBEB789705 /* MarkdownPreviewCache.swift in Sources */,
+				932A3EBA14192FCDB4E41F48 /* MarkdownPreviewLayoutScalePreference.swift in Sources */,
 				65814A64FFC5205DC6EA1A5B /* MarkdownPreviewNavigationPolicyTests.swift in Sources */,
 				E82B5ECEF30D1949919C04B9 /* MarkdownPreviewRenderer.swift in Sources */,
 				9E74A39CF966E2318A3A70DE /* MarkdownPreviewWebView.swift in Sources */,
@@ -2402,6 +2408,7 @@
 				40DA0EF0E4FA876D5C31C3CA /* MarkdownHTMLDocumentBuilder.swift in Sources */,
 				B137C92031AAB821D6D1C0FE /* MarkdownHTMLRenderer.swift in Sources */,
 				4DE92057D710A68F2C2EFF3E /* MarkdownPreviewCache.swift in Sources */,
+				65763AA7217322384C4559DB /* MarkdownPreviewLayoutScalePreference.swift in Sources */,
 				08E87F7EC45D297E1A477546 /* MarkdownPreviewNavigationPolicyTests.swift in Sources */,
 				B88F1289FD212D0BE0F1205C /* MarkdownPreviewRenderer.swift in Sources */,
 				2632B8019CA2C30481A14A4F /* MarkdownPreviewWebView.swift in Sources */,
@@ -2552,6 +2559,7 @@
 				298CA77BD2C572D549DFD670 /* MarkdownHTMLDocumentBuilder.swift in Sources */,
 				3FFED34BF5A881C384A07B90 /* MarkdownHTMLRenderer.swift in Sources */,
 				14F78F9602744F14A55418C5 /* MarkdownPreviewCache.swift in Sources */,
+				9C54B266E09C0158762F2BDF /* MarkdownPreviewLayoutScalePreference.swift in Sources */,
 				DCCC77AC9C031BD2AF77EA60 /* MarkdownPreviewRenderer.swift in Sources */,
 				9E313361A8B13D417298110B /* MarkdownPreviewWebView.swift in Sources */,
 				3E1AE30002BAC41A3B4710E1 /* MarkdownRenderCacheKey.swift in Sources */,

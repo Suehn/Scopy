@@ -47,9 +47,21 @@ struct HistoryListState {
     }
 
     mutating func appendRecentPage(items newItems: [ClipboardItemDTO]) {
+        // Appending keeps every existing index valid; extend the derived arrays instead of
+        // rebuilding them for each page chunk.
+        var index = items.count
+        for item in newItems {
+            itemIndexByID[item.id] = index
+            if item.isPinned {
+                pinnedItems.append(item)
+            } else {
+                unpinnedItems.append(item)
+            }
+            index += 1
+        }
         items.append(contentsOf: newItems)
         loadedCount = items.count
-        rebuildDerivedState()
+        itemsRevision &+= 1
         recomputeCanLoadMore()
     }
 
@@ -103,8 +115,21 @@ struct HistoryListState {
     @discardableResult
     mutating func setItemIfChanged(at index: Int, to value: ClipboardItemDTO) -> Bool {
         guard items.indices.contains(index) else { return false }
-        guard items[index] != value else { return false }
+        let previous = items[index]
+        guard previous != value else { return false }
         items[index] = value
+        if previous.isPinned == value.isPinned {
+            // Same group, same position: replace in place instead of rebuilding every array.
+            itemsRevision &+= 1
+            if value.isPinned {
+                if let groupIndex = pinnedItems.firstIndex(where: { $0.id == value.id }) {
+                    pinnedItems[groupIndex] = value
+                }
+            } else if let groupIndex = unpinnedItems.firstIndex(where: { $0.id == value.id }) {
+                unpinnedItems[groupIndex] = value
+            }
+            return true
+        }
         rebuildDerivedState()
         return true
     }
@@ -140,10 +165,24 @@ struct HistoryListState {
                 return setItemIfChanged(at: existingIndex, to: item)
             }
             items.remove(at: existingIndex)
+            if let groupIndex = pinnedItems.firstIndex(where: { $0.id == item.id }) {
+                pinnedItems.remove(at: groupIndex)
+            } else if let groupIndex = unpinnedItems.firstIndex(where: { $0.id == item.id }) {
+                unpinnedItems.remove(at: groupIndex)
+            }
         }
         items.insert(item, at: 0)
         loadedCount = items.count
-        rebuildDerivedState()
+        // The new front item leads its group; shift the index map instead of rebuilding it.
+        itemsRevision &+= 1
+        for (index, existing) in items.enumerated() {
+            itemIndexByID[existing.id] = index
+        }
+        if item.isPinned {
+            pinnedItems.insert(item, at: 0)
+        } else {
+            unpinnedItems.insert(item, at: 0)
+        }
         recomputeCanLoadMore()
         return true
     }

@@ -1,10 +1,13 @@
 import SwiftUI
 import ScopyKit
 
+/// Reads `isLoading` itself so the List body does not observe it: the flag toggles around every
+/// search and page load.
 struct LoadMoreTriggerView: View {
-    var isLoading: Bool
+    @Environment(HistoryViewModel.self) private var historyViewModel
 
     var body: some View {
+        let isLoading = historyViewModel.isLoading
         HStack {
             Spacer()
             if isLoading {

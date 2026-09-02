@@ -45,7 +45,7 @@ struct HistoryItemTextPreviewView: View {
     @State private var isMarkdownLayoutScaleEditing = false
 
     private static let exportResolutionPercentUserDefaultsKey = "ScopyMarkdownExportResolutionPercent"
-    private static let previewLayoutScalePercentUserDefaultsKey = "ScopyMarkdownPreviewLayoutScalePercent"
+    private static let previewLayoutScalePercentUserDefaultsKey = MarkdownPreviewLayoutScalePreference.userDefaultsKey
     private static let uiTestExportResolutionEnvKey = "SCOPY_UITEST_MARKDOWN_EXPORT_RESOLUTION"
     private static let markdownLayoutScaleRenderDebounceNanoseconds: UInt64 = 90_000_000
 
@@ -96,7 +96,7 @@ struct HistoryItemTextPreviewView: View {
                     let renderKey = HoverPreviewModel.markdownRenderKey(source: text, layoutScale: layoutScale)
                     let defaultRenderKey = HoverPreviewModel.markdownRenderKey(
                         source: text,
-                        layoutScale: settingsMarkdownLayoutScale
+                        layoutScale: defaultHTMLLayoutScale
                     )
                     let isLiveRender = model.isMarkdownRenderLive(for: renderKey)
                     let defaultHTMLIsFresh = model.markdownHTMLEnrichmentFingerprint
@@ -253,6 +253,12 @@ struct HistoryItemTextPreviewView: View {
         )
     }
 
+    /// The scale the pipeline rendered `model.markdownHTML` at (the active preview scale at hover
+    /// time); a scale switch in the popover re-renders only when it differs from this.
+    private var defaultHTMLLayoutScale: MarkdownChatGPTLayoutScalePercent {
+        model.markdownHTMLLayoutScale ?? settingsMarkdownLayoutScale
+    }
+
     private var isMarkdownLayoutScaleControlExpanded: Bool {
         isMarkdownLayoutScaleControlHovered || isMarkdownLayoutScaleEditing
     }
@@ -366,7 +372,7 @@ struct HistoryItemTextPreviewView: View {
         activeRenderKey: String,
         defaultHTMLIsFresh: Bool
     ) -> MarkdownDisplayDocument {
-        if layoutScale == settingsMarkdownLayoutScale, defaultHTMLIsFresh {
+        if layoutScale == defaultHTMLLayoutScale, defaultHTMLIsFresh {
             return MarkdownDisplayDocument(
                 html: defaultHTML,
                 renderKey: activeRenderKey,
@@ -403,7 +409,7 @@ struct HistoryItemTextPreviewView: View {
         guard isContentCurrent() else { return }
         let defaultHTMLIsFresh = model.markdownHTMLEnrichmentFingerprint
             == HoverPreviewModel.enrichmentFingerprint(for: source)
-        if layoutScale == settingsMarkdownLayoutScale, defaultHTMLIsFresh {
+        if layoutScale == defaultHTMLLayoutScale, defaultHTMLIsFresh {
             overrideMarkdownHTML = nil
             overrideMarkdownRenderKey = nil
             return

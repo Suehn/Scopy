@@ -100,6 +100,7 @@ struct HistoryItemView: View, Equatable {
         self.requestPopover = requestPopover
         self.dismissOtherPopovers = dismissOtherPopovers
         self.contentRevision = ClipboardItemContentRevision.resolve(item: item)
+        ScrollPerformanceProfile.incrementCounter(name: "row.init")
         if let searchMatchContext {
             let searchEvidenceText = SearchMatchPresentation.attributedText(
                 context: searchMatchContext,
@@ -1792,10 +1793,18 @@ struct HistoryItemView: View, Equatable {
                 isMarkdown: previewState.isMarkdown,
                 markdownHTML: previewState.markdownHTML,
                 markdownContentSize: previewState.markdownContentSize,
-                markdownHasHorizontalOverflow: previewState.markdownHasHorizontalOverflow
+                markdownHasHorizontalOverflow: previewState.markdownHasHorizontalOverflow,
+                layoutScale: previewState.layoutScale
             )
-        case .markdownHTML(let html):
-            state.previewModel.setMarkdownHTMLAwaitingLiveRender(html)
+        case .markdownHTML(let html, let layoutScale):
+            state.previewModel.setMarkdownHTMLAwaitingLiveRender(html, layoutScale: layoutScale)
+        case .prewarmMarkdownHTML(let html, let renderCacheKey):
+            guard !isAnyPreviewPresented else { return }
+            markdownWebViewController.prewarm(
+                html: html,
+                renderCacheKey: renderCacheKey,
+                width: HoverPreviewScreenMetrics.maxMarkdownPopoverWidthPoints()
+            )
         case .renderMarkdown(let request):
             state.previewCoordinator.hoverMarkdownTask = HistoryHoverPreviewPipeline.makeMarkdownRenderTask(
                 request: request,

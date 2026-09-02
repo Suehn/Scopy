@@ -54,6 +54,8 @@ final class HoverPreviewModel {
     /// sidecar lands after the pipeline render, the live fingerprint moves ahead of this
     /// stamp and the preview rebuilds the document instead of showing stale default HTML.
     private(set) var markdownHTMLEnrichmentFingerprint: String?
+    /// Layout scale `markdownHTML` was rendered at; nil until a document arrives.
+    private(set) var markdownHTMLLayoutScale: MarkdownChatGPTLayoutScalePercent?
 
     nonisolated static func enrichmentFingerprint(for source: String) -> String {
         LinkEnrichmentStore.shared.payload(
@@ -68,12 +70,14 @@ final class HoverPreviewModel {
         isMarkdown: Bool,
         markdownHTML: String?,
         markdownContentSize: CGSize?,
-        markdownHasHorizontalOverflow: Bool
+        markdownHasHorizontalOverflow: Bool,
+        layoutScale: MarkdownChatGPTLayoutScalePercent? = nil
     ) {
         markdownMetricsLayoutScalePercent = nil
         self.text = text
         self.isMarkdown = isMarkdown
         self.markdownHTML = markdownHTML
+        markdownHTMLLayoutScale = markdownHTML == nil ? nil : layoutScale
         self.markdownContentSize = markdownContentSize
         self.markdownHasHorizontalOverflow = markdownHasHorizontalOverflow
         markdownHTMLEnrichmentFingerprint = text.flatMap { source in
@@ -82,9 +86,10 @@ final class HoverPreviewModel {
         invalidateMarkdownLiveRender()
     }
 
-    func setMarkdownHTMLAwaitingLiveRender(_ html: String) {
+    func setMarkdownHTMLAwaitingLiveRender(_ html: String, layoutScale: MarkdownChatGPTLayoutScalePercent? = nil) {
         markdownMetricsLayoutScalePercent = nil
         markdownHTML = html
+        markdownHTMLLayoutScale = layoutScale
         markdownHTMLEnrichmentFingerprint = text.map { Self.enrichmentFingerprint(for: $0) }
         invalidateMarkdownLiveRender()
     }

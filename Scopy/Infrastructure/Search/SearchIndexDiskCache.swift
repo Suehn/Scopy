@@ -3,9 +3,9 @@ import Foundation
 import os
 
 enum SearchIndexDiskCache {
-    private static let fullIndexDiskCacheVersion: Int = 4
+    private static let fullIndexDiskCacheVersion: Int = 5
     private static let fullIndexDiskCacheMetadataVersion: Int = 2
-    private static let shortQueryIndexDiskCacheVersion: Int = 2
+    private static let shortQueryIndexDiskCacheVersion: Int = 3
 
     struct FullPaths: Sendable {
         let cachePath: String
@@ -102,7 +102,7 @@ enum SearchIndexDiskCache {
     }
 
     static func fullPaths(dbPath: String) -> FullPaths {
-        let cachePath = "\(dbPath).fullindex.v\(fullIndexDiskCacheVersion).plist"
+        let cachePath = "\(dbPath).fullindex.v\(fullIndexDiskCacheVersion).bin"
         return FullPaths(
             cachePath: cachePath,
             checksumPath: cachePath + ".sha256",
@@ -111,7 +111,7 @@ enum SearchIndexDiskCache {
     }
 
     static func shortPaths(dbPath: String) -> ShortPaths {
-        let cachePath = "\(dbPath).shortindex.v\(shortQueryIndexDiskCacheVersion).plist"
+        let cachePath = "\(dbPath).shortindex.v\(shortQueryIndexDiskCacheVersion).bin"
         return ShortPaths(cachePath: cachePath, checksumPath: cachePath + ".sha256")
     }
 
@@ -151,11 +151,17 @@ enum SearchIndexDiskCache {
             return nil
         }
 
+        // A stale cache (every commit bumps mutation_seq) is rejected from its header before the
+        // checksum and decode touch the payload.
+        guard let header = SearchIndexBinaryCodec.header(of: data),
+              header.format == SearchIndexBinaryCodec.shortFormat,
+              header.version == shortQueryIndexDiskCacheVersion,
+              header.mutationSeq == stamp.mutationSeq else { return nil }
+
         let computedChecksum = sha256Hex(data)
         guard computedChecksum == checksum else { return nil }
 
-        let decoder = PropertyListDecoder()
-        guard let cache = try? decoder.decode(ShortQueryIndexDiskCacheV2.self, from: data) else { return nil }
+        guard let cache = SearchIndexBinaryCodec.decodeShort(data) else { return nil }
         guard cache.version == shortQueryIndexDiskCacheVersion else { return nil }
         guard cache.mutationSeq == stamp.mutationSeq else { return nil }
         let liveSlotCount = cache.slots.lazy.filter { $0.id != nil }.count
@@ -372,9 +378,7 @@ enum SearchIndexDiskCache {
     }
 
     static func writeShortPersistRequest(_ request: ShortPersistRequest) throws {
-        let encoder = PropertyListEncoder()
-        encoder.outputFormat = .binary
-        let data = try encoder.encode(request.cache)
+        let data = SearchIndexBinaryCodec.encodeShort(request.cache)
         try data.write(to: URL(fileURLWithPath: request.cachePath), options: [.atomic])
         let checksum = sha256Hex(data)
         try checksum.write(to: URL(fileURLWithPath: request.checksumPath), atomically: true, encoding: .utf8)
@@ -412,9 +416,9 @@ enum SearchIndexDiskCache {
     }
 
     static func writeFullPersistRequest(_ request: FullPersistRequest) throws {
+        let data = encodeFullPayload(request.cache)
         let encoder = PropertyListEncoder()
         encoder.outputFormat = .binary
-        let data = try encoder.encode(request.cache)
         try data.write(to: URL(fileURLWithPath: request.cachePath), options: [.atomic])
         let checksum = sha256Hex(data)
         try checksum.write(to: URL(fileURLWithPath: request.checksumPath), atomically: true, encoding: .utf8)
@@ -544,95 +548,93 @@ enum SearchIndexDiskCache {
         metrics.addCounter("full_index_cache_metadata_payload_bytes", value: Int(min(metadata.payloadByteSize, UInt64(Int.max))))
     }
 
+    private static func encodeFullPayload(_ cache: FullIndexDiskCacheV4) -> Data {
+        SearchIndexBinaryCodec.encodeFull(
+            version: cache.version,
+            mutationSeq: cache.mutationSeq,
+            items: cache.items.map { item in
+                item.map {
+                    SearchIndexBinaryCodec.FullItem(
+                        id: $0.id, type: $0.type, contentHash: $0.contentHash, plainTextLower: $0.plainTextLower,
+                        appBundleID: $0.appBundleID, createdAt: $0.createdAt, lastUsedAt: $0.lastUsedAt,
+                        useCount: $0.useCount, isPinned: $0.isPinned, sizeBytes: $0.sizeBytes, storageRef: $0.storageRef
+                    )
+                }
+            },
+            asciiCharPostings: cache.asciiCharPostings,
+            nonASCIICharPostings: cache.nonASCIICharPostings.keys.sorted().map { key in
+                (key: key, postings: cache.nonASCIICharPostings[key] ?? [])
+            }
+        )
+    }
+
     private static func decodeFullIndexDiskCachePayload(
         _ data: Data,
         stamp: SearchEngineImpl.DBContentStamp
     ) -> FullIndexDiskCachePayloadParseResult {
-        guard let root = try? PropertyListSerialization.propertyList(from: data, options: [], format: nil) else {
+        guard let payload = SearchIndexBinaryCodec.decodeFull(data) else {
             return .decodeFailed
         }
-        guard let payload = root as? [String: Any] else {
+        guard payload.version == fullIndexDiskCacheVersion else {
             return .payloadInvalid
         }
-
-        guard plistInt(payload["version"]) == fullIndexDiskCacheVersion else {
+        guard payload.mutationSeq == stamp.mutationSeq else {
             return .payloadInvalid
         }
-        guard plistInt64(payload["mutationSeq"]) == stamp.mutationSeq else {
-            return .payloadInvalid
-        }
-        guard let rawItems = payload["items"] as? [Any],
-              let rawASCIIPostings = payload["asciiCharPostings"] as? [Any],
-              rawASCIIPostings.count == 128,
-              let rawNonASCIIPostings = payload["nonASCIICharPostings"] as? [String: Any] else {
+        guard payload.asciiCharPostings.count == 128 else {
             return .payloadInvalid
         }
 
         var items: [SearchEngineImpl.IndexedItem?] = []
-        items.reserveCapacity(rawItems.count)
+        items.reserveCapacity(payload.items.count)
 
         var idToSlot: [UUID: Int] = [:]
-        idToSlot.reserveCapacity(rawItems.count)
+        idToSlot.reserveCapacity(payload.items.count)
 
-        for (slot, rawItem) in rawItems.enumerated() {
-            if rawItem is NSNull {
+        for (slot, diskItem) in payload.items.enumerated() {
+            guard let diskItem else {
                 items.append(nil)
                 continue
             }
-            guard let diskItem = rawItem as? [String: Any],
-                  let idString = plistString(diskItem["id"]),
-                  let id = UUID(uuidString: idString),
-                  let typeRaw = plistString(diskItem["type"]),
-                  let type = ClipboardItemType(rawValue: typeRaw),
-                  let contentHash = plistString(diskItem["contentHash"]),
-                  let plainTextLower = plistString(diskItem["plainTextLower"]),
-                  let createdAt = plistTimeInterval(diskItem["createdAt"]),
-                  let lastUsedAt = plistTimeInterval(diskItem["lastUsedAt"]),
-                  let useCount = plistInt(diskItem["useCount"]),
-                  let isPinned = plistBool(diskItem["isPinned"]),
-                  let sizeBytes = plistInt(diskItem["sizeBytes"]) else {
+            guard let id = UUID(uuidString: diskItem.id),
+                  let type = ClipboardItemType(rawValue: diskItem.type) else {
                 return .payloadInvalid
             }
-
-            let item = SearchEngineImpl.IndexedItem(
-                id: id,
-                type: type,
-                contentHash: contentHash,
-                plainTextLower: plainTextLower,
-                appBundleID: plistOptionalString(diskItem["appBundleID"]),
-                createdAt: Date(timeIntervalSince1970: createdAt),
-                lastUsedAt: Date(timeIntervalSince1970: lastUsedAt),
-                useCount: useCount,
-                isPinned: isPinned,
-                sizeBytes: sizeBytes,
-                storageRef: plistOptionalString(diskItem["storageRef"])
+            items.append(
+                SearchEngineImpl.IndexedItem(
+                    id: id,
+                    type: type,
+                    contentHash: diskItem.contentHash,
+                    plainTextLower: diskItem.plainTextLower,
+                    appBundleID: diskItem.appBundleID,
+                    createdAt: Date(timeIntervalSince1970: diskItem.createdAt),
+                    lastUsedAt: Date(timeIntervalSince1970: diskItem.lastUsedAt),
+                    useCount: diskItem.useCount,
+                    isPinned: diskItem.isPinned,
+                    sizeBytes: diskItem.sizeBytes,
+                    storageRef: diskItem.storageRef
+                )
             )
-            items.append(item)
             idToSlot[id] = slot
         }
 
         let itemsCount = items.count
-
-        var asciiCharPostings: [[Int]] = []
-        asciiCharPostings.reserveCapacity(rawASCIIPostings.count)
-        for rawPostings in rawASCIIPostings {
-            guard let postings = rawPostings as? [Int],
-                  validateDiskCachePostings(postings, itemsCount: itemsCount) else {
+        for postings in payload.asciiCharPostings {
+            guard validateDiskCachePostings(postings, itemsCount: itemsCount) else {
                 return .payloadInvalid
             }
-            asciiCharPostings.append(postings)
         }
 
         var nonASCIICharPostings: [Character: [Int]] = [:]
-        nonASCIICharPostings.reserveCapacity(rawNonASCIIPostings.count)
-        for (rawKey, rawPostings) in rawNonASCIIPostings {
-            guard rawKey.count == 1,
-                  let character = rawKey.first,
-                  let postings = rawPostings as? [Int],
-                  validateDiskCachePostings(postings, itemsCount: itemsCount) else {
+        nonASCIICharPostings.reserveCapacity(payload.nonASCIICharPostings.count)
+        for entry in payload.nonASCIICharPostings {
+            guard entry.key.count == 1,
+                  let character = entry.key.first,
+                  nonASCIICharPostings[character] == nil,
+                  validateDiskCachePostings(entry.postings, itemsCount: itemsCount) else {
                 return .payloadInvalid
             }
-            nonASCIICharPostings[character] = postings
+            nonASCIICharPostings[character] = entry.postings
         }
 
         let tombstones = max(0, items.count - idToSlot.count)
@@ -640,10 +642,34 @@ enum SearchIndexDiskCache {
             SearchEngineImpl.FullFuzzyIndex(
                 items: items,
                 idToSlot: idToSlot,
-                asciiCharPostings: asciiCharPostings,
+                asciiCharPostings: payload.asciiCharPostings,
                 nonASCIICharPostings: nonASCIICharPostings,
                 tombstoneCount: tombstones
             )
+        )
+    }
+
+    // MARK: - Test seams
+
+    static func debugDecodeShortCache(_ data: Data) -> ShortQueryIndexDiskCacheV2? {
+        SearchIndexBinaryCodec.decodeShort(data)
+    }
+
+    static func debugEncodeShortCache(_ cache: ShortQueryIndexDiskCacheV2) -> Data {
+        SearchIndexBinaryCodec.encodeShort(cache)
+    }
+
+    static func debugDecodeFullPayload(_ data: Data) -> SearchIndexBinaryCodec.FullPayload? {
+        SearchIndexBinaryCodec.decodeFull(data)
+    }
+
+    static func debugEncodeFullPayload(_ payload: SearchIndexBinaryCodec.FullPayload, asciiCharPostings: [[Int]]) -> Data {
+        SearchIndexBinaryCodec.encodeFull(
+            version: payload.version,
+            mutationSeq: payload.mutationSeq,
+            items: payload.items,
+            asciiCharPostings: asciiCharPostings,
+            nonASCIICharPostings: payload.nonASCIICharPostings
         )
     }
 

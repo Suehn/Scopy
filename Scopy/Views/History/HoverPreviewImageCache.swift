@@ -25,7 +25,9 @@ final class HoverPreviewImageCache {
 
         let cache = NSCache<NSString, Entry>()
         cache.countLimit = 40
-        cache.totalCostLimit = 160 * 1024 * 1024
+        // Room for one full-budget preview (64 Mpx at 4 bytes per pixel) plus the usual ones;
+        // NSCache still evicts under memory pressure and entries expire after `ttl`.
+        cache.totalCostLimit = 320 * 1024 * 1024
         self.cache = cache
 
         startCleanupLoopIfNeeded()
@@ -59,7 +61,9 @@ final class HoverPreviewImageCache {
         guard !key.isEmpty else { return }
 
         let cost = Self.estimatedCostBytes(for: image)
-        let perItemLimit = 96 * 1024 * 1024
+        // The decode budget (`HoverPreviewImageQualityPolicy.maxTotalPixels`, 64 Mpx) bounds an
+        // entry at 256 MB; rejecting large previews here meant decoding them again on every hover.
+        let perItemLimit = 256 * 1024 * 1024
         if cost > perItemLimit {
             return
         }

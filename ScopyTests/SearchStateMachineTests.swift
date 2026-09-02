@@ -574,8 +574,8 @@ final class SearchStateMachineTests: XCTestCase {
         await pagingTask.value
 
         XCTAssertTrue(viewModel.isLoading, "The delayed beta search still owns the loading state")
-        XCTAssertTrue(viewModel.items.isEmpty)
-        XCTAssertTrue(viewModel.searchMatchContexts.isEmpty)
+        XCTAssertEqual(viewModel.items.map(\.id), [alphaFirst.id], "The alpha projection stays until beta lands")
+        XCTAssertEqual(viewModel.searchMatchContexts.count, 1)
 
         service.releaseRequest(query: "beta", offset: 0)
         await waitForCondition(timeout: 1.0, pollInterval: 0.005) {
@@ -647,7 +647,7 @@ final class SearchStateMachineTests: XCTestCase {
 
         viewModel.searchQuery = "beta"
         viewModel.search()
-        XCTAssertTrue(viewModel.items.isEmpty)
+        XCTAssertTrue(viewModel.items.isEmpty, "Nothing had landed for alpha yet, so nothing is retained")
         XCTAssertTrue(viewModel.searchMatchContexts.isEmpty)
 
         await waitForCondition(timeout: 1.0, pollInterval: 0.005) {
@@ -677,8 +677,8 @@ final class SearchStateMachineTests: XCTestCase {
 
         viewModel.searchQuery = "("
         viewModel.search()
-        XCTAssertTrue(viewModel.items.isEmpty)
-        XCTAssertTrue(viewModel.searchMatchContexts.isEmpty)
+        XCTAssertEqual(viewModel.items.count, 1, "The previous projection stays until the new results land")
+        XCTAssertEqual(viewModel.searchMatchContexts.count, 1)
         await waitForCondition(timeout: 1.0, pollInterval: 0.005) {
             service.recordedSearchRequests.last?.query == "(" && !viewModel.isLoading
         }
@@ -703,8 +703,8 @@ final class SearchStateMachineTests: XCTestCase {
         var updatedSettings = SettingsDTO.default
         updatedSettings.defaultSearchMode = .exact
         viewModel.applySettings(updatedSettings)
-        XCTAssertTrue(viewModel.items.isEmpty)
-        XCTAssertTrue(viewModel.searchMatchContexts.isEmpty)
+        XCTAssertEqual(viewModel.items.count, 1, "The previous projection stays until the fresh search lands")
+        XCTAssertEqual(viewModel.searchMatchContexts.count, 1)
         await waitForCondition(timeout: 1.0, pollInterval: 0.005) {
             service.recordedSearchRequests.last?.mode == .exact && !viewModel.isLoading
         }

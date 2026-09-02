@@ -173,30 +173,28 @@ final class ShortQueryIndexDiskCacheHardeningTests: XCTestCase {
             // Corrupt postings but keep checksum consistent: the loader must reject the cache and fall back.
             let cacheURL = URL(fileURLWithPath: paths.cachePath)
             let originalData = try Data(contentsOf: cacheURL)
-            var format: PropertyListSerialization.PropertyListFormat = .binary
-            let any = try PropertyListSerialization.propertyList(from: originalData, options: [], format: &format)
-            guard var root = any as? [String: Any] else {
-                XCTFail("Unexpected plist root")
+            guard let cache = SearchIndexDiskCache.debugDecodeShortCache(originalData) else {
+                XCTFail("Unexpected cache payload")
                 return
             }
-            guard let slots = root["slots"] as? [Any] else {
-                XCTFail("Missing slots")
-                return
-            }
-            let slotsCount = slots.count
-
-            guard var asciiPostings = root["asciiCharPostings"] as? [[Int]] else {
-                XCTFail("Missing asciiCharPostings")
-                return
-            }
+            let slotsCount = cache.slots.count
+            var asciiPostings = cache.asciiCharPostings
             XCTAssertEqual(asciiPostings.count, 128)
 
             // Inject an out-of-bounds slot into a common postings list ('i' in "item").
             let iIndex = Int(Character("i").asciiValue ?? 0)
             asciiPostings[iIndex].append(slotsCount)
-            root["asciiCharPostings"] = asciiPostings
 
-            let corruptedData = try PropertyListSerialization.data(fromPropertyList: root, format: .binary, options: 0)
+            let corruptedData = SearchIndexDiskCache.debugEncodeShortCache(
+                SearchIndexDiskCache.ShortQueryIndexDiskCacheV2(
+                    version: cache.version,
+                    mutationSeq: cache.mutationSeq,
+                    slots: cache.slots,
+                    asciiCharPostings: asciiPostings,
+                    asciiBigramPostings: cache.asciiBigramPostings,
+                    nonASCIIBigramPostings: cache.nonASCIIBigramPostings
+                )
+            )
             try corruptedData.write(to: cacheURL, options: [.atomic])
 
             let checksum = Self.sha256Hex(corruptedData)

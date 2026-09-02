@@ -1238,7 +1238,11 @@ public actor SearchEngineImpl {
         let reserveSlots = estimatedCount
 
         shortQueryIndexBuildTask = Task.detached(priority: .utility) { [dbPath] in
-            let snapshot = SearchIndexDiskCache.loadShortSnapshot(dbPath: dbPath)
+            let loadStart = ProcessInfo.processInfo.systemUptime
+            let cached = SearchIndexDiskCache.loadShortSnapshot(dbPath: dbPath)
+            let loadMs = (ProcessInfo.processInfo.systemUptime - loadStart) * 1000
+            ScopyLog.search.info("Short index disk cache load \(cached == nil ? "miss" : "hit", privacy: .public) in \(loadMs, format: .fixed(precision: 0), privacy: .public) ms")
+            let snapshot = cached
                 ?? Self.buildShortQueryIndexSnapshot(dbPath: dbPath, reserveSlots: reserveSlots)
             await self.finishShortQueryIndexBuild(generation: generation, snapshot: snapshot)
         }
@@ -1292,7 +1296,11 @@ public actor SearchEngineImpl {
 
         fullIndexBuildTask = Task.detached(priority: .utility) { [dbPath, startedMutationCounter, startedDBChangeToken] in
             var warmLoadMetrics = SearchWarmLoadMetrics()
-            let snapshot = SearchIndexDiskCache.loadFullSnapshot(dbPath: dbPath, metrics: &warmLoadMetrics)
+            let loadStart = ProcessInfo.processInfo.systemUptime
+            let cached = SearchIndexDiskCache.loadFullSnapshot(dbPath: dbPath, metrics: &warmLoadMetrics)
+            let loadMs = (ProcessInfo.processInfo.systemUptime - loadStart) * 1000
+            ScopyLog.search.info("Full index disk cache load \(cached == nil ? "miss" : "hit", privacy: .public) in \(loadMs, format: .fixed(precision: 0), privacy: .public) ms")
+            let snapshot = cached
                 ?? FullIndexBuilder.buildSnapshot(dbPath: dbPath, reserveSlots: reserveSlots, metrics: &warmLoadMetrics)
             await self.finishFullIndexBuild(
                 generation: generation,

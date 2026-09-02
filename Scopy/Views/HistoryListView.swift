@@ -62,9 +62,11 @@ struct HistoryListView: View {
             // v0.18: 使用 List 替代 ScrollView+LazyVStack 实现真正的视图回收
             // List 基于 NSTableView，具有视图回收能力，10k 项目内存从 ~500MB 降至 ~50MB
             ScrollViewReader { proxy in
+                let _ = ScrollPerformanceProfile.incrementCounter(name: "list.body")
                 List {
                     // Loading indicator
-                    if historyViewModel.isLoading && historyViewModel.items.isEmpty {
+                    // `items.isEmpty` first: `isLoading` is only observed while the list is empty.
+                    if historyViewModel.items.isEmpty && historyViewModel.isLoading {
                         ProgressView()
                             .controlSize(.small)
                             .padding(.vertical, ScopySpacing.md)
@@ -108,10 +110,7 @@ struct HistoryListView: View {
                     }
 
                     // Recent Section Header
-                    RecentSectionHeader(
-                        count: unpinned.count,
-                        performanceSummary: historyViewModel.performanceSummary
-                    )
+                    RecentSectionHeader(count: unpinned.count)
                     .listRowInsets(EdgeInsets())
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
@@ -123,7 +122,7 @@ struct HistoryListView: View {
 
                     // Load More Trigger
                     if historyViewModel.canLoadMore {
-                        LoadMoreTriggerView(isLoading: historyViewModel.isLoading)
+                        LoadMoreTriggerView()
                             .listRowInsets(EdgeInsets())
                             .listRowBackground(Color.clear)
                             .listRowSeparator(.hidden)
@@ -203,24 +202,19 @@ struct HistoryListView: View {
             )
             updateProfileWorkloadMetadata()
         }
-        .onChange(of: historyViewModel.loadedCount) { _, _ in updateProfileWorkloadMetadata() }
-        .onChange(of: historyViewModel.totalCount) { _, _ in updateProfileWorkloadMetadata() }
-        .onChange(of: historyViewModel.canLoadMore) { _, _ in updateProfileWorkloadMetadata() }
-        .onChange(of: historyViewModel.itemsRevision) { _, _ in
-            updateProfileWorkloadMetadata()
-            recordHistoryListIntegrationModelNoteIfNeeded()
-        }
-        .onChange(of: historyViewModel.searchMatchContexts.count) { _, _ in
-            updateProfileWorkloadMetadata()
-        }
-        .onChange(of: historyViewModel.isLoading) { _, _ in
-            updateProfileWorkloadMetadata()
-        }
-        .onChange(of: historyViewModel.contentRevisionReconciliationToken) { _, _ in
-            interactionSessionStore.reconcile(
-                snapshot: historyViewModel.contentRevisionReconciliationSnapshot
+        .background(
+            // Observed from a leaf view: an `onChange(of:)` here would make this body, and with it
+            // every row, depend on `isLoading` and the other per-search flags.
+            HistoryListStateObservers(
+                onWorkloadChange: updateProfileWorkloadMetadata,
+                onItemsRevisionChange: recordHistoryListIntegrationModelNoteIfNeeded,
+                onContentRevisionReconciliation: {
+                    interactionSessionStore.reconcile(
+                        snapshot: historyViewModel.contentRevisionReconciliationSnapshot
+                    )
+                }
             )
-        }
+        )
         .onDisappear {
             relativeTimeClock.stop()
             interactionCoordinator.tearDownPassivePath()
@@ -537,17 +531,18 @@ struct HistoryListView: View {
 /// Keeps the high-frequency scroll flag out of `HistoryListView.body`'s Observation dependency
 /// set. Only this small header redraws when scrolling starts or ends; row construction remains
 /// driven by item/selection/popover changes.
+/// Reads `isScrolling` and `performanceSummary` here, not in the List body: both change per
+/// search or scroll and would otherwise rebuild every row.
 private struct RecentSectionHeader: View {
     @Environment(HistoryViewModel.self) private var historyViewModel
 
     let count: Int
-    let performanceSummary: PerformanceSummary?
 
     var body: some View {
         SectionHeader(
             title: "Recent",
             count: count,
-            performanceSummary: performanceSummary,
+            performanceSummary: historyViewModel.performanceSummary,
             isScrolling: historyViewModel.isScrolling
         )
     }
@@ -573,6 +568,8 @@ private struct ScrollFrameSamplerView: View {
 /// re-evaluates the two rows it concerns instead of the List body (which re-initializes every ForEach
 /// child and diffs every loaded id).
 private struct HistorySelectionAwareRow<Content: View>: View {
+    @Environment(HistoryViewModel.self) private var historyViewModel
+
     let itemID: UUID
     let selectionFanout: HistoryRowSelectionFanout
     let content: (Bool) -> Content
@@ -595,9 +592,36 @@ private struct HistorySelectionAwareRow<Content: View>: View {
                 isSelected = selectionFanout.register(itemID: itemID) { selected in
                     isSelected = selected
                 }
+                historyViewModel.rowDidAppear(itemID: itemID)
             }
             .onDisappear {
                 selectionFanout.unregister(itemID: itemID)
+            }
+    }
+}
+
+/// Hosts the list-level `onChange` observers so their observed properties belong to this leaf's
+/// body instead of `HistoryListView.body`.
+private struct HistoryListStateObservers: View {
+    @Environment(HistoryViewModel.self) private var historyViewModel
+
+    let onWorkloadChange: () -> Void
+    let onItemsRevisionChange: () -> Void
+    let onContentRevisionReconciliation: () -> Void
+
+    var body: some View {
+        Color.clear
+            .onChange(of: historyViewModel.loadedCount) { _, _ in onWorkloadChange() }
+            .onChange(of: historyViewModel.totalCount) { _, _ in onWorkloadChange() }
+            .onChange(of: historyViewModel.canLoadMore) { _, _ in onWorkloadChange() }
+            .onChange(of: historyViewModel.itemsRevision) { _, _ in
+                onWorkloadChange()
+                onItemsRevisionChange()
+            }
+            .onChange(of: historyViewModel.searchMatchContexts.count) { _, _ in onWorkloadChange() }
+            .onChange(of: historyViewModel.isLoading) { _, _ in onWorkloadChange() }
+            .onChange(of: historyViewModel.contentRevisionReconciliationToken) { _, _ in
+                onContentRevisionReconciliation()
             }
     }
 }

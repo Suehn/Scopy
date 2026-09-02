@@ -64,7 +64,7 @@ final class HistoryHoverPreviewPipelineTests: XCTestCase {
         let plan = HistoryHoverPreviewPipeline.imagePlan(for: request)
 
         XCTAssertEqual(plan.delayNanos, 250_000_000)
-        XCTAssertEqual(plan.prefetchDelayNanos, 50_000_000)
+        XCTAssertEqual(plan.prefetchDelayNanos, 250_000_000)
         XCTAssertEqual(plan.targetWidthPixels, 1_280)
         XCTAssertEqual(plan.maxLongSidePixels, 12_000)
         XCTAssertEqual(plan.cacheKey, "\(request.revision.cacheKey)|w1280")
@@ -299,10 +299,10 @@ final class HistoryHoverPreviewPipelineTests: XCTestCase {
             if case .text(let state) = event { return state }
             return nil
         }
-        XCTAssertEqual(textStates.count, 2)
+        // Cached HTML and metrics arrive in the single text state that precedes presentation.
+        XCTAssertEqual(textStates.count, 1)
         XCTAssertEqual(textStates.first?.text, "# Title\n\nBody")
         XCTAssertTrue(textStates.first?.isMarkdown == true)
-        XCTAssertNil(textStates.first?.markdownHTML)
         XCTAssertEqual(textStates.last?.markdownHTML, "<h1>Title</h1>")
         XCTAssertEqual(
             textStates.last?.markdownContentSize?.width ?? 0,
@@ -332,13 +332,22 @@ final class HistoryHoverPreviewPipelineTests: XCTestCase {
             return nil
         }
 
+        // The document is rendered during the delay and handed to the WebView (prewarm) before
+        // the popover is requested; no on-demand render follows.
+        let prewarms = events.compactMap { event -> String? in
+            if case .prewarmMarkdownHTML(let html, _) = event { return html }
+            return nil
+        }
         XCTAssertEqual(textStates.count, 1)
         XCTAssertEqual(textStates.first?.text, "# Title\n\nBody")
         XCTAssertTrue(textStates.first?.isMarkdown == true)
-        XCTAssertNil(textStates.first?.markdownHTML)
+        XCTAssertNotNil(textStates.first?.markdownHTML)
+        XCTAssertNil(textStates.first?.markdownContentSize, "No metrics before the WebView reported any")
+        XCTAssertEqual(prewarms.count, 1)
+        XCTAssertEqual(prewarms.first, textStates.first?.markdownHTML)
         XCTAssertEqual(presentedKinds(events), [.text])
-        XCTAssertEqual(renderRequests.count, 1)
-        XCTAssertEqual(renderRequests.first?.source, item.plainText)
+        XCTAssertEqual(renderRequests.count, 0)
+        XCTAssertEqual(events.firstIndex { if case .prewarmMarkdownHTML = $0 { return true } else { return false } } ?? -1 < (events.firstIndex { if case .present = $0 { return true } else { return false } } ?? -1), true)
     }
 
     func testMarkdownRenderTaskRendersBeforeFinalLivenessGate() async {
@@ -354,7 +363,7 @@ final class HistoryHoverPreviewPipelineTests: XCTestCase {
             request: request,
             isCurrent: { probe.hasRendered },
             emit: { event in
-                if case .markdownHTML(let html) = event {
+                if case .markdownHTML(let html, _) = event {
                     emittedHTML.append(html)
                 }
             },
@@ -382,7 +391,7 @@ final class HistoryHoverPreviewPipelineTests: XCTestCase {
             request: request,
             isCurrent: { false },
             emit: { event in
-                if case .markdownHTML(let html) = event {
+                if case .markdownHTML(let html, _) = event {
                     emittedHTML.append(html)
                 }
             },

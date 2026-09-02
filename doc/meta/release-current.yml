@@ -1,28 +1,29 @@
-version: v0.77.1
-date: 2026-09-02
-release_doc: doc/releases/history/v0.77.1.md
+version: v0.78.0
+date: 2026-09-03
+release_doc: doc/releases/history/v0.78.0.md
 release_index: doc/releases/README.md
 changelog_file: doc/releases/CHANGELOG.md
-profile_doc: doc/perf/release-profiles/v0.77.0-profile.md
+profile_doc: doc/perf/release-profiles/v0.78.0-profile.md
 runbook_doc: doc/current/release-runbook.md
 spec_doc: doc/current/product-spec.md
 development_doc: doc/current/development-guide.md
 architecture_doc: doc/current/architecture.md
-last_verified_at: 2026-09-02
-summary: Mouse-wheel scroll detection starts only on a current scroll-wheel event; v0.77.0 gates recorded (unit 790/0, strict 790/0, UI subset 29 passed, 2 pre-existing failures)
+last_verified_at: 2026-09-03
+summary: Hover previews open at final size at the delay (300 ms prefetch, offscreen WebView prewarm, preview-scale render), search keeps rows between keystrokes, rich copies no longer block the main thread (1.9-2.4 s -> ~0), binary search-index caches (launch 2.9 s -> 55 ms), page loads prefetched and chunked
 verification:
   docs_validate: pass
   release_validate: pass
   release_policy: pass
   build: pass_make_release
   assets_verify: pass_markdown_preview_assets_verified
-  test_unit: pass_790_executed_3_skipped_0_failures_on_v0_77_0_source_plus_19_observer_and_fanout_tests_with_gate
-  test_strict: pass_790_executed_3_skipped_0_failures_on_v0_77_0_source
+  test_unit: pass_791_executed_3_skipped_0_failures
+  test_strict: pending_post_release_queued
   test_tsan: not_run_no_search_cleanup_or_storage_change
   test_integration: not_run_no_search_cleanup_or_storage_change
   test_performance: not_run_no_search_cleanup_or_storage_change
   snapshot_release: not_run_no_search_cleanup_or_storage_change
   frontend_profile_full: not_run_evidence_is_real_input_profile_v0_77_0
   bundled_pngquant: unchanged_from_v0_74_0_fork_256e081_engine_fddcf09
-  test_ui_subset: 29_passed_3_failed_one_pointer_synthesis_flake_passed_on_rerun_two_fail_identically_on_v0_76_0
-  scroll_reference: real_wheel_release_mouse_cpu_9.94s_to_2.87s_per_12s_main_5.02s_to_2.65s_callback_p95_8.3ms_max_75_to_17_25ms_trackpad_cpu_4.50s_to_2.74s
+  test_ui_subset: pending_post_release_queued_two_pre_existing_failures_expected
+  scroll_reference: unchanged_from_v0_77_1_mouse_cpu_2.87s_main_2.65s_p95_8.3ms
+  interaction_reference: markdown_hover_1.33s_to_1.04s_final_size_first_frame_search_list_body_56_to_31_rich_copy_block_2s_to_0_launch_index_2887ms_to_55ms_page_apply_25_33ms_to_17ms

@@ -258,6 +258,17 @@ This section records historical `v0.65.4` release evidence for the single previe
 - GPU: unchanged by scrolling (idle 20% with the panel open vs 8-12% without it, unrelated to the list).
 - Gates at tag time: `make release` pass; docs/release/policy validation pass. `make test-unit` on the final source was in progress when the tag was cut at the maintainer's request (the previous run on the same code executed 790 tests with 3 failures, all assertions on the old 500-row page size, since aligned); `make test-strict` and the UI subset are queued after it. Recorded in `v0.77.1`: unit 790 executed / 3 skipped / 0 failures, strict 790 / 3 / 0, UI subset 29 passed and 3 failed (one pointer-synthesis flake that passed on rerun; `testHoverPreviewDismissesOnScroll` and `testSearchEvidenceExplainsMultipleDistantMatches` fail identically on `v0.76.0`). `v0.77.1` also gates clip-view-driven scroll starts on a current scroll-wheel event. TSan, snapshot, and backend performance gates not run: no search, cleanup, or storage code changed.
 
+## Interaction Latency Release Evidence (v0.78.0, 2026-09-03)
+
+- Environment: Apple M3 Pro, 36GB, 120 Hz, macOS 15.7.3, Xcode 26.1.1, Release builds, real panel, real 9,566-row snapshot DB (warm copy via `--reuse-db`); drivers in `scripts/perf-scroll/` (`profile_scroll.py`, `profile_search.py`, `profile_capture.py`), stage timelines from the app's info logs.
+- Hover preview (Markdown text items of 8-14 KB, preview delay 1.0 s, preview scale 125% vs Settings 100%): before, every hover rendered twice (Settings scale, then the preview scale), navigated the WebView twice (once at 0 px width) and resized the popover twice, final content at 1.33 s cold / 1.31 s warm; after, the document is built at 320-360 ms, laid out offscreen at the popover width by 390 ms, the popover opens at its final size at 1.04 s with the render already on screen, and a warm hover performs no navigation.
+- Search typing (`clipboard hist`, 14 keys at 8/s): List body runs 56 -> 31, rows re-initialized 541 -> 486, the list no longer empties between keystrokes; remaining per-keystroke work is result-row layout (text, hosting cells).
+- Clipboard capture (three 1.2 MB RTF+HTML copies): main-thread samples in extraction 58.5% -> 0.3% (idle 38% -> 90%); each copy blocked the main thread 1.9-2.4 s before. Plain 1 MB text: normalization off the main thread.
+- Launch: short-index cache 2,887 ms (stale plist decoded then rejected) -> 0 ms stale / 55 ms hit; launch CPU 3.3 s -> 0.75 s over the first 12 s; cache file 16.3 MB plist -> 14.7 MB binary. Storage details walk measured at 5 ms on this DB, left as is.
+- Page loads while scrolling (continuous 8 s downward wheel): callback bursts of 25-33 ms per page -> 17 ms (two 120 Hz frames) per chunk, over-threshold ratio 0.065 -> 0.014, with pages prefetched 40 rows ahead.
+- Preview image cache: per-entry cap 96 -> 256 MB, total 160 -> 320 MB, so a tall screenshot's 64 Mpx preview stays cached for its TTL instead of being decoded on every hover; decode quality unchanged.
+- Gates at tag time: unit 791 executed / 3 skipped / 0 failures; docs, release and policy validation pass; strict and the UI subset queued after the tag (the two pre-existing UI failures from v0.76.0 remain); TSan/snapshot/backend not run (no query, cleanup, or storage-schema change).
+
 ## Homebrew Acceptance
 
 Verify all of the following after release publication:

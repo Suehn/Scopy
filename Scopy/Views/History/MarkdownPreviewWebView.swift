@@ -750,8 +750,31 @@ final class MarkdownPreviewWebViewController: NSObject, ObservableObject, WKNavi
         return true
     }
 
+    private var prewarmRenderCacheKey: String?
+
+    /// Loads a document into the shared WebView before any popover owns it, at the width the
+    /// popover will use, so the first presentation replays finished metrics instead of navigating.
+    func prewarm(html: String, renderCacheKey: String, width: CGFloat) {
+        guard currentOwnerID == nil else { return }
+        if webView.window == nil, webView.bounds.width != width {
+            webView.frame = NSRect(x: 0, y: 0, width: width, height: max(webView.bounds.height, 600))
+        }
+        prewarmRenderCacheKey = renderCacheKey
+        HistoryHoverPreviewPipeline.logHoverStage("webview prewarm")
+        loadHTMLIfNeeded(html)
+    }
+
     func loadHTMLIfNeeded(_ html: String) {
         attachWebViewIfNeeded()
+        // SwiftUI's popover measurement pass hands the view over at zero size; a navigation laid
+        // out at width 0 reports nothing usable and is redone once the popover is on screen.
+        if webView.window == nil, webView.bounds.width < 1 {
+            webView.frame = NSRect(
+                x: 0, y: 0,
+                width: HoverPreviewScreenMetrics.maxMarkdownPopoverWidthPoints(),
+                height: max(webView.bounds.height, 600)
+            )
+        }
 
         if lastHTML == html {
             if !lastLoadFinished {
@@ -826,6 +849,7 @@ final class MarkdownPreviewWebViewController: NSObject, ObservableObject, WKNavi
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         guard navigation === currentNavigation else { return }
+        HistoryHoverPreviewPipeline.logHoverStage("webview navigation finished")
         currentNavigation = nil
         lastLoadFinished = true
         failedOwnerID = nil
@@ -833,6 +857,39 @@ final class MarkdownPreviewWebViewController: NSObject, ObservableObject, WKNavi
             _ = applyScrollConfigurationIfPossible(desiredShouldScroll)
         }
         scheduleContentRefresh(for: webView, forceSizeReport: false)
+        if currentOwnerID == nil, let key = prewarmRenderCacheKey, !key.isEmpty {
+            probePrewarmLayout(renderID: currentRenderID, renderCacheKey: key)
+        }
+    }
+
+    private var prewarmProbeTask: Task<Void, Never>?
+
+    /// Offscreen, animation frames never run, so the page cannot report terminal metrics. Ask it
+    /// for its laid-out height instead and seed the metrics cache with it; the popover then opens
+    /// at that size and the real report after presentation confirms or corrects it.
+    private func probePrewarmLayout(renderID: String, renderCacheKey: String) {
+        prewarmProbeTask?.cancel()
+        prewarmProbeTask = Task { @MainActor [weak self] in
+            for _ in 0..<40 {
+                guard let self, !Task.isCancelled, self.currentRenderID == renderID, self.currentOwnerID == nil else { return }
+                if self.lastKnownMetrics != nil { return }
+                let result = try? await self.webView.evaluateJavaScript(
+                    "window.__scopyProbeLayoutHeight ? window.__scopyProbeLayoutHeight() : null"
+                )
+                if let dict = result as? [String: Any], let height = dict["height"] as? Double, height > 0 {
+                    let width = HoverPreviewScreenMetrics.maxMarkdownPopoverWidthPoints()
+                    let metrics = MarkdownContentMetrics(
+                        size: CGSize(width: width, height: height),
+                        hasHorizontalOverflow: false,
+                        renderSucceeded: true
+                    )
+                    MarkdownPreviewCache.shared.setMetrics(metrics, forKey: renderCacheKey)
+                    HistoryHoverPreviewPipeline.logHoverStage("prewarm layout height=\(Int(height)) fontsReady=\(dict["fontsReady"] as? Bool ?? false)")
+                    return
+                }
+                try? await Task.sleep(nanoseconds: 25_000_000)
+            }
+        }
     }
 
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
@@ -852,8 +909,19 @@ final class MarkdownPreviewWebViewController: NSObject, ObservableObject, WKNavi
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
         guard let metrics = MarkdownPreviewMessageParser.metrics(from: message) else { return }
         guard message.frameInfo.isMainFrame, metrics.renderID == currentRenderID else { return }
+        // A layout at zero width (SwiftUI's popover measurement pass) describes nothing.
+        guard webView.bounds.width >= 1 else { return }
+        if lastKnownMetrics == nil {
+            HistoryHoverPreviewPipeline.logHoverStage("webview rendered height=\(Int(metrics.size.height)) ok=\(metrics.renderSucceeded)")
+        }
         lastKnownMetrics = metrics
         webView.alphaValue = metrics.renderSucceeded ? 1 : 0
+        if currentOwnerID == nil, metrics.renderSucceeded, let key = prewarmRenderCacheKey, !key.isEmpty {
+            MarkdownPreviewCache.shared.setMetrics(
+                HistoryHoverPreviewPipeline.stableMetrics(from: metrics, text: ""),
+                forKey: key
+            )
+        }
 
         if metrics.isEquivalent(to: lastDeliveredMetrics) { return }
         lastDeliveredMetrics = metrics
@@ -875,6 +943,7 @@ final class MarkdownPreviewWebViewController: NSObject, ObservableObject, WKNavi
         navigationStartCount += 1
         webView.alphaValue = 0
         let document = MarkdownPreviewRenderIdentity.injecting(currentRenderID, into: html)
+        HistoryHoverPreviewPipeline.logHoverStage("webview navigation start width=\(Int(webView.bounds.width)) window=\(webView.window != nil)")
         currentNavigation = webView.loadHTMLString(document, baseURL: baseURL)
     }
 

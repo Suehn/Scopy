@@ -3,7 +3,7 @@
 
 .PHONY: all setup build run clean xcode test test-unit test-perf test-perf-heavy test-snapshot-perf test-snapshot-perf-release test-tsan test-strict coverage benchmark perf-audit perf-frontend-profile perf-frontend-profile-smoke perf-frontend-profile-standard perf-frontend-profile-full perf-unified-table test-flow test-flow-quick health-check quality-manifest-self-test
 .PHONY: test-real-db
-.PHONY: snapshot-perf-db bench-snapshot-search perf-search-warm-load perf-warm-scroll-ab perf-scroll-tools perf-scroll-wheel
+.PHONY: snapshot-perf-db bench-snapshot-search perf-search-warm-load perf-warm-scroll-ab perf-scroll-tools perf-scroll-wheel perf-search-type perf-capture
 .PHONY: tag-release push-release release-validate release-bump-patch test-release-policy
 .PHONY: markdown-renderer-deps markdown-assets-sync markdown-assets-verify test-markdown-renderer-assets markdown-assets-gate
 
@@ -381,6 +381,16 @@ perf-scroll-tools:
 perf-scroll-wheel: perf-scroll-tools
 	@APP="$$(xcodebuild -project Scopy.xcodeproj -scheme Scopy -configuration Release -showBuildSettings 2>/dev/null | grep -m1 'BUILT_PRODUCTS_DIR' | awk '{print $$3}')/Scopy.app"; \
 	python3 scripts/perf-scroll/profile_scroll.py "$$APP" "$${LABEL:-wheel}" --mode wheel --duration "$${DURATION:-12}" --sample
+
+# Real-input clipboard-capture profile against the Release app: make perf-capture LABEL=name [SCENARIO=text|rich|image] [COUNT=10] [INTERVAL=1] [SIZE=n]
+perf-capture: perf-scroll-tools
+	@APP="$$(xcodebuild -project Scopy.xcodeproj -scheme Scopy -configuration Release -showBuildSettings 2>/dev/null | grep -m1 'BUILT_PRODUCTS_DIR' | awk '{print $$3}')/Scopy.app"; \
+	python3 scripts/perf-scroll/profile_capture.py "$$APP" "$${LABEL:-capture}" --scenario "$${SCENARIO:-text}" --count "$${COUNT:-10}" --interval "$${INTERVAL:-1}" $${SIZE:+--size "$$SIZE"} --sample
+
+# Real-input search-typing profile against the Release app: make perf-search-type LABEL=name [QUERY=cm] [RATE=8]
+perf-search-type: perf-scroll-tools
+	@APP="$$(xcodebuild -project Scopy.xcodeproj -scheme Scopy -configuration Release -showBuildSettings 2>/dev/null | grep -m1 'BUILT_PRODUCTS_DIR' | awk '{print $$3}')/Scopy.app"; \
+	python3 scripts/perf-scroll/profile_search.py "$$APP" "$${LABEL:-search}" --query "$${QUERY:-cm}" --rate "$${RATE:-8}" --sample
 
 perf-warm-scroll-ab:
 	@bash scripts/perf-warm-scroll-ab.sh $(WARM_SCROLL_AB_ARGS)

@@ -2401,6 +2401,21 @@ enum MarkdownHTMLDocumentBuilder {
                     });
                   } catch (e) { }
                 }
+                // Offscreen probe for the prewarm path: the document's laid-out height before paint
+                // readiness (animation frames do not run offscreen). It seeds the popover geometry only;
+                // terminal readiness still arrives through scopySize after the popover is visible.
+                window.__scopyProbeLayoutHeight = function () {
+                  try {
+                    var el = document.getElementById('content');
+                    var state = window.__scopyRenderState || {};
+                    if (!el || state.renderFailed || state.unifiedRenderSucceeded !== true) { return null; }
+                    layoutChatGPTTables(el);
+                    updateChatGPTPreviewScale(el);
+                    var box = document.getElementById('content-scale-shell') || el;
+                    var rect = box.getBoundingClientRect();
+                    return { width: Math.ceil(rect.width || 0), height: Math.ceil(rect.height || 0), fontsReady: !!state.fontsReady };
+                  } catch (e) { return null; }
+                };
                 window.__scopyReportHeight = function (force) {
                   pendingHeightReportForce = pendingHeightReportForce || !!force;
                   if (pendingHeightReportHandle) { return; }

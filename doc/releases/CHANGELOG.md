@@ -12,6 +12,22 @@
 
 - No unreleased entries.
 
+## [v0.78.0] - 2026-09-03
+
+### Changed
+
+- Hover previews: work starts after the pointer rests 300 ms on a row; Markdown detection, context and HTML build run off the main actor, the shared WebView loads the document offscreen at the popover width and its layout probe seeds the metrics cache, so the popover opens at its final size at the preview delay and a warm hover navigates nothing. The pipeline renders at the preview's own layout scale (`MarkdownPreviewLayoutScalePreference`). Image and file prefetch moved from 50 ms to the same 300 ms.
+- Search: rows stay on screen until the new results arrive, identical refine passes are skipped, and `isLoading` / `performanceSummary` / list observers are read by leaf views instead of the List body.
+- `HistoryListState` updates derived arrays incrementally; the next history page is prefetched 40 rows before the end and applied in 20-row chunks one frame apart.
+- Clipboard capture processes RTF/HTML/text off the main thread and calls the main-thread-only WebKit HTML importer only when it can change the stored text (`mayContainTeXCharacters`); stored text and hashes are unchanged.
+- Search index caches use `SearchIndexBinaryCodec` (`shortindex.v3.bin`, `fullindex.v5.bin`) with a header preflight that rejects stale caches before decoding; old plist caches are removed as stale.
+- `HoverPreviewImageCache` per-entry cap 96 -> 256 MB and total 160 -> 320 MB so tall-screenshot previews stay cached instead of being decoded per hover.
+- Tooling: `profile_search.py`, `profile_capture.py` (+ `pbwrite`, `typekeys`, `click`, `axsearch`, `axrows`), hover and capture timelines in the info log.
+
+### Performance
+
+- Markdown hover final content `1.33 -> 1.04 s` with final size on the first frame; search typing List body runs `56 -> 31`; 1 MB rich copy main-thread block `1.9-2.4 s -> ~0`; short-index cache load at launch `2,887 -> 55 ms`, launch CPU `3.3 -> 0.75 s`; page-load callbacks `25-33 -> 17 ms`.
+
 ## [v0.77.1] - 2026-09-02
 
 ### Fixed

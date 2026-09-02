@@ -212,28 +212,18 @@ final class FullIndexDiskCacheHardeningTests: XCTestCase {
     private func corruptPostingsKeepingChecksumConsistent(cachePath: String, checksumPath: String) throws {
         let cacheURL = URL(fileURLWithPath: cachePath)
         let originalData = try Data(contentsOf: cacheURL)
-        var format: PropertyListSerialization.PropertyListFormat = .binary
-        let any = try PropertyListSerialization.propertyList(from: originalData, options: [], format: &format)
-        guard var root = any as? [String: Any] else {
-            XCTFail("Unexpected plist root")
+        guard let payload = SearchIndexDiskCache.debugDecodeFullPayload(originalData) else {
+            XCTFail("Unexpected cache payload")
             return
         }
-        guard let items = root["items"] as? [Any] else {
-            XCTFail("Missing items")
-            return
-        }
-        let itemsCount = items.count
-        guard var asciiPostings = root["asciiCharPostings"] as? [[Int]] else {
-            XCTFail("Missing asciiCharPostings")
-            return
-        }
+        let itemsCount = payload.items.count
+        var asciiPostings = payload.asciiCharPostings
         XCTAssertEqual(asciiPostings.count, 128)
 
         let iIndex = Int(Character("i").asciiValue ?? 0)
         asciiPostings[iIndex].append(itemsCount)
-        root["asciiCharPostings"] = asciiPostings
 
-        let corruptedData = try PropertyListSerialization.data(fromPropertyList: root, format: .binary, options: 0)
+        let corruptedData = SearchIndexDiskCache.debugEncodeFullPayload(payload, asciiCharPostings: asciiPostings)
         try corruptedData.write(to: cacheURL, options: [.atomic])
 
         let checksum = Self.sha256Hex(corruptedData)
