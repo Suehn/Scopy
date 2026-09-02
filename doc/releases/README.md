@@ -20,16 +20,17 @@ This page is the human-facing index for current release state. Automation should
 ## Current Release
 
 <!-- release-current:start -->
-- Version: `v0.78.0`
+- Version: `v0.78.1`
 - Date: `2026-09-03`
-- Release note: [v0.78.0](./history/v0.78.0.md)
+- Release note: [v0.78.1](./history/v0.78.1.md)
 - Changelog: [CHANGELOG.md](./CHANGELOG.md)
-- Profile doc: [v0.78.0-profile.md](../perf/release-profiles/v0.78.0-profile.md)
+- Profile doc: `none`
 <!-- release-current:end -->
 
 ## Recent Releases
 
 <!-- release-recent:start -->
+- `2026-09-03` [v0.78.1](./history/v0.78.1.md) - Protected pasteboard transactions stay out of history; valid search hits survive unrenderable match evidence
 - `2026-09-03` [v0.78.0](./history/v0.78.0.md) - Hover previews at final size, search keeps rows while typing, rich copies stop blocking the main thread, binary index caches, prefetched and chunked page loads
 - `2026-09-02` [v0.77.1](./history/v0.77.1.md) - Mouse-wheel scroll detection only starts on a current scroll-wheel event; test gates recorded for v0.77.0
 - `2026-09-02` [v0.77.0](./history/v0.77.0.md) - Mouse-wheel scrolling suppresses hover work, selection stops re-diffing the List, 100-row pages: scroll CPU 9.9 -> 2.9 s, main thread 42% -> 22%, callback max 75 -> 17-25 ms
@@ -41,14 +42,6 @@ This page is the human-facing index for current release state. Automation should
 - `2026-08-29` [v0.72.1](./history/v0.72.1.md) - Link enrichment re-render fixes, official news-card presentation, and precise promotion gates
 - `2026-08-29` [v0.72.0](./history/v0.72.0.md) - All rich surface types, opt-in link enrichment, and Sparkle auto-update
 - `2026-08-29` [v0.71.0](./history/v0.71.0.md) - Renderer hardening gate and desktop-wide rich fidelity
-- `2026-08-28` [v0.70.0](./history/v0.70.0.md) - Interactive ChatGPT-style rich surfaces and stable Markdown preview lifecycle
-- `2026-08-28` [v0.65.4](./history/v0.65.4.md) - ChatGPT-aligned Markdown preview and PNG export rendering
-- `2026-08-22` [v0.65.3](./history/v0.65.3.md) - Restart-surviving search index caches, typing-safe warm-up, and index-only corpus metrics
-- `2026-08-09` [v0.65.2](./history/v0.65.2.md) - Explain every search result with source-aware highlighted match evidence
-- `2026-07-11` [v0.65.1](./history/v0.65.1.md) - Unify GitHub and local tagged packaging on the DerivedData-aware release script
-- `2026-07-11` [v0.65.0](./history/v0.65.0.md) - Crash-consistent clipboard ingest, race-safe cleanup, passive-row performance, lossless storage accounting, and explicit release tag authority
-- `2026-06-15` [v0.8.8](./history/v0.8.8.md) - Scroll row cache and lazy Markdown export checks
-- `2026-06-07` [v0.8.7](./history/v0.8.7.md) - WACZ root Markdown table parity
 <!-- release-recent:end -->
 
 ## Full History

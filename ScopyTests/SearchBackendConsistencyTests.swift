@@ -46,6 +46,34 @@ final class SearchBackendConsistencyTests: XCTestCase {
         XCTAssertEqual(noteOnly.hits.first?.matchContext?.fragments.map(\.source), [.note])
     }
 
+    func testClipboardServiceRetainsHitWithoutEvidenceWhenFuzzyMatchersDisagree() async throws {
+        let dbPath = Self.makeSharedInMemoryDatabasePath()
+        let seedStorage = StorageService(databasePath: dbPath)
+        try await seedStorage.open()
+        defer { Task { @MainActor in await seedStorage.close() } }
+
+        let stored = try await seedStorage.upsertItem(
+            TestDataFactory.makeTextContent("/Users/example/Cafe\u{301}.txt")
+        )
+
+        let service = ClipboardServiceFactory.create(useMock: false, databasePath: dbPath)
+        try await service.start()
+        defer { Task { @MainActor in await service.stopAndWait() } }
+
+        let page = try await service.search(
+            query: SearchRequest(
+                query: "cafe",
+                mode: .fuzzy,
+                forceFullFuzzy: true,
+                limit: 10,
+                offset: 0
+            )
+        )
+
+        XCTAssertEqual(page.hits.map(\.item.id), [stored.id])
+        XCTAssertNil(page.hits.first?.matchContext)
+    }
+
     func testPinnedChangeInvalidatesShortQueryCacheThroughClipboardService() async throws {
         let dbPath = Self.makeSharedInMemoryDatabasePath()
 

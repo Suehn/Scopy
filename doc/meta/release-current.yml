@@ -1,29 +1,29 @@
-version: v0.78.0
+version: v0.78.1
 date: 2026-09-03
-release_doc: doc/releases/history/v0.78.0.md
+release_doc: doc/releases/history/v0.78.1.md
 release_index: doc/releases/README.md
 changelog_file: doc/releases/CHANGELOG.md
-profile_doc: doc/perf/release-profiles/v0.78.0-profile.md
+profile_doc: null
 runbook_doc: doc/current/release-runbook.md
 spec_doc: doc/current/product-spec.md
 development_doc: doc/current/development-guide.md
 architecture_doc: doc/current/architecture.md
 last_verified_at: 2026-09-03
-summary: Hover previews open at final size at the delay (300 ms prefetch, offscreen WebView prewarm, preview-scale render), search keeps rows between keystrokes, rich copies no longer block the main thread (1.9-2.4 s -> ~0), binary search-index caches (launch 2.9 s -> 55 ms), page loads prefetched and chunked
+summary: Protected pasteboard transactions stay out of history, and valid search hits survive unrenderable match evidence without changing normal interaction behavior
 verification:
   docs_validate: pass
   release_validate: pass
   release_policy: pass
-  build: pass_make_release
-  assets_verify: pass_markdown_preview_assets_verified
-  test_unit: pass_791_executed_3_skipped_0_failures
-  test_strict: pass_791_executed_3_skipped_0_failures
-  test_tsan: not_run_no_search_cleanup_or_storage_change
-  test_integration: not_run_no_search_cleanup_or_storage_change
-  test_performance: not_run_no_search_cleanup_or_storage_change
-  snapshot_release: not_run_no_search_cleanup_or_storage_change
-  frontend_profile_full: not_run_evidence_is_real_input_profile_v0_77_0
+  build: pass_make_build_and_release_configuration
+  assets_verify: pass_markdown_asset_gate_during_make_build
+  test_unit: pass_794_executed_3_skipped_0_failures
+  test_strict: pass_794_executed_3_skipped_0_failures
+  test_tsan: not_run_no_concurrency_change
+  test_integration: pass_targeted_monitor_engine_service_and_view_model_tests
+  test_performance: pass_real_capture_10_of_10_rows_ui_and_db_consistent_main_run_loop_p95_1_0ms
+  snapshot_release: pass_cmd_p95_0_597ms_cm_p95_5_101ms_cold_cm_45_977ms
+  frontend_profile_full: not_run_no_frontend_or_interaction_change
   bundled_pngquant: unchanged_from_v0_74_0_fork_256e081_engine_fddcf09
-  test_ui_subset: 29_passed_3_failed_same_as_v0_77_1_one_pointer_synthesis_flake_two_fail_on_v0_76_0
-  scroll_reference: unchanged_from_v0_77_1_mouse_cpu_2.87s_main_2.65s_p95_8.3ms
-  interaction_reference: markdown_hover_1.33s_to_1.04s_final_size_first_frame_search_list_body_56_to_31_rich_copy_block_2s_to_0_launch_index_2887ms_to_55ms_page_apply_25_33ms_to_17ms
+  test_ui_subset: not_run_no_ui_behavior_change
+  scroll_reference: unchanged_from_v0_78_0
+  interaction_reference: protected_marker_guard_and_search_evidence_fallback_no_normal_ui_change

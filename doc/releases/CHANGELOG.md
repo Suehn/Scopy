@@ -12,6 +12,16 @@
 
 - No unreleased entries.
 
+## [v0.78.1] - 2026-09-03
+
+### Security And Privacy
+
+- Clipboard monitoring skips an entire pasteboard change when any item carries a standard concealed, transient, auto-generated, or 1Password marker. Mixed pasteboard transactions cannot leak an unmarked companion representation into history, and monitoring resumes with the next ordinary change.
+
+### Fixed
+
+- Search retains a valid candidate when differently normalized or malformed source text prevents construction of renderable match evidence. The row falls back to its ordinary metadata while the missing evidence is counted and logged; cancellation and invalid-query errors remain authoritative.
+
 ## [v0.78.0] - 2026-09-03
 
 ### Changed

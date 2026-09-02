@@ -1078,11 +1078,6 @@ actor ClipboardService {
         for item in result.items {
             try Task.checkCancellation()
             let matchContext = result.matchContexts[item.id]
-            if query.hasSemanticQuery, matchContext == nil {
-                throw SearchEngineImpl.SearchError.searchFailed(
-                    "Search result did not contain renderable match evidence"
-                )
-            }
             let dto = await toDTO(item, storage: storage)
             hits.append(SearchResultHit(item: dto, matchContext: matchContext))
         }

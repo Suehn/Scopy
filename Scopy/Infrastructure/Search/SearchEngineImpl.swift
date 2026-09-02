@@ -1833,9 +1833,18 @@ public actor SearchEngineImpl {
         })
 
         let elapsedMs = (CFAbsoluteTimeGetCurrent() - startTime) * 1000
+        let missingEvidenceCount = request.hasSemanticQuery
+            ? max(0, result.items.count - result.matchContexts.count)
+            : 0
         perfContext?.addPhase("search_total", ms: elapsedMs)
         perfContext?.addCounter("returned_items", value: result.items.count)
         perfContext?.addCounter("match_evidence_items", value: result.matchContexts.count)
+        perfContext?.addCounter("match_evidence_missing_items", value: missingEvidenceCount)
+        if missingEvidenceCount > 0 {
+            ScopyLog.search.warning(
+                "Search retained \(missingEvidenceCount, privacy: .public) result(s) without renderable match evidence"
+            )
+        }
         return SearchResult(
             items: result.items,
             total: result.total,
@@ -1853,36 +1862,36 @@ public actor SearchEngineImpl {
     ) throws -> SearchResult {
         guard request.hasSemanticQuery, !result.items.isEmpty else { return result }
 
-        let matcher = try SearchMatchContextBuilder.prepare(
-            request: request,
-            coverage: result.coverage,
-            cancellationCheck: { try Task.checkCancellation() }
-        )
+        let matcher: SearchMatchContextBuilder.Matcher
+        do {
+            matcher = try SearchMatchContextBuilder.prepare(
+                request: request,
+                coverage: result.coverage,
+                cancellationCheck: { try Task.checkCancellation() }
+            )
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            return result
+        }
         var contexts: [UUID: SearchMatchContext] = [:]
         contexts.reserveCapacity(result.items.count)
 
-        do {
-            for item in result.items {
-                try Task.checkCancellation()
-                guard let context = try matcher.makeContext(
+        for item in result.items {
+            try Task.checkCancellation()
+            do {
+                if let context = try matcher.makeContext(
                     plainText: item.plainText,
                     note: item.note,
                     cancellationCheck: { try Task.checkCancellation() }
-                ) else {
-                    throw SearchError.searchFailed(
-                        "Search result did not contain renderable match evidence"
-                    )
+                ) {
+                    contexts[item.id] = context
                 }
-                contexts[item.id] = context
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                continue
             }
-        } catch is CancellationError {
-            throw CancellationError()
-        } catch let error as SearchError {
-            throw error
-        } catch {
-            throw SearchError.searchFailed(
-                "Search evidence generation failed: \(error.localizedDescription)"
-            )
         }
 
         return SearchResult(

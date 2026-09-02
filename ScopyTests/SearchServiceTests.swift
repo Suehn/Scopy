@@ -249,6 +249,26 @@ final class SearchServiceTests: XCTestCase {
         XCTAssertEqual(greekContext.fragments.flatMap(highlightedText), ["αλφα"])
     }
 
+    func testFuzzySearchRetainsCandidateWhenUnicodeNormalizationPreventsMatchEvidence() async throws {
+        let target = try await storage.upsertItem(
+            makeContent("/Users/example/Cafe\u{301}.txt", type: .file)
+        )
+        await search.invalidateCache()
+
+        let result = try await search.search(
+            request: SearchRequest(
+                query: "cafe",
+                mode: .fuzzy,
+                forceFullFuzzy: true,
+                limit: 50,
+                offset: 0
+            )
+        )
+
+        XCTAssertEqual(result.items.map(\.id), [target.id])
+        XCTAssertNil(result.matchContexts[target.id])
+    }
+
     func testPerfMetricsIncludeMatchEvidenceInsideSearchTotal() async throws {
         guard ProcessInfo.processInfo.environment["SCOPY_PERF_METRICS"] == "1" else {
             throw XCTSkip("Requires SCOPY_PERF_METRICS=1")

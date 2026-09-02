@@ -1011,8 +1011,9 @@ final class HistoryViewModel {
 
     /// The current rows stay on screen until the versioned replacement arrives: clearing them per
     /// keystroke emptied the List and rebuilt it twice more when the results landed. A failed
-    /// user-initiated search clears them (no candidates without evidence); a failed event-driven
-    /// refresh keeps them and marks coverage incomplete.
+    /// user-initiated search clears them when the search itself fails; a failed event-driven refresh
+    /// keeps them and marks coverage incomplete. A valid candidate without renderable evidence is
+    /// not a failed search and keeps the row with its ordinary metadata.
     private func startSearch(clearsProjectionOnFailure: Bool) {
         cancelTask(&searchTask)
         cancelTask(&refineTask)

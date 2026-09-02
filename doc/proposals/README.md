@@ -2,7 +2,7 @@
 doc_type: portal
 status: active
 owner: maintainers
-last_reviewed: 2026-07-11
+last_reviewed: 2026-09-03
 canonical: true
 ---
 
@@ -16,6 +16,7 @@ Once a proposal is implemented, move its lasting contracts into the appropriate 
 
 ## Current Contents
 
+- [Whole-repo architecture review, 2026-09 (capture, storage, search, preview/export, UI, concurrency)](./architecture-review-2026-09.md)
 - [Rich fidelity pass: root causes and surgical fixes](./rich-fidelity-pass.md)
 - [Renderer hardening gate: review and implementation plan](./renderer-hardening-gate-plan.md)
 - [Markdown preview and clipboard architecture](./markdown-preview-architecture/proposal.md)
