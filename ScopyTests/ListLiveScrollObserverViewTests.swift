@@ -73,6 +73,9 @@ final class ListLiveScrollObserverViewTests: XCTestCase {
             coordinator = HistoryListInteractionCoordinator()
             observer = ListLiveScrollObserverView.ObserverView(frame: .zero)
             observer.interactionCoordinator = coordinator
+            // Tests move the clip view programmatically; treat that as wheel-driven unless a test
+            // says otherwise.
+            observer.isScrollWheelInputCurrent = { true }
             if attachObserver {
                 scrollView.contentView.addSubview(observer)
                 observer.attachIfNeeded()
@@ -432,6 +435,34 @@ final class ListLiveScrollObserverViewTests: XCTestCase {
         now += 0.4
         XCTAssertFalse(gate.isProgrammaticScrollActive)
         scrollClipView(fixture, toY: 48)
+        XCTAssertEqual(starts, 1)
+        XCTAssertTrue(fixture.observer.isScrollingReported)
+        await waitForBoundsSettle(0.2)
+        XCTAssertFalse(fixture.observer.isScrollingReported)
+    }
+
+    func testClipViewMovementWithoutScrollWheelInputIsLayoutNotScrolling() async {
+        let fixture = Fixture(attachObserver: true)
+        defer { fixture.detachObserver() }
+        fixture.observer.boundsSettleInterval = 0.05
+        fixture.observer.isScrollWheelInputCurrent = { false }
+        var starts = 0
+        fixture.observer.onScrollStart = { starts += 1 }
+
+        scrollClipView(fixture, toY: 24)
+        XCTAssertEqual(starts, 0)
+        XCTAssertFalse(fixture.observer.isScrollingReported)
+
+        // A live-scroll gesture in progress still lets clip-view movement extend the scroll.
+        NotificationCenter.default.post(
+            name: NSScrollView.willStartLiveScrollNotification,
+            object: fixture.scrollView
+        )
+        scrollClipView(fixture, toY: 48)
+        NotificationCenter.default.post(
+            name: NSScrollView.didEndLiveScrollNotification,
+            object: fixture.scrollView
+        )
         XCTAssertEqual(starts, 1)
         XCTAssertTrue(fixture.observer.isScrollingReported)
         await waitForBoundsSettle(0.2)

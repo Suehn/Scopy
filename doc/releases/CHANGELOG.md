@@ -12,6 +12,16 @@
 
 - No unreleased entries.
 
+## [v0.77.1] - 2026-09-02
+
+### Fixed
+
+- `ListLiveScrollObserverView` starts a clip-view-driven scroll only while a scroll-wheel event is current (or a live-scroll gesture is in progress), so layout-driven list movement such as thumbnail heights settling no longer counts as scrolling and cannot suppress hover.
+
+### Notes
+
+- Test gates for the v0.77.0 code: unit 790/0 failures, strict 790/0 failures, UI subset 29 passed with 3 failures of which one is a pointer-synthesis flake and two fail identically on v0.76.0.
+
 ## [v0.77.0] - 2026-09-02
 
 ### Changed

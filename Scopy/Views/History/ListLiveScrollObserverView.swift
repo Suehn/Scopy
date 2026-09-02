@@ -75,6 +75,13 @@ extension ListLiveScrollObserverView {
         /// Scrolling that only shows up as clip-view movement (mouse wheel, momentum tail) ends this
         /// long after the last bounds change.
         var boundsSettleInterval: TimeInterval = 0.12
+        /// The clip view also moves for layout (thumbnail heights, initial load) and programmatic
+        /// scrolls. Movement starts a scroll only while a scroll-wheel event is current: mouse-wheel
+        /// events and their smooth-scroll frames run with that event current, layout does not.
+        var isScrollWheelInputCurrent: () -> Bool = {
+            guard let event = NSApp.currentEvent, event.type == .scrollWheel else { return false }
+            return ProcessInfo.processInfo.systemUptime - event.timestamp < 0.3
+        }
 
         private weak var observedScrollView: NSScrollView?
         private weak var attachedWindow: NSWindow?
@@ -218,6 +225,7 @@ extension ListLiveScrollObserverView {
                 return
             }
             if !isBoundsScrolling {
+                guard isLiveScrolling || isScrollWheelInputCurrent() else { return }
                 isBoundsScrolling = true
                 reportScrollStartIfNeeded()
             }
