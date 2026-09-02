@@ -195,6 +195,65 @@ final class StorageServiceTests: XCTestCase {
         XCTAssertTrue(ids1.isDisjoint(with: ids2))
     }
 
+    func testListFetchesReturnSummariesAndPayloadRemainsLoadableOnDemand() async throws {
+        let pinnedData = Data([0x89, 0x50, 0x4E, 0x47, 0x01])
+        let recentData = Data([0x89, 0x50, 0x4E, 0x47, 0x02])
+        let pinned = try await storage.upsertItem(
+            ClipboardMonitor.ClipboardContent(
+                type: .image,
+                plainText: "Pinned inline image",
+                payload: .data(pinnedData),
+                appBundleID: "com.test.pinned",
+                contentHash: "pinned-inline-\(UUID().uuidString)",
+                sizeBytes: pinnedData.count
+            )
+        )
+        try await storage.setPin(pinned.id, pinned: true)
+        let recent = try await storage.upsertItem(
+            ClipboardMonitor.ClipboardContent(
+                type: .image,
+                plainText: "Recent inline image",
+                payload: .data(recentData),
+                appBundleID: "com.test.recent",
+                contentHash: "recent-inline-\(UUID().uuidString)",
+                sizeBytes: recentData.count
+            )
+        )
+
+        XCTAssertEqual(pinned.rawData, pinnedData)
+        XCTAssertEqual(recent.rawData, recentData)
+        let fullPinnedResult = try await storage.findByID(pinned.id)
+        let fullPinned = try XCTUnwrap(fullPinnedResult)
+        XCTAssertEqual(fullPinned.rawData, pinnedData)
+
+        let all = try await storage.fetchRecent(limit: 10, offset: 0)
+        let pinnedSummaries = try await storage.fetchPinned()
+        let recentSummaries = try await storage.fetchRecentUnpinned(limit: 10, offset: 0)
+
+        XCTAssertEqual(all.map(\.id), [pinned.id, recent.id])
+        XCTAssertEqual(pinnedSummaries.map(\.id), [pinned.id])
+        XCTAssertEqual(recentSummaries.map(\.id), [recent.id])
+        XCTAssertTrue(all.allSatisfy { $0.rawData == nil })
+        XCTAssertTrue(pinnedSummaries.allSatisfy { $0.rawData == nil })
+        XCTAssertTrue(recentSummaries.allSatisfy { $0.rawData == nil })
+
+        let pinnedSummary = try XCTUnwrap(pinnedSummaries.first)
+        XCTAssertEqual(pinnedSummary.type, pinned.type)
+        XCTAssertEqual(pinnedSummary.contentHash, pinned.contentHash)
+        XCTAssertEqual(pinnedSummary.plainText, pinned.plainText)
+        XCTAssertEqual(pinnedSummary.note, fullPinned.note)
+        XCTAssertEqual(pinnedSummary.appBundleID, pinned.appBundleID)
+        XCTAssertEqual(pinnedSummary.createdAt, fullPinned.createdAt)
+        XCTAssertEqual(pinnedSummary.lastUsedAt, fullPinned.lastUsedAt)
+        XCTAssertEqual(pinnedSummary.useCount, fullPinned.useCount)
+        XCTAssertEqual(pinnedSummary.isPinned, fullPinned.isPinned)
+        XCTAssertEqual(pinnedSummary.sizeBytes, pinned.sizeBytes)
+        XCTAssertEqual(pinnedSummary.fileSizeBytes, fullPinned.fileSizeBytes)
+        XCTAssertEqual(pinnedSummary.storageRef, pinned.storageRef)
+        let reloadedPayload = await storage.loadPayloadData(for: pinnedSummary)
+        XCTAssertEqual(reloadedPayload, pinnedData)
+    }
+
     func testDelete() async throws {
         let content = makeTestContent(text: "To be deleted")
         let item = try await storage.upsertItem(content)

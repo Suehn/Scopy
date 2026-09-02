@@ -250,8 +250,11 @@ final class SearchServiceTests: XCTestCase {
     }
 
     func testFuzzySearchRetainsCandidateWhenUnicodeNormalizationPreventsMatchEvidence() async throws {
-        let target = try await storage.upsertItem(
+        let problemHit = try await storage.upsertItem(
             makeContent("/Users/example/Cafe\u{301}.txt", type: .file)
+        )
+        let normalHit = try await storage.upsertItem(
+            makeContent("/Users/example/Cafe.txt", type: .file)
         )
         await search.invalidateCache()
 
@@ -265,8 +268,9 @@ final class SearchServiceTests: XCTestCase {
             )
         )
 
-        XCTAssertEqual(result.items.map(\.id), [target.id])
-        XCTAssertNil(result.matchContexts[target.id])
+        XCTAssertEqual(Set(result.items.map(\.id)), [problemHit.id, normalHit.id])
+        XCTAssertNil(result.matchContexts[problemHit.id])
+        XCTAssertNotNil(result.matchContexts[normalHit.id])
     }
 
     func testPerfMetricsIncludeMatchEvidenceInsideSearchTotal() async throws {

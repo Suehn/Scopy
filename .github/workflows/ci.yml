@@ -46,6 +46,9 @@ jobs:
         with:
           xcode-version: "16.0"
 
+      - name: Test Markdown renderer
+        run: npm ci --prefix Tools/MarkdownRenderer && npm test --prefix Tools/MarkdownRenderer
+
       - name: Build
         run: make build
 

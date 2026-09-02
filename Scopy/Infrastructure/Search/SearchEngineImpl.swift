@@ -1862,18 +1862,11 @@ public actor SearchEngineImpl {
     ) throws -> SearchResult {
         guard request.hasSemanticQuery, !result.items.isEmpty else { return result }
 
-        let matcher: SearchMatchContextBuilder.Matcher
-        do {
-            matcher = try SearchMatchContextBuilder.prepare(
-                request: request,
-                coverage: result.coverage,
-                cancellationCheck: { try Task.checkCancellation() }
-            )
-        } catch is CancellationError {
-            throw CancellationError()
-        } catch {
-            return result
-        }
+        let matcher = try SearchMatchContextBuilder.prepare(
+            request: request,
+            coverage: result.coverage,
+            cancellationCheck: { try Task.checkCancellation() }
+        )
         var contexts: [UUID: SearchMatchContext] = [:]
         contexts.reserveCapacity(result.items.count)
 

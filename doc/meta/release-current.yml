@@ -1,6 +1,6 @@
-version: v0.78.1
+version: v0.78.2
 date: 2026-09-03
-release_doc: doc/releases/history/v0.78.1.md
+release_doc: doc/releases/history/v0.78.2.md
 release_index: doc/releases/README.md
 changelog_file: doc/releases/CHANGELOG.md
 profile_doc: null
@@ -9,21 +9,22 @@ spec_doc: doc/current/product-spec.md
 development_doc: doc/current/development-guide.md
 architecture_doc: doc/current/architecture.md
 last_verified_at: 2026-09-03
-summary: Protected pasteboard transactions stay out of history, and valid search hits survive unrenderable match evidence without changing normal interaction behavior
+summary: Marker-bearing content remains captured, list pages avoid inline payload blobs, and search evidence failures stay scoped to the affected candidate
 verification:
   docs_validate: pass
   release_validate: pass
   release_policy: pass
   build: pass_make_build_and_release_configuration
-  assets_verify: pass_markdown_asset_gate_during_make_build
-  test_unit: pass_794_executed_3_skipped_0_failures
-  test_strict: pass_794_executed_3_skipped_0_failures
+  assets_verify: pass_markdown_renderer_106_and_asset_sync_4
+  test_unit: pass_795_executed_3_skipped_0_failures
+  test_strict: pass_795_executed_3_skipped_0_failures
   test_tsan: not_run_no_concurrency_change
-  test_integration: pass_targeted_monitor_engine_service_and_view_model_tests
-  test_performance: pass_real_capture_10_of_10_rows_ui_and_db_consistent_main_run_loop_p95_1_0ms
-  snapshot_release: pass_cmd_p95_0_597ms_cm_p95_5_101ms_cold_cm_45_977ms
-  frontend_profile_full: not_run_no_frontend_or_interaction_change
+  test_integration: pass_targeted_7_storage_48_and_pagination_1
+  test_performance: pass_real_capture_10_of_10_ui_db_main_p95_0_9ms_first_50_avoid_420646_blob_bytes
+  snapshot_release: pass_cmd_p95_0_561ms_cm_p95_4_508ms_cold_cm_61_224ms
+  frontend_profile_full: pass_3x10s_four_scenarios_with_standard_variance_recheck
+  unified_performance: pass_causal_backend_v0781_to_v0782_and_full_frontend_table
   bundled_pngquant: unchanged_from_v0_74_0_fork_256e081_engine_fddcf09
   test_ui_subset: not_run_no_ui_behavior_change
-  scroll_reference: unchanged_from_v0_78_0
-  interaction_reference: protected_marker_guard_and_search_evidence_fallback_no_normal_ui_change
+  scroll_reference: full_current_frame_p95_8_333ms_in_3_of_4_scenarios_standard_mixed_recheck_8_333ms
+  interaction_reference: marker_capture_and_search_fallback_no_ui_change_list_payloads_load_on_demand

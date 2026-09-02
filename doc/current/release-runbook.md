@@ -2,9 +2,10 @@
 doc_type: runbook
 status: active
 owner: maintainers
-last_reviewed: 2026-08-28
+last_reviewed: 2026-09-03
 canonical: true
 related_versions:
+  - v0.78.2
   - v0.70.0
   - v0.65.4
   - v0.65.0
@@ -268,6 +269,17 @@ This section records historical `v0.65.4` release evidence for the single previe
 - Page loads while scrolling (continuous 8 s downward wheel): callback bursts of 25-33 ms per page -> 17 ms (two 120 Hz frames) per chunk, over-threshold ratio 0.065 -> 0.014, with pages prefetched 40 rows ahead.
 - Preview image cache: per-entry cap 96 -> 256 MB, total 160 -> 320 MB, so a tall screenshot's 64 Mpx preview stays cached for its TTL instead of being decoded on every hover; decode quality unchanged.
 - Gates at tag time: unit 791 executed / 3 skipped / 0 failures; docs, release and policy validation pass; strict 791 / 3 / 0 after the tag; UI subset 29 passed, 3 failed (unchanged from v0.77.1); TSan/snapshot/backend not run (no query, cleanup, or storage-schema change).
+
+## History Summary And Search Fallback Release Evidence (v0.78.2, 2026-09-03)
+
+- Environment: Apple M3 Pro, 36GB, 120 Hz display, macOS 15.7.3 (`24G419`), Xcode 26.1.1 (`17B100`), project Swift 5.9, deployment target macOS 14.0; real 9,566-row snapshot DB (`146,255,872` bytes).
+- List-query change: recent, pinned, and unpinned queries no longer select inline `raw_data`; full payloads still load through the existing item lookup on demand. The snapshot's first 50 history rows contain `420,646` bytes of inline payload, and its 15 pinned rows contain `42,194` bytes, now excluded from routine list hydration. This is avoided transfer volume, not a claimed wall-clock speedup.
+- Release-app capture (`logs/perf-capture/v0782-final/`): 10/10 generated text changes reached the run DB and became the first ten Recent rows in order; main run-loop busy p95 `0.9 ms`, max `33.6 ms`.
+- Search release benchmark: `cmd` p95 `0.561 ms` against a `50 ms` limit; prepared `cm` p95 `4.508 ms` against a `20 ms` limit; cold `cm` observed `61.224 ms` and remains record-only.
+- Full frontend profile (`logs/perf-frontend-profile-2026-09-03_02-05-13/`): three 10-second repeats for baseline/current across four snapshot scenarios completed. Current frame p95 was `8.333 ms` in accessibility, search-evidence, and text-bias; mixed had `16.667 ms` versus baseline `8.333 ms`. Raw runs also contained a `16.667 ms` baseline mixed sample with comparable app main-run-loop averages, so this is not a causal before/after comparison.
+- Standard recheck (`logs/perf-frontend-profile-2026-09-03_02-14-10/`): mixed returned to `8.333 -> 8.333 ms` and drop ratio improved `0.027 -> 0.021`; search-evidence showed the inverse p95 clock step while its drop ratio improved `0.016 -> 0.012`. The discrete 120/60 Hz sampling variance is recorded rather than presented as a product improvement or regression.
+- `make perf-unified-table` produced `logs/perf-unified-2026-09-03_02-18-42.md`. Its backend columns are a causal `v0.78.1` (`e4c7616`) versus `v0.78.2` candidate comparison with 20 warmups and 30 measured iterations; engine/service p95 values remain within their release limits, full-index warm load was `50.986 -> 50.516 ms`, and peak RSS was `115.375 -> 117.141 MB`. Its frontend columns are the runtime feature-flag variants described above and are not a revision comparison.
+- Gates: Debug and Release builds passed; Markdown renderer 106/106 and asset synchronization 4/4 passed; targeted 7/7, storage 48/48, pagination 1/1, unit 795 executed / 3 skipped / 0 failures, strict 795 / 3 / 0; documentation/release/policy validators passed before tag. No migration, schema, renderer, or interaction behavior changed. Hosted TSan remains the release workflow's concurrency check.
 
 ## Homebrew Acceptance
 

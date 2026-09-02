@@ -12,6 +12,22 @@
 
 - No unreleased entries.
 
+## [v0.78.2] - 2026-09-03
+
+### Changed
+
+- Concealed, transient, auto-generated, and 1Password pasteboard type markers no longer exclude otherwise supported content from history. This deliberately supersedes the marker-filtering behavior released in v0.78.1.
+- Recent, pinned, and unpinned history list queries return metadata summaries without loading inline `raw_data`; an item payload is fetched only when an action actually needs it.
+
+### Fixed
+
+- A match-evidence failure for one search candidate degrades only that row, while query-wide matcher preparation failures remain real search failures instead of silently removing evidence from every result.
+
+### Performance And Tooling
+
+- On the 9,566-row release snapshot, the first 50 history rows contain 420,646 bytes of inline payload that the list query now avoids loading. The existing on-demand payload path remains authoritative.
+- The macOS CI build job now runs the 106-test Markdown renderer contract before building the app.
+
 ## [v0.78.1] - 2026-09-03
 
 ### Security And Privacy

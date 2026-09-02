@@ -52,8 +52,11 @@ final class SearchBackendConsistencyTests: XCTestCase {
         try await seedStorage.open()
         defer { Task { @MainActor in await seedStorage.close() } }
 
-        let stored = try await seedStorage.upsertItem(
+        let problemHit = try await seedStorage.upsertItem(
             TestDataFactory.makeTextContent("/Users/example/Cafe\u{301}.txt")
+        )
+        let normalHit = try await seedStorage.upsertItem(
+            TestDataFactory.makeTextContent("/Users/example/Cafe.txt")
         )
 
         let service = ClipboardServiceFactory.create(useMock: false, databasePath: dbPath)
@@ -70,8 +73,9 @@ final class SearchBackendConsistencyTests: XCTestCase {
             )
         )
 
-        XCTAssertEqual(page.hits.map(\.item.id), [stored.id])
-        XCTAssertNil(page.hits.first?.matchContext)
+        XCTAssertEqual(Set(page.hits.map(\.item.id)), [problemHit.id, normalHit.id])
+        XCTAssertNil(page.hits.first { $0.item.id == problemHit.id }?.matchContext)
+        XCTAssertNotNil(page.hits.first { $0.item.id == normalHit.id }?.matchContext)
     }
 
     func testPinnedChangeInvalidatesShortQueryCacheThroughClipboardService() async throws {
