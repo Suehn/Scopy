@@ -4,9 +4,7 @@ enum PerfFeatureFlags {
     /// Same-binary causal switch for the history-row ownership architecture.
     /// Production defaults to passive/lazy rows; `0` retains the eager legacy observer path only
     /// for controlled performance comparison.
-    static var passiveHistoryRowEnabled: Bool {
-        bool("SCOPY_PERF_PASSIVE_ROW", defaultValue: true)
-    }
+    static let passiveHistoryRowEnabled = bool("SCOPY_PERF_PASSIVE_ROW", defaultValue: true)
 
     /// Same-binary causal switch for the revision-keyed Markdown menu fast-signal cache.
     /// Production keeps the cache enabled; `0` is reserved for the fixed warm-scroll A/B axis.

@@ -198,7 +198,7 @@ final class ClipboardItemDisplayText {
         snapshots.reserveCapacity(min(items.count, prewarmBatchLimit))
 
         for item in items where snapshots.count < prewarmBatchLimit {
-            let revision = ClipboardItemContentRevision(item: item)
+            let revision = ClipboardItemContentRevision.resolve(item: item)
             let identity = PrewarmIdentity(revision: revision, note: item.note)
             guard identities.insert(identity).inserted else { continue }
 
@@ -317,12 +317,12 @@ final class ClipboardItemDisplayText {
     }
 
     private func makeTitleCacheKey(for item: ClipboardItemDTO) -> TitleCacheKey {
-        TitleCacheKey(revision: ClipboardItemContentRevision(item: item))
+        TitleCacheKey(revision: ClipboardItemContentRevision.resolve(item: item))
     }
 
     private func makeMetadataCacheKey(for item: ClipboardItemDTO) -> MetadataCacheKey {
         MetadataCacheKey(
-            revision: ClipboardItemContentRevision(item: item),
+            revision: ClipboardItemContentRevision.resolve(item: item),
             note: item.note
         )
     }

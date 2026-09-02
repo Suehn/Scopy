@@ -22,7 +22,7 @@ for l in lines[start:end]:
     n=N(cnt,name,mod,indent)
     while stack and stack[-1].depth>=indent: stack.pop()
     (stack[-1].children if stack else roots).append(n); stack.append(n)
-def is_main(n): return 'Main Thread' in n.name
+def is_main(n): return 'Main Thread' in n.name or 'com.apple.main-thread' in n.name
 threads=roots
 sel=[t for t in threads if is_main(t)] if a.thread=='main' else threads
 total=sum(t.count for t in sel)

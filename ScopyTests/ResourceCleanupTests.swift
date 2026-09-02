@@ -236,8 +236,9 @@ final class ResourceCleanupTests: XCTestCase {
         Task { await appState.loadMore() }
         Task { await appState.loadMore() }
 
+        let onePage = HistoryViewModel.initialPageSize + HistoryViewModel.loadMorePageSize
         await assertEventually(timeout: 1.0, pollInterval: 0.01, {
-            appState.loadedCount == 550
+            appState.loadedCount == onePage
         }, message: "loadMore should append exactly one page")
     }
 }

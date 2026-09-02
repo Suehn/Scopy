@@ -343,6 +343,115 @@ final class ListLiveScrollObserverViewTests: XCTestCase {
         XCTAssertEqual(events, [.pointerInteractionStarted, .pointerInteractionEnded])
     }
 
+    private func scrollClipView(_ fixture: Fixture, toY y: CGFloat) {
+        let clipView = fixture.scrollView.contentView
+        clipView.scroll(to: NSPoint(x: 0, y: y))
+        fixture.scrollView.reflectScrolledClipView(clipView)
+    }
+
+    private func waitForBoundsSettle(_ seconds: TimeInterval) async {
+        try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+        // The settle work item is queued on the main queue; let it run.
+        await Task.yield()
+    }
+
+    func testClipViewMovementReportsOneScrollThatEndsAfterSettle() async {
+        let fixture = Fixture(attachObserver: true)
+        defer { fixture.detachObserver() }
+        fixture.observer.boundsSettleInterval = 0.05
+        var starts = 0
+        var ends = 0
+        fixture.observer.onScrollStart = { starts += 1 }
+        fixture.observer.onScrollEnd = { ends += 1 }
+
+        XCTAssertTrue(fixture.scrollView.contentView.postsBoundsChangedNotifications)
+        scrollClipView(fixture, toY: 24)
+        scrollClipView(fixture, toY: 48)
+        scrollClipView(fixture, toY: 72)
+
+        XCTAssertTrue(fixture.observer.isScrollingReported)
+        XCTAssertEqual(starts, 1)
+        XCTAssertEqual(ends, 0)
+
+        await waitForBoundsSettle(0.2)
+
+        XCTAssertFalse(fixture.observer.isScrollingReported)
+        XCTAssertEqual(starts, 1)
+        XCTAssertEqual(ends, 1)
+    }
+
+    func testLiveScrollEndWaitsForClipViewToSettle() async {
+        let fixture = Fixture(attachObserver: true)
+        defer { fixture.detachObserver() }
+        fixture.observer.boundsSettleInterval = 0.05
+        fixture.observer.pressedMouseButtonsProvider = { 0 }
+        var starts = 0
+        var ends = 0
+        fixture.observer.onScrollStart = { starts += 1 }
+        fixture.observer.onScrollEnd = { ends += 1 }
+
+        NotificationCenter.default.post(
+            name: NSScrollView.willStartLiveScrollNotification,
+            object: fixture.scrollView
+        )
+        scrollClipView(fixture, toY: 24)
+        NotificationCenter.default.post(
+            name: NSScrollView.didEndLiveScrollNotification,
+            object: fixture.scrollView
+        )
+        // Momentum keeps the clip view moving after the gesture ended.
+        scrollClipView(fixture, toY: 48)
+
+        XCTAssertEqual(starts, 1)
+        XCTAssertEqual(ends, 0)
+        XCTAssertTrue(fixture.observer.isScrollingReported)
+
+        await waitForBoundsSettle(0.2)
+
+        XCTAssertEqual(starts, 1)
+        XCTAssertEqual(ends, 1)
+        XCTAssertFalse(fixture.observer.isScrollingReported)
+    }
+
+    func testProgrammaticScrollGateHidesClipViewMovement() async {
+        let fixture = Fixture(attachObserver: true)
+        defer { fixture.detachObserver() }
+        fixture.observer.boundsSettleInterval = 0.05
+        var now: CFTimeInterval = 100
+        let gate = ListProgrammaticScrollGate(now: { now })
+        fixture.observer.programmaticScrollGate = gate
+        var starts = 0
+        fixture.observer.onScrollStart = { starts += 1 }
+
+        gate.beginProgrammaticScroll(duration: 0.35)
+        XCTAssertTrue(gate.isProgrammaticScrollActive)
+        scrollClipView(fixture, toY: 24)
+        XCTAssertEqual(starts, 0)
+        XCTAssertFalse(fixture.observer.isScrollingReported)
+
+        now += 0.4
+        XCTAssertFalse(gate.isProgrammaticScrollActive)
+        scrollClipView(fixture, toY: 48)
+        XCTAssertEqual(starts, 1)
+        XCTAssertTrue(fixture.observer.isScrollingReported)
+        await waitForBoundsSettle(0.2)
+        XCTAssertFalse(fixture.observer.isScrollingReported)
+    }
+
+    func testDetachWhileClipViewScrollingReportsEndOnce() {
+        let fixture = Fixture(attachObserver: true)
+        fixture.observer.boundsSettleInterval = 10
+        var ends = 0
+        fixture.observer.onScrollEnd = { ends += 1 }
+
+        scrollClipView(fixture, toY: 24)
+        XCTAssertTrue(fixture.observer.isScrollingReported)
+
+        fixture.detachObserver()
+        XCTAssertEqual(ends, 1)
+        XCTAssertFalse(fixture.observer.isScrollingReported)
+    }
+
     func testWindowResolverDoesNotReuseDetachedCachedListScrollView() throws {
         let frame = NSRect(x: 0, y: 0, width: 240, height: 180)
         let window = NSWindow(

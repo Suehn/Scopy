@@ -289,7 +289,7 @@ final class HistoryViewModel {
     @ObservationIgnored var pasteAfterCopyHandler: (() -> Void)?
 
     static let initialPageSize = 50
-    static let loadMorePageSize = 500
+    static let loadMorePageSize = 100
     static let knownContentRevisionCapacity = 4096
 
     private var listState = HistoryListState()
@@ -351,7 +351,16 @@ final class HistoryViewModel {
         }
     }
     var isLoading: Bool = false
-    var selectedID: UUID?
+    var selectedID: UUID? {
+        didSet {
+            guard selectedID != oldValue else { return }
+            rowSelection.update(selectedID: selectedID, follow: lastSelectionSource == .keyboard)
+        }
+    }
+
+    /// Visible rows subscribe to their own selection here; see `HistoryRowSelectionFanout`.
+    /// `lastSelectionSource` must be set before `selectedID` so the fan-out knows whether to follow.
+    let rowSelection = HistoryRowSelectionFanout()
 
     var isPinnedCollapsed: Bool = false
 
@@ -1261,25 +1270,29 @@ final class HistoryViewModel {
     func highlightNext() {
         guard !items.isEmpty else { return }
         lastSelectionSource = .keyboard
+        let nextID: UUID?
         if let currentID = selectedID,
            let currentIndex = indexOfItem(withID: currentID),
            currentIndex < items.count - 1 {
-            selectedID = items[currentIndex + 1].id
+            nextID = items[currentIndex + 1].id
         } else {
-            selectedID = items.first?.id
+            nextID = items.first?.id
         }
+        selectedID = nextID
     }
 
     func highlightPrevious() {
         guard !items.isEmpty else { return }
         lastSelectionSource = .keyboard
+        let nextID: UUID?
         if let currentID = selectedID,
            let currentIndex = indexOfItem(withID: currentID),
            currentIndex > 0 {
-            selectedID = items[currentIndex - 1].id
+            nextID = items[currentIndex - 1].id
         } else {
-            selectedID = items.last?.id
+            nextID = items.last?.id
         }
+        selectedID = nextID
     }
 
     func deleteSelectedItem() async {
@@ -1297,8 +1310,8 @@ final class HistoryViewModel {
 
         guard await delete(items[index]) else { return }
 
-        selectedID = nextID
         lastSelectionSource = .programmatic
+        selectedID = nextID
     }
 
     func selectCurrent() async {

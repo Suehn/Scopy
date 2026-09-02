@@ -11,6 +11,7 @@
 		019C45FAB061D359AC5B8BF8 /* SettingsComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8ACB57C715F93F048BD919DC /* SettingsComponents.swift */; };
 		01A7326078324CF6CF3012E0 /* MarkdownSourceProfileDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E51C0270C21BC4765F97A16 /* MarkdownSourceProfileDetector.swift */; };
 		01F967DD511D42CAC09ADEB8 /* KaTeX_Math-Italic.woff in Resources */ = {isa = PBXBuildFile; fileRef = 9644B5C6C165540B99E861D0 /* KaTeX_Math-Italic.woff */; };
+		02431E3C322557146F1273D8 /* HistoryRowSelectionFanout.swift in Sources */ = {isa = PBXBuildFile; fileRef = 36F3B1A794A066479AD9BDEB /* HistoryRowSelectionFanout.swift */; };
 		025979CA93982E8AB3C2589F /* SettingsFeatureRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 571425DBDBE904D833F0A1DC /* SettingsFeatureRow.swift */; };
 		0277A1F73C2ED2FCD708E55D /* image-path.md in Resources */ = {isa = PBXBuildFile; fileRef = 3A173A25023331BD475CAC8A /* image-path.md */; };
 		027ABA7EB0EA43844BC05517 /* ClipboardItemDisplayText.swift in Sources */ = {isa = PBXBuildFile; fileRef = C46B24B2682039001EA7F2A7 /* ClipboardItemDisplayText.swift */; };
@@ -29,6 +30,7 @@
 		07BD6F621DB2BF7FA767FEFE /* AboutSettingsPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3A1C22A73EE48460C9F1F650 /* AboutSettingsPage.swift */; };
 		080246A0B930E3A84FBABD01 /* HistoryListInteractionCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 019417A9D1565A70FDEB2B29 /* HistoryListInteractionCoordinatorTests.swift */; };
 		083CFF007945EF31B94011FF /* KaTeX_SansSerif-Bold.woff2 in Resources */ = {isa = PBXBuildFile; fileRef = C4CA466F95629B4628DF59F6 /* KaTeX_SansSerif-Bold.woff2 */; };
+		0889483A8009D07910CE7FEC /* HistoryRowSelectionFanoutTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 93096FD17C38F9FDC0440EA8 /* HistoryRowSelectionFanoutTests.swift */; };
 		08C8AD849C0EC181764970E4 /* MarkdownHTMLDocumentBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = E671677DECEAFE931657E79D /* MarkdownHTMLDocumentBuilder.swift */; };
 		08E87F7EC45D297E1A477546 /* MarkdownPreviewNavigationPolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 69C8E31A934581C57B87146A /* MarkdownPreviewNavigationPolicyTests.swift */; };
 		091E8BF4E5D21C87F210496F /* HistoryListState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 74563B8569159BF7E9365CEA /* HistoryListState.swift */; };
@@ -116,6 +118,7 @@
 		29E0062318F204EABC9AB386 /* HoverPreviewImageQualityPolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C209900B7E5E934B26F5B7AC /* HoverPreviewImageQualityPolicyTests.swift */; };
 		29E2A7CCECDEE09A63A0E05A /* KaTeX_Fraktur-Bold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = B71324125BE1417C5D4E6E9D /* KaTeX_Fraktur-Bold.ttf */; };
 		2A43CD8536E4EDA18E8A044B /* KaTeX_Size1-Regular.woff in Resources */ = {isa = PBXBuildFile; fileRef = FEF3E0E34D5570E1123BDF3C /* KaTeX_Size1-Regular.woff */; };
+		2A55103A0C78B2F8C1A802F5 /* HistoryRowSelectionFanout.swift in Sources */ = {isa = PBXBuildFile; fileRef = 36F3B1A794A066479AD9BDEB /* HistoryRowSelectionFanout.swift */; };
 		2A7E3D55E73C5DE17E407277 /* explicit-math.md in Resources */ = {isa = PBXBuildFile; fileRef = 2F7F44BEE8331E04053300B0 /* explicit-math.md */; };
 		2B1D2A25CAB739AF19CDE8EA /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = EA7C6CDC077B8CCDFF0DD486 /* Assets.xcassets */; };
 		2C376083B188BAE7793EADE5 /* VideoPlayerPreviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A96F37D2ACE3A8A3BC7F0BE9 /* VideoPlayerPreviewView.swift */; };
@@ -236,6 +239,7 @@
 		55591E5A748A14D35418CCB4 /* MarkdownRenderCacheKey.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5BEF0EDA5682AECFF608778 /* MarkdownRenderCacheKey.swift */; };
 		55F5B2CAE75ABD394E39FE9E /* KaTeX_SansSerif-Regular.woff in Resources */ = {isa = PBXBuildFile; fileRef = 291DBFC6B0FAC7CE6CFCBE90 /* KaTeX_SansSerif-Regular.woff */; };
 		55FB4D83A9F773B82BF5AB62 /* HoverPreviewIntentPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7E56E5F337D3748313865480 /* HoverPreviewIntentPolicy.swift */; };
+		563800FA519512BB9EDB65FD /* HistoryRowSelectionFanoutTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 93096FD17C38F9FDC0440EA8 /* HistoryRowSelectionFanoutTests.swift */; };
 		563BEF181FE95021B0D84B02 /* MarkdownExportServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 729CB1768BA4AA20400A38AD /* MarkdownExportServiceTests.swift */; };
 		56499299AE17ABA9BCB5E396 /* SectionHeader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 72C7E22A4D3725C49208C650 /* SectionHeader.swift */; };
 		56DD95C12F4A8CD6DCD8C837 /* HistoryListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8C25A96207E0DA2587E7AFBB /* HistoryListView.swift */; };
@@ -646,6 +650,7 @@
 		F13B87A14165790F40E03AC8 /* HistoryListUITestProbe.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD0CE0FF22BCE8D5BB818B10 /* HistoryListUITestProbe.swift */; };
 		F1736ED3E5D923DFA48453E0 /* HistoryRowThumbnailLifecycleSchedulerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DCAFF6323AF4A9FC1D16EA57 /* HistoryRowThumbnailLifecycleSchedulerTests.swift */; };
 		F1AAF41F4D265D649DC4957B /* LinkEnrichmentModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E2274EC3AF860DFEB8A11BA /* LinkEnrichmentModel.swift */; };
+		F2025070D1F6F8E8192DC043 /* HistoryRowSelectionFanout.swift in Sources */ = {isa = PBXBuildFile; fileRef = 36F3B1A794A066479AD9BDEB /* HistoryRowSelectionFanout.swift */; };
 		F22D54CFC27E951FA3C4C511 /* AppVersion.swift in Sources */ = {isa = PBXBuildFile; fileRef = 31ACAD6A6B51FB60D22EA0DA /* AppVersion.swift */; };
 		F2607A9FCBB7AB7917101EA7 /* HistoryItemPreviewCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A106B3D9CF8BA1181A7AE0D7 /* HistoryItemPreviewCoordinatorTests.swift */; };
 		F2E64377DABC5D4871EA2504 /* HistoryItemFileNoteEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9077C012BF49FB5A7F406FDF /* HistoryItemFileNoteEditorView.swift */; };
@@ -793,6 +798,7 @@
 		3527EAD22A82840AEDF3F820 /* ConcurrencyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConcurrencyTests.swift; sourceTree = "<group>"; };
 		36EED97B0F997DD960108413 /* KaTeX_Main-Regular.woff */ = {isa = PBXFileReference; path = "KaTeX_Main-Regular.woff"; sourceTree = "<group>"; };
 		36F2E1F457E9164BB4772826 /* SettingsWindowCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsWindowCoordinatorTests.swift; sourceTree = "<group>"; };
+		36F3B1A794A066479AD9BDEB /* HistoryRowSelectionFanout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryRowSelectionFanout.swift; sourceTree = "<group>"; };
 		373B2F77284B3AF79F40DCDB /* favicon-reuters-32.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "favicon-reuters-32.png"; sourceTree = "<group>"; };
 		376534903F32D2F1C94CAA53 /* favicon-openai-32.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "favicon-openai-32.png"; sourceTree = "<group>"; };
 		3A173A25023331BD475CAC8A /* image-path.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = "image-path.md"; sourceTree = "<group>"; };
@@ -902,6 +908,7 @@
 		90ABBA09BA409A5DF23C445E /* FTSQueryBuilderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FTSQueryBuilderTests.swift; sourceTree = "<group>"; };
 		916B40014CC1AF81D9893229 /* WebViewLifecycleTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebViewLifecycleTests.swift; sourceTree = "<group>"; };
 		91F7EA9E24919B1897FA3FAA /* news-openai-hugging-face.jpg */ = {isa = PBXFileReference; lastKnownFileType = image.jpeg; path = "news-openai-hugging-face.jpg"; sourceTree = "<group>"; };
+		93096FD17C38F9FDC0440EA8 /* HistoryRowSelectionFanoutTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryRowSelectionFanoutTests.swift; sourceTree = "<group>"; };
 		9550452B2B104A57045B6269 /* ExportPreviewHarnessView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExportPreviewHarnessView.swift; sourceTree = "<group>"; };
 		961091813A2F9C555BE37BAC /* ShortcutsSettingsPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShortcutsSettingsPage.swift; sourceTree = "<group>"; };
 		9644B5C6C165540B99E861D0 /* KaTeX_Math-Italic.woff */ = {isa = PBXFileReference; path = "KaTeX_Math-Italic.woff"; sourceTree = "<group>"; };
@@ -1365,6 +1372,7 @@
 				17241150321C665A1683C64F /* HistoryListStateTests.swift */,
 				0E5BC3C78931E99A757A8DCD /* HistoryProfileDatasetFingerprintTests.swift */,
 				97AEC3DECAB492AFD333ADA1 /* HistoryRelativeTimeClockTests.swift */,
+				93096FD17C38F9FDC0440EA8 /* HistoryRowSelectionFanoutTests.swift */,
 				DCAFF6323AF4A9FC1D16EA57 /* HistoryRowThumbnailLifecycleSchedulerTests.swift */,
 				F6BE3CC7D9AF7FCC5B679F92 /* HistoryViewModelRegressionTests.swift */,
 				FF08A6073418036ABAC09144 /* HotKeyServiceTests.swift */,
@@ -1446,6 +1454,7 @@
 				AE65E2E804A2670FCF17404B /* HistoryListInteractionCoordinator.swift */,
 				2CE8424AAA4AF537809D9147 /* HistoryListInteractionObservation.swift */,
 				110E1C880F438F88E561BCB0 /* HistoryRelativeTimeClock.swift */,
+				36F3B1A794A066479AD9BDEB /* HistoryRowSelectionFanout.swift */,
 				E5AC24893A200F18B7ADA495 /* HistoryRowThumbnailLifecycleScheduler.swift */,
 				2FB682C6821A76CC0DEA73CA /* HoverPreviewImageCache.swift */,
 				9CFA9E9A2101790657BF92E8 /* HoverPreviewImageQualityPolicy.swift */,
@@ -2143,6 +2152,8 @@
 				8E2D61A84FF125F7F5B53471 /* HistoryProfileDatasetFingerprintTests.swift in Sources */,
 				6BA530E07B6F896B7BC0E439 /* HistoryRelativeTimeClock.swift in Sources */,
 				961A8067959A2A01B2A61976 /* HistoryRelativeTimeClockTests.swift in Sources */,
+				2A55103A0C78B2F8C1A802F5 /* HistoryRowSelectionFanout.swift in Sources */,
+				0889483A8009D07910CE7FEC /* HistoryRowSelectionFanoutTests.swift in Sources */,
 				FB3E2869AFC1A526CCFB26EC /* HistoryRowThumbnailLifecycleScheduler.swift in Sources */,
 				F1736ED3E5D923DFA48453E0 /* HistoryRowThumbnailLifecycleSchedulerTests.swift in Sources */,
 				22CAC8D2216EF5F939B413B0 /* HistoryViewModel.swift in Sources */,
@@ -2344,6 +2355,8 @@
 				09CFA669C13ECCE22A36FE64 /* HistoryProfileDatasetFingerprintTests.swift in Sources */,
 				159F9B0B78C136E33EA72E8B /* HistoryRelativeTimeClock.swift in Sources */,
 				C74D62F02BC8E3CCA5135949 /* HistoryRelativeTimeClockTests.swift in Sources */,
+				F2025070D1F6F8E8192DC043 /* HistoryRowSelectionFanout.swift in Sources */,
+				563800FA519512BB9EDB65FD /* HistoryRowSelectionFanoutTests.swift in Sources */,
 				8D97DFF3F3FF7D3AEEB5CF51 /* HistoryRowThumbnailLifecycleScheduler.swift in Sources */,
 				4D8AE220728D3AE17D6674EE /* HistoryRowThumbnailLifecycleSchedulerTests.swift in Sources */,
 				18A0B29008644A161F357EEA /* HistoryViewModel.swift in Sources */,
@@ -2508,6 +2521,7 @@
 				56DD95C12F4A8CD6DCD8C837 /* HistoryListView.swift in Sources */,
 				2113C30857A8E7A4D7B87232 /* HistoryProfileDatasetFingerprint.swift in Sources */,
 				5D962EF2ACFA35BAF00F9EF3 /* HistoryRelativeTimeClock.swift in Sources */,
+				02431E3C322557146F1273D8 /* HistoryRowSelectionFanout.swift in Sources */,
 				FE1B7934B9FC6C5F1123E8F4 /* HistoryRowThumbnailLifecycleScheduler.swift in Sources */,
 				0E35E9B208BDFBB26FE28364 /* HistoryViewModel.swift in Sources */,
 				F806D8F110DD4E13B251BD0F /* HotKeyRecorder.swift in Sources */,

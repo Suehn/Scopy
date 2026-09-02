@@ -1,11 +1,35 @@
 import AppKit
 import SwiftUI
 
+/// Marks list scrolls the app performs itself (keyboard selection follow) so that the clip-view
+/// bounds signal below does not report them as user scrolling. Trackpad and mouse-wheel scrolling
+/// never pass through here.
+@MainActor
+final class ListProgrammaticScrollGate {
+    static let defaultDuration: TimeInterval = 0.35
+
+    private let now: () -> CFTimeInterval
+    private var ignoreUntil: CFTimeInterval = 0
+
+    init(now: @escaping () -> CFTimeInterval = { ProcessInfo.processInfo.systemUptime }) {
+        self.now = now
+    }
+
+    func beginProgrammaticScroll(duration: TimeInterval = ListProgrammaticScrollGate.defaultDuration) {
+        ignoreUntil = max(ignoreUntil, now() + duration)
+    }
+
+    var isProgrammaticScrollActive: Bool {
+        now() < ignoreUntil
+    }
+}
+
 struct ListLiveScrollObserverView: NSViewRepresentable {
     let interactionCoordinator: HistoryListInteractionCoordinator
     let onScrollStart: () -> Void
     let onScrollEnd: () -> Void
     var onScrollViewAttach: ((NSScrollView) -> Void)? = nil
+    var programmaticScrollGate: ListProgrammaticScrollGate? = nil
 
     func makeNSView(context: Context) -> ObserverView {
         let view = ObserverView()
@@ -13,6 +37,7 @@ struct ListLiveScrollObserverView: NSViewRepresentable {
         view.onScrollStart = onScrollStart
         view.onScrollEnd = onScrollEnd
         view.onScrollViewAttach = onScrollViewAttach
+        view.programmaticScrollGate = programmaticScrollGate
         return view
     }
 
@@ -21,6 +46,7 @@ struct ListLiveScrollObserverView: NSViewRepresentable {
         nsView.onScrollStart = onScrollStart
         nsView.onScrollEnd = onScrollEnd
         nsView.onScrollViewAttach = onScrollViewAttach
+        nsView.programmaticScrollGate = programmaticScrollGate
         nsView.attachIfNeeded()
     }
 }
@@ -42,9 +68,13 @@ extension ListLiveScrollObserverView {
         var onScrollStart: (() -> Void)?
         var onScrollEnd: (() -> Void)?
         var onScrollViewAttach: ((NSScrollView) -> Void)?
+        var programmaticScrollGate: ListProgrammaticScrollGate?
         var pressedMouseButtonsProvider: () -> Int = {
             NSEvent.pressedMouseButtons
         }
+        /// Scrolling that only shows up as clip-view movement (mouse wheel, momentum tail) ends this
+        /// long after the last bounds change.
+        var boundsSettleInterval: TimeInterval = 0.12
 
         private weak var observedScrollView: NSScrollView?
         private weak var attachedWindow: NSWindow?
@@ -54,6 +84,9 @@ extension ListLiveScrollObserverView {
         private var eventMonitorGeneration: UUID?
         private var pointerInteractionOwnership: PointerInteractionOwnership?
         private var isLiveScrolling = false
+        private var isBoundsScrolling = false
+        private var boundsSettleWorkItem: DispatchWorkItem?
+        private(set) var isScrollingReported = false
 
         override func viewDidMoveToSuperview() {
             super.viewDidMoveToSuperview()
@@ -78,9 +111,12 @@ extension ListLiveScrollObserverView {
         override func layout() {
             super.layout()
             // SwiftUI can mount the representable one layout pass before List's NSTableView.
-            // Re-resolve on the natural AppKit layout boundary; once the list is found the cache
-            // below makes this O(1).
-            attachIfNeeded()
+            // Re-resolve on the natural AppKit layout boundary until the list is found; an attached
+            // observer must not pay for a window walk on every scroll frame.
+            guard let observedScrollView, observedScrollView.window === window else {
+                attachIfNeeded()
+                return
+            }
         }
 
         func attachIfNeeded() {
@@ -110,6 +146,16 @@ extension ListLiveScrollObserverView {
                 name: NSScrollView.didEndLiveScrollNotification,
                 object: scrollView
             )
+
+            // Legacy mouse-wheel scrolling (and the momentum tail of a trackpad gesture) posts no
+            // live-scroll notifications. The clip view moving is the one signal every input shares.
+            scrollView.contentView.postsBoundsChangedNotifications = true
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(handleClipViewBoundsChange(_:)),
+                name: NSView.boundsDidChangeNotification,
+                object: scrollView.contentView
+            )
         }
 
         private func detach() {
@@ -124,6 +170,11 @@ extension ListLiveScrollObserverView {
                     name: NSScrollView.didEndLiveScrollNotification,
                     object: observedScrollView
                 )
+                NotificationCenter.default.removeObserver(
+                    self,
+                    name: NSView.boundsDidChangeNotification,
+                    object: observedScrollView.contentView
+                )
             }
             observedScrollView = nil
             attachedWindow = nil
@@ -131,16 +182,17 @@ extension ListLiveScrollObserverView {
             cachedWindowResolvedScrollView = nil
             removeEventMonitor()
             endOwnedPointerInteraction()
-            if isLiveScrolling {
-                isLiveScrolling = false
-                onScrollEnd?()
-            }
+            boundsSettleWorkItem?.cancel()
+            boundsSettleWorkItem = nil
+            isLiveScrolling = false
+            isBoundsScrolling = false
+            reportScrollEndIfSettled()
         }
 
         @objc private func handleScrollStart(_ notification: Notification) {
             guard !isLiveScrolling else { return }
             isLiveScrolling = true
-            onScrollStart?()
+            reportScrollStartIfNeeded()
         }
 
         @objc private func handleScrollEnd(_ notification: Notification) {
@@ -152,6 +204,45 @@ extension ListLiveScrollObserverView {
             }
             guard isLiveScrolling else { return }
             isLiveScrolling = false
+            reportScrollEndIfSettled()
+        }
+
+        @objc private func handleClipViewBoundsChange(_ notification: Notification) {
+            handleClipViewBoundsChange()
+        }
+
+        /// Test seam: one clip-view movement. Programmatic scrolls the app performs itself are not
+        /// user scrolling and must not retire the hovered row.
+        func handleClipViewBoundsChange() {
+            if programmaticScrollGate?.isProgrammaticScrollActive == true {
+                return
+            }
+            if !isBoundsScrolling {
+                isBoundsScrolling = true
+                reportScrollStartIfNeeded()
+            }
+            boundsSettleWorkItem?.cancel()
+            let workItem = DispatchWorkItem { [weak self] in
+                guard let self else { return }
+                self.boundsSettleWorkItem = nil
+                self.isBoundsScrolling = false
+                self.reportScrollEndIfSettled()
+            }
+            boundsSettleWorkItem = workItem
+            DispatchQueue.main.asyncAfter(deadline: .now() + boundsSettleInterval, execute: workItem)
+        }
+
+        private func reportScrollStartIfNeeded() {
+            guard !isScrollingReported else { return }
+            isScrollingReported = true
+            onScrollStart?()
+        }
+
+        /// One reported scroll spans both signals: it ends only after the live-scroll gesture
+        /// finished and the clip view has been still for `boundsSettleInterval`.
+        private func reportScrollEndIfSettled() {
+            guard isScrollingReported, !isLiveScrolling, !isBoundsScrolling else { return }
+            isScrollingReported = false
             onScrollEnd?()
         }
 

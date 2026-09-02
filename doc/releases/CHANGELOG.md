@@ -12,6 +12,19 @@
 
 - No unreleased entries.
 
+## [v0.77.0] - 2026-09-02
+
+### Changed
+
+- `ListLiveScrollObserverView` treats the list clip view's `boundsDidChange` as scrolling alongside live-scroll notifications (120 ms settle), so mouse-wheel scrolling suppresses hover sessions, preview decodes, thumbnail priority, and the relative-time clock like trackpad scrolling; `ListProgrammaticScrollGate` masks the keyboard-selection `scrollTo`. Hover previews no longer open while the list is still moving under a mouse wheel.
+- `HistoryRowSelectionFanout` delivers selection changes to the two rows they concern through `HistorySelectionAwareRow`; `HistoryListView.body` no longer reads `selectedID`, so hover-select and keyboard navigation stop re-initializing every ForEach child and diffing every loaded id.
+- `loadMorePageSize` 500 -> 100; `HistoryItemView` resolves its row descriptor lazily from the presentation cache; `ClipboardItemDisplayText.prewarm` uses memoized revisions; `ListLiveScrollObserverView.layout()` resolves the scroll view only until attached.
+- `scripts/perf-scroll`: `--phased` (trackpad-like gesture phases) and `--reuse-db` (steady-state warmed database); `analyze_sample.py` recognizes short `sample` captures.
+
+### Performance
+
+- Real wheel scrolling over the real panel (Release, 9,566-row snapshot, 12 s), mouse-like input: Scopy CPU `9.94 -> 3.03 s` (fresh DB) / `2.87 s` (steady state), main thread `5.02 -> 2.65 s` (42% -> 22%), hover sessions `322 -> 2`, callback interval p95 `16.7 -> 8.3 ms`, max `75 -> 16.7-25 ms`; trackpad-like input: CPU `4.50 -> 2.74 s`, main thread `3.37 -> 2.44 s`, callback max `83.3 -> 16.7 ms`.
+
 ## [v0.76.0] - 2026-09-02
 
 ### Changed

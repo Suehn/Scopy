@@ -101,15 +101,19 @@ final class AppStateTests: XCTestCase {
         XCTAssertTrue(appState.canLoadMore)
     }
 
-    func testLoadMoreAppends500Items() async {
+    func testLoadMoreAppendsOnePage() async {
         mockService.setItemCount(700)
         await appState.load()
 
-        XCTAssertEqual(appState.loadedCount, 50)
+        XCTAssertEqual(appState.loadedCount, HistoryViewModel.initialPageSize)
 
         await appState.loadMore()
 
-        XCTAssertEqual(appState.loadedCount, 550, "Should append 500 items")
+        XCTAssertEqual(
+            appState.loadedCount,
+            HistoryViewModel.initialPageSize + HistoryViewModel.loadMorePageSize,
+            "Should append one load-more page"
+        )
         XCTAssertTrue(appState.canLoadMore)
     }
 

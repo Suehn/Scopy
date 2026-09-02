@@ -37,7 +37,6 @@ struct HistoryItemView: View, Equatable {
     let requestPopover: (HoverPreviewPopoverKind?) -> Void
     let dismissOtherPopovers: () -> Void
     private let contentRevision: ClipboardItemContentRevision
-    private let descriptor: HistoryItemRowDescriptor
     private let searchEvidenceText: AttributedString?
     private let searchEvidenceAccessibilityText: String?
 
@@ -101,13 +100,13 @@ struct HistoryItemView: View, Equatable {
         self.requestPopover = requestPopover
         self.dismissOtherPopovers = dismissOtherPopovers
         self.contentRevision = ClipboardItemContentRevision.resolve(item: item)
-        let descriptor = HistoryItemPresentationCache.shared.rowDescriptor(for: item, settings: settings)
-        self.descriptor = descriptor
         if let searchMatchContext {
             let searchEvidenceText = SearchMatchPresentation.attributedText(
                 context: searchMatchContext,
                 itemType: item.type,
-                metadataPrefix: descriptor.searchMetadataPrefix
+                metadataPrefix: HistoryItemPresentationCache.shared
+                    .rowDescriptor(for: item, settings: settings)
+                    .searchMetadataPrefix
             )
             self.searchEvidenceText = searchEvidenceText
             self.searchEvidenceAccessibilityText = SearchMatchPresentation.accessibilityDescription(
@@ -612,6 +611,13 @@ struct HistoryItemView: View, Equatable {
     private var appIcon: NSImage? {
         guard let bundleID = descriptor.appIconBundleID else { return nil }
         return IconService.shared.icon(bundleID: bundleID)
+    }
+
+    /// Resolved from the presentation cache on demand rather than in `init`: SwiftUI initializes
+    /// every ForEach child whenever the list changes (a page load initializes hundreds of rows),
+    /// while only the visible rows ever render.
+    private var descriptor: HistoryItemRowDescriptor {
+        HistoryItemPresentationCache.shared.rowDescriptor(for: item, settings: settings)
     }
 
     private var thumbnailHeight: CGFloat {

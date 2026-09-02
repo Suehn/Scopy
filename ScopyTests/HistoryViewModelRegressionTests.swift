@@ -304,7 +304,10 @@ final class HistoryViewModelRegressionTests: XCTestCase {
         await second.value
 
         XCTAssertEqual(service.recentUnpinnedFetchCallCount, 2)
-        XCTAssertEqual(viewModel.items.count, 550)
+        XCTAssertEqual(
+            viewModel.items.count,
+            HistoryViewModel.initialPageSize + HistoryViewModel.loadMorePageSize
+        )
     }
 
     func testRemovingTheSelectedItemClearsSelection() async {

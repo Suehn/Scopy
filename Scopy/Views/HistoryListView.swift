@@ -41,6 +41,7 @@ struct HistoryListView: View {
     @State private var activePopover: HoverPreviewPopoverState?
     @State private var pendingPopover: HoverPreviewPopoverState?
     @State private var lastDismissedPopover: HoverPreviewDismissSnapshot?
+    @State private var programmaticScrollGate = ListProgrammaticScrollGate()
 
     private static let popoverReopenCooldownSeconds: CFTimeInterval = 0.25
 
@@ -79,7 +80,6 @@ struct HistoryListView: View {
                     // Rows are built inside ForEach child closures, where every @Observable read installs its own
                     // observation and copies the access list; read the shared state once here and pass values down.
                     let rowContext = HistoryRowContext(
-                        selectedID: historyViewModel.selectedID,
                         settings: settingsViewModel.settings,
                         activePopover: activePopover,
                         searchMatchContexts: historyViewModel.searchMatchContexts
@@ -155,17 +155,24 @@ struct HistoryListView: View {
                                 HistoryListUITestProbe.shared.recordProductionScrollEnd()
                             }
                         },
-                        onScrollViewAttach: scrollViewAttachHandler
+                        onScrollViewAttach: scrollViewAttachHandler,
+                        programmaticScrollGate: programmaticScrollGate
                     )
                 )
                 .background(ScrollFrameSamplerView())
-                .onChange(of: historyViewModel.selectedID) { _, newValue in
-                    // 仅当键盘导航时自动滚动到选中项
-                    if let id = newValue, historyViewModel.lastSelectionSource == .keyboard {
+                .onAppear {
+                    // Selection reaches rows through the fan-out, never through this body; the
+                    // List is diffed only when its items change. Keyboard navigation follows here.
+                    historyViewModel.rowSelection.onSelectionChanged = { id, follow in
+                        guard follow, let id else { return }
+                        programmaticScrollGate.beginProgrammaticScroll()
                         withAnimation(.easeInOut(duration: 0.1)) {
                             proxy.scrollTo(id, anchor: .center)
                         }
                     }
+                }
+                .onDisappear {
+                    historyViewModel.rowSelection.onSelectionChanged = nil
                 }
                 // 单条删除快捷键: Option+Delete
                 .onKeyPress { keyPress in
@@ -445,15 +452,23 @@ struct HistoryListView: View {
     /// v0.18: 添加 List 修饰符以保持原有样式
     /// Shared list state a row needs, captured once per list update instead of read per row.
     private struct HistoryRowContext {
-        let selectedID: UUID?
         let settings: SettingsDTO
         let activePopover: HoverPreviewPopoverState?
         let searchMatchContexts: [UUID: SearchMatchContext]
     }
 
-    @ViewBuilder
     private func historyRow(item: ClipboardItemDTO, context: HistoryRowContext) -> some View {
-        let isSelected = context.selectedID == item.id
+        HistorySelectionAwareRow(itemID: item.id, selectionFanout: historyViewModel.rowSelection) { isSelected in
+            historyRowContent(item: item, context: context, isSelected: isSelected)
+        }
+    }
+
+    @ViewBuilder
+    private func historyRowContent(
+        item: ClipboardItemDTO,
+        context: HistoryRowContext,
+        isSelected: Bool
+    ) -> some View {
         let activePopover = context.activePopover
         let isImagePreviewPresented = activePopover?.itemID == item.id && activePopover?.kind == .image
         let isTextPreviewPresented = activePopover?.itemID == item.id && activePopover?.kind == .text
@@ -468,8 +483,9 @@ struct HistoryListView: View {
             onSendViaAirDrop: { Task { await historyViewModel.sendViaAirDrop(item) } },
             onOpenContainingFolder: { Task { await historyViewModel.openContainingFolder(item) } },
             onHoverSelect: { id in
-                historyViewModel.selectedID = id
+                // Source first: the selection fan-out reads it when `selectedID` changes.
                 historyViewModel.lastSelectionSource = .mouse
+                historyViewModel.selectedID = id
             },
             onTogglePin: { Task { await historyViewModel.togglePin(item) } },
             onDelete: { Task { await historyViewModel.delete(item) } },
@@ -550,5 +566,38 @@ private struct ScrollFrameSamplerView: View {
             .allowsHitTesting(false)
             .accessibilityHidden(true)
         }
+    }
+}
+
+/// Holds one row's selection as local state fed by `HistoryRowSelectionFanout`, so a selection change
+/// re-evaluates the two rows it concerns instead of the List body (which re-initializes every ForEach
+/// child and diffs every loaded id).
+private struct HistorySelectionAwareRow<Content: View>: View {
+    let itemID: UUID
+    let selectionFanout: HistoryRowSelectionFanout
+    let content: (Bool) -> Content
+    @State private var isSelected: Bool
+
+    init(
+        itemID: UUID,
+        selectionFanout: HistoryRowSelectionFanout,
+        @ViewBuilder content: @escaping (Bool) -> Content
+    ) {
+        self.itemID = itemID
+        self.selectionFanout = selectionFanout
+        self.content = content
+        _isSelected = State(initialValue: selectionFanout.isSelected(itemID))
+    }
+
+    var body: some View {
+        content(isSelected)
+            .onAppear {
+                isSelected = selectionFanout.register(itemID: itemID) { selected in
+                    isSelected = selected
+                }
+            }
+            .onDisappear {
+                selectionFanout.unregister(itemID: itemID)
+            }
     }
 }

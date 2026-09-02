@@ -1,27 +1,27 @@
-version: v0.76.0
+version: v0.77.0
 date: 2026-09-02
-release_doc: doc/releases/history/v0.76.0.md
+release_doc: doc/releases/history/v0.77.0.md
 release_index: doc/releases/README.md
 changelog_file: doc/releases/CHANGELOG.md
-profile_doc: doc/perf/release-profiles/v0.76.0-profile.md
+profile_doc: doc/perf/release-profiles/v0.77.0-profile.md
 runbook_doc: doc/current/release-runbook.md
 spec_doc: doc/current/product-spec.md
 development_doc: doc/current/development-guide.md
 architecture_doc: doc/current/architecture.md
 last_verified_at: 2026-09-02
-summary: Real-input scroll profiling finds the cursor, revision, and observation costs; scroll CPU -32%, callback p95 83 -> 17 ms, main-thread busy halved
+summary: Mouse-wheel scrolling now suppresses hover work like a trackpad, selection stops re-diffing the List, and page loads shrink: scroll CPU 9.9 -> 2.9 s per 12 s, main thread 42% -> 22%, callback p95 8.3 ms, max 75 -> 17-25 ms
 verification:
   docs_validate: pass
   release_validate: pass
   release_policy: pass
-  build: pass
+  build: pass_make_release
   assets_verify: pass_markdown_preview_assets_verified
-  test_unit: pass_783_executed_3_skipped_0_failures
-  test_strict: pass_783_executed_3_skipped_0_failures
+  test_unit: pending_post_release_run_in_progress_previous_run_790_executed_3_failures_all_old_page_size_assertions_since_aligned
+  test_strict: pending_post_release_queued_after_unit
   test_tsan: not_run_no_search_cleanup_or_storage_change
-  test_integration: pass_15_executed_0_failures
+  test_integration: not_run_no_search_cleanup_or_storage_change
   test_performance: not_run_no_search_cleanup_or_storage_change
   snapshot_release: not_run_no_search_cleanup_or_storage_change
-  frontend_profile_full: smoke_pass_2026-09-02_19-33-39_full_not_run_evidence_is_real_input_profile
+  frontend_profile_full: not_run_evidence_is_real_input_profile_v0_77_0
   bundled_pngquant: unchanged_from_v0_74_0_fork_256e081_engine_fddcf09
-  scroll_reference: real_wheel_release_cpu_14.34s_to_9.76s_per_12s_callback_p95_83.3_to_16.7ms_fixed_runloop_busy_8378_to_3931ms
+  scroll_reference: real_wheel_release_mouse_cpu_9.94s_to_2.87s_per_12s_main_5.02s_to_2.65s_callback_p95_8.3ms_max_75_to_17_25ms_trackpad_cpu_4.50s_to_2.74s
