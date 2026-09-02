@@ -12,6 +12,18 @@
 
 - No unreleased entries.
 
+## [v0.73.0] - 2026-09-02
+
+### Changed
+
+- The bundled `pngquant` is now built from the maintainer's fork of pngquant/libimagequant (CLI `3.0.4`, engine 4.5.0 plus the fork's `perf` branch) as a universal, ad-hoc-signed binary with the same system-only dependency footprint as the official build; provenance and rebuild commands are recorded in `Scopy/Resources/ThirdParty/pngquant/PROVENANCE.md`.
+- Inherited from upstream 4.5.0: an image whose colors already fit the palette may be reduced by one color when the quality maximum is below 100; with `--skip-if-larger` an already-indexed input then stays unchanged instead of shrinking by 1-2%.
+
+### Performance
+
+- Quantization runs 2.5-4x faster at speed 3 on all cores (histogram 3.2-6.8x, palette selection 3.3-4.2x, dithered remap 2.4-4.2x) and 1.35-1.83x single-threaded, with output independent of thread count and CPU architecture and MSE within -4%..+0.7% of unchanged upstream. Whole-CLI time on real exports improves 4-33% because libpng encoding is unchanged.
+- Defaults stay at speed 3 for captures and exports: it costs the same as speed 4 with slightly better palettes, while speed 1 doubles the time for a fraction of a percent of error.
+
 ## [v0.72.2] - 2026-08-31
 
 ### Fixed

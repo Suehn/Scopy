@@ -1,25 +1,26 @@
-version: v0.72.2
-date: 2026-08-31
-release_doc: doc/releases/history/v0.72.2.md
+version: v0.73.0
+date: 2026-09-02
+release_doc: doc/releases/history/v0.73.0.md
 release_index: doc/releases/README.md
 changelog_file: doc/releases/CHANGELOG.md
-profile_doc: doc/perf/release-profiles/v0.72.2-profile.md
+profile_doc: null
 runbook_doc: doc/current/release-runbook.md
 spec_doc: doc/current/product-spec.md
 development_doc: doc/current/development-guide.md
 architecture_doc: doc/current/architecture.md
-last_verified_at: 2026-08-31
-summary: Architecture, correctness, safety, and performance hardening without UX changes
+last_verified_at: 2026-09-02
+summary: Bundled pngquant engine rebuilt from the maintainer fork, 2.5-4x faster quantization with deterministic output
 verification:
   docs_validate: pass
   release_validate: pass
-  release_policy: pass_15_cases
+  release_policy: pass
   build: pass
-  assets_verify: pass_renderer_7869c093_katex_0_16_45_fonts_60
+  assets_verify: pass_markdown_preview_assets_verified
   test_unit: pass_780_executed_3_skipped_0_failures
   test_strict: pass_780_executed_3_skipped_0_failures
-  test_tsan: pass_761_executed_3_skipped_0_failures
+  test_tsan: not_run_no_swift_source_change
   test_integration: pass_15_executed_0_failures
-  test_performance: pass_27_executed_7_heavy_skipped_0_failures
-  snapshot_release: pass_cmd_0_682ms_prepared_cm_5_458ms_cold_cm_observed_103_974ms
-  frontend_profile_full: environment_blocked_automation_mode_timeout_not_counted_as_pass
+  test_performance: not_run_no_swift_source_change
+  snapshot_release: not_run_no_swift_source_change
+  frontend_profile_full: not_run_no_swift_source_change
+  bundled_pngquant: universal_arm64_x86_64_adhoc_signed_version_3_0_4_fork_fddcf09

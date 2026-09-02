@@ -213,6 +213,15 @@ This section records historical `v0.65.4` release evidence for the single previe
 - Frontend profiling reached the UI runner but timed out while enabling automation mode before any scenario. No summary or unified table was generated; this is `environment-blocked`, not a pass or frontend speedup claim.
 - Detailed comparison and scope boundaries: [v0.72.2 Release Performance Profile](../perf/release-profiles/v0.72.2-profile.md).
 
+## Bundled pngquant Engine Release Evidence (v0.73.0, 2026-09-02)
+
+- Environment: Apple M3 Pro (5 performance + 6 efficiency cores), 36GB, arm64, macOS 15.7.3 (`24G419`), rustc 1.98.0 (Homebrew), Xcode 26.1.1 (`17B100`), project Swift 5.9, deployment target macOS 14.0. No Swift source changed.
+- Deployment semantics: `Scopy/Resources/Tools/pngquant` is a universal (`arm64` + `x86_64`) ad-hoc-signed build of the maintainer fork (CLI `kornelski/pngquant` `913a90d` + fork `af354ef`; engine `ImageOptim/libimagequant` `9388d26` + fork `perf` `fddcf09`), features `static cocoa`, linking only system frameworks and `libz`. Rebuild commands and the full provenance are in `Scopy/Resources/ThirdParty/pngquant/PROVENANCE.md`; the Intel slice is cross-built with `RUSTC_BOOTSTRAP=1 cargo build --release --target x86_64-apple-darwin -Zbuild-std=std,panic_abort` and was verified under Rosetta only.
+- Engine pipeline (quantize + dithered remap), min of 5 runs, upstream `9388d26` vs fork, ms: photo 2048x2048 speed 3 `116.7 -> 37.0` (3.15x), speed 1 `269.2 -> 130.6`, speed 10 `62.2 -> 23.2`; UI 2560x1600 speed 3 `114.4 -> 38.9` (2.94x); photo with alpha speed 3 `138.1 -> 35.2` (3.92x); 810k-color gradient noise speed 3 `238.9 -> 68.2` (3.50x). Single-threaded speed 3: `330.1 -> 180.6`, `228.5 -> 169.5`, `249.9 -> 166.6`, `535.5 -> 352.1`.
+- Quality: 58 CLI outputs (4 bench images + `test.png`, speeds 1/4/10, `--nofs`, `--posterize 2`, `--quality 60-80`, one and all threads) compared pixel by pixel against unchanged upstream 4.5.0: MSE within -4.0%..+0.7%, all-threads and single-thread outputs byte-identical, `x86_64` and `arm64` outputs byte-identical, no visible dithering seams in 4x crops. Method: `scripts/check_output.sh` and `examples/compare.rs` in the fork.
+- Real Scopy assets with Scopy's arguments, old official `3.0.3` vs this build: sizes mostly within 1%, two previously skipped exports now compress (`97,038 -> 26,699`, `2,592,990 -> 648,541`), one already-4-bit export stays unchanged via exit 98 instead of shrinking 1.4%; whole-CLI time `0.08 -> 0.06s` (screenshot), `2.52 -> 2.38s`, `3.11 -> 3.00s`, `0.59 -> 0.55s`, `36.26 -> 35.98s` (298-megapixel export). libpng level-9 encoding dominates large exports and is unchanged.
+- Gates: build pass; unit 780 executed / 3 skipped / 0 failures; strict 780 executed / 3 skipped / 0 failures; integration 15 executed / 0 failures; docs/release/policy validation pass. TSan, snapshot, and frontend performance gates were not run because no Swift source changed.
+
 ## Homebrew Acceptance
 
 Verify all of the following after release publication:

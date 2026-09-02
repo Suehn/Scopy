@@ -2,7 +2,7 @@
 doc_type: portal
 status: active
 owner: maintainers
-last_reviewed: 2026-08-22
+last_reviewed: 2026-09-02
 canonical: true
 ---
 
@@ -20,16 +20,17 @@ This page is the human-facing index for current release state. Automation should
 ## Current Release
 
 <!-- release-current:start -->
-- Version: `v0.72.2`
-- Date: `2026-08-31`
-- Release note: [v0.72.2](./history/v0.72.2.md)
+- Version: `v0.73.0`
+- Date: `2026-09-02`
+- Release note: [v0.73.0](./history/v0.73.0.md)
 - Changelog: [CHANGELOG.md](./CHANGELOG.md)
-- Profile doc: [v0.72.2 performance profile](../perf/release-profiles/v0.72.2-profile.md)
+- Profile doc: `none`
 <!-- release-current:end -->
 
 ## Recent Releases
 
 <!-- release-recent:start -->
+- `2026-09-02` [v0.73.0](./history/v0.73.0.md) - Bundled pngquant engine rebuilt from the maintainer fork, 2.5-4x faster quantization with deterministic output
 - `2026-08-31` [v0.72.2](./history/v0.72.2.md) - Architecture, correctness, safety, and performance hardening without UX changes
 - `2026-08-29` [v0.72.1](./history/v0.72.1.md) - Link enrichment re-render fixes, official news-card presentation, and precise promotion gates
 - `2026-08-29` [v0.72.0](./history/v0.72.0.md) - All rich surface types, opt-in link enrichment, and Sparkle auto-update
