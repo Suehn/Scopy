@@ -166,13 +166,19 @@ public enum PngquantService {
         let io = try ScratchDirectory()
         let inputURL = io.url.appendingPathComponent("input.pam")
         let outputURL = io.url.appendingPathComponent("output.png")
+        let startedAt = DispatchTime.now().uptimeNanoseconds
         try writePAM(image, to: inputURL)
+        let pamWrittenAt = DispatchTime.now().uptimeNanoseconds
 
         let result = try runProcess(
             executablePath: binary,
             arguments: options.baseArguments + ["--output", outputURL.path, options.colorArgument, "--", inputURL.path],
             stderrURL: io.url.appendingPathComponent("stderr"),
             timeoutSeconds: options.processTimeoutSeconds
+        )
+        let toolFinishedAt = DispatchTime.now().uptimeNanoseconds
+        logger.info(
+            "pngquant bitmap \(image.width, privacy: .public)x\(image.height, privacy: .public): hand-off \(Double(pamWrittenAt &- startedAt) / 1_000_000, format: .fixed(precision: 1), privacy: .public) ms, tool \(Double(toolFinishedAt &- pamWrittenAt) / 1_000_000, format: .fixed(precision: 1), privacy: .public) ms, exit \(result.terminationStatus, privacy: .public)"
         )
 
         let exit = result.terminationStatus
