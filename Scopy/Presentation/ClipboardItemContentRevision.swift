@@ -34,6 +34,53 @@ struct ClipboardItemContentRevision: Hashable, Sendable {
 
     private let contentIdentity: ContentIdentity
 
+    /// Returns the revision for `item`, reusing the last one computed for the same item when every field that
+    /// feeds the revision is unchanged. Rows are rebuilt on every list update during scrolling, and recomputing the
+    /// digest each time measured at 11% of the main thread.
+    static func resolve(item: ClipboardItemDTO) -> ClipboardItemContentRevision {
+        if let cached = memo.object(forKey: item.id as NSUUID), cached.matches(item) {
+            return cached.revision
+        }
+        let revision = ClipboardItemContentRevision(item: item)
+        memo.setObject(MemoEntry(item: item, revision: revision), forKey: item.id as NSUUID)
+        return revision
+    }
+
+    private static let memo: NSCache<NSUUID, MemoEntry> = {
+        let cache = NSCache<NSUUID, MemoEntry>()
+        cache.countLimit = 8192
+        return cache
+    }()
+
+    private final class MemoEntry {
+        let type: ClipboardItemType
+        let contentHash: String
+        let plainText: String
+        let sizeBytes: Int
+        let fileSizeBytes: Int?
+        let storageRef: String?
+        let revision: ClipboardItemContentRevision
+
+        init(item: ClipboardItemDTO, revision: ClipboardItemContentRevision) {
+            type = item.type
+            contentHash = item.contentHash
+            plainText = item.plainText
+            sizeBytes = item.sizeBytes
+            fileSizeBytes = item.fileSizeBytes
+            storageRef = item.storageRef
+            self.revision = revision
+        }
+
+        func matches(_ item: ClipboardItemDTO) -> Bool {
+            type == item.type &&
+                contentHash == item.contentHash &&
+                sizeBytes == item.sizeBytes &&
+                fileSizeBytes == item.fileSizeBytes &&
+                storageRef == item.storageRef &&
+                plainText == item.plainText
+        }
+    }
+
     init(item: ClipboardItemDTO) {
         let contentIdentity: ContentIdentity
         if item.contentHash.isEmpty {
@@ -123,7 +170,19 @@ struct ClipboardItemContentRevision: Hashable, Sendable {
         for component in components {
             appendLengthPrefixed(component, to: &encoded)
         }
-        return SHA256.hash(data: encoded).map { String(format: "%02x", $0) }.joined()
+        return hexString(SHA256.hash(data: encoded))
+    }
+
+    private static let hexDigits = Array("0123456789abcdef".utf8)
+
+    private static func hexString<S: Sequence>(_ bytes: S) -> String where S.Element == UInt8 {
+        var out = [UInt8]()
+        out.reserveCapacity(64)
+        for byte in bytes {
+            out.append(hexDigits[Int(byte >> 4)])
+            out.append(hexDigits[Int(byte & 0x0f)])
+        }
+        return String(decoding: out, as: UTF8.self)
     }
 
     private static func appendLengthPrefixed(_ value: String?, to data: inout Data) {

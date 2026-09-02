@@ -1,27 +1,27 @@
-version: v0.75.0
+version: v0.76.0
 date: 2026-09-02
-release_doc: doc/releases/history/v0.75.0.md
+release_doc: doc/releases/history/v0.76.0.md
 release_index: doc/releases/README.md
 changelog_file: doc/releases/CHANGELOG.md
-profile_doc: null
+profile_doc: doc/perf/release-profiles/v0.76.0-profile.md
 runbook_doc: doc/current/release-runbook.md
 spec_doc: doc/current/product-spec.md
 development_doc: doc/current/development-guide.md
 architecture_doc: doc/current/architecture.md
 last_verified_at: 2026-09-02
-summary: Frame-driven export settle and a PAM-backed export canvas, post-load export 2-3x faster with identical output, defaults speed 3 / 256 colors / 80-95
+summary: Real-input scroll profiling finds the cursor, revision, and observation costs; scroll CPU -32%, callback p95 83 -> 17 ms, main-thread busy halved
 verification:
   docs_validate: pass
   release_validate: pass
   release_policy: pass
   build: pass
   assets_verify: pass_markdown_preview_assets_verified
-  test_unit: pass_782_executed_3_skipped_0_failures
-  test_strict: pass_782_executed_3_skipped_0_failures
-  test_tsan: not_run_no_search_cleanup_or_scroll_change
+  test_unit: pass_783_executed_3_skipped_0_failures
+  test_strict: pass_783_executed_3_skipped_0_failures
+  test_tsan: not_run_no_search_cleanup_or_storage_change
   test_integration: pass_15_executed_0_failures
-  test_performance: not_run_no_search_cleanup_or_scroll_change
-  snapshot_release: not_run_no_search_cleanup_or_scroll_change
-  frontend_profile_full: not_run_no_search_cleanup_or_scroll_change
+  test_performance: not_run_no_search_cleanup_or_storage_change
+  snapshot_release: not_run_no_search_cleanup_or_storage_change
+  frontend_profile_full: smoke_pass_2026-09-02_19-33-39_full_not_run_evidence_is_real_input_profile
   bundled_pngquant: unchanged_from_v0_74_0_fork_256e081_engine_fddcf09
-  export_reference: chatgpt_public_copy_200pct_launch_to_png_3.57s_to_2.05s_post_load_at_defaults_0.79s_outputs_identical
+  scroll_reference: real_wheel_release_cpu_14.34s_to_9.76s_per_12s_callback_p95_83.3_to_16.7ms_fixed_runloop_busy_8378_to_3931ms

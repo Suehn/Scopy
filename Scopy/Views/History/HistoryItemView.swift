@@ -100,7 +100,7 @@ struct HistoryItemView: View, Equatable {
         self.isFilePreviewPresented = isFilePreviewPresented
         self.requestPopover = requestPopover
         self.dismissOtherPopovers = dismissOtherPopovers
-        self.contentRevision = ClipboardItemContentRevision(item: item)
+        self.contentRevision = ClipboardItemContentRevision.resolve(item: item)
         let descriptor = HistoryItemPresentationCache.shared.rowDescriptor(for: item, settings: settings)
         self.descriptor = descriptor
         if let searchMatchContext {

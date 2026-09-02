@@ -76,6 +76,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         configureAppHandlers(appState: appState, isUITesting: context.isUITesting)
 
+        ScrollCursorSetCoalescer.install()
+
+        // Profiling harnesses drive the real panel with synthetic input; open it without a hotkey or status-item click.
+        if !context.isUITesting, ProcessInfo.processInfo.environment["SCOPY_PROFILE_OPEN_PANEL"] == "1" {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+                self?.panel?.toggle(positionMode: .statusBar)
+            }
+        }
+
         // 启动后端服务
         Task {
             await appState.start()

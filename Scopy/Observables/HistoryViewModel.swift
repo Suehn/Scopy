@@ -83,7 +83,7 @@ struct BoundedHistoryContentRevisionRegistry {
     ) -> Bool {
         var changed = false
         for item in items {
-            let revision = ClipboardItemContentRevision(item: item)
+            let revision = ClipboardItemContentRevision.resolve(item: item)
             if deletionsByItemID[item.id] != nil {
                 guard allowRevivingDeletedItems else { continue }
                 deletionsByItemID.removeValue(forKey: item.id)
@@ -311,7 +311,7 @@ final class HistoryViewModel {
             return knownRevision == revision
         }
         guard let projectedItem = listState.item(withID: itemID) else { return false }
-        return ClipboardItemContentRevision(item: projectedItem) == revision
+        return ClipboardItemContentRevision.resolve(item: projectedItem) == revision
     }
 
     var pinnedItems: [ClipboardItemDTO] {

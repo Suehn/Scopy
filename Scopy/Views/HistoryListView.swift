@@ -76,6 +76,14 @@ struct HistoryListView: View {
                     // 这样 SwiftUI 只追踪一次 pinnedItems/unpinnedItems 访问
                     let pinned = historyViewModel.pinnedItems
                     let unpinned = historyViewModel.unpinnedItems
+                    // Rows are built inside ForEach child closures, where every @Observable read installs its own
+                    // observation and copies the access list; read the shared state once here and pass values down.
+                    let rowContext = HistoryRowContext(
+                        selectedID: historyViewModel.selectedID,
+                        settings: settingsViewModel.settings,
+                        activePopover: activePopover,
+                        searchMatchContexts: historyViewModel.searchMatchContexts
+                    )
 
                     // v0.18: 不使用 Section header，改为普通行以避免黑色背景
                     // Pinned Section Header
@@ -94,7 +102,7 @@ struct HistoryListView: View {
                         // Pinned Items
                         if !historyViewModel.isPinnedCollapsed {
                             ForEach(pinned) { item in
-                                historyRow(item: item)
+                                historyRow(item: item, context: rowContext)
                             }
                         }
                     }
@@ -110,7 +118,7 @@ struct HistoryListView: View {
 
                     // Recent Items
                     ForEach(unpinned) { item in
-                        historyRow(item: item)
+                        historyRow(item: item, context: rowContext)
                     }
 
                     // Load More Trigger
@@ -435,17 +443,26 @@ struct HistoryListView: View {
     }
 
     /// v0.18: 添加 List 修饰符以保持原有样式
+    /// Shared list state a row needs, captured once per list update instead of read per row.
+    private struct HistoryRowContext {
+        let selectedID: UUID?
+        let settings: SettingsDTO
+        let activePopover: HoverPreviewPopoverState?
+        let searchMatchContexts: [UUID: SearchMatchContext]
+    }
+
     @ViewBuilder
-    private func historyRow(item: ClipboardItemDTO) -> some View {
-        let isSelected = historyViewModel.selectedID == item.id
+    private func historyRow(item: ClipboardItemDTO, context: HistoryRowContext) -> some View {
+        let isSelected = context.selectedID == item.id
+        let activePopover = context.activePopover
         let isImagePreviewPresented = activePopover?.itemID == item.id && activePopover?.kind == .image
         let isTextPreviewPresented = activePopover?.itemID == item.id && activePopover?.kind == .text
         let isFilePreviewPresented = activePopover?.itemID == item.id && activePopover?.kind == .file
         let row = HistoryItemView(
             item: item,
             isKeyboardSelected: isSelected,
-            settings: settingsViewModel.settings,
-            searchMatchContext: historyViewModel.searchMatchContext(for: item.id),
+            settings: context.settings,
+            searchMatchContext: context.searchMatchContexts[item.id],
             onSelect: { Task { await historyViewModel.select(item) } },
             onSelectOptimizedForCodex: { Task { await historyViewModel.selectOptimizedForCodex(item) } },
             onSendViaAirDrop: { Task { await historyViewModel.sendViaAirDrop(item) } },

@@ -3,7 +3,7 @@
 
 .PHONY: all setup build run clean xcode test test-unit test-perf test-perf-heavy test-snapshot-perf test-snapshot-perf-release test-tsan test-strict coverage benchmark perf-audit perf-frontend-profile perf-frontend-profile-smoke perf-frontend-profile-standard perf-frontend-profile-full perf-unified-table test-flow test-flow-quick health-check quality-manifest-self-test
 .PHONY: test-real-db
-.PHONY: snapshot-perf-db bench-snapshot-search perf-search-warm-load perf-warm-scroll-ab
+.PHONY: snapshot-perf-db bench-snapshot-search perf-search-warm-load perf-warm-scroll-ab perf-scroll-tools perf-scroll-wheel
 .PHONY: tag-release push-release release-validate release-bump-patch test-release-policy
 .PHONY: markdown-renderer-deps markdown-assets-sync markdown-assets-verify test-markdown-renderer-assets markdown-assets-gate
 
@@ -374,6 +374,14 @@ perf-frontend-profile-full:
 
 # Release fixed-workload causal A/B; defaults to the formal shared-build two-axis 20-run suite.
 # Set WARM_SCROLL_AB_ARGS="--axis passive-row" (or markdown-menu-cache) for diagnostic single-axis runs.
+perf-scroll-tools:
+	@bash scripts/perf-scroll/build-tools.sh
+
+# Real-input scroll profile against the Release app: make perf-scroll-wheel LABEL=name [DURATION=12]
+perf-scroll-wheel: perf-scroll-tools
+	@APP="$$(xcodebuild -project Scopy.xcodeproj -scheme Scopy -configuration Release -showBuildSettings 2>/dev/null | grep -m1 'BUILT_PRODUCTS_DIR' | awk '{print $$3}')/Scopy.app"; \
+	python3 scripts/perf-scroll/profile_scroll.py "$$APP" "$${LABEL:-wheel}" --mode wheel --duration "$${DURATION:-12}" --sample
+
 perf-warm-scroll-ab:
 	@bash scripts/perf-warm-scroll-ab.sh $(WARM_SCROLL_AB_ARGS)
 

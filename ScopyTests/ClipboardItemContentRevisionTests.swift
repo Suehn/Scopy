@@ -14,6 +14,23 @@ final class ClipboardItemContentRevisionTests: XCTestCase {
         super.tearDown()
     }
 
+    func testResolveReusesRevisionUntilAContentFieldChanges() {
+        let itemID = UUID()
+        let item = makeItem(id: itemID, contentHash: "content-a", plainText: "display", storageRef: "blob/a")
+
+        let first = ClipboardItemContentRevision.resolve(item: item)
+        let again = ClipboardItemContentRevision.resolve(item: item)
+        XCTAssertEqual(first, again)
+        XCTAssertEqual(first.cacheKey, again.cacheKey)
+        XCTAssertEqual(first, ClipboardItemContentRevision(item: item))
+
+        let rehashed = ClipboardItemContentRevision.resolve(item: makeItem(id: itemID, contentHash: "content-b", plainText: "display", storageRef: "blob/a"))
+        XCTAssertNotEqual(rehashed, first)
+        let relabeled = ClipboardItemContentRevision.resolve(item: makeItem(id: itemID, contentHash: "content-b", plainText: "display 2", storageRef: "blob/a"))
+        XCTAssertNotEqual(relabeled, rehashed)
+        XCTAssertEqual(relabeled, ClipboardItemContentRevision(item: makeItem(id: itemID, contentHash: "content-b", plainText: "display 2", storageRef: "blob/a")))
+    }
+
     func testSameIDMissingHashSeparatesEqualLengthContent() {
         let itemID = UUID(uuidString: "12345678-1234-1234-1234-123456789abc")!
         let first = makeItem(id: itemID, contentHash: "", plainText: "AB")

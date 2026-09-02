@@ -1,0 +1,93 @@
+#!/usr/bin/env python3
+"""Profile history-list scrolling in the real Scopy panel with the real snapshot DB.
+usage: profile_scroll.py <app.app> <label> --mode wheel|fixed [--duration 12] [--hz 60] [--delta 24] [--flip 4]
+       [--commands 1440] [--warm 2] [--sample] [--xctrace TEMPLATE] [--settle 6] [--attempts 3]
+wheel: posts pixel scroll-wheel CGEvents at the panel (needs Accessibility trust for the terminal).
+fixed: the app's own display-link driver issues `commands` clip-view scroll steps (deterministic workload).
+"""
+import argparse, os, shutil, subprocess, sys, time, signal, tempfile, json
+S=os.path.dirname(os.path.abspath(__file__))
+TOOLS=os.environ.get('SCOPY_PERF_SCROLL_TOOLS', os.path.join(S, 'build'))
+ap=argparse.ArgumentParser(); ap.add_argument('app'); ap.add_argument('label'); ap.add_argument('--mode', default='wheel')
+ap.add_argument('--duration', type=float, default=12); ap.add_argument('--hz', type=float, default=60); ap.add_argument('--delta', type=int, default=24)
+ap.add_argument('--flip', type=float, default=4.0); ap.add_argument('--commands', type=int, default=1440); ap.add_argument('--warm', type=int, default=2)
+ap.add_argument('--sample', action='store_true'); ap.add_argument('--xctrace', default=None); ap.add_argument('--settle', type=float, default=6)
+ap.add_argument('--out', default=None); ap.add_argument('--attempts', type=int, default=3)
+a=ap.parse_args()
+out=a.out or os.path.join(repo, 'logs', 'perf-scroll', a.label); os.makedirs(out, exist_ok=True)
+repo=os.path.abspath(os.path.join(S, '..', '..'))
+profile_json=os.path.join(out,'profile.json')
+
+def make_db():
+    dbdir=tempfile.mkdtemp(prefix='scopy-profile-db-')
+    for f in ('clipboard.db','clipboard.db-wal','clipboard.db-shm','clipboard.db.fullindex.v4.plist','clipboard.db.fullindex.v4.plist.metadata.plist'):
+        src=os.path.join(repo,'perf-db',f)
+        if os.path.exists(src): shutil.copy(src, os.path.join(dbdir,f))
+    return dbdir
+
+def run_once(index):
+    if os.path.exists(profile_json): os.remove(profile_json)
+    dbdir=make_db()
+    env=dict(os.environ, USE_MOCK_SERVICE='0', SCOPY_SERVICE_DB_PATH=os.path.join(dbdir,'clipboard.db'), SCOPY_SERVICE_MONITOR_PASTEBOARD='ScopyProfile.'+str(os.getpid()),
+             SCOPY_PROFILE_OPEN_PANEL='1', SCOPY_SCROLL_PROFILE='1', SCOPY_PROFILE_MIN_SAMPLES='10', SCOPY_PROFILE_MAX_SAMPLES='131072', SCOPY_PROFILE_OUTPUT=profile_json)
+    if a.mode=='fixed':
+        env.update(SCOPY_PROFILE_FIXED_COMMAND_COUNT=str(a.commands), SCOPY_PROFILE_AUTO_SCROLL_STEP_PX=str(a.delta), SCOPY_PROFILE_WARM_ROUNDS=str(a.warm), SCOPY_PROFILE_DURATION_SEC='120')
+    else:
+        env.update(SCOPY_PROFILE_DURATION_SEC=str(int(a.settle + a.duration + 6)))
+    p=subprocess.Popen([a.app+'/Contents/MacOS/Scopy'], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    time.sleep(a.settle)
+    pos=None
+    for _ in range(20):
+        r=subprocess.run([os.path.join(TOOLS,'winpos'), str(p.pid)], capture_output=True, text=True)
+        if r.returncode==0 and r.stdout.strip()!='none': pos=[int(v) for v in r.stdout.split()]; break
+        print('window check:', r.stdout.strip(), flush=True); time.sleep(0.5)
+    result={'pid': p.pid, 'window': pos}
+    if not pos:
+        p.send_signal(signal.SIGTERM); shutil.rmtree(dbdir, ignore_errors=True); print('no usable window'); return None
+    x=pos[0]+pos[2]//2; y=pos[1]+pos[3]//2+40
+    print(f'attempt {index}: pid {p.pid} mode {a.mode} window {pos} scroll at ({x},{y})', flush=True)
+    procs=[]
+    if a.xctrace:
+        trace=os.path.join(out, 'trace.trace'); shutil.rmtree(trace, ignore_errors=True)
+        procs.append(subprocess.Popen(['xctrace','record','--template',a.xctrace,'--attach',str(p.pid),'--time-limit',f'{int(a.duration)+1}s','--output',trace], stdout=open(os.path.join(out,'xctrace.log'),'w'), stderr=subprocess.STDOUT))
+        time.sleep(2.5)
+    if a.sample:
+        procs.append(subprocess.Popen(['sample', str(p.pid), str(int(a.duration)), '-mayDie', '-file', os.path.join(out,'sample.txt')], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL))
+    sampler=subprocess.Popen([os.path.join(S,'sample.sh'), str(p.pid), str(int(a.duration))], stdout=subprocess.PIPE, text=True)
+    if a.mode=='wheel':
+        wheel=subprocess.run([os.path.join(TOOLS,'wheel'), str(x), str(y), str(a.delta), str(a.hz), str(a.duration), str(a.flip)], capture_output=True, text=True)
+        result['wheel']=wheel.stdout.strip()
+    result['cpu']=sampler.communicate()[0].strip()
+    for q in procs: q.wait()
+    deadline=time.time()+150
+    while time.time()<deadline and not os.path.exists(profile_json): time.sleep(0.5)
+    time.sleep(1.0)
+    log=subprocess.run(['/usr/bin/log','show','--last','3m','--style','compact','--predicate',f'processIdentifier == {p.pid} AND (eventMessage CONTAINS "cursor-set" OR eventMessage CONTAINS "tracking-areas")'],capture_output=True,text=True).stdout
+    result['applog']=[l.split('] ',2)[-1][:150] for l in log.splitlines() if 'cursor-set' in l or 'tracking-areas' in l]
+    p.send_signal(signal.SIGTERM)
+    try: p.wait(5)
+    except subprocess.TimeoutExpired: p.kill()
+    shutil.rmtree(dbdir, ignore_errors=True)
+    return result
+
+for i in range(1, a.attempts+1):
+    result=run_once(i)
+    ok=False
+    if result and os.path.exists(profile_json):
+        d=json.load(open(profile_json))
+        ok=(d['active_frame_ms']['count'] > 0) or (a.mode=='fixed' and bool((d.get('fixed_workload') or {}).get('completed')))
+    if ok: break
+    print(f'attempt {i}: the list did not scroll; retrying', flush=True)
+
+if result:
+    if 'wheel' in result: print(result['wheel'])
+    print(result['cpu'])
+    for l in result['applog'][-3:]: print('  app:', l)
+if os.path.exists(profile_json):
+    d=json.load(open(profile_json)); af=d['active_frame_ms']; fm=d['frame_ms']; rl=d['main_runloop_active_ms']
+    print("app profiler: active", {k: round(af.get(k,0),2) for k in ("count","p50","p95","max")}, "| all callbacks", fm.get("count"), "p95", round(fm.get("p95",0),2), "max", round(fm.get("max",0),1), "| active drop", round(d.get("active_drop_ratio") or 0,3), "| runloop busy ms", round(rl.get("total_ms",0)), "p95", round(rl.get("p95",0),2), "max", round(rl.get("max",0),1), "of", round(d.get('duration_seconds') or 0,1))
+    sp=d.get('scroll_speed_px_per_sec') or {}; print(f"scroll speed px/s: avg {sp.get('avg',0):.0f} (n={sp.get('count',0)}) | loaded {(d.get('fixed_workload') or {}).get('loaded_count')}")
+    fw=d.get('fixed_workload')
+    if fw and fw.get('enabled'): print('fixed workload:', {k:fw.get(k) for k in ('completed','observed_path_px','loaded_count','total_count')})
+else: print('no profile json written')
+print('output dir', out)

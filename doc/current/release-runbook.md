@@ -239,6 +239,14 @@ This section records historical `v0.65.4` release evidence for the single previe
 - Banded snapshot draw vs single draw on 63.7 Mpx: 206 pixels in one row differ (max channel diff 27), identical set for 256/1024-row bands with or without 16-row overlap.
 - Gates: build pass; unit 782 executed / 3 skipped / 0 failures; strict 782 executed / 3 skipped / 0 failures; integration 15 executed / 0 failures; docs/release/policy validation pass. TSan, snapshot, and frontend performance gates not run: no search, cleanup, or scrolling code changed.
 
+## History Scroll Release Evidence (v0.76.0, 2026-09-02)
+
+- Environment: Apple M3 Pro (5 performance + 6 efficiency cores), 36GB, arm64, 120 Hz display, macOS 15.7.3 (`24G419`), Xcode 26.1.1 (`17B100`), Release build; real panel (`SCOPY_PROFILE_OPEN_PANEL=1`), real snapshot DB `perf-db/clipboard.db` (9,566 rows, 146,255,872 bytes); the maintainer's system has an Accessibility pointer customization (`mouseDriverCursorSize` 2.35).
+- Method: `scripts/perf-scroll/profile_scroll.py` (`--mode wheel`: 24 px pixel scroll-wheel `CGEvent`s at 60 Hz, flipping every 4 s, 12 s, cursor over the list; `--mode fixed`: 1440 display-link commands of 36 px) with `sample` attribution; the terminal must be trusted for Accessibility to post events (`build/axcheck`).
+- Wheel workload, v0.75.0 -> v0.76.0: Scopy CPU `14.34 -> 9.76 s` per 12 s; callback interval p95 `83.3 -> 16.7 ms`, max `91.7 -> 25.0 ms`, over-threshold `13.1% -> 0%`; GPU `42% -> 19%`; main-thread shares `-[NSCursor set]` `21.4% -> 0.0%`, `ClipboardItemContentRevision` `11.2% -> 0.4%`, `installObservationSlow` `8.7% -> 0.2%`.
+- Fixed workload: main run-loop busy `8,378 -> 3,931 ms` of 12,000, run-loop p95 `7.11 -> 4.94 ms`, max `12.0 -> 7.8 ms`, Scopy CPU over the 30 s sample window `23.29 -> 11.73 s`.
+- Gates: build pass; unit 783 executed / 3 skipped / 0 failures; strict 783 executed / 3 skipped / 0 failures; integration 15 executed / 0 failures; docs/release/policy validation pass; `make perf-frontend-profile` smoke passed (`logs/perf-frontend-profile-2026-09-02_19-33-39/`); full tier not run, the real-input profile is the release evidence. TSan, snapshot, and backend performance gates not run: no search, cleanup, or storage code changed.
+
 ## Homebrew Acceptance
 
 Verify all of the following after release publication:

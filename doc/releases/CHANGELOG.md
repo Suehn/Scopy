@@ -12,6 +12,18 @@
 
 - No unreleased entries.
 
+## [v0.76.0] - 2026-09-02
+
+### Changed
+
+- `ScrollCursorSetCoalescer` drops `-[NSCursor set]` calls that re-set the already-current cursor within 100 ms; AppKit and SwiftUI issued about 70 such calls per second while scrolling, each regenerating the cursor image under an Accessibility pointer customization.
+- `ClipboardItemContentRevision.resolve(item:)` memoizes per-item revisions and encodes digests without `String(format:)`; `HistoryListView` passes `selectedID`, settings, popover state, and search-match contexts into rows by value instead of reading `@Observable` state inside each ForEach child.
+- New real-input scroll profiling tooling under `scripts/perf-scroll/` (`make perf-scroll-tools`, `make perf-scroll-wheel`) with `SCOPY_PROFILE_OPEN_PANEL=1` to open the real panel for harnesses; see `doc/perf/release-profiles/v0.76.0-profile.md`.
+
+### Performance
+
+- Real wheel scrolling over the real panel (Release, 9,566-row snapshot): Scopy CPU `14.34 -> 9.76 s` per 12 s, callback interval p95 `83.3 -> 16.7 ms`, max `91.7 -> 25.0 ms`, over-threshold `13.1% -> 0%`, GPU `42% -> 19%`; fixed 1440-command workload main run-loop busy `8,378 -> 3,931 ms` of 12,000.
+
 ## [v0.75.0] - 2026-09-02
 
 ### Changed

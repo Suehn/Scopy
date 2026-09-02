@@ -159,6 +159,9 @@ Implication: storage, search hydration, cleanup planning, and presentation must 
 6. Stable context-menu predicates belong in `HistoryItemPresentationCache`, keyed by `ClipboardItemContentRevision`. Keep `markdownMenuSignalCache` separate from the exact Markdown export-capability cache: exact `true` or `false` always wins, while the heuristic caches both outcomes, prewarms off-main, deduplicates in-flight work, and rejects stale generation completion.
 7. `HistoryRelativeTimeClock` and `HistoryItemPresentationCache` remain list/presentation concerns: pause ticking while scrolling or hidden, keep caches bounded, and invalidate by content revision.
 8. Scroll and pointer suppression stay list-local; do not reintroduce process-global hover/scroll coordination state.
+9. Rows are built inside ForEach child closures. Read `@Observable` state (`selectedID`, settings, popover state, search-match contexts) once per list update in `HistoryListView.body` and pass values into `historyRow(item:context:)`; a read inside the closure installs an observation per row. Use `ClipboardItemContentRevision.resolve(item:)` on hot paths instead of `init(item:)`.
+10. `ScrollCursorSetCoalescer` (installed at launch) drops `-[NSCursor set]` calls that re-set the already-current cursor within 100 ms because AppKit and SwiftUI re-set the arrow cursor on every scroll frame; keep it, and do not add per-frame cursor changes to the list.
+11. Measure scrolling with `scripts/perf-scroll/` (real wheel input over the real panel on a Release build, `sample` attribution) before claiming a scroll improvement; the callback-interval harness cannot see hitches or attribute time.
 
 Implication: SwiftUI row rendering should remain decoupled from global singleton churn during fast scroll and preview suppression.
 

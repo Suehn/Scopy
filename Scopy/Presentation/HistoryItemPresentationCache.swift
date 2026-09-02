@@ -114,7 +114,7 @@ final class HistoryItemPresentationCache {
 
     func filePreview(for item: ClipboardItemDTO) -> FilePreviewSummary? {
         guard item.type == .file else { return nil }
-        let key = ClipboardItemContentRevision(item: item)
+        let key = ClipboardItemContentRevision.resolve(item: item)
         if let cached = filePreviewCache[key] {
             return cached.summary
         }
@@ -162,7 +162,7 @@ final class HistoryItemPresentationCache {
                 Self.isMarkdownCandidate(type: item.type)
             guard mayScheduleFilePreview || mayScheduleMarkdownMenuSignal else { continue }
 
-            let revision = ClipboardItemContentRevision(item: item)
+            let revision = ClipboardItemContentRevision.resolve(item: item)
             let shouldComputeFilePreview =
                 mayScheduleFilePreview &&
                 filePreviewCache[revision] == nil &&
@@ -262,7 +262,7 @@ final class HistoryItemPresentationCache {
 
     func cachedFilePreview(for item: ClipboardItemDTO) -> FilePreviewSummary? {
         guard item.type == .file else { return nil }
-        return filePreviewCache[ClipboardItemContentRevision(item: item)]?.summary
+        return filePreviewCache[ClipboardItemContentRevision.resolve(item: item)]?.summary
     }
 
     func cachedRowDescriptor(for item: ClipboardItemDTO, settings: SettingsDTO) -> HistoryItemRowDescriptor? {
@@ -270,7 +270,7 @@ final class HistoryItemPresentationCache {
     }
 
     func cachedMarkdownExportCapability(for item: ClipboardItemDTO) -> Bool? {
-        cachedMarkdownExportCapability(for: ClipboardItemContentRevision(item: item))
+        cachedMarkdownExportCapability(for: ClipboardItemContentRevision.resolve(item: item))
     }
 
     /// Revision overload for hot paths that already own the deterministic content identity.
@@ -281,12 +281,12 @@ final class HistoryItemPresentationCache {
 
     func storeMarkdownExportCapability(_ value: Bool, for item: ClipboardItemDTO) {
         guard Self.isMarkdownCandidate(type: item.type) else { return }
-        let key = ClipboardItemContentRevision(item: item)
+        let key = ClipboardItemContentRevision.resolve(item: item)
         markdownCapabilityCache.insert(value, forKey: key)
     }
 
     func cachedMarkdownMenuSignal(for item: ClipboardItemDTO) -> Bool? {
-        cachedMarkdownMenuSignal(for: ClipboardItemContentRevision(item: item))
+        cachedMarkdownMenuSignal(for: ClipboardItemContentRevision.resolve(item: item))
     }
 
     /// Returns only the heuristic menu signal. Exact export capability is intentionally queried
@@ -298,7 +298,7 @@ final class HistoryItemPresentationCache {
 
     func markdownMenuSignal(for item: ClipboardItemDTO) -> Bool {
         markdownMenuSignal(
-            for: ClipboardItemContentRevision(item: item),
+            for: ClipboardItemContentRevision.resolve(item: item),
             plainText: item.plainText
         )
     }
@@ -343,7 +343,7 @@ final class HistoryItemPresentationCache {
         for item: ClipboardItemDTO,
         bucket: Int64
     ) -> String {
-        let revision = ClipboardItemContentRevision(item: item)
+        let revision = ClipboardItemContentRevision.resolve(item: item)
         if let cached = relativeTimeCache[item.id],
            cached.revision == revision,
            cached.lastUsedAt == item.lastUsedAt,
@@ -392,7 +392,7 @@ final class HistoryItemPresentationCache {
 
     func markdownExportCapability(for item: ClipboardItemDTO) -> Bool {
         guard Self.isMarkdownCandidate(type: item.type) else { return false }
-        let key = ClipboardItemContentRevision(item: item)
+        let key = ClipboardItemContentRevision.resolve(item: item)
         if let cached = markdownCapabilityCache[key] {
             return cached
         }
@@ -530,7 +530,7 @@ final class HistoryItemPresentationCache {
         settings: SettingsDTO
     ) -> RowDescriptorCacheKey {
         RowDescriptorCacheKey(
-            revision: ClipboardItemContentRevision(item: item),
+            revision: ClipboardItemContentRevision.resolve(item: item),
             note: item.note,
             appBundleID: item.appBundleID,
             thumbnailPath: item.thumbnailPath,
