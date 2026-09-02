@@ -12,6 +12,19 @@
 
 - No unreleased entries.
 
+## [v0.74.0] - 2026-09-02
+
+### Changed
+
+- Markdown/LaTeX export hands the rendered bitmap to the bundled `pngquant` as a memory-mapped raw RGBA (PAM) file instead of encoding an intermediate PNG with ImageIO; ImageIO encodes only when pngquant is disabled or declines the quality floor. Exports no longer pass `--skip-if-larger`.
+- `PngquantService` always runs the tool in file mode (`--output`), so the no-change exits never re-encode the 24-bit original.
+- The export success toast shows the final size (`pngquant 1.9 MB`) instead of a saved percentage; `ExportStats` carries `finalPNGBytes` and `pngquantApplied`.
+- Bundled `pngquant` (fork `perf` `256e081`): PNG output is written by a Rust encoder with parallel zlib-rs deflate (level 9, memLevel 5, thread-count-independent bytes, `gAMA` before `sRGB`, 256 KiB IDAT chunks), PAM input is read zero-copy, `--verbose` prints stage timings, and `--skip-if-larger` writes nothing when the result is too large.
+
+### Performance
+
+- Reference export (2160x29511): export stage from finished bitmap to final PNG about `2.55 s -> 0.34 s`; whole tool `2.05 s -> 0.21 s` (PNG input `0.56 s`); app launch to PNG on the pasteboard `6.2 s -> 3.6 s`. Output pixel-identical to `v0.73.0` and 0.7% smaller; other palette outputs within `+0.1%/-0.6%` of libpng level 9.
+
 ## [v0.73.0] - 2026-09-02
 
 ### Changed

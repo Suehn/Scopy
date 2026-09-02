@@ -1,3 +1,4 @@
+import CoreGraphics
 import Darwin
 import Foundation
 import os
@@ -30,6 +31,20 @@ public enum PngquantService {
             self.colors = colors
             self.processTimeoutSeconds = processTimeoutSeconds
         }
+
+        /// Command-line arguments shared by every invocation: quality window, speed and color budget.
+        fileprivate var baseArguments: [String] {
+            let minQ = max(0, min(100, qualityMin))
+            let maxQ = max(0, min(100, qualityMax))
+            let qualityMin = min(minQ, maxQ)
+            let qualityMax = max(minQ, maxQ)
+            let speed = max(1, min(11, speed))
+            return ["--quality", "\(qualityMin)-\(qualityMax)", "--speed", "\(speed)", "--strip"]
+        }
+
+        fileprivate var colorArgument: String {
+            "\(max(2, min(256, colors)))"
+        }
     }
 
     enum PngquantError: LocalizedError {
@@ -38,6 +53,7 @@ public enum PngquantService {
         case timedOut(timeoutSeconds: TimeInterval)
         case cancelled
         case failed(exitCode: Int32, stderr: String)
+        case invalidBitmap(width: Int, height: Int)
 
         var errorDescription: String? {
             switch self {
@@ -54,13 +70,17 @@ public enum PngquantService {
                     return "pngquant failed with exit code \(exitCode)"
                 }
                 return "pngquant failed with exit code \(exitCode): \(stderr)"
+            case .invalidBitmap(let width, let height):
+                return "pngquant cannot encode a \(width)x\(height) bitmap"
             }
         }
     }
 
+    /// Exit codes pngquant uses for "left the image alone": 98 = `--skip-if-larger`, 99 = quality below the minimum.
+    private static let noChangeExitCodes: Set<Int32> = [98, 99]
+
     private struct ProcessResult {
         let terminationStatus: Int32
-        let stdout: Data
         let stderr: Data
     }
 
@@ -110,44 +130,60 @@ public enum PngquantService {
         }
     }
 
+    /// Quantizes PNG bytes. Returns the caller's exact bytes when pngquant leaves the image alone.
     static func compressPNGData(_ pngData: Data, options: Options) throws -> Data {
         guard isLikelyPNG(pngData) else { return pngData }
 
         let binary = try resolveBinaryPath(preferredPath: options.binaryPath)
-        let minQ = max(0, min(100, options.qualityMin))
-        let maxQ = max(0, min(100, options.qualityMax))
-        let qualityMin = min(minQ, maxQ)
-        let qualityMax = max(minQ, maxQ)
-        let speed = max(1, min(11, options.speed))
-        let colors = max(2, min(256, options.colors))
+        let io = try ScratchDirectory()
+        let inputURL = io.url.appendingPathComponent("input.png")
+        let outputURL = io.url.appendingPathComponent("output.png")
+        try pngData.write(to: inputURL)
 
         let result = try runProcess(
             executablePath: binary,
-            arguments: [
-            "--quality", "\(qualityMin)-\(qualityMax)",
-            "--speed", "\(speed)",
-            "--skip-if-larger",
-            "--strip",
-            "\(colors)",
-            "-"
-            ],
-            standardInputData: pngData,
+            arguments: options.baseArguments + ["--skip-if-larger", "--output", outputURL.path, options.colorArgument, "--", inputURL.path],
+            stderrURL: io.url.appendingPathComponent("stderr"),
             timeoutSeconds: options.processTimeoutSeconds
         )
 
         let exit = result.terminationStatus
-        if exit == 98 || exit == 99 {
-            // In stdout mode pngquant may re-encode the 24-bit original for these no-change
-            // exits. Always preserve the caller's exact bytes so this cannot look optimized.
+        if noChangeExitCodes.contains(exit) {
             return pngData
         }
         if exit == 0 {
-            guard !result.stdout.isEmpty else { return pngData }
-            return result.stdout
+            guard let output = try? Data(contentsOf: outputURL), !output.isEmpty else { return pngData }
+            return output
         }
+        throw PngquantError.failed(exitCode: exit, stderr: stderrText(result.stderr))
+    }
 
-        let stderr = stderrText(result.stderr)
-        throw PngquantError.failed(exitCode: exit, stderr: stderr)
+    /// Quantizes a bitmap without an intermediate PNG: the pixels are handed to pngquant as a raw
+    /// RGBA PAM file, which it maps directly. Returns `nil` when pngquant cannot reach the quality
+    /// window, in which case the caller encodes the bitmap itself.
+    static func compressBitmap(_ image: CGImage, options: Options) throws -> Data? {
+        let binary = try resolveBinaryPath(preferredPath: options.binaryPath)
+        let io = try ScratchDirectory()
+        let inputURL = io.url.appendingPathComponent("input.pam")
+        let outputURL = io.url.appendingPathComponent("output.png")
+        try writePAM(image, to: inputURL)
+
+        let result = try runProcess(
+            executablePath: binary,
+            arguments: options.baseArguments + ["--output", outputURL.path, options.colorArgument, "--", inputURL.path],
+            stderrURL: io.url.appendingPathComponent("stderr"),
+            timeoutSeconds: options.processTimeoutSeconds
+        )
+
+        let exit = result.terminationStatus
+        if noChangeExitCodes.contains(exit) {
+            return nil
+        }
+        if exit == 0 {
+            guard let output = try? Data(contentsOf: outputURL), isLikelyPNG(output) else { return nil }
+            return output
+        }
+        throw PngquantError.failed(exitCode: exit, stderr: stderrText(result.stderr))
     }
 
     static func compressPNGFileInPlace(_ fileURL: URL, options: Options) throws -> Bool {
@@ -169,13 +205,6 @@ public enum PngquantService {
         guard FileManager.default.fileExists(atPath: originalPath) else { return false }
         guard FileManager.default.isReadableFile(atPath: originalPath) else { return false }
 
-        let minQ = max(0, min(100, options.qualityMin))
-        let maxQ = max(0, min(100, options.qualityMax))
-        let qualityMin = min(minQ, maxQ)
-        let qualityMax = max(minQ, maxQ)
-        let speed = max(1, min(11, options.speed))
-        let colors = max(2, min(256, options.colors))
-
         let tmpPath = originalPath + ".pngquant-\(UUID().uuidString).tmp"
         let tmpURL = URL(fileURLWithPath: tmpPath)
         if FileManager.default.fileExists(atPath: tmpPath) {
@@ -185,19 +214,11 @@ public enum PngquantService {
             try? FileManager.default.removeItem(at: tmpURL)
         }
 
+        let io = try ScratchDirectory()
         let result = try runProcess(
             executablePath: binary,
-            arguments: [
-                "--quality", "\(qualityMin)-\(qualityMax)",
-                "--speed", "\(speed)",
-                "--skip-if-larger",
-                "--strip",
-                "--output", tmpPath,
-                "\(colors)",
-                "--",
-                originalPath
-            ],
-            standardInputData: nil,
+            arguments: options.baseArguments + ["--skip-if-larger", "--output", tmpPath, options.colorArgument, "--", originalPath],
+            stderrURL: io.url.appendingPathComponent("stderr"),
             timeoutSeconds: options.processTimeoutSeconds
         )
 
@@ -213,13 +234,84 @@ public enum PngquantService {
             }
         }
 
-        if exit == 98 || exit == 99 {
-            // 98: --skip-if-larger; 99: quality below min. Neither replaces the source.
+        if noChangeExitCodes.contains(exit) {
             return false
         }
 
-        let stderr = stderrText(result.stderr)
-        throw PngquantError.failed(exitCode: exit, stderr: stderr)
+        throw PngquantError.failed(exitCode: exit, stderr: stderrText(result.stderr))
+    }
+
+    // MARK: - Raw bitmap hand-off
+
+    /// Bytes of the PAM header written before the pixels; padded so the pixel rows start on a
+    /// 64-byte boundary, which keeps Core Graphics on its fast blit path.
+    static func pamHeader(width: Int, height: Int) -> Data {
+        let fields = "P7\nWIDTH \(width)\nHEIGHT \(height)\nDEPTH 4\nMAXVAL 255\nTUPLTYPE RGB_ALPHA\n"
+        let trailer = "ENDHDR\n"
+        let minimalLength = fields.utf8.count + 2 + trailer.utf8.count // "#\n" comment carries the padding
+        let padding = (64 - minimalLength % 64) % 64
+        return Data((fields + "#" + String(repeating: " ", count: padding) + "\n" + trailer).utf8)
+    }
+
+    /// Flattens `image` on white into an 8-bit RGBA PAM file at `url`. The file is preallocated and
+    /// memory-mapped so the bitmap is drawn straight into the page cache without a second copy.
+    static func writePAM(_ image: CGImage, to url: URL) throws {
+        let width = image.width
+        let height = image.height
+        let header = pamHeader(width: width, height: height)
+        let (rowBytes, rowOverflow) = width.multipliedReportingOverflow(by: 4)
+        let (pixelBytes, pixelOverflow) = rowBytes.multipliedReportingOverflow(by: height)
+        guard width > 0, height > 0, !rowOverflow, !pixelOverflow, pixelBytes <= Int(Int32.max) * 4 else {
+            throw PngquantError.invalidBitmap(width: width, height: height)
+        }
+        let totalBytes = header.count + pixelBytes
+
+        let fd = open(url.path, O_RDWR | O_CREAT | O_TRUNC, 0o600)
+        guard fd >= 0 else { throw posixError("open") }
+        defer { close(fd) }
+
+        // Reserve the blocks up front so a full disk surfaces here as an error instead of a SIGBUS while drawing.
+        var store = fstore_t(
+            fst_flags: UInt32(F_ALLOCATEALL),
+            fst_posmode: F_PEOFPOSMODE,
+            fst_offset: 0,
+            fst_length: off_t(totalBytes),
+            fst_bytesalloc: 0
+        )
+        guard fcntl(fd, F_PREALLOCATE, &store) != -1 else { throw posixError("preallocate") }
+        guard ftruncate(fd, off_t(totalBytes)) == 0 else { throw posixError("ftruncate") }
+
+        guard let base = mmap(nil, totalBytes, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0), base != MAP_FAILED else {
+            throw posixError("mmap")
+        }
+        defer { munmap(base, totalBytes) }
+
+        header.withUnsafeBytes { bytes in
+            base.copyMemory(from: bytes.baseAddress!, byteCount: bytes.count)
+        }
+        guard let context = CGContext(
+            data: base.advanced(by: header.count),
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bytesPerRow: rowBytes,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else {
+            throw PngquantError.invalidBitmap(width: width, height: height)
+        }
+        let bounds = CGRect(x: 0, y: 0, width: CGFloat(width), height: CGFloat(height))
+        context.setFillColor(CGColor(red: 1, green: 1, blue: 1, alpha: 1))
+        context.fill(bounds)
+        context.draw(image, in: bounds)
+    }
+
+    private static func posixError(_ operation: String, code: Int32 = errno) -> NSError {
+        NSError(
+            domain: NSPOSIXErrorDomain,
+            code: Int(code),
+            userInfo: [NSLocalizedDescriptionKey: "\(operation) failed: \(String(cString: strerror(code)))"]
+        )
     }
 
     private static func replaceFileAtomically(
@@ -232,49 +324,41 @@ public enum PngquantService {
         }
     }
 
+    /// A private temporary directory that disappears with the value.
+    private final class ScratchDirectory {
+        let url: URL
+
+        init() throws {
+            url = FileManager.default.temporaryDirectory.appendingPathComponent(
+                "scopy-pngquant-io-\(UUID().uuidString)",
+                isDirectory: true
+            )
+            try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        }
+
+        deinit {
+            try? FileManager.default.removeItem(at: url)
+        }
+    }
+
     private static func runProcess(
         executablePath: String,
         arguments: [String],
-        standardInputData: Data?,
+        stderrURL: URL,
         timeoutSeconds requestedTimeoutSeconds: TimeInterval
     ) throws -> ProcessResult {
         guard !Task.isCancelled else { throw PngquantError.cancelled }
 
         let timeoutSeconds = effectiveProcessTimeout(requestedTimeoutSeconds)
-        let ioDirectory = FileManager.default.temporaryDirectory.appendingPathComponent(
-            "scopy-pngquant-io-\(UUID().uuidString)",
-            isDirectory: true
-        )
-        try FileManager.default.createDirectory(at: ioDirectory, withIntermediateDirectories: true)
-        defer {
-            try? FileManager.default.removeItem(at: ioDirectory)
-        }
-
-        let stdoutURL = ioDirectory.appendingPathComponent("stdout")
-        let stderrURL = ioDirectory.appendingPathComponent("stderr")
-        try Data().write(to: stdoutURL, options: .atomic)
         try Data().write(to: stderrURL, options: .atomic)
-
-        let stdoutHandle = try FileHandle(forWritingTo: stdoutURL)
         let stderrHandle = try FileHandle(forWritingTo: stderrURL)
-        var inputHandle: FileHandle?
-        defer {
-            try? inputHandle?.close()
-            try? stdoutHandle.close()
-            try? stderrHandle.close()
-        }
-
-        if let standardInputData {
-            let stdinURL = ioDirectory.appendingPathComponent("stdin")
-            try standardInputData.write(to: stdinURL, options: .atomic)
-            inputHandle = try FileHandle(forReadingFrom: stdinURL)
-        }
+        defer { try? stderrHandle.close() }
 
         let process = Process()
         process.executableURL = URL(fileURLWithPath: executablePath)
         process.arguments = arguments
-        process.standardInput = inputHandle
-        process.standardOutput = stdoutHandle
+        process.standardInput = FileHandle.nullDevice
+        process.standardOutput = FileHandle.nullDevice
         process.standardError = stderrHandle
 
         do {
@@ -296,18 +380,14 @@ public enum PngquantService {
                 terminateAndWait(process)
                 throw PngquantError.timedOut(timeoutSeconds: timeoutSeconds)
             }
-            Thread.sleep(forTimeInterval: 0.01)
+            Thread.sleep(forTimeInterval: 0.002)
         }
         process.waitUntilExit()
 
-        try? inputHandle?.close()
-        inputHandle = nil
-        try? stdoutHandle.close()
         try? stderrHandle.close()
 
         return ProcessResult(
             terminationStatus: process.terminationStatus,
-            stdout: (try? Data(contentsOf: stdoutURL)) ?? Data(),
             stderr: (try? Data(contentsOf: stderrURL)) ?? Data()
         )
     }
@@ -349,6 +429,16 @@ public enum PngquantService {
         } catch {
             logger.warning("pngquant skipped: \(error.localizedDescription, privacy: .public)")
             return pngData
+        }
+    }
+
+    /// Quantizes a bitmap, or returns `nil` when pngquant declined or failed so the caller can encode it itself.
+    public static func compressBitmapBestEffort(_ image: CGImage, options: Options) -> Data? {
+        do {
+            return try compressBitmap(image, options: options)
+        } catch {
+            logger.warning("pngquant bitmap skipped: \(error.localizedDescription, privacy: .public)")
+            return nil
         }
     }
 

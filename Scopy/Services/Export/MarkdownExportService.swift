@@ -12,15 +12,13 @@ public enum MarkdownExportService {
     public static let defaultTargetWidthPixels: CGFloat = 1080
 
     public struct ExportStats: Sendable, Equatable {
-        public let originalPNGBytes: Int
         public let finalPNGBytes: Int
-        public let pngquantRequested: Bool
+        /// True when the PNG came out of pngquant; false when ImageIO encoded the bitmap.
+        public let pngquantApplied: Bool
 
-        public var percentSaved: Int? {
-            guard pngquantRequested else { return nil }
-            guard originalPNGBytes > 0 else { return nil }
-            let saved = 1.0 - (Double(finalPNGBytes) / Double(originalPNGBytes))
-            return max(0, min(100, Int((saved * 100.0).rounded())))
+        public init(finalPNGBytes: Int, pngquantApplied: Bool) {
+            self.finalPNGBytes = finalPNGBytes
+            self.pngquantApplied = pngquantApplied
         }
     }
 
@@ -105,12 +103,8 @@ public enum MarkdownExportService {
                     dumpURL: dumpURL,
                     errorDumpURL: errorDumpURL
                 )
-                if case .success = committed {
-                    if let percent = outcome.stats.percentSaved {
-                        logger.info(
-                            "Exported PNG with pngquant: saved \(percent, privacy: .public)% (\(outcome.stats.originalPNGBytes, privacy: .public) -> \(outcome.stats.finalPNGBytes, privacy: .public) bytes)"
-                        )
-                    }
+                if case .success = committed, outcome.stats.pngquantApplied {
+                    logger.info("Exported PNG with pngquant: \(outcome.stats.finalPNGBytes, privacy: .public) bytes")
                 }
                 completion(committed)
             case .failure(let error):
@@ -1159,21 +1153,7 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
                     expectedPageWidthPoints: expectedPageWidthPoints,
                     contentScaleCompensation: contentScaleCompensation
                 )
-                let originalData = try Self.pngDataFromCGImage(rendered)
-                let finalData: Data
-                if let pngquantOptions {
-                    finalData = PngquantService.compressBestEffort(originalData, options: pngquantOptions)
-                } else {
-                    finalData = originalData
-                }
-                return MarkdownExportService.ExportOutcome(
-                    pngData: finalData,
-                    stats: MarkdownExportService.ExportStats(
-                        originalPNGBytes: originalData.count,
-                        finalPNGBytes: finalData.count,
-                        pngquantRequested: pngquantOptions != nil
-                    )
-                )
+                return try Self.encodeExportImage(rendered, pngquantOptions: pngquantOptions)
             }.value
         }
 
@@ -1222,21 +1202,8 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
         return try await Task.detached(priority: .userInitiated) {
             let targetWidth = max(1, Int(round(targetWidthPixels)))
             let normalized = Self.scaleCGImageIfNeeded(image: cg, targetWidthPixels: targetWidth)
-            let originalData = try Self.pngDataFromCGImageWithWhiteBackground(normalized)
-            let finalData: Data
-            if let pngquantOptions {
-                finalData = PngquantService.compressBestEffort(originalData, options: pngquantOptions)
-            } else {
-                finalData = originalData
-            }
-            return MarkdownExportService.ExportOutcome(
-                pngData: finalData,
-                stats: MarkdownExportService.ExportStats(
-                    originalPNGBytes: originalData.count,
-                    finalPNGBytes: finalData.count,
-                    pngquantRequested: pngquantOptions != nil
-                )
-            )
+            let flattened = try Self.flattenedOnWhiteBackground(normalized)
+            return try Self.encodeExportImage(flattened, pngquantOptions: pngquantOptions)
         }.value
     }
 
@@ -1342,28 +1309,10 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
 
         stage = .pngEncoding
         let trimmed = Self.trimBottomWhitespaceIfNeeded(image: stitched, contextData: canvas.dataPointer, bytesPerRow: bytesPerRow)
-        let originalPNG = try Self.pngDataFromCGImage(trimmed)
-        if let pngquantOptions {
-            let finalPNG = await Task.detached(priority: .userInitiated) {
-                PngquantService.compressBestEffort(originalPNG, options: pngquantOptions)
-            }.value
-            return MarkdownExportService.ExportOutcome(
-                pngData: finalPNG,
-                stats: MarkdownExportService.ExportStats(
-                    originalPNGBytes: originalPNG.count,
-                    finalPNGBytes: finalPNG.count,
-                    pngquantRequested: true
-                )
-            )
-        }
-        return MarkdownExportService.ExportOutcome(
-            pngData: originalPNG,
-            stats: MarkdownExportService.ExportStats(
-                originalPNGBytes: originalPNG.count,
-                finalPNGBytes: originalPNG.count,
-                pngquantRequested: false
-            )
-        )
+        let pngquantOptions = self.pngquantOptions
+        return try await Task.detached(priority: .userInitiated) {
+            try Self.encodeExportImage(trimmed, pngquantOptions: pngquantOptions)
+        }.value
     }
 
     private func scrollTo(webView: WKWebView, yPoints: CGFloat) async throws -> CGFloat {
@@ -2468,7 +2417,36 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
         }
     }
 
-    nonisolated private static func pngDataFromCGImageWithWhiteBackground(_ image: CGImage) throws -> Data {
+    /// Hands the bitmap to pngquant as raw pixels; falls back to ImageIO's PNG encoder when pngquant is
+    /// disabled or declines the image.
+    nonisolated static func encodeExportImage(
+        _ image: CGImage,
+        pngquantOptions: PngquantService.Options?
+    ) throws -> MarkdownExportService.ExportOutcome {
+        let startedAt = DispatchTime.now().uptimeNanoseconds
+        if let pngquantOptions, let quantized = PngquantService.compressBitmapBestEffort(image, options: pngquantOptions) {
+            logEncodeDuration(since: startedAt, pixels: image.width * image.height, bytes: quantized.count, encoder: "pngquant")
+            return MarkdownExportService.ExportOutcome(
+                pngData: quantized,
+                stats: MarkdownExportService.ExportStats(finalPNGBytes: quantized.count, pngquantApplied: true)
+            )
+        }
+        let png = try pngDataFromCGImage(image)
+        logEncodeDuration(since: startedAt, pixels: image.width * image.height, bytes: png.count, encoder: "ImageIO")
+        return MarkdownExportService.ExportOutcome(
+            pngData: png,
+            stats: MarkdownExportService.ExportStats(finalPNGBytes: png.count, pngquantApplied: false)
+        )
+    }
+
+    nonisolated private static func logEncodeDuration(since startedAt: UInt64, pixels: Int, bytes: Int, encoder: StaticString) {
+        let milliseconds = Double(DispatchTime.now().uptimeNanoseconds &- startedAt) / 1_000_000
+        MarkdownExportService.logger.info(
+            "Encoded export PNG via \(encoder, privacy: .public): \(pixels, privacy: .public) px -> \(bytes, privacy: .public) bytes in \(milliseconds, format: .fixed(precision: 1), privacy: .public) ms"
+        )
+    }
+
+    nonisolated private static func flattenedOnWhiteBackground(_ image: CGImage) throws -> CGImage {
         let w = image.width
         let h = image.height
         guard w > 0, h > 0 else {
@@ -2498,9 +2476,7 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
             throw MarkdownExportService.ExportError.stageFailed(stage: .imageConversion, underlying: nil)
         }
 
-        let trimmed = trimBottomWhitespaceIfNeeded(image: flattened, contextData: ctx.data, bytesPerRow: bytesPerRow)
-
-        return try pngDataFromCGImage(trimmed)
+        return trimBottomWhitespaceIfNeeded(image: flattened, contextData: ctx.data, bytesPerRow: bytesPerRow)
     }
 
     nonisolated private static func pngDataFromCGImage(_ image: CGImage) throws -> Data {

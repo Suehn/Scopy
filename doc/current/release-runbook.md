@@ -222,6 +222,14 @@ This section records historical `v0.65.4` release evidence for the single previe
 - Real Scopy assets with Scopy's arguments, old official `3.0.3` vs this build: sizes mostly within 1%, two previously skipped exports now compress (`97,038 -> 26,699`, `2,592,990 -> 648,541`), one already-4-bit export stays unchanged via exit 98 instead of shrinking 1.4%; whole-CLI time `0.08 -> 0.06s` (screenshot), `2.52 -> 2.38s`, `3.11 -> 3.00s`, `0.59 -> 0.55s`, `36.26 -> 35.98s` (298-megapixel export). libpng level-9 encoding dominates large exports and is unchanged.
 - Gates: build pass; unit 780 executed / 3 skipped / 0 failures; strict 780 executed / 3 skipped / 0 failures; integration 15 executed / 0 failures; docs/release/policy validation pass. TSan, snapshot, and frontend performance gates were not run because no Swift source changed.
 
+## Export Encode Path Release Evidence (v0.74.0, 2026-09-02)
+
+- Environment: Apple M3 Pro (5 performance + 6 efficiency cores), 36GB, arm64, macOS 15.7.3 (`24G419`), rustc 1.98.0 (Homebrew), Xcode 26.1.1 (`17B100`), project Swift 5.9, deployment target macOS 14.0.
+- Deployment semantics: `Scopy/Resources/Tools/pngquant` is rebuilt from the fork `perf` branch at `256e081` (engine unchanged at `fddcf09`), same features (`static cocoa`), universal, ad-hoc signed; the write path now uses zlib-rs instead of system `libz`. Exports call the tool with a memory-mapped PAM input and `--output`; `--skip-if-larger` is only passed for captured PNG files. Rebuild commands are in `Scopy/Resources/ThirdParty/pngquant/PROVENANCE.md`.
+- Reference export `chatgpt_public_copy_markdown_sample.md` at 200% (2160x29511, min of 3): whole tool `2.05 -> 0.21s` with PAM input (`0.56s` with PNG input); tool stages read `4ms`, quantize `25ms`, remap `89ms`, write `93ms`; Scopy-side hand-off (preallocate, map, flatten) `110ms` versus ImageIO encode `403ms`; app launch to PNG on the pasteboard `6.10-6.32s -> 3.50-3.70s`. Old and new app outputs have identical palette and scanlines (`1,973,376 -> 1,959,158` bytes).
+- Encoder evidence on the reference scanline stream (31.4 MB): system zlib level 9 memLevel 5 `1777ms`, zlib-rs level 9 `497ms`, libdeflate level 9 `224ms` (+2.3% size), zlib-rs level 9 in 256 KiB dictionary-primed parallel pieces `76ms` at sequential size. Writer output verified scanline-identical to libpng on palette, `tRNS`, 4-bit and truecolor-fallback images; sizes `+0.09%`, `-0.58%`, `-0.24%`, `-0.40%`, `+0.47%`.
+- Gates: build pass; unit 784 executed / 3 skipped / 0 failures; strict 784 executed / 3 skipped / 0 failures; integration 15 executed / 0 failures; fork `cargo test` 4 passed; docs/release/policy validation pass. TSan, snapshot, and frontend performance gates were not run because no search, cleanup, or scrolling code changed.
+
 ## Homebrew Acceptance
 
 Verify all of the following after release publication:

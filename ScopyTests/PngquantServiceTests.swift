@@ -1,4 +1,6 @@
+import CoreGraphics
 import Foundation
+import ImageIO
 import XCTest
 
 @testable import ScopyKit
@@ -23,7 +25,7 @@ final class PngquantServiceTests: XCTestCase {
         try super.tearDownWithError()
     }
 
-    func testStdinModeTimesOutWithoutPipeDeadlock() throws {
+    func testDataModeTimesOutWithoutDeadlock() throws {
         let binary = try makeExecutable(
             named: "hang-stdin",
             script: Self.hangingScript
@@ -110,23 +112,98 @@ final class PngquantServiceTests: XCTestCase {
         XCTAssertLessThan(Date().timeIntervalSince(cancelledAt), 2)
     }
 
-    func testLargeStderrDoesNotBlockSuccessfulStdoutCollection() throws {
+    func testLargeStderrDoesNotBlockSuccessfulOutputCollection() throws {
         let binary = try makeExecutable(
             named: "large-stderr",
             script: """
             #!/bin/sh
-            /bin/cat >/dev/null
+            output=""
+            while [ "$#" -gt 0 ]; do
+                if [ "$1" = "--output" ]; then
+                    shift
+                    output="$1"
+                fi
+                shift
+            done
             /usr/bin/head -c 262144 /dev/zero >&2
-            /usr/bin/printf '\\211PNG\\r\\n\\032\\n'
+            /usr/bin/printf '\\211PNG\\r\\n\\032\\n' > "$output"
             """
         )
-
         let output = try PngquantService.compressPNGData(
             Self.pngData,
             options: options(binary: binary, timeout: 2)
         )
-
         XCTAssertEqual(output, Data(Self.pngData.prefix(8)))
+    }
+
+    func testDataModePassesInputFileAndCollectsOutputFile() throws {
+        let binary = try makeExecutable(
+            named: "copy-input",
+            script: """
+            #!/bin/sh
+            output=""
+            input=""
+            while [ "$#" -gt 0 ]; do
+                case "$1" in
+                    --output) shift; output="$1" ;;
+                    --) shift; input="$1" ;;
+                esac
+                shift
+            done
+            /bin/cp "$input" "$output"
+            """
+        )
+        let output = try PngquantService.compressPNGData(
+            Self.pngData,
+            options: options(binary: binary, timeout: 2)
+        )
+        XCTAssertEqual(output, Self.pngData)
+    }
+
+    func testPAMHeaderAlignsPixelRows() {
+        for (width, height) in [(1, 1), (2160, 29511), (1_000_000, 7)] {
+            let header = PngquantService.pamHeader(width: width, height: height)
+            XCTAssertEqual(header.count % 64, 0, "\(width)x\(height)")
+            let text = String(decoding: header, as: UTF8.self)
+            XCTAssertTrue(text.hasPrefix("P7\nWIDTH \(width)\nHEIGHT \(height)\nDEPTH 4\nMAXVAL 255\nTUPLTYPE RGB_ALPHA\n#"))
+            XCTAssertTrue(text.hasSuffix("\nENDHDR\n"))
+        }
+    }
+
+    func testWritePAMFlattensBitmapOnWhite() throws {
+        let image = try Self.makeTestImage(width: 5, height: 3)
+        let url = directory.appendingPathComponent("bitmap.pam")
+        try PngquantService.writePAM(image, to: url)
+        let file = try Data(contentsOf: url)
+        let header = PngquantService.pamHeader(width: 5, height: 3)
+        XCTAssertEqual(file.prefix(header.count), header)
+        XCTAssertEqual(file.count, header.count + 5 * 3 * 4)
+        let pixels = [UInt8](file.suffix(from: header.count))
+        // Row 0 (top) is opaque red, row 1 is 50% transparent blue flattened on white, row 2 is fully transparent.
+        XCTAssertEqual(Array(pixels[0..<4]), [255, 0, 0, 255])
+        let blended = Array(pixels[(5 * 4)..<(5 * 4 + 4)])
+        XCTAssertEqual(blended[2], 255)
+        XCTAssertEqual(blended[3], 255)
+        XCTAssertEqual(Int(blended[0]), 128, accuracy: 1)
+        XCTAssertEqual(Int(blended[1]), 128, accuracy: 1)
+        XCTAssertEqual(Array(pixels[(10 * 4)..<(10 * 4 + 4)]), [255, 255, 255, 255])
+    }
+
+    func testBitmapRoundTripsThroughBundledPngquant() throws {
+        let bundled = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("Scopy/Resources/Tools/pngquant")
+        try XCTSkipUnless(FileManager.default.isExecutableFile(atPath: bundled.path), "bundled pngquant not present")
+        let image = try Self.makeTestImage(width: 64, height: 48)
+
+        let png = try XCTUnwrap(PngquantService.compressBitmap(image, options: options(binary: bundled, timeout: 10)))
+        XCTAssertTrue(PngquantService.isLikelyPNG(png))
+
+        let source = try XCTUnwrap(CGImageSourceCreateWithData(png as CFData, nil))
+        let decoded = try XCTUnwrap(CGImageSourceCreateImageAtIndex(source, 0, nil))
+        XCTAssertEqual(decoded.width, 64)
+        XCTAssertEqual(decoded.height, 48)
+        XCTAssertEqual(Self.rgba(of: decoded), Self.rgba(of: try Self.flattenedOnWhite(image)))
     }
 
     func testExit98And99PreserveNoChangeSemanticsForStdinAndFileModes() throws {
@@ -281,6 +358,46 @@ final class PngquantServiceTests: XCTestCase {
         Task.detached(priority: .utility) {
             try PngquantService.compressPNGData(pngData, options: options)
         }
+    }
+
+    /// Top third opaque red, middle third half-transparent blue, bottom third fully transparent.
+    private static func makeTestImage(width: Int, height: Int) throws -> CGImage {
+        let ctx = try XCTUnwrap(CGContext(
+            data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: width * 4,
+            space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ))
+        let band = CGFloat(height) / 3
+        let deviceRGB = CGColorSpaceCreateDeviceRGB()
+        ctx.setFillColor(try XCTUnwrap(CGColor(colorSpace: deviceRGB, components: [0, 0, 1, 0.5])))
+        ctx.fill(CGRect(x: 0, y: band, width: CGFloat(width), height: band))
+        ctx.setFillColor(try XCTUnwrap(CGColor(colorSpace: deviceRGB, components: [1, 0, 0, 1])))
+        ctx.fill(CGRect(x: 0, y: 2 * band, width: CGFloat(width), height: band))
+        return try XCTUnwrap(ctx.makeImage())
+    }
+
+    private static func flattenedOnWhite(_ image: CGImage) throws -> CGImage {
+        let ctx = try XCTUnwrap(CGContext(
+            data: nil, width: image.width, height: image.height, bitsPerComponent: 8, bytesPerRow: image.width * 4,
+            space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ))
+        let bounds = CGRect(x: 0, y: 0, width: image.width, height: image.height)
+        ctx.setFillColor(CGColor(red: 1, green: 1, blue: 1, alpha: 1))
+        ctx.fill(bounds)
+        ctx.draw(image, in: bounds)
+        return try XCTUnwrap(ctx.makeImage())
+    }
+
+    private static func rgba(of image: CGImage) -> [UInt8] {
+        var pixels = [UInt8](repeating: 0, count: image.width * image.height * 4)
+        pixels.withUnsafeMutableBytes { buffer in
+            let ctx = CGContext(
+                data: buffer.baseAddress, width: image.width, height: image.height, bitsPerComponent: 8,
+                bytesPerRow: image.width * 4, space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+            )!
+            ctx.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
+        }
+        return pixels
     }
 
     private static let pngData = Data(

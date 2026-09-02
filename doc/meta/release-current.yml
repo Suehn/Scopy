@@ -1,6 +1,6 @@
-version: v0.73.0
+version: v0.74.0
 date: 2026-09-02
-release_doc: doc/releases/history/v0.73.0.md
+release_doc: doc/releases/history/v0.74.0.md
 release_index: doc/releases/README.md
 changelog_file: doc/releases/CHANGELOG.md
 profile_doc: null
@@ -9,18 +9,19 @@ spec_doc: doc/current/product-spec.md
 development_doc: doc/current/development-guide.md
 architecture_doc: doc/current/architecture.md
 last_verified_at: 2026-09-02
-summary: Bundled pngquant engine rebuilt from the maintainer fork, 2.5-4x faster quantization with deterministic output
+summary: Raw bitmap hand-off to pngquant and a parallel PNG writer, export stage 7.5x faster with pixel-identical output
 verification:
   docs_validate: pass
   release_validate: pass
   release_policy: pass
   build: pass
   assets_verify: pass_markdown_preview_assets_verified
-  test_unit: pass_780_executed_3_skipped_0_failures
-  test_strict: pass_780_executed_3_skipped_0_failures
-  test_tsan: not_run_no_swift_source_change
+  test_unit: pass_784_executed_3_skipped_0_failures
+  test_strict: pass_784_executed_3_skipped_0_failures
+  test_tsan: not_run_no_search_cleanup_or_scroll_change
   test_integration: pass_15_executed_0_failures
-  test_performance: not_run_no_swift_source_change
-  snapshot_release: not_run_no_swift_source_change
-  frontend_profile_full: not_run_no_swift_source_change
-  bundled_pngquant: universal_arm64_x86_64_adhoc_signed_version_3_0_4_fork_fddcf09
+  test_performance: not_run_no_search_cleanup_or_scroll_change
+  snapshot_release: not_run_no_search_cleanup_or_scroll_change
+  frontend_profile_full: not_run_no_search_cleanup_or_scroll_change
+  bundled_pngquant: universal_arm64_x86_64_adhoc_signed_version_3_0_4_fork_256e081_engine_fddcf09
+  export_reference: chatgpt_public_copy_200pct_2160x29511_tool_2.05s_to_0.21s_app_6.2s_to_3.6s_pixel_identical

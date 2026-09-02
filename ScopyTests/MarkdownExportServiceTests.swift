@@ -71,11 +71,7 @@ final class MarkdownExportServiceTests: XCTestCase {
         let errorURL = directory.appendingPathComponent("error.txt")
         let outcome = MarkdownExportService.ExportOutcome(
             pngData: pngData,
-            stats: MarkdownExportService.ExportStats(
-                originalPNGBytes: pngData.count,
-                finalPNGBytes: pngData.count,
-                pngquantRequested: false
-            )
+            stats: MarkdownExportService.ExportStats(finalPNGBytes: pngData.count, pngquantApplied: false)
         )
 
         let result = MarkdownExportService.commitRenderedExport(
@@ -116,11 +112,7 @@ final class MarkdownExportServiceTests: XCTestCase {
         let invalidPNG = Data("not-a-png".utf8)
         let outcome = MarkdownExportService.ExportOutcome(
             pngData: invalidPNG,
-            stats: MarkdownExportService.ExportStats(
-                originalPNGBytes: invalidPNG.count,
-                finalPNGBytes: invalidPNG.count,
-                pngquantRequested: false
-            )
+            stats: MarkdownExportService.ExportStats(finalPNGBytes: invalidPNG.count, pngquantApplied: false)
         )
 
         let result = MarkdownExportService.commitRenderedExport(

@@ -665,12 +665,9 @@ struct HistoryItemTextPreviewView: View {
             switch result {
             case .success(let stats):
                 model.exportSuccess = true
-                if let percent = stats.percentSaved {
-                    if percent > 0 {
-                        model.exportSuccessMessage = "Exported PNG (\(exportResolutionLabel), pngquant -\(percent)%)"
-                    } else {
-                        model.exportSuccessMessage = "Exported PNG (\(exportResolutionLabel), pngquant no change)"
-                    }
+                if stats.pngquantApplied {
+                    let size = ByteCountFormatter.string(fromByteCount: Int64(stats.finalPNGBytes), countStyle: .file)
+                    model.exportSuccessMessage = "Exported PNG (\(exportResolutionLabel), pngquant \(size))"
                 } else {
                     model.exportSuccessMessage = "Exported PNG (\(exportResolutionLabel))"
                 }

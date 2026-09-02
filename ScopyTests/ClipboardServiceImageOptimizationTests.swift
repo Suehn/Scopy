@@ -78,10 +78,16 @@ final class ClipboardServiceImageOptimizationTests: XCTestCase {
         let fixture = try await startFixture(
             compressorScript: """
             #!/bin/sh
-            tmp="${TMPDIR:-/tmp}/scopy-pngquant-$$"
-            trap '/bin/rm -f "$tmp"' EXIT
-            /bin/cat > "$tmp"
-            /bin/dd if="$tmp" bs=1 count=8 2>/dev/null
+            output=""
+            input=""
+            while [ "$#" -gt 0 ]; do
+                case "$1" in
+                    --output) shift; output="$1" ;;
+                    --) shift; input="$1" ;;
+                esac
+                shift
+            done
+            /bin/dd if="$input" of="$output" bs=1 count=8 2>/dev/null
             """
         )
         let contentUpdated = expectation(description: "optimized content event")
@@ -120,7 +126,16 @@ final class ClipboardServiceImageOptimizationTests: XCTestCase {
         let fixture = try await startFixture(
             compressorScript: """
             #!/bin/sh
-            /bin/cat
+            output=""
+            input=""
+            while [ "$#" -gt 0 ]; do
+                case "$1" in
+                    --output) shift; output="$1" ;;
+                    --) shift; input="$1" ;;
+                esac
+                shift
+            done
+            /bin/cp "$input" "$output"
             """
         )
 
@@ -139,7 +154,6 @@ final class ClipboardServiceImageOptimizationTests: XCTestCase {
         let fixture = try await startFixture(
             compressorScript: """
             #!/bin/sh
-            /bin/cat >/dev/null
             exit 17
             """
         )
@@ -394,8 +408,17 @@ final class ClipboardServiceImageOptimizationTests: XCTestCase {
         let fixture = try await startFixture(
             compressorScript: """
             #!/bin/sh
+            output=""
+            input=""
+            while [ "$#" -gt 0 ]; do
+                case "$1" in
+                    --output) shift; output="$1" ;;
+                    --) shift; input="$1" ;;
+                esac
+                shift
+            done
             while [ ! -f "$0.admission-continue" ]; do /bin/sleep 0.01; done
-            /bin/dd bs=1 count=8 2>/dev/null
+            /bin/dd if="$input" of="$output" bs=1 count=8 2>/dev/null
             """
         )
         let admissionGateURL = URL(fileURLWithPath: fixture.compressorURL.path + ".admission-continue")
@@ -856,11 +879,20 @@ final class ClipboardServiceImageOptimizationTests: XCTestCase {
 
     nonisolated private static let blockingInlineCompressorScript = """
     #!/bin/sh
+    output=""
+    input=""
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            --output) shift; output="$1" ;;
+            --) shift; input="$1" ;;
+        esac
+        shift
+    done
     ready="$0.ready"
     gate="$0.continue"
     /usr/bin/touch "$ready"
     while [ ! -f "$gate" ]; do /bin/sleep 0.01; done
-    /bin/dd bs=1 count=8 2>/dev/null
+    /bin/dd if="$input" of="$output" bs=1 count=8 2>/dev/null
     """
 
     nonisolated private static let blockingExternalCompressorScript = """
