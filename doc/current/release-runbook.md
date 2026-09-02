@@ -267,7 +267,7 @@ This section records historical `v0.65.4` release evidence for the single previe
 - Launch: short-index cache 2,887 ms (stale plist decoded then rejected) -> 0 ms stale / 55 ms hit; launch CPU 3.3 s -> 0.75 s over the first 12 s; cache file 16.3 MB plist -> 14.7 MB binary. Storage details walk measured at 5 ms on this DB, left as is.
 - Page loads while scrolling (continuous 8 s downward wheel): callback bursts of 25-33 ms per page -> 17 ms (two 120 Hz frames) per chunk, over-threshold ratio 0.065 -> 0.014, with pages prefetched 40 rows ahead.
 - Preview image cache: per-entry cap 96 -> 256 MB, total 160 -> 320 MB, so a tall screenshot's 64 Mpx preview stays cached for its TTL instead of being decoded on every hover; decode quality unchanged.
-- Gates at tag time: unit 791 executed / 3 skipped / 0 failures; docs, release and policy validation pass; strict and the UI subset queued after the tag (the two pre-existing UI failures from v0.76.0 remain); TSan/snapshot/backend not run (no query, cleanup, or storage-schema change).
+- Gates at tag time: unit 791 executed / 3 skipped / 0 failures; docs, release and policy validation pass; strict 791 / 3 / 0 after the tag; UI subset 29 passed, 3 failed (unchanged from v0.77.1); TSan/snapshot/backend not run (no query, cleanup, or storage-schema change).
 
 ## Homebrew Acceptance
 
