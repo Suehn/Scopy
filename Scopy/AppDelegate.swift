@@ -420,6 +420,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         } else if env["SCOPY_UITEST_FORCE_PNGQUANT_MARKDOWN_EXPORT"] != nil {
             settings.pngquantMarkdownExportEnabled = true
         }
+        if env["SCOPY_UITEST_PNGQUANT_EXPORT_DEFAULTS"] == "1" {
+            let defaults = SettingsDTO.default
+            settings.pngquantMarkdownExportQualityMin = defaults.pngquantMarkdownExportQualityMin
+            settings.pngquantMarkdownExportQualityMax = defaults.pngquantMarkdownExportQualityMax
+            settings.pngquantMarkdownExportSpeed = defaults.pngquantMarkdownExportSpeed
+            settings.pngquantMarkdownExportColors = defaults.pngquantMarkdownExportColors
+        }
         return settings
     }
 

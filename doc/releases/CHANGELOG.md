@@ -12,6 +12,18 @@
 
 - No unreleased entries.
 
+## [v0.75.0] - 2026-09-02
+
+### Changed
+
+- Markdown/LaTeX export waits for layout with a page-side animation-frame watcher (settled = two frames since the last change and three unchanged frames, render readiness still required) instead of fixed 0.45 s / 0.2 s / 120 ms / 80 ms / 70 ms sleeps; wide-content adjustment retries three times instead of until the deadline.
+- The export canvas is a preallocated, memory-mapped PAM file for every path (PDF raster, single snapshot, tiled); the bitmap is drawn once, trimmed in place, and mapped by `pngquant`. The single-snapshot path draws the scaled snapshot in parallel bands. `PngquantService.compressPAMFile` replaces the bitmap hand-off.
+- Export compression defaults are speed 3, 256 colors, quality 80-95 (saved settings are untouched). UI-test auto-export can force the code defaults with `SCOPY_UITEST_PNGQUANT_EXPORT_DEFAULTS=1`; export stage transitions are logged.
+
+### Performance
+
+- Total export from launch on the reference fixtures: `3.57 -> 2.05 s`, `2.55 -> 1.40 s`, `2.27 -> 1.14 s`, `3.07 -> 2.02 s`, and `14.24 -> 8.73 s` for the 298-megapixel tiled page, with byte-identical outputs at the same settings. Post-load work at the new defaults: `0.45-0.86 s` on 19-64-megapixel pages.
+
 ## [v0.74.0] - 2026-09-02
 
 ### Changed

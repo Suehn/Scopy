@@ -190,24 +190,6 @@ final class MarkdownExportServiceTests: XCTestCase {
         XCTAssertEqual(currentBudget, expectedBudget, accuracy: 0.5)
     }
 
-    func testDebugUsesFileBackedBitmapOnceExportExceedsPreviousInMemoryBudget() {
-        let width = Int(MarkdownExportService.defaultTargetWidthPixels)
-        let previousMaxInMemoryHeight = Int(floor(60_000_000 / CGFloat(width)))
-
-        XCTAssertFalse(
-            MarkdownExportService.debugUsesFileBackedBitmap(
-                widthPixels: width,
-                heightPixels: previousMaxInMemoryHeight
-            )
-        )
-        XCTAssertTrue(
-            MarkdownExportService.debugUsesFileBackedBitmap(
-                widthPixels: width,
-                heightPixels: previousMaxInMemoryHeight + 1
-            )
-        )
-    }
-
     func testDebugBypassesPDFForVeryTallContent() {
         XCTAssertFalse(MarkdownExportService.debugShouldBypassPDFForVeryTallContent(heightPoints: 14_400))
         XCTAssertTrue(MarkdownExportService.debugShouldBypassPDFForVeryTallContent(heightPoints: 14_401))

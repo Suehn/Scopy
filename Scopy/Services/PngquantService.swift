@@ -1,4 +1,3 @@
-import CoreGraphics
 import Darwin
 import Foundation
 import os
@@ -53,7 +52,6 @@ public enum PngquantService {
         case timedOut(timeoutSeconds: TimeInterval)
         case cancelled
         case failed(exitCode: Int32, stderr: String)
-        case invalidBitmap(width: Int, height: Int)
 
         var errorDescription: String? {
             switch self {
@@ -70,8 +68,6 @@ public enum PngquantService {
                     return "pngquant failed with exit code \(exitCode)"
                 }
                 return "pngquant failed with exit code \(exitCode): \(stderr)"
-            case .invalidBitmap(let width, let height):
-                return "pngquant cannot encode a \(width)x\(height) bitmap"
             }
         }
     }
@@ -158,27 +154,22 @@ public enum PngquantService {
         throw PngquantError.failed(exitCode: exit, stderr: stderrText(result.stderr))
     }
 
-    /// Quantizes a bitmap without an intermediate PNG: the pixels are handed to pngquant as a raw
-    /// RGBA PAM file, which it maps directly. Returns `nil` when pngquant cannot reach the quality
-    /// window, in which case the caller encodes the bitmap itself.
-    static func compressBitmap(_ image: CGImage, options: Options) throws -> Data? {
+    /// Quantizes a raw RGBA PAM file (see `pamHeader`), which pngquant maps directly instead of decoding a PNG.
+    /// Returns `nil` when pngquant cannot reach the quality window, in which case the caller encodes the pixels itself.
+    static func compressPAMFile(_ inputURL: URL, options: Options) throws -> Data? {
         let binary = try resolveBinaryPath(preferredPath: options.binaryPath)
         let io = try ScratchDirectory()
-        let inputURL = io.url.appendingPathComponent("input.pam")
         let outputURL = io.url.appendingPathComponent("output.png")
-        let startedAt = DispatchTime.now().uptimeNanoseconds
-        try writePAM(image, to: inputURL)
-        let pamWrittenAt = DispatchTime.now().uptimeNanoseconds
 
+        let startedAt = DispatchTime.now().uptimeNanoseconds
         let result = try runProcess(
             executablePath: binary,
             arguments: options.baseArguments + ["--output", outputURL.path, options.colorArgument, "--", inputURL.path],
             stderrURL: io.url.appendingPathComponent("stderr"),
             timeoutSeconds: options.processTimeoutSeconds
         )
-        let toolFinishedAt = DispatchTime.now().uptimeNanoseconds
         logger.info(
-            "pngquant bitmap \(image.width, privacy: .public)x\(image.height, privacy: .public): hand-off \(Double(pamWrittenAt &- startedAt) / 1_000_000, format: .fixed(precision: 1), privacy: .public) ms, tool \(Double(toolFinishedAt &- pamWrittenAt) / 1_000_000, format: .fixed(precision: 1), privacy: .public) ms, exit \(result.terminationStatus, privacy: .public)"
+            "pngquant PAM \(inputURL.lastPathComponent, privacy: .public): tool \(Double(DispatchTime.now().uptimeNanoseconds &- startedAt) / 1_000_000, format: .fixed(precision: 1), privacy: .public) ms, exit \(result.terminationStatus, privacy: .public)"
         )
 
         let exit = result.terminationStatus
@@ -249,75 +240,17 @@ public enum PngquantService {
 
     // MARK: - Raw bitmap hand-off
 
-    /// Bytes of the PAM header written before the pixels; padded so the pixel rows start on a
-    /// 64-byte boundary, which keeps Core Graphics on its fast blit path.
+    /// Byte length of every PAM header `pamHeader` produces, so pixel rows start at a fixed, 64-byte-aligned offset
+    /// and a header can be rewritten in place when the image is trimmed.
+    static let pamHeaderLength = 128
+
+    /// PAM (`P7`) header for 8-bit straight-alpha RGBA pixels, padded with a comment line to `pamHeaderLength` bytes.
     static func pamHeader(width: Int, height: Int) -> Data {
         let fields = "P7\nWIDTH \(width)\nHEIGHT \(height)\nDEPTH 4\nMAXVAL 255\nTUPLTYPE RGB_ALPHA\n"
         let trailer = "ENDHDR\n"
-        let minimalLength = fields.utf8.count + 2 + trailer.utf8.count // "#\n" comment carries the padding
-        let padding = (64 - minimalLength % 64) % 64
+        let padding = pamHeaderLength - fields.utf8.count - 2 - trailer.utf8.count // "#" + spaces + "\n"
+        precondition(padding >= 0, "PAM header does not fit \(width)x\(height)")
         return Data((fields + "#" + String(repeating: " ", count: padding) + "\n" + trailer).utf8)
-    }
-
-    /// Flattens `image` on white into an 8-bit RGBA PAM file at `url`. The file is preallocated and
-    /// memory-mapped so the bitmap is drawn straight into the page cache without a second copy.
-    static func writePAM(_ image: CGImage, to url: URL) throws {
-        let width = image.width
-        let height = image.height
-        let header = pamHeader(width: width, height: height)
-        let (rowBytes, rowOverflow) = width.multipliedReportingOverflow(by: 4)
-        let (pixelBytes, pixelOverflow) = rowBytes.multipliedReportingOverflow(by: height)
-        guard width > 0, height > 0, !rowOverflow, !pixelOverflow, pixelBytes <= Int(Int32.max) * 4 else {
-            throw PngquantError.invalidBitmap(width: width, height: height)
-        }
-        let totalBytes = header.count + pixelBytes
-
-        let fd = open(url.path, O_RDWR | O_CREAT | O_TRUNC, 0o600)
-        guard fd >= 0 else { throw posixError("open") }
-        defer { close(fd) }
-
-        // Reserve the blocks up front so a full disk surfaces here as an error instead of a SIGBUS while drawing.
-        var store = fstore_t(
-            fst_flags: UInt32(F_ALLOCATEALL),
-            fst_posmode: F_PEOFPOSMODE,
-            fst_offset: 0,
-            fst_length: off_t(totalBytes),
-            fst_bytesalloc: 0
-        )
-        guard fcntl(fd, F_PREALLOCATE, &store) != -1 else { throw posixError("preallocate") }
-        guard ftruncate(fd, off_t(totalBytes)) == 0 else { throw posixError("ftruncate") }
-
-        guard let base = mmap(nil, totalBytes, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0), base != MAP_FAILED else {
-            throw posixError("mmap")
-        }
-        defer { munmap(base, totalBytes) }
-
-        header.withUnsafeBytes { bytes in
-            base.copyMemory(from: bytes.baseAddress!, byteCount: bytes.count)
-        }
-        guard let context = CGContext(
-            data: base.advanced(by: header.count),
-            width: width,
-            height: height,
-            bitsPerComponent: 8,
-            bytesPerRow: rowBytes,
-            space: CGColorSpaceCreateDeviceRGB(),
-            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-        ) else {
-            throw PngquantError.invalidBitmap(width: width, height: height)
-        }
-        let bounds = CGRect(x: 0, y: 0, width: CGFloat(width), height: CGFloat(height))
-        context.setFillColor(CGColor(red: 1, green: 1, blue: 1, alpha: 1))
-        context.fill(bounds)
-        context.draw(image, in: bounds)
-    }
-
-    private static func posixError(_ operation: String, code: Int32 = errno) -> NSError {
-        NSError(
-            domain: NSPOSIXErrorDomain,
-            code: Int(code),
-            userInfo: [NSLocalizedDescriptionKey: "\(operation) failed: \(String(cString: strerror(code)))"]
-        )
     }
 
     private static func replaceFileAtomically(
@@ -438,12 +371,12 @@ public enum PngquantService {
         }
     }
 
-    /// Quantizes a bitmap, or returns `nil` when pngquant declined or failed so the caller can encode it itself.
-    public static func compressBitmapBestEffort(_ image: CGImage, options: Options) -> Data? {
+    /// Quantizes a PAM file, or returns `nil` when pngquant declined or failed so the caller can encode the pixels itself.
+    public static func compressPAMFileBestEffort(_ inputURL: URL, options: Options) -> Data? {
         do {
-            return try compressBitmap(image, options: options)
+            return try compressPAMFile(inputURL, options: options)
         } catch {
-            logger.warning("pngquant bitmap skipped: \(error.localizedDescription, privacy: .public)")
+            logger.warning("pngquant PAM skipped: \(error.localizedDescription, privacy: .public)")
             return nil
         }
     }

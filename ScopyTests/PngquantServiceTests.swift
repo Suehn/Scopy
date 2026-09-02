@@ -160,50 +160,36 @@ final class PngquantServiceTests: XCTestCase {
         XCTAssertEqual(output, Self.pngData)
     }
 
-    func testPAMHeaderAlignsPixelRows() {
+    func testPAMHeaderHasFixedLengthAndParsableFields() {
         for (width, height) in [(1, 1), (2160, 29511), (1_000_000, 7)] {
             let header = PngquantService.pamHeader(width: width, height: height)
-            XCTAssertEqual(header.count % 64, 0, "\(width)x\(height)")
+            XCTAssertEqual(header.count, PngquantService.pamHeaderLength, "\(width)x\(height)")
             let text = String(decoding: header, as: UTF8.self)
             XCTAssertTrue(text.hasPrefix("P7\nWIDTH \(width)\nHEIGHT \(height)\nDEPTH 4\nMAXVAL 255\nTUPLTYPE RGB_ALPHA\n#"))
             XCTAssertTrue(text.hasSuffix("\nENDHDR\n"))
         }
     }
 
-    func testWritePAMFlattensBitmapOnWhite() throws {
-        let image = try Self.makeTestImage(width: 5, height: 3)
-        let url = directory.appendingPathComponent("bitmap.pam")
-        try PngquantService.writePAM(image, to: url)
-        let file = try Data(contentsOf: url)
-        let header = PngquantService.pamHeader(width: 5, height: 3)
-        XCTAssertEqual(file.prefix(header.count), header)
-        XCTAssertEqual(file.count, header.count + 5 * 3 * 4)
-        let pixels = [UInt8](file.suffix(from: header.count))
-        // Row 0 (top) is opaque red, row 1 is 50% transparent blue flattened on white, row 2 is fully transparent.
-        XCTAssertEqual(Array(pixels[0..<4]), [255, 0, 0, 255])
-        let blended = Array(pixels[(5 * 4)..<(5 * 4 + 4)])
-        XCTAssertEqual(blended[2], 255)
-        XCTAssertEqual(blended[3], 255)
-        XCTAssertEqual(Int(blended[0]), 128, accuracy: 1)
-        XCTAssertEqual(Int(blended[1]), 128, accuracy: 1)
-        XCTAssertEqual(Array(pixels[(10 * 4)..<(10 * 4 + 4)]), [255, 255, 255, 255])
-    }
-
-    func testBitmapRoundTripsThroughBundledPngquant() throws {
+    func testPAMFileRoundTripsThroughBundledPngquant() throws {
         let bundled = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent()
             .appendingPathComponent("Scopy/Resources/Tools/pngquant")
         try XCTSkipUnless(FileManager.default.isExecutableFile(atPath: bundled.path), "bundled pngquant not present")
-        let image = try Self.makeTestImage(width: 64, height: 48)
+        let image = try Self.flattenedOnWhite(try Self.makeTestImage(width: 64, height: 48))
+        let pixels = Self.rgba(of: image)
+        var pam = PngquantService.pamHeader(width: 64, height: 48)
+        pam.append(contentsOf: pixels)
+        let url = directory.appendingPathComponent("bitmap.pam")
+        try pam.write(to: url)
 
-        let png = try XCTUnwrap(PngquantService.compressBitmap(image, options: options(binary: bundled, timeout: 10)))
+        let png = try XCTUnwrap(PngquantService.compressPAMFile(url, options: options(binary: bundled, timeout: 10)))
         XCTAssertTrue(PngquantService.isLikelyPNG(png))
 
         let source = try XCTUnwrap(CGImageSourceCreateWithData(png as CFData, nil))
         let decoded = try XCTUnwrap(CGImageSourceCreateImageAtIndex(source, 0, nil))
         XCTAssertEqual(decoded.width, 64)
         XCTAssertEqual(decoded.height, 48)
-        XCTAssertEqual(Self.rgba(of: decoded), Self.rgba(of: try Self.flattenedOnWhite(image)))
+        XCTAssertEqual(Self.rgba(of: decoded), pixels)
     }
 
     func testExit98And99PreserveNoChangeSemanticsForStdinAndFileModes() throws {

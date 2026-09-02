@@ -230,6 +230,15 @@ This section records historical `v0.65.4` release evidence for the single previe
 - Encoder evidence on the reference scanline stream (31.4 MB): system zlib level 9 memLevel 5 `1777ms`, zlib-rs level 9 `497ms`, libdeflate level 9 `224ms` (+2.3% size), zlib-rs level 9 in 256 KiB dictionary-primed parallel pieces `76ms` at sequential size. Writer output verified scanline-identical to libpng on palette, `tRNS`, 4-bit and truecolor-fallback images; sizes `+0.09%`, `-0.58%`, `-0.24%`, `-0.40%`, `+0.47%`.
 - Gates: build pass; unit 784 executed / 3 skipped / 0 failures; strict 784 executed / 3 skipped / 0 failures; integration 15 executed / 0 failures; fork `cargo test` 4 passed; docs/release/policy validation pass. TSan, snapshot, and frontend performance gates were not run because no search, cleanup, or scrolling code changed.
 
+## Export Settle And Canvas Release Evidence (v0.75.0, 2026-09-02)
+
+- Environment: Apple M3 Pro (5 performance + 6 efficiency cores), 36GB, arm64, macOS 15.7.3 (`24G419`), Xcode 26.1.1 (`17B100`), project Swift 5.9, deployment target macOS 14.0; Debug build driven through `SCOPY_UITEST_AUTO_EXPORT_MARKDOWN` with `/usr/bin/log show --info` stage timestamps (note: zsh shadows `log` with a builtin; call `/usr/bin/log`).
+- Deployment semantics: no bundled-tool change (`pngquant` as in v0.74.0). Export waits are animation-frame driven (`layoutWatcherJS`, polled every 8 ms); the export canvas is a preallocated mmapped PAM file (128-byte header) that pngquant maps; defaults speed 3 / 256 colors / quality 80-95.
+- Fixture exports at the maintainer's saved settings (speed 1, 16 colors, 0-70), launch-to-PNG, v0.74.0 vs v0.75.0: chatgpt_public_copy 200% `3.57 -> 2.05s`, 100% `2.55 -> 1.40s`; rich_markdown 200% `2.27 -> 1.14s`; chatgpt_rich_surfaces 200% `3.07 -> 2.02s`; user_markdown_stress 200% (tiled, 2160x138038) `14.24 -> 8.73s`; all five outputs byte-identical. Stage detail on the 200% reference: prepareLayout `1.15 -> 0.14s`, applyScale `0.15 -> 0.07s`, snapshotOnce `0.22 -> 0.14s`, snapshot-to-canvas draw `0.31 -> 0.07s`.
+- Post-load work at the new defaults: chatgpt_public_copy 200% `0.79s` (launch-to-PNG `1.51s`), 100% `0.65s`; rich_markdown 200% `0.45s`; chatgpt_rich_surfaces 200% `0.86s`.
+- Banded snapshot draw vs single draw on 63.7 Mpx: 206 pixels in one row differ (max channel diff 27), identical set for 256/1024-row bands with or without 16-row overlap.
+- Gates: build pass; unit 782 executed / 3 skipped / 0 failures; strict 782 executed / 3 skipped / 0 failures; integration 15 executed / 0 failures; docs/release/policy validation pass. TSan, snapshot, and frontend performance gates not run: no search, cleanup, or scrolling code changed.
+
 ## Homebrew Acceptance
 
 Verify all of the following after release publication:

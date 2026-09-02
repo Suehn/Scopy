@@ -333,10 +333,6 @@ public enum MarkdownExportService {
         MarkdownExportRenderConstants.maxSupportedHeightPixels(for: targetWidthPixels)
     }
 
-    static func debugUsesFileBackedBitmap(widthPixels: Int, heightPixels: Int) -> Bool {
-        ExportBitmapCanvas.shouldUseFileBackedBitmap(width: widthPixels, height: heightPixels)
-    }
-
     static func debugShouldBypassPDFForVeryTallContent(heightPoints: CGFloat) -> Bool {
         MarkdownExportRenderConstants.shouldBypassPDFForHeight(heightPoints)
     }
@@ -443,81 +439,97 @@ private enum MarkdownExportRenderConstants {
     static let minAllowedGlobalScale: CGFloat = 0.02
 }
 
+/// The export bitmap is a PAM (`P7`, 8-bit `RGB_ALPHA`) file in a private temporary directory whose pixel rows are
+/// memory-mapped: every export path draws straight into the file pngquant maps afterwards, so the pixels are never
+/// copied. The header occupies a fixed-size region so the height can be rewritten in place after trimming.
 private final class ExportBitmapStorage {
-    let pointer: UnsafeMutableRawPointer
-    let length: Int
+    let directoryURL: URL
+    let fileURL: URL
+    /// Start of the pixel rows inside the mapping.
+    let pixels: UnsafeMutableRawPointer
+    private let mapping: UnsafeMutableRawPointer
+    private let mappingLength: Int
     private let fileDescriptor: Int32
 
-    private init(pointer: UnsafeMutableRawPointer, length: Int, fileDescriptor: Int32) {
-        self.pointer = pointer
-        self.length = length
+    private init(
+        directoryURL: URL,
+        fileURL: URL,
+        mapping: UnsafeMutableRawPointer,
+        mappingLength: Int,
+        headerLength: Int,
+        fileDescriptor: Int32
+    ) {
+        self.directoryURL = directoryURL
+        self.fileURL = fileURL
+        self.mapping = mapping
+        self.mappingLength = mappingLength
+        self.pixels = mapping.advanced(by: headerLength)
         self.fileDescriptor = fileDescriptor
     }
 
     deinit {
-        munmap(pointer, length)
+        munmap(mapping, mappingLength)
         close(fileDescriptor)
+        try? FileManager.default.removeItem(at: directoryURL)
     }
 
-    static func createMapped(length: Int) throws -> ExportBitmapStorage {
-        guard length > 0 else {
-            throw NSError(
-                domain: NSPOSIXErrorDomain,
-                code: Int(EINVAL),
-                userInfo: [NSLocalizedDescriptionKey: "Invalid bitmap length: \(length)"]
-            )
+    static func create(width: Int, height: Int, pixelBytes: Int) throws -> ExportBitmapStorage {
+        guard pixelBytes > 0 else {
+            throw posixError(operation: "size", code: EINVAL)
         }
-
-        var template = Array(
-            FileManager.default.temporaryDirectory
-                .appendingPathComponent("scopy-markdown-export-XXXXXX")
-                .path
-                .utf8CString
+        let header = PngquantService.pamHeader(width: width, height: height)
+        let totalLength = header.count + pixelBytes
+        let directoryURL = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "scopy-markdown-export-\(UUID().uuidString)",
+            isDirectory: true
         )
-        let fd = mkstemp(&template)
-        guard fd >= 0 else {
-            throw posixError(operation: "mkstemp")
+        try FileManager.default.createDirectory(at: directoryURL, withIntermediateDirectories: true)
+        let fileURL = directoryURL.appendingPathComponent("export.pam")
+
+        func fail(_ operation: String, fd: Int32?) -> NSError {
+            let error = posixError(operation: operation)
+            if let fd { close(fd) }
+            try? FileManager.default.removeItem(at: directoryURL)
+            return error
         }
 
-        let unlinkResult = template.withUnsafeMutableBufferPointer { buffer in
-            unlink(buffer.baseAddress)
+        let fd = open(fileURL.path, O_RDWR | O_CREAT | O_TRUNC, 0o600)
+        guard fd >= 0 else { throw fail("open", fd: nil) }
+        // Reserve the blocks up front so a full disk surfaces here as an error instead of a fault while drawing.
+        var store = fstore_t(
+            fst_flags: UInt32(F_ALLOCATEALL),
+            fst_posmode: F_PEOFPOSMODE,
+            fst_offset: 0,
+            fst_length: off_t(totalLength),
+            fst_bytesalloc: 0
+        )
+        guard fcntl(fd, F_PREALLOCATE, &store) != -1 else { throw fail("preallocate", fd: fd) }
+        guard ftruncate(fd, off_t(totalLength)) == 0 else { throw fail("ftruncate", fd: fd) }
+        guard let mapping = mmap(nil, totalLength, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0), mapping != MAP_FAILED else {
+            throw fail("mmap", fd: fd)
         }
-        if unlinkResult != 0 {
-            close(fd)
-            throw posixError(operation: "unlink")
+        header.withUnsafeBytes { bytes in
+            mapping.copyMemory(from: bytes.baseAddress!, byteCount: bytes.count)
         }
-
-        guard ftruncate(fd, off_t(length)) == 0 else {
-            let error = posixError(operation: "ftruncate")
-            close(fd)
-            throw error
-        }
-
-        let mapped = mmap(nil, length, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0)
-        guard mapped != MAP_FAILED, let mapped else {
-            let error = posixError(operation: "mmap")
-            close(fd)
-            throw error
-        }
-
-        return ExportBitmapStorage(pointer: mapped, length: length, fileDescriptor: fd)
+        return ExportBitmapStorage(
+            directoryURL: directoryURL,
+            fileURL: fileURL,
+            mapping: mapping,
+            mappingLength: totalLength,
+            headerLength: header.count,
+            fileDescriptor: fd
+        )
     }
 
-    func makeDataProvider() -> CGDataProvider? {
-        let retainedSelf = Unmanaged.passRetained(self)
-        guard let provider = CGDataProvider(
-            dataInfo: retainedSelf.toOpaque(),
-            data: pointer,
-            size: length,
-            releaseData: { info, _, _ in
-                guard let info else { return }
-                Unmanaged<ExportBitmapStorage>.fromOpaque(info).release()
-            }
-        ) else {
-            retainedSelf.release()
-            return nil
+    /// Rewrites the header for the final dimensions and drops any rows past them.
+    func finalize(width: Int, height: Int, pixelBytes: Int) throws {
+        let header = PngquantService.pamHeader(width: width, height: height)
+        header.withUnsafeBytes { bytes in
+            mapping.copyMemory(from: bytes.baseAddress!, byteCount: bytes.count)
         }
-        return provider
+        guard ftruncate(fileDescriptor, off_t(header.count + pixelBytes)) == 0 else {
+            throw Self.posixError(operation: "ftruncate")
+        }
     }
 
     private static func posixError(operation: String, code: Int32 = errno) -> NSError {
@@ -529,36 +541,33 @@ private final class ExportBitmapStorage {
     }
 }
 
-private final class ExportBitmapCanvas {
+private final class ManagedAtomic: @unchecked Sendable {
+    private var value: Bool
+    private let lock = NSLock()
+    init(_ value: Bool) { self.value = value }
+    func set(_ newValue: Bool) { lock.lock(); value = newValue; lock.unlock() }
+    func get() -> Bool { lock.lock(); defer { lock.unlock() }; return value }
+}
+
+/// A white-background RGBA8 drawing surface backed by `ExportBitmapStorage`. Rows are stored top-down.
+private final class ExportBitmapCanvas: @unchecked Sendable {
     let context: CGContext
+    let width: Int
+    private(set) var height: Int
     let bytesPerRow: Int
-    let dataPointer: UnsafeMutableRawPointer?
+    let pixels: UnsafeMutableRawPointer
+    private let storage: ExportBitmapStorage
 
-    private let width: Int
-    private let height: Int
-    private let storage: ExportBitmapStorage?
-
-    private init(
-        context: CGContext,
-        width: Int,
-        height: Int,
-        bytesPerRow: Int,
-        dataPointer: UnsafeMutableRawPointer?,
-        storage: ExportBitmapStorage?
-    ) {
+    private init(context: CGContext, width: Int, height: Int, bytesPerRow: Int, storage: ExportBitmapStorage) {
         self.context = context
         self.width = width
         self.height = height
         self.bytesPerRow = bytesPerRow
-        self.dataPointer = dataPointer
+        self.pixels = storage.pixels
         self.storage = storage
     }
 
-    static func shouldUseFileBackedBitmap(width: Int, height: Int) -> Bool {
-        guard width > 0, height > 0 else { return false }
-        let totalPixels = CGFloat(width) * CGFloat(height)
-        return totalPixels > MarkdownExportRenderConstants.maxInMemoryBitmapPixels + 0.5
-    }
+    var fileURL: URL { storage.fileURL }
 
     static func make(
         width: Int,
@@ -577,79 +586,146 @@ private final class ExportBitmapCanvas {
             )
         }
 
-        let colorSpace = CGColorSpaceCreateDeviceRGB()
-        let bitmapInfo = CGImageAlphaInfo.premultipliedLast.rawValue
-
-        if shouldUseFileBackedBitmap(width: width, height: height) {
-            let storage: ExportBitmapStorage
-            do {
-                storage = try ExportBitmapStorage.createMapped(length: bufferLength)
-            } catch {
-                throw MarkdownExportService.ExportError.stageFailed(stage: stage, underlying: error)
-            }
-
-            guard let context = CGContext(
-                data: storage.pointer,
-                width: width,
-                height: height,
-                bitsPerComponent: 8,
-                bytesPerRow: bytesPerRow,
-                space: colorSpace,
-                bitmapInfo: bitmapInfo
-            ) else {
-                throw MarkdownExportService.ExportError.stageFailed(stage: stage, underlying: nil)
-            }
-
-            return ExportBitmapCanvas(
-                context: context,
-                width: width,
-                height: height,
-                bytesPerRow: bytesPerRow,
-                dataPointer: storage.pointer,
-                storage: storage
-            )
+        let storage: ExportBitmapStorage
+        do {
+            storage = try ExportBitmapStorage.create(width: width, height: height, pixelBytes: bufferLength)
+        } catch {
+            throw MarkdownExportService.ExportError.stageFailed(stage: stage, underlying: error)
         }
 
         guard let context = CGContext(
-            data: nil,
+            data: storage.pixels,
             width: width,
             height: height,
             bitsPerComponent: 8,
             bytesPerRow: bytesPerRow,
-            space: colorSpace,
-            bitmapInfo: bitmapInfo
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
         ) else {
             throw MarkdownExportService.ExportError.stageFailed(stage: stage, underlying: nil)
         }
 
-        return ExportBitmapCanvas(
-            context: context,
-            width: width,
-            height: height,
-            bytesPerRow: bytesPerRow,
-            dataPointer: context.data,
-            storage: nil
-        )
+        return ExportBitmapCanvas(context: context, width: width, height: height, bytesPerRow: bytesPerRow, storage: storage)
+    }
+
+    /// Drops blank rows at the top of the buffer beyond a 40-pixel margin. The export background is forced to white,
+    /// so over-measured content height shows up as blank rows; this keeps the crop the export has always applied.
+    func trimBlankLeadingRowsIfNeeded() {
+        let w = width
+        let h = height
+        guard w > 0, h > 0, bytesPerRow > 0 else { return }
+        let buffer = pixels.assumingMemoryBound(to: UInt8.self)
+        let sampleStepX = 8
+        let skipRightPixels = min(24, max(0, w / 24))
+        let whiteThreshold: UInt8 = 250
+
+        func rowIsMostlyWhite(_ y: Int) -> Bool {
+            let start = y * bytesPerRow
+            var darkCount = 0
+            var sampleCount = 0
+            var x = 0
+            let maxX = max(0, w - skipRightPixels)
+            while x < maxX {
+                let idx = start + x * 4
+                if idx + 2 < bytesPerRow * h {
+                    let r = buffer[idx]
+                    let g = buffer[idx + 1]
+                    let b = buffer[idx + 2]
+                    if r < whiteThreshold || g < whiteThreshold || b < whiteThreshold {
+                        darkCount += 1
+                    }
+                    sampleCount += 1
+                }
+                x += sampleStepX
+            }
+            // Treat a row as "white" if it contains at most a handful of non-white samples (anti-aliasing noise).
+            return darkCount <= max(6, sampleCount / 180)
+        }
+
+        var firstContentRow: Int?
+        for y in 0..<h where !rowIsMostlyWhite(y) {
+            firstContentRow = y
+            break
+        }
+        guard let firstContentRow else { return }
+        // Keep a small margin (in pixels) so content doesn't touch the edge.
+        let margin = min(40, max(0, h - 1))
+        let dropRows = max(0, firstContentRow - margin)
+        let remainingRows = h - dropRows
+        guard dropRows > 0, remainingRows > 0 else { return }
+        memmove(pixels, pixels.advanced(by: dropRows * bytesPerRow), remainingRows * bytesPerRow)
+        height = remainingRows
+    }
+
+    /// Runs `draw` once per horizontal band on separate threads. Each band gets its own context over its rows and the
+    /// full canvas rectangle expressed in that context's coordinates, so drawing the whole image into `bounds`
+    /// produces exactly the rows the band owns; resampling reads source pixels, not neighbouring bands, so the result
+    /// matches a single full-canvas draw byte for byte.
+    func drawInParallelBands(_ draw: @Sendable (CGContext, CGRect) -> Void) throws {
+        let rowsPerBand = 256
+        let bandCount = max(1, (height + rowsPerBand - 1) / rowsPerBand)
+        let bytesPerRow = self.bytesPerRow
+        let width = self.width
+        let height = self.height
+        let pixels = self.pixels
+        let failed = ManagedAtomic(false)
+        DispatchQueue.concurrentPerform(iterations: bandCount) { band in
+            let startRow = band * rowsPerBand
+            let bandRows = min(rowsPerBand, height - startRow)
+            guard bandRows > 0 else { return }
+            guard let context = CGContext(
+                data: pixels.advanced(by: startRow * bytesPerRow),
+                width: width,
+                height: bandRows,
+                bitsPerComponent: 8,
+                bytesPerRow: bytesPerRow,
+                space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+            ) else {
+                failed.set(true)
+                return
+            }
+            // Rows are stored top-down while Core Graphics counts y upward from the band's bottom row.
+            let originY = -CGFloat(height - startRow - bandRows)
+            draw(context, CGRect(x: 0, y: originY, width: CGFloat(width), height: CGFloat(height)))
+        }
+        if failed.get() {
+            throw MarkdownExportService.ExportError.stageFailed(stage: .imageConversion, underlying: nil)
+        }
+    }
+
+    /// Writes the final dimensions into the file header and truncates the file to the remaining rows.
+    func finalizeFile() throws {
+        try storage.finalize(width: width, height: height, pixelBytes: bytesPerRow * height)
     }
 
     func makeImage() -> CGImage? {
-        if let storage {
-            guard let provider = storage.makeDataProvider() else { return nil }
-            return CGImage(
-                width: width,
-                height: height,
-                bitsPerComponent: 8,
-                bitsPerPixel: 32,
-                bytesPerRow: bytesPerRow,
-                space: CGColorSpaceCreateDeviceRGB(),
-                bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue),
-                provider: provider,
-                decode: nil,
-                shouldInterpolate: true,
-                intent: .defaultIntent
-            )
+        let retainedStorage = Unmanaged.passRetained(storage)
+        guard let provider = CGDataProvider(
+            dataInfo: retainedStorage.toOpaque(),
+            data: pixels,
+            size: bytesPerRow * height,
+            releaseData: { info, _, _ in
+                guard let info else { return }
+                Unmanaged<ExportBitmapStorage>.fromOpaque(info).release()
+            }
+        ) else {
+            retainedStorage.release()
+            return nil
         }
-        return context.makeImage()
+        return CGImage(
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bitsPerPixel: 32,
+            bytesPerRow: bytesPerRow,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue),
+            provider: provider,
+            decode: nil,
+            shouldInterpolate: true,
+            intent: .defaultIntent
+        )
     }
 }
 
@@ -717,7 +793,11 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
     private var timeoutTask: Task<Void, Never>?
     private var isCompleted = false
     private var exportTask: Task<Void, Never>?
-    private var stage: MarkdownExportService.ExportStage = .loadHTML
+    private var stage: MarkdownExportService.ExportStage = .loadHTML {
+        didSet {
+            MarkdownExportService.logger.info("Export stage \(oldValue.rawValue, privacy: .public) -> \(self.stage.rawValue, privacy: .public)")
+        }
+    }
     private var didDumpTableMetrics = false
     private let concurrencyID = UUID()
 
@@ -1147,13 +1227,13 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
             stage = .rasterizePDF
             let expectedPageWidthPoints = rectPoints.width
             return try await Task.detached(priority: .userInitiated) {
-                let rendered = try Self.rasterizePDFDataToCGImage(
+                let canvas = try Self.rasterizePDFDataToCanvas(
                     pdfData: pdfData,
                     targetWidthPixels: targetWidthPixels,
                     expectedPageWidthPoints: expectedPageWidthPoints,
                     contentScaleCompensation: contentScaleCompensation
                 )
-                return try Self.encodeExportImage(rendered, pngquantOptions: pngquantOptions)
+                return try Self.encodeExportCanvas(canvas, pngquantOptions: pngquantOptions)
             }.value
         }
 
@@ -1166,9 +1246,7 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
         try await resizeWebViewForSnapshot(webView: webView, heightPoints: heightPoints)
         let effectiveHeightPoints = try await reconcileExportHeightPoints(
             webView: webView,
-            estimatedHeightPoints: heightPoints,
-            passes: 5,
-            settleNanoseconds: 90_000_000
+            estimatedHeightPoints: heightPoints
         )
         if effectiveHeightPoints > MarkdownExportRenderConstants.maxSingleSnapshotRectHeightPoints + 1 {
             let underlying = NSError(
@@ -1197,13 +1275,11 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
         let cg = try cgImage(from: image)
 
         stage = .pngEncoding
-        let targetWidthPixels = self.targetWidthPixels
+        let targetWidth = max(1, Int(round(targetWidthPixels)))
         let pngquantOptions = self.pngquantOptions
         return try await Task.detached(priority: .userInitiated) {
-            let targetWidth = max(1, Int(round(targetWidthPixels)))
-            let normalized = Self.scaleCGImageIfNeeded(image: cg, targetWidthPixels: targetWidth)
-            let flattened = try Self.flattenedOnWhiteBackground(normalized)
-            return try Self.encodeExportImage(flattened, pngquantOptions: pngquantOptions)
+            let canvas = try Self.canvasFromSnapshot(cg, targetWidthPixels: targetWidth)
+            return try Self.encodeExportCanvas(canvas, pngquantOptions: pngquantOptions)
         }.value
     }
 
@@ -1217,9 +1293,7 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
 
         let effectiveTotalHeightPoints = try await reconcileExportHeightPoints(
             webView: webView,
-            estimatedHeightPoints: totalHeightPoints,
-            passes: 6,
-            settleNanoseconds: 100_000_000
+            estimatedHeightPoints: totalHeightPoints
         )
         let totalHeightPointsInt = max(1, Int(ceil(effectiveTotalHeightPoints)))
         let totalHeightPixelsInt = max(1, Int(ceil(CGFloat(totalHeightPointsInt) * outputPixelScaleFactor)))
@@ -1239,7 +1313,6 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
             stage: .stitchTiles
         )
         let ctx = canvas.context
-        let bytesPerRow = canvas.bytesPerRow
 
         ctx.setFillColor(CGColor(red: 1, green: 1, blue: 1, alpha: 1))
         ctx.fill(CGRect(x: 0, y: 0, width: CGFloat(targetWidthPixelsInt), height: CGFloat(totalHeightPixelsInt)))
@@ -1303,15 +1376,10 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
             scrollYPoints += max(1, tileViewportHeightPoints - overlapPoints)
         }
 
-        guard let stitched = canvas.makeImage() else {
-            throw MarkdownExportService.ExportError.stageFailed(stage: .stitchTiles, underlying: nil)
-        }
-
         stage = .pngEncoding
-        let trimmed = Self.trimBottomWhitespaceIfNeeded(image: stitched, contextData: canvas.dataPointer, bytesPerRow: bytesPerRow)
         let pngquantOptions = self.pngquantOptions
         return try await Task.detached(priority: .userInitiated) {
-            try Self.encodeExportImage(trimmed, pngquantOptions: pngquantOptions)
+            try Self.encodeExportCanvas(canvas, pngquantOptions: pngquantOptions)
         }.value
     }
 
@@ -1356,8 +1424,8 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
             """
             _ = try? await evaluateJavaScriptBool(webView: webView, javaScriptString: syncScrollJS)
         }
-        // Give WebKit a moment to paint after programmatic scroll.
-        try? await Task.sleep(nanoseconds: 70_000_000)
+        // Let WebKit lay out and paint the new scroll position before it is measured or captured.
+        await waitForAnimationFrames(webView: webView, count: 2, timeout: 0.5)
 
         if let appKitOffsetY {
             return appKitOffsetY
@@ -1408,8 +1476,8 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
     }
 
     private func prepareForExportScrollHeightPoints(webView: WKWebView) async throws -> CGFloat {
-        // `WKWebView.callAsyncJavaScript` has been observed to return `nil` (undefined) intermittently under UI testing.
-        // To keep export deterministic, use synchronous `evaluateJavaScript` + a short settle loop from Swift.
+        // `WKWebView.callAsyncJavaScript` has been observed to return `nil` (undefined) intermittently under UI testing,
+        // so readiness is tracked by a page-side animation-frame watcher that Swift polls with `evaluateJavaScript`.
         let widthPoints = Double(viewportWidthPoints)
 
         let setupJS = """
@@ -1682,154 +1750,57 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
         })();
         """
 
-        let measureJS = """
-        (function() {
-          try {
-            var c = document.getElementById('content');
-            if (!c) { return JSON.stringify({ hasContent: false, height: 0, fonts: 'n/a' }); }
-
-            var rectH = 0;
-            try {
-              var shell = document.getElementById('content-scale-shell') || c;
-              if (shell && typeof shell.getBoundingClientRect === 'function') {
-                var r = shell.getBoundingClientRect();
-                rectH = Math.ceil(r.height || 0);
-              }
-            } catch (e) { rectH = 0; }
-
-            var sh = 0;
-            try { sh = Math.ceil(c.scrollHeight || 0); } catch (e) { sh = 0; }
-
-            // Prefer #content measurements for export height so short content doesn't get padded to the viewport height.
-            // (documentElement.scrollHeight tends to floor to the viewport height.)
-            var useTransform = !!(window && window.__scopyExportUsesTransform);
-            var h = 0;
-            if (useTransform && rectH > 0) {
-              h = rectH;
-            } else {
-              h = Math.max(rectH || 0, sh || 0);
-            }
-
-            var fonts = 'n/a';
-            try { fonts = (document.fonts && document.fonts.status) ? document.fonts.status : 'n/a'; } catch (e) { fonts = 'n/a'; }
-            var renderReady = true;
-            var renderFailed = false;
-            var renderErrorReason = '';
-            var highlightThemeReady = false;
-            try {
-              if (typeof window.__scopyIsRenderReady === 'function') {
-                renderReady = !!window.__scopyIsRenderReady();
-              }
-            } catch (e) { renderReady = true; }
-            try {
-              var state = window.__scopyRenderState || {};
-              renderFailed = !!state.renderFailed;
-              renderErrorReason = state.unifiedErrorReason || '';
-            } catch (e) { renderFailed = false; renderErrorReason = ''; }
-            try {
-              highlightThemeReady = !!(window.__scopyRenderState && window.__scopyRenderState.highlightThemeReady);
-            } catch (e) { highlightThemeReady = false; }
-            return JSON.stringify({
-              hasContent: true,
-              height: Math.ceil(h || 0),
-              fonts: fonts,
-              renderReady: renderReady,
-              renderFailed: renderFailed,
-              renderErrorReason: renderErrorReason,
-              highlightThemeReady: highlightThemeReady
-            });
-          } catch (e) {
-            return JSON.stringify({ hasContent: false, height: 0, fonts: 'n/a' });
-          }
-        })();
-        """
-
         do {
+            try await installLayoutWatcher(webView: webView)
             _ = try await evaluateJavaScriptBool(webView: webView, javaScriptString: setupJS)
         } catch {
             throw MarkdownExportService.ExportError.stageFailed(stage: .prepareLayout, underlying: error)
         }
 
-        var lastNonZeroHeight: CGFloat = 0
-        var lastObservedHeight: CGFloat = 0
-        var stableSince: CFAbsoluteTime?
-        var firstNonZeroAt: CFAbsoluteTime?
-        var didAdjustWideContent = false
-        var fontsWereLoaded = false
-
         let readinessDeadline = CFAbsoluteTimeGetCurrent() + 12.0
-        while CFAbsoluteTimeGetCurrent() < readinessDeadline {
+        var didAdjustWideContent = false
+        var adjustAttempts = 0
+        var sinceFrame = 0
+        var firstSettledAt: CFAbsoluteTime?
+        var lastSample: LayoutSample?
+
+        while true {
+            let remaining = readinessDeadline - CFAbsoluteTimeGetCurrent()
+            guard remaining > 0 else { break }
+            let settled = try await awaitLayoutSettled(
+                webView: webView,
+                sinceFrame: sinceFrame,
+                requireRenderReady: true,
+                timeout: remaining
+            )
+            lastSample = settled.sample
+            guard settled.isSettled else { break }
+            let sample = settled.sample
             let now = CFAbsoluteTimeGetCurrent()
-            let value: String
-            do {
-                value = try await evaluateJavaScriptString(webView: webView, javaScriptString: measureJS)
-            } catch {
-                throw MarkdownExportService.ExportError.stageFailed(stage: .prepareLayout, underlying: error)
-            }
+            if firstSettledAt == nil { firstSettledAt = now }
 
-            let parsedHeight = Self.parseHeightFromMeasureValue(value)
-            let fontsStatus = Self.parseFontsStatusFromMeasureValue(value)
-            let renderReady = Self.parseRenderReadyFromMeasureValue(value)
-            if Self.parseRenderFailedFromMeasureValue(value) {
-                let reason = Self.parseRenderErrorReasonFromMeasureValue(value) ?? "Markdown renderer failed"
-                let error = NSError(
-                    domain: "Scopy.MarkdownExport",
-                    code: 1,
-                    userInfo: [NSLocalizedDescriptionKey: reason]
-                )
-                throw MarkdownExportService.ExportError.stageFailed(stage: .prepareLayout, underlying: error)
-            }
-            if fontsStatus == "loaded" { fontsWereLoaded = true }
-            if parsedHeight > 0 {
-                lastObservedHeight = parsedHeight
-            }
-            if parsedHeight <= 0 || !renderReady {
-                stableSince = nil
-                try? await Task.sleep(nanoseconds: 80_000_000)
-                continue
-            }
-            if firstNonZeroAt == nil { firstNonZeroAt = now }
-
-            if lastNonZeroHeight > 0, abs(parsedHeight - lastNonZeroHeight) < 1 {
-                if stableSince == nil { stableSince = now }
-            } else {
-                stableSince = nil
-                lastNonZeroHeight = parsedHeight
-            }
-
-            // Run export-only wide-content adjustments once, ideally after fonts are loaded and layout has stopped changing briefly.
-            // This avoids measuring code/table widths against a transient layout.
-            if !didAdjustWideContent,
-               (fontsWereLoaded || fontsStatus == "n/a" || (firstNonZeroAt != nil && (now - (firstNonZeroAt ?? now)) >= 1.2)),
-               let stableStart = stableSince,
-               (now - stableStart) >= 0.20
-            {
-                let adjusted = (try? await evaluateJavaScriptBool(webView: webView, javaScriptString: adjustWideContentJS)) ?? false
-
-                if adjusted {
-                    didAdjustWideContent = true
-                    stableSince = nil
-                    lastNonZeroHeight = 0
-                    try? await Task.sleep(nanoseconds: 120_000_000)
+            if !didAdjustWideContent {
+                // Wide-content adjustments measure code and table widths, so they wait for fonts unless the page has
+                // no font API or fonts never report within 1.2 s of the first settled layout.
+                let fontsSettled = sample.fonts == "loaded" || sample.fonts == "n/a" || now - (firstSettledAt ?? now) >= 1.2
+                if !fontsSettled {
+                    try? await Task.sleep(nanoseconds: 16_000_000)
                     continue
                 }
-
-                // If scaling didn't run successfully (e.g. WebKit flake), don't allow an early "layout stable" return yet.
-                // Retry on the next loop tick.
-                stableSince = nil
-                lastNonZeroHeight = 0
-                try? await Task.sleep(nanoseconds: 120_000_000)
+                sinceFrame = sample.frames
+                let adjusted = (try? await evaluateJavaScriptBool(webView: webView, javaScriptString: adjustWideContentJS)) ?? false
+                if adjusted {
+                    didAdjustWideContent = true
+                    continue
+                }
+                adjustAttempts += 1
+                if adjustAttempts < 3 { continue }
+                MarkdownExportService.logger.warning("Wide-content adjustment did not run after \(adjustAttempts, privacy: .public) attempts; exporting the measured layout")
+                didAdjustWideContent = true
                 continue
             }
 
-            // Consider layout stable only if height has been unchanged for long enough.
-            // This prevents returning early when #content starts at a small non-zero height (e.g. padding-only),
-            // then gets populated asynchronously by the local renderer bundle and delayed font layout.
-            if let stableStart = stableSince, (now - stableStart) >= 0.45 {
-                return parsedHeight
-            }
-
-            try? await Task.sleep(nanoseconds: 80_000_000)
+            return sample.height
         }
 
         let error = NSError(
@@ -1837,11 +1808,12 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
             code: 2,
             userInfo: [
                 NSLocalizedDescriptionKey:
-                    "Markdown did not reach terminal render readiness (last height: \(max(lastNonZeroHeight, lastObservedHeight)))."
+                    "Markdown did not reach terminal render readiness (last height: \(lastSample?.height ?? 0))."
             ]
         )
         throw MarkdownExportService.ExportError.stageFailed(stage: .prepareLayout, underlying: error)
     }
+
 
     private func dumpTableMetricsIfRequested(webView: WKWebView) async {
         guard !didDumpTableMetrics else { return }
@@ -2011,64 +1983,6 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
         didDumpTableMetrics = true
     }
 
-    nonisolated private static func parseHeightFromMeasureValue(_ value: String) -> CGFloat {
-        if let data = value.data(using: .utf8),
-           let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-        {
-            if let n = obj["height"] as? NSNumber { return max(0, CGFloat(truncating: n)) }
-            if let d = obj["height"] as? Double { return max(0, CGFloat(d)) }
-            if let i = obj["height"] as? Int { return max(0, CGFloat(i)) }
-            if let str = obj["height"] as? String, let d = Double(str) { return max(0, CGFloat(d)) }
-        }
-        return 0
-    }
-
-    nonisolated private static func parseFontsStatusFromMeasureValue(_ value: String) -> String? {
-        guard let data = value.data(using: .utf8),
-              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-        else { return nil }
-
-        if let status = obj["fonts"] as? String { return status }
-        return nil
-    }
-
-    nonisolated private static func parseRenderReadyFromMeasureValue(_ value: String) -> Bool {
-        guard let data = value.data(using: .utf8),
-              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-        else { return false }
-
-        if let ready = obj["renderReady"] as? Bool { return ready }
-        if let number = obj["renderReady"] as? NSNumber { return number.boolValue }
-        if let string = obj["renderReady"] as? String {
-            let lowered = string.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-            return lowered == "true" || lowered == "1" || lowered == "yes"
-        }
-        return false
-    }
-
-    nonisolated private static func parseRenderFailedFromMeasureValue(_ value: String) -> Bool {
-        guard let data = value.data(using: .utf8),
-              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-        else { return false }
-
-        if let failed = obj["renderFailed"] as? Bool { return failed }
-        if let number = obj["renderFailed"] as? NSNumber { return number.boolValue }
-        if let string = obj["renderFailed"] as? String {
-            let lowered = string.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-            return lowered == "true" || lowered == "1" || lowered == "yes"
-        }
-        return false
-    }
-
-    nonisolated private static func parseRenderErrorReasonFromMeasureValue(_ value: String) -> String? {
-        guard let data = value.data(using: .utf8),
-              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let reason = obj["renderErrorReason"] as? String
-        else { return nil }
-
-        let trimmed = reason.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? nil : trimmed
-    }
 
     private func layoutDebugInfo(webView: WKWebView) async throws -> String {
         let js = """
@@ -2101,58 +2015,21 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
         return try await evaluateJavaScriptString(webView: webView, javaScriptString: js)
     }
 
+    /// Waits for the layout to settle after a change and returns the larger of the estimate and the live measurement.
     private func reconcileExportHeightPoints(
         webView: WKWebView,
-        estimatedHeightPoints: CGFloat,
-        passes: Int = 4,
-        settleNanoseconds: UInt64 = 80_000_000
+        estimatedHeightPoints: CGFloat
     ) async throws -> CGFloat {
-        var bestHeight = max(1, estimatedHeightPoints)
-        let iterations = max(1, passes)
-        var unchangedPasses = 0
-
-        for index in 0..<iterations {
-            let liveHeight = await currentLiveExportHeightPoints(webView: webView)
-            if liveHeight > bestHeight + 0.5 {
-                bestHeight = liveHeight
-                unchangedPasses = 0
-            } else {
-                unchangedPasses += 1
-            }
-
-            if unchangedPasses >= 2 { break }
-            if index + 1 < iterations {
-                try? await Task.sleep(nanoseconds: settleNanoseconds)
-            }
-        }
-
-        return bestHeight
-    }
-
-    private func currentLiveExportHeightPoints(webView: WKWebView) async -> CGFloat {
-        if let debug = try? await layoutDebugInfo(webView: webView) {
-            if let exportScale = Self.parseNumberFromLayoutDebugInfo(debug, key: "exportScale"),
-               exportScale > 0,
-               abs(exportScale - 1) > 0.001,
-               let transformedRectHeight = Self.parseNumberFromLayoutDebugInfo(debug, key: "contentRectHeight"),
-               transformedRectHeight > 0
-            {
-                return transformedRectHeight
-            }
-
-            let jsCandidates = Self.parseHeightsFromLayoutDebugInfo(debug)
-            if let jsMax = jsCandidates.max(), jsMax > 0 {
-                return jsMax
-            }
-        }
-
-        if let scrollView = resolvedScrollView(for: webView),
+        let mark = (try? await readLayoutSample(webView: webView))?.frames ?? 0
+        let settled = try await awaitLayoutSettled(webView: webView, sinceFrame: mark, requireRenderReady: false, timeout: 1.0)
+        var liveHeight = settled.sample.liveHeight
+        if liveHeight <= 0,
+           let scrollView = resolvedScrollView(for: webView),
            let documentView = scrollView.documentView
         {
-            return max(documentView.bounds.height, documentView.frame.height)
+            liveHeight = max(documentView.bounds.height, documentView.frame.height)
         }
-
-        return 0
+        return max(max(1, estimatedHeightPoints), liveHeight)
     }
 
     private func currentExportScale(webView: WKWebView) async -> CGFloat {
@@ -2198,6 +2075,7 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
     }
 
     private func applyGlobalScale(webView: WKWebView, scale: CGFloat) async throws {
+        let frameMark = (try? await readLayoutSample(webView: webView))?.frames ?? 0
         let js = """
         (function() {
           try {
@@ -2299,7 +2177,7 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
         } catch {
             throw MarkdownExportService.ExportError.stageFailed(stage: .applyScale, underlying: error)
         }
-        try? await Task.sleep(nanoseconds: 80_000_000)
+        _ = try? await awaitLayoutSettled(webView: webView, sinceFrame: frameMark, requireRenderReady: false, timeout: 1.5)
     }
 
     private func scrollToTop(webView: WKWebView) async throws {
@@ -2327,8 +2205,8 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
             hostWindow.contentView?.layoutSubtreeIfNeeded()
         }
 
-        // Give WebKit a moment to realize the new viewport height and fully paint.
-        try? await Task.sleep(nanoseconds: 80_000_000)
+        // Let WebKit lay out for the new viewport height before the snapshot is measured or captured.
+        await waitForAnimationFrames(webView: webView, count: 2, timeout: 0.5)
     }
 
     private func evaluateJavaScript<T: Sendable>(
@@ -2362,6 +2240,203 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
             if let num = value as? NSNumber { return num.stringValue }
             if value == nil { return "" }
             return String(describing: value)
+        }
+    }
+
+    // MARK: - Layout settle watcher
+
+    /// A page-side animation-frame watcher: it measures the export height every frame and counts how many
+    /// consecutive frames it has been unchanged, so Swift can wait for layout to settle instead of sleeping.
+    private static let layoutWatcherJS = """
+    (function() {
+      try {
+        if (window.__scopyLayoutWatcher) { return true; }
+        var w = { frames: 0, stableFrames: 0, height: 0, live: 0, lastHeight: -1, lastLive: -1, fonts: 'n/a',
+                  renderReady: false, renderFailed: false, renderErrorReason: '', hasContent: false };
+        window.__scopyLayoutWatcher = w;
+        function measureHeight() {
+          var c = document.getElementById('content');
+          if (!c) { w.hasContent = false; return 0; }
+          w.hasContent = true;
+          var rectH = 0;
+          try {
+            var shell = document.getElementById('content-scale-shell') || c;
+            var r = shell.getBoundingClientRect();
+            rectH = Math.ceil(r.height || 0);
+          } catch (e) { rectH = 0; }
+          var sh = 0;
+          try { sh = Math.ceil(c.scrollHeight || 0); } catch (e) { sh = 0; }
+          // Prefer #content measurements so short content is not padded to the viewport height.
+          var useTransform = !!window.__scopyExportUsesTransform;
+          return Math.ceil((useTransform && rectH > 0) ? rectH : Math.max(rectH || 0, sh || 0));
+        }
+        function measureLive() {
+          var c = document.getElementById('content');
+          if (!c) { return 0; }
+          var exportScale = window.__scopyExportScale || 1;
+          var rectH = 0;
+          try { rectH = Math.ceil(c.getBoundingClientRect().height || 0); } catch (e) { rectH = 0; }
+          if (exportScale > 0 && Math.abs(exportScale - 1) > 0.001 && rectH > 0) { return rectH; }
+          var sh = 0;
+          try { sh = c.scrollHeight || 0; } catch (e) { sh = 0; }
+          return Math.max(sh, rectH);
+        }
+        function tick() {
+          w.frames += 1;
+          var h = 0; try { h = measureHeight(); } catch (e) { h = 0; }
+          var live = 0; try { live = measureLive(); } catch (e) { live = 0; }
+          var ready = true;
+          try { if (typeof window.__scopyIsRenderReady === 'function') { ready = !!window.__scopyIsRenderReady(); } } catch (e) { ready = true; }
+          var state = window.__scopyRenderState || {};
+          w.renderFailed = !!state.renderFailed;
+          w.renderErrorReason = state.unifiedErrorReason || '';
+          try { w.fonts = (document.fonts && document.fonts.status) ? document.fonts.status : 'n/a'; } catch (e) { w.fonts = 'n/a'; }
+          if (ready && h > 0 && w.lastHeight >= 0 && Math.abs(h - w.lastHeight) < 1 && Math.abs(live - w.lastLive) < 1) {
+            w.stableFrames += 1;
+          } else {
+            w.stableFrames = 0;
+          }
+          w.lastHeight = h; w.lastLive = live; w.height = h; w.live = live; w.renderReady = ready;
+          window.requestAnimationFrame(tick);
+        }
+        window.requestAnimationFrame(tick);
+        return true;
+      } catch (e) { return false; }
+    })();
+    """
+
+    private static let readLayoutWatcherJS = """
+    (function() {
+      var w = window.__scopyLayoutWatcher;
+      if (!w) { return JSON.stringify({ installed: false }); }
+      return JSON.stringify({ installed: true, frames: w.frames, stableFrames: w.stableFrames, height: w.height, live: w.live,
+        fonts: w.fonts, renderReady: w.renderReady, renderFailed: w.renderFailed, renderErrorReason: w.renderErrorReason });
+    })();
+    """
+
+    struct LayoutSample {
+        let frames: Int
+        let stableFrames: Int
+        let height: CGFloat
+        let liveHeight: CGFloat
+        let fonts: String
+        let renderReady: Bool
+        let renderFailed: Bool
+        let renderErrorReason: String?
+    }
+
+    private func installLayoutWatcher(webView: WKWebView) async throws {
+        let installed = try await evaluateJavaScriptBool(webView: webView, javaScriptString: Self.layoutWatcherJS)
+        guard installed else {
+            throw NSError(
+                domain: "Scopy.MarkdownExport",
+                code: 5,
+                userInfo: [NSLocalizedDescriptionKey: "Layout watcher could not be installed"]
+            )
+        }
+    }
+
+    private func readLayoutSample(webView: WKWebView) async throws -> LayoutSample {
+        for _ in 0..<2 {
+            let value = try await evaluateJavaScriptString(webView: webView, javaScriptString: Self.readLayoutWatcherJS)
+            guard let data = value.data(using: .utf8),
+                  let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                throw NSError(
+                    domain: "Scopy.MarkdownExport",
+                    code: 5,
+                    userInfo: [NSLocalizedDescriptionKey: "Layout watcher returned an unreadable sample: \(value.prefix(120))"]
+                )
+            }
+            if (object["installed"] as? Bool) == true {
+                func number(_ key: String) -> CGFloat {
+                    if let n = object[key] as? NSNumber { return CGFloat(truncating: n) }
+                    return 0
+                }
+                let reason = (object["renderErrorReason"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+                return LayoutSample(
+                    frames: Int(number("frames")),
+                    stableFrames: Int(number("stableFrames")),
+                    height: max(0, number("height")),
+                    liveHeight: max(0, number("live")),
+                    fonts: (object["fonts"] as? String) ?? "n/a",
+                    renderReady: (object["renderReady"] as? Bool) ?? false,
+                    renderFailed: (object["renderFailed"] as? Bool) ?? false,
+                    renderErrorReason: (reason?.isEmpty ?? true) ? nil : reason
+                )
+            }
+            // The page navigated or the world was reset; reinstall and read again.
+            try await installLayoutWatcher(webView: webView)
+        }
+        throw NSError(
+            domain: "Scopy.MarkdownExport",
+            code: 5,
+            userInfo: [NSLocalizedDescriptionKey: "Layout watcher did not report after reinstall"]
+        )
+    }
+
+    /// Polls the watcher until at least two animation frames have run after `sinceFrame` and the measured height has
+    /// been unchanged for `stableFrames` consecutive frames. When animation frames stop (occluded view), stability
+    /// falls back to the height being unchanged for 0.45 s. Returns the last sample either way; `isSettled` tells
+    /// whether the condition was met before `timeout`.
+    private func awaitLayoutSettled(
+        webView: WKWebView,
+        sinceFrame: Int,
+        stableFrames: Int = 3,
+        requireRenderReady: Bool,
+        timeout: TimeInterval
+    ) async throws -> (sample: LayoutSample, isSettled: Bool) {
+        let deadline = CFAbsoluteTimeGetCurrent() + max(0, timeout)
+        var lastFrames = -1
+        var framesChangedAt = CFAbsoluteTimeGetCurrent()
+        var lastHeight: CGFloat = -1
+        var heightStableSince = CFAbsoluteTimeGetCurrent()
+        while true {
+            let sample = try await readLayoutSample(webView: webView)
+            let now = CFAbsoluteTimeGetCurrent()
+            if sample.renderFailed {
+                let error = NSError(
+                    domain: "Scopy.MarkdownExport",
+                    code: 1,
+                    userInfo: [NSLocalizedDescriptionKey: sample.renderErrorReason ?? "Markdown renderer failed"]
+                )
+                throw MarkdownExportService.ExportError.stageFailed(stage: .prepareLayout, underlying: error)
+            }
+            if sample.frames != lastFrames {
+                lastFrames = sample.frames
+                framesChangedAt = now
+            }
+            if abs(sample.height - lastHeight) >= 1 {
+                lastHeight = sample.height
+                heightStableSince = now
+            }
+            let ready = !requireRenderReady || sample.renderReady
+            if ready, sample.height > 0 {
+                if sample.frames >= sinceFrame + 2, sample.stableFrames >= stableFrames {
+                    return (sample, true)
+                }
+                if now - framesChangedAt > 0.3, now - heightStableSince >= 0.45 {
+                    MarkdownExportService.logger.info("Layout watcher frames stalled; accepting time-based stability")
+                    return (sample, true)
+                }
+            }
+            if now >= deadline {
+                return (sample, false)
+            }
+            try? await Task.sleep(nanoseconds: 8_000_000)
+        }
+    }
+
+    /// Waits until `count` animation frames have run after the call; best effort, bounded by `timeout`.
+    private func waitForAnimationFrames(webView: WKWebView, count: Int, timeout: TimeInterval) async {
+        guard let start = try? await readLayoutSample(webView: webView) else {
+            try? await Task.sleep(nanoseconds: 50_000_000)
+            return
+        }
+        let deadline = CFAbsoluteTimeGetCurrent() + max(0, timeout)
+        while CFAbsoluteTimeGetCurrent() < deadline {
+            try? await Task.sleep(nanoseconds: 8_000_000)
+            guard let sample = try? await readLayoutSample(webView: webView) else { return }
+            if sample.frames >= start.frames + count { return }
         }
     }
 
@@ -2419,20 +2494,34 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
 
     /// Hands the bitmap to pngquant as raw pixels; falls back to ImageIO's PNG encoder when pngquant is
     /// disabled or declines the image.
-    nonisolated static func encodeExportImage(
-        _ image: CGImage,
+    /// Encodes the finished canvas: pngquant maps the canvas file directly; ImageIO encodes the bitmap only when
+    /// pngquant is disabled or declines the quality floor.
+    nonisolated static func encodeExportCanvas(
+        _ canvas: ExportBitmapCanvas,
         pngquantOptions: PngquantService.Options?
     ) throws -> MarkdownExportService.ExportOutcome {
         let startedAt = DispatchTime.now().uptimeNanoseconds
-        if let pngquantOptions, let quantized = PngquantService.compressBitmapBestEffort(image, options: pngquantOptions) {
-            logEncodeDuration(since: startedAt, pixels: image.width * image.height, bytes: quantized.count, encoder: "pngquant")
-            return MarkdownExportService.ExportOutcome(
-                pngData: quantized,
-                stats: MarkdownExportService.ExportStats(finalPNGBytes: quantized.count, pngquantApplied: true)
-            )
+        canvas.trimBlankLeadingRowsIfNeeded()
+        let pixels = canvas.width * canvas.height
+        if let pngquantOptions {
+            do {
+                try canvas.finalizeFile()
+                if let quantized = PngquantService.compressPAMFileBestEffort(canvas.fileURL, options: pngquantOptions) {
+                    logEncodeDuration(since: startedAt, pixels: pixels, bytes: quantized.count, encoder: "pngquant")
+                    return MarkdownExportService.ExportOutcome(
+                        pngData: quantized,
+                        stats: MarkdownExportService.ExportStats(finalPNGBytes: quantized.count, pngquantApplied: true)
+                    )
+                }
+            } catch {
+                MarkdownExportService.logger.warning("Export canvas could not be finalized for pngquant: \(error.localizedDescription, privacy: .public)")
+            }
+        }
+        guard let image = canvas.makeImage() else {
+            throw MarkdownExportService.ExportError.stageFailed(stage: .pngEncoding, underlying: nil)
         }
         let png = try pngDataFromCGImage(image)
-        logEncodeDuration(since: startedAt, pixels: image.width * image.height, bytes: png.count, encoder: "ImageIO")
+        logEncodeDuration(since: startedAt, pixels: pixels, bytes: png.count, encoder: "ImageIO")
         return MarkdownExportService.ExportOutcome(
             pngData: png,
             stats: MarkdownExportService.ExportStats(finalPNGBytes: png.count, pngquantApplied: false)
@@ -2446,37 +2535,26 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
         )
     }
 
-    nonisolated private static func flattenedOnWhiteBackground(_ image: CGImage) throws -> CGImage {
-        let w = image.width
-        let h = image.height
-        guard w > 0, h > 0 else {
+    /// Draws the snapshot onto a white canvas at the target width in one pass, scaling when the snapshot's backing
+    /// scale does not match the requested output width.
+    nonisolated private static func canvasFromSnapshot(_ image: CGImage, targetWidthPixels: Int) throws -> ExportBitmapCanvas {
+        let sourceWidth = image.width
+        let sourceHeight = image.height
+        guard sourceWidth > 0, sourceHeight > 0 else {
             throw MarkdownExportService.ExportError.stageFailed(stage: .imageConversion, underlying: nil)
         }
-
-        let cs = CGColorSpaceCreateDeviceRGB()
-        let bitmapInfo = CGImageAlphaInfo.premultipliedLast.rawValue
-        let bytesPerRow = w * 4
-        guard let ctx = CGContext(
-            data: nil,
-            width: w,
-            height: h,
-            bitsPerComponent: 8,
-            bytesPerRow: bytesPerRow,
-            space: cs,
-            bitmapInfo: bitmapInfo
-        ) else {
-            throw MarkdownExportService.ExportError.stageFailed(stage: .imageConversion, underlying: nil)
+        let width = max(1, targetWidthPixels)
+        let height = sourceWidth == width
+            ? sourceHeight
+            : max(1, Int(round(CGFloat(sourceHeight) * CGFloat(width) / CGFloat(sourceWidth))))
+        let canvas = try ExportBitmapCanvas.make(width: width, height: height, stage: .imageConversion)
+        try canvas.drawInParallelBands { context, bounds in
+            context.interpolationQuality = .high
+            context.setFillColor(CGColor(red: 1, green: 1, blue: 1, alpha: 1))
+            context.fill(bounds)
+            context.draw(image, in: bounds)
         }
-
-        ctx.setFillColor(CGColor(red: 1, green: 1, blue: 1, alpha: 1))
-        ctx.fill(CGRect(x: 0, y: 0, width: CGFloat(w), height: CGFloat(h)))
-        ctx.draw(image, in: CGRect(x: 0, y: 0, width: CGFloat(w), height: CGFloat(h)))
-
-        guard let flattened = ctx.makeImage() else {
-            throw MarkdownExportService.ExportError.stageFailed(stage: .imageConversion, underlying: nil)
-        }
-
-        return trimBottomWhitespaceIfNeeded(image: flattened, contextData: ctx.data, bytesPerRow: bytesPerRow)
+        return canvas
     }
 
     nonisolated private static func pngDataFromCGImage(_ image: CGImage) throws -> Data {
@@ -2496,12 +2574,12 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
         return data as Data
     }
 
-    nonisolated private static func rasterizePDFDataToCGImage(
+    nonisolated private static func rasterizePDFDataToCanvas(
         pdfData: Data,
         targetWidthPixels: Int,
         expectedPageWidthPoints: CGFloat?,
         contentScaleCompensation: CGFloat
-    ) throws -> CGImage {
+    ) throws -> ExportBitmapCanvas {
         guard targetWidthPixels > 0 else {
             throw MarkdownExportService.ExportError.stageFailed(stage: .rasterizePDF, underlying: nil)
         }
@@ -2565,7 +2643,6 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
             stage: .rasterizePDF
         )
         let ctx = canvas.context
-        let bytesPerRow = canvas.bytesPerRow
 
         ctx.interpolationQuality = .high
         ctx.setFillColor(CGColor(red: 1, green: 1, blue: 1, alpha: 1))
@@ -2605,11 +2682,7 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
             ctx.restoreGState()
         }
 
-        guard let image = canvas.makeImage() else {
-            throw MarkdownExportService.ExportError.stageFailed(stage: .rasterizePDF, underlying: nil)
-        }
-
-        return trimBottomWhitespaceIfNeeded(image: image, contextData: canvas.dataPointer, bytesPerRow: bytesPerRow)
+        return canvas
     }
 
     private struct PDFRasterMetrics: Sendable {
@@ -2658,69 +2731,6 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
         )
     }
 
-    nonisolated private static func trimBottomWhitespaceIfNeeded(
-        image: CGImage,
-        contextData: UnsafeMutableRawPointer?,
-        bytesPerRow: Int
-    ) -> CGImage {
-        // The export background is forced to white. If we accidentally over-measure content height or WebKit leaves
-        // unpainted regions at the bottom, we can trim trailing white space for a tighter and more readable result.
-        let w = image.width
-        let h = image.height
-        guard w > 0, h > 0 else { return image }
-        guard let contextData else { return image }
-        guard bytesPerRow > 0 else { return image }
-
-        let buffer = contextData.assumingMemoryBound(to: UInt8.self)
-        let sampleStepX = 8
-        let skipRightPixels = min(24, max(0, w / 24))
-        let whiteThreshold: UInt8 = 250
-
-        func rowIsMostlyWhite(_ y: Int) -> Bool {
-            let start = y * bytesPerRow
-            var darkCount = 0
-            var sampleCount = 0
-            var x = 0
-            let maxX = max(0, w - skipRightPixels)
-            while x < maxX {
-                let idx = start + x * 4
-                if idx + 2 < bytesPerRow * h {
-                    let r = buffer[idx]
-                    let g = buffer[idx + 1]
-                    let b = buffer[idx + 2]
-                    if r < whiteThreshold || g < whiteThreshold || b < whiteThreshold {
-                        darkCount += 1
-                    }
-                    sampleCount += 1
-                }
-                x += sampleStepX
-            }
-            // Treat a row as "white" if it contains at most a handful of non-white samples (anti-aliasing noise).
-            return darkCount <= max(6, sampleCount / 180)
-        }
-
-        // Find the first non-white row from the bottom (bitmap context origin is bottom-left).
-        var firstContentFromBottomY: Int?
-        for y in 0..<h {
-            if !rowIsMostlyWhite(y) {
-                firstContentFromBottomY = y
-                break
-            }
-        }
-
-        guard let firstContentFromBottomY else { return image }
-
-        // Keep a small bottom margin (in pixels) so content doesn't touch the edge.
-        let bottomMargin = min(40, max(0, h - 1))
-        let cropStartY = max(0, firstContentFromBottomY - bottomMargin)
-        if cropStartY <= 0 { return image }
-
-        let croppedHeight = h - cropStartY
-        guard croppedHeight > 0, croppedHeight < h else { return image }
-
-        let rect = CGRect(x: 0, y: cropStartY, width: w, height: croppedHeight)
-        return image.cropping(to: rect) ?? image
-    }
 
     nonisolated private static func scaleCGImageIfNeeded(image: CGImage, targetWidthPixels: Int) -> CGImage {
         let srcW = image.width
