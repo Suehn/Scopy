@@ -84,7 +84,7 @@ audience: implementing agent (Codex) + maintainer review
 | 36 | 六个手写 continuation 队列收敛为一个原语；去掉双重隔离锁；swizzle 加关闭开关 | §8.5 | P2 | M |
 | 37 | 大文件按已有缝拆分；profiling 与 UI-test 钩子收口到 sink；`ProcessInfo.arguments` 每行读取 hoist | §8.8 | P2 | S + M |
 | 38 | 构建与 CI：track `Package.resolved`、pbxproj 二选一、verify 脱离 npm、恢复 TSan、补 migration 测试 | §8.8 | P1 | S |
-| 39 | 固定预览：预览提升为面板层子窗口，Space/图钉固定，仅显式关闭，固定期间 hover 停用 | §7.7 | P1（hh 需求） | M |
+| 39 | 固定预览：预览提升为独立可移动、可调大小的浮动窗口，Space/图钉固定，仅显式关闭，固定期间 hover 停用 | §7.7 | P1（hh 需求） | M |
 
 ## 3. 采集与语义（`ClipboardMonitor`、`ClipboardService`）
 
@@ -350,13 +350,14 @@ audience: implementing agent (Codex) + maintainer review
 
 ### 7.7 固定预览（hh 需求，P1，M）
 
-需求：有时需要长时间阅读预览内容，不想一直把指针停在行或 popover 上；希望能把当前预览"固定"住，读完再手动关闭。
+需求（hh，2026-09-03 两次提出）：有时需要长时间阅读预览内容，不想一直把指针停在行或 popover 上；希望能把当前预览"固定"住，并且**可以自由移动**（拖到屏幕任意位置、可改大小），读完再手动关闭。
 
 现状约束：预览是行锚定的 SwiftUI `.popover`（`HistoryItemView.swift:1037-1164` 三处），列表层只维护一个 `activePopover`（`HistoryListView.swift:41, 330-442`）；关闭由指针离开行/popover（`scheduleRowHoverExitCleanup`、`schedulePopoverHoverExitCleanup`，120 ms 宽限）、滚轮（`dismissPreviewForScrollWheel`）、系统 dismiss、以及产品规范里的安全三角 500 ms 上限共同驱动；行是被动的，交互状态在空闲时释放（`releaseInteractionStateIfIdle`），行回收时 popover 随之消失；Markdown 只有一个共享 `WKWebView`（ownership lease）。所以"固定"不能只是把 hover-exit 计时器关掉——行一滚出视口或被回收，锚点就没了。
 
 方向：
 
-- **固定 = 把预览从行提升到列表/面板层**。新增一个由 `HistoryViewModel`（或列表层协调器）持有的 `pinnedPreview: (itemID, kind, revision)`，内容宿主是面板的一个子窗口（`NSPanel` child window，非激活、跟随主面板移动），不再是行锚定 `.popover`。触发时把当前 hover 预览的已渲染状态（`HoverPreviewModel`、Markdown 的 WebView lease、图片位图）整体移交给它，不重新渲染。
+- **固定 = 把预览从行提升为独立窗口**。新增一个由 `HistoryViewModel`（或列表层协调器）持有的 `pinnedPreview: (itemID, kind, revision)`，内容宿主是一个独立的非激活 `NSPanel`（`.nonactivatingPanel + .titled + .resizable + .fullSizeContentView`，`isMovableByWindowBackground = true`，`level = .floating`），不再是行锚定 `.popover`，也不做主面板的 child window（child 会跟着主面板移动，与"自由移动"冲突）。触发时把当前 hover 预览的已渲染状态（`HoverPreviewModel`、Markdown 的 WebView lease、图片位图）整体移交给它，不重新渲染。
+- **自由移动与尺寸**：初始位置 = 原 popover 位置，之后可拖到任意位置、任意屏幕；可调大小，Markdown 内容按现有 fit-to-width 逻辑随宽度重排（复用 `syncChatGPTZoomShell`），图片按比例适配；用 `setFrameAutosaveName` 记住上次的位置与大小。主面板关闭时固定预览是否一起关闭由 hh 决定，默认建议一起关闭（它的数据来自面板会话）。
 - **触发与关闭**：预览打开时按 Space 或点 popover 顶部的图钉按钮固定；关闭只靠显式动作：⎋、图钉再点一次、子窗口关闭按钮、面板关闭。不做自动超时。滚动、指针离开、行回收、hover 其他行都不关闭它。
 - **与 hover 的关系**：同一时间只允许一个固定预览；固定期间 hover 预览停用（避免两个预览并存，也避免抢 Markdown 的唯一 WebView）；再次固定另一行 = 替换。固定预览的条目被删除或同 ID 内容替换（规范 `:145`）时关闭。
 - **与其他条目的联动**：§7.3 `resignKey` 不能因为焦点进入固定预览子窗口就关掉主面板；§8.6 的 WebView 延迟释放要把固定预览视为"在用"；`HistoryListInteractionCoordinator` 的 scroll 抑制不得撤销固定预览的所有权（它不再是 hover 候选）。
