@@ -1060,6 +1060,10 @@ public actor SearchEngineImpl {
             return
         }
 
+        // Hand the storage over to the local copy before mutating it: while the property still
+        // referenced the same buffers, every touched array and dictionary was copied first.
+        fullIndex = nil
+
         // Keep the full index always usable by applying upserts incrementally.
         // For text/note changes, we may create tombstones to avoid expensive postings removals.
         let beforeTombstones = index.tombstoneCount
@@ -1099,6 +1103,7 @@ public actor SearchEngineImpl {
             return
         }
 
+        fullIndex = nil
         var updated = existing
         updated.isPinned = pinned
         index.items[slot] = updated
@@ -1124,6 +1129,7 @@ public actor SearchEngineImpl {
            !fullIndexStale,
            let slot = index.idToSlot[id],
            slot < index.items.count {
+            fullIndex = nil
             if index.items[slot] != nil {
                 index.items[slot] = nil
                 index.tombstoneCount += 1
@@ -1183,6 +1189,9 @@ public actor SearchEngineImpl {
         }
 
         guard var index = shortQueryIndex else { return }
+        // See `handleUpsertedItem`: release the property's reference so the upsert mutates the
+        // existing buffers instead of copying the whole index on every clipboard write.
+        shortQueryIndex = nil
         index.upsert(item)
         if shouldRebuildShortQueryIndexDueToTombstones(index: index) {
             let liveCount = index.healthStats().live
@@ -1211,6 +1220,7 @@ public actor SearchEngineImpl {
         }
 
         guard var index = shortQueryIndex else { return }
+        shortQueryIndex = nil
         index.markDeleted(id: id)
         if shouldRebuildShortQueryIndexDueToTombstones(index: index) {
             let liveCount = index.healthStats().live

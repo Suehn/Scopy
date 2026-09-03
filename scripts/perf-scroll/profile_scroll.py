@@ -18,8 +18,8 @@ ap.add_argument('--sample', action='store_true'); ap.add_argument('--xctrace', d
 ap.add_argument('--out', default=None); ap.add_argument('--attempts', type=int, default=3)
 ap.add_argument('--phased', action='store_true'); ap.add_argument('--reuse-db', action='store_true')
 a=ap.parse_args()
-out=a.out or os.path.join(repo, 'logs', 'perf-scroll', a.label); os.makedirs(out, exist_ok=True)
 repo=os.path.abspath(os.path.join(S, '..', '..'))
+out=a.out or os.path.join(repo, 'logs', 'perf-scroll', a.label); os.makedirs(out, exist_ok=True)
 profile_json=os.path.join(out,'profile.json')
 
 def make_db():
@@ -29,7 +29,9 @@ def make_db():
         os.makedirs(dbdir, exist_ok=True)
     else:
         dbdir=tempfile.mkdtemp(prefix='scopy-profile-db-')
-    for f in ('clipboard.db','clipboard.db-wal','clipboard.db-shm','clipboard.db.fullindex.v4.plist','clipboard.db.fullindex.v4.plist.metadata.plist'):
+    for f in ('clipboard.db','clipboard.db-wal','clipboard.db-shm',
+              'clipboard.db.fullindex.v5.bin','clipboard.db.fullindex.v5.bin.metadata.plist','clipboard.db.fullindex.v5.bin.sha256',
+              'clipboard.db.shortindex.v3.bin','clipboard.db.shortindex.v3.bin.sha256'):
         src=os.path.join(repo,'perf-db',f)
         if os.path.exists(src): shutil.copy(src, os.path.join(dbdir,f))
     return dbdir

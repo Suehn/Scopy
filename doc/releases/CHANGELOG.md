@@ -12,6 +12,17 @@
 
 - No unreleased entries.
 
+## [v0.79.0] - 2026-09-03
+
+### Changed
+
+- `HistoryItemView` no longer builds the search-evidence attributed string, its accessibility description, or the row-descriptor lookup while constructing a row. SwiftUI re-initializes every `ForEach` child on every list update, so with a search active that work was paid for every loaded row on every keystroke; it now runs in the row body, which only executes for rows that actually changed. Search typing blocks the main thread about 31% less with about 35% shorter worst-case stalls.
+- The search engine releases its stored `fullIndex` / `shortQueryIndex` reference before applying an upsert, pin, or delete, so index buffers are mutated in place instead of being copy-on-written on every clipboard write. Clipboard capture costs about 12% less CPU.
+
+### Fixed
+
+- `scripts/perf-scroll/profile_scroll.py` used its repository path before defining it, which made every invocation fail, and it copied the superseded v4 plist index cache instead of the v5 binary caches, so every profiling run rebuilt the search index.
+
 ## [v0.78.2] - 2026-09-03
 
 ### Changed

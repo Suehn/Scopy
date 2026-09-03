@@ -37,8 +37,6 @@ struct HistoryItemView: View, Equatable {
     let requestPopover: (HoverPreviewPopoverKind?) -> Void
     let dismissOtherPopovers: () -> Void
     private let contentRevision: ClipboardItemContentRevision
-    private let searchEvidenceText: AttributedString?
-    private let searchEvidenceAccessibilityText: String?
 
     // Idle rows retain only lightweight SwiftUI value state. The controller/model graph is
     // created as one session after a real interaction and released as a unit when idle.
@@ -101,23 +99,6 @@ struct HistoryItemView: View, Equatable {
         self.dismissOtherPopovers = dismissOtherPopovers
         self.contentRevision = ClipboardItemContentRevision.resolve(item: item)
         ScrollPerformanceProfile.incrementCounter(name: "row.init")
-        if let searchMatchContext {
-            let searchEvidenceText = SearchMatchPresentation.attributedText(
-                context: searchMatchContext,
-                itemType: item.type,
-                metadataPrefix: HistoryItemPresentationCache.shared
-                    .rowDescriptor(for: item, settings: settings)
-                    .searchMetadataPrefix
-            )
-            self.searchEvidenceText = searchEvidenceText
-            self.searchEvidenceAccessibilityText = SearchMatchPresentation.accessibilityDescription(
-                context: searchMatchContext,
-                itemType: item.type
-            )
-        } else {
-            self.searchEvidenceText = nil
-            self.searchEvidenceAccessibilityText = nil
-        }
     }
 
     // MARK: - Equatable
@@ -775,11 +756,30 @@ struct HistoryItemView: View, Equatable {
         descriptor.titleText
     }
 
+    /// Derived here rather than in `init`: SwiftUI re-initializes every `ForEach` child on every list
+    /// update, but a row's body only runs when the row actually changed. Building the evidence text in
+    /// `init` made each search keystroke pay one attributed string, one accessibility string and one
+    /// descriptor lookup for every loaded row.
+    private var searchEvidence: (text: AttributedString, accessibilityText: String)? {
+        guard let searchMatchContext else { return nil }
+        return (
+            SearchMatchPresentation.attributedText(
+                context: searchMatchContext,
+                itemType: item.type,
+                metadataPrefix: descriptor.searchMetadataPrefix
+            ),
+            SearchMatchPresentation.accessibilityDescription(
+                context: searchMatchContext,
+                itemType: item.type
+            )
+        )
+    }
+
     @ViewBuilder
     private var secondaryLine: some View {
-        if let searchEvidenceText {
-            Text(searchEvidenceText)
-                .accessibilityLabel(searchEvidenceAccessibilityText ?? "")
+        if let searchEvidence {
+            Text(searchEvidence.text)
+                .accessibilityLabel(searchEvidence.accessibilityText)
                 .accessibilityIdentifier("HistoryItem.MatchEvidence")
         } else {
             Text(metadataText)

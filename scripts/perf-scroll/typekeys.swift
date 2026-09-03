@@ -3,18 +3,23 @@ import CoreGraphics
 // Synthetic typing driver: posts a key-down and a key-up CGEvent per character at a fixed pace.
 // usage: typekeys <charsPerSecond> <text...>   (arguments after the rate are joined with single spaces)
 // Every character goes out as virtual key 0 with the Unicode string attached, so any Unicode text works.
-// Tokens: <bs> = backspace (virtual key 51), <cmd-a> = select all (Command + virtual key 0).
+// Tokens: <bs> = backspace (51), <cmd-a> = select all (Command + virtual key 0), <down> (125), <up> (126),
+// <ret> (36), <esc> (53).
 let a = CommandLine.arguments
 guard a.count >= 3, let rate = Double(a[1]), rate > 0 else {
     print("usage: typekeys <charsPerSecond> <text...>"); exit(64)
 }
 let text = a[2...].joined(separator: " ")
-enum Key { case char(Character), backspace, selectAll }
+enum Key { case char(Character), backspace, selectAll, vk(CGKeyCode) }
 var keys: [Key] = []
 var rest = Substring(text)
 while let c = rest.first {
     if rest.hasPrefix("<bs>") { keys.append(.backspace); rest = rest.dropFirst(4) }
     else if rest.hasPrefix("<cmd-a>") { keys.append(.selectAll); rest = rest.dropFirst(7) }
+    else if rest.hasPrefix("<down>") { keys.append(.vk(125)); rest = rest.dropFirst(6) }
+    else if rest.hasPrefix("<up>") { keys.append(.vk(126)); rest = rest.dropFirst(4) }
+    else if rest.hasPrefix("<ret>") { keys.append(.vk(36)); rest = rest.dropFirst(5) }
+    else if rest.hasPrefix("<esc>") { keys.append(.vk(53)); rest = rest.dropFirst(5) }
     else { keys.append(.char(c)); rest = rest.dropFirst() }
 }
 let src = CGEventSource(stateID: .hidSystemState)
@@ -24,6 +29,7 @@ func post(_ key: Key) {
     var flags: CGEventFlags = []
     if case .backspace = key { vk = 51 }
     if case .selectAll = key { flags = .maskCommand }
+    if case .vk(let code) = key { vk = code }
     for down in [true, false] {
         let ev = CGEvent(keyboardEventSource: src, virtualKey: vk, keyDown: down)!
         ev.flags = flags

@@ -56,3 +56,29 @@ is a best-effort re-open (press of the status item) that only works while the it
 make perf-capture LABEL=name [SCENARIO=rich] [COUNT=10] [INTERVAL=1] [SIZE=2000]
 python3 scripts/perf-scroll/profile_capture.py <Scopy.app> rich-smoke --scenario rich --count 5 --interval 1 --sample
 ```
+
+## Panel, activation and stall profiling
+
+`profile_interaction.py` measures the two interactions every use of the app goes through. Per cycle it posts the
+global hotkey (`build/panelready`, which also polls a cheap constant-cost Accessibility query to find the moment the
+main thread answers again), then activates a row and times the copy round trip (`build/enterlatency`: mouse-up or
+return -> content on the app's private pasteboard -> panel window gone).
+
+`build/panelwatch` times hotkey -> panel visible on its own. It resolves the panel's window number once from the full
+window list and then polls only that window, which keeps the sampling interval near 0.4 ms; polling the whole window
+list plus an Accessibility probe only resolves to ~17 ms. Note that closing the panel measures the same ~60 ms as
+opening it although it does almost no work, so most of that number is synthetic-event dispatch, not app time.
+
+`build/hoverstall` is the main-thread stall meter: it moves the pointer onto a row (optionally stepping down further
+rows) and issues a cheap Accessibility query every ~3 ms. Those queries are answered on the app's main thread, so a
+slow answer measures exactly how long the main thread was blocked. It prints p50/p95/max and every stall over 50 ms
+with its offset, which is what attributes hover-preview and search-typing hitches.
+
+```
+python3 scripts/perf-scroll/profile_interaction.py <Scopy.app> label --cycles 5 --reuse-db --click-row 150
+scripts/perf-scroll/build/hoverstall <pid> <x> <y> --seconds 6 --move 5 --step 46
+```
+
+Menu-bar managers such as Ice hide the status item from Accessibility and from the window list, so drive the panel
+with the hotkey rather than `build/statusclick`. The panel is a non-activating `NSPanel`: posted key events go to the
+frontmost application unless something clicks into the panel first.
