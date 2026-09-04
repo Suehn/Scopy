@@ -554,7 +554,6 @@ struct HistoryListView: View {
             }
         )
         .equatable()
-        .id(item.id)
 
         Group {
             if Self.isScrollProfile && !Self.profileAccessibility {

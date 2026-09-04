@@ -7,6 +7,16 @@ import ScopyUISupport
 
 /// 单个历史项视图 - 实现 Equatable 以优化重绘
 /// v0.9.3: 使用局部悬停状态 + 防抖 + Equatable 优化滚动性能
+/// Row bookkeeping that never affects what is drawn: liveness, pointer presence and the two
+/// ownership tokens. Held by reference so writing it does not invalidate the row's body.
+@MainActor
+final class HistoryRowControlState {
+    var isAppeared = false
+    var isPointerInsideRow = false
+    var passiveRowToken: HistoryListInteractionCoordinator.PassiveRowToken?
+    var sessionAttachmentToken: HistoryItemInteractionSessionStore.AttachmentToken?
+}
+
 @MainActor
 struct HistoryItemView: View, Equatable {
     @Environment(\.historyRelativeTimeClock) private var relativeTimeClock
@@ -45,11 +55,18 @@ struct HistoryItemView: View, Equatable {
     // Idle rows retain only lightweight SwiftUI value state. The controller/model graph is
     // created as one session after a real interaction and released as a unit when idle.
     @State private var interactionState: HistoryItemInteractionState?
-    @State private var passiveRowToken: HistoryListInteractionCoordinator.PassiveRowToken?
-    @State private var sessionAttachmentToken: HistoryItemInteractionSessionStore.AttachmentToken?
-    @State private var isPointerInsideRow = false
-    @State private var isAppeared = false
-    @State private var isUITestTapPreviewEnabled: Bool = false
+    /// Ownership and liveness bookkeeping, held by reference rather than as `@State`.
+    ///
+    /// None of it is read while the body is built, but every field is written on paths the scroll
+    /// runs constantly: a row appearing, and the pointer crossing a row as the content moves under
+    /// it. As `@State` each of those writes invalidated the row and cost another body evaluation,
+    /// which measured as roughly an eighth of the busy main thread and most of the worst-case
+    /// stall during a 12 s scroll.
+    @State private var control = HistoryRowControlState()
+
+    private static let isUITestTapPreviewEnabled: Bool =
+        ProcessInfo.processInfo.arguments.contains("--uitesting")
+            && ProcessInfo.processInfo.environment["SCOPY_UITEST_OPEN_PREVIEW_ON_TAP"] == "1"
 
     private static let inactivePopoverToken = UUID(uuidString: "00000000-0000-0000-0000-000000000000")!
 
@@ -326,8 +343,8 @@ struct HistoryItemView: View, Equatable {
         preferredToken: HistoryListInteractionCoordinator.PassiveRowToken? = nil
     ) -> HistoryItemInteractionState? {
         if activation.needsScrollBoundaryOwnership, usesPassiveRowArchitecture {
-            let token = preferredToken ?? passiveRowToken ?? interactionCoordinator.makePassiveRowToken()
-            passiveRowToken = token
+            let token = preferredToken ?? control.passiveRowToken ?? interactionCoordinator.makePassiveRowToken()
+            control.passiveRowToken = token
             guard claimPassiveRow(token: token) else { return nil }
         }
 
@@ -338,12 +355,12 @@ struct HistoryItemView: View, Equatable {
                 interactionState = nil
                 return ensureInteractionState(for: activation, preferredToken: preferredToken)
             }
-            if let sessionAttachmentToken {
+            if let attachmentToken = control.sessionAttachmentToken {
                 guard interactionSessionStore.authorizesViewAttachment(
                     current,
-                    attachmentToken: sessionAttachmentToken
+                    attachmentToken: attachmentToken
                 ) else { return nil }
-                current.activateViewAttachment(sessionAttachmentToken)
+                current.activateViewAttachment(attachmentToken)
             }
             current.reconcile(to: contentRevision, relativeTimeText: relativeTime)
             registerLegacyInteractionObserverIfNeeded(on: current)
@@ -354,8 +371,8 @@ struct HistoryItemView: View, Equatable {
             revision: contentRevision,
             relativeTimeText: relativeTime
         )
-        if let sessionAttachmentToken {
-            created.activateViewAttachment(sessionAttachmentToken)
+        if let attachmentToken = control.sessionAttachmentToken {
+            created.activateViewAttachment(attachmentToken)
         }
         interactionState = created
         ScrollPerformanceProfile.incrementCounter(name: "interaction.session_init")
@@ -368,7 +385,7 @@ struct HistoryItemView: View, Equatable {
             return
         }
         state.rowController.interactionObservation = interactionCoordinator.observe { event in
-            guard self.isAppeared else { return }
+            guard self.control.isAppeared else { return }
             self.handleInteractionEvent(event)
         }
         ScrollPerformanceProfile.incrementCounter(name: "interaction.observer_install")
@@ -383,18 +400,18 @@ struct HistoryItemView: View, Equatable {
         return interactionCoordinator.claimActiveRow(
             token: token,
             onEvent: { event in
-                guard self.isAppeared,
+                guard self.control.isAppeared,
                       self.item.id == expectedItemID,
-                      self.passiveRowToken == token else { return }
+                      self.control.passiveRowToken == token else { return }
                 self.reconcileInteractionStateIfNeeded(restartHover: false)
                 self.handleInteractionEvent(event)
             },
             restore: {
-                guard self.isAppeared,
+                guard self.control.isAppeared,
                       self.item.id == expectedItemID,
                       self.contentRevision == expectedRevision,
-                      self.passiveRowToken == token,
-                      self.isPointerInsideRow else {
+                      self.control.passiveRowToken == token,
+                      self.control.isPointerInsideRow else {
                     self.interactionCoordinator.releasePassiveRow(token: token)
                     return
                 }
@@ -406,7 +423,7 @@ struct HistoryItemView: View, Equatable {
     private func restoreSuppressedHover(
         token: HistoryListInteractionCoordinator.PassiveRowToken
     ) {
-        guard isAppeared, isPointerInsideRow, passiveRowToken == token else { return }
+        guard control.isAppeared, control.isPointerInsideRow, control.passiveRowToken == token else { return }
         guard let state = ensureInteractionState(for: .hover, preferredToken: token) else { return }
         state.previewCoordinator.isHovering = true
         activateHoverActionsIfAllowed(state: state)
@@ -414,31 +431,31 @@ struct HistoryItemView: View, Equatable {
     }
 
     private func releasePassiveOwnership() {
-        guard let passiveRowToken else { return }
-        interactionCoordinator.releasePassiveRow(token: passiveRowToken)
-        self.passiveRowToken = nil
+        guard let token = control.passiveRowToken else { return }
+        interactionCoordinator.releasePassiveRow(token: token)
+        control.passiveRowToken = nil
     }
 
     private func reconcileInteractionStateIfNeeded(restartHover: Bool = true) {
         guard let state = interactionState,
-              isAppeared,
+              control.isAppeared,
               interactionSessionStore.authorizesViewAttachment(
                   state,
-                  attachmentToken: sessionAttachmentToken
+                  attachmentToken: control.sessionAttachmentToken
               ),
-              state.ownsViewAttachment(sessionAttachmentToken) else { return }
+              state.ownsViewAttachment(control.sessionAttachmentToken) else { return }
         let changed = state.reconcile(to: contentRevision, relativeTimeText: relativeTime)
         guard changed else { return }
 
         requestPopover(nil)
         if usesPassiveRowArchitecture {
             releasePassiveOwnership()
-            guard restartHover, isAppeared, isPointerInsideRow else {
+            guard restartHover, control.isAppeared, control.isPointerInsideRow else {
                 releaseInteractionStateIfIdle(expected: state)
                 return
             }
             handleHover(true)
-        } else if restartHover, isPointerInsideRow {
+        } else if restartHover, control.isPointerInsideRow {
             state.previewCoordinator.isHovering = true
             activateHoverActionsIfAllowed(state: state)
         }
@@ -456,7 +473,7 @@ struct HistoryItemView: View, Equatable {
         if !current.hasExplicitUserOwnedWork {
             interactionSessionStore.release(current)
         }
-        if !isAppeared, !current.hasOwnedWork {
+        if !control.isAppeared, !current.hasOwnedWork {
             current.tearDown()
             interactionSessionStore.release(current)
             if interactionState === current {
@@ -465,10 +482,10 @@ struct HistoryItemView: View, Equatable {
             ScrollPerformanceProfile.incrementCounter(name: "interaction.session_release")
             return
         }
-        let ownsRestorationCandidate = passiveRowToken.map {
+        let ownsRestorationCandidate = control.passiveRowToken.map {
             interactionCoordinator.ownsSuppressedHoverCandidate(token: $0)
         } ?? false
-        guard (!isPointerInsideRow || ownsRestorationCandidate),
+        guard (!control.isPointerInsideRow || ownsRestorationCandidate),
               !isAnyPreviewPresented,
               interactionCoordinator.hoverPreviewTransferOwnerID != item.id,
               !current.hasOwnedWork else { return }
@@ -490,12 +507,12 @@ struct HistoryItemView: View, Equatable {
             ScrollPerformanceProfile.incrementCounter(name: "interaction.idle_disappear_fast_path")
             return
         }
-        let attachmentToken = sessionAttachmentToken
+        let attachmentToken = control.sessionAttachmentToken
         let detachResult = interactionSessionStore.detach(
             state,
             attachmentToken: attachmentToken
         )
-        sessionAttachmentToken = nil
+        control.sessionAttachmentToken = nil
         if detachResult == .staleAttachment {
             // A newer virtualized row instance already owns this same explicit session.
             return
@@ -515,7 +532,7 @@ struct HistoryItemView: View, Equatable {
 
     private func attachRetainedInteractionStateIfNeeded() {
         let token = interactionSessionStore.makeAttachmentToken()
-        sessionAttachmentToken = token
+        control.sessionAttachmentToken = token
         guard let retained = interactionSessionStore.attach(
             itemID: item.id,
             attachmentToken: token
@@ -534,7 +551,7 @@ struct HistoryItemView: View, Equatable {
         token: UUID
     ) {
         if presented {
-            guard isAppeared,
+            guard control.isAppeared,
                   let state = ensureInteractionState(for: .presentedPopover),
                   isViewInteractionCurrent(state, revision: state.revision) else { return }
             requestPopover(kind)
@@ -628,8 +645,8 @@ struct HistoryItemView: View, Equatable {
         revision: ClipboardItemContentRevision,
         attachmentToken: HistoryItemInteractionSessionStore.AttachmentToken? = nil
     ) -> Bool {
-        let expectedAttachmentToken = attachmentToken ?? sessionAttachmentToken
-        return isAppeared && interactionState === state &&
+        let expectedAttachmentToken = attachmentToken ?? control.sessionAttachmentToken
+        return control.isAppeared && interactionState === state &&
             interactionSessionStore.authorizesViewAttachment(
                 state,
                 attachmentToken: expectedAttachmentToken
@@ -898,55 +915,69 @@ struct HistoryItemView: View, Equatable {
         }
     }
 
+    /// The row's activation surface is deliberately not a `Button`.
+    ///
+    /// A SwiftUI button installs a pointer region, and `NSTableView` makes SwiftUI recompute a
+    /// re-inserted cell's pointer region, which re-evaluates the whole row body. Every row coming
+    /// into view during a scroll paid it: `NSHostingView.updateRemovedState` ->
+    /// `PointerRegionUpdater.updatePointerRegion` was 5.7% of main-thread samples and falls to
+    /// zero when the row carries no button. Tap target, identifier and the button role for
+    /// assistive technology are unchanged.
     private var mainRowButton: some View {
-        Button(action: handlePrimaryAction) {
-            HStack(alignment: .center, spacing: ScopySpacing.sm) {
-                // Pin 标记：左侧颜色条
-                if item.isPinned {
-                    Capsule()
-                        .fill(ScopyColors.selectionBorder)
-                        .frame(width: ScopySize.Width.pinIndicator, height: ScopySize.Height.pinIndicator)
-                }
+        rowActivationLabel
+            .contentShape(Rectangle())
+            .onTapGesture(perform: handlePrimaryAction)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityElement(children: .combine)
+            .accessibilityAddTraits(.isButton)
+            .accessibilityIdentifier("HistoryItem.MainAction")
+            .accessibilityHint("Activate this history item")
+            .accessibilityAction(.default, handlePrimaryAction)
+    }
 
-                // App 图标 (v0.15: 保留图标，只移除元数据中的应用名称)
-                if let icon = appIcon {
-                    Image(nsImage: icon)
-                        .resizable()
-                        .frame(width: ScopySize.Icon.listApp, height: ScopySize.Icon.listApp)
-                        .cornerRadius(ScopySize.Corner.sm)
-                } else {
-                    Image(systemName: ScopyIcons.app)
-                        .font(.system(size: ScopySize.Icon.sm))
-                        .foregroundStyle(ScopyColors.mutedText)
-                        .frame(width: ScopySize.Icon.listApp, height: ScopySize.Icon.listApp)
-                }
+    private var rowActivationLabel: some View {
+        HStack(alignment: .center, spacing: ScopySpacing.sm) {
+            // Pin 标记：左侧颜色条
+            if item.isPinned {
+                Capsule()
+                    .fill(ScopyColors.selectionBorder)
+                    .frame(width: ScopySize.Width.pinIndicator, height: ScopySize.Height.pinIndicator)
+            }
 
-                contentView
+            // App 图标 (v0.15: 保留图标，只移除元数据中的应用名称)
+            if let icon = appIcon {
+                Image(nsImage: icon)
+                    .resizable()
+                    .frame(width: ScopySize.Icon.listApp, height: ScopySize.Icon.listApp)
+                    .cornerRadius(ScopySize.Corner.sm)
+            } else {
+                Image(systemName: ScopyIcons.app)
+                    .font(.system(size: ScopySize.Icon.sm))
+                    .foregroundStyle(ScopyColors.mutedText)
+                    .frame(width: ScopySize.Icon.listApp, height: ScopySize.Icon.listApp)
+            }
 
-                Spacer(minLength: ScopySpacing.md)
+            contentView
 
-                if item.isPinned {
-                    Image(systemName: ScopyIcons.pin)
-                        .font(.system(size: ScopySize.Icon.pin))
-                        .foregroundStyle(.orange)
-                }
+            Spacer(minLength: ScopySpacing.md)
 
-                if let statusMessage, !statusMessage.isEmpty {
-                    Text(statusMessage)
-                        .font(ScopyTypography.microMono)
-                        .foregroundStyle(ScopyColors.mutedText)
-                }
+            if item.isPinned {
+                Image(systemName: ScopyIcons.pin)
+                    .font(.system(size: ScopySize.Icon.pin))
+                    .foregroundStyle(.orange)
+            }
 
-                Text(relativeTime)
+            if let statusMessage, !statusMessage.isEmpty {
+                Text(statusMessage)
                     .font(ScopyTypography.microMono)
                     .foregroundStyle(ScopyColors.mutedText)
             }
-            .contentShape(Rectangle())
+
+            Text(relativeTime)
+                .font(ScopyTypography.microMono)
+                .foregroundStyle(ScopyColors.mutedText)
         }
-        .buttonStyle(.plain)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .accessibilityIdentifier("HistoryItem.MainAction")
-        .accessibilityHint("Activate this history item")
+        .contentShape(Rectangle())
     }
 
     private var rowVisualContent: some View {
@@ -1008,16 +1039,11 @@ struct HistoryItemView: View, Equatable {
     private var rowLifecycleContent: some View {
         rowVisualContent
         .onAppear {
-            isAppeared = true
+            control.isAppeared = true
             if HistoryListUITestRuntime.isEnabled {
                 HistoryListUITestProbe.shared.recordRowAppeared(itemID: item.id)
             }
             attachRetainedInteractionStateIfNeeded()
-            if ProcessInfo.processInfo.arguments.contains("--uitesting") {
-                isUITestTapPreviewEnabled = (ProcessInfo.processInfo.environment["SCOPY_UITEST_OPEN_PREVIEW_ON_TAP"] == "1")
-            } else {
-                isUITestTapPreviewEnabled = false
-            }
             if !usesPassiveRowArchitecture {
                 _ = ensureInteractionState(for: .legacyAppearance)
             }
@@ -1111,7 +1137,7 @@ struct HistoryItemView: View, Equatable {
         ) {
             if let state = interactionState {
                 let expectedRevision = state.revision
-                let expectedAttachmentToken = sessionAttachmentToken
+                let expectedAttachmentToken = control.sessionAttachmentToken
                 pinnablePreview(kind: .text, state: state) {
                 HistoryItemTextPreviewView(
                     model: state.previewModel,
@@ -1164,7 +1190,7 @@ struct HistoryItemView: View, Equatable {
         ) {
             if let state = interactionState {
                 let expectedRevision = state.revision
-                let expectedAttachmentToken = sessionAttachmentToken
+                let expectedAttachmentToken = control.sessionAttachmentToken
                 pinnablePreview(kind: .file, state: state) {
                 HistoryItemFilePreviewView(
                     model: state.previewModel,
@@ -1289,14 +1315,14 @@ struct HistoryItemView: View, Equatable {
         // v0.17: 增强任务清理 - 确保视图消失时释放所有任务引用
         .onDisappear {
             if let state = interactionState,
-               state.ownsViewAttachment(sessionAttachmentToken) {
+               state.ownsViewAttachment(control.sessionAttachmentToken) {
                 requestPopover(nil)
             }
             if HistoryListUITestRuntime.isEnabled {
                 HistoryListUITestProbe.shared.recordRowDisappeared(itemID: item.id)
             }
-            isAppeared = false
-            isPointerInsideRow = false
+            control.isAppeared = false
+            control.isPointerInsideRow = false
             tearDownInteractionStateOnDisappear()
         }
         .onChange(of: interactionState?.previewModel.markdownContentSize) { _, _ in
@@ -1322,10 +1348,10 @@ struct HistoryItemView: View, Equatable {
     }
 
     private func handleHover(_ hovering: Bool) {
-        isPointerInsideRow = hovering
+        control.isPointerInsideRow = hovering
 
         if !hovering {
-            if let token = passiveRowToken,
+            if let token = control.passiveRowToken,
                interactionCoordinator.ownsSuppressedHoverCandidate(token: token) {
                 releasePassiveOwnership()
             }
@@ -1348,16 +1374,16 @@ struct HistoryItemView: View, Equatable {
                 releaseInteractionStateIfIdle(expected: state)
             }
 
-            let token = passiveRowToken ?? interactionCoordinator.makePassiveRowToken()
-            passiveRowToken = token
+            let token = control.passiveRowToken ?? interactionCoordinator.makePassiveRowToken()
+            control.passiveRowToken = token
             let expectedItemID = item.id
             let expectedRevision = contentRevision
             _ = interactionCoordinator.setSuppressedHoverCandidate(token: token) {
-                guard self.isAppeared,
-                      self.isPointerInsideRow,
+                guard self.control.isAppeared,
+                      self.control.isPointerInsideRow,
                       self.item.id == expectedItemID,
                       self.contentRevision == expectedRevision,
-                      self.passiveRowToken == token else {
+                      self.control.passiveRowToken == token else {
                     self.interactionCoordinator.releasePassiveRow(token: token)
                     return
                 }
@@ -1377,7 +1403,7 @@ struct HistoryItemView: View, Equatable {
     }
 
     private func activateHoverActionsIfAllowed(state: HistoryItemInteractionState) {
-        guard let attachmentToken = sessionAttachmentToken,
+        guard let attachmentToken = control.sessionAttachmentToken,
               isViewInteractionCurrent(
                   state,
                   revision: contentRevision,
@@ -1426,7 +1452,7 @@ struct HistoryItemView: View, Equatable {
     /// v0.12: 完善取消检查，获取数据后也检查取消状态
     /// v0.22: 确保在创建新任务前取消旧任务，防止快速悬停时任务累积导致内存泄漏
     private func startPreviewTask(state: HistoryItemInteractionState) {
-        guard let attachmentToken = sessionAttachmentToken,
+        guard let attachmentToken = control.sessionAttachmentToken,
               isViewInteractionCurrent(
                   state,
                   revision: contentRevision,
@@ -1459,7 +1485,7 @@ struct HistoryItemView: View, Equatable {
     }
 
     private func startFilePreviewTask(state: HistoryItemInteractionState) {
-        guard let attachmentToken = sessionAttachmentToken,
+        guard let attachmentToken = control.sessionAttachmentToken,
               isViewInteractionCurrent(
                   state,
                   revision: contentRevision,
@@ -1546,7 +1572,7 @@ struct HistoryItemView: View, Equatable {
               let exportToken = state.rowController.exportAuthorizationToken else { return }
         guard interactionSessionStore.registerExplicitWork(
             state,
-            attachmentToken: sessionAttachmentToken
+            attachmentToken: control.sessionAttachmentToken
         ) else {
             state.rowController.cancelExportActionTask()
             releaseInteractionStateIfIdle(expected: state)
@@ -1633,7 +1659,7 @@ struct HistoryItemView: View, Equatable {
         state.rowController.presentNoteEditor(note: item.note)
         guard interactionSessionStore.registerExplicitWork(
             state,
-            attachmentToken: sessionAttachmentToken
+            attachmentToken: control.sessionAttachmentToken
         ) else {
             state.rowController.dismissNoteEditor(discardDraft: true)
             releaseInteractionStateIfIdle(expected: state)
@@ -1650,7 +1676,7 @@ struct HistoryItemView: View, Equatable {
         guard let request = state.rowController.beginNoteSave() else { return }
         guard interactionSessionStore.registerExplicitWork(
             state,
-            attachmentToken: sessionAttachmentToken
+            attachmentToken: control.sessionAttachmentToken
         ) else {
             state.rowController.cancelNoteSave()
             return
@@ -1681,9 +1707,9 @@ struct HistoryItemView: View, Equatable {
 
     private func scheduleNoteEditorDismissIfStillAttached() {
         guard let state = interactionState,
-              let attachmentToken = sessionAttachmentToken else { return }
+              let attachmentToken = control.sessionAttachmentToken else { return }
         DispatchQueue.main.async {
-            guard self.isAppeared,
+            guard self.control.isAppeared,
                   self.interactionState === state,
                   self.interactionSessionStore.authorizesViewAttachment(
                       state,
@@ -1695,9 +1721,9 @@ struct HistoryItemView: View, Equatable {
     }
 
     private func handlePrimaryAction() {
-        if isUITestTapPreviewEnabled {
+        if Self.isUITestTapPreviewEnabled {
             dismissOtherPopovers()
-            isPointerInsideRow = true
+            control.isPointerInsideRow = true
             guard let state = ensureInteractionState(for: .presentedPopover) else { return }
             state.previewCoordinator.isHovering = true
             // UITest 点按打开 preview 只需要维持 row hover，不应伪造 popover hover，
@@ -1887,7 +1913,7 @@ struct HistoryItemView: View, Equatable {
         state.rowController.isOptimizingImage = true
         guard interactionSessionStore.registerExplicitWork(
             state,
-            attachmentToken: sessionAttachmentToken
+            attachmentToken: control.sessionAttachmentToken
         ) else {
             state.rowController.isOptimizingImage = false
             state.finishOptimizationWithoutFeedback(startedAt: startRevision)
@@ -1963,7 +1989,7 @@ struct HistoryItemView: View, Equatable {
 
     private func scheduleRowHoverExitCleanup(state: HistoryItemInteractionState) {
         guard interactionState === state,
-              let attachmentToken = sessionAttachmentToken else { return }
+              let attachmentToken = control.sessionAttachmentToken else { return }
         state.previewCoordinator.cancelHoverExitTask()
         guard isAnyPreviewPresented else {
             resetPreviewState(hidePopovers: true, state: state)
@@ -2001,7 +2027,7 @@ struct HistoryItemView: View, Equatable {
     /// for AppKit's transient hover changes while the popover opens, closes, or hands focus back.
     private func schedulePopoverHoverExitCleanup() {
         guard let state = interactionState,
-              let attachmentToken = sessionAttachmentToken else { return }
+              let attachmentToken = control.sessionAttachmentToken else { return }
         let expectedRevision = state.revision
         state.previewCoordinator.cancelHoverExitTask()
         state.previewCoordinator.hoverExitTask = Task { @MainActor in
@@ -2033,7 +2059,7 @@ struct HistoryItemView: View, Equatable {
     /// v0.15.1: Start text preview task - uses `plainText` (full content) and lazily upgrades to Markdown preview when detected.
     /// v0.22: 确保在创建新任务前取消旧任务，防止快速悬停时任务累积导致内存泄漏
     private func startTextPreviewTask(state: HistoryItemInteractionState) {
-        guard let attachmentToken = sessionAttachmentToken,
+        guard let attachmentToken = control.sessionAttachmentToken,
               isViewInteractionCurrent(
                   state,
                   revision: contentRevision,
