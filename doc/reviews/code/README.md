@@ -8,6 +8,7 @@ canonical: true
 
 # Code Reviews
 
+- [code-audit-2026-09-05.md](./code-audit-2026-09-05.md) — dead-code cleanup, project-generation and worktree verification fixes, and PR/branch triage
 - [code-audit-2026-07-10.md](./code-audit-2026-07-10.md) — point-in-time quality audit after safe-triangle/DerivedData work and before the v0.65.0 passive-row changes
 
 - `code-audit-*`: broad codebase audits

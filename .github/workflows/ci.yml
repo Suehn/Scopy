@@ -30,6 +30,9 @@ jobs:
       - name: Test release workflow policy
         run: make test-release-policy
 
+      - name: Test development tooling and evidence gates
+        run: make test-tooling
+
   build:
     runs-on: macos-15
     env:
