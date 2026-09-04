@@ -139,6 +139,25 @@ Measured interleaved in one session, 5 runs per side:
 | worst callback | `35.0 ms` | `35.0 ms` |
 | callback p95 | `8.33-16.67 ms` | unchanged |
 
+## The list is not dropping frames
+
+Everything above measures CPU. Whether the scroll is *smooth* is a different question, and the
+harness cannot answer it: its callback intervals are quantised to the 8.333 ms display tick and
+cannot see a hitch. Instruments can.
+
+An `Animation Hitches` trace over the same 12 s / 2,850 px/s scroll records **zero hitches**
+(`hitches-summary`: 0 rows across 967 presented frames). The app's own counters agree: dropped-frame
+ratio `0.005`, worst callback interval `16.67 ms`, i.e. at most one skipped frame on a 120 Hz
+display across the whole run.
+
+So the history list already scrolls at the display's limit under input far more aggressive than a
+person produces. **There is no smoothness deficit to recover.** What the work in this document
+improves is CPU, which is battery and heat, not perceived scrolling.
+
+Note for anyone sharing a trace: an Instruments `.trace` bundle embeds the recording process's
+whole environment, including any secrets exported in the shell. `logs/` is git-ignored so these
+stay out of the repository, but they should not be attached to a bug report unedited.
+
 ## The ceiling
 
 Removing **everything** from the row — all content, all interaction — leaves the `1.74 s` of
