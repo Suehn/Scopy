@@ -78,6 +78,7 @@ targets:
           - "Infrastructure/**"
           - "Models/**"
           - "Protocols/**"
+          - "Runtime/**"
           - "Services/**"
           - "Utilities/**"
           # These runtime assets are staged as one verified folder by the post-build scripts below.
@@ -178,6 +179,7 @@ targets:
           - "Infrastructure/**"
           - "Models/**"
           - "Protocols/**"
+          - "Runtime/**"
           - "Services/**"
           - "Utilities/**"
     settings:
@@ -236,6 +238,7 @@ targets:
           - "Infrastructure/**"
           - "Models/**"
           - "Protocols/**"
+          - "Runtime/**"
           - "Services/**"
           - "Utilities/**"
     settings:

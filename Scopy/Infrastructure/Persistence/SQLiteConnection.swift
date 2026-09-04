@@ -94,6 +94,13 @@ final class SQLiteConnection {
         sqlite3_wal_checkpoint_v2(db, nil, SQLITE_CHECKPOINT_PASSIVE, nil, nil)
     }
 
+    /// Checkpoints and truncates the WAL. Unlike the passive mode this actually shrinks the
+    /// `-wal` file once no reader is behind, which is what an oversized WAL needs.
+    func walCheckpointTruncate() {
+        guard let db = handle else { return }
+        sqlite3_wal_checkpoint_v2(db, nil, SQLITE_CHECKPOINT_TRUNCATE, nil, nil)
+    }
+
     func changeCount() -> Int {
         guard let db = handle else { return 0 }
         return Int(sqlite3_changes(db))
@@ -125,12 +132,33 @@ final class SQLiteStatement {
     }
 
     func bindText(_ value: String?, at index: Int32) throws {
-        guard let value else {
+        guard var text = value else {
             try bindNull(index)
             return
         }
 
-        guard sqlite3_bind_text(statement, index, value, -1, SQLiteConnection.sqliteTransient) == SQLITE_OK else {
+        // Bind by explicit UTF-8 byte count. A `-1` length uses C-string semantics and would
+        // silently truncate clipboard text at the first embedded NUL.
+        //
+        // Native Swift strings already hold contiguous UTF-8, so the common path binds straight
+        // out of the string's own storage and only a bridged string pays for a copy.
+        let status = text.withUTF8 { buffer -> Int32 in
+            // An empty string still has to bind as text, not NULL, so it needs a valid pointer.
+            let empty: CChar = 0
+            return withUnsafePointer(to: empty) { fallback in
+                let bytes = buffer.baseAddress
+                    .map { UnsafeRawPointer($0).assumingMemoryBound(to: CChar.self) } ?? fallback
+                return sqlite3_bind_text64(
+                    statement,
+                    index,
+                    bytes,
+                    sqlite3_uint64(buffer.count),
+                    SQLiteConnection.sqliteTransient,
+                    UInt8(SQLITE_UTF8)
+                )
+            }
+        }
+        guard status == SQLITE_OK else {
             throw SQLiteConnection.SQLiteConnectionError.bindFailed(connection.errorMessage())
         }
     }
@@ -180,7 +208,9 @@ final class SQLiteStatement {
 
     func columnText(_ index: Int32) -> String? {
         guard let ptr = sqlite3_column_text(statement, index) else { return nil }
-        return String(cString: ptr)
+        // Read by stored byte count, not C-string semantics, so text containing NUL round-trips.
+        let length = Int(sqlite3_column_bytes(statement, index))
+        return String(decoding: UnsafeBufferPointer(start: ptr, count: length), as: UTF8.self)
     }
 
     func columnTextBytes(_ index: Int32) -> (ptr: UnsafePointer<UInt8>, length: Int)? {

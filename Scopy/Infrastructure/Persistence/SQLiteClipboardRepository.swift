@@ -1228,8 +1228,8 @@ actor SQLiteClipboardRepository {
         )
     }
 
-    func incrementalVacuum(pages: Int) throws {
-        try execute("PRAGMA incremental_vacuum(\(pages))")
+    func walCheckpointTruncate() {
+        connection?.walCheckpointTruncate()
     }
 
     // MARK: - Internals

@@ -493,10 +493,23 @@ public final class ClipboardMonitor {
         return extractContent(from: pasteboard)
     }
 
+    /// Why a pasteboard write produced nothing usable.
+    ///
+    /// A failed write leaves the previous clipboard content in place, so these must reach the
+    /// caller rather than a log line.
+    public enum PasteboardWriteFailure: Error, Equatable {
+        /// The bytes could not be turned into a pasteboard image representation.
+        case imageNotRenderable
+        /// `NSPasteboard` refused the primary representation.
+        case rejectedByPasteboard
+    }
+
     /// Copy content to system clipboard
-    public func copyToClipboard(text: String) {
+    public func copyToClipboard(text: String) throws {
         pasteboard.clearContents()
-        pasteboard.setString(text, forType: .string)
+        guard pasteboard.setString(text, forType: .string) else {
+            throw PasteboardWriteFailure.rejectedByPasteboard
+        }
         // Update change count to avoid triggering our own copy as new item
         lastChangeCount = pasteboard.changeCount
     }
@@ -505,11 +518,10 @@ public final class ClipboardMonitor {
         data: Data,
         type: NSPasteboard.PasteboardType,
         imageWriteMode: ImagePasteboardWriteMode = .standard
-    ) {
+    ) throws {
         if type == .png {
             guard let imagePayload = Self.makeImagePasteboardPayloadForWrite(data, imageWriteMode: imageWriteMode) else {
-                ScopyLog.monitor.error("Failed to normalize image payload as PNG before pasteboard write")
-                return
+                throw PasteboardWriteFailure.imageNotRenderable
             }
 
             pasteboard.clearContents()
@@ -517,10 +529,11 @@ public final class ClipboardMonitor {
             pasteboard.declareTypes(declaredTypes, owner: nil)
 
             guard pasteboard.setData(imagePayload.primaryPNGData, forType: .png) else {
-                ScopyLog.monitor.error("Failed to write PNG payload to pasteboard")
-                return
+                throw PasteboardWriteFailure.rejectedByPasteboard
             }
 
+            // The primary PNG is on the pasteboard; a missing compatibility fallback narrows the
+            // set of readers, it does not fail the copy.
             if let tiffData = imagePayload.compatibilityTIFFData,
                !pasteboard.setData(tiffData, forType: .tiff) {
                 ScopyLog.monitor.warning("Failed to write TIFF fallback for PNG payload")
@@ -531,7 +544,9 @@ public final class ClipboardMonitor {
         }
 
         pasteboard.clearContents()
-        pasteboard.setData(data, forType: type)
+        guard pasteboard.setData(data, forType: type) else {
+            throw PasteboardWriteFailure.rejectedByPasteboard
+        }
         lastChangeCount = pasteboard.changeCount
     }
 
@@ -539,43 +554,44 @@ public final class ClipboardMonitor {
         imageData data: Data,
         fileURL: URL,
         imageWriteMode: ImagePasteboardWriteMode = .standard
-    ) {
+    ) throws {
         guard let imagePayload = Self.makeImagePasteboardPayloadForWrite(data, imageWriteMode: imageWriteMode) else {
-            ScopyLog.monitor.error("Failed to normalize file-backed image payload before pasteboard write")
-            return
+            throw PasteboardWriteFailure.imageNotRenderable
         }
 
         pasteboard.clearContents()
         guard pasteboard.writeObjects([fileURL as NSURL]) else {
             ScopyLog.monitor.warning("Failed to write image file URL to pasteboard; falling back to PNG payload")
-            copyToClipboard(data: data, type: .png, imageWriteMode: imageWriteMode)
+            try copyToClipboard(data: data, type: .png, imageWriteMode: imageWriteMode)
             return
         }
 
         let fileListType = NSPasteboard.PasteboardType("NSFilenamesPboardType")
         pasteboard.setPropertyList([fileURL.path], forType: fileListType)
 
-        guard pasteboard.setData(imagePayload.primaryPNGData, forType: .png) else {
+        // The file URL is already on the pasteboard, so the copy succeeded; the inline
+        // representations only widen reader compatibility.
+        if pasteboard.setData(imagePayload.primaryPNGData, forType: .png) {
+            if let tiffData = imagePayload.compatibilityTIFFData,
+               !pasteboard.setData(tiffData, forType: .tiff) {
+                ScopyLog.monitor.warning("Failed to add TIFF fallback for file-backed image pasteboard payload")
+            }
+        } else {
             ScopyLog.monitor.warning("Failed to add PNG fallback for file-backed image pasteboard payload")
-            lastChangeCount = pasteboard.changeCount
-            return
-        }
-
-        if let tiffData = imagePayload.compatibilityTIFFData,
-           !pasteboard.setData(tiffData, forType: .tiff) {
-            ScopyLog.monitor.warning("Failed to add TIFF fallback for file-backed image pasteboard payload")
         }
 
         lastChangeCount = pasteboard.changeCount
     }
 
-    public func copyToClipboard(text: String, data: Data, type: NSPasteboard.PasteboardType) {
+    public func copyToClipboard(text: String, data: Data, type: NSPasteboard.PasteboardType) throws {
         pasteboard.clearContents()
 
         let item = NSPasteboardItem()
         item.setString(text, forType: .string)
         item.setData(data, forType: type)
-        pasteboard.writeObjects([item])
+        guard pasteboard.writeObjects([item]) else {
+            throw PasteboardWriteFailure.rejectedByPasteboard
+        }
 
         lastChangeCount = pasteboard.changeCount
     }
@@ -739,11 +755,13 @@ public final class ClipboardMonitor {
 
     /// Copy file URLs to system clipboard
     /// 将文件 URL 复制到系统剪贴板，支持 Finder 粘贴
-    public func copyToClipboard(fileURLs: [URL]) {
+    public func copyToClipboard(fileURLs: [URL]) throws {
         pasteboard.clearContents()
 
         // 方法1: 使用 NSURL 的 NSPasteboardWriting 协议
-        pasteboard.writeObjects(fileURLs as [NSURL])
+        guard pasteboard.writeObjects(fileURLs as [NSURL]) else {
+            throw PasteboardWriteFailure.rejectedByPasteboard
+        }
 
         // 方法2: 同时设置 NSFilenamesPboardType，确保 Finder 兼容
         // 这是旧的 API，但 Finder 仍然依赖它

@@ -2,6 +2,7 @@ import Foundation
 import SwiftUI
 import AppKit
 import WebKit
+import ScopyKit
 import ScopyUISupport
 
 enum MarkdownPreviewRenderIdentity {

@@ -1,4 +1,5 @@
 import AppKit
+import ScopyKit
 import SwiftUI
 
 /// Marks list scrolls the app performs itself (keyboard selection follow) so that the clip-view

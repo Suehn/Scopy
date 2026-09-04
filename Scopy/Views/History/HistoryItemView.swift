@@ -699,7 +699,7 @@ struct HistoryItemView: View, Equatable {
     private var canSendViaAirDrop: Bool {
         switch item.type {
         case .file:
-            return !FilePreviewSupport.fileURLs(from: item.plainText, requireExists: true).isEmpty
+            return !FilePreviewSupport.fileURLs(from: item.plainText).isEmpty
         case .image:
             return true
         case .text, .rtf, .html, .other:
@@ -710,7 +710,7 @@ struct HistoryItemView: View, Equatable {
     private var canOpenContainingFolder: Bool {
         switch item.type {
         case .file:
-            return !FilePreviewSupport.fileURLs(from: item.plainText, requireExists: true).isEmpty
+            return !FilePreviewSupport.fileURLs(from: item.plainText).isEmpty
         case .image:
             guard realImageFileURL != nil else { return false }
             return true
@@ -728,7 +728,7 @@ struct HistoryItemView: View, Equatable {
             }
         }
 
-        return FilePreviewSupport.fileURLs(from: item.plainText, requireExists: true).first
+        return FilePreviewSupport.fileURLs(from: item.plainText, policy: .regularFilesOnly).first
     }
 
     private var filePreviewIsMarkdown: Bool {

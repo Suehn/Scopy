@@ -125,6 +125,8 @@ Scopy is a native macOS clipboard manager for users who need durable clipboard h
 ### Correctness And Safety
 
 - Copying from history must reproduce the stored content type as faithfully as the system pasteboard allows.
+- A copy that did not reach the system pasteboard must fail, not report success. A missing row, an unreadable payload, and a pasteboard that refused the content are all errors; usage counts and item events must not advance, the panel must stay open, and the failure must be visible to the user rather than only logged.
+- A file capture replays the exact nodes it recorded, in copy order. Directories and packages are part of that list: a copied folder must return to the pasteboard as the folder, not as its path text. Falling back to path text is only correct when every recorded node is gone.
 - When HTML and plain-text clipboard representations are demonstrably related, preserve authored Markdown structure from the plain-text representation while retaining the HTML payload. Unrelated or suspicious side-channel text must not replace the trustworthy rich-content extraction.
 - Cleanup, delete, and optimization paths must not remove or rewrite unrelated files.
 - Cleanup must revalidate each planned row inside the deleting transaction. A row pinned after planning, or whose content identity, recency, size, type, or storage ownership changed, must remain untouched; history and search must converge from the exact committed deletion set.
@@ -132,7 +134,7 @@ Scopy is a native macOS clipboard manager for users who need durable clipboard h
 - The storage commit protocol guarantees process-crash/restart consistency (D1). It does not claim power-loss durability while SQLite remains WAL `synchronous=NORMAL` and file publication is not explicitly synced.
 - Cleanup decisions must use exact nonnegative persisted byte counts; a large row that satisfies a cleanup target must not cause later unrelated rows to be selected because of integer narrowing or overflow.
 - AirDrop should share validated real files when available and may generate temporary PNGs for image rows; Open Containing Folder must only reveal real user files, never temporary share artifacts.
-- Paste-optimized for Codex must post `Control+V` after copying and closing the panel.
+- Paste-optimized for Codex must post `Control+V` after copying and closing the panel, and only after the copy is known to have reached the pasteboard; pasting after a failed write would deliver whatever the clipboard held before.
 - File notes, image optimization, and export flows must not corrupt the underlying item model.
 - Markdown preview and PNG export must use the same parsed HTML and base CSS for math, footnotes, syntax highlighting, tables, tasks, citations, CJK/RTL text, and Unicode; export-only fitting may run only after preview-equivalent layout is ready.
 - UI refactors must not silently change settings transaction semantics.

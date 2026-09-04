@@ -33,7 +33,20 @@ struct FooterView: View {
                 .background(ScopyColors.separator.opacity(ScopySize.Opacity.light))
 
             HStack(spacing: ScopySpacing.md) {
-                // Status Info - clean text without container
+                // Status Info - clean text without container. A failed action takes this slot so
+                // it stays visible without changing the footer's fixed height.
+                if let actionErrorMessage = historyViewModel.actionErrorMessage {
+                    HStack(spacing: ScopySpacing.xs) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                        Text(actionErrorMessage)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                    }
+                    .font(ScopyTypography.microMono)
+                    .foregroundStyle(ScopyColors.warning)
+                    .accessibilityIdentifier("Footer.ActionError")
+                    .onTapGesture { historyViewModel.clearActionError() }
+                } else {
                 HStack(spacing: ScopySpacing.sm) {
                     Text(summaryText)
                         .monospacedDigit()
@@ -60,6 +73,7 @@ struct FooterView: View {
                 }
                 .font(ScopyTypography.microMono)
                 .foregroundStyle(ScopyColors.tertiaryText)
+                }
 
                 Spacer()
 

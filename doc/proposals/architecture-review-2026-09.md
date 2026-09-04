@@ -32,6 +32,16 @@ audience: implementing agent (Codex) + maintainer review
 - **暂不改原文/富文本存储模型**：§3.2/§4.2 要真正保留同一次复制的全部 plain/RTF/HTML 表示，必须用新的完整 pasteboard snapshot payload；现有安装要么需要 migration/legacy decoder，要么需要明确的数据 epoch 重置。当前两者都不获授权，禁止做半套 magic header、双读或新旧哈希并存。
 - v0.78.1 只作为已产生的中间历史标签；其后所有选定改进与统一门禁完成后才创建一次最终修复版本。
 
+### 0.3 第二方复核与首批实施（2026-09-04）
+
+一份独立的全仓审查（GPT Pro）在 `8f9cac6`（v0.79.0）上复现了本文的多数结论。逐条对代码核实后：**大部分属实**；三处需要修正措辞，一处判定为"结构成立但当前不构成缺陷"，两处它不知道已被裁决。
+
+- **修正**：`makeImagePasteboardPayloadForWrite` 的 `CGImageSourceCreateImageAtIndex` 在标准 PNG 快路径上是多余对象创建，不是"完整解码"；真正的 w×h×4 分配只发生在 rasterize 分支（非 PNG，或 codex 模式的 paletted PNG），该分支确实无像素预算且在 MainActor 上。
+- **降级**：合并队列"旧输出配新元数据"结构上成立（`workerLoop` 用原始 work 执行、用合并后 work 回调），但当前不可达：缩略图队列以 `(typeNamespace, contentHash)` 为 key，publish 时复核 type/hash，改 `thumbnailHeight` 会先 stop 队列并 `clearThumbnailCache`；文件大小队列的 completion 完全忽略合并后的 work。不要为此改动队列。
+- **已裁决**：原文保真（§3.2）与按 representation 去重（§4.2）仍按 §0.2 冻结，等待明确的 data epoch 决定；§8.2 的 `terminateLater` 仍按 §0.1 暂缓。
+
+首批实施（不含上述冻结项）：#1 复制回执、文件夹回贴、publication 失败回退水位、`Runtime` 双 target 编译、死 `incremental_vacuum`、AirDrop 临时文件清扫、SQLite 内嵌 NUL 截断。
+
 ## 1. 七个跨模块主题
 
 1. **静默失败**：搜索证据构建失败会清空整页结果（§5.1）；复制/删除/置顶/备注失败只写日志（§7.4）；正则无效等同"无结果"（§5.3）。共同方向：任何失败都要有一个用户可见的落点，且失败降级为"少一点信息"，不是"什么都没有"。原先关于 `</head>` 导出的判断已由 §0.1 否决。

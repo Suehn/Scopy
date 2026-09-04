@@ -43,6 +43,7 @@ The app target imports backend/UI support through SwiftPM products rather than c
 | `Scopy/Domain` | DTOs, protocols, and domain-level types |
 | `Scopy/Infrastructure` | Search engine, persistence helpers, settings/configuration infrastructure |
 | `Scopy/Services` | Storage, clipboard monitoring, and concrete service primitives |
+| `Scopy/Runtime` | ScopyKit-only runtime configuration (`PerfFeatureFlags`); excluded from the app and test targets so it is compiled once |
 | `Scopy/Observables` | State/view-model layer that adapts backend protocols to SwiftUI |
 | `Scopy/Views` | Main panel, header, history items, settings pages, UI testing harnesses |
 | `Scopy/Resources` | Markdown preview assets, bundled tools, third-party runtime resources |
@@ -320,6 +321,7 @@ Implication: if you touch settings behavior, preserve the Save/Cancel model and 
 - Historical directories under `doc/implementation`, `doc/profiles`, and `doc/specs` are non-normative evidence only, not compatibility entrypoints. Remove obsolete active links and paths instead of adding redirects, aliases, or compatibility stubs.
 - Heavy work should stay off the main thread; correctness beats opportunistic speedups.
 - Views should not directly become persistence clients.
+- Every source file belongs to exactly one module. `Package.swift` and `project.yml` exclude the same directories from opposite sides; a file compiled into both `ScopyKit` and the app target produces two copies of its static state.
 - Release publication consumes a deliberate existing tag; ordinary CI must never create or push one.
 - Select roadmap work by evidenced severity, affected surface, recurrence/likelihood, and confidence relative to implementation/rollback cost. Prefer crashes, data-integrity failures, unsafe release paths, and measured systemic bottlenecks over cosmetic cleanup or speculative micro-optimization.
 

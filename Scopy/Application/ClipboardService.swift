@@ -430,19 +430,19 @@ actor ClipboardEventQueue {
     }
 
     func discardPublication(_ token: PublicationToken) {
-        completePublication(token)
+        abandonPublication(token)
     }
 
     @discardableResult
     func enqueue(_ event: ClipboardEvent, publication token: PublicationToken? = nil) async -> Bool {
         guard !isFinished, !Task.isCancelled else {
-            if let token { completePublication(token) }
+            if let token { abandonPublication(token) }
             return false
         }
 
         while bufferedCount >= capacity, !isFinished {
             guard !Task.isCancelled else {
-                if let token { completePublication(token) }
+                if let token { abandonPublication(token) }
                 return false
             }
             let waiterID = UUID()
@@ -456,7 +456,7 @@ actor ClipboardEventQueue {
         }
 
         guard !isFinished, !Task.isCancelled else {
-            if let token { completePublication(token) }
+            if let token { abandonPublication(token) }
             return false
         }
         if let token, !isLatest(token) {
@@ -516,6 +516,8 @@ actor ClipboardEventQueue {
         return token.sequence == state.highestSequence && state.outstanding.contains(token.sequence)
     }
 
+    /// Retires a publication that did deliver an event. The watermark stays where it is so the
+    /// publications this one superseded remain stale.
     private func completePublication(_ token: PublicationToken) {
         guard var state = publications[token.itemID] else { return }
         state.outstanding.remove(token.sequence)
@@ -524,6 +526,24 @@ actor ClipboardEventQueue {
         } else {
             publications[token.itemID] = state
         }
+    }
+
+    /// Retires a publication that delivered nothing (authoritative state could not be built, or
+    /// the queue was cancelled). Unlike a completed publication it must give the watermark back:
+    /// otherwise the publications it superseded also fail `isLatest`, and an item whose row did
+    /// change reaches the UI through no event at all until the next full reload.
+    private func abandonPublication(_ token: PublicationToken) {
+        guard var state = publications[token.itemID] else { return }
+        state.outstanding.remove(token.sequence)
+        guard !state.outstanding.isEmpty else {
+            publications.removeValue(forKey: token.itemID)
+            return
+        }
+        if state.highestSequence == token.sequence,
+           let highestRemaining = state.outstanding.max() {
+            state.highestSequence = highestRemaining
+        }
+        publications[token.itemID] = state
     }
 
     private func wakeOneSenderIfCapacityAvailable() {
@@ -899,6 +919,7 @@ actor ClipboardService {
                 ingestSpoolDirectory,
                 legacyDirectory: legacyIngestSpoolDirectory
             )
+            Self.sweepStaleShareableImages()
         }.value
 
         let monitor = await MainActor.run {
@@ -1202,9 +1223,13 @@ actor ClipboardService {
         let storage = try requireStorage()
         _ = try requireSearch()
 
-        guard let item = try await storage.findByID(itemID) else { return }
+        guard let item = try await storage.findByID(itemID) else {
+            throw ClipboardCopyError.itemNotFound(itemID)
+        }
 
-        await performClipboardCopy(
+        // Usage stats and the item event describe a copy that happened. Nothing below this line
+        // runs unless the pasteboard actually took the content.
+        try await performClipboardCopy(
             item: item,
             monitor: monitor,
             storage: storage,
@@ -1230,22 +1255,28 @@ actor ClipboardService {
         monitor: ClipboardMonitor,
         storage: StorageService,
         imageWriteMode: ClipboardMonitor.ImagePasteboardWriteMode
-    ) async {
+    ) async throws {
         switch item.type {
-        case .text:
-            await copyPlainText(item.plainText, monitor: monitor)
+        case .text, .other:
+            try await copyPlainText(item.plainText, itemID: item.id, monitor: monitor)
         case .rtf, .html, .image:
-            await copyRichPayload(item: item, monitor: monitor, storage: storage, imageWriteMode: imageWriteMode)
+            try await copyRichPayload(item: item, monitor: monitor, storage: storage, imageWriteMode: imageWriteMode)
         case .file:
-            await copyFilePayload(item: item, monitor: monitor, storage: storage, imageWriteMode: imageWriteMode)
-        case .other:
-            await copyPlainText(item.plainText, monitor: monitor)
+            try await copyFilePayload(item: item, monitor: monitor, storage: storage, imageWriteMode: imageWriteMode)
         }
     }
 
-    private func copyPlainText(_ text: String, monitor: ClipboardMonitor) async {
-        await MainActor.run {
-            monitor.copyToClipboard(text: text)
+    private func copyPlainText(
+        _ text: String,
+        itemID: UUID,
+        monitor: ClipboardMonitor
+    ) async throws {
+        try await MainActor.run {
+            do {
+                try monitor.copyToClipboard(text: text)
+            } catch {
+                throw ClipboardCopyError.pasteboardRejectedContent(itemID)
+            }
         }
     }
 
@@ -1254,9 +1285,11 @@ actor ClipboardService {
         monitor: ClipboardMonitor,
         storage: StorageService,
         imageWriteMode: ClipboardMonitor.ImagePasteboardWriteMode
-    ) async {
+    ) async throws {
         let data = await storage.loadPayloadData(for: item)
-        guard let data else { return }
+        guard let data else {
+            throw ClipboardCopyError.payloadUnavailable(item.id)
+        }
 
         let itemType = item.type
         let pasteboardType: NSPasteboard.PasteboardType
@@ -1267,16 +1300,23 @@ actor ClipboardService {
         default: pasteboardType = .string
         }
 
-        await MainActor.run {
-            if itemType == .rtf || itemType == .html {
-                let plainText = Self.resolvePlainText(for: item, data: data)
-                monitor.copyToClipboard(text: plainText, data: data, type: pasteboardType)
-            } else if itemType == .image,
-                      imageWriteMode == .standard,
-                      let fileURL = Self.managedImageFileURL(for: item, storage: storage) {
-                monitor.copyToClipboard(imageData: data, fileURL: fileURL, imageWriteMode: imageWriteMode)
-            } else {
-                monitor.copyToClipboard(data: data, type: pasteboardType, imageWriteMode: imageWriteMode)
+        let itemID = item.id
+        try await MainActor.run {
+            do {
+                if itemType == .rtf || itemType == .html {
+                    let plainText = Self.resolvePlainText(for: item, data: data)
+                    try monitor.copyToClipboard(text: plainText, data: data, type: pasteboardType)
+                } else if itemType == .image,
+                          imageWriteMode == .standard,
+                          let fileURL = Self.managedImageFileURL(for: item, storage: storage) {
+                    try monitor.copyToClipboard(imageData: data, fileURL: fileURL, imageWriteMode: imageWriteMode)
+                } else {
+                    try monitor.copyToClipboard(data: data, type: pasteboardType, imageWriteMode: imageWriteMode)
+                }
+            } catch ClipboardMonitor.PasteboardWriteFailure.imageNotRenderable {
+                throw ClipboardCopyError.imageNotRenderable(itemID)
+            } catch {
+                throw ClipboardCopyError.pasteboardRejectedContent(itemID)
             }
         }
     }
@@ -1286,21 +1326,27 @@ actor ClipboardService {
         monitor: ClipboardMonitor,
         storage: StorageService,
         imageWriteMode: ClipboardMonitor.ImagePasteboardWriteMode
-    ) async {
+    ) async throws {
         let fileURLs = await resolvedFileURLs(for: item, storage: storage)
-        if !fileURLs.isEmpty {
-            if let pngData = Self.resolvePNGDataForTemporaryImageFileURLs(fileURLs) {
-                await MainActor.run {
-                    monitor.copyToClipboard(data: pngData, type: .png, imageWriteMode: imageWriteMode)
-                }
-                return
-            }
+        // Every recorded node is gone; the path text is all that is left to hand back.
+        guard !fileURLs.isEmpty else {
+            try await copyPlainText(item.plainText, itemID: item.id, monitor: monitor)
+            return
+        }
 
-            await MainActor.run {
-                monitor.copyToClipboard(fileURLs: fileURLs)
+        let itemID = item.id
+        try await MainActor.run {
+            do {
+                if let pngData = Self.resolvePNGDataForTemporaryImageFileURLs(fileURLs) {
+                    try monitor.copyToClipboard(data: pngData, type: .png, imageWriteMode: imageWriteMode)
+                } else {
+                    try monitor.copyToClipboard(fileURLs: fileURLs)
+                }
+            } catch ClipboardMonitor.PasteboardWriteFailure.imageNotRenderable {
+                throw ClipboardCopyError.imageNotRenderable(itemID)
+            } catch {
+                throw ClipboardCopyError.pasteboardRejectedContent(itemID)
             }
-        } else {
-            await copyPlainText(item.plainText, monitor: monitor)
         }
     }
 
@@ -1334,35 +1380,26 @@ actor ClipboardService {
             }
         }
 
-        if let storageRef = item.storageRef, !storageRef.isEmpty {
-            var isDirectory: ObjCBool = false
-            if FileManager.default.fileExists(atPath: storageRef, isDirectory: &isDirectory),
-               !isDirectory.boolValue {
-                return [URL(fileURLWithPath: storageRef)]
-            }
+        // A managed external payload is always a regular file Scopy wrote itself.
+        if let storageRef = item.storageRef,
+           !storageRef.isEmpty,
+           FilePreviewSupport.accepts(URL(fileURLWithPath: storageRef), policy: .regularFilesOnly) {
+            return [URL(fileURLWithPath: storageRef)]
         }
 
-        let paths = item.plainText.components(separatedBy: "\n")
-        return paths.compactMap { path in
-            let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !trimmed.isEmpty else { return nil }
-            let url = URL(fileURLWithPath: trimmed)
-            var isDirectory: ObjCBool = false
-            guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory),
-                  !isDirectory.boolValue else { return nil }
-            return url
-        }
+        return FilePreviewSupport.fileURLs(from: item.plainText)
     }
 
+    /// Restores the exact node list a file capture recorded, in copy order. Directories and
+    /// packages are part of that list: Finder copies them as plain file URLs, and dropping them
+    /// here is what makes a copied folder replay as its path text instead of the folder itself.
     private static func deserializeExistingFileURLs(_ data: Data) -> [URL]? {
         guard let paths = try? JSONDecoder().decode([String].self, from: data) else { return nil }
         let urls = paths.compactMap { path -> URL? in
             let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !trimmed.isEmpty else { return nil }
             let url = URL(fileURLWithPath: trimmed)
-            var isDirectory: ObjCBool = false
-            guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory),
-                  !isDirectory.boolValue else { return nil }
+            guard FilePreviewSupport.accepts(url, policy: .anyExistingNode) else { return nil }
             return url
         }
         return urls.isEmpty ? nil : urls
@@ -1385,11 +1422,17 @@ actor ClipboardService {
         return nil
     }
 
+    /// Temporary PNGs handed to `NSSharingService`. One file per item id, so repeated shares of
+    /// the same item reuse a slot instead of accumulating.
+    nonisolated static var shareableImageDirectory: URL {
+        FileManager.default.temporaryDirectory
+            .appendingPathComponent("Scopy", isDirectory: true)
+            .appendingPathComponent("AirDrop", isDirectory: true)
+    }
+
     private func writeShareableImagePNG(_ data: Data, for item: StorageService.StoredItem) async -> URL? {
         await Task.detached(priority: .utility) {
-            let directory = FileManager.default.temporaryDirectory
-                .appendingPathComponent("Scopy", isDirectory: true)
-                .appendingPathComponent("AirDrop", isDirectory: true)
+            let directory = Self.shareableImageDirectory
             let url = directory.appendingPathComponent("scopy-image-\(item.id.uuidString).png")
 
             do {
@@ -1401,6 +1444,25 @@ actor ClipboardService {
                 return nil
             }
         }.value
+    }
+
+    /// Shares outlive the sharing sheet by an unbounded amount, so the files cannot be deleted on
+    /// completion. Sweeping them at startup bounds the directory without racing an active share.
+    nonisolated private static func sweepStaleShareableImages() {
+        let directory = shareableImageDirectory
+        guard let entries = try? FileManager.default.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: [.contentModificationDateKey],
+            options: [.skipsHiddenFiles]
+        ) else { return }
+
+        let cutoff = Date().addingTimeInterval(-24 * 60 * 60)
+        for entry in entries {
+            let modified = (try? entry.resourceValues(forKeys: [.contentModificationDateKey]))?
+                .contentModificationDate
+            guard let modified, modified < cutoff else { continue }
+            try? FileManager.default.removeItem(at: entry)
+        }
     }
 
     nonisolated private static func resolvePlainText(for item: StorageService.StoredItem, data: Data) -> String {

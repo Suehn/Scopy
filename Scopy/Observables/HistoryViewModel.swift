@@ -288,6 +288,12 @@ final class HistoryViewModel {
     @ObservationIgnored var closePanelHandler: (() -> Void)?
     @ObservationIgnored var pasteAfterCopyHandler: (() -> Void)?
 
+    /// Message for an action that failed where the user expected it to work. A failed copy leaves
+    /// the panel open, so it needs somewhere to say why instead of only reaching the log.
+    private(set) var actionErrorMessage: String?
+    @ObservationIgnored private var actionErrorClearTask: Task<Void, Never>?
+    static let actionErrorVisibleSeconds: Double = 4
+
     static let initialPageSize = 50
     static let loadMorePageSize = 100
     static let knownContentRevisionCapacity = 4096
@@ -1195,6 +1201,7 @@ final class HistoryViewModel {
             closePanelHandler?()
         } catch {
             ScopyLog.app.error("Copy failed: \(error.localizedDescription, privacy: .private)")
+            reportActionFailure(error)
         }
     }
 
@@ -1202,10 +1209,30 @@ final class HistoryViewModel {
         do {
             try await service.copyToClipboardOptimizedForCodex(itemID: item.id)
             closePanelHandler?()
+            // Only paste once the pasteboard is known to hold this item. Pasting after a failed
+            // write would deliver whatever the clipboard held before.
             pasteAfterCopyHandler?()
         } catch {
             ScopyLog.app.error("Codex-optimized copy failed: \(error.localizedDescription, privacy: .private)")
+            reportActionFailure(error)
         }
+    }
+
+    func reportActionFailure(_ error: Error) {
+        let message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+        actionErrorMessage = message
+        actionErrorClearTask?.cancel()
+        actionErrorClearTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(Self.actionErrorVisibleSeconds * 1_000_000_000))
+            guard !Task.isCancelled else { return }
+            self?.actionErrorMessage = nil
+        }
+    }
+
+    func clearActionError() {
+        actionErrorClearTask?.cancel()
+        actionErrorClearTask = nil
+        actionErrorMessage = nil
     }
 
     func sendViaAirDrop(_ item: ClipboardItemDTO) async {
@@ -1478,13 +1505,13 @@ final class HistoryViewModel {
         if let urls = try? await service.fileURLs(itemID: item.id), !urls.isEmpty {
             return urls
         }
-        return FilePreviewSupport.fileURLs(from: item.plainText, requireExists: true)
+        return FilePreviewSupport.fileURLs(from: item.plainText)
     }
 
     private func realFileURLs(for item: ClipboardItemDTO) -> [URL] {
         switch item.type {
         case .file:
-            return FilePreviewSupport.fileURLs(from: item.plainText, requireExists: true)
+            return FilePreviewSupport.fileURLs(from: item.plainText)
         case .image:
             if let storageRef = item.storageRef, !storageRef.isEmpty {
                 var isDirectory: ObjCBool = false
@@ -1493,7 +1520,7 @@ final class HistoryViewModel {
                     return [URL(fileURLWithPath: storageRef)]
                 }
             }
-            return FilePreviewSupport.fileURLs(from: item.plainText, requireExists: true)
+            return FilePreviewSupport.fileURLs(from: item.plainText)
         case .text, .rtf, .html, .other:
             return []
         }

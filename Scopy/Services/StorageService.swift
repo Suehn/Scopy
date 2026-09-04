@@ -1491,10 +1491,13 @@ public final class StorageService {
         guard mode == .full else { return aggregateResult }
 
         // 5. SQLite housekeeping (v0.md 2.3)
-        // v0.29: 仅在 WAL 体积明显膨胀时执行 vacuum，减少非敏感时段外的磁盘抖动
+        // Only when the WAL has grown well past its steady-state size, so this stays off the
+        // routine cleanup path. A truncating checkpoint is the operation that actually reclaims
+        // it; the database is not in incremental-auto-vacuum mode, so `incremental_vacuum` was
+        // a no-op here.
         let walSizeBytes = getWALFileSize()
         if walSizeBytes > 128 * 1024 * 1024 {
-            try await repository.incrementalVacuum(pages: 100)
+            await repository.walCheckpointTruncate()
         }
 
         // 6. v0.15: Clean up orphaned files (files not referenced in database)

@@ -117,25 +117,45 @@ public enum FilePreviewSupport {
         primaryFileURL(from: plainText, requireExists: false)?.path
     }
 
-    public static func fileURLs(from plainText: String, requireExists: Bool = true) -> [URL] {
+    /// Which existing local nodes a caller accepts.
+    ///
+    /// Copying a folder in Finder yields a plain directory URL, so replay, AirDrop and reveal all
+    /// have to accept directories or the item silently degrades to its path text. Size totals and
+    /// image payloads are the only callers a directory means nothing to.
+    public enum LocalFileURLPolicy: Sendable {
+        case anyExistingNode
+        case regularFilesOnly
+    }
+
+    public static func accepts(_ url: URL, policy: LocalFileURLPolicy) -> Bool {
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory) else {
+            return false
+        }
+        switch policy {
+        case .anyExistingNode: return true
+        case .regularFilesOnly: return !isDirectory.boolValue
+        }
+    }
+
+    /// Existing local URLs referenced by a file item, in the order they were copied.
+    public static func fileURLs(
+        from plainText: String,
+        policy: LocalFileURLPolicy = .anyExistingNode
+    ) -> [URL] {
         var urls: [URL] = []
         urls.reserveCapacity(2)
 
         for line in plainText.split(whereSeparator: \.isNewline) {
             let path = line.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard let url = parseFileURL(from: path) else { continue }
-            if requireExists {
-                var isDirectory: ObjCBool = false
-                guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory) else { continue }
-                guard !isDirectory.boolValue else { continue }
-            }
+            guard let url = parseFileURL(from: path), accepts(url, policy: policy) else { continue }
             urls.append(url)
         }
         return urls
     }
 
     public static func totalFileSizeBytes(from plainText: String) -> Int? {
-        let urls = fileURLs(from: plainText, requireExists: true)
+        let urls = fileURLs(from: plainText, policy: .regularFilesOnly)
         guard !urls.isEmpty else { return nil }
         let sizes = urls.lazy.compactMap {
             (try? $0.resourceValues(forKeys: [.fileSizeKey]))?.fileSize

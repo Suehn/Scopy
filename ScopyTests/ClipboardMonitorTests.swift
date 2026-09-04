@@ -436,25 +436,32 @@ final class ClipboardMonitorTests: XCTestCase {
 
     // MARK: - Copy To Clipboard Tests
 
-    func testCopyTextToClipboard() {
-        monitor.copyToClipboard(text: "Copied text")
+    func testCopyTextToClipboard() throws {
+        try monitor.copyToClipboard(text: "Copied text")
 
         XCTAssertEqual(pasteboard.string(forType: .string), "Copied text")
     }
 
-    func testCopyDataToClipboard() {
+    func testCopyDataToClipboard() throws {
         let data = "Binary data".data(using: .utf8)!
-        monitor.copyToClipboard(data: data, type: .string)
+        try monitor.copyToClipboard(data: data, type: .string)
 
         let retrieved = pasteboard.data(forType: .string)
         XCTAssertEqual(retrieved, data)
     }
 
-    func testCopyInvalidPNGDataKeepsPreviousClipboardContent() {
+    /// An unrenderable payload must report failure, not return as if the clipboard had been
+    /// replaced: the caller would otherwise close the panel and paste the previous content.
+    func testCopyInvalidPNGDataThrowsAndKeepsPreviousClipboardContent() {
         pasteboard.clearContents()
         pasteboard.setString("baseline", forType: .string)
 
-        monitor.copyToClipboard(data: Data([0x00, 0x01, 0x02]), type: .png)
+        XCTAssertThrowsError(try monitor.copyToClipboard(data: Data([0x00, 0x01, 0x02]), type: .png)) { error in
+            XCTAssertEqual(
+                error as? ClipboardMonitor.PasteboardWriteFailure,
+                .imageNotRenderable
+            )
+        }
 
         XCTAssertEqual(pasteboard.string(forType: .string), "baseline")
         XCTAssertNil(pasteboard.data(forType: .png))
@@ -466,7 +473,7 @@ final class ClipboardMonitorTests: XCTestCase {
         pasteboard.clearContents()
         pasteboard.setString("baseline", forType: .string)
 
-        monitor.copyToClipboard(data: pngData, type: .png, imageWriteMode: .codexOptimized)
+        try monitor.copyToClipboard(data: pngData, type: .png, imageWriteMode: .codexOptimized)
 
         guard let copiedPNGData = pasteboard.data(forType: .png) else {
             XCTFail("Expected PNG payload on pasteboard")
@@ -487,7 +494,7 @@ final class ClipboardMonitorTests: XCTestCase {
             documentAttributes: [.documentType: NSAttributedString.DocumentType.rtf]
         )
 
-        monitor.copyToClipboard(text: "Rich text", data: rtfData, type: .rtf)
+        try monitor.copyToClipboard(text: "Rich text", data: rtfData, type: .rtf)
 
         XCTAssertEqual(pasteboard.string(forType: .string), "Rich text")
         XCTAssertEqual(pasteboard.data(forType: .rtf), rtfData)
@@ -501,7 +508,7 @@ final class ClipboardMonitorTests: XCTestCase {
             documentAttributes: [.documentType: NSAttributedString.DocumentType.html]
         )
 
-        monitor.copyToClipboard(text: "Hello <World>", data: htmlData, type: .html)
+        try monitor.copyToClipboard(text: "Hello <World>", data: htmlData, type: .html)
 
         XCTAssertEqual(pasteboard.string(forType: .string), "Hello <World>")
         XCTAssertEqual(pasteboard.data(forType: .html), htmlData)

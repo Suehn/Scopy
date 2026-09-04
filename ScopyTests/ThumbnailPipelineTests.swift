@@ -315,6 +315,73 @@ final class ThumbnailPipelineTests: XCTestCase {
         await queue.finish()
     }
 
+    /// A publication that fails before it can build authoritative state delivers nothing. If it
+    /// keeps the watermark it raised, the publications it superseded are also rejected as stale
+    /// and the item reaches the UI through no event at all.
+    func testDiscardedLatestPublicationReleasesTheWatermarkToStillOutstandingOnes() async {
+        let queue = ClipboardEventQueue(capacity: 4)
+        let itemID = UUID()
+        let earlierToken = await queue.reservePublication(itemID: itemID)
+        let laterToken = await queue.reservePublication(itemID: itemID)
+
+        // The newer publication could not read authoritative state and publishes nothing.
+        await queue.discardPublication(laterToken)
+
+        let acceptedEarlier = await queue.enqueue(
+            .itemContentUpdated(Self.makeItem(id: itemID, contentHash: "earlier")),
+            publication: earlierToken
+        )
+        XCTAssertTrue(acceptedEarlier, "The surviving publication must still be able to deliver its event")
+        guard case .itemContentUpdated(let delivered)? = await queue.dequeue() else {
+            return XCTFail("Expected the earlier item event")
+        }
+        XCTAssertEqual(delivered.contentHash, "earlier")
+        await queue.finish()
+    }
+
+    /// Giving the watermark back on failure must not resurrect publications a *successful* newer
+    /// one already superseded.
+    func testDiscardAfterASuccessfulNewerPublicationStillRejectsTheOlderOne() async {
+        let queue = ClipboardEventQueue(capacity: 4)
+        let itemID = UUID()
+        let earliestToken = await queue.reservePublication(itemID: itemID)
+        let middleToken = await queue.reservePublication(itemID: itemID)
+        let latestToken = await queue.reservePublication(itemID: itemID)
+
+        let acceptedLatest = await queue.enqueue(
+            .itemContentUpdated(Self.makeItem(id: itemID, contentHash: "latest")),
+            publication: latestToken
+        )
+        XCTAssertTrue(acceptedLatest)
+
+        await queue.discardPublication(middleToken)
+
+        let acceptedEarliest = await queue.enqueue(
+            .itemContentUpdated(Self.makeItem(id: itemID, contentHash: "earliest")),
+            publication: earliestToken
+        )
+        XCTAssertFalse(acceptedEarliest, "A published newer state must keep older publications stale")
+        await queue.finish()
+    }
+
+    private static func makeItem(id: UUID, contentHash: String) -> ClipboardItemDTO {
+        ClipboardItemDTO(
+            id: id,
+            type: .text,
+            contentHash: contentHash,
+            plainText: contentHash,
+            note: nil,
+            appBundleID: nil,
+            createdAt: Date(),
+            lastUsedAt: Date(),
+            isPinned: false,
+            sizeBytes: contentHash.utf8.count,
+            fileSizeBytes: nil,
+            thumbnailPath: nil,
+            storageRef: nil
+        )
+    }
+
     func testClipboardEventQueueBulkRemovalUsesOneSlotAndInvalidatesOlderItemPublications() async {
         let queue = ClipboardEventQueue(capacity: 1)
         let firstID = UUID()
