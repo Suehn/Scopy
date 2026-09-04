@@ -106,6 +106,9 @@ measured worse or negligible:
 | Installing `.onHover` only while the list is idle, with the scroll phase delivered through the same per-row fan-out selection already uses | CPU `3.656 s` against `3.572 s`, busy `2664 ms` against `2309 ms`, worst callback `61.7 ms` against `35.0 ms` — worse |
 | Folding `HistorySelectionAwareRow` into the row (its wrapper existed only because the old nested `Button` made row-owned selection break the harness identifiers) and resolving the launch-time accessibility branch once instead of per row | CPU `3.560 s` against `3.572 s` — neutral. The `0.25 s` the "bare rows" probe showed came from dropping the `Group`, and moving the accessibility modifiers into the row costs back what removing it saves |
 | Truncating what reaches `Text` | not taken: titles are already capped at 100 characters, and real-vs-constant strings measured `0.18 s` across the whole row |
+| Caching the row's search evidence per item, revision and search version | a build that skips building it entirely measures `4.337 s` against `4.40 s` on the search path — about 1.4%, below what the workload resolves |
+| Removing the per-row read of the `@Observable` relative-time clock, the pattern v0.76 found costing 9% elsewhere | `3.623 s` against a contemporaneous control of `3.617 s` — nothing |
+| Resolving the row descriptor once per body instead of about four times | not taken: four lookups over 611 mounts is about 5 ms of a 3,650 ms scroll |
 
 The `NSTableView` result is the important one: reassigning `rootView` on a recycled hosting view
 is not cheaper than what `List` already does, so replacing the container is not the lever it was
