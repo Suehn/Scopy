@@ -165,6 +165,19 @@ Note for anyone sharing a trace: an Instruments `.trace` bundle embeds the recor
 whole environment, including any secrets exported in the shell. `logs/` is git-ignored so these
 stay out of the repository, but they should not be attached to a bug report unedited.
 
+## Scrolling search results
+
+Scrolling with a search active is a separate path and was never measured. It is more expensive:
+`4.40 s` against `3.57 s` for the same workload without a query (`fuzzy` search for `the`, three
+runs per side). The row descriptor and relative-time caches also miss about twice as often,
+because the result set is a different, more text-heavy slice of the database.
+
+None of that extra cost is the search evidence, though, which was the obvious suspect: the row
+builds an `AttributedString` with highlight ranges plus an accessibility string in its body, and a
+build that skips both entirely measures `4.337 s` against `4.40 s`. Caching search evidence per
+item, revision and search version is worth about 1.4%, below what this workload can resolve. The
+difference is the items themselves, not per-row work that can be removed.
+
 ## The ceiling
 
 Removing **everything** from the row — all content, all interaction — leaves the `1.74 s` of
