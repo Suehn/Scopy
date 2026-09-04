@@ -2305,40 +2305,8 @@ public final class StorageService {
 
     // MARK: - Thumbnail Cache (v0.8)
 
-    /// 获取缩略图路径（如果存在）
-    func getThumbnailPath(for contentHash: String) -> String? {
-        let path = (thumbnailCachePath as NSString).appendingPathComponent("\(contentHash).png")
-        if FileManager.default.fileExists(atPath: path) {
-            return path
-        }
-        return nil
-    }
-
-    /// 获取文件缩略图路径（如果存在）
-    func getFileThumbnailPath(for contentHash: String) -> String? {
-        let filename = Self.fileThumbnailFilename(for: contentHash)
-        let path = (thumbnailCachePath as NSString).appendingPathComponent(filename)
-        if FileManager.default.fileExists(atPath: path) {
-            return path
-        }
-        return nil
-    }
-
     nonisolated static func fileThumbnailFilename(for contentHash: String) -> String {
         "file_\(contentHash).png"
-    }
-
-    /// 保存缩略图
-    func saveThumbnail(_ data: Data, for contentHash: String) async throws -> String {
-        let path = (thumbnailCachePath as NSString).appendingPathComponent("\(contentHash).png")
-        do {
-            try await Task.detached(priority: .utility) {
-                try Self.writeAtomically(data, to: path)
-            }.value
-            return path
-        } catch {
-            throw StorageError.fileOperationFailed("Failed to save thumbnail: \(error)")
-        }
     }
 
     /// 生成缩略图 PNG 数据（后台安全）
@@ -2454,11 +2422,6 @@ public final class StorageService {
         return nil
     }
 
-    @available(*, deprecated, message: "Use loadPayloadData(for:) (this method name was misleading).")
-    func getOriginalImageData(for item: StoredItem) async -> Data? {
-        await loadPayloadData(for: item)
-    }
-
     /// 清空缩略图缓存（设置变更时调用）
     func clearThumbnailCache() async {
         let path = thumbnailCachePath
@@ -2467,38 +2430,6 @@ public final class StorageService {
             try? fileManager.removeItem(atPath: path)
             try? fileManager.createDirectory(atPath: path, withIntermediateDirectories: true)
         }.value
-    }
-
-    /// 清理缩略图缓存（LRU 策略）
-    func cleanupThumbnailCache(maxSizeMB: Int = 50) {
-        let maxBytes = maxSizeMB * 1024 * 1024
-        let url = URL(fileURLWithPath: thumbnailCachePath)
-
-        guard let enumerator = FileManager.default.enumerator(
-            at: url,
-            includingPropertiesForKeys: [.fileSizeKey, .contentAccessDateKey]
-        ) else { return }
-
-        var files: [(url: URL, size: Int, accessDate: Date)] = []
-        var totalSize = 0
-
-        for case let fileURL as URL in enumerator {
-            guard let values = try? fileURL.resourceValues(forKeys: [.fileSizeKey, .contentAccessDateKey]),
-                  let size = values.fileSize,
-                  let accessDate = values.contentAccessDate else { continue }
-            files.append((fileURL, size, accessDate))
-            totalSize += size
-        }
-
-        // 如果超出限制，按访问时间排序删除最旧的
-        if totalSize > maxBytes {
-            files.sort { $0.accessDate < $1.accessDate }
-            for file in files {
-                if totalSize <= maxBytes { break }
-                try? FileManager.default.removeItem(at: file.url)
-                totalSize -= file.size
-            }
-        }
     }
 
 }

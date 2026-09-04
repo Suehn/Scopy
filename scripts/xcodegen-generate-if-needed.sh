@@ -6,7 +6,8 @@ PBXPROJ_FILE="Scopy.xcodeproj/project.pbxproj"
 
 compute_signature() {
     local project_hashes
-    local swift_paths_hash
+    local source_paths_hash
+    local generator_version
 
     project_hashes=$(
         shasum project.yml Package.swift 2>/dev/null \
@@ -14,17 +15,19 @@ compute_signature() {
             | tr '\n' ' '
     )
 
-    swift_paths_hash=$(
+    # XcodeGen also discovers resources and asset catalogs. Their addition/removal
+    # changes the project even when the set of Swift sources stays the same.
+    source_paths_hash=$(
         find Scopy ScopyTests ScopyUITests ScopyTestHost \
-            -type f \
-            -name "*.swift" \
+            -name .DS_Store -prune -o \
             -print 2>/dev/null \
-            | sort \
+            | LC_ALL=C sort \
             | shasum \
             | awk '{print $1}'
     )
 
-    echo "${project_hashes}|${swift_paths_hash}" | shasum | awk '{print $1}'
+    generator_version="$(xcodegen --version)"
+    echo "${project_hashes}|${source_paths_hash}|${generator_version}" | shasum | awk '{print $1}'
 }
 
 main() {
@@ -49,4 +52,3 @@ main() {
 }
 
 main "$@"
-

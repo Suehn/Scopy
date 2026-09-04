@@ -80,7 +80,7 @@ Implication: clipboard semantics, dedup, cleanup triggering, and safe file handl
 5. Exact search planning and execution must share `SearchPlanner.normalizedExactQuery(_:)` so whitespace trimming affects both coverage decisions and matching consistently.
 6. UI updates are event-driven; the list should not depend on ad hoc full reloads for ordinary mutations.
 7. Search results expose `SearchCoverage` so UI can distinguish complete results, staged fuzzy refinement, and intentional recent-only limits.
-8. Production search paths should construct `SearchCoverage` directly; `isPrefilter` remains a compatibility shim for legacy and test callers only.
+8. Search result pages and engine results carry `SearchCoverage` directly. Its `isPrefilter` predicate describes staged coverage for match-context generation; there is no legacy result initializer.
 
 Implication: changes to search semantics belong in the request model, search engine, and user-visible docs together.
 
@@ -240,6 +240,9 @@ Implication: if you touch settings behavior, preserve the Save/Cancel model and 
 - `make build`
 - `./deploy.sh release --no-launch` for a repeatable local Release build and `/Applications` install; Xcode products stay in isolated DerivedData while SwiftPM continues to own `.build`
 - `make test-unit`
+- `make test-tooling` checks project regeneration, per-worktree test build isolation, and the source/performance/quality evidence gates without Xcode or GUI access; CI runs the same entrypoint.
+- Explicit test DerivedData paths are scoped by a hash of the checkout path, then by flag variant. Parallel worktrees do not share the strict/performance/sanitizer build database. Plain builds and unit tests retain Xcode's default project-path isolation.
+- The XcodeGen cache tracks project/package configuration, source and resource paths, and generator version. Source-content edits remain incremental; adding/removing a resource regenerates the project just like adding/removing Swift source.
 - `make test-strict` for concurrency-sensitive work
 - `make test-tsan` when the environment supports the hosted test path; the command auto-skips the known-bad `macOS 26.x + Xcode 26.2 (17C52)` hosted runtime combination
 - Hosted TSan CI lives in `.github/workflows/tsan.yml` on `macos-15 + Xcode 16.0`; treat that workflow as the supported real-coverage path until the local Apple runtime issue is resolved

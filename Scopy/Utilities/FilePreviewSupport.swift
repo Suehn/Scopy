@@ -113,10 +113,6 @@ public enum FilePreviewSupport {
         return nil
     }
 
-    public static func primaryFilePath(from plainText: String) -> String? {
-        primaryFileURL(from: plainText, requireExists: false)?.path
-    }
-
     /// Which existing local nodes a caller accepts.
     ///
     /// Copying a folder in Finder yields a plain directory URL, so replay, AirDrop and reveal all

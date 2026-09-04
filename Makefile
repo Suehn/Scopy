@@ -6,14 +6,18 @@
 .PHONY: snapshot-perf-db bench-snapshot-search perf-search-warm-load perf-warm-scroll-ab perf-scroll-tools perf-scroll-wheel perf-search-type perf-capture
 .PHONY: tag-release push-release release-validate release-bump-patch test-release-policy
 .PHONY: markdown-renderer-deps markdown-assets-sync markdown-assets-verify test-markdown-renderer-assets markdown-assets-gate
+.PHONY: test-tooling
 
 VERSION_ARGS := $(shell bash scripts/version.sh --xcodebuild-args 2>/dev/null)
 LOG_DIR := logs
 
 # Each Swift-flag variant gets its own DerivedData so switching between plain builds,
 # strict concurrency, sanitizers, and perf defines never invalidates another variant's
-# incremental state. Plain build/test/test-unit share Xcode's default DerivedData.
-DERIVED_DATA_BASE := $(HOME)/Library/Developer/Xcode/DerivedData
+# incremental state. Isolate explicit paths by checkout as well: simultaneous
+# worktrees must never contend for the same build database or test products.
+# Plain build/test/test-unit share Xcode's default, project-path-scoped DerivedData.
+CHECKOUT_ID := $(shell printf '%s' '$(CURDIR)' | shasum | cut -c1-12)
+DERIVED_DATA_BASE := $(HOME)/Library/Developer/Xcode/DerivedData/Scopy-$(CHECKOUT_ID)
 FRONTEND_PROFILE_SMOKE_ARGS := --skip-setup --repeats 1 --duration 3 --min-samples 50
 FRONTEND_PROFILE_STANDARD_ARGS := --skip-setup --repeats 1 --duration 6 --min-samples 120
 FRONTEND_PROFILE_FULL_ARGS := --repeats 3 --duration 10 --min-samples 260
@@ -280,6 +284,12 @@ health-check:
 quality-manifest-self-test:
 	@python3 scripts/quality/record-gate-result.py self-test --output-dir $(LOG_DIR)/quality-manifest-self-test
 
+test-tooling:
+	@python3 -m unittest discover -s scripts/tests -p 'test_*.py'
+	@python3 scripts/quality/source-manifest.py self-test
+	@python3 scripts/quality/summarize-warm-scroll-ab.py self-test
+	@$(MAKE) quality-manifest-self-test
+
 # MarkdownPreview 的 renderer、KaTeX CSS/fonts、sidecar 与 manifest 必须来自同一锁定资产集。
 markdown-renderer-deps:
 	@test -d Tools/MarkdownRenderer/node_modules/katex -a -d Tools/MarkdownRenderer/node_modules/esbuild || npm ci --prefix Tools/MarkdownRenderer
@@ -439,6 +449,7 @@ help:
 	@echo "  make test-flow-quick - Quick test flow (skip build)"
 	@echo "  make health-check - Run health checks only"
 	@echo "  make quality-manifest-self-test - Run quality manifest fixture self-test"
+	@echo "  make test-tooling - Test project generation, worktree isolation, and evidence gates"
 	@echo "  make test-markdown-renderer-assets - Test the MarkdownPreview asset contract"
 	@echo ""
 	@echo "Development:"

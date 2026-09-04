@@ -673,45 +673,4 @@ enum SearchIndexDiskCache {
         )
     }
 
-    private static func plistString(_ value: Any?) -> String? {
-        value as? String
-    }
-
-    private static func plistOptionalString(_ value: Any?) -> String? {
-        value as? String
-    }
-
-    private static func plistBool(_ value: Any?) -> Bool? {
-        value as? Bool
-    }
-
-    private static func plistInt(_ value: Any?) -> Int? {
-        if let intValue = value as? Int {
-            return intValue
-        }
-        if let number = value as? NSNumber {
-            return number.intValue
-        }
-        return nil
-    }
-
-    private static func plistInt64(_ value: Any?) -> Int64? {
-        if let int64Value = value as? Int64 {
-            return int64Value
-        }
-        if let number = value as? NSNumber {
-            return number.int64Value
-        }
-        return nil
-    }
-
-    private static func plistTimeInterval(_ value: Any?) -> TimeInterval? {
-        if let timeIntervalValue = value as? TimeInterval {
-            return timeIntervalValue
-        }
-        if let number = value as? NSNumber {
-            return number.doubleValue
-        }
-        return nil
-    }
 }

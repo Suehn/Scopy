@@ -102,8 +102,6 @@ actor SQLiteClipboardRepository {
     private var connection: SQLiteConnection?
     private var metadataUpdateInterlock: (@Sendable (MetadataUpdateKind, UUID) async -> Void)?
 
-    private(set) var isDatabaseCorrupted: Bool = false
-
     init(dbPath: String) {
         self.dbPath = dbPath
     }
@@ -506,19 +504,6 @@ actor SQLiteClipboardRepository {
                 }
             }
             try execute("DELETE FROM clipboard_items WHERE is_pinned = 0")
-        }
-        return refs
-    }
-
-    func fetchStorageRefsForUnpinned() throws -> [String] {
-        let sql = "SELECT storage_ref FROM clipboard_items WHERE is_pinned = 0 AND storage_ref IS NOT NULL"
-        let stmt = try prepare(sql)
-
-        var refs: [String] = []
-        while try stmt.step() {
-            if let ref = stmt.columnText(0) {
-                refs.append(ref)
-            }
         }
         return refs
     }
@@ -1256,7 +1241,6 @@ actor SQLiteClipboardRepository {
             do {
                 try execute("ROLLBACK")
             } catch {
-                isDatabaseCorrupted = true
                 try recoverDatabase()
             }
             throw error
@@ -1278,7 +1262,6 @@ actor SQLiteClipboardRepository {
             do {
                 try execute("ROLLBACK")
             } catch {
-                isDatabaseCorrupted = true
                 try recoverDatabase()
             }
             throw error
@@ -1294,7 +1277,6 @@ actor SQLiteClipboardRepository {
             do {
                 try execute("ROLLBACK")
             } catch {
-                isDatabaseCorrupted = true
                 try recoverDatabase()
             }
             throw error
@@ -1618,6 +1600,5 @@ actor SQLiteClipboardRepository {
     private func recoverDatabase() throws {
         close()
         try open()
-        isDatabaseCorrupted = false
     }
 }

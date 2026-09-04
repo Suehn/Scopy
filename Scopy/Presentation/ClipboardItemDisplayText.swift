@@ -425,26 +425,6 @@ final class ClipboardItemDisplayText {
         )
     }
 
-    private nonisolated static func computeTitle(type: ClipboardItemType, plainText: String) -> String {
-        computeDisplayTextPair(type: type, plainText: plainText, note: nil, sizeBytes: 0, fileSizeBytes: nil).title
-    }
-
-    private nonisolated static func computeMetadata(
-        type: ClipboardItemType,
-        plainText: String,
-        note: String?,
-        sizeBytes: Int,
-        fileSizeBytes: Int?
-    ) -> String {
-        computeDisplayTextPair(
-            type: type,
-            plainText: plainText,
-            note: note,
-            sizeBytes: sizeBytes,
-            fileSizeBytes: fileSizeBytes
-        ).metadata
-    }
-
     private nonisolated static func computeDisplayTextPair(
         type: ClipboardItemType,
         plainText: String,
