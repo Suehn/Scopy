@@ -28,10 +28,17 @@ here.
    earlier notes was a preview presentation, not a scroll cost**; with the pointer parked
    afterwards the worst callback is 35 ms.
 
-Instrumentation overhead was also checked rather than assumed: the same build with
-`SCOPY_SCROLL_PROFILE=0` measured 3.71 s against 3.75 s with the profiler on, so the app's own
-counters and its 120 Hz `TimelineView` sampler are inside the noise. A/B runs keep the profiler on
-because its `scroll_speed_px_per_sec` is the only signal that confirms the list actually moved.
+Instrumentation overhead was measured rather than assumed, twice. A single pair taken before the
+harness was fixed suggested about 1%; three runs per side on the fixed harness put it at **5.8%**
+(`3.447 s` with `SCOPY_SCROLL_PROFILE=0` against `3.660 s` with the profiler on). The app's own
+`TimelineView(.animation)` frame sampler is only present when profiling, so every figure in this
+document is about 6% above what the same build costs a user. Ratios are unaffected, since both
+sides of every comparison carry it; absolute production CPU for the shipped build is `3.447 s`,
+and the `v0.80.0` baseline in the same configuration is about `3.65 s`.
+
+A/B runs keep the profiler on anyway, because `scroll_speed_px_per_sec` is the only signal that
+confirms the list actually moved, and a run where it did not is otherwise indistinguishable from a
+large win.
 
 ## Where the 3.88 s goes
 
