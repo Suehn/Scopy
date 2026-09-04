@@ -2,9 +2,10 @@
 doc_type: runbook
 status: active
 owner: maintainers
-last_reviewed: 2026-09-03
+last_reviewed: 2026-09-04
 canonical: true
 related_versions:
+  - v0.80.0
   - v0.78.2
   - v0.70.0
   - v0.65.4
@@ -292,6 +293,17 @@ This section records historical `v0.65.4` release evidence for the single previe
 - Snapshot release bench: `cmd` p95 `0.526 ms` against a `50 ms` limit, prepared `cm` p95 `4.422 ms` against a `20 ms` limit, cold `cm` observed `59.510 ms` and remains record-only. All three improved slightly against the `v0.78.2` record (`0.561 / 4.508 / 61.224 ms`).
 - Gates: `make build` and Release build passed; unit 795 executed / 3 skipped / 0 failures; strict 795 / 3 / 0; documentation, release, and policy validators passed before tag. TSan not run: no concurrency structure changed and the index change stays inside the existing search actor. Full frontend profile and unified table not run: this release's causal evidence is the paired real-input runs above, and the flag-toggle frontend harness is not a revision comparison.
 - Measurement notes for future rounds: `scripts/perf-scroll/profile_scroll.py` previously referenced its repository path before defining it and therefore failed on every invocation, and it copied the superseded `fullindex.v4.plist` cache instead of the v5 binary caches, so earlier runs rebuilt the search index; both are fixed in this release. Menu-bar managers that hide the status item make `build/statusclick` unusable, so the panel is driven by the global hotkey.
+
+## Copy Contract And Pinned Preview Release Evidence (v0.80.0, 2026-09-04)
+
+- Environment: Apple M3 Pro, 36GB, macOS 15.7.3 (`24G419`), Xcode 26.1.1 (`17B100`), project Swift 5.9, deployment target macOS 14.0; Release build for the snapshot bench, Debug for the behavioral checks; real 9,566-row snapshot DB (`146,255,872` bytes) at `perf-db/clipboard.db`.
+- Snapshot release bench: `cmd` p95 `0.546 ms` against a `50 ms` limit, prepared `cm` p95 `4.129 ms` against a `20 ms` limit, cold `cm` observed `61.413 ms` and remains record-only. Against the `v0.79.0` record (`0.526 / 4.422 / 59.510 ms`) the prepared short-index query improved and the other two moved within run-to-run spread.
+- Write-path note: `SQLiteStatement.bindText` moved from a `-1` C-string length to an explicit byte count. It binds out of the string's own contiguous UTF-8 storage (`String.withUTF8`), so the common path adds no allocation; an earlier `Array(value.utf8)` formulation was replaced for exactly this reason before measuring.
+- Maintenance semantics changed: the `> 128 MB` WAL branch in `StorageService.performCleanup` now issues `SQLITE_CHECKPOINT_TRUNCATE` instead of `PRAGMA incremental_vacuum`. The database is not created with `auto_vacuum=INCREMENTAL`, so the previous pragma could not reclaim anything; the truncating checkpoint is what actually shrinks an oversized `-wal`. `incrementalVacuum` is removed rather than kept behind a condition.
+- Pinned preview verified against the running app through the Accessibility API (`AXUIElement` walk, press, and attribute set) because XCUITest could not start: separate `Pinned Preview` window created with the content moved into it and the popover gone; Markdown `History.Preview.RenderStatus` reads `rendered` both before and after pinning, so the shared WebView is reused rather than re-navigated; window resized to `420x500` and `980x760` with the document still `rendered`; `AXPosition` and `AXSize` settable and applied, and the frame restored from `setFrameAutosaveName` on the next pin; `kCGWindowLayer` observed as `3` by default, `0` after toggling always-on-top off, `3` again after toggling it back; explicit close removes the window and hover previews plus the shared WebView return; the window stays up after the history panel closes.
+- Scroll reference: not re-measured. The only scroll-path change is one `Bool` added to `HistoryItemView`'s `Equatable`; the pinned flag reaches rows through the existing `HistoryRowContext` channel and changes only on pin and unpin.
+- Gates: `make build` passed, and each of the two commits builds standalone; unit 821 executed / 3 skipped / 0 failures (807 at the first commit); strict 821 / 3 / 0 with no `Sendable` diagnostics; documentation and release validators passed before tag. TSan not run: the event-queue change stays inside the existing actor and the pinned preview is `@MainActor` throughout.
+- Environment-blocked, and blocking for this host rather than for the release: XCUITest and `make perf-frontend-profile` both fail with `Timed out while enabling automation mode`, which requires an interactive system-authentication approval that could not be granted here. Each attempt also leaves `testmanagerd` unable to accept new sessions, which makes ordinary `make test-unit` fail with `The test runner hung before establishing connection` until that daemon is killed; kill it before concluding that a unit-test failure is real. `ScopyUITests/HistoryListUITests/testPinnedPreviewSurvivesListScrollAndClosesOnlyExplicitly` is committed and has never been executed.
 
 ## Homebrew Acceptance
 

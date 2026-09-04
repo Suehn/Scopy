@@ -12,6 +12,25 @@
 
 - No unreleased entries.
 
+## [v0.80.0] - 2026-09-04
+
+### Added
+
+- Any hover preview can be pinned into a window of its own: draggable to any position on any screen, resizable by its edges, and floating above other apps by default with a header toggle for an ordinary window level. Position, size, and that preference are remembered. A pinned preview survives list scrolling, row recycling, hovering other rows, and the history panel closing, and closes only on an explicit action or when its item is deleted or its payload replaced. One preview is pinned at a time and hover previews are suspended while one is, because the pinned window owns the single shared Markdown WebView; pinning hands over the already-rendered content instead of preparing it again.
+
+### Fixed
+
+- A clipboard write that failed no longer reports success. Previously the pasteboard kept its previous content while copy returned normally, so the panel closed over an unchanged clipboard and the Codex paste path delivered the *previous* clipboard content to the frontmost app. Every write path now reports failure, usage counts and item events only advance after a write that reached the pasteboard, the panel stays open on failure, and the reason is shown in the footer instead of only logged.
+- A copied folder replays as the folder again. File captures recorded directories and `.app` bundles but filtered them out on the way back, so a folder degraded to its path text and a mixed selection lost its folders. Replay, AirDrop, and Open Containing Folder now accept any existing node, in copy order; only size totals and image payloads still require a regular file.
+- A publication that fails to build authoritative state returns its sequence watermark, so the publications it superseded are no longer rejected as stale as well. Losing both left the UI showing an item state the database had already moved past.
+- Text containing an embedded NUL is stored and read in full instead of being truncated at the first NUL by C-string binding semantics.
+- An oversized WAL is reclaimed with a truncating checkpoint. `PRAGMA incremental_vacuum` was a no-op because the database is not in incremental auto-vacuum mode.
+- Temporary AirDrop PNGs are swept at startup instead of accumulating in the temporary directory.
+
+### Changed
+
+- `Scopy/Runtime` is compiled into `ScopyKit` only. It was also compiled into the app target, which gave `PerfFeatureFlags` two independent copies of its static state.
+
 ## [v0.79.0] - 2026-09-03
 
 ### Changed
