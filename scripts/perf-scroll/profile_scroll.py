@@ -49,6 +49,10 @@ def run_once(index):
         env.update(SCOPY_PROFILE_FIXED_COMMAND_COUNT=str(a.commands), SCOPY_PROFILE_AUTO_SCROLL_STEP_PX=str(a.delta), SCOPY_PROFILE_WARM_ROUNDS=str(a.warm), SCOPY_PROFILE_DURATION_SEC='120')
     else:
         env.update(SCOPY_PROFILE_DURATION_SEC=str(int(a.settle + a.duration + 6)))
+    # Park the pointer away from where the panel opens. Left over the list, it starts a hover
+    # preview during the settle, and that popover is a second status-level window that swallows the
+    # synthetic input and changes the workload being measured.
+    subprocess.run([os.path.join(TOOLS,'warp'), '1400', '40'], capture_output=True)
     p=subprocess.Popen([a.app+'/Contents/MacOS/Scopy'], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     time.sleep(a.settle)
     pos=None
@@ -72,6 +76,10 @@ def run_once(index):
     if a.mode=='wheel':
         wheel=subprocess.run([os.path.join(TOOLS,'wheel'), str(x), str(y), str(a.delta), str(a.hz), str(a.duration), str(a.flip)] + (['phased'] if a.phased else []), capture_output=True, text=True)
         result['wheel']=wheel.stdout.strip()
+        # Take the pointer back off the list as soon as the wheel stops. Left there, the row under
+        # it opens a hover preview once the scroll settles, and that presentation lands inside the
+        # measured window as several hundred ms of main-thread work and the run's worst callback.
+        subprocess.run([os.path.join(TOOLS,'warp'), '1400', '40'], capture_output=True)
     result['cpu']=sampler.communicate()[0].strip()
     for q in procs: q.wait()
     if not a.no_app_profile:
