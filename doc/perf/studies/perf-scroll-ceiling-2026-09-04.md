@@ -181,6 +181,29 @@ build that skips both entirely measures `4.337 s` against `4.40 s`. Caching sear
 item, revision and search version is worth about 1.4%, below what this workload can resolve. The
 difference is the items themselves, not per-row work that can be removed.
 
+## Drawing less per row is not a lever either
+
+The obvious remaining trade was to let the row show less. It was offered twice as worth up to 27%,
+on the reasoning that rows are 55% of the cost. That reasoning is wrong, and measuring it says so:
+
+| Row content | CPU | vs full |
+| --- | ---: | ---: |
+| full | `3.613 s` | — |
+| without the app icon | `3.457 s` | **-4.3%** |
+| without the relative time | `3.493 s` | **-3.3%** |
+| without the metadata line | `3.850 s` | **+6.6%, worse** |
+| title only, everything else removed | `3.563 s` | **-1.4%** |
+
+Dropping the metadata line takes a line of text out of the row, so rows get shorter, more of them
+fit on screen, and more are mounted per scroll. The extra mounts more than cancel the saving. The
+same confound made exact row heights look bad earlier, and it caps the whole trade: a row stripped
+to nothing but its title is 1.4% cheaper than the real one.
+
+Only the elements that do not change row height pay at all — the app icon (-4.3%) and the relative
+time (-3.3%), both height-neutral because they sit beside a two-line text stack that sets the row
+height. Together with the frosted panel that is about 16%, or **1.30x** including what has already
+shipped. **Sacrificing the entire design does not reach 1.5x.**
+
 ## The ceiling
 
 Removing **everything** from the row — all content, all interaction — leaves the `1.74 s` of
