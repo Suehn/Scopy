@@ -96,10 +96,21 @@ measured worse or negligible:
 | Removing the per-row `listRowInsets` / `listRowBackground` | no change |
 | Showing list separators instead of hiding them | CPU `3.71 s` — worse |
 | Removing `.equatable()` from the row | busy `3660 ms` against `2254 ms` — much worse, it stays |
+| Installing `.onHover` only while the list is idle, with the scroll phase delivered through the same per-row fan-out selection already uses | CPU `3.656 s` against `3.572 s`, busy `2664 ms` against `2309 ms`, worst callback `61.7 ms` against `35.0 ms` — worse |
 
 The `NSTableView` result is the important one: reassigning `rootView` on a recycled hosting view
 is not cheaper than what `List` already does, so replacing the container is not the lever it was
 assumed to be. A hand-tuned version might do better, but the naive form starts 52% behind.
+
+The conditional-`.onHover` result is the second: `.onHover` costs 0.20 s, and leaving it off while
+the list moves looked like the last item of size. It behaves correctly — both hover gates pass,
+including the one that matters, where the pointer never moves and the preview still appears once
+the scroll settles — but it costs more than it saves. Switching a `_ConditionalContent` branch
+inside the row tears the row's subtree down and rebuilds it for every visible row at each scroll
+boundary (`interaction.idle_disappear_fast_path` 323 -> 399) and pulls extra `List` body runs with
+it (`list.body` 7 -> 12, `row.init` 1106 -> 2300). This is the same shape of result as the
+per-row hover marker tried before it and as exact row heights: **any per-row structural switching
+in this list costs more than the work it removes.**
 
 ## What shipped
 
@@ -136,7 +147,7 @@ panel that no longer looks like Scopy. What remains addressable after this chang
 
 | Remaining | Cost | Why it is not free |
 | --- | ---: | --- |
-| `.onHover` | `0.20 s` | Hover previews need it. Replacing it with list-level pointer tracking needs a row-index-to-item mapping; the previous attempt (list tracking area + per-row marker view) measured *worse* (`4.41 -> 4.50 s`) |
+| `.onHover` | `0.20 s` | Attempted and reverted: installing it only while the list is idle is correct but measures worse (above). Removing it outright needs list-level pointer tracking with a row-index-to-item mapping; the earlier attempt at that shape (list tracking area + per-row marker view) also measured worse |
 | list wrappers (selection fan-out, accessibility group) | `0.25 s` | Both are functionally required; the three `listRow*` modifiers inside them are already free |
 | popovers, context menu, `onChange` | `0.12 s` | Folding four popovers into one `popover(item:)` is worth part of it |
 | row view nodes and content | `0.51 s` | This is the row people look at |
