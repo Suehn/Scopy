@@ -49,10 +49,38 @@ layer at a time:
 | + `.onHover` | `3.51 s` | `2254 ms` |
 | `v0.80.0` as shipped | `3.878 s` | `2508 ms` |
 
-Read as buckets: **the container is 2.05 s, or 53% of the total, with a row that does nothing.**
-The whole of Scopy's row — every view, every modifier, every piece of interaction — is the other
-1.83 s. The largest single row modifier is `.onHover` at 0.20 s; the largest single bucket is the
-row's own scaffolding at 0.62 s above the container floor.
+### Per-frame and per-row, separated
+
+The minimal-List figure above is not a constant: it depends on how many rows the scroll mounts,
+which depends on row height. Measuring it at two heights separates the two terms.
+
+| Minimal `List` row height | rows mounted in 12 s | CPU |
+| ---: | ---: | ---: |
+| `44 pt` | 777 | `2.09 s` |
+| `88 pt` | 389 | `1.917 s` |
+
+Solving gives **`0.45 ms` per row mount and a fixed `1.74 s` that does not depend on the rows at
+all** — 720 scroll frames at about `2.4 ms` each. So of the `3.878 s` a scroll costs:
+
+- **`1.74 s` (45%) is per-frame**: clip-view scrolling, `NSTableView`'s visible-range bookkeeping,
+  Core Animation commit, compositing. Identical for any row.
+- **`2.14 s` (55%) is per-row**: about `4.3 ms` for one Scopy row against `0.45 ms` for a `Text`,
+  roughly ten times the cost.
+
+Two components of the per-frame term were tested and are not worth anything: coalescing the
+clip-view settle timer, which today allocates and cancels a `DispatchWorkItem` on every scroll
+frame, measured `3.74 s` against a contemporaneous control of `3.64 s`; hiding the scroll
+indicators measured `3.63 s`. Both are inside the noise or worse.
+
+The one per-frame component that does cost is the panel itself. Made fully opaque — no
+`NSVisualEffectView`, opaque window, opaque list background — a scroll costs `3.323 s` against
+`3.660 s` for the same build with the frosted panel, and `2128 ms` of run-loop busy against
+`2411 ms`. **The frosted panel is worth about 9% of scroll CPU.** That is a product trade, not an
+optimisation, and it is not taken here.
+
+Read as buckets: the whole of Scopy's row — every view, every modifier, every piece of
+interaction — is `2.14 s`. The largest single row modifier is `.onHover` at 0.20 s; the largest
+single bucket is the row's own scaffolding at 0.62 s above a `Text` row.
 
 ## What was tried on the container, and what it measured
 
@@ -100,9 +128,11 @@ Measured interleaved in one session, 5 runs per side:
 
 ## The ceiling
 
-Removing **everything** from the row — all content, all interaction — reaches the container floor
-of `2.05 s`, which is `1.89x`. That is the arithmetic maximum for row-level work, and it is not a
-reachable product. What remains addressable after this change:
+Removing **everything** from the row — all content, all interaction — leaves the `1.74 s` of
+per-frame cost plus what a `Text` row would still cost, about `1.96 s`, which is `1.98x`. That is
+the arithmetic maximum for row-level work, and it is not a reachable product. Adding the frosted
+panel's 9% on top of it would reach about `2.2x`, and only with a row that draws nothing on a
+panel that no longer looks like Scopy. What remains addressable after this change:
 
 | Remaining | Cost | Why it is not free |
 | --- | ---: | --- |
@@ -111,8 +141,8 @@ reachable product. What remains addressable after this change:
 | popovers, context menu, `onChange` | `0.12 s` | Folding four popovers into one `popover(item:)` is worth part of it |
 | row view nodes and content | `0.51 s` | This is the row people look at |
 
-A realistic further capture is `0.2-0.3 s`, taking the total to about **1.15-1.20x**. **1.5x is not
-available in this architecture**: it would require deleting three quarters of everything the row
+A realistic further capture is `0.2-0.3 s`, taking the total to about **1.15-1.20x**, or about
+`1.3x` if the frosted panel is also given up. **1.5x is not available in this architecture**: it would require deleting three quarters of everything the row
 does, and the container underneath it — which is over half the cost — measured worse under every
 replacement tried.
 
