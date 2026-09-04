@@ -2,9 +2,10 @@
 doc_type: runbook
 status: active
 owner: maintainers
-last_reviewed: 2026-09-04
+last_reviewed: 2026-09-05
 canonical: true
 related_versions:
+  - v0.80.1
   - v0.80.0
   - v0.78.2
   - v0.70.0
@@ -332,3 +333,9 @@ Known release pitfalls:
 
 - Legacy deployment notes are preserved in [../archive/release-runbook-legacy.md](../archive/release-runbook-legacy.md).
 - Older changelog entries live under [../archive/changelog/](../archive/changelog/README.md).
+
+## v0.80.1 Search Pagination Acceptance
+
+The release profile at [v0.80.1-profile.md](../perf/release-profiles/v0.80.1-profile.md) records the final repeated CGEvent wheel comparison on an Apple M3 Pro (36 GB), macOS 15.7.3 / Xcode 26.1.1, and a fresh 9,756-row snapshot. The backend release gates passed: cmd p95 0.575 ms and prepared cm p95 5.044 ms; cold cm was 45.598 ms. The full XCUITest profile was attempted but blocked before scenario startup by automation-mode initialization. Standalone execution of the strict build passed 830 tests (4 conditional skips), after normal IDE-session startup stalled. These are separate evidence paths; neither substitutes a passed full UI gate.
+
+The final three-pair Fuzzy pagination comparison reduced median longest active callback from 91.7 to 58.3 ms (36.4%); median 12-second gesture CPU moved from 3.76 to 3.65 s. Callback p95 stayed at 8.33 ms; these figures do not establish an application-wide 1.5–2x gain.

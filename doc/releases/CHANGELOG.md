@@ -12,6 +12,20 @@
 
 - No unreleased entries.
 
+## [v0.80.1] - 2026-09-05
+
+### Fixed
+
+- Keep Fuzzy and Fuzzy+ pagination in the calibrated full-result order instead of mixing it with prefilter ranking and replacing a large result set on the next page.
+- Cancel buffered page additions after a query change or deletion refresh, retaining complete match evidence and the current selection during refinement.
+
+### Performance And Tooling
+
+- Mount search results in 20-row batches, prewarm each page once, append list projections incrementally, and avoid replacing an identical refined page for metadata-only changes.
+- Include previously committed row-state and pointer-region optimizations without changing row appearance, button activation, or previews.
+- Remove unused helpers, repair project-generation cache invalidation, isolate worktree test outputs, and add tooling self-tests to CI.
+- See [the release profile](../perf/release-profiles/v0.80.1-profile.md) for repeated real-snapshot measurements and the blocked full XCUITest gate.
+
 ## [v0.80.0] - 2026-09-04
 
 ### Added

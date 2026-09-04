@@ -2,7 +2,7 @@
 doc_type: portal
 status: active
 owner: maintainers
-last_reviewed: 2026-09-02
+last_reviewed: 2026-09-05
 canonical: true
 ---
 
@@ -12,8 +12,8 @@ Per-release profiles live here when a release merits its own comparison document
 
 ## Current Coverage
 
-- Latest profile file: [v0.78.0-profile.md](./v0.78.0-profile.md)
-- Latest release without dedicated profile: `v0.77.1`
+- Latest profile file: [v0.80.1-profile.md](./v0.80.1-profile.md)
+- Latest release without dedicated profile: `v0.80.0`
 
 ## Rule
 

@@ -1,30 +1,28 @@
-version: v0.80.0
-date: 2026-09-04
-release_doc: doc/releases/history/v0.80.0.md
+version: v0.80.1
+date: 2026-09-05
+release_doc: doc/releases/history/v0.80.1.md
 release_index: doc/releases/README.md
 changelog_file: doc/releases/CHANGELOG.md
-profile_doc: null
+profile_doc: doc/perf/release-profiles/v0.80.1-profile.md
 runbook_doc: doc/current/release-runbook.md
 spec_doc: doc/current/product-spec.md
 development_doc: doc/current/development-guide.md
 architecture_doc: doc/current/architecture.md
-last_verified_at: 2026-09-04
-summary: Copy reports whether it reached the pasteboard, copied folders replay as folders, and any hover preview can be pinned into a movable, resizable, always-on-top window
+last_verified_at: 2026-09-05
+summary: Keep search pagination correctly ranked and apply new rows in small batches
 verification:
   docs_validate: pass
   release_validate: pass
   release_policy: pass
-  build: pass_make_build_and_each_commit_builds_standalone
-  assets_verify: unchanged_no_renderer_or_asset_change
-  test_unit: pass_821_executed_3_skipped_0_failures
-  test_strict: pass_821_executed_3_skipped_0_failures_no_sendable_diagnostics
-  test_tsan: not_run_event_queue_change_inside_existing_actor_and_pinned_preview_is_mainactor
-  test_integration: not_run_no_schema_change
-  test_performance: pass_snapshot_release_gate_only_no_frontend_profile_available
-  snapshot_release: pass_cmd_p95_0_546ms_cm_p95_4_129ms_cold_cm_61_413ms
-  frontend_profile_full: environment_blocked_xcuitest_automation_mode_authorization_unavailable
-  unified_performance: not_run_frontend_half_environment_blocked
+  build: pass_local_debug_release_and_hosted_build
+  assets_verify: pass_make_build_no_renderer_change
+  test_unit: pass_830_executed_4_skipped_0_failures
+  test_strict: pass_830_standalone_strict_build_normal_ide_startup_blocked_hosted_strict_pass
+  test_tsan: pass_hosted_run_33917243016
+  test_integration: not_run_no_schema_or_capture_change
+  test_performance: pass_snapshot_release_and_repeated_cgevent_search_profile
+  snapshot_release: pass_cmd_p95_0_575ms_cm_p95_5_044ms_cold_cm_45_598ms
+  frontend_profile_full: environment_blocked_xcuitest_automation_mode_initialization
+  unified_performance: generated_from_real_cgevent_profiles_backend_baseline_unmeasured
   bundled_pngquant: unchanged_from_v0_74_0_fork_256e081_engine_fddcf09
-  test_ui_subset: environment_blocked_pinned_preview_verified_through_accessibility_api_on_running_app
-  scroll_reference: no_new_scroll_path_work_one_bool_added_to_row_equatable
-  interaction_reference: pinned_preview_markdown_handover_renderstatus_rendered_before_and_after_no_renavigation
+  test_ui_subset: cgevent_accessibility_checks_recorded_in_release_profile

@@ -2,7 +2,7 @@
 doc_type: portal
 status: active
 owner: maintainers
-last_reviewed: 2026-05-07
+last_reviewed: 2026-09-05
 canonical: true
 ---
 
@@ -33,6 +33,6 @@ This directory holds the canonical performance evidence set.
 ## Preferred Reading Order
 
 - Current release context: [../releases/README.md](../releases/README.md)
-- Latest dedicated profile: [release-profiles/v0.7.6-profile.md](./release-profiles/v0.7.6-profile.md)
-- Latest release without a dedicated profile: `v0.7.7`
+- Latest dedicated profile: [release-profiles/v0.80.1-profile.md](./release-profiles/v0.80.1-profile.md)
+- Latest release without a dedicated profile: `v0.80.0`
 - Latest cross-cutting study: [studies/perf-front-back-unified-2026-02-28.md](./studies/perf-front-back-unified-2026-02-28.md)

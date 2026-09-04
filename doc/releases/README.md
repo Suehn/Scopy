@@ -2,7 +2,7 @@
 doc_type: portal
 status: active
 owner: maintainers
-last_reviewed: 2026-09-04
+last_reviewed: 2026-09-05
 canonical: true
 ---
 
@@ -20,16 +20,17 @@ This page is the human-facing index for current release state. Automation should
 ## Current Release
 
 <!-- release-current:start -->
-- Version: `v0.80.0`
-- Date: `2026-09-04`
-- Release note: [v0.80.0](./history/v0.80.0.md)
+- Version: `v0.80.1`
+- Date: `2026-09-05`
+- Release note: [v0.80.1](./history/v0.80.1.md)
 - Changelog: [CHANGELOG.md](./CHANGELOG.md)
-- Profile doc: `none`
+- Profile doc: [v0.80.1 profile](../perf/release-profiles/v0.80.1-profile.md)
 <!-- release-current:end -->
 
 ## Recent Releases
 
 <!-- release-recent:start -->
+- `2026-09-05` [v0.80.1](./history/v0.80.1.md) - Keep search pagination correctly ranked and apply new rows in small batches
 - `2026-09-04` [v0.80.0](./history/v0.80.0.md) - Copy reports whether it reached the pasteboard, copied folders replay as folders, and any hover preview can be pinned into a movable, resizable, always-on-top window
 - `2026-09-03` [v0.79.0](./history/v0.79.0.md) - Row construction stops doing render work and search indexes mutate in place: search typing blocks the main thread 31% less with 35% shorter worst stalls, clipboard capture 12% cheaper
 - `2026-09-03` [v0.78.2](./history/v0.78.2.md) - Marker-bearing clipboard content remains captured; history pages skip inline payload blobs; search evidence failures stay correctly scoped
@@ -41,9 +42,6 @@ This page is the human-facing index for current release state. Automation should
 - `2026-09-02` [v0.75.0](./history/v0.75.0.md) - Frame-driven export settle and a PAM-backed export canvas: post-load export 2-3x faster, identical output, defaults speed 3 / 256 colors / 80-95
 - `2026-09-02` [v0.74.0](./history/v0.74.0.md) - Raw bitmap hand-off to pngquant and a parallel PNG writer: export stage 7.5x faster, pixel-identical output
 - `2026-09-02` [v0.73.0](./history/v0.73.0.md) - Bundled pngquant engine rebuilt from the maintainer fork, 2.5-4x faster quantization with deterministic output
-- `2026-08-31` [v0.72.2](./history/v0.72.2.md) - Architecture, correctness, safety, and performance hardening without UX changes
-- `2026-08-29` [v0.72.1](./history/v0.72.1.md) - Link enrichment re-render fixes, official news-card presentation, and precise promotion gates
-- `2026-08-29` [v0.72.0](./history/v0.72.0.md) - All rich surface types, opt-in link enrichment, and Sparkle auto-update
 <!-- release-recent:end -->
 
 ## Full History
