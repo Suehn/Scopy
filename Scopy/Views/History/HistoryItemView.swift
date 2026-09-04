@@ -70,6 +70,11 @@ struct HistoryItemView: View, Equatable {
 
     private static let inactivePopoverToken = UUID(uuidString: "00000000-0000-0000-0000-000000000000")!
 
+    private struct RowHighlight: Equatable {
+        let isHovering: Bool
+        let isKeyboardSelected: Bool
+    }
+
     init(
         item: ClipboardItemDTO,
         isKeyboardSelected: Bool,
@@ -977,7 +982,6 @@ struct HistoryItemView: View, Equatable {
                 .font(ScopyTypography.microMono)
                 .foregroundStyle(ScopyColors.mutedText)
         }
-        .contentShape(Rectangle())
     }
 
     private var rowVisualContent: some View {
@@ -1031,8 +1035,11 @@ struct HistoryItemView: View, Equatable {
             }
         }
         // v0.10.3: 添加选中/悬停态过渡动效
-        .animation(isScrollInteractionActive ? nil : .easeInOut(duration: 0.15), value: isHovering)
-        .animation(isScrollInteractionActive ? nil : .easeInOut(duration: 0.15), value: isKeyboardSelected)
+        // One animation node: both flags drive the same transition on the same subtree.
+        .animation(
+            isScrollInteractionActive ? nil : .easeInOut(duration: 0.15),
+            value: RowHighlight(isHovering: isHovering, isKeyboardSelected: isKeyboardSelected)
+        )
         .padding(.horizontal, ScopySpacing.md) // Outer padding for floating effect
     }
 
