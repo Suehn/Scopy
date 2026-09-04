@@ -51,6 +51,30 @@ final class HistoryListStateTests: XCTestCase {
         XCTAssertTrue(state.canLoadMore)
     }
 
+    func testAppendingSearchChunksPreservesPinnedGroupsAndUnknownTotalPaging() {
+        let first = makeItem(text: "first")
+        let pinned = makeItem(text: "pinned", isPinned: true)
+        let second = makeItem(text: "second")
+        let anotherPinned = makeItem(text: "another pinned", isPinned: true)
+        var state = HistoryListState()
+        state.replacePage(items: [first, pinned], total: -1, hasMore: true)
+        let revision = state.itemsRevision
+
+        state.appendPage(items: [second, anotherPinned], total: -1, hasMore: true)
+        XCTAssertEqual(state.items.map(\.id), [first.id, pinned.id, second.id, anotherPinned.id])
+        XCTAssertEqual(state.pinnedItems.map(\.id), [pinned.id, anotherPinned.id])
+        XCTAssertEqual(state.unpinnedItems.map(\.id), [first.id, second.id])
+        XCTAssertEqual(state.indexOfItem(withID: anotherPinned.id), 3)
+        XCTAssertEqual(state.itemsRevision, revision + 1)
+        XCTAssertTrue(state.canLoadMore)
+
+        // An empty terminal page still updates authoritative paging metadata.
+        state.appendPage(items: [], total: 4, hasMore: false)
+        XCTAssertEqual(state.loadedCount, 4)
+        XCTAssertEqual(state.totalCount, 4)
+        XCTAssertFalse(state.canLoadMore)
+    }
+
     func testSetItemIfChangedUpdatesInPlaceAndDerivedPinnedSplit() {
         let first = makeItem(text: "first")
         let second = makeItem(text: "second")

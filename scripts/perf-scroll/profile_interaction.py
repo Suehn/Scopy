@@ -72,6 +72,9 @@ try:
                                     '-file', os.path.join(out, 'sample.txt')],
                                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     for i in range(a.cycles):
+        # A stationary pointer over the reopened list can create a preview before winpos runs.
+        # Park it away so the header click below targets the history panel, not that popover.
+        subprocess.run([os.path.join(TOOLS, 'warp'), '1400', '40'], capture_output=True)
         o = run('panelready', '--hotkey', str(a.hotkey), *(['--count-rows'] if a.count_rows else []))
         print(f'  cycle {i+1} {o}', flush=True)
         lines.append(o)

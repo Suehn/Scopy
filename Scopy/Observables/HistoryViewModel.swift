@@ -921,7 +921,7 @@ final class HistoryViewModel {
         Task { await loadMore() }
     }
 
-    /// Rows a page is applied in per run-loop turn, so a 100-row page costs four small List
+    /// Rows a page is applied in per run-loop turn, so a 100-row page costs five small List
     /// updates instead of one long one while the user is still scrolling.
     static let loadMoreApplyChunkRows = 20
 
@@ -955,6 +955,7 @@ final class HistoryViewModel {
                     // When current result is prefilter (total = -1), force full fuzzy before paging.
                     if (searchCoverage == .stagedRefine || searchCoverage == .incomplete),
                        (searchMode == .fuzzy || searchMode == .fuzzyPlus) {
+                        cancelTask(&refineTask)
                         let expectedLimit = loadedCount + Self.loadMorePageSize
                         let request = SearchRequest(
                             query: searchQuery,
@@ -972,7 +973,7 @@ final class HistoryViewModel {
                         )
                         let result = try await service.search(query: request)
                         guard !Task.isCancelled, currentVersion == searchVersion else { return }
-                        replaceSearchPage(with: result)
+                        guard await applyRefinedSearchPage(with: result, version: currentVersion) else { return }
                         searchCoverage = result.coverage
                         return
                     }
@@ -984,6 +985,9 @@ final class HistoryViewModel {
                         appFilter: appFilter,
                         typeFilter: typeFilter,
                         typeFilters: typeFilters,
+                        // Continue the calibrated ranking. Returning to the interactive prefilter
+                        // mixes two result orders and forces a large replacement on the next page.
+                        forceFullFuzzy: searchMode == .fuzzy || searchMode == .fuzzyPlus,
                         limit: Self.loadMorePageSize,
                         offset: loadedCount
                     )
@@ -992,7 +996,8 @@ final class HistoryViewModel {
                     )
                     let result = try await service.search(query: request)
                     guard !Task.isCancelled, currentVersion == searchVersion else { return }
-                    appendSearchPage(with: result)
+                    prewarmDisplayText(for: acceptedSearchHits(result.hits).map(\.item))
+                    guard await appendSearchPage(with: result, version: currentVersion) else { return }
                     searchCoverage = result.coverage
                 } else {
                     ScrollPerformanceProfile.shared.incrementCounter(
@@ -1004,15 +1009,15 @@ final class HistoryViewModel {
                     )
                     guard !Task.isCancelled, currentVersion == searchVersion else { return }
                     let currentItems = excludingKnownDeletedItems(moreItems)
+                    prewarmDisplayText(for: currentItems)
                     var start = 0
                     while start < currentItems.count {
                         let chunk = Array(currentItems[start..<min(currentItems.count, start + Self.loadMoreApplyChunkRows)])
                         listState.appendRecentPage(items: chunk)
                         mergeKnownContentRevisions(chunk)
-                        prewarmDisplayText(for: chunk)
                         start += chunk.count
                         if start < currentItems.count {
-                            // One chunk per display frame: SwiftUI commits it before the next arrives.
+                            // Yield so the UI can commit this chunk before receiving more rows.
                             try? await Task.sleep(nanoseconds: 20_000_000)
                             guard !Task.isCancelled, currentVersion == searchVersion else { return }
                         }
@@ -1094,6 +1099,7 @@ final class HistoryViewModel {
                 )
                 let result = try await service.search(query: request)
                 guard !Task.isCancelled, currentVersion == searchVersion else { return }
+                prewarmDisplayText(for: acceptedSearchHits(result.hits).map(\.item))
                 replaceSearchPage(with: result)
                 searchCoverage = result.coverage
 
@@ -1130,6 +1136,7 @@ final class HistoryViewModel {
                             guard !Task.isCancelled, refineVersion == searchVersion else { return }
 
                             guard loadedCount <= Self.initialPageSize else { return }
+                            prewarmDisplayText(for: acceptedSearchHits(refined.hits).map(\.item))
                             replaceSearchPage(with: refined, skippingIdenticalRefine: true)
                             searchCoverage = refined.coverage
                         } catch {
@@ -1402,6 +1409,8 @@ final class HistoryViewModel {
 
     // MARK: - Private
 
+    // Prewarm a fetched page once, before publishing its first chunk. These caches cancel
+    // superseded requests, so prewarming each chunk would discard unfinished work.
     private func prewarmDisplayText(for items: [ClipboardItemDTO]) {
         guard !items.isEmpty else { return }
         ClipboardItemDisplayText.shared.prewarm(items: items)
@@ -1570,9 +1579,8 @@ final class HistoryViewModel {
         // A refine pass that reproduces the prefilter page must not rebuild the List.
         if skippingIdenticalRefine,
            resultItems == items,
-           contexts == searchMatchContexts,
-           listState.totalCount == result.total,
-           listState.canLoadMore == result.hasMore {
+           contexts == searchMatchContexts {
+            listState.updatePagination(total: result.total, hasMore: result.hasMore)
             return
         }
         listState.replacePage(
@@ -1582,27 +1590,68 @@ final class HistoryViewModel {
         )
         searchMatchContexts = contexts
         mergeKnownContentRevisions(resultItems)
-        prewarmDisplayText(for: resultItems)
         reconcileSelectionAfterProjectionReplacement()
     }
 
-    private func appendSearchPage(with result: SearchResultPage) {
+    private func applyRefinedSearchPage(with result: SearchResultPage, version: Int) async -> Bool {
         let hits = acceptedSearchHits(result.hits)
-        let resultItems = hits.map(\.item)
-        listState.appendPage(
-            items: resultItems,
-            total: result.total,
-            hasMore: result.hasMore
-        )
-        var mergedContexts = searchMatchContexts
-        for hit in hits {
-            if let matchContext = hit.matchContext {
-                mergedContexts[hit.item.id] = matchContext
+        let existingIDs = Set(items.map(\.id))
+        let newHits = hits.filter { !existingIDs.contains($0.item.id) }
+        prewarmDisplayText(for: hits.map(\.item))
+        // Keep the staged rows, including the visible scroll anchor and selection, present
+        // while mounting new rows. Once they exist, commit the full ranking atomically.
+        // Replacing a truncated prefix first can temporarily remove the current scroll anchor.
+        if !newHits.isEmpty {
+            let additions = SearchResultPage(
+                hits: newHits,
+                total: result.total,
+                hasMore: result.hasMore,
+                coverage: result.coverage
+            )
+            guard await appendSearchPage(with: additions, version: version) else { return false }
+            try? await Task.sleep(nanoseconds: 20_000_000)
+        }
+        guard !Task.isCancelled, version == searchVersion else { return false }
+        replaceSearchPage(with: result, skippingIdenticalRefine: true)
+        return true
+    }
+
+    private func appendSearchPage(with result: SearchResultPage, version: Int) async -> Bool {
+        guard !Task.isCancelled, version == searchVersion else { return false }
+        if result.hits.isEmpty {
+            listState.updatePagination(total: result.total, hasMore: result.hasMore)
+            return true
+        }
+        var start = 0
+        while start < result.hits.count {
+            guard !Task.isCancelled, version == searchVersion else { return false }
+            let end = min(start + Self.loadMoreApplyChunkRows, result.hits.count)
+            let hits = acceptedSearchHits(Array(result.hits[start..<end]))
+            let resultItems = hits.map(\.item)
+
+            // Publish each chunk's evidence and rows in the same actor turn. Yield only after
+            // both are ready, so a newly visible search result never loses its match evidence.
+            var mergedContexts = searchMatchContexts
+            for hit in hits {
+                if let matchContext = hit.matchContext {
+                    mergedContexts[hit.item.id] = matchContext
+                }
+            }
+            searchMatchContexts = mergedContexts
+            ScrollPerformanceProfile.shared.incrementCounter(name: "list.pagination_search_chunk")
+            listState.appendPage(
+                items: resultItems,
+                total: result.total,
+                hasMore: end < result.hits.count || result.hasMore
+            )
+            mergeKnownContentRevisions(resultItems)
+            start = end
+            if start < result.hits.count {
+                // Match recent-history paging: allow layout to commit before the next chunk.
+                try? await Task.sleep(nanoseconds: 20_000_000)
             }
         }
-        searchMatchContexts = mergedContexts
-        mergeKnownContentRevisions(resultItems)
-        prewarmDisplayText(for: resultItems)
+        return true
     }
 
     private func clearSearchProjection() {

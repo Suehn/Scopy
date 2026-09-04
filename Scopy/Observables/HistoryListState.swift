@@ -39,14 +39,17 @@ struct HistoryListState {
         total: Int,
         hasMore: Bool
     ) {
-        items.append(contentsOf: newItems)
-        loadedCount = items.count
+        appendItems(newItems)
         totalCount = total
         canLoadMore = hasMore
-        rebuildDerivedState()
     }
 
     mutating func appendRecentPage(items newItems: [ClipboardItemDTO]) {
+        appendItems(newItems)
+        recomputeCanLoadMore()
+    }
+
+    private mutating func appendItems(_ newItems: [ClipboardItemDTO]) {
         // Appending keeps every existing index valid; extend the derived arrays instead of
         // rebuilding them for each page chunk.
         var index = items.count
@@ -62,7 +65,11 @@ struct HistoryListState {
         items.append(contentsOf: newItems)
         loadedCount = items.count
         itemsRevision &+= 1
-        recomputeCanLoadMore()
+    }
+
+    mutating func updatePagination(total: Int, hasMore: Bool) {
+        totalCount = total
+        canLoadMore = hasMore
     }
 
     mutating func updateTotalCount(_ total: Int) {

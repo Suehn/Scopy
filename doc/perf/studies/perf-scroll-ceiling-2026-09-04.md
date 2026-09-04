@@ -66,11 +66,13 @@ which depends on row height. Measuring it at two heights separates the two terms
 | `44 pt` | 777 | `2.09 s` |
 | `88 pt` | 389 | `1.917 s` |
 
-Solving gives **`0.45 ms` per row mount and a fixed `1.74 s` that does not depend on the rows at
-all** — 720 scroll frames at about `2.4 ms` each. So of the `3.878 s` a scroll costs:
+A two-point linear fit estimates **`0.45 ms` per row mount and a `1.74 s` intercept** for this
+warm wheel-scroll workload. Two row heights do not establish a framework lower bound, nor do
+these runs cover search pagination, cold caches, other hardware, or a different architecture.
+The model decomposes the observed `3.878 s` as follows:
 
 - **`1.74 s` (45%) is per-frame**: clip-view scrolling, `NSTableView`'s visible-range bookkeeping,
-  Core Animation commit, compositing. Identical for any row.
+  Core Animation commit, compositing. Approximately constant across these two minimal-row runs.
 - **`2.14 s` (55%) is per-row**: about `4.3 ms` for one Scopy row against `0.45 ms` for a `Text`,
   roughly ten times the cost.
 
@@ -204,11 +206,11 @@ time (-3.3%), both height-neutral because they sit beside a two-line text stack 
 height. Together with the frosted panel that is about 16%, or **1.30x** including what has already
 shipped. **Sacrificing the entire design does not reach 1.5x.**
 
-## The ceiling
+## Headroom in the tested workload
 
 Removing **everything** from the row — all content, all interaction — leaves the `1.74 s` of
 per-frame cost plus what a `Text` row would still cost, about `1.96 s`, which is `1.98x`. That is
-the arithmetic maximum for row-level work, and it is not a reachable product. Adding the frosted
+an extrapolation of the two-point model, not a measured maximum or a usable product. Adding the frosted
 panel's 9% on top of it would reach about `2.2x`, and only with a row that draws nothing on a
 panel that no longer looks like Scopy. What remains addressable after this change:
 
@@ -220,13 +222,13 @@ panel that no longer looks like Scopy. What remains addressable after this chang
 | row view nodes and content | `0.51 s` | This is the row people look at. Merging `background`/`overlay`/`animation` into single nodes was measured before and gave nothing |
 
 A realistic further capture is `0.2-0.3 s`, taking the total to about **1.15-1.20x**, or about
-`1.3x` if the frosted panel is also given up. **1.5x is not available in this architecture**: it would require deleting three quarters of everything the row
-does, and the container underneath it — which is over half the cost — measured worse under every
-replacement tried.
+`1.3x` if the frosted panel is also given up. **None of the tested candidates establishes a 1.5x
+improvement while preserving the current experience.** The tested hosting-based container
+replacements were slower; this does not rule out other implementations or improvements to
+specific stalls. Search pagination must be measured separately from steady scrolling.
 
-If a large factor is ever required, the honest options are to change the workload rather than the
-code (fewer visible rows, cheaper rows by design) or to accept a substantially plainer row. Both
-are product decisions, not optimisations.
+Reducing visible rows or simplifying their appearance changes the product. Such experiments
+cannot establish a gain for the unchanged experience.
 
 ## Reproducing
 

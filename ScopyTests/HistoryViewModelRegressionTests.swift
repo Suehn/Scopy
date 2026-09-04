@@ -327,6 +327,270 @@ final class HistoryViewModelRegressionTests: XCTestCase {
         XCTAssertFalse(viewModel.items.contains { $0.id == selectedID })
     }
 
+    func testSearchPaginationYieldsWithCompleteEvidenceAndPreservesOrderAndSelection() async {
+        let results = (0..<175).map { makeItem(text: "needle \($0)", age: $0) }
+        let service = HistoryViewModelRegressionService(items: results)
+        service.includesMatchEvidence = true
+        let viewModel = HistoryViewModel(service: service, settingsViewModel: SettingsViewModel(service: service))
+        viewModel.configureTiming(.immediateRegressionTests)
+        defer { viewModel.stop() }
+        viewModel.searchMode = .exact
+        viewModel.searchQuery = "needle"
+        viewModel.search()
+        await waitForNextItemsRevision(in: viewModel)
+        await waitForSearchToFinish(in: viewModel)
+        viewModel.selectedID = results[12].id
+        viewModel.scrollDidStart()
+
+        let pagination = Task { await viewModel.loadMore() }
+        await waitForNextItemsRevision(in: viewModel)
+        XCTAssertGreaterThan(viewModel.loadedCount, 50)
+        XCTAssertLessThan(viewModel.loadedCount, 150)
+        XCTAssertTrue(viewModel.isLoading)
+        XCTAssertTrue(viewModel.canLoadMore)
+        XCTAssertTrue(viewModel.items.allSatisfy { viewModel.searchMatchContext(for: $0.id) != nil })
+
+        // Another caller must await the buffered page rather than fetch overlapping rows.
+        await viewModel.loadMore()
+        await pagination.value
+        XCTAssertEqual(service.searchRequests.map(\.offset), [0, 50])
+        XCTAssertEqual(viewModel.items.map(\.id), Array(results.prefix(150)).map(\.id))
+        XCTAssertEqual(viewModel.searchMatchContexts.count, 150)
+        XCTAssertEqual(viewModel.selectedID, results[12].id)
+        XCTAssertTrue(viewModel.isScrolling)
+
+        await viewModel.loadMore()
+        XCTAssertEqual(viewModel.items.map(\.id), results.map(\.id))
+        XCTAssertEqual(viewModel.searchMatchContexts.count, results.count)
+        XCTAssertEqual(viewModel.totalCount, results.count)
+        XCTAssertFalse(viewModel.canLoadMore)
+        XCTAssertFalse(viewModel.isLoading)
+    }
+
+    func testCalibratedFuzzyPaginationNeverReturnsToPrefilterOrdering() async {
+        for mode in [SearchMode.fuzzy, .fuzzyPlus] {
+            let results = (0..<175).map { makeItem(text: "needle \($0)", age: $0) }
+            let service = HistoryViewModelRegressionService(items: results)
+            service.includesMatchEvidence = true
+            service.returnsStagedFirstPage = true
+            service.prefilterItems = Array(results.reversed())
+            service.suspendNextRefine = true
+            let refineStarted = expectation(description: "Full refine started for \(mode)")
+            service.onRefineStarted = { refineStarted.fulfill() }
+            let viewModel = HistoryViewModel(service: service, settingsViewModel: SettingsViewModel(service: service))
+            viewModel.configureTiming(.immediateRegressionTests)
+            defer { viewModel.stop() }
+            viewModel.searchMode = mode
+            viewModel.searchQuery = "needle"
+            viewModel.search()
+            await fulfillment(of: [refineStarted], timeout: 1.0)
+            let refined = expectation(description: "Full ranking published for \(mode)")
+            withObservationTracking {
+                _ = viewModel.searchCoverage
+            } onChange: {
+                refined.fulfill()
+            }
+            service.resumeRefine()
+            await fulfillment(of: [refined], timeout: 1.0)
+            await waitForSearchToFinish(in: viewModel)
+            XCTAssertEqual(viewModel.items.map(\.id), Array(results.prefix(50)).map(\.id))
+
+            await viewModel.loadMore()
+            XCTAssertEqual(viewModel.searchCoverage, .complete)
+            XCTAssertEqual(viewModel.items.map(\.id), Array(results.prefix(150)).map(\.id))
+            XCTAssertEqual(Set(viewModel.items.map(\.id)).count, 150)
+            XCTAssertEqual(viewModel.searchMatchContexts.count, 150)
+            await viewModel.loadMore()
+            XCTAssertEqual(viewModel.items.map(\.id), results.map(\.id))
+            XCTAssertEqual(service.searchRequests.map(\.offset), [0, 0, 50, 150])
+            XCTAssertTrue(service.searchRequests.dropFirst().allSatisfy(\.forceFullFuzzy))
+            XCTAssertFalse(viewModel.canLoadMore)
+        }
+    }
+
+    func testRefinedPaginationYieldsAndPreservesSelectionMovedIntoTail() async {
+        let results = (0..<150).map { makeItem(text: "needle \($0)", age: $0) }
+        let service = HistoryViewModelRegressionService(items: results)
+        service.includesMatchEvidence = true
+        service.returnsStagedFirstPage = true
+        let viewModel = HistoryViewModel(service: service, settingsViewModel: SettingsViewModel(service: service))
+        var timing = HistoryViewModel.Timing.immediateRegressionTests
+        timing.refineLongQueryDelayNs = 60_000_000_000
+        viewModel.configureTiming(timing)
+        defer { viewModel.stop() }
+        viewModel.searchMode = .fuzzy
+        viewModel.searchQuery = "needle"
+        viewModel.search()
+        await waitForNextItemsRevision(in: viewModel)
+        await waitForSearchToFinish(in: viewModel)
+        XCTAssertEqual(viewModel.searchCoverage, .stagedRefine)
+        viewModel.selectedID = results[12].id
+        viewModel.scrollDidStart()
+
+        // The full search moves the selected row out of the first visible prefix.
+        var reordered = results
+        let selected = reordered.remove(at: 12)
+        reordered.insert(selected, at: 110)
+        service.items = reordered
+        let pagination = Task { await viewModel.loadMore() }
+        await waitForNextItemsRevision(in: viewModel)
+        XCTAssertGreaterThan(viewModel.loadedCount, 50)
+        XCTAssertLessThan(viewModel.loadedCount, 150)
+        XCTAssertEqual(viewModel.items.map(\.id), Array(results.prefix(viewModel.loadedCount)).map(\.id))
+        XCTAssertEqual(viewModel.searchMatchContexts.count, viewModel.loadedCount)
+        XCTAssertEqual(Array(viewModel.items.prefix(50)).map(\.id), Array(results.prefix(50)).map(\.id),
+                       "Keep every staged row present so AppKit can preserve the visible scroll anchor")
+        await viewModel.selectCurrent()
+        XCTAssertEqual(service.copiedItemIDs, [selected.id])
+        XCTAssertEqual(viewModel.selectedID, selected.id)
+        XCTAssertTrue(viewModel.isLoading)
+        XCTAssertTrue(viewModel.canLoadMore, "Buffered rows must remain reachable even on the final page")
+
+        await pagination.value
+        XCTAssertEqual(service.searchRequests.count, 2)
+        XCTAssertEqual(service.searchRequests.last?.offset, 0)
+        XCTAssertEqual(service.searchRequests.last?.limit, 150)
+        XCTAssertTrue(service.searchRequests.last?.forceFullFuzzy == true)
+        XCTAssertEqual(viewModel.items.map(\.id), reordered.map(\.id))
+        XCTAssertEqual(Set(viewModel.searchMatchContexts.keys), Set(reordered.map(\.id)))
+        XCTAssertEqual(viewModel.selectedID, selected.id)
+        XCTAssertEqual(viewModel.searchCoverage, .complete)
+        XCTAssertTrue(viewModel.isScrolling)
+        XCTAssertFalse(viewModel.canLoadMore)
+        XCTAssertFalse(viewModel.isLoading)
+    }
+
+    func testIdenticalRefinedPrefixUpdatesTotalsWithoutRebuildingRows() async {
+        let results = (0..<50).map { makeItem(text: "needle \($0)", age: $0) }
+        let service = HistoryViewModelRegressionService(items: results)
+        service.includesMatchEvidence = true
+        service.returnsStagedFirstPage = true
+        let viewModel = HistoryViewModel(service: service, settingsViewModel: SettingsViewModel(service: service))
+        var timing = HistoryViewModel.Timing.immediateRegressionTests
+        timing.refineLongQueryDelayNs = 0
+        service.suspendNextRefine = true
+        let refineStarted = expectation(description: "Refine started")
+        service.onRefineStarted = { refineStarted.fulfill() }
+        viewModel.configureTiming(timing)
+        defer { viewModel.stop() }
+        viewModel.searchMode = .fuzzy
+        viewModel.searchQuery = "needle"
+        viewModel.search()
+        await waitForNextItemsRevision(in: viewModel)
+        await waitForSearchToFinish(in: viewModel)
+        await fulfillment(of: [refineStarted], timeout: 1.0)
+        let revision = viewModel.itemsRevision
+        let refined = expectation(description: "Refine completes")
+        withObservationTracking {
+            _ = viewModel.searchCoverage
+        } onChange: {
+            refined.fulfill()
+        }
+        service.resumeRefine()
+        await fulfillment(of: [refined], timeout: 1.0)
+        XCTAssertEqual(viewModel.itemsRevision, revision)
+        XCTAssertEqual(viewModel.totalCount, 50)
+        XCTAssertEqual(viewModel.searchCoverage, .complete)
+        XCTAssertFalse(viewModel.canLoadMore)
+        XCTAssertEqual(viewModel.searchMatchContexts.count, 50)
+    }
+
+    func testChangingSearchDuringPageApplicationDiscardsRemainingRowsAndEvidence() async {
+        let oldResults = (0..<175).map { makeItem(text: "needle \($0)", age: $0) }
+        let newResults = (0..<3).map { makeItem(text: "replacement \($0)", age: $0) }
+        let service = HistoryViewModelRegressionService(items: oldResults + newResults)
+        service.includesMatchEvidence = true
+        let viewModel = HistoryViewModel(service: service, settingsViewModel: SettingsViewModel(service: service))
+        viewModel.configureTiming(.immediateRegressionTests)
+        defer { viewModel.stop() }
+        viewModel.searchMode = .exact
+        viewModel.searchQuery = "needle"
+        viewModel.search()
+        await waitForNextItemsRevision(in: viewModel)
+        await waitForSearchToFinish(in: viewModel)
+
+        let pagination = Task { await viewModel.loadMore() }
+        await waitForNextItemsRevision(in: viewModel)
+        XCTAssertGreaterThan(viewModel.loadedCount, 50)
+        XCTAssertLessThan(viewModel.loadedCount, 150)
+        viewModel.searchQuery = "replacement"
+        viewModel.search()
+        await waitForNextItemsRevision(in: viewModel)
+        await waitForSearchToFinish(in: viewModel)
+        await pagination.value
+
+        XCTAssertEqual(viewModel.items.map(\.id), newResults.map(\.id))
+        XCTAssertEqual(Set(viewModel.searchMatchContexts.keys), Set(newResults.map(\.id)))
+        XCTAssertEqual(viewModel.totalCount, 3)
+        XCTAssertEqual(viewModel.searchCoverage, .complete)
+        XCTAssertFalse(viewModel.canLoadMore)
+        XCTAssertFalse(viewModel.isLoading)
+    }
+
+    func testChangingSearchDuringRefinedPaginationDiscardsThePendingRanking() async {
+        let oldResults = (0..<175).map { makeItem(text: "needle \($0)", age: $0) }
+        let newResults = (0..<3).map { makeItem(text: "replacement \($0)", age: $0) }
+        let service = HistoryViewModelRegressionService(items: oldResults + newResults)
+        service.includesMatchEvidence = true
+        service.returnsStagedFirstPage = true
+        let viewModel = HistoryViewModel(service: service, settingsViewModel: SettingsViewModel(service: service))
+        var timing = HistoryViewModel.Timing.immediateRegressionTests
+        timing.refineLongQueryDelayNs = 60_000_000_000
+        viewModel.configureTiming(timing)
+        defer { viewModel.stop() }
+        viewModel.searchMode = .fuzzy
+        viewModel.searchQuery = "needle"
+        viewModel.search()
+        await waitForNextItemsRevision(in: viewModel)
+        await waitForSearchToFinish(in: viewModel)
+
+        let pagination = Task { await viewModel.loadMore() }
+        await waitForNextItemsRevision(in: viewModel)
+        XCTAssertGreaterThan(viewModel.loadedCount, 50)
+        XCTAssertLessThan(viewModel.loadedCount, 150)
+        service.returnsStagedFirstPage = false
+        viewModel.searchQuery = "replacement"
+        viewModel.search()
+        await waitForNextItemsRevision(in: viewModel)
+        await waitForSearchToFinish(in: viewModel)
+        await pagination.value
+
+        XCTAssertEqual(viewModel.items.map(\.id), newResults.map(\.id))
+        XCTAssertEqual(Set(viewModel.searchMatchContexts.keys), Set(newResults.map(\.id)))
+        XCTAssertEqual(viewModel.searchCoverage, .complete)
+        XCTAssertFalse(viewModel.canLoadMore)
+        XCTAssertFalse(viewModel.isLoading)
+    }
+
+    func testDeletingBufferedSearchResultCancelsThePageAndCannotResurrectIt() async {
+        let results = (0..<175).map { makeItem(text: "needle \($0)", age: $0) }
+        let service = HistoryViewModelRegressionService(items: results)
+        service.includesMatchEvidence = true
+        let viewModel = HistoryViewModel(service: service, settingsViewModel: SettingsViewModel(service: service))
+        viewModel.configureTiming(.immediateRegressionTests)
+        defer { viewModel.stop() }
+        viewModel.searchMode = .exact
+        viewModel.searchQuery = "needle"
+        viewModel.search()
+        await waitForNextItemsRevision(in: viewModel)
+        await waitForSearchToFinish(in: viewModel)
+
+        let pagination = Task { await viewModel.loadMore() }
+        await waitForNextItemsRevision(in: viewModel)
+        let deletedID = results[90].id
+        service.items.removeAll { $0.id == deletedID }
+        await viewModel.handleEvent(.itemDeleted(deletedID))
+        await waitForNextItemsRevision(in: viewModel)
+        await waitForSearchToFinish(in: viewModel)
+        await pagination.value
+        await viewModel.loadMore()
+
+        XCTAssertEqual(viewModel.items.map(\.id), Array(service.items.prefix(150)).map(\.id))
+        XCTAssertFalse(viewModel.items.contains { $0.id == deletedID })
+        XCTAssertNil(viewModel.searchMatchContext(for: deletedID))
+        XCTAssertEqual(viewModel.totalCount, 174)
+    }
+
     func testSlowDetailedStorageStatsDoesNotBlockFirstScreenLoad() async {
         let service = HistoryViewModelRegressionService(items: makeItems(count: 3))
         service.suspendDetailedStorageStats = true
@@ -361,6 +625,18 @@ final class HistoryViewModelRegressionTests: XCTestCase {
         await loadTask.value
 
         XCTAssertEqual(settings.diskSizeBytes, 4_096)
+    }
+
+    private func waitForSearchToFinish(in viewModel: HistoryViewModel) async {
+        guard viewModel.isLoading else { return }
+        let finished = expectation(description: "Search finished publishing and recording metrics")
+        withObservationTracking {
+            _ = viewModel.isLoading
+        } onChange: {
+            finished.fulfill()
+        }
+        await fulfillment(of: [finished], timeout: 1.0)
+        XCTAssertFalse(viewModel.isLoading)
     }
 
     private func waitForNextItemsRevision(in viewModel: HistoryViewModel) async {
@@ -414,10 +690,13 @@ private final class HistoryViewModelRegressionService: ClipboardServiceProtocol 
     var deleteShouldFail = false
     var searchShouldFail = false
     var returnsStagedFirstPage = false
+    var prefilterItems: [ClipboardItemDTO]?
     var refineShouldFail = false
+    var suspendNextRefine = false
     var suspendDetailedStorageStats = false
     var suspendNextInitialFetch = false
     var suspendNextPaginationFetch = false
+    var includesMatchEvidence = false
     var onRefineStarted: (() -> Void)?
     var onDetailedStorageStatsStarted: (() -> Void)?
     var onInitialFetchStarted: (() -> Void)?
@@ -492,14 +771,35 @@ private final class HistoryViewModelRegressionService: ClipboardServiceProtocol 
             throw TestError.expectedFailure
         }
 
-        let matches = items.filter {
+        if query.forceFullFuzzy, suspendNextRefine {
+            suspendNextRefine = false
+            await withCheckedContinuation { continuation in
+                refineContinuation = continuation
+                onRefineStarted?()
+            }
+        }
+        let isStaged = returnsStagedFirstPage && !query.forceFullFuzzy
+        let searchItems = isStaged ? (prefilterItems ?? items) : items
+        let matches = searchItems.filter {
             query.query.isEmpty || $0.plainText.localizedCaseInsensitiveContains(query.query)
         }
         let start = min(query.offset, matches.count)
         let end = min(start + query.limit, matches.count)
-        let isStaged = returnsStagedFirstPage && !query.forceFullFuzzy
         return SearchResultPage(
-            hits: matches[start..<end].map { SearchResultHit(item: $0, matchContext: nil) },
+            hits: matches[start..<end].map { item in
+                let context: SearchMatchContext? = includesMatchEvidence ? SearchMatchContext(
+                    mode: query.mode,
+                    fragments: [SearchMatchFragment(
+                        source: .content,
+                        text: item.plainText,
+                        highlightedRanges: [SearchMatchTextRange(offset: 0, length: query.query.count)]
+                    )],
+                    occurrenceCount: 1,
+                    occurrenceCountIsTruncated: false,
+                    isPositionOnly: false
+                ) : nil
+                return SearchResultHit(item: item, matchContext: context)
+            },
             total: isStaged ? -1 : matches.count,
             hasMore: end < matches.count,
             coverage: isStaged ? .stagedRefine : .complete
@@ -526,7 +826,8 @@ private final class HistoryViewModelRegressionService: ClipboardServiceProtocol 
         items.removeAll { !$0.isPinned }
     }
 
-    func copyToClipboard(itemID: UUID) async throws {}
+    var copiedItemIDs: [UUID] = []
+    func copyToClipboard(itemID: UUID) async throws { copiedItemIDs.append(itemID) }
     func copyToClipboardOptimizedForCodex(itemID: UUID) async throws {}
     func fileURLs(itemID: UUID) async throws -> [URL] { [] }
     func updateSettings(_ settings: SettingsDTO) async throws {}
