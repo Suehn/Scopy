@@ -97,6 +97,8 @@ measured worse or negligible:
 | Showing list separators instead of hiding them | CPU `3.71 s` — worse |
 | Removing `.equatable()` from the row | busy `3660 ms` against `2254 ms` — much worse, it stays |
 | Installing `.onHover` only while the list is idle, with the scroll phase delivered through the same per-row fan-out selection already uses | CPU `3.656 s` against `3.572 s`, busy `2664 ms` against `2309 ms`, worst callback `61.7 ms` against `35.0 ms` — worse |
+| Folding `HistorySelectionAwareRow` into the row (its wrapper existed only because the old nested `Button` made row-owned selection break the harness identifiers) and resolving the launch-time accessibility branch once instead of per row | CPU `3.560 s` against `3.572 s` — neutral. The `0.25 s` the "bare rows" probe showed came from dropping the `Group`, and moving the accessibility modifiers into the row costs back what removing it saves |
+| Truncating what reaches `Text` | not taken: titles are already capped at 100 characters, and real-vs-constant strings measured `0.18 s` across the whole row |
 
 The `NSTableView` result is the important one: reassigning `rootView` on a recycled hosting view
 is not cheaper than what `List` already does, so replacing the container is not the lever it was
@@ -150,7 +152,7 @@ panel that no longer looks like Scopy. What remains addressable after this chang
 | `.onHover` | `0.20 s` | Attempted and reverted: installing it only while the list is idle is correct but measures worse (above). Removing it outright needs list-level pointer tracking with a row-index-to-item mapping; the earlier attempt at that shape (list tracking area + per-row marker view) also measured worse |
 | list wrappers (selection fan-out, accessibility group) | `0.25 s` | Both are functionally required; the three `listRow*` modifiers inside them are already free |
 | popovers, context menu, `onChange` | `0.12 s` | Folding four popovers into one `popover(item:)` is worth part of it |
-| row view nodes and content | `0.51 s` | This is the row people look at |
+| row view nodes and content | `0.51 s` | This is the row people look at. Merging `background`/`overlay`/`animation` into single nodes was measured before and gave nothing |
 
 A realistic further capture is `0.2-0.3 s`, taking the total to about **1.15-1.20x**, or about
 `1.3x` if the frosted panel is also given up. **1.5x is not available in this architecture**: it would require deleting three quarters of everything the row
