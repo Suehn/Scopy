@@ -27,6 +27,7 @@ struct HistoryItemHarnessView: View {
     @State private var settingsViewModel: SettingsViewModel
     @State private var settings: SettingsDTO
     @State private var isKeyboardSelected: Bool
+    @State private var pinPreviewRequest: String?
     @State private var interactionCoordinator = HistoryListInteractionCoordinator()
     @State private var interactionSessionStore = HistoryItemInteractionSessionStore()
     private let item: ClipboardItemDTO
@@ -99,9 +100,13 @@ struct HistoryItemHarnessView: View {
                     isImagePreviewPresented: activePopover == .image,
                     isTextPreviewPresented: activePopover == .text,
                     isFilePreviewPresented: activePopover == .file,
+                    isPreviewPinningActive: false,
                     requestPopover: { kind in
                         popoverRequest = Self.popoverName(kind)
                         activePopover = kind
+                    },
+                    requestPinPreview: { kind, _, _ in
+                        pinPreviewRequest = Self.popoverName(kind)
                     },
                     dismissOtherPopovers: {
                         popoverRequest = "dismiss-other"
@@ -122,6 +127,8 @@ struct HistoryItemHarnessView: View {
                     .accessibilityIdentifier("UITest.HistoryItemHarness.OpenFolderCount")
                 Text("optimize=\(optimizeCount)")
                     .accessibilityIdentifier("UITest.HistoryItemHarness.OptimizeCount")
+                Text("pinPreview=\(pinPreviewRequest ?? "none")")
+                    .accessibilityIdentifier("UITest.HistoryItemHarness.PinPreviewRequest")
                 Text("pin=\(pinCount)")
                     .accessibilityIdentifier("UITest.HistoryItemHarness.PinCount")
                 Text("noteUpdates=\(updateNoteCount)")

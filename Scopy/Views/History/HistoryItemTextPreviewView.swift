@@ -5,6 +5,7 @@ import Foundation
 
 struct HistoryItemTextPreviewView: View {
     @Environment(SettingsViewModel.self) private var settingsViewModel
+    @Environment(\.hoverPreviewSizeBudget) private var sizeBudget
     /// Bumped when a link-enrichment sidecar lands for the current text so the body
     /// recomputes its render key and rebuilds the enriched document.
     @State private var linkEnrichmentRevision = 0
@@ -50,10 +51,8 @@ struct HistoryItemTextPreviewView: View {
     private static let markdownLayoutScaleRenderDebounceNanoseconds: UInt64 = 90_000_000
 
     var body: some View {
-        let maxWidth: CGFloat = model.isMarkdown
-            ? HoverPreviewScreenMetrics.maxMarkdownPopoverWidthPoints()
-            : HoverPreviewScreenMetrics.maxPopoverWidthPoints()
-        let maxHeight: CGFloat = HoverPreviewScreenMetrics.maxPopoverHeightPoints()
+        let maxWidth: CGFloat = model.isMarkdown ? sizeBudget.maxMarkdownWidth : sizeBudget.maxWidth
+        let maxHeight: CGFloat = sizeBudget.maxHeight
         let font = NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
         let padding: CGFloat = ScopySpacing.md
 

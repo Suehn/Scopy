@@ -4,6 +4,8 @@ import ScopyUISupport
 import SwiftUI
 
 struct HistoryItemFilePreviewView: View {
+    @Environment(\.hoverPreviewSizeBudget) private var sizeBudget
+
     let model: HoverPreviewModel
     let thumbnailPath: String?
     let kind: FilePreviewKind
@@ -56,8 +58,8 @@ struct HistoryItemFilePreviewView: View {
                 .accessibilityIdentifier("History.Preview.File")
                 .accessibilityElement(children: .contain)
         } else {
-            let maxWidth: CGFloat = max(1, HoverPreviewScreenMetrics.maxPopoverWidthPoints())
-            let maxHeight: CGFloat = HoverPreviewScreenMetrics.maxPopoverHeightPoints()
+            let maxWidth: CGFloat = max(1, sizeBudget.maxWidth)
+            let maxHeight: CGFloat = sizeBudget.maxHeight
             let width = previewWidth(maxWidth: maxWidth, maxHeight: maxHeight)
 
             let content = previewContent()

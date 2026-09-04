@@ -4,6 +4,8 @@ import ScopyUISupport
 import AppKit
 
 struct HistoryItemImagePreviewView: View {
+    @Environment(\.hoverPreviewSizeBudget) private var sizeBudget
+
     let model: HoverPreviewModel
     let thumbnailPath: String?
 
@@ -11,8 +13,8 @@ struct HistoryItemImagePreviewView: View {
     @State private var lastLoadedPath: String?
 
     var body: some View {
-        let width: CGFloat = max(1, HoverPreviewScreenMetrics.maxPopoverWidthPoints())
-        let maxHeight: CGFloat = HoverPreviewScreenMetrics.maxPopoverHeightPoints()
+        let width: CGFloat = max(1, sizeBudget.maxWidth)
+        let maxHeight: CGFloat = sizeBudget.maxHeight
 
         let content = previewContent()
         let naturalHeight = previewHeight(width: width)

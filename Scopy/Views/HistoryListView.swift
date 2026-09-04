@@ -38,6 +38,7 @@ struct HistoryListView: View {
     @State private var relativeTimeClock = HistoryRelativeTimeClock()
 
     // Enforce that at most one hover preview popover is presented at a time.
+    @State private var pinnedPreviewController = PinnedPreviewController()
     @State private var activePopover: HoverPreviewPopoverState?
     @State private var pendingPopover: HoverPreviewPopoverState?
     @State private var lastDismissedPopover: HoverPreviewDismissSnapshot?
@@ -84,6 +85,7 @@ struct HistoryListView: View {
                     let rowContext = HistoryRowContext(
                         settings: settingsViewModel.settings,
                         activePopover: activePopover,
+                        isPreviewPinningActive: pinnedPreviewController.isPinned,
                         searchMatchContexts: historyViewModel.searchMatchContexts
                     )
 
@@ -197,9 +199,7 @@ struct HistoryListView: View {
             relativeTimeClock.start(
                 pausedForScrolling: ScrollPerformanceProfile.shared.usesFixedDriverAnimationSampler
             )
-            interactionSessionStore.reconcile(
-                snapshot: historyViewModel.contentRevisionReconciliationSnapshot
-            )
+            reconcileRetainedPreviewState()
             updateProfileWorkloadMetadata()
         }
         .background(
@@ -208,11 +208,7 @@ struct HistoryListView: View {
             HistoryListStateObservers(
                 onWorkloadChange: updateProfileWorkloadMetadata,
                 onItemsRevisionChange: recordHistoryListIntegrationModelNoteIfNeeded,
-                onContentRevisionReconciliation: {
-                    interactionSessionStore.reconcile(
-                        snapshot: historyViewModel.contentRevisionReconciliationSnapshot
-                    )
-                }
+                onContentRevisionReconciliation: reconcileRetainedPreviewState
             )
         )
         .onDisappear {
@@ -318,6 +314,15 @@ struct HistoryListView: View {
         HistoryListUITestProbe.shared.recordModelPersistedNote(note)
     }
 
+    /// Both off-list holders of preview state apply the same snapshot: a retained row session and
+    /// the pinned window must not disagree about whether an item is still there.
+    @MainActor
+    private func reconcileRetainedPreviewState() {
+        let snapshot = historyViewModel.contentRevisionReconciliationSnapshot
+        interactionSessionStore.reconcile(snapshot: snapshot)
+        pinnedPreviewController.reconcile(snapshot: snapshot)
+    }
+
     @MainActor
     private func detachSharedMarkdownWebViewIfAttached() {
         guard sharedMarkdownPreviewController.webView.superview != nil else { return }
@@ -383,8 +388,43 @@ struct HistoryListView: View {
         return remaining > 0 ? remaining : 0
     }
 
+    /// Moves the preview a row is showing into the pinned window.
+    ///
+    /// The popover is dismissed first so the shared Markdown WebView is released before the
+    /// window's host claims it; presenting on the next run loop turn keeps that hand-off in the
+    /// same order the popover-to-popover transition already uses.
+    @MainActor
+    private func pinPreview(
+        item: ClipboardItemDTO,
+        kind: HoverPreviewPopoverKind,
+        model: HoverPreviewModel,
+        revision: ClipboardItemContentRevision
+    ) {
+        let filePreview = kind == .file
+            ? FilePreviewSupport.previewSummary(from: item.plainText, requireExists: true)
+            : nil
+        detachSharedMarkdownWebViewIfAttached()
+        pendingPopover = nil
+        activePopover = nil
+
+        DispatchQueue.main.async {
+            pinnedPreviewController.pin(
+                item: item,
+                revision: revision,
+                kind: kind,
+                filePreviewKind: filePreview?.kind,
+                filePreviewPath: filePreview?.path,
+                source: model,
+                settingsViewModel: settingsViewModel,
+                markdownWebViewController: sharedMarkdownPreviewController
+            )
+        }
+    }
+
     @MainActor
     private func presentPopover(itemID: UUID, kind: HoverPreviewPopoverKind) {
+        // One preview at a time: a pinned window holds the shared Markdown WebView.
+        guard !pinnedPreviewController.isPinned else { return }
         let next = HoverPreviewPopoverState(itemID: itemID, kind: kind)
         if let existing = activePopover,
            existing.itemID != itemID,
@@ -448,6 +488,7 @@ struct HistoryListView: View {
     private struct HistoryRowContext {
         let settings: SettingsDTO
         let activePopover: HoverPreviewPopoverState?
+        let isPreviewPinningActive: Bool
         let searchMatchContexts: [UUID: SearchMatchContext]
     }
 
@@ -497,12 +538,16 @@ struct HistoryListView: View {
             isImagePreviewPresented: isImagePreviewPresented,
             isTextPreviewPresented: isTextPreviewPresented,
             isFilePreviewPresented: isFilePreviewPresented,
+            isPreviewPinningActive: context.isPreviewPinningActive,
             requestPopover: { kind in
                 guard let kind else {
                     dismissPopoverIfActive(itemID: item.id)
                     return
                 }
                 presentPopover(itemID: item.id, kind: kind)
+            },
+            requestPinPreview: { kind, model, revision in
+                pinPreview(item: item, kind: kind, model: model, revision: revision)
             },
             dismissOtherPopovers: {
                 dismissAnyPopover(except: item.id)

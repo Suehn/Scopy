@@ -187,4 +187,30 @@ final class HoverPreviewModel {
         exportFailed = false
         exportErrorMessage = nil
     }
+
+    /// Hands already-rendered content to another model.
+    ///
+    /// Pinning must show the document that is already on screen: the payload, the measured
+    /// geometry and the live-render stamp all move across, so the pinned host reuses the shared
+    /// WebView's current navigation instead of re-running the preview pipeline. Export state is
+    /// feedback for the surface that started it and stays behind.
+    func adoptRenderedContent(from source: HoverPreviewModel) {
+        previewCGImage = source.previewCGImage
+        text = source.text
+        isMarkdown = source.isMarkdown
+        markdownHTML = source.markdownHTML
+        markdownHTMLLayoutScale = source.markdownHTMLLayoutScale
+        markdownHTMLEnrichmentFingerprint = source.markdownHTMLEnrichmentFingerprint
+        markdownContentSize = source.markdownContentSize
+        markdownMetricsLayoutScalePercent = source.markdownMetricsLayoutScalePercent
+        markdownHasHorizontalOverflow = source.markdownHasHorizontalOverflow
+        markdownLiveRenderKey = source.markdownLiveRenderKey
+        markdownRenderErrorKey = source.markdownRenderErrorKey
+        markdownRenderErrorReason = source.markdownRenderErrorReason
+    }
+
+    /// Whether anything is available to show without re-running the pipeline.
+    var hasRenderedContent: Bool {
+        previewCGImage != nil || text != nil || markdownHTML != nil
+    }
 }

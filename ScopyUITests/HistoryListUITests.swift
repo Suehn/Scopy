@@ -273,6 +273,98 @@ final class HistoryListUITests: XCTestCase {
         )
     }
 
+    /// §7.7 acceptance: a pinned preview is a window of its own, so the list may scroll and other
+    /// rows may be hovered without it going away, and only an explicit action closes it.
+    func testPinnedPreviewSurvivesListScrollAndClosesOnlyExplicitly() throws {
+        app.terminate()
+        app.launchEnvironment = [:]
+        app.launchEnvironment["USE_MOCK_SERVICE"] = "1"
+        app.launchEnvironment["SCOPY_MOCK_ITEM_COUNT"] = "80"
+        app.launchEnvironment["SCOPY_MOCK_IMAGE_COUNT"] = "30"
+        app.launchEnvironment["SCOPY_MOCK_SHOW_THUMBNAILS"] = "1"
+        app.launchEnvironment["SCOPY_MOCK_IMAGE_PREVIEW_DELAY"] = "0"
+        app.launchEnvironment["SCOPY_UITEST_OPEN_PREVIEW_ON_TAP"] = "1"
+        app.launch()
+        _ = prepareMainWindow()
+
+        let list = app.anyElement("History.List")
+        guard list.waitForExistence(timeout: 15) else {
+            XCTFail("List not found")
+            return
+        }
+
+        let items = app.anyElements(matching: NSPredicate(format: "identifier BEGINSWITH %@", "History.Item."))
+        guard items.element(boundBy: 0).waitForExistence(timeout: 5) else {
+            XCTFail("History item not found")
+            return
+        }
+
+        guard let preview = openAnyPreview(in: items) else {
+            XCTFail("Preview not shown")
+            return
+        }
+
+        let pinButton = app.anyElement("History.Preview.Pin")
+        guard pinButton.waitForExistence(timeout: 4) else {
+            XCTFail("Pin control not shown on the hover preview")
+            return
+        }
+        pinButton.click()
+
+        let pinnedWindow = app.anyElement("PinnedPreview.Window")
+        XCTAssertTrue(pinnedWindow.waitForExistence(timeout: 8), "Pinned preview window did not appear")
+        waitForPredicate(
+            NSPredicate(format: "exists == 0"),
+            on: preview,
+            timeout: 8,
+            message: "The hover popover must hand over to the pinned window, not stay open alongside it"
+        )
+
+        // Scrolling is what tears a row-anchored popover down; the pinned window must not care.
+        for _ in 0..<3 {
+            list.swipeUp()
+            usleep(120_000)
+        }
+        XCTAssertTrue(pinnedWindow.exists, "Pinned preview must survive list scrolling and row recycling")
+
+        // Hovering another row must not open a second preview while one is pinned.
+        let otherRow = items.element(boundBy: 1)
+        if otherRow.exists {
+            otherRow.hover()
+            usleep(400_000)
+        }
+        XCTAssertFalse(
+            app.anyElement("History.Preview.Text").exists || app.anyElement("History.Preview.Image").exists,
+            "Hover previews must stay disabled while a preview is pinned"
+        )
+        XCTAssertTrue(pinnedWindow.exists, "Hovering another row must not close the pinned preview")
+
+        app.anyElement("PinnedPreview.Close").click()
+        waitForPredicate(
+            NSPredicate(format: "exists == 0"),
+            on: pinnedWindow,
+            timeout: 8,
+            message: "Explicit unpin did not close the pinned preview"
+        )
+
+        // Unpinning restores ordinary hover previews.
+        _ = prepareMainWindow()
+        XCTAssertNotNil(openAnyPreview(in: items), "Hover previews must come back after unpinning")
+    }
+
+    private func openAnyPreview(in items: XCUIElementQuery) -> XCUIElement? {
+        for index in 0..<3 {
+            let candidate = items.element(boundBy: index)
+            guard candidate.exists else { continue }
+            candidate.click()
+            let textPreview = app.anyElement("History.Preview.Text")
+            if textPreview.waitForExistence(timeout: 4) { return textPreview }
+            let imagePreview = app.anyElement("History.Preview.Image")
+            if imagePreview.waitForExistence(timeout: 4) { return imagePreview }
+        }
+        return nil
+    }
+
     func testHoverPreviewDismissesOnScroll() throws {
         app.terminate()
         app.launchEnvironment = [:]

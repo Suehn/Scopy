@@ -19,6 +19,31 @@ struct HistoryContentRevisionReconciliationSnapshot {
     func wasDeleted(_ itemID: UUID) -> Bool {
         deletedItemIDs.contains(itemID)
     }
+
+    /// Whether state held for `itemID` outside the list must be torn down.
+    ///
+    /// Shared by every off-list holder (retained row sessions, the pinned preview window) so they
+    /// cannot disagree about what "gone" means. Generation changes are the caller's, because each
+    /// holder applies snapshots on its own schedule.
+    func invalidates(
+        itemID: UUID,
+        currentRevision: ClipboardItemContentRevision?,
+        clearGenerationChanged: Bool,
+        deletionEvictionGenerationChanged: Bool
+    ) -> Bool {
+        if wasDeleted(itemID) { return true }
+        if clearGenerationChanged,
+           clearSurvivorSetIsAuthoritative,
+           !clearSurvivingItemIDs.contains(itemID) {
+            return true
+        }
+        // A deletion-eviction overflow means the deleted set is no longer authoritative.
+        if !clearGenerationChanged, deletionEvictionGenerationChanged { return true }
+        if let currentRevision, let known = revision(for: itemID), known != currentRevision {
+            return true
+        }
+        return false
+    }
 }
 
 struct BoundedHistoryContentRevisionRegistry {

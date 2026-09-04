@@ -16,6 +16,32 @@ enum PanelReopenSearchResetPolicy {
     }
 }
 
+/// Whether losing key focus should close the history panel.
+///
+/// "Focus left the panel" normally means the user is done with it. A pinned preview is the one
+/// exception: it is Scopy's own window, and clicking or dragging it must not take the history
+/// panel down with it.
+///
+/// The decision is made from the event that caused the key change rather than from the incoming
+/// key window, because AppKit installs the new key window only after `resignKey` returns. Waiting
+/// a run loop turn for it would reorder the close against the status-item toggle, which reads
+/// `isPresented`.
+enum FloatingPanelDismissPolicy {
+    static func closesOnResignKey(
+        eventType: NSEvent.EventType?,
+        eventWindow: NSWindow?,
+        isPinnedPreviewWindow: (NSWindow) -> Bool
+    ) -> Bool {
+        switch eventType {
+        case .leftMouseDown, .rightMouseDown, .otherMouseDown:
+            guard let eventWindow else { return true }
+            return !isPinnedPreviewWindow(eventWindow)
+        default:
+            return true
+        }
+    }
+}
+
 /// 浮动面板 - 参考 Maccy 的 FloatingPanel 实现
 class FloatingPanel: NSPanel, NSWindowDelegate {
     var isPresented: Bool = false
@@ -179,6 +205,12 @@ class FloatingPanel: NSPanel, NSWindowDelegate {
 
     override func resignKey() {
         super.resignKey()
+        let causingEvent = NSApp.currentEvent
+        guard FloatingPanelDismissPolicy.closesOnResignKey(
+            eventType: causingEvent?.type,
+            eventWindow: causingEvent?.window,
+            isPinnedPreviewWindow: { $0 is PinnedPreviewPanel }
+        ) else { return }
         close()
     }
 

@@ -40,7 +40,7 @@ audience: implementing agent (Codex) + maintainer review
 - **降级**：合并队列"旧输出配新元数据"结构上成立（`workerLoop` 用原始 work 执行、用合并后 work 回调），但当前不可达：缩略图队列以 `(typeNamespace, contentHash)` 为 key，publish 时复核 type/hash，改 `thumbnailHeight` 会先 stop 队列并 `clearThumbnailCache`；文件大小队列的 completion 完全忽略合并后的 work。不要为此改动队列。
 - **已裁决**：原文保真（§3.2）与按 representation 去重（§4.2）仍按 §0.2 冻结，等待明确的 data epoch 决定；§8.2 的 `terminateLater` 仍按 §0.1 暂缓。
 
-首批实施（不含上述冻结项）：#1 复制回执、文件夹回贴、publication 失败回退水位、`Runtime` 双 target 编译、死 `incremental_vacuum`、AirDrop 临时文件清扫、SQLite 内嵌 NUL 截断。
+首批实施（不含上述冻结项）：#1 复制回执、文件夹回贴、publication 失败回退水位、`Runtime` 双 target 编译、死 `incremental_vacuum`、AirDrop 临时文件清扫、SQLite 内嵌 NUL 截断，以及 §7.7 固定预览。
 
 ## 1. 七个跨模块主题
 
@@ -358,7 +358,17 @@ audience: implementing agent (Codex) + maintainer review
 
 方向：行用 `.accessibilityElement(children: .ignore)` + 组合标签（"Text from Safari, 3 lines, pinned, 2 hours ago"）+ `.isSelected`；`accessibilityCustomAction` 提供置顶/删除；测试标识符统一放在已存在的 `--uitesting` 门后；命中区 ≥ 28 pt；三个无障碍环境值接入（§7.1）。
 
-### 7.7 固定预览（hh 需求，P1，M）
+### 7.7 固定预览（hh 需求，P1，M）——已实施（2026-09-04）
+
+实施与本节方向的三处差异，均已在实机验证后确定：
+
+- **不用 Space 触发**：面板打开时搜索框持有键盘焦点，Space 会被输入进查询。触发改为预览左上角的图钉按钮（`History.Preview.Pin`），是唯一在任何状态下都可用的入口。
+- **固定预览不随主面板关闭**："拖到屏幕任意位置、读完再手动关闭"要求它在用户切到别的应用后仍然存在；若随面板关闭，一点别处就消失，功能失去意义。它只由显式动作（窗口内关闭按钮、标题栏关闭按钮）或条目失效关闭。
+- **新增置顶开关**（hh 2026-09-04 追加）：窗口默认浮于其他应用之上，header 内可切换到普通窗口层级，选择记在 `ScopyPinnedPreviewKeepsOnTop`。
+
+实现要点：`PinnedPreviewController` 持有从行的 `HoverPreviewModel` 复制来的快照模型与 `PinnedPreviewPanel`，因此不依赖随时会被释放的行 session；行通过 `HistoryRowContext.isPreviewPinningActive` 停用 hover 预览；`FloatingPanelDismissPolicy` 让主面板在"点击落在固定预览窗口"时不关闭；失效判定与 retained row session 共用 `HistoryContentRevisionReconciliationSnapshot.invalidates(...)`。
+
+实机验证（AX 驱动，v0.79.0+）：独立窗口生成、内容移交（Markdown `renderStatus` 固定前后均为 `rendered`，未重新导航）、位置/尺寸可设且 `setFrameAutosaveName` 记忆、默认 `kCGWindowLayer=3`（floating）→ 切换后 `0` → 再切回 `3`、显式关闭后 hover 预览恢复、主面板关闭后固定窗口存活。XCUITest 与前端 scroll profile 在本机被系统认证/自动化权限阻断，记为 environment-blocked。
 
 需求（hh，2026-09-03 两次提出）：有时需要长时间阅读预览内容，不想一直把指针停在行或 popover 上；希望能把当前预览"固定"住，并且**可以自由移动**（拖到屏幕任意位置、可改大小），读完再手动关闭。
 
