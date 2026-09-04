@@ -17,6 +17,7 @@ ap.add_argument('--flip', type=float, default=4.0); ap.add_argument('--commands'
 ap.add_argument('--sample', action='store_true'); ap.add_argument('--xctrace', default=None); ap.add_argument('--settle', type=float, default=6)
 ap.add_argument('--out', default=None); ap.add_argument('--attempts', type=int, default=3)
 ap.add_argument('--phased', action='store_true'); ap.add_argument('--reuse-db', action='store_true')
+ap.add_argument('--no-app-profile', action='store_true', help='run with SCOPY_SCROLL_PROFILE=0 so the app carries no instrumentation; CPU from ps is then the honest absolute number')
 a=ap.parse_args()
 repo=os.path.abspath(os.path.join(S, '..', '..'))
 out=a.out or os.path.join(repo, 'logs', 'perf-scroll', a.label); os.makedirs(out, exist_ok=True)
@@ -43,7 +44,7 @@ def run_once(index):
     if os.path.exists(profile_json): os.remove(profile_json)
     dbdir=make_db()
     env=dict(os.environ, USE_MOCK_SERVICE='0', SCOPY_SERVICE_DB_PATH=os.path.join(dbdir,'clipboard.db'), SCOPY_SERVICE_MONITOR_PASTEBOARD='ScopyProfile.'+str(os.getpid()),
-             SCOPY_PROFILE_OPEN_PANEL='1', SCOPY_SCROLL_PROFILE='1', SCOPY_PROFILE_MIN_SAMPLES='10', SCOPY_PROFILE_MAX_SAMPLES='131072', SCOPY_PROFILE_OUTPUT=profile_json)
+             SCOPY_PROFILE_OPEN_PANEL='1', SCOPY_SCROLL_PROFILE=('0' if a.no_app_profile else '1'), SCOPY_PROFILE_MIN_SAMPLES='10', SCOPY_PROFILE_MAX_SAMPLES='131072', SCOPY_PROFILE_OUTPUT=profile_json)
     if a.mode=='fixed':
         env.update(SCOPY_PROFILE_FIXED_COMMAND_COUNT=str(a.commands), SCOPY_PROFILE_AUTO_SCROLL_STEP_PX=str(a.delta), SCOPY_PROFILE_WARM_ROUNDS=str(a.warm), SCOPY_PROFILE_DURATION_SEC='120')
     else:
@@ -73,8 +74,9 @@ def run_once(index):
         result['wheel']=wheel.stdout.strip()
     result['cpu']=sampler.communicate()[0].strip()
     for q in procs: q.wait()
-    deadline=time.time()+150
-    while time.time()<deadline and not os.path.exists(profile_json): time.sleep(0.5)
+    if not a.no_app_profile:
+        deadline=time.time()+150
+        while time.time()<deadline and not os.path.exists(profile_json): time.sleep(0.5)
     time.sleep(1.0)
     log=subprocess.run(['/usr/bin/log','show','--last','3m','--style','compact','--predicate',f'processIdentifier == {p.pid} AND (eventMessage CONTAINS "cursor-set" OR eventMessage CONTAINS "tracking-areas")'],capture_output=True,text=True).stdout
     result['applog']=[l.split('] ',2)[-1][:150] for l in log.splitlines() if 'cursor-set' in l or 'tracking-areas' in l]
@@ -87,7 +89,11 @@ def run_once(index):
 for i in range(1, a.attempts+1):
     result=run_once(i)
     ok=False
-    if result and os.path.exists(profile_json):
+    if a.no_app_profile:
+        # No app report to confirm the list moved; the scroll is verified from the sample tree
+        # (see --sample) and by comparing against the instrumented run of the same build.
+        ok=bool(result)
+    elif result and os.path.exists(profile_json):
         d=json.load(open(profile_json))
         ok=(d['active_frame_ms']['count'] > 0) or (a.mode=='fixed' and bool((d.get('fixed_workload') or {}).get('completed')))
     if ok: break
