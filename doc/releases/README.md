@@ -20,16 +20,17 @@ This page is the human-facing index for current release state. Automation should
 ## Current Release
 
 <!-- release-current:start -->
-- Version: `v0.80.1`
+- Version: `v0.80.2`
 - Date: `2026-09-05`
-- Release note: [v0.80.1](./history/v0.80.1.md)
+- Release note: [v0.80.2](./history/v0.80.2.md)
 - Changelog: [CHANGELOG.md](./CHANGELOG.md)
-- Profile doc: [v0.80.1 profile](../perf/release-profiles/v0.80.1-profile.md)
+- Profile doc: `none`
 <!-- release-current:end -->
 
 ## Recent Releases
 
 <!-- release-recent:start -->
+- `2026-09-05` [v0.80.2](./history/v0.80.2.md) - Fix Chinese emphasis and single-dollar math while simplifying capture tests
 - `2026-09-05` [v0.80.1](./history/v0.80.1.md) - Keep search pagination correctly ranked and apply new rows in small batches
 - `2026-09-04` [v0.80.0](./history/v0.80.0.md) - Copy reports whether it reached the pasteboard, copied folders replay as folders, and any hover preview can be pinned into a movable, resizable, always-on-top window
 - `2026-09-03` [v0.79.0](./history/v0.79.0.md) - Row construction stops doing render work and search indexes mutate in place: search typing blocks the main thread 31% less with 35% shorter worst stalls, clipboard capture 12% cheaper
@@ -41,7 +42,6 @@ This page is the human-facing index for current release state. Automation should
 - `2026-09-02` [v0.76.0](./history/v0.76.0.md) - Real-input scroll profiling finds the cursor, revision, and observation costs; scroll CPU -32%, callback p95 83 -> 17 ms
 - `2026-09-02` [v0.75.0](./history/v0.75.0.md) - Frame-driven export settle and a PAM-backed export canvas: post-load export 2-3x faster, identical output, defaults speed 3 / 256 colors / 80-95
 - `2026-09-02` [v0.74.0](./history/v0.74.0.md) - Raw bitmap hand-off to pngquant and a parallel PNG writer: export stage 7.5x faster, pixel-identical output
-- `2026-09-02` [v0.73.0](./history/v0.73.0.md) - Bundled pngquant engine rebuilt from the maintainer fork, 2.5-4x faster quantization with deterministic output
 <!-- release-recent:end -->
 
 ## Full History

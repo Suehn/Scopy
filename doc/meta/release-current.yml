@@ -1,28 +1,28 @@
-version: v0.80.1
+version: v0.80.2
 date: 2026-09-05
-release_doc: doc/releases/history/v0.80.1.md
+release_doc: doc/releases/history/v0.80.2.md
 release_index: doc/releases/README.md
 changelog_file: doc/releases/CHANGELOG.md
-profile_doc: doc/perf/release-profiles/v0.80.1-profile.md
+profile_doc: null
 runbook_doc: doc/current/release-runbook.md
 spec_doc: doc/current/product-spec.md
 development_doc: doc/current/development-guide.md
 architecture_doc: doc/current/architecture.md
 last_verified_at: 2026-09-05
-summary: Keep search pagination correctly ranked and apply new rows in small batches
+summary: Fix Chinese emphasis and single-dollar math while simplifying capture tests
 verification:
   docs_validate: pass
   release_validate: pass
   release_policy: pass
-  build: pass_local_debug_release_and_hosted_build
-  assets_verify: pass_make_build_no_renderer_change
-  test_unit: pass_830_executed_4_skipped_0_failures
-  test_strict: pass_830_standalone_strict_build_normal_ide_startup_blocked_hosted_strict_pass
-  test_tsan: pass_hosted_run_33917243016
-  test_integration: not_run_no_schema_or_capture_change
-  test_performance: pass_snapshot_release_and_repeated_cgevent_search_profile
-  snapshot_release: pass_cmd_p95_0_575ms_cm_p95_5_044ms_cold_cm_45_598ms
-  frontend_profile_full: environment_blocked_xcuitest_automation_mode_initialization
-  unified_performance: generated_from_real_cgevent_profiles_backend_baseline_unmeasured
+  build: pass_local_debug_same_source_2058da3
+  assets_verify: pass_node_147_build_and_atomic_asset_verification
+  test_unit: pass_830_executed_4_skipped_0_failures_standalone_xctest_ide_initialization_blocked
+  test_strict: pass_strict_build_830_executed_4_skipped_0_failures_standalone_xctest_ide_initialization_blocked
+  test_tsan: not_rerun_locally_hosted_validation_pending
+  test_integration: not_run_no_schema_change_capture_parser_covered_by_unit_tests
+  test_performance: not_run_no_performance_claim
+  snapshot_release: not_run_no_backend_performance_change
+  frontend_profile_full: not_run_no_frontend_performance_claim
+  unified_performance: not_run_no_performance_claim
   bundled_pngquant: unchanged_from_v0_74_0_fork_256e081_engine_fddcf09
-  test_ui_subset: cgevent_accessibility_checks_recorded_in_release_profile
+  test_ui_subset: pass_real_app_before_after_png_delimiter_fixture
