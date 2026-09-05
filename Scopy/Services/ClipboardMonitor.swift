@@ -488,11 +488,6 @@ public final class ClipboardMonitor {
         ignoredApps = apps
     }
 
-    /// Manually read current clipboard content
-    public func readCurrentClipboard() -> ClipboardContent? {
-        return extractContent(from: pasteboard)
-    }
-
     /// Why a pasteboard write produced nothing usable.
     ///
     /// A failed write leaves the previous clipboard content in place, so these must reach the
@@ -786,21 +781,9 @@ public final class ClipboardMonitor {
         }
     }
 
-    /// 从 Data 反序列化文件 URL 数组
-    /// 使用 URL(fileURLWithPath:) 确保正确创建文件 URL
-    nonisolated static func deserializeFileURLs(_ data: Data) -> [URL]? {
-        do {
-            let paths = try JSONDecoder().decode([String].self, from: data)
-            return paths.map { URL(fileURLWithPath: $0) }
-        } catch {
-            ScopyLog.monitor.error("Failed to deserialize file URLs: \(error.localizedDescription, privacy: .private)")
-            return nil
-        }
-    }
-
     // MARK: - Private Methods
 
-    private func checkClipboard() async {
+    func checkClipboard() async {
         guard isMonitoring else { return }
         guard !isCheckingClipboard else { return }
         let sessionID = monitoringSessionID
@@ -1802,7 +1785,7 @@ public final class ClipboardMonitor {
         )
     }
 
-    /// Central dedup key policy, shared by immediate reads and durable ingest replay.
+    /// Central dedup key policy, shared by small-content capture and durable ingest replay.
     nonisolated private static func contentHash(
         type: ClipboardItemType,
         plainText: String,
@@ -1838,129 +1821,6 @@ public final class ClipboardMonitor {
             }
             return computeHashStatic(Data(plainText.utf8))
         }
-    }
-
-    /// 提取剪贴板内容（包含哈希计算）
-    /// 注意：检测顺序与 extractRawData 保持一致
-    private func extractContent(from pasteboard: NSPasteboard) -> ClipboardContent? {
-        let appBundleID = getFrontmostAppBundleID()
-
-        // 检测顺序（默认）：File URLs > Image > RTF > HTML > Plain text
-        // Plain text 必须放最后，因为其他类型通常也包含文本表示
-        //
-        // 例外：当剪贴板同时包含“图片 + Office 表格类富文本/文本”时（常见于 Excel 复制单元格），
-        // 让图片降级为兜底，优先保留表格的富文本/文本语义（详见 extractRawData 注释）。
-
-        let fileURLs = (pasteboard.readObjects(
-            forClasses: [NSURL.self],
-            options: [.urlReadingFileURLsOnly: true]
-        ) as? [URL]) ?? []
-        let shouldPreferImageOverFileURLs = shouldPreferImageOverFileURLs(fileURLs: fileURLs, from: pasteboard)
-
-        // 1. File URLs (最高优先级)
-        // 例外：临时图片路径与图片二进制并存时（常见于聊天/IM 客户端）优先按图片处理。
-        if !fileURLs.isEmpty, !shouldPreferImageOverFileURLs {
-            let paths = fileURLs.map { $0.path }.joined(separator: "\n")
-            let hash = Self.contentHash(
-                type: .file,
-                plainText: paths,
-                payloadData: nil,
-                precomputedHash: nil
-            )
-            // 序列化文件 URL 以便后续恢复
-            let urlData = Self.serializeFileURLs(fileURLs)
-            return ClipboardContent(
-                type: .file,
-                plainText: paths,
-                payload: urlData.map(ClipboardContent.Payload.data) ?? .none,
-                appBundleID: appBundleID,
-                contentHash: hash,
-                sizeBytes: paths.utf8.count + (urlData?.count ?? 0)
-            )
-        }
-
-        let shouldPreferRichTypesOverImage = shouldPreferRichTypesOverImage(from: pasteboard)
-
-        // 2. Image (PNG, TIFF, etc.) - 默认优先 PNG，TIFF 转为 PNG 避免存储膨胀
-        if !shouldPreferRichTypesOverImage, let imageResult = extractOptimalImageData(from: pasteboard, candidateFileURL: fileURLs.first) {
-            let imageData = imageResult.data
-            let hash = computeHash(imageData)
-            return ClipboardContent(
-                type: .image,
-                plainText: "[Image: \(Self.formatBytes(imageData.count))]",
-                payload: .data(imageData),
-                appBundleID: appBundleID,
-                contentHash: hash,
-                sizeBytes: imageData.count
-            )
-        }
-
-        // 3. RTF
-        if let rtfData = pasteboard.data(forType: .rtf) {
-            let rtfPlainText = Self.normalizeText(extractPreferredPlainText(from: pasteboard, richTextData: rtfData, type: .rtf))
-            let plainText: String
-            if let htmlData = pasteboard.data(forType: .html) {
-                let htmlPlainText = Self.normalizeText(extractPreferredPlainText(from: pasteboard, richTextData: htmlData, type: .html))
-                plainText = Self.shouldPreferRichPlainText(htmlPlainText, over: rtfPlainText) ? htmlPlainText : rtfPlainText
-            } else {
-                plainText = rtfPlainText
-            }
-            // Dedup by normalized main text (v0.md 3.2). RTF payload may vary across copies even when the text is identical.
-            let hash = plainText.isEmpty ? computeHash(rtfData) : computeHash(plainText)
-            return ClipboardContent(
-                type: .rtf,
-                plainText: plainText,
-                payload: .data(rtfData),
-                appBundleID: appBundleID,
-                contentHash: hash,
-                sizeBytes: rtfData.count
-            )
-        }
-
-        // 4. HTML
-        if let htmlData = pasteboard.data(forType: .html) {
-            let plainText = Self.normalizeText(extractPreferredPlainText(from: pasteboard, richTextData: htmlData, type: .html))
-            // Dedup by normalized main text (v0.md 3.2). HTML payload may include volatile metadata.
-            let hash = plainText.isEmpty ? computeHash(htmlData) : computeHash(plainText)
-            return ClipboardContent(
-                type: .html,
-                plainText: plainText,
-                payload: .data(htmlData),
-                appBundleID: appBundleID,
-                contentHash: hash,
-                sizeBytes: htmlData.count
-            )
-        }
-
-        // 5. Plain text (最低优先级 - 作为兜底)
-        if let string = pasteboard.string(forType: .string) {
-            let normalizedText = Self.normalizeText(string)
-            let hash = computeHash(normalizedText)
-            return ClipboardContent(
-                type: .text,
-                plainText: normalizedText,
-                payload: .none,
-                appBundleID: appBundleID,
-                contentHash: hash,
-                sizeBytes: normalizedText.utf8.count
-            )
-        }
-
-        // 6. Image（兜底）
-        if shouldPreferRichTypesOverImage, let imageResult = extractOptimalImageData(from: pasteboard, candidateFileURL: fileURLs.first) {
-            let imageData = imageResult.data
-            let hash = computeHash(imageData)
-            return ClipboardContent(
-                type: .image,
-                plainText: "[Image: \(Self.formatBytes(imageData.count))]",
-                payload: .data(imageData),
-                appBundleID: appBundleID,
-                contentHash: hash,
-                sizeBytes: imageData.count
-            )
-        }
-
-        return nil
     }
 
     private func shouldPreferRichTypesOverImage(from pasteboard: NSPasteboard) -> Bool {
@@ -2078,19 +1938,6 @@ public final class ClipboardMonitor {
 
     // MARK: - Helper Methods
 
-    private func extractPreferredPlainText(from pasteboard: NSPasteboard, richTextData: Data, type: ClipboardItemType) -> String {
-        let extracted: String?
-        switch type {
-        case .rtf:
-            extracted = Self.extractPlainTextFromRTF(richTextData)
-        case .html:
-            extracted = extractPlainTextFromHTML(richTextData)
-        default:
-            extracted = nil
-        }
-        return Self.preferredPlainText(candidate: pasteboard.string(forType: .string), extracted: extracted, type: type)
-    }
-
     /// Chooses between the pasteboard `.string` and the text extracted from the rich payload.
     ///
     /// Prefer the pasteboard-provided `.string` when it is a faithful plain-text representation of the rich
@@ -2129,10 +1976,7 @@ public final class ClipboardMonitor {
         return candidate
     }
 
-    /// Whether the text extracted from `htmlData` (or the pasteboard string) could carry TeX commands.
-    /// `containsTeXCommands` needs a backslash or a dollar sign; when neither the raw HTML bytes (including
-    /// numeric or named entities that could decode to them) nor the plain string contain one, the HTML
-    /// import cannot change which representation is stored.
+    /// Whether HTML extraction can produce TeX, including delimiters synthesized from math annotations.
     nonisolated private static func mayContainTeXCharacters(htmlData: Data, string: String?) -> Bool {
         if let string, string.contains("\\") || string.contains("$") {
             return true
@@ -2144,9 +1988,11 @@ public final class ClipboardMonitor {
             if previous == ampersand, byte == hash { return true }
             previous = byte
         }
-        // Named entities for the same characters.
-        if let text = String(data: htmlData, encoding: .utf8) ?? String(data: htmlData, encoding: .utf16) {
-            if text.range(of: "&dollar", options: .caseInsensitive) != nil || text.range(of: "&bsol", options: .caseInsensitive) != nil {
+        // Math annotations such as `E = mc^2` need extraction even without literal TeX delimiters.
+        if let text = Self.decodeHTMLDataToString(htmlData) {
+            if text.range(of: "application/x-tex", options: .caseInsensitive) != nil
+                || text.range(of: "&dollar", options: .caseInsensitive) != nil
+                || text.range(of: "&bsol", options: .caseInsensitive) != nil {
                 return true
             }
         }
@@ -2494,98 +2340,10 @@ public final class ClipboardMonitor {
             .replacingOccurrences(of: "\r", with: "\n")
     }
 
-    /// Compute content hash for deduplication (v0.md 3.2)
-    private func computeHash(_ text: String) -> String {
-        computeHash(Data(text.utf8))
-    }
-
-    private func computeHash(_ data: Data) -> String {
-        Self.computeHashStatic(data)
-    }
-
     /// 静态哈希计算方法（可在任意线程调用）
     public nonisolated static func computeHashStatic(_ data: Data) -> String {
         let digest = SHA256.hash(data: data)
         return digest.map { String(format: "%02x", $0) }.joined()
-    }
-
-    // MARK: - Image Fingerprint (轻量级图片指纹)
-
-    /// 计算图片轻量指纹：分辨率 + 四角4x4像素块
-    /// 格式: "img:{width}x{height}:{cornerPixelsHash}"
-    nonisolated static func computeImageFingerprint(_ imageData: Data) -> String? {
-        guard let imageSource = CGImageSourceCreateWithData(imageData as CFData, nil),
-              let cgImage = CGImageSourceCreateImageAtIndex(imageSource, 0, nil) else {
-            return nil
-        }
-
-        let width = cgImage.width
-        let height = cgImage.height
-
-        // 获取四角像素指纹
-        let cornerHash = extractCornerPixelsHash(from: cgImage, width: width, height: height)
-
-        return "img:\(width)x\(height):\(cornerHash)"
-    }
-
-    /// v0.19: 使用缩略图计算哈希，大幅减少内存占用
-    /// 将图片缩放到 32x32 后计算全图哈希，而不是在原图上提取四角
-    /// 4K 图片：原方案 33MB -> 新方案 4KB (减少 99.99%)
-    nonisolated private static let thumbnailSize = 32
-
-    nonisolated private static func extractCornerPixelsHash(from cgImage: CGImage, width: Int, height: Int) -> String {
-        return autoreleasepool {
-            let thumbSize = thumbnailSize
-            let colorSpace = CGColorSpaceCreateDeviceRGB()
-            let bytesPerPixel = 4
-            let bytesPerRow = bytesPerPixel * thumbSize
-            let bitsPerComponent = 8
-
-            // 创建 32x32 的缩略图上下文（仅 4KB 内存）
-            guard let context = CGContext(
-                data: nil,
-                width: thumbSize,
-                height: thumbSize,
-                bitsPerComponent: bitsPerComponent,
-                bytesPerRow: bytesPerRow,
-                space: colorSpace,
-                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-            ) else {
-                return "\(width)\(height)"
-            }
-
-            // 将原图绘制到缩略图上下文（自动缩放）
-            context.interpolationQuality = .low  // 快速缩放
-            context.draw(cgImage, in: CGRect(x: 0, y: 0, width: thumbSize, height: thumbSize))
-
-            guard let data = context.data else {
-                return "\(width)\(height)"
-            }
-
-            // 读取缩略图全部像素
-            let buffer = data.bindMemory(to: UInt8.self, capacity: thumbSize * thumbSize * bytesPerPixel)
-            var pixelData: [UInt8] = []
-            pixelData.reserveCapacity(thumbSize * thumbSize * 3)
-
-            for i in 0..<(thumbSize * thumbSize) {
-                let offset = i * bytesPerPixel
-                pixelData.append(buffer[offset])     // R
-                pixelData.append(buffer[offset + 1]) // G
-                pixelData.append(buffer[offset + 2]) // B
-            }
-
-            return compressPixelData(pixelData)
-        }
-    }
-
-    /// 压缩像素数据为短哈希（约32字符）
-    nonisolated private static func compressPixelData(_ pixels: [UInt8]) -> String {
-        // 简单的 XOR 折叠 + 十六进制编码
-        var hash: [UInt8] = [UInt8](repeating: 0, count: 16)
-        for (i, byte) in pixels.enumerated() {
-            hash[i % 16] ^= byte
-        }
-        return hash.map { String(format: "%02x", $0) }.joined()
     }
 
     nonisolated private static func extractPlainTextFromRTF(_ data: Data) -> String? {
@@ -2959,36 +2717,4 @@ public final class ClipboardMonitor {
         return nil
     }
 
-    /// 从剪贴板提取图片数据，优先 PNG，如果只有 TIFF 则转换为 PNG
-    private func extractOptimalImageData(
-        from pasteboard: NSPasteboard,
-        candidateFileURL: URL? = nil
-    ) -> (data: Data, wasTIFF: Bool)? {
-        // 优先检查 PNG（已压缩格式）
-        if let pngData = pasteboard.data(forType: .png) {
-            return (pngData, false)
-        }
-
-        // 只有 TIFF 时，转换为 PNG 以节省存储
-        if let tiffData = pasteboard.data(forType: .tiff) {
-            if let pngData = Self.convertTIFFToPNG(tiffData) {
-                return (pngData, true)
-            }
-            // 转换失败时保留 TIFF
-            return (tiffData, true)
-        }
-
-        if let image = NSImage(pasteboard: pasteboard),
-           let tiffData = image.tiffRepresentation,
-           let pngData = Self.convertTIFFToPNG(tiffData) {
-            return (pngData, false)
-        }
-
-        if let candidateFileURL,
-           let pngData = Self.loadImageFileDataAsPNG(candidateFileURL) {
-            return (pngData, false)
-        }
-
-        return nil
-    }
 }

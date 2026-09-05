@@ -1,10 +1,7 @@
 import Foundation
 
-/// RealClipboardService - 兼容层 adapter
-///
-/// 说明：
-/// - UI 仍通过 `@MainActor ClipboardServiceProtocol` 访问后端，因此保留该类型对外形态。
-/// - 真实逻辑迁移到 `Scopy/Application/ClipboardService.swift`（actor），此类仅做转发。
+/// Bridges the main-actor UI protocol to the backend ClipboardService actor.
+
 @MainActor
 final class RealClipboardService: ClipboardServiceProtocol {
     private let clipboardService: ClipboardService

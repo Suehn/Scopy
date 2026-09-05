@@ -4,7 +4,6 @@ import Foundation
 ///
 /// 目标：
 /// - 消灭多点读写 UserDefaults（AppDelegate / RealClipboardService 等）
-/// - 为后续“热键/设置变更订阅”提供统一入口
 public actor SettingsStore {
     public static let shared = SettingsStore()
 
@@ -14,8 +13,6 @@ public actor SettingsStore {
 
     private let userDefaults: UserDefaults
     private var cachedSettings: SettingsDTO?
-
-    private var subscribers: [UUID: AsyncStream<SettingsDTO>.Continuation] = [:]
 
     public init(userDefaults: UserDefaults = .standard) {
         self.userDefaults = userDefaults
@@ -38,7 +35,6 @@ public actor SettingsStore {
     public func save(_ settings: SettingsDTO) {
         userDefaults.set(Self.encode(settings), forKey: Constants.settingsKey)
         cachedSettings = settings
-        broadcast(settings)
     }
 
     public func updateHotkey(keyCode: UInt32, modifiers: UInt32) {
@@ -46,33 +42,6 @@ public actor SettingsStore {
         updated.hotkeyKeyCode = keyCode
         updated.hotkeyModifiers = modifiers
         save(updated)
-    }
-
-    public func observeSettings(bufferSize: Int = 1) -> AsyncStream<SettingsDTO> {
-        let id = UUID()
-        return AsyncStream(SettingsDTO.self, bufferingPolicy: .bufferingNewest(bufferSize)) { continuation in
-            subscribers[id] = continuation
-
-            if let current = cachedSettings ?? userDefaults.dictionary(forKey: Constants.settingsKey).map(Self.decode) {
-                continuation.yield(current)
-            }
-
-            continuation.onTermination = { [weak self] _ in
-                Task {
-                    await self?.removeSubscriber(id: id)
-                }
-            }
-        }
-    }
-
-    private func removeSubscriber(id: UUID) {
-        subscribers.removeValue(forKey: id)
-    }
-
-    private func broadcast(_ settings: SettingsDTO) {
-        for continuation in subscribers.values {
-            continuation.yield(settings)
-        }
     }
 
     // MARK: - Encoding / Decoding

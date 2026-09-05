@@ -85,28 +85,10 @@ final class ReusableMockClipboardService: ClipboardServiceProtocol {
         }
     }
 
-    func resetCallCounts() {
-        searchCallCount = 0
-        copyCallCount = 0
-        pinCallCount = 0
-        unpinCallCount = 0
-        deleteCallCount = 0
-        clearAllCallCount = 0
-        fetchRecentCallCount = 0
-        lastSearchQuery = nil
-        lastSearchMode = nil
-        lastCopiedItemID = nil
-    }
-
     // MARK: - Event Emission
 
     func emitEvent(_ event: ClipboardEvent) {
         eventContinuation?.yield(event)
-    }
-
-    func emitNewItem(_ item: ClipboardItemDTO) {
-        items.insert(item, at: 0)
-        emitEvent(.newItem(item))
     }
 
     // MARK: - ClipboardServiceProtocol

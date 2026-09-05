@@ -1,135 +1,49 @@
 # Repository Guidelines
 
-## AI Coding Workflow（Codex / Claude Code）
+## Working Agreement
 
-### Required engineering principles
+- Choose the simplest implementation that fully meets current requirements. Remove obsolete paths instead of adding compatibility layers, speculative abstractions, or temporary replacements. Keep concerns modular and each increment working end to end.
+- Use existing dependencies before reimplementing common functionality; verify their capabilities rather than guessing. Prefer maintained libraries when they reduce total complexity.
+- Preserve user changes. Inspect the worktree before editing; use an isolated checkout when other work is active. Search with `rg`; avoid destructive Git commands.
+- Small tasks need inspection, implementation, and verification. Cross-module or risky tasks need a short plan. Create a proposal only for decisions requiring durable review; no mandatory Trellis task, PRD, journal, or sub-agent ceremony.
+- Report actual results and limitations. Compilation, an unstarted test host, archived evidence, and diagnostic simplifications are not proof of runtime behavior or performance gains.
 
-- Do not preserve backward compatibility. Remove obsolete paths instead of adding compatibility layers, fallbacks, or migrations.
-- Choose the simplest implementation that fully meets the current requirements. Avoid speculative abstractions, configuration, and indirection.
-- Grow the system in layers. Start from the smallest version that works end to end, and add each new capability on top of a product that already works. Never trade a working product for unfinished complexity.
-- Keep components modular and concerns clearly separated.
-- Prefer established, well-maintained libraries when they reduce overall complexity or improve reliability. Do not reimplement common functionality without a clear reason.
-- Lean on the dependencies already in the project before writing your own implementation or adding packages. Do not assume a library lacks a capability without checking its documentation and types.
-- Make architectural decisions for the long term. Do not accept a stopgap that only works for now and is meant to be replaced later.
+## Sources Of Truth
 
-### 真实约束（不要猜）
+- Read [release-current.yml](doc/meta/release-current.yml) for canonical document entrypoints, then only the current documents relevant to the task. Historical notes, proposals, and archives are evidence, not active requirements.
+- [product-spec.md](doc/current/product-spec.md) owns product behavior; [architecture.md](doc/current/architecture.md) owns module boundaries and data-safety invariants; [development-guide.md](doc/current/development-guide.md) maps changes to runtime entrypoints.
+- `project.yml` owns Swift, deployment-target, and Xcode baselines. Do not change them without an explicit requirement. Newer system APIs need availability handling encapsulated at the component boundary.
+- Before adding Apple/Swift API calls, verify exact signatures and availability using Cupertino documentation/sample lookup. Compile immediately; the compiler adjudicates discrepancies.
+- Ordinary development updates only affected canonical docs. Release metadata, notes, indexes, and changelog change only for a release, a changed release fact, or an explicit request.
 
-- 以 `project.yml` 为单一事实来源：`SWIFT_VERSION` / `MACOSX_DEPLOYMENT_TARGET` / `xcodeVersion`；除非明确要求，不要改这些基线。
-- 引入新系统 API（例如 macOS 26 / Liquid Glass）必须 `if #available` + fallback；把可用性封装在组件/适配层，避免业务逻辑散落条件分支。
+## Product Boundaries That Must Survive Refactoring
 
-### 权威上下文（防幻觉）
+- Views use state and backend protocols, not direct persistence access. Heavy capture, search, cleanup, and media work remains bounded and off the UI thread.
+- Settings use explicit Save/Cancel transactions. Hotkey application goes through `AppDelegate.applyHotKey` for registration and persistence, with `.settingsChanged` reapplication; only `kEventHotKeyPressed` triggers actions, with repeat throttling.
+- Before renderer work, read [markdown-chatgpt-wacz-style-contract.md](doc/current/markdown-chatgpt-wacz-style-contract.md). It alone owns syntax, safe HTML, typography, layout, navigation, and rendering evidence requirements.
+- Keep one `MarkdownHTMLRenderer -> MarkdownHTMLDocumentBuilder` chain: preview and PNG share the parse result, HTML, base CSS, and local assets. Do not introduce a second parser, selector, or shadow renderer.
+- Preserve current-owner/render-ID readiness, logical-viewport layout, local overflow, and atomic renderer/KaTeX asset validation. Archived source/fonts alone do not prove computed styles or visual parity. Correct conflicting active documentation instead of preserving obsolete semantics.
 
-- 不要凭记忆编 Apple / Swift API：先用 MCP `cupertino` 搜索/阅读 Apple 文档或 sample code，确认**精确签名**与平台可用性再落代码。
-- 文档仍以编译器为裁判：写完立刻本地编译/测试，不留“占位实现”。
+## Validation By Change Scope
 
-### Markdown / 富文本渲染原则
+| Change | Required evidence |
+| --- | --- |
+| Documentation/metadata only | Relevant `make docs-validate` / `make release-validate` checks |
+| Functional code | `make build` + `make test-unit`; focused tests first are useful, disclose any omitted gates |
+| Concurrency, actors, threads | Also `make test-strict`; TSan when warranted |
+| Backend search/cleanup performance | `make test-snapshot-perf-release` using a fresh `make snapshot-perf-db` copy; never commit the DB |
+| Frontend performance | `make perf-frontend-profile` smoke; standard recommended before commit, full required before release |
+| Performance conclusions | `make perf-unified-table`; record environment, scenarios, actual numbers, and causal limits in the runbook or its linked evidence |
+| Hotkeys | `/tmp/scopy_hotkey.log` includes `updateHotKey()` and one action per press |
+| Renderer | Node `npm test`, `npm run build`, `npm run verify:assets` in `Tools/MarkdownRenderer`; app build, unit, strict, and a real-app PNG visual check; maintain Swift/Node contracts and export fixtures together |
+| Build/test/release tooling | `make test-tooling`, plus `make test-release-policy` for release workflows/scripts/targets |
 
-- `doc/current/markdown-chatgpt-wacz-style-contract.md` 是 ChatGPT 风格 Markdown、GFM、代码、表格、KaTeX、字体、间距、响应式和 Unicode/RTL 行为的唯一 canonical 契约。WACZ 中的源码或资源只能证明对应代码路径；没有 hydrated final DOM、computed style 或新截图时，不得声称像素级一致、暗色一致或某个字体实际生效。
-- 运行时只允许 `MarkdownHTMLRenderer -> MarkdownHTMLDocumentBuilder` 一条 Markdown 到 standalone HTML 的链路。预览与 PNG 导出必须消费同一 parse result、HTML、基础 CSS 和本地资源；不得增加 renderer selector、feature flag、shadow renderer、markdown-it fallback 或第二套 export parser。
-- 保持契约语义：单 `~` 与单 `$` 为字面量，成对删除线和显式数学才解析；raw HTML 只允许 canonical 契约定义的无属性闭合安全子集（`u`、`kbd`、`mark`、`sub`、`sup`、`details`/`summary`）进入受信 AST，完整注释隐藏，其余标签必须显示为字面文本；代码区域不得二次解析；未转义 table pipe 仍是分隔符；脚注 ID 和每次 WebView render ID 必须稳定且互不混用。
-- 布局缩放使用 `816 / scale` 的逻辑视口选择 40rem/48rem thread width，不得用物理 WKWebView 的 media query 代替。代码、公式和表格拥有局部横向溢出，不能扩宽外层 popover；公式宿主不得使用会导致离屏导出漏绘的 `content-visibility:auto`。
-- 字体以可靠的 macOS 系统 sans/mono 栈和项目内 KaTeX 字体为准；不要因为归档中存在某个字体文件就推断正文 computed font。
-- 任何旧 release note、archive、proposal、注释或历史契约若与上述 canonical 契约或当前源码/测试冲突，均为非规范历史材料；删除或改正仍标为 active 的冲突文本，不得为旧说法保留兼容路径。
-- 改动渲染器时同步维护 Node 契约测试、`ScopyTests/ChatGPTMarkdownRendererTests.swift` 和相关真实导出 fixture；至少运行 `npm test && npm run build`、`npm run verify:assets`、应用构建、单测、严格并发测试和一张真实应用 PNG 视觉检查。renderer bundle、KaTeX CSS、KaTeX 字体及 manifest 必须作为同一原子资产集合校验，构建产物中不得同时出现根目录扁平副本和规范子目录副本。自动化宿主若未启动场景，必须记录为 environment-blocked，不能记为通过。
+A host that never enters the requested scene is environment-blocked, not passed. Narrow failures before repeating broad suites. Build/test setup may install missing `xcodegen`; check availability and applicable network/installation authorization first.
 
-### 轻量工作流（默认）
+## Build And Release Entry Points
 
-- 不要求创建 Trellis task、PRD、JSONL context、developer journal，也不要求调用 Trellis 专用 sub-agent/skill。
-- 简单、边界明确的任务直接检查、修改、验证并交付，不为流程本身创建额外文档。
-- 复杂、跨模块或高风险任务先写一个短计划；只有需要长期保存设计取舍、多人评审或分阶段实施时，才在 `doc/proposals/` 新建 proposal。
-- sub-agent 仅在可独立并行、确实能降低风险或等待时间时按需使用，不是完成任务的前置条件；主代理仍负责整合、实现与验证。
-- 既有任务材料只是参考资料，不是运行时状态或完成门禁。项目级事实以 `project.yml`、源码、测试和 `doc/current/` 的 canonical 文档为准。
-
-### 验证闭环（按风险）
-
-- 纯文档或元数据修改只跑相关校验，不强制构建应用。
-- 功能代码修改默认跑 `make build` + `make test-unit`；局部、低风险修改可先跑定向测试，交付时说明未跑的门禁及原因。
-- 并发/actor/线程相关：额外跑 `make test-strict`；需要时跑 `make test-tsan`
-- 性能改动（搜索/清理/滚动）：
-  - 后端至少跑 `make test-snapshot-perf-release`
-  - 前端日常至少跑 `make perf-frontend-profile`（smoke，真实 snapshot DB）
-  - 提交前建议跑 `make perf-frontend-profile-standard`；发布前必须跑 `make perf-frontend-profile-full`
-  - 最终用 `make perf-unified-table` 生成前后端同表对比证据
-- 热键相关：自查 `/tmp/scopy_hotkey.log`（按下仅触发一次，且包含 `updateHotKey()`）
-- 注意：`make build/test*` 会触发 `make setup`；若缺 `xcodegen` 可能会尝试 `brew install xcodegen`，在无法联网或未授权时先询问。
-
-## 必读文档
-
-- 行为准则要同时参考 @CLAUDE.md 的说法准则
-- 开始任务时按需读取：先看 `doc/meta/release-current.yml` 的 canonical 入口，再读取与改动相关的 `doc/current/` 文档；涉及近期发布状态时再看 `doc/releases/README.md` / `doc/releases/CHANGELOG.md`。
-- 普通开发不要求为每次改动更新 release metadata 或新建版本文档。只有准备 release、改变当前发布事实或用户明确要求时才更新 release metadata、版本文档、索引和 CHANGELOG；性能/部署变化仍需写入 `doc/current/release-runbook.md`，含环境与具体数值。
-
-## 项目结构
-
-- 源码：`Scopy/`（入口 `main.swift` → `ScopyApp`，`AppDelegate` 管窗口/热键）。
-- 服务：`Scopy/Services/`（HotKeyService、ClipboardMonitor、StorageService、SearchService）。
-- 状态与协议：`Scopy/Observables/`，`Scopy/Protocols/`。
-- 测试：`ScopyTests/`，`ScopyUITests/`。
-- 文档：`doc/releases/`（版本/变更）、`doc/current/product-spec.md`（规格）、`doc/current/maintainer-guide.md`（流程）。
-- 脚本：`deploy.sh`，`Makefile`。
-
-## 构建与开发
-
-- Debug 构建：`make build`（推荐）或 `./deploy.sh`
-- Release 构建：`make release` 或 `./deploy.sh release`
-- 仅编译不启动：`./deploy.sh --no-launch`
-- 生成工程（需要时）：`bash scripts/xcodegen-generate-if-needed.sh` 或 `xcodegen generate`
-
-## 测试
-
-- 单测（推荐）：`make test-unit`（或 `xcodebuild test -scheme Scopy -destination 'platform=macOS' -only-testing:ScopyTests`）
-- 并发回归（推荐）：`make test-strict`（`SWIFT_STRICT_CONCURRENCY=complete`）
-- 定向：`-only-testing:ScopyTests/<TestName>`
-- 热键改动自查：`/tmp/scopy_hotkey.log` 应有 `updateHotKey()` 且按下仅触发一次。
-- 性能基准测试必须使用从 `~/Library/Application Support/Scopy/clipboard.db` 快照到仓库内的最新副本（`make snapshot-perf-db`，文件不提交）。
-- Release 快照性能门禁：`make test-snapshot-perf-release`
-- 前端真实性能采样：`make perf-frontend-profile`（smoke） / `make perf-frontend-profile-standard`（提交前） / `make perf-frontend-profile-full`（发布前）
-- 前后端统一量化同表：`make perf-unified-table BACKEND_BASELINE=... BACKEND_CURRENT=... FRONTEND_SUMMARY=...`
-
-## 编码风格
-
-- Swift，4 空格缩进，协议优先、显式访问控制；默认 ASCII。
-- 注释仅用于非显式逻辑；文件名匹配类型（例：`HotKeyService.swift`）。
-- 搜索优先 `rg`；不回滚用户已有改动，避免破坏性 git 命令。
-
-## 提交与 PR
-
-- 提交信息：简短祈使句（例 “Fix hotkey recording”）。
-- PR：说明改动、测试结果，UI 变更附截图，关联 issue；若性能/部署变化，附具体数据与环境。
-- 版本发布（必须）：统一使用 **git tag** 驱动版本号与发布（禁止用“commit count 自动生成版本”）。
-  - 创建版本提交（含 `doc/meta/release-current.yml`、`doc/releases/history/vX.Y.Z.md`、索引、CHANGELOG、profile 或 `profile_doc: null`、必要时 `doc/current/release-runbook.md`）
-  - 发布前校验（必须过）：`make release-validate`（校验索引里的 **当前版本** 对应的版本文档/CHANGELOG 条目都存在）
-  - 需要创建新版本文档骨架时：`make release-bump-patch`（从 release metadata 读取当前版本并递增 patch）
-  - 打 tag（推荐从 release metadata 读取当前版本）：`make tag-release`
-  - 推送（确保 tag 一并推送）：
-    - 一次性：`make push-release`
-    - 或手动：`git push origin main` + `git push origin vX.Y.Z`
-  - Release 产物：GitHub Actions `Build and Release` 仅从 tag 构建并上传 DMG + `.sha256`；并会在 `main` 上更新本仓库 `Casks/scopy.rb` 到同版本与 sha；同时尝试更新 `Suehn/homebrew-scopy`（依赖 `HOMEBREW_GITHUB_API_TOKEN`，缺失时会跳过）。
-  - 发布完成定义（必须做到）：**Homebrew 可安装/可升级到该版本**。
-    - 等待 tag 对应 release 产出 `Scopy-<version>.dmg` + `Scopy-<version>.dmg.sha256`（不要覆盖同 tag 的 DMG；修复发布请 bump 版本重发）
-    - 同步源检查（必须）：`curl -fsSL https://raw.githubusercontent.com/Suehn/Scopy/main/Casks/scopy.rb | sed -n '1,12p'`（version/sha 必须匹配上一步的 `.sha256`）
-    - tap 检查（必须）：`curl -fsSL https://raw.githubusercontent.com/Suehn/homebrew-scopy/main/Casks/scopy.rb | sed -n '1,12p'`（应与同步源一致；若仍旧版本，通常是 workflow 缺少权限/secret，需手动提交 tap 仓库的 `Casks/scopy.rb`）
-    - 本地验证：`brew tap Suehn/scopy` → `brew update` → `brew info --cask scopy`（看 version/From）→ `brew fetch --cask scopy -f`（必要时 `brew cat scopy` 排查 cask 内容）
-    - 安装落地校验（必须做）：确认 `/Applications/Scopy.app` 存在；若未出现，执行 `brew reinstall --cask scopy --appdir=/Applications` 或从 `/opt/homebrew/Caskroom/scopy/<version>/Scopy.app` 手动复制到 `/Applications`。
-    - 常见故障排查（版本“回滚/下载错版本”）：
-      - 先看本地到底用的哪个 cask：`brew info --cask scopy`（From/版本），必要时 `brew cat scopy`。
-      - 强制刷新 tap + 重装（适用于“以为是 fix18 但装到 fix2”这类缓存/旧 tap 场景）：
-        ```bash
-        brew untap Suehn/scopy >/dev/null 2>&1
-        rm -rf "$(brew --repo Suehn/scopy 2>/dev/null || true)"
-        brew update && brew tap Suehn/scopy && brew update
-        brew reinstall --cask scopy --force --appdir=/Applications
-        xattr -dr com.apple.quarantine /Applications/Scopy.app 2>/dev/null || true
-        ```
-      - 用 Info.plist 确认真正安装的版本（不要只看 UI/文件名）：`defaults read /Applications/Scopy.app/Contents/Info CFBundleShortVersionString`
-  - 本地构建：推荐用 `make`/`./deploy.sh`（会注入 `MARKETING_VERSION/CURRENT_PROJECT_VERSION`；见 `scripts/version.sh`）。
-
-## 架构与热键要点
-
-- 统一入口 `AppDelegate.applyHotKey`：注册 + 持久化 UserDefaults；HotKeyService 仅监听 `kEventHotKeyPressed`，含轻节流防按住重复。
-- 设置事件 `.settingsChanged` 兜底重应用热键。
-- 热键日志：`/tmp/scopy_hotkey.log`。
-
-## 设置窗口约定
-
-- Settings 使用显式 **Save/Cancel** 事务模型（`isDirty`），UI 重排/视觉改进需避免任何设置逻辑/行为变化（不要改成 autosave）。
+- `make build` compiles Debug; `make release` compiles Release. `./deploy.sh` builds and launches; `./deploy.sh --no-launch` builds only. Generate the project with `bash scripts/xcodegen-generate-if-needed.sh` when needed.
+- Source and tests live in `Scopy/`, `ScopyTests/`, and `ScopyUITests/`; `Package.swift` and `project.yml` define module ownership. Use Swift with four-space indentation, explicit access control, and names matching types.
+- Use `ScopyLog` categories and private metadata; never log clipboard bodies, image bytes, notes, or file contents. See the development guide for logging boundaries.
+- Commit messages are short imperative summaries. PRs explain behavior, verification, and material limits; include UI evidence for UI changes.
+- For an authorized release, follow [release-runbook.md](doc/current/release-runbook.md) or the repository `scopy-release-homebrew` skill. Version authority is an explicit Git tag, never commit count. Do not overwrite published tags/assets. Completion requires matching DMG/checksum, both casks, Homebrew installation, and installed bundle verification.

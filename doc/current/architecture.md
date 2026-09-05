@@ -2,7 +2,7 @@
 doc_type: spec
 status: active
 owner: maintainers
-last_reviewed: 2026-07-11
+last_reviewed: 2026-09-05
 canonical: true
 related_versions:
   - v0.70.0
@@ -16,6 +16,7 @@ This document describes the current system shape and operational invariants. For
 ## Current System Shape
 
 - `Scopy` app target owns app lifecycle, panel/window orchestration, observables, presentation logic, and views.
+- `RealClipboardService` bridges the main-actor UI protocol to the `ClipboardService` actor; forwarding here enforces isolation rather than introducing another backend.
 - `ScopyKit` owns the backend domain/application/infrastructure/services layer and is imported by the app and tests.
 - `ScopyUISupport` holds reusable UI support code shared by app-side views.
 - `ScopyBench` provides benchmark tooling for backend/perf verification.
@@ -40,13 +41,7 @@ This document describes the current system shape and operational invariants. For
 
 - App/UI shell manages the menubar icon, floating panel, settings window, and preview/export flows.
 - History action flows resolve shareable file URLs through backend protocols; UI rows decide visibility from DTO-level capability hints and do not directly read storage internals.
-- Markdown preview/export uses one local CommonMark/GFM-to-HTML pipeline for preview and PNG: stable footnote IDs, HTML-only KaTeX, syntax highlighting, tasks/tables/citations, a closed safe-HTML AST extension with all residual HTML literalized, bounded source-profile repair, strict `scopy-rich` v2 web/image/news/weather/finance/currency envelopes, and one field-preserving consecutive-public-image presentation adapter. Missing assets and invalid rich envelopes fail visibly; there is no alternate renderer, silent fallback, or prose-to-card inference. The normative semantics, typography, responsive layout, evidence boundary, and verification matrix live in [markdown-chatgpt-wacz-style-contract.md](./markdown-chatgpt-wacz-style-contract.md).
-- Markdown preview assets and bundled tools are one manifest-verified release unit. The renderer IIFE, its sidecar, KaTeX CSS, and the complete lockfile-matched KaTeX font set are generated/verified together and staged once in their canonical subdirectories; flat duplicate bundle resources are a build failure rather than a cross-machine fallback.
-- Rich cards may resolve only assets from the bundled closed allowlist. Preview hydrates deterministic controls from frozen envelope data; export freezes the same DOM before PDF or snapshot capture. No renderer path fetches remote images, live weather, market data, exchange rates, or hidden citation targets.
-- Navigation is split by destination class. Fragment links stay inside the WebView; validated HTTP(S) and strict Codex absolute-file links cross the native boundary only after explicit user activation; every other scheme/path form is cancelled.
-- Each Markdown WebView navigation has a render ID. Only current main-frame readiness/metrics may update preview state, and metric equality includes overflow plus success/error state as well as geometry.
-- Terminal readiness is a conjunction of renderer completion, stylesheet readiness, font readiness, terminal local-image state, runtime hydration, paint completion, and measured layout. Resize/toggle bursts are coalesced through one animation-frame epoch; preview opacity is enabled only after current-owner terminal success, while export times out as failure rather than snapshotting a merely nonzero but incomplete DOM.
-- The shared preview controller also carries an owner lease. Only the current SwiftUI representable may attach, navigate, configure scrolling, or detach it; identical in-flight HTML is a no-op, and scroll setup retries until WebKit's internal `NSScrollView` exists. Hidden premeasurement must not share the controller.
+- Markdown preview/export share `MarkdownHTMLRenderer -> MarkdownHTMLDocumentBuilder`. The reusable WebView has one owner lease and per-navigation render IDs; stale callbacks must not publish state. [markdown-chatgpt-wacz-style-contract.md](./markdown-chatgpt-wacz-style-contract.md) owns renderer semantics, layout, local resources, navigation, readiness, and verification.
 - Preview and export flows must treat stored content as source-of-truth input, not a side channel that mutates persisted data.
 
 ## Operational Invariants

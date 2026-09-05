@@ -1,6 +1,6 @@
 import AppKit
 import XCTest
-import ScopyKit
+@testable import ScopyKit
 
 /// ClipboardMonitor 单元测试
 /// 验证剪贴板监控和内容提取功能
@@ -31,13 +31,6 @@ final class ClipboardMonitorTests: XCTestCase {
             try? FileManager.default.removeItem(at: ingestSpoolDirectory)
         }
         ingestSpoolDirectory = nil
-    }
-
-    // MARK: - Initialization Tests
-
-    func testInitialization() {
-        XCTAssertNotNil(monitor)
-        XCTAssertNotNil(monitor.contentStream)
     }
 
     func testClipboardIngestMetricsSummaryAggregatesCountersAndTimestamps() async throws {
@@ -106,27 +99,36 @@ final class ClipboardMonitorTests: XCTestCase {
 
     // MARK: - Clipboard Read Tests
 
-    func testReadCurrentClipboard() {
+    func testCaptureClipboard() async {
+        monitor.setPollingInterval(5.0)
+        monitor.startMonitoring()
+
         // Set something to clipboard
         pasteboard.clearContents()
         pasteboard.setString("Test clipboard content", forType: .string)
 
-        let content = monitor.readCurrentClipboard()
+        let content = await captureClipboard()
         XCTAssertNotNil(content)
         XCTAssertEqual(content?.type, .text)
         XCTAssertEqual(content?.plainText, "Test clipboard content")
     }
 
-    func testReadEmptyClipboard() {
+    func testReadEmptyClipboard() async {
+        monitor.setPollingInterval(5.0)
+        monitor.startMonitoring()
+
         // Clear clipboard
         pasteboard.clearContents()
 
-        let content = monitor.readCurrentClipboard()
+        let content = await captureClipboard(expectContent: false)
         // Empty clipboard returns nil
         XCTAssertNil(content)
     }
 
-    func testReadCurrentClipboardHTMLNonUTF8ProvidesPlainTextFallback() {
+    func testCaptureClipboardHTMLNonUTF8ProvidesPlainTextFallback() async {
+        monitor.setPollingInterval(5.0)
+        monitor.startMonitoring()
+
         let html = "<html><body>你好 Hello</body></html>"
         guard let htmlData = html.data(using: .utf16) else {
             XCTFail("Failed to encode HTML data")
@@ -136,14 +138,17 @@ final class ClipboardMonitorTests: XCTestCase {
         pasteboard.clearContents()
         pasteboard.setData(htmlData, forType: .html)
 
-        let content = monitor.readCurrentClipboard()
+        let content = await captureClipboard()
         XCTAssertNotNil(content)
         XCTAssertEqual(content?.type, .html)
         XCTAssertTrue(content?.plainText.contains("你好") ?? false)
         XCTAssertTrue(content?.plainText.contains("Hello") ?? false)
     }
 
-    func testReadCurrentClipboardHTMLUsesRichPayloadPlainTextEvenWhenStringIsCorrupted() {
+    func testCaptureClipboardHTMLUsesRichPayloadPlainTextEvenWhenStringIsCorrupted() async {
+        monitor.setPollingInterval(5.0)
+        monitor.startMonitoring()
+
         let expected = #"[\mathbf{e}^L_i = \mathbf{e}_i + \sum_{u\in\mathcal{N}_i} \frac{1}{\sqrt{|\mathcal{N}_i|}\sqrt{|\mathcal{N}_u|}} \mathbf{e}_u]"#
         let html = "<html><body><pre>\(expected)</pre></body></html>"
         let htmlData = Data(html.utf8)
@@ -160,7 +165,7 @@ final class ClipboardMonitorTests: XCTestCase {
         item.setData(htmlData, forType: .html)
         pasteboard.writeObjects([item])
 
-        let content = monitor.readCurrentClipboard()
+        let content = await captureClipboard()
         XCTAssertNotNil(content)
         XCTAssertEqual(content?.type, .html)
         let text = content?.plainText ?? ""
@@ -171,7 +176,10 @@ final class ClipboardMonitorTests: XCTestCase {
         XCTAssertFalse(text.contains("================"))
     }
 
-    func testReadCurrentClipboardHTMLKaTeXUsesAnnotationTeXForPlainText() {
+    func testCaptureClipboardHTMLKaTeXUsesAnnotationTeXForPlainText() async {
+        monitor.setPollingInterval(5.0)
+        monitor.startMonitoring()
+
         let html = """
         <html><body>
         <h3>符号与公式层面的关键修正</h3>
@@ -198,7 +206,7 @@ final class ClipboardMonitorTests: XCTestCase {
         item.setData(htmlData, forType: .html)
         pasteboard.writeObjects([item])
 
-        let content = monitor.readCurrentClipboard()
+        let content = await captureClipboard()
         XCTAssertNotNil(content)
         XCTAssertEqual(content?.type, .html)
 
@@ -210,7 +218,10 @@ final class ClipboardMonitorTests: XCTestCase {
         XCTAssertFalse(text.contains("katex"))
     }
 
-    func testReadCurrentClipboardHTMLPrefersRelatedStructuredMarkdownPlainTextAndKeepsHTMLPayload() {
+    func testCaptureClipboardHTMLPrefersRelatedStructuredMarkdownPlainTextAndKeepsHTMLPayload() async {
+        monitor.setPollingInterval(5.0)
+        monitor.startMonitoring()
+
         let markdown = """
         # Portfolio construction
 
@@ -239,14 +250,17 @@ final class ClipboardMonitorTests: XCTestCase {
         item.setData(htmlData, forType: .html)
         pasteboard.writeObjects([item])
 
-        let content = monitor.readCurrentClipboard()
+        let content = await captureClipboard()
         XCTAssertEqual(content?.type, .html)
         XCTAssertEqual(content?.plainText, markdown)
         XCTAssertEqual(content?.rawData, htmlData)
         XCTAssertEqual(content?.contentHash, ClipboardMonitor.computeHashStatic(Data(markdown.utf8)))
     }
 
-    func testReadCurrentClipboardHTMLPrefersRelatedSingleMarkdownLink() {
+    func testCaptureClipboardHTMLPrefersRelatedSingleMarkdownLink() async {
+        monitor.setPollingInterval(5.0)
+        monitor.startMonitoring()
+
         let markdown = "Read the [Open Codex community renderer](https://github.com/open-codex/opencode) for implementation details."
         let html = "<html><body><p>Read the <a href=\"https://github.com/open-codex/opencode\">Open Codex community renderer</a> for implementation details.</p></body></html>"
 
@@ -256,12 +270,15 @@ final class ClipboardMonitorTests: XCTestCase {
         item.setData(Data(html.utf8), forType: .html)
         pasteboard.writeObjects([item])
 
-        let content = monitor.readCurrentClipboard()
+        let content = await captureClipboard()
         XCTAssertEqual(content?.type, .html)
         XCTAssertEqual(content?.plainText, markdown)
     }
 
-    func testReadCurrentClipboardHTMLPrefersRelatedConsecutiveMarkdownImages() {
+    func testCaptureClipboardHTMLPrefersRelatedConsecutiveMarkdownImages() async {
+        monitor.setPollingInterval(5.0)
+        monitor.startMonitoring()
+
         let markdown = """
         Reference images:
 
@@ -276,12 +293,15 @@ final class ClipboardMonitorTests: XCTestCase {
         item.setData(Data(html.utf8), forType: .html)
         pasteboard.writeObjects([item])
 
-        let content = monitor.readCurrentClipboard()
+        let content = await captureClipboard()
         XCTAssertEqual(content?.type, .html)
         XCTAssertEqual(content?.plainText, markdown)
     }
 
-    func testReadCurrentClipboardHTMLRejectsStructuredMarkdownWithLargeUnrelatedTail() {
+    func testCaptureClipboardHTMLRejectsStructuredMarkdownWithLargeUnrelatedTail() async {
+        monitor.setPollingInterval(5.0)
+        monitor.startMonitoring()
+
         let shared = "Quarterly summary confirms stable demand and improving service quality."
         let unrelatedTail = Array(repeating: "Unrelated appendix discusses gardening soil irrigation pruning and seeds.", count: 24)
             .joined(separator: "\n")
@@ -294,14 +314,17 @@ final class ClipboardMonitorTests: XCTestCase {
         item.setData(Data(html.utf8), forType: .html)
         pasteboard.writeObjects([item])
 
-        let content = monitor.readCurrentClipboard()
+        let content = await captureClipboard()
         XCTAssertEqual(content?.type, .html)
         XCTAssertNotEqual(content?.plainText, markdown)
         XCTAssertTrue(content?.plainText.contains(shared) ?? false)
         XCTAssertFalse(content?.plainText.contains("gardening soil") ?? true)
     }
 
-    func testReadCurrentClipboardHTMLDoesNotPreferUnrelatedStructuredMarkdownOverKaTeXHTML() {
+    func testCaptureClipboardHTMLDoesNotPreferUnrelatedStructuredMarkdownOverKaTeXHTML() async {
+        monitor.setPollingInterval(5.0)
+        monitor.startMonitoring()
+
         let unrelatedMarkdown = """
         # Completely unrelated note
 
@@ -322,13 +345,16 @@ final class ClipboardMonitorTests: XCTestCase {
         item.setData(Data(html.utf8), forType: .html)
         pasteboard.writeObjects([item])
 
-        let content = monitor.readCurrentClipboard()
+        let content = await captureClipboard()
         XCTAssertEqual(content?.type, .html)
         XCTAssertNotEqual(content?.plainText, unrelatedMarkdown)
         XCTAssertTrue(content?.plainText.contains("$E = mc^2$") ?? false)
     }
 
-    func testReadCurrentClipboardHTMLKeepsKaTeXExtractionForRelatedNonMarkdownPlainText() {
+    func testCaptureClipboardHTMLKeepsKaTeXExtractionForRelatedNonMarkdownPlainText() async {
+        monitor.setPollingInterval(5.0)
+        monitor.startMonitoring()
+
         let plainText = "Equation E equals m c squared"
         let html = """
         <html><body><p>Equation
@@ -344,13 +370,16 @@ final class ClipboardMonitorTests: XCTestCase {
         item.setData(Data(html.utf8), forType: .html)
         pasteboard.writeObjects([item])
 
-        let content = monitor.readCurrentClipboard()
+        let content = await captureClipboard()
         XCTAssertEqual(content?.type, .html)
         XCTAssertNotEqual(content?.plainText, plainText)
         XCTAssertTrue(content?.plainText.contains("$E = mc^2$") ?? false)
     }
 
-    func testReadCurrentClipboardHTMLWithoutPlainTextStillUsesHTMLExtraction() {
+    func testCaptureClipboardHTMLWithoutPlainTextStillUsesHTMLExtraction() async {
+        monitor.setPollingInterval(5.0)
+        monitor.startMonitoring()
+
         let html = """
         <html><body><h2>Only HTML</h2><p>No plain-text MIME was provided.</p></body></html>
         """
@@ -359,14 +388,17 @@ final class ClipboardMonitorTests: XCTestCase {
         pasteboard.clearContents()
         pasteboard.setData(htmlData, forType: .html)
 
-        let content = monitor.readCurrentClipboard()
+        let content = await captureClipboard()
         XCTAssertEqual(content?.type, .html)
         XCTAssertTrue(content?.plainText.contains("Only HTML") ?? false)
         XCTAssertTrue(content?.plainText.contains("No plain-text MIME was provided.") ?? false)
         XCTAssertEqual(content?.rawData, htmlData)
     }
 
-    func testReadCurrentClipboardRTFPrefersKaTeXAnnotationFromHTMLWhenAvailable() throws {
+    func testCaptureClipboardRTFPrefersKaTeXAnnotationFromHTMLWhenAvailable() async throws {
+        monitor.setPollingInterval(5.0)
+        monitor.startMonitoring()
+
         let html = """
         <html><body>
         <p>Eq: <span class="katex"><span class="katex-mathml"><math><semantics>
@@ -394,7 +426,7 @@ final class ClipboardMonitorTests: XCTestCase {
         item.setData(htmlData, forType: .html)
         pasteboard.writeObjects([item])
 
-        let content = monitor.readCurrentClipboard()
+        let content = await captureClipboard()
         XCTAssertNotNil(content)
         XCTAssertEqual(content?.type, .rtf)
 
@@ -403,7 +435,10 @@ final class ClipboardMonitorTests: XCTestCase {
         XCTAssertFalse(text.contains("RTF fallback"))
     }
 
-    func testReadCurrentClipboardRTFUsesRichPayloadPlainTextEvenWhenStringIsCorrupted() throws {
+    func testCaptureClipboardRTFUsesRichPayloadPlainTextEvenWhenStringIsCorrupted() async throws {
+        monitor.setPollingInterval(5.0)
+        monitor.startMonitoring()
+
         let expected = #"[\mathbf{e}^L_i = \mathbf{e}_i + \sum_{u\in\mathcal{N}_i} \frac{1}{\sqrt{|\mathcal{N}_i|}\sqrt{|\mathcal{N}_u|}} \mathbf{e}_u]"#
         let attributed = NSAttributedString(string: expected)
         let range = NSRange(location: 0, length: attributed.length)
@@ -423,7 +458,7 @@ final class ClipboardMonitorTests: XCTestCase {
         item.setData(rtfData, forType: .rtf)
         pasteboard.writeObjects([item])
 
-        let content = monitor.readCurrentClipboard()
+        let content = await captureClipboard()
         XCTAssertNotNil(content)
         XCTAssertEqual(content?.type, .rtf)
         let text = content?.plainText ?? ""
@@ -516,15 +551,21 @@ final class ClipboardMonitorTests: XCTestCase {
 
     // MARK: - Content Type Detection Tests
 
-    func testTextContentDetection() {
+    func testTextContentDetection() async {
+        monitor.setPollingInterval(5.0)
+        monitor.startMonitoring()
+
         pasteboard.clearContents()
         pasteboard.setString("Plain text content", forType: .string)
 
-        let content = monitor.readCurrentClipboard()
+        let content = await captureClipboard()
         XCTAssertEqual(content?.type, .text)
     }
 
-    func testImageContentDetection() {
+    func testImageContentDetection() async {
+        monitor.setPollingInterval(5.0)
+        monitor.startMonitoring()
+
         // Create test image
         let image = NSImage(size: NSSize(width: 10, height: 10))
         image.lockFocus()
@@ -537,12 +578,15 @@ final class ClipboardMonitorTests: XCTestCase {
         pasteboard.clearContents()
         pasteboard.setData(tiffData, forType: .tiff)
 
-        let content = monitor.readCurrentClipboard()
+        let content = await captureClipboard()
         XCTAssertEqual(content?.type, .image)
         XCTAssertNotNil(content?.rawData)
     }
 
-    func testImageWithTemporaryImageFileURLPrefersImageContent() throws {
+    func testImageWithTemporaryImageFileURLPrefersImageContent() async throws {
+        monitor.setPollingInterval(5.0)
+        monitor.startMonitoring()
+
         guard let tiffData = makeSolidColorTIFFData() else {
             XCTFail("Failed to generate image data")
             return
@@ -557,12 +601,15 @@ final class ClipboardMonitorTests: XCTestCase {
         item.setData(tiffData, forType: .tiff)
         pasteboard.writeObjects([item])
 
-        let content = monitor.readCurrentClipboard()
+        let content = await captureClipboard()
         XCTAssertEqual(content?.type, .image)
         XCTAssertNotNil(content?.rawData)
     }
 
-    func testTemporaryImageFileURLWithoutImageTypesButDecodableFileStillPrefersImage() throws {
+    func testTemporaryImageFileURLWithoutImageTypesButDecodableFileStillPrefersImage() async throws {
+        monitor.setPollingInterval(5.0)
+        monitor.startMonitoring()
+
         let tempImageURL = try makeTemporaryValidPNGFileURL()
         defer { try? FileManager.default.removeItem(at: tempImageURL.deletingLastPathComponent()) }
 
@@ -572,7 +619,7 @@ final class ClipboardMonitorTests: XCTestCase {
         item.setString(tempImageURL.path, forType: .string)
         pasteboard.writeObjects([item])
 
-        let content = monitor.readCurrentClipboard()
+        let content = await captureClipboard()
         XCTAssertEqual(content?.type, .image)
         guard let rawData = content?.rawData else {
             XCTFail("Expected image payload data")
@@ -581,7 +628,10 @@ final class ClipboardMonitorTests: XCTestCase {
         XCTAssertTrue(isLikelyPNG(rawData))
     }
 
-    func testWeChatContainerImageFileURLWithoutImageTypesStillPrefersImage() throws {
+    func testWeChatContainerImageFileURLWithoutImageTypesStillPrefersImage() async throws {
+        monitor.setPollingInterval(5.0)
+        monitor.startMonitoring()
+
         let rootDirectory = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("scopy-wechat-path-\(UUID().uuidString)", isDirectory: true)
         let weChatTempDirectory = rootDirectory
@@ -613,7 +663,7 @@ final class ClipboardMonitorTests: XCTestCase {
         item.setString(imageURL.path, forType: .string)
         pasteboard.writeObjects([item])
 
-        let content = monitor.readCurrentClipboard()
+        let content = await captureClipboard()
         XCTAssertEqual(content?.type, .image)
         guard let rawData = content?.rawData else {
             XCTFail("Expected image payload data")
@@ -622,29 +672,37 @@ final class ClipboardMonitorTests: XCTestCase {
         XCTAssertTrue(isLikelyPNG(rawData))
     }
 
-    func testTemporaryNonImageFileURLStillDetectedAsFile() throws {
+    func testTemporaryNonImageFileURLStillDetectedAsFile() async throws {
+        monitor.setPollingInterval(5.0)
+        monitor.startMonitoring()
+
         let tempTextURL = try makeTemporaryTextFileURL()
         defer { try? FileManager.default.removeItem(at: tempTextURL.deletingLastPathComponent()) }
 
         pasteboard.clearContents()
         pasteboard.writeObjects([tempTextURL as NSURL])
 
-        let content = monitor.readCurrentClipboard()
+        let content = await captureClipboard()
         XCTAssertEqual(content?.type, .file)
         XCTAssertTrue(content?.plainText.contains(tempTextURL.path) ?? false)
     }
 
     func testFileCaptureRemainsDistinctFromEqualPathText() async throws {
+        monitor.setPollingInterval(5.0)
+        monitor.startMonitoring()
+
         let fileURL = try makeTemporaryTextFileURL()
         defer { try? FileManager.default.removeItem(at: fileURL.deletingLastPathComponent()) }
 
         pasteboard.clearContents()
         pasteboard.setString(fileURL.path, forType: .string)
-        let textContent = try XCTUnwrap(monitor.readCurrentClipboard())
+        let capturedText = await captureClipboard()
+        let textContent = try XCTUnwrap(capturedText)
 
         pasteboard.clearContents()
         pasteboard.writeObjects([fileURL as NSURL])
-        let fileContent = try XCTUnwrap(monitor.readCurrentClipboard())
+        let capturedFile = await captureClipboard()
+        let fileContent = try XCTUnwrap(capturedFile)
 
         XCTAssertEqual(textContent.type, .text)
         XCTAssertEqual(fileContent.type, .file)
@@ -675,7 +733,10 @@ final class ClipboardMonitorTests: XCTestCase {
         )
     }
 
-    func testNonTemporaryImageFileURLWithFileListTypeStillDetectedAsFile() throws {
+    func testNonTemporaryImageFileURLWithFileListTypeStillDetectedAsFile() async throws {
+        monitor.setPollingInterval(5.0)
+        monitor.startMonitoring()
+
         guard let tiffData = makeSolidColorTIFFData() else {
             XCTFail("Failed to generate image data")
             return
@@ -691,11 +752,14 @@ final class ClipboardMonitorTests: XCTestCase {
         pasteboard.writeObjects([item])
         pasteboard.setPropertyList([imageURL.path], forType: NSPasteboard.PasteboardType("NSFilenamesPboardType"))
 
-        let content = monitor.readCurrentClipboard()
+        let content = await captureClipboard()
         XCTAssertEqual(content?.type, .file)
     }
 
-    func testTableHTMLPrefersHTMLOverImageWhenBothExist() {
+    func testTableHTMLPrefersHTMLOverImageWhenBothExist() async {
+        monitor.setPollingInterval(5.0)
+        monitor.startMonitoring()
+
         // Simulate Office/Excel: image preview + HTML table + plain text.
         let image = NSImage(size: NSSize(width: 10, height: 10))
         image.lockFocus()
@@ -720,13 +784,16 @@ final class ClipboardMonitorTests: XCTestCase {
         item.setData(tiffData, forType: .tiff)
         pasteboard.writeObjects([item])
 
-        let content = monitor.readCurrentClipboard()
+        let content = await captureClipboard()
         XCTAssertEqual(content?.type, .html)
         XCTAssertEqual(content?.plainText, plainText)
         XCTAssertEqual(content?.rawData, htmlData)
     }
 
-    func testImageHTMLKeepsImageWhenHTMLLooksLikeImage() {
+    func testImageHTMLKeepsImageWhenHTMLLooksLikeImage() async {
+        monitor.setPollingInterval(5.0)
+        monitor.startMonitoring()
+
         // Copy image from browser often includes a small <img ...> HTML snippet; should remain image.
         let image = NSImage(size: NSSize(width: 10, height: 10))
         image.lockFocus()
@@ -747,94 +814,117 @@ final class ClipboardMonitorTests: XCTestCase {
         item.setData(tiffData, forType: .tiff)
         pasteboard.writeObjects([item])
 
-        let content = monitor.readCurrentClipboard()
+        let content = await captureClipboard()
         XCTAssertEqual(content?.type, .image)
         XCTAssertNotNil(content?.rawData)
     }
 
     // MARK: - Hash Tests (v0.md 3.2)
 
-    func testContentHashConsistency() {
+    func testContentHashConsistency() async {
+        monitor.setPollingInterval(5.0)
+        monitor.startMonitoring()
+
         pasteboard.clearContents()
         pasteboard.setString("Hash test content", forType: .string)
 
-        let content1 = monitor.readCurrentClipboard()
-        let content2 = monitor.readCurrentClipboard()
+        let content1 = await captureClipboard()
+        pasteboard.clearContents()
+        pasteboard.setString("Hash test content", forType: .string)
+        let content2 = await captureClipboard()
 
         // Same content should produce same hash
         XCTAssertEqual(content1?.contentHash, content2?.contentHash)
     }
 
-    func testContentHashDifferent() {
+    func testContentHashDifferent() async {
+        monitor.setPollingInterval(5.0)
+        monitor.startMonitoring()
+
         pasteboard.clearContents()
         pasteboard.setString("Content A", forType: .string)
-        let content1 = monitor.readCurrentClipboard()
+        let content1 = await captureClipboard()
 
         pasteboard.clearContents()
         pasteboard.setString("Content B", forType: .string)
-        let content2 = monitor.readCurrentClipboard()
+        let content2 = await captureClipboard()
 
         // Different content should produce different hash
         XCTAssertNotEqual(content1?.contentHash, content2?.contentHash)
     }
 
-    func testTextNormalization() {
+    func testTextNormalization() async {
+        monitor.setPollingInterval(5.0)
+        monitor.startMonitoring()
+
         // Test with leading/trailing whitespace
         pasteboard.clearContents()
         pasteboard.setString("   normalized   ", forType: .string)
-        let content1 = monitor.readCurrentClipboard()
+        let content1 = await captureClipboard()
 
         // Same text without whitespace
         pasteboard.clearContents()
         pasteboard.setString("normalized", forType: .string)
-        let content2 = monitor.readCurrentClipboard()
+        let content2 = await captureClipboard()
 
         // Hashes should be equal after normalization
         XCTAssertEqual(content1?.contentHash, content2?.contentHash)
     }
 
-    func testLineEndingNormalization() {
+    func testLineEndingNormalization() async {
+        monitor.setPollingInterval(5.0)
+        monitor.startMonitoring()
+
         // Windows line endings
         pasteboard.clearContents()
         pasteboard.setString("line1\r\nline2", forType: .string)
-        let content1 = monitor.readCurrentClipboard()
+        let content1 = await captureClipboard()
 
         // Unix line endings
         pasteboard.clearContents()
         pasteboard.setString("line1\nline2", forType: .string)
-        let content2 = monitor.readCurrentClipboard()
+        let content2 = await captureClipboard()
 
         // Should have same hash after normalization
         XCTAssertEqual(content1?.contentHash, content2?.contentHash)
     }
 
-    func testUnicodeLineSeparatorNormalization() {
+    func testUnicodeLineSeparatorNormalization() async {
+        monitor.setPollingInterval(5.0)
+        monitor.startMonitoring()
+
         // Unicode line separator
         pasteboard.clearContents()
         pasteboard.setString("line1\u{2028}line2", forType: .string)
-        let content1 = monitor.readCurrentClipboard()
+        let content1 = await captureClipboard()
 
         // Unix line endings
         pasteboard.clearContents()
         pasteboard.setString("line1\nline2", forType: .string)
-        let content2 = monitor.readCurrentClipboard()
+        let content2 = await captureClipboard()
 
         XCTAssertEqual(content1?.contentHash, content2?.contentHash)
     }
 
-    func testNBSPAndBOMNormalization() {
+    func testNBSPAndBOMNormalization() async {
+        monitor.setPollingInterval(5.0)
+        monitor.startMonitoring()
+
         pasteboard.clearContents()
         pasteboard.setString("\u{FEFF}\u{00A0}Normalized\u{00A0}\u{FEFF}", forType: .string)
-        let content1 = monitor.readCurrentClipboard()
+        let content1 = await captureClipboard()
 
         pasteboard.clearContents()
         pasteboard.setString("Normalized", forType: .string)
-        let content2 = monitor.readCurrentClipboard()
+        let content2 = await captureClipboard()
 
         XCTAssertEqual(content1?.contentHash, content2?.contentHash)
     }
 
-    func testRTFContentHashUsesNormalizedPlainTextNotRawPayload() throws {
+    func testRTFContentHashUsesNormalizedPlainTextNotRawPayload() async throws {
+        monitor.setPollingInterval(5.0)
+        monitor.startMonitoring()
+
         let plainText = "Duplicate rich text"
 
         let a1 = NSMutableAttributedString(string: plainText)
@@ -854,12 +944,12 @@ final class ClipboardMonitorTests: XCTestCase {
         pasteboard.clearContents()
         pasteboard.setString(plainText, forType: .string)
         pasteboard.setData(rtf1, forType: .rtf)
-        let content1 = monitor.readCurrentClipboard()
+        let content1 = await captureClipboard()
 
         pasteboard.clearContents()
         pasteboard.setString(plainText, forType: .string)
         pasteboard.setData(rtf2, forType: .rtf)
-        let content2 = monitor.readCurrentClipboard()
+        let content2 = await captureClipboard()
 
         XCTAssertEqual(content1?.type, .rtf)
         XCTAssertEqual(content2?.type, .rtf)
@@ -868,7 +958,10 @@ final class ClipboardMonitorTests: XCTestCase {
         XCTAssertEqual(content1?.contentHash, content2?.contentHash)
     }
 
-    func testHTMLContentHashUsesNormalizedPlainTextNotRawPayload() {
+    func testHTMLContentHashUsesNormalizedPlainTextNotRawPayload() async {
+        monitor.setPollingInterval(5.0)
+        monitor.startMonitoring()
+
         let plainText = "Hello <World>"
         let html1 = Data("<html><body><b>Hello <World></b></body></html>".utf8)
         let html2 = Data("<div style=\"color:red\">Hello <World></div>".utf8)
@@ -877,12 +970,12 @@ final class ClipboardMonitorTests: XCTestCase {
         pasteboard.clearContents()
         pasteboard.setString(plainText, forType: .string)
         pasteboard.setData(html1, forType: .html)
-        let content1 = monitor.readCurrentClipboard()
+        let content1 = await captureClipboard()
 
         pasteboard.clearContents()
         pasteboard.setString(plainText, forType: .string)
         pasteboard.setData(html2, forType: .html)
-        let content2 = monitor.readCurrentClipboard()
+        let content2 = await captureClipboard()
 
         XCTAssertEqual(content1?.type, .html)
         XCTAssertEqual(content2?.type, .html)
@@ -893,19 +986,25 @@ final class ClipboardMonitorTests: XCTestCase {
 
     // MARK: - Size Calculation Tests
 
-    func testSizeCalculation() {
+    func testSizeCalculation() async {
+        monitor.setPollingInterval(5.0)
+        monitor.startMonitoring()
+
         pasteboard.clearContents()
         pasteboard.setString("12345", forType: .string) // 5 bytes
 
-        let content = monitor.readCurrentClipboard()
+        let content = await captureClipboard()
         XCTAssertEqual(content?.sizeBytes, 5)
     }
 
-    func testUTF8SizeCalculation() {
+    func testUTF8SizeCalculation() async {
+        monitor.setPollingInterval(5.0)
+        monitor.startMonitoring()
+
         pasteboard.clearContents()
         pasteboard.setString("你好", forType: .string) // 6 bytes in UTF-8
 
-        let content = monitor.readCurrentClipboard()
+        let content = await captureClipboard()
         XCTAssertEqual(content?.sizeBytes, 6)
     }
 
@@ -1293,42 +1392,50 @@ final class ClipboardMonitorTests: XCTestCase {
         }, message: "Corrupt envelope should be discarded and cleaned up during replay")
     }
 
-    // MARK: - App Bundle ID Tests
 
-    func testAppBundleIDCapture() {
-        // Note: This tests the current frontmost app, which may vary
-        pasteboard.clearContents()
-        pasteboard.setString("Test", forType: .string)
+    func testVeryLongText() async {
+        monitor.setPollingInterval(5.0)
+        monitor.startMonitoring()
 
-        let content = monitor.readCurrentClipboard()
-
-        // In test environment, this will be XCTest runner
-        // Just verify it doesn't crash and returns something
-        print("Captured app bundle ID: \(content?.appBundleID ?? "nil")")
-    }
-
-    // MARK: - Edge Cases
-
-    func testVeryLongText() {
         let longText = String(repeating: "a", count: 100_000) // 100KB
 
         pasteboard.clearContents()
         pasteboard.setString(longText, forType: .string)
 
-        let content = monitor.readCurrentClipboard()
+        let content = await captureClipboard()
         XCTAssertEqual(content?.sizeBytes, 100_000)
         XCTAssertNotNil(content?.contentHash)
     }
 
-    func testSpecialCharacters() {
+    func testSpecialCharacters() async {
+        monitor.setPollingInterval(5.0)
+        monitor.startMonitoring()
+
         let specialText = "Hello 👋 World 🌍 \n\t\r Special \"quotes\" 'and' <html>"
 
         pasteboard.clearContents()
         pasteboard.setString(specialText, forType: .string)
 
-        let content = monitor.readCurrentClipboard()
+        let content = await captureClipboard()
         XCTAssertNotNil(content)
         XCTAssertTrue(content?.plainText.contains("👋") ?? false)
+    }
+
+    /// Drive one production poll and observe its emitted content, including durable image work.
+    private func captureClipboard(expectContent: Bool = true) async -> ClipboardMonitor.ClipboardContent? {
+        let received = XCTestExpectation(description: "Production capture emitted content")
+        received.isInverted = !expectContent
+        var result: ClipboardMonitor.ClipboardContent?
+        let stream = monitor.contentStream
+        let consumer = Task {
+            var iterator = stream.makeAsyncIterator()
+            result = await iterator.next()
+            if result != nil { received.fulfill() }
+        }
+        defer { consumer.cancel() }
+        await monitor.checkClipboard()
+        await fulfillment(of: [received], timeout: expectContent ? 3.0 : 0.15)
+        return result
     }
 
     private func makeSolidColorTIFFData() -> Data? {
