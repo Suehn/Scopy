@@ -14,15 +14,20 @@ verification:
   docs_validate: pass
   release_validate: pass
   release_policy: pass
-  build: pass_local_debug_source_0929bae
+  build: pass_local_debug_and_hosted_tagged_release_33956494915
   assets_verify: pass_atomic_renderer_and_katex_assets
-  test_unit: pass_local_standalone_xctest_833_executed_4_skipped_0_failures
-  test_strict: pass_local_strict_standalone_xctest_833_executed_4_skipped_0_failures
-  test_tsan: not_run_no_concurrency_change
+  test_unit: pass_hosted_833_executed_4_skipped_0_failures_run_33956492640
+  test_strict: pass_hosted_833_executed_4_skipped_0_failures_run_33956492640
+  test_tsan: pass_hosted_814_executed_4_skipped_0_failures_run_33956492649
   test_integration: not_run_no_schema_change
   test_performance: not_run_no_performance_claim
   snapshot_release: not_run_no_backend_performance_change
   frontend_profile_full: not_run_no_frontend_change
   unified_performance: not_run_no_performance_claim
-  test_ui_subset: pass_real_app_png_1080x774_table_bold_currency_math
-  publication: pending
+  test_ui_subset: pass_installed_release_png_identical_to_verified_candidate
+  release_commit: 2cfd4a0
+  release_workflow: https://github.com/Suehn/Scopy/actions/runs/33956494915
+  dmg_sha256: 1e4eb7329dcc7efbbf01f7756a18d52877abe685837c0ed99ee89eec3aacd70b
+  homebrew_casks: pass_repo_a143dea_and_manual_tap_987b30f
+  tap_automation: failed_403_token_write_permission_manual_sync_completed
+  installed_bundle: pass_Applications_Scopy_0_80_3_build_519_launched
