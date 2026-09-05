@@ -257,6 +257,70 @@ final class ClipboardMonitorTests: XCTestCase {
         XCTAssertEqual(content?.contentHash, ClipboardMonitor.computeHashStatic(Data(markdown.utf8)))
     }
 
+    func testCaptureClipboardPreservesCompactChineseTableAndInlineEmphasis() async {
+        let markdown = """
+        # 估值结果
+
+        这是**需要保留的加粗**结论。
+
+        | 情景 | 世界 | 判断 |
+        | --- | --- | --- |
+        | 悲观 | 利润回落 | 等待 |
+        | 基准 | 持续扩张 | 积极 |
+
+        公式：$x$。
+        """
+        let html = "<h1>估值结果</h1><p>这是<strong>需要保留的加粗</strong>结论。</p><table><tr><th>情景</th><th>世界</th><th>判断</th></tr><tr><td>悲观</td><td>利润回落</td><td>等待</td></tr><tr><td>基准</td><td>持续扩张</td><td>积极</td></tr></table><p>公式：<span class=\"katex\"><annotation encoding=\"application/x-tex\">x</annotation></span>。</p>"
+        monitor.setPollingInterval(5.0)
+        monitor.startMonitoring()
+        pasteboard.clearContents()
+        let item = NSPasteboardItem()
+        item.setString(markdown, forType: .string)
+        item.setData(Data(html.utf8), forType: .html)
+        pasteboard.writeObjects([item])
+
+        let content = await captureClipboard()
+        XCTAssertEqual(content?.plainText, markdown)
+        XCTAssertEqual(content?.rawData, Data(html.utf8))
+    }
+
+    func testCaptureClipboardRejectsUnrelatedChineseMarkdown() async {
+        let markdown = "# 园艺记录\n\n这是**花卉种植**计划，明天修剪枝叶并检查灌溉系统。"
+        let html = "<meta charset=\"utf-8\"><h1>估值结果</h1><p>公司收入增长，利润率提升，资本回报改善。</p>"
+        monitor.setPollingInterval(5.0)
+        monitor.startMonitoring()
+        pasteboard.clearContents()
+        let item = NSPasteboardItem()
+        item.setString(markdown, forType: .string)
+        item.setData(Data(html.utf8), forType: .html)
+        pasteboard.writeObjects([item])
+
+        let content = await captureClipboard()
+        XCTAssertTrue(content?.plainText.contains("公司收入增长") ?? false)
+        XCTAssertFalse(content?.plainText.contains("花卉种植") ?? true)
+        XCTAssertEqual(content?.rawData, Data(html.utf8))
+    }
+
+    func testCaptureClipboardPreservesChineseMarkdownTableWithKaTeXHTML() async throws {
+        let fixtures = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("Fixtures")
+        let markdown = try String(contentsOf: fixtures.appendingPathComponent("chatgpt_copy_chinese_table.md"), encoding: .utf8)
+            .trimmingCharacters(in: .newlines)
+        let html = try Data(contentsOf: fixtures.appendingPathComponent("chatgpt_copy_chinese_table.html"))
+        monitor.setPollingInterval(5.0)
+        monitor.startMonitoring()
+        pasteboard.clearContents()
+        let item = NSPasteboardItem()
+        item.setString(markdown, forType: .string)
+        item.setData(html, forType: .html)
+        pasteboard.writeObjects([item])
+
+        let content = await captureClipboard()
+        XCTAssertEqual(content?.plainText, markdown)
+        XCTAssertEqual(content?.rawData, html)
+        XCTAssertEqual(content?.type, .html)
+        XCTAssertEqual(content?.contentHash, ClipboardMonitor.computeHashStatic(Data(markdown.utf8)))
+    }
+
     func testCaptureClipboardHTMLPrefersRelatedSingleMarkdownLink() async {
         monitor.setPollingInterval(5.0)
         monitor.startMonitoring()

@@ -2206,7 +2206,15 @@ public final class ClipboardMonitor {
         var current = ""
 
         for character in sample.lowercased() {
-            if character.isLetter || character.isNumber {
+            // Ideographs do not need spaces between words. Rich extraction may join table cells
+            // or strip emphasis inside a sentence; neither should change their comparison units.
+            if character.unicodeScalars.contains(where: { $0.properties.isIdeographic }) {
+                if !current.isEmpty {
+                    tokens.append(current)
+                    current.removeAll(keepingCapacity: true)
+                }
+                tokens.append(String(character))
+            } else if character.isLetter || character.isNumber {
                 current.append(character)
             } else if !current.isEmpty {
                 tokens.append(current)
