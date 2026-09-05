@@ -1,6 +1,6 @@
-version: v0.80.3
+version: v0.80.4
 date: 2026-09-05
-release_doc: doc/releases/history/v0.80.3.md
+release_doc: doc/releases/history/v0.80.4.md
 release_index: doc/releases/README.md
 changelog_file: doc/releases/CHANGELOG.md
 profile_doc: null
@@ -9,25 +9,23 @@ spec_doc: doc/current/product-spec.md
 development_doc: doc/current/development-guide.md
 architecture_doc: doc/current/architecture.md
 last_verified_at: 2026-09-05
-summary: Preserve Chinese tables and emphasis when capturing ChatGPT copies
+summary: Render original Codex icons and preserve source artwork colors
 verification:
   docs_validate: pass
   release_validate: pass
-  release_policy: pass
-  build: pass_local_debug_and_hosted_tagged_release_33956494915
-  assets_verify: pass_atomic_renderer_and_katex_assets
-  test_unit: pass_hosted_833_executed_4_skipped_0_failures_run_33956492640
-  test_strict: pass_hosted_833_executed_4_skipped_0_failures_run_33956492640
-  test_tsan: pass_hosted_814_executed_4_skipped_0_failures_run_33956492649
+  release_policy: pass_15_tests
+  build: pass_local_debug_98a2af0
+  assets_verify: pass_node_155_atomic_assets_5048dd6b
+  test_unit: pass_local_834_executed_4_skipped_0_failures
+  test_strict: pass_local_834_executed_4_skipped_0_failures
+  test_tsan: not_run_no_actor_or_synchronization_change
   test_integration: not_run_no_schema_change
-  test_performance: not_run_no_performance_claim
   snapshot_release: not_run_no_backend_performance_change
-  frontend_profile_full: not_run_no_frontend_change
+  frontend_profile_full: pass_3_repeats_36_profiles_including_hover
   unified_performance: not_run_no_performance_claim
-  test_ui_subset: pass_installed_release_png_identical_to_verified_candidate
-  release_commit: 2cfd4a0
-  release_workflow: https://github.com/Suehn/Scopy/actions/runs/33956494915
-  dmg_sha256: 1e4eb7329dcc7efbbf01f7756a18d52877abe685837c0ed99ee89eec3aacd70b
-  homebrew_casks: pass_repo_a143dea_and_manual_tap_987b30f
-  tap_automation: failed_403_token_write_permission_manual_sync_completed
-  installed_bundle: pass_Applications_Scopy_0_80_3_build_519_launched
+  test_ui_subset: pass_2_real_app_png_exports_and_webkit_icon_geometry
+  release_commit: pending
+  release_workflow: pending
+  dmg_sha256: pending
+  homebrew_casks: pending
+  installed_bundle: pending
