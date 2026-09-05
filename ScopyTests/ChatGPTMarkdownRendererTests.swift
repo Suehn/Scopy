@@ -2,6 +2,18 @@ import XCTest
 import ScopyKit
 
 final class ChatGPTMarkdownRendererTests: XCTestCase {
+    func testDelimiterFixtureReachesSharedRuntimeWithoutRewritingMoneyOrCode() throws {
+        let url = try XCTUnwrap(Bundle(for: Self.self).url(forResource: "markdown_delimiter_repro", withExtension: "md"))
+        let source = try String(contentsOf: url, encoding: .utf8)
+        let html = MarkdownHTMLRenderer.render(markdown: source)
+        let literal = try String(decoding: JSONEncoder().encode(source), as: UTF8.self)
+
+        XCTAssertTrue(html.contains("window.ScopyUnifiedMarkdown.render(\(literal),"))
+        XCTAssertTrue(source.contains("这是**$E=mc^2$**对应的公式"))
+        XCTAssertTrue(source.contains("价格 $5 和 $10"))
+        XCTAssertTrue(source.contains("`**粗体** $x$`"))
+    }
+
     func testRendererBuildsOneLocalStandaloneDocument() {
         let html = MarkdownHTMLRenderer.render(markdown: "# Title\n\n\\(x + y\\)")
 

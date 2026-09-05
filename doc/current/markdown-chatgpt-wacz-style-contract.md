@@ -64,7 +64,7 @@ The relevant archived code paths are:
 | Concern | Extracted source | Captured behavior |
 | --- | --- | --- |
 | GFM deletion | `0193_chatgpt.com__cdn_assets_2afb55f3-lu3w05zggnq379p9.js.js` | `remark-gfm` uses `singleTilde: false`. |
-| Math delimiter policy | same chunk | `remark-math` uses `singleDollarTextMath: false`. |
+| Archived math delimiter policy | same chunk | `remark-math` uses `singleDollarTextMath: false`; the user-requested Scopy extension below supersedes this for current single-dollar input. |
 | Main KaTeX render | `0369_chatgpt.com__cdn_assets_92cd10e6-jjavjknqtcsnwvej.js.js` | `output: "html"`, `throwOnError: true`, `trust: false`; parse errors retry with `strict: "ignore"` and `throwOnError: false`. |
 | Math host semantics | `0235_chatgpt.com__cdn_assets_427e2db6-b5g2la6rlxwmly3m.js.js` | host has `role="math"`, `aria-label`, `data-math-source`, and `data-client-katex-layout`. |
 | Completed Markdown styling | `0601_chatgpt.com__cdn_assets_root-d7fyo9pd.css.css` | `.markdown.prose.markdown-new-styling` typography, spacing, wrapping, tables, tokens, and responsive thread-width code paths. |
@@ -232,7 +232,7 @@ Rich v2 exports remain true-color PNGs. Palette reduction is skipped whenever th
 | --- | --- |
 | ATX headings | `#` through `######`; Scopy repairs missing whitespace such as `#标题` outside code. Heading elements receive no generated `id`. |
 | Paragraphs and line breaks | CommonMark paragraphs; the local assistant-style path turns source newlines into `<br>` through `remark-breaks`. |
-| Emphasis | `*text*`/`_text_` become emphasis; `**text**`/`__text__` become strong text. |
+| Emphasis | CommonMark emphasis/strong nodes with the `remark-cjk-friendly/parseOnly` CJK delimiter extension: Chinese-adjacent punctuation and inline math can be enclosed in `*`/`**` without inserting spaces. |
 | Deletion | Only paired double tildes such as `~~text~~` create `<del>`; `~text~` remains literal. |
 | Inline code | Backtick spans block Markdown/math parsing inside them. Delimiter length follows CommonMark, including embedded backticks. |
 | Fenced code | Backtick or tilde fences; a four-backtick outer fence can contain a three-backtick example without splitting into two blocks. |
@@ -268,19 +268,32 @@ The renderer owns only IDs it generates. The safe-HTML subset accepts no source 
 - syntax highlighting, KaTeX, tasks, footnotes, and source citations remain trusted renderer-generated structures;
 - source is JSON-encoded into the standalone document, so `</script>` cannot break out of the payload script.
 
+### CJK emphasis adaptation (2026-09-05)
+
+CommonMark 0.31.2 delimiter flanking rules leave `这是**重点。**请注意` and `请看**“重要结论”**并继续` literal, and can leave `**` around adjacent math. Scopy uses the maintained [remark-cjk-friendly](https://github.com/tats-u/markdown-cjk-friendly) parsing extension within the same remark pipeline, rather than regular-expression replacement, HTML injection, or invisible-space insertion. This is a user-facing Scopy adaptation. ASCII-only emphasis rules, code islands, escapes and malformed whitespace are preserved; `** 加粗 **` is still not valid strong syntax.
+
 ## Formula Contract
 
 Supported explicit math forms:
 
 | Source form | Mode |
 | --- | --- |
+| `$...$` with the bounded rules below | inline |
 | `\(...\)` | inline |
 | `\[...\]` | display |
 | single-line `$$...$$` | inline |
 | standalone multiline `$$` / body / `$$` block | display |
 | fenced `math` block | display |
 
-A single-dollar pair such as `$20` or `$x + 1$` remains literal. Currency, shell variables (`$HOME`, `$PATH`), code spans, code fences, links, URLs, and file paths must never be reinterpreted as math.
+As requested on 2026-09-05, Scopy supports single-dollar inline math. This is a **Scopy behavior extension**, not a claim about the archived ChatGPT parser. `remarkScopyMath` reuses upstream `micromark-extension-math` tokenization and `remark-math` AST handling; it only restricts single-dollar acceptance. It does not insert a second parser or rewrite source dollars into another delimiter.
+
+- A pair must enclose nonempty content on one line, with no whitespace immediately inside either delimiter. `$x+1$`, `$NPV$`, and `中文$x$之后` render; `$ x $`, `$x $`, and unclosed `$x` remain literal.
+- The opening delimiter cannot immediately follow an ASCII letter/digit/underscore, slash, backslash, dot, or dollar. The closing delimiter cannot immediately precede an ASCII letter/digit/underscore, slash, backslash, or dollar. This deliberately conservative boundary protects amounts and path/identifier fragments while allowing CJK adjacency. For intentional math at an excluded boundary, use `\(...\)` or `$$...$$`.
+- `$5 and $10`, `US$5 to US$10`, `$19.99–$29.99`, `$HOME/$PATH`, code spans/fences/indented code, and link destinations remain ordinary source. A rejected currency opener must not consume a later valid formula. Formula syntax is allowed in link **labels**, not destinations.
+- Explicitly paired numeric text such as `$5$` is math. Arbitrary prose can be ambiguous; a literal dollar in an otherwise formula-shaped pair must be escaped as `\$` or placed in code. No parser can infer the author's intent from identical source characters.
+- The native Markdown eligibility heuristic accepts CJK-adjacent pairs so these inputs can reach the renderer; JavaScript remains the syntax authority. Render cache version is incremented when these semantics change.
+
+The whitespace/digit safeguards are informed by [Pandoc's `tex_math_dollars` rules](https://pandoc.org/MANUAL.html#extension-tex_math_dollars); Scopy's ASCII/path exclusions are stricter. The existing double-dollar, backslash, and fenced-math behavior is unchanged.
 
 KaTeX behavior:
 
@@ -429,7 +442,7 @@ PNG export builds the same HTML off the main thread, then owns WebKit work on th
 | Family | Required behavior |
 | --- | --- |
 | single vs double tilde | single literal; double deletion |
-| `$` currency/shell/math ambiguity | single-dollar literal; explicit backslash/double-dollar/fence math only |
+| `$` currency/shell/math ambiguity | bounded single-dollar pairs render; currency, escaped dollars, syntax islands and path/identifier fragments remain literal |
 | code syntax islands | no Markdown/math repair inside inline/fenced/indented code |
 | nested fences | longer outer fence preserves shorter inner fence text |
 | safe HTML | exact attribute-free paired subset becomes semantic nodes; valid complete comments disappear; details is interactive in preview and frozen open in export |

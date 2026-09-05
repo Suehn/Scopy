@@ -38,3 +38,17 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+## CJK-Friendly Markdown Parsing
+
+`remark-cjk-friendly` 2.3.1, `micromark-extension-cjk-friendly` 2.0.1,
+and `micromark-extension-cjk-friendly-util` are MIT licensed under the terms above.
+They include adaptations of remark-gfm and micromark utilities.
+
+Copyright (c) 2025 Tatsunori Uchino <tats.u@live.jp>
+
+Copyright (c) Titus Wormer <tituswormer@gmail.com>
+
+The transitive `get-east-asian-width` package is also MIT licensed under the same terms.
+
+Copyright (c) Sindre Sorhus <sindresorhus@gmail.com> (https://sindresorhus.com)

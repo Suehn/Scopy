@@ -10,9 +10,9 @@ test("ChatGPT contract: only paired double tildes create deletion", () => {
   assert.doesNotMatch(result.html, /<del>one tilde<\/del>/);
 });
 
-test("ChatGPT contract: single-dollar delimiters stay literal while explicit math renders", () => {
+test("Scopy extension: bounded single-dollar math joins the explicit math forms", () => {
   const result = render([
-    "Single-dollar $x + 1$ stays literal.",
+    "Single-dollar $x + 1$ now renders.",
     "",
     "Backslash inline: \\(a + b\\).",
     "",
@@ -23,8 +23,8 @@ test("ChatGPT contract: single-dollar delimiters stay literal while explicit mat
     "$$"
   ].join("\n"));
 
-  assert.match(result.html, /\$x \+ 1\$/);
-  assert.equal(result.metadata.mathCount, 3);
+  assert.match(result.html, /aria-label="x \+ 1"/);
+  assert.equal(result.metadata.mathCount, 4);
   assert.match(result.html, /<span class="katex">/);
   assert.match(result.html, /class="katex-display"/);
   assert.match(result.html, /aria-label="a \+ b"/);

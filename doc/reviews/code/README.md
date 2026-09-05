@@ -8,6 +8,8 @@ canonical: true
 
 # Code Reviews
 
+- [markdown-delimiters-2026-09-05.md](./markdown-delimiters-2026-09-05.md) — reproduced CJK emphasis/math boundaries, bounded single-dollar support, and real-app PNG comparison
+
 - [simplification-audit-2026-09-05.md](./simplification-audit-2026-09-05.md) — production capture/test unification, unused mechanisms, and skill/documentation deduplication
 
 - [code-audit-2026-09-05.md](./code-audit-2026-09-05.md) — dead-code cleanup, project-generation and worktree verification fixes, and PR/branch triage

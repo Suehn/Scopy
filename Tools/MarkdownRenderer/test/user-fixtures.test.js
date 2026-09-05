@@ -38,10 +38,13 @@ test("renders copied ChatGPT rich-surface prose as stable ordinary Markdown", ()
   assert.notEqual(sourceBytes.at(-1), 0x0d, "exact fixture must not gain a trailing CR");
 
   assert.ok(result.html.length > source.length);
-  assert.equal(result.metadata.mathCount, 0);
-  assert.equal(result.metadata.mathStrictCount, 0);
+  assert.equal(result.metadata.mathCount, 3);
+  assert.equal(result.metadata.mathStrictCount, 3);
   assert.equal(result.metadata.mathRelaxedCount, 0);
   assert.equal(result.metadata.mathErrorCount, 0);
+  for (const price of ["$79.99", "$209.99", "$398.00"]) {
+    assert.ok(result.html.includes(price), `price must stay literal: ${price}`);
+  }
   assert.deepEqual(result.metadata.warnings, []);
   assert.equal(countMatches(result.html, /class="scopy-source-citation-link"/g), 0);
   assert.equal(countMatches(result.html, /<img(?:\s|>)/g), 0);

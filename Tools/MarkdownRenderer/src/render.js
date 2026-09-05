@@ -3,7 +3,8 @@ import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 import rehypeStringify from "rehype-stringify";
 import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
-import remarkMath from "remark-math";
+import remarkCjkFriendly from "remark-cjk-friendly/parseOnly";
+import { remarkScopyMath } from "./remarkScopyMath.js";
 import remarkParse from "remark-parse";
 import remarkRehype from "remark-rehype";
 import { unified } from "unified";
@@ -47,8 +48,9 @@ function renderInternal(source, policy = {}) {
   const processor = unified()
     .use(remarkParse)
     .use(remarkGfm, { singleTilde: false })
+    .use(remarkCjkFriendly)
     .use(remarkBreaks)
-    .use(remarkMath, { singleDollarTextMath: false })
+    .use(remarkScopyMath)
     .use(remarkScopyLooseMathRepair, {
       policy: normalizedPolicy,
       metadata: repairMetadata

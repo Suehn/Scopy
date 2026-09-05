@@ -1,6 +1,16 @@
 import XCTest
 
 final class MarkdownDetectorTests: XCTestCase {
+    func testInlineDollarMathCanTouchChineseWithoutHidingPreviewEligibility() {
+        for source in ["公式$x$之后", "这是$E=mc^2$结论", "$NPV$", "价格 $5，公式 $x+1$之后"] {
+            XCTAssertTrue(MarkdownDetector.containsMath(source), source)
+            XCTAssertTrue(MarkdownDetector.isLikelyMarkdown(source), source)
+        }
+        for source in ["$ x $", "$x $", "$ x$", "$x\ny$", "/tmp/$x$/file", "US$5 to US$10"] {
+            XCTAssertFalse(MarkdownDetector.containsMath(source), source)
+        }
+    }
+
     func testContainsMathDoesNotTreatMultipleCurrencyDollarsAsMath() {
         XCTAssertFalse(MarkdownDetector.containsMath("Price is $5 and $6."))
         XCTAssertFalse(MarkdownDetector.containsMath("$5 $6 $7"))

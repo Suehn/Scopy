@@ -20,8 +20,8 @@ enum MarkdownHTMLRenderer {
         )
         guard !Task.isCancelled else { return cancelledOutput(context: context) }
         // The unified renderer is the delimiter authority for authored/ChatGPT Markdown. The
-        // protector is only needed while a scientific repair profile rewrites surrounding text;
-        // running it unconditionally used to normalize otherwise literal single-dollar content.
+        // protector is only needed while a scientific repair profile rewrites surrounding text.
+        // Authored dollar delimiters and currency reach the parser unchanged.
         let protected = context.policy.allowLatexInlineTextNormalize
             ? MathProtector.protectMath(in: normalizedMarkdown)
             : MathProtector.ProtectedMath(markdown: normalizedMarkdown, placeholders: [])

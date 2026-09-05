@@ -153,6 +153,14 @@ enum MarkdownDetector {
             }
 
             let afterStart = next
+            if i > text.startIndex {
+                let before = text[text.index(before: i)]
+                if isASCIIIdentifierCharacter(before) || "/\\.$".contains(before) {
+                    i = next
+                    scanned += 1
+                    continue
+                }
+            }
             guard let end = findClosingInlineDollar(in: text, from: afterStart, maxScanUTF16: maxScanUTF16 - scanned) else {
                 // Unclosed `$`: treat as plain text.
                 i = text.index(after: i)
@@ -161,8 +169,8 @@ enum MarkdownDetector {
             }
 
             let inner = text[afterStart..<end]
-            // Require some non-whitespace content to reduce false positives like `$ $`.
-            if inner.contains(where: { !$0.isWhitespace && !$0.isNewline }) {
+            if let first = inner.first, let last = inner.last,
+               !first.isWhitespace, !last.isWhitespace {
                 return true
             }
 
@@ -181,6 +189,7 @@ enum MarkdownDetector {
         var i = index
         var scanned = 0
         while i < text.endIndex, scanned < maxScanUTF16 {
+            if text[i].isNewline { return nil }
             if text[i] == "$" {
                 // Ignore escaped dollars.
                 if i > text.startIndex, text[text.index(before: i)] == "\\" {
@@ -201,6 +210,7 @@ enum MarkdownDetector {
                 if isClosingDollarBoundary(text, at: i) {
                     return i
                 }
+                return nil
             }
             i = text.index(after: i)
             scanned += 1
@@ -213,8 +223,12 @@ enum MarkdownDetector {
         guard after < text.endIndex else { return true }
         let ch = text[after]
         if ch.isWhitespace || ch.isNewline { return true }
-        if ch.isLetter || ch.isNumber { return false }
-        if ch == "_" { return false }
+        if isASCIIIdentifierCharacter(ch) || "/\\$".contains(ch) { return false }
         return true
+    }
+
+    private static func isASCIIIdentifierCharacter(_ character: Character) -> Bool {
+        character.unicodeScalars.allSatisfy { $0.value < 128 }
+            && (character.isLetter || character.isNumber || character == "_")
     }
 }
