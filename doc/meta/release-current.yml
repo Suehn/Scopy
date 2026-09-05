@@ -14,15 +14,20 @@ verification:
   docs_validate: pass
   release_validate: pass
   release_policy: pass
-  build: pass_local_debug_same_source_2058da3
+  build: pass_local_debug_and_tagged_hosted_release_33952516545
   assets_verify: pass_node_147_build_and_atomic_asset_verification
-  test_unit: pass_830_executed_4_skipped_0_failures_standalone_xctest_ide_initialization_blocked
-  test_strict: pass_strict_build_830_executed_4_skipped_0_failures_standalone_xctest_ide_initialization_blocked
-  test_tsan: not_rerun_locally_hosted_validation_pending
+  test_unit: pass_hosted_830_executed_4_skipped_0_failures_run_33952250183
+  test_strict: pass_hosted_strict_830_executed_4_skipped_0_failures_run_33952250183
+  test_tsan: pass_hosted_811_executed_4_skipped_0_failures_run_33952250182
   test_integration: not_run_no_schema_change_capture_parser_covered_by_unit_tests
   test_performance: not_run_no_performance_claim
   snapshot_release: not_run_no_backend_performance_change
   frontend_profile_full: not_run_no_frontend_performance_claim
   unified_performance: not_run_no_performance_claim
   bundled_pngquant: unchanged_from_v0_74_0_fork_256e081_engine_fddcf09
-  test_ui_subset: pass_real_app_before_after_png_delimiter_fixture
+  test_ui_subset: pass_installed_release_png_identical_to_verified_candidate
+  release_commit: 37e7417436b03617f3c9507c78a4e3fbf5237c2e
+  release_workflow: https://github.com/Suehn/Scopy/actions/runs/33952516545
+  dmg_sha256: 086ddf8efad4980c56977979ddfea7bd6ad0c2c83068fb5387b1cf6bc0bc942a
+  homebrew_casks: pass_repo_7a980b3_and_tap_8fc2464_match_published_dmg
+  installed_bundle: pass_Applications_Scopy_0_80_2_build_514_launched
