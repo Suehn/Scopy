@@ -1,0 +1,80 @@
+{
+  "application": "Codex",
+  "version": "26.901.41600",
+  "build": "7982",
+  "extractedOn": "2026-09-05",
+  "extraction": "Static original preset SVG bodies and isolated JSX path declarations; original geometry and intrinsic viewBoxes preserved. No bundle code executed.",
+  "rights": "Original OpenAI application artwork. Not covered by the Phosphor MIT license; extraction does not establish redistribution rights.",
+  "definitions": {
+    "image": {
+      "definition": "rii=GN(photo-light-16)",
+      "source": "app-initial-86767c3d23e5.js",
+      "sourceSha256": "fb72076ee44f6596f8dafa9a3effe37a3527a87db21fde8b4042233957b554bb",
+      "semanticEvidence": "Named original icon preset in the installed Codex app bundle; Scopy selects this semantic icon. No claim that Scopy rich-card wrappers equal Codex wrappers.",
+      "svgSha256": "ffb49c6966a7cab7dc80a311f88b966248cf660ed4c94bb23d09f650ceeb4f4c",
+      "viewBox": "0 0 16 16",
+      "intrinsicWidth": "16",
+      "intrinsicHeight": "16"
+    },
+    "play-fill": {
+      "definition": "xii=GN(play-light-20)",
+      "source": "app-initial-86767c3d23e5.js",
+      "sourceSha256": "fb72076ee44f6596f8dafa9a3effe37a3527a87db21fde8b4042233957b554bb",
+      "semanticEvidence": "Named original play-light-20 preset: the original path has an inner cutout (outline triangle). The Scopy legacy key play-fill is retained for integration, but this source is not a filled triangle and no original filled-play preset was identified.",
+      "svgSha256": "b7ddbbb18434ed5c3f424cad496dce9efcd46b9501036baa527f324ed13de7c0",
+      "viewBox": "0 0 20 20",
+      "intrinsicWidth": "20",
+      "intrinsicHeight": "20"
+    },
+    "close": {
+      "definition": "qN=GN(xmark-md-light-16)",
+      "source": "app-initial-86767c3d23e5.js",
+      "sourceSha256": "fb72076ee44f6596f8dafa9a3effe37a3527a87db21fde8b4042233957b554bb",
+      "semanticEvidence": "Named original icon preset in the installed Codex app bundle; Scopy selects this semantic icon. No claim that Scopy rich-card wrappers equal Codex wrappers.",
+      "svgSha256": "75363f60a52dcd0ba54cd271f0653aaa0e02bef9d3e04c46243c2bd42af50cad",
+      "viewBox": "0 0 16 16",
+      "intrinsicWidth": "16",
+      "intrinsicHeight": "16"
+    },
+    "caret-left": {
+      "definition": "Yei=GN(chevron-left-md-light-16)",
+      "source": "app-initial-86767c3d23e5.js",
+      "sourceSha256": "fb72076ee44f6596f8dafa9a3effe37a3527a87db21fde8b4042233957b554bb",
+      "semanticEvidence": "Named original icon preset in the installed Codex app bundle; Scopy selects this semantic icon. No claim that Scopy rich-card wrappers equal Codex wrappers.",
+      "svgSha256": "5d3bf912992c856c4ad501e2dad79b0dbbdb73d82204404e1dac6e2f000be419",
+      "viewBox": "0 0 16 16",
+      "intrinsicWidth": "16",
+      "intrinsicHeight": "16"
+    },
+    "caret-right": {
+      "definition": "Zei=GN(chevron-right-md-light-16)",
+      "source": "app-initial-86767c3d23e5.js",
+      "sourceSha256": "fb72076ee44f6596f8dafa9a3effe37a3527a87db21fde8b4042233957b554bb",
+      "semanticEvidence": "Named original icon preset in the installed Codex app bundle; Scopy selects this semantic icon. No claim that Scopy rich-card wrappers equal Codex wrappers.",
+      "svgSha256": "309701f4cfad0b7817d7d05e9a04fc805395f48dca435105ea771428182ac427",
+      "viewBox": "0 0 16 16",
+      "intrinsicWidth": "16",
+      "intrinsicHeight": "16"
+    },
+    "star-fill": {
+      "definition": "default JSX svg component",
+      "source": "StarFilled-e6ba126b821e.js",
+      "sourceSha256": "51ed1c7f95e89623755072e75f7779d7cb8c6d4133c8845386159e9446e747e4",
+      "semanticEvidence": "app-primary-139889e10fbd.js lazy icon registry maps star to this original component. Scopy uses it for the matching visual meaning; exact ratings/map-card usage was not established.",
+      "svgSha256": "cc0292236d3eb92b2af1c8237b403862f4efa9fe1a31ce7827e40dd266ee6fb2",
+      "viewBox": "0 0 20 20",
+      "intrinsicWidth": "1em",
+      "intrinsicHeight": "1em"
+    },
+    "map-pin": {
+      "definition": "default JSX svg component",
+      "source": "MapPinAltFill-2c48127e228d.js",
+      "sourceSha256": "a23c50109b2b1c4e0089d01a2d9ecdb835b31c2c8908af1ca6a5db285ae452ca",
+      "semanticEvidence": "app-primary-139889e10fbd.js lazy icon registry maps mappin to this original component. Scopy uses it for the matching visual meaning; exact ratings/map-card usage was not established.",
+      "svgSha256": "7d6fd33712e7e4d1ab4cf69746d821fe02d552ce362fcd2ac3e8c4559391b60a",
+      "viewBox": "0 0 20 20",
+      "intrinsicWidth": "1em",
+      "intrinsicHeight": "1em"
+    }
+  }
+}

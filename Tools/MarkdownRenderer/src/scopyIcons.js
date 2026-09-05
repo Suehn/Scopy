@@ -1,111 +1,18 @@
-// Icon path data is copied unchanged from @phosphor-icons/core 2.1.1.
-// Source files and the MIT license are recorded in ../THIRD_PARTY_NOTICES.md.
+import assets from "./codexControlIconAssets.json" with { type: "json" };
 
-const ICONS = Object.freeze({
-  "file-text": Object.freeze({
-    className: "scopy-icon--file-text",
-    path: "M213.66,82.34l-56-56A8,8,0,0,0,152,24H56A16,16,0,0,0,40,40V216a16,16,0,0,0,16,16H200a16,16,0,0,0,16-16V88A8,8,0,0,0,213.66,82.34ZM160,51.31,188.69,80H160ZM200,216H56V40h88V88a8,8,0,0,0,8,8h48V216Zm-32-80a8,8,0,0,1-8,8H96a8,8,0,0,1,0-16h64A8,8,0,0,1,168,136Zm0,32a8,8,0,0,1-8,8H96a8,8,0,0,1,0-16h64A8,8,0,0,1,168,168Z"
-  }),
-  "javascript-badge": Object.freeze({
-    className: "scopy-icon--javascript-badge",
-    path: "M213.66,82.34l-56-56A8,8,0,0,0,152,24H56A16,16,0,0,0,40,40v76a4,4,0,0,0,4,4H164a4,4,0,0,1,4,4V228a4,4,0,0,0,4,4h28a16,16,0,0,0,16-16V88A8,8,0,0,0,213.66,82.34ZM152,88V44l44,44Zm-4.19,108.31a20.82,20.82,0,0,1-9.19,15.23C133.43,215,127,216,121.13,216a61.34,61.34,0,0,1-15.19-2,8,8,0,0,1,4.31-15.41c4.38,1.2,15,2.7,19.55-.36.88-.59,1.83-1.52,2.14-3.93.34-2.67-.72-4.1-12.78-7.59-9.35-2.7-25-7.23-23-23.11a20.58,20.58,0,0,1,9-14.95c11.85-8,30.72-3.31,32.84-2.76a8,8,0,0,1-4.07,15.48c-4.49-1.17-15.23-2.56-19.83.56a4.57,4.57,0,0,0-2,3.67c-.11.9-.13,1.09,1.12,1.9,2.31,1.49,6.45,2.68,10.45,3.84C133.49,174.17,150,179,147.81,196.31ZM80,152v37.41c0,14.22-11.18,26.26-25.41,26.58A26,26,0,0,1,28,190.37,8.17,8.17,0,0,1,35.31,182,8,8,0,0,1,44,190.22a8.89,8.89,0,0,0,4,8c7.85,4.82,16-.75,16-8.2V152.27A8.17,8.17,0,0,1,71.47,144,8,8,0,0,1,80,152Z"
-  }),
-  code: Object.freeze({
-    className: "scopy-icon--code",
-    path: "M69.12,94.15,28.5,128l40.62,33.85a8,8,0,1,1-10.24,12.29l-48-40a8,8,0,0,1,0-12.29l48-40a8,8,0,0,1,10.24,12.3Zm176,27.7-48-40a8,8,0,1,0-10.24,12.3L227.5,128l-40.62,33.85a8,8,0,1,0,10.24,12.29l48-40a8,8,0,0,0,0-12.29ZM162.73,32.48a8,8,0,0,0-10.25,4.79l-64,176a8,8,0,0,0,4.79,10.26A8.14,8.14,0,0,0,96,224a8,8,0,0,0,7.52-5.27l64-176A8,8,0,0,0,162.73,32.48Z"
-  }),
-  image: Object.freeze({
-    className: "scopy-icon--image",
-    path: "M216,40H40A16,16,0,0,0,24,56V200a16,16,0,0,0,16,16H216a16,16,0,0,0,16-16V56A16,16,0,0,0,216,40Zm0,16V158.75l-26.07-26.06a16,16,0,0,0-22.63,0l-20,20-44-44a16,16,0,0,0-22.62,0L40,149.37V56ZM40,172l52-52,80,80H40Zm176,28H194.63l-36-36,20-20L216,181.38V200ZM144,100a12,12,0,1,1,12,12A12,12,0,0,1,144,100Z"
-  }),
-  "star-fill": Object.freeze({
-    className: "scopy-icon--star-fill",
-    path: "M234.29,114.85l-45,38.83L203,211.75a16.4,16.4,0,0,1-24.5,17.82L128,198.49,77.47,229.57A16.4,16.4,0,0,1,53,211.75l13.76-58.07-45-38.83A16.46,16.46,0,0,1,31.08,86l59-4.76,22.76-55.08a16.36,16.36,0,0,1,30.27,0l22.75,55.08,59,4.76a16.46,16.46,0,0,1,9.37,28.86Z"
-  }),
-  "map-pin": Object.freeze({
-    className: "scopy-icon--map-pin",
-    path: "M128,16a88.1,88.1,0,0,0-88,88c0,75.3,80,132.17,83.41,134.55a8,8,0,0,0,9.18,0C136,236.17,216,179.3,216,104A88.1,88.1,0,0,0,128,16Zm0,56a32,32,0,1,1-32,32A32,32,0,0,1,128,72Z"
-  }),
-  "play-fill": Object.freeze({
-    className: "scopy-icon--play-fill",
-    path: "M240,128a15.74,15.74,0,0,1-7.6,13.51L88.32,229.65a16,16,0,0,1-16.2.3A15.86,15.86,0,0,1,64,216.13V39.87a15.86,15.86,0,0,1,8.12-13.82,16,16,0,0,1,16.2.3L232.4,114.49A15.74,15.74,0,0,1,240,128Z"
-  }),
-  "external-link": Object.freeze({
-    className: "scopy-icon--external-link",
-    path: "M200,64V168a8,8,0,0,1-16,0V83.31L69.66,197.66a8,8,0,0,1-11.32-11.32L172.69,72H88a8,8,0,0,1,0-16H192A8,8,0,0,1,200,64Z"
-  }),
-  "puzzle-piece": Object.freeze({
-    className: "scopy-icon--puzzle-piece",
-    path: "M220.27,158.54a8,8,0,0,0-7.7-.46,20,20,0,1,1,0-36.16A8,8,0,0,0,224,114.69V72a16,16,0,0,0-16-16H171.78a35.36,35.36,0,0,0,.22-4,36.11,36.11,0,0,0-11.36-26.24,36,36,0,0,0-60.55,23.62,36.56,36.56,0,0,0,.14,6.62H64A16,16,0,0,0,48,72v32.22a35.36,35.36,0,0,0-4-.22,36.12,36.12,0,0,0-26.24,11.36,35.7,35.7,0,0,0-9.69,27,36.08,36.08,0,0,0,33.31,33.6,35.68,35.68,0,0,0,6.62-.14V208a16,16,0,0,0,16,16H208a16,16,0,0,0,16-16V165.31A8,8,0,0,0,220.27,158.54ZM208,208H64V165.31a8,8,0,0,0-11.43-7.23,20,20,0,1,1,0-36.16A8,8,0,0,0,64,114.69V72h46.69a8,8,0,0,0,7.23-11.43,20,20,0,1,1,36.16,0A8,8,0,0,0,161.31,72H208v32.23a35.68,35.68,0,0,0-6.62-.14A36,36,0,0,0,204,176a35.36,35.36,0,0,0,4-.22Z"
-  }),
-  globe: Object.freeze({
-    className: "scopy-icon--globe",
-    path: "M128,24h0A104,104,0,1,0,232,128,104.12,104.12,0,0,0,128,24Zm88,104a87.61,87.61,0,0,1-3.33,24H174.16a157.44,157.44,0,0,0,0-48h38.51A87.61,87.61,0,0,1,216,128ZM102,168H154a115.11,115.11,0,0,1-26,45A115.27,115.27,0,0,1,102,168Zm-3.9-16a140.84,140.84,0,0,1,0-48h59.88a140.84,140.84,0,0,1,0,48ZM40,128a87.61,87.61,0,0,1,3.33-24H81.84a157.44,157.44,0,0,0,0,48H43.33A87.61,87.61,0,0,1,40,128ZM154,88H102a115.11,115.11,0,0,1,26-45A115.27,115.27,0,0,1,154,88Zm52.33,0H170.71a135.28,135.28,0,0,0-22.3-45.6A88.29,88.29,0,0,1,206.37,88ZM107.59,42.4A135.28,135.28,0,0,0,85.29,88H49.63A88.29,88.29,0,0,1,107.59,42.4ZM49.63,168H85.29a135.28,135.28,0,0,0,22.3,45.6A88.29,88.29,0,0,1,49.63,168Zm98.78,45.6a135.28,135.28,0,0,0,22.3-45.6h35.66A88.29,88.29,0,0,1,148.41,213.6Z"
-  }),
-  close: Object.freeze({
-    className: "scopy-icon--close",
-    path: "M205.66,194.34a8,8,0,0,1-11.32,11.32L128,139.31,61.66,205.66a8,8,0,0,1-11.32-11.32L116.69,128,50.34,61.66A8,8,0,0,1,61.66,50.34L128,116.69l66.34-66.35a8,8,0,0,1,11.32,11.32L139.31,128Z"
-  }),
-  "caret-left": Object.freeze({
-    className: "scopy-icon--caret-left",
-    path: "M165.66,202.34a8,8,0,0,1-11.32,11.32l-80-80a8,8,0,0,1,0-11.32l80-80a8,8,0,0,1,11.32,11.32L91.31,128Z"
-  }),
-  "caret-right": Object.freeze({
-    className: "scopy-icon--caret-right",
-    path: "M181.66,133.66l-80,80a8,8,0,0,1-11.32-11.32L164.69,128,90.34,53.66a8,8,0,0,1,11.32-11.32l80,80A8,8,0,0,1,181.66,133.66Z"
-  }),
-  "caret-up-down": Object.freeze({
-    className: "scopy-icon--caret-up-down",
-    path: "M181.66,170.34a8,8,0,0,1,0,11.32l-48,48a8,8,0,0,1-11.32,0l-48-48a8,8,0,0,1,11.32-11.32L128,212.69l42.34-42.35A8,8,0,0,1,181.66,170.34Zm-96-84.68L128,43.31l42.34,42.35a8,8,0,0,0,11.32-11.32l-48-48a8,8,0,0,0-11.32,0l-48,48A8,8,0,0,0,85.66,85.66Z"
-  })
-});
-
-const ALIASES = Object.freeze({
-  document: "file-text",
-  "file-text": "file-text",
-  javascript: "javascript-badge",
-  "javascript-badge": "javascript-badge",
-  code: "code",
-  image: "image",
-  "star-fill": "star-fill",
-  "map-pin": "map-pin",
-  "play-fill": "play-fill",
-  "external-link": "external-link",
-  "puzzle-piece": "puzzle-piece",
-  globe: "globe",
-  close: "close",
-  "caret-left": "caret-left",
-  "caret-right": "caret-right",
-  "caret-up-down": "caret-up-down"
-});
-
-export const SCOPY_ICON_NAMES = Object.freeze(Object.keys(ALIASES));
+// Original Codex artwork; the currency selector retains its existing Phosphor
+// control because no equivalent combined icon was found in the installed app.
+const currencyChevronPath = 'M181.66,170.34a8,8,0,0,1,0,11.32l-48,48a8,8,0,0,1-11.32,0l-48-48a8,8,0,0,1,11.32-11.32L128,212.69l42.34-42.35A8,8,0,0,1,181.66,170.34Zm-96-84.68L128,43.31l42.34,42.35a8,8,0,0,0,11.32-11.32l-48-48a8,8,0,0,0-11.32,0l-48,48A8,8,0,0,0,85.66,85.66Z';
+export const SCOPY_ICON_NAMES = Object.freeze([...Object.keys(assets.icons), "caret-up-down"]);
 
 export function scopyIcon(name) {
-  const canonicalName = ALIASES[String(name || "")];
-  const icon = canonicalName ? ICONS[canonicalName] : null;
-  if (!icon) {
-    throw new TypeError(`Unknown Scopy icon: ${String(name)}`);
-  }
-  return {
-    type: "element",
-    tagName: "svg",
-    properties: {
-      className: ["scopy-icon", icon.className],
-      viewBox: "0 0 256 256",
-      width: 16,
-      height: 16,
-      ariaHidden: "true",
-      focusable: "false"
-    },
-    children: [{
-      type: "element",
-      tagName: "path",
-      properties: {
-        d: icon.path,
-        fill: "currentColor"
-      },
-      children: []
-    }]
+  if (name === "caret-up-down") return {
+    type: "element", tagName: "svg",
+    properties: { className: ["scopy-icon", "scopy-icon--caret-up-down"], viewBox: "0 0 256 256", width: 16, height: 16, ariaHidden: "true", focusable: "false" },
+    children: [{ type: "element", tagName: "path", properties: { d: currencyChevronPath, fill: "currentColor" }, children: [] }]
   };
+  if (!Object.hasOwn(assets.icons, name)) throw new Error(`Unknown Scopy icon: ${name}`);
+  const icon = JSON.parse(JSON.stringify(assets.icons[name]));
+  icon.properties = { className: ["scopy-icon", `scopy-icon--${name}`], ...icon.properties, ariaHidden: "true", focusable: "false" };
+  return icon;
 }

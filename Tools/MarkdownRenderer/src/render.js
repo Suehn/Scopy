@@ -15,7 +15,7 @@ import {
   scopySafeHTMLDetailsHandler,
   scopySafeHTMLInlineHandler
 } from "./remarkScopySafeHTML.js";
-import { scopyIcon } from "./scopyIcons.js";
+import { codexFileIcon, codexPluginIcon, localFileKind } from "./scopyCodexIcons.js";
 import { scopySourceIcon } from "./scopySourceIcon.js";
 import { preprocessBackslashMath } from "./scopyBackslashMathPreprocessor.js";
 import { remarkScopyImageGroups } from "./remarkScopyImageGroups.js";
@@ -112,7 +112,7 @@ const scopySanitizeSchema = {
   clobberPrefix: "",
   protocols: {
     ...defaultSchema.protocols,
-    href: ["http", "https", "plugin"],
+    href: ["http", "https", "plugin", "app"],
     src: [...(defaultSchema.protocols?.src || []), "data"]
   },
   tagNames: [...new Set([
@@ -231,7 +231,7 @@ const scopySanitizeSchema = {
       ["dataScopyLightboxTitle", "true"],
       "ariaLive"
     ],
-    path: ["className", "d", "fill", "stroke", "strokeWidth", "strokeLinecap", "strokeLinejoin", "opacity"],
+    path: ["className", "d", "fillRule", "clipRule", "fill", "stroke", "strokeWidth", "strokeLinecap", "strokeLinejoin", "opacity"],
     polygon: ["points", "fill", "opacity"],
     polyline: ["points", "fill", "stroke", "strokeWidth"],
     section: [
@@ -271,7 +271,7 @@ const scopySanitizeSchema = {
       ...(defaultSchema.attributes?.sup || []),
       ["className", "scopy-safe-html-sup"]
     ],
-    svg: ["className", "viewBox", "width", "height", "role", "ariaLabel", "ariaHidden", "focusable"],
+    svg: ["className", ["fill", "none", "currentColor"], "viewBox", "width", "height", "role", "ariaLabel", "ariaHidden", "focusable"],
     text: ["className", "x", "y", "dx", "dy", "textAnchor", "dominantBaseline"],
     time: ["className", "dateTime"],
     u: [["className", "scopy-safe-html-u"]],
@@ -314,6 +314,7 @@ function rehypeScopyLinkSemantics(enrichment) {
   return function transformer(tree) {
     // Bound emitted data, including repeated occurrences of the same link.
     let remainingFaviconCharacters = 512 * 1024;
+    let fileIconOccurrence = 0;
     visitElements(tree, (node) => {
       if (!node || node.tagName !== "a" || !node.properties) {
         return;
@@ -366,19 +367,19 @@ function rehypeScopyLinkSemantics(enrichment) {
           delete node.properties.href;
           node.properties.ariaDisabled = "true";
         }
-        const icon = scopyIcon(iconNameForFileKind(kind));
+        const icon = codexFileIcon(kind, fileIconOccurrence++);
         icon.properties.className.push("scopy-file-icon");
         node.children = [
-          icon,
+          elementNode("span", { className: ["scopy-mention-icon"] }, [icon]),
           elementNode("span", { className: ["scopy-link__label"] }, node.children || [])
         ];
         return;
       }
-      className.push("scopy-link", href.startsWith("plugin:") ? "scopy-link--plugin" : "scopy-link--inert");
+      className.push("scopy-link", /^(?:plugin:|app:\/\/)/.test(href) ? "scopy-link--plugin" : "scopy-link--inert");
       node.properties.className = className;
-      if (href.startsWith("plugin:")) {
+      if (/^(?:plugin:|app:\/\/)/.test(href)) {
         node.properties.ariaDisabled = "true";
-        node.children = [scopyIcon("puzzle-piece"),
+        node.children = [elementNode("span", { className: ["scopy-mention-icon"] }, [codexPluginIcon(href, fileIconOccurrence++)]),
           elementNode("span", { className: ["scopy-link__label"] }, node.children || [])];
       }
     });
@@ -405,24 +406,6 @@ function isLocalPathTarget(value) {
     value.startsWith("./") ||
     value.startsWith("../") ||
     /^[^?#]+(?:\/[^?#]+)+(?::\d+(?::\d+)?)?(?:[?#].*)?$/u.test(value);
-}
-
-function localFileKind(value) {
-  const clean = String(value).split(/[?#]/, 1)[0].replace(/:\d+(?::\d+)?$/, "").toLowerCase();
-  if (/\.(?:md|markdown|txt|rtf)$/.test(clean)) return "document";
-  if (/\.(?:js|jsx|mjs|cjs)$/.test(clean)) return "javascript";
-  if (/\.(?:png|jpe?g|gif|webp|svg|heic|tiff?)$/.test(clean)) return "image";
-  if (/\.(?:swift|html?|css|json|py|ts|tsx|java|kt|kts|c|cc|cpp|h|hpp|rs|go|rb|php|sh|zsh|bash|sql|ya?ml|toml|xml)$/.test(clean)) {
-    return "code";
-  }
-  return "document";
-}
-
-function iconNameForFileKind(kind) {
-  if (kind === "javascript") return "javascript";
-  if (kind === "image") return "image";
-  if (kind === "code") return "code";
-  return "document";
 }
 
 function scopyFileURL(path) {

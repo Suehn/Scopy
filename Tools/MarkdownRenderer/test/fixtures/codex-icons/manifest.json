@@ -1,0 +1,376 @@
+{
+  "provenance": {
+    "application": "Codex",
+    "bundleIdentifier": "com.openai.codex",
+    "version": "26.901.41600",
+    "build": "7982",
+    "extractedOn": "2026-09-05",
+    "sourceBundle": "app-initial-86767c3d23e5.js",
+    "sourceSha256": "fb72076ee44f6596f8dafa9a3effe37a3527a87db21fde8b4042233957b554bb",
+    "extraction": "Static isolated SVG JSX expressions only; original geometry, colors, gradients, viewBox and intrinsic dimensions preserved. JSX Fragment flattened without visual alteration.",
+    "resolver": "HV -> _5r -> b5r; video and audio are explicit Scopy adapters from attachment icons LVr/NVr, not HV mappings.",
+    "rights": "Original OpenAI application artwork. Not covered by the Phosphor MIT license; extraction does not establish redistribution rights."
+  },
+  "entries": {
+    "artifactDocument": {
+      "symbol": "r8r",
+      "role": "HV file-type resolver",
+      "sourceRange": {
+        "start": 4828141,
+        "end": 4831352,
+        "unit": "UTF-16 code units"
+      },
+      "expressionSha256": "621453dde69530b36fa1cebd0f75eb984c1f82ff4f7caec86d8a7167e4e32403",
+      "nodeSha256": "ccacd08a22c5216214b430c395d19e48f898fae4bc416946fe983643e54e4a13",
+      "svgSha256": "e00341bb6d23a7802339198fbea1eeb449874c52f7dcd85fcd2ff697b4403c1a"
+    },
+    "code": {
+      "symbol": "t8r",
+      "role": "HV file-type resolver",
+      "sourceRange": {
+        "start": 4826975,
+        "end": 4828103,
+        "unit": "UTF-16 code units"
+      },
+      "expressionSha256": "643ee980d7b6e33cd23e8503bc32b861ef53c6f63c802980c8837ef3a2d7d755",
+      "nodeSha256": "82646acf9483edf03641804403277043eb148025d0c9ed7bc3a3645d4205cc50",
+      "svgSha256": "575f3b945d9330263bc84b9bae33fcf556af674d4de4ab7a58e252cb465eead0"
+    },
+    "document": {
+      "symbol": "g8r",
+      "role": "HV file-type resolver",
+      "sourceRange": {
+        "start": 4840369,
+        "end": 4843475,
+        "unit": "UTF-16 code units"
+      },
+      "expressionSha256": "6550962cab804112850dc700ed0f2987556bdd498bd7c1dbce623f9ed9cab6b6",
+      "nodeSha256": "5ac98396f36a5d00d730680ce9d851cbf5691923ee62e259bc2afc4ee8d0ae6d",
+      "svgSha256": "24b71e4c9da314c6e6722b5c43bf3f6ab3aa6edbd26ea8051b2edadac984cb00"
+    },
+    "file": {
+      "symbol": "y8r",
+      "role": "HV file-type resolver",
+      "sourceRange": {
+        "start": 4843515,
+        "end": 4846229,
+        "unit": "UTF-16 code units"
+      },
+      "expressionSha256": "7f4d2886dabb20928a18c884843dc1d6d1913b7292d64cae0f44bf0a80126d17",
+      "nodeSha256": "dec554ea552d852b22b04c7d77d32f3c882730d2f16acb81bea7976b766e0974",
+      "svgSha256": "755400bff3b2b4500c14b960ee661b857802d63a759b0129ceec2eb5e48af50a"
+    },
+    "css": {
+      "symbol": "w8r",
+      "role": "HV file-type resolver",
+      "sourceRange": {
+        "start": 4849289,
+        "end": 4849967,
+        "unit": "UTF-16 code units"
+      },
+      "expressionSha256": "1a046fa676f2403b185136d59d2b30e735cebd88696c76e7510044ac6e4331f8",
+      "nodeSha256": "28e9c6667c472cfe6be7f31d61ec4d0f4f8daa4819e872e1fbaf6a331371e8a4",
+      "svgSha256": "c34f0c565648651db46189d6a47b4f4bbb4682be8a0009a913953944ca64c5ca"
+    },
+    "cplusplus": {
+      "symbol": "Q6r",
+      "role": "HV file-type resolver",
+      "sourceRange": {
+        "start": 4825700,
+        "end": 4826935,
+        "unit": "UTF-16 code units"
+      },
+      "expressionSha256": "dbc202c3cd52bede221b3ff75a5f7965cdc8867f7d1ec8b5e15c871e2e7fd55d",
+      "nodeSha256": "e8b8bfc3ec1a1a85077c2b1b33747f030e94690e89413d82dd16838864fb2d97",
+      "svgSha256": "604b18faca7adc6a87966e2b772f716ea9a75627af3914f6be96330f76c1134a"
+    },
+    "folder": {
+      "symbol": "S8r",
+      "role": "HV file-type resolver",
+      "sourceRange": {
+        "start": 4846269,
+        "end": 4849251,
+        "unit": "UTF-16 code units"
+      },
+      "expressionSha256": "add2e2b7061f95349715fd8fda1b7077a2f452fa8e4e863884d1331d25af90cd",
+      "nodeSha256": "88b22f43d40003094da31397d49ff9aa8c6581e5d370bc5ef6fca345c5b92e1d",
+      "svgSha256": "e9a599011e4eedf52dac975a51af697df2321defa1da752331a0a05b4019d263"
+    },
+    "html": {
+      "symbol": "A8r",
+      "role": "HV file-type resolver",
+      "sourceRange": {
+        "start": 4850912,
+        "end": 4852041,
+        "unit": "UTF-16 code units"
+      },
+      "expressionSha256": "e9bb0c94d079269261be711abc55fe2098b254bda801db502cbf4680ff1b1e29",
+      "nodeSha256": "6634989622c7d977eff46cbe6524e451f298825a11072553e114602d19ff1aac",
+      "svgSha256": "fa7f395f3080adfb0df5f96ca0dfec032e3a9478945c66963db1ade53cbb7bfa"
+    },
+    "java": {
+      "symbol": "I8r",
+      "role": "HV file-type resolver",
+      "sourceRange": {
+        "start": 4855122,
+        "end": 4855800,
+        "unit": "UTF-16 code units"
+      },
+      "expressionSha256": "a10b285d9a5483f54baac0a67222c8b2e9809125f547924fe302ecf53fc3471e",
+      "nodeSha256": "450ea739bde17047b562a3a54650f971e5376ffc80368620ca3cddf3f3daa471",
+      "svgSha256": "c698ae29d956f293f92ea32749071528a57befa52550f999f0e45feb458b5fca"
+    },
+    "javascript": {
+      "symbol": "z8r",
+      "role": "HV file-type resolver",
+      "sourceRange": {
+        "start": 4855840,
+        "end": 4857808,
+        "unit": "UTF-16 code units"
+      },
+      "expressionSha256": "6c5e07c8f3f300539b5e7d824e145439c7e85eeebb2d1825c5604e261a74dbbf",
+      "nodeSha256": "927154ff12be335a23d584f1e922453a87b114822869e9eaeb939ac147ff65bb",
+      "svgSha256": "499fe3145e6d077b34921106edfdb403c8c74969142e1d39fd5ab64e44e24f5c"
+    },
+    "image": {
+      "symbol": "N8r",
+      "role": "HV file-type resolver",
+      "sourceRange": {
+        "start": 4852081,
+        "end": 4855082,
+        "unit": "UTF-16 code units"
+      },
+      "expressionSha256": "6284d751fa7e2d2b25843bb3398e53f805af7b7be7964cfce7c3683f7aababa8",
+      "nodeSha256": "dc19d87f35179e0317ecb5e8a3763063807483400516aa3aa2ce86992c09a2a7",
+      "svgSha256": "c566009625154dd302c281eeaedcb81553ef74bd32a28800f9d5e61d46f5fb6d"
+    },
+    "yaml": {
+      "symbol": "y8r",
+      "role": "HV file-type resolver",
+      "sourceRange": {
+        "start": 4843515,
+        "end": 4846229,
+        "unit": "UTF-16 code units"
+      },
+      "expressionSha256": "7f4d2886dabb20928a18c884843dc1d6d1913b7292d64cae0f44bf0a80126d17",
+      "nodeSha256": "dec554ea552d852b22b04c7d77d32f3c882730d2f16acb81bea7976b766e0974",
+      "svgSha256": "755400bff3b2b4500c14b960ee661b857802d63a759b0129ceec2eb5e48af50a"
+    },
+    "json": {
+      "symbol": "H8r",
+      "role": "HV file-type resolver",
+      "sourceRange": {
+        "start": 4857848,
+        "end": 4860055,
+        "unit": "UTF-16 code units"
+      },
+      "expressionSha256": "7cd2b168e9458fd10cfea7db3ef703e896efc9cbec5fb3dcdb519b401e362e60",
+      "nodeSha256": "7919cd35702816e0efcd4107ccbd954575ce605b9839f2e66d47039ce51feec2",
+      "svgSha256": "f495ac44944ef1bb7c54647352f259789df94abdedf98375e9a1c013915707e0"
+    },
+    "notebook": {
+      "symbol": "G8r",
+      "role": "HV file-type resolver",
+      "sourceRange": {
+        "start": 4860095,
+        "end": 4863666,
+        "unit": "UTF-16 code units"
+      },
+      "expressionSha256": "eedc3c9d416ff28a57b80c5a0f4a839450121e3de537e6ae67a89a30cbbf307f",
+      "nodeSha256": "50528cfa4c08d4ef0570385c63e87ea8fbf4249641f50030deb2d5a0e0bfcc8a",
+      "svgSha256": "199fc7453594f9ad4105200ae8401321663e58a7e9c22bfa73195e7de0796109"
+    },
+    "pdf": {
+      "symbol": "o8r",
+      "role": "HV file-type resolver",
+      "sourceRange": {
+        "start": 4831392,
+        "end": 4832584,
+        "unit": "UTF-16 code units"
+      },
+      "expressionSha256": "04ce1d0094560be951c67f529e3d74e31936f6799abde0fad118265bedbad17a",
+      "nodeSha256": "d63dea5dedaf401278e68493ee6b508f15a5c5bfc30aadbdefe43e0fdd868389",
+      "svgSha256": "52d46464913accd1363893b85e50412ee65ab20a35e64c7072023a26c35f55e8"
+    },
+    "php": {
+      "symbol": "J8r",
+      "role": "HV file-type resolver",
+      "sourceRange": {
+        "start": 4863706,
+        "end": 4867596,
+        "unit": "UTF-16 code units"
+      },
+      "expressionSha256": "3af977b27dab6a527ffa77bfac1515033b3164846844f83d004ed07e3324e020",
+      "nodeSha256": "cf087e0b95fc14c78166af2ce5e66d002fe62eb49aa8b6e8168f1dcc63177a40",
+      "svgSha256": "a491f6b95ec47be963b0e50b9254b6f79f7b673b04cc621ef36037d5bc1c004e"
+    },
+    "python": {
+      "symbol": "Z8r",
+      "role": "HV file-type resolver",
+      "sourceRange": {
+        "start": 4867636,
+        "end": 4869304,
+        "unit": "UTF-16 code units"
+      },
+      "expressionSha256": "3b4be524a12b9da6e68348fe786bb0063bd2dde2fb80cc2b286d6a76588c08a6",
+      "nodeSha256": "8952b1e3a7e87b2ea97f51ebbff688007b286ec02d06b9c77495387324d52999",
+      "svgSha256": "b62f147aa8f73f882cfe26cf8502e4c0c0cec7b5937405792699dc013991fa96"
+    },
+    "react": {
+      "symbol": "e5r",
+      "role": "HV file-type resolver",
+      "sourceRange": {
+        "start": 4869344,
+        "end": 4874039,
+        "unit": "UTF-16 code units"
+      },
+      "expressionSha256": "428a7ce0d5d6c046242d6e2bde3aeff6fdb6f03f2ac067114277a58fd8f4842a",
+      "nodeSha256": "3cb98e89033d8016d32116142805a9217eaa02613d8449b012f88f0c7eaacac6",
+      "svgSha256": "3d9be750cd56040980d6590262dd772e406078b8ba9f58116e6fe23b4cc5b990"
+    },
+    "rust": {
+      "symbol": "r5r",
+      "role": "HV file-type resolver",
+      "sourceRange": {
+        "start": 4874079,
+        "end": 4887146,
+        "unit": "UTF-16 code units"
+      },
+      "expressionSha256": "309fd26becac2e1c4405c78586214654cd90f8690bb1af9cfe6684cb2b9a6be9",
+      "nodeSha256": "4cd04bf4bf4cc68d02ecd79c20639e0c66d5db5d1a5d02f90fb88f75b983726f",
+      "svgSha256": "3a2a5e743ce5a0e8969b0943af0cc1f8fb2380a548c51d88ad01ade70f42d608"
+    },
+    "shell": {
+      "symbol": "p8r",
+      "role": "HV file-type resolver",
+      "sourceRange": {
+        "start": 4839653,
+        "end": 4840329,
+        "unit": "UTF-16 code units"
+      },
+      "expressionSha256": "47bfd231f29d67d6aac6eed71ab25a5e58aead8475f6082a7795d650a3685087",
+      "nodeSha256": "acbb9952d3ff2446a7684903705dd9be39f9e547d5655c51a653a2b73c47ddd1",
+      "svgSha256": "e6010e87d635d9a44b26940f89d67316ff71adad374517e2f18f6e1a936ed1df"
+    },
+    "skill": {
+      "symbol": "VV",
+      "role": "HV file-type resolver",
+      "sourceRange": {
+        "start": 4889963,
+        "end": 4891295,
+        "unit": "UTF-16 code units"
+      },
+      "expressionSha256": "50cd33855468b03d4a14d7c9bcc39387bd14f56000ca3192c2ddaf0e61672ce9",
+      "nodeSha256": "37ff04b0103500f7b4089391378965124da813d62c6b9ff3070933b565aef3dc",
+      "svgSha256": "5d255900aeb61d99dc9b3e779fbdcae171dd5e25734969b196663390bb12a39e"
+    },
+    "spreadsheet": {
+      "symbol": "u8r",
+      "role": "HV file-type resolver",
+      "sourceRange": {
+        "start": 4836175,
+        "end": 4839613,
+        "unit": "UTF-16 code units"
+      },
+      "expressionSha256": "a621c38d60320af0aa8b7cd4d0740827fd350dad7cbb824d7295644e6dc4b174",
+      "nodeSha256": "c6c87d84162d569a2d6daafc5ec7fef42f99ff18af47ab148d95a6438cd110a0",
+      "svgSha256": "e403fee25349b5afdc63d0f96ee50e526582e14267c4705528d2d0c61dab1367"
+    },
+    "build": {
+      "symbol": "D8r",
+      "role": "HV file-type resolver",
+      "sourceRange": {
+        "start": 4850007,
+        "end": 4850872,
+        "unit": "UTF-16 code units"
+      },
+      "expressionSha256": "9e9059b4d144d3db1e4a72487eae79fcc2bb2c1ce3f975cf5af1e20625fb6bac",
+      "nodeSha256": "f8ae7d868acf8375826beeab7599544612b71e1c12503ca289df26737abf35c8",
+      "svgSha256": "8eaaf9f78a8347697d1619e4e1216806eb2cb20d5da0adbd7c166b141b95778c"
+    },
+    "presentation": {
+      "symbol": "c8r",
+      "role": "HV file-type resolver",
+      "sourceRange": {
+        "start": 4832622,
+        "end": 4836137,
+        "unit": "UTF-16 code units"
+      },
+      "expressionSha256": "d036f5856760e83203e86026af21bc5662a45e40b731b5e6b7de14e4cc4684bd",
+      "nodeSha256": "9b1017c69804f71d9fd970fb896b64713f67a2063ccece2752af5936ed942ea8",
+      "svgSha256": "6d67cdb4915a04d2f4d442c0822ab71ea12154546e0c2d0a80cead9f7a5a7ac5"
+    },
+    "hashes": {
+      "symbol": "Y6r",
+      "role": "HV file-type resolver",
+      "sourceRange": {
+        "start": 4825199,
+        "end": 4825660,
+        "unit": "UTF-16 code units"
+      },
+      "expressionSha256": "461e56fda2e8e74b699b115d1ce6456fc3df7195b53c6e55f56915b5ce4b53d7",
+      "nodeSha256": "7c31a952bf77b65af4da2d3365d1c062d9e20857846c452e1848f9fc8c3c59b1",
+      "svgSha256": "4096d1c2b0babc514b99a3dc31578d014ab52297dd1a8c9f6931f4633d12655d"
+    },
+    "terminal": {
+      "symbol": "d5r",
+      "role": "HV file-type resolver",
+      "sourceRange": {
+        "start": 4891335,
+        "end": 4894225,
+        "unit": "UTF-16 code units"
+      },
+      "expressionSha256": "34e9c6ab373a0d82e7b6208832ec51ed9ce99723334c132e37b709e9a7b11649",
+      "nodeSha256": "cf920c9b6ee215ee4de3719444467bb64a8d1d55b92a77e2b05b6a59fcb4be5f",
+      "svgSha256": "e5f4d57063a71091b9e6c7b2c5d51fa1f607c91cee35f3f027cef563ce6678a2"
+    },
+    "typescript": {
+      "symbol": "m5r",
+      "role": "HV file-type resolver",
+      "sourceRange": {
+        "start": 4894265,
+        "end": 4896098,
+        "unit": "UTF-16 code units"
+      },
+      "expressionSha256": "b2666caee5fc38da3b089f3eefd99918d7af3bd8d417e11f6a4514276063202a",
+      "nodeSha256": "ad44bc982ba3bee7298fa7353be0edd0d6944096db8611e10010f84e7148c701",
+      "svgSha256": "a8c97f6b5dfb4bb12c646cc90cc362271919c91733160ac9920ff429a72e1e02"
+    },
+    "toml": {
+      "symbol": "o5r",
+      "role": "HV file-type resolver",
+      "sourceRange": {
+        "start": 4887186,
+        "end": 4889925,
+        "unit": "UTF-16 code units"
+      },
+      "expressionSha256": "39ce1ca5395120007fcb39638a8a8772cf763d6b3d781d83d26a9152f4d08c8c",
+      "nodeSha256": "6287012bca4b9b5c295f8853774a93a576de7f945a4f4f606bda08311b157031",
+      "svgSha256": "b64a6920b6e8ad50ed28b3f693c4768ff0e653f3652668628eccd20af107e5e3"
+    },
+    "video": {
+      "symbol": "LVr",
+      "role": "attachment-type icon; explicit Scopy adapter, not HV resolver output",
+      "sourceRange": {
+        "start": 4518599,
+        "end": 4519273,
+        "unit": "UTF-16 code units"
+      },
+      "expressionSha256": "7476ca06f98cf4e90fcdb3dbfaefabd65395fe02a5df57c4eab11a58147d69aa",
+      "nodeSha256": "4be8a83297f9590284e245a260d41fb46e44f817e574ad4efa1a01fc9a353d0f",
+      "svgSha256": "dbc52f5ba15971b41d26d6fbde8ec6c6ae5e11a305dcf67e7f485dca14c2d65c"
+    },
+    "audio": {
+      "symbol": "NVr",
+      "role": "attachment-type icon; explicit Scopy adapter, not HV resolver output",
+      "sourceRange": {
+        "start": 4514683,
+        "end": 4516048,
+        "unit": "UTF-16 code units"
+      },
+      "expressionSha256": "f2081dcd4845663c31ec0ef03614b5c96d0d4816ebbbc48b2ca51ffd7b742093",
+      "nodeSha256": "bdeb4b0098fce7c19eec752f8fb07a6bae86382396f0ff938105b167a574ad74",
+      "svgSha256": "5d75f7bc419efad052236bc3a5504b9425e4fedb89ea10aa10458b81826a882a"
+    }
+  }
+}

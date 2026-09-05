@@ -616,6 +616,7 @@
 		D625C6FCB576A9DBEB789705 /* MarkdownPreviewCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B47012368E8607A49B45194 /* MarkdownPreviewCache.swift */; };
 		D629743A30D7F17CBFF23429 /* HistoryItemFileThumbnailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 731B070DC304C5CC7CDC7C75 /* HistoryItemFileThumbnailView.swift */; };
 		D66F7A50373D003978463AEA /* StorageSettingsPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF6837577946B91862943880 /* StorageSettingsPage.swift */; };
+		D88291E95D3BC8B8A45456DE /* markdown_codex_icons.md in Resources */ = {isa = PBXBuildFile; fileRef = 7F62A8B9DF24C0578AD04A8C /* markdown_codex_icons.md */; };
 		D9CF498F1C141AA27D635CAF /* favicon-investing-32.png in Resources */ = {isa = PBXBuildFile; fileRef = 593FFA8E5E4F1C431B42F670 /* favicon-investing-32.png */; };
 		DA2483A05985496EAFA7CD17 /* ScopyIcons.swift in Sources */ = {isa = PBXBuildFile; fileRef = FAECF70623C7580CB548B68A /* ScopyIcons.swift */; };
 		DA3FC3D055F108D0EC80E643 /* image-group-chatgpt-search-results.jpg in Resources */ = {isa = PBXBuildFile; fileRef = 5198384EBFCABFD921F2BAAC /* image-group-chatgpt-search-results.jpg */; };
@@ -930,6 +931,7 @@
 		7CE948DFDB9CA6E77C80DDC4 /* KaTeX_Size2-Regular.woff */ = {isa = PBXFileReference; path = "KaTeX_Size2-Regular.woff"; sourceTree = "<group>"; };
 		7D762743BEF2D1B59E4E9808 /* ClipboardServiceContentFilteringIntegrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipboardServiceContentFilteringIntegrationTests.swift; sourceTree = "<group>"; };
 		7E56E5F337D3748313865480 /* HoverPreviewIntentPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HoverPreviewIntentPolicy.swift; sourceTree = "<group>"; };
+		7F62A8B9DF24C0578AD04A8C /* markdown_codex_icons.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = markdown_codex_icons.md; sourceTree = "<group>"; };
 		7FA791FEADD9346CE7CA8217 /* KaTeX_Typewriter-Regular.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "KaTeX_Typewriter-Regular.ttf"; sourceTree = "<group>"; };
 		822D1AD4571728338CDD265C /* MarkdownATXHeadingNormalizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownATXHeadingNormalizer.swift; sourceTree = "<group>"; };
 		82CFF8877261ED83C85EA933 /* KaTeX_Size1-Regular.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "KaTeX_Size1-Regular.ttf"; sourceTree = "<group>"; };
@@ -1681,6 +1683,7 @@
 				87618982DF3A1D4F738AC4B8 /* chatgpt_public_copy_markdown_sample.md */,
 				30ED7ABC96A3F3EC3C1AF535 /* chatgpt_rich_copy_sample.md */,
 				BE2C40E55ECCD1FA48F28CF7 /* chatgpt_rich_surfaces.md */,
+				7F62A8B9DF24C0578AD04A8C /* markdown_codex_icons.md */,
 				D7606FCD0679847F08069204 /* markdown_link_icons.md */,
 				9E57493DEBD8670CDF52F04B /* markdown_safe_html_torture.md */,
 				D022F8113E684307FAD99300 /* README.md */,
@@ -1877,6 +1880,7 @@
 				B117329827CF92730C60B45F /* favicon-reuters-32.png in Resources */,
 				6493EDDA8DBBF0FC13699EF2 /* image-group-chatgpt-search-button.jpg in Resources */,
 				7637C3FE0C98C3818AE6DA6C /* image-group-chatgpt-search-results.jpg in Resources */,
+				D88291E95D3BC8B8A45456DE /* markdown_codex_icons.md in Resources */,
 				2FC2914D91D5A948F4AE8B09 /* markdown_link_icons.md in Resources */,
 				46FC01D8322547FAF7C2C553 /* markdown_safe_html_torture.md in Resources */,
 				7606A0ECDCC99F402295852B /* news-openai-hugging-face.jpg in Resources */,

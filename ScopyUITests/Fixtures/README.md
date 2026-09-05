@@ -13,3 +13,5 @@ Fixtures in this directory are deterministic local inputs for Scopy UI/export ch
 ## Source-icon regression fixture
 
 `markdown_link_icons.md` is a synthetic presentation fixture based on the user's 2026-09-05 link comparison. It covers verified EleBank/HSBC favicons, unknown-host globe, long CJK and RTL links, local file kinds, inert plugin links, task markers, footnotes, citation sources, and news/search source rows. Its prose is for rendering verification, not banking advice. The original icon provenance is in `Tools/MarkdownRenderer/THIRD_PARTY_NOTICES.md`. Node `source-icons.test.js` and real-app `testAutoExportSourceIconsFixture` share this fixture.
+
+`markdown_codex_icons.md` covers the original installed Codex file/media and 22 application glyphs, repeated Office gradients, bank favicons and long labels. `testAutoExportCodexIconsPreservesOriginalColors` enables palette reduction and verifies the actual export keeps true color. Immutable SVG provenance fixtures live under `Tools/MarkdownRenderer/test/fixtures/codex-*` (Node-only to avoid Xcode flattening same-name assets).

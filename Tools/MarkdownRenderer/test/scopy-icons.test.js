@@ -1,73 +1,44 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { SCOPY_ICON_NAMES, scopyIcon } from "../src/scopyIcons.js";
+import assets from "../src/codexControlIconAssets.json" with { type: "json" };
+import { render } from "../src/render.js";
 
-const canonicalNames = [
-  "puzzle-piece",
-  "file-text",
-  "javascript-badge",
-  "code",
-  "image",
-  "external-link",
-  "globe",
-  "close",
-  "caret-left",
-  "caret-right",
-  "caret-up-down"
-];
+const root = new URL("./fixtures/codex-control-icons/", import.meta.url);
+const manifest = JSON.parse(readFileSync(new URL("manifest.json", root)));
 
-test("creates deterministic decorative HAST for every canonical icon", () => {
-  for (const name of canonicalNames) {
+test("rich controls retain exact Codex paths and original optical viewBoxes", () => {
+  for (const [name, source] of Object.entries(assets.icons)) {
+    const svg = readFileSync(new URL(`${name}.svg`, root));
+    assert.equal(createHash("sha256").update(svg).digest("hex"), manifest.definitions[name].svgSha256);
     const icon = scopyIcon(name);
-    assert.equal(icon.type, "element", name);
-    assert.equal(icon.tagName, "svg", name);
-    assert.deepEqual(icon.properties.className, ["scopy-icon", `scopy-icon--${name}`], name);
-    assert.equal(icon.properties.viewBox, "0 0 256 256", name);
-    assert.equal(icon.properties.width, 16, name);
-    assert.equal(icon.properties.height, 16, name);
+    assert.deepEqual(icon.children, source.children, name);
+    assert.equal(icon.properties.viewBox, source.properties.viewBox, name);
     assert.equal(icon.properties.ariaHidden, "true", name);
     assert.equal(icon.properties.focusable, "false", name);
-    assert.equal(icon.children.length, 1, name);
-    assert.equal(icon.children[0].tagName, "path", name);
-    assert.equal(icon.children[0].properties.fill, "currentColor", name);
-    assert.match(icon.children[0].properties.d, /^M/, name);
-    assert.equal(icon.children[0].children.length, 0, name);
+    icon.children[0].properties.d = "changed";
+    assert.deepEqual(scopyIcon(name).children, source.children, name);
   }
 });
 
-test("document and javascript aliases resolve to the stable canonical classes", () => {
-  assert.deepEqual(scopyIcon("document"), scopyIcon("file-text"));
-  assert.deepEqual(scopyIcon("javascript"), scopyIcon("javascript-badge"));
-  assert.ok(SCOPY_ICON_NAMES.includes("document"));
-  assert.ok(SCOPY_ICON_NAMES.includes("javascript"));
-});
-
-test("returns fresh HAST objects without exposing shared mutable path data", () => {
-  const first = scopyIcon("globe");
-  const second = scopyIcon("globe");
-  first.properties.className.push("mutated");
-  first.children[0].properties.d = "changed";
-
-  assert.deepEqual(second.properties.className, ["scopy-icon", "scopy-icon--globe"]);
-  assert.match(second.children[0].properties.d, /^M128,24h0A104/);
-});
-
-test("rejects unknown icons and emits no text, styles, or Unicode arrow glyphs", () => {
-  assert.throws(() => scopyIcon("missing"), /Unknown Scopy icon: missing/);
-  for (const name of SCOPY_ICON_NAMES) {
-    const serialized = JSON.stringify(scopyIcon(name));
-    assert.doesNotMatch(serialized, /↗|emoji|style/i, name);
-    assert.doesNotMatch(serialized, /"type":"text"/, name);
+test("icon API is closed and no old substitute file/source icons remain", () => {
+  for (const name of ["missing", "constructor", "globe", "file-text", "javascript-badge", "puzzle-piece"]) {
+    assert.throws(() => scopyIcon(name), /Unknown Scopy icon/);
   }
+  assert.equal(SCOPY_ICON_NAMES.length, 8);
 });
 
-test("keeps selected Phosphor Core 2.1.1 path data exact", () => {
-  assert.equal(
-    scopyIcon("external-link").children[0].properties.d,
-    "M200,64V168a8,8,0,0,1-16,0V83.31L69.66,197.66a8,8,0,0,1-11.32-11.32L172.69,72H88a8,8,0,0,1,0-16H192A8,8,0,0,1,200,64Z"
-  );
-  assert.match(
-    scopyIcon("javascript").children[0].properties.d,
-    /^M213\.66,82\.34l-56-56.*M80,152v37\.41/s
-  );
+test("source and image artwork keeps evenodd paint through the HTML sanitizer", () => {
+  const html = render("([来源][1])\n\n[1]: https://example.com").html;
+  assert.match(html, /fill-rule="evenodd" clip-rule="evenodd"/);
+  assert.match(html, /viewBox="0 0 12 12"/);
+});
+
+test("rendered rating and map icons keep their inherited paint color", () => {
+  const html = render(readFileSync(new URL("../../../ScopyUITests/Fixtures/chatgpt_rich_surfaces.md", import.meta.url), "utf8")).html;
+  for (const name of ["star-fill", "map-pin"]) {
+    assert.match(html, new RegExp(`<svg class="scopy-icon scopy-icon--${name}"[^>]*fill="currentColor"`));
+  }
 });

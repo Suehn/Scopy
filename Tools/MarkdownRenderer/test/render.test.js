@@ -69,12 +69,12 @@ test("preserves supported custom plugin links without widening file URL links", 
   assert.doesNotMatch(fileURL.html, /href="file:\/\/\/Users\/ziyi\/a.md"/);
 });
 
-test("sanitizes network link protocols to http, https, and explicit plugin only", () => {
+test("sanitizes network link protocols to http, https, and inert app or plugin mentions", () => {
   const result = render("[web](https://example.com) [mail](mailto:test@example.com) [script](javascript:alert(1)) [plugin](plugin:asset)");
 
   assert.match(result.html, /href="https:\/\/example\.com"/);
   assert.match(result.html, /href="https:\/\/example\.com" class="scopy-link scopy-link--external"/);
-  assert.match(result.html, /<svg class="scopy-icon scopy-icon--globe scopy-link-origin-icon"[^>]*><path d="[^"]+" fill="currentColor"><\/path><\/svg>/);
+  assert.match(result.html, /<svg class="scopy-icon scopy-icon--globe scopy-link-origin-icon"[^>]*><path[^>]+d="[^"]+" fill="currentColor"><\/path><\/svg>/);
   assert.match(result.html, /href="plugin:asset"/);
   assert.doesNotMatch(result.html, /href="plugin:asset"[^>]*scopy-link--external/);
   assert.doesNotMatch(result.html, /href="mailto:/);
@@ -106,7 +106,7 @@ test("Codex links add real SVG affordance, resolve absolute and tilde files, and
   assert.match(result.html, /href="https:\/\/example\.com\/path" class="scopy-link scopy-link--external"/);
   assert.match(result.html, /class="scopy-icon scopy-icon--globe scopy-link-origin-icon"[^>]+aria-hidden="true"/);
   assert.doesNotMatch(result.html, /↗|&#x2197;|&#8599;/);
-  assert.match(result.html, /<a class="scopy-link scopy-link--file scopy-link--file-inert" data-scopy-file-kind="document" aria-disabled="true">[^<]*<svg[^>]*scopy-icon--file-text[^>]*>/);
+  assert.match(result.html, /<a class="scopy-link scopy-link--file scopy-link--file-inert" data-scopy-file-kind="document" aria-disabled="true"><span class="scopy-mention-icon"><svg[^>]*scopy-codex-icon--document[^>]*>/);
   assert.doesNotMatch(result.html, /href="(?:\.\/)?docs\/guide\.md"/);
   assert.match(result.html, /href="#section" class="scopy-link scopy-link--internal"/);
   assert.match(result.html, /href="scopy-file:\/Users\/alice\/file\.md:4" class="scopy-link scopy-link--file scopy-link--file-resolvable" data-scopy-file-kind="document"/);

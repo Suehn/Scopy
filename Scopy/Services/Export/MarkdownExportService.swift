@@ -785,6 +785,7 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
     private let targetWidthPixels: CGFloat
     private let viewportWidthPoints: CGFloat
     private let pngquantOptions: PngquantService.Options?
+    private var preservesArtworkColors = false
     private let completion: (Result<MarkdownExportService.ExportOutcome, Error>) -> Void
     private let targetScreen: NSScreen?
     private let backingScaleFactor: CGFloat
@@ -1070,6 +1071,12 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
             )
             throw MarkdownExportService.ExportError.stageFailed(stage: .prepareLayout, underlying: underlying)
         }
+        // The HTML shell is rendered by JavaScript; inspect the ready DOM instead
+        // of searching the unrendered input for classes that do not exist yet.
+        preservesArtworkColors = try await evaluateJavaScriptBool(
+            webView: webView,
+            javaScriptString: "Boolean(document.querySelector('#content [data-scopy-version=\"2\"], #content .scopy-mention-icon, #content img.scopy-link-origin-icon, #content img.scopy-source-citation-origin-icon'))"
+        )
         var scrollHeightPoints = initialScrollHeightPoints
 
         stage = .applyScale
@@ -1178,7 +1185,7 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
 
     private func exportPDFRasterizedPNG(webView: WKWebView, heightPoints: CGFloat) async throws -> MarkdownExportService.ExportOutcome {
         let targetWidthPixels = max(1, Int(round(self.targetWidthPixels)))
-        let pngquantOptions = self.pngquantOptions
+        let pngquantOptions = preservesArtworkColors ? nil : self.pngquantOptions
         // WebKit's PDF output can embed page contents at a reduced scale (≈1 / devicePixelRatio),
         // which becomes more pronounced as we increase export resolution. Compensate by the full output pixel scale.
         let contentScaleCompensation = max(1, outputPixelScaleFactor)
@@ -1276,7 +1283,7 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
 
         stage = .pngEncoding
         let targetWidth = max(1, Int(round(targetWidthPixels)))
-        let pngquantOptions = self.pngquantOptions
+        let pngquantOptions = preservesArtworkColors ? nil : self.pngquantOptions
         return try await Task.detached(priority: .userInitiated) {
             let canvas = try Self.canvasFromSnapshot(cg, targetWidthPixels: targetWidth)
             return try Self.encodeExportCanvas(canvas, pngquantOptions: pngquantOptions)
@@ -1377,7 +1384,7 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
         }
 
         stage = .pngEncoding
-        let pngquantOptions = self.pngquantOptions
+        let pngquantOptions = preservesArtworkColors ? nil : self.pngquantOptions
         return try await Task.detached(priority: .userInitiated) {
             try Self.encodeExportCanvas(canvas, pngquantOptions: pngquantOptions)
         }.value

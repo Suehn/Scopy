@@ -1,0 +1,237 @@
+{
+  "provenance": {
+    "application": "Codex",
+    "version": "26.901.41600",
+    "build": "7982",
+    "extractedOn": "2026-09-05",
+    "extraction": "Static original preset SVG bodies and isolated JSX path declarations; original geometry and intrinsic viewBoxes preserved. No bundle code executed.",
+    "rights": "Original OpenAI application artwork. Not covered by the Phosphor MIT license; extraction does not establish redistribution rights.",
+    "definitions": {
+      "image": {
+        "definition": "rii=GN(photo-light-16)",
+        "source": "app-initial-86767c3d23e5.js",
+        "sourceSha256": "fb72076ee44f6596f8dafa9a3effe37a3527a87db21fde8b4042233957b554bb",
+        "semanticEvidence": "Named original icon preset in the installed Codex app bundle; Scopy selects this semantic icon. No claim that Scopy rich-card wrappers equal Codex wrappers.",
+        "svgSha256": "ffb49c6966a7cab7dc80a311f88b966248cf660ed4c94bb23d09f650ceeb4f4c",
+        "viewBox": "0 0 16 16",
+        "intrinsicWidth": "16",
+        "intrinsicHeight": "16"
+      },
+      "play-fill": {
+        "definition": "xii=GN(play-light-20)",
+        "source": "app-initial-86767c3d23e5.js",
+        "sourceSha256": "fb72076ee44f6596f8dafa9a3effe37a3527a87db21fde8b4042233957b554bb",
+        "semanticEvidence": "Named original play-light-20 preset: the original path has an inner cutout (outline triangle). The Scopy legacy key play-fill is retained for integration, but this source is not a filled triangle and no original filled-play preset was identified.",
+        "svgSha256": "b7ddbbb18434ed5c3f424cad496dce9efcd46b9501036baa527f324ed13de7c0",
+        "viewBox": "0 0 20 20",
+        "intrinsicWidth": "20",
+        "intrinsicHeight": "20"
+      },
+      "close": {
+        "definition": "qN=GN(xmark-md-light-16)",
+        "source": "app-initial-86767c3d23e5.js",
+        "sourceSha256": "fb72076ee44f6596f8dafa9a3effe37a3527a87db21fde8b4042233957b554bb",
+        "semanticEvidence": "Named original icon preset in the installed Codex app bundle; Scopy selects this semantic icon. No claim that Scopy rich-card wrappers equal Codex wrappers.",
+        "svgSha256": "75363f60a52dcd0ba54cd271f0653aaa0e02bef9d3e04c46243c2bd42af50cad",
+        "viewBox": "0 0 16 16",
+        "intrinsicWidth": "16",
+        "intrinsicHeight": "16"
+      },
+      "caret-left": {
+        "definition": "Yei=GN(chevron-left-md-light-16)",
+        "source": "app-initial-86767c3d23e5.js",
+        "sourceSha256": "fb72076ee44f6596f8dafa9a3effe37a3527a87db21fde8b4042233957b554bb",
+        "semanticEvidence": "Named original icon preset in the installed Codex app bundle; Scopy selects this semantic icon. No claim that Scopy rich-card wrappers equal Codex wrappers.",
+        "svgSha256": "5d3bf912992c856c4ad501e2dad79b0dbbdb73d82204404e1dac6e2f000be419",
+        "viewBox": "0 0 16 16",
+        "intrinsicWidth": "16",
+        "intrinsicHeight": "16"
+      },
+      "caret-right": {
+        "definition": "Zei=GN(chevron-right-md-light-16)",
+        "source": "app-initial-86767c3d23e5.js",
+        "sourceSha256": "fb72076ee44f6596f8dafa9a3effe37a3527a87db21fde8b4042233957b554bb",
+        "semanticEvidence": "Named original icon preset in the installed Codex app bundle; Scopy selects this semantic icon. No claim that Scopy rich-card wrappers equal Codex wrappers.",
+        "svgSha256": "309701f4cfad0b7817d7d05e9a04fc805395f48dca435105ea771428182ac427",
+        "viewBox": "0 0 16 16",
+        "intrinsicWidth": "16",
+        "intrinsicHeight": "16"
+      },
+      "star-fill": {
+        "definition": "default JSX svg component",
+        "source": "StarFilled-e6ba126b821e.js",
+        "sourceSha256": "51ed1c7f95e89623755072e75f7779d7cb8c6d4133c8845386159e9446e747e4",
+        "semanticEvidence": "app-primary-139889e10fbd.js lazy icon registry maps star to this original component. Scopy uses it for the matching visual meaning; exact ratings/map-card usage was not established.",
+        "svgSha256": "cc0292236d3eb92b2af1c8237b403862f4efa9fe1a31ce7827e40dd266ee6fb2",
+        "viewBox": "0 0 20 20",
+        "intrinsicWidth": "1em",
+        "intrinsicHeight": "1em"
+      },
+      "map-pin": {
+        "definition": "default JSX svg component",
+        "source": "MapPinAltFill-2c48127e228d.js",
+        "sourceSha256": "a23c50109b2b1c4e0089d01a2d9ecdb835b31c2c8908af1ca6a5db285ae452ca",
+        "semanticEvidence": "app-primary-139889e10fbd.js lazy icon registry maps mappin to this original component. Scopy uses it for the matching visual meaning; exact ratings/map-card usage was not established.",
+        "svgSha256": "7d6fd33712e7e4d1ab4cf69746d821fe02d552ce362fcd2ac3e8c4559391b60a",
+        "viewBox": "0 0 20 20",
+        "intrinsicWidth": "1em",
+        "intrinsicHeight": "1em"
+      }
+    }
+  },
+  "icons": {
+    "image": {
+      "type": "element",
+      "tagName": "svg",
+      "properties": {
+        "width": "16",
+        "height": "16",
+        "viewBox": "0 0 16 16"
+      },
+      "children": [
+        {
+          "type": "element",
+          "tagName": "path",
+          "properties": {
+            "fillRule": "evenodd",
+            "clipRule": "evenodd",
+            "d": "M10.0811 4.49963C11.1994 4.49963 12.1064 5.40665 12.1064 6.52502C12.1062 7.64318 11.1993 8.55042 10.0811 8.55042C8.96284 8.55042 8.05593 7.64318 8.05566 6.52502C8.05566 5.40665 8.96268 4.49963 10.0811 4.49963ZM10.0811 5.55042C9.54258 5.55042 9.10645 5.98655 9.10645 6.52502C9.10671 7.06328 9.54274 7.49963 10.0811 7.49963C10.6194 7.49963 11.0554 7.06328 11.0557 6.52502C11.0557 5.98655 10.6195 5.55042 10.0811 5.55042Z",
+            "fill": "currentColor"
+          },
+          "children": []
+        },
+        {
+          "type": "element",
+          "tagName": "path",
+          "properties": {
+            "fillRule": "evenodd",
+            "clipRule": "evenodd",
+            "d": "M11.8662 2.14124C13.3344 2.14124 14.5254 3.33226 14.5254 4.80042V11.1998C14.5254 12.668 13.3344 13.858 11.8662 13.858H4.13379C2.66563 13.858 1.47461 12.668 1.47461 11.1998V4.80042C1.47461 3.33226 2.66563 2.14124 4.13379 2.14124H11.8662ZM4.13379 3.19202C3.24553 3.19202 2.52539 3.91216 2.52539 4.80042V9.58557L3.55371 8.55823C4.34438 7.76773 5.62617 7.76687 6.41699 8.55725L10.6699 12.8082H11.8662C12.7545 12.8082 13.4746 12.0881 13.4746 11.1998V4.80042C13.4746 3.91216 12.7545 3.19202 11.8662 3.19202H4.13379ZM5.6748 9.30042C5.29407 8.91989 4.6766 8.91989 4.2959 9.30042L2.52539 11.0709V11.1998C2.52539 12.0881 3.24553 12.8082 4.13379 12.8082H9.18457L5.6748 9.30042Z",
+            "fill": "currentColor"
+          },
+          "children": []
+        }
+      ]
+    },
+    "play-fill": {
+      "type": "element",
+      "tagName": "svg",
+      "properties": {
+        "width": "20",
+        "height": "20",
+        "viewBox": "0 0 20 20"
+      },
+      "children": [
+        {
+          "type": "element",
+          "tagName": "path",
+          "properties": {
+            "d": "M5.41602 2.90729C5.99952 2.6251 6.75183 2.60101 7.38574 2.98835L7.38477 2.98932L16.1787 8.34186L16.2988 8.42096C17.5052 9.2712 17.4666 11.1487 16.1816 11.9327L16.1709 11.9395L16.1699 11.9385L7.375 17.087L7.37402 17.086C6.74243 17.4664 5.99614 17.4418 5.41602 17.1612C4.86336 16.8938 4.39667 16.3583 4.34082 15.6397L4.33496 15.4942V4.57428C4.3349 3.78256 4.82669 3.19237 5.41602 2.90729ZM5.66504 15.4942C5.66499 15.6822 5.77425 15.857 5.99512 15.9639C6.22208 16.0737 6.49007 16.069 6.69238 15.9454L6.70312 15.9385L15.4902 10.796C15.9646 10.505 15.9637 9.76785 15.4883 9.47858L15.4873 9.4776L6.69336 4.12409L6.69238 4.12311C6.49008 3.9995 6.22206 3.9948 5.99512 4.10456C5.77418 4.21145 5.66499 4.38625 5.66504 4.57428V15.4942Z",
+            "fill": "currentColor"
+          },
+          "children": []
+        }
+      ]
+    },
+    "close": {
+      "type": "element",
+      "tagName": "svg",
+      "properties": {
+        "width": "16",
+        "height": "16",
+        "viewBox": "0 0 16 16"
+      },
+      "children": [
+        {
+          "type": "element",
+          "tagName": "path",
+          "properties": {
+            "d": "M10.962 4.29539C11.1669 4.09057 11.4992 4.09076 11.7042 4.29539C11.9092 4.50039 11.9091 4.83255 11.7042 5.03758L8.74229 7.99949L11.7052 10.9624C11.9097 11.1673 11.9097 11.4996 11.7052 11.7046C11.5003 11.9095 11.168 11.9093 10.963 11.7046L8.0001 8.74168L5.03721 11.7046C4.83216 11.9093 4.49994 11.9095 4.29502 11.7046C4.09047 11.4996 4.09045 11.1673 4.29502 10.9624L7.25791 7.99949L4.296 5.03758C4.09101 4.83255 4.09099 4.5004 4.296 4.29539C4.50105 4.09079 4.8333 4.09054 5.03819 4.29539L8.0001 7.2573L10.962 4.29539Z",
+            "fill": "currentColor"
+          },
+          "children": []
+        }
+      ]
+    },
+    "caret-left": {
+      "type": "element",
+      "tagName": "svg",
+      "properties": {
+        "width": "16",
+        "height": "16",
+        "viewBox": "0 0 16 16"
+      },
+      "children": [
+        {
+          "type": "element",
+          "tagName": "path",
+          "properties": {
+            "d": "M9.87117 11.6289C10.0762 11.8339 10.0762 12.166 9.87117 12.3711C9.66614 12.5761 9.334 12.5761 9.12898 12.3711L5.36433 8.60641C5.0296 8.27129 5.0296 7.72863 5.36433 7.39351L9.12898 3.62887C9.334 3.42384 9.66614 3.42384 9.87117 3.62887C10.0762 3.83389 10.0762 4.16603 9.87117 4.37105L6.24226 7.99996L9.87117 11.6289Z",
+            "fill": "currentColor"
+          },
+          "children": []
+        }
+      ]
+    },
+    "caret-right": {
+      "type": "element",
+      "tagName": "svg",
+      "properties": {
+        "width": "16",
+        "height": "16",
+        "viewBox": "0 0 16 16"
+      },
+      "children": [
+        {
+          "type": "element",
+          "tagName": "path",
+          "properties": {
+            "d": "M5.96236 11.6289C5.75734 11.8339 5.75734 12.166 5.96236 12.3711C6.16739 12.5761 6.49953 12.5761 6.70455 12.3711L10.4692 8.60641C10.8039 8.27129 10.8039 7.72863 10.4692 7.39351L6.70455 3.62887C6.49952 3.42384 6.16739 3.42384 5.96236 3.62887C5.75734 3.83389 5.75734 4.16603 5.96236 4.37105L9.59127 7.99996L5.96236 11.6289Z",
+            "fill": "currentColor"
+          },
+          "children": []
+        }
+      ]
+    },
+    "star-fill": {
+      "type": "element",
+      "tagName": "svg",
+      "properties": {
+        "width": "1em",
+        "height": "1em",
+        "viewBox": "0 0 20 20",
+        "fill": "currentColor"
+      },
+      "children": [
+        {
+          "type": "element",
+          "tagName": "path",
+          "properties": {
+            "d": "M8.47119 1.44011C9.21443 0.309919 10.9178 0.348019 11.5972 1.55339L13.5425 5.00554L13.564 5.03484C13.5876 5.06126 13.6194 5.07938 13.6548 5.0866L17.5396 5.87078C18.8959 6.14444 19.4579 7.75217 18.6128 8.80828L18.5269 8.90886L15.8452 11.8259C15.8125 11.8614 15.7968 11.9097 15.8022 11.9577L16.2573 15.8952L16.2681 16.027C16.3308 17.378 14.9304 18.3479 13.6724 17.7721L10.0688 16.1237C10.0358 16.1086 9.99927 16.1044 9.96436 16.112L9.93018 16.1237L6.32666 17.7721C5.0281 18.3664 3.57889 17.3138 3.74268 15.8952L4.19776 11.9577V11.9225C4.19539 11.8988 4.18827 11.8758 4.17627 11.8552L4.15479 11.8259L1.47315 8.90886C0.506645 7.85753 1.05975 6.15347 2.45947 5.87078L6.34424 5.0866L6.37842 5.07586C6.41112 5.06151 6.43866 5.03717 6.45654 5.00554L8.40283 1.55339L8.47119 1.44011Z"
+          },
+          "children": []
+        }
+      ]
+    },
+    "map-pin": {
+      "type": "element",
+      "tagName": "svg",
+      "properties": {
+        "width": "1em",
+        "height": "1em",
+        "viewBox": "0 0 20 20",
+        "fill": "currentColor"
+      },
+      "children": [
+        {
+          "type": "element",
+          "tagName": "path",
+          "properties": {
+            "d": "M9.99492 18.1734C9.79122 18.1734 9.56714 18.1021 9.2514 17.9392C4.58659 15.4845 2.61066 11.9299 2.61066 8.86413C2.61066 4.72895 5.65603 1.82617 9.99492 1.82617C14.3338 1.82617 17.3893 4.72895 17.3893 8.86413C17.3893 11.9299 15.4032 15.4845 10.7384 17.9392C10.4227 18.1021 10.1986 18.1734 9.99492 18.1734ZM9.99492 12.0725C11.6856 12.0725 13.0504 10.7077 13.0504 9.01691C13.0504 7.32617 11.6856 5.96136 9.99492 5.96136C8.30418 5.96136 6.93937 7.32617 6.93937 9.01691C6.93937 10.7077 8.30418 12.0725 9.99492 12.0725Z"
+          },
+          "children": []
+        }
+      ]
+    }
+  }
+}

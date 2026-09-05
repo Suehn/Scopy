@@ -1,0 +1,280 @@
+{
+  "provenance": {
+    "application": "Codex",
+    "bundleIdentifier": "com.openai.codex",
+    "version": "26.901.41600",
+    "build": "7982",
+    "extractedOn": "2026-09-05",
+    "sourceBundle": "app-initial-86767c3d23e5.js",
+    "sourceSha256": "fb72076ee44f6596f8dafa9a3effe37a3527a87db21fde8b4042233957b554bb",
+    "extraction": "Static isolated SVG JSX expressions only; original geometry, colors, gradients, viewBox and intrinsic dimensions preserved. JSX Fragment flattened and React style objects serialized to CSS declarations without visual alteration.",
+    "resolver": "PQr -> IQr -> LQr -> RQr. Original 22 resolver entries; presentations shares file-presentation SVG.",
+    "rights": "Original OpenAI application artwork. Not covered by the Phosphor MIT license; extraction does not establish redistribution rights."
+  },
+  "entries": {
+    "computer-use": {
+      "symbol": "HZr",
+      "role": "PQr / RQr plugin-name resolver",
+      "sourceRange": {
+        "start": 4679969,
+        "end": 4680984,
+        "unit": "UTF-16 code units"
+      },
+      "expressionSha256": "7ae42a0da33d9fd7e1790950b152d3749bf21cebd4c82b83de54331308048bac",
+      "nodeSha256": "dd236d57f3a0f83115ef845bcda1f8043a72e4cd24009836dcb1dc826930cb82",
+      "svgSha256": "aaaa0cc74c4145023e326b77c7b94010c78684407771a34d496ab91ad07502fd"
+    },
+    "figma": {
+      "symbol": "LZr",
+      "role": "PQr / RQr plugin-name resolver",
+      "sourceRange": {
+        "start": 4678146,
+        "end": 4679196,
+        "unit": "UTF-16 code units"
+      },
+      "expressionSha256": "349c20c9c958435a09214ac4117b5aeee3c5f6aafa1820cd393c095c77f8cf0a",
+      "nodeSha256": "4f17b81befc9b8fe7c67f58597af93e5d8fc1c580df9027c20ea50f2a4dcbcb7",
+      "svgSha256": "881d061b2a6ba51884c6f7c54cfb84630f43a5ccbd5209bb2502d5de60777698"
+    },
+    "file-csv": {
+      "symbol": "GZr",
+      "role": "PQr / RQr plugin-name resolver",
+      "sourceRange": {
+        "start": 4681024,
+        "end": 4681907,
+        "unit": "UTF-16 code units"
+      },
+      "expressionSha256": "d1bb0adde773545e6a6558fd392b42946fed8d117219d0ae52e6eabe0112af1f",
+      "nodeSha256": "bd2aa003e7f77c0f8bcccf43a8e719e972bce43443491fe8910b4a43c041d1ff",
+      "svgSha256": "b558c2f2ae70b4730a37c3695c9376823d4085bd26350634e3075c09280c18d0"
+    },
+    "file-pdf": {
+      "symbol": "$Zr",
+      "role": "PQr / RQr plugin-name resolver",
+      "sourceRange": {
+        "start": 4689304,
+        "end": 4690508,
+        "unit": "UTF-16 code units"
+      },
+      "expressionSha256": "06d3fad0d0fea4576dd44d0a0b209226c4c985cc5d270492f517024a4a5d7941",
+      "nodeSha256": "cc8d5752042889c23074538628ab6390dac139f2f4c9d74408f355d2298ad7f0",
+      "svgSha256": "499a47edeb47385a2513334fc03b3c62a268a034ed3cce36062889759b71e2e6"
+    },
+    "file-presentation": {
+      "symbol": "nQr",
+      "role": "PQr / RQr plugin-name resolver",
+      "sourceRange": {
+        "start": 4690548,
+        "end": 4691333,
+        "unit": "UTF-16 code units"
+      },
+      "expressionSha256": "05daa677283f1fc6ca12f3955585bdb08039b10f4ec2aba3a43ed1d01fc784b4",
+      "nodeSha256": "5658159c4aec187bb6370a23af520b8bb072ea0a3e1b07ea29df82ef70665528",
+      "svgSha256": "7ba4997ad3dab0ce9d5e64f74487d719029b35532ff5c8aaedcbf9076cb5fbaa"
+    },
+    "file-spreadsheet": {
+      "symbol": "aQr",
+      "role": "PQr / RQr plugin-name resolver",
+      "sourceRange": {
+        "start": 4691373,
+        "end": 4692256,
+        "unit": "UTF-16 code units"
+      },
+      "expressionSha256": "16536ace162019acd704ba11bda194e40d606157846fa94550bdddaadf9d1316",
+      "nodeSha256": "bd2aa003e7f77c0f8bcccf43a8e719e972bce43443491fe8910b4a43c041d1ff",
+      "svgSha256": "b558c2f2ae70b4730a37c3695c9376823d4085bd26350634e3075c09280c18d0"
+    },
+    "file-word-document": {
+      "symbol": "sQr",
+      "role": "PQr / RQr plugin-name resolver",
+      "sourceRange": {
+        "start": 4692294,
+        "end": 4693467,
+        "unit": "UTF-16 code units"
+      },
+      "expressionSha256": "0730de6f4fcfc85335cf2de4d02ad8b0f04473d70cc77938f3493ee45779a297",
+      "nodeSha256": "204d2588e7e9aba17a8fde7cfa0c1dd19846559b8777765e170c91dc555eb5f3",
+      "svgSha256": "0148ddcccb5b17597245821f6317c5f6ce7ab5431d52cad99c7e3b31ca0e3a73"
+    },
+    "git": {
+      "symbol": "zZr",
+      "role": "PQr / RQr plugin-name resolver",
+      "sourceRange": {
+        "start": 4679234,
+        "end": 4679929,
+        "unit": "UTF-16 code units"
+      },
+      "expressionSha256": "8db55e2ae5177a69f68e6d2674b4c11aa9cd132a611b2a1766f6cf04f94e69a0",
+      "nodeSha256": "175e99500145f024806e3e13e4d1bb09a53ea487bfa771cdcf8cac79501f5e54",
+      "svgSha256": "690729e8ddc8f7046e522b1ff1eff673fffce9637c994e5f63232412fc0d971d"
+    },
+    "gmail": {
+      "symbol": "fQr",
+      "role": "PQr / RQr plugin-name resolver",
+      "sourceRange": {
+        "start": 4695004,
+        "end": 4696592,
+        "unit": "UTF-16 code units"
+      },
+      "expressionSha256": "e07bb2cb75abeeafdac9d96cdd2d539049185e28d35f07970aab64eaa41edcc5",
+      "nodeSha256": "5ac826eaabaac809a49fbe9387079b356199573d69356e702728e7dc130407df",
+      "svgSha256": "626b9f37e29482f270318bf357a159858d1e116d0322d0f6699d4b1aaa0312af"
+    },
+    "google-calendar": {
+      "symbol": "mQr",
+      "role": "PQr / RQr plugin-name resolver",
+      "sourceRange": {
+        "start": 4696630,
+        "end": 4700493,
+        "unit": "UTF-16 code units"
+      },
+      "expressionSha256": "7cdbc677eacb1137d00d7295fffb2b152596ba1ce8caf80248ca2a30d7f73a2f",
+      "nodeSha256": "dc4b1b1c8735dc6fef5056927bd593b72e71ae544567f2b570d8556048f7294d",
+      "svgSha256": "50d369debde0917f89c360297e0dfebe3c2ce508e0de3bca3b1abecfc6f636c6"
+    },
+    "google-docs": {
+      "symbol": "qZr",
+      "role": "PQr / RQr plugin-name resolver",
+      "sourceRange": {
+        "start": 4681945,
+        "end": 4684284,
+        "unit": "UTF-16 code units"
+      },
+      "expressionSha256": "9c7b78d6d9fac0614a662acb4e760e22ee6a9f5b0f92ea4b868741fb81201a00",
+      "nodeSha256": "06c6c4d2663963f5a332d54afee2e700262db169a38df939121f1117abaf2e56",
+      "svgSha256": "73d47de6a650ae92e15ee0343b8b407d8b04bfb195dbc83c1a314ca33d73e461"
+    },
+    "google-drive": {
+      "symbol": "gQr",
+      "role": "PQr / RQr plugin-name resolver",
+      "sourceRange": {
+        "start": 4700531,
+        "end": 4702206,
+        "unit": "UTF-16 code units"
+      },
+      "expressionSha256": "925e8e266210950e0848a4e2e93131bc9c8deaad1e3affe32d245f6e41cef9d7",
+      "nodeSha256": "4d1b19cdaafc3aa67e0116712afba9431585041f07301ce624ac24cbdd4d965b",
+      "svgSha256": "e650fe935ae984a85da2771391a2eba81fa7d4d1dbee05adc6b33ce3d9917640"
+    },
+    "google-sheets": {
+      "symbol": "YZr",
+      "role": "PQr / RQr plugin-name resolver",
+      "sourceRange": {
+        "start": 4684322,
+        "end": 4686130,
+        "unit": "UTF-16 code units"
+      },
+      "expressionSha256": "77af0b2f760ff6ee8ffda36c32160f0991a86dc49b3d85d5dfff862a53a9658e",
+      "nodeSha256": "f824f89dfafac7d5d694a49122b4cc7c425a0afa0e2dd18cda7010bfc257b43e",
+      "svgSha256": "83e597b8a15552b33c2b23ae31866444ba97db5dae048ca57ddc827107d63072"
+    },
+    "google-slides": {
+      "symbol": "ZZr",
+      "role": "PQr / RQr plugin-name resolver",
+      "sourceRange": {
+        "start": 4686168,
+        "end": 4689266,
+        "unit": "UTF-16 code units"
+      },
+      "expressionSha256": "f3f36b87057fe46640be35fcfd1a0e4481473954b521ba46ea9eae5566cbbfea",
+      "nodeSha256": "c1171c62e2f4a608673419290b44719c77202ade156d1ac3cccf2ecf37634969",
+      "svgSha256": "3f511fbb8251b7f0a96e98ecd1e41a28e993f89ac20b3bee9a5c9fcf2f7a8e24"
+    },
+    "github": {
+      "symbol": "uQr",
+      "role": "PQr / RQr plugin-name resolver",
+      "sourceRange": {
+        "start": 4693507,
+        "end": 4694966,
+        "unit": "UTF-16 code units"
+      },
+      "expressionSha256": "c9f7b3e45593a70512c574fef6e3ba1a7d2142904ee57b5ada542f05f3de9681",
+      "nodeSha256": "8f5979ba9114c9d632472addc18c5371c09f93db7229efb452f344a5e6897107",
+      "svgSha256": "b9f958a55ec1d1884de357180e60f4a9562a1dc6eb20e6d3ee2ed16fb34add1c"
+    },
+    "linear": {
+      "symbol": "yQr",
+      "role": "PQr / RQr plugin-name resolver",
+      "sourceRange": {
+        "start": 4702246,
+        "end": 4703527,
+        "unit": "UTF-16 code units"
+      },
+      "expressionSha256": "a63b3a701f78567367e7bdb093abeb5f3585680e9317584af91c6e9ef0120000",
+      "nodeSha256": "575cfb76517bda942f3c39bc1b219c2d43c550884dc774aa4d35c4fb606968fa",
+      "svgSha256": "71f1d3b5cb1f825c64f952fb22180668af885bf01088bfd139d0aae3dc25d1ce"
+    },
+    "notion": {
+      "symbol": "SQr",
+      "role": "PQr / RQr plugin-name resolver",
+      "sourceRange": {
+        "start": 4703567,
+        "end": 4705158,
+        "unit": "UTF-16 code units"
+      },
+      "expressionSha256": "8b2518b1d8b1b4a70513f76c4e4fdde80be15765550c50900cd77882db82888f",
+      "nodeSha256": "dbe8f26e9af7771b1c28a00f53692c657a5bbc2c08ed6c6a36d95c29865f7cb7",
+      "svgSha256": "11ff2a111eb47ed5a76f39830cffef1f1477a0273351d1f1f26d9937b1e628c8"
+    },
+    "presentations": {
+      "symbol": "nQr",
+      "role": "PQr / RQr plugin-name resolver",
+      "sourceRange": {
+        "start": 4690548,
+        "end": 4691333,
+        "unit": "UTF-16 code units"
+      },
+      "expressionSha256": "05daa677283f1fc6ca12f3955585bdb08039b10f4ec2aba3a43ed1d01fc784b4",
+      "nodeSha256": "5658159c4aec187bb6370a23af520b8bb072ea0a3e1b07ea29df82ef70665528",
+      "svgSha256": "7ba4997ad3dab0ce9d5e64f74487d719029b35532ff5c8aaedcbf9076cb5fbaa"
+    },
+    "salesforce": {
+      "symbol": "TQr",
+      "role": "PQr / RQr plugin-name resolver",
+      "sourceRange": {
+        "start": 4705198,
+        "end": 4705769,
+        "unit": "UTF-16 code units"
+      },
+      "expressionSha256": "9a71bf31ac8edd5f2e735aaea560619bb14221a41fc27ebc6268fef609cd33a4",
+      "nodeSha256": "d3284605c6cd875240e6537f71ac761ce6e6fee2a61cefd942be919e18177975",
+      "svgSha256": "279ae2734d715af5f3ff29961667738b94bfa5ae1ebf0d843a2b404c2fa193c4"
+    },
+    "sites": {
+      "symbol": "DQr",
+      "role": "PQr / RQr plugin-name resolver",
+      "sourceRange": {
+        "start": 4705807,
+        "end": 4706593,
+        "unit": "UTF-16 code units"
+      },
+      "expressionSha256": "b50dd17e248ac3be4a32c6b7f93d63b1e356107100d233801c2bc165297e2db3",
+      "nodeSha256": "04a2451ff2033a3ddbb277be4b010a83ec26974038c50c919247dc0291a2d0f9",
+      "svgSha256": "ff0656bf7e1557584fe91f383a72c8272cae2bfa29cee11fc5825af79b951ea4"
+    },
+    "slack": {
+      "symbol": "kQr",
+      "role": "PQr / RQr plugin-name resolver",
+      "sourceRange": {
+        "start": 4706631,
+        "end": 4708439,
+        "unit": "UTF-16 code units"
+      },
+      "expressionSha256": "84e3e2126b317b9397d6c67672c1088901a395f6e17b6f3e1e2118ef14f054c1",
+      "nodeSha256": "6ca3313ca15a27c7dd512d0ed2052d948f66222fa14f4ca3ecd9ee5a7643cf9f",
+      "svgSha256": "016acc82888f974f39f28cdd2d8c3da512556f1e4733b6fbabdec78ff1a4e4fe"
+    },
+    "wallet": {
+      "symbol": "MQr",
+      "role": "PQr / RQr plugin-name resolver",
+      "sourceRange": {
+        "start": 4708479,
+        "end": 4708810,
+        "unit": "UTF-16 code units"
+      },
+      "expressionSha256": "5b22be6a4bf13bdf2e06eaca96c237cfdeee886297035444f4326f4606ec07ce",
+      "nodeSha256": "d435d7ded99063e635de3b3b352a3b2bd3ae76e9c81bfa463fe60d51b3cb7f6c",
+      "svgSha256": "067eae58aca3dbab87e302ca8828a59df6334097233de87aaf72ea26b4d00ac1"
+    }
+  }
+}

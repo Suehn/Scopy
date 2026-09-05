@@ -51,8 +51,8 @@ test("linked images, local files, plugins, tasks and footnotes keep their own ic
   assert.doesNotMatch(render("[![logo](https://example.com/logo.png)](https://www.hsbc.com.hk)").html, /scopy-link-origin-icon|scopy-icon--external-link/);
   assert.match(render("[![logo](https://example.com/logo.png) 官网](https://www.hsbc.com.hk)").html, /favicon-hsbc-hk/);
   const { html } = render(readFileSync(fixture, "utf8"));
-  for (const kind of ["file-text", "javascript-badge", "code", "image", "puzzle-piece"]) assert.ok(html.includes(`scopy-icon--${kind}`), kind);
-  assert.match(html, /scopy-link--plugin" aria-disabled="true"><svg/);
+  for (const kind of ["document", "javascript", "code", "image"]) assert.ok(html.includes(`scopy-codex-icon--${kind}`), kind);
+  assert.match(html, /scopy-link--plugin" aria-disabled="true"><span class="scopy-mention-icon"><svg/);
   assert.match(html, /type="checkbox" checked disabled/);
   assert.match(html, /data-footnote-ref/);
   assert.doesNotMatch(html, /data-footnote-ref[^>]*><(?:img|svg)/);

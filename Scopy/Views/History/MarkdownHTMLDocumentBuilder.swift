@@ -858,22 +858,29 @@ enum MarkdownHTMLDocumentBuilder {
           }
           a.scopy-link--file,
           a.scopy-link--plugin {
-            display: inline-flex;
-            align-items: center;
-            gap: 8px;
-            max-width: 100%;
-            vertical-align: -0.16em;
+            padding-inline: 0.125rem;
+            font-weight: 500;
+            color: color-mix(in srgb, var(--scopy-link-color) 80%, var(--scopy-text-primary) 20%);
+            white-space: nowrap;
           }
-          a.scopy-link--file .scopy-file-icon {
-            width: 1em;
-            height: 1em;
-            /* Phosphor glyphs keep ~13% grid padding inside their 256 viewBox; scaling the whole
-               svg element (no internal clipping) restores the full-bleed optical size of the
-               Codex reference file icons without editing licensed path data. */
-            transform: scale(1.15);
+          .scopy-mention-icon {
+            position: relative;
+            display: inline-block;
+            width: 1rem;
+            height: 1lh;
+            vertical-align: bottom;
+            margin-inline-end: 3px;
           }
-          a.scopy-link--file .scopy-link__label {
-            min-width: 0;
+          .scopy-mention-icon > svg {
+            position: absolute;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 1rem;
+            height: 1rem;
+          }
+          a.scopy-link--file .scopy-link__label,
+          a.scopy-link--plugin .scopy-link__label {
+            white-space: normal;
             overflow-wrap: anywhere;
           }
           a.scopy-link--file-inert,

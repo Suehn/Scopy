@@ -2,21 +2,10 @@
 
 ## Phosphor Icons
 
-Selected SVG path data comes from `@phosphor-icons/core` 2.1.1:
-
-- `assets/regular/file-text.svg`
-- `assets/fill/file-js-fill.svg`
-- `assets/regular/code.svg`
-- `assets/regular/image.svg`
-- `assets/regular/arrow-up-right.svg`
-- `assets/regular/globe.svg`
-- `assets/regular/puzzle-piece.svg`
-- `assets/fill/star-fill.svg`
-- `assets/fill/map-pin-fill.svg`
-- `assets/fill/play-fill.svg`
-- `assets/regular/x.svg`
-- `assets/regular/caret-left.svg`
-- `assets/regular/caret-right.svg`
+The currency selector's combined up/down control retains the unchanged SVG path
+from `@phosphor-icons/core` 2.1.1 `assets/regular/caret-up-down.svg`.
+File, source, application and other rich-control artwork now uses the original
+Codex assets documented below; the obsolete substitute paths were removed.
 
 MIT License
 
@@ -73,3 +62,66 @@ EleBank's official identity and help-center host are linked from
 [the bank's website](https://www.elebank.com/zh-hk/).
 Only the explicitly listed hosts in `scopyLocalImageAssets.js` select these
 assets; lookalike domains and arbitrary subdomains do not inherit a logo.
+
+## Codex File and Attachment Icons
+
+`src/codexFileIconAssets.json` preserves the original SVG geometry, colors,
+gradients, view boxes, and intrinsic dimensions extracted from the locally
+installed Codex application on 2026-09-05:
+
+- Application bundle: `/Applications/ChatGPT.app` (`com.openai.codex`).
+- Version: `26.901.41600`, build `7982`.
+- Source JavaScript asset: `app-initial-86767c3d23e5.js`.
+- Source SHA-256: `fb72076ee44f6596f8dafa9a3effe37a3527a87db21fde8b4042233957b554bb`.
+- File selection source: `HV` → `_5r` → `b5r` (28 file-type entries; YAML uses the
+  same SVG as the generic file icon).
+- Audio and video source: `NVr` and `LVr`, respectively, using the source `pz`
+  SVG wrapper. These two attachment icons are explicit Scopy adaptations for
+  audio/video files; the Codex `HV` resolver itself does not select them.
+
+Extraction evaluated only individually isolated literal SVG JSX expressions
+with a minimal JSX-to-HAST adapter. It did not execute the application bundle.
+JSX fragments were flattened without changing SVG visual data. No path was
+redrawn or simplified and no brand color was substituted. Runtime code may
+namespace SVG definition IDs and apply the requested display dimensions;
+the stored originals retain their source IDs and dimensions.
+
+Standalone SVG fixtures and per-icon source-expression, HAST-node, and SVG-file
+SHA-256 values are recorded in
+`Tools/MarkdownRenderer/test/fixtures/codex-icons/manifest.json`. Source ranges in that
+manifest are zero-based UTF-16 code-unit ranges in the source JavaScript asset.
+
+The original application artwork belongs to OpenAI. These icons are separate
+from the Phosphor assets and are not covered by the Phosphor MIT license above.
+This provenance record is not a grant of redistribution rights.
+
+## Codex Plugin and Connector Icons
+
+`src/codexPluginIconAssets.json` separately preserves all 22 entries from the
+same Codex application's `PQr` → `IQr` → `LQr` → `RQr` plugin-name resolver.
+This includes its original Figma, Git, Gmail, Google Calendar, Google Docs,
+Google Drive, Google Sheets, Google Slides, GitHub, Linear, Notion, Salesforce,
+Sites, and Slack artwork, plus Computer Use, Wallet, and file-format icons.
+`presentations` and `file-presentation` share the same original SVG component.
+
+- Codex version: `26.901.41600`, build `7982`, `com.openai.codex`.
+- Extraction date: 2026-09-05.
+- Source JavaScript asset: `app-initial-86767c3d23e5.js`.
+- Source SHA-256: `fb72076ee44f6596f8dafa9a3effe37a3527a87db21fde8b4042233957b554bb`.
+- Standalone SVGs and source-expression/HAST/SVG hashes:
+  `Tools/MarkdownRenderer/test/fixtures/codex-plugin-icons/manifest.json`.
+
+Only isolated literal SVG JSX expressions were evaluated with the same minimal
+JSX-to-HAST adapter described above. The full application was not executed.
+Original paths, colors, gradients, view boxes, and intrinsic sizes were
+preserved. Names and normalization in this source resolver identify its actual
+supported keys; unknown app identifiers do not establish a brand match.
+
+This artwork and the represented trademarks remain the property of their
+respective owners. They are separate from the Phosphor assets and are not
+covered by the Phosphor MIT license. This record documents provenance and
+provides no grant of redistribution rights.
+
+## Original Codex globe and rich controls (2026-09-05)
+
+The same installed Codex version supplies original 12/16 light globes (`Tni`/`Dni`) and seven rich-control glyphs. See `src/codexGlobeAssets.json`, `src/codexControlIconAssets.json` and `test/fixtures/codex-control-icons/PROVENANCE.md` for exact definitions, source hashes and semantic limits. The `play-fill` integration key uses the original outlined `play-light-20`; no filled source was invented. Only the combined currency selector retains Phosphor artwork. These original application assets are separate from the Phosphor MIT license.

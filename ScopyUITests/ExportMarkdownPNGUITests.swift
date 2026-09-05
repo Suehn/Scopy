@@ -84,6 +84,21 @@ final class ExportMarkdownPNGUITests: XCTestCase {
         XCTAssertLessThan(bottomWhitespaceRows(props.cgImage), 120)
     }
 
+    func testAutoExportCodexIconsPreservesOriginalColors() throws {
+        try assertUserFixtureExport(
+            fixtureName: "markdown_codex_icons.md",
+            dumpStem: "markdown_codex_icons",
+            timeoutSeconds: 45,
+            minimumHeight: 900,
+            minimumContentHeight: 800,
+            forcePaletteReduction: true
+        )
+        let data = try Data(contentsOf: URL(fileURLWithPath: "/tmp/scopy_uitest_export_markdown_codex_icons.png"))
+        XCTAssertGreaterThan(data.count, 26)
+        // IHDR color type must remain RGB/RGBA even when lossy export is enabled.
+        XCTAssertTrue([UInt8(2), UInt8(6)].contains(data[25]))
+    }
+
     func testAutoExportSourceIconsFixture() throws {
         try assertUserFixtureExport(
             fixtureName: "markdown_link_icons.md",
@@ -1609,7 +1624,8 @@ final class ExportMarkdownPNGUITests: XCTestCase {
         dumpStem: String,
         timeoutSeconds: TimeInterval,
         minimumHeight: Int,
-        minimumContentHeight: Int
+        minimumContentHeight: Int,
+        forcePaletteReduction: Bool = false
     ) throws {
         let fixture = fixturePath(relative: "Fixtures/\(fixtureName)")
         let dumpPath = "/tmp/scopy_uitest_export_\(dumpStem).png"
@@ -1626,6 +1642,9 @@ final class ExportMarkdownPNGUITests: XCTestCase {
         app.launchEnvironment["SCOPY_UITEST_MARKDOWN_EXPORT_RESOLUTION"] = "100"
         app.launchEnvironment["SCOPY_EXPORT_DUMP_PATH"] = dumpPath
         app.launchEnvironment["SCOPY_EXPORT_ERROR_DUMP_PATH"] = errorPath
+        if forcePaletteReduction {
+            app.launchEnvironment["SCOPY_UITEST_FORCE_PNGQUANT_MARKDOWN_EXPORT"] = "1"
+        }
         app.launch()
         defer { app.terminate() }
 

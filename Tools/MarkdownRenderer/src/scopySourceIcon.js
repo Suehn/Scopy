@@ -1,4 +1,4 @@
-import { scopyIcon } from "./scopyIcons.js";
+import { codexGlobeIcon } from "./scopyCodexIcons.js";
 import { isValidExternalHTTPURL } from "./scopyExternalURLPolicy.js";
 import { bundledFaviconAssetForHost, bundledImagePath } from "./scopyLocalImageAssets.js";
 
@@ -14,7 +14,7 @@ export function scopySourceIcon(url, classNames, faviconClass) {
       children: []
     };
   }
-  const icon = scopyIcon("globe");
+  const icon = codexGlobeIcon(classNames.includes("scopy-source-citation-origin-icon") ? 12 : 16);
   icon.properties.className.push(...classNames);
   return icon;
 }
@@ -25,7 +25,7 @@ export function replaceFailedSourceIcon(image) {
   const classes = ["scopy-link-origin-icon", "scopy-source-citation-origin-icon", "scopy-rich-origin-icon"];
   const matched = classes.filter((name) => image?.classList?.contains(name));
   if (!matched.length || !image.parentNode) return false;
-  const icon = scopyIcon("globe");
+  const icon = codexGlobeIcon(matched.includes("scopy-source-citation-origin-icon") ? 12 : 16);
   const doc = image.ownerDocument;
   const namespace = "http://www.w3.org/2000/svg";
   const svg = doc.createElementNS(namespace, "svg");
@@ -39,6 +39,8 @@ export function replaceFailedSourceIcon(image) {
   const path = doc.createElementNS(namespace, "path");
   path.setAttribute("d", icon.children[0].properties.d);
   path.setAttribute("fill", "currentColor");
+  path.setAttribute("fill-rule", "evenodd");
+  path.setAttribute("clip-rule", "evenodd");
   svg.appendChild(path);
   image.parentNode.replaceChild(svg, image);
   return true;

@@ -271,6 +271,7 @@ final class WebViewLifecycleTests: XCTestCase {
         {"version":2,"type":"news","items":[{"title":"损坏图标仍保留正文","url":"https://example.org/","favicon":{"src":"data:image/png;base64,AAAA"}}]}
         ```
         """
+        let mentions = "[PDF](/tmp/report.pdf) [Word](/tmp/report.docx) [Word again](/tmp/report.docx) [图片](/tmp/image.png) [视频](/tmp/movie.mp4) [音频](/tmp/audio.wav) [Google Sheets](app://google-sheets) [Google Sheets again](app://google-sheets)"
         // The standalone xctest runner has no app resource directory. Load the same
         // canonical document against the checked-in atomic asset set explicitly.
         let assetRoot = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
@@ -279,7 +280,7 @@ final class WebViewLifecycleTests: XCTestCase {
         try FileManager.default.copyItem(at: assetRoot, to: testAssets)
         defer { try? FileManager.default.removeItem(at: testAssets) }
         let documentURL = testAssets.appendingPathComponent("test.html")
-        try MarkdownHTMLRenderer.render(markdown: source).write(to: documentURL, atomically: true, encoding: .utf8)
+        try MarkdownHTMLRenderer.render(markdown: source + "\n\n" + mentions).write(to: documentURL, atomically: true, encoding: .utf8)
         controller.webView.navigationDelegate = nil
         controller.webView.loadFileURL(documentURL, allowingReadAccessTo: testAssets)
         var ready = false
@@ -314,9 +315,19 @@ final class WebViewLifecycleTests: XCTestCase {
           const loaded = images.length === 2 && images.every(i => i.complete && i.naturalWidth > 0);
           const aligned = iconBox.width > 0 && iconBox.width <= 32 && iconBox.left < labelBox.left && Math.abs(iconBox.top - labelBox.top) < 8;
           const fallback = root.querySelector('svg.scopy-rich-origin-icon[data-scopy-image-state="error"]');
+          const mentions = [...root.querySelectorAll('.scopy-mention-icon')];
+          const mentionGeometry = mentions.length === 8 && mentions.every(box => {
+            const svg = box.querySelector('svg'), b = box.getBoundingClientRect(), g = svg.getBoundingClientRect();
+            return Math.abs(g.width - 16) < 0.1 && Math.abs(g.height - 16) < 0.1 && Math.abs(g.top + g.height / 2 - b.top - b.height / 2) < 0.5;
+          });
+          const ids = [...root.querySelectorAll('[id]')].map(n => n.id);
+          const uniquePaintIDs = new Set(ids).size === ids.length;
+          const gradients = root.querySelectorAll('.scopy-mention-icon linearGradient').length > 0;
+          const masks = root.querySelectorAll('.scopy-mention-icon mask').length > 0;
+          const originalMediaColor = getComputedStyle(root.querySelector('.scopy-codex-icon--video path')).fill === 'rgb(146, 79, 247)';
           window.ScopyUnifiedMarkdown.freezeRichForExport(root);
           const afterIcons = root.querySelectorAll('img.scopy-link-origin-icon');
-          return JSON.stringify({loaded, aligned, fallback: !!fallback, noErrorText: !root.textContent.includes('图片无法显示'), exportPreservesIcons: afterIcons.length === images.length});
+          return JSON.stringify({loaded, aligned, mentionGeometry, uniquePaintIDs, gradients, masks, originalMediaColor, fallback: !!fallback, noErrorText: !root.textContent.includes('图片无法显示'), exportPreservesIcons: afterIcons.length === images.length});
         })()
         """
         var result: String?
@@ -332,7 +343,7 @@ final class WebViewLifecycleTests: XCTestCase {
         let json = try XCTUnwrap(result).data(using: .utf8)!
         let outcomes = try XCTUnwrap(JSONSerialization.jsonObject(with: json) as? [String: Bool])
         for (name, passed) in outcomes { XCTAssertTrue(passed, name) }
-        XCTAssertEqual(outcomes.count, 5)
+        XCTAssertEqual(outcomes.count, 10)
     }
 
     private func runMainLoopUntil(timeout: TimeInterval, condition: () -> Bool) -> Bool {
