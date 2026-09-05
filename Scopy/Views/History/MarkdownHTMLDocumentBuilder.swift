@@ -841,13 +841,23 @@ enum MarkdownHTMLDocumentBuilder {
             text-decoration: underline;
             text-underline-offset: 2px;
           }
-          a.scopy-link--external .scopy-icon--external-link {
-            width: 0.75em;
-            height: 0.75em;
-            margin-inline-start: 0.16em;
-            vertical-align: -0.01em;
+          a.scopy-link--external .scopy-link-origin-icon {
+            display: inline-block;
+            width: 1em;
+            height: 1em;
+            margin-inline-end: 0.28em;
+            vertical-align: -0.125em;
+            object-fit: contain;
+            border-radius: 2px;
           }
-          a.scopy-link--file {
+          a.scopy-link--external .scopy-link__label::before {
+            content: "\\2060";
+          }
+          a.scopy-link--external svg.scopy-link-origin-icon {
+            color: rgb(93, 112, 128);
+          }
+          a.scopy-link--file,
+          a.scopy-link--plugin {
             display: inline-flex;
             align-items: center;
             gap: 8px;
@@ -2465,6 +2475,7 @@ enum MarkdownHTMLDocumentBuilder {
                 function replaceFailedImage(image) {
                   try {
                     if (!image || !image.parentNode) { return; }
+                    if (window.ScopyUnifiedMarkdown.replaceFailedSourceIcon(image)) { return; }
                     var fallback = document.createElement('span');
                     var label = String(image.getAttribute('alt') || '').trim();
                     fallback.className = 'scopy-image-terminal-fallback';

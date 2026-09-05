@@ -99,6 +99,7 @@ Authoritative implementation surfaces:
 - `Tools/MarkdownRenderer/src/remarkScopyPublicCards.js`: the closed public-copy shape adapters that promote exact visible video/product/place blocks through the same v2 validator.
 - `Tools/MarkdownRenderer/src/richInteractionRuntime.js`: one delegated preview hydrator and deterministic export freeze.
 - `Tools/MarkdownRenderer/src/scopyIcons.js`: closed official Phosphor icon paths used by Codex-style links and rich controls.
+- `Tools/MarkdownRenderer/src/scopySourceIcon.js`: shared exact-host source icons and compact failed-favicon fallback.
 - `Tools/MarkdownRenderer/src/rehypeScopyKatex.js`: HTML-only math rendering and stable failure behavior.
 - `Scopy/Views/History/MarkdownPreviewWebView.swift`: generation-safe WebView lifecycle and metrics.
 - `Scopy/Services/Export/MarkdownExportService.swift`: PNG reliability strategies applied to the same HTML.
@@ -354,11 +355,13 @@ Font evidence must be stated carefully. The WACZ declares 63 `@font-face` entrie
 
 ## Links, Citations, Tasks, and Tables
 
-Ordinary links receive the external-link treatment only when their sanitized destination is an absolute HTTP(S) URL with a host, no credentials, no encoded or decoded control characters, and at most 8,192 UTF-8 bytes. Those links use the local blue accent, reveal an underline on hover, and append the bundled official Phosphor `arrow-up-right` icon. An explicit preview click opens the validated HTTP(S) destination through the native workspace URL handler; export is inert.
+Ordinary links receive the external-link treatment only when their sanitized destination is an absolute HTTP(S) URL with a host, no credentials, no encoded or decoded control characters, and at most 8,192 UTF-8 bytes. Those links use the local blue accent, reveal an underline on hover, and prepend a 1em source icon: verified bundled favicon for an exact mapped host, otherwise the bundled official Phosphor globe. A CSS word joiner keeps the icon with the start of the label without inserting characters into copied text; long labels retain ordinary inline wrapping. Image-only anchors keep their image without an extra source icon. An explicit preview click opens the validated HTTP(S) destination through the native workspace URL handler; export is inert.
 
-A Codex file link such as `[render.js](/Users/hh/Documents/code/Scopy/Tools/MarkdownRenderer/src/render.js:25)` retains the absolute path and one-based `:25` suffix as its Markdown destination. It is local, receives a file-kind icon rather than an external affordance, and never becomes a source citation. An explicit preview click may hand only that validated absolute path plus optional one-based line/column suffix to the native workspace opener; programmatic navigation, remote hosts, relative paths, double-slash paths, queries, fragments, credentials, and control characters are rejected. Relative paths and `plugin:` destinations retain the non-HTTP visual classification but remain inert. Same-document footnote/fragment links alone retain in-WebView navigation. Raw `file:` URLs are sanitized away rather than treated as an alias for the Codex absolute-path form.
+A Codex file link such as `[render.js](/Users/hh/Documents/code/Scopy/Tools/MarkdownRenderer/src/render.js:25)` retains the absolute path and one-based `:25` suffix as its Markdown destination. It is local, receives a file-kind icon rather than an external affordance, and never becomes a source citation. An explicit preview click may hand only that validated absolute path plus optional one-based line/column suffix to the native workspace opener; programmatic navigation, remote hosts, relative paths, double-slash paths, queries, fragments, credentials, and control characters are rejected. Relative paths retain their file-kind icon. `plugin:` destinations receive the official Phosphor puzzle-piece icon. Both retain the non-HTTP visual classification and remain inert. Same-document footnote/fragment links alone retain in-WebView navigation. Raw `file:` URLs are sanitized away rather than treated as an alias for the Codex absolute-path form.
 
-Ordinary links do not fetch or guess favicons. Rich v2 results may request only an explicitly named bundled favicon asset from the closed allowlist; any other brand icon falls back to deterministic local renderer SVG. A source citation may additionally show a bundled favicon only when its destination's exact lowercase host appears in the closed citation host map (`scopyLocalImageAssets.js`); every other citation keeps the deterministic globe icon, and no path fetches, guesses, or widens a host into a pattern.
+Source artwork is shared across ordinary HTTP(S) links, citation primary/supporting sources, and rich `news`/`web_results` source rows. The exact lowercase destination host, never the visible label or a suffix match, selects a bundled asset in `scopyLocalImageAssets.js`. Verified EleBank and HSBC HK artwork is included alongside the existing OpenAI, Investing.com and Reuters assets; original official URLs and hashes are recorded in `Tools/MarkdownRenderer/THIRD_PARTY_NOTICES.md`. Every unknown host uses the deterministic local globe. This front-positioned treatment follows the user's 2026-09-05 comparison screenshot; it is a user-requested Scopy presentation, not a claim that the older unfinished WACZ proves these banks' final DOM.
+
+A descriptive ordinary link may additionally reuse the exact URL's existing frozen enrichment favicon after the same bounded raster data-URI validation used by rich v2; only the first 48 frozen entries are considered and ordinary-link data-URI output has a 512 KiB character budget counting repeated occurrences. Over-budget icons use the bundled/globe fallback. Its authored label and inline shape stay intact. No new request or enrichment setting change occurs. Rich results continue to prefer their explicit validated image reference, then the exact-host map, then globe. A corrupt favicon becomes a compact local globe during the shared image-readiness phase, without expanding into the generic image-error message. Preview and PNG consume these same terminal image outcomes.
 
 Ordinary Markdown images also never trigger network access. The two exact ChatGPT Search documentation URLs present in `chatgpt_public_copy_markdown_sample.md` map to their corresponding bundled raster assets so that public-copy rendering is deterministic across machines. Matching is full-string exact, including query parameters; every other HTTP(S) image retains provenance/alt text and the deterministic offline fallback rather than being fetched or inferred.
 
@@ -494,6 +497,7 @@ Focused renderer assertions live in:
 
 - `Tools/MarkdownRenderer/test/chatgpt-wacz-20260828.test.js`
 - `Tools/MarkdownRenderer/test/render.test.js`
+- `Tools/MarkdownRenderer/test/source-icons.test.js`
 - `Tools/MarkdownRenderer/test/safe-html.test.js`
 - `Tools/MarkdownRenderer/test/asset-contract.test.js`
 - `ScopyTests/ChatGPTMarkdownRendererTests.swift`
@@ -505,6 +509,7 @@ Real user fixtures, rich-surface provenance, and strict v2 examples live in:
 - `ScopyUITests/Fixtures/chatgpt_rich_copy_sample.md` (copied visible text; ordinary-Markdown degradation, never synthesized cards)
 - `ScopyUITests/Fixtures/chatgpt_public_copy_markdown_sample.md` (exact public copy; ordinary images may receive the field-preserving image-group presentation adapter)
 - `ScopyUITests/Fixtures/chatgpt_rich_surfaces.md`
+- `ScopyUITests/Fixtures/markdown_link_icons.md` (bank links, unknown hosts, local/plugin links, citations, tasks, footnotes and source cards)
 - `ScopyUITests/Fixtures/README.md`
 
 Whole-fixture Node coverage is in `Tools/MarkdownRenderer/test/user-fixtures.test.js`. Real-app PNG export cases are in `ScopyUITests/ExportMarkdownPNGUITests.swift`; failure to enable the macOS UI automation harness is environment-blocked and cannot be counted as a pass.

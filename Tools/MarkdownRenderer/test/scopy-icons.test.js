@@ -3,6 +3,7 @@ import test from "node:test";
 import { SCOPY_ICON_NAMES, scopyIcon } from "../src/scopyIcons.js";
 
 const canonicalNames = [
+  "puzzle-piece",
   "file-text",
   "javascript-badge",
   "code",

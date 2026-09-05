@@ -104,6 +104,7 @@
 		22CAC8D2216EF5F939B413B0 /* HistoryViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 18510662ACE6AFE5DEB66283 /* HistoryViewModel.swift */; };
 		232E5447B97792941C6129DA /* KaTeX_Size1-Regular.woff2 in Resources */ = {isa = PBXBuildFile; fileRef = 2EE1FE7EB1F6F45E2516F019 /* KaTeX_Size1-Regular.woff2 */; };
 		23337C912A577960C511EEB6 /* FooterView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 21D905D4EC55C2920DDD4A26 /* FooterView.swift */; };
+		233C99DD1AB0698E2116F605 /* favicon-elebank-150.png in Resources */ = {isa = PBXBuildFile; fileRef = 2DBE48B5EDCA12819998CFBB /* favicon-elebank-150.png */; };
 		23850B41F38BC90311ACD0DE /* KaTeX_Main-Bold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = D731CF7F77AA5C6A09962488 /* KaTeX_Main-Bold.ttf */; };
 		23E413BF3FBB4FFF3B5FF598 /* XCTestExtensions.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA19ACBA28A519AD56F862DE /* XCTestExtensions.swift */; };
 		24BFACFEF8E8D165DBBDB81B /* HistoryItemFilePreviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4DC6A7ACEAFAAAF77066A68F /* HistoryItemFilePreviewView.swift */; };
@@ -139,6 +140,7 @@
 		2F21B622233CBD3AE5D4E9A9 /* ClipboardItemDisplayTextTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B48DDD4A33C8F8F615B17CA0 /* ClipboardItemDisplayTextTests.swift */; };
 		2F483FB5F05DC1F003816DFB /* HoverPreviewImageCacheTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 747759CE91D4B8639F351272 /* HoverPreviewImageCacheTests.swift */; };
 		2F61C96D9B3E4FA72FB6CFD3 /* HistoryItemMarkdownExportControllerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6165569F3708B3E387C69609 /* HistoryItemMarkdownExportControllerTests.swift */; };
+		2FC2914D91D5A948F4AE8B09 /* markdown_link_icons.md in Resources */ = {isa = PBXBuildFile; fileRef = D7606FCD0679847F08069204 /* markdown_link_icons.md */; };
 		2FCF65AF361332A023B227D9 /* LaTeXInlineTextNormalizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2DAAE2DB0F49DD63A8BAE8E6 /* LaTeXInlineTextNormalizer.swift */; };
 		3003C0B7078A4A8262C2F0DB /* image-group-chatgpt-search-button.jpg in Resources */ = {isa = PBXBuildFile; fileRef = 4C4B09C8F80E4B09C21E0B96 /* image-group-chatgpt-search-button.jpg */; };
 		30084BB50FB9888EE7A22979 /* MarkdownTableCodeSpanPipeNormalizerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4191DF443254AEB1B0B02054 /* MarkdownTableCodeSpanPipeNormalizerTests.swift */; };
@@ -213,6 +215,7 @@
 		48CA21D8D95B02785B7A5249 /* HistoryListInteractionCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE65E2E804A2670FCF17404B /* HistoryListInteractionCoordinator.swift */; };
 		48FEF6C0924CC035D973568E /* KaTeX_Main-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = CDF347C5B482D70864B12C4E /* KaTeX_Main-Regular.ttf */; };
 		490ABFAD17BC32D8BC6A3724 /* HoverPreviewTextSizingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2E40783442AC61FF6AB4D09E /* HoverPreviewTextSizingTests.swift */; };
+		49A94DE74FCE0C6733A1042C /* favicon-elebank-150.png in Resources */ = {isa = PBXBuildFile; fileRef = 6E5C450193B29D5753E24B39 /* favicon-elebank-150.png */; };
 		4A95D8E07E139A11201F4027 /* ConcurrencyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3527EAD22A82840AEDF3F820 /* ConcurrencyTests.swift */; };
 		4A97283EB7F543596192650F /* FilePreviewSupportTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 156557CD8078DC274375EABE /* FilePreviewSupportTests.swift */; };
 		4B2B806DC4707030C0324218 /* scopy-unified-renderer.iife.js.sha256 in Resources */ = {isa = PBXBuildFile; fileRef = 6C44E1EE4C782302992F81F0 /* scopy-unified-renderer.iife.js.sha256 */; };
@@ -392,6 +395,7 @@
 		86DD62086FF07DFB117F798B /* KaTeX_Math-Italic.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 1ADABCABCFD7B7E85F0224D3 /* KaTeX_Math-Italic.ttf */; };
 		873A9F6DEDF8C403C50A8BF2 /* KaTeX_Script-Regular.woff in Resources */ = {isa = PBXBuildFile; fileRef = 024FB47EE00106753C4DB412 /* KaTeX_Script-Regular.woff */; };
 		877A7C4CCD68E76263B6AF19 /* KaTeX_SansSerif-Italic.ttf in Resources */ = {isa = PBXBuildFile; fileRef = CD07D7CE6BE8E39A3AF4651C /* KaTeX_SansSerif-Italic.ttf */; };
+		87A4E9A4908A85DA539E7E8D /* favicon-elebank-150.png in Resources */ = {isa = PBXBuildFile; fileRef = 6E5C450193B29D5753E24B39 /* favicon-elebank-150.png */; };
 		884E86217C2B9383A211B56E /* ScrollCursorSetCoalescer.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFA72B55409DC71EB7E570D7 /* ScrollCursorSetCoalescer.swift */; };
 		887B19F1D0F5F5E002B880EF /* news-openai-jalapeno.jpg in Resources */ = {isa = PBXBuildFile; fileRef = D9BAB40563618D6302671819 /* news-openai-jalapeno.jpg */; };
 		88F77496CFB21A88BF0D8745 /* AppStateTestCompatibility.swift in Sources */ = {isa = PBXBuildFile; fileRef = C9D55BDCEE3B396CBE2DC623 /* AppStateTestCompatibility.swift */; };
@@ -503,6 +507,7 @@
 		AF39160A8C5689496AEF19FA /* FloatingPanelDismissPolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D3E7E2D6A25F67ADDEF8A57 /* FloatingPanelDismissPolicyTests.swift */; };
 		AF88843D26420117B347594B /* MarkdownTaskListRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = DB00E98E0A155E5198656DA9 /* MarkdownTaskListRuntime.swift */; };
 		B0019D19B2F765954C062A28 /* reference-link.md in Resources */ = {isa = PBXBuildFile; fileRef = E15DF921CD907AE377BF0826 /* reference-link.md */; };
+		B017701D03D47A65C0CDDD81 /* favicon-hsbc-hk-32.png in Resources */ = {isa = PBXBuildFile; fileRef = D36DE21BEADC8495515B8CB0 /* favicon-hsbc-hk-32.png */; };
 		B0B69389973463A9B81155A4 /* chatgpt_copy_chinese_table.md in Resources */ = {isa = PBXBuildFile; fileRef = B22069E741707A2786C30E5F /* chatgpt_copy_chinese_table.md */; };
 		B0F8C23D7B1B5DBE7FDB6F6B /* HotKeyServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF08A6073418036ABAC09144 /* HotKeyServiceTests.swift */; };
 		B10FF3B8AEEE28985C6B79F4 /* KaTeX_SansSerif-Italic.ttf in Resources */ = {isa = PBXBuildFile; fileRef = CD07D7CE6BE8E39A3AF4651C /* KaTeX_SansSerif-Italic.ttf */; };
@@ -634,6 +639,7 @@
 		DF15A575AEB6BFFC571AA648 /* SearchServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 15EBBE158869225275AB5F98 /* SearchServiceTests.swift */; };
 		DF2872C04F3E5F7404ECC8F1 /* news-openai-hugging-face.jpg in Resources */ = {isa = PBXBuildFile; fileRef = 980DAA8656401BFD34393B68 /* news-openai-hugging-face.jpg */; };
 		DF392D969C2EA104479B1B13 /* HoverPreviewTextSizing.swift in Sources */ = {isa = PBXBuildFile; fileRef = D8917ECD9B983D1DE16E8771 /* HoverPreviewTextSizing.swift */; };
+		DF9BEC52115E56665BDEBB63 /* favicon-hsbc-hk-32.png in Resources */ = {isa = PBXBuildFile; fileRef = 36D053EAD753740FCB4661B8 /* favicon-hsbc-hk-32.png */; };
 		DFB0718E0E804835211C723F /* HistoryListInteractionObservation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2CE8424AAA4AF537809D9147 /* HistoryListInteractionObservation.swift */; };
 		E05E6B1865EE279500489011 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 15AD12EB1E64621C175C997C /* SettingsView.swift */; };
 		E1810664181CAB8A03B59441 /* KaTeX_Typewriter-Regular.woff in Resources */ = {isa = PBXBuildFile; fileRef = A8242720DB38F21E56D5181F /* KaTeX_Typewriter-Regular.woff */; };
@@ -666,6 +672,7 @@
 		EBF2E6EC8FB4C45EF7926005 /* KaTeX_SansSerif-Regular.woff2 in Resources */ = {isa = PBXBuildFile; fileRef = F16334487FE981B66D0438B5 /* KaTeX_SansSerif-Regular.woff2 */; };
 		EBFC503BE6005552DBACECFB /* MarkdownRenderContext.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4691EB889BD8853399C89DF /* MarkdownRenderContext.swift */; };
 		ED43F03C5BA0981F9AA28B0B /* SettingsPageHeader.swift in Sources */ = {isa = PBXBuildFile; fileRef = C977DE6F35EC7F84B1462BF9 /* SettingsPageHeader.swift */; };
+		EDE3CE1F657AECE298882D57 /* favicon-hsbc-hk-32.png in Resources */ = {isa = PBXBuildFile; fileRef = 36D053EAD753740FCB4661B8 /* favicon-hsbc-hk-32.png */; };
 		EE38FEF9AA08B75350268678 /* SettingsConcurrencyMergeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 141E9CECE7EA4C7ADD332905 /* SettingsConcurrencyMergeTests.swift */; };
 		EF082ECDD73A8C6562990723 /* MarkdownSyntaxProtectorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A6E587E62AEA336ECC849651 /* MarkdownSyntaxProtectorTests.swift */; };
 		EF52B1ECC178B94131984E35 /* favicon-openai-32.png in Resources */ = {isa = PBXBuildFile; fileRef = 3E88B3BFBDF2163711ABDFC1 /* favicon-openai-32.png */; };
@@ -812,6 +819,7 @@
 		2CE8424AAA4AF537809D9147 /* HistoryListInteractionObservation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryListInteractionObservation.swift; sourceTree = "<group>"; };
 		2D09BA0550F18A7F9EF6A074 /* MockServices.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockServices.swift; sourceTree = "<group>"; };
 		2DAAE2DB0F49DD63A8BAE8E6 /* LaTeXInlineTextNormalizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LaTeXInlineTextNormalizer.swift; sourceTree = "<group>"; };
+		2DBE48B5EDCA12819998CFBB /* favicon-elebank-150.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "favicon-elebank-150.png"; sourceTree = "<group>"; };
 		2DD68D65AAE34804297FB3A7 /* FullIndexDiskCacheHardeningTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FullIndexDiskCacheHardeningTests.swift; sourceTree = "<group>"; };
 		2E40783442AC61FF6AB4D09E /* HoverPreviewTextSizingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HoverPreviewTextSizingTests.swift; sourceTree = "<group>"; };
 		2EE1FE7EB1F6F45E2516F019 /* KaTeX_Size1-Regular.woff2 */ = {isa = PBXFileReference; path = "KaTeX_Size1-Regular.woff2"; sourceTree = "<group>"; };
@@ -822,6 +830,7 @@
 		32D999A7588A12D89B127388 /* PngquantServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PngquantServiceTests.swift; sourceTree = "<group>"; };
 		33AD448FC3C112E3EC1A82B2 /* MarkdownSyntaxProtector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownSyntaxProtector.swift; sourceTree = "<group>"; };
 		3527EAD22A82840AEDF3F820 /* ConcurrencyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConcurrencyTests.swift; sourceTree = "<group>"; };
+		36D053EAD753740FCB4661B8 /* favicon-hsbc-hk-32.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "favicon-hsbc-hk-32.png"; sourceTree = "<group>"; };
 		36EED97B0F997DD960108413 /* KaTeX_Main-Regular.woff */ = {isa = PBXFileReference; path = "KaTeX_Main-Regular.woff"; sourceTree = "<group>"; };
 		36F2E1F457E9164BB4772826 /* SettingsWindowCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsWindowCoordinatorTests.swift; sourceTree = "<group>"; };
 		36F3B1A794A066479AD9BDEB /* HistoryRowSelectionFanout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryRowSelectionFanout.swift; sourceTree = "<group>"; };
@@ -896,6 +905,7 @@
 		6A2BAEF33A56AB9DC5808252 /* main.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = main.swift; sourceTree = "<group>"; };
 		6C44E1EE4C782302992F81F0 /* scopy-unified-renderer.iife.js.sha256 */ = {isa = PBXFileReference; path = "scopy-unified-renderer.iife.js.sha256"; sourceTree = "<group>"; };
 		6CA7DBA24F4EBA39B8AF76DE /* README.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = README.md; sourceTree = "<group>"; };
+		6E5C450193B29D5753E24B39 /* favicon-elebank-150.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "favicon-elebank-150.png"; sourceTree = "<group>"; };
 		6EE4401FFF4C04C3F4498B26 /* libsqlite3.tbd */ = {isa = PBXFileReference; lastKnownFileType = "sourcecode.text-based-dylib-definition"; name = libsqlite3.tbd; path = usr/lib/libsqlite3.tbd; sourceTree = SDKROOT; };
 		6F00D09F6FFB196F3B17E451 /* KaTeX_AMS-Regular.woff2 */ = {isa = PBXFileReference; path = "KaTeX_AMS-Regular.woff2"; sourceTree = "<group>"; };
 		6F3688AAE5BBEB37456EEA10 /* KaTeX_Size3-Regular.woff2 */ = {isa = PBXFileReference; path = "KaTeX_Size3-Regular.woff2"; sourceTree = "<group>"; };
@@ -925,6 +935,7 @@
 		82CFF8877261ED83C85EA933 /* KaTeX_Size1-Regular.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "KaTeX_Size1-Regular.ttf"; sourceTree = "<group>"; };
 		844C4C084D60F319E545D8E0 /* AppDelegateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegateTests.swift; sourceTree = "<group>"; };
 		85328477E197D8B958744DD5 /* Scopy.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Scopy.entitlements; sourceTree = "<group>"; };
+		854261159C224F67A2D4EFFF /* scopy-link-icons-20260905 */ = {isa = PBXFileReference; lastKnownFileType = folder; name = "scopy-link-icons-20260905"; path = .; sourceTree = SOURCE_ROOT; };
 		87618982DF3A1D4F738AC4B8 /* chatgpt_public_copy_markdown_sample.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = chatgpt_public_copy_markdown_sample.md; sourceTree = "<group>"; };
 		87F62228AF78982B9DD8A1F0 /* KaTeX_Main-BoldItalic.woff2 */ = {isa = PBXFileReference; path = "KaTeX_Main-BoldItalic.woff2"; sourceTree = "<group>"; };
 		896E7E53DDFA91945E5BF7A2 /* currency-shell-vars.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = "currency-shell-vars.md"; sourceTree = "<group>"; };
@@ -945,7 +956,6 @@
 		9644B5C6C165540B99E861D0 /* KaTeX_Math-Italic.woff */ = {isa = PBXFileReference; path = "KaTeX_Math-Italic.woff"; sourceTree = "<group>"; };
 		97AEC3DECAB492AFD333ADA1 /* HistoryRelativeTimeClockTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryRelativeTimeClockTests.swift; sourceTree = "<group>"; };
 		980DAA8656401BFD34393B68 /* news-openai-hugging-face.jpg */ = {isa = PBXFileReference; lastKnownFileType = image.jpeg; path = "news-openai-hugging-face.jpg"; sourceTree = "<group>"; };
-		981F278303CBA80DA8E8A43D /* Scopy */ = {isa = PBXFileReference; lastKnownFileType = folder; name = Scopy; path = .; sourceTree = SOURCE_ROOT; };
 		9885AF2F2F08BC47D9D3A957 /* user_markdown_stress.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = user_markdown_stress.md; sourceTree = "<group>"; };
 		98A81F5BEC4470C8DA1B4864 /* TestDataFactory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TestDataFactory.swift; sourceTree = "<group>"; };
 		9A04554A91EC5384AF33AA67 /* SearchPlannerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchPlannerTests.swift; sourceTree = "<group>"; };
@@ -1025,11 +1035,13 @@
 		D022F8113E684307FAD99300 /* README.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = README.md; sourceTree = "<group>"; };
 		D09D06477D29F2066855D402 /* ReviewFix24Tests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReviewFix24Tests.swift; sourceTree = "<group>"; };
 		D0C6646BEAEFFB053C94B22E /* KeyboardNavigationUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardNavigationUITests.swift; sourceTree = "<group>"; };
+		D36DE21BEADC8495515B8CB0 /* favicon-hsbc-hk-32.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "favicon-hsbc-hk-32.png"; sourceTree = "<group>"; };
 		D38BC14341511B0D98DD1546 /* KaTeX_Caligraphic-Bold.woff */ = {isa = PBXFileReference; path = "KaTeX_Caligraphic-Bold.woff"; sourceTree = "<group>"; };
 		D44765DCFEC088D84D51037F /* KaTeX_Caligraphic-Regular.woff */ = {isa = PBXFileReference; path = "KaTeX_Caligraphic-Regular.woff"; sourceTree = "<group>"; };
 		D46D30575F2F7DFC342AA626 /* MarkdownSourceProfileDetectorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownSourceProfileDetectorTests.swift; sourceTree = "<group>"; };
 		D5BB0068AA3C9002124DE49D /* KaTeX_SansSerif-Italic.woff2 */ = {isa = PBXFileReference; path = "KaTeX_SansSerif-Italic.woff2"; sourceTree = "<group>"; };
 		D731CF7F77AA5C6A09962488 /* KaTeX_Main-Bold.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "KaTeX_Main-Bold.ttf"; sourceTree = "<group>"; };
+		D7606FCD0679847F08069204 /* markdown_link_icons.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = markdown_link_icons.md; sourceTree = "<group>"; };
 		D8917ECD9B983D1DE16E8771 /* HoverPreviewTextSizing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HoverPreviewTextSizing.swift; sourceTree = "<group>"; };
 		D97F17C245BCC541ADD97F99 /* rich_markdown.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = rich_markdown.md; sourceTree = "<group>"; };
 		D9BAB40563618D6302671819 /* news-openai-jalapeno.jpg */ = {isa = PBXFileReference; lastKnownFileType = image.jpeg; path = "news-openai-jalapeno.jpg"; sourceTree = "<group>"; };
@@ -1316,7 +1328,7 @@
 		7FE17EEF8617970E762C41B4 /* Packages */ = {
 			isa = PBXGroup;
 			children = (
-				981F278303CBA80DA8E8A43D /* Scopy */,
+				854261159C224F67A2D4EFFF /* scopy-link-icons-20260905 */,
 			);
 			name = Packages;
 			sourceTree = "<group>";
@@ -1336,7 +1348,9 @@
 		95EFB718ECA060A1CFB2A992 /* rich */ = {
 			isa = PBXGroup;
 			children = (
+				6E5C450193B29D5753E24B39 /* favicon-elebank-150.png */,
 				ADE6D1D5A7EB19AB201B6BD5 /* favicon-help-openai-32.png */,
+				36D053EAD753740FCB4661B8 /* favicon-hsbc-hk-32.png */,
 				593FFA8E5E4F1C431B42F670 /* favicon-investing-32.png */,
 				376534903F32D2F1C94CAA53 /* favicon-openai-32.png */,
 				45FE5581BA6B7A5FE04D097A /* favicon-reuters-32.png */,
@@ -1596,7 +1610,9 @@
 		D14DEFE76D1F3C80EB35EBD8 /* chatgpt-rich */ = {
 			isa = PBXGroup;
 			children = (
+				2DBE48B5EDCA12819998CFBB /* favicon-elebank-150.png */,
 				9ADAC66BA3C4E18726B8FC98 /* favicon-help-openai-32.png */,
+				D36DE21BEADC8495515B8CB0 /* favicon-hsbc-hk-32.png */,
 				B78347DD005103E5AB5B3AAE /* favicon-investing-32.png */,
 				3E88B3BFBDF2163711ABDFC1 /* favicon-openai-32.png */,
 				373B2F77284B3AF79F40DCDB /* favicon-reuters-32.png */,
@@ -1665,6 +1681,7 @@
 				87618982DF3A1D4F738AC4B8 /* chatgpt_public_copy_markdown_sample.md */,
 				30ED7ABC96A3F3EC3C1AF535 /* chatgpt_rich_copy_sample.md */,
 				BE2C40E55ECCD1FA48F28CF7 /* chatgpt_rich_surfaces.md */,
+				D7606FCD0679847F08069204 /* markdown_link_icons.md */,
 				9E57493DEBD8670CDF52F04B /* markdown_safe_html_torture.md */,
 				D022F8113E684307FAD99300 /* README.md */,
 				78C694E7F8CA4BC030CEB9A0 /* resolution_scale.md */,
@@ -1852,12 +1869,15 @@
 				427CCADBB76CD9E2379954EE /* chatgpt_public_copy_markdown_sample.md in Resources */,
 				68B83CCF39A03A2E827039E6 /* chatgpt_rich_copy_sample.md in Resources */,
 				139AAB5621E0934C44816030 /* chatgpt_rich_surfaces.md in Resources */,
+				233C99DD1AB0698E2116F605 /* favicon-elebank-150.png in Resources */,
 				9721868D9D83030619E86440 /* favicon-help-openai-32.png in Resources */,
+				B017701D03D47A65C0CDDD81 /* favicon-hsbc-hk-32.png in Resources */,
 				53332DCA6E89AA22F8CB3A57 /* favicon-investing-32.png in Resources */,
 				EF52B1ECC178B94131984E35 /* favicon-openai-32.png in Resources */,
 				B117329827CF92730C60B45F /* favicon-reuters-32.png in Resources */,
 				6493EDDA8DBBF0FC13699EF2 /* image-group-chatgpt-search-button.jpg in Resources */,
 				7637C3FE0C98C3818AE6DA6C /* image-group-chatgpt-search-results.jpg in Resources */,
+				2FC2914D91D5A948F4AE8B09 /* markdown_link_icons.md in Resources */,
 				46FC01D8322547FAF7C2C553 /* markdown_safe_html_torture.md in Resources */,
 				7606A0ECDCC99F402295852B /* news-openai-hugging-face.jpg in Resources */,
 				9C5C05A36DFEF4AED2785BA6 /* news-openai-jalapeno.jpg in Resources */,
@@ -1955,7 +1975,9 @@
 				2DE0836FDCCF43137C6B334C /* code-fence-paths.md in Resources */,
 				46C42C9BB62C23F9210865DA /* currency-shell-vars.md in Resources */,
 				C8CC1960E186E74FF0C1FB09 /* explicit-math.md in Resources */,
+				49A94DE74FCE0C6733A1042C /* favicon-elebank-150.png in Resources */,
 				9A49EB79358B96FFE89A7FE9 /* favicon-help-openai-32.png in Resources */,
+				DF9BEC52115E56665BDEBB63 /* favicon-hsbc-hk-32.png in Resources */,
 				6F5F76131C6BAD6C5A0C2890 /* favicon-investing-32.png in Resources */,
 				F442EEB37A9A1665AFC9A75B /* favicon-openai-32.png in Resources */,
 				F97103158490895675720570 /* favicon-reuters-32.png in Resources */,
@@ -2054,7 +2076,9 @@
 				92E7AE42405491EDD1FCD685 /* code-fence-paths.md in Resources */,
 				8536241DF4D7B262D51F90F1 /* currency-shell-vars.md in Resources */,
 				2A7E3D55E73C5DE17E407277 /* explicit-math.md in Resources */,
+				87A4E9A4908A85DA539E7E8D /* favicon-elebank-150.png in Resources */,
 				DB3995EBBF7A6D18F66AC998 /* favicon-help-openai-32.png in Resources */,
+				EDE3CE1F657AECE298882D57 /* favicon-hsbc-hk-32.png in Resources */,
 				D9CF498F1C141AA27D635CAF /* favicon-investing-32.png in Resources */,
 				C8595AD425A4B6AED4404417 /* favicon-openai-32.png in Resources */,
 				4C9533970F572393A0B76B53 /* favicon-reuters-32.png in Resources */,

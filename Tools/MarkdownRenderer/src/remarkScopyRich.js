@@ -1,3 +1,4 @@
+import { scopySourceIcon } from "./scopySourceIcon.js";
 import { scopyIcon } from "./scopyIcons.js";
 import { bundledImagePath } from "./scopyLocalImageAssets.js";
 
@@ -768,7 +769,7 @@ function renderNews(surface) {
             ariaHidden: "true"
           }, [scopyIcon("image")]);
     const source = element("span", { className: ["scopy-rich-news-source"] }, [
-      renderOriginIcon(item.favicon, item.source || "Source"),
+      renderOriginIcon(item.favicon, item.url),
       element("span", {}, [text(item.source || hostLabel(item.url))])
     ]);
     const body = element("span", { className: ["scopy-rich-news-body"] }, [
@@ -811,7 +812,7 @@ function renderWebResults(surface) {
     return element("li", { className: ["scopy-rich-web-result"] }, [
       element("article", { id: surface.rootID + "-item-" + index }, [
         element("p", { className: ["scopy-rich-web-result-source"] }, [
-          renderOriginIcon(item.favicon, source),
+          renderOriginIcon(item.favicon, item.url),
           text(source),
           item.date ? element("time", {}, [text(item.date)]) : null
         ].filter(Boolean)),
@@ -1340,13 +1341,12 @@ function renderAccessiblePointList(points) {
   ));
 }
 
-function renderOriginIcon(image, fallbackAlt) {
+function renderOriginIcon(image, url) {
   if (image && imageRenderSource(image)) {
-    return renderImageVisual(image, fallbackAlt, ["scopy-rich-origin-icon"]);
+    // The adjacent source label already names this decorative icon.
+    return renderImageVisual({ ...image, alt: "" }, "", ["scopy-rich-origin-icon"]);
   }
-  const icon = scopyIcon("globe");
-  icon.properties.className.push("scopy-rich-origin-icon");
-  return icon;
+  return scopySourceIcon(url, ["scopy-rich-origin-icon"]);
 }
 
 function renderImageVisual(image, fallbackAlt, classNames) {

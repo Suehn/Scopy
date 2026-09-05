@@ -1,6 +1,5 @@
 import { isValidExternalHTTPURL } from "./scopyExternalURLPolicy.js";
-import { scopyIcon } from "./scopyIcons.js";
-import { bundledFaviconAssetForCitationHost, bundledImagePath } from "./scopyLocalImageAssets.js";
+import { scopySourceIcon } from "./scopySourceIcon.js";
 
 export function remarkScopySourceCitations() {
   return function transformer(tree) {
@@ -175,30 +174,12 @@ function normalizeIdentifier(value) {
 }
 
 function citationOriginIcon(url) {
-  // A citation may show a real favicon only through the closed bundled map keyed by the
-  // destination's exact host; every other citation keeps the deterministic globe. No fetching.
-  const asset = bundledFaviconAssetForCitationHost(citationHost(url));
-  const path = bundledImagePath(asset);
-  if (path) {
-    return element("img", {
-      src: path,
-      alt: "",
-      className: ["scopy-source-citation-origin-icon", "scopy-source-citation-favicon"]
-    }, []);
+  const icon = scopySourceIcon(url, ["scopy-source-citation-origin-icon"], "scopy-source-citation-favicon");
+  if (icon.tagName === "svg") {
+    icon.properties.width = 12;
+    icon.properties.height = 12;
   }
-  const icon = scopyIcon("globe");
-  icon.properties.className.push("scopy-source-citation-origin-icon");
-  icon.properties.width = 12;
-  icon.properties.height = 12;
   return icon;
-}
-
-function citationHost(url) {
-  try {
-    return new URL(String(url || "")).hostname.toLowerCase();
-  } catch {
-    return null;
-  }
 }
 
 function element(tagName, properties = {}, children = []) {

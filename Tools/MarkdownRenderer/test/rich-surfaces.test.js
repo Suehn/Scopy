@@ -214,16 +214,10 @@ test("strict v2 currency is numeric, bidirectional, and leaves its inputs enable
 });
 
 test("the bundled image asset map is closed and every mapped file is real", () => {
-  const html = rich({
-    version: 2,
-    type: "image_group",
-    layout: "carousel",
-    images: Object.keys(BUNDLED_IMAGE_ASSETS).map((asset) => ({ asset, alt: asset }))
-  });
-
   for (const [asset, relativePath] of Object.entries(BUNDLED_IMAGE_ASSETS)) {
+    const html = rich({ version: 2, type: "image_group", layout: "carousel", images: [{ asset, alt: asset }] });
     assert.equal(existsSync(previewAssetRoot + relativePath), true, `${asset} file exists`);
-    assert.match(html, new RegExp(`src="${relativePath.replaceAll(".", "\\.")}"`));
+    assert.ok(html.includes(`src="${relativePath}"`), `${asset} renders bundled bytes`);
   }
   assert.match(rich({
     version: 2,

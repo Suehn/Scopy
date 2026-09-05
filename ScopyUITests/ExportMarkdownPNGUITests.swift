@@ -84,6 +84,16 @@ final class ExportMarkdownPNGUITests: XCTestCase {
         XCTAssertLessThan(bottomWhitespaceRows(props.cgImage), 120)
     }
 
+    func testAutoExportSourceIconsFixture() throws {
+        try assertUserFixtureExport(
+            fixtureName: "markdown_link_icons.md",
+            dumpStem: "markdown_link_icons",
+            timeoutSeconds: 45,
+            minimumHeight: 800,
+            minimumContentHeight: 600
+        )
+    }
+
     func testAutoExportUserMarkdownStressFixtureCompletesWithoutBlankOrTruncation() throws {
         try assertUserFixtureExport(
             fixtureName: "user_markdown_stress.md",

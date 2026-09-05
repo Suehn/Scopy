@@ -10,6 +10,7 @@ Selected SVG path data comes from `@phosphor-icons/core` 2.1.1:
 - `assets/regular/image.svg`
 - `assets/regular/arrow-up-right.svg`
 - `assets/regular/globe.svg`
+- `assets/regular/puzzle-piece.svg`
 - `assets/fill/star-fill.svg`
 - `assets/fill/map-pin-fill.svg`
 - `assets/fill/play-fill.svg`
@@ -52,3 +53,23 @@ Copyright (c) Titus Wormer <tituswormer@gmail.com>
 The transitive `get-east-asian-width` package is also MIT licensed under the same terms.
 
 Copyright (c) Sindre Sorhus <sindresorhus@gmail.com> (https://sindresorhus.com)
+
+
+## Official Website Favicons
+
+The following original PNG files were downloaded unchanged on 2026-09-05 from
+the banks' official website icon links. They identify destinations in rendered
+links and citations; they do not imply endorsement. The logos and trademarks
+remain the property of their respective owners and are not covered by the
+Phosphor MIT license above.
+
+| Bundled asset | Official declaring page | Original icon URL | Original size | SHA-256 |
+| --- | --- | --- | --- | --- |
+| `rich/favicon-elebank-150.png` | [EleBank help center](https://support.platform.elebank.com/personal/zh-hk), `rel="shortcut icon"` | [Original EleBank PNG](https://cdn.wm.elebank.com/user-consult-node/assets/ele-favico.png) | 150 × 150 | `da74bf5a184e841e81a90f4bd59928f0ce489fe63ea48b09d0a5f2238617c806` |
+| `rich/favicon-hsbc-hk-32.png` | [HSBC HK FPS FAQ](https://www.hsbc.com.hk/campaigns/fps/faq/), `rel="icon"`, `sizes="32x32"` | [Original HSBC HK PNG](https://www.hsbc.com.hk/etc.clientlibs/dpws/clientlibs-public/clientlib-site/resources/favicons/favicon-32x32.png) | 32 × 32 | `e3fbe878da9f2a357e7e3f556d0c3e32b6a7c82f5bb7507f5b0878bad2a4c395` |
+
+Matching fixture copies live in `ScopyUITests/Fixtures/Assets/chatgpt-rich/`.
+EleBank's official identity and help-center host are linked from
+[the bank's website](https://www.elebank.com/zh-hk/).
+Only the explicitly listed hosts in `scopyLocalImageAssets.js` select these
+assets; lookalike domains and arbitrary subdomains do not inherit a logo.

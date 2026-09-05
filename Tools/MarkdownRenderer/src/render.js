@@ -16,6 +16,7 @@ import {
   scopySafeHTMLInlineHandler
 } from "./remarkScopySafeHTML.js";
 import { scopyIcon } from "./scopyIcons.js";
+import { scopySourceIcon } from "./scopySourceIcon.js";
 import { preprocessBackslashMath } from "./scopyBackslashMathPreprocessor.js";
 import { remarkScopyImageGroups } from "./remarkScopyImageGroups.js";
 import { remarkScopyPublicCards } from "./remarkScopyPublicCards.js";
@@ -77,7 +78,7 @@ function renderInternal(source, policy = {}) {
     })
     .use(rehypeGuardDataImages)
     .use(rehypeSanitize, scopySanitizeSchema)
-    .use(rehypeScopyLinkSemantics)
+    .use(rehypeScopyLinkSemantics, normalizedPolicy.linkEnrichment)
     .use(rehypeScopyKatex, { failureMode: "relaxed" })
     .use(rehypeHighlight, scopyHighlightOptions)
     .use(rehypeStringify);
@@ -306,8 +307,13 @@ const scopyHighlightOptions = {
   }
 };
 
-function rehypeScopyLinkSemantics() {
+function rehypeScopyLinkSemantics(enrichment) {
+  const favicons = new Map(Object.entries(enrichment || {}).slice(0, 48)
+    .filter(([, entry]) => isRenderableDataImage(entry?.favicon))
+    .map(([url, entry]) => [url, entry.favicon]));
   return function transformer(tree) {
+    // Bound emitted data, including repeated occurrences of the same link.
+    let remainingFaviconCharacters = 512 * 1024;
     visitElements(tree, (node) => {
       if (!node || node.tagName !== "a" || !node.properties) {
         return;
@@ -332,9 +338,18 @@ function rehypeScopyLinkSemantics() {
       if (isValidExternalHTTPURL(href)) {
         className.push("scopy-link", "scopy-link--external");
         node.properties.className = className;
+        // Image-only anchors already have their own visual identity. Do not attach
+        // an extra favicon to a linked image or its offline placeholder.
+        if (!hasVisibleLinkText(node)) return;
+        const candidate = favicons.get(href);
+        const favicon = candidate && candidate.length <= remainingFaviconCharacters ? candidate : null;
+        if (favicon) remainingFaviconCharacters -= favicon.length;
+        const icon = favicon
+          ? elementNode("img", { src: favicon, alt: "", className: ["scopy-link-origin-icon"] }, [])
+          : scopySourceIcon(href, ["scopy-link-origin-icon"]);
         node.children = [
-          elementNode("span", { className: ["scopy-link__label"] }, node.children || []),
-          scopyIcon("external-link")
+          icon,
+          elementNode("span", { className: ["scopy-link__label"] }, node.children || [])
         ];
         return;
       }
@@ -361,8 +376,19 @@ function rehypeScopyLinkSemantics() {
       }
       className.push("scopy-link", href.startsWith("plugin:") ? "scopy-link--plugin" : "scopy-link--inert");
       node.properties.className = className;
+      if (href.startsWith("plugin:")) {
+        node.properties.ariaDisabled = "true";
+        node.children = [scopyIcon("puzzle-piece"),
+          elementNode("span", { className: ["scopy-link__label"] }, node.children || [])];
+      }
     });
   };
+}
+
+function hasVisibleLinkText(node) {
+  if (node.type === "text") return /\S/u.test(node.value || "");
+  if (node.tagName === "img") return false;
+  return Array.isArray(node.children) && node.children.some(hasVisibleLinkText);
 }
 
 function isSameDocumentFragment(value) {

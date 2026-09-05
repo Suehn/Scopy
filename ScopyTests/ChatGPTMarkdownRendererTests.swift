@@ -375,7 +375,7 @@ final class ChatGPTMarkdownRendererTests: XCTestCase {
         XCTAssertTrue(html.contains("pointer-events: auto;"))
         XCTAssertTrue(html.contains("--scopy-link-color: rgb(46, 131, 210);"))
         XCTAssertTrue(html.contains("a.scopy-link:focus-visible"))
-        XCTAssertTrue(html.contains(".scopy-icon--external-link"))
+        XCTAssertTrue(html.contains(".scopy-link-origin-icon"))
         XCTAssertTrue(html.contains(".scopy-file-icon"))
         XCTAssertTrue(html.contains("a[data-footnote-backref]"))
         XCTAssertTrue(html.contains("html.scopy-export-mode a"))

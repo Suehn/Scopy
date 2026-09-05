@@ -74,7 +74,7 @@ test("sanitizes network link protocols to http, https, and explicit plugin only"
 
   assert.match(result.html, /href="https:\/\/example\.com"/);
   assert.match(result.html, /href="https:\/\/example\.com" class="scopy-link scopy-link--external"/);
-  assert.match(result.html, /<svg class="scopy-icon scopy-icon--external-link"[^>]*><path d="[^"]+" fill="currentColor"><\/path><\/svg>/);
+  assert.match(result.html, /<svg class="scopy-icon scopy-icon--globe scopy-link-origin-icon"[^>]*><path d="[^"]+" fill="currentColor"><\/path><\/svg>/);
   assert.match(result.html, /href="plugin:asset"/);
   assert.doesNotMatch(result.html, /href="plugin:asset"[^>]*scopy-link--external/);
   assert.doesNotMatch(result.html, /href="mailto:/);
@@ -104,7 +104,7 @@ test("Codex links add real SVG affordance, resolve absolute and tilde files, and
   ].join(" "));
 
   assert.match(result.html, /href="https:\/\/example\.com\/path" class="scopy-link scopy-link--external"/);
-  assert.match(result.html, /class="scopy-icon scopy-icon--external-link"[^>]+aria-hidden="true"/);
+  assert.match(result.html, /class="scopy-icon scopy-icon--globe scopy-link-origin-icon"[^>]+aria-hidden="true"/);
   assert.doesNotMatch(result.html, /↗|&#x2197;|&#8599;/);
   assert.match(result.html, /<a class="scopy-link scopy-link--file scopy-link--file-inert" data-scopy-file-kind="document" aria-disabled="true">[^<]*<svg[^>]*scopy-icon--file-text[^>]*>/);
   assert.doesNotMatch(result.html, /href="(?:\.\/)?docs\/guide\.md"/);
@@ -114,7 +114,7 @@ test("Codex links add real SVG affordance, resolve absolute and tilde files, and
   assert.match(result.html, /href="plugin:asset" class="scopy-link scopy-link--plugin"/);
   assert.match(result.html, /href="https:\/\/user:password@example\.com\/private" class="scopy-link scopy-link--inert"/);
   assert.match(result.html, /href="https:\/\/example\.com\/line%0Abreak" class="scopy-link scopy-link--inert"/);
-  assert.equal((result.html.match(/scopy-icon--external-link/g) || []).length, 1);
+  assert.equal((result.html.match(/scopy-link-origin-icon/g) || []).length, 1);
 });
 
 test("raw scopy-file, file, and javascript schemes cannot inject navigable links", () => {
@@ -197,7 +197,7 @@ test("does not promote encoded-control citation destinations", () => {
 test("keeps ordinary parenthesized markdown links as normal links", () => {
   const result = render("Read the docs ([guide][1]) before changing code.\n\n[1]: https://example.com/guide");
 
-  assert.match(result.html, /\(<a href="https:\/\/example\.com\/guide" class="scopy-link scopy-link--external"><span class="scopy-link__label">guide<\/span><svg class="scopy-icon scopy-icon--external-link"/);
+  assert.match(result.html, /\(<a href="https:\/\/example\.com\/guide" class="scopy-link scopy-link--external"><svg class="scopy-icon scopy-icon--globe scopy-link-origin-icon"[^>]*>.*?<\/svg><span class="scopy-link__label">guide<\/span>/);
   assert.doesNotMatch(result.html, /scopy-source-citation-link/);
 });
 

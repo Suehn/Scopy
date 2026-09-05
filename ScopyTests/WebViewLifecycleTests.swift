@@ -254,6 +254,87 @@ final class WebViewLifecycleTests: XCTestCase {
         XCTAssertNil(weakController, "Expected controller to deinit (no retain cycle via script message handler)")
     }
 
+    func testSourceIconsLoadAndFailedFrozenIconKeepsCompactFallback() throws {
+        let controller = MarkdownPreviewWebViewController()
+        let owner = UUID()
+        controller.beginOwnership(owner)
+        defer { controller.endOwnership(owner) }
+        let window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 816, height: 900), styleMask: [.borderless], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = controller.webView
+        window.orderFront(nil)
+        defer { window.close() }
+        let source = """
+        正文 [大象官方说明](https://support.platform.elebank.com/personal/zh-hk) 与 [汇丰 FPS 常见问题](https://www.hsbc.com.hk/campaigns/fps/faq/)。
+
+        ```scopy-rich
+        {"version":2,"type":"news","items":[{"title":"损坏图标仍保留正文","url":"https://example.org/","favicon":{"src":"data:image/png;base64,AAAA"}}]}
+        ```
+        """
+        // The standalone xctest runner has no app resource directory. Load the same
+        // canonical document against the checked-in atomic asset set explicitly.
+        let assetRoot = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("Scopy/Resources/MarkdownPreview", isDirectory: true)
+        let testAssets = FileManager.default.temporaryDirectory.appendingPathComponent("scopy-icon-webkit-" + UUID().uuidString, isDirectory: true)
+        try FileManager.default.copyItem(at: assetRoot, to: testAssets)
+        defer { try? FileManager.default.removeItem(at: testAssets) }
+        let documentURL = testAssets.appendingPathComponent("test.html")
+        try MarkdownHTMLRenderer.render(markdown: source).write(to: documentURL, atomically: true, encoding: .utf8)
+        controller.webView.navigationDelegate = nil
+        controller.webView.loadFileURL(documentURL, allowingReadAccessTo: testAssets)
+        var ready = false
+        let deadline = Date().addingTimeInterval(20)
+        while !ready && Date() < deadline {
+            var polled = false
+            controller.webView.evaluateJavaScript("Boolean(window.__scopyIsRenderReady && window.__scopyIsRenderReady())") { value, _ in
+                ready = value as? Bool == true
+                polled = true
+            }
+            _ = runMainLoopUntil(timeout: 2) { polled }
+            if !ready { RunLoop.main.run(until: Date().addingTimeInterval(0.1)) }
+        }
+        if !ready {
+            var diagnostic: String?
+            controller.webView.evaluateJavaScript("JSON.stringify(window.__scopyRenderState || {})") { value, error in
+                diagnostic = (value as? String) ?? String(describing: error)
+            }
+            _ = runMainLoopUntil(timeout: 2) { diagnostic != nil }
+            XCTFail("Real WebKit document did not reach terminal success: \(diagnostic ?? "no response")")
+            return
+        }
+        let checks = """
+        (() => {
+          const root = document.getElementById('content');
+          const images = [...root.querySelectorAll('img.scopy-link-origin-icon')];
+          const first = images[0];
+          const label = first.nextElementSibling;
+          const range = document.createRange();
+          range.selectNodeContents(label);
+          const iconBox = first.getBoundingClientRect(), labelBox = range.getClientRects()[0];
+          const loaded = images.length === 2 && images.every(i => i.complete && i.naturalWidth > 0);
+          const aligned = iconBox.width > 0 && iconBox.width <= 32 && iconBox.left < labelBox.left && Math.abs(iconBox.top - labelBox.top) < 8;
+          const fallback = root.querySelector('svg.scopy-rich-origin-icon[data-scopy-image-state="error"]');
+          window.ScopyUnifiedMarkdown.freezeRichForExport(root);
+          const afterIcons = root.querySelectorAll('img.scopy-link-origin-icon');
+          return JSON.stringify({loaded, aligned, fallback: !!fallback, noErrorText: !root.textContent.includes('图片无法显示'), exportPreservesIcons: afterIcons.length === images.length});
+        })()
+        """
+        var result: String?
+        var evaluationError: Error?
+        var evaluated = false
+        controller.webView.evaluateJavaScript(checks) { value, error in
+            result = value as? String
+            evaluationError = error
+            evaluated = true
+        }
+        XCTAssertTrue(runMainLoopUntil(timeout: 10) { evaluated })
+        XCTAssertNil(evaluationError)
+        let json = try XCTUnwrap(result).data(using: .utf8)!
+        let outcomes = try XCTUnwrap(JSONSerialization.jsonObject(with: json) as? [String: Bool])
+        for (name, passed) in outcomes { XCTAssertTrue(passed, name) }
+        XCTAssertEqual(outcomes.count, 5)
+    }
+
     private func runMainLoopUntil(timeout: TimeInterval, condition: () -> Bool) -> Bool {
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
