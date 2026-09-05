@@ -20,9 +20,9 @@ This page is the human-facing index for current release state. Automation should
 ## Current Release
 
 <!-- release-current:start -->
-- Version: `v0.80.2`
+- Version: `v0.80.3`
 - Date: `2026-09-05`
-- Release note: [v0.80.2](./history/v0.80.2.md)
+- Release note: [v0.80.3](./history/v0.80.3.md)
 - Changelog: [CHANGELOG.md](./CHANGELOG.md)
 - Profile doc: `none`
 <!-- release-current:end -->
@@ -30,6 +30,7 @@ This page is the human-facing index for current release state. Automation should
 ## Recent Releases
 
 <!-- release-recent:start -->
+- `2026-09-05` [v0.80.3](./history/v0.80.3.md) - Preserve Chinese tables and emphasis when capturing ChatGPT copies
 - `2026-09-05` [v0.80.2](./history/v0.80.2.md) - Fix Chinese emphasis and single-dollar math while simplifying capture tests
 - `2026-09-05` [v0.80.1](./history/v0.80.1.md) - Keep search pagination correctly ranked and apply new rows in small batches
 - `2026-09-04` [v0.80.0](./history/v0.80.0.md) - Copy reports whether it reached the pasteboard, copied folders replay as folders, and any hover preview can be pinned into a movable, resizable, always-on-top window
@@ -41,7 +42,6 @@ This page is the human-facing index for current release state. Automation should
 - `2026-09-02` [v0.77.0](./history/v0.77.0.md) - Mouse-wheel scrolling suppresses hover work, selection stops re-diffing the List, 100-row pages: scroll CPU 9.9 -> 2.9 s, main thread 42% -> 22%, callback max 75 -> 17-25 ms
 - `2026-09-02` [v0.76.0](./history/v0.76.0.md) - Real-input scroll profiling finds the cursor, revision, and observation costs; scroll CPU -32%, callback p95 83 -> 17 ms
 - `2026-09-02` [v0.75.0](./history/v0.75.0.md) - Frame-driven export settle and a PAM-backed export canvas: post-load export 2-3x faster, identical output, defaults speed 3 / 256 colors / 80-95
-- `2026-09-02` [v0.74.0](./history/v0.74.0.md) - Raw bitmap hand-off to pngquant and a parallel PNG writer: export stage 7.5x faster, pixel-identical output
 <!-- release-recent:end -->
 
 ## Full History

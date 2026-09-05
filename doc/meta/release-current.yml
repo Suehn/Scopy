@@ -1,6 +1,6 @@
-version: v0.80.2
+version: v0.80.3
 date: 2026-09-05
-release_doc: doc/releases/history/v0.80.2.md
+release_doc: doc/releases/history/v0.80.3.md
 release_index: doc/releases/README.md
 changelog_file: doc/releases/CHANGELOG.md
 profile_doc: null
@@ -9,25 +9,20 @@ spec_doc: doc/current/product-spec.md
 development_doc: doc/current/development-guide.md
 architecture_doc: doc/current/architecture.md
 last_verified_at: 2026-09-05
-summary: Fix Chinese emphasis and single-dollar math while simplifying capture tests
+summary: Preserve Chinese tables and emphasis when capturing ChatGPT copies
 verification:
   docs_validate: pass
   release_validate: pass
   release_policy: pass
-  build: pass_local_debug_and_tagged_hosted_release_33952516545
-  assets_verify: pass_node_147_build_and_atomic_asset_verification
-  test_unit: pass_hosted_830_executed_4_skipped_0_failures_run_33952250183
-  test_strict: pass_hosted_strict_830_executed_4_skipped_0_failures_run_33952250183
-  test_tsan: pass_hosted_811_executed_4_skipped_0_failures_run_33952250182
-  test_integration: not_run_no_schema_change_capture_parser_covered_by_unit_tests
+  build: pass_local_debug_source_0929bae
+  assets_verify: pass_atomic_renderer_and_katex_assets
+  test_unit: pass_local_standalone_xctest_833_executed_4_skipped_0_failures
+  test_strict: pass_local_strict_standalone_xctest_833_executed_4_skipped_0_failures
+  test_tsan: not_run_no_concurrency_change
+  test_integration: not_run_no_schema_change
   test_performance: not_run_no_performance_claim
   snapshot_release: not_run_no_backend_performance_change
-  frontend_profile_full: not_run_no_frontend_performance_claim
+  frontend_profile_full: not_run_no_frontend_change
   unified_performance: not_run_no_performance_claim
-  bundled_pngquant: unchanged_from_v0_74_0_fork_256e081_engine_fddcf09
-  test_ui_subset: pass_installed_release_png_identical_to_verified_candidate
-  release_commit: 37e7417436b03617f3c9507c78a4e3fbf5237c2e
-  release_workflow: https://github.com/Suehn/Scopy/actions/runs/33952516545
-  dmg_sha256: 086ddf8efad4980c56977979ddfea7bd6ad0c2c83068fb5387b1cf6bc0bc942a
-  homebrew_casks: pass_repo_7a980b3_and_tap_8fc2464_match_published_dmg
-  installed_bundle: pass_Applications_Scopy_0_80_2_build_514_launched
+  test_ui_subset: pass_real_app_png_1080x774_table_bold_currency_math
+  publication: pending
