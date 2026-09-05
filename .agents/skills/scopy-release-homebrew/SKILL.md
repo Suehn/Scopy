@@ -1,13 +1,13 @@
 ---
 name: scopy-release-homebrew
-description: "Prepare or verify a Scopy release through Git tags, GitHub DMG assets, Homebrew cask parity, and installed bundle verification. Use for release cutovers or readiness checks."
+description: "Prepare, publish, or verify Scopy releases across tags, GitHub DMGs, both Homebrew casks, and the installed app. Use for 发版, 发布准备, or release/install verification; ordinary code or documentation cleanup does not trigger publication."
 ---
 
 # Scopy Release
 
 Read `doc/meta/release-current.yml` and `doc/current/release-runbook.md` in the target checkout. The runbook owns commands, gates, packaging, and Homebrew acceptance; do not maintain a second procedure here.
 
-First inspect Git status, HEAD, and the requested target version. For readiness, inspect state and run relevant validation; tagging, pushing, or reinstalling requires that scope in the user request. An authorized release proceeds through the runbook using a coherent verified commit; preserve unrelated work and do not infer release authorization from a general cleanup request.
+First inspect Git status, HEAD, release metadata, and the requested mode/version. Resolve omitted version details from current release state and the verified change scope; ask only if the choice materially changes the release. For readiness, inspect and validate within that scope. For an authorized release, continue through publication and installation using the runbook and a coherent verified commit; existing session authorization is sufficient. Preserve unrelated work. General cleanup is not release authorization, and `deploy.sh --no-launch` still replaces the installed app.
 
 Keep these decision points explicit:
 

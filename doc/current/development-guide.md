@@ -180,17 +180,20 @@ Implication: if you touch settings behavior, preserve the Save/Cancel model and 
 
 ### Lightweight Development Workflow
 
-- Trellis tasks, PRDs, JSONL context, developer journals, and Trellis-specific agents or skills are not required.
-- For a small, well-bounded change, inspect the relevant code and canonical docs, implement it directly, run scope-appropriate validation, and report the result.
-- For a complex, cross-module, or high-risk change, write a short working plan. Add a document under `doc/proposals/` only when the design needs durable review, staged implementation, or future reuse.
-- Use sub-agents only when work can be split into genuinely independent investigations or reviews. They are optional, and the primary agent remains responsible for integration and validation.
-- Existing task artifacts may be consulted as historical input, but they do not define active workflow state or completion. Current contracts live in `project.yml`, source, tests, and canonical `doc/current/` documents.
-- Match validation to risk: documentation-only changes need relevant documentation checks; functional code normally needs build and unit coverage; concurrency, performance, release, UI, and hotkey changes add their scope-specific gates below.
+[AGENTS.md](../../AGENTS.md) owns shared autonomy, delegation, and validation rules. Use the current task for its outcome, constraints, and acceptance evidence; routine work needs no separate PRD, journal, or plan file.
+
+- For a long task, keep a compact checkpoint in the same conversation: current scope, checkout/commit, completed changes, evidence paths, and the next unresolved step. Re-read live Git and relevant artifacts after resuming. Save a proposal only when others need durable design review; archived task files are context, not active requirements.
+- Treat mid-task user corrections as updates to the current objective. Before dependent edits or publication, reconcile the changed scope with work already performed and tools still running; a new instruction does not undo completed actions.
+- Reuse completed validation only when the relevant source, dependencies/assets, build flags, and environment match, and identify that evidence. A documentation follow-up does not invalidate unchanged runtime evidence; a renderer dependency change does. Keep blocked, failed, skipped, and unattempted gates distinct.
+- Keep stable project rules in `AGENTS.md`, product contracts in their canonical documents, and repeatable procedures in narrowly scoped skills. A new model is a reason to inspect conflicting rules, not to copy its API manual, fix a model/effort setting for every task, or add a new agent framework.
+- Improve instructions from an observed failure. Review a small set of representative requests for the intended outcome, accidental scope expansion, unnecessary questions, and redundant checks. A skill's frontmatter validator proves structure only; do not claim agent behavior improved without observing subsequent runs.
+
+These choices apply the [Astra instruction-following and verification guidance](https://developers.openai.com/api/docs/guides/latest-model#prompting-best-practices) and [Codex best practices](https://learn.chatgpt.com/guides/best-practices), checked on 2026-09-05. They are project workflow choices; model pricing, API features, and product availability remain in current official documentation.
 
 ### Baseline Build/Test
 
-- `make build`
-- `./deploy.sh release --no-launch` for a repeatable local Release build and `/Applications` install; Xcode products stay in isolated DerivedData while SwiftPM continues to own `.build`
+- `make build` / `make release` compile Debug / Release without replacing the installed app.
+- `./deploy.sh release --no-launch` builds and installs into `/Applications`; use it when installation is intended. The flag skips launch only. Xcode products stay in isolated DerivedData while SwiftPM continues to own `.build`
 - `make test-unit`
 - `make test-tooling` checks project regeneration, per-worktree test build isolation, and the source/performance/quality evidence gates without Xcode or GUI access; CI runs the same entrypoint.
 - Explicit test DerivedData paths are scoped by a hash of the checkout path, then by flag variant. Parallel worktrees do not share the strict/performance/sanitizer build database. Plain builds and unit tests retain Xcode's default project-path isolation.
@@ -198,7 +201,7 @@ Implication: if you touch settings behavior, preserve the Save/Cancel model and 
 - `make test-strict` for concurrency-sensitive work
 - `make test-tsan` when the environment supports the hosted test path; the command auto-skips the known-bad `macOS 26.x + Xcode 26.2 (17C52)` hosted runtime combination
 - Hosted TSan CI lives in `.github/workflows/tsan.yml` on `macos-15 + Xcode 16.0`; treat that workflow as the supported real-coverage path until the local Apple runtime issue is resolved
-- Resource staging scripts in `project.yml` intentionally stay correctness-first for SwiftPM bundles and app resources. Optimize their internal work with idempotent/differential copy behavior; do not skip dynamic staging by enabling dependency analysis unless the input/output contract is fully explicit.
+- Preserve final bundled-resource validation in packaging. The package has no resources and the former SwiftPM resource-staging phase was removed; do not restore that phase from historical instructions.
 
 ### Performance Validation
 
@@ -224,17 +227,19 @@ Implication: if you touch settings behavior, preserve the Save/Cancel model and 
 
 ## Common Change Playbooks
 
+The paths below identify flows to trace and contracts to verify. Edit only affected owners; listing adjacent modules does not require changes to every module or test file. Apply performance gates when the changed path or claim makes them relevant.
+
 ### Search Behavior
 
-- Touch `SearchRequest`, `SearchMode`, and search engine code together.
+- Trace search requests through `SearchRequest`, `SearchMode`, and the search engine; update their owners when request or mode semantics change.
 - Keep exact-search query normalization shared between `SearchPlanner.planExact` and `SearchEngineImpl.searchExact`.
 - Re-check `SearchCoverage`, refine behavior, and any recent-only hint paths together.
 - Re-check header controls, search hints, pagination, and requirements docs.
-- Run search-focused performance validation, not only unit tests.
+- Run search-focused performance validation when query execution, paging, or index work changes.
 
 ### Clipboard Or Storage Semantics
 
-- Touch `ClipboardMonitor`, `ClipboardService`, and `StorageService` as one flow.
+- Trace capture through `ClipboardMonitor`, `ClipboardService`, and `StorageService` as one flow.
 - Re-check copy/replay semantics, external storage validation, cleanup behavior, and any item-model field assumptions.
 - Preserve the durable-spool contract: retain source through commit, make receipt + mutation atomic, transition the envelope to terminal before receipt removal, and treat receipt replay as a no-op even when the item was later deleted.
 - Route new cleanup variants through `StorageService.applyDeletePlan`; extend `DeleteCandidate` when a new policy predicate affects eligibility so commit-time revalidation remains complete.
@@ -244,18 +249,18 @@ Implication: if you touch settings behavior, preserve the Save/Cancel model and 
 
 ### Settings Or Hotkey Changes
 
-- Touch `SettingsDTO`, settings pages, `SettingsView`, and runtime hotkey flow together.
+- Trace the affected setting through `SettingsDTO`, settings pages, `SettingsView`, and runtime application; include the hotkey path when it changes.
 - Preserve Save/Cancel and `settingsChanged` behavior.
 - Verify `/tmp/scopy_hotkey.log` behavior when the hotkey path changes.
 
 ### Preview Or Export Changes
 
-- Touch preview UI, rendering pipeline, and `MarkdownExportService` together.
+- Trace the affected behavior through preview UI, the shared rendering pipeline, and `MarkdownExportService`.
 - Keep hover preview planning in `HistoryHoverPreviewPipeline`; row views should apply typed events rather than own decode/cache/metric policy.
 - For hover-preview work, run a focused test plus `scripts/perf-frontend-profile.sh --include-hover` so Markdown and image hover buckets are present.
 - For hover-transfer changes, cover pure geometry/session behavior, controller cancellation and generation replacement, list-level transfer ownership, stale popover-token geometry, and XCUI trajectories both through and outside the real corridor.
 - Run strict-concurrency coverage because the controller lifecycle is task-based. Treat the include-hover frontend profile as a broad rendering regression smoke; do not claim it measures safe-triangle travel unless its automation explicitly crosses row-to-popover geometry.
-- For Markdown renderer fixes, update `Tools/MarkdownRenderer/test/chatgpt-wacz-20260828.test.js`, `Tools/MarkdownRenderer/test/render.test.js`, and `ScopyTests/ChatGPTMarkdownRendererTests.swift`; add isolated export UI coverage when the PNG output contract changes.
+- For Markdown renderer fixes, add a minimal reproduction at the failing boundary and run the renderer gates in `AGENTS.md`. Existing Node tests under `Tools/MarkdownRenderer/test/` and Swift `ChatGPTMarkdownRendererTests` cover different boundaries; update assertions and shared fixtures when their contract changes. Add isolated export UI coverage when the PNG output contract changes.
 - Re-check pngquant settings interactions, preview latency, and output pasteboard behavior.
 
 ### File Action Or Context Menu Changes
@@ -266,7 +271,7 @@ Implication: if you touch settings behavior, preserve the Save/Cancel model and 
 
 ### Release Or Documentation Changes
 
-- Update metadata, release note, release index, changelog, and any active current docs that changed semantically.
+- For an ordinary documentation change, update affected canonical docs and run `make docs-validate`. Update release metadata, notes, indexes, and changelog only for an authorized release or a changed release fact.
 - Keep ordinary workflows top-level read-only. A release/documentation push validates only; only the explicit maintainer `make tag-release` / `make push-release` path may create a tag.
 - Run `make test-release-policy` whenever `.github/workflows/`, release scripts, or release Make targets change.
 - For release/versioning fixes, test both `scripts/version.sh --tag` and the release packaging path so the app bundle version, DMG name, and release metadata resolve from the same tag.

@@ -2,7 +2,7 @@
 doc_type: guide
 status: active
 owner: maintainers
-last_reviewed: 2026-07-11
+last_reviewed: 2026-09-05
 canonical: true
 related_versions:
   - v0.65.2
@@ -15,6 +15,8 @@ related_versions:
 ---
 
 ## Selection Rule
+
+Use this guide to select work in an open-ended audit or roadmap request. An explicit user request, including focused cleanup, defines the task; this guide does not require replacing it with a different priority.
 
 Rank candidate work by evidence, not novelty:
 
@@ -37,25 +39,13 @@ Prefer work that removes one or more of these:
 - architectural seams that repeatedly cause cross-layer defects or block safe extension;
 - missing observability or rollback boundaries for high-risk production behavior.
 
-## Required Evidence Before Implementation
+## Evidence Proportional To The Decision
 
-- [ ] Reproduce or trace the current failure/bottleneck end to end.
-- [ ] Name the affected users, operations, layers, and worst credible outcome.
-- [ ] Compare at least the smallest correct systemic fix and one alternative.
-- [ ] Define user-visible invariants and rollback surface.
-- [ ] Choose tests or measurements that would fail before and pass after.
-- [ ] Confirm the work is not merely cleanup adjacent to a higher-impact unresolved issue.
+For a material bug or bottleneck, reproduce it or trace the failing boundary, identify affected behavior, and select evidence that distinguishes the fix from the baseline. Compare alternatives when there is a real architectural, performance, or rollback tradeoff; a small local fix needs no artificial second design.
 
-## Small Changes
+For requested cleanup, verify callers, runtime entrypoints, and the behavior each test protects. Remove a wrapper or obsolete path when its responsibility is already covered. Retain distinct failure coverage even when tests look similar. The useful result is less maintenance with preserved behavior, not a deletion quota or a new abstraction.
 
-A small change is worth doing when it directly:
-
-- closes a high-severity failure mode;
-- enables or proves a larger high-leverage change;
-- removes a recurring maintenance hazard with broad reach;
-- makes the current change safely testable, reversible, or observable.
-
-Defer cosmetic cleanup, speculative abstraction, and isolated micro-optimization when they do not meet one of those conditions.
+Name user-visible invariants and the rollback surface for cross-module or risky changes. Keep these in the working plan unless durable review is needed.
 
 ## Quality Is A Constraint, Not A Substitute For Impact
 
@@ -75,7 +65,7 @@ Elegant implementation does not rescue a low-value target. High impact does not 
 - the fix expands across unrelated subsystems without stronger evidence;
 - regression coverage cannot observe the failure boundary;
 - rollback would require reverting unrelated behavior;
-- a higher-severity confirmed issue becomes available.
+- a higher-severity confirmed issue makes the current plan unsafe or invalid; explain the impact and reconcile the scope rather than silently switching tasks.
 
 ## Completion Evidence
 
@@ -85,5 +75,6 @@ Before calling a high-leverage change complete:
 - [ ] Full risk-proportional gates pass, not only focused tests.
 - [ ] Performance claims use before/after evidence on a realistic workload.
 - [ ] No user-facing contract drift is hidden inside the change.
-- [ ] Specs, release notes, verification data, and rollback instructions agree.
-- [ ] The next roadmap item is re-ranked from current evidence.
+- [ ] Affected canonical docs and verification evidence agree; release records change only within release scope or to correct release facts.
+
+Stop when the requested outcome and applicable gates are satisfied. Re-rank remaining candidates only if the user requested ongoing roadmap selection; a completed fix does not automatically start another task.

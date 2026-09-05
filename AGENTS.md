@@ -5,8 +5,10 @@
 - Choose the simplest implementation that fully meets current requirements. Remove obsolete paths instead of adding compatibility layers, speculative abstractions, or temporary replacements. Keep concerns modular and each increment working end to end.
 - Use existing dependencies before reimplementing common functionality; verify their capabilities rather than guessing. Prefer maintained libraries when they reduce total complexity.
 - Preserve user changes. Inspect the worktree before editing; use an isolated checkout when other work is active. Search with `rg`; avoid destructive Git commands.
-- Small tasks need inspection, implementation, and verification. Cross-module or risky tasks need a short plan. Create a proposal only for decisions requiring durable review; no mandatory Trellis task, PRD, journal, or sub-agent ceremony.
-- Report actual results and limitations. Compilation, an unstarted test host, archived evidence, and diagnostic simplifications are not proof of runtime behavior or performance gains.
+- Small tasks need inspection, implementation, and verification. For cross-module or risky work, state the intended outcome, scope, and completion evidence in a short plan. Create a proposal only for decisions requiring durable review; no mandatory task files or sub-agent ceremony.
+- Make routine, reversible implementation decisions within the request and continue through verification. Ask only when missing information materially changes the outcome or a consequential action lacks authorization; use existing session authorization. Prepare a concrete, reviewable result before any remaining approval. If a repository rule blocks work, cite its exact file and wording and explain why it applies.
+- For broad audits with independent surfaces, use a small set of bounded sub-agents when the runtime permits; give each a question, ownership boundary, and evidence to return. Keep serial work local and verify integrated results in the primary task.
+- Report the outcome, validation, and material limits concisely in the user's language. Compilation, an unstarted test host, archived evidence, and diagnostic simplifications are not proof of runtime behavior or performance gains.
 
 ## Sources Of Truth
 
@@ -38,11 +40,11 @@
 | Renderer | Node `npm test`, `npm run build`, `npm run verify:assets` in `Tools/MarkdownRenderer`; app build, unit, strict, and a real-app PNG visual check; maintain Swift/Node contracts and export fixtures together |
 | Build/test/release tooling | `make test-tooling`, plus `make test-release-policy` for release workflows/scripts/targets |
 
-A host that never enters the requested scene is environment-blocked, not passed. Narrow failures before repeating broad suites. Build/test setup may install missing `xcodegen`; check availability and applicable network/installation authorization first.
+Complete the applicable gates above; broaden or repeat them only for changed inputs, failures, or unresolved risks. Add tests that detect a real regression, not assertions that mirror implementation details. A host that never enters the requested scene is environment-blocked, not passed. Narrow failures before repeating broad suites. Build/test setup may install missing `xcodegen`; check availability and applicable network/installation authorization first.
 
 ## Build And Release Entry Points
 
-- `make build` compiles Debug; `make release` compiles Release. `./deploy.sh` builds and launches; `./deploy.sh --no-launch` builds only. Generate the project with `bash scripts/xcodegen-generate-if-needed.sh` when needed.
+- `make build` compiles Debug; `make release` compiles Release. `./deploy.sh` builds, installs into `/Applications`, and launches; `--no-launch` skips only launch and still replaces the installed app. Use `make build` / `make release` for compilation without installation. Generate the project with `bash scripts/xcodegen-generate-if-needed.sh` when needed.
 - Source and tests live in `Scopy/`, `ScopyTests/`, and `ScopyUITests/`; `Package.swift` and `project.yml` define module ownership. Use Swift with four-space indentation, explicit access control, and names matching types.
 - Use `ScopyLog` categories and private metadata; never log clipboard bodies, image bytes, notes, or file contents. See the development guide for logging boundaries.
 - Commit messages are short imperative summaries. PRs explain behavior, verification, and material limits; include UI evidence for UI changes.
