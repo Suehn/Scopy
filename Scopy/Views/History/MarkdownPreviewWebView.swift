@@ -374,6 +374,7 @@ struct MarkdownPreviewWebView: NSViewRepresentable {
         config.defaultWebpagePreferences.allowsContentJavaScript = true
         config.preferences.javaScriptCanOpenWindowsAutomatically = false
         config.userContentController = WKUserContentController()
+        MarkdownPreviewWebView.installResponsiveLayout(into: config.userContentController)
 
         Self.installNetworkBlocker(into: config.userContentController)
         config.userContentController.add(context.coordinator.sizeMessageHandlerProxy, name: Self.sizeMessageHandlerName)
@@ -425,6 +426,15 @@ struct MarkdownPreviewWebView: NSViewRepresentable {
         scrollView.autohidesScrollers = true
         scrollView.scrollerStyle = .overlay
         scrollView.drawsBackground = false
+    }
+
+    /// Presentation only: exported documents retain the canonical output viewport.
+    fileprivate static func installResponsiveLayout(into controller: WKUserContentController) {
+        controller.addUserScript(WKUserScript(
+            source: "window.__scopyResponsivePreview = true;",
+            injectionTime: .atDocumentStart,
+            forMainFrameOnly: true
+        ))
     }
 
     fileprivate static func installNetworkBlocker(into controller: WKUserContentController) {
@@ -642,6 +652,7 @@ final class MarkdownPreviewWebViewController: NSObject, ObservableObject, WKNavi
         config.defaultWebpagePreferences.allowsContentJavaScript = true
         config.preferences.javaScriptCanOpenWindowsAutomatically = false
         config.userContentController = WKUserContentController()
+        MarkdownPreviewWebView.installResponsiveLayout(into: config.userContentController)
 
         let wv = WKWebView(frame: .zero, configuration: config)
         wv.allowsMagnification = false

@@ -14,13 +14,14 @@ struct HistoryItemImagePreviewView: View {
 
     var body: some View {
         let width: CGFloat = max(1, sizeBudget.maxWidth)
-        let maxHeight: CGFloat = sizeBudget.maxHeight
+        let maxHeight: CGFloat = max(1, sizeBudget.maxHeight - PreviewToolbar<EmptyView>.height)
 
         let content = previewContent()
         let naturalHeight = previewHeight(width: width)
         let desiredHeight = min(maxHeight, max(1, naturalHeight))
 
-        Group {
+        VStack(spacing: 0) {
+                PreviewToolbar { EmptyView() }
             if naturalHeight > maxHeight {
                 ScrollView(.vertical) {
                     content

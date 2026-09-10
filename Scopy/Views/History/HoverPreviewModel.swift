@@ -16,6 +16,8 @@ final class HoverPreviewModel {
     private var markdownRenderErrorKey: String?
     private var markdownRenderErrorReason: String?
     var isMarkdown: Bool = false
+    var presentationSize: CGSize?
+    var previewLayoutScalePercent: Int?
 
     // Export state
     var isExporting: Bool = false
@@ -167,6 +169,8 @@ final class HoverPreviewModel {
     /// Clears view-owned preview payload while allowing a user-started export to finish after the
     /// popover or its virtualized row disappears.
     func resetPreviewContent() {
+        presentationSize = nil
+        previewLayoutScalePercent = nil
         previewCGImage = nil
         text = nil
         markdownHTML = nil
@@ -195,6 +199,8 @@ final class HoverPreviewModel {
     /// WebView's current navigation instead of re-running the preview pipeline. Export state is
     /// feedback for the surface that started it and stays behind.
     func adoptRenderedContent(from source: HoverPreviewModel) {
+        presentationSize = source.presentationSize
+        previewLayoutScalePercent = source.previewLayoutScalePercent
         previewCGImage = source.previewCGImage
         text = source.text
         isMarkdown = source.isMarkdown

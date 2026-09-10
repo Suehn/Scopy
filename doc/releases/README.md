@@ -20,9 +20,9 @@ This page is the human-facing index for current release state. Automation should
 ## Current Release
 
 <!-- release-current:start -->
-- Version: `v0.80.5`
+- Version: `v0.80.6`
 - Date: `2026-09-11`
-- Release note: [v0.80.5](./history/v0.80.5.md)
+- Release note: [v0.80.6](./history/v0.80.6.md)
 - Changelog: [CHANGELOG.md](./CHANGELOG.md)
 - Profile doc: `none`
 <!-- release-current:end -->
@@ -30,6 +30,7 @@ This page is the human-facing index for current release state. Automation should
 ## Recent Releases
 
 <!-- release-recent:start -->
+- `2026-09-11` [v0.80.6](./history/v0.80.6.md) - Keep multiple resizable previews with quiet unified controls and responsive reading layout
 - `2026-09-11` [v0.80.5](./history/v0.80.5.md) - Discover and cache website icons across Markdown links, citations and source cards
 - `2026-09-05` [v0.80.4](./history/v0.80.4.md) - Render original Codex icons and preserve source artwork colors
 - `2026-09-05` [v0.80.3](./history/v0.80.3.md) - Preserve Chinese tables and emphasis when capturing ChatGPT copies

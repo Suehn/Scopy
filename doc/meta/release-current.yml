@@ -1,6 +1,6 @@
-version: v0.80.5
+version: v0.80.6
 date: 2026-09-11
-release_doc: doc/releases/history/v0.80.5.md
+release_doc: doc/releases/history/v0.80.6.md
 release_index: doc/releases/README.md
 changelog_file: doc/releases/CHANGELOG.md
 profile_doc: null
@@ -9,25 +9,19 @@ spec_doc: doc/current/product-spec.md
 development_doc: doc/current/development-guide.md
 architecture_doc: doc/current/architecture.md
 last_verified_at: 2026-09-11
-summary: Discover and cache website icons across Markdown links, citations and source cards
+summary: Independent resizable previews with quiet unified controls and responsive reading layout
 verification:
   docs_validate: pass
   release_validate: pass
   release_policy: pass_15_tests
   build: pass_local_debug
   assets_verify: pass_node_157_atomic_assets_3f2da803
-  test_unit: pass_focused_52_executed_1_network_skip_0_failures
-  test_strict: pass_focused_52_with_SWIFT_STRICT_CONCURRENCY_complete
-  test_tsan: pass_hosted_34508802594
+  test_unit: pass_focused_80_tests_0_failures
+  test_strict: pass_focused_80_with_SWIFT_STRICT_CONCURRENCY_complete
+  test_tsan: not_run_locally_no_new_background_concurrency
   test_integration: not_run_no_schema_change
   snapshot_release: not_run_no_backend_performance_change
   frontend_profile_full: not_run_user_requested_no_unrelated_performance_testing
   unified_performance: not_run_no_performance_claim
-  test_ui_subset: pass_slow_native_icon_WebKit_and_byte_identical_cold_offline_installed_PNG
-  release_commit: a7aefdd
-  release_workflow: https://github.com/Suehn/Scopy/actions/runs/34508807740
-  dmg_sha256: d53b6a35b970e06d4b2548c5b72cf48e3091e2a0fa9311ccb6bc311874863f31
-  homebrew_casks: pass_repo_19cc443_and_manual_tap_b1bfabe
-  tap_automation: failed_manual_ssh_sync_completed
-  hosted_ci: pass_34508802401
-  installed_bundle: pass_Applications_Scopy_0_80_5_build_527_launched
+  test_ui_subset: automation_host_blocked_native_windows_and_WebKit_pass
+  png_export: pass_real_app_byte_identical_NeoSoul_fixture

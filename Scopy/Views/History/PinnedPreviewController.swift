@@ -30,6 +30,8 @@ struct PinnedPreview: Identifiable {
         let maxWidth = HoverPreviewScreenMetrics.maxPopoverWidthPoints()
         let maxHeight = HoverPreviewScreenMetrics.maxPopoverHeightPoints()
 
+        if let size = model.presentationSize { return size }
+
         let contentSize: CGSize
         if model.isMarkdown, let measured = model.markdownContentSize {
             contentSize = CGSize(width: maxWidth, height: measured.height)
@@ -47,40 +49,26 @@ struct PinnedPreview: Identifiable {
     }
 }
 
-/// Owns the single pinned preview window.
-///
-/// One at a time: the Markdown preview is one shared `WKWebView`, and a second host would take it
-/// away from the first. For the same reason the list stops presenting hover previews while a
-/// preview is pinned.
+/// Owns independent snapshots and WebViews. The list lends its current WebView only when
+/// creating a window, then allocates a fresh hover controller for subsequent previews.
 @Observable
 @MainActor
 final class PinnedPreviewController {
-    private(set) var pinned: PinnedPreview?
-
-    @ObservationIgnored private var panel: PinnedPreviewPanel?
+    private(set) var previews: [UUID: PinnedPreview] = [:]
+    @ObservationIgnored private var panels: [UUID: PinnedPreviewPanel] = [:]
     @ObservationIgnored private var lastAppliedClearGeneration: UInt64 = 0
     @ObservationIgnored private var lastAppliedDeletionEvictionGeneration: UInt64 = 0
 
-    var isPinned: Bool { pinned != nil }
+    var isPinned: Bool { !previews.isEmpty }
 
-    /// Whether the window floats above other apps. On by default: a pinned preview exists to be
-    /// read while working somewhere else. Turning it off drops it to an ordinary window level.
-    var keepsOnTop: Bool = PinnedPreviewController.storedKeepsOnTop {
-        didSet {
-            guard keepsOnTop != oldValue else { return }
-            UserDefaults.standard.set(keepsOnTop, forKey: Self.keepsOnTopDefaultsKey)
-            if let panel { Self.applyKeepsOnTop(keepsOnTop, to: panel) }
-        }
+    func isPinned(itemID: UUID) -> Bool { previews[itemID] != nil }
+
+    func focus(itemID: UUID) {
+        panels[itemID]?.orderFrontRegardless()
     }
 
-    func isPinned(itemID: UUID) -> Bool {
-        pinned?.itemID == itemID
-    }
-
-    /// Pins the preview a row is currently showing.
-    ///
-    /// `source` is the row's live preview model; its rendered payload is copied so the row stays
-    /// free to reset or release its own session immediately afterwards.
+    /// Snapshots synchronously, before dismissing the row can clear its interaction model.
+    @discardableResult
     func pin(
         item: ClipboardItemDTO,
         revision: ClipboardItemContentRevision,
@@ -89,141 +77,123 @@ final class PinnedPreviewController {
         filePreviewPath: String?,
         source: HoverPreviewModel,
         settingsViewModel: SettingsViewModel,
-        markdownWebViewController: MarkdownPreviewWebViewController
-    ) {
-        guard source.hasRenderedContent else { return }
-
+        markdownWebViewController: MarkdownPreviewWebViewController?
+    ) -> Bool {
+        guard source.hasRenderedContent, previews[item.id] == nil else { return false }
         let model = HoverPreviewModel()
         model.adoptRenderedContent(from: source)
-
-        pinned = PinnedPreview(
-            itemID: item.id,
-            revision: revision,
-            kind: kind,
-            item: item,
-            filePreviewKind: filePreviewKind,
-            filePreviewPath: filePreviewPath,
-            model: model
+        let preview = PinnedPreview(
+            itemID: item.id, revision: revision, kind: kind, item: item,
+            filePreviewKind: filePreviewKind, filePreviewPath: filePreviewPath, model: model
         )
-
-        present(
-            settingsViewModel: settingsViewModel,
-            markdownWebViewController: markdownWebViewController
+        previews[item.id] = preview
+        let panel = makePanel(itemID: item.id)
+        panels[item.id] = panel
+        panel.contentView = NSHostingView(
+            rootView: PinnedPreviewWindowView(
+                preview: preview,
+                markdownWebViewController: markdownWebViewController,
+                initialKeepsOnTop: Self.storedKeepsOnTop,
+                onKeepsOnTopChange: { [weak panel] value in
+                    UserDefaults.standard.set(value, forKey: Self.keepsOnTopDefaultsKey)
+                    if let panel { Self.applyKeepsOnTop(value, to: panel) }
+                },
+                onDismiss: { [weak self] in self?.dismiss(itemID: item.id) }
+            ).environment(settingsViewModel)
         )
+        if !panel.setFrameUsingName(Self.frameAutosaveName + "." + item.id.uuidString),
+           !panel.setFrameUsingName(Self.frameAutosaveName) {
+            panel.setContentSize(preview.preferredContentSize(chromeHeight: PreviewToolbar<EmptyView>.height))
+            panel.center()
+        }
+        if let previous = panels.values.first(where: { $0 !== panel }) {
+            panel.setFrameOrigin(NSPoint(x: previous.frame.minX + 28, y: previous.frame.minY - 28))
+        }
+        let visibleFrame = panel.screen?.visibleFrame ?? HoverPreviewScreenMetrics.activeVisibleFrame()
+        panel.setFrame(Self.fittedFrame(panel.frame, in: visibleFrame), display: false)
+        panel.orderFrontRegardless()
+        return true
+    }
+
+    func dismiss(itemID: UUID) {
+        previews.removeValue(forKey: itemID)?.model.cancelExportTasks()
+        guard let panel = panels.removeValue(forKey: itemID) else { return }
+        panel.saveFrame(usingName: Self.frameAutosaveName)
+        panel.orderOut(nil)
+        panel.contentView = nil
     }
 
     func dismiss() {
-        guard pinned != nil else { return }
-        pinned = nil
-        panel?.orderOut(nil)
-        panel?.contentView = nil
-        panel = nil
+        for itemID in Array(previews.keys) { dismiss(itemID: itemID) }
     }
 
-    /// Closes a pinned preview whose item no longer exists, or whose payload was replaced. The
-    /// window shows a snapshot, so a superseded revision must not stay on screen.
     func reconcile(snapshot: HistoryContentRevisionReconciliationSnapshot) {
-        let clearGenerationChanged = lastAppliedClearGeneration != snapshot.clearGeneration
-        let deletionEvictionGenerationChanged =
-            lastAppliedDeletionEvictionGeneration != snapshot.deletionEvictionGeneration
+        let clearChanged = lastAppliedClearGeneration != snapshot.clearGeneration
+        let evictionChanged = lastAppliedDeletionEvictionGeneration != snapshot.deletionEvictionGeneration
         lastAppliedClearGeneration = snapshot.clearGeneration
         lastAppliedDeletionEvictionGeneration = snapshot.deletionEvictionGeneration
-
-        guard let pinned else { return }
-        if snapshot.invalidates(
-            itemID: pinned.itemID,
-            currentRevision: pinned.revision,
-            clearGenerationChanged: clearGenerationChanged,
-            deletionEvictionGenerationChanged: deletionEvictionGenerationChanged
+        for preview in Array(previews.values) where snapshot.invalidates(
+            itemID: preview.itemID,
+            currentRevision: preview.revision,
+            clearGenerationChanged: clearChanged,
+            deletionEvictionGenerationChanged: evictionChanged
         ) {
-            dismiss()
+            dismiss(itemID: preview.itemID)
         }
     }
 
-    // MARK: - Window
-
-    private func present(
-        settingsViewModel: SettingsViewModel,
-        markdownWebViewController: MarkdownPreviewWebViewController
-    ) {
-        guard let pinned else { return }
-
-        let panel = self.panel ?? makePanel()
-        self.panel = panel
-
-        let hostView = NSHostingView(
-            rootView: PinnedPreviewWindowView(
-                preview: pinned,
-                markdownWebViewController: markdownWebViewController,
-                initialKeepsOnTop: keepsOnTop,
-                onKeepsOnTopChange: { [weak self] value in self?.keepsOnTop = value },
-                onDismiss: { [weak self] in self?.dismiss() }
-            )
-            .environment(settingsViewModel)
+    /// Saved frames may refer to a disconnected or smaller screen.
+    static func fittedFrame(_ frame: CGRect, in visibleFrame: CGRect) -> CGRect {
+        let width = min(max(320, frame.width), visibleFrame.width)
+        let height = min(max(200, frame.height), visibleFrame.height)
+        return CGRect(
+            x: min(max(frame.minX, visibleFrame.minX), visibleFrame.maxX - width),
+            y: min(max(frame.minY, visibleFrame.minY), visibleFrame.maxY - height),
+            width: width, height: height
         )
-        panel.contentView = hostView
-
-        // AppKit restores a saved frame from the autosave name; only a first-ever pin needs a
-        // size, and it takes it from what the popover was already showing.
-        if !panel.setFrameUsingName(Self.frameAutosaveName) {
-            panel.setContentSize(
-                pinned.preferredContentSize(chromeHeight: PinnedPreviewWindowView.chromeHeight)
-            )
-            panel.center()
-        }
-        panel.orderFrontRegardless()
     }
 
-    private func makePanel() -> PinnedPreviewPanel {
+    private func makePanel(itemID: UUID) -> PinnedPreviewPanel {
         let panel = PinnedPreviewPanel(
             contentRect: NSRect(x: 0, y: 0, width: 480, height: 480),
-            styleMask: [.titled, .closable, .resizable, .fullSizeContentView, .nonactivatingPanel, .utilityWindow],
-            backing: .buffered,
-            defer: false
+            styleMask: [.titled, .closable, .resizable, .fullSizeContentView, .nonactivatingPanel],
+            backing: .buffered, defer: false
         )
-        panel.title = "Pinned Preview"
+        panel.title = "Preview"
         panel.titleVisibility = .hidden
         panel.titlebarAppearsTransparent = true
-        Self.applyKeepsOnTop(keepsOnTop, to: panel)
+        for button in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] {
+            panel.standardWindowButton(button)?.isHidden = true
+        }
+        Self.applyKeepsOnTop(Self.storedKeepsOnTop, to: panel)
         panel.hidesOnDeactivate = false
-        panel.isMovableByWindowBackground = true
+        panel.isMovableByWindowBackground = false
         panel.isReleasedWhenClosed = false
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         panel.animationBehavior = .utilityWindow
-        panel.setFrameAutosaveName(Self.frameAutosaveName)
+        panel.setFrameAutosaveName(Self.frameAutosaveName + "." + itemID.uuidString)
         panel.minSize = NSSize(width: 320, height: 200)
-        panel.onCloseRequested = { [weak self] in self?.dismiss() }
+        panel.onCloseRequested = { [weak self] in self?.dismiss(itemID: itemID) }
         return panel
     }
 
-    /// `isFloatingPanel` is what makes AppKit treat the window as a palette; the level is what
-    /// actually orders it above other apps. Both have to follow the toggle.
-    private static func applyKeepsOnTop(_ keepsOnTop: Bool, to panel: NSPanel) {
-        panel.isFloatingPanel = keepsOnTop
-        panel.level = keepsOnTop ? .floating : .normal
+    private static func applyKeepsOnTop(_ value: Bool, to panel: NSPanel) {
+        panel.isFloatingPanel = value
+        panel.level = value ? .floating : .normal
     }
 
     private static let frameAutosaveName = "ScopyPinnedPreviewPanel"
     private static let keepsOnTopDefaultsKey = "ScopyPinnedPreviewKeepsOnTop"
-
     private static var storedKeepsOnTop: Bool {
         UserDefaults.standard.object(forKey: keepsOnTopDefaultsKey) as? Bool ?? true
     }
 }
 
-/// The pinned preview window.
-///
-/// It takes key focus like any palette window so its close button, scrolling and text selection
-/// behave normally; `FloatingPanelDismissPolicy` is what keeps the history panel from closing
-/// underneath it. `.nonactivatingPanel` means clicking it does not pull Scopy to the front when
-/// the user is working in another app.
+/// A nonactivating, resizable reading window; each window has its own content owner.
 final class PinnedPreviewPanel: NSPanel {
     var onCloseRequested: (() -> Void)?
-
     override var canBecomeMain: Bool { false }
-
     override func close() {
-        // The frame is autosaved on every move and resize; closing only has to tell the owner.
         super.close()
         onCloseRequested?()
     }

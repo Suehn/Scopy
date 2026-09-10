@@ -92,6 +92,54 @@ final class PinnedPreviewControllerTests: XCTestCase {
         XCTAssertFalse(controller.isPinned(itemID: item.id))
     }
 
+    func testMultipleWindowsHaveIndependentModelsAndCloseIndividually() throws {
+        let first = Self.makeItem(), second = Self.makeItem()
+        pin(item: first)
+        pin(item: second)
+        XCTAssertEqual(controller.previews.count, 2)
+        let firstModel = try XCTUnwrap(controller.previews[first.id]?.model)
+        let secondModel = try XCTUnwrap(controller.previews[second.id]?.model)
+        firstModel.previewLayoutScalePercent = 200
+        XCTAssertNil(secondModel.previewLayoutScalePercent)
+        controller.dismiss(itemID: first.id)
+        XCTAssertTrue(controller.isPinned(itemID: second.id))
+        XCTAssertEqual(secondModel.text, second.plainText)
+    }
+
+    func testDeletionClosesOnlyTheAffectedWindow() {
+        let first = Self.makeItem(), second = Self.makeItem()
+        pin(item: first)
+        pin(item: second)
+        controller.reconcile(snapshot: Self.snapshot(deleted: [first.id]))
+        XCTAssertFalse(controller.isPinned(itemID: first.id))
+        XCTAssertTrue(controller.isPinned(itemID: second.id))
+    }
+
+    func testSavedWindowFrameFitsAfterDisplayChanges() {
+        let screen = CGRect(x: -1440, y: 0, width: 1440, height: 900)
+        let saved = CGRect(x: 1900, y: -300, width: 2100, height: 1200)
+        let fitted = PinnedPreviewController.fittedFrame(saved, in: screen)
+        XCTAssertEqual(fitted, screen)
+        let normal = CGRect(x: -1000, y: 100, width: 500, height: 600)
+        XCTAssertEqual(PinnedPreviewController.fittedFrame(normal, in: screen), normal)
+    }
+
+    func testPinnedWindowChromeFitsNarrowAndWideContent() throws {
+        let item = Self.makeItem()
+        pin(item: item)
+        let panel = try XCTUnwrap(NSApp.windows.compactMap { $0 as? PinnedPreviewPanel }.first { $0.isVisible })
+        let host = try XCTUnwrap(panel.contentView)
+        for width in [320, 1000, 320] {
+            panel.setContentSize(CGSize(width: width, height: 400))
+            host.layoutSubtreeIfNeeded()
+            RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+            XCTAssertEqual(host.bounds.width, CGFloat(width), accuracy: 1)
+            XCTAssertEqual(host.bounds.height, panel.frame.height, accuracy: 1, "Content fills the titlebar area")
+            XCTAssertTrue(panel.standardWindowButton(.closeButton)?.isHidden == true)
+
+        }
+    }
+
     // MARK: - Reconciliation
 
     func testPinnedPreviewSurvivesAnUnrelatedItemsDeletion() {

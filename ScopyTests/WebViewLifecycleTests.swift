@@ -1,5 +1,6 @@
 import XCTest
 import WebKit
+import ScopyKit
 
 @testable import Scopy
 
@@ -344,6 +345,74 @@ final class WebViewLifecycleTests: XCTestCase {
         let outcomes = try XCTUnwrap(JSONSerialization.jsonObject(with: json) as? [String: Bool])
         for (name, passed) in outcomes { XCTAssertTrue(passed, name) }
         XCTAssertEqual(outcomes.count, 10)
+    }
+
+    func testResponsivePreviewReflowsAtEachWindowWidthWithoutReloading() throws {
+        let controller = MarkdownPreviewWebViewController()
+        let owner = UUID()
+        controller.beginOwnership(owner)
+        defer { controller.endOwnership(owner) }
+        let window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 360, height: 600), styleMask: [.borderless], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = controller.webView
+        window.orderFront(nil)
+        defer { window.close() }
+        let assetRoot = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("Scopy/Resources/MarkdownPreview", isDirectory: true)
+        let testAssets = FileManager.default.temporaryDirectory.appendingPathComponent("scopy-layout-" + UUID().uuidString)
+        try FileManager.default.copyItem(at: assetRoot, to: testAssets)
+        defer { try? FileManager.default.removeItem(at: testAssets) }
+        let source = "# Responsive preview\n\n" + String(repeating: "窗口调整大小时，正文应该居中并保持字号，表格和代码只在自身范围滚动。", count: 15)
+            + "\n\n```text\n" + String(repeating: "long_code_", count: 150) + "\n```"
+        for scale in [80, 115, 200] {
+            let context = MarkdownRenderContextResolver.defaultContext(for: source, layoutScale: MarkdownChatGPTLayoutScalePercent(settingsValue: scale))
+            let document = testAssets.appendingPathComponent("layout-\(scale).html")
+            try MarkdownHTMLRenderer.render(markdown: source, context: context).html.write(to: document, atomically: true, encoding: .utf8)
+            controller.webView.navigationDelegate = nil
+            controller.webView.loadFileURL(document, allowingReadAccessTo: testAssets)
+            var ready = false
+            let deadline = Date().addingTimeInterval(15)
+            while !ready && Date() < deadline {
+                ready = evaluate("Boolean(window.__scopyIsRenderReady && window.__scopyIsRenderReady())", in: controller.webView) as? Bool == true
+                if !ready { RunLoop.main.run(until: Date().addingTimeInterval(0.05)) }
+            }
+            XCTAssertTrue(ready, "Live document at \(scale)% must render")
+            for width in [360, 900, 1500, 360] {
+                window.setContentSize(CGSize(width: width, height: 600))
+                RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+                let checks = """
+                (() => {
+                  const root = document.documentElement, content = document.getElementById('content');
+                  window.syncChatGPTZoomShell(content);
+                  const paragraph = content.querySelector('p').getBoundingClientRect();
+                  const shell = document.getElementById('content-scale-shell').getBoundingClientRect();
+                  const viewport = innerWidth;
+                  const code = content.querySelector('.scopy-code-card-scroll') || content.querySelector('pre');
+                  return {
+                    centered: Math.abs(paragraph.left - (viewport - paragraph.right)) < 2,
+                    fits: Math.abs(shell.width - viewport) < 2 && root.scrollWidth <= viewport + 1,
+                    scale: Math.abs(parseFloat(getComputedStyle(root).getPropertyValue('--scopy-chatgpt-preview-scale')) - \(Double(scale) / 100)) < 0.001,
+                    readable: paragraph.width > 50 && paragraph.width <= 768 * \(Double(scale) / 100) + 1,
+                    localOverflow: code.scrollWidth > code.clientWidth
+                  };
+                })()
+                """
+                let values = try XCTUnwrap(evaluate(checks, in: controller.webView) as? [String: Bool])
+                for (name, passed) in values { XCTAssertTrue(passed, "\(name), width \(width), scale \(scale)") }
+            }
+        }
+    }
+
+    private func evaluate(_ script: String, in webView: WKWebView) -> Any? {
+        var finished = false
+        var result: Any?
+        webView.evaluateJavaScript(script) { value, error in
+            XCTAssertNil(error)
+            result = value
+            finished = true
+        }
+        XCTAssertTrue(runMainLoopUntil(timeout: 5) { finished })
+        return result
     }
 
     private func runMainLoopUntil(timeout: TimeInterval, condition: () -> Bool) -> Bool {

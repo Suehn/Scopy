@@ -156,7 +156,17 @@ enum MarkdownHTMLDocumentBuilder {
                 var fit = 1;
                 var isExportMode = false;
                 try { isExportMode = root.classList && root.classList.contains('scopy-export-mode'); } catch (e) { isExportMode = false; }
-                if (!isExportMode && visualWidth && isFinite(visualWidth) && visualWidth > 0) {
+                // Resizable previews use their logical viewport. PNG and other fixed-output
+                // consumers keep the original layout, including the same browser zoom.
+                if (window.__scopyResponsivePreview && !isExportMode) {
+                  var hostWidth = Math.max(1, window.innerWidth || root.clientWidth || 1);
+                  renderWidth = hostWidth / zoom;
+                  root.style.setProperty('--scopy-chatgpt-layout-viewport-width', renderWidth + 'px');
+                  root.style.setProperty('--scopy-chatgpt-thread-content-max-width',
+                    (renderWidth >= \(Self.layout.chatGPTWideThreadMinimumViewportWidth)
+                      ? \(Self.layout.chatGPTWideThreadContentWidth)
+                      : \(Self.layout.chatGPTDefaultThreadContentWidth)) + 'px');
+                } else if (!isExportMode && visualWidth && isFinite(visualWidth) && visualWidth > 0) {
                   var viewportWidth = 0;
                   try { viewportWidth = Math.ceil(window.innerWidth || 0); } catch (e) { viewportWidth = 0; }
                   if (!viewportWidth || !isFinite(viewportWidth) || viewportWidth <= 0) {

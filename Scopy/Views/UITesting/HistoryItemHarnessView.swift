@@ -100,7 +100,6 @@ struct HistoryItemHarnessView: View {
                     isImagePreviewPresented: activePopover == .image,
                     isTextPreviewPresented: activePopover == .text,
                     isFilePreviewPresented: activePopover == .file,
-                    isPreviewPinningActive: false,
                     requestPopover: { kind in
                         popoverRequest = Self.popoverName(kind)
                         activePopover = kind

@@ -6,6 +6,7 @@ import Foundation
 struct HistoryItemTextPreviewView: View {
     @Environment(SettingsViewModel.self) private var settingsViewModel
     @Environment(\.hoverPreviewSizeBudget) private var sizeBudget
+    @Environment(\.previewWindowActions) private var windowActions
     /// Bumped when a link-enrichment sidecar lands for the current text so the body
     /// recomputes its render key and rebuilds the enriched document.
     @State private var linkEnrichmentRevision = 0
@@ -34,7 +35,7 @@ struct HistoryItemTextPreviewView: View {
         self.retainExplicitExport = retainExplicitExport
         self.onInteractionLifecycleChange = onInteractionLifecycleChange
         self._exportResolutionPercent = State(initialValue: Self.initialExportResolutionPercent())
-        self._previewLayoutScalePercent = State(initialValue: Self.initialPreviewLayoutScalePercent())
+        self._previewLayoutScalePercent = State(initialValue: model.previewLayoutScalePercent ?? Self.initialPreviewLayoutScalePercent())
     }
 
     @State private var exportResolutionPercent: Int
@@ -52,11 +53,18 @@ struct HistoryItemTextPreviewView: View {
 
     var body: some View {
         let maxWidth: CGFloat = model.isMarkdown ? sizeBudget.maxMarkdownWidth : sizeBudget.maxWidth
-        let maxHeight: CGFloat = sizeBudget.maxHeight
+        let maxHeight: CGFloat = max(1, sizeBudget.maxHeight - PreviewToolbar<EmptyView>.height)
         let font = NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
         let padding: CGFloat = ScopySpacing.md
 
-        Group {
+        VStack(spacing: 0) {
+            PreviewToolbar {
+                if model.isMarkdown {
+                    markdownLayoutScaleControl()
+                    exportResolutionMenu()
+                    exportButton()
+                }
+            }
             if let text = model.text {
                 let fallbackWidth = model.isMarkdown
                     ? maxWidth
@@ -141,13 +149,6 @@ struct HistoryItemTextPreviewView: View {
                                 .zIndex(1)
                         }
 
-                        HStack(spacing: ScopySpacing.xs) {
-                            markdownLayoutScaleControl()
-                            exportResolutionMenu()
-                            exportButton()
-                        }
-                            .padding(ScopySpacing.sm)
-                            .zIndex(2)
                     }
                     .task(id: renderKey) {
                         initializePreviewLayoutScaleFromSettingsIfNeeded()
@@ -282,11 +283,9 @@ struct HistoryItemTextPreviewView: View {
         model.markMarkdownRenderSucceeded(for: renderKey)
 
         let newHeight = metrics.size.height
-        let fixedWidth = HoverPreviewScreenMetrics.maxMarkdownPopoverWidthPoints()
+        let fixedWidth = sizeBudget.maxMarkdownWidth
         model.markdownContentSize = CGSize(width: fixedWidth, height: newHeight)
-        if metrics.hasHorizontalOverflow {
-            model.markdownHasHorizontalOverflow = true
-        }
+        model.markdownHasHorizontalOverflow = metrics.hasHorizontalOverflow
     }
 
     private static func initialPreviewLayoutScalePercent() -> Int {
@@ -300,6 +299,7 @@ struct HistoryItemTextPreviewView: View {
     private func initializePreviewLayoutScaleFromSettingsIfNeeded() {
         guard !hasInitializedPreviewLayoutScale else { return }
         hasInitializedPreviewLayoutScale = true
+        guard model.previewLayoutScalePercent == nil else { return }
         if UserDefaults.standard.object(forKey: Self.previewLayoutScalePercentUserDefaultsKey) == nil {
             let settingsScale = settingsMarkdownLayoutScale
             if previewLayoutScalePercent != settingsScale.rawValue, let text = model.text {
@@ -325,7 +325,10 @@ struct HistoryItemTextPreviewView: View {
             model.invalidateMarkdownLiveRender()
         }
         previewLayoutScalePercent = normalized
-        UserDefaults.standard.set(normalized, forKey: Self.previewLayoutScalePercentUserDefaultsKey)
+        model.previewLayoutScalePercent = normalized
+        if !windowActions.isPinned {
+            UserDefaults.standard.set(normalized, forKey: Self.previewLayoutScalePercentUserDefaultsKey)
+        }
     }
 
     private func markMarkdownPreviewAwaitingMetrics() {
@@ -434,6 +437,7 @@ struct HistoryItemTextPreviewView: View {
             source: source,
             layoutScale: activeMarkdownLayoutScale
         ) == renderKey else { return }
+        model.setMarkdownHTMLAwaitingLiveRender(html, layoutScale: layoutScale)
         overrideMarkdownHTML = html
         overrideMarkdownRenderKey = renderKey
         markMarkdownPreviewAwaitingMetrics()
@@ -504,7 +508,7 @@ struct HistoryItemTextPreviewView: View {
                         isMarkdownLayoutScaleEditing = isEditing
                     }
                 )
-                .frame(width: 126)
+                .frame(width: min(126, max(40, sizeBudget.maxWidth - 240)))
                 .accessibilityIdentifier("History.Preview.MarkdownLayoutScaleSlider")
                 .accessibilityLabel("Markdown preview layout scale")
                 .accessibilityValue(activeMarkdownLayoutScale.label)
@@ -513,16 +517,6 @@ struct HistoryItemTextPreviewView: View {
         }
         .frame(height: 28)
         .padding(.horizontal, isExpanded ? 10 : 8)
-        .background(
-            Capsule()
-                .fill(ScopyColors.secondaryBackground.opacity(isExpanded ? 0.92 : 0.72))
-        )
-        .overlay(
-            Capsule()
-                .stroke(ScopyColors.separator.opacity(isExpanded ? 0.65 : 0.35), lineWidth: 0.5)
-        )
-        .shadow(color: .black.opacity(isExpanded ? 0.12 : 0.06), radius: isExpanded ? 8 : 4, y: 2)
-        .opacity(isExpanded ? 0.98 : 0.82)
         .animation(.easeOut(duration: 0.16), value: isExpanded)
         .onHover { isMarkdownLayoutScaleControlHovered = $0 }
         .help("Markdown preview layout scale (\(activeMarkdownLayoutScale.label))")
@@ -572,6 +566,7 @@ struct HistoryItemTextPreviewView: View {
                 )
         }
         .menuStyle(.borderlessButton)
+        .fixedSize()
         .accessibilityIdentifier("History.Preview.ExportResolutionMenu")
         .accessibilityLabel("Export resolution")
         .accessibilityValue(exportResolution.label)

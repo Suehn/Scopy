@@ -113,7 +113,6 @@ final class HistoryRowPixelSnapshotTests: XCTestCase {
             isImagePreviewPresented: false,
             isTextPreviewPresented: false,
             isFilePreviewPresented: false,
-            isPreviewPinningActive: false,
             requestPopover: { _ in },
             requestPinPreview: { _, _, _ in },
             dismissOtherPopovers: {}

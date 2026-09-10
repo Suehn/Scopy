@@ -44,9 +44,6 @@ struct HistoryItemView: View, Equatable {
     let isImagePreviewPresented: Bool
     let isTextPreviewPresented: Bool
     let isFilePreviewPresented: Bool
-    /// A pinned preview owns the shared Markdown WebView and is the only preview on screen, so
-    /// rows stop starting hover previews while one is up.
-    let isPreviewPinningActive: Bool
     let requestPopover: (HoverPreviewPopoverKind?) -> Void
     let requestPinPreview: (HoverPreviewPopoverKind, HoverPreviewModel, ClipboardItemContentRevision) -> Void
     let dismissOtherPopovers: () -> Void
@@ -97,7 +94,6 @@ struct HistoryItemView: View, Equatable {
         isImagePreviewPresented: Bool,
         isTextPreviewPresented: Bool,
         isFilePreviewPresented: Bool,
-        isPreviewPinningActive: Bool,
         requestPopover: @escaping (HoverPreviewPopoverKind?) -> Void,
         requestPinPreview: @escaping (HoverPreviewPopoverKind, HoverPreviewModel, ClipboardItemContentRevision) -> Void,
         dismissOtherPopovers: @escaping () -> Void
@@ -123,7 +119,6 @@ struct HistoryItemView: View, Equatable {
         self.isImagePreviewPresented = isImagePreviewPresented
         self.isTextPreviewPresented = isTextPreviewPresented
         self.isFilePreviewPresented = isFilePreviewPresented
-        self.isPreviewPinningActive = isPreviewPinningActive
         self.requestPopover = requestPopover
         self.requestPinPreview = requestPinPreview
         self.dismissOtherPopovers = dismissOtherPopovers
@@ -155,7 +150,7 @@ struct HistoryItemView: View, Equatable {
             lhs.isImagePreviewPresented == rhs.isImagePreviewPresented &&
             lhs.isTextPreviewPresented == rhs.isTextPreviewPresented &&
             lhs.isFilePreviewPresented == rhs.isFilePreviewPresented &&
-            lhs.isPreviewPinningActive == rhs.isPreviewPinningActive &&
+            lhs.markdownWebViewController === rhs.markdownWebViewController &&
             lhs.settings.showImageThumbnails == rhs.settings.showImageThumbnails &&
             lhs.settings.thumbnailHeight == rhs.settings.thumbnailHeight &&
             lhs.settings.imagePreviewDelay == rhs.settings.imagePreviewDelay &&
@@ -1078,27 +1073,20 @@ struct HistoryItemView: View, Equatable {
     private func pinnablePreview<Content: View>(
         kind: HoverPreviewPopoverKind,
         state: HistoryItemInteractionState,
-        @ViewBuilder content: () -> Content
+        @ViewBuilder content: @escaping () -> Content
     ) -> some View {
-        content()
-            .overlay(alignment: .topLeading) {
-                Button {
-                    let model = state.previewModel
-                    let revision = state.revision
-                    requestPopover(nil)
-                    requestPinPreview(kind, model, revision)
-                } label: {
-                    Image(systemName: "pin")
-                        .font(.system(size: ScopySize.Icon.xs))
-                        .padding(ScopySpacing.xxs)
-                        .background(ScopyColors.cardBackground, in: RoundedRectangle(cornerRadius: ScopySize.Corner.sm))
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(ScopyColors.mutedText)
-                .padding(ScopySpacing.xs)
-                .help("Pin this preview in a movable window")
-                .accessibilityIdentifier("History.Preview.Pin")
+        ResizablePreview(
+            model: state.previewModel,
+            onResizeActivityChange: { resizing in
+                state.previewCoordinator.isResizing = resizing
+                handlePopoverHover(resizing || state.previewCoordinator.containsPopoverPointer())
             }
+        ) {
+            content()
+                .environment(\.previewWindowActions, PreviewWindowActions(pin: {
+                    requestPinPreview(kind, state.previewModel, state.revision)
+                }))
+        }
     }
 
     private var rowPreviewPopoverContent: some View {
@@ -1418,7 +1406,6 @@ struct HistoryItemView: View, Equatable {
               ) else { return }
         guard state.previewCoordinator.isHovering else { return }
         guard !isPreviewInteractionSuppressed else { return }
-        guard !isPreviewPinningActive else { return }
         guard !interactionCoordinator.isHoverPreviewTransferBlocked(for: item.id) else { return }
 
         dismissOtherPopovers()

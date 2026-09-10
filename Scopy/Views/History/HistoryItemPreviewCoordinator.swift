@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import Observation
 
@@ -6,6 +7,7 @@ import Observation
 final class HistoryItemPreviewCoordinator {
     var isHovering = false
     var isPopoverHovering = false
+    var isResizing = false
     private(set) var imagePopoverToken = UUID()
     private(set) var textPopoverToken = UUID()
     private(set) var filePopoverToken = UUID()
@@ -53,12 +55,17 @@ final class HistoryItemPreviewCoordinator {
         resetPreviewModel()
     }
 
+    func containsPopoverPointer() -> Bool {
+        popoverScreenFrame?.contains(NSEvent.mouseLocation) ?? false
+    }
+
     func handlePopoverHover(
         _ hovering: Bool,
         isRowHovering: Bool,
         cancelHoverExit: () -> Void,
         scheduleHoverExit: () -> Void
     ) {
+        guard !isResizing || hovering else { return }
         isPopoverHovering = hovering
         if hovering {
             cancelHoverExit()
@@ -77,6 +84,7 @@ final class HistoryItemPreviewCoordinator {
         cancelHoverExitTask()
         popoverScreenFrame = nil
         isPopoverHovering = false
+        isResizing = false
         Task { @MainActor [weak self] in
             guard let self else { return }
             guard self.popoverToken(for: kind) == token else { return }
@@ -166,6 +174,7 @@ final class HistoryItemPreviewCoordinator {
         markdownFilePreviewCacheKey = nil
         popoverScreenFrame = nil
         isPopoverHovering = false
+        isResizing = false
     }
 
     private func popoverToken(for kind: HoverPreviewPopoverKind) -> UUID {

@@ -275,81 +275,63 @@ final class HistoryListUITests: XCTestCase {
 
     /// §7.7 acceptance: a pinned preview is a window of its own, so the list may scroll and other
     /// rows may be hovered without it going away, and only an explicit action closes it.
-    func testPinnedPreviewSurvivesListScrollAndClosesOnlyExplicitly() throws {
+    func testMultiplePinnedPreviewsKeepHoverAvailableAndHideHistory() throws {
         app.terminate()
-        app.launchEnvironment = [:]
-        app.launchEnvironment["USE_MOCK_SERVICE"] = "1"
-        app.launchEnvironment["SCOPY_MOCK_ITEM_COUNT"] = "80"
-        app.launchEnvironment["SCOPY_MOCK_IMAGE_COUNT"] = "30"
-        app.launchEnvironment["SCOPY_MOCK_SHOW_THUMBNAILS"] = "1"
-        app.launchEnvironment["SCOPY_MOCK_IMAGE_PREVIEW_DELAY"] = "0"
-        app.launchEnvironment["SCOPY_UITEST_OPEN_PREVIEW_ON_TAP"] = "1"
+        app.launchEnvironment = [
+            "USE_MOCK_SERVICE": "1", "SCOPY_MOCK_ITEM_COUNT": "80",
+            "SCOPY_MOCK_IMAGE_COUNT": "30", "SCOPY_MOCK_SHOW_THUMBNAILS": "1",
+            "SCOPY_MOCK_IMAGE_PREVIEW_DELAY": "0", "SCOPY_UITEST_OPEN_PREVIEW_ON_TAP": "1"
+        ]
         app.launch()
         _ = prepareMainWindow()
-
         let list = app.anyElement("History.List")
-        guard list.waitForExistence(timeout: 15) else {
-            XCTFail("List not found")
-            return
-        }
-
+        XCTAssertTrue(list.waitForExistence(timeout: 15))
         let items = app.anyElements(matching: NSPredicate(format: "identifier BEGINSWITH %@", "History.Item."))
-        guard items.element(boundBy: 0).waitForExistence(timeout: 5) else {
-            XCTFail("History item not found")
-            return
+        XCTAssertNotNil(openAnyPreview(in: items))
+        let pin = app.buttons["History.Preview.Pin"]
+        XCTAssertTrue(pin.waitForExistence(timeout: 5))
+        let resize = app.anyElement("History.Preview.Resize")
+        XCTAssertTrue(resize.exists)
+        let initialFrame = app.anyElement("History.Preview.Image").frame
+        let start = resize.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        start.press(forDuration: 0.1, thenDragTo: start.withOffset(CGVector(dx: -100, dy: -80)))
+        XCTAssertTrue(pin.exists, "Dragging the resize grip must retain the popover")
+        if initialFrame.width > 400 {
+            XCTAssertLessThan(app.anyElement("History.Preview.Image").frame.width, initialFrame.width - 40)
         }
+        pin.click()
+        let windows = app.anyElements(matching: NSPredicate(format: "identifier == %@", "PinnedPreview.Window"))
+        XCTAssertTrue(windows.firstMatch.waitForExistence(timeout: 8))
+        XCTAssertFalse(list.isHittable, "Pinning hides the history panel")
+        let first = XCTAttachment(screenshot: app.screenshot())
+        first.name = "Pinned preview with unified toolbar"
+        first.lifetime = .keepAlways
+        add(first)
 
-        guard let preview = openAnyPreview(in: items) else {
-            XCTFail("Preview not shown")
-            return
-        }
+        app.menuBars.statusItems.firstMatch.click()
+        XCTAssertTrue(list.waitForExistence(timeout: 5))
+        XCTAssertTrue(list.isHittable)
+        items.element(boundBy: 2).click()
+        XCTAssertTrue(pin.waitForExistence(timeout: 8), "A pinned window must not disable further previews")
+        pin.click()
+        XCTAssertEqual(windows.count, 2, "Two independent previews should coexist")
+        XCTAssertFalse(list.isHittable)
 
-        let pinButton = app.anyElement("History.Preview.Pin")
-        guard pinButton.waitForExistence(timeout: 4) else {
-            XCTFail("Pin control not shown on the hover preview")
-            return
-        }
-        pinButton.click()
-
-        let pinnedWindow = app.anyElement("PinnedPreview.Window")
-        XCTAssertTrue(pinnedWindow.waitForExistence(timeout: 8), "Pinned preview window did not appear")
-        waitForPredicate(
-            NSPredicate(format: "exists == 0"),
-            on: preview,
-            timeout: 8,
-            message: "The hover popover must hand over to the pinned window, not stay open alongside it"
-        )
-
-        // Scrolling is what tears a row-anchored popover down; the pinned window must not care.
-        for _ in 0..<3 {
-            list.swipeUp()
-            usleep(120_000)
-        }
-        XCTAssertTrue(pinnedWindow.exists, "Pinned preview must survive list scrolling and row recycling")
-
-        // Hovering another row must not open a second preview while one is pinned.
-        let otherRow = items.element(boundBy: 1)
-        if otherRow.exists {
-            otherRow.hover()
-            usleep(400_000)
-        }
-        XCTAssertFalse(
-            app.anyElement("History.Preview.Text").exists || app.anyElement("History.Preview.Image").exists,
-            "Hover previews must stay disabled while a preview is pinned"
-        )
-        XCTAssertTrue(pinnedWindow.exists, "Hovering another row must not close the pinned preview")
-
-        app.anyElement("PinnedPreview.Close").click()
-        waitForPredicate(
-            NSPredicate(format: "exists == 0"),
-            on: pinnedWindow,
-            timeout: 8,
-            message: "Explicit unpin did not close the pinned preview"
-        )
-
-        // Unpinning restores ordinary hover previews.
-        _ = prepareMainWindow()
-        XCTAssertNotNil(openAnyPreview(in: items), "Hover previews must come back after unpinning")
+        app.menuBars.statusItems.firstMatch.click()
+        XCTAssertTrue(list.waitForExistence(timeout: 5))
+        items.element(boundBy: 4).click()
+        XCTAssertTrue(pin.waitForExistence(timeout: 8))
+        XCTAssertEqual(windows.count, 2, "Hovering another item preserves both windows")
+        let multiple = XCTAttachment(screenshot: app.screenshot())
+        multiple.name = "Two pinned windows and a third hover preview"
+        multiple.lifetime = .keepAlways
+        add(multiple)
+        list.swipeUp()
+        XCTAssertEqual(windows.count, 2, "Scrolling only dismisses the hover preview")
+        app.buttons["PinnedPreview.Close"].firstMatch.click()
+        XCTAssertEqual(windows.count, 1)
+        app.buttons["PinnedPreview.Close"].firstMatch.click()
+        XCTAssertEqual(windows.count, 0)
     }
 
     private func openAnyPreview(in items: XCUIElementQuery) -> XCUIElement? {

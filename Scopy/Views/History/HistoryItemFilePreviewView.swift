@@ -59,14 +59,15 @@ struct HistoryItemFilePreviewView: View {
                 .accessibilityElement(children: .contain)
         } else {
             let maxWidth: CGFloat = max(1, sizeBudget.maxWidth)
-            let maxHeight: CGFloat = sizeBudget.maxHeight
+            let maxHeight: CGFloat = max(1, sizeBudget.maxHeight - PreviewToolbar<EmptyView>.height)
             let width = previewWidth(maxWidth: maxWidth, maxHeight: maxHeight)
 
             let content = previewContent()
             let naturalHeight = previewHeight(width: width)
             let desiredHeight = min(maxHeight, max(1, naturalHeight))
 
-            Group {
+            VStack(spacing: 0) {
+                PreviewToolbar { EmptyView() }
                 if naturalHeight > maxHeight {
                     ScrollView(.vertical) {
                         content

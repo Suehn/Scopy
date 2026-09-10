@@ -410,18 +410,18 @@ An unescaped pipe remains a real delimiter. The captured edge corpus visibly los
 
 Scopy separates layout width, display fit, and bitmap export:
 
-- fixed preview/PNG output surface: 816px;
+- fixed PNG output surface: 816px; interactive previews use their host width;
 - content inline padding: 24px per side;
 - default thread max width: 40rem / 640px;
-- wide thread max width: 48rem / 768px when the logical layout viewport is at least 856px; Scopy resolves this from `816 / scale` while building the document because a CSS media query would observe only the narrower physical WKWebView;
+- wide thread max width: 48rem / 768px when the logical layout viewport is at least 816px; the logical viewport is `hostWidth / scale` in interactive previews and `816 / scale` in PNG;
 - ordinary answer blocks and short tables are centered on that thread column;
 - ordinary text and inline code: `overflow-wrap: anywhere; word-break: normal`;
 - code, KaTeX display, and tables own local horizontal overflow;
 - images are constrained to the content width.
 
-The user-selected ChatGPT layout scale is clamped to 80...200%. The output pixel surface remains fixed. Layout occurs in an internal viewport of `816 / scale`, then WebKit-style visual zoom maps it back to the fixed surface. This causes real reflow before display scaling; it must not reuse line breaks from another scale or enlarge the PNG canvas to simulate zoom.
+The user-selected ChatGPT layout scale is clamped to 80...200%. The PNG output pixel surface remains fixed. Export layout occurs in an internal viewport of `816 / scale`, then WebKit-style visual zoom maps it back to the fixed surface. Interactive previews apply the same zoom to `hostWidth / scale`, so resizing reflows and recenters the thread without shrinking the selected font size. This causes real reflow before display scaling; it must not reuse line breaks from another scale or enlarge the PNG canvas to simulate zoom.
 
-Preview fit-to-popover scaling is display-only. It must not change the internal Markdown viewport, table baseline, cache key, or PNG target width.
+Responsive preview layout is a host capability injected before document load. Window resizing only updates layout CSS variables in the same DOM; it never reparses source or changes HTML/cache keys. Export creates its own WebView without that capability and retains the fixed output viewport. Fixed-output document consumers may still apply display-only fit scaling.
 
 The current production document is the captured light-theme branch. The WACZ contains light/dark token code paths but no hydrated theme class or final computed style. Do not invent a dark palette from asset presence alone; dark-mode parity remains a separately capturable/visually verifiable extension.
 
