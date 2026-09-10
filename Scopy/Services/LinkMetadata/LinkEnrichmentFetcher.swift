@@ -6,7 +6,7 @@ import UniformTypeIdentifiers
 /// the renderer itself never fetches. Every request is cookie-less, size-capped, and
 /// checked against current public HTTP(S) DNS answers; imagery is downscaled into data
 /// URIs that fit the strict v2 data-image limits.
-struct LinkEnrichmentFetcher: Sendable {
+public struct LinkEnrichmentFetcher: Sendable {
     static let maximumHTMLBytes = 512 * 1_024
     static let maximumImageBytes = 8 * 1_024 * 1_024
     static let maximumThumbnailPixel = 576
@@ -20,12 +20,13 @@ struct LinkEnrichmentFetcher: Sendable {
     private let sessionBox: LinkEnrichmentSessionBox
     private let hostResolver: HostResolver
 
-    init() {
+    public init(requestTimeout: TimeInterval = 6, resourceTimeout: TimeInterval = 12) {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.httpCookieAcceptPolicy = .never
         configuration.httpShouldSetCookies = false
-        configuration.timeoutIntervalForRequest = 6
-        configuration.timeoutIntervalForResource = 12
+        configuration.urlCredentialStorage = nil
+        configuration.timeoutIntervalForRequest = requestTimeout
+        configuration.timeoutIntervalForResource = resourceTimeout
         configuration.httpAdditionalHeaders = [
             "User-Agent": "Scopy/LinkPreview (+https://github.com/Suehn/Scopy)"
         ]
@@ -42,7 +43,7 @@ struct LinkEnrichmentFetcher: Sendable {
         self.sessionBox = LinkEnrichmentSessionBox(configuration: configuration, delegate: delegate)
     }
 
-    func enrich(urls: [String]) async -> [String: LinkEnrichmentEntry] {
+    public func enrich(urls: [String]) async -> [String: LinkEnrichmentEntry] {
         var entries: [String: LinkEnrichmentEntry] = [:]
         var decodedBudget = Self.totalDecodedImageBudget
         await withTaskGroup(of: (String, PageMetadata?).self) { group in
@@ -92,6 +93,75 @@ struct LinkEnrichmentFetcher: Sendable {
             }
         }
         return entries
+    }
+
+    /// Only a canonical origin is accepted; no article path, query, or credentials are sent.
+    func fetchFavicon(origin: URL) async -> Data? {
+        guard origin.path == "/", origin.query == nil, origin.fragment == nil,
+              origin.user == nil, origin.password == nil else { return nil }
+        return await withTaskGroup(of: Data?.self) { group in
+            group.addTask { await faviconPNG(origin.appendingPathComponent("favicon.ico").absoluteString) }
+            group.addTask {
+                guard let url = validatedPublicURL(origin.absoluteString),
+                      let (data, response) = try? await sessionBox.delegate.load(
+                        from: url, maximumBytes: Self.maximumHTMLBytes, session: sessionBox.session),
+                      let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode)
+                else { return nil }
+                let base = http.url ?? origin
+                let candidates = Self.faviconCandidates(in: String(decoding: data, as: UTF8.self), base: base)
+                for candidate in candidates.prefix(3) {
+                    guard !Task.isCancelled else { return nil }
+                    if let png = await faviconPNG(candidate) { return png }
+                }
+                return nil
+            }
+            for await png in group {
+                if let png { group.cancelAll(); return png }
+            }
+            return nil
+        }
+    }
+
+    private func faviconPNG(_ url: String) async -> Data? {
+        guard !Task.isCancelled,
+              let image = await fetchDataImage(urlString: url, maxPixel: Self.maximumFaviconPixel,
+                  encodedCap: Self.maximumEncodedFaviconBytes, type: .png),
+              let body = image.dataURI.split(separator: ",", maxSplits: 1).last
+        else { return nil }
+        return Data(base64Encoded: String(body))
+    }
+
+    /// Attribute order, quote style, rel token lists and relative CDN URLs are independent.
+    /// Raster candidates precede SVG, which ImageIO may not decode; /favicon.ico races this path.
+    static func faviconCandidates(in html: String, base: URL) -> [String] {
+        guard let tags = try? NSRegularExpression(pattern: #"<link\b[^>]{0,4096}>"#, options: [.caseInsensitive]),
+              let attributes = try? NSRegularExpression(
+                pattern: #"([a-zA-Z][\w:-]*)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))"#)
+        else { return [] }
+        var results: [(String, Int)] = []
+        for match in tags.matches(in: html, range: NSRange(html.startIndex..., in: html)).prefix(64) {
+            guard let range = Range(match.range, in: html) else { continue }
+            let tag = String(html[range])
+            var values: [String: String] = [:]
+            for attribute in attributes.matches(in: tag, range: NSRange(tag.startIndex..., in: tag)) {
+                guard let keyRange = Range(attribute.range(at: 1), in: tag) else { continue }
+                for index in 2...4 {
+                    if let valueRange = Range(attribute.range(at: index), in: tag) {
+                        values[String(tag[keyRange]).lowercased()] = decodeEntities(String(tag[valueRange]))
+                        break
+                    }
+                }
+            }
+            let rel = Set((values["rel"] ?? "").lowercased().split(whereSeparator: { $0.isWhitespace }).map(String.init))
+            guard !rel.isDisjoint(with: ["icon", "apple-touch-icon", "apple-touch-icon-precomposed"]),
+                  let href = values["href"], let url = URL(string: href, relativeTo: base)?.absoluteURL,
+                  !results.contains(where: { $0.0 == url.absoluteString }) else { continue }
+            let rank = url.pathExtension.lowercased() == "svg" ? 2 : (rel.contains("icon") ? 0 : 1)
+            results.append((url.absoluteString, rank))
+        }
+        return results.enumerated().sorted { a, b in
+            a.element.1 == b.element.1 ? a.offset < b.offset : a.element.1 < b.element.1
+        }.map { $0.element.0 }
     }
 
     func isSafePublicURL(_ urlString: String) -> Bool {
@@ -145,7 +215,7 @@ struct LinkEnrichmentFetcher: Sendable {
             .map { String($0.prefix(10)) }
         metadata.imageURL = meta(["og:image", "og:image:url", "twitter:image"])
             .flatMap { resolve($0, against: base) }
-        metadata.faviconURL = faviconHref(in: head).flatMap { resolve($0, against: base) }
+        metadata.faviconURL = Self.faviconCandidates(in: head, base: base).first
             ?? resolve("/favicon.ico", against: base)
         return metadata
     }
@@ -164,16 +234,6 @@ struct LinkEnrichmentFetcher: Sendable {
 
     private func htmlTitle(in html: String) -> String? {
         firstCapture("<title[^>]*>([^<]{1,400})</title>", in: html)
-    }
-
-    private func faviconHref(in html: String) -> String? {
-        firstCapture(
-            "<link[^>]+rel=[\"'](?:shortcut )?(?:icon|apple-touch-icon)[\"'][^>]*href=[\"']([^\"']+)[\"']",
-            in: html
-        ) ?? firstCapture(
-            "<link[^>]+href=[\"']([^\"']+)[\"'][^>]*rel=[\"'](?:shortcut )?(?:icon|apple-touch-icon)[\"']",
-            in: html
-        )
     }
 
     private func firstCapture(_ pattern: String, in text: String) -> String? {
@@ -590,13 +650,5 @@ private final class LinkEnrichmentBoundedRequest: @unchecked Sendable {
             return continuation
         }
         continuation?.resume(with: result)
-    }
-}
-
-private extension NSLock {
-    func withLock<T>(_ body: () throws -> T) rethrows -> T {
-        lock()
-        defer { unlock() }
-        return try body()
     }
 }

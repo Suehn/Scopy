@@ -1,17 +1,7 @@
 import CryptoKit
 import Foundation
 
-/// One frozen Open Graph snapshot for a link in an assistant copy. Imagery is stored as
-/// bounded data URIs so the rendered envelope stays self-contained and passes the same
-/// strict v2 data-image limits as every other rich surface.
-struct LinkEnrichmentEntry: Codable, Equatable, Sendable {
-    var title: String
-    var source: String?
-    var date: String?
-    var snippet: String?
-    var image: String?
-    var favicon: String?
-}
+import ScopyKit
 
 /// The per-item enrichment artifact, keyed by the markdown content hash. Immutable once
 /// written; regenerating requires deleting the sidecar (it is a derived cache, not truth).

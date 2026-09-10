@@ -56,6 +56,7 @@ public actor SettingsStore {
             "pngquantBinaryPath": settings.pngquantBinaryPath,
             "pngquantCopyImageEnabled": settings.pngquantCopyImageEnabled,
             "linkEnrichmentEnabled": settings.linkEnrichmentEnabled,
+            "siteIconsEnabled": settings.siteIconsEnabled,
             "pngquantCopyImageQualityMin": settings.pngquantCopyImageQualityMin,
             "pngquantCopyImageQualityMax": settings.pngquantCopyImageQualityMax,
             "pngquantCopyImageSpeed": settings.pngquantCopyImageSpeed,
@@ -139,7 +140,8 @@ public actor SettingsStore {
             thumbnailHeight: dict["thumbnailHeight"] as? Int ?? SettingsDTO.default.thumbnailHeight,
             imagePreviewDelay: dict["imagePreviewDelay"] as? Double ?? SettingsDTO.default.imagePreviewDelay,
             markdownChatGPTLayoutScalePercent: markdownLayoutScale,
-            linkEnrichmentEnabled: dict["linkEnrichmentEnabled"] as? Bool ?? SettingsDTO.default.linkEnrichmentEnabled
+            linkEnrichmentEnabled: dict["linkEnrichmentEnabled"] as? Bool ?? SettingsDTO.default.linkEnrichmentEnabled,
+            siteIconsEnabled: dict["siteIconsEnabled"] as? Bool ?? SettingsDTO.default.siteIconsEnabled
         )
     }
 

@@ -369,6 +369,7 @@ struct MarkdownPreviewWebView: NSViewRepresentable {
     @MainActor
     func makeNSView(context: Context) -> WKWebView {
         let config = WKWebViewConfiguration()
+        SourceIconSchemeHandler.install(in: config)
         config.websiteDataStore = .nonPersistent()
         config.defaultWebpagePreferences.allowsContentJavaScript = true
         config.preferences.javaScriptCanOpenWindowsAutomatically = false
@@ -636,6 +637,7 @@ final class MarkdownPreviewWebViewController: NSObject, ObservableObject, WKNavi
         }
     ) {
         let config = WKWebViewConfiguration()
+        SourceIconSchemeHandler.install(in: config)
         config.websiteDataStore = .nonPersistent()
         config.defaultWebpagePreferences.allowsContentJavaScript = true
         config.preferences.javaScriptCanOpenWindowsAutomatically = false

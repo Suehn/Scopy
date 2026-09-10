@@ -41,6 +41,7 @@ This document describes the current system shape and operational invariants. For
 
 - App/UI shell manages the menubar icon, floating panel, settings window, and preview/export flows.
 - History action flows resolve shareable file URLs through backend protocols; UI rows decide visibility from DTO-level capability hints and do not directly read storage internals.
+- Website source icons use one bounded native origin-image service shared by preview and PNG; only decoded cached PNG bytes cross into WebKit, whose HTTP(S) access stays blocked.
 - Markdown preview/export share `MarkdownHTMLRenderer -> MarkdownHTMLDocumentBuilder`. The reusable WebView has one owner lease and per-navigation render IDs; stale callbacks must not publish state. [markdown-chatgpt-wacz-style-contract.md](./markdown-chatgpt-wacz-style-contract.md) owns renderer semantics, layout, local resources, navigation, readiness, and verification.
 - Preview and export flows must treat stored content as source-of-truth input, not a side channel that mutates persisted data.
 

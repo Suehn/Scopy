@@ -66,3 +66,36 @@ test("repeated frozen favicons have an aggregate emitted budget", () => {
   assert.equal((html.match(/data:image\/png;base64/g) || []).length, 1);
   assert.equal((html.match(/scopy-icon--globe/g) || []).length, 24);
 });
+
+test("native website icons cover arbitrary destinations across prose, references and cards without disclosing paths", () => {
+  const source = `正文 [任意站点](https://fresh.example/private/path?token=secret) [同站](https://fresh.example/other)。
+
+([来源][1])
+
+[1]: https://citation.example/story
+
+\`\`\`scopy-rich
+{"version":2,"type":"news","items":[{"title":"消息","url":"https://news.example/long/story"}]}
+\`\`\`
+
+\`[代码](https://code.example/secret)\`
+
+![图片](scopy-source-icon://image.example/https)`;
+  const { html } = render(source, { nativeSourceIcons: true });
+  for (const host of ["fresh.example", "citation.example", "news.example"]) {
+    assert.ok(html.includes(`src="scopy-source-icon://${host}/https"`), host);
+  }
+  assert.equal((html.match(/src="scopy-source-icon:\/\/fresh.example\/https"/g) || []).length, 2);
+  assert.doesNotMatch(html, /src="scopy-source-icon:[^"]*(?:token|secret|story|code.example|image.example)/);
+  assert.match(html, /<span class="scopy-link__label">任意站点<\/span>/);
+  assert.doesNotMatch(render(source).html, /src="scopy-source-icon:/);
+});
+
+test("native icon work is bounded and unsafe URLs never become native requests", () => {
+  const source = Array.from({ length: 70 }, (_, i) => `[link](https://site${i}.example/path)`).join(" ");
+  const { html } = render(source, { nativeSourceIcons: true });
+  assert.equal((html.match(/data-scopy-native-source-icon/g) || []).length, 24);
+  for (const url of ["https://user:pass@private.example/", "https://site.example/%0a", "https://site.example:8080/path"]) {
+    assert.doesNotMatch(render(`[link](${url})`, { nativeSourceIcons: true }).html, /src="scopy-source-icon:/);
+  }
+});

@@ -16,6 +16,12 @@ export function scopySourceIcon(url, classNames, faviconClass) {
   }
   const icon = codexGlobeIcon(classNames.includes("scopy-source-citation-origin-icon") ? 12 : 16);
   icon.properties.className.push(...classNames);
+  if (host) {
+    const destination = new URL(url);
+    if (!destination.port && /^[a-z0-9.-]+$/i.test(host)) {
+      icon.properties.dataScopySourceIcon = `scopy-source-icon://${host}/${destination.protocol.slice(0, -1)}`;
+    }
+  }
   return icon;
 }
 
@@ -44,4 +50,29 @@ export function replaceFailedSourceIcon(image) {
   svg.appendChild(path);
   image.parentNode.replaceChild(svg, image);
   return true;
+}
+
+// Run after sanitization. Only our source-icon nodes can become native image requests;
+// authored images never gain access to this image-only origin service.
+export function rehypeScopyNativeSourceIcons({ enabled }) {
+  return (tree) => {
+    const origins = new Set();
+    let count = 0;
+    function visit(node) {
+      const source = node?.properties?.dataScopySourceIcon;
+      if (source) {
+        delete node.properties.dataScopySourceIcon;
+        if (enabled && count < 256 && (origins.has(source) || origins.size < 24)) {
+          origins.add(source);
+          count += 1;
+          node.tagName = "img";
+          node.properties = { src: source, alt: "", className: node.properties.className.filter(name => name !== "scopy-icon--globe"),
+            dataScopyNativeSourceIcon: "true" };
+          node.children = [];
+        }
+      }
+      for (const child of node?.children || []) visit(child);
+    }
+    visit(tree);
+  };
 }

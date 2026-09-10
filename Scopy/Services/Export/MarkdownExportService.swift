@@ -896,6 +896,7 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
 
         // Create offscreen WebView with an explicit viewport size to make layout deterministic.
         let config = WKWebViewConfiguration()
+        SourceIconSchemeHandler.install(in: config)
         config.websiteDataStore = .nonPersistent()
         config.defaultWebpagePreferences.allowsContentJavaScript = true
         config.preferences.javaScriptCanOpenWindowsAutomatically = false

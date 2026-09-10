@@ -79,6 +79,11 @@ struct AppearanceSettingsPage: View {
                 SettingsCardDivider()
 
                 SettingsCardRow {
+                    Toggle("网站图标（联网获取并缓存）", isOn: $tempSettings.siteIconsEnabled)
+                        .accessibilityIdentifier("Settings.SiteIconsToggle")
+                }
+
+                SettingsCardRow {
                     Toggle("链接预览增强（联网）", isOn: $tempSettings.linkEnrichmentEnabled)
                         .accessibilityIdentifier("Settings.LinkEnrichmentToggle")
                 }

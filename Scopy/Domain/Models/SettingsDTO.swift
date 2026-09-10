@@ -38,6 +38,8 @@ public struct SettingsDTO: Sendable, Equatable {
     /// 当启用时，助手内容（ChatGPT/Codex 等）里的裸链接会联网抓取 Open Graph 标题与缩略图，
     /// 冻结为本地 sidecar 后渲染成卡片。默认关闭；渲染层永不联网，此开关只门控抓取。
     public var linkEnrichmentEnabled: Bool
+    /// Fetch and cache public website icons using origins only.
+    public var siteIconsEnabled: Bool = true
 
     public static let `default` = SettingsDTO(
         maxItems: 10000,

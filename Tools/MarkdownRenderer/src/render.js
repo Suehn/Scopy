@@ -16,7 +16,7 @@ import {
   scopySafeHTMLInlineHandler
 } from "./remarkScopySafeHTML.js";
 import { codexFileIcon, codexPluginIcon, localFileKind } from "./scopyCodexIcons.js";
-import { scopySourceIcon } from "./scopySourceIcon.js";
+import { scopySourceIcon, rehypeScopyNativeSourceIcons } from "./scopySourceIcon.js";
 import { preprocessBackslashMath } from "./scopyBackslashMathPreprocessor.js";
 import { remarkScopyImageGroups } from "./remarkScopyImageGroups.js";
 import { remarkScopyPublicCards } from "./remarkScopyPublicCards.js";
@@ -79,6 +79,7 @@ function renderInternal(source, policy = {}) {
     .use(rehypeGuardDataImages)
     .use(rehypeSanitize, scopySanitizeSchema)
     .use(rehypeScopyLinkSemantics, normalizedPolicy.linkEnrichment)
+    .use(rehypeScopyNativeSourceIcons, { enabled: normalizedPolicy.nativeSourceIcons })
     .use(rehypeScopyKatex, { failureMode: "relaxed" })
     .use(rehypeHighlight, scopyHighlightOptions)
     .use(rehypeStringify);
@@ -271,7 +272,7 @@ const scopySanitizeSchema = {
       ...(defaultSchema.attributes?.sup || []),
       ["className", "scopy-safe-html-sup"]
     ],
-    svg: ["className", ["fill", "none", "currentColor"], "viewBox", "width", "height", "role", "ariaLabel", "ariaHidden", "focusable"],
+    svg: ["className", "dataScopySourceIcon", ["fill", "none", "currentColor"], "viewBox", "width", "height", "role", "ariaLabel", "ariaHidden", "focusable"],
     text: ["className", "x", "y", "dx", "dy", "textAnchor", "dominantBaseline"],
     time: ["className", "dateTime"],
     u: [["className", "scopy-safe-html-u"]],
@@ -451,6 +452,7 @@ function visitElements(node, visitor) {
 
 function normalizePolicy(policy) {
   return {
+    nativeSourceIcons: policy.nativeSourceIcons === true,
     profile: String(policy.profile || "plainTextUnknown"),
     allowLooseMathRepair: policy.allowLooseMathRepair === true,
     policyVersion: String(policy.policyVersion || ""),

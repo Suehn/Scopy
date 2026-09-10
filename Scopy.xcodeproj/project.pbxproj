@@ -51,7 +51,6 @@
 		0EF4AADED6B06A5651357687 /* MarkdownSyntaxProtector.swift in Sources */ = {isa = PBXBuildFile; fileRef = 33AD448FC3C112E3EC1A82B2 /* MarkdownSyntaxProtector.swift */; };
 		0EFE49BD8634937BD92E51EC /* HoverPreviewImageQualityPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9CFA9E9A2101790657BF92E8 /* HoverPreviewImageQualityPolicy.swift */; };
 		0F008FE00FA588F058BFC382 /* HistoryRowPixelSnapshotTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 62A3A218EDA8A30B0973BFF5 /* HistoryRowPixelSnapshotTests.swift */; };
-		0F0D394FF8273E8F265ADC7C /* LinkEnrichmentFetcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 60054F00733ACB806444A846 /* LinkEnrichmentFetcher.swift */; };
 		0F2B4AFBDEADB8BFC90399E7 /* HotKeyRecorderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10A8A6276630C764728D88F6 /* HotKeyRecorderView.swift */; };
 		0FD74D15059EA77E63270E96 /* HotKeyRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3A1E175FDD120FFDD7F1D4E4 /* HotKeyRecorder.swift */; };
 		10546EB3FD62A7EF581DD47E /* loose-latex.md in Resources */ = {isa = PBXBuildFile; fileRef = A9D3AC27CB4291833F0B994C /* loose-latex.md */; };
@@ -156,7 +155,6 @@
 		33B94459419865FFF5750A89 /* KaTeX_Caligraphic-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = FD494BE1E8A9226E9C010653 /* KaTeX_Caligraphic-Regular.ttf */; };
 		345CD5DA7AD86657EE160466 /* LaTeXDocumentNormalizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 40BEDF7D2448B733FAA444B2 /* LaTeXDocumentNormalizer.swift */; };
 		34882D74E4796207D49E6558 /* LaTeXInlineTextNormalizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2DAAE2DB0F49DD63A8BAE8E6 /* LaTeXInlineTextNormalizer.swift */; };
-		348FC3BEB3FA7CFDE4CAB3C8 /* LinkEnrichmentFetcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 60054F00733ACB806444A846 /* LinkEnrichmentFetcher.swift */; };
 		356DE44000772F83C9DB3FCE /* HistoryItemHarnessView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B9FF3E3F61A7EAAF6CA767B /* HistoryItemHarnessView.swift */; };
 		35B7F9DC9FBBBFD8FA39329E /* KaTeX_Main-Italic.woff2 in Resources */ = {isa = PBXBuildFile; fileRef = 559EFA45395E9A16916A9E7B /* KaTeX_Main-Italic.woff2 */; };
 		35F9DA552D86FB9CBF6A3C81 /* ScopyColors.swift in Sources */ = {isa = PBXBuildFile; fileRef = 493362158599490B2914D1A5 /* ScopyColors.swift */; };
@@ -396,6 +394,7 @@
 		873A9F6DEDF8C403C50A8BF2 /* KaTeX_Script-Regular.woff in Resources */ = {isa = PBXBuildFile; fileRef = 024FB47EE00106753C4DB412 /* KaTeX_Script-Regular.woff */; };
 		877A7C4CCD68E76263B6AF19 /* KaTeX_SansSerif-Italic.ttf in Resources */ = {isa = PBXBuildFile; fileRef = CD07D7CE6BE8E39A3AF4651C /* KaTeX_SansSerif-Italic.ttf */; };
 		87A4E9A4908A85DA539E7E8D /* favicon-elebank-150.png in Resources */ = {isa = PBXBuildFile; fileRef = 6E5C450193B29D5753E24B39 /* favicon-elebank-150.png */; };
+		8819DE47B0864E39DF44F165 /* SourceIconTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 15C5CB69A5654AB258FE2835 /* SourceIconTests.swift */; };
 		884E86217C2B9383A211B56E /* ScrollCursorSetCoalescer.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFA72B55409DC71EB7E570D7 /* ScrollCursorSetCoalescer.swift */; };
 		887B19F1D0F5F5E002B880EF /* news-openai-jalapeno.jpg in Resources */ = {isa = PBXBuildFile; fileRef = D9BAB40563618D6302671819 /* news-openai-jalapeno.jpg */; };
 		88F77496CFB21A88BF0D8745 /* AppStateTestCompatibility.swift in Sources */ = {isa = PBXBuildFile; fileRef = C9D55BDCEE3B396CBE2DC623 /* AppStateTestCompatibility.swift */; };
@@ -457,6 +456,7 @@
 		9B7AEAA201394AEAAFBC98D2 /* HistoryItemTextPreviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F77CBE035B9D88E9E868592 /* HistoryItemTextPreviewView.swift */; };
 		9BD0FAEC9573A2D5396A6798 /* MarkdownRenderCacheKey.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5BEF0EDA5682AECFF608778 /* MarkdownRenderCacheKey.swift */; };
 		9BD786560A73DC3C4CE8D4D6 /* HistoryItemThumbnailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20DE268ED91DDC33CB05EFB3 /* HistoryItemThumbnailView.swift */; };
+		9C4A70DFEE9BEA28E17C4ECF /* SourceIconTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 15C5CB69A5654AB258FE2835 /* SourceIconTests.swift */; };
 		9C53587D96359D0519DF9817 /* KaTeX_Caligraphic-Bold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 42D411B91F0A819854835FBE /* KaTeX_Caligraphic-Bold.ttf */; };
 		9C54B266E09C0158762F2BDF /* MarkdownPreviewLayoutScalePreference.swift in Sources */ = {isa = PBXBuildFile; fileRef = 74EE7FAABB8A5254A7DD0645 /* MarkdownPreviewLayoutScalePreference.swift */; };
 		9C5C05A36DFEF4AED2785BA6 /* news-openai-jalapeno.jpg in Resources */ = {isa = PBXBuildFile; fileRef = 75C7B838EED36545B77362F5 /* news-openai-jalapeno.jpg */; };
@@ -621,6 +621,7 @@
 		DA2483A05985496EAFA7CD17 /* ScopyIcons.swift in Sources */ = {isa = PBXBuildFile; fileRef = FAECF70623C7580CB548B68A /* ScopyIcons.swift */; };
 		DA3FC3D055F108D0EC80E643 /* image-group-chatgpt-search-results.jpg in Resources */ = {isa = PBXBuildFile; fileRef = 5198384EBFCABFD921F2BAAC /* image-group-chatgpt-search-results.jpg */; };
 		DA3FD88C0191F89C444DBC70 /* rich_markdown.md in Resources */ = {isa = PBXBuildFile; fileRef = D97F17C245BCC541ADD97F99 /* rich_markdown.md */; };
+		DAE844579E16B539EDE0ECFA /* markdown_site_icons_neosoul.md in Resources */ = {isa = PBXBuildFile; fileRef = 774470A3E5C3142D494715C5 /* markdown_site_icons_neosoul.md */; };
 		DB3995EBBF7A6D18F66AC998 /* favicon-help-openai-32.png in Resources */ = {isa = PBXBuildFile; fileRef = ADE6D1D5A7EB19AB201B6BD5 /* favicon-help-openai-32.png */; };
 		DBC6D55DDA5588D9E5998BAD /* HoverPreviewLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 133634F5AE6D9FACED6E1E9C /* HoverPreviewLoader.swift */; };
 		DBD7AEA83D9BDF95D9135B3A /* HistoryItemRowControllerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB39D191C2CDAE7B01F1EF16 /* HistoryItemRowControllerTests.swift */; };
@@ -720,7 +721,6 @@
 		FE020EC5D04BE0530DC72ED6 /* KaTeX_Main-Bold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = D731CF7F77AA5C6A09962488 /* KaTeX_Main-Bold.ttf */; };
 		FE1B7934B9FC6C5F1123E8F4 /* HistoryRowThumbnailLifecycleScheduler.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5AC24893A200F18B7ADA495 /* HistoryRowThumbnailLifecycleScheduler.swift */; };
 		FE96B78665F159342116C6D5 /* ReviewFix24Tests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D09D06477D29F2066855D402 /* ReviewFix24Tests.swift */; };
-		FFBC03B9FA878BB9FA25909D /* LinkEnrichmentFetcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 60054F00733ACB806444A846 /* LinkEnrichmentFetcher.swift */; };
 		FFF482F6A9A7DD14B0698AC7 /* ScopyUISupport in Frameworks */ = {isa = PBXBuildFile; productRef = A8C4FDEA64E79129FEBF1CBE /* ScopyUISupport */; };
 /* End PBXBuildFile section */
 
@@ -787,6 +787,7 @@
 		153370FC30C96C172F3FC68C /* SearchMatchPresentationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchMatchPresentationTests.swift; sourceTree = "<group>"; };
 		156557CD8078DC274375EABE /* FilePreviewSupportTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilePreviewSupportTests.swift; sourceTree = "<group>"; };
 		15AD12EB1E64621C175C997C /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		15C5CB69A5654AB258FE2835 /* SourceIconTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SourceIconTests.swift; sourceTree = "<group>"; };
 		15EBBE158869225275AB5F98 /* SearchServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchServiceTests.swift; sourceTree = "<group>"; };
 		162CA2AC19540746D21C8DDB /* HistoryItemPresentationCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryItemPresentationCache.swift; sourceTree = "<group>"; };
 		17241150321C665A1683C64F /* HistoryListStateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryListStateTests.swift; sourceTree = "<group>"; };
@@ -890,7 +891,6 @@
 		5AAB1963DA04B41B525FE8EF /* raw-html-literal.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = "raw-html-literal.md"; sourceTree = "<group>"; };
 		5B3FCCDA93A7993C6B7B2BD7 /* MockClipboardServiceHistoryListIntegrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockClipboardServiceHistoryListIntegrationTests.swift; sourceTree = "<group>"; };
 		5F236FB16D44AFE08ACBC9C5 /* IntegrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntegrationTests.swift; sourceTree = "<group>"; };
-		60054F00733ACB806444A846 /* LinkEnrichmentFetcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LinkEnrichmentFetcher.swift; sourceTree = "<group>"; };
 		60CF1C183B3F302D5E620DB2 /* HistoryItemImagePreviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryItemImagePreviewView.swift; sourceTree = "<group>"; };
 		6119B6CED24CEDFCE2AA9419 /* KaTeX_SansSerif-Regular.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "KaTeX_SansSerif-Regular.ttf"; sourceTree = "<group>"; };
 		6146C28BE595B15CFD414140 /* StorageServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StorageServiceTests.swift; sourceTree = "<group>"; };
@@ -919,6 +919,7 @@
 		74EE7FAABB8A5254A7DD0645 /* MarkdownPreviewLayoutScalePreference.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownPreviewLayoutScalePreference.swift; sourceTree = "<group>"; };
 		753E825FB74D799376C6A8B4 /* PinnedPreviewControllerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PinnedPreviewControllerTests.swift; sourceTree = "<group>"; };
 		75C7B838EED36545B77362F5 /* news-openai-jalapeno.jpg */ = {isa = PBXFileReference; lastKnownFileType = image.jpeg; path = "news-openai-jalapeno.jpg"; sourceTree = "<group>"; };
+		774470A3E5C3142D494715C5 /* markdown_site_icons_neosoul.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = markdown_site_icons_neosoul.md; sourceTree = "<group>"; };
 		7836A2D126F3A98770E8FE98 /* code-fence-paths.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = "code-fence-paths.md"; sourceTree = "<group>"; };
 		7854D4BF872E9A35EDC0F3E2 /* HistoryItemPreviewCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryItemPreviewCoordinator.swift; sourceTree = "<group>"; };
 		78B1C2A3C6505AD7597DFF7C /* PopoverWindowObserver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PopoverWindowObserver.swift; sourceTree = "<group>"; };
@@ -937,7 +938,6 @@
 		82CFF8877261ED83C85EA933 /* KaTeX_Size1-Regular.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "KaTeX_Size1-Regular.ttf"; sourceTree = "<group>"; };
 		844C4C084D60F319E545D8E0 /* AppDelegateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegateTests.swift; sourceTree = "<group>"; };
 		85328477E197D8B958744DD5 /* Scopy.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Scopy.entitlements; sourceTree = "<group>"; };
-		854261159C224F67A2D4EFFF /* scopy-link-icons-20260905 */ = {isa = PBXFileReference; lastKnownFileType = folder; name = "scopy-link-icons-20260905"; path = .; sourceTree = SOURCE_ROOT; };
 		87618982DF3A1D4F738AC4B8 /* chatgpt_public_copy_markdown_sample.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = chatgpt_public_copy_markdown_sample.md; sourceTree = "<group>"; };
 		87F62228AF78982B9DD8A1F0 /* KaTeX_Main-BoldItalic.woff2 */ = {isa = PBXFileReference; path = "KaTeX_Main-BoldItalic.woff2"; sourceTree = "<group>"; };
 		896E7E53DDFA91945E5BF7A2 /* currency-shell-vars.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = "currency-shell-vars.md"; sourceTree = "<group>"; };
@@ -1058,6 +1058,7 @@
 		DEABB0DE8397AFCE5C93FCC5 /* KaTeX_SansSerif-Bold.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "KaTeX_SansSerif-Bold.ttf"; sourceTree = "<group>"; };
 		DFF43B49A8AE6293848A6558 /* HoverPreviewSizeBudget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HoverPreviewSizeBudget.swift; sourceTree = "<group>"; };
 		E15DF921CD907AE377BF0826 /* reference-link.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = "reference-link.md"; sourceTree = "<group>"; };
+		E1A75D5113556F63BF9ADFE9 /* scopy-source-favicons-20260911 */ = {isa = PBXFileReference; lastKnownFileType = folder; name = "scopy-source-favicons-20260911"; path = .; sourceTree = SOURCE_ROOT; };
 		E4691EB889BD8853399C89DF /* MarkdownRenderContext.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownRenderContext.swift; sourceTree = "<group>"; };
 		E5AC24893A200F18B7ADA495 /* HistoryRowThumbnailLifecycleScheduler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryRowThumbnailLifecycleScheduler.swift; sourceTree = "<group>"; };
 		E671677DECEAFE931657E79D /* MarkdownHTMLDocumentBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownHTMLDocumentBuilder.swift; sourceTree = "<group>"; };
@@ -1330,7 +1331,7 @@
 		7FE17EEF8617970E762C41B4 /* Packages */ = {
 			isa = PBXGroup;
 			children = (
-				854261159C224F67A2D4EFFF /* scopy-link-icons-20260905 */,
+				E1A75D5113556F63BF9ADFE9 /* scopy-source-favicons-20260911 */,
 			);
 			name = Packages;
 			sourceTree = "<group>";
@@ -1470,6 +1471,7 @@
 				36F2E1F457E9164BB4772826 /* SettingsWindowCoordinatorTests.swift */,
 				CF519408C137227E5F1B8226 /* ShortQueryIndexDiskCacheHardeningTests.swift */,
 				ADE11D7F3EEE23CE6073C7DD /* SnapshotPerformanceTests.swift */,
+				15C5CB69A5654AB258FE2835 /* SourceIconTests.swift */,
 				AA1C5C44C2A823612D31233D /* SQLiteIntegerWidthTests.swift */,
 				FBD0646DCC941F6107122620 /* SQLiteTextFidelityTests.swift */,
 				439622504A6684CD4427F6FE /* StorageCommitProtocolTests.swift */,
@@ -1662,7 +1664,6 @@
 			children = (
 				B6D1736FE413BD5902C40CB5 /* LinkEnrichmentCoordinator.swift */,
 				55308C9DA7BC7662D334C284 /* LinkEnrichmentEligibility.swift */,
-				60054F00733ACB806444A846 /* LinkEnrichmentFetcher.swift */,
 				3E2274EC3AF860DFEB8A11BA /* LinkEnrichmentModel.swift */,
 				BB7C02F2A8B7E87B33A74976 /* LinkEnrichmentStore.swift */,
 			);
@@ -1686,6 +1687,7 @@
 				7F62A8B9DF24C0578AD04A8C /* markdown_codex_icons.md */,
 				D7606FCD0679847F08069204 /* markdown_link_icons.md */,
 				9E57493DEBD8670CDF52F04B /* markdown_safe_html_torture.md */,
+				774470A3E5C3142D494715C5 /* markdown_site_icons_neosoul.md */,
 				D022F8113E684307FAD99300 /* README.md */,
 				78C694E7F8CA4BC030CEB9A0 /* resolution_scale.md */,
 				D97F17C245BCC541ADD97F99 /* rich_markdown.md */,
@@ -1883,6 +1885,7 @@
 				D88291E95D3BC8B8A45456DE /* markdown_codex_icons.md in Resources */,
 				2FC2914D91D5A948F4AE8B09 /* markdown_link_icons.md in Resources */,
 				46FC01D8322547FAF7C2C553 /* markdown_safe_html_torture.md in Resources */,
+				DAE844579E16B539EDE0ECFA /* markdown_site_icons_neosoul.md in Resources */,
 				7606A0ECDCC99F402295852B /* news-openai-hugging-face.jpg in Resources */,
 				9C5C05A36DFEF4AED2785BA6 /* news-openai-jalapeno.jpg in Resources */,
 				75599DB341D187DAE9BD8DAB /* news-openai-kiro.jpg in Resources */,
@@ -2257,7 +2260,6 @@
 				4ED08491809BFE39787DE10B /* LaTeXInlineTextNormalizer.swift in Sources */,
 				E5BF938A6A66D6C4709BCD49 /* LinkEnrichmentCoordinator.swift in Sources */,
 				42532CE476A24C56DBFDF104 /* LinkEnrichmentEligibility.swift in Sources */,
-				348FC3BEB3FA7CFDE4CAB3C8 /* LinkEnrichmentFetcher.swift in Sources */,
 				9580C022720818C5E12C8DB6 /* LinkEnrichmentModel.swift in Sources */,
 				F0F31631043E1066D7E805AC /* LinkEnrichmentStore.swift in Sources */,
 				A62A0EB668775962020562C4 /* LinkEnrichmentTests.swift in Sources */,
@@ -2334,6 +2336,7 @@
 				137ABDD7D22A3B37EEAC3AEF /* ShortQueryIndexDiskCacheHardeningTests.swift in Sources */,
 				8936CEA202269770DD286AC6 /* ShortcutsSettingsPage.swift in Sources */,
 				374BBA5450BC7E111343E688 /* SnapshotPerformanceTests.swift in Sources */,
+				9C4A70DFEE9BEA28E17C4ECF /* SourceIconTests.swift in Sources */,
 				3BB5109BA4558651C5EE7DB2 /* StorageCommitProtocolTests.swift in Sources */,
 				7D547894B05F8069CA7A3DD2 /* StorageServiceTests.swift in Sources */,
 				25EAB1843BC73ADEDF662E4A /* StorageSettingsPage.swift in Sources */,
@@ -2469,7 +2472,6 @@
 				34882D74E4796207D49E6558 /* LaTeXInlineTextNormalizer.swift in Sources */,
 				A8FB65FC9E59F0A80EE4AAAC /* LinkEnrichmentCoordinator.swift in Sources */,
 				06291B2796DCC50FE45DE79C /* LinkEnrichmentEligibility.swift in Sources */,
-				0F0D394FF8273E8F265ADC7C /* LinkEnrichmentFetcher.swift in Sources */,
 				F1AAF41F4D265D649DC4957B /* LinkEnrichmentModel.swift in Sources */,
 				CE4F5EBF4A6F1F2200E80D6F /* LinkEnrichmentStore.swift in Sources */,
 				30B89200167DB97247166395 /* LinkEnrichmentTests.swift in Sources */,
@@ -2547,6 +2549,7 @@
 				52349B93FE20FDACBA2992A8 /* ShortQueryIndexDiskCacheHardeningTests.swift in Sources */,
 				7D69F4EFE1199AC3FB188867 /* ShortcutsSettingsPage.swift in Sources */,
 				18637C156D85757153BECD04 /* SnapshotPerformanceTests.swift in Sources */,
+				8819DE47B0864E39DF44F165 /* SourceIconTests.swift in Sources */,
 				8C6479CA9D1282C2950C4F2A /* StorageCommitProtocolTests.swift in Sources */,
 				83B5EE1F7FAB659097712B82 /* StorageServiceTests.swift in Sources */,
 				68DCB77F6F20942281A5E05B /* StorageSettingsPage.swift in Sources */,
@@ -2629,7 +2632,6 @@
 				2FCF65AF361332A023B227D9 /* LaTeXInlineTextNormalizer.swift in Sources */,
 				C25FFC8A25D8EE13A3194943 /* LinkEnrichmentCoordinator.swift in Sources */,
 				4B55871527A9C4D77D1EF211 /* LinkEnrichmentEligibility.swift in Sources */,
-				FFBC03B9FA878BB9FA25909D /* LinkEnrichmentFetcher.swift in Sources */,
 				C5A9C2CF3592CF755FBF285D /* LinkEnrichmentModel.swift in Sources */,
 				BB6D77B1C24FFB6B6B3BEA20 /* LinkEnrichmentStore.swift in Sources */,
 				262269F64423C3104B626FEB /* ListLiveScrollObserverHarnessView.swift in Sources */,

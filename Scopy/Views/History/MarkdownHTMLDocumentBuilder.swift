@@ -6,7 +6,7 @@ enum MarkdownHTMLDocumentBuilder {
     private static let overflowProbeSelector = "pre, .katex, .footnotes"
 
     private static let cspMetaTag = """
-    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; base-uri 'none'; form-action 'none'; object-src 'none'; frame-src 'none'; connect-src 'none'; img-src 'self' data:; style-src 'self' 'unsafe-inline' file:; script-src 'self' 'unsafe-inline' file:; font-src 'self' data: file:;">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; base-uri 'none'; form-action 'none'; object-src 'none'; frame-src 'none'; connect-src 'none'; img-src 'self' data: scopy-source-icon:; style-src 'self' 'unsafe-inline' file:; script-src 'self' 'unsafe-inline' file:; font-src 'self' data: file:;">
     """
 
 
@@ -2543,9 +2543,15 @@ enum MarkdownHTMLDocumentBuilder {
                   }
                   setTimeout(function () {
                     for (var i = 0; i < images.length; i++) {
-                      if (!settled[i]) { finishImage(images[i], false); }
+                      if (!settled[i] && !images[i].hasAttribute('data-scopy-native-source-icon')) { finishImage(images[i], false); }
                     }
                   }, 1500);
+                  // Native icon discovery is separately bounded; other image readiness is unchanged.
+                  setTimeout(function () {
+                    for (var i = 0; i < images.length; i++) {
+                      if (!settled[i]) { finishImage(images[i], false); }
+                    }
+                  }, 10000);
                 }
                 function awaitStylesheetReady(completion) {
                   var link = document.getElementById('scopy-katex-stylesheet');
@@ -2692,6 +2698,12 @@ enum MarkdownHTMLDocumentBuilder {
                   }
                   settleRenderedImages(root, function () {
                     ready('images');
+                    // WebKit's fonts.ready also waits for layout-dependent images. Start its
+                    // own timeout after native icons settle, so icon discovery is not a font failure.
+                    awaitFontsReady(function (fontError) {
+                      if (fontError) { fail(fontError); return; }
+                      ready('fonts');
+                    });
                   });
                   awaitStylesheetReady(function (stylesheetError) {
                     if (stylesheetError) {
@@ -2700,13 +2712,7 @@ enum MarkdownHTMLDocumentBuilder {
                     }
                     ready('stylesheet');
                   });
-                  awaitFontsReady(function (fontError) {
-                    if (fontError) {
-                      fail(fontError);
-                      return;
-                    }
-                    ready('fonts');
-                  });
+
                 }
                 function finish(succeeded) {
                   var el = document.getElementById('content');
@@ -2841,6 +2847,7 @@ enum MarkdownHTMLDocumentBuilder {
     private static func unifiedPolicyPayload(context: MarkdownRenderContext) -> [String: AnyEncodable] {
         var payload: [String: AnyEncodable] = [
             "profile": AnyEncodable(context.profile.rawValue),
+            "nativeSourceIcons": AnyEncodable(true),
             "allowLooseMathRepair": AnyEncodable(context.policy.allowLooseMathRepair),
             "policyVersion": AnyEncodable(MarkdownRenderContextResolver.rendererVersion)
         ]

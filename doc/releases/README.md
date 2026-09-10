@@ -20,9 +20,9 @@ This page is the human-facing index for current release state. Automation should
 ## Current Release
 
 <!-- release-current:start -->
-- Version: `v0.80.4`
-- Date: `2026-09-05`
-- Release note: [v0.80.4](./history/v0.80.4.md)
+- Version: `v0.80.5`
+- Date: `2026-09-11`
+- Release note: [v0.80.5](./history/v0.80.5.md)
 - Changelog: [CHANGELOG.md](./CHANGELOG.md)
 - Profile doc: `none`
 <!-- release-current:end -->
@@ -30,6 +30,7 @@ This page is the human-facing index for current release state. Automation should
 ## Recent Releases
 
 <!-- release-recent:start -->
+- `2026-09-11` [v0.80.5](./history/v0.80.5.md) - Discover and cache website icons across Markdown links, citations and source cards
 - `2026-09-05` [v0.80.4](./history/v0.80.4.md) - Render original Codex icons and preserve source artwork colors
 - `2026-09-05` [v0.80.3](./history/v0.80.3.md) - Preserve Chinese tables and emphasis when capturing ChatGPT copies
 - `2026-09-05` [v0.80.2](./history/v0.80.2.md) - Fix Chinese emphasis and single-dollar math while simplifying capture tests
@@ -41,7 +42,6 @@ This page is the human-facing index for current release state. Automation should
 - `2026-09-03` [v0.78.0](./history/v0.78.0.md) - Hover previews at final size, search keeps rows while typing, rich copies stop blocking the main thread, binary index caches, prefetched and chunked page loads
 - `2026-09-02` [v0.77.1](./history/v0.77.1.md) - Mouse-wheel scroll detection only starts on a current scroll-wheel event; test gates recorded for v0.77.0
 - `2026-09-02` [v0.77.0](./history/v0.77.0.md) - Mouse-wheel scrolling suppresses hover work, selection stops re-diffing the List, 100-row pages: scroll CPU 9.9 -> 2.9 s, main thread 42% -> 22%, callback max 75 -> 17-25 ms
-- `2026-09-02` [v0.76.0](./history/v0.76.0.md) - Real-input scroll profiling finds the cursor, revision, and observation costs; scroll CPU -32%, callback p95 83 -> 17 ms
 <!-- release-recent:end -->
 
 ## Full History
