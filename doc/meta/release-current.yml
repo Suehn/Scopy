@@ -18,10 +18,17 @@ verification:
   assets_verify: pass_node_157_atomic_assets_3f2da803
   test_unit: pass_focused_80_tests_0_failures
   test_strict: pass_focused_80_with_SWIFT_STRICT_CONCURRENCY_complete
-  test_tsan: not_run_locally_no_new_background_concurrency
+  test_tsan: pass_hosted_34513053859
   test_integration: not_run_no_schema_change
   snapshot_release: not_run_no_backend_performance_change
   frontend_profile_full: not_run_user_requested_no_unrelated_performance_testing
   unified_performance: not_run_no_performance_claim
   test_ui_subset: automation_host_blocked_native_windows_and_WebKit_pass
   png_export: pass_real_app_byte_identical_NeoSoul_fixture
+  release_commit: 2849ca9eaa53c90ce9f0c62115ac68c47aadd733
+  release_workflow: https://github.com/Suehn/Scopy/actions/runs/34513059002
+  dmg_sha256: 5256ef8a1c2509c4ef09d1ba21272ccecc7d3db335fff8b60dc604bc4d7a0feb
+  homebrew_casks: pass_repo_c3f09a6_and_manual_tap_ba85202
+  tap_automation: failed_manual_ssh_sync_completed
+  hosted_ci: pass_build_unit_strict_policy_34513053839
+  installed_bundle: pass_Applications_Scopy_0_80_6_build_530_launched
