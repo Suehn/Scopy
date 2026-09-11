@@ -388,9 +388,11 @@ final class WebViewLifecycleTests: XCTestCase {
                   window.syncChatGPTZoomShell(content);
                   const paragraph = content.querySelector('p').getBoundingClientRect();
                   const shell = document.getElementById('content-scale-shell').getBoundingClientRect();
+                  const contentBox = content.getBoundingClientRect();
                   const viewport = innerWidth;
                   const code = content.querySelector('.scopy-code-card-scroll') || content.querySelector('pre');
                   return {
+                    geometry: JSON.stringify({ viewport, paragraph: paragraph.toJSON(), shell: shell.toJSON(), content: contentBox.toJSON(), scrollX, shellMargin: getComputedStyle(document.getElementById('content-scale-shell')).marginLeft }),
                     centered: Math.abs(paragraph.left - (viewport - paragraph.right)) < 2,
                     fits: Math.abs(shell.width - Math.min(816, viewport)) < 2 && root.scrollWidth <= viewport + 1,
                     scale: Math.abs(parseFloat(getComputedStyle(root).getPropertyValue('--scopy-chatgpt-preview-scale')) - \(Double(scale) / 100) * Math.min(1, viewport / 816)) < 0.001,
@@ -401,8 +403,12 @@ final class WebViewLifecycleTests: XCTestCase {
                   };
                 })()
                 """
-                let values = try XCTUnwrap(evaluate(checks, in: controller.webView) as? [String: Bool])
-                for (name, passed) in values { XCTAssertTrue(passed, "\(name), width \(width), scale \(scale)") }
+                let values = try XCTUnwrap(evaluate(checks, in: controller.webView) as? [String: Any])
+                let geometry = try XCTUnwrap(values["geometry"] as? String)
+                for (name, value) in values where name != "geometry" {
+                    let passed = try XCTUnwrap(value as? Bool)
+                    XCTAssertTrue(passed, "\(name), width \(width), scale \(scale): \(geometry)")
+                }
             }
         }
     }

@@ -19,7 +19,7 @@ verification:
   assets_verify: pass_node_157_atomic_assets_3f2da803
   test_unit: pass_native_runner_847_tests_4_skips_0_failures_xcode_launcher_blocked
   test_strict: pass_native_runner_847_tests_4_skips_complete_strict_build_xcode_launcher_blocked
-  test_tsan: pending_hosted
+  test_tsan: failed_hosted_34557868563_four_macos15_centering_assertions
   test_integration: not_run_no_schema_change
   snapshot_release: not_run_no_backend_performance_change
   frontend_profile_smoke: environment_blocked_runner_did_not_enter_scenes
@@ -27,10 +27,10 @@ verification:
   unified_performance: not_run_no_performance_claim
   test_ui_subset: native_geometry_WebKit_and_app_harness_pass_full_mouse_flow_not_verified
   png_export: pass_real_app_byte_identical_preview_fixture_9ea97a67
-  release_commit: pending
-  release_workflow: pending
-  dmg_sha256: pending
-  homebrew_casks: pending
-  tap_automation: pending
-  hosted_ci: pending
-  installed_bundle: pending_target_version
+  release_commit: 68c5caa02895e735fa10c784a3a49a21daa14575
+  release_workflow: https://github.com/Suehn/Scopy/actions/runs/34557871433
+  dmg_sha256: e173c267f830b6bbcfcbb35e4e254db70a18249620c2dd2da47fb9d19d56f5bf
+  homebrew_casks: pass_repo_1cb116e_and_manual_tap_7400d8b
+  tap_automation: failed_403_manual_ssh_sync_completed
+  hosted_ci: failed_34557868600_four_macos15_centering_assertions_each_unit_and_strict
+  installed_bundle: held_for_macos15_centering_repair
