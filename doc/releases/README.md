@@ -20,9 +20,9 @@ This page is the human-facing index for current release state. Automation should
 ## Current Release
 
 <!-- release-current:start -->
-- Version: `v0.80.6`
+- Version: `v0.80.7`
 - Date: `2026-09-11`
-- Release note: [v0.80.6](./history/v0.80.6.md)
+- Release note: [v0.80.7](./history/v0.80.7.md)
 - Changelog: [CHANGELOG.md](./CHANGELOG.md)
 - Profile doc: `none`
 <!-- release-current:end -->
@@ -30,6 +30,7 @@ This page is the human-facing index for current release state. Automation should
 ## Recent Releases
 
 <!-- release-recent:start -->
+- `2026-09-11` [v0.80.7](./history/v0.80.7.md) - Restore preview typography and remove the reserved toolbar row
 - `2026-09-11` [v0.80.6](./history/v0.80.6.md) - Keep multiple resizable previews with quiet unified controls and responsive reading layout
 - `2026-09-11` [v0.80.5](./history/v0.80.5.md) - Discover and cache website icons across Markdown links, citations and source cards
 - `2026-09-05` [v0.80.4](./history/v0.80.4.md) - Render original Codex icons and preserve source artwork colors
@@ -41,8 +42,6 @@ This page is the human-facing index for current release state. Automation should
 - `2026-09-03` [v0.78.2](./history/v0.78.2.md) - Marker-bearing clipboard content remains captured; history pages skip inline payload blobs; search evidence failures stay correctly scoped
 - `2026-09-03` [v0.78.1](./history/v0.78.1.md) - Protected pasteboard transactions stay out of history; valid search hits survive unrenderable match evidence
 - `2026-09-03` [v0.78.0](./history/v0.78.0.md) - Hover previews at final size, search keeps rows while typing, rich copies stop blocking the main thread, binary index caches, prefetched and chunked page loads
-- `2026-09-02` [v0.77.1](./history/v0.77.1.md) - Mouse-wheel scroll detection only starts on a current scroll-wheel event; test gates recorded for v0.77.0
-- `2026-09-02` [v0.77.0](./history/v0.77.0.md) - Mouse-wheel scrolling suppresses hover work, selection stops re-diffing the List, 100-row pages: scroll CPU 9.9 -> 2.9 s, main thread 42% -> 22%, callback max 75 -> 17-25 ms
 <!-- release-recent:end -->
 
 ## Full History
