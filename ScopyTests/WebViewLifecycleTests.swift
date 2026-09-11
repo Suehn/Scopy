@@ -364,16 +364,20 @@ final class WebViewLifecycleTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: testAssets) }
         let source = "# Stable preview\n\n" + String(repeating: "窗口调整大小时保留原有排版与缩放规则，表格和代码只在自身范围滚动。", count: 15)
             + "\n\n```text\n" + String(repeating: "long_code_", count: 150) + "\n```"
-        for scale in [80, 115, 200] {
+        // Cover both overlay and space-reserving scrollbars independently of the host's preference.
+        for (scale, scrollbarWidth) in [(80, 0), (115, 0), (200, 0), (80, 15), (115, 15), (200, 15)] {
             let context = MarkdownRenderContextResolver.defaultContext(for: source, layoutScale: MarkdownChatGPTLayoutScalePercent(settingsValue: scale))
-            let document = testAssets.appendingPathComponent("layout-\(scale).html")
-            try MarkdownHTMLRenderer.render(markdown: source, context: context).html.write(to: document, atomically: true, encoding: .utf8)
+            let documentName = "layout-\(scale)-\(scrollbarWidth).html"
+            let document = testAssets.appendingPathComponent(documentName)
+            let html = MarkdownHTMLRenderer.render(markdown: source, context: context).html
+                .replacingOccurrences(of: "</head>", with: "<style>html { overflow-y: scroll; } ::-webkit-scrollbar { width: \(scrollbarWidth)px; height: \(scrollbarWidth)px; }</style></head>")
+            try html.write(to: document, atomically: true, encoding: .utf8)
             controller.webView.navigationDelegate = nil
             controller.webView.loadFileURL(document, allowingReadAccessTo: testAssets)
             var ready = false
             let deadline = Date().addingTimeInterval(15)
             while !ready && Date() < deadline {
-                ready = evaluate("Boolean(location.pathname.endsWith('layout-\(scale).html') && window.__scopyIsRenderReady && window.__scopyIsRenderReady())", in: controller.webView) as? Bool == true
+                ready = evaluate("Boolean(location.pathname.endsWith('\(documentName)') && window.__scopyIsRenderReady && window.__scopyIsRenderReady())", in: controller.webView) as? Bool == true
                 if !ready { RunLoop.main.run(until: Date().addingTimeInterval(0.05)) }
             }
             XCTAssertTrue(ready, "Live document at \(scale)% must render")
@@ -392,8 +396,10 @@ final class WebViewLifecycleTests: XCTestCase {
                   const viewport = innerWidth;
                   const code = content.querySelector('.scopy-code-card-scroll') || content.querySelector('pre');
                   return {
-                    geometry: JSON.stringify({ viewport, paragraph: paragraph.toJSON(), shell: shell.toJSON(), content: contentBox.toJSON(), scrollX, shellMargin: getComputedStyle(document.getElementById('content-scale-shell')).marginLeft }),
-                    centered: Math.abs(paragraph.left - (viewport - paragraph.right)) < 2,
+                    geometry: JSON.stringify({ viewport, clientWidth: root.clientWidth, paragraph: paragraph.toJSON(), shell: shell.toJSON(), content: contentBox.toJSON(), scrollX, shellMargin: getComputedStyle(document.getElementById('content-scale-shell')).marginLeft }),
+                    shellCentered: Math.abs(shell.left - Math.max(0, (root.clientWidth - shell.width) / 2)) < 2,
+                    paragraphCentered: Math.abs(paragraph.left + paragraph.width / 2 - shell.left - shell.width / 2) < 2,
+                    scrollbarWidth: Math.abs(viewport - root.clientWidth - \(scrollbarWidth)) < 1,
                     fits: Math.abs(shell.width - Math.min(816, viewport)) < 2 && root.scrollWidth <= viewport + 1,
                     scale: Math.abs(parseFloat(getComputedStyle(root).getPropertyValue('--scopy-chatgpt-preview-scale')) - \(Double(scale) / 100) * Math.min(1, viewport / 816)) < 0.001,
                     layoutWidth: Math.abs(content.offsetWidth - 816 / \(Double(scale) / 100)) < 1,
@@ -407,7 +413,7 @@ final class WebViewLifecycleTests: XCTestCase {
                 let geometry = try XCTUnwrap(values["geometry"] as? String)
                 for (name, value) in values where name != "geometry" {
                     let passed = try XCTUnwrap(value as? Bool)
-                    XCTAssertTrue(passed, "\(name), width \(width), scale \(scale): \(geometry)")
+                    XCTAssertTrue(passed, "\(name), width \(width), scale \(scale), scrollbar \(scrollbarWidth): \(geometry)")
                 }
             }
         }
