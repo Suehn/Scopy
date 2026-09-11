@@ -140,6 +140,23 @@ final class PinnedPreviewControllerTests: XCTestCase {
         }
     }
 
+    func testPlainTextBeginsAtTheTopWithoutAToolbarRow() throws {
+        pin(item: Self.makeItem())
+        let panel = try XCTUnwrap(NSApp.windows.compactMap { $0 as? PinnedPreviewPanel }.first { $0.isVisible })
+        let host = try XCTUnwrap(panel.contentView)
+        panel.setContentSize(CGSize(width: 640, height: 400))
+        host.layoutSubtreeIfNeeded()
+        RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+        func textScrollView(in view: NSView) -> NSScrollView? {
+            if let scroll = view as? NSScrollView, scroll.documentView is NSTextView { return scroll }
+            return view.subviews.lazy.compactMap { textScrollView(in: $0) }.first
+        }
+        let scroll = try XCTUnwrap(textScrollView(in: host))
+        let contentFrame = scroll.convert(scroll.bounds, to: host)
+        let topInset = host.isFlipped ? contentFrame.minY - host.bounds.minY : host.bounds.maxY - contentFrame.maxY
+        XCTAssertEqual(topInset, 0, accuracy: 1, "Controls must overlay the document, not insert an empty header")
+    }
+
     // MARK: - Reconciliation
 
     func testPinnedPreviewSurvivesAnUnrelatedItemsDeletion() {

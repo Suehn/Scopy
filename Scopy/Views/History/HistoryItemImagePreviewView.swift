@@ -14,14 +14,13 @@ struct HistoryItemImagePreviewView: View {
 
     var body: some View {
         let width: CGFloat = max(1, sizeBudget.maxWidth)
-        let maxHeight: CGFloat = max(1, sizeBudget.maxHeight - PreviewToolbar<EmptyView>.height)
+        let maxHeight: CGFloat = sizeBudget.maxHeight
 
         let content = previewContent()
         let naturalHeight = previewHeight(width: width)
         let desiredHeight = min(maxHeight, max(1, naturalHeight))
 
-        VStack(spacing: 0) {
-                PreviewToolbar { EmptyView() }
+        Group {
             if naturalHeight > maxHeight {
                 ScrollView(.vertical) {
                     content
@@ -38,6 +37,7 @@ struct HistoryItemImagePreviewView: View {
         }
         .accessibilityIdentifier("History.Preview.Image")
         .accessibilityElement(children: .contain)
+        .previewControls { EmptyView() }
     }
 
     @ViewBuilder

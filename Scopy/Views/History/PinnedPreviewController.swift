@@ -26,7 +26,7 @@ struct PinnedPreview: Identifiable {
     /// The hover preview has measured its content by this point (the WebView reported the
     /// Markdown layout, the image knows its pixel size), so the first frame matches what the user
     /// was looking at instead of snapping to the window's minimum.
-    func preferredContentSize(chromeHeight: CGFloat) -> CGSize {
+    func preferredContentSize() -> CGSize {
         let maxWidth = HoverPreviewScreenMetrics.maxPopoverWidthPoints()
         let maxHeight = HoverPreviewScreenMetrics.maxPopoverHeightPoints()
 
@@ -44,7 +44,7 @@ struct PinnedPreview: Identifiable {
 
         return CGSize(
             width: min(maxWidth, max(320, contentSize.width)),
-            height: min(maxHeight, max(200, contentSize.height + chromeHeight))
+            height: min(maxHeight, max(200, contentSize.height))
         )
     }
 }
@@ -103,7 +103,7 @@ final class PinnedPreviewController {
         )
         if !panel.setFrameUsingName(Self.frameAutosaveName + "." + item.id.uuidString),
            !panel.setFrameUsingName(Self.frameAutosaveName) {
-            panel.setContentSize(preview.preferredContentSize(chromeHeight: PreviewToolbar<EmptyView>.height))
+            panel.setContentSize(preview.preferredContentSize())
             panel.center()
         }
         if let previous = panels.values.first(where: { $0 !== panel }) {

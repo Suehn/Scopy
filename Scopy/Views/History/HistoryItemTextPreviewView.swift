@@ -53,18 +53,11 @@ struct HistoryItemTextPreviewView: View {
 
     var body: some View {
         let maxWidth: CGFloat = model.isMarkdown ? sizeBudget.maxMarkdownWidth : sizeBudget.maxWidth
-        let maxHeight: CGFloat = max(1, sizeBudget.maxHeight - PreviewToolbar<EmptyView>.height)
+        let maxHeight: CGFloat = sizeBudget.maxHeight
         let font = NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
         let padding: CGFloat = ScopySpacing.md
 
-        VStack(spacing: 0) {
-            PreviewToolbar {
-                if model.isMarkdown {
-                    markdownLayoutScaleControl()
-                    exportResolutionMenu()
-                    exportButton()
-                }
-            }
+        Group {
             if let text = model.text {
                 let fallbackWidth = model.isMarkdown
                     ? maxWidth
@@ -203,6 +196,15 @@ struct HistoryItemTextPreviewView: View {
         }
         .accessibilityIdentifier("History.Preview.Text")
         .accessibilityElement(children: .contain)
+        .previewControls {
+            if model.isMarkdown {
+                PreviewControlGroup {
+                    markdownLayoutScaleControl()
+                    exportResolutionMenu()
+                    exportButton()
+                }
+            }
+        }
     }
 
     // MARK: - Export Button

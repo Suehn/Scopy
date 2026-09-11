@@ -59,15 +59,14 @@ struct HistoryItemFilePreviewView: View {
                 .accessibilityElement(children: .contain)
         } else {
             let maxWidth: CGFloat = max(1, sizeBudget.maxWidth)
-            let maxHeight: CGFloat = max(1, sizeBudget.maxHeight - PreviewToolbar<EmptyView>.height)
+            let maxHeight: CGFloat = sizeBudget.maxHeight
             let width = previewWidth(maxWidth: maxWidth, maxHeight: maxHeight)
 
             let content = previewContent()
             let naturalHeight = previewHeight(width: width)
             let desiredHeight = min(maxHeight, max(1, naturalHeight))
 
-            VStack(spacing: 0) {
-                PreviewToolbar { EmptyView() }
+            Group {
                 if naturalHeight > maxHeight {
                     ScrollView(.vertical) {
                         content
@@ -84,6 +83,7 @@ struct HistoryItemFilePreviewView: View {
             }
             .accessibilityIdentifier("History.Preview.File")
             .accessibilityElement(children: .contain)
+            .previewControls { EmptyView() }
             .task(id: filePath) {
                 await updateFileExists(path: filePath)
                 await loadVideoNaturalSizeIfNeeded(path: filePath)

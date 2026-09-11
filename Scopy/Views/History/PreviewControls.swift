@@ -21,52 +21,84 @@ extension EnvironmentValues {
     }
 }
 
-struct PreviewToolbar<Controls: View>: View {
-    static var height: CGFloat { 34 }
+/// Controls overlay the document edges without reserving a header or changing content geometry.
+struct PreviewControls<Controls: View>: ViewModifier {
     @Environment(\.previewWindowActions) private var actions
+    @ViewBuilder let controls: () -> Controls
+
+    func body(content: Content) -> some View {
+        content
+            .frame(
+                maxWidth: actions.isPinned ? .infinity : nil,
+                maxHeight: actions.isPinned ? .infinity : nil,
+                alignment: .top
+            )
+            .overlay(alignment: .bottomLeading) {
+                if actions.pin != nil || actions.isPinned {
+                    PreviewControlGroup {
+                        if let pin = actions.pin {
+                            Button(action: pin) { Image(systemName: "pin").frame(width: 24, height: 24) }
+                                .help("Keep this preview in a separate window")
+                                .accessibilityIdentifier("History.Preview.Pin")
+                        }
+                        if let toggle = actions.toggleFloating {
+                            Button(action: toggle) {
+                                Image(systemName: actions.keepsOnTop ? "pin.fill" : "pin")
+                                    .frame(width: 24, height: 24)
+                            }
+                            .help(actions.keepsOnTop ? "Keep above other apps (on)" : "Keep above other apps (off)")
+                            .accessibilityIdentifier("PinnedPreview.KeepOnTop")
+                            .accessibilityValue(actions.keepsOnTop ? "on" : "off")
+                        }
+                        if actions.isPinned {
+                            Image(systemName: "circle.grid.2x2")
+                                .frame(width: 24, height: 24)
+                                .overlay { PreviewWindowDragRegion() }
+                                .help("Drag to move preview")
+                                .accessibilityLabel("Move preview")
+                                .accessibilityIdentifier("PinnedPreview.Drag")
+                        }
+                        if let close = actions.close {
+                            Button(action: close) { Image(systemName: "xmark").frame(width: 24, height: 24) }
+                                .help("Close preview")
+                                .accessibilityIdentifier("PinnedPreview.Close")
+                        }
+                    }
+                    .padding(8)
+                }
+            }
+            .overlay(alignment: .topTrailing) {
+                controls()
+                    .padding(8)
+            }
+    }
+}
+
+extension View {
+    func previewControls<Controls: View>(@ViewBuilder controls: @escaping () -> Controls) -> some View {
+        modifier(PreviewControls(controls: controls))
+    }
+}
+
+/// Each compact control group responds independently; the space between groups stays selectable.
+struct PreviewControlGroup<Controls: View>: View {
     @State private var isHovered = false
     @ViewBuilder let controls: () -> Controls
 
     var body: some View {
-        HStack(spacing: 6) {
-            if let pin = actions.pin {
-                Button(action: pin) { Image(systemName: "pin") }
-                    .help("Keep this preview in a separate window")
-                    .accessibilityIdentifier("History.Preview.Pin")
-            }
-            if let toggle = actions.toggleFloating {
-                Button(action: toggle) {
-                    Image(systemName: actions.keepsOnTop ? "pin.fill" : "pin")
-                }
-                .help(actions.keepsOnTop ? "Keep above other apps (on)" : "Keep above other apps (off)")
-                .accessibilityIdentifier("PinnedPreview.KeepOnTop")
-                .accessibilityValue(actions.keepsOnTop ? "on" : "off")
-            }
-            Spacer(minLength: 8)
-            controls()
-                .fixedSize(horizontal: true, vertical: false)
-            if let close = actions.close {
-                Button(action: close) { Image(systemName: "xmark") }
-                    .help("Close preview")
-                    .accessibilityIdentifier("PinnedPreview.Close")
-            }
-        }
-        .buttonStyle(.plain)
-        .font(.system(size: 12))
-        .foregroundStyle(.secondary)
-        .padding(.horizontal, 10)
-        .frame(height: Self.height)
-        .opacity(isHovered ? 1 : 0.38)
-        .background {
-            if actions.isPinned { PreviewWindowDragRegion() }
-        }
-        .contentShape(Rectangle())
-        .onHover { isHovered = $0 }
-        .animation(.easeOut(duration: 0.15), value: isHovered)
+        HStack(spacing: 4, content: controls)
+            .buttonStyle(.plain)
+            .font(.system(size: 12))
+            .foregroundStyle(.secondary)
+            .padding(4)
+            .background(.regularMaterial, in: Capsule())
+            .opacity(isHovered ? 1 : 0.25)
+            .onHover { isHovered = $0 }
+            .animation(.easeOut(duration: 0.15), value: isHovered)
     }
 }
 
-/// Only the toolbar background drags the window; text remains selectable in the document.
+/// The explicit move grip alone drags the window; document text remains selectable.
 private struct PreviewWindowDragRegion: NSViewRepresentable {
     final class DragView: NSView {
         override func mouseDown(with event: NSEvent) { window?.performDrag(with: event) }

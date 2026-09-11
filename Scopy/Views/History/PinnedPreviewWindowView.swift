@@ -5,15 +5,15 @@ import SwiftUI
 /// Contents of the pinned preview window.
 ///
 /// The same preview views the hover popover uses, laid out against the window's live content size
-/// instead of the screen-derived popover budget, so resizing the window reflows the document
-/// through the same responsive document runtime.
+/// instead of the screen-derived popover budget, while preserving the document's canonical
+/// layout and display-fit scale.
 struct PinnedPreviewWindowView: View {
     let preview: PinnedPreview
     let markdownWebViewController: MarkdownPreviewWebViewController?
     let onKeepsOnTopChange: (Bool) -> Void
     let onDismiss: () -> Void
 
-    /// Owned here so the header re-renders on toggle; the controller applies the window level.
+    /// Owned here so the floating controls re-render on toggle; the controller applies the window level.
     @State private var keepsOnTop: Bool
 
     init(

@@ -347,7 +347,7 @@ final class WebViewLifecycleTests: XCTestCase {
         XCTAssertEqual(outcomes.count, 10)
     }
 
-    func testResponsivePreviewReflowsAtEachWindowWidthWithoutReloading() throws {
+    func testPreviewResizingPreservesCanonicalLineBreaksAndFitsDisplayWithoutReloading() throws {
         let controller = MarkdownPreviewWebViewController()
         let owner = UUID()
         controller.beginOwnership(owner)
@@ -362,7 +362,7 @@ final class WebViewLifecycleTests: XCTestCase {
         let testAssets = FileManager.default.temporaryDirectory.appendingPathComponent("scopy-layout-" + UUID().uuidString)
         try FileManager.default.copyItem(at: assetRoot, to: testAssets)
         defer { try? FileManager.default.removeItem(at: testAssets) }
-        let source = "# Responsive preview\n\n" + String(repeating: "窗口调整大小时，正文应该居中并保持字号，表格和代码只在自身范围滚动。", count: 15)
+        let source = "# Stable preview\n\n" + String(repeating: "窗口调整大小时保留原有排版与缩放规则，表格和代码只在自身范围滚动。", count: 15)
             + "\n\n```text\n" + String(repeating: "long_code_", count: 150) + "\n```"
         for scale in [80, 115, 200] {
             let context = MarkdownRenderContextResolver.defaultContext(for: source, layoutScale: MarkdownChatGPTLayoutScalePercent(settingsValue: scale))
@@ -373,11 +373,13 @@ final class WebViewLifecycleTests: XCTestCase {
             var ready = false
             let deadline = Date().addingTimeInterval(15)
             while !ready && Date() < deadline {
-                ready = evaluate("Boolean(window.__scopyIsRenderReady && window.__scopyIsRenderReady())", in: controller.webView) as? Bool == true
+                ready = evaluate("Boolean(location.pathname.endsWith('layout-\(scale).html') && window.__scopyIsRenderReady && window.__scopyIsRenderReady())", in: controller.webView) as? Bool == true
                 if !ready { RunLoop.main.run(until: Date().addingTimeInterval(0.05)) }
             }
             XCTAssertTrue(ready, "Live document at \(scale)% must render")
-            for width in [360, 900, 1500, 360] {
+            let initialParagraphHeight = try XCTUnwrap(evaluate("document.querySelector('#content p').offsetHeight", in: controller.webView) as? Double)
+            _ = evaluate("window.__scopyLayoutRegressionIdentity = document.getElementById('content'); true", in: controller.webView)
+            for width in [360, 640, 816, 900, 1500, 360] {
                 window.setContentSize(CGSize(width: width, height: 600))
                 RunLoop.main.run(until: Date().addingTimeInterval(0.1))
                 let checks = """
@@ -390,9 +392,11 @@ final class WebViewLifecycleTests: XCTestCase {
                   const code = content.querySelector('.scopy-code-card-scroll') || content.querySelector('pre');
                   return {
                     centered: Math.abs(paragraph.left - (viewport - paragraph.right)) < 2,
-                    fits: Math.abs(shell.width - viewport) < 2 && root.scrollWidth <= viewport + 1,
-                    scale: Math.abs(parseFloat(getComputedStyle(root).getPropertyValue('--scopy-chatgpt-preview-scale')) - \(Double(scale) / 100)) < 0.001,
-                    readable: paragraph.width > 50 && paragraph.width <= 768 * \(Double(scale) / 100) + 1,
+                    fits: Math.abs(shell.width - Math.min(816, viewport)) < 2 && root.scrollWidth <= viewport + 1,
+                    scale: Math.abs(parseFloat(getComputedStyle(root).getPropertyValue('--scopy-chatgpt-preview-scale')) - \(Double(scale) / 100) * Math.min(1, viewport / 816)) < 0.001,
+                    layoutWidth: Math.abs(content.offsetWidth - 816 / \(Double(scale) / 100)) < 1,
+                    lineBreaks: content.querySelector('p').offsetHeight === \(initialParagraphHeight),
+                    sameDocument: content === window.__scopyLayoutRegressionIdentity,
                     localOverflow: code.scrollWidth > code.clientWidth
                   };
                 })()
