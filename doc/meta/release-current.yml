@@ -1,6 +1,6 @@
-version: v0.80.7
-date: 2026-09-11
-release_doc: doc/releases/history/v0.80.7.md
+version: v0.81.0
+date: 2026-09-23
+release_doc: doc/releases/history/v0.81.0.md
 release_index: doc/releases/README.md
 changelog_file: doc/releases/CHANGELOG.md
 profile_doc: null
@@ -8,29 +8,29 @@ runbook_doc: doc/current/release-runbook.md
 spec_doc: doc/current/product-spec.md
 development_doc: doc/current/development-guide.md
 architecture_doc: doc/current/architecture.md
-last_verified_at: 2026-09-11
-summary: Restore preview typography and remove the reserved toolbar row
+last_verified_at: 2026-09-23
+summary: Compress exports 2x faster (5x at speed 1) with the rebuilt pngquant
 verification:
   docs_validate: pass
   release_validate: pass
   release_policy: pass_15_tests
-  tooling: pass_7_tests_17_manifest_checks_36_summary_checks_quality_self_test
+  tooling: not_run_no_tooling_change
   build: pass_local_debug
-  assets_verify: pass_node_157_atomic_assets_3f2da803
-  test_unit: pass_hosted_847_tests_4_skips_0_failures_unit_job_retry_and_local_native_runner
-  test_strict: pass_hosted_and_local_native_runner_847_tests_4_skips_complete_strict_build
-  test_tsan: pass_hosted_34558818649_828_tests_4_skips_0_failures
-  test_integration: not_run_no_schema_change
+  assets_verify: pass_via_make_build_renderer_3f2da803_unchanged
+  test_unit: pass_local_847_tests_4_skips_0_failures_bundled_pngquant_round_trip
+  test_strict: pass_local_847_tests_4_skips_0_failures
+  test_tsan: not_run_no_swift_change
+  test_integration: pass_local_15_tests_0_failures
   snapshot_release: not_run_no_backend_performance_change
-  frontend_profile_smoke: environment_blocked_runner_did_not_enter_scenes
-  frontend_profile_full: not_run_no_performance_claim
-  unified_performance: not_run_no_performance_claim
-  test_ui_subset: native_geometry_WebKit_and_app_harness_pass_full_mouse_flow_not_verified
-  png_export: pass_real_app_byte_identical_preview_fixture_9ea97a67
-  release_commit: 68c5caa02895e735fa10c784a3a49a21daa14575
-  release_workflow: https://github.com/Suehn/Scopy/actions/runs/34557871433
-  dmg_sha256: e173c267f830b6bbcfcbb35e4e254db70a18249620c2dd2da47fb9d19d56f5bf
-  homebrew_casks: pass_repo_1cb116e_and_manual_tap_7400d8b
-  tap_automation: failed_403_manual_ssh_sync_completed
-  hosted_ci: pass_build_unit_strict_policy_34558818678_attempt_2_unit_retried_after_unrelated_storage_race
-  installed_bundle: pass_Applications_Scopy_0_80_7_build_534_launched_254_bundle_entries_match_DMG
+  frontend_profile_smoke: not_run_no_frontend_change
+  frontend_profile_full: not_run_no_frontend_change
+  unified_performance: not_run_bundled_tool_benchmarks_in_release_note
+  test_ui_subset: not_run_no_ui_change
+  png_export: pass_real_app_preview_fixture_pixel_identical_stress_page_0_0006pct_chunk_borders
+  release_commit: pending
+  release_workflow: pending
+  dmg_sha256: pending
+  homebrew_casks: pending
+  tap_automation: pending
+  hosted_ci: pending
+  installed_bundle: pending_target_version

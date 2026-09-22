@@ -20,9 +20,9 @@ This page is the human-facing index for current release state. Automation should
 ## Current Release
 
 <!-- release-current:start -->
-- Version: `v0.80.7`
-- Date: `2026-09-11`
-- Release note: [v0.80.7](./history/v0.80.7.md)
+- Version: `v0.81.0`
+- Date: `2026-09-23`
+- Release note: [v0.81.0](./history/v0.81.0.md)
 - Changelog: [CHANGELOG.md](./CHANGELOG.md)
 - Profile doc: `none`
 <!-- release-current:end -->
@@ -30,6 +30,7 @@ This page is the human-facing index for current release state. Automation should
 ## Recent Releases
 
 <!-- release-recent:start -->
+- `2026-09-23` [v0.81.0](./history/v0.81.0.md) - Compress exports 2x faster (5x at speed 1) with the rebuilt pngquant
 - `2026-09-11` [v0.80.7](./history/v0.80.7.md) - Restore preview typography and remove the reserved toolbar row
 - `2026-09-11` [v0.80.6](./history/v0.80.6.md) - Keep multiple resizable previews with quiet unified controls and responsive reading layout
 - `2026-09-11` [v0.80.5](./history/v0.80.5.md) - Discover and cache website icons across Markdown links, citations and source cards
