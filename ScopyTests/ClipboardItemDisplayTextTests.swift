@@ -59,7 +59,9 @@ final class ClipboardItemDisplayTextTests: XCTestCase {
             XCTAssertEqual(actualTitle, expectedTitle, "title mismatch for file plainText: \(String(reflecting: sample.plainText))")
             XCTAssertEqual(actualMetadata, expectedMetadata, "metadata mismatch for file plainText: \(String(reflecting: sample.plainText))")
             if sample.fileSizeBytes == fiveGiB {
-                XCTAssertEqual(actualMetadata, "5120.0 MB")
+                // ByteCountFormatter separates number and unit with a narrow no-break space.
+                XCTAssertEqual(actualMetadata, Localization.formatBytes(fiveGiB))
+                XCTAssertTrue(actualMetadata.hasSuffix("GB"), "5 GiB must not wrap or fall back to MB: \(actualMetadata)")
             }
         }
     }
@@ -318,13 +320,6 @@ final class ClipboardItemDisplayTextTests: XCTestCase {
     }
 
     private func legacyFormatBytes(_ bytes: Int) -> String {
-        if bytes < 1024 {
-            return "\(bytes) B"
-        }
-        let kb = Double(bytes) / 1024
-        if kb < 1024 {
-            return String(format: "%.1f KB", kb)
-        }
-        return String(format: "%.1f MB", kb / 1024)
+        Localization.formatBytes(bytes)
     }
 }

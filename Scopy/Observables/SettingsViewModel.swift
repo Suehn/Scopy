@@ -24,8 +24,8 @@ final class SettingsViewModel {
     @ObservationIgnored private let externalImageSizeMismatchSlackBytes: Int = 5 * 1024 * 1024
 
     var storageSizeText: String {
-        let contentSize = formatBytes(storageStats.sizeBytes)
-        let diskSize = formatBytes(diskSizeBytes)
+        let contentSize = Localization.formatBytes(storageStats.sizeBytes)
+        let diskSize = Localization.formatBytes(diskSizeBytes)
         return "\(contentSize) / \(diskSize)"
     }
 
@@ -134,13 +134,4 @@ final class SettingsViewModel {
         try await service.getDetailedStorageStats()
     }
 
-    // MARK: - Private
-
-    private func formatBytes(_ bytes: Int) -> String {
-        let kb = Double(max(0, bytes)) / 1024
-        if kb < 1024 {
-            return String(format: "%.1f KB", kb)
-        }
-        return String(format: "%.1f MB", kb / 1024)
-    }
 }

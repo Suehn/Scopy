@@ -2086,10 +2086,6 @@ struct HistoryItemView: View, Equatable {
     private func appName(for bundleID: String) -> String {
         return IconService.shared.appName(bundleID: bundleID)
     }
-
-    private func formatBytes(_ bytes: Int) -> String {
-        Localization.formatBytes(bytes)
-    }
 }
 
 private struct ScrollWheelDismissMonitor: NSViewRepresentable {

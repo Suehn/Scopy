@@ -617,14 +617,7 @@ final class ClipboardItemDisplayText {
     }
 
     private nonisolated static func formatBytes(_ bytes: Int) -> String {
-        if bytes < 1024 {
-            return "\(bytes) B"
-        }
-        let kb = Double(bytes) / 1024
-        if kb < 1024 {
-            return String(format: "%.1f KB", kb)
-        }
-        return String(format: "%.1f MB", kb / 1024)
+        Localization.formatBytes(bytes)
     }
 }
 

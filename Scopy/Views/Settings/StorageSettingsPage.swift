@@ -78,25 +78,25 @@ struct StorageSettingsPage: View {
                     SettingsCardDivider()
                     SettingsCardRow {
                         LabeledContent("数据库") {
-                            Text(stats.databaseSizeText).foregroundStyle(.secondary)
+                            Text(Localization.formatBytes(stats.databaseSizeBytes)).foregroundStyle(.secondary)
                         }
                     }
                     SettingsCardDivider()
                     SettingsCardRow {
                         LabeledContent("外部存储") {
-                            Text(stats.externalStorageSizeText).foregroundStyle(.secondary)
+                            Text(Localization.formatBytes(stats.externalStorageSizeBytes)).foregroundStyle(.secondary)
                         }
                     }
                     SettingsCardDivider()
                     SettingsCardRow {
                         LabeledContent("缩略图") {
-                            Text(stats.thumbnailSizeText).foregroundStyle(.secondary)
+                            Text(Localization.formatBytes(stats.thumbnailSizeBytes)).foregroundStyle(.secondary)
                         }
                     }
                     SettingsCardDivider()
                     SettingsCardRow {
                         LabeledContent("总计") {
-                            Text(stats.totalSizeText)
+                            Text(Localization.formatBytes(stats.totalSizeBytes))
                                 .fontWeight(.medium)
                                 .foregroundStyle(.secondary)
                         }
