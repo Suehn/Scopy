@@ -810,6 +810,7 @@ actor ClipboardService {
     private let eventQueue: ClipboardEventQueue
     private let itemMutationGate = ClipboardItemMutationGate()
     private var monitorTask: Task<Void, Never>?
+    private var storageRootLock: StorageRootLock?
     private var isStarted = false
 
     // MARK: - Cleanup Scheduling (v0.26)
@@ -887,11 +888,19 @@ actor ClipboardService {
     func start() async throws {
         guard !isStarted else { return }
 
+        // Claim the storage root before any spool or directory work so a second process
+        // cannot orphan-sweep payloads or double-capture the pasteboard.
+        let databasePath = databasePath
+        let storageRoot = StorageService.resolveRootDirectory(databasePath: databasePath, storageRootURL: nil)
+        let rootLock = try StorageRootLock.acquire(root: storageRoot)
+
         let loadedSettings = await settingsStore.load()
 
         let pasteboardName = monitorPasteboardName
         let pollingInterval = monitorPollingInterval ?? (TimeInterval(loadedSettings.clipboardPollingIntervalMs) / 1000.0)
-        let storage = await MainActor.run { StorageService(databasePath: databasePath) }
+        let storage = await MainActor.run {
+            StorageService(databasePath: databasePath, storageRootURL: storageRoot)
+        }
         let ingestSpoolDirectory = URL(
             fileURLWithPath: storage.ingestSpoolDirectoryPath,
             isDirectory: true
@@ -981,6 +990,7 @@ actor ClipboardService {
             self.storage = storage
             self.search = search
             self.monitorTask = monitorTask
+            self.storageRootLock = rootLock
             self.isStarted = true
 
             await startBackgroundMediaQueuesIfNeeded()
@@ -996,6 +1006,7 @@ actor ClipboardService {
             }
             await storage.close()
             await search.close()
+            rootLock.release()
             throw error
         }
     }
@@ -1007,6 +1018,8 @@ actor ClipboardService {
         let monitor = monitor
         let storage = storage
         let search = search
+        let rootLock = storageRootLock
+        storageRootLock = nil
 
         await stopBackgroundMediaQueues()
 
@@ -1037,6 +1050,8 @@ actor ClipboardService {
         if let search {
             await search.close()
         }
+
+        rootLock?.release()
     }
 
     // MARK: - Data Access

@@ -344,7 +344,7 @@ public final class StorageService {
         cleanupInterlock = interlock
     }
 
-    private static func resolveRootDirectory(databasePath: String?, storageRootURL: URL?) -> URL {
+    nonisolated static func resolveRootDirectory(databasePath: String?, storageRootURL: URL?) -> URL {
         if let storageRootURL { return storageRootURL }
 
         if let databasePath, !databasePath.isEmpty, !isInMemoryDatabasePath(databasePath) {
@@ -367,7 +367,7 @@ public final class StorageService {
         return FileManager.default.temporaryDirectory.appendingPathComponent("Scopy", isDirectory: true)
     }
 
-    private static func isRunningUnderTests() -> Bool {
+    nonisolated private static func isRunningUnderTests() -> Bool {
         let env = ProcessInfo.processInfo.environment
         if env["XCTestConfigurationFilePath"] != nil
             || env["XCTestBundlePath"] != nil
@@ -381,16 +381,16 @@ public final class StorageService {
         return NSClassFromString("XCTestCase") != nil
     }
 
-    private static func isInMemoryDatabasePath(_ databasePath: String) -> Bool {
+    nonisolated private static func isInMemoryDatabasePath(_ databasePath: String) -> Bool {
         if databasePath == ":memory:" { return true }
         if databasePath.hasPrefix("file::memory:") { return true }
         if databasePath.contains("mode=memory") { return true }
         return false
     }
 
-    private static let testRunIdentifier = String(ProcessInfo.processInfo.processIdentifier)
+    nonisolated private static let testRunIdentifier = String(ProcessInfo.processInfo.processIdentifier)
 
-    private static func resolveTestRootDirectory(databasePath: String?) -> URL {
+    nonisolated private static func resolveTestRootDirectory(databasePath: String?) -> URL {
         if let databasePath, !databasePath.isEmpty, !isInMemoryDatabasePath(databasePath) {
             return URL(fileURLWithPath: databasePath).deletingLastPathComponent()
         }
@@ -401,7 +401,7 @@ public final class StorageService {
         return base.appendingPathComponent(UUID().uuidString, isDirectory: true)
     }
 
-    private static func resolveEphemeralRootDirectory() -> URL {
+    nonisolated private static func resolveEphemeralRootDirectory() -> URL {
         FileManager.default.temporaryDirectory
             .appendingPathComponent("ScopyTemp", isDirectory: true)
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
