@@ -276,3 +276,40 @@ P-R4（文档外壳与 CSS 迁入渲染器包、CSP 收紧、182 个子串断言
 **按建议默认执行、hh 反对再改**：strict 出现并发诊断即失败；删 `make test`/`coverage`（独立 P2 卫生项）；F10 悬停改选中只在指针真实移动后（阈值实机定）；B2 空闲阈值 60 s、不截断索引；C1 不做突发轮询；C2 不做 4 MiB 分支（已裁定）；D1 mock/harness DEBUG 化并保留 `--uitesting` 导出入口；D4 先移植独有场景到 ScopyBench 再删；D5 `ByteCountFormatter`（复用 `Localization.swift:6`）；D6 消费者驱动删研究工具、保留观测点与 WACZ 脚本；D8 删无人维护的 frontmatter 字段（`owner` 逐项看）；D9 删 82 个符号链接并同批修消费者；D10 归档 6 个旧提案；D12 CHANGELOG 下一版起英文；B8 不做 `.terminateLater`；C3 有界 FIFO；P-R3 步骤 5 与 P-R4 表格模型 P2；R8 先 spike；About 诊断折叠、Quit 两处都留、固定窗口只用共享尺寸并删逐条目分支。
 
 **产品项，不阻塞任何工程项**：F8b 撤销、F11 ⌘1–9、F13 状态栏菜单与 Launch at Login、D11 UI 语言（Codex 建议 P2 用 `xcstrings` 跟随系统）、D13 pin → detached（本轮不做）。
+
+## 10. 实施状态（2026-09-24，分支 `review-2026-09-24`）
+
+hh 的决定：丢弃工作树实验；D3 折叠 flag；B5 第二实例失败提示；F5 静态 QuickLook。实施由主线程加两个并行实现者（后端线、前端线，各自独立 worktree）完成，每项单独提交。
+
+**已完成**
+
+| 阶段 | 条目 | 说明 |
+| --- | --- | --- |
+| Phase 0 | R1 + M1 | AGENTS.md 验证表重写；canonical 文档 35 处纠正；新增代码约定、术语表、性能证据协议、本机 UI 验证路径 |
+| Phase 0 | N5 + F0 + R5a | 脚本 fail-closed；索引缓存文件名 v6；打印 `list.body`；`perf-frontend-profile` 改单变体 + `--compare` |
+| Phase 0 | R2 | 6 条并发诊断全部修掉；strict 变体 `SWIFT_TREAT_WARNINGS_AS_ERRORS=YES` |
+| Phase 0 | R3 + D4 | 设置过滤与轮询测试回 unit/strict/TSan；删 `test`/`coverage`/`benchmark`/`test-integration`/`test-perf*`/`test-snapshot-perf`/`test-real-db`/`test-flow*`/`health-check`/`quality-manifest-self-test`/`perf-audit`/`perf-warm-scroll-ab`/`perf-unified-table` 及其脚本；删 `PerformanceTests`、`SnapshotPerformanceTests`、`RealDatabaseRegressionTests`、`IntegrationTests` 类 |
+| Phase 0 | B3-D0 + W1 + P-R1 ①② + 卫生 §1.1/§2.1/§3.1/§4.1 | repository 五个死查询、`SearchPlanner.plan`、诊断、一次性 WebView、`__scopyRenderMath`、无消费者符号与环境变量、冗余测试与 UI 测试、82 个兼容符号链接、`DEPLOYMENT.md`、legacy doc 目录 |
+| Phase 0 | D3 | 11 个 `PerfFeatureFlags` 全部折叠；`Scopy/Runtime` 删除；`ScopyWarmProfile` scheme 与 A/B 工具链删除 |
+| Phase 1a | F9 + F8a | 键盘/⏎/⌥⌫ 按展示顺序；⌥⌫ 在文本编辑态不删条目 |
+| Phase 1a | B5 | `StorageRootLock`（flock）在 `ClipboardService.start()` 起点取得 |
+| Phase 1a | C1 ① + C2（两点）+ C3 语义 | 自写基线 + generation；每个 changeCount 只评估一次；落盘失败缓存重试；串行有界 FIFO（32）；回放按创建时间；TIFF 真实扩展名；Timer 加 tolerance |
+| Phase 1a | B10 + B6（结果码） | 读取无 100 MiB 上限；SQLite 扩展结果码进错误与 `persistence` 日志 |
+| Phase 1a | F15 + F13 | 搜索/加载/分页失败保留旧行并在页脚可重试；pin/delete/clear/AirDrop/Reveal 失败可见；Recent 段头遥测删除 |
+| Phase 1a | E0 + E1 ①② | 导出取消竞态修复；恒假 rich-v2 判断与重复布局变量删除 |
+| Phase 1b | F1 + F2（缩小版） | List 常驻、空态覆盖层、空 staged 页推迟；`listState` 观察拆分 + `HistoryRowLiveStateFanout` |
+| Phase 1b | B4 | `StorageService` 改 actor，`CleanupPolicy` 按值传入 |
+| Phase 1b | B1′ | `StorageCommitJournal`：每笔提交一条带序号的变更，缺口即重置；清理批量墓碑 |
+| Phase 1b | B2a + B2b 简化 + B2c + F7 | `UInt32` postings、缓存 v6、空闲 60 s 裁剪、内存压力响应；前端缓存随面板关闭释放、memo 不持全文、缩略图字节上限 |
+| Phase 1b | F5（H1 + H3 + 部分 H2）+ P-R2 | 呈现状态扇出；`.other` 文件静态 QuickLook；图片/文件几何在 present 前确定；指纹存储属性；body 不再做全文 SHA；导出复用屏幕文档 |
+| Phase 1b | F10 + F12 + 小项 | 指针真实移动后才 hover 改选中；面板记住尺寸；固定窗口逐条目 frame 分支删除；IconService 负缓存 |
+| Phase 2 | D1 | mock 与三个 harness 视图只编进 Debug；`ClipboardServiceFactory` 只保留真实服务 |
+| Phase 2 | M2、M9、M10 部分、R13 部分 | 符号链接与 Compatibility 节删除；Makefile `help`/`.PHONY`/`clean`；`ScrollPerformanceTests` 改名 `ScrollPerformanceProfileTests` |
+
+**未做（本轮明确留下）**
+
+- F3/F4：条件项，等复测（需要安静桌面上的真实输入测量）；F6 同。
+- B3 D1–D6（`SearchEngineImpl` 分解）、C3 八文件拆分、P-R4（CSS/运行时外置）、P-R3（Swift/JS 收敛）、R9、E1 ③④⑥（推送、进度/取消 UI、拆分）：L 级结构改动，无用户可见收益，留待下一轮。
+- B6 每周 `quick_check` 与设置页提示、B7 以外的持久化项、B8（退出落盘，维持暂缓）。
+- M5 改名（R3 pin→detached 不做；R6 与 B3-D6 同批）、M6 注释英文化、M7 frontmatter 字段、M8 旧提案归档、R12/R14/R15。
+- 产品项：F8b 撤销、F11 ⌘1–9、状态栏菜单、Launch at Login、D11 本地化。

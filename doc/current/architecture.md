@@ -27,10 +27,10 @@ This document describes the current system shape and operational invariants. For
 
 ### Clipboard Path
 
-- `ClipboardMonitor` observes pasteboard changes and normalizes incoming clipboard content.
+- `ClipboardMonitor` observes pasteboard changes and normalizes incoming clipboard content. It records Scopy's own pasteboard writes as the baseline so they are never recaptured, evaluates each change count once (a failed spool write retries from the data already read), and hands every capture, small or large, to one bounded serial ingest queue (capacity 32) so history order equals copy order; crash replay is ordered by envelope creation time.
 - `ClipboardMonitor` writes durable external captures to an Application Support-owned ingest spool before handing work to the service. Pending envelopes remain replayable across process restart; terminal markers make acknowledgement restart-safe.
-- `ClipboardService` coordinates ingest, deduplication, cleanup scheduling, and event emission. It publishes search/UI changes only from committed storage outcomes and hands committed cleanup events to an independent cancellation lifetime.
-- `StorageService` persists structured items, external payloads, and thumbnail-related artifacts. For a durable ingest ID it retains the source, places the payload at a unique managed path, and commits the item mutation plus the `ingest_receipts` row (introduced in schema user_version 8; current 9) in one `BEGIN IMMEDIATE` transaction.
+- `ClipboardService` takes the storage-root writer lock (`.scopy-writer.lock`, `flock`) before touching any shared directory; a second instance on the same data directory fails to start with a visible message (run a Debug build against `SCOPY_SERVICE_DB_PATH`). It coordinates ingest, deduplication, cleanup scheduling, and event emission. It publishes search/UI changes only from committed storage outcomes and hands committed cleanup events to an independent cancellation lifetime.
+- `StorageService` is an actor whose file-system work never runs on the main thread; cleanup takes a `CleanupPolicy` value per run. It persists structured items, external payloads, and thumbnail-related artifacts, reads payloads of any size the writer accepted, and sweeps unreferenced thumbnails during full cleanup. For a durable ingest ID it retains the source, places the payload at a unique managed path, and commits the item mutation plus the `ingest_receipts` row (introduced in schema user_version 8; current 9) in one `BEGIN IMMEDIATE` transaction.
 - Cleanup planning is advisory. `SQLiteClipboardRepository.commitDeletePlan` revalidates the candidate snapshot and deletes matching rows in one write transaction, then returns the exact committed IDs and storage refs used by bounded file cleanup, search invalidation, and one bulk history event.
 
 ### Search Path
@@ -38,6 +38,7 @@ This document describes the current system shape and operational invariants. For
 - UI and state layers issue typed `SearchRequest` values through backend protocols.
 - Backend search uses SQLite-backed storage/indexing plus mode-specific search behavior exposed through `SearchMode`.
 - Search results flow back through observables/view models rather than direct view-to-storage access.
+- Every commit that advances `mutation_seq` appends one sequenced change to `StorageCommitJournal`; the engine applies changes in order (including batch tombstones for committed cleanup) and rebuilds only on a sequence gap. After 60 s without searches the engine releases its query caches and full index (persisting the index first when the disk cache is stale); memory-pressure warnings trigger the same trim, and critical pressure also drops the short index.
 
 ### UI And Preview Path
 
@@ -56,6 +57,7 @@ This document describes the current system shape and operational invariants. For
 - External storage access continues to require path validation before file operations.
 - A durable ingest source is not moved or deleted before the database commit. Receipt replay is an internal no-op, including after the committed item has since been deleted, and acknowledgement reaches a non-replay terminal marker before receipt removal.
 - File deletion is DB-first and consumes only commit-time validated refs. Planned rows that became pinned or changed payload identity are skipped, and shared refs are rechecked under path reservations before unlink.
+- SQLite failures carry the extended result code; logs record the code and category publicly and the message privately.
 - The storage protocol claims D1 process-crash/restart consistency only; WAL `synchronous=NORMAL` and unsynced rename/write paths are not a D2/D3 power-loss guarantee.
 - Documentation/release automation reads [release-current.yml](../meta/release-current.yml) as the machine-readable source of truth.
 

@@ -61,7 +61,6 @@ targets:
           - "Domain/**"
           - "Extensions/**"
           - "Infrastructure/**"
-          - "Runtime/**"
           - "Services/**"
           - "Utilities/**"
           # These runtime assets are staged as one verified folder by the post-build scripts below.
@@ -160,7 +159,6 @@ targets:
           - "Domain/**"
           - "Extensions/**"
           - "Infrastructure/**"
-          - "Runtime/**"
           - "Services/**"
           - "Utilities/**"
     settings:
@@ -214,7 +212,6 @@ targets:
           - "Domain/**"
           - "Extensions/**"
           - "Infrastructure/**"
-          - "Runtime/**"
           - "Services/**"
           - "Utilities/**"
     settings:
