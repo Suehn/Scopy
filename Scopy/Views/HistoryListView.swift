@@ -489,11 +489,7 @@ struct HistoryListView: View {
             onSelectOptimizedForCodex: { Task { await historyViewModel.selectOptimizedForCodex(item) } },
             onSendViaAirDrop: { Task { await historyViewModel.sendViaAirDrop(item) } },
             onOpenContainingFolder: { Task { await historyViewModel.openContainingFolder(item) } },
-            onHoverSelect: { id in
-                // Source first: the selection fan-out reads it when `selectedID` changes.
-                historyViewModel.lastSelectionSource = .mouse
-                historyViewModel.selectedID = id
-            },
+            onHoverSelect: { id in historyViewModel.acceptHoverSelection(id) },
             onTogglePin: { Task { await historyViewModel.togglePin(item) } },
             onDelete: { Task { await historyViewModel.delete(item) } },
             onUpdateNote: { note in

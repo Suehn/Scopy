@@ -59,6 +59,8 @@ class FloatingPanel: NSPanel, NSWindowDelegate {
 
         self.statusBarButton = statusBarButton
         delegate = self
+        // Remembers the size the user resized to; the origin is recomputed on every open.
+        setFrameAutosaveName("ScopyHistoryPanel")
 
         // 面板配置
         animationBehavior = .none
@@ -93,6 +95,17 @@ class FloatingPanel: NSPanel, NSWindowDelegate {
     }
 
     func open(positionMode: PanelPositionMode = .statusBar) {
+        // A size remembered on a larger display must still fit the display it opens on.
+        if let visibleFrame = targetScreen()?.visibleFrame {
+            let fitted = NSSize(
+                width: min(frame.width, visibleFrame.width),
+                height: min(frame.height, visibleFrame.height)
+            )
+            if fitted != frame.size {
+                setFrame(NSRect(origin: frame.origin, size: fitted), display: false)
+            }
+        }
+
         var origin: NSPoint
 
         switch positionMode {
@@ -148,14 +161,14 @@ class FloatingPanel: NSPanel, NSWindowDelegate {
     }
 
     /// 约束窗口位置到屏幕可见区域内
-    private func constrainToScreen(origin: NSPoint) -> NSPoint {
-        // 找到包含鼠标或窗口的屏幕
+    /// The screen under the pointer, where the panel opens.
+    private func targetScreen() -> NSScreen? {
         let mouseLocation = NSEvent.mouseLocation
-        let targetScreen = NSScreen.screens.first { screen in
-            screen.frame.contains(mouseLocation)
-        } ?? NSScreen.main ?? NSScreen.screens.first
+        return NSScreen.screens.first { $0.frame.contains(mouseLocation) } ?? NSScreen.main ?? NSScreen.screens.first
+    }
 
-        guard let screen = targetScreen else {
+    private func constrainToScreen(origin: NSPoint) -> NSPoint {
+        guard let screen = targetScreen() else {
             return origin
         }
 

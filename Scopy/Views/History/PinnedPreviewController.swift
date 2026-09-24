@@ -101,8 +101,7 @@ final class PinnedPreviewController {
                 onDismiss: { [weak self] in self?.dismiss(itemID: item.id) }
             ).environment(settingsViewModel)
         )
-        if !panel.setFrameUsingName(Self.frameAutosaveName + "." + item.id.uuidString),
-           !panel.setFrameUsingName(Self.frameAutosaveName) {
+        if !panel.setFrameUsingName(Self.frameAutosaveName) {
             panel.setContentSize(preview.preferredContentSize())
             panel.center()
         }
@@ -171,7 +170,6 @@ final class PinnedPreviewController {
         panel.isReleasedWhenClosed = false
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         panel.animationBehavior = .utilityWindow
-        panel.setFrameAutosaveName(Self.frameAutosaveName + "." + itemID.uuidString)
         panel.minSize = NSSize(width: 320, height: 200)
         panel.onCloseRequested = { [weak self] in self?.dismiss(itemID: itemID) }
         return panel

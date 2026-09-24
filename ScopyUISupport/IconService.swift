@@ -8,6 +8,9 @@ public final class IconService {
 
     private let iconCache: NSCache<NSString, NSImage>
     private let nameCache: NSCache<NSString, NSString>
+    /// Bundle IDs with no installed application, so rows of uninstalled apps do not ask
+    /// LaunchServices again on every render.
+    private var missingBundleIDs: Set<String> = []
 
     private init() {
         let iconCache = NSCache<NSString, NSImage>()
@@ -27,8 +30,10 @@ public final class IconService {
         if let cached = cachedIcon(bundleID: bundleID) {
             return cached
         }
+        guard !missingBundleIDs.contains(bundleID) else { return nil }
 
         guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) else {
+            missingBundleIDs.insert(bundleID)
             return nil
         }
 
@@ -60,5 +65,6 @@ public final class IconService {
     public func clearAll() {
         iconCache.removeAllObjects()
         nameCache.removeAllObjects()
+        missingBundleIDs.removeAll()
     }
 }

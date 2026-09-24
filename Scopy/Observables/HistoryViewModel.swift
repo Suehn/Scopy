@@ -451,6 +451,24 @@ final class HistoryViewModel {
 
     var lastSelectionSource: SelectionSource = .programmatic
 
+    /// Where the pointer was when the keyboard last moved the selection. Rows scrolling under a
+    /// resting pointer report hover; that must not take the selection back until the pointer moves.
+    @ObservationIgnored private var keyboardSelectionPointerAnchor: CGPoint?
+    static let hoverSelectionPointerSlop: CGFloat = 3
+
+    /// Hover still updates the selection (also while the search field is focused), but only once
+    /// the pointer has really moved since the last keyboard navigation.
+    func acceptHoverSelection(_ id: UUID) {
+        if let anchor = keyboardSelectionPointerAnchor {
+            let pointer = NSEvent.mouseLocation
+            guard hypot(pointer.x - anchor.x, pointer.y - anchor.y) > Self.hoverSelectionPointerSlop else { return }
+            keyboardSelectionPointerAnchor = nil
+        }
+        // Source first: the selection fan-out reads it when `selectedID` changes.
+        lastSelectionSource = .mouse
+        selectedID = id
+    }
+
     var isScrolling: Bool = false
 
     private var searchVersion: Int = 0
@@ -1405,6 +1423,7 @@ final class HistoryViewModel {
         let rows = displayOrderItems
         guard !rows.isEmpty else { return }
         lastSelectionSource = .keyboard
+        keyboardSelectionPointerAnchor = NSEvent.mouseLocation
         if let selectedID,
            let index = rows.firstIndex(where: { $0.id == selectedID }),
            index < rows.count - 1 {
@@ -1418,6 +1437,7 @@ final class HistoryViewModel {
         let rows = displayOrderItems
         guard !rows.isEmpty else { return }
         lastSelectionSource = .keyboard
+        keyboardSelectionPointerAnchor = NSEvent.mouseLocation
         if let selectedID,
            let index = rows.firstIndex(where: { $0.id == selectedID }),
            index > 0 {
