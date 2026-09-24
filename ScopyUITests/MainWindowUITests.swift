@@ -56,10 +56,6 @@ final class MainWindowUITests: XCTestCase {
         XCTAssertEqual(value, "test query")
     }
 
-    func testSearchFieldClearButton() throws {
-        throw XCTSkip("Clear button is icon-only and not exposed to XCUITest reliably; covered by unit/UI behavior tests elsewhere.")
-    }
-
     func testWindowHasCorrectTitle() throws {
         let window = app.windows.firstMatch
         guard window.waitForExistence(timeout: 5) else {
