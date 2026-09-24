@@ -1243,22 +1243,15 @@ actor SQLiteClipboardRepository {
         return candidates
     }
 
+    // SQLite failures propagate as `SQLiteConnectionError`, which carries the extended result code.
     private func execute(_ sql: String) throws {
         guard let connection else { throw RepositoryError.databaseNotOpen }
-        do {
-            try connection.execute(sql)
-        } catch {
-            throw RepositoryError.queryFailed(error.localizedDescription)
-        }
+        try connection.execute(sql)
     }
 
     private func prepare(_ sql: String) throws -> SQLiteStatement {
         guard let connection else { throw RepositoryError.databaseNotOpen }
-        do {
-            return try connection.prepare(sql)
-        } catch {
-            throw RepositoryError.queryFailed(error.localizedDescription)
-        }
+        return try connection.prepare(sql)
     }
 
     private func verifySchema(_ connection: SQLiteConnection) throws {

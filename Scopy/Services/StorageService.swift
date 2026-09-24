@@ -2212,10 +2212,6 @@ public final class StorageService {
         return (externalStoragePath as NSString).appendingPathComponent(filename)
     }
 
-    /// v0.22: 外部文件加载最大大小限制 (100MB)
-    /// 防止恶意或损坏的文件导致内存耗尽
-    nonisolated private static let maxExternalFileSize: Int = 100 * 1024 * 1024
-
     nonisolated static func validateStorageRef(_ ref: String, externalStoragePath: String) -> Bool {
         let filename = (ref as NSString).lastPathComponent
         let nameWithoutExt = (filename as NSString).deletingPathExtension
@@ -2263,20 +2259,10 @@ public final class StorageService {
             throw StorageError.fileOperationFailed("Invalid storage reference: potential path traversal")
         }
 
-        let url = URL(fileURLWithPath: path)
+        // No size cap: capture stores payloads of any size, so reads must return them too.
+        // `.mappedIfSafe` keeps large files out of anonymous memory.
         do {
-            let attrs = try FileManager.default.attributesOfItem(atPath: path)
-            if let fileSize = attrs[.size] as? Int, fileSize > maxExternalFileSize {
-                throw StorageError.fileOperationFailed("File too large: \(fileSize) bytes (max: \(maxExternalFileSize))")
-            }
-        } catch let error as StorageError {
-            throw error
-        } catch {
-            ScopyLog.storage.warning("Failed to get file attributes: \(error.localizedDescription, privacy: .private)")
-        }
-
-        do {
-            return try Data(contentsOf: url, options: [.mappedIfSafe])
+            return try Data(contentsOf: URL(fileURLWithPath: path), options: [.mappedIfSafe])
         } catch {
             throw StorageError.fileOperationFailed("Failed to read external file: \(error)")
         }
@@ -2381,8 +2367,16 @@ public final class StorageService {
         // 1. 优先使用外部存储（大图片 >100KB）
         if let storageRef = item.storageRef {
             let allowedRoot = externalStoragePath
+            let itemID = item.id
             return await Task.detached(priority: .userInitiated) {
-                try? Self.loadExternalData(path: storageRef, externalStoragePath: allowedRoot)
+                do {
+                    return try Self.loadExternalData(path: storageRef, externalStoragePath: allowedRoot)
+                } catch {
+                    ScopyLog.storage.error(
+                        "Failed to load external payload for item \(itemID.uuidString, privacy: .public): \(error.localizedDescription, privacy: .private)"
+                    )
+                    return nil
+                }
             }.value
         }
 
