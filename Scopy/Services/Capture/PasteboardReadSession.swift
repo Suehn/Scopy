@@ -1,52 +1,27 @@
 import AppKit
 import Foundation
 
-extension ClipboardMonitor {
-    /// One pasteboard change as read on the main actor. Hashing happens later: inline for small
-    /// text, in envelope processing off the main actor for images and large payloads.
-    struct RawClipboardData: Sendable {
-        let type: ClipboardItemType
-        let plainText: String
-        let rawData: Data?
-        let appBundleID: String?
-        let sizeBytes: Int
-        let precomputedHash: String?  // A hash decided at read time overrides the content-hash policy.
-        let imageDataWasTIFF: Bool
+/// One pasteboard change, read on the main actor over several IPC calls. Content is accepted
+/// only if the changeCount held for the whole read, so two overlapping copies never mix.
+/// Nothing is hashed here: small text is hashed inline by the monitor, images and large
+/// payloads in envelope processing off the main actor.
+@MainActor
+struct PasteboardReadSession {
+    let pasteboard: NSPasteboard
+    let changeCount: Int
 
-        init(
-            type: ClipboardItemType,
-            plainText: String,
-            rawData: Data?,
-            appBundleID: String?,
-            sizeBytes: Int,
-            precomputedHash: String? = nil,
-            imageDataWasTIFF: Bool = false
-        ) {
-            self.type = type
-            self.plainText = plainText
-            self.rawData = rawData
-            self.appBundleID = appBundleID
-            self.sizeBytes = sizeBytes
-            self.precomputedHash = precomputedHash
-            self.imageDataWasTIFF = imageDataWasTIFF
-        }
-    }
-
-    /// Outcome of reading one pasteboard change.
-    enum Extraction {
-        case content(RawClipboardData)
+    enum Outcome {
+        case content(ClipboardMonitor.RawClipboardData)
         case nothing
         /// The pasteboard changed while its representations were read; reread on the next poll.
         case changedDuringRead
     }
 
-    /// Reads one pasteboard change without hashing. Detection order matters: a copied file
-    /// carries both a file URL and its path as plain text, so file URLs are checked first.
-    func extractRawData(from pasteboard: NSPasteboard, changeCount: Int) async -> Extraction {
-        let appBundleID = getFrontmostAppBundleID()
-        // Representations are read over several IPC calls; content read while another copy
-        // landed could mix two copies, so it is only accepted if the changeCount held.
-        func verified(_ rawData: RawClipboardData) -> Extraction {
+    /// Detection order matters: a copied file carries both a file URL and its path as plain
+    /// text, so file URLs are checked first.
+    func read() async -> Outcome {
+        let appBundleID = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
+        func verified(_ rawData: ClipboardMonitor.RawClipboardData) -> Outcome {
             pasteboard.changeCount == changeCount ? .content(rawData) : .changedDuringRead
         }
 
@@ -62,14 +37,14 @@ extension ClipboardMonitor {
             forClasses: [NSURL.self],
             options: [.urlReadingFileURLsOnly: true]
         ) as? [URL]) ?? []
-        let shouldPreferImageOverFileURLs = shouldPreferImageOverFileURLs(fileURLs: fileURLs, from: pasteboard)
+        let shouldPreferImageOverFileURLs = shouldPreferImageOverFileURLs(fileURLs)
 
         // 1. File URLs. Exception: some apps (messaging clients) copy an image as a temporary
         // image file plus the bitmap; that stays an image.
         if !fileURLs.isEmpty, !shouldPreferImageOverFileURLs {
             let paths = fileURLs.map { $0.path }.joined(separator: "\n")
             let urlData = CapturePolicy.serializeFileURLs(fileURLs)
-            return verified(RawClipboardData(
+            return verified(ClipboardMonitor.RawClipboardData(
                 type: .file,
                 plainText: paths,
                 rawData: urlData,
@@ -78,13 +53,13 @@ extension ClipboardMonitor {
             ))
         }
 
-        let shouldPreferRichTypesOverImage = shouldPreferRichTypesOverImage(from: pasteboard)
+        let shouldPreferRichTypesOverImage = shouldPreferRichTypesOverImage()
 
         // 2. Image. PNG is preferred; declared TIFF bytes are kept as read and re-encoded in
         // envelope processing off the main actor. Images deduplicate by SHA-256 of the bytes.
-        if !shouldPreferRichTypesOverImage, let imageResult = extractImageDataForIngest(from: pasteboard, candidateFileURL: fileURLs.first) {
+        if !shouldPreferRichTypesOverImage, let imageResult = imageDataForIngest(candidateFileURL: fileURLs.first) {
             let imageData = imageResult.data
-            return verified(RawClipboardData(
+            return verified(ClipboardMonitor.RawClipboardData(
                 type: .image,
                 plainText: "[Image]",
                 rawData: imageData,
@@ -123,9 +98,9 @@ extension ClipboardMonitor {
         // nothing, so charts and screenshots copied with table signals are not lost.
         // This read follows a suspension point, so confirm the pasteboard still holds this change.
         guard pasteboard.changeCount == changeCount else { return .changedDuringRead }
-        if shouldPreferRichTypesOverImage, let imageResult = extractImageDataForIngest(from: pasteboard, candidateFileURL: fileURLs.first) {
+        if shouldPreferRichTypesOverImage, let imageResult = imageDataForIngest(candidateFileURL: fileURLs.first) {
             let imageData = imageResult.data
-            return verified(RawClipboardData(
+            return verified(ClipboardMonitor.RawClipboardData(
                 type: .image,
                 plainText: "[Image]",
                 rawData: imageData,
@@ -139,7 +114,7 @@ extension ClipboardMonitor {
         return .nothing
     }
 
-    private func shouldPreferRichTypesOverImage(from pasteboard: NSPasteboard) -> Bool {
+    private func shouldPreferRichTypesOverImage() -> Bool {
         // Only relevant when an image representation is declared.
         guard let types = pasteboard.types, types.contains(.png) || types.contains(.tiff) else {
             return false
@@ -170,26 +145,19 @@ extension ClipboardMonitor {
         return false
     }
 
-    private func shouldPreferImageOverFileURLs(fileURLs: [URL], from pasteboard: NSPasteboard) -> Bool {
+    private func shouldPreferImageOverFileURLs(_ fileURLs: [URL]) -> Bool {
         guard fileURLs.count == 1 else { return false }
         let fileURL = fileURLs[0]
         guard CapturePolicy.isLikelyTemporaryImageFileURL(fileURL) else { return false }
-        if extractImageDataForIngest(from: pasteboard, candidateFileURL: nil) != nil {
+        if imageDataForIngest(candidateFileURL: nil) != nil {
             return true
         }
-        return Self.loadImageFileDataAsPNG(fileURL) != nil
-    }
-
-    private func getFrontmostAppBundleID() -> String? {
-        NSWorkspace.shared.frontmostApplication?.bundleIdentifier
+        return ClipboardMonitor.loadImageFileDataAsPNG(fileURL) != nil
     }
 
     /// Image bytes for ingest. Declared PNG or TIFF bytes are returned as read (TIFF is
     /// re-encoded later off the main actor); the NSImage and file-URL fallbacks re-encode here.
-    private func extractImageDataForIngest(
-        from pasteboard: NSPasteboard,
-        candidateFileURL: URL? = nil
-    ) -> (data: Data, wasTIFF: Bool)? {
+    private func imageDataForIngest(candidateFileURL: URL?) -> (data: Data, wasTIFF: Bool)? {
         // Only read image representations the pasteboard declares; text copies skip them entirely.
         let types = pasteboard.types ?? []
         if types.contains(.png), let pngData = pasteboard.data(forType: .png) {
@@ -203,12 +171,12 @@ extension ClipboardMonitor {
         if NSImage.canInit(with: pasteboard),
            let image = NSImage(pasteboard: pasteboard),
            let tiffData = image.tiffRepresentation,
-           let pngData = Self.convertTIFFToPNG(tiffData) {
+           let pngData = ClipboardMonitor.convertTIFFToPNG(tiffData) {
             return (pngData, false)
         }
 
         if let candidateFileURL,
-           let pngData = Self.loadImageFileDataAsPNG(candidateFileURL) {
+           let pngData = ClipboardMonitor.loadImageFileDataAsPNG(candidateFileURL) {
             return (pngData, false)
         }
 

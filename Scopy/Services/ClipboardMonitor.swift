@@ -104,6 +104,36 @@ public final class ClipboardMonitor {
         }
     }
 
+    /// One pasteboard change as read on the main actor. Hashing happens later: inline for small
+    /// text, in envelope processing off the main actor for images and large payloads.
+    struct RawClipboardData: Sendable {
+        let type: ClipboardItemType
+        let plainText: String
+        let rawData: Data?
+        let appBundleID: String?
+        let sizeBytes: Int
+        let precomputedHash: String?  // A hash decided at read time overrides the content-hash policy.
+        let imageDataWasTIFF: Bool
+
+        init(
+            type: ClipboardItemType,
+            plainText: String,
+            rawData: Data?,
+            appBundleID: String?,
+            sizeBytes: Int,
+            precomputedHash: String? = nil,
+            imageDataWasTIFF: Bool = false
+        ) {
+            self.type = type
+            self.plainText = plainText
+            self.rawData = rawData
+            self.appBundleID = appBundleID
+            self.sizeBytes = sizeBytes
+            self.precomputedHash = precomputedHash
+            self.imageDataWasTIFF = imageDataWasTIFF
+        }
+    }
+
     /// One entry of the serial ingest FIFO. Small captures are ready immediately; large ones
     /// are durable envelopes processed off the main actor in queue order.
     private enum IngestJob: Sendable {
@@ -133,36 +163,48 @@ public final class ClipboardMonitor {
 
     // MARK: - Properties
 
-    let pasteboard: NSPasteboard
+    private let pasteboard: NSPasteboard
+    private let writer: PasteboardWriter
+
     nonisolated private let timerBox: TimerBox
+
     /// The last changeCount that was handled: captured, found empty, or written by Scopy itself.
     private var handledChangeCount: Int = 0
+
     /// Incremented by every Scopy pasteboard write, so a capture that suspended across one does
     /// not move the baseline back to the pre-write changeCount.
     private var ownWriteGeneration: UInt64 = 0
+
     private var isMonitoring = false
+
     private var monitoringSessionID: UInt64 = 0
+
     private var isCheckingClipboard = false
+
     private var pendingPersistRetry: PendingPersistRetry?
 
     /// Serial, bounded FIFO shared by small and large captures, so history order follows
     /// capture order and a full queue applies backpressure to polling.
     private let ingestJobs: AsyncBoundedQueue<IngestJob>
+
     private var activeEnvelopeWork: Task<IngestEnvelopeProcessor.Outcome, Never>?
+
     private var replayTask: Task<Void, Never>?
+
     private var trackedPendingEnvelopePaths = Set<String>()
+
     /// Test injection: delay applied before each envelope is processed.
     var ingestProcessingDelay: Duration = .zero
 
     private let contentQueue: AsyncBoundedQueue<ClipboardContent>
+
     public let contentStream: AsyncStream<ClipboardContent>
 
     private let ingestSpoolDirectory: URL
 
-    // Configuration
-    public private(set) var pollingInterval: TimeInterval = 0.5 // 500ms default
+    public private(set) var pollingInterval: TimeInterval = 0.5
 
-    // MARK: - Initialization
+    // MARK: - Lifecycle
 
     public convenience init(
         pasteboard: NSPasteboard = .general,
@@ -187,6 +229,7 @@ public final class ClipboardMonitor {
         spoolAlreadyPrepared: Bool
     ) {
         self.pasteboard = pasteboard
+        self.writer = PasteboardWriter(pasteboard: pasteboard)
         self.timerBox = TimerBox()
         if let pollingInterval {
             self.pollingInterval = max(0.1, min(5.0, pollingInterval))
@@ -275,8 +318,6 @@ public final class ClipboardMonitor {
         }
     }
 
-    // MARK: - Public API
-
     public func startMonitoring() {
         // The timer is added to the main run loop; started elsewhere it would never fire.
         assert(Thread.isMainThread, "startMonitoring must be called on main thread")
@@ -313,58 +354,7 @@ public final class ClipboardMonitor {
         }
     }
 
-    @discardableResult
-    public func acknowledgeIngestEnvelope(at url: URL) -> IngestAcknowledgementOutcome {
-        guard let acknowledgement = IngestSpool.transitionEnvelopeToTerminal(
-            at: url,
-            ingestDirectory: ingestSpoolDirectory
-        ) else {
-            return .rejected
-        }
-
-        trackedPendingEnvelopePaths.remove(url.path)
-        publishIngestSnapshot()
-        Task {
-            await ClipboardIngestMetrics.shared.recordAcknowledgedEnvelope()
-        }
-        return .terminal(acknowledgement)
-    }
-
-    public func pendingTerminalIngestAcknowledgements(
-        limit: Int = 256,
-        excluding excludedIDs: Set<UUID> = []
-    ) -> [TerminalIngestAcknowledgement] {
-        IngestSpool.discoverTerminalAcknowledgements(
-            in: ingestSpoolDirectory,
-            limit: max(0, limit),
-            excluding: excludedIDs
-        )
-    }
-
-    @discardableResult
-    public func completeTerminalIngestAcknowledgement(
-        _ acknowledgement: TerminalIngestAcknowledgement
-    ) -> Bool {
-        guard IngestSpool.validateTerminalAcknowledgement(
-            acknowledgement,
-            ingestDirectory: ingestSpoolDirectory
-        ) else {
-            return false
-        }
-        return IngestSpool.cleanupTerminalAcknowledgement(
-            acknowledgement,
-            ingestDirectory: ingestSpoolDirectory
-        )
-    }
-
-    /// Called once per Scopy pasteboard write after its representations are written, whether or
-    /// not all of them succeeded, so polling never recaptures Scopy's own write.
-    func recordOwnWrite() {
-        handledChangeCount = pasteboard.changeCount
-        ownWriteGeneration &+= 1
-    }
-
-    // MARK: - Private Methods
+    // MARK: - Polling And Baseline
 
     func checkClipboard() async {
         guard isMonitoring else { return }
@@ -396,7 +386,7 @@ public final class ClipboardMonitor {
         // Read this change's representations on the main actor.
         let extractStart = ProcessInfo.processInfo.systemUptime
         let rawData: RawClipboardData
-        switch await extractRawData(from: pasteboard, changeCount: currentChangeCount) {
+        switch await PasteboardReadSession(pasteboard: pasteboard, changeCount: currentChangeCount).read() {
         case .changedDuringRead:
             return
         case .nothing:
@@ -459,6 +449,30 @@ public final class ClipboardMonitor {
         guard sessionID == monitoringSessionID, generation == ownWriteGeneration else { return }
         handledChangeCount = changeCount
     }
+
+    /// Called once per Scopy pasteboard write after its representations are written, whether or
+    /// not all of them succeeded, so polling never recaptures Scopy's own write.
+    private func recordOwnWrite() {
+        handledChangeCount = pasteboard.changeCount
+        ownWriteGeneration &+= 1
+    }
+
+    private func installMonitoringTimer() {
+        if let timer = timerBox.take() {
+            timer.invalidate()
+        }
+
+        let timer = Timer(timeInterval: pollingInterval, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                await self?.checkClipboard()
+            }
+        }
+        timer.tolerance = pollingInterval / 5
+        RunLoop.main.add(timer, forMode: .common)
+        timerBox.set(timer)
+    }
+
+    // MARK: - Ingest Orchestration
 
     /// Writes the durable envelope off the main actor, then queues it behind earlier captures.
     /// Returns false when the envelope could not be written, so the caller can retry from memory.
@@ -531,21 +545,6 @@ public final class ClipboardMonitor {
         }
     }
 
-    private func installMonitoringTimer() {
-        if let timer = timerBox.take() {
-            timer.invalidate()
-        }
-
-        let timer = Timer(timeInterval: pollingInterval, repeats: true) { [weak self] _ in
-            Task { @MainActor [weak self] in
-                await self?.checkClipboard()
-            }
-        }
-        timer.tolerance = pollingInterval / 5
-        RunLoop.main.add(timer, forMode: .common)
-        timerBox.set(timer)
-    }
-
     private func replayPendingLargeContentFromDisk() {
         let persisted = IngestSpool.discoverPendingEnvelopeURLs(in: ingestSpoolDirectory)
         let replayed = persisted.filter { trackedPendingEnvelopePaths.insert($0.path).inserted }
@@ -589,4 +588,84 @@ public final class ClipboardMonitor {
         }
     }
 
+    @discardableResult
+    public func acknowledgeIngestEnvelope(at url: URL) -> IngestAcknowledgementOutcome {
+        guard let acknowledgement = IngestSpool.transitionEnvelopeToTerminal(
+            at: url,
+            ingestDirectory: ingestSpoolDirectory
+        ) else {
+            return .rejected
+        }
+
+        trackedPendingEnvelopePaths.remove(url.path)
+        publishIngestSnapshot()
+        Task {
+            await ClipboardIngestMetrics.shared.recordAcknowledgedEnvelope()
+        }
+        return .terminal(acknowledgement)
+    }
+
+    public func pendingTerminalIngestAcknowledgements(
+        limit: Int = 256,
+        excluding excludedIDs: Set<UUID> = []
+    ) -> [TerminalIngestAcknowledgement] {
+        IngestSpool.discoverTerminalAcknowledgements(
+            in: ingestSpoolDirectory,
+            limit: max(0, limit),
+            excluding: excludedIDs
+        )
+    }
+
+    @discardableResult
+    public func completeTerminalIngestAcknowledgement(
+        _ acknowledgement: TerminalIngestAcknowledgement
+    ) -> Bool {
+        guard IngestSpool.validateTerminalAcknowledgement(
+            acknowledgement,
+            ingestDirectory: ingestSpoolDirectory
+        ) else {
+            return false
+        }
+        return IngestSpool.cleanupTerminalAcknowledgement(
+            acknowledgement,
+            ingestDirectory: ingestSpoolDirectory
+        )
+    }
+
+    // MARK: - Pasteboard Writes
+
+    /// Every write goes through PasteboardWriter and is then recorded as the capture baseline,
+    /// so polling never recaptures Scopy's own write.
+    public func copyToClipboard(text: String) throws {
+        defer { recordOwnWrite() }
+        try writer.write(text: text)
+    }
+
+    public func copyToClipboard(
+        data: Data,
+        type: NSPasteboard.PasteboardType,
+        imageWriteMode: ImagePasteboardWriteMode = .standard
+    ) throws {
+        defer { recordOwnWrite() }
+        try writer.write(data: data, type: type, imageWriteMode: imageWriteMode)
+    }
+
+    public func copyToClipboard(
+        imageData data: Data,
+        fileURL: URL,
+        imageWriteMode: ImagePasteboardWriteMode = .standard
+    ) throws {
+        defer { recordOwnWrite() }
+        try writer.write(imageData: data, fileURL: fileURL, imageWriteMode: imageWriteMode)
+    }
+
+    public func copyToClipboard(text: String, data: Data, type: NSPasteboard.PasteboardType) throws {
+        defer { recordOwnWrite() }
+        try writer.write(text: text, data: data, type: type)
+    }
+
+    public func copyToClipboard(fileURLs: [URL]) throws {
+        defer { recordOwnWrite() }
+        try writer.write(fileURLs: fileURLs)
+    }
 }

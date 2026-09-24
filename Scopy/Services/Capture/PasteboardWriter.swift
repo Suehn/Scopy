@@ -4,48 +4,36 @@ import Foundation
 import ImageIO
 import UniformTypeIdentifiers
 
-extension ClipboardMonitor {
-    public enum ImagePasteboardWriteMode: Sendable {
-        case standard
-        case codexOptimized
-    }
+/// Writes Scopy content to a pasteboard with the representations readers expect: PNG plus a
+/// TIFF fallback for images, file URLs plus the legacy file list for Finder. It owns no capture
+/// state; ClipboardMonitor records each write as its baseline after calling it.
+@MainActor
+struct PasteboardWriter {
+    let pasteboard: NSPasteboard
 
-    /// Why a pasteboard write produced nothing usable.
-    ///
-    /// A failed write leaves the previous clipboard content in place, so these must reach the
-    /// caller rather than a log line.
-    public enum PasteboardWriteFailure: Error, Equatable {
-        /// The bytes could not be turned into a pasteboard image representation.
-        case imageNotRenderable
-        /// `NSPasteboard` refused the primary representation.
-        case rejectedByPasteboard
-    }
-
-    public func copyToClipboard(text: String) throws {
+    func write(text: String) throws {
         pasteboard.clearContents()
-        defer { recordOwnWrite() }
         guard pasteboard.setString(text, forType: .string) else {
-            throw PasteboardWriteFailure.rejectedByPasteboard
+            throw ClipboardMonitor.PasteboardWriteFailure.rejectedByPasteboard
         }
     }
 
-    public func copyToClipboard(
+    func write(
         data: Data,
         type: NSPasteboard.PasteboardType,
-        imageWriteMode: ImagePasteboardWriteMode = .standard
+        imageWriteMode: ClipboardMonitor.ImagePasteboardWriteMode = .standard
     ) throws {
         if type == .png {
-            guard let imagePayload = Self.makeImagePasteboardPayloadForWrite(data, imageWriteMode: imageWriteMode) else {
-                throw PasteboardWriteFailure.imageNotRenderable
+            guard let imagePayload = ClipboardMonitor.makeImagePasteboardPayloadForWrite(data, imageWriteMode: imageWriteMode) else {
+                throw ClipboardMonitor.PasteboardWriteFailure.imageNotRenderable
             }
 
             pasteboard.clearContents()
-            defer { recordOwnWrite() }
-            let declaredTypes: [NSPasteboard.PasteboardType] = imagePayload.compatibilityTIFFData == nil ? [.png] : [.png, .tiff]
+                let declaredTypes: [NSPasteboard.PasteboardType] = imagePayload.compatibilityTIFFData == nil ? [.png] : [.png, .tiff]
             pasteboard.declareTypes(declaredTypes, owner: nil)
 
             guard pasteboard.setData(imagePayload.primaryPNGData, forType: .png) else {
-                throw PasteboardWriteFailure.rejectedByPasteboard
+                throw ClipboardMonitor.PasteboardWriteFailure.rejectedByPasteboard
             }
 
             // The primary PNG is on the pasteboard; a missing compatibility fallback narrows the
@@ -58,26 +46,24 @@ extension ClipboardMonitor {
         }
 
         pasteboard.clearContents()
-        defer { recordOwnWrite() }
         guard pasteboard.setData(data, forType: type) else {
-            throw PasteboardWriteFailure.rejectedByPasteboard
+            throw ClipboardMonitor.PasteboardWriteFailure.rejectedByPasteboard
         }
     }
 
-    public func copyToClipboard(
+    func write(
         imageData data: Data,
         fileURL: URL,
-        imageWriteMode: ImagePasteboardWriteMode = .standard
+        imageWriteMode: ClipboardMonitor.ImagePasteboardWriteMode = .standard
     ) throws {
-        guard let imagePayload = Self.makeImagePasteboardPayloadForWrite(data, imageWriteMode: imageWriteMode) else {
-            throw PasteboardWriteFailure.imageNotRenderable
+        guard let imagePayload = ClipboardMonitor.makeImagePasteboardPayloadForWrite(data, imageWriteMode: imageWriteMode) else {
+            throw ClipboardMonitor.PasteboardWriteFailure.imageNotRenderable
         }
 
         pasteboard.clearContents()
-        defer { recordOwnWrite() }
         guard pasteboard.writeObjects([fileURL as NSURL]) else {
             ScopyLog.monitor.warning("Failed to write image file URL to pasteboard; falling back to PNG payload")
-            try copyToClipboard(data: data, type: .png, imageWriteMode: imageWriteMode)
+            try write(data: data, type: .png, imageWriteMode: imageWriteMode)
             return
         }
 
@@ -96,16 +82,47 @@ extension ClipboardMonitor {
         }
     }
 
-    public func copyToClipboard(text: String, data: Data, type: NSPasteboard.PasteboardType) throws {
+    func write(text: String, data: Data, type: NSPasteboard.PasteboardType) throws {
         pasteboard.clearContents()
-        defer { recordOwnWrite() }
 
         let item = NSPasteboardItem()
         item.setString(text, forType: .string)
         item.setData(data, forType: type)
         guard pasteboard.writeObjects([item]) else {
-            throw PasteboardWriteFailure.rejectedByPasteboard
+            throw ClipboardMonitor.PasteboardWriteFailure.rejectedByPasteboard
         }
+    }
+
+    /// Writes file URLs so Finder can paste them.
+    func write(fileURLs: [URL]) throws {
+        pasteboard.clearContents()
+
+        guard pasteboard.writeObjects(fileURLs as [NSURL]) else {
+            throw ClipboardMonitor.PasteboardWriteFailure.rejectedByPasteboard
+        }
+
+        // Finder still reads the legacy NSFilenamesPboardType next to the NSURL objects.
+        let paths = fileURLs.map { $0.path }
+        pasteboard.setPropertyList(paths, forType: NSPasteboard.PasteboardType("NSFilenamesPboardType"))
+    }
+}
+
+// Write vocabulary that ClipboardService and its tests reference as `ClipboardMonitor.…`.
+extension ClipboardMonitor {
+    public enum ImagePasteboardWriteMode: Sendable {
+        case standard
+        case codexOptimized
+    }
+
+    /// Why a pasteboard write produced nothing usable.
+    ///
+    /// A failed write leaves the previous clipboard content in place, so these must reach the
+    /// caller rather than a log line.
+    public enum PasteboardWriteFailure: Error, Equatable {
+        /// The bytes could not be turned into a pasteboard image representation.
+        case imageNotRenderable
+        /// `NSPasteboard` refused the primary representation.
+        case rejectedByPasteboard
     }
 
     struct ImagePasteboardPayload {
@@ -263,19 +280,5 @@ extension ClipboardMonitor {
             space: colorSpace,
             bitmapInfo: bitmapInfo.rawValue
         )
-    }
-
-    /// Writes file URLs so Finder can paste them.
-    public func copyToClipboard(fileURLs: [URL]) throws {
-        pasteboard.clearContents()
-        defer { recordOwnWrite() }
-
-        guard pasteboard.writeObjects(fileURLs as [NSURL]) else {
-            throw PasteboardWriteFailure.rejectedByPasteboard
-        }
-
-        // Finder still reads the legacy NSFilenamesPboardType next to the NSURL objects.
-        let paths = fileURLs.map { $0.path }
-        pasteboard.setPropertyList(paths, forType: NSPasteboard.PasteboardType("NSFilenamesPboardType"))
     }
 }
