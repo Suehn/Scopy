@@ -1,8 +1,9 @@
 import Foundation
 
 enum ScopyThresholds {
-    /// ClipboardMonitor: content >= threshold will compute hash off-main (except small text).
-    static let ingestHashOffloadBytes = 50 * 1024
+    /// ClipboardMonitor: content >= threshold is written as a durable envelope and processed off
+    /// the main actor; images take that path at any size.
+    static let ingestDurableEnvelopeBytes = 50 * 1024
 
     /// ClipboardMonitor: content >= threshold will be spooled to disk before emitting into streams.
     ///

@@ -13,7 +13,6 @@ final class MockClipboardService: ClipboardServiceProtocol {
         let imageCount: Int
         let showThumbnails: Bool?
         let imagePreviewDelay: Double?
-        let thumbnailSize: Int
         let textLength: Int
         let historyListIntegrationNamespace: String?
         let noteUpdateDelayMilliseconds: Int?
@@ -25,7 +24,6 @@ final class MockClipboardService: ClipboardServiceProtocol {
             let imageCount = max(0, parseInt(env["SCOPY_MOCK_IMAGE_COUNT"]) ?? 0)
             let showThumbnails = parseBool(env["SCOPY_MOCK_SHOW_THUMBNAILS"])
             let imagePreviewDelay = parseDouble(env["SCOPY_MOCK_IMAGE_PREVIEW_DELAY"])
-            let thumbnailSize = max(16, parseInt(env["SCOPY_MOCK_THUMBNAIL_SIZE"]) ?? 64)
             let textLength = max(0, parseInt(env["SCOPY_MOCK_TEXT_LENGTH"]) ?? 0)
             let historyListIntegrationNamespace = historyListIntegrationNamespace(
                 environment: env,
@@ -43,7 +41,6 @@ final class MockClipboardService: ClipboardServiceProtocol {
                 imageCount: imageCount,
                 showThumbnails: showThumbnails,
                 imagePreviewDelay: imagePreviewDelay,
-                thumbnailSize: thumbnailSize,
                 textLength: textLength,
                 historyListIntegrationNamespace: historyListIntegrationNamespace,
                 noteUpdateDelayMilliseconds: noteUpdateDelayMilliseconds
@@ -201,7 +198,7 @@ final class MockClipboardService: ClipboardServiceProtocol {
         let totalCount = max(sampleTexts.count, config.itemCount)
         let extraCount = max(0, totalCount - sampleTexts.count)
         let imageCount = min(config.imageCount, extraCount)
-        let imagePaths = Self.prepareMockThumbnails(count: imageCount, size: config.thumbnailSize)
+        let imagePaths = Self.prepareMockThumbnails(count: imageCount, size: 64)
         let generatedText = Self.makeGeneratedText(length: config.textLength)
         let now = Date()
 

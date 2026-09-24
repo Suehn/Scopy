@@ -419,7 +419,7 @@ public final class ClipboardMonitor {
         // Images always take the durable envelope path so their SHA-256 runs off the main
         // actor; other content does so from the durable-envelope size up. Everything smaller
         // is hashed inline and queued directly.
-        if rawData.type == .image || rawData.sizeBytes >= ScopyThresholds.ingestHashOffloadBytes {
+        if rawData.type == .image || rawData.sizeBytes >= ScopyThresholds.ingestDurableEnvelopeBytes {
             guard await submitDurableCapture(rawData, logFailure: true) else {
                 pendingPersistRetry = PendingPersistRetry(
                     rawData: rawData,
