@@ -470,8 +470,7 @@ extension ListLiveScrollObserverView {
 
         private func findScrollViewInWindow(allowGenericFallback: Bool) -> NSScrollView? {
             guard let window, let contentView = window.contentView else { return nil }
-            if PerfFeatureFlags.scrollResolverCacheEnabled,
-               cachedWindow === window,
+            if cachedWindow === window,
                let cachedWindowResolvedScrollView,
                cachedWindowResolvedScrollView.window === window,
                cachedWindowResolvedScrollView.isDescendant(of: contentView),
@@ -481,9 +480,7 @@ extension ListLiveScrollObserverView {
 
             let resolved = findFirstListScrollView(in: contentView)
                 ?? (allowGenericFallback ? findFirstGenericScrollView(in: contentView) : nil)
-            if PerfFeatureFlags.scrollResolverCacheEnabled,
-               let resolved,
-               Self.isListScrollView(resolved) {
+            if let resolved, Self.isListScrollView(resolved) {
                 cachedWindow = window
                 cachedWindowResolvedScrollView = resolved
             } else {

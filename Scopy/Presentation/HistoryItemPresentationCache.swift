@@ -157,9 +157,7 @@ final class HistoryItemPresentationCache {
 
         for item in items where snapshots.count < prewarmBatchLimit {
             let mayScheduleFilePreview = item.type == .file
-            let mayScheduleMarkdownMenuSignal =
-                PerfFeatureFlags.markdownMenuSignalCacheEnabled &&
-                Self.isMarkdownCandidate(type: item.type)
+            let mayScheduleMarkdownMenuSignal = Self.isMarkdownCandidate(type: item.type)
             guard mayScheduleFilePreview || mayScheduleMarkdownMenuSignal else { continue }
 
             let revision = ClipboardItemContentRevision.resolve(item: item)
@@ -310,16 +308,6 @@ final class HistoryItemPresentationCache {
         plainText: String
     ) -> Bool {
         guard Self.isMarkdownCandidate(type: revision.type) else { return false }
-
-        guard PerfFeatureFlags.markdownMenuSignalCacheEnabled else {
-            ScrollPerformanceProfile.shared.incrementCounter(
-                name: "row.markdown_menu_signal_uncached"
-            )
-            return Self.profiledMarkdownMenuSignal(
-                plainText: plainText,
-                timingName: "row.markdown_menu_signal_uncached_ms"
-            )
-        }
 
         if let cached = markdownMenuSignalCache[revision] {
             ScrollPerformanceProfile.shared.incrementCounter(

@@ -321,20 +321,15 @@ struct HistoryItemView: View, Equatable {
         case hover
         case explicitAction
         case presentedPopover
-        case legacyAppearance
 
         var needsScrollBoundaryOwnership: Bool {
             switch self {
             case .hover, .presentedPopover:
                 return true
-            case .explicitAction, .legacyAppearance:
+            case .explicitAction:
                 return false
             }
         }
-    }
-
-    private var usesPassiveRowArchitecture: Bool {
-        PerfFeatureFlags.passiveHistoryRowEnabled
     }
 
     @discardableResult
@@ -342,7 +337,7 @@ struct HistoryItemView: View, Equatable {
         for activation: InteractionActivation,
         preferredToken: HistoryListInteractionCoordinator.PassiveRowToken? = nil
     ) -> HistoryItemInteractionState? {
-        if activation.needsScrollBoundaryOwnership, usesPassiveRowArchitecture {
+        if activation.needsScrollBoundaryOwnership {
             let token = preferredToken ?? control.passiveRowToken ?? interactionCoordinator.makePassiveRowToken()
             control.passiveRowToken = token
             guard claimPassiveRow(token: token) else { return nil }
@@ -363,7 +358,6 @@ struct HistoryItemView: View, Equatable {
                 current.activateViewAttachment(attachmentToken)
             }
             current.reconcile(to: contentRevision, relativeTimeText: relativeTime)
-            registerLegacyInteractionObserverIfNeeded(on: current)
             return current
         }
 
@@ -376,19 +370,7 @@ struct HistoryItemView: View, Equatable {
         }
         interactionState = created
         ScrollPerformanceProfile.incrementCounter(name: "interaction.session_init")
-        registerLegacyInteractionObserverIfNeeded(on: created)
         return created
-    }
-
-    private func registerLegacyInteractionObserverIfNeeded(on state: HistoryItemInteractionState) {
-        guard !usesPassiveRowArchitecture, state.rowController.interactionObservation == nil else {
-            return
-        }
-        state.rowController.interactionObservation = interactionCoordinator.observe { event in
-            guard self.control.isAppeared else { return }
-            self.handleInteractionEvent(event)
-        }
-        ScrollPerformanceProfile.incrementCounter(name: "interaction.observer_install")
     }
 
     @discardableResult
@@ -448,23 +430,17 @@ struct HistoryItemView: View, Equatable {
         guard changed else { return }
 
         requestPopover(nil)
-        if usesPassiveRowArchitecture {
-            releasePassiveOwnership()
-            guard restartHover, control.isAppeared, control.isPointerInsideRow else {
-                releaseInteractionStateIfIdle(expected: state)
-                return
-            }
-            handleHover(true)
-        } else if restartHover, control.isPointerInsideRow {
-            state.previewCoordinator.isHovering = true
-            activateHoverActionsIfAllowed(state: state)
+        releasePassiveOwnership()
+        guard restartHover, control.isAppeared, control.isPointerInsideRow else {
+            releaseInteractionStateIfIdle(expected: state)
+            return
         }
+        handleHover(true)
     }
 
     private func releaseInteractionStateIfIdle(
         expected state: HistoryItemInteractionState? = nil
     ) {
-        guard usesPassiveRowArchitecture else { return }
         let retainedExpected = state.flatMap {
             interactionSessionStore.contains($0) ? $0 : nil
         }
@@ -904,15 +880,9 @@ struct HistoryItemView: View, Equatable {
 
     @ViewBuilder
     private var scrollAwareRowContent: some View {
-        if usesPassiveRowArchitecture {
-            // Keep the lightweight hover detector installed through live scrolling so the final
-            // stationary row can become the coordinator's single restoration candidate.
-            rowContent.onHover(perform: handleHover)
-        } else if isScrollInteractionActive {
-            rowContent
-        } else {
-            rowContent.onHover(perform: handleHover)
-        }
+        // Keep the lightweight hover detector installed through live scrolling so the final
+        // stationary row can become the coordinator's single restoration candidate.
+        rowContent.onHover(perform: handleHover)
     }
 
     /// The row's activation surface is deliberately not a `Button`.
@@ -1046,9 +1016,6 @@ struct HistoryItemView: View, Equatable {
                 HistoryListUITestProbe.shared.recordRowAppeared(itemID: item.id)
             }
             attachRetainedInteractionStateIfNeeded()
-            if !usesPassiveRowArchitecture {
-                _ = ensureInteractionState(for: .legacyAppearance)
-            }
         }
         .onChange(of: item.lastUsedAt) { _, _ in
             updateRelativeTimeText()
@@ -1359,7 +1326,7 @@ struct HistoryItemView: View, Equatable {
             return
         }
 
-        if usesPassiveRowArchitecture, isPreviewInteractionSuppressed {
+        if isPreviewInteractionSuppressed {
             if let state = interactionState {
                 state.previewCoordinator.isHovering = false
                 state.rowController.isHoveringOptimizeButton = false

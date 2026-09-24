@@ -105,10 +105,6 @@ final class HistoryListInteractionCoordinator {
     private var cooldownCancellation: CooldownCancellation?
     private var cooldownGeneration: UInt64 = 0
 
-    // Transitional compatibility path. Passive rows use the O(1) slot API below; the legacy
-    // observer broadcast remains available for same-binary profiling and incremental migration.
-    private var observers: [UUID: (Event) -> Void] = [:]
-
     init(
         hoverPreviewCooldownAfterScrollSeconds: CFTimeInterval =
             HistoryListInteractionCoordinator.defaultHoverPreviewCooldownAfterScrollSeconds,
@@ -229,14 +225,6 @@ final class HistoryListInteractionCoordinator {
         suppressedHoverCandidate?.token == token
     }
 
-    func observe(_ observer: @escaping (Event) -> Void) -> HistoryListInteractionObservation {
-        let id = UUID()
-        observers[id] = observer
-        return HistoryListInteractionObservation { [weak self] in
-            self?.observers.removeValue(forKey: id)
-        }
-    }
-
     func beginScrolling() {
         guard !isScrolling else { return }
 
@@ -245,7 +233,6 @@ final class HistoryListInteractionCoordinator {
         isScrolling = true
         publishPassivePathSnapshot()
         notifyAndRetireActiveRow(.scrollStarted)
-        notifyLegacyObservers(.scrollStarted)
         publishPassivePathSnapshot()
     }
 
@@ -255,7 +242,6 @@ final class HistoryListInteractionCoordinator {
         isScrolling = false
         lastScrollEndDeadline = monotonicNow() + hoverPreviewCooldownAfterScrollSeconds
         publishPassivePathSnapshot()
-        notifyLegacyObservers(.scrollEnded)
         scheduleOrRestoreCandidate()
         publishPassivePathSnapshot()
     }
@@ -267,7 +253,6 @@ final class HistoryListInteractionCoordinator {
             // the paired end/start transitions.
             pointerInteractionToken = nil
             publishPassivePathSnapshot()
-            notifyLegacyObservers(.pointerInteractionEnded)
         }
 
         invalidateCooldown(keepDeadline: true)
@@ -277,7 +262,6 @@ final class HistoryListInteractionCoordinator {
         pointerInteractionToken = token
         publishPassivePathSnapshot()
         notifyAndRetireActiveRow(.pointerInteractionStarted)
-        notifyLegacyObservers(.pointerInteractionStarted)
         publishPassivePathSnapshot()
         return token
     }
@@ -286,7 +270,6 @@ final class HistoryListInteractionCoordinator {
         guard pointerInteractionToken == token else { return }
         pointerInteractionToken = nil
         publishPassivePathSnapshot()
-        notifyLegacyObservers(.pointerInteractionEnded)
         scheduleOrRestoreCandidate()
         publishPassivePathSnapshot()
     }
@@ -298,8 +281,7 @@ final class HistoryListInteractionCoordinator {
         endPointerInteraction(token: pointerInteractionToken)
     }
 
-    /// Cancels every passive-path ownership and scheduled restoration. The legacy observer table
-    /// intentionally remains intact because its observations own their own cancellation lifetime.
+    /// Cancels every passive-path ownership and scheduled restoration.
     func tearDownPassivePath() {
         invalidateCooldown(keepDeadline: false)
         activeRowSlot = nil
@@ -349,12 +331,9 @@ final class HistoryListInteractionCoordinator {
     private func finishHoverPreviewTransfer(itemID: UUID) {
         hoverPreviewTransferToken = nil
         publishPassivePathSnapshot()
-        let event = Event.hoverPreviewTransferEnded(itemID: itemID)
-        // Passive rows do not install legacy broadcast observers. Route the unblock event to the
-        // sole active row so a row that entered while the safe corridor was owned can resume its
-        // normal hover path without reintroducing O(visible rows) fan-out.
-        activeRowSlot?.eventSink(event)
-        notifyLegacyObservers(event)
+        // Route the unblock event to the sole active row so a row that entered while the safe
+        // corridor was owned can resume its normal hover path without O(visible rows) fan-out.
+        activeRowSlot?.eventSink(.hoverPreviewTransferEnded(itemID: itemID))
     }
 
     func isHoverPreviewTransferBlocked(for itemID: UUID) -> Bool {
@@ -445,14 +424,6 @@ final class HistoryListInteractionCoordinator {
 
     private func publishPassivePathSnapshot() {
         passivePathSnapshotSink(passivePathSnapshot)
-    }
-
-    private func notifyLegacyObservers(_ event: Event) {
-        // A callback may cancel itself or another legacy observation. Iterate a stable snapshot so
-        // that mutation is safe and affects only subsequent events.
-        for observer in Array(observers.values) {
-            observer(event)
-        }
     }
 
     nonisolated private static func productionCooldownScheduler(

@@ -1750,9 +1750,6 @@ final class HistoryViewModel {
     }
 
     private func effectiveSearchDebounceNs(for query: String) -> UInt64 {
-        guard PerfFeatureFlags.shortQueryDebounceEnabled else {
-            return timing.searchDebounceNs
-        }
         if query.count <= 2 {
             return max(timing.searchDebounceNs, 16_000_000)
         }

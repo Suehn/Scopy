@@ -103,10 +103,7 @@ struct HistoryListState {
     }
 
     func indexOfItem(withID id: UUID) -> Int? {
-        guard PerfFeatureFlags.historyIndexingEnabled else {
-            return items.firstIndex { $0.id == id }
-        }
-        return itemIndexByID[id]
+        itemIndexByID[id]
     }
 
     func item(at index: Int) -> ClipboardItemDTO? {

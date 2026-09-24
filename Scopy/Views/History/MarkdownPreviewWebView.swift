@@ -28,15 +28,13 @@ private enum MarkdownPreviewScrollViewResolver {
     private static var cache: [ObjectIdentifier: WeakScrollViewBox] = [:]
 
     static func resolve(for view: NSView) -> NSScrollView? {
-        if PerfFeatureFlags.markdownResolverCacheEnabled {
-            let key = ObjectIdentifier(view)
-            if let cached = cache[key]?.value {
-                return cached
-            }
-            // Opportunistic pruning for deallocated views.
-            if cache.count > 256 {
-                cache = cache.filter { $0.value.value != nil }
-            }
+        let key = ObjectIdentifier(view)
+        if let cached = cache[key]?.value {
+            return cached
+        }
+        // Opportunistic pruning for deallocated views.
+        if cache.count > 256 {
+            cache = cache.filter { $0.value.value != nil }
         }
 
         let resolved: NSScrollView?
@@ -48,9 +46,7 @@ private enum MarkdownPreviewScrollViewResolver {
             resolved = findFirstScrollView(in: view)
         }
 
-        if PerfFeatureFlags.markdownResolverCacheEnabled {
-            cache[ObjectIdentifier(view)] = WeakScrollViewBox(resolved)
-        }
+        cache[key] = WeakScrollViewBox(resolved)
         return resolved
     }
 
