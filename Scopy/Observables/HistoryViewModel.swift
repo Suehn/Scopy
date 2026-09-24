@@ -1108,13 +1108,20 @@ final class HistoryViewModel {
                 )
                 let result = try await service.search(query: request)
                 guard !Task.isCancelled, currentVersion == searchVersion else { return }
-                prewarmDisplayText(for: acceptedSearchHits(result.hits).map(\.item))
-                replaceSearchPage(with: result)
-                searchCoverage = result.coverage
+                let prefilterItems = acceptedSearchHits(result.hits).map(\.item)
+                prewarmDisplayText(for: prefilterItems)
+                let refineFollows = (searchMode == .fuzzy || searchMode == .fuzzyPlus)
+                    && result.coverage.isStagedRefine
+                // An empty prefilter page is not an answer while the full pass is still coming:
+                // publishing it would flash "No results" until the refine brings rows back.
+                let deferredEmptyPage = refineFollows && prefilterItems.isEmpty ? result : nil
+                if deferredEmptyPage == nil {
+                    replaceSearchPage(with: result)
+                    searchCoverage = result.coverage
+                }
 
-                if (searchMode == .fuzzy || searchMode == .fuzzyPlus),
-                   result.coverage.isStagedRefine,
-                   loadedCount <= Self.initialPageSize {
+                var pendingRefine: Task<Void, Never>?
+                if refineFollows {
                     let refineQuery = searchQuery
                     let refineMode = searchMode
                     let refineAppFilter = appFilter
@@ -1122,7 +1129,7 @@ final class HistoryViewModel {
                     let refineTypeFilters = typeFilters
                     let refineVersion = currentVersion
 
-                    refineTask = Task {
+                    let refine = Task {
                         let trimmed = refineQuery.trimmingCharacters(in: .whitespacesAndNewlines)
                         let delayNs: UInt64 = trimmed.count <= 2 ? timing.refineShortQueryDelayNs : timing.refineLongQueryDelayNs
                         try? await Task.sleep(nanoseconds: delayNs)
@@ -1144,21 +1151,30 @@ final class HistoryViewModel {
                             let refined = try await service.search(query: refineRequest)
                             guard !Task.isCancelled, refineVersion == searchVersion else { return }
 
-                            guard loadedCount <= Self.initialPageSize else { return }
                             prewarmDisplayText(for: acceptedSearchHits(refined.hits).map(\.item))
                             replaceSearchPage(with: refined, skippingIdenticalRefine: true)
                             searchCoverage = refined.coverage
                         } catch {
                             guard !Task.isCancelled, refineVersion == searchVersion else { return }
-                            guard searchCoverage.isStagedRefine else { return }
+                            if let deferredEmptyPage {
+                                replaceSearchPage(with: deferredEmptyPage)
+                            } else if !searchCoverage.isStagedRefine {
+                                return
+                            }
                             searchCoverage = .incomplete
                             ScopyLog.app.warning("Refine search failed: \(error.localizedDescription, privacy: .private)")
                         }
                     }
+                    refineTask = refine
+                    if deferredEmptyPage != nil { pendingRefine = refine }
                 }
 
                 let elapsedMs = (CFAbsoluteTimeGetCurrent() - startTime) * 1000
                 Task { await PerformanceMetrics.shared.recordSearchLatency(elapsedMs) }
+                // With the prefilter page deferred, loading lasts until the refine lands: the empty
+                // state shows only for a final empty result, and the previous query's rows on
+                // screen cannot start paging for this one.
+                await pendingRefine?.value
             } catch {
                 guard !Task.isCancelled, currentVersion == searchVersion else { return }
                 searchCoverage = .incomplete

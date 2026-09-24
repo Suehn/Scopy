@@ -52,131 +52,115 @@ struct HistoryListView: View {
     private static let shouldExposeAccessibility: Bool = isScrollProfile ? profileAccessibility : isUITesting
 
     var body: some View {
-        Group {
-            if historyViewModel.items.isEmpty && !historyViewModel.isLoading {
-                EmptyStateView(
-                    hasFilters: historyViewModel.hasActiveFilters,
-                    openSettings: openSettings
+        // v0.18: 使用 List 替代 ScrollView+LazyVStack 实现真正的视图回收
+        // List 基于 NSTableView，具有视图回收能力，10k 项目内存从 ~500MB 降至 ~50MB
+        // The List stays mounted when a search has no rows; the empty and loading states are a
+        // leaf overlay, so this body never reads `isLoading` or the filter state.
+        ScrollViewReader { proxy in
+            let _ = ScrollPerformanceProfile.incrementCounter(name: "list.body")
+            List {
+                // v0.21: 使用局部变量缓存计算属性结果，避免多次访问触发 @Observable 追踪
+                // 这样 SwiftUI 只追踪一次 pinnedItems/unpinnedItems 访问
+                let pinned = historyViewModel.pinnedItems
+                let unpinned = historyViewModel.unpinnedItems
+                // Rows are built inside ForEach child closures, where every @Observable read installs its own
+                // observation and copies the access list; read the shared state once here and pass values down.
+                let rowContext = HistoryRowContext(
+                    settings: settingsViewModel.settings,
+                    activePopover: activePopover,
+                    searchMatchContexts: historyViewModel.searchMatchContexts
                 )
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-            // v0.18: 使用 List 替代 ScrollView+LazyVStack 实现真正的视图回收
-            // List 基于 NSTableView，具有视图回收能力，10k 项目内存从 ~500MB 降至 ~50MB
-            ScrollViewReader { proxy in
-                let _ = ScrollPerformanceProfile.incrementCounter(name: "list.body")
-                List {
-                    // Loading indicator
-                    // `items.isEmpty` first: `isLoading` is only observed while the list is empty.
-                    if historyViewModel.items.isEmpty && historyViewModel.isLoading {
-                        ProgressView()
-                            .controlSize(.small)
-                            .padding(.vertical, ScopySpacing.md)
-                            .listRowInsets(EdgeInsets())
-                            .listRowBackground(Color.clear)
-                            .listRowSeparator(.hidden)
-                    }
 
-                    // v0.21: 使用局部变量缓存计算属性结果，避免多次访问触发 @Observable 追踪
-                    // 这样 SwiftUI 只追踪一次 pinnedItems/unpinnedItems 访问
-                    let pinned = historyViewModel.pinnedItems
-                    let unpinned = historyViewModel.unpinnedItems
-                    // Rows are built inside ForEach child closures, where every @Observable read installs its own
-                    // observation and copies the access list; read the shared state once here and pass values down.
-                    let rowContext = HistoryRowContext(
-                        settings: settingsViewModel.settings,
-                        activePopover: activePopover,
-                        searchMatchContexts: historyViewModel.searchMatchContexts
+                // v0.18: 不使用 Section header，改为普通行以避免黑色背景
+                // Pinned Section Header
+                if !pinned.isEmpty {
+                    SectionHeader(
+                        title: "Pinned",
+                        count: pinned.count,
+                                        isCollapsible: true,
+                        isCollapsed: historyViewModel.isPinnedCollapsed,
+                        onToggle: { historyViewModel.isPinnedCollapsed.toggle() }
                     )
-
-                    // v0.18: 不使用 Section header，改为普通行以避免黑色背景
-                    // Pinned Section Header
-                    if !pinned.isEmpty {
-                        SectionHeader(
-                            title: "Pinned",
-                            count: pinned.count,
-                                            isCollapsible: true,
-                            isCollapsed: historyViewModel.isPinnedCollapsed,
-                            onToggle: { historyViewModel.isPinnedCollapsed.toggle() }
-                        )
-                        .listRowInsets(EdgeInsets())
-                        .listRowBackground(Color.clear)
-                        .listRowSeparator(.hidden)
-
-                        // Pinned Items
-                        if !historyViewModel.isPinnedCollapsed {
-                            ForEach(pinned) { item in
-                                historyRow(item: item, context: rowContext)
-                            }
-                        }
-                    }
-
-                    // Recent Section Header
-                    RecentSectionHeader(count: unpinned.count)
                     .listRowInsets(EdgeInsets())
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
 
-                    // Recent Items
-                    ForEach(unpinned) { item in
-                        historyRow(item: item, context: rowContext)
-                    }
-
-                    // Load More Trigger
-                    if historyViewModel.canLoadMore {
-                        LoadMoreTriggerView()
-                            .listRowInsets(EdgeInsets())
-                            .listRowBackground(Color.clear)
-                            .listRowSeparator(.hidden)
-                            .onAppear {
-                                Task { await historyViewModel.loadMore() }
-                            }
-                    }
-                }
-                .listStyle(.plain)
-                .scrollContentBackground(.hidden)
-                .scrollIndicators(.automatic)
-                .accessibilityIdentifier("History.List")
-                .background(
-                    ListLiveScrollObserverView(
-                        interactionCoordinator: interactionCoordinator,
-                        onScrollStart: {
-                            interactionCoordinator.beginScrolling()
-                            relativeTimeClock.scrollDidStart()
-                            historyViewModel.scrollDidStart()
-                            if HistoryListUITestRuntime.isEnabled {
-                                HistoryListUITestProbe.shared.recordProductionScrollStart()
-                            }
-                        },
-                        onScrollEnd: {
-                            interactionCoordinator.endScrolling()
-                            relativeTimeClock.scrollDidEnd()
-                            historyViewModel.scrollDidEnd()
-                            if HistoryListUITestRuntime.isEnabled {
-                                HistoryListUITestProbe.shared.recordProductionScrollEnd()
-                            }
-                        },
-                        onScrollViewAttach: scrollViewAttachHandler,
-                        programmaticScrollGate: programmaticScrollGate
-                    )
-                )
-                .background(ScrollFrameSamplerView())
-                .onAppear {
-                    // Selection reaches rows through the fan-out, never through this body; the
-                    // List is diffed only when its items change. Keyboard navigation follows here.
-                    historyViewModel.rowSelection.onSelectionChanged = { id, follow in
-                        guard follow, let id else { return }
-                        programmaticScrollGate.beginProgrammaticScroll()
-                        withAnimation(.easeInOut(duration: 0.1)) {
-                            proxy.scrollTo(id, anchor: .center)
+                    // Pinned Items
+                    if !historyViewModel.isPinnedCollapsed {
+                        ForEach(pinned) { item in
+                            historyRow(item: item, context: rowContext)
                         }
                     }
                 }
-                .onDisappear {
-                    historyViewModel.rowSelection.onSelectionChanged = nil
+
+                // Recent Section Header (hidden while the empty overlay stands in for the list)
+                if !pinned.isEmpty || !unpinned.isEmpty {
+                    RecentSectionHeader(count: unpinned.count)
+                    .listRowInsets(EdgeInsets())
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+                }
+
+                // Recent Items
+                ForEach(unpinned) { item in
+                    historyRow(item: item, context: rowContext)
+                }
+
+                // Load More Trigger
+                if historyViewModel.canLoadMore {
+                    LoadMoreTriggerView()
+                        .listRowInsets(EdgeInsets())
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+                        .onAppear {
+                            Task { await historyViewModel.loadMore() }
+                        }
                 }
             }
+            .listStyle(.plain)
+            .scrollContentBackground(.hidden)
+            .scrollIndicators(.automatic)
+            .accessibilityIdentifier("History.List")
+            .background(
+                ListLiveScrollObserverView(
+                    interactionCoordinator: interactionCoordinator,
+                    onScrollStart: {
+                        interactionCoordinator.beginScrolling()
+                        relativeTimeClock.scrollDidStart()
+                        historyViewModel.scrollDidStart()
+                        if HistoryListUITestRuntime.isEnabled {
+                            HistoryListUITestProbe.shared.recordProductionScrollStart()
+                        }
+                    },
+                    onScrollEnd: {
+                        interactionCoordinator.endScrolling()
+                        relativeTimeClock.scrollDidEnd()
+                        historyViewModel.scrollDidEnd()
+                        if HistoryListUITestRuntime.isEnabled {
+                            HistoryListUITestProbe.shared.recordProductionScrollEnd()
+                        }
+                    },
+                    onScrollViewAttach: scrollViewAttachHandler,
+                    programmaticScrollGate: programmaticScrollGate
+                )
+            )
+            .background(ScrollFrameSamplerView())
+            .onAppear {
+                // Selection reaches rows through the fan-out, never through this body; the
+                // List is diffed only when its items change. Keyboard navigation follows here.
+                historyViewModel.rowSelection.onSelectionChanged = { id, follow in
+                    guard follow, let id else { return }
+                    programmaticScrollGate.beginProgrammaticScroll()
+                    withAnimation(.easeInOut(duration: 0.1)) {
+                        proxy.scrollTo(id, anchor: .center)
+                    }
+                }
+            }
+            .onDisappear {
+                historyViewModel.rowSelection.onSelectionChanged = nil
+            }
         }
-        }
+        .overlay { HistoryListEmptyOverlay(openSettings: openSettings) }
         .environment(\.historyRelativeTimeClock, relativeTimeClock)
         .background(
             HistoryWindowVisibilityObserver(clock: relativeTimeClock)
@@ -562,6 +546,30 @@ struct HistoryListView: View {
         .listRowInsets(EdgeInsets())      // 移除默认内边距
         .listRowBackground(Color.clear)    // 透明背景
         .listRowSeparator(.hidden)         // 隐藏分隔线
+    }
+}
+
+/// The empty and first-load states over the always-mounted List. Only this leaf observes
+/// `isLoading` and `hasActiveFilters`; it renders nothing while there are rows.
+private struct HistoryListEmptyOverlay: View {
+    @Environment(HistoryViewModel.self) private var historyViewModel
+
+    let openSettings: (() -> Void)?
+
+    var body: some View {
+        if historyViewModel.items.isEmpty {
+            if historyViewModel.isLoading {
+                ProgressView()
+                    .controlSize(.small)
+                    .padding(.vertical, ScopySpacing.md)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            } else {
+                EmptyStateView(
+                    hasFilters: historyViewModel.hasActiveFilters,
+                    openSettings: openSettings
+                )
+            }
+        }
     }
 }
 
