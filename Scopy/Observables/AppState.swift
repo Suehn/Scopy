@@ -27,7 +27,7 @@ enum StartupPhase: Equatable {
 @Observable
 @MainActor
 final class AppState {
-    // MARK: - Singleton (兼容层)
+    // MARK: - Shared instance
 
     private static var _shared: AppState?
     static var shared: AppState {
@@ -39,10 +39,6 @@ final class AppState {
 
     static func create(service: ClipboardServiceProtocol) -> AppState {
         AppState(service: service)
-    }
-
-    static func resetShared() {
-        _shared = nil
     }
 
     // MARK: - Properties

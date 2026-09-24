@@ -1522,10 +1522,6 @@ struct HistoryItemView: View, Equatable {
         }
     }
 
-    private func cancelPreviewTask() {
-        interactionState?.previewCoordinator.cancelPreviewTasks()
-    }
-
     private func cancelHoverDebounceTask() {
         interactionState?.previewCoordinator.cancelHoverDebounceTask()
     }

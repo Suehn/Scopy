@@ -9,11 +9,6 @@ enum PanelPositionMode {
 
 enum PanelReopenSearchResetPolicy {
     static let staleIntervalSeconds: TimeInterval = 180
-
-    static func shouldClearSearch(lastClosedAt: Date?, now: Date = Date()) -> Bool {
-        guard let lastClosedAt else { return false }
-        return now.timeIntervalSince(lastClosedAt) > staleIntervalSeconds
-    }
 }
 
 /// Whether losing key focus should close the history panel.

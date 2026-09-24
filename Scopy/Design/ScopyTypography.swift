@@ -27,6 +27,5 @@ enum ScopyTypography {
     static let microMono = Font.system(size: Size.caption, weight: .regular, design: .monospaced)
 
     // MARK: - 设置页面专用
-    static let sidebarLabel = Font.system(size: Size.title, weight: .medium)
     static let pathLabel = Font.system(size: Size.caption, weight: .regular)
 }

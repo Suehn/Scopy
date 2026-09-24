@@ -11,6 +11,4 @@ enum ScopySpacing {
     static let md: CGFloat = u * 2      // 8pt - 中等间距
     static let lg: CGFloat = u * 3      // 12pt - 较大间距
     static let xl: CGFloat = u * 4      // 16pt - 大间距
-    static let xxl: CGFloat = u * 5     // 20pt - 特大间距
-    static let xxxl: CGFloat = u * 8    // 32pt - 超大间距
 }

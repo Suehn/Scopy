@@ -876,10 +876,7 @@ final class HistoryViewModel {
         cancelTask(&storageDetailsTask)
         storageDetailsTask = Task {
             do {
-                let walkStart = ProcessInfo.processInfo.systemUptime
                 let details = try await service.getDetailedStorageStats()
-                let walkMs = (ProcessInfo.processInfo.systemUptime - walkStart) * 1000
-                ScopyLog.app.info("Storage details walk took \(walkMs, format: .fixed(precision: 0), privacy: .public) ms")
                 guard shouldApplyLoadResult(version: version) else { return }
 
                 settingsViewModel.diskSizeBytes = details.totalSizeBytes

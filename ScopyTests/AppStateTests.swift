@@ -1,5 +1,6 @@
 import AppKit
 import Observation
+import SwiftUI
 import XCTest
 import ScopyKit
 
@@ -835,22 +836,15 @@ final class AppStateTests: XCTestCase {
         XCTAssertFalse(appState.canLoadMore)
     }
 
-    func testPanelReopenPolicyClearsOnlyAfterThreshold() {
-        let now = Date()
+    func testPanelReopenPolicyClearsOnlyAfterThreshold() throws {
+        let panel = FloatingPanel(contentRect: NSRect(x: 0, y: 0, width: 200, height: 200)) { EmptyView() }
+        let threshold = PanelReopenSearchResetPolicy.staleIntervalSeconds
 
-        XCTAssertFalse(PanelReopenSearchResetPolicy.shouldClearSearch(lastClosedAt: nil, now: now))
-        XCTAssertFalse(
-            PanelReopenSearchResetPolicy.shouldClearSearch(
-                lastClosedAt: now.addingTimeInterval(-PanelReopenSearchResetPolicy.staleIntervalSeconds),
-                now: now
-            )
-        )
-        XCTAssertTrue(
-            PanelReopenSearchResetPolicy.shouldClearSearch(
-                lastClosedAt: now.addingTimeInterval(-PanelReopenSearchResetPolicy.staleIntervalSeconds - 1),
-                now: now
-            )
-        )
+        XCTAssertFalse(panel.wasClosedLongerThan(threshold))
+        panel.close()
+        let closedAt = try XCTUnwrap(panel.lastClosedAt)
+        XCTAssertFalse(panel.wasClosedLongerThan(threshold, now: closedAt.addingTimeInterval(threshold)))
+        XCTAssertTrue(panel.wasClosedLongerThan(threshold, now: closedAt.addingTimeInterval(threshold + 1)))
     }
 
     // MARK: - Settings Tests
