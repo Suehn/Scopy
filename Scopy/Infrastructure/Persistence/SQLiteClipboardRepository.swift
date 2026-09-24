@@ -686,6 +686,21 @@ actor SQLiteClipboardRepository {
         return updatedCount
     }
 
+    /// Distinct (type, content hash) pairs of rows that can own a thumbnail.
+    func fetchThumbnailOwners() throws -> [(type: ClipboardItemType, contentHash: String)] {
+        let stmt = try prepare(
+            "SELECT DISTINCT type, content_hash FROM clipboard_items WHERE type IN ('image', 'file')"
+        )
+        var owners: [(type: ClipboardItemType, contentHash: String)] = []
+        while try stmt.step() {
+            guard let typeString = stmt.columnText(0),
+                  let type = ClipboardItemType(rawValue: typeString),
+                  let contentHash = stmt.columnText(1) else { continue }
+            owners.append((type: type, contentHash: contentHash))
+        }
+        return owners
+    }
+
     func fetchExternalRefFilenames() throws -> Set<String> {
         let sql = "SELECT storage_ref FROM clipboard_items WHERE storage_ref IS NOT NULL AND storage_ref <> ''"
         let stmt = try prepare(sql)

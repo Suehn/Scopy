@@ -1437,7 +1437,50 @@ public actor StorageService {
 
         // 6. v0.15: Clean up orphaned files (files not referenced in database)
         try await cleanupOrphanedFiles()
+        try await cleanupOrphanedThumbnails()
         return aggregateResult
+    }
+
+    /// Thumbnails are named by content hash and outlive their rows, so a full cleanup removes the
+    /// ones no image or file row references. Only Scopy-generated names are considered. Racing a
+    /// generation for a new row at worst deletes a cache file that is regenerated on demand.
+    private func cleanupOrphanedThumbnails() async throws {
+        let referenced = Set(try await repository.fetchThumbnailOwners().map { owner in
+            owner.type == .file
+                ? Self.fileThumbnailFilename(for: owner.contentHash)
+                : "\(owner.contentHash).png"
+        })
+        let directory = thumbnailCachePath
+        let removed = await Task.detached(priority: .utility) {
+            Self.removeUnreferencedThumbnails(in: directory, referenced: referenced)
+        }.value
+        if removed > 0 {
+            ScopyLog.storage.info("Removed \(removed, privacy: .public) unreferenced thumbnails")
+        }
+    }
+
+    nonisolated private static func removeUnreferencedThumbnails(in directory: String, referenced: Set<String>) -> Int {
+        guard let names = try? FileManager.default.contentsOfDirectory(atPath: directory) else { return 0 }
+        var removed = 0
+        for name in names where isGeneratedThumbnailName(name) && !referenced.contains(name) {
+            if (try? FileManager.default.removeItem(atPath: (directory as NSString).appendingPathComponent(name))) != nil {
+                removed += 1
+            }
+        }
+        return removed
+    }
+
+    /// `<sha256>.png` for images; `file_<hash>.png` for files, where current file hashes carry a
+    /// `file:` namespace and older ones are bare SHA-256.
+    nonisolated private static func isGeneratedThumbnailName(_ name: String) -> Bool {
+        guard name.hasSuffix(".png") else { return false }
+        var hash = name.dropLast(4)
+        if hash.hasPrefix("file_file:") {
+            hash = hash.dropFirst(10)
+        } else if hash.hasPrefix("file_") {
+            hash = hash.dropFirst(5)
+        }
+        return hash.utf8.count == 64 && hash.utf8.allSatisfy { ($0 >= 48 && $0 <= 57) || ($0 >= 97 && $0 <= 102) }
     }
 
     private func getWALFileSize() -> Int {
