@@ -7,23 +7,31 @@ enum MarkdownHTMLRenderer {
 
     /// Returns "" when cancelled; callers treat empty HTML as "no document".
     static func render(markdown: String, context: MarkdownRenderContext) -> String {
-        guard !Task.isCancelled else { return "" }
+        guard let source = preprocess(markdown: markdown, policy: context.policy) else { return "" }
+        return MarkdownHTMLDocumentBuilder.document(markdown: source, context: context)
+    }
+
+    /// The bounded Swift-side source repair that runs before the renderer bundle parses the
+    /// document. Returns nil when the task is cancelled. This is the only production path;
+    /// `MarkdownRenderingCorpusParityTests` pins its output for the corpus.
+    static func preprocess(markdown: String, policy: MarkdownRepairPolicy) -> String? {
+        guard !Task.isCancelled else { return nil }
         var source = markdown
-        if context.policy.allowLatexDocumentNormalize {
+        if policy.allowLatexDocumentNormalize {
             // Code, links, URLs and paths are islands the LaTeX document normalizer must not rewrite.
             let islands = MarkdownSyntaxProtector.protectForLaTeXDocumentNormalization(source)
-            guard !Task.isCancelled else { return "" }
+            guard !Task.isCancelled else { return nil }
             let normalized = LaTeXDocumentNormalizer.normalize(islands.markdown)
-            guard !Task.isCancelled else { return "" }
+            guard !Task.isCancelled else { return nil }
             source = MarkdownSyntaxProtector.restore(normalized, placeholders: islands.placeholders)
-            guard !Task.isCancelled else { return "" }
+            guard !Task.isCancelled else { return nil }
         }
         // The unified renderer is the delimiter authority for authored/ChatGPT Markdown. Math is
         // only protected while a scientific repair profile rewrites the surrounding text; authored
         // dollar delimiters and currency reach the parser unchanged.
-        if context.policy.allowLatexInlineTextNormalize {
+        if policy.allowLatexInlineTextNormalize {
             let protected = MathProtector.protectMath(in: source)
-            guard !Task.isCancelled else { return "" }
+            guard !Task.isCancelled else { return nil }
             source = MathProtector.restoreMath(
                 in: LaTeXInlineTextNormalizer.normalize(protected.markdown),
                 placeholders: protected.placeholders,
@@ -32,7 +40,7 @@ enum MarkdownHTMLRenderer {
         }
         source = MarkdownATXHeadingNormalizer.normalize(source)
         source = MarkdownTableCodeSpanPipeNormalizer.normalize(source)
-        guard !Task.isCancelled else { return "" }
-        return MarkdownHTMLDocumentBuilder.document(markdown: source, context: context)
+        guard !Task.isCancelled else { return nil }
+        return source
     }
 }

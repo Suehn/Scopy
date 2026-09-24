@@ -10,7 +10,9 @@ const cases = JSON.parse(readFileSync(new URL("cases.json", corpusRoot), "utf8")
 
 for (const testCase of cases) {
   test(`corpus: ${testCase.name}`, () => {
-    const source = readFileSync(new URL(testCase.file, corpusRoot), "utf8");
+    // `rendererInput` is the committed output of the app's Swift-side preprocessing
+    // (pinned by MarkdownRenderingCorpusParityTests), i.e. the bytes production hands to render().
+    const source = readFileSync(new URL(testCase.rendererInput, corpusRoot), "utf8");
     const result = render(source, {
       profile: testCase.expectedProfile,
       allowLooseMathRepair: testCase.allowLooseMathRepair,

@@ -2,6 +2,7 @@
   {
     "name": "chatgpt-file-links",
     "file": "chatgpt-file-links.md",
+    "rendererInput": "chatgpt-file-links.renderer-input.md",
     "expectedProfile": "chatGPTMarkdown",
     "allowLooseMathRepair": false,
     "renderedContains": [
@@ -17,6 +18,7 @@
   {
     "name": "image-path",
     "file": "image-path.md",
+    "rendererInput": "image-path.renderer-input.md",
     "expectedProfile": "chatGPTMarkdown",
     "allowLooseMathRepair": false,
     "renderedContains": [
@@ -31,6 +33,7 @@
   {
     "name": "reference-link",
     "file": "reference-link.md",
+    "rendererInput": "reference-link.renderer-input.md",
     "expectedProfile": "authoredMarkdown",
     "allowLooseMathRepair": false,
     "renderedContains": [
@@ -45,6 +48,7 @@
   {
     "name": "explicit-math",
     "file": "explicit-math.md",
+    "rendererInput": "explicit-math.renderer-input.md",
     "expectedProfile": "scientificMarkdown",
     "allowLooseMathRepair": false,
     "renderedContains": [
@@ -57,6 +61,7 @@
   {
     "name": "loose-latex",
     "file": "loose-latex.md",
+    "rendererInput": "loose-latex.renderer-input.md",
     "expectedProfile": "pdfOCRScientific",
     "allowLooseMathRepair": true,
     "renderedContains": [
@@ -70,6 +75,7 @@
   {
     "name": "currency-shell-vars",
     "file": "currency-shell-vars.md",
+    "rendererInput": "currency-shell-vars.renderer-input.md",
     "expectedProfile": "authoredMarkdown",
     "allowLooseMathRepair": false,
     "renderedContains": [
@@ -85,6 +91,7 @@
   {
     "name": "cjk-mixed-markdown",
     "file": "cjk-mixed-markdown.md",
+    "rendererInput": "cjk-mixed-markdown.renderer-input.md",
     "expectedProfile": "chatGPTMarkdown",
     "allowLooseMathRepair": false,
     "renderedContains": [
@@ -100,6 +107,7 @@
   {
     "name": "raw-html-literal",
     "file": "raw-html-literal.md",
+    "rendererInput": "raw-html-literal.renderer-input.md",
     "expectedProfile": "richHTML",
     "allowLooseMathRepair": false,
     "renderedContains": [
@@ -116,6 +124,7 @@
   {
     "name": "raw-html-literal-markdown",
     "file": "raw-html-literal-markdown.md",
+    "rendererInput": "raw-html-literal-markdown.renderer-input.md",
     "expectedProfile": "authoredMarkdown",
     "allowLooseMathRepair": false,
     "renderedContains": [
@@ -133,6 +142,7 @@
   {
     "name": "code-fence-paths",
     "file": "code-fence-paths.md",
+    "rendererInput": "code-fence-paths.renderer-input.md",
     "expectedProfile": "authoredMarkdown",
     "allowLooseMathRepair": false,
     "renderedContains": [
@@ -142,6 +152,47 @@
     ],
     "renderedNotContains": [
       "katex"
+    ],
+    "expectedRepairedMathCount": 0
+  },
+  {
+    "name": "atx-headings",
+    "file": "atx-headings.md",
+    "rendererInput": "atx-headings.renderer-input.md",
+    "expectedProfile": "authoredMarkdown",
+    "allowLooseMathRepair": false,
+    "renderedContains": [
+      "<h1>一级标题 <code># H1</code></h1>",
+      "<h2>二级标题</h2>",
+      "<p>#! /usr/bin/env bash</p>",
+      "<pre><code>#indented code",
+      "###fenced code",
+      "<p>#实际对象本回答是否真的使用1Markdown heading✅"
+    ],
+    "renderedNotContains": [
+      "<h1>!",
+      "<h1>实际对象",
+      "<h3>fenced code</h3>"
+    ],
+    "expectedRepairedMathCount": 0
+  },
+  {
+    "name": "table-code-span-pipes",
+    "file": "table-code-span-pipes.md",
+    "rendererInput": "table-code-span-pipes.renderer-input.md",
+    "expectedProfile": "authoredMarkdown",
+    "allowLooseMathRepair": false,
+    "renderedContains": [
+      "<td><code>| A | B |</code></td>",
+      "<td><code>A | B</code></td>",
+      "<p>Paragraph <code>A | B</code> should stay literal.</p>",
+      "<td>```python</td>",
+      "<td>```bash</td>"
+    ],
+    "renderedNotContains": [
+      "<td>`</td>",
+      "<td>`A</td>",
+      "```python | ```bash"
     ],
     "expectedRepairedMathCount": 0
   }
