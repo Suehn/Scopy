@@ -388,10 +388,7 @@ public final class StorageService {
         return false
     }
 
-    private static let testRunIdentifier: String = {
-        ProcessInfo.processInfo.environment["SCOPY_TEST_RUN_ID"]
-            ?? String(ProcessInfo.processInfo.processIdentifier)
-    }()
+    private static let testRunIdentifier = String(ProcessInfo.processInfo.processIdentifier)
 
     private static func resolveTestRootDirectory(databasePath: String?) -> URL {
         if let databasePath, !databasePath.isEmpty, !isInMemoryDatabasePath(databasePath) {
@@ -432,27 +429,12 @@ public final class StorageService {
         try await repository.open()
     }
 
-    /// v0.11: 执行 WAL 检查点（定期调用以控制 WAL 文件大小）
-    public func performWALCheckpoint() async {
-        await repository.walCheckpointPassive()
-    }
-
     /// v0.20: 关闭前执行 WAL 检查点，确保数据完整写入
     public func close() async {
         await repository.close()
     }
 
     // MARK: - CRUD Operations
-
-    /// Insert or update item (handles deduplication per v0.md 3.2)
-    /// v0.29: 大内容外部写入后台化，避免阻塞主线程
-    public func upsertItem(_ content: ClipboardMonitor.ClipboardContent) async throws -> StoredItem {
-        let outcome = try await upsertItemWithOutcome(content)
-        guard let item = outcome.item else {
-            throw StorageError.queryFailed("Previously applied ingest item no longer exists")
-        }
-        return item
-    }
 
     func upsertItemWithOutcome(_ content: ClipboardMonitor.ClipboardContent) async throws -> UpsertOutcome {
         if let ingestID = content.ingestID {
@@ -716,10 +698,6 @@ public final class StorageService {
 
     func removeIngestReceipt(_ ingestID: UUID) async throws {
         try await repository.removeIngestReceipt(ingestID)
-    }
-
-    public func findByHash(_ hash: String) async throws -> StoredItem? {
-        try await repository.fetchItemByHash(hash)
     }
 
     public func findByID(_ id: UUID) async throws -> StoredItem? {
@@ -1228,18 +1206,16 @@ public final class StorageService {
             return cached.size
         }
 
-        if PerfFeatureFlags.externalSizeMetaFastPathEnabled {
-            do {
-                let size = try await repository.getExternalSize()
-                externalSizeCacheLock.withLock {
-                    cachedExternalSize = (size, Date())
-                }
-                return size
-            } catch {
-                ScopyLog.storage.warning(
-                    "Failed to read external_size_bytes from meta, fallback to directory scan: \(error.localizedDescription, privacy: .private)"
-                )
+        do {
+            let size = try await repository.getExternalSize()
+            externalSizeCacheLock.withLock {
+                cachedExternalSize = (size, Date())
             }
+            return size
+        } catch {
+            ScopyLog.storage.warning(
+                "Failed to read external_size_bytes from meta, fallback to directory scan: \(error.localizedDescription, privacy: .private)"
+            )
         }
 
         // 计算实际大小（后台计算，避免阻塞主线程）
@@ -1377,8 +1353,7 @@ public final class StorageService {
 
         // 0. Composite path (count + external): reduce duplicated DB scans and delete passes.
         var currentCount = try await getItemCount()
-        if PerfFeatureFlags.cleanupCompositePlanEnabled,
-           currentCount > maxItems {
+        if currentCount > maxItems {
             let currentExternalSize = try await getExternalStorageSize()
             if currentExternalSize > maxLargeBytes {
                 let compositeResult = try await cleanupCountAndExternalIfNeeded(
@@ -1665,8 +1640,6 @@ public final class StorageService {
         cleanupImagesOnly: Bool,
         onCommitted: CleanupCommitHandler?
     ) async throws -> CleanupResult {
-        guard PerfFeatureFlags.cleanupCompositePlanEnabled else { return .empty }
-
         let deleteCount = max(0, currentCount - maxItems)
         let excessBytes = max(0, externalSize - maxLargeBytes)
         guard deleteCount > 0 || excessBytes > 0 else { return .empty }
@@ -1693,12 +1666,6 @@ public final class StorageService {
             )
         } else {
             externalPlan = .empty
-        }
-
-        if PerfFeatureFlags.cleanupShadowCompareEnabled {
-            ScopyLog.storage.info(
-                "Cleanup shadow compare: countPlan=\(countPlan.ids.count, privacy: .public) externalPlan=\(externalPlan.ids.count, privacy: .public) estimatedFreedByCount=\(estimatedFreedByCount, privacy: .public) remainingExcess=\(remainingExcess, privacy: .public)"
-            )
         }
 
         let merged = SQLiteClipboardRepository.mergeDeletePlans([countPlan, externalPlan])

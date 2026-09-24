@@ -282,7 +282,6 @@ public final class ClipboardMonitor {
 
     // Configuration
     public private(set) var pollingInterval: TimeInterval = 0.5 // 500ms default
-    public private(set) var ignoredApps: Set<String> = []
 
     // MARK: - Initialization
 
@@ -482,10 +481,6 @@ public final class ClipboardMonitor {
             acknowledgement,
             ingestDirectory: ingestSpoolDirectory
         )
-    }
-
-    public func setIgnoredApps(_ apps: Set<String>) {
-        ignoredApps = apps
     }
 
     /// Why a pasteboard write produced nothing usable.
@@ -808,12 +803,6 @@ public final class ClipboardMonitor {
         let extractMs = (ProcessInfo.processInfo.systemUptime - extractStart) * 1000
         let extractSummary = "\(rawData.type.rawValue) \(rawData.sizeBytes) bytes, main-thread wait \(Int(extractMs)) ms"
         ScopyLog.monitor.info("Capture extract \(extractSummary, privacy: .public)")
-
-        // Check if we should ignore this app
-        if let appID = rawData.appBundleID, ignoredApps.contains(appID) {
-            lastChangeCount = currentChangeCount
-            return
-        }
 
         // Skip empty content
         guard !rawData.plainText.isEmpty || (rawData.rawData != nil && !rawData.rawData!.isEmpty) else {

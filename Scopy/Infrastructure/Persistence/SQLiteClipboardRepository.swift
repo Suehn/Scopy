@@ -136,10 +136,6 @@ actor SQLiteClipboardRepository {
         connection = nil
     }
 
-    func walCheckpointPassive() {
-        connection?.walCheckpointPassive()
-    }
-
     func setMetadataUpdateInterlockForTesting(
         _ interlock: (@Sendable (MetadataUpdateKind, UUID) async -> Void)?
     ) {
@@ -452,15 +448,6 @@ actor SQLiteClipboardRepository {
         )
     }
 
-    func deleteItem(id: UUID) throws {
-        try performWriteTransaction {
-            let sql = "DELETE FROM clipboard_items WHERE id = ?"
-            let stmt = try prepare(sql)
-            try stmt.bindText(id.uuidString, at: 1)
-            _ = try stmt.step()
-        }
-    }
-
     func deleteItemReturningStorageRef(id: UUID) throws -> String? {
         var storageRef: String?
         try performWriteTransaction {
@@ -482,12 +469,6 @@ actor SQLiteClipboardRepository {
             _ = try stmt.step()
         }
         return storageRef
-    }
-
-    func deleteAllExceptPinned() throws {
-        try performWriteTransaction {
-            try execute("DELETE FROM clipboard_items WHERE is_pinned = 0")
-        }
     }
 
     func deleteAllExceptPinnedReturningStorageRefs() throws -> [String] {
@@ -602,48 +583,6 @@ actor SQLiteClipboardRepository {
         return items
     }
 
-    func fetchAllSummaries() throws -> [ClipboardStoredItem] {
-        let sql = """
-            SELECT id, type, content_hash, plain_text, note, app_bundle_id, created_at, last_used_at,
-                   use_count, is_pinned, size_bytes, storage_ref, file_size_bytes
-            FROM clipboard_items
-        """
-        let stmt = try prepare(sql)
-
-        var items: [ClipboardStoredItem] = []
-        while try stmt.step() {
-            items.append(try parseStoredItemSummary(from: stmt))
-        }
-        return items
-    }
-
-    func fetchItemsByIDs(_ ids: [UUID]) throws -> [ClipboardStoredItem] {
-        guard !ids.isEmpty else { return [] }
-
-        let placeholders = ids.map { _ in "?" }.joined(separator: ",")
-        let sql = """
-            SELECT id, type, content_hash, plain_text, note, app_bundle_id, created_at, last_used_at,
-                   use_count, is_pinned, size_bytes, storage_ref, raw_data, file_size_bytes
-            FROM clipboard_items
-            WHERE id IN (\(placeholders))
-        """
-        let stmt = try prepare(sql)
-
-        for (index, id) in ids.enumerated() {
-            try stmt.bindText(id.uuidString, at: Int32(index + 1))
-        }
-
-        var fetched: [UUID: ClipboardStoredItem] = [:]
-        fetched.reserveCapacity(ids.count)
-
-        while try stmt.step() {
-            let item = try parseStoredItem(from: stmt)
-            fetched[item.id] = item
-        }
-
-        return ids.compactMap { fetched[$0] }
-    }
-
     func fetchRecentApps(limit: Int) throws -> [String] {
         let sql = """
             SELECT app_bundle_id
@@ -735,170 +674,6 @@ actor SQLiteClipboardRepository {
             return updatedCount > 0
         }
         return updatedCount
-    }
-
-    func searchAllWithFilters(
-        appFilter: String?,
-        typeFilter: ClipboardItemType?,
-        typeFilters: [ClipboardItemType]?,
-        limit: Int,
-        offset: Int
-    ) throws -> (items: [ClipboardStoredItem], total: Int, hasMore: Bool) {
-        var sql = """
-            SELECT id, type, content_hash, plain_text, note, app_bundle_id, created_at, last_used_at,
-                   use_count, is_pinned, size_bytes, storage_ref, file_size_bytes
-            FROM clipboard_items
-            WHERE 1 = 1
-        """
-        var params: [String] = []
-
-        if let appFilter {
-            sql += " AND app_bundle_id = ?"
-            params.append(appFilter)
-        }
-
-        if let typeFilters, !typeFilters.isEmpty {
-            let placeholders = typeFilters.map { _ in "?" }.joined(separator: ",")
-            sql += " AND type IN (\(placeholders))"
-            params.append(contentsOf: typeFilters.map(\.rawValue))
-        } else if let typeFilter {
-            sql += " AND type = ?"
-            params.append(typeFilter.rawValue)
-        }
-
-        sql += " ORDER BY is_pinned DESC, last_used_at DESC, id ASC"
-        sql += " LIMIT ? OFFSET ?"
-
-        let stmt = try prepare(sql)
-        var bindIndex: Int32 = 1
-        for param in params {
-            try stmt.bindText(param, at: bindIndex)
-            bindIndex += 1
-        }
-        try stmt.bindInt(limit + 1, at: bindIndex)
-        try stmt.bindInt(offset, at: bindIndex + 1)
-
-        var items: [ClipboardStoredItem] = []
-        items.reserveCapacity(limit + 1)
-        while try stmt.step() {
-            items.append(try parseStoredItemSummary(from: stmt))
-        }
-
-        let hasMore = items.count > limit
-        if hasMore {
-            items = Array(items.prefix(limit))
-        }
-
-        let total = hasMore ? -1 : offset + items.count
-        return (items, total, hasMore)
-    }
-
-    func searchWithFTS(
-        ftsQuery: String,
-        appFilter: String?,
-        typeFilter: ClipboardItemType?,
-        typeFilters: [ClipboardItemType]?,
-        limit: Int,
-        offset: Int
-    ) throws -> (items: [ClipboardStoredItem], total: Int, hasMore: Bool) {
-        // Step 1: rowids from FTS
-        let ftsSQL = """
-            SELECT rowid FROM clipboard_fts
-            WHERE clipboard_fts MATCH ?
-            ORDER BY bm25(clipboard_fts)
-            LIMIT ? OFFSET ?
-        """
-        let ftsStmt = try prepare(ftsSQL)
-        try ftsStmt.bindText(ftsQuery, at: 1)
-        try ftsStmt.bindInt(limit + 1, at: 2)
-        try ftsStmt.bindInt(offset, at: 3)
-
-        var rowids: [Int64] = []
-        rowids.reserveCapacity(limit + 1)
-        while try ftsStmt.step() {
-            rowids.append(ftsStmt.columnInt64(0))
-        }
-
-        let hasMore = rowids.count > limit
-        if hasMore {
-            rowids.removeLast()
-        }
-
-        if rowids.isEmpty {
-            return ([], 0, false)
-        }
-
-        // Step 2: fetch from main table (apply filters)
-        let placeholders = rowids.map { _ in "?" }.joined(separator: ",")
-        var mainSQL = """
-            SELECT id, type, content_hash, plain_text, note, app_bundle_id, created_at, last_used_at,
-                   use_count, is_pinned, size_bytes, storage_ref, file_size_bytes
-            FROM clipboard_items
-            WHERE rowid IN (\(placeholders))
-        """
-
-        var filterParams: [String] = []
-        if let appFilter {
-            mainSQL += " AND app_bundle_id = ?"
-            filterParams.append(appFilter)
-        }
-
-        if let typeFilters, !typeFilters.isEmpty {
-            let placeholders = typeFilters.map { _ in "?" }.joined(separator: ",")
-            mainSQL += " AND type IN (\(placeholders))"
-            filterParams.append(contentsOf: typeFilters.map(\.rawValue))
-        } else if let typeFilter {
-            mainSQL += " AND type = ?"
-            filterParams.append(typeFilter.rawValue)
-        }
-
-        let orderCases = rowids.enumerated().map { "WHEN rowid = \($0.element) THEN \($0.offset)" }.joined(separator: " ")
-        mainSQL += " ORDER BY is_pinned DESC, CASE \(orderCases) END"
-
-        let mainStmt = try prepare(mainSQL)
-
-        var bindIndex: Int32 = 1
-        for rowid in rowids {
-            try mainStmt.bindInt64(rowid, at: bindIndex)
-            bindIndex += 1
-        }
-
-        for param in filterParams {
-            try mainStmt.bindText(param, at: bindIndex)
-            bindIndex += 1
-        }
-
-        var items: [ClipboardStoredItem] = []
-        items.reserveCapacity(rowids.count)
-        while try mainStmt.step() {
-            items.append(try parseStoredItemSummary(from: mainStmt))
-        }
-
-        let total = hasMore ? -1 : offset + items.count
-        return (items, total, hasMore)
-    }
-
-    func ftsPrefilterIDs(ftsQuery: String, limit: Int) throws -> [UUID] {
-        let sql = """
-            SELECT clipboard_items.id
-            FROM clipboard_fts
-            JOIN clipboard_items ON clipboard_items.rowid = clipboard_fts.rowid
-            WHERE clipboard_fts MATCH ?
-            ORDER BY bm25(clipboard_fts)
-            LIMIT ?
-        """
-        let stmt = try prepare(sql)
-        try stmt.bindText(ftsQuery, at: 1)
-        try stmt.bindInt(limit, at: 2)
-
-        var ids: [UUID] = []
-        ids.reserveCapacity(limit)
-        while try stmt.step() {
-            guard let idString = stmt.columnText(0),
-                  let id = UUID(uuidString: idString) else { continue }
-            ids.append(id)
-        }
-        return ids
     }
 
     func fetchExternalRefFilenames() throws -> Set<String> {

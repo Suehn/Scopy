@@ -708,20 +708,6 @@ actor ClipboardService {
         let requestCapacity: Int
     }
 
-    struct BackgroundMediaSchedulingSnapshot: Sendable, Equatable {
-        let thumbnailActiveCount: Int
-        let thumbnailPendingCount: Int
-        let thumbnailWorkerCount: Int
-        let thumbnailMaxActiveCount: Int
-        let thumbnailMaxPendingCount: Int
-        let fileSizeActiveCount: Int
-        let fileSizePendingCount: Int
-        let fileSizeWorkerCount: Int
-        let fileSizeMaxActiveCount: Int
-        let fileSizeMaxPendingCount: Int
-        let fileSizeRetryTimestampCount: Int
-    }
-
     private struct ThumbnailGenerationKey: Hashable, Sendable {
         let typeNamespace: String
         let contentHash: String
@@ -2502,24 +2488,6 @@ actor ClipboardService {
         await thumbnailQueue?.stop()
         await fileSizeQueue?.stop()
         fileSizeComputationLastAttemptAt.removeAll()
-    }
-
-    func backgroundMediaSchedulingSnapshot() async -> BackgroundMediaSchedulingSnapshot {
-        let thumbnail = await thumbnailGenerationQueue?.snapshot()
-        let fileSize = await fileSizeComputationQueue?.snapshot()
-        return BackgroundMediaSchedulingSnapshot(
-            thumbnailActiveCount: thumbnail?.activeCount ?? 0,
-            thumbnailPendingCount: thumbnail?.pendingCount ?? 0,
-            thumbnailWorkerCount: thumbnail?.workerCount ?? 0,
-            thumbnailMaxActiveCount: thumbnail?.maxActiveCount ?? 0,
-            thumbnailMaxPendingCount: thumbnail?.maxPendingCount ?? 0,
-            fileSizeActiveCount: fileSize?.activeCount ?? 0,
-            fileSizePendingCount: fileSize?.pendingCount ?? 0,
-            fileSizeWorkerCount: fileSize?.workerCount ?? 0,
-            fileSizeMaxActiveCount: fileSize?.maxActiveCount ?? 0,
-            fileSizeMaxPendingCount: fileSize?.maxPendingCount ?? 0,
-            fileSizeRetryTimestampCount: fileSizeComputationLastAttemptAt.count
-        )
     }
 
     private func toDTO(

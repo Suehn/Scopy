@@ -96,8 +96,6 @@ public actor SearchEngineImpl {
 
     private enum Perf {
         static let metricsEnabled: Bool = ProcessInfo.processInfo.environment["SCOPY_PERF_METRICS"] == "1"
-        static let signpostsEnabled: Bool = ProcessInfo.processInfo.environment["SCOPY_PERF_SIGNPOSTS"] == "1"
-        static let log = OSLog(subsystem: "com.scopy.app", category: "perf")
     }
 
     private struct AdaptiveSearchTuning {
@@ -116,10 +114,6 @@ public actor SearchEngineImpl {
         )
 
         static func current(candidateCount: Int) -> AdaptiveSearchTuning {
-            guard PerfFeatureFlags.searchAdaptiveTuningEnabled else {
-                return .fallback
-            }
-
             let cores = max(2, ProcessInfo.processInfo.activeProcessorCount)
             var tuning = fallback
 
@@ -1776,28 +1770,8 @@ public actor SearchEngineImpl {
     public func search(request: SearchRequest) async throws -> SearchResult {
         let startTime = CFAbsoluteTimeGetCurrent()
         let perfContext = Perf.metricsEnabled ? PerfContext() : nil
-        let signpostID = Perf.signpostsEnabled ? OSSignpostID(log: Perf.log) : nil
 
         reconcileInteractiveFullIndexWarmup(for: request)
-
-        if let signpostID {
-            os_signpost(
-                .begin,
-                log: Perf.log,
-                name: "Search",
-                signpostID: signpostID,
-                "mode=%{public}@ sort=%{public}@ forceFullFuzzy=%{public}d queryLen=%{public}d",
-                request.mode.rawValue,
-                request.sortMode.rawValue,
-                request.forceFullFuzzy ? 1 : 0,
-                request.query.count
-            )
-        }
-        defer {
-            if let signpostID {
-                os_signpost(.end, log: Perf.log, name: "Search", signpostID: signpostID)
-            }
-        }
 
         let timeout: TimeInterval
         switch request.mode {
@@ -1925,10 +1899,6 @@ public actor SearchEngineImpl {
         }
         try Task.checkCancellation()
 
-        let plan = SearchPlanner.plan(request: request, state: searchPlannerState(for: request))
-        perf?.addReason("search_plan_path:\(plan.path.rawValue)")
-        perf?.addReason("search_plan_reason:\(plan.reason.rawValue)")
-
         switch request.mode {
         case .exact:
             return try await searchExact(request: request)
@@ -1941,18 +1911,8 @@ public actor SearchEngineImpl {
         }
     }
 
-    private func searchPlannerState(for request: SearchRequest) -> SearchPlanner.State {
-        let trimmedQuery = request.query.trimmingCharacters(in: .whitespacesAndNewlines)
-        return SearchPlanner.State(
-            fullIndexReady: fullIndex != nil && !fullIndexStale,
-            shortQueryIndexReady: shortQueryIndex != nil,
-            prefersFTSForFuzzy: shouldPreferFTSForFuzzy(query: trimmedQuery),
-            shortQueryCacheLimit: shortQueryCacheSize
-        )
-    }
-
     private func searchExact(request: SearchRequest) async throws -> SearchResult {
-        let normalizedQuery = SearchPlanner.normalizedExactQuery(request.query)
+        let normalizedQuery = SearchQueryNormalization.normalizedExactQuery(request.query)
         if normalizedQuery.isEmpty {
             return try searchAllWithFilters(request: request)
         }
@@ -2088,7 +2048,7 @@ public actor SearchEngineImpl {
     }
 
     private func fuzzyPlusTokens(_ queryLower: String) -> [String] {
-        SearchPlanner.fuzzyPlusTokens(queryLower)
+        SearchQueryNormalization.fuzzyPlusTokens(queryLower)
     }
 
     private func buildTrigramFTSQuery(tokens: [String]) -> String? {
@@ -2113,7 +2073,7 @@ public actor SearchEngineImpl {
     }
 
     private func shouldUseSubstringOnlyFallbackForFuzzyPlus(tokens: [String]) -> Bool {
-        SearchPlanner.shouldUseSubstringOnlyFallbackForFuzzyPlus(tokens: tokens)
+        SearchQueryNormalization.shouldUseSubstringOnlyFallbackForFuzzyPlus(tokens: tokens)
     }
 
     // MARK: - Cache Search
@@ -3047,7 +3007,7 @@ public actor SearchEngineImpl {
                 pageSlots.reserveCapacity(request.limit + 1)
                 var matchesSeen = 0
 
-                let scanStart = CFAbsoluteTimeGetCurrent()
+                let scanStart = perf == nil ? 0 : CFAbsoluteTimeGetCurrent()
                 for (i, slot) in candidateSlots.enumerated() {
                     if i % 1024 == 0 {
                         try Task.checkCancellation()
@@ -3095,7 +3055,7 @@ public actor SearchEngineImpl {
             topHeap.reserveCapacity(desiredTopCount)
             var totalMatches = 0
 
-            let scoreStart = CFAbsoluteTimeGetCurrent()
+            let scoreStart = perf == nil ? 0 : CFAbsoluteTimeGetCurrent()
             for (i, slot) in candidateSlots.enumerated() {
                 if i % 1024 == 0 {
                     try Task.checkCancellation()
@@ -3126,7 +3086,7 @@ public actor SearchEngineImpl {
             perf?.addCounter("full_index_prefilter_total_matches", value: totalMatches)
 
             var topItems = topHeap.elements
-            let sortStart = CFAbsoluteTimeGetCurrent()
+            let sortStart = perf == nil ? 0 : CFAbsoluteTimeGetCurrent()
             topItems.sort { isBetterSlot($0, than: $1) }
             perf?.addPhase("full_index_prefilter_sort", ms: (CFAbsoluteTimeGetCurrent() - sortStart) * 1000)
 
@@ -3177,73 +3137,21 @@ public actor SearchEngineImpl {
             return SearchResult(items: resultItems, total: totalMatches, hasMore: hasMore, coverage: .complete, searchTimeMs: 0)
         }
 
-        // Cache a bounded "top-K" prefix to avoid repeated rescans without pinning a huge array in memory.
-        // Historically this was only used for deep paging; first-page caching lets the immediate next page reuse
-        // work already paid for by the initial full fuzzy scan.
-        if request.offset > 0 || PerfFeatureFlags.fuzzyFirstPageCacheEnabled {
-            let tuning = AdaptiveSearchTuning.current(candidateCount: candidateSlots.count)
-            let maxDeepPagingCacheTopMatches = tuning.deepPagingCacheTopMatches
-            let deepPagingCachePrefetchExtra = tuning.deepPagingCachePrefetchExtra
-            let cacheTopCount = min(maxDeepPagingCacheTopMatches, desiredTopCount + deepPagingCachePrefetchExtra)
+        // Cache a bounded "top-K" prefix so later pages reuse this scan without pinning a huge array in memory.
+        let tuning = AdaptiveSearchTuning.current(candidateCount: candidateSlots.count)
+        let maxDeepPagingCacheTopMatches = tuning.deepPagingCacheTopMatches
+        let deepPagingCachePrefetchExtra = tuning.deepPagingCachePrefetchExtra
+        let cacheTopCount = min(maxDeepPagingCacheTopMatches, desiredTopCount + deepPagingCachePrefetchExtra)
 
-            if let cached = fuzzySortedMatchesCache,
-               cached.key == sortedCacheKey,
-               cached.topMatches.count >= desiredTopCount {
-                perf?.addCounter("fuzzy_sorted_matches_cache_hit", value: 1)
-                return try pageFromSortedMatches(cached.topMatches, totalMatches: cached.totalMatches)
-            }
-
-            var topHeap = BinaryHeap<ScoredSlot>(areSorted: isWorseSlot)
-            topHeap.reserveCapacity(min(cacheTopCount, 8192))
-            var totalMatches = 0
-
-            for (i, slot) in candidateSlots.enumerated() {
-                if i % 1024 == 0 {
-                    try Task.checkCancellation()
-                }
-
-                guard slot < index.items.count, let item = index.items[slot] else { continue }
-
-                if let appFilter = request.appFilter, item.appBundleID != appFilter { continue }
-                if let typeFilters = request.typeFilters, !typeFilters.isEmpty {
-                    if !typeFilters.contains(item.type) { continue }
-                } else if let typeFilter = request.typeFilter, item.type != typeFilter {
-                    continue
-                }
-
-                guard let score = computeScore(for: item) else { continue }
-                totalMatches += 1
-
-                guard cacheTopCount > 0 else { continue }
-                let scoredItem = ScoredSlot(slot: slot, score: score)
-
-                if topHeap.count < cacheTopCount {
-                    topHeap.insert(scoredItem)
-                } else if let worst = topHeap.peek, isBetterSlot(scoredItem, than: worst) {
-                    topHeap.replaceRoot(with: scoredItem)
-                }
-            }
-
-            var topItems = topHeap.elements
-            topItems.sort { isBetterSlot($0, than: $1) }
-
-            if topItems.count <= maxDeepPagingCacheTopMatches {
-                fuzzySortedMatchesCache = FuzzySortedMatchesCacheValue(
-                    key: sortedCacheKey,
-                    totalMatches: totalMatches,
-                    topMatches: topItems
-                )
-                perf?.addCounter("fuzzy_sorted_matches_cache_store_count", value: topItems.count)
-            } else {
-                fuzzySortedMatchesCache = nil
-            }
-
-            return try pageFromSortedMatches(topItems, totalMatches: totalMatches)
+        if let cached = fuzzySortedMatchesCache,
+           cached.key == sortedCacheKey,
+           cached.topMatches.count >= desiredTopCount {
+            perf?.addCounter("fuzzy_sorted_matches_cache_hit", value: 1)
+            return try pageFromSortedMatches(cached.topMatches, totalMatches: cached.totalMatches)
         }
 
         var topHeap = BinaryHeap<ScoredSlot>(areSorted: isWorseSlot)
-        topHeap.reserveCapacity(desiredTopCount)
-
+        topHeap.reserveCapacity(min(cacheTopCount, 8192))
         var totalMatches = 0
 
         for (i, slot) in candidateSlots.enumerated() {
@@ -3263,10 +3171,10 @@ public actor SearchEngineImpl {
             guard let score = computeScore(for: item) else { continue }
             totalMatches += 1
 
-            guard desiredTopCount > 0 else { continue }
+            guard cacheTopCount > 0 else { continue }
             let scoredItem = ScoredSlot(slot: slot, score: score)
 
-            if topHeap.count < desiredTopCount {
+            if topHeap.count < cacheTopCount {
                 topHeap.insert(scoredItem)
             } else if let worst = topHeap.peek, isBetterSlot(scoredItem, than: worst) {
                 topHeap.replaceRoot(with: scoredItem)
@@ -3276,22 +3184,18 @@ public actor SearchEngineImpl {
         var topItems = topHeap.elements
         topItems.sort { isBetterSlot($0, than: $1) }
 
-        let start = min(request.offset, topItems.count)
-        let end = min(start + request.limit, topItems.count)
-        let page: [ScoredSlot] = (start < end) ? Array(topItems[start..<end]) : []
+        if topItems.count <= maxDeepPagingCacheTopMatches {
+            fuzzySortedMatchesCache = FuzzySortedMatchesCacheValue(
+                key: sortedCacheKey,
+                totalMatches: totalMatches,
+                topMatches: topItems
+            )
+            perf?.addCounter("fuzzy_sorted_matches_cache_store_count", value: topItems.count)
+        } else {
+            fuzzySortedMatchesCache = nil
+        }
 
-        let hasMore = totalIsUnknown ? (totalMatches >= request.limit) : (totalMatches > request.offset + request.limit)
-        let total = totalIsUnknown ? -1 : totalMatches
-
-        let pageIDs = page.compactMap { index.items[$0.slot]?.id }
-        let resultItems = try fetchItemsByIDs(ids: pageIDs)
-        return SearchResult(
-            items: resultItems,
-            total: total,
-            hasMore: hasMore,
-            coverage: totalIsUnknown ? .stagedRefine : .complete,
-            searchTimeMs: 0
-        )
+        return try pageFromSortedMatches(topItems, totalMatches: totalMatches)
     }
 
     static func hasReachableNextFuzzyPage(
@@ -3959,25 +3863,6 @@ public actor SearchEngineImpl {
 
         var items: [ClipboardStoredItem] = []
         items.reserveCapacity(limit)
-        var row = 0
-        while try stmt.step() {
-            if row % 512 == 0 { try Task.checkCancellation() }
-            row += 1
-            items.append(try parseStoredItemSummary(from: stmt))
-        }
-        return items
-    }
-
-    private func fetchAllSummaries() throws -> [ClipboardStoredItem] {
-        let sql = """
-            SELECT id, type, content_hash, plain_text, note, app_bundle_id, created_at, last_used_at,
-                   use_count, is_pinned, size_bytes, storage_ref, file_size_bytes
-            FROM clipboard_items
-        """
-        let stmt = try prepare(sql)
-        defer { stmt.reset() }
-
-        var items: [ClipboardStoredItem] = []
         var row = 0
         while try stmt.step() {
             if row % 512 == 0 { try Task.checkCancellation() }

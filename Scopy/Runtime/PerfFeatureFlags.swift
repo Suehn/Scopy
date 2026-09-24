@@ -29,26 +29,6 @@ public enum PerfFeatureFlags {
         bool("SCOPY_PERF_SHORT_QUERY_DEBOUNCE", defaultValue: true)
     }
 
-    public static var cleanupCompositePlanEnabled: Bool {
-        bool("SCOPY_PERF_CLEANUP_COMPOSITE_PLAN", defaultValue: true)
-    }
-
-    public static var cleanupShadowCompareEnabled: Bool {
-        bool("SCOPY_CLEANUP_SHADOW_COMPARE", defaultValue: false)
-    }
-
-    public static var externalSizeMetaFastPathEnabled: Bool {
-        bool("SCOPY_PERF_EXTERNAL_SIZE_META", defaultValue: true)
-    }
-
-    public static var searchAdaptiveTuningEnabled: Bool {
-        bool("SCOPY_PERF_SEARCH_ADAPTIVE_TUNING", defaultValue: true)
-    }
-
-    public static var fuzzyFirstPageCacheEnabled: Bool {
-        bool("SCOPY_PERF_FUZZY_FIRST_PAGE_CACHE", defaultValue: true)
-    }
-
     private static func bool(_ key: String, defaultValue: Bool) -> Bool {
         guard let raw = ProcessInfo.processInfo.environment[key]?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
               !raw.isEmpty else {

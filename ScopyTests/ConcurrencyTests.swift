@@ -1,5 +1,5 @@
 import XCTest
-import ScopyKit
+@testable import ScopyKit
 
 /// 并发安全测试 - v0.10.4
 /// 验证搜索、缓存刷新、任务取消等场景的并发安全性
@@ -182,7 +182,7 @@ final class ConcurrencyTests: XCTestCase {
         }
 
         // 数据库中只应该有一条记录
-        let item = try await storage.findByHash(duplicateHash)
+        let item = try await storage.repository.fetchItemByHash(duplicateHash)
         XCTAssertNotNil(item, "Item should exist")
         XCTAssertGreaterThanOrEqual(item!.useCount, 1, "Use count should be updated")
 

@@ -1,6 +1,6 @@
 import AppKit
 import XCTest
-import ScopyKit
+@testable import ScopyKit
 
 /// 性能测试和基准测试
 /// 验证 v0.md 第4节的性能目标
@@ -569,7 +569,7 @@ final class PerformanceTests: XCTestCase {
                 }
 
                 // v0.14: 在每次清理前执行 WAL checkpoint，模拟真实场景
-                await diskStorage.performWALCheckpoint()
+                await diskStorage.repository.walCheckpointTruncate()
 
                 let start = CFAbsoluteTimeGetCurrent()
                 try await diskStorage.performCleanup()
@@ -610,7 +610,7 @@ final class PerformanceTests: XCTestCase {
             diskStorage.cleanupSettings.maxLargeStorageMB = 100 // 100MB
 
             // v0.14: WAL checkpoint 确保数据落盘
-            await diskStorage.performWALCheckpoint()
+            await diskStorage.repository.walCheckpointTruncate()
 
             let start = CFAbsoluteTimeGetCurrent()
             try await diskStorage.performCleanup()
@@ -638,7 +638,7 @@ final class PerformanceTests: XCTestCase {
             diskStorage.cleanupSettings.maxItems = 5000
 
             // v0.14: WAL checkpoint 确保数据落盘
-            await diskStorage.performWALCheckpoint()
+            await diskStorage.repository.walCheckpointTruncate()
 
             let start = CFAbsoluteTimeGetCurrent()
             try await diskStorage.performCleanup()
@@ -669,7 +669,7 @@ final class PerformanceTests: XCTestCase {
             let text = makeRealisticText(index: i, base: "Service note", length: len)
             _ = try await storage.upsertItem(makeContent(text))
         }
-        await storage.performWALCheckpoint()
+        await storage.repository.walCheckpointTruncate()
         await storage.close()
 
         let suiteName = "scopy-service-perf-settings-\(UUID().uuidString)"

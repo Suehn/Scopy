@@ -91,12 +91,6 @@ final class ClipboardMonitorTests: XCTestCase {
         )
     }
 
-    func testIgnoredAppsConfiguration() {
-        let apps: Set<String> = ["com.app1", "com.app2"]
-        monitor.setIgnoredApps(apps)
-        XCTAssertEqual(monitor.ignoredApps, apps)
-    }
-
     // MARK: - Clipboard Read Tests
 
     func testCaptureClipboard() async {
