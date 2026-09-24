@@ -531,21 +531,21 @@ final class SearchServiceTests: XCTestCase {
 
     func testFuzzyTopKCapDoesNotAdvertiseUnreachableNextPage() {
         XCTAssertTrue(
-            SearchEngineImpl.hasReachableNextFuzzyPage(
+            FullIndexRanker.hasReachableNextFuzzyPage(
                 availableTopMatches: 50_000,
                 offset: 49_900,
                 limit: 50
             )
         )
         XCTAssertFalse(
-            SearchEngineImpl.hasReachableNextFuzzyPage(
+            FullIndexRanker.hasReachableNextFuzzyPage(
                 availableTopMatches: 50_000,
                 offset: 49_950,
                 limit: 50
             )
         )
         XCTAssertFalse(
-            SearchEngineImpl.hasReachableNextFuzzyPage(
+            FullIndexRanker.hasReachableNextFuzzyPage(
                 availableTopMatches: 50_000,
                 offset: 50_000,
                 limit: 50

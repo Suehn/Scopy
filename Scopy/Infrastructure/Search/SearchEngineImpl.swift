@@ -95,79 +95,6 @@ public actor SearchEngineImpl {
         let handle: OpaquePointer
     }
 
-    private enum Perf {
-        static let metricsEnabled: Bool = ProcessInfo.processInfo.environment["SCOPY_PERF_METRICS"] == "1"
-    }
-
-    private struct AdaptiveSearchTuning {
-        var prefilterMin: Int
-        var prefilterMax: Int
-        var prefilterScale: Int
-        var deepPagingCacheTopMatches: Int
-        var deepPagingCachePrefetchExtra: Int
-
-        static let fallback = AdaptiveSearchTuning(
-            prefilterMin: 5_000,
-            prefilterMax: 20_000,
-            prefilterScale: 40,
-            deepPagingCacheTopMatches: 50_000,
-            deepPagingCachePrefetchExtra: 2_000
-        )
-
-        static func current(candidateCount: Int) -> AdaptiveSearchTuning {
-            let cores = max(2, ProcessInfo.processInfo.activeProcessorCount)
-            var tuning = fallback
-
-            if cores >= 10 {
-                tuning.prefilterMax = 30_000
-                tuning.prefilterScale = 48
-                tuning.deepPagingCacheTopMatches = 64_000
-                tuning.deepPagingCachePrefetchExtra = 3_000
-            } else if cores <= 4 {
-                tuning.prefilterMax = 16_000
-                tuning.prefilterScale = 32
-                tuning.deepPagingCacheTopMatches = 36_000
-                tuning.deepPagingCachePrefetchExtra = 1_500
-            }
-
-            if candidateCount >= 20_000 {
-                tuning.prefilterMax = max(tuning.prefilterMax, 36_000)
-            }
-            return tuning
-        }
-    }
-
-    private final class PerfContext: @unchecked Sendable {
-        private(set) var phases: [SearchPerfMetrics.Phase] = []
-        private(set) var counters: [SearchPerfMetrics.Counter] = []
-        private(set) var reasons: [SearchPerfMetrics.Reason] = []
-
-        func addPhase(_ name: String, ms: Double) {
-            phases.append(SearchPerfMetrics.Phase(name: name, ms: ms))
-        }
-
-        func addCounter(_ name: String, value: Int) {
-            counters.append(SearchPerfMetrics.Counter(name: name, value: value))
-        }
-
-        func addReason(_ name: String) {
-            reasons.append(SearchPerfMetrics.Reason(name: name))
-        }
-
-        func measure<T>(_ name: String, _ block: () throws -> T) rethrows -> T {
-            let start = CFAbsoluteTimeGetCurrent()
-            defer {
-                let elapsedMs = (CFAbsoluteTimeGetCurrent() - start) * 1000
-                addPhase(name, ms: elapsedMs)
-            }
-            return try block()
-        }
-
-        func snapshot() -> SearchPerfMetrics {
-            SearchPerfMetrics(phases: phases, counters: counters, reasons: reasons)
-        }
-    }
-
     private struct CachedRecentItem {
         let item: ClipboardStoredItem
         let combinedLower: String
@@ -204,71 +131,6 @@ public actor SearchEngineImpl {
             // Heuristic: long-text corpus makes full-history fuzzy scanning expensive/unpredictable.
             // - avg ≥ 1k chars OR max ≥ 100k chars => prefer FTS for interactive fuzzy queries.
             avgPlainTextLength >= 1024 || maxPlainTextLength >= 100_000
-        }
-    }
-
-    private struct ScoredSlot {
-        let slot: Int
-        let score: Int
-    }
-
-    private struct BinaryHeap<Element> {
-        private(set) var elements: [Element] = []
-        private let areSorted: (Element, Element) -> Bool
-
-        init(areSorted: @escaping (Element, Element) -> Bool) {
-            self.areSorted = areSorted
-        }
-
-        var count: Int { elements.count }
-        var peek: Element? { elements.first }
-
-        mutating func reserveCapacity(_ n: Int) {
-            elements.reserveCapacity(n)
-        }
-
-        mutating func insert(_ value: Element) {
-            elements.append(value)
-            siftUp(from: elements.count - 1)
-        }
-
-        mutating func replaceRoot(with value: Element) {
-            guard !elements.isEmpty else {
-                elements = [value]
-                return
-            }
-            elements[0] = value
-            siftDown(from: 0)
-        }
-
-        private mutating func siftUp(from index: Int) {
-            var child = index
-            var parent = (child - 1) / 2
-            while child > 0 && areSorted(elements[child], elements[parent]) {
-                elements.swapAt(child, parent)
-                child = parent
-                parent = (child - 1) / 2
-            }
-        }
-
-        private mutating func siftDown(from index: Int) {
-            var parent = index
-            while true {
-                let left = parent * 2 + 1
-                let right = left + 1
-                var candidate = parent
-
-                if left < elements.count && areSorted(elements[left], elements[candidate]) {
-                    candidate = left
-                }
-                if right < elements.count && areSorted(elements[right], elements[candidate]) {
-                    candidate = right
-                }
-
-                if candidate == parent { return }
-                elements.swapAt(parent, candidate)
-                parent = candidate
-            }
         }
     }
 
@@ -342,33 +204,13 @@ public actor SearchEngineImpl {
     private var statementCacheLRU: [String] = []
     private let statementCacheLimit = 32
 
-    private struct FuzzySortedMatchesCacheKey: Hashable {
-        let mode: SearchMode
-        let sortMode: SearchSortMode
-        let queryLower: String
-        let appFilter: String?
-        let typeFilter: ClipboardItemType?
-        let typeFiltersKey: String?
-        let forceFullFuzzy: Bool
-        let indexGeneration: UInt64
-    }
-
-    private struct FuzzySortedMatchesCacheValue {
-        let key: FuzzySortedMatchesCacheKey
-        let totalMatches: Int
-        let topMatches: [ScoredSlot] // Already sorted by isBetterSlot; may be truncated for deep paging.
-    }
-
-    private var fuzzySortedMatchesCache: FuzzySortedMatchesCacheValue?
+    private var fuzzySortedMatchesCache: FullIndexRanker.SortedMatchesCache?
 
     private let searchTimeout: TimeInterval
     private let initialIndexBuildTimeout: TimeInterval
 
     private var corpusMetrics: CorpusMetrics?
     private var corpusMetricsUpdatedAt: Date = .distantPast
-
-    private var charPostingsScratchASCII: [Bool] = Array(repeating: false, count: 128)
-    private var charPostingsScratchNonASCII: Set<Character> = []
 
     private var supportsTrigramFTS: Bool = false
 
@@ -877,21 +719,7 @@ public actor SearchEngineImpl {
 
         guard let startDataVersion = readDataVersion() else { return nil }
 
-        var items: [IndexedItem?] = []
-        if reserveSlots > 0 {
-            items.reserveCapacity(reserveSlots)
-        }
-
-        var idToSlot: [UUID: Int] = [:]
-        if reserveSlots > 0 {
-            idToSlot.reserveCapacity(reserveSlots)
-        }
-
-        var asciiCharPostings: [[UInt32]] = Array(repeating: [], count: 128)
-        var nonASCIICharPostings: [Character: [UInt32]] = [:]
-        var seenASCII = Array(repeating: false, count: 128)
-        var seenNonASCII = Set<Character>()
-        seenNonASCII.reserveCapacity(16)
+        var index = FullFuzzyIndex(reserveSlots: reserveSlots)
 
         do {
             let sql = """
@@ -942,20 +770,7 @@ public actor SearchEngineImpl {
                     storageRef: storageRef,
                     rawData: nil
                 )
-
-                let indexed = IndexedItem(from: stored)
-                let slot = items.count
-                items.append(indexed)
-                idToSlot[indexed.id] = slot
-
-                appendSlotToCharPostings(
-                    text: indexed.plainTextLower,
-                    slot: slot,
-                    asciiCharPostings: &asciiCharPostings,
-                    nonASCIICharPostings: &nonASCIICharPostings,
-                    seenASCII: &seenASCII,
-                    seenNonASCII: &seenNonASCII
-                )
+                index.append(IndexedItem(from: stored))
             }
         } catch {
             return nil
@@ -964,13 +779,6 @@ public actor SearchEngineImpl {
         guard let endDataVersion = readDataVersion() else { return nil }
         guard !Task.isCancelled else { return nil }
 
-        let index = FullFuzzyIndex(
-            items: items,
-            idToSlot: idToSlot,
-            asciiCharPostings: asciiCharPostings,
-            nonASCIICharPostings: nonASCIICharPostings,
-            tombstoneCount: 0
-        )
         return FullIndexSnapshot(
             index: index,
             startDataVersion: startDataVersion,
@@ -981,7 +789,7 @@ public actor SearchEngineImpl {
 
     private static func recordFullIndexDiskCacheMetadataCounters(
         _ metadata: FullIndexDiskCacheMetadataV2?,
-        perf: PerfContext
+        perf: SearchPerfContext
     ) {
         guard let metadata else { return }
         perf.addCounter("full_index_cache_metadata_item_count", value: metadata.itemCount)
@@ -1248,7 +1056,7 @@ public actor SearchEngineImpl {
 
     public func search(request: SearchRequest) async throws -> SearchResult {
         let startTime = CFAbsoluteTimeGetCurrent()
-        let perfContext = Perf.metricsEnabled ? PerfContext() : nil
+        let perfContext = SearchPerfContext.metricsEnabled ? SearchPerfContext() : nil
         activeSearchCount += 1
         lastSearchUptime = ProcessInfo.processInfo.systemUptime
         defer {
@@ -1370,7 +1178,7 @@ public actor SearchEngineImpl {
 
     // MARK: - Search Internals
 
-    private func searchInternal(request: SearchRequest, perf: PerfContext?) async throws -> SearchResult {
+    private func searchInternal(request: SearchRequest, perf: SearchPerfContext?) async throws -> SearchResult {
         try openIfNeeded()
         if let perf {
             perf.measure("refresh_corpus_metrics") { refreshCorpusMetricsIfNeeded() }
@@ -1441,14 +1249,14 @@ public actor SearchEngineImpl {
         return fts
     }
 
-    private func searchFuzzy(request: SearchRequest, perf: PerfContext?) async throws -> SearchResult {
+    private func searchFuzzy(request: SearchRequest, perf: SearchPerfContext?) async throws -> SearchResult {
         if request.query.isEmpty {
             return try searchAllWithFilters(request: request)
         }
         return try await searchFullFuzzy(request: request, mode: .fuzzy, perf: perf)
     }
 
-    private func searchFuzzyPlus(request: SearchRequest, perf: PerfContext?) async throws -> SearchResult {
+    private func searchFuzzyPlus(request: SearchRequest, perf: SearchPerfContext?) async throws -> SearchResult {
         if request.query.isEmpty {
             return try searchAllWithFilters(request: request)
         }
@@ -1640,7 +1448,7 @@ public actor SearchEngineImpl {
 
     // MARK: - Full-History Fuzzy Search
 
-    private func searchFullFuzzy(request: SearchRequest, mode: SearchMode, perf: PerfContext?) async throws -> SearchResult {
+    private func searchFullFuzzy(request: SearchRequest, mode: SearchMode, perf: SearchPerfContext?) async throws -> SearchResult {
         let trimmedQuery = request.query.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmedQuery.isEmpty {
             return try searchAllWithFilters(request: request)
@@ -1714,7 +1522,7 @@ public actor SearchEngineImpl {
         request: SearchRequest,
         trimmedQuery: String,
         mode: SearchMode,
-        perf: PerfContext?
+        perf: SearchPerfContext?
     ) throws -> SearchResult? {
         guard !request.forceFullFuzzy,
               trimmedQuery.count >= 3,
@@ -1761,7 +1569,7 @@ public actor SearchEngineImpl {
     private func searchInteractiveFTSPrefilter(
         request: SearchRequest,
         ftsQuery: String,
-        perf: PerfContext?
+        perf: SearchPerfContext?
     ) throws -> SearchResult? {
         let fts: SearchResult
         if let perf {
@@ -1782,7 +1590,7 @@ public actor SearchEngineImpl {
         request: SearchRequest,
         trimmedQuery: String,
         mode: SearchMode,
-        perf: PerfContext?
+        perf: SearchPerfContext?
     ) throws -> SearchResult? {
         guard mode == .fuzzyPlus else { return nil }
 
@@ -1820,7 +1628,7 @@ public actor SearchEngineImpl {
     private func searchInteractiveNonASCIISubstringFallback(
         request: SearchRequest,
         trimmedQuery: String,
-        perf: PerfContext?
+        perf: SearchPerfContext?
     ) throws -> SearchResult? {
         guard !trimmedQuery.canBeConverted(to: .ascii) else { return nil }
 
@@ -1873,7 +1681,7 @@ public actor SearchEngineImpl {
         request: SearchRequest,
         trimmedQuery: String,
         mode: SearchMode,
-        perf: PerfContext?
+        perf: SearchPerfContext?
     ) throws -> SearchResult {
         let tokenLower = trimmedQuery.lowercased()
         let typeFilters = request.typeFilters.map(Array.init)
@@ -1910,7 +1718,7 @@ public actor SearchEngineImpl {
         request: SearchRequest,
         trimmedQuery: String,
         mode: SearchMode,
-        perf: PerfContext?
+        perf: SearchPerfContext?
     ) throws -> SearchResult? {
         guard let index = fullIndex, !fullIndexStale else { return nil }
 
@@ -1929,7 +1737,7 @@ public actor SearchEngineImpl {
         request: SearchRequest,
         tokenLower: String,
         typeFilters: [ClipboardItemType]?,
-        perf: PerfContext?
+        perf: SearchPerfContext?
     ) throws -> SearchResult? {
         guard var shortIndex = shortQueryIndex else { return nil }
 
@@ -1963,7 +1771,7 @@ public actor SearchEngineImpl {
         tokenLower: String,
         candidateIDStrings: [String],
         typeFilters: [ClipboardItemType]?,
-        perf: PerfContext?
+        perf: SearchPerfContext?
     ) throws -> SearchResult? {
         if candidateIDStrings.isEmpty {
             return makeZeroTimeSearchResult(items: [], total: 0, hasMore: false)
@@ -2009,7 +1817,7 @@ public actor SearchEngineImpl {
         tokenLower: String,
         candidateIDStrings: [String],
         typeFilters: [ClipboardItemType]?,
-        perf: PerfContext?
+        perf: SearchPerfContext?
     ) throws -> SearchResult? {
         if candidateIDStrings.isEmpty {
             return makeZeroTimeSearchResult(items: [], total: 0, hasMore: false)
@@ -2060,7 +1868,7 @@ public actor SearchEngineImpl {
         request: SearchRequest,
         tokenLower: String,
         typeFilters: [ClipboardItemType]?,
-        perf: PerfContext?
+        perf: SearchPerfContext?
     ) throws -> SearchResult {
         perf?.addCounter("short_query_path_sql_scan", value: 1)
         let page: (items: [ClipboardStoredItem], total: Int, hasMore: Bool)
@@ -2090,7 +1898,7 @@ public actor SearchEngineImpl {
         return makeZeroTimeSearchResult(page: page)
     }
 
-    private func getOrBuildFullIndex(perf: PerfContext?) throws -> FullFuzzyIndex {
+    private func getOrBuildFullIndex(perf: SearchPerfContext?) throws -> FullFuzzyIndex {
         if let index = fullIndex, !fullIndexStale {
             perf?.addCounter("full_index_source_memory", value: 1)
             return index
@@ -2187,7 +1995,7 @@ public actor SearchEngineImpl {
         )
     }
 
-    private func waitForFullIndexBuildIfNeeded(perf: PerfContext?) async {
+    private func waitForFullIndexBuildIfNeeded(perf: SearchPerfContext?) async {
         guard let task = fullIndexBuildTask else { return }
         if let perf {
             let phaseStart = CFAbsoluteTimeGetCurrent()
@@ -2199,7 +2007,7 @@ public actor SearchEngineImpl {
         }
     }
 
-    private func buildFullIndex(perf: PerfContext?) throws -> FullFuzzyIndex {
+    private func buildFullIndex(perf: SearchPerfContext?) throws -> FullFuzzyIndex {
         let estimatedCount = corpusMetrics?.itemCount ?? 0
 
         let sql = """
@@ -2210,52 +2018,16 @@ public actor SearchEngineImpl {
         let stmt = try prepare(sql)
         defer { stmt.reset() }
 
-        var items: [IndexedItem?] = []
-        if estimatedCount > 0 {
-            items.reserveCapacity(estimatedCount)
-        }
-
-        var idToSlot: [UUID: Int] = [:]
-        if estimatedCount > 0 {
-            idToSlot.reserveCapacity(estimatedCount)
-        }
-
-        var asciiCharPostings: [[UInt32]] = Array(repeating: [], count: 128)
-        var nonASCIICharPostings: [Character: [UInt32]] = [:]
-        var seenASCII = Array(repeating: false, count: 128)
-        var seenNonASCII = Set<Character>()
-        seenNonASCII.reserveCapacity(16)
-
+        var index = FullFuzzyIndex(reserveSlots: estimatedCount)
         var row = 0
         while try stmt.step() {
             if row % 512 == 0 {
                 try Task.checkCancellation()
             }
             row += 1
-
-            let stored = try parseStoredItemSummary(from: stmt)
-            let indexed = IndexedItem(from: stored)
-            let slot = items.count
-            items.append(indexed)
-            idToSlot[indexed.id] = slot
-
-            Self.appendSlotToCharPostings(
-                text: indexed.plainTextLower,
-                slot: slot,
-                asciiCharPostings: &asciiCharPostings,
-                nonASCIICharPostings: &nonASCIICharPostings,
-                seenASCII: &seenASCII,
-                seenNonASCII: &seenNonASCII
-            )
+            index.append(IndexedItem(from: try parseStoredItemSummary(from: stmt)))
         }
-
-        return FullFuzzyIndex(
-            items: items,
-            idToSlot: idToSlot,
-            asciiCharPostings: asciiCharPostings,
-            nonASCIICharPostings: nonASCIICharPostings,
-            tombstoneCount: 0
-        )
+        return index
     }
 
     private func shouldMarkFullIndexStaleDueToTombstones(index: FullFuzzyIndex) -> Bool {
@@ -2273,53 +2045,16 @@ public actor SearchEngineImpl {
         return ratio >= fullIndexTombstoneRatioStaleThresholdDefault
     }
 
-    private func computeCandidateSlots(
-        index: FullFuzzyIndex,
-        queryChars: (asciiCodes: [UInt8], nonASCIIChars: [Character])
-    ) -> [Int] {
-        if queryChars.asciiCodes.isEmpty, queryChars.nonASCIIChars.isEmpty {
-            return Array(index.items.indices)
-        }
-
-        var lists: [[UInt32]] = []
-        lists.reserveCapacity(queryChars.asciiCodes.count + queryChars.nonASCIIChars.count)
-
-        for ascii in queryChars.asciiCodes {
-            let list = index.asciiCharPostings[Int(ascii)]
-            if list.isEmpty {
-                return []
-            }
-            lists.append(list)
-        }
-
-        for ch in queryChars.nonASCIIChars {
-            guard let list = index.nonASCIICharPostings[ch], !list.isEmpty else {
-                return []
-            }
-            lists.append(list)
-        }
-
-        lists.sort { $0.count < $1.count }
-
-        var candidates = lists[0]
-        for list in lists.dropFirst() {
-            candidates = intersectSorted(candidates, list)
-            if candidates.isEmpty { break }
-        }
-        return candidates.map { Int($0) }
-    }
-
-    private func searchInFullIndex(index: FullFuzzyIndex, request: SearchRequest, mode: SearchMode, perf: PerfContext?) throws -> SearchResult {
+    private func searchInFullIndex(index: FullFuzzyIndex, request: SearchRequest, mode: SearchMode, perf: SearchPerfContext?) throws -> SearchResult {
         let queryLower = request.query.lowercased()
-        let queryChars = uniqueNonWhitespaceQueryCharacters(queryLower)
 
         var candidateSlots: [Int]
         if let perf {
             candidateSlots = perf.measure("full_index_candidate_intersection") {
-                computeCandidateSlots(index: index, queryChars: queryChars)
+                FullIndexRanker.candidateSlots(index: index, queryLower: queryLower)
             }
         } else {
-            candidateSlots = computeCandidateSlots(index: index, queryChars: queryChars)
+            candidateSlots = FullIndexRanker.candidateSlots(index: index, queryLower: queryLower)
         }
 
         if candidateSlots.isEmpty {
@@ -2327,72 +2062,17 @@ public actor SearchEngineImpl {
         }
         perf?.addCounter("full_index_candidate_slots", value: candidateSlots.count)
 
-        let queryLowerIsASCII = queryLower.canBeConverted(to: .ascii)
-        let preparedQuery = prepareFuzzyQuery(queryLower: queryLower, queryLowerIsASCII: queryLowerIsASCII)
-        let plusWords: [(word: String, isASCII: Bool)]
-        if mode == .fuzzyPlus {
-            plusWords = fuzzyPlusTokens(queryLower)
-                .map { (word: $0, isASCII: $0.canBeConverted(to: .ascii)) }
-        } else {
-            plusWords = []
-        }
+        let scorer = FuzzyMatcher.Scorer(queryLower: queryLower, mode: mode)
 
-        let plusTokens: [(word: String, isASCII: Bool, prepared: PreparedFuzzyQuery?)] = plusWords.map { wordInfo in
-            if wordInfo.isASCII, wordInfo.word.count >= 3 {
-                return (word: wordInfo.word, isASCII: wordInfo.isASCII, prepared: nil)
-            }
-            return (
-                word: wordInfo.word,
-                isASCII: wordInfo.isASCII,
-                prepared: prepareFuzzyQuery(queryLower: wordInfo.word, queryLowerIsASCII: wordInfo.isASCII)
-            )
-        }
-
-        func computeScore(for item: IndexedItem) -> Int? {
-            switch mode {
-            case .fuzzy:
-                return fuzzyMatchScore(textLower: item.plainTextLower, query: preparedQuery)
-            case .fuzzyPlus:
-                var totalScore = 0
-                var ok = true
-                for token in plusTokens {
-                    if token.isASCII, token.word.count >= 3 {
-                        guard let range = item.plainTextLower.range(of: token.word) else {
-                            ok = false
-                            break
-                        }
-                        let pos = range.lowerBound.utf16Offset(in: item.plainTextLower)
-                        let m = token.word.utf16.count
-                        totalScore += m * 10 - (m - 1) - pos
-                        continue
-                    }
-
-                    guard let prepared = token.prepared,
-                          let s = fuzzyMatchScore(textLower: item.plainTextLower, query: prepared) else {
-                        ok = false
-                        break
-                    }
-                    totalScore += s
-                }
-                return ok ? totalScore : nil
-            default:
-                return nil
-            }
-        }
-
-        var totalIsUnknown = false
-        if (mode == .fuzzy || mode == .fuzzyPlus),
-           !request.forceFullFuzzy,
-            request.offset == 0,
-           queryLower.count >= 4,
-           queryLowerIsASCII,
-           candidateSlots.count >= 6_000 {
-            let tuning = AdaptiveSearchTuning.current(candidateCount: candidateSlots.count)
-            let desiredTopCount = max(0, request.offset + request.limit + 1)
-            let prefilterLimit = min(
-                tuning.prefilterMax,
-                max(tuning.prefilterMin, desiredTopCount * tuning.prefilterScale)
-            )
+        // A large ASCII candidate set on the first interactive page is narrowed by FTS before
+        // scoring; the page is then staged (total unknown) and the UI refines it later.
+        var staged = false
+        if let prefilterLimit = FullIndexRanker.adaptivePrefilterLimit(
+            request: request,
+            mode: mode,
+            queryLower: queryLower,
+            candidateCount: candidateSlots.count
+        ) {
             perf?.addCounter("adaptive_prefilter_limit", value: prefilterLimit)
             if let ftsQuery = FTSQueryBuilder.build(userQuery: queryLower) {
                 let ftsSlots: [Int]?
@@ -2405,293 +2085,50 @@ public actor SearchEngineImpl {
                 }
 
                 if let ftsSlots, !ftsSlots.isEmpty {
-                    let pinnedSlots = candidateSlots.filter { slot in
-                        guard slot < index.items.count, let item = index.items[slot] else { return false }
-                        return item.isPinned
-                    }
-                    var merged = Set(ftsSlots)
-                    for s in pinnedSlots { merged.insert(s) }
-                    candidateSlots = Array(merged)
+                    candidateSlots = FullIndexRanker.mergePrefilter(
+                        candidateSlots: candidateSlots,
+                        ftsSlots: ftsSlots,
+                        index: index
+                    )
                     perf?.addCounter("full_index_fts_prefilter_candidate_slots", value: candidateSlots.count)
-                    totalIsUnknown = true
+                    staged = true
                 }
             }
         }
 
-        let desiredTopCount = max(0, request.offset + request.limit + 1)
-        let sortMode = request.sortMode
-        func isBetterSlot(_ lhs: ScoredSlot, than rhs: ScoredSlot) -> Bool {
-            guard let lhsItem = index.items[lhs.slot] else { return false }
-            guard let rhsItem = index.items[rhs.slot] else { return true }
-
-            if lhsItem.isPinned != rhsItem.isPinned {
-                return lhsItem.isPinned && !rhsItem.isPinned
-            }
-            switch sortMode {
-            case .recent:
-                if lhsItem.lastUsedAt != rhsItem.lastUsedAt {
-                    return lhsItem.lastUsedAt > rhsItem.lastUsedAt
-                }
-                if lhs.score != rhs.score {
-                    return lhs.score > rhs.score
-                }
-            case .relevance:
-                if lhs.score != rhs.score {
-                    return lhs.score > rhs.score
-                }
-                if lhsItem.lastUsedAt != rhsItem.lastUsedAt {
-                    return lhsItem.lastUsedAt > rhsItem.lastUsedAt
-                }
-            }
-            return lhsItem.id.uuidString < rhsItem.id.uuidString
-        }
-
-        func isWorseSlot(_ lhs: ScoredSlot, than rhs: ScoredSlot) -> Bool {
-            isBetterSlot(rhs, than: lhs)
-        }
-
-        if totalIsUnknown {
-            if sortMode == .recent {
-                if perf == nil {
-                    candidateSlots.sort { lhsSlot, rhsSlot in
-                        guard lhsSlot < index.items.count, rhsSlot < index.items.count else { return lhsSlot < rhsSlot }
-                        let lhsItem = index.items[lhsSlot]
-                        let rhsItem = index.items[rhsSlot]
-                        if lhsItem == nil { return false }
-                        if rhsItem == nil { return true }
-                        guard let lhsItem, let rhsItem else { return false }
-
-                        if lhsItem.isPinned != rhsItem.isPinned {
-                            return lhsItem.isPinned && !rhsItem.isPinned
-                        }
-                        if lhsItem.lastUsedAt != rhsItem.lastUsedAt {
-                            return lhsItem.lastUsedAt > rhsItem.lastUsedAt
-                        }
-                        return lhsItem.id.uuidString < rhsItem.id.uuidString
-                    }
-                } else {
-                    let sortStart = CFAbsoluteTimeGetCurrent()
-                    candidateSlots.sort { lhsSlot, rhsSlot in
-                        guard lhsSlot < index.items.count, rhsSlot < index.items.count else { return lhsSlot < rhsSlot }
-                        let lhsItem = index.items[lhsSlot]
-                        let rhsItem = index.items[rhsSlot]
-                        if lhsItem == nil { return false }
-                        if rhsItem == nil { return true }
-                        guard let lhsItem, let rhsItem else { return false }
-
-                        if lhsItem.isPinned != rhsItem.isPinned {
-                            return lhsItem.isPinned && !rhsItem.isPinned
-                        }
-                        if lhsItem.lastUsedAt != rhsItem.lastUsedAt {
-                            return lhsItem.lastUsedAt > rhsItem.lastUsedAt
-                        }
-                        return lhsItem.id.uuidString < rhsItem.id.uuidString
-                    }
-                    perf?.addPhase("full_index_prefilter_recent_candidate_sort", ms: (CFAbsoluteTimeGetCurrent() - sortStart) * 1000)
-                }
-
-                var pageSlots: [Int] = []
-                pageSlots.reserveCapacity(request.limit + 1)
-                var matchesSeen = 0
-
-                let scanStart = perf == nil ? 0 : CFAbsoluteTimeGetCurrent()
-                for (i, slot) in candidateSlots.enumerated() {
-                    if i % 1024 == 0 {
-                        try Task.checkCancellation()
-                    }
-
-                    guard slot < index.items.count, let item = index.items[slot] else { continue }
-
-                    if let appFilter = request.appFilter, item.appBundleID != appFilter { continue }
-                    if let typeFilters = request.typeFilters, !typeFilters.isEmpty {
-                        if !typeFilters.contains(item.type) { continue }
-                    } else if let typeFilter = request.typeFilter, item.type != typeFilter {
-                        continue
-                    }
-
-                    guard computeScore(for: item) != nil else { continue }
-
-                    if matchesSeen >= request.offset {
-                        pageSlots.append(slot)
-                        if pageSlots.count >= request.limit + 1 {
-                            break
-                        }
-                    }
-                    matchesSeen += 1
-                }
-                perf?.addPhase("full_index_prefilter_recent_scan", ms: (CFAbsoluteTimeGetCurrent() - scanStart) * 1000)
-                perf?.addCounter("full_index_prefilter_total_matches", value: matchesSeen)
-
-                let hasMore = pageSlots.count > request.limit
-                if hasMore {
-                    pageSlots.removeLast()
-                }
-                let pageIDs = pageSlots.compactMap { index.items[$0]?.id }
-                let resultItems: [ClipboardStoredItem]
-                if let perf {
-                    resultItems = try perf.measure("full_index_prefilter_fetch_items") {
-                        try fetchItemsByIDs(ids: pageIDs)
-                    }
-                } else {
-                    resultItems = try fetchItemsByIDs(ids: pageIDs)
-                }
-                return SearchResult(items: resultItems, total: -1, hasMore: hasMore, coverage: .stagedRefine, searchTimeMs: 0)
-            }
-
-            var topHeap = BinaryHeap<ScoredSlot>(areSorted: isWorseSlot)
-            topHeap.reserveCapacity(desiredTopCount)
-            var totalMatches = 0
-
-            let scoreStart = perf == nil ? 0 : CFAbsoluteTimeGetCurrent()
-            for (i, slot) in candidateSlots.enumerated() {
-                if i % 1024 == 0 {
-                    try Task.checkCancellation()
-                }
-
-                guard slot < index.items.count, let item = index.items[slot] else { continue }
-
-                if let appFilter = request.appFilter, item.appBundleID != appFilter { continue }
-                if let typeFilters = request.typeFilters, !typeFilters.isEmpty {
-                    if !typeFilters.contains(item.type) { continue }
-                } else if let typeFilter = request.typeFilter, item.type != typeFilter {
-                    continue
-                }
-
-                guard let score = computeScore(for: item) else { continue }
-                totalMatches += 1
-
-                guard desiredTopCount > 0 else { continue }
-                let scoredItem = ScoredSlot(slot: slot, score: score)
-
-                if topHeap.count < desiredTopCount {
-                    topHeap.insert(scoredItem)
-                } else if let worst = topHeap.peek, isBetterSlot(scoredItem, than: worst) {
-                    topHeap.replaceRoot(with: scoredItem)
-                }
-            }
-            perf?.addPhase("full_index_prefilter_scoring", ms: (CFAbsoluteTimeGetCurrent() - scoreStart) * 1000)
-            perf?.addCounter("full_index_prefilter_total_matches", value: totalMatches)
-
-            var topItems = topHeap.elements
-            let sortStart = perf == nil ? 0 : CFAbsoluteTimeGetCurrent()
-            topItems.sort { isBetterSlot($0, than: $1) }
-            perf?.addPhase("full_index_prefilter_sort", ms: (CFAbsoluteTimeGetCurrent() - sortStart) * 1000)
-
-            let start = min(request.offset, topItems.count)
-            let end = min(start + request.limit, topItems.count)
-            let page: [ScoredSlot] = (start < end) ? Array(topItems[start..<end]) : []
-
-            let hasMore = totalMatches > request.offset + request.limit
-            let pageIDs = page.compactMap { index.items[$0.slot]?.id }
-            let resultItems: [ClipboardStoredItem]
-            if let perf {
-                resultItems = try perf.measure("full_index_prefilter_fetch_items") {
-                    try fetchItemsByIDs(ids: pageIDs)
-                }
-            } else {
-                resultItems = try fetchItemsByIDs(ids: pageIDs)
-            }
-            return SearchResult(items: resultItems, total: -1, hasMore: hasMore, coverage: .stagedRefine, searchTimeMs: 0)
-        }
-
-        func typeFiltersKey(_ set: Set<ClipboardItemType>?) -> String? {
-            guard let set, !set.isEmpty else { return nil }
-            return set.map(\.rawValue).sorted().joined(separator: ",")
-        }
-
-        let sortedCacheKey = FuzzySortedMatchesCacheKey(
-            mode: mode,
-            sortMode: request.sortMode,
-            queryLower: queryLower,
-            appFilter: request.appFilter,
-            typeFilter: request.typeFilter,
-            typeFiltersKey: typeFiltersKey(request.typeFilters),
-            forceFullFuzzy: request.forceFullFuzzy,
-            indexGeneration: fullIndexGeneration
-        )
-
-        func pageFromSortedMatches(_ sortedTop: [ScoredSlot], totalMatches: Int) throws -> SearchResult {
-            let start = min(request.offset, sortedTop.count)
-            let end = min(start + request.limit, sortedTop.count)
-            let page: [ScoredSlot] = (start < end) ? Array(sortedTop[start..<end]) : []
-            let hasMore = Self.hasReachableNextFuzzyPage(
-                availableTopMatches: sortedTop.count,
-                offset: request.offset,
-                limit: request.limit
+        let page: FullIndexRanker.Page
+        if staged {
+            page = try FullIndexRanker.rankStaged(
+                index: index,
+                request: request,
+                scorer: scorer,
+                candidateSlots: candidateSlots,
+                perf: perf
             )
-            let pageIDs = page.compactMap { index.items[$0.slot]?.id }
-            let resultItems = try fetchItemsByIDs(ids: pageIDs)
-            return SearchResult(items: resultItems, total: totalMatches, hasMore: hasMore, coverage: .complete, searchTimeMs: 0)
-        }
-
-        // Cache a bounded "top-K" prefix so later pages reuse this scan without pinning a huge array in memory.
-        let tuning = AdaptiveSearchTuning.current(candidateCount: candidateSlots.count)
-        let maxDeepPagingCacheTopMatches = tuning.deepPagingCacheTopMatches
-        let deepPagingCachePrefetchExtra = tuning.deepPagingCachePrefetchExtra
-        let cacheTopCount = min(maxDeepPagingCacheTopMatches, desiredTopCount + deepPagingCachePrefetchExtra)
-
-        if let cached = fuzzySortedMatchesCache,
-           cached.key == sortedCacheKey,
-           cached.topMatches.count >= desiredTopCount {
-            perf?.addCounter("fuzzy_sorted_matches_cache_hit", value: 1)
-            return try pageFromSortedMatches(cached.topMatches, totalMatches: cached.totalMatches)
-        }
-
-        var topHeap = BinaryHeap<ScoredSlot>(areSorted: isWorseSlot)
-        topHeap.reserveCapacity(min(cacheTopCount, 8192))
-        var totalMatches = 0
-
-        for (i, slot) in candidateSlots.enumerated() {
-            if i % 1024 == 0 {
-                try Task.checkCancellation()
-            }
-
-            guard slot < index.items.count, let item = index.items[slot] else { continue }
-
-            if let appFilter = request.appFilter, item.appBundleID != appFilter { continue }
-            if let typeFilters = request.typeFilters, !typeFilters.isEmpty {
-                if !typeFilters.contains(item.type) { continue }
-            } else if let typeFilter = request.typeFilter, item.type != typeFilter {
-                continue
-            }
-
-            guard let score = computeScore(for: item) else { continue }
-            totalMatches += 1
-
-            guard cacheTopCount > 0 else { continue }
-            let scoredItem = ScoredSlot(slot: slot, score: score)
-
-            if topHeap.count < cacheTopCount {
-                topHeap.insert(scoredItem)
-            } else if let worst = topHeap.peek, isBetterSlot(scoredItem, than: worst) {
-                topHeap.replaceRoot(with: scoredItem)
-            }
-        }
-
-        var topItems = topHeap.elements
-        topItems.sort { isBetterSlot($0, than: $1) }
-
-        if topItems.count <= maxDeepPagingCacheTopMatches {
-            fuzzySortedMatchesCache = FuzzySortedMatchesCacheValue(
-                key: sortedCacheKey,
-                totalMatches: totalMatches,
-                topMatches: topItems
-            )
-            perf?.addCounter("fuzzy_sorted_matches_cache_store_count", value: topItems.count)
         } else {
-            fuzzySortedMatchesCache = nil
+            page = try FullIndexRanker.rankComplete(
+                index: index,
+                request: request,
+                mode: mode,
+                queryLower: queryLower,
+                scorer: scorer,
+                candidateSlots: candidateSlots,
+                indexContentVersion: fullIndexGeneration,
+                cache: &fuzzySortedMatchesCache,
+                perf: perf
+            )
         }
 
-        return try pageFromSortedMatches(topItems, totalMatches: totalMatches)
-    }
-
-    static func hasReachableNextFuzzyPage(
-        availableTopMatches: Int,
-        offset: Int,
-        limit: Int
-    ) -> Bool {
-        guard availableTopMatches > offset, offset >= 0, limit > 0 else { return false }
-        return availableTopMatches - offset > limit
+        let pageIDs = page.slots.compactMap { index.items[$0]?.id }
+        let resultItems: [ClipboardStoredItem]
+        if staged, let perf {
+            resultItems = try perf.measure("full_index_prefilter_fetch_items") {
+                try fetchItemsByIDs(ids: pageIDs)
+            }
+        } else {
+            resultItems = try fetchItemsByIDs(ids: pageIDs)
+        }
+        return SearchResult(items: resultItems, total: page.total, hasMore: page.hasMore, coverage: page.coverage, searchTimeMs: 0)
     }
 
     private func shouldPreferFTSForFuzzy(query: String) -> Bool {
@@ -2703,69 +2140,9 @@ public actor SearchEngineImpl {
     private func searchFuzzyInRecentCache(request: SearchRequest, mode: SearchMode, query: String) throws -> SearchResult {
         try refreshCacheIfNeeded()
 
-        let queryLower = query.lowercased()
-        let queryLowerIsASCII = queryLower.canBeConverted(to: .ascii)
-        let preparedQuery = prepareFuzzyQuery(queryLower: queryLower, queryLowerIsASCII: queryLowerIsASCII)
+        let scorer = FuzzyMatcher.Scorer(queryLower: query.lowercased(), mode: mode)
 
-        let plusWords: [(word: String, isASCII: Bool)]
-        if mode == .fuzzyPlus {
-            plusWords = fuzzyPlusTokens(queryLower)
-                .map { (word: $0, isASCII: $0.canBeConverted(to: .ascii)) }
-        } else {
-            plusWords = []
-        }
-
-        let plusTokens: [(word: String, isASCII: Bool, prepared: PreparedFuzzyQuery?)] = plusWords.map { wordInfo in
-            if wordInfo.isASCII, wordInfo.word.count >= 3 {
-                return (word: wordInfo.word, isASCII: wordInfo.isASCII, prepared: nil)
-            }
-            return (
-                word: wordInfo.word,
-                isASCII: wordInfo.isASCII,
-                prepared: prepareFuzzyQuery(queryLower: wordInfo.word, queryLowerIsASCII: wordInfo.isASCII)
-            )
-        }
-
-        func score(for cached: CachedRecentItem) -> Int? {
-            let textLower = cached.combinedLower
-
-            switch mode {
-            case .fuzzy:
-                return fuzzyMatchScore(textLower: textLower, query: preparedQuery)
-            case .fuzzyPlus:
-                var totalScore = 0
-                var ok = true
-                for token in plusTokens {
-                    if token.isASCII, token.word.count >= 3 {
-                        guard let range = textLower.range(of: token.word) else {
-                            ok = false
-                            break
-                        }
-                        let pos = range.lowerBound.utf16Offset(in: textLower)
-                        let m = token.word.utf16.count
-                        totalScore += m * 10 - (m - 1) - pos
-                        continue
-                    }
-
-                    guard let prepared = token.prepared,
-                          let s = fuzzyMatchScore(textLower: textLower, query: prepared) else {
-                        ok = false
-                        break
-                    }
-                    totalScore += s
-                }
-                return ok ? totalScore : nil
-            default:
-                return nil
-            }
-        }
-
-        struct ScoredCachedItem {
-            let item: ClipboardStoredItem
-            let score: Int
-        }
-
-        var scored: [ScoredCachedItem] = []
+        var scored: [(item: ClipboardStoredItem, key: SearchRankKey)] = []
         scored.reserveCapacity(min(recentItemsCache.count, shortQueryCacheSize))
 
         for cached in recentItemsCache {
@@ -2777,32 +2154,11 @@ public actor SearchEngineImpl {
                 if item.type != typeFilter { continue }
             }
 
-            guard let s = score(for: cached) else { continue }
-            scored.append(ScoredCachedItem(item: item, score: s))
+            guard let score = scorer.score(textLower: cached.combinedLower) else { continue }
+            scored.append((item: item, key: SearchRankKey(item: item, score: score)))
         }
 
-        scored.sort { lhs, rhs in
-            if lhs.item.isPinned != rhs.item.isPinned {
-                return lhs.item.isPinned && !rhs.item.isPinned
-            }
-            switch request.sortMode {
-            case .recent:
-                if lhs.item.lastUsedAt != rhs.item.lastUsedAt {
-                    return lhs.item.lastUsedAt > rhs.item.lastUsedAt
-                }
-                if lhs.score != rhs.score {
-                    return lhs.score > rhs.score
-                }
-            case .relevance:
-                if lhs.score != rhs.score {
-                    return lhs.score > rhs.score
-                }
-                if lhs.item.lastUsedAt != rhs.item.lastUsedAt {
-                    return lhs.item.lastUsedAt > rhs.item.lastUsedAt
-                }
-            }
-            return lhs.item.id.uuidString < rhs.item.id.uuidString
-        }
+        scored.sort { SearchRankKey.isBetter($0.key, than: $1.key, sortMode: request.sortMode) }
 
         let totalMatches = scored.count
         let start = min(request.offset, totalMatches)
@@ -2821,29 +2177,6 @@ public actor SearchEngineImpl {
     private func ftsPrefilterSlots(index: FullFuzzyIndex, ftsQuery: String, limit: Int) throws -> [Int] {
         let ids = try ftsPrefilterIDs(ftsQuery: ftsQuery, limit: limit)
         return ids.compactMap { index.idToSlot[$0] }
-    }
-
-    private func intersectSorted(_ a: [UInt32], _ b: [UInt32]) -> [UInt32] {
-        var i = 0
-        var j = 0
-        var result: [UInt32] = []
-        result.reserveCapacity(min(a.count, b.count))
-
-        while i < a.count && j < b.count {
-            let va = a[i]
-            let vb = b[j]
-            if va == vb {
-                result.append(va)
-                i += 1
-                j += 1
-            } else if va < vb {
-                i += 1
-            } else {
-                j += 1
-            }
-        }
-
-        return result
     }
 
     @discardableResult
@@ -2865,310 +2198,7 @@ public actor SearchEngineImpl {
             index.tombstoneCount += 1
         }
 
-        let newSlot = index.items.count
-        index.items.append(indexed)
-        index.idToSlot[indexed.id] = newSlot
-
-        Self.appendSlotToCharPostings(
-            text: indexed.plainTextLower,
-            slot: newSlot,
-            asciiCharPostings: &index.asciiCharPostings,
-            nonASCIICharPostings: &index.nonASCIICharPostings,
-            seenASCII: &charPostingsScratchASCII,
-            seenNonASCII: &charPostingsScratchNonASCII
-        )
-        return true
-    }
-
-    private static func appendSlotToCharPostings(
-        text: String,
-        slot: Int,
-        asciiCharPostings: inout [[UInt32]],
-        nonASCIICharPostings: inout [Character: [UInt32]],
-        seenASCII: inout [Bool],
-        seenNonASCII: inout Set<Character>
-    ) {
-        for i in 0..<seenASCII.count {
-            seenASCII[i] = false
-        }
-        seenNonASCII.removeAll(keepingCapacity: true)
-
-        for ch in text {
-            if ch.isWhitespace { continue }
-            if let ascii = ch.asciiValue {
-                let idx = Int(ascii)
-                if !seenASCII[idx] {
-                    seenASCII[idx] = true
-                    asciiCharPostings[idx].append(UInt32(slot))
-                }
-                continue
-            }
-
-            if seenNonASCII.insert(ch).inserted {
-                nonASCIICharPostings[ch, default: []].append(UInt32(slot))
-            }
-        }
-    }
-
-    private func uniqueNonWhitespaceQueryCharacters(_ text: String) -> (asciiCodes: [UInt8], nonASCIIChars: [Character]) {
-        var asciiCodes: [UInt8] = []
-        var nonASCIIChars: [Character] = []
-        asciiCodes.reserveCapacity(min(text.count, 64))
-        nonASCIIChars.reserveCapacity(min(text.count, 64))
-
-        var seenASCII0: UInt64 = 0
-        var seenASCII1: UInt64 = 0
-        var seenNonASCII = Set<Character>()
-        seenNonASCII.reserveCapacity(min(text.count, 64))
-
-        for ch in text {
-            if ch.isWhitespace { continue }
-
-            if let ascii = ch.asciiValue {
-                if ascii < 64 {
-                    let bit = UInt64(1) << UInt64(ascii)
-                    if (seenASCII0 & bit) == 0 {
-                        seenASCII0 |= bit
-                        asciiCodes.append(ascii)
-                    }
-                } else {
-                    let bit = UInt64(1) << UInt64(ascii - 64)
-                    if (seenASCII1 & bit) == 0 {
-                        seenASCII1 |= bit
-                        asciiCodes.append(ascii)
-                    }
-                }
-                continue
-            }
-
-            if seenNonASCII.insert(ch).inserted {
-                nonASCIIChars.append(ch)
-            }
-        }
-
-        return (asciiCodes: asciiCodes, nonASCIIChars: nonASCIIChars)
-    }
-
-    private struct PreparedFuzzyQuery {
-        let lower: String
-        let isASCII: Bool
-        let characterCount: Int
-        let utf16Count: Int
-        let safeFastUTF16: Bool
-        let utf16Units: [UInt16]?
-    }
-
-    private func prepareFuzzyQuery(queryLower: String, queryLowerIsASCII: Bool) -> PreparedFuzzyQuery {
-        let characterCount = queryLower.count
-        if characterCount <= 2 {
-            let safeFastUTF16 = queryLowerIsASCII || isSafeForFastUTF16Search(queryLower)
-            if safeFastUTF16 {
-                let units = Array(queryLower.utf16)
-                return PreparedFuzzyQuery(
-                    lower: queryLower,
-                    isASCII: queryLowerIsASCII,
-                    characterCount: characterCount,
-                    utf16Count: units.count,
-                    safeFastUTF16: true,
-                    utf16Units: units
-                )
-            }
-
-            return PreparedFuzzyQuery(
-                lower: queryLower,
-                isASCII: queryLowerIsASCII,
-                characterCount: characterCount,
-                utf16Count: queryLower.utf16.count,
-                safeFastUTF16: false,
-                utf16Units: nil
-            )
-        }
-
-        if queryLowerIsASCII {
-            let units = Array(queryLower.utf16)
-            return PreparedFuzzyQuery(
-                lower: queryLower,
-                isASCII: true,
-                characterCount: characterCount,
-                utf16Count: units.count,
-                safeFastUTF16: true,
-                utf16Units: units
-            )
-        }
-
-        return PreparedFuzzyQuery(
-            lower: queryLower,
-            isASCII: false,
-            characterCount: characterCount,
-            utf16Count: queryLower.utf16.count,
-            safeFastUTF16: false,
-            utf16Units: nil
-        )
-    }
-
-    private func fuzzyMatchScore(textLower: String, query: PreparedFuzzyQuery) -> Int? {
-        guard !query.lower.isEmpty else { return 0 }
-
-        if query.characterCount <= 2 {
-            guard let pos = findNeedleUTF16Offset(haystack: textLower, needle: query) else { return nil }
-            let m = query.utf16Count
-            return m * 10 - (m - 1) - pos
-        }
-
-        if query.isASCII, let queryUnits = query.utf16Units {
-            return fuzzyMatchScoreASCIIUTF16(textLower: textLower, queryUnits: queryUnits)
-        }
-
-        // Fuzzy subsequence matching (non-contiguous). Implemented as a single pass to avoid
-        // repeated `String.Index` distance computations on large/unicode-heavy texts.
-        var queryIterator = query.lower.makeIterator()
-        guard var queryChar = queryIterator.next() else { return 0 }
-
-        var firstPos: Int?
-        var lastPos = 0
-        var gapPenalty = 0
-        var matchedCount = 0
-        var searchStartPos = 0
-
-        var pos = 0
-        for ch in textLower {
-            if ch == queryChar {
-                if firstPos == nil { firstPos = pos }
-                gapPenalty += pos - searchStartPos
-                matchedCount += 1
-                lastPos = pos
-                if let next = queryIterator.next() {
-                    queryChar = next
-                    searchStartPos = pos + 1
-                } else {
-                    break
-                }
-            }
-            pos += 1
-        }
-
-        guard matchedCount == query.characterCount else { return nil }
-        let span = firstPos.map { lastPos - $0 } ?? 0
-        return matchedCount * 10 - span - gapPenalty
-    }
-
-    private func fuzzyMatchScoreASCIIUTF16(textLower: String, queryUnits: [UInt16]) -> Int? {
-        // ASCII-only query: run a single-pass subsequence match on UTF16 code units.
-        //
-        // Rationale:
-        // - Avoids `Character` iteration overhead on very large texts.
-        // - Keeps score semantics aligned with the existing gap/span model, and naturally
-        //   ranks contiguous matches higher (because span/gapPenalty become smaller).
-        guard !queryUnits.isEmpty else { return 0 }
-
-        var queryIndex = 0
-        let queryCount = queryUnits.count
-        var firstPos: Int?
-        var lastPos = 0
-        var gapPenalty = 0
-        var matchedCount = 0
-        var searchStartPos = 0
-
-        var pos = 0
-        for cu in textLower.utf16 {
-            if cu == queryUnits[queryIndex] {
-                if firstPos == nil { firstPos = pos }
-                gapPenalty += pos - searchStartPos
-                matchedCount += 1
-                lastPos = pos
-                queryIndex += 1
-                if queryIndex >= queryCount { break }
-                searchStartPos = pos + 1
-            }
-            pos += 1
-        }
-
-        guard matchedCount == queryCount else { return nil }
-        let span = firstPos.map { lastPos - $0 } ?? 0
-        return matchedCount * 10 - span - gapPenalty
-    }
-
-    private func findNeedleUTF16Offset(haystack: String, needle: PreparedFuzzyQuery) -> Int? {
-        guard !needle.lower.isEmpty else { return 0 }
-
-        if needle.safeFastUTF16, let needleUnits = needle.utf16Units {
-            if needleUnits.count <= 4 {
-                return findNeedleUTF16OffsetFast(haystack: haystack, needleUnits: needleUnits)
-            }
-        }
-
-        guard let range = haystack.range(of: needle.lower) else { return nil }
-        return range.lowerBound.utf16Offset(in: haystack)
-    }
-
-    private func findNeedleUTF16OffsetFast(haystack: String, needleUnits: [UInt16]) -> Int? {
-        guard let first = needleUnits.first else { return 0 }
-
-        // Hot path: short needles (≤ 4 UTF16 units).
-        switch needleUnits.count {
-        case 1:
-            var pos = 0
-            for cu in haystack.utf16 {
-                if cu == first { return pos }
-                pos += 1
-            }
-            return nil
-        case 2:
-            let second = needleUnits[1]
-            var pos = 0
-            var prev: UInt16? = nil
-            for cu in haystack.utf16 {
-                if prev == first, cu == second {
-                    return pos - 1
-                }
-                prev = cu
-                pos += 1
-            }
-            return nil
-        case 3:
-            let second = needleUnits[1]
-            let third = needleUnits[2]
-            var pos = 0
-            var prev1: UInt16? = nil
-            var prev2: UInt16? = nil
-            for cu in haystack.utf16 {
-                if prev2 == first, prev1 == second, cu == third {
-                    return pos - 2
-                }
-                prev2 = prev1
-                prev1 = cu
-                pos += 1
-            }
-            return nil
-        case 4:
-            let second = needleUnits[1]
-            let third = needleUnits[2]
-            let fourth = needleUnits[3]
-            var pos = 0
-            var prev1: UInt16? = nil
-            var prev2: UInt16? = nil
-            var prev3: UInt16? = nil
-            for cu in haystack.utf16 {
-                if prev3 == first, prev2 == second, prev1 == third, cu == fourth {
-                    return pos - 3
-                }
-                prev3 = prev2
-                prev2 = prev1
-                prev1 = cu
-                pos += 1
-            }
-            return nil
-        default:
-            return nil
-        }
-    }
-
-    private func isSafeForFastUTF16Search(_ needle: String) -> Bool {
-        // If canonical mapping changes, Swift `String` search may match canonically-equivalent sequences.
-        // Keep the fast UTF16 scan only when the needle is stable under canonical compose/decompose.
-        let ns = needle as NSString
-        if ns.precomposedStringWithCanonicalMapping != needle { return false }
-        if ns.decomposedStringWithCanonicalMapping != needle { return false }
+        index.append(indexed)
         return true
     }
 
@@ -3936,140 +2966,43 @@ public actor SearchEngineImpl {
             return (pos: 0, lengthIfNoMatch: codepointPos - 1)
         }
 
-        struct CandidateHit {
-            let idString: String
-            let lastUsedAt: Double
-            let isPinned: Bool
-            let matchPos: Int
-        }
-
         let keepCount = offset + limit + 1
-
-        @inline(__always)
-        func isBetter(_ lhs: CandidateHit, _ rhs: CandidateHit) -> Bool {
-            if lhs.isPinned != rhs.isPinned {
-                return lhs.isPinned && !rhs.isPinned
-            }
-
-            switch sortMode {
-            case .recent:
-                if lhs.lastUsedAt != rhs.lastUsedAt {
-                    return lhs.lastUsedAt > rhs.lastUsedAt
-                }
-                if lhs.matchPos != rhs.matchPos {
-                    return lhs.matchPos < rhs.matchPos
-                }
-            case .relevance:
-                if lhs.matchPos != rhs.matchPos {
-                    return lhs.matchPos < rhs.matchPos
-                }
-                if lhs.lastUsedAt != rhs.lastUsedAt {
-                    return lhs.lastUsedAt > rhs.lastUsedAt
-                }
-            }
-
-            return lhs.idString < rhs.idString
+        var selector = TopKSelector<SearchRankKey>(capacity: keepCount) { lhs, rhs in
+            SearchRankKey.isBetter(lhs, than: rhs, sortMode: sortMode)
         }
-
-        @inline(__always)
-        func isWorse(_ lhs: CandidateHit, _ rhs: CandidateHit) -> Bool {
-            isBetter(rhs, lhs)
-        }
-
-        var heap: [CandidateHit] = []
-        heap.reserveCapacity(min(keepCount, 8192))
-
-        @inline(__always)
-        func heapSiftUp(_ startIndex: Int) {
-            var childIndex = startIndex
-            while childIndex > 0 {
-                let parentIndex = (childIndex - 1) / 2
-                if !isWorse(heap[childIndex], heap[parentIndex]) {
-                    break
-                }
-                heap.swapAt(childIndex, parentIndex)
-                childIndex = parentIndex
-            }
-        }
-
-        @inline(__always)
-        func heapSiftDown(_ startIndex: Int) {
-            var parentIndex = startIndex
-            while true {
-                let leftIndex = parentIndex * 2 + 1
-                if leftIndex >= heap.count { break }
-                let rightIndex = leftIndex + 1
-
-                var worstIndex = leftIndex
-                if rightIndex < heap.count, isWorse(heap[rightIndex], heap[leftIndex]) {
-                    worstIndex = rightIndex
-                }
-
-                if !isWorse(heap[worstIndex], heap[parentIndex]) {
-                    break
-                }
-                heap.swapAt(parentIndex, worstIndex)
-                parentIndex = worstIndex
-            }
-        }
-
-        @inline(__always)
-        func heapInsertKeepingTopK(_ hit: CandidateHit) {
-            if keepCount <= 0 { return }
-
-            if heap.count < keepCount {
-                heap.append(hit)
-                heapSiftUp(heap.count - 1)
-                return
-            }
-
-            guard !heap.isEmpty else { return }
-            if isBetter(hit, heap[0]) {
-                heap[0] = hit
-                heapSiftDown(0)
-            }
-        }
+        selector.reserveCapacity(min(keepCount, 8192))
 
         while try stmt.step() {
-            guard let idString = stmt.columnText(0) else { continue }
+            guard let idString = stmt.columnText(0), let id = UUID(uuidString: idString) else { continue }
 
-            let lastUsedAt = stmt.columnDouble(1)
+            let lastUsedAt = Date(timeIntervalSince1970: stmt.columnDouble(1))
             let isPinned = stmt.columnInt(2) != 0
 
             let plainRes = instrASCIIInsensitiveUTF8(
                 haystack: stmt.columnTextBytes(3),
                 needleLower: needleLowerBytes
             )
+            let matchPos: Int
             if plainRes.pos > 0 {
-                heapInsertKeepingTopK(CandidateHit(idString: idString, lastUsedAt: lastUsedAt, isPinned: isPinned, matchPos: plainRes.pos))
-                continue
+                matchPos = plainRes.pos
+            } else {
+                let noteRes = instrASCIIInsensitiveUTF8(
+                    haystack: stmt.columnTextBytes(4),
+                    needleLower: needleLowerBytes
+                )
+                guard noteRes.pos > 0 else { continue }
+                // A note match ranks as if it followed the plain text and one separator.
+                matchPos = plainRes.lengthIfNoMatch + 1 + noteRes.pos
             }
-
-            let noteRes = instrASCIIInsensitiveUTF8(
-                haystack: stmt.columnTextBytes(4),
-                needleLower: needleLowerBytes
-            )
-            guard noteRes.pos > 0 else { continue }
-
-            let matchPos = plainRes.lengthIfNoMatch + 1 + noteRes.pos
-            heapInsertKeepingTopK(CandidateHit(idString: idString, lastUsedAt: lastUsedAt, isPinned: isPinned, matchPos: matchPos))
+            selector.offer(SearchRankKey(isPinned: isPinned, lastUsedAt: lastUsedAt, score: -matchPos, id: id))
         }
 
-        heap.sort(by: isBetter)
+        let hits = selector.sortedElements()
+        let start = min(offset, hits.count)
+        let end = min(offset + limit + 1, hits.count)
+        var pageIDs: [UUID] = (start < end) ? hits[start..<end].map(\.id) : []
 
-        let start = min(offset, heap.count)
-        let end = min(offset + limit + 1, heap.count)
-        let pageHits: [CandidateHit] = (start < end) ? Array(heap[start..<end]) : []
-
-        var pageIDs: [UUID] = []
-        pageIDs.reserveCapacity(min(pageHits.count, limit + 1))
-        for hit in pageHits {
-            if let id = UUID(uuidString: hit.idString) {
-                pageIDs.append(id)
-            }
-        }
-
-        let hasMore = heap.count == keepCount
+        let hasMore = hits.count == keepCount
         if hasMore {
             pageIDs.removeLast()
         }
