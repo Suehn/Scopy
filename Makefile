@@ -132,7 +132,7 @@ test-tsan:
 
 # Swift 6 Strict Concurrency regression (tests target only)
 test-strict: markdown-assets-verify setup
-	@echo "Running Strict Concurrency tests..."
+	@echo "Running Strict Concurrency tests (any Swift warning fails)..."
 	@mkdir -p $(LOG_DIR)
 	bash -o pipefail -c 'xcodebuild test \
 		-project Scopy.xcodeproj \
@@ -141,6 +141,7 @@ test-strict: markdown-assets-verify setup
 		-only-testing:ScopyTests \
 		-derivedDataPath $(DERIVED_DATA_BASE)/Scopy-Strict \
 		SWIFT_STRICT_CONCURRENCY=complete \
+		SWIFT_TREAT_WARNINGS_AS_ERRORS=YES \
 		$(VERSION_ARGS) \
 		2>&1 | tee $(LOG_DIR)/strict-concurrency-test.log'
 
