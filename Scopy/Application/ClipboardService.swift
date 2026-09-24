@@ -655,7 +655,7 @@ private actor ClipboardItemMutationGate {
 /// Application 层门面（vNext）：统一组合 monitor/storage/search/settings，并由 actor 持有事件 continuation。
 ///
 /// 说明（Phase 4 约束）：
-/// - `ClipboardMonitor` / `StorageService` 为 `@MainActor`，因此该 actor 在内部通过 `MainActor.run {}` 或跨 MainActor 调用处理边界。
+/// - `ClipboardMonitor` 为 `@MainActor`，该 actor 通过 `MainActor.run {}` 处理边界；`StorageService` 是独立 actor，存储调用不经过主线程。
 /// - UI 仍通过 `@MainActor ClipboardServiceProtocol` 调用 `RealClipboardService`（adapter），由 adapter 转发到该 actor。
 actor ClipboardService {
     // MARK: - Types
@@ -898,9 +898,7 @@ actor ClipboardService {
 
         let pasteboardName = monitorPasteboardName
         let pollingInterval = monitorPollingInterval ?? (TimeInterval(loadedSettings.clipboardPollingIntervalMs) / 1000.0)
-        let storage = await MainActor.run {
-            StorageService(databasePath: databasePath, storageRootURL: storageRoot)
-        }
+        let storage = StorageService(databasePath: databasePath, storageRootURL: storageRoot)
         let ingestSpoolDirectory = URL(
             fileURLWithPath: storage.ingestSpoolDirectoryPath,
             isDirectory: true
@@ -933,7 +931,7 @@ actor ClipboardService {
             )
         }
 
-        let dbPath = await storage.databaseFilePath
+        let dbPath = storage.databaseFilePath
         let search = SearchEngineImpl(dbPath: dbPath)
 
         do {
@@ -970,9 +968,6 @@ actor ClipboardService {
             }
 
             await MainActor.run {
-                storage.cleanupSettings.maxItems = loadedSettings.maxItems
-                storage.cleanupSettings.maxSmallStorageMB = loadedSettings.maxStorageMB
-                storage.cleanupSettings.cleanupImagesOnly = loadedSettings.cleanupImagesOnly
                 monitor.startMonitoring()
             }
 
@@ -1487,6 +1482,14 @@ actor ClipboardService {
         return ClipboardMonitor.loadImageFileDataAsPNG(fileURLs[0])
     }
 
+    private func cleanupPolicy() -> StorageService.CleanupPolicy {
+        var policy = StorageService.CleanupPolicy()
+        policy.maxItems = settings.maxItems
+        policy.maxContentBytes = settings.maxStorageMB * 1024 * 1024
+        policy.imagesOnly = settings.cleanupImagesOnly
+        return policy
+    }
+
     func updateSettings(_ newSettings: SettingsDTO) async throws {
         let oldSettings = settings
         let patch = SettingsPatch.from(baseline: oldSettings, draft: newSettings)
@@ -1504,12 +1507,6 @@ actor ClipboardService {
         }
 
         if let storage = storage {
-            await MainActor.run {
-                storage.cleanupSettings.maxItems = newSettings.maxItems
-                storage.cleanupSettings.maxSmallStorageMB = newSettings.maxStorageMB
-                storage.cleanupSettings.cleanupImagesOnly = newSettings.cleanupImagesOnly
-            }
-
             if patch.affectsThumbnailCache {
                 await stopThumbnailGenerationQueue()
                 invalidateThumbnailCacheIndex()
@@ -1522,6 +1519,7 @@ actor ClipboardService {
                 do {
                     _ = try await storage.performCleanup(
                         mode: .full,
+                        policy: cleanupPolicy(),
                         onCommitted: cleanupCommitHandler()
                     )
                 } catch {
@@ -1542,10 +1540,7 @@ actor ClipboardService {
     func setCleanupInterlockForTesting(
         _ interlock: (@Sendable (StorageService.CleanupInterlockPoint) async -> Void)?
     ) async {
-        let storage = self.storage
-        await MainActor.run {
-            storage?.setCleanupInterlockForTesting(interlock)
-        }
+        await storage?.setCleanupInterlockForTesting(interlock)
     }
 
     func getStorageStats() async throws -> (itemCount: Int, sizeBytes: Int) {
@@ -1558,10 +1553,10 @@ actor ClipboardService {
     func getDetailedStorageStats() async throws -> StorageStatsDTO {
         let storage = try requireStorage()
         let count = try await storage.getItemCount()
-        let dbSize = await storage.getDatabaseFileSize()
+        let dbSize = storage.getDatabaseFileSize()
         let externalSize = try await storage.getExternalStorageSizeForStats()
         let thumbnailSize = await storage.getThumbnailCacheSize()
-        let dbPath = await storage.databaseFilePath
+        let dbPath = storage.databaseFilePath
 
         return StorageStatsDTO(
             itemCount: count,
@@ -2422,6 +2417,7 @@ actor ClipboardService {
         do {
             _ = try await storage.performCleanup(
                 mode: mode,
+                policy: cleanupPolicy(),
                 onCommitted: cleanupCommitHandler()
             )
             lastLightCleanupAt = now

@@ -212,7 +212,7 @@ final class StorageCommitProtocolTests: XCTestCase {
         )
 
         let gate = IngestReceiptResolutionGate()
-        storage.setIngestCommitInterlockForTesting { point in
+        await storage.setIngestCommitInterlockForTesting { point in
             guard case .beforeReceiptResolution(let candidatePath) = point else { return }
             await gate.pause(candidatePath: candidatePath)
         }
@@ -234,7 +234,7 @@ final class StorageCommitProtocolTests: XCTestCase {
         } catch {
             // Expected after receipt resolution proves the transaction did not commit.
         }
-        storage.setIngestCommitInterlockForTesting(nil)
+        await storage.setIngestCommitInterlockForTesting(nil)
 
         XCTAssertFalse(FileManager.default.fileExists(atPath: candidatePath))
         XCTAssertEqual(try Data(contentsOf: sourceURL), sourceData)

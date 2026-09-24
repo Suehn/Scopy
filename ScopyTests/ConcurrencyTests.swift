@@ -403,6 +403,7 @@ final class ConcurrencyTests: XCTestCase {
 
     /// v0.11: 并发清理和搜索测试 - 验证清理过程中搜索的安全性
     func testConcurrentCleanupAndSearch() async throws {
+        var cleanupPolicy = StorageService.CleanupPolicy()
         // 插入测试数据
         for i in 0..<500 {
             let content = ClipboardMonitor.ClipboardContent(
@@ -416,7 +417,7 @@ final class ConcurrencyTests: XCTestCase {
             _ = try await storage.upsertItem(content)
         }
 
-        storage.cleanupSettings.maxItems = 100
+        cleanupPolicy.maxItems = 100
 
         // 并发执行清理和搜索
         let search = self.search!
@@ -432,7 +433,7 @@ final class ConcurrencyTests: XCTestCase {
         )
 
         async let searchResult = try? search.search(request: request)
-        let cleanupSucceeded = (try? await storage.performCleanup()) != nil
+        let cleanupSucceeded = (try? await storage.performCleanup(policy: cleanupPolicy)) != nil
         let searchSucceeded = (await searchResult) != nil
 
         // 两个操作都应该成功完成（或至少不崩溃）

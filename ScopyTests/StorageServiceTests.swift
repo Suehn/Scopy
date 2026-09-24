@@ -926,7 +926,8 @@ final class StorageServiceTests: XCTestCase {
     }
 
     func testCleanupByCount() async throws {
-        storage.cleanupSettings.maxItems = 5
+        var cleanupPolicy = StorageService.CleanupPolicy()
+        cleanupPolicy.maxItems = 5
 
         // Insert 10 items
         for i in 0..<10 {
@@ -939,7 +940,7 @@ final class StorageServiceTests: XCTestCase {
         XCTAssertEqual(countBeforeCleanup, 10)
 
         // Cleanup
-        try await storage.performCleanup()
+        try await storage.performCleanup(policy: cleanupPolicy)
 
         // Should have max 5 items
         let countAfterCleanup = try await storage.getItemCount()
@@ -947,6 +948,7 @@ final class StorageServiceTests: XCTestCase {
     }
 
     func testCleanupCommitSkipsCandidatePinnedAfterPlanning() async throws {
+        var cleanupPolicy = StorageService.CleanupPolicy()
         let directory = try makeTemporaryDirectory(prefix: "cleanup-pin-revalidation")
         let databasePath = directory.appendingPathComponent("clipboard.db").path
         let probe = RemoveFileProbe()
@@ -966,17 +968,17 @@ final class StorageServiceTests: XCTestCase {
         _ = try await primary.upsertItem(makeLargeTestContent())
         let candidateRef = try XCTUnwrap(candidate.storageRef)
 
-        primary.cleanupSettings.maxItems = 1
-        primary.cleanupSettings.maxSmallStorageMB = 200
-        primary.cleanupSettings.maxLargeStorageMB = 800
+        cleanupPolicy.maxItems = 1
+        cleanupPolicy.maxContentBytes = 200 * 1024 * 1024
+        cleanupPolicy.maxExternalBytes = 800 * 1024 * 1024
         let gate = StorageMetadataUpdateGate()
-        primary.setCleanupInterlockForTesting { point in
+        await primary.setCleanupInterlockForTesting { point in
             guard case .afterPlanBeforeCommit(let itemIDs) = point,
                   itemIDs.contains(candidate.id) else { return }
             await gate.pause()
         }
 
-        let cleanup = Task { try await primary.performCleanup(mode: .light) }
+        let cleanup = Task { [cleanupPolicy] in try await primary.performCleanup(mode: .light, policy: cleanupPolicy) }
         await gate.waitUntilPaused()
         try await competing.setPin(candidate.id, pinned: true)
         await gate.release()
@@ -993,6 +995,7 @@ final class StorageServiceTests: XCTestCase {
     }
 
     func testCleanupCommitSkipsCandidateWhosePayloadWasReplacedAfterPlanning() async throws {
+        var cleanupPolicy = StorageService.CleanupPolicy()
         let directory = try makeTemporaryDirectory(prefix: "cleanup-payload-revalidation")
         let databasePath = directory.appendingPathComponent("clipboard.db").path
         let probe = RemoveFileProbe()
@@ -1012,17 +1015,17 @@ final class StorageServiceTests: XCTestCase {
         _ = try await primary.upsertItem(makeLargeTestContent())
         let oldRef = try XCTUnwrap(candidate.storageRef)
 
-        primary.cleanupSettings.maxItems = 1
-        primary.cleanupSettings.maxSmallStorageMB = 200
-        primary.cleanupSettings.maxLargeStorageMB = 800
+        cleanupPolicy.maxItems = 1
+        cleanupPolicy.maxContentBytes = 200 * 1024 * 1024
+        cleanupPolicy.maxExternalBytes = 800 * 1024 * 1024
         let gate = StorageMetadataUpdateGate()
-        primary.setCleanupInterlockForTesting { point in
+        await primary.setCleanupInterlockForTesting { point in
             guard case .afterPlanBeforeCommit(let itemIDs) = point,
                   itemIDs.contains(candidate.id) else { return }
             await gate.pause()
         }
 
-        let cleanup = Task { try await primary.performCleanup(mode: .light) }
+        let cleanup = Task { [cleanupPolicy] in try await primary.performCleanup(mode: .light, policy: cleanupPolicy) }
         await gate.waitUntilPaused()
 
         let replacementData = Data(repeating: 0x3C, count: 256 * 1024)
@@ -1054,6 +1057,7 @@ final class StorageServiceTests: XCTestCase {
     }
 
     func testCleanupReportsEarlierCommittedBatchBeforeLaterPhaseFails() async throws {
+        var cleanupPolicy = StorageService.CleanupPolicy()
         let directory = try makeTemporaryDirectory(prefix: "cleanup-partial-result")
         let databasePath = directory.appendingPathComponent("clipboard.db").path
         let diskStorage = StorageService(databasePath: databasePath)
@@ -1067,15 +1071,16 @@ final class StorageServiceTests: XCTestCase {
         try await Task.sleep(nanoseconds: 10_000_000)
         _ = try await diskStorage.upsertItem(makeTestContent(text: "newest"))
 
-        diskStorage.cleanupSettings.maxItems = 2
-        diskStorage.cleanupSettings.maxDaysAge = 0
-        diskStorage.cleanupSettings.maxSmallStorageMB = 200
-        diskStorage.cleanupSettings.maxLargeStorageMB = 800
+        cleanupPolicy.maxItems = 2
+        cleanupPolicy.maxAgeDays = 0
+        cleanupPolicy.maxContentBytes = 200 * 1024 * 1024
+        cleanupPolicy.maxExternalBytes = 800 * 1024 * 1024
 
         let probe = CleanupFailureProbe()
         do {
             _ = try await diskStorage.performCleanup(
                 mode: .light,
+                policy: cleanupPolicy,
                 onCommitted: { result in
                     await probe.recordAndInstallFailure(after: result, dbPath: databasePath)
                 }
@@ -1095,6 +1100,7 @@ final class StorageServiceTests: XCTestCase {
     }
 
     func testCleanupDoesNotUnlinkCommittedRefStillOwnedBySurvivingRow() async throws {
+        var cleanupPolicy = StorageService.CleanupPolicy()
         let probe = RemoveFileProbe()
         let (diskStorage, baseURL) = try await makeTemporaryStorage(
             prefix: "cleanup-shared-ref",
@@ -1119,10 +1125,10 @@ final class StorageServiceTests: XCTestCase {
             rawData: nil
         )
 
-        diskStorage.cleanupSettings.maxItems = 1
-        diskStorage.cleanupSettings.maxSmallStorageMB = 200
-        diskStorage.cleanupSettings.maxLargeStorageMB = 800
-        let result = try await diskStorage.performCleanup(mode: .light)
+        cleanupPolicy.maxItems = 1
+        cleanupPolicy.maxContentBytes = 200 * 1024 * 1024
+        cleanupPolicy.maxExternalBytes = 800 * 1024 * 1024
+        let result = try await diskStorage.performCleanup(mode: .light, policy: cleanupPolicy)
 
         XCTAssertEqual(result.deletedItemIDs, [oldest.id])
         XCTAssertEqual(result.fileDeletionCandidateCount, 1)
@@ -1135,7 +1141,8 @@ final class StorageServiceTests: XCTestCase {
     }
 
     func testCleanupPreservesPinned() async throws {
-        storage.cleanupSettings.maxItems = 3
+        var cleanupPolicy = StorageService.CleanupPolicy()
+        cleanupPolicy.maxItems = 3
 
         // Insert 5 items
         for i in 0..<5 {
@@ -1149,7 +1156,7 @@ final class StorageServiceTests: XCTestCase {
         try await storage.setPin(items[1].id, pinned: true)
 
         // Cleanup
-        try await storage.performCleanup()
+        try await storage.performCleanup(policy: cleanupPolicy)
 
         // All pinned items should survive
         let remaining = try await storage.fetchRecent(limit: 10, offset: 0)
@@ -1158,8 +1165,9 @@ final class StorageServiceTests: XCTestCase {
     }
 
     func testCleanupImagesOnlyBySizeDoesNotDeleteText() async throws {
-        storage.cleanupSettings.cleanupImagesOnly = true
-        storage.cleanupSettings.maxSmallStorageMB = 1
+        var cleanupPolicy = StorageService.CleanupPolicy()
+        cleanupPolicy.imagesOnly = true
+        cleanupPolicy.maxContentBytes = 1 * 1024 * 1024
 
         // Insert text first (oldest)
         for i in 0..<5 {
@@ -1174,7 +1182,7 @@ final class StorageServiceTests: XCTestCase {
         XCTAssertEqual(countBeforeCleanup, 7)
 
         // Cleanup should delete images but keep all text items.
-        try await storage.performCleanup()
+        try await storage.performCleanup(policy: cleanupPolicy)
 
         let remaining = try await storage.fetchRecent(limit: 100, offset: 0)
         XCTAssertEqual(remaining.filter { $0.type == .text }.count, 5)
@@ -1186,8 +1194,9 @@ final class StorageServiceTests: XCTestCase {
     }
 
     func testCleanupImagesOnlyByCountDoesNotDeleteText() async throws {
-        storage.cleanupSettings.cleanupImagesOnly = true
-        storage.cleanupSettings.maxItems = 3
+        var cleanupPolicy = StorageService.CleanupPolicy()
+        cleanupPolicy.imagesOnly = true
+        cleanupPolicy.maxItems = 3
 
         // Insert texts
         for i in 0..<5 {
@@ -1202,7 +1211,7 @@ final class StorageServiceTests: XCTestCase {
         XCTAssertEqual(countBeforeCleanup, 7)
 
         // Cleanup should delete images but not text, even if still above maxItems.
-        try await storage.performCleanup()
+        try await storage.performCleanup(policy: cleanupPolicy)
 
         let remaining = try await storage.fetchRecent(limit: 100, offset: 0)
         XCTAssertEqual(remaining.filter { $0.type == .text }.count, 5)
@@ -1216,6 +1225,7 @@ final class StorageServiceTests: XCTestCase {
     }
 
     func testCleanupByCountDeletesExternalFilesThroughDeletePlanExecutor() async throws {
+        var cleanupPolicy = StorageService.CleanupPolicy()
         let probe = RemoveFileProbe()
         let (routedStorage, baseURL) = try await makeTemporaryStorage(
             prefix: "scopy-cleanup-count-route",
@@ -1228,9 +1238,9 @@ final class StorageServiceTests: XCTestCase {
             }
         }
 
-        routedStorage.cleanupSettings.maxItems = 1
-        routedStorage.cleanupSettings.maxSmallStorageMB = 200
-        routedStorage.cleanupSettings.maxLargeStorageMB = 800
+        cleanupPolicy.maxItems = 1
+        cleanupPolicy.maxContentBytes = 200 * 1024 * 1024
+        cleanupPolicy.maxExternalBytes = 800 * 1024 * 1024
 
         _ = try await routedStorage.upsertItem(makeLargeTestContent())
         try await Task.sleep(nanoseconds: 10_000_000)
@@ -1238,7 +1248,7 @@ final class StorageServiceTests: XCTestCase {
         try await Task.sleep(nanoseconds: 10_000_000)
         _ = try await routedStorage.upsertItem(makeLargeTestContent())
 
-        try await routedStorage.performCleanup(mode: .light)
+        try await routedStorage.performCleanup(mode: .light, policy: cleanupPolicy)
 
         let remaining = try await routedStorage.fetchRecent(limit: 10, offset: 0)
         XCTAssertEqual(remaining.count, 1)
@@ -1246,6 +1256,7 @@ final class StorageServiceTests: XCTestCase {
     }
 
     func testCleanupImagesOnlyByCountDeletesExternalFilesThroughDeletePlanExecutor() async throws {
+        var cleanupPolicy = StorageService.CleanupPolicy()
         let probe = RemoveFileProbe()
         let (routedStorage, baseURL) = try await makeTemporaryStorage(
             prefix: "scopy-cleanup-images-count-route",
@@ -1258,17 +1269,17 @@ final class StorageServiceTests: XCTestCase {
             }
         }
 
-        routedStorage.cleanupSettings.cleanupImagesOnly = true
-        routedStorage.cleanupSettings.maxItems = 1
-        routedStorage.cleanupSettings.maxSmallStorageMB = 200
-        routedStorage.cleanupSettings.maxLargeStorageMB = 800
+        cleanupPolicy.imagesOnly = true
+        cleanupPolicy.maxItems = 1
+        cleanupPolicy.maxContentBytes = 200 * 1024 * 1024
+        cleanupPolicy.maxExternalBytes = 800 * 1024 * 1024
 
         let text = try await routedStorage.upsertItem(makeTestContent(text: "text survives"))
         let image1 = try await routedStorage.upsertItem(makeLargeTestContent())
         try await Task.sleep(nanoseconds: 10_000_000)
         let image2 = try await routedStorage.upsertItem(makeLargeTestContent())
 
-        try await routedStorage.performCleanup(mode: .light)
+        try await routedStorage.performCleanup(mode: .light, policy: cleanupPolicy)
 
         let survivingText = try await routedStorage.findByID(text.id)
         let removedImage1 = try await routedStorage.findByID(image1.id)
@@ -1280,6 +1291,7 @@ final class StorageServiceTests: XCTestCase {
     }
 
     func testCleanupByAgeDeletesExternalFilesThroughDeletePlanExecutor() async throws {
+        var cleanupPolicy = StorageService.CleanupPolicy()
         let probe = RemoveFileProbe()
         let (routedStorage, baseURL) = try await makeTemporaryStorage(
             prefix: "scopy-cleanup-age-route",
@@ -1292,14 +1304,14 @@ final class StorageServiceTests: XCTestCase {
             }
         }
 
-        routedStorage.cleanupSettings.maxItems = 10
-        routedStorage.cleanupSettings.maxDaysAge = 0
-        routedStorage.cleanupSettings.maxSmallStorageMB = 200
-        routedStorage.cleanupSettings.maxLargeStorageMB = 800
+        cleanupPolicy.maxItems = 10
+        cleanupPolicy.maxAgeDays = 0
+        cleanupPolicy.maxContentBytes = 200 * 1024 * 1024
+        cleanupPolicy.maxExternalBytes = 800 * 1024 * 1024
 
         let item = try await routedStorage.upsertItem(makeLargeTestContent())
 
-        try await routedStorage.performCleanup(mode: .light)
+        try await routedStorage.performCleanup(mode: .light, policy: cleanupPolicy)
 
         let missing = try await routedStorage.findByID(item.id)
         XCTAssertNil(missing)
@@ -1307,6 +1319,7 @@ final class StorageServiceTests: XCTestCase {
     }
 
     func testCleanupBySizeDeletesExternalFilesThroughDeletePlanExecutor() async throws {
+        var cleanupPolicy = StorageService.CleanupPolicy()
         let probe = RemoveFileProbe()
         let (routedStorage, baseURL) = try await makeTemporaryStorage(
             prefix: "scopy-cleanup-size-route",
@@ -1319,15 +1332,15 @@ final class StorageServiceTests: XCTestCase {
             }
         }
 
-        routedStorage.cleanupSettings.maxItems = 10
-        routedStorage.cleanupSettings.maxSmallStorageMB = 1
-        routedStorage.cleanupSettings.maxLargeStorageMB = 800
+        cleanupPolicy.maxItems = 10
+        cleanupPolicy.maxContentBytes = 1 * 1024 * 1024
+        cleanupPolicy.maxExternalBytes = 800 * 1024 * 1024
 
         let first = try await routedStorage.upsertItem(makeLargeTestContent())
         try await Task.sleep(nanoseconds: 10_000_000)
         let second = try await routedStorage.upsertItem(makeLargeTestContent())
 
-        try await routedStorage.performCleanup(mode: .light)
+        try await routedStorage.performCleanup(mode: .light, policy: cleanupPolicy)
 
         let removedFirst = try await routedStorage.findByID(first.id)
         let removedSecond = try await routedStorage.findByID(second.id)
@@ -1337,6 +1350,7 @@ final class StorageServiceTests: XCTestCase {
     }
 
     func testCleanupExternalStorageDeletesExternalFilesThroughDeletePlanExecutor() async throws {
+        var cleanupPolicy = StorageService.CleanupPolicy()
         let probe = RemoveFileProbe()
         let (routedStorage, baseURL) = try await makeTemporaryStorage(
             prefix: "scopy-cleanup-external-route",
@@ -1349,13 +1363,13 @@ final class StorageServiceTests: XCTestCase {
             }
         }
 
-        routedStorage.cleanupSettings.maxItems = 10
-        routedStorage.cleanupSettings.maxSmallStorageMB = 200
-        routedStorage.cleanupSettings.maxLargeStorageMB = 0
+        cleanupPolicy.maxItems = 10
+        cleanupPolicy.maxContentBytes = 200 * 1024 * 1024
+        cleanupPolicy.maxExternalBytes = 0
 
         let item = try await routedStorage.upsertItem(makeLargeTestContent())
 
-        try await routedStorage.performCleanup(mode: .light)
+        try await routedStorage.performCleanup(mode: .light, policy: cleanupPolicy)
 
         let missing = try await routedStorage.findByID(item.id)
         XCTAssertNil(missing)
@@ -1363,6 +1377,7 @@ final class StorageServiceTests: XCTestCase {
     }
 
     func testCleanupSkipsInvalidStorageRefAfterDBDelete() async throws {
+        var cleanupPolicy = StorageService.CleanupPolicy()
         let probe = RemoveFileProbe()
         let (routedStorage, baseURL) = try await makeTemporaryStorage(
             prefix: "scopy-cleanup-invalid-ref",
@@ -1389,11 +1404,11 @@ final class StorageServiceTests: XCTestCase {
             rawData: nil
         )
 
-        routedStorage.cleanupSettings.maxItems = 0
-        routedStorage.cleanupSettings.maxSmallStorageMB = 200
-        routedStorage.cleanupSettings.maxLargeStorageMB = 800
+        cleanupPolicy.maxItems = 0
+        cleanupPolicy.maxContentBytes = 200 * 1024 * 1024
+        cleanupPolicy.maxExternalBytes = 800 * 1024 * 1024
 
-        try await routedStorage.performCleanup(mode: .light)
+        try await routedStorage.performCleanup(mode: .light, policy: cleanupPolicy)
 
         let missing = try await routedStorage.findByID(item.id)
         XCTAssertNil(missing)
@@ -1500,6 +1515,7 @@ final class StorageServiceTests: XCTestCase {
     }
 
     func testCleanupByCountDoesNotRemoveExternalFilesWhenDBIsBusy() async throws {
+        var cleanupPolicy = StorageService.CleanupPolicy()
         let baseURL = try makeTemporaryDirectory(prefix: "scopy-cleanup-busy")
 
         let probe = RemoveFileProbe()
@@ -1525,9 +1541,9 @@ final class StorageServiceTests: XCTestCase {
             return
         }
 
-        diskStorage.cleanupSettings.maxItems = 1
-        diskStorage.cleanupSettings.maxSmallStorageMB = 200
-        diskStorage.cleanupSettings.maxLargeStorageMB = 800
+        cleanupPolicy.maxItems = 1
+        cleanupPolicy.maxContentBytes = 200 * 1024 * 1024
+        cleanupPolicy.maxExternalBytes = 800 * 1024 * 1024
 
         do {
             let lockFlags = SQLiteConnection.openFlags(for: dbPath, readOnly: false)
@@ -1539,7 +1555,7 @@ final class StorageServiceTests: XCTestCase {
             }
 
             do {
-                try await diskStorage.performCleanup(mode: .light)
+                try await diskStorage.performCleanup(mode: .light, policy: cleanupPolicy)
                 XCTFail("Expected cleanup to fail while DB is busy")
             } catch {
                 // Expected
@@ -1580,7 +1596,7 @@ final class StorageServiceTests: XCTestCase {
         try staleStatData.write(to: oldURL, options: .atomic)
 
         let gate = StorageMetadataUpdateGate()
-        primary.setExternalSizeSyncInterlockForTesting { point in
+        await primary.setExternalSizeSyncInterlockForTesting { point in
             guard case .afterStatBeforeCommit = point else { return }
             await gate.pause()
         }
@@ -1642,7 +1658,7 @@ final class StorageServiceTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: oldURL.path))
 
         let gate = StorageMetadataUpdateGate()
-        diskStorage.setOrphanCleanupInterlockForTesting { point in
+        await diskStorage.setOrphanCleanupInterlockForTesting { point in
             guard case .afterEnumerationBeforeOwnershipValidation = point else { return }
             await gate.pause()
         }
@@ -1687,7 +1703,7 @@ final class StorageServiceTests: XCTestCase {
         let optimized = try XCTUnwrap(optimizedResult)
 
         let gate = StorageMetadataUpdateGate()
-        diskStorage.setOrphanCleanupInterlockForTesting { point in
+        await diskStorage.setOrphanCleanupInterlockForTesting { point in
             guard case .afterOwnershipValidationBeforeRemove(let path) = point,
                   URL(fileURLWithPath: path).resolvingSymlinksInPath().standardizedFileURL.path == oldReservationKey else { return }
             await gate.pause()

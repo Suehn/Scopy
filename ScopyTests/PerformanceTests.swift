@@ -526,15 +526,16 @@ final class PerformanceTests: XCTestCase {
 
     /// 测试清理性能
     func testCleanupPerformance() async throws {
+        var cleanupPolicy = StorageService.CleanupPolicy()
         // Insert many items
         for i in 0..<1000 {
             _ = try await storage.upsertItem(makeContent("Cleanup test item \(i)"))
         }
 
-        storage.cleanupSettings.maxItems = 100
+        cleanupPolicy.maxItems = 100
 
         let startTime = CFAbsoluteTimeGetCurrent()
-        try await storage.performCleanup()
+        try await storage.performCleanup(policy: cleanupPolicy)
         let elapsed = CFAbsoluteTimeGetCurrent() - startTime
 
         print("📊 Cleanup Performance:")
@@ -550,6 +551,7 @@ final class PerformanceTests: XCTestCase {
     /// 目标: P95 < 500ms（调整目标以反映真实场景：每次循环重新插入数据导致 WAL 膨胀）
     /// 真实场景：单次清理 9000 条约 200-300ms，但测试循环累积 WAL 开销
     func testInlineCleanupPerformance10k() async throws {
+        var cleanupPolicy = StorageService.CleanupPolicy()
         try XCTSkipIf(!shouldRunHeavyPerf(), "Run: make test-perf-heavy")
 
         try await withDiskStorage { diskStorage, _, _ in
@@ -559,7 +561,7 @@ final class PerformanceTests: XCTestCase {
                 _ = try await diskStorage.upsertItem(makeContent(text))
             }
 
-            diskStorage.cleanupSettings.maxItems = 1000
+            cleanupPolicy.maxItems = 1000
 
             var times: [Double] = []
             for iteration in 0..<5 {
@@ -572,7 +574,7 @@ final class PerformanceTests: XCTestCase {
                 await diskStorage.repository.walCheckpointTruncate()
 
                 let start = CFAbsoluteTimeGetCurrent()
-                try await diskStorage.performCleanup()
+                try await diskStorage.performCleanup(policy: cleanupPolicy)
                 let elapsed = (CFAbsoluteTimeGetCurrent() - start) * 1000
                 times.append(elapsed)
                 print("   - Iteration \(iteration + 1): \(String(format: "%.2f", elapsed))ms")
@@ -589,6 +591,7 @@ final class PerformanceTests: XCTestCase {
     /// 目标: P95 < 1800ms（当前基线：10k 大文件写入 + 9k 文件删除 + 数据库清理）
     /// 真实场景：外部存储清理涉及大量文件 I/O，性能受磁盘速度影响
     func testExternalCleanupPerformance10k() async throws {
+        var cleanupPolicy = StorageService.CleanupPolicy()
         try XCTSkipIf(!shouldRunHeavyPerf(), "Run: make test-perf-heavy")
 
         try await withDiskStorage { diskStorage, _, _ in
@@ -606,14 +609,14 @@ final class PerformanceTests: XCTestCase {
                 _ = try await diskStorage.upsertItem(content)
             }
 
-            diskStorage.cleanupSettings.maxItems = 1000
-            diskStorage.cleanupSettings.maxLargeStorageMB = 100 // 100MB
+            cleanupPolicy.maxItems = 1000
+            cleanupPolicy.maxExternalBytes = 100 * 1024 * 1024 // 100MB
 
             // v0.14: WAL checkpoint 确保数据落盘
             await diskStorage.repository.walCheckpointTruncate()
 
             let start = CFAbsoluteTimeGetCurrent()
-            try await diskStorage.performCleanup()
+            try await diskStorage.performCleanup(policy: cleanupPolicy)
             let elapsed = (CFAbsoluteTimeGetCurrent() - start) * 1000
 
             print("📊 External Cleanup Performance (10k items): \(String(format: "%.2f", elapsed))ms")
@@ -626,6 +629,7 @@ final class PerformanceTests: XCTestCase {
     /// v0.14: 大规模清理性能测试 (50k 项)
     /// 目标: P95 < 2000ms（调整目标：50k 插入后 WAL 膨胀 + 45k 删除 + FTS5 同步）
     func testCleanupPerformance50k() async throws {
+        var cleanupPolicy = StorageService.CleanupPolicy()
         try XCTSkipIf(!shouldRunHeavyPerf(), "Run: make test-perf-heavy")
 
         try await withDiskStorage { diskStorage, _, _ in
@@ -635,13 +639,13 @@ final class PerformanceTests: XCTestCase {
                 _ = try await diskStorage.upsertItem(makeContent(text))
             }
 
-            diskStorage.cleanupSettings.maxItems = 5000
+            cleanupPolicy.maxItems = 5000
 
             // v0.14: WAL checkpoint 确保数据落盘
             await diskStorage.repository.walCheckpointTruncate()
 
             let start = CFAbsoluteTimeGetCurrent()
-            try await diskStorage.performCleanup()
+            try await diskStorage.performCleanup(policy: cleanupPolicy)
             let elapsed = (CFAbsoluteTimeGetCurrent() - start) * 1000
 
             print("📊 Large Scale Cleanup Performance (50k items): \(String(format: "%.2f", elapsed))ms")
@@ -934,6 +938,7 @@ final class PerformanceTests: XCTestCase {
 
     /// 重负载：外部存储压力（300 x 256KB，实际约 190MB 含 WAL），验证清理与引用
     func testExternalStorageStress() async throws {
+        var cleanupPolicy = StorageService.CleanupPolicy()
         try XCTSkipIf(!shouldRunHeavyPerf(), "Run: make test-perf-heavy")
 
         try await withDiskStorage { diskStorage, _, _ in
@@ -957,12 +962,12 @@ final class PerformanceTests: XCTestCase {
 
             // Trigger cleanup to ensure it runs fast enough
             // 预热一次，避免首次 I/O 抖动
-            diskStorage.cleanupSettings.maxLargeStorageMB = 1000
-            try await diskStorage.performCleanup()
+            cleanupPolicy.maxExternalBytes = 1000 * 1024 * 1024
+            try await diskStorage.performCleanup(policy: cleanupPolicy)
 
-            diskStorage.cleanupSettings.maxLargeStorageMB = 50 // 50MB cap
+            cleanupPolicy.maxExternalBytes = 50 * 1024 * 1024 // 50MB cap
             let start = CFAbsoluteTimeGetCurrent()
-            try await diskStorage.performCleanup()
+            try await diskStorage.performCleanup(policy: cleanupPolicy)
             let elapsed = (CFAbsoluteTimeGetCurrent() - start) * 1000
             print("🧹 External cleanup elapsed: \(String(format: "%.2f", elapsed))ms")
             XCTAssertLessThan(elapsed, 800, "External cleanup should finish within 800ms")
