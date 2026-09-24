@@ -89,29 +89,37 @@ enum HistoryItemMarkdownExportController {
         }
     }
 
+    /// `renderedHTML`, when given, must be the document for `markdownSource` at `layoutScale`
+    /// (a preview passes the document it shows); otherwise the source is rendered here.
     static func exportMarkdownToClipboard(
         markdownSource: String,
+        renderedHTML: String? = nil,
         settings: SettingsDTO,
         layoutScale: MarkdownChatGPTLayoutScalePercent? = nil,
         resolutionScale: CGFloat? = nil,
         pasteboardWriteLease: MarkdownExportService.PasteboardWriteLease? = nil,
         authorizePasteboardWrite: @escaping @MainActor () -> Bool = { true }
         ) async -> Result<MarkdownExportService.ExportStats, Error> {
-        let resolvedLayoutScale = layoutScale ?? MarkdownChatGPTLayoutScalePercent(
-            settingsValue: settings.markdownChatGPTLayoutScalePercent
-        )
-        let renderTask = Task.detached(priority: .userInitiated) {
-            let context = MarkdownRenderContextResolver.defaultContext(
-                for: markdownSource,
-                layoutScale: resolvedLayoutScale
+        let html: String
+        if let renderedHTML {
+            html = renderedHTML
+        } else {
+            let resolvedLayoutScale = layoutScale ?? MarkdownChatGPTLayoutScalePercent(
+                settingsValue: settings.markdownChatGPTLayoutScalePercent
             )
-            return MarkdownHTMLRenderer.render(markdown: markdownSource, context: context)
+            let renderTask = Task.detached(priority: .userInitiated) {
+                let context = MarkdownRenderContextResolver.defaultContext(
+                    for: markdownSource,
+                    layoutScale: resolvedLayoutScale
+                )
+                return MarkdownHTMLRenderer.render(markdown: markdownSource, context: context)
+            }
+            html = await withTaskCancellationHandler(operation: {
+                await renderTask.value
+            }, onCancel: {
+                renderTask.cancel()
+            })
         }
-        let html = await withTaskCancellationHandler(operation: {
-            await renderTask.value
-        }, onCancel: {
-            renderTask.cancel()
-        })
         guard !Task.isCancelled else { return .failure(CancellationError()) }
         let pngquantOptions = pngquantOptions(settings: settings, renderedHTML: html)
 

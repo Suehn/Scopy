@@ -1803,7 +1803,7 @@ struct HistoryItemView: View, Equatable {
               let layoutScalePercent = state.previewModel.markdownMetricsLayoutScalePercent else { return }
 
         let layoutScale = MarkdownChatGPTLayoutScalePercent(settingsValue: layoutScalePercent)
-        let renderKey = HoverPreviewModel.markdownRenderKey(source: text, layoutScale: layoutScale)
+        let renderKey = state.previewModel.markdownRenderKey(for: text, layoutScale: layoutScale)
         guard state.previewModel.isMarkdownRenderLive(for: renderKey) else { return }
 
         let contentHash: String
@@ -1850,6 +1850,10 @@ struct HistoryItemView: View, Equatable {
             requestPopover(kind)
         case .image(let cgImage):
             state.previewModel.previewCGImage = cgImage
+        case .imagePixelSize(let size):
+            state.previewModel.previewPixelSize = size
+        case .fileAvailability(let isAvailable):
+            state.previewModel.fileIsAvailable = isAvailable
         case .text(let previewState):
             state.previewModel.primeTextPreview(
                 text: previewState.text,

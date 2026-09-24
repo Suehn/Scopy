@@ -17,11 +17,6 @@ struct HoverPreviewPopoverState: Equatable {
     let kind: HoverPreviewPopoverKind
 }
 
-private struct HoverPreviewDismissSnapshot: Equatable {
-    let itemID: UUID
-    let at: CFTimeInterval
-}
-
 /// 历史列表视图 - 符合 v0.md 的懒加载设计
 @MainActor
 struct HistoryListView: View {
@@ -39,12 +34,8 @@ struct HistoryListView: View {
 
     // Enforce that at most one hover preview popover is presented at a time.
     @State private var pinnedPreviewController = PinnedPreviewController()
-    @State private var activePopover: HoverPreviewPopoverState?
-    @State private var pendingPopover: HoverPreviewPopoverState?
-    @State private var lastDismissedPopover: HoverPreviewDismissSnapshot?
+    @State private var presentation = HoverPreviewPresentation()
     @State private var programmaticScrollGate = ListProgrammaticScrollGate()
-
-    private static let popoverReopenCooldownSeconds: CFTimeInterval = 0.25
 
     private static let isUITesting: Bool = ProcessInfo.processInfo.arguments.contains("--uitesting")
     private static let isScrollProfile: Bool = ProcessInfo.processInfo.environment["SCOPY_SCROLL_PROFILE"] == "1"
@@ -65,10 +56,7 @@ struct HistoryListView: View {
                 let unpinned = historyViewModel.unpinnedItems
                 // Rows are built inside ForEach child closures, where every @Observable read installs its own
                 // observation and copies the access list; read the shared state once here and pass values down.
-                let rowContext = HistoryRowContext(
-                    settings: settingsViewModel.settings,
-                    activePopover: activePopover
-                )
+                let rowContext = HistoryRowContext(settings: settingsViewModel.settings)
 
                 // v0.18: 不使用 Section header，改为普通行以避免黑色背景
                 // Pinned Section Header
@@ -204,6 +192,18 @@ struct HistoryListView: View {
 
     // MARK: - Preview Popover Coordination
 
+    /// The presented popover lives in the row fan-out, so changing it re-renders the two rows
+    /// involved instead of this body.
+    private var activePopover: HoverPreviewPopoverState? {
+        get { historyViewModel.rowLiveState.presentedPreview }
+        nonmutating set { historyViewModel.rowLiveState.updatePresentedPreview(newValue) }
+    }
+
+    private var pendingPopover: HoverPreviewPopoverState? {
+        get { presentation.pending }
+        nonmutating set { presentation.pending = newValue }
+    }
+
     private func updateProfileWorkloadMetadata() {
         guard ScrollPerformanceProfile.isEnabled else { return }
         let profile = ScrollPerformanceProfile.shared
@@ -332,7 +332,7 @@ struct HistoryListView: View {
 
     @MainActor
     private func recordPopoverDismiss(itemID: UUID) {
-        lastDismissedPopover = HoverPreviewDismissSnapshot(itemID: itemID, at: CFAbsoluteTimeGetCurrent())
+        presentation.recordDismiss(itemID: itemID)
     }
 
     @MainActor
@@ -356,10 +356,7 @@ struct HistoryListView: View {
 
     @MainActor
     private func reopenDelaySeconds(for itemID: UUID) -> CFTimeInterval {
-        guard let snapshot = lastDismissedPopover, snapshot.itemID == itemID else { return 0 }
-        let elapsed = CFAbsoluteTimeGetCurrent() - snapshot.at
-        let remaining = Self.popoverReopenCooldownSeconds - elapsed
-        return remaining > 0 ? remaining : 0
+        presentation.reopenDelaySeconds(for: itemID)
     }
 
     /// Transfer only the current hover WebView. Other windows and the next hover have
@@ -465,7 +462,6 @@ struct HistoryListView: View {
     /// Shared list state a row needs, captured once per list update instead of read per row.
     private struct HistoryRowContext {
         let settings: SettingsDTO
-        let activePopover: HoverPreviewPopoverState?
     }
 
     private func historyRow(item: ClipboardItemDTO, context: HistoryRowContext) -> some View {
@@ -481,10 +477,9 @@ struct HistoryListView: View {
         live: HistoryRowLiveState
     ) -> some View {
         let isSelected = live.isSelected
-        let activePopover = context.activePopover
-        let isImagePreviewPresented = activePopover?.itemID == item.id && activePopover?.kind == .image
-        let isTextPreviewPresented = activePopover?.itemID == item.id && activePopover?.kind == .text
-        let isFilePreviewPresented = activePopover?.itemID == item.id && activePopover?.kind == .file
+        let isImagePreviewPresented = live.presentedPreview == .image
+        let isTextPreviewPresented = live.presentedPreview == .text
+        let isFilePreviewPresented = live.presentedPreview == .file
         let row = HistoryItemView(
             item: item,
             isKeyboardSelected: isSelected,

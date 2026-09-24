@@ -80,7 +80,6 @@ enum HistoryHoverPreviewPipeline {
         let targetWidthPixels: Int
         let quickLookMaxSidePixels: Int
         let maxLongSidePixels: Int
-        let shouldPrefetchImage: Bool
     }
 
     struct TextPreviewState {
@@ -122,6 +121,11 @@ enum HistoryHoverPreviewPipeline {
     enum Event {
         case present(HoverPreviewPopoverKind)
         case image(CGImage?)
+        /// Oriented pixel size from the image header, known before the popover opens so the
+        /// popover keeps its size when the decoded image arrives.
+        case imagePixelSize(CGSize)
+        /// Whether the previewed file exists, resolved before the popover opens.
+        case fileAvailability(Bool)
         case text(TextPreviewState)
         case markdownHTML(String, MarkdownChatGPTLayoutScalePercent)
         case renderMarkdown(MarkdownRenderRequest)
@@ -212,8 +216,7 @@ enum HistoryHoverPreviewPipeline {
             cacheKey: "file|\(request.revision.cacheKey)|\(kindToken)|w\(targetWidthPixels)",
             targetWidthPixels: targetWidthPixels,
             quickLookMaxSidePixels: max(targetWidthPixels, targetHeightPixels),
-            maxLongSidePixels: request.maxLongSidePixels,
-            shouldPrefetchImage: request.previewInfo.kind == .image || request.previewInfo.kind == .video
+            maxLongSidePixels: request.maxLongSidePixels
         )
     }
 
@@ -307,6 +310,11 @@ enum HistoryHoverPreviewPipeline {
 
             let cgImage: CGImage?
             if let storageRef, !storageRef.isEmpty {
+                let pixelSize = await Task.detached(priority: .userInitiated) {
+                    HoverPreviewLoader.displayPixelSize(fromFileAtPath: storageRef)
+                }.value
+                guard !Task.isCancelled, isCurrent() else { return nil }
+                if let pixelSize { emit(.imagePixelSize(pixelSize)) }
                 let sendable = await runBudgetedDetached(priority: .userInitiated) { () async -> SendableCGImage? in
                     guard let image = HoverPreviewLoader.makePreviewCGImage(
                         fromFileAtPath: storageRef,
@@ -320,6 +328,11 @@ enum HistoryHoverPreviewPipeline {
                 cgImage = sendable?.image
             } else {
                 guard let data = await getImageData() else { return nil }
+                let pixelSize = await Task.detached(priority: .userInitiated) {
+                    HoverPreviewLoader.displayPixelSize(from: data)
+                }.value
+                guard !Task.isCancelled, isCurrent() else { return nil }
+                if let pixelSize { emit(.imagePixelSize(pixelSize)) }
                 let sendable = await runBudgetedDetached(priority: .userInitiated) { () async -> SendableCGImage? in
                     guard let image = HoverPreviewLoader.makePreviewCGImage(
                         from: data,
@@ -362,16 +375,33 @@ enum HistoryHoverPreviewPipeline {
         let previewInfo = request.previewInfo
         let scale = request.scale
 
+        // Every kind prefetches a still: `.other` files show a static QuickLook thumbnail in the
+        // hover popover; only a pinned window hosts a live QuickLook view.
         let preparedPreviewImage: Task<CGImage?, Never> = Task(priority: .userInitiated) { @MainActor () -> CGImage? in
-            guard plan.shouldPrefetchImage else { return nil }
             if plan.prefetchDelayNanos > 0 {
                 try? await Task.sleep(nanoseconds: plan.prefetchDelayNanos)
             }
             guard !Task.isCancelled, isCurrent() else { return nil }
 
+            let path = previewInfo.url.path
+            let exists = await Task.detached(priority: .userInitiated) {
+                FileManager.default.fileExists(atPath: path)
+            }.value
+            guard !Task.isCancelled, isCurrent() else { return nil }
+            emit(.fileAvailability(exists))
+            guard exists else { return nil }
+
             if let cached = HoverPreviewImageCache.shared.image(forKey: plan.cacheKey) {
                 emit(.image(cached))
                 return cached
+            }
+
+            if previewInfo.kind == .image {
+                let pixelSize = await Task.detached(priority: .userInitiated) {
+                    HoverPreviewLoader.displayPixelSize(fromFileAtPath: path)
+                }.value
+                guard !Task.isCancelled, isCurrent() else { return nil }
+                if let pixelSize { emit(.imagePixelSize(pixelSize)) }
             }
 
             let sendable = await runBudgetedDetached(priority: .userInitiated) { () async -> SendableCGImage? in

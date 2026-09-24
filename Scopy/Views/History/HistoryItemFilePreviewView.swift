@@ -5,6 +5,7 @@ import SwiftUI
 
 struct HistoryItemFilePreviewView: View {
     @Environment(\.hoverPreviewSizeBudget) private var sizeBudget
+    @Environment(\.previewWindowActions) private var windowActions
 
     let model: HoverPreviewModel
     let thumbnailPath: String?
@@ -41,8 +42,6 @@ struct HistoryItemFilePreviewView: View {
     @State private var loadedThumbnail: NSImage?
     @State private var lastLoadedPath: String?
     @State private var videoNaturalSize: CGSize?
-    @State private var cachedFileExists: Bool = false
-    @State private var cachedFileExistsPath: String?
 
     var body: some View {
         if isMarkdownPreview {
@@ -85,7 +84,6 @@ struct HistoryItemFilePreviewView: View {
             .accessibilityElement(children: .contain)
             .previewControls { EmptyView() }
             .task(id: filePath) {
-                await updateFileExists(path: filePath)
                 await loadVideoNaturalSizeIfNeeded(path: filePath)
             }
         }
@@ -95,7 +93,8 @@ struct HistoryItemFilePreviewView: View {
     private func previewContent() -> some View {
         if kind == .video, let filePath, isFileAvailable {
             VideoPlayerPreviewView(url: URL(fileURLWithPath: filePath))
-        } else if usesQuickLookPreview, let filePath, isFileAvailable {
+        } else if usesQuickLookPreview, windowActions.isPinned, let filePath, isFileAvailable {
+            // The live QuickLook view is built only in a pinned window; hover shows the still.
             QuickLookPreviewView(url: URL(fileURLWithPath: filePath))
         } else if let cgImage = model.previewCGImage {
             Image(decorative: cgImage, scale: 1.0)
@@ -152,9 +151,7 @@ struct HistoryItemFilePreviewView: View {
     }
 
     private var isFileAvailable: Bool {
-        guard let filePath else { return false }
-        guard cachedFileExistsPath == filePath else { return false }
-        return cachedFileExists
+        filePath != nil && model.fileIsAvailable == true
     }
 
     private var videoReferenceSize: CGSize? {
@@ -196,7 +193,9 @@ struct HistoryItemFilePreviewView: View {
         }
 
         let size: CGSize?
-        if let cgImage = model.previewCGImage {
+        if let pixelSize = model.previewPixelSize {
+            size = pixelSize
+        } else if let cgImage = model.previewCGImage {
             size = CGSize(width: cgImage.width, height: cgImage.height)
         } else if let thumbnailPath {
             let loaded = lastLoadedPath == thumbnailPath ? loadedThumbnail : nil
@@ -215,25 +214,6 @@ struct HistoryItemFilePreviewView: View {
         let originalHeight = max(size.height, 1)
         let scaledHeight = width * (originalHeight / originalWidth)
         return ceil(scaledHeight)
-    }
-
-    @MainActor
-    private func updateFileExists(path: String?) async {
-        guard let path else {
-            cachedFileExistsPath = nil
-            cachedFileExists = false
-            return
-        }
-
-        cachedFileExistsPath = path
-        cachedFileExists = false
-
-        let exists = await Task.detached(priority: .utility) {
-            FileManager.default.fileExists(atPath: path)
-        }.value
-        guard !Task.isCancelled else { return }
-        guard cachedFileExistsPath == path else { return }
-        cachedFileExists = exists
     }
 
     @MainActor
