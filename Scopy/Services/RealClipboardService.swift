@@ -128,16 +128,12 @@ final class RealClipboardService: ClipboardServiceProtocol {
 public enum ClipboardServiceFactory {
     @MainActor
     public static func create(
-        useMock: Bool = false,
         databasePath: String? = nil,
         settingsStore: SettingsStore = .shared,
         monitorPasteboardName: String? = nil,
         monitorPollingInterval: TimeInterval? = nil
     ) -> ClipboardServiceProtocol {
-        if useMock {
-            return MockClipboardService()
-        }
-        return RealClipboardService(
+        RealClipboardService(
             databasePath: databasePath,
             settingsStore: settingsStore,
             monitorPasteboardName: monitorPasteboardName,

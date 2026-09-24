@@ -1,3 +1,4 @@
+#if DEBUG
 import AppKit
 import SwiftUI
 import ScopyKit
@@ -36,7 +37,7 @@ struct HistoryItemHarnessView: View {
     private let markdownWebViewController = MarkdownPreviewWebViewController()
 
     init() {
-        _settingsViewModel = State(initialValue: SettingsViewModel(service: ClipboardServiceFactory.create(useMock: true)))
+        _settingsViewModel = State(initialValue: SettingsViewModel(service: MockClipboardService()))
         let scenario = Self.scenarioFromEnvironment()
         let item = Self.makeItem(for: scenario)
         let keyboardSelected = ProcessInfo.processInfo.environment["SCOPY_UITEST_HISTORY_ITEM_KEYBOARD_SELECTED"] != "0"
@@ -420,3 +421,4 @@ Inline math: $a^2 + b^2 = c^2$
         return rep.representation(using: .png, properties: [:])
     }
 }
+#endif

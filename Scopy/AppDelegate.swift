@@ -60,6 +60,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             )
         }
 
+        #if DEBUG
         if context.isExportHarness {
             uiTestWindow = makeExportHarnessWindow()
             return
@@ -74,6 +75,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             uiTestWindow = makeListLiveScrollObserverHarnessWindow()
             return
         }
+        #endif
 
         let rootView = makeRootView(appState: appState)
 
@@ -122,11 +124,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func resolveLaunchContext() -> LaunchContext {
         let isUITesting = ProcessInfo.processInfo.arguments.contains("--uitesting")
+        #if DEBUG
         let isExportHarness = isUITesting && ProcessInfo.processInfo.environment["SCOPY_UITEST_EXPORT_HARNESS"] == "1"
         let isHistoryItemHarness = isUITesting && ProcessInfo.processInfo.environment["SCOPY_UITEST_HISTORY_ITEM_HARNESS"] == "1"
         let isListLiveScrollObserverHarness = isUITesting
             && ProcessInfo.processInfo.arguments.contains("--list-live-scroll-observer-harness")
             && ProcessInfo.processInfo.environment["SCOPY_UITEST_LIST_LIVE_SCROLL_OBSERVER_HARNESS"] == "1"
+        #else
+        // Harness windows and the mock service are compiled only into Debug builds.
+        let isExportHarness = false
+        let isHistoryItemHarness = false
+        let isListLiveScrollObserverHarness = false
+        #endif
         return LaunchContext(
             isUITesting: isUITesting,
             isExportHarness: isExportHarness,
@@ -142,6 +151,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             .environment(appState.settingsViewModel)
     }
 
+    #if DEBUG
     private func makeExportHarnessWindow() -> NSWindow {
         let window = makeHostingWindow(
             rootView: ExportPreviewHarnessView(),
@@ -173,6 +183,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             level: .floating
         )
     }
+    #endif
 
     private func makeUITestWindow<V: View>(rootView: V) -> NSWindow {
         let window = makeHostingWindow(

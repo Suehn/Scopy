@@ -1,3 +1,4 @@
+#if DEBUG
 import AppKit
 import SwiftUI
 
@@ -246,3 +247,4 @@ private final class HarnessDocumentView: NSView {
         )
     }
 }
+#endif

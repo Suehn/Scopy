@@ -1,9 +1,10 @@
+#if DEBUG
 import AppKit
 import CryptoKit
 import Foundation
+import ScopyKit
 
-/// Mock 剪贴板服务 - 用于 UI 开发和测试
-/// 符合 v0.md 的解耦验收标准: UI 可以在「后端 mock」模式下运行
+/// In-memory ClipboardServiceProtocol for UI tests (--uitesting) and unit tests; Debug builds only.
 @MainActor
 final class MockClipboardService: ClipboardServiceProtocol {
     private struct MockConfig {
@@ -114,7 +115,7 @@ final class MockClipboardService: ClipboardServiceProtocol {
 
     init() {
         let config = Self.config
-        let queue = AsyncBoundedQueue<ClipboardEvent>(capacity: ScopyThresholds.clipboardEventStreamMaxBufferedItems)
+        let queue = AsyncBoundedQueue<ClipboardEvent>(capacity: 2048)  // mirrors ScopyThresholds.clipboardEventStreamMaxBufferedItems
         self.eventQueue = queue
         self.stream = AsyncStream(unfolding: { await queue.dequeue() })
         self.settings = Self.applySettingsOverrides(config: config)
@@ -749,3 +750,4 @@ final class MockClipboardService: ClipboardServiceProtocol {
         )
     }
 }
+#endif

@@ -18,7 +18,7 @@ final class SearchBackendConsistencyTests: XCTestCase {
             note: "beta and remarktoken live only in this note"
         )
 
-        let service = ClipboardServiceFactory.create(useMock: false, databasePath: dbPath)
+        let service = ClipboardServiceFactory.create(databasePath: dbPath)
         try await service.start()
         defer { Task { @MainActor in await service.stopAndWait() } }
 
@@ -59,7 +59,7 @@ final class SearchBackendConsistencyTests: XCTestCase {
             TestDataFactory.makeTextContent("/Users/example/Cafe.txt")
         )
 
-        let service = ClipboardServiceFactory.create(useMock: false, databasePath: dbPath)
+        let service = ClipboardServiceFactory.create(databasePath: dbPath)
         try await service.start()
         defer { Task { @MainActor in await service.stopAndWait() } }
 
@@ -89,7 +89,7 @@ final class SearchBackendConsistencyTests: XCTestCase {
         try await Task.sleep(nanoseconds: 10_000_000) // 10ms delay for ordering
         let newer = try await seedStorage.upsertItem(TestDataFactory.makeTextContent("Apple Two"))
 
-        let service = ClipboardServiceFactory.create(useMock: false, databasePath: dbPath)
+        let service = ClipboardServiceFactory.create(databasePath: dbPath)
         try await service.start()
         defer { Task { @MainActor in await service.stopAndWait() } }
 
@@ -111,7 +111,7 @@ final class SearchBackendConsistencyTests: XCTestCase {
         defer { Task { @MainActor in await seedStorage.close() } }
 
         let image = try await seedStorage.upsertItem(TestDataFactory.makeImageContent())
-        let service = ClipboardServiceFactory.create(useMock: false, databasePath: dbPath)
+        let service = ClipboardServiceFactory.create(databasePath: dbPath)
         try await service.start()
         defer { Task { @MainActor in await service.stopAndWait() } }
 

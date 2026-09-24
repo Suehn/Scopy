@@ -23,7 +23,6 @@ final class StorageStatsSemanticsTests: XCTestCase {
 
         let dbPath = baseURL.appendingPathComponent("clipboard.db").path
         let service = ClipboardServiceFactory.create(
-            useMock: false,
             databasePath: dbPath,
             settingsStore: settingsStore,
             monitorPasteboardName: pasteboard.name.rawValue,

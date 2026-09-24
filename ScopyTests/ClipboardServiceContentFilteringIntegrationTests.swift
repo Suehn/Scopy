@@ -96,7 +96,6 @@ final class ClipboardServiceContentFilteringIntegrationTests: XCTestCase {
         await settingsStore.save(settings)
 
         let service = ClipboardServiceFactory.create(
-            useMock: false,
             databasePath: tempDirectory.appendingPathComponent("clipboard.db").path,
             settingsStore: settingsStore,
             monitorPasteboardName: pasteboard.name.rawValue,

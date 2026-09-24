@@ -4,7 +4,7 @@ import Foundation
 ///
 /// - Guarantees: no dropping; producers suspend when buffer is full.
 /// - Intended use: avoid `AsyncStream` `.unbounded` buffering while preserving event ordering.
-actor AsyncBoundedQueue<Element: Sendable> {
+public actor AsyncBoundedQueue<Element: Sendable> {
     private let capacity: Int
     private var buffer: [Element?]
     private var headIndex: Int = 0
@@ -25,13 +25,13 @@ actor AsyncBoundedQueue<Element: Sendable> {
     private var waitingReceivers: [ReceiverWaiter] = []
     private var waitingSenders: [SenderWaiter] = []
 
-    init(capacity: Int) {
+    public init(capacity: Int) {
         let safeCapacity = max(1, capacity)
         self.capacity = safeCapacity
         self.buffer = Array(repeating: nil, count: safeCapacity)
     }
 
-    func enqueue(_ element: Element) async {
+    public func enqueue(_ element: Element) async {
         guard !isFinished else { return }
         guard !Task.isCancelled else { return }
 
@@ -68,7 +68,7 @@ actor AsyncBoundedQueue<Element: Sendable> {
         bufferedCount += 1
     }
 
-    func dequeue() async -> Element? {
+    public func dequeue() async -> Element? {
         if bufferedCount > 0 {
             let element = buffer[headIndex]
             buffer[headIndex] = nil
@@ -101,7 +101,7 @@ actor AsyncBoundedQueue<Element: Sendable> {
         }
     }
 
-    func finish() {
+    public func finish() {
         guard !isFinished else { return }
         isFinished = true
 

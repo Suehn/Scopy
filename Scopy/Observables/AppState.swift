@@ -129,14 +129,14 @@ final class AppState {
         )
     }()
 
-    /// UI-test launches are mock-safe by default in every configuration. A real-snapshot test must
-    /// opt out explicitly with `USE_MOCK_SERVICE=0`. Ordinary Debug launches use the real service;
-    /// developers can still opt into the mock explicitly with `USE_MOCK_SERVICE=1`.
+    /// The mock exists only in Debug builds. Debug UI-test launches use it unless `USE_MOCK_SERVICE=0`;
+    /// ordinary Debug launches use the real service unless `USE_MOCK_SERVICE=1`. Release never uses it.
     static func shouldUseMockService(
         arguments: [String],
         environment: [String: String],
         isDebugBuild: Bool
     ) -> Bool {
+        guard isDebugBuild else { return false }
         if arguments.contains("--uitesting") {
             return environment["USE_MOCK_SERVICE"] != "0"
         }
@@ -151,11 +151,14 @@ final class AppState {
             resolvedService = service
             ScopyLog.app.info("Using injected Clipboard Service")
         } else if Self.useMockService {
-            resolvedService = ClipboardServiceFactory.create(useMock: true)
+            #if DEBUG
+            resolvedService = MockClipboardService()
             ScopyLog.app.info("Using Mock Clipboard Service")
+            #else
+            fatalError("The mock clipboard service is compiled only into Debug builds")
+            #endif
         } else {
             resolvedService = ClipboardServiceFactory.create(
-                useMock: false,
                 databasePath: envOptions.databasePath,
                 monitorPasteboardName: envOptions.monitorPasteboardName,
                 monitorPollingInterval: envOptions.monitorPollingInterval

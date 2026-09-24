@@ -170,7 +170,6 @@ final class ClipboardServiceCopyToClipboardTests: XCTestCase {
         await storage.close()
 
         service = ClipboardServiceFactory.create(
-            useMock: false,
             databasePath: dbPath,
             settingsStore: settingsStore,
             monitorPasteboardName: pasteboard.name.rawValue,

@@ -1,3 +1,4 @@
+#if DEBUG
 import AppKit
 import SwiftUI
 import ScopyKit
@@ -32,7 +33,7 @@ struct ExportPreviewHarnessView: View {
         m.exportFailed = false
         m.exportErrorMessage = nil
         _model = State(initialValue: m)
-        _settingsViewModel = State(initialValue: SettingsViewModel(service: ClipboardServiceFactory.create(useMock: true)))
+        _settingsViewModel = State(initialValue: SettingsViewModel(service: MockClipboardService()))
     }
 
     var body: some View {
@@ -148,3 +149,4 @@ struct ExportPreviewHarnessView: View {
         return 1
     }
 }
+#endif

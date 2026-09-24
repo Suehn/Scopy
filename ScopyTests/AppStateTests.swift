@@ -23,19 +23,26 @@ final class AppStateTests: XCTestCase {
         mockService = nil
     }
 
-    func testReleaseUITestingDefaultsToMockUnlessExplicitlyDisabled() {
-        XCTAssertTrue(
+    func testReleaseNeverUsesMockAndDebugUITestingDefaultsToMockUnlessDisabled() {
+        XCTAssertFalse(
             AppState.shouldUseMockService(
                 arguments: ["Scopy", "--uitesting"],
                 environment: [:],
                 isDebugBuild: false
             )
         )
+        XCTAssertTrue(
+            AppState.shouldUseMockService(
+                arguments: ["Scopy", "--uitesting"],
+                environment: [:],
+                isDebugBuild: true
+            )
+        )
         XCTAssertFalse(
             AppState.shouldUseMockService(
                 arguments: ["Scopy", "--uitesting"],
                 environment: ["USE_MOCK_SERVICE": "0"],
-                isDebugBuild: false
+                isDebugBuild: true
             )
         )
     }
