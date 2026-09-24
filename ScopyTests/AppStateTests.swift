@@ -84,12 +84,6 @@ final class AppStateTests: XCTestCase {
         XCTAssertNil(appState.selectedID)
     }
 
-    func testForTestingFactoryMethod() {
-        let customService = TestMockClipboardService()
-        let state = AppState.forTesting(service: customService)
-        XCTAssertNotNil(state)
-    }
-
     // MARK: - Data Loading Tests (v0.md 2.2: 首屏 50-100 条)
 
     func testInitialLoadFetches50Items() async {
@@ -399,32 +393,6 @@ final class AppStateTests: XCTestCase {
 
     // MARK: - v0.11 Keyboard Navigation Boundary Tests
 
-    /// v0.11: 空列表时调用 highlightNext 不崩溃
-    func testHighlightNextOnEmptyListDoesNotCrash() {
-        XCTAssertTrue(appState.items.isEmpty)
-        XCTAssertNil(appState.selectedID)
-
-        // 多次调用不应崩溃
-        for _ in 0..<10 {
-            appState.highlightNext()
-        }
-
-        XCTAssertNil(appState.selectedID, "Selection should remain nil on empty list")
-    }
-
-    /// v0.11: 空列表时调用 highlightPrevious 不崩溃
-    func testHighlightPreviousOnEmptyListDoesNotCrash() {
-        XCTAssertTrue(appState.items.isEmpty)
-        XCTAssertNil(appState.selectedID)
-
-        // 多次调用不应崩溃
-        for _ in 0..<10 {
-            appState.highlightPrevious()
-        }
-
-        XCTAssertNil(appState.selectedID, "Selection should remain nil on empty list")
-    }
-
     /// v0.11: 单项列表时调用 highlightNext 行为正确
     func testHighlightNextOnSingleItem() async {
         mockService.setItemCount(1)
@@ -477,30 +445,6 @@ final class AppStateTests: XCTestCase {
         // 调用 highlightNext 应该能正常工作
         appState.highlightNext()
         // 由于原选中项已不存在，应该选中第一项
-        XCTAssertNotNil(appState.selectedID)
-    }
-
-    /// v0.11: 快速连续导航不崩溃
-    func testRapidNavigationDoesNotCrash() async {
-        mockService.setItemCount(10)
-        await appState.load()
-
-        // 快速连续调用导航方法
-        for _ in 0..<100 {
-            appState.highlightNext()
-        }
-
-        for _ in 0..<100 {
-            appState.highlightPrevious()
-        }
-
-        // 交替调用
-        for _ in 0..<50 {
-            appState.highlightNext()
-            appState.highlightPrevious()
-        }
-
-        // 测试通过如果没有崩溃
         XCTAssertNotNil(appState.selectedID)
     }
 

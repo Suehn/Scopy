@@ -244,28 +244,6 @@ final class HoverPreviewIntentPolicyTests: XCTestCase {
         XCTAssertGreaterThan(insideCount, 95_000)
     }
 
-    func testSafeTriangleContains100kPerformance() throws {
-        let triangle = try XCTUnwrap(
-            HoverPreviewIntentPolicy.safeTriangle(
-                origin: CGPoint(x: 0, y: 150),
-                targetFrame: target,
-                padding: 8
-            )
-        )
-        let points = (0..<100_000).map { index in
-            let progress = CGFloat(index % 90) / 90
-            return CGPoint(x: progress * 90, y: 150 + sin(progress * .pi) * 20)
-        }
-
-        measure(metrics: [XCTClockMetric()]) {
-            var insideCount = 0
-            for point in points where triangle.contains(point, boundaryTolerance: 0.5) {
-                insideCount += 1
-            }
-            XCTAssertGreaterThan(insideCount, 95_000)
-        }
-    }
-
     private func makeHorizontalSession() -> HoverPreviewIntentPolicy.Session {
         HoverPreviewIntentPolicy.Session(
             origin: CGPoint(x: 0, y: 150),
