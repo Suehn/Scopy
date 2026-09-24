@@ -483,6 +483,7 @@ struct HistoryListView: View {
         let row = HistoryItemView(
             item: item,
             isKeyboardSelected: isSelected,
+            quickSlot: live.quickSlot,
             settings: context.settings,
             searchMatchContext: live.evidence,
             onSelect: { Task { await historyViewModel.select(item) } },

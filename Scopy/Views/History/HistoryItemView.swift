@@ -23,6 +23,7 @@ struct HistoryItemView: View, Equatable {
 
     let item: ClipboardItemDTO
     let isKeyboardSelected: Bool
+    let quickSlot: Int?
     let settings: SettingsDTO
     let searchMatchContext: SearchMatchContext?
 
@@ -75,6 +76,7 @@ struct HistoryItemView: View, Equatable {
     init(
         item: ClipboardItemDTO,
         isKeyboardSelected: Bool,
+        quickSlot: Int? = nil,
         settings: SettingsDTO,
         searchMatchContext: SearchMatchContext?,
         onSelect: @escaping () -> Void,
@@ -100,6 +102,7 @@ struct HistoryItemView: View, Equatable {
     ) {
         self.item = item
         self.isKeyboardSelected = isKeyboardSelected
+        self.quickSlot = quickSlot
         self.settings = settings
         self.searchMatchContext = searchMatchContext
         self.onSelect = onSelect
@@ -147,6 +150,7 @@ struct HistoryItemView: View, Equatable {
             lhs.item.thumbnailPath == rhs.item.thumbnailPath &&
             lhs.searchMatchContext == rhs.searchMatchContext &&
             lhs.isKeyboardSelected == rhs.isKeyboardSelected &&
+            lhs.quickSlot == rhs.quickSlot &&
             lhs.isImagePreviewPresented == rhs.isImagePreviewPresented &&
             lhs.isTextPreviewPresented == rhs.isTextPreviewPresented &&
             lhs.isFilePreviewPresented == rhs.isFilePreviewPresented &&
@@ -943,9 +947,17 @@ struct HistoryItemView: View, Equatable {
                     .foregroundStyle(ScopyColors.mutedText)
             }
 
-            Text(relativeTime)
-                .font(ScopyTypography.microMono)
-                .foregroundStyle(ScopyColors.mutedText)
+            // While ⌘ is held the slot replaces the time in the same font, so the row height
+            // and trailing layout do not move.
+            if let quickSlot {
+                Text(verbatim: "⌘\(quickSlot)")
+                    .font(ScopyTypography.microMono)
+                    .foregroundStyle(ScopyColors.mutedText)
+            } else {
+                Text(relativeTime)
+                    .font(ScopyTypography.microMono)
+                    .foregroundStyle(ScopyColors.mutedText)
+            }
         }
     }
 

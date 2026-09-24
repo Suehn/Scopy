@@ -1558,6 +1558,25 @@ final class HistoryViewModel {
         await select(item)
     }
 
+    /// ⌘1–9: the n-th displayed row with ⏎ semantics (copy and close; a failed copy keeps the
+    /// panel open). Collapsed pinned rows are not displayed, so they take no slot.
+    func selectQuickSlot(_ slot: Int) async {
+        let rows = displayOrderItems
+        guard slot >= 1, slot <= min(9, rows.count) else { return }
+        await select(rows[slot - 1])
+    }
+
+    /// While ⌘ is held the first nine displayed rows show ⌘n instead of their time.
+    func setQuickSlotHintsVisible(_ visible: Bool) {
+        var slots: [UUID: Int] = [:]
+        if visible {
+            for (index, item) in displayOrderItems.prefix(9).enumerated() {
+                slots[item.id] = index + 1
+            }
+        }
+        rowLiveState.updateQuickSlots(slots)
+    }
+
     // MARK: - Private
 
     // Prewarm a fetched page once, before publishing its first chunk. These caches cancel

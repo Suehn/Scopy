@@ -8,6 +8,9 @@ struct HistoryRowLiveState: Equatable {
     var evidence: SearchMatchContext?
     /// The hover popover this row presents, if any (at most one row at a time).
     var presentedPreview: HoverPreviewPopoverKind?
+    /// The ⌘1–9 slot shown in place of the time while ⌘ is held; only the first nine
+    /// displayed rows have one.
+    var quickSlot: Int?
 }
 
 /// Delivers selection, search evidence and the presented hover popover to the visible rows they
@@ -21,6 +24,7 @@ final class HistoryRowLiveStateFanout {
     private(set) var selectedID: UUID?
     private(set) var presentedPreview: HoverPreviewPopoverState?
     private var evidence: [UUID: SearchMatchContext] = [:]
+    private var quickSlots: [UUID: Int] = [:]
     private var sinks: [UUID: (HistoryRowLiveState) -> Void] = [:]
 
     /// Runs after a selection change was fanned out. `follow` is true for keyboard navigation,
@@ -31,7 +35,8 @@ final class HistoryRowLiveStateFanout {
         HistoryRowLiveState(
             isSelected: selectedID == itemID,
             evidence: evidence[itemID],
-            presentedPreview: presentedPreview?.itemID == itemID ? presentedPreview?.kind : nil
+            presentedPreview: presentedPreview?.itemID == itemID ? presentedPreview?.kind : nil,
+            quickSlot: quickSlots[itemID]
         )
     }
 
@@ -76,6 +81,16 @@ final class HistoryRowLiveStateFanout {
     func replaceEvidence(_ next: [UUID: SearchMatchContext]) {
         let previous = evidence
         evidence = next
+        for (itemID, sink) in sinks where previous[itemID] != next[itemID] {
+            sink(state(for: itemID))
+        }
+    }
+
+    /// Replaces the ⌘n slots (empty when ⌘ is released) and notifies only the rows whose slot changed.
+    func updateQuickSlots(_ next: [UUID: Int]) {
+        let previous = quickSlots
+        guard previous != next else { return }
+        quickSlots = next
         for (itemID, sink) in sinks where previous[itemID] != next[itemID] {
             sink(state(for: itemID))
         }

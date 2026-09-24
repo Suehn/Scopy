@@ -94,6 +94,28 @@ final class HistoryViewModelRegressionTests: XCTestCase {
         XCTAssertEqual(viewModel.selectedID, target.id)
     }
 
+    func testQuickSlotCopiesNthDisplayedRowAndSkipsCollapsedPinned() async {
+        var items = makeItems(count: 3)
+        items[0] = items[0].withPinned(true)
+        let service = HistoryViewModelRegressionService(items: items)
+        let viewModel = HistoryViewModel(service: service, settingsViewModel: SettingsViewModel(service: service))
+        defer { viewModel.stop() }
+        var closeCount = 0
+        viewModel.closePanelHandler = { closeCount += 1 }
+        await viewModel.load()
+
+        await viewModel.selectQuickSlot(1)
+        XCTAssertEqual(service.copiedItemIDs, [items[0].id], "Slot 1 is the first displayed row, the pinned one")
+        XCTAssertEqual(closeCount, 1, "⌘n copies and closes like ⏎")
+
+        viewModel.isPinnedCollapsed = true
+        await viewModel.selectQuickSlot(1)
+        XCTAssertEqual(service.copiedItemIDs.last, items[1].id, "A collapsed pinned row takes no slot")
+
+        await viewModel.selectQuickSlot(3)
+        XCTAssertEqual(service.copiedItemIDs.count, 2, "A slot past the displayed rows does nothing")
+    }
+
     func testKeyboardNavigationSkipsCollapsedPinnedRows() async {
         var items = makeItems(count: 3)
         items[0] = items[0].withPinned(true)

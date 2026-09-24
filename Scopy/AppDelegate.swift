@@ -13,6 +13,20 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         static let flags: CGEventFlags = .maskControl
     }
 
+    enum QuickSlotShortcut {
+        /// ⌘1–9 by layout-independent key code (kVK_ANSI_1…9), not by character: on AZERTY the
+        /// unshifted "1" key types "&".
+        private static let slotsByKeyCode: [UInt16: Int] = [
+            UInt16(kVK_ANSI_1): 1, UInt16(kVK_ANSI_2): 2, UInt16(kVK_ANSI_3): 3,
+            UInt16(kVK_ANSI_4): 4, UInt16(kVK_ANSI_5): 5, UInt16(kVK_ANSI_6): 6,
+            UInt16(kVK_ANSI_7): 7, UInt16(kVK_ANSI_8): 8, UInt16(kVK_ANSI_9): 9
+        ]
+
+        static func slot(forKeyCode keyCode: UInt16) -> Int? {
+            slotsByKeyCode[keyCode]
+        }
+    }
+
     enum OptionDeleteShortcut {
         /// ⌥⌫ deletes the selected history item only when pressed in the history window and no
         /// text is being edited there: the search field and note editors keep word deletion.
@@ -35,8 +49,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     /// Sparkle auto-update: checks the appcast daily, reminds the user when a new version
     /// exists, and installs + relaunches on confirmation. Disabled in UI-test harnesses.
     private(set) var updaterController: SPUStandardUpdaterController?
-    /// v0.22: 存储事件监视器引用，以便在应用退出时移除
-    private var localEventMonitor: Any?
+    private var localEventMonitors: [Any] = []
     private var memoryPressureSource: DispatchSourceMemoryPressure?
 
     private lazy var statusItem: NSStatusItem = {
@@ -112,7 +125,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         setupHotKeyRegistration()
-        installLocalEventMonitor()
+        installLocalEventMonitors()
         installMemoryPressureHandler()
     }
 
@@ -210,6 +223,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             // What the user last saw deleted must be deleted once the panel is gone.
             guard let self else { return }
             Task { @MainActor in
+                self.appState.historyViewModel.setQuickSlotHintsVisible(false)
                 await self.appState.historyViewModel.commitPendingDeletionNow()
             }
         }
@@ -295,22 +309,27 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func installLocalEventMonitor() {
-        // 注册 ⌘, 快捷键打开设置
-        // v0.22: 存储监视器引用，以便在应用退出时移除
-        localEventMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+    /// ⌘ alone; ⇧⌘, ⌥⌘ and ⌃⌘ chords stay with the responder chain.
+    private static func isPlainCommand(_ flags: NSEvent.ModifierFlags) -> Bool {
+        flags.contains(.command) && flags.isDisjoint(with: [.shift, .option, .control])
+    }
+
+    /// Panel shortcuts live here rather than in SwiftUI so the first responder decides and the
+    /// search field cannot consume them first.
+    private func installLocalEventMonitors() {
+        let keyDownMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self else { return event }
 
             let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+            let historyWindow = self.panel ?? self.uiTestWindow
 
-            // ⌥⌫ (Option+Delete) deletes the selected item. Handled here rather than in SwiftUI so
-            // the first responder decides: while text is being edited, the key stays word deletion.
+            // ⌥⌫ deletes the selected item unless text is being edited, where it stays word deletion.
             if flags.contains(.option),
                !flags.contains(.command),
                !flags.contains(.control),
                !flags.contains(.shift),
                (event.keyCode == 51 || event.keyCode == 117),
-               OptionDeleteShortcut.deletesItem(eventWindow: event.window, historyWindow: self.panel ?? self.uiTestWindow),
+               OptionDeleteShortcut.deletesItem(eventWindow: event.window, historyWindow: historyWindow),
                self.appState.historyViewModel.selectedID != nil {
                 Task { @MainActor in
                     await self.appState.historyViewModel.deleteSelectedItem()
@@ -318,17 +337,26 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 return nil
             }
 
-            let isPlainCommand = flags.contains(.command)
-                && flags.isDisjoint(with: [.shift, .option, .control])
+            let isPlainCommand = Self.isPlainCommand(flags)
 
             // ⌘Z undoes the last deletion only while its undo window is open; the rest of the
             // time the key stays text undo for the search field and note editors.
             if isPlainCommand,
                event.keyCode == UInt16(kVK_ANSI_Z),
-               event.window === (self.panel ?? self.uiTestWindow),
+               event.window === historyWindow,
                self.appState.historyViewModel.undoableDeletionID != nil {
                 Task { @MainActor in
                     await self.appState.historyViewModel.undoPendingDeletion()
+                }
+                return nil
+            }
+
+            // ⌘1–9 copies the n-th displayed row and closes the panel, like ⏎ on that row.
+            if isPlainCommand,
+               event.window === historyWindow,
+               let slot = QuickSlotShortcut.slot(forKeyCode: event.keyCode) {
+                Task { @MainActor in
+                    await self.appState.historyViewModel.selectQuickSlot(slot)
                 }
                 return nil
             }
@@ -339,6 +367,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
             return event
         }
+
+        // The ⌘n row hints follow the modifier state itself, not a key press.
+        let flagsChangedMonitor = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
+            guard let self else { return event }
+            let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+            self.appState.historyViewModel.setQuickSlotHintsVisible(
+                Self.isPlainCommand(flags) && self.panel?.isPresented == true
+            )
+            return event
+        }
+
+        localEventMonitors = [keyDownMonitor, flagsChangedMonitor].compactMap { $0 }
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
@@ -346,14 +386,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-        // 清理资源
         hotKeyService?.unregister()
         isHotKeyRegistered = false
-        // v0.22: 移除事件监视器，防止内存泄漏
-        if let monitor = localEventMonitor {
-            NSEvent.removeMonitor(monitor)
-            localEventMonitor = nil
-        }
+        localEventMonitors.forEach(NSEvent.removeMonitor)
+        localEventMonitors.removeAll()
         memoryPressureSource?.cancel()
         memoryPressureSource = nil
         appState.stop()
