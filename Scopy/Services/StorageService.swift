@@ -499,7 +499,11 @@ public final class StorageService {
                 inlineData = nil
             case .data(let data):
                 if content.sizeBytes >= Self.externalStorageThreshold {
-                    let path = makeExternalPath(id: id, type: content.type)
+                    let path = makeExternalPath(
+                        id: id,
+                        type: content.type,
+                        imageExtension: ImageFileExtension.sniff(data)
+                    )
                     storageRef = path
                     let reservationKey = Self.externalReservationKey(forPath: path)
                     guard let reservation = await sharedExternalFileReservations.acquire(
@@ -523,7 +527,11 @@ public final class StorageService {
                 }
             case .file(let url):
                 if content.sizeBytes >= Self.externalStorageThreshold {
-                    let path = makeExternalPath(id: id, type: content.type)
+                    let path = makeExternalPath(
+                        id: id,
+                        type: content.type,
+                        imageExtension: ImageFileExtension.sniff(fileAt: url)
+                    )
                     storageRef = path
                     let reservationKey = Self.externalReservationKey(forPath: path)
                     guard let reservation = await sharedExternalFileReservations.acquire(
@@ -2187,10 +2195,14 @@ public final class StorageService {
         try replaceFileAtomically(from: stagedURL, to: destinationURL)
     }
 
-    private func makeExternalPath(id: UUID, type: ClipboardItemType) -> String {
+    private func makeExternalPath(
+        id: UUID,
+        type: ClipboardItemType,
+        imageExtension: @autoclosure () -> String
+    ) -> String {
         let ext: String
         switch type {
-        case .image: ext = "png"
+        case .image: ext = imageExtension()
         case .rtf: ext = "rtf"
         case .html: ext = "html"
         default: ext = "dat"
