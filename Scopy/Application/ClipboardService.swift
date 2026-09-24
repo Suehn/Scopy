@@ -931,8 +931,7 @@ actor ClipboardService {
             )
         }
 
-        let dbPath = storage.databaseFilePath
-        let search = SearchEngineImpl(dbPath: dbPath)
+        let search = SearchEngineImpl(dbPath: storage.databaseFilePath, commitJournal: storage.commitJournal)
 
         do {
             try await storage.open()
@@ -1117,7 +1116,7 @@ actor ClipboardService {
 
     private func setPinned(itemID: UUID, pinned: Bool) async throws {
         let storage = try requireStorage()
-        let search = try requireSearch()
+        _ = try requireSearch()
         guard let lease = await itemMutationGate.acquire(itemID: itemID) else {
             throw CancellationError()
         }
@@ -1125,7 +1124,6 @@ actor ClipboardService {
         do {
             guard !Task.isCancelled else { throw CancellationError() }
             try await storage.setPin(itemID, pinned: pinned)
-            await search.handlePinnedChange(id: itemID, pinned: pinned)
             _ = await publishAuthoritativeItemState(
                 id: itemID,
                 storage: storage,
@@ -1167,7 +1165,7 @@ actor ClipboardService {
         let search = try requireSearch()
 
         try await storage.deleteItem(itemID)
-        await search.handleDeletion(id: itemID)
+        await search.applyCommittedChanges()
         fileSizeComputationLastAttemptAt.remove { $0.itemID == itemID }
         await fileSizeComputationQueue?.cancelPending { $0.itemID == itemID }
         let publication = await reservePublication(for: itemID)
@@ -1179,7 +1177,7 @@ actor ClipboardService {
         let search = try requireSearch()
 
         try await storage.deleteAllExceptPinned()
-        await search.handleClearAll()
+        await search.applyCommittedChanges()
         fileSizeComputationLastAttemptAt.removeAll()
         await fileSizeComputationQueue?.discardPending()
         await thumbnailGenerationQueue?.discardPending()
@@ -1572,6 +1570,7 @@ actor ClipboardService {
         let storage = try requireStorage()
         let updated = try await storage.syncExternalImageSizeBytesFromDisk()
         if updated > 0 {
+            await search?.applyCommittedChanges()
             ScopyLog.storage.info("Synced external image size_bytes from disk: updated=\(updated, privacy: .public)")
         }
         return updated
@@ -2004,52 +2003,15 @@ actor ClipboardService {
         return current
     }
 
-    /// Search publication is an awaited actor hop, so every pass validates the row both before
-    /// and after applying the candidate. A bounded repair loop prevents an older full DTO from
-    /// escaping when a same-ID replacement, metadata update, or deletion wins during that hop.
+    /// Applies committed storage changes to search before the item is published, so a search
+    /// issued after the event sees it, then returns the item's current row (nil when it no longer
+    /// exists or cannot be read).
     private func synchronizeSearchWithCurrentItem(
         id: UUID,
         storage: StorageService
     ) async -> StorageService.StoredItem? {
-        guard let search else { return nil }
-
-        let initial: StorageService.StoredItem?
-        do {
-            initial = try await storage.findByID(id)
-        } catch {
-            await search.invalidateCache()
-            return nil
-        }
-
-        var candidate = initial
-        for _ in 0..<3 {
-            guard let candidateItem = candidate else {
-                await search.handleDeletion(id: id)
-                return nil
-            }
-
-            await search.handleUpsertedItem(candidateItem)
-
-            let latest: StorageService.StoredItem?
-            do {
-                latest = try await storage.findByID(id)
-            } catch {
-                await search.invalidateCache()
-                return nil
-            }
-
-            guard let latest else {
-                await search.handleDeletion(id: id)
-                return nil
-            }
-            if Self.hasSameItemState(latest, as: candidateItem) {
-                return latest
-            }
-            candidate = latest
-        }
-
-        await search.invalidateCache()
-        return nil
+        await search?.applyCommittedChanges()
+        return try? await storage.findByID(id)
     }
 
     private func externalSourceMatches(
@@ -2109,19 +2071,6 @@ actor ClipboardService {
             lhs.fileSizeBytes == rhs.fileSizeBytes &&
             lhs.storageRef == rhs.storageRef &&
             lhs.rawData == rhs.rawData
-    }
-
-    private static func hasSameItemState(
-        _ lhs: StorageService.StoredItem,
-        as rhs: StorageService.StoredItem
-    ) -> Bool {
-        hasSamePayload(lhs, as: rhs) &&
-            lhs.note == rhs.note &&
-            lhs.appBundleID == rhs.appBundleID &&
-            lhs.createdAt == rhs.createdAt &&
-            lhs.lastUsedAt == rhs.lastUsedAt &&
-            lhs.useCount == rhs.useCount &&
-            lhs.isPinned == rhs.isPinned
     }
 
     private static func supersededImageOptimizationOutcome(
@@ -2372,9 +2321,7 @@ actor ClipboardService {
         guard !deletedItemIDs.isEmpty else { return }
         let deletedSet = Set(deletedItemIDs)
 
-        if let search {
-            await search.invalidateCache()
-        }
+        await search?.applyCommittedChanges()
         fileSizeComputationLastAttemptAt.remove { deletedSet.contains($0.itemID) }
         await fileSizeComputationQueue?.cancelPending { deletedSet.contains($0.itemID) }
         await eventQueue.invalidatePublications(itemIDs: deletedItemIDs)

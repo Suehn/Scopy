@@ -286,6 +286,9 @@ public actor StorageService {
     /// 数据库文件路径（用于设置窗口显示）
     public nonisolated var databaseFilePath: String { dbPath }
 
+    /// Every committed write, in commit order, for the search engine to apply.
+    nonisolated var commitJournal: StorageCommitJournal { repository.commitJournal }
+
     // MARK: - Initialization
 
     public init(

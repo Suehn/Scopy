@@ -877,7 +877,8 @@ public actor SearchEngineImpl {
     private var fullIndex: FullFuzzyIndex?
     private var fullIndexStale = true
     private var fullIndexGeneration: UInt64 = 0
-    private var observedMutationCounter: UInt64 = 0
+    /// Committed storage changes to apply in order; nil when the engine only reads the database.
+    private let commitJournal: StorageCommitJournal?
 
 #if DEBUG
     private var debugFullIndexLastSnapshotSourceValue: FullIndexSnapshotSource?
@@ -955,14 +956,17 @@ public actor SearchEngineImpl {
     // MARK: - Initialization
 
     public init(dbPath: String) {
-        self.dbPath = dbPath
-        searchTimeout = 5.0
-        initialIndexBuildTimeout = 30.0
+        self.init(dbPath: dbPath, searchTimeout: 5.0, commitJournal: nil)
     }
 
-    init(dbPath: String, searchTimeout: TimeInterval) {
+    init(dbPath: String, commitJournal: StorageCommitJournal?) {
+        self.init(dbPath: dbPath, searchTimeout: 5.0, commitJournal: commitJournal)
+    }
+
+    init(dbPath: String, searchTimeout: TimeInterval, commitJournal: StorageCommitJournal? = nil) {
         self.dbPath = dbPath
         self.searchTimeout = searchTimeout
+        self.commitJournal = commitJournal
         initialIndexBuildTimeout = 30.0
     }
 
@@ -1023,7 +1027,10 @@ public actor SearchEngineImpl {
 
     // MARK: - Cache / Index Updates
 
+    /// Drops every in-memory index and resynchronizes from the database; journaled commits up to
+    /// that point are covered by the rebuild.
     public func invalidateCache() {
+        _ = commitJournal?.drain()
         resetRecentCache()
         resetFullIndex()
         resetShortQueryIndex()
@@ -1032,11 +1039,78 @@ public actor SearchEngineImpl {
         startShortQueryIndexBuildIfNeeded()
     }
 
-    func handleUpsertedItem(_ item: ClipboardStoredItem) {
-        observedMutationCounter &+= 1
-        if invalidateInMemoryIndexesIfDBChangedExternallyBeforeApplyingInternalMutationIfNeeded() {
+    /// Applies every storage commit journaled since the last call, in commit order.
+    func applyCommittedChanges() {
+        synchronizeWithCommittedChanges()
+    }
+
+    /// Brings the indexes up to the database. Journaled commits are applied in `mutation_seq`
+    /// order; a commit missing from the journal (another process, or an overflowed journal) is a
+    /// gap that no in-memory index can reproduce, so every index is reset and rebuilt.
+    private func synchronizeWithCommittedChanges() {
+        guard connection != nil else { return }
+        // Read the database position before draining: every in-process commit up to it has been
+        // journaled by then, so a position beyond the journal means an unobserved commit.
+        let current = try? fetchDBChangeToken()
+        if let commitJournal {
+            let drained = commitJournal.drain()
+            if drained.overflowed {
+                resetIndexesForUnobservedCommits()
+                return
+            }
+            for entry in drained.entries {
+                guard let known = knownDBChangeToken else {
+                    refreshKnownDBChangeTokenIfPossible()
+                    continue
+                }
+                if entry.mutationSeq <= known { continue }
+                guard entry.mutationSeq == known + 1 else {
+                    resetIndexesForUnobservedCommits()
+                    return
+                }
+                knownDBChangeToken = entry.mutationSeq
+                apply(entry.change)
+            }
+        }
+        guard let current else { return }
+        guard let known = knownDBChangeToken else {
+            knownDBChangeToken = current
             return
         }
+        if known < current {
+            resetIndexesForUnobservedCommits()
+        }
+    }
+
+    private func resetIndexesForUnobservedCommits() {
+        resetQueryCaches()
+        resetFullIndex()
+        resetShortQueryIndex()
+        markCorpusMetricsStale()
+        refreshKnownDBChangeTokenIfPossible()
+        startShortQueryIndexBuildIfNeeded()
+    }
+
+    private func apply(_ change: StorageCommittedChange) {
+        switch change {
+        case .upserted(let item):
+            applyUpsert(item)
+        case .pinChanged(let id, let isPinned):
+            applyPinChange(id: id, pinned: isPinned)
+        case .deleted(let ids):
+            applyDeletions(ids)
+        case .clearedUnpinned:
+            resetRecentCache()
+            resetFullIndex()
+            resetShortQueryIndex()
+            markCorpusMetricsStale()
+            startShortQueryIndexBuildIfNeeded()
+        case .unindexedFields:
+            break
+        }
+    }
+
+    private func applyUpsert(_ item: ClipboardStoredItem) {
         resetQueryCaches()
         handleShortQueryIndexUpsert(item)
 
@@ -1077,11 +1151,7 @@ public actor SearchEngineImpl {
         }
     }
 
-    func handlePinnedChange(id: UUID, pinned: Bool) {
-        observedMutationCounter &+= 1
-        if invalidateInMemoryIndexesIfDBChangedExternallyBeforeApplyingInternalMutationIfNeeded() {
-            return
-        }
+    private func applyPinChange(id: UUID, pinned: Bool) {
         resetQueryCaches()
 
         if fullIndexBuildTask != nil {
@@ -1105,45 +1175,34 @@ public actor SearchEngineImpl {
         markIndexChanged()
     }
 
-    func handleDeletion(id: UUID) {
-        observedMutationCounter &+= 1
-        if invalidateInMemoryIndexesIfDBChangedExternallyBeforeApplyingInternalMutationIfNeeded() {
-            return
-        }
+    /// Tombstones one committed delete set in both indexes, checking the rebuild threshold once.
+    private func applyDeletions(_ ids: [UUID]) {
+        guard !ids.isEmpty else { return }
         markCorpusMetricsStale()
-        handleShortQueryIndexDeletion(id: id)
+        resetQueryCaches()
+        handleShortQueryIndexDeletions(ids)
 
         if fullIndexBuildTask != nil {
-            fullIndexPendingEvents.append(.delete(id))
-            resetQueryCaches()
+            fullIndexPendingEvents.append(contentsOf: ids.map(FullIndexPendingEvent.delete))
             return
         }
 
-        if var index = fullIndex,
-           !fullIndexStale,
-           let slot = index.idToSlot[id],
-           slot < index.items.count {
-            fullIndex = nil
-            if index.items[slot] != nil {
-                index.items[slot] = nil
-                index.tombstoneCount += 1
-            }
-            index.idToSlot.removeValue(forKey: id)
-            fullIndex = index
-            markIndexChanged()
-
-            if shouldMarkFullIndexStaleDueToTombstones(index: index) {
-                fullIndexStale = true
-                startFullIndexBuildIfNeeded(force: true)
-            }
+        guard var index = fullIndex, !fullIndexStale else { return }
+        fullIndex = nil
+        for id in ids {
+            guard let slot = index.idToSlot.removeValue(forKey: id),
+                  slot < index.items.count,
+                  index.items[slot] != nil else { continue }
+            index.items[slot] = nil
+            index.tombstoneCount += 1
         }
+        fullIndex = index
+        markIndexChanged()
 
-        resetQueryCaches()
-    }
-
-    func handleClearAll() {
-        observedMutationCounter &+= 1
-        invalidateCache()
+        if shouldMarkFullIndexStaleDueToTombstones(index: index) {
+            fullIndexStale = true
+            startFullIndexBuildIfNeeded(force: true)
+        }
     }
 
     private func resetRecentCache() {
@@ -1183,7 +1242,7 @@ public actor SearchEngineImpl {
         }
 
         guard var index = shortQueryIndex else { return }
-        // See `handleUpsertedItem`: release the property's reference so the upsert mutates the
+        // See `applyUpsert`: release the property's reference so the upsert mutates the
         // existing buffers instead of copying the whole index on every clipboard write.
         shortQueryIndex = nil
         index.upsert(item)
@@ -1207,15 +1266,17 @@ public actor SearchEngineImpl {
         return ratio >= shortQueryIndexTombstoneRatioRebuildThreshold
     }
 
-    private func handleShortQueryIndexDeletion(id: UUID) {
+    private func handleShortQueryIndexDeletions(_ ids: [UUID]) {
         if shortQueryIndexBuildTask != nil {
-            shortQueryIndexPendingDeletions.append(id)
+            shortQueryIndexPendingDeletions.append(contentsOf: ids)
             return
         }
 
         guard var index = shortQueryIndex else { return }
         shortQueryIndex = nil
-        index.markDeleted(id: id)
+        for id in ids {
+            index.markDeleted(id: id)
+        }
         if shouldRebuildShortQueryIndexDueToTombstones(index: index) {
             let liveCount = index.healthStats().live
             resetShortQueryIndex()
@@ -1290,15 +1351,13 @@ public actor SearchEngineImpl {
         }
 
         fullIndexPendingEvents = []
-        let startedMutationCounter = observedMutationCounter
-        let startedDBChangeToken = knownDBChangeToken ?? (try? fetchDBChangeToken()) ?? 0
 
         fullIndexBuildGeneration &+= 1
         let generation = fullIndexBuildGeneration
         let reserveSlots = estimatedCount
         fullIndexBuildTrigger = trigger
 
-        fullIndexBuildTask = Task.detached(priority: .utility) { [dbPath, startedMutationCounter, startedDBChangeToken] in
+        fullIndexBuildTask = Task.detached(priority: .utility) { [dbPath] in
             var warmLoadMetrics = SearchWarmLoadMetrics()
             let loadStart = ProcessInfo.processInfo.systemUptime
             let cached = SearchIndexDiskCache.loadFullSnapshot(dbPath: dbPath, metrics: &warmLoadMetrics)
@@ -1308,8 +1367,6 @@ public actor SearchEngineImpl {
                 ?? FullIndexBuilder.buildSnapshot(dbPath: dbPath, reserveSlots: reserveSlots, metrics: &warmLoadMetrics)
             await self.finishFullIndexBuild(
                 generation: generation,
-                startedMutationCounter: startedMutationCounter,
-                startedDBChangeToken: startedDBChangeToken,
                 snapshot: snapshot,
                 warmLoadMetrics: warmLoadMetrics
             )
@@ -1514,7 +1571,7 @@ public actor SearchEngineImpl {
 
     private func scheduleShortQueryIndexDiskCachePersistIfPossible() {
         guard shortQueryIndexDiskCachePersistTask == nil else { return }
-        invalidateInMemoryIndexesIfDBChangedExternally()
+        synchronizeWithCommittedChanges()
         guard let index = shortQueryIndex else { return }
         // `knownDBChangeToken` is the mutation_seq the in-memory index content corresponds to;
         // stamping the cache with it (rather than re-reading the DB) keeps the two atomic.
@@ -1540,7 +1597,7 @@ public actor SearchEngineImpl {
 
     private func scheduleFullIndexDiskCachePersistIfPossible() {
         guard fullIndexDiskCachePersistTask == nil else { return }
-        invalidateInMemoryIndexesIfDBChangedExternally()
+        synchronizeWithCommittedChanges()
         guard let index = fullIndex, !fullIndexStale else { return }
         guard usesMutationSeq, let mutationSeq = knownDBChangeToken else { return }
         guard let request = SearchIndexDiskCache.makeFullPersistRequest(
@@ -1563,6 +1620,8 @@ public actor SearchEngineImpl {
     }
 
     private func finishShortQueryIndexBuild(generation: UInt64, snapshot: ShortQueryIndexSnapshot?) {
+        guard shortQueryIndexBuildGeneration == generation else { return }
+        synchronizeWithCommittedChanges()
         guard shortQueryIndexBuildGeneration == generation else { return }
         shortQueryIndexBuildTask = nil
 
@@ -1595,11 +1654,13 @@ public actor SearchEngineImpl {
 
     private func finishFullIndexBuild(
         generation: UInt64,
-        startedMutationCounter: UInt64,
-        startedDBChangeToken: Int64,
         snapshot: FullIndexSnapshot?,
         warmLoadMetrics: SearchWarmLoadMetrics
     ) {
+        guard fullIndexBuildGeneration == generation else { return }
+        // Collect every commit made during the build as pending events; an unobserved commit
+        // resets the indexes, which also supersedes this build.
+        synchronizeWithCommittedChanges()
         guard fullIndexBuildGeneration == generation else { return }
         fullIndexBuildTask = nil
         fullIndexBuildTrigger = nil
@@ -1614,25 +1675,6 @@ public actor SearchEngineImpl {
         fullIndexPendingEvents = []
 
         guard let snapshot else { return }
-        if usesMutationSeq,
-           snapshot.source == .database,
-           let currentToken = try? fetchDBChangeToken() {
-            let observedDelta = Int64(observedMutationCounter &- startedMutationCounter)
-            let expectedToken = startedDBChangeToken &+ observedDelta
-            if currentToken != expectedToken {
-                // The DB changed during background build, but those commits weren't fully observed via our callbacks
-                // (e.g. cleanup transactions, another app instance, or a missed notification). Drop in-memory
-                // indexes/caches to guarantee full-history correctness.
-                resetQueryCaches()
-                resetFullIndex()
-                resetShortQueryIndex()
-                markCorpusMetricsStale()
-                knownDBChangeToken = currentToken
-                startShortQueryIndexBuildIfNeeded()
-                return
-            }
-        }
-
         var index = snapshot.index
 
 #if DEBUG
@@ -1708,61 +1750,6 @@ public actor SearchEngineImpl {
         if let v = try? fetchDBChangeToken() {
             knownDBChangeToken = v
         }
-    }
-
-    @discardableResult
-    private func invalidateInMemoryIndexesIfDBChangedExternallyBeforeApplyingInternalMutationIfNeeded() -> Bool {
-        guard connection != nil else { return false }
-        guard let known = knownDBChangeToken else {
-            refreshKnownDBChangeTokenIfPossible()
-            return false
-        }
-        guard let current = try? fetchDBChangeToken() else { return false }
-        guard current != known else { return false }
-
-        if usesMutationSeq {
-            // Our update callbacks are invoked per storage commit, and `mutation_seq` is incremented
-            // exactly once per commit. Therefore delta == 1 is the expected case.
-            if current == known + 1 {
-                knownDBChangeToken = current
-                return false
-            }
-        } else {
-            // Fallback: best-effort with `PRAGMA data_version`. We cannot rely on it being a strict
-            // per-commit counter across all SQLite builds/modes, but delta == 1 is still the expected
-            // case for our own storage commits.
-            if current == known + 1 {
-                knownDBChangeToken = current
-                return false
-            }
-        }
-
-        resetQueryCaches()
-        resetFullIndex()
-        resetShortQueryIndex()
-        markCorpusMetricsStale()
-        knownDBChangeToken = current
-        startShortQueryIndexBuildIfNeeded()
-        return true
-    }
-
-    private func invalidateInMemoryIndexesIfDBChangedExternally() {
-        guard connection != nil else { return }
-        guard let known = knownDBChangeToken else {
-            refreshKnownDBChangeTokenIfPossible()
-            return
-        }
-        guard let current = try? fetchDBChangeToken() else { return }
-        guard current != known else { return }
-
-        // DB has changed but we haven't observed it through our update callbacks yet.
-        // To guarantee "full history" correctness, drop in-memory indexes/caches and fall back to SQL scans.
-        resetQueryCaches()
-        resetFullIndex()
-        resetShortQueryIndex()
-        markCorpusMetricsStale()
-        knownDBChangeToken = current
-        startShortQueryIndexBuildIfNeeded()
     }
 
     // MARK: - Search API
@@ -1893,9 +1880,9 @@ public actor SearchEngineImpl {
         }
 
         if let perf {
-            perf.measure("invalidate_external_db_change") { invalidateInMemoryIndexesIfDBChangedExternally() }
+            perf.measure("invalidate_external_db_change") { synchronizeWithCommittedChanges() }
         } else {
-            invalidateInMemoryIndexesIfDBChangedExternally()
+            synchronizeWithCommittedChanges()
         }
         try Task.checkCancellation()
 

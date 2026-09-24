@@ -13,7 +13,7 @@ final class SearchServiceTests: XCTestCase {
     override func setUp() async throws {
         storage = StorageService(databasePath: Self.makeSharedInMemoryDatabasePath())
         try await storage.open()
-        search = SearchEngineImpl(dbPath: storage.databaseFilePath)
+        search = SearchEngineImpl(dbPath: storage.databaseFilePath, commitJournal: storage.commitJournal)
         try await search.open()
     }
 
@@ -1106,7 +1106,7 @@ final class SearchServiceTests: XCTestCase {
         var startedRebuild = false
         for item in toDelete {
             try await storage.deleteItem(item.id)
-            await search.handleDeletion(id: item.id)
+            await search.applyCommittedChanges()
 
             let health = await search.debugShortQueryIndexHealth()
             if health.isBuilding {
@@ -1250,11 +1250,11 @@ final class SearchServiceTests: XCTestCase {
             request: SearchRequest(query: "xxx", mode: .fuzzy, sortMode: .relevance, forceFullFuzzy: true, limit: 10, offset: 0)
         )
 
-        guard let updated = try await storage.updateNote(id: noteOnly.id, note: "ab") else {
+        guard try await storage.updateNote(id: noteOnly.id, note: "ab") != nil else {
             XCTFail("updateNote returned nil")
             return
         }
-        await search.handleUpsertedItem(updated)
+        await search.applyCommittedChanges()
 
         let result = try await search.search(
             request: SearchRequest(query: "ab", mode: .fuzzy, sortMode: .relevance, limit: 10, offset: 0)

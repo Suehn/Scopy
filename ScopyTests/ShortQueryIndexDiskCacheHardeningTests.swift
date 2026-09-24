@@ -239,18 +239,18 @@ final class ShortQueryIndexDiskCacheHardeningTests: XCTestCase {
 
             let inserted = try await storage.upsertItem(content)
 
-            let search1 = SearchEngineImpl(dbPath: dbPath)
+            let search1 = SearchEngineImpl(dbPath: dbPath, commitJournal: storage.commitJournal)
             try await search1.open()
             let paths: (cachePath: String, checksumPath: String)
             await search1.debugStartShortQueryIndexBuild(force: true)
             await search1.debugAwaitShortQueryIndexBuild()
             paths = await search1.debugShortQueryIndexDiskCachePaths()
+            // Let the post-build persist finish so close() persists the updated index.
+            try await Self.waitForFile(at: paths.checksumPath, timeoutSeconds: Self.fileWaitTimeoutSeconds)
 
-            // Simulate a common "usage update" path: same contentHash => update lastUsedAt/useCount only.
-            var updated = inserted
-            updated.lastUsedAt = Date()
-            updated.useCount += 1
-            await search1.handleUpsertedItem(updated)
+            // A common "usage update" path: same contentHash => update lastUsedAt/useCount only.
+            _ = try await storage.incrementUsage(id: inserted.id, at: Date())
+            await search1.applyCommittedChanges()
 
             await search1.close()
 
@@ -297,7 +297,7 @@ final class ShortQueryIndexDiskCacheHardeningTests: XCTestCase {
 
             let inserted = try await storage.upsertItem(content)
 
-            let search1 = SearchEngineImpl(dbPath: dbPath)
+            let search1 = SearchEngineImpl(dbPath: dbPath, commitJournal: storage.commitJournal)
             try await search1.open()
             let paths: (cachePath: String, checksumPath: String)
             do {
@@ -319,23 +319,8 @@ final class ShortQueryIndexDiskCacheHardeningTests: XCTestCase {
                 let warmSource = await search1.debugShortQueryIndexLastSnapshotSource()
                 XCTAssertEqual(warmSource, "diskCache")
 
-                let updated = ClipboardStoredItem(
-                    id: inserted.id,
-                    type: inserted.type,
-                    contentHash: inserted.contentHash,
-                    plainText: inserted.plainText,
-                    note: "note-2",
-                    appBundleID: inserted.appBundleID,
-                    createdAt: inserted.createdAt,
-                    lastUsedAt: Date(),
-                    useCount: inserted.useCount,
-                    isPinned: inserted.isPinned,
-                    sizeBytes: inserted.sizeBytes,
-                    fileSizeBytes: inserted.fileSizeBytes,
-                    storageRef: inserted.storageRef,
-                    rawData: inserted.rawData
-                )
-                await search1.handleUpsertedItem(updated)
+                _ = try await storage.updateNote(id: inserted.id, note: "note-2")
+                await search1.applyCommittedChanges()
 
                 let stats1 = await search1.debugShortQueryIndexStats()
                 XCTAssertEqual(stats1.live, 1)

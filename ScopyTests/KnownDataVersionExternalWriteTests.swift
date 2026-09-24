@@ -27,7 +27,7 @@ final class KnownDataVersionExternalWriteTests: XCTestCase {
 
         let apple = try await storage.upsertItem(makeTextContent("apple"))
 
-        let search = SearchEngineImpl(dbPath: dbPath)
+        let search = SearchEngineImpl(dbPath: dbPath, commitJournal: storage.commitJournal)
         try await search.open()
 
         _ = try await search.search(request: SearchRequest(query: "apple", mode: .fuzzy, limit: 10, offset: 0))
@@ -36,15 +36,17 @@ final class KnownDataVersionExternalWriteTests: XCTestCase {
         XCTAssertTrue(health.isBuilt)
         #endif
 
-        // Simulate an "external" DB write (or a missed callback): write via storage, but don't call
-        // search.handleUpsertedItem for the new row.
-        let banana = try await storage.upsertItem(makeTextContent("banana"))
+        // Simulate an "external" DB write: a second storage writes the row, so its commit never
+        // reaches the engine's journal.
+        let external = StorageService(databasePath: dbPath)
+        try await external.open()
+        let banana = try await external.upsertItem(makeTextContent("banana"))
+        await external.close()
 
-        // Now perform a normal internal mutation that *does* notify SearchEngineImpl. If SearchEngineImpl
-        // blindly refreshes knownDataVersion here, it can swallow the prior unobserved commit and keep a
-        // stale in-memory full index (missing "banana").
-        let cherry = try await storage.upsertItem(makeTextContent("cherry"))
-        await search.handleUpsertedItem(cherry)
+        // Now perform a normal internal mutation that *is* journaled. Applying it must not swallow
+        // the prior unobserved commit and keep a stale in-memory full index (missing "banana").
+        _ = try await storage.upsertItem(makeTextContent("cherry"))
+        await search.applyCommittedChanges()
 
         let result = try await search.search(request: SearchRequest(query: "banana", mode: .fuzzy, limit: 10, offset: 0))
         XCTAssertTrue(result.items.contains { $0.id == banana.id })
