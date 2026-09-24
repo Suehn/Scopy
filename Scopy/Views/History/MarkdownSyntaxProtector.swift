@@ -11,7 +11,6 @@ enum MarkdownSyntaxIslandKind: Equatable {
     case inlineLink
     case image
     case referenceLink
-    case shortcutReference
     case referenceDefinition
     case autolink
     case url
@@ -19,7 +18,7 @@ enum MarkdownSyntaxIslandKind: Equatable {
 }
 
 enum MarkdownSyntaxProtector {
-    static func protectForLooseMathRepair(_ markdown: String) -> MarkdownSyntaxProtectionResult {
+    static func protectForLaTeXDocumentNormalization(_ markdown: String) -> MarkdownSyntaxProtectionResult {
         guard !markdown.isEmpty else {
             return MarkdownSyntaxProtectionResult(markdown: markdown, placeholders: [])
         }
@@ -197,8 +196,8 @@ enum MarkdownSyntaxProtector {
             guard line[index] == "<" else { return nil }
             let next = line.index(after: index)
             guard next < line.endIndex else { return nil }
-            let tail = String(line[next...]).lowercased()
-            guard tail.hasPrefix("http://") || tail.hasPrefix("https://") || tail.hasPrefix("mailto:") else { return nil }
+            let head = lowercasedHead(of: line, at: next, length: 8)
+            guard head.hasPrefix("http://") || head.hasPrefix("https://") || head.hasPrefix("mailto:") else { return nil }
             guard let close = line[next...].firstIndex(of: ">") else { return nil }
             let body = line[next..<close]
             guard !body.contains(where: { $0.isWhitespace || $0.isNewline }) else { return nil }
@@ -242,24 +241,31 @@ enum MarkdownSyntaxProtector {
         }
 
         private func urlSpan(in line: String, at index: String.Index) -> String.Index? {
-            let tail = String(line[index...]).lowercased()
-            guard tail.hasPrefix("http://") || tail.hasPrefix("https://") else { return nil }
+            guard line[index] == "h" || line[index] == "H" else { return nil }
+            let head = lowercasedHead(of: line, at: index, length: 8)
+            guard head.hasPrefix("http://") || head.hasPrefix("https://") else { return nil }
             return consumeUntilBoundary(in: line, from: index)
         }
 
         private func filePathSpan(in line: String, at index: String.Index) -> String.Index? {
-            let tail = String(line[index...])
-            let lowerTail = tail.lowercased()
+            let tail = line[index...]
             guard tail.hasPrefix("/Users/")
                 || tail.hasPrefix("/Volumes/")
                 || tail.hasPrefix("~/")
                 || tail.hasPrefix("./")
                 || tail.hasPrefix("../")
-                || lowerTail.hasPrefix("file://")
+                || ((line[index] == "f" || line[index] == "F")
+                    && lowercasedHead(of: line, at: index, length: 7).hasPrefix("file://"))
             else {
                 return nil
             }
             return consumeUntilBoundary(in: line, from: index)
+        }
+
+        /// Lowercases only the next `length` characters, so probing every position of a long line
+        /// does not copy the rest of the line each time.
+        private func lowercasedHead(of line: String, at index: String.Index, length: Int) -> String {
+            line[index...].prefix(length).lowercased()
         }
 
         private func consumeUntilBoundary(in line: String, from index: String.Index) -> String.Index {

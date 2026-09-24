@@ -66,7 +66,7 @@ private enum MarkdownPreviewScrollViewResolver {
 @MainActor
 private enum MarkdownPreviewMessageParser {
     static func metrics(from message: WKScriptMessage) -> MarkdownContentMetrics? {
-        guard message.name == MarkdownPreviewWebView.sizeMessageHandlerName else { return nil }
+        guard message.name == MarkdownPreviewWebViewController.sizeMessageHandlerName else { return nil }
 
         var size: CGSize?
         var overflowX: Bool = false
@@ -341,272 +341,9 @@ struct MarkdownPreviewMetricDeliveryIdentity: Equatable {
     let renderKey: String
 }
 
-struct MarkdownPreviewOneShotMetricDeliveryIdentity: Equatable {
-    let renderID: String
-    let callbackID: UUID
-}
-
-struct MarkdownPreviewWebView: NSViewRepresentable {
-    let html: String
-    let shouldScroll: Bool
-    let onContentSizeChange: @MainActor (MarkdownContentMetrics) -> Void
-
-    private static let blockNetworkRuleListIdentifier = "ScopyMarkdownPreviewBlockNetwork"
-    fileprivate static let sizeMessageHandlerName = "scopySize"
-    private static let blockNetworkRulesJSON = """
-    [
-      {
-        "trigger": { "url-filter": "https?://.*" },
-        "action": { "type": "block" }
-      }
-    ]
-    """
-    private static var cachedBlockNetworkRuleList: WKContentRuleList?
-    private static var isCompilingRuleList: Bool = false
-    private static let ruleListLock = NSLock()
-    private static let pendingControllers = NSHashTable<WKUserContentController>.weakObjects()
-
-    @MainActor
-    func makeNSView(context: Context) -> WKWebView {
-        let config = WKWebViewConfiguration()
-        SourceIconSchemeHandler.install(in: config)
-        config.websiteDataStore = .nonPersistent()
-        config.defaultWebpagePreferences.allowsContentJavaScript = true
-        config.preferences.javaScriptCanOpenWindowsAutomatically = false
-        config.userContentController = WKUserContentController()
-
-        Self.installNetworkBlocker(into: config.userContentController)
-        config.userContentController.add(context.coordinator.sizeMessageHandlerProxy, name: Self.sizeMessageHandlerName)
-
-        let webView = WKWebView(frame: .zero, configuration: config)
-        webView.navigationDelegate = context.coordinator
-        webView.uiDelegate = context.coordinator
-        webView.allowsMagnification = false
-        webView.setValue(false, forKey: "drawsBackground")
-        configureScrollers(for: webView, shouldScroll: shouldScroll)
-        context.coordinator.attachScrollbarAutoHiderIfPossible(for: webView)
-        return webView
-    }
-
-    @MainActor
-    func updateNSView(_ webView: WKWebView, context: Context) {
-        context.coordinator.onContentSizeChange = onContentSizeChange
-        configureScrollers(for: webView, shouldScroll: shouldScroll)
-        context.coordinator.attachScrollbarAutoHiderIfPossible(for: webView)
-
-        if context.coordinator.lastHTML != html {
-            context.coordinator.lastHTML = html
-            let baseURL = Bundle.main.resourceURL?.appendingPathComponent("MarkdownPreview", isDirectory: true)
-            context.coordinator.load(html: html, in: webView, baseURL: baseURL)
-        }
-    }
-
-    @MainActor
-    func makeCoordinator() -> Coordinator {
-        Coordinator()
-    }
-
-    @MainActor
-    static func dismantleNSView(_ nsView: WKWebView, coordinator: Coordinator) {
-        nsView.stopLoading()
-        nsView.navigationDelegate = nil
-        nsView.uiDelegate = nil
-        nsView.configuration.userContentController.removeScriptMessageHandler(forName: Self.sizeMessageHandlerName)
-        coordinator.scrollbarAutoHider.detach()
-    }
-
-    @MainActor
-    private func configureScrollers(for webView: WKWebView, shouldScroll: Bool) {
-        guard let scrollView = MarkdownPreviewScrollViewResolver.resolve(for: webView) else { return }
-        scrollView.hasVerticalScroller = shouldScroll
-        // Keep the outer horizontal scroller disabled. Horizontal overflow is handled inside HTML (e.g. KaTeX/code)
-        // so we don't show a persistent bottom bar under the system "always show scroll bars" setting.
-        scrollView.hasHorizontalScroller = false
-        scrollView.autohidesScrollers = true
-        scrollView.scrollerStyle = .overlay
-        scrollView.drawsBackground = false
-    }
-
-    fileprivate static func installNetworkBlocker(into controller: WKUserContentController) {
-        ruleListLock.lock()
-        if let cached = cachedBlockNetworkRuleList {
-            ruleListLock.unlock()
-            controller.add(cached)
-            return
-        }
-        pendingControllers.add(controller)
-        if isCompilingRuleList {
-            ruleListLock.unlock()
-            return
-        }
-        isCompilingRuleList = true
-        ruleListLock.unlock()
-
-        WKContentRuleListStore.default().compileContentRuleList(
-            forIdentifier: blockNetworkRuleListIdentifier,
-            encodedContentRuleList: blockNetworkRulesJSON
-        ) { ruleList, _ in
-            ruleListLock.lock()
-            isCompilingRuleList = false
-            if let ruleList {
-                cachedBlockNetworkRuleList = ruleList
-            }
-            ruleListLock.unlock()
-
-            guard let ruleList else { return }
-            DispatchQueue.main.async {
-                for pending in pendingControllers.allObjects {
-                    pending.add(ruleList)
-                }
-            }
-        }
-    }
-
-    @MainActor
-    final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler {
-        var lastHTML: String = ""
-        var onContentSizeChange: (@MainActor (MarkdownContentMetrics) -> Void)?
-        private var lastReportedMetrics: MarkdownContentMetrics = MarkdownContentMetrics(size: .zero, hasHorizontalOverflow: false)
-        private var currentRenderID: String = ""
-        private var currentCallbackID = UUID()
-        private var currentNavigation: WKNavigation?
-        let scrollbarAutoHider = ScrollbarAutoHider()
-        let sizeMessageHandlerProxy = WeakScriptMessageHandler()
-
-        override init() {
-            super.init()
-            sizeMessageHandlerProxy.delegate = self
-        }
-
-        func load(html: String, in webView: WKWebView, baseURL: URL?) {
-            currentRenderID = UUID().uuidString
-            currentCallbackID = UUID()
-            lastReportedMetrics = MarkdownContentMetrics(size: .zero, hasHorizontalOverflow: false)
-            webView.alphaValue = 0
-            let document = MarkdownPreviewRenderIdentity.injecting(currentRenderID, into: html)
-            currentNavigation = webView.loadHTMLString(document, baseURL: baseURL)
-        }
-
-        func attachScrollbarAutoHiderIfPossible(for webView: WKWebView) {
-            if let scrollView = MarkdownPreviewScrollViewResolver.resolve(for: webView) {
-                scrollbarAutoHider.attach(to: scrollView)
-            } else {
-                Task { @MainActor [weak self, weak webView] in
-                    await Task.yield()
-                    guard let self, let webView else { return }
-                    if let scrollView = MarkdownPreviewScrollViewResolver.resolve(for: webView) {
-                        self.scrollbarAutoHider.attach(to: scrollView)
-                    }
-                }
-            }
-        }
-
-        @MainActor
-        func webView(
-            _ webView: WKWebView,
-            decidePolicyFor navigationAction: WKNavigationAction,
-            decisionHandler: @escaping @MainActor (WKNavigationActionPolicy) -> Void
-        ) {
-            MarkdownPreviewNavigationPolicy.handle(
-                navigationAction,
-                in: webView,
-                decisionHandler: decisionHandler
-            )
-        }
-
-        func webView(
-            _ webView: WKWebView,
-            createWebViewWith configuration: WKWebViewConfiguration,
-            for navigationAction: WKNavigationAction,
-            windowFeatures: WKWindowFeatures
-        ) -> WKWebView? {
-            nil
-        }
-
-        func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-            guard navigation === currentNavigation else { return }
-            currentNavigation = nil
-            // Best-effort: ensure math render runs even if DOMContentLoaded timing varies.
-            attachScrollbarAutoHiderIfPossible(for: webView)
-            webView.evaluateJavaScript("typeof window.__scopyRenderMath === 'function'") { result, _ in
-                guard let ok = result as? Bool, ok else { return }
-                webView.evaluateJavaScript("window.__scopyRenderMath()") { _, _ in }
-            }
-            webView.evaluateJavaScript("typeof window.__scopyReportHeight === 'function'") { result, _ in
-                guard let ok = result as? Bool, ok else { return }
-                webView.evaluateJavaScript("window.__scopyReportHeight()") { _, _ in }
-            }
-        }
-
-        func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
-            handleNavigationFailure(navigation, in: webView, reason: error.localizedDescription)
-        }
-
-        func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
-            handleNavigationFailure(navigation, in: webView, reason: error.localizedDescription)
-        }
-
-        func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
-            handleNavigationFailure(nil, in: webView, reason: "Web content process terminated")
-        }
-
-        func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
-            guard let metrics = MarkdownPreviewMessageParser.metrics(from: message) else { return }
-            guard message.frameInfo.isMainFrame, metrics.renderID == currentRenderID else { return }
-            if metrics.isEquivalent(to: lastReportedMetrics) { return }
-            lastReportedMetrics = metrics
-            if let wk = message.webView {
-                wk.alphaValue = metrics.renderSucceeded ? 1 : 0
-                attachScrollbarAutoHiderIfPossible(for: wk)
-            }
-            scheduleMetricsDelivery(metrics, capturedIdentity: metricDeliveryIdentity)
-        }
-
-        private func handleNavigationFailure(_ navigation: WKNavigation?, in webView: WKWebView, reason: String) {
-            if let navigation {
-                guard navigation === currentNavigation else { return }
-            }
-            currentNavigation = nil
-            webView.alphaValue = 0
-            let metrics = MarkdownContentMetrics(
-                size: CGSize(width: max(1, webView.bounds.width), height: max(1, webView.bounds.height)),
-                hasHorizontalOverflow: false,
-                renderSucceeded: false,
-                renderErrorReason: reason,
-                renderID: currentRenderID
-            )
-            guard !metrics.isEquivalent(to: lastReportedMetrics) else { return }
-            lastReportedMetrics = metrics
-            scheduleMetricsDelivery(metrics, capturedIdentity: metricDeliveryIdentity)
-        }
-
-        var metricDeliveryIdentity: MarkdownPreviewOneShotMetricDeliveryIdentity {
-            MarkdownPreviewOneShotMetricDeliveryIdentity(
-                renderID: currentRenderID,
-                callbackID: currentCallbackID
-            )
-        }
-
-        func scheduleMetricsDelivery(
-            _ metrics: MarkdownContentMetrics,
-            capturedIdentity: MarkdownPreviewOneShotMetricDeliveryIdentity
-        ) {
-            guard metrics.renderID == capturedIdentity.renderID,
-                  let callback = onContentSizeChange
-            else {
-                return
-            }
-
-            Task { @MainActor [weak self] in
-                guard let self, self.metricDeliveryIdentity == capturedIdentity else { return }
-                callback(metrics)
-            }
-        }
-    }
-}
-
 @MainActor
 final class MarkdownPreviewWebViewController: NSObject, ObservableObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler {
+    static let sizeMessageHandlerName = "scopySize"
     let webView: WKWebView
 
     var onContentSizeChange: (@MainActor (MarkdownContentMetrics) -> Void)?
@@ -636,13 +373,7 @@ final class MarkdownPreviewWebViewController: NSObject, ObservableObject, WKNavi
             MarkdownPreviewScrollViewResolver.resolve(for: $0)
         }
     ) {
-        let config = WKWebViewConfiguration()
-        SourceIconSchemeHandler.install(in: config)
-        config.websiteDataStore = .nonPersistent()
-        config.defaultWebpagePreferences.allowsContentJavaScript = true
-        config.preferences.javaScriptCanOpenWindowsAutomatically = false
-        config.userContentController = WKUserContentController()
-
+        let config = MarkdownWebKitEnvironment.makeConfiguration()
         let wv = WKWebView(frame: .zero, configuration: config)
         wv.allowsMagnification = false
         wv.setValue(false, forKey: "drawsBackground")
@@ -650,10 +381,8 @@ final class MarkdownPreviewWebViewController: NSObject, ObservableObject, WKNavi
         self.scrollViewResolver = scrollViewResolver
         super.init()
 
-        // Reuse the same network blocker & message handler semantics as the one-shot web view.
-        MarkdownPreviewWebView.installNetworkBlocker(into: config.userContentController)
         sizeMessageHandlerProxy.delegate = self
-        config.userContentController.add(sizeMessageHandlerProxy, name: MarkdownPreviewWebView.sizeMessageHandlerName)
+        config.userContentController.add(sizeMessageHandlerProxy, name: Self.sizeMessageHandlerName)
 
         attachWebViewIfNeeded()
     }
@@ -681,8 +410,8 @@ final class MarkdownPreviewWebViewController: NSObject, ObservableObject, WKNavi
     private func attachWebViewIfNeeded() {
         guard !bridgeIsAttached else { return }
         let controller = webView.configuration.userContentController
-        controller.removeScriptMessageHandler(forName: MarkdownPreviewWebView.sizeMessageHandlerName)
-        controller.add(sizeMessageHandlerProxy, name: MarkdownPreviewWebView.sizeMessageHandlerName)
+        controller.removeScriptMessageHandler(forName: Self.sizeMessageHandlerName)
+        controller.add(sizeMessageHandlerProxy, name: Self.sizeMessageHandlerName)
 
         webView.navigationDelegate = self
         webView.uiDelegate = self
@@ -700,7 +429,7 @@ final class MarkdownPreviewWebViewController: NSObject, ObservableObject, WKNavi
         webView.stopLoading()
         webView.navigationDelegate = nil
         webView.uiDelegate = nil
-        webView.configuration.userContentController.removeScriptMessageHandler(forName: MarkdownPreviewWebView.sizeMessageHandlerName)
+        webView.configuration.userContentController.removeScriptMessageHandler(forName: Self.sizeMessageHandlerName)
         scrollbarAutoHider.detach()
         onContentSizeChange = nil
         bridgeIsAttached = false
@@ -1019,12 +748,8 @@ final class MarkdownPreviewWebViewController: NSObject, ObservableObject, WKNavi
     }
 
     private func requestContentRefresh(for webView: WKWebView, forceSizeReport: Bool) {
-        // Best-effort: ensure math render & size reporting run even if DOMContentLoaded timing varies,
+        // Best-effort: ensure size reporting runs even if DOMContentLoaded timing varies,
         // and for reuse cases where the web view is re-attached without a navigation finishing.
-        webView.evaluateJavaScript("typeof window.__scopyRenderMath === 'function'") { result, _ in
-            guard let ok = result as? Bool, ok else { return }
-            webView.evaluateJavaScript("window.__scopyRenderMath()") { _, _ in }
-        }
         webView.evaluateJavaScript("typeof window.__scopyReportHeight === 'function'") { result, _ in
             guard let ok = result as? Bool, ok else { return }
             let force = forceSizeReport ? "true" : "false"

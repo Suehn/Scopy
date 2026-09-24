@@ -710,12 +710,12 @@ enum HistoryHoverPreviewPipeline {
         await runBudgetedDetached(priority: .utility) {
             if ScrollPerformanceProfile.isEnabled {
                 let start = CFAbsoluteTimeGetCurrent()
-                let html = MarkdownHTMLRenderer.render(markdown: source, context: context).html
+                let html = MarkdownHTMLRenderer.render(markdown: source, context: context)
                 let elapsed = (CFAbsoluteTimeGetCurrent() - start) * 1000
                 ScrollPerformanceProfile.recordTiming(name: "hover.markdown_render_ms", elapsedMs: elapsed)
                 return html
             }
-            return MarkdownHTMLRenderer.render(markdown: source, context: context).html
+            return MarkdownHTMLRenderer.render(markdown: source, context: context)
         } ?? ""
     }
 

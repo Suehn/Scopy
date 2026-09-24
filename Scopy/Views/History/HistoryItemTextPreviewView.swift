@@ -91,7 +91,7 @@ struct HistoryItemTextPreviewView: View {
                 if model.isMarkdown, model.markdownHTML == nil, showMarkdownPlaceholder {
                     ProgressView()
                         .frame(width: width, height: clampedHeight)
-                } else if model.isMarkdown, let html = model.markdownHTML {
+                } else if model.isMarkdown, let html = model.markdownHTML, let controller = markdownWebViewController {
                     let layoutScale = activeMarkdownLayoutScale
                     let renderKey = HoverPreviewModel.markdownRenderKey(source: text, layoutScale: layoutScale)
                     let defaultRenderKey = HoverPreviewModel.markdownRenderKey(
@@ -109,30 +109,17 @@ struct HistoryItemTextPreviewView: View {
                         defaultHTMLIsFresh: defaultHTMLIsFresh
                     )
                     ZStack(alignment: .topTrailing) {
-                        if let controller = markdownWebViewController {
-                            ReusableMarkdownPreviewWebView(
-                                controller: controller,
-                                html: displayedDocument.html,
-                                shouldScroll: shouldScroll,
-                                onContentSizeChange: { metrics in
-                                    guard !displayedDocument.isPendingActiveScale else { return }
-                                    applyMarkdownMetrics(metrics, renderKey: displayedDocument.renderKey)
-                                }
-                            )
-                            .frame(width: width, height: clampedHeight)
-                            .accessibilityHidden(isUITesting)
-                        } else {
-                            MarkdownPreviewWebView(
-                                html: displayedDocument.html,
-                                shouldScroll: shouldScroll,
-                                onContentSizeChange: { metrics in
-                                    guard !displayedDocument.isPendingActiveScale else { return }
-                                    applyMarkdownMetrics(metrics, renderKey: displayedDocument.renderKey)
-                                }
-                            )
-                            .frame(width: width, height: clampedHeight)
-                            .accessibilityHidden(isUITesting)
-                        }
+                        ReusableMarkdownPreviewWebView(
+                            controller: controller,
+                            html: displayedDocument.html,
+                            shouldScroll: shouldScroll,
+                            onContentSizeChange: { metrics in
+                                guard !displayedDocument.isPendingActiveScale else { return }
+                                applyMarkdownMetrics(metrics, renderKey: displayedDocument.renderKey)
+                            }
+                        )
+                        .frame(width: width, height: clampedHeight)
+                        .accessibilityHidden(isUITesting)
 
                         // The shield covers first paints and real reloads only. While a stale
                         // document intentionally stays on screen (scale change or enrichment
@@ -430,7 +417,7 @@ struct HistoryItemTextPreviewView: View {
                 for: source,
                 layoutScale: layoutScale
             )
-            return MarkdownHTMLRenderer.render(markdown: source, context: context).html
+            return MarkdownHTMLRenderer.render(markdown: source, context: context)
         }.value
         guard !Task.isCancelled else { return }
         guard isContentCurrent() else { return }

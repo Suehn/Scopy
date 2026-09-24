@@ -222,18 +222,17 @@ final class ChatGPTMarkdownRendererTests: XCTestCase {
         let narrowOutput = MarkdownHTMLRenderer.render(markdown: "Text", context: narrowContext)
         let wideOutput = MarkdownHTMLRenderer.render(markdown: "Text", context: wideContext)
 
-        XCTAssertTrue(narrowOutput.html.contains("--scopy-chatgpt-thread-content-max-width: 640.0px;"))
-        XCTAssertFalse(narrowOutput.html.contains("--scopy-chatgpt-thread-content-max-width: 768.0px;"))
-        XCTAssertTrue(wideOutput.html.contains("--scopy-chatgpt-thread-content-max-width: 768.0px;"))
-        XCTAssertFalse(wideOutput.html.contains("--scopy-chatgpt-thread-content-max-width: 640.0px;"))
-        XCTAssertFalse(narrowOutput.html.contains("@media (min-width: 856.0px)"))
-        XCTAssertFalse(wideOutput.html.contains("@media (min-width: 856.0px)"))
-        XCTAssertTrue(narrowOutput.html.contains("--scopy-chatgpt-output-surface-width: 816.0px;"))
-        XCTAssertTrue(narrowOutput.html.contains("margin-inline: auto;"))
-        XCTAssertTrue(narrowOutput.html.contains("min-width: var(--scopy-chatgpt-thread-content-width);"))
-        XCTAssertTrue(narrowOutput.html.contains("--scopy-chatgpt-browser-zoom: 1.25;"))
+        XCTAssertTrue(narrowOutput.contains("--scopy-chatgpt-thread-content-max-width: 640.0px;"))
+        XCTAssertFalse(narrowOutput.contains("--scopy-chatgpt-thread-content-max-width: 768.0px;"))
+        XCTAssertTrue(wideOutput.contains("--scopy-chatgpt-thread-content-max-width: 768.0px;"))
+        XCTAssertFalse(wideOutput.contains("--scopy-chatgpt-thread-content-max-width: 640.0px;"))
+        XCTAssertFalse(narrowOutput.contains("@media (min-width: 856.0px)"))
+        XCTAssertFalse(wideOutput.contains("@media (min-width: 856.0px)"))
+        XCTAssertTrue(narrowOutput.contains("--scopy-chatgpt-output-surface-width: 816.0px;"))
+        XCTAssertTrue(narrowOutput.contains("margin-inline: auto;"))
+        XCTAssertTrue(narrowOutput.contains("min-width: var(--scopy-chatgpt-thread-content-width);"))
+        XCTAssertTrue(narrowOutput.contains("--scopy-chatgpt-browser-zoom: 1.25;"))
         XCTAssertEqual(narrowContext.layoutScale, .percent125)
-        XCTAssertEqual(MarkdownRenderLayoutConstants.renderWidth(for: .percent125), 816)
         // The 816px output surface is the canonical wide desktop state: 100% scale renders the
         // 48rem column, and only zooming in (logical viewport < 816) selects the 40rem column.
         XCTAssertEqual(
@@ -292,7 +291,7 @@ final class ChatGPTMarkdownRendererTests: XCTestCase {
         let sourceLiteral = String(data: try JSONEncoder().encode(source), encoding: .utf8)!
 
         for context in contexts {
-            let html = MarkdownHTMLRenderer.render(markdown: source, context: context).html
+            let html = MarkdownHTMLRenderer.render(markdown: source, context: context)
             XCTAssertTrue(html.contains("ScopyUnifiedMarkdown.render(\(sourceLiteral),"), "profile=\(context.profile)")
         }
     }
@@ -416,5 +415,50 @@ final class ChatGPTMarkdownRendererTests: XCTestCase {
         XCTAssertTrue(base.isEquivalent(to: withinPixel))
         XCTAssertFalse(base.isEquivalent(to: failed))
         XCTAssertFalse(base.isEquivalent(to: nextGeneration))
+    }
+
+    /// Default profiles skip the LaTeX-document protector round trip; the embedded source must
+    /// still be exactly the heading- and table-pipe-normalized input.
+    func testDefaultProfilesEmbedSourceAfterOnlyHeadingAndPipeRepair() throws {
+        let casesData = try TestFixture.data("MarkdownRenderingCorpus/cases.json")
+        let cases = try XCTUnwrap(JSONSerialization.jsonObject(with: casesData) as? [[String: Any]])
+        let fixtures = ["markdown_delimiter_repro.md"]
+            + cases.compactMap { $0["file"] as? String }.map { "MarkdownRenderingCorpus/\($0)" }
+        var checked = 0
+        for fixture in fixtures {
+            let source = try String(contentsOf: TestFixture.url(fixture), encoding: .utf8)
+            let context = MarkdownRenderContextResolver.defaultContext(for: source)
+            guard !context.policy.allowLatexDocumentNormalize, !context.policy.allowLatexInlineTextNormalize else {
+                continue
+            }
+            let html = MarkdownHTMLRenderer.render(markdown: source, context: context)
+            XCTAssertEqual(
+                try embeddedSource(in: html),
+                MarkdownTableCodeSpanPipeNormalizer.normalize(MarkdownATXHeadingNormalizer.normalize(source)),
+                fixture
+            )
+            checked += 1
+        }
+        XCTAssertGreaterThan(checked, 5)
+    }
+
+    private func embeddedSource(in html: String) throws -> String {
+        let marker = "window.ScopyUnifiedMarkdown.render("
+        let start = try XCTUnwrap(html.range(of: marker)).upperBound
+        var index = html.index(after: start)
+        var escaped = false
+        while index < html.endIndex {
+            let character = html[index]
+            if escaped {
+                escaped = false
+            } else if character == "\\" {
+                escaped = true
+            } else if character == "\"" {
+                break
+            }
+            index = html.index(after: index)
+        }
+        let literal = String(html[start...index])
+        return try JSONDecoder().decode(String.self, from: Data(literal.utf8))
     }
 }

@@ -739,45 +739,6 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
         static let dumpPDFPath = "SCOPY_EXPORT_PDF_DUMP_PATH"
     }
 
-    private enum ExportNetworkBlocker {
-        private static let ruleListIdentifier = "ScopyMarkdownExportBlockNetwork"
-        private static let rulesJSON = """
-        [
-          {
-            "trigger": { "url-filter": "https?://.*" },
-            "action": { "type": "block" }
-          }
-        ]
-        """
-        @MainActor
-        private static var cachedRuleList: WKContentRuleList?
-        @MainActor
-        private static var compilingTask: Task<WKContentRuleList?, Never>?
-
-        @MainActor
-        static func ruleList() async -> WKContentRuleList? {
-            if let cachedRuleList { return cachedRuleList }
-            if let compilingTask { return await compilingTask.value }
-
-            let task = Task { @MainActor () -> WKContentRuleList? in
-                await withCheckedContinuation { continuation in
-                    WKContentRuleListStore.default().compileContentRuleList(
-                        forIdentifier: ruleListIdentifier,
-                        encodedContentRuleList: rulesJSON
-                    ) { ruleList, _ in
-                        continuation.resume(returning: ruleList)
-                    }
-                }
-            }
-
-            compilingTask = task
-            let result = await task.value
-            cachedRuleList = result
-            compilingTask = nil
-            return result
-        }
-    }
-
     private let html: String
     private let layoutWidthPixels: CGFloat
     private let layoutWidthPoints: CGFloat
@@ -895,19 +856,8 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
         guard !isCompleted else { return }
 
         // Create offscreen WebView with an explicit viewport size to make layout deterministic.
-        let config = WKWebViewConfiguration()
-        SourceIconSchemeHandler.install(in: config)
-        config.websiteDataStore = .nonPersistent()
-        config.defaultWebpagePreferences.allowsContentJavaScript = true
-        config.preferences.javaScriptCanOpenWindowsAutomatically = false
-        config.userContentController = WKUserContentController()
-
-        if !ProcessInfo.processInfo.arguments.contains("--uitesting"),
-           let ruleList = await ExportNetworkBlocker.ruleList()
-        {
-            config.userContentController.add(ruleList)
-        }
-
+        await MarkdownWebKitEnvironment.prepareRules()
+        let config = MarkdownWebKitEnvironment.makeConfiguration()
         let wv = WKWebView(
             frame: CGRect(
                 x: 0,
@@ -1503,7 +1453,6 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
               } catch (e) { }
               try { if (typeof window.syncChatGPTZoomShell === 'function') { window.syncChatGPTZoomShell(content); } } catch (e) { }
             }
-            try { if (typeof window.__scopyRenderMath === 'function') { window.__scopyRenderMath(); } } catch (e) { }
           } catch (e) { }
           return true;
         })();
@@ -2051,25 +2000,6 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
         return scale
     }
 
-    nonisolated private static func parseHeightsFromLayoutDebugInfo(_ value: String) -> [CGFloat] {
-        guard let data = value.data(using: .utf8),
-              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-        else { return [] }
-
-        let keys = [
-            "contentScrollHeight",
-            "contentRectHeight"
-        ]
-
-        return keys.compactMap { key in
-            if let number = obj[key] as? NSNumber { return max(0, CGFloat(truncating: number)) }
-            if let double = obj[key] as? Double { return max(0, CGFloat(double)) }
-            if let int = obj[key] as? Int { return max(0, CGFloat(int)) }
-            if let string = obj[key] as? String, let value = Double(string) { return max(0, CGFloat(value)) }
-            return nil
-        }
-    }
-
     nonisolated private static func parseNumberFromLayoutDebugInfo(_ value: String, key: String) -> CGFloat? {
         guard let data = value.data(using: .utf8),
               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
@@ -2500,22 +2430,17 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
         }
     }
 
-    /// Hands the bitmap to pngquant as raw pixels; falls back to ImageIO's PNG encoder when pngquant is
-    /// disabled or declines the image.
     /// Encodes the finished canvas: pngquant maps the canvas file directly; ImageIO encodes the bitmap only when
     /// pngquant is disabled or declines the quality floor.
     nonisolated static func encodeExportCanvas(
         _ canvas: ExportBitmapCanvas,
         pngquantOptions: PngquantService.Options?
     ) throws -> MarkdownExportService.ExportOutcome {
-        let startedAt = DispatchTime.now().uptimeNanoseconds
         canvas.trimBlankLeadingRowsIfNeeded()
-        let pixels = canvas.width * canvas.height
         if let pngquantOptions {
             do {
                 try canvas.finalizeFile()
                 if let quantized = PngquantService.compressPAMFileBestEffort(canvas.fileURL, options: pngquantOptions) {
-                    logEncodeDuration(since: startedAt, pixels: pixels, bytes: quantized.count, encoder: "pngquant")
                     return MarkdownExportService.ExportOutcome(
                         pngData: quantized,
                         stats: MarkdownExportService.ExportStats(finalPNGBytes: quantized.count, pngquantApplied: true)
@@ -2529,17 +2454,9 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
             throw MarkdownExportService.ExportError.stageFailed(stage: .pngEncoding, underlying: nil)
         }
         let png = try pngDataFromCGImage(image)
-        logEncodeDuration(since: startedAt, pixels: pixels, bytes: png.count, encoder: "ImageIO")
         return MarkdownExportService.ExportOutcome(
             pngData: png,
             stats: MarkdownExportService.ExportStats(finalPNGBytes: png.count, pngquantApplied: false)
-        )
-    }
-
-    nonisolated private static func logEncodeDuration(since startedAt: UInt64, pixels: Int, bytes: Int, encoder: StaticString) {
-        let milliseconds = Double(DispatchTime.now().uptimeNanoseconds &- startedAt) / 1_000_000
-        MarkdownExportService.logger.info(
-            "Encoded export PNG via \(encoder, privacy: .public): \(pixels, privacy: .public) px -> \(bytes, privacy: .public) bytes in \(milliseconds, format: .fixed(precision: 1), privacy: .public) ms"
         )
     }
 

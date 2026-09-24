@@ -135,41 +135,6 @@ final class WebViewLifecycleTests: XCTestCase {
         XCTAssertNotEqual(firstIdentity.renderKey, secondIdentity.renderKey)
     }
 
-    func testOneShotDeferredMetricsCannotCrossRenderOrCallbackBoundary() {
-        let coordinator = MarkdownPreviewWebView.Coordinator()
-        let webView = WKWebView()
-        var deliveries: [String] = []
-
-        coordinator.onContentSizeChange = { _ in deliveries.append("first") }
-        coordinator.load(html: "<html><body>first</body></html>", in: webView, baseURL: nil)
-        let firstIdentity = coordinator.metricDeliveryIdentity
-        coordinator.scheduleMetricsDelivery(
-            MarkdownContentMetrics(
-                size: CGSize(width: 320, height: 200),
-                hasHorizontalOverflow: false,
-                renderID: firstIdentity.renderID
-            ),
-            capturedIdentity: firstIdentity
-        )
-
-        coordinator.onContentSizeChange = { _ in deliveries.append("second") }
-        coordinator.load(html: "<html><body>second</body></html>", in: webView, baseURL: nil)
-        let secondIdentity = coordinator.metricDeliveryIdentity
-        coordinator.scheduleMetricsDelivery(
-            MarkdownContentMetrics(
-                size: CGSize(width: 320, height: 240),
-                hasHorizontalOverflow: false,
-                renderID: secondIdentity.renderID
-            ),
-            capturedIdentity: secondIdentity
-        )
-
-        XCTAssertTrue(runMainLoopUntil(timeout: 1) { deliveries.count == 1 })
-        XCTAssertEqual(deliveries, ["second"])
-        XCTAssertNotEqual(firstIdentity.renderID, secondIdentity.renderID)
-        XCTAssertNotEqual(firstIdentity.callbackID, secondIdentity.callbackID)
-    }
-
     func testWebContentProcessTerminationEmitsFailureAndOnlyNewOwnerCanRetry() {
         let controller = MarkdownPreviewWebViewController()
         let firstOwner = UUID()
@@ -369,7 +334,7 @@ final class WebViewLifecycleTests: XCTestCase {
             let context = MarkdownRenderContextResolver.defaultContext(for: source, layoutScale: MarkdownChatGPTLayoutScalePercent(settingsValue: scale))
             let documentName = "layout-\(scale)-\(scrollbarWidth).html"
             let document = testAssets.appendingPathComponent(documentName)
-            let html = MarkdownHTMLRenderer.render(markdown: source, context: context).html
+            let html = MarkdownHTMLRenderer.render(markdown: source, context: context)
                 .replacingOccurrences(of: "</head>", with: "<style>html { overflow-y: scroll; } ::-webkit-scrollbar { width: \(scrollbarWidth)px; height: \(scrollbarWidth)px; }</style></head>")
             try html.write(to: document, atomically: true, encoding: .utf8)
             controller.webView.navigationDelegate = nil
