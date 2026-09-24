@@ -42,7 +42,7 @@ The app target imports backend/UI support through SwiftPM products rather than c
 | `Scopy/Application` | App-facing backend facade, notably `ClipboardService` |
 | `Scopy/Domain` | DTOs, protocols, and domain-level types |
 | `Scopy/Infrastructure` | Search engine, persistence helpers, settings/configuration infrastructure |
-| `Scopy/Services` | Storage, clipboard monitoring, and concrete service primitives |
+| `Scopy/Services` | Storage, clipboard monitoring (`ClipboardMonitor` plus the `Services/Capture` read/decide/extract/spool/pipeline/writer types), and concrete service primitives |
 | `Scopy/Observables` | State/view-model layer that adapts backend protocols to SwiftUI |
 | `Scopy/Views` | Main panel, header, history items, settings pages, UI testing harnesses |
 | `Scopy/Resources` | Markdown preview assets, bundled tools, third-party runtime resources |
@@ -62,7 +62,7 @@ Implication: app shell code should stay orchestration-only; backend initializati
 
 ### 2. Clipboard Ingest
 
-1. `ClipboardMonitor` observes pasteboard changes and normalizes clipboard payloads. Externally backed captures are first written as owned payload + pending envelope artifacts under the Application Support ingest spool; legacy cache envelopes are migrated or drained without overwriting a replayable destination.
+1. `ClipboardMonitor` polls the pasteboard and hands each change to the `Services/Capture` types: `PasteboardReadSession` reads it once, `CapturePolicy` picks the type, `CapturedTextExtraction` normalizes text off the main actor, and the serial bounded ingest queue keeps history order equal to copy order. Externally backed captures are first written as owned payload + pending envelope artifacts under the Application Support ingest spool; legacy cache envelopes are migrated or drained without overwriting a replayable destination.
 2. `ClipboardService.handleNewContent(_:)` decides how to ingest, deduplicate, and schedule cleanup. The envelope UUID is the ingest idempotency key.
 3. `StorageService` (an actor; its file-system work never runs on the main thread) retains durable spool sources, validates every path against the owned root, and places any managed candidate at a unique destination without consuming the source.
 4. `SQLiteClipboardRepository` resolves the receipt, item insert/dedup mutation, and content-free `ingest_receipts` write in one `BEGIN IMMEDIATE` transaction. Outcomes are `inserted`, `updated`, or `alreadyApplied`; only the first two publish product events.
