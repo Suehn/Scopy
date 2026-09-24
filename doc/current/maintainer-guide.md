@@ -20,7 +20,8 @@ related_versions:
 - Markdown/rich rendering contract: [markdown-chatgpt-wacz-style-contract.md](./markdown-chatgpt-wacz-style-contract.md)
 - Release runbook: [release-runbook.md](./release-runbook.md)
 - Requirements: [product-spec.md](./product-spec.md)
-- Architecture/optimization guidance: [architecture.md](./architecture.md)
+- Architecture boundaries and invariants: [architecture.md](./architecture.md)
+- Work selection: [high-leverage-change-guide.md](./high-leverage-change-guide.md)
 
 ## Read By Scenario
 
@@ -50,18 +51,17 @@ related_versions:
 - `make docs-validate`
 - `make release-validate`
 - `make test-release-policy`
-- `make quality-manifest-self-test` when quality evidence tooling changes
 - `bash scripts/release/tag-from-doc.sh --tag` reads the metadata tag without creating it
 
 ## Active Vs Historical Docs
 
 - `doc/current/` contains active operating guidance and current constraints.
 - `doc/releases/` contains the current release window and immutable release history.
-- `doc/perf/` and `doc/reviews/` contain evidence, not source-of-truth product requirements.
+- `doc/perf/`, `doc/reviews/`, and `doc/proposals/` contain evidence and drafts; they never override `doc/current`.
 - `doc/archive/` preserves pre-reorg material; use it for traceability, not day-to-day navigation.
 
 ## Obsolete-Path Policy
 
-- Do not preserve legacy paths for inbound compatibility. Historical files may remain only as non-normative evidence under `doc/archive`; remove obsolete active paths and update callers to canonical locations under `doc/current`, `doc/releases`, `doc/perf`, `doc/reviews`, `doc/proposals`, and `doc/meta`.
+- Do not preserve legacy paths for inbound compatibility: the former `doc/implementation`, `doc/profiles`, `doc/specs` directories and root aliases were removed, and no redirects or symlinks are recreated. Historical files may remain only as non-normative evidence under `doc/archive`; update callers to canonical locations under `doc/current`, `doc/releases`, `doc/perf`, `doc/reviews`, `doc/proposals`, and `doc/meta`.
 - Do not add new automation that scrapes Markdown tables for release state.
 - Do not grant non-release workflows write permission or add workflow-owned tag creation. Keep publication downstream of a deliberate existing tag or explicit dispatch.

@@ -56,7 +56,7 @@ The app target imports backend/UI support through SwiftPM products rather than c
 ### 1. Application Startup
 
 1. `AppDelegate.applicationDidFinishLaunching` boots the menu bar app, windows/panel, and root state wiring.
-2. `AppState.start()` chooses the service implementation, starts it, subscribes to event streams, and triggers initial loads.
+2. `AppState` selects the service implementation in its initializer (`ClipboardServiceFactory`; the mock only for `--uitesting`, or `USE_MOCK_SERVICE=1` in Debug). `AppState.start()` starts it, subscribes to `eventStream`, applies settings, and triggers the initial loads. `ClipboardService.start()` takes the storage-root writer lock before touching any shared directory; a second instance fails to start with a visible message.
 3. `ClipboardService.start()` brings up `ClipboardMonitor`, `StorageService`, and `SearchEngineImpl`.
 
 Implication: app shell code should stay orchestration-only; backend initialization belongs behind `ClipboardServiceProtocol`.
@@ -65,7 +65,7 @@ Implication: app shell code should stay orchestration-only; backend initializati
 
 1. `ClipboardMonitor` observes pasteboard changes and normalizes clipboard payloads. Externally backed captures are first written as owned payload + pending envelope artifacts under the Application Support ingest spool; legacy cache envelopes are migrated or drained without overwriting a replayable destination.
 2. `ClipboardService.handleNewContent(_:)` decides how to ingest, deduplicate, and schedule cleanup. The envelope UUID is the ingest idempotency key.
-3. `StorageService` retains durable spool sources, validates every path against the owned root, and publishes any managed candidate to a unique destination without consuming the source.
+3. `StorageService` (an actor; its file-system work never runs on the main thread) retains durable spool sources, validates every path against the owned root, and places any managed candidate at a unique destination without consuming the source.
 4. `SQLiteClipboardRepository` resolves the receipt, item insert/dedup mutation, and content-free `ingest_receipts` write in one `BEGIN IMMEDIATE` transaction. Outcomes are `inserted`, `updated`, or `alreadyApplied`; only the first two publish product events.
 5. Acknowledgement moves the pending envelope to a non-replay terminal marker before receipt removal and bounded artifact cleanup. Failure before that transition leaves enough evidence for restart replay.
 
@@ -74,13 +74,13 @@ Implication: clipboard semantics, dedup, cleanup triggering, and safe file handl
 ### 3. History Loading And Search
 
 1. `HistoryViewModel.load()` uses `fetchPinned()` plus `fetchRecentUnpinned(limit:offset:)` so pinned rows do not consume the initial recent-page quota.
-2. `HistoryViewModel.loadMore()` uses `fetchRecentUnpinned(limit:offset:)` with the current unpinned count as offset; the initial recent page is 50 and load-more pages are 500.
+2. `HistoryViewModel.loadMore()` uses `fetchRecentUnpinned(limit:offset:)` with the current unpinned count as offset; the initial recent page is 50 items and load-more pages are 100 (`HistoryViewModel.initialPageSize` / `loadMorePageSize`).
 3. `HistoryViewModel.search()` builds a `SearchRequest` and calls `search(query:)`.
 4. `SearchEngineImpl` executes mode-specific behavior for `exact`, `fuzzy`, `fuzzyPlus`, and `regex`.
-5. Exact search planning and execution must share `SearchPlanner.normalizedExactQuery(_:)` so whitespace trimming affects both coverage decisions and matching consistently.
+5. Exact search execution (`SearchEngineImpl.searchExact`) and match-evidence generation (`SearchMatchContextBuilder`) must share `SearchQueryNormalization.normalizedExactQuery(_:)`, so trimming affects the recent-only cutoff, matching, and evidence identically. Query routing is the `switch request.mode` in the engine; there is no separate planner.
 6. UI updates are event-driven; the list should not depend on ad hoc full reloads for ordinary mutations.
 7. Search results expose `SearchCoverage` so UI can distinguish complete results, staged fuzzy refinement, and intentional recent-only limits.
-8. Search result pages and engine results carry `SearchCoverage` directly. Its `isPrefilter` predicate describes staged coverage for match-context generation; there is no legacy result initializer.
+8. Search result pages and engine results carry `SearchCoverage` directly. Match-evidence generation adds FTS phrase evidence only for `stagedRefine` coverage; recent-only and incomplete coverage keep the plain evidence path.
 
 Implication: changes to search semantics belong in the request model, search engine, and user-visible docs together.
 
@@ -118,7 +118,7 @@ Implication: preview/export work must remain background-safe and should not muta
 1. `StorageService` builds repository `DeletePlan` values whose `DeleteCandidate` snapshots include item ID, type, content hash, recency, size, and storage ref for cleanup-by-count, cleanup-by-age, cleanup-by-size, image-only cleanup, external-storage cleanup, and composite cleanup.
 2. Planning is advisory. `SQLiteClipboardRepository.commitDeletePlan(_:)` starts `BEGIN IMMEDIATE`, reloads each candidate, revalidates the full cleanup snapshot plus unpinned state, deletes only matching rows, and captures exact storage refs from those rows in the same transaction.
 3. `StorageService.applyDeletePlan` immediately reports the committed `CleanupResult` before bounded file cleanup. External refs are containment-validated, reserved by canonical path, and batch-checked for surviving owners before unlink; a file failure never rolls the database deletion back.
-4. `ClipboardService` invalidates stale publications/search state and emits one `.itemsRemoved([UUID])` event from the exact committed IDs. The handoff survives cancellation of the debounce/caller task after commit.
+4. `ClipboardService` applies the exact committed deletion set to the search indexes (tombstones, not a rebuild), invalidates stale publications, and emits one `.itemsRemoved([UUID])` event from the exact committed IDs. The handoff survives cancellation of the debounce/caller task after commit. Every storage commit sends the search engine exactly one notification carrying that commit's `mutation_seq`; a gap in the sequence invalidates the in-memory indexes.
 5. `HistoryViewModel` removes those IDs in linear time, preserves pagination state, and refreshes the authoritative total instead of full-reloading the list.
 
 Implication: new cleanup variants must use the commit-time revalidating executor. A pre-transaction plan is never authority to delete a row or file.
@@ -134,7 +134,7 @@ Implication: new cleanup variants must use the commit-time revalidating executor
 
 Implication: storage, search hydration, cleanup planning, and presentation must observe the same exact positive byte count without changing the public DTO shape.
 
-### 4.5 List Interaction Coordination
+### 4.3 List Interaction Coordination
 
 1. `HistoryListView` owns `HistoryListInteractionCoordinator` and passes it into rows / observers as list-scoped state.
 2. `HistoryItemView` keeps its passive descriptor and content revision directly, but creates one optional `HistoryItemInteractionState` only for a real hover/action or owned asynchronous lifetime. Do not restore eager row controllers.
@@ -195,27 +195,47 @@ These choices apply the [Astra instruction-following and verification guidance](
 - `make build` / `make release` compile Debug / Release without replacing the installed app.
 - `./deploy.sh release --no-launch` builds and installs into `/Applications`; use it when installation is intended. The flag skips launch only. Xcode products stay in isolated DerivedData while SwiftPM continues to own `.build`
 - `make test-unit`
-- `make test-tooling` checks project regeneration, per-worktree test build isolation, and the source/performance/quality evidence gates without Xcode or GUI access; CI runs the same entrypoint.
+- `make test-tooling` checks project regeneration and per-worktree test build isolation without Xcode or GUI access; CI runs the same entrypoint.
 - Explicit test DerivedData paths are scoped by a hash of the checkout path, then by flag variant. Parallel worktrees do not share the strict/performance/sanitizer build database. Plain builds and unit tests retain Xcode's default project-path isolation.
 - The XcodeGen cache tracks project/package configuration, source and resource paths, and generator version. Source-content edits remain incremental; adding/removing a resource regenerates the project just like adding/removing Swift source.
-- `make test-strict` for concurrency-sensitive work
+- `make test-strict` for concurrency-sensitive work; the strict build treats every Swift warning as an error, so the branch must be warning-free
 - `make test-tsan` when the environment supports the hosted test path; the command auto-skips the known-bad `macOS 26.x + Xcode 26.2 (17C52)` hosted runtime combination
 - Hosted TSan CI lives in `.github/workflows/tsan.yml` on `macos-15 + Xcode 16.0`; treat that workflow as the supported real-coverage path until the local Apple runtime issue is resolved
 - Preserve final bundled-resource validation in packaging. The package has no resources and the former SwiftPM resource-staging phase was removed; do not restore that phase from historical instructions.
 
 ### Performance Validation
 
-- `make test-snapshot-perf-release` for release-path backend perf gates
-- `make perf-search-warm-load` for backend full-index warm-load latency and peak RSS
-- `scripts/perf-warm-scroll-ab.sh` for causal fixed-workload comparisons. The default `passive-row` axis changes only `SCOPY_PERF_PASSIVE_ROW`; `--axis markdown-menu-cache` keeps both variants passive and changes only `SCOPY_PERF_MARKDOWN_MENU_SIGNAL_CACHE`. Require at least two repeats, exact AB/BA order validation, equal observed work, Release configuration, axis-specific counters, and all-pair improvement gates.
-- `make perf-frontend-profile` for daily frontend smoke
-- `make perf-frontend-profile-standard` before stronger local confidence
-- `make perf-frontend-profile-full` before release-grade validation
-- `scripts/perf-frontend-profile.sh --include-hover` when preview work needs direct hover-preview bucket evidence
-- `make perf-unified-table` when correlating frontend and backend evidence, including `warm-load-summary.json` when present
-- When a profile adds new evidence beyond the release note, add a versioned doc under `doc/perf/release-profiles/` and point `profile_doc` at it
+- `make test-snapshot-perf-release` is the backend search gate on a `make snapshot-perf-db` copy; record the copy's SHA-256 so both sides of a comparison use the same data.
+- `make perf-search-warm-load` reports full-index warm-load latency and peak RSS.
+- `make perf-scroll-wheel`, `make perf-search-type`, and `make perf-capture` drive the Release app with real input (`scripts/perf-scroll/`); they need `perf-db`, Accessibility trust for the terminal, and a quiet desktop. They fail closed: a run whose workload did not reach the app exits non-zero.
+- `make perf-frontend-profile[-smoke|-standard|-full]` is an XCUITest callback-cadence profile; it cannot see hitches, and on hosts where XCUITest is blocked it is environment-blocked, not evidence.
 - XCTest performance inputs and in-progress outputs must use the test bundle, DerivedData, or `/tmp`, not runtime `#filePath` or direct repository paths under `~/Documents`. Copy only completed evidence back to `logs/` after the test succeeds.
 - Display-link callback intervals describe callback cadence, not presented frames. Never relabel them FPS without compositor-backed evidence.
+
+#### Performance Evidence Protocol
+
+1. Declare the metric, workload (script and arguments), threshold, and expected direction before measuring.
+2. Build A and B as Release from clean commits (worktrees); record both `git rev-parse HEAD` values and the app binary SHA-256s.
+3. Use one snapshot copy (SHA-256 recorded) and a warm copy per side; discard one warm-up run per side.
+4. Quiet desktop, no other Scopy instance, mains power, pointer parked outside the list; record chip, memory, macOS and Xcode builds.
+5. Measure the A/A noise floor first (three interleaved pairs of the same build), then run ABBA (at least three pairs; five when the expected effect is under 5%).
+6. Keep the app profiler on for ratios (its counters prove the workload happened); for absolute CPU claims add a run with the profiler off and state its overhead.
+7. Every run must prove the workload happened: `active count > 0` for scrolling, the Accessibility readback for typing, a window observation for hover, `UI check: OK` for capture. Discard and report invalid runs.
+8. Record per-run raw values, per-side mean and sd, the delta, and whether the ranges overlap. Report max-type metrics as the median of per-run maxima.
+9. Conclude only when every B run beats every A run, or |Δmean| exceeds both twice the pooled sd and the A/A resolution. Name the single variable that caused the change; state what was not measured; never extrapolate to "the whole app is N× faster".
+10. Conclusions go to `doc/perf/studies/` or the release note; raw data stays in `logs/`; never attach `.trace` files (they embed the recording environment).
+
+#### Local UI Verification Path
+
+XCUITest is blocked by system authentication on the maintainer's machine and hangs `testmanagerd` when attempted; UI changes are verified by driving the real app instead:
+
+1. `make release` (or `make build`) and `make perf-scroll-tools`. Never `./deploy.sh` for verification (it replaces the installed app).
+2. Prepare a temporary directory with a warm `perf-db` copy or an empty database seeded through a private pasteboard (`scripts/perf-scroll/build/pbwrite`).
+3. Park the pointer (`build/warp 1400 40`), then launch the binary directly with `USE_MOCK_SERVICE=0 SCOPY_SERVICE_DB_PATH=… SCOPY_SERVICE_MONITOR_PASTEBOARD=<private> SCOPY_PROFILE_OPEN_PANEL=1` (add `SCOPY_SCROLL_PROFILE=1 SCOPY_PROFILE_ACCESSIBILITY=1` when row identifiers are needed; that mode is for functional checks only).
+4. Wait for the panel with `build/winpos <pid>`; click into the panel before sending keys; drive with `build/click`, `build/typekeys`, `build/wheel`, `build/warp`, or the global hotkey through `build/panelwatch --hotkey 8`.
+5. Observe with `build/axsearch` / `build/axrows` (values and geometry), `CGWindowListCopyWindowInfo` (window level and bounds), the private pasteboard change count (`build/enterlatency`), `log stream --predicate 'subsystem == "com.scopy.app"'`, `build/hoverstall` (main-thread stalls), and the profile JSON counters.
+6. Write the expected values down, assert them, terminate with SIGTERM, delete the temporary directory, and record the command, app SHA-256, and output in the commit or release note.
+7. PNG export is checked without a screenshot: launch with `--uitesting SCOPY_UITEST_AUTO_EXPORT_MARKDOWN=1 SCOPY_UITEST_AUTO_EXPORT_MARKDOWN_PATH=<fixture> SCOPY_EXPORT_DUMP_PATH=<file>` and compare the dump byte-for-byte or pixel-wise with the previous build.
 
 ### Documentation And Release Validation
 
@@ -223,7 +243,6 @@ These choices apply the [Astra instruction-following and verification guidance](
 - `make release-validate`
 - `make test-release-policy`
 - `make tag-release` only after the applicable build, unit, strict-concurrency, scope-specific, documentation, and release gates have passed and the release candidate is committed
-- `make quality-manifest-self-test` when changing quality evidence tooling
 
 ## Common Change Playbooks
 
@@ -280,17 +299,45 @@ The paths below identify flows to trace and contracts to verify. Edit only affec
 ## Important Invariants
 
 - `project.yml` is the baseline source for Swift/Xcode/deployment targets.
-- Active docs live under `doc/current`, `doc/releases`, and `doc/meta`.
-- Historical directories under `doc/implementation`, `doc/profiles`, and `doc/specs` are non-normative evidence only, not compatibility entrypoints. Remove obsolete active links and paths instead of adding redirects, aliases, or compatibility stubs.
+- Normative docs live under `doc/current` and `doc/meta`; `doc/releases` is the release record. `doc/perf`, `doc/reviews`, and `doc/proposals` hold evidence and drafts and never override `doc/current`.
+- The legacy `doc/implementation`, `doc/profiles`, and `doc/specs` directories and root aliases were removed; do not recreate redirects, symlinks, or compatibility stubs.
 - Heavy work should stay off the main thread; correctness beats opportunistic speedups.
 - Views should not directly become persistence clients.
-- Every source file belongs to exactly one module. `Package.swift` and `project.yml` exclude the same directories from opposite sides; a file compiled into both `ScopyKit` and the app target produces two copies of its static state.
+- Every ScopyKit source compiles only into ScopyKit. `Package.swift` (ScopyKit excludes) and `project.yml` (app and test-bundle excludes) partition the top-level entries of `Scopy/`; a file compiled into both `ScopyKit` and the app target produces two copies of its static state. App-side sources are also compiled directly into `ScopyTests` and `ScopyTSanTests` by design (no test host).
 - Release publication consumes a deliberate existing tag; ordinary CI must never create or push one.
 - Select roadmap work by evidenced severity, affected surface, recurrence/likelihood, and confidence relative to implementation/rollback cost. Prefer crashes, data-integrity failures, unsafe release paths, and measured systemic bottlenecks over cosmetic cleanup or speculative micro-optimization.
 
+## Code Conventions
+
+- **Module ownership.** Backend code (`Application`, `Domain`, `Infrastructure`, `Services`, `Utilities`, `Extensions`, `Runtime`) belongs to ScopyKit; app code (`Design`, `Observables`, `Presentation`, `Views`, top-level files) belongs to the Scopy target.
+- **Access control.** In ScopyKit, mark `public` only what the app or ScopyBench uses; tests use `@testable import`. The app target never needs `public`.
+- **One primary type per file**, named after the file. Split a large file along ownership seams into separate types with explicit inputs and outputs (a store, a pure policy, a SQL gateway, a state machine) when a change touches it; do not split by line count alone, and do not widen `private` state just to spread one type over extensions.
+- **No foreign-language source in Swift strings** beyond short parameters: CSS, JS, and HTML live under `Scopy/Resources` and the renderer package where they are tested and covered by the asset manifest.
+- **Naming roles.** `…Policy` is a pure decision type (no side effects, clock, or async). `…Snapshot` is an immutable copy. `…Outcome` is an enum of alternative results; `…Result` is a struct of counts. `…Token` is compared by identity to reject stale callbacks. `generation` is a staleness counter; `revision` is content identity.
+- **Test seams.** A production symbol that exists only for tests is named `…ForTesting`, compiled only under `#if DEBUG`, and has no production caller; prefer a test-target extension when no private state is needed.
+- **Hooks.** Launch arguments and environment variables are read once into `static let` values, never per row or per frame. A hook that no script, test, or document sets is deleted.
+- **Comments** are English and explain why (invariants, measured causes, rejected alternatives), not version history or archived documents.
+- **Experiments** and A/B switches stay on branches; merged code has one implementation per behaviour.
+
+## Glossary
+
+- **capture / ingest**: capture reads and normalizes one pasteboard change; ingest is the idempotent path that writes it to storage.
+- **spool / envelope / terminal marker / receipt**: the Application Support staging directory; one replayable description of an externally backed capture; the acknowledged state that is never replayed; the `ingest_receipts` row proving the envelope was committed.
+- **publish**: emit committed state as an event to the UI and search (`ClipboardEventQueue.PublicationToken`). Placing a file at its managed path is *placement*, not publication.
+- **projection / publish (UI)**: the rows, evidence, coverage, and selection the view model exposes to the list; a publication is one atomic change to it.
+- **content revision** (`ClipboardItemContentRevision`): the identity of an item's content, used to invalidate stale preview, note, and export work. It is not a list change counter.
+- **render ID**: the identity of one preview WebView load; stale callbacks are dropped by comparing it.
+- **lease**: a revocable exclusive right (mutation gate, external image source, pasteboard write, WebView ownership).
+- **coverage**: how complete a result set is relative to full history (`complete`, `stagedRefine`, `incomplete`, `recentOnly`).
+- **match evidence** (`SearchMatchContext`): the matched excerpt, source, and count shown on a result row.
+- **summary row**: a row projection without the payload blob; distinct from aggregate summaries such as `CleanupResult`.
+- **plan / commit (cleanup)**: an advisory candidate snapshot taken outside the transaction, and the revalidated deletion inside it.
+- **tombstone**: the placeholder slot of a deleted item in an in-memory search index.
+- **pinned item** vs **pinned preview**: an item kept at the top of the list, and a preview detached into its own window; the code keeps both names.
+
 ## Logging And Privacy
 
-- Use the subsystem-specific `ScopyLog` categories (`app`, `monitor`, `storage`, `persistence`, `search`, `ui`, and `hotkey`) instead of ad hoc `print` or `NSLog` calls in production paths.
+- Log only through the `ScopyLog` categories (`app`, `monitor`, `storage`, `persistence`, `search`, `ui`, `hotkey`, `export`); do not create ad hoc `Logger` instances or call `print` / `NSLog` in production paths. SQLite failures log the extended result code and category publicly and the message privately.
 - Treat clipboard text, query strings, file paths, bundle identifiers, note contents, raw payloads, and unfiltered error descriptions as private by default. Never log clipboard bodies, image bytes, note contents, or file contents.
 - Counts, durations, thresholds, and feature-state values may be public only when they cannot reveal user content.
 - Avoid per-item logging in clipboard polling, list rendering, search candidates, or other hot loops unless it is sampled or guarded by an explicit diagnostic/profile flag.

@@ -1,12 +1,11 @@
-# Scopy Makefile
-# 符合 v0.md 的构建和测试流程
+# Scopy Makefile: build, test, measurement, and release entry points (see doc/current/development-guide.md).
 
-.PHONY: all setup build run clean xcode test test-unit test-perf test-perf-heavy test-snapshot-perf test-snapshot-perf-release test-tsan test-strict coverage benchmark perf-audit perf-frontend-profile perf-frontend-profile-smoke perf-frontend-profile-standard perf-frontend-profile-full perf-unified-table test-flow test-flow-quick health-check quality-manifest-self-test
-.PHONY: test-real-db
-.PHONY: snapshot-perf-db bench-snapshot-search perf-search-warm-load perf-warm-scroll-ab perf-scroll-tools perf-scroll-wheel perf-search-type perf-capture
-.PHONY: tag-release push-release release-validate release-bump-patch test-release-policy
+.PHONY: all setup build release run clean quick-build xcode help stats format lint
+.PHONY: test-unit test-strict test-tsan test-snapshot-perf-release test-tooling
+.PHONY: snapshot-perf-db bench-snapshot-search perf-search-warm-load perf-scroll-tools perf-scroll-wheel perf-search-type perf-capture
+.PHONY: perf-frontend-profile perf-frontend-profile-smoke perf-frontend-profile-standard perf-frontend-profile-full
+.PHONY: tag-release push-release release-validate release-bump-patch test-release-policy docs-validate
 .PHONY: markdown-renderer-deps markdown-assets-sync markdown-assets-verify test-markdown-renderer-assets markdown-assets-gate
-.PHONY: test-tooling
 
 VERSION_ARGS := $(shell bash scripts/version.sh --xcodebuild-args 2>/dev/null)
 LOG_DIR := logs
@@ -55,9 +54,7 @@ run: build
 clean:
 	@echo "Cleaning..."
 	xcodebuild -project Scopy.xcodeproj -scheme Scopy clean 2>/dev/null || true
-	rm -rf build/
-	rm -rf DerivedData/
-	rm -rf Scopy.xcodeproj
+	rm -rf .build/ $(DERIVED_DATA_BASE)
 
 # 快速构建（跳过 xcodegen 如果项目已存在）
 quick-build: markdown-assets-verify
@@ -68,19 +65,8 @@ quick-build: markdown-assets-verify
 
 # =================== 测试命令 ===================
 
-# 运行所有测试
-test: markdown-assets-verify setup
-	@echo "Running all tests..."
-	@mkdir -p $(LOG_DIR)
-	bash -o pipefail -c 'xcodebuild test \
-		-project Scopy.xcodeproj \
-		-scheme Scopy \
-		-destination platform=macOS \
-		-resultBundlePath $(LOG_DIR)/TestResults.xcresult \
-		$(VERSION_ARGS) \
-		2>&1 | tee $(LOG_DIR)/test.log'
 
-# 仅运行单元测试（排除性能测试）
+# Unit tests: every ScopyTests class, including the product-setting and polling tests.
 test-unit: markdown-assets-verify setup
 	@echo "Running unit tests..."
 	@mkdir -p $(LOG_DIR)
@@ -89,55 +75,11 @@ test-unit: markdown-assets-verify setup
 		-scheme Scopy \
 		-destination platform=macOS \
 		-only-testing:ScopyTests \
-		-skip-testing:ScopyTests/IntegrationTests \
-		-skip-testing:ScopyTests/PollingIntervalSettingTests \
-		-skip-testing:ScopyTests/ClipboardServiceContentFilteringIntegrationTests \
-		-skip-testing:ScopyTests/PerformanceTests \
 		$(VERSION_ARGS) \
 		2>&1 | tee $(LOG_DIR)/test-unit.log'
 
-# 运行性能测试
-test-perf: setup
-	@echo "Running performance tests..."
-	@mkdir -p $(LOG_DIR)
-	bash -o pipefail -c 'xcodebuild test \
-		-project Scopy.xcodeproj \
-		-scheme Scopy \
-		-destination platform=macOS \
-		-only-testing:ScopyTests/PerformanceTests \
-		-derivedDataPath $(DERIVED_DATA_BASE)/Scopy-Perf \
-		OTHER_SWIFT_FLAGS="\$$(inherited) -DSCOPY_PERF_TESTS" \
-		$(VERSION_ARGS) \
-		2>&1 | tee $(LOG_DIR)/test-perf.log'
 
-# 运行重负载性能测试（更慢）
-test-perf-heavy: setup
-	@echo "Running heavy performance tests..."
-	@mkdir -p $(LOG_DIR)
-	bash -o pipefail -c 'xcodebuild test \
-		-project Scopy.xcodeproj \
-		-scheme Scopy \
-		-destination platform=macOS \
-		-only-testing:ScopyTests/PerformanceTests \
-		-derivedDataPath $(DERIVED_DATA_BASE)/Scopy-PerfHeavy \
-		OTHER_SWIFT_FLAGS="\$$(inherited) -DSCOPY_PERF_TESTS -DSCOPY_HEAVY_PERF_TESTS" \
-		$(VERSION_ARGS) \
-		2>&1 | tee $(LOG_DIR)/test-perf-heavy.log'
 
-# 运行基于真实快照 DB 的端到端性能测试（需先 make snapshot-perf-db）
-# 注意：将环境变量注入到 XCTest 需要使用 TEST_RUNNER_ 前缀。
-test-snapshot-perf: setup
-	@echo "Running snapshot performance tests..."
-	@mkdir -p $(LOG_DIR)
-	bash -o pipefail -c '{ echo "Snapshot env: SCOPY_SNAPSHOT_DB_PATH=$${SCOPY_SNAPSHOT_DB_PATH:-} SCOPY_SNAPSHOT_STRICT_SLO=$${SCOPY_SNAPSHOT_STRICT_SLO:-}"; TEST_RUNNER_SCOPY_SNAPSHOT_DB_PATH="$$SCOPY_SNAPSHOT_DB_PATH" TEST_RUNNER_SCOPY_SNAPSHOT_STRICT_SLO="$$SCOPY_SNAPSHOT_STRICT_SLO" xcodebuild test \
-		-project Scopy.xcodeproj \
-		-scheme Scopy \
-		-destination platform=macOS \
-		-only-testing:ScopyTests/SnapshotPerformanceTests \
-		-derivedDataPath $(DERIVED_DATA_BASE)/Scopy-SnapshotPerf \
-		OTHER_SWIFT_FLAGS="\$$(inherited) -DSCOPY_SNAPSHOT_PERF_TESTS" \
-		$(VERSION_ARGS) \
-		; } 2>&1 | tee $(LOG_DIR)/test-snapshot-perf.log'
 
 # 运行 release 配置的快照性能校验（ScopyBench + 阈值断言）
 test-snapshot-perf-release: setup
@@ -163,19 +105,6 @@ test-snapshot-perf-release: setup
 			awk -v actual="$$CM_P95" -v target="$$CM_TARGET" "BEGIN { exit (actual <= target) ? 0 : 1 }"; \
 		} 2>&1 | tee $(LOG_DIR)/test-snapshot-perf-release.log'
 
-# 运行基于本机真实 DB 的对照回归测试（可选，需 -DSCOPY_REAL_DB_TESTS）
-test-real-db: setup
-	@echo "Running real database regression tests..."
-	@mkdir -p $(LOG_DIR)
-	bash -o pipefail -c 'xcodebuild test \
-		-project Scopy.xcodeproj \
-		-scheme Scopy \
-		-destination platform=macOS \
-		-only-testing:ScopyTests/RealDatabaseRegressionTests \
-		-derivedDataPath $(DERIVED_DATA_BASE)/Scopy-RealDB \
-		OTHER_SWIFT_FLAGS="\$$(inherited) -DSCOPY_REAL_DB_TESTS" \
-		$(VERSION_ARGS) \
-		2>&1 | tee $(LOG_DIR)/test-real-db.log'
 
 # Thread Sanitizer (requires hosted test bundle mode)
 test-tsan:
@@ -210,89 +139,30 @@ test-strict: markdown-assets-verify setup
 		-scheme Scopy \
 		-destination platform=macOS \
 		-only-testing:ScopyTests \
-		-skip-testing:ScopyTests/IntegrationTests \
-		-skip-testing:ScopyTests/PollingIntervalSettingTests \
-		-skip-testing:ScopyTests/ClipboardServiceContentFilteringIntegrationTests \
-		-skip-testing:ScopyTests/PerformanceTests \
 		-derivedDataPath $(DERIVED_DATA_BASE)/Scopy-Strict \
 		SWIFT_STRICT_CONCURRENCY=complete \
 		$(VERSION_ARGS) \
 		2>&1 | tee $(LOG_DIR)/strict-concurrency-test.log'
 
-# 运行集成测试
-test-integration: setup
-	@echo "Running integration tests..."
-	@mkdir -p $(LOG_DIR)
-	bash -o pipefail -c 'xcodebuild test \
-		-project Scopy.xcodeproj \
-		-scheme Scopy \
-		-destination platform=macOS \
-		-only-testing:ScopyTests/IntegrationTests \
-		-only-testing:ScopyTests/PollingIntervalSettingTests \
-		-only-testing:ScopyTests/ClipboardServiceContentFilteringIntegrationTests \
-		$(VERSION_ARGS) \
-		2>&1 | tee $(LOG_DIR)/test-integration.log'
 
-# 生成测试覆盖率报告
-coverage: setup
-	@echo "Running tests with coverage..."
-	@mkdir -p $(LOG_DIR)
-	bash -o pipefail -c 'xcodebuild test \
-		-project Scopy.xcodeproj \
-		-scheme Scopy \
-		-destination platform=macOS \
-		-enableCodeCoverage YES \
-		-resultBundlePath $(LOG_DIR)/CoverageResults.xcresult \
-		$(VERSION_ARGS) \
-		2>&1 | tee $(LOG_DIR)/coverage.log'
-	@echo ""
-	@echo "Coverage report generated at $(LOG_DIR)/CoverageResults.xcresult"
-	@echo "View with: xcrun xccov view --report $(LOG_DIR)/CoverageResults.xcresult"
 
-# 运行基准测试
-benchmark: setup
-	@echo "Running benchmarks..."
-	@echo "This will take a few minutes..."
-	@mkdir -p $(LOG_DIR)
-	bash -o pipefail -c 'RUN_PERF_TESTS=1 xcodebuild test \
-		-project Scopy.xcodeproj \
-		-scheme Scopy \
-		-destination platform=macOS \
-		-only-testing:ScopyTests/PerformanceTests \
-		-derivedDataPath $(DERIVED_DATA_BASE)/Scopy-Perf \
-		OTHER_SWIFT_FLAGS="\$$(inherited) -DSCOPY_PERF_TESTS" \
-		$(VERSION_ARGS) \
-		2>&1 | tee $(LOG_DIR)/benchmark-output.log'
-	@echo ""
-	@echo "Benchmark results saved to $(LOG_DIR)/benchmark-output.log"
 
 # =================== 测试流程自动化 ===================
 
-# 完整测试流程（杀进程 → 编译 → 安装 → 启动 → 健康检查）
-test-flow:
-	@bash scripts/test-flow.sh
 
-# 快速测试流程（跳过编译）
-test-flow-quick:
-	@bash scripts/test-flow.sh --skip-build
 
-# 仅运行健康检查
-health-check:
-	@bash scripts/health-check.sh
 
-# 运行质量证据 manifest 模块自测（生成 logs/ 下的 JSON + Markdown 示例）
-quality-manifest-self-test:
-	@python3 scripts/quality/record-gate-result.py self-test --output-dir $(LOG_DIR)/quality-manifest-self-test
 
 test-tooling:
 	@python3 -m unittest discover -s scripts/tests -p 'test_*.py'
-	@python3 scripts/quality/source-manifest.py self-test
-	@python3 scripts/quality/summarize-warm-scroll-ab.py self-test
-	@$(MAKE) quality-manifest-self-test
 
 # MarkdownPreview 的 renderer、KaTeX CSS/fonts、sidecar 与 manifest 必须来自同一锁定资产集。
+# Reinstall the renderer's npm dependencies whenever the lockfile changed since the last install.
 markdown-renderer-deps:
-	@test -d Tools/MarkdownRenderer/node_modules/katex -a -d Tools/MarkdownRenderer/node_modules/esbuild || npm ci --prefix Tools/MarkdownRenderer
+	@lock="$$(shasum Tools/MarkdownRenderer/package-lock.json | cut -c1-40)"; \
+	stamp=Tools/MarkdownRenderer/node_modules/.scopy-lock-sha; \
+	test -d Tools/MarkdownRenderer/node_modules/katex -a "$$(cat $$stamp 2>/dev/null)" = "$$lock" \
+		|| { npm ci --prefix Tools/MarkdownRenderer && echo "$$lock" > $$stamp; }
 
 markdown-assets-sync: markdown-renderer-deps
 	@npm run sync:katex-assets --prefix Tools/MarkdownRenderer
@@ -335,7 +205,7 @@ stats:
 	@find ScopyTests -name "*.swift" 2>/dev/null -exec cat {} \; | wc -l | xargs echo "  Total lines:"
 	@echo ""
 	@echo "By directory:"
-	@for dir in Scopy/Services Scopy/Protocols Scopy/Views Scopy/Observables; do \
+	@for dir in Scopy/Application Scopy/Infrastructure Scopy/Services Scopy/Views Scopy/Observables; do \
 		if [ -d "$$dir" ]; then \
 			count=$$(find "$$dir" -name "*.swift" -exec cat {} \; | wc -l); \
 			echo "  $$dir: $$count lines"; \
@@ -363,9 +233,6 @@ bench-snapshot-search:
 perf-search-warm-load:
 	@bash scripts/perf-search-warm-load.sh
 
-# 一键性能审计（bench + perf tests；输出落盘到 logs/perf-audit-*）
-perf-audit:
-	@bash scripts/perf-audit.sh
 
 # 前端 scroll/profile 真实性能审计（默认开发用轻量 smoke）
 perf-frontend-profile: perf-frontend-profile-smoke
@@ -382,8 +249,6 @@ perf-frontend-profile-standard:
 perf-frontend-profile-full:
 	@bash scripts/perf-frontend-profile.sh $(FRONTEND_PROFILE_FULL_ARGS)
 
-# Release fixed-workload causal A/B; defaults to the formal shared-build two-axis 20-run suite.
-# Set WARM_SCROLL_AB_ARGS="--axis passive-row" (or markdown-menu-cache) for diagnostic single-axis runs.
 perf-scroll-tools:
 	@bash scripts/perf-scroll/build-tools.sh
 
@@ -402,74 +267,47 @@ perf-search-type: perf-scroll-tools
 	@APP="$$(xcodebuild -project Scopy.xcodeproj -scheme Scopy -configuration Release -showBuildSettings 2>/dev/null | grep -m1 'BUILT_PRODUCTS_DIR' | awk '{print $$3}')/Scopy.app"; \
 	python3 scripts/perf-scroll/profile_search.py "$$APP" "$${LABEL:-search}" --query "$${QUERY:-cm}" --rate "$${RATE:-8}" --sample
 
-perf-warm-scroll-ab:
-	@bash scripts/perf-warm-scroll-ab.sh $(WARM_SCROLL_AB_ARGS)
 
-# 汇总前后端同表对比（需传 BACKEND_BASELINE/BACKEND_CURRENT/FRONTEND_SUMMARY）
-perf-unified-table:
-	@test -n "$$BACKEND_BASELINE" || (echo "Missing BACKEND_BASELINE=<logs/perf-audit-...>" && exit 1)
-	@test -n "$$BACKEND_CURRENT" || (echo "Missing BACKEND_CURRENT=<logs/perf-audit-...>" && exit 1)
-	@test -n "$$FRONTEND_SUMMARY" || (echo "Missing FRONTEND_SUMMARY=<logs/perf-frontend-profile-.../frontend-scroll-profile-summary.json>" && exit 1)
-	@bash scripts/perf-unified-table.sh --backend-baseline "$$BACKEND_BASELINE" --backend-current "$$BACKEND_CURRENT" --frontend-summary "$$FRONTEND_SUMMARY"
 
 # =================== 帮助 ===================
 
 # 帮助信息
 help:
-	@echo "Scopy Build System"
+	@echo "Scopy"
 	@echo ""
-	@echo "Build Commands:"
-	@echo "  make setup        - Install dependencies and generate Xcode project"
-	@echo "  make xcode        - Generate and open Xcode project"
-	@echo "  make build        - Build the application (Debug)"
-	@echo "  make release      - Build the application (Release)"
-	@echo "  make run          - Build and run the application"
-	@echo "  make clean        - Clean build artifacts"
-	@echo "  make quick-build  - Build without regenerating project"
+	@echo "Build:"
+	@echo "  make setup        - Install xcodegen if missing and generate the Xcode project"
+	@echo "  make build        - Build Debug (also verifies the Markdown renderer assets)"
+	@echo "  make release      - Build Release"
+	@echo "  make run          - Build and launch the Debug app"
+	@echo "  make quick-build  - Build without regenerating the project"
+	@echo "  make xcode        - Generate and open the Xcode project"
+	@echo "  make clean        - Remove SwiftPM and DerivedData outputs (keeps the tracked project)"
 	@echo ""
-	@echo "Test Commands:"
-	@echo "  make test         - Run all tests"
-	@echo "  make test-unit    - Run unit tests only"
-	@echo "  make test-perf    - Run performance tests"
-	@echo "  make test-perf-heavy - Run heavy perf tests"
-	@echo "  make test-snapshot-perf - Run snapshot perf tests"
-	@echo "  make test-snapshot-perf-release - Run snapshot perf tests in Release mode"
-	@echo "  make test-integration - Run integration tests"
-	@echo "  make test-strict  - Run Strict Concurrency regression"
-	@echo "  make coverage     - Run tests with coverage report"
-	@echo "  make benchmark    - Run full benchmark suite"
-	@echo "  make perf-frontend-profile - Run frontend profile smoke (default)"
-	@echo "  make perf-frontend-profile-standard - Run frontend profile standard tier"
-	@echo "  make perf-frontend-profile-full - Run frontend profile full release tier"
-	@echo "  make perf-search-warm-load - Measure backend warm-load latency and peak RSS"
-	@echo "  make perf-unified-table - Merge backend+frontend metrics into one table"
+	@echo "Required gates:"
+	@echo "  make test-unit    - All ScopyTests classes"
+	@echo "  make test-strict  - Unit tests under strict concurrency; any Swift warning fails"
+	@echo "  make test-tsan    - Hosted ThreadSanitizer test bundle"
+	@echo "  make test-tooling - Project generation, worktree isolation, and script checks"
+	@echo "  make docs-validate / make release-validate / make test-release-policy"
+	@echo "  make markdown-assets-verify - Verify renderer bundle, CSS, fonts, and manifest atomically"
 	@echo ""
-	@echo "Test Flow Automation:"
-	@echo "  make test-flow    - Full test flow (kill → build → install → launch → health check)"
-	@echo "  make test-flow-quick - Quick test flow (skip build)"
-	@echo "  make health-check - Run health checks only"
-	@echo "  make quality-manifest-self-test - Run quality manifest fixture self-test"
-	@echo "  make test-tooling - Test project generation, worktree isolation, and evidence gates"
-	@echo "  make test-markdown-renderer-assets - Test the MarkdownPreview asset contract"
-	@echo ""
-	@echo "Development:"
-	@echo "  make format       - Format code (requires swift-format)"
-	@echo "  make lint         - Lint code (requires swiftlint)"
-	@echo "  make stats        - Show project statistics"
-	@echo "  make markdown-assets-sync - Sync locked KaTeX CSS/fonts without rebuilding renderer"
-	@echo "  make markdown-assets-verify - Verify renderer/CSS/fonts/sidecar/manifest atomically"
+	@echo "Measurement (local, needs perf-db and a quiet desktop; see the development guide):"
+	@echo "  make snapshot-perf-db            - Copy the live database into perf-db/"
+	@echo "  make test-snapshot-perf-release  - Backend search latency gate on the snapshot"
+	@echo "  make bench-snapshot-search       - ScopyBench runs without thresholds"
+	@echo "  make perf-search-warm-load       - Full-index warm-load latency and peak RSS"
+	@echo "  make perf-scroll-wheel / perf-search-type / perf-capture - Real-input Release profiles"
+	@echo "  make perf-frontend-profile[-smoke|-standard|-full] - XCUITest callback-cadence profile (blocked on hosts without automation access)"
 	@echo ""
 	@echo "Release:"
 	@echo "  make tag-release  - Tag HEAD from doc/meta/release-current.yml"
-	@echo "  make push-release - Push main + current tag"
-	@echo "  make docs-validate - Validate canonical docs, metadata, and links"
-	@echo "  make test-release-policy - Test that workflows cannot create or push tags"
+	@echo "  make push-release - Push main and the current tag"
+	@echo "  make release-bump-patch - Bump the patch version in the release metadata"
 	@echo ""
-	@echo "Requirements:"
-	@echo "  - Xcode 16.0+"
-	@echo "  - macOS 14.0+"
-	@echo "  - Homebrew (for xcodegen installation)"
-	@echo "  - python3 (for perf summary parsing scripts)"
+	@echo "Development:"
+	@echo "  make format / make lint / make stats"
+	@echo "  make markdown-assets-sync - Sync locked KaTeX CSS/fonts without rebuilding the renderer"
 
 # =================== Release Helpers ===================
 
@@ -478,11 +316,6 @@ tag-release: markdown-assets-gate
 
 push-release: markdown-assets-gate
 	@bash scripts/release/push-main.sh
-	@echo ""
-	@echo "Performance Targets (v0.md):"
-	@echo "  - Search ≤5k items: P95 ≤ 50ms"
-	@echo "  - Search 10k-100k: P95 ≤ 150ms"
-	@echo "  - Dispatch: 0ms normally; minimum 16ms coalescing for queries of at most two characters"
 
 release-validate:
 	@bash scripts/release/validate-release-docs.sh

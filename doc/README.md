@@ -29,9 +29,3 @@ This directory is split into active operating docs, release history, performance
 - `proposals/`: design drafts and future-looking specs that are not active requirements.
 - `archive/`: preserved pre-reorg material and split historical changelog data.
 - `meta/`: machine-readable metadata and doc taxonomy.
-
-## Compatibility
-
-- Legacy paths under `doc/implementation/`, `doc/profiles/`, and `doc/specs/` remain only as compatibility links for old references.
-- Do not use those directories as new navigation entrypoints.
-- New automation must read [meta/release-current.yml](./meta/release-current.yml), not scrape Markdown pages.

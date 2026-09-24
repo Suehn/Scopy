@@ -34,5 +34,5 @@ This directory holds the canonical performance evidence set.
 
 - Current release context: [../releases/README.md](../releases/README.md)
 - Latest dedicated profile: [release-profiles/v0.80.1-profile.md](./release-profiles/v0.80.1-profile.md)
-- Latest release without a dedicated profile: `v0.80.0`
+- Latest scroll study (ceiling reached): [studies/perf-scroll-ceiling-2026-09-04.md](./studies/perf-scroll-ceiling-2026-09-04.md)
 - Latest cross-cutting study: [studies/perf-front-back-unified-2026-02-28.md](./studies/perf-front-back-unified-2026-02-28.md)

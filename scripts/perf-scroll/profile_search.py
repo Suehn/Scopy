@@ -51,7 +51,9 @@ def make_db():
         os.makedirs(dbdir, exist_ok=True)
     else:
         dbdir=tempfile.mkdtemp(prefix='scopy-profile-db-')
-    for f in ('clipboard.db','clipboard.db-wal','clipboard.db-shm','clipboard.db.fullindex.v4.plist','clipboard.db.fullindex.v4.plist.metadata.plist'):
+    for f in ('clipboard.db','clipboard.db-wal','clipboard.db-shm',
+              'clipboard.db.fullindex.v5.bin','clipboard.db.fullindex.v5.bin.metadata.plist','clipboard.db.fullindex.v5.bin.sha256',
+              'clipboard.db.shortindex.v3.bin','clipboard.db.shortindex.v3.bin.sha256'):
         src=os.path.join(repo, 'perf-db', f)
         if os.path.exists(src): shutil.copy(src, os.path.join(dbdir, f))
     return dbdir
@@ -106,10 +108,10 @@ def run_once(index):
     drop_db(dbdir)
     return result
 
-result=None
+result=None; workload_ok=False
 for i in range(1, a.attempts+1):
     result=run_once(i)
-    if result and f'search field value: "{EXPECTED}"' in result.get('ax', ''): break
+    if result and f'search field value: "{EXPECTED}"' in result.get('ax', ''): workload_ok=True; break
     print(f'attempt {i}: the search field does not contain {EXPECTED!r} (ax: {(result or {}).get("ax", "")!r}); retrying', flush=True)
 
 if result:
@@ -120,9 +122,13 @@ if result:
 if os.path.exists(profile_json):
     d=json.load(open(profile_json))
     counters=((d.get('structural_metrics') or {}).get('counters') or {})
-    hits={k: v for k, v in counters.items() if 'search' in k or 'row.' in k}
-    print('profiler counters (search/row.):', hits if hits else 'none present', '| all counters:', sorted(counters))
+    hits={k: v for k, v in counters.items() if 'search' in k or 'row.' in k or k=='list.body'}
+    print('profiler counters (search/row./list.body):', hits if hits else 'none present', '| all counters:', sorted(counters))
+    print('list.body', counters.get('list.body', 0), 'row.init', counters.get('row.init', 0), 'keys', key_count)
     rl=d.get('main_runloop_active_ms') or {}
     print('app profiler: runloop busy ms', round(rl.get('total_ms', 0)), 'p95', round(rl.get('p95', 0), 2), 'max', round(rl.get('max', 0), 1), 'of', round(d.get('duration_seconds') or 0, 1), 's')
 else: print('no profile json written')
 print('output dir', out)
+# Fail closed: a run whose workload never reached the app, or that left no profile, must not look like a measurement.
+if not workload_ok: print('FAIL: the typed query never appeared in the search field'); sys.exit(2)
+if not os.path.exists(profile_json): print('FAIL: no profile json written'); sys.exit(3)

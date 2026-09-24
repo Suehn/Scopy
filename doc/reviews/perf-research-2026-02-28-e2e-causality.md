@@ -1,1 +1,0 @@
-../perf/studies/perf-research-2026-02-28-e2e-causality.md

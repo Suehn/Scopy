@@ -30,7 +30,9 @@ ROWS=a.count+3
 
 def make_db():
     dbdir=tempfile.mkdtemp(prefix='scopy-capture-db-')
-    for f in ('clipboard.db','clipboard.db-wal','clipboard.db-shm','clipboard.db.fullindex.v4.plist','clipboard.db.fullindex.v4.plist.metadata.plist'):
+    for f in ('clipboard.db','clipboard.db-wal','clipboard.db-shm',
+              'clipboard.db.fullindex.v5.bin','clipboard.db.fullindex.v5.bin.metadata.plist','clipboard.db.fullindex.v5.bin.sha256',
+              'clipboard.db.shortindex.v3.bin','clipboard.db.shortindex.v3.bin.sha256'):
         src=os.path.join(repo, 'perf-db', f)
         if os.path.exists(src): shutil.copy(src, os.path.join(dbdir, f))
     return dbdir
@@ -153,3 +155,7 @@ for l in matches: print('  app:', l[:220])
 print('profile json:', 'written' if os.path.exists(profile_json) else 'not written (the scroll profiler only finalizes after >=30 animation-callback samples, i.e. scrolling)')
 print('screenshot', os.path.join(out,'panel.png'), '(only meaningful when the terminal has Screen Recording permission)')
 print('output dir', out)
+# Fail closed: writes that did not happen, an unreadable list, or rows out of order are failures, not notes.
+if pb.returncode!=0: print('FAIL: pbwrite failed'); sys.exit(2)
+if good is None: print('FAIL: no accessibility read of the list succeeded'); sys.exit(3)
+if not ok: print('FAIL: newest rows are not at the top of Recent'); sys.exit(4)

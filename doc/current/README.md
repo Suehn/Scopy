@@ -14,4 +14,5 @@ canonical: true
 - [markdown-chatgpt-wacz-style-contract.md](./markdown-chatgpt-wacz-style-contract.md): sole canonical Markdown, rich-surface, link, typography, responsive, and preview/export rendering contract
 - [release-runbook.md](./release-runbook.md): release and verification runbook
 - [maintainer-guide.md](./maintainer-guide.md): short navigation guide
+- [high-leverage-change-guide.md](./high-leverage-change-guide.md): how to rank open-ended work
 - [troubleshooting/README.md](./troubleshooting/README.md): active troubleshooting notes

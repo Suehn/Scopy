@@ -18,17 +18,19 @@ This document describes the current system shape and operational invariants. For
 - `Scopy` app target owns app lifecycle, panel/window orchestration, observables, presentation logic, and views.
 - `RealClipboardService` bridges the main-actor UI protocol to the `ClipboardService` actor; forwarding here enforces isolation rather than introducing another backend.
 - `ScopyKit` owns the backend domain/application/infrastructure/services layer and is imported by the app and tests.
-- `ScopyUISupport` holds reusable UI support code shared by app-side views.
+- `ScopyUISupport` holds the scroll profiler, `ThumbnailCache`, `IconService`, and `WeakScriptMessageHandler`; only the app target and tests import it.
 - `ScopyBench` provides benchmark tooling for backend/perf verification.
+- `Tools/MarkdownRenderer` is the Node (remark/rehype/KaTeX) renderer; its bundle and asset manifest are checked into `Scopy/Resources/MarkdownPreview` and loaded by `WKWebView`.
+- Sparkle provides update checks and installation.
 
 ## Runtime Data Flow
 
 ### Clipboard Path
 
 - `ClipboardMonitor` observes pasteboard changes and normalizes incoming clipboard content.
-- `ClipboardMonitor` publishes durable external captures to an Application Support-owned ingest spool before handing work to the service. Pending envelopes remain replayable across process restart; terminal markers make acknowledgement restart-safe.
+- `ClipboardMonitor` writes durable external captures to an Application Support-owned ingest spool before handing work to the service. Pending envelopes remain replayable across process restart; terminal markers make acknowledgement restart-safe.
 - `ClipboardService` coordinates ingest, deduplication, cleanup scheduling, and event emission. It publishes search/UI changes only from committed storage outcomes and hands committed cleanup events to an independent cancellation lifetime.
-- `StorageService` persists structured items, external payloads, and thumbnail-related artifacts. For a durable ingest ID it retains the source, publishes a unique managed candidate, and commits the item mutation plus the schema-v8 `ingest_receipts` row in one `BEGIN IMMEDIATE` transaction.
+- `StorageService` persists structured items, external payloads, and thumbnail-related artifacts. For a durable ingest ID it retains the source, places the payload at a unique managed path, and commits the item mutation plus the `ingest_receipts` row (introduced in schema user_version 8; current 9) in one `BEGIN IMMEDIATE` transaction.
 - Cleanup planning is advisory. `SQLiteClipboardRepository.commitDeletePlan` revalidates the candidate snapshot and deletes matching rows in one write transaction, then returns the exact committed IDs and storage refs used by bounded file cleanup, search invalidation, and one bulk history event.
 
 ### Search Path

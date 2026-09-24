@@ -39,7 +39,7 @@ if missing:
     sys.exit(1)
 
 scan_files = []
-for pattern in ["README.md", "CLAUDE.md", "AGENTS.md", "DEPLOYMENT.md", "doc/**/*.md"]:
+for pattern in ["README.md", "CLAUDE.md", "AGENTS.md", "doc/**/*.md"]:
     scan_files.extend(root.glob(pattern))
 scan_files = sorted({p for p in scan_files if p.exists()})
 

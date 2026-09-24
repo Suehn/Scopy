@@ -17,19 +17,6 @@ schemes:
       targets:
         - ScopyTests
         - ScopyUITests
-  ScopyWarmProfile:
-    build:
-      targets:
-        Scopy: all
-        ScopyUITests: [test]
-    test:
-      config: Release
-      targets:
-        - ScopyUITests
-    run:
-      config: Release
-    profile:
-      config: Release
   ScopyTSan:
     build:
       targets:
@@ -50,8 +37,7 @@ settings:
     # SwiftPM packages still build into DerivedData; add search paths so App/Test targets can `import ScopyKit`
     SWIFT_INCLUDE_PATHS: "$(inherited) $(OBJROOT)/../Products/$(CONFIGURATION)"
     FRAMEWORK_SEARCH_PATHS: "$(inherited) $(OBJROOT)/../Products/$(CONFIGURATION)"
-    # 版本号配置 (v0.6)
-    # Note: 发布版本统一由 git tag 驱动，详见 scripts/version.sh 与 DEPLOYMENT.md。
+    # Release versions come from the git tag via scripts/version.sh (doc/current/release-runbook.md).
     MARKETING_VERSION: "0.0.0"
     CURRENT_PROJECT_VERSION: "0"
 
@@ -70,14 +56,11 @@ targets:
       - path: Scopy
         excludes:
           - "**/*.md"
-          # Phase 7 (v0.43): App target only keeps App/UI/Presentation.
-          # Backend (Domain/Application/Infrastructure/Services/Utilities) is provided by SwiftPM module `ScopyKit`.
+          # Backend sources belong to the ScopyKit package (Package.swift); keep these excludes the complement of its excludes.
           - "Application/**"
           - "Domain/**"
           - "Extensions/**"
           - "Infrastructure/**"
-          - "Models/**"
-          - "Protocols/**"
           - "Runtime/**"
           - "Services/**"
           - "Utilities/**"
@@ -172,13 +155,11 @@ targets:
           - "ScopyApp.swift"   # 排除 SwiftUI App，避免 NSApplication 冲突
           - "Info.plist"
           - "*.entitlements"
-          # Phase 7 (v0.43): Do not compile backend sources into tests; use `ScopyKit` dependency instead.
+          # Backend sources come from the ScopyKit package, never compiled twice.
           - "Application/**"
           - "Domain/**"
           - "Extensions/**"
           - "Infrastructure/**"
-          - "Models/**"
-          - "Protocols/**"
           - "Runtime/**"
           - "Services/**"
           - "Utilities/**"
@@ -217,9 +198,6 @@ targets:
       - path: ScopyTests
         excludes:
           - "Fixtures/**"
-          - "IntegrationTests.swift"
-          - "ClipboardServiceContentFilteringIntegrationTests.swift"
-          - "PerformanceTests.swift"
       - path: ScopyTests/Fixtures
         buildPhase: resources
       # Hosted test bundle mode: includes app sources but excludes entrypoints to avoid @main conflicts.
@@ -231,13 +209,11 @@ targets:
           - "AppDelegate.swift"
           - "Info.plist"
           - "*.entitlements"
-          # Phase 7 (v0.43): Do not compile backend sources into tests; use `ScopyKit` dependency instead.
+          # Backend sources come from the ScopyKit package, never compiled twice.
           - "Application/**"
           - "Domain/**"
           - "Extensions/**"
           - "Infrastructure/**"
-          - "Models/**"
-          - "Protocols/**"
           - "Runtime/**"
           - "Services/**"
           - "Utilities/**"

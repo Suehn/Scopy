@@ -2,7 +2,7 @@
 
 > 状态：实施前蓝图
 > 目标：在尽量小影响的前提下，把 Scopy 的 Markdown + LaTeX 预览链路改造成边界清晰、可回滚、可验证、长期可演进的渲染体系。
-> 输入资料：`doc/implementation/GPT-Pro-迁移md渲染.md`
+> 输入资料：`doc/archive/implementation/GPT-Pro-迁移md渲染.md`
 
 ## 1. 目标与判定标准
 

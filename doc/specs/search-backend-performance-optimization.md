@@ -1,1 +1,0 @@
-../proposals/search-backend-performance-optimization.md

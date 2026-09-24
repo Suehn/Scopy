@@ -57,3 +57,6 @@ artifacts/render-validation/
 # Local performance DB snapshot (never commit)
 perf-db/
 .secrets/
+
+# Claude Code agent worktrees
+.claude/worktrees/

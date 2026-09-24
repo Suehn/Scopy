@@ -2,7 +2,8 @@
 
 ## Working Agreement
 
-- Choose the simplest implementation that fully meets current requirements. Remove obsolete paths instead of adding compatibility layers, speculative abstractions, or temporary replacements. Keep concerns modular and each increment working end to end.
+- Choose the simplest implementation that fully meets current requirements. Remove obsolete code and document paths instead of adding compatibility layers, aliases, speculative abstractions, or temporary replacements. Keep concerns modular and each increment working end to end.
+- Do not merge code whose only consumer is a test (other than a `#if DEBUG` `…ForTesting` seam), an environment variable that nothing sets, or a finished experiment; experiments and A/B switches stay on branches. Tests must be able to fail on a real regression: no print-only, timing-only, or assertion-free tests.
 - Use existing dependencies before reimplementing common functionality; verify their capabilities rather than guessing. Prefer maintained libraries when they reduce total complexity.
 - Preserve user changes. Inspect the worktree before editing; use an isolated checkout when other work is active. Search with `rg`; avoid destructive Git commands.
 - Small tasks need inspection, implementation, and verification. For cross-module or risky work, state the intended outcome, scope, and completion evidence in a short plan. Create a proposal only for decisions requiring durable review; no mandatory task files or sub-agent ceremony.
@@ -13,8 +14,8 @@
 ## Sources Of Truth
 
 - Read [release-current.yml](doc/meta/release-current.yml) for canonical document entrypoints, then only the current documents relevant to the task. Historical notes, proposals, and archives are evidence, not active requirements.
-- [product-spec.md](doc/current/product-spec.md) owns product behavior; [architecture.md](doc/current/architecture.md) owns module boundaries and data-safety invariants; [development-guide.md](doc/current/development-guide.md) maps changes to runtime entrypoints.
-- `project.yml` owns Swift, deployment-target, and Xcode baselines. Do not change them without an explicit requirement. Newer system APIs need availability handling encapsulated at the component boundary.
+- [product-spec.md](doc/current/product-spec.md) owns product behavior; [architecture.md](doc/current/architecture.md) owns module boundaries and data-safety invariants; [development-guide.md](doc/current/development-guide.md) maps changes to runtime entrypoints and owns the code conventions, glossary, performance evidence protocol, and local UI verification path.
+- `project.yml` owns Swift, deployment-target, and Xcode baselines, and `Package.swift` must stay its complement. Do not change them without an explicit requirement. Newer system APIs need availability handling encapsulated at the component boundary.
 - Before adding Apple/Swift API calls, verify exact signatures and availability using Cupertino documentation/sample lookup. Compile immediately; the compiler adjudicates discrepancies.
 - Ordinary development updates only affected canonical docs. Release metadata, notes, indexes, and changelog change only for a release, a changed release fact, or an explicit request.
 
@@ -28,24 +29,26 @@
 
 ## Validation By Change Scope
 
-| Change | Required evidence |
-| --- | --- |
-| Documentation/metadata only | Relevant `make docs-validate` / `make release-validate` checks |
-| Functional code | `make build` + `make test-unit`; focused tests first are useful, disclose any omitted gates |
-| Concurrency, actors, threads | Also `make test-strict`; TSan when warranted |
-| Backend search/cleanup performance | `make test-snapshot-perf-release` using a fresh `make snapshot-perf-db` copy; never commit the DB |
-| Frontend performance | `make perf-frontend-profile` smoke; standard recommended before commit, full required before release |
-| Performance conclusions | `make perf-unified-table`; record environment, scenarios, actual numbers, and causal limits in the runbook or its linked evidence |
-| Hotkeys | `/tmp/scopy_hotkey.log` includes `updateHotKey()` and one action per press |
-| Renderer | Node `npm test`, `npm run build`, `npm run verify:assets` in `Tools/MarkdownRenderer`; app build, unit, strict, and a real-app PNG visual check; maintain Swift/Node contracts and export fixtures together |
-| Build/test/release tooling | `make test-tooling`, plus `make test-release-policy` for release workflows/scripts/targets |
+| Change | Local gate (must pass before commit) | CI (runs on push) | Extra evidence when claiming a behaviour or performance change |
+| --- | --- | --- | --- |
+| Documentation/metadata only | `make docs-validate`, `make release-validate` | release_policy | — |
+| Swift code outside views | `make build` + `make test-unit` (run the focused tests first) | build, unit_tests, strict_concurrency, tsan | — |
+| Concurrency, actors, lifecycle | Also `make test-strict` (fails on any Swift warning in the strict build) | strict_concurrency, hosted TSan | Local `make test-tsan` optional |
+| List updates, search typing, hover, keyboard | Unit tests, then the local UI path in the development guide (direct launch + Accessibility + window list + private pasteboard + log counts) | unit_tests | Interleaved A/B on a Release build with `make perf-search-type`, `scripts/perf-scroll/build/hoverstall`, and the profile counters (`list.body`, `row.init`); see the development guide's performance evidence protocol |
+| Backend search or cleanup performance | `make test-snapshot-perf-release` on one `make snapshot-perf-db` copy shared by both sides; record the copy's SHA-256 | — | Interleaved ScopyBench A/B under the same protocol |
+| Memory | Unit tests plus `make perf-search-warm-load` A/B | unit_tests | `footprint` session readings on the real app (idle, after a search session, after idle) |
+| Capture semantics | Unit tests (capture matrix, content-filter settings) | unit_tests, tsan | `make perf-capture` for main-thread cost |
+| Renderer or export | `npm test`, `npm run build`, `npm run verify:assets` in `Tools/MarkdownRenderer` (the last runs inside `make build`); app build, unit, strict; a real-app PNG export comparison (`--uitesting` auto-export, byte or pixel diff against the previous build); keep the Swift/Node contracts and fixtures together | build (npm test + verify), unit_tests | Hosted XCUITest export suite once the CI trial is green |
+| UI behaviour (views, panel) | Unit tests plus the local UI path | unit_tests | — |
+| Hotkeys | `/tmp/scopy_hotkey.log` includes `updateHotKey()` and one action per press | — | — |
+| Build/test/release tooling | `make test-tooling`, plus `make test-release-policy` for release workflows/scripts/targets | release_policy | — |
 
-Complete the applicable gates above; broaden or repeat them only for changed inputs, failures, or unresolved risks. Add tests that detect a real regression, not assertions that mirror implementation details. A host that never enters the requested scene is environment-blocked, not passed. Narrow failures before repeating broad suites. Build/test setup may install missing `xcodegen`; check availability and applicable network/installation authorization first.
+Complete the applicable gates above; broaden or repeat them only for changed inputs, failures, or unresolved risks. Add tests that detect a real regression, not assertions that mirror implementation details. A host that never enters the requested scene is environment-blocked, not passed; on this machine XCUITest is blocked by system authentication and hangs `testmanagerd`, so UI evidence comes from the local UI path, never from `make test`-style scheme runs. Narrow failures before repeating broad suites. Build/test setup may install missing `xcodegen` or the renderer's npm dependencies; check availability and applicable network/installation authorization first. A performance claim needs an interleaved A/B with an A/A noise floor; a single run or a flag toggle inside one binary is exploratory, not evidence.
 
 ## Build And Release Entry Points
 
 - `make build` compiles Debug; `make release` compiles Release. `./deploy.sh` builds, installs into `/Applications`, and launches; `--no-launch` skips only launch and still replaces the installed app. Use `make build` / `make release` for compilation without installation. Generate the project with `bash scripts/xcodegen-generate-if-needed.sh` when needed.
-- Source and tests live in `Scopy/`, `ScopyTests/`, and `ScopyUITests/`; `Package.swift` and `project.yml` define module ownership. Use Swift with four-space indentation, explicit access control, and names matching types.
+- Swift sources live in `Scopy/` (app and ScopyKit), `ScopyUISupport/`, `ScopyTests/`, `ScopyUITests/`, `ScopyTestHost/`, and `Tools/ScopyBench/`; the Node renderer lives in `Tools/MarkdownRenderer/`. `Package.swift` and `project.yml` define module ownership. Use four-space indentation and the development guide's code conventions (one primary type per file, `public` only on ScopyKit API, English comments).
 - Use `ScopyLog` categories and private metadata; never log clipboard bodies, image bytes, notes, or file contents. See the development guide for logging boundaries.
 - Commit messages are short imperative summaries. PRs explain behavior, verification, and material limits; include UI evidence for UI changes.
-- For an authorized release, follow [release-runbook.md](doc/current/release-runbook.md) or the repository `scopy-release-homebrew` skill. Version authority is an explicit Git tag, never commit count. Do not overwrite published tags/assets. Completion requires matching DMG/checksum, both casks, Homebrew installation, and installed bundle verification.
+- For an authorized release, follow [release-runbook.md](doc/current/release-runbook.md); the `scopy-release-homebrew` skill (`.agents/skills/scopy-release-homebrew/SKILL.md`) only points to it. Version authority is an explicit Git tag, never commit count. Do not overwrite published tags/assets. Completion requires matching DMG/checksum, both casks, Homebrew installation, and installed bundle verification.

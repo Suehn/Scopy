@@ -50,6 +50,8 @@ Scopy is a native macOS clipboard manager for users who need durable clipboard h
 - Keep stable context-menu content predicates out of repeated row-body work. Cache the fast Markdown menu signal by content revision, keep it bounded, and preserve separately cached exact export capability as the authoritative result.
 - Coordinate scrolling with one list-owned active slot and one tokenized suppressed-hover candidate rather than broadcasting scroll state through every visible row. A stationary pointer should regain its valid hover after scroll cooldown, while stale tokens must never revive another row.
 - Allow per-item copy, pin/unpin, delete, and contextual actions, including AirDrop for images/files and Open Containing Folder for real file-backed items.
+- Keyboard navigation, Enter, and Option+Delete act only on rows that are currently displayed: collapsed pinned rows are skipped, and Option+Delete never deletes an item while a text field (the search field or a note editor) is being edited.
+- A pin, delete, clear, share, or reveal action that fails is reported in the panel footer; it is never only logged.
 - Allow file items to carry editable notes.
 
 ### Search And Filtering
@@ -58,6 +60,7 @@ Scopy is a native macOS clipboard manager for users who need durable clipboard h
 - Support app-based filtering and content-type filtering from the header.
 - Support multi-type filtering for grouped categories such as rich text.
 - Keep result ordering user-relevant: pinned items stay prominent, with matching quality and recency driving the remainder.
+- A search, initial load, or page load that fails keeps the rows already on screen and reports the failure with a retry; a failure is never presented as an empty result.
 - Explain results from a non-empty text search with bounded, source-aware match evidence generated alongside the result rather than rescanning full item content in the row UI. If malformed or differently normalized source text makes evidence unrenderable for one candidate, retain that candidate with ordinary metadata and count and log the shortfall. Query-wide evidence preparation failures remain search failures rather than silently stripping evidence from every result.
 - Keep each result title stable. In search state, use the existing second line for an occurrence count and one or two short excerpts centered on the best matches; highlight every visible match with the adaptive system find color and a non-color emphasis cue.
 - Label evidence from notes and file paths explicitly. If matches are distant or span body and note, show at most two excerpts and keep the existing one-line secondary-row height; a capped count is shown as a lower bound.
@@ -97,7 +100,7 @@ Scopy is a native macOS clipboard manager for users who need durable clipboard h
 | --- | --- |
 | Modes | Exact / Fuzzy / Fuzzy+ / Regex |
 | Filters | App filter, single-type filter, grouped multi-type filter |
-| Pagination | Pinned items are independent of recent pagination; default recent unpinned page size is 50 and load-more pages fetch 500 unpinned items |
+| Pagination | Pinned items are independent of recent pagination; the first recent unpinned page is 50 items and each automatic load-more page fetches 100 unpinned items, applied to the list in 20-row chunks |
 | Responsiveness | Production search dispatch uses `0ms` debounce; queries of at most two characters use a minimum `16ms` coalescing delay |
 | Fuzzy / Fuzzy+ | May return a staged first page, but must converge to complete full-history results |
 | Exact | After trimming surrounding whitespace, `>= 3` characters search complete history; `<= 2` characters intentionally search only the most recent `2000` items and must say so in the UI |
@@ -119,6 +122,8 @@ Scopy is a native macOS clipboard manager for users who need durable clipboard h
 | Appearance | Thumbnail height | `40 px` | Users can pick supported thumbnail sizes |
 | Appearance | Hover preview delay | `1.0 s` | Users can slow down or speed up preview trigger timing |
 | Appearance | Markdown ChatGPT layout scale | `100%` | Users can set the default Markdown preview/export layout scale from 80% to 200%; hover preview also provides the same local scale slider |
+| Appearance | Website icons | `true` | Fetch origin-only favicons and cache them for offline preview/export |
+| Appearance | Link enrichment | `false` | Fetch Open Graph titles and downscaled images for the bare links of recognized assistant content and freeze them locally |
 | Storage | Max items | `10,000` | History retention remains policy-controlled, not architecturally capped |
 | Storage | Content budget | `200 MB` | Budget applies to content estimate, not raw DB file size |
 | Storage | Cleanup images only | `false` | When enabled, auto-cleanup should preserve text/rich text while removing image items |

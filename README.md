@@ -38,7 +38,7 @@ brew install --cask scopy && xattr -dr com.apple.quarantine /Applications/Scopy.
 | Native macOS shell | SwiftUI menu bar app, global hotkey, translucent `FloatingPanel`, keyboard navigation, context menus, Settings | Feels like a Mac utility instead of a web wrapper |
 | Deep Mac actions | Copy, paste, pin, delete, AirDrop, Open Containing Folder, file notes, image optimization | Clipboard history stays actionable, not just searchable |
 | Long history | Text, RTF, HTML, images, files, pins, deduplication, inline/external payload storage, thumbnails | Store research, code, screenshots, documents, and long answers together |
-| Search | Exact, Fuzzy, Fuzzy+, Regex, app filters, type filters, grouped rich-text filters, explicit load-more | Fast recall without making the panel feel heavy |
+| Search | Exact, Fuzzy, Fuzzy+, Regex, app filters, type filters, grouped rich-text filters, automatic paging | Fast recall without making the panel feel heavy |
 | Markdown preview | ChatGPT-style Markdown/LaTeX preview, 80%-200% scale, shared preview/export renderer, PNG export | Copy a long answer, inspect it locally, export the same rendered surface |
 | Renderer depth | Headings, lists, blockquotes, code, tables, footnotes, definition lists, task lists, safe HTML islands, inline/block math | Long Markdown stays readable and exportable |
 | Operability | `make build`, unit/strict tests, snapshot perf gates, frontend profiles, release metadata validation | Performance and release claims have repeatable evidence |
@@ -61,7 +61,7 @@ Maccy is excellent when you want a minimal, keyboard-first clipboard list. Scopy
 
 | Common pain point or request | Scopy design answer |
 | --- | --- |
-| Large custom histories can make a popup slow to prepare, especially around 10,000 items ([p0deje/Maccy#1372](https://github.com/p0deje/Maccy/issues/1372)). | Pinned rows load separately, the first recent page stays small, and load-more pages are explicit. |
+| Large custom histories can make a popup slow to prepare, especially around 10,000 items ([p0deje/Maccy#1372](https://github.com/p0deje/Maccy/issues/1372)). | Pinned rows load separately, the first recent page is 50 rows, and further 100-row pages load automatically as you scroll. |
 | Large clippings and long previews can lag ([#1080](https://github.com/p0deje/Maccy/issues/1080), [#1095](https://github.com/p0deje/Maccy/issues/1095)). | Preview preparation, Markdown rendering, thumbnails, and export have bounded paths and focused tests. |
 | Users ask for better image save/draw/share workflows ([#1331](https://github.com/p0deje/Maccy/issues/1331), [#1245](https://github.com/p0deje/Maccy/issues/1245), [#1348](https://github.com/p0deje/Maccy/issues/1348)). | Scopy stores image rows, shows thumbnails, previews images, optimizes/compresses, and sends image/file rows via AirDrop. |
 | Duplicate suppression and direct reuse matter ([#1124](https://github.com/p0deje/Maccy/issues/1124), [#1306](https://github.com/p0deje/Maccy/issues/1306)). | Equivalent content is deduplicated at ingest, and keyboard-first select/copy/paste flows are part of the main panel contract. |
@@ -118,7 +118,7 @@ Download the latest `.dmg` from [GitHub Releases](https://github.com/Suehn/Scopy
 | Open or close panel | `Shift` + `Command` + `C` by default, customizable |
 | Search history | Start typing in the panel |
 | Navigate | Up / Down |
-| Select and paste | Enter |
+| Copy and close panel | Enter |
 | Clear search or close | Esc |
 | Delete selected item | Option + Delete |
 | Open Settings | Command + Comma |

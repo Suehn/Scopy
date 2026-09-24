@@ -1,1 +1,0 @@
-../proposals/semantic-search-offline-v1.md
