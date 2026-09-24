@@ -50,11 +50,11 @@ enum SearchIndexBinaryCodec {
             }
         }
 
-        mutating func postings(_ values: [Int]) {
+        mutating func postings(_ values: [UInt32]) {
             u32(UInt32(values.count))
             values.withUnsafeBufferPointer { buffer in
                 for value in buffer {
-                    var little = Int32(truncatingIfNeeded: value).littleEndian
+                    var little = value.littleEndian
                     withUnsafeBytes(of: &little) { data.append(contentsOf: $0) }
                 }
             }
@@ -117,12 +117,12 @@ enum SearchIndexBinaryCodec {
             return .some(value)
         }
 
-        mutating func postings() -> [Int]? {
+        mutating func postings() -> [UInt32]? {
             guard let count = count(bytesPerElement: 4), let slice = take(count * 4) else { return nil }
-            return slice.withUnsafeBytes { raw -> [Int] in
-                [Int](unsafeUninitializedCapacity: count) { buffer, initialized in
+            return slice.withUnsafeBytes { raw -> [UInt32] in
+                [UInt32](unsafeUninitializedCapacity: count) { buffer, initialized in
                     for index in 0..<count {
-                        buffer[index] = Int(Int32(littleEndian: raw.loadUnaligned(fromByteOffset: index * 4, as: Int32.self)))
+                        buffer[index] = UInt32(littleEndian: raw.loadUnaligned(fromByteOffset: index * 4, as: UInt32.self))
                     }
                     initialized = count
                 }
@@ -189,7 +189,7 @@ enum SearchIndexBinaryCodec {
         }
 
         guard let asciiCount = reader.count(bytesPerElement: 4) else { return nil }
-        var asciiCharPostings: [[Int]] = []
+        var asciiCharPostings: [[UInt32]] = []
         asciiCharPostings.reserveCapacity(asciiCount)
         for _ in 0..<asciiCount {
             guard let postings = reader.postings() else { return nil }
@@ -228,31 +228,26 @@ enum SearchIndexBinaryCodec {
     struct FullItem: Sendable {
         let id: String
         let type: String
-        let contentHash: String
         let plainTextLower: String
         let appBundleID: String?
-        let createdAt: TimeInterval
         let lastUsedAt: TimeInterval
-        let useCount: Int
         let isPinned: Bool
-        let sizeBytes: Int
-        let storageRef: String?
     }
 
     struct FullPayload: Sendable {
         let version: Int
         let mutationSeq: Int64
         let items: [FullItem?]
-        let asciiCharPostings: [[Int]]
-        let nonASCIICharPostings: [(key: String, postings: [Int])]
+        let asciiCharPostings: [[UInt32]]
+        let nonASCIICharPostings: [(key: String, postings: [UInt32])]
     }
 
     static func encodeFull(
         version: Int,
         mutationSeq: Int64,
         items: [FullItem?],
-        asciiCharPostings: [[Int]],
-        nonASCIICharPostings: [(key: String, postings: [Int])]
+        asciiCharPostings: [[UInt32]],
+        nonASCIICharPostings: [(key: String, postings: [UInt32])]
     ) -> Data {
         var writer = Writer(capacity: 1 << 22)
         writer.u32(magic)
@@ -268,15 +263,10 @@ enum SearchIndexBinaryCodec {
             writer.u8(1)
             writer.string(item.id)
             writer.string(item.type)
-            writer.string(item.contentHash)
             writer.string(item.plainTextLower)
             writer.string(item.appBundleID)
-            writer.f64(item.createdAt)
             writer.f64(item.lastUsedAt)
-            writer.i64(Int64(item.useCount))
             writer.u8(item.isPinned ? 1 : 0)
-            writer.i64(Int64(item.sizeBytes))
-            writer.string(item.storageRef)
         }
         writer.u32(UInt32(asciiCharPostings.count))
         for postings in asciiCharPostings {
@@ -305,21 +295,19 @@ enum SearchIndexBinaryCodec {
                 continue
             }
             guard present == 1,
-                  let id = reader.string(), let type = reader.string(), let contentHash = reader.string(),
+                  let id = reader.string(), let type = reader.string(),
                   let plainTextLower = reader.string(), let appBundleID = reader.string(),
-                  let createdAt = reader.f64(), let lastUsedAt = reader.f64(), let useCount = reader.i64(),
-                  let pinned = reader.u8(), let sizeBytes = reader.i64(), let storageRef = reader.string()
+                  let lastUsedAt = reader.f64(), let pinned = reader.u8()
             else { return nil }
-            guard let id, let type, let contentHash, let plainTextLower, pinned <= 1 else { return nil }
+            guard let id, let type, let plainTextLower, pinned <= 1 else { return nil }
             items.append(FullItem(
-                id: id, type: type, contentHash: contentHash, plainTextLower: plainTextLower,
-                appBundleID: appBundleID, createdAt: createdAt, lastUsedAt: lastUsedAt,
-                useCount: Int(useCount), isPinned: pinned == 1, sizeBytes: Int(sizeBytes), storageRef: storageRef
+                id: id, type: type, plainTextLower: plainTextLower,
+                appBundleID: appBundleID, lastUsedAt: lastUsedAt, isPinned: pinned == 1
             ))
         }
 
         guard let asciiCount = reader.count(bytesPerElement: 4) else { return nil }
-        var asciiCharPostings: [[Int]] = []
+        var asciiCharPostings: [[UInt32]] = []
         asciiCharPostings.reserveCapacity(asciiCount)
         for _ in 0..<asciiCount {
             guard let postings = reader.postings() else { return nil }
@@ -327,7 +315,7 @@ enum SearchIndexBinaryCodec {
         }
 
         guard let nonASCIICount = reader.count(bytesPerElement: 8) else { return nil }
-        var nonASCII: [(key: String, postings: [Int])] = []
+        var nonASCII: [(key: String, postings: [UInt32])] = []
         nonASCII.reserveCapacity(nonASCIICount)
         for _ in 0..<nonASCIICount {
             guard let key = reader.string(), let key, let postings = reader.postings() else { return nil }

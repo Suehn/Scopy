@@ -3,7 +3,7 @@ import Foundation
 import os
 
 enum SearchIndexDiskCache {
-    private static let fullIndexDiskCacheVersion: Int = 5
+    private static let fullIndexDiskCacheVersion: Int = 6
     private static let fullIndexDiskCacheMetadataVersion: Int = 2
     private static let shortQueryIndexDiskCacheVersion: Int = 3
 
@@ -36,15 +36,15 @@ enum SearchIndexDiskCache {
         let version: Int
         let mutationSeq: Int64
         let items: [DiskIndexedItem?]
-        let asciiCharPostings: [[Int]]
-        let nonASCIICharPostings: [String: [Int]]
+        let asciiCharPostings: [[UInt32]]
+        let nonASCIICharPostings: [String: [UInt32]]
     }
 
     struct ShortQueryIndexDiskCacheV2: Codable, Sendable {
         let version: Int
         let mutationSeq: Int64
         let slots: [DiskShortQuerySlot]
-        let asciiCharPostings: [[Int]]
+        let asciiCharPostings: [[UInt32]]
         let asciiBigramPostings: [DiskUInt16Postings]
         let nonASCIIBigramPostings: [DiskUInt32Postings]
     }
@@ -59,39 +59,29 @@ enum SearchIndexDiskCache {
 
     struct DiskUInt16Postings: Codable, Sendable {
         let key: UInt16
-        let postings: [Int]
+        let postings: [UInt32]
     }
 
     struct DiskUInt32Postings: Codable, Sendable {
         let key: UInt32
-        let postings: [Int]
+        let postings: [UInt32]
     }
 
     fileprivate struct DiskIndexedItem: Codable, Sendable {
         let id: String
         let type: String
-        let contentHash: String
         let plainTextLower: String
         let appBundleID: String?
-        let createdAt: TimeInterval
         let lastUsedAt: TimeInterval
-        let useCount: Int
         let isPinned: Bool
-        let sizeBytes: Int
-        let storageRef: String?
 
         init(from item: SearchEngineImpl.IndexedItem) {
             self.id = item.id.uuidString
             self.type = item.type.rawValue
-            self.contentHash = item.contentHash
             self.plainTextLower = item.plainTextLower
             self.appBundleID = item.appBundleID
-            self.createdAt = item.createdAt.timeIntervalSince1970
             self.lastUsedAt = item.lastUsedAt.timeIntervalSince1970
-            self.useCount = item.useCount
             self.isPinned = item.isPinned
-            self.sizeBytes = item.sizeBytes
-            self.storageRef = item.storageRef
         }
     }
 
@@ -391,7 +381,7 @@ enum SearchIndexDiskCache {
     ) -> FullPersistRequest? {
         guard index.asciiCharPostings.count == 128 else { return nil }
 
-        var nonASCII: [String: [Int]] = [:]
+        var nonASCII: [String: [UInt32]] = [:]
         nonASCII.reserveCapacity(index.nonASCIICharPostings.count)
         for (ch, postings) in index.nonASCIICharPostings {
             nonASCII[String(ch)] = postings
@@ -434,13 +424,10 @@ enum SearchIndexDiskCache {
         try metadataData.write(to: URL(fileURLWithPath: request.metadataPath), options: [.atomic])
     }
 
-    private static func validateDiskCachePostings(_ postings: [Int], itemsCount: Int) -> Bool {
+    private static func validateDiskCachePostings(_ postings: [UInt32], itemsCount: Int) -> Bool {
         guard !postings.isEmpty else { return true }
 
-        let first = postings[0]
-        if first < 0 { return false }
-
-        let last = postings[postings.count - 1]
+        let last = Int(postings[postings.count - 1])
         if last >= itemsCount { return false }
 
         // Sample a few indices to catch obviously corrupted or unsorted postings without scanning the full array.
@@ -458,8 +445,8 @@ enum SearchIndexDiskCache {
             var previousValue: Int = -1
             for index in indices {
                 if index == previousIndex { continue }
-                let value = postings[index]
-                if value < 0 || value >= itemsCount { return false }
+                let value = Int(postings[index])
+                if value >= itemsCount { return false }
                 if previousValue >= 0, value <= previousValue { return false }
                 previousIndex = index
                 previousValue = value
@@ -555,9 +542,8 @@ enum SearchIndexDiskCache {
             items: cache.items.map { item in
                 item.map {
                     SearchIndexBinaryCodec.FullItem(
-                        id: $0.id, type: $0.type, contentHash: $0.contentHash, plainTextLower: $0.plainTextLower,
-                        appBundleID: $0.appBundleID, createdAt: $0.createdAt, lastUsedAt: $0.lastUsedAt,
-                        useCount: $0.useCount, isPinned: $0.isPinned, sizeBytes: $0.sizeBytes, storageRef: $0.storageRef
+                        id: $0.id, type: $0.type, plainTextLower: $0.plainTextLower,
+                        appBundleID: $0.appBundleID, lastUsedAt: $0.lastUsedAt, isPinned: $0.isPinned
                     )
                 }
             },
@@ -604,15 +590,10 @@ enum SearchIndexDiskCache {
                 SearchEngineImpl.IndexedItem(
                     id: id,
                     type: type,
-                    contentHash: diskItem.contentHash,
                     plainTextLower: diskItem.plainTextLower,
                     appBundleID: diskItem.appBundleID,
-                    createdAt: Date(timeIntervalSince1970: diskItem.createdAt),
                     lastUsedAt: Date(timeIntervalSince1970: diskItem.lastUsedAt),
-                    useCount: diskItem.useCount,
-                    isPinned: diskItem.isPinned,
-                    sizeBytes: diskItem.sizeBytes,
-                    storageRef: diskItem.storageRef
+                    isPinned: diskItem.isPinned
                 )
             )
             idToSlot[id] = slot
@@ -625,7 +606,7 @@ enum SearchIndexDiskCache {
             }
         }
 
-        var nonASCIICharPostings: [Character: [Int]] = [:]
+        var nonASCIICharPostings: [Character: [UInt32]] = [:]
         nonASCIICharPostings.reserveCapacity(payload.nonASCIICharPostings.count)
         for entry in payload.nonASCIICharPostings {
             guard entry.key.count == 1,
@@ -663,7 +644,7 @@ enum SearchIndexDiskCache {
         SearchIndexBinaryCodec.decodeFull(data)
     }
 
-    static func debugEncodeFullPayload(_ payload: SearchIndexBinaryCodec.FullPayload, asciiCharPostings: [[Int]]) -> Data {
+    static func debugEncodeFullPayload(_ payload: SearchIndexBinaryCodec.FullPayload, asciiCharPostings: [[UInt32]]) -> Data {
         SearchIndexBinaryCodec.encodeFull(
             version: payload.version,
             mutationSeq: payload.mutationSeq,

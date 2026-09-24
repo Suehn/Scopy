@@ -811,6 +811,7 @@ actor ClipboardService {
     private let itemMutationGate = ClipboardItemMutationGate()
     private var monitorTask: Task<Void, Never>?
     private var storageRootLock: StorageRootLock?
+    private var memoryPressureSources: [any DispatchSourceMemoryPressure] = []
     private var isStarted = false
 
     // MARK: - Cleanup Scheduling (v0.26)
@@ -986,6 +987,7 @@ actor ClipboardService {
             self.monitorTask = monitorTask
             self.storageRootLock = rootLock
             self.isStarted = true
+            startMemoryPressureMonitoring()
 
             await startBackgroundMediaQueuesIfNeeded()
 
@@ -1005,6 +1007,30 @@ actor ClipboardService {
         }
     }
 
+    /// Warning releases search session memory; critical also drops the short-query index and
+    /// SQLite's page cache on the write connection.
+    private func startMemoryPressureMonitoring() {
+        memoryPressureSources = [false, true].map { critical in
+            let source = DispatchSource.makeMemoryPressureSource(
+                eventMask: critical ? .critical : .warning,
+                queue: .global(qos: .utility)
+            )
+            let handler: @Sendable () -> Void = { [weak self] in
+                Task { await self?.handleMemoryPressure(critical: critical) }
+            }
+            source.setEventHandler(handler: handler)
+            source.resume()
+            return source
+        }
+    }
+
+    private func handleMemoryPressure(critical: Bool) async {
+        await search?.trimSessionMemory(critical ? .memoryCritical : .memoryWarning)
+        if critical {
+            await storage?.repository.releaseMemory()
+        }
+    }
+
     func stop() async {
         guard isStarted else { return }
         isStarted = false
@@ -1014,6 +1040,8 @@ actor ClipboardService {
         let search = search
         let rootLock = storageRootLock
         storageRootLock = nil
+        memoryPressureSources.forEach { $0.cancel() }
+        memoryPressureSources = []
 
         await stopBackgroundMediaQueues()
 

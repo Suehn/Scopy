@@ -221,7 +221,7 @@ final class FullIndexDiskCacheHardeningTests: XCTestCase {
         XCTAssertEqual(asciiPostings.count, 128)
 
         let iIndex = Int(Character("i").asciiValue ?? 0)
-        asciiPostings[iIndex].append(itemsCount)
+        asciiPostings[iIndex].append(UInt32(itemsCount))
 
         let corruptedData = SearchIndexDiskCache.debugEncodeFullPayload(payload, asciiCharPostings: asciiPostings)
         try corruptedData.write(to: cacheURL, options: [.atomic])

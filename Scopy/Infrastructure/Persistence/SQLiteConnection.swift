@@ -135,6 +135,12 @@ final class SQLiteConnection {
         sqlite3_wal_checkpoint_v2(db, nil, SQLITE_CHECKPOINT_TRUNCATE, nil, nil)
     }
 
+    /// Frees the page cache and other heap memory this connection can release.
+    func releaseMemory() {
+        guard let db = handle else { return }
+        sqlite3_db_release_memory(db)
+    }
+
     func changeCount() -> Int {
         guard let db = handle else { return 0 }
         return Int(sqlite3_changes(db))

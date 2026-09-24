@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 import SQLite3
 import os
@@ -172,72 +173,53 @@ public actor SearchEngineImpl {
         let combinedLower: String
     }
 
+    /// The fields fuzzy search filters, scores, and orders by.
     struct IndexedItem: Sendable {
         let id: UUID
         let type: ClipboardItemType
-        let contentHash: String
         let plainTextLower: String
         let appBundleID: String?
-        let createdAt: Date
         var lastUsedAt: Date
-        var useCount: Int
         var isPinned: Bool
-        let sizeBytes: Int
-        let storageRef: String?
 
         init(from item: ClipboardStoredItem) {
             self.id = item.id
             self.type = item.type
-            self.contentHash = item.contentHash
             var combined = item.plainText
             if let note = item.note, !note.isEmpty {
                 combined.append("\n")
                 combined.append(note)
             }
-            let lower = combined.lowercased()
-            self.plainTextLower = lower
+            self.plainTextLower = combined.lowercased()
             self.appBundleID = item.appBundleID
-            self.createdAt = item.createdAt
             self.lastUsedAt = item.lastUsedAt
-            self.useCount = item.useCount
             self.isPinned = item.isPinned
-            self.sizeBytes = item.sizeBytes
-            self.storageRef = item.storageRef
         }
 
         init(
             id: UUID,
             type: ClipboardItemType,
-            contentHash: String,
             plainTextLower: String,
             appBundleID: String?,
-            createdAt: Date,
             lastUsedAt: Date,
-            useCount: Int,
-            isPinned: Bool,
-            sizeBytes: Int,
-            storageRef: String?
+            isPinned: Bool
         ) {
             self.id = id
             self.type = type
-            self.contentHash = contentHash
             self.plainTextLower = plainTextLower
             self.appBundleID = appBundleID
-            self.createdAt = createdAt
             self.lastUsedAt = lastUsedAt
-            self.useCount = useCount
             self.isPinned = isPinned
-            self.sizeBytes = sizeBytes
-            self.storageRef = storageRef
         }
     }
 
+    /// Postings hold slot numbers as `UInt32`, matching their on-disk width.
     struct FullFuzzyIndex: Sendable {
         var items: [IndexedItem?]
         var idToSlot: [UUID: Int]
         // ASCII-only char index: 128
-        var asciiCharPostings: [[Int]]
-        var nonASCIICharPostings: [Character: [Int]]
+        var asciiCharPostings: [[UInt32]]
+        var nonASCIICharPostings: [Character: [UInt32]]
         var tombstoneCount: Int
     }
 
@@ -405,15 +387,15 @@ public actor SearchEngineImpl {
         private var slotToNoteHash: [String?] = []
         private var idToSlot: [UUID: Int] = [:]
 
-        private var asciiCharPostings: [[Int]] = Array(repeating: [], count: Self.asciiCharCount)
+        private var asciiCharPostings: [[UInt32]] = Array(repeating: [], count: Self.asciiCharCount)
         // Key: (a << 7) | b
-        private var asciiBigramPostings: [UInt16: [Int]] = [:]
+        private var asciiBigramPostings: [UInt16: [UInt32]] = [:]
 
         // Key: (a << 16) | b
         //
         // This covers the hottest non-ASCII short query case (e.g. 2 CJK chars like “数学”),
         // where SQLite `instr()` substring scans become expensive on large text corpora.
-        private var nonASCIIBigramPostings: [UInt32: [Int]] = [:]
+        private var nonASCIIBigramPostings: [UInt32: [UInt32]] = [:]
 
         // Scratch stamps to keep postings unique per ingestion pass.
         private var ingestStamp: UInt32 = 1
@@ -526,7 +508,7 @@ public actor SearchEngineImpl {
                 return b
             }
 
-            let slots: [Int]
+            let slots: [UInt32]
             switch bytes.count {
             case 1:
                 let c = Int(lowerASCII(bytes[0]))
@@ -575,7 +557,7 @@ public actor SearchEngineImpl {
             return uniqueIDStrings(from: slots)
         }
 
-        private mutating func uniqueIDStrings(from slots: [Int]) -> [String] {
+        private mutating func uniqueIDStrings(from slots: [UInt32]) -> [String] {
             candidateStamp &+= 1
             if candidateStamp == 0 {
                 candidateStamp = 1
@@ -585,7 +567,8 @@ public actor SearchEngineImpl {
             var result: [String] = []
             result.reserveCapacity(min(256, slots.count))
 
-            for slot in slots {
+            for rawSlot in slots {
+                let slot = Int(rawSlot)
                 guard slot < slotToIDString.count else { continue }
                 if slot < slotCandidateStamp.count {
                     if slotCandidateStamp[slot] == candidateStamp { continue }
@@ -628,7 +611,7 @@ public actor SearchEngineImpl {
                     let c = Int(b)
                     if seenASCIICharStamp[c] != ingestStamp {
                         seenASCIICharStamp[c] = ingestStamp
-                        asciiCharPostings[c].append(slot)
+                        asciiCharPostings[c].append(UInt32(slot))
                     }
 
                     if let p = prev {
@@ -636,7 +619,7 @@ public actor SearchEngineImpl {
                         let idx = Int(key)
                         if seenASCIIBigramStamp[idx] != ingestStamp {
                             seenASCIIBigramStamp[idx] = ingestStamp
-                            asciiBigramPostings[key, default: []].append(slot)
+                            asciiBigramPostings[key, default: []].append(UInt32(slot))
                         }
                     }
                     prev = b
@@ -674,7 +657,7 @@ public actor SearchEngineImpl {
                         let key = (UInt32(p) << 16) | UInt32(cu)
                         if seenNonASCIIBigramStamp[key] != ingestStamp {
                             seenNonASCIIBigramStamp[key] = ingestStamp
-                            nonASCIIBigramPostings[key, default: []].append(slot)
+                            nonASCIIBigramPostings[key, default: []].append(UInt32(slot))
                         }
                     }
                     prev = cu
@@ -880,6 +863,15 @@ public actor SearchEngineImpl {
     /// Committed storage changes to apply in order; nil when the engine only reads the database.
     private let commitJournal: StorageCommitJournal?
 
+    /// Indexes and caches built for a search session are released once searching has been idle
+    /// this long; the next session loads them back from the disk cache or the database.
+    private static let sessionIdleTrimDelay: TimeInterval = 60
+    private var activeSearchCount = 0
+    private var lastSearchUptime: TimeInterval = 0
+    private var idleTrimTask: Task<Void, Never>?
+    /// `mutation_seq` stamped on the full index's disk cache while it still matches memory.
+    private var fullIndexPersistedMutationSeq: Int64?
+
 #if DEBUG
     private var debugFullIndexLastSnapshotSourceValue: FullIndexSnapshotSource?
     private var debugFullIndexLastDiskCacheLoadReasonValue: FullIndexDiskCacheLoadReason?
@@ -990,6 +982,8 @@ public actor SearchEngineImpl {
     }
 
     public func close() async {
+        idleTrimTask?.cancel()
+        idleTrimTask = nil
         fullIndexBuildTask?.cancel()
         fullIndexBuildTask = nil
         fullIndexBuildGeneration &+= 1
@@ -1466,8 +1460,8 @@ public actor SearchEngineImpl {
             idToSlot.reserveCapacity(reserveSlots)
         }
 
-        var asciiCharPostings: [[Int]] = Array(repeating: [], count: 128)
-        var nonASCIICharPostings: [Character: [Int]] = [:]
+        var asciiCharPostings: [[UInt32]] = Array(repeating: [], count: 128)
+        var nonASCIICharPostings: [Character: [UInt32]] = [:]
         var seenASCII = Array(repeating: false, count: 128)
         var seenNonASCII = Set<Character>()
         seenNonASCII.reserveCapacity(16)
@@ -1600,23 +1594,30 @@ public actor SearchEngineImpl {
         synchronizeWithCommittedChanges()
         guard let index = fullIndex, !fullIndexStale else { return }
         guard usesMutationSeq, let mutationSeq = knownDBChangeToken else { return }
+        guard fullIndexPersistedMutationSeq != mutationSeq else { return }
         guard let request = SearchIndexDiskCache.makeFullPersistRequest(
             index: index,
             dbPath: dbPath,
             mutationSeq: mutationSeq
         ) else { return }
         fullIndexDiskCachePersistTask = Task.detached(priority: .utility) { [request] in
+            let persisted: Bool
             do {
                 try SearchIndexDiskCache.writeFullPersistRequest(request)
+                persisted = true
             } catch {
                 // Best-effort cache: ignore failures.
+                persisted = false
             }
-            await self.finishFullIndexDiskCachePersist()
+            await self.finishFullIndexDiskCachePersist(mutationSeq: persisted ? mutationSeq : nil)
         }
     }
 
-    private func finishFullIndexDiskCachePersist() {
+    private func finishFullIndexDiskCachePersist(mutationSeq: Int64?) {
         fullIndexDiskCachePersistTask = nil
+        if let mutationSeq {
+            fullIndexPersistedMutationSeq = mutationSeq
+        }
     }
 
     private func finishShortQueryIndexBuild(generation: UInt64, snapshot: ShortQueryIndexSnapshot?) {
@@ -1711,6 +1712,9 @@ public actor SearchEngineImpl {
 
         markIndexChanged()
 
+        if snapshot.source == .diskCache, pending.isEmpty {
+            fullIndexPersistedMutationSeq = knownDBChangeToken
+        }
         if fullIndexStale {
             startFullIndexBuildIfNeeded(force: true)
         } else if snapshot.source == .database {
@@ -1752,11 +1756,79 @@ public actor SearchEngineImpl {
         }
     }
 
+    // MARK: - Session Memory
+
+    enum SessionMemoryTrim: Sendable {
+        /// Searching went idle: persist a changed full index, then release it.
+        case idle
+        /// Memory warning: release without spending memory on a persist.
+        case memoryWarning
+        /// Critical memory pressure: also drop the short-query index.
+        case memoryCritical
+    }
+
+    /// Releases per-session search memory. Released indexes come back through the normal
+    /// disk-cache load or database build on the next search that needs them.
+    func trimSessionMemory(_ trim: SessionMemoryTrim) {
+        resetQueryCaches()
+        statementCache = [:]
+        statementCacheLRU = []
+        connection?.releaseMemory()
+
+        if fullIndexBuildTask != nil {
+            resetFullIndex()
+        } else if fullIndex != nil {
+            if trim == .idle {
+                scheduleFullIndexDiskCachePersistIfPossible()
+            }
+            fullIndex = nil
+            fullIndexStale = true
+            markIndexChanged()
+        }
+        if trim == .memoryCritical {
+            resetShortQueryIndex()
+        }
+        malloc_zone_pressure_relief(nil, 0)
+    }
+
+    /// At most one timer task per session; it trims after the last search has been idle for
+    /// `sessionIdleTrimDelay` and no search is running.
+    private func armIdleTrim() {
+        guard idleTrimTask == nil else { return }
+        idleTrimTask = Task { [weak self] in
+            var delay = Self.sessionIdleTrimDelay
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+                guard let self, !Task.isCancelled else { return }
+                guard let remaining = await self.trimIfSessionIdle() else { return }
+                delay = remaining
+            }
+        }
+    }
+
+    /// Trims and returns nil once the session is idle; otherwise returns the seconds left to wait.
+    private func trimIfSessionIdle() -> TimeInterval? {
+        let idle = ProcessInfo.processInfo.systemUptime - lastSearchUptime
+        guard activeSearchCount == 0, idle >= Self.sessionIdleTrimDelay else {
+            return max(1, Self.sessionIdleTrimDelay - idle)
+        }
+        idleTrimTask = nil
+        trimSessionMemory(.idle)
+        return nil
+    }
+
     // MARK: - Search API
 
     public func search(request: SearchRequest) async throws -> SearchResult {
         let startTime = CFAbsoluteTimeGetCurrent()
         let perfContext = Perf.metricsEnabled ? PerfContext() : nil
+        activeSearchCount += 1
+        lastSearchUptime = ProcessInfo.processInfo.systemUptime
+        defer {
+            activeSearchCount -= 1
+            lastSearchUptime = ProcessInfo.processInfo.systemUptime
+            armIdleTrim()
+        }
 
         reconcileInteractiveFullIndexWarmup(for: request)
 
@@ -2641,6 +2713,7 @@ public actor SearchEngineImpl {
             } else {
                 fullIndex = loaded
                 fullIndexStale = false
+                fullIndexPersistedMutationSeq = knownDBChangeToken
                 markIndexChanged()
                 perf?.addCounter("full_index_source_disk_cache", value: 1)
                 perf?.addCounter("full_index_items", value: loaded.items.count)
@@ -2720,8 +2793,8 @@ public actor SearchEngineImpl {
             idToSlot.reserveCapacity(estimatedCount)
         }
 
-        var asciiCharPostings: [[Int]] = Array(repeating: [], count: 128)
-        var nonASCIICharPostings: [Character: [Int]] = [:]
+        var asciiCharPostings: [[UInt32]] = Array(repeating: [], count: 128)
+        var nonASCIICharPostings: [Character: [UInt32]] = [:]
         var seenASCII = Array(repeating: false, count: 128)
         var seenNonASCII = Set<Character>()
         seenNonASCII.reserveCapacity(16)
@@ -2781,7 +2854,7 @@ public actor SearchEngineImpl {
             return Array(index.items.indices)
         }
 
-        var lists: [[Int]] = []
+        var lists: [[UInt32]] = []
         lists.reserveCapacity(queryChars.asciiCodes.count + queryChars.nonASCIIChars.count)
 
         for ascii in queryChars.asciiCodes {
@@ -2806,7 +2879,7 @@ public actor SearchEngineImpl {
             candidates = intersectSorted(candidates, list)
             if candidates.isEmpty { break }
         }
-        return candidates
+        return candidates.map { Int($0) }
     }
 
     private func searchInFullIndex(index: FullFuzzyIndex, request: SearchRequest, mode: SearchMode, perf: PerfContext?) throws -> SearchResult {
@@ -3323,10 +3396,10 @@ public actor SearchEngineImpl {
         return ids.compactMap { index.idToSlot[$0] }
     }
 
-    private func intersectSorted(_ a: [Int], _ b: [Int]) -> [Int] {
+    private func intersectSorted(_ a: [UInt32], _ b: [UInt32]) -> [UInt32] {
         var i = 0
         var j = 0
-        var result: [Int] = []
+        var result: [UInt32] = []
         result.reserveCapacity(min(a.count, b.count))
 
         while i < a.count && j < b.count {
@@ -3383,8 +3456,8 @@ public actor SearchEngineImpl {
     private static func appendSlotToCharPostings(
         text: String,
         slot: Int,
-        asciiCharPostings: inout [[Int]],
-        nonASCIICharPostings: inout [Character: [Int]],
+        asciiCharPostings: inout [[UInt32]],
+        nonASCIICharPostings: inout [Character: [UInt32]],
         seenASCII: inout [Bool],
         seenNonASCII: inout Set<Character>
     ) {
@@ -3399,13 +3472,13 @@ public actor SearchEngineImpl {
                 let idx = Int(ascii)
                 if !seenASCII[idx] {
                     seenASCII[idx] = true
-                    asciiCharPostings[idx].append(slot)
+                    asciiCharPostings[idx].append(UInt32(slot))
                 }
                 continue
             }
 
             if seenNonASCII.insert(ch).inserted {
-                nonASCIICharPostings[ch, default: []].append(slot)
+                nonASCIICharPostings[ch, default: []].append(UInt32(slot))
             }
         }
     }

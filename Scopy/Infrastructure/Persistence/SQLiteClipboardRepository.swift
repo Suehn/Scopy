@@ -1002,6 +1002,10 @@ actor SQLiteClipboardRepository {
         connection?.walCheckpointTruncate()
     }
 
+    func releaseMemory() {
+        connection?.releaseMemory()
+    }
+
     // MARK: - Internals
 
     private static func openFlags(for path: String) -> Int32 {

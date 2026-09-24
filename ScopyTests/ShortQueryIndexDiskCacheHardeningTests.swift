@@ -183,7 +183,7 @@ final class ShortQueryIndexDiskCacheHardeningTests: XCTestCase {
 
             // Inject an out-of-bounds slot into a common postings list ('i' in "item").
             let iIndex = Int(Character("i").asciiValue ?? 0)
-            asciiPostings[iIndex].append(slotsCount)
+            asciiPostings[iIndex].append(UInt32(slotsCount))
 
             let corruptedData = SearchIndexDiskCache.debugEncodeShortCache(
                 SearchIndexDiskCache.ShortQueryIndexDiskCacheV2(
