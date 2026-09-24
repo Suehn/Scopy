@@ -44,7 +44,7 @@ Scopy is a native macOS clipboard manager for users who need durable clipboard h
 
 ### History Browsing
 
-- Show recent history in a floating panel driven by a global hotkey.
+- Show recent history in a floating panel driven by a global hotkey; the panel remembers its last size, clamped to the current screen.
 - Support incremental loading for large histories instead of blocking on full-history reads; pinned rows are loaded separately and do not consume the initial recent-page quota.
 - Keep an idle history row passive: preview, note, Markdown export, image optimization, popover, and feedback state should be created only for real interaction or owned work, then released when every owned task is idle.
 - Keep stable context-menu content predicates out of repeated row-body work. Cache the fast Markdown menu signal by content revision, keep it bounded, and preserve separately cached exact export capability as the authoritative result.
@@ -68,7 +68,7 @@ Scopy is a native macOS clipboard manager for users who need durable clipboard h
 
 ### Preview, Media, And Export
 
-- Provide hover previews for text, images, and files.
+- Provide hover previews for text, images, and files. Hovering a file of another type shows a static QuickLook thumbnail; the live QuickLook view exists only in a pinned window. Image previews open at their final size.
 - Hover previews have a subtle corner resize grip. Compact window actions float at the lower leading edge, with Markdown scale/export controls at the upper trailing edge. Controls brighten on hover and never reserve a header row or change content geometry. A pinned window has a dedicated small move grip, leaving document text selectable.
 - Pinning keeps the current rendered content in an independent movable, resizable window and hides the history panel. Multiple pinned windows coexist while the list continues to offer hover previews. Each pinned Markdown window owns its own WebView, scroll position and layout scale; media windows do not allocate WebViews. Pinning the same item again focuses its existing window. A pin floats above other apps by default with a per-window toggle, and closes explicitly or when its item is deleted or its payload replaced. Saved frames are constrained to the current display.
 - Preview text reflows against the current window width at the chosen scale, with a centered readable column and local scrolling for wide tables/code. PNG keeps its canonical output width and uses the same rendering pipeline.
@@ -92,7 +92,7 @@ Scopy is a native macOS clipboard manager for users who need durable clipboard h
 - Provide settings pages for General, Shortcuts, Clipboard, Appearance, Storage, and About.
 - Preserve explicit Save/Cancel semantics for settings changes.
 - Apply recorded hotkeys immediately after capture while keeping the rest of settings transactional.
-- Show About-page version/build information and lightweight performance metrics.
+- Show About-page version/build information and lightweight performance metrics; the history list itself shows no timing telemetry.
 
 ## Current Search Contract
 
@@ -158,7 +158,7 @@ Scopy is a native macOS clipboard manager for users who need durable clipboard h
 - Context-menu availability must preserve keyboard and accessibility behavior; performance work may cache stable predicates but must not defer menu availability until hover or conflate a heuristic Markdown signal with exact PNG-export capability.
 - Normal row/button/context-menu pointer events must not be classified as scrollbar interaction; suppression begins only for an actionable vertical or horizontal scroller part with matched down/up ownership.
 - The history view and search UI must remain usable on realistic snapshot databases, not just toy data.
-- Search typing focus and list selection remain independent: focusing the search field does not clear the selected row, and hover can still update row selection while the field is focused.
+- Search typing focus and list selection remain independent: focusing the search field does not clear the selected row, and hover can still update row selection while the field is focused. After keyboard navigation, hover changes the selection only once the pointer has actually moved, so a row scrolling under a resting pointer never steals the keyboard selection.
 
 ### Operability
 

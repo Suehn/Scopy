@@ -4,12 +4,7 @@ import CoreGraphics
 
 @MainActor
 final class HistoryItemViewUITests: XCTestCase {
-    private static let forwardedPerfKeys: [String] = [
-        "SCOPY_PERF_HISTORY_INDEX",
-        "SCOPY_PERF_SCROLL_RESOLVER_CACHE",
-        "SCOPY_PERF_MARKDOWN_RESOLVER_CACHE",
-        "SCOPY_PERF_SHORT_QUERY_DEBOUNCE"
-    ]
+    private static let forwardedPerfKeys: [String] = []
 
     private var app: XCUIApplication!
 

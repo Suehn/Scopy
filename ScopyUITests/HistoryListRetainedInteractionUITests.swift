@@ -35,7 +35,6 @@ final class HistoryListRetainedInteractionUITests: XCTestCase {
         // Keep hover previews out of the way while this suite exercises row controls and menus.
         app.launchEnvironment["SCOPY_MOCK_IMAGE_PREVIEW_DELAY"] = "10"
         app.launchEnvironment["SCOPY_MOCK_UPDATE_NOTE_DELAY_MS"] = "2000"
-        app.launchEnvironment["SCOPY_PERF_PASSIVE_ROW"] = "1"
         app.launch()
 
         let window = app.windows.firstMatch

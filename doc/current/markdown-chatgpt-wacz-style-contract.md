@@ -84,7 +84,7 @@ source + MarkdownRenderContext
   -> local unified/remark/rehype bundle
   -> MarkdownHTMLDocumentBuilder.document
   -> the same standalone HTML document
-       -> MarkdownPreviewWebView
+       -> MarkdownPreviewWebViewController (hover and pinned previews)
        -> MarkdownExportService
 ```
 
@@ -101,7 +101,7 @@ Authoritative implementation surfaces:
 - `Tools/MarkdownRenderer/src/scopyIcons.js`: original installed Codex control artwork, plus the documented Phosphor currency selector. `scopyCodexIcons.js` owns original file/app/globe artwork and deterministic SVG paint IDs.
 - `Tools/MarkdownRenderer/src/scopySourceIcon.js`: shared exact-host source icons and compact failed-favicon fallback.
 - `Tools/MarkdownRenderer/src/rehypeScopyKatex.js`: HTML-only math rendering and stable failure behavior.
-- `Scopy/Views/History/MarkdownPreviewWebView.swift`: generation-safe WebView lifecycle and metrics.
+- `Scopy/Views/History/MarkdownPreviewWebView.swift`: the one `MarkdownPreviewWebViewController` (owner lease, render IDs, metrics) and the `ReusableMarkdownPreviewWebView` representable; `Scopy/Services/Export/MarkdownWebKitEnvironment.swift` holds the shared WebKit configuration and network-blocking rules for preview and export.
 - `Scopy/Services/Export/MarkdownExportService.swift`: PNG reliability strategies applied to the same HTML.
 - `Scopy/Resources/MarkdownPreview/asset-manifest.json` plus `Tools/MarkdownRenderer/scripts/verify-assets.mjs`: the lockfile-derived renderer/KaTeX asset contract.
 
@@ -369,7 +369,7 @@ Source artwork is shared across ordinary HTTP(S) links, citation primary/support
 
 A descriptive ordinary link may additionally reuse the exact URL's existing frozen enrichment favicon after the same bounded raster data-URI validation used by rich v2; only the first 48 frozen entries are considered and ordinary-link data-URI output has a 512 KiB character budget counting repeated occurrences. Over-budget icons use the bundled/globe fallback. Its authored label and inline shape stay intact. Frozen enrichment icons take precedence and require no new request. Rich results continue to prefer their explicit validated image reference, then the exact-host map, then native origin discovery and globe fallback. A corrupt favicon becomes a compact local globe during the shared image-readiness phase, without expanding into the generic image-error message. Preview and PNG consume these same terminal image outcomes.
 
-**Native website icons (2026-09-11).** Ordinary links, source citations and rich source labels share one `scopySourceIcon` identity rule. After sanitization, only renderer-created source glyphs may become `scopy-source-icon://host/https` (or `/http`) images. This resource carries no article path, query, credentials or non-default port. Authored images cannot use the scheme. A document admits at most 24 distinct origins and 256 icon occurrences. Both preview WebViews and PNG export register the same `SourceIconSchemeHandler`; it delegates to `SourceIconService` in the backend. The independent **网站图标（联网获取并缓存）** setting defaults on and uses normal Save/Cancel transactions; disabling it permits cached icons but no new requests. Ordinary XCTest/UI exports disable icon networking unless explicitly enabled for live verification.
+**Native website icons (2026-09-11).** Ordinary links, source citations and rich source labels share one `scopySourceIcon` identity rule. After sanitization, only renderer-created source glyphs may become `scopy-source-icon://host/https` (or `/http`) images. This resource carries no article path, query, credentials or non-default port. Authored images cannot use the scheme. A document admits at most 24 distinct origins and 256 icon occurrences. The preview WebView and PNG export register the same `SourceIconSchemeHandler`; it delegates to `SourceIconService` in the backend. The independent **网站图标（联网获取并缓存）** setting defaults on and uses normal Save/Cancel transactions; disabling it permits cached icons but no new requests. Ordinary XCTest/UI exports disable icon networking unless explicitly enabled for live verification.
 
 The service reuses `LinkEnrichmentFetcher`'s cookie-less, credential-less, public-DNS/redirect validation and bounded image decoding. It races the origin's `/favicon.ico` against declared homepage icon links (attribute order, relative URLs and rel token lists supported; no page title required), emits only downscaled PNG at most 64 px / 32 KiB, deduplicates in-flight work, and limits work to six origins plus 24 queued. The disk/memory cache holds at most 256 origins, with 30-day positive and one-hour negative expiry; cached successes remain usable offline. The existing DNS-preflight/Fake-IP residual boundary above also applies. No third-party favicon aggregator or issuer-specific mapping is added.
 
@@ -421,7 +421,7 @@ Scopy separates layout width, display fit, and bitmap export:
 
 The user-selected ChatGPT layout scale is clamped to 80...200%. Layout occurs in an internal viewport of `816 / scale`, then WebKit-style visual zoom maps it back to the fixed 816px output surface. Changing this selected scale causes real reflow; it must not reuse line breaks from another scale or enlarge the PNG canvas to simulate zoom.
 
-Preview fit-to-host scaling is display-only: a host narrower than 816px scales the fixed surface down by `hostWidth / 816`; a wider host centers it without magnifying it. Resizing must preserve the internal viewport, font metrics, line breaks, table baseline, HTML/cache key and PNG target width. Both preview WebView implementations and export consume this same document runtime without a separate responsive-layout mode. Compact native controls overlay the document edges and do not reserve a header row.
+Preview fit-to-host scaling is display-only: a host narrower than 816px scales the fixed surface down by `hostWidth / 816`; a wider host centers it without magnifying it. Resizing must preserve the internal viewport, font metrics, line breaks, table baseline, HTML/cache key and PNG target width. The preview WebView controller and export consume this same document runtime without a separate responsive-layout mode. Compact native controls overlay the document edges and do not reserve a header row.
 
 The current production document is the captured light-theme branch. The WACZ contains light/dark token code paths but no hydrated theme class or final computed style. Do not invent a dark palette from asset presence alone; dark-mode parity remains a separately capturable/visually verifiable extension.
 

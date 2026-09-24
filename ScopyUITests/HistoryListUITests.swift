@@ -12,12 +12,6 @@ final class HistoryListUITests: XCTestCase {
     }
 
     private static let forwardedPerfKeys: [String] = [
-        "SCOPY_PERF_HISTORY_INDEX",
-        "SCOPY_PERF_SCROLL_RESOLVER_CACHE",
-        "SCOPY_PERF_MARKDOWN_RESOLVER_CACHE",
-        "SCOPY_PERF_SHORT_QUERY_DEBOUNCE",
-        "SCOPY_PERF_PASSIVE_ROW",
-        "SCOPY_PERF_MARKDOWN_MENU_SIGNAL_CACHE",
         "SCOPY_MOCK_DATASET_ID",
         "SCOPY_PROFILE_SOURCE_FINGERPRINT",
         "SCOPY_PROFILE_EXECUTABLE_FINGERPRINT",
@@ -657,14 +651,6 @@ final class HistoryListUITests: XCTestCase {
             config["max_samples"] as? Int,
             Int(app.launchEnvironment["SCOPY_PROFILE_MAX_SAMPLES"] ?? "")
         )
-        for key in [
-            "SCOPY_PERF_HISTORY_INDEX",
-            "SCOPY_PERF_SCROLL_RESOLVER_CACHE",
-            "SCOPY_PERF_MARKDOWN_RESOLVER_CACHE",
-            "SCOPY_PERF_SHORT_QUERY_DEBOUNCE"
-        ] {
-            XCTAssertEqual(config[key] as? String, "1", "Fixed profile requires config.\(key)=1")
-        }
 
         XCTAssertEqual(dataset["schema"] as? String, "history-profile-dataset-v1")
         XCTAssertEqual(dataset["id"] as? String, datasetID)
