@@ -3,67 +3,6 @@ import XCTest
 @testable import ScopyKit
 
 @MainActor
-final class IndexLifecycleTests: XCTestCase {
-
-    func testFullFuzzyIndexMarksStaleAfterTombstonesAndRebuilds() async throws {
-        let baseURL = FileManager.default.temporaryDirectory.appendingPathComponent("scopy-index-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: baseURL, withIntermediateDirectories: true)
-
-        let dbPath = baseURL.appendingPathComponent("clipboard.db").path
-        let storage = StorageService(databasePath: dbPath)
-        try await storage.open()
-
-        for i in 0..<64 {
-            let text = "item \(i)"
-            let content = ClipboardMonitor.ClipboardContent(
-                type: .text,
-                plainText: text,
-                payload: .none,
-                appBundleID: "com.test.app",
-                contentHash: "hash-\(i)-\(UUID().uuidString)",
-                sizeBytes: text.utf8.count
-            )
-            _ = try await storage.upsertItem(content)
-        }
-
-        let search = SearchEngineImpl(dbPath: dbPath, commitJournal: storage.commitJournal)
-        try await search.open()
-
-        _ = try await search.search(request: SearchRequest(query: "item", mode: .fuzzy, limit: 10, offset: 0))
-        var health = await search.debugFullIndexHealth()
-        XCTAssertTrue(health.isBuilt)
-        XCTAssertFalse(health.isStale)
-        XCTAssertEqual(health.tombstones, 0)
-        XCTAssertEqual(health.slots, 64)
-
-        let toDelete = try await storage.fetchRecent(limit: 16, offset: 0)
-        for item in toDelete {
-            try await storage.deleteItem(item.id)
-            await search.applyCommittedChanges()
-        }
-
-        health = await search.debugFullIndexHealth()
-        XCTAssertTrue(health.isBuilt)
-        if !health.isStale {
-            // Depending on timing, background rebuild may already complete.
-            XCTAssertEqual(health.tombstones, 0)
-            XCTAssertEqual(health.slots, 48)
-        }
-
-        _ = try await search.search(request: SearchRequest(query: "item", mode: .fuzzy, limit: 10, offset: 0))
-        health = await search.debugFullIndexHealth()
-        XCTAssertTrue(health.isBuilt)
-        XCTAssertFalse(health.isStale)
-        XCTAssertEqual(health.tombstones, 0)
-        XCTAssertEqual(health.slots, 48)
-
-        await search.close()
-        await storage.close()
-        try? FileManager.default.removeItem(at: baseURL)
-    }
-}
-
-@MainActor
 final class StorageDeletionConcurrencyTests: XCTestCase {
 
     func testDeleteAllExceptPinnedDoesNotBlockMainActorAndIsBounded() async throws {

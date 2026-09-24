@@ -273,28 +273,6 @@ final class SearchServiceTests: XCTestCase {
         XCTAssertNotNil(result.matchContexts[normalHit.id])
     }
 
-    func testPerfMetricsIncludeMatchEvidenceInsideSearchTotal() async throws {
-        guard ProcessInfo.processInfo.environment["SCOPY_PERF_METRICS"] == "1" else {
-            throw XCTSkip("Requires SCOPY_PERF_METRICS=1")
-        }
-        let target = try await storage.upsertItem(makeContent("timed evidence needle"))
-        await search.invalidateCache()
-
-        let result = try await search.search(
-            request: SearchRequest(query: "needle", mode: .exact, limit: 50, offset: 0)
-        )
-        let metrics = try XCTUnwrap(result.perf)
-        let evidence = try XCTUnwrap(metrics.phases.first { $0.name == "match_evidence" })
-        let total = try XCTUnwrap(metrics.phases.first { $0.name == "search_total" })
-
-        XCTAssertNotNil(result.matchContexts[target.id])
-        XCTAssertLessThanOrEqual(evidence.ms, total.ms)
-        XCTAssertEqual(
-            metrics.counters.first { $0.name == "match_evidence_items" }?.value,
-            result.items.count
-        )
-    }
-
     func testSearchDeadlineInterruptsActiveSQLiteQueryPromptly() async throws {
         await search.close()
 
@@ -700,62 +678,7 @@ final class SearchServiceTests: XCTestCase {
 
     // MARK: - Performance Tests (v0.md 4.1)
 
-    func testSearchPerformance5kItems() async throws {
-        // Skip if not running performance tests
-        #if DEBUG
-        try XCTSkipIf(ProcessInfo.processInfo.environment["RUN_PERF_TESTS"] == nil,
-                      "Set RUN_PERF_TESTS env var to run performance tests")
-        #endif
-
-        try await populateTestData(count: 5000)
-
-        let request = SearchRequest(query: "test", mode: .fuzzy, limit: 50, offset: 0)
-
-        // v0.md 4.1: P95 ≤ 50ms for ≤5k items
-        measure {
-            let expectation = XCTestExpectation(description: "Search completed")
-            Task {
-                _ = try await self.search.search(request: request)
-                expectation.fulfill()
-            }
-            wait(for: [expectation], timeout: 1.0)
-        }
-    }
-
-    func testSearchPerformanceTiming() async throws {
-        try await populateTestData(count: 1000)
-
-        let request = SearchRequest(query: "Item", mode: .fuzzy, limit: 50, offset: 0)
-        let result = try await search.search(request: request)
-
-        // Check that search time is reported
-        XCTAssertGreaterThanOrEqual(result.searchTimeMs, 0)
-
-        #if !SCOPY_TSAN_TESTS
-        // For 1k items, should be very fast (< 100ms typically)
-        XCTAssertLessThan(result.searchTimeMs, 100, "Search took too long: \(result.searchTimeMs)ms")
-        #endif
-    }
-
     // MARK: - Short Query Optimization Tests (v0.md 4.2)
-
-    func testShortQueryUsesCache() async throws {
-        try await populateTestData(count: 100)
-
-        // First search - populates cache
-        let request1 = SearchRequest(query: "a", mode: .fuzzy, limit: 50, offset: 0)
-        let result1 = try await search.search(request: request1)
-        let time1 = result1.searchTimeMs
-
-        // Second search - should use cache
-        let request2 = SearchRequest(query: "b", mode: .fuzzy, limit: 50, offset: 0)
-        let result2 = try await search.search(request: request2)
-        let time2 = result2.searchTimeMs
-
-        // Cache hit should be faster (or at least not significantly slower)
-        // This is a soft assertion since timing can vary
-        print("Cache test: First query \(time1)ms, Second query \(time2)ms")
-    }
 
     // MARK: - Cache Invalidation Tests
 

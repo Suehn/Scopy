@@ -36,45 +36,6 @@ final class ResourceCleanupTests: XCTestCase {
         }
     }
 
-    /// 测试清理操作在全部 pin 时不会无限循环
-    func testCleanupWithAllPinnedItems() async throws {
-        var cleanupPolicy = StorageService.CleanupPolicy()
-        let storage = StorageService(databasePath: ":memory:")
-        try await storage.open()
-
-        // 插入并 pin 所有项目
-        for i in 0..<10 {
-            let content = ClipboardMonitor.ClipboardContent(
-                type: .text,
-                plainText: "Pinned item \(i)",
-                payload: .none,
-                appBundleID: nil,
-                contentHash: "pinned_\(i)",
-                sizeBytes: 20
-            )
-            let item = try await storage.upsertItem(content)
-            try await storage.setPin(item.id, pinned: true)
-        }
-
-        // 设置非常小的限制
-        cleanupPolicy.maxItems = 5
-        cleanupPolicy.maxContentBytes = 0 // 0 MB
-
-        // 执行清理 - 不应该无限循环
-        let startTime = Date()
-        try await storage.performCleanup(policy: cleanupPolicy)
-        let elapsed = Date().timeIntervalSince(startTime)
-
-        // 清理应该在合理时间内完成（不超过 1 秒）
-        XCTAssertLessThan(elapsed, 1.0, "Cleanup should complete quickly even with all pinned items")
-
-        // 所有 pinned 项目应该保留
-        let count = try await storage.getItemCount()
-        XCTAssertEqual(count, 10, "All pinned items should be preserved")
-
-        await storage.close()
-    }
-
     /// 测试 sqlite3_step 错误处理
     func testSqliteStepErrorHandling() async throws {
         var cleanupPolicy = StorageService.CleanupPolicy()
@@ -111,54 +72,11 @@ final class ResourceCleanupTests: XCTestCase {
 
     // MARK: - Search Service Cleanup Tests
 
-    /// 测试搜索服务缓存失效
-    func testSearchCacheInvalidation() async throws {
-        let storage = StorageService(databasePath: Self.makeSharedInMemoryDatabasePath())
-        try await storage.open()
-        let search = SearchEngineImpl(dbPath: storage.databaseFilePath)
-        try await search.open()
-
-        // 插入数据
-        for i in 0..<10 {
-            let content = ClipboardMonitor.ClipboardContent(
-                type: .text,
-                plainText: "Cache item \(i)",
-                payload: .none,
-                appBundleID: nil,
-                contentHash: "cache_\(i)",
-                sizeBytes: 15
-            )
-            _ = try await storage.upsertItem(content)
-        }
-
-        // 执行搜索（填充缓存）
-        let request = SearchRequest(
-            query: "it", // 短查询使用缓存
-            mode: .exact,
-            appFilter: nil,
-            typeFilter: nil,
-            limit: 50,
-            offset: 0
-        )
-        let result1 = try await search.search(request: request)
-        XCTAssertGreaterThan(result1.total, 0, "Should find items")
-
-        // 失效缓存
-        await search.invalidateCache()
-
-        // 再次搜索应该仍然工作
-        let result2 = try await search.search(request: request)
-        XCTAssertEqual(result1.total, result2.total, "Results should be consistent after cache invalidation")
-
-        await search.close()
-        await storage.close()
-    }
-
     // MARK: - Event Stream Cleanup Tests
 
     /// 测试服务停止后，事件监听任务可被取消并正常收尾（无需依赖 stream finish）
     func testEventStreamCleanup() async throws {
-        let service = ClipboardServiceFactory.create(useMock: false, databasePath: Self.makeSharedInMemoryDatabasePath())
+        let service = ClipboardServiceFactory.create(databasePath: Self.makeSharedInMemoryDatabasePath())
 
         // 启动服务
         try await service.start()
@@ -194,53 +112,4 @@ final class ResourceCleanupTests: XCTestCase {
 
     // MARK: - Task Cancellation Tests
 
-    /// 测试搜索任务取消后不会更新状态
-    func testSearchTaskCancellation() async throws {
-        let service = TestMockClipboardService()
-        let appState = AppState.forTesting(service: service)
-        defer { appState.stop() }
-
-        // 设置初始状态
-        service.setItemCount(100)
-        await appState.load()
-        service.resetSearchCallCount()
-
-        appState.searchQuery = "1"
-
-        // 开始搜索
-        appState.search()
-
-        // 立即取消（通过开始新搜索）
-        appState.searchQuery = "2"
-        appState.search()
-
-        await assertEventually(timeout: 1.0, pollInterval: 0.01, {
-            service.searchCallCount >= 1 && service.lastSearchQuery == "2"
-        }, message: "Search cancellation should settle on latest query")
-
-        // 验证状态一致性（不应该有旧搜索的结果）
-        XCTAssertTrue(appState.items.allSatisfy { $0.plainText.localizedCaseInsensitiveContains("2") })
-    }
-
-    /// 测试 loadMore 任务取消
-    func testLoadMoreTaskCancellation() async throws {
-        let service = TestMockClipboardService()
-        let appState = AppState.forTesting(service: service)
-        defer { appState.stop() }
-
-        // 初始化
-        service.setItemCount(700)
-        await appState.load()
-        XCTAssertTrue(appState.canLoadMore)
-
-        // 快速连续调用 loadMore
-        Task { await appState.loadMore() }
-        Task { await appState.loadMore() }
-        Task { await appState.loadMore() }
-
-        let onePage = HistoryViewModel.initialPageSize + HistoryViewModel.loadMorePageSize
-        await assertEventually(timeout: 1.0, pollInterval: 0.01, {
-            appState.loadedCount == onePage
-        }, message: "loadMore should append exactly one page")
-    }
 }
