@@ -361,7 +361,6 @@ enum ScopyBench {
         await settingsStore.save(settings)
 
         let service = ClipboardServiceFactory.create(
-            useMock: false,
             databasePath: options.dbPath,
             settingsStore: settingsStore,
             monitorPasteboardName: "ScopyBench",
