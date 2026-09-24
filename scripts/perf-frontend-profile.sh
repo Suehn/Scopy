@@ -1,6 +1,8 @@
 #!/bin/bash
-# Run realistic frontend scroll/profile benchmarks (baseline vs current).
-# Produces repeatable JSON + Markdown summaries under logs/.
+# Run realistic frontend scroll/profile benchmarks for the current build (one variant).
+# Produces repeatable JSON + Markdown summaries under logs/. Pass --compare <prior summary.json>
+# to fill the Baseline column from an earlier run of another commit; the script never toggles
+# feature flags inside one binary.
 
 set -eEuo pipefail
 
@@ -18,6 +20,7 @@ MIN_SAMPLES=260
 SKIP_SETUP=0
 DESTINATION="platform=macOS"
 INCLUDE_HOVER=0
+COMPARE_SUMMARY=""
 SKIP_AX_LIST_QUERY="${SCOPY_PROFILE_SKIP_AX_LIST_QUERY:-0}"
 
 TEST_ACCESSIBILITY="ScopyUITests/HistoryListUITests/testScrollProfileRealSnapshotAccessibility"
@@ -37,7 +40,8 @@ Usage:
 Options:
   --out <dir>            Output directory (default: $OUT_DIR_DEFAULT)
   --db <path>            Snapshot DB path (default: $DB_DEFAULT)
-  --repeats <n>          Repeats per variant (default: $REPEATS)
+  --repeats <n>          Repeats (default: $REPEATS)
+  --compare <file>       Prior frontend-scroll-profile-summary.json used as the Baseline column
   --duration <sec>       Profile duration per scenario (default: $DURATION_SEC)
   --min-samples <n>      Minimum frame samples (default: $MIN_SAMPLES)
   --skip-setup           Skip xcodegen regenerate check
@@ -95,6 +99,10 @@ while [[ $# -gt 0 ]]; do
       SKIP_SETUP=1
       shift 1
       ;;
+    --compare)
+      COMPARE_SUMMARY="$2"
+      shift 2
+      ;;
     --include-hover)
       INCLUDE_HOVER=1
       shift 1
@@ -118,7 +126,7 @@ if [[ ! -f "$DB_PATH" ]]; then
   exit 1
 fi
 
-mkdir -p "$OUT_DIR/raw/baseline" "$OUT_DIR/raw/current"
+mkdir -p "$OUT_DIR/raw/current"
 RUNNER_OUTPUT_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/scopy-frontend-profile.XXXXXX")"
 RUNNER_DB_PATH="$RUNNER_OUTPUT_ROOT/clipboard.db"
 # Keep XCTest and the profiled app away from Documents-backed repo paths. On macOS, opening
@@ -156,18 +164,6 @@ run_variant_repeat() {
   local runner_profile_dir="$RUNNER_OUTPUT_ROOT/raw/$variant"
   local log_file="$OUT_DIR/xcodebuild.$variant.$run_id.log"
   mkdir -p "$runner_profile_dir"
-
-  local perf_index=1
-  local perf_scroll_cache=1
-  local perf_markdown_cache=1
-  local perf_short_debounce=1
-
-  if [[ "$variant" == "baseline" ]]; then
-    perf_index=0
-    perf_scroll_cache=0
-    perf_markdown_cache=0
-    perf_short_debounce=0
-  fi
 
   local profile_scenarios=(
     "real-snapshot-accessibility"
@@ -216,10 +212,6 @@ run_variant_repeat() {
       TEST_RUNNER_SCOPY_UI_PROFILE_DURATION_SEC="$DURATION_SEC" \
       TEST_RUNNER_SCOPY_UI_PROFILE_MIN_SAMPLES="$MIN_SAMPLES" \
       TEST_RUNNER_SCOPY_PROFILE_SKIP_AX_LIST_QUERY="$SKIP_AX_LIST_QUERY" \
-      TEST_RUNNER_SCOPY_PERF_HISTORY_INDEX="$perf_index" \
-      TEST_RUNNER_SCOPY_PERF_SCROLL_RESOLVER_CACHE="$perf_scroll_cache" \
-      TEST_RUNNER_SCOPY_PERF_MARKDOWN_RESOLVER_CACHE="$perf_markdown_cache" \
-      TEST_RUNNER_SCOPY_PERF_SHORT_QUERY_DEBOUNCE="$perf_short_debounce" \
       xcodebuild -quiet test \
         -project Scopy.xcodeproj \
         -scheme Scopy \
@@ -291,13 +283,11 @@ echo "DB: $DB_PATH"
 echo "Repeats: $REPEATS"
 
 for repeat in $(seq 1 "$REPEATS"); do
-  echo "== Repeat $repeat/$REPEATS: baseline =="
-  run_variant_repeat "baseline" "$repeat"
-  echo "== Repeat $repeat/$REPEATS: current =="
+  echo "== Repeat $repeat/$REPEATS =="
   run_variant_repeat "current" "$repeat"
 done
 
-python3 - "$OUT_DIR" "$REPEATS" "$DURATION_SEC" "$MIN_SAMPLES" "$INCLUDE_HOVER" <<'PY'
+python3 - "$OUT_DIR" "$REPEATS" "$DURATION_SEC" "$MIN_SAMPLES" "$INCLUDE_HOVER" "$COMPARE_SUMMARY" <<'PY'
 import json
 import os
 import statistics
@@ -310,9 +300,10 @@ repeats = int(sys.argv[2])
 duration_sec = float(sys.argv[3])
 min_samples = int(sys.argv[4])
 include_hover = sys.argv[5] == "1"
+compare_summary_path = sys.argv[6] if len(sys.argv) > 6 else ""
 
 raw_root = os.path.join(out_dir, "raw")
-variants = ["baseline", "current"]
+variants = ["current"]
 
 metric_bucket_keys = [
     "row.display_model_ms",
@@ -744,9 +735,15 @@ md_lines.append("")
 md_lines.append("| Scenario | Metric | Baseline | Current | Delta | Change |")
 md_lines.append("|---|---:|---:|---:|---:|---:|")
 
-all_scenarios = sorted(set(summary["variants"].get("baseline", {}).keys()) | set(summary["variants"].get("current", {}).keys()))
+baseline_variants = {}
+if compare_summary_path:
+    with open(compare_summary_path, encoding="utf-8") as f:
+        baseline_variants = json.load(f).get("variants", {}).get("current", {})
+    md_lines.append(f"- Baseline column: {compare_summary_path}")
+    md_lines.append("")
+all_scenarios = sorted(set(baseline_variants.keys()) | set(summary["variants"].get("current", {}).keys()))
 for scenario in all_scenarios:
-    baseline = summary["variants"].get("baseline", {}).get(scenario, {})
+    baseline = baseline_variants.get(scenario, {})
     current = summary["variants"].get("current", {}).get(scenario, {})
     pairs = [
         ("frame_p95_ms", baseline.get("frame_p95_ms", {}).get("median"), current.get("frame_p95_ms", {}).get("median")),
