@@ -313,3 +313,11 @@ hh 的决定：丢弃工作树实验；D3 折叠 flag；B5 第二实例失败提
 - B6 每周 `quick_check` 与设置页提示、B7 以外的持久化项、B8（退出落盘，维持暂缓）。
 - M5 改名（R3 pin→detached 不做；R6 与 B3-D6 同批）、M6 注释英文化、M7 frontmatter 字段、M8 旧提案归档、R12/R14/R15。
 - 产品项：F8b 撤销、F11 ⌘1–9、状态栏菜单、Launch at Login、D11 本地化。
+
+**验证记录（合并后，2026-09-24 晚）**
+
+- `make build`、`make release`：通过。`make test-unit`：813 项、2 项跳过、0 失败。`make test-strict`（warning 即失败）：813 项通过，Swift warning 0。`make test-tooling`、`make docs-validate`：通过。
+- `make test-snapshot-perf-release`（新鲜 `make snapshot-perf-db` 副本，157 MB）：cmd p95 0.55 ms（目标 50）、预热 cm p95 4.90 ms（目标 20）、冷 cm 45.5 ms；v0.79.0 记录为 0.53 / 4.42 / 59.5。
+- 真实输入测量（`make perf-search-type`、hover 停顿）**未取得**：本会话的 shell 由 Claude 桌面 app 派生，`AXIsProcessTrusted` 为 false，合成输入不投递、AX 读回为空，脚本按 fail-closed 退出。需在有 Accessibility 授权的 Terminal 里按性能证据协议执行：先 `make release && make perf-scroll-tools`，再 `python3 scripts/perf-scroll/profile_search.py <Release app> before --query markdown --rate 8 --reuse-db --sample`（基线用 `4fbcd89` 的 Release 构建，交错 ABBA）。F3/F4 是否重启以该复测为准。
+- 前端线在其分支上做了真实 App 的 PNG 导出字节对比（两个夹具改前改后 `cmp` 一致）；渲染器 JS 未改动。
+- 未跑：XCUITest（本机被系统认证阻断）、`make test-tsan`（以托管 CI 为准）。
