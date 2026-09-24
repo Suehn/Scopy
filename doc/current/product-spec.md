@@ -51,6 +51,7 @@ Scopy is a native macOS clipboard manager for users who need durable clipboard h
 - Coordinate scrolling with one list-owned active slot and one tokenized suppressed-hover candidate rather than broadcasting scroll state through every visible row. A stationary pointer should regain its valid hover after scroll cooldown, while stale tokens must never revive another row.
 - Allow per-item copy, pin/unpin, delete, and contextual actions, including AirDrop for images/files and Open Containing Folder for real file-backed items.
 - Keyboard navigation, Enter, and Option+Delete act only on rows that are currently displayed: collapsed pinned rows are skipped, and Option+Delete never deletes an item while a text field (the search field or a note editor) is being edited.
+- Deleting a row removes it from the panel at once but sends the backend delete only after a 5 s undo window. During that window the footer shows "Deleted · Undo" and ⌘Z restores the row; outside it, ⌘Z stays text undo. Closing the panel, the next delete, or Clear All commits the pending delete immediately, and a backend republish of the same row inside the window (identical content copied again) undoes it implicitly. A pinned preview of the deleted item closes and does not reopen on undo.
 - A pin, delete, clear, share, or reveal action that fails is reported in the panel footer; it is never only logged.
 - Allow file items to carry editable notes.
 

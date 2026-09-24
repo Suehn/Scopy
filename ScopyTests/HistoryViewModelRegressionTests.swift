@@ -4,21 +4,94 @@ import XCTest
 
 @MainActor
 final class HistoryViewModelRegressionTests: XCTestCase {
-    func testDeleteSelectedItemKeepsSelectionWhenDeleteFails() async {
+    func testDeleteRemovesRowImmediatelyAndCommitsAfterWindow() async {
         let service = HistoryViewModelRegressionService(items: makeItems(count: 3))
-        let settings = SettingsViewModel(service: service)
-        let viewModel = HistoryViewModel(service: service, settingsViewModel: settings)
+        let viewModel = HistoryViewModel(service: service, settingsViewModel: SettingsViewModel(service: service))
+        viewModel.configureTiming(.immediateRegressionTests)
         defer { viewModel.stop() }
-
         await viewModel.load()
-        let selectedID = viewModel.items[1].id
-        viewModel.selectedID = selectedID
+        let target = viewModel.items[1]
+
+        await viewModel.delete(target)
+
+        XCTAssertFalse(viewModel.items.contains { $0.id == target.id }, "The row leaves the list at once")
+        XCTAssertEqual(viewModel.undoableDeletionID, target.id)
+        XCTAssertTrue(service.items.contains { $0.id == target.id }, "The backend delete waits for the undo window")
+
+        await waitUntil(timeout: 2.0) { !service.items.contains { $0.id == target.id } }
+        XCTAssertFalse(service.items.contains { $0.id == target.id })
+        XCTAssertNil(viewModel.undoableDeletionID)
+    }
+
+    func testUndoRestoresRowAndSelection() async {
+        let service = HistoryViewModelRegressionService(items: makeItems(count: 3))
+        let viewModel = HistoryViewModel(service: service, settingsViewModel: SettingsViewModel(service: service))
+        viewModel.configureTiming(.immediateRegressionTests)
+        defer { viewModel.stop() }
+        await viewModel.load()
+        let order = viewModel.items.map(\.id)
+        let target = viewModel.items[1]
+
+        await viewModel.delete(target)
+        await viewModel.undoPendingDeletion()
+
+        XCTAssertEqual(viewModel.items.map(\.id), order, "Undo puts the row back where the reload places it")
+        XCTAssertEqual(viewModel.selectedID, target.id)
+        XCTAssertNil(viewModel.undoableDeletionID)
+        try? await Task.sleep(nanoseconds: 150_000_000)
+        XCTAssertTrue(service.items.contains { $0.id == target.id }, "Undo cancels the deferred backend delete")
+    }
+
+    func testRecaptureDuringUndoWindowCancelsDeletion() async {
+        let service = HistoryViewModelRegressionService(items: makeItems(count: 3))
+        let viewModel = HistoryViewModel(service: service, settingsViewModel: SettingsViewModel(service: service))
+        viewModel.configureTiming(.immediateRegressionTests)
+        defer { viewModel.stop() }
+        await viewModel.load()
+        let target = viewModel.items[1]
+
+        await viewModel.delete(target)
+        await viewModel.handleEvent(.itemUpdated(target))
+
+        XCTAssertTrue(viewModel.items.contains { $0.id == target.id }, "The republished row is back")
+        XCTAssertNil(viewModel.undoableDeletionID)
+        try? await Task.sleep(nanoseconds: 150_000_000)
+        XCTAssertTrue(service.items.contains { $0.id == target.id }, "Committing would delete what was just copied")
+    }
+
+    func testPanelCloseCommitsPendingDeletion() async {
+        let service = HistoryViewModelRegressionService(items: makeItems(count: 3))
+        let viewModel = HistoryViewModel(service: service, settingsViewModel: SettingsViewModel(service: service))
+        viewModel.configureTiming(.immediateRegressionTests)
+        defer { viewModel.stop() }
+        await viewModel.load()
+        let target = viewModel.items[1]
+
+        await viewModel.delete(target)
+        // FloatingPanel.onClose calls this so the backend matches what the user last saw.
+        await viewModel.commitPendingDeletionNow()
+
+        XCTAssertFalse(service.items.contains { $0.id == target.id })
+        XCTAssertNil(viewModel.undoableDeletionID)
+    }
+
+    func testCommitFailureRevivesRowAndReportsError() async {
+        let service = HistoryViewModelRegressionService(items: makeItems(count: 3))
+        let viewModel = HistoryViewModel(service: service, settingsViewModel: SettingsViewModel(service: service))
+        viewModel.configureTiming(.immediateRegressionTests)
+        defer { viewModel.stop() }
+        await viewModel.load()
+        let target = viewModel.items[1]
+        viewModel.selectedID = target.id
         service.deleteShouldFail = true
 
         await viewModel.deleteSelectedItem()
+        XCTAssertFalse(viewModel.items.contains { $0.id == target.id })
 
-        XCTAssertEqual(viewModel.selectedID, selectedID)
-        XCTAssertEqual(viewModel.items.map(\.id), service.items.map(\.id))
+        await waitUntil(timeout: 2.0) { viewModel.actionErrorMessage != nil }
+        XCTAssertNotNil(viewModel.actionErrorMessage)
+        XCTAssertEqual(viewModel.items.map(\.id), service.items.map(\.id), "A failed commit revives the row")
+        XCTAssertEqual(viewModel.selectedID, target.id)
     }
 
     func testKeyboardNavigationSkipsCollapsedPinnedRows() async {
@@ -702,6 +775,13 @@ final class HistoryViewModelRegressionTests: XCTestCase {
         XCTAssertFalse(viewModel.isLoading)
     }
 
+    private func waitUntil(timeout: TimeInterval, _ condition: () -> Bool) async {
+        let deadline = Date().addingTimeInterval(timeout)
+        while !condition(), Date() < deadline {
+            try? await Task.sleep(nanoseconds: 10_000_000)
+        }
+    }
+
     private func waitForNextItemsRevision(in viewModel: HistoryViewModel) async {
         let changed = expectation(description: "History projection changed")
         withObservationTracking {
@@ -739,7 +819,8 @@ private extension HistoryViewModel.Timing {
         refineShortQueryDelayNs: 0,
         refineLongQueryDelayNs: 0,
         recentAppsRefreshDelayNs: 0,
-        staleLoadRetryDelayNs: 0
+        staleLoadRetryDelayNs: 0,
+        undoDeletionWindowNs: 50_000_000
     )
 }
 

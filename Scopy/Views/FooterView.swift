@@ -46,6 +46,17 @@ struct FooterView: View {
                     .foregroundStyle(ScopyColors.warning)
                     .accessibilityIdentifier("Footer.ActionError")
                     .onTapGesture { historyViewModel.clearActionError() }
+                } else if historyViewModel.undoableDeletionID != nil {
+                    HStack(spacing: ScopySpacing.xs) {
+                        Text("Deleted")
+                        Text(verbatim: "·")
+                        Button("Undo") { Task { await historyViewModel.undoPendingDeletion() } }
+                            .buttonStyle(.plain)
+                            .foregroundStyle(ScopyColors.accent)
+                    }
+                    .font(ScopyTypography.microMono)
+                    .foregroundStyle(ScopyColors.tertiaryText)
+                    .accessibilityIdentifier("Footer.UndoDeletion")
                 } else if let fetchFailureMessage = historyViewModel.fetchFailureMessage {
                     HStack(spacing: ScopySpacing.xs) {
                         Image(systemName: "exclamationmark.triangle.fill")

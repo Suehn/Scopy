@@ -284,15 +284,17 @@ final class HistoryViewModel {
         var refineLongQueryDelayNs: UInt64
         var recentAppsRefreshDelayNs: UInt64
         var staleLoadRetryDelayNs: UInt64
+        /// How long a deleted row stays undoable before the backend delete is sent.
+        var undoDeletionWindowNs: UInt64
 
         static let production = Timing(
-            // v0.29+: 更快的首屏反馈（10ms 级）
             searchDebounceNs: 0,
-            // v0.57+: 长词全量校准足够快，refine 立即执行；短词保留极短 delay 避免抖动
+            // Long queries refine at once; short ones keep a tiny delay so the page does not flicker.
             refineShortQueryDelayNs: 10_000_000,
             refineLongQueryDelayNs: 0,
             recentAppsRefreshDelayNs: 500_000_000,
-            staleLoadRetryDelayNs: 100_000_000
+            staleLoadRetryDelayNs: 100_000_000,
+            undoDeletionWindowNs: 5_000_000_000
         )
 
         static let tests = Timing(
@@ -300,8 +302,15 @@ final class HistoryViewModel {
             refineShortQueryDelayNs: 40_000_000,
             refineLongQueryDelayNs: 40_000_000,
             recentAppsRefreshDelayNs: 20_000_000,
-            staleLoadRetryDelayNs: 20_000_000
+            staleLoadRetryDelayNs: 20_000_000,
+            undoDeletionWindowNs: 50_000_000
         )
+    }
+
+    private struct PendingDeletion {
+        let item: ClipboardItemDTO
+        let token: UUID
+        let commit: Task<Void, Never>
     }
 
     // MARK: - Properties
@@ -318,6 +327,11 @@ final class HistoryViewModel {
     private(set) var actionErrorMessage: String?
     @ObservationIgnored private var actionErrorClearTask: Task<Void, Never>?
     static let actionErrorVisibleSeconds: Double = 4
+
+    /// The row removed by the last delete while its backend delete is still deferred. The footer
+    /// offers Undo and ⌘Z restores the row only while this is set.
+    private(set) var undoableDeletionID: UUID?
+    @ObservationIgnored private var pendingDeletion: PendingDeletion?
 
     /// Why the last search, history load or page fetch failed. The rows on screen are kept; the
     /// footer shows this with a retry until the next search or load starts.
@@ -602,6 +616,7 @@ final class HistoryViewModel {
     // MARK: - Event Handling
 
     func handleEvent(_ event: ClipboardEvent) async {
+        await reconcilePendingDeletion(with: event)
         switch event {
         case .newItem(let item):
             mergeKnownContentRevisions([item], allowRevivingDeletedItems: true)
@@ -1368,18 +1383,89 @@ final class HistoryViewModel {
         }
     }
 
-    @discardableResult
-    func delete(_ item: ClipboardItemDTO) async -> Bool {
+    /// Removes the row at once and sends the backend delete after `Timing.undoDeletionWindowNs`,
+    /// so the footer or ⌘Z can undo it. One deletion is pending at a time: the next delete, a
+    /// clear, or closing the panel commits the previous one first. The tombstone keeps events,
+    /// searches and loads from reviving the row meanwhile, and closes its pinned preview.
+    func delete(_ item: ClipboardItemDTO) async {
+        await commitPendingDeletionNow()
+        invalidateKnownContentRevision(itemID: item.id)
+        _ = removeItem(withID: item.id)
+        let token = UUID()
+        let window = timing.undoDeletionWindowNs
+        pendingDeletion = PendingDeletion(item: item, token: token, commit: Task { [weak self] in
+            try? await Task.sleep(nanoseconds: window)
+            guard !Task.isCancelled else { return }
+            await self?.commitPendingDeletion(token: token)
+        })
+        undoableDeletionID = item.id
+    }
+
+    func undoPendingDeletion() async {
+        guard let pending = pendingDeletion else { return }
+        pending.commit.cancel()
+        pendingDeletion = nil
+        undoableDeletionID = nil
+        await revive(pending.item)
+    }
+
+    /// Sends the pending backend delete now instead of at the end of the undo window.
+    func commitPendingDeletionNow() async {
+        guard let pending = pendingDeletion else { return }
+        pending.commit.cancel()
+        await commitPendingDeletion(token: pending.token)
+    }
+
+    private func commitPendingDeletion(token: UUID) async {
+        guard let pending = pendingDeletion, pending.token == token else { return }
+        pendingDeletion = nil
+        undoableDeletionID = nil
         do {
-            try await service.delete(itemID: item.id)
-            invalidateKnownContentRevision(itemID: item.id)
-            _ = removeItem(withID: item.id)
-            return true
+            try await service.delete(itemID: pending.item.id)
         } catch {
             ScopyLog.app.error("Delete failed: \(error.localizedDescription, privacy: .private)")
+            await revive(pending.item)
             reportActionFailure(error)
-            return false
         }
+    }
+
+    /// The backend deleted the pending row itself; there is nothing left to send or undo.
+    private func discardPendingDeletion() {
+        pendingDeletion?.commit.cancel()
+        pendingDeletion = nil
+        undoableDeletionID = nil
+    }
+
+    /// A pending deletion is undone implicitly when the backend publishes the same row again
+    /// (identical content copied inside the window and deduplicated onto this row): committing
+    /// it would delete what the user just copied.
+    private func reconcilePendingDeletion(with event: ClipboardEvent) async {
+        guard let pending = pendingDeletion else { return }
+        switch event {
+        case .newItem(let item), .itemUpdated(let item), .itemContentUpdated(let item):
+            if item.id == pending.item.id { await undoPendingDeletion() }
+        case .itemDeleted(let id):
+            if id == pending.item.id { discardPendingDeletion() }
+        case .itemsRemoved(let ids):
+            if ids.contains(pending.item.id) { discardPendingDeletion() }
+        case .itemsCleared(let keepPinned):
+            if !(keepPinned && pending.item.isPinned) { discardPendingDeletion() }
+        default:
+            break
+        }
+    }
+
+    /// Lifts the tombstone and reloads, which puts the row back at its real position with its
+    /// evidence; undo is rare enough that one full projection replace is acceptable.
+    private func revive(_ item: ClipboardItemDTO) async {
+        mergeKnownContentRevisions([item], allowRevivingDeletedItems: true)
+        if isUnfilteredList {
+            await load()
+        } else {
+            search()
+        }
+        lastSelectionSource = .programmatic
+        selectedID = item.id
     }
 
     func updateNote(_ item: ClipboardItemDTO, note: String?) async -> Bool {
@@ -1393,6 +1479,7 @@ final class HistoryViewModel {
     }
 
     func clearAll() async {
+        await commitPendingDeletionNow()
         do {
             try await service.clearAll()
         } catch {
@@ -1460,7 +1547,7 @@ final class HistoryViewModel {
             nextID = nil
         }
 
-        guard await delete(rows[index]) else { return }
+        await delete(rows[index])
 
         lastSelectionSource = .programmatic
         self.selectedID = nextID

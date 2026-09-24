@@ -1,4 +1,5 @@
 import AppKit
+import Carbon.HIToolbox
 import CoreGraphics
 import ScopyKit
 import ScopyUISupport
@@ -203,8 +204,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         ) {
             rootView
         }
-        // Hover bitmaps are only useful while the panel is open; pinned windows keep their own.
-        panel.onClose = { HoverPreviewImageCache.shared.removeAll() }
+        panel.onClose = { [weak self] in
+            // Hover bitmaps are only useful while the panel is open; pinned windows keep their own.
+            HoverPreviewImageCache.shared.removeAll()
+            // What the user last saw deleted must be deleted once the panel is gone.
+            guard let self else { return }
+            Task { @MainActor in
+                await self.appState.historyViewModel.commitPendingDeletionNow()
+            }
+        }
         return panel
     }
 
@@ -310,11 +318,22 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 return nil
             }
 
-            if event.modifierFlags.contains(.command),
-               !event.modifierFlags.contains(.shift),
-               !event.modifierFlags.contains(.option),
-               !event.modifierFlags.contains(.control),
-               event.charactersIgnoringModifiers == "," {
+            let isPlainCommand = flags.contains(.command)
+                && flags.isDisjoint(with: [.shift, .option, .control])
+
+            // ⌘Z undoes the last deletion only while its undo window is open; the rest of the
+            // time the key stays text undo for the search field and note editors.
+            if isPlainCommand,
+               event.keyCode == UInt16(kVK_ANSI_Z),
+               event.window === (self.panel ?? self.uiTestWindow),
+               self.appState.historyViewModel.undoableDeletionID != nil {
+                Task { @MainActor in
+                    await self.appState.historyViewModel.undoPendingDeletion()
+                }
+                return nil
+            }
+
+            if isPlainCommand, event.charactersIgnoringModifiers == "," {
                 self.openSettings()
                 return nil
             }
