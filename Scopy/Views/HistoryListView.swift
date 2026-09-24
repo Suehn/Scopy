@@ -174,14 +174,6 @@ struct HistoryListView: View {
                 .onDisappear {
                     historyViewModel.rowSelection.onSelectionChanged = nil
                 }
-                // 单条删除快捷键: Option+Delete
-                .onKeyPress { keyPress in
-                    if keyPress.key == .delete && keyPress.modifiers.contains(.option) {
-                        Task { await historyViewModel.deleteSelectedItem() }
-                        return .handled
-                    }
-                    return .ignored
-                }
             }
         }
         }

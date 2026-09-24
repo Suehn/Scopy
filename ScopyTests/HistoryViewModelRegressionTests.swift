@@ -21,6 +21,26 @@ final class HistoryViewModelRegressionTests: XCTestCase {
         XCTAssertEqual(viewModel.items.map(\.id), service.items.map(\.id))
     }
 
+    func testKeyboardNavigationSkipsCollapsedPinnedRows() async {
+        var items = makeItems(count: 3)
+        items[0] = items[0].withPinned(true)
+        let service = HistoryViewModelRegressionService(items: items)
+        let viewModel = HistoryViewModel(service: service, settingsViewModel: SettingsViewModel(service: service))
+        defer { viewModel.stop() }
+        await viewModel.load()
+        let pinnedID = items[0].id
+
+        viewModel.highlightNext()
+        XCTAssertEqual(viewModel.selectedID, pinnedID)
+        viewModel.isPinnedCollapsed = true
+        XCTAssertNil(viewModel.selectedID, "Collapsing hides the pinned row, so it cannot stay the ⏎/⌥⌫ target")
+
+        viewModel.highlightNext()
+        XCTAssertEqual(viewModel.selectedID, items[1].id)
+        viewModel.highlightPrevious()
+        XCTAssertEqual(viewModel.selectedID, items[2].id, "Wrapping upward skips the hidden pinned row")
+    }
+
     func testNewItemRefreshesActiveSemanticSearchWithoutDisturbingSelectionOrScroll() async {
         let original = makeItem(text: "needle original", age: 1)
         let service = HistoryViewModelRegressionService(items: [original])

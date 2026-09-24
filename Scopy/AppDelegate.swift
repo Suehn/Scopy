@@ -12,6 +12,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         static let flags: CGEventFlags = .maskControl
     }
 
+    enum OptionDeleteShortcut {
+        /// ⌥⌫ deletes the selected history item only when pressed in the history window and no
+        /// text is being edited there: the search field and note editors keep word deletion.
+        @MainActor
+        static func deletesItem(eventWindow: NSWindow?, historyWindow: NSWindow?) -> Bool {
+            guard let eventWindow, eventWindow === historyWindow else { return false }
+            let responder = eventWindow.firstResponder
+            return !(responder is NSText || responder is NSTextField)
+        }
+    }
+
     var panel: FloatingPanel?
     private var uiTestWindow: NSWindow?
     private(set) var hotKeyService: HotKeyService?
@@ -251,14 +262,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
             let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
 
-            // ⌥⌫ (Option+Delete) - 删除选中项
-            // NOTE: SwiftUI TextField may consume ⌥⌫ for word deletion; handle at the AppKit layer so the shortcut always works.
+            // ⌥⌫ (Option+Delete) deletes the selected item. Handled here rather than in SwiftUI so
+            // the first responder decides: while text is being edited, the key stays word deletion.
             if flags.contains(.option),
                !flags.contains(.command),
                !flags.contains(.control),
                !flags.contains(.shift),
                (event.keyCode == 51 || event.keyCode == 117),
-               (self.panel?.isVisible == true || self.uiTestWindow?.isVisible == true),
+               OptionDeleteShortcut.deletesItem(eventWindow: event.window, historyWindow: self.panel ?? self.uiTestWindow),
                self.appState.historyViewModel.selectedID != nil {
                 Task { @MainActor in
                     await self.appState.historyViewModel.deleteSelectedItem()

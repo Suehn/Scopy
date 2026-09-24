@@ -393,7 +393,21 @@ final class HistoryViewModel {
     /// `lastSelectionSource` must be set before `selectedID` so the fan-out knows whether to follow.
     let rowSelection = HistoryRowSelectionFanout()
 
-    var isPinnedCollapsed: Bool = false
+    var isPinnedCollapsed: Bool = false {
+        didSet {
+            // A collapsed pinned row is off screen; ⏎ and ⌥⌫ must not act on it.
+            guard isPinnedCollapsed, let selectedID,
+                  pinnedItems.contains(where: { $0.id == selectedID }) else { return }
+            lastSelectionSource = .programmatic
+            self.selectedID = nil
+        }
+    }
+
+    /// Rows in on-screen order: the pinned section (unless collapsed), then recent rows.
+    /// Keyboard navigation, ⏎ and ⌥⌫ act only on these.
+    var displayOrderItems: [ClipboardItemDTO] {
+        isPinnedCollapsed ? unpinnedItems : pinnedItems + unpinnedItems
+    }
 
     var appFilter: String?
     var typeFilter: ClipboardItemType?
@@ -1351,57 +1365,53 @@ final class HistoryViewModel {
     // MARK: - Keyboard Navigation
 
     func highlightNext() {
-        guard !items.isEmpty else { return }
+        let rows = displayOrderItems
+        guard !rows.isEmpty else { return }
         lastSelectionSource = .keyboard
-        let nextID: UUID?
-        if let currentID = selectedID,
-           let currentIndex = indexOfItem(withID: currentID),
-           currentIndex < items.count - 1 {
-            nextID = items[currentIndex + 1].id
+        if let selectedID,
+           let index = rows.firstIndex(where: { $0.id == selectedID }),
+           index < rows.count - 1 {
+            self.selectedID = rows[index + 1].id
         } else {
-            nextID = items.first?.id
+            self.selectedID = rows.first?.id
         }
-        selectedID = nextID
     }
 
     func highlightPrevious() {
-        guard !items.isEmpty else { return }
+        let rows = displayOrderItems
+        guard !rows.isEmpty else { return }
         lastSelectionSource = .keyboard
-        let nextID: UUID?
-        if let currentID = selectedID,
-           let currentIndex = indexOfItem(withID: currentID),
-           currentIndex > 0 {
-            nextID = items[currentIndex - 1].id
+        if let selectedID,
+           let index = rows.firstIndex(where: { $0.id == selectedID }),
+           index > 0 {
+            self.selectedID = rows[index - 1].id
         } else {
-            nextID = items.last?.id
+            self.selectedID = rows.last?.id
         }
-        selectedID = nextID
     }
 
     func deleteSelectedItem() async {
-        guard let id = selectedID else { return }
-        guard let index = indexOfItem(withID: id) else { return }
+        let rows = displayOrderItems
+        guard let selectedID, let index = rows.firstIndex(where: { $0.id == selectedID }) else { return }
 
         let nextID: UUID?
-        if index < items.count - 1 {
-            nextID = items[index + 1].id
+        if index < rows.count - 1 {
+            nextID = rows[index + 1].id
         } else if index > 0 {
-            nextID = items[index - 1].id
+            nextID = rows[index - 1].id
         } else {
             nextID = nil
         }
 
-        guard await delete(items[index]) else { return }
+        guard await delete(rows[index]) else { return }
 
         lastSelectionSource = .programmatic
-        selectedID = nextID
+        self.selectedID = nextID
     }
 
     func selectCurrent() async {
-        if let selectedID,
-           let index = indexOfItem(withID: selectedID) {
-            await select(items[index])
-        }
+        guard let selectedID, let item = displayOrderItems.first(where: { $0.id == selectedID }) else { return }
+        await select(item)
     }
 
     // MARK: - Private
