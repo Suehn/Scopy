@@ -7,7 +7,7 @@ import SwiftUI
 /// never pass through here.
 @MainActor
 final class ListProgrammaticScrollGate {
-    static let defaultDuration: TimeInterval = 0.35
+    nonisolated static let defaultDuration: TimeInterval = 0.35
 
     private let now: () -> CFTimeInterval
     private var ignoreUntil: CFTimeInterval = 0

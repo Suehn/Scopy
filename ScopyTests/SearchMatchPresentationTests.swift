@@ -28,7 +28,7 @@ final class SearchMatchPresentationTests: XCTestCase {
             "2 处 · 正文 · body needle  /  备注 · note needle"
         )
         XCTAssertEqual(highlightedRunCount(in: text), 2)
-        XCTAssertTrue(highlightedRuns(in: text).allSatisfy { $0.foregroundColor == .black })
+        XCTAssertTrue(highlightedRuns(in: text).allSatisfy { $0[AttributeScopes.SwiftUIAttributes.ForegroundColorAttribute.self] == .black })
 
         XCTAssertEqual(
             SearchMatchPresentation.accessibilityDescription(
@@ -215,6 +215,6 @@ final class SearchMatchPresentationTests: XCTestCase {
     }
 
     private func highlightedRuns(in text: AttributedString) -> [AttributedString.Runs.Run] {
-        text.runs.filter { $0.backgroundColor != nil }
+        text.runs.filter { $0[AttributeScopes.SwiftUIAttributes.BackgroundColorAttribute.self] != nil }
     }
 }
