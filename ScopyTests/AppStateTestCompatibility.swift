@@ -72,11 +72,6 @@ extension AppState {
     var loadedCount: Int { historyViewModel.loadedCount }
     var totalCount: Int { historyViewModel.totalCount }
 
-    var performanceSummary: PerformanceSummary? {
-        get { historyViewModel.performanceSummary }
-        set { historyViewModel.performanceSummary = newValue }
-    }
-
     var settings: SettingsDTO {
         get { settingsViewModel.settings }
         set { settingsViewModel.settings = newValue }

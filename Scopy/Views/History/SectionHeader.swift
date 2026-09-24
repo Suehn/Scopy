@@ -4,7 +4,6 @@ import ScopyKit
 struct SectionHeader: View {
     let title: String
     let count: Int
-    var performanceSummary: PerformanceSummary? = nil
     var isScrolling: Bool = false
     /// v0.16.2: 可折叠支持
     var isCollapsible: Bool = false
@@ -28,20 +27,6 @@ struct SectionHeader: View {
                 .fontWeight(.medium)
                 .foregroundStyle(ScopyColors.tertiaryText)
                 .monospacedDigit()
-
-            if let summary = performanceSummary, title == "Recent" {
-                Spacer()
-                HStack(spacing: ScopySpacing.md) {
-                    if summary.searchSamples > 0 {
-                        Text("Search: \(summary.formattedSearchAvg)")
-                    }
-                    if summary.loadSamples > 0 {
-                        Text("Load: \(summary.formattedLoadAvg)")
-                    }
-                }
-                .font(.system(size: ScopyTypography.Size.micro, weight: .regular, design: .monospaced))
-                .foregroundStyle(ScopyColors.tertiaryText.opacity(ScopySize.Opacity.strong))
-            }
 
             Spacer()
         }

@@ -220,9 +220,11 @@ final class AppState {
 
     func startEventListener() {
         eventTask?.cancel()
+        // Subscribe before returning so events emitted right after start() are not missed.
+        let events = service.eventStream
         eventTask = Task { [weak self] in
-            guard let self else { return }
-            for await event in self.service.eventStream {
+            for await event in events {
+                guard let self else { break }
                 guard !Task.isCancelled else { break }
                 await self.handleEvent(event)
             }

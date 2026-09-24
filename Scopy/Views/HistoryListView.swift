@@ -568,8 +568,8 @@ struct HistoryListView: View {
 /// Keeps the high-frequency scroll flag out of `HistoryListView.body`'s Observation dependency
 /// set. Only this small header redraws when scrolling starts or ends; row construction remains
 /// driven by item/selection/popover changes.
-/// Reads `isScrolling` and `performanceSummary` here, not in the List body: both change per
-/// search or scroll and would otherwise rebuild every row.
+/// Reads `isScrolling` here, not in the List body: it changes per scroll and would otherwise
+/// rebuild every row.
 private struct RecentSectionHeader: View {
     @Environment(HistoryViewModel.self) private var historyViewModel
 
@@ -579,7 +579,6 @@ private struct RecentSectionHeader: View {
         SectionHeader(
             title: "Recent",
             count: count,
-            performanceSummary: historyViewModel.performanceSummary,
             isScrolling: historyViewModel.isScrolling
         )
     }

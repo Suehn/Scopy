@@ -319,6 +319,10 @@ final class HistoryViewModel {
     @ObservationIgnored private var actionErrorClearTask: Task<Void, Never>?
     static let actionErrorVisibleSeconds: Double = 4
 
+    /// Why the last search, history load or page fetch failed. The rows on screen are kept; the
+    /// footer shows this with a retry until the next search or load starts.
+    private(set) var fetchFailureMessage: String?
+
     static let initialPageSize = 50
     static let loadMorePageSize = 100
     static let knownContentRevisionCapacity = 4096
@@ -445,8 +449,6 @@ final class HistoryViewModel {
         listState.totalCount
     }
     var searchCoverage: SearchCoverage = .complete
-
-    var performanceSummary: PerformanceSummary?
 
     var searchCoverageHint: String? {
         let trimmed = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -583,7 +585,7 @@ final class HistoryViewModel {
             }
 
             if hasSemanticSearchQuery {
-                refreshSemanticSearchProjection()
+                search()
                 return
             }
 
@@ -658,7 +660,7 @@ final class HistoryViewModel {
             mergeKnownContentRevisions([item])
             guard !contentRevisionRegistry.isDeleted(itemID: item.id) else { return }
             if hasSemanticSearchQuery {
-                refreshSemanticSearchProjection()
+                search()
                 return
             }
             guard let index = indexOfItem(withID: item.id) else { return }
@@ -804,6 +806,7 @@ final class HistoryViewModel {
         guard shouldApplyLoadResult(version: currentVersion) else { return }
 
         isLoading = true
+        fetchFailureMessage = nil
         defer {
             if currentVersion == searchVersion {
                 isLoading = false
@@ -843,11 +846,7 @@ final class HistoryViewModel {
 
             // Load latency should reflect "first screen ready" rather than unrelated background work.
             let elapsedMs = (CFAbsoluteTimeGetCurrent() - startTime) * 1000
-            await PerformanceMetrics.shared.recordLoadLatency(elapsedMs)
-            guard shouldApplyLoadResult(version: currentVersion) else { return }
-
-            performanceSummary = await PerformanceMetrics.shared.getSummary()
-            guard shouldApplyLoadResult(version: currentVersion) else { return }
+            Task { await PerformanceMetrics.shared.recordLoadLatency(elapsedMs) }
 
             let stats = try await service.getStorageStats()
             guard shouldApplyLoadResult(version: currentVersion) else { return }
@@ -857,6 +856,8 @@ final class HistoryViewModel {
             settingsViewModel.storageStats = stats
             scheduleStorageDetailsRefresh(version: currentVersion)
         } catch {
+            guard shouldApplyLoadResult(version: currentVersion) else { return }
+            reportFetchFailure("Loading history", error)
             ScopyLog.app.error("Failed to load items: \(error.localizedDescription, privacy: .private)")
         }
     }
@@ -952,7 +953,8 @@ final class HistoryViewModel {
                 }
             }
             guard !Task.isCancelled else { return }
-            guard canLoadMore, !isLoading else { return }
+            // After a failure the rows may not belong to the current request; paging waits for a retry.
+            guard canLoadMore, !isLoading, fetchFailureMessage == nil else { return }
 
             isLoading = true
             defer {
@@ -1036,9 +1038,12 @@ final class HistoryViewModel {
                     searchCoverage = .complete
                 }
             } catch {
-                if !Task.isCancelled {
-                    ScopyLog.app.error("Failed to load more: \(error.localizedDescription, privacy: .private)")
+                guard !Task.isCancelled, currentVersion == searchVersion else { return }
+                if searchCoverage.isStagedRefine {
+                    searchCoverage = .incomplete
                 }
+                reportFetchFailure("Loading more", error)
+                ScopyLog.app.error("Failed to load more: \(error.localizedDescription, privacy: .private)")
             }
         }
 
@@ -1048,24 +1053,17 @@ final class HistoryViewModel {
 
     // MARK: - Search
 
-    func search() {
-        startSearch(clearsProjectionOnFailure: true)
-    }
-
-    private func refreshSemanticSearchProjection() {
-        startSearch(clearsProjectionOnFailure: false)
-    }
-
     /// The current rows stay on screen until the versioned replacement arrives: clearing them per
-    /// keystroke emptied the List and rebuilt it twice more when the results landed. A failed
-    /// user-initiated search clears them when the search itself fails; a failed event-driven refresh
-    /// keeps them and marks coverage incomplete. A valid candidate without renderable evidence is
-    /// not a failed search and keeps the row with its ordinary metadata.
-    private func startSearch(clearsProjectionOnFailure: Bool) {
+    /// keystroke emptied the List and rebuilt it twice more when the results landed. A failed search
+    /// also keeps them, marks coverage incomplete and reports the failure in the footer, so a
+    /// failure never reads as "No results". A valid candidate without renderable evidence is not a
+    /// failed search and keeps the row with its ordinary metadata.
+    func search() {
         cancelTask(&searchTask)
         cancelTask(&refineTask)
         cancelTask(&staleLoadRetryTask)
         cancelTask(&storageDetailsTask)
+        fetchFailureMessage = nil
 
         searchVersion += 1
         let currentVersion = searchVersion
@@ -1160,16 +1158,11 @@ final class HistoryViewModel {
                 }
 
                 let elapsedMs = (CFAbsoluteTimeGetCurrent() - startTime) * 1000
-                await PerformanceMetrics.shared.recordSearchLatency(elapsedMs)
-                performanceSummary = await PerformanceMetrics.shared.getSummary()
+                Task { await PerformanceMetrics.shared.recordSearchLatency(elapsedMs) }
             } catch {
                 guard !Task.isCancelled, currentVersion == searchVersion else { return }
-                if clearsProjectionOnFailure {
-                    clearSearchProjection()
-                    searchCoverage = .complete
-                } else {
-                    searchCoverage = .incomplete
-                }
+                searchCoverage = .incomplete
+                reportFetchFailure("Search", error)
                 ScopyLog.app.error("Search failed: \(error.localizedDescription, privacy: .private)")
             }
         }
@@ -1262,7 +1255,10 @@ final class HistoryViewModel {
     }
 
     func reportActionFailure(_ error: Error) {
-        let message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+        reportActionFailure(message: Self.failureReason(error))
+    }
+
+    func reportActionFailure(message: String) {
         actionErrorMessage = message
         actionErrorClearTask?.cancel()
         actionErrorClearTask = Task { [weak self] in
@@ -1278,11 +1274,23 @@ final class HistoryViewModel {
         actionErrorMessage = nil
     }
 
+    private func reportFetchFailure(_ operation: String, _ error: Error) {
+        fetchFailureMessage = "\(operation) failed: \(Self.failureReason(error))"
+    }
+
+    private static func failureReason(_ error: Error) -> String {
+        (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+    }
+
     func sendViaAirDrop(_ item: ClipboardItemDTO) async {
         let urls = await resolvedFileURLs(for: item)
-        guard !urls.isEmpty else { return }
+        guard !urls.isEmpty else {
+            reportActionFailure(message: "No files to send via AirDrop")
+            return
+        }
         guard let service = NSSharingService(named: .sendViaAirDrop) else {
             ScopyLog.app.error("AirDrop sharing service is unavailable")
+            reportActionFailure(message: "AirDrop is unavailable")
             return
         }
         service.perform(withItems: urls)
@@ -1290,7 +1298,10 @@ final class HistoryViewModel {
 
     func openContainingFolder(_ item: ClipboardItemDTO) async {
         let urls = realFileURLs(for: item)
-        guard !urls.isEmpty else { return }
+        guard !urls.isEmpty else {
+            reportActionFailure(message: "No file to show in Finder")
+            return
+        }
         NSWorkspace.shared.activateFileViewerSelecting(urls)
     }
 
@@ -1312,6 +1323,7 @@ final class HistoryViewModel {
             mergeKnownContentRevisions([item.withPinned(!item.isPinned)])
         } catch {
             ScopyLog.app.error("Pin toggle failed: \(error.localizedDescription, privacy: .private)")
+            reportActionFailure(error)
         }
     }
 
@@ -1324,6 +1336,7 @@ final class HistoryViewModel {
             return true
         } catch {
             ScopyLog.app.error("Delete failed: \(error.localizedDescription, privacy: .private)")
+            reportActionFailure(error)
             return false
         }
     }
@@ -1343,6 +1356,7 @@ final class HistoryViewModel {
             try await service.clearAll()
         } catch {
             ScopyLog.app.error("Clear failed: \(error.localizedDescription, privacy: .private)")
+            reportActionFailure(error)
         }
     }
 
@@ -1659,12 +1673,6 @@ final class HistoryViewModel {
             }
         }
         return true
-    }
-
-    private func clearSearchProjection() {
-        listState.replacePage(items: [], total: 0, hasMore: false)
-        searchMatchContexts.removeAll(keepingCapacity: true)
-        selectedID = nil
     }
 
     private func reconcileSelectionAfterProjectionReplacement() {
