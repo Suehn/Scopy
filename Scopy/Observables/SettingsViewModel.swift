@@ -44,17 +44,6 @@ final class SettingsViewModel {
 
     // MARK: - Settings
 
-    func updateDefaultSearchMode(_ mode: SearchMode) async {
-        do {
-            var latest = try await service.getSettings()
-            latest.defaultSearchMode = mode
-            try await service.updateSettings(latest)
-            settings = latest
-        } catch {
-            ScopyLog.app.error("Failed to update default search mode: \(error.localizedDescription, privacy: .private)")
-        }
-    }
-
     func getLatestSettingsOrThrow() async throws -> SettingsDTO {
         try await service.getSettings()
     }
@@ -89,13 +78,6 @@ final class SettingsViewModel {
     }
 
     // MARK: - Stats
-
-    func refreshStorageStats() async throws {
-        let stats = try await service.getStorageStats()
-        storageStats = stats
-        await refreshDiskSizeIfNeeded()
-        syncExternalImageSizeBytesFromDiskIfNeeded()
-    }
 
     func refreshDiskSizeIfNeeded() async {
         if let cache = diskSizeCache,

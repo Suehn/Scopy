@@ -60,15 +60,6 @@ public actor PerformanceMetrics {
         LatencyFormatter.format(ms: loadP95, samples: nil)
     }
 
-    /// 样本数量
-    public var searchSampleCount: Int {
-        searchLatencies.count
-    }
-
-    public var loadSampleCount: Int {
-        loadLatencies.count
-    }
-
     // MARK: - Reset
 
     /// 重置所有指标

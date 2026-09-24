@@ -17,11 +17,6 @@ struct HoverPreviewPopoverState: Equatable {
     let kind: HoverPreviewPopoverKind
 }
 
-private struct HoverPreviewDismissSnapshot: Equatable {
-    let itemID: UUID
-    let at: CFTimeInterval
-}
-
 /// 历史列表视图 - 符合 v0.md 的懒加载设计
 @MainActor
 struct HistoryListView: View {
@@ -39,12 +34,8 @@ struct HistoryListView: View {
 
     // Enforce that at most one hover preview popover is presented at a time.
     @State private var pinnedPreviewController = PinnedPreviewController()
-    @State private var activePopover: HoverPreviewPopoverState?
-    @State private var pendingPopover: HoverPreviewPopoverState?
-    @State private var lastDismissedPopover: HoverPreviewDismissSnapshot?
+    @State private var presentation = HoverPreviewPresentation()
     @State private var programmaticScrollGate = ListProgrammaticScrollGate()
-
-    private static let popoverReopenCooldownSeconds: CFTimeInterval = 0.25
 
     private static let isUITesting: Bool = ProcessInfo.processInfo.arguments.contains("--uitesting")
     private static let isScrollProfile: Bool = ProcessInfo.processInfo.environment["SCOPY_SCROLL_PROFILE"] == "1"
@@ -52,139 +43,111 @@ struct HistoryListView: View {
     private static let shouldExposeAccessibility: Bool = isScrollProfile ? profileAccessibility : isUITesting
 
     var body: some View {
-        Group {
-            if historyViewModel.items.isEmpty && !historyViewModel.isLoading {
-                EmptyStateView(
-                    hasFilters: historyViewModel.hasActiveFilters,
-                    openSettings: openSettings
-                )
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-            // v0.18: 使用 List 替代 ScrollView+LazyVStack 实现真正的视图回收
-            // List 基于 NSTableView，具有视图回收能力，10k 项目内存从 ~500MB 降至 ~50MB
-            ScrollViewReader { proxy in
-                let _ = ScrollPerformanceProfile.incrementCounter(name: "list.body")
-                List {
-                    // Loading indicator
-                    // `items.isEmpty` first: `isLoading` is only observed while the list is empty.
-                    if historyViewModel.items.isEmpty && historyViewModel.isLoading {
-                        ProgressView()
-                            .controlSize(.small)
-                            .padding(.vertical, ScopySpacing.md)
-                            .listRowInsets(EdgeInsets())
-                            .listRowBackground(Color.clear)
-                            .listRowSeparator(.hidden)
-                    }
+        // v0.18: 使用 List 替代 ScrollView+LazyVStack 实现真正的视图回收
+        // List 基于 NSTableView，具有视图回收能力，10k 项目内存从 ~500MB 降至 ~50MB
+        // The List stays mounted when a search has no rows; the empty and loading states are a
+        // leaf overlay, so this body never reads `isLoading` or the filter state.
+        ScrollViewReader { proxy in
+            let _ = ScrollPerformanceProfile.incrementCounter(name: "list.body")
+            List {
+                // v0.21: 使用局部变量缓存计算属性结果，避免多次访问触发 @Observable 追踪
+                // 这样 SwiftUI 只追踪一次 pinnedItems/unpinnedItems 访问
+                let pinned = historyViewModel.pinnedItems
+                let unpinned = historyViewModel.unpinnedItems
+                // Rows are built inside ForEach child closures, where every @Observable read installs its own
+                // observation and copies the access list; read the shared state once here and pass values down.
+                let rowContext = HistoryRowContext(settings: settingsViewModel.settings)
 
-                    // v0.21: 使用局部变量缓存计算属性结果，避免多次访问触发 @Observable 追踪
-                    // 这样 SwiftUI 只追踪一次 pinnedItems/unpinnedItems 访问
-                    let pinned = historyViewModel.pinnedItems
-                    let unpinned = historyViewModel.unpinnedItems
-                    // Rows are built inside ForEach child closures, where every @Observable read installs its own
-                    // observation and copies the access list; read the shared state once here and pass values down.
-                    let rowContext = HistoryRowContext(
-                        settings: settingsViewModel.settings,
-                        activePopover: activePopover,
-                        searchMatchContexts: historyViewModel.searchMatchContexts
+                // v0.18: 不使用 Section header，改为普通行以避免黑色背景
+                // Pinned Section Header
+                if !pinned.isEmpty {
+                    SectionHeader(
+                        title: "Pinned",
+                        count: pinned.count,
+                                        isCollapsible: true,
+                        isCollapsed: historyViewModel.isPinnedCollapsed,
+                        onToggle: { historyViewModel.isPinnedCollapsed.toggle() }
                     )
-
-                    // v0.18: 不使用 Section header，改为普通行以避免黑色背景
-                    // Pinned Section Header
-                    if !pinned.isEmpty {
-                        SectionHeader(
-                            title: "Pinned",
-                            count: pinned.count,
-                                            isCollapsible: true,
-                            isCollapsed: historyViewModel.isPinnedCollapsed,
-                            onToggle: { historyViewModel.isPinnedCollapsed.toggle() }
-                        )
-                        .listRowInsets(EdgeInsets())
-                        .listRowBackground(Color.clear)
-                        .listRowSeparator(.hidden)
-
-                        // Pinned Items
-                        if !historyViewModel.isPinnedCollapsed {
-                            ForEach(pinned) { item in
-                                historyRow(item: item, context: rowContext)
-                            }
-                        }
-                    }
-
-                    // Recent Section Header
-                    RecentSectionHeader(count: unpinned.count)
                     .listRowInsets(EdgeInsets())
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
 
-                    // Recent Items
-                    ForEach(unpinned) { item in
-                        historyRow(item: item, context: rowContext)
-                    }
-
-                    // Load More Trigger
-                    if historyViewModel.canLoadMore {
-                        LoadMoreTriggerView()
-                            .listRowInsets(EdgeInsets())
-                            .listRowBackground(Color.clear)
-                            .listRowSeparator(.hidden)
-                            .onAppear {
-                                Task { await historyViewModel.loadMore() }
-                            }
-                    }
-                }
-                .listStyle(.plain)
-                .scrollContentBackground(.hidden)
-                .scrollIndicators(.automatic)
-                .accessibilityIdentifier("History.List")
-                .background(
-                    ListLiveScrollObserverView(
-                        interactionCoordinator: interactionCoordinator,
-                        onScrollStart: {
-                            interactionCoordinator.beginScrolling()
-                            relativeTimeClock.scrollDidStart()
-                            historyViewModel.scrollDidStart()
-                            if HistoryListUITestRuntime.isEnabled {
-                                HistoryListUITestProbe.shared.recordProductionScrollStart()
-                            }
-                        },
-                        onScrollEnd: {
-                            interactionCoordinator.endScrolling()
-                            relativeTimeClock.scrollDidEnd()
-                            historyViewModel.scrollDidEnd()
-                            if HistoryListUITestRuntime.isEnabled {
-                                HistoryListUITestProbe.shared.recordProductionScrollEnd()
-                            }
-                        },
-                        onScrollViewAttach: scrollViewAttachHandler,
-                        programmaticScrollGate: programmaticScrollGate
-                    )
-                )
-                .background(ScrollFrameSamplerView())
-                .onAppear {
-                    // Selection reaches rows through the fan-out, never through this body; the
-                    // List is diffed only when its items change. Keyboard navigation follows here.
-                    historyViewModel.rowSelection.onSelectionChanged = { id, follow in
-                        guard follow, let id else { return }
-                        programmaticScrollGate.beginProgrammaticScroll()
-                        withAnimation(.easeInOut(duration: 0.1)) {
-                            proxy.scrollTo(id, anchor: .center)
+                    // Pinned Items
+                    if !historyViewModel.isPinnedCollapsed {
+                        ForEach(pinned) { item in
+                            historyRow(item: item, context: rowContext)
                         }
                     }
                 }
-                .onDisappear {
-                    historyViewModel.rowSelection.onSelectionChanged = nil
+
+                // Recent Section Header (hidden while the empty overlay stands in for the list)
+                if !pinned.isEmpty || !unpinned.isEmpty {
+                    RecentSectionHeader(count: unpinned.count)
+                    .listRowInsets(EdgeInsets())
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
                 }
-                // 单条删除快捷键: Option+Delete
-                .onKeyPress { keyPress in
-                    if keyPress.key == .delete && keyPress.modifiers.contains(.option) {
-                        Task { await historyViewModel.deleteSelectedItem() }
-                        return .handled
-                    }
-                    return .ignored
+
+                // Recent Items
+                ForEach(unpinned) { item in
+                    historyRow(item: item, context: rowContext)
+                }
+
+                // Load More Trigger
+                if historyViewModel.canLoadMore {
+                    LoadMoreTriggerView()
+                        .listRowInsets(EdgeInsets())
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+                        .onAppear {
+                            Task { await historyViewModel.loadMore() }
+                        }
                 }
             }
+            .listStyle(.plain)
+            .scrollContentBackground(.hidden)
+            .scrollIndicators(.automatic)
+            .accessibilityIdentifier("History.List")
+            .background(
+                ListLiveScrollObserverView(
+                    interactionCoordinator: interactionCoordinator,
+                    onScrollStart: {
+                        interactionCoordinator.beginScrolling()
+                        relativeTimeClock.scrollDidStart()
+                        historyViewModel.scrollDidStart()
+                        if HistoryListUITestRuntime.isEnabled {
+                            HistoryListUITestProbe.shared.recordProductionScrollStart()
+                        }
+                    },
+                    onScrollEnd: {
+                        interactionCoordinator.endScrolling()
+                        relativeTimeClock.scrollDidEnd()
+                        historyViewModel.scrollDidEnd()
+                        if HistoryListUITestRuntime.isEnabled {
+                            HistoryListUITestProbe.shared.recordProductionScrollEnd()
+                        }
+                    },
+                    onScrollViewAttach: scrollViewAttachHandler,
+                    programmaticScrollGate: programmaticScrollGate
+                )
+            )
+            .background(ScrollFrameSamplerView())
+            .onAppear {
+                // Selection reaches rows through the fan-out, never through this body; the
+                // List is diffed only when its items change. Keyboard navigation follows here.
+                historyViewModel.rowLiveState.onSelectionChanged = { id, follow in
+                    guard follow, let id else { return }
+                    programmaticScrollGate.beginProgrammaticScroll()
+                    withAnimation(.easeInOut(duration: 0.1)) {
+                        proxy.scrollTo(id, anchor: .center)
+                    }
+                }
+            }
+            .onDisappear {
+                historyViewModel.rowLiveState.onSelectionChanged = nil
+            }
         }
-        }
+        .overlay { HistoryListEmptyOverlay(openSettings: openSettings) }
         .environment(\.historyRelativeTimeClock, relativeTimeClock)
         .background(
             HistoryWindowVisibilityObserver(clock: relativeTimeClock)
@@ -228,6 +191,18 @@ struct HistoryListView: View {
     }
 
     // MARK: - Preview Popover Coordination
+
+    /// The presented popover lives in the row fan-out, so changing it re-renders the two rows
+    /// involved instead of this body.
+    private var activePopover: HoverPreviewPopoverState? {
+        get { historyViewModel.rowLiveState.presentedPreview }
+        nonmutating set { historyViewModel.rowLiveState.updatePresentedPreview(newValue) }
+    }
+
+    private var pendingPopover: HoverPreviewPopoverState? {
+        get { presentation.pending }
+        nonmutating set { presentation.pending = newValue }
+    }
 
     private func updateProfileWorkloadMetadata() {
         guard ScrollPerformanceProfile.isEnabled else { return }
@@ -357,7 +332,7 @@ struct HistoryListView: View {
 
     @MainActor
     private func recordPopoverDismiss(itemID: UUID) {
-        lastDismissedPopover = HoverPreviewDismissSnapshot(itemID: itemID, at: CFAbsoluteTimeGetCurrent())
+        presentation.recordDismiss(itemID: itemID)
     }
 
     @MainActor
@@ -381,10 +356,7 @@ struct HistoryListView: View {
 
     @MainActor
     private func reopenDelaySeconds(for itemID: UUID) -> CFTimeInterval {
-        guard let snapshot = lastDismissedPopover, snapshot.itemID == itemID else { return 0 }
-        let elapsed = CFAbsoluteTimeGetCurrent() - snapshot.at
-        let remaining = Self.popoverReopenCooldownSeconds - elapsed
-        return remaining > 0 ? remaining : 0
+        presentation.reopenDelaySeconds(for: itemID)
     }
 
     /// Transfer only the current hover WebView. Other windows and the next hover have
@@ -490,13 +462,11 @@ struct HistoryListView: View {
     /// Shared list state a row needs, captured once per list update instead of read per row.
     private struct HistoryRowContext {
         let settings: SettingsDTO
-        let activePopover: HoverPreviewPopoverState?
-        let searchMatchContexts: [UUID: SearchMatchContext]
     }
 
     private func historyRow(item: ClipboardItemDTO, context: HistoryRowContext) -> some View {
-        HistorySelectionAwareRow(itemID: item.id, selectionFanout: historyViewModel.rowSelection) { isSelected in
-            historyRowContent(item: item, context: context, isSelected: isSelected)
+        HistoryLiveRow(itemID: item.id, fanout: historyViewModel.rowLiveState) { live in
+            historyRowContent(item: item, context: context, live: live)
         }
     }
 
@@ -504,26 +474,22 @@ struct HistoryListView: View {
     private func historyRowContent(
         item: ClipboardItemDTO,
         context: HistoryRowContext,
-        isSelected: Bool
+        live: HistoryRowLiveState
     ) -> some View {
-        let activePopover = context.activePopover
-        let isImagePreviewPresented = activePopover?.itemID == item.id && activePopover?.kind == .image
-        let isTextPreviewPresented = activePopover?.itemID == item.id && activePopover?.kind == .text
-        let isFilePreviewPresented = activePopover?.itemID == item.id && activePopover?.kind == .file
+        let isSelected = live.isSelected
+        let isImagePreviewPresented = live.presentedPreview == .image
+        let isTextPreviewPresented = live.presentedPreview == .text
+        let isFilePreviewPresented = live.presentedPreview == .file
         let row = HistoryItemView(
             item: item,
             isKeyboardSelected: isSelected,
             settings: context.settings,
-            searchMatchContext: context.searchMatchContexts[item.id],
+            searchMatchContext: live.evidence,
             onSelect: { Task { await historyViewModel.select(item) } },
             onSelectOptimizedForCodex: { Task { await historyViewModel.selectOptimizedForCodex(item) } },
             onSendViaAirDrop: { Task { await historyViewModel.sendViaAirDrop(item) } },
             onOpenContainingFolder: { Task { await historyViewModel.openContainingFolder(item) } },
-            onHoverSelect: { id in
-                // Source first: the selection fan-out reads it when `selectedID` changes.
-                historyViewModel.lastSelectionSource = .mouse
-                historyViewModel.selectedID = id
-            },
+            onHoverSelect: { id in historyViewModel.acceptHoverSelection(id) },
             onTogglePin: { Task { await historyViewModel.togglePin(item) } },
             onDelete: { Task { await historyViewModel.delete(item) } },
             onUpdateNote: { note in
@@ -573,11 +539,35 @@ struct HistoryListView: View {
     }
 }
 
+/// The empty and first-load states over the always-mounted List. Only this leaf observes
+/// `isLoading` and `hasActiveFilters`; it renders nothing while there are rows.
+private struct HistoryListEmptyOverlay: View {
+    @Environment(HistoryViewModel.self) private var historyViewModel
+
+    let openSettings: (() -> Void)?
+
+    var body: some View {
+        if historyViewModel.items.isEmpty {
+            if historyViewModel.isLoading {
+                ProgressView()
+                    .controlSize(.small)
+                    .padding(.vertical, ScopySpacing.md)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            } else {
+                EmptyStateView(
+                    hasFilters: historyViewModel.hasActiveFilters,
+                    openSettings: openSettings
+                )
+            }
+        }
+    }
+}
+
 /// Keeps the high-frequency scroll flag out of `HistoryListView.body`'s Observation dependency
 /// set. Only this small header redraws when scrolling starts or ends; row construction remains
 /// driven by item/selection/popover changes.
-/// Reads `isScrolling` and `performanceSummary` here, not in the List body: both change per
-/// search or scroll and would otherwise rebuild every row.
+/// Reads `isScrolling` here, not in the List body: it changes per scroll and would otherwise
+/// rebuild every row.
 private struct RecentSectionHeader: View {
     @Environment(HistoryViewModel.self) private var historyViewModel
 
@@ -587,7 +577,6 @@ private struct RecentSectionHeader: View {
         SectionHeader(
             title: "Recent",
             count: count,
-            performanceSummary: historyViewModel.performanceSummary,
             isScrolling: historyViewModel.isScrolling
         )
     }
@@ -609,38 +598,38 @@ private struct ScrollFrameSamplerView: View {
     }
 }
 
-/// Holds one row's selection as local state fed by `HistoryRowSelectionFanout`, so a selection change
-/// re-evaluates the two rows it concerns instead of the List body (which re-initializes every ForEach
-/// child and diffs every loaded id).
-private struct HistorySelectionAwareRow<Content: View>: View {
+/// Holds one row's live state (selection, search evidence) as local state fed by
+/// `HistoryRowLiveStateFanout`, so a change re-evaluates the rows it concerns instead of the List
+/// body (which re-initializes every ForEach child and diffs every loaded id).
+private struct HistoryLiveRow<Content: View>: View {
     @Environment(HistoryViewModel.self) private var historyViewModel
 
     let itemID: UUID
-    let selectionFanout: HistoryRowSelectionFanout
-    let content: (Bool) -> Content
-    @State private var isSelected: Bool
+    let fanout: HistoryRowLiveStateFanout
+    let content: (HistoryRowLiveState) -> Content
+    @State private var live: HistoryRowLiveState
 
     init(
         itemID: UUID,
-        selectionFanout: HistoryRowSelectionFanout,
-        @ViewBuilder content: @escaping (Bool) -> Content
+        fanout: HistoryRowLiveStateFanout,
+        @ViewBuilder content: @escaping (HistoryRowLiveState) -> Content
     ) {
         self.itemID = itemID
-        self.selectionFanout = selectionFanout
+        self.fanout = fanout
         self.content = content
-        _isSelected = State(initialValue: selectionFanout.isSelected(itemID))
+        _live = State(initialValue: fanout.state(for: itemID))
     }
 
     var body: some View {
-        content(isSelected)
+        content(live)
             .onAppear {
-                isSelected = selectionFanout.register(itemID: itemID) { selected in
-                    isSelected = selected
+                live = fanout.register(itemID: itemID) { state in
+                    live = state
                 }
                 historyViewModel.rowDidAppear(itemID: itemID)
             }
             .onDisappear {
-                selectionFanout.unregister(itemID: itemID)
+                fanout.unregister(itemID: itemID)
             }
     }
 }

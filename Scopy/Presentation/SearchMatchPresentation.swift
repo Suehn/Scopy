@@ -117,9 +117,9 @@ enum SearchMatchPresentation {
 
             let end = range.offset + range.length
             var highlighted = AttributedString(String(characters[range.offset..<end]))
-            highlighted.backgroundColor = ScopyColors.searchMatch
-            highlighted.foregroundColor = .black
-            highlighted.inlinePresentationIntent = .stronglyEmphasized
+            highlighted[AttributeScopes.SwiftUIAttributes.BackgroundColorAttribute.self] = ScopyColors.searchMatch
+            highlighted[AttributeScopes.SwiftUIAttributes.ForegroundColorAttribute.self] = .black
+            highlighted[AttributeScopes.FoundationAttributes.InlinePresentationIntentAttribute.self] = .stronglyEmphasized
             result.append(highlighted)
             cursor = end
         }

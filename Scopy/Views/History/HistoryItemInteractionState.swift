@@ -148,8 +148,6 @@ final class HistoryItemInteractionState {
     /// stays alive so a recycled List row cannot cancel a user command.
     func suspendForRowDisappearance() {
         guard !isTornDown else { return }
-        rowController.interactionObservation?.cancel()
-        rowController.interactionObservation = nil
         rowController.isHoveringOptimizeButton = false
         rowController.isScrollInteractionActive = false
 
@@ -192,8 +190,6 @@ final class HistoryItemInteractionState {
         guard !isTornDown else { return }
         isTornDown = true
 
-        rowController.interactionObservation?.cancel()
-        rowController.interactionObservation = nil
         rowController.cancelOptimizeImageTask()
         rowController.cancelOptimizeMessageTask()
         rowController.cancelExportActionTask()

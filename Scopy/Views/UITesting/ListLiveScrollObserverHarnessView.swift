@@ -16,14 +16,19 @@ struct ListLiveScrollObserverHarnessView: View {
         static let liveScrollEndCount = "UITest.ListLiveScrollObserverHarness.LiveScrollEndCount"
     }
 
-    @State private var interactionCoordinator = HistoryListInteractionCoordinator()
-    @State private var interactionObservation: HistoryListInteractionObservation?
+    @State private var pointerCounts: PointerInteractionCounts
+    @State private var interactionCoordinator: HistoryListInteractionCoordinator
     @State private var isObserverAttached = false
-    @State private var pointerStartCount = 0
-    @State private var pointerEndCount = 0
-    @State private var pointerActiveCount = 0
     @State private var liveScrollStartCount = 0
     @State private var liveScrollEndCount = 0
+
+    init() {
+        let counts = PointerInteractionCounts()
+        _pointerCounts = State(initialValue: counts)
+        _interactionCoordinator = State(initialValue: HistoryListInteractionCoordinator(
+            passivePathSnapshotSink: { counts.record($0) }
+        ))
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -62,15 +67,15 @@ struct ListLiveScrollObserverHarnessView: View {
                     identifier: AccessibilityID.observerAttached
                 )
                 counterText(
-                    "start=\(pointerStartCount)",
+                    "start=\(pointerCounts.started)",
                     identifier: AccessibilityID.pointerStartCount
                 )
                 counterText(
-                    "end=\(pointerEndCount)",
+                    "end=\(pointerCounts.ended)",
                     identifier: AccessibilityID.pointerEndCount
                 )
                 counterText(
-                    "active=\(pointerActiveCount)",
+                    "active=\(pointerCounts.active)",
                     identifier: AccessibilityID.pointerActiveCount
                 )
                 counterText(
@@ -85,13 +90,6 @@ struct ListLiveScrollObserverHarnessView: View {
             .font(.system(.body, design: .monospaced))
         }
         .padding(20)
-        .onAppear {
-            installInteractionObservationIfNeeded()
-        }
-        .onDisappear {
-            interactionObservation?.cancel()
-            interactionObservation = nil
-        }
     }
 
     private func counterText(_ value: String, identifier: String) -> some View {
@@ -99,19 +97,20 @@ struct ListLiveScrollObserverHarnessView: View {
             .accessibilityIdentifier(identifier)
     }
 
-    private func installInteractionObservationIfNeeded() {
-        guard interactionObservation == nil else { return }
-        interactionObservation = interactionCoordinator.observe { event in
-            switch event {
-            case .pointerInteractionStarted:
-                pointerStartCount += 1
-            case .pointerInteractionEnded:
-                pointerEndCount += 1
-            default:
-                break
-            }
-            pointerActiveCount = interactionCoordinator.isPointerInteractionActive ? 1 : 0
-        }
+}
+
+/// Counts pointer-interaction starts and ends from the coordinator's passive-path snapshots.
+@MainActor
+@Observable
+private final class PointerInteractionCounts {
+    private(set) var started = 0
+    private(set) var ended = 0
+    private(set) var active = 0
+
+    func record(_ snapshot: HistoryListInteractionCoordinator.PassivePathSnapshot) {
+        guard snapshot.pointerInteractionCount != active else { return }
+        if snapshot.pointerInteractionCount > active { started += 1 } else { ended += 1 }
+        active = snapshot.pointerInteractionCount
     }
 }
 

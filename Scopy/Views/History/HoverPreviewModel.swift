@@ -7,6 +7,10 @@ import ScopyKit
 @MainActor
 final class HoverPreviewModel {
     var previewCGImage: CGImage?
+    /// Header pixel size of the previewed image; sizes the popover before the decode lands.
+    var previewPixelSize: CGSize?
+    /// Whether the previewed file exists; nil until the pipeline has checked.
+    var fileIsAvailable: Bool?
     var text: String?
     var markdownHTML: String?
     var markdownContentSize: CGSize?
@@ -42,14 +46,52 @@ final class HoverPreviewModel {
         source: String,
         layoutScale: MarkdownChatGPTLayoutScalePercent
     ) -> String {
-        let enrichment = LinkEnrichmentStore.shared.payload(
-            forContentKey: LinkEnrichmentContentKey.make(for: source)
+        markdownRenderKey(
+            layoutScale: layoutScale,
+            enrichmentFingerprint: enrichmentFingerprint(forContentKey: LinkEnrichmentContentKey.make(for: source)),
+            textKey: ClipboardItemContentRevision.deterministicTextCacheKey(source)
         )
-        return [
-            layoutScale.cacheKey,
-            enrichment?.fingerprint ?? "plain",
-            ClipboardItemContentRevision.deterministicTextCacheKey(source)
-        ].joined(separator: "|")
+    }
+
+    nonisolated private static func markdownRenderKey(
+        layoutScale: MarkdownChatGPTLayoutScalePercent,
+        enrichmentFingerprint: String,
+        textKey: String
+    ) -> String {
+        [layoutScale.cacheKey, enrichmentFingerprint, textKey].joined(separator: "|")
+    }
+
+    /// Full-text digests of `text`, computed once per text value: the preview body reads render
+    /// keys on every update, and each digest hashes the whole document.
+    @ObservationIgnored private var textDigests: (text: String, contentKey: String, textKey: String)?
+
+    private func digests(for source: String) -> (contentKey: String, textKey: String) {
+        if let textDigests, textDigests.text == source {
+            return (textDigests.contentKey, textDigests.textKey)
+        }
+        let contentKey = LinkEnrichmentContentKey.make(for: source)
+        let textKey = ClipboardItemContentRevision.deterministicTextCacheKey(source)
+        textDigests = (source, contentKey, textKey)
+        return (contentKey, textKey)
+    }
+
+    /// `markdownRenderKey(source:layoutScale:)` for this model's text, without rehashing it.
+    func markdownRenderKey(for source: String, layoutScale: MarkdownChatGPTLayoutScalePercent) -> String {
+        let digests = digests(for: source)
+        return Self.markdownRenderKey(
+            layoutScale: layoutScale,
+            enrichmentFingerprint: Self.enrichmentFingerprint(forContentKey: digests.contentKey),
+            textKey: digests.textKey
+        )
+    }
+
+    /// Whether `markdownHTML` was built with the enrichment sidecar that is stored now.
+    func isMarkdownHTMLEnrichmentCurrent(for source: String) -> Bool {
+        markdownHTMLEnrichmentFingerprint == enrichmentFingerprint(for: source)
+    }
+
+    private func enrichmentFingerprint(for source: String) -> String {
+        Self.enrichmentFingerprint(forContentKey: digests(for: source).contentKey)
     }
 
     /// The link-enrichment fingerprint `markdownHTML` was built with. When a frozen
@@ -59,10 +101,8 @@ final class HoverPreviewModel {
     /// Layout scale `markdownHTML` was rendered at; nil until a document arrives.
     private(set) var markdownHTMLLayoutScale: MarkdownChatGPTLayoutScalePercent?
 
-    nonisolated static func enrichmentFingerprint(for source: String) -> String {
-        LinkEnrichmentStore.shared.payload(
-            forContentKey: LinkEnrichmentContentKey.make(for: source)
-        )?.fingerprint ?? "plain"
+    nonisolated private static func enrichmentFingerprint(forContentKey contentKey: String) -> String {
+        LinkEnrichmentStore.shared.payload(forContentKey: contentKey)?.fingerprint ?? "plain"
     }
 
     /// Cached HTML and metrics may seed the popover geometry, but they do not describe the
@@ -83,7 +123,7 @@ final class HoverPreviewModel {
         self.markdownContentSize = markdownContentSize
         self.markdownHasHorizontalOverflow = markdownHasHorizontalOverflow
         markdownHTMLEnrichmentFingerprint = text.flatMap { source in
-            markdownHTML == nil ? nil : Self.enrichmentFingerprint(for: source)
+            markdownHTML == nil ? nil : enrichmentFingerprint(for: source)
         }
         invalidateMarkdownLiveRender()
     }
@@ -92,7 +132,7 @@ final class HoverPreviewModel {
         markdownMetricsLayoutScalePercent = nil
         markdownHTML = html
         markdownHTMLLayoutScale = layoutScale
-        markdownHTMLEnrichmentFingerprint = text.map { Self.enrichmentFingerprint(for: $0) }
+        markdownHTMLEnrichmentFingerprint = text.map { enrichmentFingerprint(for: $0) }
         invalidateMarkdownLiveRender()
     }
 
@@ -172,6 +212,8 @@ final class HoverPreviewModel {
         presentationSize = nil
         previewLayoutScalePercent = nil
         previewCGImage = nil
+        previewPixelSize = nil
+        fileIsAvailable = nil
         text = nil
         markdownHTML = nil
         markdownHTMLEnrichmentFingerprint = nil
@@ -202,6 +244,8 @@ final class HoverPreviewModel {
         presentationSize = source.presentationSize
         previewLayoutScalePercent = source.previewLayoutScalePercent
         previewCGImage = source.previewCGImage
+        previewPixelSize = source.previewPixelSize
+        fileIsAvailable = source.fileIsAvailable
         text = source.text
         isMarkdown = source.isMarkdown
         markdownHTML = source.markdownHTML

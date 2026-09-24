@@ -11,7 +11,7 @@ struct PreviewWindowActions {
 }
 
 private struct PreviewWindowActionsKey: EnvironmentKey {
-    static let defaultValue = PreviewWindowActions()
+    static var defaultValue: PreviewWindowActions { PreviewWindowActions() }
 }
 
 extension EnvironmentValues {

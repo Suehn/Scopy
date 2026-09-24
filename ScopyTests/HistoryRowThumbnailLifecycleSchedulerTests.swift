@@ -13,7 +13,7 @@ final class HistoryRowThumbnailLifecycleSchedulerTests: XCTestCase {
         defer { ThumbnailCache.shared.clear() }
 
         XCTAssertNil(HistoryRowThumbnailLifecycleScheduler.productionCachedImage(for: path))
-        ThumbnailCache.shared.store(image, forPath: path)
+        ThumbnailCache.shared.store(image, forPath: path, costBytes: 0)
 
         XCTAssertTrue(HistoryRowThumbnailLifecycleScheduler.productionCachedImage(for: path) === image)
     }

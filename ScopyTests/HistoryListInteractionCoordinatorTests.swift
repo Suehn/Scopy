@@ -44,12 +44,9 @@ final class HistoryListInteractionCoordinatorTests: XCTestCase {
         }
     }
 
-    func testScrollLifecycleNotifiesObserversAndAppliesCooldown() {
+    func testScrollLifecycleAppliesCooldown() {
         let scheduler = ManualCooldownScheduler()
         let coordinator = makeCoordinator(scheduler: scheduler)
-        var events: [HistoryListInteractionCoordinator.Event] = []
-
-        let observation = coordinator.observe { events.append($0) }
 
         XCTAssertFalse(coordinator.isScrolling)
         XCTAssertFalse(coordinator.isHoverPreviewSuppressed)
@@ -58,40 +55,29 @@ final class HistoryListInteractionCoordinatorTests: XCTestCase {
 
         XCTAssertTrue(coordinator.isScrolling)
         XCTAssertTrue(coordinator.isHoverPreviewSuppressed)
-        XCTAssertEqual(events, [.scrollStarted])
 
         coordinator.endScrolling()
 
         XCTAssertFalse(coordinator.isScrolling)
         XCTAssertTrue(coordinator.isHoverPreviewSuppressed)
-        XCTAssertEqual(events, [.scrollStarted, .scrollEnded])
 
         scheduler.advance(by: 0.25)
         XCTAssertFalse(coordinator.isHoverPreviewSuppressed)
-
-        observation.cancel()
     }
 
     func testPointerInteractionSuppressesPreviewWithoutChangingScrollState() {
         let coordinator = HistoryListInteractionCoordinator()
-        var events: [HistoryListInteractionCoordinator.Event] = []
-
-        let observation = coordinator.observe { events.append($0) }
 
         coordinator.beginPointerInteraction()
 
         XCTAssertFalse(coordinator.isScrolling)
         XCTAssertTrue(coordinator.isPointerInteractionActive)
         XCTAssertTrue(coordinator.isHoverPreviewSuppressed)
-        XCTAssertEqual(events, [.pointerInteractionStarted])
 
         coordinator.endPointerInteraction()
 
         XCTAssertFalse(coordinator.isPointerInteractionActive)
         XCTAssertFalse(coordinator.isHoverPreviewSuppressed)
-        XCTAssertEqual(events, [.pointerInteractionStarted, .pointerInteractionEnded])
-
-        observation.cancel()
     }
 
     func testActiveSlotReplacementRejectsStaleAThenBReleasesAfterAReclaims() {
@@ -340,55 +326,10 @@ final class HistoryListInteractionCoordinatorTests: XCTestCase {
         )
     }
 
-    func testCancelledObservationStopsFurtherCallbacks() {
-        let coordinator = HistoryListInteractionCoordinator()
-        var events: [HistoryListInteractionCoordinator.Event] = []
-
-        let observation = coordinator.observe { events.append($0) }
-        observation.cancel()
-
-        coordinator.beginScrolling()
-        coordinator.endScrolling()
-
-        XCTAssertTrue(events.isEmpty)
-    }
-
-    func testObservationDeinitStopsFurtherCallbacks() {
-        let coordinator = HistoryListInteractionCoordinator()
-        var events: [HistoryListInteractionCoordinator.Event] = []
-        var observation: HistoryListInteractionObservation? = coordinator.observe { events.append($0) }
-
-        XCTAssertNotNil(observation)
-        observation = nil
-
-        coordinator.beginScrolling()
-        coordinator.endScrolling()
-
-        XCTAssertTrue(events.isEmpty)
-    }
-
-    func testLegacyObservationCanCancelItselfReentrantly() {
-        let coordinator = HistoryListInteractionCoordinator()
-        var callbackCount = 0
-        var observation: HistoryListInteractionObservation?
-        observation = coordinator.observe { _ in
-            callbackCount += 1
-            observation?.cancel()
-        }
-
-        coordinator.beginScrolling()
-        coordinator.endScrolling()
-
-        XCTAssertEqual(callbackCount, 1)
-        withExtendedLifetime(observation) {}
-    }
-
     func testHoverPreviewTransferBlocksOtherRowsUntilOwnerEnds() {
         let coordinator = HistoryListInteractionCoordinator()
         let sourceItemID = UUID()
         let adjacentItemID = UUID()
-        var events: [HistoryListInteractionCoordinator.Event] = []
-        let observation = coordinator.observe { events.append($0) }
 
         XCTAssertTrue(coordinator.beginHoverPreviewTransfer(for: sourceItemID))
         XCTAssertEqual(coordinator.hoverPreviewTransferOwnerID, sourceItemID)
@@ -398,13 +339,9 @@ final class HistoryListInteractionCoordinatorTests: XCTestCase {
 
         coordinator.endHoverPreviewTransfer(for: adjacentItemID)
         XCTAssertEqual(coordinator.hoverPreviewTransferOwnerID, sourceItemID)
-        XCTAssertTrue(events.isEmpty)
 
         coordinator.endHoverPreviewTransfer(for: sourceItemID)
         XCTAssertNil(coordinator.hoverPreviewTransferOwnerID)
-        XCTAssertEqual(events, [.hoverPreviewTransferEnded(itemID: sourceItemID)])
-
-        observation.cancel()
     }
 
     func testHoverPreviewTransferEndTargetsSolePassiveActiveRow() {
@@ -412,8 +349,6 @@ final class HistoryListInteractionCoordinatorTests: XCTestCase {
         let sourceItemID = UUID()
         let activeRow = coordinator.makePassiveRowToken()
         var passiveEvents: [HistoryListInteractionCoordinator.Event] = []
-        var legacyEvents: [HistoryListInteractionCoordinator.Event] = []
-        let observation = coordinator.observe { legacyEvents.append($0) }
 
         XCTAssertTrue(coordinator.claimActiveRow(
             token: activeRow,
@@ -428,10 +363,7 @@ final class HistoryListInteractionCoordinatorTests: XCTestCase {
             itemID: sourceItemID
         )
         XCTAssertEqual(passiveEvents, [expected])
-        XCTAssertEqual(legacyEvents, [expected])
         XCTAssertTrue(coordinator.ownsActiveRow(token: activeRow))
-
-        observation.cancel()
     }
 
     func testHoverPreviewTransferEndTargetsNewestPassiveActiveRowOnly() {

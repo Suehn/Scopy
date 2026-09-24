@@ -9,7 +9,6 @@ enum ScopyColors {
     
     // Spotlight/Raycast style: slightly translucent, dark/vibrant
     static let cardBackground = Color(nsColor: .windowBackgroundColor.withAlphaComponent(0.6))
-    static let headerBackground = Color.clear // Header blends with window
     
     // MARK: - Separators & Borders
     static let separator = Color(nsColor: .separatorColor)

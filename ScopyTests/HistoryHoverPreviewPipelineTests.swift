@@ -1,5 +1,6 @@
 import CoreGraphics
 import Foundation
+import ImageIO
 import XCTest
 
 @testable import ScopyKit
@@ -111,7 +112,7 @@ final class HistoryHoverPreviewPipelineTests: XCTestCase {
         XCTAssertNotEqual(firstRequest.revision, replacementRequest.revision)
     }
 
-    func testFilePlansPreserveKindSpecificCacheAndPrefetchPolicy() {
+    func testFilePlansPreserveKindSpecificCacheKeys() {
         let itemID = UUID(uuidString: "33333333-3333-3333-3333-333333333333")!
         let item = makeItem(id: itemID, type: .file, contentHash: "file-hash", plainText: "/tmp/picture.png")
         let imageInfo = FilePreviewSupport.previewInfo(from: "/tmp/picture.png", requireExists: false)!
@@ -144,10 +145,8 @@ final class HistoryHoverPreviewPipelineTests: XCTestCase {
             )
         )
 
-        XCTAssertTrue(imagePlan.shouldPrefetchImage)
         XCTAssertEqual(imagePlan.cacheKey, "file|\(ClipboardItemContentRevision(item: item).cacheKey)|image|w1000")
         XCTAssertEqual(imagePlan.quickLookMaxSidePixels, 1_000)
-        XCTAssertFalse(otherPlan.shouldPrefetchImage)
         XCTAssertEqual(otherPlan.cacheKey, "file|\(ClipboardItemContentRevision(item: item).cacheKey)|other|w1000")
     }
 
@@ -451,6 +450,69 @@ final class HistoryHoverPreviewPipelineTests: XCTestCase {
             return nil
         }.count, 2)
         XCTAssertEqual(presentedKinds(events), [.image])
+    }
+
+    func testImageGeometryIsKnownBeforeThePopoverPresents() async throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("scopy-hover-\(UUID().uuidString).png")
+        defer { try? FileManager.default.removeItem(at: url) }
+        try writePNG(width: 40, height: 10, to: url)
+        let item = makeItem(type: .image, contentHash: UUID().uuidString, plainText: "Image")
+        let request = HistoryHoverPreviewPipeline.ImageRequest(
+            revision: ClipboardItemContentRevision(item: item),
+            storageRef: url.path,
+            delay: 0.6,  // the 300 ms prefetch starts well before the popover
+            scale: 1,
+            targetWidthPoints: 64,
+            maxLongSidePixels: 1_024
+        )
+
+        var events: [HistoryHoverPreviewPipeline.Event] = []
+        await HistoryHoverPreviewPipeline.run(request: .image(request), isCurrent: { true }, emit: { events.append($0) })
+
+        let sizeIndex = try XCTUnwrap(events.firstIndex { if case .imagePixelSize(let size) = $0 { return size == CGSize(width: 40, height: 10) } else { return false } })
+        let presentIndex = try XCTUnwrap(events.firstIndex { if case .present = $0 { return true } else { return false } })
+        XCTAssertLessThan(sizeIndex, presentIndex)
+    }
+
+    func testOtherFileKindPrefetchesQuickLookStillBeforePresenting() async throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("scopy-hover-\(UUID().uuidString).txt")
+        defer { try? FileManager.default.removeItem(at: url) }
+        try Data("quick look".utf8).write(to: url)
+        let item = makeItem(type: .file, contentHash: UUID().uuidString, plainText: url.path)
+        let info = try XCTUnwrap(FilePreviewSupport.previewInfo(from: url.path, requireExists: true))
+        XCTAssertEqual(info.kind, .other)
+        let request = HistoryHoverPreviewPipeline.FileRequest(
+            revision: ClipboardItemContentRevision(item: item),
+            previewInfo: info,
+            isMarkdown: false,
+            delay: 0.6,  // the 300 ms prefetch starts well before the popover
+            markdownLayoutScale: MarkdownRenderLayoutConstants.defaultChatGPTLayoutScale,
+            scale: 1,
+            targetWidthPoints: 200,
+            targetHeightPoints: 200,
+            maxLongSidePixels: 1_024
+        )
+
+        var events: [HistoryHoverPreviewPipeline.Event] = []
+        await HistoryHoverPreviewPipeline.run(request: .file(request), isCurrent: { true }, emit: { events.append($0) })
+
+        let availabilityIndex = try XCTUnwrap(events.firstIndex { if case .fileAvailability(true) = $0 { return true } else { return false } })
+        let presentIndex = try XCTUnwrap(events.firstIndex { if case .present(.file) = $0 { return true } else { return false } })
+        XCTAssertLessThan(availabilityIndex, presentIndex)
+        XCTAssertTrue(events.contains { if case .image(.some) = $0 { return true } else { return false } })
+    }
+
+    private func writePNG(width: Int, height: Int, to url: URL) throws {
+        let context = try XCTUnwrap(CGContext(
+            data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
+            space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ))
+        context.setFillColor(CGColor(red: 0.2, green: 0.4, blue: 0.6, alpha: 1))
+        context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+        let image = try XCTUnwrap(context.makeImage())
+        let destination = try XCTUnwrap(CGImageDestinationCreateWithURL(url as CFURL, "public.png" as CFString, 1, nil))
+        CGImageDestinationAddImage(destination, image, nil)
+        XCTAssertTrue(CGImageDestinationFinalize(destination))
     }
 
     private func presentedKinds(_ events: [HistoryHoverPreviewPipeline.Event]) -> [HoverPreviewPopoverKind] {

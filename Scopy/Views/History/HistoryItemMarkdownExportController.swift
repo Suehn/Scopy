@@ -89,31 +89,39 @@ enum HistoryItemMarkdownExportController {
         }
     }
 
+    /// `renderedHTML`, when given, must be the document for `markdownSource` at `layoutScale`
+    /// (a preview passes the document it shows); otherwise the source is rendered here.
     static func exportMarkdownToClipboard(
         markdownSource: String,
+        renderedHTML: String? = nil,
         settings: SettingsDTO,
         layoutScale: MarkdownChatGPTLayoutScalePercent? = nil,
         resolutionScale: CGFloat? = nil,
         pasteboardWriteLease: MarkdownExportService.PasteboardWriteLease? = nil,
         authorizePasteboardWrite: @escaping @MainActor () -> Bool = { true }
         ) async -> Result<MarkdownExportService.ExportStats, Error> {
-        let resolvedLayoutScale = layoutScale ?? MarkdownChatGPTLayoutScalePercent(
-            settingsValue: settings.markdownChatGPTLayoutScalePercent
-        )
-        let renderTask = Task.detached(priority: .userInitiated) {
-            let context = MarkdownRenderContextResolver.defaultContext(
-                for: markdownSource,
-                layoutScale: resolvedLayoutScale
+        let html: String
+        if let renderedHTML {
+            html = renderedHTML
+        } else {
+            let resolvedLayoutScale = layoutScale ?? MarkdownChatGPTLayoutScalePercent(
+                settingsValue: settings.markdownChatGPTLayoutScalePercent
             )
-            return MarkdownHTMLRenderer.render(markdown: markdownSource, context: context).html
+            let renderTask = Task.detached(priority: .userInitiated) {
+                let context = MarkdownRenderContextResolver.defaultContext(
+                    for: markdownSource,
+                    layoutScale: resolvedLayoutScale
+                )
+                return MarkdownHTMLRenderer.render(markdown: markdownSource, context: context)
+            }
+            html = await withTaskCancellationHandler(operation: {
+                await renderTask.value
+            }, onCancel: {
+                renderTask.cancel()
+            })
         }
-        let html = await withTaskCancellationHandler(operation: {
-            await renderTask.value
-        }, onCancel: {
-            renderTask.cancel()
-        })
         guard !Task.isCancelled else { return .failure(CancellationError()) }
-        let pngquantOptions = pngquantOptions(settings: settings, renderedHTML: html)
+        let pngquantOptions = pngquantOptions(settings: settings)
 
         let cancellationRelay = MarkdownExportCancellationRelay()
         return await withTaskCancellationHandler(operation: {
@@ -160,14 +168,10 @@ enum HistoryItemMarkdownExportController {
         return nil
     }
 
-    static func pngquantOptions(
-        settings: SettingsDTO,
-        renderedHTML: String
-    ) -> PngquantService.Options? {
+    /// Rich surfaces keep true color: the export checks the rendered DOM and skips palette
+    /// reduction for them (`MarkdownExportService`), not this unrendered document shell.
+    static func pngquantOptions(settings: SettingsDTO) -> PngquantService.Options? {
         guard settings.pngquantMarkdownExportEnabled else { return nil }
-        // Data-rich surfaces rely on subtle chart gradients and source imagery. Palette reduction can
-        // collapse those colors even when the DOM/CSS is correct, so their canonical export stays lossless.
-        guard !renderedHTML.contains("data-scopy-version=\"2\"") else { return nil }
         return PngquantService.Options(
             binaryPath: settings.pngquantBinaryPath,
             qualityMin: settings.pngquantMarkdownExportQualityMin,

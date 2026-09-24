@@ -2,62 +2,37 @@ import Foundation
 
 enum MarkdownHTMLRenderer {
     static func render(markdown: String) -> String {
-        let context = MarkdownRenderContextResolver.defaultContext(for: markdown)
-        return render(markdown: markdown, context: context).html
+        render(markdown: markdown, context: MarkdownRenderContextResolver.defaultContext(for: markdown))
     }
 
-    static func render(markdown: String, context: MarkdownRenderContext) -> MarkdownRenderOutput {
-        guard !Task.isCancelled else { return cancelledOutput(context: context) }
-        let syntaxProtected = MarkdownSyntaxProtector.protectForLooseMathRepair(markdown)
-        guard !Task.isCancelled else { return cancelledOutput(context: context) }
-        let latexNormalized = context.policy.allowLatexDocumentNormalize
-            ? LaTeXDocumentNormalizer.normalize(syntaxProtected.markdown)
-            : syntaxProtected.markdown
-        guard !Task.isCancelled else { return cancelledOutput(context: context) }
-        let normalizedMarkdown = MarkdownSyntaxProtector.restore(
-            latexNormalized,
-            placeholders: syntaxProtected.placeholders
-        )
-        guard !Task.isCancelled else { return cancelledOutput(context: context) }
-        // The unified renderer is the delimiter authority for authored/ChatGPT Markdown. The
-        // protector is only needed while a scientific repair profile rewrites surrounding text.
-        // Authored dollar delimiters and currency reach the parser unchanged.
-        let protected = context.policy.allowLatexInlineTextNormalize
-            ? MathProtector.protectMath(in: normalizedMarkdown)
-            : MathProtector.ProtectedMath(markdown: normalizedMarkdown, placeholders: [])
-        guard !Task.isCancelled else { return cancelledOutput(context: context) }
-        let inlineNormalizedMarkdown = context.policy.allowLatexInlineTextNormalize
-            ? LaTeXInlineTextNormalizer.normalize(protected.markdown)
-            : protected.markdown
-        let restoredMathMarkdown = MathProtector.restoreMath(
-            in: inlineNormalizedMarkdown,
-            placeholders: protected.placeholders,
-            escape: { $0 }
-        )
-        let normalizedHeadingsMarkdown = MarkdownATXHeadingNormalizer.normalize(restoredMathMarkdown)
-        let tablePipeNormalizedMarkdown = MarkdownTableCodeSpanPipeNormalizer.normalize(normalizedHeadingsMarkdown)
-
-        guard !Task.isCancelled else { return cancelledOutput(context: context) }
-        let html = MarkdownHTMLDocumentBuilder.document(
-            markdown: tablePipeNormalizedMarkdown,
-            context: context
-        )
-        let diagnostics = MarkdownRenderDiagnostics(
-            profile: context.profile,
-            explicitMathDetected: MarkdownDetector.containsMath(normalizedMarkdown),
-            warnings: []
-        )
-        return MarkdownRenderOutput(html: html, diagnostics: diagnostics)
-    }
-
-    private static func cancelledOutput(context: MarkdownRenderContext) -> MarkdownRenderOutput {
-        MarkdownRenderOutput(
-            html: "",
-            diagnostics: MarkdownRenderDiagnostics(
-                profile: context.profile,
-                explicitMathDetected: false,
-                warnings: ["render cancelled"]
+    /// Returns "" when cancelled; callers treat empty HTML as "no document".
+    static func render(markdown: String, context: MarkdownRenderContext) -> String {
+        guard !Task.isCancelled else { return "" }
+        var source = markdown
+        if context.policy.allowLatexDocumentNormalize {
+            // Code, links, URLs and paths are islands the LaTeX document normalizer must not rewrite.
+            let islands = MarkdownSyntaxProtector.protectForLaTeXDocumentNormalization(source)
+            guard !Task.isCancelled else { return "" }
+            let normalized = LaTeXDocumentNormalizer.normalize(islands.markdown)
+            guard !Task.isCancelled else { return "" }
+            source = MarkdownSyntaxProtector.restore(normalized, placeholders: islands.placeholders)
+            guard !Task.isCancelled else { return "" }
+        }
+        // The unified renderer is the delimiter authority for authored/ChatGPT Markdown. Math is
+        // only protected while a scientific repair profile rewrites the surrounding text; authored
+        // dollar delimiters and currency reach the parser unchanged.
+        if context.policy.allowLatexInlineTextNormalize {
+            let protected = MathProtector.protectMath(in: source)
+            guard !Task.isCancelled else { return "" }
+            source = MathProtector.restoreMath(
+                in: LaTeXInlineTextNormalizer.normalize(protected.markdown),
+                placeholders: protected.placeholders,
+                escape: { $0 }
             )
-        )
+        }
+        source = MarkdownATXHeadingNormalizer.normalize(source)
+        source = MarkdownTableCodeSpanPipeNormalizer.normalize(source)
+        guard !Task.isCancelled else { return "" }
+        return MarkdownHTMLDocumentBuilder.document(markdown: source, context: context)
     }
 }

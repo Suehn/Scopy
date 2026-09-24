@@ -40,7 +40,6 @@ final class HistoryItemRowController {
     @ObservationIgnored var exportActionTask: Task<Void, Never>?
     @ObservationIgnored var exportMessageTask: Task<Void, Never>?
     @ObservationIgnored private(set) var noteSaveTask: Task<Void, Never>?
-    @ObservationIgnored var interactionObservation: HistoryListInteractionObservation?
     @ObservationIgnored private(set) var exportAuthorizationToken: UUID?
     @ObservationIgnored private(set) var noteSaveToken: UUID?
     @ObservationIgnored private var noteDraftGeneration: UInt64 = 0

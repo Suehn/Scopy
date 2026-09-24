@@ -21,6 +21,57 @@ final class HistoryViewModelRegressionTests: XCTestCase {
         XCTAssertEqual(viewModel.items.map(\.id), service.items.map(\.id))
     }
 
+    func testKeyboardNavigationSkipsCollapsedPinnedRows() async {
+        var items = makeItems(count: 3)
+        items[0] = items[0].withPinned(true)
+        let service = HistoryViewModelRegressionService(items: items)
+        let viewModel = HistoryViewModel(service: service, settingsViewModel: SettingsViewModel(service: service))
+        defer { viewModel.stop() }
+        await viewModel.load()
+        let pinnedID = items[0].id
+
+        viewModel.highlightNext()
+        XCTAssertEqual(viewModel.selectedID, pinnedID)
+        viewModel.isPinnedCollapsed = true
+        XCTAssertNil(viewModel.selectedID, "Collapsing hides the pinned row, so it cannot stay the ⏎/⌥⌫ target")
+
+        viewModel.highlightNext()
+        XCTAssertEqual(viewModel.selectedID, items[1].id)
+        viewModel.highlightPrevious()
+        XCTAssertEqual(viewModel.selectedID, items[2].id, "Wrapping upward skips the hidden pinned row")
+    }
+
+    func testEmptyStagedPrefilterIsNotPublishedWhileRefineIsPending() async {
+        let match = makeItem(text: "needle match", age: 1)
+        let other = makeItem(text: "other", age: 2)
+        let service = HistoryViewModelRegressionService(items: [match, other])
+        service.returnsStagedFirstPage = true
+        service.prefilterItems = []
+        service.suspendNextRefine = true
+        let refineStarted = expectation(description: "Refine started")
+        service.onRefineStarted = { refineStarted.fulfill() }
+        let viewModel = HistoryViewModel(service: service, settingsViewModel: SettingsViewModel(service: service))
+        viewModel.configureTiming(.immediateRegressionTests)
+        defer { viewModel.stop() }
+        await viewModel.load()
+        let revision = viewModel.itemsRevision
+
+        viewModel.searchMode = .fuzzyPlus
+        viewModel.searchQuery = "needle"
+        viewModel.search()
+        await fulfillment(of: [refineStarted], timeout: 1.0)
+
+        XCTAssertEqual(viewModel.items.map(\.id), [match.id, other.id], "The empty prefilter page is not published")
+        XCTAssertEqual(viewModel.itemsRevision, revision)
+        XCTAssertTrue(viewModel.isLoading, "Loading lasts until the refine lands")
+
+        service.resumeRefine()
+        await waitForSearchToFinish(in: viewModel)
+        XCTAssertEqual(viewModel.items.map(\.id), [match.id])
+        XCTAssertEqual(viewModel.itemsRevision, revision + 1, "The refine replaces the rows once")
+        XCTAssertEqual(viewModel.searchCoverage, .complete)
+    }
+
     func testNewItemRefreshesActiveSemanticSearchWithoutDisturbingSelectionOrScroll() async {
         let original = makeItem(text: "needle original", age: 1)
         let service = HistoryViewModelRegressionService(items: [original])
@@ -486,8 +537,20 @@ final class HistoryViewModelRegressionTests: XCTestCase {
         } onChange: {
             refined.fulfill()
         }
+        // What the List body reads: an identical refine that only settles the total must not
+        // invalidate it.
+        let listInputsInvalidated = expectation(description: "List inputs invalidated")
+        listInputsInvalidated.isInverted = true
+        withObservationTracking {
+            _ = viewModel.pinnedItems
+            _ = viewModel.unpinnedItems
+            _ = viewModel.canLoadMore
+        } onChange: {
+            listInputsInvalidated.fulfill()
+        }
         service.resumeRefine()
         await fulfillment(of: [refined], timeout: 1.0)
+        await fulfillment(of: [listInputsInvalidated], timeout: 0.05)
         XCTAssertEqual(viewModel.itemsRevision, revision)
         XCTAssertEqual(viewModel.totalCount, 50)
         XCTAssertEqual(viewModel.searchCoverage, .complete)

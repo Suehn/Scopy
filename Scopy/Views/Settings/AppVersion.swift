@@ -32,11 +32,6 @@ public enum AppVersion {
         return formatter.string(from: modificationDate)
     }
 
-    /// 带日期的完整版本信息 (e.g., "0.6.0 (1) - 2025-11-27")
-    public static var versionWithDate: String {
-        "\(fullVersion) - \(buildDate)"
-    }
-
     /// 应用名称
     public static var appName: String {
         Bundle.main.infoDictionary?["CFBundleName"] as? String ?? "Scopy"

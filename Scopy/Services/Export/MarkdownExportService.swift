@@ -667,14 +667,16 @@ private final class ExportBitmapCanvas: @unchecked Sendable {
         let bytesPerRow = self.bytesPerRow
         let width = self.width
         let height = self.height
-        let pixels = self.pixels
+        /// Each band writes only its own rows of the shared buffer.
+        struct BandedPixels: @unchecked Sendable { let base: UnsafeMutableRawPointer }
+        let pixels = BandedPixels(base: self.pixels)
         let failed = ManagedAtomic(false)
         DispatchQueue.concurrentPerform(iterations: bandCount) { band in
             let startRow = band * rowsPerBand
             let bandRows = min(rowsPerBand, height - startRow)
             guard bandRows > 0 else { return }
             guard let context = CGContext(
-                data: pixels.advanced(by: startRow * bytesPerRow),
+                data: pixels.base.advanced(by: startRow * bytesPerRow),
                 width: width,
                 height: bandRows,
                 bitsPerComponent: 8,
@@ -739,45 +741,6 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
         static let dumpPDFPath = "SCOPY_EXPORT_PDF_DUMP_PATH"
     }
 
-    private enum ExportNetworkBlocker {
-        private static let ruleListIdentifier = "ScopyMarkdownExportBlockNetwork"
-        private static let rulesJSON = """
-        [
-          {
-            "trigger": { "url-filter": "https?://.*" },
-            "action": { "type": "block" }
-          }
-        ]
-        """
-        @MainActor
-        private static var cachedRuleList: WKContentRuleList?
-        @MainActor
-        private static var compilingTask: Task<WKContentRuleList?, Never>?
-
-        @MainActor
-        static func ruleList() async -> WKContentRuleList? {
-            if let cachedRuleList { return cachedRuleList }
-            if let compilingTask { return await compilingTask.value }
-
-            let task = Task { @MainActor () -> WKContentRuleList? in
-                await withCheckedContinuation { continuation in
-                    WKContentRuleListStore.default().compileContentRuleList(
-                        forIdentifier: ruleListIdentifier,
-                        encodedContentRuleList: rulesJSON
-                    ) { ruleList, _ in
-                        continuation.resume(returning: ruleList)
-                    }
-                }
-            }
-
-            compilingTask = task
-            let result = await task.value
-            cachedRuleList = result
-            compilingTask = nil
-            return result
-        }
-    }
-
     private let html: String
     private let layoutWidthPixels: CGFloat
     private let layoutWidthPoints: CGFloat
@@ -793,6 +756,7 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
     private var hostWindow: NSWindow?
     private var timeoutTask: Task<Void, Never>?
     private var isCompleted = false
+    private var loadTask: Task<Void, Never>?
     private var exportTask: Task<Void, Never>?
     private var stage: MarkdownExportService.ExportStage = .loadHTML {
         didSet {
@@ -886,7 +850,7 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
             }
         }
 
-        Task { @MainActor in
+        loadTask = Task { @MainActor in
             await self.startWebViewAndLoadHTML()
         }
     }
@@ -894,20 +858,12 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
     private func startWebViewAndLoadHTML() async {
         guard !isCompleted else { return }
 
+        await MarkdownWebKitEnvironment.prepareRules()
+        // A cancel or timeout during the await must not build a WebView and window afterwards.
+        guard !isCompleted, !Task.isCancelled else { return }
+
         // Create offscreen WebView with an explicit viewport size to make layout deterministic.
-        let config = WKWebViewConfiguration()
-        SourceIconSchemeHandler.install(in: config)
-        config.websiteDataStore = .nonPersistent()
-        config.defaultWebpagePreferences.allowsContentJavaScript = true
-        config.preferences.javaScriptCanOpenWindowsAutomatically = false
-        config.userContentController = WKUserContentController()
-
-        if !ProcessInfo.processInfo.arguments.contains("--uitesting"),
-           let ruleList = await ExportNetworkBlocker.ruleList()
-        {
-            config.userContentController.add(ruleList)
-        }
-
+        let config = MarkdownWebKitEnvironment.makeConfiguration()
         let wv = WKWebView(
             frame: CGRect(
                 x: 0,
@@ -958,19 +914,9 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
         // Insert export-specific styles before </head>
         let exportStyles = """
         <style id="scopy-export-style">
+            /* Layout variables come from the document itself; export adds only its own rules. */
             :root {
                 color-scheme: light !important;
-                --scopy-chatgpt-output-surface-width: \(MarkdownRenderLayoutConstants.chatGPTOutputSurfaceWidth)px;
-                --scopy-chatgpt-content-inline-padding: \(MarkdownRenderLayoutConstants.chatGPTContentInlinePadding)px;
-                --scopy-chatgpt-content-top-padding: \(MarkdownRenderLayoutConstants.chatGPTContentTopPadding)px;
-                --scopy-chatgpt-content-bottom-padding: \(MarkdownRenderLayoutConstants.chatGPTContentBottomPadding)px;
-                --scopy-chatgpt-thread-content-width: min(
-                    var(--scopy-chatgpt-thread-content-max-width),
-                    max(1px, calc(var(--scopy-chatgpt-render-width) - (var(--scopy-chatgpt-content-inline-padding) * 2)))
-                );
-                --scopy-chatgpt-render-width: var(--scopy-chatgpt-layout-viewport-width);
-                --scopy-chatgpt-markdown-table-col-baseline: var(--scopy-chatgpt-thread-content-max-width);
-                --scopy-chatgpt-table-breakout-width: var(--scopy-chatgpt-thread-content-width);
             }
             @page { margin: 0 !important; }
             html, body {
@@ -1503,7 +1449,6 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
               } catch (e) { }
               try { if (typeof window.syncChatGPTZoomShell === 'function') { window.syncChatGPTZoomShell(content); } } catch (e) { }
             }
-            try { if (typeof window.__scopyRenderMath === 'function') { window.__scopyRenderMath(); } } catch (e) { }
           } catch (e) { }
           return true;
         })();
@@ -2051,25 +1996,6 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
         return scale
     }
 
-    nonisolated private static func parseHeightsFromLayoutDebugInfo(_ value: String) -> [CGFloat] {
-        guard let data = value.data(using: .utf8),
-              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-        else { return [] }
-
-        let keys = [
-            "contentScrollHeight",
-            "contentRectHeight"
-        ]
-
-        return keys.compactMap { key in
-            if let number = obj[key] as? NSNumber { return max(0, CGFloat(truncating: number)) }
-            if let double = obj[key] as? Double { return max(0, CGFloat(double)) }
-            if let int = obj[key] as? Int { return max(0, CGFloat(int)) }
-            if let string = obj[key] as? String, let value = Double(string) { return max(0, CGFloat(value)) }
-            return nil
-        }
-    }
-
     nonisolated private static func parseNumberFromLayoutDebugInfo(_ value: String, key: String) -> CGFloat? {
         guard let data = value.data(using: .utf8),
               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
@@ -2500,22 +2426,17 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
         }
     }
 
-    /// Hands the bitmap to pngquant as raw pixels; falls back to ImageIO's PNG encoder when pngquant is
-    /// disabled or declines the image.
     /// Encodes the finished canvas: pngquant maps the canvas file directly; ImageIO encodes the bitmap only when
     /// pngquant is disabled or declines the quality floor.
     nonisolated static func encodeExportCanvas(
         _ canvas: ExportBitmapCanvas,
         pngquantOptions: PngquantService.Options?
     ) throws -> MarkdownExportService.ExportOutcome {
-        let startedAt = DispatchTime.now().uptimeNanoseconds
         canvas.trimBlankLeadingRowsIfNeeded()
-        let pixels = canvas.width * canvas.height
         if let pngquantOptions {
             do {
                 try canvas.finalizeFile()
                 if let quantized = PngquantService.compressPAMFileBestEffort(canvas.fileURL, options: pngquantOptions) {
-                    logEncodeDuration(since: startedAt, pixels: pixels, bytes: quantized.count, encoder: "pngquant")
                     return MarkdownExportService.ExportOutcome(
                         pngData: quantized,
                         stats: MarkdownExportService.ExportStats(finalPNGBytes: quantized.count, pngquantApplied: true)
@@ -2529,17 +2450,9 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
             throw MarkdownExportService.ExportError.stageFailed(stage: .pngEncoding, underlying: nil)
         }
         let png = try pngDataFromCGImage(image)
-        logEncodeDuration(since: startedAt, pixels: pixels, bytes: png.count, encoder: "ImageIO")
         return MarkdownExportService.ExportOutcome(
             pngData: png,
             stats: MarkdownExportService.ExportStats(finalPNGBytes: png.count, pngquantApplied: false)
-        )
-    }
-
-    nonisolated private static func logEncodeDuration(since startedAt: UInt64, pixels: Int, bytes: Int, encoder: StaticString) {
-        let milliseconds = Double(DispatchTime.now().uptimeNanoseconds &- startedAt) / 1_000_000
-        MarkdownExportService.logger.info(
-            "Encoded export PNG via \(encoder, privacy: .public): \(pixels, privacy: .public) px -> \(bytes, privacy: .public) bytes in \(milliseconds, format: .fixed(precision: 1), privacy: .public) ms"
         )
     }
 
@@ -2794,6 +2707,8 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
     }
 
     private func cleanup() {
+        loadTask?.cancel()
+        loadTask = nil
         exportTask?.cancel()
         exportTask = nil
         timeoutTask?.cancel()

@@ -2355,11 +2355,6 @@ enum MarkdownHTMLDocumentBuilder {
                     return false;
                   }
                 };
-                window.__scopyRenderMath = window.__scopyRenderMath || function () {
-                  if (typeof window.__scopyReportHeight === 'function') {
-                    window.__scopyReportHeight();
-                  }
-                };
                 \(tableWrapFunctionScript)
                 function reportHeightNow(force) {
                   try {

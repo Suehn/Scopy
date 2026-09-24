@@ -75,12 +75,7 @@ struct ContentView: View {
     }
 
     private func handleKeyPress(_ keyPress: KeyPress) -> KeyPress.Result {
-        // ⌥⌫ (Option+Delete) - 删除选中项
-        if keyPress.key == .delete && keyPress.modifiers.contains(.option) {
-            Task { await historyViewModel.deleteSelectedItem() }
-            return .handled
-        }
-
+        // ⌥⌫ is handled by AppDelegate's key monitor, which knows the first responder.
         // ⌘⌫ (Command+Delete) - 清空历史（需要确认）
         if keyPress.key == .delete && keyPress.modifiers.contains(.command) {
             showClearConfirmation = true

@@ -23,6 +23,8 @@ final class ListLiveScrollObserverViewTests: XCTestCase {
         let horizontalScroller: PartReportingScroller
         let coordinator: HistoryListInteractionCoordinator
         let observer: ListLiveScrollObserverView.ObserverView
+        /// Pointer-interaction starts and ends, derived from the coordinator's snapshots.
+        private(set) var pointerTransitions: [String] = []
 
         init(attachObserver: Bool = false) {
             let frame = NSRect(x: 0, y: 0, width: 240, height: 180)
@@ -70,7 +72,8 @@ final class ListLiveScrollObserverViewTests: XCTestCase {
                 scroller.reportedPart = .knobSlot
             }
 
-            coordinator = HistoryListInteractionCoordinator()
+            var recordTransition: (HistoryListInteractionCoordinator.PassivePathSnapshot) -> Void = { _ in }
+            coordinator = HistoryListInteractionCoordinator(passivePathSnapshotSink: { recordTransition($0) })
             observer = ListLiveScrollObserverView.ObserverView(frame: .zero)
             observer.interactionCoordinator = coordinator
             // Tests move the clip view programmatically; treat that as wheel-driven unless a test
@@ -79,6 +82,12 @@ final class ListLiveScrollObserverViewTests: XCTestCase {
             if attachObserver {
                 scrollView.contentView.addSubview(observer)
                 observer.attachIfNeeded()
+            }
+            var active = 0
+            recordTransition = { [unowned self] snapshot in
+                guard snapshot.pointerInteractionCount != active else { return }
+                self.pointerTransitions.append(snapshot.pointerInteractionCount > active ? "start" : "end")
+                active = snapshot.pointerInteractionCount
             }
         }
 
@@ -201,9 +210,6 @@ final class ListLiveScrollObserverViewTests: XCTestCase {
     func testOrdinaryContentDownAndUnmatchedMouseUpDoNotBeginOrEndSuppression() {
         let fixture = Fixture(attachObserver: true)
         defer { fixture.detachObserver() }
-        var events: [HistoryListInteractionCoordinator.Event] = []
-        let observation = fixture.coordinator.observe { events.append($0) }
-        defer { observation.cancel() }
 
         fixture.observer.handlePointerInteraction(
             type: .leftMouseDown,
@@ -217,16 +223,13 @@ final class ListLiveScrollObserverViewTests: XCTestCase {
         )
 
         XCTAssertFalse(fixture.coordinator.isPointerInteractionActive)
-        XCTAssertTrue(events.isEmpty)
+        XCTAssertTrue(fixture.pointerTransitions.isEmpty)
     }
 
     func testScrollerDownAndMouseUpPairOneOwnedPointerInteraction() {
         let fixture = Fixture(attachObserver: true)
         defer { fixture.detachObserver() }
         fixture.observer.pressedMouseButtonsProvider = { 1 }
-        var events: [HistoryListInteractionCoordinator.Event] = []
-        let observation = fixture.coordinator.observe { events.append($0) }
-        defer { observation.cancel() }
         let scrollerPoint = fixture.pointInWindow(for: fixture.verticalScroller)
 
         fixture.observer.handlePointerInteraction(
@@ -236,7 +239,7 @@ final class ListLiveScrollObserverViewTests: XCTestCase {
         )
 
         XCTAssertTrue(fixture.coordinator.isPointerInteractionActive)
-        XCTAssertEqual(events, [.pointerInteractionStarted])
+        XCTAssertEqual(fixture.pointerTransitions, ["start"])
 
         // The matching up may occur away from the scroller; only the owned down matters.
         fixture.observer.handlePointerInteraction(
@@ -246,15 +249,12 @@ final class ListLiveScrollObserverViewTests: XCTestCase {
         )
 
         XCTAssertFalse(fixture.coordinator.isPointerInteractionActive)
-        XCTAssertEqual(events, [.pointerInteractionStarted, .pointerInteractionEnded])
+        XCTAssertEqual(fixture.pointerTransitions, ["start", "end"])
     }
 
     func testDetachEndsOwnedPointerInteractionExactlyOnce() {
         let fixture = Fixture(attachObserver: true)
         fixture.observer.pressedMouseButtonsProvider = { 1 }
-        var events: [HistoryListInteractionCoordinator.Event] = []
-        let observation = fixture.coordinator.observe { events.append($0) }
-        defer { observation.cancel() }
 
         fixture.observer.handlePointerInteraction(
             type: .leftMouseDown,
@@ -267,16 +267,13 @@ final class ListLiveScrollObserverViewTests: XCTestCase {
         fixture.detachObserver()
 
         XCTAssertFalse(fixture.coordinator.isPointerInteractionActive)
-        XCTAssertEqual(events, [.pointerInteractionStarted, .pointerInteractionEnded])
+        XCTAssertEqual(fixture.pointerTransitions, ["start", "end"])
     }
 
     func testLiveScrollEndCleansConsumedMouseUpWithoutStartNotification() {
         let fixture = Fixture(attachObserver: true)
         defer { fixture.detachObserver() }
         fixture.observer.pressedMouseButtonsProvider = { 0 }
-        var events: [HistoryListInteractionCoordinator.Event] = []
-        let observation = fixture.coordinator.observe { events.append($0) }
-        defer { observation.cancel() }
 
         fixture.observer.handlePointerInteraction(
             type: .leftMouseDown,
@@ -291,7 +288,7 @@ final class ListLiveScrollObserverViewTests: XCTestCase {
         )
 
         XCTAssertFalse(fixture.coordinator.isPointerInteractionActive)
-        XCTAssertEqual(events, [.pointerInteractionStarted, .pointerInteractionEnded])
+        XCTAssertEqual(fixture.pointerTransitions, ["start", "end"])
     }
 
     func testLiveScrollEndKeepsPointerReasonWhilePhysicalButtonRemainsDown() {
@@ -323,15 +320,6 @@ final class ListLiveScrollObserverViewTests: XCTestCase {
         let fixture = Fixture(attachObserver: true)
         defer { fixture.detachObserver() }
         fixture.observer.pressedMouseButtonsProvider = { 0 }
-        var events: [HistoryListInteractionCoordinator.Event] = []
-        let ended = expectation(description: "consumed mouse-up fallback ended ownership")
-        let observation = fixture.coordinator.observe { event in
-            events.append(event)
-            if event == .pointerInteractionEnded {
-                ended.fulfill()
-            }
-        }
-        defer { observation.cancel() }
 
         fixture.observer.handlePointerInteraction(
             type: .leftMouseDown,
@@ -340,10 +328,13 @@ final class ListLiveScrollObserverViewTests: XCTestCase {
         )
         XCTAssertTrue(fixture.coordinator.isPointerInteractionActive)
 
-        await fulfillment(of: [ended], timeout: 1)
+        let deadline = Date().addingTimeInterval(1)
+        while fixture.coordinator.isPointerInteractionActive, Date() < deadline {
+            try? await Task.sleep(nanoseconds: 5_000_000)
+        }
 
         XCTAssertFalse(fixture.coordinator.isPointerInteractionActive)
-        XCTAssertEqual(events, [.pointerInteractionStarted, .pointerInteractionEnded])
+        XCTAssertEqual(fixture.pointerTransitions, ["start", "end"])
     }
 
     private func scrollClipView(_ fixture: Fixture, toY y: CGFloat) {

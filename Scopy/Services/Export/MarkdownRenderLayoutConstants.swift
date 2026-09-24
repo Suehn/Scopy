@@ -72,15 +72,6 @@ public enum MarkdownRenderLayoutConstants {
     /// while zooming in (logical viewport < 816) falls back to the narrow 40rem reading column.
     public static let chatGPTWideThreadMinimumViewportWidth: Double = chatGPTOutputSurfaceWidth
 
-    public static var chatGPTRenderWidth: Double {
-        chatGPTOutputSurfaceWidth
-    }
-
-    public static func renderWidth(for profile: MarkdownChatGPTLayoutScalePercent) -> Double {
-        _ = profile
-        return chatGPTOutputSurfaceWidth
-    }
-
     public static func threadContentWidth(
         forLayoutViewportWidth layoutViewportWidth: Double
     ) -> Double {

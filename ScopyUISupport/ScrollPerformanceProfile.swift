@@ -511,7 +511,6 @@ public final class ScrollPerformanceProfile {
 
     static let fixedWorkloadRequiredCounterNames = [
         "interaction.session_init",
-        "interaction.observer_install",
         "interaction.idle_disappear_fast_path",
         "row.descriptor_cache_hit",
         "row.descriptor_cache_miss",
@@ -521,7 +520,6 @@ public final class ScrollPerformanceProfile {
         "list.pagination_request",
         "row.markdown_menu_signal_cache_hit",
         "row.markdown_menu_signal_cache_miss",
-        "row.markdown_menu_signal_uncached",
         "profile.ingress_coalesced",
         "profile.ingress_dropped"
     ]

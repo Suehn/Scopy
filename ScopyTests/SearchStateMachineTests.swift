@@ -660,9 +660,9 @@ final class SearchStateMachineTests: XCTestCase {
         XCTAssertEqual(viewModel.searchMatchContext(for: viewModel.items[0].id)?.mode, .exact)
     }
 
-    func testSearchErrorDoesNotLeaveCandidatesWithoutEvidence() async {
+    func testFailedSearchKeepsPreviousRowsAndReportsFailureInsteadOfNoResults() async {
         let service = LifecycleClipboardService()
-        service.failingQueries = ["("]
+        service.failingQueries = ["bar"]
         let settings = SettingsViewModel(service: service)
         let viewModel = HistoryViewModel(service: service, settingsViewModel: settings)
         viewModel.configureTiming(.tests)
@@ -673,18 +673,26 @@ final class SearchStateMachineTests: XCTestCase {
         await waitForCondition(timeout: 1.0, pollInterval: 0.005) {
             viewModel.items.count == 1 && !viewModel.isLoading
         }
-        XCTAssertEqual(viewModel.searchMatchContexts.count, 1)
+        let previousRow = viewModel.items[0].id
 
-        viewModel.searchQuery = "("
+        viewModel.searchQuery = "bar"
         viewModel.search()
-        XCTAssertEqual(viewModel.items.count, 1, "The previous projection stays until the new results land")
-        XCTAssertEqual(viewModel.searchMatchContexts.count, 1)
         await waitForCondition(timeout: 1.0, pollInterval: 0.005) {
-            service.recordedSearchRequests.last?.query == "(" && !viewModel.isLoading
+            service.recordedSearchRequests.last?.query == "bar" && !viewModel.isLoading
         }
 
-        XCTAssertTrue(viewModel.items.isEmpty)
-        XCTAssertTrue(viewModel.searchMatchContexts.isEmpty)
+        XCTAssertEqual(viewModel.items.map(\.id), [previousRow])
+        XCTAssertNotNil(viewModel.searchMatchContext(for: previousRow))
+        XCTAssertNotNil(viewModel.fetchFailureMessage)
+        XCTAssertEqual(viewModel.searchCoverage, .incomplete)
+
+        service.failingQueries = []
+        viewModel.search()
+        XCTAssertNil(viewModel.fetchFailureMessage, "A retry clears the failure as soon as it starts")
+        await waitForCondition(timeout: 1.0, pollInterval: 0.005) {
+            viewModel.items.first?.plainText.contains("bar") == true && !viewModel.isLoading
+        }
+        XCTAssertNil(viewModel.fetchFailureMessage)
     }
 
     func testPersistedModeChangeWithActiveQueryStartsFreshSearch() async {

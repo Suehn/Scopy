@@ -12,6 +12,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         static let flags: CGEventFlags = .maskControl
     }
 
+    enum OptionDeleteShortcut {
+        /// ⌥⌫ deletes the selected history item only when pressed in the history window and no
+        /// text is being edited there: the search field and note editors keep word deletion.
+        @MainActor
+        static func deletesItem(eventWindow: NSWindow?, historyWindow: NSWindow?) -> Bool {
+            guard let eventWindow, eventWindow === historyWindow else { return false }
+            let responder = eventWindow.firstResponder
+            return !(responder is NSText || responder is NSTextField)
+        }
+    }
+
     var panel: FloatingPanel?
     private var uiTestWindow: NSWindow?
     private(set) var hotKeyService: HotKeyService?
@@ -25,6 +36,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private(set) var updaterController: SPUStandardUpdaterController?
     /// v0.22: 存储事件监视器引用，以便在应用退出时移除
     private var localEventMonitor: Any?
+    private var memoryPressureSource: DispatchSourceMemoryPressure?
 
     private lazy var statusItem: NSStatusItem = {
         let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -98,6 +110,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         setupHotKeyRegistration()
         installLocalEventMonitor()
+        installMemoryPressureHandler()
     }
 
     private struct LaunchContext {
@@ -173,12 +186,32 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func makeMainPanel<V: View>(rootView: V) -> FloatingPanel {
-        FloatingPanel(
+        let panel = FloatingPanel(
             contentRect: NSRect(x: 0, y: 0, width: Int(ScopySize.Window.mainWidth), height: Int(ScopySize.Window.mainHeight)),
             statusBarButton: statusItem.button
         ) {
             rootView
         }
+        // Hover bitmaps are only useful while the panel is open; pinned windows keep their own.
+        panel.onClose = { HoverPreviewImageCache.shared.removeAll() }
+        return panel
+    }
+
+    private func installMemoryPressureHandler() {
+        let source = DispatchSource.makeMemoryPressureSource(eventMask: [.warning, .critical], queue: .main)
+        source.setEventHandler {
+            MainActor.assumeIsolated { Self.purgeFrontendCaches() }
+        }
+        source.resume()
+        memoryPressureSource = source
+    }
+
+    /// Frontend caches that rebuild on demand; dropped when the system reports memory pressure.
+    static func purgeFrontendCaches() {
+        HoverPreviewImageCache.shared.removeAll()
+        MarkdownPreviewCache.shared.removeDocuments()
+        ClipboardItemDisplayText.shared.clearCaches()
+        HistoryItemPresentationCache.shared.clearCaches()
     }
 
     private func makeHostingWindow<V: View>(
@@ -251,14 +284,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
             let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
 
-            // ⌥⌫ (Option+Delete) - 删除选中项
-            // NOTE: SwiftUI TextField may consume ⌥⌫ for word deletion; handle at the AppKit layer so the shortcut always works.
+            // ⌥⌫ (Option+Delete) deletes the selected item. Handled here rather than in SwiftUI so
+            // the first responder decides: while text is being edited, the key stays word deletion.
             if flags.contains(.option),
                !flags.contains(.command),
                !flags.contains(.control),
                !flags.contains(.shift),
                (event.keyCode == 51 || event.keyCode == 117),
-               (self.panel?.isVisible == true || self.uiTestWindow?.isVisible == true),
+               OptionDeleteShortcut.deletesItem(eventWindow: event.window, historyWindow: self.panel ?? self.uiTestWindow),
                self.appState.historyViewModel.selectedID != nil {
                 Task { @MainActor in
                     await self.appState.historyViewModel.deleteSelectedItem()
@@ -291,6 +324,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             NSEvent.removeMonitor(monitor)
             localEventMonitor = nil
         }
+        memoryPressureSource?.cancel()
+        memoryPressureSource = nil
         appState.stop()
     }
 
@@ -374,7 +409,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
            let html = try? String(contentsOfFile: htmlPath, encoding: .utf8),
            !html.isEmpty {
             let settings = await uiTestMarkdownExportSettings()
-            let pngquantOptions = uiTestPngquantOptions(settings: settings)
+            let pngquantOptions = HistoryItemMarkdownExportController.pngquantOptions(settings: settings)
             await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
                 MarkdownExportService.exportToPNGClipboard(
                     html: html,
@@ -418,36 +453,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private func uiTestMarkdownExportSettings() async -> SettingsDTO {
         var settings = await settingsStore.load()
         let env = ProcessInfo.processInfo.environment
-        if let rawLayoutScale = env["SCOPY_UITEST_MARKDOWN_LAYOUT_SCALE"],
-           let layoutScale = Int(rawLayoutScale.trimmingCharacters(in: .whitespacesAndNewlines)) {
-            settings.markdownChatGPTLayoutScalePercent = MarkdownChatGPTLayoutScalePercent(
-                settingsValue: layoutScale
-            ).rawValue
-        }
         if env["SCOPY_UITEST_FORCE_PNGQUANT_MARKDOWN_EXPORT"] == "0" {
             settings.pngquantMarkdownExportEnabled = false
         } else if env["SCOPY_UITEST_FORCE_PNGQUANT_MARKDOWN_EXPORT"] != nil {
             settings.pngquantMarkdownExportEnabled = true
         }
-        if env["SCOPY_UITEST_PNGQUANT_EXPORT_DEFAULTS"] == "1" {
-            let defaults = SettingsDTO.default
-            settings.pngquantMarkdownExportQualityMin = defaults.pngquantMarkdownExportQualityMin
-            settings.pngquantMarkdownExportQualityMax = defaults.pngquantMarkdownExportQualityMax
-            settings.pngquantMarkdownExportSpeed = defaults.pngquantMarkdownExportSpeed
-            settings.pngquantMarkdownExportColors = defaults.pngquantMarkdownExportColors
-        }
         return settings
-    }
-
-    private func uiTestPngquantOptions(settings: SettingsDTO) -> PngquantService.Options? {
-        guard settings.pngquantMarkdownExportEnabled else { return nil }
-        return PngquantService.Options(
-            binaryPath: settings.pngquantBinaryPath,
-            qualityMin: settings.pngquantMarkdownExportQualityMin,
-            qualityMax: settings.pngquantMarkdownExportQualityMax,
-            speed: settings.pngquantMarkdownExportSpeed,
-            colors: settings.pngquantMarkdownExportColors
-        )
     }
 
     // MARK: - Hotkey Settings

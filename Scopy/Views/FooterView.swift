@@ -46,6 +46,19 @@ struct FooterView: View {
                     .foregroundStyle(ScopyColors.warning)
                     .accessibilityIdentifier("Footer.ActionError")
                     .onTapGesture { historyViewModel.clearActionError() }
+                } else if let fetchFailureMessage = historyViewModel.fetchFailureMessage {
+                    HStack(spacing: ScopySpacing.xs) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                        Text(fetchFailureMessage)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                        Button("Retry") { historyViewModel.search() }
+                            .buttonStyle(.plain)
+                            .foregroundStyle(ScopyColors.accent)
+                    }
+                    .font(ScopyTypography.microMono)
+                    .foregroundStyle(ScopyColors.warning)
+                    .accessibilityIdentifier("Footer.FetchFailure")
                 } else {
                 HStack(spacing: ScopySpacing.sm) {
                     Text(summaryText)

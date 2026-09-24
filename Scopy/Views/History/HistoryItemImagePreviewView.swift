@@ -69,7 +69,9 @@ struct HistoryItemImagePreviewView: View {
 
     private func previewHeight(width: CGFloat) -> CGFloat {
         let size: CGSize?
-        if let cgImage = model.previewCGImage {
+        if let pixelSize = model.previewPixelSize {
+            size = pixelSize
+        } else if let cgImage = model.previewCGImage {
             size = CGSize(width: cgImage.width, height: cgImage.height)
         } else if let thumbnailPath {
             let loaded = lastLoadedPath == thumbnailPath ? loadedThumbnail : nil

@@ -12,7 +12,7 @@ final class MarkdownSyntaxProtectorTests: XCTestCase {
         Bare: https://example.com/a_(b)?q=x_y and /Users/alice/docs/file_v2.md:25
         """
 
-        let protected = MarkdownSyntaxProtector.protectForLooseMathRepair(input)
+        let protected = MarkdownSyntaxProtector.protectForLaTeXDocumentNormalization(input)
         let restored = MarkdownSyntaxProtector.restore(protected.markdown, placeholders: protected.placeholders)
 
         XCTAssertEqual(restored, input)
@@ -39,7 +39,7 @@ final class MarkdownSyntaxProtectorTests: XCTestCase {
     func testDoesNotProtectStandaloneMathLikeSquareBrackets() {
         let input = "value [T_{io}=12.4] remains available for loose math repair."
 
-        let protected = MarkdownSyntaxProtector.protectForLooseMathRepair(input)
+        let protected = MarkdownSyntaxProtector.protectForLaTeXDocumentNormalization(input)
 
         XCTAssertEqual(protected.markdown, input)
         XCTAssertTrue(protected.placeholders.isEmpty)

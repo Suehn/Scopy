@@ -27,7 +27,7 @@ enum StartupPhase: Equatable {
 @Observable
 @MainActor
 final class AppState {
-    // MARK: - Singleton (兼容层)
+    // MARK: - Shared instance
 
     private static var _shared: AppState?
     static var shared: AppState {
@@ -39,10 +39,6 @@ final class AppState {
 
     static func create(service: ClipboardServiceProtocol) -> AppState {
         AppState(service: service)
-    }
-
-    static func resetShared() {
-        _shared = nil
     }
 
     // MARK: - Properties
@@ -224,9 +220,11 @@ final class AppState {
 
     func startEventListener() {
         eventTask?.cancel()
+        // Subscribe before returning so events emitted right after start() are not missed.
+        let events = service.eventStream
         eventTask = Task { [weak self] in
-            guard let self else { return }
-            for await event in self.service.eventStream {
+            for await event in events {
+                guard let self else { break }
                 guard !Task.isCancelled else { break }
                 await self.handleEvent(event)
             }

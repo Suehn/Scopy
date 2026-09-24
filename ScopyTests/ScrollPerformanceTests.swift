@@ -544,7 +544,7 @@ final class ScrollPerformanceTests: XCTestCase {
         XCTAssertEqual(metadata.jsonPayload["pinned_item_count"] as? Int, 2)
         XCTAssertEqual(metadata.jsonPayload["text_utf8_bytes_min"] as? Int, 4_096)
         XCTAssertEqual(metadata.jsonPayload["text_utf8_bytes_max"] as? Int, 4_096)
-        XCTAssertEqual(ScrollPerformanceProfile.fixedWorkloadRequiredCounterNames.count, 14)
+        XCTAssertEqual(ScrollPerformanceProfile.fixedWorkloadRequiredCounterNames.count, 12)
     }
 
     func testSerializedMetricIngressSchedulesOneDrainForAnOrderedBatch() {

@@ -6,25 +6,6 @@ import ScopyKit
 @MainActor
 final class SettingsConcurrencyMergeTests: XCTestCase {
 
-    func testUpdateDefaultSearchModeDoesNotOverrideHotkey() async {
-        let suiteName = "ScopyTests.SettingsConcurrencyMergeTests.\(UUID().uuidString)"
-        UserDefaults.standard.removePersistentDomain(forName: suiteName)
-        defer { UserDefaults.standard.removePersistentDomain(forName: suiteName) }
-
-        let store = SettingsStore(suiteName: suiteName)
-        let service = ClipboardServiceFactory.createForTesting(settingsStore: store)
-        let viewModel = SettingsViewModel(service: service)
-
-        await store.updateHotkey(keyCode: 123, modifiers: 456)
-
-        await viewModel.updateDefaultSearchMode(.regex)
-
-        let final = await store.load()
-        XCTAssertEqual(final.hotkeyKeyCode, 123)
-        XCTAssertEqual(final.hotkeyModifiers, 456)
-        XCTAssertEqual(final.defaultSearchMode, .regex)
-    }
-
     func testSettingsPatchMergePreservesExternalHotkey() async throws {
         let suiteName = "ScopyTests.SettingsConcurrencyMergeTests.\(UUID().uuidString)"
         UserDefaults.standard.removePersistentDomain(forName: suiteName)
