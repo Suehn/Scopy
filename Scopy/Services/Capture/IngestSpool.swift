@@ -1,7 +1,12 @@
 import Foundation
 
-extension ClipboardMonitor {
-    struct PendingIngestEnvelope: Codable, Sendable {
+/// The Application Support ingest spool: envelope format, durable writes, ownership
+/// validation, terminal markers, quarantine, stale-artifact sweeps and the legacy Caches
+/// migration. Every function takes the spool directory explicitly and touches nothing else.
+enum IngestSpool {
+    /// On-disk description of one externally backed capture; the same document is read back
+    /// from the pending envelope and from its terminal marker.
+    struct Envelope: Codable, Sendable {
         let id: UUID
         let typeRawValue: String
         let plainText: String
@@ -16,20 +21,20 @@ extension ClipboardMonitor {
         }
     }
 
-    nonisolated private static let terminalEnvelopeSuffix = ".envelope.acked"
+    private static let terminalEnvelopeSuffix = ".envelope.acked"
 
-    nonisolated static let pendingEnvelopeSuffix = ".envelope.json"
+    static let pendingEnvelopeSuffix = ".envelope.json"
 
-    nonisolated static let transientWorkPrefix = ".ingest-work-"
+    static let transientWorkPrefix = ".ingest-work-"
 
-    nonisolated private static let corruptEnvelopeSuffix = ".quarantine"
+    private static let corruptEnvelopeSuffix = ".quarantine"
 
-    nonisolated private static let staleControlledArtifactAge: TimeInterval = 24 * 60 * 60
+    private static let staleControlledArtifactAge: TimeInterval = 24 * 60 * 60
 
-    nonisolated private static let maxControlledArtifactsPerSweep = 256
+    private static let maxControlledArtifactsPerSweep = 256
 
-    nonisolated static func persistPendingEnvelope(
-        for rawData: RawClipboardData,
+    static func persistPendingEnvelope(
+        for rawData: ClipboardMonitor.RawClipboardData,
         in ingestDirectory: URL
     ) throws -> URL {
         let id = UUID()
@@ -47,7 +52,7 @@ extension ClipboardMonitor {
             try StorageService.writeAtomically(payloadData, to: url.path)
         }
 
-        let envelope = PendingIngestEnvelope(
+        let envelope = Envelope(
             id: id,
             typeRawValue: rawData.type.rawValue,
             plainText: rawData.plainText,
@@ -64,12 +69,12 @@ extension ClipboardMonitor {
         return envelopeURL
     }
 
-    nonisolated private static func writePendingEnvelope(_ envelope: PendingIngestEnvelope, to url: URL) throws {
+    private static func writePendingEnvelope(_ envelope: Envelope, to url: URL) throws {
         let data = try JSONEncoder().encode(envelope)
         try StorageService.writeAtomically(data, to: url.path)
     }
 
-    nonisolated private static func loadPendingEnvelope(from url: URL) -> PendingIngestEnvelope? {
+    private static func loadPendingEnvelope(from url: URL) -> Envelope? {
         guard let data = BestEffortFileOps.loadData(
             from: url,
             logger: ScopyLog.monitor,
@@ -78,7 +83,7 @@ extension ClipboardMonitor {
             return nil
         }
         return BestEffortFileOps.decodeJSON(
-            PendingIngestEnvelope.self,
+            Envelope.self,
             from: data,
             logger: ScopyLog.monitor,
             operation: "loadPendingEnvelope.decode",
@@ -88,7 +93,7 @@ extension ClipboardMonitor {
 
     /// Pending envelopes in capture order. Envelopes are written to a temporary file and renamed,
     /// so creation date approximates capture time; the file name breaks ties deterministically.
-    nonisolated static func discoverPendingEnvelopeURLs(in directory: URL) -> [URL] {
+    static func discoverPendingEnvelopeURLs(in directory: URL) -> [URL] {
         guard let urls = try? FileManager.default.contentsOfDirectory(
             at: directory,
             includingPropertiesForKeys: [.creationDateKey],
@@ -111,7 +116,7 @@ extension ClipboardMonitor {
             .map { $0.url }
     }
 
-    nonisolated static func pendingPayloadURL(for envelope: PendingIngestEnvelope, ingestDirectory: URL) -> URL? {
+    static func pendingPayloadURL(for envelope: Envelope, ingestDirectory: URL) -> URL? {
         guard let payloadFileName = envelope.payloadFileName else { return nil }
         guard payloadFileName == "\(envelope.id.uuidString).payload" else { return nil }
         let url = ingestDirectory.appendingPathComponent(payloadFileName)
@@ -125,7 +130,7 @@ extension ClipboardMonitor {
         return url
     }
 
-    nonisolated static func loadPendingPayload(from envelope: PendingIngestEnvelope, ingestDirectory: URL) -> Data? {
+    static func loadPendingPayload(from envelope: Envelope, ingestDirectory: URL) -> Data? {
         guard let payloadURL = pendingPayloadURL(for: envelope, ingestDirectory: ingestDirectory) else {
             return nil
         }
@@ -137,11 +142,11 @@ extension ClipboardMonitor {
         )
     }
 
-    nonisolated static func loadValidatedEnvelope(
+    static func loadValidatedEnvelope(
         from url: URL,
         ingestDirectory: URL,
         suffix: String
-    ) -> PendingIngestEnvelope? {
+    ) -> Envelope? {
         guard let pathID = validateOwnedEnvelopeURL(
             url,
             in: ingestDirectory,
@@ -157,7 +162,7 @@ extension ClipboardMonitor {
         return envelope
     }
 
-    nonisolated private static func validateOwnedEnvelopeURL(
+    fileprivate static func validateOwnedEnvelopeURL(
         _ url: URL,
         in ingestDirectory: URL,
         suffix: String,
@@ -179,7 +184,7 @@ extension ClipboardMonitor {
         return id
     }
 
-    nonisolated private static func validateOwnedRegularFile(
+    fileprivate static func validateOwnedRegularFile(
         _ url: URL,
         in directory: URL,
         expectedFileName: String
@@ -201,10 +206,10 @@ extension ClipboardMonitor {
         return resolvedCandidate.deletingLastPathComponent().path == resolvedRoot
     }
 
-    nonisolated static func transitionEnvelopeToTerminal(
+    static func transitionEnvelopeToTerminal(
         at pendingURL: URL,
         ingestDirectory: URL
-    ) -> TerminalIngestAcknowledgement? {
+    ) -> ClipboardMonitor.TerminalIngestAcknowledgement? {
         guard let pathID = validateOwnedEnvelopeURL(
             pendingURL,
             in: ingestDirectory,
@@ -243,18 +248,18 @@ extension ClipboardMonitor {
         ) else {
             return nil
         }
-        return TerminalIngestAcknowledgement(
+        return ClipboardMonitor.TerminalIngestAcknowledgement(
             ingestID: envelope.id,
             markerURL: markerURL,
             payloadFileName: envelope.payloadFileName
         )
     }
 
-    nonisolated static func discoverTerminalAcknowledgements(
+    static func discoverTerminalAcknowledgements(
         in directory: URL,
         limit: Int,
         excluding excludedIDs: Set<UUID>
-    ) -> [TerminalIngestAcknowledgement] {
+    ) -> [ClipboardMonitor.TerminalIngestAcknowledgement] {
         guard limit > 0,
               let urls = try? FileManager.default.contentsOfDirectory(
                 at: directory,
@@ -274,7 +279,7 @@ extension ClipboardMonitor {
                 ) else {
                     return nil
                 }
-                return TerminalIngestAcknowledgement(
+                return ClipboardMonitor.TerminalIngestAcknowledgement(
                     ingestID: envelope.id,
                     markerURL: markerURL,
                     payloadFileName: envelope.payloadFileName
@@ -284,8 +289,8 @@ extension ClipboardMonitor {
             .prefix(limit))
     }
 
-    nonisolated static func validateTerminalAcknowledgement(
-        _ acknowledgement: TerminalIngestAcknowledgement,
+    static func validateTerminalAcknowledgement(
+        _ acknowledgement: ClipboardMonitor.TerminalIngestAcknowledgement,
         ingestDirectory: URL
     ) -> Bool {
         guard let envelope = loadValidatedEnvelope(
@@ -299,8 +304,8 @@ extension ClipboardMonitor {
             envelope.payloadFileName == acknowledgement.payloadFileName
     }
 
-    nonisolated static func cleanupTerminalAcknowledgement(
-        _ acknowledgement: TerminalIngestAcknowledgement,
+    static func cleanupTerminalAcknowledgement(
+        _ acknowledgement: ClipboardMonitor.TerminalIngestAcknowledgement,
         ingestDirectory: URL
     ) -> Bool {
         if let payloadFileName = acknowledgement.payloadFileName,
@@ -340,7 +345,7 @@ extension ClipboardMonitor {
         return !FileManager.default.fileExists(atPath: acknowledgement.markerURL.path)
     }
 
-    nonisolated static func quarantinePendingEnvelope(
+    static func quarantinePendingEnvelope(
         at url: URL,
         ingestDirectory: URL
     ) {
@@ -365,42 +370,7 @@ extension ClipboardMonitor {
         }
     }
 
-    nonisolated static func createTransientWorkCopy(
-        for content: ClipboardContent,
-        preferredExtension: String = "png"
-    ) throws -> URL {
-        guard content.fileOwnership == .durableSpool,
-              case .file(let sourceURL) = content.payload,
-              let ingestID = content.ingestID,
-              let envelopeURL = content.ingestEnvelopeURL else {
-            throw CocoaError(.fileReadInvalidFileName)
-        }
-        let directory = envelopeURL.deletingLastPathComponent()
-        guard validateOwnedEnvelopeURL(
-            envelopeURL,
-            in: directory,
-            suffix: pendingEnvelopeSuffix,
-            requireExistingRegularFile: true
-        ) == ingestID,
-        validateOwnedRegularFile(
-            sourceURL,
-            in: directory,
-            expectedFileName: "\(ingestID.uuidString).payload"
-        ) else {
-            throw CocoaError(.fileReadNoPermission)
-        }
-
-        let safeExtension = preferredExtension.lowercased().allSatisfy { $0.isLetter || $0.isNumber }
-            ? preferredExtension.lowercased()
-            : "dat"
-        let workURL = directory.appendingPathComponent(
-            "\(transientWorkPrefix)\(UUID().uuidString).\(safeExtension)"
-        )
-        try FileManager.default.copyItem(at: sourceURL, to: workURL)
-        return workURL
-    }
-
-    nonisolated static func migrateLegacyPendingEnvelopes(
+    static func migrateLegacyPendingEnvelopes(
         from legacyDirectory: URL,
         to destinationDirectory: URL
     ) {
@@ -461,7 +431,7 @@ extension ClipboardMonitor {
         }
     }
 
-    nonisolated private static func copyOwnedMigrationFileIfNeeded(
+    private static func copyOwnedMigrationFileIfNeeded(
         from sourceURL: URL,
         to destinationURL: URL,
         destinationDirectory: URL
@@ -506,7 +476,7 @@ extension ClipboardMonitor {
         }
     }
 
-    nonisolated static func cleanupStaleControlledArtifacts(in directory: URL) {
+    static func cleanupStaleControlledArtifacts(in directory: URL) {
         guard let urls = try? FileManager.default.contentsOfDirectory(
             at: directory,
             includingPropertiesForKeys: [.contentModificationDateKey, .isRegularFileKey],
@@ -543,7 +513,7 @@ extension ClipboardMonitor {
         }
     }
 
-    nonisolated private static func isControlledTransientArtifactName(_ name: String) -> Bool {
+    private static func isControlledTransientArtifactName(_ name: String) -> Bool {
         if name.hasPrefix(transientWorkPrefix) { return true }
         guard name.hasSuffix(".tmp") else { return false }
         let base = String(name.dropLast(4))
@@ -556,14 +526,14 @@ extension ClipboardMonitor {
         return false
     }
 
-    nonisolated private static func standalonePayloadID(from name: String) -> UUID? {
+    private static func standalonePayloadID(from name: String) -> UUID? {
         guard name.hasSuffix(".payload") else { return nil }
         return UUID(uuidString: String(name.dropLast(".payload".count)))
     }
 
     /// A pending, terminal, or quarantined envelope remains the conservative authority for its
     /// payload. Only an aged UUID payload with no such sibling is an owned crash orphan.
-    nonisolated private static func hasEnvelopeAuthority(for id: UUID, in directory: URL) -> Bool {
+    private static func hasEnvelopeAuthority(for id: UUID, in directory: URL) -> Bool {
         let base = id.uuidString
         let authorityNames = [
             base + pendingEnvelopeSuffix,
@@ -575,5 +545,45 @@ extension ClipboardMonitor {
                 atPath: directory.appendingPathComponent(name).path
             )
         }
+    }
+}
+
+// Referenced by ClipboardService as `ClipboardMonitor.createTransientWorkCopy`.
+extension ClipboardMonitor {
+    /// Copies a durable spool payload to a transient work file in the same directory, after
+    /// re-validating that the envelope and payload are still owned spool files.
+    nonisolated static func createTransientWorkCopy(
+        for content: ClipboardContent,
+        preferredExtension: String = "png"
+    ) throws -> URL {
+        guard content.fileOwnership == .durableSpool,
+              case .file(let sourceURL) = content.payload,
+              let ingestID = content.ingestID,
+              let envelopeURL = content.ingestEnvelopeURL else {
+            throw CocoaError(.fileReadInvalidFileName)
+        }
+        let directory = envelopeURL.deletingLastPathComponent()
+        guard IngestSpool.validateOwnedEnvelopeURL(
+            envelopeURL,
+            in: directory,
+            suffix: IngestSpool.pendingEnvelopeSuffix,
+            requireExistingRegularFile: true
+        ) == ingestID,
+        IngestSpool.validateOwnedRegularFile(
+            sourceURL,
+            in: directory,
+            expectedFileName: "\(ingestID.uuidString).payload"
+        ) else {
+            throw CocoaError(.fileReadNoPermission)
+        }
+
+        let safeExtension = preferredExtension.lowercased().allSatisfy { $0.isLetter || $0.isNumber }
+            ? preferredExtension.lowercased()
+            : "dat"
+        let workURL = directory.appendingPathComponent(
+            "\(IngestSpool.transientWorkPrefix)\(UUID().uuidString).\(safeExtension)"
+        )
+        try FileManager.default.copyItem(at: sourceURL, to: workURL)
+        return workURL
     }
 }

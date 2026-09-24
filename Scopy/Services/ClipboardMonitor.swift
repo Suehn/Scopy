@@ -148,7 +148,7 @@ public final class ClipboardMonitor {
     /// Serial, bounded FIFO shared by small and large captures, so history order follows
     /// capture order and a full queue applies backpressure to polling.
     private let ingestJobs: AsyncBoundedQueue<IngestJob>
-    private var activeEnvelopeWork: Task<EnvelopeBuildResult, Never>?
+    private var activeEnvelopeWork: Task<IngestEnvelopeProcessor.Outcome, Never>?
     private var replayTask: Task<Void, Never>?
     private var trackedPendingEnvelopePaths = Set<String>()
     /// Test injection: delay applied before each envelope is processed.
@@ -255,9 +255,9 @@ public final class ClipboardMonitor {
             )
         }
         if let legacyDirectory {
-            migrateLegacyPendingEnvelopes(from: legacyDirectory, to: ingestDirectory)
+            IngestSpool.migrateLegacyPendingEnvelopes(from: legacyDirectory, to: ingestDirectory)
         }
-        cleanupStaleControlledArtifacts(in: ingestDirectory)
+        IngestSpool.cleanupStaleControlledArtifacts(in: ingestDirectory)
     }
 
     deinit {
@@ -315,7 +315,7 @@ public final class ClipboardMonitor {
 
     @discardableResult
     public func acknowledgeIngestEnvelope(at url: URL) -> IngestAcknowledgementOutcome {
-        guard let acknowledgement = Self.transitionEnvelopeToTerminal(
+        guard let acknowledgement = IngestSpool.transitionEnvelopeToTerminal(
             at: url,
             ingestDirectory: ingestSpoolDirectory
         ) else {
@@ -334,7 +334,7 @@ public final class ClipboardMonitor {
         limit: Int = 256,
         excluding excludedIDs: Set<UUID> = []
     ) -> [TerminalIngestAcknowledgement] {
-        Self.discoverTerminalAcknowledgements(
+        IngestSpool.discoverTerminalAcknowledgements(
             in: ingestSpoolDirectory,
             limit: max(0, limit),
             excluding: excludedIDs
@@ -345,13 +345,13 @@ public final class ClipboardMonitor {
     public func completeTerminalIngestAcknowledgement(
         _ acknowledgement: TerminalIngestAcknowledgement
     ) -> Bool {
-        guard Self.validateTerminalAcknowledgement(
+        guard IngestSpool.validateTerminalAcknowledgement(
             acknowledgement,
             ingestDirectory: ingestSpoolDirectory
         ) else {
             return false
         }
-        return Self.cleanupTerminalAcknowledgement(
+        return IngestSpool.cleanupTerminalAcknowledgement(
             acknowledgement,
             ingestDirectory: ingestSpoolDirectory
         )
@@ -434,7 +434,12 @@ public final class ClipboardMonitor {
         }
 
         // Small non-image content: hash inline, then queue behind any earlier large capture.
-        let hash = computeHash(rawData)
+        let hash = CapturePolicy.contentHash(
+            type: rawData.type,
+            plainText: rawData.plainText,
+            payloadData: rawData.rawData,
+            precomputedHash: rawData.precomputedHash
+        )
         let content = ClipboardContent(
             type: rawData.type,
             plainText: rawData.plainText,
@@ -462,7 +467,7 @@ public final class ClipboardMonitor {
         let ingestDirectory = ingestSpoolDirectory
         do {
             envelopeURL = try await Task.detached(priority: .userInitiated) {
-                try Self.persistPendingEnvelope(for: rawData, in: ingestDirectory)
+                try IngestSpool.persistPendingEnvelope(for: rawData, in: ingestDirectory)
             }.value
         } catch {
             if logFailure {
@@ -503,7 +508,7 @@ public final class ClipboardMonitor {
             let ingestDirectory = ingestSpoolDirectory
             let delay = ingestProcessingDelay
             let work = Task.detached(priority: .userInitiated) {
-                await Self.buildEnvelopeContent(envelopeURL, ingestDirectory: ingestDirectory, delay: delay)
+                await IngestEnvelopeProcessor.buildContent(from: envelopeURL, ingestDirectory: ingestDirectory, delay: delay)
             }
             activeEnvelopeWork = work
             publishIngestSnapshot()
@@ -518,7 +523,7 @@ public final class ClipboardMonitor {
                 discardIngestEnvelope(at: envelopeURL)
             case .content(let content):
                 guard isMonitoring, monitoringSessionID == sessionID else {
-                    Self.cleanupPayloadIfNeeded(content.payload, ownership: content.fileOwnership)
+                    IngestEnvelopeProcessor.cleanupPayloadIfNeeded(content.payload, ownership: content.fileOwnership)
                     return
                 }
                 await contentQueue.enqueue(content)
@@ -542,7 +547,7 @@ public final class ClipboardMonitor {
     }
 
     private func replayPendingLargeContentFromDisk() {
-        let persisted = Self.discoverPendingEnvelopeURLs(in: ingestSpoolDirectory)
+        let persisted = IngestSpool.discoverPendingEnvelopeURLs(in: ingestSpoolDirectory)
         let replayed = persisted.filter { trackedPendingEnvelopePaths.insert($0.path).inserted }
         guard !replayed.isEmpty else { return }
         publishIngestSnapshot()
@@ -565,7 +570,7 @@ public final class ClipboardMonitor {
         case .terminal(let acknowledgement):
             completeTerminalIngestAcknowledgement(acknowledgement)
         case .rejected:
-            Self.quarantinePendingEnvelope(at: url, ingestDirectory: ingestSpoolDirectory)
+            IngestSpool.quarantinePendingEnvelope(at: url, ingestDirectory: ingestSpoolDirectory)
             trackedPendingEnvelopePaths.remove(url.path)
             publishIngestSnapshot()
         }
@@ -582,16 +587,6 @@ public final class ClipboardMonitor {
                 persistedCount: persistedCount
             )
         }
-    }
-
-    /// Inline hash for small captures; envelope processing applies the same policy off the main actor.
-    private func computeHash(_ rawData: RawClipboardData) -> String {
-        Self.contentHash(
-            type: rawData.type,
-            plainText: rawData.plainText,
-            payloadData: rawData.rawData,
-            precomputedHash: rawData.precomputedHash
-        )
     }
 
 }

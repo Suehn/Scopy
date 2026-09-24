@@ -1,15 +1,15 @@
 import AppKit
 import Foundation
 
-extension ClipboardMonitor {
-    // MARK: - Helper Methods
-
+/// Text representation of a capture: which of `.string`, RTF text and HTML text is stored, the
+/// Markdown/TeX heuristics behind that choice, RTF/HTML/KaTeX extraction, and `normalizeText`.
+enum CapturedTextExtraction {
     /// Chooses between the pasteboard `.string` and the text extracted from the rich payload.
     ///
     /// Prefer the pasteboard-provided `.string` when it is a faithful plain-text representation of the rich
     /// payload. Some apps provide `.string` that is already a lossy transformation (e.g. rich -> Markdown), which
     /// can corrupt TeX-heavy content; in those cases, fall back to the text extracted from the rich payload.
-    nonisolated private static func preferredPlainText(candidate: String?, extracted: String?, type: ClipboardItemType) -> String {
+    private static func preferredPlainText(candidate: String?, extracted: String?, type: ClipboardItemType) -> String {
         let candidate = candidate ?? ""
         if candidate.isEmpty {
             return extracted ?? ""
@@ -43,7 +43,7 @@ extension ClipboardMonitor {
     }
 
     /// Whether HTML extraction can produce TeX, including delimiters synthesized from math annotations.
-    nonisolated private static func mayContainTeXCharacters(htmlData: Data, string: String?) -> Bool {
+    private static func mayContainTeXCharacters(htmlData: Data, string: String?) -> Bool {
         if let string, string.contains("\\") || string.contains("$") {
             return true
         }
@@ -68,13 +68,13 @@ extension ClipboardMonitor {
     /// Text-representation extraction off the main thread. RTF import, normalization and the Markdown/TeX
     /// heuristics run here; the WebKit HTML import must run on the main thread and is requested only when
     /// it can change the stored text.
-    nonisolated static func makeTextRawData(
+    static func makeTextRawData(
         rtfData: Data?,
         htmlData: Data?,
         string: String?,
         appBundleID: String?,
         parseHTMLOnMain: @MainActor @Sendable (Data) -> String?
-    ) async -> RawClipboardData? {
+    ) async -> ClipboardMonitor.RawClipboardData? {
         // 3. RTF
         if let rtfData {
             let rtfPlainText = Self.normalizeText(
@@ -97,7 +97,7 @@ extension ClipboardMonitor {
                     }
                 }
             }
-            return RawClipboardData(
+            return ClipboardMonitor.RawClipboardData(
                 type: .rtf,
                 plainText: plainText,
                 rawData: rtfData,
@@ -121,7 +121,7 @@ extension ClipboardMonitor {
             } else {
                 plainText = Self.normalizeText(candidate)
             }
-            return RawClipboardData(
+            return ClipboardMonitor.RawClipboardData(
                 type: .html,
                 plainText: plainText,
                 rawData: htmlData,
@@ -133,7 +133,7 @@ extension ClipboardMonitor {
         // 5. Plain text: the lowest-priority representation.
         if let string {
             let normalizedText = Self.normalizeText(string)
-            return RawClipboardData(
+            return ClipboardMonitor.RawClipboardData(
                 type: .text,
                 plainText: normalizedText,
                 rawData: nil,
@@ -144,7 +144,7 @@ extension ClipboardMonitor {
         return nil
     }
 
-    nonisolated private static func isClearlyStructuredMarkdown(_ text: String) -> Bool {
+    private static func isClearlyStructuredMarkdown(_ text: String) -> Bool {
         // This is intentionally stricter than preview eligibility. Clipboard MIME selection should only override
         // rich-text extraction for unambiguous source Markdown, not prose that happens to contain punctuation.
         let sample = text.count > 64_000 ? String(text.prefix(64_000)) : text
@@ -198,13 +198,13 @@ extension ClipboardMonitor {
         return score >= 2
     }
 
-    nonisolated private static func isATXHeading(_ line: String) -> Bool {
+    private static func isATXHeading(_ line: String) -> Bool {
         let markerCount = line.prefix { $0 == "#" }.count
         guard (1...6).contains(markerCount), line.count > markerCount else { return false }
         return line[line.index(line.startIndex, offsetBy: markerCount)].isWhitespace
     }
 
-    nonisolated private static func isMarkdownListItem(_ line: String) -> Bool {
+    private static func isMarkdownListItem(_ line: String) -> Bool {
         if line.hasPrefix("- ") || line.hasPrefix("* ") || line.hasPrefix("+ ") {
             return true
         }
@@ -220,7 +220,7 @@ extension ClipboardMonitor {
         return index < line.endIndex && line[index].isWhitespace
     }
 
-    nonisolated private static func isMarkdownTableDelimiter(_ line: String) -> Bool {
+    private static func isMarkdownTableDelimiter(_ line: String) -> Bool {
         let cells = line.split(separator: "|", omittingEmptySubsequences: true)
         guard !cells.isEmpty else { return false }
         return cells.allSatisfy { cell in
@@ -230,18 +230,18 @@ extension ClipboardMonitor {
         }
     }
 
-    nonisolated private static func containsPairedMarkdownMarker(_ marker: String, in text: String) -> Bool {
+    private static func containsPairedMarkdownMarker(_ marker: String, in text: String) -> Bool {
         guard let first = text.range(of: marker) else { return false }
         return text[first.upperBound...].range(of: marker) != nil
     }
 
-    nonisolated private static func containsMarkdownLink(in text: String) -> Bool {
+    private static func containsMarkdownLink(in text: String) -> Bool {
         guard let closeBracket = text.range(of: "](") else { return false }
         return text[..<closeBracket.lowerBound].contains("[")
             && text[closeBracket.upperBound...].contains(")")
     }
 
-    nonisolated private static func textRepresentationsAreRelated(_ candidate: String, _ extracted: String) -> Bool {
+    private static func textRepresentationsAreRelated(_ candidate: String, _ extracted: String) -> Bool {
         let candidateTokens = Self.comparisonTokens(in: candidate)
         let extractedTokens = Self.comparisonTokens(in: extracted)
         guard candidateTokens.count >= 2, extractedTokens.count >= 2 else { return false }
@@ -264,7 +264,7 @@ extension ClipboardMonitor {
         return extractedCoverage >= 0.75 && candidateCoverage >= 0.65
     }
 
-    nonisolated private static func comparisonTokens(in text: String) -> [String] {
+    private static func comparisonTokens(in text: String) -> [String] {
         let bounded = text.count > 64_000 ? String(text.prefix(64_000)) : text
         let sample = Self.strippingInlineMarkdownDestinations(bounded)
         var tokens: [String] = []
@@ -293,7 +293,7 @@ extension ClipboardMonitor {
         return tokens
     }
 
-    nonisolated private static func strippingInlineMarkdownDestinations(_ text: String) -> String {
+    private static func strippingInlineMarkdownDestinations(_ text: String) -> String {
         var result = ""
         result.reserveCapacity(text.count)
         var index = text.startIndex
@@ -337,7 +337,7 @@ extension ClipboardMonitor {
         return result
     }
 
-    nonisolated private static func containsTeXCommands(_ text: String) -> Bool {
+    private static func containsTeXCommands(_ text: String) -> Bool {
         // Heuristic: detect common TeX signals so we can prefer an extracted rich payload representation
         // over a corrupted pasteboard `.string` (e.g. KaTeX/MathML selection from web pages).
         if !text.contains("\\") && !text.contains("$") {
@@ -367,7 +367,7 @@ extension ClipboardMonitor {
         return false
     }
 
-    nonisolated private static func shouldPreferRichPlainText(_ candidate: String, over baseline: String) -> Bool {
+    private static func shouldPreferRichPlainText(_ candidate: String, over baseline: String) -> Bool {
         guard !candidate.isEmpty else { return false }
         if baseline.isEmpty { return true }
 
@@ -382,7 +382,7 @@ extension ClipboardMonitor {
         return false
     }
 
-    nonisolated private static func isLikelyFragmentedCopyText(_ text: String) -> Bool {
+    private static func isLikelyFragmentedCopyText(_ text: String) -> Bool {
         // Typical symptom when copying KaTeX-rendered equations as plain text: a lot of 1-2 character lines.
         let lines = text.split(separator: "\n", omittingEmptySubsequences: true)
         guard lines.count >= 8 else { return false }
@@ -398,7 +398,7 @@ extension ClipboardMonitor {
     /// Canonical text for both the content hash and the stored plain text: unifies line
     /// separators, replaces NBSP, removes BOM, and trims surrounding whitespace. Replayed text
     /// therefore loses its surrounding whitespace (architecture-review-2026-09 §3.2).
-    nonisolated private static func normalizeText(_ text: String) -> String {
+    private static func normalizeText(_ text: String) -> String {
         text
             // Unicode line separators become '\n'.
             .replacingOccurrences(of: "\u{2028}", with: "\n") // LINE SEPARATOR
@@ -412,14 +412,14 @@ extension ClipboardMonitor {
             .replacingOccurrences(of: "\r", with: "\n")
     }
 
-    nonisolated private static func extractPlainTextFromRTF(_ data: Data) -> String? {
+    private static func extractPlainTextFromRTF(_ data: Data) -> String? {
         guard let attributedString = NSAttributedString(rtf: data, documentAttributes: nil) else {
             return nil
         }
         return attributedString.string
     }
 
-    func extractPlainTextFromHTML(_ data: Data) -> String? {
+    @MainActor static func extractPlainTextFromHTML(_ data: Data) -> String? {
         if let html = Self.decodeHTMLDataToString(data),
            html.range(of: "application/x-tex", options: .caseInsensitive) != nil {
             let extracted = Self.extractMarkdownLikeTextFromKaTeXHTML(html)
@@ -437,7 +437,7 @@ extension ClipboardMonitor {
         return attributedString.string
     }
 
-    nonisolated private static func decodeHTMLDataToString(_ data: Data) -> String? {
+    private static func decodeHTMLDataToString(_ data: Data) -> String? {
         // In practice pasteboard HTML is usually UTF-8, but some producers emit UTF-16.
         let encodings: [String.Encoding] = [
             .utf8,
@@ -458,7 +458,7 @@ extension ClipboardMonitor {
         return nil
     }
 
-    nonisolated private static func extractMarkdownLikeTextFromKaTeXHTML(_ html: String) -> String {
+    private static func extractMarkdownLikeTextFromKaTeXHTML(_ html: String) -> String {
         // Fast path: avoid work when there's no KaTeX marker.
         if !html.localizedCaseInsensitiveContains("katex") {
             return ""
@@ -582,7 +582,7 @@ extension ClipboardMonitor {
         return output.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    nonisolated private static func appendHTMLText(
+    private static func appendHTMLText(
         _ text: String,
         to output: inout String,
         inKaTeX: Bool,
@@ -610,7 +610,7 @@ extension ClipboardMonitor {
         }
     }
 
-    nonisolated private static func appendNewlines(_ count: Int, to output: inout String) {
+    private static func appendNewlines(_ count: Int, to output: inout String) {
         guard count > 0 else { return }
         var trimmed = output
         while trimmed.last == " " {
@@ -629,7 +629,7 @@ extension ClipboardMonitor {
         }
     }
 
-    nonisolated private static func attribute(named name: String, in tag: String) -> String? {
+    private static func attribute(named name: String, in tag: String) -> String? {
         // Extremely small attribute parser: looks for name="..." or name='...'.
         // Tag is the raw content inside "<" and ">".
         let needle = "\(name.lowercased())="
@@ -657,7 +657,7 @@ extension ClipboardMonitor {
         return String(tag[start..<end])
     }
 
-    nonisolated private static func decodeHTMLEntities(_ text: String) -> String {
+    private static func decodeHTMLEntities(_ text: String) -> String {
         guard text.contains("&") else { return text }
 
         var output = ""
@@ -692,7 +692,7 @@ extension ClipboardMonitor {
         return output
     }
 
-    nonisolated private static func decodeHTMLEntity(_ entity: String) -> String? {
+    private static func decodeHTMLEntity(_ entity: String) -> String? {
         switch entity.lowercased() {
         case "amp": return "&"
         case "lt": return "<"

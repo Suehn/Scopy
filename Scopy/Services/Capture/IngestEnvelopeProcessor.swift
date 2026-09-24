@@ -1,31 +1,34 @@
 import Foundation
 
-extension ClipboardMonitor {
-    enum EnvelopeBuildResult: Sendable {
-        case content(ClipboardContent)
+/// Off-main-actor stage of the ingest FIFO: turns one durable envelope into `ClipboardContent`
+/// (validate, load the payload, re-encode TIFF, hash, spool large payloads to a work file).
+/// The FIFO itself, its worker and session scoping are owned by ClipboardMonitor.
+enum IngestEnvelopeProcessor {
+    enum Outcome: Sendable {
+        case content(ClipboardMonitor.ClipboardContent)
         case invalid
         case cancelled
     }
 
-    nonisolated static func buildEnvelopeContent(
-        _ envelopeURL: URL,
+    static func buildContent(
+        from envelopeURL: URL,
         ingestDirectory: URL,
         delay: Duration
-    ) async -> EnvelopeBuildResult {
+    ) async -> Outcome {
         if delay > .zero {
             try? await Task.sleep(for: delay)
         }
         guard !Task.isCancelled else { return .cancelled }
 
-        guard let envelope = loadValidatedEnvelope(
+        guard let envelope = IngestSpool.loadValidatedEnvelope(
             from: envelopeURL,
             ingestDirectory: ingestDirectory,
-            suffix: pendingEnvelopeSuffix
+            suffix: IngestSpool.pendingEnvelopeSuffix
         ) else {
             return .invalid
         }
 
-        let originalPayloadData = loadPendingPayload(from: envelope, ingestDirectory: ingestDirectory)
+        let originalPayloadData = IngestSpool.loadPendingPayload(from: envelope, ingestDirectory: ingestDirectory)
         if envelope.payloadFileName != nil, originalPayloadData == nil {
             ScopyLog.monitor.error(
                 "Discarding pending ingest envelope because payload file is missing: \(envelopeURL.lastPathComponent, privacy: .public)"
@@ -37,7 +40,7 @@ extension ClipboardMonitor {
         var sizeBytes = envelope.sizeBytes
 
         if envelope.type == .image, let imageData = payloadData {
-            if envelope.imageDataWasTIFF, let pngData = convertTIFFToPNG(imageData) {
+            if envelope.imageDataWasTIFF, let pngData = ClipboardMonitor.convertTIFFToPNG(imageData) {
                 payloadData = pngData
             } else {
                 payloadData = imageData
@@ -46,7 +49,7 @@ extension ClipboardMonitor {
             plainText = "[Image: \(formatBytes(sizeBytes))]"
         }
 
-        let hash = contentHash(
+        let hash = CapturePolicy.contentHash(
             type: envelope.type,
             plainText: plainText,
             payloadData: payloadData,
@@ -55,7 +58,7 @@ extension ClipboardMonitor {
 
         let preferredPayloadURL: URL? = {
             guard payloadData == originalPayloadData else { return nil }
-            return pendingPayloadURL(for: envelope, ingestDirectory: ingestDirectory)
+            return IngestSpool.pendingPayloadURL(for: envelope, ingestDirectory: ingestDirectory)
         }()
 
         let builtPayload = buildPayload(
@@ -67,7 +70,7 @@ extension ClipboardMonitor {
             preferredFileURL: preferredPayloadURL
         )
 
-        return .content(ClipboardContent(
+        return .content(ClipboardMonitor.ClipboardContent(
             type: envelope.type,
             plainText: plainText,
             payload: builtPayload.payload,
@@ -80,12 +83,22 @@ extension ClipboardMonitor {
         ))
     }
 
-    private struct BuiltPayload: Sendable {
-        let payload: ClipboardContent.Payload
-        let ownership: ClipboardContent.FileOwnership
+    /// Deletes a transient payload file of content that will not be delivered.
+    static func cleanupPayloadIfNeeded(
+        _ payload: ClipboardMonitor.ClipboardContent.Payload,
+        ownership: ClipboardMonitor.ClipboardContent.FileOwnership
+    ) {
+        guard ownership == .transient else { return }
+        guard case .file(let url) = payload else { return }
+        try? FileManager.default.removeItem(at: url)
     }
 
-    nonisolated private static func buildPayload(
+    private struct BuiltPayload: Sendable {
+        let payload: ClipboardMonitor.ClipboardContent.Payload
+        let ownership: ClipboardMonitor.ClipboardContent.FileOwnership
+    }
+
+    private static func buildPayload(
         type: ClipboardItemType,
         data: Data?,
         sizeBytes: Int,
@@ -112,7 +125,7 @@ extension ClipboardMonitor {
         }
 
         let fileURL = ingestDirectory.appendingPathComponent(
-            "\(transientWorkPrefix)\(UUID().uuidString).\(ext)"
+            "\(IngestSpool.transientWorkPrefix)\(UUID().uuidString).\(ext)"
         )
         do {
             try StorageService.writeAtomically(data, to: fileURL.path)
@@ -123,16 +136,7 @@ extension ClipboardMonitor {
         }
     }
 
-    nonisolated static func cleanupPayloadIfNeeded(
-        _ payload: ClipboardContent.Payload,
-        ownership: ClipboardContent.FileOwnership
-    ) {
-        guard ownership == .transient else { return }
-        guard case .file(let url) = payload else { return }
-        try? FileManager.default.removeItem(at: url)
-    }
-
-    nonisolated private static func formatBytes(_ bytes: Int) -> String {
+    private static func formatBytes(_ bytes: Int) -> String {
         let kb = Double(bytes) / 1024
         if kb < 1024 {
             return String(format: "%.1f KB", kb)

@@ -68,7 +68,7 @@ extension ClipboardMonitor {
         // image file plus the bitmap; that stays an image.
         if !fileURLs.isEmpty, !shouldPreferImageOverFileURLs {
             let paths = fileURLs.map { $0.path }.joined(separator: "\n")
-            let urlData = Self.serializeFileURLs(fileURLs)
+            let urlData = CapturePolicy.serializeFileURLs(fileURLs)
             return verified(RawClipboardData(
                 type: .file,
                 plainText: paths,
@@ -102,11 +102,11 @@ extension ClipboardMonitor {
         let string = pasteboard.string(forType: .string)
         guard pasteboard.changeCount == changeCount else { return .changedDuringRead }
         if rtfData != nil || htmlData != nil || string != nil {
-            let parseHTMLOnMain: @MainActor @Sendable (Data) -> String? = { [self] data in
-                extractPlainTextFromHTML(data)
+            let parseHTMLOnMain: @MainActor @Sendable (Data) -> String? = { data in
+                CapturedTextExtraction.extractPlainTextFromHTML(data)
             }
             let textRawData = await Task.detached(priority: .userInitiated) {
-                await Self.makeTextRawData(
+                await CapturedTextExtraction.makeTextRawData(
                     rtfData: rtfData,
                     htmlData: htmlData,
                     string: string,
@@ -155,15 +155,15 @@ extension ClipboardMonitor {
             return true
         }
 
-        if hasHTML, let htmlData = pasteboard.data(forType: .html), Self.htmlLooksLikeOfficeSpreadsheet(htmlData) {
+        if hasHTML, let htmlData = pasteboard.data(forType: .html), CapturePolicy.htmlLooksLikeOfficeSpreadsheet(htmlData) {
             return true
         }
 
-        if hasRTF, let rtfData = pasteboard.data(forType: .rtf), Self.rtfLooksLikeTable(rtfData) {
+        if hasRTF, let rtfData = pasteboard.data(forType: .rtf), CapturePolicy.rtfLooksLikeTable(rtfData) {
             return true
         }
 
-        if hasString, let string = pasteboard.string(forType: .string), Self.stringLooksLikeTabularData(string) {
+        if hasString, let string = pasteboard.string(forType: .string), CapturePolicy.stringLooksLikeTabularData(string) {
             return true
         }
 
@@ -173,7 +173,7 @@ extension ClipboardMonitor {
     private func shouldPreferImageOverFileURLs(fileURLs: [URL], from pasteboard: NSPasteboard) -> Bool {
         guard fileURLs.count == 1 else { return false }
         let fileURL = fileURLs[0]
-        guard Self.isLikelyTemporaryImageFileURL(fileURL) else { return false }
+        guard CapturePolicy.isLikelyTemporaryImageFileURL(fileURL) else { return false }
         if extractImageDataForIngest(from: pasteboard, candidateFileURL: nil) != nil {
             return true
         }
