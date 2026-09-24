@@ -1,5 +1,5 @@
 import XCTest
-import ScopyKit
+@testable import ScopyKit
 
 /// 资源清理测试 - v0.10.4
 /// 验证 Timer、Task、事件流、数据库连接等资源的正确清理
@@ -38,6 +38,7 @@ final class ResourceCleanupTests: XCTestCase {
 
     /// 测试清理操作在全部 pin 时不会无限循环
     func testCleanupWithAllPinnedItems() async throws {
+        var cleanupPolicy = StorageService.CleanupPolicy()
         let storage = StorageService(databasePath: ":memory:")
         try await storage.open()
 
@@ -56,12 +57,12 @@ final class ResourceCleanupTests: XCTestCase {
         }
 
         // 设置非常小的限制
-        storage.cleanupSettings.maxItems = 5
-        storage.cleanupSettings.maxSmallStorageMB = 0 // 0 MB
+        cleanupPolicy.maxItems = 5
+        cleanupPolicy.maxContentBytes = 0 // 0 MB
 
         // 执行清理 - 不应该无限循环
         let startTime = Date()
-        try await storage.performCleanup()
+        try await storage.performCleanup(policy: cleanupPolicy)
         let elapsed = Date().timeIntervalSince(startTime)
 
         // 清理应该在合理时间内完成（不超过 1 秒）
@@ -76,6 +77,7 @@ final class ResourceCleanupTests: XCTestCase {
 
     /// 测试 sqlite3_step 错误处理
     func testSqliteStepErrorHandling() async throws {
+        var cleanupPolicy = StorageService.CleanupPolicy()
         let storage = StorageService(databasePath: ":memory:")
         try await storage.open()
 
@@ -93,9 +95,9 @@ final class ResourceCleanupTests: XCTestCase {
         }
 
         // 正常清理应该成功
-        storage.cleanupSettings.maxItems = 3
+        cleanupPolicy.maxItems = 3
         do {
-            try await storage.performCleanup()
+            try await storage.performCleanup(policy: cleanupPolicy)
         } catch {
             XCTFail("Cleanup should not throw: \(error)")
         }

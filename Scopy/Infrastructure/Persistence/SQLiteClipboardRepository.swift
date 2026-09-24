@@ -101,6 +101,8 @@ actor SQLiteClipboardRepository {
     private let dbPath: String
     private var connection: SQLiteConnection?
     private var metadataUpdateInterlock: (@Sendable (MetadataUpdateKind, UUID) async -> Void)?
+    /// One entry per committed write, in commit order; drained by the search engine.
+    nonisolated let commitJournal = StorageCommitJournal()
 
     init(dbPath: String) {
         self.dbPath = dbPath
@@ -134,10 +136,6 @@ actor SQLiteClipboardRepository {
         connection?.walCheckpointPassive()
         connection?.close()
         connection = nil
-    }
-
-    func walCheckpointPassive() {
-        connection?.walCheckpointPassive()
     }
 
     func setMetadataUpdateInterlockForTesting(
@@ -205,6 +203,10 @@ actor SQLiteClipboardRepository {
                 storageRef: storageRef,
                 rawData: rawData
             )
+            guard let inserted = try fetchItemByID(id) else {
+                throw RepositoryError.queryFailed("Inserted row could not be read back")
+            }
+            return .upserted(inserted)
         }
     }
 
@@ -238,13 +240,13 @@ actor SQLiteClipboardRepository {
         _ = try performConditionalWriteTransaction {
             if let receiptItemID = try fetchIngestReceiptItemID(ingestID) {
                 outcome = .alreadyApplied(try fetchItemByID(receiptItemID))
-                return false
+                return nil
             }
-            guard let existing = try fetchItemByHash(contentHash) else { return false }
+            guard let existing = try fetchItemByHash(contentHash) else { return nil }
             let updated = try incrementUsageRow(existing.id, lastUsedAt: lastUsedAt)
             try insertIngestReceipt(ingestID: ingestID, itemID: updated.id, committedAt: lastUsedAt)
             outcome = .updated(updated)
-            return true
+            return .upserted(updated)
         }
         return outcome
     }
@@ -271,14 +273,14 @@ actor SQLiteClipboardRepository {
         _ = try performConditionalWriteTransaction {
             if let receiptItemID = try fetchIngestReceiptItemID(ingestID) {
                 outcome = .alreadyApplied(try fetchItemByID(receiptItemID))
-                return false
+                return nil
             }
 
             if let existing = try fetchItemByHash(contentHash) {
                 let updated = try incrementUsageRow(existing.id, lastUsedAt: lastUsedAt)
                 try insertIngestReceipt(ingestID: ingestID, itemID: updated.id, committedAt: lastUsedAt)
                 outcome = .updated(updated)
-                return true
+                return .upserted(updated)
             }
 
             try insertItemRow(
@@ -300,7 +302,7 @@ actor SQLiteClipboardRepository {
                 throw RepositoryError.queryFailed("Inserted ingest row could not be read back")
             }
             outcome = .inserted(inserted)
-            return true
+            return .upserted(inserted)
         }
 
         guard let outcome else {
@@ -331,7 +333,7 @@ actor SQLiteClipboardRepository {
     func incrementUsageReturningCurrent(id: UUID, lastUsedAt: Date) throws -> ClipboardStoredItem? {
         var updatedItem: ClipboardStoredItem?
         _ = try performConditionalWriteTransaction {
-            guard try fetchItemByID(id) != nil else { return false }
+            guard try fetchItemByID(id) != nil else { return nil }
 
             let stmt = try prepare(
                 """
@@ -344,7 +346,7 @@ actor SQLiteClipboardRepository {
             try stmt.bindText(id.uuidString, at: 2)
             _ = try stmt.step()
             updatedItem = try fetchItemByID(id)
-            return updatedItem != nil
+            return updatedItem.map(StorageCommittedChange.upserted)
         }
         return updatedItem
     }
@@ -356,6 +358,7 @@ actor SQLiteClipboardRepository {
             try stmt.bindInt(pinned ? 1 : 0, at: 1)
             try stmt.bindText(id.uuidString, at: 2)
             _ = try stmt.step()
+            return .pinChanged(id: id, isPinned: pinned)
         }
     }
 
@@ -379,6 +382,7 @@ actor SQLiteClipboardRepository {
             try stmt.bindBlob(rawData, at: 4)
             try stmt.bindText(id.uuidString, at: 5)
             _ = try stmt.step()
+            return try fetchItemByID(id).map(StorageCommittedChange.upserted) ?? .unindexedFields
         }
     }
 
@@ -400,7 +404,7 @@ actor SQLiteClipboardRepository {
         _ = try performConditionalWriteTransaction {
             guard let current = try fetchItemByID(expected.id),
                   Self.hasSamePayload(current, as: expected) else {
-                return false
+                return nil
             }
 
             let sql = """
@@ -431,7 +435,7 @@ actor SQLiteClipboardRepository {
                 storageRef: storageRef,
                 rawData: rawData
             )
-            return true
+            return committedItem.map(StorageCommittedChange.upserted)
         }
         return committedItem
     }
@@ -450,15 +454,6 @@ actor SQLiteClipboardRepository {
             id: expected.id,
             update: .fileSizeBytes(expected: expected, value: fileSizeBytes)
         )
-    }
-
-    func deleteItem(id: UUID) throws {
-        try performWriteTransaction {
-            let sql = "DELETE FROM clipboard_items WHERE id = ?"
-            let stmt = try prepare(sql)
-            try stmt.bindText(id.uuidString, at: 1)
-            _ = try stmt.step()
-        }
     }
 
     func deleteItemReturningStorageRef(id: UUID) throws -> String? {
@@ -480,14 +475,9 @@ actor SQLiteClipboardRepository {
             let stmt = try prepare(sql)
             try stmt.bindText(id.uuidString, at: 1)
             _ = try stmt.step()
+            return .deleted([id])
         }
         return storageRef
-    }
-
-    func deleteAllExceptPinned() throws {
-        try performWriteTransaction {
-            try execute("DELETE FROM clipboard_items WHERE is_pinned = 0")
-        }
     }
 
     func deleteAllExceptPinnedReturningStorageRefs() throws -> [String] {
@@ -504,6 +494,7 @@ actor SQLiteClipboardRepository {
                 }
             }
             try execute("DELETE FROM clipboard_items WHERE is_pinned = 0")
+            return .clearedUnpinned
         }
         return refs
     }
@@ -602,48 +593,6 @@ actor SQLiteClipboardRepository {
         return items
     }
 
-    func fetchAllSummaries() throws -> [ClipboardStoredItem] {
-        let sql = """
-            SELECT id, type, content_hash, plain_text, note, app_bundle_id, created_at, last_used_at,
-                   use_count, is_pinned, size_bytes, storage_ref, file_size_bytes
-            FROM clipboard_items
-        """
-        let stmt = try prepare(sql)
-
-        var items: [ClipboardStoredItem] = []
-        while try stmt.step() {
-            items.append(try parseStoredItemSummary(from: stmt))
-        }
-        return items
-    }
-
-    func fetchItemsByIDs(_ ids: [UUID]) throws -> [ClipboardStoredItem] {
-        guard !ids.isEmpty else { return [] }
-
-        let placeholders = ids.map { _ in "?" }.joined(separator: ",")
-        let sql = """
-            SELECT id, type, content_hash, plain_text, note, app_bundle_id, created_at, last_used_at,
-                   use_count, is_pinned, size_bytes, storage_ref, raw_data, file_size_bytes
-            FROM clipboard_items
-            WHERE id IN (\(placeholders))
-        """
-        let stmt = try prepare(sql)
-
-        for (index, id) in ids.enumerated() {
-            try stmt.bindText(id.uuidString, at: Int32(index + 1))
-        }
-
-        var fetched: [UUID: ClipboardStoredItem] = [:]
-        fetched.reserveCapacity(ids.count)
-
-        while try stmt.step() {
-            let item = try parseStoredItem(from: stmt)
-            fetched[item.id] = item
-        }
-
-        return ids.compactMap { fetched[$0] }
-    }
-
     func fetchRecentApps(limit: Int) throws -> [String] {
         let sql = """
             SELECT app_bundle_id
@@ -732,173 +681,24 @@ actor SQLiteClipboardRepository {
                 _ = try stmt.step()
                 updatedCount += connection?.changeCount() ?? 0
             }
-            return updatedCount > 0
+            return updatedCount > 0 ? .unindexedFields : nil
         }
         return updatedCount
     }
 
-    func searchAllWithFilters(
-        appFilter: String?,
-        typeFilter: ClipboardItemType?,
-        typeFilters: [ClipboardItemType]?,
-        limit: Int,
-        offset: Int
-    ) throws -> (items: [ClipboardStoredItem], total: Int, hasMore: Bool) {
-        var sql = """
-            SELECT id, type, content_hash, plain_text, note, app_bundle_id, created_at, last_used_at,
-                   use_count, is_pinned, size_bytes, storage_ref, file_size_bytes
-            FROM clipboard_items
-            WHERE 1 = 1
-        """
-        var params: [String] = []
-
-        if let appFilter {
-            sql += " AND app_bundle_id = ?"
-            params.append(appFilter)
-        }
-
-        if let typeFilters, !typeFilters.isEmpty {
-            let placeholders = typeFilters.map { _ in "?" }.joined(separator: ",")
-            sql += " AND type IN (\(placeholders))"
-            params.append(contentsOf: typeFilters.map(\.rawValue))
-        } else if let typeFilter {
-            sql += " AND type = ?"
-            params.append(typeFilter.rawValue)
-        }
-
-        sql += " ORDER BY is_pinned DESC, last_used_at DESC, id ASC"
-        sql += " LIMIT ? OFFSET ?"
-
-        let stmt = try prepare(sql)
-        var bindIndex: Int32 = 1
-        for param in params {
-            try stmt.bindText(param, at: bindIndex)
-            bindIndex += 1
-        }
-        try stmt.bindInt(limit + 1, at: bindIndex)
-        try stmt.bindInt(offset, at: bindIndex + 1)
-
-        var items: [ClipboardStoredItem] = []
-        items.reserveCapacity(limit + 1)
+    /// Distinct (type, content hash) pairs of rows that can own a thumbnail.
+    func fetchThumbnailOwners() throws -> [(type: ClipboardItemType, contentHash: String)] {
+        let stmt = try prepare(
+            "SELECT DISTINCT type, content_hash FROM clipboard_items WHERE type IN ('image', 'file')"
+        )
+        var owners: [(type: ClipboardItemType, contentHash: String)] = []
         while try stmt.step() {
-            items.append(try parseStoredItemSummary(from: stmt))
+            guard let typeString = stmt.columnText(0),
+                  let type = ClipboardItemType(rawValue: typeString),
+                  let contentHash = stmt.columnText(1) else { continue }
+            owners.append((type: type, contentHash: contentHash))
         }
-
-        let hasMore = items.count > limit
-        if hasMore {
-            items = Array(items.prefix(limit))
-        }
-
-        let total = hasMore ? -1 : offset + items.count
-        return (items, total, hasMore)
-    }
-
-    func searchWithFTS(
-        ftsQuery: String,
-        appFilter: String?,
-        typeFilter: ClipboardItemType?,
-        typeFilters: [ClipboardItemType]?,
-        limit: Int,
-        offset: Int
-    ) throws -> (items: [ClipboardStoredItem], total: Int, hasMore: Bool) {
-        // Step 1: rowids from FTS
-        let ftsSQL = """
-            SELECT rowid FROM clipboard_fts
-            WHERE clipboard_fts MATCH ?
-            ORDER BY bm25(clipboard_fts)
-            LIMIT ? OFFSET ?
-        """
-        let ftsStmt = try prepare(ftsSQL)
-        try ftsStmt.bindText(ftsQuery, at: 1)
-        try ftsStmt.bindInt(limit + 1, at: 2)
-        try ftsStmt.bindInt(offset, at: 3)
-
-        var rowids: [Int64] = []
-        rowids.reserveCapacity(limit + 1)
-        while try ftsStmt.step() {
-            rowids.append(ftsStmt.columnInt64(0))
-        }
-
-        let hasMore = rowids.count > limit
-        if hasMore {
-            rowids.removeLast()
-        }
-
-        if rowids.isEmpty {
-            return ([], 0, false)
-        }
-
-        // Step 2: fetch from main table (apply filters)
-        let placeholders = rowids.map { _ in "?" }.joined(separator: ",")
-        var mainSQL = """
-            SELECT id, type, content_hash, plain_text, note, app_bundle_id, created_at, last_used_at,
-                   use_count, is_pinned, size_bytes, storage_ref, file_size_bytes
-            FROM clipboard_items
-            WHERE rowid IN (\(placeholders))
-        """
-
-        var filterParams: [String] = []
-        if let appFilter {
-            mainSQL += " AND app_bundle_id = ?"
-            filterParams.append(appFilter)
-        }
-
-        if let typeFilters, !typeFilters.isEmpty {
-            let placeholders = typeFilters.map { _ in "?" }.joined(separator: ",")
-            mainSQL += " AND type IN (\(placeholders))"
-            filterParams.append(contentsOf: typeFilters.map(\.rawValue))
-        } else if let typeFilter {
-            mainSQL += " AND type = ?"
-            filterParams.append(typeFilter.rawValue)
-        }
-
-        let orderCases = rowids.enumerated().map { "WHEN rowid = \($0.element) THEN \($0.offset)" }.joined(separator: " ")
-        mainSQL += " ORDER BY is_pinned DESC, CASE \(orderCases) END"
-
-        let mainStmt = try prepare(mainSQL)
-
-        var bindIndex: Int32 = 1
-        for rowid in rowids {
-            try mainStmt.bindInt64(rowid, at: bindIndex)
-            bindIndex += 1
-        }
-
-        for param in filterParams {
-            try mainStmt.bindText(param, at: bindIndex)
-            bindIndex += 1
-        }
-
-        var items: [ClipboardStoredItem] = []
-        items.reserveCapacity(rowids.count)
-        while try mainStmt.step() {
-            items.append(try parseStoredItemSummary(from: mainStmt))
-        }
-
-        let total = hasMore ? -1 : offset + items.count
-        return (items, total, hasMore)
-    }
-
-    func ftsPrefilterIDs(ftsQuery: String, limit: Int) throws -> [UUID] {
-        let sql = """
-            SELECT clipboard_items.id
-            FROM clipboard_fts
-            JOIN clipboard_items ON clipboard_items.rowid = clipboard_fts.rowid
-            WHERE clipboard_fts MATCH ?
-            ORDER BY bm25(clipboard_fts)
-            LIMIT ?
-        """
-        let stmt = try prepare(sql)
-        try stmt.bindText(ftsQuery, at: 1)
-        try stmt.bindInt(limit, at: 2)
-
-        var ids: [UUID] = []
-        ids.reserveCapacity(limit)
-        while try stmt.step() {
-            guard let idString = stmt.columnText(0),
-                  let id = UUID(uuidString: idString) else { continue }
-            ids.append(id)
-        }
-        return ids
+        return owners
     }
 
     func fetchExternalRefFilenames() throws -> Set<String> {
@@ -1203,7 +1003,7 @@ actor SQLiteClipboardRepository {
                 deletedItemIDs.append(contentsOf: committed.map(\.id))
                 deletedStorageRefs.append(contentsOf: committed.compactMap(\.storageRef))
             }
-            return !deletedItemIDs.isEmpty
+            return deletedItemIDs.isEmpty ? nil : .deleted(deletedItemIDs)
         }
 
         return DeleteCommitResult(
@@ -1217,6 +1017,10 @@ actor SQLiteClipboardRepository {
         connection?.walCheckpointTruncate()
     }
 
+    func releaseMemory() {
+        connection?.releaseMemory()
+    }
+
     // MARK: - Internals
 
     private static func openFlags(for path: String) -> Int32 {
@@ -1227,37 +1031,37 @@ actor SQLiteClipboardRepository {
         return flags
     }
 
-    private func bumpMutationSeq() throws {
-        try execute("UPDATE scopy_meta SET mutation_seq = mutation_seq + 1 WHERE id = 1")
-    }
-
-    private func performWriteTransaction(_ body: () throws -> Void) throws {
-        try execute("BEGIN IMMEDIATE TRANSACTION")
-        do {
-            try body()
-            try bumpMutationSeq()
-            try execute("COMMIT")
-        } catch {
-            do {
-                try execute("ROLLBACK")
-            } catch {
-                try recoverDatabase()
-            }
-            throw error
+    private func bumpMutationSeq() throws -> Int64 {
+        let stmt = try prepare("UPDATE scopy_meta SET mutation_seq = mutation_seq + 1 WHERE id = 1 RETURNING mutation_seq")
+        guard try stmt.step() else {
+            throw RepositoryError.queryFailed("scopy_meta row is missing")
         }
+        let mutationSeq = stmt.columnInt64(0)
+        _ = try stmt.step()
+        return mutationSeq
     }
 
+    /// Commits `body` and records the change it reports in the commit journal, together with the
+    /// commit's `mutation_seq`, before any other repository work can run.
+    private func performWriteTransaction(_ body: () throws -> StorageCommittedChange) throws {
+        _ = try performConditionalWriteTransaction { try body() }
+    }
+
+    /// `body` returns nil when it wrote nothing; such a transaction advances no sequence number.
+    @discardableResult
     private func performConditionalWriteTransaction(
-        _ body: () throws -> Bool
+        _ body: () throws -> StorageCommittedChange?
     ) throws -> Bool {
         try execute("BEGIN IMMEDIATE TRANSACTION")
         do {
-            let didWrite = try body()
-            if didWrite {
-                try bumpMutationSeq()
+            guard let change = try body() else {
+                try execute("COMMIT")
+                return false
             }
+            let mutationSeq = try bumpMutationSeq()
             try execute("COMMIT")
-            return didWrite
+            commitJournal.append(mutationSeq: mutationSeq, change: Self.journalChange(change))
+            return true
         } catch {
             do {
                 try execute("ROLLBACK")
@@ -1366,7 +1170,7 @@ actor SQLiteClipboardRepository {
     ) throws -> ClipboardStoredItem? {
         var updatedItem: ClipboardStoredItem?
         _ = try performConditionalWriteTransaction {
-            guard let current = try fetchItemByID(id) else { return false }
+            guard let current = try fetchItemByID(id) else { return nil }
 
             switch update {
             case .note(let note):
@@ -1377,8 +1181,8 @@ actor SQLiteClipboardRepository {
                     _ = try stmt.step()
                 }
             case .fileSizeBytes(let expected, let fileSizeBytes):
-                guard Self.hasSamePayload(current, as: expected) else { return false }
-                guard current.fileSizeBytes != fileSizeBytes else { return false }
+                guard Self.hasSamePayload(current, as: expected) else { return nil }
+                guard current.fileSizeBytes != fileSizeBytes else { return nil }
                 do {
                     let stmt = try prepare("UPDATE clipboard_items SET file_size_bytes = ? WHERE id = ?")
                     if let fileSizeBytes {
@@ -1392,9 +1196,30 @@ actor SQLiteClipboardRepository {
             }
 
             updatedItem = try fetchItemByID(id)
-            return updatedItem != nil
+            return updatedItem.map(StorageCommittedChange.upserted)
         }
         return updatedItem
+    }
+
+    /// Journal entries never hold payload bytes.
+    private static func journalChange(_ change: StorageCommittedChange) -> StorageCommittedChange {
+        guard case .upserted(let item) = change, item.rawData != nil else { return change }
+        return .upserted(ClipboardStoredItem(
+            id: item.id,
+            type: item.type,
+            contentHash: item.contentHash,
+            plainText: item.plainText,
+            note: item.note,
+            appBundleID: item.appBundleID,
+            createdAt: item.createdAt,
+            lastUsedAt: item.lastUsedAt,
+            useCount: item.useCount,
+            isPinned: item.isPinned,
+            sizeBytes: item.sizeBytes,
+            fileSizeBytes: item.fileSizeBytes,
+            storageRef: item.storageRef,
+            rawData: nil
+        ))
     }
 
     private static func hasSamePayload(
@@ -1468,22 +1293,15 @@ actor SQLiteClipboardRepository {
         return candidates
     }
 
+    // SQLite failures propagate as `SQLiteConnectionError`, which carries the extended result code.
     private func execute(_ sql: String) throws {
         guard let connection else { throw RepositoryError.databaseNotOpen }
-        do {
-            try connection.execute(sql)
-        } catch {
-            throw RepositoryError.queryFailed(error.localizedDescription)
-        }
+        try connection.execute(sql)
     }
 
     private func prepare(_ sql: String) throws -> SQLiteStatement {
         guard let connection else { throw RepositoryError.databaseNotOpen }
-        do {
-            return try connection.prepare(sql)
-        } catch {
-            throw RepositoryError.queryFailed(error.localizedDescription)
-        }
+        return try connection.prepare(sql)
     }
 
     private func verifySchema(_ connection: SQLiteConnection) throws {

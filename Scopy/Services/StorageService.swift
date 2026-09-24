@@ -97,8 +97,11 @@ private let sharedExternalFileReservations = ExternalFileReservationRegistry()
 
 /// StorageService - 数据持久化服务
 /// 符合 v0.md 第2节：分级存储（小内容SQLite内联，大内容外部文件）
-@MainActor
-public final class StorageService {
+///
+/// An actor so storage work and its file-system calls stay off the main thread. Pure forwards
+/// to the repository are `nonisolated`, so they cost a single hop; the external-payload
+/// protection state and test interlocks stay isolated to this actor.
+public actor StorageService {
     // MARK: - Types
 
     enum StorageError: Error, LocalizedError {
@@ -198,15 +201,16 @@ public final class StorageService {
         })
     }
 
-    /// Default cleanup settings (v0.md 2.1)
-    public struct CleanupSettings {
-        public var maxItems: Int = 10_000
-        public var maxDaysAge: Int? = nil // nil = unlimited
-        public var maxSmallStorageMB: Int = 200
-        public var maxLargeStorageMB: Int = 800
-        public var cleanupImagesOnly: Bool = false
-
-        public init() {}
+    /// Retention limits for one cleanup run; callers build it from the current settings.
+    struct CleanupPolicy: Sendable, Equatable {
+        var maxItems: Int = 10_000
+        /// Limit on `total_size_bytes`, which counts inline and external payload bytes.
+        var maxContentBytes: Int = 200 * 1024 * 1024
+        /// Limit on external payload bytes.
+        var maxExternalBytes: Int = 800 * 1024 * 1024
+        var imagesOnly: Bool = false
+        /// `nil` keeps items regardless of age.
+        var maxAgeDays: Int?
     }
 
     public struct CleanupResult: Sendable, Equatable {
@@ -262,21 +266,13 @@ public final class StorageService {
     private let thumbnailCachePath: String
     private let fileOps: StorageFileOps
 
-    /// Exposed as immutable values so non-`@MainActor` contexts can safely validate/read paths without capturing `StorageService`.
+    /// Immutable paths readable without hopping onto the actor.
     nonisolated let externalStorageDirectoryPath: String
     nonisolated let thumbnailCacheDirectoryPath: String
     nonisolated let ingestSpoolDirectoryPath: String
 
-    let repository: SQLiteClipboardRepository
+    nonisolated let repository: SQLiteClipboardRepository
 
-    public var cleanupSettings = CleanupSettings()
-
-    /// v0.10.8: 外部存储大小缓存（避免重复遍历文件系统）
-    private var cachedExternalSize: (size: Int, timestamp: Date)?
-    private let externalSizeCacheTTL: TimeInterval = 180  // 延长缓存，降低频繁遍历
-
-    /// v0.22: 保护 cachedExternalSize 的锁，防止后台线程和主线程之间的数据竞争
-    private let externalSizeCacheLock = NSLock()
     private var protectedExternalFilenameRefCounts: [String: Int] = [:]
     private var externalPayloadCommitGeneration: UInt64 = 0
     private var externalImageSourceLeaseReservations: [
@@ -288,7 +284,10 @@ public final class StorageService {
     private var cleanupInterlock: (@Sendable (CleanupInterlockPoint) async -> Void)?
 
     /// 数据库文件路径（用于设置窗口显示）
-    public var databaseFilePath: String { dbPath }
+    public nonisolated var databaseFilePath: String { dbPath }
+
+    /// Every committed write, in commit order, for the search engine to apply.
+    nonisolated var commitJournal: StorageCommitJournal { repository.commitJournal }
 
     // MARK: - Initialization
 
@@ -344,7 +343,7 @@ public final class StorageService {
         cleanupInterlock = interlock
     }
 
-    private static func resolveRootDirectory(databasePath: String?, storageRootURL: URL?) -> URL {
+    nonisolated static func resolveRootDirectory(databasePath: String?, storageRootURL: URL?) -> URL {
         if let storageRootURL { return storageRootURL }
 
         if let databasePath, !databasePath.isEmpty, !isInMemoryDatabasePath(databasePath) {
@@ -367,7 +366,7 @@ public final class StorageService {
         return FileManager.default.temporaryDirectory.appendingPathComponent("Scopy", isDirectory: true)
     }
 
-    private static func isRunningUnderTests() -> Bool {
+    nonisolated private static func isRunningUnderTests() -> Bool {
         let env = ProcessInfo.processInfo.environment
         if env["XCTestConfigurationFilePath"] != nil
             || env["XCTestBundlePath"] != nil
@@ -381,19 +380,16 @@ public final class StorageService {
         return NSClassFromString("XCTestCase") != nil
     }
 
-    private static func isInMemoryDatabasePath(_ databasePath: String) -> Bool {
+    nonisolated private static func isInMemoryDatabasePath(_ databasePath: String) -> Bool {
         if databasePath == ":memory:" { return true }
         if databasePath.hasPrefix("file::memory:") { return true }
         if databasePath.contains("mode=memory") { return true }
         return false
     }
 
-    private static let testRunIdentifier: String = {
-        ProcessInfo.processInfo.environment["SCOPY_TEST_RUN_ID"]
-            ?? String(ProcessInfo.processInfo.processIdentifier)
-    }()
+    nonisolated private static let testRunIdentifier = String(ProcessInfo.processInfo.processIdentifier)
 
-    private static func resolveTestRootDirectory(databasePath: String?) -> URL {
+    nonisolated private static func resolveTestRootDirectory(databasePath: String?) -> URL {
         if let databasePath, !databasePath.isEmpty, !isInMemoryDatabasePath(databasePath) {
             return URL(fileURLWithPath: databasePath).deletingLastPathComponent()
         }
@@ -404,7 +400,7 @@ public final class StorageService {
         return base.appendingPathComponent(UUID().uuidString, isDirectory: true)
     }
 
-    private static func resolveEphemeralRootDirectory() -> URL {
+    nonisolated private static func resolveEphemeralRootDirectory() -> URL {
         FileManager.default.temporaryDirectory
             .appendingPathComponent("ScopyTemp", isDirectory: true)
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -428,31 +424,16 @@ public final class StorageService {
     // MARK: - Database Lifecycle
 
     /// v0.11: 修复半打开状态问题 - 使用临时变量，失败时确保清理
-    public func open() async throws {
+    public nonisolated func open() async throws {
         try await repository.open()
     }
 
-    /// v0.11: 执行 WAL 检查点（定期调用以控制 WAL 文件大小）
-    public func performWALCheckpoint() async {
-        await repository.walCheckpointPassive()
-    }
-
     /// v0.20: 关闭前执行 WAL 检查点，确保数据完整写入
-    public func close() async {
+    public nonisolated func close() async {
         await repository.close()
     }
 
     // MARK: - CRUD Operations
-
-    /// Insert or update item (handles deduplication per v0.md 3.2)
-    /// v0.29: 大内容外部写入后台化，避免阻塞主线程
-    public func upsertItem(_ content: ClipboardMonitor.ClipboardContent) async throws -> StoredItem {
-        let outcome = try await upsertItemWithOutcome(content)
-        guard let item = outcome.item else {
-            throw StorageError.queryFailed("Previously applied ingest item no longer exists")
-        }
-        return item
-    }
 
     func upsertItemWithOutcome(_ content: ClipboardMonitor.ClipboardContent) async throws -> UpsertOutcome {
         if let ingestID = content.ingestID {
@@ -517,7 +498,11 @@ public final class StorageService {
                 inlineData = nil
             case .data(let data):
                 if content.sizeBytes >= Self.externalStorageThreshold {
-                    let path = makeExternalPath(id: id, type: content.type)
+                    let path = makeExternalPath(
+                        id: id,
+                        type: content.type,
+                        imageExtension: ImageFileExtension.sniff(data)
+                    )
                     storageRef = path
                     let reservationKey = Self.externalReservationKey(forPath: path)
                     guard let reservation = await sharedExternalFileReservations.acquire(
@@ -541,7 +526,11 @@ public final class StorageService {
                 }
             case .file(let url):
                 if content.sizeBytes >= Self.externalStorageThreshold {
-                    let path = makeExternalPath(id: id, type: content.type)
+                    let path = makeExternalPath(
+                        id: id,
+                        type: content.type,
+                        imageExtension: ImageFileExtension.sniff(fileAt: url)
+                    )
                     storageRef = path
                     let reservationKey = Self.externalReservationKey(forPath: path)
                     guard let reservation = await sharedExternalFileReservations.acquire(
@@ -714,41 +703,37 @@ public final class StorageService {
         }
     }
 
-    func removeIngestReceipt(_ ingestID: UUID) async throws {
+    nonisolated func removeIngestReceipt(_ ingestID: UUID) async throws {
         try await repository.removeIngestReceipt(ingestID)
     }
 
-    public func findByHash(_ hash: String) async throws -> StoredItem? {
-        try await repository.fetchItemByHash(hash)
-    }
-
-    public func findByID(_ id: UUID) async throws -> StoredItem? {
+    public nonisolated func findByID(_ id: UUID) async throws -> StoredItem? {
         try await repository.fetchItemByID(id)
     }
 
     /// Fetch recent items with pagination (v0.md 2.2)
     /// v0.13: 预分配数组容量，避免多次重新分配
-    public func fetchRecent(limit: Int, offset: Int) async throws -> [StoredItem] {
+    public nonisolated func fetchRecent(limit: Int, offset: Int) async throws -> [StoredItem] {
         try await repository.fetchRecent(limit: limit, offset: offset)
     }
 
-    public func fetchPinned() async throws -> [StoredItem] {
+    public nonisolated func fetchPinned() async throws -> [StoredItem] {
         try await repository.fetchPinned()
     }
 
-    public func fetchRecentUnpinned(limit: Int, offset: Int) async throws -> [StoredItem] {
+    public nonisolated func fetchRecentUnpinned(limit: Int, offset: Int) async throws -> [StoredItem] {
         try await repository.fetchRecentUnpinned(limit: limit, offset: offset)
     }
 
-    func incrementUsage(id: UUID, at timestamp: Date) async throws -> StoredItem? {
+    nonisolated func incrementUsage(id: UUID, at timestamp: Date) async throws -> StoredItem? {
         try await repository.incrementUsageReturningCurrent(id: id, lastUsedAt: timestamp)
     }
 
-    func updateNote(id: UUID, note: String?) async throws -> StoredItem? {
+    nonisolated func updateNote(id: UUID, note: String?) async throws -> StoredItem? {
         try await repository.updateItemNoteReturningItem(id: id, note: note)
     }
 
-    func updateFileSizeBytes(
+    nonisolated func updateFileSizeBytes(
         expected: StoredItem,
         fileSizeBytes: Int?
     ) async throws -> StoredItem? {
@@ -758,7 +743,7 @@ public final class StorageService {
         )
     }
 
-    func updateItemPayload(
+    nonisolated func updateItemPayload(
         id: UUID,
         contentHash: String,
         sizeBytes: Int,
@@ -776,7 +761,7 @@ public final class StorageService {
 
     /// Commits an asynchronously transformed payload only while the persisted row still matches
     /// the transform's input snapshot. Returns `nil` for deletion or same-ID replacement.
-    func compareAndSwapItemPayload(
+    nonisolated func compareAndSwapItemPayload(
         expected: StoredItem,
         contentHash: String,
         sizeBytes: Int,
@@ -836,7 +821,6 @@ public final class StorageService {
                 return nil
             }
 
-            invalidateExternalSizeCache()
             return committedItem
         } catch {
             endProtectingExternalFilename(finalFilename)
@@ -1112,7 +1096,6 @@ public final class StorageService {
         // Delete files off-main with bounded concurrency to avoid UI stalls and I/O storms.
         let fileURLs = validatedExternalFileURLs(from: refs, logContext: "clearAll")
         guard !fileURLs.isEmpty else {
-            invalidateExternalSizeCache()
             return
         }
         let remover = fileOps.removeFile
@@ -1124,7 +1107,6 @@ public final class StorageService {
                     removeFile: remover
                 )
         }.value
-        invalidateExternalSizeCache()
     }
 
     private func validatedExternalFileURLs(from storageRefs: [String], logContext: StaticString) -> [URL] {
@@ -1152,17 +1134,17 @@ public final class StorageService {
         return urls
     }
 
-    public func setPin(_ id: UUID, pinned: Bool) async throws {
+    public nonisolated func setPin(_ id: UUID, pinned: Bool) async throws {
         try await repository.updatePin(id: id, pinned: pinned)
     }
 
     // MARK: - Statistics
 
-    public func getItemCount() async throws -> Int {
+    public nonisolated func getItemCount() async throws -> Int {
         try await repository.getItemCount()
     }
 
-    public func getTotalSize() async throws -> Int {
+    public nonisolated func getTotalSize() async throws -> Int {
         try await repository.getTotalSize()
     }
 
@@ -1213,44 +1195,12 @@ public final class StorageService {
         guard !updates.isEmpty else { return 0 }
         await externalSizeSyncInterlock?(.afterStatBeforeCommit)
         let updatedCount = try await repository.updateItemSizeBytesBatchInTransaction(updates: updates)
-        if updatedCount > 0 {
-            invalidateExternalSizeCache()
-        }
         return updatedCount
     }
 
-    /// v0.10.8: 使用缓存避免重复遍历文件系统
-    /// v0.22: 使用锁保护缓存访问，防止数据竞争
-    public func getExternalStorageSize() async throws -> Int {
-        // 检查缓存是否有效（加锁读取）
-        if let cached = externalSizeCacheLock.withLock({ cachedExternalSize }),
-           Date().timeIntervalSince(cached.timestamp) < externalSizeCacheTTL {
-            return cached.size
-        }
-
-        if PerfFeatureFlags.externalSizeMetaFastPathEnabled {
-            do {
-                let size = try await repository.getExternalSize()
-                externalSizeCacheLock.withLock {
-                    cachedExternalSize = (size, Date())
-                }
-                return size
-            } catch {
-                ScopyLog.storage.warning(
-                    "Failed to read external_size_bytes from meta, fallback to directory scan: \(error.localizedDescription, privacy: .private)"
-                )
-            }
-        }
-
-        // 计算实际大小（后台计算，避免阻塞主线程）
-        let path = externalStoragePath
-        let size = try await Task.detached(priority: .utility) {
-            try Self.calculateDirectorySize(at: path)
-        }.value
-        externalSizeCacheLock.withLock {
-            cachedExternalSize = (size, Date())
-        }
-        return size
+    /// External payload bytes as maintained by triggers in `scopy_meta` (O(1)).
+    public nonisolated func getExternalStorageSize() async throws -> Int {
+        try await repository.getExternalSize()
     }
 
     /// 静态目录大小计算，便于后台线程使用
@@ -1274,16 +1224,8 @@ public final class StorageService {
         return totalSize
     }
 
-    /// v0.10.8: 使外部存储大小缓存失效
-    /// v0.22: 使用锁保护缓存访问，防止数据竞争
-    private func invalidateExternalSizeCache() {
-        externalSizeCacheLock.withLock {
-            cachedExternalSize = nil
-        }
-    }
-
     /// 获取数据库文件的实际磁盘大小（包含 WAL 和 SHM 文件）
-    func getDatabaseFileSize() -> Int {
+    nonisolated func getDatabaseFileSize() -> Int {
         let fm = FileManager.default
         var total = 0
         // SQLite WAL 模式会创建 .db-wal 和 .db-shm 文件
@@ -1299,7 +1241,7 @@ public final class StorageService {
 
     /// v0.15.2: 获取外部存储大小（强制刷新，不使用缓存）
     /// 用于 Settings 页面显示准确的存储统计（后台线程计算，避免阻塞主线程）
-    func getExternalStorageSizeForStats() async throws -> Int {
+    nonisolated func getExternalStorageSizeForStats() async throws -> Int {
         let path = externalStoragePath
         return try await withCheckedThrowingContinuation { continuation in
             DispatchQueue.global(qos: .utility).async {
@@ -1314,7 +1256,7 @@ public final class StorageService {
     }
 
     /// v0.15.2: 获取缩略图缓存大小
-    func getThumbnailCacheSize() async -> Int {
+    nonisolated func getThumbnailCacheSize() async -> Int {
         let path = thumbnailCachePath
         return await withCheckedContinuation { continuation in
             DispatchQueue.global(qos: .utility).async {
@@ -1341,44 +1283,37 @@ public final class StorageService {
     }
 
     /// 获取最近使用的 app 列表（用于过滤）
-    public func getRecentApps(limit: Int) async throws -> [String] {
+    public nonisolated func getRecentApps(limit: Int) async throws -> [String] {
         try await repository.fetchRecentApps(limit: limit)
     }
 
     // MARK: - Cleanup (v0.md 2.3)
 
-    public enum CleanupMode {
+    public enum CleanupMode: Sendable {
         case light   // 热路径：跳过 vacuum / orphan 扫描
         case full    // 低频：完整清理
-    }
-
-    @discardableResult
-    public func performCleanup(mode: CleanupMode = .full) async throws -> CleanupResult {
-        try await performCleanup(mode: mode, onCommitted: nil)
     }
 
     /// `onCommitted` is invoked after every independently committed delete phase. This prevents a
     /// later policy/read failure from hiding IDs that an earlier phase already removed from SQLite.
     @discardableResult
     func performCleanup(
-        mode: CleanupMode,
-        onCommitted: CleanupCommitHandler?
+        mode: CleanupMode = .full,
+        policy: CleanupPolicy,
+        onCommitted: CleanupCommitHandler? = nil
     ) async throws -> CleanupResult {
-        let cleanupImagesOnly = cleanupSettings.cleanupImagesOnly
+        let cleanupImagesOnly = policy.imagesOnly
         let modeText = (mode == .full) ? "full" : "light"
-        let maxItems = cleanupSettings.maxItems
-        let maxTotalMB = cleanupSettings.maxSmallStorageMB
-        let maxExternalMB = cleanupSettings.maxLargeStorageMB
-        let maxLargeBytes = maxExternalMB * 1024 * 1024
+        let maxItems = policy.maxItems
+        let maxLargeBytes = policy.maxExternalBytes
         ScopyLog.storage.info(
-            "Cleanup start: mode=\(modeText, privacy: .public) imagesOnly=\(cleanupImagesOnly, privacy: .public) maxItems=\(maxItems, privacy: .public) maxTotalMB=\(maxTotalMB, privacy: .public) maxExternalMB=\(maxExternalMB, privacy: .public)"
+            "Cleanup start: mode=\(modeText, privacy: .public) imagesOnly=\(cleanupImagesOnly, privacy: .public) maxItems=\(maxItems, privacy: .public) maxContentBytes=\(policy.maxContentBytes, privacy: .public) maxExternalBytes=\(maxLargeBytes, privacy: .public)"
         )
         var aggregateResult = CleanupResult.empty
 
         // 0. Composite path (count + external): reduce duplicated DB scans and delete passes.
         var currentCount = try await getItemCount()
-        if PerfFeatureFlags.cleanupCompositePlanEnabled,
-           currentCount > maxItems {
+        if currentCount > maxItems {
             let currentExternalSize = try await getExternalStorageSize()
             if currentExternalSize > maxLargeBytes {
                 let compositeResult = try await cleanupCountAndExternalIfNeeded(
@@ -1420,7 +1355,7 @@ public final class StorageService {
         }
 
         // 2. By age (if configured)
-        if let maxDays = cleanupSettings.maxDaysAge {
+        if let maxDays = policy.maxAgeDays {
             ScopyLog.storage.info(
                 "Cleanup by age: maxDays=\(maxDays, privacy: .public) imagesOnly=\(cleanupImagesOnly, privacy: .public)"
             )
@@ -1441,9 +1376,9 @@ public final class StorageService {
             }
         }
 
-        // 3. By space (small content / database)
+        // 3. By content bytes (inline and external payloads; `total_size_bytes`)
         let dbSize = try await getTotalSize()
-        let maxSmallBytes = cleanupSettings.maxSmallStorageMB * 1024 * 1024
+        let maxSmallBytes = policy.maxContentBytes
         if dbSize > maxSmallBytes {
             ScopyLog.storage.info(
                 "Cleanup by size: currentBytes=\(dbSize, privacy: .public) maxBytes=\(maxSmallBytes, privacy: .public) imagesOnly=\(cleanupImagesOnly, privacy: .public)"
@@ -1502,7 +1437,50 @@ public final class StorageService {
 
         // 6. v0.15: Clean up orphaned files (files not referenced in database)
         try await cleanupOrphanedFiles()
+        try await cleanupOrphanedThumbnails()
         return aggregateResult
+    }
+
+    /// Thumbnails are named by content hash and outlive their rows, so a full cleanup removes the
+    /// ones no image or file row references. Only Scopy-generated names are considered. Racing a
+    /// generation for a new row at worst deletes a cache file that is regenerated on demand.
+    private func cleanupOrphanedThumbnails() async throws {
+        let referenced = Set(try await repository.fetchThumbnailOwners().map { owner in
+            owner.type == .file
+                ? Self.fileThumbnailFilename(for: owner.contentHash)
+                : "\(owner.contentHash).png"
+        })
+        let directory = thumbnailCachePath
+        let removed = await Task.detached(priority: .utility) {
+            Self.removeUnreferencedThumbnails(in: directory, referenced: referenced)
+        }.value
+        if removed > 0 {
+            ScopyLog.storage.info("Removed \(removed, privacy: .public) unreferenced thumbnails")
+        }
+    }
+
+    nonisolated private static func removeUnreferencedThumbnails(in directory: String, referenced: Set<String>) -> Int {
+        guard let names = try? FileManager.default.contentsOfDirectory(atPath: directory) else { return 0 }
+        var removed = 0
+        for name in names where isGeneratedThumbnailName(name) && !referenced.contains(name) {
+            if (try? FileManager.default.removeItem(atPath: (directory as NSString).appendingPathComponent(name))) != nil {
+                removed += 1
+            }
+        }
+        return removed
+    }
+
+    /// `<sha256>.png` for images; `file_<hash>.png` for files, where current file hashes carry a
+    /// `file:` namespace and older ones are bare SHA-256.
+    nonisolated private static func isGeneratedThumbnailName(_ name: String) -> Bool {
+        guard name.hasSuffix(".png") else { return false }
+        var hash = name.dropLast(4)
+        if hash.hasPrefix("file_file:") {
+            hash = hash.dropFirst(10)
+        } else if hash.hasPrefix("file_") {
+            hash = hash.dropFirst(5)
+        }
+        return hash.utf8.count == 64 && hash.utf8.allSatisfy { ($0 >= 48 && $0 <= 57) || ($0 >= 97 && $0 <= 102) }
     }
 
     private func getWALFileSize() -> Int {
@@ -1568,9 +1546,6 @@ public final class StorageService {
                 removeFile: remover
             )
         }.value
-
-        // 4. Invalidate cache after cleanup
-        invalidateExternalSizeCache()
     }
 
     private func shouldRefuseOrphanCleanupForMismatchedDatabaseRoot() -> Bool {
@@ -1665,8 +1640,6 @@ public final class StorageService {
         cleanupImagesOnly: Bool,
         onCommitted: CleanupCommitHandler?
     ) async throws -> CleanupResult {
-        guard PerfFeatureFlags.cleanupCompositePlanEnabled else { return .empty }
-
         let deleteCount = max(0, currentCount - maxItems)
         let excessBytes = max(0, externalSize - maxLargeBytes)
         guard deleteCount > 0 || excessBytes > 0 else { return .empty }
@@ -1693,12 +1666,6 @@ public final class StorageService {
             )
         } else {
             externalPlan = .empty
-        }
-
-        if PerfFeatureFlags.cleanupShadowCompareEnabled {
-            ScopyLog.storage.info(
-                "Cleanup shadow compare: countPlan=\(countPlan.ids.count, privacy: .public) externalPlan=\(externalPlan.ids.count, privacy: .public) estimatedFreedByCount=\(estimatedFreedByCount, privacy: .public) remainingExcess=\(remainingExcess, privacy: .public)"
-            )
         }
 
         let merged = SQLiteClipboardRepository.mergeDeletePlans([countPlan, externalPlan])
@@ -1744,7 +1711,6 @@ public final class StorageService {
         let fileURLs = validatedExternalFileURLs(from: committed.storageRefs, logContext: logContext)
         let fileSummary: FileDeletionSummary
         guard !fileURLs.isEmpty else {
-            invalidateExternalSizeCache()
             ScopyLog.storage.info(
                 "[\(logContext)] Cleanup committed: planned=\(committed.plannedCount, privacy: .public) committed=\(committed.deletedItemIDs.count, privacy: .public) skipped=\(committed.skippedCount, privacy: .public) fileCandidates=0 fileAttempts=0 fileCleanupFailures=0"
             )
@@ -1770,7 +1736,6 @@ public final class StorageService {
                 removeFile: remover
             )
         }.value
-        invalidateExternalSizeCache()
         ScopyLog.storage.info(
             "[\(logContext)] Cleanup committed: planned=\(committed.plannedCount, privacy: .public) committed=\(committed.deletedItemIDs.count, privacy: .public) skipped=\(committed.skippedCount, privacy: .public) fileCandidates=\(fileSummary.candidateCount, privacy: .public) fileAttempts=\(fileSummary.attemptedCount, privacy: .public) fileCleanupFailures=\(fileSummary.cleanupFailureCount, privacy: .public)"
         )
@@ -1867,8 +1832,6 @@ public final class StorageService {
         typeFilter: ClipboardItemType?,
         onCommitted: CleanupCommitHandler?
     ) async throws -> CleanupResult {
-        // 使缓存失效，确保获取最新大小
-        invalidateExternalSizeCache()
         let currentSize = try await getExternalStorageSize()
         if currentSize <= targetBytes { return .empty }
 
@@ -2220,10 +2183,14 @@ public final class StorageService {
         try replaceFileAtomically(from: stagedURL, to: destinationURL)
     }
 
-    private func makeExternalPath(id: UUID, type: ClipboardItemType) -> String {
+    private func makeExternalPath(
+        id: UUID,
+        type: ClipboardItemType,
+        imageExtension: @autoclosure () -> String
+    ) -> String {
         let ext: String
         switch type {
-        case .image: ext = "png"
+        case .image: ext = imageExtension()
         case .rtf: ext = "rtf"
         case .html: ext = "html"
         default: ext = "dat"
@@ -2232,10 +2199,6 @@ public final class StorageService {
         let filename = "\(id.uuidString).\(ext)"
         return (externalStoragePath as NSString).appendingPathComponent(filename)
     }
-
-    /// v0.22: 外部文件加载最大大小限制 (100MB)
-    /// 防止恶意或损坏的文件导致内存耗尽
-    nonisolated private static let maxExternalFileSize: Int = 100 * 1024 * 1024
 
     nonisolated static func validateStorageRef(_ ref: String, externalStoragePath: String) -> Bool {
         let filename = (ref as NSString).lastPathComponent
@@ -2284,20 +2247,10 @@ public final class StorageService {
             throw StorageError.fileOperationFailed("Invalid storage reference: potential path traversal")
         }
 
-        let url = URL(fileURLWithPath: path)
+        // No size cap: capture stores payloads of any size, so reads must return them too.
+        // `.mappedIfSafe` keeps large files out of anonymous memory.
         do {
-            let attrs = try FileManager.default.attributesOfItem(atPath: path)
-            if let fileSize = attrs[.size] as? Int, fileSize > maxExternalFileSize {
-                throw StorageError.fileOperationFailed("File too large: \(fileSize) bytes (max: \(maxExternalFileSize))")
-            }
-        } catch let error as StorageError {
-            throw error
-        } catch {
-            ScopyLog.storage.warning("Failed to get file attributes: \(error.localizedDescription, privacy: .private)")
-        }
-
-        do {
-            return try Data(contentsOf: url, options: [.mappedIfSafe])
+            return try Data(contentsOf: URL(fileURLWithPath: path), options: [.mappedIfSafe])
         } catch {
             throw StorageError.fileOperationFailed("Failed to read external file: \(error)")
         }
@@ -2398,12 +2351,20 @@ public final class StorageService {
     /// Notes:
     /// - This is used by image/rtf/html/file restore paths.
     /// - When `rawData` is nil (e.g. memory-optimized summaries), this falls back to reloading from DB.
-    func loadPayloadData(for item: StoredItem) async -> Data? {
+    nonisolated func loadPayloadData(for item: StoredItem) async -> Data? {
         // 1. 优先使用外部存储（大图片 >100KB）
         if let storageRef = item.storageRef {
             let allowedRoot = externalStoragePath
+            let itemID = item.id
             return await Task.detached(priority: .userInitiated) {
-                try? Self.loadExternalData(path: storageRef, externalStoragePath: allowedRoot)
+                do {
+                    return try Self.loadExternalData(path: storageRef, externalStoragePath: allowedRoot)
+                } catch {
+                    ScopyLog.storage.error(
+                        "Failed to load external payload for item \(itemID.uuidString, privacy: .public): \(error.localizedDescription, privacy: .private)"
+                    )
+                    return nil
+                }
             }.value
         }
 
@@ -2423,7 +2384,7 @@ public final class StorageService {
     }
 
     /// 清空缩略图缓存（设置变更时调用）
-    func clearThumbnailCache() async {
+    nonisolated func clearThumbnailCache() async {
         let path = thumbnailCachePath
         await Task.detached(priority: .utility) {
             let fileManager = FileManager.default

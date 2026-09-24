@@ -9,10 +9,8 @@ enum ScopyThresholds {
     /// Rationale: avoid large `Data` payloads accumulating in memory when consumers are slower.
     static let ingestSpoolBytes = externalStorageBytes
 
-    /// ClipboardMonitor: maximum concurrent background ingest tasks.
-    static let ingestMaxConcurrentTasks = 3
-
-    /// ClipboardMonitor: soft limit for queued large ingests before surfacing backlog pressure metrics.
+    /// ClipboardMonitor: capacity of the serial ingest FIFO; polling waits once it is full.
+    /// Also the backlog size at which pending envelopes are reported as a soft-limit hit.
     static let ingestMaxPendingItems = 32
 
     /// StorageService: content >= threshold will be stored in external file (not inline DB blob).

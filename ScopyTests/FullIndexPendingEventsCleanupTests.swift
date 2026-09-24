@@ -36,7 +36,7 @@ final class FullIndexPendingEventsCleanupTests: XCTestCase {
                 return
             }
 
-            let engine = SearchEngineImpl(dbPath: dbPath)
+            let engine = SearchEngineImpl(dbPath: dbPath, commitJournal: storage.commitJournal)
             search = engine
             try await engine.open()
 
@@ -45,7 +45,8 @@ final class FullIndexPendingEventsCleanupTests: XCTestCase {
             XCTAssertTrue(build.isBuilding)
 
             // Enqueue a pending event while the index is building.
-            await engine.handleUpsertedItem(item)
+            _ = try await storage.updateNote(id: item.id, note: "pending")
+            await engine.applyCommittedChanges()
             build = await engine.debugFullIndexBuildHealth()
             XCTAssertGreaterThanOrEqual(build.pendingEvents, 1)
 

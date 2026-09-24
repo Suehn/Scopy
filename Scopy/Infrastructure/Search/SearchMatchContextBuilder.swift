@@ -375,7 +375,7 @@ public enum SearchMatchContextBuilder {
         case .regex:
             normalizedQuery = request.query
         case .exact:
-            normalizedQuery = SearchPlanner.normalizedExactQuery(request.query)
+            normalizedQuery = SearchQueryNormalization.normalizedExactQuery(request.query)
         case .fuzzy, .fuzzyPlus:
             normalizedQuery = request.query.trimmingCharacters(in: .whitespacesAndNewlines)
         }
@@ -384,7 +384,7 @@ public enum SearchMatchContextBuilder {
             ? makeFuzzyTerm(normalizedQuery)
             : nil
         let fuzzyPlusTerms = request.mode == .fuzzyPlus
-            ? SearchPlanner.fuzzyPlusTokens(normalizedQuery.lowercased()).map(makeFuzzyTerm)
+            ? SearchQueryNormalization.fuzzyPlusTokens(normalizedQuery.lowercased()).map(makeFuzzyTerm)
             : []
         let regex: NSRegularExpression?
         if request.mode == .regex {
@@ -396,7 +396,7 @@ public enum SearchMatchContextBuilder {
             regex = nil
         }
         let needsUnicode61 = (request.mode == .exact && normalizedQuery.count > 2)
-            || coverage.isPrefilter
+            || coverage.isStagedRefine
         let unicode61Tokenizer: Unicode61Tokenizer?
         let exactPhrases: [[String]]
         if needsUnicode61 {
@@ -579,7 +579,7 @@ public enum SearchMatchContextBuilder {
             return MatchSet(matches: witness, occurrenceCount: 1, isTruncated: false)
         }
 
-        guard coverage.isPrefilter else { return MatchSet() }
+        guard coverage.isStagedRefine else { return MatchSet() }
         guard let tokenizer else { throw BuildError.unicode61Unavailable(SQLITE_ERROR) }
         return try ftsPhraseMatches(
             phrases: prefilterPhrases,
@@ -628,7 +628,7 @@ public enum SearchMatchContextBuilder {
             }
 
             guard !termMatches.matches.isEmpty else {
-                if coverage.isPrefilter {
+                if coverage.isStagedRefine {
                     guard let tokenizer else {
                         throw BuildError.unicode61Unavailable(SQLITE_ERROR)
                     }

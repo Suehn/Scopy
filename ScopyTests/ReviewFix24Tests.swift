@@ -26,7 +26,7 @@ final class IndexLifecycleTests: XCTestCase {
             _ = try await storage.upsertItem(content)
         }
 
-        let search = SearchEngineImpl(dbPath: dbPath)
+        let search = SearchEngineImpl(dbPath: dbPath, commitJournal: storage.commitJournal)
         try await search.open()
 
         _ = try await search.search(request: SearchRequest(query: "item", mode: .fuzzy, limit: 10, offset: 0))
@@ -39,7 +39,7 @@ final class IndexLifecycleTests: XCTestCase {
         let toDelete = try await storage.fetchRecent(limit: 16, offset: 0)
         for item in toDelete {
             try await storage.deleteItem(item.id)
-            await search.handleDeletion(id: item.id)
+            await search.applyCommittedChanges()
         }
 
         health = await search.debugFullIndexHealth()

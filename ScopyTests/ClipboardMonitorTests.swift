@@ -17,7 +17,6 @@ final class ClipboardMonitorTests: XCTestCase {
             .appendingPathComponent("scopy-clipboard-monitor-ingest-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: ingestSpoolDirectory, withIntermediateDirectories: true)
         await ClipboardIngestMetrics.shared.reset()
-        ClipboardMonitor.testingAsyncProcessingDelayNs = 0
         monitor = ClipboardMonitor(pasteboard: pasteboard, ingestSpoolDirectory: ingestSpoolDirectory)
     }
 
@@ -25,7 +24,6 @@ final class ClipboardMonitorTests: XCTestCase {
         monitor.stopMonitoring()
         monitor = nil
         pasteboard = nil
-        ClipboardMonitor.testingAsyncProcessingDelayNs = 0
         await ClipboardIngestMetrics.shared.reset()
         if let ingestSpoolDirectory {
             try? FileManager.default.removeItem(at: ingestSpoolDirectory)
@@ -89,12 +87,6 @@ final class ClipboardMonitorTests: XCTestCase {
             ClipboardMonitor.computeHashStatic(Data("abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq".utf8)),
             "248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1"
         )
-    }
-
-    func testIgnoredAppsConfiguration() {
-        let apps: Set<String> = ["com.app1", "com.app2"]
-        monitor.setIgnoredApps(apps)
-        XCTAssertEqual(monitor.ignoredApps, apps)
     }
 
     // MARK: - Clipboard Read Tests
@@ -1310,7 +1302,7 @@ final class ClipboardMonitorTests: XCTestCase {
     }
 
     func testLargeContentSurvivesPollingIntervalChange() async throws {
-        ClipboardMonitor.testingAsyncProcessingDelayNs = 300_000_000
+        monitor.ingestProcessingDelay = .milliseconds(300)
         monitor.setPollingInterval(0.1)
 
         pasteboard.clearContents()
@@ -1348,7 +1340,7 @@ final class ClipboardMonitorTests: XCTestCase {
     }
 
     func testPendingLargeContentReplaysAfterMonitorRestart() async throws {
-        ClipboardMonitor.testingAsyncProcessingDelayNs = 2_000_000_000
+        monitor.ingestProcessingDelay = .seconds(2)
         monitor.setPollingInterval(0.1)
 
         pasteboard.clearContents()
@@ -1369,7 +1361,7 @@ final class ClipboardMonitorTests: XCTestCase {
         }, message: "Pending envelope should be persisted before restart")
         monitor.stopMonitoring()
 
-        ClipboardMonitor.testingAsyncProcessingDelayNs = 0
+        monitor.ingestProcessingDelay = .zero
         let expectation = XCTestExpectation(description: "Pending envelope replayed after restart")
         let task = Task {
             for await content in monitor.contentStream where content.type == .image {
@@ -1483,6 +1475,71 @@ final class ClipboardMonitorTests: XCTestCase {
         let content = await captureClipboard()
         XCTAssertNotNil(content)
         XCTAssertTrue(content?.plainText.contains("👋") ?? false)
+    }
+
+    func testOwnWriteDuringSuspendedCaptureIsNotRecaptured() async throws {
+        monitor.setPollingInterval(5.0)
+        monitor.startMonitoring()
+        let log = collectContents()
+        defer { log.consumer?.cancel() }
+
+        let external = "External copy \(UUID())"
+        pasteboard.clearContents()
+        pasteboard.setString(external, forType: .string)
+
+        // The capture suspends while its text is processed off the main actor; Scopy writes then.
+        let capture = Task { await monitor.checkClipboard() }
+        await Task.yield()
+        try monitor.copyToClipboard(text: "Scopy paste-back \(UUID())")
+        await capture.value
+
+        await monitor.checkClipboard()
+        try await Task.sleep(nanoseconds: 200_000_000)
+
+        XCTAssertEqual(log.items.map(\.plainText), [external])
+    }
+
+    func testSlowLargeCaptureStillPrecedesLaterSmallCapture() async throws {
+        monitor.ingestProcessingDelay = .milliseconds(300)
+        monitor.setPollingInterval(5.0)
+        monitor.startMonitoring()
+        let log = collectContents()
+        defer { log.consumer?.cancel() }
+
+        let large = String(repeating: "L", count: 60 * 1024)
+        pasteboard.clearContents()
+        pasteboard.setString(large, forType: .string)
+        await monitor.checkClipboard()
+
+        pasteboard.clearContents()
+        pasteboard.setString("small", forType: .string)
+        await monitor.checkClipboard()
+
+        await assertEventually(timeout: 3.0, pollInterval: 0.05, {
+            log.items.count == 2
+        }, message: "Both captures should be delivered")
+        XCTAssertEqual(log.items.map(\.sizeBytes), [large.utf8.count, "small".utf8.count])
+    }
+
+    @MainActor
+    private final class ContentLog {
+        var items: [ClipboardMonitor.ClipboardContent] = []
+        var consumer: Task<Void, Never>?
+    }
+
+    /// Records every emitted content in order, acknowledging durable envelopes like the service.
+    private func collectContents() -> ContentLog {
+        let log = ContentLog()
+        let stream = monitor.contentStream
+        log.consumer = Task {
+            for await content in stream {
+                if let envelopeURL = content.ingestEnvelopeURL {
+                    self.acknowledgeAndCompleteEnvelope(envelopeURL)
+                }
+                log.items.append(content)
+            }
+        }
+        return log
     }
 
     /// Drive one production poll and observe its emitted content, including durable image work.

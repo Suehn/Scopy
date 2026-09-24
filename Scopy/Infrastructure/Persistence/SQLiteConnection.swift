@@ -2,22 +2,59 @@ import Foundation
 import SQLite3
 
 final class SQLiteConnection {
-    enum SQLiteConnectionError: Error, LocalizedError {
-        case openFailed(String)
-        case execFailed(String)
-        case prepareFailed(String)
-        case bindFailed(String)
-        case stepFailed(String)
+    struct SQLiteConnectionError: Error, LocalizedError {
+        enum Operation: String, Sendable {
+            case open, exec, prepare, bind, step
+        }
 
-        var errorDescription: String? {
-            switch self {
-            case .openFailed(let msg): return "SQLite open failed: \(msg)"
-            case .execFailed(let msg): return "SQLite exec failed: \(msg)"
-            case .prepareFailed(let msg): return "SQLite prepare failed: \(msg)"
-            case .bindFailed(let msg): return "SQLite bind failed: \(msg)"
-            case .stepFailed(let msg): return "SQLite step failed: \(msg)"
+        enum Category: String, Sendable {
+            case busy, full, corrupt, readonly, ioerr, constraint, interrupt, other
+        }
+
+        let operation: Operation
+        /// SQLite extended result code, e.g. 1555 for SQLITE_CONSTRAINT_PRIMARYKEY.
+        let code: Int32
+        let message: String
+
+        var category: Category {
+            switch code & 0xFF {
+            case SQLITE_BUSY, SQLITE_LOCKED: return .busy
+            case SQLITE_FULL: return .full
+            case SQLITE_CORRUPT, SQLITE_NOTADB: return .corrupt
+            case SQLITE_READONLY: return .readonly
+            case SQLITE_IOERR: return .ioerr
+            case SQLITE_CONSTRAINT: return .constraint
+            case SQLITE_INTERRUPT: return .interrupt
+            default: return .other
             }
         }
+
+        var errorDescription: String? {
+            "SQLite \(operation.rawValue) failed (code \(code)): \(message)"
+        }
+    }
+
+    /// Builds the error for a failed call and records it. The code and category are public so
+    /// release logs can tell BUSY/FULL/CORRUPT apart; the message may echo SQL or data and stays
+    /// private. Interrupts are the search engine's normal cancellation path and are not logged.
+    static func failure(
+        _ operation: SQLiteConnectionError.Operation,
+        status: Int32,
+        db: OpaquePointer?,
+        message: String? = nil
+    ) -> SQLiteConnectionError {
+        let extended = db.map { sqlite3_extended_errcode($0) } ?? status
+        let code = (extended & 0xFF) == (status & 0xFF) ? extended : status
+        let message = message
+            ?? db.map { String(cString: sqlite3_errmsg($0)) }
+            ?? String(cString: sqlite3_errstr(status))
+        let error = SQLiteConnectionError(operation: operation, code: code, message: message)
+        if error.category != .interrupt {
+            ScopyLog.persistence.error(
+                "SQLite \(operation.rawValue, privacy: .public) failed code=\(code, privacy: .public) category=\(error.category.rawValue, privacy: .public) message=\(message, privacy: .private)"
+            )
+        }
+        return error
     }
 
     fileprivate static let sqliteTransient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
@@ -39,11 +76,11 @@ final class SQLiteConnection {
         var db: OpaquePointer?
         let rc = sqlite3_open_v2(path, &db, flags, nil)
         guard rc == SQLITE_OK, let db else {
-            let message = db.map { String(cString: sqlite3_errmsg($0)) } ?? "code=\(rc)"
+            let error = Self.failure(.open, status: rc == SQLITE_OK ? SQLITE_CANTOPEN : rc, db: db)
             if let db {
                 sqlite3_close(db)
             }
-            throw SQLiteConnectionError.openFailed(message)
+            throw error
         }
         self.handle = db
     }
@@ -58,32 +95,29 @@ final class SQLiteConnection {
         handle = nil
     }
 
-    func errorMessage() -> String {
-        guard let db = handle else { return "Database is not open" }
-        return String(cString: sqlite3_errmsg(db))
-    }
-
     func execute(_ sql: String) throws {
         guard let db = handle else {
-            throw SQLiteConnectionError.execFailed("Database is not open")
+            throw Self.failure(.exec, status: SQLITE_MISUSE, db: nil, message: "Database is not open")
         }
 
         var errMsg: UnsafeMutablePointer<CChar>?
-        if sqlite3_exec(db, sql, nil, nil, &errMsg) != SQLITE_OK {
-            let message = errMsg.map { String(cString: $0) } ?? errorMessage()
+        let rc = sqlite3_exec(db, sql, nil, nil, &errMsg)
+        if rc != SQLITE_OK {
+            let message = errMsg.map { String(cString: $0) }
             sqlite3_free(errMsg)
-            throw SQLiteConnectionError.execFailed(message)
+            throw Self.failure(.exec, status: rc, db: db, message: message)
         }
     }
 
     func prepare(_ sql: String) throws -> SQLiteStatement {
         guard let db = handle else {
-            throw SQLiteConnectionError.prepareFailed("Database is not open")
+            throw Self.failure(.prepare, status: SQLITE_MISUSE, db: nil, message: "Database is not open")
         }
 
         var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK, let stmt else {
-            throw SQLiteConnectionError.prepareFailed(errorMessage())
+        let rc = sqlite3_prepare_v2(db, sql, -1, &stmt, nil)
+        guard rc == SQLITE_OK, let stmt else {
+            throw Self.failure(.prepare, status: rc == SQLITE_OK ? SQLITE_MISUSE : rc, db: db)
         }
 
         return SQLiteStatement(connection: self, statement: stmt)
@@ -99,6 +133,12 @@ final class SQLiteConnection {
     func walCheckpointTruncate() {
         guard let db = handle else { return }
         sqlite3_wal_checkpoint_v2(db, nil, SQLITE_CHECKPOINT_TRUNCATE, nil, nil)
+    }
+
+    /// Frees the page cache and other heap memory this connection can release.
+    func releaseMemory() {
+        guard let db = handle else { return }
+        sqlite3_db_release_memory(db)
     }
 
     func changeCount() -> Int {
@@ -126,9 +166,8 @@ final class SQLiteStatement {
     }
 
     func bindNull(_ index: Int32) throws {
-        guard sqlite3_bind_null(statement, index) == SQLITE_OK else {
-            throw SQLiteConnection.SQLiteConnectionError.bindFailed(connection.errorMessage())
-        }
+        let rc = sqlite3_bind_null(statement, index)
+        guard rc == SQLITE_OK else { throw failure(.bind, status: rc) }
     }
 
     func bindText(_ value: String?, at index: Int32) throws {
@@ -158,27 +197,22 @@ final class SQLiteStatement {
                 )
             }
         }
-        guard status == SQLITE_OK else {
-            throw SQLiteConnection.SQLiteConnectionError.bindFailed(connection.errorMessage())
-        }
+        guard status == SQLITE_OK else { throw failure(.bind, status: status) }
     }
 
     func bindInt(_ value: Int, at index: Int32) throws {
-        guard sqlite3_bind_int64(statement, index, Int64(value)) == SQLITE_OK else {
-            throw SQLiteConnection.SQLiteConnectionError.bindFailed(connection.errorMessage())
-        }
+        let rc = sqlite3_bind_int64(statement, index, Int64(value))
+        guard rc == SQLITE_OK else { throw failure(.bind, status: rc) }
     }
 
     func bindInt64(_ value: Int64, at index: Int32) throws {
-        guard sqlite3_bind_int64(statement, index, value) == SQLITE_OK else {
-            throw SQLiteConnection.SQLiteConnectionError.bindFailed(connection.errorMessage())
-        }
+        let rc = sqlite3_bind_int64(statement, index, value)
+        guard rc == SQLITE_OK else { throw failure(.bind, status: rc) }
     }
 
     func bindDouble(_ value: Double, at index: Int32) throws {
-        guard sqlite3_bind_double(statement, index, value) == SQLITE_OK else {
-            throw SQLiteConnection.SQLiteConnectionError.bindFailed(connection.errorMessage())
-        }
+        let rc = sqlite3_bind_double(statement, index, value)
+        guard rc == SQLITE_OK else { throw failure(.bind, status: rc) }
     }
 
     func bindBlob(_ data: Data?, at index: Int32) throws {
@@ -188,9 +222,8 @@ final class SQLiteStatement {
         }
 
         let bytes = (data as NSData).bytes
-        guard sqlite3_bind_blob(statement, index, bytes, Int32(data.count), SQLiteConnection.sqliteTransient) == SQLITE_OK else {
-            throw SQLiteConnection.SQLiteConnectionError.bindFailed(connection.errorMessage())
-        }
+        let rc = sqlite3_bind_blob(statement, index, bytes, Int32(data.count), SQLiteConnection.sqliteTransient)
+        guard rc == SQLITE_OK else { throw failure(.bind, status: rc) }
     }
 
     @discardableResult
@@ -202,8 +235,15 @@ final class SQLiteStatement {
         case SQLITE_DONE:
             return false
         default:
-            throw SQLiteConnection.SQLiteConnectionError.stepFailed(connection.errorMessage())
+            throw failure(.step, status: rc)
         }
+    }
+
+    private func failure(
+        _ operation: SQLiteConnection.SQLiteConnectionError.Operation,
+        status: Int32
+    ) -> SQLiteConnection.SQLiteConnectionError {
+        SQLiteConnection.failure(operation, status: status, db: connection.handle)
     }
 
     func columnText(_ index: Int32) -> String? {

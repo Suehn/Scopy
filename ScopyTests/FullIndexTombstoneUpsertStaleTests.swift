@@ -35,7 +35,7 @@ final class FullIndexTombstoneUpsertStaleTests: XCTestCase {
                 return
             }
 
-            let engine = SearchEngineImpl(dbPath: dbPath)
+            let engine = SearchEngineImpl(dbPath: dbPath, commitJournal: storage.commitJournal)
             search = engine
             try await engine.open()
 
@@ -49,11 +49,11 @@ final class FullIndexTombstoneUpsertStaleTests: XCTestCase {
 
             // Repeated note updates should create tombstones; once past threshold, index should be marked stale and rebuilt.
             for i in 0..<64 {
-                guard let updated = try await storage.updateNote(id: target.id, note: "note \(i)") else {
+                guard try await storage.updateNote(id: target.id, note: "note \(i)") != nil else {
                     XCTFail("updateNote returned nil")
                     break
                 }
-                await engine.handleUpsertedItem(updated)
+                await engine.applyCommittedChanges()
 
                 let build = await engine.debugFullIndexBuildHealth()
                 if build.isBuilding { break }

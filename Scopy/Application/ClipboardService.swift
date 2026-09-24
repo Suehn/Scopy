@@ -655,7 +655,7 @@ private actor ClipboardItemMutationGate {
 /// Application 层门面（vNext）：统一组合 monitor/storage/search/settings，并由 actor 持有事件 continuation。
 ///
 /// 说明（Phase 4 约束）：
-/// - `ClipboardMonitor` / `StorageService` 为 `@MainActor`，因此该 actor 在内部通过 `MainActor.run {}` 或跨 MainActor 调用处理边界。
+/// - `ClipboardMonitor` 为 `@MainActor`，该 actor 通过 `MainActor.run {}` 处理边界；`StorageService` 是独立 actor，存储调用不经过主线程。
 /// - UI 仍通过 `@MainActor ClipboardServiceProtocol` 调用 `RealClipboardService`（adapter），由 adapter 转发到该 actor。
 actor ClipboardService {
     // MARK: - Types
@@ -706,20 +706,6 @@ actor ClipboardService {
         let activeProcessCount: Int
         let queuedRequestCount: Int
         let requestCapacity: Int
-    }
-
-    struct BackgroundMediaSchedulingSnapshot: Sendable, Equatable {
-        let thumbnailActiveCount: Int
-        let thumbnailPendingCount: Int
-        let thumbnailWorkerCount: Int
-        let thumbnailMaxActiveCount: Int
-        let thumbnailMaxPendingCount: Int
-        let fileSizeActiveCount: Int
-        let fileSizePendingCount: Int
-        let fileSizeWorkerCount: Int
-        let fileSizeMaxActiveCount: Int
-        let fileSizeMaxPendingCount: Int
-        let fileSizeRetryTimestampCount: Int
     }
 
     private struct ThumbnailGenerationKey: Hashable, Sendable {
@@ -824,6 +810,8 @@ actor ClipboardService {
     private let eventQueue: ClipboardEventQueue
     private let itemMutationGate = ClipboardItemMutationGate()
     private var monitorTask: Task<Void, Never>?
+    private var storageRootLock: StorageRootLock?
+    private var memoryPressureSources: [any DispatchSourceMemoryPressure] = []
     private var isStarted = false
 
     // MARK: - Cleanup Scheduling (v0.26)
@@ -901,11 +889,17 @@ actor ClipboardService {
     func start() async throws {
         guard !isStarted else { return }
 
+        // Claim the storage root before any spool or directory work so a second process
+        // cannot orphan-sweep payloads or double-capture the pasteboard.
+        let databasePath = databasePath
+        let storageRoot = StorageService.resolveRootDirectory(databasePath: databasePath, storageRootURL: nil)
+        let rootLock = try StorageRootLock.acquire(root: storageRoot)
+
         let loadedSettings = await settingsStore.load()
 
         let pasteboardName = monitorPasteboardName
         let pollingInterval = monitorPollingInterval ?? (TimeInterval(loadedSettings.clipboardPollingIntervalMs) / 1000.0)
-        let storage = await MainActor.run { StorageService(databasePath: databasePath) }
+        let storage = StorageService(databasePath: databasePath, storageRootURL: storageRoot)
         let ingestSpoolDirectory = URL(
             fileURLWithPath: storage.ingestSpoolDirectoryPath,
             isDirectory: true
@@ -938,8 +932,7 @@ actor ClipboardService {
             )
         }
 
-        let dbPath = await storage.databaseFilePath
-        let search = SearchEngineImpl(dbPath: dbPath)
+        let search = SearchEngineImpl(dbPath: storage.databaseFilePath, commitJournal: storage.commitJournal)
 
         do {
             try await storage.open()
@@ -975,9 +968,6 @@ actor ClipboardService {
             }
 
             await MainActor.run {
-                storage.cleanupSettings.maxItems = loadedSettings.maxItems
-                storage.cleanupSettings.maxSmallStorageMB = loadedSettings.maxStorageMB
-                storage.cleanupSettings.cleanupImagesOnly = loadedSettings.cleanupImagesOnly
                 monitor.startMonitoring()
             }
 
@@ -995,7 +985,9 @@ actor ClipboardService {
             self.storage = storage
             self.search = search
             self.monitorTask = monitorTask
+            self.storageRootLock = rootLock
             self.isStarted = true
+            startMemoryPressureMonitoring()
 
             await startBackgroundMediaQueuesIfNeeded()
 
@@ -1010,7 +1002,32 @@ actor ClipboardService {
             }
             await storage.close()
             await search.close()
+            rootLock.release()
             throw error
+        }
+    }
+
+    /// Warning releases search session memory; critical also drops the short-query index and
+    /// SQLite's page cache on the write connection.
+    private func startMemoryPressureMonitoring() {
+        memoryPressureSources = [false, true].map { critical in
+            let source = DispatchSource.makeMemoryPressureSource(
+                eventMask: critical ? .critical : .warning,
+                queue: .global(qos: .utility)
+            )
+            let handler: @Sendable () -> Void = { [weak self] in
+                Task { await self?.handleMemoryPressure(critical: critical) }
+            }
+            source.setEventHandler(handler: handler)
+            source.resume()
+            return source
+        }
+    }
+
+    private func handleMemoryPressure(critical: Bool) async {
+        await search?.trimSessionMemory(critical ? .memoryCritical : .memoryWarning)
+        if critical {
+            await storage?.repository.releaseMemory()
         }
     }
 
@@ -1021,6 +1038,10 @@ actor ClipboardService {
         let monitor = monitor
         let storage = storage
         let search = search
+        let rootLock = storageRootLock
+        storageRootLock = nil
+        memoryPressureSources.forEach { $0.cancel() }
+        memoryPressureSources = []
 
         await stopBackgroundMediaQueues()
 
@@ -1051,6 +1072,8 @@ actor ClipboardService {
         if let search {
             await search.close()
         }
+
+        rootLock?.release()
     }
 
     // MARK: - Data Access
@@ -1121,7 +1144,7 @@ actor ClipboardService {
 
     private func setPinned(itemID: UUID, pinned: Bool) async throws {
         let storage = try requireStorage()
-        let search = try requireSearch()
+        _ = try requireSearch()
         guard let lease = await itemMutationGate.acquire(itemID: itemID) else {
             throw CancellationError()
         }
@@ -1129,7 +1152,6 @@ actor ClipboardService {
         do {
             guard !Task.isCancelled else { throw CancellationError() }
             try await storage.setPin(itemID, pinned: pinned)
-            await search.handlePinnedChange(id: itemID, pinned: pinned)
             _ = await publishAuthoritativeItemState(
                 id: itemID,
                 storage: storage,
@@ -1171,7 +1193,7 @@ actor ClipboardService {
         let search = try requireSearch()
 
         try await storage.deleteItem(itemID)
-        await search.handleDeletion(id: itemID)
+        await search.applyCommittedChanges()
         fileSizeComputationLastAttemptAt.remove { $0.itemID == itemID }
         await fileSizeComputationQueue?.cancelPending { $0.itemID == itemID }
         let publication = await reservePublication(for: itemID)
@@ -1183,7 +1205,7 @@ actor ClipboardService {
         let search = try requireSearch()
 
         try await storage.deleteAllExceptPinned()
-        await search.handleClearAll()
+        await search.applyCommittedChanges()
         fileSizeComputationLastAttemptAt.removeAll()
         await fileSizeComputationQueue?.discardPending()
         await thumbnailGenerationQueue?.discardPending()
@@ -1486,6 +1508,14 @@ actor ClipboardService {
         return ClipboardMonitor.loadImageFileDataAsPNG(fileURLs[0])
     }
 
+    private func cleanupPolicy() -> StorageService.CleanupPolicy {
+        var policy = StorageService.CleanupPolicy()
+        policy.maxItems = settings.maxItems
+        policy.maxContentBytes = settings.maxStorageMB * 1024 * 1024
+        policy.imagesOnly = settings.cleanupImagesOnly
+        return policy
+    }
+
     func updateSettings(_ newSettings: SettingsDTO) async throws {
         let oldSettings = settings
         let patch = SettingsPatch.from(baseline: oldSettings, draft: newSettings)
@@ -1503,12 +1533,6 @@ actor ClipboardService {
         }
 
         if let storage = storage {
-            await MainActor.run {
-                storage.cleanupSettings.maxItems = newSettings.maxItems
-                storage.cleanupSettings.maxSmallStorageMB = newSettings.maxStorageMB
-                storage.cleanupSettings.cleanupImagesOnly = newSettings.cleanupImagesOnly
-            }
-
             if patch.affectsThumbnailCache {
                 await stopThumbnailGenerationQueue()
                 invalidateThumbnailCacheIndex()
@@ -1521,6 +1545,7 @@ actor ClipboardService {
                 do {
                     _ = try await storage.performCleanup(
                         mode: .full,
+                        policy: cleanupPolicy(),
                         onCommitted: cleanupCommitHandler()
                     )
                 } catch {
@@ -1541,10 +1566,7 @@ actor ClipboardService {
     func setCleanupInterlockForTesting(
         _ interlock: (@Sendable (StorageService.CleanupInterlockPoint) async -> Void)?
     ) async {
-        let storage = self.storage
-        await MainActor.run {
-            storage?.setCleanupInterlockForTesting(interlock)
-        }
+        await storage?.setCleanupInterlockForTesting(interlock)
     }
 
     func getStorageStats() async throws -> (itemCount: Int, sizeBytes: Int) {
@@ -1557,10 +1579,10 @@ actor ClipboardService {
     func getDetailedStorageStats() async throws -> StorageStatsDTO {
         let storage = try requireStorage()
         let count = try await storage.getItemCount()
-        let dbSize = await storage.getDatabaseFileSize()
+        let dbSize = storage.getDatabaseFileSize()
         let externalSize = try await storage.getExternalStorageSizeForStats()
         let thumbnailSize = await storage.getThumbnailCacheSize()
-        let dbPath = await storage.databaseFilePath
+        let dbPath = storage.databaseFilePath
 
         return StorageStatsDTO(
             itemCount: count,
@@ -1576,6 +1598,7 @@ actor ClipboardService {
         let storage = try requireStorage()
         let updated = try await storage.syncExternalImageSizeBytesFromDisk()
         if updated > 0 {
+            await search?.applyCommittedChanges()
             ScopyLog.storage.info("Synced external image size_bytes from disk: updated=\(updated, privacy: .public)")
         }
         return updated
@@ -2008,52 +2031,15 @@ actor ClipboardService {
         return current
     }
 
-    /// Search publication is an awaited actor hop, so every pass validates the row both before
-    /// and after applying the candidate. A bounded repair loop prevents an older full DTO from
-    /// escaping when a same-ID replacement, metadata update, or deletion wins during that hop.
+    /// Applies committed storage changes to search before the item is published, so a search
+    /// issued after the event sees it, then returns the item's current row (nil when it no longer
+    /// exists or cannot be read).
     private func synchronizeSearchWithCurrentItem(
         id: UUID,
         storage: StorageService
     ) async -> StorageService.StoredItem? {
-        guard let search else { return nil }
-
-        let initial: StorageService.StoredItem?
-        do {
-            initial = try await storage.findByID(id)
-        } catch {
-            await search.invalidateCache()
-            return nil
-        }
-
-        var candidate = initial
-        for _ in 0..<3 {
-            guard let candidateItem = candidate else {
-                await search.handleDeletion(id: id)
-                return nil
-            }
-
-            await search.handleUpsertedItem(candidateItem)
-
-            let latest: StorageService.StoredItem?
-            do {
-                latest = try await storage.findByID(id)
-            } catch {
-                await search.invalidateCache()
-                return nil
-            }
-
-            guard let latest else {
-                await search.handleDeletion(id: id)
-                return nil
-            }
-            if Self.hasSameItemState(latest, as: candidateItem) {
-                return latest
-            }
-            candidate = latest
-        }
-
-        await search.invalidateCache()
-        return nil
+        await search?.applyCommittedChanges()
+        return try? await storage.findByID(id)
     }
 
     private func externalSourceMatches(
@@ -2113,19 +2099,6 @@ actor ClipboardService {
             lhs.fileSizeBytes == rhs.fileSizeBytes &&
             lhs.storageRef == rhs.storageRef &&
             lhs.rawData == rhs.rawData
-    }
-
-    private static func hasSameItemState(
-        _ lhs: StorageService.StoredItem,
-        as rhs: StorageService.StoredItem
-    ) -> Bool {
-        hasSamePayload(lhs, as: rhs) &&
-            lhs.note == rhs.note &&
-            lhs.appBundleID == rhs.appBundleID &&
-            lhs.createdAt == rhs.createdAt &&
-            lhs.lastUsedAt == rhs.lastUsedAt &&
-            lhs.useCount == rhs.useCount &&
-            lhs.isPinned == rhs.isPinned
     }
 
     private static func supersededImageOptimizationOutcome(
@@ -2376,9 +2349,7 @@ actor ClipboardService {
         guard !deletedItemIDs.isEmpty else { return }
         let deletedSet = Set(deletedItemIDs)
 
-        if let search {
-            await search.invalidateCache()
-        }
+        await search?.applyCommittedChanges()
         fileSizeComputationLastAttemptAt.remove { deletedSet.contains($0.itemID) }
         await fileSizeComputationQueue?.cancelPending { deletedSet.contains($0.itemID) }
         await eventQueue.invalidatePublications(itemIDs: deletedItemIDs)
@@ -2421,6 +2392,7 @@ actor ClipboardService {
         do {
             _ = try await storage.performCleanup(
                 mode: mode,
+                policy: cleanupPolicy(),
                 onCommitted: cleanupCommitHandler()
             )
             lastLightCleanupAt = now
@@ -2502,24 +2474,6 @@ actor ClipboardService {
         await thumbnailQueue?.stop()
         await fileSizeQueue?.stop()
         fileSizeComputationLastAttemptAt.removeAll()
-    }
-
-    func backgroundMediaSchedulingSnapshot() async -> BackgroundMediaSchedulingSnapshot {
-        let thumbnail = await thumbnailGenerationQueue?.snapshot()
-        let fileSize = await fileSizeComputationQueue?.snapshot()
-        return BackgroundMediaSchedulingSnapshot(
-            thumbnailActiveCount: thumbnail?.activeCount ?? 0,
-            thumbnailPendingCount: thumbnail?.pendingCount ?? 0,
-            thumbnailWorkerCount: thumbnail?.workerCount ?? 0,
-            thumbnailMaxActiveCount: thumbnail?.maxActiveCount ?? 0,
-            thumbnailMaxPendingCount: thumbnail?.maxPendingCount ?? 0,
-            fileSizeActiveCount: fileSize?.activeCount ?? 0,
-            fileSizePendingCount: fileSize?.pendingCount ?? 0,
-            fileSizeWorkerCount: fileSize?.workerCount ?? 0,
-            fileSizeMaxActiveCount: fileSize?.maxActiveCount ?? 0,
-            fileSizeMaxPendingCount: fileSize?.maxPendingCount ?? 0,
-            fileSizeRetryTimestampCount: fileSizeComputationLastAttemptAt.count
-        )
     }
 
     private func toDTO(
