@@ -67,8 +67,7 @@ struct HistoryListView: View {
                 // observation and copies the access list; read the shared state once here and pass values down.
                 let rowContext = HistoryRowContext(
                     settings: settingsViewModel.settings,
-                    activePopover: activePopover,
-                    searchMatchContexts: historyViewModel.searchMatchContexts
+                    activePopover: activePopover
                 )
 
                 // v0.18: 不使用 Section header，改为普通行以避免黑色背景
@@ -148,7 +147,7 @@ struct HistoryListView: View {
             .onAppear {
                 // Selection reaches rows through the fan-out, never through this body; the
                 // List is diffed only when its items change. Keyboard navigation follows here.
-                historyViewModel.rowSelection.onSelectionChanged = { id, follow in
+                historyViewModel.rowLiveState.onSelectionChanged = { id, follow in
                     guard follow, let id else { return }
                     programmaticScrollGate.beginProgrammaticScroll()
                     withAnimation(.easeInOut(duration: 0.1)) {
@@ -157,7 +156,7 @@ struct HistoryListView: View {
                 }
             }
             .onDisappear {
-                historyViewModel.rowSelection.onSelectionChanged = nil
+                historyViewModel.rowLiveState.onSelectionChanged = nil
             }
         }
         .overlay { HistoryListEmptyOverlay(openSettings: openSettings) }
@@ -467,12 +466,11 @@ struct HistoryListView: View {
     private struct HistoryRowContext {
         let settings: SettingsDTO
         let activePopover: HoverPreviewPopoverState?
-        let searchMatchContexts: [UUID: SearchMatchContext]
     }
 
     private func historyRow(item: ClipboardItemDTO, context: HistoryRowContext) -> some View {
-        HistorySelectionAwareRow(itemID: item.id, selectionFanout: historyViewModel.rowSelection) { isSelected in
-            historyRowContent(item: item, context: context, isSelected: isSelected)
+        HistoryLiveRow(itemID: item.id, fanout: historyViewModel.rowLiveState) { live in
+            historyRowContent(item: item, context: context, live: live)
         }
     }
 
@@ -480,8 +478,9 @@ struct HistoryListView: View {
     private func historyRowContent(
         item: ClipboardItemDTO,
         context: HistoryRowContext,
-        isSelected: Bool
+        live: HistoryRowLiveState
     ) -> some View {
+        let isSelected = live.isSelected
         let activePopover = context.activePopover
         let isImagePreviewPresented = activePopover?.itemID == item.id && activePopover?.kind == .image
         let isTextPreviewPresented = activePopover?.itemID == item.id && activePopover?.kind == .text
@@ -490,7 +489,7 @@ struct HistoryListView: View {
             item: item,
             isKeyboardSelected: isSelected,
             settings: context.settings,
-            searchMatchContext: context.searchMatchContexts[item.id],
+            searchMatchContext: live.evidence,
             onSelect: { Task { await historyViewModel.select(item) } },
             onSelectOptimizedForCodex: { Task { await historyViewModel.selectOptimizedForCodex(item) } },
             onSendViaAirDrop: { Task { await historyViewModel.sendViaAirDrop(item) } },
@@ -608,38 +607,38 @@ private struct ScrollFrameSamplerView: View {
     }
 }
 
-/// Holds one row's selection as local state fed by `HistoryRowSelectionFanout`, so a selection change
-/// re-evaluates the two rows it concerns instead of the List body (which re-initializes every ForEach
-/// child and diffs every loaded id).
-private struct HistorySelectionAwareRow<Content: View>: View {
+/// Holds one row's live state (selection, search evidence) as local state fed by
+/// `HistoryRowLiveStateFanout`, so a change re-evaluates the rows it concerns instead of the List
+/// body (which re-initializes every ForEach child and diffs every loaded id).
+private struct HistoryLiveRow<Content: View>: View {
     @Environment(HistoryViewModel.self) private var historyViewModel
 
     let itemID: UUID
-    let selectionFanout: HistoryRowSelectionFanout
-    let content: (Bool) -> Content
-    @State private var isSelected: Bool
+    let fanout: HistoryRowLiveStateFanout
+    let content: (HistoryRowLiveState) -> Content
+    @State private var live: HistoryRowLiveState
 
     init(
         itemID: UUID,
-        selectionFanout: HistoryRowSelectionFanout,
-        @ViewBuilder content: @escaping (Bool) -> Content
+        fanout: HistoryRowLiveStateFanout,
+        @ViewBuilder content: @escaping (HistoryRowLiveState) -> Content
     ) {
         self.itemID = itemID
-        self.selectionFanout = selectionFanout
+        self.fanout = fanout
         self.content = content
-        _isSelected = State(initialValue: selectionFanout.isSelected(itemID))
+        _live = State(initialValue: fanout.state(for: itemID))
     }
 
     var body: some View {
-        content(isSelected)
+        content(live)
             .onAppear {
-                isSelected = selectionFanout.register(itemID: itemID) { selected in
-                    isSelected = selected
+                live = fanout.register(itemID: itemID) { state in
+                    live = state
                 }
                 historyViewModel.rowDidAppear(itemID: itemID)
             }
             .onDisappear {
-                selectionFanout.unregister(itemID: itemID)
+                fanout.unregister(itemID: itemID)
             }
     }
 }

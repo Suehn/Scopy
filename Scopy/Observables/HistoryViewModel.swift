@@ -327,7 +327,13 @@ final class HistoryViewModel {
     static let loadMorePageSize = 100
     static let knownContentRevisionCapacity = 4096
 
-    private var listState = HistoryListState()
+    /// Not observed as a whole: an in-place change (pagination, total) would invalidate every
+    /// reader. Readers observe the three cells below, which `mutateProjection` writes only when
+    /// their value changes.
+    @ObservationIgnored private var listState = HistoryListState()
+    private(set) var itemsRevision: UInt64 = 0
+    private(set) var totalCount = 0
+    private(set) var canLoadMore = false
     @ObservationIgnored private var contentRevisionRegistry =
         BoundedHistoryContentRevisionRegistry(capacity: knownContentRevisionCapacity)
 
@@ -350,26 +356,39 @@ final class HistoryViewModel {
     }
 
     var pinnedItems: [ClipboardItemDTO] {
-        listState.pinnedItems
+        _ = itemsRevision
+        return listState.pinnedItems
     }
 
     var unpinnedItems: [ClipboardItemDTO] {
-        listState.unpinnedItems
+        _ = itemsRevision
+        return listState.unpinnedItems
     }
 
     var items: [ClipboardItemDTO] {
-        get { listState.items }
+        get {
+            _ = itemsRevision
+            return listState.items
+        }
         set {
             let currentItems = excludingKnownDeletedItems(newValue)
-            listState.replaceItems(currentItems)
-            mergeKnownContentRevisions(currentItems)
             if isUnfilteredList {
                 searchMatchContexts.removeAll(keepingCapacity: true)
             }
+            mutateProjection { $0.replaceItems(currentItems) }
+            mergeKnownContentRevisions(currentItems)
         }
     }
 
-    private(set) var searchMatchContexts: [UUID: SearchMatchContext] = [:]
+    var loadedCount: Int {
+        _ = itemsRevision
+        return listState.loadedCount
+    }
+
+    /// Evidence reaches rows through `rowLiveState`; the List body never reads this map.
+    private(set) var searchMatchContexts: [UUID: SearchMatchContext] = [:] {
+        didSet { rowLiveState.replaceEvidence(searchMatchContexts) }
+    }
 
     func searchMatchContext(for itemID: UUID) -> SearchMatchContext? {
         searchMatchContexts[itemID]
@@ -389,13 +408,13 @@ final class HistoryViewModel {
     var selectedID: UUID? {
         didSet {
             guard selectedID != oldValue else { return }
-            rowSelection.update(selectedID: selectedID, follow: lastSelectionSource == .keyboard)
+            rowLiveState.update(selectedID: selectedID, follow: lastSelectionSource == .keyboard)
         }
     }
 
-    /// Visible rows subscribe to their own selection here; see `HistoryRowSelectionFanout`.
+    /// Visible rows subscribe to their selection and evidence here; see `HistoryRowLiveStateFanout`.
     /// `lastSelectionSource` must be set before `selectedID` so the fan-out knows whether to follow.
-    let rowSelection = HistoryRowSelectionFanout()
+    let rowLiveState = HistoryRowLiveStateFanout()
 
     var isPinnedCollapsed: Bool = false {
         didSet {
@@ -436,18 +455,6 @@ final class HistoryViewModel {
 
     private var searchVersion: Int = 0
 
-    var canLoadMore: Bool {
-        listState.canLoadMore
-    }
-    var loadedCount: Int {
-        listState.loadedCount
-    }
-    var itemsRevision: UInt64 {
-        listState.itemsRevision
-    }
-    var totalCount: Int {
-        listState.totalCount
-    }
     var searchCoverage: SearchCoverage = .complete
 
     var searchCoverageHint: String? {
@@ -599,9 +606,9 @@ final class HistoryViewModel {
             }
 
             if didMatchCurrentFilters, totalCount >= 0 {
-                listState.incrementTotalCount()
+                mutateProjection { $0.incrementTotalCount() }
             } else if isUnfilteredList, totalCount >= 0 {
-                listState.incrementTotalCount()
+                mutateProjection { $0.incrementTotalCount() }
             }
         case .thumbnailUpdated(
             let itemID,
@@ -654,7 +661,7 @@ final class HistoryViewModel {
             }
 
             if totalCount >= 0 {
-                listState.recomputeCanLoadMore()
+                mutateProjection { $0.recomputeCanLoadMore() }
             }
         case .itemContentUpdated(let item):
             mergeKnownContentRevisions([item])
@@ -675,10 +682,10 @@ final class HistoryViewModel {
             invalidateInFlightProjectionWorkForDeletion()
             let wasPresent = removeItem(withID: id)
 
-            listState.decrementTotalCountIfNeeded(
-                wasPresent: wasPresent,
-                isUnfilteredList: isUnfilteredList
-            )
+            let isUnfilteredList = isUnfilteredList
+            mutateProjection {
+                $0.decrementTotalCountIfNeeded(wasPresent: wasPresent, isUnfilteredList: isUnfilteredList)
+            }
             if hasActiveFilters {
                 search()
             }
@@ -687,7 +694,7 @@ final class HistoryViewModel {
             guard !deletedIDs.isEmpty else { return }
             let newlyDeletedCount = invalidateKnownContentRevisions(itemIDs: deletedIDs)
             invalidateInFlightProjectionWorkForDeletion()
-            _ = listState.removeItems(withIDs: deletedIDs)
+            mutateProjection { _ = $0.removeItems(withIDs: deletedIDs) }
             for id in deletedIDs {
                 searchMatchContexts.removeValue(forKey: id)
             }
@@ -699,13 +706,13 @@ final class HistoryViewModel {
                 do {
                     let stats = try await service.getStorageStats()
                     guard projectionVersion == searchVersion, isUnfilteredList else { return }
-                    listState.updateTotalCount(stats.itemCount)
+                    mutateProjection { $0.updateTotalCount(stats.itemCount) }
                     settingsViewModel.storageStats = stats
                 } catch {
                     guard projectionVersion == searchVersion, isUnfilteredList else { return }
                     // Exact committed IDs are still the best available authority on a transient
                     // stats read failure; duplicate bulk events do not decrement twice.
-                    listState.decrementTotalCount(by: newlyDeletedCount)
+                    mutateProjection { $0.decrementTotalCount(by: newlyDeletedCount) }
                     ScopyLog.app.error(
                         "Failed to refresh history count after cleanup: \(error.localizedDescription, privacy: .private)"
                     )
@@ -837,8 +844,8 @@ final class HistoryViewModel {
                 return
             }
 
-            listState.replaceItems(fetchedItems)
             searchMatchContexts.removeAll(keepingCapacity: true)
+            mutateProjection { $0.replaceItems(fetchedItems) }
             mergeKnownContentRevisions(fetchedItems)
             prewarmDisplayText(for: fetchedItems)
             searchCoverage = .complete
@@ -851,7 +858,7 @@ final class HistoryViewModel {
             let stats = try await service.getStorageStats()
             guard shouldApplyLoadResult(version: currentVersion) else { return }
 
-            listState.updateTotalCount(stats.itemCount)
+            mutateProjection { $0.updateTotalCount(stats.itemCount) }
 
             settingsViewModel.storageStats = stats
             scheduleStorageDetailsRefresh(version: currentVersion)
@@ -1026,7 +1033,7 @@ final class HistoryViewModel {
                     var start = 0
                     while start < currentItems.count {
                         let chunk = Array(currentItems[start..<min(currentItems.count, start + Self.loadMoreApplyChunkRows)])
-                        listState.appendRecentPage(items: chunk)
+                        mutateProjection { $0.appendRecentPage(items: chunk) }
                         mergeKnownContentRevisions(chunk)
                         start += chunk.count
                         if start < currentItems.count {
@@ -1551,12 +1558,10 @@ final class HistoryViewModel {
         selectedID = nil
         lastSelectionSource = .programmatic
         let preservedItems = isUnfilteredList ? pinnedSurvivors.items : []
-        listState.replacePage(
-            items: preservedItems,
-            total: preservedItems.count,
-            hasMore: false
-        )
         searchMatchContexts.removeAll(keepingCapacity: true)
+        mutateProjection {
+            $0.replacePage(items: preservedItems, total: preservedItems.count, hasMore: false)
+        }
         searchCoverage = .complete
         lastLoadedAt = .distantPast
         clearKnownContentRevisions(pinnedSurvivors: pinnedSurvivors)
@@ -1615,17 +1620,16 @@ final class HistoryViewModel {
         )
         // A refine pass that reproduces the prefilter page must not rebuild the List.
         if skippingIdenticalRefine,
-           resultItems == items,
+           resultItems == listState.items,
            contexts == searchMatchContexts {
-            listState.updatePagination(total: result.total, hasMore: result.hasMore)
+            mutateProjection { $0.updatePagination(total: result.total, hasMore: result.hasMore) }
             return
         }
-        listState.replacePage(
-            items: resultItems,
-            total: result.total,
-            hasMore: result.hasMore
-        )
+        // Evidence first: rows created for the new page read theirs when they are built.
         searchMatchContexts = contexts
+        mutateProjection {
+            $0.replacePage(items: resultItems, total: result.total, hasMore: result.hasMore)
+        }
         mergeKnownContentRevisions(resultItems)
         reconcileSelectionAfterProjectionReplacement()
     }
@@ -1656,7 +1660,7 @@ final class HistoryViewModel {
     private func appendSearchPage(with result: SearchResultPage, version: Int) async -> Bool {
         guard !Task.isCancelled, version == searchVersion else { return false }
         if result.hits.isEmpty {
-            listState.updatePagination(total: result.total, hasMore: result.hasMore)
+            mutateProjection { $0.updatePagination(total: result.total, hasMore: result.hasMore) }
             return true
         }
         var start = 0
@@ -1676,11 +1680,13 @@ final class HistoryViewModel {
             }
             searchMatchContexts = mergedContexts
             ScrollPerformanceProfile.shared.incrementCounter(name: "list.pagination_search_chunk")
-            listState.appendPage(
-                items: resultItems,
-                total: result.total,
-                hasMore: end < result.hits.count || result.hasMore
-            )
+            mutateProjection {
+                $0.appendPage(
+                    items: resultItems,
+                    total: result.total,
+                    hasMore: end < result.hits.count || result.hasMore
+                )
+            }
             mergeKnownContentRevisions(resultItems)
             start = end
             if start < result.hits.count {
@@ -1699,7 +1705,9 @@ final class HistoryViewModel {
 
     @discardableResult
     private func setItemIfChanged(at index: Int, to value: ClipboardItemDTO) -> Bool {
-        listState.setItemIfChanged(at: index, to: value)
+        var changed = false
+        mutateProjection { changed = $0.setItemIfChanged(at: index, to: value) }
+        return changed
     }
 
     @discardableResult
@@ -1709,12 +1717,16 @@ final class HistoryViewModel {
             selectedID = nil
             lastSelectionSource = .programmatic
         }
-        return listState.removeItem(withID: id)
+        var removed = false
+        mutateProjection { removed = $0.removeItem(withID: id) }
+        return removed
     }
 
     @discardableResult
     private func insertOrMoveItemToFront(_ item: ClipboardItemDTO) -> Bool {
-        listState.insertOrMoveItemToFront(item)
+        var changed = false
+        mutateProjection { changed = $0.insertOrMoveItemToFront(item) }
+        return changed
     }
 
     private func effectiveSearchDebounceNs(for query: String) -> UInt64 {
@@ -1725,6 +1737,15 @@ final class HistoryViewModel {
             return max(timing.searchDebounceNs, 16_000_000)
         }
         return timing.searchDebounceNs
+    }
+
+    /// The only way the projection changes: applies `change` and then writes each observed cell
+    /// only if its value moved, so a pagination-only or total-only update leaves the rows alone.
+    private func mutateProjection(_ change: (inout HistoryListState) -> Void) {
+        change(&listState)
+        if itemsRevision != listState.itemsRevision { itemsRevision = listState.itemsRevision }
+        if totalCount != listState.totalCount { totalCount = listState.totalCount }
+        if canLoadMore != listState.canLoadMore { canLoadMore = listState.canLoadMore }
     }
 
     private func cancelTask(_ task: inout Task<Void, Never>?) {

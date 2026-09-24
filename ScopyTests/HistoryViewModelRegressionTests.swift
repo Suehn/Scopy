@@ -537,8 +537,20 @@ final class HistoryViewModelRegressionTests: XCTestCase {
         } onChange: {
             refined.fulfill()
         }
+        // What the List body reads: an identical refine that only settles the total must not
+        // invalidate it.
+        let listInputsInvalidated = expectation(description: "List inputs invalidated")
+        listInputsInvalidated.isInverted = true
+        withObservationTracking {
+            _ = viewModel.pinnedItems
+            _ = viewModel.unpinnedItems
+            _ = viewModel.canLoadMore
+        } onChange: {
+            listInputsInvalidated.fulfill()
+        }
         service.resumeRefine()
         await fulfillment(of: [refined], timeout: 1.0)
+        await fulfillment(of: [listInputsInvalidated], timeout: 0.05)
         XCTAssertEqual(viewModel.itemsRevision, revision)
         XCTAssertEqual(viewModel.totalCount, 50)
         XCTAssertEqual(viewModel.searchCoverage, .complete)
