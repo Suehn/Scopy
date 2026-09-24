@@ -11,9 +11,9 @@ enum MarkdownHTMLRenderer {
         return MarkdownHTMLDocumentBuilder.document(markdown: source, context: context)
     }
 
-    /// The bounded Swift-side source repair that runs before the renderer bundle parses the
-    /// document. Returns nil when the task is cancelled. This is the only production path;
-    /// `MarkdownRenderingCorpusParityTests` pins its output for the corpus.
+    /// The bounded Swift-side source repair for the scientific profiles; every other source reaches
+    /// the renderer bundle verbatim (heading and table-pipe repair live in `render.js`). Returns nil
+    /// when the task is cancelled.
     static func preprocess(markdown: String, policy: MarkdownRepairPolicy) -> String? {
         guard !Task.isCancelled else { return nil }
         var source = markdown
@@ -38,8 +38,6 @@ enum MarkdownHTMLRenderer {
                 escape: { $0 }
             )
         }
-        source = MarkdownATXHeadingNormalizer.normalize(source)
-        source = MarkdownTableCodeSpanPipeNormalizer.normalize(source)
         guard !Task.isCancelled else { return nil }
         return source
     }

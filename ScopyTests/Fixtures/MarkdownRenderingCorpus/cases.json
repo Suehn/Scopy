@@ -2,7 +2,6 @@
   {
     "name": "chatgpt-file-links",
     "file": "chatgpt-file-links.md",
-    "rendererInput": "chatgpt-file-links.renderer-input.md",
     "expectedProfile": "chatGPTMarkdown",
     "allowLooseMathRepair": false,
     "renderedContains": [
@@ -18,7 +17,6 @@
   {
     "name": "image-path",
     "file": "image-path.md",
-    "rendererInput": "image-path.renderer-input.md",
     "expectedProfile": "chatGPTMarkdown",
     "allowLooseMathRepair": false,
     "renderedContains": [
@@ -33,7 +31,6 @@
   {
     "name": "reference-link",
     "file": "reference-link.md",
-    "rendererInput": "reference-link.renderer-input.md",
     "expectedProfile": "authoredMarkdown",
     "allowLooseMathRepair": false,
     "renderedContains": [
@@ -48,7 +45,6 @@
   {
     "name": "explicit-math",
     "file": "explicit-math.md",
-    "rendererInput": "explicit-math.renderer-input.md",
     "expectedProfile": "scientificMarkdown",
     "allowLooseMathRepair": false,
     "renderedContains": [
@@ -61,7 +57,6 @@
   {
     "name": "loose-latex",
     "file": "loose-latex.md",
-    "rendererInput": "loose-latex.renderer-input.md",
     "expectedProfile": "pdfOCRScientific",
     "allowLooseMathRepair": true,
     "renderedContains": [
@@ -75,7 +70,6 @@
   {
     "name": "currency-shell-vars",
     "file": "currency-shell-vars.md",
-    "rendererInput": "currency-shell-vars.renderer-input.md",
     "expectedProfile": "authoredMarkdown",
     "allowLooseMathRepair": false,
     "renderedContains": [
@@ -91,7 +85,6 @@
   {
     "name": "cjk-mixed-markdown",
     "file": "cjk-mixed-markdown.md",
-    "rendererInput": "cjk-mixed-markdown.renderer-input.md",
     "expectedProfile": "chatGPTMarkdown",
     "allowLooseMathRepair": false,
     "renderedContains": [
@@ -107,7 +100,6 @@
   {
     "name": "raw-html-literal",
     "file": "raw-html-literal.md",
-    "rendererInput": "raw-html-literal.renderer-input.md",
     "expectedProfile": "richHTML",
     "allowLooseMathRepair": false,
     "renderedContains": [
@@ -124,7 +116,6 @@
   {
     "name": "raw-html-literal-markdown",
     "file": "raw-html-literal-markdown.md",
-    "rendererInput": "raw-html-literal-markdown.renderer-input.md",
     "expectedProfile": "authoredMarkdown",
     "allowLooseMathRepair": false,
     "renderedContains": [
@@ -142,7 +133,6 @@
   {
     "name": "code-fence-paths",
     "file": "code-fence-paths.md",
-    "rendererInput": "code-fence-paths.renderer-input.md",
     "expectedProfile": "authoredMarkdown",
     "allowLooseMathRepair": false,
     "renderedContains": [
@@ -158,7 +148,6 @@
   {
     "name": "atx-headings",
     "file": "atx-headings.md",
-    "rendererInput": "atx-headings.renderer-input.md",
     "expectedProfile": "authoredMarkdown",
     "allowLooseMathRepair": false,
     "renderedContains": [
@@ -179,7 +168,6 @@
   {
     "name": "table-code-span-pipes",
     "file": "table-code-span-pipes.md",
-    "rendererInput": "table-code-span-pipes.renderer-input.md",
     "expectedProfile": "authoredMarkdown",
     "allowLooseMathRepair": false,
     "renderedContains": [

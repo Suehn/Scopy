@@ -31,9 +31,11 @@ test("icon API is closed and no old substitute file/source icons remain", () => 
 });
 
 test("source and image artwork keeps evenodd paint through the HTML sanitizer", () => {
-  const html = render("([来源][1])\n\n[1]: https://example.com").html;
+  // Native origin icons cover the first 24 origins; the citation past that budget keeps the local globe SVG.
+  const overBudget = Array.from({ length: 24 }, (_, i) => `[l](https://site${i}.example/)`).join(" ");
+  const html = render(`${overBudget}\n\n([来源][1])\n\n[1]: https://example.com`).html;
+  assert.match(html, /scopy-source-citation-origin-icon"[^>]*viewBox="0 0 12 12"/);
   assert.match(html, /fill-rule="evenodd" clip-rule="evenodd"/);
-  assert.match(html, /viewBox="0 0 12 12"/);
 });
 
 test("rendered rating and map icons keep their inherited paint color", () => {

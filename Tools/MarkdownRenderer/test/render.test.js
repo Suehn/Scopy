@@ -74,7 +74,7 @@ test("sanitizes network link protocols to http, https, and inert app or plugin m
 
   assert.match(result.html, /href="https:\/\/example\.com"/);
   assert.match(result.html, /href="https:\/\/example\.com" class="scopy-link scopy-link--external"/);
-  assert.match(result.html, /<svg class="scopy-icon scopy-icon--globe scopy-link-origin-icon"[^>]*><path[^>]+d="[^"]+" fill="currentColor"><\/path><\/svg>/);
+  assert.match(result.html, /<img src="scopy-source-icon:\/\/example\.com\/https" alt="" class="scopy-icon scopy-link-origin-icon" data-scopy-native-source-icon="true">/);
   assert.match(result.html, /href="plugin:asset"/);
   assert.doesNotMatch(result.html, /href="plugin:asset"[^>]*scopy-link--external/);
   assert.doesNotMatch(result.html, /href="mailto:/);
@@ -104,7 +104,7 @@ test("Codex links add real SVG affordance, resolve absolute and tilde files, and
   ].join(" "));
 
   assert.match(result.html, /href="https:\/\/example\.com\/path" class="scopy-link scopy-link--external"/);
-  assert.match(result.html, /class="scopy-icon scopy-icon--globe scopy-link-origin-icon"[^>]+aria-hidden="true"/);
+  assert.match(result.html, /<img src="scopy-source-icon:\/\/example\.com\/https" alt="" class="scopy-icon scopy-link-origin-icon" data-scopy-native-source-icon="true">/);
   assert.doesNotMatch(result.html, /↗|&#x2197;|&#8599;/);
   assert.match(result.html, /<a class="scopy-link scopy-link--file scopy-link--file-inert" data-scopy-file-kind="document" aria-disabled="true"><span class="scopy-mention-icon"><svg[^>]*scopy-codex-icon--document[^>]*>/);
   assert.doesNotMatch(result.html, /href="(?:\.\/)?docs\/guide\.md"/);
@@ -180,7 +180,7 @@ test("promotes parenthesized reference-style source links to citation pills", ()
   assert.match(result.html, /<a href="https:\/\/apnews\.com\/article\/d6cf2b964940f47a83f0a6f587c7e0c3\?utm_source=chatgpt\.com" title="Hegseth reassures Pacific allies" class="scopy-source-citation-link" data-scopy-source-citation="true" aria-label="AP News">/);
   assert.match(result.html, /class="scopy-source-citation-label">AP News<\/span>/);
   assert.match(result.html, /class="scopy-source-citation-label">Reuters<\/span>/);
-  assert.match(result.html, /class="scopy-icon scopy-icon--globe scopy-source-citation-origin-icon"/);
+  assert.match(result.html, /<img src="scopy-source-icon:\/\/apnews\.com\/https" alt="" class="scopy-icon scopy-source-citation-origin-icon" data-scopy-native-source-icon="true">/);
   assert.doesNotMatch(result.html, /scopy-link--external|scopy-icon--external-link|scopy-link__label/);
   assert.doesNotMatch(result.html, /\(<a href="https:\/\/apnews\.com/);
   assert.doesNotMatch(result.html, /AP News<\/a>\)/);
@@ -197,7 +197,7 @@ test("does not promote encoded-control citation destinations", () => {
 test("keeps ordinary parenthesized markdown links as normal links", () => {
   const result = render("Read the docs ([guide][1]) before changing code.\n\n[1]: https://example.com/guide");
 
-  assert.match(result.html, /\(<a href="https:\/\/example\.com\/guide" class="scopy-link scopy-link--external"><svg class="scopy-icon scopy-icon--globe scopy-link-origin-icon"[^>]*>.*?<\/svg><span class="scopy-link__label">guide<\/span>/);
+  assert.match(result.html, /\(<a href="https:\/\/example\.com\/guide" class="scopy-link scopy-link--external"><img src="scopy-source-icon:\/\/example\.com\/https"[^>]*><span class="scopy-link__label">guide<\/span>/);
   assert.doesNotMatch(result.html, /scopy-source-citation-link/);
 });
 
@@ -212,7 +212,7 @@ Mapped hosts.([OpenAI][1], [Reuters][2]) Unknown host.([AP News][3])
 
   assert.match(result.html, /<img src="rich\/favicon-help-openai-32\.png" alt="" class="scopy-source-citation-origin-icon scopy-source-citation-favicon">/);
   assert.match(result.html, /<img src="rich\/favicon-reuters-32\.png" alt="" class="scopy-source-citation-origin-icon scopy-source-citation-favicon">/);
-  assert.match(result.html, /class="scopy-icon scopy-icon--globe scopy-source-citation-origin-icon"/);
+  assert.match(result.html, /<img src="scopy-source-icon:\/\/apnews\.com\/https" alt="" class="scopy-icon scopy-source-citation-origin-icon" data-scopy-native-source-icon="true">/);
   assert.doesNotMatch(result.html, /<img[^>]+src="https?:\/\//i);
 });
 

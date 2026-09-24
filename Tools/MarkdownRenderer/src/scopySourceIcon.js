@@ -54,7 +54,7 @@ export function replaceFailedSourceIcon(image) {
 
 // Run after sanitization. Only our source-icon nodes can become native image requests;
 // authored images never gain access to this image-only origin service.
-export function rehypeScopyNativeSourceIcons({ enabled }) {
+export function rehypeScopyNativeSourceIcons() {
   return (tree) => {
     const origins = new Set();
     let count = 0;
@@ -62,7 +62,7 @@ export function rehypeScopyNativeSourceIcons({ enabled }) {
       const source = node?.properties?.dataScopySourceIcon;
       if (source) {
         delete node.properties.dataScopySourceIcon;
-        if (enabled && count < 256 && (origins.has(source) || origins.size < 24)) {
+        if (count < 256 && (origins.has(source) || origins.size < 24)) {
           origins.add(source);
           count += 1;
           node.tagName = "img";

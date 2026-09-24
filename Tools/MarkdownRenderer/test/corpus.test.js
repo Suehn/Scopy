@@ -10,14 +10,10 @@ const cases = JSON.parse(readFileSync(new URL("cases.json", corpusRoot), "utf8")
 
 for (const testCase of cases) {
   test(`corpus: ${testCase.name}`, () => {
-    // `rendererInput` is the committed output of the app's Swift-side preprocessing
-    // (pinned by MarkdownRenderingCorpusParityTests), i.e. the bytes production hands to render().
-    const source = readFileSync(new URL(testCase.rendererInput, corpusRoot), "utf8");
-    const result = render(source, {
-      profile: testCase.expectedProfile,
-      allowLooseMathRepair: testCase.allowLooseMathRepair,
-      policyVersion: "corpus-test"
-    });
+    // Non-scientific sources reach render() verbatim; MarkdownRenderingCorpusContractTests pins the
+    // profile and policy declared here against the app's detector.
+    const source = readFileSync(new URL(testCase.file, corpusRoot), "utf8");
+    const result = render(source, { allowLooseMathRepair: testCase.allowLooseMathRepair });
 
     assert.equal(result.metadata.repairedMathCount, testCase.expectedRepairedMathCount);
     for (const expected of testCase.renderedContains) {

@@ -2294,15 +2294,21 @@ enum MarkdownHTMLDocumentBuilder {
         jsonLiteral(value)
     }
 
+    /// Sorted keys make the document bytes a function of the input alone. The default `/` escaping
+    /// (`<\/head>`, `<\/script>`) is what keeps embedded source from closing the shell's own
+    /// elements; the replacement below is only a second line of defense. Do not add
+    /// `.withoutEscapingSlashes`.
     private static func jsonLiteral<T: Encodable>(_ value: T) -> String {
-        let data = (try? JSONEncoder().encode(value)) ?? Data()
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        let data = (try? encoder.encode(value)) ?? Data()
         let s = String(data: data, encoding: .utf8) ?? "{}"
         return s.replacingOccurrences(of: "</script", with: "<\\/script", options: [.caseInsensitive])
     }
 
     static func document(markdown: String, context: MarkdownRenderContext) -> String {
         let markdownLiteral = jsonLiteral(markdown)
-        let policyLiteral = jsonLiteral(unifiedPolicyPayload(context: context))
+        let policyLiteral = policyPayloadJSON(context: context)
         let overflowSelectorLiteral = jsonStringLiteral(overflowProbeSelector)
         let taskListBootstrapScript = MarkdownTaskListRuntime.bootstrapScript
 
@@ -2839,28 +2845,19 @@ enum MarkdownHTMLDocumentBuilder {
         """
     }
 
-    private static func unifiedPolicyPayload(context: MarkdownRenderContext) -> [String: AnyEncodable] {
-        var payload: [String: AnyEncodable] = [
-            "profile": AnyEncodable(context.profile.rawValue),
-            "nativeSourceIcons": AnyEncodable(true),
-            "allowLooseMathRepair": AnyEncodable(context.policy.allowLooseMathRepair),
-            "policyVersion": AnyEncodable(MarkdownRenderContextResolver.rendererVersion)
-        ]
-        if let enrichment = context.linkEnrichment, !enrichment.entries.isEmpty {
-            payload["linkEnrichment"] = AnyEncodable(enrichment.entries)
-        }
-        return payload
-    }
-}
-
-private struct AnyEncodable: Encodable {
-    private let encodeValue: (Encoder) throws -> Void
-
-    init<T: Encodable>(_ value: T) {
-        self.encodeValue = value.encode(to:)
+    /// The policy object embedded next to the source. `render.js#normalizePolicy` reads exactly
+    /// these keys; `MarkdownRenderingCorpusContractTests` pins the bytes against the shared fixture
+    /// `Tools/MarkdownRenderer/test/fixtures/policy-contract.json`.
+    static func policyPayloadJSON(context: MarkdownRenderContext) -> String {
+        jsonLiteral(RenderPolicyPayload(
+            allowLooseMathRepair: context.policy.allowLooseMathRepair,
+            linkEnrichment: context.linkEnrichment.flatMap { $0.entries.isEmpty ? nil : $0.entries }
+        ))
     }
 
-    func encode(to encoder: Encoder) throws {
-        try encodeValue(encoder)
+    private struct RenderPolicyPayload: Encodable {
+        let allowLooseMathRepair: Bool
+        /// Omitted when there is no frozen sidecar or it is empty, so plain documents share one payload.
+        let linkEnrichment: [String: LinkEnrichmentEntry]?
     }
 }

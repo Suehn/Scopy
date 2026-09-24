@@ -90,9 +90,9 @@ source + MarkdownRenderContext
 
 Authoritative implementation surfaces:
 
-- `Scopy/Views/History/MarkdownHTMLRenderer.swift`: bounded, code-aware source normalization and the only document entrypoint.
+- `Scopy/Views/History/MarkdownHTMLRenderer.swift`: the only document entrypoint. It changes source bytes only for the scientific profiles (`scientificMarkdown`, `latexDocumentLike`, `pdfOCRScientific`), whose LaTeX document/inline normalization is still Swift; every other profile reaches the bundle verbatim.
 - `Scopy/Views/History/MarkdownHTMLDocumentBuilder.swift`: local assets, CSS, table/runtime measurement, readiness, and export hooks.
-- `Tools/MarkdownRenderer/src/render.js`: Markdown AST/HTML AST pipeline.
+- `Tools/MarkdownRenderer/src/render.js`: Markdown AST/HTML AST pipeline and every profile-independent source repair (ATX heading whitespace, table code-span pipes, backslash math), in that order; `scopyLineScan.js` is the one fence/indentation scanner those repairs share.
 - `Tools/MarkdownRenderer/src/remarkScopySafeHTML.js`: the closed user-authored safe-HTML recognizer; unsupported or malformed forms fail to literal text.
 - `Tools/MarkdownRenderer/src/scopyLocalImageAssets.js`: the closed bundled-image allowlist and exact public-URL mappings used by fixtures.
 - `Tools/MarkdownRenderer/src/remarkScopyRich.js`: strict v2 validation and the only trusted rich-surface HAST builders.
@@ -231,7 +231,7 @@ Rich v2 exports remain true-color PNGs. Palette reduction is skipped whenever th
 
 | Input | Result |
 | --- | --- |
-| ATX headings | `#` through `######`; Scopy repairs missing whitespace such as `#标题` outside code. Heading elements receive no generated `id`. |
+| ATX headings | `#` through `######`; the renderer repairs missing whitespace such as `#标题` outside code before parsing (one to six `#`, at most three leading spaces, no `#!`, remainder at most 200 grapheme clusters). Heading elements receive no generated `id`. |
 | Paragraphs and line breaks | CommonMark paragraphs; the local assistant-style path turns source newlines into `<br>` through `remark-breaks`. |
 | Emphasis | CommonMark emphasis/strong nodes with the `remark-cjk-friendly/parseOnly` CJK delimiter extension: Chinese-adjacent punctuation and inline math can be enclosed in `*`/`**` without inserting spaces. |
 | Deletion | Only paired double tildes such as `~~text~~` create `<del>`; `~text~` remains literal. |
@@ -245,7 +245,7 @@ Rich v2 exports remain true-color PNGs. Palette reduction is skipped whenever th
 | Thematic breaks | CommonMark thematic breaks become `<hr>`. |
 | Footnotes | GFM footnotes are supported. Renderer-generated IDs use exactly one namespace: definition `scopy-fn-<normalized-id>`, reference `scopy-fnref-<normalized-id>`, and repeated references append `-2`, `-3`, etc. Heading IDs are not synthesized. |
 
-All source normalization is syntax-aware:
+All source normalization is syntax-aware and, apart from the scientific-profile LaTeX normalization, runs in `render.js` so Node tests see the production input:
 
 - fenced code, indented code, inline code, links, images, reference definitions, URLs, and file paths are protected before loose scientific-text repair;
 - `#标题` repair does not rewrite code fences, indented code, or shebangs;
@@ -512,6 +512,8 @@ Focused renderer assertions live in:
 - `Tools/MarkdownRenderer/test/source-icons.test.js`
 - `Tools/MarkdownRenderer/test/safe-html.test.js`
 - `Tools/MarkdownRenderer/test/asset-contract.test.js`
+- `Tools/MarkdownRenderer/test/source-repairs.test.js`
+- `Tools/MarkdownRenderer/test/corpus.test.js` and `Tools/MarkdownRenderer/test/policy-contract.test.js`, paired with `ScopyTests/MarkdownRenderingCorpusContractTests.swift` over the same `cases.json` and `test/fixtures/policy-contract.json`
 - `ScopyTests/ChatGPTMarkdownRendererTests.swift`
 - `ScopyTests/WebViewLifecycleTests.swift`
 

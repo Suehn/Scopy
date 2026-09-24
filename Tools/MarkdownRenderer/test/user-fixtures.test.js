@@ -126,9 +126,9 @@ test("renders the exact public ChatGPT Markdown copy without reconstructing priv
     "mapped-host citations render bundled favicons"
   );
   assert.equal(
-    countMatches(result.html, /<img[^>]*\ssrc="(?!rich\/)/g),
+    countMatches(result.html, /<img[^>]*\ssrc="(?!rich\/|scopy-source-icon:)/g),
     0,
-    "every image source is a bundled local asset"
+    "every image source is a bundled local asset or the native origin-icon scheme"
   );
 
   assert.doesNotMatch(result.html, /<img[^>]+src="https?:\/\//i);

@@ -80,25 +80,6 @@ final class ChatGPTMarkdownRendererTests: XCTestCase {
         XCTAssertTrue(html.contains("html.scopy-export-mode summary.scopy-safe-summary"))
     }
 
-    func testRendererNormalizesATXHeadingsWithoutTouchingCode() {
-        let markdown = """
-        #一级标题 `# H1`
-
-            #indented code stays code
-
-        ```markdown
-        ###fenced code stays code
-        ```
-        """
-
-        let html = MarkdownHTMLRenderer.render(markdown: markdown)
-
-        XCTAssertTrue(html.contains("# 一级标题 `# H1`"))
-        XCTAssertTrue(html.contains("#indented code stays code"))
-        XCTAssertTrue(html.contains("###fenced code stays code"))
-        XCTAssertFalse(html.contains("#一级标题 `# H1`"))
-    }
-
     func testScriptBreakingSourceIsEncodedAsData() {
         let source = "</script><script>globalThis.pwned=true</script>"
         let html = MarkdownHTMLRenderer.render(markdown: source)
@@ -417,9 +398,9 @@ final class ChatGPTMarkdownRendererTests: XCTestCase {
         XCTAssertFalse(base.isEquivalent(to: nextGeneration))
     }
 
-    /// Default profiles skip the LaTeX-document protector round trip; the embedded source must
-    /// still be exactly the heading- and table-pipe-normalized input.
-    func testDefaultProfilesEmbedSourceAfterOnlyHeadingAndPipeRepair() throws {
+    /// Default profiles embed the source verbatim: heading and table-pipe repair happen in the
+    /// renderer bundle, so the Node corpus test sees exactly the production input.
+    func testDefaultProfilesEmbedSourceVerbatim() throws {
         let casesData = try TestFixture.data("MarkdownRenderingCorpus/cases.json")
         let cases = try XCTUnwrap(JSONSerialization.jsonObject(with: casesData) as? [[String: Any]])
         let fixtures = ["markdown_delimiter_repro.md"]
@@ -432,17 +413,23 @@ final class ChatGPTMarkdownRendererTests: XCTestCase {
                 continue
             }
             let html = MarkdownHTMLRenderer.render(markdown: source, context: context)
-            XCTAssertEqual(
-                try embeddedSource(in: html),
-                MarkdownTableCodeSpanPipeNormalizer.normalize(MarkdownATXHeadingNormalizer.normalize(source)),
-                fixture
-            )
+            XCTAssertEqual(Data(try embeddedSource(in: html).utf8), Data(source.utf8), fixture)
             checked += 1
         }
-        XCTAssertGreaterThan(checked, 5)
+        XCTAssertGreaterThan(checked, 7)
     }
 
-    private func embeddedSource(in html: String) throws -> String {
+    /// The `</head>` ruling: embedded source can never close the shell's own elements because
+    /// JSONEncoder escapes `/` by default. `.withoutEscapingSlashes` must never be added.
+    func testEmbeddedSourceKeepsDefaultSlashEscaping() throws {
+        let html = MarkdownHTMLRenderer.render(markdown: "</head></script><script>x</script>")
+        let literal = try embeddedSourceLiteral(in: html)
+
+        XCTAssertEqual(literal, "\"<\\/head><\\/script><script>x<\\/script>\"")
+        XCTAssertEqual(html.components(separatedBy: "</head>").count, 2, "only the shell's own head closes")
+    }
+
+    private func embeddedSourceLiteral(in html: String) throws -> String {
         let marker = "window.ScopyUnifiedMarkdown.render("
         let start = try XCTUnwrap(html.range(of: marker)).upperBound
         var index = html.index(after: start)
@@ -458,7 +445,10 @@ final class ChatGPTMarkdownRendererTests: XCTestCase {
             }
             index = html.index(after: index)
         }
-        let literal = String(html[start...index])
-        return try JSONDecoder().decode(String.self, from: Data(literal.utf8))
+        return String(html[start...index])
+    }
+
+    private func embeddedSource(in html: String) throws -> String {
+        try JSONDecoder().decode(String.self, from: Data(embeddedSourceLiteral(in: html).utf8))
     }
 }

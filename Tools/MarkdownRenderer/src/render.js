@@ -18,6 +18,8 @@ import {
 import { codexFileIcon, codexPluginIcon, localFileKind } from "./scopyCodexIcons.js";
 import { scopySourceIcon, rehypeScopyNativeSourceIcons } from "./scopySourceIcon.js";
 import { preprocessBackslashMath } from "./scopyBackslashMathPreprocessor.js";
+import { repairATXHeadings } from "./scopyATXHeadings.js";
+import { createFenceTracker, leadingIndentSpaces } from "./scopyLineScan.js";
 import { remarkScopyImageGroups } from "./remarkScopyImageGroups.js";
 import { remarkScopyPublicCards } from "./remarkScopyPublicCards.js";
 import { remarkScopyLinkEnrichment } from "./remarkScopyLinkEnrichment.js";
@@ -42,8 +44,11 @@ export function render(source, policy = {}) {
 function renderInternal(source, policy = {}) {
   const warnings = [];
   const normalizedPolicy = normalizePolicy(policy);
+  // Source-level repairs run in this order: heading whitespace first, so a flat `#`-led row is
+  // classified before table detection; then table code-span pipes; then backslash math.
   const originalSource = String(source || "");
-  const tableCodeSpanGuarded = protectTableCodeSpanPipes(originalSource);
+  const headingRepaired = repairATXHeadings(originalSource);
+  const tableCodeSpanGuarded = protectTableCodeSpanPipes(headingRepaired);
   const preprocessed = preprocessBackslashMath(tableCodeSpanGuarded);
   const repairMetadata = { repairedMathCount: 0 };
   const processor = unified()
@@ -79,7 +84,7 @@ function renderInternal(source, policy = {}) {
     .use(rehypeGuardDataImages)
     .use(rehypeSanitize, scopySanitizeSchema)
     .use(rehypeScopyLinkSemantics, normalizedPolicy.linkEnrichment)
-    .use(rehypeScopyNativeSourceIcons, { enabled: normalizedPolicy.nativeSourceIcons })
+    .use(rehypeScopyNativeSourceIcons)
     .use(rehypeScopyKatex, { failureMode: "relaxed" })
     .use(rehypeHighlight, scopyHighlightOptions)
     .use(rehypeStringify);
@@ -450,12 +455,11 @@ function visitElements(node, visitor) {
   }
 }
 
+// The policy object is the exact payload the app embeds next to the source; the shared
+// contract fixture test/fixtures/policy-contract.json pins both sides. Only these two keys exist.
 function normalizePolicy(policy) {
   return {
-    nativeSourceIcons: policy.nativeSourceIcons === true,
-    profile: String(policy.profile || "plainTextUnknown"),
     allowLooseMathRepair: policy.allowLooseMathRepair === true,
-    policyVersion: String(policy.policyVersion || ""),
     linkEnrichment: policy.linkEnrichment && typeof policy.linkEnrichment === "object" && !Array.isArray(policy.linkEnrichment)
       ? policy.linkEnrichment
       : null
@@ -482,24 +486,10 @@ function protectTableCodeSpanPipes(source) {
 
 function findTableLineIndexes(lines) {
   const indexes = new Set();
-  let activeFence = null;
+  const fences = createFenceTracker();
 
   for (let i = 0; i < lines.length; i += 1) {
-    const fence = fencePrefix(lines[i]);
-    if (fence) {
-      if (activeFence) {
-        if (activeFence.marker === fence.marker && fence.count >= activeFence.count) {
-          activeFence = null;
-        }
-      } else {
-        activeFence = fence;
-      }
-      continue;
-    }
-    if (activeFence) {
-      continue;
-    }
-    if (!isTableDelimiterLine(lines[i])) {
+    if (fences.skip(lines[i]) || !isTableDelimiterLine(lines[i])) {
       continue;
     }
 
@@ -513,19 +503,6 @@ function findTableLineIndexes(lines) {
   }
 
   return indexes;
-}
-
-function fencePrefix(line) {
-  const trimmed = String(line || "").trim();
-  const marker = trimmed[0];
-  if (marker !== "`" && marker !== "~") {
-    return null;
-  }
-  let count = 0;
-  while (count < trimmed.length && trimmed[count] === marker) {
-    count += 1;
-  }
-  return count >= 3 ? { marker, count } : null;
 }
 
 function isTableDelimiterLine(line) {
@@ -561,22 +538,6 @@ function isDelimiterCell(cell) {
 function isTableContentLine(line) {
   const raw = String(line || "");
   return leadingIndentSpaces(raw) <= 3 && raw.indexOf("|") !== -1;
-}
-
-function leadingIndentSpaces(line) {
-  let spaces = 0;
-  for (const ch of String(line || "")) {
-    if (ch === " ") {
-      spaces += 1;
-      continue;
-    }
-    if (ch === "\t") {
-      spaces += 4;
-      continue;
-    }
-    break;
-  }
-  return spaces;
 }
 
 function protectCodeSpansInLine(line) {
