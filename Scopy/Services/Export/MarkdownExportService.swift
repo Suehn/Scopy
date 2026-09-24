@@ -667,14 +667,16 @@ private final class ExportBitmapCanvas: @unchecked Sendable {
         let bytesPerRow = self.bytesPerRow
         let width = self.width
         let height = self.height
-        let pixels = self.pixels
+        /// Each band writes only its own rows of the shared buffer.
+        struct BandedPixels: @unchecked Sendable { let base: UnsafeMutableRawPointer }
+        let pixels = BandedPixels(base: self.pixels)
         let failed = ManagedAtomic(false)
         DispatchQueue.concurrentPerform(iterations: bandCount) { band in
             let startRow = band * rowsPerBand
             let bandRows = min(rowsPerBand, height - startRow)
             guard bandRows > 0 else { return }
             guard let context = CGContext(
-                data: pixels.advanced(by: startRow * bytesPerRow),
+                data: pixels.base.advanced(by: startRow * bytesPerRow),
                 width: width,
                 height: bandRows,
                 bitsPerComponent: 8,
@@ -754,6 +756,7 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
     private var hostWindow: NSWindow?
     private var timeoutTask: Task<Void, Never>?
     private var isCompleted = false
+    private var loadTask: Task<Void, Never>?
     private var exportTask: Task<Void, Never>?
     private var stage: MarkdownExportService.ExportStage = .loadHTML {
         didSet {
@@ -847,7 +850,7 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
             }
         }
 
-        Task { @MainActor in
+        loadTask = Task { @MainActor in
             await self.startWebViewAndLoadHTML()
         }
     }
@@ -855,8 +858,11 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
     private func startWebViewAndLoadHTML() async {
         guard !isCompleted else { return }
 
-        // Create offscreen WebView with an explicit viewport size to make layout deterministic.
         await MarkdownWebKitEnvironment.prepareRules()
+        // A cancel or timeout during the await must not build a WebView and window afterwards.
+        guard !isCompleted, !Task.isCancelled else { return }
+
+        // Create offscreen WebView with an explicit viewport size to make layout deterministic.
         let config = MarkdownWebKitEnvironment.makeConfiguration()
         let wv = WKWebView(
             frame: CGRect(
@@ -908,19 +914,9 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
         // Insert export-specific styles before </head>
         let exportStyles = """
         <style id="scopy-export-style">
+            /* Layout variables come from the document itself; export adds only its own rules. */
             :root {
                 color-scheme: light !important;
-                --scopy-chatgpt-output-surface-width: \(MarkdownRenderLayoutConstants.chatGPTOutputSurfaceWidth)px;
-                --scopy-chatgpt-content-inline-padding: \(MarkdownRenderLayoutConstants.chatGPTContentInlinePadding)px;
-                --scopy-chatgpt-content-top-padding: \(MarkdownRenderLayoutConstants.chatGPTContentTopPadding)px;
-                --scopy-chatgpt-content-bottom-padding: \(MarkdownRenderLayoutConstants.chatGPTContentBottomPadding)px;
-                --scopy-chatgpt-thread-content-width: min(
-                    var(--scopy-chatgpt-thread-content-max-width),
-                    max(1px, calc(var(--scopy-chatgpt-render-width) - (var(--scopy-chatgpt-content-inline-padding) * 2)))
-                );
-                --scopy-chatgpt-render-width: var(--scopy-chatgpt-layout-viewport-width);
-                --scopy-chatgpt-markdown-table-col-baseline: var(--scopy-chatgpt-thread-content-max-width);
-                --scopy-chatgpt-table-breakout-width: var(--scopy-chatgpt-thread-content-width);
             }
             @page { margin: 0 !important; }
             html, body {
@@ -2711,6 +2707,8 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
     }
 
     private func cleanup() {
+        loadTask?.cancel()
+        loadTask = nil
         exportTask?.cancel()
         exportTask = nil
         timeoutTask?.cancel()

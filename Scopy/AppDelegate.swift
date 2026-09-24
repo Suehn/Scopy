@@ -409,7 +409,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
            let html = try? String(contentsOfFile: htmlPath, encoding: .utf8),
            !html.isEmpty {
             let settings = await uiTestMarkdownExportSettings()
-            let pngquantOptions = uiTestPngquantOptions(settings: settings)
+            let pngquantOptions = HistoryItemMarkdownExportController.pngquantOptions(settings: settings)
             await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
                 MarkdownExportService.exportToPNGClipboard(
                     html: html,
@@ -459,17 +459,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             settings.pngquantMarkdownExportEnabled = true
         }
         return settings
-    }
-
-    private func uiTestPngquantOptions(settings: SettingsDTO) -> PngquantService.Options? {
-        guard settings.pngquantMarkdownExportEnabled else { return nil }
-        return PngquantService.Options(
-            binaryPath: settings.pngquantBinaryPath,
-            qualityMin: settings.pngquantMarkdownExportQualityMin,
-            qualityMax: settings.pngquantMarkdownExportQualityMax,
-            speed: settings.pngquantMarkdownExportSpeed,
-            colors: settings.pngquantMarkdownExportColors
-        )
     }
 
     // MARK: - Hotkey Settings
