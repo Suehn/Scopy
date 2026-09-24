@@ -16,6 +16,13 @@ Once a proposal is implemented, move its lasting contracts into the appropriate 
 
 ## Current Contents
 
+- [Review and improvement roadmap, 2026-09-24 (phases, cross-face priorities, conflict rulings, decision register)](./review-roadmap-2026-09-24.md)
+- [Frontend interaction review, 2026-09-24 (search typing, hover presentation, memory, keyboard and feedback gaps)](./frontend-interaction-review-2026-09-24.md)
+- [Backend search/storage review, 2026-09-24 (index memory, engine decomposition, StorageService isolation, lifecycle)](./backend-search-storage-review-2026-09-24.md)
+- [Capture and Markdown pipeline review, 2026-09-24 (capture baseline, render hot path, Swift/JS convergence, export)](./capture-and-markdown-pipeline-review-2026-09-24.md)
+- [Maintainability and docs review, 2026-09-24 (doc accuracy table, glossary, comment language, conventions, D1-D13)](./maintainability-and-docs-review-2026-09-24.md)
+- [Regression safety net, 2026-09-24 (gate map, guard tests per change class, performance evidence protocol, local UI verification)](./regression-safety-net-2026-09-24.md)
+- [Code hygiene audit, 2026-09-19 (redundant tests, assumed behaviour, research-time residue; cleanup plan and decisions)](./code-hygiene-audit-2026-09-19.md)
 - [Whole-repo architecture review, 2026-09 (capture, storage, search, preview/export, UI, concurrency)](./architecture-review-2026-09.md)
 - [Rich fidelity pass: root causes and surgical fixes](./rich-fidelity-pass.md)
 - [Renderer hardening gate: review and implementation plan](./renderer-hardening-gate-plan.md)
