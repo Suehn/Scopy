@@ -2,14 +2,15 @@ import AppKit
 import Foundation
 
 extension ClipboardMonitor {
-    /// 原始剪贴板数据（在主线程提取，但哈希计算延迟到后台）
+    /// One pasteboard change as read on the main actor. Hashing happens later: inline for small
+    /// text, in envelope processing off the main actor for images and large payloads.
     struct RawClipboardData: Sendable {
         let type: ClipboardItemType
         let plainText: String
         let rawData: Data?
         let appBundleID: String?
         let sizeBytes: Int
-        let precomputedHash: String?  // 图片等内容的预计算轻量指纹
+        let precomputedHash: String?  // A hash decided at read time overrides the content-hash policy.
         let imageDataWasTIFF: Bool
 
         init(
@@ -39,9 +40,8 @@ extension ClipboardMonitor {
         case changedDuringRead
     }
 
-    /// 快速提取原始数据（不计算哈希，避免阻塞主线程）
-    /// 注意：检测顺序很重要！文件复制时剪贴板同时包含 file URL 和 plain text，
-    /// 必须先检测 file URL，否则会被误识别为文本。
+    /// Reads one pasteboard change without hashing. Detection order matters: a copied file
+    /// carries both a file URL and its path as plain text, so file URLs are checked first.
     func extractRawData(from pasteboard: NSPasteboard, changeCount: Int) async -> Extraction {
         let appBundleID = getFrontmostAppBundleID()
         // Representations are read over several IPC calls; content read while another copy
@@ -50,14 +50,13 @@ extension ClipboardMonitor {
             pasteboard.changeCount == changeCount ? .content(rawData) : .changedDuringRead
         }
 
-        // 检测顺序（默认）：File URLs > Image > RTF > HTML > Plain text
-        // Plain text 必须放最后，因为其他类型通常也包含文本表示
+        // Default order: file URLs > image > RTF > HTML > plain text. Plain text goes last
+        // because the other types usually carry a text representation too.
         //
-        // 例外：Office/Excel 复制单元格时，经常同时提供“图片预览 + HTML/RTF/文本”。
-        // 此时如果优先选 Image，会导致历史记录变成图片，粘贴行为也不符合用户预期（表格应保持为富文本/文本）。
-        //
-        // 这里采用“仅在检测到明显的表格/Office 富文本信号时”才让 Image 退到后面，
-        // 以避免影响浏览器/设计工具等真正的图片复制场景。
+        // Exception: copied Office/Excel cells offer an image preview next to HTML/RTF/text.
+        // Preferring the image would store a picture of the table and paste as one, so the
+        // image is demoted only when clear table/Office signals are present; browser and
+        // design-tool image copies keep the default order.
 
         let fileURLs = (pasteboard.readObjects(
             forClasses: [NSURL.self],
@@ -65,11 +64,10 @@ extension ClipboardMonitor {
         ) as? [URL]) ?? []
         let shouldPreferImageOverFileURLs = shouldPreferImageOverFileURLs(fileURLs: fileURLs, from: pasteboard)
 
-        // 1. File URLs (最高优先级 - 文件复制总是带有文本表示)
-        // 例外：部分 App（如 IM）复制图片时会同时给“临时图片文件路径 + 图片二进制”，这类场景应保留图片语义。
+        // 1. File URLs. Exception: some apps (messaging clients) copy an image as a temporary
+        // image file plus the bitmap; that stays an image.
         if !fileURLs.isEmpty, !shouldPreferImageOverFileURLs {
             let paths = fileURLs.map { $0.path }.joined(separator: "\n")
-            // 序列化文件 URL 以便后续恢复
             let urlData = Self.serializeFileURLs(fileURLs)
             return verified(RawClipboardData(
                 type: .file,
@@ -82,8 +80,8 @@ extension ClipboardMonitor {
 
         let shouldPreferRichTypesOverImage = shouldPreferRichTypesOverImage(from: pasteboard)
 
-        // 2. Image (PNG, TIFF, etc.) - 默认优先 PNG；TIFF 转 PNG 延迟到后台（避免主线程重编码）
-        // v0.19: 图片统一使用 SHA256 去重（在后台线程计算），移除无用的轻量指纹
+        // 2. Image. PNG is preferred; declared TIFF bytes are kept as read and re-encoded in
+        // envelope processing off the main actor. Images deduplicate by SHA-256 of the bytes.
         if !shouldPreferRichTypesOverImage, let imageResult = extractImageDataForIngest(from: pasteboard, candidateFileURL: fileURLs.first) {
             let imageData = imageResult.data
             return verified(RawClipboardData(
@@ -121,8 +119,8 @@ extension ClipboardMonitor {
             }
         }
 
-        // 6. Image（兜底）
-        // 如果上面没有任何富文本/文本可用，再回退到图片，确保复制图表/截图等场景不丢失内容。
+        // 6. Image fallback for a demoted image whose rich/text representations produced
+        // nothing, so charts and screenshots copied with table signals are not lost.
         // This read follows a suspension point, so confirm the pasteboard still holds this change.
         guard pasteboard.changeCount == changeCount else { return .changedDuringRead }
         if shouldPreferRichTypesOverImage, let imageResult = extractImageDataForIngest(from: pasteboard, candidateFileURL: fileURLs.first) {
@@ -142,7 +140,7 @@ extension ClipboardMonitor {
     }
 
     private func shouldPreferRichTypesOverImage(from pasteboard: NSPasteboard) -> Bool {
-        // 仅当剪贴板确实包含图片时才需要此判断，避免无谓开销。
+        // Only relevant when an image representation is declared.
         guard let types = pasteboard.types, types.contains(.png) || types.contains(.tiff) else {
             return false
         }
@@ -152,7 +150,7 @@ extension ClipboardMonitor {
         let hasString = types.contains(.string)
         guard hasHTML || hasRTF || hasString else { return false }
 
-        // Office/Excel 复制通常会带一些自定义的 pasteboard types；优先用 types 快速识别。
+        // Office/Excel copies declare custom pasteboard types; checking them avoids reading data.
         if types.contains(where: { $0.rawValue.localizedCaseInsensitiveContains("excel") }) {
             return true
         }
@@ -186,7 +184,8 @@ extension ClipboardMonitor {
         NSWorkspace.shared.frontmostApplication?.bundleIdentifier
     }
 
-    /// 从剪贴板提取图片数据（用于 ingest），优先 PNG；TIFF 转 PNG 在后台执行
+    /// Image bytes for ingest. Declared PNG or TIFF bytes are returned as read (TIFF is
+    /// re-encoded later off the main actor); the NSImage and file-URL fallbacks re-encode here.
     private func extractImageDataForIngest(
         from pasteboard: NSPasteboard,
         candidateFileURL: URL? = nil

@@ -1,8 +1,9 @@
 import AppKit
 import Foundation
 
-/// ClipboardMonitor - 系统剪贴板监控服务
-/// 符合 v0.md 第1节：后端只提供结构化数据和命令接口
+/// Polls the system pasteboard, records Scopy's own writes as the capture baseline, and feeds
+/// every capture through one serial ingest FIFO into `contentStream`. Reading, type decisions,
+/// text extraction, the durable spool, and envelope processing live in `Services/Capture`.
 @MainActor
 public final class ClipboardMonitor {
 
@@ -276,9 +277,8 @@ public final class ClipboardMonitor {
 
     // MARK: - Public API
 
-    /// v0.10.4: 移除重复的 RunLoop.add 调用
     public func startMonitoring() {
-        // v0.10.7: 确保在主线程调用，否则 Timer 不会触发
+        // The timer is added to the main run loop; started elsewhere it would never fire.
         assert(Thread.isMainThread, "startMonitoring must be called on main thread")
 
         guard !isMonitoring else { return }
@@ -393,7 +393,7 @@ public final class ClipboardMonitor {
             }
         }
 
-        // 快速提取原始数据（在主线程）
+        // Read this change's representations on the main actor.
         let extractStart = ProcessInfo.processInfo.systemUptime
         let rawData: RawClipboardData
         switch await extractRawData(from: pasteboard, changeCount: currentChangeCount) {
@@ -416,10 +416,9 @@ public final class ClipboardMonitor {
             return
         }
 
-        // v0.10.4: 根据内容类型和大小决定处理方式
-        // 1. 图片一律走后台 SHA256，避免轻指纹误判
-        // 2. 所有大内容（包括非图片）都异步处理，避免主线程阻塞
-        // 3. 只有小内容在主线程同步处理
+        // Images always take the durable envelope path so their SHA-256 runs off the main
+        // actor; other content does so from the durable-envelope size up. Everything smaller
+        // is hashed inline and queued directly.
         if rawData.type == .image || rawData.sizeBytes >= ScopyThresholds.ingestHashOffloadBytes {
             guard await submitDurableCapture(rawData, logFailure: true) else {
                 pendingPersistRetry = PendingPersistRetry(
@@ -434,7 +433,7 @@ public final class ClipboardMonitor {
             return
         }
 
-        // 小内容（非图片）：同步计算哈希，排在更早的大内容之后
+        // Small non-image content: hash inline, then queue behind any earlier large capture.
         let hash = computeHash(rawData)
         let content = ClipboardContent(
             type: rawData.type,
@@ -585,7 +584,7 @@ public final class ClipboardMonitor {
         }
     }
 
-    /// 为 RawClipboardData 计算哈希（用于小内容，在主线程同步执行）
+    /// Inline hash for small captures; envelope processing applies the same policy off the main actor.
     private func computeHash(_ rawData: RawClipboardData) -> String {
         Self.contentHash(
             type: rawData.type,

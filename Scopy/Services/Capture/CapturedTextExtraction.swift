@@ -130,7 +130,7 @@ extension ClipboardMonitor {
             )
         }
 
-        // 5. Plain text (最低优先级 - 作为兜底)
+        // 5. Plain text: the lowest-priority representation.
         if let string {
             let normalizedText = Self.normalizeText(string)
             return RawClipboardData(
@@ -395,10 +395,12 @@ extension ClipboardMonitor {
         return Double(shortLineCount) / Double(lines.count) >= 0.6
     }
 
-    /// Normalize text for consistent hashing (v0.md 3.2: 去首尾空白、统一换行)
+    /// Canonical text for both the content hash and the stored plain text: unifies line
+    /// separators, replaces NBSP, removes BOM, and trims surrounding whitespace. Replayed text
+    /// therefore loses its surrounding whitespace (architecture-review-2026-09 §3.2).
     nonisolated private static func normalizeText(_ text: String) -> String {
         text
-            // Normalize common Unicode line separators to '\n' for stable hashing (still "统一换行").
+            // Unicode line separators become '\n'.
             .replacingOccurrences(of: "\u{2028}", with: "\n") // LINE SEPARATOR
             .replacingOccurrences(of: "\u{2029}", with: "\n") // PARAGRAPH SEPARATOR
             .replacingOccurrences(of: "\u{0085}", with: "\n") // NEXT LINE

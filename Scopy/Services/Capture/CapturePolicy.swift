@@ -6,11 +6,10 @@ import UniformTypeIdentifiers
 extension ClipboardMonitor {
     // MARK: - File URL Serialization
 
-    /// 序列化文件 URL 数组为 Data
-    /// 使用文件路径而非 absoluteString，确保反序列化时能正确还原为文件 URL
+    /// Stored payload of a file capture: a JSON array of paths. Paths rather than
+    /// `absoluteString`, so replay rebuilds file URLs without a `file://` round trip.
     nonisolated static func serializeFileURLs(_ urls: [URL]) -> Data? {
         do {
-            // 使用 .path 而非 .absoluteString，避免 file:// 前缀问题
             let paths = urls.map { $0.path }
             return try JSONEncoder().encode(paths)
         } catch {
@@ -98,18 +97,19 @@ extension ClipboardMonitor {
     }
 
     nonisolated static func htmlLooksLikeOfficeSpreadsheet(_ htmlData: Data) -> Bool {
-        // 仅扫描前面一小段，避免大表格导致不必要的开销。
+        // Only the first 16 KB is scanned, so a large table costs nothing extra.
         let sample = String(decoding: htmlData.prefix(16 * 1024), as: UTF8.self).lowercased()
 
-        // 复制图片（浏览器/设计工具）常见为 <img ...>；即便 HTML 包在 table 中，也不应抢走 image。
+        // Browsers and design tools copy images as `<img …>`, sometimes inside a table; those
+        // stay images.
         if sample.contains("<img") { return false }
 
-        // Excel/Office 常见签名（不要求全部命中；任一命中即可）
+        // Any one Excel/Office signature is enough.
         if sample.contains("urn:schemas-microsoft-com:office:excel") { return true }
         if sample.contains("microsoft excel") { return true }
         if sample.contains("mso-") { return true }
 
-        // 兜底：明确的表格结构（Excel 复制单元格基本都会包含）
+        // Fallback: an explicit table structure, which copied Excel cells always carry.
         if sample.contains("<table") && (sample.contains("<td") || sample.contains("<tr")) {
             return true
         }
@@ -119,17 +119,17 @@ extension ClipboardMonitor {
 
     nonisolated static func rtfLooksLikeTable(_ rtfData: Data) -> Bool {
         let sample = String(decoding: rtfData.prefix(16 * 1024), as: UTF8.self).lowercased()
-        // RTF 表格常见控制字：\trowd / \cell
+        // RTF tables carry the \trowd / \cell control words.
         return sample.contains("\\trowd") || sample.contains("\\cell")
     }
 
     nonisolated static func stringLooksLikeTabularData(_ string: String) -> Bool {
-        // Excel/Sheets 复制单元格的 plain text 往往是 TSV（列用 tab，行用 \n）。
-        // 注意：不要仅凭“多行”就判定为表格，否则可能误伤“复制图片 + 多行文本描述”的场景。
+        // Copied Excel/Sheets cells arrive as TSV. Line count alone is not a signal: an image
+        // copied together with a multi-line description would be misread as a table.
         return string.contains("\t")
     }
 
-    /// 静态哈希计算方法（可在任意线程调用）
+    /// SHA-256 hex digest: the content hash of every stored item.
     public nonisolated static func computeHashStatic(_ data: Data) -> String {
         let digest = SHA256.hash(data: data)
         return digest.map { String(format: "%02x", $0) }.joined()
@@ -137,8 +137,8 @@ extension ClipboardMonitor {
 
     // MARK: - TIFF to PNG Conversion
 
-    /// 将 TIFF 数据转换为 PNG 格式（避免存储膨胀）
-    /// macOS 剪贴板对截图返回 TIFF（未压缩），可能比原始 PNG 大 35 倍
+    /// Re-encodes TIFF as PNG before storage: screenshots reach the pasteboard as uncompressed
+    /// TIFF, up to 35x the size of the PNG.
     nonisolated static func convertTIFFToPNG(_ tiffData: Data) -> Data? {
         guard let imageSource = CGImageSourceCreateWithData(tiffData as CFData, nil) else {
             return nil

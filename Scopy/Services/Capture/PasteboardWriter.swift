@@ -21,7 +21,6 @@ extension ClipboardMonitor {
         case rejectedByPasteboard
     }
 
-    /// Copy content to system clipboard
     public func copyToClipboard(text: String) throws {
         pasteboard.clearContents()
         defer { recordOwnWrite() }
@@ -266,19 +265,16 @@ extension ClipboardMonitor {
         )
     }
 
-    /// Copy file URLs to system clipboard
-    /// 将文件 URL 复制到系统剪贴板，支持 Finder 粘贴
+    /// Writes file URLs so Finder can paste them.
     public func copyToClipboard(fileURLs: [URL]) throws {
         pasteboard.clearContents()
         defer { recordOwnWrite() }
 
-        // 方法1: 使用 NSURL 的 NSPasteboardWriting 协议
         guard pasteboard.writeObjects(fileURLs as [NSURL]) else {
             throw PasteboardWriteFailure.rejectedByPasteboard
         }
 
-        // 方法2: 同时设置 NSFilenamesPboardType，确保 Finder 兼容
-        // 这是旧的 API，但 Finder 仍然依赖它
+        // Finder still reads the legacy NSFilenamesPboardType next to the NSURL objects.
         let paths = fileURLs.map { $0.path }
         pasteboard.setPropertyList(paths, forType: NSPasteboard.PasteboardType("NSFilenamesPboardType"))
     }
