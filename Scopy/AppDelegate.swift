@@ -36,6 +36,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private(set) var updaterController: SPUStandardUpdaterController?
     /// v0.22: 存储事件监视器引用，以便在应用退出时移除
     private var localEventMonitor: Any?
+    private var memoryPressureSource: DispatchSourceMemoryPressure?
 
     private lazy var statusItem: NSStatusItem = {
         let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -109,6 +110,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         setupHotKeyRegistration()
         installLocalEventMonitor()
+        installMemoryPressureHandler()
     }
 
     private struct LaunchContext {
@@ -184,12 +186,32 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func makeMainPanel<V: View>(rootView: V) -> FloatingPanel {
-        FloatingPanel(
+        let panel = FloatingPanel(
             contentRect: NSRect(x: 0, y: 0, width: Int(ScopySize.Window.mainWidth), height: Int(ScopySize.Window.mainHeight)),
             statusBarButton: statusItem.button
         ) {
             rootView
         }
+        // Hover bitmaps are only useful while the panel is open; pinned windows keep their own.
+        panel.onClose = { HoverPreviewImageCache.shared.removeAll() }
+        return panel
+    }
+
+    private func installMemoryPressureHandler() {
+        let source = DispatchSource.makeMemoryPressureSource(eventMask: [.warning, .critical], queue: .main)
+        source.setEventHandler {
+            MainActor.assumeIsolated { Self.purgeFrontendCaches() }
+        }
+        source.resume()
+        memoryPressureSource = source
+    }
+
+    /// Frontend caches that rebuild on demand; dropped when the system reports memory pressure.
+    static func purgeFrontendCaches() {
+        HoverPreviewImageCache.shared.removeAll()
+        MarkdownPreviewCache.shared.removeDocuments()
+        ClipboardItemDisplayText.shared.clearCaches()
+        HistoryItemPresentationCache.shared.clearCaches()
     }
 
     private func makeHostingWindow<V: View>(
@@ -302,6 +324,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             NSEvent.removeMonitor(monitor)
             localEventMonitor = nil
         }
+        memoryPressureSource?.cancel()
+        memoryPressureSource = nil
         appState.stop()
     }
 

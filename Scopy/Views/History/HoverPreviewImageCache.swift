@@ -17,10 +17,12 @@ final class HoverPreviewImageCache {
     private let now: () -> Date
     private let cache: NSCache<NSString, Entry>
     private var expiresAt: [String: Date] = [:]
+    private let cleanupInterval: TimeInterval
     private var cleanupTask: Task<Void, Never>?
 
-    init(ttl: TimeInterval = 60, now: @escaping () -> Date = { Date() }) {
+    init(ttl: TimeInterval = 60, cleanupInterval: TimeInterval = 15, now: @escaping () -> Date = { Date() }) {
         self.ttl = ttl
+        self.cleanupInterval = cleanupInterval
         self.now = now
 
         let cache = NSCache<NSString, Entry>()
@@ -29,8 +31,6 @@ final class HoverPreviewImageCache {
         // NSCache still evicts under memory pressure and entries expire after `ttl`.
         cache.totalCostLimit = 320 * 1024 * 1024
         self.cache = cache
-
-        startCleanupLoopIfNeeded()
     }
 
     deinit {
@@ -71,6 +71,7 @@ final class HoverPreviewImageCache {
         let entry = Entry(image: image)
         cache.setObject(entry, forKey: key as NSString, cost: cost)
         expiresAt[key] = now().addingTimeInterval(ttl)
+        startCleanupLoopIfNeeded()
     }
 
     func remove(_ key: String) {
@@ -81,18 +82,27 @@ final class HoverPreviewImageCache {
     func removeAll() {
         expiresAt.removeAll()
         cache.removeAllObjects()
+        cleanupTask?.cancel()
+        cleanupTask = nil
     }
 
     // MARK: - Cleanup
 
+    var isCleanupLoopRunning: Bool { cleanupTask != nil }
+
+    /// Sweeps expired entries while there are any; the loop ends once the cache is empty and
+    /// the next `setImage` starts it again.
     private func startCleanupLoopIfNeeded() {
         guard cleanupTask == nil else { return }
-
+        let intervalNs = UInt64(cleanupInterval * 1_000_000_000)
         cleanupTask = Task { [weak self] in
             while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 15_000_000_000)
-                await MainActor.run {
-                    self?.cleanupExpired()
+                try? await Task.sleep(nanoseconds: intervalNs)
+                guard let self, !Task.isCancelled else { return }
+                self.cleanupExpired()
+                if self.expiresAt.isEmpty {
+                    self.cleanupTask = nil
+                    return
                 }
             }
         }

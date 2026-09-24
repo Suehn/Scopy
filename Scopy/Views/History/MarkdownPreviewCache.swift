@@ -73,6 +73,12 @@ final class MarkdownPreviewCache: @unchecked Sendable {
         filePreviewCache.setObject(FilePreviewBox(entry), forKey: key as NSString, cost: cost)
     }
 
+    /// Drops rendered documents and file previews; metrics are tiny and keep re-hover stable.
+    func removeDocuments() {
+        htmlCache.removeAllObjects()
+        filePreviewCache.removeAllObjects()
+    }
+
     func updateFilePreviewFetchedAt(_ date: Date, forKey key: String) {
         guard let existing = filePreview(forKey: key) else { return }
         let updated = FilePreviewEntry(text: existing.text, html: existing.html, metrics: existing.metrics, fetchedAt: date)

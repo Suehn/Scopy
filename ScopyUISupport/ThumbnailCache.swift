@@ -423,6 +423,8 @@ public final class ThumbnailCache {
     private init() {
         let cache = NSCache<NSString, NSImage>()
         cache.countLimit = 1000
+        // Decoded bytes, so unusually wide thumbnails cannot grow the cache without bound.
+        cache.totalCostLimit = 32 * 1024 * 1024
         self.cache = cache
     }
 
@@ -430,8 +432,8 @@ public final class ThumbnailCache {
         cache.object(forKey: path as NSString)
     }
 
-    public func store(_ image: NSImage, forPath path: String) {
-        cache.setObject(image, forKey: path as NSString)
+    public func store(_ image: NSImage, forPath path: String, costBytes: Int) {
+        cache.setObject(image, forKey: path as NSString, cost: costBytes)
     }
 
     public func remove(path: String) {
@@ -459,7 +461,7 @@ public final class ThumbnailCache {
         }
         let commitStart = ScrollPerformanceProfile.isEnabled ? CFAbsoluteTimeGetCurrent() : nil
         let image = NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
-        store(image, forPath: path)
+        store(image, forPath: path, costBytes: cgImage.bytesPerRow * cgImage.height)
         if let commitStart {
             ScrollPerformanceProfile.recordTiming(
                 name: "image.thumbnail_main_commit_ms",

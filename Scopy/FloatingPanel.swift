@@ -42,6 +42,8 @@ class FloatingPanel: NSPanel, NSWindowDelegate {
     var isPresented: Bool = false
     var statusBarButton: NSStatusBarButton?
     private(set) var lastClosedAt: Date?
+    /// Runs after every close, whatever triggered it (toggle, copy, focus loss).
+    var onClose: (() -> Void)?
 
     init<Content: View>(
         contentRect: NSRect,
@@ -196,6 +198,7 @@ class FloatingPanel: NSPanel, NSWindowDelegate {
         isPresented = false
         lastClosedAt = Date()
         statusBarButton?.isHighlighted = false
+        onClose?()
     }
 
     override func resignKey() {

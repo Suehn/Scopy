@@ -38,24 +38,31 @@ struct ClipboardItemContentRevision: Hashable, Sendable {
     /// feeds the revision is unchanged. Rows are rebuilt on every list update during scrolling, and recomputing the
     /// digest each time measured at 11% of the main thread.
     static func resolve(item: ClipboardItemDTO) -> ClipboardItemContentRevision {
-        if let cached = memo.object(forKey: item.id as NSUUID), cached.matches(item) {
+        if let cached = memo.cache.object(forKey: item.id as NSUUID), cached.matches(item) {
             return cached.revision
         }
         let revision = ClipboardItemContentRevision(item: item)
-        memo.setObject(MemoEntry(item: item, revision: revision), forKey: item.id as NSUUID)
+        memo.cache.setObject(MemoEntry(item: item, revision: revision), forKey: item.id as NSUUID)
         return revision
     }
 
-    private static let memo: NSCache<NSUUID, MemoEntry> = {
-        let cache = NSCache<NSUUID, MemoEntry>()
-        cache.countLimit = 8192
-        return cache
-    }()
+    /// NSCache is thread-safe and its entries are immutable, so the shared memo is Sendable.
+    private final class Memo: @unchecked Sendable {
+        let cache: NSCache<NSUUID, MemoEntry> = {
+            let cache = NSCache<NSUUID, MemoEntry>()
+            cache.countLimit = 8192
+            return cache
+        }()
+    }
+
+    private static let memo = Memo()
 
     private final class MemoEntry {
         let type: ClipboardItemType
         let contentHash: String
-        let plainText: String
+        /// Kept only when the revision depends on it: a hashed text-family item is identified by
+        /// its hash, so the memo does not retain its (possibly large) body.
+        let plainText: String?
         let sizeBytes: Int
         let fileSizeBytes: Int?
         let storageRef: String?
@@ -64,7 +71,7 @@ struct ClipboardItemContentRevision: Hashable, Sendable {
         init(item: ClipboardItemDTO, revision: ClipboardItemContentRevision) {
             type = item.type
             contentHash = item.contentHash
-            plainText = item.plainText
+            plainText = revision.dependsOnPlainText ? item.plainText : nil
             sizeBytes = item.sizeBytes
             fileSizeBytes = item.fileSizeBytes
             storageRef = item.storageRef
@@ -77,7 +84,16 @@ struct ClipboardItemContentRevision: Hashable, Sendable {
                 sizeBytes == item.sizeBytes &&
                 fileSizeBytes == item.fileSizeBytes &&
                 storageRef == item.storageRef &&
-                plainText == item.plainText
+                (plainText == nil || plainText == item.plainText)
+        }
+    }
+
+    private var dependsOnPlainText: Bool {
+        switch contentIdentity {
+        case .fallbackText, .suppliedHash(_, supplementalPlainText: .some):
+            return true
+        case .suppliedHash(_, supplementalPlainText: .none):
+            return false
         }
     }
 
