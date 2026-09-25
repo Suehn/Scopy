@@ -1,15 +1,18 @@
 // One definition of "fence line" and "indentation" for every source-level rewrite that runs
 // before parsing and must leave code alone (heading repair, table code-span pipes, backslash
-// math). The rules mirror the Swift `MarkdownCodeSkipper` they replaced: any indentation may
-// precede a fence, and only spaces and tabs (Unicode Zs plus U+0009) count as leading blank.
+// math). A fence may be indented by at most three columns (a tab counts as four), as in CommonMark:
+// four or more make the line indented code, not a fence.
 
 const LEADING_BLANK = /^[\t\p{Zs}]+/u;
 
 /**
- * `{ marker, count }` when `line` is a fence marker line: optional leading blank, then three or
- * more of the same "`" or "~" character. `null` otherwise.
+ * `{ marker, count }` when `line` is a fence marker line: at most three columns of leading blank,
+ * then three or more of the same "`" or "~" character. `null` otherwise.
  */
 export function fencePrefix(line) {
+  if (leadingIndentSpaces(line) > 3) {
+    return null;
+  }
   const trimmed = String(line || "").replace(LEADING_BLANK, "");
   const marker = trimmed[0];
   if (marker !== "`" && marker !== "~") {
