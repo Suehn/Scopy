@@ -51,5 +51,7 @@ struct SectionHeader: View {
                 isHovered = false
             }
         }
+        // The List raises every row to its row estimate; keep the title next to its rows.
+        .frame(minHeight: ScopySize.Height.listRowEstimate, alignment: .bottom)
     }
 }

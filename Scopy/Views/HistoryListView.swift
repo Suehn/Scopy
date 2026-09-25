@@ -105,6 +105,12 @@ struct HistoryListView: View {
                 }
             }
             .listStyle(.plain)
+            // The List's NSTableView lays out rows it has not measured yet at this height (SwiftUI
+            // defaults it to 24 pt; a text row is 43 pt) and corrects them after a fast scroll
+            // ends, which moved the visible rows. SwiftUI's delegate answers the per-row height
+            // estimate from this value, so setting the table's `rowHeight` directly has no effect.
+            // Rows shorter than it (the section headers, the load-more row) are raised to it.
+            .environment(\.defaultMinListRowHeight, ScopySize.Height.listRowEstimate)
             .scrollContentBackground(.hidden)
             .scrollIndicators(.automatic)
             .accessibilityIdentifier("History.List")
