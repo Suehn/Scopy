@@ -61,7 +61,32 @@ final class MarkdownRenderingCorpusContractTests: XCTestCase {
                 LinkEnrichmentPayload(version: LinkEnrichmentPayload.formatVersion, fetchedAt: Date(timeIntervalSince1970: 0), entries: $0)
             }
 
-            XCTAssertEqual(MarkdownHTMLDocumentBuilder.policyPayloadJSON(context: context), testCase.payload, testCase.name)
+            let document = MarkdownHTMLDocumentBuilder.document(source: "Text", context: context)
+            XCTAssertEqual(try embeddedPolicy(in: document), testCase.payload, testCase.name)
         }
+    }
+
+    /// The exact bytes of the `policy` object in the document's render input (`{"policy":{…},"source":…}`).
+    private func embeddedPolicy(in document: String) throws -> String {
+        let open = #"<script type="application/json" id="scopy-render-input">{"policy":"#
+        let start = try XCTUnwrap(document.range(of: open)).upperBound
+        var depth = 0
+        var inString = false
+        var escaped = false
+        for index in document[start...].indices {
+            let character = document[index]
+            if inString {
+                if escaped { escaped = false } else if character == "\\" { escaped = true } else if character == "\"" { inString = false }
+                continue
+            }
+            if character == "\"" { inString = true }
+            if character == "{" { depth += 1 }
+            if character == "}" {
+                depth -= 1
+                if depth == 0 { return String(document[start...index]) }
+            }
+        }
+        XCTFail("unterminated policy object")
+        return ""
     }
 }

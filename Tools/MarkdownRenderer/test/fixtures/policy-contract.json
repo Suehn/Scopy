@@ -1,5 +1,5 @@
 {
-  "comment": "Shared Swift/JS contract for the render policy payload. `payload` is the exact JSON MarkdownHTMLDocumentBuilder.policyPayloadJSON emits for the context (sorted keys, default `/` escaping); render.js consumes it as-is; the three flags gate the renderer's source repairs. MarkdownRenderingCorpusContractTests pins the bytes, policy-contract.test.js pins the behavior.",
+  "comment": "Shared Swift/JS contract for the render policy payload. `payload` is the exact JSON of the policy object MarkdownHTMLDocumentBuilder embeds in the document for the context (sorted keys, default `/` escaping); render.js consumes it as-is; the three flags gate the renderer's source repairs. MarkdownRenderingCorpusContractTests pins the bytes, policy-contract.test.js pins the behavior.",
   "source": "\\section{Heading}\n\n\\textbf{Bold} (\\mathcal{U})\n\n[News Example](https://news.example/a?x=1)\n\n[News Example](https://news.example/b)",
   "cases": [
     {
