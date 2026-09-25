@@ -1,5 +1,5 @@
 {
-  "comment": "Synthetic inputs for the scientific-profile source repairs. `expected` was produced by the former Swift implementation (MarkdownHTMLRenderer.preprocess with the scientificMarkdown policy for `inline`, the latexDocumentLike policy for `document`); the JS port must reproduce it byte for byte.",
+  "comment": "Synthetic inputs for the scientific-profile source repairs. `expected` was produced by the former Swift implementation (MarkdownHTMLRenderer.preprocess with the scientificMarkdown policy for `inline`, the latexDocumentLike policy for `document`); the JS port must reproduce it byte for byte. Two cases deliberately differ from the Swift output, which dropped a starred tabular and everything after it and an unclosed tabular at the end of the document.",
   "cases": [
     {
       "name": "document: newline forms are unified",
@@ -32,10 +32,16 @@
       "expected": "| Name | Value | Note |\n| --- | --- | --- |\n| A | 1 | x |\n| B | 2 |  |\n| C | 3 | y extra |\n| D \\& E | 4 | z |\nAfter table"
     },
     {
-      "name": "document: starred tabular inside a quote",
+      "name": "document: starred tabular inside a quote closes on its own end tag",
       "level": "document",
-      "source": "\\begin{quote}\n\\begin{tabular*}{\\textwidth}{ll}\nH1 & H2 \\\\\nv1 & v2 \\\\\n\\end{tabular*}\n\\end{quote}",
-      "expected": ""
+      "source": "\\begin{quote}\n\\begin{tabular*}{\\textwidth}{ll}\nH1 & H2 \\\\\nv1 & v2 \\\\\n\\end{tabular*}\n\\end{quote}\nAfter the table",
+      "expected": "> | H1 | H2 |\n> | --- | --- |\n> | v1 | v2 |\nAfter the table"
+    },
+    {
+      "name": "document: an unclosed tabular stays verbatim",
+      "level": "document",
+      "source": "Intro\n\\begin{tabular}{ll}\nA & B \\\\\n\\label{kept} trailing",
+      "expected": "Intro\n\\begin{tabular}{ll}\nA & B \\\\\n\\label{kept} trailing"
     },
     {
       "name": "document: empty tabular",

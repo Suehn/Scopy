@@ -13,8 +13,9 @@ import {
 // headings, itemize/enumerate become lists, quote/center/tabular/rule/label are converted or
 // dropped. Markdown syntax islands (code, links, images, reference definitions, autolinks, bare
 // URLs and file paths) are swapped for placeholders first so the line rewrite never touches them.
-// Ported byte-for-byte from the former Swift LaTeXDocumentNormalizer + MarkdownSyntaxProtector;
-// test/fixtures/scientific-repairs.json holds the Swift goldens.
+// Ported byte-for-byte from the former Swift LaTeXDocumentNormalizer + MarkdownSyntaxProtector, except that a
+// tabular environment closes on its own end tag and an unclosed one stays verbatim (Swift let `tabular*` and an
+// unclosed table swallow the rest of the document); test/fixtures/scientific-repairs.json holds the goldens.
 
 export function normalizeLatexDocument(source) {
   if (source === "") {
@@ -256,7 +257,8 @@ function normalizeDocument(text) {
   const fences = createFenceTracker();
   const listStack = [];
   let inQuoteBlock = false;
-  let tabularLines = null;
+  // An open tabular/tabular* environment: its own end tag closes it; unclosed at the end it stays verbatim.
+  let tabular = null;
   const emit = (line) => output.push(inQuoteBlock && trim(line) !== "" ? `> ${line}` : line);
 
   for (let line of lines) {
@@ -264,15 +266,16 @@ function normalizeDocument(text) {
       output.push(line);
       continue;
     }
-    if (tabularLines) {
-      if (isEndEnvironmentLine(line, "tabular")) {
-        convertTabularToMarkdownTable(tabularLines).forEach(emit);
-        tabularLines = null;
+    if (tabular) {
+      if (isEndEnvironmentLine(line, tabular.name)) {
+        convertTabularToMarkdownTable(tabular.lines).forEach(emit);
+        tabular = null;
       } else {
-        tabularLines.push(line);
+        tabular.lines.push(line);
       }
       continue;
     }
+    const sourceLine = line;
 
     const trimmedLine = trim(line);
     if (trimmedLine.startsWith("\\label{") && trimmedLine.endsWith("}") && !trimmedLine.startsWith("`")) {
@@ -291,8 +294,9 @@ function normalizeDocument(text) {
     if (isBeginEnvironmentLine(line, "center") || isEndEnvironmentLine(line, "center")) {
       continue;
     }
-    if (trim(line).startsWith("\\begin{tabular}") || trim(line).startsWith("\\begin{tabular*}")) {
-      tabularLines = [];
+    const tabularName = ["tabular", "tabular*"].find((name) => trim(line).startsWith(`\\begin{${name}}`));
+    if (tabularName) {
+      tabular = { name: tabularName, beginLine: sourceLine, lines: [] };
       continue;
     }
     if (isBeginEnvironmentLine(line, "itemize")) {
@@ -323,6 +327,9 @@ function normalizeDocument(text) {
         ?? convertHorizontalRuleLine(line)
         ?? line
     );
+  }
+  if (tabular) {
+    output.push(tabular.beginLine, ...tabular.lines);
   }
   return output.join("\n");
 }
