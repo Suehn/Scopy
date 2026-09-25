@@ -21,6 +21,22 @@ final class SearchPerfContext: @unchecked Sendable {
         reasons.append(SearchEngineImpl.SearchPerfMetrics.Reason(name: name))
     }
 
+    /// Folds in the background full-index load this search awaited.
+    func addFullIndexLoad(_ metrics: SearchWarmLoadMetrics, itemCount: Int) {
+        for phase in metrics.phases {
+            addPhase(phase.name, ms: phase.ms)
+        }
+        for counter in metrics.counters {
+            addCounter(counter.name, value: counter.value)
+        }
+        for reason in metrics.reasons {
+            addReason(reason)
+        }
+        let source = metrics.source == .diskCache ? "full_index_source_disk_cache" : "full_index_source_database"
+        addCounter(source, value: 1)
+        addCounter("full_index_items", value: itemCount)
+    }
+
     func measure<T>(_ name: String, _ block: () throws -> T) rethrows -> T {
         let start = CFAbsoluteTimeGetCurrent()
         defer {

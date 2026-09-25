@@ -22,46 +22,6 @@ public actor SearchEngineImpl {
         }
     }
 
-    public struct SearchPerfMetrics: Sendable {
-        public struct Phase: Sendable {
-            public let name: String
-            public let ms: Double
-
-            public init(name: String, ms: Double) {
-                self.name = name
-                self.ms = ms
-            }
-        }
-
-        public struct Counter: Sendable {
-            public let name: String
-            public let value: Int
-
-            public init(name: String, value: Int) {
-                self.name = name
-                self.value = value
-            }
-        }
-
-        public struct Reason: Sendable {
-            public let name: String
-
-            public init(name: String) {
-                self.name = name
-            }
-        }
-
-        public let phases: [Phase]
-        public let counters: [Counter]
-        public let reasons: [Reason]
-
-        public init(phases: [Phase], counters: [Counter], reasons: [Reason] = []) {
-            self.phases = phases
-            self.counters = counters
-            self.reasons = reasons
-        }
-    }
-
     public struct SearchResult: Sendable {
         public let items: [ClipboardStoredItem]
         public let total: Int
@@ -102,10 +62,10 @@ public actor SearchEngineImpl {
 
     // MARK: - Properties
 
-    private let dbPath: String
+    let dbPath: String
     private let readStore: SearchReadStore
-    private let fullIndexStore: FullIndexStore
-    private let shortIndexStore: ShortIndexStore
+    let fullIndexStore: FullIndexStore
+    let shortIndexStore: ShortIndexStore
     /// The `mutation_seq` the in-memory indexes correspond to.
     private var knownMutationSeq: Int64?
 
@@ -318,7 +278,7 @@ public actor SearchEngineImpl {
 
     // MARK: - Index Builds
 
-    private func startShortQueryIndexBuildIfNeeded(force: Bool = false) {
+    func startShortQueryIndexBuildIfNeeded(force: Bool = false) {
         shortIndexStore.startBuildIfNeeded(force: force, estimatedCount: corpusMetrics?.itemCount ?? 0) { generation, snapshot in
             await self.finishShortQueryIndexBuild(generation: generation, snapshot: snapshot)
         }
@@ -350,7 +310,7 @@ public actor SearchEngineImpl {
         startFullIndexBuildIfNeeded(force: false, trigger: .interactive)
     }
 
-    private func startFullIndexBuildIfNeeded(force: Bool = false, trigger: FullIndexStore.BuildTrigger = .forced) {
+    func startFullIndexBuildIfNeeded(force: Bool = false, trigger: FullIndexStore.BuildTrigger = .forced) {
         fullIndexStore.startBuildIfNeeded(
             force: force,
             trigger: trigger,
@@ -526,16 +486,10 @@ public actor SearchEngineImpl {
                 )
                 if let perfContext {
                     return try perfContext.measure("match_evidence") {
-                        try Self.attachingMatchContexts(
-                            to: rawResult,
-                            request: request
-                        )
+                        try SearchMatchContextBuilder.attach(to: rawResult, request: request)
                     }
                 }
-                return try Self.attachingMatchContexts(
-                    to: rawResult,
-                    request: request
-                )
+                return try SearchMatchContextBuilder.attach(to: rawResult, request: request)
             }
         }, onCancel: {
             if let interruptHandle {
@@ -564,48 +518,6 @@ public actor SearchEngineImpl {
             searchTimeMs: elapsedMs,
             perf: perfContext?.snapshot(),
             matchContexts: result.matchContexts
-        )
-    }
-
-    private static func attachingMatchContexts(
-        to result: SearchResult,
-        request: SearchRequest
-    ) throws -> SearchResult {
-        guard request.hasSemanticQuery, !result.items.isEmpty else { return result }
-
-        let matcher = try SearchMatchContextBuilder.prepare(
-            request: request,
-            coverage: result.coverage,
-            cancellationCheck: { try Task.checkCancellation() }
-        )
-        var contexts: [UUID: SearchMatchContext] = [:]
-        contexts.reserveCapacity(result.items.count)
-
-        for item in result.items {
-            try Task.checkCancellation()
-            do {
-                if let context = try matcher.makeContext(
-                    plainText: item.plainText,
-                    note: item.note,
-                    cancellationCheck: { try Task.checkCancellation() }
-                ) {
-                    contexts[item.id] = context
-                }
-            } catch is CancellationError {
-                throw CancellationError()
-            } catch {
-                continue
-            }
-        }
-
-        return SearchResult(
-            items: result.items,
-            total: result.total,
-            hasMore: result.hasMore,
-            coverage: result.coverage,
-            searchTimeMs: result.searchTimeMs,
-            perf: result.perf,
-            matchContexts: contexts
         )
     }
 
@@ -1272,7 +1184,7 @@ public actor SearchEngineImpl {
 
             if let index = fullIndexStore.usableIndex {
                 if let perf, let metrics = fullIndexStore.lastWarmLoadMetrics {
-                    Self.record(metrics, index: index, perf: perf)
+                    perf.addFullIndexLoad(metrics, itemCount: index.items.count)
                 }
                 return index
             }
@@ -1282,21 +1194,6 @@ public actor SearchEngineImpl {
                 throw SearchError.searchFailed("Failed to build the full index")
             }
         }
-    }
-
-    private static func record(_ metrics: SearchWarmLoadMetrics, index: FullFuzzyIndex, perf: SearchPerfContext) {
-        for phase in metrics.phases {
-            perf.addPhase(phase.name, ms: phase.ms)
-        }
-        for counter in metrics.counters {
-            perf.addCounter(counter.name, value: counter.value)
-        }
-        for reason in metrics.reasons {
-            perf.addReason(reason)
-        }
-        let source = metrics.source == .diskCache ? "full_index_source_disk_cache" : "full_index_source_database"
-        perf.addCounter(source, value: 1)
-        perf.addCounter("full_index_items", value: index.items.count)
     }
 
     private func normalizedSearchRequest(for request: SearchRequest, trimmedQuery: String, mode: SearchMode) -> SearchRequest {
@@ -1512,81 +1409,4 @@ public actor SearchEngineImpl {
         let page = try readStore.fetchAll(filters: .init(request), window: .init(request))
         return SearchResult(items: page.items, total: page.total, hasMore: page.hasMore, coverage: .complete, searchTimeMs: 0)
     }
-
-#if DEBUG
-    func debugFullIndexHealth() -> (isBuilt: Bool, isStale: Bool, slots: Int, tombstones: Int) {
-        guard let index = fullIndexStore.index else {
-            return (false, fullIndexStore.isStale, 0, 0)
-        }
-        return (true, fullIndexStore.isStale, index.items.count, index.tombstoneCount)
-    }
-
-    func debugFullIndexLastSnapshotSource() -> String? {
-        fullIndexStore.lastSnapshotSource?.rawValue
-    }
-
-    func debugFullIndexLastDiskCacheLoadReason() -> String? {
-        fullIndexStore.lastDiskCacheLoadReason?.rawValue
-    }
-
-    func debugFullIndexBuildHealth() -> (isBuilding: Bool, pendingEvents: Int) {
-        (fullIndexStore.buildTask != nil, fullIndexStore.pendingEventCount)
-    }
-
-    /// Cancels the build task only; its completion still lands through the normal path.
-    func debugCancelFullIndexBuild() {
-        fullIndexStore.buildTask?.cancel()
-    }
-
-    func debugFullIndexDiskCachePaths() -> (cachePath: String, checksumPath: String, metadataPath: String) {
-        let paths = SearchIndexDiskCache.fullPaths(dbPath: dbPath)
-        return (cachePath: paths.cachePath, checksumPath: paths.checksumPath, metadataPath: paths.metadataPath)
-    }
-
-    func debugShortQueryIndexDiskCachePaths() -> (cachePath: String, checksumPath: String) {
-        let paths = SearchIndexDiskCache.shortPaths(dbPath: dbPath)
-        return (cachePath: paths.cachePath, checksumPath: paths.checksumPath)
-    }
-
-    func debugStartFullIndexBuild(force: Bool = true) {
-        startFullIndexBuildIfNeeded(force: force)
-    }
-
-    func debugFullIndexBuildGeneration() -> UInt64 {
-        fullIndexStore.buildGeneration
-    }
-
-    func debugAwaitFullIndexBuild() async {
-        await fullIndexStore.buildTask?.value
-    }
-
-    func debugShortQueryIndexHealth() -> (isBuilt: Bool, isBuilding: Bool) {
-        (shortIndexStore.index != nil, shortIndexStore.buildTask != nil)
-    }
-
-    func debugShortQueryIndexStats() -> (isBuilt: Bool, isBuilding: Bool, slots: Int, live: Int, tombstones: Int) {
-        let isBuilding = shortIndexStore.buildTask != nil
-        guard let index = shortIndexStore.index else {
-            return (false, isBuilding, 0, 0, 0)
-        }
-        let stats = index.healthStats()
-        return (true, isBuilding, stats.slots, stats.live, stats.tombstones)
-    }
-
-    func debugShortQueryIndexLastSnapshotSource() -> String? {
-        shortIndexStore.lastSnapshotSource?.rawValue
-    }
-
-    func debugStartShortQueryIndexBuild(force: Bool = true) {
-        startShortQueryIndexBuildIfNeeded(force: force)
-    }
-
-    func debugInstallPendingShortQueryIndexBuild(_ task: Task<Void, Never>) {
-        shortIndexStore.installPendingBuild(task)
-    }
-
-    func debugAwaitShortQueryIndexBuild() async {
-        await shortIndexStore.buildTask?.value
-    }
-#endif
 }
