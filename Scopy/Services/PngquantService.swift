@@ -161,15 +161,11 @@ public enum PngquantService {
         let io = try ScratchDirectory()
         let outputURL = io.url.appendingPathComponent("output.png")
 
-        let startedAt = DispatchTime.now().uptimeNanoseconds
         let result = try runProcess(
             executablePath: binary,
             arguments: options.baseArguments + ["--output", outputURL.path, options.colorArgument, "--", inputURL.path],
             stderrURL: io.url.appendingPathComponent("stderr"),
             timeoutSeconds: options.processTimeoutSeconds
-        )
-        logger.info(
-            "pngquant PAM \(inputURL.lastPathComponent, privacy: .public): tool \(Double(DispatchTime.now().uptimeNanoseconds &- startedAt) / 1_000_000, format: .fixed(precision: 1), privacy: .public) ms, exit \(result.terminationStatus, privacy: .public)"
         )
 
         let exit = result.terminationStatus
