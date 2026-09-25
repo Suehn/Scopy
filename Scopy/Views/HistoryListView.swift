@@ -36,7 +36,6 @@ struct HistoryListView: View {
     @State private var pinnedPreviewController = PinnedPreviewController()
     @State private var presentation = HoverPreviewPresentation()
     @State private var programmaticScrollGate = ListProgrammaticScrollGate()
-    @State private var scrollAnchorKeeper = ListScrollAnchorKeeper()
 
     private static let isUITesting: Bool = ProcessInfo.processInfo.arguments.contains("--uitesting")
     private static let isScrollProfile: Bool = ProcessInfo.processInfo.environment["SCOPY_SCROLL_PROFILE"] == "1"
@@ -128,8 +127,7 @@ struct HistoryListView: View {
                         }
                     },
                     onScrollViewAttach: scrollViewAttachHandler,
-                    programmaticScrollGate: programmaticScrollGate,
-                    anchorKeeper: scrollAnchorKeeper
+                    programmaticScrollGate: programmaticScrollGate
                 )
             )
             .background(ScrollFrameSamplerView())
@@ -143,18 +141,9 @@ struct HistoryListView: View {
                         proxy.scrollTo(id, anchor: .center)
                     }
                 }
-                let keeper = scrollAnchorKeeper
-                let viewModel = historyViewModel
-                keeper.programmaticScrollGate = programmaticScrollGate
-                keeper.itemID = { row in Self.tableRowItemID(row, in: viewModel) }
-                keeper.row = { id in Self.tableRow(ofItemID: id, in: viewModel) }
-                viewModel.projectionWillChange = { keeper.projectionWillChange() }
-                viewModel.projectionDidChange = { keeper.projectionDidChange() }
             }
             .onDisappear {
                 historyViewModel.rowLiveState.onSelectionChanged = nil
-                historyViewModel.projectionWillChange = nil
-                historyViewModel.projectionDidChange = nil
             }
         }
         .overlay { HistoryListEmptyOverlay(openSettings: openSettings) }
@@ -466,46 +455,6 @@ struct HistoryListView: View {
             detachSharedMarkdownWebViewIfAttached()
             activePopover = nil
         }
-    }
-
-    /// The List's NSTableView row order: the pinned header, the pinned rows unless collapsed, the
-    /// recent header, the recent rows, and the load-more row. Headers and the load-more row have
-    /// no item.
-    private static func tableRowItemID(_ row: Int, in viewModel: HistoryViewModel) -> UUID? {
-        let pinned = viewModel.pinnedItems
-        let unpinned = viewModel.unpinnedItems
-        var index = row
-        if !pinned.isEmpty {
-            if index == 0 { return nil }
-            index -= 1
-            if !viewModel.isPinnedCollapsed {
-                if index < pinned.count { return pinned[index].id }
-                index -= pinned.count
-            }
-        }
-        if !pinned.isEmpty || !unpinned.isEmpty {
-            if index == 0 { return nil }
-            index -= 1
-        }
-        return index >= 0 && index < unpinned.count ? unpinned[index].id : nil
-    }
-
-    private static func tableRow(ofItemID id: UUID, in viewModel: HistoryViewModel) -> Int? {
-        let pinned = viewModel.pinnedItems
-        let unpinned = viewModel.unpinnedItems
-        var offset = 0
-        if !pinned.isEmpty {
-            offset += 1
-            if !viewModel.isPinnedCollapsed {
-                if let index = pinned.firstIndex(where: { $0.id == id }) { return offset + index }
-                offset += pinned.count
-            }
-        }
-        if !pinned.isEmpty || !unpinned.isEmpty {
-            offset += 1
-        }
-        guard let index = unpinned.firstIndex(where: { $0.id == id }) else { return nil }
-        return offset + index
     }
 
     /// Shared list state a row needs, captured once per list update instead of read per row.

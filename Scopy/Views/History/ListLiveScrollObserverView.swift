@@ -31,7 +31,6 @@ struct ListLiveScrollObserverView: NSViewRepresentable {
     let onScrollEnd: () -> Void
     var onScrollViewAttach: ((NSScrollView) -> Void)? = nil
     var programmaticScrollGate: ListProgrammaticScrollGate? = nil
-    var anchorKeeper: ListScrollAnchorKeeper? = nil
 
     func makeNSView(context: Context) -> ObserverView {
         let view = ObserverView()
@@ -40,7 +39,6 @@ struct ListLiveScrollObserverView: NSViewRepresentable {
         view.onScrollEnd = onScrollEnd
         view.onScrollViewAttach = onScrollViewAttach
         view.programmaticScrollGate = programmaticScrollGate
-        view.anchorKeeper = anchorKeeper
         return view
     }
 
@@ -50,7 +48,6 @@ struct ListLiveScrollObserverView: NSViewRepresentable {
         nsView.onScrollEnd = onScrollEnd
         nsView.onScrollViewAttach = onScrollViewAttach
         nsView.programmaticScrollGate = programmaticScrollGate
-        nsView.anchorKeeper = anchorKeeper
         nsView.attachIfNeeded()
     }
 }
@@ -73,9 +70,6 @@ extension ListLiveScrollObserverView {
         var onScrollEnd: (() -> Void)?
         var onScrollViewAttach: ((NSScrollView) -> Void)?
         var programmaticScrollGate: ListProgrammaticScrollGate?
-        var anchorKeeper: ListScrollAnchorKeeper? {
-            didSet { anchorKeeper?.scrollView = observedScrollView }
-        }
         var pressedMouseButtonsProvider: () -> Int = {
             NSEvent.pressedMouseButtons
         }
@@ -146,7 +140,6 @@ extension ListLiveScrollObserverView {
             detach()
             observedScrollView = scrollView
             attachedWindow = scrollView.window
-            anchorKeeper?.scrollView = scrollView
             onScrollViewAttach?(scrollView)
             installEventMonitorIfNeeded()
 
@@ -197,7 +190,6 @@ extension ListLiveScrollObserverView {
             attachedWindow = nil
             cachedWindow = nil
             cachedWindowResolvedScrollView = nil
-            anchorKeeper?.scrollView = nil
             removeEventMonitor()
             endOwnedPointerInteraction()
             boundsSettleWorkItem?.cancel()
