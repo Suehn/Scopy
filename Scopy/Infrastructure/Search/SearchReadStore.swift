@@ -169,7 +169,7 @@ final class SearchReadStore {
     }
 
     /// A prepared statement for `sql`, reset and ready to bind; the most recent 32 are kept.
-    func prepare(_ sql: String) throws -> SQLiteStatement {
+    private func prepare(_ sql: String) throws -> SQLiteStatement {
         guard let connection else { throw SearchEngineImpl.SearchError.databaseNotOpen }
 
         if let cached = statementCache[sql] {
@@ -639,27 +639,10 @@ final class SearchReadStore {
         return index
     }
 
-    /// Every row's summary, bracketed by `PRAGMA data_version` reads that tell the caller whether
-    /// a commit landed during the scan; `nil` when the scan fails or the task is cancelled.
-    static func loadFullIndex(
-        dbPath: String,
-        reserveSlots: Int
-    ) -> (index: FullFuzzyIndex, startDataVersion: Int64, endDataVersion: Int64)? {
+    /// Every row's summary; `nil` when the scan fails or the task is cancelled.
+    static func loadFullIndex(dbPath: String, reserveSlots: Int) -> FullFuzzyIndex? {
         guard let conn = try? openConnection(dbPath: dbPath) else { return nil }
         defer { conn.close() }
-
-        func readDataVersion() -> Int64? {
-            do {
-                let stmt = try conn.prepare("PRAGMA data_version")
-                defer { stmt.reset() }
-                guard try stmt.step() else { return nil }
-                return stmt.columnInt64(0)
-            } catch {
-                return nil
-            }
-        }
-
-        guard let startDataVersion = readDataVersion() else { return nil }
 
         var index = FullFuzzyIndex(reserveSlots: reserveSlots)
 
@@ -678,9 +661,8 @@ final class SearchReadStore {
             return nil
         }
 
-        guard let endDataVersion = readDataVersion() else { return nil }
         guard !Task.isCancelled else { return nil }
-        return (index, startDataVersion, endDataVersion)
+        return index
     }
 
     // MARK: - SQL fragments

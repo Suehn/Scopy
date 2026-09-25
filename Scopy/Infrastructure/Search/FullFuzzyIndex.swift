@@ -80,7 +80,5 @@ enum FullIndexSnapshotSource: String, Sendable {
 
 struct FullIndexSnapshot: Sendable {
     let index: FullFuzzyIndex
-    let startDataVersion: Int64
-    let endDataVersion: Int64
     let source: FullIndexSnapshotSource
 }

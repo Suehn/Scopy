@@ -253,7 +253,7 @@ enum SearchIndexDiskCache {
             return .skip(reason: .fingerprintMismatch, metadata: metadata)
         }
 
-        let isTombstoneStale = SearchEngineImpl.shouldMarkFullIndexStaleDueToTombstones(
+        let isTombstoneStale = FullIndexStore.needsRebuild(
             itemCount: metadata.itemCount,
             tombstoneCount: metadata.tombstoneCount
         )
@@ -326,7 +326,7 @@ enum SearchIndexDiskCache {
         if candidate.metadata == nil {
             persistFullIndexDiskCacheMetadataIfPossible(metadata, at: candidate.metadataPath)
         }
-        if SearchEngineImpl.shouldMarkFullIndexStaleDueToTombstones(
+        if FullIndexStore.needsRebuild(
             itemCount: index.items.count,
             tombstoneCount: index.tombstoneCount
         ) {
@@ -347,7 +347,7 @@ enum SearchIndexDiskCache {
         #endif
 
         return FullIndexDiskCacheLoadOutcome(
-            snapshot: FullIndexSnapshot(index: index, startDataVersion: 0, endDataVersion: 0, source: .diskCache),
+            snapshot: FullIndexSnapshot(index: index, source: .diskCache),
             reason: .diskCacheHit,
             metadata: metadata
         )
