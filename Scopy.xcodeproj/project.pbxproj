@@ -28,6 +28,7 @@
 		07BD6F621DB2BF7FA767FEFE /* AboutSettingsPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3A1C22A73EE48460C9F1F650 /* AboutSettingsPage.swift */; };
 		080246A0B930E3A84FBABD01 /* HistoryListInteractionCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 019417A9D1565A70FDEB2B29 /* HistoryListInteractionCoordinatorTests.swift */; };
 		083CFF007945EF31B94011FF /* KaTeX_SansSerif-Bold.woff2 in Resources */ = {isa = PBXBuildFile; fileRef = C4CA466F95629B4628DF59F6 /* KaTeX_SansSerif-Bold.woff2 */; };
+		08A3887ADD419ED4EF747CE9 /* ListScrollAnchorKeeper.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8FE8589D8D939B2CDCF818AA /* ListScrollAnchorKeeper.swift */; };
 		08C8AD849C0EC181764970E4 /* MarkdownHTMLDocumentBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = E671677DECEAFE931657E79D /* MarkdownHTMLDocumentBuilder.swift */; };
 		08E87F7EC45D297E1A477546 /* MarkdownPreviewNavigationPolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 69C8E31A934581C57B87146A /* MarkdownPreviewNavigationPolicyTests.swift */; };
 		091E8BF4E5D21C87F210496F /* HistoryListState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 74563B8569159BF7E9365CEA /* HistoryListState.swift */; };
@@ -164,6 +165,7 @@
 		375449EE01B4DDE18CA36421 /* HistoryListStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 17241150321C665A1683C64F /* HistoryListStateTests.swift */; };
 		37DCC06F8558E8AD146115C6 /* KaTeX_Main-Italic.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 4CCFB5A572DDB5DFF6FC01F1 /* KaTeX_Main-Italic.ttf */; };
 		386816ACBAC8D0F16018E34F /* HistoryListInteractionCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE65E2E804A2670FCF17404B /* HistoryListInteractionCoordinator.swift */; };
+		39385F25D578363D99D72E68 /* ListScrollAnchorKeeper.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8FE8589D8D939B2CDCF818AA /* ListScrollAnchorKeeper.swift */; };
 		39650A6D9C8A53B7FF7260D5 /* news-openai-hugging-face.jpg in Resources */ = {isa = PBXBuildFile; fileRef = 980DAA8656401BFD34393B68 /* news-openai-hugging-face.jpg */; };
 		3987123A264B4C656B541840 /* TextMetricsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2AB48529B6E462A63799B326 /* TextMetricsTests.swift */; };
 		3A02C38CC8FE16847AF9472B /* KaTeX_Script-Regular.woff2 in Resources */ = {isa = PBXBuildFile; fileRef = FF66BCA00380B574D43BB7A5 /* KaTeX_Script-Regular.woff2 */; };
@@ -261,6 +263,7 @@
 		5DEA997D3181D53CD433BC75 /* PopoverWindowObserver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 78B1C2A3C6505AD7597DFF7C /* PopoverWindowObserver.swift */; };
 		5E4F26434E12A6F9818A0E8C /* KaTeX_Script-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = CBE2D342D5B027E53089C35D /* KaTeX_Script-Regular.ttf */; };
 		5E7CE158A9A7BB0AD50CA392 /* ClipboardItemDisplayTextTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B48DDD4A33C8F8F615B17CA0 /* ClipboardItemDisplayTextTests.swift */; };
+		5F778F9209CE3A04FC0E9A42 /* ListScrollAnchorKeeperTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1C3A68B441B3700302B22095 /* ListScrollAnchorKeeperTests.swift */; };
 		5FE10C58E1689AD7B7B32F77 /* chatgpt_copy_chinese_table.html in Resources */ = {isa = PBXBuildFile; fileRef = 3E8EDDB53D0EE6BC581B6CA8 /* chatgpt_copy_chinese_table.html */; };
 		6090378DFFF8FDE1F72BF971 /* HistoryHoverPreviewPipelineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B07691C802480ACD52B76823 /* HistoryHoverPreviewPipelineTests.swift */; };
 		60CE434763A73C85700FF131 /* raw-html-literal-markdown.md in Resources */ = {isa = PBXBuildFile; fileRef = 8B2D906C211948F48A3A1046 /* raw-html-literal-markdown.md */; };
@@ -365,6 +368,7 @@
 		83C6F37CC243FC98B4DA9096 /* KaTeX_AMS-Regular.woff in Resources */ = {isa = PBXBuildFile; fileRef = 3B27D58B30D7E42FD5A09A9F /* KaTeX_AMS-Regular.woff */; };
 		83FD16DEED8306D6A70DB755 /* chatgpt-file-links.md in Resources */ = {isa = PBXBuildFile; fileRef = A196CA0115E4C671A45AD88A /* chatgpt-file-links.md */; };
 		8428066FF2584ACB44D935FD /* KaTeX_Fraktur-Regular.woff in Resources */ = {isa = PBXBuildFile; fileRef = 9A4492992CF21106308EF239 /* KaTeX_Fraktur-Regular.woff */; };
+		8449C42FBA9AE255A8766573 /* ListScrollAnchorKeeper.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8FE8589D8D939B2CDCF818AA /* ListScrollAnchorKeeper.swift */; };
 		84545D8DEA775E702773B41A /* MockClipboardServiceFixedDatasetTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 04BBAB06BBBEFAD9C75F1425 /* MockClipboardServiceFixedDatasetTests.swift */; };
 		847904181954981532FFE71E /* SectionHeader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 72C7E22A4D3725C49208C650 /* SectionHeader.swift */; };
 		849089F007FB3D528DFDF598 /* HistoryItemMarkdownExportController.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5A9EE21DB9627ADA27E99B3 /* HistoryItemMarkdownExportController.swift */; };
@@ -608,6 +612,7 @@
 		D8738CFBB1B08CD6B2CD14E3 /* PreviewControls.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0FAE180C180AC1677449E237 /* PreviewControls.swift */; };
 		D88291E95D3BC8B8A45456DE /* markdown_codex_icons.md in Resources */ = {isa = PBXBuildFile; fileRef = 7F62A8B9DF24C0578AD04A8C /* markdown_codex_icons.md */; };
 		D9CF498F1C141AA27D635CAF /* favicon-investing-32.png in Resources */ = {isa = PBXBuildFile; fileRef = 593FFA8E5E4F1C431B42F670 /* favicon-investing-32.png */; };
+		D9E1C67CA90A0CF494141D3B /* ListScrollAnchorKeeperTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1C3A68B441B3700302B22095 /* ListScrollAnchorKeeperTests.swift */; };
 		DA2483A05985496EAFA7CD17 /* ScopyIcons.swift in Sources */ = {isa = PBXBuildFile; fileRef = FAECF70623C7580CB548B68A /* ScopyIcons.swift */; };
 		DA3FC3D055F108D0EC80E643 /* image-group-chatgpt-search-results.jpg in Resources */ = {isa = PBXBuildFile; fileRef = 5198384EBFCABFD921F2BAAC /* image-group-chatgpt-search-results.jpg */; };
 		DA3FD88C0191F89C444DBC70 /* rich_markdown.md in Resources */ = {isa = PBXBuildFile; fileRef = D97F17C245BCC541ADD97F99 /* rich_markdown.md */; };
@@ -789,6 +794,7 @@
 		1A4241D7C868D4CFCA4B6CCE /* asset-manifest.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "asset-manifest.json"; sourceTree = "<group>"; };
 		1ADABCABCFD7B7E85F0224D3 /* KaTeX_Math-Italic.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "KaTeX_Math-Italic.ttf"; sourceTree = "<group>"; };
 		1BA4429AD8887915F23E586F /* PinnedPreviewWindowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PinnedPreviewWindowView.swift; sourceTree = "<group>"; };
+		1C3A68B441B3700302B22095 /* ListScrollAnchorKeeperTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ListScrollAnchorKeeperTests.swift; sourceTree = "<group>"; };
 		1C4B5140A59A1707B71546B5 /* weather-mostly-cloudy-light.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "weather-mostly-cloudy-light.png"; sourceTree = "<group>"; };
 		1CD2C0D1A2BF40256A0620F5 /* HistoryItemRowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryItemRowController.swift; sourceTree = "<group>"; };
 		1DD2701F34BADFA415D6EF27 /* KaTeX_Size4-Regular.woff2 */ = {isa = PBXFileReference; path = "KaTeX_Size4-Regular.woff2"; sourceTree = "<group>"; };
@@ -939,6 +945,7 @@
 		8C7E1DDFD0D54856F1284221 /* ScopyTSanTests-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = "ScopyTSanTests-Info.plist"; sourceTree = "<group>"; };
 		8D861CAAB54D3FB78AB36051 /* MarkdownPreviewWebView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownPreviewWebView.swift; sourceTree = "<group>"; };
 		8E91DA63EC8BC224068DDAD7 /* news-openai-kiro.jpg */ = {isa = PBXFileReference; lastKnownFileType = image.jpeg; path = "news-openai-kiro.jpg"; sourceTree = "<group>"; };
+		8FE8589D8D939B2CDCF818AA /* ListScrollAnchorKeeper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ListScrollAnchorKeeper.swift; sourceTree = "<group>"; };
 		9077C012BF49FB5A7F406FDF /* HistoryItemFileNoteEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryItemFileNoteEditorView.swift; sourceTree = "<group>"; };
 		90ABBA09BA409A5DF23C445E /* FTSQueryBuilderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FTSQueryBuilderTests.swift; sourceTree = "<group>"; };
 		916B40014CC1AF81D9893229 /* WebViewLifecycleTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebViewLifecycleTests.swift; sourceTree = "<group>"; };
@@ -1442,6 +1449,7 @@
 				3D3209F851E4886CFEA36357 /* KnownDataVersionExternalWriteTests.swift */,
 				27833E5F87FE84BAF1B0E42D /* LinkEnrichmentTests.swift */,
 				DC43DBB202CDD9AF7BC4B970 /* ListLiveScrollObserverViewTests.swift */,
+				1C3A68B441B3700302B22095 /* ListScrollAnchorKeeperTests.swift */,
 				737EA000345DD36ADB608E14 /* LocalizationCatalogTests.swift */,
 				560C361190AB8C1F6C867B31 /* MarkdownComputedStyleTests.swift */,
 				493C86BD8E4F500AA9F36C33 /* MarkdownDetectorTests.swift */,
@@ -1531,6 +1539,7 @@
 				DFF43B49A8AE6293848A6558 /* HoverPreviewSizeBudget.swift */,
 				D8917ECD9B983D1DE16E8771 /* HoverPreviewTextSizing.swift */,
 				69E5EDE952C99FFB76658AD2 /* ListLiveScrollObserverView.swift */,
+				8FE8589D8D939B2CDCF818AA /* ListScrollAnchorKeeper.swift */,
 				568714EFD72C9DC5533473A8 /* LoadMoreTriggerView.swift */,
 				BE407AE516932998B9FCE1A0 /* MarkdownDetector.swift */,
 				E671677DECEAFE931657E79D /* MarkdownHTMLDocumentBuilder.swift */,
@@ -2281,6 +2290,8 @@
 				4BD1A1FAECDDFB350793FF3D /* ListLiveScrollObserverHarnessView.swift in Sources */,
 				41CE19EE13324E299BEB89A3 /* ListLiveScrollObserverView.swift in Sources */,
 				F8FB1B34C0808C3D6D7A8FAE /* ListLiveScrollObserverViewTests.swift in Sources */,
+				39385F25D578363D99D72E68 /* ListScrollAnchorKeeper.swift in Sources */,
+				D9E1C67CA90A0CF494141D3B /* ListScrollAnchorKeeperTests.swift in Sources */,
 				3AC7E0410AE0ACFE0E0EB4EC /* LiveMarkdownDocument.swift in Sources */,
 				91130AD28128B7601FCDCACC /* LoadMoreTriggerView.swift in Sources */,
 				437D09C393E7FBBE8EB9D265 /* Localization.swift in Sources */,
@@ -2490,6 +2501,8 @@
 				97EEBA9812BB331F4C5595C6 /* ListLiveScrollObserverHarnessView.swift in Sources */,
 				F46EA2E946C32E791B2710E6 /* ListLiveScrollObserverView.swift in Sources */,
 				7801C543CD9B8CD0A39C4160 /* ListLiveScrollObserverViewTests.swift in Sources */,
+				8449C42FBA9AE255A8766573 /* ListScrollAnchorKeeper.swift in Sources */,
+				5F778F9209CE3A04FC0E9A42 /* ListScrollAnchorKeeperTests.swift in Sources */,
 				44627552BF758D58B3192EDF /* LiveMarkdownDocument.swift in Sources */,
 				74BEC382983B8DE7AAAAF6D1 /* LoadMoreTriggerView.swift in Sources */,
 				80C5D92E52A700850F1E5997 /* Localization.swift in Sources */,
@@ -2642,6 +2655,7 @@
 				BB6D77B1C24FFB6B6B3BEA20 /* LinkEnrichmentStore.swift in Sources */,
 				262269F64423C3104B626FEB /* ListLiveScrollObserverHarnessView.swift in Sources */,
 				36012B3E0492649A27A3334A /* ListLiveScrollObserverView.swift in Sources */,
+				08A3887ADD419ED4EF747CE9 /* ListScrollAnchorKeeper.swift in Sources */,
 				98350810B6B0F435AD57BEF1 /* LoadMoreTriggerView.swift in Sources */,
 				94AB18BED4E8018E91611810 /* Localization.swift in Sources */,
 				410980DA64696262D9658A0D /* MarkdownDetector.swift in Sources */,
