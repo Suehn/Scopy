@@ -96,7 +96,7 @@ Search marker: `SCOPY_EXPORT_PDF_GLOBAL_SCALE_MISMATCH`
 
 - Forced PDF export has an extra failure mode that preview and snapshot export do not have: pre-PDF global-scale budgeting uses the WKWebView viewport width, while PDF rasterization ultimately uses the real PDF page boxes.
 - If the PDF page box is narrower than the viewport, the final raster height becomes larger than the earlier estimate. Long content can then fail only on the PDF path with symptoms such as clipped long exports or `PDF rasterization too large`.
-- When touching Markdown export, keep the PDF preflight/re-scale guard next to this marker and keep `ExportMarkdownPNGUITests.testAutoExportGlobalScalePDFDoesNotLeaveBlankRight()` green.
+- When touching Markdown export, keep the PDF preflight/re-scale guard next to this marker and check a long real-app export at 200% resolution, which takes the PDF path (no automated UI test covers it since the raw-HTML export tests were removed).
 - Global export scale must preserve the already-laid-out content width. Do not compensate by widening `#content` by `1 / scale`; that changes paragraph line breaks and table column measurement instead of scaling the preview-equivalent layout.
 
 Implication: preview/export work must remain background-safe and should not mutate unrelated persisted content.

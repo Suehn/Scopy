@@ -66,30 +66,19 @@ extension ExportCoordinator {
             estimatedHeightPoints: scrollHeightPoints
         )
 
-        let isUITesting = ProcessInfo.processInfo.arguments.contains("--uitesting")
         let processInfo = ProcessInfo.processInfo
-        let pdfExplicitlyRequired = processInfo.environment[ExportEnv.requirePDFExport] == "1"
         let projectedOutputHeightPixels = max(1, scrollHeightPoints * outputPixelScaleFactor)
         let projectedOutputTotalPixels = max(1, targetWidthPixels * projectedOutputHeightPixels)
-        let shouldBypassPDFFromRasterBudget = !pdfExplicitlyRequired
-            && projectedOutputTotalPixels > MarkdownExportRenderConstants.maxInMemoryBitmapPixels + 0.5
+        let shouldBypassPDFFromRasterBudget = projectedOutputTotalPixels > MarkdownExportRenderConstants.maxInMemoryBitmapPixels + 0.5
         let shouldBypassPDFFromHeight = MarkdownExportRenderConstants.shouldBypassPDFForHeight(scrollHeightPoints)
-        let shouldBypassPDFForVeryTallContent = !pdfExplicitlyRequired
-            && (
-                shouldBypassPDFFromHeight
-                || shouldBypassPDFFromRasterBudget
-            )
-        let requiresPDFExportForResolution = outputScale > 1.001 && !shouldBypassPDFForVeryTallContent
+        let shouldBypassPDFForVeryTallContent = shouldBypassPDFFromHeight || shouldBypassPDFFromRasterBudget
+        let requiresPDFExport = outputScale > 1.001 && !shouldBypassPDFForVeryTallContent
         let shouldAttemptPDF: Bool = {
-            let env = processInfo.environment
-            if let raw = env[ExportEnv.disablePDFExport], raw == "1" { return false }
-            if pdfExplicitlyRequired { return true }
+            if processInfo.environment[ExportEnv.disablePDFExport] == "1" { return false }
             if shouldBypassPDFForVeryTallContent { return false }
-            if requiresPDFExportForResolution { return true }
-            if isUITesting {
-                return env[ExportEnv.uiTestEnablePDFExport] == "1"
-            }
-            return true
+            if requiresPDFExport { return true }
+            // UI tests capture 1x exports through the snapshot path.
+            return !processInfo.arguments.contains("--uitesting")
         }()
         if shouldBypassPDFForVeryTallContent {
             let pdfBypassReason = shouldBypassPDFFromHeight ? "height" : "rasterBudget"
@@ -97,7 +86,6 @@ extension ExportCoordinator {
                 "Skipping PDF export and falling back to snapshot export. reason=\(pdfBypassReason, privacy: .public) heightPt=\(scrollHeightPoints, privacy: .public) projectedPixels=\(projectedOutputTotalPixels, privacy: .public)"
             )
         }
-        let requiresPDFExport = requiresPDFExportForResolution || pdfExplicitlyRequired
         if requiresPDFExport, !shouldAttemptPDF {
             let underlying = NSError(
                 domain: "Scopy.MarkdownExport",
@@ -180,10 +168,6 @@ extension ExportCoordinator {
                     estimatedHeightPoints: currentHeightPoints
                 )
                 continue
-            }
-
-            if let dumpPath = ProcessInfo.processInfo.environment[ExportEnv.dumpPDFPath], !dumpPath.isEmpty {
-                try? pdfData.write(to: URL(fileURLWithPath: dumpPath), options: [.atomic])
             }
 
             try advance(to: .rasterizePDF)

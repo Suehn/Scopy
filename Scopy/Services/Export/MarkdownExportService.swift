@@ -382,17 +382,7 @@ enum MarkdownExportRenderConstants {
     }
 
     // Raise the default height budget 10x while keeping extra-long exports off the heap.
-    static var maxTotalPixels: CGFloat {
-        let processInfo = ProcessInfo.processInfo
-        if processInfo.arguments.contains("--uitesting"),
-           let raw = processInfo.environment["SCOPY_UITEST_EXPORT_MAX_TOTAL_PIXELS"],
-           let value = Double(raw),
-           value.isFinite,
-           value >= 1_000_000 {
-            return CGFloat(value)
-        }
-        return defaultMaxInlineBitmapPixels * maxHeightBudgetMultiplier
-    }
+    static let maxTotalPixels: CGFloat = defaultMaxInlineBitmapPixels * maxHeightBudgetMultiplier
 
     static var maxInMemoryBitmapPixels: CGFloat {
         min(maxTotalPixels, defaultMaxInlineBitmapPixels)

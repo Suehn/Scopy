@@ -9,9 +9,6 @@ import WebKit
 final class ExportCoordinator: NSObject, WKNavigationDelegate {
     enum ExportEnv {
         static let disablePDFExport = "SCOPY_EXPORT_DISABLE_PDF"
-        static let uiTestEnablePDFExport = "SCOPY_UITEST_ENABLE_PDF_EXPORT"
-        static let requirePDFExport = "SCOPY_EXPORT_REQUIRE_PDF"
-        static let dumpPDFPath = "SCOPY_EXPORT_PDF_DUMP_PATH"
     }
 
     let html: String
