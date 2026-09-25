@@ -1,4 +1,5 @@
 import {
+  closingBraceScan,
   createFenceTracker,
   fencePrefix,
   isWhitespaceUnit,
@@ -400,25 +401,10 @@ function removeInlineLabels(segment) {
   let out = segment;
   let start = out.indexOf("\\label{");
   while (start !== -1) {
-    let i = start + "\\label{".length;
-    let depth = 1;
-    let scanned = 0;
-    while (i < out.length && scanned < 4000) {
-      const ch = out[i];
-      if (ch === "{") {
-        depth += 1;
-      }
-      if (ch === "}") {
-        depth -= 1;
-        if (depth === 0) {
-          i += 1;
-          break;
-        }
-      }
-      i += 1;
-      scanned += 1;
-    }
-    out = out.slice(0, start) + out.slice(i);
+    // An unbalanced label removes what was scanned: at most 4,000 characters of it.
+    const close = closingBraceScan(out, start + "\\label{".length, 4000);
+    const end = close.index === -1 ? close.end : close.index + 1;
+    out = out.slice(0, start) + out.slice(end);
     start = out.indexOf("\\label{");
   }
   return out;
