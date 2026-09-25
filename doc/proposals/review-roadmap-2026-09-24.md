@@ -345,15 +345,17 @@ hh 的决定：内部结构项全做，并设红队复核；产品项全部加�
 - 第一轮（搜索 + 产品）9 项：P1 撤销删除跨 `await` 覆盖待删槽（连续删除时第三条留在数据库却被隐藏）→ 8c38e47 在任何 await 前接管槽；P2 延迟删除与分页 offset 不一致 → `pagingOffset`；P2 撤销深页行丢分页 → 就地插回原索引并恢复证据；P2 ⌘ 提示不随顺序变 → 投影变化时重算；P2 冷索引构建 `try?` 静默漏行 → 构建失败并报错；P2 冷构建等待不可取消 → 等待者可取消、共享构建继续；P2 为测试 seam 放宽 `private` 与无消费者接口 → seam 回同文件、恢复 private、删 `buildTrigger`/`TopKSelector.count`；P2 登录项审批状态回到应用后不刷新 → `didBecomeActive` 与 Save 前重读；P2 本地化测试只验证了未查到资源的原串 → 改为校验编译进 bundle 的 `.strings`/`.stringsdict`。
 - 第二轮（渲染线 + 当日整合）14 项：P1 连续删除后真实 `.itemDeleted` 事件递增 `searchVersion` 使最新 Undo 与分页补偿失效 → 待删槽改键在 `projectionIdentity`（只在换查询/清空时变）；P2 撤销用旧整数索引在新捕获后顺序错 → 按删除时的前后邻居插回；P2 竞态测试没进入声称的交错 → 用 60 s 窗口让第二次删除亲自提交第一次并在其中挂起；P2 停止位移日志会把 400 ms 内的新滚动算进去 → 按滚动代次与程序滚动门过滤。渲染侧 P1 导出取消不停止 detached 工作且提前释放并发槽、P1 `\begin{tabular*}` 吞掉表格与后文并被固化为 golden，以及 P2 fence scanner 缩进代码边界、Unicode 扫描上限语义、无动画帧时的陈旧缓存、K7 二次隐藏、Swift 残留的导出 CSS/JS 与 `</head>` 回退、只供测试的 `policyPayloadJSON`、UI 测试删除后的无消费者 hook、导出拆分扩大 internal 状态——交渲染线子代理修。
 
-**滚动停止跳变（hh 2026-09-25 实机反馈）**
+**滚动停止跳变（hh 2026-09-25 实机反馈，已定位并修复）**
 
-- 产品线曾以 a35bc06 把 List 未测量行估高设为 43 pt（文本行高）；hh 在含该提交的构建（0.81.0 build 615）上仍看到快速滚动停下的跳变，且它把段头抬到 43 pt，违反"样式不变"，已回滚（d186bac）。
-- Codex astra（high）根因排序：① NSTableView 延迟测量与混合行高（文本 43 / 文件 ≈52 / 缩略图 ≈60 pt），估计值只有一个，无法用 `defaultMinListRowHeight` 消除；② 分页分块（20 行/20 ms）或模糊搜索排名替换恰在停止瞬间落地；③ 停止后批量提交等待中的缩略图；④ hover 恢复；⑤ `scrollTo` 已由源码排除。
-- 已加观测点 e7c8837：滚动停止后 100/400 ms 内若 clip view 位移 ≥0.5 pt 或文档高度变化，`ScopyLog.ui` 记一条 "Scroll settled: content shifted …"。hh 实机区分步骤：关闭缩略图重复；只在文本行区域快滚；看跳变时页脚计数是否同时变化；停止后立刻把指针移出列表。日志：`log stream --predicate 'subsystem == "com.scopy.app" AND category == "ui"'`。
+- 产品线曾以 a35bc06 把 List 未测量行估高设为 43 pt；hh 在含该提交的构建（build 615）上仍看到跳变，且它把段头抬到 43 pt，违反"样式不变"，已回滚（d186bac）。
+- hh 实机排除：关缩略图仍跳、纯文本区域仍跳、总数不变。随后用滚动会话内逐帧日志（e7c8837/64554eb，`log stream --level info`，`.info` 不落盘）抓到 7 次滚动 678 帧：向上滚零异常；向下滚时单帧内文档高度骤降 526/1462/562/183/1669/479/168 pt，同一帧顶边下的行从 216→244、269→301、114→164，紧接着 4 个 +607.5 pt 台阶（4 块 × 20 行 × 估计高度 30.4）。结论：**分页把新页追加进 List 时，NSTableView 重新询问全部行高，屏幕外的行只能回答估计值**，文档整体变矮、视口下的内容整体位移；快速滚动恰在惯性收尾时到达预取点（末尾前 40 行），于是感觉"停下才跳"。
+- 修复 25a9832 `ListScrollAnchorKeeper`：`HistoryViewModel.mutateProjection` 前后通过 `projectionWillChange`/`projectionDidChange` 让列表记下顶边那一行（按 item id）与行内偏移，表格文档 frame 一变就在同一帧内把 clip 原点校正回去；行被替换（搜索结果）时不校正。不改任何样式。单元测试用真实 NSTableView 验证行高重算与前插两种情形。
+- 8fd9ffb：每页 100 → 300 行、每块 20 → 50 行（hh 提议）：快速滚动时分页周期减为约 1/3，每行摊到的 List 更新次数也减少（每次更新都触发全表行高重查）。
+- 观测点保留：滚动会话内只有文档高度变化或顶边行跳变超出滚动量解释时才记一条 `Layout moved the list …`；停止后 100/400 ms 的 `Scroll settled …` 只在位移时记录。
 
 **未做（明确留下）**
 
-- 滚动停止跳变的修复：待 hh 按上面四步区分后再定；"样式不变"前提下若根因是①，SwiftUI `List` 没有逐行估高 API，需要产品取舍。
+- 滚动锚定修复与 300 行分页的帧时间 A/B 未做（需要有 Accessibility 授权的 Terminal）；hh 实机确认为准。
 - F3/F4/F6 仍是条件项；前端性能 A/B（`make perf-search-type`、`profile_scroll.py`、`hoverstall`、`list.body`/`row.init`）需要在有 Accessibility 授权的 Terminal 里按性能证据协议做，本会话 shell 不能注入输入。
 - 搜索结果行每次 body 求值都构造 Accessibility 描述（约 7 次本地化调用，改动前也是每次拼接中文），Codex 建议纳入 A/B。
 - B6 每周 `quick_check`、B8、D13 pin → detached、旧提案归档（M8）。
