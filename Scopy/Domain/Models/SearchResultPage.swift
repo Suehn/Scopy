@@ -20,6 +20,7 @@ public struct SearchMatchTextRange: Sendable, Equatable, Hashable {
 /// A short, single-line excerpt that explains one part of a search match.
 public struct SearchMatchFragment: Sendable, Equatable, Hashable {
     public let source: SearchMatchSource
+    /// Empty when the matched content has no visible characters; the UI shows a placeholder.
     public let text: String
     public let highlightedRanges: [SearchMatchTextRange]
 

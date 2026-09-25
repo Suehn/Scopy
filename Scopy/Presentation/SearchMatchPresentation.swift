@@ -17,11 +17,13 @@ enum SearchMatchPresentation {
         }
 
         if context.occurrenceCount > 1 || context.occurrenceCountIsTruncated {
-            let suffix = context.occurrenceCountIsTruncated ? "+" : ""
-            append("\(context.occurrenceCount)\(suffix) 处 · ", to: &result)
+            let count = context.occurrenceCountIsTruncated
+                ? String(localized: "\(context.occurrenceCount)+ matches")
+                : String(localized: "\(context.occurrenceCount) matches")
+            append("\(count) · ", to: &result)
         }
         if context.isPositionOnly {
-            append("位置命中 · ", to: &result)
+            append("\(String(localized: "Position match")) · ", to: &result)
         }
 
         let hasMixedSources = Set(context.fragments.map(\.source)).count > 1
@@ -46,14 +48,16 @@ enum SearchMatchPresentation {
         context: SearchMatchContext,
         itemType: ClipboardItemType
     ) -> String {
-        let countSuffix = context.occurrenceCountIsTruncated ? "处以上命中" : "处命中"
+        let count = context.occurrenceCountIsTruncated
+            ? String(localized: "\(context.occurrenceCount) or more matches found")
+            : String(localized: "\(context.occurrenceCount) matches found")
         var parts = [
-            "\(modeLabel(context.mode))搜索",
-            "\(context.occurrenceCount)\(countSuffix)"
+            String(localized: "\(modeLabel(context.mode)) search"),
+            count
         ]
 
         if context.isPositionOnly {
-            parts.append("位置命中")
+            parts.append(String(localized: "Position match"))
         }
 
         let hasMultipleFragments = context.fragments.count > 1
@@ -62,23 +66,22 @@ enum SearchMatchPresentation {
                 for: fragment.source,
                 itemType: itemType,
                 alwaysShowContent: true
-            ) ?? "正文"
+            ) ?? String(localized: "Content")
             let fragmentLabel = hasMultipleFragments
-                ? "片段\(index + 1)，\(source)"
+                ? String(localized: "Fragment \(index + 1), \(source)")
                 : source
+            let text = displayText(for: fragment)
             let highlights = highlightedStrings(in: fragment)
             if highlights.isEmpty {
-                parts.append("\(fragmentLabel)：\(fragment.text)")
+                parts.append(String(localized: "\(fragmentLabel): \(text)"))
             } else {
-                let visible = highlights.prefix(4).joined(separator: "、")
-                let suffix = highlights.count > 4 ? "等" : ""
-                parts.append(
-                    "\(fragmentLabel)：\(fragment.text)；命中词：\(visible)\(suffix)"
-                )
+                let visible = ListFormatter.localizedString(byJoining: Array(highlights.prefix(4)))
+                let matches = highlights.count > 4 ? String(localized: "\(visible) and more") : visible
+                parts.append(String(localized: "\(fragmentLabel): \(text); matches: \(matches)"))
             }
         }
 
-        return parts.joined(separator: "。") + "。"
+        return parts.map { String(localized: "\($0).") }.joined(separator: " ")
     }
 
     private static func sourceLabel(
@@ -88,16 +91,21 @@ enum SearchMatchPresentation {
     ) -> String? {
         switch source {
         case .note:
-            return "备注"
+            return String(localized: "Note")
         case .content where itemType == .file:
-            return "路径"
+            return String(localized: "Path")
         case .content where itemType == .image:
-            return "图片"
+            return String(localized: "Image")
         case .content where alwaysShowContent:
-            return "正文"
+            return String(localized: "Content")
         case .content:
             return nil
         }
+    }
+
+    /// A fragment with no text matched content that has no visible characters.
+    private static func displayText(for fragment: SearchMatchFragment) -> String {
+        fragment.text.isEmpty ? String(localized: "(Blank content)") : fragment.text
     }
 
     private static func append(_ text: String, to result: inout AttributedString) {
@@ -108,7 +116,7 @@ enum SearchMatchPresentation {
         fragment: SearchMatchFragment,
         to result: inout AttributedString
     ) {
-        let characters = Array(fragment.text)
+        let characters = Array(displayText(for: fragment))
         var cursor = 0
         for range in fragment.highlightedRanges {
             if cursor < range.offset {
@@ -139,16 +147,17 @@ enum SearchMatchPresentation {
         }
     }
 
+    /// Search modes are product terms and stay untranslated, as in the header menu.
     private static func modeLabel(_ mode: SearchMode) -> String {
         switch mode {
         case .exact:
-            return "精确"
+            return "Exact"
         case .fuzzy:
-            return "模糊"
+            return "Fuzzy"
         case .fuzzyPlus:
-            return "增强模糊"
+            return "Fuzzy+"
         case .regex:
-            return "正则"
+            return "Regex"
         }
     }
 }

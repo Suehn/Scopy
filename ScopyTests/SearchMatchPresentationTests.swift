@@ -25,7 +25,7 @@ final class SearchMatchPresentationTests: XCTestCase {
 
         XCTAssertEqual(
             String(text.characters),
-            "2 处 · 正文 · body needle  /  备注 · note needle"
+            "2 matches · Content · body needle  /  Note · note needle"
         )
         XCTAssertEqual(highlightedRunCount(in: text), 2)
         XCTAssertTrue(highlightedRuns(in: text).allSatisfy { $0[AttributeScopes.SwiftUIAttributes.ForegroundColorAttribute.self] == .black })
@@ -44,8 +44,8 @@ final class SearchMatchPresentationTests: XCTestCase {
                 ),
                 itemType: .text
             ),
-            "精确搜索。2处命中。片段1，正文：body needle；命中词：needle。"
-                + "片段2，备注：note needle；命中词：needle。"
+            "Exact search. 2 matches found. Fragment 1, Content: body needle; matches: needle."
+                + " Fragment 2, Note: note needle; matches: needle."
         )
     }
 
@@ -66,8 +66,8 @@ final class SearchMatchPresentationTests: XCTestCase {
 
         XCTAssertEqual(
             description,
-            "增强模糊搜索。2处命中。片段1，正文：first alpha context；命中词：alpha。"
-                + "片段2，正文：second beta context；命中词：beta。"
+            "Fuzzy+ search. 2 matches found. Fragment 1, Content: first alpha context; matches: alpha."
+                + " Fragment 2, Content: second beta context; matches: beta."
         )
     }
 
@@ -95,9 +95,10 @@ final class SearchMatchPresentationTests: XCTestCase {
             itemType: .text
         )
 
+        let visibleTerms = ListFormatter.localizedString(byJoining: ["a", "b", "c", "d"])
         XCTAssertEqual(
             description,
-            "精确搜索。5处命中。备注：a b c d e complete note context；命中词：a、b、c、d等。"
+            "Exact search. 5 matches found. Note: a b c d e complete note context; matches: \(visibleTerms) and more."
         )
     }
 
@@ -131,7 +132,7 @@ final class SearchMatchPresentationTests: XCTestCase {
             metadataPrefix: nil
         )
 
-        XCTAssertEqual(String(text.characters), "3+ 处 · 位置命中 · 路径 · …archive.txt")
+        XCTAssertEqual(String(text.characters), "3+ matches · Position match · Path · …archive.txt")
         XCTAssertEqual(highlightedRunCount(in: text), 0)
     }
 
@@ -151,7 +152,24 @@ final class SearchMatchPresentationTests: XCTestCase {
             metadataPrefix: nil
         )
 
-        XCTAssertEqual(String(text.characters), "2 处 · 图片 · image clue  /  备注 · note clue")
+        XCTAssertEqual(String(text.characters), "2 matches · Image · image clue  /  Note · note clue")
+    }
+
+    func testBlankFragmentShowsPlaceholder() {
+        let context = SearchMatchContext(
+            mode: .regex,
+            fragments: [SearchMatchFragment(source: .content, text: "", highlightedRanges: [])],
+            occurrenceCount: 1,
+            occurrenceCountIsTruncated: false,
+            isPositionOnly: true
+        )
+
+        let text = SearchMatchPresentation.attributedText(context: context, itemType: .text, metadataPrefix: nil)
+        XCTAssertEqual(String(text.characters), "Position match · (Blank content)")
+        XCTAssertEqual(
+            SearchMatchPresentation.accessibilityDescription(context: context, itemType: .text),
+            "Regex search. 1 matches found. Position match. Content: (Blank content)."
+        )
     }
 
     func testHistoryItemHarnessRendersSearchEvidenceOffscreen() throws {

@@ -1042,11 +1042,7 @@ public enum SearchMatchContextBuilder {
     ) -> SearchMatchFragment? {
         guard let firstMatch = matches.first else { return nil }
         if sourceText.isEmpty, firstMatch.range.location == 0, firstMatch.range.length == 0 {
-            return SearchMatchFragment(
-                source: source,
-                text: "（空内容）",
-                highlightedRanges: []
-            )
+            return SearchMatchFragment(source: source, text: "", highlightedRanges: [])
         }
 
         guard !sourceText.isEmpty,
@@ -1094,11 +1090,8 @@ public enum SearchMatchContextBuilder {
             hasTrailingOmission: sliceEnd != sourceText.endIndex
         )
         if fragment.text.isEmpty {
-            return SearchMatchFragment(
-                source: source,
-                text: "（空白内容）",
-                highlightedRanges: []
-            )
+            // Whitespace-only content: the presentation shows a placeholder for an empty fragment.
+            return SearchMatchFragment(source: source, text: "", highlightedRanges: [])
         }
         return fragment
     }

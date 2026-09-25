@@ -20,8 +20,63 @@
     "%@ / %@": {
       "shouldTranslate": false
     },
+    "%@ and more": {
+      "comment": "Accessibility: more highlighted terms were omitted",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ 等"
+          }
+        }
+      }
+    },
+    "%@ search": {
+      "comment": "Accessibility: the search mode, e.g. \"Exact search\"",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ 搜索"
+          }
+        }
+      }
+    },
     "%@ · %lld": {
       "shouldTranslate": false
+    },
+    "%@.": {
+      "comment": "Accessibility: one sentence of the match description",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@。"
+          }
+        }
+      }
+    },
+    "%@: %@": {
+      "comment": "Accessibility: fragment label and its text",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@：%2$@"
+          }
+        }
+      }
+    },
+    "%@: %@; matches: %@": {
+      "comment": "Accessibility: fragment label, its text and the highlighted terms",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@：%2$@；命中词：%3$@"
+          }
+        }
+      }
     },
     "%lld": {
       "shouldTranslate": false
@@ -113,8 +168,77 @@
         }
       }
     },
+    "%lld matches": {
+      "comment": "Search evidence line: number of matches in the item",
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld match"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld matches"
+                }
+              }
+            }
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld 处"
+          }
+        }
+      }
+    },
+    "%lld matches found": {
+      "comment": "Accessibility description of a search match",
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld match found"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld matches found"
+                }
+              }
+            }
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld 处命中"
+          }
+        }
+      }
+    },
     "%lld ms": {
       "shouldTranslate": false
+    },
+    "%lld or more matches found": {
+      "comment": "Accessibility description of a search match with a truncated count",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld 处以上命中"
+          }
+        }
+      }
     },
     "%lld results": {
       "localizations": {
@@ -182,6 +306,17 @@
         }
       }
     },
+    "%lld+ matches": {
+      "comment": "Search evidence line: the match count was truncated",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld+ 处"
+          }
+        }
+      }
+    },
     "%lld+ results": {
       "localizations": {
         "zh-Hans": {
@@ -201,6 +336,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "%1$lld/%2$lld 条"
+          }
+        }
+      }
+    },
+    "(Blank content)": {
+      "comment": "Search evidence for content with no visible characters",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "（空白内容）"
           }
         }
       }
@@ -632,6 +778,17 @@
         }
       }
     },
+    "Content": {
+      "comment": "Search evidence source label: the item body",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正文"
+          }
+        }
+      }
+    },
     "Content size limit": {
       "localizations": {
         "zh-Hans": {
@@ -954,6 +1111,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "首屏加载"
+          }
+        }
+      }
+    },
+    "Fragment %lld, %@": {
+      "comment": "Accessibility: n-th evidence fragment and its source label",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "片段 %lld，%@"
           }
         }
       }
@@ -1530,6 +1698,17 @@
         }
       }
     },
+    "Path": {
+      "comment": "Search evidence source label: a file path",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "路径"
+          }
+        }
+      }
+    },
     "Performance and ingest metrics": {
       "localizations": {
         "zh-Hans": {
@@ -1576,6 +1755,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "采样频率"
+          }
+        }
+      }
+    },
+    "Position match": {
+      "comment": "The query matched a position only, such as a regex anchor",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "位置命中"
           }
         }
       }

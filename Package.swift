@@ -23,6 +23,7 @@ let package = Package(
                 "AppDelegate.swift",
                 "FloatingPanel.swift",
                 "Design",
+                "Localization",
                 "Observables",
                 "Presentation",
                 "Resources",

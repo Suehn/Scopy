@@ -263,7 +263,7 @@ final class SearchMatchContextBuilderTests: XCTestCase {
 
         XCTAssertEqual(context.occurrenceCount, 1)
         XCTAssertTrue(context.isPositionOnly)
-        XCTAssertEqual(context.fragments.map(\.text), ["（空内容）"])
+        XCTAssertEqual(context.fragments.map(\.text), [""])
     }
 
     func testWhitespaceRegexProducesVisiblePositionEvidence() throws {
@@ -271,7 +271,7 @@ final class SearchMatchContextBuilderTests: XCTestCase {
 
         XCTAssertEqual(context.occurrenceCount, 1)
         XCTAssertTrue(context.isPositionOnly)
-        XCTAssertEqual(context.fragments.map(\.text), ["（空白内容）"])
+        XCTAssertEqual(context.fragments.map(\.text), [""])
     }
 
     func testRegexKeepsEmojiGraphemeIntact() throws {

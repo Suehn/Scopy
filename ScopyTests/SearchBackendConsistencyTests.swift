@@ -122,7 +122,7 @@ final class SearchBackendConsistencyTests: XCTestCase {
         let context = try XCTUnwrap(imageHit.matchContext)
 
         XCTAssertTrue(context.isPositionOnly)
-        XCTAssertEqual(context.fragments.map(\.text), ["（空内容）"])
+        XCTAssertEqual(context.fragments.map(\.text), [""])
     }
 
     private static func makeSharedInMemoryDatabasePath() -> String {
