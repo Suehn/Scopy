@@ -253,6 +253,28 @@ extension ListLiveScrollObserverView {
             guard isScrollingReported, !isLiveScrolling, !isBoundsScrolling else { return }
             isScrollingReported = false
             onScrollEnd?()
+            logContentShiftAfterScrollEnd()
+        }
+
+        /// Evidence for the "list jumps after a fast scroll stops" report: a clip view that moves
+        /// after the scroll has settled, with no new scroll input, means a layout correction moved
+        /// the content. Logs only when it happens.
+        private func logContentShiftAfterScrollEnd() {
+            guard let scrollView = observedScrollView else { return }
+            let clipView = scrollView.contentView
+            let originY = clipView.bounds.origin.y
+            let documentHeight = scrollView.documentView?.frame.height ?? 0
+            for delayMs in [100, 400] {
+                DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(delayMs)) { [weak self] in
+                    guard let self, !self.isScrollingReported, self.observedScrollView === scrollView else { return }
+                    let shift = clipView.bounds.origin.y - originY
+                    let heightDelta = (scrollView.documentView?.frame.height ?? 0) - documentHeight
+                    guard abs(shift) >= 0.5 || abs(heightDelta) >= 0.5 else { return }
+                    ScopyLog.ui.info(
+                        "Scroll settled: content shifted \(shift, format: .fixed(precision: 1), privacy: .public) pt and document height changed \(heightDelta, format: .fixed(precision: 1), privacy: .public) pt within \(delayMs, privacy: .public) ms of the stop"
+                    )
+                }
+            }
         }
 
         private func installEventMonitorIfNeeded() {
