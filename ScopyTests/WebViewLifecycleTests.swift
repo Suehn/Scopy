@@ -365,8 +365,10 @@ final class WebViewLifecycleTests: XCTestCase {
 
         XCTAssertFalse(document.isRenderReady)
         XCTAssertEqual(document.evaluate("window.ScopyDocument.state.renderFailed") as? Bool, true)
-        // A missing file-URL stylesheet never fires `error` in WebKit; the stylesheet deadline ends it instead.
-        XCTAssertEqual(document.evaluate("window.ScopyDocument.state.unifiedErrorReason") as? String, "stylesheet timeout")
+        // Whether a missing file-URL stylesheet fires `error` depends on the WebKit build: macOS 15.7 waits for the
+        // stylesheet deadline, the macos-15 CI image reports the failure. Both end the document as a failure.
+        let reason = document.evaluate("window.ScopyDocument.state.unifiedErrorReason") as? String
+        XCTAssertTrue(reason == "stylesheet timeout" || reason == "stylesheet failed", "unexpected reason: \(reason ?? "nil")")
     }
 
     private func runMainLoopUntil(timeout: TimeInterval, condition: () -> Bool) -> Bool {
