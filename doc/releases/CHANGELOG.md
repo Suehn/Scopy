@@ -12,6 +12,35 @@
 
 - No unreleased entries.
 
+## [v0.82.0] - 2026-09-26
+
+### Fixed
+
+- The history list no longer jumps when a fast scroll ends: the explicit `.id(item.id)` that `v0.80.1` removed from the rows is back, so the List keeps its measured row heights across updates.
+- A failed search, load or page fetch keeps the rows on screen with a retry in the footer; pin, delete, clear, AirDrop and Reveal failures are visible.
+- ⌥⌫ does not delete the item while its note is being edited; keyboard navigation, ⏎ and ⌥⌫ follow the displayed order and skip a collapsed pinned section; hover changes the selection only after real pointer movement.
+- A second instance fails to start with a message instead of sharing the storage root; capture evaluates each change once, retries a failed write from cached data, replays in creation order and names TIFF captures correctly; payloads above 100 MiB can be read again.
+- Export cancellation stops the detached work before releasing its slot; starred `tabular*` environments, fences indented up to three columns and character-counted brace scans render as before the renderer migration.
+
+### Added
+
+- Undo for a deletion (5 s window, footer Undo or ⌘Z), ⌘1–9 copying with slot hints while ⌘ is held, a status-item right-click menu, Launch at Login inside the settings transaction, and an English / Simplified Chinese interface that follows the system language.
+- Export progress phases with a cancel button; About folds its metrics into a Diagnostics group.
+
+### Changed
+
+- Search engine, clipboard monitor and Markdown rendering chain decomposed: `SearchEngineImpl` 3,546 → 1,510 lines with `SearchReadStore`, `FullIndexRanker`, `FuzzyMatcher`, `FullIndexStore`, `ShortIndexStore`; `ClipboardMonitor` 2,728 → 671 lines with the `Services/Capture` types; one `MarkdownHTMLDocumentBuilder.document(source:context:)` document with the source repairs in the renderer bundle (`rendererVersion` 13), external base CSS and runtime, and a CSP without inline script.
+- The schema is required explicitly (`SQLiteSchema.requireCurrentSchema`); the trigram fallback, `data_version` token, `COUNT(*)` fallbacks and `schema_version` table are gone. Each commit journals exactly one sequenced change; cleanup no longer rebuilds both indexes.
+- Memory: `UInt32` postings, the full index is released after 60 s idle or on memory pressure, front-end caches release with the panel. Paging loads 300 rows per page in 50-row chunks. Actor renamed `ClipboardBackend`; comments are English throughout.
+
+### Removed
+
+- Eleven runtime performance flags and the `Runtime` directory, 82 compatibility symlinks, unused repository search queries and `SearchPlanner`, the raw-HTML `--uitesting` export entry points and their UI tests, Debug-only mock and harness views from Release builds, the duplicate `NSLock.withLock`, and dead Make targets and their test classes.
+
+### Performance
+
+- Real-input A/B against `v0.81.0` (Release, three A/A + three ABBA pairs): typing "markdown" at 8 keys/s runs 31% fewer List body evaluations and 42% fewer row initializations; a 12 s wheel scroll runs 32% fewer row initializations; CPU and frame times are unchanged within noise, with no regression. Snapshot search bench: `cmd` p95 0.48 ms, prepared `cm` p95 4.87 ms, cold `cm` 43.6 ms.
+
 ## [v0.81.0] - 2026-09-23
 
 ### Changed
