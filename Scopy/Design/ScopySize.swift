@@ -40,9 +40,6 @@ enum ScopySize {
         private static var u: CGFloat { ScopySize.unit }
 
         static let listItem: CGFloat = u * 9
-        /// Laid-out height of a text history row. The history List estimates rows it has not
-        /// laid out yet at this height; see `HistoryListView`.
-        static let listRowEstimate: CGFloat = 43
         static let header: CGFloat = u * 11
         static let footer: CGFloat = u * 8
         static let loadMore: CGFloat = u * 7.5
