@@ -351,7 +351,7 @@ hh 的决定：内部结构项全做，并设红队复核；产品项全部加�
 - 逐帧日志（e7c8837/64554eb，`log stream --level info`）证明：向下快滚时单帧内文档高度骤降 526–1669 pt、视口顶边下的行跳 28–50 行，紧接着分页块按估计高度追加；即使无分页的向上快滚，文档高度也每帧 ±900–2300 pt 摆动。机制是 SwiftUI `List` 底层 NSTableView 丢掉已测行高、按估计值重排。
 - hh 指出"渐进加载之前没有这个问题"。用同一份数据逐版本实机二分：v0.77.1 不跳、v0.78.0（分块分页 + 40 行预取）不跳、v0.79.0 不跳、v0.80.0 不跳、**456abdf 跳**、v0.80.1 跳、v0.81.0 跳。当前树关掉 40 行预取仍跳；当前树恢复行上的 `.id(item.id)` 不跳。
 - 根因：456abdf（09-04 "Stop rebuilding row state SwiftUI never draws from"）认为 `ForEach` 已按 id 识别子视图、行上的 `.id(item.id)` 是多余的身份作用域而删掉；实际上没有显式身份时 List 每次更新都让 NSTableView 丢失已测行高。修复 98b7e05 恢复该行并在开发指南加规则 14。
-- 同批保留：8fd9ffb 每页 100 → 300、每块 20 → 50（hh 提议，减少快速滚动时的分页次数）；观测点 `Layout moved the list …` / `Scroll settled …` / `Projection changed …`。`ListScrollAnchorKeeper`（25a9832）是在找到根因前加的补偿，实机确认根因修复后单独足够即删除。
+- 同批保留：8fd9ffb 每页 100 → 300、每块 20 → 50（hh 提议，减少快速滚动时的分页次数）；观测点 `Layout moved the list …` / `Scroll settled …` / `Projection changed …`。`ListScrollAnchorKeeper`（25a9832）是在找到根因前加的补偿；hh 实机确认只恢复 `.id` 即不跳后已删除。
 
 **未做（明确留下）**
 
