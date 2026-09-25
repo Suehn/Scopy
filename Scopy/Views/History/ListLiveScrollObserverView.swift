@@ -231,6 +231,8 @@ extension ListLiveScrollObserverView {
                 guard isLiveScrolling || isScrollWheelInputCurrent() else { return }
                 isBoundsScrolling = true
                 reportScrollStartIfNeeded()
+            } else if !isScrollWheelInputCurrent() {
+                logLayoutDrivenClipMove()
             }
             boundsSettleWorkItem?.cancel()
             let workItem = DispatchWorkItem { [weak self] in
@@ -247,6 +249,7 @@ extension ListLiveScrollObserverView {
             guard !isScrollingReported else { return }
             isScrollingReported = true
             scrollGeneration &+= 1
+            lastLoggedClipOriginY = observedScrollView?.contentView.bounds.origin.y
             onScrollStart?()
         }
 
@@ -259,7 +262,26 @@ extension ListLiveScrollObserverView {
             logContentShiftAfterScrollEnd()
         }
 
-        /// Evidence for the "list jumps after a fast scroll stops" report: a clip view that moves
+        private var lastLoggedClipOriginY: CGFloat?
+
+        /// Evidence for the "list jumps after a fast scroll stops" report, part one: inside a
+        /// scroll session, the clip view moving while no scroll-wheel event is current is not the
+        /// user's input or its momentum frames but a layout correction (row heights re-measured,
+        /// rows re-tiled). Logs the move with the row under the top edge.
+        private func logLayoutDrivenClipMove() {
+            guard let scrollView = observedScrollView else { return }
+            let originY = scrollView.contentView.bounds.origin.y
+            defer { lastLoggedClipOriginY = originY }
+            guard let previous = lastLoggedClipOriginY, abs(originY - previous) >= 0.5 else { return }
+            let row = Self.firstVisibleRow(in: scrollView)
+            let documentHeight: CGFloat = scrollView.documentView?.frame.height ?? 0
+            let eventType = NSApp.currentEvent.map { String(describing: $0.type) } ?? "none"
+            ScopyLog.ui.info(
+                "Layout moved the list \(originY - previous, format: .fixed(precision: 1), privacy: .public) pt with no scroll input (current event \(eventType, privacy: .public)); first visible row \(row.index, privacy: .public) at \(row.top, format: .fixed(precision: 1), privacy: .public) pt, height \(row.height, format: .fixed(precision: 1), privacy: .public), document \(documentHeight, format: .fixed(precision: 1), privacy: .public) pt"
+            )
+        }
+
+        /// Evidence for the "list jumps after a fast scroll stops" report, part two: a clip view that moves
         /// after the scroll has settled, while no newer user or programmatic scroll has started,
         /// means a layout correction moved the content. Logs only when it happens.
         private func logContentShiftAfterScrollEnd() {
