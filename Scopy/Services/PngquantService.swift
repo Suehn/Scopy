@@ -3,8 +3,6 @@ import Foundation
 import os
 
 public enum PngquantService {
-    private static let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "Scopy", category: "pngquant")
-
     public struct Options: Sendable, Equatable {
         public static let defaultProcessTimeoutSeconds: TimeInterval = 60
 
@@ -358,11 +356,11 @@ public enum PngquantService {
         do {
             let output = try compressPNGData(pngData, options: options)
             if output.count > 0, output.count != pngData.count {
-                logger.debug("pngquant compressed PNG: \(pngData.count, privacy: .public) -> \(output.count, privacy: .public) bytes")
+                ScopyLog.pngquant.debug("pngquant compressed PNG: \(pngData.count, privacy: .public) -> \(output.count, privacy: .public) bytes")
             }
             return output
         } catch {
-            logger.warning("pngquant skipped: \(error.localizedDescription, privacy: .public)")
+            ScopyLog.pngquant.warning("pngquant skipped: \(error.localizedDescription, privacy: .public)")
             return pngData
         }
     }
@@ -372,7 +370,7 @@ public enum PngquantService {
         do {
             return try compressPAMFile(inputURL, options: options)
         } catch {
-            logger.warning("pngquant PAM skipped: \(error.localizedDescription, privacy: .public)")
+            ScopyLog.pngquant.warning("pngquant PAM skipped: \(error.localizedDescription, privacy: .public)")
             return nil
         }
     }
@@ -381,11 +379,11 @@ public enum PngquantService {
         do {
             let replaced = try compressPNGFileInPlace(fileURL, options: options)
             if replaced {
-                logger.debug("pngquant compressed PNG file in-place: \(fileURL.path, privacy: .private)")
+                ScopyLog.pngquant.debug("pngquant compressed PNG file in-place: \(fileURL.path, privacy: .private)")
             }
             return replaced
         } catch {
-            logger.warning("pngquant file skipped: \(error.localizedDescription, privacy: .public)")
+            ScopyLog.pngquant.warning("pngquant file skipped: \(error.localizedDescription, privacy: .public)")
             return false
         }
     }

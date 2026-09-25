@@ -4,8 +4,7 @@ import SwiftUI
 import XCTest
 import ScopyKit
 
-/// AppState 单元测试
-/// 验证状态管理、搜索防抖、键盘导航等核心逻辑
+/// AppState unit tests: state management, search debouncing and keyboard navigation.
 @MainActor
 final class AppStateTests: XCTestCase {
 
@@ -91,7 +90,7 @@ final class AppStateTests: XCTestCase {
         XCTAssertNil(appState.selectedID)
     }
 
-    // MARK: - Data Loading Tests (v0.md 2.2: 首屏 50-100 条)
+    // MARK: - Data Loading Tests
 
     func testInitialLoadFetches50Items() async {
         mockService.setItemCount(100)
@@ -400,92 +399,92 @@ final class AppStateTests: XCTestCase {
 
     // MARK: - v0.11 Keyboard Navigation Boundary Tests
 
-    /// v0.11: 单项列表时调用 highlightNext 行为正确
+    /// highlightNext on a single-item list.
     func testHighlightNextOnSingleItem() async {
         mockService.setItemCount(1)
         await appState.load()
 
         XCTAssertEqual(appState.items.count, 1)
 
-        // 无选中时，选中第一项
+        // Nothing selected: selects the first item.
         appState.highlightNext()
         XCTAssertEqual(appState.selectedID, appState.items[0].id)
 
-        // 已选中唯一项时，保持选中（或循环到自己）
+        // The only item is selected: stays selected (wraps to itself).
         appState.highlightNext()
         XCTAssertEqual(appState.selectedID, appState.items[0].id)
     }
 
-    /// v0.11: 单项列表时调用 highlightPrevious 行为正确
+    /// highlightPrevious on a single-item list.
     func testHighlightPreviousOnSingleItem() async {
         mockService.setItemCount(1)
         await appState.load()
 
         XCTAssertEqual(appState.items.count, 1)
 
-        // 无选中时，选中最后一项（也是第一项）
+        // Nothing selected: selects the last item, which is also the first.
         appState.highlightPrevious()
         XCTAssertEqual(appState.selectedID, appState.items[0].id)
 
-        // 已选中唯一项时，保持选中（或循环到自己）
+        // The only item is selected: stays selected (wraps to itself).
         appState.highlightPrevious()
         XCTAssertEqual(appState.selectedID, appState.items[0].id)
     }
 
-    /// v0.11: 选中项被删除后导航行为正确
+    /// Navigation after the selected item was deleted.
     func testNavigationAfterSelectedItemDeleted() async {
         mockService.setItemCount(5)
         await appState.load()
 
-        // 选中第三项
+        // Select the third item.
         appState.selectedID = appState.items[2].id
         let selectedItem = appState.items[2]
 
-        // 删除选中项
+        // Delete the selected item.
         await appState.delete(selectedItem)
 
-        // 选中项应该被清除或移动到下一项
-        // 根据 deleteSelectedItem 的实现，应该选中下一项
-        // 但 delete 方法不会自动更新 selectedID
-        // 此时 selectedID 指向已删除的项
+        // The selection should be cleared or move to the next item.
+        // deleteSelectedItem selects the next item,
+        // but delete alone does not update selectedID,
+        // so selectedID still points at the deleted item here.
 
-        // 调用 highlightNext 应该能正常工作
+        // highlightNext must still work:
         appState.highlightNext()
-        // 由于原选中项已不存在，应该选中第一项
+        // the old selection is gone, so it selects the first item.
         XCTAssertNotNil(appState.selectedID)
     }
 
-    /// v0.11: 删除选中项后选中下一项
+    /// Deleting the selected item selects the next one.
     func testDeleteSelectedItemSelectsNext() async {
         mockService.setItemCount(5)
         await appState.load()
 
-        // 选中第二项
+        // Select the second item.
         appState.selectedID = appState.items[1].id
         let nextItemID = appState.items[2].id
 
         await appState.deleteSelectedItem()
 
-        // 应该选中原来的第三项（现在是第二项）
+        // The former third item (now second) should be selected.
         XCTAssertEqual(appState.selectedID, nextItemID)
     }
 
-    /// v0.11: 删除最后一项时选中前一项
+    /// Deleting the last item selects the previous one.
     func testDeleteLastItemSelectsPrevious() async {
         mockService.setItemCount(3)
         await appState.load()
 
-        // 选中最后一项
+        // Select the last item.
         appState.selectedID = appState.items[2].id
         let previousItemID = appState.items[1].id
 
         await appState.deleteSelectedItem()
 
-        // 应该选中前一项
+        // The previous item should be selected.
         XCTAssertEqual(appState.selectedID, previousItemID)
     }
 
-    /// v0.11: 删除唯一项后选中为空
+    /// Deleting the only item clears the selection.
     func testDeleteOnlyItemClearsSelection() async {
         mockService.setItemCount(1)
         await appState.load()
@@ -865,9 +864,9 @@ final class TestMockClipboardService: ClipboardServiceProtocol {
     var searchDelayNsByQuery: [String: UInt64] = [:]
     /// When true, the artificial search delay will not be interrupted by task cancellation (simulates a backend that can't cancel promptly).
     var searchDelayIgnoresCancellation: Bool = false
-    /// v0.29: 渐进搜索测试 - 指定查询首屏模拟预筛 total=-1
+    /// Staged search: the first page of a given query simulates a prefilter with total = -1.
     var simulatePrefilterQueries: Set<String> = []
-    /// 记录每次 search 请求，便于验证渐进/分页行为
+    /// Records every search request so staged and paged behaviour can be verified.
     var recordedSearchRequests: [SearchRequest] = []
 
     var eventStream: AsyncStream<ClipboardEvent> {
@@ -1114,7 +1113,7 @@ final class TestMockClipboardService: ClipboardServiceProtocol {
     }
 
     func getImageData(itemID: UUID) async throws -> Data? {
-        // Mock 服务不存储实际图片数据
+        // The mock stores no image data.
         return nil
     }
 
@@ -1128,7 +1127,7 @@ final class TestMockClipboardService: ClipboardServiceProtocol {
     func syncExternalImageSizeBytesFromDisk() async throws -> Int { 0 }
 
     func getRecentApps(limit: Int) async throws -> [String] {
-        // 返回 mock 数据中的 app 列表
+        // The apps present in the mock data.
         let apps = Set(items.compactMap { $0.appBundleID })
         return Array(apps.prefix(limit))
     }

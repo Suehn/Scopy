@@ -95,7 +95,7 @@ final class ConcurrencyTests: XCTestCase {
         var results: [SearchEngineImpl.SearchResult] = []
         for i in 0..<20 {
             let request = SearchRequest(
-                query: String(i % 10), // 短查询触发缓存
+                query: String(i % 10), // A short query exercises the cache.
                 mode: .exact,
                 appFilter: nil,
                 typeFilter: nil,

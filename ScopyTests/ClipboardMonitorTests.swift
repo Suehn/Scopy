@@ -2,8 +2,7 @@ import AppKit
 import XCTest
 @testable import ScopyKit
 
-/// ClipboardMonitor 单元测试
-/// 验证剪贴板监控和内容提取功能
+/// ClipboardMonitor unit tests: pasteboard monitoring and content extraction.
 @MainActor
 final class ClipboardMonitorTests: XCTestCase {
 
