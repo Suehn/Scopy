@@ -1045,11 +1045,28 @@ function applyExportScale(scale) {
 }
 
 // An animation-frame watcher: it measures the export height every frame and counts how many consecutive frames it
-// has been unchanged, so the host can wait for layout to settle instead of sleeping. The first call installs it;
-// every call returns the current sample as JSON.
-function watchLayout() {
+// has been unchanged. The host announces each wait as a new numeric `phase`; the watcher pushes a sample to the
+// `scopyExportLayout` message handler when the phase starts, when two frames have run in the phase, when the layout
+// is first stable for three frames in the phase, and whenever the render-failure state changes. Every call returns
+// the current sample as JSON, which is the host's fallback when frames stop (an occluded window gets none).
+const SETTLED_STABLE_FRAMES = 3;
+
+function layoutSample(w, event) {
+  return { phase: w.phase, event: event, frames: w.frames, stableFrames: w.stableFrames, height: w.height, live: w.live,
+    fonts: w.fonts, renderReady: w.renderReady, renderFailed: w.renderFailed, renderErrorReason: w.renderErrorReason };
+}
+
+function postLayout(w, event) {
+  try {
+    var handler = window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.scopyExportLayout;
+    if (handler) { handler.postMessage(layoutSample(w, event)); }
+  } catch (e) { }
+}
+
+function watchLayout(phase) {
   if (!layoutWatcher) {
-    var w = { frames: 0, stableFrames: 0, height: 0, live: 0, lastHeight: -1, lastLive: -1, fonts: 'n/a',
+    var w = { phase: 0, phaseStartFrame: 0, framesReported: false, settledReported: false,
+              frames: 0, stableFrames: 0, height: 0, live: 0, lastHeight: -1, lastLive: -1, fonts: 'n/a',
               renderReady: false, renderFailed: false, renderErrorReason: '' };
     layoutWatcher = w;
     var measureHeight = function () {
@@ -1080,6 +1097,7 @@ function watchLayout() {
       var h = 0; try { h = measureHeight(); } catch (e) { h = 0; }
       var live = 0; try { live = measureLive(); } catch (e) { live = 0; }
       var ready = isRenderReady();
+      var wasFailed = w.renderFailed;
       w.renderFailed = !!state.renderFailed;
       w.renderErrorReason = state.unifiedErrorReason || '';
       try { w.fonts = (document.fonts && document.fonts.status) ? document.fonts.status : 'n/a'; } catch (e) { w.fonts = 'n/a'; }
@@ -1089,13 +1107,29 @@ function watchLayout() {
         w.stableFrames = 0;
       }
       w.lastHeight = h; w.lastLive = live; w.height = h; w.live = live; w.renderReady = ready;
+      var framesAdvanced = w.frames >= w.phaseStartFrame + 2;
+      if (w.renderFailed !== wasFailed) { postLayout(w, 'renderFailed'); }
+      if (framesAdvanced && !w.framesReported) {
+        w.framesReported = true;
+        postLayout(w, 'frames');
+      }
+      if (framesAdvanced && !w.settledReported && h > 0 && w.stableFrames >= SETTLED_STABLE_FRAMES) {
+        w.settledReported = true;
+        postLayout(w, 'settled');
+      }
       window.requestAnimationFrame(tick);
     };
     window.requestAnimationFrame(tick);
   }
-  var s = layoutWatcher;
-  return JSON.stringify({ frames: s.frames, stableFrames: s.stableFrames, height: s.height, live: s.live,
-    fonts: s.fonts, renderReady: s.renderReady, renderFailed: s.renderFailed, renderErrorReason: s.renderErrorReason });
+  var watcher = layoutWatcher;
+  if (typeof phase === 'number' && phase !== watcher.phase) {
+    watcher.phase = phase;
+    watcher.phaseStartFrame = watcher.frames;
+    watcher.framesReported = false;
+    watcher.settledReported = false;
+    postLayout(watcher, 'phase');
+  }
+  return JSON.stringify(layoutSample(watcher, 'read'));
 }
 
 // MARK: - Boot

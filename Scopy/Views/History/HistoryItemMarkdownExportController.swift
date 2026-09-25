@@ -98,7 +98,8 @@ enum HistoryItemMarkdownExportController {
         layoutScale: MarkdownChatGPTLayoutScalePercent? = nil,
         resolutionScale: CGFloat? = nil,
         pasteboardWriteLease: MarkdownExportService.PasteboardWriteLease? = nil,
-        authorizePasteboardWrite: @escaping @MainActor () -> Bool = { true }
+        authorizePasteboardWrite: @escaping @MainActor () -> Bool = { true },
+        onProgress: @escaping @MainActor (MarkdownExportService.ExportProgress) -> Void = { _ in }
         ) async -> Result<MarkdownExportService.ExportStats, Error> {
         let html: String
         if let renderedHTML {
@@ -132,7 +133,8 @@ enum HistoryItemMarkdownExportController {
                     resolutionScale: resolutionScale ?? defaultResolutionScale(),
                     pngquantOptions: pngquantOptions,
                     pasteboardWriteLease: pasteboardWriteLease,
-                    authorizePasteboardWrite: authorizePasteboardWrite
+                    authorizePasteboardWrite: authorizePasteboardWrite,
+                    onProgress: onProgress
                 ) { result in
                     continuation.resume(returning: result)
                 }
