@@ -571,6 +571,12 @@ struct HistoryListView: View {
             }
         )
         .equatable()
+        // Keep this explicit identity. ForEach already identifies the child by `item.id`, but
+        // without `.id` the List's NSTableView loses its measured row heights on every update
+        // and re-tiles from the estimate, which moves the content under the viewport when a page
+        // lands or a fast scroll ends. Removing it (456abdf) was bisected on device as the cause
+        // of the scroll-stop jump on 2026-09-25.
+        .id(item.id)
 
         Group {
             if Self.isScrollProfile && !Self.profileAccessibility {
