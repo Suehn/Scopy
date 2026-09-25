@@ -320,38 +320,36 @@ function awaitFontsReady(completion) {
     completion('font exception');
   }
 }
-// A hidden document (the unowned prewarm WebView, an occluded host) gets no animation frames, so its 1.5 s paint
-// deadline starts only once it becomes visible; until then it neither fails nor replaces its rendered DOM.
+// A hidden document (the unowned prewarm WebView, an occluded host) gets no animation frames, so the 1.5 s paint
+// deadline runs only while the document is visible: it pauses whenever the document is hidden during the wait and
+// restarts when it is shown again. A hidden document therefore never fails or replaces its rendered DOM.
 function awaitTwoPaintFrames(completion) {
   var remaining = 2;
   var settled = false;
   var renderID = currentRenderID();
   var watchdog = 0;
-  function armWatchdog() {
-    if (settled || watchdog) { return; }
-    watchdog = setTimeout(function () {
-      if (settled) { return; }
-      settled = true;
-      completion('paint timeout');
-    }, 1500);
+  function onDeadline() {
+    watchdog = 0;
+    if (settled || document.visibilityState === 'hidden') { return; }
+    done('paint timeout');
   }
-  function onVisibilityChange() {
-    if (document.visibilityState === 'hidden') { return; }
-    document.removeEventListener('visibilitychange', onVisibilityChange);
-    armWatchdog();
-  }
-  if (document.visibilityState === 'hidden') {
-    document.addEventListener('visibilitychange', onVisibilityChange);
-  } else {
-    armWatchdog();
+  function syncDeadline() {
+    if (settled) { return; }
+    if (document.visibilityState === 'hidden') {
+      if (watchdog) { clearTimeout(watchdog); watchdog = 0; }
+    } else if (!watchdog) {
+      watchdog = setTimeout(onDeadline, 1500);
+    }
   }
   function done(reason) {
     if (settled) { return; }
     settled = true;
-    if (watchdog) { clearTimeout(watchdog); }
-    document.removeEventListener('visibilitychange', onVisibilityChange);
+    if (watchdog) { clearTimeout(watchdog); watchdog = 0; }
+    document.removeEventListener('visibilitychange', syncDeadline);
     completion(reason || '');
   }
+  document.addEventListener('visibilitychange', syncDeadline);
+  syncDeadline();
   function step() {
     if (currentRenderID() !== renderID) {
       done('stale paint render ID');
