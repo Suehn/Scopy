@@ -39,7 +39,7 @@ The app target imports backend/UI support through SwiftPM products rather than c
 | --- | --- |
 | `project.yml` | XcodeGen project definition and build-script wiring |
 | `Package.swift` | SwiftPM products: `ScopyKit`, `ScopyUISupport`, `ScopyBench` |
-| `Scopy/Application` | App-facing backend facade, notably `ClipboardService` |
+| `Scopy/Application` | Backend facade `ClipboardBackend`; its concurrency primitives in `Concurrency/` |
 | `Scopy/Domain` | DTOs, protocols, and domain-level types |
 | `Scopy/Infrastructure` | Search engine, persistence helpers, settings/configuration infrastructure |
 | `Scopy/Services` | Storage, clipboard monitoring, and concrete service primitives |
@@ -55,15 +55,15 @@ The app target imports backend/UI support through SwiftPM products rather than c
 ### 1. Application Startup
 
 1. `AppDelegate.applicationDidFinishLaunching` boots the menu bar app, windows/panel, and root state wiring.
-2. `AppState` selects the service implementation in its initializer (`ClipboardServiceFactory`; the mock only for `--uitesting`, or `USE_MOCK_SERVICE=1` in Debug). `AppState.start()` starts it, subscribes to `eventStream`, applies settings, and triggers the initial loads. `ClipboardService.start()` takes the storage-root writer lock before touching any shared directory; a second instance fails to start with a visible message.
-3. `ClipboardService.start()` brings up `ClipboardMonitor`, `StorageService`, and `SearchEngineImpl`.
+2. `AppState` selects the service implementation in its initializer (`ClipboardServiceFactory`; the mock only for `--uitesting`, or `USE_MOCK_SERVICE=1` in Debug). `AppState.start()` starts it, subscribes to `eventStream`, applies settings, and triggers the initial loads. `ClipboardBackend.start()` takes the storage-root writer lock before touching any shared directory; a second instance fails to start with a visible message.
+3. `ClipboardBackend.start()` brings up `ClipboardMonitor`, `StorageService`, and `SearchEngineImpl`.
 
 Implication: app shell code should stay orchestration-only; backend initialization belongs behind `ClipboardServiceProtocol`.
 
 ### 2. Clipboard Ingest
 
 1. `ClipboardMonitor` observes pasteboard changes and normalizes clipboard payloads. Externally backed captures are first written as owned payload + pending envelope artifacts under the Application Support ingest spool; legacy cache envelopes are migrated or drained without overwriting a replayable destination.
-2. `ClipboardService.handleNewContent(_:)` decides how to ingest, deduplicate, and schedule cleanup. The envelope UUID is the ingest idempotency key.
+2. `ClipboardBackend.handleNewContent(_:)` decides how to ingest, deduplicate, and schedule cleanup. The envelope UUID is the ingest idempotency key.
 3. `StorageService` (an actor; its file-system work never runs on the main thread) retains durable spool sources, validates every path against the owned root, and places any managed candidate at a unique destination without consuming the source.
 4. `SQLiteClipboardRepository` resolves the receipt, item insert/dedup mutation, and content-free `ingest_receipts` write in one `BEGIN IMMEDIATE` transaction. Outcomes are `inserted`, `updated`, or `alreadyApplied`; only the first two publish product events.
 5. Acknowledgement moves the pending envelope to a non-replay terminal marker before receipt removal and bounded artifact cleanup. Failure before that transition leaves enough evidence for restart replay.
@@ -75,7 +75,7 @@ Implication: clipboard semantics, dedup, cleanup triggering, and safe file handl
 1. `HistoryViewModel.load()` uses `fetchPinned()` plus `fetchRecentUnpinned(limit:offset:)` so pinned rows do not consume the initial recent-page quota.
 2. `HistoryViewModel.loadMore()` uses `fetchRecentUnpinned(limit:offset:)` with the current unpinned count as offset; the initial recent page is 50 items and load-more pages are 100 (`HistoryViewModel.initialPageSize` / `loadMorePageSize`).
 3. `HistoryViewModel.search()` builds a `SearchRequest` and calls `search(query:)`.
-4. `SearchEngineImpl` executes mode-specific behavior for `exact`, `fuzzy`, `fuzzyPlus`, and `regex`.
+4. `SearchEngineImpl` routes `exact`, `fuzzy`, `fuzzyPlus`, and `regex` requests. SQL paths run through `SearchReadStore` (read-only connection, statement cache, shared filter and paging clauses); fuzzy ranking runs in `FullIndexRanker` / `FuzzyMatcher` over the index that `FullIndexStore` holds, and one- and two-character queries use `ShortIndexStore`. Both stores build detached and apply committed changes in order; a search that needs the full index awaits its build. `SearchMatchContextBuilder.attach(to:request:)` adds match evidence to each page.
 5. Exact search execution (`SearchEngineImpl.searchExact`) and match-evidence generation (`SearchMatchContextBuilder`) must share `SearchQueryNormalization.normalizedExactQuery(_:)`, so trimming affects the recent-only cutoff, matching, and evidence identically. Query routing is the `switch request.mode` in the engine; there is no separate planner.
 6. UI updates are event-driven; the list should not depend on ad hoc full reloads for ordinary mutations.
 7. Search results expose `SearchCoverage` so UI can distinguish complete results, staged fuzzy refinement, and intentional recent-only limits.
@@ -117,7 +117,7 @@ Implication: preview/export work must remain background-safe and should not muta
 1. `StorageService` builds repository `DeletePlan` values whose `DeleteCandidate` snapshots include item ID, type, content hash, recency, size, and storage ref for cleanup-by-count, cleanup-by-age, cleanup-by-size, image-only cleanup, external-storage cleanup, and composite cleanup.
 2. Planning is advisory. `SQLiteClipboardRepository.commitDeletePlan(_:)` starts `BEGIN IMMEDIATE`, reloads each candidate, revalidates the full cleanup snapshot plus unpinned state, deletes only matching rows, and captures exact storage refs from those rows in the same transaction.
 3. `StorageService.applyDeletePlan` immediately reports the committed `CleanupResult` before bounded file cleanup. External refs are containment-validated, reserved by canonical path, and batch-checked for surviving owners before unlink; a file failure never rolls the database deletion back.
-4. `ClipboardService` applies the exact committed deletion set to the search indexes (tombstones, not a rebuild), invalidates stale publications, and emits one `.itemsRemoved([UUID])` event from the exact committed IDs. The handoff survives cancellation of the debounce/caller task after commit. Every repository commit that advances `mutation_seq` appends exactly one change to `StorageCommitJournal`; the search engine drains the journal in sequence order, accepts `+1` steps, and rebuilds when it sees a gap or a database sequence the journal never reported.
+4. `ClipboardBackend` applies the exact committed deletion set to the search indexes (tombstones, not a rebuild), invalidates stale publications, and emits one `.itemsRemoved([UUID])` event from the exact committed IDs. The handoff survives cancellation of the debounce/caller task after commit. Every repository commit that advances `mutation_seq` appends exactly one change to `StorageCommitJournal`; the search engine drains the journal in sequence order, accepts `+1` steps, and rebuilds when it sees a gap or a database sequence the journal never reported.
 5. `HistoryViewModel` removes those IDs in linear time, preserves pagination state, and refreshes the authoritative total instead of full-reloading the list.
 
 Implication: new cleanup variants must use the commit-time revalidating executor. A pre-transaction plan is never authority to delete a row or file.
@@ -250,14 +250,15 @@ The paths below identify flows to trace and contracts to verify. Edit only affec
 ### Search Behavior
 
 - Trace search requests through `SearchRequest`, `SearchMode`, and the search engine; update their owners when request or mode semantics change.
-- Keep exact-search query normalization shared between `SearchPlanner.planExact` and `SearchEngineImpl.searchExact`.
+- Keep exact-search query normalization shared between `SearchEngineImpl.searchExact` and `SearchMatchContextBuilder` (`SearchQueryNormalization.normalizedExactQuery(_:)`).
+- `SearchSQLGoldenTests` locks every SQL path's ordered ids, `total`, and `hasMore`; a deliberate ranking change updates its golden text in the same commit.
 - Re-check `SearchCoverage`, refine behavior, and any recent-only hint paths together.
 - Re-check header controls, search hints, pagination, and requirements docs.
 - Run search-focused performance validation when query execution, paging, or index work changes.
 
 ### Clipboard Or Storage Semantics
 
-- Trace capture through `ClipboardMonitor`, `ClipboardService`, and `StorageService` as one flow.
+- Trace capture through `ClipboardMonitor`, `ClipboardBackend`, and `StorageService` as one flow.
 - Re-check copy/replay semantics, external storage validation, cleanup behavior, and any item-model field assumptions.
 - Preserve the durable-spool contract: retain source through commit, make receipt + mutation atomic, transition the envelope to terminal before receipt removal, and treat receipt replay as a no-op even when the item was later deleted.
 - Route new cleanup variants through `StorageService.applyDeletePlan`; extend `DeleteCandidate` when a new policy predicate affects eligibility so commit-time revalidation remains complete.
@@ -302,6 +303,8 @@ The paths below identify flows to trace and contracts to verify. Edit only affec
 - The legacy `doc/implementation`, `doc/profiles`, and `doc/specs` directories and root aliases were removed; do not recreate redirects, symlinks, or compatibility stubs.
 - Heavy work should stay off the main thread; correctness beats opportunistic speedups.
 - Views should not directly become persistence clients.
+- Every SQLite connection opens only a database at the current schema with all required tables (`SQLiteSchema.requireCurrentSchema`); code does not branch on optional tables or older schemas.
+- The search engine never scans the whole table on its actor: full- and short-index builds run detached on their own read-only connections.
 - Every ScopyKit source compiles only into ScopyKit. `Package.swift` (ScopyKit excludes) and `project.yml` (app and test-bundle excludes) partition the top-level entries of `Scopy/`; a file compiled into both `ScopyKit` and the app target produces two copies of its static state. App-side sources are also compiled directly into `ScopyTests` and `ScopyTSanTests` by design (no test host).
 - Release publication consumes a deliberate existing tag; ordinary CI must never create or push one.
 - Select roadmap work by evidenced severity, affected surface, recurrence/likelihood, and confidence relative to implementation/rollback cost. Prefer crashes, data-integrity failures, unsafe release paths, and measured systemic bottlenecks over cosmetic cleanup or speculative micro-optimization.
@@ -332,6 +335,9 @@ The paths below identify flows to trace and contracts to verify. Edit only affec
 - **summary row**: a row projection without the payload blob; distinct from aggregate summaries such as `CleanupResult`.
 - **plan / commit (cleanup)**: an advisory candidate snapshot taken outside the transaction, and the revalidated deletion inside it.
 - **tombstone**: the placeholder slot of a deleted item in an in-memory search index.
+- **full index / short index**: the in-memory fuzzy index over all history (`FullFuzzyIndex`, owned by `FullIndexStore`) and the one- and two-character candidate index (`ShortQueryIndex`, owned by `ShortIndexStore`).
+- **read store**: `SearchReadStore`, the search engine's read-only connection and every SQL query it runs.
+- **backend**: `ClipboardBackend`, the actor behind `RealClipboardService` that composes monitor, storage, search, and settings.
 - **pinned item** vs **pinned preview**: an item kept at the top of the list, and a preview detached into its own window; the code keeps both names.
 
 ## Logging And Privacy

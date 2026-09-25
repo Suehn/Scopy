@@ -16,7 +16,7 @@ This document describes the current system shape and operational invariants. For
 ## Current System Shape
 
 - `Scopy` app target owns app lifecycle, panel/window orchestration, observables, presentation logic, and views.
-- `RealClipboardService` bridges the main-actor UI protocol to the `ClipboardService` actor; forwarding here enforces isolation rather than introducing another backend.
+- `RealClipboardService` bridges the main-actor UI protocol to the `ClipboardBackend` actor; forwarding here enforces isolation rather than introducing another backend.
 - `ScopyKit` owns the backend domain/application/infrastructure/services layer and is imported by the app and tests.
 - `ScopyUISupport` holds the scroll profiler, `ThumbnailCache`, `IconService`, and `WeakScriptMessageHandler`; only the app target and tests import it.
 - `ScopyBench` provides benchmark tooling for backend/perf verification.
@@ -29,7 +29,7 @@ This document describes the current system shape and operational invariants. For
 
 - `ClipboardMonitor` observes pasteboard changes and normalizes incoming clipboard content. It records Scopy's own pasteboard writes as the baseline so they are never recaptured, evaluates each change count once (a failed spool write retries from the data already read), and hands every capture, small or large, to one bounded serial ingest queue (capacity 32) so history order equals copy order; crash replay is ordered by envelope creation time.
 - `ClipboardMonitor` writes durable external captures to an Application Support-owned ingest spool before handing work to the service. Pending envelopes remain replayable across process restart; terminal markers make acknowledgement restart-safe.
-- `ClipboardService` takes the storage-root writer lock (`.scopy-writer.lock`, `flock`) before touching any shared directory; a second instance on the same data directory fails to start with a visible message (run a Debug build against `SCOPY_SERVICE_DB_PATH`). It coordinates ingest, deduplication, cleanup scheduling, and event emission. It publishes search/UI changes only from committed storage outcomes and hands committed cleanup events to an independent cancellation lifetime.
+- `ClipboardBackend` takes the storage-root writer lock (`.scopy-writer.lock`, `flock`) before touching any shared directory; a second instance on the same data directory fails to start with a visible message (run a Debug build against `SCOPY_SERVICE_DB_PATH`). It coordinates ingest, deduplication, cleanup scheduling, and event emission. It publishes search/UI changes only from committed storage outcomes and hands committed cleanup events to an independent cancellation lifetime.
 - `StorageService` is an actor whose file-system work never runs on the main thread; cleanup takes a `CleanupPolicy` value per run. It persists structured items, external payloads, and thumbnail-related artifacts, reads payloads of any size the writer accepted, and sweeps unreferenced thumbnails during full cleanup. For a durable ingest ID it retains the source, places the payload at a unique managed path, and commits the item mutation plus the `ingest_receipts` row (introduced in schema user_version 8; current 9) in one `BEGIN IMMEDIATE` transaction.
 - Cleanup planning is advisory. `SQLiteClipboardRepository.commitDeletePlan` revalidates the candidate snapshot and deletes matching rows in one write transaction, then returns the exact committed IDs and storage refs used by bounded file cleanup, search invalidation, and one bulk history event.
 
@@ -37,6 +37,8 @@ This document describes the current system shape and operational invariants. For
 
 - UI and state layers issue typed `SearchRequest` values through backend protocols.
 - Backend search uses SQLite-backed storage/indexing plus mode-specific search behavior exposed through `SearchMode`.
+- `SearchEngineImpl` is the only search actor and routes each request. It reads through `SearchReadStore`, its own read-only connection (never the repository's write connection, since it interrupts that connection on timeout and cancellation), and ranks fuzzy queries with `FullIndexRanker` over indexes held by `FullIndexStore` and `ShortIndexStore`. Index builds run detached on their own read-only connections; a search that needs the full index awaits the build without blocking the actor. `ClipboardItemRow` is the one column list and row decoder both connections use.
+- Both connections refuse a database that `SQLiteSchema.requireCurrentSchema` rejects: `user_version` below `SQLiteMigrations.currentUserVersion` or a missing required table (`clipboard_items`, `clipboard_fts`, `clipboard_fts_trigram`, `scopy_meta`, `ingest_receipts`). Trigram FTS and the `scopy_meta` counters are therefore always present; there are no fallbacks for their absence.
 - Search results flow back through observables/view models rather than direct view-to-storage access.
 - Every commit that advances `mutation_seq` appends one sequenced change to `StorageCommitJournal`; the engine applies changes in order (including batch tombstones for committed cleanup) and rebuilds only on a sequence gap. After 60 s without searches the engine releases its query caches and full index (persisting the index first when the disk cache is stale); memory-pressure warnings trigger the same trim, and critical pressure also drops the short index.
 
