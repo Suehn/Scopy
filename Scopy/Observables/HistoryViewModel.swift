@@ -310,9 +310,12 @@ final class HistoryViewModel {
     private struct PendingDeletion {
         let item: ClipboardItemDTO
         let token: UUID
-        /// Where the row sat, and in which projection, so undo can put it straight back.
+        /// Which projection the row left and its neighbours there, so undo can put it straight
+        /// back even after newer rows were inserted in front.
+        let projection: UUID
         let index: Int
-        let projectionVersion: Int
+        let predecessorID: UUID?
+        let successorID: UUID?
         let evidence: SearchMatchContext?
         let commit: Task<Void, Never>
     }
@@ -336,6 +339,9 @@ final class HistoryViewModel {
     /// offers Undo and ⌘Z restores the row only while this is set.
     private(set) var undoableDeletionID: UUID?
     @ObservationIgnored private var pendingDeletion: PendingDeletion?
+    /// Changes only when the rows are replaced by another query or cleared; `searchVersion` also
+    /// advances for in-flight work invalidated by a deletion event, which keeps the same rows.
+    @ObservationIgnored private var projectionIdentity = UUID()
     @ObservationIgnored private var quickSlotHintsVisible = false
 
     /// Why the last search, history load or page fetch failed. The rows on screen are kept; the
@@ -1112,6 +1118,7 @@ final class HistoryViewModel {
         fetchFailureMessage = nil
 
         searchVersion += 1
+        projectionIdentity = UUID()
         let currentVersion = searchVersion
 
         cancelTask(&loadMoreTask)
@@ -1393,6 +1400,8 @@ final class HistoryViewModel {
         pendingDeletion = nil
         invalidateKnownContentRevision(itemID: item.id)
         let index = indexOfItem(withID: item.id) ?? 0
+        let predecessorID = index > 0 ? listState.item(at: index - 1)?.id : nil
+        let successorID = listState.item(at: index + 1)?.id
         let evidence = searchMatchContexts[item.id]
         _ = removeItem(withID: item.id)
         let token = UUID()
@@ -1400,8 +1409,10 @@ final class HistoryViewModel {
         pendingDeletion = PendingDeletion(
             item: item,
             token: token,
+            projection: projectionIdentity,
             index: index,
-            projectionVersion: searchVersion,
+            predecessorID: predecessorID,
+            successorID: successorID,
             evidence: evidence,
             commit: Task { [weak self] in
                 try? await Task.sleep(nanoseconds: window)
@@ -1480,8 +1491,16 @@ final class HistoryViewModel {
     /// shows up in the next fetch.
     private func revive(_ pending: PendingDeletion) {
         mergeKnownContentRevisions([pending.item], allowRevivingDeletedItems: true)
-        guard pending.projectionVersion == searchVersion else { return }
-        mutateProjection { $0.insertItem(pending.item, at: pending.index) }
+        guard pending.projection == projectionIdentity else { return }
+        let index: Int
+        if let successorID = pending.successorID, let successor = indexOfItem(withID: successorID) {
+            index = successor
+        } else if let predecessorID = pending.predecessorID, let predecessor = indexOfItem(withID: predecessorID) {
+            index = predecessor + 1
+        } else {
+            index = pending.index
+        }
+        mutateProjection { $0.insertItem(pending.item, at: index) }
         if let evidence = pending.evidence {
             searchMatchContexts[pending.item.id] = evidence
         }
@@ -1492,7 +1511,7 @@ final class HistoryViewModel {
     /// A row whose backend delete is still deferred keeps its place in the backend's ordering, so
     /// paging the projection it was removed from starts one row later.
     private func pagingOffset(_ loaded: Int, countsPinned: Bool) -> Int {
-        guard let pending = pendingDeletion, pending.projectionVersion == searchVersion,
+        guard let pending = pendingDeletion, pending.projection == projectionIdentity,
               countsPinned || !pending.item.isPinned else { return loaded }
         return loaded + 1
     }
@@ -1717,6 +1736,7 @@ final class HistoryViewModel {
         cancelTask(&staleLoadRetryTask)
         cancelTask(&storageDetailsTask)
         searchVersion &+= 1
+        projectionIdentity = UUID()
         isLoading = false
         selectedID = nil
         lastSelectionSource = .programmatic

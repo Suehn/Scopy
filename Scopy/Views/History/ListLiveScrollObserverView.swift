@@ -95,6 +95,8 @@ extension ListLiveScrollObserverView {
         private var isBoundsScrolling = false
         private var boundsSettleWorkItem: DispatchWorkItem?
         private(set) var isScrollingReported = false
+        /// Counts reported scrolls, so a settle check outlived by a newer scroll is dropped.
+        private var scrollGeneration = 0
 
         override func viewDidMoveToSuperview() {
             super.viewDidMoveToSuperview()
@@ -244,6 +246,7 @@ extension ListLiveScrollObserverView {
         private func reportScrollStartIfNeeded() {
             guard !isScrollingReported else { return }
             isScrollingReported = true
+            scrollGeneration &+= 1
             onScrollStart?()
         }
 
@@ -257,16 +260,19 @@ extension ListLiveScrollObserverView {
         }
 
         /// Evidence for the "list jumps after a fast scroll stops" report: a clip view that moves
-        /// after the scroll has settled, with no new scroll input, means a layout correction moved
-        /// the content. Logs only when it happens.
+        /// after the scroll has settled, while no newer user or programmatic scroll has started,
+        /// means a layout correction moved the content. Logs only when it happens.
         private func logContentShiftAfterScrollEnd() {
             guard let scrollView = observedScrollView else { return }
             let clipView = scrollView.contentView
             let originY = clipView.bounds.origin.y
             let documentHeight = scrollView.documentView?.frame.height ?? 0
+            let generation = scrollGeneration
             for delayMs in [100, 400] {
                 DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(delayMs)) { [weak self] in
-                    guard let self, !self.isScrollingReported, self.observedScrollView === scrollView else { return }
+                    guard let self, !self.isScrollingReported, self.scrollGeneration == generation,
+                          self.observedScrollView === scrollView,
+                          self.programmaticScrollGate?.isProgrammaticScrollActive != true else { return }
                     let shift = clipView.bounds.origin.y - originY
                     let heightDelta = (scrollView.documentView?.frame.height ?? 0) - documentHeight
                     guard abs(shift) >= 0.5 || abs(heightDelta) >= 0.5 else { return }
