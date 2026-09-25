@@ -68,16 +68,6 @@ enum SQLiteMigrations {
             )
             """
         )
-
-        // Legacy table kept for backward compatibility (older versions used it).
-        try connection.execute(
-            """
-            CREATE TABLE IF NOT EXISTS schema_version (
-                version INTEGER PRIMARY KEY
-            )
-            """
-        )
-        try connection.execute("INSERT OR IGNORE INTO schema_version (version) VALUES (1)")
     }
 
     private static func setupPlainTextBytesIndex(_ connection: SQLiteConnection) throws {
