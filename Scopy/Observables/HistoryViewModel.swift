@@ -310,6 +310,10 @@ final class HistoryViewModel {
     private struct PendingDeletion {
         let item: ClipboardItemDTO
         let token: UUID
+        /// Where the row sat, and in which projection, so undo can put it straight back.
+        let index: Int
+        let projectionVersion: Int
+        let evidence: SearchMatchContext?
         let commit: Task<Void, Never>
     }
 
@@ -332,6 +336,7 @@ final class HistoryViewModel {
     /// offers Undo and ⌘Z restores the row only while this is set.
     private(set) var undoableDeletionID: UUID?
     @ObservationIgnored private var pendingDeletion: PendingDeletion?
+    @ObservationIgnored private var quickSlotHintsVisible = false
 
     /// Why the last search, history load or page fetch failed. The rows on screen are kept; the
     /// footer shows this with a retry until the next search or load starts.
@@ -432,6 +437,7 @@ final class HistoryViewModel {
 
     var isPinnedCollapsed: Bool = false {
         didSet {
+            if quickSlotHintsVisible { fanOutQuickSlots() }
             // A collapsed pinned row is off screen; ⏎ and ⌥⌫ must not act on it.
             guard isPinnedCollapsed, let selectedID,
                   pinnedItems.contains(where: { $0.id == selectedID }) else { return }
@@ -1042,7 +1048,7 @@ final class HistoryViewModel {
                         // mixes two result orders and forces a large replacement on the next page.
                         forceFullFuzzy: searchMode == .fuzzy || searchMode == .fuzzyPlus,
                         limit: Self.loadMorePageSize,
-                        offset: loadedCount
+                        offset: pagingOffset(loadedCount, countsPinned: true)
                     )
                     ScrollPerformanceProfile.shared.incrementCounter(
                         name: "list.pagination_request"
@@ -1058,7 +1064,7 @@ final class HistoryViewModel {
                     )
                     let moreItems = try await service.fetchRecentUnpinned(
                         limit: Self.loadMorePageSize,
-                        offset: unpinnedItems.count
+                        offset: pagingOffset(unpinnedItems.count, countsPinned: false)
                     )
                     guard !Task.isCancelled, currentVersion == searchVersion else { return }
                     let currentItems = excludingKnownDeletedItems(moreItems)
@@ -1380,17 +1386,31 @@ final class HistoryViewModel {
     /// clear, or closing the panel commits the previous one first. The tombstone keeps events,
     /// searches and loads from reviving the row meanwhile, and closes its pinned preview.
     func delete(_ item: ClipboardItemDTO) async {
-        await commitPendingDeletionNow()
+        // Take the undo slot over before any await: a delete that starts while the previous one
+        // is being sent must not be overwritten when this call resumes.
+        let previous = pendingDeletion
+        previous?.commit.cancel()
+        pendingDeletion = nil
         invalidateKnownContentRevision(itemID: item.id)
+        let index = indexOfItem(withID: item.id) ?? 0
+        let evidence = searchMatchContexts[item.id]
         _ = removeItem(withID: item.id)
         let token = UUID()
         let window = timing.undoDeletionWindowNs
-        pendingDeletion = PendingDeletion(item: item, token: token, commit: Task { [weak self] in
-            try? await Task.sleep(nanoseconds: window)
-            guard !Task.isCancelled else { return }
-            await self?.commitPendingDeletion(token: token)
-        })
+        pendingDeletion = PendingDeletion(
+            item: item,
+            token: token,
+            index: index,
+            projectionVersion: searchVersion,
+            evidence: evidence,
+            commit: Task { [weak self] in
+                try? await Task.sleep(nanoseconds: window)
+                guard !Task.isCancelled else { return }
+                await self?.commitPendingDeletion(token: token)
+            }
+        )
         undoableDeletionID = item.id
+        if let previous { await sendDeletion(previous) }
     }
 
     func undoPendingDeletion() async {
@@ -1398,25 +1418,33 @@ final class HistoryViewModel {
         pending.commit.cancel()
         pendingDeletion = nil
         undoableDeletionID = nil
-        await revive(pending.item)
+        revive(pending)
     }
 
     /// Sends the pending backend delete now instead of at the end of the undo window.
     func commitPendingDeletionNow() async {
         guard let pending = pendingDeletion else { return }
         pending.commit.cancel()
-        await commitPendingDeletion(token: pending.token)
+        pendingDeletion = nil
+        undoableDeletionID = nil
+        await sendDeletion(pending)
     }
 
     private func commitPendingDeletion(token: UUID) async {
         guard let pending = pendingDeletion, pending.token == token else { return }
         pendingDeletion = nil
         undoableDeletionID = nil
+        await sendDeletion(pending)
+    }
+
+    /// The backend delete of a row whose undo window is over; the slot has already moved on, so a
+    /// newer pending deletion is never touched here.
+    private func sendDeletion(_ pending: PendingDeletion) async {
         do {
             try await service.delete(itemID: pending.item.id)
         } catch {
             ScopyLog.app.error("Delete failed: \(error.localizedDescription, privacy: .private)")
-            await revive(pending.item)
+            revive(pending)
             reportActionFailure(error)
         }
     }
@@ -1447,17 +1475,26 @@ final class HistoryViewModel {
         }
     }
 
-    /// Lifts the tombstone and reloads, which puts the row back at its real position with its
-    /// evidence; undo is rare enough that one full projection replace is acceptable.
-    private func revive(_ item: ClipboardItemDTO) async {
-        mergeKnownContentRevisions([item], allowRevivingDeletedItems: true)
-        if isUnfilteredList {
-            await load()
-        } else {
-            search()
+    /// Lifts the tombstone and puts the row back where it was removed from, with its evidence,
+    /// while the projection is still the one it left; after a new search or load the row simply
+    /// shows up in the next fetch.
+    private func revive(_ pending: PendingDeletion) {
+        mergeKnownContentRevisions([pending.item], allowRevivingDeletedItems: true)
+        guard pending.projectionVersion == searchVersion else { return }
+        mutateProjection { $0.insertItem(pending.item, at: pending.index) }
+        if let evidence = pending.evidence {
+            searchMatchContexts[pending.item.id] = evidence
         }
         lastSelectionSource = .programmatic
-        selectedID = item.id
+        selectedID = pending.item.id
+    }
+
+    /// A row whose backend delete is still deferred keeps its place in the backend's ordering, so
+    /// paging the projection it was removed from starts one row later.
+    private func pagingOffset(_ loaded: Int, countsPinned: Bool) -> Int {
+        guard let pending = pendingDeletion, pending.projectionVersion == searchVersion,
+              countsPinned || !pending.item.isPinned else { return loaded }
+        return loaded + 1
     }
 
     func updateNote(_ item: ClipboardItemDTO, note: String?) async -> Bool {
@@ -1558,11 +1595,19 @@ final class HistoryViewModel {
         await select(rows[slot - 1])
     }
 
-    /// While ⌘ is held the first nine displayed rows show ⌘n instead of their time.
+    /// While ⌘ is held the first nine displayed rows show ⌘n instead of their time; the hints
+    /// follow the displayed order for as long as they are up.
     func setQuickSlotHintsVisible(_ visible: Bool) {
+        quickSlotHintsVisible = visible
+        fanOutQuickSlots()
+    }
+
+    private func fanOutQuickSlots() {
         var slots: [UUID: Int] = [:]
-        if visible {
-            for (index, item) in displayOrderItems.prefix(9).enumerated() {
+        if quickSlotHintsVisible {
+            let leading = isPinnedCollapsed ? [] : Array(pinnedItems.prefix(9))
+            let rows = leading + unpinnedItems.prefix(9 - leading.count)
+            for (index, item) in rows.enumerated() {
                 slots[item.id] = index + 1
             }
         }
@@ -1858,7 +1903,10 @@ final class HistoryViewModel {
     /// only if its value moved, so a pagination-only or total-only update leaves the rows alone.
     private func mutateProjection(_ change: (inout HistoryListState) -> Void) {
         change(&listState)
-        if projectionGeneration != listState.projectionGeneration { projectionGeneration = listState.projectionGeneration }
+        if projectionGeneration != listState.projectionGeneration {
+            projectionGeneration = listState.projectionGeneration
+            if quickSlotHintsVisible { fanOutQuickSlots() }
+        }
         if totalCount != listState.totalCount { totalCount = listState.totalCount }
         if canLoadMore != listState.canLoadMore { canLoadMore = listState.canLoadMore }
     }

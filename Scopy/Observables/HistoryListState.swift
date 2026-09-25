@@ -162,6 +162,15 @@ struct HistoryListState {
         return removedCount
     }
 
+    /// Puts a row back at the position it was removed from (clamped to the current count).
+    mutating func insertItem(_ item: ClipboardItemDTO, at index: Int) {
+        guard indexOfItem(withID: item.id) == nil else { return }
+        items.insert(item, at: min(max(0, index), items.count))
+        loadedCount = items.count
+        rebuildDerivedState()
+        recomputeCanLoadMore()
+    }
+
     @discardableResult
     mutating func insertOrMoveItemToFront(_ item: ClipboardItemDTO) -> Bool {
         if let existingIndex = indexOfItem(withID: item.id) {

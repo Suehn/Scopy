@@ -94,6 +94,91 @@ final class HistoryViewModelRegressionTests: XCTestCase {
         XCTAssertEqual(viewModel.selectedID, target.id)
     }
 
+    func testDeletesStartedDuringACommitAreAllSent() async {
+        let service = HistoryViewModelRegressionService(items: makeItems(count: 4))
+        let viewModel = HistoryViewModel(service: service, settingsViewModel: SettingsViewModel(service: service))
+        viewModel.configureTiming(.immediateRegressionTests)
+        defer { viewModel.stop() }
+        await viewModel.load()
+        let (first, second, third, fourth) = (viewModel.items[0], viewModel.items[1], viewModel.items[2], viewModel.items[3])
+        let firstDeleteStarted = expectation(description: "Backend delete of the first row started")
+        service.suspendNextDelete = true
+        service.onDeleteStarted = { firstDeleteStarted.fulfill() }
+
+        await viewModel.delete(first)
+        await fulfillment(of: [firstDeleteStarted], timeout: 1.0)
+        // The second delete commits the first one and is suspended on it; the third starts meanwhile.
+        let secondDelete = Task { await viewModel.delete(second) }
+        await Task.yield()
+        let thirdDelete = Task { await viewModel.delete(third) }
+        await Task.yield()
+        XCTAssertEqual(viewModel.undoableDeletionID, third.id, "The newest delete owns the undo slot")
+        service.resumeDelete()
+        await secondDelete.value
+        await thirdDelete.value
+
+        await waitUntil(timeout: 2.0) { service.items.map(\.id) == [fourth.id] }
+        XCTAssertEqual(service.items.map(\.id), [fourth.id], "Every delete reaches the backend")
+        XCTAssertEqual(viewModel.items.map(\.id), [fourth.id])
+    }
+
+    func testPagingSkipsTheRowWhoseDeleteIsStillDeferred() async {
+        let all = makeItems(count: 60)
+        let service = HistoryViewModelRegressionService(items: all)
+        let viewModel = HistoryViewModel(service: service, settingsViewModel: SettingsViewModel(service: service))
+        defer { viewModel.stop() }
+        await viewModel.load()
+        XCTAssertEqual(viewModel.items.count, HistoryViewModel.initialPageSize)
+
+        await viewModel.delete(viewModel.items[0])
+        await viewModel.loadMore()
+
+        let ids = viewModel.items.map(\.id)
+        XCTAssertEqual(ids, all.dropFirst().map(\.id), "The next page starts after the row the backend still holds")
+    }
+
+    func testUndoOfADeepRowKeepsTheLoadedPages() async {
+        let all = makeItems(count: 60)
+        let service = HistoryViewModelRegressionService(items: all)
+        let viewModel = HistoryViewModel(service: service, settingsViewModel: SettingsViewModel(service: service))
+        defer { viewModel.stop() }
+        await viewModel.load()
+        await viewModel.loadMore()
+        XCTAssertEqual(viewModel.items.count, 60)
+        let target = viewModel.items[55]
+
+        await viewModel.delete(target)
+        await viewModel.undoPendingDeletion()
+
+        XCTAssertEqual(viewModel.items.map(\.id), all.map(\.id), "Undo puts the row back without dropping the loaded pages")
+        XCTAssertEqual(viewModel.selectedID, target.id)
+    }
+
+    func testQuickSlotHintsFollowTheDisplayedOrder() async {
+        var items = makeItems(count: 3)
+        items[0] = items[0].withPinned(true)
+        let service = HistoryViewModelRegressionService(items: items)
+        let viewModel = HistoryViewModel(service: service, settingsViewModel: SettingsViewModel(service: service))
+        defer { viewModel.stop() }
+        await viewModel.load()
+
+        viewModel.setQuickSlotHintsVisible(true)
+        XCTAssertEqual(viewModel.rowLiveState.state(for: items[1].id).quickSlot, 2)
+
+        viewModel.isPinnedCollapsed = true
+        XCTAssertEqual(viewModel.rowLiveState.state(for: items[1].id).quickSlot, 1, "Collapsing the pinned row renumbers the hints")
+        XCTAssertNil(viewModel.rowLiveState.state(for: items[0].id).quickSlot)
+
+        let newest = makeItem(text: "newest", age: -1)
+        service.items.insert(newest, at: 0)
+        await viewModel.handleEvent(.newItem(newest))
+        XCTAssertEqual(viewModel.rowLiveState.state(for: newest.id).quickSlot, 1, "A new front row takes slot 1")
+        XCTAssertEqual(viewModel.rowLiveState.state(for: items[1].id).quickSlot, 2)
+
+        viewModel.setQuickSlotHintsVisible(false)
+        XCTAssertNil(viewModel.rowLiveState.state(for: newest.id).quickSlot)
+    }
+
     func testQuickSlotCopiesNthDisplayedRowAndSkipsCollapsedPinned() async {
         var items = makeItems(count: 3)
         items[0] = items[0].withPinned(true)
@@ -854,6 +939,9 @@ private final class HistoryViewModelRegressionService: ClipboardServiceProtocol 
 
     var items: [ClipboardItemDTO]
     var deleteShouldFail = false
+    var suspendNextDelete = false
+    var onDeleteStarted: (() -> Void)?
+    private var deleteContinuation: CheckedContinuation<Void, Never>?
     var searchShouldFail = false
     var returnsStagedFirstPage = false
     var prefilterItems: [ClipboardItemDTO]?
@@ -985,7 +1073,19 @@ private final class HistoryViewModelRegressionService: ClipboardServiceProtocol 
         if deleteShouldFail {
             throw TestError.expectedFailure
         }
+        if suspendNextDelete {
+            suspendNextDelete = false
+            await withCheckedContinuation { continuation in
+                deleteContinuation = continuation
+                onDeleteStarted?()
+            }
+        }
         items.removeAll { $0.id == itemID }
+    }
+
+    func resumeDelete() {
+        deleteContinuation?.resume()
+        deleteContinuation = nil
     }
 
     func clearAll() async throws {
