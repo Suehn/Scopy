@@ -24,7 +24,7 @@
 - Views use state and backend protocols, not direct persistence access. Heavy capture, search, cleanup, and media work remains bounded and off the UI thread.
 - Settings use explicit Save/Cancel transactions. Hotkey application goes through `AppDelegate.applyHotKey` for registration and persistence, with `.settingsChanged` reapplication; only `kEventHotKeyPressed` triggers actions, with repeat throttling.
 - Before renderer work, read [markdown-chatgpt-wacz-style-contract.md](doc/current/markdown-chatgpt-wacz-style-contract.md). It alone owns syntax, safe HTML, typography, layout, navigation, and rendering evidence requirements.
-- Keep one `MarkdownHTMLRenderer -> MarkdownHTMLDocumentBuilder` chain: preview and PNG share the parse result, HTML, base CSS, and local assets. Do not introduce a second parser, selector, or shadow renderer.
+- Keep one `MarkdownHTMLDocumentBuilder.document(source:context:)` document: preview and PNG load the same document (source and policy payload, base CSS, document runtime, local assets) and parse it with the same renderer bundle. Do not introduce a second parser, selector, or shadow renderer.
 - Preserve current-owner/render-ID readiness, logical-viewport layout, local overflow, and atomic renderer/KaTeX asset validation. Archived source/fonts alone do not prove computed styles or visual parity. Correct conflicting active documentation instead of preserving obsolete semantics.
 
 ## Validation By Change Scope

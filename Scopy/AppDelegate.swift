@@ -510,28 +510,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
-        if let htmlPath = ProcessInfo.processInfo.environment["SCOPY_UITEST_AUTO_EXPORT_HTML_PATH"],
-           !htmlPath.isEmpty,
-           let html = try? String(contentsOfFile: htmlPath, encoding: .utf8),
-           !html.isEmpty {
-            let settings = await uiTestMarkdownExportSettings()
-            let pngquantOptions = HistoryItemMarkdownExportController.pngquantOptions(settings: settings)
-            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-                MarkdownExportService.exportToPNGClipboard(
-                    html: html,
-                    targetWidthPixels: MarkdownExportService.defaultTargetWidthPixels,
-                    resolutionScale: HistoryItemMarkdownExportController.defaultResolutionScale(),
-                    pngquantOptions: pngquantOptions
-                ) { result in
-                    if case .failure(let error) = result, !errorPath.isEmpty {
-                        try? Data(String(describing: error).utf8).write(to: URL(fileURLWithPath: errorPath), options: [.atomic])
-                    }
-                    continuation.resume()
-                }
-            }
-            return
-        }
-
         // Wait for history to load.
         for _ in 0..<200 {
             if !appState.historyViewModel.items.isEmpty { break }

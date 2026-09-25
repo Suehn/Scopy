@@ -14,18 +14,12 @@ struct ExportPreviewHarnessView: View {
 
     init() {
         let markdown = Self.loadMarkdown()
-        let htmlOverride = Self.loadHTMLOverride()
         let m = HoverPreviewModel()
-        if let htmlOverride, !htmlOverride.isEmpty {
-            // Keep a wide fallback so the export button stays near the top-right of the harness window.
-            m.text = String(repeating: "X", count: 260)
-        } else {
-            m.text = markdown
-        }
+        m.text = markdown
         // Avoid hosting a live WKWebView inside the export harness: UI testing + multiple WebViews can be flaky.
         // Export still uses the offscreen export pipeline via `markdownHTML`.
         m.isMarkdown = false
-        m.markdownHTML = htmlOverride ?? MarkdownHTMLDocumentBuilder.document(source: markdown)
+        m.markdownHTML = MarkdownHTMLDocumentBuilder.document(source: markdown)
         m.markdownContentSize = nil
         m.markdownHasHorizontalOverflow = false
         m.isExporting = false
@@ -95,16 +89,6 @@ struct ExportPreviewHarnessView: View {
 
         Paragraph 5: More content to increase height.
         """
-    }
-
-    private static func loadHTMLOverride() -> String? {
-        if let path = ProcessInfo.processInfo.environment["SCOPY_UITEST_EXPORT_HTML_PATH"],
-           !path.isEmpty,
-           let s = try? String(contentsOfFile: path, encoding: .utf8),
-           !s.isEmpty {
-            return s
-        }
-        return nil
     }
 
     private func exportNow() {

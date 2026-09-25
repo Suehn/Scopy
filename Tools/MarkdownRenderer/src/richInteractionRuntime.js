@@ -600,8 +600,8 @@ function isOfflineImageSource(value) {
 
 function reportHeight() {
   try {
-    if (typeof window !== "undefined" && typeof window.__scopyReportHeight === "function") {
-      window.__scopyReportHeight(true);
+    if (typeof window !== "undefined" && window.ScopyDocument && typeof window.ScopyDocument.reportHeight === "function") {
+      window.ScopyDocument.reportHeight(true);
     }
   } catch {
     // Height reporting is best-effort and never owns interaction state.

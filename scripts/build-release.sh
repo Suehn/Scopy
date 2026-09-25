@@ -109,7 +109,7 @@ if ! node Tools/MarkdownRenderer/scripts/verify-assets.mjs --asset-root "$BUILT_
     exit 1
 fi
 BUILT_RESOURCE_ROOT="${BUILD_DIR}/${APP_NAME}.app/Contents/Resources"
-for duplicate in katex.min.css scopy-unified-renderer.iife.js scopy-unified-renderer.iife.js.sha256; do
+for duplicate in katex.min.css scopy-document.css scopy-unified-renderer.iife.js scopy-unified-renderer.iife.js.sha256; do
     if [ -e "${BUILT_RESOURCE_ROOT}/${duplicate}" ]; then
         echo -e "${RED}✗ 检测到扁平化的重复 MarkdownPreview 资源: ${duplicate}${NC}"
         exit 1
