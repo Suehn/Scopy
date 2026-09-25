@@ -62,74 +62,63 @@ struct AboutSettingsPage: View {
                 }
             }
 
-            SettingsSection("性能监测", systemImage: "speedometer") {
+            SettingsSection("Diagnostics", systemImage: "stethoscope") {
                 SettingsCardRow {
-                    LabeledContent("搜索延迟") {
-                        Text(searchValue).monospacedDigit().foregroundStyle(.secondary)
-                    }
-                }
-                SettingsCardDivider()
-                SettingsCardRow {
-                    LabeledContent("首屏加载") {
-                        Text(loadValue).monospacedDigit().foregroundStyle(.secondary)
-                    }
-                }
-                SettingsCardDivider()
-                SettingsCardRow {
-                    LabeledContent("内存占用") {
-                        Text(String(format: "%.1f MB", memoryUsageMB))
-                            .monospacedDigit()
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                SettingsCardDivider()
-                SettingsCardRow {
-                    HStack {
-                        Spacer()
-                        Button("刷新数据", action: refreshPerformance)
-                            .buttonStyle(.link)
-                            .controlSize(.small)
-                    }
-                }
-            }
-
-            SettingsSection("Ingest 诊断", systemImage: "waveform.path.ecg") {
-                SettingsCardRow {
-                    LabeledContent("队列 / 活跃任务") {
-                        Text("\(ingestPendingValue) / \(ingestActiveValue)")
-                            .monospacedDigit()
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                SettingsCardDivider()
-                SettingsCardRow {
-                    LabeledContent("持久 backlog") {
-                        Text(ingestPersistedValue)
-                            .monospacedDigit()
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                SettingsCardDivider()
-                SettingsCardRow {
-                    LabeledContent("soft limit / replay") {
-                        Text("\(ingestSoftLimitValue) / \(ingestReplayValue)")
-                            .monospacedDigit()
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                SettingsCardDivider()
-                SettingsCardRow {
-                    LabeledContent("changeCount 跳变") {
-                        Text("\(ingestJumpValue) (max Δ\(ingestMaxDeltaValue))")
-                            .monospacedDigit()
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                SettingsCardDivider()
-                SettingsCardRow {
-                    LabeledContent("最近持久化 / ack") {
-                        Text("\(ingestPersistedAtValue) / \(ingestAckAtValue)")
-                            .foregroundStyle(.secondary)
+                    DisclosureGroup("Performance and ingest metrics") {
+                        VStack(alignment: .leading, spacing: 0) {
+                            LabeledContent("搜索延迟") {
+                                Text(searchValue).monospacedDigit().foregroundStyle(.secondary)
+                            }
+                            .padding(.vertical, 6)
+                            LabeledContent("首屏加载") {
+                                Text(loadValue).monospacedDigit().foregroundStyle(.secondary)
+                            }
+                            .padding(.vertical, 6)
+                            LabeledContent("内存占用") {
+                                Text(String(format: "%.1f MB", memoryUsageMB))
+                                    .monospacedDigit()
+                                    .foregroundStyle(.secondary)
+                            }
+                            .padding(.vertical, 6)
+                            Divider()
+                            LabeledContent("队列 / 活跃任务") {
+                                Text("\(ingestPendingValue) / \(ingestActiveValue)")
+                                    .monospacedDigit()
+                                    .foregroundStyle(.secondary)
+                            }
+                            .padding(.vertical, 6)
+                            LabeledContent("持久 backlog") {
+                                Text(ingestPersistedValue)
+                                    .monospacedDigit()
+                                    .foregroundStyle(.secondary)
+                            }
+                            .padding(.vertical, 6)
+                            LabeledContent("soft limit / replay") {
+                                Text("\(ingestSoftLimitValue) / \(ingestReplayValue)")
+                                    .monospacedDigit()
+                                    .foregroundStyle(.secondary)
+                            }
+                            .padding(.vertical, 6)
+                            LabeledContent("changeCount 跳变") {
+                                Text("\(ingestJumpValue) (max Δ\(ingestMaxDeltaValue))")
+                                    .monospacedDigit()
+                                    .foregroundStyle(.secondary)
+                            }
+                            .padding(.vertical, 6)
+                            LabeledContent("最近持久化 / ack") {
+                                Text("\(ingestPersistedAtValue) / \(ingestAckAtValue)")
+                                    .foregroundStyle(.secondary)
+                            }
+                            .padding(.vertical, 6)
+                            HStack {
+                                Spacer()
+                                Button("刷新数据", action: refreshPerformance)
+                                    .buttonStyle(.link)
+                                    .controlSize(.small)
+                            }
+                            .padding(.top, 6)
+                        }
+                        .padding(.top, 6)
                     }
                 }
             }

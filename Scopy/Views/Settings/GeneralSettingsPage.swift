@@ -3,9 +3,32 @@ import ScopyKit
 
 struct GeneralSettingsPage: View {
     @Binding var tempSettings: SettingsDTO
+    @Binding var launchAtLogin: Bool
+    let launchAtLoginRequiresApproval: Bool
 
     var body: some View {
         SettingsPageContainer(page: .general) {
+            SettingsSection("Startup", systemImage: "power") {
+                SettingsCardRow {
+                    Toggle("Launch at Login", isOn: $launchAtLogin)
+                        .accessibilityIdentifier("Settings.LaunchAtLoginToggle")
+                }
+                if launchAtLoginRequiresApproval {
+                    SettingsCardDivider()
+                    SettingsCardRow {
+                        HStack {
+                            Text("Allow Scopy in System Settings > General > Login Items to finish.")
+                                .font(.callout)
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                            Button("Open Login Items") {
+                                LaunchAtLogin.openLoginItemsSettings()
+                            }
+                        }
+                    }
+                }
+            }
+
             SettingsSection(
                 "搜索",
                 systemImage: "magnifyingglass",

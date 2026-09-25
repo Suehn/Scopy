@@ -80,20 +80,6 @@ struct FooterView: View {
                     Text(settingsViewModel.storageSizeText)
                         .lineLimit(1)
                         .fixedSize()
-
-                    if historyViewModel.canLoadMore && historyViewModel.hasActiveFilters {
-                        Text("·")
-                        if historyViewModel.isLoading {
-                            ProgressView()
-                                .controlSize(.mini)
-                        } else {
-                            Button("Load more") {
-                                Task { await historyViewModel.loadMore() }
-                            }
-                            .buttonStyle(.plain)
-                            .foregroundStyle(ScopyColors.accent)
-                        }
-                    }
                 }
                 .font(ScopyTypography.microMono)
                 .foregroundStyle(ScopyColors.tertiaryText)

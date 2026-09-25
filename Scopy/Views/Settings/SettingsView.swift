@@ -11,6 +11,9 @@ struct SettingsView: View {
     @State private var isSaving = false
     @State private var saveErrorMessage: String?
     @State private var savedHint: String?
+    @State private var launchAtLoginBaseline = false
+    @State private var launchAtLogin = false
+    @State private var launchAtLoginRequiresApproval = false
 
     @State private var storageStats: StorageStatsDTO?
     @State private var isLoadingStats = false
@@ -42,6 +45,7 @@ struct SettingsView: View {
             }
         }
         .onAppear {
+            readLaunchAtLogin()
             Task { @MainActor in
                 await settingsViewModel.loadSettings()
                 let loaded = settingsViewModel.settings
@@ -93,7 +97,7 @@ struct SettingsView: View {
         let baseline = baselineSettings ?? settingsViewModel.settings
         let patch = SettingsPatch.from(baseline: baseline, draft: settings.wrappedValue)
             .droppingHotkey()
-        let isDirty = !patch.isEmpty
+        let isDirty = !patch.isEmpty || launchAtLogin != launchAtLoginBaseline
 
         return NavigationSplitView {
             List(filteredPages, selection: $selection) { page in
@@ -107,7 +111,11 @@ struct SettingsView: View {
             Group {
                 switch selection ?? .general {
                 case .general:
-                    GeneralSettingsPage(tempSettings: settings)
+                    GeneralSettingsPage(
+                        tempSettings: settings,
+                        launchAtLogin: $launchAtLogin,
+                        launchAtLoginRequiresApproval: launchAtLoginRequiresApproval
+                    )
                 case .shortcuts:
                     ShortcutsSettingsPage(
                         tempSettings: settings,
@@ -179,11 +187,31 @@ struct SettingsView: View {
         }
     }
 
+    private func readLaunchAtLogin() {
+        launchAtLoginBaseline = LaunchAtLogin.isRegistered
+        launchAtLogin = launchAtLoginBaseline
+        launchAtLoginRequiresApproval = LaunchAtLogin.requiresApproval
+    }
+
     private func saveSettings() {
         guard let baselineSettings, let currentSettings = tempSettings else {
             ScopyLog.ui.warning("saveSettings: baselineSettings or tempSettings is nil, skipping save")
             return
         }
+
+        // The login item is applied first and synchronously: a failure keeps the window open
+        // with nothing else saved. A registration that still needs approval keeps the window
+        // open so the General page can show how to finish it.
+        if launchAtLogin != launchAtLoginBaseline {
+            do {
+                try LaunchAtLogin.apply(launchAtLogin)
+            } catch {
+                saveErrorMessage = error.localizedDescription
+                return
+            }
+            readLaunchAtLogin()
+        }
+        let dismissesOnSave = !launchAtLoginRequiresApproval
 
         isSaving = true
 
@@ -194,7 +222,7 @@ struct SettingsView: View {
                 guard !patch.isEmpty else {
                     await MainActor.run {
                         isSaving = false
-                        onDismiss?()
+                        if dismissesOnSave { onDismiss?() }
                     }
                     return
                 }
@@ -207,7 +235,7 @@ struct SettingsView: View {
                     savedHint = "已保存"
                     self.baselineSettings = merged
                     tempSettings = merged
-                    onDismiss?()
+                    if dismissesOnSave { onDismiss?() }
                     Task { @MainActor in
                         try? await Task.sleep(nanoseconds: 1_200_000_000)
                         if savedHint == "已保存" {

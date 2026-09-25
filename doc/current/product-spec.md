@@ -45,6 +45,7 @@ Scopy is a native macOS clipboard manager for users who need durable clipboard h
 ### History Browsing
 
 - Show recent history in a floating panel driven by a global hotkey; the panel remembers its last size, clamped to the current screen.
+- A left click on the status item toggles the panel; a right click opens a menu with Open Scopy, Settings…, Check for Updates…, and Quit Scopy.
 - Support incremental loading for large histories instead of blocking on full-history reads; pinned rows are loaded separately and do not consume the initial recent-page quota.
 - Keep an idle history row passive: preview, note, Markdown export, image optimization, popover, and feedback state should be created only for real interaction or owned work, then released when every owned task is idle.
 - Keep stable context-menu content predicates out of repeated row-body work. Cache the fast Markdown menu signal by content revision, keep it bounded, and preserve separately cached exact export capability as the authoritative result.
@@ -94,7 +95,7 @@ Scopy is a native macOS clipboard manager for users who need durable clipboard h
 - Provide settings pages for General, Shortcuts, Clipboard, Appearance, Storage, and About.
 - Preserve explicit Save/Cancel semantics for settings changes.
 - Apply recorded hotkeys immediately after capture while keeping the rest of settings transactional.
-- Show About-page version/build information and lightweight performance metrics; the history list itself shows no timing telemetry.
+- Show About-page version/build information; lightweight performance and ingest metrics sit in a collapsed Diagnostics group. The history list itself shows no timing telemetry.
 
 ## Current Search Contract
 
@@ -114,6 +115,7 @@ Scopy is a native macOS clipboard manager for users who need durable clipboard h
 | Page | Setting | Current default | Requirement |
 | --- | --- | --- | --- |
 | General | Default search mode | `Fuzzy+` | New sessions should default to the same mode the main UI expects |
+| General | Launch at Login | Off | Reflects the system login-item state (`SMAppService.mainApp`), not a stored setting; Save registers or unregisters, Cancel discards. A registration awaiting approval keeps the window open and links to System Settings > Login Items |
 | Shortcuts | Global hotkey | `Shift+Cmd+C` | Users can re-record the panel toggle hotkey |
 | Clipboard | Save images | `true` | Turning it off skips image history writes without mutating the live clipboard |
 | Clipboard | Save files | `true` | Turning it off skips file history writes without mutating the live clipboard |

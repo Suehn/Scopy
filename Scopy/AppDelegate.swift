@@ -57,6 +57,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem.button?.image = NSImage(systemSymbolName: "doc.on.clipboard", accessibilityDescription: "Scopy")
         statusItem.button?.action = #selector(togglePanel)
         statusItem.button?.target = self
+        statusItem.button?.sendAction(on: [.leftMouseUp, .rightMouseUp])
         return statusItem
     }()
 
@@ -396,7 +397,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc func togglePanel() {
-        // 状态栏点击：窗口在状态栏下方
+        if NSApp.currentEvent?.type == .rightMouseUp {
+            showStatusMenu()
+            return
+        }
+        // A status-item click opens the panel below the menu bar.
         if let panel {
             panel.toggle(positionMode: .statusBar)
         } else if let uiTestWindow {
@@ -407,6 +412,43 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 NSApp.activate(ignoringOtherApps: true)
             }
         }
+    }
+
+    /// Right-click menu of the status item. Assigning the menu only for this click keeps the
+    /// left click toggling the panel.
+    private func showStatusMenu() {
+        let menu = NSMenu()
+        menu.addItem(withTitle: String(localized: "Open Scopy"), action: #selector(openPanelFromStatusMenu), keyEquivalent: "")
+            .target = self
+        menu.addItem(withTitle: String(localized: "Settings…"), action: #selector(openSettingsFromStatusMenu), keyEquivalent: ",")
+            .target = self
+        if let updaterController {
+            menu.addItem(
+                withTitle: String(localized: "Check for Updates…"),
+                action: #selector(SPUStandardUpdaterController.checkForUpdates(_:)),
+                keyEquivalent: ""
+            ).target = updaterController
+        }
+        menu.addItem(.separator())
+        menu.addItem(withTitle: String(localized: "Quit Scopy"), action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+
+        statusItem.menu = menu
+        statusItem.button?.performClick(nil)
+        statusItem.menu = nil
+    }
+
+    @objc private func openPanelFromStatusMenu() {
+        if let panel {
+            if !panel.isPresented {
+                panel.open(positionMode: .statusBar)
+            }
+        } else {
+            togglePanel()
+        }
+    }
+
+    @objc private func openSettingsFromStatusMenu() {
+        openSettings()
     }
 
     func togglePanelAtMousePosition() {
