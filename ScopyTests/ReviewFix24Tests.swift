@@ -101,7 +101,7 @@ final class ClipboardServiceStartAtomicityTests: XCTestCase {
 
         let store = SettingsStore(suiteName: suiteName)
         let pasteboard = NSPasteboard.withUniqueName()
-        let service = ClipboardService(
+        let service = ClipboardBackend(
             databasePath: invalidDBURL.path,
             settingsStore: store,
             monitorPasteboardName: pasteboard.name.rawValue,

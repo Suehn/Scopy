@@ -2,9 +2,8 @@ import XCTest
 import Carbon.HIToolbox
 import ScopyKit
 
-/// HotKeyService 单元测试
-/// 验证全局快捷键的处理器管理和触发逻辑
-/// 注意：使用测试模式 API 避免实际注册 Carbon 热键
+/// HotKeyService handler management and triggering, through the test-mode API so no
+/// Carbon hotkey is actually registered.
 final class HotKeyServiceTests: XCTestCase {
 
     override func setUp() {

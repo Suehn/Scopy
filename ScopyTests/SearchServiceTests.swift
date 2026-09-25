@@ -2,8 +2,7 @@ import XCTest
 @testable import ScopyKit
 import SQLite3
 
-/// SearchService 单元测试
-/// 验证 v0.md 第4节的搜索性能和功能要求
+/// SearchEngineImpl behavior and performance on an in-memory database.
 @MainActor
 final class SearchServiceTests: XCTestCase {
 
@@ -298,10 +297,10 @@ final class SearchServiceTests: XCTestCase {
             }
         }
 
+        // The query below runs on clipboard_fts alone; skip trigram indexing of the bulk rows.
         try execute("DROP TRIGGER IF EXISTS clipboard_trigram_ai")
         try execute("DROP TRIGGER IF EXISTS clipboard_trigram_ad")
         try execute("DROP TRIGGER IF EXISTS clipboard_trigram_au")
-        try execute("DROP TABLE IF EXISTS clipboard_fts_trigram")
 
         let terms = (0..<128).map { "deadline_token_\($0)" }
         let searchableText = terms.joined(separator: " ")
@@ -531,21 +530,21 @@ final class SearchServiceTests: XCTestCase {
 
     func testFuzzyTopKCapDoesNotAdvertiseUnreachableNextPage() {
         XCTAssertTrue(
-            SearchEngineImpl.hasReachableNextFuzzyPage(
+            FullIndexRanker.hasReachableNextFuzzyPage(
                 availableTopMatches: 50_000,
                 offset: 49_900,
                 limit: 50
             )
         )
         XCTAssertFalse(
-            SearchEngineImpl.hasReachableNextFuzzyPage(
+            FullIndexRanker.hasReachableNextFuzzyPage(
                 availableTopMatches: 50_000,
                 offset: 49_950,
                 limit: 50
             )
         )
         XCTAssertFalse(
-            SearchEngineImpl.hasReachableNextFuzzyPage(
+            FullIndexRanker.hasReachableNextFuzzyPage(
                 availableTopMatches: 50_000,
                 offset: 50_000,
                 limit: 50

@@ -107,7 +107,7 @@ struct PasteboardWriter {
     }
 }
 
-// Write vocabulary that ClipboardService and its tests reference as `ClipboardMonitor.…`.
+// Write vocabulary that ClipboardBackend and its tests reference as `ClipboardMonitor.…`.
 extension ClipboardMonitor {
     public enum ImagePasteboardWriteMode: Sendable {
         case standard

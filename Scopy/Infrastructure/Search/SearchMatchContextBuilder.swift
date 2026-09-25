@@ -1168,3 +1168,49 @@ public enum SearchMatchContextBuilder {
         )
     }
 }
+
+extension SearchMatchContextBuilder {
+    /// `result` with renderable match evidence per item. An item whose evidence cannot be built
+    /// keeps its place without evidence; only cancellation aborts.
+    static func attach(
+        to result: SearchEngineImpl.SearchResult,
+        request: SearchRequest
+    ) throws -> SearchEngineImpl.SearchResult {
+        guard request.hasSemanticQuery, !result.items.isEmpty else { return result }
+
+        let matcher = try prepare(
+            request: request,
+            coverage: result.coverage,
+            cancellationCheck: { try Task.checkCancellation() }
+        )
+        var contexts: [UUID: SearchMatchContext] = [:]
+        contexts.reserveCapacity(result.items.count)
+
+        for item in result.items {
+            try Task.checkCancellation()
+            do {
+                if let context = try matcher.makeContext(
+                    plainText: item.plainText,
+                    note: item.note,
+                    cancellationCheck: { try Task.checkCancellation() }
+                ) {
+                    contexts[item.id] = context
+                }
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                continue
+            }
+        }
+
+        return SearchEngineImpl.SearchResult(
+            items: result.items,
+            total: result.total,
+            hasMore: result.hasMore,
+            coverage: result.coverage,
+            searchTimeMs: result.searchTimeMs,
+            perf: result.perf,
+            matchContexts: contexts
+        )
+    }
+}

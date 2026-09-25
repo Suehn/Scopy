@@ -9,7 +9,7 @@ enum SQLiteMigrations {
             return
         }
 
-        // v0.x baseline schema (idempotent)
+        // Baseline schema (idempotent).
         try createTables(connection)
         try createIndexes(connection)
         if userVersion < 3 {
@@ -20,7 +20,7 @@ enum SQLiteMigrations {
             try setupFTS(connection)
         }
         if userVersion < 4 {
-            try setupTrigramFTSIfSupported(connection)
+            try setupTrigramFTS(connection)
         }
         if userVersion < 5 {
             try setupMetaTable(connection)
@@ -41,7 +41,7 @@ enum SQLiteMigrations {
         try connection.execute("PRAGMA user_version = \(currentUserVersion)")
     }
 
-    private static func readUserVersion(_ connection: SQLiteConnection) throws -> Int32 {
+    static func readUserVersion(_ connection: SQLiteConnection) throws -> Int32 {
         let stmt = try connection.prepare("PRAGMA user_version")
         guard try stmt.step() else { return 0 }
         return Int32(stmt.columnInt(0))
@@ -68,22 +68,12 @@ enum SQLiteMigrations {
             )
             """
         )
-
-        // Legacy table kept for backward compatibility (older versions used it).
-        try connection.execute(
-            """
-            CREATE TABLE IF NOT EXISTS schema_version (
-                version INTEGER PRIMARY KEY
-            )
-            """
-        )
-        try connection.execute("INSERT OR IGNORE INTO schema_version (version) VALUES (1)")
     }
 
     private static func setupPlainTextBytesIndex(_ connection: SQLiteConnection) throws {
         // Expression index so corpus-metrics aggregates (COUNT/AVG/MAX over plain-text byte
         // length) run as an index-only scan instead of reading every row's text payload.
-        // The expression must stay byte-identical to the one in SearchEngineImpl.computeCorpusMetrics.
+        // The expression must stay byte-identical to the one in SearchReadStore.corpusMetrics.
         try connection.execute(
             "CREATE INDEX IF NOT EXISTS idx_plain_text_bytes ON clipboard_items(LENGTH(CAST(plain_text AS BLOB)))"
         )
@@ -303,7 +293,7 @@ enum SQLiteMigrations {
             """
         )
 
-        // v2: Avoid FTS churn on metadata-only updates (last_used_at/use_count/is_pinned).
+        // Avoid FTS churn on metadata-only updates (last_used_at/use_count/is_pinned).
         // Only refresh FTS row when plain_text or note changes.
         try connection.execute("DROP TRIGGER IF EXISTS clipboard_au")
         try connection.execute(
@@ -319,28 +309,18 @@ enum SQLiteMigrations {
         )
     }
 
-    private static func setupTrigramFTSIfSupported(_ connection: SQLiteConnection) throws {
-        // Optional: FTS5 trigram tokenizer may not be available on all SQLite builds.
-        // If unsupported, keep the DB usable and fall back to existing search paths.
-        do {
-            try connection.execute(
-                """
-                CREATE VIRTUAL TABLE IF NOT EXISTS clipboard_fts_trigram USING fts5(
-                    plain_text,
-                    note,
-                    content='clipboard_items',
-                    content_rowid='rowid',
-                    tokenize='trigram'
-                )
-                """
+    private static func setupTrigramFTS(_ connection: SQLiteConnection) throws {
+        try connection.execute(
+            """
+            CREATE VIRTUAL TABLE IF NOT EXISTS clipboard_fts_trigram USING fts5(
+                plain_text,
+                note,
+                content='clipboard_items',
+                content_rowid='rowid',
+                tokenize='trigram'
             )
-        } catch {
-            let message = error.localizedDescription.lowercased()
-            if message.contains("trigram") || message.contains("tokenizer") {
-                return
-            }
-            throw error
-        }
+            """
+        )
 
         try connection.execute(
             """

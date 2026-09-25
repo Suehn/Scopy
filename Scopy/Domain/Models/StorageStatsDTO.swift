@@ -1,11 +1,11 @@
 import Foundation
 
-/// 存储统计详情 DTO
+/// Detailed storage statistics.
 public struct StorageStatsDTO: Sendable {
     public let itemCount: Int
     public let databaseSizeBytes: Int
     public let externalStorageSizeBytes: Int
-    public let thumbnailSizeBytes: Int  // v0.15.2: 缩略图缓存大小
+    public let thumbnailSizeBytes: Int  // Thumbnail cache size.
     public let totalSizeBytes: Int
     public let databasePath: String
 

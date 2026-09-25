@@ -1,17 +1,15 @@
 import AppKit
 import Carbon.HIToolbox
 
-/// v0.11: 日志轮转配置
+/// The hotkey debug log, rotated past 10 MB.
 private let logPath = "/tmp/scopy_hotkey.log"
 private let logPathOld = "/tmp/scopy_hotkey.log.old"
 private let maxLogSize = 10 * 1024 * 1024  // 10MB
 
-/// v0.23: 使用串行队列替代锁，避免文件 I/O 阻塞调用线程
+/// Serializes log writes off the calling thread.
 private let logQueue = DispatchQueue(label: "com.scopy.hotkey.log", qos: .utility)
 
-/// v0.11: 调试日志函数 - 写入文件（带轮转和线程安全）
-/// v0.17.1: 使用 withLock 统一锁策略
-/// v0.23: 改用异步队列，避免文件 I/O 阻塞调用线程
+/// Logs to ScopyLog and appends to the rotated debug log file asynchronously.
 private func logToFile(_ message: String) {
     let timestamp = ISO8601DateFormatter().string(from: Date())
     let logMessage = "[\(timestamp)] \(message)\n"
@@ -20,18 +18,14 @@ private func logToFile(_ message: String) {
 
     guard let data = logMessage.data(using: .utf8) else { return }
 
-    // 异步写入文件，不阻塞调用线程
     logQueue.async {
-        // 检查文件大小，必要时轮转
+        // Rotate: the current log replaces the previous backup.
         if let attrs = try? FileManager.default.attributesOfItem(atPath: logPath),
            let size = attrs[.size] as? Int, size > maxLogSize {
-            // 删除旧的备份文件
             try? FileManager.default.removeItem(atPath: logPathOld)
-            // 将当前日志重命名为备份
             try? FileManager.default.moveItem(atPath: logPath, toPath: logPathOld)
         }
 
-        // 写入日志
         if FileManager.default.fileExists(atPath: logPath) {
             if let handle = try? FileHandle(forWritingTo: URL(fileURLWithPath: logPath)) {
                 defer { try? handle.close() }
@@ -44,17 +38,15 @@ private func logToFile(_ message: String) {
     }
 }
 
-/// HotKeyService - 全局快捷键服务
-/// v0.9.5: 完全重写，参考 soffes/HotKey 库的实现方式
-/// - 使用 GetEventParameter 从事件中提取 hotKeyID
-/// - 通过 hotKeyID 匹配处理器
-/// - 解决快捷键录制后需要重启才能生效的问题
+/// Registers the global hotkey through Carbon and dispatches presses to the handler.
+/// Modeled on soffes/HotKey: the event's hotKeyID (read with `GetEventParameter`) selects the
+/// handler, so a newly recorded shortcut takes effect without a relaunch.
 public final class HotKeyService {
     // MARK: - Types
 
     public typealias HotKeyHandler = @MainActor @Sendable () -> Void
 
-    // MARK: - Static Properties (Carbon API 需要)
+    // MARK: - Static Properties (required by the Carbon API)
 
     private struct SharedState {
         var handlers: [UInt32: HotKeyHandler] = [:]
@@ -82,7 +74,7 @@ public final class HotKeyService {
 
     private static let sharedState = Locked(SharedState())
 
-    /// 热键签名
+    /// Hotkey signature.
     private static let hotKeySignature: OSType = {
         var result: OSType = 0
         for char in "SCPY".utf8.prefix(4) {
@@ -91,11 +83,10 @@ public final class HotKeyService {
         return result
     }()
 
-    /// v0.20: 安全递增 hotKeyID，防止溢出（通过 lock-isolated shared state 串行化）
+    /// The next hotKeyID, serialized through the shared state and wrapped before overflow.
     private static func getNextHotKeyID() -> UInt32 {
         return sharedState.withValue { state in
-            // 如果接近溢出，重置为 1（跳过 0，因为 0 通常表示无效 ID）
-            // 使用 UInt32.max - 1000 作为阈值，留出足够的安全边界
+            // Near overflow, wrap to 1 (0 usually means an invalid ID), leaving a 1000-ID margin.
             if state.nextHotKeyID >= UInt32.max - 1000 {
                 logToFile("⚠️ HotKeyID approaching overflow, resetting to 1")
                 state.nextHotKeyID = 1
@@ -116,7 +107,7 @@ public final class HotKeyService {
         set { currentHotKeyIDBox.withValue { $0 = newValue } }
     }
 
-    // 默认快捷键: ⇧⌘C
+    // Default shortcut: ⇧⌘C
     private let defaultKeyCode: UInt32 = UInt32(kVK_ANSI_C)  // 8
     private let defaultModifiers: UInt32 = 0x0300  // shiftKey | cmdKey
 
@@ -133,7 +124,7 @@ public final class HotKeyService {
 
     // MARK: - Private: Event Handler Installation
 
-    /// 安装事件处理器（只安装一次）
+    /// Installs the event handler once.
     private static func installEventHandlerIfNeeded() {
         let shouldInstall = sharedState.withValue { state -> Bool in
             guard state.eventHandlerRef == nil else {
@@ -150,7 +141,7 @@ public final class HotKeyService {
 
         guard shouldInstall else { return }
 
-        // 只监听按下事件，避免按下/松开各触发一次导致"按住才显示"
+        // Pressed events only: handling release too would fire twice and show only while held.
         var eventTypes = [
             EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
         ]
@@ -181,13 +172,13 @@ public final class HotKeyService {
 
     // MARK: - Public API
 
-    /// 注册全局快捷键（使用默认快捷键）
+    /// Registers the default global shortcut.
     public func register(handler: @escaping HotKeyHandler) {
         logToFile("🔧 register() called with default hotkey")
         registerHotKey(keyCode: defaultKeyCode, modifiers: defaultModifiers, handler: handler)
     }
 
-    /// 注销全局快捷键
+    /// Unregisters the global shortcut.
     public func unregister() {
         guard let hotKeyRef = hotKeyRef else {
             logToFile("⚠️ unregister() called but no hotkey registered")
@@ -198,7 +189,7 @@ public final class HotKeyService {
         let status = UnregisterEventHotKey(hotKeyRef)
         self.hotKeyRef = nil
 
-        // 从共享状态中移除处理器
+        // Remove the handler from the shared state.
         Self.sharedState.withValue { state in
             _ = state.handlers.removeValue(forKey: hotKeyID)
         }
@@ -206,21 +197,20 @@ public final class HotKeyService {
         currentHotKeyID = 0
     }
 
-    /// 更新快捷键（设置窗口使用）
+    /// Replaces the shortcut; used by Settings.
     public func updateHotKey(keyCode: UInt32, modifiers: UInt32, handler: @escaping HotKeyHandler) {
         logToFile("🔧 updateHotKey() called: keyCode=\(keyCode), modifiers=0x\(String(modifiers, radix: 16))")
 
-        // 先注销旧的
+        // Unregister the old shortcut first.
         unregister()
 
-        // 注册新的
+        // Register the new one.
         registerHotKey(keyCode: keyCode, modifiers: modifiers, handler: handler)
     }
 
     // MARK: - Private: Registration
 
     private func registerHotKey(keyCode: UInt32, modifiers: UInt32, handler: @escaping HotKeyHandler) {
-        // v0.20: 使用 getNextHotKeyID() 防止溢出
         let newID = Self.getNextHotKeyID()
         currentHotKeyID = newID
         let handlerCount = Self.sharedState.withValue { state -> Int in
@@ -229,12 +219,10 @@ public final class HotKeyService {
         }
         logToFile("📝 Handler stored: id=\(newID), total handlers=\(handlerCount)")
 
-        // 创建 hotKeyID 结构
         var hotKeyID = EventHotKeyID()
         hotKeyID.signature = Self.hotKeySignature
         hotKeyID.id = newID
 
-        // 注册热键
         let status = RegisterEventHotKey(
             keyCode,
             modifiers,
@@ -273,7 +261,7 @@ public final class HotKeyService {
 
     // MARK: - Static: Event Handling
 
-    /// 处理 Carbon 事件
+    /// Handles a Carbon hotkey event.
     fileprivate static func handleCarbonEvent(_ event: EventRef?) -> OSStatus {
         logToFile("🎯 handleCarbonEvent called")
 
@@ -282,14 +270,14 @@ public final class HotKeyService {
             return OSStatus(eventNotHandledErr)
         }
 
-        // 只处理 HotKey 按下事件，忽略松开
+        // Handle presses only; ignore releases.
         let kind = GetEventKind(event)
         guard kind == UInt32(kEventHotKeyPressed) else {
             logToFile("⏩ Ignoring event kind=\(kind)")
             return OSStatus(eventNotHandledErr)
         }
 
-        // 提取 hotKeyID
+        // Read the hotKeyID.
         var hotKeyID = EventHotKeyID()
         let status = GetEventParameter(
             event,
@@ -308,20 +296,20 @@ public final class HotKeyService {
 
         logToFile("📥 Event received: signature=\(hotKeyID.signature), id=\(hotKeyID.id), expected signature=\(hotKeySignature)")
 
-        // 验证签名
+        // Check the signature.
         guard hotKeyID.signature == hotKeySignature else {
             logToFile("⚠️ Signature mismatch")
             return OSStatus(eventNotHandledErr)
         }
 
-        // 查找并执行处理器（共享状态串行化，同时保护 lastFire）
+        // Look up and run the handler; the shared state also guards `lastFire`.
         let result: (handler: HotKeyHandler?, shouldExecute: Bool) = sharedState.withValue { state in
             let availableKeys = Array(state.handlers.keys)
             let handler = state.handlers[hotKeyID.id]
 
             logToFile("🔍 Looking for handler: id=\(hotKeyID.id), available handlers=\(availableKeys)")
 
-            // 按住时会重复发 pressed 事件，做简单节流
+            // Holding the keys repeats pressed events; throttle them.
             let now = CFAbsoluteTimeGetCurrent()
             if let last = state.lastFire, last.id == hotKeyID.id, now - last.timestamp < 0.25 {
                 logToFile("⏩ Ignoring repeat pressed event for id=\(hotKeyID.id)")
@@ -363,7 +351,6 @@ public final class HotKeyService {
         }
     }
 
-    /// v0.17.1: 使用 withLock 统一锁策略
     public func triggerHandlerForTesting() {
         let hotKeyID = currentHotKeyID
         let handler = Self.sharedState.withValue { state in
@@ -384,10 +371,8 @@ public final class HotKeyService {
         }
     }
 
-    /// v0.22: 修复竞态条件 - 使用 getNextHotKeyID() 确保线程安全
-    /// v0.22.1: 修复嵌套锁死锁风险 - 在 handlersLock 外部调用 getNextHotKeyID()
+    /// Takes the new ID before entering the shared state, so the two locks never nest.
     public func registerHandlerOnly(_ handler: @escaping HotKeyHandler) {
-        // 先获取 ID（避免在 critical region 内做额外工作）
         let newID = Self.getNextHotKeyID()
         currentHotKeyID = newID
         Self.sharedState.withValue { state in
@@ -407,7 +392,7 @@ public final class HotKeyService {
 
 // MARK: - Carbon Event Callback
 
-/// Carbon API 事件处理回调（必须是 C 函数）
+/// The Carbon event callback; it must be a C function.
 private func carbonEventCallback(
     nextHandler: EventHandlerCallRef?,
     event: EventRef?,

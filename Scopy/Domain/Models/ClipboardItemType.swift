@@ -1,6 +1,6 @@
 import Foundation
 
-/// 剪贴板项类型
+/// The kind of content a clipboard item holds.
 public enum ClipboardItemType: String, Sendable {
     case text
     case rtf

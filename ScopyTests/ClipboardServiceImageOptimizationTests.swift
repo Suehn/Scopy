@@ -36,7 +36,7 @@ private actor ImageOptimizationInterlockGate {
 @MainActor
 final class ClipboardServiceImageOptimizationTests: XCTestCase {
     private struct Fixture {
-        let service: ClipboardService
+        let service: ClipboardBackend
         let itemID: UUID
         let originalData: Data
         let originalHash: String
@@ -53,7 +53,7 @@ final class ClipboardServiceImageOptimizationTests: XCTestCase {
         }
     }
 
-    private var service: ClipboardService?
+    private var service: ClipboardBackend?
     private var tempDirectory: URL?
     private var settingsSuiteName: String?
 
@@ -793,7 +793,7 @@ final class ClipboardServiceImageOptimizationTests: XCTestCase {
     private func startFixture(
         compressorScript: String,
         originalData: Data? = nil,
-        imageOptimizationInterlock: (@Sendable (ClipboardService.ImageOptimizationInterlockPoint, UUID) async -> Void)? = nil
+        imageOptimizationInterlock: (@Sendable (ClipboardBackend.ImageOptimizationInterlockPoint, UUID) async -> Void)? = nil
     ) async throws -> Fixture {
         precondition(service == nil)
 
@@ -834,7 +834,7 @@ final class ClipboardServiceImageOptimizationTests: XCTestCase {
         )
         await seedStorage.close()
 
-        let clipboardService = ClipboardService(
+        let clipboardService = ClipboardBackend(
             databasePath: databasePath,
             settingsStore: settingsStore,
             monitorPasteboardName: NSPasteboard.withUniqueName().name.rawValue,

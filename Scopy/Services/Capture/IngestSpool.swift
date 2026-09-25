@@ -548,7 +548,7 @@ enum IngestSpool {
     }
 }
 
-// Referenced by ClipboardService as `ClipboardMonitor.createTransientWorkCopy`.
+// Referenced by ClipboardBackend as `ClipboardMonitor.createTransientWorkCopy`.
 extension ClipboardMonitor {
     /// Copies a durable spool payload to a transient work file in the same directory, after
     /// re-validating that the envelope and payload are still owned spool files.

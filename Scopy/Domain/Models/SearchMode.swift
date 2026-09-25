@@ -1,9 +1,9 @@
 import Foundation
 
-/// 搜索模式 - 对应 v0.md 中的 SearchMode
+/// How a search query matches.
 public enum SearchMode: String, Sendable, CaseIterable, Equatable, Hashable {
     case exact
     case fuzzy
-    case fuzzyPlus  // v0.19.1: 分词 + 每词模糊匹配
+    case fuzzyPlus  // Whitespace-separated words, each matched fuzzily.
     case regex
 }

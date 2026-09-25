@@ -113,7 +113,7 @@ enum CapturePolicy {
     }
 }
 
-// Image and hash helpers that ClipboardService, StorageService and their tests reference as
+// Image and hash helpers that ClipboardBackend, StorageService and their tests reference as
 // `ClipboardMonitor.…`; they need no monitor state.
 extension ClipboardMonitor {
     /// SHA-256 hex digest: the content hash of every stored item.

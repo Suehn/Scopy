@@ -282,7 +282,7 @@ public final class ClipboardMonitor {
 
     /// Performs potentially large legacy copies and artifact enumeration outside the monitor's
     /// main-actor lifecycle in production. The public initializer keeps a synchronous fallback for
-    /// standalone callers that cannot participate in ClipboardService startup orchestration.
+    /// standalone callers that cannot participate in ClipboardBackend startup orchestration.
     nonisolated static func prepareIngestSpoolDirectory(
         _ ingestDirectory: URL,
         legacyDirectory: URL?

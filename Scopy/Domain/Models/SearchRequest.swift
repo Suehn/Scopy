@@ -1,16 +1,15 @@
 import Foundation
 
-/// 搜索请求 - 对应 v0.md 中的 SearchRequest
-/// v0.22: 添加 typeFilters 支持多类型过滤（如 Rich Text = rtf + html）
+/// One search: query, mode, sort, filters, and page.
 public struct SearchRequest: Sendable {
     public let query: String
     public let mode: SearchMode
     public let sortMode: SearchSortMode
     public let appFilter: String?
     public let typeFilter: ClipboardItemType?
-    /// v0.22: 多类型过滤，优先于 typeFilter
+    /// Several item types at once (Rich Text is rtf + html); wins over `typeFilter`.
     public let typeFilters: Set<ClipboardItemType>?
-    /// v0.29: 渐进搜索 - 是否强制使用全量 fuzzy（禁用首屏预筛）
+    /// Staged search refine: skip the first-page prefilter and run the full fuzzy search.
     public let forceFullFuzzy: Bool
     public let limit: Int
     public let offset: Int

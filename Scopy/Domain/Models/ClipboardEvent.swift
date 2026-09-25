@@ -1,10 +1,10 @@
 import Foundation
 
-/// 剪贴板事件 - 对应 v0.md 中的 ClipboardEvent
+/// A change the backend publishes to the UI.
 public enum ClipboardEvent: Sendable {
     case newItem(ClipboardItemDTO)
-    case itemUpdated(ClipboardItemDTO)  // 用于置顶更新的条目
-    case itemContentUpdated(ClipboardItemDTO) // 内容更新（不应置顶）
+    case itemUpdated(ClipboardItemDTO)  // Moves the item to the top.
+    case itemContentUpdated(ClipboardItemDTO) // Content changed; the item keeps its position.
     case thumbnailUpdated(
         itemID: UUID,
         expectedType: ClipboardItemType,
