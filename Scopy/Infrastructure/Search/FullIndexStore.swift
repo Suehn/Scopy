@@ -70,8 +70,9 @@ final class FullIndexStore {
     /// The index when it is installed and not superseded.
     var usableIndex: FullFuzzyIndex? { isStale ? nil : index }
     var buildTask: Task<Void, Never>? { build?.task }
-    var buildTrigger: BuildTrigger? { build?.trigger }
+#if DEBUG
     var pendingEventCount: Int { build?.pendingEvents.count ?? 0 }
+#endif
 
     static func needsRebuild(itemCount: Int, tombstoneCount: Int) -> Bool {
         guard itemCount >= tombstoneMinSlotsForStale else { return false }

@@ -21,18 +21,10 @@ final class SearchReadStore {
         let typeFilter: ClipboardItemType?
         let typeFilters: [ClipboardItemType]?
 
-        init(appFilter: String?, typeFilter: ClipboardItemType?, typeFilters: [ClipboardItemType]?) {
-            self.appFilter = appFilter
-            self.typeFilter = typeFilter
-            self.typeFilters = typeFilters
-        }
-
         init(_ request: SearchRequest) {
-            self.init(
-                appFilter: request.appFilter,
-                typeFilter: request.typeFilter,
-                typeFilters: request.typeFilters.map(Array.init)
-            )
+            appFilter = request.appFilter
+            typeFilter = request.typeFilter
+            typeFilters = request.typeFilters.map(Array.init)
         }
 
         /// Appends `AND` clauses and their parameters. `column` prefixes the column names for
@@ -59,13 +51,9 @@ final class SearchReadStore {
         let limit: Int
         let offset: Int
 
-        init(limit: Int, offset: Int) {
-            self.limit = limit
-            self.offset = offset
-        }
-
         init(_ request: SearchRequest) {
-            self.init(limit: request.limit, offset: request.offset)
+            limit = request.limit
+            offset = request.offset
         }
 
         func bind(to stmt: SQLiteStatement, at index: Int32) throws {

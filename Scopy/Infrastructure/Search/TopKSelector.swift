@@ -12,8 +12,6 @@ struct TopKSelector<Element> {
         self.isBetter = isBetter
     }
 
-    var count: Int { heap.count }
-
     mutating func reserveCapacity(_ n: Int) {
         heap.reserveCapacity(n)
     }
