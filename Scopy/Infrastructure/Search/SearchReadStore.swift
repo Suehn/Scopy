@@ -604,7 +604,8 @@ final class SearchReadStore {
 
     // MARK: - Index scans (a private connection each, off the engine actor)
 
-    /// Every row's short-index fields; `nil` when the scan fails or the task is cancelled.
+    /// Every row's short-index fields; `nil` when the task is cancelled or the scan fails. A row
+    /// that cannot be decoded fails the scan: an index missing rows must not pass as complete.
     static func loadShortQueryIndex(dbPath: String, reserveSlots: Int) -> ShortQueryIndex? {
         guard let conn = try? openConnection(dbPath: dbPath) else { return nil }
         defer { conn.close() }
@@ -622,7 +623,7 @@ final class SearchReadStore {
                       let id = UUID(uuidString: idString),
                       let typeRaw = stmt.columnText(1),
                       let type = ClipboardItemType(rawValue: typeRaw) else {
-                    continue
+                    throw ClipboardItemRow.DecodeError.invalidRow
                 }
 
                 let contentHash = stmt.columnText(2) ?? ""
@@ -632,6 +633,7 @@ final class SearchReadStore {
                 index.upsert(id: id, type: type, contentHash: contentHash, plainText: plainText, note: note)
             }
         } catch {
+            logScanFailure("short", error)
             return nil
         }
 
@@ -639,7 +641,8 @@ final class SearchReadStore {
         return index
     }
 
-    /// Every row's summary; `nil` when the scan fails or the task is cancelled.
+    /// Every row's summary; `nil` when the task is cancelled or the scan fails. A row that cannot
+    /// be decoded fails the scan: an index missing rows must not pass as complete.
     static func loadFullIndex(dbPath: String, reserveSlots: Int) -> FullFuzzyIndex? {
         guard let conn = try? openConnection(dbPath: dbPath) else { return nil }
         defer { conn.close() }
@@ -654,15 +657,28 @@ final class SearchReadStore {
             while try stmt.step() {
                 if row % 512 == 0, Task.isCancelled { return nil }
                 row += 1
-                guard let stored = try? ClipboardItemRow.decodeSummary(stmt) else { continue }
-                index.append(IndexedItem(from: stored))
+                index.append(IndexedItem(from: try ClipboardItemRow.decodeSummary(stmt)))
             }
         } catch {
+            logScanFailure("full", error)
             return nil
         }
 
         guard !Task.isCancelled else { return nil }
         return index
+    }
+
+    /// SQLite failures carry their extended result code; row content is never logged.
+    private static func logScanFailure(_ index: String, _ error: Error) {
+        let reason: String
+        if let sqlite = error as? SQLiteConnection.SQLiteConnectionError {
+            reason = "sqlite code=\(sqlite.code) category=\(sqlite.category.rawValue)"
+        } else if error is ClipboardItemRow.DecodeError {
+            reason = "undecodable row"
+        } else {
+            reason = String(describing: type(of: error))
+        }
+        ScopyLog.search.error("\(index, privacy: .public) index scan failed: \(reason, privacy: .public)")
     }
 
     // MARK: - SQL fragments
