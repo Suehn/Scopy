@@ -584,7 +584,7 @@ final class HistoryViewModelRegressionTests: XCTestCase {
     }
 
     func testSearchPaginationYieldsWithCompleteEvidenceAndPreservesOrderAndSelection() async {
-        let results = (0..<175).map { makeItem(text: "needle \($0)", age: $0) }
+        let results = (0..<(Self.firstTwoPages + 25)).map { makeItem(text: "needle \($0)", age: $0) }
         let service = HistoryViewModelRegressionService(items: results)
         service.includesMatchEvidence = true
         let viewModel = HistoryViewModel(service: service, settingsViewModel: SettingsViewModel(service: service))
@@ -601,7 +601,7 @@ final class HistoryViewModelRegressionTests: XCTestCase {
         let pagination = Task { await viewModel.loadMore() }
         await waitForNextItemsRevision(in: viewModel)
         XCTAssertGreaterThan(viewModel.loadedCount, 50)
-        XCTAssertLessThan(viewModel.loadedCount, 150)
+        XCTAssertLessThan(viewModel.loadedCount, Self.firstTwoPages)
         XCTAssertTrue(viewModel.isLoading)
         XCTAssertTrue(viewModel.canLoadMore)
         XCTAssertTrue(viewModel.items.allSatisfy { viewModel.searchMatchContext(for: $0.id) != nil })
@@ -610,8 +610,8 @@ final class HistoryViewModelRegressionTests: XCTestCase {
         await viewModel.loadMore()
         await pagination.value
         XCTAssertEqual(service.searchRequests.map(\.offset), [0, 50])
-        XCTAssertEqual(viewModel.items.map(\.id), Array(results.prefix(150)).map(\.id))
-        XCTAssertEqual(viewModel.searchMatchContexts.count, 150)
+        XCTAssertEqual(viewModel.items.map(\.id), Array(results.prefix(Self.firstTwoPages)).map(\.id))
+        XCTAssertEqual(viewModel.searchMatchContexts.count, Self.firstTwoPages)
         XCTAssertEqual(viewModel.selectedID, results[12].id)
         XCTAssertTrue(viewModel.isScrolling)
 
@@ -625,7 +625,7 @@ final class HistoryViewModelRegressionTests: XCTestCase {
 
     func testCalibratedFuzzyPaginationNeverReturnsToPrefilterOrdering() async {
         for mode in [SearchMode.fuzzy, .fuzzyPlus] {
-            let results = (0..<175).map { makeItem(text: "needle \($0)", age: $0) }
+            let results = (0..<(Self.firstTwoPages + 25)).map { makeItem(text: "needle \($0)", age: $0) }
             let service = HistoryViewModelRegressionService(items: results)
             service.includesMatchEvidence = true
             service.returnsStagedFirstPage = true
@@ -653,19 +653,19 @@ final class HistoryViewModelRegressionTests: XCTestCase {
 
             await viewModel.loadMore()
             XCTAssertEqual(viewModel.searchCoverage, .complete)
-            XCTAssertEqual(viewModel.items.map(\.id), Array(results.prefix(150)).map(\.id))
-            XCTAssertEqual(Set(viewModel.items.map(\.id)).count, 150)
-            XCTAssertEqual(viewModel.searchMatchContexts.count, 150)
+            XCTAssertEqual(viewModel.items.map(\.id), Array(results.prefix(Self.firstTwoPages)).map(\.id))
+            XCTAssertEqual(Set(viewModel.items.map(\.id)).count, Self.firstTwoPages)
+            XCTAssertEqual(viewModel.searchMatchContexts.count, Self.firstTwoPages)
             await viewModel.loadMore()
             XCTAssertEqual(viewModel.items.map(\.id), results.map(\.id))
-            XCTAssertEqual(service.searchRequests.map(\.offset), [0, 0, 50, 150])
+            XCTAssertEqual(service.searchRequests.map(\.offset), [0, 0, HistoryViewModel.initialPageSize, Self.firstTwoPages])
             XCTAssertTrue(service.searchRequests.dropFirst().allSatisfy(\.forceFullFuzzy))
             XCTAssertFalse(viewModel.canLoadMore)
         }
     }
 
     func testRefinedPaginationYieldsAndPreservesSelectionMovedIntoTail() async {
-        let results = (0..<150).map { makeItem(text: "needle \($0)", age: $0) }
+        let results = (0..<Self.firstTwoPages).map { makeItem(text: "needle \($0)", age: $0) }
         let service = HistoryViewModelRegressionService(items: results)
         service.includesMatchEvidence = true
         service.returnsStagedFirstPage = true
@@ -691,7 +691,7 @@ final class HistoryViewModelRegressionTests: XCTestCase {
         let pagination = Task { await viewModel.loadMore() }
         await waitForNextItemsRevision(in: viewModel)
         XCTAssertGreaterThan(viewModel.loadedCount, 50)
-        XCTAssertLessThan(viewModel.loadedCount, 150)
+        XCTAssertLessThan(viewModel.loadedCount, Self.firstTwoPages)
         XCTAssertEqual(viewModel.items.map(\.id), Array(results.prefix(viewModel.loadedCount)).map(\.id))
         XCTAssertEqual(viewModel.searchMatchContexts.count, viewModel.loadedCount)
         XCTAssertEqual(Array(viewModel.items.prefix(50)).map(\.id), Array(results.prefix(50)).map(\.id),
@@ -705,7 +705,7 @@ final class HistoryViewModelRegressionTests: XCTestCase {
         await pagination.value
         XCTAssertEqual(service.searchRequests.count, 2)
         XCTAssertEqual(service.searchRequests.last?.offset, 0)
-        XCTAssertEqual(service.searchRequests.last?.limit, 150)
+        XCTAssertEqual(service.searchRequests.last?.limit, Self.firstTwoPages)
         XCTAssertTrue(service.searchRequests.last?.forceFullFuzzy == true)
         XCTAssertEqual(viewModel.items.map(\.id), reordered.map(\.id))
         XCTAssertEqual(Set(viewModel.searchMatchContexts.keys), Set(reordered.map(\.id)))
@@ -764,7 +764,7 @@ final class HistoryViewModelRegressionTests: XCTestCase {
     }
 
     func testChangingSearchDuringPageApplicationDiscardsRemainingRowsAndEvidence() async {
-        let oldResults = (0..<175).map { makeItem(text: "needle \($0)", age: $0) }
+        let oldResults = (0..<(Self.firstTwoPages + 25)).map { makeItem(text: "needle \($0)", age: $0) }
         let newResults = (0..<3).map { makeItem(text: "replacement \($0)", age: $0) }
         let service = HistoryViewModelRegressionService(items: oldResults + newResults)
         service.includesMatchEvidence = true
@@ -780,7 +780,7 @@ final class HistoryViewModelRegressionTests: XCTestCase {
         let pagination = Task { await viewModel.loadMore() }
         await waitForNextItemsRevision(in: viewModel)
         XCTAssertGreaterThan(viewModel.loadedCount, 50)
-        XCTAssertLessThan(viewModel.loadedCount, 150)
+        XCTAssertLessThan(viewModel.loadedCount, Self.firstTwoPages)
         viewModel.searchQuery = "replacement"
         viewModel.search()
         await waitForNextItemsRevision(in: viewModel)
@@ -796,7 +796,7 @@ final class HistoryViewModelRegressionTests: XCTestCase {
     }
 
     func testChangingSearchDuringRefinedPaginationDiscardsThePendingRanking() async {
-        let oldResults = (0..<175).map { makeItem(text: "needle \($0)", age: $0) }
+        let oldResults = (0..<(Self.firstTwoPages + 25)).map { makeItem(text: "needle \($0)", age: $0) }
         let newResults = (0..<3).map { makeItem(text: "replacement \($0)", age: $0) }
         let service = HistoryViewModelRegressionService(items: oldResults + newResults)
         service.includesMatchEvidence = true
@@ -815,7 +815,7 @@ final class HistoryViewModelRegressionTests: XCTestCase {
         let pagination = Task { await viewModel.loadMore() }
         await waitForNextItemsRevision(in: viewModel)
         XCTAssertGreaterThan(viewModel.loadedCount, 50)
-        XCTAssertLessThan(viewModel.loadedCount, 150)
+        XCTAssertLessThan(viewModel.loadedCount, Self.firstTwoPages)
         service.returnsStagedFirstPage = false
         viewModel.searchQuery = "replacement"
         viewModel.search()
@@ -831,7 +831,7 @@ final class HistoryViewModelRegressionTests: XCTestCase {
     }
 
     func testDeletingBufferedSearchResultCancelsThePageAndCannotResurrectIt() async {
-        let results = (0..<175).map { makeItem(text: "needle \($0)", age: $0) }
+        let results = (0..<(Self.firstTwoPages + 25)).map { makeItem(text: "needle \($0)", age: $0) }
         let service = HistoryViewModelRegressionService(items: results)
         service.includesMatchEvidence = true
         let viewModel = HistoryViewModel(service: service, settingsViewModel: SettingsViewModel(service: service))
@@ -853,10 +853,10 @@ final class HistoryViewModelRegressionTests: XCTestCase {
         await pagination.value
         await viewModel.loadMore()
 
-        XCTAssertEqual(viewModel.items.map(\.id), Array(service.items.prefix(150)).map(\.id))
+        XCTAssertEqual(viewModel.items.map(\.id), Array(service.items.prefix(Self.firstTwoPages)).map(\.id))
         XCTAssertFalse(viewModel.items.contains { $0.id == deletedID })
         XCTAssertNil(viewModel.searchMatchContext(for: deletedID))
-        XCTAssertEqual(viewModel.totalCount, 174)
+        XCTAssertEqual(viewModel.totalCount, results.count - 1)
     }
 
     func testSlowDetailedStorageStatsDoesNotBlockFirstScreenLoad() async {
@@ -906,6 +906,9 @@ final class HistoryViewModelRegressionTests: XCTestCase {
         await fulfillment(of: [finished], timeout: 1.0)
         XCTAssertFalse(viewModel.isLoading)
     }
+
+    /// The rows loaded after the first page and one load-more page.
+    private static let firstTwoPages = HistoryViewModel.initialPageSize + HistoryViewModel.loadMorePageSize
 
     private func waitUntil(timeout: TimeInterval, _ condition: () -> Bool) async {
         let deadline = Date().addingTimeInterval(timeout)

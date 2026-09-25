@@ -353,7 +353,7 @@ final class HistoryViewModel {
     private(set) var fetchFailureMessage: String?
 
     static let initialPageSize = 50
-    static let loadMorePageSize = 100
+    static let loadMorePageSize = 300
     static let knownContentRevisionCapacity = 4096
 
     /// Not observed as a whole: an in-place change (pagination, total) would invalidate every
@@ -989,9 +989,10 @@ final class HistoryViewModel {
         Task { await loadMore() }
     }
 
-    /// Rows applied per chunk; chunks are 20 ms apart so a 100-row page costs five small List
-    /// updates instead of one long one while the user is still scrolling.
-    static let loadMoreApplyChunkRows = 20
+    /// Rows applied per chunk; chunks are 20 ms apart so a page costs a few short List updates
+    /// instead of one long one while the user is still scrolling. Every update makes the table
+    /// re-query all row heights, so fewer, larger chunks cost less than many small ones.
+    static let loadMoreApplyChunkRows = 50
 
     func loadMore() async {
         ScrollPerformanceProfile.shared.incrementCounter(name: "list.load_more_attempt")
