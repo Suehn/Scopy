@@ -11,7 +11,7 @@ import AppKit
 /// running. The keeper records the row under the top edge and its offset before the change and
 /// scrolls back to that row as soon as the table has re-tiled, so the same row stays in place.
 @MainActor
-final class ListScrollAnchorKeeper {
+final class ListScrollAnchorKeeper: NSObject {
     private struct Anchor {
         /// The item under the top edge, or nil for a header or load-more row.
         let itemID: UUID?
@@ -32,13 +32,7 @@ final class ListScrollAnchorKeeper {
     var programmaticScrollGate: ListProgrammaticScrollGate?
 
     private var anchor: Anchor?
-    private var documentFrameObserver: NSObjectProtocol?
-
-    deinit {
-        if let documentFrameObserver {
-            NotificationCenter.default.removeObserver(documentFrameObserver)
-        }
-    }
+    private weak var observedDocumentView: NSView?
 
     /// Records the row under the top edge; the first capture of a change wins until it is restored.
     func projectionWillChange() {
@@ -61,22 +55,25 @@ final class ListScrollAnchorKeeper {
         }
     }
 
+    /// Selector observers unregister themselves when the keeper is released.
     private func observeDocumentFrame() {
-        if let documentFrameObserver {
-            NotificationCenter.default.removeObserver(documentFrameObserver)
-            self.documentFrameObserver = nil
+        if let observedDocumentView {
+            NotificationCenter.default.removeObserver(self, name: NSView.frameDidChangeNotification, object: observedDocumentView)
+            self.observedDocumentView = nil
         }
         guard let documentView = scrollView?.documentView else { return }
         documentView.postsFrameChangedNotifications = true
-        documentFrameObserver = NotificationCenter.default.addObserver(
-            forName: NSView.frameDidChangeNotification,
-            object: documentView,
-            queue: nil
-        ) { [weak self] _ in
-            MainActor.assumeIsolated {
-                self?.restore()
-            }
-        }
+        observedDocumentView = documentView
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(documentFrameDidChange(_:)),
+            name: NSView.frameDidChangeNotification,
+            object: documentView
+        )
+    }
+
+    @objc private func documentFrameDidChange(_ notification: Notification) {
+        restore()
     }
 
     /// Scrolls so the anchored row sits where it was. A row whose item left the projection is
