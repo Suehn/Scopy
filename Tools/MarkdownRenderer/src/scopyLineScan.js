@@ -1,15 +1,18 @@
 // One definition of "fence line" and "indentation" for every source-level rewrite that runs
 // before parsing and must leave code alone (heading repair, table code-span pipes, backslash
-// math). The rules mirror the Swift `MarkdownCodeSkipper` they replaced: any indentation may
-// precede a fence, and only spaces and tabs (Unicode Zs plus U+0009) count as leading blank.
+// math). A fence may be indented by at most three columns (a tab counts as four), as in CommonMark:
+// four or more make the line indented code, not a fence.
 
 const LEADING_BLANK = /^[\t\p{Zs}]+/u;
 
 /**
- * `{ marker, count }` when `line` is a fence marker line: optional leading blank, then three or
- * more of the same "`" or "~" character. `null` otherwise.
+ * `{ marker, count }` when `line` is a fence marker line: at most three columns of leading blank,
+ * then three or more of the same "`" or "~" character. `null` otherwise.
  */
 export function fencePrefix(line) {
+  if (leadingIndentSpaces(line) > 3) {
+    return null;
+  }
   const trimmed = String(line || "").replace(LEADING_BLANK, "");
   const marker = trimmed[0];
   if (marker !== "`" && marker !== "~") {
@@ -133,4 +136,52 @@ export function processInlineCode(line, transform) {
   }
   const tail = line.slice(segmentStart);
   return result + (inCode ? tail : transform(tail));
+}
+
+const graphemes = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+
+/**
+ * Scans `text` from `from` one character at a time, examining at most `limit` characters, where a character is a
+ * grapheme cluster like the Swift `Character` the scientific repairs' scan limits were written for (UTF-16 lengths
+ * stay the unit of their admission limits). Stops at the first character for which `visit(character)` is true.
+ * Returns `{ index, end, scanned }`: the index of that character or -1, the position scanning stopped at when
+ * nothing matched, and how many characters were examined before the match.
+ */
+export function scanCharacters(text, from, limit, visit) {
+  if (text.length - from <= limit) {
+    // Fewer code units than the limit remain, so the limit cannot bind: scan code units directly.
+    for (let i = from; i < text.length; i += 1) {
+      if (visit(text[i])) {
+        return { index: i, end: i, scanned: i - from };
+      }
+    }
+    return { index: -1, end: text.length, scanned: text.length - from };
+  }
+  let scanned = 0;
+  let position = from;
+  for (const { segment, index } of graphemes.segment(text.slice(from))) {
+    if (scanned >= limit) {
+      break;
+    }
+    if (visit(segment)) {
+      return { index: from + index, end: from + index, scanned };
+    }
+    scanned += 1;
+    position = from + index + segment.length;
+  }
+  return { index: -1, end: position, scanned };
+}
+
+/** Scans for the `}` closing a group whose body starts at `from`, within `limit` characters. */
+export function closingBraceScan(text, from, limit) {
+  let depth = 1;
+  return scanCharacters(text, from, limit, (character) => {
+    if (character === "{") {
+      depth += 1;
+    } else if (character === "}") {
+      depth -= 1;
+      return depth === 0;
+    }
+    return false;
+  });
 }

@@ -10,7 +10,8 @@ final class LiveMarkdownDocument {
     let window: NSWindow
     let assetRoot: URL
 
-    init(webView: WKWebView = WKWebView(frame: CGRect(x: 0, y: 0, width: 816, height: 900))) throws {
+    init(webView: WKWebView? = nil) throws {
+        let webView = webView ?? WKWebView(frame: CGRect(x: 0, y: 0, width: 816, height: 900))
         self.webView = webView
         window = NSWindow(contentRect: webView.frame, styleMask: [.borderless], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false

@@ -1,4 +1,5 @@
 import {
+  closingBraceScan,
   createFenceTracker,
   isWhitespaceUnit,
   leadingIndentSpaces,
@@ -84,20 +85,9 @@ function replaceCommandWithBracedArg(text, head, wrap) {
   return out;
 }
 
-/** Index of the `}` closing a group whose body starts at `from`, scanning at most `limit` units. */
+/** Index of the `}` closing a group whose body starts at `from`, within `limit` characters, or -1. */
 function closingBrace(text, from, limit) {
-  let depth = 1;
-  for (let j = from, scanned = 0; j < text.length && scanned < limit; j += 1, scanned += 1) {
-    if (text[j] === "{") {
-      depth += 1;
-    } else if (text[j] === "}") {
-      depth -= 1;
-      if (depth === 0) {
-        return j;
-      }
-    }
-  }
-  return -1;
+  return closingBraceScan(text, from, limit).index;
 }
 
 // MARK: - Math protection
@@ -426,6 +416,7 @@ function escapeUnderscoresInsideText(text) {
   if (!text.includes("\\text{") || !text.includes("_")) {
     return text;
   }
+  // One character budget for the whole segment, as in the Swift original.
   const limit = MAX_BLOCK_MATH_LENGTH * 8;
   let out = "";
   let i = 0;
@@ -436,29 +427,14 @@ function escapeUnderscoresInsideText(text) {
       return out + text.slice(i);
     }
     out += text.slice(i, start) + "\\text{";
-    let j = start + "\\text{".length;
-    let depth = 1;
-    let content = "";
-    while (j < text.length && scanned < limit) {
-      if (text[j] === "{") {
-        depth += 1;
-      }
-      if (text[j] === "}") {
-        depth -= 1;
-        if (depth === 0) {
-          break;
-        }
-      }
-      content += text[j];
-      j += 1;
-      scanned += 1;
+    const bodyStart = start + "\\text{".length;
+    const close = closingBraceScan(text, bodyStart, limit - scanned);
+    if (close.index === -1) {
+      return out + text.slice(bodyStart);
     }
-    if (j >= text.length || depth !== 0) {
-      return out + text.slice(start + "\\text{".length);
-    }
-    out += escapeUnescapedUnderscores(content) + "}";
-    i = j + 1;
-    scanned += 1;
+    out += escapeUnescapedUnderscores(text.slice(bodyStart, close.index)) + "}";
+    scanned += close.scanned + 1;
+    i = close.index + 1;
   }
   return out;
 }

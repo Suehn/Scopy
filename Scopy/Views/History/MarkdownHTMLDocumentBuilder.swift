@@ -71,12 +71,8 @@ enum MarkdownHTMLDocumentBuilder {
     }
 
     /// The policy object embedded next to the source. `render.js#normalizePolicy` reads exactly
-    /// these keys; `MarkdownRenderingCorpusContractTests` pins the bytes against the shared fixture
-    /// `Tools/MarkdownRenderer/test/fixtures/policy-contract.json`.
-    static func policyPayloadJSON(context: MarkdownRenderContext) -> String {
-        jsonLiteral(policyPayload(context: context))
-    }
-
+    /// these keys; `MarkdownRenderingCorpusContractTests` pins its bytes in the rendered document against the
+    /// shared fixture `Tools/MarkdownRenderer/test/fixtures/policy-contract.json`.
     private static func policyPayload(context: MarkdownRenderContext) -> RenderPolicyPayload {
         RenderPolicyPayload(
             allowLatexDocumentNormalize: context.policy.allowLatexDocumentNormalize,

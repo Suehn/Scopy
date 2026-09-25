@@ -63,9 +63,17 @@ test("does not escape pipes inside fenced code blocks that contain a table", () 
   assert.doesNotMatch(result.html, /<table>/);
 });
 
+test("a fence indented four columns is indented code and does not hide the rest of the document", () => {
+  const html = render("    ```\nFormula: \\(x\\)").html;
+  assert.match(html, /<pre><code>```\n<\/code><\/pre>/);
+  assert.match(html, /data-math-source="x"/);
+});
+
 test("fence and indentation scanning share one definition", () => {
   assert.deepEqual(fencePrefix("```swift"), { marker: "`", count: 3 });
-  assert.deepEqual(fencePrefix("\t ~~~~"), { marker: "~", count: 4 });
+  assert.deepEqual(fencePrefix("   ~~~~"), { marker: "~", count: 4 });
+  assert.equal(fencePrefix("    ```"), null);
+  assert.equal(fencePrefix("\t```"), null);
   assert.equal(fencePrefix("``"), null);
   assert.equal(fencePrefix("﻿```"), null);
   assert.equal(leadingIndentSpaces("\t  x"), 6);

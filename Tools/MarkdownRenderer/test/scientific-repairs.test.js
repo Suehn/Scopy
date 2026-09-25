@@ -28,3 +28,15 @@ test("the renderer applies the scientific repairs only when the policy asks", ()
   const document = render(source, { allowLatexDocumentNormalize: true, allowLatexInlineTextNormalize: true }).html;
   assert.match(document, /<h1>Energy<\/h1>/);
 });
+
+test("brace-scan limits count characters (grapheme clusters) like the Swift original, not UTF-16 units", () => {
+  // 1,500 family emoji: 16,500 UTF-16 units and 10,500 code points, but 1,500 characters.
+  const families = "👩‍👩‍👧‍👦".repeat(1500);
+  assert.equal(normalizeLatexInline(`\\textbf{${families}}`), `**${families}**`);
+  assert.equal(
+    normalizeLatexInline(`\\begin{equation}\nx \\label{${families}}\n\\end{equation}`),
+    "\\begin{equation}\nx\\end{equation}"
+  );
+  const tooLong = "a".repeat(10_001);
+  assert.equal(normalizeLatexInline(`\\textbf{${tooLong}}`), `\\textbf{${tooLong}}`);
+});

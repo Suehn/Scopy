@@ -320,38 +320,36 @@ function awaitFontsReady(completion) {
     completion('font exception');
   }
 }
-// A hidden document (the unowned prewarm WebView, an occluded host) gets no animation frames, so its 1.5 s paint
-// deadline starts only once it becomes visible; until then it neither fails nor replaces its rendered DOM.
+// A hidden document (the unowned prewarm WebView, an occluded host) gets no animation frames, so the 1.5 s paint
+// deadline runs only while the document is visible: it pauses whenever the document is hidden during the wait and
+// restarts when it is shown again. A hidden document therefore never fails or replaces its rendered DOM.
 function awaitTwoPaintFrames(completion) {
   var remaining = 2;
   var settled = false;
   var renderID = currentRenderID();
   var watchdog = 0;
-  function armWatchdog() {
-    if (settled || watchdog) { return; }
-    watchdog = setTimeout(function () {
-      if (settled) { return; }
-      settled = true;
-      completion('paint timeout');
-    }, 1500);
+  function onDeadline() {
+    watchdog = 0;
+    if (settled || document.visibilityState === 'hidden') { return; }
+    done('paint timeout');
   }
-  function onVisibilityChange() {
-    if (document.visibilityState === 'hidden') { return; }
-    document.removeEventListener('visibilitychange', onVisibilityChange);
-    armWatchdog();
-  }
-  if (document.visibilityState === 'hidden') {
-    document.addEventListener('visibilitychange', onVisibilityChange);
-  } else {
-    armWatchdog();
+  function syncDeadline() {
+    if (settled) { return; }
+    if (document.visibilityState === 'hidden') {
+      if (watchdog) { clearTimeout(watchdog); watchdog = 0; }
+    } else if (!watchdog) {
+      watchdog = setTimeout(onDeadline, 1500);
+    }
   }
   function done(reason) {
     if (settled) { return; }
     settled = true;
-    if (watchdog) { clearTimeout(watchdog); }
-    document.removeEventListener('visibilitychange', onVisibilityChange);
+    if (watchdog) { clearTimeout(watchdog); watchdog = 0; }
+    document.removeEventListener('visibilitychange', syncDeadline);
     completion(reason || '');
   }
+  document.addEventListener('visibilitychange', syncDeadline);
+  syncDeadline();
   function step() {
     if (currentRenderID() !== renderID) {
       done('stale paint render ID');
@@ -1064,8 +1062,9 @@ function applyExportScale(scale) {
 // An animation-frame watcher: it measures the export height every frame and counts how many consecutive frames it
 // has been unchanged. The host announces each wait as a new numeric `phase`; the watcher pushes a sample to the
 // `scopyExportLayout` message handler when the phase starts, when two frames have run in the phase, when the layout
-// is first stable for three frames in the phase, and whenever the render-failure state changes. Every call returns
-// the current sample as JSON, which is the host's fallback when frames stop (an occluded window gets none).
+// is first stable for three frames in the phase, and whenever the render-failure state changes. Every call
+// re-measures and returns the current sample as JSON, which is the host's fallback when frames stop (an occluded
+// window gets none).
 const SETTLED_STABLE_FRAMES = 3;
 
 function layoutSample(w, event) {
@@ -1080,57 +1079,67 @@ function postLayout(w, event) {
   } catch (e) { }
 }
 
+function measureExportHeight() {
+  var c = document.getElementById('content');
+  if (!c) { return 0; }
+  var rectH = 0;
+  try {
+    var shell = document.getElementById('content-scale-shell') || c;
+    rectH = Math.ceil(shell.getBoundingClientRect().height || 0);
+  } catch (e) { rectH = 0; }
+  var sh = 0;
+  try { sh = Math.ceil(c.scrollHeight || 0); } catch (e) { sh = 0; }
+  // Prefer #content measurements so short content is not padded to the viewport height.
+  return Math.ceil((exportState.usesTransform && rectH > 0) ? rectH : Math.max(rectH || 0, sh || 0));
+}
+
+function measureExportLiveHeight() {
+  var c = document.getElementById('content');
+  if (!c) { return 0; }
+  var rectH = 0;
+  try { rectH = Math.ceil(c.getBoundingClientRect().height || 0); } catch (e) { rectH = 0; }
+  if (exportState.scale > 0 && Math.abs(exportState.scale - 1) > 0.001 && rectH > 0) { return rectH; }
+  var sh = 0;
+  try { sh = c.scrollHeight || 0; } catch (e) { sh = 0; }
+  return Math.max(sh, rectH);
+}
+
+// Refreshes geometry, readiness and failure now. Both the frame tick and a host read call it, so a read taken
+// while animation frames are stalled still sees the current layout; only a frame tick advances `frames`.
+function measureLayout(w) {
+  try { w.height = measureExportHeight(); } catch (e) { w.height = 0; }
+  try { w.live = measureExportLiveHeight(); } catch (e) { w.live = 0; }
+  w.renderReady = isRenderReady();
+  w.renderFailed = !!state.renderFailed;
+  w.renderErrorReason = state.unifiedErrorReason || '';
+  try { w.fonts = (document.fonts && document.fonts.status) ? document.fonts.status : 'n/a'; } catch (e) { w.fonts = 'n/a'; }
+}
+
 function watchLayout(phase) {
   if (!layoutWatcher) {
-    var w = { phase: 0, phaseStartFrame: 0, framesReported: false, settledReported: false,
+    var w = { phase: 0, phaseStartFrame: 0, framesReported: false, settledReported: false, postedFailed: false,
               frames: 0, stableFrames: 0, height: 0, live: 0, lastHeight: -1, lastLive: -1, fonts: 'n/a',
               renderReady: false, renderFailed: false, renderErrorReason: '' };
     layoutWatcher = w;
-    var measureHeight = function () {
-      var c = document.getElementById('content');
-      if (!c) { return 0; }
-      var rectH = 0;
-      try {
-        var shell = document.getElementById('content-scale-shell') || c;
-        rectH = Math.ceil(shell.getBoundingClientRect().height || 0);
-      } catch (e) { rectH = 0; }
-      var sh = 0;
-      try { sh = Math.ceil(c.scrollHeight || 0); } catch (e) { sh = 0; }
-      // Prefer #content measurements so short content is not padded to the viewport height.
-      return Math.ceil((exportState.usesTransform && rectH > 0) ? rectH : Math.max(rectH || 0, sh || 0));
-    };
-    var measureLive = function () {
-      var c = document.getElementById('content');
-      if (!c) { return 0; }
-      var rectH = 0;
-      try { rectH = Math.ceil(c.getBoundingClientRect().height || 0); } catch (e) { rectH = 0; }
-      if (exportState.scale > 0 && Math.abs(exportState.scale - 1) > 0.001 && rectH > 0) { return rectH; }
-      var sh = 0;
-      try { sh = c.scrollHeight || 0; } catch (e) { sh = 0; }
-      return Math.max(sh, rectH);
-    };
     var tick = function () {
       w.frames += 1;
-      var h = 0; try { h = measureHeight(); } catch (e) { h = 0; }
-      var live = 0; try { live = measureLive(); } catch (e) { live = 0; }
-      var ready = isRenderReady();
-      var wasFailed = w.renderFailed;
-      w.renderFailed = !!state.renderFailed;
-      w.renderErrorReason = state.unifiedErrorReason || '';
-      try { w.fonts = (document.fonts && document.fonts.status) ? document.fonts.status : 'n/a'; } catch (e) { w.fonts = 'n/a'; }
-      if (ready && h > 0 && w.lastHeight >= 0 && Math.abs(h - w.lastHeight) < 1 && Math.abs(live - w.lastLive) < 1) {
+      measureLayout(w);
+      if (w.renderReady && w.height > 0 && w.lastHeight >= 0 && Math.abs(w.height - w.lastHeight) < 1 && Math.abs(w.live - w.lastLive) < 1) {
         w.stableFrames += 1;
       } else {
         w.stableFrames = 0;
       }
-      w.lastHeight = h; w.lastLive = live; w.height = h; w.live = live; w.renderReady = ready;
+      w.lastHeight = w.height; w.lastLive = w.live;
       var framesAdvanced = w.frames >= w.phaseStartFrame + 2;
-      if (w.renderFailed !== wasFailed) { postLayout(w, 'renderFailed'); }
+      if (w.renderFailed !== w.postedFailed) {
+        w.postedFailed = w.renderFailed;
+        postLayout(w, 'renderFailed');
+      }
       if (framesAdvanced && !w.framesReported) {
         w.framesReported = true;
         postLayout(w, 'frames');
       }
-      if (framesAdvanced && !w.settledReported && h > 0 && w.stableFrames >= SETTLED_STABLE_FRAMES) {
+      if (framesAdvanced && !w.settledReported && w.height > 0 && w.stableFrames >= SETTLED_STABLE_FRAMES) {
         w.settledReported = true;
         postLayout(w, 'settled');
       }
@@ -1139,6 +1148,7 @@ function watchLayout(phase) {
     window.requestAnimationFrame(tick);
   }
   var watcher = layoutWatcher;
+  measureLayout(watcher);
   if (typeof phase === 'number' && phase !== watcher.phase) {
     watcher.phase = phase;
     watcher.phaseStartFrame = watcher.frames;
@@ -1149,6 +1159,208 @@ function watchLayout(phase) {
   return JSON.stringify(layoutSample(watcher, 'read'));
 }
 
+// Scrolls the export page to `y` for tiled capture; `scrollOffset` reports where it actually landed.
+function scrollExportTo(y) {
+  try { window.scrollTo(0, y); } catch (e) { }
+  try {
+    document.documentElement.scrollTop = y;
+    if (document.body) { document.body.scrollTop = y; }
+  } catch (e) { }
+  return true;
+}
+
+function exportScrollOffset() {
+  return Math.max(0, window.scrollY || window.pageYOffset || document.documentElement.scrollTop || 0);
+}
+
+// Rich surfaces, file/app mentions and source raster icons keep true color, so palette reduction is skipped.
+function exportPreservesArtworkColors() {
+  return Boolean(document.querySelector('#content [data-scopy-version="2"], #content .scopy-mention-icon, #content img.scopy-link-origin-icon, #content img.scopy-source-citation-origin-icon'));
+}
+
+// UI-test diagnostics (SCOPY_EXPORT_TABLE_METRICS_PATH): table and content geometry after wide-content fitting.
+function exportTableMetrics(widthPoints) {
+  try {
+    var content = document.getElementById('content');
+    if (!content) { return JSON.stringify({ hasContent: false, targetWidth: 0, tables: [] }); }
+
+    var padL = 0, padR = 0;
+    try {
+      var cs = window.getComputedStyle(content);
+      padL = parseFloat(cs.paddingLeft) || 0;
+      padR = parseFloat(cs.paddingRight) || 0;
+    } catch (e) { padL = 0; padR = 0; }
+    var targetWidth = Math.max(1, Math.floor(widthPoints - padL - padR));
+
+    function parseScale(transform) {
+      if (!transform || transform === 'none') { return 1; }
+      // matrix(a, b, c, d, e, f) => scaleX ~= sqrt(a^2 + b^2)
+      var m = transform.match(/matrix\(([^)]+)\)/);
+      if (!m || !m[1]) { return 1; }
+      var parts = m[1].split(',').map(function(x) { return parseFloat(x); });
+      if (!parts || parts.length < 4) { return 1; }
+      var a = parts[0], b = parts[1];
+      var s = Math.sqrt((a * a) + (b * b));
+      return (s && isFinite(s) && s > 0) ? s : 1;
+    }
+
+    var tables = content.querySelectorAll('table');
+    var out = [];
+    for (var i = 0; i < (tables.length || 0); i++) {
+      var t = tables[i];
+      if (!t) { continue; }
+      var block = t;
+      try {
+        var directParent = t.parentElement;
+        if (directParent && directParent.classList && directParent.classList.contains('scopy-chatgpt-table-wrapper')) {
+          var containerParent = directParent.parentElement;
+          if (containerParent && containerParent.classList && containerParent.classList.contains('scopy-chatgpt-table-container')) {
+            block = containerParent;
+          }
+        } else if (directParent && directParent.classList && directParent.classList.contains('scopy-chatgpt-table-container')) {
+          block = directParent;
+        }
+      } catch (e) { block = t; }
+      var rect = t.getBoundingClientRect();
+      var w = Math.ceil(rect.width || 0);
+      var sw = 0, cw = 0;
+      try { sw = Math.ceil(t.scrollWidth || 0); } catch (e) { sw = 0; }
+      try { cw = Math.ceil(t.clientWidth || 0); } catch (e) { cw = 0; }
+
+      var wrapped = false;
+      var wrapperW = 0;
+      try {
+        var p = block.parentElement;
+        wrapped = !!(p && p.classList && p.classList.contains('scopy-export-table-wrapper'));
+        if (wrapped) {
+          var pr = p.getBoundingClientRect();
+          wrapperW = Math.ceil(pr.width || 0);
+        }
+      } catch (e) { wrapped = false; wrapperW = 0; }
+
+      var cols = 0;
+      try {
+        var row = t.querySelector('tr');
+        if (row && row.children) { cols = row.children.length || 0; }
+      } catch (e) { cols = 0; }
+
+      var scale = 1;
+      try {
+        var tr = window.getComputedStyle(block).transform;
+        scale = parseScale(tr);
+        if (scale === 1) {
+          tr = window.getComputedStyle(t).transform;
+          scale = parseScale(tr);
+        }
+      } catch (e) { scale = 1; }
+
+      out.push({
+        index: i,
+        cols: cols,
+        width: w,
+        scrollWidth: sw,
+        clientWidth: cw,
+        wrapped: wrapped,
+        wrapperWidth: wrapperW,
+        scale: scale,
+        targetWidth: targetWidth
+      });
+    }
+
+    var exportScale = 1;
+    var usesTransform = false;
+    try {
+      exportScale = exportState.scale || 1;
+      usesTransform = !!exportState.usesTransform;
+    } catch (e) { exportScale = 1; usesTransform = false; }
+
+    var contentRectW = 0, contentRectH = 0;
+    try {
+      var r = content.getBoundingClientRect();
+      contentRectW = Math.ceil(r.width || 0);
+      contentRectH = Math.ceil(r.height || 0);
+    } catch (e) { contentRectW = 0; contentRectH = 0; }
+
+    var contentScrollW = 0, contentOffsetW = 0;
+    try { contentScrollW = Math.ceil(content.scrollWidth || 0); } catch (e) { contentScrollW = 0; }
+    try { contentOffsetW = Math.ceil(content.offsetWidth || 0); } catch (e) { contentOffsetW = 0; }
+
+    var contentComputedWidth = '', contentComputedMaxWidth = '', contentComputedTransform = '';
+    try {
+      var ccs = window.getComputedStyle(content);
+      contentComputedWidth = ccs.width || '';
+      contentComputedMaxWidth = ccs.maxWidth || '';
+      contentComputedTransform = ccs.transform || '';
+    } catch (e) { contentComputedWidth = ''; contentComputedMaxWidth = ''; contentComputedTransform = ''; }
+
+    var contentStyleWidth = '', contentStyleMaxWidth = '', contentStyleTransform = '';
+    try {
+      contentStyleWidth = content.style && content.style.width ? content.style.width : '';
+      contentStyleMaxWidth = content.style && content.style.maxWidth ? content.style.maxWidth : '';
+      contentStyleTransform = content.style && content.style.transform ? content.style.transform : '';
+    } catch (e) { contentStyleWidth = ''; contentStyleMaxWidth = ''; contentStyleTransform = ''; }
+
+    var bodyOverflowX = '', htmlOverflowX = '';
+    try { bodyOverflowX = (window.getComputedStyle(document.body).overflowX || ''); } catch (e) { bodyOverflowX = ''; }
+    try { htmlOverflowX = (window.getComputedStyle(document.documentElement).overflowX || ''); } catch (e) { htmlOverflowX = ''; }
+
+    var innerW = 0;
+    var dpr = 1;
+    try { innerW = window.innerWidth || 0; } catch (e) { innerW = 0; }
+    try { dpr = window.devicePixelRatio || 1; } catch (e) { dpr = 1; }
+
+    return JSON.stringify({
+      hasContent: true,
+      targetWidth: targetWidth,
+      exportScale: exportScale,
+      usesTransform: usesTransform,
+      innerWidth: innerW,
+      devicePixelRatio: dpr,
+      contentRectWidth: contentRectW,
+      contentRectHeight: contentRectH,
+      contentScrollWidth: contentScrollW,
+      contentOffsetWidth: contentOffsetW,
+      contentComputedWidth: contentComputedWidth,
+      contentComputedMaxWidth: contentComputedMaxWidth,
+      contentComputedTransform: contentComputedTransform,
+      contentStyleWidth: contentStyleWidth,
+      contentStyleMaxWidth: contentStyleMaxWidth,
+      contentStyleTransform: contentStyleTransform,
+      bodyOverflowX: bodyOverflowX,
+      htmlOverflowX: htmlOverflowX,
+      tables: out
+    });
+  } catch (e) {
+    return JSON.stringify({ hasContent: false, targetWidth: 0, tables: [], error: String(e) });
+  }
+}
+
+// Page state for export error messages.
+function exportLayoutDebugInfo() {
+  try {
+    var c = document.getElementById('content');
+    var info = {
+      readyState: (document && document.readyState) ? document.readyState : 'unknown',
+      hasContent: !!c,
+      exportScale: exportState.scale || 1,
+      bodyFontSize: (function() {
+        try { return (window.getComputedStyle && document.body) ? window.getComputedStyle(document.body).fontSize : ''; } catch (e) { return ''; }
+      })(),
+      devicePixelRatio: (window && window.devicePixelRatio) ? window.devicePixelRatio : 1,
+      innerHeight: (window && window.innerHeight) ? window.innerHeight : 0,
+      bodyScrollHeight: (document.body && document.body.scrollHeight) ? document.body.scrollHeight : 0,
+      documentScrollHeight: (document.documentElement && document.documentElement.scrollHeight) ? document.documentElement.scrollHeight : 0,
+      contentScrollHeight: (c && c.scrollHeight) ? c.scrollHeight : 0,
+      contentRectHeight: (c && c.getBoundingClientRect) ? Math.ceil(c.getBoundingClientRect().height || 0) : 0,
+      renderFailed: !!state.renderFailed,
+      renderErrorReason: state.unifiedErrorReason || ''
+    };
+    return JSON.stringify(info);
+  } catch (e) {
+    return "debugError:" + (e && e.message ? e.message : String(e));
+  }
+}
+
 // MARK: - Boot
 
 let booted = false;
@@ -1157,6 +1369,10 @@ function boot() {
   var node = document.getElementById('scopy-render-input');
   if (booted || !node) { return; }
   booted = true;
+  // The export host registers its layout channel before loading, so its document is in export mode from the start.
+  if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.scopyExportLayout) {
+    document.documentElement.classList.add('scopy-export-mode');
+  }
   try { input = JSON.parse(node.textContent || ''); } catch (e) { input = null; }
   installRenderScopedLayoutObserver();
   renderUnified();
@@ -1181,6 +1397,11 @@ export const scopyDocument = Object.freeze({
     adjustWideContent: adjustWideContentForExport,
     applyScale: applyExportScale,
     watchLayout,
+    scrollTo: scrollExportTo,
+    scrollOffset: exportScrollOffset,
+    preservesArtworkColors: exportPreservesArtworkColors,
+    tableMetrics: exportTableMetrics,
+    layoutDebugInfo: exportLayoutDebugInfo,
     state: exportState
   })
 });

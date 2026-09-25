@@ -366,9 +366,12 @@ public enum PngquantService {
     }
 
     /// Quantizes a PAM file, or returns `nil` when pngquant declined or failed so the caller can encode the pixels itself.
-    public static func compressPAMFileBestEffort(_ inputURL: URL, options: Options) -> Data? {
+    /// Cancellation is not a pngquant failure: it throws `CancellationError` so the caller stops instead of encoding.
+    public static func compressPAMFileBestEffort(_ inputURL: URL, options: Options) throws -> Data? {
         do {
             return try compressPAMFile(inputURL, options: options)
+        } catch PngquantError.cancelled {
+            throw CancellationError()
         } catch {
             ScopyLog.pngquant.warning("pngquant PAM skipped: \(error.localizedDescription, privacy: .public)")
             return nil

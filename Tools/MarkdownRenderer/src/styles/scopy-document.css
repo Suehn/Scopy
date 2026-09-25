@@ -2058,3 +2058,38 @@ html.scopy-scrollbars-visible details::-webkit-scrollbar {
   width: 8px;
   height: 8px;
 }
+
+/* The export document: white page, zero print margin, the unscaled content width, and no inner scrollbars while
+   tiled capture scrolls. */
+@page { margin: 0 !important; }
+html.scopy-export-mode {
+  color-scheme: light !important;
+}
+html.scopy-export-mode,
+html.scopy-export-mode body {
+  background: #FFFFFF !important;
+  color: #000000 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  -webkit-text-size-adjust: 100% !important;
+  -webkit-print-color-adjust: exact !important;
+  print-color-adjust: exact !important;
+  overflow-x: visible !important;
+}
+html.scopy-export-mode #content {
+  background: #FFFFFF !important;
+  display: block;
+  width: var(--scopy-chatgpt-render-width) !important;
+  max-width: none !important;
+  opacity: 1 !important;
+  transition: none !important;
+}
+html.scopy-export-mode.scopy-scrollbars-visible pre::-webkit-scrollbar,
+html.scopy-export-mode.scopy-scrollbars-visible table::-webkit-scrollbar,
+html.scopy-export-mode.scopy-scrollbars-visible .scopy-math-inline-host::-webkit-scrollbar,
+html.scopy-export-mode.scopy-scrollbars-visible .katex-display::-webkit-scrollbar,
+html.scopy-export-mode.scopy-scrollbars-visible .footnotes::-webkit-scrollbar,
+html.scopy-export-mode.scopy-scrollbars-visible details::-webkit-scrollbar {
+  width: 0px !important;
+  height: 0px !important;
+}
