@@ -31,6 +31,7 @@ struct ListLiveScrollObserverView: NSViewRepresentable {
     let onScrollEnd: () -> Void
     var onScrollViewAttach: ((NSScrollView) -> Void)? = nil
     var programmaticScrollGate: ListProgrammaticScrollGate? = nil
+    var anchorKeeper: ListScrollAnchorKeeper? = nil
 
     func makeNSView(context: Context) -> ObserverView {
         let view = ObserverView()
@@ -39,6 +40,7 @@ struct ListLiveScrollObserverView: NSViewRepresentable {
         view.onScrollEnd = onScrollEnd
         view.onScrollViewAttach = onScrollViewAttach
         view.programmaticScrollGate = programmaticScrollGate
+        view.anchorKeeper = anchorKeeper
         return view
     }
 
@@ -48,6 +50,7 @@ struct ListLiveScrollObserverView: NSViewRepresentable {
         nsView.onScrollEnd = onScrollEnd
         nsView.onScrollViewAttach = onScrollViewAttach
         nsView.programmaticScrollGate = programmaticScrollGate
+        nsView.anchorKeeper = anchorKeeper
         nsView.attachIfNeeded()
     }
 }
@@ -70,6 +73,9 @@ extension ListLiveScrollObserverView {
         var onScrollEnd: (() -> Void)?
         var onScrollViewAttach: ((NSScrollView) -> Void)?
         var programmaticScrollGate: ListProgrammaticScrollGate?
+        var anchorKeeper: ListScrollAnchorKeeper? {
+            didSet { anchorKeeper?.scrollView = observedScrollView }
+        }
         var pressedMouseButtonsProvider: () -> Int = {
             NSEvent.pressedMouseButtons
         }
@@ -140,6 +146,7 @@ extension ListLiveScrollObserverView {
             detach()
             observedScrollView = scrollView
             attachedWindow = scrollView.window
+            anchorKeeper?.scrollView = scrollView
             onScrollViewAttach?(scrollView)
             installEventMonitorIfNeeded()
 
@@ -190,6 +197,7 @@ extension ListLiveScrollObserverView {
             attachedWindow = nil
             cachedWindow = nil
             cachedWindowResolvedScrollView = nil
+            anchorKeeper?.scrollView = nil
             removeEventMonitor()
             endOwnedPointerInteraction()
             boundsSettleWorkItem?.cancel()
@@ -231,7 +239,7 @@ extension ListLiveScrollObserverView {
                 guard isLiveScrolling || isScrollWheelInputCurrent() else { return }
                 isBoundsScrolling = true
                 reportScrollStartIfNeeded()
-            } else if !isScrollWheelInputCurrent() {
+            } else {
                 logLayoutDrivenClipMove()
             }
             boundsSettleWorkItem?.cancel()
@@ -249,7 +257,7 @@ extension ListLiveScrollObserverView {
             guard !isScrollingReported else { return }
             isScrollingReported = true
             scrollGeneration &+= 1
-            lastLoggedClipOriginY = observedScrollView?.contentView.bounds.origin.y
+            lastScrollSample = nil
             onScrollStart?()
         }
 
@@ -262,22 +270,24 @@ extension ListLiveScrollObserverView {
             logContentShiftAfterScrollEnd()
         }
 
-        private var lastLoggedClipOriginY: CGFloat?
+        private var lastScrollSample: (originY: CGFloat, row: Int, documentHeight: CGFloat)?
 
-        /// Evidence for the "list jumps after a fast scroll stops" report, part one: inside a
-        /// scroll session, the clip view moving while no scroll-wheel event is current is not the
-        /// user's input or its momentum frames but a layout correction (row heights re-measured,
-        /// rows re-tiled). Logs the move with the row under the top edge.
+        /// Evidence for the "list jumps while a fast scroll ends" report: inside a scroll session,
+        /// a frame in which the document height changes or the row under the top edge moves by
+        /// more rows than the clip movement explains is a layout correction (the table re-queried
+        /// row heights after its rows changed), not the user's input.
         private func logLayoutDrivenClipMove() {
             guard let scrollView = observedScrollView else { return }
-            let originY = scrollView.contentView.bounds.origin.y
-            defer { lastLoggedClipOriginY = originY }
-            guard let previous = lastLoggedClipOriginY, abs(originY - previous) >= 0.5 else { return }
             let row = Self.firstVisibleRow(in: scrollView)
-            let documentHeight: CGFloat = scrollView.documentView?.frame.height ?? 0
-            let eventType = NSApp.currentEvent.map { String(describing: $0.type) } ?? "none"
+            let sample = (originY: scrollView.contentView.bounds.origin.y, row: row.index, documentHeight: scrollView.documentView?.frame.height ?? 0)
+            defer { lastScrollSample = sample }
+            guard let previous = lastScrollSample else { return }
+            let move = sample.originY - previous.originY
+            let heightDelta = sample.documentHeight - previous.documentHeight
+            let rowJump = abs(sample.row - previous.row)
+            guard abs(heightDelta) >= 0.5 || CGFloat(rowJump) > abs(move) / 24 + 2 else { return }
             ScopyLog.ui.info(
-                "Layout moved the list \(originY - previous, format: .fixed(precision: 1), privacy: .public) pt with no scroll input (current event \(eventType, privacy: .public)); first visible row \(row.index, privacy: .public) at \(row.top, format: .fixed(precision: 1), privacy: .public) pt, height \(row.height, format: .fixed(precision: 1), privacy: .public), document \(documentHeight, format: .fixed(precision: 1), privacy: .public) pt"
+                "Layout moved the list: clip \(move, format: .fixed(precision: 1), privacy: .public) pt, document \(heightDelta, format: .fixed(precision: 1), privacy: .public) pt, row under the top edge \(previous.row, privacy: .public) -> \(sample.row, privacy: .public) at \(row.top, format: .fixed(precision: 1), privacy: .public) pt (height \(row.height, format: .fixed(precision: 1), privacy: .public)), rows \(row.count, privacy: .public)"
             )
         }
 

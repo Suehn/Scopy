@@ -328,6 +328,10 @@ final class HistoryViewModel {
 
     @ObservationIgnored var closePanelHandler: (() -> Void)?
     @ObservationIgnored var pasteAfterCopyHandler: (() -> Void)?
+    /// The list keeps the row under its top edge in place across a row change (see
+    /// `ListScrollAnchorKeeper`); these bracket every change to the rows.
+    @ObservationIgnored var projectionWillChange: (() -> Void)?
+    @ObservationIgnored var projectionDidChange: (() -> Void)?
 
     /// Message for an action that failed where the user expected it to work. A failed copy leaves
     /// the panel open, so it needs somewhere to say why instead of only reaching the log.
@@ -1922,10 +1926,12 @@ final class HistoryViewModel {
     /// The only way the projection changes: applies `change` and then writes each observed cell
     /// only if its value moved, so a pagination-only or total-only update leaves the rows alone.
     private func mutateProjection(_ change: (inout HistoryListState) -> Void) {
+        projectionWillChange?()
         change(&listState)
         if projectionGeneration != listState.projectionGeneration {
             projectionGeneration = listState.projectionGeneration
             if quickSlotHintsVisible { fanOutQuickSlots() }
+            projectionDidChange?()
         }
         if totalCount != listState.totalCount { totalCount = listState.totalCount }
         if canLoadMore != listState.canLoadMore { canLoadMore = listState.canLoadMore }
