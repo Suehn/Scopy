@@ -25,8 +25,8 @@ test("labels and lookalike hosts cannot select bank branding", () => {
   for (const host of ["hsbc.com.hk.evil.example", "fake.hsbc.com.hk", "elebank.com.evil.example", "evil-elebank.com"]) {
     assert.equal(bundledFaviconAssetForHost(host), null);
     const { html } = render(`[大象银行 汇丰](https://${host}/)`);
-    assert.match(html, /scopy-icon--globe scopy-link-origin-icon/);
-    assert.doesNotMatch(html, /<img/);
+    assert.match(html, new RegExp(`<img src="scopy-source-icon://${host.replace(/\./g, "\\.")}/https"[^>]*scopy-link-origin-icon`));
+    assert.doesNotMatch(html, /favicon-/);
   }
   assert.match(render("[汇丰](https://WWW.HSBC.COM.HK/path)").html, /favicon-hsbc-hk-32/);
   for (const url of ["https://user:pass@www.hsbc.com.hk", "https://www.hsbc.com.hk/%0a", "javascript:alert(1)"]) {
@@ -43,7 +43,7 @@ test("descriptive ordinary links reuse only bounded frozen raster favicons and k
   assert.match(html, /<span class="scopy-link__label">详细步骤<\/span>/);
   assert.doesNotMatch(html, /scopy-rich-news|Different fetched title/);
   for (const favicon of ["https://example.com/icon.png", "data:image/svg+xml;base64,PHN2Zz4=", "data:image/png;base64," + "A".repeat(400000)]) {
-    assert.match(render(`正文 [步骤](${url})`, { linkEnrichment: { [url]: { favicon } } }).html, /scopy-icon--globe scopy-link-origin-icon/);
+    assert.match(render(`正文 [步骤](${url})`, { linkEnrichment: { [url]: { favicon } } }).html, /<img src="scopy-source-icon:\/\/example\.com\/https"[^>]*scopy-link-origin-icon/);
   }
 });
 
@@ -64,7 +64,7 @@ test("repeated frozen favicons have an aggregate emitted budget", () => {
   const { html } = render(Array(25).fill(`[步骤](${url})`).join(" "), { linkEnrichment: { [url]: { favicon } } });
   assert.ok(html.length < 600000);
   assert.equal((html.match(/data:image\/png;base64/g) || []).length, 1);
-  assert.equal((html.match(/scopy-icon--globe/g) || []).length, 24);
+  assert.equal((html.match(/data-scopy-native-source-icon/g) || []).length, 24);
 });
 
 test("native website icons cover arbitrary destinations across prose, references and cards without disclosing paths", () => {
@@ -81,21 +81,20 @@ test("native website icons cover arbitrary destinations across prose, references
 \`[代码](https://code.example/secret)\`
 
 ![图片](scopy-source-icon://image.example/https)`;
-  const { html } = render(source, { nativeSourceIcons: true });
+  const { html } = render(source);
   for (const host of ["fresh.example", "citation.example", "news.example"]) {
     assert.ok(html.includes(`src="scopy-source-icon://${host}/https"`), host);
   }
   assert.equal((html.match(/src="scopy-source-icon:\/\/fresh.example\/https"/g) || []).length, 2);
   assert.doesNotMatch(html, /src="scopy-source-icon:[^"]*(?:token|secret|story|code.example|image.example)/);
   assert.match(html, /<span class="scopy-link__label">任意站点<\/span>/);
-  assert.doesNotMatch(render(source).html, /src="scopy-source-icon:/);
 });
 
 test("native icon work is bounded and unsafe URLs never become native requests", () => {
   const source = Array.from({ length: 70 }, (_, i) => `[link](https://site${i}.example/path)`).join(" ");
-  const { html } = render(source, { nativeSourceIcons: true });
+  const { html } = render(source);
   assert.equal((html.match(/data-scopy-native-source-icon/g) || []).length, 24);
   for (const url of ["https://user:pass@private.example/", "https://site.example/%0a", "https://site.example:8080/path"]) {
-    assert.doesNotMatch(render(`[link](${url})`, { nativeSourceIcons: true }).html, /src="scopy-source-icon:/);
+    assert.doesNotMatch(render(`[link](${url})`).html, /src="scopy-source-icon:/);
   }
 });

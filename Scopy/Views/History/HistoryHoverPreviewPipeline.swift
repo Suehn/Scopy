@@ -113,7 +113,7 @@ enum HistoryHoverPreviewPipeline {
         var renderCacheKey: String {
             switch target {
             case .text(let cacheKey), .file(let cacheKey):
-                return MarkdownRenderCacheKey.make(contentHash: cacheKey, context: context)
+                return MarkdownRenderCacheKey.make(input: context, itemKey: cacheKey)
             }
         }
     }
@@ -467,7 +467,7 @@ enum HistoryHoverPreviewPipeline {
                 for: cachedEntry.text,
                 layoutScale: request.markdownLayoutScale
             )
-            let renderCacheKey = MarkdownRenderCacheKey.make(contentHash: request.cacheKey, context: context)
+            let renderCacheKey = MarkdownRenderCacheKey.make(input: context, itemKey: request.cacheKey)
             let cachedHTML = MarkdownPreviewCache.shared.html(forKey: renderCacheKey)
             emitCachedFilePreview(cachedEntry, renderCacheKey: renderCacheKey, layoutScale: request.markdownLayoutScale, emit: emit)
             if cachedHTML == nil, cachedEntry.text.utf16.count <= maxMarkdownPreviewBytes {
@@ -483,7 +483,7 @@ enum HistoryHoverPreviewPipeline {
                 for: cachedEntry.text,
                 layoutScale: request.markdownLayoutScale
             )
-            let renderCacheKey = MarkdownRenderCacheKey.make(contentHash: request.cacheKey, context: context)
+            let renderCacheKey = MarkdownRenderCacheKey.make(input: context, itemKey: request.cacheKey)
             let cachedHTML = MarkdownPreviewCache.shared.html(forKey: renderCacheKey)
             let cachedMetrics = MarkdownPreviewCache.shared.metrics(forKey: renderCacheKey)
             emit(
@@ -547,7 +547,7 @@ enum HistoryHoverPreviewPipeline {
             for: preview,
             layoutScale: request.markdownLayoutScale
         )
-        let renderCacheKey = MarkdownRenderCacheKey.make(contentHash: request.cacheKey, context: context)
+        let renderCacheKey = MarkdownRenderCacheKey.make(input: context, itemKey: request.cacheKey)
         let cachedHTML: String? = (cachedEntry?.text == preview) ? MarkdownPreviewCache.shared.html(forKey: renderCacheKey) : nil
         let cachedMetrics: MarkdownContentMetrics? = (cachedEntry?.text == preview) ? MarkdownPreviewCache.shared.metrics(forKey: renderCacheKey) : nil
         MarkdownPreviewCache.shared.setFilePreview(
@@ -620,7 +620,7 @@ enum HistoryHoverPreviewPipeline {
             let contentHash = request.revision.cacheKey
             let (context, key) = await Task.detached(priority: .userInitiated) {
                 let context = MarkdownRenderContextResolver.defaultContext(for: preview, layoutScale: layoutScale)
-                return (context, MarkdownRenderCacheKey.make(contentHash: contentHash, context: context))
+                return (context, MarkdownRenderCacheKey.make(input: context, itemKey: contentHash))
             }.value
             guard !Task.isCancelled, isCurrent() else { return }
             renderCacheKey = key
@@ -740,12 +740,12 @@ enum HistoryHoverPreviewPipeline {
         await runBudgetedDetached(priority: .utility) {
             if ScrollPerformanceProfile.isEnabled {
                 let start = CFAbsoluteTimeGetCurrent()
-                let html = MarkdownHTMLRenderer.render(markdown: source, context: context)
+                let html = MarkdownHTMLDocumentBuilder.document(source: source, context: context)
                 let elapsed = (CFAbsoluteTimeGetCurrent() - start) * 1000
                 ScrollPerformanceProfile.recordTiming(name: "hover.markdown_render_ms", elapsedMs: elapsed)
                 return html
             }
-            return MarkdownHTMLRenderer.render(markdown: source, context: context)
+            return MarkdownHTMLDocumentBuilder.document(source: source, context: context)
         } ?? ""
     }
 

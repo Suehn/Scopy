@@ -45,6 +45,7 @@ struct HistoryItemTextPreviewView: View {
     @State private var overrideMarkdownRenderKey: String?
     @State private var isMarkdownLayoutScaleControlHovered = false
     @State private var isMarkdownLayoutScaleEditing = false
+    @State private var exportProgress: MarkdownExportService.ExportProgress?
 
     private static let exportResolutionPercentUserDefaultsKey = "ScopyMarkdownExportResolutionPercent"
     private static let previewLayoutScalePercentUserDefaultsKey = MarkdownPreviewLayoutScalePreference.userDefaultsKey
@@ -177,6 +178,9 @@ struct HistoryItemTextPreviewView: View {
                     markdownLayoutScaleControl()
                     exportResolutionMenu()
                     exportButton()
+                    if model.isExporting {
+                        exportProgressControls()
+                    }
                 }
             }
         }
@@ -398,7 +402,7 @@ struct HistoryItemTextPreviewView: View {
                 for: source,
                 layoutScale: layoutScale
             )
-            return MarkdownHTMLRenderer.render(markdown: source, context: context)
+            return MarkdownHTMLDocumentBuilder.document(source: source, context: context)
         }.value
         guard !Task.isCancelled else { return }
         guard isContentCurrent() else { return }
@@ -579,6 +583,38 @@ struct HistoryItemTextPreviewView: View {
         .disabled(model.isExporting)
     }
 
+    /// The export phase and a cancel button while an export runs; cancelling ends the export task chain.
+    @ViewBuilder
+    private func exportProgressControls() -> some View {
+        Text(exportProgressLabel)
+            .font(.system(size: 11, weight: .medium))
+            .foregroundColor(ScopyColors.mutedText)
+            .monospacedDigit()
+            .accessibilityIdentifier("History.Preview.ExportProgress")
+        Button {
+            model.cancelExportTasks()
+            exportProgress = nil
+            onInteractionLifecycleChange()
+        } label: {
+            Image(systemName: "xmark.circle.fill")
+                .foregroundColor(ScopyColors.mutedText)
+                .frame(width: 24, height: 24)
+        }
+        .accessibilityIdentifier("History.Preview.ExportCancel")
+        .accessibilityLabel("Cancel export")
+        .help("Cancel export")
+    }
+
+    private var exportProgressLabel: String {
+        switch exportProgress {
+        case .none, .rendering: return "Rendering…"
+        case .capturing(let tile, let count) where count > 1: return "Capturing \(tile)/\(count)…"
+        case .capturing: return "Capturing…"
+        case .compressing: return "Compressing…"
+        case .writing: return "Copying…"
+        }
+    }
+
     private var exportButtonHelpText: String {
         if model.isExporting { return "Exporting PNG…" }
         if model.exportSuccess, let message = model.exportSuccessMessage, !message.isEmpty {
@@ -612,6 +648,7 @@ struct HistoryItemTextPreviewView: View {
         let pasteboardWriteLease = MarkdownExportService.capturePasteboardWriteLease()
 
         let expectedCurrent = isExportContentCurrent
+        exportProgress = nil
         model.exportActionTask = Task { @MainActor in
             let result = await HistoryItemMarkdownExportController.exportMarkdownToClipboard(
                 markdownSource: markdownSource,
@@ -622,8 +659,12 @@ struct HistoryItemTextPreviewView: View {
                 pasteboardWriteLease: pasteboardWriteLease,
                 authorizePasteboardWrite: {
                     model.authorizesExportAction(token: exportToken) && expectedCurrent()
+                },
+                onProgress: { progress in
+                    if model.authorizesExportAction(token: exportToken) { exportProgress = progress }
                 }
             )
+            exportProgress = nil
             guard !Task.isCancelled,
                   expectedCurrent(),
                   model.authorizesExportAction(token: exportToken),

@@ -1,7 +1,9 @@
+import { createFenceTracker } from "./scopyLineScan.js";
+
 export function preprocessBackslashMath(source) {
   const text = String(source || "");
   const lines = text.split("\n");
-  let inFence = null;
+  const fences = createFenceTracker();
   let inDisplayBlock = false;
   let displayOpenLine = "";
   let displayLines = [];
@@ -9,20 +11,7 @@ export function preprocessBackslashMath(source) {
   const output = [];
 
   for (const line of lines) {
-    const fence = fenceMarker(line);
-    if (fence) {
-      if (inFence) {
-        if (fence.marker === inFence.marker && fence.length >= inFence.length) {
-          inFence = null;
-        }
-      } else {
-        inFence = fence;
-      }
-      output.push(line);
-      continue;
-    }
-
-    if (inFence) {
+    if (fences.skip(line)) {
       output.push(line);
       continue;
     }
@@ -61,15 +50,6 @@ export function preprocessBackslashMath(source) {
   }
 
   return { markdown: output.join("\n"), mathCount };
-}
-
-function fenceMarker(line) {
-  const match = /^( {0,3})(`{3,}|~{3,})/.exec(line);
-  if (!match) {
-    return null;
-  }
-  const run = match[2];
-  return { marker: run[0], length: run.length };
 }
 
 function preprocessInline(line) {

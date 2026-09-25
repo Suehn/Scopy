@@ -4,20 +4,11 @@ This is the canonical contract for Scopy Markdown preview and PNG export. It rec
 
 ## Evidence Scope
 
-Primary capture:
+Primary capture (archive locations and the extraction command are in the Evidence Appendix):
 
-- archive: `/Users/hh/Downloads/my-archiving-session.wacz`
 - captured page: `https://chatgpt.com/`
 - archive time: 2026-08-28
-- reproducible extraction: `/tmp/scopy-wacz-extract/my-archiving-session-20260828`
-- extraction command:
-
-```bash
-python3 scripts/quality/analyze-chatgpt-wacz-markdown.py \
-  /Users/hh/Downloads/my-archiving-session.wacz \
-  --out-dir /tmp/scopy-wacz-extract/my-archiving-session-20260828 \
-  --force
-```
+- reproducible extraction: `scripts/quality/analyze-chatgpt-wacz-markdown.py`
 
 The extraction found 653 content responses: 444 JavaScript files, 39 CSS files, 145 JSON responses with an unspecified charset, one UTF-8 JSON response, ten WOFF2 responses, two initial HTML responses, and other media/runtime resources. The wider WARC contains 660 requests, 653 responses, seven revisits, and one `warcinfo` record. The Markdown-related audit matched 270 JS/CSS files.
 
@@ -30,7 +21,6 @@ This capture does **not** contain a completed conversation response or hydrated 
 
 Secondary capture:
 
-- archive: `/Users/hh/Downloads/my-archiving-session (1).wacz`
 - captured page: `https://chatgpt.com/c/6a90ea40-c6e4-83ea-8a59-fb00f791fa25`
 - archive time: 2026-08-28
 
@@ -78,21 +68,22 @@ The archive also contains alternate/streaming Markdown and code-block paths. The
 There is one production flow:
 
 ```text
-source + MarkdownRenderContext
-  -> bounded source normalization
-  -> MarkdownHTMLRenderer
-  -> local unified/remark/rehype bundle
-  -> MarkdownHTMLDocumentBuilder.document
-  -> the same standalone HTML document
-       -> MarkdownPreviewWebViewController (hover and pinned previews)
-       -> MarkdownExportService
+source + MarkdownRenderContext (profile, repair policy, layout scale, frozen enrichment)
+  -> MarkdownHTMLDocumentBuilder.document(source:context:)
+       the same standalone document: shell + source and policy as JSON data
+       + scopy-document.css + katex.min.css + the renderer bundle (unified/remark/rehype + document runtime)
+  -> MarkdownPreviewWebViewController (hover and pinned previews)
+  -> MarkdownExportService (PNG)
 ```
+
+Swift never parses Markdown. Every WebView that loads the document parses the embedded source with the same bundle, so preview and export load the same document and their parse results are identical by determinism; each source repair happens inside that parse pipeline.
 
 Authoritative implementation surfaces:
 
-- `Scopy/Views/History/MarkdownHTMLRenderer.swift`: bounded, code-aware source normalization and the only document entrypoint.
-- `Scopy/Views/History/MarkdownHTMLDocumentBuilder.swift`: local assets, CSS, table/runtime measurement, readiness, and export hooks.
-- `Tools/MarkdownRenderer/src/render.js`: Markdown AST/HTML AST pipeline.
+- `Scopy/Views/History/MarkdownHTMLDocumentBuilder.swift`: the only document entrypoint (`document(source:context:)`) and the thin document shell. It never changes source bytes: the source is embedded verbatim with the policy (`allowLatexDocumentNormalize`, `allowLatexInlineTextNormalize`, `allowLooseMathRepair`, optional `linkEnrichment`) chosen by the Swift profile detector. The shell holds CSP, the two local stylesheets, the nine scale-dependent layout variables on `:root`, the source and policy as an inert `<script type="application/json" id="scopy-render-input">` block, and the deferred renderer bundle. It owns no CSS rules and no script.
+- `Tools/MarkdownRenderer/src/styles/scopy-document.css`: the base document CSS (typography, code, tables, rich surfaces, tasks, footnotes, export-mode rules), copied to `Scopy/Resources/MarkdownPreview/scopy-document.css`.
+- `Tools/MarkdownRenderer/src/documentRuntime.js`: the document runtime bundled into the same IIFE and exposed as `window.ScopyDocument` (`boot`, `isRenderReady`, `probeLayoutHeight`, `reportHeight`, `state`, and `export.{prepare, adjustWideContent, applyScale, watchLayout}`): rendering the embedded input, the pipe-table model and column buckets, task-list markers, terminal readiness, render-ID-scoped metrics, and export-side preparation and the layout watcher.
+- `Tools/MarkdownRenderer/src/render.js`: Markdown AST/HTML AST pipeline and every source repair, in this order: the policy-gated scientific LaTeX document repair (`scopyLatexDocument.js`) and inline/math-segment repair (`scopyLatexInline.js`), ATX heading whitespace, table code-span pipes, backslash math. `scopyLineScan.js` is the one fence/indentation/inline-code scanner those repairs share.
 - `Tools/MarkdownRenderer/src/remarkScopySafeHTML.js`: the closed user-authored safe-HTML recognizer; unsupported or malformed forms fail to literal text.
 - `Tools/MarkdownRenderer/src/scopyLocalImageAssets.js`: the closed bundled-image allowlist and exact public-URL mappings used by fixtures.
 - `Tools/MarkdownRenderer/src/remarkScopyRich.js`: strict v2 validation and the only trusted rich-surface HAST builders.
@@ -102,14 +93,14 @@ Authoritative implementation surfaces:
 - `Tools/MarkdownRenderer/src/scopySourceIcon.js`: shared exact-host source icons and compact failed-favicon fallback.
 - `Tools/MarkdownRenderer/src/rehypeScopyKatex.js`: HTML-only math rendering and stable failure behavior.
 - `Scopy/Views/History/MarkdownPreviewWebView.swift`: the one `MarkdownPreviewWebViewController` (owner lease, render IDs, metrics) and the `ReusableMarkdownPreviewWebView` representable; `Scopy/Services/Export/MarkdownWebKitEnvironment.swift` holds the shared WebKit configuration and network-blocking rules for preview and export.
-- `Scopy/Services/Export/MarkdownExportService.swift`: PNG reliability strategies applied to the same HTML.
-- `Scopy/Resources/MarkdownPreview/asset-manifest.json` plus `Tools/MarkdownRenderer/scripts/verify-assets.mjs`: the lockfile-derived renderer/KaTeX asset contract.
+- `Scopy/Services/Export/`: PNG export of the same HTML. `MarkdownExportService.swift` is the facade (errors, stages, user-facing `ExportProgress`, clipboard commit); `ExportWebViewHost.swift` owns the offscreen WebView, host panel, navigation and JS bridge; `ExportLayoutPreparation.swift` waits for layout through phase-numbered `scopyExportLayout` pushes from `ScopyDocument.export.watchLayout`, falling back to time-based stability when animation frames stop; `ExportCaptureStrategies.swift` holds the PDF, single-snapshot and tiled reliability strategies; `ExportBitmapCanvas.swift`, `ExportConcurrencyGate.swift` and `ExportDiagnostics.swift` hold the bitmap canvas and encoding, the concurrency gate, and UI-test diagnostics. Page-side export work is only calls into `ScopyDocument.export`.
+- `Scopy/Resources/MarkdownPreview/asset-manifest.json` plus `Tools/MarkdownRenderer/scripts/verify-assets.mjs`: the atomic renderer bundle, document CSS, and lockfile-derived KaTeX asset contract.
 
-There is no legacy renderer selection, feature flag, shadow renderer, silent markdown-it fallback, or second preview/export parse result. Missing renderer assets are a render failure, not permission to display a semantically different document.
+There is no legacy renderer selection, feature flag, shadow renderer, silent markdown-it fallback, second parser, or export-only document. Missing renderer assets are a render failure, not permission to display a semantically different document.
 
 ## `scopy-rich` v2 Structured Snapshot
 
-Ordinary Markdown remains the public interchange fallback. When the producer actually possesses a complete structured surface, it may place one strict JSON object in a fenced block whose info string is exactly `scopy-rich`. The envelope freezes all source data needed for rendering and interaction; it is never a prompt to query, scrape, refresh, or infer. The same `MarkdownHTMLRenderer -> MarkdownHTMLDocumentBuilder` flow recognizes and validates it while building the same Markdown AST/HTML document. Preview hydration and PNG export are two modes of that one document, not separate card renderers or source fetches.
+Ordinary Markdown remains the public interchange fallback. When the producer actually possesses a complete structured surface, it may place one strict JSON object in a fenced block whose info string is exactly `scopy-rich`. The envelope freezes all source data needed for rendering and interaction; it is never a prompt to query, scrape, refresh, or infer. The renderer bundle recognizes and validates it while parsing the same embedded source into the Markdown AST/HTML document. Preview hydration and PNG export are two modes of that one document, not separate card renderers or source fetches.
 
 Strict v2 is the only structured-data card input, and a closed set of public-copy presentation adapters may promote exact visible shapes into it (every candidate passes the same `normalizeRichSurface` authority; a failed candidate stays prose):
 
@@ -123,13 +114,11 @@ Strict v2 is the only structured-data card input, and a closed set of public-cop
 No adapter invents fields the copy does not carry: adapter cards have no thumbnails, ratings, or dates unless the source text contains them. This is also the honest ceiling of public-copy fidelity: ChatGPT's Copy action strips card payloads at the source (news collapses to bare source links; stock, weather, and exchange values may not survive as text at all), so surfaces whose visible copy lacks the data remain ordinary prose rather than fabricated cards. Full official-look cards require a producer that still possesses the structured data and writes a strict v2 envelope.
 
 ```text
-Markdown source
-  -> code-aware normalization
-  -> MarkdownHTMLRenderer
+Markdown source embedded by MarkdownHTMLDocumentBuilder.document
+  -> renderer bundle: code-aware source repair, then parse
        -> ordinary Markdown nodes
        -> strict scopy-rich v2 validation and trusted rich-surface nodes
-  -> MarkdownHTMLDocumentBuilder.document
-  -> one local HTML/CSS/SVG document for preview and export
+  -> one local HTML/CSS/SVG DOM in each preview and export WebView
 ```
 
 ### Envelope and frozen schema
@@ -231,7 +220,7 @@ Rich v2 exports remain true-color PNGs. Palette reduction is skipped whenever th
 
 | Input | Result |
 | --- | --- |
-| ATX headings | `#` through `######`; Scopy repairs missing whitespace such as `#标题` outside code. Heading elements receive no generated `id`. |
+| ATX headings | `#` through `######`; the renderer repairs missing whitespace such as `#标题` outside code before parsing (one to six `#`, at most three leading spaces, no `#!`, remainder at most 200 grapheme clusters). Heading elements receive no generated `id`. |
 | Paragraphs and line breaks | CommonMark paragraphs; the local assistant-style path turns source newlines into `<br>` through `remark-breaks`. |
 | Emphasis | CommonMark emphasis/strong nodes with the `remark-cjk-friendly/parseOnly` CJK delimiter extension: Chinese-adjacent punctuation and inline math can be enclosed in `*`/`**` without inserting spaces. |
 | Deletion | Only paired double tildes such as `~~text~~` create `<del>`; `~text~` remains literal. |
@@ -245,7 +234,7 @@ Rich v2 exports remain true-color PNGs. Palette reduction is skipped whenever th
 | Thematic breaks | CommonMark thematic breaks become `<hr>`. |
 | Footnotes | GFM footnotes are supported. Renderer-generated IDs use exactly one namespace: definition `scopy-fn-<normalized-id>`, reference `scopy-fnref-<normalized-id>`, and repeated references append `-2`, `-3`, etc. Heading IDs are not synthesized. |
 
-All source normalization is syntax-aware:
+All source normalization is syntax-aware and runs in `render.js` before parsing, so Node tests see the production input:
 
 - fenced code, indented code, inline code, links, images, reference definitions, URLs, and file paths are protected before loose scientific-text repair;
 - `#标题` repair does not rewrite code fences, indented code, or shebangs;
@@ -306,8 +295,8 @@ KaTeX behavior:
 6. Cap user-declared KaTeX geometry at 20em so inputs such as `\\rule{100000em}{100000em}` cannot expand preview or PNG height without bound. This is a Scopy stability guard; it is not claimed as an observed ChatGPT runtime option.
 7. Do not put `content-visibility:auto` on formula hosts. WebKit can omit off-viewport formulas from a full-document PNG snapshot even though their intrinsic placeholders remain. Scopy keeps every formula paintable; this is an export-stability guard.
 8. The main answer path is HTML-only KaTeX. CSS or auxiliary code mentioning `.katex-mathml` does not prove that the captured main answer used a MathML+HTML pair.
-9. The renderer reports `mathStrictCount`, `mathRelaxedCount`, and `mathErrorCount` from the actual render outcome. Authored/ChatGPT source bytes bypass loose formula normalization; only the explicitly selected OCR/scientific profile may repair source before this one parser runs.
-10. The renderer IIFE, KaTeX CSS, and every CSS-referenced KaTeX font are one lockfile-derived asset set. The manifest records exact hashes and KaTeX version; build/test reject a mixed, missing, stale, or flat-duplicated app-bundle layout instead of falling back to host fonts or another renderer.
+9. `mathStrictCount`, `mathRelaxedCount`, and `mathErrorCount` are returned in render metadata from the actual render outcome and asserted by renderer tests; the app does not consume them. Authored/ChatGPT source bytes bypass loose formula normalization; only the explicitly selected OCR/scientific profile may repair source before this one parser runs.
+10. The renderer IIFE (with the document runtime), the base document CSS, KaTeX CSS, and every CSS-referenced KaTeX font are one asset set; KaTeX is lockfile-derived and the document CSS must equal its renderer-package source. The manifest records exact hashes and KaTeX version; build/test reject a mixed, missing, stale, or flat-duplicated app-bundle layout instead of falling back to host fonts or another renderer.
 
 The optional loose-math repair is a Scopy input adaptation for clearly detected OCR/scientific or LaTeX-document profiles. It is disabled for ordinary ChatGPT/authored Markdown, and profile selection may change only bounded source repair—not the renderer, CSS, or output architecture.
 
@@ -367,7 +356,7 @@ After render readiness, PNG export inspects the actual DOM for rich surfaces, fi
 
 Source artwork is shared across ordinary HTTP(S) links, citation primary/supporting sources, and rich `news`/`web_results` source rows. The exact lowercase destination host, never the visible label or a suffix match, selects a bundled asset in `scopyLocalImageAssets.js`. Verified EleBank and HSBC HK artwork is included alongside the existing OpenAI, Investing.com and Reuters assets; original official URLs and hashes are recorded in `Tools/MarkdownRenderer/THIRD_PARTY_NOTICES.md`. Every unknown host uses the deterministic local globe. This front-positioned treatment follows the user's 2026-09-05 comparison screenshot; it is a user-requested Scopy presentation, not a claim that the older unfinished WACZ proves these banks' final DOM.
 
-A descriptive ordinary link may additionally reuse the exact URL's existing frozen enrichment favicon after the same bounded raster data-URI validation used by rich v2; only the first 48 frozen entries are considered and ordinary-link data-URI output has a 512 KiB character budget counting repeated occurrences. Over-budget icons use the bundled/globe fallback. Its authored label and inline shape stay intact. Frozen enrichment icons take precedence and require no new request. Rich results continue to prefer their explicit validated image reference, then the exact-host map, then native origin discovery and globe fallback. A corrupt favicon becomes a compact local globe during the shared image-readiness phase, without expanding into the generic image-error message. Preview and PNG consume these same terminal image outcomes.
+A descriptive ordinary link may additionally reuse the exact URL's existing frozen enrichment favicon after the same bounded raster data-URI validation used by rich v2; only the first 48 frozen entries in ascending URL order are considered (the sidecar is embedded with sorted keys) and ordinary-link data-URI output has a 512 KiB character budget counting repeated occurrences. Over-budget icons use the bundled/globe fallback. Its authored label and inline shape stay intact. Frozen enrichment icons take precedence and require no new request. Rich results continue to prefer their explicit validated image reference, then the exact-host map, then native origin discovery and globe fallback. A corrupt favicon becomes a compact local globe during the shared image-readiness phase, without expanding into the generic image-error message. Preview and PNG consume these same terminal image outcomes.
 
 **Native website icons (2026-09-11).** Ordinary links, source citations and rich source labels share one `scopySourceIcon` identity rule. After sanitization, only renderer-created source glyphs may become `scopy-source-icon://host/https` (or `/http`) images. This resource carries no article path, query, credentials or non-default port. Authored images cannot use the scheme. A document admits at most 24 distinct origins and 256 icon occurrences. The preview WebView and PNG export register the same `SourceIconSchemeHandler`; it delegates to `SourceIconService` in the backend. The independent **网站图标（联网获取并缓存）** setting defaults on and uses normal Save/Cancel transactions; disabling it permits cached icons but no new requests. Ordinary XCTest/UI exports disable icon networking unless explicitly enabled for live verification.
 
@@ -393,7 +382,7 @@ Every pipe table uses one table model:
 - cell text uses `word-break: normal` and `overflow-wrap: anywhere`;
 - table-local overflow never requests a wider Swift hover popover.
 
-Column bucket thresholds are based on text length:
+Column bucket thresholds are based on each column's longest whitespace-collapsed cell text (`tableColumnSize` in `documentRuntime.js`, pinned by `document-runtime.test.js`):
 
 | Length | Bucket | Min/max width as fraction of thread max width |
 | ---: | --- | --- |
@@ -438,9 +427,9 @@ The current production document is the captured light-theme branch. The WACZ con
 
 ## Preview and Export Stability
 
-Preview and export consume the same parse result, standalone HTML, base CSS, renderer bundle, rich-interaction runtime, KaTeX CSS/fonts, syntax-highlighting output, and bundled rich assets. Scripts, fonts and ordinary images remain local. Website icons may resolve through the shared native origin service, with offline cache and compact terminal fallback; HTTP(S) WebView access remains blocked. Preview hydrates supported controls; export freezes those same controls in the envelope-selected initial state before capture.
+Preview and export load the same document (source and policy payload, base CSS, document runtime) and parse it with the same bundle, so the parse result, rich-interaction runtime, KaTeX CSS/fonts, syntax-highlighting output, and bundled rich assets are identical. Scripts, fonts and ordinary images remain local. Website icons may resolve through the shared native origin service, with offline cache and compact terminal fallback; HTTP(S) WebView access remains blocked. Preview hydrates supported controls; export freezes those same controls in the envelope-selected initial state before capture.
 
-Each WebView load receives a new opaque render ID inserted into `data-scopy-render-id`. Every size/readiness message must carry that ID. Scopy accepts a message only when:
+Each preview WebView load receives a new opaque render ID inserted into `data-scopy-render-id`. Every size/readiness message must carry that ID. The export WebView keeps the placeholder and uses its own phase-numbered `scopyExportLayout` channel instead. Scopy accepts a preview message only when:
 
 - it comes from the main frame;
 - its render ID matches the current load;
@@ -448,7 +437,9 @@ Each WebView load receives a new opaque render ID inserted into `data-scopy-rend
 
 Metric deduplication compares width, height, horizontal-overflow state, success/failure state, error reason, and render ID. A same-size failure cannot be swallowed as a duplicate success, and a late message from an earlier document cannot resize or mark the new preview ready.
 
-The document remains hidden until the renderer, canonical stylesheet, `document.fonts`, every local image load/error outcome, task/table/rich runtime, two paint frames, and a current layout epoch reach a terminal ready state. ResizeObserver and interactive-details/rich-control changes are coalesced through requestAnimationFrame. The reusable WebView becomes opaque only for a current-owner terminal success; a terminal failure leaves the static source/DOM available behind a visible reason instead of producing a blank first hover. Renderer failure is reported as failure; it does not silently switch engines.
+An unowned preview WebView may preload the document a popover is about to show (hover prewarm). It publishes no readiness, changes no visibility, and its probed height (`ScopyDocument.probeLayoutHeight`) is used only for host geometry, cached under the exact render cache key. A hidden document gets no animation frames, so its paint deadline starts only when it becomes visible; it never fails or replaces its rendered DOM while offscreen.
+
+The document remains hidden until the renderer, both stylesheets (`katex.min.css` and `scopy-document.css`), `document.fonts`, every local image load/error outcome, task/table/rich runtime, two paint frames, and a current layout epoch reach a terminal ready state. ResizeObserver and interactive-details/rich-control changes are coalesced through requestAnimationFrame. The reusable WebView becomes opaque only for a current-owner terminal success; a terminal failure leaves the static source/DOM available behind a visible reason instead of producing a blank first hover. Renderer failure is reported as failure; it does not silently switch engines.
 
 PNG export builds the same HTML off the main thread, then owns WebKit work on the main actor. Its PDF, one-shot snapshot, and tiled snapshot paths are reliability strategies for one frozen DOM, not alternate renderers. The export freeze closes transient overlays/tooltips, disables rich controls and links, removes them from the tab order, and cancels activation. Export-only code wrapping or table scaling may run only after preview-equivalent layout is ready and only to fit bitmap constraints; it may not change Markdown parsing, typography, content width, table/card models, or frozen source data.
 
@@ -505,6 +496,8 @@ make docs-validate
 git diff --check
 ```
 
+Then compare a real-app PNG export against the previous build: launch the Debug app directly with `--uitesting`, `SCOPY_UITEST_AUTO_EXPORT_MARKDOWN=1`, `SCOPY_UITEST_AUTO_EXPORT_MARKDOWN_PATH=<fixture>`, `SCOPY_EXPORT_DUMP_PATH=<png>`, `USE_MOCK_SERVICE=0` and a temporary `SCOPY_SERVICE_DB_PATH`, for at least `user_markdown_stress.md` and `chatgpt_rich_copy_sample.md`, and report a byte comparison (or a pixel diff with the reason for any difference).
+
 Focused renderer assertions live in:
 
 - `Tools/MarkdownRenderer/test/chatgpt-wacz-20260828.test.js`
@@ -512,8 +505,14 @@ Focused renderer assertions live in:
 - `Tools/MarkdownRenderer/test/source-icons.test.js`
 - `Tools/MarkdownRenderer/test/safe-html.test.js`
 - `Tools/MarkdownRenderer/test/asset-contract.test.js`
-- `ScopyTests/ChatGPTMarkdownRendererTests.swift`
-- `ScopyTests/WebViewLifecycleTests.swift`
+- `Tools/MarkdownRenderer/test/document-runtime.test.js`
+- `Tools/MarkdownRenderer/test/source-repairs.test.js` and `Tools/MarkdownRenderer/test/scientific-repairs.test.js` (synthetic scientific-profile goldens in `test/fixtures/scientific-repairs.json`)
+- `Tools/MarkdownRenderer/test/corpus.test.js` and `Tools/MarkdownRenderer/test/policy-contract.test.js`, paired with `ScopyTests/MarkdownRenderingCorpusContractTests.swift` over the same `cases.json` and `test/fixtures/policy-contract.json`
+- `ScopyTests/ChatGPTMarkdownRendererTests.swift` (shell structure, embedding, cache key, render identity)
+- `ScopyTests/MarkdownComputedStyleTests.swift` (the typography table, quote bar, inline code, code card, and table rules as computed styles in real WebKit)
+- `ScopyTests/WebViewLifecycleTests.swift` (live readiness, terminal image fallback, stylesheet failure, resize, icons)
+
+Style rules are verified as computed styles, never as CSS or script source substrings.
 
 Real user fixtures, rich-surface provenance, and strict v2 examples live in:
 
@@ -527,3 +526,18 @@ Real user fixtures, rich-surface provenance, and strict v2 examples live in:
 Whole-fixture Node coverage is in `Tools/MarkdownRenderer/test/user-fixtures.test.js`. Real-app PNG export cases are in `ScopyUITests/ExportMarkdownPNGUITests.swift`; failure to enable the macOS UI automation harness is environment-blocked and cannot be counted as a pass.
 
 A screenshot can verify the currently rendered geometry, but it cannot redefine parser semantics or replace the source-derived contract. Dark, narrow, and preview-versus-export golden-image coverage should be added only with an isolated harness that does not mutate the user's general pasteboard.
+
+## Evidence Appendix
+
+Maintainer-local capture locations (not in the repository):
+
+- primary archive: `~/Downloads/my-archiving-session.wacz`
+- secondary archive: `~/Downloads/my-archiving-session (1).wacz`
+- extraction output: `/tmp/scopy-wacz-extract/my-archiving-session-20260828`
+
+```bash
+python3 scripts/quality/analyze-chatgpt-wacz-markdown.py \
+  ~/Downloads/my-archiving-session.wacz \
+  --out-dir /tmp/scopy-wacz-extract/my-archiving-session-20260828 \
+  --force
+```

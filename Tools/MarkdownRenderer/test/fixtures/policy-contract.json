@@ -1,0 +1,66 @@
+{
+  "comment": "Shared Swift/JS contract for the render policy payload. `payload` is the exact JSON MarkdownHTMLDocumentBuilder.policyPayloadJSON emits for the context (sorted keys, default `/` escaping); render.js consumes it as-is; the three flags gate the renderer's source repairs. MarkdownRenderingCorpusContractTests pins the bytes, policy-contract.test.js pins the behavior.",
+  "source": "\\section{Heading}\n\n\\textbf{Bold} (\\mathcal{U})\n\n[News Example](https://news.example/a?x=1)\n\n[News Example](https://news.example/b)",
+  "cases": [
+    {
+      "name": "default profile without a sidecar",
+      "profile": "chatGPTMarkdown",
+      "linkEnrichment": null,
+      "payload": "{\"allowLatexDocumentNormalize\":false,\"allowLatexInlineTextNormalize\":false,\"allowLooseMathRepair\":false}",
+      "expectedRepairedMathCount": 0,
+      "expectsNewsCards": false,
+      "expectsLatexDocument": false,
+      "expectsLatexInline": false
+    },
+    {
+      "name": "loose repair profile",
+      "profile": "pdfOCRScientific",
+      "linkEnrichment": null,
+      "payload": "{\"allowLatexDocumentNormalize\":true,\"allowLatexInlineTextNormalize\":true,\"allowLooseMathRepair\":true}",
+      "expectedRepairedMathCount": 1,
+      "expectsNewsCards": false,
+      "expectsLatexDocument": true,
+      "expectsLatexInline": true
+    },
+    {
+      "name": "scientific inline profile",
+      "profile": "scientificMarkdown",
+      "linkEnrichment": null,
+      "payload": "{\"allowLatexDocumentNormalize\":false,\"allowLatexInlineTextNormalize\":true,\"allowLooseMathRepair\":false}",
+      "expectedRepairedMathCount": 0,
+      "expectsNewsCards": false,
+      "expectsLatexDocument": false,
+      "expectsLatexInline": true
+    },
+    {
+      "name": "empty sidecar is omitted",
+      "profile": "authoredMarkdown",
+      "linkEnrichment": {},
+      "payload": "{\"allowLatexDocumentNormalize\":false,\"allowLatexInlineTextNormalize\":false,\"allowLooseMathRepair\":false}",
+      "expectedRepairedMathCount": 0,
+      "expectsNewsCards": false,
+      "expectsLatexDocument": false,
+      "expectsLatexInline": false
+    },
+    {
+      "name": "frozen sidecar entries",
+      "profile": "authoredMarkdown",
+      "linkEnrichment": {
+        "https://news.example/b": {
+          "title": "Story B"
+        },
+        "https://news.example/a?x=1": {
+          "title": "Story A",
+          "source": "News Example",
+          "date": "2026-09-24",
+          "snippet": "Snippet"
+        }
+      },
+      "payload": "{\"allowLatexDocumentNormalize\":false,\"allowLatexInlineTextNormalize\":false,\"allowLooseMathRepair\":false,\"linkEnrichment\":{\"https:\\/\\/news.example\\/a?x=1\":{\"date\":\"2026-09-24\",\"snippet\":\"Snippet\",\"source\":\"News Example\",\"title\":\"Story A\"},\"https:\\/\\/news.example\\/b\":{\"title\":\"Story B\"}}}",
+      "expectedRepairedMathCount": 0,
+      "expectsNewsCards": true,
+      "expectsLatexDocument": false,
+      "expectsLatexInline": false
+    }
+  ]
+}

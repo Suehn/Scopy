@@ -113,13 +113,13 @@ final class SourceIconTests: XCTestCase {
         try FileManager.default.copyItem(at: root, to: assets)
         defer { try? FileManager.default.removeItem(at: assets) }
         let document = assets.appendingPathComponent("test.html")
-        try MarkdownHTMLRenderer.render(markdown: "正文 [站点标题](https://new-site.example/private?token=secret) 与后续文字。")
+        try MarkdownHTMLDocumentBuilder.document(source: "正文 [站点标题](https://new-site.example/private?token=secret) 与后续文字。")
             .write(to: document, atomically: true, encoding: .utf8)
         webView.loadFileURL(document, allowingReadAccessTo: assets)
         let deadline = Date().addingTimeInterval(12)
         var ready = false
         while !ready && Date() < deadline {
-            ready = (try? await webView.evaluateJavaScript("Boolean(window.__scopyIsRenderReady && window.__scopyIsRenderReady())")) as? Bool == true
+            ready = (try? await webView.evaluateJavaScript("Boolean(window.ScopyDocument && window.ScopyDocument.isRenderReady())")) as? Bool == true
             if !ready { try await Task.sleep(nanoseconds: 100_000_000) }
         }
         XCTAssertTrue(ready, "a slow native icon must not become a font timeout")

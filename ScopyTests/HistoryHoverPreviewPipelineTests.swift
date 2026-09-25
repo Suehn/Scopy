@@ -277,8 +277,8 @@ final class HistoryHoverPreviewPipelineTests: XCTestCase {
     func testTextPreviewUsesCachedMarkdownCapabilityAndCachedHTMLMetrics() async {
         let item = makeItem(type: .text, contentHash: "cached-markdown", plainText: "# Title\n\nBody")
         let renderCacheKey = MarkdownRenderCacheKey.make(
-            contentHash: ClipboardItemContentRevision(item: item).cacheKey,
-            context: MarkdownRenderContextResolver.defaultContext(for: item.plainText)
+            input: MarkdownRenderContextResolver.defaultContext(for: item.plainText),
+            itemKey: ClipboardItemContentRevision(item: item).cacheKey
         )
         HistoryItemPresentationCache.shared.storeMarkdownExportCapability(true, for: item)
         MarkdownPreviewCache.shared.setHTML("<h1>Title</h1>", forKey: renderCacheKey)

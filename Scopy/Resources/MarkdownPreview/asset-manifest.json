@@ -3,8 +3,8 @@
   "renderer": {
     "path": "contrib/scopy-unified-renderer.iife.js",
     "sidecarPath": "contrib/scopy-unified-renderer.iife.js.sha256",
-    "sha256": "3f2da8037b32c06872b2927c129f12b89f03fc1037b2728645916b8e3bb56681",
-    "bytes": 881938,
+    "sha256": "1b5b97f044075e7e8f2dad628ce71729a24b34206bccaba800f79d01056c53af",
+    "bytes": 915987,
     "build": {
       "entrypoint": "Tools/MarkdownRenderer/src/index.js",
       "format": "iife",
@@ -14,6 +14,12 @@
       "minify": true,
       "legalComments": "none"
     }
+  },
+  "documentCSS": {
+    "path": "scopy-document.css",
+    "source": "Tools/MarkdownRenderer/src/styles/scopy-document.css",
+    "sha256": "d44f5d57a3ce0dd092b9b5e16a40008f10e5b06bb91b826671f386b26f095ab4",
+    "bytes": 56860
   },
   "katex": {
     "package": "katex",

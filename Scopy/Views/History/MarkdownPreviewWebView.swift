@@ -588,6 +588,12 @@ final class MarkdownPreviewWebViewController: NSObject, ObservableObject, WKNavi
         if currentOwnerID == nil, let key = prewarmRenderCacheKey, !key.isEmpty {
             probePrewarmLayout(renderID: currentRenderID, renderCacheKey: key)
         }
+        // The document runtime ships inside the renderer bundle; a load that finished without it can never report.
+        let renderID = currentRenderID
+        webView.evaluateJavaScript("typeof window.ScopyDocument === 'object'") { [weak self] result, _ in
+            guard let self, self.currentRenderID == renderID, result as? Bool != true else { return }
+            self.handleNavigationFailure(nil, in: webView, reason: "renderer bundle missing")
+        }
     }
 
     private var prewarmProbeTask: Task<Void, Never>?
@@ -602,7 +608,7 @@ final class MarkdownPreviewWebViewController: NSObject, ObservableObject, WKNavi
                 guard let self, !Task.isCancelled, self.currentRenderID == renderID, self.currentOwnerID == nil else { return }
                 if self.lastKnownMetrics != nil { return }
                 let result = try? await self.webView.evaluateJavaScript(
-                    "window.__scopyProbeLayoutHeight ? window.__scopyProbeLayoutHeight() : null"
+                    "window.ScopyDocument ? window.ScopyDocument.probeLayoutHeight() : null"
                 )
                 if let dict = result as? [String: Any], let height = dict["height"] as? Double, height > 0 {
                     let width = HoverPreviewScreenMetrics.maxMarkdownPopoverWidthPoints()
@@ -729,7 +735,7 @@ final class MarkdownPreviewWebViewController: NSObject, ObservableObject, WKNavi
         pendingContentRefreshTask?.cancel()
         pendingContentRefreshTask = Task { @MainActor in
             // SwiftUI can call `updateNSView` before the representable receives its final size.
-            // Avoid forcing `__scopyReportHeight` while the web view is still in a transient 0-width layout state,
+            // Avoid forcing a size report while the web view is still in a transient 0-width layout state,
             // otherwise we may cache a bogus tiny width and poison future popover sizing.
             var attempts = 0
             while attempts < 60 {
@@ -746,11 +752,8 @@ final class MarkdownPreviewWebViewController: NSObject, ObservableObject, WKNavi
     private func requestContentRefresh(for webView: WKWebView, forceSizeReport: Bool) {
         // Best-effort: ensure size reporting runs even if DOMContentLoaded timing varies,
         // and for reuse cases where the web view is re-attached without a navigation finishing.
-        webView.evaluateJavaScript("typeof window.__scopyReportHeight === 'function'") { result, _ in
-            guard let ok = result as? Bool, ok else { return }
-            let force = forceSizeReport ? "true" : "false"
-            webView.evaluateJavaScript("window.__scopyReportHeight(\(force))") { _, _ in }
-        }
+        let force = forceSizeReport ? "true" : "false"
+        webView.evaluateJavaScript("window.ScopyDocument && window.ScopyDocument.reportHeight(\(force))") { _, _ in }
     }
 }
 

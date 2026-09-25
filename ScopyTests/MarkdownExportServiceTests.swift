@@ -196,6 +196,44 @@ final class MarkdownExportServiceTests: XCTestCase {
         XCTAssertTrue(MarkdownExportService.debugShouldBypassPDFForVeryTallContent(heightPoints: 29_001))
     }
 
+    func testLateLayoutMessageFromPreviousPhaseIsIgnored() throws {
+        func message(phase: Int, event: String) throws -> ExportLayoutMessage {
+            try XCTUnwrap(ExportLayoutMessage(body: [
+                "phase": phase, "event": event, "frames": 12, "stableFrames": 3, "height": 480, "live": 480,
+                "fonts": "loaded", "renderReady": true, "renderFailed": false, "renderErrorReason": ""
+            ] as [String: Any]))
+        }
+        var phases = ExportLayoutPhases()
+        _ = phases.begin()
+        let current = phases.begin()
+
+        XCTAssertFalse(phases.receive(try message(phase: current - 1, event: "settled")))
+        XCTAssertNil(phases.latest, "a settle from the previous wait must not satisfy the current one")
+        XCTAssertTrue(phases.receive(try message(phase: current, event: "settled")))
+        XCTAssertEqual(phases.latest?.sample.height, 480)
+    }
+
+    /// The host panel is ordered out once the document is ready, so animation frames stop and no settle is pushed;
+    /// the export must still finish through the time-based fallback.
+    func testOccludedExportFallsBackToTimeBasedSettle() async throws {
+        let assets = try LiveMarkdownDocument()
+        defer { assets.close() }
+        ExportCoordinator.markdownPreviewResourceURLForTesting = assets.assetRoot
+        ExportCoordinator.ordersOutHostWindowForTesting = true
+        defer {
+            ExportCoordinator.markdownPreviewResourceURLForTesting = nil
+            ExportCoordinator.ordersOutHostWindowForTesting = false
+        }
+        let html = MarkdownHTMLDocumentBuilder.document(source: "# Occluded export\n\nThe host panel leaves the screen after the document is ready.")
+
+        let result = await withCheckedContinuation { continuation in
+            MarkdownExportService.exportToPNGData(html: html) { continuation.resume(returning: $0) }
+        }
+
+        let png = try result.get().pngData
+        XCTAssertEqual(Array(png.prefix(8)), [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A])
+    }
+
     private func loadRealPalettedFixturePNGData() throws -> Data {
         try TestFixture.data("history-replay-real-screenshot-paletted.png")
     }

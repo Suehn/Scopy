@@ -3,7 +3,7 @@
     "name": "chatgpt-file-links",
     "file": "chatgpt-file-links.md",
     "expectedProfile": "chatGPTMarkdown",
-    "allowLooseMathRepair": false,
+    "policy": { "allowLatexDocumentNormalize": false, "allowLatexInlineTextNormalize": false, "allowLooseMathRepair": false },
     "renderedContains": [
       "href=\"scopy-file:/Users/alice/project/docs/guide_v2.md:25\"",
       "href=\"scopy-file:/Users/alice/project/src/backend/adapter/chatgpt_text.js:944\"",
@@ -18,7 +18,7 @@
     "name": "image-path",
     "file": "image-path.md",
     "expectedProfile": "chatGPTMarkdown",
-    "allowLooseMathRepair": false,
+    "policy": { "allowLatexDocumentNormalize": false, "allowLatexInlineTextNormalize": false, "allowLooseMathRepair": false },
     "renderedContains": [
       "<img src=\"/Users/alice/Pictures/diagram_v2.png\"",
       "alt=\"diagram\""
@@ -32,7 +32,7 @@
     "name": "reference-link",
     "file": "reference-link.md",
     "expectedProfile": "authoredMarkdown",
-    "allowLooseMathRepair": false,
+    "policy": { "allowLatexDocumentNormalize": false, "allowLatexInlineTextNormalize": false, "allowLooseMathRepair": false },
     "renderedContains": [
       "href=\"scopy-file:/Users/alice/papers/file_v2.md:25\"",
       "Reference target"
@@ -46,7 +46,7 @@
     "name": "explicit-math",
     "file": "explicit-math.md",
     "expectedProfile": "scientificMarkdown",
-    "allowLooseMathRepair": false,
+    "policy": { "allowLatexDocumentNormalize": false, "allowLatexInlineTextNormalize": true, "allowLooseMathRepair": false },
     "renderedContains": [
       "katex",
       "katex-display"
@@ -58,7 +58,7 @@
     "name": "loose-latex",
     "file": "loose-latex.md",
     "expectedProfile": "pdfOCRScientific",
-    "allowLooseMathRepair": true,
+    "policy": { "allowLatexDocumentNormalize": true, "allowLatexInlineTextNormalize": true, "allowLooseMathRepair": true },
     "renderedContains": [
       "katex"
     ],
@@ -71,7 +71,7 @@
     "name": "currency-shell-vars",
     "file": "currency-shell-vars.md",
     "expectedProfile": "authoredMarkdown",
-    "allowLooseMathRepair": false,
+    "policy": { "allowLatexDocumentNormalize": false, "allowLatexInlineTextNormalize": false, "allowLooseMathRepair": false },
     "renderedContains": [
       "$20",
       "<code>$HOME/bin:$PATH</code>",
@@ -86,7 +86,7 @@
     "name": "cjk-mixed-markdown",
     "file": "cjk-mixed-markdown.md",
     "expectedProfile": "chatGPTMarkdown",
-    "allowLooseMathRepair": false,
+    "policy": { "allowLatexDocumentNormalize": false, "allowLatexInlineTextNormalize": false, "allowLooseMathRepair": false },
     "renderedContains": [
       "中文路径",
       "href=\"scopy-file:/Users/alice/%E8%AE%BA%E6%96%87/%E7%AC%AC1%E7%AB%A0_v2.md:25\"",
@@ -101,7 +101,7 @@
     "name": "raw-html-literal",
     "file": "raw-html-literal.md",
     "expectedProfile": "richHTML",
-    "allowLooseMathRepair": false,
+    "policy": { "allowLatexDocumentNormalize": false, "allowLatexInlineTextNormalize": false, "allowLooseMathRepair": false },
     "renderedContains": [
       "<details class=\"scopy-safe-details\">",
       "<summary class=\"scopy-safe-summary\">More</summary>",
@@ -117,7 +117,7 @@
     "name": "raw-html-literal-markdown",
     "file": "raw-html-literal-markdown.md",
     "expectedProfile": "authoredMarkdown",
-    "allowLooseMathRepair": false,
+    "policy": { "allowLatexDocumentNormalize": false, "allowLatexInlineTextNormalize": false, "allowLooseMathRepair": false },
     "renderedContains": [
       "<details class=\"scopy-safe-details\">",
       "<summary class=\"scopy-safe-summary\">More</summary>",
@@ -134,7 +134,7 @@
     "name": "code-fence-paths",
     "file": "code-fence-paths.md",
     "expectedProfile": "authoredMarkdown",
-    "allowLooseMathRepair": false,
+    "policy": { "allowLatexDocumentNormalize": false, "allowLatexInlineTextNormalize": false, "allowLooseMathRepair": false },
     "renderedContains": [
       "/Users/alice/project/file_v2.md:25",
       "<code class=\"hljs language-sh\">",
@@ -142,6 +142,45 @@
     ],
     "renderedNotContains": [
       "katex"
+    ],
+    "expectedRepairedMathCount": 0
+  },
+  {
+    "name": "atx-headings",
+    "file": "atx-headings.md",
+    "expectedProfile": "authoredMarkdown",
+    "policy": { "allowLatexDocumentNormalize": false, "allowLatexInlineTextNormalize": false, "allowLooseMathRepair": false },
+    "renderedContains": [
+      "<h1>一级标题 <code># H1</code></h1>",
+      "<h2>二级标题</h2>",
+      "<p>#! /usr/bin/env bash</p>",
+      "<pre><code>#indented code",
+      "###fenced code",
+      "<p>#实际对象本回答是否真的使用1Markdown heading✅"
+    ],
+    "renderedNotContains": [
+      "<h1>!",
+      "<h1>实际对象",
+      "<h3>fenced code</h3>"
+    ],
+    "expectedRepairedMathCount": 0
+  },
+  {
+    "name": "table-code-span-pipes",
+    "file": "table-code-span-pipes.md",
+    "expectedProfile": "authoredMarkdown",
+    "policy": { "allowLatexDocumentNormalize": false, "allowLatexInlineTextNormalize": false, "allowLooseMathRepair": false },
+    "renderedContains": [
+      "<td><code>| A | B |</code></td>",
+      "<td><code>A | B</code></td>",
+      "<p>Paragraph <code>A | B</code> should stay literal.</p>",
+      "<td>```python</td>",
+      "<td>```bash</td>"
+    ],
+    "renderedNotContains": [
+      "<td>`</td>",
+      "<td>`A</td>",
+      "```python | ```bash"
     ],
     "expectedRepairedMathCount": 0
   }
