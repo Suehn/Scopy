@@ -58,14 +58,14 @@ final class HistoryListStateTests: XCTestCase {
         let anotherPinned = makeItem(text: "another pinned", isPinned: true)
         var state = HistoryListState()
         state.replacePage(items: [first, pinned], total: -1, hasMore: true)
-        let revision = state.itemsRevision
+        let revision = state.projectionGeneration
 
         state.appendPage(items: [second, anotherPinned], total: -1, hasMore: true)
         XCTAssertEqual(state.items.map(\.id), [first.id, pinned.id, second.id, anotherPinned.id])
         XCTAssertEqual(state.pinnedItems.map(\.id), [pinned.id, anotherPinned.id])
         XCTAssertEqual(state.unpinnedItems.map(\.id), [first.id, second.id])
         XCTAssertEqual(state.indexOfItem(withID: anotherPinned.id), 3)
-        XCTAssertEqual(state.itemsRevision, revision + 1)
+        XCTAssertEqual(state.projectionGeneration, revision + 1)
         XCTAssertTrue(state.canLoadMore)
 
         // An empty terminal page still updates authoritative paging metadata.

@@ -9,12 +9,12 @@ struct ShortcutsSettingsPage: View {
     var body: some View {
         SettingsPageContainer(page: .shortcuts) {
             SettingsSection(
-                "快捷键",
+                "Shortcuts",
                 systemImage: "keyboard",
-                footer: "点击录制新快捷键，按 ESC 取消。录制完成后会立即生效并持久化。"
+                footer: "Click to record a new shortcut; press Esc to cancel. A recorded shortcut takes effect and is saved immediately."
             ) {
                 SettingsCardRow {
-                    LabeledContent("全局快捷键") {
+                    LabeledContent("Global hotkey") {
                         HotKeyRecorderView(
                             keyCode: $tempSettings.hotkeyKeyCode,
                             modifiers: $tempSettings.hotkeyModifiers,

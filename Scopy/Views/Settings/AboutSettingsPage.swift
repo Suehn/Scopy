@@ -12,7 +12,7 @@ struct AboutSettingsPage: View {
 
     var body: some View {
         SettingsPageContainer(page: .about) {
-            SettingsSection("信息", systemImage: "info.circle") {
+            SettingsSection("Info", systemImage: "info.circle") {
                 SettingsCardRow {
                     HStack(spacing: 16) {
                         Image(nsImage: NSApp.applicationIconImage)
@@ -28,15 +28,15 @@ struct AboutSettingsPage: View {
                                 .fontWeight(.semibold)
 
                             VStack(alignment: .leading, spacing: 2) {
-                                Text("版本 \(AppVersion.fullVersion)")
-                                Text("构建于 \(AppVersion.buildDate)")
+                                Text("Version \(AppVersion.fullVersion)")
+                                Text("Built \(AppVersion.buildDate)")
                             }
                             .font(.callout)
                             .foregroundStyle(.secondary)
                         }
                         Spacer()
 
-                        Button("检查更新…") {
+                        Button("Check for Updates…") {
                             checkForUpdates?()
                         }
                         .disabled(checkForUpdates == nil)
@@ -45,99 +45,88 @@ struct AboutSettingsPage: View {
                 }
             }
 
-            SettingsSection("特性", systemImage: "sparkles") {
+            SettingsSection("Features", systemImage: "sparkles") {
                 SettingsCardRow {
                     LazyVGrid(
                         columns: [GridItem(.flexible()), GridItem(.flexible())],
                         alignment: .leading,
                         spacing: 12
                     ) {
-                        FeatureItem(text: "无限历史", icon: "infinity", color: .purple)
-                        FeatureItem(text: "高性能搜索", icon: "magnifyingglass", color: .blue)
-                        FeatureItem(text: "分层存储", icon: "externaldrive", color: .orange)
-                        FeatureItem(text: "去重写入", icon: "checkmark.seal", color: .green)
-                        FeatureItem(text: "全局快捷键", icon: "keyboard", color: .indigo)
-                        FeatureItem(text: "低延迟体验", icon: "bolt", color: .teal)
+                        FeatureItem(text: "Unlimited history", icon: "infinity", color: .purple)
+                        FeatureItem(text: "Fast search", icon: "magnifyingglass", color: .blue)
+                        FeatureItem(text: "Tiered storage", icon: "externaldrive", color: .orange)
+                        FeatureItem(text: "Deduplicated capture", icon: "checkmark.seal", color: .green)
+                        FeatureItem(text: "Global hotkey", icon: "keyboard", color: .indigo)
+                        FeatureItem(text: "Low latency", icon: "bolt", color: .teal)
                     }
                 }
             }
 
-            SettingsSection("性能监测", systemImage: "speedometer") {
+            SettingsSection("Diagnostics", systemImage: "stethoscope") {
                 SettingsCardRow {
-                    LabeledContent("搜索延迟") {
-                        Text(searchValue).monospacedDigit().foregroundStyle(.secondary)
-                    }
-                }
-                SettingsCardDivider()
-                SettingsCardRow {
-                    LabeledContent("首屏加载") {
-                        Text(loadValue).monospacedDigit().foregroundStyle(.secondary)
-                    }
-                }
-                SettingsCardDivider()
-                SettingsCardRow {
-                    LabeledContent("内存占用") {
-                        Text(String(format: "%.1f MB", memoryUsageMB))
-                            .monospacedDigit()
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                SettingsCardDivider()
-                SettingsCardRow {
-                    HStack {
-                        Spacer()
-                        Button("刷新数据", action: refreshPerformance)
-                            .buttonStyle(.link)
-                            .controlSize(.small)
-                    }
-                }
-            }
-
-            SettingsSection("Ingest 诊断", systemImage: "waveform.path.ecg") {
-                SettingsCardRow {
-                    LabeledContent("队列 / 活跃任务") {
-                        Text("\(ingestPendingValue) / \(ingestActiveValue)")
-                            .monospacedDigit()
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                SettingsCardDivider()
-                SettingsCardRow {
-                    LabeledContent("持久 backlog") {
-                        Text(ingestPersistedValue)
-                            .monospacedDigit()
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                SettingsCardDivider()
-                SettingsCardRow {
-                    LabeledContent("soft limit / replay") {
-                        Text("\(ingestSoftLimitValue) / \(ingestReplayValue)")
-                            .monospacedDigit()
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                SettingsCardDivider()
-                SettingsCardRow {
-                    LabeledContent("changeCount 跳变") {
-                        Text("\(ingestJumpValue) (max Δ\(ingestMaxDeltaValue))")
-                            .monospacedDigit()
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                SettingsCardDivider()
-                SettingsCardRow {
-                    LabeledContent("最近持久化 / ack") {
-                        Text("\(ingestPersistedAtValue) / \(ingestAckAtValue)")
-                            .foregroundStyle(.secondary)
+                    DisclosureGroup("Performance and ingest metrics") {
+                        VStack(alignment: .leading, spacing: 0) {
+                            LabeledContent("Search latency") {
+                                Text(searchValue).monospacedDigit().foregroundStyle(.secondary)
+                            }
+                            .padding(.vertical, 6)
+                            LabeledContent("First page load") {
+                                Text(loadValue).monospacedDigit().foregroundStyle(.secondary)
+                            }
+                            .padding(.vertical, 6)
+                            LabeledContent("Memory") {
+                                Text(String(format: "%.1f MB", memoryUsageMB))
+                                    .monospacedDigit()
+                                    .foregroundStyle(.secondary)
+                            }
+                            .padding(.vertical, 6)
+                            Divider()
+                            LabeledContent("Queued / active") {
+                                Text("\(ingestPendingValue) / \(ingestActiveValue)")
+                                    .monospacedDigit()
+                                    .foregroundStyle(.secondary)
+                            }
+                            .padding(.vertical, 6)
+                            LabeledContent("Persisted backlog") {
+                                Text(ingestPersistedValue)
+                                    .monospacedDigit()
+                                    .foregroundStyle(.secondary)
+                            }
+                            .padding(.vertical, 6)
+                            LabeledContent("soft limit / replay") {
+                                Text("\(ingestSoftLimitValue) / \(ingestReplayValue)")
+                                    .monospacedDigit()
+                                    .foregroundStyle(.secondary)
+                            }
+                            .padding(.vertical, 6)
+                            LabeledContent("changeCount jumps") {
+                                Text("\(ingestJumpValue) (max Δ\(ingestMaxDeltaValue))")
+                                    .monospacedDigit()
+                                    .foregroundStyle(.secondary)
+                            }
+                            .padding(.vertical, 6)
+                            LabeledContent("Last persisted / ack") {
+                                Text("\(ingestPersistedAtValue) / \(ingestAckAtValue)")
+                                    .foregroundStyle(.secondary)
+                            }
+                            .padding(.vertical, 6)
+                            HStack {
+                                Spacer()
+                                Button("Refresh", action: refreshPerformance)
+                                    .buttonStyle(.link)
+                                    .controlSize(.small)
+                            }
+                            .padding(.top, 6)
+                        }
+                        .padding(.top, 6)
                     }
                 }
             }
 
-            SettingsSection("链接", systemImage: "link") {
+            SettingsSection("Links", systemImage: "link") {
                 SettingsCardRow {
                     Link(destination: URL(string: "https://github.com/Suehn/Scopy")!) {
-                        Label("GitHub 仓库", systemImage: "arrow.up.right.square")
+                        Label("GitHub Repository", systemImage: "arrow.up.right.square")
                     }
                 }
 
@@ -145,7 +134,7 @@ struct AboutSettingsPage: View {
 
                 SettingsCardRow {
                     Link(destination: URL(string: "https://github.com/Suehn/Scopy/issues/new")!) {
-                        Label("提交反馈", systemImage: "bubble.left.and.bubble.right")
+                        Label("Send Feedback", systemImage: "bubble.left.and.bubble.right")
                     }
                 }
             }
@@ -262,7 +251,7 @@ struct AboutSettingsPage: View {
 }
 
 private struct FeatureItem: View {
-    let text: String
+    let text: LocalizedStringKey
     let icon: String
     let color: Color
     

@@ -335,7 +335,7 @@ final class SearchHintTests: XCTestCase {
 
         let hint = viewModel.searchCoverageHint
         XCTAssertNotNil(hint)
-        XCTAssertTrue(hint?.contains("全量校准") ?? false)
+        XCTAssertTrue(hint?.contains("full search") ?? false)
     }
 
     func testRegexPrimarySearchStatusLabelShowsRecentOnlyLimit() {

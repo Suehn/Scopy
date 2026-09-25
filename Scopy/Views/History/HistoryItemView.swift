@@ -3,10 +3,9 @@ import AppKit
 import ScopyKit
 import ScopyUISupport
 
-// MARK: - History Item View (v0.9.3 - 性能优化版)
+// MARK: - History Item View
 
-/// 单个历史项视图 - 实现 Equatable 以优化重绘
-/// v0.9.3: 使用局部悬停状态 + 防抖 + Equatable 优化滚动性能
+/// One history row. `Equatable` so the List re-renders it only when its inputs change.
 /// Row bookkeeping that never affects what is drawn: liveness, pointer presence and the two
 /// ownership tokens. Held by reference so writing it does not invalidate the row's body.
 @MainActor
@@ -22,11 +21,12 @@ struct HistoryItemView: View, Equatable {
     @Environment(\.historyRelativeTimeClock) private var relativeTimeClock
 
     let item: ClipboardItemDTO
-    let isKeyboardSelected: Bool
+    let isSelected: Bool
+    let quickSlot: Int?
     let settings: SettingsDTO
     let searchMatchContext: SearchMatchContext?
 
-    // 回调闭包 - 不参与 Equatable 比较
+    // Callbacks do not take part in `==`.
     let onSelect: () -> Void
     let onSelectOptimizedForCodex: () -> Void
     let onSendViaAirDrop: () -> Void
@@ -69,12 +69,13 @@ struct HistoryItemView: View, Equatable {
 
     private struct RowHighlight: Equatable {
         let isHovering: Bool
-        let isKeyboardSelected: Bool
+        let isSelected: Bool
     }
 
     init(
         item: ClipboardItemDTO,
-        isKeyboardSelected: Bool,
+        isSelected: Bool,
+        quickSlot: Int? = nil,
         settings: SettingsDTO,
         searchMatchContext: SearchMatchContext?,
         onSelect: @escaping () -> Void,
@@ -99,7 +100,8 @@ struct HistoryItemView: View, Equatable {
         dismissOtherPopovers: @escaping () -> Void
     ) {
         self.item = item
-        self.isKeyboardSelected = isKeyboardSelected
+        self.isSelected = isSelected
+        self.quickSlot = quickSlot
         self.settings = settings
         self.searchMatchContext = searchMatchContext
         self.onSelect = onSelect
@@ -146,7 +148,8 @@ struct HistoryItemView: View, Equatable {
             lhs.item.appBundleID == rhs.item.appBundleID &&
             lhs.item.thumbnailPath == rhs.item.thumbnailPath &&
             lhs.searchMatchContext == rhs.searchMatchContext &&
-            lhs.isKeyboardSelected == rhs.isKeyboardSelected &&
+            lhs.isSelected == rhs.isSelected &&
+            lhs.quickSlot == rhs.quickSlot &&
             lhs.isImagePreviewPresented == rhs.isImagePreviewPresented &&
             lhs.isTextPreviewPresented == rhs.isTextPreviewPresented &&
             lhs.isFilePreviewPresented == rhs.isFilePreviewPresented &&
@@ -166,12 +169,12 @@ struct HistoryItemView: View, Equatable {
     nonisolated static func shouldShowOptimizeButton(
         itemType: ClipboardItemType,
         isHovering: Bool,
-        isKeyboardSelected: Bool,
+        isSelected: Bool,
         isInteractionSuppressed: Bool
     ) -> Bool {
         itemType == .image &&
             !isInteractionSuppressed &&
-            (isHovering || isKeyboardSelected)
+            (isHovering || isSelected)
     }
 
     private var isPreviewInteractionSuppressed: Bool {
@@ -307,7 +310,7 @@ struct HistoryItemView: View, Equatable {
     }
 
     private var statusMessage: String? {
-        if isExportingPNG { return "Exporting…" }
+        if isExportingPNG { return String(localized: "Exporting…") }
         if let exportMessage, !exportMessage.isEmpty { return exportMessage }
         return optimizeMessage
     }
@@ -582,7 +585,7 @@ struct HistoryItemView: View, Equatable {
     // MARK: - Computed Properties
 
     private var backgroundColor: Color {
-        if isKeyboardSelected {
+        if isSelected {
             return ScopyColors.selection
         } else if isHovering {
             return ScopyColors.hover
@@ -591,7 +594,7 @@ struct HistoryItemView: View, Equatable {
         }
     }
 
-    /// v0.12: 优先使用预加载缓存，避免主线程阻塞
+    /// From the prewarmed icon cache, so the row body never waits on LaunchServices.
     private var appIcon: NSImage? {
         guard let bundleID = descriptor.appIconBundleID else { return nil }
         return IconService.shared.icon(bundleID: bundleID)
@@ -749,7 +752,7 @@ struct HistoryItemView: View, Equatable {
         descriptor.canShowFileThumbnail
     }
 
-    /// v0.21: 使用预计算的 metadata，避免视图渲染时 O(n) 字符串操作
+    /// Precomputed, so the body does no per-render string work.
     private var metadataText: String {
         descriptor.metadataText
     }
@@ -788,12 +791,11 @@ struct HistoryItemView: View, Equatable {
         }
     }
 
-    /// v0.15: Simplified content view - removed app icon, using new metadata format
     @ViewBuilder
     private var contentView: some View {
         switch item.type {
         case .image where showThumbnails:
-            // v0.15.1: 图片有缩略图时，只显示缩略图和大小，不显示 "Image" 标题
+            // With a thumbnail, an image row shows the thumbnail and its metadata, not an "Image" title.
             HStack(spacing: ScopySpacing.md) {
                 HistoryItemThumbnailView(
                     thumbnailPath: item.thumbnailPath,
@@ -846,7 +848,7 @@ struct HistoryItemView: View, Equatable {
                     .font(ScopyTypography.caption)
                     .foregroundStyle(ScopyColors.mutedText)
                     .lineLimit(1)
-                    .padding(.leading, ScopySpacing.md)  // v0.15.1: 缩进两格
+                    .padding(.leading, ScopySpacing.md)
             }
         default:
             VStack(alignment: .leading, spacing: ScopySpacing.xxs) {
@@ -858,7 +860,7 @@ struct HistoryItemView: View, Equatable {
                     .font(ScopyTypography.caption)
                     .foregroundStyle(ScopyColors.mutedText)
                     .lineLimit(1)
-                    .padding(.leading, ScopySpacing.md)  // v0.15: 缩进两格
+                    .padding(.leading, ScopySpacing.md)
             }
         }
     }
@@ -893,7 +895,7 @@ struct HistoryItemView: View, Equatable {
     /// `PointerRegionUpdater.updatePointerRegion` was 5.7% of main-thread samples and falls to
     /// zero when the row carries no button. Tap target, identifier and the button role for
     /// assistive technology are unchanged.
-    private var mainRowButton: some View {
+    private var rowActivationSurface: some View {
         rowActivationLabel
             .contentShape(Rectangle())
             .onTapGesture(perform: handlePrimaryAction)
@@ -907,14 +909,13 @@ struct HistoryItemView: View, Equatable {
 
     private var rowActivationLabel: some View {
         HStack(alignment: .center, spacing: ScopySpacing.sm) {
-            // Pin 标记：左侧颜色条
+            // Pinned rows carry a colored bar on the leading edge.
             if item.isPinned {
                 Capsule()
                     .fill(ScopyColors.selectionBorder)
                     .frame(width: ScopySize.Width.pinIndicator, height: ScopySize.Height.pinIndicator)
             }
 
-            // App 图标 (v0.15: 保留图标，只移除元数据中的应用名称)
             if let icon = appIcon {
                 Image(nsImage: icon)
                     .resizable()
@@ -943,9 +944,17 @@ struct HistoryItemView: View, Equatable {
                     .foregroundStyle(ScopyColors.mutedText)
             }
 
-            Text(relativeTime)
-                .font(ScopyTypography.microMono)
-                .foregroundStyle(ScopyColors.mutedText)
+            // While ⌘ is held the slot replaces the time in the same font, so the row height
+            // and trailing layout do not move.
+            if let quickSlot {
+                Text(verbatim: "⌘\(quickSlot)")
+                    .font(ScopyTypography.microMono)
+                    .foregroundStyle(ScopyColors.mutedText)
+            } else {
+                Text(relativeTime)
+                    .font(ScopyTypography.microMono)
+                    .foregroundStyle(ScopyColors.mutedText)
+            }
         }
     }
 
@@ -953,12 +962,12 @@ struct HistoryItemView: View, Equatable {
         let needsThumbnailHeight = descriptor.needsThumbnailHeight
 
         return HStack(alignment: .center, spacing: ScopySpacing.sm) {
-            mainRowButton
+            rowActivationSurface
 
             if Self.shouldShowOptimizeButton(
                 itemType: item.type,
                 isHovering: isHovering,
-                isKeyboardSelected: isKeyboardSelected,
+                isSelected: isSelected,
                 isInteractionSuppressed: isScrollInteractionActive || isPreviewInteractionSuppressed
             ) {
                 Button {
@@ -975,7 +984,7 @@ struct HistoryItemView: View, Equatable {
                 .buttonStyle(.plain)
                 .accessibilityIdentifier("HistoryItem.OptimizeButton")
                 .accessibilityLabel("Optimize image")
-                .help("优化图片大小（pngquant）")
+                .help("Optimize image size (pngquant)")
                 .disabled(isOptimizingImage)
                 .onHover { hovering in
                     handleOptimizeButtonHover(hovering)
@@ -987,23 +996,22 @@ struct HistoryItemView: View, Equatable {
         .frame(minHeight: needsThumbnailHeight ? thumbnailHeight + ScopySpacing.lg : ScopySize.Height.listItem)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background {
-            if isKeyboardSelected || isHovering {
+            if isSelected || isHovering {
                 RoundedRectangle(cornerRadius: ScopySize.Corner.lg, style: .continuous)
                     .fill(backgroundColor)
             }
         }
-        // v0.10.3: 键盘选中时添加边框
+        // The selected row also gets a border.
         .overlay {
-            if isKeyboardSelected {
+            if isSelected {
                 RoundedRectangle(cornerRadius: ScopySize.Corner.lg, style: .continuous)
                     .stroke(ScopyColors.selectionBorder, lineWidth: ScopySize.Stroke.medium)
             }
         }
-        // v0.10.3: 添加选中/悬停态过渡动效
         // One animation node: both flags drive the same transition on the same subtree.
         .animation(
             isScrollInteractionActive ? nil : .easeInOut(duration: 0.15),
-            value: RowHighlight(isHovering: isHovering, isKeyboardSelected: isKeyboardSelected)
+            value: RowHighlight(isHovering: isHovering, isSelected: isSelected)
         )
         .padding(.horizontal, ScopySpacing.md) // Outer padding for floating effect
     }
@@ -1274,7 +1282,7 @@ struct HistoryItemView: View, Equatable {
 
     private var rowTeardownContent: some View {
         rowMenuContent
-        // v0.17: 增强任务清理 - 确保视图消失时释放所有任务引用
+        // Releases every task the row owns when it leaves the screen.
         .onDisappear {
             if let state = interactionState,
                state.ownsViewAttachment(control.sessionAttachmentToken) {
@@ -1377,7 +1385,7 @@ struct HistoryItemView: View, Equatable {
 
         dismissOtherPopovers()
 
-        // 静止 150ms 后才更新全局选中状态
+        // Hover moves the selection only after the pointer rests for 150 ms.
         state.previewCoordinator.cancelHoverDebounceTask()
         let expectedRevision = state.revision
         state.previewCoordinator.hoverDebounceTask = Task { @MainActor in
@@ -1408,10 +1416,8 @@ struct HistoryItemView: View, Equatable {
     }
 
     // MARK: - Preview Task
-    // v0.10.3: 使用 Task 替代 Timer，自动取消防止泄漏
 
-    /// v0.12: 完善取消检查，获取数据后也检查取消状态
-    /// v0.22: 确保在创建新任务前取消旧任务，防止快速悬停时任务累积导致内存泄漏
+    /// Cancels any previous preview task first, and re-checks cancellation after loading.
     private func startPreviewTask(state: HistoryItemInteractionState) {
         guard let attachmentToken = control.sessionAttachmentToken,
               isViewInteractionCurrent(
@@ -1519,7 +1525,7 @@ struct HistoryItemView: View, Equatable {
     }
 
     private var noteMenuTitle: String {
-        item.note?.isEmpty == false ? "Edit Note..." : "Add Note..."
+        item.note?.isEmpty == false ? String(localized: "Edit Note…") : String(localized: "Add Note…")
     }
 
     private func startExportPNGTask() {
@@ -1546,7 +1552,7 @@ struct HistoryItemView: View, Equatable {
             item: currentItem,
             filePreviewInfo: currentFilePreviewInfo
         ) else {
-            state.rowController.finishExportingPNG(message: "Export failed", token: exportToken)
+            state.rowController.finishExportingPNG(message: String(localized: "Export failed"), token: exportToken)
             scheduleExportMessageReset(state: state, revision: expectedRevision)
             return
         }
@@ -1560,7 +1566,7 @@ struct HistoryItemView: View, Equatable {
                       state.revision == expectedRevision,
                       state.rowController.authorizesExport(token: exportToken) else { return }
                 state.rowController.finishExportingPNG(
-                    message: "Export failed",
+                    message: String(localized: "Export failed"),
                     token: exportToken
                 )
                 scheduleExportMessageReset(state: state, revision: expectedRevision)
@@ -1587,9 +1593,9 @@ struct HistoryItemView: View, Equatable {
 
             switch result {
             case .success:
-                state.rowController.finishExportingPNG(message: "PNG copied", token: exportToken)
+                state.rowController.finishExportingPNG(message: String(localized: "PNG copied"), token: exportToken)
             case .failure:
-                state.rowController.finishExportingPNG(message: "Export failed", token: exportToken)
+                state.rowController.finishExportingPNG(message: String(localized: "Export failed"), token: exportToken)
             }
             scheduleExportMessageReset(state: state, revision: expectedRevision)
         }
@@ -1683,8 +1689,8 @@ struct HistoryItemView: View, Equatable {
             control.isPointerInsideRow = true
             guard let state = ensureInteractionState(for: .presentedPopover) else { return }
             state.previewCoordinator.isHovering = true
-            // UITest 点按打开 preview 只需要维持 row hover，不应伪造 popover hover，
-            // 否则滚动关闭路径会被 `isPopoverHovering` 误拦截。
+            // A UI-test tap keeps only row hover: faking popover hover would make the scroll dismissal
+            // path treat the popover as hovered and skip closing it.
             state.previewCoordinator.isPopoverHovering = false
             if item.type == .image && showThumbnails {
                 startPreviewTask(state: state)
@@ -1912,19 +1918,19 @@ struct HistoryItemView: View, Equatable {
         case .optimized:
             let original = max(0, outcome.originalBytes)
             let optimized = max(0, outcome.optimizedBytes)
-            guard original > 0, optimized >= 0 else { return "已优化" }
-            guard optimized < original else { return "无变化" }
+            guard original > 0, optimized >= 0 else { return String(localized: "Optimized") }
+            guard optimized < original else { return String(localized: "No change") }
             let percent = Int((Double(original - optimized) / Double(original) * 100.0).rounded())
-            guard percent > 0 else { return "已压缩" }
-            return "压缩 -\(percent)%"
+            guard percent > 0 else { return String(localized: "Compressed") }
+            return String(localized: "Compressed -\(percent)%")
         case .noChange:
-            return "无变化"
+            return String(localized: "No change")
         case .failed(let message):
             let lower = message.lowercased()
             if lower.contains("pngquant") && (lower.contains("not found") || lower.contains("not executable")) {
-                return "pngquant 不可用"
+                return String(localized: "pngquant unavailable")
             }
-            return "压缩失败"
+            return String(localized: "Compression failed")
         }
     }
 
@@ -2015,10 +2021,9 @@ struct HistoryItemView: View, Equatable {
         releaseInteractionStateIfIdle(expected: state)
     }
 
-    // MARK: - Text Preview (v0.15)
+    // MARK: - Text Preview
 
-    /// v0.15.1: Start text preview task - uses `plainText` (full content) and lazily upgrades to Markdown preview when detected.
-    /// v0.22: 确保在创建新任务前取消旧任务，防止快速悬停时任务累积导致内存泄漏
+    /// Starts the text preview from `plainText` (full content) and upgrades to a Markdown preview when detected.
     private func startTextPreviewTask(state: HistoryItemInteractionState) {
         guard let attachmentToken = control.sessionAttachmentToken,
               isViewInteractionCurrent(
@@ -2082,13 +2087,9 @@ struct HistoryItemView: View, Equatable {
         releaseInteractionStateIfIdle(expected: state)
     }
 
-    /// v0.12: 使用全局缓存获取应用名称，避免重复调用 NSWorkspace
+    /// From the shared cache, so NSWorkspace is not queried per row.
     private func appName(for bundleID: String) -> String {
         return IconService.shared.appName(bundleID: bundleID)
-    }
-
-    private func formatBytes(_ bytes: Int) -> String {
-        Localization.formatBytes(bytes)
     }
 }
 

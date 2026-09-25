@@ -11,6 +11,9 @@ struct SettingsView: View {
     @State private var isSaving = false
     @State private var saveErrorMessage: String?
     @State private var savedHint: String?
+    @State private var launchAtLoginBaseline = false
+    @State private var launchAtLogin = false
+    @State private var launchAtLoginRequiresApproval = false
 
     @State private var storageStats: StorageStatsDTO?
     @State private var isLoadingStats = false
@@ -42,6 +45,7 @@ struct SettingsView: View {
             }
         }
         .onAppear {
+            readLaunchAtLogin()
             Task { @MainActor in
                 await settingsViewModel.loadSettings()
                 let loaded = settingsViewModel.settings
@@ -55,7 +59,7 @@ struct SettingsView: View {
             statsTask = nil
         }
         .alert(
-            "保存失败",
+            "Couldn’t Save Settings",
             isPresented: Binding(
                 get: { saveErrorMessage != nil },
                 set: { isPresented in
@@ -63,7 +67,7 @@ struct SettingsView: View {
                 }
             )
         ) {
-            Button("好") { saveErrorMessage = nil }
+            Button("OK") { saveErrorMessage = nil }
         } message: {
             Text(saveErrorMessage ?? "")
         }
@@ -73,7 +77,7 @@ struct SettingsView: View {
         VStack(spacing: 12) {
             ProgressView()
                 .controlSize(.large)
-            Text("正在加载设置…")
+            Text("Loading settings…")
                 .foregroundStyle(.secondary)
         }
         .frame(width: ScopySize.Window.settingsWidth, height: ScopySize.Window.settingsHeight)
@@ -93,7 +97,7 @@ struct SettingsView: View {
         let baseline = baselineSettings ?? settingsViewModel.settings
         let patch = SettingsPatch.from(baseline: baseline, draft: settings.wrappedValue)
             .droppingHotkey()
-        let isDirty = !patch.isEmpty
+        let isDirty = !patch.isEmpty || launchAtLogin != launchAtLoginBaseline
 
         return NavigationSplitView {
             List(filteredPages, selection: $selection) { page in
@@ -101,13 +105,17 @@ struct SettingsView: View {
                     .tag(page)
             }
             .listStyle(.sidebar)
-            .searchable(text: $sidebarSearchText, placement: .sidebar, prompt: "搜索")
+            .searchable(text: $sidebarSearchText, placement: .sidebar, prompt: "Search")
             .frame(minWidth: ScopySize.Width.sidebarMin)
         } detail: {
             Group {
                 switch selection ?? .general {
                 case .general:
-                    GeneralSettingsPage(tempSettings: settings)
+                    GeneralSettingsPage(
+                        tempSettings: settings,
+                        launchAtLogin: $launchAtLogin,
+                        launchAtLoginRequiresApproval: launchAtLoginRequiresApproval
+                    )
                 case .shortcuts:
                     ShortcutsSettingsPage(
                         tempSettings: settings,
@@ -179,11 +187,31 @@ struct SettingsView: View {
         }
     }
 
+    private func readLaunchAtLogin() {
+        launchAtLoginBaseline = LaunchAtLogin.isRegistered
+        launchAtLogin = launchAtLoginBaseline
+        launchAtLoginRequiresApproval = LaunchAtLogin.requiresApproval
+    }
+
     private func saveSettings() {
         guard let baselineSettings, let currentSettings = tempSettings else {
             ScopyLog.ui.warning("saveSettings: baselineSettings or tempSettings is nil, skipping save")
             return
         }
+
+        // The login item is applied first and synchronously: a failure keeps the window open
+        // with nothing else saved. A registration that still needs approval keeps the window
+        // open so the General page can show how to finish it.
+        if launchAtLogin != launchAtLoginBaseline {
+            do {
+                try LaunchAtLogin.apply(launchAtLogin)
+            } catch {
+                saveErrorMessage = error.localizedDescription
+                return
+            }
+            readLaunchAtLogin()
+        }
+        let dismissesOnSave = !launchAtLoginRequiresApproval
 
         isSaving = true
 
@@ -194,7 +222,7 @@ struct SettingsView: View {
                 guard !patch.isEmpty else {
                     await MainActor.run {
                         isSaving = false
-                        onDismiss?()
+                        if dismissesOnSave { onDismiss?() }
                     }
                     return
                 }
@@ -204,13 +232,14 @@ struct SettingsView: View {
                 try await settingsViewModel.updateSettingsOrThrow(merged)
                 await MainActor.run {
                     isSaving = false
-                    savedHint = "已保存"
+                    let hint = String(localized: "Saved")
+                    savedHint = hint
                     self.baselineSettings = merged
                     tempSettings = merged
-                    onDismiss?()
+                    if dismissesOnSave { onDismiss?() }
                     Task { @MainActor in
                         try? await Task.sleep(nanoseconds: 1_200_000_000)
-                        if savedHint == "已保存" {
+                        if savedHint == hint {
                             savedHint = nil
                         }
                     }
@@ -235,7 +264,7 @@ private struct SettingsActionBar: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            Button("恢复默认", action: onReset)
+            Button("Restore Defaults", action: onReset)
                 .buttonStyle(.link)
                 .controlSize(.small)
                 .accessibilityIdentifier("Settings.ResetButton")
@@ -249,11 +278,11 @@ private struct SettingsActionBar: View {
                     .transition(.opacity)
             }
 
-            Button("取消", action: onCancel)
+            Button("Cancel", action: onCancel)
                 .keyboardShortcut(.cancelAction)
                 .accessibilityIdentifier("Settings.CancelButton")
 
-            Button("保存", action: onSave)
+            Button("Save", action: onSave)
                 .buttonStyle(.borderedProminent)
                 .keyboardShortcut(.defaultAction)
                 .disabled(!isDirty || isSaving)

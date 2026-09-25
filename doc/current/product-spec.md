@@ -45,12 +45,15 @@ Scopy is a native macOS clipboard manager for users who need durable clipboard h
 ### History Browsing
 
 - Show recent history in a floating panel driven by a global hotkey; the panel remembers its last size, clamped to the current screen.
+- A left click on the status item toggles the panel; a right click opens a menu with Open Scopy, Settings…, Check for Updates…, and Quit Scopy.
 - Support incremental loading for large histories instead of blocking on full-history reads; pinned rows are loaded separately and do not consume the initial recent-page quota.
 - Keep an idle history row passive: preview, note, Markdown export, image optimization, popover, and feedback state should be created only for real interaction or owned work, then released when every owned task is idle.
 - Keep stable context-menu content predicates out of repeated row-body work. Cache the fast Markdown menu signal by content revision, keep it bounded, and preserve separately cached exact export capability as the authoritative result.
 - Coordinate scrolling with one list-owned active slot and one tokenized suppressed-hover candidate rather than broadcasting scroll state through every visible row. A stationary pointer should regain its valid hover after scroll cooldown, while stale tokens must never revive another row.
 - Allow per-item copy, pin/unpin, delete, and contextual actions, including AirDrop for images/files and Open Containing Folder for real file-backed items.
 - Keyboard navigation, Enter, and Option+Delete act only on rows that are currently displayed: collapsed pinned rows are skipped, and Option+Delete never deletes an item while a text field (the search field or a note editor) is being edited.
+- ⌘1–⌘9 act on the first nine displayed rows with the same semantics as Enter (copy and close; a failed copy keeps the panel open). While ⌘ is held, those rows show their ⌘n hint in place of the relative time without changing row height.
+- Deleting a row removes it from the panel at once but sends the backend delete only after a 5 s undo window. During that window the footer shows "Deleted · Undo" and ⌘Z restores the row; outside it, ⌘Z stays text undo. Closing the panel, the next delete, or Clear All commits the pending delete immediately, and a backend republish of the same row inside the window (identical content copied again) undoes it implicitly. A pinned preview of the deleted item closes and does not reopen on undo.
 - A pin, delete, clear, share, or reveal action that fails is reported in the panel footer; it is never only logged.
 - Allow file items to carry editable notes.
 
@@ -89,10 +92,11 @@ Scopy is a native macOS clipboard manager for users who need durable clipboard h
 
 ### Settings And Diagnostics
 
+- The UI follows the system language; English and Simplified Chinese are provided, and other languages fall back to English.
 - Provide settings pages for General, Shortcuts, Clipboard, Appearance, Storage, and About.
 - Preserve explicit Save/Cancel semantics for settings changes.
 - Apply recorded hotkeys immediately after capture while keeping the rest of settings transactional.
-- Show About-page version/build information and lightweight performance metrics; the history list itself shows no timing telemetry.
+- Show About-page version/build information; lightweight performance and ingest metrics sit in a collapsed Diagnostics group. The history list itself shows no timing telemetry.
 
 ## Current Search Contract
 
@@ -112,6 +116,7 @@ Scopy is a native macOS clipboard manager for users who need durable clipboard h
 | Page | Setting | Current default | Requirement |
 | --- | --- | --- | --- |
 | General | Default search mode | `Fuzzy+` | New sessions should default to the same mode the main UI expects |
+| General | Launch at Login | Off | Reflects the system login-item state (`SMAppService.mainApp`), not a stored setting; Save registers or unregisters, Cancel discards. A registration awaiting approval keeps the window open and links to System Settings > Login Items |
 | Shortcuts | Global hotkey | `Shift+Cmd+C` | Users can re-record the panel toggle hotkey |
 | Clipboard | Save images | `true` | Turning it off skips image history writes without mutating the live clipboard |
 | Clipboard | Save files | `true` | Turning it off skips file history writes without mutating the live clipboard |

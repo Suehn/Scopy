@@ -3,11 +3,11 @@ import Foundation
 import Observation
 import ScopyKit
 
-/// 选中来源 - 用于区分鼠标和键盘导航
+/// Who changed the selection; only keyboard navigation scrolls the list to follow it.
 enum SelectionSource {
-    case keyboard   // 键盘导航：应该滚动到选中项
-    case mouse      // 鼠标悬停：不应滚动
-    case programmatic // 程序设置：不滚动
+    case keyboard
+    case mouse
+    case programmatic
 }
 
 struct StartupFailure: Equatable {
@@ -23,7 +23,7 @@ enum StartupPhase: Equatable {
     case startupFailed(StartupFailure)
 }
 
-/// 应用状态 - 符合 v0.md 的 Observable 架构
+/// Owns the clipboard service and the view models shared by the panel and settings.
 @Observable
 @MainActor
 final class AppState {

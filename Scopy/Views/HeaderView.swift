@@ -3,7 +3,7 @@ import ScopyKit
 import ScopyUISupport
 import SwiftUI
 
-/// 头部视图 - 包含标题、过滤按钮和搜索框
+/// The panel header: search field, filters, sort and search mode.
 struct HeaderView: View {
     @Binding var searchQuery: String
     @FocusState.Binding var searchFocused: Bool
@@ -117,8 +117,8 @@ private struct SearchModeMenu: View {
         switch mode {
         case .exact: return "Exact"
         case .fuzzy: return "Fuzzy"
-        case .fuzzyPlus: return "Fuzzy+ (Recommended)"
-        case .regex: return "Regex (Recent 2000)"
+        case .fuzzyPlus: return String(localized: "Fuzzy+ (Recommended)")
+        case .regex: return String(localized: "Regex (Recent 2000)")
         }
     }
 
@@ -181,19 +181,19 @@ private struct FTSSortToggleButton: View {
         let modeText: String
         switch historyViewModel.ftsSortMode {
         case .relevance:
-            modeText = "Relevance (score + last used)"
+            modeText = String(localized: "Relevance (score + last used)")
         case .recent:
-            modeText = "Recent (last used)"
+            modeText = String(localized: "Recent (last used)")
         }
-        return isApplicable ? "Sort: \(modeText)" : "Sort applies to Exact (≥3 chars) and Fuzzy/Fuzzy+ queries"
+        return isApplicable ? String(localized: "Sort: \(modeText)") : String(localized: "Sort applies to Exact (≥3 chars) and Fuzzy/Fuzzy+ queries")
     }
 
     private var accessibilityValue: String {
         switch historyViewModel.ftsSortMode {
         case .relevance:
-            return "Relevance"
+            return String(localized: "Relevance")
         case .recent:
-            return "Recent"
+            return String(localized: "Recent")
         }
     }
 }
@@ -267,14 +267,12 @@ struct AppFilterButton: View {
 
 // MARK: - Type Filter Button
 
-/// v0.22: 添加 Rich Text 选项，支持 rtf + html 类型过滤
 struct TypeFilterButton: View {
     @Environment(HistoryViewModel.self) private var historyViewModel
 
-    /// Rich Text 类型集合 (rtf + html)
+    /// Rich text covers both RTF and HTML items.
     private static let richTextTypes: Set<ClipboardItemType> = [.rtf, .html]
 
-    /// 当前是否选中 Rich Text 过滤
     private var isRichTextSelected: Bool {
         historyViewModel.typeFilters == Self.richTextTypes
     }
@@ -310,7 +308,7 @@ struct TypeFilterButton: View {
     }
 
     @ViewBuilder
-    private func typeMenuItem(_ type: ClipboardItemType, label: String, icon: String) -> some View {
+    private func typeMenuItem(_ type: ClipboardItemType, label: LocalizedStringKey, icon: String) -> some View {
         Button(action: {
             historyViewModel.typeFilter = type
             historyViewModel.typeFilters = nil
@@ -325,7 +323,6 @@ struct TypeFilterButton: View {
         }
     }
 
-    /// Rich Text 菜单项 (rtf + html)
     @ViewBuilder
     private func richTextMenuItem() -> some View {
         Button(action: {
@@ -342,7 +339,6 @@ struct TypeFilterButton: View {
         }
     }
 
-    /// 当前过滤类型的图标
     private var currentTypeIcon: String {
         if isRichTextSelected {
             return "doc.richtext"

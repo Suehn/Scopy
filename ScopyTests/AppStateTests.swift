@@ -661,11 +661,14 @@ final class AppStateTests: XCTestCase {
 
         await appState.delete(itemToDelete)
 
-        XCTAssertEqual(mockService.deleteCallCount, 1)
+        XCTAssertEqual(mockService.deleteCallCount, 0, "The backend delete waits for the undo window")
         XCTAssertFalse(appState.items.contains { $0.id == itemToDelete.id })
         XCTAssertEqual(appState.loadedCount, 49)
         XCTAssertEqual(appState.totalCount, 100)
         XCTAssertTrue(appState.canLoadMore)
+
+        await appState.historyViewModel.commitPendingDeletionNow()
+        XCTAssertEqual(mockService.deleteCallCount, 1)
 
         await appState.historyViewModel.handleEvent(.itemDeleted(itemToDelete.id))
 
@@ -823,7 +826,8 @@ private extension HistoryViewModel.Timing {
             refineShortQueryDelayNs: refineDelayNs,
             refineLongQueryDelayNs: refineDelayNs,
             recentAppsRefreshDelayNs: 20_000_000,
-            staleLoadRetryDelayNs: 20_000_000
+            staleLoadRetryDelayNs: 20_000_000,
+            undoDeletionWindowNs: 50_000_000
         )
     }
 }

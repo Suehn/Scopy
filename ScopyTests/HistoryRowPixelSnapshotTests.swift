@@ -37,6 +37,16 @@ final class HistoryRowPixelSnapshotTests: XCTestCase {
         }
     }
 
+    /// The List estimates every row it has not laid out yet at `listRowEstimate`. If a text row
+    /// drifts from it, a fast scroll lays rows out at the estimate and corrects them after the
+    /// scroll ends, which moves the visible rows.
+    func testTextRowHeightMatchesListRowEstimate() {
+        for shape in [RowShape.text, .textPinned, .longText] {
+            let host = NSHostingView(rootView: row(for: shape).frame(width: 480))
+            XCTAssertEqual(host.fittingSize.height, ScopySize.Height.listRowEstimate, "\(shape)")
+        }
+    }
+
     enum RowShape: String, CaseIterable {
         case text
         case textSelected
@@ -86,7 +96,7 @@ final class HistoryRowPixelSnapshotTests: XCTestCase {
         let coordinator = HistoryListInteractionCoordinator()
         return HistoryItemView(
             item: item(for: shape),
-            isKeyboardSelected: shape == .textSelected,
+            isSelected: shape == .textSelected,
             settings: .default,
             searchMatchContext: nil,
             onSelect: {},

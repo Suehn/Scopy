@@ -1,4 +1,5 @@
 import AppKit
+import Carbon.HIToolbox
 import CoreGraphics
 import ScopyKit
 import ScopyUISupport
@@ -10,6 +11,20 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     struct CodexPasteShortcut {
         static let virtualKey: CGKeyCode = 9
         static let flags: CGEventFlags = .maskControl
+    }
+
+    enum QuickSlotShortcut {
+        /// ⌘1–9 by layout-independent key code (kVK_ANSI_1…9), not by character: on AZERTY the
+        /// unshifted "1" key types "&".
+        private static let slotsByKeyCode: [UInt16: Int] = [
+            UInt16(kVK_ANSI_1): 1, UInt16(kVK_ANSI_2): 2, UInt16(kVK_ANSI_3): 3,
+            UInt16(kVK_ANSI_4): 4, UInt16(kVK_ANSI_5): 5, UInt16(kVK_ANSI_6): 6,
+            UInt16(kVK_ANSI_7): 7, UInt16(kVK_ANSI_8): 8, UInt16(kVK_ANSI_9): 9
+        ]
+
+        static func slot(forKeyCode keyCode: UInt16) -> Int? {
+            slotsByKeyCode[keyCode]
+        }
     }
 
     enum OptionDeleteShortcut {
@@ -34,8 +49,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     /// Sparkle auto-update: checks the appcast daily, reminds the user when a new version
     /// exists, and installs + relaunches on confirmation. Disabled in UI-test harnesses.
     private(set) var updaterController: SPUStandardUpdaterController?
-    /// v0.22: 存储事件监视器引用，以便在应用退出时移除
-    private var localEventMonitor: Any?
+    private var localEventMonitors: [Any] = []
     private var memoryPressureSource: DispatchSourceMemoryPressure?
 
     private lazy var statusItem: NSStatusItem = {
@@ -43,6 +57,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem.button?.image = NSImage(systemSymbolName: "doc.on.clipboard", accessibilityDescription: "Scopy")
         statusItem.button?.action = #selector(togglePanel)
         statusItem.button?.target = self
+        statusItem.button?.sendAction(on: [.leftMouseUp, .rightMouseUp])
         return statusItem
     }()
 
@@ -85,7 +100,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             panel = makeMainPanel(rootView: rootView)
         }
 
-        // 显示状态栏图标
         _ = statusItem
 
         configureAppHandlers(appState: appState, isUITesting: context.isUITesting)
@@ -99,7 +113,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
-        // 启动后端服务
         Task {
             await appState.start()
         }
@@ -111,7 +124,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         setupHotKeyRegistration()
-        installLocalEventMonitor()
+        installLocalEventMonitors()
         installMemoryPressureHandler()
     }
 
@@ -203,8 +216,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         ) {
             rootView
         }
-        // Hover bitmaps are only useful while the panel is open; pinned windows keep their own.
-        panel.onClose = { HoverPreviewImageCache.shared.removeAll() }
+        panel.onClose = { [weak self] in
+            // Hover bitmaps are only useful while the panel is open; pinned windows keep their own.
+            HoverPreviewImageCache.shared.removeAll()
+            // What the user last saw deleted must be deleted once the panel is gone.
+            guard let self else { return }
+            Task { @MainActor in
+                self.appState.historyViewModel.setQuickSlotHintsVisible(false)
+                await self.appState.historyViewModel.commitPendingDeletionNow()
+            }
+        }
         return panel
     }
 
@@ -267,7 +288,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             self?.openSettings()
         }
 
-        // 设置快捷键回调（用于解耦 SettingsView 与 AppDelegate）
+        // Hotkey callbacks let SettingsView apply a recorded hotkey without knowing AppDelegate.
         appState.applyHotKeyHandler = { [weak self] keyCode, modifiers in
             self?.applyHotKey(keyCode: keyCode, modifiers: modifiers)
         }
@@ -278,7 +299,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func setupHotKeyRegistration() {
-        // 注册全局快捷键（从设置加载或使用默认 ⇧⌘C）
+        // Registers the persisted global hotkey (default ⇧⌘C).
         hotKeyService = HotKeyService()
         Task { @MainActor [weak self] in
             guard let self else { return }
@@ -287,22 +308,27 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func installLocalEventMonitor() {
-        // 注册 ⌘, 快捷键打开设置
-        // v0.22: 存储监视器引用，以便在应用退出时移除
-        localEventMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+    /// ⌘ alone; ⇧⌘, ⌥⌘ and ⌃⌘ chords stay with the responder chain.
+    private static func isPlainCommand(_ flags: NSEvent.ModifierFlags) -> Bool {
+        flags.contains(.command) && flags.isDisjoint(with: [.shift, .option, .control])
+    }
+
+    /// Panel shortcuts live here rather than in SwiftUI so the first responder decides and the
+    /// search field cannot consume them first.
+    private func installLocalEventMonitors() {
+        let keyDownMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self else { return event }
 
             let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+            let historyWindow = self.panel ?? self.uiTestWindow
 
-            // ⌥⌫ (Option+Delete) deletes the selected item. Handled here rather than in SwiftUI so
-            // the first responder decides: while text is being edited, the key stays word deletion.
+            // ⌥⌫ deletes the selected item unless text is being edited, where it stays word deletion.
             if flags.contains(.option),
                !flags.contains(.command),
                !flags.contains(.control),
                !flags.contains(.shift),
                (event.keyCode == 51 || event.keyCode == 117),
-               OptionDeleteShortcut.deletesItem(eventWindow: event.window, historyWindow: self.panel ?? self.uiTestWindow),
+               OptionDeleteShortcut.deletesItem(eventWindow: event.window, historyWindow: historyWindow),
                self.appState.historyViewModel.selectedID != nil {
                 Task { @MainActor in
                     await self.appState.historyViewModel.deleteSelectedItem()
@@ -310,16 +336,48 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 return nil
             }
 
-            if event.modifierFlags.contains(.command),
-               !event.modifierFlags.contains(.shift),
-               !event.modifierFlags.contains(.option),
-               !event.modifierFlags.contains(.control),
-               event.charactersIgnoringModifiers == "," {
+            let isPlainCommand = Self.isPlainCommand(flags)
+
+            // ⌘Z undoes the last deletion only while its undo window is open; the rest of the
+            // time the key stays text undo for the search field and note editors.
+            if isPlainCommand,
+               event.keyCode == UInt16(kVK_ANSI_Z),
+               event.window === historyWindow,
+               self.appState.historyViewModel.undoableDeletionID != nil {
+                Task { @MainActor in
+                    await self.appState.historyViewModel.undoPendingDeletion()
+                }
+                return nil
+            }
+
+            // ⌘1–9 copies the n-th displayed row and closes the panel, like ⏎ on that row.
+            if isPlainCommand,
+               event.window === historyWindow,
+               let slot = QuickSlotShortcut.slot(forKeyCode: event.keyCode) {
+                Task { @MainActor in
+                    await self.appState.historyViewModel.selectQuickSlot(slot)
+                }
+                return nil
+            }
+
+            if isPlainCommand, event.charactersIgnoringModifiers == "," {
                 self.openSettings()
                 return nil
             }
             return event
         }
+
+        // The ⌘n row hints follow the modifier state itself, not a key press.
+        let flagsChangedMonitor = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
+            guard let self else { return event }
+            let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+            self.appState.historyViewModel.setQuickSlotHintsVisible(
+                Self.isPlainCommand(flags) && self.panel?.isPresented == true
+            )
+            return event
+        }
+
+        localEventMonitors = [keyDownMonitor, flagsChangedMonitor].compactMap { $0 }
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
@@ -327,21 +385,21 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-        // 清理资源
         hotKeyService?.unregister()
         isHotKeyRegistered = false
-        // v0.22: 移除事件监视器，防止内存泄漏
-        if let monitor = localEventMonitor {
-            NSEvent.removeMonitor(monitor)
-            localEventMonitor = nil
-        }
+        localEventMonitors.forEach(NSEvent.removeMonitor)
+        localEventMonitors.removeAll()
         memoryPressureSource?.cancel()
         memoryPressureSource = nil
         appState.stop()
     }
 
     @objc func togglePanel() {
-        // 状态栏点击：窗口在状态栏下方
+        if NSApp.currentEvent?.type == .rightMouseUp {
+            showStatusMenu()
+            return
+        }
+        // A status-item click opens the panel below the menu bar.
         if let panel {
             panel.toggle(positionMode: .statusBar)
         } else if let uiTestWindow {
@@ -354,8 +412,45 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// Right-click menu of the status item. Assigning the menu only for this click keeps the
+    /// left click toggling the panel.
+    private func showStatusMenu() {
+        let menu = NSMenu()
+        menu.addItem(withTitle: String(localized: "Open Scopy"), action: #selector(openPanelFromStatusMenu), keyEquivalent: "")
+            .target = self
+        menu.addItem(withTitle: String(localized: "Settings…"), action: #selector(openSettingsFromStatusMenu), keyEquivalent: ",")
+            .target = self
+        if let updaterController {
+            menu.addItem(
+                withTitle: String(localized: "Check for Updates…"),
+                action: #selector(SPUStandardUpdaterController.checkForUpdates(_:)),
+                keyEquivalent: ""
+            ).target = updaterController
+        }
+        menu.addItem(.separator())
+        menu.addItem(withTitle: String(localized: "Quit Scopy"), action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+
+        statusItem.menu = menu
+        statusItem.button?.performClick(nil)
+        statusItem.menu = nil
+    }
+
+    @objc private func openPanelFromStatusMenu() {
+        if let panel {
+            if !panel.isPresented {
+                panel.open(positionMode: .statusBar)
+            }
+        } else {
+            togglePanel()
+        }
+    }
+
+    @objc private func openSettingsFromStatusMenu() {
+        openSettings()
+    }
+
     func togglePanelAtMousePosition() {
-        // 快捷键触发：窗口在鼠标位置
+        // A hotkey press opens the panel at the mouse pointer.
         if let panel {
             if !panel.isPresented,
                panel.wasClosedLongerThan(PanelReopenSearchResetPolicy.staleIntervalSeconds) {
@@ -474,7 +569,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - Hotkey Settings
 
-    /// 统一应用并持久化快捷键，确保无需重启即可生效
+    /// Registers and persists the hotkey in one place so a change applies without a restart.
     @MainActor
     func applyHotKey(keyCode: UInt32, modifiers: UInt32) {
         let requested = (keyCode: keyCode, modifiers: modifiers)
@@ -539,9 +634,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - Settings Window
 
-    /// 打开设置窗口
-    /// v0.10: 注入 AppState 到 Environment，实现完全解耦
-    /// v0.17: 修复内存泄漏 - 窗口关闭时释放并清空引用
+    /// Opens the settings window, or brings the existing one to the front.
     @MainActor
     func openSettings() {
         settingsWindowCoordinator.show(

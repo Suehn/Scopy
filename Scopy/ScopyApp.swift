@@ -1,6 +1,6 @@
 import SwiftUI
 
-// 注意：不使用 @main，改用 main.swift 来支持测试模式
+// Not @main: main.swift is the entry point so the unit-test target can exclude it.
 struct ScopyApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
 

@@ -284,15 +284,17 @@ final class HistoryViewModel {
         var refineLongQueryDelayNs: UInt64
         var recentAppsRefreshDelayNs: UInt64
         var staleLoadRetryDelayNs: UInt64
+        /// How long a deleted row stays undoable before the backend delete is sent.
+        var undoDeletionWindowNs: UInt64
 
         static let production = Timing(
-            // v0.29+: 更快的首屏反馈（10ms 级）
             searchDebounceNs: 0,
-            // v0.57+: 长词全量校准足够快，refine 立即执行；短词保留极短 delay 避免抖动
+            // Long queries refine at once; short ones keep a tiny delay so the page does not flicker.
             refineShortQueryDelayNs: 10_000_000,
             refineLongQueryDelayNs: 0,
             recentAppsRefreshDelayNs: 500_000_000,
-            staleLoadRetryDelayNs: 100_000_000
+            staleLoadRetryDelayNs: 100_000_000,
+            undoDeletionWindowNs: 5_000_000_000
         )
 
         static let tests = Timing(
@@ -300,8 +302,15 @@ final class HistoryViewModel {
             refineShortQueryDelayNs: 40_000_000,
             refineLongQueryDelayNs: 40_000_000,
             recentAppsRefreshDelayNs: 20_000_000,
-            staleLoadRetryDelayNs: 20_000_000
+            staleLoadRetryDelayNs: 20_000_000,
+            undoDeletionWindowNs: 50_000_000
         )
+    }
+
+    private struct PendingDeletion {
+        let item: ClipboardItemDTO
+        let token: UUID
+        let commit: Task<Void, Never>
     }
 
     // MARK: - Properties
@@ -319,6 +328,11 @@ final class HistoryViewModel {
     @ObservationIgnored private var actionErrorClearTask: Task<Void, Never>?
     static let actionErrorVisibleSeconds: Double = 4
 
+    /// The row removed by the last delete while its backend delete is still deferred. The footer
+    /// offers Undo and ⌘Z restores the row only while this is set.
+    private(set) var undoableDeletionID: UUID?
+    @ObservationIgnored private var pendingDeletion: PendingDeletion?
+
     /// Why the last search, history load or page fetch failed. The rows on screen are kept; the
     /// footer shows this with a retry until the next search or load starts.
     private(set) var fetchFailureMessage: String?
@@ -331,7 +345,7 @@ final class HistoryViewModel {
     /// reader. Readers observe the three cells below, which `mutateProjection` writes only when
     /// their value changes.
     @ObservationIgnored private var listState = HistoryListState()
-    private(set) var itemsRevision: UInt64 = 0
+    private(set) var projectionGeneration: UInt64 = 0
     private(set) var totalCount = 0
     private(set) var canLoadMore = false
     @ObservationIgnored private var contentRevisionRegistry =
@@ -356,18 +370,18 @@ final class HistoryViewModel {
     }
 
     var pinnedItems: [ClipboardItemDTO] {
-        _ = itemsRevision
+        _ = projectionGeneration
         return listState.pinnedItems
     }
 
     var unpinnedItems: [ClipboardItemDTO] {
-        _ = itemsRevision
+        _ = projectionGeneration
         return listState.unpinnedItems
     }
 
     var items: [ClipboardItemDTO] {
         get {
-            _ = itemsRevision
+            _ = projectionGeneration
             return listState.items
         }
         set {
@@ -381,7 +395,7 @@ final class HistoryViewModel {
     }
 
     var loadedCount: Int {
-        _ = itemsRevision
+        _ = projectionGeneration
         return listState.loadedCount
     }
 
@@ -483,17 +497,17 @@ final class HistoryViewModel {
         case .complete:
             return nil
         case .stagedRefine:
-            return "首屏为预筛结果，正在全量校准…（排序/漏项可能会更新）"
+            return String(localized: "Showing prefiltered results while the full search finishes; order and missing items may still change.")
         case .incomplete:
-            return "结果未完成（排序/漏项可能不完整）"
+            return String(localized: "Results are incomplete; order and coverage may be partial.")
         case .recentOnly(let limit):
             switch searchMode {
             case .exact:
-                return "Exact 短词（≤2）仅搜索最近 \(limit) 条。输入 ≥3 字符或切换到 Fuzzy+ / Fuzzy。"
+                return String(localized: "Exact queries of 2 or fewer characters search only the most recent \(String(limit)) items. Type 3 or more characters, or switch to Fuzzy+ or Fuzzy.")
             case .regex:
-                return "Regex 仅搜索最近 \(limit) 条。需要全量搜索时，请改用 Exact（≥3 字符）或 Fuzzy+。"
+                return String(localized: "Regex searches only the most recent \(String(limit)) items. For a full search, use Exact with 3 or more characters, or Fuzzy+.")
             case .fuzzy, .fuzzyPlus:
-                return "当前仅搜索最近 \(limit) 条。"
+                return String(localized: "Searching only the most recent \(String(limit)) items.")
             }
         }
     }
@@ -506,32 +520,32 @@ final class HistoryViewModel {
         case .complete:
             return searchModeDisplayName(searchMode)
         case .stagedRefine:
-            return "Calibrating"
+            return String(localized: "Calibrating")
         case .incomplete:
-            return "Partial"
+            return String(localized: "Partial")
         case .recentOnly(let limit):
-            return "Recent \(limit)"
+            return String(localized: "Recent \(String(limit))")
         }
     }
 
     var searchStatusSummary: String {
         let trimmed = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
         let mode = searchModeDisplayName(searchMode)
-        guard hasSemanticSearchQuery else { return "Mode: \(mode)" }
+        guard hasSemanticSearchQuery else { return String(localized: "Mode: \(mode)") }
 
         let coverage: String
         switch effectiveSearchCoverage(for: trimmed) {
         case .complete:
-            coverage = "Complete"
+            coverage = String(localized: "Complete")
         case .stagedRefine:
-            coverage = "Staged"
+            coverage = String(localized: "Staged")
         case .incomplete:
-            coverage = "Partial"
+            coverage = String(localized: "Partial")
         case .recentOnly(let limit):
-            coverage = "Recent \(limit)"
+            coverage = String(localized: "Recent \(String(limit))")
         }
 
-        return "Mode: \(mode) · Coverage: \(coverage) · Sort: \(searchSortDisplayName(for: trimmed))"
+        return String(localized: "Mode: \(mode) · Coverage: \(coverage) · Sort: \(searchSortDisplayName(for: trimmed))")
     }
 
     @ObservationIgnored private var searchTask: Task<Void, Never>?
@@ -602,6 +616,7 @@ final class HistoryViewModel {
     // MARK: - Event Handling
 
     func handleEvent(_ event: ClipboardEvent) async {
+        await reconcilePendingDeletion(with: event)
         switch event {
         case .newItem(let item):
             mergeKnownContentRevisions([item], allowRevivingDeletedItems: true)
@@ -844,14 +859,14 @@ final class HistoryViewModel {
             var fetchedItems: [ClipboardItemDTO] = []
             var hasStableSnapshot = false
             for _ in 0..<2 {
-                let revisionBeforeFetch = itemsRevision
+                let revisionBeforeFetch = projectionGeneration
                 let pinnedItems = try await service.fetchPinned()
                 let recentItems = try await service.fetchRecentUnpinned(
                     limit: Self.initialPageSize,
                     offset: 0
                 )
                 guard shouldApplyLoadResult(version: currentVersion) else { return }
-                guard itemsRevision == revisionBeforeFetch else { continue }
+                guard projectionGeneration == revisionBeforeFetch else { continue }
                 fetchedItems = excludingKnownDeletedItems(pinnedItems + recentItems)
                 hasStableSnapshot = true
                 break
@@ -882,7 +897,7 @@ final class HistoryViewModel {
             scheduleStorageDetailsRefresh(version: currentVersion)
         } catch {
             guard shouldApplyLoadResult(version: currentVersion) else { return }
-            reportFetchFailure("Loading history", error)
+            reportFetchFailure(String(localized: "Loading history failed"), error)
             ScopyLog.app.error("Failed to load items: \(error.localizedDescription, privacy: .private)")
         }
     }
@@ -958,7 +973,7 @@ final class HistoryViewModel {
         Task { await loadMore() }
     }
 
-    /// Rows a page is applied in per run-loop turn, so a 100-row page costs five small List
+    /// Rows applied per chunk; chunks are 20 ms apart so a 100-row page costs five small List
     /// updates instead of one long one while the user is still scrolling.
     static let loadMoreApplyChunkRows = 20
 
@@ -1067,7 +1082,7 @@ final class HistoryViewModel {
                 if searchCoverage.isStagedRefine {
                     searchCoverage = .incomplete
                 }
-                reportFetchFailure("Loading more", error)
+                reportFetchFailure(String(localized: "Loading more failed"), error)
                 ScopyLog.app.error("Failed to load more: \(error.localizedDescription, privacy: .private)")
             }
         }
@@ -1203,7 +1218,7 @@ final class HistoryViewModel {
             } catch {
                 guard !Task.isCancelled, currentVersion == searchVersion else { return }
                 searchCoverage = .incomplete
-                reportFetchFailure("Search", error)
+                reportFetchFailure(String(localized: "Search failed"), error)
                 ScopyLog.app.error("Search failed: \(error.localizedDescription, privacy: .private)")
             }
         }
@@ -1237,20 +1252,12 @@ final class HistoryViewModel {
         if isFTSSortApplicable(for: trimmedQuery) {
             switch ftsSortMode {
             case .relevance:
-                return "Relevance"
+                return String(localized: "Relevance")
             case .recent:
-                return "Recent"
+                return String(localized: "Recent")
             }
         }
-
-        switch searchMode {
-        case .regex:
-            return "Recent"
-        case .exact where trimmedQuery.count <= 2:
-            return "Recent"
-        case .exact, .fuzzy, .fuzzyPlus:
-            return "Recent"
-        }
+        return String(localized: "Recent")
     }
 
     private func isFTSSortApplicable(for trimmedQuery: String) -> Bool {
@@ -1316,7 +1323,7 @@ final class HistoryViewModel {
     }
 
     private func reportFetchFailure(_ operation: String, _ error: Error) {
-        fetchFailureMessage = "\(operation) failed: \(Self.failureReason(error))"
+        fetchFailureMessage = "\(operation): \(Self.failureReason(error))"
     }
 
     private static func failureReason(_ error: Error) -> String {
@@ -1326,12 +1333,12 @@ final class HistoryViewModel {
     func sendViaAirDrop(_ item: ClipboardItemDTO) async {
         let urls = await resolvedFileURLs(for: item)
         guard !urls.isEmpty else {
-            reportActionFailure(message: "No files to send via AirDrop")
+            reportActionFailure(message: String(localized: "No files to send via AirDrop"))
             return
         }
         guard let service = NSSharingService(named: .sendViaAirDrop) else {
             ScopyLog.app.error("AirDrop sharing service is unavailable")
-            reportActionFailure(message: "AirDrop is unavailable")
+            reportActionFailure(message: String(localized: "AirDrop is unavailable"))
             return
         }
         service.perform(withItems: urls)
@@ -1340,7 +1347,7 @@ final class HistoryViewModel {
     func openContainingFolder(_ item: ClipboardItemDTO) async {
         let urls = realFileURLs(for: item)
         guard !urls.isEmpty else {
-            reportActionFailure(message: "No file to show in Finder")
+            reportActionFailure(message: String(localized: "No file to show in Finder"))
             return
         }
         NSWorkspace.shared.activateFileViewerSelecting(urls)
@@ -1368,18 +1375,89 @@ final class HistoryViewModel {
         }
     }
 
-    @discardableResult
-    func delete(_ item: ClipboardItemDTO) async -> Bool {
+    /// Removes the row at once and sends the backend delete after `Timing.undoDeletionWindowNs`,
+    /// so the footer or ⌘Z can undo it. One deletion is pending at a time: the next delete, a
+    /// clear, or closing the panel commits the previous one first. The tombstone keeps events,
+    /// searches and loads from reviving the row meanwhile, and closes its pinned preview.
+    func delete(_ item: ClipboardItemDTO) async {
+        await commitPendingDeletionNow()
+        invalidateKnownContentRevision(itemID: item.id)
+        _ = removeItem(withID: item.id)
+        let token = UUID()
+        let window = timing.undoDeletionWindowNs
+        pendingDeletion = PendingDeletion(item: item, token: token, commit: Task { [weak self] in
+            try? await Task.sleep(nanoseconds: window)
+            guard !Task.isCancelled else { return }
+            await self?.commitPendingDeletion(token: token)
+        })
+        undoableDeletionID = item.id
+    }
+
+    func undoPendingDeletion() async {
+        guard let pending = pendingDeletion else { return }
+        pending.commit.cancel()
+        pendingDeletion = nil
+        undoableDeletionID = nil
+        await revive(pending.item)
+    }
+
+    /// Sends the pending backend delete now instead of at the end of the undo window.
+    func commitPendingDeletionNow() async {
+        guard let pending = pendingDeletion else { return }
+        pending.commit.cancel()
+        await commitPendingDeletion(token: pending.token)
+    }
+
+    private func commitPendingDeletion(token: UUID) async {
+        guard let pending = pendingDeletion, pending.token == token else { return }
+        pendingDeletion = nil
+        undoableDeletionID = nil
         do {
-            try await service.delete(itemID: item.id)
-            invalidateKnownContentRevision(itemID: item.id)
-            _ = removeItem(withID: item.id)
-            return true
+            try await service.delete(itemID: pending.item.id)
         } catch {
             ScopyLog.app.error("Delete failed: \(error.localizedDescription, privacy: .private)")
+            await revive(pending.item)
             reportActionFailure(error)
-            return false
         }
+    }
+
+    /// The backend deleted the pending row itself; there is nothing left to send or undo.
+    private func discardPendingDeletion() {
+        pendingDeletion?.commit.cancel()
+        pendingDeletion = nil
+        undoableDeletionID = nil
+    }
+
+    /// A pending deletion is undone implicitly when the backend publishes the same row again
+    /// (identical content copied inside the window and deduplicated onto this row): committing
+    /// it would delete what the user just copied.
+    private func reconcilePendingDeletion(with event: ClipboardEvent) async {
+        guard let pending = pendingDeletion else { return }
+        switch event {
+        case .newItem(let item), .itemUpdated(let item), .itemContentUpdated(let item):
+            if item.id == pending.item.id { await undoPendingDeletion() }
+        case .itemDeleted(let id):
+            if id == pending.item.id { discardPendingDeletion() }
+        case .itemsRemoved(let ids):
+            if ids.contains(pending.item.id) { discardPendingDeletion() }
+        case .itemsCleared(let keepPinned):
+            if !(keepPinned && pending.item.isPinned) { discardPendingDeletion() }
+        default:
+            break
+        }
+    }
+
+    /// Lifts the tombstone and reloads, which puts the row back at its real position with its
+    /// evidence; undo is rare enough that one full projection replace is acceptable.
+    private func revive(_ item: ClipboardItemDTO) async {
+        mergeKnownContentRevisions([item], allowRevivingDeletedItems: true)
+        if isUnfilteredList {
+            await load()
+        } else {
+            search()
+        }
+        lastSelectionSource = .programmatic
+        selectedID = item.id
     }
 
     func updateNote(_ item: ClipboardItemDTO, note: String?) async -> Bool {
@@ -1393,6 +1471,7 @@ final class HistoryViewModel {
     }
 
     func clearAll() async {
+        await commitPendingDeletionNow()
         do {
             try await service.clearAll()
         } catch {
@@ -1460,7 +1539,7 @@ final class HistoryViewModel {
             nextID = nil
         }
 
-        guard await delete(rows[index]) else { return }
+        await delete(rows[index])
 
         lastSelectionSource = .programmatic
         self.selectedID = nextID
@@ -1469,6 +1548,25 @@ final class HistoryViewModel {
     func selectCurrent() async {
         guard let selectedID, let item = displayOrderItems.first(where: { $0.id == selectedID }) else { return }
         await select(item)
+    }
+
+    /// ⌘1–9: the n-th displayed row with ⏎ semantics (copy and close; a failed copy keeps the
+    /// panel open). Collapsed pinned rows are not displayed, so they take no slot.
+    func selectQuickSlot(_ slot: Int) async {
+        let rows = displayOrderItems
+        guard slot >= 1, slot <= min(9, rows.count) else { return }
+        await select(rows[slot - 1])
+    }
+
+    /// While ⌘ is held the first nine displayed rows show ⌘n instead of their time.
+    func setQuickSlotHintsVisible(_ visible: Bool) {
+        var slots: [UUID: Int] = [:]
+        if visible {
+            for (index, item) in displayOrderItems.prefix(9).enumerated() {
+                slots[item.id] = index + 1
+            }
+        }
+        rowLiveState.updateQuickSlots(slots)
     }
 
     // MARK: - Private
@@ -1760,7 +1858,7 @@ final class HistoryViewModel {
     /// only if its value moved, so a pagination-only or total-only update leaves the rows alone.
     private func mutateProjection(_ change: (inout HistoryListState) -> Void) {
         change(&listState)
-        if itemsRevision != listState.itemsRevision { itemsRevision = listState.itemsRevision }
+        if projectionGeneration != listState.projectionGeneration { projectionGeneration = listState.projectionGeneration }
         if totalCount != listState.totalCount { totalCount = listState.totalCount }
         if canLoadMore != listState.canLoadMore { canLoadMore = listState.canLoadMore }
     }

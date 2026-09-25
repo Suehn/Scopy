@@ -1,12 +1,13 @@
 import Foundation
 
-/// 本地化相关的轻量工具
 enum Localization {
-    /// 使用系统的 ByteCountFormatter，自动适配语言/单位
+    /// The one byte formatter for every user-visible size (row metadata, footer, storage stats):
+    /// Finder-style 1000-based units in the user's locale, never a bare byte count.
     static func formatBytes(_ bytes: Int) -> String {
         let formatter = ByteCountFormatter()
         formatter.allowedUnits = [.useKB, .useMB, .useGB]
         formatter.countStyle = .file
+        formatter.allowsNonnumericFormatting = false
         return formatter.string(fromByteCount: Int64(bytes))
     }
 }

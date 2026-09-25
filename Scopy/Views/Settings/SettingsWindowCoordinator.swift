@@ -15,9 +15,9 @@ struct SettingsWindowSessionGate {
     }
 }
 
-/// 管理 Settings 窗口的创建/复用/关闭行为。
+/// Creates, reuses and closes the settings window.
 ///
-/// 约束：保持用户无感（仍然是 “关闭按钮 = 隐藏窗口”，Settings 内部仍然是 Save/Cancel 事务模型）。
+/// Closing the window discards the draft like Cancel; settings stay a Save/Cancel transaction.
 @MainActor
 final class SettingsWindowCoordinator: NSObject, NSWindowDelegate {
     private var window: NSWindow?

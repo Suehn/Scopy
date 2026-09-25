@@ -12,22 +12,22 @@ enum SettingsPage: String, CaseIterable, Identifiable, Hashable {
 
     var title: String {
         switch self {
-        case .general: return "通用"
-        case .shortcuts: return "快捷键"
-        case .clipboard: return "剪贴板"
-        case .appearance: return "外观"
-        case .storage: return "存储"
-        case .about: return "关于"
+        case .general: return String(localized: "General")
+        case .shortcuts: return String(localized: "Shortcuts")
+        case .clipboard: return String(localized: "Clipboard")
+        case .appearance: return String(localized: "Appearance")
+        case .storage: return String(localized: "Storage")
+        case .about: return String(localized: "About")
         }
     }
 
     var subtitle: String? {
         switch self {
-        case .general: return "搜索与默认行为"
-        case .shortcuts: return "全局快捷键"
-        case .clipboard: return "保存内容类型"
-        case .appearance: return "缩略图与预览"
-        case .storage: return "容量上限与占用"
+        case .general: return String(localized: "Search and startup")
+        case .shortcuts: return String(localized: "Global hotkey")
+        case .clipboard: return String(localized: "Captured content types")
+        case .appearance: return String(localized: "Thumbnails and previews")
+        case .storage: return String(localized: "Limits and usage")
         case .about: return nil
         }
     }
