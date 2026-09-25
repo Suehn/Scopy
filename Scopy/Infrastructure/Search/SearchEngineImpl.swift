@@ -62,10 +62,10 @@ public actor SearchEngineImpl {
 
     // MARK: - Properties
 
-    let dbPath: String
+    private let dbPath: String
     private let readStore: SearchReadStore
-    let fullIndexStore: FullIndexStore
-    let shortIndexStore: ShortIndexStore
+    private let fullIndexStore: FullIndexStore
+    private let shortIndexStore: ShortIndexStore
     /// The `mutation_seq` the in-memory indexes correspond to.
     private var knownMutationSeq: Int64?
 
@@ -278,7 +278,7 @@ public actor SearchEngineImpl {
 
     // MARK: - Index Builds
 
-    func startShortQueryIndexBuildIfNeeded(force: Bool = false) {
+    private func startShortQueryIndexBuildIfNeeded(force: Bool = false) {
         shortIndexStore.startBuildIfNeeded(force: force, estimatedCount: corpusMetrics?.itemCount ?? 0) { generation, snapshot in
             await self.finishShortQueryIndexBuild(generation: generation, snapshot: snapshot)
         }
@@ -310,7 +310,7 @@ public actor SearchEngineImpl {
         startFullIndexBuildIfNeeded(force: false, trigger: .interactive)
     }
 
-    func startFullIndexBuildIfNeeded(force: Bool = false, trigger: FullIndexStore.BuildTrigger = .forced) {
+    private func startFullIndexBuildIfNeeded(force: Bool = false, trigger: FullIndexStore.BuildTrigger = .forced) {
         fullIndexStore.startBuildIfNeeded(
             force: force,
             trigger: trigger,
@@ -1174,12 +1174,12 @@ public actor SearchEngineImpl {
         while true {
             try Task.checkCancellation()
             startFullIndexBuildIfNeeded(force: true)
-            guard let task = fullIndexStore.buildTask else {
+            guard fullIndexStore.buildTask != nil else {
                 throw SearchError.searchFailed("Failed to start the full index build")
             }
             let generation = fullIndexStore.buildGeneration
             let waitStart = CFAbsoluteTimeGetCurrent()
-            await task.value
+            try await waitForFullIndexBuild()
             perf?.addPhase("full_index_build_wait", ms: (CFAbsoluteTimeGetCurrent() - waitStart) * 1000)
 
             if let index = fullIndexStore.usableIndex {
@@ -1194,6 +1194,27 @@ public actor SearchEngineImpl {
                 throw SearchError.searchFailed("Failed to build the full index")
             }
         }
+    }
+
+    /// Waits for the running full-index build to end. Cancellation (including the search
+    /// timeout) resumes only this search; the build keeps running for everyone else.
+    private func waitForFullIndexBuild() async throws {
+        let id = UUID()
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                if Task.isCancelled {
+                    continuation.resume(throwing: CancellationError())
+                } else {
+                    fullIndexStore.addBuildWaiter(id, continuation)
+                }
+            }
+        } onCancel: {
+            Task { await self.cancelFullIndexBuildWait(id) }
+        }
+    }
+
+    private func cancelFullIndexBuildWait(_ id: UUID) {
+        fullIndexStore.removeBuildWaiter(id)?.resume(throwing: CancellationError())
     }
 
     private func normalizedSearchRequest(for request: SearchRequest, trimmedQuery: String, mode: SearchMode) -> SearchRequest {
@@ -1409,4 +1430,81 @@ public actor SearchEngineImpl {
         let page = try readStore.fetchAll(filters: .init(request), window: .init(request))
         return SearchResult(items: page.items, total: page.total, hasMore: page.hasMore, coverage: .complete, searchTimeMs: 0)
     }
+
+#if DEBUG
+    func debugFullIndexHealth() -> (isBuilt: Bool, isStale: Bool, slots: Int, tombstones: Int) {
+        guard let index = fullIndexStore.index else {
+            return (false, fullIndexStore.isStale, 0, 0)
+        }
+        return (true, fullIndexStore.isStale, index.items.count, index.tombstoneCount)
+    }
+
+    func debugFullIndexLastSnapshotSource() -> String? {
+        fullIndexStore.lastSnapshotSource?.rawValue
+    }
+
+    func debugFullIndexLastDiskCacheLoadReason() -> String? {
+        fullIndexStore.lastDiskCacheLoadReason?.rawValue
+    }
+
+    func debugFullIndexBuildHealth() -> (isBuilding: Bool, pendingEvents: Int) {
+        (fullIndexStore.buildTask != nil, fullIndexStore.pendingEventCount)
+    }
+
+    /// Cancels the build task only; its completion still lands through the normal path.
+    func debugCancelFullIndexBuild() {
+        fullIndexStore.buildTask?.cancel()
+    }
+
+    func debugFullIndexDiskCachePaths() -> (cachePath: String, checksumPath: String, metadataPath: String) {
+        let paths = SearchIndexDiskCache.fullPaths(dbPath: dbPath)
+        return (cachePath: paths.cachePath, checksumPath: paths.checksumPath, metadataPath: paths.metadataPath)
+    }
+
+    func debugShortQueryIndexDiskCachePaths() -> (cachePath: String, checksumPath: String) {
+        let paths = SearchIndexDiskCache.shortPaths(dbPath: dbPath)
+        return (cachePath: paths.cachePath, checksumPath: paths.checksumPath)
+    }
+
+    func debugStartFullIndexBuild(force: Bool = true) {
+        startFullIndexBuildIfNeeded(force: force)
+    }
+
+    func debugFullIndexBuildGeneration() -> UInt64 {
+        fullIndexStore.buildGeneration
+    }
+
+    func debugAwaitFullIndexBuild() async {
+        await fullIndexStore.buildTask?.value
+    }
+
+    func debugShortQueryIndexHealth() -> (isBuilt: Bool, isBuilding: Bool) {
+        (shortIndexStore.index != nil, shortIndexStore.buildTask != nil)
+    }
+
+    func debugShortQueryIndexStats() -> (isBuilt: Bool, isBuilding: Bool, slots: Int, live: Int, tombstones: Int) {
+        let isBuilding = shortIndexStore.buildTask != nil
+        guard let index = shortIndexStore.index else {
+            return (false, isBuilding, 0, 0, 0)
+        }
+        let stats = index.healthStats()
+        return (true, isBuilding, stats.slots, stats.live, stats.tombstones)
+    }
+
+    func debugShortQueryIndexLastSnapshotSource() -> String? {
+        shortIndexStore.lastSnapshotSource?.rawValue
+    }
+
+    func debugStartShortQueryIndexBuild(force: Bool = true) {
+        startShortQueryIndexBuildIfNeeded(force: force)
+    }
+
+    func debugInstallPendingShortQueryIndexBuild(_ task: Task<Void, Never>) {
+        shortIndexStore.installPendingBuild(task)
+    }
+
+    func debugAwaitShortQueryIndexBuild() async {
+        await shortIndexStore.buildTask?.value
+    }
+#endif
 }

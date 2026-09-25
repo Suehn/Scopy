@@ -33,6 +33,8 @@ final class FullIndexStore {
         let generation: UInt64
         let trigger: BuildTrigger
         var pendingEvents: [PendingEvent] = []
+        /// Searches suspended until this build lands or is superseded.
+        var waiters: [UUID: CheckedContinuation<Void, Error>] = [:]
     }
 
     private static let tombstoneRatioStaleThreshold = 0.25
@@ -68,8 +70,9 @@ final class FullIndexStore {
     /// The index when it is installed and not superseded.
     var usableIndex: FullFuzzyIndex? { isStale ? nil : index }
     var buildTask: Task<Void, Never>? { build?.task }
-    var buildTrigger: BuildTrigger? { build?.trigger }
+#if DEBUG
     var pendingEventCount: Int { build?.pendingEvents.count ?? 0 }
+#endif
 
     static func needsRebuild(itemCount: Int, tombstoneCount: Int) -> Bool {
         guard itemCount >= tombstoneMinSlotsForStale else { return false }
@@ -138,7 +141,7 @@ final class FullIndexStore {
         knownMutationSeq: Int64?
     ) -> BuildOutcome {
         let pending = build?.pendingEvents ?? []
-        build = nil
+        endBuild()
         lastWarmLoadMetrics = warmLoadMetrics
 #if DEBUG
         let databaseRebuild = FullIndexDiskCacheLoadReason.databaseRebuild.rawValue
@@ -178,8 +181,29 @@ final class FullIndexStore {
     /// Stops the running build; its completion is ignored.
     func cancelBuild() {
         build?.task.cancel()
-        build = nil
+        endBuild()
         buildGeneration &+= 1
+    }
+
+    /// Clears the build and resumes its waiters; they re-check the index on the engine actor.
+    private func endBuild() {
+        let waiters = build?.waiters.values
+        build = nil
+        waiters?.forEach { $0.resume() }
+    }
+
+    /// Suspends `continuation` until the running build ends; resumes it at once without a build.
+    func addBuildWaiter(_ id: UUID, _ continuation: CheckedContinuation<Void, Error>) {
+        guard build != nil else {
+            continuation.resume()
+            return
+        }
+        build?.waiters[id] = continuation
+    }
+
+    /// The waiter to resume on its search's cancellation; the build keeps running for others.
+    func removeBuildWaiter(_ id: UUID) -> CheckedContinuation<Void, Error>? {
+        build?.waiters.removeValue(forKey: id)
     }
 
     func cancelInteractiveBuild() {
