@@ -473,8 +473,7 @@ enum SearchIndexDiskCache {
         return true
     }
 
-    /// Reads the logical content stamp from `scopy_meta`. Databases without that table
-    /// (never migrated by StorageService) simply don't participate in disk caching.
+    /// Reads the logical content stamp from `scopy_meta`; `nil` when the database cannot be read.
     private static func dbContentStamp(dbPath: String) -> DBContentStamp? {
         guard FileManager.default.fileExists(atPath: dbPath) else { return nil }
         let flags = SQLiteConnection.openFlags(for: dbPath, readOnly: true)

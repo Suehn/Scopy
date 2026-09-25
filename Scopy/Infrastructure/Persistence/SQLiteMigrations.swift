@@ -20,7 +20,7 @@ enum SQLiteMigrations {
             try setupFTS(connection)
         }
         if userVersion < 4 {
-            try setupTrigramFTSIfSupported(connection)
+            try setupTrigramFTS(connection)
         }
         if userVersion < 5 {
             try setupMetaTable(connection)
@@ -41,7 +41,7 @@ enum SQLiteMigrations {
         try connection.execute("PRAGMA user_version = \(currentUserVersion)")
     }
 
-    private static func readUserVersion(_ connection: SQLiteConnection) throws -> Int32 {
+    static func readUserVersion(_ connection: SQLiteConnection) throws -> Int32 {
         let stmt = try connection.prepare("PRAGMA user_version")
         guard try stmt.step() else { return 0 }
         return Int32(stmt.columnInt(0))
@@ -319,28 +319,18 @@ enum SQLiteMigrations {
         )
     }
 
-    private static func setupTrigramFTSIfSupported(_ connection: SQLiteConnection) throws {
-        // Optional: FTS5 trigram tokenizer may not be available on all SQLite builds.
-        // If unsupported, keep the DB usable and fall back to existing search paths.
-        do {
-            try connection.execute(
-                """
-                CREATE VIRTUAL TABLE IF NOT EXISTS clipboard_fts_trigram USING fts5(
-                    plain_text,
-                    note,
-                    content='clipboard_items',
-                    content_rowid='rowid',
-                    tokenize='trigram'
-                )
-                """
+    private static func setupTrigramFTS(_ connection: SQLiteConnection) throws {
+        try connection.execute(
+            """
+            CREATE VIRTUAL TABLE IF NOT EXISTS clipboard_fts_trigram USING fts5(
+                plain_text,
+                note,
+                content='clipboard_items',
+                content_rowid='rowid',
+                tokenize='trigram'
             )
-        } catch {
-            let message = error.localizedDescription.lowercased()
-            if message.contains("trigram") || message.contains("tokenizer") {
-                return
-            }
-            throw error
-        }
+            """
+        )
 
         try connection.execute(
             """

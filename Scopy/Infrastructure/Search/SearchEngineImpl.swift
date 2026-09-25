@@ -126,8 +126,8 @@ public actor SearchEngineImpl {
 
     private let dbPath: String
     private let readStore: SearchReadStore
-    private var usesMutationSeq: Bool = false
-    private var knownDBChangeToken: Int64?
+    /// The `mutation_seq` the in-memory indexes correspond to.
+    private var knownMutationSeq: Int64?
 
     private var recentItemsCache: [CachedRecentItem] = []
     private var cacheTimestamp: Date = .distantPast
@@ -257,8 +257,7 @@ public actor SearchEngineImpl {
         fuzzySortedMatchesCache = nil
         corpusMetrics = nil
         corpusMetricsUpdatedAt = .distantPast
-        knownDBChangeToken = nil
-        usesMutationSeq = false
+        knownMutationSeq = nil
         readStore.close()
     }
 
@@ -272,7 +271,7 @@ public actor SearchEngineImpl {
         resetFullIndex()
         resetShortQueryIndex()
         markCorpusMetricsStale()
-        refreshKnownDBChangeTokenIfPossible()
+        refreshKnownMutationSeqIfPossible()
         startShortQueryIndexBuildIfNeeded()
     }
 
@@ -288,7 +287,7 @@ public actor SearchEngineImpl {
         guard readStore.isOpen else { return }
         // Read the database position before draining: every in-process commit up to it has been
         // journaled by then, so a position beyond the journal means an unobserved commit.
-        let current = try? fetchDBChangeToken()
+        let current = try? readStore.fetchMutationSeq()
         if let commitJournal {
             let drained = commitJournal.drain()
             if drained.overflowed {
@@ -296,8 +295,8 @@ public actor SearchEngineImpl {
                 return
             }
             for entry in drained.entries {
-                guard let known = knownDBChangeToken else {
-                    refreshKnownDBChangeTokenIfPossible()
+                guard let known = knownMutationSeq else {
+                    refreshKnownMutationSeqIfPossible()
                     continue
                 }
                 if entry.mutationSeq <= known { continue }
@@ -305,13 +304,13 @@ public actor SearchEngineImpl {
                     resetIndexesForUnobservedCommits()
                     return
                 }
-                knownDBChangeToken = entry.mutationSeq
+                knownMutationSeq = entry.mutationSeq
                 apply(entry.change)
             }
         }
         guard let current else { return }
-        guard let known = knownDBChangeToken else {
-            knownDBChangeToken = current
+        guard let known = knownMutationSeq else {
+            knownMutationSeq = current
             return
         }
         if known < current {
@@ -324,7 +323,7 @@ public actor SearchEngineImpl {
         resetFullIndex()
         resetShortQueryIndex()
         markCorpusMetricsStale()
-        refreshKnownDBChangeTokenIfPossible()
+        refreshKnownMutationSeqIfPossible()
         startShortQueryIndexBuildIfNeeded()
     }
 
@@ -644,9 +643,9 @@ public actor SearchEngineImpl {
         guard shortQueryIndexDiskCachePersistTask == nil else { return }
         synchronizeWithCommittedChanges()
         guard let index = shortQueryIndex else { return }
-        // `knownDBChangeToken` is the mutation_seq the in-memory index content corresponds to;
+        // `knownMutationSeq` is the mutation_seq the in-memory index content corresponds to;
         // stamping the cache with it (rather than re-reading the DB) keeps the two atomic.
-        guard usesMutationSeq, let mutationSeq = knownDBChangeToken else { return }
+        guard let mutationSeq = knownMutationSeq else { return }
         guard let request = SearchIndexDiskCache.makeShortPersistRequest(
             index: index,
             dbPath: dbPath,
@@ -670,7 +669,7 @@ public actor SearchEngineImpl {
         guard fullIndexDiskCachePersistTask == nil else { return }
         synchronizeWithCommittedChanges()
         guard let index = fullIndex, !fullIndexStale else { return }
-        guard usesMutationSeq, let mutationSeq = knownDBChangeToken else { return }
+        guard let mutationSeq = knownMutationSeq else { return }
         guard fullIndexPersistedMutationSeq != mutationSeq else { return }
         guard let request = SearchIndexDiskCache.makeFullPersistRequest(
             index: index,
@@ -790,7 +789,7 @@ public actor SearchEngineImpl {
         markIndexChanged()
 
         if snapshot.source == .diskCache, pending.isEmpty {
-            fullIndexPersistedMutationSeq = knownDBChangeToken
+            fullIndexPersistedMutationSeq = knownMutationSeq
         }
         if fullIndexStale {
             startFullIndexBuildIfNeeded(force: true)
@@ -805,17 +804,10 @@ public actor SearchEngineImpl {
         }
     }
 
-    private func fetchDBChangeToken() throws -> Int64 {
-        if usesMutationSeq {
-            return try readStore.fetchMutationSeq()
-        }
-        return try readStore.fetchDataVersion()
-    }
-
-    private func refreshKnownDBChangeTokenIfPossible() {
+    private func refreshKnownMutationSeqIfPossible() {
         guard readStore.isOpen else { return }
-        if let v = try? fetchDBChangeToken() {
-            knownDBChangeToken = v
+        if let v = try? readStore.fetchMutationSeq() {
+            knownMutationSeq = v
         }
     }
 
@@ -1302,7 +1294,7 @@ public actor SearchEngineImpl {
         guard request.forceFullFuzzy, mode == .fuzzyPlus else { return nil }
         let tokens = fuzzyPlusTokens(trimmedQuery.lowercased())
         guard shouldUseSubstringOnlyFallbackForFuzzyPlus(tokens: tokens) else { return nil }
-        let page = try readStore.searchSubstringLike(
+        let page = try readStore.searchTrigram(
             tokens: tokens,
             sortMode: request.sortMode,
             filters: .init(request),
@@ -1393,7 +1385,7 @@ public actor SearchEngineImpl {
         let page: SearchReadStore.Page
         if let perf {
             page = try perf.measure("sql_substring_only_fallback") {
-                try readStore.searchSubstringLike(
+                try readStore.searchTrigram(
                     tokens: tokens,
                     sortMode: request.sortMode,
                     filters: .init(request),
@@ -1401,7 +1393,7 @@ public actor SearchEngineImpl {
                 )
             }
         } else {
-            page = try readStore.searchSubstringLike(
+            page = try readStore.searchTrigram(
                 tokens: tokens,
                 sortMode: request.sortMode,
                 filters: .init(request),
@@ -1700,7 +1692,7 @@ public actor SearchEngineImpl {
             } else {
                 fullIndex = loaded
                 fullIndexStale = false
-                fullIndexPersistedMutationSeq = knownDBChangeToken
+                fullIndexPersistedMutationSeq = knownMutationSeq
                 markIndexChanged()
                 perf?.addCounter("full_index_source_disk_cache", value: 1)
                 perf?.addCounter("full_index_items", value: loaded.items.count)
@@ -1985,11 +1977,10 @@ public actor SearchEngineImpl {
     private func openIfNeeded() throws {
         guard !readStore.isOpen else { return }
         try readStore.open()
-        usesMutationSeq = readStore.hasMetaTable
         fuzzySortedMatchesCache = nil
         SearchIndexDiskCache.removeStaleCacheFiles(dbPath: dbPath)
         refreshCorpusMetricsIfNeeded(force: true)
-        refreshKnownDBChangeTokenIfPossible()
+        refreshKnownMutationSeqIfPossible()
         startShortQueryIndexBuildIfNeeded()
     }
 

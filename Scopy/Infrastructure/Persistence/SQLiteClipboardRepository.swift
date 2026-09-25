@@ -5,13 +5,11 @@ actor SQLiteClipboardRepository {
     enum RepositoryError: Error, LocalizedError {
         case databaseNotOpen
         case queryFailed(String)
-        case migrationFailed(String)
 
         var errorDescription: String? {
             switch self {
             case .databaseNotOpen: return "Database is not open"
             case .queryFailed(let msg): return "Query failed: \(msg)"
-            case .migrationFailed(let msg): return "Migration failed: \(msg)"
             }
         }
     }
@@ -123,7 +121,7 @@ actor SQLiteClipboardRepository {
             try conn.execute("PRAGMA mmap_size = 268435456")
 
             try SQLiteMigrations.migrateIfNeeded(conn)
-            try verifySchema(conn)
+            try SQLiteSchema.requireCurrentSchema(conn)
         } catch {
             conn.close()
             throw error
@@ -610,49 +608,23 @@ actor SQLiteClipboardRepository {
     }
 
     func getItemCount() throws -> Int {
-        do {
-            let stmt = try prepare("SELECT item_count FROM scopy_meta WHERE id = 1")
-            guard try stmt.step() else { return 0 }
-            return stmt.columnInt(0)
-        } catch {
-            let stmt = try prepare("SELECT COUNT(*) FROM clipboard_items")
-            guard try stmt.step() else { return 0 }
-            return stmt.columnInt(0)
-        }
+        let stmt = try prepare("SELECT item_count FROM scopy_meta WHERE id = 1")
+        guard try stmt.step() else { return 0 }
+        return stmt.columnInt(0)
     }
 
     func getTotalSize() throws -> Int {
-        do {
-            let stmt = try prepare("SELECT total_size_bytes FROM scopy_meta WHERE id = 1")
-            guard try stmt.step() else { return 0 }
-            let value = stmt.columnInt64(0)
-            return Int(min(value, Int64(Int.max)))
-        } catch {
-            let stmt = try prepare("SELECT SUM(size_bytes) FROM clipboard_items")
-            guard try stmt.step() else { return 0 }
-            let value = stmt.columnInt64(0)
-            return Int(min(value, Int64(Int.max)))
-        }
+        let stmt = try prepare("SELECT total_size_bytes FROM scopy_meta WHERE id = 1")
+        guard try stmt.step() else { return 0 }
+        let value = stmt.columnInt64(0)
+        return Int(min(value, Int64(Int.max)))
     }
 
     func getExternalSize() throws -> Int {
-        do {
-            let stmt = try prepare("SELECT external_size_bytes FROM scopy_meta WHERE id = 1")
-            guard try stmt.step() else { return 0 }
-            let value = stmt.columnInt64(0)
-            return Int(min(value, Int64(Int.max)))
-        } catch {
-            let stmt = try prepare(
-                """
-                SELECT COALESCE(SUM(size_bytes), 0)
-                FROM clipboard_items
-                WHERE storage_ref IS NOT NULL AND storage_ref <> ''
-                """
-            )
-            guard try stmt.step() else { return 0 }
-            let value = stmt.columnInt64(0)
-            return Int(min(value, Int64(Int.max)))
-        }
+        let stmt = try prepare("SELECT external_size_bytes FROM scopy_meta WHERE id = 1")
+        guard try stmt.step() else { return 0 }
+        let value = stmt.columnInt64(0)
+        return Int(min(value, Int64(Int.max)))
     }
 
     func updateItemSizeBytesBatchInTransaction(updates: [SizeBytesUpdate]) throws -> Int {
@@ -759,17 +731,9 @@ actor SQLiteClipboardRepository {
     }
 
     func planCleanupByCount(target: Int) throws -> DeletePlan {
-        let currentCount: Int
-        do {
-            let stmt = try prepare("SELECT unpinned_count FROM scopy_meta WHERE id = 1")
-            guard try stmt.step() else { return .empty }
-            currentCount = stmt.columnInt(0)
-        } catch {
-            let countSQL = "SELECT COUNT(*) FROM clipboard_items WHERE is_pinned = 0"
-            let countStmt = try prepare(countSQL)
-            guard try countStmt.step() else { return .empty }
-            currentCount = countStmt.columnInt(0)
-        }
+        let stmt = try prepare("SELECT unpinned_count FROM scopy_meta WHERE id = 1")
+        guard try stmt.step() else { return .empty }
+        let currentCount = stmt.columnInt(0)
 
         let deleteCount = currentCount - target
         guard deleteCount > 0 else { return .empty }
@@ -1297,27 +1261,6 @@ actor SQLiteClipboardRepository {
     private func prepare(_ sql: String) throws -> SQLiteStatement {
         guard let connection else { throw RepositoryError.databaseNotOpen }
         return try connection.prepare(sql)
-    }
-
-    private func verifySchema(_ connection: SQLiteConnection) throws {
-        // Main table
-        let mainStmt = try connection.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='clipboard_items'")
-        guard try mainStmt.step() else {
-            throw RepositoryError.migrationFailed("Main table 'clipboard_items' not found")
-        }
-
-        // FTS table
-        let ftsStmt = try connection.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='clipboard_fts'")
-        guard try ftsStmt.step() else {
-            throw RepositoryError.migrationFailed("FTS table 'clipboard_fts' not found")
-        }
-
-        let receiptStmt = try connection.prepare(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='ingest_receipts'"
-        )
-        guard try receiptStmt.step() else {
-            throw RepositoryError.migrationFailed("Receipt table 'ingest_receipts' not found")
-        }
     }
 
     private func deleteItemsBatch(ids: [UUID]) throws {

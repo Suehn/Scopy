@@ -298,10 +298,10 @@ final class SearchServiceTests: XCTestCase {
             }
         }
 
+        // The query below runs on clipboard_fts alone; skip trigram indexing of the bulk rows.
         try execute("DROP TRIGGER IF EXISTS clipboard_trigram_ai")
         try execute("DROP TRIGGER IF EXISTS clipboard_trigram_ad")
         try execute("DROP TRIGGER IF EXISTS clipboard_trigram_au")
-        try execute("DROP TABLE IF EXISTS clipboard_fts_trigram")
 
         let terms = (0..<128).map { "deadline_token_\($0)" }
         let searchableText = terms.joined(separator: " ")

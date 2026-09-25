@@ -105,8 +105,6 @@ final class SearchReadStore {
     private var statementCache: [String: CachedStatement] = [:]
     private var statementCacheLRU: [String] = []
     private let statementCacheLimit = 32
-    private(set) var supportsTrigramFTS = false
-    private(set) var hasMetaTable = false
 
     init(dbPath: String) {
         self.dbPath = dbPath
@@ -128,9 +126,7 @@ final class SearchReadStore {
         }
 
         do {
-            try Self.verifySchema(conn)
-            supportsTrigramFTS = (try? conn.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='clipboard_fts_trigram'").step()) == true
-            hasMetaTable = (try? conn.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='scopy_meta'").step()) == true
+            try SQLiteSchema.requireCurrentSchema(conn)
         } catch {
             conn.close()
             throw SearchEngineImpl.SearchError.searchFailed(error.localizedDescription)
@@ -144,8 +140,6 @@ final class SearchReadStore {
     func close() {
         statementCache = [:]
         statementCacheLRU = []
-        supportsTrigramFTS = false
-        hasMetaTable = false
         connection?.close()
         connection = nil
     }
@@ -172,18 +166,6 @@ final class SearchReadStore {
             throw error
         }
         return conn
-    }
-
-    private static func verifySchema(_ connection: SQLiteConnection) throws {
-        let mainStmt = try connection.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='clipboard_items'")
-        guard try mainStmt.step() else {
-            throw SearchEngineImpl.SearchError.searchFailed("Main table 'clipboard_items' not found")
-        }
-
-        let ftsStmt = try connection.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='clipboard_fts'")
-        guard try ftsStmt.step() else {
-            throw SearchEngineImpl.SearchError.searchFailed("FTS table 'clipboard_fts' not found")
-        }
     }
 
     /// A prepared statement for `sql`, reset and ready to bind; the most recent 32 are kept.
@@ -229,13 +211,6 @@ final class SearchReadStore {
     }
 
     // MARK: - Metadata
-
-    func fetchDataVersion() throws -> Int64 {
-        let stmt = try prepare("PRAGMA data_version")
-        defer { stmt.reset() }
-        guard try stmt.step() else { return 0 }
-        return stmt.columnInt64(0)
-    }
 
     func fetchMutationSeq() throws -> Int64 {
         let stmt = try prepare("SELECT mutation_seq FROM scopy_meta WHERE id = 1")
@@ -381,73 +356,17 @@ final class SearchReadStore {
         return ids
     }
 
-    private func searchTrigramFTS(
-        ftsQuery: String,
-        primaryTokenLower: String,
-        sortMode: SearchSortMode,
-        filters: Filters,
-        window: PageWindow
-    ) throws -> Page {
-        var sql: String
-        var params: [String] = []
-
-        switch sortMode {
-        case .recent:
-            sql = """
-                SELECT \(ClipboardItemRow.qualifiedSummaryColumns)
-                FROM clipboard_fts_trigram
-                JOIN clipboard_items ON clipboard_items.rowid = clipboard_fts_trigram.rowid
-                WHERE clipboard_fts_trigram MATCH ?
-            """
-            params.append(ftsQuery)
-        case .relevance:
-            sql = """
-                SELECT \(ClipboardItemRow.summaryColumns)
-                FROM (
-                    SELECT \(ClipboardItemRow.qualifiedSummaryColumns),
-                           instr(lower(clipboard_items.plain_text), ?) AS plainPos,
-                           instr(lower(coalesce(clipboard_items.note, '')), ?) AS notePos
-                    FROM clipboard_fts_trigram
-                    JOIN clipboard_items ON clipboard_items.rowid = clipboard_fts_trigram.rowid
-                    WHERE clipboard_fts_trigram MATCH ?
-            """
-            params.append(primaryTokenLower)
-            params.append(primaryTokenLower)
-            params.append(ftsQuery)
-        }
-
-        filters.append(to: &sql, params: &params)
-
-        switch sortMode {
-        case .recent:
-            sql += " ORDER BY is_pinned DESC, last_used_at DESC, id ASC"
-            sql += " LIMIT ? OFFSET ?"
-        case .relevance:
-            sql += Self.earliestPositionOrderTail
-        }
-
-        return try runPage(sql, params: params, window: window)
-    }
-
     // MARK: - Substring
 
-    /// Every token must occur in the plain text or note (case-sensitive `instr`); trigram FTS
-    /// serves it when the database has the table and every token has at least three characters.
+    /// Every token must occur in the plain text or note. Tokens of three or more characters go
+    /// through the case-insensitive trigram index; shorter ones scan with case-sensitive `instr`.
     func searchSubstring(tokens: [String], sortMode: SearchSortMode, filters: Filters, window: PageWindow) throws -> Page {
         let tokens = tokens.filter { !$0.isEmpty }
         guard let primary = tokens.first else { return .empty }
         let extraTokens = Array(tokens.dropFirst())
 
-        if shouldUseTrigramFTS(tokens: tokens),
-           let ftsQuery = Self.trigramFTSQuery(tokens: tokens)
-        {
-            return try searchTrigramFTS(
-                ftsQuery: ftsQuery,
-                primaryTokenLower: primary.lowercased(),
-                sortMode: sortMode,
-                filters: filters,
-                window: window
-            )
+        if Self.trigramCanMatch(tokens) {
+            return try searchTrigram(tokens: tokens, sortMode: sortMode, filters: filters, window: window)
         }
 
         var params: [String] = []
@@ -495,66 +414,48 @@ final class SearchReadStore {
         return try runPage(sql, params: params, window: window)
     }
 
-    /// Like `searchSubstring` but case-insensitive through `LIKE`, for fuzzy+ queries whose
-    /// ASCII words of three or more characters have substring-only semantics.
-    func searchSubstringLike(tokens: [String], sortMode: SearchSortMode, filters: Filters, window: PageWindow) throws -> Page {
+    /// Every token must occur in the plain text or note, case-insensitively, through the
+    /// trigram index; every token needs at least three characters, the tokenizer's minimum.
+    func searchTrigram(tokens: [String], sortMode: SearchSortMode, filters: Filters, window: PageWindow) throws -> Page {
         let tokens = tokens.filter { !$0.isEmpty }
         guard let primary = tokens.first else { return .empty }
-        let extraTokens = Array(tokens.dropFirst())
 
-        if shouldUseTrigramFTS(tokens: tokens),
-           let ftsQuery = Self.trigramFTSQuery(tokens: tokens)
-        {
-            return try searchTrigramFTS(
-                ftsQuery: ftsQuery,
-                primaryTokenLower: primary,
-                sortMode: sortMode,
-                filters: filters,
-                window: window
-            )
-        }
-
-        var params: [String] = []
         var sql: String
-
-        func appendTokenFilter(_ token: String) {
-            sql += " AND (plain_text LIKE ? ESCAPE '\\' OR coalesce(note, '') LIKE ? ESCAPE '\\')"
-            let pattern = "%" + Self.escapeForLike(token) + "%"
-            params.append(pattern)
-            params.append(pattern)
-        }
+        var params: [String] = []
 
         switch sortMode {
         case .recent:
             sql = """
-                SELECT \(ClipboardItemRow.summaryColumns)
-                FROM clipboard_items INDEXED BY idx_pinned
-                WHERE 1 = 1
+                SELECT \(ClipboardItemRow.qualifiedSummaryColumns)
+                FROM clipboard_fts_trigram
+                JOIN clipboard_items ON clipboard_items.rowid = clipboard_fts_trigram.rowid
+                WHERE clipboard_fts_trigram MATCH ?
             """
-            filters.append(to: &sql, params: &params)
-            appendTokenFilter(primary)
-            for token in extraTokens {
-                appendTokenFilter(token)
-            }
-            sql += " ORDER BY is_pinned DESC, last_used_at DESC, id ASC"
-            sql += " LIMIT ? OFFSET ?"
+            params.append(Self.trigramFTSQuery(tokens: tokens))
         case .relevance:
             sql = """
                 SELECT \(ClipboardItemRow.summaryColumns)
                 FROM (
-                    SELECT \(ClipboardItemRow.summaryColumns),
-                           instr(lower(plain_text), ?) AS plainPos,
-                           instr(lower(coalesce(note, '')), ?) AS notePos
-                    FROM clipboard_items INDEXED BY idx_pinned
-                    WHERE 1 = 1
+                    SELECT \(ClipboardItemRow.qualifiedSummaryColumns),
+                           instr(lower(clipboard_items.plain_text), ?) AS plainPos,
+                           instr(lower(coalesce(clipboard_items.note, '')), ?) AS notePos
+                    FROM clipboard_fts_trigram
+                    JOIN clipboard_items ON clipboard_items.rowid = clipboard_fts_trigram.rowid
+                    WHERE clipboard_fts_trigram MATCH ?
             """
-            params.append(primary)
-            params.append(primary)
-            filters.append(to: &sql, params: &params)
-            appendTokenFilter(primary)
-            for token in extraTokens {
-                appendTokenFilter(token)
-            }
+            let primaryLower = primary.lowercased()
+            params.append(primaryLower)
+            params.append(primaryLower)
+            params.append(Self.trigramFTSQuery(tokens: tokens))
+        }
+
+        filters.append(to: &sql, params: &params)
+
+        switch sortMode {
+        case .recent:
+            sql += " ORDER BY is_pinned DESC, last_used_at DESC, id ASC"
+            sql += " LIMIT ? OFFSET ?"
+        case .relevance:
             sql += Self.earliestPositionOrderTail
         }
 
@@ -836,38 +737,14 @@ final class SearchReadStore {
         return sql
     }
 
-    private func shouldUseTrigramFTS(tokens: [String]) -> Bool {
-        guard supportsTrigramFTS else { return false }
-        guard !tokens.isEmpty else { return false }
-        return tokens.allSatisfy { $0.count >= 3 }
+    private static func trigramCanMatch(_ tokens: [String]) -> Bool {
+        !tokens.isEmpty && tokens.allSatisfy { $0.count >= 3 }
     }
 
-    private static func trigramFTSQuery(tokens: [String]) -> String? {
-        let tokens = tokens.filter { !$0.isEmpty }
-        guard !tokens.isEmpty else { return nil }
-
-        func quotePhrase(_ raw: String) -> String {
-            let escaped = raw.replacingOccurrences(of: "\"", with: "\"\"")
-            return "\"\(escaped)\""
-        }
-
-        if tokens.count == 1 {
-            return quotePhrase(tokens[0])
-        }
-        return tokens.map(quotePhrase).joined(separator: " AND ")
-    }
-
-    private static func escapeForLike(_ token: String) -> String {
-        guard !token.isEmpty else { return token }
-        var result = ""
-        result.reserveCapacity(token.count)
-        for ch in token {
-            if ch == "\\" || ch == "%" || ch == "_" {
-                result.append("\\")
-            }
-            result.append(ch)
-        }
-        return result
+    /// Each non-empty token as a quoted phrase, joined with `AND`.
+    private static func trigramFTSQuery(tokens: [String]) -> String {
+        tokens.map { "\"" + $0.replacingOccurrences(of: "\"", with: "\"\"") + "\"" }
+            .joined(separator: " AND ")
     }
 
     private static func jsonArray(_ strings: [String]) -> String {
