@@ -146,30 +146,28 @@ actor SQLiteClipboardRepository {
 
     func fetchItemByHash(_ hash: String) throws -> ClipboardStoredItem? {
         let sql = """
-            SELECT id, type, content_hash, plain_text, note, app_bundle_id, created_at, last_used_at,
-                   use_count, is_pinned, size_bytes, storage_ref, raw_data, file_size_bytes
+            SELECT \(ClipboardItemRow.fullColumns)
             FROM clipboard_items
             WHERE content_hash = ? LIMIT 1
         """
         let stmt = try prepare(sql)
         try stmt.bindText(hash, at: 1)
         if try stmt.step() {
-            return try parseStoredItem(from: stmt)
+            return try ClipboardItemRow.decodeFull(stmt)
         }
         return nil
     }
 
     func fetchItemByID(_ id: UUID) throws -> ClipboardStoredItem? {
         let sql = """
-            SELECT id, type, content_hash, plain_text, note, app_bundle_id, created_at, last_used_at,
-                   use_count, is_pinned, size_bytes, storage_ref, raw_data, file_size_bytes
+            SELECT \(ClipboardItemRow.fullColumns)
             FROM clipboard_items
             WHERE id = ? LIMIT 1
         """
         let stmt = try prepare(sql)
         try stmt.bindText(id.uuidString, at: 1)
         if try stmt.step() {
-            return try parseStoredItem(from: stmt)
+            return try ClipboardItemRow.decodeFull(stmt)
         }
         return nil
     }
@@ -537,8 +535,7 @@ actor SQLiteClipboardRepository {
 
     func fetchRecent(limit: Int, offset: Int) throws -> [ClipboardStoredItem] {
         let sql = """
-            SELECT id, type, content_hash, plain_text, note, app_bundle_id, created_at, last_used_at,
-                   use_count, is_pinned, size_bytes, storage_ref, file_size_bytes
+            SELECT \(ClipboardItemRow.summaryColumns)
             FROM clipboard_items
             ORDER BY is_pinned DESC, last_used_at DESC, id ASC
             LIMIT ? OFFSET ?
@@ -550,15 +547,14 @@ actor SQLiteClipboardRepository {
         var items: [ClipboardStoredItem] = []
         items.reserveCapacity(limit)
         while try stmt.step() {
-            items.append(try parseStoredItemSummary(from: stmt))
+            items.append(try ClipboardItemRow.decodeSummary(stmt))
         }
         return items
     }
 
     func fetchPinned() throws -> [ClipboardStoredItem] {
         let sql = """
-            SELECT id, type, content_hash, plain_text, note, app_bundle_id, created_at, last_used_at,
-                   use_count, is_pinned, size_bytes, storage_ref, file_size_bytes
+            SELECT \(ClipboardItemRow.summaryColumns)
             FROM clipboard_items
             WHERE is_pinned = 1
             ORDER BY last_used_at DESC, id ASC
@@ -567,15 +563,14 @@ actor SQLiteClipboardRepository {
 
         var items: [ClipboardStoredItem] = []
         while try stmt.step() {
-            items.append(try parseStoredItemSummary(from: stmt))
+            items.append(try ClipboardItemRow.decodeSummary(stmt))
         }
         return items
     }
 
     func fetchRecentUnpinned(limit: Int, offset: Int) throws -> [ClipboardStoredItem] {
         let sql = """
-            SELECT id, type, content_hash, plain_text, note, app_bundle_id, created_at, last_used_at,
-                   use_count, is_pinned, size_bytes, storage_ref, file_size_bytes
+            SELECT \(ClipboardItemRow.summaryColumns)
             FROM clipboard_items
             WHERE is_pinned = 0
             ORDER BY last_used_at DESC, id ASC
@@ -588,7 +583,7 @@ actor SQLiteClipboardRepository {
         var items: [ClipboardStoredItem] = []
         items.reserveCapacity(limit)
         while try stmt.step() {
-            items.append(try parseStoredItemSummary(from: stmt))
+            items.append(try ClipboardItemRow.decodeSummary(stmt))
         }
         return items
     }
@@ -1323,83 +1318,6 @@ actor SQLiteClipboardRepository {
         guard try receiptStmt.step() else {
             throw RepositoryError.migrationFailed("Receipt table 'ingest_receipts' not found")
         }
-    }
-
-    private func parseStoredItem(from stmt: SQLiteStatement) throws -> ClipboardStoredItem {
-        guard let idString = stmt.columnText(0),
-              let id = UUID(uuidString: idString),
-              let typeString = stmt.columnText(1),
-              let type = ClipboardItemType(rawValue: typeString),
-              let contentHash = stmt.columnText(2) else {
-            throw RepositoryError.queryFailed("Failed to parse item")
-        }
-
-        let plainText = stmt.columnText(3) ?? ""
-        let note = stmt.columnText(4)
-        let appBundleID = stmt.columnText(5)
-        let createdAt = Date(timeIntervalSince1970: stmt.columnDouble(6))
-        let lastUsedAt = Date(timeIntervalSince1970: stmt.columnDouble(7))
-        let useCount = stmt.columnInt(8)
-        let isPinned = stmt.columnInt(9) != 0
-        let sizeBytes = stmt.columnInt(10)
-        let storageRef = stmt.columnText(11)
-        let rawData = stmt.columnBlobData(12)
-        let fileSizeBytes = stmt.columnIntOptional(13)
-
-        return ClipboardStoredItem(
-            id: id,
-            type: type,
-            contentHash: contentHash,
-            plainText: plainText,
-            note: note,
-            appBundleID: appBundleID,
-            createdAt: createdAt,
-            lastUsedAt: lastUsedAt,
-            useCount: useCount,
-            isPinned: isPinned,
-            sizeBytes: sizeBytes,
-            fileSizeBytes: fileSizeBytes,
-            storageRef: storageRef,
-            rawData: rawData
-        )
-    }
-
-    private func parseStoredItemSummary(from stmt: SQLiteStatement) throws -> ClipboardStoredItem {
-        guard let idString = stmt.columnText(0),
-              let id = UUID(uuidString: idString),
-              let typeString = stmt.columnText(1),
-              let type = ClipboardItemType(rawValue: typeString),
-              let contentHash = stmt.columnText(2) else {
-            throw RepositoryError.queryFailed("Failed to parse item")
-        }
-
-        let plainText = stmt.columnText(3) ?? ""
-        let note = stmt.columnText(4)
-        let appBundleID = stmt.columnText(5)
-        let createdAt = Date(timeIntervalSince1970: stmt.columnDouble(6))
-        let lastUsedAt = Date(timeIntervalSince1970: stmt.columnDouble(7))
-        let useCount = stmt.columnInt(8)
-        let isPinned = stmt.columnInt(9) != 0
-        let sizeBytes = stmt.columnInt(10)
-        let storageRef = stmt.columnText(11)
-        let fileSizeBytes = stmt.columnIntOptional(12)
-
-        return ClipboardStoredItem(
-            id: id,
-            type: type,
-            contentHash: contentHash,
-            plainText: plainText,
-            note: note,
-            appBundleID: appBundleID,
-            createdAt: createdAt,
-            lastUsedAt: lastUsedAt,
-            useCount: useCount,
-            isPinned: isPinned,
-            sizeBytes: sizeBytes,
-            fileSizeBytes: fileSizeBytes,
-            storageRef: storageRef,
-            rawData: nil
-        )
     }
 
     private func deleteItemsBatch(ids: [UUID]) throws {

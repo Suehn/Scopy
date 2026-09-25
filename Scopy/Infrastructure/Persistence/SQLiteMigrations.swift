@@ -83,7 +83,7 @@ enum SQLiteMigrations {
     private static func setupPlainTextBytesIndex(_ connection: SQLiteConnection) throws {
         // Expression index so corpus-metrics aggregates (COUNT/AVG/MAX over plain-text byte
         // length) run as an index-only scan instead of reading every row's text payload.
-        // The expression must stay byte-identical to the one in SearchEngineImpl.computeCorpusMetrics.
+        // The expression must stay byte-identical to the one in SearchReadStore.corpusMetrics.
         try connection.execute(
             "CREATE INDEX IF NOT EXISTS idx_plain_text_bytes ON clipboard_items(LENGTH(CAST(plain_text AS BLOB)))"
         )
