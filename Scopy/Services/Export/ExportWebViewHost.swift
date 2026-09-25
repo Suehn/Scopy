@@ -190,67 +190,12 @@ final class ExportCoordinator: NSObject, WKNavigationDelegate {
         window.orderFront(nil)
         self.hostWindow = window
 
-        // Inject export styles into HTML
-        let exportHTML = injectExportStyles(html)
-
         // Load HTML
         var baseURL = Bundle.main.resourceURL?.appendingPathComponent("MarkdownPreview", isDirectory: true)
 #if DEBUG
         baseURL = Self.markdownPreviewResourceURLForTesting ?? baseURL
 #endif
-        wv.loadHTMLString(exportHTML, baseURL: baseURL)
-    }
-
-    func injectExportStyles(_ html: String) -> String {
-        // Insert export-specific styles before </head>
-        let exportStyles = """
-        <style id="scopy-export-style">
-            /* Layout variables come from the document itself; export adds only its own rules. */
-            :root {
-                color-scheme: light !important;
-            }
-            @page { margin: 0 !important; }
-            html, body {
-                background: #FFFFFF !important;
-                color: #000000 !important;
-                margin: 0 !important;
-                padding: 0 !important;
-                -webkit-text-size-adjust: 100% !important;
-                -webkit-print-color-adjust: exact !important;
-                print-color-adjust: exact !important;
-                overflow-x: visible !important;
-            }
-
-            #content {
-                background: #FFFFFF !important;
-                display: block;
-                width: var(--scopy-chatgpt-render-width) !important;
-                max-width: none !important;
-                opacity: 1 !important;
-                transition: none !important;
-            }
-
-            /* During export we may scroll programmatically for tiled snapshots; always keep inner scrollbars hidden. */
-            html.scopy-scrollbars-visible pre::-webkit-scrollbar,
-            html.scopy-scrollbars-visible table::-webkit-scrollbar,
-            html.scopy-scrollbars-visible .scopy-math-inline-host::-webkit-scrollbar,
-            html.scopy-scrollbars-visible .katex-display::-webkit-scrollbar,
-            html.scopy-scrollbars-visible .footnotes::-webkit-scrollbar,
-            html.scopy-scrollbars-visible details::-webkit-scrollbar {
-                width: 0px !important;
-                height: 0px !important;
-            }
-        </style>
-        """
-
-        if let headEndRange = html.range(of: "</head>", options: .caseInsensitive) {
-            var modifiedHTML = html
-            modifiedHTML.insert(contentsOf: exportStyles, at: headEndRange.lowerBound)
-            return modifiedHTML
-        }
-
-        // Fallback: prepend styles
-        return exportStyles + html
+        wv.loadHTMLString(html, baseURL: baseURL)
     }
 
     // MARK: - WKNavigationDelegate

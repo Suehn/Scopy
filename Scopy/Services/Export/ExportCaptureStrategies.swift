@@ -26,7 +26,7 @@ extension ExportCoordinator {
         // of searching the unrendered input for classes that do not exist yet.
         preservesArtworkColors = try await evaluateJavaScriptBool(
             webView: webView,
-            javaScriptString: "Boolean(document.querySelector('#content [data-scopy-version=\"2\"], #content .scopy-mention-icon, #content img.scopy-link-origin-icon, #content img.scopy-source-citation-origin-icon'))"
+            javaScriptString: "window.ScopyDocument.export.preservesArtworkColors()"
         )
         var scrollHeightPoints = initialScrollHeightPoints
 
@@ -371,28 +371,13 @@ extension ExportCoordinator {
             webView.layoutSubtreeIfNeeded()
             webView.displayIfNeeded()
             appKitOffsetY = max(0, clipView.bounds.origin.y)
-        } else {
-            let scrollJS = """
-            (function() {
-              try { window.scrollTo(0, \(target)); } catch (e) { }
-              return true;
-            })();
-            """
-            _ = try await evaluateJavaScriptBool(webView: webView, javaScriptString: scrollJS)
         }
-        if appKitOffsetY != nil {
-            let syncScrollJS = """
-            (function() {
-              var y = \(target);
-              try { window.scrollTo(0, y); } catch (e) { }
-              try {
-                if (document && document.documentElement) { document.documentElement.scrollTop = y; }
-                if (document && document.body) { document.body.scrollTop = y; }
-              } catch (e) { }
-              return true;
-            })();
-            """
-            _ = try? await evaluateJavaScriptBool(webView: webView, javaScriptString: syncScrollJS)
+        // Keep the page's own scroll position in step with the clip view (or scroll it when there is none).
+        let scrollJS = "window.ScopyDocument.export.scrollTo(\(target))"
+        if appKitOffsetY == nil {
+            _ = try await evaluateJavaScriptBool(webView: webView, javaScriptString: scrollJS)
+        } else {
+            _ = try? await evaluateJavaScriptBool(webView: webView, javaScriptString: scrollJS)
         }
         // Let WebKit lay out and paint the new scroll position before it is measured or captured.
         await waitForAnimationFrames(webView: webView, timeout: 0.5)
@@ -401,19 +386,7 @@ extension ExportCoordinator {
             return appKitOffsetY
         }
 
-        let actualJS = """
-        (function() {
-          try {
-            var y = 0;
-            if (typeof window.scrollY === 'number') { y = window.scrollY; }
-            else if (typeof window.pageYOffset === 'number') { y = window.pageYOffset; }
-            else if (document && document.documentElement && typeof document.documentElement.scrollTop === 'number') { y = document.documentElement.scrollTop; }
-            return String(Math.max(0, y || 0));
-          } catch (e) {
-            return "0";
-          }
-        })();
-        """
+        let actualJS = "window.ScopyDocument.export.scrollOffset()"
         let actual = try await evaluateJavaScriptString(webView: webView, javaScriptString: actualJS)
         return max(0, CGFloat(Double(actual) ?? 0))
     }
