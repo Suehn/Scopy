@@ -8,7 +8,7 @@ import WebKit
 
 extension ExportCoordinator {
     func exportPNG(webView: WKWebView) async throws -> MarkdownExportService.ExportOutcome {
-        stage = .prepareLayout
+        try advance(to: .prepareLayout)
         let initialScrollHeightPoints = try await prepareForExportScrollHeightPoints(webView: webView)
 #if DEBUG
         if Self.ordersOutHostWindowForTesting { hostWindow?.orderOut(nil) }
@@ -30,7 +30,7 @@ extension ExportCoordinator {
         )
         var scrollHeightPoints = initialScrollHeightPoints
 
-        stage = .applyScale
+        try advance(to: .applyScale)
         // Target output width is fixed (pixels). We avoid downscaling unless we hit safe image-area constraints.
         var appliedScale: CGFloat = 1
         let widthPixels = max(1, targetWidthPixels)
@@ -110,6 +110,8 @@ extension ExportCoordinator {
             do {
                 let outcome = try await exportPDFRasterizedPNG(webView: webView, heightPoints: scrollHeightPoints)
                 return outcome
+            } catch is CancellationError {
+                throw CancellationError()
             } catch {
                 if requiresPDFExport {
                     throw error
@@ -118,18 +120,20 @@ extension ExportCoordinator {
             }
         }
 
-        stage = .snapshotOnce
+        try advance(to: .snapshotOnce)
         if scrollHeightPoints <= MarkdownExportRenderConstants.maxSingleSnapshotRectHeightPoints {
             do {
                 let outcome = try await exportSingleSnapshotPNG(webView: webView, heightPoints: scrollHeightPoints)
                 return outcome
+            } catch is CancellationError {
+                throw CancellationError()
             } catch {
                 // Fall back to tiled snapshots for robustness (long content or intermittent WebKit snapshot failures).
                 MarkdownExportService.logger.error("Single snapshot failed; falling back to tiled export. scale=\(appliedScale, privacy: .public) heightPt=\(scrollHeightPoints, privacy: .public) error=\(String(describing: error), privacy: .public)")
             }
         }
 
-        stage = .snapshotTiles
+        try advance(to: .snapshotTiles)
         let outcome = try await exportTiledPNG(webView: webView, totalHeightPoints: scrollHeightPoints)
         return outcome
     }
@@ -150,7 +154,7 @@ extension ExportCoordinator {
         // the final raster height and can reintroduce long-content clipping only on the PDF path. Before rasterizing,
         // preflight the generated PDF with its real page boxes and, if needed, apply one more export-scale reduction.
         for _ in 0..<4 {
-            stage = .createPDF
+            try advance(to: .createPDF)
             let rectPoints = CGRect(
                 x: 0,
                 y: 0,
@@ -182,17 +186,18 @@ extension ExportCoordinator {
                 try? pdfData.write(to: URL(fileURLWithPath: dumpPath), options: [.atomic])
             }
 
-            stage = .rasterizePDF
+            try advance(to: .rasterizePDF)
             let expectedPageWidthPoints = rectPoints.width
-            return try await Task.detached(priority: .userInitiated) {
+            return try await runDetached {
                 let canvas = try Self.rasterizePDFDataToCanvas(
                     pdfData: pdfData,
                     targetWidthPixels: targetWidthPixels,
                     expectedPageWidthPoints: expectedPageWidthPoints,
                     contentScaleCompensation: contentScaleCompensation
                 )
+                try Task.checkCancellation()
                 return try Self.encodeExportCanvas(canvas, pngquantOptions: pngquantOptions)
-            }.value
+            }
         }
 
         throw MarkdownExportService.ExportError.exportLimitExceeded(
@@ -229,22 +234,23 @@ extension ExportCoordinator {
 
         let image = try await takeSnapshot(webView: webView, config: config)
 
-        stage = .imageConversion
+        try advance(to: .imageConversion)
         let cg = try cgImage(from: image)
 
-        stage = .pngEncoding
+        try advance(to: .pngEncoding)
         let targetWidth = max(1, Int(round(targetWidthPixels)))
         let pngquantOptions = preservesArtworkColors ? nil : self.pngquantOptions
-        return try await Task.detached(priority: .userInitiated) {
+        return try await runDetached {
             let canvas = try Self.canvasFromSnapshot(cg, targetWidthPixels: targetWidth)
+            try Task.checkCancellation()
             return try Self.encodeExportCanvas(canvas, pngquantOptions: pngquantOptions)
-        }.value
+        }
     }
 
     func exportTiledPNG(webView: WKWebView, totalHeightPoints: CGFloat) async throws -> MarkdownExportService.ExportOutcome {
         let targetWidthPixelsInt = max(1, Int(round(targetWidthPixels)))
 
-        stage = .snapshotTiles
+        try advance(to: .snapshotTiles)
         let tileViewportHeightPoints = MarkdownExportRenderConstants.exportViewportHeightPoints
         try await resizeWebViewForSnapshot(webView: webView, heightPoints: tileViewportHeightPoints)
         try await scrollToTop(webView: webView)
@@ -282,6 +288,7 @@ extension ExportCoordinator {
         let tileCount = 1 + Int(max(0, ceil((CGFloat(totalHeightPointsInt) - tileViewportHeightPoints) / tileStepPoints)))
         var tileNumber = 0
         while scrollYPoints < CGFloat(totalHeightPointsInt) {
+            try Task.checkCancellation()
             tileNumber += 1
             reportProgress(.capturing(tile: min(tileNumber, tileCount), of: tileCount))
             let remaining = CGFloat(totalHeightPointsInt) - scrollYPoints
@@ -324,7 +331,7 @@ extension ExportCoordinator {
             let destinationHeightPixels = max(1, contentEndPixels - contentStartPixels)
             let drawY = max(0, totalHeightPixelsInt - contentEndPixels)
 
-            stage = .stitchTiles
+            try advance(to: .stitchTiles)
             ctx.draw(
                 normalizedTile,
                 in: CGRect(
@@ -339,11 +346,11 @@ extension ExportCoordinator {
             scrollYPoints += tileStepPoints
         }
 
-        stage = .pngEncoding
+        try advance(to: .pngEncoding)
         let pngquantOptions = preservesArtworkColors ? nil : self.pngquantOptions
-        return try await Task.detached(priority: .userInitiated) {
+        return try await runDetached {
             try Self.encodeExportCanvas(canvas, pngquantOptions: pngquantOptions)
-        }.value
+        }
     }
 
     func scrollTo(webView: WKWebView, yPoints: CGFloat) async throws -> CGFloat {
@@ -516,6 +523,23 @@ extension ExportCoordinator {
                     resumeOnce(result)
                 }
             }
+        }
+    }
+
+    /// Moves to the next export stage unless the export was cancelled.
+    func advance(to next: MarkdownExportService.ExportStage) throws {
+        try Task.checkCancellation()
+        stage = next
+    }
+
+    /// Runs CPU-bound capture and encoding off the main actor. Cancelling the export cancels this work (pngquant is
+    /// terminated), and the export does not finish until the work has exited.
+    func runDetached<T: Sendable>(_ work: @escaping @Sendable () throws -> T) async throws -> T {
+        let task = Task.detached(priority: .userInitiated, operation: work)
+        return try await withTaskCancellationHandler {
+            try await task.value
+        } onCancel: {
+            task.cancel()
         }
     }
 }

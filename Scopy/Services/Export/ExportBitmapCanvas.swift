@@ -309,18 +309,22 @@ extension ExportCoordinator {
     ) throws -> MarkdownExportService.ExportOutcome {
         canvas.trimBlankLeadingRowsIfNeeded()
         if let pngquantOptions {
+            var finalized = true
             do {
                 try canvas.finalizeFile()
-                if let quantized = PngquantService.compressPAMFileBestEffort(canvas.fileURL, options: pngquantOptions) {
-                    return MarkdownExportService.ExportOutcome(
-                        pngData: quantized,
-                        stats: MarkdownExportService.ExportStats(finalPNGBytes: quantized.count, pngquantApplied: true)
-                    )
-                }
             } catch {
+                finalized = false
                 MarkdownExportService.logger.warning("Export canvas could not be finalized for pngquant: \(error.localizedDescription, privacy: .public)")
             }
+            // A cancelled export stops here instead of falling back to ImageIO.
+            if finalized, let quantized = try PngquantService.compressPAMFileBestEffort(canvas.fileURL, options: pngquantOptions) {
+                return MarkdownExportService.ExportOutcome(
+                    pngData: quantized,
+                    stats: MarkdownExportService.ExportStats(finalPNGBytes: quantized.count, pngquantApplied: true)
+                )
+            }
         }
+        try Task.checkCancellation()
         guard let image = canvas.makeImage() else {
             throw MarkdownExportService.ExportError.stageFailed(stage: .pngEncoding, underlying: nil)
         }

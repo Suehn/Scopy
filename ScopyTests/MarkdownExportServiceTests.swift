@@ -234,6 +234,43 @@ final class MarkdownExportServiceTests: XCTestCase {
         XCTAssertEqual(Array(png.prefix(8)), [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A])
     }
 
+    /// Cancelling an export stops its encoding (pngquant is terminated) and hands the concurrency slot back only after
+    /// that work has exited, so cancel-and-retry cannot exceed the two concurrent exports.
+    func testCancelledExportReleasesItsSlotOnlyAfterEncodingWorkExits() async throws {
+        let assets = try LiveMarkdownDocument()
+        defer { assets.close() }
+        ExportCoordinator.markdownPreviewResourceURLForTesting = assets.assetRoot
+        defer { ExportCoordinator.markdownPreviewResourceURLForTesting = nil }
+        let started = assets.assetRoot.appendingPathComponent("pngquant-started")
+        let slowPngquant = assets.assetRoot.appendingPathComponent("slow-pngquant")
+        try "#!/bin/sh\ntouch '\(started.path)'\nsleep 30\n".write(to: slowPngquant, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: slowPngquant.path)
+        let options = PngquantService.Options(binaryPath: slowPngquant.path, qualityMin: 60, qualityMax: 80, speed: 4, colors: 256)
+        let gate = ExportCoordinator.concurrencyGate
+        let idleCount = gate.activeCount
+        var result: Result<MarkdownExportService.ExportOutcome, Error>?
+
+        let handle = MarkdownExportService.exportToPNGData(
+            html: MarkdownHTMLDocumentBuilder.document(source: "# Slow encoder\n\nBody"),
+            pngquantOptions: options
+        ) { result = $0 }
+        try await waitUntil(timeout: 20) { FileManager.default.fileExists(atPath: started.path) }
+        handle.cancel()
+
+        guard case .failure(let error) = result else { return XCTFail("cancel must complete the export") }
+        XCTAssertTrue(error is CancellationError)
+        XCTAssertEqual(gate.activeCount, idleCount + 1, "the slot stays taken while pngquant is being stopped")
+        try await waitUntil(timeout: 3) { gate.activeCount == idleCount }
+    }
+
+    private func waitUntil(timeout: TimeInterval, _ condition: () -> Bool) async throws {
+        let deadline = Date().addingTimeInterval(timeout)
+        while !condition() {
+            guard Date() < deadline else { return XCTFail("condition not met within \(timeout) s") }
+            try await Task.sleep(nanoseconds: 20_000_000)
+        }
+    }
+
     private func loadRealPalettedFixturePNGData() throws -> Data {
         try TestFixture.data("history-replay-real-screenshot-paletted.png")
     }

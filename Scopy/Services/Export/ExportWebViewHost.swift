@@ -351,6 +351,7 @@ final class ExportCoordinator: NSObject, WKNavigationDelegate {
     }
 
     func cleanup() {
+        let runningWork = [loadTask, exportTask].compactMap { $0 }
         loadTask?.cancel()
         loadTask = nil
         exportTask?.cancel()
@@ -366,7 +367,12 @@ final class ExportCoordinator: NSObject, WKNavigationDelegate {
         hostWindow?.orderOut(nil)
         hostWindow = nil
         Self.activeCoordinators.remove(self)
-        Self.concurrencyGate.finish(id: concurrencyID)
+        // The slot is released only once cancelled capture and encoding work has actually exited.
+        let concurrencyID = concurrencyID
+        Task { @MainActor in
+            for work in runningWork { await work.value }
+            Self.concurrencyGate.finish(id: concurrencyID)
+        }
     }
 
     func reportProgress(_ progress: MarkdownExportService.ExportProgress) {
