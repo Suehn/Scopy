@@ -159,16 +159,16 @@ final class SearchMatchPresentationTests: XCTestCase {
         let context = SearchMatchContext(
             mode: .regex,
             fragments: [SearchMatchFragment(source: .content, text: "", highlightedRanges: [])],
-            occurrenceCount: 1,
+            occurrenceCount: 2,
             occurrenceCountIsTruncated: false,
             isPositionOnly: true
         )
 
         let text = SearchMatchPresentation.attributedText(context: context, itemType: .text, metadataPrefix: nil)
-        XCTAssertEqual(String(text.characters), "Position match · (Blank content)")
+        XCTAssertEqual(String(text.characters), "2 matches · Position match · (Blank content)")
         XCTAssertEqual(
             SearchMatchPresentation.accessibilityDescription(context: context, itemType: .text),
-            "Regex search. 1 matches found. Position match. Content: (Blank content)."
+            "Regex search. 2 matches found. Position match. Content: (Blank content)."
         )
     }
 
