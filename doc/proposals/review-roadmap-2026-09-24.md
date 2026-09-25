@@ -321,3 +321,39 @@ hh 的决定：丢弃工作树实验；D3 折叠 flag；B5 第二实例失败提
 - 真实输入测量（`make perf-search-type`、hover 停顿）**未取得**：本会话的 shell 由 Claude 桌面 app 派生，`AXIsProcessTrusted` 为 false，合成输入不投递、AX 读回为空，脚本按 fail-closed 退出。需在有 Accessibility 授权的 Terminal 里按性能证据协议执行：先 `make release && make perf-scroll-tools`，再 `python3 scripts/perf-scroll/profile_search.py <Release app> before --query markdown --rate 8 --reuse-db --sample`（基线用 `4fbcd89` 的 Release 构建，交错 ABBA）。F3/F4 是否重启以该复测为准。
 - 前端线在其分支上做了真实 App 的 PNG 导出字节对比（两个夹具改前改后 `cmp` 一致）；渲染器 JS 未改动。
 - 未跑：XCUITest（本机被系统认证阻断）、`make test-tsan`（以托管 CI 为准）。
+
+## 11. 第二轮实施状态（2026-09-25，分支 `review-2026-09-24`）
+
+hh 的决定：内部结构项全做，并设红队复核；产品项全部加上；子代理用 Opus 5.5（high），数量减少；前端样式暂不改、前端性能不回归。三条实现线各在独立 worktree，主线程整合并完成捕获线（C3 八文件拆分，779aa98/61b1e13）。
+
+**已完成**
+
+| 线 | 条目 | 说明 |
+| --- | --- | --- |
+| 搜索 | B3 D1–D6 | `SearchEngineImpl` 3,546 → 1,412 行：`FuzzyMatcher`、`FullIndexRanker`、`SearchReadStore`（全部 SQL + `ClipboardItemRow` 解码，与 repository 共用）、`FullIndexStore`/`ShortIndexStore`（detached 构建，搜索等待构建而不在 actor 上同步扫表）、`SearchMatchContextBuilder.attach(to:request:)`、`SearchSQLGoldenTests`（200 例锁定每条 SQL 路径的 id/total/hasMore） |
+| 搜索 | B3-D3 | `SQLiteSchema.requireCurrentSchema`（user_version + 5 张必需表）；trigram 可选路径、LIKE 回退、data_version 令牌、COUNT(*) 回退、只写不读的 `schema_version` 表全部删除 |
+| 搜索 | M5/M6 后端部分 | 并发原语移到 `Scopy/Application/Concurrency/`；actor `ClipboardService → ClipboardBackend`（协议/工厂/`RealClipboardService` 名字不变）；`StoredItem` 别名删除；后端注释英文化；pngquant 日志走 `ScopyLog.pngquant`；与 Foundation 重复的 `NSLock.withLock` 扩展删除 |
+| 渲染 | P-R3 | 表格管道转义、`#标题` 修复、科学 profile 的 LaTeX 规范化（约 1,675 行 Swift）全部迁入渲染器包（render.js、scopyLatexDocument.js、scopyLatexInline.js、scopyLineScan.js、scopyATXHeadings.js）；Swift 只嵌入 source + policy；34 个合成黄金逐字节复现，3,000 例随机 Swift/JS 对照零差异；rendererVersion v13 |
+| 渲染 | P-R4 | 基础 CSS 外置 `scopy-document.css`（manifest 校验）；内联脚本、表格运行时、任务列表、导出页侧逻辑合并为 `documentRuntime.js`（`window.ScopyDocument`）；CSP 去掉 script 的 `'unsafe-inline'`；就绪等两张样式表；文档外壳每份约 99 KB → 1.4 KB |
+| 渲染 | E1 ③④⑥ | 导出等待布局改为页面推送（phase 编号、迟到消息丢弃、无动画帧时按时间回退）；`ExportProgress` + 取消按钮；导出服务拆为 `Scopy/Services/Export/` 七个文件 |
+| 渲染 | R6 + K7 | `MarkdownHTMLRenderer` 并入 `MarkdownHTMLDocumentBuilder.document(source:context:)`；K7 修代码：离屏预热的绘制期限从文档可见才计时，不再把失败 DOM 交给 popover；契约 K1–K13 措辞更新 |
+| 产品 | F8b、F11、F13、D11 | 撤销删除 5 s 窗口（页脚 Undo / ⌘Z）；⌘1–9 复制第 n 个显示行并在按住 ⌘ 时提示；状态栏右键菜单（Open / Settings… / Check for Updates… / Quit）；Launch at Login（`SMAppService.mainApp`，在 Save/Cancel 事务内，待审批时窗口保持并链接到登录项设置）；About 诊断折叠、页脚 Load more 删除；`Scopy/Localization/Localizable.xcstrings`（en 源 + zh-Hans，跟随系统语言；Exact/Fuzzy/Markdown 等模式名与诊断术语不翻译）；app 侧注释英文化与改名 `isSelected`、`rowActivationSurface`、`projectionGeneration` |
+| 整合 | 主线程 | 搜索证据标签本地化；ScopyKit 里的"（空内容）"占位改为空 fragment + 展示层 "(Blank content)"；ScopyKit 排除 `Localization`；裸 HTML 导出入口（`SCOPY_UITEST_*EXPORT_HTML_PATH`）与依赖它的 10 个 UI 测试删除（页面没有文档运行时已不能导出）；`richInteractionRuntime.js` 改走 `ScopyDocument.reportHeight`（合并后审出）；测试注释英文化 |
+
+**红队复核（Codex astra xhigh，只读）**
+
+- 第一轮（搜索 + 产品）9 项：P1 撤销删除跨 `await` 覆盖待删槽（连续删除时第三条留在数据库却被隐藏）→ 8c38e47 在任何 await 前接管槽；P2 延迟删除与分页 offset 不一致 → `pagingOffset`；P2 撤销深页行丢分页 → 就地插回原索引并恢复证据；P2 ⌘ 提示不随顺序变 → 投影变化时重算；P2 冷索引构建 `try?` 静默漏行 → 构建失败并报错；P2 冷构建等待不可取消 → 等待者可取消、共享构建继续；P2 为测试 seam 放宽 `private` 与无消费者接口 → seam 回同文件、恢复 private、删 `buildTrigger`/`TopKSelector.count`；P2 登录项审批状态回到应用后不刷新 → `didBecomeActive` 与 Save 前重读；P2 本地化测试只验证了未查到资源的原串 → 改为校验编译进 bundle 的 `.strings`/`.stringsdict`。
+- 第二轮（渲染线 + 当日整合）14 项：P1 连续删除后真实 `.itemDeleted` 事件递增 `searchVersion` 使最新 Undo 与分页补偿失效 → 待删槽改键在 `projectionIdentity`（只在换查询/清空时变）；P2 撤销用旧整数索引在新捕获后顺序错 → 按删除时的前后邻居插回；P2 竞态测试没进入声称的交错 → 用 60 s 窗口让第二次删除亲自提交第一次并在其中挂起；P2 停止位移日志会把 400 ms 内的新滚动算进去 → 按滚动代次与程序滚动门过滤。渲染侧 P1 导出取消不停止 detached 工作且提前释放并发槽、P1 `\begin{tabular*}` 吞掉表格与后文并被固化为 golden，以及 P2 fence scanner 缩进代码边界、Unicode 扫描上限语义、无动画帧时的陈旧缓存、K7 二次隐藏、Swift 残留的导出 CSS/JS 与 `</head>` 回退、只供测试的 `policyPayloadJSON`、UI 测试删除后的无消费者 hook、导出拆分扩大 internal 状态——交渲染线子代理修。
+
+**滚动停止跳变（hh 2026-09-25 实机反馈）**
+
+- 产品线曾以 a35bc06 把 List 未测量行估高设为 43 pt（文本行高）；hh 在含该提交的构建（0.81.0 build 615）上仍看到快速滚动停下的跳变，且它把段头抬到 43 pt，违反"样式不变"，已回滚（d186bac）。
+- Codex astra（high）根因排序：① NSTableView 延迟测量与混合行高（文本 43 / 文件 ≈52 / 缩略图 ≈60 pt），估计值只有一个，无法用 `defaultMinListRowHeight` 消除；② 分页分块（20 行/20 ms）或模糊搜索排名替换恰在停止瞬间落地；③ 停止后批量提交等待中的缩略图；④ hover 恢复；⑤ `scrollTo` 已由源码排除。
+- 已加观测点 e7c8837：滚动停止后 100/400 ms 内若 clip view 位移 ≥0.5 pt 或文档高度变化，`ScopyLog.ui` 记一条 "Scroll settled: content shifted …"。hh 实机区分步骤：关闭缩略图重复；只在文本行区域快滚；看跳变时页脚计数是否同时变化；停止后立刻把指针移出列表。日志：`log stream --predicate 'subsystem == "com.scopy.app" AND category == "ui"'`。
+
+**未做（明确留下）**
+
+- 滚动停止跳变的修复：待 hh 按上面四步区分后再定；"样式不变"前提下若根因是①，SwiftUI `List` 没有逐行估高 API，需要产品取舍。
+- F3/F4/F6 仍是条件项；前端性能 A/B（`make perf-search-type`、`profile_scroll.py`、`hoverstall`、`list.body`/`row.init`）需要在有 Accessibility 授权的 Terminal 里按性能证据协议做，本会话 shell 不能注入输入。
+- 搜索结果行每次 body 求值都构造 Accessibility 描述（约 7 次本地化调用，改动前也是每次拼接中文），Codex 建议纳入 A/B。
+- B6 每周 `quick_check`、B8、D13 pin → detached、旧提案归档（M8）。
