@@ -19,16 +19,16 @@ verification:
   assets_verify: pass_via_make_build_renderer_64e94929
   test_unit: pass_local_829_tests_2_skips_0_failures_on_e9dc3fb_code_identical
   test_strict: pass_local_829_tests_0_failures_0_warnings_on_e9dc3fb_code_identical
-  test_tsan: pending_hosted_ci
+  test_tsan: fail_hosted_36158384294_same_three_live_webkit_export_tests_as_unit_see_hosted_ci
   snapshot_release: pass_cmd_p95_0_48ms_cm_p95_4_87ms_cold_43_6ms_db_bfcf2820
   frontend_ab: pass_v0_81_0_vs_e9dc3fb_no_regression_list_body_minus_31pct_row_init_minus_42pct_logs_perf_ab_2026-09-25_23-33-18
   frontend_profile_full: not_run_xcuitest_blocked_on_this_machine
   test_ui_subset: not_run_xcuitest_blocked_on_this_machine
   png_export: pass_real_app_two_fixtures_byte_identical_across_the_renderer_merge
-  release_commit: pending
-  release_workflow: pending
-  dmg_sha256: pending
-  homebrew_casks: pending
-  tap_automation: pending
-  hosted_ci: pending
-  installed_bundle: pending
+  release_commit: d62b13fca566d5e827f2a39ac72aa390acd0b038
+  release_workflow: https://github.com/Suehn/Scopy/actions/runs/36158383939
+  dmg_sha256: b585fae135038c62dae0957c9f76d1fc3c2cccee07d98575eee9380782c9bb58
+  homebrew_casks: pass_repo_adedc80_and_manual_tap_8272557
+  tap_automation: failed_manual_ssh_sync_completed
+  hosted_ci: build_and_policy_pass_36158384230_unit_and_strict_fail_on_three_live_webkit_tests_stylesheet_reason_and_two_export_tests_fix_pushed_after_release
+  installed_bundle: pass_Applications_Scopy_0_82_0_build_653_launched_434_bundle_entries_match_DMG
