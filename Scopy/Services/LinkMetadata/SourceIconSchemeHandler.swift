@@ -10,7 +10,7 @@ public final class SourceIconSchemeHandler: NSObject, WKURLSchemeHandler {
     private let load: @Sendable (URL) async -> Data?
 
     public override init() {
-        self.load = { origin in
+        self.load = { @Sendable origin in
             let settings = await SettingsStore.shared.load()
             let environment = ProcessInfo.processInfo.environment
             let testing = ProcessInfo.processInfo.arguments.contains("--uitesting")
