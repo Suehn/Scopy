@@ -19,6 +19,8 @@ import { codexFileIcon, codexPluginIcon, localFileKind } from "./scopyCodexIcons
 import { scopySourceIcon, rehypeScopyNativeSourceIcons } from "./scopySourceIcon.js";
 import { preprocessBackslashMath } from "./scopyBackslashMathPreprocessor.js";
 import { repairATXHeadings } from "./scopyATXHeadings.js";
+import { normalizeLatexDocument } from "./scopyLatexDocument.js";
+import { normalizeLatexInline } from "./scopyLatexInline.js";
 import { createFenceTracker, leadingIndentSpaces } from "./scopyLineScan.js";
 import { remarkScopyImageGroups } from "./remarkScopyImageGroups.js";
 import { remarkScopyPublicCards } from "./remarkScopyPublicCards.js";
@@ -44,10 +46,18 @@ export function render(source, policy = {}) {
 function renderInternal(source, policy = {}) {
   const warnings = [];
   const normalizedPolicy = normalizePolicy(policy);
-  // Source-level repairs run in this order: heading whitespace first, so a flat `#`-led row is
-  // classified before table detection; then table code-span pipes; then backslash math.
+  // Source-level repairs run in this order: the scientific-profile LaTeX document and inline
+  // repairs (policy-gated); heading whitespace, so a flat `#`-led row is classified before table
+  // detection; table code-span pipes; then backslash math.
   const originalSource = String(source || "");
-  const headingRepaired = repairATXHeadings(originalSource);
+  let scientificRepaired = originalSource;
+  if (normalizedPolicy.allowLatexDocumentNormalize) {
+    scientificRepaired = normalizeLatexDocument(scientificRepaired);
+  }
+  if (normalizedPolicy.allowLatexInlineTextNormalize) {
+    scientificRepaired = normalizeLatexInline(scientificRepaired);
+  }
+  const headingRepaired = repairATXHeadings(scientificRepaired);
   const tableCodeSpanGuarded = protectTableCodeSpanPipes(headingRepaired);
   const preprocessed = preprocessBackslashMath(tableCodeSpanGuarded);
   const repairMetadata = { repairedMathCount: 0 };
@@ -456,9 +466,11 @@ function visitElements(node, visitor) {
 }
 
 // The policy object is the exact payload the app embeds next to the source; the shared
-// contract fixture test/fixtures/policy-contract.json pins both sides. Only these two keys exist.
+// contract fixture test/fixtures/policy-contract.json pins both sides. Only these keys exist.
 function normalizePolicy(policy) {
   return {
+    allowLatexDocumentNormalize: policy.allowLatexDocumentNormalize === true,
+    allowLatexInlineTextNormalize: policy.allowLatexInlineTextNormalize === true,
     allowLooseMathRepair: policy.allowLooseMathRepair === true,
     linkEnrichment: policy.linkEnrichment && typeof policy.linkEnrichment === "object" && !Array.isArray(policy.linkEnrichment)
       ? policy.linkEnrichment

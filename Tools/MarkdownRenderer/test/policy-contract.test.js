@@ -6,7 +6,7 @@ import { render } from "../src/render.js";
 // The app embeds exactly this payload (bytes pinned by Swift MarkdownRenderingCorpusContractTests
 // against the same fixture); here the renderer must accept each payload and act on it.
 const contract = JSON.parse(readFileSync(new URL("./fixtures/policy-contract.json", import.meta.url), "utf8"));
-const rendererPolicyKeys = ["allowLooseMathRepair", "linkEnrichment"];
+const rendererPolicyKeys = ["allowLatexDocumentNormalize", "allowLatexInlineTextNormalize", "allowLooseMathRepair", "linkEnrichment"];
 
 for (const testCase of contract.cases) {
   test(`policy contract: ${testCase.name}`, () => {
@@ -23,5 +23,7 @@ for (const testCase of contract.cases) {
     const result = render(contract.source, policy);
     assert.equal(result.metadata.repairedMathCount, testCase.expectedRepairedMathCount);
     assert.equal(/scopy-rich-news/.test(result.html), testCase.expectsNewsCards);
+    assert.equal(/<h1>Heading<\/h1>/.test(result.html), testCase.expectsLatexDocument);
+    assert.equal(/<strong>Bold<\/strong>/.test(result.html), testCase.expectsLatexInline);
   });
 }

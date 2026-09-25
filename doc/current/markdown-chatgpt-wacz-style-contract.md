@@ -90,9 +90,9 @@ source + MarkdownRenderContext
 
 Authoritative implementation surfaces:
 
-- `Scopy/Views/History/MarkdownHTMLRenderer.swift`: the only document entrypoint. It changes source bytes only for the scientific profiles (`scientificMarkdown`, `latexDocumentLike`, `pdfOCRScientific`), whose LaTeX document/inline normalization is still Swift; every other profile reaches the bundle verbatim.
+- `Scopy/Views/History/MarkdownHTMLRenderer.swift`: the only document entrypoint. It never changes source bytes: the source is embedded verbatim with the policy (`allowLatexDocumentNormalize`, `allowLatexInlineTextNormalize`, `allowLooseMathRepair`, optional `linkEnrichment`) chosen by the Swift profile detector.
 - `Scopy/Views/History/MarkdownHTMLDocumentBuilder.swift`: local assets, CSS, table/runtime measurement, readiness, and export hooks.
-- `Tools/MarkdownRenderer/src/render.js`: Markdown AST/HTML AST pipeline and every profile-independent source repair (ATX heading whitespace, table code-span pipes, backslash math), in that order; `scopyLineScan.js` is the one fence/indentation scanner those repairs share.
+- `Tools/MarkdownRenderer/src/render.js`: Markdown AST/HTML AST pipeline and every source repair, in this order: the policy-gated scientific LaTeX document repair (`scopyLatexDocument.js`) and inline/math-segment repair (`scopyLatexInline.js`), ATX heading whitespace, table code-span pipes, backslash math. `scopyLineScan.js` is the one fence/indentation/inline-code scanner those repairs share.
 - `Tools/MarkdownRenderer/src/remarkScopySafeHTML.js`: the closed user-authored safe-HTML recognizer; unsupported or malformed forms fail to literal text.
 - `Tools/MarkdownRenderer/src/scopyLocalImageAssets.js`: the closed bundled-image allowlist and exact public-URL mappings used by fixtures.
 - `Tools/MarkdownRenderer/src/remarkScopyRich.js`: strict v2 validation and the only trusted rich-surface HAST builders.
@@ -245,7 +245,7 @@ Rich v2 exports remain true-color PNGs. Palette reduction is skipped whenever th
 | Thematic breaks | CommonMark thematic breaks become `<hr>`. |
 | Footnotes | GFM footnotes are supported. Renderer-generated IDs use exactly one namespace: definition `scopy-fn-<normalized-id>`, reference `scopy-fnref-<normalized-id>`, and repeated references append `-2`, `-3`, etc. Heading IDs are not synthesized. |
 
-All source normalization is syntax-aware and, apart from the scientific-profile LaTeX normalization, runs in `render.js` so Node tests see the production input:
+All source normalization is syntax-aware and runs in `render.js` before parsing, so Node tests see the production input:
 
 - fenced code, indented code, inline code, links, images, reference definitions, URLs, and file paths are protected before loose scientific-text repair;
 - `#标题` repair does not rewrite code fences, indented code, or shebangs;
@@ -512,7 +512,7 @@ Focused renderer assertions live in:
 - `Tools/MarkdownRenderer/test/source-icons.test.js`
 - `Tools/MarkdownRenderer/test/safe-html.test.js`
 - `Tools/MarkdownRenderer/test/asset-contract.test.js`
-- `Tools/MarkdownRenderer/test/source-repairs.test.js`
+- `Tools/MarkdownRenderer/test/source-repairs.test.js` and `Tools/MarkdownRenderer/test/scientific-repairs.test.js` (synthetic scientific-profile goldens in `test/fixtures/scientific-repairs.json`)
 - `Tools/MarkdownRenderer/test/corpus.test.js` and `Tools/MarkdownRenderer/test/policy-contract.test.js`, paired with `ScopyTests/MarkdownRenderingCorpusContractTests.swift` over the same `cases.json` and `test/fixtures/policy-contract.json`
 - `ScopyTests/ChatGPTMarkdownRendererTests.swift`
 - `ScopyTests/WebViewLifecycleTests.swift`

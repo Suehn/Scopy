@@ -1,0 +1,209 @@
+{
+  "comment": "Synthetic inputs for the scientific-profile source repairs. `expected` was produced by the former Swift implementation (MarkdownHTMLRenderer.preprocess with the scientificMarkdown policy for `inline`, the latexDocumentLike policy for `document`); the JS port must reproduce it byte for byte.",
+  "cases": [
+    {
+      "name": "document: newline forms are unified",
+      "level": "document",
+      "source": "\\section{Alpha}\r\nline one\rline two line three line four",
+      "expected": "# Alpha\nline one\nline two\nline three\nline four"
+    },
+    {
+      "name": "document: sectioning commands become headings",
+      "level": "document",
+      "source": "\\section{Intro}\n\\section*{Starred}\n\\subsection{Sub}\n\\subsubsection*{Deep}\n  \\paragraph{Para}\n\\subparagraph*{Sub para}\n\\section{}\n\\section{Open",
+      "expected": "# Intro\n# Starred\n## Sub\n### Deep\n#### Para\n##### Sub para\n\\section{}\n\\section{Open"
+    },
+    {
+      "name": "document: labels are dropped outside code",
+      "level": "document",
+      "source": "\\label{sec:intro}\nText \\label{eq:1} continues \\label{a{b}c} here.\n`\\label{kept}`\nInline `\\label{code}` and \\label{gone} mixed.",
+      "expected": "Text  continues  here.\n`\\label{kept}`\nInline `\\label{code}` and  mixed."
+    },
+    {
+      "name": "document: quote and center environments",
+      "level": "document",
+      "source": "\\begin{quote}\nQuoted line\n\n\\section{Inside}\n\\end{quote}\n\\begin{center}\nCentered\n\\end{center}\n\\begin{quote}[x]\nOption quote\n\\end{quote}",
+      "expected": "> Quoted line\n\n> # Inside\nCentered\n> Option quote"
+    },
+    {
+      "name": "document: tabular becomes a pipe table",
+      "level": "document",
+      "source": "\\begin{tabular}{|l|c|r|}\n\\hline\nName & Value & Note \\\\\n\\hline\nA & 1 & x \\\\ B & 2 \\\\\nC & 3 & y & extra \\\\\n\\hline{}\nD \\& E & 4 & z\n\\hline% trailing\n\\end{tabular}\nAfter table",
+      "expected": "| Name | Value | Note |\n| --- | --- | --- |\n| A | 1 | x |\n| B | 2 |  |\n| C | 3 | y extra |\n| D \\& E | 4 | z |\nAfter table"
+    },
+    {
+      "name": "document: starred tabular inside a quote",
+      "level": "document",
+      "source": "\\begin{quote}\n\\begin{tabular*}{\\textwidth}{ll}\nH1 & H2 \\\\\nv1 & v2 \\\\\n\\end{tabular*}\n\\end{quote}",
+      "expected": ""
+    },
+    {
+      "name": "document: empty tabular",
+      "level": "document",
+      "source": "\\begin{tabular}{l}\n\\hline\n\\end{tabular}\nnext",
+      "expected": "next"
+    },
+    {
+      "name": "document: nested itemize and enumerate",
+      "level": "document",
+      "source": "\\begin{itemize}\n\\item First\n  \\item[--] Dashed option\n\\begin{enumerate}\n\\item One\n\\item[(b)] Two\n\\end{enumerate}\n\\item Back\n\\end{itemize}\n\\item Orphan item\n\\end{enumerate}",
+      "expected": "- First\n- Dashed option\n  1. One\n  1. Two\n- Back\n- Orphan item"
+    },
+    {
+      "name": "document: horizontal rules",
+      "level": "document",
+      "source": "\\noindent\\rule{\\linewidth}{0.4pt}\n\\rule{\\textwidth}{1pt}\n\\rule{\\linewidth}{1pt} trailing\nsee \\rule{\\textwidth}{1pt}",
+      "expected": "---\n---\n---\nsee \\rule{\\textwidth}{1pt}"
+    },
+    {
+      "name": "document: fenced code is untouched",
+      "level": "document",
+      "source": "```latex\n\\section{Code}\n\\label{x}\n```\n~~~~\n```\n\\item still code\n```\n~~~~\n\\section{After}",
+      "expected": "```latex\n\\section{Code}\n\\label{x}\n```\n~~~~\n```\n\\item still code\n```\n~~~~\n# After"
+    },
+    {
+      "name": "document: syntax islands survive",
+      "level": "document",
+      "source": "\\section{[Link \\label{x}](https://example.com/\\label{y})}\n[paper]: /Users/alice/paper_v2.md \"P\"\nSee <https://example.com/a\\label{z}> and https://example.com/\\label{w} or /Users/alice/\\label{v}.md\n![img \\label{i}](./img\\label{j}.png) and [ref \\label{r}][paper] and ~/x\\label{t} ../y\\label{u}\n`code \\label{c}` ``two ` ticks \\label{d}`` file://Host/\\label{f}",
+      "expected": "# [Link \\label{x}](https://example.com/\\label{y})\n[paper]: /Users/alice/paper_v2.md \"P\"\nSee <https://example.com/a\\label{z}> and https://example.com/\\label{w} or /Users/alice/\\label{v}.md\n![img \\label{i}](./img\\label{j}.png) and [ref \\label{r}][paper] and ~/x\\label{t} ../y\\label{u}\n`code \\label{c}` ``two ` ticks \\label{d}`` file://Host/\\label{f}"
+    },
+    {
+      "name": "document: unclosed fence is one island",
+      "level": "document",
+      "source": "\\section{Top}\n```\n\\section{Never}\n\\label{never}",
+      "expected": "# Top\n```\n\\section{Never}\n\\label{never}"
+    },
+    {
+      "name": "document: CRLF reaches the island scanner as one line",
+      "level": "document",
+      "source": "`a`\r\n\\section{Title}\r\n\\label{x}\r\n[l](http://e.com)",
+      "expected": "`a`\n# Title\n[l](http://e.com)"
+    },
+    {
+      "name": "inline: text formatting commands",
+      "level": "inline",
+      "source": "A \\textbf{bold {nested}} and \\emph{emph} and \\textit{it} word.\nUnbalanced \\textbf{open",
+      "expected": "A **bold {nested}** and *emph* and *it* word.\nUnbalanced \\textbf{open"
+    },
+    {
+      "name": "inline: formatting commands inside code stay literal",
+      "level": "inline",
+      "source": "`\\textbf{code}` \\textbf{real}\n```\n\\emph{fenced}\n```\n\\emph{after}",
+      "expected": "`\\textbf{code}` **real**\n```\n\\emph{fenced}\n```\n*after*"
+    },
+    {
+      "name": "inline: formatting commands inside math stay math",
+      "level": "inline",
+      "source": "$\\textbf{x}$ and \\textbf{y $z$}",
+      "expected": "$\\textbf{x}$ and **y $z$**"
+    },
+    {
+      "name": "inline: escaped commands inside math",
+      "level": "inline",
+      "source": "$\\\\alpha + \\\\beta$ and $a \\\\ b$ and $\\\\\\\\gamma$ outside \\\\delta",
+      "expected": "$\\alpha + \\beta$ and $a \\\\ b$ and $\\gamma$ outside \\\\delta"
+    },
+    {
+      "name": "inline: text underscores inside math",
+      "level": "inline",
+      "source": "$\\text{drop_last} + \\text{a\\_b} + \\text{x_{y}_z}$ and $\\text{open_$",
+      "expected": "$\\text{drop\\_last} + \\text{a\\_b} + \\text{x\\_{y}\\_z}$ and $\\text{open_$"
+    },
+    {
+      "name": "inline: labels inside math",
+      "level": "inline",
+      "source": "\\begin{equation}\n  E = mc^2 \\label{eq:energy}\n\\end{equation}\n$$\nx \\label{eq:x}\n$$",
+      "expected": "\\begin{equation}\n  E = mc^2\\end{equation}\n$$\nx$$"
+    },
+    {
+      "name": "inline: set braces inside math",
+      "level": "inline",
+      "source": "$\\mathcal{N}_u={i\\mid (u,i)\\in E}$ and $S={x | x>0}$ and $T={a,b}$ and $U={\\{a\\}|b}$",
+      "expected": "$\\mathcal{N}_u=\\{i\\mid (u,i)\\in E\\}$ and $S=\\{x | x>0\\}$ and $T={a,b}$ and $U={\\{a\\}|b}$"
+    },
+    {
+      "name": "inline: aligned upgrade",
+      "level": "inline",
+      "source": "$a &= b \\\\ c &= d$ and $x & y$ and $\\begin{matrix} a & b \\end{matrix}$",
+      "expected": "$$\\begin{aligned} a &= b \\\\ c &= d \\end{aligned}$$ and $x & y$ and $\\begin{matrix} a & b \\end{matrix}$"
+    },
+    {
+      "name": "inline: adjacent dollar runs",
+      "level": "inline",
+      "source": "$\\mathbf{b}$$\\in$ R and $x$$, done and $$y$$ block and a$$b",
+      "expected": "$\\mathbf{b}$ $\\in$ R and $x$, done and $$y$$ block and a$ $b"
+    },
+    {
+      "name": "inline: stray dollar before spacing commands",
+      "level": "inline",
+      "source": "$a \\quad $\\mathbf{b}$ and $c \\,  $\\d$ and $e $\\f$",
+      "expected": "$a \\quad \\mathbf{b}$ and $c \\,  \\d$ and $e $\\f$"
+    },
+    {
+      "name": "inline: backslash delimiters",
+      "level": "inline",
+      "source": "\\(\\\\alpha\\) and \\[x={a\\mid b}\\] and \\(\\) empty",
+      "expected": "\\(\\alpha\\) and \\[x=\\{a\\mid b\\}\\] and \\(\\) empty"
+    },
+    {
+      "name": "inline: escaped dollars and currency",
+      "level": "inline",
+      "source": "Costs \\$5 and \\$10, $5 and $10, $ x $ spaced",
+      "expected": "Costs \\$5 and \\$10, $5 and $10, $ x $ spaced"
+    },
+    {
+      "name": "inline: multi-line display blocks",
+      "level": "inline",
+      "source": "$$\n\\\\frac{a}{b}\n$$\n  $$\n  \\text{indented_block}\n  $$\n$$\nunclosed \\\\alpha",
+      "expected": "$$\n\\frac{a}{b}\n$$\n    $$\n  \\text{indented\\_block}\n  $$\n$$\nunclosed \\\\alpha"
+    },
+    {
+      "name": "inline: multi-line environments",
+      "level": "inline",
+      "source": "\\begin{align*}\n a &= b \\label{l1}\\\\\n c &= d\n\\end{align*}\n\\begin{cases} x \\end{cases}\n  \\begin{pmatrix}\n1 & 2\n\\end{pmatrix}\n\\begin{unknown}\nx_1\n\\end{unknown}\n\\begin{gather}\nnever closed \\\\alpha",
+      "expected": "\\begin{align*}\n a &= b\\\\\n c &= d\n\\end{align*}\n\\begin{cases} x \\end{cases}\n    \\begin{pmatrix}\n1 & 2\n\\end{pmatrix}\n\\begin{unknown}\nx_1\n\\end{unknown}\n\\begin{gather}\nnever closed \\\\alpha"
+    },
+    {
+      "name": "inline: environment nested in inline math",
+      "level": "inline",
+      "source": "$f(x)=\\begin{cases} 1 & x>0 \\\\ 0 & \\text{other_wise} \\end{cases}$ end",
+      "expected": "$f(x)=\\begin{cases} 1 & x>0 \\\\ 0 & \\text{other\\_wise} \\end{cases}$ end"
+    },
+    {
+      "name": "inline: math inside inline code stays code",
+      "level": "inline",
+      "source": "`$\\\\alpha$` then $\\\\beta$ and ``$\\text{a_b}$`` done",
+      "expected": "`$\\\\alpha$` then $\\beta$ and ``$\\text{a_b}$`` done"
+    },
+    {
+      "name": "inline: math inside fences stays code",
+      "level": "inline",
+      "source": "```\n$\\\\alpha$\n\\begin{equation}\n\\label{x}\n\\end{equation}\n```\n$\\\\beta$",
+      "expected": "```\n$\\\\alpha$\n\\begin{equation}\n\\label{x}\n\\end{equation}\n```\n$\\beta$"
+    },
+    {
+      "name": "inline: CRLF text is scanned as one line",
+      "level": "inline",
+      "source": "$\\\\alpha$\r\n\\textbf{b}\r\n```\r\n$\\\\c$\r\n```",
+      "expected": "$\\alpha$\r\n**b**\r\n```\r\n$\\\\c$\r\n```"
+    },
+    {
+      "name": "inline: CRLF inside inline math is one character",
+      "level": "inline",
+      "source": "$\\\\alpha\r\n\\\\beta$ and $a\nb$",
+      "expected": "$\\alpha\r\n\\beta$ and $a\nb$"
+    },
+    {
+      "name": "inline: oversized inline math is left alone",
+      "level": "inline",
+      "source": "$\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a$ tail $\\\\b$",
+      "expected": "$\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a\\\\a$ tail $\\\\b$"
+    },
+    {
+      "name": "document: sectioning with inline math and formatting",
+      "level": "document",
+      "source": "\\section{Energy $\\\\alpha$}\n\\begin{itemize}\n\\item \\textbf{Mass} $m={x\\mid x>0}$ \\label{m}\n\\end{itemize}\n\\begin{equation}\nE=mc^2 \\label{e}\n\\end{equation}",
+      "expected": "# Energy $\\alpha$\n- **Mass** $m=\\{x\\mid x>0\\}$\n\\begin{equation}\nE=mc^2 \n\\end{equation}"
+    }
+  ]
+}

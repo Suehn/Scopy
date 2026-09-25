@@ -398,9 +398,9 @@ final class ChatGPTMarkdownRendererTests: XCTestCase {
         XCTAssertFalse(base.isEquivalent(to: nextGeneration))
     }
 
-    /// Default profiles embed the source verbatim: heading and table-pipe repair happen in the
-    /// renderer bundle, so the Node corpus test sees exactly the production input.
-    func testDefaultProfilesEmbedSourceVerbatim() throws {
+    /// Every profile embeds the source verbatim: all source repair happens in the renderer bundle,
+    /// so the Node corpus test sees exactly the production input.
+    func testEveryProfileEmbedsSourceVerbatim() throws {
         let casesData = try TestFixture.data("MarkdownRenderingCorpus/cases.json")
         let cases = try XCTUnwrap(JSONSerialization.jsonObject(with: casesData) as? [[String: Any]])
         let fixtures = ["markdown_delimiter_repro.md"]
@@ -409,14 +409,11 @@ final class ChatGPTMarkdownRendererTests: XCTestCase {
         for fixture in fixtures {
             let source = try String(contentsOf: TestFixture.url(fixture), encoding: .utf8)
             let context = MarkdownRenderContextResolver.defaultContext(for: source)
-            guard !context.policy.allowLatexDocumentNormalize, !context.policy.allowLatexInlineTextNormalize else {
-                continue
-            }
             let html = MarkdownHTMLRenderer.render(markdown: source, context: context)
             XCTAssertEqual(Data(try embeddedSource(in: html).utf8), Data(source.utf8), fixture)
             checked += 1
         }
-        XCTAssertGreaterThan(checked, 7)
+        XCTAssertGreaterThan(checked, 12)
     }
 
     /// The `</head>` ruling: embedded source can never close the shell's own elements because

@@ -63,3 +63,74 @@ export function createFenceTracker() {
     }
   };
 }
+
+// The scientific-profile repairs (scopyLatexDocument.js, scopyLatexInline.js) were ported from
+// Swift and keep its `Character` line model: "\r\n" is one character, so only a "\n" that does
+// not follow "\r" ends a line. Every other source repair splits on "\n".
+export function splitCharacterLines(text) {
+  const lines = [];
+  let start = 0;
+  for (let i = text.indexOf("\n"); i >= 0; i = text.indexOf("\n", i + 1)) {
+    if (i > 0 && text.charCodeAt(i - 1) === 13) {
+      continue;
+    }
+    lines.push(text.slice(start, i));
+    start = i + 1;
+  }
+  lines.push(text.slice(start));
+  return lines;
+}
+
+// Swift `.whitespacesAndNewlines`: Unicode Zs, tab, and U+000A-U+000D, U+0085, U+2028, U+2029.
+const EDGE_BLANK = /^[\t\n\v\f\r\u0085\u2028\u2029\p{Zs}]+|[\t\n\v\f\r\u0085\u2028\u2029\p{Zs}]+$/gu;
+
+export function trimBlankAndNewlines(text) {
+  return text.replace(EDGE_BLANK, "");
+}
+
+const WHITE_SPACE = /\p{White_Space}/u;
+
+/** Swift `Character.isWhitespace` for one UTF-16 unit (every White_Space scalar is in the BMP). */
+export function isWhitespaceUnit(unit) {
+  return unit !== undefined && WHITE_SPACE.test(unit);
+}
+
+/**
+ * Applies `transform` to the parts of one line outside backtick code spans. A run of N backticks
+ * opens a span that only a run of exactly N backticks closes; an unclosed span runs to the end of
+ * the line. Backtick runs and code-span bodies are copied unchanged.
+ */
+export function processInlineCode(line, transform) {
+  if (line.indexOf("`") === -1) {
+    return transform(line);
+  }
+  let result = "";
+  let inCode = false;
+  let openRun = 0;
+  let segmentStart = 0;
+  let i = 0;
+  while (i < line.length) {
+    if (line[i] !== "`") {
+      i += 1;
+      continue;
+    }
+    let j = i;
+    while (j < line.length && line[j] === "`") {
+      j += 1;
+    }
+    const segment = line.slice(segmentStart, i);
+    result += inCode ? segment : transform(segment);
+    result += line.slice(i, j);
+    if (!inCode) {
+      inCode = true;
+      openRun = j - i;
+    } else if (j - i === openRun) {
+      inCode = false;
+      openRun = 0;
+    }
+    i = j;
+    segmentStart = i;
+  }
+  const tail = line.slice(segmentStart);
+  return result + (inCode ? tail : transform(tail));
+}

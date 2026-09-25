@@ -2850,12 +2850,16 @@ enum MarkdownHTMLDocumentBuilder {
     /// `Tools/MarkdownRenderer/test/fixtures/policy-contract.json`.
     static func policyPayloadJSON(context: MarkdownRenderContext) -> String {
         jsonLiteral(RenderPolicyPayload(
+            allowLatexDocumentNormalize: context.policy.allowLatexDocumentNormalize,
+            allowLatexInlineTextNormalize: context.policy.allowLatexInlineTextNormalize,
             allowLooseMathRepair: context.policy.allowLooseMathRepair,
             linkEnrichment: context.linkEnrichment.flatMap { $0.entries.isEmpty ? nil : $0.entries }
         ))
     }
 
     private struct RenderPolicyPayload: Encodable {
+        let allowLatexDocumentNormalize: Bool
+        let allowLatexInlineTextNormalize: Bool
         let allowLooseMathRepair: Bool
         /// Omitted when there is no frozen sidecar or it is empty, so plain documents share one payload.
         let linkEnrichment: [String: LinkEnrichmentEntry]?

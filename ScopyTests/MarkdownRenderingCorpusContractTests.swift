@@ -9,6 +9,12 @@ final class MarkdownRenderingCorpusContractTests: XCTestCase {
         let name: String
         let file: String
         let expectedProfile: String
+        let policy: DeclaredPolicy
+    }
+
+    private struct DeclaredPolicy: Decodable {
+        let allowLatexDocumentNormalize: Bool
+        let allowLatexInlineTextNormalize: Bool
         let allowLooseMathRepair: Bool
     }
 
@@ -23,7 +29,7 @@ final class MarkdownRenderingCorpusContractTests: XCTestCase {
         let payload: String
     }
 
-    func testCorpusProfileAndLooseRepairPolicyMatchDeclarations() throws {
+    func testCorpusProfileAndRepairPolicyMatchDeclarations() throws {
         let cases = try JSONDecoder().decode([CorpusCase].self, from: TestFixture.data("MarkdownRenderingCorpus/cases.json"))
         XCTAssertGreaterThanOrEqual(cases.count, 12)
         for testCase in cases {
@@ -31,7 +37,9 @@ final class MarkdownRenderingCorpusContractTests: XCTestCase {
             let context = MarkdownRenderContextResolver.defaultContext(for: source)
 
             XCTAssertEqual(context.profile.rawValue, testCase.expectedProfile, testCase.name)
-            XCTAssertEqual(context.policy.allowLooseMathRepair, testCase.allowLooseMathRepair, testCase.name)
+            XCTAssertEqual(context.policy.allowLatexDocumentNormalize, testCase.policy.allowLatexDocumentNormalize, testCase.name)
+            XCTAssertEqual(context.policy.allowLatexInlineTextNormalize, testCase.policy.allowLatexInlineTextNormalize, testCase.name)
+            XCTAssertEqual(context.policy.allowLooseMathRepair, testCase.policy.allowLooseMathRepair, testCase.name)
         }
     }
 
@@ -41,7 +49,7 @@ final class MarkdownRenderingCorpusContractTests: XCTestCase {
             .deletingLastPathComponent()
             .appendingPathComponent("Tools/MarkdownRenderer/test/fixtures/policy-contract.json")
         let contract = try JSONDecoder().decode(PolicyContract.self, from: Data(contentsOf: fixture))
-        XCTAssertGreaterThanOrEqual(contract.cases.count, 4)
+        XCTAssertGreaterThanOrEqual(contract.cases.count, 5)
         for testCase in contract.cases {
             let profile = try XCTUnwrap(MarkdownSourceProfile(rawValue: testCase.profile), testCase.name)
             var context = MarkdownRenderContext(
