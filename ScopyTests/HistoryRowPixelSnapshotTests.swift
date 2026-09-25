@@ -96,7 +96,7 @@ final class HistoryRowPixelSnapshotTests: XCTestCase {
         let coordinator = HistoryListInteractionCoordinator()
         return HistoryItemView(
             item: item(for: shape),
-            isKeyboardSelected: shape == .textSelected,
+            isSelected: shape == .textSelected,
             settings: .default,
             searchMatchContext: nil,
             onSelect: {},

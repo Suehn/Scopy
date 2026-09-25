@@ -240,7 +240,7 @@ final class ClipboardItemContentRevisionTests: XCTestCase {
             HistoryItemView.shouldShowOptimizeButton(
                 itemType: .image,
                 isHovering: true,
-                isKeyboardSelected: false,
+                isSelected: false,
                 isInteractionSuppressed: false
             )
         )
@@ -248,7 +248,7 @@ final class ClipboardItemContentRevisionTests: XCTestCase {
             HistoryItemView.shouldShowOptimizeButton(
                 itemType: .image,
                 isHovering: false,
-                isKeyboardSelected: true,
+                isSelected: true,
                 isInteractionSuppressed: false
             )
         )
@@ -256,7 +256,7 @@ final class ClipboardItemContentRevisionTests: XCTestCase {
             HistoryItemView.shouldShowOptimizeButton(
                 itemType: .image,
                 isHovering: true,
-                isKeyboardSelected: true,
+                isSelected: true,
                 isInteractionSuppressed: true
             )
         )
@@ -264,7 +264,7 @@ final class ClipboardItemContentRevisionTests: XCTestCase {
             HistoryItemView.shouldShowOptimizeButton(
                 itemType: .text,
                 isHovering: true,
-                isKeyboardSelected: true,
+                isSelected: true,
                 isInteractionSuppressed: false
             )
         )
@@ -341,7 +341,7 @@ final class ClipboardItemContentRevisionTests: XCTestCase {
     ) -> HistoryItemView {
         HistoryItemView(
             item: item,
-            isKeyboardSelected: false,
+            isSelected: false,
             settings: settings,
             searchMatchContext: searchMatchContext,
             onSelect: {},

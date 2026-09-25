@@ -102,9 +102,9 @@ final class SettingsViewModel {
         let disk = diskSizeBytes
         guard estimated > 0, disk > 0 else { return }
 
-        // v0.50.fix19: 当用户在应用外部覆盖/压缩了 content/ 下的图片后，
-        // DB 的 size_bytes 可能仍为旧值，导致估算值反而 > 真实磁盘占用。
-        // 这里加一个轻量阈值，避免在极小差异/四舍五入情况下反复触发扫描。
+        // After images under content/ are overwritten or compressed outside the app, the stored
+        // size_bytes can exceed the real disk usage. The slack keeps rounding and tiny differences
+        // from triggering a rescan every time.
         guard estimated > disk + externalImageSizeMismatchSlackBytes else { return }
 
         let now = Date()

@@ -345,7 +345,7 @@ final class HistoryViewModel {
     /// reader. Readers observe the three cells below, which `mutateProjection` writes only when
     /// their value changes.
     @ObservationIgnored private var listState = HistoryListState()
-    private(set) var itemsRevision: UInt64 = 0
+    private(set) var projectionGeneration: UInt64 = 0
     private(set) var totalCount = 0
     private(set) var canLoadMore = false
     @ObservationIgnored private var contentRevisionRegistry =
@@ -370,18 +370,18 @@ final class HistoryViewModel {
     }
 
     var pinnedItems: [ClipboardItemDTO] {
-        _ = itemsRevision
+        _ = projectionGeneration
         return listState.pinnedItems
     }
 
     var unpinnedItems: [ClipboardItemDTO] {
-        _ = itemsRevision
+        _ = projectionGeneration
         return listState.unpinnedItems
     }
 
     var items: [ClipboardItemDTO] {
         get {
-            _ = itemsRevision
+            _ = projectionGeneration
             return listState.items
         }
         set {
@@ -395,7 +395,7 @@ final class HistoryViewModel {
     }
 
     var loadedCount: Int {
-        _ = itemsRevision
+        _ = projectionGeneration
         return listState.loadedCount
     }
 
@@ -859,14 +859,14 @@ final class HistoryViewModel {
             var fetchedItems: [ClipboardItemDTO] = []
             var hasStableSnapshot = false
             for _ in 0..<2 {
-                let revisionBeforeFetch = itemsRevision
+                let revisionBeforeFetch = projectionGeneration
                 let pinnedItems = try await service.fetchPinned()
                 let recentItems = try await service.fetchRecentUnpinned(
                     limit: Self.initialPageSize,
                     offset: 0
                 )
                 guard shouldApplyLoadResult(version: currentVersion) else { return }
-                guard itemsRevision == revisionBeforeFetch else { continue }
+                guard projectionGeneration == revisionBeforeFetch else { continue }
                 fetchedItems = excludingKnownDeletedItems(pinnedItems + recentItems)
                 hasStableSnapshot = true
                 break
@@ -973,7 +973,7 @@ final class HistoryViewModel {
         Task { await loadMore() }
     }
 
-    /// Rows a page is applied in per run-loop turn, so a 100-row page costs five small List
+    /// Rows applied per chunk; chunks are 20 ms apart so a 100-row page costs five small List
     /// updates instead of one long one while the user is still scrolling.
     static let loadMoreApplyChunkRows = 20
 
@@ -1858,7 +1858,7 @@ final class HistoryViewModel {
     /// only if its value moved, so a pagination-only or total-only update leaves the rows alone.
     private func mutateProjection(_ change: (inout HistoryListState) -> Void) {
         change(&listState)
-        if itemsRevision != listState.itemsRevision { itemsRevision = listState.itemsRevision }
+        if projectionGeneration != listState.projectionGeneration { projectionGeneration = listState.projectionGeneration }
         if totalCount != listState.totalCount { totalCount = listState.totalCount }
         if canLoadMore != listState.canLoadMore { canLoadMore = listState.canLoadMore }
     }

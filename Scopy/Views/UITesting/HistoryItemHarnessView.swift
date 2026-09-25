@@ -27,7 +27,7 @@ struct HistoryItemHarnessView: View {
     @State private var popoverRequest = "none"
     @State private var settingsViewModel: SettingsViewModel
     @State private var settings: SettingsDTO
-    @State private var isKeyboardSelected: Bool
+    @State private var isSelected: Bool
     @State private var pinPreviewRequest: String?
     @State private var interactionCoordinator = HistoryListInteractionCoordinator()
     @State private var interactionSessionStore = HistoryItemInteractionSessionStore()
@@ -60,7 +60,7 @@ struct HistoryItemHarnessView: View {
             coverage: .complete
         )
         _settings = State(initialValue: settings)
-        _isKeyboardSelected = State(initialValue: keyboardSelected)
+        _isSelected = State(initialValue: keyboardSelected)
     }
 
     var body: some View {
@@ -68,7 +68,7 @@ struct HistoryItemHarnessView: View {
             VStack(spacing: 0) {
                 HistoryItemView(
                     item: item,
-                    isKeyboardSelected: isKeyboardSelected,
+                    isSelected: isSelected,
                     settings: settings,
                     searchMatchContext: searchMatchContext,
                     onSelect: { selectCount += 1 },

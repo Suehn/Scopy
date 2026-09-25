@@ -1,25 +1,23 @@
 import Foundation
 
-/// 应用版本信息工具
-/// v0.6: 动态读取版本号和构建信息
+/// Version and build information read from the bundle.
 public enum AppVersion {
-    /// 应用版本号 (e.g., "0.6.0")
+    /// Marketing version, e.g. "0.81.0".
     public static var version: String {
         Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? String(localized: "Unknown")
     }
 
-    /// 构建号 (e.g., "1")
+    /// Build number, e.g. "1".
     public static var build: String {
         Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "1"
     }
 
-    /// 完整版本字符串 (e.g., "0.6.0 (1)")
+    /// Version and build, e.g. "0.81.0 (1)".
     public static var fullVersion: String {
         "\(version) (\(build))"
     }
 
-    /// 构建日期
-    /// 通过读取应用 bundle 的修改时间获取近似构建日期
+    /// Approximate build date: the bundle's modification date.
     public static var buildDate: String {
         guard let bundleURL = Bundle.main.bundleURL as URL?,
               let attributes = try? FileManager.default.attributesOfItem(atPath: bundleURL.path),
@@ -32,7 +30,6 @@ public enum AppVersion {
         return formatter.string(from: modificationDate)
     }
 
-    /// 应用名称
     public static var appName: String {
         Bundle.main.infoDictionary?["CFBundleName"] as? String ?? "Scopy"
     }

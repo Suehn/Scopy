@@ -1,10 +1,10 @@
 import AppKit
 import SwiftUI
 
-/// 窗口定位模式
+/// Where the panel opens.
 enum PanelPositionMode {
-    case statusBar      // 原有行为：状态栏按钮下方
-    case mousePosition  // 新行为：鼠标位置
+    case statusBar
+    case mousePosition
 }
 
 enum PanelReopenSearchResetPolicy {
@@ -37,7 +37,7 @@ enum FloatingPanelDismissPolicy {
     }
 }
 
-/// 浮动面板 - 参考 Maccy 的 FloatingPanel 实现
+/// The floating history panel (modelled on Maccy's FloatingPanel).
 class FloatingPanel: NSPanel, NSWindowDelegate {
     var isPresented: Bool = false
     var statusBarButton: NSStatusBarButton?
@@ -62,7 +62,6 @@ class FloatingPanel: NSPanel, NSWindowDelegate {
         // Remembers the size the user resized to; the origin is recomputed on every open.
         setFrameAutosaveName("ScopyHistoryPanel")
 
-        // 面板配置
         animationBehavior = .none
         isFloatingPanel = true
         level = .statusBar
@@ -74,12 +73,10 @@ class FloatingPanel: NSPanel, NSWindowDelegate {
         backgroundColor = .clear
         titlebarSeparatorStyle = .none
 
-        // 隐藏窗口按钮
         standardWindowButton(.closeButton)?.isHidden = true
         standardWindowButton(.miniaturizeButton)?.isHidden = true
         standardWindowButton(.zoomButton)?.isHidden = true
 
-        // 设置内容视图
         contentView = NSHostingView(
             rootView: view()
                 .ignoresSafeArea()
@@ -115,7 +112,6 @@ class FloatingPanel: NSPanel, NSWindowDelegate {
             origin = calculateMousePosition()
         }
 
-        // 应用屏幕边界约束
         origin = constrainToScreen(origin: origin)
 
         setFrameOrigin(origin)
@@ -133,7 +129,7 @@ class FloatingPanel: NSPanel, NSWindowDelegate {
 
     // MARK: - Position Calculation
 
-    /// 计算状态栏按钮下方的位置（原有行为）
+    /// Below the status-item button.
     private func calculateStatusBarPosition() -> NSPoint {
         guard let button = statusBarButton, let buttonWindow = button.window else {
             return calculateFallbackPosition()
@@ -148,19 +144,19 @@ class FloatingPanel: NSPanel, NSWindowDelegate {
         )
     }
 
-    /// 计算鼠标位置附近的窗口位置（新行为）
+    /// Next to the mouse pointer.
     private func calculateMousePosition() -> NSPoint {
         let mouseLocation = NSEvent.mouseLocation
         let offset: CGFloat = 8
 
-        // 窗口左上角在鼠标位置右下方，避免遮挡光标
+        // The top-left corner sits below and right of the pointer so the panel does not cover it.
         return NSPoint(
             x: mouseLocation.x + offset,
             y: mouseLocation.y - frame.height - offset
         )
     }
 
-    /// 约束窗口位置到屏幕可见区域内
+    /// Keeps the panel inside the screen's visible frame.
     /// The screen under the pointer, where the panel opens.
     private func targetScreen() -> NSScreen? {
         let mouseLocation = NSEvent.mouseLocation
@@ -175,7 +171,6 @@ class FloatingPanel: NSPanel, NSWindowDelegate {
         let screenFrame = screen.visibleFrame
         var constrainedOrigin = origin
 
-        // 水平约束
         if constrainedOrigin.x + frame.width > screenFrame.maxX {
             constrainedOrigin.x = screenFrame.maxX - frame.width
         }
@@ -183,7 +178,6 @@ class FloatingPanel: NSPanel, NSWindowDelegate {
             constrainedOrigin.x = screenFrame.minX
         }
 
-        // 垂直约束
         if constrainedOrigin.y < screenFrame.minY {
             constrainedOrigin.y = screenFrame.minY
         }
@@ -194,7 +188,7 @@ class FloatingPanel: NSPanel, NSWindowDelegate {
         return constrainedOrigin
     }
 
-    /// 兜底位置：屏幕中心
+    /// Fallback: the center of the main screen.
     private func calculateFallbackPosition() -> NSPoint {
         guard let screen = NSScreen.main else {
             return NSPoint(x: 100, y: 100)

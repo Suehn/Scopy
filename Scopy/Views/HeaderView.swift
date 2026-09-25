@@ -3,7 +3,7 @@ import ScopyKit
 import ScopyUISupport
 import SwiftUI
 
-/// 头部视图 - 包含标题、过滤按钮和搜索框
+/// The panel header: search field, filters, sort and search mode.
 struct HeaderView: View {
     @Binding var searchQuery: String
     @FocusState.Binding var searchFocused: Bool
@@ -267,14 +267,12 @@ struct AppFilterButton: View {
 
 // MARK: - Type Filter Button
 
-/// v0.22: 添加 Rich Text 选项，支持 rtf + html 类型过滤
 struct TypeFilterButton: View {
     @Environment(HistoryViewModel.self) private var historyViewModel
 
-    /// Rich Text 类型集合 (rtf + html)
+    /// Rich text covers both RTF and HTML items.
     private static let richTextTypes: Set<ClipboardItemType> = [.rtf, .html]
 
-    /// 当前是否选中 Rich Text 过滤
     private var isRichTextSelected: Bool {
         historyViewModel.typeFilters == Self.richTextTypes
     }
@@ -325,7 +323,6 @@ struct TypeFilterButton: View {
         }
     }
 
-    /// Rich Text 菜单项 (rtf + html)
     @ViewBuilder
     private func richTextMenuItem() -> some View {
         Button(action: {
@@ -342,7 +339,6 @@ struct TypeFilterButton: View {
         }
     }
 
-    /// 当前过滤类型的图标
     private var currentTypeIcon: String {
         if isRichTextSelected {
             return "doc.richtext"

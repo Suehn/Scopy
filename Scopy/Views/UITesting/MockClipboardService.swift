@@ -120,7 +120,6 @@ final class MockClipboardService: ClipboardServiceProtocol {
         self.stream = AsyncStream(unfolding: { await queue.dequeue() })
         self.settings = Self.applySettingsOverrides(config: config)
 
-        // 生成一些测试数据
         generateMockData(config: config)
     }
 
@@ -133,7 +132,7 @@ final class MockClipboardService: ClipboardServiceProtocol {
     // MARK: - Lifecycle
 
     func start() async throws {
-        // Mock 服务无需启动，空实现
+        // Nothing to start.
     }
 
     func stop() {
@@ -215,7 +214,7 @@ final class MockClipboardService: ClipboardServiceProtocol {
                 appBundleID: apps[index % apps.count],
                 createdAt: now.addingTimeInterval(Double(-index * 3600)),
                 lastUsedAt: now.addingTimeInterval(Double(-index * 1800)),
-                isPinned: index < 2,  // 前两个是固定的
+                isPinned: index < 2,
                 sizeBytes: text.utf8.count,
                 fileSizeBytes: nil,
                 thumbnailPath: nil,
@@ -224,7 +223,7 @@ final class MockClipboardService: ClipboardServiceProtocol {
             items.append(item)
         }
 
-        // 添加更多测试数据以测试分页 / 滚动性能
+        // Enough extra rows to exercise paging and scrolling.
         for i in 0..<extraCount {
             let index = sampleTexts.count + i
             if i < imageCount {
@@ -463,7 +462,7 @@ final class MockClipboardService: ClipboardServiceProtocol {
     }
 
     func fetchRecent(limit: Int, offset: Int) async throws -> [ClipboardItemDTO] {
-        // 模拟网络延迟
+        // Simulated backend latency.
         try await Task.sleep(nanoseconds: 50_000_000)  // 50ms
 
         let sortedItems = items.sorted { $0.lastUsedAt > $1.lastUsedAt }
@@ -490,7 +489,7 @@ final class MockClipboardService: ClipboardServiceProtocol {
     }
 
     func search(query: SearchRequest) async throws -> SearchResultPage {
-        // 模拟搜索延迟
+        // Simulated search latency.
         try await Task.sleep(nanoseconds: 30_000_000)  // 30ms
 
         let filtered: [ClipboardItemDTO]
@@ -617,7 +616,7 @@ final class MockClipboardService: ClipboardServiceProtocol {
 
     func copyToClipboard(itemID: UUID) async throws {
         guard let item = items.first(where: { $0.id == itemID }) else { return }
-        // 在真实实现中，这里会复制到系统剪贴板
+        // The real service writes to the system pasteboard here.
         ScopyLog.app.info("Copied to clipboard: \(String(item.plainText.prefix(50)), privacy: .private)...")
     }
 
@@ -656,7 +655,7 @@ final class MockClipboardService: ClipboardServiceProtocol {
     }
 
     func getImageData(itemID: UUID) async throws -> Data? {
-        // Mock 服务不存储实际图片数据
+        // The mock stores no image bytes.
         return nil
     }
 
@@ -697,17 +696,16 @@ final class MockClipboardService: ClipboardServiceProtocol {
     }
 
     func syncExternalImageSizeBytesFromDisk() async throws -> Int {
-        // Mock 环境不接触真实文件系统，返回 0 表示无更新。
+        // The mock never touches the file system; 0 means nothing was updated.
         0
     }
 
     func getRecentApps(limit: Int) async throws -> [String] {
-        // 返回 mock 数据中的 app 列表
         let apps = Set(items.compactMap { $0.appBundleID })
         return Array(apps.prefix(limit))
     }
 
-    // 模拟添加新剪贴板项
+    // Simulates a new clipboard capture.
     func simulateNewClipboardItem(_ text: String) {
         let item = ClipboardItemDTO(
             id: UUID(),

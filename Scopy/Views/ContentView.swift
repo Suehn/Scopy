@@ -1,8 +1,7 @@
 import SwiftUI
 import ScopyKit
 
-/// 主内容视图 - 对应 Maccy 的 ContentView
-/// v0.10.1: 改用 Environment 注入 AppState，保持与 SettingsView 一致
+/// The panel content: header, history list and footer.
 struct ContentView: View {
     @Environment(AppState.self) private var appState
     @Environment(HistoryViewModel.self) private var historyViewModel
@@ -76,7 +75,7 @@ struct ContentView: View {
 
     private func handleKeyPress(_ keyPress: KeyPress) -> KeyPress.Result {
         // ⌥⌫ is handled by AppDelegate's key monitor, which knows the first responder.
-        // ⌘⌫ (Command+Delete) - 清空历史（需要确认）
+        // ⌘⌫ clears all history after confirmation.
         if keyPress.key == .delete && keyPress.modifiers.contains(.command) {
             showClearConfirmation = true
             return .handled

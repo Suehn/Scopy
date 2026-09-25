@@ -11,7 +11,7 @@ struct HistoryListState {
     private(set) var canLoadMore: Bool = false
     /// Bumped on every `items` mutation. Observing this instead of `items` avoids SwiftUI's
     /// element-wise array comparison (O(loaded plain-text bytes)) on the main thread.
-    private(set) var itemsRevision: UInt64 = 0
+    private(set) var projectionGeneration: UInt64 = 0
 
     private var itemIndexByID: [UUID: Int] = [:]
 
@@ -64,7 +64,7 @@ struct HistoryListState {
         }
         items.append(contentsOf: newItems)
         loadedCount = items.count
-        itemsRevision &+= 1
+        projectionGeneration &+= 1
     }
 
     mutating func updatePagination(total: Int, hasMore: Bool) {
@@ -124,7 +124,7 @@ struct HistoryListState {
         items[index] = value
         if previous.isPinned == value.isPinned {
             // Same group, same position: replace in place instead of rebuilding every array.
-            itemsRevision &+= 1
+            projectionGeneration &+= 1
             if value.isPinned {
                 if let groupIndex = pinnedItems.firstIndex(where: { $0.id == value.id }) {
                     pinnedItems[groupIndex] = value
@@ -178,7 +178,7 @@ struct HistoryListState {
         items.insert(item, at: 0)
         loadedCount = items.count
         // The new front item leads its group; shift the index map instead of rebuilding it.
-        itemsRevision &+= 1
+        projectionGeneration &+= 1
         for (index, existing) in items.enumerated() {
             itemIndexByID[existing.id] = index
         }
@@ -192,7 +192,7 @@ struct HistoryListState {
     }
 
     private mutating func rebuildDerivedState() {
-        itemsRevision &+= 1
+        projectionGeneration &+= 1
         pinnedItems = []
         unpinnedItems = []
         pinnedItems.reserveCapacity(items.count)

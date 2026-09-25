@@ -1,6 +1,6 @@
 import Foundation
 
-/// 统一的 SF Symbol 常量，便于后续替换
+/// SF Symbol names shared across views.
 enum ScopyIcons {
     static let app = "app"
     static let filterApp = "app.badge"

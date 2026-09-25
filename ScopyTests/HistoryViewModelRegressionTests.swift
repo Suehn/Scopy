@@ -149,7 +149,7 @@ final class HistoryViewModelRegressionTests: XCTestCase {
         viewModel.configureTiming(.immediateRegressionTests)
         defer { viewModel.stop() }
         await viewModel.load()
-        let revision = viewModel.itemsRevision
+        let revision = viewModel.projectionGeneration
 
         viewModel.searchMode = .fuzzyPlus
         viewModel.searchQuery = "needle"
@@ -157,13 +157,13 @@ final class HistoryViewModelRegressionTests: XCTestCase {
         await fulfillment(of: [refineStarted], timeout: 1.0)
 
         XCTAssertEqual(viewModel.items.map(\.id), [match.id, other.id], "The empty prefilter page is not published")
-        XCTAssertEqual(viewModel.itemsRevision, revision)
+        XCTAssertEqual(viewModel.projectionGeneration, revision)
         XCTAssertTrue(viewModel.isLoading, "Loading lasts until the refine lands")
 
         service.resumeRefine()
         await waitForSearchToFinish(in: viewModel)
         XCTAssertEqual(viewModel.items.map(\.id), [match.id])
-        XCTAssertEqual(viewModel.itemsRevision, revision + 1, "The refine replaces the rows once")
+        XCTAssertEqual(viewModel.projectionGeneration, revision + 1, "The refine replaces the rows once")
         XCTAssertEqual(viewModel.searchCoverage, .complete)
     }
 
@@ -188,7 +188,7 @@ final class HistoryViewModelRegressionTests: XCTestCase {
 
         let refreshed = expectation(description: "Active search projection refreshed")
         withObservationTracking {
-            _ = viewModel.itemsRevision
+            _ = viewModel.projectionGeneration
         } onChange: {
             refreshed.fulfill()
         }
@@ -408,7 +408,7 @@ final class HistoryViewModelRegressionTests: XCTestCase {
 
         let converged = expectation(description: "Trailing fetch applied stable snapshot")
         withObservationTracking {
-            _ = viewModel.itemsRevision
+            _ = viewModel.projectionGeneration
         } onChange: {
             converged.fulfill()
         }
@@ -625,7 +625,7 @@ final class HistoryViewModelRegressionTests: XCTestCase {
         await waitForNextItemsRevision(in: viewModel)
         await waitForSearchToFinish(in: viewModel)
         await fulfillment(of: [refineStarted], timeout: 1.0)
-        let revision = viewModel.itemsRevision
+        let revision = viewModel.projectionGeneration
         let refined = expectation(description: "Refine completes")
         withObservationTracking {
             _ = viewModel.searchCoverage
@@ -646,7 +646,7 @@ final class HistoryViewModelRegressionTests: XCTestCase {
         service.resumeRefine()
         await fulfillment(of: [refined], timeout: 1.0)
         await fulfillment(of: [listInputsInvalidated], timeout: 0.05)
-        XCTAssertEqual(viewModel.itemsRevision, revision)
+        XCTAssertEqual(viewModel.projectionGeneration, revision)
         XCTAssertEqual(viewModel.totalCount, 50)
         XCTAssertEqual(viewModel.searchCoverage, .complete)
         XCTAssertFalse(viewModel.canLoadMore)
@@ -807,7 +807,7 @@ final class HistoryViewModelRegressionTests: XCTestCase {
     private func waitForNextItemsRevision(in viewModel: HistoryViewModel) async {
         let changed = expectation(description: "History projection changed")
         withObservationTracking {
-            _ = viewModel.itemsRevision
+            _ = viewModel.projectionGeneration
         } onChange: {
             changed.fulfill()
         }

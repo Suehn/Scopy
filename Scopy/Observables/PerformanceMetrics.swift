@@ -1,8 +1,6 @@
 import Foundation
 
-/// 性能指标收集器
-/// 收集并计算搜索延迟、首屏加载等性能数据
-/// 用于 About 页面显示真实性能指标
+/// Search and first-load latency samples for the About page diagnostics.
 public actor PerformanceMetrics {
     public static let shared = PerformanceMetrics()
 
@@ -14,35 +12,35 @@ public actor PerformanceMetrics {
 
     // MARK: - Recording
 
-    /// 记录搜索延迟 (ms)
+    /// Records one search latency in milliseconds.
     public func recordSearchLatency(_ ms: Double) {
         recordLatency(ms, buffer: &searchLatencies)
     }
 
-    /// 记录首屏加载延迟 (ms)
+    /// Records one first-page load latency in milliseconds.
     public func recordLoadLatency(_ ms: Double) {
         recordLatency(ms, buffer: &loadLatencies)
     }
 
     // MARK: - Statistics
 
-    /// 搜索延迟 P95 (ms)
+    /// Search latency P95 in milliseconds.
     public var searchP95: Double {
         calculateP95(searchLatencies)
     }
 
-    /// 首屏加载 P95 (ms)
+    /// First-page load P95 in milliseconds.
     public var loadP95: Double {
         calculateP95(loadLatencies)
     }
 
-    /// 搜索延迟平均值 (ms)
+    /// Mean search latency in milliseconds.
     public var searchAvg: Double {
         guard !searchLatencies.isEmpty else { return 0 }
         return searchLatencies.reduce(0, +) / Double(searchLatencies.count)
     }
 
-    /// 首屏加载平均值 (ms)
+    /// Mean first-page load latency in milliseconds.
     public var loadAvg: Double {
         guard !loadLatencies.isEmpty else { return 0 }
         return loadLatencies.reduce(0, +) / Double(loadLatencies.count)
@@ -50,19 +48,19 @@ public actor PerformanceMetrics {
 
     // MARK: - Formatted Display
 
-    /// 格式化搜索 P95 显示 (精确到2位有效数字)
+    /// Search P95 for display, two significant digits.
     public var formattedSearchP95: String {
         LatencyFormatter.format(ms: searchP95, samples: nil)
     }
 
-    /// 格式化首屏加载 P95 显示
+    /// First-page load P95 for display.
     public var formattedLoadP95: String {
         LatencyFormatter.format(ms: loadP95, samples: nil)
     }
 
     // MARK: - Reset
 
-    /// 重置所有指标
+    /// Clears every sample.
     public func reset() {
         searchLatencies.removeAll()
         loadLatencies.removeAll()
@@ -88,7 +86,7 @@ public actor PerformanceMetrics {
 // MARK: - Convenience Methods for Main Actor
 
 extension PerformanceMetrics {
-    /// 获取性能摘要 (供 UI 使用)
+    /// A snapshot for the UI.
     public func getSummary() async -> PerformanceSummary {
         return PerformanceSummary(
             searchP95: searchP95,
@@ -101,7 +99,7 @@ extension PerformanceMetrics {
     }
 }
 
-/// 性能摘要数据结构
+/// Latency snapshot shown on the About page.
 public struct PerformanceSummary: Sendable {
     public let searchP95: Double
     public let loadP95: Double
@@ -110,22 +108,22 @@ public struct PerformanceSummary: Sendable {
     public let searchSamples: Int
     public let loadSamples: Int
 
-    /// 格式化搜索 P95 (精确到2位有效数字)
+    /// Search P95 for display, two significant digits.
     public var formattedSearchP95: String {
         LatencyFormatter.format(ms: searchP95, samples: searchSamples)
     }
 
-    /// 格式化首屏加载 P95
+    /// First-page load P95 for display.
     public var formattedLoadP95: String {
         LatencyFormatter.format(ms: loadP95, samples: loadSamples)
     }
 
-    /// 格式化搜索平均值
+    /// Mean search latency for display.
     public var formattedSearchAvg: String {
         LatencyFormatter.format(ms: searchAvg, samples: searchSamples)
     }
 
-    /// 格式化首屏加载平均值
+    /// Mean first-page load latency for display.
     public var formattedLoadAvg: String {
         LatencyFormatter.format(ms: loadAvg, samples: loadSamples)
     }

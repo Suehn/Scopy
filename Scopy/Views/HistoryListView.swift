@@ -17,7 +17,7 @@ struct HoverPreviewPopoverState: Equatable {
     let kind: HoverPreviewPopoverKind
 }
 
-/// 历史列表视图 - 符合 v0.md 的懒加载设计
+/// The history list: pinned rows, recent rows and automatic paging.
 @MainActor
 struct HistoryListView: View {
     @FocusState.Binding var searchFocused: Bool
@@ -43,22 +43,21 @@ struct HistoryListView: View {
     private static let shouldExposeAccessibility: Bool = isScrollProfile ? profileAccessibility : isUITesting
 
     var body: some View {
-        // v0.18: 使用 List 替代 ScrollView+LazyVStack 实现真正的视图回收
-        // List 基于 NSTableView，具有视图回收能力，10k 项目内存从 ~500MB 降至 ~50MB
+        // List (NSTableView underneath) recycles row views; a ScrollView + LazyVStack kept every
+        // row it had shown alive (~500 MB for 10k items against ~50 MB).
         // The List stays mounted when a search has no rows; the empty and loading states are a
         // leaf overlay, so this body never reads `isLoading` or the filter state.
         ScrollViewReader { proxy in
             let _ = ScrollPerformanceProfile.incrementCounter(name: "list.body")
             List {
-                // v0.21: 使用局部变量缓存计算属性结果，避免多次访问触发 @Observable 追踪
-                // 这样 SwiftUI 只追踪一次 pinnedItems/unpinnedItems 访问
+                // Read each observed collection once so the body registers one dependency per property.
                 let pinned = historyViewModel.pinnedItems
                 let unpinned = historyViewModel.unpinnedItems
                 // Rows are built inside ForEach child closures, where every @Observable read installs its own
                 // observation and copies the access list; read the shared state once here and pass values down.
                 let rowContext = HistoryRowContext(settings: settingsViewModel.settings)
 
-                // v0.18: 不使用 Section header，改为普通行以避免黑色背景
+                // Section titles are ordinary rows: a List Section header draws an opaque background.
                 // Pinned Section Header
                 if !pinned.isEmpty {
                     SectionHeader(
@@ -464,7 +463,6 @@ struct HistoryListView: View {
         }
     }
 
-    /// v0.18: 添加 List 修饰符以保持原有样式
     /// Shared list state a row needs, captured once per list update instead of read per row.
     private struct HistoryRowContext {
         let settings: SettingsDTO
@@ -488,7 +486,7 @@ struct HistoryListView: View {
         let isFilePreviewPresented = live.presentedPreview == .file
         let row = HistoryItemView(
             item: item,
-            isKeyboardSelected: isSelected,
+            isSelected: isSelected,
             quickSlot: live.quickSlot,
             settings: context.settings,
             searchMatchContext: live.evidence,
@@ -540,9 +538,9 @@ struct HistoryListView: View {
                 row.accessibilityAddTraits(isSelected ? .isSelected : [])
             }
         }
-        .listRowInsets(EdgeInsets())      // 移除默认内边距
-        .listRowBackground(Color.clear)    // 透明背景
-        .listRowSeparator(.hidden)         // 隐藏分隔线
+        .listRowInsets(EdgeInsets())
+        .listRowBackground(Color.clear)
+        .listRowSeparator(.hidden)
     }
 }
 
@@ -655,7 +653,7 @@ private struct HistoryListStateObservers: View {
             .onChange(of: historyViewModel.loadedCount) { _, _ in onWorkloadChange() }
             .onChange(of: historyViewModel.totalCount) { _, _ in onWorkloadChange() }
             .onChange(of: historyViewModel.canLoadMore) { _, _ in onWorkloadChange() }
-            .onChange(of: historyViewModel.itemsRevision) { _, _ in
+            .onChange(of: historyViewModel.projectionGeneration) { _, _ in
                 onWorkloadChange()
                 onItemsRevisionChange()
             }

@@ -1,23 +1,21 @@
 import SwiftUI
 import ScopyKit
 
-/// 底部状态栏视图
+/// The panel footer: item count, storage size, and the delete/settings/quit buttons.
 struct FooterView: View {
     @Environment(HistoryViewModel.self) private var historyViewModel
     @Environment(SettingsViewModel.self) private var settingsViewModel
 
     let openSettings: (() -> Void)?
 
-    /// v0.22: 修复 -1 显示 bug - 当 totalCount=-1 时表示"未知"，显示 "50+ items"
+    /// A totalCount of -1 means the total is unknown (the page query fetched LIMIT + 1 rows).
     private var summaryText: String {
         if historyViewModel.hasActiveFilters {
-            // 搜索模式：显示当前结果数
             if historyViewModel.totalCount < 0 {
                 return String(localized: "\(historyViewModel.items.count)+ results")
             }
             return String(localized: "\(historyViewModel.items.count) results")
         } else if historyViewModel.totalCount < 0 {
-            // totalCount=-1 表示未知总数（v0.13 LIMIT+1 技巧）
             return String(localized: "\(historyViewModel.loadedCount)+ items")
         } else if historyViewModel.loadedCount < historyViewModel.totalCount {
             return String(localized: "\(historyViewModel.loadedCount)/\(historyViewModel.totalCount) items")
@@ -87,7 +85,6 @@ struct FooterView: View {
 
                 Spacer()
 
-                // Action Buttons - v0.15: Single delete + Settings + Quit
                 HStack(spacing: ScopySpacing.xs) {
                     FooterButton(icon: "trash", shortcut: "⌥⌫") {
                         Task { await historyViewModel.deleteSelectedItem() }
@@ -108,13 +105,13 @@ struct FooterView: View {
             .padding(.horizontal, ScopySpacing.lg)
             .padding(.vertical, ScopySpacing.xs)
         }
-        // v0.10.3-fix: 固定高度防止搜索时布局跳动
+        // A fixed height keeps the list from moving when the status text changes.
         .frame(height: ScopySize.Height.footer)
         .frame(maxWidth: .infinity)
     }
 }
 
-/// 底部按钮组件 - 仅图标 + 快捷键
+/// Icon plus shortcut hint.
 struct FooterButton: View {
     let icon: String
     let shortcut: String

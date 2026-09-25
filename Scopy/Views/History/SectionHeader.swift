@@ -5,7 +5,6 @@ struct SectionHeader: View {
     let title: String
     let count: Int
     var isScrolling: Bool = false
-    /// v0.16.2: 可折叠支持
     var isCollapsible: Bool = false
     var isCollapsed: Bool = false
     var onToggle: (() -> Void)? = nil
@@ -14,7 +13,6 @@ struct SectionHeader: View {
 
     var body: some View {
         HStack {
-            // v0.16.2: 折叠指示器
             if isCollapsible {
                 Image(systemName: isCollapsed ? "chevron.right" : "chevron.down")
                     .font(.system(size: 10, weight: .medium))
@@ -33,7 +31,6 @@ struct SectionHeader: View {
         .padding(.horizontal, ScopySpacing.md)
         .padding(.top, ScopySpacing.md)
         .padding(.bottom, ScopySpacing.xs)
-        // v0.16.2: 可点击折叠
         .background(isCollapsible && isHovered ? ScopyColors.hover.opacity(0.5) : Color.clear)
         .contentShape(Rectangle())
         .onTapGesture {

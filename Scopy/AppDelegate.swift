@@ -100,7 +100,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             panel = makeMainPanel(rootView: rootView)
         }
 
-        // 显示状态栏图标
         _ = statusItem
 
         configureAppHandlers(appState: appState, isUITesting: context.isUITesting)
@@ -114,7 +113,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
-        // 启动后端服务
         Task {
             await appState.start()
         }
@@ -290,7 +288,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             self?.openSettings()
         }
 
-        // 设置快捷键回调（用于解耦 SettingsView 与 AppDelegate）
+        // Hotkey callbacks let SettingsView apply a recorded hotkey without knowing AppDelegate.
         appState.applyHotKeyHandler = { [weak self] keyCode, modifiers in
             self?.applyHotKey(keyCode: keyCode, modifiers: modifiers)
         }
@@ -301,7 +299,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func setupHotKeyRegistration() {
-        // 注册全局快捷键（从设置加载或使用默认 ⇧⌘C）
+        // Registers the persisted global hotkey (default ⇧⌘C).
         hotKeyService = HotKeyService()
         Task { @MainActor [weak self] in
             guard let self else { return }
@@ -452,7 +450,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func togglePanelAtMousePosition() {
-        // 快捷键触发：窗口在鼠标位置
+        // A hotkey press opens the panel at the mouse pointer.
         if let panel {
             if !panel.isPresented,
                panel.wasClosedLongerThan(PanelReopenSearchResetPolicy.staleIntervalSeconds) {
@@ -571,7 +569,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - Hotkey Settings
 
-    /// 统一应用并持久化快捷键，确保无需重启即可生效
+    /// Registers and persists the hotkey in one place so a change applies without a restart.
     @MainActor
     func applyHotKey(keyCode: UInt32, modifiers: UInt32) {
         let requested = (keyCode: keyCode, modifiers: modifiers)
@@ -636,9 +634,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - Settings Window
 
-    /// 打开设置窗口
-    /// v0.10: 注入 AppState 到 Environment，实现完全解耦
-    /// v0.17: 修复内存泄漏 - 窗口关闭时释放并清空引用
+    /// Opens the settings window, or brings the existing one to the front.
     @MainActor
     func openSettings() {
         settingsWindowCoordinator.show(

@@ -1,7 +1,7 @@
 import SwiftUI
 import AppKit
 
-/// 设计系统颜色 - 仅用于前端视图，保持与系统动态颜色一致
+/// View colors, derived from system dynamic colors so they follow appearance changes.
 enum ScopyColors {
     // MARK: - Window & Backgrounds
     static let background = Color(nsColor: .windowBackgroundColor)
@@ -15,11 +15,11 @@ enum ScopyColors {
     static let border = Color(nsColor: .gridColor)
     
     // MARK: - Interaction
-    // v0.10.3: 区分键盘选中和鼠标悬停
+    // The selected row (Enter target) is stronger than a hovered row.
     private static let highlightBase = Color(nsColor: .selectedContentBackgroundColor)
-    static let selection = highlightBase.opacity(0.25)  // 键盘选中：更明显的蓝色
-    static let hover = Color(nsColor: .unemphasizedSelectedContentBackgroundColor).opacity(0.5)  // 鼠标悬停：淡灰色
-    static let selectionBorder = highlightBase.opacity(0.4) // 键盘选中边框
+    static let selection = highlightBase.opacity(0.25)
+    static let hover = Color(nsColor: .unemphasizedSelectedContentBackgroundColor).opacity(0.5)
+    static let selectionBorder = highlightBase.opacity(0.4)
     static let searchMatch = Color(nsColor: .findHighlightColor)
     
     // MARK: - Text
