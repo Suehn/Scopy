@@ -84,6 +84,7 @@
 		1B38754D12F3BE9B2B2C96BD /* FTSQueryBuilderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90ABBA09BA409A5DF23C445E /* FTSQueryBuilderTests.swift */; };
 		1B6B2AEAA9A30AD8B711819F /* KaTeX_Math-BoldItalic.woff in Resources */ = {isa = PBXBuildFile; fileRef = 54048A8E4F0441B0602C2F0B /* KaTeX_Math-BoldItalic.woff */; };
 		1D55B8531231065B01EF89B1 /* KaTeX_Fraktur-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = A690791438CF49B62239C05F /* KaTeX_Fraktur-Regular.ttf */; };
+		1D9DCE923835D9DC887A7D90 /* LaunchAtLogin.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB829154EBE8562BE8C6E2ED /* LaunchAtLogin.swift */; };
 		1DB469972C46FA103B70DA76 /* ChatGPTMarkdownRendererTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 199A898A7754BB5CF5B53D8A /* ChatGPTMarkdownRendererTests.swift */; };
 		1E32DCAA15E8B64396D2CBED /* HistoryItemInteractionState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 514610AEEA6EF3C593119BDE /* HistoryItemInteractionState.swift */; };
 		1EE8D91926401AF1FEE54592 /* WebViewLifecycleTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 916B40014CC1AF81D9893229 /* WebViewLifecycleTests.swift */; };
@@ -127,6 +128,7 @@
 		2C376083B188BAE7793EADE5 /* VideoPlayerPreviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A96F37D2ACE3A8A3BC7F0BE9 /* VideoPlayerPreviewView.swift */; };
 		2C6F65EA64E31C4A0C99D3B4 /* KaTeX_Fraktur-Bold.woff in Resources */ = {isa = PBXBuildFile; fileRef = C292766FEABCFB7962B37D27 /* KaTeX_Fraktur-Bold.woff */; };
 		2CD9B55509AEAAE142D5D25E /* HoverPreviewIntentController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2A1B869A2AD61B9EF2050898 /* HoverPreviewIntentController.swift */; };
+		2D2F44BD4703F8DFF8AC8247 /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = C36A8565BD8CFEAC82C67C22 /* Localizable.xcstrings */; };
 		2D429D47319FFF762E9DDD4F /* KaTeX_Size4-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 00AFBF62BB4464886FE18A9B /* KaTeX_Size4-Regular.ttf */; };
 		2D7A4916A5D6C1E115F435A4 /* MathEnvironmentSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = BBD2BD25B039DA8458E6884A /* MathEnvironmentSupport.swift */; };
 		2DA012275EB17CAC0F2AADF2 /* KaTeX_Size3-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 0FCD300F73DC064A18BACA5B /* KaTeX_Size3-Regular.ttf */; };
@@ -196,6 +198,7 @@
 		4327874AA10C675856FE8E3A /* HoverPreviewImageQualityPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9CFA9E9A2101790657BF92E8 /* HoverPreviewImageQualityPolicy.swift */; };
 		437D09C393E7FBBE8EB9D265 /* Localization.swift in Sources */ = {isa = PBXBuildFile; fileRef = 64F67E7978679E2B6026F8F5 /* Localization.swift */; };
 		43B8612CECC8A1768F74742B /* ClipboardMonitorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F940F6182C4E298B3511A044 /* ClipboardMonitorTests.swift */; };
+		43CC6F3249F5C27E8D9D8216 /* LaunchAtLogin.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB829154EBE8562BE8C6E2ED /* LaunchAtLogin.swift */; };
 		43EA1389737A28F2FD24F70F /* KaTeX_SansSerif-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 6119B6CED24CEDFCE2AA9419 /* KaTeX_SansSerif-Regular.ttf */; };
 		440C0A8885E4A77144105A51 /* ConcurrencyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3527EAD22A82840AEDF3F820 /* ConcurrencyTests.swift */; };
 		4477A0713317360F5C7A6D63 /* ScopyUISupport in Frameworks */ = {isa = PBXBuildFile; productRef = 02D3C02B0377544B3BD2ACD0 /* ScopyUISupport */; };
@@ -230,6 +233,7 @@
 		52349B93FE20FDACBA2992A8 /* ShortQueryIndexDiskCacheHardeningTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF519408C137227E5F1B8226 /* ShortQueryIndexDiskCacheHardeningTests.swift */; };
 		52B6DB95C6CEC0805C3A2714 /* HoverPreviewIntentController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2A1B869A2AD61B9EF2050898 /* HoverPreviewIntentController.swift */; };
 		52BE6C5FACF17DDE6BCE4F91 /* SearchSessionMemoryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 473048CFE7D0920E72A2D4A2 /* SearchSessionMemoryTests.swift */; };
+		52EF5CEB01042B6C31C24BE6 /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = C36A8565BD8CFEAC82C67C22 /* Localizable.xcstrings */; };
 		53332DCA6E89AA22F8CB3A57 /* favicon-investing-32.png in Resources */ = {isa = PBXBuildFile; fileRef = B78347DD005103E5AB5B3AAE /* favicon-investing-32.png */; };
 		5355D31C91E97C44151301D0 /* MarkdownTableCodeSpanPipeNormalizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = EFE4A2BF34D93F8BB10C49D2 /* MarkdownTableCodeSpanPipeNormalizer.swift */; };
 		53ED585BC4AC2068BFDDB4F9 /* KaTeX_Math-Italic.woff in Resources */ = {isa = PBXBuildFile; fileRef = 9644B5C6C165540B99E861D0 /* KaTeX_Math-Italic.woff */; };
@@ -337,6 +341,7 @@
 		7801C543CD9B8CD0A39C4160 /* ListLiveScrollObserverViewTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DC43DBB202CDD9AF7BC4B970 /* ListLiveScrollObserverViewTests.swift */; };
 		7837E9A22F5584A725A3AA2D /* KaTeX_Caligraphic-Regular.woff in Resources */ = {isa = PBXBuildFile; fileRef = D44765DCFEC088D84D51037F /* KaTeX_Caligraphic-Regular.woff */; };
 		787CF5F036B52E2844D437BB /* scopy-unified-renderer.iife.js in Resources */ = {isa = PBXBuildFile; fileRef = 21A1BCB1D999A11487793A6D /* scopy-unified-renderer.iife.js */; };
+		788E8CE7A1024F03860F6CB5 /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = C36A8565BD8CFEAC82C67C22 /* Localizable.xcstrings */; };
 		792618772D3FA72DB68AFB0C /* KaTeX_Math-BoldItalic.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 69386A72A42FB0CEB954D029 /* KaTeX_Math-BoldItalic.ttf */; };
 		7990F7AD71766B8A192E606C /* KaTeX_Typewriter-Regular.woff2 in Resources */ = {isa = PBXBuildFile; fileRef = BD450DDC435BD725CD4310FD /* KaTeX_Typewriter-Regular.woff2 */; };
 		79C683411D52F91709D15AE9 /* HistoryItemPresentationCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = 162CA2AC19540746D21C8DDB /* HistoryItemPresentationCache.swift */; };
@@ -372,6 +377,7 @@
 		847904181954981532FFE71E /* SectionHeader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 72C7E22A4D3725C49208C650 /* SectionHeader.swift */; };
 		849089F007FB3D528DFDF598 /* HistoryItemMarkdownExportController.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5A9EE21DB9627ADA27E99B3 /* HistoryItemMarkdownExportController.swift */; };
 		8490E8B273E3D76DA6B8BAEA /* HistoryViewModelRegressionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6BE3CC7D9AF7FCC5B679F92 /* HistoryViewModelRegressionTests.swift */; };
+		8495CF80026E46D625519ED3 /* LaunchAtLogin.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB829154EBE8562BE8C6E2ED /* LaunchAtLogin.swift */; };
 		84A84247DBA36409F8803B21 /* HistoryItemInteractionStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4F69EDE05A9181A2C8FE7EE2 /* HistoryItemInteractionStateTests.swift */; };
 		84FBAA65ABD2DD114AFF5531 /* HistoryItemInteractionState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 514610AEEA6EF3C593119BDE /* HistoryItemInteractionState.swift */; };
 		8523D35465AD9E7E4E77DAA6 /* KaTeX_Main-Bold.woff2 in Resources */ = {isa = PBXBuildFile; fileRef = CD4A5EB48C1E9F4E3F3926CC /* KaTeX_Main-Bold.woff2 */; };
@@ -1013,6 +1019,7 @@
 		BACD4A1BF6DABAE83D2073AE /* EmptyStateView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmptyStateView.swift; sourceTree = "<group>"; };
 		BB39D191C2CDAE7B01F1EF16 /* HistoryItemRowControllerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryItemRowControllerTests.swift; sourceTree = "<group>"; };
 		BB7C02F2A8B7E87B33A74976 /* LinkEnrichmentStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LinkEnrichmentStore.swift; sourceTree = "<group>"; };
+		BB829154EBE8562BE8C6E2ED /* LaunchAtLogin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LaunchAtLogin.swift; sourceTree = "<group>"; };
 		BBD2BD25B039DA8458E6884A /* MathEnvironmentSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MathEnvironmentSupport.swift; sourceTree = "<group>"; };
 		BD450DDC435BD725CD4310FD /* KaTeX_Typewriter-Regular.woff2 */ = {isa = PBXFileReference; path = "KaTeX_Typewriter-Regular.woff2"; sourceTree = "<group>"; };
 		BE2C40E55ECCD1FA48F28CF7 /* chatgpt_rich_surfaces.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = chatgpt_rich_surfaces.md; sourceTree = "<group>"; };
@@ -1021,6 +1028,7 @@
 		C15EC3DDC8CD06BBFA369E60 /* markdown_delimiter_repro.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = markdown_delimiter_repro.md; sourceTree = "<group>"; };
 		C209900B7E5E934B26F5B7AC /* HoverPreviewImageQualityPolicyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HoverPreviewImageQualityPolicyTests.swift; sourceTree = "<group>"; };
 		C292766FEABCFB7962B37D27 /* KaTeX_Fraktur-Bold.woff */ = {isa = PBXFileReference; path = "KaTeX_Fraktur-Bold.woff"; sourceTree = "<group>"; };
+		C36A8565BD8CFEAC82C67C22 /* Localizable.xcstrings */ = {isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; path = Localizable.xcstrings; sourceTree = "<group>"; };
 		C46B24B2682039001EA7F2A7 /* ClipboardItemDisplayText.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipboardItemDisplayText.swift; sourceTree = "<group>"; };
 		C4CA466F95629B4628DF59F6 /* KaTeX_SansSerif-Bold.woff2 */ = {isa = PBXFileReference; path = "KaTeX_SansSerif-Bold.woff2"; sourceTree = "<group>"; };
 		C5A9EE21DB9627ADA27E99B3 /* HistoryItemMarkdownExportController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryItemMarkdownExportController.swift; sourceTree = "<group>"; };
@@ -1165,6 +1173,7 @@
 				9EFEC5C5952694258B5B6FF4 /* GeneralSettingsPage.swift */,
 				3A1E175FDD120FFDD7F1D4E4 /* HotKeyRecorder.swift */,
 				10A8A6276630C764728D88F6 /* HotKeyRecorderView.swift */,
+				BB829154EBE8562BE8C6E2ED /* LaunchAtLogin.swift */,
 				8ACB57C715F93F048BD919DC /* SettingsComponents.swift */,
 				B98F18E6E4E1E553EF6A31B4 /* SettingsPage.swift */,
 				C977DE6F35EC7F84B1462BF9 /* SettingsPageHeader.swift */,
@@ -1633,6 +1642,14 @@
 			path = "chatgpt-rich";
 			sourceTree = "<group>";
 		};
+		D686D5FA17834B048F3F7A07 /* Localization */ = {
+			isa = PBXGroup;
+			children = (
+				C36A8565BD8CFEAC82C67C22 /* Localizable.xcstrings */,
+			);
+			path = Localization;
+			sourceTree = "<group>";
+		};
 		E48448F133BE3F80D945AC6C /* Scopy */ = {
 			isa = PBXGroup;
 			children = (
@@ -1644,6 +1661,7 @@
 				85328477E197D8B958744DD5 /* Scopy.entitlements */,
 				1072DE11C8E9ECC684565EA3 /* ScopyApp.swift */,
 				C8E7F13B9638715B53477797 /* Design */,
+				D686D5FA17834B048F3F7A07 /* Localization */,
 				4B3899A417146FCA05E0513F /* Observables */,
 				9A6C5FE7FD03AE7C4FE971EA /* Presentation */,
 				C28B8A59353DDD6FF1C2A8F7 /* Resources */,
@@ -1846,6 +1864,7 @@
 			knownRegions = (
 				Base,
 				en,
+				"zh-Hans",
 			);
 			mainGroup = 9C69D015A6946528E40569E5;
 			minimizedProjectReferenceProxies = 1;
@@ -1905,6 +1924,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				864224810A476156A991A548 /* Assets.xcassets in Resources */,
+				788E8CE7A1024F03860F6CB5 /* Localizable.xcstrings in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -1973,6 +1993,7 @@
 				3752F0D5794DC646C39D6BDD /* KaTeX_Typewriter-Regular.ttf in Resources */,
 				E7B7460372AC3F6EBE32ED38 /* KaTeX_Typewriter-Regular.woff in Resources */,
 				5B71EA3015A2A0AE65642424 /* KaTeX_Typewriter-Regular.woff2 in Resources */,
+				52EF5CEB01042B6C31C24BE6 /* Localizable.xcstrings in Resources */,
 				A0FAE5C35A48A98E167465E3 /* README.md in Resources */,
 				8FD82826E460D9A0DDA40A19 /* ScopyTSanTests-Info.plist in Resources */,
 				6FA0EF69B5B36283925CCC59 /* asset-manifest.json in Resources */,
@@ -2075,6 +2096,7 @@
 				BC610E448C258D168998D7DE /* KaTeX_Typewriter-Regular.ttf in Resources */,
 				E1810664181CAB8A03B59441 /* KaTeX_Typewriter-Regular.woff in Resources */,
 				7990F7AD71766B8A192E606C /* KaTeX_Typewriter-Regular.woff2 in Resources */,
+				2D2F44BD4703F8DFF8AC8247 /* Localizable.xcstrings in Resources */,
 				8A298D2E08FBEF86C5D9398F /* README.md in Resources */,
 				6C2FC5117C492DDB46A890AF /* asset-manifest.json in Resources */,
 				6F43D8697DA17D09E5FDB74D /* cases.json in Resources */,
@@ -2262,6 +2284,7 @@
 				ABE7FEE66C0F5B14B7956106 /* KnownDataVersionExternalWriteTests.swift in Sources */,
 				F585083760F9B2F39CB19F22 /* LaTeXDocumentNormalizer.swift in Sources */,
 				4ED08491809BFE39787DE10B /* LaTeXInlineTextNormalizer.swift in Sources */,
+				8495CF80026E46D625519ED3 /* LaunchAtLogin.swift in Sources */,
 				E5BF938A6A66D6C4709BCD49 /* LinkEnrichmentCoordinator.swift in Sources */,
 				42532CE476A24C56DBFDF104 /* LinkEnrichmentEligibility.swift in Sources */,
 				9580C022720818C5E12C8DB6 /* LinkEnrichmentModel.swift in Sources */,
@@ -2475,6 +2498,7 @@
 				8DD3C969CE33ED2575F583AA /* KnownDataVersionExternalWriteTests.swift in Sources */,
 				345CD5DA7AD86657EE160466 /* LaTeXDocumentNormalizer.swift in Sources */,
 				34882D74E4796207D49E6558 /* LaTeXInlineTextNormalizer.swift in Sources */,
+				1D9DCE923835D9DC887A7D90 /* LaunchAtLogin.swift in Sources */,
 				A8FB65FC9E59F0A80EE4AAAC /* LinkEnrichmentCoordinator.swift in Sources */,
 				06291B2796DCC50FE45DE79C /* LinkEnrichmentEligibility.swift in Sources */,
 				F1AAF41F4D265D649DC4957B /* LinkEnrichmentModel.swift in Sources */,
@@ -2635,6 +2659,7 @@
 				2277C098F2DB4BC17E0E9868 /* HoverPreviewTextSizing.swift in Sources */,
 				B75EF593A93DDECF91196568 /* LaTeXDocumentNormalizer.swift in Sources */,
 				2FCF65AF361332A023B227D9 /* LaTeXInlineTextNormalizer.swift in Sources */,
+				43CC6F3249F5C27E8D9D8216 /* LaunchAtLogin.swift in Sources */,
 				C25FFC8A25D8EE13A3194943 /* LinkEnrichmentCoordinator.swift in Sources */,
 				4B55871527A9C4D77D1EF211 /* LinkEnrichmentEligibility.swift in Sources */,
 				C5A9C2CF3592CF755FBF285D /* LinkEnrichmentModel.swift in Sources */,
@@ -2894,8 +2919,10 @@
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Scopy/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/../Frameworks";
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
 				PRODUCT_NAME = Scopy;
 				SDKROOT = macosx;
+				SWIFT_EMIT_LOC_STRINGS = YES;
 			};
 			name = Debug;
 		};
@@ -2927,8 +2954,10 @@
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Scopy/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/../Frameworks";
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
 				PRODUCT_NAME = Scopy;
 				SDKROOT = macosx;
+				SWIFT_EMIT_LOC_STRINGS = YES;
 			};
 			name = Release;
 		};
