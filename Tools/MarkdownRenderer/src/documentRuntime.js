@@ -1064,8 +1064,9 @@ function applyExportScale(scale) {
 // An animation-frame watcher: it measures the export height every frame and counts how many consecutive frames it
 // has been unchanged. The host announces each wait as a new numeric `phase`; the watcher pushes a sample to the
 // `scopyExportLayout` message handler when the phase starts, when two frames have run in the phase, when the layout
-// is first stable for three frames in the phase, and whenever the render-failure state changes. Every call returns
-// the current sample as JSON, which is the host's fallback when frames stop (an occluded window gets none).
+// is first stable for three frames in the phase, and whenever the render-failure state changes. Every call
+// re-measures and returns the current sample as JSON, which is the host's fallback when frames stop (an occluded
+// window gets none).
 const SETTLED_STABLE_FRAMES = 3;
 
 function layoutSample(w, event) {
@@ -1080,57 +1081,67 @@ function postLayout(w, event) {
   } catch (e) { }
 }
 
+function measureExportHeight() {
+  var c = document.getElementById('content');
+  if (!c) { return 0; }
+  var rectH = 0;
+  try {
+    var shell = document.getElementById('content-scale-shell') || c;
+    rectH = Math.ceil(shell.getBoundingClientRect().height || 0);
+  } catch (e) { rectH = 0; }
+  var sh = 0;
+  try { sh = Math.ceil(c.scrollHeight || 0); } catch (e) { sh = 0; }
+  // Prefer #content measurements so short content is not padded to the viewport height.
+  return Math.ceil((exportState.usesTransform && rectH > 0) ? rectH : Math.max(rectH || 0, sh || 0));
+}
+
+function measureExportLiveHeight() {
+  var c = document.getElementById('content');
+  if (!c) { return 0; }
+  var rectH = 0;
+  try { rectH = Math.ceil(c.getBoundingClientRect().height || 0); } catch (e) { rectH = 0; }
+  if (exportState.scale > 0 && Math.abs(exportState.scale - 1) > 0.001 && rectH > 0) { return rectH; }
+  var sh = 0;
+  try { sh = c.scrollHeight || 0; } catch (e) { sh = 0; }
+  return Math.max(sh, rectH);
+}
+
+// Refreshes geometry, readiness and failure now. Both the frame tick and a host read call it, so a read taken
+// while animation frames are stalled still sees the current layout; only a frame tick advances `frames`.
+function measureLayout(w) {
+  try { w.height = measureExportHeight(); } catch (e) { w.height = 0; }
+  try { w.live = measureExportLiveHeight(); } catch (e) { w.live = 0; }
+  w.renderReady = isRenderReady();
+  w.renderFailed = !!state.renderFailed;
+  w.renderErrorReason = state.unifiedErrorReason || '';
+  try { w.fonts = (document.fonts && document.fonts.status) ? document.fonts.status : 'n/a'; } catch (e) { w.fonts = 'n/a'; }
+}
+
 function watchLayout(phase) {
   if (!layoutWatcher) {
-    var w = { phase: 0, phaseStartFrame: 0, framesReported: false, settledReported: false,
+    var w = { phase: 0, phaseStartFrame: 0, framesReported: false, settledReported: false, postedFailed: false,
               frames: 0, stableFrames: 0, height: 0, live: 0, lastHeight: -1, lastLive: -1, fonts: 'n/a',
               renderReady: false, renderFailed: false, renderErrorReason: '' };
     layoutWatcher = w;
-    var measureHeight = function () {
-      var c = document.getElementById('content');
-      if (!c) { return 0; }
-      var rectH = 0;
-      try {
-        var shell = document.getElementById('content-scale-shell') || c;
-        rectH = Math.ceil(shell.getBoundingClientRect().height || 0);
-      } catch (e) { rectH = 0; }
-      var sh = 0;
-      try { sh = Math.ceil(c.scrollHeight || 0); } catch (e) { sh = 0; }
-      // Prefer #content measurements so short content is not padded to the viewport height.
-      return Math.ceil((exportState.usesTransform && rectH > 0) ? rectH : Math.max(rectH || 0, sh || 0));
-    };
-    var measureLive = function () {
-      var c = document.getElementById('content');
-      if (!c) { return 0; }
-      var rectH = 0;
-      try { rectH = Math.ceil(c.getBoundingClientRect().height || 0); } catch (e) { rectH = 0; }
-      if (exportState.scale > 0 && Math.abs(exportState.scale - 1) > 0.001 && rectH > 0) { return rectH; }
-      var sh = 0;
-      try { sh = c.scrollHeight || 0; } catch (e) { sh = 0; }
-      return Math.max(sh, rectH);
-    };
     var tick = function () {
       w.frames += 1;
-      var h = 0; try { h = measureHeight(); } catch (e) { h = 0; }
-      var live = 0; try { live = measureLive(); } catch (e) { live = 0; }
-      var ready = isRenderReady();
-      var wasFailed = w.renderFailed;
-      w.renderFailed = !!state.renderFailed;
-      w.renderErrorReason = state.unifiedErrorReason || '';
-      try { w.fonts = (document.fonts && document.fonts.status) ? document.fonts.status : 'n/a'; } catch (e) { w.fonts = 'n/a'; }
-      if (ready && h > 0 && w.lastHeight >= 0 && Math.abs(h - w.lastHeight) < 1 && Math.abs(live - w.lastLive) < 1) {
+      measureLayout(w);
+      if (w.renderReady && w.height > 0 && w.lastHeight >= 0 && Math.abs(w.height - w.lastHeight) < 1 && Math.abs(w.live - w.lastLive) < 1) {
         w.stableFrames += 1;
       } else {
         w.stableFrames = 0;
       }
-      w.lastHeight = h; w.lastLive = live; w.height = h; w.live = live; w.renderReady = ready;
+      w.lastHeight = w.height; w.lastLive = w.live;
       var framesAdvanced = w.frames >= w.phaseStartFrame + 2;
-      if (w.renderFailed !== wasFailed) { postLayout(w, 'renderFailed'); }
+      if (w.renderFailed !== w.postedFailed) {
+        w.postedFailed = w.renderFailed;
+        postLayout(w, 'renderFailed');
+      }
       if (framesAdvanced && !w.framesReported) {
         w.framesReported = true;
         postLayout(w, 'frames');
       }
-      if (framesAdvanced && !w.settledReported && h > 0 && w.stableFrames >= SETTLED_STABLE_FRAMES) {
+      if (framesAdvanced && !w.settledReported && w.height > 0 && w.stableFrames >= SETTLED_STABLE_FRAMES) {
         w.settledReported = true;
         postLayout(w, 'settled');
       }
@@ -1139,6 +1150,7 @@ function watchLayout(phase) {
     window.requestAnimationFrame(tick);
   }
   var watcher = layoutWatcher;
+  measureLayout(watcher);
   if (typeof phase === 'number' && phase !== watcher.phase) {
     watcher.phase = phase;
     watcher.phaseStartFrame = watcher.frames;
