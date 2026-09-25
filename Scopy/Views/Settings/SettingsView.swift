@@ -58,6 +58,10 @@ struct SettingsView: View {
             statsTask?.cancel()
             statsTask = nil
         }
+        // Approval happens in System Settings; re-read the login item when the user comes back.
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            refreshLaunchAtLogin()
+        }
         .alert(
             "Couldn’t Save Settings",
             isPresented: Binding(
@@ -193,6 +197,14 @@ struct SettingsView: View {
         launchAtLoginRequiresApproval = LaunchAtLogin.requiresApproval
     }
 
+    /// Re-reads the system state without discarding a toggle the user changed but has not saved.
+    private func refreshLaunchAtLogin() {
+        let draftChanged = launchAtLogin != launchAtLoginBaseline
+        launchAtLoginBaseline = LaunchAtLogin.isRegistered
+        if !draftChanged { launchAtLogin = launchAtLoginBaseline }
+        launchAtLoginRequiresApproval = LaunchAtLogin.requiresApproval
+    }
+
     private func saveSettings() {
         guard let baselineSettings, let currentSettings = tempSettings else {
             ScopyLog.ui.warning("saveSettings: baselineSettings or tempSettings is nil, skipping save")
@@ -202,6 +214,7 @@ struct SettingsView: View {
         // The login item is applied first and synchronously: a failure keeps the window open
         // with nothing else saved. A registration that still needs approval keeps the window
         // open so the General page can show how to finish it.
+        refreshLaunchAtLogin()
         if launchAtLogin != launchAtLoginBaseline {
             do {
                 try LaunchAtLogin.apply(launchAtLogin)
