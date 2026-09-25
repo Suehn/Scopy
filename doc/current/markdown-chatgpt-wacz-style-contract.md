@@ -91,7 +91,9 @@ source + MarkdownRenderContext
 Authoritative implementation surfaces:
 
 - `Scopy/Views/History/MarkdownHTMLRenderer.swift`: the only document entrypoint. It never changes source bytes: the source is embedded verbatim with the policy (`allowLatexDocumentNormalize`, `allowLatexInlineTextNormalize`, `allowLooseMathRepair`, optional `linkEnrichment`) chosen by the Swift profile detector.
-- `Scopy/Views/History/MarkdownHTMLDocumentBuilder.swift`: local assets, CSS, table/runtime measurement, readiness, and export hooks.
+- `Scopy/Views/History/MarkdownHTMLDocumentBuilder.swift`: the thin document shell: CSP, the two local stylesheets, the nine scale-dependent layout variables on `:root`, the source and policy as an inert `<script type="application/json" id="scopy-render-input">` block, and the deferred renderer bundle. It owns no CSS rules and no script.
+- `Tools/MarkdownRenderer/src/styles/scopy-document.css`: the base document CSS (typography, code, tables, rich surfaces, tasks, footnotes, export-mode rules), copied to `Scopy/Resources/MarkdownPreview/scopy-document.css`.
+- `Tools/MarkdownRenderer/src/documentRuntime.js`: the document runtime bundled into the same IIFE and exposed as `window.ScopyDocument` (`boot`, `isRenderReady`, `probeLayoutHeight`, `reportHeight`, `state`, and `export.{prepare, adjustWideContent, applyScale, watchLayout}`): rendering the embedded input, the pipe-table model and column buckets, task-list markers, terminal readiness, render-ID-scoped metrics, and export-side preparation and the layout watcher.
 - `Tools/MarkdownRenderer/src/render.js`: Markdown AST/HTML AST pipeline and every source repair, in this order: the policy-gated scientific LaTeX document repair (`scopyLatexDocument.js`) and inline/math-segment repair (`scopyLatexInline.js`), ATX heading whitespace, table code-span pipes, backslash math. `scopyLineScan.js` is the one fence/indentation/inline-code scanner those repairs share.
 - `Tools/MarkdownRenderer/src/remarkScopySafeHTML.js`: the closed user-authored safe-HTML recognizer; unsupported or malformed forms fail to literal text.
 - `Tools/MarkdownRenderer/src/scopyLocalImageAssets.js`: the closed bundled-image allowlist and exact public-URL mappings used by fixtures.
@@ -102,8 +104,8 @@ Authoritative implementation surfaces:
 - `Tools/MarkdownRenderer/src/scopySourceIcon.js`: shared exact-host source icons and compact failed-favicon fallback.
 - `Tools/MarkdownRenderer/src/rehypeScopyKatex.js`: HTML-only math rendering and stable failure behavior.
 - `Scopy/Views/History/MarkdownPreviewWebView.swift`: the one `MarkdownPreviewWebViewController` (owner lease, render IDs, metrics) and the `ReusableMarkdownPreviewWebView` representable; `Scopy/Services/Export/MarkdownWebKitEnvironment.swift` holds the shared WebKit configuration and network-blocking rules for preview and export.
-- `Scopy/Services/Export/MarkdownExportService.swift`: PNG reliability strategies applied to the same HTML.
-- `Scopy/Resources/MarkdownPreview/asset-manifest.json` plus `Tools/MarkdownRenderer/scripts/verify-assets.mjs`: the lockfile-derived renderer/KaTeX asset contract.
+- `Scopy/Services/Export/MarkdownExportService.swift`: PNG reliability strategies applied to the same HTML; page-side export work is only calls into `ScopyDocument.export`.
+- `Scopy/Resources/MarkdownPreview/asset-manifest.json` plus `Tools/MarkdownRenderer/scripts/verify-assets.mjs`: the atomic renderer bundle, document CSS, and lockfile-derived KaTeX asset contract.
 
 There is no legacy renderer selection, feature flag, shadow renderer, silent markdown-it fallback, or second preview/export parse result. Missing renderer assets are a render failure, not permission to display a semantically different document.
 
@@ -307,7 +309,7 @@ KaTeX behavior:
 7. Do not put `content-visibility:auto` on formula hosts. WebKit can omit off-viewport formulas from a full-document PNG snapshot even though their intrinsic placeholders remain. Scopy keeps every formula paintable; this is an export-stability guard.
 8. The main answer path is HTML-only KaTeX. CSS or auxiliary code mentioning `.katex-mathml` does not prove that the captured main answer used a MathML+HTML pair.
 9. The renderer reports `mathStrictCount`, `mathRelaxedCount`, and `mathErrorCount` from the actual render outcome. Authored/ChatGPT source bytes bypass loose formula normalization; only the explicitly selected OCR/scientific profile may repair source before this one parser runs.
-10. The renderer IIFE, KaTeX CSS, and every CSS-referenced KaTeX font are one lockfile-derived asset set. The manifest records exact hashes and KaTeX version; build/test reject a mixed, missing, stale, or flat-duplicated app-bundle layout instead of falling back to host fonts or another renderer.
+10. The renderer IIFE (with the document runtime), the base document CSS, KaTeX CSS, and every CSS-referenced KaTeX font are one asset set; KaTeX is lockfile-derived and the document CSS must equal its renderer-package source. The manifest records exact hashes and KaTeX version; build/test reject a mixed, missing, stale, or flat-duplicated app-bundle layout instead of falling back to host fonts or another renderer.
 
 The optional loose-math repair is a Scopy input adaptation for clearly detected OCR/scientific or LaTeX-document profiles. It is disabled for ordinary ChatGPT/authored Markdown, and profile selection may change only bounded source repair—not the renderer, CSS, or output architecture.
 
@@ -393,7 +395,7 @@ Every pipe table uses one table model:
 - cell text uses `word-break: normal` and `overflow-wrap: anywhere`;
 - table-local overflow never requests a wider Swift hover popover.
 
-Column bucket thresholds are based on text length:
+Column bucket thresholds are based on each column's longest whitespace-collapsed cell text (`tableColumnSize` in `documentRuntime.js`, pinned by `document-runtime.test.js`):
 
 | Length | Bucket | Min/max width as fraction of thread max width |
 | ---: | --- | --- |
@@ -448,7 +450,7 @@ Each WebView load receives a new opaque render ID inserted into `data-scopy-rend
 
 Metric deduplication compares width, height, horizontal-overflow state, success/failure state, error reason, and render ID. A same-size failure cannot be swallowed as a duplicate success, and a late message from an earlier document cannot resize or mark the new preview ready.
 
-The document remains hidden until the renderer, canonical stylesheet, `document.fonts`, every local image load/error outcome, task/table/rich runtime, two paint frames, and a current layout epoch reach a terminal ready state. ResizeObserver and interactive-details/rich-control changes are coalesced through requestAnimationFrame. The reusable WebView becomes opaque only for a current-owner terminal success; a terminal failure leaves the static source/DOM available behind a visible reason instead of producing a blank first hover. Renderer failure is reported as failure; it does not silently switch engines.
+The document remains hidden until the renderer, both stylesheets (`katex.min.css` and `scopy-document.css`), `document.fonts`, every local image load/error outcome, task/table/rich runtime, two paint frames, and a current layout epoch reach a terminal ready state. ResizeObserver and interactive-details/rich-control changes are coalesced through requestAnimationFrame. The reusable WebView becomes opaque only for a current-owner terminal success; a terminal failure leaves the static source/DOM available behind a visible reason instead of producing a blank first hover. Renderer failure is reported as failure; it does not silently switch engines.
 
 PNG export builds the same HTML off the main thread, then owns WebKit work on the main actor. Its PDF, one-shot snapshot, and tiled snapshot paths are reliability strategies for one frozen DOM, not alternate renderers. The export freeze closes transient overlays/tooltips, disables rich controls and links, removes them from the tab order, and cancels activation. Export-only code wrapping or table scaling may run only after preview-equivalent layout is ready and only to fit bitmap constraints; it may not change Markdown parsing, typography, content width, table/card models, or frozen source data.
 
@@ -512,10 +514,14 @@ Focused renderer assertions live in:
 - `Tools/MarkdownRenderer/test/source-icons.test.js`
 - `Tools/MarkdownRenderer/test/safe-html.test.js`
 - `Tools/MarkdownRenderer/test/asset-contract.test.js`
+- `Tools/MarkdownRenderer/test/document-runtime.test.js`
 - `Tools/MarkdownRenderer/test/source-repairs.test.js` and `Tools/MarkdownRenderer/test/scientific-repairs.test.js` (synthetic scientific-profile goldens in `test/fixtures/scientific-repairs.json`)
 - `Tools/MarkdownRenderer/test/corpus.test.js` and `Tools/MarkdownRenderer/test/policy-contract.test.js`, paired with `ScopyTests/MarkdownRenderingCorpusContractTests.swift` over the same `cases.json` and `test/fixtures/policy-contract.json`
-- `ScopyTests/ChatGPTMarkdownRendererTests.swift`
-- `ScopyTests/WebViewLifecycleTests.swift`
+- `ScopyTests/ChatGPTMarkdownRendererTests.swift` (shell structure, embedding, cache key, render identity)
+- `ScopyTests/MarkdownComputedStyleTests.swift` (the typography table, quote bar, inline code, code card, and table rules as computed styles in real WebKit)
+- `ScopyTests/WebViewLifecycleTests.swift` (live readiness, terminal image fallback, stylesheet failure, resize, icons)
+
+Style rules are verified as computed styles, never as CSS or script source substrings.
 
 Real user fixtures, rich-surface provenance, and strict v2 examples live in:
 

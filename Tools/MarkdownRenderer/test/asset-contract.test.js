@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import test from "node:test";
 import {
   defaultAssetRoot,
+  documentCSSRelativePath,
   katexCSSRelativePath,
   loadLockedKatexAssets,
   manifestRelativePath,
@@ -59,6 +60,7 @@ test("reports package, sidecar, manifest, and font-set drift precisely", async (
     await synchronizeReleaseAssets({ assetRoot, rendererBytes });
 
     await writeFile(join(assetRoot, katexCSSRelativePath), "stale css\n");
+    await writeFile(join(assetRoot, documentCSSRelativePath), "stale css\n");
     await writeFile(join(assetRoot, rendererSidecarRelativePath), "stale\n");
     await writeFile(join(assetRoot, "fonts/Unexpected.woff2"), "stale\n");
     const verification = await verifyReleaseAssets({
@@ -68,6 +70,7 @@ test("reports package, sidecar, manifest, and font-set drift precisely", async (
     const codes = new Set(verification.failures.map(({ code }) => code));
 
     assert.ok(codes.has("PACKAGE_ASSET_DRIFT"));
+    assert.ok(codes.has("DOCUMENT_CSS_DRIFT"));
     assert.ok(codes.has("RENDERER_SIDECAR_DRIFT"));
     assert.ok(codes.has("KATEX_FONT_SET_DRIFT"));
 

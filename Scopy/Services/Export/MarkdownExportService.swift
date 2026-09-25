@@ -1434,274 +1434,8 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
         // so readiness is tracked by a page-side animation-frame watcher that Swift polls with `evaluateJavaScript`.
         let widthPoints = Double(viewportWidthPoints)
 
-        let setupJS = """
-        (function() {
-          try {
-            try { if (document && document.documentElement && document.documentElement.classList) { document.documentElement.classList.add('scopy-export-mode'); } } catch (e) { }
-            var content = document.getElementById('content');
-            if (content) {
-              try { content.style.opacity = '1'; } catch (e) { }
-              try { content.style.transition = 'none'; } catch (e) { }
-              try {
-                if (window.ScopyUnifiedMarkdown && typeof window.ScopyUnifiedMarkdown.freezeRichForExport === 'function') {
-                  window.ScopyUnifiedMarkdown.freezeRichForExport(content);
-                }
-              } catch (e) { }
-              try { if (typeof window.syncChatGPTZoomShell === 'function') { window.syncChatGPTZoomShell(content); } } catch (e) { }
-            }
-          } catch (e) { }
-          return true;
-        })();
-        """
-
-        let adjustWideContentJS = """
-        (function() {
-          var w = \(widthPoints);
-          var exportScale = 1;
-          try {
-            if (window && window.__scopyExportUsesTransform && window.__scopyExportScale) {
-              var s = window.__scopyExportScale;
-              if (s && isFinite(s) && s > 0) { exportScale = s; }
-            }
-          } catch (e) { exportScale = 1; }
-          function computeTargetWidthPoints(content) {
-            var padL = 0, padR = 0;
-            try {
-              var cs = window.getComputedStyle(content);
-              padL = parseFloat(cs.paddingLeft) || 0;
-              padR = parseFloat(cs.paddingRight) || 0;
-            } catch (e) { padL = 0; padR = 0; }
-            var layoutW = 0;
-            try { layoutW = Math.ceil(content.clientWidth || content.offsetWidth || 0); } catch (e) { layoutW = 0; }
-            if (!layoutW || !isFinite(layoutW) || layoutW <= 0) {
-              try {
-                var raw = window.getComputedStyle(document.documentElement).getPropertyValue('--scopy-chatgpt-render-width');
-                layoutW = Math.ceil(parseFloat(raw) || 0);
-              } catch (e) { layoutW = 0; }
-            }
-            if (!layoutW || !isFinite(layoutW) || layoutW <= 0) { layoutW = w; }
-
-            // Table export starts from the same unscaled content box as preview. A later global transform may shrink
-            // the entire rendered surface for PNG area limits, but it must not change text/table layout widths.
-            return Math.max(1, Math.floor(layoutW - padL - padR));
-          }
-          function isExportTableWrapper(node) {
-            return !!(node && node.classList && node.classList.contains('scopy-export-table-wrapper'));
-          }
-          function unwrapIfNeeded(block) {
-            try {
-              var p = block && block.parentElement;
-              if (!p) { return; }
-              if (!isExportTableWrapper(p)) { return; }
-              var gp = p.parentNode;
-              if (!gp) { return; }
-              gp.insertBefore(block, p);
-              gp.removeChild(p);
-            } catch (e) { }
-          }
-          function previewTableBlock(table) {
-            try {
-              var p = table && table.parentElement;
-              if (p && p.classList && p.classList.contains('scopy-chatgpt-table-wrapper')) {
-                var gp = p.parentElement;
-                if (gp && gp.classList && gp.classList.contains('scopy-chatgpt-table-container')) {
-                  return gp;
-                }
-              }
-              if (p && p.classList && p.classList.contains('scopy-chatgpt-table-container')) {
-                return p;
-              }
-              if (table && table.parentNode && document && typeof document.createElement === 'function') {
-                var wrapper = document.createElement('div');
-                wrapper.className = 'scopy-chatgpt-table-container';
-                var tableWrapper = document.createElement('div');
-                tableWrapper.className = 'scopy-chatgpt-table-wrapper';
-                table.parentNode.insertBefore(wrapper, table);
-                wrapper.appendChild(tableWrapper);
-                tableWrapper.appendChild(table);
-                return wrapper;
-              }
-            } catch (e) { }
-            return table;
-          }
-          function resetExportScale(node) {
-            try {
-              if (!node || !node.dataset || node.dataset.scopyExportScaled !== 'true') { return; }
-              if (node.style) {
-                node.style.transform = '';
-                node.style.transformOrigin = '';
-              }
-              delete node.dataset.scopyExportScaled;
-            } catch (e) { }
-          }
-          function applyExportScale(node, scale) {
-            try {
-              node.style.transform = 'scale(' + scale + ')';
-              node.style.transformOrigin = 'top left';
-              if (node.dataset) { node.dataset.scopyExportScaled = 'true'; }
-            } catch (e) { }
-          }
-          function measureLayoutWidth(node) {
-            if (!node) { return 0; }
-            try { void node.offsetHeight; } catch (e) { }
-            var rectW = 0, scrollW = 0, offsetW = 0, clientW = 0;
-            try {
-              rectW = Math.ceil((node.getBoundingClientRect().width || 0));
-              var browserZoom = 1;
-              try {
-                var rawZoom = window.getComputedStyle(document.documentElement).getPropertyValue('--scopy-chatgpt-browser-zoom');
-                browserZoom = parseFloat(rawZoom) || 1;
-              } catch (e) { browserZoom = 1; }
-              if (browserZoom && isFinite(browserZoom) && browserZoom > 0 && browserZoom !== 1) {
-                rectW = Math.ceil(rectW / browserZoom);
-              }
-              if (exportScale && isFinite(exportScale) && exportScale > 0 && exportScale !== 1) {
-                rectW = Math.ceil(rectW / exportScale);
-              }
-            } catch (e) { rectW = 0; }
-            try { scrollW = Math.ceil((node.scrollWidth || 0)); } catch (e) { scrollW = 0; }
-            try { offsetW = Math.ceil((node.offsetWidth || 0)); } catch (e) { offsetW = 0; }
-            try { clientW = Math.ceil((node.clientWidth || 0)); } catch (e) { clientW = 0; }
-            return Math.max(rectW, scrollW, offsetW, clientW);
-          }
-          function measurePreviewTableWidth(table, block) {
-            return Math.max(measureLayoutWidth(block), measureLayoutWidth(table));
-          }
-
-          function measureBlockWidth(node) {
-            if (!node) { return 0; }
-            try { void node.offsetHeight; } catch (e) { }
-            var rectW = 0, scrollW = 0, offsetW = 0, clientW = 0;
-            try {
-              rectW = Math.ceil((node.getBoundingClientRect().width || 0));
-              var browserZoom = 1;
-              try {
-                var rawZoom = window.getComputedStyle(document.documentElement).getPropertyValue('--scopy-chatgpt-browser-zoom');
-                browserZoom = parseFloat(rawZoom) || 1;
-              } catch (e) { browserZoom = 1; }
-              if (browserZoom && isFinite(browserZoom) && browserZoom > 0 && browserZoom !== 1) {
-                rectW = Math.ceil(rectW / browserZoom);
-              }
-            } catch (e) { rectW = 0; }
-            try { scrollW = Math.ceil((node.scrollWidth || 0)); } catch (e) { scrollW = 0; }
-            try { offsetW = Math.ceil((node.offsetWidth || 0)); } catch (e) { offsetW = 0; }
-            try { clientW = Math.ceil((node.clientWidth || 0)); } catch (e) { clientW = 0; }
-            return Math.max(rectW, scrollW, offsetW, clientW);
-          }
-
-          function scaleWideTables(content, targetWidth) {
-            if (!content || !content.querySelectorAll) { return; }
-            try {
-              if (typeof window.__scopyScaleChatGPTTablesForExport === 'function') {
-                window.__scopyScaleChatGPTTablesForExport(content, targetWidth);
-                return;
-              }
-            } catch (e) { }
-            var tables = content.querySelectorAll('table');
-            for (var i = 0; i < (tables.length || 0); i++) {
-              var table = tables[i];
-              if (!table) { continue; }
-              var block = previewTableBlock(table);
-              unwrapIfNeeded(block);
-              resetExportScale(block);
-              resetExportScale(table);
-
-              var rawWidth = measurePreviewTableWidth(table, block);
-              if (!rawWidth || rawWidth <= targetWidth + 1) { continue; }
-
-              var scale = targetWidth / rawWidth;
-              if (!scale || !isFinite(scale) || scale >= 0.999) { continue; }
-              if (scale <= 0) { continue; }
-
-              // Preserve the preview table layout. Fallback HTML that was not produced by the Markdown renderer still
-              // scales the table itself and reserves the scaled height on its table container.
-              applyExportScale(table, scale);
-              try {
-                var rawH = Math.ceil(table.offsetHeight || table.scrollHeight || table.getBoundingClientRect().height || 0);
-                if (rawH && rawH > 0 && block && block.style) {
-                  block.style.height = Math.ceil(rawH * scale + 1) + 'px';
-                  block.style.overflowX = 'visible';
-                  if (block.dataset) { block.dataset.scopyExportScaled = 'true'; }
-                }
-              } catch (e) { }
-            }
-          }
-
-          function adaptWideCodeBlocks(content, targetWidth) {
-            if (!content || !content.querySelectorAll) { return; }
-            var blocks = content.querySelectorAll('pre');
-            for (var i = 0; i < (blocks.length || 0); i++) {
-              var pre = blocks[i];
-              if (!pre || !pre.classList) { continue; }
-              try { pre.classList.remove('scopy-export-wrap-code'); } catch (e) { }
-              var rawWidth = measureBlockWidth(pre);
-              if (rawWidth > targetWidth + 1) {
-                try { pre.classList.add('scopy-export-wrap-code'); } catch (e) { }
-              }
-            }
-          }
-
-          function scaleWideMath(content, targetWidth) {
-            if (!content || !content.querySelectorAll) { return; }
-            var displays = content.querySelectorAll('.katex-display');
-            for (var i = 0; i < (displays.length || 0); i++) {
-              var display = displays[i];
-              var math = display && display.querySelector ? display.querySelector('.katex') : null;
-              if (!display || !math || !math.style) { continue; }
-              var available = 0;
-              try { available = Math.floor(display.clientWidth || 0); } catch (e) { available = 0; }
-              if (!available || available <= 0) { available = targetWidth; }
-              available = Math.min(targetWidth, available);
-              var rawWidth = measureBlockWidth(math);
-              if (!rawWidth || rawWidth <= available + 1) { continue; }
-              var scale = available / rawWidth;
-              if (!scale || !isFinite(scale) || scale <= 0 || scale >= 0.999) { continue; }
-              var rawHeight = 0;
-              try { rawHeight = Math.ceil(math.offsetHeight || math.scrollHeight || math.getBoundingClientRect().height || 0); } catch (e) { rawHeight = 0; }
-              math.style.transform = 'scale(' + scale + ')';
-              math.style.transformOrigin = 'top center';
-              display.style.overflow = 'visible';
-              display.style.maxWidth = '100%';
-              if (rawHeight > 0) { display.style.height = Math.ceil(rawHeight * scale + 1) + 'px'; }
-              if (display.dataset) { display.dataset.scopyExportMathScaled = 'true'; }
-            }
-
-            var inlineHosts = content.querySelectorAll('.scopy-math-inline-host');
-            for (var j = 0; j < (inlineHosts.length || 0); j++) {
-              var host = inlineHosts[j];
-              var inlineMath = host && host.querySelector ? host.querySelector('.katex') : null;
-              if (!host || !inlineMath || !inlineMath.style || !host.style) { continue; }
-              var inlineAvailable = 0;
-              try { inlineAvailable = Math.floor(host.clientWidth || 0); } catch (e) { inlineAvailable = 0; }
-              if (!inlineAvailable || inlineAvailable <= 0) { inlineAvailable = targetWidth; }
-              inlineAvailable = Math.min(targetWidth, inlineAvailable);
-              var inlineRawWidth = measureBlockWidth(inlineMath);
-              if (!inlineRawWidth || inlineRawWidth <= inlineAvailable + 1) { continue; }
-              var inlineScale = inlineAvailable / inlineRawWidth;
-              if (!inlineScale || !isFinite(inlineScale) || inlineScale <= 0 || inlineScale >= 0.999) { continue; }
-              var inlineRawHeight = 0;
-              try { inlineRawHeight = Math.ceil(inlineMath.offsetHeight || inlineMath.scrollHeight || inlineMath.getBoundingClientRect().height || 0); } catch (e) { inlineRawHeight = 0; }
-              inlineMath.style.transform = 'scale(' + inlineScale + ')';
-              inlineMath.style.transformOrigin = 'left center';
-              host.style.overflow = 'visible';
-              host.style.maxWidth = '100%';
-              host.style.width = Math.ceil(inlineRawWidth * inlineScale + 1) + 'px';
-              if (inlineRawHeight > 0) { host.style.height = Math.ceil(inlineRawHeight * inlineScale + 1) + 'px'; }
-              if (host.dataset) { host.dataset.scopyExportMathScaled = 'true'; }
-            }
-          }
-
-          var content = document.getElementById('content');
-          if (!content) { return false; }
-          var targetWidth = computeTargetWidthPoints(content);
-          try { if (typeof window.syncChatGPTZoomShell === 'function') { window.syncChatGPTZoomShell(content); } } catch (e) { }
-          scaleWideTables(content, targetWidth);
-          scaleWideMath(content, targetWidth);
-          adaptWideCodeBlocks(content, targetWidth);
-          try { if (typeof window.syncChatGPTZoomShell === 'function') { window.syncChatGPTZoomShell(content); } } catch (e) { }
-          return true;
-        })();
-        """
+        let setupJS = "window.ScopyDocument.export.prepare()"
+        let adjustWideContentJS = "window.ScopyDocument.export.adjustWideContent(\(widthPoints))"
 
         do {
             try await installLayoutWatcher(webView: webView)
@@ -1865,8 +1599,8 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
             var exportScale = 1;
             var usesTransform = false;
             try {
-              if (window && window.__scopyExportScale) { exportScale = window.__scopyExportScale; }
-              usesTransform = !!(window && window.__scopyExportUsesTransform);
+              exportScale = window.ScopyDocument.export.state.scale || 1;
+              usesTransform = !!window.ScopyDocument.export.state.usesTransform;
             } catch (e) { exportScale = 1; usesTransform = false; }
 
             var contentRectW = 0, contentRectH = 0;
@@ -1945,8 +1679,7 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
             var info = {
               readyState: (document && document.readyState) ? document.readyState : 'unknown',
               hasContent: !!c,
-              exportScale: (window && window.__scopyExportScale) ? window.__scopyExportScale : 1,
-              baseFontSize: (window && window.__scopyExportBaseFontSize) ? window.__scopyExportBaseFontSize : 0,
+              exportScale: window.ScopyDocument.export.state.scale || 1,
               bodyFontSize: (function() {
                 try { return (window.getComputedStyle && document.body) ? window.getComputedStyle(document.body).fontSize : ''; } catch (e) { return ''; }
               })(),
@@ -1956,8 +1689,8 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
               documentScrollHeight: (document.documentElement && document.documentElement.scrollHeight) ? document.documentElement.scrollHeight : 0,
               contentScrollHeight: (c && c.scrollHeight) ? c.scrollHeight : 0,
               contentRectHeight: (c && c.getBoundingClientRect) ? Math.ceil(c.getBoundingClientRect().height || 0) : 0,
-              renderFailed: !!(window.__scopyRenderState && window.__scopyRenderState.renderFailed),
-              renderErrorReason: (window.__scopyRenderState && window.__scopyRenderState.unifiedErrorReason) ? window.__scopyRenderState.unifiedErrorReason : ''
+              renderFailed: !!window.ScopyDocument.state.renderFailed,
+              renderErrorReason: window.ScopyDocument.state.unifiedErrorReason || ''
             };
             return JSON.stringify(info);
           } catch (e) {
@@ -2010,94 +1743,7 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
 
     private func applyGlobalScale(webView: WKWebView, scale: CGFloat) async throws {
         let frameMark = (try? await readLayoutSample(webView: webView))?.frames ?? 0
-        let js = """
-        (function() {
-          try {
-            // Reset any prior scaling so we can re-apply deterministically.
-            try { document.documentElement && (document.documentElement.style.zoom = ''); } catch (e) { }
-            try { document.body && (document.body.style.zoom = ''); } catch (e) { }
-
-            window.__scopyExportScale = \(Double(scale));
-            window.__scopyExportUsesTransform = true;
-
-            var body = document.body;
-            if (!body) { return false; }
-            var content = document.getElementById('content');
-            if (!content) { return false; }
-
-            var nextScale = \(Double(scale));
-            if (!nextScale || !isFinite(nextScale) || nextScale <= 0) { nextScale = 1; }
-            var browserZoom = 1;
-            try {
-              var rawZoom = window.getComputedStyle(document.documentElement).getPropertyValue('--scopy-chatgpt-browser-zoom');
-              browserZoom = parseFloat(rawZoom) || 1;
-            } catch (e) { browserZoom = 1; }
-            if (!browserZoom || !isFinite(browserZoom) || browserZoom <= 0) { browserZoom = 1; }
-
-            // Scopy-rendered Markdown has an explicit fixed-width layout shell. Keep that width stable while applying
-            // export scale so paragraph wrapping and table column measurement stay aligned with preview/ChatGPT.
-            // Legacy raw HTML exports do not have the shell, so keep their historical width compensation to avoid
-            // blank right margins in WebKit's PDF rasterization path.
-            try {
-              var preservesScopyLayoutWidth = false;
-              try { preservesScopyLayoutWidth = !!document.getElementById('content-scale-shell'); } catch (e) { preservesScopyLayoutWidth = false; }
-              content.style.transformOrigin = 'top left';
-              content.style.transform = 'scale(' + (browserZoom * nextScale) + ')';
-
-              // Prefer an explicit pixel width for the unscaled layout. Very large percentage widths can be clamped or
-              // handled inconsistently by WebKit's PDF pipeline, resulting in a blank right margin after scaling.
-              var viewportW = 0;
-              try { viewportW = Math.ceil(window.innerWidth || 0); } catch (e) { viewportW = 0; }
-              if (!viewportW || !isFinite(viewportW) || viewportW <= 0) {
-                try { viewportW = Math.ceil((document.documentElement && document.documentElement.clientWidth) ? document.documentElement.clientWidth : 0); } catch (e) { viewportW = 0; }
-              }
-              var widthPx = 0;
-              if (viewportW && isFinite(viewportW) && viewportW > 0) {
-                if (preservesScopyLayoutWidth) {
-                  try { widthPx = Math.max(1, Math.ceil(content.clientWidth || content.offsetWidth || 0)); } catch (e) { widthPx = 0; }
-                  if (!widthPx || !isFinite(widthPx) || widthPx <= 0) {
-                    try {
-                      var rawRenderWidth = window.getComputedStyle(document.documentElement).getPropertyValue('--scopy-chatgpt-render-width');
-                      widthPx = Math.max(1, Math.ceil(parseFloat(rawRenderWidth) || 0));
-                    } catch (e) { widthPx = 0; }
-                  }
-                  if (!widthPx || !isFinite(widthPx) || widthPx <= 0) {
-                    widthPx = Math.max(1, Math.ceil(viewportW));
-                  }
-                } else if (nextScale === 1) {
-                  widthPx = Math.max(1, Math.ceil(viewportW));
-                } else {
-                  widthPx = Math.max(1, Math.ceil(viewportW / nextScale));
-                }
-              }
-              if (widthPx > 0) {
-                content.style.setProperty('width', widthPx + 'px', 'important');
-                content.style.setProperty('max-width', widthPx + 'px', 'important');
-              } else {
-                var widthPercent = (preservesScopyLayoutWidth || nextScale === 1) ? 100 : Math.max(1, (100 / nextScale));
-                content.style.setProperty('width', widthPercent + '%', 'important');
-                content.style.setProperty('max-width', widthPercent + '%', 'important');
-              }
-              content.style.display = 'block';
-              try {
-                var shell = document.getElementById('content-scale-shell');
-                if (shell && shell.style) {
-                  var rawHeight = Math.ceil(content.scrollHeight || content.offsetHeight || 0);
-                  if (rawHeight && isFinite(rawHeight) && rawHeight > 0) {
-                    shell.style.height = Math.ceil(rawHeight * browserZoom * nextScale) + 'px';
-                  }
-                }
-              } catch (e) { }
-            } catch (e) { return false; }
-
-            // Ensure font-size reset so we don't double-scale text.
-            try { body.style.fontSize = ''; } catch (e) { }
-            return true;
-          } catch (e) {
-            return false;
-          }
-        })();
-        """
+        let js = "window.ScopyDocument.export.applyScale(\(Double(scale)))"
         do {
             let ok = try await evaluateJavaScriptBool(webView: webView, javaScriptString: js)
             if !ok {
@@ -2179,74 +1825,9 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
 
     // MARK: - Layout settle watcher
 
-    /// A page-side animation-frame watcher: it measures the export height every frame and counts how many
-    /// consecutive frames it has been unchanged, so Swift can wait for layout to settle instead of sleeping.
-    private static let layoutWatcherJS = """
-    (function() {
-      try {
-        if (window.__scopyLayoutWatcher) { return true; }
-        var w = { frames: 0, stableFrames: 0, height: 0, live: 0, lastHeight: -1, lastLive: -1, fonts: 'n/a',
-                  renderReady: false, renderFailed: false, renderErrorReason: '', hasContent: false };
-        window.__scopyLayoutWatcher = w;
-        function measureHeight() {
-          var c = document.getElementById('content');
-          if (!c) { w.hasContent = false; return 0; }
-          w.hasContent = true;
-          var rectH = 0;
-          try {
-            var shell = document.getElementById('content-scale-shell') || c;
-            var r = shell.getBoundingClientRect();
-            rectH = Math.ceil(r.height || 0);
-          } catch (e) { rectH = 0; }
-          var sh = 0;
-          try { sh = Math.ceil(c.scrollHeight || 0); } catch (e) { sh = 0; }
-          // Prefer #content measurements so short content is not padded to the viewport height.
-          var useTransform = !!window.__scopyExportUsesTransform;
-          return Math.ceil((useTransform && rectH > 0) ? rectH : Math.max(rectH || 0, sh || 0));
-        }
-        function measureLive() {
-          var c = document.getElementById('content');
-          if (!c) { return 0; }
-          var exportScale = window.__scopyExportScale || 1;
-          var rectH = 0;
-          try { rectH = Math.ceil(c.getBoundingClientRect().height || 0); } catch (e) { rectH = 0; }
-          if (exportScale > 0 && Math.abs(exportScale - 1) > 0.001 && rectH > 0) { return rectH; }
-          var sh = 0;
-          try { sh = c.scrollHeight || 0; } catch (e) { sh = 0; }
-          return Math.max(sh, rectH);
-        }
-        function tick() {
-          w.frames += 1;
-          var h = 0; try { h = measureHeight(); } catch (e) { h = 0; }
-          var live = 0; try { live = measureLive(); } catch (e) { live = 0; }
-          var ready = true;
-          try { if (typeof window.__scopyIsRenderReady === 'function') { ready = !!window.__scopyIsRenderReady(); } } catch (e) { ready = true; }
-          var state = window.__scopyRenderState || {};
-          w.renderFailed = !!state.renderFailed;
-          w.renderErrorReason = state.unifiedErrorReason || '';
-          try { w.fonts = (document.fonts && document.fonts.status) ? document.fonts.status : 'n/a'; } catch (e) { w.fonts = 'n/a'; }
-          if (ready && h > 0 && w.lastHeight >= 0 && Math.abs(h - w.lastHeight) < 1 && Math.abs(live - w.lastLive) < 1) {
-            w.stableFrames += 1;
-          } else {
-            w.stableFrames = 0;
-          }
-          w.lastHeight = h; w.lastLive = live; w.height = h; w.live = live; w.renderReady = ready;
-          window.requestAnimationFrame(tick);
-        }
-        window.requestAnimationFrame(tick);
-        return true;
-      } catch (e) { return false; }
-    })();
-    """
-
-    private static let readLayoutWatcherJS = """
-    (function() {
-      var w = window.__scopyLayoutWatcher;
-      if (!w) { return JSON.stringify({ installed: false }); }
-      return JSON.stringify({ installed: true, frames: w.frames, stableFrames: w.stableFrames, height: w.height, live: w.live,
-        fonts: w.fonts, renderReady: w.renderReady, renderFailed: w.renderFailed, renderErrorReason: w.renderErrorReason });
-    })();
-    """
+    /// The page-side animation-frame watcher (`ScopyDocument.export.watchLayout`): the first call installs it and
+    /// every call returns the current sample, so Swift can wait for layout to settle instead of sleeping.
+    private static let watchLayoutJS = "window.ScopyDocument.export.watchLayout()"
 
     struct LayoutSample {
         let frames: Int
@@ -2260,51 +1841,33 @@ private final class ExportCoordinator: NSObject, WKNavigationDelegate {
     }
 
     private func installLayoutWatcher(webView: WKWebView) async throws {
-        let installed = try await evaluateJavaScriptBool(webView: webView, javaScriptString: Self.layoutWatcherJS)
-        guard installed else {
-            throw NSError(
-                domain: "Scopy.MarkdownExport",
-                code: 5,
-                userInfo: [NSLocalizedDescriptionKey: "Layout watcher could not be installed"]
-            )
-        }
+        _ = try await readLayoutSample(webView: webView)
     }
 
     private func readLayoutSample(webView: WKWebView) async throws -> LayoutSample {
-        for _ in 0..<2 {
-            let value = try await evaluateJavaScriptString(webView: webView, javaScriptString: Self.readLayoutWatcherJS)
-            guard let data = value.data(using: .utf8),
-                  let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-                throw NSError(
-                    domain: "Scopy.MarkdownExport",
-                    code: 5,
-                    userInfo: [NSLocalizedDescriptionKey: "Layout watcher returned an unreadable sample: \(value.prefix(120))"]
-                )
-            }
-            if (object["installed"] as? Bool) == true {
-                func number(_ key: String) -> CGFloat {
-                    if let n = object[key] as? NSNumber { return CGFloat(truncating: n) }
-                    return 0
-                }
-                let reason = (object["renderErrorReason"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
-                return LayoutSample(
-                    frames: Int(number("frames")),
-                    stableFrames: Int(number("stableFrames")),
-                    height: max(0, number("height")),
-                    liveHeight: max(0, number("live")),
-                    fonts: (object["fonts"] as? String) ?? "n/a",
-                    renderReady: (object["renderReady"] as? Bool) ?? false,
-                    renderFailed: (object["renderFailed"] as? Bool) ?? false,
-                    renderErrorReason: (reason?.isEmpty ?? true) ? nil : reason
-                )
-            }
-            // The page navigated or the world was reset; reinstall and read again.
-            try await installLayoutWatcher(webView: webView)
+        let value = try await evaluateJavaScriptString(webView: webView, javaScriptString: Self.watchLayoutJS)
+        guard let data = value.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw NSError(
+                domain: "Scopy.MarkdownExport",
+                code: 5,
+                userInfo: [NSLocalizedDescriptionKey: "Layout watcher returned an unreadable sample: \(value.prefix(120))"]
+            )
         }
-        throw NSError(
-            domain: "Scopy.MarkdownExport",
-            code: 5,
-            userInfo: [NSLocalizedDescriptionKey: "Layout watcher did not report after reinstall"]
+        func number(_ key: String) -> CGFloat {
+            if let n = object[key] as? NSNumber { return CGFloat(truncating: n) }
+            return 0
+        }
+        let reason = (object["renderErrorReason"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return LayoutSample(
+            frames: Int(number("frames")),
+            stableFrames: Int(number("stableFrames")),
+            height: max(0, number("height")),
+            liveHeight: max(0, number("live")),
+            fonts: (object["fonts"] as? String) ?? "n/a",
+            renderReady: (object["renderReady"] as? Bool) ?? false,
+            renderFailed: (object["renderFailed"] as? Bool) ?? false,
+            renderErrorReason: (reason?.isEmpty ?? true) ? nil : reason
         )
     }
 

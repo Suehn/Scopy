@@ -225,11 +225,9 @@ final class WebViewLifecycleTests: XCTestCase {
         let owner = UUID()
         controller.beginOwnership(owner)
         defer { controller.endOwnership(owner) }
-        let window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 816, height: 900), styleMask: [.borderless], backing: .buffered, defer: false)
-        window.isReleasedWhenClosed = false
-        window.contentView = controller.webView
-        window.orderFront(nil)
-        defer { window.close() }
+        controller.webView.frame = CGRect(x: 0, y: 0, width: 816, height: 900)
+        let document = try LiveMarkdownDocument(webView: controller.webView)
+        defer { document.close() }
         let source = """
         正文 [大象官方说明](https://support.platform.elebank.com/personal/zh-hk) 与 [汇丰 FPS 常见问题](https://www.hsbc.com.hk/campaigns/fps/faq/)。
 
@@ -238,35 +236,9 @@ final class WebViewLifecycleTests: XCTestCase {
         ```
         """
         let mentions = "[PDF](/tmp/report.pdf) [Word](/tmp/report.docx) [Word again](/tmp/report.docx) [图片](/tmp/image.png) [视频](/tmp/movie.mp4) [音频](/tmp/audio.wav) [Google Sheets](app://google-sheets) [Google Sheets again](app://google-sheets)"
-        // The standalone xctest runner has no app resource directory. Load the same
-        // canonical document against the checked-in atomic asset set explicitly.
-        let assetRoot = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
-            .appendingPathComponent("Scopy/Resources/MarkdownPreview", isDirectory: true)
-        let testAssets = FileManager.default.temporaryDirectory.appendingPathComponent("scopy-icon-webkit-" + UUID().uuidString, isDirectory: true)
-        try FileManager.default.copyItem(at: assetRoot, to: testAssets)
-        defer { try? FileManager.default.removeItem(at: testAssets) }
-        let documentURL = testAssets.appendingPathComponent("test.html")
-        try MarkdownHTMLRenderer.render(markdown: source + "\n\n" + mentions).write(to: documentURL, atomically: true, encoding: .utf8)
-        controller.webView.navigationDelegate = nil
-        controller.webView.loadFileURL(documentURL, allowingReadAccessTo: testAssets)
-        var ready = false
-        let deadline = Date().addingTimeInterval(20)
-        while !ready && Date() < deadline {
-            var polled = false
-            controller.webView.evaluateJavaScript("Boolean(window.__scopyIsRenderReady && window.__scopyIsRenderReady())") { value, _ in
-                ready = value as? Bool == true
-                polled = true
-            }
-            _ = runMainLoopUntil(timeout: 2) { polled }
-            if !ready { RunLoop.main.run(until: Date().addingTimeInterval(0.1)) }
-        }
-        if !ready {
-            var diagnostic: String?
-            controller.webView.evaluateJavaScript("JSON.stringify(window.__scopyRenderState || {})") { value, error in
-                diagnostic = (value as? String) ?? String(describing: error)
-            }
-            _ = runMainLoopUntil(timeout: 2) { diagnostic != nil }
-            XCTFail("Real WebKit document did not reach terminal success: \(diagnostic ?? "no response")")
+        try document.load(MarkdownHTMLRenderer.render(markdown: source + "\n\n" + mentions), timeout: 20)
+        guard document.isRenderReady else {
+            XCTFail("Real WebKit document did not reach terminal success: \(document.evaluate("JSON.stringify(window.ScopyDocument.state)") ?? "no response")")
             return
         }
         let checks = """
@@ -291,22 +263,12 @@ final class WebViewLifecycleTests: XCTestCase {
           const gradients = root.querySelectorAll('.scopy-mention-icon linearGradient').length > 0;
           const masks = root.querySelectorAll('.scopy-mention-icon mask').length > 0;
           const originalMediaColor = getComputedStyle(root.querySelector('.scopy-codex-icon--video path')).fill === 'rgb(146, 79, 247)';
-          window.ScopyUnifiedMarkdown.freezeRichForExport(root);
+          window.ScopyDocument.export.prepare();
           const afterIcons = root.querySelectorAll('img.scopy-link-origin-icon');
           return JSON.stringify({loaded, aligned, mentionGeometry, uniquePaintIDs, gradients, masks, originalMediaColor, fallback: !!fallback, noErrorText: !root.textContent.includes('图片无法显示'), exportPreservesIcons: afterIcons.length === images.length});
         })()
         """
-        var result: String?
-        var evaluationError: Error?
-        var evaluated = false
-        controller.webView.evaluateJavaScript(checks) { value, error in
-            result = value as? String
-            evaluationError = error
-            evaluated = true
-        }
-        XCTAssertTrue(runMainLoopUntil(timeout: 10) { evaluated })
-        XCTAssertNil(evaluationError)
-        let json = try XCTUnwrap(result).data(using: .utf8)!
+        let json = try XCTUnwrap(document.evaluate(checks) as? String).data(using: .utf8)!
         let outcomes = try XCTUnwrap(JSONSerialization.jsonObject(with: json) as? [String: Bool])
         for (name, passed) in outcomes { XCTAssertTrue(passed, name) }
         XCTAssertEqual(outcomes.count, 10)
@@ -317,44 +279,28 @@ final class WebViewLifecycleTests: XCTestCase {
         let owner = UUID()
         controller.beginOwnership(owner)
         defer { controller.endOwnership(owner) }
-        let window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 360, height: 600), styleMask: [.borderless], backing: .buffered, defer: false)
-        window.isReleasedWhenClosed = false
-        window.contentView = controller.webView
-        window.orderFront(nil)
-        defer { window.close() }
-        let assetRoot = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
-            .appendingPathComponent("Scopy/Resources/MarkdownPreview", isDirectory: true)
-        let testAssets = FileManager.default.temporaryDirectory.appendingPathComponent("scopy-layout-" + UUID().uuidString)
-        try FileManager.default.copyItem(at: assetRoot, to: testAssets)
-        defer { try? FileManager.default.removeItem(at: testAssets) }
+        controller.webView.frame = CGRect(x: 0, y: 0, width: 360, height: 600)
+        let document = try LiveMarkdownDocument(webView: controller.webView)
+        defer { document.close() }
+        let window = document.window
         let source = "# Stable preview\n\n" + String(repeating: "窗口调整大小时保留原有排版与缩放规则，表格和代码只在自身范围滚动。", count: 15)
             + "\n\n```text\n" + String(repeating: "long_code_", count: 150) + "\n```"
         // Cover both overlay and space-reserving scrollbars independently of the host's preference.
         for (scale, scrollbarWidth) in [(80, 0), (115, 0), (200, 0), (80, 15), (115, 15), (200, 15)] {
             let context = MarkdownRenderContextResolver.defaultContext(for: source, layoutScale: MarkdownChatGPTLayoutScalePercent(settingsValue: scale))
-            let documentName = "layout-\(scale)-\(scrollbarWidth).html"
-            let document = testAssets.appendingPathComponent(documentName)
             let html = MarkdownHTMLRenderer.render(markdown: source, context: context)
                 .replacingOccurrences(of: "</head>", with: "<style>html { overflow-y: scroll; } ::-webkit-scrollbar { width: \(scrollbarWidth)px; height: \(scrollbarWidth)px; }</style></head>")
-            try html.write(to: document, atomically: true, encoding: .utf8)
-            controller.webView.navigationDelegate = nil
-            controller.webView.loadFileURL(document, allowingReadAccessTo: testAssets)
-            var ready = false
-            let deadline = Date().addingTimeInterval(15)
-            while !ready && Date() < deadline {
-                ready = evaluate("Boolean(location.pathname.endsWith('\(documentName)') && window.__scopyIsRenderReady && window.__scopyIsRenderReady())", in: controller.webView) as? Bool == true
-                if !ready { RunLoop.main.run(until: Date().addingTimeInterval(0.05)) }
-            }
-            XCTAssertTrue(ready, "Live document at \(scale)% must render")
-            let initialParagraphHeight = try XCTUnwrap(evaluate("document.querySelector('#content p').offsetHeight", in: controller.webView) as? Double)
-            _ = evaluate("window.__scopyLayoutRegressionIdentity = document.getElementById('content'); true", in: controller.webView)
+            try document.load(html, name: "layout-\(scale)-\(scrollbarWidth).html")
+            XCTAssertTrue(document.isRenderReady, "Live document at \(scale)% must render")
+            let initialParagraphHeight = try XCTUnwrap(document.evaluate("document.querySelector('#content p').offsetHeight") as? Double)
+            _ = document.evaluate("window.__scopyLayoutRegressionIdentity = document.getElementById('content'); true")
             for width in [360, 640, 816, 900, 1500, 360] {
                 window.setContentSize(CGSize(width: width, height: 600))
                 RunLoop.main.run(until: Date().addingTimeInterval(0.1))
                 let checks = """
                 (() => {
                   const root = document.documentElement, content = document.getElementById('content');
-                  window.syncChatGPTZoomShell(content);
+                  window.ScopyDocument.probeLayoutHeight();
                   const paragraph = content.querySelector('p').getBoundingClientRect();
                   const shell = document.getElementById('content-scale-shell').getBoundingClientRect();
                   const contentBox = content.getBoundingClientRect();
@@ -374,7 +320,7 @@ final class WebViewLifecycleTests: XCTestCase {
                   };
                 })()
                 """
-                let values = try XCTUnwrap(evaluate(checks, in: controller.webView) as? [String: Any])
+                let values = try XCTUnwrap(document.evaluate(checks) as? [String: Any])
                 let geometry = try XCTUnwrap(values["geometry"] as? String)
                 for (name, value) in values where name != "geometry" {
                     let passed = try XCTUnwrap(value as? Bool)
@@ -384,16 +330,29 @@ final class WebViewLifecycleTests: XCTestCase {
         }
     }
 
-    private func evaluate(_ script: String, in webView: WKWebView) -> Any? {
-        var finished = false
-        var result: Any?
-        webView.evaluateJavaScript(script) { value, error in
-            XCTAssertNil(error)
-            result = value
-            finished = true
-        }
-        XCTAssertTrue(runMainLoopUntil(timeout: 5) { finished })
-        return result
+    func testBrokenImageReachesTerminalFallbackWithoutFailingTheDocument() throws {
+        let document = try LiveMarkdownDocument()
+        defer { document.close() }
+        XCTAssertTrue(try document.load(MarkdownHTMLRenderer.render(markdown: "正文\n\n![示意图](missing-diagram.png)")))
+
+        XCTAssertTrue(document.isRenderReady)
+        XCTAssertEqual(document.evaluate("window.ScopyDocument.state.imagesReady") as? Bool, true)
+        XCTAssertEqual(
+            document.evaluate("document.querySelector('.scopy-image-terminal-fallback[data-scopy-image-state=\"error\"]').textContent") as? String,
+            "示意图 · 图片无法显示"
+        )
+    }
+
+    func testMissingKaTeXStylesheetIsATerminalFailure() throws {
+        let document = try LiveMarkdownDocument()
+        defer { document.close() }
+        try FileManager.default.removeItem(at: document.assetRoot.appendingPathComponent("katex.min.css"))
+        XCTAssertTrue(try document.load(MarkdownHTMLRenderer.render(markdown: "$$E=mc^2$$")))
+
+        XCTAssertFalse(document.isRenderReady)
+        XCTAssertEqual(document.evaluate("window.ScopyDocument.state.renderFailed") as? Bool, true)
+        // A missing file-URL stylesheet never fires `error` in WebKit; the stylesheet deadline ends it instead.
+        XCTAssertEqual(document.evaluate("window.ScopyDocument.state.unifiedErrorReason") as? String, "stylesheet timeout")
     }
 
     private func runMainLoopUntil(timeout: TimeInterval, condition: () -> Bool) -> Bool {

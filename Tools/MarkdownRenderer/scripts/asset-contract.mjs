@@ -24,6 +24,7 @@ export const rendererRelativePath =
   "contrib/scopy-unified-renderer.iife.js";
 export const rendererSidecarRelativePath = `${rendererRelativePath}.sha256`;
 export const katexCSSRelativePath = "katex.min.css";
+export const documentCSSRelativePath = "scopy-document.css";
 export const katexFontsRelativePath = "fonts";
 
 const packageLockPath = resolve(markdownRendererRoot, "package-lock.json");
@@ -32,6 +33,11 @@ const installedKatexRoot = resolve(
   "node_modules/katex"
 );
 const rendererEntrypoint = resolve(markdownRendererRoot, "src/index.js");
+const documentCSSSourcePath = resolve(markdownRendererRoot, "src/styles/scopy-document.css");
+
+export async function loadDocumentCSSBytes() {
+  return readFile(documentCSSSourcePath);
+}
 
 const bundleConfiguration = Object.freeze({
   entrypoint: "Tools/MarkdownRenderer/src/index.js",
@@ -162,7 +168,7 @@ export async function buildRendererBytes() {
   return normalizeBundle(result.outputFiles[0].contents);
 }
 
-export function createAssetManifest(rendererBytes, katexAssets) {
+export function createAssetManifest(rendererBytes, katexAssets, documentCSSBytes) {
   return {
     schemaVersion: 1,
     renderer: {
@@ -171,6 +177,12 @@ export function createAssetManifest(rendererBytes, katexAssets) {
       sha256: sha256(rendererBytes),
       bytes: rendererBytes.length,
       build: bundleConfiguration
+    },
+    documentCSS: {
+      path: documentCSSRelativePath,
+      source: "Tools/MarkdownRenderer/src/styles/scopy-document.css",
+      sha256: sha256(documentCSSBytes),
+      bytes: documentCSSBytes.length
     },
     katex: {
       package: "katex",
@@ -247,6 +259,7 @@ export async function synchronizeReleaseAssets({
   }
   rendererBytes = Buffer.from(rendererBytes);
   const katexAssets = await loadLockedKatexAssets();
+  const documentCSSBytes = await loadDocumentCSSBytes();
 
   if (writeRenderer) {
     await atomicWrite(
@@ -262,12 +275,16 @@ export async function synchronizeReleaseAssets({
     resolve(resolvedAssetRoot, katexCSSRelativePath),
     katexAssets.cssBytes
   );
+  await atomicWrite(
+    resolve(resolvedAssetRoot, documentCSSRelativePath),
+    documentCSSBytes
+  );
   const removedFonts = await synchronizeFonts(
     resolvedAssetRoot,
     katexAssets.fonts
   );
 
-  const manifest = createAssetManifest(rendererBytes, katexAssets);
+  const manifest = createAssetManifest(rendererBytes, katexAssets, documentCSSBytes);
   // The manifest is committed last. A partial update cannot verify as a complete
   // release asset set, even if an earlier process was interrupted.
   await atomicWrite(
@@ -335,6 +352,19 @@ export async function verifyReleaseAssets({
     katexCSSRelativePath,
     failures
   );
+  const documentCSSBytes = await readAsset(
+    resolvedAssetRoot,
+    documentCSSRelativePath,
+    failures
+  );
+  const expectedDocumentCSSBytes = await loadDocumentCSSBytes();
+  if (documentCSSBytes && !documentCSSBytes.equals(expectedDocumentCSSBytes)) {
+    addFailure(
+      failures,
+      "DOCUMENT_CSS_DRIFT",
+      `${documentCSSRelativePath} differs from src/styles/scopy-document.css; run npm run build`
+    );
+  }
   const manifestBytes = await readAsset(
     resolvedAssetRoot,
     manifestRelativePath,
@@ -393,7 +423,7 @@ export async function verifyReleaseAssets({
 
   if (rendererBytes && manifestBytes) {
     const expectedManifest = serializeAssetManifest(
-      createAssetManifest(rendererBytes, katexAssets)
+      createAssetManifest(rendererBytes, katexAssets, expectedDocumentCSSBytes)
     );
     if (manifestBytes.toString("utf8") !== expectedManifest) {
       addFailure(

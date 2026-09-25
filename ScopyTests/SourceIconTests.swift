@@ -119,7 +119,7 @@ final class SourceIconTests: XCTestCase {
         let deadline = Date().addingTimeInterval(12)
         var ready = false
         while !ready && Date() < deadline {
-            ready = (try? await webView.evaluateJavaScript("Boolean(window.__scopyIsRenderReady && window.__scopyIsRenderReady())")) as? Bool == true
+            ready = (try? await webView.evaluateJavaScript("Boolean(window.ScopyDocument && window.ScopyDocument.isRenderReady())")) as? Bool == true
             if !ready { try await Task.sleep(nanoseconds: 100_000_000) }
         }
         XCTAssertTrue(ready, "a slow native icon must not become a font timeout")

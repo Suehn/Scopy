@@ -2,193 +2,36 @@ import XCTest
 import ScopyKit
 
 final class ChatGPTMarkdownRendererTests: XCTestCase {
-    func testDelimiterFixtureReachesSharedRuntimeWithoutRewritingMoneyOrCode() throws {
-        let url = try XCTUnwrap(Bundle(for: Self.self).url(forResource: "markdown_delimiter_repro", withExtension: "md"))
-        let source = try String(contentsOf: url, encoding: .utf8)
-        let html = MarkdownHTMLRenderer.render(markdown: source)
-        let literal = try String(decoding: JSONEncoder().encode(source), as: UTF8.self)
-
-        XCTAssertTrue(html.contains("window.ScopyUnifiedMarkdown.render(\(literal),"))
-        XCTAssertTrue(source.contains("这是**$E=mc^2$**对应的公式"))
-        XCTAssertTrue(source.contains("价格 $5 和 $10"))
-        XCTAssertTrue(source.contains("`**粗体** $x$`"))
-    }
-
-    func testRendererBuildsOneLocalStandaloneDocument() {
+    /// The shell is data plus references: two local stylesheets, one deferred local bundle, the render input as
+    /// inert JSON, and a CSP that forbids inline script.
+    func testRendererBuildsOneLocalStandaloneDocument() throws {
         let html = MarkdownHTMLRenderer.render(markdown: "# Title\n\n\\(x + y\\)")
 
-        XCTAssertTrue(html.contains("contrib/scopy-unified-renderer.iife.js"))
-        XCTAssertTrue(html.contains("katex.min.css"))
-        XCTAssertTrue(html.contains("window.__scopyIsRenderReady"))
-        XCTAssertTrue(html.contains("data-scopy-render-id=\"\(MarkdownPreviewRenderIdentity.placeholder)\""))
-        XCTAssertTrue(html.contains("renderID: document.documentElement.getAttribute('data-scopy-render-id')"))
-        XCTAssertFalse(html.contains("markdown-it"))
-        XCTAssertFalse(html.contains("renderMarkdownItFallback"))
-        XCTAssertFalse(html.contains("window.markdownit"))
-        XCTAssertFalse(html.contains("auto-render.min.js"))
-        XCTAssertFalse(html.contains("katex.min.js"))
+        XCTAssertTrue(html.contains("<html data-scopy-render-id=\"\(MarkdownPreviewRenderIdentity.placeholder)\">"))
+        XCTAssertEqual(tagMatches(#"<link [^>]*>"#, in: html), [
+            #"<link id="scopy-katex-stylesheet" rel="stylesheet" href="katex.min.css">"#,
+            #"<link id="scopy-document-stylesheet" rel="stylesheet" href="scopy-document.css">"#
+        ])
+        XCTAssertEqual(tagMatches(#"<script[^>]*>"#, in: html), [
+            #"<script type="application/json" id="scopy-render-input">"#,
+            #"<script defer src="contrib/scopy-unified-renderer.iife.js">"#
+        ])
+        let policy = try XCTUnwrap(tagMatches(#"content="default-src[^"]*""#, in: html).first)
+        XCTAssertTrue(policy.contains("script-src 'self' file:;"))
+        XCTAssertFalse(policy.contains("script-src 'self' 'unsafe-inline'"))
+        XCTAssertTrue(policy.contains("connect-src 'none'"))
+        XCTAssertTrue(policy.contains("base-uri 'none'"))
+        XCTAssertTrue(html.contains(#"<div id="content-scale-shell"><div id="content" dir="auto"></div></div>"#))
+        XCTAssertEqual(try renderInput(in: html).source, "# Title\n\n\\(x + y\\)")
     }
 
-    func testRendererWaitsForImagesToReachATerminalState() {
-        let html = MarkdownHTMLRenderer.render(markdown: "![diagram](data:image/png;base64,broken)")
-
-        XCTAssertTrue(html.contains("function settleRenderedImages(root, completion)"))
-        XCTAssertTrue(html.contains("image.decode().then("))
-        XCTAssertTrue(html.contains("data-scopy-image-state"))
-        XCTAssertTrue(html.contains("scopy-image-terminal-fallback"))
-        XCTAssertTrue(html.contains("img:not([data-scopy-deferred-image])"))
-        XCTAssertTrue(html.contains("function awaitTerminalReadiness(root)"))
-        XCTAssertTrue(html.contains("state.imagesReady = true"))
-        XCTAssertTrue(html.contains("awaitTerminalReadiness(el)"))
-        XCTAssertFalse(html.contains("content-visibility: auto"))
-    }
-
-    func testRendererPublishesReadinessOnlyAfterLocalAssetsFontsAndPaint() {
-        let html = MarkdownHTMLRenderer.render(markdown: "$$E=mc^2$$")
-
-        XCTAssertTrue(html.contains("id=\"scopy-katex-stylesheet\""))
-        XCTAssertTrue(html.contains("function awaitStylesheetReady(completion)"))
-        XCTAssertTrue(html.contains("function awaitFontsReady(completion)"))
-        XCTAssertTrue(html.contains("function awaitTwoPaintFrames(completion)"))
-        XCTAssertTrue(html.contains("KaTeX font failed:"))
-        XCTAssertTrue(html.contains("completion('paint timeout')"))
-        XCTAssertTrue(html.contains("var pending = 3"))
-        XCTAssertTrue(html.contains("!!state.stylesheetReady && !!state.fontsReady && !!state.imagesReady && !!state.paintReady"))
-        XCTAssertTrue(html.contains("state.paintReady = true;"))
-        XCTAssertTrue(html.contains("finish(true);"))
-        XCTAssertTrue(html.contains("window.syncChatGPTZoomShell = syncChatGPTZoomShell"))
-    }
-
-    func testRichHydrationFailureCannotReplaceSuccessfullyRenderedStaticDOM() {
-        let html = MarkdownHTMLRenderer.render(markdown: "```scopy-rich\n{\"version\":2,\"type\":\"currency\",\"state\":\"ready\",\"from\":{\"code\":\"USD\"},\"to\":{\"code\":\"CNY\"},\"amount\":1,\"rate\":7}\n```")
-
-        XCTAssertTrue(html.contains("el.innerHTML = result.html;"))
-        XCTAssertTrue(html.contains("window.__scopyRenderState.hydrationWarning"))
-        XCTAssertTrue(html.contains("rich hydration failed"))
-        XCTAssertTrue(html.contains("awaitTerminalReadiness(el)"))
-    }
-
-    func testClosedSafeHTMLExtensionHasOneResponsiveStyleAndExportContract() {
-        let html = MarkdownHTMLRenderer.render(markdown: "<u>u</u> <kbd>K</kbd> <mark>m</mark> H<sub>2</sub> x<sup>2</sup>\n\n<details><summary>More</summary>\n\nBody\n\n</details>")
-
-        XCTAssertTrue(html.contains("u.scopy-safe-html-u"))
-        XCTAssertTrue(html.contains("kbd.scopy-safe-html-kbd"))
-        XCTAssertTrue(html.contains("mark.scopy-safe-html-mark"))
-        XCTAssertTrue(html.contains("sub.scopy-safe-html-sub"))
-        XCTAssertTrue(html.contains("details.scopy-safe-details"))
-        XCTAssertTrue(html.contains("summary.scopy-safe-summary"))
-        XCTAssertTrue(html.contains("html.scopy-export-mode summary.scopy-safe-summary"))
-    }
-
-    func testScriptBreakingSourceIsEncodedAsData() {
-        let source = "</script><script>globalThis.pwned=true</script>"
+    func testScriptBreakingSourceIsEncodedAsData() throws {
+        let source = "</script><script>globalThis.pwned=true</script> <!--<script>"
         let html = MarkdownHTMLRenderer.render(markdown: source)
 
-        XCTAssertFalse(html.contains(source))
-        XCTAssertTrue(html.contains("<\\/script>"))
-        XCTAssertTrue(html.contains("globalThis.pwned=true"))
-    }
-
-    func testChatGPTTypographyAndBlockRhythmContract() {
-        let html = MarkdownHTMLRenderer.render(markdown: "# H1\n\n## H2\n\nText")
-
-        XCTAssertTrue(html.contains("--scopy-chatgpt-body-font-size: calc(16px"))
-        XCTAssertTrue(html.contains("--scopy-chatgpt-body-line-height: calc(26px"))
-        XCTAssertTrue(html.contains("--scopy-chatgpt-h1-font-size: calc(24px"))
-        XCTAssertTrue(html.contains("--scopy-chatgpt-h1-line-height: calc(32px"))
-        XCTAssertTrue(html.contains("--scopy-chatgpt-h2-font-size: calc(20px"))
-        XCTAssertTrue(html.contains("--scopy-chatgpt-h2-line-height: calc(28px"))
-        XCTAssertTrue(html.contains("--scopy-chatgpt-h3-font-size: calc(18px"))
-        XCTAssertTrue(html.contains("--scopy-chatgpt-h4-line-height: calc(24px"))
-        XCTAssertTrue(html.contains("margin: 4px 0;"))
-        XCTAssertTrue(html.contains("p + p {"))
-        XCTAssertTrue(html.contains("margin: 16px 0;"))
-        XCTAssertTrue(html.contains("padding-inline-start: 26px;"))
-        XCTAssertTrue(html.contains("padding-block: 8px;"))
-        XCTAssertTrue(html.contains("padding-inline-start: 24px;"))
-        XCTAssertFalse(html.contains("margin: 8px 0 4px 0;"))
-        XCTAssertFalse(html.contains("h3 code {"))
-    }
-
-    func testCodeTableMathAndOverflowContract() {
-        let html = MarkdownHTMLRenderer.render(markdown: "```swift\nlet x = 1\n```\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\n\\[x+y\\]")
-
-        XCTAssertTrue(html.contains("--scopy-chatgpt-code-card-font-size: calc(14px"))
-        XCTAssertTrue(html.contains("--scopy-chatgpt-code-card-line-height: calc(20px"))
-        XCTAssertTrue(html.contains("overflow-x: auto;"))
-        XCTAssertTrue(html.contains("white-space: pre;"))
-        XCTAssertTrue(html.contains("min-width: max-content;"))
-        XCTAssertTrue(html.contains("table {"))
-        XCTAssertTrue(html.contains("font-size: calc(14px * var(--scopy-chatgpt-layout-font-scale));"))
-        XCTAssertTrue(html.contains("line-height: calc(24px * var(--scopy-chatgpt-layout-font-scale));"))
-        XCTAssertTrue(html.contains("th {"))
-        XCTAssertTrue(html.contains("line-height: calc(16px * var(--scopy-chatgpt-layout-font-scale));"))
-        XCTAssertTrue(html.contains("padding-block: 8px;"))
-        XCTAssertTrue(html.contains("font-size: 1.21em;"))
-        XCTAssertTrue(html.contains("line-height: 1.2;"))
-        XCTAssertTrue(html.contains("unicode-bidi: isolate;"))
-        XCTAssertTrue(html.contains(".scopy-math-inline-host {"))
-        XCTAssertTrue(html.contains("display: inline-block;"))
-        XCTAssertTrue(html.contains(".scopy-math-inline-host::-webkit-scrollbar"))
-        XCTAssertTrue(html.contains("white-space: nowrap;"))
-        XCTAssertTrue(html.contains("overflow-wrap: anywhere;"))
-        XCTAssertFalse(html.contains("overflow-wrap: break-word;"))
-    }
-
-    func testRichSurfacesUseOneOfflineResponsiveStyleContract() {
-        let html = MarkdownHTMLRenderer.render(markdown: "```scopy-rich\n{\"version\":2,\"type\":\"currency\",\"state\":\"ready\",\"from\":{\"code\":\"USD\"},\"to\":{\"code\":\"CNY\"},\"amount\":100,\"rate\":6.7199,\"fractionDigits\":2}\n```")
-
-        XCTAssertTrue(html.contains(".scopy-rich {"))
-        XCTAssertTrue(html.contains("#content > .scopy-rich"))
-        XCTAssertTrue(html.contains("width: min(var(--scopy-chatgpt-thread-content-max-width)"))
-        XCTAssertTrue(html.contains("container-type: inline-size;"))
-        XCTAssertTrue(html.contains("border-radius: var(--scopy-rich-card-radius);"))
-        XCTAssertTrue(html.contains(".scopy-rich-news-card"))
-        XCTAssertTrue(html.contains("--scopy-rich-news-card-ideal-width: 15.33rem;"))
-        XCTAssertTrue(html.contains("flex: 0 0 min(var(--scopy-rich-news-card-ideal-width), calc(100% - 24px));"))
-        XCTAssertTrue(html.contains("@container (min-width: 48rem)"))
-        XCTAssertTrue(html.contains("flex-basis: calc((100% - (var(--scopy-rich-column-gap) * 2)) / 3);"))
-        XCTAssertFalse(html.contains("min-height: 293px;"))
-        XCTAssertTrue(html.contains(".scopy-rich-image-layout-search"))
-        XCTAssertTrue(html.contains(".scopy-rich-image-layout-carousel"))
-        XCTAssertTrue(html.contains("@container (min-width: 24.5rem)"))
-        XCTAssertTrue(html.contains("flex-basis: calc((100% - (var(--scopy-rich-image-gap) * 2)) / 3);"))
-        XCTAssertTrue(html.contains(".scopy-rich-weather-card"))
-        XCTAssertTrue(html.contains(".scopy-rich-weather-days"))
-        XCTAssertTrue(html.contains("flex: 1 0 90px;"))
-        XCTAssertTrue(html.contains(".scopy-rich-weather-chart-title .scopy-icon"))
-        XCTAssertTrue(html.contains(".scopy-rich-finance-ranges"))
-        XCTAssertTrue(html.contains("grid-auto-columns: minmax(var(--scopy-rich-range-min-width), 1fr);"))
-        XCTAssertTrue(html.contains("--scopy-rich-range-min-width: 4.5rem;"))
-        XCTAssertTrue(html.contains(".scopy-rich-finance-chart svg"))
-        XCTAssertTrue(html.contains("height: clamp(200px, 31.25cqi, 240px);"))
-        XCTAssertTrue(html.contains("grid-template-columns: repeat(auto-fit, minmax(min(12rem, 100%), 1fr));"))
-        XCTAssertTrue(html.contains(".scopy-rich-currency-card"))
-        XCTAssertTrue(html.contains("min-height: 199px;"))
-        XCTAssertTrue(html.contains("window.ScopyUnifiedMarkdown.hydrateRich"))
-        XCTAssertTrue(html.contains("{ exportMode: exportMode }"))
-        XCTAssertTrue(html.contains("html.scopy-export-mode .scopy-rich-lightbox"))
-        XCTAssertTrue(html.contains("unicode-bidi: isolate;"))
-        XCTAssertTrue(html.contains("overflow-x: auto;"))
-        XCTAssertFalse(html.contains("content-visibility: auto"))
-        XCTAssertFalse(html.contains(".scopy-rich-weather-daily"))
-        XCTAssertFalse(html.contains(".scopy-rich-currency-pair"))
-    }
-
-    func testCitationCountAndSupportingSourcesAreRealAccessibleDOM() {
-        let html = MarkdownHTMLRenderer.render(markdown: "([Primary][p], [Secondary][s])\n\n[p]: https://primary.example/a\n[s]: https://secondary.example/b")
-
-        XCTAssertTrue(html.contains(".scopy-source-citation-count"))
-        XCTAssertTrue(html.contains(".scopy-source-citation-supporting"))
-        XCTAssertTrue(html.contains("left: var(--scopy-source-popup-left, 0px);"))
-        XCTAssertTrue(html.contains("--scopy-source-popup-max-width"))
-        XCTAssertTrue(html.contains("inset-block-start: calc(100% - 1px);"))
-        XCTAssertTrue(html.contains(":focus-within"))
-        XCTAssertTrue(html.contains("inset-block-start: calc(100% - 1px);"))
-        XCTAssertTrue(html.contains("width: min(320px, var(--scopy-source-popup-max-width, calc(100vw - 24px)));"))
-        XCTAssertFalse(html.contains("content: attr(data-scopy-source-count)"))
-        XCTAssertFalse(html.contains("function normalizeSourceCitations"))
-        XCTAssertFalse(html.contains("extractScopySourceCitations"))
+        XCTAssertFalse(html.contains("</script><script>globalThis"))
+        XCTAssertFalse(html.contains("<!--"))
+        XCTAssertEqual(try renderInput(in: html).source, source)
     }
 
     func testThreadWidthUsesLogicalLayoutViewportThreshold() {
@@ -207,11 +50,7 @@ final class ChatGPTMarkdownRendererTests: XCTestCase {
         XCTAssertFalse(narrowOutput.contains("--scopy-chatgpt-thread-content-max-width: 768.0px;"))
         XCTAssertTrue(wideOutput.contains("--scopy-chatgpt-thread-content-max-width: 768.0px;"))
         XCTAssertFalse(wideOutput.contains("--scopy-chatgpt-thread-content-max-width: 640.0px;"))
-        XCTAssertFalse(narrowOutput.contains("@media (min-width: 856.0px)"))
-        XCTAssertFalse(wideOutput.contains("@media (min-width: 856.0px)"))
         XCTAssertTrue(narrowOutput.contains("--scopy-chatgpt-output-surface-width: 816.0px;"))
-        XCTAssertTrue(narrowOutput.contains("margin-inline: auto;"))
-        XCTAssertTrue(narrowOutput.contains("min-width: var(--scopy-chatgpt-thread-content-width);"))
         XCTAssertTrue(narrowOutput.contains("--scopy-chatgpt-browser-zoom: 1.25;"))
         XCTAssertEqual(narrowContext.layoutScale, .percent125)
         // The 816px output surface is the canonical wide desktop state: 100% scale renders the
@@ -260,23 +99,6 @@ final class ChatGPTMarkdownRendererTests: XCTestCase {
         XCTAssertTrue(ocr.policy.allowLooseMathRepair)
     }
 
-    func testAuthoredAndChatGPTSourcesBypassScientificMathPreprocessing() throws {
-        let source = #"Literal $\text{drop_last}$, $\label{kept}$, $\mathbb{R}\setminus\{0\}$, and \\text stay byte-for-byte."#
-        let contexts = [MarkdownSourceProfile.authoredMarkdown, .chatGPTMarkdown].map { profile in
-            MarkdownRenderContext(
-                profile: profile,
-                policy: .conservativeDefault(for: profile),
-                layoutScale: MarkdownRenderLayoutConstants.defaultChatGPTLayoutScale
-            )
-        }
-        let sourceLiteral = String(data: try JSONEncoder().encode(source), encoding: .utf8)!
-
-        for context in contexts {
-            let html = MarkdownHTMLRenderer.render(markdown: source, context: context)
-            XCTAssertTrue(html.contains("ScopyUnifiedMarkdown.render(\(sourceLiteral),"), "profile=\(context.profile)")
-        }
-    }
-
     func testCacheKeyHasOneRendererVersionAndLayoutScale() {
         let context = MarkdownRenderContextResolver.defaultContext(
             for: "[doc](/Users/alice/a.md:1)",
@@ -314,58 +136,6 @@ final class ChatGPTMarkdownRendererTests: XCTestCase {
         XCTAssertNotEqual(first, second)
     }
 
-    func testMetricsScriptTracksOverflowAndRenderOutcomeWithoutSizeChanges() {
-        let html = MarkdownHTMLRenderer.render(markdown: "Inline \\(x\\)")
-
-        XCTAssertTrue(html.contains("pre, .katex, .footnotes"))
-        XCTAssertTrue(html.contains("overflowX === lastOverflowX"))
-        XCTAssertTrue(html.contains("renderSucceeded === lastRenderSucceeded"))
-        XCTAssertTrue(html.contains("renderErrorReason === lastRenderErrorReason"))
-    }
-
-    func testMetricsScriptCoalescesGenerationScopedLayoutAndInteractionReports() {
-        let html = MarkdownHTMLRenderer.render(markdown: "<details><summary>More</summary>Body</details>")
-
-        XCTAssertTrue(html.contains("if (!state.renderComplete) { return; }"))
-        XCTAssertTrue(html.contains("pendingHeightReportForce = pendingHeightReportForce || !!force"))
-        XCTAssertTrue(html.contains("window.requestAnimationFrame(deliver)"))
-        XCTAssertTrue(html.contains("currentRenderGeneration() !== scheduledGeneration"))
-        XCTAssertTrue(html.contains("new window.ResizeObserver"))
-        XCTAssertTrue(html.contains("currentRenderGeneration() !== observedGeneration"))
-        XCTAssertTrue(html.contains("el.addEventListener('toggle'"))
-        XCTAssertTrue(html.contains("el.addEventListener('keydown'"))
-        XCTAssertTrue(html.contains("document.fonts.ready.then"))
-    }
-
-    func testAnswerDirectionAndDirectionalSpacingUseLogicalCSS() {
-        let html = MarkdownHTMLRenderer.render(markdown: "> مرحبا\n\n- שלום")
-
-        XCTAssertTrue(html.contains("id=\"content\" dir=\"auto\""))
-        XCTAssertTrue(html.contains("padding-inline-start: 26px;"))
-        XCTAssertTrue(html.contains("padding-inline-start: 24px;"))
-        XCTAssertTrue(html.contains("inset-inline-start: 0;"))
-        XCTAssertFalse(html.contains("padding-left: 26px;"))
-    }
-
-    func testPreviewLinksAreInteractiveButExportsRemainInert() {
-        let html = MarkdownHTMLRenderer.render(markdown: "[OpenAI](https://openai.com)")
-
-        XCTAssertTrue(html.contains("a.scopy-link--external,"))
-        XCTAssertTrue(html.contains("a.scopy-link--file-resolvable,"))
-        XCTAssertTrue(html.contains("pointer-events: auto;"))
-        XCTAssertTrue(html.contains("--scopy-link-color: rgb(46, 131, 210);"))
-        XCTAssertTrue(html.contains("a.scopy-link:focus-visible"))
-        XCTAssertTrue(html.contains(".scopy-link-origin-icon"))
-        XCTAssertTrue(html.contains(".scopy-mention-icon > svg"))
-        XCTAssertTrue(html.contains("a[data-footnote-backref]"))
-        XCTAssertTrue(html.contains("html.scopy-export-mode a"))
-        XCTAssertTrue(html.contains("pointer-events: none;"))
-        XCTAssertFalse(html.contains("content: \"↗\""))
-        XCTAssertFalse(html.contains("a.scopy-external-link"))
-        XCTAssertTrue(html.contains("base-uri 'none'"))
-        XCTAssertTrue(html.contains("connect-src 'none'"))
-    }
-
     func testMetricsDedupeIncludesRenderOutcomeAndGeneration() {
         let base = MarkdownContentMetrics(
             size: CGSize(width: 640, height: 400),
@@ -398,8 +168,6 @@ final class ChatGPTMarkdownRendererTests: XCTestCase {
         XCTAssertFalse(base.isEquivalent(to: nextGeneration))
     }
 
-    /// Every profile embeds the source verbatim: all source repair happens in the renderer bundle,
-    /// so the Node corpus test sees exactly the production input.
     func testEveryProfileEmbedsSourceVerbatim() throws {
         let casesData = try TestFixture.data("MarkdownRenderingCorpus/cases.json")
         let cases = try XCTUnwrap(JSONSerialization.jsonObject(with: casesData) as? [[String: Any]])
@@ -410,7 +178,7 @@ final class ChatGPTMarkdownRendererTests: XCTestCase {
             let source = try String(contentsOf: TestFixture.url(fixture), encoding: .utf8)
             let context = MarkdownRenderContextResolver.defaultContext(for: source)
             let html = MarkdownHTMLRenderer.render(markdown: source, context: context)
-            XCTAssertEqual(Data(try embeddedSource(in: html).utf8), Data(source.utf8), fixture)
+            XCTAssertEqual(Data(try renderInput(in: html).source.utf8), Data(source.utf8), fixture)
             checked += 1
         }
         XCTAssertGreaterThan(checked, 12)
@@ -420,32 +188,26 @@ final class ChatGPTMarkdownRendererTests: XCTestCase {
     /// JSONEncoder escapes `/` by default. `.withoutEscapingSlashes` must never be added.
     func testEmbeddedSourceKeepsDefaultSlashEscaping() throws {
         let html = MarkdownHTMLRenderer.render(markdown: "</head></script><script>x</script>")
-        let literal = try embeddedSourceLiteral(in: html)
 
-        XCTAssertEqual(literal, "\"<\\/head><\\/script><script>x<\\/script>\"")
+        XCTAssertTrue(html.contains(#""source":"<\/head><\/script><script>x<\/script>""#))
         XCTAssertEqual(html.components(separatedBy: "</head>").count, 2, "only the shell's own head closes")
     }
 
-    private func embeddedSourceLiteral(in html: String) throws -> String {
-        let marker = "window.ScopyUnifiedMarkdown.render("
-        let start = try XCTUnwrap(html.range(of: marker)).upperBound
-        var index = html.index(after: start)
-        var escaped = false
-        while index < html.endIndex {
-            let character = html[index]
-            if escaped {
-                escaped = false
-            } else if character == "\\" {
-                escaped = true
-            } else if character == "\"" {
-                break
-            }
-            index = html.index(after: index)
-        }
-        return String(html[start...index])
+    private struct RenderInput: Decodable {
+        let source: String
     }
 
-    private func embeddedSource(in html: String) throws -> String {
-        try JSONDecoder().decode(String.self, from: Data(embeddedSourceLiteral(in: html).utf8))
+    private func renderInput(in html: String) throws -> RenderInput {
+        let open = #"<script type="application/json" id="scopy-render-input">"#
+        let start = try XCTUnwrap(html.range(of: open)).upperBound
+        let end = try XCTUnwrap(html.range(of: "</script>", range: start..<html.endIndex)).lowerBound
+        return try JSONDecoder().decode(RenderInput.self, from: Data(html[start..<end].utf8))
+    }
+
+    private func tagMatches(_ pattern: String, in html: String) -> [String] {
+        let regex = try! NSRegularExpression(pattern: pattern)
+        return regex.matches(in: html, range: NSRange(html.startIndex..., in: html)).compactMap {
+            Range($0.range, in: html).map { String(html[$0]) }
+        }
     }
 }
