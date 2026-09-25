@@ -311,7 +311,7 @@ struct HistoryItemView: View, Equatable {
     }
 
     private var statusMessage: String? {
-        if isExportingPNG { return "Exporting…" }
+        if isExportingPNG { return String(localized: "Exporting…") }
         if let exportMessage, !exportMessage.isEmpty { return exportMessage }
         return optimizeMessage
     }
@@ -987,7 +987,7 @@ struct HistoryItemView: View, Equatable {
                 .buttonStyle(.plain)
                 .accessibilityIdentifier("HistoryItem.OptimizeButton")
                 .accessibilityLabel("Optimize image")
-                .help("优化图片大小（pngquant）")
+                .help("Optimize image size (pngquant)")
                 .disabled(isOptimizingImage)
                 .onHover { hovering in
                     handleOptimizeButtonHover(hovering)
@@ -1531,7 +1531,7 @@ struct HistoryItemView: View, Equatable {
     }
 
     private var noteMenuTitle: String {
-        item.note?.isEmpty == false ? "Edit Note..." : "Add Note..."
+        item.note?.isEmpty == false ? String(localized: "Edit Note…") : String(localized: "Add Note…")
     }
 
     private func startExportPNGTask() {
@@ -1558,7 +1558,7 @@ struct HistoryItemView: View, Equatable {
             item: currentItem,
             filePreviewInfo: currentFilePreviewInfo
         ) else {
-            state.rowController.finishExportingPNG(message: "Export failed", token: exportToken)
+            state.rowController.finishExportingPNG(message: String(localized: "Export failed"), token: exportToken)
             scheduleExportMessageReset(state: state, revision: expectedRevision)
             return
         }
@@ -1572,7 +1572,7 @@ struct HistoryItemView: View, Equatable {
                       state.revision == expectedRevision,
                       state.rowController.authorizesExport(token: exportToken) else { return }
                 state.rowController.finishExportingPNG(
-                    message: "Export failed",
+                    message: String(localized: "Export failed"),
                     token: exportToken
                 )
                 scheduleExportMessageReset(state: state, revision: expectedRevision)
@@ -1599,9 +1599,9 @@ struct HistoryItemView: View, Equatable {
 
             switch result {
             case .success:
-                state.rowController.finishExportingPNG(message: "PNG copied", token: exportToken)
+                state.rowController.finishExportingPNG(message: String(localized: "PNG copied"), token: exportToken)
             case .failure:
-                state.rowController.finishExportingPNG(message: "Export failed", token: exportToken)
+                state.rowController.finishExportingPNG(message: String(localized: "Export failed"), token: exportToken)
             }
             scheduleExportMessageReset(state: state, revision: expectedRevision)
         }
@@ -1924,19 +1924,19 @@ struct HistoryItemView: View, Equatable {
         case .optimized:
             let original = max(0, outcome.originalBytes)
             let optimized = max(0, outcome.optimizedBytes)
-            guard original > 0, optimized >= 0 else { return "已优化" }
-            guard optimized < original else { return "无变化" }
+            guard original > 0, optimized >= 0 else { return String(localized: "Optimized") }
+            guard optimized < original else { return String(localized: "No change") }
             let percent = Int((Double(original - optimized) / Double(original) * 100.0).rounded())
-            guard percent > 0 else { return "已压缩" }
-            return "压缩 -\(percent)%"
+            guard percent > 0 else { return String(localized: "Compressed") }
+            return String(localized: "Compressed -\(percent)%")
         case .noChange:
-            return "无变化"
+            return String(localized: "No change")
         case .failed(let message):
             let lower = message.lowercased()
             if lower.contains("pngquant") && (lower.contains("not found") || lower.contains("not executable")) {
-                return "pngquant 不可用"
+                return String(localized: "pngquant unavailable")
             }
-            return "压缩失败"
+            return String(localized: "Compression failed")
         }
     }
 

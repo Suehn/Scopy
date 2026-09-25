@@ -13,16 +13,16 @@ struct FooterView: View {
         if historyViewModel.hasActiveFilters {
             // 搜索模式：显示当前结果数
             if historyViewModel.totalCount < 0 {
-                return "\(historyViewModel.items.count)+ results"
+                return String(localized: "\(historyViewModel.items.count)+ results")
             }
-            return "\(historyViewModel.items.count) results"
+            return String(localized: "\(historyViewModel.items.count) results")
         } else if historyViewModel.totalCount < 0 {
             // totalCount=-1 表示未知总数（v0.13 LIMIT+1 技巧）
-            return "\(historyViewModel.loadedCount)+ items"
+            return String(localized: "\(historyViewModel.loadedCount)+ items")
         } else if historyViewModel.loadedCount < historyViewModel.totalCount {
-            return "\(historyViewModel.loadedCount)/\(historyViewModel.totalCount) items"
+            return String(localized: "\(historyViewModel.loadedCount)/\(historyViewModel.totalCount) items")
         } else {
-            return "\(historyViewModel.totalCount) items"
+            return String(localized: "\(historyViewModel.totalCount) items")
         }
     }
 

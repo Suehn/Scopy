@@ -16,7 +16,7 @@ struct HotKeyRecorderView: View {
 
     var body: some View {
         Button(action: toggleRecording) {
-            Text(recorder.isRecording ? "按键录制中…" : formatHotKey(keyCode: keyCode, modifiers: modifiers))
+            Text(recorder.isRecording ? String(localized: "Recording…") : formatHotKey(keyCode: keyCode, modifiers: modifiers))
                 .font(.system(.body, design: .monospaced))
                 .padding(.horizontal, 10)
                 .padding(.vertical, 6)
@@ -49,7 +49,7 @@ struct HotKeyRecorderView: View {
             recorder.stopRecording(restorePrevious: true)
         }
         .alert(
-            "快捷键不可用",
+            "Shortcut Unavailable",
             isPresented: Binding(
                 get: { applyErrorMessage != nil },
                 set: { isPresented in
@@ -57,7 +57,7 @@ struct HotKeyRecorderView: View {
                 }
             )
         ) {
-            Button("好") { applyErrorMessage = nil }
+            Button("OK") { applyErrorMessage = nil }
         } message: {
             Text(applyErrorMessage ?? "")
         }
@@ -104,7 +104,7 @@ struct HotKeyRecorderView: View {
 
         keyCode = persisted.hotkeyKeyCode
         modifiers = persisted.hotkeyModifiers
-        applyErrorMessage = "该快捷键可能已被系统或其他应用占用，已恢复为 \(formatHotKey(keyCode: keyCode, modifiers: modifiers))"
+        applyErrorMessage = String(localized: "This shortcut may already be used by the system or another app. Reverted to \(formatHotKey(keyCode: keyCode, modifiers: modifiers)).")
     }
 
     @MainActor

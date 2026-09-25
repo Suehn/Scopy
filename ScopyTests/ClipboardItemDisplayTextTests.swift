@@ -85,8 +85,9 @@ final class ClipboardItemDisplayTextTests: XCTestCase {
 
         let display = ClipboardItemDisplayText.shared.displayTexts(for: item)
 
-        XCTAssertEqual(display.searchMetadataPrefix, "3字 · 1行")
-        XCTAssertTrue(display.metadata.hasPrefix("3字 · 1行 · "))
+        let expectedPrefix = "\(String(localized: "\(3) words")) · \(String(localized: "\(1) lines"))"
+        XCTAssertEqual(display.searchMetadataPrefix, expectedPrefix)
+        XCTAssertTrue(display.metadata.hasPrefix(expectedPrefix + " · "))
     }
 
     @MainActor
@@ -284,7 +285,7 @@ final class ClipboardItemDisplayTextTests: XCTestCase {
         let cleanText = text.replacingOccurrences(of: "\n", with: " ")
             .replacingOccurrences(of: "\r", with: " ")
         let lastChars = cleanText.count <= 15 ? cleanText : "...\(String(cleanText.suffix(15)))"
-        return "\(charCount)字 · \(lineCount)行 · \(lastChars)"
+        return "\(String(localized: "\(charCount) words")) · \(String(localized: "\(lineCount) lines")) · \(lastChars)"
     }
 
     private func legacyFileTitle(_ plainText: String) -> String {
@@ -294,7 +295,7 @@ final class ClipboardItemDisplayTextTests: XCTestCase {
         if fileCount <= 1 {
             return firstName.isEmpty ? plainText : firstName
         }
-        return "\(firstName) + \(fileCount - 1) more"
+        return String(localized: "\(firstName) + \(fileCount - 1) more")
     }
 
     private func legacyFileMetadata(_ plainText: String, note: String?, fileSizeBytes: Int?) -> String {
@@ -303,13 +304,13 @@ final class ClipboardItemDisplayTextTests: XCTestCase {
         var parts: [String] = []
 
         if fileCount > 1 {
-            parts.append("\(fileCount)个文件")
+            parts.append(String(localized: "\(fileCount) files"))
         }
 
         if let fileSizeBytes {
             parts.append(legacyFormatBytes(fileSizeBytes))
         } else {
-            parts.append("未知大小")
+            parts.append(String(localized: "Unknown size"))
         }
 
         if let note, !note.isEmpty {

@@ -117,8 +117,8 @@ private struct SearchModeMenu: View {
         switch mode {
         case .exact: return "Exact"
         case .fuzzy: return "Fuzzy"
-        case .fuzzyPlus: return "Fuzzy+ (Recommended)"
-        case .regex: return "Regex (Recent 2000)"
+        case .fuzzyPlus: return String(localized: "Fuzzy+ (Recommended)")
+        case .regex: return String(localized: "Regex (Recent 2000)")
         }
     }
 
@@ -181,19 +181,19 @@ private struct FTSSortToggleButton: View {
         let modeText: String
         switch historyViewModel.ftsSortMode {
         case .relevance:
-            modeText = "Relevance (score + last used)"
+            modeText = String(localized: "Relevance (score + last used)")
         case .recent:
-            modeText = "Recent (last used)"
+            modeText = String(localized: "Recent (last used)")
         }
-        return isApplicable ? "Sort: \(modeText)" : "Sort applies to Exact (≥3 chars) and Fuzzy/Fuzzy+ queries"
+        return isApplicable ? String(localized: "Sort: \(modeText)") : String(localized: "Sort applies to Exact (≥3 chars) and Fuzzy/Fuzzy+ queries")
     }
 
     private var accessibilityValue: String {
         switch historyViewModel.ftsSortMode {
         case .relevance:
-            return "Relevance"
+            return String(localized: "Relevance")
         case .recent:
-            return "Recent"
+            return String(localized: "Recent")
         }
     }
 }
@@ -310,7 +310,7 @@ struct TypeFilterButton: View {
     }
 
     @ViewBuilder
-    private func typeMenuItem(_ type: ClipboardItemType, label: String, icon: String) -> some View {
+    private func typeMenuItem(_ type: ClipboardItemType, label: LocalizedStringKey, icon: String) -> some View {
         Button(action: {
             historyViewModel.typeFilter = type
             historyViewModel.typeFilters = nil

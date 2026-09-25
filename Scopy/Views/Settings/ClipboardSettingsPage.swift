@@ -7,28 +7,28 @@ struct ClipboardSettingsPage: View {
     var body: some View {
         SettingsPageContainer(page: .clipboard) {
             SettingsSection(
-                "内容类型",
+                "Content types",
                 systemImage: "doc.on.clipboard",
-                footer: "关闭某类内容后，Scopy 将跳过写入历史（不会影响当前剪贴板）。"
+                footer: "When a content type is off, Scopy does not add it to history. The current clipboard is not affected."
             ) {
                 SettingsCardRow {
-                    Toggle("保存图片", isOn: $tempSettings.saveImages)
+                    Toggle("Save images", isOn: $tempSettings.saveImages)
                 }
 
                 SettingsCardDivider()
 
                 SettingsCardRow {
-                    Toggle("保存文件", isOn: $tempSettings.saveFiles)
+                    Toggle("Save files", isOn: $tempSettings.saveFiles)
                 }
             }
 
             SettingsSection(
-                "历史图片优化（pngquant）",
+                "Image optimization (pngquant)",
                 systemImage: "photo",
-                footer: "Scopy 已内置 pngquant，无需额外安装。你可以在历史列表每条图片右侧点击“优化”按钮手动压缩并覆盖原图；也可以开启自动压缩，让新图片写入历史前自动压缩。两者共用同一套参数。"
+                footer: "pngquant is bundled with Scopy. Click the optimize button on an image row to compress that image in place, or compress new images automatically before they are saved to history. Both use the same parameters."
             ) {
                 SettingsCardRow {
-                    Toggle("自动压缩新图片", isOn: $tempSettings.pngquantCopyImageEnabled)
+                    Toggle("Compress new images automatically", isOn: $tempSettings.pngquantCopyImageEnabled)
                 }
 
                 SettingsCardDivider()
@@ -36,7 +36,7 @@ struct ClipboardSettingsPage: View {
                 SettingsCardRow {
                     VStack(alignment: .leading, spacing: 8) {
                         HStack {
-                            Text("质量范围")
+                            Text("Quality range")
                             Spacer()
                             Text("\(tempSettings.pngquantCopyImageQualityMin)-\(tempSettings.pngquantCopyImageQualityMax)")
                                 .foregroundStyle(.secondary)
@@ -80,7 +80,7 @@ struct ClipboardSettingsPage: View {
                 SettingsCardRow {
                     VStack(alignment: .leading, spacing: 8) {
                         HStack {
-                            Text("速度")
+                            Text("Speed")
                             Spacer()
                             Text("\(tempSettings.pngquantCopyImageSpeed)")
                                 .foregroundStyle(.secondary)
@@ -104,7 +104,7 @@ struct ClipboardSettingsPage: View {
                 SettingsCardDivider()
 
                 SettingsCardRow {
-                    LabeledContent("颜色数") {
+                    LabeledContent("Colors") {
                         Picker("", selection: $tempSettings.pngquantCopyImageColors) {
                             Text("16").tag(16)
                             Text("32").tag(32)
@@ -120,12 +120,12 @@ struct ClipboardSettingsPage: View {
             }
 
             SettingsSection(
-                "导出 PNG 压缩（pngquant）",
+                "PNG export compression (pngquant)",
                 systemImage: "square.and.arrow.up",
-                footer: "开启后，Markdown/LaTeX 导出 PNG 到剪贴板时会先用 pngquant 压缩，并仅输出压缩后的 PNG（会进入历史）。默认开启。"
+                footer: "When on, a Markdown or LaTeX PNG export to the clipboard is compressed with pngquant first and only the compressed PNG is copied (it enters history). On by default."
             ) {
                 SettingsCardRow {
-                    Toggle("压缩导出 PNG", isOn: $tempSettings.pngquantMarkdownExportEnabled)
+                    Toggle("Compress exported PNG", isOn: $tempSettings.pngquantMarkdownExportEnabled)
                 }
 
                 SettingsCardDivider()
@@ -133,7 +133,7 @@ struct ClipboardSettingsPage: View {
                 SettingsCardRow {
                     VStack(alignment: .leading, spacing: 8) {
                         HStack {
-                            Text("质量范围")
+                            Text("Quality range")
                             Spacer()
                             Text("\(tempSettings.pngquantMarkdownExportQualityMin)-\(tempSettings.pngquantMarkdownExportQualityMax)")
                                 .foregroundStyle(.secondary)
@@ -178,7 +178,7 @@ struct ClipboardSettingsPage: View {
                 SettingsCardRow {
                     VStack(alignment: .leading, spacing: 8) {
                         HStack {
-                            Text("速度")
+                            Text("Speed")
                             Spacer()
                             Text("\(tempSettings.pngquantMarkdownExportSpeed)")
                                 .foregroundStyle(.secondary)
@@ -203,7 +203,7 @@ struct ClipboardSettingsPage: View {
                 SettingsCardDivider()
 
                 SettingsCardRow {
-                    LabeledContent("颜色数") {
+                    LabeledContent("Colors") {
                         Picker("", selection: $tempSettings.pngquantMarkdownExportColors) {
                             Text("16").tag(16)
                             Text("32").tag(32)
@@ -220,14 +220,14 @@ struct ClipboardSettingsPage: View {
             }
 
             SettingsSection(
-                "采样频率",
+                "Polling",
                 systemImage: "timer",
-                footer: "采样间隔越小，捕获越及时，但更耗电。"
+                footer: "A shorter interval captures changes sooner but uses more power."
             ) {
                 SettingsCardRow {
                     VStack(alignment: .leading, spacing: 8) {
                         HStack {
-                            Text("剪贴板采样间隔")
+                            Text("Clipboard polling interval")
                             Spacer()
                             Text("\(tempSettings.clipboardPollingIntervalMs) ms")
                                 .foregroundStyle(.secondary)

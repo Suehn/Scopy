@@ -158,7 +158,7 @@ final class PinnedPreviewController {
             styleMask: [.titled, .closable, .resizable, .fullSizeContentView, .nonactivatingPanel],
             backing: .buffered, defer: false
         )
-        panel.title = "Preview"
+        panel.title = String(localized: "Preview")
         panel.titleVisibility = .hidden
         panel.titlebarAppearsTransparent = true
         for button in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] {

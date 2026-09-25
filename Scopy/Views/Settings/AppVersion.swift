@@ -5,7 +5,7 @@ import Foundation
 public enum AppVersion {
     /// 应用版本号 (e.g., "0.6.0")
     public static var version: String {
-        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "Unknown"
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? String(localized: "Unknown")
     }
 
     /// 构建号 (e.g., "1")
@@ -24,7 +24,7 @@ public enum AppVersion {
         guard let bundleURL = Bundle.main.bundleURL as URL?,
               let attributes = try? FileManager.default.attributesOfItem(atPath: bundleURL.path),
               let modificationDate = attributes[.modificationDate] as? Date else {
-            return "Unknown"
+            return String(localized: "Unknown")
         }
 
         let formatter = DateFormatter()

@@ -436,13 +436,13 @@ final class ClipboardItemDisplayText {
         case .text, .rtf, .html:
             let textMetadata = computeTextMetadata(plainText)
             return DisplayTextPair(
-                title: plainText.isEmpty ? "(No text)" : String(plainText.prefix(100)),
+                title: plainText.isEmpty ? String(localized: "(No text)") : String(plainText.prefix(100)),
                 metadata: textMetadata.text,
                 searchMetadataPrefix: textMetadata.searchPrefix
             )
         case .image:
             return DisplayTextPair(
-                title: "Image",
+                title: String(localized: "Image"),
                 metadata: computeImageMetadata(plainText, sizeBytes: sizeBytes),
                 searchMetadataPrefix: nil
             )
@@ -456,7 +456,7 @@ final class ClipboardItemDisplayText {
         default:
             let metadata = formatBytes(sizeBytes)
             return DisplayTextPair(
-                title: plainText.isEmpty ? "(No text)" : String(plainText.prefix(100)),
+                title: plainText.isEmpty ? String(localized: "(No text)") : String(plainText.prefix(100)),
                 metadata: metadata,
                 searchMetadataPrefix: nil
             )
@@ -472,7 +472,7 @@ final class ClipboardItemDisplayText {
         if fileCount <= 1 {
             return firstName.isEmpty ? plainText : firstName
         }
-        return "\(firstName) + \(fileCount - 1) more"
+        return String(localized: "\(firstName) + \(fileCount - 1) more")
     }
 
     private nonisolated static func computeTextMetadata(
@@ -488,7 +488,7 @@ final class ClipboardItemDisplayText {
 
         let (suffix, needsEllipsis) = cleanTailAndEllipsis(text, maxTailChars: maxTailChars)
         let lastChars = needsEllipsis ? "...\(suffix)" : suffix
-        let searchPrefix = "\(summary.wordUnitCount)字 · \(summary.lineCount)行"
+        let searchPrefix = "\(String(localized: "\(summary.wordUnitCount) words")) · \(String(localized: "\(summary.lineCount) lines"))"
         return ("\(searchPrefix) · \(lastChars)", searchPrefix)
     }
 
@@ -556,13 +556,13 @@ final class ClipboardItemDisplayText {
         var parts: [String] = []
 
         if fileCount > 1 {
-            parts.append("\(fileCount)个文件")
+            parts.append(String(localized: "\(fileCount) files"))
         }
 
         if let fileSizeBytes {
             parts.append(formatBytes(fileSizeBytes))
         } else {
-            parts.append("未知大小")
+            parts.append(String(localized: "Unknown size"))
         }
 
         if let note, !note.isEmpty {

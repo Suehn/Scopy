@@ -497,17 +497,17 @@ final class HistoryViewModel {
         case .complete:
             return nil
         case .stagedRefine:
-            return "首屏为预筛结果，正在全量校准…（排序/漏项可能会更新）"
+            return String(localized: "Showing prefiltered results while the full search finishes; order and missing items may still change.")
         case .incomplete:
-            return "结果未完成（排序/漏项可能不完整）"
+            return String(localized: "Results are incomplete; order and coverage may be partial.")
         case .recentOnly(let limit):
             switch searchMode {
             case .exact:
-                return "Exact 短词（≤2）仅搜索最近 \(limit) 条。输入 ≥3 字符或切换到 Fuzzy+ / Fuzzy。"
+                return String(localized: "Exact queries of 2 or fewer characters search only the most recent \(String(limit)) items. Type 3 or more characters, or switch to Fuzzy+ or Fuzzy.")
             case .regex:
-                return "Regex 仅搜索最近 \(limit) 条。需要全量搜索时，请改用 Exact（≥3 字符）或 Fuzzy+。"
+                return String(localized: "Regex searches only the most recent \(String(limit)) items. For a full search, use Exact with 3 or more characters, or Fuzzy+.")
             case .fuzzy, .fuzzyPlus:
-                return "当前仅搜索最近 \(limit) 条。"
+                return String(localized: "Searching only the most recent \(String(limit)) items.")
             }
         }
     }
@@ -520,32 +520,32 @@ final class HistoryViewModel {
         case .complete:
             return searchModeDisplayName(searchMode)
         case .stagedRefine:
-            return "Calibrating"
+            return String(localized: "Calibrating")
         case .incomplete:
-            return "Partial"
+            return String(localized: "Partial")
         case .recentOnly(let limit):
-            return "Recent \(limit)"
+            return String(localized: "Recent \(String(limit))")
         }
     }
 
     var searchStatusSummary: String {
         let trimmed = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
         let mode = searchModeDisplayName(searchMode)
-        guard hasSemanticSearchQuery else { return "Mode: \(mode)" }
+        guard hasSemanticSearchQuery else { return String(localized: "Mode: \(mode)") }
 
         let coverage: String
         switch effectiveSearchCoverage(for: trimmed) {
         case .complete:
-            coverage = "Complete"
+            coverage = String(localized: "Complete")
         case .stagedRefine:
-            coverage = "Staged"
+            coverage = String(localized: "Staged")
         case .incomplete:
-            coverage = "Partial"
+            coverage = String(localized: "Partial")
         case .recentOnly(let limit):
-            coverage = "Recent \(limit)"
+            coverage = String(localized: "Recent \(String(limit))")
         }
 
-        return "Mode: \(mode) · Coverage: \(coverage) · Sort: \(searchSortDisplayName(for: trimmed))"
+        return String(localized: "Mode: \(mode) · Coverage: \(coverage) · Sort: \(searchSortDisplayName(for: trimmed))")
     }
 
     @ObservationIgnored private var searchTask: Task<Void, Never>?
@@ -897,7 +897,7 @@ final class HistoryViewModel {
             scheduleStorageDetailsRefresh(version: currentVersion)
         } catch {
             guard shouldApplyLoadResult(version: currentVersion) else { return }
-            reportFetchFailure("Loading history", error)
+            reportFetchFailure(String(localized: "Loading history failed"), error)
             ScopyLog.app.error("Failed to load items: \(error.localizedDescription, privacy: .private)")
         }
     }
@@ -1082,7 +1082,7 @@ final class HistoryViewModel {
                 if searchCoverage.isStagedRefine {
                     searchCoverage = .incomplete
                 }
-                reportFetchFailure("Loading more", error)
+                reportFetchFailure(String(localized: "Loading more failed"), error)
                 ScopyLog.app.error("Failed to load more: \(error.localizedDescription, privacy: .private)")
             }
         }
@@ -1218,7 +1218,7 @@ final class HistoryViewModel {
             } catch {
                 guard !Task.isCancelled, currentVersion == searchVersion else { return }
                 searchCoverage = .incomplete
-                reportFetchFailure("Search", error)
+                reportFetchFailure(String(localized: "Search failed"), error)
                 ScopyLog.app.error("Search failed: \(error.localizedDescription, privacy: .private)")
             }
         }
@@ -1252,20 +1252,12 @@ final class HistoryViewModel {
         if isFTSSortApplicable(for: trimmedQuery) {
             switch ftsSortMode {
             case .relevance:
-                return "Relevance"
+                return String(localized: "Relevance")
             case .recent:
-                return "Recent"
+                return String(localized: "Recent")
             }
         }
-
-        switch searchMode {
-        case .regex:
-            return "Recent"
-        case .exact where trimmedQuery.count <= 2:
-            return "Recent"
-        case .exact, .fuzzy, .fuzzyPlus:
-            return "Recent"
-        }
+        return String(localized: "Recent")
     }
 
     private func isFTSSortApplicable(for trimmedQuery: String) -> Bool {
@@ -1331,7 +1323,7 @@ final class HistoryViewModel {
     }
 
     private func reportFetchFailure(_ operation: String, _ error: Error) {
-        fetchFailureMessage = "\(operation) failed: \(Self.failureReason(error))"
+        fetchFailureMessage = "\(operation): \(Self.failureReason(error))"
     }
 
     private static func failureReason(_ error: Error) -> String {
@@ -1341,12 +1333,12 @@ final class HistoryViewModel {
     func sendViaAirDrop(_ item: ClipboardItemDTO) async {
         let urls = await resolvedFileURLs(for: item)
         guard !urls.isEmpty else {
-            reportActionFailure(message: "No files to send via AirDrop")
+            reportActionFailure(message: String(localized: "No files to send via AirDrop"))
             return
         }
         guard let service = NSSharingService(named: .sendViaAirDrop) else {
             ScopyLog.app.error("AirDrop sharing service is unavailable")
-            reportActionFailure(message: "AirDrop is unavailable")
+            reportActionFailure(message: String(localized: "AirDrop is unavailable"))
             return
         }
         service.perform(withItems: urls)
@@ -1355,7 +1347,7 @@ final class HistoryViewModel {
     func openContainingFolder(_ item: ClipboardItemDTO) async {
         let urls = realFileURLs(for: item)
         guard !urls.isEmpty else {
-            reportActionFailure(message: "No file to show in Finder")
+            reportActionFailure(message: String(localized: "No file to show in Finder"))
             return
         }
         NSWorkspace.shared.activateFileViewerSelecting(urls)

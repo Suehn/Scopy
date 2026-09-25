@@ -62,7 +62,7 @@ struct HistoryListView: View {
                 // Pinned Section Header
                 if !pinned.isEmpty {
                     SectionHeader(
-                        title: "Pinned",
+                        title: String(localized: "Pinned"),
                         count: pinned.count,
                                         isCollapsible: true,
                         isCollapsed: historyViewModel.isPinnedCollapsed,
@@ -582,7 +582,7 @@ private struct RecentSectionHeader: View {
 
     var body: some View {
         SectionHeader(
-            title: "Recent",
+            title: String(localized: "Recent"),
             count: count,
             isScrolling: historyViewModel.isScrolling
         )

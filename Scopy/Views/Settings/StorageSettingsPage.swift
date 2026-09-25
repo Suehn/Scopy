@@ -11,12 +11,12 @@ struct StorageSettingsPage: View {
     var body: some View {
         SettingsPageContainer(page: .storage) {
             SettingsSection(
-                "限制",
+                "Limits",
                 systemImage: "gauge.with.dots.needle.bottom.50percent",
-                footer: "超过上限后会自动清理较旧的条目（Pinned 会被保留）。“内容估算上限”按条目内容体积（SUM(size_bytes)）计算，不等同于数据库文件大小。开启“仅清理图片”后，自动清理只会删除图片条目（文本/富文本等会永久保留）；若主要占用来自文本或已 Pinned 图片，可能无法降到上限。"
+                footer: "Past a limit, older items are cleaned up automatically; pinned items are kept. The content size limit counts item content (SUM(size_bytes)), not the database file size. With “Clean up images only”, automatic cleanup deletes only image items and keeps text and rich text; if most space is used by text or pinned images, usage may stay above the limit."
             ) {
                 SettingsCardRow {
-                    LabeledContent("历史条目上限") {
+                    LabeledContent("History item limit") {
                         Picker("", selection: $tempSettings.maxItems) {
                             Text("1,000").tag(1000)
                             Text("5,000").tag(5000)
@@ -34,7 +34,7 @@ struct StorageSettingsPage: View {
                 SettingsCardDivider()
 
                 SettingsCardRow {
-                    LabeledContent("内容估算上限") {
+                    LabeledContent("Content size limit") {
                         Picker("", selection: $tempSettings.maxStorageMB) {
                             Text("100 MB").tag(100)
                             Text("200 MB").tag(200)
@@ -52,50 +52,50 @@ struct StorageSettingsPage: View {
                 SettingsCardDivider()
 
                 SettingsCardRow {
-                    Toggle("仅清理图片（文本永久保留）", isOn: $tempSettings.cleanupImagesOnly)
+                    Toggle("Clean up images only (text is kept)", isOn: $tempSettings.cleanupImagesOnly)
                         .accessibilityIdentifier("Settings.CleanupImagesOnlyToggle")
                 }
             }
 
-            SettingsSection("当前占用", systemImage: "chart.pie") {
+            SettingsSection("Current usage", systemImage: "chart.pie") {
                 if isLoading {
                     SettingsCardRow {
                         HStack {
                             Spacer()
                             ProgressView().controlSize(.small)
-                            Text("正在读取…")
+                            Text("Loading…")
                                 .foregroundStyle(.secondary)
                             Spacer()
                         }
                     }
                 } else if let stats = storageStats {
                     SettingsCardRow {
-                        LabeledContent("条目数") {
+                        LabeledContent("Items") {
                             Text("\(stats.itemCount) / \(tempSettings.maxItems)")
                                 .foregroundStyle(.secondary)
                         }
                     }
                     SettingsCardDivider()
                     SettingsCardRow {
-                        LabeledContent("数据库") {
+                        LabeledContent("Database") {
                             Text(Localization.formatBytes(stats.databaseSizeBytes)).foregroundStyle(.secondary)
                         }
                     }
                     SettingsCardDivider()
                     SettingsCardRow {
-                        LabeledContent("外部存储") {
+                        LabeledContent("External storage") {
                             Text(Localization.formatBytes(stats.externalStorageSizeBytes)).foregroundStyle(.secondary)
                         }
                     }
                     SettingsCardDivider()
                     SettingsCardRow {
-                        LabeledContent("缩略图") {
+                        LabeledContent("Thumbnails") {
                             Text(Localization.formatBytes(stats.thumbnailSizeBytes)).foregroundStyle(.secondary)
                         }
                     }
                     SettingsCardDivider()
                     SettingsCardRow {
-                        LabeledContent("总计") {
+                        LabeledContent("Total") {
                             Text(Localization.formatBytes(stats.totalSizeBytes))
                                 .fontWeight(.medium)
                                 .foregroundStyle(.secondary)
@@ -106,22 +106,22 @@ struct StorageSettingsPage: View {
                         HStack {
                             Spacer()
                             Button(action: onRefresh) {
-                                Label("刷新", systemImage: "arrow.clockwise")
+                                Label("Refresh", systemImage: "arrow.clockwise")
                             }
                             .buttonStyle(.link)
                         }
                     }
                 } else {
                     SettingsCardRow {
-                        Text("无法读取存储统计")
+                        Text("Storage statistics unavailable")
                             .foregroundStyle(.secondary)
                     }
                 }
             }
 
-            SettingsSection("位置", systemImage: "folder") {
+            SettingsSection("Location", systemImage: "folder") {
                 SettingsCardRow {
-                    LabeledContent("数据库位置") {
+                    LabeledContent("Database location") {
                         Text(storageStats?.databasePath ?? "~/Library/Application Support/Scopy/")
                             .foregroundStyle(.secondary)
                             .font(ScopyTypography.pathLabel)
@@ -133,7 +133,7 @@ struct StorageSettingsPage: View {
                 SettingsCardDivider()
 
                 SettingsCardRow {
-                    Button("在 Finder 中显示") {
+                    Button("Show in Finder") {
                         let scopyDir: URL
                         if let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first {
                             scopyDir = appSupport.appendingPathComponent("Scopy")

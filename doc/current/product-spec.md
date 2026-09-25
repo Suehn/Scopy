@@ -92,6 +92,7 @@ Scopy is a native macOS clipboard manager for users who need durable clipboard h
 
 ### Settings And Diagnostics
 
+- The UI follows the system language; English and Simplified Chinese are provided, and other languages fall back to English.
 - Provide settings pages for General, Shortcuts, Clipboard, Appearance, Storage, and About.
 - Preserve explicit Save/Cancel semantics for settings changes.
 - Apply recorded hotkeys immediately after capture while keeping the rest of settings transactional.

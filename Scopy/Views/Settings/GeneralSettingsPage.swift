@@ -30,17 +30,17 @@ struct GeneralSettingsPage: View {
             }
 
             SettingsSection(
-                "搜索",
+                "Search",
                 systemImage: "magnifyingglass",
-                footer: "建议默认使用 Fuzzy+（与主界面默认一致）。Regex 仅搜索最近 2000 条，适合高级 recent-only 场景。"
+                footer: "Fuzzy+ is recommended and matches the main window default. Regex searches only the most recent 2000 items, for advanced recent-only searches."
             ) {
                 SettingsCardRow {
-                    LabeledContent("默认搜索模式") {
+                    LabeledContent("Default search mode") {
                         Picker("", selection: $tempSettings.defaultSearchMode) {
-                            Text("分词模糊（Fuzzy+，推荐）").tag(SearchMode.fuzzyPlus)
-                            Text("模糊（Fuzzy）").tag(SearchMode.fuzzy)
-                            Text("精确（Exact）").tag(SearchMode.exact)
-                            Text("正则（Regex，仅最近 2000 条）").tag(SearchMode.regex)
+                            Text("Fuzzy+ (tokenized, recommended)").tag(SearchMode.fuzzyPlus)
+                            Text("Fuzzy").tag(SearchMode.fuzzy)
+                            Text("Exact").tag(SearchMode.exact)
+                            Text("Regex (most recent 2000 items only)").tag(SearchMode.regex)
                         }
                         .labelsHidden()
                         .pickerStyle(.menu)

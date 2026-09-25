@@ -1,15 +1,15 @@
 import SwiftUI
 
 struct SettingsSection<Content: View>: View {
-    let title: String
+    let title: LocalizedStringKey
     let systemImage: String?
-    let footer: String?
+    let footer: LocalizedStringKey?
     @ViewBuilder let content: () -> Content
 
     init(
-        _ title: String,
+        _ title: LocalizedStringKey,
         systemImage: String? = nil,
-        footer: String? = nil,
+        footer: LocalizedStringKey? = nil,
         @ViewBuilder content: @escaping () -> Content
     ) {
         self.title = title
@@ -26,7 +26,7 @@ struct SettingsSection<Content: View>: View {
                 content()
             }
 
-            if let footer, !footer.isEmpty {
+            if let footer {
                 Text(footer)
                     .font(.footnote)
                     .foregroundStyle(.secondary)
@@ -37,7 +37,7 @@ struct SettingsSection<Content: View>: View {
 }
 
 private struct SettingsSectionHeader: View {
-    let title: String
+    let title: LocalizedStringKey
     let systemImage: String?
 
     var body: some View {

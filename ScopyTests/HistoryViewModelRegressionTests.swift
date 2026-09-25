@@ -320,7 +320,7 @@ final class HistoryViewModelRegressionTests: XCTestCase {
         XCTAssertEqual(viewModel.primarySearchStatusLabel, "Partial")
         XCTAssertEqual(
             viewModel.searchCoverageHint,
-            "结果未完成（排序/漏项可能不完整）"
+            "Results are incomplete; order and coverage may be partial."
         )
         XCTAssertTrue(viewModel.searchStatusSummary.contains("Coverage: Partial"))
         XCTAssertEqual(viewModel.selectedID, results[0].id)
