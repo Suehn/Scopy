@@ -1174,12 +1174,12 @@ public actor SearchEngineImpl {
         while true {
             try Task.checkCancellation()
             startFullIndexBuildIfNeeded(force: true)
-            guard let task = fullIndexStore.buildTask else {
+            guard fullIndexStore.buildTask != nil else {
                 throw SearchError.searchFailed("Failed to start the full index build")
             }
             let generation = fullIndexStore.buildGeneration
             let waitStart = CFAbsoluteTimeGetCurrent()
-            await task.value
+            try await waitForFullIndexBuild()
             perf?.addPhase("full_index_build_wait", ms: (CFAbsoluteTimeGetCurrent() - waitStart) * 1000)
 
             if let index = fullIndexStore.usableIndex {
@@ -1194,6 +1194,27 @@ public actor SearchEngineImpl {
                 throw SearchError.searchFailed("Failed to build the full index")
             }
         }
+    }
+
+    /// Waits for the running full-index build to end. Cancellation (including the search
+    /// timeout) resumes only this search; the build keeps running for everyone else.
+    private func waitForFullIndexBuild() async throws {
+        let id = UUID()
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                if Task.isCancelled {
+                    continuation.resume(throwing: CancellationError())
+                } else {
+                    fullIndexStore.addBuildWaiter(id, continuation)
+                }
+            }
+        } onCancel: {
+            Task { await self.cancelFullIndexBuildWait(id) }
+        }
+    }
+
+    private func cancelFullIndexBuildWait(_ id: UUID) {
+        fullIndexStore.removeBuildWaiter(id)?.resume(throwing: CancellationError())
     }
 
     private func normalizedSearchRequest(for request: SearchRequest, trimmedQuery: String, mode: SearchMode) -> SearchRequest {
