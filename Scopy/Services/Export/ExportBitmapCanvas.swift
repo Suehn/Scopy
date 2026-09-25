@@ -298,12 +298,11 @@ final class ExportBitmapCanvas: @unchecked Sendable {
     }
 }
 
-/// Manages the lifecycle of offscreen WebView for export
-
-extension ExportCoordinator {
+/// Pure rasterization and encoding for the export canvas: snapshot and PDF pages in, PNG bytes out.
+enum ExportRaster {
     /// Encodes the finished canvas: pngquant maps the canvas file directly; ImageIO encodes the bitmap only when
     /// pngquant is disabled or declines the quality floor.
-    nonisolated static func encodeExportCanvas(
+    static func encodeExportCanvas(
         _ canvas: ExportBitmapCanvas,
         pngquantOptions: PngquantService.Options?
     ) throws -> MarkdownExportService.ExportOutcome {
@@ -337,7 +336,7 @@ extension ExportCoordinator {
 
     /// Draws the snapshot onto a white canvas at the target width in one pass, scaling when the snapshot's backing
     /// scale does not match the requested output width.
-    nonisolated static func canvasFromSnapshot(_ image: CGImage, targetWidthPixels: Int) throws -> ExportBitmapCanvas {
+    static func canvasFromSnapshot(_ image: CGImage, targetWidthPixels: Int) throws -> ExportBitmapCanvas {
         let sourceWidth = image.width
         let sourceHeight = image.height
         guard sourceWidth > 0, sourceHeight > 0 else {
@@ -357,7 +356,7 @@ extension ExportCoordinator {
         return canvas
     }
 
-    nonisolated static func pngDataFromCGImage(_ image: CGImage) throws -> Data {
+    static func pngDataFromCGImage(_ image: CGImage) throws -> Data {
         let data = NSMutableData()
         guard let destination = CGImageDestinationCreateWithData(
             data as CFMutableData,
@@ -374,7 +373,7 @@ extension ExportCoordinator {
         return data as Data
     }
 
-    nonisolated static func rasterizePDFDataToCanvas(
+    static func rasterizePDFDataToCanvas(
         pdfData: Data,
         targetWidthPixels: Int,
         expectedPageWidthPoints: CGFloat?,
@@ -490,7 +489,7 @@ extension ExportCoordinator {
         let totalPixels: CGFloat
     }
 
-    nonisolated static func pdfRasterMetrics(pdfData: Data, targetWidthPixels: Int) throws -> PDFRasterMetrics {
+    static func pdfRasterMetrics(pdfData: Data, targetWidthPixels: Int) throws -> PDFRasterMetrics {
         guard targetWidthPixels > 0 else {
             throw MarkdownExportService.ExportError.stageFailed(stage: .rasterizePDF, underlying: nil)
         }
@@ -532,7 +531,7 @@ extension ExportCoordinator {
     }
 
 
-    nonisolated static func scaleCGImageIfNeeded(image: CGImage, targetWidthPixels: Int) -> CGImage {
+    static func scaleCGImageIfNeeded(image: CGImage, targetWidthPixels: Int) -> CGImage {
         let srcW = image.width
         let srcH = image.height
         guard srcW > 0, srcH > 0 else { return image }
