@@ -104,8 +104,7 @@ private actor CleanupFailureProbe {
     }
 }
 
-/// StorageService 单元测试
-/// 验证 v0.md 第2、3节的存储和去重要求
+/// StorageService storage and deduplication.
 @MainActor
 final class StorageServiceTests: XCTestCase {
 

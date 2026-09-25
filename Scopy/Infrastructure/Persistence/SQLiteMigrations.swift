@@ -9,7 +9,7 @@ enum SQLiteMigrations {
             return
         }
 
-        // v0.x baseline schema (idempotent)
+        // Baseline schema (idempotent).
         try createTables(connection)
         try createIndexes(connection)
         if userVersion < 3 {
@@ -293,7 +293,7 @@ enum SQLiteMigrations {
             """
         )
 
-        // v2: Avoid FTS churn on metadata-only updates (last_used_at/use_count/is_pinned).
+        // Avoid FTS churn on metadata-only updates (last_used_at/use_count/is_pinned).
         // Only refresh FTS row when plain_text or note changes.
         try connection.execute("DROP TRIGGER IF EXISTS clipboard_au")
         try connection.execute(

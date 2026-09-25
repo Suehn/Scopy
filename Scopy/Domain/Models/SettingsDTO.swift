@@ -1,22 +1,22 @@
 import Foundation
 
-/// 设置 DTO
+/// User settings.
 public struct SettingsDTO: Sendable, Equatable {
     public var maxItems: Int
     public var maxStorageMB: Int
-    /// 当启用时，自动清理仅删除图片条目（及其外部 payload），不会删除文本/富文本等条目。
+    /// When on, automatic cleanup deletes only image items (and their external payloads), never text or rich text.
     public var cleanupImagesOnly: Bool
     public var saveImages: Bool
     public var saveFiles: Bool
-    /// pngquant CLI 路径（留空则自动探测）
+    /// The pngquant executable; empty means auto-detect.
     public var pngquantBinaryPath: String
-    /// 当启用时，图片写入剪贴板历史前会先用 pngquant 压缩（只保留压缩后的图片，覆盖原始写入）。
+    /// When on, captured images are compressed with pngquant before they enter the history; only the compressed image is kept.
     public var pngquantCopyImageEnabled: Bool
     public var pngquantCopyImageQualityMin: Int
     public var pngquantCopyImageQualityMax: Int
     public var pngquantCopyImageSpeed: Int
     public var pngquantCopyImageColors: Int
-    /// 当启用时，导出 Markdown/LaTeX 渲染 PNG 到剪贴板会先用 pngquant 压缩（只输出压缩后的 PNG）。
+    /// When on, Markdown/LaTeX PNG exports to the pasteboard are compressed with pngquant first.
     public var pngquantMarkdownExportEnabled: Bool
     public var pngquantMarkdownExportQualityMin: Int
     public var pngquantMarkdownExportQualityMax: Int
@@ -29,14 +29,14 @@ public struct SettingsDTO: Sendable, Equatable {
     public var defaultSearchMode: SearchMode
     public var hotkeyKeyCode: UInt32
     public var hotkeyModifiers: UInt32
-    // 缩略图设置 (v0.8)
+    // Thumbnails
     public var showImageThumbnails: Bool
     public var thumbnailHeight: Int
-    public var imagePreviewDelay: Double  // 悬浮预览延迟（秒）
-    /// Markdown 预览/导出使用的 ChatGPT 排版比例。只影响字体度量与换行，不改变 PNG 目标像素宽度。
+    public var imagePreviewDelay: Double  // Hover preview delay in seconds.
+    /// ChatGPT layout scale for Markdown preview and export; changes font metrics and wrapping, not the PNG's target pixel width.
     public var markdownChatGPTLayoutScalePercent: Int
-    /// 当启用时，助手内容（ChatGPT/Codex 等）里的裸链接会联网抓取 Open Graph 标题与缩略图，
-    /// 冻结为本地 sidecar 后渲染成卡片。默认关闭；渲染层永不联网，此开关只门控抓取。
+    /// When on, bare links in assistant content (ChatGPT, Codex, ...) fetch their Open Graph title and thumbnail,
+    /// frozen into a local sidecar and rendered as a card. Off by default; rendering never goes online, this gates only the fetch.
     public var linkEnrichmentEnabled: Bool
     /// Fetch and cache public website icons using origins only.
     public var siteIconsEnabled: Bool = true

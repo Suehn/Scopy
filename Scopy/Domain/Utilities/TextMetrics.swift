@@ -1,7 +1,7 @@
 import Foundation
 
 public enum TextMetrics {
-    /// “字数”展示：中文/日文/韩文按字计数；英文/数字按“词”计数（避免把一个单词按字母算多个字）。
+    /// Displayed word count: each CJK character counts once; Latin letters and digits count per word, not per letter.
     public static func displayWordUnitCount(for text: String) -> Int {
         var count = 0
         var inWord = false

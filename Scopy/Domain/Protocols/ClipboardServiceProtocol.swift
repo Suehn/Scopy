@@ -2,86 +2,85 @@ import Foundation
 
 // MARK: - Service Protocol
 
-/// 剪贴板服务协议 - 对应 v0.md 中的前后端接口设计
-/// 后端只提供结构化数据和命令接口，不关心 UI
+/// The UI's interface to the clipboard backend: structured data and commands, no UI concerns.
 @MainActor
 public protocol ClipboardServiceProtocol: AnyObject {
     // MARK: - Lifecycle
 
-    /// 启动服务（真实服务需要初始化数据库、启动监控；Mock 服务可空实现）
+    /// Starts the service: the real one opens the database and starts monitoring; a mock may do nothing.
     func start() async throws
 
-    /// 停止服务（清理资源）
+    /// Stops the service and releases its resources.
     func stop()
 
-    /// 停止服务并等待清理完成（用于测试/退出路径，避免 sleep-based 等待）
+    /// Stops the service and waits for cleanup to finish (tests and quit), instead of sleeping.
     func stopAndWait() async
 
     // MARK: - Data Access
 
-    /// 获取最近的剪贴板项
+    /// Recent clipboard items.
     func fetchRecent(limit: Int, offset: Int) async throws -> [ClipboardItemDTO]
 
-    /// 获取固定项。固定项在 UI 中独立成组，不应占用 recent page 配额。
+    /// Pinned items. The UI groups them separately, so they do not count against a recent page.
     func fetchPinned() async throws -> [ClipboardItemDTO]
 
-    /// 获取未固定的最近项，用于 recent 分页。
+    /// Recent unpinned items, for paging the recent list.
     func fetchRecentUnpinned(limit: Int, offset: Int) async throws -> [ClipboardItemDTO]
 
-    /// 搜索剪贴板历史
+    /// Searches the clipboard history.
     func search(query: SearchRequest) async throws -> SearchResultPage
 
-    /// 固定/取消固定项目
+    /// Pins or unpins an item.
     func pin(itemID: UUID) async throws
     func unpin(itemID: UUID) async throws
 
-    /// 更新备注（用于文件条目）
+    /// Updates an item's note (used for file items).
     func updateNote(itemID: UUID, note: String?) async throws
 
-    /// 删除项目
+    /// Deletes an item.
     func delete(itemID: UUID) async throws
 
-    /// 清空历史。成功返回前必须发布或转发 `.itemsCleared`；视图状态由该事件驱动。
+    /// Clears the history. Must publish or forward `.itemsCleared` before returning; view state follows that event.
     func clearAll() async throws
 
-    /// 复制到系统剪贴板
+    /// Copies an item to the system pasteboard.
     func copyToClipboard(itemID: UUID) async throws
 
-    /// 显式为 Codex 这类窄图片读取路径准备兼容表示。
-    /// 该入口只应由明确的用户动作触发，避免影响普通粘贴语义。
+    /// Prepares a compatible image representation for narrow image readers such as Codex.
+    /// Only an explicit user action triggers it, so ordinary paste semantics stay unchanged.
     func copyToClipboardOptimizedForCodex(itemID: UUID) async throws
 
-    /// 解析系统分享可用的本地文件 URL。文件项返回原始文件，图片项可返回临时 PNG。
+    /// Local file URLs for the system share sheet: the original file for file items, a temporary PNG for images.
     func fileURLs(itemID: UUID) async throws -> [URL]
 
-    /// 更新设置
+    /// Updates the settings.
     func updateSettings(_ settings: SettingsDTO) async throws
 
-    /// 获取当前设置
+    /// The current settings.
     func getSettings() async throws -> SettingsDTO
 
-    /// 获取存储统计
+    /// Storage statistics.
     func getStorageStats() async throws -> (itemCount: Int, sizeBytes: Int)
 
-    /// 获取详细的存储统计
+    /// Detailed storage statistics.
     func getDetailedStorageStats() async throws -> StorageStatsDTO
 
-    /// 获取图片原始数据（用于预览）
+    /// An image item's original data, for preview.
     func getImageData(itemID: UUID) async throws -> Data?
 
-    /// 手动优化历史中的图片（pngquant）：压缩并覆盖原图，同时更新 DB 的 hash/size。
+    /// Optimizes a history image with pngquant, replacing the original and updating its hash and size.
     func optimizeImage(itemID: UUID) async throws -> ImageOptimizationOutcomeDTO
 
-    /// 修复/同步：当用户在应用外部批量压缩了 `content/` 下的图片时，
-    /// 数据库里的 `size_bytes` 可能仍是旧值，导致“内容估算”显示偏大与清理策略误判。
-    /// 该方法会从磁盘读取外部图片的真实文件大小并写回 `size_bytes`。
+    /// After images under `content/` are recompressed outside the app, the stored `size_bytes`
+    /// overstate the content estimate and mislead cleanup; this reads each external image's real
+    /// file size from disk and writes it back.
     ///
-    /// - Returns: 实际更新了多少条记录（size_bytes 发生变化的条目数）
+    /// - Returns: The number of items whose `size_bytes` changed.
     func syncExternalImageSizeBytesFromDisk() async throws -> Int
 
-    /// 获取最近使用的 app 列表（用于过滤）
+    /// Recently used source apps, for the app filter.
     func getRecentApps(limit: Int) async throws -> [String]
 
-    /// 事件观察 - 新增条目、删除、设置变更等
+    /// Backend events: new items, deletions, settings changes, and so on.
     var eventStream: AsyncStream<ClipboardEvent> { get }
 }

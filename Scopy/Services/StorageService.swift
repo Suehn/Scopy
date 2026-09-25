@@ -95,8 +95,7 @@ private actor ExternalFileReservationRegistry {
 /// the canonical full path, so unrelated roots do not block each other.
 private let sharedExternalFileReservations = ExternalFileReservationRegistry()
 
-/// StorageService - 数据持久化服务
-/// 符合 v0.md 第2节：分级存储（小内容SQLite内联，大内容外部文件）
+/// Clipboard persistence: small payloads inline in SQLite, large payloads in external files.
 ///
 /// An actor so storage work and its file-system calls stay off the main thread. Pure forwards
 /// to the repository are `nonisolated`, so they cost a single hop; the external-payload
@@ -178,7 +177,7 @@ public actor StorageService {
 
     // MARK: - Configuration
 
-    /// Threshold for external storage (v0.md: 小内容 < X KB)
+    /// Payloads at or above this size are stored as external files.
     static let externalStorageThreshold = ScopyThresholds.externalStorageBytes
 
     /// Baseline concurrency limit for bulk filesystem deletions.
@@ -281,7 +280,7 @@ public actor StorageService {
     private var ingestCommitInterlock: (@Sendable (IngestCommitInterlockPoint) async -> Void)?
     private var cleanupInterlock: (@Sendable (CleanupInterlockPoint) async -> Void)?
 
-    /// 数据库文件路径（用于设置窗口显示）
+    /// The database file path, shown in Settings.
     public nonisolated var databaseFilePath: String { dbPath }
 
     /// Every committed write, in commit order, for the search engine to apply.
@@ -296,8 +295,8 @@ public actor StorageService {
     ) {
         let rootURL = Self.resolveRootDirectory(databasePath: databasePath, storageRootURL: storageRootURL)
 
-        // v0.22: 改进目录创建错误处理 - 记录错误但不阻止初始化
-        // 目录创建失败通常是权限问题，后续操作会有更具体的错误
+        // A directory that cannot be created is logged, not fatal: it is usually a permissions
+        // problem, and the first operation that needs it reports a more specific error.
         Self.createDirectoryIfNeeded(at: rootURL, description: "app directory")
 
         self.rootDirectory = rootURL
@@ -421,12 +420,11 @@ public actor StorageService {
 
     // MARK: - Database Lifecycle
 
-    /// v0.11: 修复半打开状态问题 - 使用临时变量，失败时确保清理
     public nonisolated func open() async throws {
         try await repository.open()
     }
 
-    /// v0.20: 关闭前执行 WAL 检查点，确保数据完整写入
+    /// Checkpoints the WAL before closing.
     public nonisolated func close() async {
         await repository.close()
     }
@@ -488,7 +486,7 @@ public actor StorageService {
         var repositoryCommitAttempted = false
 
         do {
-            // Decide storage location based on size (v0.md 2.1). An external path is reserved
+            // Decide storage location based on size. An external path is reserved
             // before publishing bytes and remains reserved through the DB insert, so orphan
             // cleanup cannot validate it as unreferenced and remove it in between.
             switch content.payload {
@@ -709,8 +707,7 @@ public actor StorageService {
         try await repository.fetchItemByID(id)
     }
 
-    /// Fetch recent items with pagination (v0.md 2.2)
-    /// v0.13: 预分配数组容量，避免多次重新分配
+    /// Fetch recent items with pagination.
     public nonisolated func fetchRecent(limit: Int, offset: Int) async throws -> [ClipboardStoredItem] {
         try await repository.fetchRecent(limit: limit, offset: offset)
     }
@@ -1146,14 +1143,12 @@ public actor StorageService {
         try await repository.getTotalSize()
     }
 
-    /// v0.50.fix19: 同步外部图片的 `size_bytes` 与磁盘真实文件大小。
+    /// Rewrites external images' `size_bytes` from their files on disk.
     ///
-    /// 场景：用户在应用外部对 `content/` 目录批量压缩/覆盖图片后，
-    /// DB 的 `size_bytes` 仍是旧值，会导致：
-    /// - Footer “内容估算”显示偏大（甚至出现估算 > 磁盘的反直觉情况）
-    /// - 按“内容估算上限”触发的自动清理误删
+    /// After images under `content/` are recompressed outside the app, the stale `size_bytes`
+    /// would overstate the content estimate and let size-based cleanup delete too much.
     ///
-    /// 该方法只更新 `size_bytes`，不改变 `content_hash`（避免大规模重建缩略图/缓存）。
+    /// Only `size_bytes` changes; `content_hash` stays, so thumbnails and caches stay valid.
     func syncExternalImageSizeBytesFromDisk() async throws -> Int {
         let records = try await repository.fetchExternalStorageSizeRecords(typeFilter: .image)
         guard !records.isEmpty else { return 0 }
@@ -1201,7 +1196,7 @@ public actor StorageService {
         try await repository.getExternalSize()
     }
 
-    /// 静态目录大小计算，便于后台线程使用
+    /// Directory size, computable off the actor.
     nonisolated private static func calculateDirectorySize(at path: String) throws -> Int {
         let url = URL(fileURLWithPath: path)
         let resourceKeys: Set<URLResourceKey> = [.fileSizeKey]
@@ -1222,11 +1217,10 @@ public actor StorageService {
         return totalSize
     }
 
-    /// 获取数据库文件的实际磁盘大小（包含 WAL 和 SHM 文件）
+    /// On-disk size of the database including its WAL and SHM files.
     nonisolated func getDatabaseFileSize() -> Int {
         let fm = FileManager.default
         var total = 0
-        // SQLite WAL 模式会创建 .db-wal 和 .db-shm 文件
         for ext in ["", "-wal", "-shm"] {
             let path = dbPath + ext
             if let attrs = try? fm.attributesOfItem(atPath: path),
@@ -1237,8 +1231,7 @@ public actor StorageService {
         return total
     }
 
-    /// v0.15.2: 获取外部存储大小（强制刷新，不使用缓存）
-    /// 用于 Settings 页面显示准确的存储统计（后台线程计算，避免阻塞主线程）
+    /// External storage size, measured fresh on a background queue for Settings.
     nonisolated func getExternalStorageSizeForStats() async throws -> Int {
         let path = externalStoragePath
         return try await withCheckedThrowingContinuation { continuation in
@@ -1253,7 +1246,7 @@ public actor StorageService {
         }
     }
 
-    /// v0.15.2: 获取缩略图缓存大小
+    /// Thumbnail cache size.
     nonisolated func getThumbnailCacheSize() async -> Int {
         let path = thumbnailCachePath
         return await withCheckedContinuation { continuation in
@@ -1280,16 +1273,16 @@ public actor StorageService {
         }
     }
 
-    /// 获取最近使用的 app 列表（用于过滤）
+    /// Recently used source apps, for the app filter.
     public nonisolated func getRecentApps(limit: Int) async throws -> [String] {
         try await repository.fetchRecentApps(limit: limit)
     }
 
-    // MARK: - Cleanup (v0.md 2.3)
+    // MARK: - Cleanup
 
     public enum CleanupMode: Sendable {
-        case light   // 热路径：跳过 vacuum / orphan 扫描
-        case full    // 低频：完整清理
+        case light   // Hot path: skips vacuum and the orphan scan.
+        case full    // Infrequent: complete cleanup.
     }
 
     /// `onCommitted` is invoked after every independently committed delete phase. This prevents a
@@ -1398,7 +1391,7 @@ public actor StorageService {
             }
         }
 
-        // 4. By space (large content / external storage) - v0.9
+        // 4. By space (large content / external storage)
         let externalSize = try await getExternalStorageSize()
         if externalSize > maxLargeBytes {
             ScopyLog.storage.info(
@@ -1423,7 +1416,7 @@ public actor StorageService {
 
         guard mode == .full else { return aggregateResult }
 
-        // 5. SQLite housekeeping (v0.md 2.3)
+        // 5. SQLite housekeeping
         // Only when the WAL has grown well past its steady-state size, so this stays off the
         // routine cleanup path. A truncating checkpoint is the operation that actually reclaims
         // it; the database is not in incremental-auto-vacuum mode, so `incremental_vacuum` was
@@ -1433,7 +1426,7 @@ public actor StorageService {
             await repository.walCheckpointTruncate()
         }
 
-        // 6. v0.15: Clean up orphaned files (files not referenced in database)
+        // 6. Clean up orphaned files (files not referenced in database)
         try await cleanupOrphanedFiles()
         try await cleanupOrphanedThumbnails()
         return aggregateResult
@@ -1490,10 +1483,10 @@ public actor StorageService {
         return 0
     }
 
-    /// v0.15: Clean up orphaned files in external storage directory
+    /// Clean up orphaned files in external storage directory
     /// Files that exist on disk but have no corresponding database record
     /// This fixes the storage leak where files accumulate without being tracked
-    /// v0.19: 修复 - 文件删除移到后台线程，避免阻塞主线程
+    /// Deletes files off the actor's thread.
     public func cleanupOrphanedFiles() async throws {
         if Self.isRunningUnderTests(), isAppSupportContentDirectory(externalStoragePath) {
             ScopyLog.storage.error("Refusing to cleanup orphaned files under Application Support during tests")
@@ -1747,9 +1740,7 @@ public actor StorageService {
         )
     }
 
-    /// v0.14: 深度优化 - 消除子查询 COUNT，使用单次查询 + 事务批量删除
-    /// 原理：先计算当前非 pin 数量，再用 OFFSET 直接定位要删除的记录
-    /// 收益：消除 O(n) 子查询，50k 数据下节省 ~200ms
+    /// Plans the deletion from the unpinned count and deletes the plan in one transaction.
     private func cleanupByCount(
         target: Int,
         onCommitted: CleanupCommitHandler?
@@ -1782,7 +1773,7 @@ public actor StorageService {
         )
     }
 
-    /// v0.19: 修复 - 同时删除外部存储文件，避免孤立文件累积
+    /// Also deletes the external files, so none are orphaned.
     private func cleanupByAge(
         maxDays: Int,
         typeFilter: ClipboardItemType?,
@@ -1801,9 +1792,7 @@ public actor StorageService {
         )
     }
 
-    /// v0.14: 深度优化 - 消除循环迭代，单次查询 + 事务批量删除
-    /// 原理：一次性获取所有待删除项目，累加 size 直到达到目标，单事务删除
-    /// 收益：消除多次迭代的 SQL 开销，9000 条删除从 ~4500ms 降到 ~200ms
+    /// Selects the oldest items until the size target is met and deletes them in one transaction.
     private func cleanupBySize(
         targetBytes: Int,
         typeFilter: ClipboardItemType?,
@@ -1821,10 +1810,7 @@ public actor StorageService {
         )
     }
 
-    /// v0.13: 批量删除多个项目（单条 SQL，单事务，避免 N+1 查询）
-    /// v0.14: 深度优化 - 消除循环迭代，单次查询 + 事务批量删除
-    /// 原理：一次性获取所有外部存储项目，累加 size 直到达到目标，单事务删除
-    /// 收益：消除多次迭代的 SQL 和文件系统开销
+    /// Selects the oldest items until the size target is met and deletes them in one transaction.
     private func cleanupExternalStorage(
         targetBytes: Int,
         typeFilter: ClipboardItemType?,
@@ -2107,21 +2093,18 @@ public actor StorageService {
 
     // MARK: - External Storage
 
-    /// v0.17: 原子文件写入 - 使用临时文件 + 重命名，避免崩溃时文件损坏
+    /// Writes through a temporary file and a rename, so a crash never leaves a partial file.
     nonisolated static func writeAtomically(_ data: Data, to path: String) throws {
         let tempPath = path + ".tmp"
         let tempURL = URL(fileURLWithPath: tempPath)
         let finalURL = URL(fileURLWithPath: path)
 
-        // 写入临时文件
         try data.write(to: tempURL)
 
-        // 如果目标文件存在，先删除
         if FileManager.default.fileExists(atPath: path) {
             try FileManager.default.removeItem(at: finalURL)
         }
 
-        // 原子重命名
         try FileManager.default.moveItem(at: tempURL, to: finalURL)
     }
 
@@ -2254,14 +2237,14 @@ public actor StorageService {
         }
     }
 
-    // MARK: - Thumbnail Cache (v0.8)
+    // MARK: - Thumbnail Cache
 
     nonisolated static func fileThumbnailFilename(for contentHash: String) -> String {
         "file_\(contentHash).png"
     }
 
-    /// 生成缩略图 PNG 数据（后台安全）
-    /// 使用 ImageIO downsample + 编码，避免 AppKit 绘制/锁屏开销
+    /// Thumbnail PNG data; safe off the main thread.
+    /// Downsamples and encodes with ImageIO, avoiding AppKit drawing and its locks.
     nonisolated static func makeThumbnailPNG(from imageData: Data, maxHeight: Int) -> Data? {
         guard maxHeight > 0 else { return nil }
         guard let source = CGImageSourceCreateWithData(imageData as CFData, nil) else { return nil }
@@ -2301,8 +2284,8 @@ public actor StorageService {
         return output as Data
     }
 
-    /// 生成缩略图 PNG 数据（文件路径版本，后台安全）
-    /// - Note: 优先走 ImageIO + URL，避免读入完整 Data（对外部存储大图片更省内存/更快）。
+    /// Thumbnail PNG data from a file; safe off the main thread.
+    /// - Note: Reads through ImageIO from the URL instead of loading the whole file.
     nonisolated static func makeThumbnailPNG(fromFileAtPath path: String, maxHeight: Int) -> Data? {
         guard maxHeight > 0 else { return nil }
         let url = URL(fileURLWithPath: path)
@@ -2350,7 +2333,7 @@ public actor StorageService {
     /// - This is used by image/rtf/html/file restore paths.
     /// - When `rawData` is nil (e.g. memory-optimized summaries), this falls back to reloading from DB.
     nonisolated func loadPayloadData(for item: ClipboardStoredItem) async -> Data? {
-        // 1. 优先使用外部存储（大图片 >100KB）
+        // 1. External storage (large images).
         if let storageRef = item.storageRef {
             let allowedRoot = externalStoragePath
             let itemID = item.id
@@ -2366,13 +2349,12 @@ public actor StorageService {
             }.value
         }
 
-        // 2. 使用内联数据（小图片）
+        // 2. Inline data (small images).
         if let rawData = item.rawData {
             return rawData
         }
 
-        // 3. 从数据库重新加载（缓存中 rawData 为 nil 的情况）
-        // 这是 v0.19 内存优化导致的问题：缓存中的 rawData 被设为 nil
+        // 3. Reload from the database: summaries carry no `rawData`.
         if let freshItem = try? await findByID(item.id), let rawData = freshItem.rawData {
             return rawData
         }
@@ -2381,7 +2363,7 @@ public actor StorageService {
         return nil
     }
 
-    /// 清空缩略图缓存（设置变更时调用）
+    /// Clears the thumbnail cache; called when thumbnail settings change.
     nonisolated func clearThumbnailCache() async {
         let path = thumbnailCachePath
         await Task.detached(priority: .utility) {

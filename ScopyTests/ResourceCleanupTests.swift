@@ -1,19 +1,18 @@
 import XCTest
 @testable import ScopyKit
 
-/// 资源清理测试 - v0.10.4
-/// 验证 Timer、Task、事件流、数据库连接等资源的正确清理
+/// Timers, tasks, event streams, and database connections are released correctly.
 @MainActor
 final class ResourceCleanupTests: XCTestCase {
 
     // MARK: - Storage Cleanup Tests
 
-    /// 测试数据库连接在 close 后正确释放
+    /// The database connection is released on close.
     func testDatabaseConnectionCleanup() async throws {
         let storage = StorageService(databasePath: ":memory:")
         try await storage.open()
 
-        // 插入一些数据
+        // Insert some data.
         let content = ClipboardMonitor.ClipboardContent(
             type: .text,
             plainText: "Test content",
@@ -24,10 +23,10 @@ final class ResourceCleanupTests: XCTestCase {
         )
         _ = try await storage.upsertItem(content)
 
-        // 关闭数据库
+        // Close the database.
         await storage.close()
 
-        // 验证数据库已关闭（后续 DB 调用应失败）
+        // Later database calls fail once it is closed.
         do {
             _ = try await storage.getItemCount()
             XCTFail("Expected databaseNotOpen after close")
@@ -36,13 +35,13 @@ final class ResourceCleanupTests: XCTestCase {
         }
     }
 
-    /// 测试 sqlite3_step 错误处理
+    /// sqlite3_step error handling.
     func testSqliteStepErrorHandling() async throws {
         var cleanupPolicy = StorageService.CleanupPolicy()
         let storage = StorageService(databasePath: ":memory:")
         try await storage.open()
 
-        // 插入测试数据
+        // Insert test data.
         for i in 0..<5 {
             let content = ClipboardMonitor.ClipboardContent(
                 type: .text,
@@ -55,7 +54,7 @@ final class ResourceCleanupTests: XCTestCase {
             _ = try await storage.upsertItem(content)
         }
 
-        // 正常清理应该成功
+        // A normal cleanup succeeds.
         cleanupPolicy.maxItems = 3
         do {
             try await storage.performCleanup(policy: cleanupPolicy)
@@ -63,7 +62,7 @@ final class ResourceCleanupTests: XCTestCase {
             XCTFail("Cleanup should not throw: \(error)")
         }
 
-        // 验证清理后的数量
+        // Check the count after cleanup.
         let count = try await storage.getItemCount()
         XCTAssertLessThanOrEqual(count, 3, "Item count should be reduced")
 
@@ -74,14 +73,14 @@ final class ResourceCleanupTests: XCTestCase {
 
     // MARK: - Event Stream Cleanup Tests
 
-    /// 测试服务停止后，事件监听任务可被取消并正常收尾（无需依赖 stream finish）
+    /// After the service stops, an event-listening task cancels and finishes without relying on the stream ending.
     func testEventStreamCleanup() async throws {
         let service = ClipboardServiceFactory.create(databasePath: Self.makeSharedInMemoryDatabasePath())
 
-        // 启动服务
+        // Start the service.
         try await service.start()
 
-        // 创建一个监听事件的任务
+        // A task that listens for events.
         let eventTask = Task {
             var eventCount = 0
             for await _ in service.eventStream {
@@ -96,13 +95,13 @@ final class ResourceCleanupTests: XCTestCase {
         // Give the listener a chance to subscribe.
         await Task.yield()
 
-        // 停止服务（等待资源收尾）
+        // Stop the service and wait for its cleanup.
         await service.stopAndWait()
 
-        // 取消事件任务
+        // Cancel the event task.
         eventTask.cancel()
 
-        // 验证任务可以正常结束
+        // The task finishes.
         let _ = await eventTask.value
     }
 

@@ -1,11 +1,9 @@
 import AppKit
 import Foundation
 
-/// Application 层门面（vNext）：统一组合 monitor/storage/search/settings，并由 actor 持有事件 continuation。
-///
-/// 说明（Phase 4 约束）：
-/// - `ClipboardMonitor` 为 `@MainActor`，该 actor 通过 `MainActor.run {}` 处理边界；`StorageService` 是独立 actor，存储调用不经过主线程。
-/// - UI 仍通过 `@MainActor ClipboardServiceProtocol` 调用 `RealClipboardService`（adapter），由 adapter 转发到该 actor。
+/// The backend facade: composes monitor, storage, search, and settings, and owns the event stream.
+/// `ClipboardMonitor` is `@MainActor` and crossed with `MainActor.run {}`; `StorageService` is its own actor,
+/// so storage calls never touch the main thread. The UI reaches this actor through `RealClipboardService`.
 actor ClipboardBackend {
     // MARK: - Types
 
@@ -163,7 +161,7 @@ actor ClipboardBackend {
     private var memoryPressureSources: [any DispatchSourceMemoryPressure] = []
     private var isStarted = false
 
-    // MARK: - Cleanup Scheduling (v0.26)
+    // MARK: - Cleanup Scheduling
 
     private var cleanupTask: Task<Void, Never>?
     private var isCleanupRunning = false

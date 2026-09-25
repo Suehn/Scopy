@@ -1,11 +1,10 @@
 import Foundation
 import ScopyKit
 
-// MARK: - Reusable Mock ClipboardService
+// MARK: - Reusable ClipboardServiceProtocol Mock
 
-/// 可配置的 Mock ClipboardService (通用版本)
-/// 用于单元测试，支持调用追踪和行为配置
-/// 注意：与 AppStateTests 中的 TestMockClipboardService 接口相同但更完整
+/// A configurable `ClipboardServiceProtocol` mock that records calls; a fuller version of
+/// AppStateTests' `TestMockClipboardService`.
 @MainActor
 final class ReusableMockClipboardService: ClipboardServiceProtocol {
 
@@ -47,7 +46,7 @@ final class ReusableMockClipboardService: ClipboardServiceProtocol {
     // MARK: - Lifecycle
 
     func start() async throws {
-        // Mock 服务无需启动，空实现
+        // Nothing to start.
     }
 
     func stop() {
@@ -245,7 +244,7 @@ final class ReusableMockClipboardService: ClipboardServiceProtocol {
     }
 
     func getImageData(itemID: UUID) async throws -> Data? {
-        // Mock 服务不存储实际图片数据
+        // The mock stores no image data.
         return nil
     }
 
@@ -286,7 +285,7 @@ final class ReusableMockClipboardService: ClipboardServiceProtocol {
     func syncExternalImageSizeBytesFromDisk() async throws -> Int { 0 }
 
     func getRecentApps(limit: Int) async throws -> [String] {
-        // 返回 mock 数据中的 app 列表
+        // The apps in the mock data.
         let apps = Set(items.compactMap { $0.appBundleID })
         return Array(apps.prefix(limit))
     }
@@ -294,7 +293,7 @@ final class ReusableMockClipboardService: ClipboardServiceProtocol {
 
 // MARK: - Mock StorageService
 
-/// Mock StorageService for testing (不依赖 SQLite)
+/// Mock StorageService for testing, without SQLite.
 final class MockInMemoryStorageService {
 
     private(set) var items: [ClipboardItemDTO] = []
@@ -322,7 +321,7 @@ final class MockInMemoryStorageService {
 
 // MARK: - Mock SearchService
 
-/// Mock SearchService for testing (不依赖真实搜索)
+/// Mock SearchService for testing, without a real search.
 final class MockInMemorySearchService {
 
     private(set) var searchCallCount = 0

@@ -1,9 +1,6 @@
 import Foundation
 
-/// SettingsStore - Settings 的唯一真相源（SSOT）
-///
-/// 目标：
-/// - 消灭多点读写 UserDefaults（AppDelegate / RealClipboardService 等）
+/// The single source of truth for settings: nothing else reads or writes their UserDefaults entry.
 public actor SettingsStore {
     public static let shared = SettingsStore()
 

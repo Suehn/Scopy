@@ -2,8 +2,7 @@ import XCTest
 @testable import ScopyKit
 import SQLite3
 
-/// SearchService 单元测试
-/// 验证 v0.md 第4节的搜索性能和功能要求
+/// SearchEngineImpl behavior and performance on an in-memory database.
 @MainActor
 final class SearchServiceTests: XCTestCase {
 

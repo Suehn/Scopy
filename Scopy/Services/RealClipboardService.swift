@@ -144,8 +144,8 @@ public enum ClipboardServiceFactory {
     /// Create service for testing with shared in-memory database.
     ///
     /// Notes:
-    /// - Search 使用独立 read connection，因此不能使用 `:memory:`（每个连接会得到不同数据库）。
-    /// - 使用 shared-cache in-memory URI 让多连接访问同一 DB。
+    /// - Search reads through its own connection, so `:memory:` would give it a different database.
+    /// - A shared-cache in-memory URI lets every connection open the same database.
     @MainActor
     public static func createForTesting(
         settingsStore: SettingsStore = .shared,

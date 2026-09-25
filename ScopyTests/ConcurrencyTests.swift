@@ -1,8 +1,7 @@
 import XCTest
 @testable import ScopyKit
 
-/// 并发安全测试 - v0.10.4
-/// 验证搜索、缓存刷新、任务取消等场景的并发安全性
+/// Concurrency safety of searches, cache refreshes, and task cancellation.
 @MainActor
 final class ConcurrencyTests: XCTestCase {
     var storage: StorageService!
@@ -24,9 +23,9 @@ final class ConcurrencyTests: XCTestCase {
 
     // MARK: - Search Cancellation Safety
 
-    /// 测试快速连续搜索时的取消安全性
+    /// Rapid successive searches cancel safely.
     func testSearchCancellationSafety() async throws {
-        // 插入测试数据
+        // Insert test data.
         for i in 0..<100 {
             let content = ClipboardMonitor.ClipboardContent(
                 type: .text,
@@ -39,7 +38,7 @@ final class ConcurrencyTests: XCTestCase {
             _ = try await storage.upsertItem(content)
         }
 
-        // 快速发起多个搜索请求
+        // Fire several searches in quick succession.
         let search = self.search!
         var tasks: [Task<SearchEngineImpl.SearchResult?, Never>] = []
         for i in 0..<10 {
@@ -57,12 +56,12 @@ final class ConcurrencyTests: XCTestCase {
             tasks.append(task)
         }
 
-        // 取消前面的任务
+        // Cancel the earlier ones.
         for i in 0..<5 {
             tasks[i].cancel()
         }
 
-        // 等待所有任务完成
+        // Wait for every task.
         var completedCount = 0
         for task in tasks {
             let result = await task.value
@@ -71,15 +70,15 @@ final class ConcurrencyTests: XCTestCase {
             }
         }
 
-        // 至少后面的任务应该完成
+        // At least the later searches complete.
         XCTAssertGreaterThanOrEqual(completedCount, 1, "At least some searches should complete")
     }
 
     // MARK: - Cache Refresh Concurrency
 
-    /// 测试缓存刷新的并发安全性
+    /// Cache refreshes are concurrency-safe.
     func testCacheRefreshConcurrency() async throws {
-        // 插入测试数据
+        // Insert test data.
         for i in 0..<50 {
             let content = ClipboardMonitor.ClipboardContent(
                 type: .text,
@@ -92,7 +91,7 @@ final class ConcurrencyTests: XCTestCase {
             _ = try await storage.upsertItem(content)
         }
 
-        // 顺序执行多个短查询（会触发缓存刷新）
+        // Run several short queries in sequence (they refresh the cache).
         var results: [SearchEngineImpl.SearchResult] = []
         for i in 0..<20 {
             let request = SearchRequest(
@@ -108,7 +107,7 @@ final class ConcurrencyTests: XCTestCase {
             }
         }
 
-        // 所有搜索都应该成功完成
+        // Every search completes.
         XCTAssertEqual(results.count, 20, "All searches should complete")
     }
 
@@ -118,7 +117,7 @@ final class ConcurrencyTests: XCTestCase {
 
     // MARK: - Search Version Number
 
-    /// 测试搜索版本号防止旧结果覆盖新结果
+    /// The search version keeps an older result from replacing a newer one.
     func testSearchVersionPreventsStaleResults() async throws {
         let service = TestMockClipboardService()
         let appState = AppState.forTesting(service: service)
@@ -158,7 +157,7 @@ final class ConcurrencyTests: XCTestCase {
         XCTAssertTrue(appState.items.allSatisfy { $0.plainText.localizedCaseInsensitiveContains("2") })
     }
 
-    /// 测试普通 load 的旧结果不会覆盖后发起的搜索结果
+    /// An older plain load does not replace a later search's result.
     func testLoadDoesNotOverwriteNewerSearchResults() async throws {
         let service = TestMockClipboardService()
         let appState = AppState.forTesting(service: service)
@@ -191,9 +190,9 @@ final class ConcurrencyTests: XCTestCase {
 
     // MARK: - v0.11 Concurrent Search Stress Tests
 
-    /// v0.11: 并发搜索压力测试 - 同时发起 10 个搜索请求
+    /// Stress: ten concurrent searches.
     func testConcurrentSearchStress() async throws {
-        // 插入大量测试数据
+        // Insert a larger data set.
         for i in 0..<1000 {
             let content = ClipboardMonitor.ClipboardContent(
                 type: .text,
@@ -206,7 +205,7 @@ final class ConcurrencyTests: XCTestCase {
             _ = try await storage.upsertItem(content)
         }
 
-        // 使用 TaskGroup 实现真正的并发搜索
+        // A task group runs the searches concurrently.
         let search = self.search!
         let queries = ["stress", "lorem", "ipsum", "dolor", "amet", "test", "item", "sit", "content", "hash"]
 
@@ -234,7 +233,7 @@ final class ConcurrencyTests: XCTestCase {
                 }
             }
 
-            // 所有搜索都应该成功完成
+            // Every search completes.
             XCTAssertEqual(successCount, queries.count, "All concurrent searches should complete")
             XCTAssertGreaterThan(totalItems, 0, "Should return some results")
         }

@@ -1,6 +1,6 @@
 import Foundation
 
-/// 图片优化结果（用于手动压缩/提示压缩比）
+/// The result of optimizing an image, for manual compression and its ratio display.
 public struct ImageOptimizationOutcomeDTO: Sendable, Equatable {
     public enum Result: Sendable, Equatable {
         case optimized
