@@ -54,7 +54,7 @@ final class ClipboardServiceCleanupTests: XCTestCase {
         let settingsStore = SettingsStore(suiteName: suiteName)
         await settingsStore.save(.default)
 
-        let service = ClipboardService(
+        let service = ClipboardBackend(
             databasePath: databasePath,
             settingsStore: settingsStore,
             monitorPasteboardName: NSPasteboard.withUniqueName().name.rawValue,

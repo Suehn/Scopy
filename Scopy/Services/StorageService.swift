@@ -126,14 +126,12 @@ public actor StorageService {
         }
     }
 
-    public typealias StoredItem = ClipboardStoredItem
-
     enum UpsertOutcome: Sendable {
-        case inserted(StoredItem)
-        case updated(StoredItem)
-        case alreadyApplied(StoredItem?)
+        case inserted(ClipboardStoredItem)
+        case updated(ClipboardStoredItem)
+        case alreadyApplied(ClipboardStoredItem?)
 
-        var item: StoredItem? {
+        var item: ClipboardStoredItem? {
             switch self {
             case .inserted(let item): return item
             case .updated(let item): return item
@@ -168,7 +166,7 @@ public actor StorageService {
     }
 
     private enum OptimizedPayloadRepairResult {
-        case restored(StoredItem)
+        case restored(ClipboardStoredItem)
         case independentlySuperseded
         case failed
     }
@@ -608,7 +606,7 @@ public actor StorageService {
                     rawData: inlineData
                 )
                 outcome = .inserted(
-                    StoredItem(
+                    ClipboardStoredItem(
                         id: id,
                         type: content.type,
                         contentHash: content.contentHash,
@@ -707,36 +705,36 @@ public actor StorageService {
         try await repository.removeIngestReceipt(ingestID)
     }
 
-    public nonisolated func findByID(_ id: UUID) async throws -> StoredItem? {
+    public nonisolated func findByID(_ id: UUID) async throws -> ClipboardStoredItem? {
         try await repository.fetchItemByID(id)
     }
 
     /// Fetch recent items with pagination (v0.md 2.2)
     /// v0.13: 预分配数组容量，避免多次重新分配
-    public nonisolated func fetchRecent(limit: Int, offset: Int) async throws -> [StoredItem] {
+    public nonisolated func fetchRecent(limit: Int, offset: Int) async throws -> [ClipboardStoredItem] {
         try await repository.fetchRecent(limit: limit, offset: offset)
     }
 
-    public nonisolated func fetchPinned() async throws -> [StoredItem] {
+    public nonisolated func fetchPinned() async throws -> [ClipboardStoredItem] {
         try await repository.fetchPinned()
     }
 
-    public nonisolated func fetchRecentUnpinned(limit: Int, offset: Int) async throws -> [StoredItem] {
+    public nonisolated func fetchRecentUnpinned(limit: Int, offset: Int) async throws -> [ClipboardStoredItem] {
         try await repository.fetchRecentUnpinned(limit: limit, offset: offset)
     }
 
-    nonisolated func incrementUsage(id: UUID, at timestamp: Date) async throws -> StoredItem? {
+    nonisolated func incrementUsage(id: UUID, at timestamp: Date) async throws -> ClipboardStoredItem? {
         try await repository.incrementUsageReturningCurrent(id: id, lastUsedAt: timestamp)
     }
 
-    nonisolated func updateNote(id: UUID, note: String?) async throws -> StoredItem? {
+    nonisolated func updateNote(id: UUID, note: String?) async throws -> ClipboardStoredItem? {
         try await repository.updateItemNoteReturningItem(id: id, note: note)
     }
 
     nonisolated func updateFileSizeBytes(
-        expected: StoredItem,
+        expected: ClipboardStoredItem,
         fileSizeBytes: Int?
-    ) async throws -> StoredItem? {
+    ) async throws -> ClipboardStoredItem? {
         try await repository.updateItemFileSizeBytesReturningItem(
             expected: expected,
             fileSizeBytes: fileSizeBytes
@@ -762,12 +760,12 @@ public actor StorageService {
     /// Commits an asynchronously transformed payload only while the persisted row still matches
     /// the transform's input snapshot. Returns `nil` for deletion or same-ID replacement.
     nonisolated func compareAndSwapItemPayload(
-        expected: StoredItem,
+        expected: ClipboardStoredItem,
         contentHash: String,
         sizeBytes: Int,
         storageRef: String?,
         rawData: Data?
-    ) async throws -> StoredItem? {
+    ) async throws -> ClipboardStoredItem? {
         try await repository.compareAndSwapItemPayload(
             expected: expected,
             contentHash: contentHash,
@@ -784,11 +782,11 @@ public actor StorageService {
     /// an orphan; after CAS the row points to fully written immutable bytes. Full orphan cleanup
     /// owns eventual reclamation of the old path.
     func commitOptimizedExternalImagePayload(
-        expected: StoredItem,
+        expected: ClipboardStoredItem,
         stagedURL: URL,
         contentHash: String,
         sizeBytes: Int
-    ) async throws -> StoredItem? {
+    ) async throws -> ClipboardStoredItem? {
         let finalURL = URL(fileURLWithPath: externalStoragePath, isDirectory: true)
             .appendingPathComponent("\(UUID().uuidString).png")
         let finalFilename = finalURL.lastPathComponent
@@ -870,7 +868,7 @@ public actor StorageService {
     /// optimized file against orphan deletion. Every failed post-CAS verification restores the
     /// valid committed payload before another attempt or return.
     func reconcileExternalImageSourceOwnership(
-        committedItem: StoredItem,
+        committedItem: ClipboardStoredItem,
         sourceURL: URL,
         sourceLease: ExternalImageSourceLease,
         verificationInterlock: (@Sendable (_ attempt: Int) async -> Void)? = nil
@@ -922,7 +920,7 @@ public actor StorageService {
     }
 
     private func performExternalSourceReconciliation(
-        committedItem: StoredItem,
+        committedItem: ClipboardStoredItem,
         sourceURL: URL,
         verificationInterlock: (@Sendable (_ attempt: Int) async -> Void)?
     ) async -> ExternalSourceReconciliationResult {
@@ -949,7 +947,7 @@ public actor StorageService {
             }
 
             let liveHash = ClipboardMonitor.computeHashStatic(liveData)
-            let reconciled: StoredItem
+            let reconciled: ClipboardStoredItem
             do {
                 guard let value = try await repository.compareAndSwapItemPayload(
                     expected: expectedOptimized,
@@ -1003,8 +1001,8 @@ public actor StorageService {
     /// before the stability check finishes. Retry the repair from that newer source-lineage row;
     /// never leave a known-unstable source as the DB winner merely because the first CAS lost.
     private func restoreOptimizedPayloadAfterUnstableSource(
-        reconciled: StoredItem,
-        committedItem: StoredItem,
+        reconciled: ClipboardStoredItem,
+        committedItem: ClipboardStoredItem,
         sourceURL: URL
     ) async -> OptimizedPayloadRepairResult {
         var expected = reconciled
@@ -2351,7 +2349,7 @@ public actor StorageService {
     /// Notes:
     /// - This is used by image/rtf/html/file restore paths.
     /// - When `rawData` is nil (e.g. memory-optimized summaries), this falls back to reloading from DB.
-    nonisolated func loadPayloadData(for item: StoredItem) async -> Data? {
+    nonisolated func loadPayloadData(for item: ClipboardStoredItem) async -> Data? {
         // 1. 优先使用外部存储（大图片 >100KB）
         if let storageRef = item.storageRef {
             let allowedRoot = externalStoragePath

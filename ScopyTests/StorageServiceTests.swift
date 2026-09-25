@@ -112,7 +112,7 @@ final class StorageServiceTests: XCTestCase {
     var storage: StorageService!
     private var raceStorages: [StorageService] = []
     private var raceStorageDirectories: [URL] = []
-    private var clipboardServices: [ClipboardService] = []
+    private var clipboardServices: [ClipboardBackend] = []
     private var settingsSuiteNames: [String] = []
 
     private final class RemoveFileProbe: @unchecked Sendable {
@@ -456,7 +456,7 @@ final class StorageServiceTests: XCTestCase {
         let thumbnailURL = rootURL.appendingPathComponent(filename)
         try Data([0x89, 0x50, 0x4E, 0x47]).write(to: thumbnailURL)
 
-        var index = ClipboardService.ThumbnailCacheIndex(root: rootURL.path, filenames: [filename])
+        var index = ClipboardBackend.ThumbnailCacheIndex(root: rootURL.path, filenames: [filename])
         XCTAssertEqual(index.pathIfExists(filename: filename), thumbnailURL.path)
 
         try fileManager.removeItem(at: thumbnailURL)
@@ -1608,7 +1608,7 @@ final class StorageServiceTests: XCTestCase {
             .appendingPathComponent(".scopy-size-sync-test.stage")
         try optimizedData.write(to: stagedURL, options: .atomic)
         let optimizedHash = "optimized-\(UUID().uuidString)"
-        let committed: StorageService.StoredItem?
+        let committed: ClipboardStoredItem?
         do {
             committed = try await competing.commitOptimizedExternalImagePayload(
                 expected: item,

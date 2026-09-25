@@ -1,673 +1,22 @@
 import AppKit
 import Foundation
 
-enum BackgroundWorkPriority: Int, Sendable, Comparable {
-    case utility
-    case userInitiated
-
-    static func < (lhs: BackgroundWorkPriority, rhs: BackgroundWorkPriority) -> Bool {
-        lhs.rawValue < rhs.rawValue
-    }
-
-    var taskPriority: TaskPriority {
-        switch self {
-        case .utility:
-            return .utility
-        case .userInitiated:
-            return .userInitiated
-        }
-    }
-}
-
-/// Fixed-worker, finite-pending work ownership for background item enrichment.
-/// Submitting work never creates a Task; only the configured workers own Tasks.
-actor BoundedCoalescingWorkerQueue<Key: Hashable & Sendable, Work: Sendable, Output: Sendable> {
-    enum Admission: Sendable {
-        case accepted
-        case coalescedPending(upgradedPriority: Bool)
-        case coalescedActive
-        case replacedOldestUtility(Key)
-        case rejectedFull
-        case rejectedStopped
-    }
-
-    struct Snapshot: Sendable {
-        let isRunning: Bool
-        let activeCount: Int
-        let pendingCount: Int
-        let workerCount: Int
-        let waitingWorkerCount: Int
-        let maxActiveCount: Int
-        let maxPendingCount: Int
-        let workerLimit: Int
-        let pendingLimit: Int
-        let activeKeys: [Key]
-        let pendingKeys: [Key]
-        let pendingPriorities: [BackgroundWorkPriority]
-    }
-
-    private struct Entry {
-        let key: Key
-        var work: Work
-        var priority: BackgroundWorkPriority
-        let sequence: UInt64
-    }
-
-    private struct WorkerWaiter {
-        let id: UUID
-        let generation: UInt64
-        let continuation: CheckedContinuation<Bool, Never>
-    }
-
-    typealias Merge = @Sendable (_ existing: Work, _ incoming: Work) -> Work
-    typealias Operation = @Sendable (_ work: Work, _ priority: BackgroundWorkPriority) async -> Output
-    typealias Completion = @Sendable (_ mergedWork: Work, _ output: Output) async -> Void
-
-    private let workerLimit: Int
-    private let pendingLimit: Int
-    private let merge: Merge
-    private let operation: Operation
-    private let completion: Completion
-
-    private var isRunning = false
-    private var generation: UInt64 = 0
-    private var sequence: UInt64 = 0
-    private var pendingOrder: [Key] = []
-    private var pendingByKey: [Key: Entry] = [:]
-    private var activeByKey: [Key: Entry] = [:]
-    private var workerTasks: [UUID: Task<Void, Never>] = [:]
-    private var workerWaiters: [WorkerWaiter] = []
-    private var maxObservedActiveCount = 0
-    private var maxObservedPendingCount = 0
-
-    init(
-        workerLimit: Int,
-        pendingLimit: Int,
-        merge: @escaping Merge,
-        operation: @escaping Operation,
-        completion: @escaping Completion
-    ) {
-        self.workerLimit = max(1, workerLimit)
-        self.pendingLimit = max(1, pendingLimit)
-        self.merge = merge
-        self.operation = operation
-        self.completion = completion
-    }
-
-    deinit {
-        workerTasks.values.forEach { $0.cancel() }
-        workerWaiters.forEach { $0.continuation.resume(returning: false) }
-    }
-
-    func start() {
-        guard !isRunning else { return }
-        isRunning = true
-        generation &+= 1
-        let workerGeneration = generation
-
-        for _ in 0..<workerLimit {
-            let workerID = UUID()
-            workerTasks[workerID] = Task(priority: .utility) { [weak self] in
-                await self?.workerLoop(id: workerID, generation: workerGeneration)
-            }
-        }
-    }
-
-    @discardableResult
-    func submit(key: Key, work: Work, priority: BackgroundWorkPriority) -> Admission {
-        guard isRunning else { return .rejectedStopped }
-
-        if var active = activeByKey[key] {
-            active.work = merge(active.work, work)
-            active.priority = max(active.priority, priority)
-            activeByKey[key] = active
-            return .coalescedActive
-        }
-
-        if var pending = pendingByKey[key] {
-            let upgraded = priority > pending.priority
-            pending.work = merge(pending.work, work)
-            pending.priority = max(pending.priority, priority)
-            pendingByKey[key] = pending
-            return .coalescedPending(upgradedPriority: upgraded)
-        }
-
-        var replacedKey: Key?
-        if pendingByKey.count >= pendingLimit {
-            guard priority == .userInitiated,
-                  let utilityIndex = pendingOrder.firstIndex(where: { pendingByKey[$0]?.priority == .utility }) else {
-                return .rejectedFull
-            }
-            let oldestUtilityKey = pendingOrder.remove(at: utilityIndex)
-            pendingByKey.removeValue(forKey: oldestUtilityKey)
-            replacedKey = oldestUtilityKey
-        }
-
-        sequence &+= 1
-        let entry = Entry(key: key, work: work, priority: priority, sequence: sequence)
-        pendingOrder.append(key)
-        pendingByKey[key] = entry
-        maxObservedPendingCount = max(maxObservedPendingCount, pendingByKey.count)
-        wakeOneWorker()
-
-        if let replacedKey {
-            return .replacedOldestUtility(replacedKey)
-        }
-        return .accepted
-    }
-
-    @discardableResult
-    func cancelPending(key: Key) -> Bool {
-        guard pendingByKey.removeValue(forKey: key) != nil else { return false }
-        pendingOrder.removeAll { $0 == key }
-        return true
-    }
-
-    @discardableResult
-    func cancelPending(where shouldCancel: @Sendable (Key) -> Bool) -> [Key] {
-        let cancelledKeys = pendingOrder.filter(shouldCancel)
-        guard !cancelledKeys.isEmpty else { return [] }
-        let cancelledSet = Set(cancelledKeys)
-        pendingOrder.removeAll { cancelledSet.contains($0) }
-        for key in cancelledKeys {
-            pendingByKey.removeValue(forKey: key)
-        }
-        return cancelledKeys
-    }
-
-    func discardPending() {
-        pendingOrder.removeAll(keepingCapacity: true)
-        pendingByKey.removeAll(keepingCapacity: true)
-    }
-
-    func stop() async {
-        guard isRunning || !workerTasks.isEmpty else {
-            pendingOrder.removeAll(keepingCapacity: true)
-            pendingByKey.removeAll(keepingCapacity: true)
-            activeByKey.removeAll(keepingCapacity: true)
-            return
-        }
-
-        isRunning = false
-        generation &+= 1
-        pendingOrder.removeAll(keepingCapacity: true)
-        pendingByKey.removeAll(keepingCapacity: true)
-        activeByKey.removeAll(keepingCapacity: true)
-
-        let waiters = workerWaiters
-        workerWaiters.removeAll(keepingCapacity: true)
-        waiters.forEach { $0.continuation.resume(returning: false) }
-
-        let tasks = Array(workerTasks.values)
-        workerTasks.removeAll(keepingCapacity: true)
-        tasks.forEach { $0.cancel() }
-        for task in tasks {
-            await task.value
-        }
-    }
-
-    func snapshot() -> Snapshot {
-        let orderedEntries = pendingOrder.compactMap { pendingByKey[$0] }
-        return Snapshot(
-            isRunning: isRunning,
-            activeCount: activeByKey.count,
-            pendingCount: pendingByKey.count,
-            workerCount: workerTasks.count,
-            waitingWorkerCount: workerWaiters.count,
-            maxActiveCount: maxObservedActiveCount,
-            maxPendingCount: maxObservedPendingCount,
-            workerLimit: workerLimit,
-            pendingLimit: pendingLimit,
-            activeKeys: Array(activeByKey.keys),
-            pendingKeys: orderedEntries.map(\.key),
-            pendingPriorities: orderedEntries.map(\.priority)
-        )
-    }
-
-    private func workerLoop(id: UUID, generation workerGeneration: UInt64) async {
-        while !Task.isCancelled,
-              let entry = await nextEntry(workerID: id, generation: workerGeneration) {
-            let output = await operation(entry.work, entry.priority)
-            guard let mergedEntry = finishEntry(key: entry.key, generation: workerGeneration) else {
-                continue
-            }
-            await completion(mergedEntry.work, output)
-        }
-        workerTasks.removeValue(forKey: id)
-    }
-
-    private func nextEntry(workerID: UUID, generation workerGeneration: UInt64) async -> Entry? {
-        while isRunning, workerGeneration == generation, !Task.isCancelled {
-            if let entry = popNextEntry() {
-                activeByKey[entry.key] = entry
-                maxObservedActiveCount = max(maxObservedActiveCount, activeByKey.count)
-                return entry
-            }
-
-            let shouldContinue = await suspendWorker(id: workerID, generation: workerGeneration)
-            guard shouldContinue else { return nil }
-        }
-        return nil
-    }
-
-    private func popNextEntry() -> Entry? {
-        guard !pendingOrder.isEmpty else { return nil }
-        let nextIndex = pendingOrder.firstIndex(where: { pendingByKey[$0]?.priority == .userInitiated }) ?? 0
-        let key = pendingOrder.remove(at: nextIndex)
-        return pendingByKey.removeValue(forKey: key)
-    }
-
-    private func finishEntry(key: Key, generation workerGeneration: UInt64) -> Entry? {
-        guard isRunning, workerGeneration == generation else { return nil }
-        return activeByKey.removeValue(forKey: key)
-    }
-
-    private func suspendWorker(id: UUID, generation workerGeneration: UInt64) async -> Bool {
-        guard isRunning, workerGeneration == generation, !Task.isCancelled else { return false }
-        let waiterID = UUID()
-        return await withTaskCancellationHandler(operation: {
-            await withCheckedContinuation { continuation in
-                guard isRunning, workerGeneration == generation, !Task.isCancelled else {
-                    continuation.resume(returning: false)
-                    return
-                }
-                workerWaiters.append(
-                    WorkerWaiter(id: waiterID, generation: workerGeneration, continuation: continuation)
-                )
-            }
-        }, onCancel: {
-            Task { await self.cancelWorkerWaiter(id: waiterID) }
-        })
-    }
-
-    private func wakeOneWorker() {
-        while !workerWaiters.isEmpty {
-            let waiter = workerWaiters.removeFirst()
-            guard waiter.generation == generation else {
-                waiter.continuation.resume(returning: false)
-                continue
-            }
-            waiter.continuation.resume(returning: true)
-            return
-        }
-    }
-
-    private func cancelWorkerWaiter(id: UUID) {
-        guard let index = workerWaiters.firstIndex(where: { $0.id == id }) else { return }
-        let waiter = workerWaiters.remove(at: index)
-        waiter.continuation.resume(returning: false)
-    }
-}
-
-struct BoundedRetryTimestamps<Key: Hashable & Sendable>: Sendable {
-    private let capacity: Int
-    private var timestamps: [Key: Date] = [:]
-    private var order: [Key] = []
-
-    init(capacity: Int) {
-        self.capacity = max(1, capacity)
-    }
-
-    var count: Int { timestamps.count }
-
-    mutating func containsRecent(_ key: Key, now: Date, interval: TimeInterval) -> Bool {
-        prune(olderThan: now.addingTimeInterval(-max(0, interval)))
-        guard let timestamp = timestamps[key] else { return false }
-        return now.timeIntervalSince(timestamp) < interval
-    }
-
-    mutating func record(_ key: Key, at timestamp: Date) {
-        if timestamps[key] != nil {
-            order.removeAll { $0 == key }
-        }
-        timestamps[key] = timestamp
-        order.append(key)
-
-        while timestamps.count > capacity, !order.isEmpty {
-            let evicted = order.removeFirst()
-            timestamps.removeValue(forKey: evicted)
-        }
-    }
-
-    mutating func remove(_ key: Key) {
-        timestamps.removeValue(forKey: key)
-        order.removeAll { $0 == key }
-    }
-
-    mutating func remove(where shouldRemove: (Key) -> Bool) {
-        let removedKeys = order.filter(shouldRemove)
-        guard !removedKeys.isEmpty else { return }
-        let removedSet = Set(removedKeys)
-        order.removeAll { removedSet.contains($0) }
-        for key in removedKeys {
-            timestamps.removeValue(forKey: key)
-        }
-    }
-
-    mutating func prune(olderThan cutoff: Date) {
-        while let oldest = order.first,
-              let timestamp = timestamps[oldest],
-              timestamp < cutoff {
-            order.removeFirst()
-            timestamps.removeValue(forKey: oldest)
-        }
-    }
-
-    mutating func removeAll() {
-        timestamps.removeAll(keepingCapacity: true)
-        order.removeAll(keepingCapacity: true)
-    }
-}
-
-actor ClipboardEventQueue {
-    struct PublicationToken: Sendable, Equatable {
-        let itemID: UUID
-        let sequence: UInt64
-        let clearGeneration: UInt64
-    }
-
-    private struct PublicationState {
-        var highestSequence: UInt64
-        var outstanding: Set<UInt64>
-    }
-
-    private struct ReceiverWaiter {
-        let id: UUID
-        let continuation: CheckedContinuation<ClipboardEvent?, Never>
-    }
-
-    private struct SenderWaiter {
-        let id: UUID
-        let continuation: CheckedContinuation<Void, Never>
-    }
-
-    private let capacity: Int
-    private var buffer: [ClipboardEvent?]
-    private var headIndex = 0
-    private var tailIndex = 0
-    private var bufferedCount = 0
-    private var isFinished = false
-    private var nextSequence: UInt64 = 0
-    private var clearGeneration: UInt64 = 0
-    private var publications: [UUID: PublicationState] = [:]
-    private var waitingReceivers: [ReceiverWaiter] = []
-    private var waitingSenders: [SenderWaiter] = []
-
-    init(capacity: Int) {
-        self.capacity = max(1, capacity)
-        self.buffer = Array(repeating: nil, count: max(1, capacity))
-    }
-
-    func reservePublication(itemID: UUID) -> PublicationToken {
-        nextSequence &+= 1
-        let token = PublicationToken(
-            itemID: itemID,
-            sequence: nextSequence,
-            clearGeneration: clearGeneration
-        )
-        var state = publications[itemID] ?? PublicationState(
-            highestSequence: token.sequence,
-            outstanding: []
-        )
-        state.highestSequence = max(state.highestSequence, token.sequence)
-        state.outstanding.insert(token.sequence)
-        publications[itemID] = state
-        return token
-    }
-
-    func advanceClearGeneration() {
-        clearGeneration &+= 1
-        publications.removeAll(keepingCapacity: true)
-    }
-
-    /// Invalidates only publications for rows a bulk cleanup actually deleted. Older suspended
-    /// per-item senders then fail `isLatest`, while unrelated item publications remain intact.
-    func invalidatePublications(itemIDs: [UUID]) {
-        guard !itemIDs.isEmpty else { return }
-        for itemID in Set(itemIDs) {
-            publications.removeValue(forKey: itemID)
-        }
-    }
-
-    func discardPublication(_ token: PublicationToken) {
-        abandonPublication(token)
-    }
-
-    @discardableResult
-    func enqueue(_ event: ClipboardEvent, publication token: PublicationToken? = nil) async -> Bool {
-        guard !isFinished, !Task.isCancelled else {
-            if let token { abandonPublication(token) }
-            return false
-        }
-
-        while bufferedCount >= capacity, !isFinished {
-            guard !Task.isCancelled else {
-                if let token { abandonPublication(token) }
-                return false
-            }
-            let waiterID = UUID()
-            await withTaskCancellationHandler(operation: {
-                await withCheckedContinuation { continuation in
-                    waitingSenders.append(SenderWaiter(id: waiterID, continuation: continuation))
-                }
-            }, onCancel: {
-                Task { await self.cancelSender(id: waiterID) }
-            })
-        }
-
-        guard !isFinished, !Task.isCancelled else {
-            if let token { abandonPublication(token) }
-            return false
-        }
-        if let token, !isLatest(token) {
-            completePublication(token)
-            wakeOneSenderIfCapacityAvailable()
-            return false
-        }
-
-        if !waitingReceivers.isEmpty {
-            let receiver = waitingReceivers.removeFirst()
-            receiver.continuation.resume(returning: event)
-        } else {
-            buffer[tailIndex] = event
-            tailIndex = (tailIndex + 1) % capacity
-            bufferedCount += 1
-        }
-        if let token { completePublication(token) }
-        return true
-    }
-
-    func dequeue() async -> ClipboardEvent? {
-        if bufferedCount > 0 {
-            let event = buffer[headIndex]
-            buffer[headIndex] = nil
-            headIndex = (headIndex + 1) % capacity
-            bufferedCount -= 1
-            wakeOneSenderIfCapacityAvailable()
-            return event
-        }
-        guard !isFinished, !Task.isCancelled else { return nil }
-
-        let waiterID = UUID()
-        return await withTaskCancellationHandler(operation: {
-            await withCheckedContinuation { continuation in
-                waitingReceivers.append(ReceiverWaiter(id: waiterID, continuation: continuation))
-            }
-        }, onCancel: {
-            Task { await self.cancelReceiver(id: waiterID) }
-        })
-    }
-
-    func finish() {
-        guard !isFinished else { return }
-        isFinished = true
-        publications.removeAll(keepingCapacity: false)
-        let receivers = waitingReceivers
-        waitingReceivers.removeAll()
-        receivers.forEach { $0.continuation.resume(returning: nil) }
-        let senders = waitingSenders
-        waitingSenders.removeAll()
-        senders.forEach { $0.continuation.resume() }
-    }
-
-    private func isLatest(_ token: PublicationToken) -> Bool {
-        guard token.clearGeneration == clearGeneration,
-              let state = publications[token.itemID] else { return false }
-        return token.sequence == state.highestSequence && state.outstanding.contains(token.sequence)
-    }
-
-    /// Retires a publication that did deliver an event. The watermark stays where it is so the
-    /// publications this one superseded remain stale.
-    private func completePublication(_ token: PublicationToken) {
-        guard var state = publications[token.itemID] else { return }
-        state.outstanding.remove(token.sequence)
-        if state.outstanding.isEmpty {
-            publications.removeValue(forKey: token.itemID)
-        } else {
-            publications[token.itemID] = state
-        }
-    }
-
-    /// Retires a publication that delivered nothing (authoritative state could not be built, or
-    /// the queue was cancelled). Unlike a completed publication it must give the watermark back:
-    /// otherwise the publications it superseded also fail `isLatest`, and an item whose row did
-    /// change reaches the UI through no event at all until the next full reload.
-    private func abandonPublication(_ token: PublicationToken) {
-        guard var state = publications[token.itemID] else { return }
-        state.outstanding.remove(token.sequence)
-        guard !state.outstanding.isEmpty else {
-            publications.removeValue(forKey: token.itemID)
-            return
-        }
-        if state.highestSequence == token.sequence,
-           let highestRemaining = state.outstanding.max() {
-            state.highestSequence = highestRemaining
-        }
-        publications[token.itemID] = state
-    }
-
-    private func wakeOneSenderIfCapacityAvailable() {
-        guard bufferedCount < capacity, !waitingSenders.isEmpty else { return }
-        let sender = waitingSenders.removeFirst()
-        sender.continuation.resume()
-    }
-
-    private func cancelReceiver(id: UUID) {
-        guard let index = waitingReceivers.firstIndex(where: { $0.id == id }) else { return }
-        let waiter = waitingReceivers.remove(at: index)
-        waiter.continuation.resume(returning: nil)
-    }
-
-    private func cancelSender(id: UUID) {
-        guard let index = waitingSenders.firstIndex(where: { $0.id == id }) else { return }
-        let waiter = waitingSenders.remove(at: index)
-        waiter.continuation.resume()
-    }
-}
-
-/// Serializes the small set of same-item mutations whose semantic events are derived from final
-/// state (currently pin/unpin). The lease is cancellation-safe and leaves no per-item entry once
-/// the owner and its waiters are gone.
-private actor ClipboardItemMutationGate {
-    struct Lease: Sendable {
-        let id: UUID
-        let itemID: UUID
-    }
-
-    private struct Waiter {
-        let id: UUID
-        let itemID: UUID
-        let continuation: CheckedContinuation<Lease?, Never>
-    }
-
-    private var owners: [UUID: UUID] = [:]
-    private var waitersByItemID: [UUID: [Waiter]] = [:]
-    private let maxPendingCount = 64
-    private var pendingCount = 0
-
-    func acquire(itemID: UUID) async -> Lease? {
-        guard !Task.isCancelled else { return nil }
-        let requestID = UUID()
-        let lease: Lease? = await withTaskCancellationHandler(operation: {
-            await withCheckedContinuation { continuation in
-                guard !Task.isCancelled else {
-                    continuation.resume(returning: nil)
-                    return
-                }
-                if owners[itemID] == nil {
-                    owners[itemID] = requestID
-                    continuation.resume(returning: Lease(id: requestID, itemID: itemID))
-                } else {
-                    guard pendingCount < maxPendingCount else {
-                        continuation.resume(returning: nil)
-                        return
-                    }
-                    waitersByItemID[itemID, default: []].append(
-                        Waiter(id: requestID, itemID: itemID, continuation: continuation)
-                    )
-                    pendingCount += 1
-                }
-            }
-        }, onCancel: {
-            Task { await self.cancelWaiter(id: requestID, itemID: itemID) }
-        })
-
-        guard let lease else { return nil }
-        guard !Task.isCancelled else {
-            release(lease)
-            return nil
-        }
-        return lease
-    }
-
-    func release(_ lease: Lease) {
-        guard owners[lease.itemID] == lease.id else { return }
-        if var waiters = waitersByItemID[lease.itemID], !waiters.isEmpty {
-            let next = waiters.removeFirst()
-            pendingCount = max(0, pendingCount - 1)
-            if waiters.isEmpty {
-                waitersByItemID.removeValue(forKey: lease.itemID)
-            } else {
-                waitersByItemID[lease.itemID] = waiters
-            }
-            owners[lease.itemID] = next.id
-            next.continuation.resume(returning: Lease(id: next.id, itemID: next.itemID))
-        } else {
-            owners.removeValue(forKey: lease.itemID)
-            waitersByItemID.removeValue(forKey: lease.itemID)
-        }
-    }
-
-    private func cancelWaiter(id: UUID, itemID: UUID) {
-        guard var waiters = waitersByItemID[itemID],
-              let index = waiters.firstIndex(where: { $0.id == id }) else { return }
-        let waiter = waiters.remove(at: index)
-        pendingCount = max(0, pendingCount - 1)
-        if waiters.isEmpty {
-            waitersByItemID.removeValue(forKey: itemID)
-        } else {
-            waitersByItemID[itemID] = waiters
-        }
-        waiter.continuation.resume(returning: nil)
-    }
-}
-
 /// Application 层门面（vNext）：统一组合 monitor/storage/search/settings，并由 actor 持有事件 continuation。
 ///
 /// 说明（Phase 4 约束）：
 /// - `ClipboardMonitor` 为 `@MainActor`，该 actor 通过 `MainActor.run {}` 处理边界；`StorageService` 是独立 actor，存储调用不经过主线程。
 /// - UI 仍通过 `@MainActor ClipboardServiceProtocol` 调用 `RealClipboardService`（adapter），由 adapter 转发到该 actor。
-actor ClipboardService {
+actor ClipboardBackend {
     // MARK: - Types
 
-    enum ClipboardServiceError: Error, LocalizedError {
+    enum ClipboardBackendError: Error, LocalizedError {
         case notStarted
         case itemNotFoundOrSuperseded
 
         var errorDescription: String? {
             switch self {
             case .notStarted:
-                return "ClipboardService is not started"
+                return "ClipboardBackend is not started"
             case .itemNotFoundOrSuperseded:
                 return "Clipboard item no longer exists or was superseded"
             }
@@ -714,7 +63,7 @@ actor ClipboardService {
     }
 
     private struct ThumbnailGenerationWork: Sendable {
-        let item: StorageService.StoredItem
+        let item: ClipboardStoredItem
         let itemIDs: Set<UUID>
         let maxHeight: Int
         let externalStorageRoot: String
@@ -728,7 +77,7 @@ actor ClipboardService {
     >
 
     private struct FileSizeComputationWork: Sendable {
-        let expected: StorageService.StoredItem
+        let expected: ClipboardStoredItem
     }
 
     private struct FileSizeComputationKey: Hashable, Sendable {
@@ -740,7 +89,7 @@ actor ClipboardService {
         let storageRef: String?
         let rawData: Data?
 
-        init(expected: StorageService.StoredItem) {
+        init(expected: ClipboardStoredItem) {
             self.itemID = expected.id
             self.typeNamespace = expected.type.rawValue
             self.contentHash = expected.contentHash
@@ -752,7 +101,7 @@ actor ClipboardService {
     }
 
     private struct FileSizeComputationResult: Sendable {
-        let expected: StorageService.StoredItem
+        let expected: ClipboardStoredItem
         let fileSizeBytes: Int
     }
 
@@ -1170,14 +519,14 @@ actor ClipboardService {
         _ = try requireSearch()
 
         guard let existing = try await storage.findByID(itemID) else {
-            throw ClipboardServiceError.itemNotFoundOrSuperseded
+            throw ClipboardBackendError.itemNotFoundOrSuperseded
         }
         let trimmed = note?.trimmingCharacters(in: .whitespacesAndNewlines)
         let normalized = (trimmed?.isEmpty ?? true) ? nil : trimmed
         guard existing.note != normalized else { return }
 
         guard try await storage.updateNote(id: itemID, note: normalized) != nil else {
-            throw ClipboardServiceError.itemNotFoundOrSuperseded
+            throw ClipboardBackendError.itemNotFoundOrSuperseded
         }
         await metadataPublicationInterlock?(.afterNoteCommit, itemID)
         _ = await publishAuthoritativeItemState(
@@ -1273,7 +622,7 @@ actor ClipboardService {
     }
 
     private func performClipboardCopy(
-        item: StorageService.StoredItem,
+        item: ClipboardStoredItem,
         monitor: ClipboardMonitor,
         storage: StorageService,
         imageWriteMode: ClipboardMonitor.ImagePasteboardWriteMode
@@ -1303,7 +652,7 @@ actor ClipboardService {
     }
 
     private func copyRichPayload(
-        item: StorageService.StoredItem,
+        item: ClipboardStoredItem,
         monitor: ClipboardMonitor,
         storage: StorageService,
         imageWriteMode: ClipboardMonitor.ImagePasteboardWriteMode
@@ -1344,7 +693,7 @@ actor ClipboardService {
     }
 
     private func copyFilePayload(
-        item: StorageService.StoredItem,
+        item: ClipboardStoredItem,
         monitor: ClipboardMonitor,
         storage: StorageService,
         imageWriteMode: ClipboardMonitor.ImagePasteboardWriteMode
@@ -1373,7 +722,7 @@ actor ClipboardService {
     }
 
     nonisolated private static func managedImageFileURL(
-        for item: StorageService.StoredItem,
+        for item: ClipboardStoredItem,
         storage: StorageService
     ) -> URL? {
         guard item.type == .image,
@@ -1392,7 +741,7 @@ actor ClipboardService {
         return url
     }
 
-    private func resolvedFileURLs(for item: StorageService.StoredItem, storage: StorageService) async -> [URL] {
+    private func resolvedFileURLs(for item: ClipboardStoredItem, storage: StorageService) async -> [URL] {
         if item.type == .file || item.type == .image {
             let urlData = await storage.loadPayloadData(for: item)
             if let data = urlData,
@@ -1427,7 +776,7 @@ actor ClipboardService {
         return urls.isEmpty ? nil : urls
     }
 
-    private func shareableImageFileURL(for item: StorageService.StoredItem, storage: StorageService) async -> URL? {
+    private func shareableImageFileURL(for item: ClipboardStoredItem, storage: StorageService) async -> URL? {
         if let payloadData = await storage.loadPayloadData(for: item),
            let imagePayload = ClipboardMonitor.makeImagePasteboardPayloadForWrite(payloadData, imageWriteMode: .standard) {
             return await writeShareableImagePNG(imagePayload.primaryPNGData, for: item)
@@ -1452,7 +801,7 @@ actor ClipboardService {
             .appendingPathComponent("AirDrop", isDirectory: true)
     }
 
-    private func writeShareableImagePNG(_ data: Data, for item: StorageService.StoredItem) async -> URL? {
+    private func writeShareableImagePNG(_ data: Data, for item: ClipboardStoredItem) async -> URL? {
         await Task.detached(priority: .utility) {
             let directory = Self.shareableImageDirectory
             let url = directory.appendingPathComponent("scopy-image-\(item.id.uuidString).png")
@@ -1487,7 +836,7 @@ actor ClipboardService {
         }
     }
 
-    nonisolated private static func resolvePlainText(for item: StorageService.StoredItem, data: Data) -> String {
+    nonisolated private static func resolvePlainText(for item: ClipboardStoredItem, data: Data) -> String {
         if !item.plainText.isEmpty { return item.plainText }
 
         switch item.type {
@@ -1693,7 +1042,7 @@ actor ClipboardService {
     }
 
     private func optimizeInlineImage(
-        _ item: StorageService.StoredItem,
+        _ item: ClipboardStoredItem,
         rawData: Data,
         storage: StorageService,
         options: PngquantService.Options
@@ -1751,7 +1100,7 @@ actor ClipboardService {
     }
 
     private func optimizeExternalImage(
-        _ item: StorageService.StoredItem,
+        _ item: ClipboardStoredItem,
         storageRef: String,
         storage: StorageService,
         options: PngquantService.Options
@@ -1868,7 +1217,7 @@ actor ClipboardService {
     }
 
     private func commitOptimizedExternalImageUnderLease(
-        item: StorageService.StoredItem,
+        item: ClipboardStoredItem,
         sourceURL: URL,
         stagedURL: URL,
         stagedOriginalData: Data,
@@ -1889,7 +1238,7 @@ actor ClipboardService {
             return Self.supersededImageOptimizationOutcome(originalBytes: originalBytes)
         }
 
-        let updated: StorageService.StoredItem
+        let updated: ClipboardStoredItem
         do {
             guard let value = try await storage.commitOptimizedExternalImagePayload(
                 expected: item,
@@ -1957,9 +1306,9 @@ actor ClipboardService {
     }
 
     private func publishOptimizedItem(
-        _ updated: StorageService.StoredItem,
+        _ updated: ClipboardStoredItem,
         storage: StorageService
-    ) async -> StorageService.StoredItem? {
+    ) async -> ClipboardStoredItem? {
         await imageOptimizationInterlock?(.beforeSearchPublication, updated.id)
         guard let current = await publishAuthoritativeItemState(
             id: updated.id,
@@ -1978,10 +1327,10 @@ actor ClipboardService {
         priority: TaskPriority,
         kind: AuthoritativePublicationKind = .contentUpdated,
         metadataInterlockPoint: MetadataPublicationInterlockPoint? = nil
-    ) async -> StorageService.StoredItem? {
+    ) async -> ClipboardStoredItem? {
         let publication = await reservePublication(for: id)
         guard let current = await synchronizeSearchWithCurrentItem(id: id, storage: storage) else {
-            let latest: StorageService.StoredItem?
+            let latest: ClipboardStoredItem?
             do {
                 latest = try await storage.findByID(id)
             } catch {
@@ -2037,7 +1386,7 @@ actor ClipboardService {
     private func synchronizeSearchWithCurrentItem(
         id: UUID,
         storage: StorageService
-    ) async -> StorageService.StoredItem? {
+    ) async -> ClipboardStoredItem? {
         await search?.applyCommittedChanges()
         return try? await storage.findByID(id)
     }
@@ -2062,7 +1411,7 @@ actor ClipboardService {
     /// the row describing bytes that were already superseded.
     private func reconcileExternalSourceOwnership(
         sourceURL: URL,
-        committedItem: StorageService.StoredItem,
+        committedItem: ClipboardStoredItem,
         storage: StorageService,
         sourceLease: StorageService.ExternalImageSourceLease
     ) async -> ExternalSourceReconciliationResult {
@@ -2088,8 +1437,8 @@ actor ClipboardService {
     }
 
     private static func hasSamePayload(
-        _ lhs: StorageService.StoredItem,
-        as rhs: StorageService.StoredItem
+        _ lhs: ClipboardStoredItem,
+        as rhs: ClipboardStoredItem
     ) -> Bool {
         lhs.id == rhs.id &&
             lhs.type == rhs.type &&
@@ -2139,17 +1488,17 @@ actor ClipboardService {
     // MARK: - Internals
 
     private func requireMonitor() throws -> ClipboardMonitor {
-        guard let monitor else { throw ClipboardServiceError.notStarted }
+        guard let monitor else { throw ClipboardBackendError.notStarted }
         return monitor
     }
 
     private func requireStorage() throws -> StorageService {
-        guard let storage else { throw ClipboardServiceError.notStarted }
+        guard let storage else { throw ClipboardBackendError.notStarted }
         return storage
     }
 
     private func requireSearch() throws -> SearchEngineImpl {
-        guard let search else { throw ClipboardServiceError.notStarted }
+        guard let search else { throw ClipboardBackendError.notStarted }
         return search
     }
 
@@ -2477,7 +1826,7 @@ actor ClipboardService {
     }
 
     private func toDTO(
-        _ item: StorageService.StoredItem,
+        _ item: ClipboardStoredItem,
         storage: StorageService,
         thumbnailGenerationPriority: TaskPriority = .utility
     ) async -> ClipboardItemDTO {
@@ -2538,7 +1887,7 @@ actor ClipboardService {
     }
 
     private func scheduleThumbnailGenerationIfNeeded(
-        for item: StorageService.StoredItem,
+        for item: ClipboardStoredItem,
         storage: StorageService,
         priority: TaskPriority
     ) async {
@@ -2559,7 +1908,7 @@ actor ClipboardService {
         )
     }
 
-    private func scheduleFileSizeComputationIfNeeded(expected: StorageService.StoredItem) async {
+    private func scheduleFileSizeComputationIfNeeded(expected: ClipboardStoredItem) async {
         let key = FileSizeComputationKey(expected: expected)
         let now = Date()
         if fileSizeComputationLastAttemptAt.containsRecent(
@@ -2600,7 +1949,7 @@ actor ClipboardService {
     }
 
     func applyComputedFileSizeBytes(
-        expected: StorageService.StoredItem,
+        expected: ClipboardStoredItem,
         fileSizeBytes: Int
     ) async {
         guard isStarted, let storage else { return }
@@ -2783,7 +2132,7 @@ actor ClipboardService {
 
 // MARK: - Thumbnail Cache Index
 
-extension ClipboardService {
+extension ClipboardBackend {
     private func scheduleThumbnailCacheIndexBuildIfNeeded(thumbnailCacheRoot: String) {
         guard !thumbnailCacheRoot.isEmpty else { return }
 
@@ -2855,7 +2204,7 @@ extension ClipboardService {
         }
     }
 
-    private func shouldScheduleImageThumbnailGeneration(for item: StorageService.StoredItem, externalStorageRoot: String) -> Bool {
+    private func shouldScheduleImageThumbnailGeneration(for item: ClipboardStoredItem, externalStorageRoot: String) -> Bool {
         guard item.type == .image else { return false }
 
         guard let storageRef = item.storageRef, !storageRef.isEmpty else {

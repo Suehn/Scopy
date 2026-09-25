@@ -1,13 +1,13 @@
 import Foundation
 
-/// Bridges the main-actor UI protocol to the backend ClipboardService actor.
+/// Bridges the main-actor UI protocol to the ClipboardBackend actor.
 
 @MainActor
 final class RealClipboardService: ClipboardServiceProtocol {
-    private let clipboardService: ClipboardService
+    private let backend: ClipboardBackend
 
     var eventStream: AsyncStream<ClipboardEvent> {
-        clipboardService.eventStream
+        backend.eventStream
     }
 
     init(
@@ -16,7 +16,7 @@ final class RealClipboardService: ClipboardServiceProtocol {
         monitorPasteboardName: String? = nil,
         monitorPollingInterval: TimeInterval? = nil
     ) {
-        self.clipboardService = ClipboardService(
+        self.backend = ClipboardBackend(
             databasePath: databasePath,
             settingsStore: settingsStore,
             monitorPasteboardName: monitorPasteboardName,
@@ -27,99 +27,99 @@ final class RealClipboardService: ClipboardServiceProtocol {
     // MARK: - Lifecycle
 
     func start() async throws {
-        try await clipboardService.start()
+        try await backend.start()
     }
 
     func stop() {
-        Task { [clipboardService] in
-            await clipboardService.stop()
+        Task { [backend] in
+            await backend.stop()
         }
     }
 
     func stopAndWait() async {
-        await clipboardService.stop()
+        await backend.stop()
     }
 
     // MARK: - Data Access
 
     func fetchRecent(limit: Int, offset: Int) async throws -> [ClipboardItemDTO] {
-        try await clipboardService.fetchRecent(limit: limit, offset: offset)
+        try await backend.fetchRecent(limit: limit, offset: offset)
     }
 
     func fetchPinned() async throws -> [ClipboardItemDTO] {
-        try await clipboardService.fetchPinned()
+        try await backend.fetchPinned()
     }
 
     func fetchRecentUnpinned(limit: Int, offset: Int) async throws -> [ClipboardItemDTO] {
-        try await clipboardService.fetchRecentUnpinned(limit: limit, offset: offset)
+        try await backend.fetchRecentUnpinned(limit: limit, offset: offset)
     }
 
     func search(query: SearchRequest) async throws -> SearchResultPage {
-        try await clipboardService.search(query: query)
+        try await backend.search(query: query)
     }
 
     func pin(itemID: UUID) async throws {
-        try await clipboardService.pin(itemID: itemID)
+        try await backend.pin(itemID: itemID)
     }
 
     func unpin(itemID: UUID) async throws {
-        try await clipboardService.unpin(itemID: itemID)
+        try await backend.unpin(itemID: itemID)
     }
 
     func updateNote(itemID: UUID, note: String?) async throws {
-        try await clipboardService.updateNote(itemID: itemID, note: note)
+        try await backend.updateNote(itemID: itemID, note: note)
     }
 
     func delete(itemID: UUID) async throws {
-        try await clipboardService.delete(itemID: itemID)
+        try await backend.delete(itemID: itemID)
     }
 
     func clearAll() async throws {
-        try await clipboardService.clearAll()
+        try await backend.clearAll()
     }
 
     func copyToClipboard(itemID: UUID) async throws {
-        try await clipboardService.copyToClipboard(itemID: itemID)
+        try await backend.copyToClipboard(itemID: itemID)
     }
 
     func copyToClipboardOptimizedForCodex(itemID: UUID) async throws {
-        try await clipboardService.copyToClipboardOptimizedForCodex(itemID: itemID)
+        try await backend.copyToClipboardOptimizedForCodex(itemID: itemID)
     }
 
     func fileURLs(itemID: UUID) async throws -> [URL] {
-        try await clipboardService.fileURLs(itemID: itemID)
+        try await backend.fileURLs(itemID: itemID)
     }
 
     func updateSettings(_ settings: SettingsDTO) async throws {
-        try await clipboardService.updateSettings(settings)
+        try await backend.updateSettings(settings)
     }
 
     func getSettings() async throws -> SettingsDTO {
-        await clipboardService.getSettings()
+        await backend.getSettings()
     }
 
     func getStorageStats() async throws -> (itemCount: Int, sizeBytes: Int) {
-        try await clipboardService.getStorageStats()
+        try await backend.getStorageStats()
     }
 
     func getDetailedStorageStats() async throws -> StorageStatsDTO {
-        try await clipboardService.getDetailedStorageStats()
+        try await backend.getDetailedStorageStats()
     }
 
     func getImageData(itemID: UUID) async throws -> Data? {
-        try await clipboardService.getImageData(itemID: itemID)
+        try await backend.getImageData(itemID: itemID)
     }
 
     func optimizeImage(itemID: UUID) async throws -> ImageOptimizationOutcomeDTO {
-        try await clipboardService.optimizeImage(itemID: itemID)
+        try await backend.optimizeImage(itemID: itemID)
     }
 
     func syncExternalImageSizeBytesFromDisk() async throws -> Int {
-        try await clipboardService.syncExternalImageSizeBytesFromDisk()
+        try await backend.syncExternalImageSizeBytesFromDisk()
     }
 
     func getRecentApps(limit: Int) async throws -> [String] {
-        try await clipboardService.getRecentApps(limit: limit)
+        try await backend.getRecentApps(limit: limit)
     }
 }
 
