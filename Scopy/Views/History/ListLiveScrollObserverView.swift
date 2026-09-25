@@ -267,6 +267,7 @@ extension ListLiveScrollObserverView {
             let clipView = scrollView.contentView
             let originY = clipView.bounds.origin.y
             let documentHeight = scrollView.documentView?.frame.height ?? 0
+            let firstRow = Self.firstVisibleRow(in: scrollView)
             let generation = scrollGeneration
             for delayMs in [100, 400] {
                 DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(delayMs)) { [weak self] in
@@ -275,12 +276,23 @@ extension ListLiveScrollObserverView {
                           self.programmaticScrollGate?.isProgrammaticScrollActive != true else { return }
                     let shift = clipView.bounds.origin.y - originY
                     let heightDelta = (scrollView.documentView?.frame.height ?? 0) - documentHeight
-                    guard abs(shift) >= 0.5 || abs(heightDelta) >= 0.5 else { return }
+                    let rowNow = Self.firstVisibleRow(in: scrollView)
+                    guard abs(shift) >= 0.5 || abs(heightDelta) >= 0.5 || firstRow.index != rowNow.index else { return }
                     ScopyLog.ui.info(
-                        "Scroll settled: content shifted \(shift, format: .fixed(precision: 1), privacy: .public) pt and document height changed \(heightDelta, format: .fixed(precision: 1), privacy: .public) pt within \(delayMs, privacy: .public) ms of the stop"
+                        "Scroll settled: content shifted \(shift, format: .fixed(precision: 1), privacy: .public) pt, document height changed \(heightDelta, format: .fixed(precision: 1), privacy: .public) pt, first visible row \(firstRow.index, privacy: .public) at \(firstRow.top, format: .fixed(precision: 1), privacy: .public) pt (height \(firstRow.height, format: .fixed(precision: 1), privacy: .public)) -> row \(rowNow.index, privacy: .public) at \(rowNow.top, format: .fixed(precision: 1), privacy: .public) pt (height \(rowNow.height, format: .fixed(precision: 1), privacy: .public)), rows \(rowNow.count, privacy: .public), within \(delayMs, privacy: .public) ms of the stop"
                     )
                 }
             }
+        }
+
+        /// The table row under the top of the clip view, with its frame in document coordinates.
+        private static func firstVisibleRow(in scrollView: NSScrollView) -> (index: Int, top: CGFloat, height: CGFloat, count: Int) {
+            guard let tableView = scrollView.documentView as? NSTableView else { return (-1, 0, 0, 0) }
+            let visible = scrollView.contentView.documentVisibleRect
+            let rows = tableView.rows(in: visible)
+            guard rows.length > 0 else { return (-1, visible.origin.y, 0, tableView.numberOfRows) }
+            let rect = tableView.rect(ofRow: rows.location)
+            return (rows.location, rect.origin.y, rect.height, tableView.numberOfRows)
         }
 
         private func installEventMonitorIfNeeded() {
