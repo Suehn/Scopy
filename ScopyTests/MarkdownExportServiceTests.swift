@@ -224,7 +224,7 @@ final class MarkdownExportServiceTests: XCTestCase {
             ExportCoordinator.markdownPreviewResourceURLForTesting = nil
             ExportCoordinator.ordersOutHostWindowForTesting = false
         }
-        let html = MarkdownHTMLRenderer.render(markdown: "# Occluded export\n\nThe host panel leaves the screen after the document is ready.")
+        let html = MarkdownHTMLDocumentBuilder.document(source: "# Occluded export\n\nThe host panel leaves the screen after the document is ready.")
 
         let result = await withCheckedContinuation { continuation in
             MarkdownExportService.exportToPNGData(html: html) { continuation.resume(returning: $0) }

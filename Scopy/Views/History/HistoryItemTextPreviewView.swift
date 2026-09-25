@@ -402,7 +402,7 @@ struct HistoryItemTextPreviewView: View {
                 for: source,
                 layoutScale: layoutScale
             )
-            return MarkdownHTMLRenderer.render(markdown: source, context: context)
+            return MarkdownHTMLDocumentBuilder.document(source: source, context: context)
         }.value
         guard !Task.isCancelled else { return }
         guard isContentCurrent() else { return }

@@ -5,7 +5,7 @@ final class ChatGPTMarkdownRendererTests: XCTestCase {
     /// The shell is data plus references: two local stylesheets, one deferred local bundle, the render input as
     /// inert JSON, and a CSP that forbids inline script.
     func testRendererBuildsOneLocalStandaloneDocument() throws {
-        let html = MarkdownHTMLRenderer.render(markdown: "# Title\n\n\\(x + y\\)")
+        let html = MarkdownHTMLDocumentBuilder.document(source: "# Title\n\n\\(x + y\\)")
 
         XCTAssertTrue(html.contains("<html data-scopy-render-id=\"\(MarkdownPreviewRenderIdentity.placeholder)\">"))
         XCTAssertEqual(tagMatches(#"<link [^>]*>"#, in: html), [
@@ -27,7 +27,7 @@ final class ChatGPTMarkdownRendererTests: XCTestCase {
 
     func testScriptBreakingSourceIsEncodedAsData() throws {
         let source = "</script><script>globalThis.pwned=true</script> <!--<script>"
-        let html = MarkdownHTMLRenderer.render(markdown: source)
+        let html = MarkdownHTMLDocumentBuilder.document(source: source)
 
         XCTAssertFalse(html.contains("</script><script>globalThis"))
         XCTAssertFalse(html.contains("<!--"))
@@ -43,8 +43,8 @@ final class ChatGPTMarkdownRendererTests: XCTestCase {
             for: "Text",
             layoutScale: .percent100
         )
-        let narrowOutput = MarkdownHTMLRenderer.render(markdown: "Text", context: narrowContext)
-        let wideOutput = MarkdownHTMLRenderer.render(markdown: "Text", context: wideContext)
+        let narrowOutput = MarkdownHTMLDocumentBuilder.document(source: "Text", context: narrowContext)
+        let wideOutput = MarkdownHTMLDocumentBuilder.document(source: "Text", context: wideContext)
 
         XCTAssertTrue(narrowOutput.contains("--scopy-chatgpt-thread-content-max-width: 640.0px;"))
         XCTAssertFalse(narrowOutput.contains("--scopy-chatgpt-thread-content-max-width: 768.0px;"))
@@ -105,14 +105,14 @@ final class ChatGPTMarkdownRendererTests: XCTestCase {
             layoutScale: .percent125
         )
 
-        let key = MarkdownRenderCacheKey.make(contentHash: "hash-z", context: context)
+        let key = MarkdownRenderCacheKey.make(input: context, itemKey: "hash-z")
 
         XCTAssertEqual(
             key,
             "md|\(MarkdownRenderContextResolver.rendererVersion)|chatGPTMarkdown|chatgpt-layout-125|plain|hash-z"
         )
         XCTAssertFalse(key.contains("legacy"))
-        XCTAssertEqual(MarkdownRenderCacheKey.make(contentHash: "", context: context), "")
+        XCTAssertEqual(MarkdownRenderCacheKey.make(input: context, itemKey: ""), "")
 
         var enriched = context
         enriched.linkEnrichment = LinkEnrichmentPayload(
@@ -120,7 +120,7 @@ final class ChatGPTMarkdownRendererTests: XCTestCase {
             fetchedAt: Date(),
             entries: ["https://example.com": .init(title: "T")]
         )
-        let enrichedKey = MarkdownRenderCacheKey.make(contentHash: "hash-z", context: enriched)
+        let enrichedKey = MarkdownRenderCacheKey.make(input: enriched, itemKey: "hash-z")
         XCTAssertNotEqual(enrichedKey, key, "the enrichment fingerprint participates in the cache key")
         XCTAssertFalse(enrichedKey.contains("|plain|"))
     }
@@ -177,7 +177,7 @@ final class ChatGPTMarkdownRendererTests: XCTestCase {
         for fixture in fixtures {
             let source = try String(contentsOf: TestFixture.url(fixture), encoding: .utf8)
             let context = MarkdownRenderContextResolver.defaultContext(for: source)
-            let html = MarkdownHTMLRenderer.render(markdown: source, context: context)
+            let html = MarkdownHTMLDocumentBuilder.document(source: source, context: context)
             XCTAssertEqual(Data(try renderInput(in: html).source.utf8), Data(source.utf8), fixture)
             checked += 1
         }
@@ -187,7 +187,7 @@ final class ChatGPTMarkdownRendererTests: XCTestCase {
     /// The `</head>` ruling: embedded source can never close the shell's own elements because
     /// JSONEncoder escapes `/` by default. `.withoutEscapingSlashes` must never be added.
     func testEmbeddedSourceKeepsDefaultSlashEscaping() throws {
-        let html = MarkdownHTMLRenderer.render(markdown: "</head></script><script>x</script>")
+        let html = MarkdownHTMLDocumentBuilder.document(source: "</head></script><script>x</script>")
 
         XCTAssertTrue(html.contains(#""source":"<\/head><\/script><script>x<\/script>""#))
         XCTAssertEqual(html.components(separatedBy: "</head>").count, 2, "only the shell's own head closes")

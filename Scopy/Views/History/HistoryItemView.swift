@@ -1791,7 +1791,7 @@ struct HistoryItemView: View, Equatable {
             for: text,
             layoutScale: layoutScale
         )
-        let renderCacheKey = MarkdownRenderCacheKey.make(contentHash: contentHash, context: context)
+        let renderCacheKey = MarkdownRenderCacheKey.make(input: context, itemKey: contentHash)
         guard !renderCacheKey.isEmpty else { return }
         let metrics = MarkdownContentMetrics(
             size: size,

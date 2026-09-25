@@ -450,7 +450,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
-        let html = MarkdownHTMLRenderer.render(markdown: item.plainText)
+        let html = MarkdownHTMLDocumentBuilder.document(source: item.plainText)
 
         MarkdownExportService.exportToPNGClipboard(html: html, targetWidthPixels: MarkdownExportService.defaultTargetWidthPixels) { result in
             if case .failure(let error) = result, !errorPath.isEmpty {

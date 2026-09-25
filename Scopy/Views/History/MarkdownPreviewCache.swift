@@ -1,8 +1,8 @@
 import Foundation
 import CoreGraphics
 
-// NSCache 本身是线程安全的；本缓存仅存放 String/struct 等值类型（必要时用 NSObject box 包装），
-// 因此作为全局共享缓存是安全的（对并发检查使用 @unchecked Sendable 明确意图）。
+// NSCache is thread-safe and this cache stores only value types (String, structs, boxed in an NSObject where
+// needed), so one global shared cache is safe; @unchecked Sendable states that intent for concurrency checking.
 final class MarkdownPreviewCache: @unchecked Sendable {
     static let shared = MarkdownPreviewCache()
 

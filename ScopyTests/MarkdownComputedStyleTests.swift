@@ -43,7 +43,7 @@ final class MarkdownComputedStyleTests: XCTestCase {
         let document = try LiveMarkdownDocument()
         defer { document.close() }
         let context = MarkdownRenderContextResolver.defaultContext(for: Self.source, layoutScale: .percent100)
-        XCTAssertTrue(try document.load(MarkdownHTMLRenderer.render(markdown: Self.source, context: context)))
+        XCTAssertTrue(try document.load(MarkdownHTMLDocumentBuilder.document(source: Self.source, context: context)))
         XCTAssertTrue(document.isRenderReady, "\(document.evaluate("JSON.stringify(window.ScopyDocument.state)") ?? "no state")")
 
         let script = """

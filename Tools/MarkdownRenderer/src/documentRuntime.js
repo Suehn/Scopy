@@ -35,7 +35,7 @@ var lastRenderErrorReason = '';
 var pendingHeightReportHandle = 0;
 var pendingHeightReportForce = false;
 var layoutObserver = null;
-function currentRenderGeneration() {
+function currentRenderID() {
   try { return document.documentElement.getAttribute('data-scopy-render-id') || ''; } catch (e) { return ''; }
 }
 function isRenderReady() {
@@ -120,12 +120,12 @@ function probeLayoutHeight() {
 function reportHeight(force) {
   pendingHeightReportForce = pendingHeightReportForce || !!force;
   if (pendingHeightReportHandle) { return; }
-  var scheduledGeneration = currentRenderGeneration();
+  var scheduledRenderID = currentRenderID();
   var deliver = function () {
     pendingHeightReportHandle = 0;
     var shouldForce = pendingHeightReportForce;
     pendingHeightReportForce = false;
-    if (currentRenderGeneration() !== scheduledGeneration) { return; }
+    if (currentRenderID() !== scheduledRenderID) { return; }
     reportHeightNow(shouldForce);
   };
   if (typeof window.requestAnimationFrame === 'function') {
@@ -134,31 +134,31 @@ function reportHeight(force) {
     pendingHeightReportHandle = window.setTimeout(deliver, 0);
   }
 }
-function installGenerationScopedLayoutObserver() {
+function installRenderScopedLayoutObserver() {
   var el = document.getElementById('content');
   if (!el || layoutObserver) { return; }
-  var observedGeneration = currentRenderGeneration();
+  var observedRenderID = currentRenderID();
   if (typeof window.ResizeObserver === 'function') {
     layoutObserver = new window.ResizeObserver(function () {
-      if (currentRenderGeneration() !== observedGeneration) { return; }
+      if (currentRenderID() !== observedRenderID) { return; }
       reportHeight(false);
     });
     layoutObserver.observe(el);
   }
   el.addEventListener('toggle', function (event) {
-    if (currentRenderGeneration() !== observedGeneration) { return; }
+    if (currentRenderID() !== observedRenderID) { return; }
     var target = event && event.target;
     if (!target || String(target.tagName || '').toLowerCase() !== 'details') { return; }
     reportHeight(true);
   }, true);
   el.addEventListener('keydown', function () {
-    if (currentRenderGeneration() !== observedGeneration) { return; }
+    if (currentRenderID() !== observedRenderID) { return; }
     reportHeight(true);
   }, true);
   try {
     if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === 'function') {
       document.fonts.ready.then(function () {
-        if (currentRenderGeneration() === observedGeneration) { reportHeight(true); }
+        if (currentRenderID() === observedRenderID) { reportHeight(true); }
       });
     }
   } catch (e) { }
@@ -320,24 +320,41 @@ function awaitFontsReady(completion) {
     completion('font exception');
   }
 }
+// A hidden document (the unowned prewarm WebView, an occluded host) gets no animation frames, so its 1.5 s paint
+// deadline starts only once it becomes visible; until then it neither fails nor replaces its rendered DOM.
 function awaitTwoPaintFrames(completion) {
   var remaining = 2;
   var settled = false;
-  var generation = currentRenderGeneration();
-  var watchdog = setTimeout(function () {
-    if (settled) { return; }
-    settled = true;
-    completion('paint timeout');
-  }, 1500);
+  var renderID = currentRenderID();
+  var watchdog = 0;
+  function armWatchdog() {
+    if (settled || watchdog) { return; }
+    watchdog = setTimeout(function () {
+      if (settled) { return; }
+      settled = true;
+      completion('paint timeout');
+    }, 1500);
+  }
+  function onVisibilityChange() {
+    if (document.visibilityState === 'hidden') { return; }
+    document.removeEventListener('visibilitychange', onVisibilityChange);
+    armWatchdog();
+  }
+  if (document.visibilityState === 'hidden') {
+    document.addEventListener('visibilitychange', onVisibilityChange);
+  } else {
+    armWatchdog();
+  }
   function done(reason) {
     if (settled) { return; }
     settled = true;
-    clearTimeout(watchdog);
+    if (watchdog) { clearTimeout(watchdog); }
+    document.removeEventListener('visibilitychange', onVisibilityChange);
     completion(reason || '');
   }
   function step() {
-    if (currentRenderGeneration() !== generation) {
-      done('stale paint generation');
+    if (currentRenderID() !== renderID) {
+      done('stale paint render ID');
       return;
     }
     try {
@@ -1141,7 +1158,7 @@ function boot() {
   if (booted || !node) { return; }
   booted = true;
   try { input = JSON.parse(node.textContent || ''); } catch (e) { input = null; }
-  installGenerationScopedLayoutObserver();
+  installRenderScopedLayoutObserver();
   renderUnified();
   window.addEventListener('load', function () {
     reportHeight(true);

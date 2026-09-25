@@ -113,7 +113,7 @@ enum HistoryItemMarkdownExportController {
                     for: markdownSource,
                     layoutScale: resolvedLayoutScale
                 )
-                return MarkdownHTMLRenderer.render(markdown: markdownSource, context: context)
+                return MarkdownHTMLDocumentBuilder.document(source: markdownSource, context: context)
             }
             html = await withTaskCancellationHandler(operation: {
                 await renderTask.value

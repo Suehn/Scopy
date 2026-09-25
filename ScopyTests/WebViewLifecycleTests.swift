@@ -236,7 +236,7 @@ final class WebViewLifecycleTests: XCTestCase {
         ```
         """
         let mentions = "[PDF](/tmp/report.pdf) [Word](/tmp/report.docx) [Word again](/tmp/report.docx) [图片](/tmp/image.png) [视频](/tmp/movie.mp4) [音频](/tmp/audio.wav) [Google Sheets](app://google-sheets) [Google Sheets again](app://google-sheets)"
-        try document.load(MarkdownHTMLRenderer.render(markdown: source + "\n\n" + mentions), timeout: 20)
+        try document.load(MarkdownHTMLDocumentBuilder.document(source: source + "\n\n" + mentions), timeout: 20)
         guard document.isRenderReady else {
             XCTFail("Real WebKit document did not reach terminal success: \(document.evaluate("JSON.stringify(window.ScopyDocument.state)") ?? "no response")")
             return
@@ -288,7 +288,7 @@ final class WebViewLifecycleTests: XCTestCase {
         // Cover both overlay and space-reserving scrollbars independently of the host's preference.
         for (scale, scrollbarWidth) in [(80, 0), (115, 0), (200, 0), (80, 15), (115, 15), (200, 15)] {
             let context = MarkdownRenderContextResolver.defaultContext(for: source, layoutScale: MarkdownChatGPTLayoutScalePercent(settingsValue: scale))
-            let html = MarkdownHTMLRenderer.render(markdown: source, context: context)
+            let html = MarkdownHTMLDocumentBuilder.document(source: source, context: context)
                 .replacingOccurrences(of: "</head>", with: "<style>html { overflow-y: scroll; } ::-webkit-scrollbar { width: \(scrollbarWidth)px; height: \(scrollbarWidth)px; }</style></head>")
             try document.load(html, name: "layout-\(scale)-\(scrollbarWidth).html")
             XCTAssertTrue(document.isRenderReady, "Live document at \(scale)% must render")
@@ -333,7 +333,7 @@ final class WebViewLifecycleTests: XCTestCase {
     func testBrokenImageReachesTerminalFallbackWithoutFailingTheDocument() throws {
         let document = try LiveMarkdownDocument()
         defer { document.close() }
-        XCTAssertTrue(try document.load(MarkdownHTMLRenderer.render(markdown: "正文\n\n![示意图](missing-diagram.png)")))
+        XCTAssertTrue(try document.load(MarkdownHTMLDocumentBuilder.document(source: "正文\n\n![示意图](missing-diagram.png)")))
 
         XCTAssertTrue(document.isRenderReady)
         XCTAssertEqual(document.evaluate("window.ScopyDocument.state.imagesReady") as? Bool, true)
@@ -343,11 +343,25 @@ final class WebViewLifecycleTests: XCTestCase {
         )
     }
 
+    /// The unowned prewarm WebView is offscreen and gets no animation frames. Its paint deadline must not replace
+    /// the rendered document with a failure before a popover shows it.
+    func testHiddenPrewarmWaitsForVisibilityInsteadOfFailingThePaintDeadline() throws {
+        let document = try LiveMarkdownDocument()
+        defer { document.close() }
+        document.window.contentView = nil
+        XCTAssertFalse(try document.load(MarkdownHTMLDocumentBuilder.document(source: "# Prewarmed\n\nBody"), timeout: 2.5))
+        XCTAssertEqual(document.evaluate("window.ScopyDocument.state.renderFailed") as? Bool, false)
+        XCTAssertEqual(document.evaluate("document.querySelector('#content h1').textContent") as? String, "Prewarmed")
+
+        document.window.contentView = document.webView
+        XCTAssertTrue(document.wait(until: "window.ScopyDocument.isRenderReady()", timeout: 5))
+    }
+
     func testMissingKaTeXStylesheetIsATerminalFailure() throws {
         let document = try LiveMarkdownDocument()
         defer { document.close() }
         try FileManager.default.removeItem(at: document.assetRoot.appendingPathComponent("katex.min.css"))
-        XCTAssertTrue(try document.load(MarkdownHTMLRenderer.render(markdown: "$$E=mc^2$$")))
+        XCTAssertTrue(try document.load(MarkdownHTMLDocumentBuilder.document(source: "$$E=mc^2$$")))
 
         XCTAssertFalse(document.isRenderReady)
         XCTAssertEqual(document.evaluate("window.ScopyDocument.state.renderFailed") as? Bool, true)

@@ -25,7 +25,7 @@ struct ExportPreviewHarnessView: View {
         // Avoid hosting a live WKWebView inside the export harness: UI testing + multiple WebViews can be flaky.
         // Export still uses the offscreen export pipeline via `markdownHTML`.
         m.isMarkdown = false
-        m.markdownHTML = htmlOverride ?? MarkdownHTMLRenderer.render(markdown: markdown)
+        m.markdownHTML = htmlOverride ?? MarkdownHTMLDocumentBuilder.document(source: markdown)
         m.markdownContentSize = nil
         m.markdownHasHorizontalOverflow = false
         m.isExporting = false

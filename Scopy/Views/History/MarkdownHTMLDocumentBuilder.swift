@@ -8,7 +8,14 @@ import ScopyKit
 enum MarkdownHTMLDocumentBuilder {
     private static let layout = MarkdownRenderLayoutConstants.self
 
-    static func document(markdown: String, context: MarkdownRenderContext) -> String {
+    /// The document for `source` with the context its profile detector and frozen enrichment select.
+    static func document(source: String) -> String {
+        document(source: source, context: MarkdownRenderContextResolver.defaultContext(for: source))
+    }
+
+    /// The document for `source` under `context`. Swift never rewrites the source: every repair runs in the
+    /// renderer bundle, gated by the embedded policy.
+    static func document(source: String, context: MarkdownRenderContext) -> String {
         """
         <!doctype html>
         <html data-scopy-render-id="\(MarkdownPreviewRenderIdentity.placeholder)">
@@ -19,7 +26,7 @@ enum MarkdownHTMLDocumentBuilder {
             <link id="scopy-katex-stylesheet" rel="stylesheet" href="katex.min.css">
             <link id="scopy-document-stylesheet" rel="stylesheet" href="scopy-document.css">
             <style>\(layoutVariables(context.layoutScale))</style>
-            <script type="application/json" id="scopy-render-input">\(jsonLiteral(RenderInput(policy: policyPayload(context: context), source: markdown)))</script>
+            <script type="application/json" id="scopy-render-input">\(jsonLiteral(RenderInput(policy: policyPayload(context: context), source: source)))</script>
             <script defer src="contrib/scopy-unified-renderer.iife.js"></script>
           </head>
           <body>
