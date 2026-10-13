@@ -15,8 +15,14 @@ verification:
   release_validate: pass
   release_policy: pass_15_tests
   build: pass_local_macOS_15_7_3_source_identical_to_98ae34b
-  test_unit: local_WebKit_rendering_failures_on_unchanged_98ae34b_source
+  test_unit: fail_local_829_tests_2_skips_17_failure_events_9_failed_cases_WebKit_and_pngquant_cancellation_unchanged_sources
   test_strict: not_rerun_install_only_patch_under_requested_rapid_release_scope
   homebrew_requirement: pass_Homebrew_4_6_and_7_parsers_accept_14_15_26_27_reject_13
-  homebrew_casks: tap_requirement_fix_published_fc6d2fb_version_sync_pending_assets
-  installed_bundle: pending_published_asset
+  homebrew_casks: pass_repo_ae1478f_and_tap_eb5a305_0_82_1_explicit_minimum_14
+  installed_bundle: pass_macOS_15_7_3_0_82_1_build_659_universal_launched_files_match_DMG
+  release_commit: 5988e57b95d266b1672a6b03893832c844061073
+  release_workflow: https://github.com/Suehn/Scopy/actions/runs/38416239825
+  dmg_sha256: b5872ecfcfd21a12a132c67cda91866e45f0ba7d8009bd3dddf59ce7d95f9878
+  tap_automation: failed_manual_sync_completed_eb5a305
+  hosted_tsan: pass_38416215173
+  hosted_ci: failure_38416215881_see_workflow_for_job_results
