@@ -7,7 +7,7 @@ cask "scopy" do
   desc "Clipboard manager with unlimited history"
   homepage "https://github.com/Suehn/Scopy"
 
-  depends_on macos: :sonoma
+  depends_on macos: ">= :sonoma"
 
   app "Scopy.app"
 

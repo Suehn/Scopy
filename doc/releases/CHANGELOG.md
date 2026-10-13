@@ -12,6 +12,14 @@
 
 - No unreleased entries.
 
+## [v0.82.1] - 2026-10-13
+
+### Fixed
+
+- Homebrew now explicitly requires macOS 14 or later instead of being interpreted as Sonoma-only by older Homebrew versions. This removes the installation block on macOS 15 and newer, without imposing an upper OS limit. Future macOS runtime compatibility still requires testing.
+- Includes the post-v0.82.0 source-icon loader `@Sendable` correction and renderer-test host handling already on main.
+
+
 ## [v0.82.0] - 2026-09-26
 
 ### Fixed
