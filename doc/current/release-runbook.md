@@ -375,3 +375,44 @@ Dated historical observations formerly embedded in this runbook are preserved in
   - `cmd` p95 12.79 / 12.65 / 12.19 ms (limit 50);
   - prepared `cm` p95 9.07 / 7.91 / 7.94 ms (limit 20);
   - cold `cm` 138.5 (first run after the build) / 63.4 / 63.6 ms.
+
+### 2026-10-18 Search Stage 4: Short-Index Bigram Filter For Fuzzy+ ASCII Words
+
+- **Source baseline:** stage 3 at `bce089d` (includes `main` `b169d85`); branch `claude/search-bigram-filter`. Development evidence, not a release. Environment and project baselines as in stage 1.
+- **Change:**
+  - Fuzzy+ matches an ASCII word of three or more characters as a substring of whole characters, so each adjacent byte pair of the word is adjacent in the lowercased text.
+  - While the short index is installed, `searchInFullIndex` drops full-index candidates that lack one of those pairs in the short index's ASCII bigram postings. This runs before scoring and before the staging decision.
+  - Pairs with ";" or "`" are skipped, an id the short index does not hold passes, and fuzzy mode is never filtered.
+- **Where it applies:** on this snapshot, a heavy-text corpus (average plain text ≥ 1 KB), every fuzzy+ query made only of such words skips the full index.
+  - While typing, the FTS prefilter serves it. The per-request phases show `fts_prefilter` and no full-index phase, for `config` and for mixed queries such as `co config` and `config 数据`.
+  - On refine (`forceFullFuzzy`), SQL substring search serves it.
+  - So here the filter serves only the refine of a mixed query, one that also has a word under three characters or a non-ASCII word. On lighter corpora it serves every such query.
+- **Dropped:**
+  - **CJK bigrams** (estimated 5.1× for `数据库`): non-ASCII fuzzy+ words, and every fuzzy-mode query of three or more characters, match as subsequences. A bigram filter would drop real matches such as `数x据y库`.
+  - **Incremental narrowing while typing (item 8):** it was to apply only together with the bigram filter. On this corpus, typing a query of three or more characters never reaches the full index.
+- **No missed matches:**
+  - **Committed test:** `testFuzzyPlusFullIndexFindsTheSameRowsThroughTheShortIndexBigrams` builds two engines on one seeded 400-row fixture, one with the short index and one without (below its corpus size only a forced build creates it). It compares ids, `total` and `hasMore` for 16 fuzzy+ and fuzzy queries in both sort orders.
+  - **Fixture content:** U+037E, U+1FEF, the Kelvin sign, combining marks, ZWJ, ZWSP, soft hyphen, İ, a ligature, CR LF and lone ";" and "`".
+  - **Scratch run** of the same test, not committed: 30 seeds × 1,900 rows, 1,920 result comparisons, 0 mismatches.
+  - **Controls:** keeping the ";" and "`" pairs fails the committed test (12 failures), and so does filtering fuzzy mode (4). Filtering two-character words does not fail it: fuzzy+ matches them as UTF-16 code-unit substrings, so their bigrams are also present. That is a safe extension, not taken.
+- Real DB snapshot as in stage 1, a fresh APFS clone per binary. Release ScopyBench binaries from one scratch copy: stage 3 `9f4d3823`, stage 4 `af634d7a`. Engine layer with the short index prepared, `数据库` searched untimed before each run, 15 samples after 3 warm-ups. Means of run medians, ms.
+
+| Workload (ms) | A/A, 3 interleaved pairs | Stage 3, 5 ABBA pairs | Stage 4, 5 ABBA pairs |
+| --- | --- | --- | --- |
+| Refine `co config`, relevance | 33.95 / 34.06 | 33.64 | 20.74 |
+| Refine `co config`, recent | 33.38 / 33.51 | 33.56 | 31.37 |
+| Refine `a function`, relevance | 36.75 / 36.57 | 36.53 | 26.54 |
+| Refine `a function`, recent | 48.12 / 47.95 | 48.68 | 46.41 |
+| Refine `数据 select`, relevance | 72.64 / 72.64 | 73.00 | 68.65 |
+| Refine `数据 select`, recent | 171.04 / 170.69 | 172.42 | 170.20 |
+| Refine `a the`, relevance | 26.46 / 26.43 | 26.62 | 21.64 |
+| Refine `a the`, recent | 12.99 / 12.98 | 13.10 | 12.84 |
+| Typing `config`, recent (FTS, control) | 13.94 / 13.86 | 14.05 | 13.89 |
+| Service `cmd` (control) | 11.87 / 11.96 | 11.91 | 12.02 |
+| Prepared `cm` (control) | 7.94 / 7.91 | 7.84 | 7.98 |
+
+- Recent-sorted refines gain less. They already stop early, and match evidence dominates them (for example, 77 of 88 ms for `select`).
+- **Gates:**
+  - `make build` passed; `make test-unit`: 755 passed, 0 failed.
+  - `make test-snapshot-perf-release` on the stage-4 clone passed three times: `cmd` p95 12.61 / 12.35 / 16.62 ms (limit 50); prepared `cm` p95 8.76 / 8.25 / 8.30 ms (limit 20); cold `cm` 138.6 (first run after the build) / 65.1 / 65.2 ms.
+- **Pre-existing, not changed here:** the full index's character filter requires a literal ";" or "`" in the text. So a row that matches a fuzzy+ word only through U+037E or U+1FEF is missed whenever it has no literal ";" or "`" elsewhere, and the SQL paths miss it too.

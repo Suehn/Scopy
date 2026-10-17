@@ -196,6 +196,31 @@ struct ShortQueryIndex: Sendable {
         return uniqueIDStrings(from: slots)
     }
 
+    /// The items whose lowercased plain text or note holds every bigram of one ASCII bigram set.
+    struct ASCIIBigramMatches {
+        fileprivate let isMatch: [Bool]
+        fileprivate let idToSlot: [UUID: Int]
+
+        /// An item the index does not hold passes, so an index that lags the caller's drops nothing.
+        func mayContain(_ id: UUID) -> Bool {
+            guard let slot = idToSlot[id] else { return true }
+            return isMatch[slot]
+        }
+    }
+
+    /// Keys are `(a << 7) | b` of lowercase ASCII bytes, as the postings store them.
+    func items(containingASCIIBigrams keys: Set<UInt16>) -> ASCIIBigramMatches {
+        // Each postings list holds a slot at most once, so a slot in every list counts once per key.
+        var counts = [UInt16](repeating: 0, count: slotToIDString.count)
+        for key in keys {
+            for slot in asciiBigramPostings[key] ?? [] where Int(slot) < counts.count {
+                counts[Int(slot)] &+= 1
+            }
+        }
+        let required = UInt16(keys.count)
+        return ASCIIBigramMatches(isMatch: counts.map { $0 == required }, idToSlot: idToSlot)
+    }
+
     private mutating func uniqueIDStrings(from slots: [UInt32]) -> [String] {
         candidateStamp &+= 1
         if candidateStamp == 0 {
