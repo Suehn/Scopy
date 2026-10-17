@@ -26,8 +26,11 @@ struct HistoryListView: View {
 
     let openSettings: (() -> Void)?
 
-    // Shared Markdown preview controller to avoid repeatedly creating/destroying WebKit views/processes.
-    @State private var sharedMarkdownPreviewController = MarkdownPreviewWebViewController()
+    // One hover WebView for the whole list. With the `@State` property wrapper (Xcode 16, CI) a
+    // default value is evaluated on every `HistoryListView` init, which built and discarded a
+    // WKWebView each time; Xcode 27's `@State` macro defers it, older toolchains do not.
+    // `@StateObject` evaluates its autoclosure once per list on every toolchain.
+    @StateObject private var sharedMarkdownPreview = SharedMarkdownPreviewSlot()
     @State private var interactionCoordinator = HistoryListInteractionCoordinator()
     @State private var interactionSessionStore = HistoryItemInteractionSessionStore()
     @State private var relativeTimeClock = HistoryRelativeTimeClock()
@@ -298,9 +301,9 @@ struct HistoryListView: View {
 
     @MainActor
     private func detachSharedMarkdownWebViewIfAttached() {
-        guard sharedMarkdownPreviewController.webView.superview != nil else { return }
-        sharedMarkdownPreviewController.detachWebView()
-        sharedMarkdownPreviewController.webView.removeFromSuperview()
+        guard sharedMarkdownPreview.controller.webView.superview != nil else { return }
+        sharedMarkdownPreview.controller.detachWebView()
+        sharedMarkdownPreview.controller.webView.removeFromSuperview()
     }
 
     @MainActor
@@ -380,9 +383,9 @@ struct HistoryListView: View {
         snapshot.adoptRenderedContent(from: model)
         let filePreview = kind == .file
             ? FilePreviewSupport.previewSummary(from: item.plainText, requireExists: true) : nil
-        let controller = model.isMarkdown ? sharedMarkdownPreviewController : nil
+        let controller = model.isMarkdown ? sharedMarkdownPreview.controller : nil
         detachSharedMarkdownWebViewIfAttached()
-        if controller != nil { sharedMarkdownPreviewController = MarkdownPreviewWebViewController() }
+        if controller != nil { sharedMarkdownPreview.controller = MarkdownPreviewWebViewController() }
         pendingPopover = nil
         activePopover = nil
         DispatchQueue.main.async {
@@ -430,7 +433,7 @@ struct HistoryListView: View {
 
         // If the shared web view is still attached (e.g. pre-measure view), detach it before presenting the popover.
         // Present on the next run loop tick to avoid transient "already has a superview" issues.
-        if sharedMarkdownPreviewController.webView.superview != nil {
+        if sharedMarkdownPreview.controller.webView.superview != nil {
             detachSharedMarkdownWebViewIfAttached()
             schedulePopoverPresentation(next, delaySeconds: reopenDelaySeconds(for: itemID))
             return
@@ -496,7 +499,7 @@ struct HistoryListView: View {
             },
             onOptimizeImage: { await historyViewModel.optimizeImage(item) },
             getImageData: { try? await historyViewModel.getImageData(itemID: item.id) },
-            markdownWebViewController: sharedMarkdownPreviewController,
+            markdownWebViewController: sharedMarkdownPreview.controller,
             interactionCoordinator: interactionCoordinator,
             interactionSessionStore: interactionSessionStore,
             isContentRevisionCurrent: { itemID, revision in
@@ -542,6 +545,14 @@ struct HistoryListView: View {
         .listRowBackground(Color.clear)
         .listRowSeparator(.hidden)
     }
+}
+
+/// Holds the list's hover Markdown controller. Pinning a Markdown preview hands the current
+/// controller (and its WebView) to the pinned window and installs a fresh one here; publishing
+/// the replacement rebuilds the rows with it.
+@MainActor
+private final class SharedMarkdownPreviewSlot: ObservableObject {
+    @Published var controller = MarkdownPreviewWebViewController()
 }
 
 /// The empty and first-load states over the always-mounted List. Only this leaf observes
