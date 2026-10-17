@@ -1063,11 +1063,13 @@ public enum SearchMatchContextBuilder {
             targetRange = firstRange
         }
 
-        let leadingCount = min(
-            leadingContextCharacters,
-            sourceText.distance(from: sourceText.startIndex, to: targetRange.lowerBound)
-        )
-        let sliceStart = sourceText.index(targetRange.lowerBound, offsetBy: -leadingCount)
+        // Walks back from the match, never from the start of a possibly multi-megabyte text.
+        let sliceStart = sourceText.index(
+            targetRange.lowerBound,
+            offsetBy: -leadingContextCharacters,
+            limitedBy: sourceText.startIndex
+        ) ?? sourceText.startIndex
+        let leadingCount = sourceText.distance(from: sliceStart, to: targetRange.lowerBound)
         let targetCount = sourceText.distance(from: targetRange.lowerBound, to: targetRange.upperBound)
         let remainingCount = max(0, characterBudget - leadingCount - min(targetCount, characterBudget))
         let targetEnd = sourceText.index(
