@@ -1944,7 +1944,10 @@ final class HistoryViewModel {
     }
 
     private func replaceSearchPage(with result: SearchResultPage, skippingIdenticalRefine: Bool = false) {
-        let hits = acceptedSearchHits(result.hits)
+        // A row appears once, as on the append path: two hits for one id would trap the evidence
+        // map below and give the List two rows with one identity.
+        var seenIDs = Set<UUID>()
+        let hits = acceptedSearchHits(result.hits).filter { seenIDs.insert($0.item.id).inserted }
         let resultItems = hits.map(\.item)
         let contexts = Dictionary(
             uniqueKeysWithValues: hits.compactMap { hit in

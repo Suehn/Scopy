@@ -688,6 +688,24 @@ final class HistoryViewModelRegressionTests: XCTestCase {
         XCTAssertFalse(viewModel.isLoading)
     }
 
+    func testSearchPageWithARepeatedHitShowsTheRowOnce() async {
+        let repeated = makeItem(text: "needle repeated", age: 1)
+        let other = makeItem(text: "needle other", age: 2)
+        let service = HistoryViewModelRegressionService(items: [repeated, repeated, other])
+        service.includesMatchEvidence = true
+        let viewModel = HistoryViewModel(service: service, settingsViewModel: SettingsViewModel(service: service))
+        viewModel.configureTiming(.immediateRegressionTests)
+        defer { viewModel.stop() }
+        viewModel.searchMode = .exact
+        viewModel.searchQuery = "needle"
+        viewModel.search()
+        await waitForNextItemsRevision(in: viewModel)
+        await waitForSearchToFinish(in: viewModel)
+
+        XCTAssertEqual(viewModel.items.map(\.id), [repeated.id, other.id])
+        XCTAssertNotNil(viewModel.searchMatchContext(for: repeated.id))
+    }
+
     func testConcurrentLoadMoreCallsShareTheInFlightRequest() async {
         let service = HistoryViewModelRegressionService(items: makeItems(count: 700))
         let viewModel = HistoryViewModel(
