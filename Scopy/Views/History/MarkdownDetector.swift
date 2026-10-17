@@ -3,7 +3,8 @@ import Foundation
 enum MarkdownDetector {
     static func hasFastMarkdownSignal(_ text: String, maxScanCharacters: Int = 4_096) -> Bool {
         if text.isEmpty { return false }
-        let sample = text.count > maxScanCharacters ? String(text.prefix(maxScanCharacters)) : text
+        // `prefix` stops after `maxScanCharacters`; `count` would walk the whole text first.
+        let sample = String(text.prefix(maxScanCharacters))
 
         if sample.contains("$$") { return true }
         if sample.contains("\\(") || sample.contains("\\)") { return true }

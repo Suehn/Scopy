@@ -86,6 +86,7 @@
 		1D55B8531231065B01EF89B1 /* KaTeX_Fraktur-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = A690791438CF49B62239C05F /* KaTeX_Fraktur-Regular.ttf */; };
 		1D9DCE923835D9DC887A7D90 /* LaunchAtLogin.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB829154EBE8562BE8C6E2ED /* LaunchAtLogin.swift */; };
 		1DB469972C46FA103B70DA76 /* ChatGPTMarkdownRendererTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 199A898A7754BB5CF5B53D8A /* ChatGPTMarkdownRendererTests.swift */; };
+		1DDF3DB3DA964EBA8630A8A7 /* HistoryListHoverWebViewTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 66FBCACE7E0DE466D0E73231 /* HistoryListHoverWebViewTests.swift */; };
 		1E32DCAA15E8B64396D2CBED /* HistoryItemInteractionState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 514610AEEA6EF3C593119BDE /* HistoryItemInteractionState.swift */; };
 		1EE8D91926401AF1FEE54592 /* WebViewLifecycleTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 916B40014CC1AF81D9893229 /* WebViewLifecycleTests.swift */; };
 		1EF748B0035D35C6E05C23AE /* PinnedPreviewControllerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 753E825FB74D799376C6A8B4 /* PinnedPreviewControllerTests.swift */; };
@@ -662,6 +663,7 @@
 		EF52B1ECC178B94131984E35 /* favicon-openai-32.png in Resources */ = {isa = PBXBuildFile; fileRef = 3E88B3BFBDF2163711ABDFC1 /* favicon-openai-32.png */; };
 		F03552B81820C96BFE047A69 /* KaTeX_Math-BoldItalic.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 69386A72A42FB0CEB954D029 /* KaTeX_Math-BoldItalic.ttf */; };
 		F03E91B9FB7E93AC2EFE6596 /* StorageRootLockTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8057CE13776951F6740B9E6D /* StorageRootLockTests.swift */; };
+		F0AF9AC84D90524211D92A09 /* HistoryListHoverWebViewTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 66FBCACE7E0DE466D0E73231 /* HistoryListHoverWebViewTests.swift */; };
 		F0E6D9E9F47E8BD776F13345 /* StorageServiceTestSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = B702AD3476929572862E87A6 /* StorageServiceTestSupport.swift */; };
 		F0F31631043E1066D7E805AC /* LinkEnrichmentStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB7C02F2A8B7E87B33A74976 /* LinkEnrichmentStore.swift */; };
 		F13B87A14165790F40E03AC8 /* HistoryListUITestProbe.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD0CE0FF22BCE8D5BB818B10 /* HistoryListUITestProbe.swift */; };
@@ -881,6 +883,7 @@
 		64F67E7978679E2B6026F8F5 /* Localization.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Localization.swift; sourceTree = "<group>"; };
 		65BB06386EF12AEE9E081825 /* MockClipboardService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockClipboardService.swift; sourceTree = "<group>"; };
 		66A10DAA25261DC94EED1258 /* SearchBackendConsistencyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchBackendConsistencyTests.swift; sourceTree = "<group>"; };
+		66FBCACE7E0DE466D0E73231 /* HistoryListHoverWebViewTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryListHoverWebViewTests.swift; sourceTree = "<group>"; };
 		69386A72A42FB0CEB954D029 /* KaTeX_Math-BoldItalic.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "KaTeX_Math-BoldItalic.ttf"; sourceTree = "<group>"; };
 		69C8E31A934581C57B87146A /* MarkdownPreviewNavigationPolicyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownPreviewNavigationPolicyTests.swift; sourceTree = "<group>"; };
 		69E5EDE952C99FFB76658AD2 /* ListLiveScrollObserverView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ListLiveScrollObserverView.swift; sourceTree = "<group>"; };
@@ -1412,6 +1415,7 @@
 				A106B3D9CF8BA1181A7AE0D7 /* HistoryItemPreviewCoordinatorTests.swift */,
 				BB39D191C2CDAE7B01F1EF16 /* HistoryItemRowControllerTests.swift */,
 				5312307E6F7CD9B5184A1F2E /* HistoryItemRowDescriptorTests.swift */,
+				66FBCACE7E0DE466D0E73231 /* HistoryListHoverWebViewTests.swift */,
 				019417A9D1565A70FDEB2B29 /* HistoryListInteractionCoordinatorTests.swift */,
 				17241150321C665A1683C64F /* HistoryListStateTests.swift */,
 				0E5BC3C78931E99A757A8DCD /* HistoryProfileDatasetFingerprintTests.swift */,
@@ -2242,6 +2246,7 @@
 				9B7AEAA201394AEAAFBC98D2 /* HistoryItemTextPreviewView.swift in Sources */,
 				BDF9443F7F2193814BC1A913 /* HistoryItemThumbnailView.swift in Sources */,
 				F782F226273CDC46067A65B9 /* HistoryItemView.swift in Sources */,
+				1DDF3DB3DA964EBA8630A8A7 /* HistoryListHoverWebViewTests.swift in Sources */,
 				48CA21D8D95B02785B7A5249 /* HistoryListInteractionCoordinator.swift in Sources */,
 				080246A0B930E3A84FBABD01 /* HistoryListInteractionCoordinatorTests.swift in Sources */,
 				091E8BF4E5D21C87F210496F /* HistoryListState.swift in Sources */,
@@ -2444,6 +2449,7 @@
 				5957B8762A9A3A45F1E3AC86 /* HistoryItemTextPreviewView.swift in Sources */,
 				19AE2BACD59D1592A7C358C5 /* HistoryItemThumbnailView.swift in Sources */,
 				DDB28299C2A49D09AB3CDFD5 /* HistoryItemView.swift in Sources */,
+				F0AF9AC84D90524211D92A09 /* HistoryListHoverWebViewTests.swift in Sources */,
 				386816ACBAC8D0F16018E34F /* HistoryListInteractionCoordinator.swift in Sources */,
 				ADB85CCB72E4053CFC1DA81F /* HistoryListInteractionCoordinatorTests.swift in Sources */,
 				F9AD5F9ABB4915AD3FB7608A /* HistoryListState.swift in Sources */,

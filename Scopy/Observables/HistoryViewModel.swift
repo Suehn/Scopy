@@ -10,7 +10,11 @@ struct HistoryContentRevisionReconciliationSnapshot {
     let clearGeneration: UInt64
     let clearSurvivingItemIDs: Set<UUID>
     let clearSurvivorSetIsAuthoritative: Bool
-    let deletionEvictionGeneration: UInt64
+    /// The registry's newest stamp when this snapshot was taken. A holder keeps the stamp of the
+    /// snapshot it last applied: every tombstone up to it was in a snapshot the holder saw.
+    let stamp: UInt64
+    /// Stamp of the newest tombstone the bounded registry has evicted (0 when none).
+    let newestEvictedDeletionStamp: UInt64
 
     func revision(for itemID: UUID) -> ClipboardItemContentRevision? {
         knownRevisionsByItemID[itemID]
@@ -23,13 +27,13 @@ struct HistoryContentRevisionReconciliationSnapshot {
     /// Whether state held for `itemID` outside the list must be torn down.
     ///
     /// Shared by every off-list holder (retained row sessions, the pinned preview window) so they
-    /// cannot disagree about what "gone" means. Generation changes are the caller's, because each
-    /// holder applies snapshots on its own schedule.
+    /// cannot disagree about what "gone" means. The clear generation and stamp are the caller's,
+    /// because each holder applies snapshots on its own schedule.
     func invalidates(
         itemID: UUID,
         currentRevision: ClipboardItemContentRevision?,
         clearGenerationChanged: Bool,
-        deletionEvictionGenerationChanged: Bool
+        lastAppliedStamp: UInt64
     ) -> Bool {
         if wasDeleted(itemID) { return true }
         if clearGenerationChanged,
@@ -37,8 +41,10 @@ struct HistoryContentRevisionReconciliationSnapshot {
            !clearSurvivingItemIDs.contains(itemID) {
             return true
         }
-        // A deletion-eviction overflow means the deleted set is no longer authoritative.
-        if !clearGenerationChanged, deletionEvictionGenerationChanged { return true }
+        // Only a tombstone evicted before the holder ever saw it can hide a deletion of its item.
+        // Evicting tombstones the holder already applied loses nothing: with history at its
+        // max-items limit every capture deletes a row and evicts the oldest tombstone.
+        if !clearGenerationChanged, newestEvictedDeletionStamp > lastAppliedStamp { return true }
         if let currentRevision, let known = revision(for: itemID), known != currentRevision {
             return true
         }
@@ -68,7 +74,7 @@ struct BoundedHistoryContentRevisionRegistry {
     private(set) var clearGeneration: UInt64 = 0
     private(set) var clearSurvivingItemIDs: Set<UUID> = []
     private(set) var clearSurvivorSetIsAuthoritative = true
-    private(set) var deletionEvictionGeneration: UInt64 = 0
+    private(set) var newestEvictedDeletionStamp: UInt64 = 0
 
     init(capacity: Int) {
         self.capacity = max(1, capacity)
@@ -81,7 +87,8 @@ struct BoundedHistoryContentRevisionRegistry {
             clearGeneration: clearGeneration,
             clearSurvivingItemIDs: clearSurvivingItemIDs,
             clearSurvivorSetIsAuthoritative: clearSurvivorSetIsAuthoritative,
-            deletionEvictionGeneration: deletionEvictionGeneration
+            stamp: nextStamp,
+            newestEvictedDeletionStamp: newestEvictedDeletionStamp
         )
     }
 
@@ -243,7 +250,8 @@ struct BoundedHistoryContentRevisionRegistry {
             deletionOrderCursor += 1
             guard deletionsByItemID[candidate.itemID]?.stamp == candidate.stamp else { continue }
             deletionsByItemID.removeValue(forKey: candidate.itemID)
-            deletionEvictionGeneration &+= 1
+            // The queue is in stamp order, so this only grows.
+            newestEvictedDeletionStamp = candidate.stamp
         }
     }
 
@@ -505,6 +513,10 @@ final class HistoryViewModel {
     /// Advances on every history event. A recent page read while it moved may predate the commit
     /// the event describes, so it is read again from the same cursor.
     @ObservationIgnored private var recentMutationEpoch: UInt64 = 0
+    /// Every history event delivered while a recent page read is in flight, in order; see
+    /// `fetchSettledRecentPage`.
+    @ObservationIgnored private var eventsDuringRecentReads: [ClipboardEvent] = []
+    @ObservationIgnored private var recentReadsInFlight = 0
     @ObservationIgnored private var historyCountTask: Task<Void, Never>?
 
 
@@ -638,6 +650,7 @@ final class HistoryViewModel {
     // MARK: - Event Handling
 
     func handleEvent(_ event: ClipboardEvent) async {
+        if recentReadsInFlight > 0 { eventsDuringRecentReads.append(event) }
         switch event {
         case .newItem, .itemUpdated, .itemContentUpdated, .itemDeleted, .itemsRemoved, .itemPinned, .itemUnpinned, .itemsCleared:
             recentMutationEpoch &+= 1
@@ -680,28 +693,10 @@ final class HistoryViewModel {
             let thumbnailPath
         ):
             ThumbnailCache.shared.remove(path: thumbnailPath)
-            guard let index = indexOfItem(withID: itemID) else { return }
-            let existing = items[index]
-            guard existing.type == expectedType,
-                  existing.contentHash == expectedContentHash else { return }
-            guard existing.thumbnailPath != thumbnailPath else { return }
-
-            let updated = ClipboardItemDTO(
-                id: existing.id,
-                type: existing.type,
-                contentHash: existing.contentHash,
-                plainText: existing.plainText,
-                note: existing.note,
-                appBundleID: existing.appBundleID,
-                createdAt: existing.createdAt,
-                lastUsedAt: existing.lastUsedAt,
-                isPinned: existing.isPinned,
-                sizeBytes: existing.sizeBytes,
-                fileSizeBytes: existing.fileSizeBytes,
-                thumbnailPath: thumbnailPath,
-                storageRef: existing.storageRef
+            applyThumbnail(
+                thumbnailPath, toItemID: itemID,
+                expectedType: expectedType, expectedContentHash: expectedContentHash
             )
-            setItemIfChanged(at: index, to: updated)
         case .itemUpdated(let item):
             mergeKnownContentRevisions([item])
             guard !contentRevisionRegistry.isDeleted(itemID: item.id) else { return }
@@ -753,8 +748,14 @@ final class HistoryViewModel {
             let newlyDeletedCount = invalidateKnownContentRevisions(itemIDs: deletedIDs)
             invalidateInFlightProjectionWorkForDeletion()
             mutateProjection { _ = $0.removeItems(withIDs: deletedIDs) }
+            // One write: each write to `searchMatchContexts` copies the map (the fan-out shares
+            // its storage) and walks every registered row.
+            var contexts = searchMatchContexts
             for id in deletedIDs {
-                searchMatchContexts.removeValue(forKey: id)
+                contexts.removeValue(forKey: id)
+            }
+            if contexts.count != searchMatchContexts.count {
+                searchMatchContexts = contexts
             }
 
             if isUnfilteredList {
@@ -922,6 +923,7 @@ final class HistoryViewModel {
                 $0.replaceRecentPage(items: fetchedItems, total: snapshot.total, continuingAfter: snapshot.nextCursor)
             }
             mergeKnownContentRevisions(fetchedItems)
+            replayRowChanges(of: settled.overlappingEvents)
             prewarmDisplayText(for: fetchedItems)
             searchCoverage = .complete
             lastLoadedAt = Date()
@@ -946,26 +948,109 @@ final class HistoryViewModel {
         !Task.isCancelled && version == searchVersion && isUnfilteredList
     }
 
+    /// Reads of one recent page before a read that overlapped events is used anyway. Ingest replay
+    /// or a program writing the pasteboard in a loop can deliver an event during every read, and
+    /// `AppState.start` waits for the first page.
+    static let settledRecentReadAttempts = 3
+
     /// Reads the recent page after `cursor` until no history event arrived during the read: such
     /// an event may describe a commit the snapshot predates, and applying the snapshot after it
-    /// would undo the event. One retry is immediate; later ones wait `staleLoadRetryDelayNs`.
-    /// `nil` when the request was superseded.
+    /// would undo the event. The first retry is immediate and the next waits
+    /// `staleLoadRetryDelayNs`. The last read is returned even if events overlapped it, with
+    /// those events; the caller applies its rows and replays them in the same actor turn
+    /// (`replayRowChanges`). `nil` when the request was superseded.
     private func fetchSettledRecentPage(
         limit: Int,
         after cursor: RecentHistoryCursor?,
         version: Int
-    ) async throws -> (page: RecentHistoryPage, epoch: UInt64)? {
-        for attempt in 0... {
+    ) async throws -> (page: RecentHistoryPage, epoch: UInt64, overlappingEvents: [ClipboardEvent])? {
+        recentReadsInFlight += 1
+        defer {
+            recentReadsInFlight -= 1
+            if recentReadsInFlight == 0 { eventsDuringRecentReads.removeAll() }
+        }
+        var attempt = 1
+        while true {
+            guard shouldApplyLoadResult(version: version) else { return nil }
+            let epoch = recentMutationEpoch
+            let firstOverlapping = eventsDuringRecentReads.endIndex
+            let page = try await service.fetchHistoryPage(limit: limit, after: cursor)
+            guard shouldApplyLoadResult(version: version) else { return nil }
+            if recentMutationEpoch == epoch { return (page, epoch, []) }
+            if attempt == Self.settledRecentReadAttempts {
+                return (page, recentMutationEpoch, Array(eventsDuringRecentReads[firstOverlapping...]))
+            }
             if attempt > 1 {
                 try? await Task.sleep(nanoseconds: timing.staleLoadRetryDelayNs)
             }
-            guard shouldApplyLoadResult(version: version) else { return nil }
-            let epoch = recentMutationEpoch
-            let page = try await service.fetchHistoryPage(limit: limit, after: cursor)
-            guard shouldApplyLoadResult(version: version) else { return nil }
-            if recentMutationEpoch == epoch { return (page, epoch) }
+            attempt += 1
         }
-        return nil
+    }
+
+    /// Applies, in order, the row changes of the events that overlapped the read whose rows were
+    /// just applied: the read may predate them. Each event carries the stored row as of its
+    /// commit, so replaying one the page already includes changes nothing once the later events
+    /// are replayed too. The events already updated the registry; this restores the revisions the
+    /// page's older copies overwrote. Deletions need no replay: pages pass through tombstones.
+    private func replayRowChanges(of events: [ClipboardEvent]) {
+        for event in events {
+            let row: ClipboardItemDTO
+            switch event {
+            case .newItem(let item), .itemUpdated(let item):
+                row = item
+            case .itemContentUpdated(let item):
+                // A content change does not move a row or bring an unloaded one in.
+                guard listState.item(withID: item.id) != nil else { continue }
+                row = item
+            case .itemPinned(let item), .itemUnpinned(let item):
+                if let loaded = listState.item(withID: item.id) {
+                    row = loaded.withPinned(item.isPinned)
+                } else {
+                    guard item.isPinned else { continue }
+                    row = item
+                }
+            case .thumbnailUpdated(let itemID, let expectedType, let expectedContentHash, let thumbnailPath):
+                applyThumbnail(
+                    thumbnailPath, toItemID: itemID,
+                    expectedType: expectedType, expectedContentHash: expectedContentHash
+                )
+                continue
+            default:
+                continue
+            }
+            guard contentRevisionRegistry.acceptsProjection(itemID: row.id) else { continue }
+            _ = upsertRecentItem(row)
+            mergeKnownContentRevisions([row])
+        }
+    }
+
+    private func applyThumbnail(
+        _ thumbnailPath: String,
+        toItemID itemID: UUID,
+        expectedType: ClipboardItemType,
+        expectedContentHash: String
+    ) {
+        guard let index = indexOfItem(withID: itemID) else { return }
+        let existing = items[index]
+        guard existing.type == expectedType,
+              existing.contentHash == expectedContentHash,
+              existing.thumbnailPath != thumbnailPath else { return }
+        let updated = ClipboardItemDTO(
+            id: existing.id,
+            type: existing.type,
+            contentHash: existing.contentHash,
+            plainText: existing.plainText,
+            note: existing.note,
+            appBundleID: existing.appBundleID,
+            createdAt: existing.createdAt,
+            lastUsedAt: existing.lastUsedAt,
+            isPinned: existing.isPinned,
+            sizeBytes: existing.sizeBytes,
+            fileSizeBytes: existing.fileSizeBytes,
+            thumbnailPath: thumbnailPath,
+            storageRef: existing.storageRef
+        )
+        setItemIfChanged(at: index, to: updated)
     }
 
     private func scheduleStorageDetailsRefresh(version: Int) {
@@ -1107,6 +1192,10 @@ final class HistoryViewModel {
                         ) else { return }
                         let page = settled.page
                         prewarmDisplayText(for: excludingKnownDeletedItems(page.items))
+                        // A read that overlapped events is applied in one step, so the replay
+                        // of those events follows it before any later event can arrive.
+                        let chunkRows = settled.overlappingEvents.isEmpty
+                            ? Self.loadMoreApplyChunkRows : page.items.count
                         var start = 0
                         repeat {
                             if start > 0 {
@@ -1114,7 +1203,7 @@ final class HistoryViewModel {
                                 guard !Task.isCancelled, currentVersion == searchVersion else { return }
                                 guard recentMutationEpoch == settled.epoch else { continue pages }
                             }
-                            let end = min(page.items.count, start + Self.loadMoreApplyChunkRows)
+                            let end = min(page.items.count, start + chunkRows)
                             let chunk = page.items[start..<end]
                             let continuation = end == page.items.count
                                 ? page.nextCursor
@@ -1122,6 +1211,7 @@ final class HistoryViewModel {
                             let accepted = excludingKnownDeletedItems(Array(chunk))
                             mutateProjection { $0.appendRecentPage(items: accepted, continuingAfter: continuation) }
                             mergeKnownContentRevisions(accepted)
+                            replayRowChanges(of: settled.overlappingEvents)
                             remaining -= chunk.count
                             start = end
                         } while start < page.items.count
@@ -1860,7 +1950,10 @@ final class HistoryViewModel {
     }
 
     private func replaceSearchPage(with result: SearchResultPage, skippingIdenticalRefine: Bool = false) {
-        let hits = acceptedSearchHits(result.hits)
+        // A row appears once, as on the append path: two hits for one id would trap the evidence
+        // map below and give the List two rows with one identity.
+        var seenIDs = Set<UUID>()
+        let hits = acceptedSearchHits(result.hits).filter { seenIDs.insert($0.item.id).inserted }
         let resultItems = hits.map(\.item)
         let contexts = Dictionary(
             uniqueKeysWithValues: hits.compactMap { hit in
