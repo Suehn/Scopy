@@ -7,7 +7,6 @@ final class ClipboardServiceCopyToClipboardTests: XCTestCase {
     private var service: (any ClipboardServiceProtocol)!
     private var pasteboard: NSPasteboard!
     private var settingsStore: SettingsStore!
-    private var settingsSuiteName: String?
     private var tempDirectory: URL?
     private var nonTemporaryDirectory: URL?
     private var insertedItemID: UUID?
@@ -23,16 +22,12 @@ final class ClipboardServiceCopyToClipboardTests: XCTestCase {
     private var insertedPalettedImageData: Data?
 
     override func setUp() async throws {
-        let suiteName = "scopy-copy-settings-\(UUID().uuidString)"
-        UserDefaults.standard.removePersistentDomain(forName: suiteName)
-        settingsSuiteName = suiteName
-        settingsStore = SettingsStore(suiteName: suiteName)
-
         pasteboard = NSPasteboard.withUniqueName()
 
         let baseURL = FileManager.default.temporaryDirectory.appendingPathComponent("scopy-copy-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: baseURL, withIntermediateDirectories: true)
         tempDirectory = baseURL
+        settingsStore = SettingsStore(suiteName: baseURL.appendingPathComponent("settings").path)
 
         let dbPath = baseURL.appendingPathComponent("clipboard.db").path
 
@@ -204,10 +199,6 @@ final class ClipboardServiceCopyToClipboardTests: XCTestCase {
         service = nil
         pasteboard = nil
         settingsStore = nil
-        if let suiteName = settingsSuiteName {
-            UserDefaults.standard.removePersistentDomain(forName: suiteName)
-        }
-        settingsSuiteName = nil
     }
 
     func testCopyToClipboardHTMLWhenStoredPlainTextIsEmptyWritesPlainString() async throws {

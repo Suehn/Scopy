@@ -48,10 +48,7 @@ final class ClipboardServiceCleanupTests: XCTestCase {
         _ = try await seedStorage.upsertItem(makeTextContent("newest"))
         await seedStorage.close()
 
-        let suiteName = "scopy-cleanup-cancellation-settings-\(UUID().uuidString)"
-        UserDefaults.standard.removePersistentDomain(forName: suiteName)
-        defer { UserDefaults.standard.removePersistentDomain(forName: suiteName) }
-        let settingsStore = SettingsStore(suiteName: suiteName)
+        let settingsStore = SettingsStore(suiteName: directory.appendingPathComponent("settings").path)
         await settingsStore.save(.default)
 
         let service = ClipboardBackend(

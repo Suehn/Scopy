@@ -18,6 +18,8 @@ public actor SettingsStore {
     ///
     /// Notes:
     /// - This avoids passing a non-Sendable `UserDefaults` instance across actor boundaries in Swift 6 strict mode.
+    /// - An absolute-path suite name is stored as `<path>.plist`; tests and tools pass a path inside a temporary
+    ///   directory they delete, because a unique plain name leaves a plist in `~/Library/Preferences` forever.
     public init(suiteName: String) {
         self.userDefaults = UserDefaults(suiteName: suiteName) ?? .standard
     }

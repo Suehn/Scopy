@@ -1048,11 +1048,7 @@ final class HistoryViewModelRegressionTests: XCTestCase {
     func testRealHistoryPagesContinueFromTheLastRowAcrossConcurrentChangesAndQuitPersistsDeletion() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("scopy-history-contract-\(UUID())")
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-        let suite = "scopy-history-contract-\(UUID())"
-        defer {
-            try? FileManager.default.removeItem(at: root)
-            UserDefaults.standard.removePersistentDomain(forName: suite)
-        }
+        defer { try? FileManager.default.removeItem(at: root) }
         let path = root.appendingPathComponent("clipboard.db").path
         let writer = StorageService(databasePath: path)
         try await writer.open()
@@ -1065,7 +1061,7 @@ final class HistoryViewModelRegressionTests: XCTestCase {
         for index in 0..<700 { _ = try await capture(index) }
         let original = try await writer.fetchRecent(limit: 700, offset: 0)
         let service = ClipboardServiceFactory.create(databasePath: path,
-            settingsStore: SettingsStore(suiteName: suite),
+            settingsStore: SettingsStore(suiteName: root.appendingPathComponent("settings").path),
             monitorPasteboardName: "scopy-history-contract-\(UUID())", monitorPollingInterval: 60)
         try await service.start()
         /// The changed rows as the backend publishes them; every change in this test moves its row

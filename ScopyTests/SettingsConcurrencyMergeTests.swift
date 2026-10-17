@@ -7,11 +7,13 @@ import ScopyKit
 final class SettingsConcurrencyMergeTests: XCTestCase {
 
     func testSavingAStaleDraftPersistsItsChangesWithoutRevertingTheNewHotkey() async throws {
-        let suiteName = "ScopyTests.SettingsConcurrencyMergeTests.\(UUID().uuidString)"
-        UserDefaults.standard.removePersistentDomain(forName: suiteName)
-        defer { UserDefaults.standard.removePersistentDomain(forName: suiteName) }
+        let settingsDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("scopy-settings-merge-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: settingsDirectory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: settingsDirectory) }
+        let suitePath = settingsDirectory.appendingPathComponent("settings").path
 
-        let store = SettingsStore(suiteName: suiteName)
+        let store = SettingsStore(suiteName: suitePath)
         let service = ClipboardServiceFactory.createForTesting(settingsStore: store)
         let viewModel = SettingsViewModel(service: service)
         await viewModel.loadSettings()
@@ -26,7 +28,7 @@ final class SettingsConcurrencyMergeTests: XCTestCase {
 
         await store.updateHotkey(keyCode: 777, modifiers: 888)
         let committed = try await viewModel.updateSettings(patch)
-        let reopened = SettingsStore(suiteName: suiteName)
+        let reopened = SettingsStore(suiteName: suitePath)
         let persisted = await reopened.load()
 
         XCTAssertEqual(persisted.maxItems, draft.maxItems)
@@ -36,10 +38,13 @@ final class SettingsConcurrencyMergeTests: XCTestCase {
         XCTAssertEqual(viewModel.settings, persisted)
     }
 
-    func testConcurrentFieldPatchesAndHotkeyUpdateSurviveAStoreReopen() async {
-        let suiteName = "ScopyTests.SettingsConcurrencyMergeTests.\(UUID().uuidString)"
-        defer { UserDefaults.standard.removePersistentDomain(forName: suiteName) }
-        let store = SettingsStore(suiteName: suiteName)
+    func testConcurrentFieldPatchesAndHotkeyUpdateSurviveAStoreReopen() async throws {
+        let settingsDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("scopy-settings-merge-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: settingsDirectory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: settingsDirectory) }
+        let suitePath = settingsDirectory.appendingPathComponent("settings").path
+        let store = SettingsStore(suiteName: suitePath)
         var captureDraft = SettingsDTO.default
         captureDraft.saveImages = false
         let capturePatch = SettingsPatch.from(baseline: .default, draft: captureDraft)
@@ -51,7 +56,7 @@ final class SettingsConcurrencyMergeTests: XCTestCase {
         async let appearance = store.apply(appearancePatch)
         async let hotkey: Void = store.updateHotkey(keyCode: 333, modifiers: 444)
         let (savedCapture, savedAppearance, _) = await (capture, appearance, hotkey)
-        let reopened = SettingsStore(suiteName: suiteName)
+        let reopened = SettingsStore(suiteName: suitePath)
         let persisted = await reopened.load()
 
         XCTAssertFalse(savedCapture.saveImages)

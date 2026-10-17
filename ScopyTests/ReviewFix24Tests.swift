@@ -95,11 +95,7 @@ final class ClipboardServiceStartAtomicityTests: XCTestCase {
         try FileManager.default.createDirectory(at: invalidDBURL, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: invalidDBURL) }
 
-        let suiteName = "scopy-start-\(UUID().uuidString)"
-        UserDefaults.standard.removePersistentDomain(forName: suiteName)
-        defer { UserDefaults.standard.removePersistentDomain(forName: suiteName) }
-
-        let store = SettingsStore(suiteName: suiteName)
+        let store = SettingsStore(suiteName: invalidDBURL.appendingPathComponent("settings").path)
         let pasteboard = NSPasteboard.withUniqueName()
         let service = ClipboardBackend(
             databasePath: invalidDBURL.path,

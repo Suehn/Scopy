@@ -9,23 +9,18 @@ final class PollingIntervalSettingTests: XCTestCase {
     private var tempDirectory: URL?
     private var pasteboard: NSPasteboard!
     private var settingsStore: SettingsStore!
-    private var settingsSuiteName: String?
 
     override func setUp() async throws {
-        let suiteName = "scopy-polling-interval-settings-\(UUID().uuidString)"
-        UserDefaults.standard.removePersistentDomain(forName: suiteName)
-        settingsStore = SettingsStore(suiteName: suiteName)
-        settingsSuiteName = suiteName
+        let baseURL = FileManager.default.temporaryDirectory.appendingPathComponent("scopy-polling-interval-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: baseURL, withIntermediateDirectories: true)
+        tempDirectory = baseURL
 
+        settingsStore = SettingsStore(suiteName: baseURL.appendingPathComponent("settings").path)
         var settings = await settingsStore.load()
         settings.clipboardPollingIntervalMs = 2000
         await settingsStore.save(settings)
 
         pasteboard = NSPasteboard.withUniqueName()
-
-        let baseURL = FileManager.default.temporaryDirectory.appendingPathComponent("scopy-polling-interval-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: baseURL, withIntermediateDirectories: true)
-        tempDirectory = baseURL
 
         let dbPath = baseURL.appendingPathComponent("clipboard.db").path
         service = ClipboardServiceFactory.create(
@@ -48,10 +43,6 @@ final class PollingIntervalSettingTests: XCTestCase {
         tempDirectory = nil
         pasteboard = nil
         settingsStore = nil
-        if let suiteName = settingsSuiteName {
-            UserDefaults.standard.removePersistentDomain(forName: suiteName)
-        }
-        settingsSuiteName = nil
     }
 
     func testPollingInterval2000msDelaysCapture() async throws {
@@ -71,11 +62,20 @@ final class PollingIntervalSettingTests: XCTestCase {
 }
 
 final class SettingsStorePersistenceTests: XCTestCase {
+    private var settingsDirectory: URL!
+
+    override func setUpWithError() throws {
+        settingsDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("scopy-settingsstore-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: settingsDirectory, withIntermediateDirectories: true)
+    }
+
+    override func tearDown() {
+        try? FileManager.default.removeItem(at: settingsDirectory)
+    }
 
     func testSaveAndLoadPollingIntervalPersists() async {
-        let suiteName = "scopy-settingsstore-\(UUID().uuidString)"
-        defer { UserDefaults.standard.removePersistentDomain(forName: suiteName) }
-        UserDefaults.standard.removePersistentDomain(forName: suiteName)
+        let suiteName = settingsDirectory.appendingPathComponent("settings").path
 
         let store = SettingsStore(suiteName: suiteName)
 
@@ -88,9 +88,7 @@ final class SettingsStorePersistenceTests: XCTestCase {
     }
 
     func testSaveAndLoadMarkdownLayoutScalePersists() async {
-        let suiteName = "scopy-settingsstore-markdown-layout-\(UUID().uuidString)"
-        defer { UserDefaults.standard.removePersistentDomain(forName: suiteName) }
-        UserDefaults.standard.removePersistentDomain(forName: suiteName)
+        let suiteName = settingsDirectory.appendingPathComponent("settings").path
 
         let store = SettingsStore(suiteName: suiteName)
 
@@ -103,9 +101,7 @@ final class SettingsStorePersistenceTests: XCTestCase {
     }
 
     func testSaveAndLoadPngquantSettingsPersist() async {
-        let suiteName = "scopy-settingsstore-pngquant-\(UUID().uuidString)"
-        defer { UserDefaults.standard.removePersistentDomain(forName: suiteName) }
-        UserDefaults.standard.removePersistentDomain(forName: suiteName)
+        let suiteName = settingsDirectory.appendingPathComponent("settings").path
 
         let store = SettingsStore(suiteName: suiteName)
 
@@ -138,9 +134,7 @@ final class SettingsStorePersistenceTests: XCTestCase {
     }
 
     func testPollingIntervalClampedWhenDecoding() async {
-        let suiteName = "scopy-settingsstore-clamp-\(UUID().uuidString)"
-        defer { UserDefaults.standard.removePersistentDomain(forName: suiteName) }
-        UserDefaults.standard.removePersistentDomain(forName: suiteName)
+        let suiteName = settingsDirectory.appendingPathComponent("settings").path
 
         let defaults = UserDefaults(suiteName: suiteName)!
         let store = SettingsStore(suiteName: suiteName)
@@ -165,9 +159,7 @@ final class SettingsStorePersistenceTests: XCTestCase {
     }
 
     func testMarkdownLayoutScaleClampedWhenDecoding() async {
-        let suiteName = "scopy-settingsstore-markdown-layout-clamp-\(UUID().uuidString)"
-        defer { UserDefaults.standard.removePersistentDomain(forName: suiteName) }
-        UserDefaults.standard.removePersistentDomain(forName: suiteName)
+        let suiteName = settingsDirectory.appendingPathComponent("settings").path
 
         let defaults = UserDefaults(suiteName: suiteName)!
         let store = SettingsStore(suiteName: suiteName)
@@ -202,9 +194,7 @@ final class SettingsStorePersistenceTests: XCTestCase {
     }
 
     func testPngquantSettingsClampedWhenDecoding() async {
-        let suiteName = "scopy-settingsstore-pngquant-clamp-\(UUID().uuidString)"
-        defer { UserDefaults.standard.removePersistentDomain(forName: suiteName) }
-        UserDefaults.standard.removePersistentDomain(forName: suiteName)
+        let suiteName = settingsDirectory.appendingPathComponent("settings").path
 
         let defaults = UserDefaults(suiteName: suiteName)!
         let store = SettingsStore(suiteName: suiteName)
