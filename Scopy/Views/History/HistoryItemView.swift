@@ -67,6 +67,11 @@ struct HistoryItemView: View, Equatable {
 
     private static let inactivePopoverToken = UUID(uuidString: "00000000-0000-0000-0000-000000000000")!
 
+    #if DEBUG
+    /// Rows built so far in this process.
+    static var initCountForTesting = 0
+    #endif
+
     private struct RowHighlight: Equatable {
         let isHovering: Bool
         let isSelected: Bool
@@ -126,6 +131,9 @@ struct HistoryItemView: View, Equatable {
         self.dismissOtherPopovers = dismissOtherPopovers
         self.contentRevision = ClipboardItemContentRevision.resolve(item: item)
         ScrollPerformanceProfile.incrementCounter(name: "row.init")
+        #if DEBUG
+        Self.initCountForTesting += 1
+        #endif
     }
 
     // MARK: - Equatable
