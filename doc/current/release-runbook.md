@@ -254,3 +254,66 @@ Dated historical observations formerly embedded in this runbook are preserved in
 - The checksum alone on those files, warm: SHA-256 24.2–25.0 ms vs CRC-32 1.9–2.1 ms (74 MB), 11.4–12.3 vs 0.8–0.9 ms (35 MB). The full index reloads after every 60 s idle trim and the short index on every launch.
 - `make build` passed; `make test-unit`: 742 passed, 0 failed, 0 skipped (51.5 s). `make test-snapshot-perf-release` on the stage-1 clone, three runs: `cmd` p95 12.18 / 11.92 / 14.17 ms (limit 50), prepared `cm` p95 16.29 / 16.06 / 15.43 ms (limit 20), cold `cm` 213.5 (first run after the build) / 83.5 / 83.6 ms. All passed.
 - Not measured: the app's first launch after the upgrade, which rebuilds both caches once (about 4.1–4.6 s for the full index on this snapshot).
+
+### 2026-10-18 Search Stage 2: Recent Early Stop, Page Continuation And Relevance Prefix Reads
+
+- Source baseline: `cd41a95` (stage 1, branch `claude/search-fragment-crc`); branch `claude/search-recent-early-stop`. Development evidence, not a release. Environment and project baselines as in stage 1.
+- Changes:
+  - **Recent early stop:** recency decides before the score, so a recent-sorted fuzzy ranking scores rows newest first. It stops once the window and one more hit are in and the next row starts another (pinned, last used) group, so rows that share a timestamp keep their score order. This covers `FullIndexRanker.rankComplete` and the one- and two-character SQL path `SearchReadStore.searchShortQuerySubstring`. The SQL path reads order and recency from the covering `idx_recent_order`, because a row's recency columns lie behind its text's overflow pages. Filters become index-only rowid subqueries. `total` is `-1` with `hasMore` until the scan reaches the end; the footer already shows "+" for a negative total.
+  - **Page continuation:** a page whose offset is the previous page's end, with the same query, filters and sort, continues that scan instead of rescoring from the start. The ranker keeps the scan in its `SortedMatchesCache`; the read store keeps it while `mutation_seq` is unchanged. Any other request runs the original query, and callers see no new API.
+  - **Relevance prefix reads:** relevance reads each plain text's first 4 KB through SQLite blob I/O (`SQLiteBlobReader`). A row whose prefix ends between two ASCII characters is decided there. Any other row is read in full only while its best possible score could still enter the window.
+  - **Fallback threshold:** past 4,096 short-index candidates, the engine scans every row instead of passing the ids to SQL. It now does so above 10% of the rows (recent) or 50% (relevance), down from 85%.
+- Real DB snapshot, clones and protocol as in stage 1 (SHA-256 `30841d15…ee6c`, unchanged after the runs). Release ScopyBench binaries (SHA-256 prefix):
+  - stage 1 with the new bench options: `0302b297`;
+  - stage 2: `14f431e5`;
+  - stage 2 without page continuation: `1eea5b3e`;
+  - stage 2 with full-text relevance reads and the 85% threshold: `23be5ec8`.
+- Workloads, all engine layer except `cmd` and the cold requests:
+  - `f*`: full index (`--force-full-fuzzy`), searching `数据库` untimed before each run so the ranking cache misses as on a new keystroke; 15 samples after 3 warm-ups.
+  - `s*` and `r*`: prepared short index, 15 samples after 3 warm-ups.
+  - `p*`: ten consecutive 300-row pages per sample; 7 samples after 2 warm-ups.
+  - `cmd`, prepared `cm` and the cold requests: as in stage 1.
+- Results are means of run medians, in ms. The first stage-2 run on its fresh clone (cold page cache: cold `cm` 111.1, cold recent `cm` 327.9) is left out of the cold rows.
+
+| Workload (ms) | A/A, 3 interleaved pairs | Stage 1, 5 ABBA pairs | Stage 2, 5 ABBA pairs |
+| --- | --- | --- | --- |
+| Recent full index `e` | 13.41 / 13.52 | 13.31 | 4.07 |
+| Recent full index `co` | 20.45 / 20.76 | 20.52 | 4.74 |
+| Recent full index `数据` | 23.90 / 23.98 | 23.67 | 14.09 |
+| Recent full index `cm` | 134.9 / 135.2 | 134.1 | 94.6 |
+| Recent short `e` | 25.17 / 25.05 | 24.45 | 3.59 |
+| Recent short `co` | 25.36 / 24.88 | 25.27 | 4.30 |
+| Recent short `数据` | 32.22 / 30.92 | 31.18 | 15.30 |
+| Recent short `cm` | 97.73 / 96.98 | 96.82 | 87.88 |
+| Recent cold `cm` (service) | 168.2 / 166.7 | 165.1–171.6 | 106.1–109.0 |
+| Recent short `e`, 10 pages | 423.1 / 413.5 | 418.6 | 134.2 |
+| Recent short `co`, 10 pages | 491.2 / 479.7 | 476.5 | 266.6 |
+| Recent full index `e`, 10 pages | 148.9 / 146.3 | 144.7 | 126.5 |
+| Service `cmd` (control) | 12.16 / 12.09 | 11.83 | 11.90 |
+| Prepared relevance `cm` (gate) | 16.05 / 16.24 | 16.07 | 10.04 |
+| Cold relevance `cm` (service) | 86.0 / 86.8 | 83.8–87.5 | 84.6–88.5 |
+| Relevance short `e` | 24.57 / 24.80 | 23.86 | 20.79 |
+| Relevance short `co` | 23.81 / 22.70 | 23.32 | 21.01 |
+| Relevance short `数据` | 34.86 / 34.38 | 34.25 | 30.12 |
+| Relevance full index `e` (control) | 9.24 / 9.11 | 9.05 | 9.15 |
+
+- Each item was isolated with 5-pair ABBA runs against stage 2:
+  - **Page continuation**, against the binary without it: short `e` 172.0 → 135.2, short `co` 375.2 → 266.2, full-index `e` 137.8 → 128.3 (10 pages, ms).
+  - **Relevance prefix reads**, against full-text reads with the 85% threshold: prepared `cm` 16.05 → 9.96, `e` 24.43 → 20.93, `co` 23.00 → 21.26, `数据` 33.50 → 30.95. Cold `cm` is about equal; that binary's first cold run, a 508.6 ms outlier, is left out.
+- Dropped parts of the deep-paging item, measured on this snapshot:
+  - **Empty-query keyset:** `LIMIT/OFFSET` pages cost 1.3 / 0.5 / 0.7 ms at offsets 0 / 3,000 / 9,000.
+  - **FTS rowid cache:** an FTS page costs a constant ~15 ms at any depth, with at most 3.2k matches. Match evidence costs 107–445 ms per 300-row page, so the offset is not the cost.
+  - **`instr` fallback keyset:** this fallback is reached only by exact-mode non-ASCII queries with no FTS match.
+- Remaining cost: match-evidence generation is 76–80 ms of the 88–100 ms recent short `cm`, and most of each FTS or `instr` page.
+- `make build` passed; `make test-unit`: 747 passed, 0 failed.
+  - New golden tests compare page windows with the full ranking on the full-index, short-index SQL and full-scan paths, for timestamp ties, the 4 KB prefix cut, CJK and combining-mark prefixes, filters, and a commit between pages.
+  - Removing tie-group completion or the continuation sort makes them fail.
+- `make test-snapshot-perf-release` on the stage-2 clone, four runs:
+  - `cmd` p95 12.08 / 12.05 / 11.92 / 12.62 ms (limit 50);
+  - prepared `cm` p95 10.23 / 10.18 / 9.92 / 10.66 ms (limit 20);
+  - cold `cm` 103.2 / 85.9 / 85.5 / 88.5 ms.
+
+  All printed under their limits. Only the fourth run's exit status was captured, and it was 0.
+- Load average during the A/B runs: 2.6–3.5.
+- Not measured: the real app's typing and scrolling (`make perf-search-type`, `make perf-scroll-wheel`).
+- Unchanged: cold relevance requests, which run before the short index is ready.
