@@ -57,7 +57,7 @@ final class PinnedPreviewController {
     private(set) var previews: [UUID: PinnedPreview] = [:]
     @ObservationIgnored private var panels: [UUID: PinnedPreviewPanel] = [:]
     @ObservationIgnored private var lastAppliedClearGeneration: UInt64 = 0
-    @ObservationIgnored private var lastAppliedDeletionEvictionGeneration: UInt64 = 0
+    @ObservationIgnored private var lastAppliedStamp: UInt64 = 0
 
     var isPinned: Bool { !previews.isEmpty }
 
@@ -128,14 +128,14 @@ final class PinnedPreviewController {
 
     func reconcile(snapshot: HistoryContentRevisionReconciliationSnapshot) {
         let clearChanged = lastAppliedClearGeneration != snapshot.clearGeneration
-        let evictionChanged = lastAppliedDeletionEvictionGeneration != snapshot.deletionEvictionGeneration
+        let previousStamp = lastAppliedStamp
         lastAppliedClearGeneration = snapshot.clearGeneration
-        lastAppliedDeletionEvictionGeneration = snapshot.deletionEvictionGeneration
+        lastAppliedStamp = snapshot.stamp
         for preview in Array(previews.values) where snapshot.invalidates(
             itemID: preview.itemID,
             currentRevision: preview.revision,
             clearGenerationChanged: clearChanged,
-            deletionEvictionGenerationChanged: evictionChanged
+            lastAppliedStamp: previousStamp
         ) {
             dismiss(itemID: preview.itemID)
         }
