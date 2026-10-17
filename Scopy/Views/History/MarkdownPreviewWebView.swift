@@ -364,11 +364,19 @@ final class MarkdownPreviewWebViewController: NSObject, ObservableObject, WKNavi
     private let scrollbarAutoHider = ScrollbarAutoHider()
     private let sizeMessageHandlerProxy = WeakScriptMessageHandler()
 
+    #if DEBUG
+    /// Controllers built so far in this process; each one creates a WKWebView.
+    static var createdCountForTesting = 0
+    #endif
+
     init(
         scrollViewResolver: @escaping @MainActor (NSView) -> NSScrollView? = {
             MarkdownPreviewScrollViewResolver.resolve(for: $0)
         }
     ) {
+        #if DEBUG
+        Self.createdCountForTesting += 1
+        #endif
         let config = MarkdownWebKitEnvironment.makeConfiguration()
         let wv = WKWebView(frame: .zero, configuration: config)
         wv.allowsMagnification = false

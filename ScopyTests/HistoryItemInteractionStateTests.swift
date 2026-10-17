@@ -300,7 +300,8 @@ final class HistoryItemInteractionStateTests: XCTestCase {
                 clearGeneration: 0,
                 clearSurvivingItemIDs: [],
                 clearSurvivorSetIsAuthoritative: true,
-                deletionEvictionGeneration: 0
+                stamp: 0,
+                newestEvictedDeletionStamp: 0
             )
         )
 
@@ -314,7 +315,8 @@ final class HistoryItemInteractionStateTests: XCTestCase {
                 clearGeneration: 0,
                 clearSurvivingItemIDs: [],
                 clearSurvivorSetIsAuthoritative: true,
-                deletionEvictionGeneration: 0
+                stamp: 0,
+                newestEvictedDeletionStamp: 0
             )
         )
 
@@ -341,7 +343,8 @@ final class HistoryItemInteractionStateTests: XCTestCase {
                 clearGeneration: 0,
                 clearSurvivingItemIDs: [],
                 clearSurvivorSetIsAuthoritative: true,
-                deletionEvictionGeneration: 0
+                stamp: 0,
+                newestEvictedDeletionStamp: 0
             )
         )
 
@@ -352,7 +355,8 @@ final class HistoryItemInteractionStateTests: XCTestCase {
                 clearGeneration: 0,
                 clearSurvivingItemIDs: [],
                 clearSurvivorSetIsAuthoritative: true,
-                deletionEvictionGeneration: 0
+                stamp: 0,
+                newestEvictedDeletionStamp: 0
             )
         )
 
@@ -376,7 +380,8 @@ final class HistoryItemInteractionStateTests: XCTestCase {
                 clearGeneration: 1,
                 clearSurvivingItemIDs: [],
                 clearSurvivorSetIsAuthoritative: true,
-                deletionEvictionGeneration: 0
+                stamp: 0,
+                newestEvictedDeletionStamp: 0
             )
         )
 

@@ -326,7 +326,7 @@ final class HistoryContentRevisionRegistryTests: XCTestCase {
         XCTAssertFalse(interactionState.isTornDown)
     }
 
-    func testDeletionTombstoneEvictionConservativelyInvalidatesRetainedSessions() {
+    func testUnseenTombstoneEvictionConservativelyInvalidatesRetainedSessions() {
         let items = (0..<3).map { index in makeItem(index: index) }
         var registry = BoundedHistoryContentRevisionRegistry(capacity: 2)
         _ = registry.merge(items: items, allowRevivingDeletedItems: false)
@@ -347,7 +347,7 @@ final class HistoryContentRevisionRegistryTests: XCTestCase {
         let overflowedSnapshot = registry.snapshot
 
         XCTAssertEqual(overflowedSnapshot.deletedItemIDs.count, 2)
-        XCTAssertGreaterThan(overflowedSnapshot.deletionEvictionGeneration, 0)
+        XCTAssertGreaterThan(overflowedSnapshot.newestEvictedDeletionStamp, 0)
         store.reconcile(snapshot: overflowedSnapshot)
         XCTAssertTrue(state.isTornDown)
         XCTAssertFalse(store.contains(state))
@@ -361,7 +361,7 @@ final class HistoryContentRevisionRegistryTests: XCTestCase {
         for item in deletedItems {
             _ = registry.invalidate(itemID: item.id)
         }
-        XCTAssertGreaterThan(registry.snapshot.deletionEvictionGeneration, 0)
+        XCTAssertGreaterThan(registry.snapshot.newestEvictedDeletionStamp, 0)
 
         _ = registry.merge(
             items: [legitimateProjectionItem],
