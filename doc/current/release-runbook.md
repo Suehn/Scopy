@@ -317,3 +317,61 @@ Dated historical observations formerly embedded in this runbook are preserved in
 - Load average during the A/B runs: 2.6–3.5.
 - Not measured: the real app's typing and scrolling (`make perf-search-type`, `make perf-scroll-wheel`).
 - Unchanged: cold relevance requests, which run before the short index is ready.
+
+### 2026-10-18 Search Stage 3: SIMD Plain-Text Skip In LoweredTextMatcher
+
+- Source baseline: stage 2 at `b4a1f95` (includes `main` `347238f`); branch `claude/search-simd-matcher`. Development evidence, not a release. Environment and project baselines as in stage 1.
+- **Change:** between special scalars, lowercasing keeps each scalar's UTF-16 length and adds no ASCII unit. So `LoweredTextMatcher` now checks 16 bytes per step (`SIMD16<UInt8>`) for well-formedness and counts their UTF-16 units. It stops at the first special scalar, malformed byte, or byte that can start the ASCII needle in either case, and leaves the last 17 bytes to the per-scalar path. Decisions are unchanged.
+- **Differential fuzz:** 3 seeds × 400,000 random texts, compared with `text.lowercased()` and `range(of:)` or a UTF-16 search.
+  - Texts mixed combining marks, Kelvin sign, İ, Prepend, ZWJ, VS16, Hangul jamo, CJK, emoji, four-byte scalars, malformed bytes (1 text in 6) and runs of up to 600 pieces.
+  - Result: 4,675,599 comparisons, 3,884,315 decided on bytes, 0 mismatches.
+  - On seed 1, both the stage-2 and the stage-3 matcher decided exactly 1,294,738 of the 1,558,492 comparisons.
+- **Negative controls:** each disables one check; mismatches on seed 1 at 400,000 texts, then on the new unit test.
+
+| Disabled check | Fuzz mismatches | `LoweredTextMatcherTests` mismatches |
+| --- | --- | --- |
+| Preceding-neighbour check | 3,512 | 74 |
+| Following-neighbour check | 20,769 | 668 |
+| Continuation structure | 5,106 | 62 |
+| E0/ED/F0/F4 second-byte ranges | 11,541 | 159 |
+| Invalid leads (C0, C1, F5–FF) | 4,239 | 47 |
+| Special-scalar stops | 155,524 | 1,961 |
+| Uppercase needle stop | 49,682 | 1,292 |
+| Stop byte's own well-formedness | 123 | 3 |
+| Back-up before the final scalar | 136,326 | 422 |
+| Second unit of four-byte scalars | 498,916 | 5,424 |
+| Neighbour bookkeeping after a skip | 2,084 | 39 |
+| Lane flush every 7 blocks (moved to 64) | 1 | 1,889 |
+
+- **New unit test:** `LoweredTextMatcherTests` runs the same comparison on 1,500 seeded texts with long runs, in 1.4 s in the Debug test host.
+  - It decides 80.7% of comparisons, against a 70% floor.
+  - The real XCTest run fails on the weakest control (3 mismatches).
+- Real DB snapshot as in stage 1 (SHA-256 `30841d15…ee6c`). Each binary used a fresh APFS clone.
+- Release ScopyBench binaries (SHA-256 prefix), both built from one scratch copy so the embedded paths match: stage 2 `67265065`, stage 3 `9f4d3823`. Workloads as in stage 2. Means of run medians, ms.
+
+| Workload (ms) | A/A, 3 interleaved pairs | Stage 2, 5 ABBA pairs | Stage 3, 5 ABBA pairs |
+| --- | --- | --- | --- |
+| Prepared relevance `cm` (gate) | 9.68 / 9.65 | 9.67 | 7.72 |
+| Relevance short `e` | 20.13 / 20.17 | 20.21 | 17.99 |
+| Relevance short `co` | 20.42 / 20.52 | 20.85 | 16.77 |
+| Relevance short `数据` | 29.47 / 29.52 | 29.70 | 26.46 |
+| Relevance full index `e` | 8.89 / 8.95 | 8.94 | 7.79 |
+| Recent full index `cm` | 92.72 / 92.71 | 92.60 | 86.61 |
+| Recent short `cm` | 86.04 / 85.97 | 86.03 | 85.20 |
+| Recent short `co`, 10 pages | 258.85 / 259.17 | 258.71 | 256.13 |
+| Service `cmd` | 11.72 / 11.74 | 11.73 | 11.72 |
+
+- Unchanged within noise: recent `e`, `co` and `数据` on both indexes, and the `e` page runs. Their early-stopped scans read little text.
+- **Cold requests:**
+  - During the 5-pair run, XProtect's remediator used 88% CPU. Both sides then had single-request outliers of 140–330 ms.
+  - A second 10-pair ABBA of the cold requests alone ran after XProtect exited. Medians, first entry per side excluded (a page-in outlier on both sides):
+
+| Cold request | Stage 2 (ms) | Stage 3 (ms) |
+| --- | --- | --- |
+| Relevance `cm` | 86.7 (84.0–88) | 64.8 (64.0–68) |
+| Recent `cm` | 106.4 (105.5–108) | 102.5 (99.4–105) |
+
+- `make build` passed; `make test-unit`: 753 passed, 0 failed. `make test-snapshot-perf-release` on the stage-3 clone passed three times:
+  - `cmd` p95 12.79 / 12.65 / 12.19 ms (limit 50);
+  - prepared `cm` p95 9.07 / 7.91 / 7.94 ms (limit 20);
+  - cold `cm` 138.5 (first run after the build) / 63.4 / 63.6 ms.
