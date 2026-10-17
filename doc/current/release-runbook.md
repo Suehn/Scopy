@@ -416,3 +416,38 @@ Dated historical observations formerly embedded in this runbook are preserved in
   - `make build` passed; `make test-unit`: 755 passed, 0 failed.
   - `make test-snapshot-perf-release` on the stage-4 clone passed three times: `cmd` p95 12.61 / 12.35 / 16.62 ms (limit 50); prepared `cm` p95 8.76 / 8.25 / 8.30 ms (limit 20); cold `cm` 138.6 (first run after the build) / 65.1 / 65.2 ms.
 - **Pre-existing, not changed here:** the full index's character filter requires a literal ";" or "`" in the text. So a row that matches a fuzzy+ word only through U+037E or U+1FEF is missed whenever it has no literal ";" or "`" elsewhere, and the SQL paths miss it too.
+
+### 2026-10-18 Search Stage 5: Relevance Short-Query Score Reuse Across Pages
+
+- **Source baseline:** stage 4 at `e13a031`; branch `claude/search-relevance-pages`. Development evidence, not a release. Environment and project baselines as in stage 1.
+- **Change:** a relevance-sorted one- or two-character query keeps each candidate's 4 KB prefix score, its rows still undecided (best bound first), and each full read (`SearchReadStore.RelevanceScores`).
+  - Any page of the same token and filters reuses them while `mutation_seq` is unchanged. It then reads in full only the undecided rows whose bound could still enter the deeper window.
+  - The top `offset + limit + 1` under `SearchRankKey`'s strict order is unique, and rows are resolved in the same bound order, so pages are unchanged.
+- **Tests:**
+  - `testRelevanceShortQueryPagesAgreeAcrossThePrefixCut` walks every window and filter of one query, so every page after the first comes from the reused scores. It still matches the full index.
+  - New `testRelevanceShortQueryScoresAreReadAgainAfterACommit` fails when `mutation_seq` is dropped from the reuse key (2 failures).
+  - Skipping the undecided rows on reused pages fails the window test.
+- **Gate change:** the prepared `cm` run of `make test-snapshot-perf-release` now searches `md` untimed before each sample (`--reset-query md`). Without it, every warm sample would be a cache hit (2.5 ms) and the gate would no longer bound a fresh ranking.
+- **A/B:** a fresh APFS clone per binary; Release ScopyBench from one scratch copy (stage 4 `af634d7a`, stage 5 `5febce81`). Engine layer with the short index prepared, relevance order. Means of run medians, ms.
+  - First pages: `q` searched untimed before each run so the scores are not reused; 15 samples after 3 warm-ups.
+  - Ten 300-row pages: the same reset, 7 samples after 2 warm-ups.
+
+| Workload (ms) | A/A, 3 interleaved pairs | Stage 4, 5 ABBA pairs | Stage 5, 5 ABBA pairs |
+| --- | --- | --- | --- |
+| First page `e` | 19.02 / 18.98 | 19.03 | 19.26 |
+| First page `co` | 17.39 / 17.76 | 17.92 | 17.62 |
+| First page `cm` | 8.30 / 8.40 | 8.30 | 8.34 |
+| First page `数据` | 27.32 / 27.40 | 27.39 | 27.49 |
+| `e`, 10 pages | 256.8 / 260.8 | 263.4 | 121.9 |
+| `co`, 10 pages | 301.0 / 307.7 | 303.5 | 180.4 |
+| `cm`, 10 pages | 411.0 / 409.5 | 411.9 | 313.8 |
+| `数据`, 10 pages | 1,018.5 / 1,011.1 | 1,020.2 | 925.2 |
+| Same `cm` again (the old gate form) | 8.07 / 8.02 | 7.95 | 2.50 |
+| Prepared `cm` after `md` (the new gate form) | 8.26 / 8.50 | 8.30 | 8.24 |
+| Service `cmd` (control) | 12.36 / 12.43 | 12.27 | 12.25 |
+| Recent short `e` (control) | 3.65 / 3.60 | 3.59 | 3.60 |
+
+- **What's left in deep pages:** fetching the rows and building match evidence for 300 rows per page. `数据` spends 31–48 ms per page on evidence.
+- **Gates:**
+  - `make build` passed; `make test-unit`: 756 passed, 0 failed; `make test-tooling` and `make test-release-policy` passed.
+  - `make test-snapshot-perf-release` with the new `cm` run passed three times: `cmd` p95 12.93 / 12.64 / 12.06 ms (limit 50); prepared `cm` p95 8.90 / 9.08 / 9.07 ms (limit 20); cold `cm` 119.3 (first run after the build) / 66.8 / 72.1 ms.

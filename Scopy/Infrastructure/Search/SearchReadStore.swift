@@ -116,12 +116,24 @@ final class SearchReadStore {
         let position: RecencyScanPosition
     }
 
+    /// The previous relevance short query's scores, which every page of the same query reuses while
+    /// nothing was committed: the rows its prefixes or full reads decided, and the rows still
+    /// undecided, best bound first.
+    private struct RelevanceScores {
+        let tokenLower: String
+        let filters: Filters
+        let mutationSeq: Int64
+        var hits: [SearchRankKey]
+        var undecided: ArraySlice<(rowID: Int64, bound: SearchRankKey)>
+    }
+
     private let dbPath: String
     private var connection: SQLiteConnection?
     private var statementCache: [String: CachedStatement] = [:]
     private var statementCacheLRU: [String] = []
     private let statementCacheLimit = 32
     private var shortQueryContinuation: ShortQueryContinuation?
+    private var relevanceScores: RelevanceScores?
 
     init(dbPath: String) {
         self.dbPath = dbPath
@@ -158,6 +170,7 @@ final class SearchReadStore {
         statementCache = [:]
         statementCacheLRU = []
         shortQueryContinuation = nil
+        relevanceScores = nil
         connection?.close()
         connection = nil
     }
@@ -167,6 +180,7 @@ final class SearchReadStore {
         statementCache = [:]
         statementCacheLRU = []
         shortQueryContinuation = nil
+        relevanceScores = nil
         connection?.releaseMemory()
     }
 
@@ -527,7 +541,13 @@ final class SearchReadStore {
             )
         }
 
-        return try bestMatchesPage(matcher, candidateIDStrings: candidateIDStrings, filters: filters, window: window)
+        return try bestMatchesPage(
+            matcher,
+            tokenLower: tokenLower,
+            candidateIDStrings: candidateIDStrings,
+            filters: filters,
+            window: window
+        )
     }
 
     /// The candidates' rows from the covering recency index, without reading the table: the
@@ -550,25 +570,75 @@ final class SearchReadStore {
 
     /// Scores every candidate from the first bytes of its plain text where they decide it. A hit
     /// there outranks, pinned state aside, every row with no hit as early, so a row is read in full
-    /// only while the best score it can still have would enter the window.
+    /// only while the best score it can still have would enter the window. Later pages of the same
+    /// query start from the scores the earlier pages left.
     private func bestMatchesPage(
         _ matcher: ShortQueryMatcher,
+        tokenLower: String,
         candidateIDStrings: [String]?,
         filters: Filters,
         window: PageWindow
     ) throws -> Page {
-        guard let connection else { throw SearchEngineImpl.SearchError.databaseNotOpen }
-        var params: [String] = []
-        let rows = try prepare(candidateRowsSQL(candidateIDStrings: candidateIDStrings, filters: filters, params: &params))
-        defer { rows.reset() }
-        try Self.bind(params, to: rows)
+        let mutationSeq = try fetchMutationSeq()
+        var scores: RelevanceScores
+        if let previous = relevanceScores,
+           previous.tokenLower == tokenLower,
+           previous.filters == filters,
+           previous.mutationSeq == mutationSeq {
+            scores = previous
+        } else {
+            let (hits, undecided) = try prefixScores(matcher, candidateIDStrings: candidateIDStrings, filters: filters)
+            scores = RelevanceScores(
+                tokenLower: tokenLower,
+                filters: filters,
+                mutationSeq: mutationSeq,
+                hits: hits,
+                undecided: undecided[...]
+            )
+        }
+        // Released while the scores change, so they are not copied; a cancelled page drops them.
+        relevanceScores = nil
 
         let keepCount = window.offset + window.limit + 1
         var selector = TopKSelector<SearchRankKey>(capacity: keepCount) { lhs, rhs in
             SearchRankKey.isBetter(lhs, than: rhs, sortMode: .relevance)
         }
         selector.reserveCapacity(min(keepCount, 8192))
-        // Undecided rows, each with the best score it can have.
+        for hit in scores.hits {
+            selector.offer(hit)
+        }
+        let text = try prepare("SELECT plain_text, note FROM clipboard_items WHERE rowid = ?")
+        defer { text.reset() }
+        while let row = scores.undecided.first {
+            try Task.checkCancellation()
+            // Later rows have no better bound, and the weakest kept hit only improves.
+            guard selector.wouldKeep(row.bound) else { break }
+            scores.undecided.removeFirst()
+            text.reset()
+            try text.bindInt64(row.rowID, at: 1)
+            guard try text.step(), let score = matcher.score(text, plainColumn: 0, noteColumn: 1) else { continue }
+            let hit = SearchRankKey(isPinned: row.bound.isPinned, lastUsedAt: row.bound.lastUsedAt, score: score, id: row.bound.id)
+            selector.offer(hit)
+            scores.hits.append(hit)
+        }
+        relevanceScores = scores
+        return try rankedPage(selector.sortedElements(), window: window)
+    }
+
+    /// Every candidate's score where its plain text's first bytes decide it, and the others with
+    /// the best score each can have, best first.
+    private func prefixScores(
+        _ matcher: ShortQueryMatcher,
+        candidateIDStrings: [String]?,
+        filters: Filters
+    ) throws -> (hits: [SearchRankKey], undecided: [(rowID: Int64, bound: SearchRankKey)]) {
+        guard let connection else { throw SearchEngineImpl.SearchError.databaseNotOpen }
+        var params: [String] = []
+        let rows = try prepare(candidateRowsSQL(candidateIDStrings: candidateIDStrings, filters: filters, params: &params))
+        defer { rows.reset() }
+        try Self.bind(params, to: rows)
+
+        var hits: [SearchRankKey] = []
         var undecided: [(rowID: Int64, bound: SearchRankKey)] = []
         let prefixReader = SQLiteBlobReader(connection: connection, table: "clipboard_items", column: "plain_text")
         defer { prefixReader.close() }
@@ -586,26 +656,13 @@ final class SearchReadStore {
             let lastUsedAt = Date(timeIntervalSince1970: rows.columnDouble(3))
             switch verdict {
             case .score(let score):
-                selector.offer(SearchRankKey(isPinned: isPinned, lastUsedAt: lastUsedAt, score: score, id: id))
+                hits.append(SearchRankKey(isPinned: isPinned, lastUsedAt: lastUsedAt, score: score, id: id))
             case .scoreAtMost(let bound):
                 undecided.append((rowID, SearchRankKey(isPinned: isPinned, lastUsedAt: lastUsedAt, score: bound, id: id)))
             }
         }
-        prefixReader.close()
-
         undecided.sort { SearchRankKey.isBetter($0.bound, than: $1.bound, sortMode: .relevance) }
-        let text = try prepare("SELECT plain_text, note FROM clipboard_items WHERE rowid = ?")
-        defer { text.reset() }
-        for row in undecided {
-            try Task.checkCancellation()
-            // Later rows have no better bound, and the weakest kept hit only improves.
-            guard selector.wouldKeep(row.bound) else { break }
-            text.reset()
-            try text.bindInt64(row.rowID, at: 1)
-            guard try text.step(), let score = matcher.score(text, plainColumn: 0, noteColumn: 1) else { continue }
-            selector.offer(SearchRankKey(isPinned: row.bound.isPinned, lastUsedAt: row.bound.lastUsedAt, score: score, id: row.bound.id))
-        }
-        return try rankedPage(selector.sortedElements(), window: window)
+        return (hits, undecided)
     }
 
     /// Recency decides before the score, so rows are read newest first until the window and one
