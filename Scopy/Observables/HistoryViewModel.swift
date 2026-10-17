@@ -10,7 +10,11 @@ struct HistoryContentRevisionReconciliationSnapshot {
     let clearGeneration: UInt64
     let clearSurvivingItemIDs: Set<UUID>
     let clearSurvivorSetIsAuthoritative: Bool
-    let deletionEvictionGeneration: UInt64
+    /// The registry's newest stamp when this snapshot was taken. A holder keeps the stamp of the
+    /// snapshot it last applied: every tombstone up to it was in a snapshot the holder saw.
+    let stamp: UInt64
+    /// Stamp of the newest tombstone the bounded registry has evicted (0 when none).
+    let newestEvictedDeletionStamp: UInt64
 
     func revision(for itemID: UUID) -> ClipboardItemContentRevision? {
         knownRevisionsByItemID[itemID]
@@ -23,13 +27,13 @@ struct HistoryContentRevisionReconciliationSnapshot {
     /// Whether state held for `itemID` outside the list must be torn down.
     ///
     /// Shared by every off-list holder (retained row sessions, the pinned preview window) so they
-    /// cannot disagree about what "gone" means. Generation changes are the caller's, because each
-    /// holder applies snapshots on its own schedule.
+    /// cannot disagree about what "gone" means. The clear generation and stamp are the caller's,
+    /// because each holder applies snapshots on its own schedule.
     func invalidates(
         itemID: UUID,
         currentRevision: ClipboardItemContentRevision?,
         clearGenerationChanged: Bool,
-        deletionEvictionGenerationChanged: Bool
+        lastAppliedStamp: UInt64
     ) -> Bool {
         if wasDeleted(itemID) { return true }
         if clearGenerationChanged,
@@ -37,8 +41,10 @@ struct HistoryContentRevisionReconciliationSnapshot {
            !clearSurvivingItemIDs.contains(itemID) {
             return true
         }
-        // A deletion-eviction overflow means the deleted set is no longer authoritative.
-        if !clearGenerationChanged, deletionEvictionGenerationChanged { return true }
+        // Only a tombstone evicted before the holder ever saw it can hide a deletion of its item.
+        // Evicting tombstones the holder already applied loses nothing: with history at its
+        // max-items limit every capture deletes a row and evicts the oldest tombstone.
+        if !clearGenerationChanged, newestEvictedDeletionStamp > lastAppliedStamp { return true }
         if let currentRevision, let known = revision(for: itemID), known != currentRevision {
             return true
         }
@@ -68,7 +74,7 @@ struct BoundedHistoryContentRevisionRegistry {
     private(set) var clearGeneration: UInt64 = 0
     private(set) var clearSurvivingItemIDs: Set<UUID> = []
     private(set) var clearSurvivorSetIsAuthoritative = true
-    private(set) var deletionEvictionGeneration: UInt64 = 0
+    private(set) var newestEvictedDeletionStamp: UInt64 = 0
 
     init(capacity: Int) {
         self.capacity = max(1, capacity)
@@ -81,7 +87,8 @@ struct BoundedHistoryContentRevisionRegistry {
             clearGeneration: clearGeneration,
             clearSurvivingItemIDs: clearSurvivingItemIDs,
             clearSurvivorSetIsAuthoritative: clearSurvivorSetIsAuthoritative,
-            deletionEvictionGeneration: deletionEvictionGeneration
+            stamp: nextStamp,
+            newestEvictedDeletionStamp: newestEvictedDeletionStamp
         )
     }
 
@@ -243,7 +250,8 @@ struct BoundedHistoryContentRevisionRegistry {
             deletionOrderCursor += 1
             guard deletionsByItemID[candidate.itemID]?.stamp == candidate.stamp else { continue }
             deletionsByItemID.removeValue(forKey: candidate.itemID)
-            deletionEvictionGeneration &+= 1
+            // The queue is in stamp order, so this only grows.
+            newestEvictedDeletionStamp = candidate.stamp
         }
     }
 

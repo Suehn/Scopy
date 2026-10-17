@@ -229,6 +229,36 @@ final class PinnedPreviewControllerTests: XCTestCase {
         XCTAssertTrue(controller.isPinned, "A pinned item that survived Clear All keeps its window")
     }
 
+    /// With history at its max-items limit every capture deletes a row, so once the tombstone
+    /// registry is full each deletion evicts its oldest tombstone. Evicting tombstones this window
+    /// already applied hides nothing from it and must not close it.
+    func testPinnedPreviewSurvivesEvictionOfTombstonesItAlreadyApplied() async {
+        let service = TestMockClipboardService()
+        service.setItemCount(2)
+        let appState = AppState.forTesting(service: service)
+        addTeardownBlock { await appState.stop() }
+        let viewModel = appState.historyViewModel
+        await viewModel.load()
+        let item = viewModel.items[0]
+        pin(item: item)
+        controller.reconcile(snapshot: viewModel.contentRevisionReconciliationSnapshot)
+
+        let fullRegistry = (0..<HistoryViewModel.knownContentRevisionCapacity).map { _ in UUID() }
+        await viewModel.handleEvent(.itemsRemoved(fullRegistry))
+        controller.reconcile(snapshot: viewModel.contentRevisionReconciliationSnapshot)
+        for _ in 0..<3 {
+            await viewModel.handleEvent(.itemDeleted(UUID()))
+            let snapshot = viewModel.contentRevisionReconciliationSnapshot
+            XCTAssertGreaterThan(snapshot.newestEvictedDeletionStamp, 0, "The deletion evicted a tombstone")
+            controller.reconcile(snapshot: snapshot)
+            XCTAssertTrue(controller.isPinned(itemID: item.id))
+        }
+
+        await viewModel.handleEvent(.itemDeleted(item.id))
+        controller.reconcile(snapshot: viewModel.contentRevisionReconciliationSnapshot)
+        XCTAssertFalse(controller.isPinned(itemID: item.id), "Deleting the item itself still closes it")
+    }
+
     // MARK: - Helpers
 
     private func pin(item: ClipboardItemDTO) {
@@ -279,8 +309,7 @@ final class PinnedPreviewControllerTests: XCTestCase {
         deleted: Set<UUID> = [],
         clearGeneration: UInt64 = 0,
         clearSurvivingItemIDs: Set<UUID> = [],
-        survivorSetIsAuthoritative: Bool = true,
-        deletionEvictionGeneration: UInt64 = 0
+        survivorSetIsAuthoritative: Bool = true
     ) -> HistoryContentRevisionReconciliationSnapshot {
         HistoryContentRevisionReconciliationSnapshot(
             knownRevisionsByItemID: knownRevisions,
@@ -288,7 +317,8 @@ final class PinnedPreviewControllerTests: XCTestCase {
             clearGeneration: clearGeneration,
             clearSurvivingItemIDs: clearSurvivingItemIDs,
             clearSurvivorSetIsAuthoritative: survivorSetIsAuthoritative,
-            deletionEvictionGeneration: deletionEvictionGeneration
+            stamp: 0,
+            newestEvictedDeletionStamp: 0
         )
     }
 }
