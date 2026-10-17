@@ -21,8 +21,9 @@ verification:
   snapshot_release: pass_4_of_5_cmd_p95_15_3_to_16_6ms_prepared_cm_p95_16_7_to_18_7ms_one_21_9ms_miss_under_external_load_cold_cm_85_to_89ms_db_2724012f
   frontend_profile: not_run_xcuitest_blocked_on_this_machine
   quit_on_logout: not_exercised
-  release_commit: pending_tag
-  release_workflow: pending_tag
-  dmg_sha256: pending_published_asset
-  homebrew_casks: pending_published_asset
-  installed_bundle: pending_published_asset
+  release_commit: 4b359156a97aab5b3812228d2155e32a89040504
+  release_workflow: https://github.com/Suehn/Scopy/actions/runs/39061813094
+  dmg_sha256: 35f0c1e050fbffa2a3f79854d6b16960e9c3e5abfb99d2f12ea17ad8a9b10988
+  homebrew_casks: pass_repo_3f043e8_and_tap_b89cdf7_identical_0_82_2
+  tap_automation: failed_403_token_lacks_tap_write_manual_sync_b89cdf7
+  installed_bundle: pass_brew_reinstall_0_82_2_build_672_universal_min_14_434_entries_match_DMG_first_launch_waits_on_Gatekeeper_approval
