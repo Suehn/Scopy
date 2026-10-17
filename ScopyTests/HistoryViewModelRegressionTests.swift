@@ -470,6 +470,55 @@ final class HistoryViewModelRegressionTests: XCTestCase {
         XCTAssertEqual(viewModel.items.last?.id, items.last?.id)
     }
 
+    func testHistoryChangesDuringADeepSearchKeepTheLoadedDepthAndPageInOrder() async {
+        let pageDepth = HistoryViewModel.initialPageSize + HistoryViewModel.loadMorePageSize
+        let results = (0..<(pageDepth + 20)).map { makeItem(text: "needle \($0)", age: $0) }
+        let service = HistoryViewModelRegressionService(items: results)
+        let viewModel = HistoryViewModel(service: service, settingsViewModel: SettingsViewModel(service: service))
+        viewModel.configureTiming(.immediateRegressionTests)
+        defer { viewModel.stop() }
+        viewModel.searchMode = .fuzzy
+        viewModel.searchQuery = "needle"
+        viewModel.search()
+        await waitForSearchToFinish(in: viewModel)
+        await viewModel.loadMore()
+        XCTAssertEqual(viewModel.loadedCount, pageDepth)
+
+        // The refresh for a capture is held in flight; a page requested meanwhile waits for it.
+        service.suspendNextRefine = true
+        let refreshStarted = expectation(description: "Refresh started")
+        service.onRefineStarted = { refreshStarted.fulfill() }
+        let captured = makeItem(text: "needle captured", age: -1)
+        service.items.insert(captured, at: 0)
+        await viewModel.handleEvent(.newItem(captured))
+        await fulfillment(of: [refreshStarted], timeout: 1.0)
+        service.onRefineStarted = nil
+        // Without a held refresh, the next forced page must not be held instead (and hang).
+        service.suspendNextRefine = false
+        let requestCount = service.searchRequests.count
+        let paging = Task { await viewModel.loadMore() }
+        await Task.yield() // the main-actor task runs up to its wait on the paging slot
+        service.resumeRefine()
+        await paging.value
+
+        XCTAssertEqual(service.searchRequests.count, requestCount, "Paging waited instead of reading an offset the capture moved")
+        XCTAssertEqual(service.searchRequests.last?.offset, 0)
+        XCTAssertEqual(service.searchRequests.last?.limit, pageDepth)
+        XCTAssertEqual(viewModel.loadedCount, pageDepth, "The capture joins without collapsing the paged rows")
+        XCTAssertEqual(viewModel.items.first?.id, captured.id)
+
+        let deleted = viewModel.items[pageDepth - 10]
+        service.items.removeAll { $0.id == deleted.id }
+        await viewModel.handleEvent(.itemDeleted(deleted.id))
+        await viewModel.loadMore()
+        await waitForSearchToFinish(in: viewModel)
+
+        XCTAssertEqual(viewModel.loadedCount, pageDepth - 1, "A deletion keeps the paged rows too")
+        XCTAssertFalse(viewModel.items.contains { $0.id == deleted.id })
+        await viewModel.loadMore()
+        XCTAssertEqual(viewModel.items.map(\.id), service.items.map(\.id), "The next page continues where the refresh ended")
+    }
+
     func testFailedEventDrivenSearchKeepsRowsButMarksCoverageIncomplete() async {
         let original = makeItem(text: "needle original", age: 1)
         let service = HistoryViewModelRegressionService(items: [original])
@@ -1049,12 +1098,12 @@ final class HistoryViewModelRegressionTests: XCTestCase {
         let deletedID = results[90].id
         service.items.removeAll { $0.id == deletedID }
         await viewModel.handleEvent(.itemDeleted(deletedID))
-        await waitForNextItemsRevision(in: viewModel)
-        await waitForSearchToFinish(in: viewModel)
         await pagination.value
+        await viewModel.loadMore() // waits for the refresh that holds the paging slot
         await viewModel.loadMore()
 
-        XCTAssertEqual(viewModel.items.map(\.id), Array(service.items.prefix(Self.firstTwoPages)).map(\.id))
+        XCTAssertGreaterThan(viewModel.loadedCount, Self.firstTwoPages - 1, "The deletion kept the paged rows")
+        XCTAssertEqual(viewModel.items.map(\.id), Array(service.items.prefix(viewModel.loadedCount)).map(\.id))
         XCTAssertFalse(viewModel.items.contains { $0.id == deletedID })
         XCTAssertNil(viewModel.searchMatchContext(for: deletedID))
         XCTAssertEqual(viewModel.totalCount, results.count - 1)
