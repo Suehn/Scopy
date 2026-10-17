@@ -1,5 +1,4 @@
 #if DEBUG
-import CryptoKit
 import XCTest
 @testable import ScopyKit
 
@@ -197,7 +196,7 @@ final class ShortQueryIndexDiskCacheHardeningTests: XCTestCase {
             )
             try corruptedData.write(to: cacheURL, options: [.atomic])
 
-            let checksum = Self.sha256Hex(corruptedData)
+            let checksum = SearchIndexDiskCache.checksumHex(corruptedData)
             try checksum.write(toFile: paths.checksumPath, atomically: true, encoding: .utf8)
 
             let search2 = SearchEngineImpl(dbPath: dbPath)
@@ -400,11 +399,6 @@ final class ShortQueryIndexDiskCacheHardeningTests: XCTestCase {
         }
         XCTFail("Timed out waiting for file modification: \(path)")
         throw WaitForFileError()
-    }
-
-    private static func sha256Hex(_ data: Data) -> String {
-        let digest = SHA256.hash(data: data)
-        return digest.map { String(format: "%02x", $0) }.joined()
     }
 }
 

@@ -1,4 +1,3 @@
-import CryptoKit
 import XCTest
 @testable import ScopyKit
 
@@ -226,7 +225,7 @@ final class FullIndexDiskCacheHardeningTests: XCTestCase {
         let corruptedData = SearchIndexDiskCache.debugEncodeFullPayload(payload, asciiCharPostings: asciiPostings)
         try corruptedData.write(to: cacheURL, options: [.atomic])
 
-        let checksum = Self.sha256Hex(corruptedData)
+        let checksum = SearchIndexDiskCache.checksumHex(corruptedData)
         try checksum.write(toFile: checksumPath, atomically: true, encoding: .utf8)
     }
 
@@ -239,10 +238,5 @@ final class FullIndexDiskCacheHardeningTests: XCTestCase {
             try await Task.sleep(nanoseconds: 50_000_000)
         }
         XCTFail("Timed out waiting for file: \(path)")
-    }
-
-    private static func sha256Hex(_ data: Data) -> String {
-        let digest = SHA256.hash(data: data)
-        return digest.map { String(format: "%02x", $0) }.joined()
     }
 }

@@ -224,3 +224,33 @@ Dated historical observations formerly embedded in this runbook are preserved in
 | 5 | 15.50 | 16.79 | 85.4 | pass |
 
 - Run 3 coincided with external load: right after it, another application used 1.7 cores and the load average was 7. Prepared `cm` p95 sits at 80–95% of its limit on this snapshot for both this candidate and baseline `bb9269f` (16.2 / 18.3 ms), so external load can push it over.
+
+### 2026-10-18 Search Stage 1: Bounded Fragment Context And CRC-32 Cache Check
+
+- Source baseline: `c05ba8d` (v0.82.2); branch `claude/search-fragment-crc`. Development evidence, not a release. Environment: Apple M3, 8 cores, 24 GB; macOS 27.2 (`26B5101f`); Xcode 27.0 (`27A5194q`); Swift 6.4. Project baselines (Swift 5.9, macOS 14) unchanged. The Xcode 16 CI compile was not run locally.
+- Changes:
+  - **Match context:** `SearchMatchContextBuilder.makeFragment` walks at most `leadingContextCharacters` back from the match, `index(_:offsetBy:limitedBy:)`, instead of counting characters from the start of the text. Same slice: a fuzz of 975,395 random texts and UTF-16 match positions (combining marks, ZWJ, emoji, flags, CR LF, Hangul jamo, Prepend, Indic clusters) found 0 differences in slice start or leading count.
+  - **Index caches:** the `.crc32` sidecar (zlib `crc32_z`) replaces the `.sha256` sidecar. It only guards against truncation and corruption; the header's mutation sequence and the decoder's checks are unchanged. Cache versions: short index 4 → 5, full index 8 → 9, so older files are deleted and rebuilt once.
+- Real DB snapshot: 16,727 rows, 341,401,600 bytes, 65 MB of plain text, SHA-256 `30841d150cc108a5114328f0308e4283ce36cb0b4065eb8a893d3d9b16f4ee6c` (unchanged after the runs). Each binary used its own `cp -c` APFS clone.
+- Release ScopyBench binaries (SHA-256 prefix): baseline `c065d858`, fragment change alone `deef157b`, stage 1 `a65aba48`. Median of each run's samples (service `cmd`: 30 after 20 warm-ups; prepared engine `cm`: 30 after 3; service `co`/`e`: 15 after 3; cold `cm`: 1). One discarded warm-up run per clone.
+
+| Service / engine workload (ms) | A/A, 3 interleaved pairs | Baseline, 5 ABBA pairs | Fragment change, 5 ABBA pairs |
+| --- | --- | --- | --- |
+| Service `cmd` | 15.07 / 15.01 | 15.07–15.73 (mean 15.38) | 12.15–12.34 (mean 12.26) |
+| Prepared `cm` | 16.17 / 16.18 | mean 16.43 | mean 16.57 |
+| Service `co` | 23.25 / 23.13 | mean 25.22 | mean 23.80 |
+| Service `e` | 24.41 / 24.46 | mean 24.77 | mean 25.25 |
+| Cold `cm` | 85.35 / 96.89 | mean 88.68 | mean 85.34 |
+
+- Only `cmd` moved: every fragment-change run beat every baseline run, by 3.1 ms against an A/A resolution of 0.06 ms. The other workloads overlap the noise.
+- A second 5-pair ABBA, baseline against stage 1, ran under external load (load average 5–7, another application's renderer at 80% CPU): `cmd` 15.68–16.65 → 13.39–13.41 ms, prepared `cm` 18.13 → 17.94, `co` 25.89 → 25.55, `e` 27.20 → 26.98, cold `cm` 87.99 → 88.70 (means). The cold request runs before the short index is ready, so the checksum is not on its path.
+- Cache loads, from the engine's own `Short/Full index disk cache load hit in N ms` log lines, 12-run A/A and 16-run ABBA, first (cold page cache) run per side discarded:
+
+| Disk cache load (ms) | A/A | Baseline | Stage 1 |
+| --- | --- | --- | --- |
+| Full index, 74 MB | 91–94 / 91–96 | 91–96 (median 91) | 68–73 (median 70) |
+| Short index, 35 MB | 80–89 / 81–89 | 80–91 (median 83) | 71–78 (median 74) |
+
+- The checksum alone on those files, warm: SHA-256 24.2–25.0 ms vs CRC-32 1.9–2.1 ms (74 MB), 11.4–12.3 vs 0.8–0.9 ms (35 MB). The full index reloads after every 60 s idle trim and the short index on every launch.
+- `make build` passed; `make test-unit`: 742 passed, 0 failed, 0 skipped (51.5 s). `make test-snapshot-perf-release` on the stage-1 clone, three runs: `cmd` p95 12.18 / 11.92 / 14.17 ms (limit 50), prepared `cm` p95 16.29 / 16.06 / 15.43 ms (limit 20), cold `cm` 213.5 (first run after the build) / 83.5 / 83.6 ms. All passed.
+- Not measured: the app's first launch after the upgrade, which rebuilds both caches once (about 4.1–4.6 s for the full index on this snapshot).
