@@ -16,6 +16,7 @@ Once a proposal is implemented, move its lasting contracts into the appropriate 
 
 ## Current Contents
 
+- [History list with explicit row updates (comparable row wrappers, then an AppKit table fed by the projection's diff)](./history-list-explicit-updates.md)
 - [Review and improvement roadmap, 2026-09-24 (phases, cross-face priorities, conflict rulings, decision register)](./review-roadmap-2026-09-24.md)
 - [Frontend interaction review, 2026-09-24 (search typing, hover presentation, memory, keyboard and feedback gaps)](./frontend-interaction-review-2026-09-24.md)
 - [Backend search/storage review, 2026-09-24 (index memory, engine decomposition, StorageService isolation, lifecycle)](./backend-search-storage-review-2026-09-24.md)
