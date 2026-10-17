@@ -43,9 +43,8 @@ final class ExportCoordinator: NSObject, WKNavigationDelegate {
     private var layoutWaiter: ExportLayoutWaiter?
 
 #if DEBUG
-    /// Test seams: the xctest runner has no app resource directory, and ordering the host panel out once the
-    /// document is ready reproduces a host that becomes occluded mid-export (animation frames stop).
-    static var markdownPreviewResourceURLForTesting: URL?
+    /// Test seam: ordering the host panel out once the document is ready reproduces a host that becomes occluded
+    /// mid-export (animation frames stop).
     static var ordersOutHostWindowForTesting = false
 #endif
     private var didDumpTableMetrics = false
@@ -191,10 +190,7 @@ final class ExportCoordinator: NSObject, WKNavigationDelegate {
         self.hostWindow = window
 
         // Load HTML
-        var baseURL = Bundle.main.resourceURL?.appendingPathComponent("MarkdownPreview", isDirectory: true)
-#if DEBUG
-        baseURL = Self.markdownPreviewResourceURLForTesting ?? baseURL
-#endif
+        let baseURL = Bundle.main.resourceURL?.appendingPathComponent("MarkdownPreview", isDirectory: true)
         wv.loadHTMLString(html, baseURL: baseURL)
     }
 
@@ -537,10 +533,9 @@ final class ExportCoordinator: NSObject, WKNavigationDelegate {
         config.snapshotWidth = NSNumber(value: Double(snapshotWidthPoints))
         config.afterScreenUpdates = true
 
-        let image = try await takeSnapshot(webView: webView, config: config)
+        let cg = try await takeSnapshot(webView: webView, config: config)
 
         try advance(to: .imageConversion)
-        let cg = try cgImage(from: image)
 
         try advance(to: .pngEncoding)
         let targetWidth = max(1, Int(round(targetWidthPixels)))
@@ -620,8 +615,7 @@ final class ExportCoordinator: NSObject, WKNavigationDelegate {
             config.snapshotWidth = NSNumber(value: Double(snapshotWidthPoints))
             config.afterScreenUpdates = true
 
-            let image = try await takeSnapshot(webView: webView, config: config)
-            let tileCG = try cgImage(from: image)
+            let tileCG = try await takeSnapshot(webView: webView, config: config)
 
             let normalizedTile = ExportRaster.scaleCGImageIfNeeded(image: tileCG, targetWidthPixels: targetWidthPixelsInt)
 
@@ -752,8 +746,14 @@ final class ExportCoordinator: NSObject, WKNavigationDelegate {
         await waitForAnimationFrames(webView: webView, timeout: 0.5)
     }
 
-    private func takeSnapshot(webView: WKWebView, config: WKSnapshotConfiguration) async throws -> NSImage {
-        try await withCheckedThrowingContinuation { continuation in
+    /// WebKit hands the snapshot over and keeps no reference. Swift 6.0 (the Xcode 16 baseline) cannot prove that
+    /// for a closure parameter, so the image crosses the continuation boxed.
+    private struct SnapshotImage: @unchecked Sendable {
+        let image: NSImage
+    }
+
+    private func takeSnapshot(webView: WKWebView, config: WKSnapshotConfiguration) async throws -> CGImage {
+        let snapshot: SnapshotImage = try await withCheckedThrowingContinuation { continuation in
             webView.takeSnapshot(with: config) { image, error in
                 if let error {
                     continuation.resume(throwing: error)
@@ -763,9 +763,10 @@ final class ExportCoordinator: NSObject, WKNavigationDelegate {
                     continuation.resume(throwing: MarkdownExportService.ExportError.stageFailed(stage: .snapshotOnce, underlying: nil))
                     return
                 }
-                continuation.resume(returning: image)
+                continuation.resume(returning: SnapshotImage(image: image))
             }
         }
+        return try cgImage(from: snapshot.image)
     }
 
     private func createPDF(webView: WKWebView, rectPoints: CGRect) async throws -> Data {

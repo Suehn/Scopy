@@ -3,9 +3,9 @@ import Foundation
 import os
 
 enum SearchIndexDiskCache {
-    private static let fullIndexDiskCacheVersion: Int = 6
+    private static let fullIndexDiskCacheVersion: Int = 8
     private static let fullIndexDiskCacheMetadataVersion: Int = 2
-    private static let shortQueryIndexDiskCacheVersion: Int = 3
+    private static let shortQueryIndexDiskCacheVersion: Int = 4
 
     struct FullPaths: Sendable {
         let cachePath: String

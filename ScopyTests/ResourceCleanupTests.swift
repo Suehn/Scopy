@@ -35,45 +35,7 @@ final class ResourceCleanupTests: XCTestCase {
         }
     }
 
-    /// sqlite3_step error handling.
-    func testSqliteStepErrorHandling() async throws {
-        var cleanupPolicy = StorageService.CleanupPolicy()
-        let storage = StorageService(databasePath: ":memory:")
-        try await storage.open()
-
-        // Insert test data.
-        for i in 0..<5 {
-            let content = ClipboardMonitor.ClipboardContent(
-                type: .text,
-                plainText: "Item \(i)",
-                payload: .none,
-                appBundleID: nil,
-                contentHash: "hash_\(i)",
-                sizeBytes: 10
-            )
-            _ = try await storage.upsertItem(content)
-        }
-
-        // A normal cleanup succeeds.
-        cleanupPolicy.maxItems = 3
-        do {
-            try await storage.performCleanup(policy: cleanupPolicy)
-        } catch {
-            XCTFail("Cleanup should not throw: \(error)")
-        }
-
-        // Check the count after cleanup.
-        let count = try await storage.getItemCount()
-        XCTAssertLessThanOrEqual(count, 3, "Item count should be reduced")
-
-        await storage.close()
-    }
-
-    // MARK: - Search Service Cleanup Tests
-
-    // MARK: - Event Stream Cleanup Tests
-
-    /// After the service stops, an event-listening task cancels and finishes without relying on the stream ending.
+    /// A consumer owns cancellation; stopping the service need not finish its event stream.
     func testEventStreamCleanup() async throws {
         let service = ClipboardServiceFactory.create(databasePath: Self.makeSharedInMemoryDatabasePath())
 

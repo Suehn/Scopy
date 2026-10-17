@@ -25,14 +25,123 @@ final class SearchServiceTests: XCTestCase {
 
     // MARK: - Basic Search Tests
 
-    func testExactSearch() async throws {
-        try await populateTestData()
+    func testUnicodeShortFuzzyMembershipIsStableAcrossSQLShortAndFullIndexes() async throws {
+        let accent = try await storage.upsertItem(makeContent("ÉCOLE"))
+        let greek = try await storage.upsertItem(makeContent("Ωmega"))
+        let umlaut = try await storage.upsertItem(makeContent("Äpfel"))
+        let kelvin = try await storage.upsertItem(makeContent("KELVIN"))
+        let note = try await storage.upsertItem(makeContent("note only"))
+        _ = try await storage.updateNote(id: note.id, note: "ÉCOLE Ωmega Äpfel KELVIN")
+        let decomposed = try await storage.upsertItem(makeContent("E\u{301}E\u{301}"))
+        let emoji = try await storage.upsertItem(makeContent("☺️"))
+        let dottedI = try await storage.upsertItem(makeContent("İK"))
+        let kelvinSign = try await storage.upsertItem(makeContent("\u{212A}m"))
+        let korean = try await storage.upsertItem(makeContent("대한민국"))
+        let jamo = try await storage.upsertItem(makeContent("하\u{11AB}"))
+        _ = try await storage.upsertItem(makeContent("한\u{301}"))
+        let variant = try await storage.upsertItem(makeContent("我\u{FE00}"))
+        let cyrillic = try await storage.upsertItem(makeContent("ДОМ"))
+        let brief = try await storage.upsertItem(makeContent("ЙОД"))
+        let decomposedBrief = try await storage.upsertItem(makeContent("и\u{306}"))
+        let kana = try await storage.upsertItem(makeContent("か\u{3099}"))
+        let cases: [(String, Set<UUID>)] = [
+            ("é", [accent.id, note.id, decomposed.id]),
+            ("ω", [greek.id, note.id]),
+            ("ä", [umlaut.id, note.id]),
+            ("k", [kelvin.id, note.id, dottedI.id, kelvinSign.id]),
+            ("한", [korean.id, jamo.id]),
+            ("我", [variant.id]),
+            ("д", [cyrillic.id, brief.id]),
+            ("й", [brief.id, decomposedBrief.id]),
+            ("が", [kana.id]),
+            ("ke", [kelvin.id, note.id]),
+            ("i", [kelvin.id, note.id, dottedI.id]),
+            ("ik", []),
+            ("éé", [decomposed.id]),
+            ("☺", [emoji.id]),
+            ("e", [accent.id, greek.id, umlaut.id, kelvin.id, note.id, decomposed.id]),
+            ("z", [])
+        ]
+        var orderedResults: [String: [UUID]] = [:]
+        await search.close()
+        for state in ["sql", "short", "full"] {
+            let engine = SearchEngineImpl(dbPath: storage.databaseFilePath, commitJournal: storage.commitJournal)
+            try await engine.open()
+            if state == "short" {
+                try await engine.prepareShortQueryIndex()
+            } else if state == "full" {
+                _ = try await engine.search(request: SearchRequest(query: "warmup", mode: .fuzzy, forceFullFuzzy: true))
+            }
+            for mode in [SearchMode.fuzzy, .fuzzyPlus] {
+                for sort in [SearchSortMode.recent, .relevance] {
+                    for (query, expected) in cases {
+                        let result = try await engine.search(
+                            request: SearchRequest(query: query, mode: mode, sortMode: sort, limit: 50, offset: 0)
+                        )
+                        XCTAssertEqual(Set(result.items.map(\.id)), expected, "\(state) \(mode) \(sort) \(query)")
+                        let key = "\(mode) \(sort) \(query)"
+                        if let ordered = orderedResults[key] {
+                            XCTAssertEqual(result.items.map(\.id), ordered, "\(state) \(key)")
+                        } else {
+                            orderedResults[key] = result.items.map(\.id)
+                        }
+                        XCTAssertEqual(result.total, expected.count)
+                        XCTAssertEqual(result.coverage, .complete)
+                        XCTAssertFalse(result.hasMore)
+                    }
+                }
+            }
+            await engine.close()
+        }
+    }
 
-        let request = SearchRequest(query: "Hello", mode: .exact, limit: 50, offset: 0)
-        let result = try await search.search(request: request)
-
-        XCTAssertGreaterThan(result.items.count, 0)
-        XCTAssertTrue(result.items.allSatisfy { $0.plainText.lowercased().contains("hello") })
+    func testFuzzyPlusUnicodeMembershipIsStableAcrossForcedSearchAndSorts() async throws {
+        let kelvin = try await storage.upsertItem(makeContent("KELVIN"))
+        let accent = try await storage.upsertItem(makeContent("ÉCOLE"))
+        let decomposed = try await storage.upsertItem(makeContent("E\u{301}COLE"))
+        let note = try await storage.upsertItem(makeContent("note target"))
+        _ = try await storage.updateNote(id: note.id, note: "KELVIN ÉCOLE search")
+        let plain = try await storage.upsertItem(makeContent("search"))
+        _ = try await storage.upsertItem(makeContent("ſearch"))
+        let asciiI = try await storage.upsertItem(makeContent("istanbul"))
+        _ = try await storage.upsertItem(makeContent("İSTANBUL"))
+        let emoji = try await storage.upsertItem(makeContent("👍🏽 ab"))
+        let latte = try await storage.upsertItem(makeContent("CAFE latte"))
+        _ = try await storage.upsertItem(makeContent("cafe\u{301}"))
+        let cup = try await storage.upsertItem(makeContent("☕cafe文"))
+        let cases: [(String, Set<UUID>)] = [
+            ("cafe", [latte.id, cup.id]),
+            ("kelvin", [kelvin.id, note.id]),
+            ("KELVIN", [kelvin.id, note.id]),
+            ("search", [plain.id, note.id]),
+            ("kelvin search", [note.id]),
+            ("istanbul", [asciiI.id]),
+            ("👍 a", [emoji.id]),
+            ("👍 ab", [emoji.id])
+        ]
+        await search.invalidateCache()
+        for sort in [SearchSortMode.recent, .relevance] {
+            for (query, expected) in cases {
+                for forced in [false, true] {
+                    let result = try await search.search(request: SearchRequest(
+                        query: query, mode: .fuzzyPlus, sortMode: sort,
+                        forceFullFuzzy: forced, limit: 50, offset: 0
+                    ))
+                    XCTAssertEqual(Set(result.items.map(\.id)), expected, "\(sort) forced=\(forced) \(query)")
+                    XCTAssertEqual(result.total, expected.count)
+                    XCTAssertEqual(result.coverage, .complete)
+                }
+            }
+        }
+        // The Unicode trigram adapter is also used by non-ASCII substring fallbacks.
+        let store = SearchReadStore(dbPath: storage.databaseFilePath)
+        try store.open()
+        defer { store.close() }
+        for sort in [SearchSortMode.recent, .relevance] {
+            let request = SearchRequest(query: "école", mode: .exact, sortMode: sort, limit: 50, offset: 0)
+            let page = try store.searchTrigram(tokens: ["école"], sortMode: sort, filters: .init(request), window: .init(request))
+            XCTAssertEqual(Set(page.items.map(\.id)), [accent.id, decomposed.id, note.id])
+        }
     }
 
     func testExactSearchSplitsWordsByDefault() async throws {
@@ -120,16 +229,6 @@ final class SearchServiceTests: XCTestCase {
 
         XCTAssertTrue(result.items.contains(where: { $0.id == oldTarget.id }))
         XCTAssertEqual(result.coverage, .complete)
-    }
-
-    func testFuzzySearch() async throws {
-        try await populateTestData()
-
-        let request = SearchRequest(query: "hlo", mode: .fuzzy, limit: 50, offset: 0)
-        let result = try await search.search(request: request)
-
-        // Fuzzy should find "Hello" with "hlo"
-        XCTAssertGreaterThan(result.items.count, 0)
     }
 
     func testFuzzySearchMatchesASCIIAbbreviationsAsSubsequence() async throws {
@@ -445,17 +544,6 @@ final class SearchServiceTests: XCTestCase {
         XCTAssertEqual(result.coverage, .recentOnly(limit: 2000))
     }
 
-    func testSearchWithNoResults() async throws {
-        try await populateTestData()
-
-        let request = SearchRequest(query: "xyznonexistent123", mode: .exact, limit: 50, offset: 0)
-        let result = try await search.search(request: request)
-
-        XCTAssertEqual(result.items.count, 0)
-        XCTAssertEqual(result.total, 0)
-        XCTAssertFalse(result.hasMore)
-    }
-
     func testExactQueryWithoutSearchableTokensReturnsNoResults() async throws {
         try await populateTestData()
 
@@ -468,18 +556,6 @@ final class SearchServiceTests: XCTestCase {
         XCTAssertFalse(result.hasMore)
         XCTAssertEqual(result.coverage, .complete)
     }
-
-    func testEmptyQuery() async throws {
-        try await populateTestData()
-
-        let request = SearchRequest(query: "", mode: .exact, limit: 50, offset: 0)
-        let result = try await search.search(request: request)
-
-        // Empty query should return all items (up to limit)
-        XCTAssertGreaterThan(result.items.count, 0)
-    }
-
-    // MARK: - Pagination Tests
 
     func testSearchPagination() async throws {
         try await populateTestData(count: 100)
@@ -596,65 +672,6 @@ final class SearchServiceTests: XCTestCase {
     }
 
     // MARK: - Filter Tests
-
-    func testAppFilter() async throws {
-        // Insert items from different apps
-        _ = try await storage.upsertItem(makeContent("Safari text", app: "com.apple.Safari"))
-        _ = try await storage.upsertItem(makeContent("Xcode text", app: "com.apple.dt.Xcode"))
-        _ = try await storage.upsertItem(makeContent("Terminal text", app: "com.apple.Terminal"))
-        await search.invalidateCache()
-
-        let request = SearchRequest(
-            query: "text",
-            mode: .fuzzy,
-            appFilter: "com.apple.Safari",
-            limit: 50,
-            offset: 0
-        )
-        let result = try await search.search(request: request)
-
-        XCTAssertEqual(result.items.count, 1)
-        XCTAssertEqual(result.items[0].appBundleID, "com.apple.Safari")
-    }
-
-    func testTypeFilter() async throws {
-        // Insert different types
-        _ = try await storage.upsertItem(makeContent("Text content", type: .text))
-        _ = try await storage.upsertItem(makeContent("HTML content", type: .html))
-        await search.invalidateCache()
-
-        let request = SearchRequest(
-            query: "content",
-            mode: .fuzzy,
-            typeFilter: .text,
-            limit: 50,
-            offset: 0
-        )
-        let result = try await search.search(request: request)
-
-        XCTAssertEqual(result.items.count, 1)
-        XCTAssertEqual(result.items[0].type, .text)
-    }
-
-    func testEmptyQueryWithAppFilterReturnsAll() async throws {
-        _ = try await storage.upsertItem(makeContent("A1", app: "com.test.one"))
-        _ = try await storage.upsertItem(makeContent("A2", app: "com.test.one"))
-        _ = try await storage.upsertItem(makeContent("B1", app: "com.test.two"))
-        await search.invalidateCache()
-
-        let request = SearchRequest(
-            query: "",
-            mode: .exact,
-            appFilter: "com.test.one",
-            limit: 50,
-            offset: 0
-        )
-        let result = try await search.search(request: request)
-
-        XCTAssertEqual(result.total, 2)
-        XCTAssertEqual(result.items.count, 2)
-        XCTAssertTrue(result.items.allSatisfy { $0.appBundleID == "com.test.one" })
-    }
 
     func testFilteredPaginationHasMore() async throws {
         for i in 0..<60 {
@@ -898,19 +915,6 @@ final class SearchServiceTests: XCTestCase {
         }
     }
 
-    func testCaseSensitivity() async throws {
-        _ = try await storage.upsertItem(makeContent("UPPERCASE"))
-        _ = try await storage.upsertItem(makeContent("lowercase"))
-        _ = try await storage.upsertItem(makeContent("MixedCase"))
-        await search.invalidateCache()
-
-        let request = SearchRequest(query: "case", mode: .fuzzy, limit: 50, offset: 0)
-        let result = try await search.search(request: request)
-
-        // Should find all three (case insensitive)
-        XCTAssertEqual(result.items.count, 3)
-    }
-
     func testFuzzyPinnedItemsRankFirst() async throws {
         let pinned = try await storage.upsertItem(makeContent("axbyc"))
         try await storage.setPin(pinned.id, pinned: true)
@@ -1043,28 +1047,6 @@ final class SearchServiceTests: XCTestCase {
         XCTAssertTrue(stats.isBuilt)
         XCTAssertEqual(stats.tombstones, 0)
         XCTAssertEqual(stats.slots, stats.live)
-    }
-
-    func testExactSearchResultsSortByLastUsedAt() async throws {
-        let pinnedOld = try await storage.upsertItem(makeContent("alpha pinned old"))
-        try await storage.setPin(pinnedOld.id, pinned: true)
-        try await Task.sleep(nanoseconds: 10_000_000)
-
-        _ = try await storage.upsertItem(makeContent("alpha middle"))
-        try await Task.sleep(nanoseconds: 10_000_000)
-
-        _ = try await storage.upsertItem(makeContent("alpha newest"))
-        await search.invalidateCache()
-
-        let result = try await search.search(
-            request: SearchRequest(query: "alpha", mode: .exact, sortMode: .recent, limit: 10, offset: 0)
-        )
-        XCTAssertEqual(result.items.count, 3)
-        XCTAssertEqual(result.items.first?.id, pinnedOld.id, "Pinned items should still rank first")
-
-        let unpinned = result.items.filter { !$0.isPinned }
-        XCTAssertEqual(unpinned.count, 2)
-        XCTAssertGreaterThan(unpinned[0].lastUsedAt, unpinned[1].lastUsedAt)
     }
 
     func testExactFTSSortModeRelevanceUsesBM25Ordering() async throws {

@@ -720,6 +720,13 @@ public actor StorageService {
         try await repository.fetchRecentUnpinned(limit: limit, offset: offset)
     }
 
+    nonisolated func fetchHistoryPage(limit: Int, offset: Int, expectedRevision: Int64?) async throws -> (
+        pinned: [ClipboardStoredItem], items: [ClipboardStoredItem], total: Int,
+        offset: Int, nextOffset: Int, revision: Int64
+    ) {
+        try await repository.fetchHistoryPage(limit: limit, offset: offset, expectedRevision: expectedRevision)
+    }
+
     nonisolated func incrementUsage(id: UUID, at timestamp: Date) async throws -> ClipboardStoredItem? {
         try await repository.incrementUsageReturningCurrent(id: id, lastUsedAt: timestamp)
     }
@@ -2044,7 +2051,16 @@ public actor StorageService {
     }
 
     private nonisolated static func externalReservationKey(forPath path: String) -> String {
-        URL(fileURLWithPath: path).resolvingSymlinksInPath().standardizedFileURL.path
+        resolvingDirectorySymlinks(of: URL(fileURLWithPath: path)).path
+    }
+
+    /// Resolves the file's directory and keeps its name. Resolving the file itself is unstable: one
+    /// removed mid-call comes back as `/private/var/...` instead of `/var/...`, which would give one
+    /// file two reservation keys and fail the containment check.
+    private nonisolated static func resolvingDirectorySymlinks(of url: URL) -> URL {
+        let url = url.standardizedFileURL
+        return url.deletingLastPathComponent().resolvingSymlinksInPath()
+            .appendingPathComponent(url.lastPathComponent).standardizedFileURL
     }
 
     nonisolated static func fileDeletionConcurrency(for fileCount: Int) -> Int {
@@ -2212,8 +2228,7 @@ public actor StorageService {
                 return false
             }
 
-            let url = URL(fileURLWithPath: ref)
-            let resolvedPath = url.resolvingSymlinksInPath().path
+            let resolvedPath = resolvingDirectorySymlinks(of: URL(fileURLWithPath: ref)).path
             let allowedPath = URL(fileURLWithPath: externalStoragePath).resolvingSymlinksInPath().path
             guard resolvedPath.hasPrefix(allowedPath + "/") else {
                 return false

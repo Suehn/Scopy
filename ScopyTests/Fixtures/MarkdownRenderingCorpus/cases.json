@@ -183,5 +183,18 @@
       "```python | ```bash"
     ],
     "expectedRepairedMathCount": 0
+  },
+  {
+    "name": "mixed-image-run",
+    "file": "mixed-image-run.md",
+    "expectedProfile": "authoredMarkdown",
+    "policy": { "allowLatexDocumentNormalize": false, "allowLatexInlineTextNormalize": false, "allowLooseMathRepair": false },
+    "renderedContains": [
+      "<h1>Mixed image run</h1>",
+      "<img src=\"images/local.png\" alt=\"local\" title=\"Local title\">",
+      "<img src=\"https://example.com/remote.png\" alt=\"remote\" title=\"Remote title\">"
+    ],
+    "renderedNotContains": ["scopy-rich-image-group"],
+    "expectedRepairedMathCount": 0
   }
 ]

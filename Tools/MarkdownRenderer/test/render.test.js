@@ -49,6 +49,29 @@ test("leaves escaped table code-span pipes and non-table paragraphs stable", () 
   assert.match(result.html, /<td><code>A \| B<\/code><\/td>\s*<td>ok<\/td>/);
 });
 
+test("repeated table delimiter rows preserve cells and following fenced content", () => {
+  const source = [
+    "| Example | Notes |",
+    "| --- | --- |",
+    ...Array(32).fill("| `A | B` | ok |\n| --- | --- |"),
+    "",
+    "```md",
+    "| Raw | Code |",
+    "| --- | --- |",
+    "| `C | D` | raw |",
+    "```",
+    "",
+    "| Another | Table |",
+    "| --- | --- |",
+    "| `E | F` | last |"
+  ].join("\n");
+  const html = render(source).html;
+  assert.equal((html.match(/<td><code>A \| B<\/code><\/td>\s*<td>ok<\/td>/g) || []).length, 32);
+  assert.match(html, /<td><code>E \| F<\/code><\/td>\s*<td>last<\/td>/);
+  assert.match(html, /`C \| D`/);
+  assert.doesNotMatch(html, /`C \\\| D`/);
+});
+
 test("keeps table fence-marker examples as cell text", () => {
   const result = render([
     "| 模块 | 示例 1 | 示例 2 | 推荐 |",

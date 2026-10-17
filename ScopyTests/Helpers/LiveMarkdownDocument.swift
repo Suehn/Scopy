@@ -3,7 +3,8 @@ import WebKit
 import XCTest
 
 /// A real WebKit load of the production Markdown document against a temporary copy of the checked-in
-/// atomic asset set (the standalone xctest runner has no app resource directory).
+/// atomic asset set: tests write documents beside the assets and may remove one, which the test host's bundled
+/// copy must never see.
 @MainActor
 final class LiveMarkdownDocument {
     let webView: WKWebView

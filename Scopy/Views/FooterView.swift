@@ -68,6 +68,13 @@ struct FooterView: View {
                     .font(ScopyTypography.microMono)
                     .foregroundStyle(ScopyColors.warning)
                     .accessibilityIdentifier("Footer.FetchFailure")
+                } else if historyViewModel.captureReadBlocked {
+                    Text("Clipboard capture is waiting for an unreadable item")
+                        .font(ScopyTypography.microMono)
+                        .foregroundStyle(ScopyColors.warning)
+                        .lineLimit(1)
+                        .help("Capture will retry automatically. Later items wait in order.")
+                        .accessibilityIdentifier("Footer.CaptureReadBlocked")
                 } else {
                 HStack(spacing: ScopySpacing.sm) {
                     Text(summaryText)

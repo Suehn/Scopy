@@ -24,19 +24,21 @@ final class SettingsWindowCoordinator: NSObject, NSWindowDelegate {
     private var sessionGate = SettingsWindowSessionGate()
 
     func show(appState: AppState, checkForUpdates: (() -> Void)? = nil) {
-        let session = sessionGate.startSession()
         let window = ensureWindow()
-        window.contentView = NSHostingView(
-            rootView: makeSettingsView(
-                appState: appState,
-                checkForUpdates: checkForUpdates,
-                onDismiss: { [weak self] in
-                    Task { @MainActor in
-                        self?.dismiss(session: session)
+        if !window.isVisible {
+            let session = sessionGate.startSession()
+            window.contentView = NSHostingView(
+                rootView: makeSettingsView(
+                    appState: appState,
+                    checkForUpdates: checkForUpdates,
+                    onDismiss: { [weak self] in
+                        Task { @MainActor in
+                            self?.dismiss(session: session)
+                        }
                     }
-                }
+                )
             )
-        )
+        }
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
     }

@@ -7,6 +7,7 @@ enum IngestEnvelopeProcessor {
     enum Outcome: Sendable {
         case content(ClipboardMonitor.ClipboardContent)
         case invalid
+        case unavailable
         case cancelled
     }
 
@@ -20,21 +21,23 @@ enum IngestEnvelopeProcessor {
         }
         guard !Task.isCancelled else { return .cancelled }
 
-        guard let envelope = IngestSpool.loadValidatedEnvelope(
-            from: envelopeURL,
-            ingestDirectory: ingestDirectory,
-            suffix: IngestSpool.pendingEnvelopeSuffix
-        ) else {
-            return .invalid
-        }
-
-        let originalPayloadData = IngestSpool.loadPendingPayload(from: envelope, ingestDirectory: ingestDirectory)
-        if envelope.payloadFileName != nil, originalPayloadData == nil {
-            ScopyLog.monitor.error(
-                "Discarding pending ingest envelope because payload file is missing: \(envelopeURL.lastPathComponent, privacy: .public)"
+        let envelope: IngestSpool.Envelope
+        let originalPayloadData: Data?
+        do {
+            envelope = try IngestSpool.loadValidatedEnvelope(
+                from: envelopeURL,
+                ingestDirectory: ingestDirectory,
+                suffix: IngestSpool.pendingEnvelopeSuffix
             )
+            guard !Task.isCancelled else { return .cancelled }
+            originalPayloadData = try IngestSpool.loadPendingPayload(from: envelope, ingestDirectory: ingestDirectory)
+        } catch IngestSpool.ReadError.unavailable {
+            return Task.isCancelled ? .cancelled : .unavailable
+        } catch {
+            guard !Task.isCancelled else { return .cancelled }
             return .invalid
         }
+        guard !Task.isCancelled else { return .cancelled }
         var payloadData = originalPayloadData
         var plainText = envelope.plainText
         var sizeBytes = envelope.sizeBytes
@@ -61,6 +64,8 @@ enum IngestEnvelopeProcessor {
             return IngestSpool.pendingPayloadURL(for: envelope, ingestDirectory: ingestDirectory)
         }()
 
+        guard !Task.isCancelled else { return .cancelled }
+
         let builtPayload = buildPayload(
             type: envelope.type,
             data: payloadData,
@@ -69,6 +74,11 @@ enum IngestEnvelopeProcessor {
             spoolThresholdBytes: ScopyThresholds.ingestSpoolBytes,
             preferredFileURL: preferredPayloadURL
         )
+
+        guard !Task.isCancelled else {
+            cleanupPayloadIfNeeded(builtPayload.payload, ownership: builtPayload.ownership)
+            return .cancelled
+        }
 
         return .content(ClipboardMonitor.ClipboardContent(
             type: envelope.type,

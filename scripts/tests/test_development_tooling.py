@@ -101,7 +101,7 @@ class WorktreeIsolationTests(unittest.TestCase):
                 shutil.copy(REPO / "Makefile", root / "Makefile")
                 # Inspect the real recipes; do not run setup or Xcode.
                 result = subprocess.run(
-                    ["make", "-n", "test-strict", "VERSION_ARGS="],
+                    ["make", "-n", "test-unit", "VERSION_ARGS="],
                     cwd=root, capture_output=True, text=True, check=True,
                 )
                 import re

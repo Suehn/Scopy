@@ -1,4 +1,5 @@
 import { bundledImageAssetForExactRemoteURL } from "./scopyLocalImageAssets.js";
+import { normalizeRichSurface } from "./remarkScopyRich.js";
 
 export function remarkScopyImageGroups() {
   return function transformer(tree) {
@@ -21,8 +22,20 @@ export function remarkScopyImageGroups() {
           continue;
         }
         const replacements = [];
+        let valid = true;
         for (let start = 0; start < images.length;) {
           const remaining = images.length - start;
+          const count = Math.min(12, remaining);
+          const surface = normalizeRichSurface({
+            version: 2,
+            type: "image_group",
+            layout: count === 2 ? "search" : "carousel",
+            images: images.slice(start, start + count).map(groupedImage)
+          });
+          if (!surface) {
+            valid = false;
+            break;
+          }
           if (remaining === 1) {
             replacements.push({
               type: "paragraph",
@@ -36,12 +49,16 @@ export function remarkScopyImageGroups() {
             start += 1;
             continue;
           }
-          const count = Math.min(12, remaining);
           replacements.push({
             type: "scopyImageGroup",
-            images: images.slice(start, start + count).map(groupedImage)
+            surface
           });
           start += count;
+        }
+        // A rejected batch, including a lone tail, keeps the entire original run intact.
+        if (!valid) {
+          index = end;
+          continue;
         }
         children.splice(index, end - index, ...replacements);
         index += replacements.length;

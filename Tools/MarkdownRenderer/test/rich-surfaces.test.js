@@ -322,6 +322,43 @@ test("adjacent ordinary images use the v2 image-group path while one image stays
   assert.match(single, /^<p><img src="https:\/\/example.com\/one.png" alt="one"><\/p>$/);
   assert.doesNotMatch(single, /scopy-rich-image-group/);
   assert.doesNotMatch(separated, /scopy-rich-image-group/);
+
+  for (const count of [12, 13, 24]) {
+    const paragraphs = Array.from({ length: count }, (_, index) =>
+      `![image ${index}](https://example.com/${index}.png "Title ${index}")`);
+    const html = render(paragraphs.join("\n\n")).html;
+    const groupedCount = count - (count % 12 === 1 ? 1 : 0);
+    const titles = [...html.matchAll(/data-scopy-image-title="true">([^<]*)</g)].map((match) => match[1]);
+    assert.deepEqual(titles, Array.from({ length: groupedCount }, (_, index) => `Title ${index}`));
+    assert.equal((html.match(/class="scopy-rich scopy-rich-image-group"/g) || []).length, Math.ceil(groupedCount / 12));
+    if (count % 12 === 1) {
+      assert.ok(html.endsWith(render(paragraphs.at(-1)).html));
+    }
+  }
+});
+
+test("automatic image runs stay ordinary when any batch fails strict v2 validation", () => {
+  const remote = '![remote](https://example.com/remote.png "Remote title")';
+  const local = '![local](images/local.png "Local title")';
+  const dataImage = `data:image/png;base64,${Buffer.alloc(180 * 1024).toString("base64")}`;
+  const runs = [
+    [local, remote],
+    [remote, '![file](file:///tmp/image.png "File title")'],
+    [remote, '![unsafe](javascript:alert)'],
+    [remote, `![${"a".repeat(4097)}](https://example.com/alt.png)`],
+    [remote, `![title](https://example.com/title.png "${"t".repeat(4097)}")`],
+    [remote, `![url](https://example.com/${"u".repeat(2049)}.png)`],
+    [remote, '![bad data](data:image/png;base64,not-base64)'],
+    Array.from({ length: 3 }, (_, index) => `![data ${index}](${dataImage})`),
+    [...Array(12).fill(remote), local],
+    [...Array(12).fill(remote), local, remote]
+  ];
+  for (const paragraphs of runs) {
+    // Render singleton images through the same resource policy; grouping must not lose or
+    // rewrite any source, alt, title, order or paragraph boundary when validation declines.
+    const ordinary = paragraphs.map((source) => render(source).html).join("\n");
+    assert.equal(render(paragraphs.join("\n\n")).html, ordinary);
+  }
 });
 
 test("only the two verified public-copy image URLs resolve to bundled assets", () => {

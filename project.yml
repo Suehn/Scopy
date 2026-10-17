@@ -85,7 +85,9 @@ targets:
       - package: Sparkle
         product: Sparkle
     postBuildScripts:
-      - name: "Stage MarkdownPreview Assets"
+      # The test host stages the same folder, so hosted tests load the renderer from the app-bundle path.
+      - &stage_markdown_preview_assets
+        name: "Stage MarkdownPreview Assets"
         script: |
           set -euo pipefail
           SRC_DIR="${SRCROOT}/Scopy/Resources/MarkdownPreview"
@@ -150,7 +152,7 @@ targets:
           - "Fixtures/**"
       - path: ScopyTests/Fixtures
         buildPhase: resources
-      # 独立测试 bundle 模式：直接包含应用源码，避免 SwiftUI App 生命周期冲突
+      # The minimal AppKit host runs the event loop without starting the SwiftUI application.
       - path: Scopy
         excludes:
           - "**/*.md"
@@ -171,12 +173,12 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.scopy.tests
         GENERATE_INFOPLIST_FILE: true
         INFOPLIST_KEY_NSPrincipalClass: XCTestCase
-        # 保持独立测试 bundle 模式；Scopy 依赖只用于构建 @testable import 所需模块。
-        TEST_HOST: ""
-        BUNDLE_LOADER: ""
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/ScopyTestHost.app/Contents/MacOS/ScopyTestHost"
+        BUNDLE_LOADER: "$(TEST_HOST)"
     dependencies:
       - target: Scopy
         link: false
+      - target: ScopyTestHost
       - sdk: libsqlite3.tbd
       - package: ScopyKit
         product: ScopyKit
@@ -192,6 +194,8 @@ targets:
         PRODUCT_NAME: ScopyTestHost
         PRODUCT_BUNDLE_IDENTIFIER: com.scopy.testhost
         GENERATE_INFOPLIST_FILE: true
+    postBuildScripts:
+      - *stage_markdown_preview_assets
 
   ScopyTSanTests:
     type: bundle.unit-test

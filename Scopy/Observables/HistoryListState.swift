@@ -53,7 +53,10 @@ struct HistoryListState {
         // Appending keeps every existing index valid; extend the derived arrays instead of
         // rebuilding them for each page chunk.
         var index = items.count
+        var accepted: [ClipboardItemDTO] = []
         for item in newItems {
+            guard itemIndexByID[item.id] == nil else { continue }
+            accepted.append(item)
             itemIndexByID[item.id] = index
             if item.isPinned {
                 pinnedItems.append(item)
@@ -62,7 +65,7 @@ struct HistoryListState {
             }
             index += 1
         }
-        items.append(contentsOf: newItems)
+        items.append(contentsOf: accepted)
         loadedCount = items.count
         projectionGeneration &+= 1
     }
@@ -74,20 +77,6 @@ struct HistoryListState {
 
     mutating func updateTotalCount(_ total: Int) {
         totalCount = total
-        recomputeCanLoadMore()
-    }
-
-    mutating func incrementTotalCount() {
-        guard totalCount >= 0 else { return }
-        totalCount += 1
-        recomputeCanLoadMore()
-    }
-
-    mutating func decrementTotalCountIfNeeded(wasPresent: Bool, isUnfilteredList: Bool) {
-        guard totalCount >= 0 else { return }
-        if isUnfilteredList || wasPresent {
-            totalCount = max(0, totalCount - 1)
-        }
         recomputeCanLoadMore()
     }
 
@@ -172,30 +161,19 @@ struct HistoryListState {
     }
 
     @discardableResult
-    mutating func insertOrMoveItemToFront(_ item: ClipboardItemDTO) -> Bool {
-        if let existingIndex = indexOfItem(withID: item.id) {
-            if existingIndex == 0 {
-                return setItemIfChanged(at: existingIndex, to: item)
-            }
-            items.remove(at: existingIndex)
-            if let groupIndex = pinnedItems.firstIndex(where: { $0.id == item.id }) {
-                pinnedItems.remove(at: groupIndex)
-            } else if let groupIndex = unpinnedItems.firstIndex(where: { $0.id == item.id }) {
-                unpinnedItems.remove(at: groupIndex)
-            }
+    mutating func upsertRecentItem(_ item: ClipboardItemDTO) -> Bool {
+        if let index = indexOfItem(withID: item.id) {
+            guard items[index] != item else { return false }
+            items.remove(at: index)
         }
-        items.insert(item, at: 0)
+        let index = items.firstIndex {
+            if $0.isPinned != item.isPinned { return item.isPinned }
+            if $0.lastUsedAt != item.lastUsedAt { return item.lastUsedAt > $0.lastUsedAt }
+            return item.id.uuidString < $0.id.uuidString
+        } ?? items.endIndex
+        items.insert(item, at: index)
         loadedCount = items.count
-        // The new front item leads its group; shift the index map instead of rebuilding it.
-        projectionGeneration &+= 1
-        for (index, existing) in items.enumerated() {
-            itemIndexByID[existing.id] = index
-        }
-        if item.isPinned {
-            pinnedItems.insert(item, at: 0)
-        } else {
-            unpinnedItems.insert(item, at: 0)
-        }
+        rebuildDerivedState()
         recomputeCanLoadMore()
         return true
     }

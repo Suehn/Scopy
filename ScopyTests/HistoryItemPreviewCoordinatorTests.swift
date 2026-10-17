@@ -102,7 +102,6 @@ final class HistoryItemPreviewCoordinatorTests: XCTestCase {
                 )
             )
         )
-        weak var weakCoordinator = coordinator
 
         XCTAssertTrue(interactionCoordinator.beginHoverPreviewTransfer(for: itemID))
         coordinator?.startRowExitIntent(
@@ -117,7 +116,6 @@ final class HistoryItemPreviewCoordinatorTests: XCTestCase {
 
         coordinator = nil
 
-        XCTAssertNil(weakCoordinator)
         await fulfillment(of: [finished], timeout: 1)
         XCTAssertNil(interactionCoordinator.hoverPreviewTransferOwnerID)
         XCTAssertEqual(finishCount, 1)

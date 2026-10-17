@@ -221,24 +221,6 @@ final class LinkEnrichmentTests: XCTestCase {
         )
     }
 
-    /// Live-network verification, excluded from regular suites.
-    /// Run manually with TEST_RUNNER_SCOPY_NETWORK_TESTS=1 on the focused xcodebuild test
-    /// invocation (xcodebuild forwards only TEST_RUNNER_-prefixed variables to XCTest).
-    func testLiveFetchProducesFrozenEntriesForRealArticle() async throws {
-        try XCTSkipUnless(
-            ProcessInfo.processInfo.environment["SCOPY_NETWORK_TESTS"] == "1"
-                || ProcessInfo.processInfo.environment["TEST_RUNNER_SCOPY_NETWORK_TESTS"] == "1",
-            "network-gated; set SCOPY_NETWORK_TESTS=1 to run"
-        )
-        let fetcher = LinkEnrichmentFetcher()
-        let entries = await fetcher.enrich(urls: ["https://openai.com/index/introducing-chatgpt-search/"])
-        let entry = try XCTUnwrap(entries["https://openai.com/index/introducing-chatgpt-search/"])
-        XCTAssertFalse(entry.title.isEmpty)
-        if let image = entry.image {
-            XCTAssertTrue(image.hasPrefix("data:image/"))
-        }
-    }
-
     private func makeFetcher(
         resolver: @escaping LinkEnrichmentFetcher.HostResolver
     ) -> LinkEnrichmentFetcher {

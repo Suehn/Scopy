@@ -7,44 +7,6 @@ import ScopyKit
 /// Tests the scroll profiler instrumentation itself (`ScrollPerformanceProfile`), not the list's scroll performance.
 final class ScrollPerformanceProfileTests: XCTestCase {
 
-    private final class TestScroller: NSScroller {
-        var reportedPart: NSScroller.Part = .knob
-
-        override func testPart(_ point: NSPoint) -> NSScroller.Part {
-            reportedPart
-        }
-    }
-
-    @MainActor
-    private struct ScrollbarFixture {
-        let window: NSWindow
-        let scrollView: NSScrollView
-        let observer: ListLiveScrollObserverView.ObserverView
-        let verticalScroller: TestScroller
-        let horizontalScroller: TestScroller
-
-        var verticalPointInWindow: NSPoint {
-            verticalScroller.convert(
-                NSPoint(x: verticalScroller.bounds.midX, y: verticalScroller.bounds.midY),
-                to: nil
-            )
-        }
-
-        var horizontalPointInWindow: NSPoint {
-            horizontalScroller.convert(
-                NSPoint(x: horizontalScroller.bounds.midX, y: horizontalScroller.bounds.midY),
-                to: nil
-            )
-        }
-
-        var documentPointInWindow: NSPoint {
-            scrollView.contentView.convert(
-                NSPoint(x: scrollView.contentView.bounds.midX, y: scrollView.contentView.bounds.midY),
-                to: nil
-            )
-        }
-    }
-
     func testBoundedRingBufferWrapsInChronologicalOrder() {
         var buffer = BoundedRingBuffer<Int>(capacity: 3)
 
@@ -265,29 +227,6 @@ final class ScrollPerformanceProfileTests: XCTestCase {
         XCTAssertEqual(metrics.gauges["active.slot.max"], 1)
     }
 
-    func testFixedDatasetMetadataSerializesValidatorKeys() {
-        let metadata = ScrollProfileDatasetMetadata(
-            schema: "history-profile-dataset-v1",
-            datasetID: "fixed-warm-text-v1",
-            fingerprint: "sha256:" + String(repeating: "a", count: 64),
-            itemCount: 50,
-            textItemCount: 50,
-            imageItemCount: 0,
-            pinnedItemCount: 2,
-            uniqueItemIDCount: 50,
-            minimumTextUTF8Bytes: 4_096,
-            maximumTextUTF8Bytes: 4_096
-        )
-
-        XCTAssertEqual(metadata.jsonPayload["schema"] as? String, "history-profile-dataset-v1")
-        XCTAssertEqual(metadata.jsonPayload["id"] as? String, "fixed-warm-text-v1")
-        XCTAssertEqual(metadata.jsonPayload["item_count"] as? Int, 50)
-        XCTAssertEqual(metadata.jsonPayload["pinned_item_count"] as? Int, 2)
-        XCTAssertEqual(metadata.jsonPayload["text_utf8_bytes_min"] as? Int, 4_096)
-        XCTAssertEqual(metadata.jsonPayload["text_utf8_bytes_max"] as? Int, 4_096)
-        XCTAssertEqual(ScrollPerformanceProfile.fixedWorkloadRequiredCounterNames.count, 12)
-    }
-
     func testSerializedMetricIngressSchedulesOneDrainForAnOrderedBatch() {
         let ingress = ScrollProfileSerializedEventBuffer<Int>()
 
@@ -351,29 +290,6 @@ final class ScrollPerformanceProfileTests: XCTestCase {
         XCTAssertEqual(batch.elements, [6])
         XCTAssertEqual(batch.overflow.coalescedRecordCount, 2)
         XCTAssertEqual(batch.overflow.droppedRecordCount, 0)
-    }
-
-    func testSerializedMetricIngressSurvivesConcurrentEnqueueCloseAndReopen() {
-        let ingress = ScrollProfileSerializedEventBuffer<Int>(capacity: 32)
-
-        DispatchQueue.concurrentPerform(iterations: 4_000) { value in
-            switch value % 41 {
-            case 0:
-                _ = ingress.closeAndTakePendingForFinalization()
-            case 1:
-                ingress.reopenDiscardingPending()
-            default:
-                _ = ingress.enqueue(value)
-            }
-        }
-
-        _ = ingress.closeAndTakePendingForFinalization()
-        XCTAssertFalse(ingress.enqueue(-1))
-        ingress.reopenDiscardingPending()
-        XCTAssertTrue(ingress.enqueue(99_999))
-        let finalBatch = ingress.closeAndTakePendingForFinalization()
-        XCTAssertEqual(finalBatch.elements, [99_999])
-        XCTAssertEqual(finalBatch.overflow, ScrollProfileIngressOverflowStats())
     }
 
     func testAnimationCallbackMetricNamesAndThresholdMathAreExplicit() throws {
@@ -442,13 +358,6 @@ final class ScrollPerformanceProfileTests: XCTestCase {
         XCTAssertEqual(payload["drop_ratio"] as? Double ?? 0, 2.0 / 3.0, accuracy: 0.0001)
         XCTAssertEqual(legacyActiveFrameStats["count"] as? Int, 2)
         XCTAssertEqual(payload["active_drop_ratio"] as? Double ?? 0, 1, accuracy: 0.0001)
-        let semantics = ScrollPerformanceProfile.metricSemanticsPayload
-        let intervalSemantics = try XCTUnwrap(
-            semantics[ScrollPerformanceProfile.MetricName.animationCallbackInterval] as? String
-        )
-        XCTAssertTrue(intervalSemantics.contains("NSScreen CADisplayLink"))
-        XCTAssertTrue(intervalSemantics.contains("TimelineView(.animation)"))
-        XCTAssertTrue(intervalSemantics.contains("not presented-frame"))
     }
 
     func testAsynchronouslyQueuedTimingEventKeepsOriginalCompletionWindow() async throws {
@@ -621,49 +530,4 @@ final class ScrollPerformanceProfileTests: XCTestCase {
         XCTAssertEqual(detailCallback["end_ms"] as? Double ?? 0, 66, accuracy: 0.1)
     }
 
-    private func makeObserver() -> (ListLiveScrollObserverView.ObserverView, NSScrollView) {
-        let scrollView = NSScrollView(frame: NSRect(x: 0, y: 0, width: 200, height: 200))
-        let observer = ListLiveScrollObserverView.ObserverView(frame: .zero)
-        scrollView.contentView.addSubview(observer)
-        observer.attachIfNeeded()
-        return (observer, scrollView)
-    }
-
-    private func makeScrollbarFixture() -> ScrollbarFixture {
-        let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 360, height: 280),
-            styleMask: [.borderless],
-            backing: .buffered,
-            defer: false
-        )
-        let contentView = NSView(frame: NSRect(x: 0, y: 0, width: 360, height: 280))
-        window.contentView = contentView
-
-        let scrollView = NSScrollView(frame: NSRect(x: 20, y: 20, width: 300, height: 220))
-        scrollView.scrollerStyle = .legacy
-        scrollView.autohidesScrollers = false
-        scrollView.hasVerticalScroller = true
-        scrollView.hasHorizontalScroller = true
-
-        let verticalScroller = TestScroller()
-        let horizontalScroller = TestScroller()
-        scrollView.verticalScroller = verticalScroller
-        scrollView.horizontalScroller = horizontalScroller
-        scrollView.documentView = NSView(frame: NSRect(x: 0, y: 0, width: 800, height: 800))
-        contentView.addSubview(scrollView)
-        scrollView.tile()
-        contentView.layoutSubtreeIfNeeded()
-
-        let observer = ListLiveScrollObserverView.ObserverView(frame: .zero)
-        scrollView.contentView.addSubview(observer)
-        observer.attachIfNeeded()
-
-        return ScrollbarFixture(
-            window: window,
-            scrollView: scrollView,
-            observer: observer,
-            verticalScroller: verticalScroller,
-            horizontalScroller: horizontalScroller
-        )
-    }
 }

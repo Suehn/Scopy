@@ -30,12 +30,6 @@ final class RealClipboardService: ClipboardServiceProtocol {
         try await backend.start()
     }
 
-    func stop() {
-        Task { [backend] in
-            await backend.stop()
-        }
-    }
-
     func stopAndWait() async {
         await backend.stop()
     }
@@ -50,8 +44,8 @@ final class RealClipboardService: ClipboardServiceProtocol {
         try await backend.fetchPinned()
     }
 
-    func fetchRecentUnpinned(limit: Int, offset: Int) async throws -> [ClipboardItemDTO] {
-        try await backend.fetchRecentUnpinned(limit: limit, offset: offset)
+    func fetchHistoryPage(limit: Int, offset: Int, expectedRevision: Int64?) async throws -> RecentHistoryPage {
+        try await backend.fetchHistoryPage(limit: limit, offset: offset, expectedRevision: expectedRevision)
     }
 
     func search(query: SearchRequest) async throws -> SearchResultPage {
@@ -90,8 +84,8 @@ final class RealClipboardService: ClipboardServiceProtocol {
         try await backend.fileURLs(itemID: itemID)
     }
 
-    func updateSettings(_ settings: SettingsDTO) async throws {
-        try await backend.updateSettings(settings)
+    func updateSettings(_ patch: SettingsPatch) async throws -> SettingsDTO {
+        try await backend.updateSettings(patch)
     }
 
     func getSettings() async throws -> SettingsDTO {

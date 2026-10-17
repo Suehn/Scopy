@@ -9,7 +9,6 @@ public actor SettingsStore {
     }
 
     private let userDefaults: UserDefaults
-    private var cachedSettings: SettingsDTO?
 
     public init(userDefaults: UserDefaults = .standard) {
         self.userDefaults = userDefaults
@@ -24,21 +23,25 @@ public actor SettingsStore {
     }
 
     public func load() -> SettingsDTO {
-        let settings = Self.loadFromUserDefaults(userDefaults)
-        cachedSettings = settings
-        return settings
+        Self.loadFromUserDefaults(userDefaults)
     }
 
     public func save(_ settings: SettingsDTO) {
         userDefaults.set(Self.encode(settings), forKey: Constants.settingsKey)
-        cachedSettings = settings
+    }
+
+    /// Merges only the changed fields and persists them without yielding the settings actor.
+    public func apply(_ patch: SettingsPatch) -> SettingsDTO {
+        let values = Self.encode(load().applying(patch))
+        userDefaults.set(values, forKey: Constants.settingsKey)
+        return Self.decode(values)
     }
 
     public func updateHotkey(keyCode: UInt32, modifiers: UInt32) {
-        var updated = cachedSettings ?? Self.loadFromUserDefaults(userDefaults)
-        updated.hotkeyKeyCode = keyCode
-        updated.hotkeyModifiers = modifiers
-        save(updated)
+        var patch = SettingsPatch()
+        patch.hotkeyKeyCode = keyCode
+        patch.hotkeyModifiers = modifiers
+        _ = apply(patch)
     }
 
     // MARK: - Encoding / Decoding

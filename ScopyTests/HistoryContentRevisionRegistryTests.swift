@@ -9,10 +9,12 @@ final class HistoryContentRevisionRegistryTests: XCTestCase {
         let service = TestMockClipboardService()
         service.setItemCount(3)
         let appState = AppState.forTesting(service: service)
-        defer { appState.stop() }
-        await appState.load()
+        addTeardownBlock {
+            await appState.stop()
+        }
+        await appState.historyViewModel.load()
 
-        let target = appState.items[0]
+        let target = appState.historyViewModel.items[0]
         let targetRevision = ClipboardItemContentRevision(item: target)
         XCTAssertTrue(
             appState.historyViewModel.isContentRevisionCurrent(
@@ -21,9 +23,9 @@ final class HistoryContentRevisionRegistryTests: XCTestCase {
             )
         )
 
-        appState.items = [appState.items[1]]
+        appState.historyViewModel.items = [appState.historyViewModel.items[1]]
 
-        XCTAssertFalse(appState.items.contains { $0.id == target.id })
+        XCTAssertFalse(appState.historyViewModel.items.contains { $0.id == target.id })
         XCTAssertTrue(
             appState.historyViewModel.isContentRevisionCurrent(
                 itemID: target.id,
@@ -37,19 +39,21 @@ final class HistoryContentRevisionRegistryTests: XCTestCase {
         let service = TestMockClipboardService()
         service.setItemCount(2)
         let appState = AppState.forTesting(service: service)
-        defer { appState.stop() }
-        await appState.load()
+        addTeardownBlock {
+            await appState.stop()
+        }
+        await appState.historyViewModel.load()
 
-        let target = appState.items[0]
+        let target = appState.historyViewModel.items[0]
         let oldRevision = ClipboardItemContentRevision(item: target)
-        appState.items = [appState.items[1]]
+        appState.historyViewModel.items = [appState.historyViewModel.items[1]]
         let updated = replacingContent(of: target, hash: "updated-hash", text: "updated")
         let updatedRevision = ClipboardItemContentRevision(item: updated)
         let oldToken = appState.historyViewModel.contentRevisionReconciliationToken
 
         await appState.historyViewModel.handleEvent(.itemContentUpdated(updated))
 
-        XCTAssertFalse(appState.items.contains { $0.id == target.id })
+        XCTAssertFalse(appState.historyViewModel.items.contains { $0.id == target.id })
         XCTAssertFalse(
             appState.historyViewModel.isContentRevisionCurrent(
                 itemID: target.id,
@@ -72,16 +76,18 @@ final class HistoryContentRevisionRegistryTests: XCTestCase {
         let service = TestMockClipboardService()
         service.setItemCount(1)
         let appState = AppState.forTesting(service: service)
-        defer { appState.stop() }
-        await appState.load()
+        addTeardownBlock {
+            await appState.stop()
+        }
+        await appState.historyViewModel.load()
 
-        let target = try! XCTUnwrap(appState.items.first)
+        let target = try! XCTUnwrap(appState.historyViewModel.items.first)
         let revision = ClipboardItemContentRevision(item: target)
 
         await appState.historyViewModel.handleEvent(.itemDeleted(target.id))
-        appState.items = [target]
+        appState.historyViewModel.items = [target]
 
-        XCTAssertTrue(appState.items.isEmpty, "A stale search/load projection must not revive a deleted row")
+        XCTAssertTrue(appState.historyViewModel.items.isEmpty, "A stale search/load projection must not revive a deleted row")
         XCTAssertFalse(
             appState.historyViewModel.isContentRevisionCurrent(
                 itemID: target.id,
@@ -94,7 +100,7 @@ final class HistoryContentRevisionRegistryTests: XCTestCase {
 
         await appState.historyViewModel.handleEvent(.newItem(target))
 
-        XCTAssertEqual(appState.items.map(\.id), [target.id])
+        XCTAssertEqual(appState.historyViewModel.items.map(\.id), [target.id])
         XCTAssertTrue(
             appState.historyViewModel.isContentRevisionCurrent(
                 itemID: target.id,
@@ -110,15 +116,17 @@ final class HistoryContentRevisionRegistryTests: XCTestCase {
         let service = TestMockClipboardService()
         service.setItemCount(3)
         let appState = AppState.forTesting(service: service)
-        defer { appState.stop() }
-        await appState.load()
+        addTeardownBlock {
+            await appState.stop()
+        }
+        await appState.historyViewModel.load()
 
-        let target = try! XCTUnwrap(appState.items.first)
+        let target = try! XCTUnwrap(appState.historyViewModel.items.first)
         service.resetSearchCallCount()
         service.searchDelayIgnoresCancellation = true
         service.searchDelayNs = 200_000_000
-        appState.searchQuery = "Test"
-        appState.search()
+        appState.historyViewModel.searchQuery = "Test"
+        appState.historyViewModel.search()
 
         await assertEventually(timeout: 1.0, pollInterval: 0.01, {
             service.searchStartedQueries.count == 1
@@ -131,34 +139,36 @@ final class HistoryContentRevisionRegistryTests: XCTestCase {
         await assertEventually(timeout: 1.0, pollInterval: 0.01, {
             service.searchStartedQueries.count == 2 && service.searchCallCount >= 1
         }, message: "An authoritative delete should replace the in-flight filtered projection")
-        XCTAssertFalse(appState.items.contains { $0.id == target.id })
+        XCTAssertFalse(appState.historyViewModel.items.contains { $0.id == target.id })
 
         await assertEventually(timeout: 1.0, pollInterval: 0.01, {
             service.searchCallCount == 2
         }, message: "The uncancellable stale request should finish without overwriting the refresh")
-        XCTAssertFalse(appState.items.contains { $0.id == target.id })
+        XCTAssertFalse(appState.historyViewModel.items.contains { $0.id == target.id })
     }
 
     func testItemsClearedDuringActiveSearchEmptiesProjectionAndInvalidatesOldRevision() async {
         let service = TestMockClipboardService()
         service.setItemCount(10)
         let appState = AppState.forTesting(service: service, historyTiming: .production)
-        defer { appState.stop() }
-        await appState.load()
+        addTeardownBlock {
+            await appState.stop()
+        }
+        await appState.historyViewModel.load()
 
-        let target = try! XCTUnwrap(appState.items.first)
+        let target = try! XCTUnwrap(appState.historyViewModel.items.first)
         let revision = ClipboardItemContentRevision(item: target)
-        appState.searchQuery = "Test"
-        appState.search()
+        appState.historyViewModel.searchQuery = "Test"
+        appState.historyViewModel.search()
         await assertEventually(timeout: 1.0, pollInterval: 0.01, {
-            service.searchCallCount == 1 && !appState.isLoading
+            service.searchCallCount == 1 && !appState.historyViewModel.isLoading
         })
 
         service.setItemCount(0)
         await appState.historyViewModel.handleEvent(.itemsCleared(keepPinned: false))
 
-        XCTAssertTrue(appState.items.isEmpty)
-        XCTAssertEqual(appState.totalCount, 0)
+        XCTAssertTrue(appState.historyViewModel.items.isEmpty)
+        XCTAssertEqual(appState.historyViewModel.totalCount, 0)
         XCTAssertFalse(
             appState.historyViewModel.isContentRevisionCurrent(
                 itemID: target.id,
@@ -175,14 +185,16 @@ final class HistoryContentRevisionRegistryTests: XCTestCase {
         let service = TestMockClipboardService()
         service.setItemCount(2, pinnedCount: 1)
         let appState = AppState.forTesting(service: service)
-        defer { appState.stop() }
+        addTeardownBlock {
+            await appState.stop()
+        }
         let subscribed = expectation(description: "Event listener subscribed")
         service.onEventStreamSubscribed = { subscribed.fulfill() }
         await appState.start()
         await fulfillment(of: [subscribed], timeout: 1.0)
 
-        let pinnedItem = try! XCTUnwrap(appState.pinnedItems.first)
-        let unpinnedItem = try! XCTUnwrap(appState.unpinnedItems.first)
+        let pinnedItem = try! XCTUnwrap(appState.historyViewModel.pinnedItems.first)
+        let unpinnedItem = try! XCTUnwrap(appState.historyViewModel.unpinnedItems.first)
         let pinnedState = HistoryItemInteractionState(
             revision: ClipboardItemContentRevision(item: pinnedItem),
             relativeTimeText: "now"
@@ -206,7 +218,7 @@ final class HistoryContentRevisionRegistryTests: XCTestCase {
 
         let clearHandled = expectation(description: "Clear event handled before sentinel")
         appState.applyHotKeyHandler = { _, _ in clearHandled.fulfill() }
-        await appState.clearAll()
+        await appState.historyViewModel.clearAll()
         service.emitEvent(.settingsChanged)
         await fulfillment(of: [clearHandled], timeout: 1.0)
         store.reconcile(
@@ -218,18 +230,20 @@ final class HistoryContentRevisionRegistryTests: XCTestCase {
         XCTAssertEqual(pinnedState.rowController.noteDraft, "pinned draft")
         XCTAssertFalse(store.contains(unpinnedState))
         XCTAssertTrue(unpinnedState.isTornDown)
-        XCTAssertEqual(appState.items.map(\.id), [pinnedItem.id])
+        XCTAssertEqual(appState.historyViewModel.items.map(\.id), [pinnedItem.id])
     }
 
     func testTransientPinnedFetchFailureDoesNotEraseKnownPinnedDraft() async {
         let service = TestMockClipboardService()
         service.setItemCount(2, pinnedCount: 1)
         let appState = AppState.forTesting(service: service)
-        defer { appState.stop() }
-        await appState.load()
+        addTeardownBlock {
+            await appState.stop()
+        }
+        await appState.historyViewModel.load()
 
-        let pinnedItem = try! XCTUnwrap(appState.pinnedItems.first)
-        let unpinnedItem = try! XCTUnwrap(appState.unpinnedItems.first)
+        let pinnedItem = try! XCTUnwrap(appState.historyViewModel.pinnedItems.first)
+        let unpinnedItem = try! XCTUnwrap(appState.historyViewModel.unpinnedItems.first)
         let pinnedState = HistoryItemInteractionState(
             revision: ClipboardItemContentRevision(item: pinnedItem),
             relativeTimeText: "now"
@@ -265,19 +279,21 @@ final class HistoryContentRevisionRegistryTests: XCTestCase {
         )
         XCTAssertFalse(store.contains(unpinnedState))
         XCTAssertTrue(unpinnedState.isTornDown)
-        XCTAssertEqual(appState.items.map(\.id), [pinnedItem.id])
+        XCTAssertEqual(appState.historyViewModel.items.map(\.id), [pinnedItem.id])
     }
 
     func testRegistryIsBoundedAndCapacityEvictionRemainsUnknown() {
         let service = TestMockClipboardService()
         let appState = AppState.forTesting(service: service)
-        defer { appState.stop() }
+        addTeardownBlock {
+            await appState.stop()
+        }
         let itemCount = HistoryViewModel.knownContentRevisionCapacity + 4
         let items = (0..<itemCount).map { index in makeItem(index: index) }
         let evictedItem = items[0]
         let evictedRevision = ClipboardItemContentRevision(item: evictedItem)
 
-        appState.items = items
+        appState.historyViewModel.items = items
 
         let snapshot = appState.historyViewModel.contentRevisionReconciliationSnapshot
         XCTAssertLessThanOrEqual(

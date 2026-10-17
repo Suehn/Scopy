@@ -40,7 +40,7 @@ var start = 0
 for (i, r) in rows.enumerated() {
     var texts: [String] = [], id = ""
     collect(r, depth: 3, texts: &texts, id: &id)
-    if id.isEmpty, texts.contains(where: { $0.hasPrefix("Recent") }) { start = i; break }
+    if id.isEmpty, texts.contains(where: { $0.hasPrefix("Recent") || $0.hasPrefix("最近") }) { start = i; break }
 }
 print("list role \(str(list, kAXRoleAttribute) ?? "?") rows materialized \(rows.count), printing from row \(start)\(start > 0 ? " (rows before it are the Pinned section)" : "")")
 for (i, r) in rows.enumerated().dropFirst(start).prefix(maxRows) {

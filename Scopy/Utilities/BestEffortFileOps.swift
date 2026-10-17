@@ -52,49 +52,6 @@ enum BestEffortFileOps {
         }
     }
 
-    static func loadData(
-        from url: URL,
-        options: Data.ReadingOptions = [],
-        logger: Logger,
-        operation: String
-    ) -> Data? {
-        do {
-            return try Data(contentsOf: url, options: options)
-        } catch {
-            logFailure(
-                logger: logger,
-                operation: operation,
-                action: "read",
-                path: url.path,
-                itemID: nil,
-                error: error
-            )
-            return nil
-        }
-    }
-
-    static func decodeJSON<T: Decodable>(
-        _ type: T.Type,
-        from data: Data,
-        logger: Logger,
-        operation: String,
-        path: String
-    ) -> T? {
-        do {
-            return try JSONDecoder().decode(T.self, from: data)
-        } catch {
-            logFailure(
-                logger: logger,
-                operation: operation,
-                action: "decode",
-                path: path,
-                itemID: nil,
-                error: error
-            )
-            return nil
-        }
-    }
-
     private static func logFailure(
         logger: Logger,
         operation: String,

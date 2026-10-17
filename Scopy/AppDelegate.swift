@@ -51,6 +51,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private(set) var updaterController: SPUStandardUpdaterController?
     private var localEventMonitors: [Any] = []
     private var memoryPressureSource: DispatchSourceMemoryPressure?
+    private var pendingTerminationAttempt: UUID?
+    /// Quit waits for deletions and a clean backend shutdown, but never longer than this: storage is
+    /// crash-consistent, so a hung shutdown must not keep Scopy (or a logout or update relaunch) alive.
+    private static let terminationDeadline: Duration = .seconds(5)
 
     private lazy var statusItem: NSStatusItem = {
         let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -384,6 +388,46 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         false
     }
 
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard pendingTerminationAttempt == nil else { return .terminateLater }
+        let attempt = UUID()
+        pendingTerminationAttempt = attempt
+        let isSystemQuit = Self.isSystemQuit(NSAppleEventManager.shared().currentAppleEvent)
+        Task { @MainActor in
+            var canTerminate = await appState.stopForTermination()
+            if !canTerminate && isSystemQuit {
+                // Logout, restart, and shutdown go ahead; the row whose deletion failed stays in history.
+                await appState.stop()
+                canTerminate = true
+            }
+            replyToTermination(sender, attempt: attempt, canTerminate: canTerminate)
+        }
+        Task { @MainActor in
+            try? await Task.sleep(for: Self.terminationDeadline)
+            replyToTermination(sender, attempt: attempt, canTerminate: true)
+        }
+        return .terminateLater
+    }
+
+    /// Logout, restart, and shutdown quit with a reason (`kAEQuitReason`); a user or updater quit has none.
+    private static func isSystemQuit(_ event: NSAppleEventDescriptor?) -> Bool {
+        guard let event, event.eventClass == AEEventClass(kCoreEventClass),
+              event.eventID == AEEventID(kAEQuitApplication) else { return false }
+        let reason = AEKeyword(kAEQuitReason)
+        return event.attributeDescriptor(forKeyword: reason) != nil || event.paramDescriptor(forKeyword: reason) != nil
+    }
+
+    /// Answers one termination attempt exactly once, whichever of shutdown or the deadline comes first.
+    private func replyToTermination(_ sender: NSApplication, attempt: UUID, canTerminate: Bool) {
+        guard pendingTerminationAttempt == attempt else { return }
+        pendingTerminationAttempt = nil
+        if !canTerminate, let panel, !panel.isPresented {
+            // A failed delete restored its row; show it with the error instead of quitting.
+            panel.toggle(positionMode: .statusBar)
+        }
+        sender.reply(toApplicationShouldTerminate: canTerminate)
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
         hotKeyService?.unregister()
         isHotKeyRegistered = false
@@ -391,7 +435,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         localEventMonitors.removeAll()
         memoryPressureSource?.cancel()
         memoryPressureSource = nil
-        appState.stop()
     }
 
     @objc func togglePanel() {

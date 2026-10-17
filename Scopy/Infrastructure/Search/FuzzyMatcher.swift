@@ -14,6 +14,8 @@ enum FuzzyMatcher {
         let utf16Count: Int
         let safeFastUTF16: Bool
         let utf16Units: [UInt16]?
+        /// A one- or two-character needle's byte-level search, with the same rule as the String one.
+        let substringMatcher: LoweredTextMatcher?
     }
 
     /// One compiled query for either fuzzy mode; `score(textLower:)` is the single scoring rule
@@ -21,7 +23,7 @@ enum FuzzyMatcher {
     struct Scorer {
         private enum PlusTerm {
             /// ASCII word of three or more characters: substring-only semantics.
-            case substring(word: String, utf16Count: Int)
+            case substring(word: String, utf16Count: Int, matcher: LoweredTextMatcher?)
             case fuzzy(PreparedQuery)
         }
 
@@ -35,7 +37,11 @@ enum FuzzyMatcher {
             if mode == .fuzzyPlus {
                 plusTerms = SearchQueryNormalization.fuzzyPlusTokens(queryLower).map { word in
                     if word.canBeConverted(to: .ascii), word.count >= 3 {
-                        return .substring(word: word, utf16Count: word.utf16.count)
+                        return .substring(
+                            word: word,
+                            utf16Count: word.utf16.count,
+                            matcher: LoweredTextMatcher(charactersOf: word)
+                        )
                     }
                     return .fuzzy(FuzzyMatcher.prepare(queryLower: word))
                 }
@@ -52,9 +58,10 @@ enum FuzzyMatcher {
                 var totalScore = 0
                 for term in plusTerms {
                     switch term {
-                    case .substring(let word, let utf16Count):
-                        guard let range = textLower.range(of: word) else { return nil }
-                        let pos = range.lowerBound.utf16Offset(in: textLower)
+                    case .substring(let word, let utf16Count, let matcher):
+                        guard let pos = FuzzyMatcher.firstOffset(of: word, in: textLower, matcher: matcher) else {
+                            return nil
+                        }
                         totalScore += utf16Count * 10 - (utf16Count - 1) - pos
                     case .fuzzy(let prepared):
                         guard let termScore = FuzzyMatcher.score(textLower: textLower, query: prepared) else {
@@ -83,7 +90,10 @@ enum FuzzyMatcher {
                     characterCount: characterCount,
                     utf16Count: units.count,
                     safeFastUTF16: true,
-                    utf16Units: units
+                    utf16Units: units,
+                    substringMatcher: units.count <= 4
+                        ? LoweredTextMatcher(codeUnitsOf: queryLower)
+                        : LoweredTextMatcher(charactersOf: queryLower)
                 )
             }
 
@@ -93,7 +103,8 @@ enum FuzzyMatcher {
                 characterCount: characterCount,
                 utf16Count: queryLower.utf16.count,
                 safeFastUTF16: false,
-                utf16Units: nil
+                utf16Units: nil,
+                substringMatcher: LoweredTextMatcher(charactersOf: queryLower)
             )
         }
 
@@ -105,7 +116,8 @@ enum FuzzyMatcher {
                 characterCount: characterCount,
                 utf16Count: units.count,
                 safeFastUTF16: true,
-                utf16Units: units
+                utf16Units: units,
+                substringMatcher: nil
             )
         }
 
@@ -115,7 +127,8 @@ enum FuzzyMatcher {
             characterCount: characterCount,
             utf16Count: queryLower.utf16.count,
             safeFastUTF16: false,
-            utf16Units: nil
+            utf16Units: nil,
+            substringMatcher: nil
         )
     }
 
@@ -199,6 +212,13 @@ enum FuzzyMatcher {
 
     private static func findNeedleUTF16Offset(haystack: String, needle: PreparedQuery) -> Int? {
         guard !needle.lower.isEmpty else { return 0 }
+        if let matcher = needle.substringMatcher {
+            switch matcher.firstMatch(in: haystack) {
+            case .hit(let offset): return offset
+            case .miss: return nil
+            case .undecided: break
+            }
+        }
 
         if needle.safeFastUTF16, let needleUnits = needle.utf16Units {
             if needleUnits.count <= 4 {
@@ -206,7 +226,17 @@ enum FuzzyMatcher {
             }
         }
 
-        guard let range = haystack.range(of: needle.lower) else { return nil }
+        return firstOffset(of: needle.lower, in: haystack, matcher: nil)
+    }
+
+    /// `String.range(of:)` as a UTF-16 offset, decided on the bytes when the matcher can.
+    static func firstOffset(of needle: String, in haystack: String, matcher: LoweredTextMatcher?) -> Int? {
+        switch matcher?.firstMatch(in: haystack) {
+        case .hit(let offset): return offset
+        case .miss: return nil
+        case .undecided, nil: break
+        }
+        guard let range = haystack.range(of: needle) else { return nil }
         return range.lowerBound.utf16Offset(in: haystack)
     }
 
@@ -276,8 +306,9 @@ enum FuzzyMatcher {
     /// only used for needles that are stable under canonical compose/decompose.
     private static func isSafeForFastUTF16Search(_ needle: String) -> Bool {
         let ns = needle as NSString
-        if ns.precomposedStringWithCanonicalMapping != needle { return false }
-        if ns.decomposedStringWithCanonicalMapping != needle { return false }
+        // String equality is canonically equivalent; this gate needs identical code units.
+        if !ns.precomposedStringWithCanonicalMapping.utf16.elementsEqual(needle.utf16) { return false }
+        if !ns.decomposedStringWithCanonicalMapping.utf16.elementsEqual(needle.utf16) { return false }
         return true
     }
 }

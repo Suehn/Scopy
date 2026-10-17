@@ -5,21 +5,6 @@ import ScopyUISupport
 
 @MainActor
 internal struct HistoryItemRowDescriptor {
-    struct Dependencies {
-        var displayTexts: @MainActor (ClipboardItemDTO) -> (
-            title: String,
-            metadata: String,
-            searchMetadataPrefix: String?
-        )
-        var filePreview: @MainActor (ClipboardItemDTO) -> FilePreviewSummary?
-
-        @MainActor
-        static let live = Dependencies(
-            displayTexts: { ClipboardItemDisplayText.shared.displayTexts(for: $0) },
-            filePreview: { HistoryItemPresentationCache.shared.filePreview(for: $0) }
-        )
-    }
-
     let titleText: String
     let metadataText: String
     let searchMetadataPrefix: String?
@@ -35,10 +20,8 @@ internal struct HistoryItemRowDescriptor {
 
     init(
         item: ClipboardItemDTO,
-        settings: SettingsDTO,
-        dependencies: Dependencies? = nil
+        settings: SettingsDTO
     ) {
-        let dependencies = dependencies ?? .live
         let profileStart = ScrollPerformanceProfile.isEnabled ? CFAbsoluteTimeGetCurrent() : nil
         defer {
             if let profileStart {
@@ -51,11 +34,11 @@ internal struct HistoryItemRowDescriptor {
 
         let thumbnailHeight = CGFloat(settings.thumbnailHeight)
         let showThumbnails = settings.showImageThumbnails
-        let filePreview = dependencies.filePreview(item)
+        let filePreview = HistoryItemPresentationCache.shared.filePreview(for: item)
         let canShowFileThumbnail = showThumbnails
             && item.type == .file
             && filePreview?.shouldGenerateThumbnail == true
-        let displayTexts = dependencies.displayTexts(item)
+        let displayTexts = ClipboardItemDisplayText.shared.displayTexts(for: item)
 
         self.titleText = displayTexts.title
         self.metadataText = displayTexts.metadata

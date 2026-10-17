@@ -1,10 +1,11 @@
 import AppKit
-import Observation
 import SwiftUI
 import XCTest
 import ScopyKit
 
-/// AppState unit tests: state management, search debouncing and keyboard navigation.
+@testable import Scopy
+
+/// Service selection, event delivery and application callback wiring.
 @MainActor
 final class AppStateTests: XCTestCase {
 
@@ -17,7 +18,7 @@ final class AppStateTests: XCTestCase {
     }
 
     override func tearDown() async throws {
-        appState.stop()
+        await appState.stop()
         appState = nil
         mockService = nil
     }
@@ -80,468 +81,11 @@ final class AppStateTests: XCTestCase {
         )
     }
 
-    // MARK: - Initialization Tests
-
-    func testInitializationWithMockService() {
-        XCTAssertNotNil(appState)
-        XCTAssertTrue(appState.items.isEmpty)
-        XCTAssertEqual(appState.searchQuery, "")
-        XCTAssertFalse(appState.isLoading)
-        XCTAssertNil(appState.selectedID)
-    }
-
-    // MARK: - Data Loading Tests
-
-    func testInitialLoadFetches50Items() async {
-        mockService.setItemCount(100)
-        await appState.load()
-
-        XCTAssertEqual(appState.items.count, 50, "Should load 50 items initially")
-        XCTAssertEqual(appState.loadedCount, 50)
-        XCTAssertEqual(appState.totalCount, 100)
-        XCTAssertTrue(appState.canLoadMore)
-    }
-
-    func testLoadMoreAppendsOnePage() async {
-        mockService.setItemCount(700)
-        await appState.load()
-
-        XCTAssertEqual(appState.loadedCount, HistoryViewModel.initialPageSize)
-
-        await appState.loadMore()
-
-        XCTAssertEqual(
-            appState.loadedCount,
-            HistoryViewModel.initialPageSize + HistoryViewModel.loadMorePageSize,
-            "Should append one load-more page"
-        )
-        XCTAssertTrue(appState.canLoadMore)
-    }
-
-    func testLoadMoreUpdatesCanLoadMoreFlag() async {
-        mockService.setItemCount(60)
-        await appState.load()
-
-        XCTAssertTrue(appState.canLoadMore)
-
-        await appState.loadMore()
-
-        XCTAssertFalse(appState.canLoadMore, "Should be false when all items loaded")
-    }
-
-    func testLoadUpdatesStorageStats() async {
-        mockService.setItemCount(50)
-        await appState.load()
-
-        XCTAssertEqual(appState.storageStats.itemCount, 50)
-        XCTAssertGreaterThan(appState.storageStats.sizeBytes, 0)
-    }
-
-    func testLoadMoreDoesNothingWhenNoMoreItems() async {
-        mockService.setItemCount(30)
-        await appState.load()
-
-        XCTAssertFalse(appState.canLoadMore)
-
-        let countBefore = appState.loadedCount
-        await appState.loadMore()
-
-        XCTAssertEqual(appState.loadedCount, countBefore, "Should not change when canLoadMore is false")
-    }
-
-    // MARK: - Search Coalescing Tests
-
-    func testSearchCoalescesRapidInputWithoutDebounce() async throws {
-        let service = TestMockClipboardService()
-        let state = AppState.forTesting(service: service, historyTiming: .production)
-        defer { state.stop() }
-
-        service.setItemCount(100)
-        await state.load()
-        service.resetSearchCallCount()
-
-        // Rapid search calls
-        state.searchQuery = "h"
-        state.search()
-        state.searchQuery = "he"
-        state.search()
-        state.searchQuery = "hel"
-        state.search()
-
-        await assertEventually(timeout: 1.0, pollInterval: 0.01, {
-            service.searchCallCount == 1
-        }, message: "Rapid input should coalesce into a single search")
-
-        XCTAssertEqual(service.lastSearchQuery, "hel", "Should use the latest query")
-
-        // Ensure no extra searches fire later.
-        try await Task.sleep(nanoseconds: 100_000_000) // 100ms
-        XCTAssertEqual(service.searchCallCount, 1, "Should not execute more than once for rapid input")
-    }
-
-    func testRapidSearchCancelsPrevious() async throws {
-        mockService.setItemCount(100)
-        await appState.load()
-        mockService.resetSearchCallCount()
-
-        // Start search
-        appState.searchQuery = "first"
-        appState.search()
-
-        // Immediately start another
-        appState.searchQuery = "second"
-        appState.search()
-
-        await assertEventually(timeout: 1.0, pollInterval: 0.01, {
-            self.mockService.searchCallCount == 1
-        }, message: "Search should eventually execute once")
-        XCTAssertEqual(mockService.lastSearchQuery, "second", "Should use the latest query")
-    }
-
-    func testLoadMoreDoesNotAppendAfterSearchChange() async throws {
-        mockService.setItemCount(200)
-        await appState.load()
-
-        // First search to enable filtered paging
-        appState.searchQuery = "1"
-        appState.search()
-        await assertEventually(timeout: 1.0, pollInterval: 0.01, {
-            self.mockService.searchCallCount == 1 && !self.appState.isLoading
-        }, message: "Initial search should complete")
-        XCTAssertTrue(appState.canLoadMore)
-
-        // Make loadMore slow so it overlaps with next search
-        mockService.searchDelayNs = 120_000_000
-        let pagingTask = Task { await appState.loadMore() }
-
-        // Switch query while paging in flight
-        mockService.searchDelayNs = 0
-        appState.searchQuery = "2"
-        appState.search()
-        await assertEventually(timeout: 1.0, pollInterval: 0.01, {
-            self.appState.items.allSatisfy { $0.plainText.localizedCaseInsensitiveContains("2") } && !self.appState.isLoading
-        }, message: "Second search should complete with latest results")
-
-        await pagingTask.value
-
-        // Results should only match the latest query
-        XCTAssertTrue(appState.items.allSatisfy { $0.plainText.localizedCaseInsensitiveContains("2") })
-    }
-
-    func testSearchUpdatesItemsList() async throws {
-        mockService.setItemCount(100)
-        await appState.load()
-
-        appState.searchQuery = "test"
-        appState.search()
-
-        await assertEventually(timeout: 1.0, pollInterval: 0.01, {
-            self.mockService.lastSearchQuery == "test" && !self.appState.isLoading
-        }, message: "Search should complete")
-        XCTAssertFalse(appState.items.isEmpty)
-    }
-
-    func testProgressiveRefineUpdatesAfterPrefilter() async throws {
-        appState.historyViewModel.configureTiming(.testsWithRefineDelay(500_000_000))
-        mockService.setItemCount(100)
-        await appState.load()
-        mockService.resetSearchCallCount()
-        mockService.simulatePrefilterQueries = ["test"]
-
-        appState.searchQuery = "test"
-        appState.search()
-
-        await assertEventually(timeout: 1.0, pollInterval: 0.01, {
-            self.mockService.searchCallCount == 1 && self.appState.totalCount == -1
-        }, message: "Initial prefiltered search should complete")
-
-        await assertEventually(timeout: 1.0, pollInterval: 0.01, {
-            self.mockService.searchCallCount == 2 && self.appState.totalCount == 100
-        }, message: "Refine search should complete")
-        XCTAssertEqual(appState.items.count, 50)
-    }
-
-    func testLoadMoreAfterPrefilterForcesFullSearch() async throws {
-        appState.historyViewModel.configureTiming(.testsWithRefineDelay(5_000_000_000))
-        mockService.setItemCount(120)
-        await appState.load()
-        mockService.resetSearchCallCount()
-        mockService.simulatePrefilterQueries = ["test"]
-
-        appState.searchQuery = "test"
-        appState.search()
-
-        await assertEventually(timeout: 1.0, pollInterval: 0.01, {
-            self.mockService.recordedSearchRequests.count == 1 &&
-            self.appState.totalCount == -1 &&
-            !self.appState.isLoading
-        }, message: "Initial prefiltered search should complete")
-        XCTAssertEqual(mockService.recordedSearchRequests.count, 1)
-
-        let expectedLimit = appState.loadedCount + HistoryViewModel.loadMorePageSize
-        await appState.loadMore()
-
-        XCTAssertEqual(mockService.recordedSearchRequests.count, 2)
-        let second = mockService.recordedSearchRequests[1]
-        XCTAssertTrue(second.forceFullFuzzy)
-        XCTAssertEqual(second.offset, 0)
-        XCTAssertEqual(second.limit, expectedLimit)
-    }
-
-    func testEmptySearchReloadsAllItems() async throws {
-        mockService.setItemCount(100)
-        await appState.load()
-
-        // First do a search
-        appState.searchQuery = "test"
-        appState.search()
-        await assertEventually(timeout: 1.0, pollInterval: 0.01, {
-            !self.appState.isLoading && !self.appState.searchQuery.isEmpty
-        }, message: "Search should complete")
-
-        // Then clear search
-        appState.searchQuery = ""
-        appState.search()
-        await assertEventually(timeout: 1.0, pollInterval: 0.01, {
-            self.appState.items.count == 50 && self.appState.searchQuery.isEmpty && !self.appState.isLoading
-        }, message: "Empty search should reload")
-
-        XCTAssertEqual(appState.items.count, 50, "Should reload all items on empty search")
-    }
-
-    func testHasActiveFiltersIncludesFilterOnlyStates() {
-        XCTAssertTrue(appState.searchQuery.isEmpty)
-        XCTAssertFalse(appState.hasActiveFilters)
-
-        appState.appFilter = "com.example.editor"
-        XCTAssertTrue(appState.hasActiveFilters)
-
-        appState.appFilter = nil
-        appState.typeFilter = .text
-        XCTAssertTrue(appState.hasActiveFilters)
-
-        appState.typeFilter = nil
-        appState.typeFilters = [.rtf, .html]
-        XCTAssertTrue(appState.hasActiveFilters)
-    }
-
-    // MARK: - Keyboard Navigation Tests
-
-    func testHighlightNextMovesSelectionDown() async {
-        mockService.setItemCount(10)
-        await appState.load()
-
-        appState.selectedID = appState.items[0].id
-        appState.highlightNext()
-
-        XCTAssertEqual(appState.selectedID, appState.items[1].id)
-    }
-
-    func testHighlightNextSelectsFirstWhenNoSelection() async {
-        mockService.setItemCount(10)
-        await appState.load()
-
-        XCTAssertNil(appState.selectedID)
-        appState.highlightNext()
-
-        XCTAssertEqual(appState.selectedID, appState.items.first?.id)
-    }
-
-    func testHighlightNextStaysAtLastItem() async {
-        mockService.setItemCount(10)
-        await appState.load()
-
-        appState.selectedID = appState.items.last?.id
-        appState.highlightNext()
-
-        XCTAssertEqual(appState.selectedID, appState.items.first?.id, "Should wrap to first")
-    }
-
-    func testHighlightPreviousMovesSelectionUp() async {
-        mockService.setItemCount(10)
-        await appState.load()
-
-        appState.selectedID = appState.items[2].id
-        appState.highlightPrevious()
-
-        XCTAssertEqual(appState.selectedID, appState.items[1].id)
-    }
-
-    func testHighlightPreviousSelectsLastWhenNoSelection() async {
-        mockService.setItemCount(10)
-        await appState.load()
-
-        XCTAssertNil(appState.selectedID)
-        appState.highlightPrevious()
-
-        XCTAssertEqual(appState.selectedID, appState.items.last?.id)
-    }
-
-    func testHighlightPreviousStaysAtFirstItem() async {
-        mockService.setItemCount(10)
-        await appState.load()
-
-        appState.selectedID = appState.items.first?.id
-        appState.highlightPrevious()
-
-        XCTAssertEqual(appState.selectedID, appState.items.last?.id, "Should wrap to last")
-    }
-
-    func testHighlightDoesNothingWithEmptyItems() {
-        XCTAssertTrue(appState.items.isEmpty)
-
-        appState.highlightNext()
-        XCTAssertNil(appState.selectedID)
-
-        appState.highlightPrevious()
-        XCTAssertNil(appState.selectedID)
-    }
-
-    // MARK: - v0.11 Keyboard Navigation Boundary Tests
-
-    /// highlightNext on a single-item list.
-    func testHighlightNextOnSingleItem() async {
-        mockService.setItemCount(1)
-        await appState.load()
-
-        XCTAssertEqual(appState.items.count, 1)
-
-        // Nothing selected: selects the first item.
-        appState.highlightNext()
-        XCTAssertEqual(appState.selectedID, appState.items[0].id)
-
-        // The only item is selected: stays selected (wraps to itself).
-        appState.highlightNext()
-        XCTAssertEqual(appState.selectedID, appState.items[0].id)
-    }
-
-    /// highlightPrevious on a single-item list.
-    func testHighlightPreviousOnSingleItem() async {
-        mockService.setItemCount(1)
-        await appState.load()
-
-        XCTAssertEqual(appState.items.count, 1)
-
-        // Nothing selected: selects the last item, which is also the first.
-        appState.highlightPrevious()
-        XCTAssertEqual(appState.selectedID, appState.items[0].id)
-
-        // The only item is selected: stays selected (wraps to itself).
-        appState.highlightPrevious()
-        XCTAssertEqual(appState.selectedID, appState.items[0].id)
-    }
-
-    /// Navigation after the selected item was deleted.
-    func testNavigationAfterSelectedItemDeleted() async {
-        mockService.setItemCount(5)
-        await appState.load()
-
-        // Select the third item.
-        appState.selectedID = appState.items[2].id
-        let selectedItem = appState.items[2]
-
-        // Delete the selected item.
-        await appState.delete(selectedItem)
-
-        // The selection should be cleared or move to the next item.
-        // deleteSelectedItem selects the next item,
-        // but delete alone does not update selectedID,
-        // so selectedID still points at the deleted item here.
-
-        // highlightNext must still work:
-        appState.highlightNext()
-        // the old selection is gone, so it selects the first item.
-        XCTAssertNotNil(appState.selectedID)
-    }
-
-    /// Deleting the selected item selects the next one.
-    func testDeleteSelectedItemSelectsNext() async {
-        mockService.setItemCount(5)
-        await appState.load()
-
-        // Select the second item.
-        appState.selectedID = appState.items[1].id
-        let nextItemID = appState.items[2].id
-
-        await appState.deleteSelectedItem()
-
-        // The former third item (now second) should be selected.
-        XCTAssertEqual(appState.selectedID, nextItemID)
-    }
-
-    /// Deleting the last item selects the previous one.
-    func testDeleteLastItemSelectsPrevious() async {
-        mockService.setItemCount(3)
-        await appState.load()
-
-        // Select the last item.
-        appState.selectedID = appState.items[2].id
-        let previousItemID = appState.items[1].id
-
-        await appState.deleteSelectedItem()
-
-        // The previous item should be selected.
-        XCTAssertEqual(appState.selectedID, previousItemID)
-    }
-
-    /// Deleting the only item clears the selection.
-    func testDeleteOnlyItemClearsSelection() async {
-        mockService.setItemCount(1)
-        await appState.load()
-
-        appState.selectedID = appState.items[0].id
-
-        await appState.deleteSelectedItem()
-
-        XCTAssertNil(appState.selectedID, "Selection should be nil after deleting only item")
-        XCTAssertTrue(appState.items.isEmpty)
-    }
-
-    func testSelectCurrentCopiesItem() async {
-        mockService.setItemCount(10)
-        await appState.load()
-
-        appState.selectedID = appState.items[0].id
-        mockService.resetCopyCallCount()
-
-        await appState.selectCurrent()
-
-        XCTAssertEqual(mockService.copyCallCount, 1)
-        XCTAssertEqual(mockService.lastCopiedItemID, appState.items[0].id)
-    }
-
-    func testSelectCurrentDoesNothingWithNoSelection() async {
-        mockService.setItemCount(10)
-        await appState.load()
-
-        XCTAssertNil(appState.selectedID)
-        mockService.resetCopyCallCount()
-
-        await appState.selectCurrent()
-
-        XCTAssertEqual(mockService.copyCallCount, 0)
-    }
-
-    // MARK: - Item Operations Tests
-
-    func testSelectCopiesItemToClipboard() async {
-        mockService.setItemCount(10)
-        await appState.load()
-
-        let item = appState.items[0]
-        mockService.resetCopyCallCount()
-
-        await appState.select(item)
-
-        XCTAssertEqual(mockService.copyCallCount, 1)
-        XCTAssertEqual(mockService.lastCopiedItemID, item.id)
-    }
-
     func testSelectOptimizedForCodexCopiesAndRequestsPaste() async {
         mockService.setItemCount(10)
-        await appState.load()
+        await appState.historyViewModel.load()
 
-        let item = appState.items[0]
+        let item = appState.historyViewModel.items[0]
         var pasteRequestCount = 0
         appState.pasteAfterCopyHandler = {
             pasteRequestCount += 1
@@ -554,239 +98,24 @@ final class AppStateTests: XCTestCase {
         XCTAssertEqual(pasteRequestCount, 1)
     }
 
-    func testTogglePinChangesState() async {
-        mockService.setItemCount(10)
-        await appState.load()
-
-        let item = appState.items[0]
-        let wasPinned = item.isPinned
-        mockService.pinCallCount = 0
-        mockService.unpinCallCount = 0
-
-        await appState.togglePin(item)
-
-        // Item state should be toggled (load is called after toggle)
-        // The mock service handles pin/unpin
-        XCTAssertEqual(mockService.pinCallCount + mockService.unpinCallCount, 1)
-        if wasPinned {
-            XCTAssertEqual(mockService.unpinCallCount, 1)
-        } else {
-            XCTAssertEqual(mockService.pinCallCount, 1)
-        }
-    }
-
-    func testDeleteRemovesItem() async {
-        mockService.setItemCount(10)
-        await appState.load()
-
-        let initialCount = appState.items.count
-        let itemToDelete = appState.items[0]
-
-        await appState.delete(itemToDelete)
-
-        XCTAssertEqual(appState.items.count, initialCount - 1)
-        XCTAssertFalse(appState.items.contains { $0.id == itemToDelete.id })
-    }
-
     func testClearAllRefreshesOnceFromPublishedEvent() async throws {
         mockService.setItemCount(3, pinnedCount: 1)
         let subscribed = expectation(description: "Event listener subscribed")
         mockService.onEventStreamSubscribed = { subscribed.fulfill() }
         await appState.start()
         await fulfillment(of: [subscribed], timeout: 1.0)
-        let pinnedID = try XCTUnwrap(appState.pinnedItems.first?.id)
+        let pinnedID = try XCTUnwrap(appState.historyViewModel.pinnedItems.first?.id)
         let refreshCountBeforeClear = mockService.fetchRecentUnpinnedCallCount
         let clearHandled = expectation(description: "Clear event handled before sentinel")
         appState.applyHotKeyHandler = { _, _ in clearHandled.fulfill() }
 
-        await appState.clearAll()
+        await appState.historyViewModel.clearAll()
         mockService.emitEvent(.settingsChanged)
         await fulfillment(of: [clearHandled], timeout: 1.0)
 
         XCTAssertEqual(mockService.clearAllCallCount, 1)
         XCTAssertEqual(mockService.fetchRecentUnpinnedCallCount, refreshCountBeforeClear + 1)
-        XCTAssertEqual(appState.items.map(\.id), [pinnedID])
-    }
-
-    // MARK: - Event Stream Tests
-    // Note: Event stream tests are challenging because they require proper async setup
-    // These tests verify the handleEvent logic directly instead of through the stream
-
-    func testHandleNewItemEvent() async throws {
-        mockService.setItemCount(10)
-        await appState.load()
-
-        let initialCount = appState.items.count
-        let newItem = ClipboardItemDTO(
-            id: UUID(),
-            type: .text,
-            contentHash: "newhash",
-            plainText: "New clipboard item",
-            appBundleID: "com.test",
-            createdAt: Date(),
-            lastUsedAt: Date(),
-            isPinned: false,
-            sizeBytes: 20,
-            thumbnailPath: nil,
-            storageRef: nil
-        )
-
-        // Directly test the items array manipulation
-        appState.items.insert(newItem, at: 0)
-
-        XCTAssertEqual(appState.items.count, initialCount + 1)
-        XCTAssertEqual(appState.items.first?.id, newItem.id)
-    }
-
-    func testHandleItemDeletedEvent() async throws {
-        mockService.setItemCount(10)
-        await appState.load()
-
-        let itemToDelete = appState.items[0]
-        let initialCount = appState.items.count
-
-        // Directly test the items array manipulation
-        appState.items.removeAll { $0.id == itemToDelete.id }
-
-        XCTAssertEqual(appState.items.count, initialCount - 1)
-        XCTAssertFalse(appState.items.contains { $0.id == itemToDelete.id })
-    }
-
-    func testDeleteUpdatesVisibleCountersAndDeletedEventConverges() async throws {
-        mockService.setItemCount(100)
-        await appState.load()
-
-        let itemToDelete = appState.items[0]
-
-        await appState.delete(itemToDelete)
-
-        XCTAssertEqual(mockService.deleteCallCount, 0, "The backend delete waits for the undo window")
-        XCTAssertFalse(appState.items.contains { $0.id == itemToDelete.id })
-        XCTAssertEqual(appState.loadedCount, 49)
-        XCTAssertEqual(appState.totalCount, 100)
-        XCTAssertTrue(appState.canLoadMore)
-
-        await appState.historyViewModel.commitPendingDeletionNow()
-        XCTAssertEqual(mockService.deleteCallCount, 1)
-
-        await appState.historyViewModel.handleEvent(.itemDeleted(itemToDelete.id))
-
-        XCTAssertFalse(appState.items.contains { $0.id == itemToDelete.id })
-        XCTAssertEqual(appState.loadedCount, 49)
-        XCTAssertEqual(appState.totalCount, 99)
-        XCTAssertTrue(appState.canLoadMore)
-    }
-
-    func testBulkCleanupEventConvergesWithoutResettingLoadedPagination() async {
-        mockService.setItemCount(100)
-        await appState.load()
-
-        let firstDeletedID = appState.items[3].id
-        let secondDeletedID = appState.items[31].id
-        let unloadedDeletedID = mockService.itemID(at: 70)
-        let committedIDs = [firstDeletedID, secondDeletedID, unloadedDeletedID]
-        mockService.removeItemsForTesting(committedIDs)
-
-        await appState.historyViewModel.handleEvent(
-            .itemsRemoved(committedIDs)
-        )
-
-        XCTAssertFalse(appState.items.contains { $0.id == firstDeletedID })
-        XCTAssertFalse(appState.items.contains { $0.id == secondDeletedID })
-        XCTAssertEqual(appState.loadedCount, 48)
-        XCTAssertEqual(appState.totalCount, 97)
-        XCTAssertTrue(appState.canLoadMore)
-    }
-
-    func testBulkCleanupEventDoesNotDoubleDecrementAfterPostCommitReload() async {
-        mockService.setItemCount(100)
-        await appState.load()
-
-        let committedIDs = [
-            appState.items[3].id,
-            appState.items[31].id,
-            mockService.itemID(at: 70)
-        ]
-        mockService.removeItemsForTesting(committedIDs)
-        await appState.load()
-        XCTAssertEqual(appState.totalCount, 97)
-
-        await appState.historyViewModel.handleEvent(.itemsRemoved(committedIDs))
-
-        XCTAssertEqual(appState.totalCount, 97)
-        XCTAssertEqual(appState.loadedCount, 50)
-        XCTAssertTrue(committedIDs.allSatisfy { id in
-            !appState.items.contains { $0.id == id }
-        })
-    }
-
-    func testHistoryListStatePassthroughsInvalidateObservation() async {
-        mockService.setItemCount(2)
-        await appState.load()
-
-        let itemToPin = appState.unpinnedItems[0]
-        let invalidated = expectation(description: "History list passthrough invalidated observation")
-
-        withObservationTracking {
-            _ = appState.historyViewModel.pinnedItems.count
-            _ = appState.historyViewModel.unpinnedItems.count
-        } onChange: {
-            invalidated.fulfill()
-        }
-
-        await appState.historyViewModel.handleEvent(.itemPinned(itemToPin.id))
-
-        await fulfillment(of: [invalidated], timeout: 1.0)
-        XCTAssertEqual(appState.pinnedItems.map(\.id), [itemToPin.id])
-        XCTAssertEqual(appState.unpinnedItems.count, 1)
-    }
-
-    // MARK: - Pagination State Tests
-
-    func testCanLoadMoreWhenMoreItemsExist() async {
-        mockService.setItemCount(100)
-        await appState.load()
-
-        XCTAssertTrue(appState.canLoadMore)
-        XCTAssertEqual(appState.loadedCount, 50)
-        XCTAssertEqual(appState.totalCount, 100)
-    }
-
-    func testCannotLoadMoreWhenAllLoaded() async {
-        mockService.setItemCount(30)
-        await appState.load()
-
-        XCTAssertFalse(appState.canLoadMore)
-        XCTAssertEqual(appState.loadedCount, 30)
-        XCTAssertEqual(appState.totalCount, 30)
-    }
-
-    // MARK: - Pinned Items Tests
-
-    func testPinnedItemsFiltering() async {
-        mockService.setItemCount(10, pinnedCount: 3)
-        await appState.load()
-
-        XCTAssertEqual(appState.pinnedItems.count, 3)
-        XCTAssertEqual(appState.unpinnedItems.count, 7)
-        XCTAssertEqual(appState.items.count, 10)
-    }
-
-    func testPinnedItemsDoNotConsumeInitialRecentPageQuota() async {
-        mockService.setItemCount(120, pinnedCount: 30)
-        await appState.load()
-
-        XCTAssertEqual(appState.pinnedItems.count, 30)
-        XCTAssertEqual(appState.unpinnedItems.count, HistoryViewModel.initialPageSize)
-        XCTAssertEqual(appState.loadedCount, 80)
-        XCTAssertTrue(appState.canLoadMore)
-
-        await appState.loadMore()
-
-        XCTAssertEqual(appState.pinnedItems.count, 30)
-        XCTAssertEqual(appState.unpinnedItems.count, 90)
-        XCTAssertEqual(appState.loadedCount, 120)
-        XCTAssertFalse(appState.canLoadMore)
+        XCTAssertEqual(appState.historyViewModel.items.map(\.id), [pinnedID])
     }
 
     func testPanelReopenPolicyClearsOnlyAfterThreshold() throws {
@@ -800,40 +129,9 @@ final class AppStateTests: XCTestCase {
         XCTAssertTrue(panel.wasClosedLongerThan(threshold, now: closedAt.addingTimeInterval(threshold + 1)))
     }
 
-    // MARK: - Settings Tests
-
-    func testLoadSettings() async {
-        await appState.loadSettings()
-
-        XCTAssertEqual(appState.settings.maxItems, SettingsDTO.default.maxItems)
-    }
-
-    func testUpdateSettings() async {
-        var newSettings = appState.settings
-        newSettings.maxItems = 5000
-
-        await appState.updateSettings(newSettings)
-
-        XCTAssertEqual(appState.settings.maxItems, 5000)
-    }
 }
 
-private extension HistoryViewModel.Timing {
-    static func testsWithRefineDelay(_ refineDelayNs: UInt64) -> HistoryViewModel.Timing {
-        HistoryViewModel.Timing(
-            searchDebounceNs: 20_000_000,
-            refineShortQueryDelayNs: refineDelayNs,
-            refineLongQueryDelayNs: refineDelayNs,
-            recentAppsRefreshDelayNs: 20_000_000,
-            staleLoadRetryDelayNs: 20_000_000,
-            undoDeletionWindowNs: 50_000_000
-        )
-    }
-}
-
-// MARK: - Enhanced Mock Service for Testing
-
-/// Test-specific mock service with call tracking
+/// Shared service used by lifecycle, query isolation and content-revision tests.
 @MainActor
 final class TestMockClipboardService: ClipboardServiceProtocol {
     private var items: [ClipboardItemDTO] = []
@@ -841,6 +139,7 @@ final class TestMockClipboardService: ClipboardServiceProtocol {
     private var eventContinuation: AsyncStream<ClipboardEvent>.Continuation?
 
     var startCallCount = 0
+    var stopCallCount = 0
     var startFailuresRemaining = 0
 
     // Call tracking
@@ -849,9 +148,6 @@ final class TestMockClipboardService: ClipboardServiceProtocol {
     var lastSearchQuery: String?
     var copyCallCount = 0
     var lastCopiedItemID: UUID?
-    var pinCallCount = 0
-    var unpinCallCount = 0
-    var deleteCallCount = 0
     var clearAllCallCount = 0
     var fetchRecentCallCount = 0
     var fetchRecentUnpinnedCallCount = 0
@@ -864,10 +160,6 @@ final class TestMockClipboardService: ClipboardServiceProtocol {
     var searchDelayNsByQuery: [String: UInt64] = [:]
     /// When true, the artificial search delay will not be interrupted by task cancellation (simulates a backend that can't cancel promptly).
     var searchDelayIgnoresCancellation: Bool = false
-    /// Staged search: the first page of a given query simulates a prefilter with total = -1.
-    var simulatePrefilterQueries: Set<String> = []
-    /// Records every search request so staged and paged behaviour can be verified.
-    var recordedSearchRequests: [SearchRequest] = []
 
     var eventStream: AsyncStream<ClipboardEvent> {
         AsyncStream { continuation in
@@ -887,6 +179,7 @@ final class TestMockClipboardService: ClipboardServiceProtocol {
     }
 
     func stop() {
+        stopCallCount += 1
         eventContinuation?.finish()
     }
 
@@ -918,21 +211,10 @@ final class TestMockClipboardService: ClipboardServiceProtocol {
         items[index].id
     }
 
-    func removeItemsForTesting(_ itemIDs: [UUID]) {
-        let removed = Set(itemIDs)
-        items.removeAll { removed.contains($0.id) }
-    }
-
     func resetSearchCallCount() {
         searchCallCount = 0
         searchStartedQueries = []
         lastSearchQuery = nil
-        recordedSearchRequests = []
-    }
-
-    func resetCopyCallCount() {
-        copyCallCount = 0
-        lastCopiedItemID = nil
     }
 
     func emitEvent(_ event: ClipboardEvent) {
@@ -965,13 +247,19 @@ final class TestMockClipboardService: ClipboardServiceProtocol {
         return items.filter(\.isPinned).sorted { $0.lastUsedAt > $1.lastUsedAt }
     }
 
-    func fetchRecentUnpinned(limit: Int, offset: Int) async throws -> [ClipboardItemDTO] {
+    func fetchHistoryPage(limit: Int, offset: Int, expectedRevision: Int64?) async throws -> RecentHistoryPage {
+        let start = expectedRevision == 0 ? max(0, offset) : 0
+        let count = max(0, limit) + (start == 0 ? max(0, offset) : 0)
+        let pinned = start == 0 ? try await fetchPinned() : []
         fetchRecentCallCount += 1
         fetchRecentUnpinnedCallCount += 1
+        if fetchRecentDelayNs > 0 {
+            try await Task.sleep(nanoseconds: fetchRecentDelayNs)
+        }
         let sortedItems = items.filter { !$0.isPinned }.sorted { $0.lastUsedAt > $1.lastUsedAt }
-        let start = min(offset, sortedItems.count)
-        let end = min(offset + limit, sortedItems.count)
-        return Array(sortedItems[start..<end])
+        let pageItems = Array(sortedItems.dropFirst(start).prefix(count))
+        return RecentHistoryPage(pinnedItems: pinned, items: pageItems, total: items.count,
+                                 offset: start, nextOffset: start + pageItems.count, revision: 0)
     }
 
     func search(query: SearchRequest) async throws -> SearchResultPage {
@@ -995,7 +283,6 @@ final class TestMockClipboardService: ClipboardServiceProtocol {
         }
         searchCallCount += 1
         lastSearchQuery = query.query
-        recordedSearchRequests.append(query)
 
         let filtered: [ClipboardItemDTO]
         if query.query.isEmpty {
@@ -1007,20 +294,13 @@ final class TestMockClipboardService: ClipboardServiceProtocol {
         let start = min(query.offset, filtered.count)
         let end = min(query.offset + query.limit, filtered.count)
 
-        let shouldSimulatePrefilter =
-            simulatePrefilterQueries.contains(query.query) &&
-            !query.forceFullFuzzy &&
-            query.offset == 0
-
-        let total = shouldSimulatePrefilter ? -1 : filtered.count
-
         return SearchResultPage(
             hits: filtered[start..<end].map {
                 SearchResultHit(item: $0, matchContext: nil)
             },
-            total: total,
+            total: filtered.count,
             hasMore: end < filtered.count,
-            coverage: shouldSimulatePrefilter ? .stagedRefine : .complete
+            coverage: .complete
         )
     }
 
@@ -1036,7 +316,6 @@ final class TestMockClipboardService: ClipboardServiceProtocol {
     }
 
     func pin(itemID: UUID) async throws {
-        pinCallCount += 1
         if let index = items.firstIndex(where: { $0.id == itemID }) {
             let item = items[index]
             items[index] = ClipboardItemDTO(
@@ -1050,7 +329,6 @@ final class TestMockClipboardService: ClipboardServiceProtocol {
     }
 
     func unpin(itemID: UUID) async throws {
-        unpinCallCount += 1
         if let index = items.firstIndex(where: { $0.id == itemID }) {
             let item = items[index]
             items[index] = ClipboardItemDTO(
@@ -1066,7 +344,6 @@ final class TestMockClipboardService: ClipboardServiceProtocol {
     func updateNote(itemID _: UUID, note _: String?) async throws {}
 
     func delete(itemID: UUID) async throws {
-        deleteCallCount += 1
         items.removeAll { $0.id == itemID }
     }
 
@@ -1087,8 +364,9 @@ final class TestMockClipboardService: ClipboardServiceProtocol {
 
     func fileURLs(itemID _: UUID) async throws -> [URL] { [] }
 
-    func updateSettings(_ newSettings: SettingsDTO) async throws {
-        settings = newSettings
+    func updateSettings(_ patch: SettingsPatch) async throws -> SettingsDTO {
+        settings = settings.applying(patch)
+        return settings
     }
 
     func getSettings() async throws -> SettingsDTO {
@@ -1133,9 +411,7 @@ final class TestMockClipboardService: ClipboardServiceProtocol {
     }
 }
 
-// MARK: - Failing Mock Service for Fallback Tests (v0.10.1)
-
-/// Mock service that fails on start() - used to test fallback behavior
+/// A startup failure must remain visible instead of silently replacing the service.
 @MainActor
 final class FailingMockService: ClipboardServiceProtocol {
     private var eventContinuation: AsyncStream<ClipboardEvent>.Continuation?
@@ -1164,7 +440,11 @@ final class FailingMockService: ClipboardServiceProtocol {
 
     func fetchRecent(limit: Int, offset: Int) async throws -> [ClipboardItemDTO] { [] }
     func fetchPinned() async throws -> [ClipboardItemDTO] { [] }
-    func fetchRecentUnpinned(limit: Int, offset: Int) async throws -> [ClipboardItemDTO] { [] }
+    func fetchHistoryPage(limit _: Int, offset: Int, expectedRevision: Int64?) async throws -> RecentHistoryPage {
+        let start = expectedRevision == 0 ? max(0, offset) : 0
+        return RecentHistoryPage(pinnedItems: [], items: [], total: 0,
+                                 offset: start, nextOffset: start, revision: 0)
+    }
     func search(query: SearchRequest) async throws -> SearchResultPage {
         SearchResultPage(hits: [], total: 0, hasMore: false, coverage: .complete)
     }
@@ -1176,7 +456,9 @@ final class FailingMockService: ClipboardServiceProtocol {
     func copyToClipboard(itemID: UUID) async throws {}
     func copyToClipboardOptimizedForCodex(itemID: UUID) async throws {}
     func fileURLs(itemID: UUID) async throws -> [URL] { [] }
-    func updateSettings(_ newSettings: SettingsDTO) async throws {}
+    func updateSettings(_ patch: SettingsPatch) async throws -> SettingsDTO {
+        SettingsDTO.default.applying(patch)
+    }
     func getSettings() async throws -> SettingsDTO { .default }
     func getStorageStats() async throws -> (itemCount: Int, sizeBytes: Int) { (0, 0) }
     func getDetailedStorageStats() async throws -> StorageStatsDTO {
@@ -1190,8 +472,6 @@ final class FailingMockService: ClipboardServiceProtocol {
     func getRecentApps(limit: Int) async throws -> [String] { [] }
 }
 
-// MARK: - Fallback and Event Handler Tests (v0.10.1)
-
 @MainActor
 final class AppStateFallbackTests: XCTestCase {
 
@@ -1204,16 +484,17 @@ final class AppStateFallbackTests: XCTestCase {
         await state.start()
 
         guard case .startupFailed(let failure) = state.startupPhase else {
+            await state.stop()
             return XCTFail("Expected startup failure state")
         }
 
         XCTAssertTrue(state.service is FailingMockService, "Failing service should not be replaced with mock data")
-        XCTAssertEqual(state.items, [])
-        XCTAssertEqual(state.totalCount, 0)
+        XCTAssertEqual(state.historyViewModel.items, [])
+        XCTAssertEqual(state.historyViewModel.totalCount, 0)
         XCTAssertTrue(failure.diagnostics.contains("Scopy startup failed"))
         XCTAssertTrue(failure.diagnostics.contains("FailingMockService"))
 
-        state.stop()
+        await state.stop()
     }
 
     func testRetryStartRecoversAfterTransientFailure() async {
@@ -1221,28 +502,39 @@ final class AppStateFallbackTests: XCTestCase {
         service.startFailuresRemaining = 1
         service.setItemCount(3)
         let state = AppState.forTesting(service: service)
-        defer { state.stop() }
+        addTeardownBlock {
+            await state.stop()
+        }
 
         await state.start()
         guard case .startupFailed = state.startupPhase else {
             return XCTFail("Expected first start to fail")
         }
         XCTAssertEqual(service.startCallCount, 1)
-        XCTAssertTrue(state.items.isEmpty)
+        XCTAssertTrue(state.historyViewModel.items.isEmpty)
 
         await state.start()
 
         await assertEventually(timeout: 1.0, pollInterval: 0.01, {
-            state.startupPhase == .running && state.items.count == 3
+            state.startupPhase == .running && state.historyViewModel.items.count == 3
         }, message: "Retry should recover startup and load history")
 
         XCTAssertEqual(service.startCallCount, 2)
+
+        await state.start()
+        XCTAssertEqual(service.startCallCount, 2, "Starting a running service must not subscribe twice")
+        let stopCount = service.stopCallCount
+        await state.stop()
+        XCTAssertEqual(service.stopCallCount, stopCount + 1)
+        XCTAssertEqual(state.startupPhase, .idle)
     }
 
     func testCopyStartupDiagnosticsWritesFailureDetailsToPasteboard() async {
         let failingService = FailingMockService()
         let state = AppState.forTesting(service: failingService)
-        defer { state.stop() }
+        addTeardownBlock {
+            await state.stop()
+        }
 
         await state.start()
         state.copyStartupDiagnosticsToPasteboard()
@@ -1256,7 +548,9 @@ final class AppStateFallbackTests: XCTestCase {
     func testSettingsChangedAppliesHotkey() async throws {
         let mockService = TestMockClipboardService()
         let state = AppState.forTesting(service: mockService)
-        defer { state.stop() }
+        addTeardownBlock {
+            await state.stop()
+        }
 
         var hotkeyApplied = false
         var appliedKeyCode: UInt32 = 0
@@ -1271,15 +565,18 @@ final class AppStateFallbackTests: XCTestCase {
         await state.start()
         let fetchCountAfterStart = mockService.fetchRecentCallCount
 
-        // Emit settingsChanged event
+        var settings = SettingsDTO.default
+        settings.hotkeyKeyCode += 1
+        settings.hotkeyModifiers += 1
+        _ = try await mockService.updateSettings(SettingsPatch.from(baseline: .default, draft: settings))
         mockService.emitEvent(.settingsChanged)
 
         await assertEventually(timeout: 1.0, pollInterval: 0.01, {
             hotkeyApplied
         }, message: "Hotkey handler should be called on settingsChanged")
 
-        XCTAssertEqual(appliedKeyCode, SettingsDTO.default.hotkeyKeyCode)
-        XCTAssertEqual(appliedModifiers, SettingsDTO.default.hotkeyModifiers)
+        XCTAssertEqual(appliedKeyCode, settings.hotkeyKeyCode)
+        XCTAssertEqual(appliedModifiers, settings.hotkeyModifiers)
         XCTAssertEqual(mockService.fetchRecentCallCount, fetchCountAfterStart)
     }
 
@@ -1287,14 +584,16 @@ final class AppStateFallbackTests: XCTestCase {
         let mockService = TestMockClipboardService()
         mockService.setItemCount(3)
         let state = AppState.forTesting(service: mockService)
-        defer { state.stop() }
+        addTeardownBlock {
+            await state.stop()
+        }
 
         await state.start()
         let fetchCountAfterStart = mockService.fetchRecentCallCount
 
         var settings = SettingsDTO.default
         settings.thumbnailHeight = SettingsDTO.default.thumbnailHeight + 8
-        try await mockService.updateSettings(settings)
+        _ = try await mockService.updateSettings(SettingsPatch.from(baseline: .default, draft: settings))
         mockService.emitEvent(.settingsChanged)
 
         await assertEventually(timeout: 1.0, pollInterval: 0.01, {
@@ -1302,56 +601,19 @@ final class AppStateFallbackTests: XCTestCase {
         }, message: "thumbnail settings changes should reload history so thumbnail paths are refreshed")
     }
 
-    func testSettingsChangedDoesNotReloadHistoryForHotkeyOnlyChange() async throws {
-        let mockService = TestMockClipboardService()
-        mockService.setItemCount(3)
-        let state = AppState.forTesting(service: mockService)
-        defer { state.stop() }
-
-        await state.start()
-        let fetchCountAfterStart = mockService.fetchRecentCallCount
-
-        var settings = SettingsDTO.default
-        settings.hotkeyKeyCode = SettingsDTO.default.hotkeyKeyCode + 1
-        try await mockService.updateSettings(settings)
-        mockService.emitEvent(.settingsChanged)
-
-        try await Task.sleep(nanoseconds: 100_000_000)
-        XCTAssertEqual(mockService.fetchRecentCallCount, fetchCountAfterStart)
-    }
-
-    /// Test that settingsChanged without handler doesn't crash (logs warning instead)
-    func testSettingsChangedWithoutHandlerDoesNotCrash() async throws {
-        let mockService = TestMockClipboardService()
-        let state = AppState.forTesting(service: mockService)
-        defer { state.stop() }
-
-        // Explicitly set handler to nil
-        state.applyHotKeyHandler = nil
-
-        await state.start()
-
-        // Emit settingsChanged event - should not crash
-        mockService.emitEvent(.settingsChanged)
-
-        await assertEventually(timeout: 1.0, pollInterval: 0.01, {
-            !state.isLoading
-        }, message: "settingsChanged should finish processing")
-
-        // Test passes if no crash occurred
-    }
-
     func testThumbnailUpdatedUpdatesItemWithoutReordering() async throws {
         let mockService = TestMockClipboardService()
         mockService.setItemCount(5)
         let state = AppState.forTesting(service: mockService)
-        defer { state.stop() }
+        addTeardownBlock {
+            await state.stop()
+        }
 
         await state.start()
 
-        let originalOrder = state.items.map(\.id)
-        let targetID = state.items[2].id
-        let target = try XCTUnwrap(state.items.first(where: { $0.id == targetID }))
+        let originalOrder = state.historyViewModel.items.map(\.id)
+        let targetID = state.historyViewModel.items[2].id
+        let target = try XCTUnwrap(state.historyViewModel.items.first(where: { $0.id == targetID }))
         let thumbnailPath = "/tmp/scopy-test-thumbnail-\(UUID().uuidString).png"
 
         mockService.emitEvent(
@@ -1363,12 +625,12 @@ final class AppStateFallbackTests: XCTestCase {
             )
         )
         await assertEventually(timeout: 1.0, pollInterval: 0.01, {
-            state.items.first(where: { $0.id == targetID })?.thumbnailPath == thumbnailPath
+            state.historyViewModel.items.first(where: { $0.id == targetID })?.thumbnailPath == thumbnailPath
         }, message: "Thumbnail path should be updated in place")
 
-        XCTAssertEqual(state.items.map(\.id), originalOrder, "Thumbnail updates should not reorder items")
+        XCTAssertEqual(state.historyViewModel.items.map(\.id), originalOrder, "Thumbnail updates should not reorder items")
         XCTAssertEqual(
-            state.items.first(where: { $0.id == targetID })?.thumbnailPath,
+            state.historyViewModel.items.first(where: { $0.id == targetID })?.thumbnailPath,
             thumbnailPath,
             "Thumbnail path should be updated in place"
         )
@@ -1378,11 +640,13 @@ final class AppStateFallbackTests: XCTestCase {
         let mockService = TestMockClipboardService()
         mockService.setItemCount(5)
         let state = AppState.forTesting(service: mockService)
-        defer { state.stop() }
+        addTeardownBlock {
+            await state.stop()
+        }
 
         await state.start()
 
-        let target = try XCTUnwrap(state.items.first(where: { !$0.isPinned }))
+        let target = try XCTUnwrap(state.historyViewModel.items.first(where: { !$0.isPinned }))
         let validPath = "/tmp/scopy-current-thumbnail-\(UUID().uuidString).png"
         mockService.emitEvent(
             .thumbnailUpdated(
@@ -1393,7 +657,7 @@ final class AppStateFallbackTests: XCTestCase {
             )
         )
         await assertEventually(timeout: 1.0, pollInterval: 0.01, {
-            state.items.first(where: { $0.id == target.id })?.thumbnailPath == validPath
+            state.historyViewModel.items.first(where: { $0.id == target.id })?.thumbnailPath == validPath
         }, message: "Current thumbnail should be applied")
 
         mockService.emitEvent(
@@ -1408,11 +672,11 @@ final class AppStateFallbackTests: XCTestCase {
         // event ahead of it in the stream has also been handled.
         mockService.emitEvent(.itemPinned(target.id))
         await assertEventually(timeout: 1.0, pollInterval: 0.01, {
-            state.items.first(where: { $0.id == target.id })?.isPinned == true
+            state.historyViewModel.items.first(where: { $0.id == target.id })?.isPinned == true
         }, message: "Sentinel event should be processed")
 
         XCTAssertEqual(
-            state.items.first(where: { $0.id == target.id })?.thumbnailPath,
+            state.historyViewModel.items.first(where: { $0.id == target.id })?.thumbnailPath,
             validPath,
             "A thumbnail generated for an older content hash must not attach to the replacement"
         )

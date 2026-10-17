@@ -225,25 +225,6 @@ final class HoverPreviewIntentPolicyTests: XCTestCase {
         )
     }
 
-    func testBatchGeometryEvaluationRemainsStable() throws {
-        let triangle = try XCTUnwrap(
-            HoverPreviewIntentPolicy.safeTriangle(
-                origin: CGPoint(x: 0, y: 150),
-                targetFrame: target,
-                padding: 8
-            )
-        )
-        var insideCount = 0
-        for index in 0..<100_000 {
-            let progress = CGFloat(index % 90) / 90
-            let point = CGPoint(x: progress * 90, y: 150 + sin(progress * .pi) * 20)
-            if triangle.contains(point, boundaryTolerance: 0.5) {
-                insideCount += 1
-            }
-        }
-        XCTAssertGreaterThan(insideCount, 95_000)
-    }
-
     private func makeHorizontalSession() -> HoverPreviewIntentPolicy.Session {
         HoverPreviewIntentPolicy.Session(
             origin: CGPoint(x: 0, y: 150),

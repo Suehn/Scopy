@@ -356,16 +356,6 @@ public enum MarkdownExportService {
         }
         return .general
     }
-
-#if DEBUG
-    static func debugMaxSupportedHeightPixels(targetWidthPixels: CGFloat = defaultTargetWidthPixels) -> CGFloat {
-        MarkdownExportRenderConstants.maxSupportedHeightPixels(for: targetWidthPixels)
-    }
-
-    static func debugShouldBypassPDFForVeryTallContent(heightPoints: CGFloat) -> Bool {
-        MarkdownExportRenderConstants.shouldBypassPDFForHeight(heightPoints)
-    }
-#endif
 }
 
 enum MarkdownExportRenderConstants {
@@ -386,11 +376,6 @@ enum MarkdownExportRenderConstants {
 
     static var maxInMemoryBitmapPixels: CGFloat {
         min(maxTotalPixels, defaultMaxInlineBitmapPixels)
-    }
-
-    static func maxSupportedHeightPixels(for targetWidthPixels: CGFloat) -> CGFloat {
-        let width = max(1, targetWidthPixels)
-        return floor(maxTotalPixels / width)
     }
 
     // Keep single-shot snapshots within a conservative height. Taller exports should switch to tiled snapshot + stitch.

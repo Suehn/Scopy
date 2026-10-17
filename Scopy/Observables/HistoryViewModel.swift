@@ -339,6 +339,9 @@ final class HistoryViewModel {
     /// offers Undo and ⌘Z restores the row only while this is set.
     private(set) var undoableDeletionID: UUID?
     @ObservationIgnored private var pendingDeletion: PendingDeletion?
+    @ObservationIgnored private var inFlightDeletions: [UUID: Task<Bool, Never>] = [:]
+    @ObservationIgnored private var isTerminating = false
+    @ObservationIgnored private var deletionFailureGeneration: UInt64 = 0
     /// Changes only when the rows are replaced by another query or cleared; `searchVersion` also
     /// advances for in-flight work invalidated by a deletion event, which keeps the same rows.
     @ObservationIgnored private var projectionIdentity = UUID()
@@ -347,6 +350,7 @@ final class HistoryViewModel {
     /// Why the last search, history load or page fetch failed. The rows on screen are kept; the
     /// footer shows this with a retry until the next search or load starts.
     private(set) var fetchFailureMessage: String?
+    private(set) var captureReadBlocked = false
 
     static let initialPageSize = 50
     static let loadMorePageSize = 300
@@ -498,6 +502,17 @@ final class HistoryViewModel {
     var isScrolling: Bool = false
 
     private var searchVersion: Int = 0
+    @ObservationIgnored private var recentMutationEpoch: UInt64 = 0
+    @ObservationIgnored private var recentRevision: Int64?
+    @ObservationIgnored private var recentPageTargetDepth: Int?
+    @ObservationIgnored private var recentSnapshotTargetDepth: Int?
+    @ObservationIgnored private var recentNextOffset = 0
+    @ObservationIgnored private var recentPinnedCount = 0
+    @ObservationIgnored private var recentRebaseToken: UUID?
+    @ObservationIgnored private var recentRebaseRequested = false
+    @ObservationIgnored private var scheduledRecentLimit = HistoryViewModel.initialPageSize
+    @ObservationIgnored private var historyCountTask: Task<Void, Never>?
+
 
     var searchCoverage: SearchCoverage = .complete
 
@@ -594,7 +609,7 @@ final class HistoryViewModel {
     }
 
     func updateService(_ service: ClipboardServiceProtocol) {
-        cancelTask(&staleLoadRetryTask)
+        resetRecentRebase()
         cancelTask(&storageDetailsTask)
         self.service = service
     }
@@ -617,17 +632,45 @@ final class HistoryViewModel {
     }
 
     func stop() {
+        searchVersion &+= 1
+        isLoading = false
+        captureReadBlocked = false
+        recentPageTargetDepth = nil
         cancelTask(&searchTask)
         cancelTask(&loadMoreTask)
         cancelTask(&refineTask)
-        cancelTask(&staleLoadRetryTask)
+        resetRecentRebase()
         cancelTask(&storageDetailsTask)
         cancelTask(&recentAppsRefreshTask)
+        cancelTask(&historyCountTask)
     }
 
     // MARK: - Event Handling
 
     func handleEvent(_ event: ClipboardEvent) async {
+        switch event {
+        case .newItem, .itemUpdated, .itemContentUpdated, .itemDeleted, .itemsRemoved, .itemPinned, .itemUnpinned, .itemsCleared:
+            recentMutationEpoch &+= 1
+            recentRevision = nil
+            if isUnfilteredList { scheduleHistoryCountRefresh() }
+        default:
+            break
+        }
+
+        let interruptedDepth: Int?
+        switch event {
+        case .itemDeleted, .itemsRemoved:
+            interruptedDepth = isUnfilteredList ? (recentPageTargetDepth ?? recentSnapshotTargetDepth) : nil
+        case .newItem, .itemUpdated, .itemContentUpdated, .itemPinned, .itemUnpinned:
+            interruptedDepth = isUnfilteredList ? recentPageTargetDepth : nil
+        default:
+            interruptedDepth = nil
+        }
+        defer {
+            if let interruptedDepth, isUnfilteredList {
+                scheduleLoadAfterStaleSnapshot(version: searchVersion, limit: interruptedDepth)
+            }
+        }
         await reconcilePendingDeletion(with: event)
         switch event {
         case .newItem(let item):
@@ -644,17 +687,17 @@ final class HistoryViewModel {
             let didMatchCurrentFilters = matchesCurrentFilters(item)
 
             if didMatchCurrentFilters {
-                _ = insertOrMoveItemToFront(item)
+                // A new row joins a filtered result set; the unfiltered count is refreshed from storage.
+                let joinsFilteredList = !isUnfilteredList && indexOfItem(withID: item.id) == nil
+                _ = upsertRecentItem(item)
+                if joinsFilteredList, totalCount >= 0 {
+                    mutateProjection { $0.updateTotalCount($0.totalCount + 1) }
+                }
                 prewarmDisplayText(for: [item])
             } else {
                 _ = removeItem(withID: item.id)
             }
 
-            if didMatchCurrentFilters, totalCount >= 0 {
-                mutateProjection { $0.incrementTotalCount() }
-            } else if isUnfilteredList, totalCount >= 0 {
-                mutateProjection { $0.incrementTotalCount() }
-            }
         case .thumbnailUpdated(
             let itemID,
             let expectedType,
@@ -699,7 +742,7 @@ final class HistoryViewModel {
 
             let didMatchCurrentFilters = matchesCurrentFilters(item)
             if didMatchCurrentFilters {
-                _ = insertOrMoveItemToFront(item)
+                _ = upsertRecentItem(item)
                 prewarmDisplayText(for: [item])
             } else {
                 _ = removeItem(withID: item.id)
@@ -725,12 +768,7 @@ final class HistoryViewModel {
         case .itemDeleted(let id):
             invalidateKnownContentRevision(itemID: id)
             invalidateInFlightProjectionWorkForDeletion()
-            let wasPresent = removeItem(withID: id)
-
-            let isUnfilteredList = isUnfilteredList
-            mutateProjection {
-                $0.decrementTotalCountIfNeeded(wasPresent: wasPresent, isUnfilteredList: isUnfilteredList)
-            }
+            _ = removeItem(withID: id)
             if hasActiveFilters {
                 search()
             }
@@ -748,13 +786,14 @@ final class HistoryViewModel {
                 // Refresh only the authoritative count. Re-fetching the first page here would
                 // collapse a user's already-loaded pagination depth back to the initial 50 rows.
                 let projectionVersion = searchVersion
+                let epoch = recentMutationEpoch
                 do {
                     let stats = try await service.getStorageStats()
-                    guard projectionVersion == searchVersion, isUnfilteredList else { return }
+                    guard projectionVersion == searchVersion, epoch == recentMutationEpoch, isUnfilteredList else { return }
                     mutateProjection { $0.updateTotalCount(stats.itemCount) }
                     settingsViewModel.storageStats = stats
                 } catch {
-                    guard projectionVersion == searchVersion, isUnfilteredList else { return }
+                    guard projectionVersion == searchVersion, epoch == recentMutationEpoch, isUnfilteredList else { return }
                     // Exact committed IDs are still the best available authority on a transient
                     // stats read failure; duplicate bulk events do not decrement twice.
                     mutateProjection { $0.decrementTotalCount(by: newlyDeletedCount) }
@@ -769,14 +808,22 @@ final class HistoryViewModel {
             setKnownContentPinned(itemID: id, isPinned: true)
             if let index = indexOfItem(withID: id) {
                 let updated = items[index].withPinned(true)
-                setItemIfChanged(at: index, to: updated)
+                if hasSemanticSearchQuery {
+                    setItemIfChanged(at: index, to: updated)
+                } else {
+                    _ = upsertRecentItem(updated)
+                }
                 mergeKnownContentRevisions([updated])
             }
         case .itemUnpinned(let id):
             setKnownContentPinned(itemID: id, isPinned: false)
             if let index = indexOfItem(withID: id) {
                 let updated = items[index].withPinned(false)
-                setItemIfChanged(at: index, to: updated)
+                if hasSemanticSearchQuery {
+                    setItemIfChanged(at: index, to: updated)
+                } else {
+                    _ = upsertRecentItem(updated)
+                }
                 mergeKnownContentRevisions([updated])
             }
         case .itemsCleared(let keepPinned):
@@ -785,6 +832,8 @@ final class HistoryViewModel {
             )
             prepareForItemsCleared(pinnedSurvivors: pinnedSurvivors)
             await refreshAfterItemsCleared()
+        case .captureReadBlocked(let blocked):
+            captureReadBlocked = blocked
         case .settingsChanged:
             break
         }
@@ -824,6 +873,23 @@ final class HistoryViewModel {
         }
     }
 
+    private func scheduleHistoryCountRefresh() {
+        historyCountTask?.cancel()
+        let epoch = recentMutationEpoch
+        historyCountTask = Task {
+            try? await Task.sleep(nanoseconds: timing.recentAppsRefreshDelayNs)
+            guard !Task.isCancelled, isUnfilteredList else { return }
+            do {
+                let stats = try await service.getStorageStats()
+                guard !Task.isCancelled, isUnfilteredList, epoch == recentMutationEpoch else { return }
+                mutateProjection { $0.updateTotalCount(stats.itemCount) }
+                settingsViewModel.storageStats = stats
+            } catch {
+                ScopyLog.app.warning("Failed to refresh history count: \(error.localizedDescription, privacy: .private)")
+            }
+        }
+    }
+
     private func preloadAppIcons() {
         let appsToPreload = recentApps
         Task { @MainActor in
@@ -852,45 +918,53 @@ final class HistoryViewModel {
     // MARK: - Loading
 
     func load() async {
-        cancelTask(&staleLoadRetryTask)
+        guard isUnfilteredList else { return }
+        searchVersion &+= 1
+        cancelTask(&loadMoreTask)
+        resetRecentRebase()
+        await loadRecent(recentLimit: Self.initialPageSize)
+    }
+
+    private func loadRecent(recentLimit: Int) async {
         cancelTask(&storageDetailsTask)
         let currentVersion = searchVersion
         guard shouldApplyLoadResult(version: currentVersion) else { return }
 
         isLoading = true
+        recentSnapshotTargetDepth = recentLimit
         fetchFailureMessage = nil
         defer {
             if currentVersion == searchVersion {
                 isLoading = false
+                recentSnapshotTargetDepth = nil
             }
         }
 
         do {
             let startTime = CFAbsoluteTimeGetCurrent()
 
-            var fetchedItems: [ClipboardItemDTO] = []
-            var hasStableSnapshot = false
+            var snapshot: RecentHistoryPage?
             for _ in 0..<2 {
-                let revisionBeforeFetch = projectionGeneration
-                let pinnedItems = try await service.fetchPinned()
-                let recentItems = try await service.fetchRecentUnpinned(
-                    limit: Self.initialPageSize,
-                    offset: 0
-                )
+                let epoch = recentMutationEpoch
+                let page = try await service.fetchHistoryPage(limit: recentLimit, offset: 0, expectedRevision: nil)
                 guard shouldApplyLoadResult(version: currentVersion) else { return }
-                guard projectionGeneration == revisionBeforeFetch else { continue }
-                fetchedItems = excludingKnownDeletedItems(pinnedItems + recentItems)
-                hasStableSnapshot = true
+                guard recentMutationEpoch == epoch else { continue }
+                snapshot = page
                 break
             }
             guard shouldApplyLoadResult(version: currentVersion) else { return }
-            guard hasStableSnapshot else {
-                scheduleLoadAfterStaleSnapshot(version: currentVersion)
+            guard let snapshot else {
+                scheduleLoadAfterStaleSnapshot(version: currentVersion, limit: recentLimit)
                 return
             }
+            let fetchedItems = excludingKnownDeletedItems(snapshot.pinnedItems + snapshot.items)
+            recentRevision = snapshot.revision
+            recentNextOffset = snapshot.nextOffset
+            recentPinnedCount = snapshot.pinnedItems.count
 
             searchMatchContexts.removeAll(keepingCapacity: true)
-            mutateProjection { $0.replaceItems(fetchedItems) }
+            mutateProjection { $0.replacePage(items: fetchedItems, total: snapshot.total,
+                                               hasMore: snapshot.pinnedItems.count + snapshot.nextOffset < snapshot.total) }
             mergeKnownContentRevisions(fetchedItems)
             prewarmDisplayText(for: fetchedItems)
             searchCoverage = .complete
@@ -902,8 +976,6 @@ final class HistoryViewModel {
 
             let stats = try await service.getStorageStats()
             guard shouldApplyLoadResult(version: currentVersion) else { return }
-
-            mutateProjection { $0.updateTotalCount(stats.itemCount) }
 
             settingsViewModel.storageStats = stats
             scheduleStorageDetailsRefresh(version: currentVersion)
@@ -918,24 +990,43 @@ final class HistoryViewModel {
         !Task.isCancelled && version == searchVersion && isUnfilteredList
     }
 
-    private func scheduleLoadAfterStaleSnapshot(version: Int) {
-        guard staleLoadRetryTask == nil else { return }
-        staleLoadRetryTask = Task {
-            do {
-                try await Task.sleep(nanoseconds: timing.staleLoadRetryDelayNs)
-            } catch {
-                return
-            }
-            guard !Task.isCancelled else { return }
-            guard version == searchVersion, isUnfilteredList else {
-                staleLoadRetryTask = nil
-                return
-            }
+    private func resetRecentRebase() {
+        cancelTask(&staleLoadRetryTask)
+        recentRebaseToken = nil
+        recentRebaseRequested = false
+        scheduledRecentLimit = Self.initialPageSize
+        recentPageTargetDepth = nil
+        recentSnapshotTargetDepth = nil
+    }
 
-            // Clear ownership before reloading so another double collision can schedule
-            // exactly one successor instead of being blocked by this completed task.
-            staleLoadRetryTask = nil
-            await load()
+    private func scheduleLoadAfterStaleSnapshot(version: Int, limit: Int = HistoryViewModel.initialPageSize) {
+        scheduledRecentLimit = max(scheduledRecentLimit, limit)
+        recentRebaseRequested = true
+        guard staleLoadRetryTask == nil else { return }
+        let token = UUID()
+        recentRebaseToken = token
+        staleLoadRetryTask = Task {
+            defer {
+                if recentRebaseToken == token {
+                    staleLoadRetryTask = nil
+                    recentRebaseToken = nil
+                    recentRebaseRequested = false
+                    scheduledRecentLimit = Self.initialPageSize
+                }
+            }
+            while recentRebaseRequested {
+                do {
+                    try await Task.sleep(nanoseconds: timing.staleLoadRetryDelayNs)
+                } catch { return }
+                // The old page owns loading until its final chunk/await has exited. A rebase
+                // cannot race that page's result or its loading-state cleanup.
+                if let page = loadMoreTask { await page.value }
+                guard !Task.isCancelled, version == searchVersion, isUnfilteredList else { return }
+                let limit = scheduledRecentLimit
+                scheduledRecentLimit = Self.initialPageSize
+                recentRebaseRequested = false
+                await loadRecent(recentLimit: limit)
+            }
         }
     }
 
@@ -980,7 +1071,7 @@ final class HistoryViewModel {
     static let loadMorePrefetchRows = 40
 
     func rowDidAppear(itemID: UUID) {
-        guard canLoadMore, !isLoading, loadMoreTask == nil else { return }
+        guard canLoadMore, !isLoading, loadMoreTask == nil, staleLoadRetryTask == nil else { return }
         guard let index = indexOfItem(withID: itemID), index >= loadedCount - Self.loadMorePrefetchRows else { return }
         Task { await loadMore() }
     }
@@ -992,6 +1083,10 @@ final class HistoryViewModel {
 
     func loadMore() async {
         ScrollPerformanceProfile.shared.incrementCounter(name: "list.load_more_attempt")
+        if let rebase = staleLoadRetryTask {
+            await rebase.value
+            return
+        }
         if let inFlightTask = loadMoreTask {
             await inFlightTask.value
             return
@@ -1003,6 +1098,7 @@ final class HistoryViewModel {
             defer {
                 if currentVersion == searchVersion {
                     loadMoreTask = nil
+                    recentPageTargetDepth = nil
                 }
             }
             guard !Task.isCancelled else { return }
@@ -1069,25 +1165,47 @@ final class HistoryViewModel {
                     ScrollPerformanceProfile.shared.incrementCounter(
                         name: "list.pagination_request"
                     )
-                    let moreItems = try await service.fetchRecentUnpinned(
+                    let epoch = recentMutationEpoch
+                    let depth = recentNextOffset + Self.loadMorePageSize
+                    recentPageTargetDepth = depth
+                    let page = try await service.fetchHistoryPage(
                         limit: Self.loadMorePageSize,
-                        offset: pagingOffset(unpinnedItems.count, countsPinned: false)
+                        offset: recentNextOffset,
+                        expectedRevision: recentRevision
                     )
                     guard !Task.isCancelled, currentVersion == searchVersion else { return }
-                    let currentItems = excludingKnownDeletedItems(moreItems)
+                    guard recentMutationEpoch == epoch else {
+                        scheduleLoadAfterStaleSnapshot(version: currentVersion, limit: depth)
+                        return
+                    }
+                    let currentItems = excludingKnownDeletedItems(page.pinnedItems + page.items)
                     prewarmDisplayText(for: currentItems)
-                    var start = 0
-                    while start < currentItems.count {
-                        let chunk = Array(currentItems[start..<min(currentItems.count, start + Self.loadMoreApplyChunkRows)])
-                        mutateProjection { $0.appendRecentPage(items: chunk) }
-                        mergeKnownContentRevisions(chunk)
-                        start += chunk.count
-                        if start < currentItems.count {
-                            // Yield so the UI can commit this chunk before receiving more rows.
-                            try? await Task.sleep(nanoseconds: 20_000_000)
-                            guard !Task.isCancelled, currentVersion == searchVersion else { return }
+                    if page.offset == 0 {
+                        recentPinnedCount = page.pinnedItems.count
+                        mutateProjection { $0.replaceItems(currentItems) }
+                        mergeKnownContentRevisions(currentItems)
+                    } else {
+                        var start = 0
+                        while start < currentItems.count {
+                            let end = min(currentItems.count, start + Self.loadMoreApplyChunkRows)
+                            let chunk = excludingKnownDeletedItems(Array(currentItems[start..<end]))
+                            mutateProjection { $0.appendRecentPage(items: chunk) }
+                            mergeKnownContentRevisions(chunk)
+                            start = end
+                            if start < currentItems.count {
+                                try? await Task.sleep(nanoseconds: 20_000_000)
+                                guard !Task.isCancelled, currentVersion == searchVersion else { return }
+                                guard recentMutationEpoch == epoch else {
+                                    scheduleLoadAfterStaleSnapshot(version: currentVersion, limit: depth)
+                                    return
+                                }
+                            }
                         }
                     }
+                    recentRevision = page.revision
+                    recentNextOffset = page.nextOffset
+                    let hasMore = recentPinnedCount + page.nextOffset < page.total
+                    mutateProjection { $0.updatePagination(total: page.total, hasMore: hasMore) }
                     searchCoverage = .complete
                 }
             } catch {
@@ -1114,7 +1232,7 @@ final class HistoryViewModel {
     func search() {
         cancelTask(&searchTask)
         cancelTask(&refineTask)
-        cancelTask(&staleLoadRetryTask)
+        resetRecentRebase()
         cancelTask(&storageDetailsTask)
         fetchFailureMessage = nil
 
@@ -1210,12 +1328,11 @@ final class HistoryViewModel {
                             searchCoverage = refined.coverage
                         } catch {
                             guard !Task.isCancelled, refineVersion == searchVersion else { return }
-                            if let deferredEmptyPage {
-                                replaceSearchPage(with: deferredEmptyPage)
-                            } else if !searchCoverage.isStagedRefine {
+                            if deferredEmptyPage == nil, !searchCoverage.isStagedRefine {
                                 return
                             }
                             searchCoverage = .incomplete
+                            reportFetchFailure(String(localized: "Search failed"), error)
                             ScopyLog.app.warning("Refine search failed: \(error.localizedDescription, privacy: .private)")
                         }
                     }
@@ -1394,6 +1511,7 @@ final class HistoryViewModel {
     /// clear, or closing the panel commits the previous one first. The tombstone keeps events,
     /// searches and loads from reviving the row meanwhile, and closes its pinned preview.
     func delete(_ item: ClipboardItemDTO) async {
+        guard !isTerminating else { return }
         // Take the undo slot over before any await: a delete that starts while the previous one
         // is being sent must not be overwritten when this call resumes.
         let previous = pendingDeletion
@@ -1442,6 +1560,21 @@ final class HistoryViewModel {
         await sendDeletion(pending)
     }
 
+    /// Normal Quit waits for both the undo slot and deletes already sent by a timer or panel close.
+    /// A failed delete restores its row and keeps the app open so the user can retry.
+    func prepareForTermination() async -> Bool {
+        isTerminating = true
+        let failuresBeforeDrain = deletionFailureGeneration
+        repeat {
+            await commitPendingDeletionNow()
+            let tasks = Array(inFlightDeletions.values)
+            for task in tasks { _ = await task.value }
+        } while pendingDeletion != nil || !inFlightDeletions.isEmpty
+        let succeeded = deletionFailureGeneration == failuresBeforeDrain
+        if !succeeded { isTerminating = false }
+        return succeeded
+    }
+
     private func commitPendingDeletion(token: UUID) async {
         guard let pending = pendingDeletion, pending.token == token else { return }
         pendingDeletion = nil
@@ -1451,14 +1584,24 @@ final class HistoryViewModel {
 
     /// The backend delete of a row whose undo window is over; the slot has already moved on, so a
     /// newer pending deletion is never touched here.
-    private func sendDeletion(_ pending: PendingDeletion) async {
-        do {
-            try await service.delete(itemID: pending.item.id)
-        } catch {
-            ScopyLog.app.error("Delete failed: \(error.localizedDescription, privacy: .private)")
-            revive(pending)
-            reportActionFailure(error)
+    @discardableResult
+    private func sendDeletion(_ pending: PendingDeletion) async -> Bool {
+        if let existing = inFlightDeletions[pending.token] { return await existing.value }
+        let task = Task { @MainActor in
+            defer { inFlightDeletions.removeValue(forKey: pending.token) }
+            do {
+                try await service.delete(itemID: pending.item.id)
+                return true
+            } catch {
+                deletionFailureGeneration &+= 1
+                ScopyLog.app.error("Delete failed: \(error.localizedDescription, privacy: .private)")
+                revive(pending)
+                reportActionFailure(error)
+                return false
+            }
         }
+        inFlightDeletions[pending.token] = task
+        return await task.value
     }
 
     /// The backend deleted the pending row itself; there is nothing left to send or undo.
@@ -1697,9 +1840,10 @@ final class HistoryViewModel {
         cancelTask(&searchTask)
         cancelTask(&loadMoreTask)
         cancelTask(&refineTask)
-        cancelTask(&staleLoadRetryTask)
+        resetRecentRebase()
         cancelTask(&storageDetailsTask)
         searchVersion &+= 1
+        recentPageTargetDepth = nil
         isLoading = false
     }
 
@@ -1734,7 +1878,7 @@ final class HistoryViewModel {
         cancelTask(&searchTask)
         cancelTask(&loadMoreTask)
         cancelTask(&refineTask)
-        cancelTask(&staleLoadRetryTask)
+        resetRecentRebase()
         cancelTask(&storageDetailsTask)
         searchVersion &+= 1
         projectionIdentity = UUID()
@@ -1907,9 +2051,9 @@ final class HistoryViewModel {
     }
 
     @discardableResult
-    private func insertOrMoveItemToFront(_ item: ClipboardItemDTO) -> Bool {
+    private func upsertRecentItem(_ item: ClipboardItemDTO) -> Bool {
         var changed = false
-        mutateProjection { changed = $0.insertOrMoveItemToFront(item) }
+        mutateProjection { changed = $0.upsertRecentItem(item) }
         return changed
     }
 

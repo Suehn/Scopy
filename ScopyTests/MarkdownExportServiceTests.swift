@@ -181,21 +181,6 @@ final class MarkdownExportServiceTests: XCTestCase {
         XCTAssertNotNil(NSImage(pasteboard: pasteboard))
     }
 
-    func testDebugMaxSupportedHeightPixelsIsTenTimesPreviousBudgetAtDefaultWidth() {
-        let width = MarkdownExportService.defaultTargetWidthPixels
-        let previousTotalPixels: CGFloat = 60_000_000
-        let expectedBudget = floor((previousTotalPixels * 10) / width)
-        let currentBudget = MarkdownExportService.debugMaxSupportedHeightPixels(targetWidthPixels: width)
-
-        XCTAssertEqual(currentBudget, expectedBudget, accuracy: 0.5)
-    }
-
-    func testDebugBypassesPDFForVeryTallContent() {
-        XCTAssertFalse(MarkdownExportService.debugShouldBypassPDFForVeryTallContent(heightPoints: 14_400))
-        XCTAssertTrue(MarkdownExportService.debugShouldBypassPDFForVeryTallContent(heightPoints: 14_401))
-        XCTAssertTrue(MarkdownExportService.debugShouldBypassPDFForVeryTallContent(heightPoints: 29_001))
-    }
-
     func testLateLayoutMessageFromPreviousPhaseIsIgnored() throws {
         func message(phase: Int, event: String) throws -> ExportLayoutMessage {
             try XCTUnwrap(ExportLayoutMessage(body: [
@@ -216,20 +201,13 @@ final class MarkdownExportServiceTests: XCTestCase {
     /// The host panel is ordered out once the document is ready, so animation frames stop and no settle is pushed;
     /// the export must still finish through the time-based fallback.
     func testOccludedExportFallsBackToTimeBasedSettle() async throws {
-        let assets = try LiveMarkdownDocument()
-        defer { assets.close() }
-        ExportCoordinator.markdownPreviewResourceURLForTesting = assets.assetRoot
         ExportCoordinator.ordersOutHostWindowForTesting = true
-        defer {
-            ExportCoordinator.markdownPreviewResourceURLForTesting = nil
-            ExportCoordinator.ordersOutHostWindowForTesting = false
-        }
+        defer { ExportCoordinator.ordersOutHostWindowForTesting = false }
         let html = MarkdownHTMLDocumentBuilder.document(source: "# Occluded export\n\nThe host panel leaves the screen after the document is ready.")
 
         let result = await withCheckedContinuation { continuation in
             MarkdownExportService.exportToPNGData(html: html) { continuation.resume(returning: $0) }
         }
-        try Self.skipIfTheHostCannotRunTheRendererBundle(result)
 
         let png = try result.get().pngData
         XCTAssertEqual(Array(png.prefix(8)), [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A])
@@ -238,12 +216,11 @@ final class MarkdownExportServiceTests: XCTestCase {
     /// Cancelling an export stops its encoding (pngquant is terminated) and hands the concurrency slot back only after
     /// that work has exited, so cancel-and-retry cannot exceed the two concurrent exports.
     func testCancelledExportReleasesItsSlotOnlyAfterEncodingWorkExits() async throws {
-        let assets = try LiveMarkdownDocument()
-        defer { assets.close() }
-        ExportCoordinator.markdownPreviewResourceURLForTesting = assets.assetRoot
-        defer { ExportCoordinator.markdownPreviewResourceURLForTesting = nil }
-        let started = assets.assetRoot.appendingPathComponent("pngquant-started")
-        let slowPngquant = assets.assetRoot.appendingPathComponent("slow-pngquant")
+        let scratch = FileManager.default.temporaryDirectory.appendingPathComponent("scopy-slow-pngquant-" + UUID().uuidString)
+        try FileManager.default.createDirectory(at: scratch, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: scratch) }
+        let started = scratch.appendingPathComponent("pngquant-started")
+        let slowPngquant = scratch.appendingPathComponent("slow-pngquant")
         try "#!/bin/sh\ntouch '\(started.path)'\nsleep 30\n".write(to: slowPngquant, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: slowPngquant.path)
         let options = PngquantService.Options(binaryPath: slowPngquant.path, qualityMin: 60, qualityMax: 80, speed: 4, colors: 256)
@@ -256,22 +233,13 @@ final class MarkdownExportServiceTests: XCTestCase {
             pngquantOptions: options
         ) { result = $0 }
         try await waitUntil(timeout: 20) { FileManager.default.fileExists(atPath: started.path) || result != nil }
-        if let result { try Self.skipIfTheHostCannotRunTheRendererBundle(result) }
+        XCTAssertNil(result, "the export must reach encoding before it is cancelled")
         handle.cancel()
 
         guard case .failure(let error) = result else { return XCTFail("cancel must complete the export") }
         XCTAssertTrue(error is CancellationError)
         XCTAssertEqual(gate.activeCount, idleCount + 1, "the slot stays taken while pngquant is being stopped")
         try await waitUntil(timeout: 3) { gate.activeCount == idleCount }
-    }
-
-    /// The export document references the renderer bundle as a file subresource of a string-loaded document. A
-    /// WebContent process without read access to the temporary asset copy (the macos-15 CI image) never runs the
-    /// bundle and the first script call fails on `window.ScopyDocument`; that host is environment-blocked for the
-    /// live export tests, which need the app bundle there.
-    private static func skipIfTheHostCannotRunTheRendererBundle(_ result: Result<MarkdownExportService.ExportOutcome, Error>) throws {
-        guard case .failure(let error) = result, String(describing: error).contains("window.ScopyDocument") else { return }
-        throw XCTSkip("this host cannot load the renderer bundle for a string-loaded export document: \(error)")
     }
 
     private func waitUntil(timeout: TimeInterval, _ condition: () -> Bool) async throws {

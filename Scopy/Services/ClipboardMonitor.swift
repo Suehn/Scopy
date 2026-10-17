@@ -137,7 +137,7 @@ public final class ClipboardMonitor {
     /// One entry of the serial ingest FIFO. Small captures are ready immediately; large ones
     /// are durable envelopes processed off the main actor in queue order.
     private enum IngestJob: Sendable {
-        case ready(ClipboardContent)
+        case ready(ClipboardContent, sessionID: UInt64)
         case envelope(URL, sessionID: UInt64)
     }
 
@@ -192,6 +192,10 @@ public final class ClipboardMonitor {
     private var replayTask: Task<Void, Never>?
 
     private var trackedPendingEnvelopePaths = Set<String>()
+
+    private(set) var isCaptureReadBlocked = false
+    private var captureReadStatusRevision: UInt64 = 0
+    var onCaptureReadBlockedChanged: (@MainActor @Sendable (Bool, UInt64) -> Void)?
 
     /// Test injection: delay applied before each envelope is processed.
     var ingestProcessingDelay: Duration = .zero
@@ -344,6 +348,7 @@ public final class ClipboardMonitor {
         replayTask?.cancel()
         replayTask = nil
         trackedPendingEnvelopePaths.removeAll()
+        setCaptureReadBlocked(false)
         publishIngestSnapshot()
     }
 
@@ -439,7 +444,8 @@ public final class ClipboardMonitor {
             sizeBytes: rawData.sizeBytes
         )
         await replayTask?.value
-        await ingestJobs.enqueue(.ready(content))
+        guard isMonitoring, monitoringSessionID == sessionID, !Task.isCancelled else { return }
+        await ingestJobs.enqueue(.ready(content, sessionID: sessionID))
         settle(currentChangeCount, ownWriteGeneration: generation, sessionID: sessionID)
     }
 
@@ -477,6 +483,7 @@ public final class ClipboardMonitor {
     /// Writes the durable envelope off the main actor, then queues it behind earlier captures.
     /// Returns false when the envelope could not be written, so the caller can retry from memory.
     private func submitDurableCapture(_ rawData: RawClipboardData, logFailure: Bool) async -> Bool {
+        let sessionID = monitoringSessionID
         let envelopeURL: URL
         let ingestDirectory = ingestSpoolDirectory
         do {
@@ -496,7 +503,7 @@ public final class ClipboardMonitor {
 
         // A completed envelope is durable. If monitoring stopped while the write was in flight,
         // leave it on disk for the next replay instead of queueing it in a stopped session.
-        guard isMonitoring else { return true }
+        guard isMonitoring, monitoringSessionID == sessionID, !Task.isCancelled else { return true }
         guard trackedPendingEnvelopePaths.insert(envelopeURL.path).inserted else { return true }
         if trackedPendingEnvelopePaths.count > ScopyThresholds.ingestMaxPendingItems {
             Task {
@@ -505,24 +512,43 @@ public final class ClipboardMonitor {
         }
         publishIngestSnapshot()
 
-        let sessionID = monitoringSessionID
         await replayTask?.value
+        guard isMonitoring, monitoringSessionID == sessionID, !Task.isCancelled else { return true }
         await ingestJobs.enqueue(.envelope(envelopeURL, sessionID: sessionID))
         return true
     }
 
     private func process(_ job: IngestJob) async {
         switch job {
-        case .ready(let content):
+        case .ready(let content, let sessionID):
+            guard isMonitoring, monitoringSessionID == sessionID, !Task.isCancelled else { return }
             await contentQueue.enqueue(content)
         case .envelope(let envelopeURL, let sessionID):
-            // Jobs from a stopped session are skipped; their envelopes replay on the next start.
-            guard isMonitoring, monitoringSessionID == sessionID else { return }
+            await processEnvelope(at: envelopeURL, sessionID: sessionID)
+        }
+    }
 
+    private func processEnvelope(at envelopeURL: URL, sessionID: UInt64) async {
+        // Retain the FIFO head across read failures. The existing bounded queue applies
+        // backpressure to later captures instead of letting them overtake this capture.
+        let retryDelays: [Duration] = [.milliseconds(100), .milliseconds(300), .seconds(1), .seconds(3), .seconds(10), .seconds(30)]
+        var retryIndex = 0
+        var retryDelay: Duration = .zero
+        while isMonitoring, monitoringSessionID == sessionID, !Task.isCancelled {
             let ingestDirectory = ingestSpoolDirectory
-            let delay = ingestProcessingDelay
+            let processingDelay = ingestProcessingDelay
+            let wait = retryDelay
             let work = Task.detached(priority: .userInitiated) {
-                await IngestEnvelopeProcessor.buildContent(from: envelopeURL, ingestDirectory: ingestDirectory, delay: delay)
+                do {
+                    if wait > .zero { try await Task.sleep(for: wait) }
+                } catch {
+                    return IngestEnvelopeProcessor.Outcome.cancelled
+                }
+                return await IngestEnvelopeProcessor.buildContent(
+                    from: envelopeURL,
+                    ingestDirectory: ingestDirectory,
+                    delay: processingDelay
+                )
             }
             activeEnvelopeWork = work
             publishIngestSnapshot()
@@ -530,18 +556,34 @@ public final class ClipboardMonitor {
             activeEnvelopeWork = nil
             publishIngestSnapshot()
 
+            // Check every outcome, including invalid data, before touching any artifact.
+            guard isMonitoring, monitoringSessionID == sessionID, !Task.isCancelled else {
+                if case .content(let content) = result {
+                    IngestEnvelopeProcessor.cleanupPayloadIfNeeded(content.payload, ownership: content.fileOwnership)
+                }
+                return
+            }
             switch result {
             case .cancelled:
                 return
-            case .invalid:
-                discardIngestEnvelope(at: envelopeURL)
             case .content(let content):
-                guard isMonitoring, monitoringSessionID == sessionID else {
-                    IngestEnvelopeProcessor.cleanupPayloadIfNeeded(content.payload, ownership: content.fileOwnership)
+                setCaptureReadBlocked(false)
+                await contentQueue.enqueue(content)
+                return
+            case .invalid:
+                if IngestSpool.quarantinePendingEnvelope(at: envelopeURL, ingestDirectory: ingestDirectory) {
+                    ScopyLog.monitor.warning("Rejected invalid ingest envelope; owned source bytes retained")
+                    trackedPendingEnvelopePaths.remove(envelopeURL.path)
+                    setCaptureReadBlocked(false)
+                    publishIngestSnapshot()
                     return
                 }
-                await contentQueue.enqueue(content)
+            case .unavailable:
+                break
             }
+            setCaptureReadBlocked(true)
+            retryDelay = retryDelays[retryIndex]
+            retryIndex = min(retryIndex + 1, retryDelays.count - 1)
         }
     }
 
@@ -556,6 +598,7 @@ public final class ClipboardMonitor {
         let jobs = ingestJobs
         replayTask = Task {
             for envelopeURL in replayed {
+                guard !Task.isCancelled else { return }
                 await jobs.enqueue(.envelope(envelopeURL, sessionID: sessionID))
             }
         }
@@ -564,15 +607,12 @@ public final class ClipboardMonitor {
         }
     }
 
-    private func discardIngestEnvelope(at url: URL) {
-        switch acknowledgeIngestEnvelope(at: url) {
-        case .terminal(let acknowledgement):
-            completeTerminalIngestAcknowledgement(acknowledgement)
-        case .rejected:
-            IngestSpool.quarantinePendingEnvelope(at: url, ingestDirectory: ingestSpoolDirectory)
-            trackedPendingEnvelopePaths.remove(url.path)
-            publishIngestSnapshot()
-        }
+    private func setCaptureReadBlocked(_ blocked: Bool) {
+        guard blocked != isCaptureReadBlocked else { return }
+        isCaptureReadBlocked = blocked
+        captureReadStatusRevision &+= 1
+        ScopyLog.monitor.notice("Ingest spool read blocked: \(blocked, privacy: .public)")
+        onCaptureReadBlockedChanged?(blocked, captureReadStatusRevision)
     }
 
     private func publishIngestSnapshot() {

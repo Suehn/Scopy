@@ -10,10 +10,7 @@ public protocol ClipboardServiceProtocol: AnyObject {
     /// Starts the service: the real one opens the database and starts monitoring; a mock may do nothing.
     func start() async throws
 
-    /// Stops the service and releases its resources.
-    func stop()
-
-    /// Stops the service and waits for cleanup to finish (tests and quit), instead of sleeping.
+    /// Stops the service and waits for its producers and resource cleanup to finish.
     func stopAndWait() async
 
     // MARK: - Data Access
@@ -24,8 +21,8 @@ public protocol ClipboardServiceProtocol: AnyObject {
     /// Pinned items. The UI groups them separately, so they do not count against a recent page.
     func fetchPinned() async throws -> [ClipboardItemDTO]
 
-    /// Recent unpinned items, for paging the recent list.
-    func fetchRecentUnpinned(limit: Int, offset: Int) async throws -> [ClipboardItemDTO]
+    /// A consistent recent page, or the expanded prefix if the continuation's revision changed.
+    func fetchHistoryPage(limit: Int, offset: Int, expectedRevision: Int64?) async throws -> RecentHistoryPage
 
     /// Searches the clipboard history.
     func search(query: SearchRequest) async throws -> SearchResultPage
@@ -53,8 +50,8 @@ public protocol ClipboardServiceProtocol: AnyObject {
     /// Local file URLs for the system share sheet: the original file for file items, a temporary PNG for images.
     func fileURLs(itemID: UUID) async throws -> [URL]
 
-    /// Updates the settings.
-    func updateSettings(_ settings: SettingsDTO) async throws
+    /// Commits changed fields atomically and returns the persisted settings.
+    func updateSettings(_ patch: SettingsPatch) async throws -> SettingsDTO
 
     /// The current settings.
     func getSettings() async throws -> SettingsDTO

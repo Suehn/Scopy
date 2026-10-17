@@ -586,6 +586,30 @@ actor SQLiteClipboardRepository {
         return items
     }
 
+    func fetchHistoryPage(limit: Int, offset: Int, expectedRevision: Int64?) throws -> (
+        pinned: [ClipboardStoredItem], items: [ClipboardStoredItem], total: Int,
+        offset: Int, nextOffset: Int, revision: Int64
+    ) {
+        try execute("BEGIN DEFERRED TRANSACTION")
+        do {
+            let metadata = try prepare("SELECT mutation_seq, item_count FROM scopy_meta WHERE id = 1")
+            guard try metadata.step() else { throw RepositoryError.queryFailed("scopy_meta row is missing") }
+            let revision = metadata.columnInt64(0)
+            let total = metadata.columnInt(1)
+            _ = try metadata.step()
+            let offset = max(0, offset)
+            let start = expectedRevision == revision ? offset : 0
+            let count = max(0, limit) + (start == 0 ? offset : 0)
+            let pinned = start == 0 ? try fetchPinned() : []
+            let items = try fetchRecentUnpinned(limit: count, offset: start)
+            try execute("COMMIT")
+            return (pinned, items, total, start, start + items.count, revision)
+        } catch {
+            try? execute("ROLLBACK")
+            throw error
+        }
+    }
+
     func fetchRecentApps(limit: Int) throws -> [String] {
         let sql = """
             SELECT app_bundle_id

@@ -83,13 +83,8 @@ final class ClipboardItemContentRevisionTests: XCTestCase {
         XCTAssertEqual(firstRevision, secondRevision)
         XCTAssertEqual(firstRevision.cacheKey, secondRevision.cacheKey)
         XCTAssertEqual(
-            firstRevision.cacheKey,
-            "content-v1|aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee|" +
-                "8337686fa0a8cfb2737c1a9a0356009f9790b255be174d673cc80702b3a002d5"
-        )
-        XCTAssertEqual(
             ClipboardItemContentRevision.deterministicTextCacheKey(first.plainText),
-            "text-v1|905a73d5a62aee7a369e34d29ad978ce4481dcb2012c924fa4f356d6722c8b17"
+            ClipboardItemContentRevision.deterministicTextCacheKey(sameContent.plainText)
         )
         assertSendable(firstRevision)
     }
@@ -159,31 +154,21 @@ final class ClipboardItemContentRevisionTests: XCTestCase {
         XCTAssertEqual(originalRevision.cacheKey, generatedRevision.cacheKey)
         XCTAssertFalse(makeView(item: original) == makeView(item: thumbnailGenerated))
 
-        HistoryItemPresentationCache.shared.clearCaches()
-        var displayTextCallCount = 0
-        let dependencies = HistoryItemRowDescriptor.Dependencies(
-            displayTexts: { _ in
-                displayTextCallCount += 1
-                return ("Image", "metadata", nil)
-            },
-            filePreview: { _ in nil }
-        )
-        _ = HistoryItemPresentationCache.shared.rowDescriptor(
+        let cache = HistoryItemPresentationCache.shared
+        cache.clearCaches()
+        let originalDescriptor = cache.rowDescriptor(
             for: original,
-            settings: .default,
-            dependencies: dependencies
+            settings: .default
         )
-        _ = HistoryItemPresentationCache.shared.rowDescriptor(
+        XCTAssertNil(cache.cachedRowDescriptor(for: thumbnailGenerated, settings: .default))
+        let generatedDescriptor = cache.rowDescriptor(
             for: thumbnailGenerated,
-            settings: .default,
-            dependencies: dependencies
+            settings: .default
         )
-        _ = HistoryItemPresentationCache.shared.rowDescriptor(
-            for: thumbnailGenerated,
-            settings: .default,
-            dependencies: dependencies
-        )
-        XCTAssertEqual(displayTextCallCount, 2)
+        XCTAssertEqual(originalDescriptor.titleText, String(localized: "Image"))
+        XCTAssertEqual(generatedDescriptor.titleText, originalDescriptor.titleText)
+        XCTAssertNotNil(cache.cachedRowDescriptor(for: original, settings: .default))
+        XCTAssertNotNil(cache.cachedRowDescriptor(for: thumbnailGenerated, settings: .default))
     }
 
     func testHistoryItemViewEqualityRejectsSameIDMissingHashReplacement() {

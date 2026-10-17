@@ -54,53 +54,6 @@ final class KeyboardNavigationUITests: XCTestCase {
         XCTAssertTrue(selectedItem.waitForExistence(timeout: 5), "Hovering the list should still select a row while the search field is focused.")
     }
 
-    func testDownArrowSelectsNextItem() throws {
-        let window = app.windows.firstMatch
-        guard window.waitForExistence(timeout: 5) else {
-            XCTFail("Window not found")
-            return
-        }
-
-        // Press down arrow
-        window.typeKey(.downArrow, modifierFlags: [])
-
-        // Should have selected an item (verify via selection highlight)
-        let exists = window.exists
-        XCTAssertTrue(exists)
-    }
-
-    func testUpArrowSelectsPreviousItem() throws {
-        let window = app.windows.firstMatch
-        guard window.waitForExistence(timeout: 5) else {
-            XCTFail("Window not found")
-            return
-        }
-
-        // First go down, then up
-        window.typeKey(.downArrow, modifierFlags: [])
-        window.typeKey(.downArrow, modifierFlags: [])
-        window.typeKey(.upArrow, modifierFlags: [])
-
-        let exists = window.exists
-        XCTAssertTrue(exists)
-    }
-
-    func testEnterKeySelectsItem() throws {
-        let window = app.windows.firstMatch
-        guard window.waitForExistence(timeout: 5) else {
-            XCTFail("Window not found")
-            return
-        }
-
-        // Select first item
-        window.typeKey(.downArrow, modifierFlags: [])
-
-        // Press enter - should copy and possibly close window
-        window.typeKey(.return, modifierFlags: [])
-        // Window may close after selection; just ensure we don't crash.
-        _ = window.exists
-    }
-
     func testEscapeKeyClearsSearch() throws {
         let searchField = app.anyElement("History.SearchField")
         guard searchField.waitForExistence(timeout: 10) else {
@@ -124,19 +77,4 @@ final class KeyboardNavigationUITests: XCTestCase {
         )
     }
 
-    func testMultipleDownArrowsNavigatesList() throws {
-        let window = app.windows.firstMatch
-        guard window.waitForExistence(timeout: 5) else {
-            XCTFail("Window not found")
-            return
-        }
-
-        // Navigate through multiple items
-        for _ in 0..<5 {
-            window.typeKey(.downArrow, modifierFlags: [])
-        }
-
-        let exists = window.exists
-        XCTAssertTrue(exists)
-    }
 }

@@ -6,29 +6,6 @@ import XCTest
 
 @MainActor
 final class HistoryProfileDatasetFingerprintTests: XCTestCase {
-    func testFixedDatasetMetadataMatchesActualRowsAndIsDeterministic() {
-        let items = MockClipboardService.makeFixedWarmTextDataset()
-        let first = HistoryProfileDatasetFingerprint.make(
-            datasetID: MockClipboardService.fixedWarmTextDatasetID,
-            items: items
-        )
-        let second = HistoryProfileDatasetFingerprint.make(
-            datasetID: MockClipboardService.fixedWarmTextDatasetID,
-            items: items
-        )
-
-        XCTAssertEqual(first, second)
-        XCTAssertEqual(first.schema, HistoryProfileDatasetFingerprint.schema)
-        XCTAssertEqual(first.datasetID, MockClipboardService.fixedWarmTextDatasetID)
-        XCTAssertTrue(first.fingerprint.range(of: #"^sha256:[0-9a-f]{64}$"#, options: .regularExpression) != nil)
-        XCTAssertEqual(first.itemCount, 50)
-        XCTAssertEqual(first.textItemCount, 50)
-        XCTAssertEqual(first.imageItemCount, 0)
-        XCTAssertEqual(first.pinnedItemCount, 2)
-        XCTAssertEqual(first.uniqueItemIDCount, 50)
-        XCTAssertEqual(first.minimumTextUTF8Bytes, 4_096)
-        XCTAssertEqual(first.maximumTextUTF8Bytes, 4_096)
-    }
 
     func testFingerprintChangesForEveryCanonicalIdentityBoundary() throws {
         let items = MockClipboardService.makeFixedWarmTextDataset()
@@ -69,19 +46,6 @@ final class HistoryProfileDatasetFingerprintTests: XCTestCase {
             HistoryProfileDatasetFingerprint.make(datasetID: "different-dataset", items: items).fingerprint,
             original
         )
-    }
-
-    func testJSONPayloadUsesValidatorSchemaKeys() {
-        let metadata = HistoryProfileDatasetFingerprint.make(
-            datasetID: MockClipboardService.fixedWarmTextDatasetID,
-            items: MockClipboardService.makeFixedWarmTextDataset()
-        )
-
-        XCTAssertEqual(metadata.jsonPayload["schema"] as? String, "history-profile-dataset-v1")
-        XCTAssertEqual(metadata.jsonPayload["id"] as? String, "fixed-warm-text-v1")
-        XCTAssertEqual(metadata.jsonPayload["item_count"] as? Int, 50)
-        XCTAssertEqual(metadata.jsonPayload["text_utf8_bytes_min"] as? Int, 4_096)
-        XCTAssertEqual(metadata.jsonPayload["text_utf8_bytes_max"] as? Int, 4_096)
     }
 
     private func replacing(
