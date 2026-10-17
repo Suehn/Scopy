@@ -1246,6 +1246,18 @@ public actor SearchEngineImpl {
             candidateSlots = FullIndexRanker.candidateSlots(index: index, queryLower: queryLower)
         }
 
+        // The character postings barely narrow ASCII words; the short index's bigram postings do.
+        let bigrams = FullIndexRanker.requiredASCIIBigrams(queryLower: queryLower, mode: mode)
+        if !bigrams.isEmpty, !candidateSlots.isEmpty, let shortIndex = shortIndexStore.index {
+            let filterStart = perf == nil ? 0 : CFAbsoluteTimeGetCurrent()
+            let matches = shortIndex.items(containingASCIIBigrams: bigrams)
+            candidateSlots.removeAll { slot in
+                index.items[slot].map { !matches.mayContain($0.id) } ?? false
+            }
+            perf?.addPhase("full_index_bigram_filter", ms: (CFAbsoluteTimeGetCurrent() - filterStart) * 1000)
+            perf?.addCounter("full_index_bigram_candidate_slots", value: candidateSlots.count)
+        }
+
         if candidateSlots.isEmpty {
             return SearchResult(items: [], total: 0, hasMore: false, coverage: .complete, searchTimeMs: 0)
         }

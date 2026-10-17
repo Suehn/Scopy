@@ -317,3 +317,137 @@ Dated historical observations formerly embedded in this runbook are preserved in
 - Load average during the A/B runs: 2.6–3.5.
 - Not measured: the real app's typing and scrolling (`make perf-search-type`, `make perf-scroll-wheel`).
 - Unchanged: cold relevance requests, which run before the short index is ready.
+
+### 2026-10-18 Search Stage 3: SIMD Plain-Text Skip In LoweredTextMatcher
+
+- Source baseline: stage 2 at `b4a1f95` (includes `main` `347238f`); branch `claude/search-simd-matcher`. Development evidence, not a release. Environment and project baselines as in stage 1.
+- **Change:** between special scalars, lowercasing keeps each scalar's UTF-16 length and adds no ASCII unit. So `LoweredTextMatcher` now checks 16 bytes per step (`SIMD16<UInt8>`) for well-formedness and counts their UTF-16 units. It stops at the first special scalar, malformed byte, or byte that can start the ASCII needle in either case, and leaves the last 17 bytes to the per-scalar path. Decisions are unchanged.
+- **Differential fuzz:** 3 seeds × 400,000 random texts, compared with `text.lowercased()` and `range(of:)` or a UTF-16 search.
+  - Texts mixed combining marks, Kelvin sign, İ, Prepend, ZWJ, VS16, Hangul jamo, CJK, emoji, four-byte scalars, malformed bytes (1 text in 6) and runs of up to 600 pieces.
+  - Result: 4,675,599 comparisons, 3,884,315 decided on bytes, 0 mismatches.
+  - On seed 1, both the stage-2 and the stage-3 matcher decided exactly 1,294,738 of the 1,558,492 comparisons.
+- **Negative controls:** each disables one check; mismatches on seed 1 at 400,000 texts, then on the new unit test.
+
+| Disabled check | Fuzz mismatches | `LoweredTextMatcherTests` mismatches |
+| --- | --- | --- |
+| Preceding-neighbour check | 3,512 | 74 |
+| Following-neighbour check | 20,769 | 668 |
+| Continuation structure | 5,106 | 62 |
+| E0/ED/F0/F4 second-byte ranges | 11,541 | 159 |
+| Invalid leads (C0, C1, F5–FF) | 4,239 | 47 |
+| Special-scalar stops | 155,524 | 1,961 |
+| Uppercase needle stop | 49,682 | 1,292 |
+| Stop byte's own well-formedness | 123 | 3 |
+| Back-up before the final scalar | 136,326 | 422 |
+| Second unit of four-byte scalars | 498,916 | 5,424 |
+| Neighbour bookkeeping after a skip | 2,084 | 39 |
+| Lane flush every 7 blocks (moved to 64) | 1 | 1,889 |
+
+- **New unit test:** `LoweredTextMatcherTests` runs the same comparison on 1,500 seeded texts with long runs, in 1.4 s in the Debug test host.
+  - It decides 80.7% of comparisons, against a 70% floor.
+  - The real XCTest run fails on the weakest control (3 mismatches).
+- Real DB snapshot as in stage 1 (SHA-256 `30841d15…ee6c`). Each binary used a fresh APFS clone.
+- Release ScopyBench binaries (SHA-256 prefix), both built from one scratch copy so the embedded paths match: stage 2 `67265065`, stage 3 `9f4d3823`. Workloads as in stage 2. Means of run medians, ms.
+
+| Workload (ms) | A/A, 3 interleaved pairs | Stage 2, 5 ABBA pairs | Stage 3, 5 ABBA pairs |
+| --- | --- | --- | --- |
+| Prepared relevance `cm` (gate) | 9.68 / 9.65 | 9.67 | 7.72 |
+| Relevance short `e` | 20.13 / 20.17 | 20.21 | 17.99 |
+| Relevance short `co` | 20.42 / 20.52 | 20.85 | 16.77 |
+| Relevance short `数据` | 29.47 / 29.52 | 29.70 | 26.46 |
+| Relevance full index `e` | 8.89 / 8.95 | 8.94 | 7.79 |
+| Recent full index `cm` | 92.72 / 92.71 | 92.60 | 86.61 |
+| Recent short `cm` | 86.04 / 85.97 | 86.03 | 85.20 |
+| Recent short `co`, 10 pages | 258.85 / 259.17 | 258.71 | 256.13 |
+| Service `cmd` | 11.72 / 11.74 | 11.73 | 11.72 |
+
+- Unchanged within noise: recent `e`, `co` and `数据` on both indexes, and the `e` page runs. Their early-stopped scans read little text.
+- **Cold requests:**
+  - During the 5-pair run, XProtect's remediator used 88% CPU. Both sides then had single-request outliers of 140–330 ms.
+  - A second 10-pair ABBA of the cold requests alone ran after XProtect exited. Medians, first entry per side excluded (a page-in outlier on both sides):
+
+| Cold request | Stage 2 (ms) | Stage 3 (ms) |
+| --- | --- | --- |
+| Relevance `cm` | 86.7 (84.0–88) | 64.8 (64.0–68) |
+| Recent `cm` | 106.4 (105.5–108) | 102.5 (99.4–105) |
+
+- `make build` passed; `make test-unit`: 753 passed, 0 failed. `make test-snapshot-perf-release` on the stage-3 clone passed three times:
+  - `cmd` p95 12.79 / 12.65 / 12.19 ms (limit 50);
+  - prepared `cm` p95 9.07 / 7.91 / 7.94 ms (limit 20);
+  - cold `cm` 138.5 (first run after the build) / 63.4 / 63.6 ms.
+
+### 2026-10-18 Search Stage 4: Short-Index Bigram Filter For Fuzzy+ ASCII Words
+
+- **Source baseline:** stage 3 at `bce089d` (includes `main` `b169d85`); branch `claude/search-bigram-filter`. Development evidence, not a release. Environment and project baselines as in stage 1.
+- **Change:**
+  - Fuzzy+ matches an ASCII word of three or more characters as a substring of whole characters, so each adjacent byte pair of the word is adjacent in the lowercased text.
+  - While the short index is installed, `searchInFullIndex` drops full-index candidates that lack one of those pairs in the short index's ASCII bigram postings. This runs before scoring and before the staging decision.
+  - Pairs with ";" or "`" are skipped, an id the short index does not hold passes, and fuzzy mode is never filtered.
+- **Where it applies:** on this snapshot, a heavy-text corpus (average plain text ≥ 1 KB), every fuzzy+ query made only of such words skips the full index.
+  - While typing, the FTS prefilter serves it. The per-request phases show `fts_prefilter` and no full-index phase, for `config` and for mixed queries such as `co config` and `config 数据`.
+  - On refine (`forceFullFuzzy`), SQL substring search serves it.
+  - So here the filter serves only the refine of a mixed query, one that also has a word under three characters or a non-ASCII word. On lighter corpora it serves every such query.
+- **Dropped:**
+  - **CJK bigrams** (estimated 5.1× for `数据库`): non-ASCII fuzzy+ words, and every fuzzy-mode query of three or more characters, match as subsequences. A bigram filter would drop real matches such as `数x据y库`.
+  - **Incremental narrowing while typing (item 8):** it was to apply only together with the bigram filter. On this corpus, typing a query of three or more characters never reaches the full index.
+- **No missed matches:**
+  - **Committed test:** `testFuzzyPlusFullIndexFindsTheSameRowsThroughTheShortIndexBigrams` builds two engines on one seeded 400-row fixture, one with the short index and one without (below its corpus size only a forced build creates it). It compares ids, `total` and `hasMore` for 16 fuzzy+ and fuzzy queries in both sort orders.
+  - **Fixture content:** U+037E, U+1FEF, the Kelvin sign, combining marks, ZWJ, ZWSP, soft hyphen, İ, a ligature, CR LF and lone ";" and "`".
+  - **Scratch run** of the same test, not committed: 30 seeds × 1,900 rows, 1,920 result comparisons, 0 mismatches.
+  - **Controls:** keeping the ";" and "`" pairs fails the committed test (12 failures), and so does filtering fuzzy mode (4). Filtering two-character words does not fail it: fuzzy+ matches them as UTF-16 code-unit substrings, so their bigrams are also present. That is a safe extension, not taken.
+- Real DB snapshot as in stage 1, a fresh APFS clone per binary. Release ScopyBench binaries from one scratch copy: stage 3 `9f4d3823`, stage 4 `af634d7a`. Engine layer with the short index prepared, `数据库` searched untimed before each run, 15 samples after 3 warm-ups. Means of run medians, ms.
+
+| Workload (ms) | A/A, 3 interleaved pairs | Stage 3, 5 ABBA pairs | Stage 4, 5 ABBA pairs |
+| --- | --- | --- | --- |
+| Refine `co config`, relevance | 33.95 / 34.06 | 33.64 | 20.74 |
+| Refine `co config`, recent | 33.38 / 33.51 | 33.56 | 31.37 |
+| Refine `a function`, relevance | 36.75 / 36.57 | 36.53 | 26.54 |
+| Refine `a function`, recent | 48.12 / 47.95 | 48.68 | 46.41 |
+| Refine `数据 select`, relevance | 72.64 / 72.64 | 73.00 | 68.65 |
+| Refine `数据 select`, recent | 171.04 / 170.69 | 172.42 | 170.20 |
+| Refine `a the`, relevance | 26.46 / 26.43 | 26.62 | 21.64 |
+| Refine `a the`, recent | 12.99 / 12.98 | 13.10 | 12.84 |
+| Typing `config`, recent (FTS, control) | 13.94 / 13.86 | 14.05 | 13.89 |
+| Service `cmd` (control) | 11.87 / 11.96 | 11.91 | 12.02 |
+| Prepared `cm` (control) | 7.94 / 7.91 | 7.84 | 7.98 |
+
+- Recent-sorted refines gain less. They already stop early, and match evidence dominates them (for example, 77 of 88 ms for `select`).
+- **Gates:**
+  - `make build` passed; `make test-unit`: 755 passed, 0 failed.
+  - `make test-snapshot-perf-release` on the stage-4 clone passed three times: `cmd` p95 12.61 / 12.35 / 16.62 ms (limit 50); prepared `cm` p95 8.76 / 8.25 / 8.30 ms (limit 20); cold `cm` 138.6 (first run after the build) / 65.1 / 65.2 ms.
+- **Pre-existing, not changed here:** the full index's character filter requires a literal ";" or "`" in the text. So a row that matches a fuzzy+ word only through U+037E or U+1FEF is missed whenever it has no literal ";" or "`" elsewhere, and the SQL paths miss it too.
+
+### 2026-10-18 Search Stage 5: Relevance Short-Query Score Reuse Across Pages
+
+- **Source baseline:** stage 4 at `e13a031`; branch `claude/search-relevance-pages`. Development evidence, not a release. Environment and project baselines as in stage 1.
+- **Change:** a relevance-sorted one- or two-character query keeps each candidate's 4 KB prefix score, its rows still undecided (best bound first), and each full read (`SearchReadStore.RelevanceScores`).
+  - Any page of the same token and filters reuses them while `mutation_seq` is unchanged. It then reads in full only the undecided rows whose bound could still enter the deeper window.
+  - The top `offset + limit + 1` under `SearchRankKey`'s strict order is unique, and rows are resolved in the same bound order, so pages are unchanged.
+- **Tests:**
+  - `testRelevanceShortQueryPagesAgreeAcrossThePrefixCut` walks every window and filter of one query, so every page after the first comes from the reused scores. It still matches the full index.
+  - New `testRelevanceShortQueryScoresAreReadAgainAfterACommit` fails when `mutation_seq` is dropped from the reuse key (2 failures).
+  - Skipping the undecided rows on reused pages fails the window test.
+- **Gate change:** the prepared `cm` run of `make test-snapshot-perf-release` now searches `md` untimed before each sample (`--reset-query md`). Without it, every warm sample would be a cache hit (2.5 ms) and the gate would no longer bound a fresh ranking.
+- **A/B:** a fresh APFS clone per binary; Release ScopyBench from one scratch copy (stage 4 `af634d7a`, stage 5 `5febce81`). Engine layer with the short index prepared, relevance order. Means of run medians, ms.
+  - First pages: `q` searched untimed before each run so the scores are not reused; 15 samples after 3 warm-ups.
+  - Ten 300-row pages: the same reset, 7 samples after 2 warm-ups.
+
+| Workload (ms) | A/A, 3 interleaved pairs | Stage 4, 5 ABBA pairs | Stage 5, 5 ABBA pairs |
+| --- | --- | --- | --- |
+| First page `e` | 19.02 / 18.98 | 19.03 | 19.26 |
+| First page `co` | 17.39 / 17.76 | 17.92 | 17.62 |
+| First page `cm` | 8.30 / 8.40 | 8.30 | 8.34 |
+| First page `数据` | 27.32 / 27.40 | 27.39 | 27.49 |
+| `e`, 10 pages | 256.8 / 260.8 | 263.4 | 121.9 |
+| `co`, 10 pages | 301.0 / 307.7 | 303.5 | 180.4 |
+| `cm`, 10 pages | 411.0 / 409.5 | 411.9 | 313.8 |
+| `数据`, 10 pages | 1,018.5 / 1,011.1 | 1,020.2 | 925.2 |
+| Same `cm` again (the old gate form) | 8.07 / 8.02 | 7.95 | 2.50 |
+| Prepared `cm` after `md` (the new gate form) | 8.26 / 8.50 | 8.30 | 8.24 |
+| Service `cmd` (control) | 12.36 / 12.43 | 12.27 | 12.25 |
+| Recent short `e` (control) | 3.65 / 3.60 | 3.59 | 3.60 |
+
+- **What's left in deep pages:** fetching the rows and building match evidence for 300 rows per page. `数据` spends 31–48 ms per page on evidence.
+- **Gates:**
+  - `make build` passed; `make test-unit`: 756 passed, 0 failed; `make test-tooling` and `make test-release-policy` passed.
+  - `make test-snapshot-perf-release` with the new `cm` run passed three times: `cmd` p95 12.93 / 12.64 / 12.06 ms (limit 50); prepared `cm` p95 8.90 / 9.08 / 9.07 ms (limit 20); cold `cm` 119.3 (first run after the build) / 66.8 / 72.1 ms.
