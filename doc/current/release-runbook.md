@@ -208,3 +208,19 @@ Dated historical observations formerly embedded in this runbook are preserved in
 | Cold `cm`, single request | 86.4 / 92.0 | 83.3 / 83.1 | observation only |
 
 - Not run: `make perf-frontend-profile`, which drives the real app with synthetic wheel input. Frontend scroll/load-more latency is therefore not measured for this change.
+
+### 2026-10-18 v0.82.2 Release Gates
+
+- Release candidate `5fb38d7` contains the three sections above. Environment: Apple M3, 8 cores, 24 GB; macOS 27.2 (`26B5101f`); Xcode 27.0 (`27A5194q`). Release note: [v0.82.2](../releases/history/v0.82.2.md).
+- `make build` passed; `make test-unit` 742 passed, 0 failed, 0 skipped (51.3 s). Hosted CI `39057779920` and Hosted TSan `39057779924` passed on the same commit.
+- `make test-snapshot-perf-release`, five consecutive runs on one clone of the snapshot (SHA-256 prefix `2724012f0ee77159`, unchanged after the runs):
+
+| Run | Service `cmd` p95 (ms) | Prepared `cm` p95 (ms) | Cold `cm` (ms) | Gate |
+| --- | --- | --- | --- | --- |
+| 1 | 16.07 | 17.11 | 185.1 (cache rebuild on the fresh clone) | pass |
+| 2 | 16.55 | 18.74 | 89.4 | pass |
+| 3 | 16.43 | 21.89 | 89.5 | fail (limit 20) |
+| 4 | 15.27 | 16.68 | 84.8 | pass |
+| 5 | 15.50 | 16.79 | 85.4 | pass |
+
+- Run 3 coincided with external load: right after it, another application used 1.7 cores and the load average was 7. Prepared `cm` p95 sits at 80–95% of its limit on this snapshot for both this candidate and baseline `bb9269f` (16.2 / 18.3 ms), so external load can push it over.

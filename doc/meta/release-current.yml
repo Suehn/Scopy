@@ -1,6 +1,6 @@
-version: v0.82.1
-date: 2026-10-13
-release_doc: doc/releases/history/v0.82.1.md
+version: v0.82.2
+date: 2026-10-18
+release_doc: doc/releases/history/v0.82.2.md
 release_index: doc/releases/README.md
 changelog_file: doc/releases/CHANGELOG.md
 profile_doc: null
@@ -8,21 +8,21 @@ runbook_doc: doc/current/release-runbook.md
 spec_doc: doc/current/product-spec.md
 development_doc: doc/current/development-guide.md
 architecture_doc: doc/current/architecture.md
-last_verified_at: 2026-10-13
-summary: Fix Homebrew installation on macOS 15 and later
+last_verified_at: 2026-10-18
+summary: Harden capture, quit and storage races, page recent history by key, and search non-ASCII text up to 52% faster
 verification:
   docs_validate: pass
   release_validate: pass
-  release_policy: pass_15_tests
-  build: pass_local_macOS_15_7_3_source_identical_to_98ae34b
-  test_unit: fail_local_829_tests_2_skips_17_failure_events_9_failed_cases_WebKit_and_pngquant_cancellation_unchanged_sources
-  test_strict: not_rerun_install_only_patch_under_requested_rapid_release_scope
-  homebrew_requirement: pass_Homebrew_4_6_and_7_parsers_accept_14_15_26_27_reject_13
-  homebrew_casks: pass_repo_ae1478f_and_tap_eb5a305_0_82_1_explicit_minimum_14
-  installed_bundle: pass_macOS_15_7_3_0_82_1_build_659_universal_launched_files_match_DMG
-  release_commit: 5988e57b95d266b1672a6b03893832c844061073
-  release_workflow: https://github.com/Suehn/Scopy/actions/runs/38416239825
-  dmg_sha256: b5872ecfcfd21a12a132c67cda91866e45f0ba7d8009bd3dddf59ce7d95f9878
-  tap_automation: failed_manual_sync_completed_eb5a305
-  hosted_tsan: pass_38416215173
-  hosted_ci: failure_38416215881_see_workflow_for_job_results
+  release_policy: pass
+  build: pass_local_debug_5fb38d7
+  test_unit: pass_local_742_tests_0_failures_0_skips_strict_warnings_as_errors_5fb38d7
+  test_tsan: pass_hosted_39057779924_5fb38d7
+  hosted_ci: pass_39057779920_5fb38d7
+  snapshot_release: pass_4_of_5_cmd_p95_15_3_to_16_6ms_prepared_cm_p95_16_7_to_18_7ms_one_21_9ms_miss_under_external_load_cold_cm_85_to_89ms_db_2724012f
+  frontend_profile: not_run_xcuitest_blocked_on_this_machine
+  quit_on_logout: not_exercised
+  release_commit: pending_tag
+  release_workflow: pending_tag
+  dmg_sha256: pending_published_asset
+  homebrew_casks: pending_published_asset
+  installed_bundle: pending_published_asset

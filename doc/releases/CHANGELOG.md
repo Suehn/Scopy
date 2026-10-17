@@ -12,6 +12,26 @@
 
 - No unreleased entries.
 
+## [v0.82.2] - 2026-10-18
+
+### Fixed
+
+- Capture quarantines a pending envelope whose payload is gone instead of blocking the queue, and a quarantine-name collision no longer retries forever.
+- Quit waits at most 5 s for pending deletes and closes search before storage, so the WAL is truncated on quit; a failed delete cancels only a user or updater Quit, never logout, restart or shutdown.
+- A new item joining a filtered list counts once, and pagination still reaches the oldest row.
+- Storage reservation keys and the containment check resolve the directory instead of the file, so a file removed mid-call no longer gets two keys.
+- CJK trigram queries use the FTS index again.
+
+### Changed
+
+- The recent history list continues from the key of its last row instead of an offset; a change between pages no longer re-reads and replaces the visible rows.
+- Substring decisions go through one byte-level matcher, `LoweredTextMatcher`, which defers to `String` wherever bytes could disagree.
+- About reads memory through `proc_pid_rusage`; CI compiles under Xcode 16 strict concurrency again; tests and ScopyBench no longer leave preference files behind.
+
+### Performance
+
+- Real 16,690-row snapshot, Release A–B–B–A against `bb9269f`: single-character non-ASCII queries 19–52% faster, cold `cm` 24% faster, forced `config` by relevance 71% faster; `co` +4% and forced `cmd` by recency +5%. Recent-list deep page at 16,000 rows: 2 ms instead of an 80 ms prefix re-read.
+
 ## [v0.82.1] - 2026-10-13
 
 ### Fixed
