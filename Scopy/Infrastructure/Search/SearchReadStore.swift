@@ -16,15 +16,16 @@ final class SearchReadStore {
     }
 
     /// The optional row filters every listing query supports; `typeFilters` wins over `typeFilter`.
-    struct Filters {
+    struct Filters: Equatable {
         let appFilter: String?
         let typeFilter: ClipboardItemType?
+        /// Sorted, so equal sets compare and bind equally.
         let typeFilters: [ClipboardItemType]?
 
         init(_ request: SearchRequest) {
             appFilter = request.appFilter
             typeFilter = request.typeFilter
-            typeFilters = request.typeFilters.map(Array.init)
+            typeFilters = request.typeFilters?.sorted { $0.rawValue < $1.rawValue }
         }
 
         /// Appends `AND` clauses and their parameters. `column` prefixes the column names for
@@ -43,6 +44,15 @@ final class SearchReadStore {
                 sql += " AND \(column)type = ?"
                 params.append(typeFilter.rawValue)
             }
+        }
+
+        /// The same restriction as a rowid subquery that the filter columns' indexes answer, for
+        /// scans that must not read rows: `app_bundle_id` lies behind the text's overflow pages.
+        func appendAsRowIDSubquery(to sql: inout String, params: inout [String]) {
+            var restriction = ""
+            append(to: &restriction, params: &params)
+            guard !restriction.isEmpty else { return }
+            sql += " AND rowid IN (SELECT rowid FROM clipboard_items WHERE 1 = 1\(restriction))"
         }
     }
 
@@ -88,11 +98,30 @@ final class SearchReadStore {
         let statement: SQLiteStatement
     }
 
+    /// Where a recent short-query scan stands; scans stop only between (pinned, last used) groups.
+    private enum RecencyScanPosition {
+        case start
+        case after(isPinned: Bool, lastUsedAt: Double)
+        case end
+    }
+
+    /// What the previous recent short-query page left: the ranked hits after it and where its
+    /// scan stopped. The next page of the same query continues there while nothing was committed.
+    private struct ShortQueryContinuation {
+        let tokenLower: String
+        let filters: Filters
+        let mutationSeq: Int64
+        let nextOffset: Int
+        let hits: [SearchRankKey]
+        let position: RecencyScanPosition
+    }
+
     private let dbPath: String
     private var connection: SQLiteConnection?
     private var statementCache: [String: CachedStatement] = [:]
     private var statementCacheLRU: [String] = []
     private let statementCacheLimit = 32
+    private var shortQueryContinuation: ShortQueryContinuation?
 
     init(dbPath: String) {
         self.dbPath = dbPath
@@ -128,6 +157,7 @@ final class SearchReadStore {
     func close() {
         statementCache = [:]
         statementCacheLRU = []
+        shortQueryContinuation = nil
         connection?.close()
         connection = nil
     }
@@ -136,6 +166,7 @@ final class SearchReadStore {
     func trimMemory() {
         statementCache = [:]
         statementCacheLRU = []
+        shortQueryContinuation = nil
         connection?.releaseMemory()
     }
 
@@ -484,64 +515,287 @@ final class SearchReadStore {
     ) throws -> Page {
         let tokenLower = tokenLower.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !tokenLower.isEmpty else { return .empty }
-        var params: [String] = []
-        var sql = ""
+        if let candidateIDStrings, candidateIDStrings.isEmpty { return .empty }
+        let matcher = ShortQueryMatcher(tokenLower: tokenLower)
+        if sortMode == .recent {
+            return try newestMatchesPage(
+                matcher,
+                tokenLower: tokenLower,
+                candidateIDStrings: candidateIDStrings,
+                filters: filters,
+                window: window
+            )
+        }
+
+        return try bestMatchesPage(matcher, candidateIDStrings: candidateIDStrings, filters: filters, window: window)
+    }
+
+    /// The candidates' rows from the covering recency index, without reading the table: the
+    /// recency columns lie behind the text's overflow pages. Filters are rowid subqueries.
+    private func candidateRowsSQL(
+        candidateIDStrings: [String]?,
+        filters: Filters,
+        keyset: String = "",
+        params: inout [String]
+    ) -> String {
+        var sql = "SELECT rowid, id, is_pinned, last_used_at FROM clipboard_items INDEXED BY idx_recent_order WHERE 1 = 1"
+        sql += keyset
         if let candidateIDStrings {
-            guard !candidateIDStrings.isEmpty else { return .empty }
-            sql = "WITH candidates(id) AS (SELECT value FROM json_each(?)) "
+            sql += " AND id IN (SELECT value FROM json_each(?))"
             params.append(Self.jsonArray(candidateIDStrings))
         }
-        sql += """
-            SELECT clipboard_items.id, clipboard_items.last_used_at, clipboard_items.is_pinned,
-                   clipboard_items.plain_text, clipboard_items.note
-            FROM clipboard_items
-        """
-        if candidateIDStrings != nil {
-            sql += " JOIN candidates ON clipboard_items.id = candidates.id"
-        }
-        sql += " WHERE 1 = 1"
-        filters.append(to: &sql, params: &params)
-        let stmt = try prepare(sql)
-        defer { stmt.reset() }
-        try Self.bind(params, to: stmt)
+        filters.appendAsRowIDSubquery(to: &sql, params: &params)
+        return sql + " ORDER BY is_pinned DESC, last_used_at DESC, id ASC"
+    }
 
-        let scorer = FuzzyMatcher.Scorer(queryLower: tokenLower, mode: .fuzzy)
-        let matcher = FuzzyMatcher.prepare(queryLower: tokenLower).substringMatcher
-        let needleUnits = tokenLower.utf16.count
-        let baseScore = needleUnits * 10 - (needleUnits - 1)
+    /// Scores every candidate from the first bytes of its plain text where they decide it. A hit
+    /// there outranks, pinned state aside, every row with no hit as early, so a row is read in full
+    /// only while the best score it can still have would enter the window.
+    private func bestMatchesPage(
+        _ matcher: ShortQueryMatcher,
+        candidateIDStrings: [String]?,
+        filters: Filters,
+        window: PageWindow
+    ) throws -> Page {
+        guard let connection else { throw SearchEngineImpl.SearchError.databaseNotOpen }
+        var params: [String] = []
+        let rows = try prepare(candidateRowsSQL(candidateIDStrings: candidateIDStrings, filters: filters, params: &params))
+        defer { rows.reset() }
+        try Self.bind(params, to: rows)
+
         let keepCount = window.offset + window.limit + 1
         var selector = TopKSelector<SearchRankKey>(capacity: keepCount) { lhs, rhs in
-            SearchRankKey.isBetter(lhs, than: rhs, sortMode: sortMode)
+            SearchRankKey.isBetter(lhs, than: rhs, sortMode: .relevance)
         }
         selector.reserveCapacity(min(keepCount, 8192))
-        while try stmt.step() {
+        // Undecided rows, each with the best score it can have.
+        var undecided: [(rowID: Int64, bound: SearchRankKey)] = []
+        let prefixReader = SQLiteBlobReader(connection: connection, table: "clipboard_items", column: "plain_text")
+        defer { prefixReader.close() }
+        var prefix = [UInt8](repeating: 0, count: ShortQueryMatcher.prefixBytes)
+        while try rows.step() {
             try Task.checkCancellation()
-            guard let idString = stmt.columnText(0), let id = UUID(uuidString: idString) else { continue }
-            let matchedScore: Int?
-            switch matcher.map({
-                Self.combinedMatch($0, plain: Self.bytes(stmt.columnTextBytes(3)), note: Self.bytes(stmt.columnTextBytes(4)))
-            }) {
-            case .hit(let offset):
-                matchedScore = baseScore - offset
-            case .miss:
-                matchedScore = nil
-            case .undecided, nil:
-                var combined = stmt.columnText(3) ?? ""
-                if let note = stmt.columnText(4), !note.isEmpty {
-                    combined.append("\n")
-                    combined.append(note)
-                }
-                matchedScore = scorer.score(textLower: combined.lowercased())
+            guard let idString = rows.columnText(1), let id = UUID(uuidString: idString) else { continue }
+            let rowID = rows.columnInt64(0)
+            let verdict = prefix.withUnsafeMutableBytes { buffer -> ShortQueryMatcher.PrefixVerdict in
+                guard let read = prefixReader.readPrefix(rowID: rowID, into: buffer) else { return .scoreAtMost(matcher.baseScore) }
+                let bytes = UnsafeBufferPointer(start: buffer.baseAddress?.assumingMemoryBound(to: UInt8.self), count: read.copied)
+                return matcher.prefixVerdict(bytes, isWholeValue: read.copied == read.length)
             }
-            guard let score = matchedScore else { continue }
-            selector.offer(SearchRankKey(
-                isPinned: stmt.columnInt(2) != 0,
-                lastUsedAt: Date(timeIntervalSince1970: stmt.columnDouble(1)),
+            let isPinned = rows.columnInt(2) != 0
+            let lastUsedAt = Date(timeIntervalSince1970: rows.columnDouble(3))
+            switch verdict {
+            case .score(let score):
+                selector.offer(SearchRankKey(isPinned: isPinned, lastUsedAt: lastUsedAt, score: score, id: id))
+            case .scoreAtMost(let bound):
+                undecided.append((rowID, SearchRankKey(isPinned: isPinned, lastUsedAt: lastUsedAt, score: bound, id: id)))
+            }
+        }
+        prefixReader.close()
+
+        undecided.sort { SearchRankKey.isBetter($0.bound, than: $1.bound, sortMode: .relevance) }
+        let text = try prepare("SELECT plain_text, note FROM clipboard_items WHERE rowid = ?")
+        defer { text.reset() }
+        for row in undecided {
+            try Task.checkCancellation()
+            // Later rows have no better bound, and the weakest kept hit only improves.
+            guard selector.wouldKeep(row.bound) else { break }
+            text.reset()
+            try text.bindInt64(row.rowID, at: 1)
+            guard try text.step(), let score = matcher.score(text, plainColumn: 0, noteColumn: 1) else { continue }
+            selector.offer(SearchRankKey(isPinned: row.bound.isPinned, lastUsedAt: row.bound.lastUsedAt, score: score, id: row.bound.id))
+        }
+        return try rankedPage(selector.sortedElements(), window: window)
+    }
+
+    /// Recency decides before the score, so rows are read newest first until the window and one
+    /// more hit are in and the next row starts another (pinned, last used) group. A page that
+    /// starts where the previous page of the same query ended continues that scan.
+    private func newestMatchesPage(
+        _ matcher: ShortQueryMatcher,
+        tokenLower: String,
+        candidateIDStrings: [String]?,
+        filters: Filters,
+        window: PageWindow
+    ) throws -> Page {
+        let mutationSeq = try fetchMutationSeq()
+        // `hits` are ranked from `firstRank` on.
+        var firstRank = 0
+        var hits: [SearchRankKey] = []
+        var position = RecencyScanPosition.start
+        if let previous = shortQueryContinuation,
+           previous.tokenLower == tokenLower,
+           previous.filters == filters,
+           previous.mutationSeq == mutationSeq,
+           previous.nextOffset == window.offset {
+            firstRank = previous.nextOffset
+            hits = previous.hits
+            position = previous.position
+        }
+
+        let neededHits = window.offset + window.limit + 1 - firstRank
+        if hits.count < neededHits {
+            let scanned = hits.count
+            position = try scanNewest(
+                matcher,
+                after: position,
+                candidateIDStrings: candidateIDStrings,
+                filters: filters,
+                until: neededHits,
+                into: &hits
+            )
+            // Earlier groups rank first, so only the new groups need ordering.
+            hits[scanned...].sort { SearchRankKey.isBetter($0, than: $1, sortMode: .recent) }
+        }
+
+        let pageStart = min(window.offset - firstRank, hits.count)
+        let nextStart = min(pageStart + window.limit, hits.count)
+        shortQueryContinuation = ShortQueryContinuation(
+            tokenLower: tokenLower,
+            filters: filters,
+            mutationSeq: mutationSeq,
+            nextOffset: window.offset + window.limit,
+            hits: Array(hits[nextStart...]),
+            position: position
+        )
+        return try fetchPage(hits[pageStart...].map(\.id)[...], window: window)
+    }
+
+    /// Appends the hits of whole (pinned, last used) groups after `position` until `hits` holds
+    /// `count` and the next row starts another group, and returns where the scan stopped. Only
+    /// visited rows' text is read, in the scan's read transaction.
+    private func scanNewest(
+        _ matcher: ShortQueryMatcher,
+        after position: RecencyScanPosition,
+        candidateIDStrings: [String]?,
+        filters: Filters,
+        until count: Int,
+        into hits: inout [SearchRankKey]
+    ) throws -> RecencyScanPosition {
+        var keyset = ""
+        switch position {
+        case .start: break
+        case .after: keyset = " AND (is_pinned, last_used_at) < (?, ?)"
+        case .end: return .end
+        }
+        var params: [String] = []
+        let order = try prepare(
+            candidateRowsSQL(candidateIDStrings: candidateIDStrings, filters: filters, keyset: keyset, params: &params)
+        )
+        defer { order.reset() }
+        var firstParam: Int32 = 1
+        if case .after(let isPinned, let lastUsedAt) = position {
+            try order.bindInt(isPinned ? 1 : 0, at: 1)
+            try order.bindDouble(lastUsedAt, at: 2)
+            firstParam = 3
+        }
+        try Self.bind(params, to: order, from: firstParam)
+        let text = try prepare("SELECT plain_text, note FROM clipboard_items WHERE rowid = ?")
+        defer { text.reset() }
+
+        var group: (isPinned: Bool, lastUsedAt: Double)?
+        while try order.step() {
+            try Task.checkCancellation()
+            let isPinned = order.columnInt(2) != 0
+            let lastUsedAt = order.columnDouble(3)
+            // Every row of a group is scored: the score orders rows used at the same time.
+            if hits.count >= count, let group, group != (isPinned, lastUsedAt) {
+                return .after(isPinned: group.isPinned, lastUsedAt: group.lastUsedAt)
+            }
+            group = (isPinned, lastUsedAt)
+
+            text.reset()
+            try text.bindInt64(order.columnInt64(0), at: 1)
+            guard try text.step(), let idString = order.columnText(1), let id = UUID(uuidString: idString),
+                  let score = matcher.score(text, plainColumn: 0, noteColumn: 1) else { continue }
+            hits.append(SearchRankKey(
+                isPinned: isPinned,
+                lastUsedAt: Date(timeIntervalSince1970: lastUsedAt),
                 score: score,
                 id: id
             ))
         }
-        return try rankedPage(selector.sortedElements(), window: window)
+        return .end
+    }
+
+    /// One short query's byte matcher and its `String` fallback, as the full index scores it.
+    private struct ShortQueryMatcher {
+        enum PrefixVerdict {
+            case score(Int)
+            case scoreAtMost(Int)
+        }
+
+        /// How much of a plain text `prefixVerdict` reads first.
+        static let prefixBytes = 4096
+
+        let scorer: FuzzyMatcher.Scorer
+        let matcher: LoweredTextMatcher?
+        let baseScore: Int
+        /// The most lowered UTF-16 units a match spans: its canonical decomposition's.
+        private let maxMatchUnits: Int
+
+        init(tokenLower: String) {
+            scorer = FuzzyMatcher.Scorer(queryLower: tokenLower, mode: .fuzzy)
+            matcher = FuzzyMatcher.prepare(queryLower: tokenLower).substringMatcher
+            let needleUnits = tokenLower.utf16.count
+            baseScore = needleUnits * 10 - (needleUnits - 1)
+            maxMatchUnits = tokenLower.decomposedStringWithCanonicalMapping.utf16.count
+        }
+
+        /// The row's score when the leading bytes of its plain text decide it, else the best score
+        /// it can still have. The bytes are cut between two ASCII characters (not after a carriage
+        /// return), where no character spans the cut, so a hit before it is the text's first.
+        func prefixVerdict(_ bytes: UnsafeBufferPointer<UInt8>, isWholeValue: Bool) -> PrefixVerdict {
+            guard let matcher, let prefix = Self.decidablePrefix(bytes, isWholeValue: isWholeValue) else {
+                return .scoreAtMost(baseScore)
+            }
+            switch matcher.firstMatch(in: prefix) {
+            case .hit(let offset):
+                return .score(baseScore - offset)
+            case .undecided:
+                return .scoreAtMost(baseScore)
+            case .miss:
+                // A match the prefix misses starts at most `maxMatchUnits` before its end; a note
+                // match starts after the whole plain text.
+                guard let units = LoweredTextMatcher.loweredUTF16Length(of: prefix) else { return .scoreAtMost(baseScore) }
+                return .scoreAtMost(baseScore - max(0, units - maxMatchUnits))
+            }
+        }
+
+        private static func decidablePrefix(_ bytes: UnsafeBufferPointer<UInt8>, isWholeValue: Bool) -> UnsafeBufferPointer<UInt8>? {
+            if isWholeValue { return bytes }
+            var end = bytes.count - 1
+            while end > 0 {
+                if bytes[end] < 0x80, bytes[end - 1] < 0x80, bytes[end - 1] != 0x0D {
+                    return UnsafeBufferPointer(rebasing: bytes[..<end])
+                }
+                end -= 1
+            }
+            return nil
+        }
+
+        /// The row's score for `plain + "\n" + note`, or nil when it does not match.
+        func score(_ row: SQLiteStatement, plainColumn: Int32, noteColumn: Int32) -> Int? {
+            switch matcher.map({
+                SearchReadStore.combinedMatch(
+                    $0,
+                    plain: SearchReadStore.bytes(row.columnTextBytes(plainColumn)),
+                    note: SearchReadStore.bytes(row.columnTextBytes(noteColumn))
+                )
+            }) {
+            case .hit(let offset):
+                return baseScore - offset
+            case .miss:
+                return nil
+            case .undecided, nil:
+                var combined = row.columnText(plainColumn) ?? ""
+                if let note = row.columnText(noteColumn), !note.isEmpty {
+                    combined.append("\n")
+                    combined.append(note)
+                }
+                return scorer.score(textLower: combined.lowercased())
+            }
+        }
     }
 
     /// The matcher's verdict on `plain + "\n" + note`, as the scorer joins them, without joining.
@@ -733,8 +987,8 @@ final class SearchReadStore {
         return json
     }
 
-    private static func bind(_ params: [String], to stmt: SQLiteStatement) throws {
-        var bindIndex: Int32 = 1
+    private static func bind(_ params: [String], to stmt: SQLiteStatement, from first: Int32 = 1) throws {
+        var bindIndex = first
         for param in params {
             try stmt.bindText(param, at: bindIndex)
             bindIndex += 1

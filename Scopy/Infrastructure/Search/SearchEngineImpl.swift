@@ -1062,7 +1062,7 @@ public actor SearchEngineImpl {
             return makeZeroTimeSearchResult(items: [], total: 0, hasMore: false)
         }
 
-        guard !shouldFallbackFromShortQueryCandidates(candidateIDStrings.count) else {
+        guard !shouldFallbackFromShortQueryCandidates(candidateIDStrings.count, sortMode: request.sortMode) else {
             return nil
         }
 
@@ -1101,7 +1101,7 @@ public actor SearchEngineImpl {
             return makeZeroTimeSearchResult(items: [], total: 0, hasMore: false)
         }
 
-        guard !shouldFallbackFromShortQueryCandidates(candidateIDStrings.count) else {
+        guard !shouldFallbackFromShortQueryCandidates(candidateIDStrings.count, sortMode: request.sortMode) else {
             return nil
         }
 
@@ -1130,10 +1130,13 @@ public actor SearchEngineImpl {
         return makeZeroTimeSearchResult(page: page)
     }
 
-    private func shouldFallbackFromShortQueryCandidates(_ candidateCount: Int) -> Bool {
+    /// Whether a scan of every row beats passing the candidates to SQL, whose id list costs about
+    /// 5 ms per 12,000 ids. A recency scan reads only the rows before its page ends, and a
+    /// relevance pass the first 4 KB of each row, so a large candidate set saves too little.
+    private func shouldFallbackFromShortQueryCandidates(_ candidateCount: Int, sortMode: SearchSortMode) -> Bool {
         guard let itemCount = corpusMetrics?.itemCount, itemCount > 0 else { return false }
         guard candidateCount > 4096 else { return false }
-        return Double(candidateCount) / Double(itemCount) > 0.85
+        return Double(candidateCount) / Double(itemCount) > (sortMode == .recent ? 0.1 : 0.5)
     }
 
     private func searchShortFuzzyWithSQLFallback(

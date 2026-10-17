@@ -17,8 +17,8 @@ enum FullIndexRanker {
         let score: Int
     }
 
-    /// A bounded prefix of one complete ranking so deeper pages of the same query reuse the
-    /// scan instead of scoring every candidate again.
+    /// A bounded prefix of one ranking so deeper pages of the same query reuse the scan instead
+    /// of scoring every candidate again.
     struct SortedMatchesCache {
         struct Key: Hashable {
             let mode: SearchMode
@@ -32,9 +32,25 @@ enum FullIndexRanker {
         }
 
         let key: Key
+        /// `-1` while a recency scan has not reached the end.
         let totalMatches: Int
         /// Already ordered best first; may be truncated for deep paging.
         let topMatches: [ScoredSlot]
+        /// Where an unfinished recency scan continues: its candidates newest first and how many
+        /// of them it scored, always up to a whole (pinned, last used) group.
+        let recentScan: (order: [RecencyEntry], scanned: Int)?
+    }
+
+    struct RecencyEntry {
+        let slot: Int
+        let isPinned: Bool
+        /// Seconds since the reference date: `Date` comparisons are not inlinable and made sorting
+        /// a large candidate set ten times slower.
+        let lastUsedAt: TimeInterval
+
+        func sharesGroup(with other: RecencyEntry) -> Bool {
+            isPinned == other.isPinned && lastUsedAt == other.lastUsedAt
+        }
     }
 
     private struct AdaptiveTuning {
@@ -266,11 +282,37 @@ enum FullIndexRanker {
         let maxDeepPagingCacheTopMatches = tuning.deepPagingCacheTopMatches
         let cacheTopCount = min(maxDeepPagingCacheTopMatches, desiredTopCount + tuning.deepPagingCachePrefetchExtra)
 
-        if let cached = cache,
-           cached.key == cacheKey,
-           cached.topMatches.count >= desiredTopCount {
-            perf?.addCounter("fuzzy_sorted_matches_cache_hit", value: 1)
-            return pageFromSortedMatches(cached.topMatches, totalMatches: cached.totalMatches, request: request)
+        if let cached = cache, cached.key == cacheKey {
+            if cached.topMatches.count >= desiredTopCount || cached.totalMatches == cached.topMatches.count {
+                perf?.addCounter("fuzzy_sorted_matches_cache_hit", value: 1)
+                return pageFromSortedMatches(cached.topMatches, totalMatches: cached.totalMatches, request: request)
+            }
+            if let recentScan = cached.recentScan {
+                perf?.addCounter("fuzzy_recent_scan_continued", value: 1)
+                return try rankRecent(
+                    index: index, request: request, scorer: scorer, key: cacheKey, order: recentScan.order,
+                    scanned: recentScan.scanned, matches: cached.topMatches, cache: &cache, perf: perf
+                )
+            }
+        }
+
+        if request.sortMode == .recent {
+            var order: [RecencyEntry] = []
+            order.reserveCapacity(candidateSlots.count)
+            for slot in candidateSlots {
+                guard slot < index.items.count, let item = index.items[slot],
+                      passesFilters(item, request: request) else { continue }
+                order.append(RecencyEntry(
+                    slot: slot,
+                    isPinned: item.isPinned,
+                    lastUsedAt: item.lastUsedAt.timeIntervalSinceReferenceDate
+                ))
+            }
+            order.sort { $0.isPinned != $1.isPinned ? $0.isPinned : $0.lastUsedAt > $1.lastUsedAt }
+            return try rankRecent(
+                index: index, request: request, scorer: scorer, key: cacheKey, order: order,
+                scanned: 0, matches: [], cache: &cache, perf: perf
+            )
         }
 
         var selector = makeSelector(index: index, sortMode: request.sortMode, capacity: cacheTopCount)
@@ -290,13 +332,60 @@ enum FullIndexRanker {
 
         let topItems = selector.sortedElements()
         if topItems.count <= maxDeepPagingCacheTopMatches {
-            cache = SortedMatchesCache(key: cacheKey, totalMatches: totalMatches, topMatches: topItems)
+            cache = SortedMatchesCache(key: cacheKey, totalMatches: totalMatches, topMatches: topItems, recentScan: nil)
             perf?.addCounter("fuzzy_sorted_matches_cache_store_count", value: topItems.count)
         } else {
             cache = nil
         }
 
         return pageFromSortedMatches(topItems, totalMatches: totalMatches, request: request)
+    }
+
+    /// Recency decides before the score, so candidates are scored newest first, continuing
+    /// `matches` from `scanned`, until the page and one more hit are in and the next candidate
+    /// starts another (pinned, last used) group: every row of a group is scored, which keeps rows
+    /// used at the same time in score order. The total is unknown until the scan reaches the end.
+    private static func rankRecent(
+        index: FullFuzzyIndex,
+        request: SearchRequest,
+        scorer: FuzzyMatcher.Scorer,
+        key: SortedMatchesCache.Key,
+        order: [RecencyEntry],
+        scanned: Int,
+        matches: [ScoredSlot],
+        cache: inout SortedMatchesCache?,
+        perf: SearchPerfContext?
+    ) throws -> Page {
+        let desiredTopCount = max(0, request.offset + request.limit + 1)
+        var newMatches: [ScoredSlot] = []
+        var position = scanned
+        while position < order.count {
+            if position % 1024 == 0 {
+                try Task.checkCancellation()
+            }
+            let entry = order[position]
+            if matches.count + newMatches.count >= desiredTopCount, !entry.sharesGroup(with: order[position - 1]) {
+                break
+            }
+            if let item = index.items[entry.slot], let score = scorer.score(textLower: item.plainTextLower) {
+                newMatches.append(ScoredSlot(slot: entry.slot, score: score))
+            }
+            position += 1
+        }
+        perf?.addCounter("fuzzy_recent_scan_scored", value: position - scanned)
+
+        // The scan stopped between groups, so every new match ranks after every earlier one.
+        newMatches.sort { isBetter($0, than: $1, index: index, sortMode: .recent) }
+        let topMatches = matches + newMatches
+        let finished = position == order.count
+        let totalMatches = finished ? topMatches.count : -1
+        cache = SortedMatchesCache(
+            key: key,
+            totalMatches: totalMatches,
+            topMatches: topMatches,
+            recentScan: finished ? nil : (order, position)
+        )
+        return pageFromSortedMatches(topMatches, totalMatches: totalMatches, request: request)
     }
 
     static func hasReachableNextFuzzyPage(
@@ -325,14 +414,18 @@ enum FullIndexRanker {
         capacity: Int
     ) -> TopKSelector<ScoredSlot> {
         TopKSelector(capacity: capacity) { lhs, rhs in
-            guard let lhsItem = index.items[lhs.slot] else { return false }
-            guard let rhsItem = index.items[rhs.slot] else { return true }
-            return SearchRankKey.isBetter(
-                SearchRankKey(item: lhsItem, score: lhs.score),
-                than: SearchRankKey(item: rhsItem, score: rhs.score),
-                sortMode: sortMode
-            )
+            isBetter(lhs, than: rhs, index: index, sortMode: sortMode)
         }
+    }
+
+    private static func isBetter(_ lhs: ScoredSlot, than rhs: ScoredSlot, index: FullFuzzyIndex, sortMode: SearchSortMode) -> Bool {
+        guard let lhsItem = index.items[lhs.slot] else { return false }
+        guard let rhsItem = index.items[rhs.slot] else { return true }
+        return SearchRankKey.isBetter(
+            SearchRankKey(item: lhsItem, score: lhs.score),
+            than: SearchRankKey(item: rhsItem, score: rhs.score),
+            sortMode: sortMode
+        )
     }
 
     private static func pageFromSortedMatches(

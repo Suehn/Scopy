@@ -27,6 +27,11 @@ struct TopKSelector<Element> {
         }
     }
 
+    /// Whether `offer(element)` would keep it.
+    func wouldKeep(_ element: Element) -> Bool {
+        capacity > 0 && (heap.count < capacity || isBetter(element, heap[0]))
+    }
+
     /// The kept elements, best first.
     func sortedElements() -> [Element] {
         heap.sorted(by: isBetter)

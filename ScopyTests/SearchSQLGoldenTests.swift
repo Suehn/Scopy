@@ -35,6 +35,57 @@ final class SearchSQLGoldenTests: XCTestCase {
         Row(number: 16, text: "数", app: "com.c", type: .text, t: 10),
     ]
 
+    // Recent-sort (pinned, last used) groups that straddle page boundaries, with different "ab"
+    // scores inside each group: the best row is read last at t = 300 and first at t = 200.
+    private static let sameTimeRows: [Row] = [
+        Row(number: 1, text: "xxab", app: "com.a", type: .text, t: 300),
+        Row(number: 2, text: "xab", app: "com.a", type: .text, t: 300),
+        Row(number: 3, text: "ab best", app: "com.a", type: .text, t: 300),
+        Row(number: 4, text: "ab pinned", app: "com.a", type: .text, t: 10, pinned: true),
+        Row(number: 5, text: "ab best", app: "com.a", type: .text, t: 200),
+        Row(number: 6, text: "xxab", app: "com.a", type: .text, t: 200),
+        Row(number: 7, text: "zzz", app: "com.a", type: .text, t: 250),
+        Row(number: 8, text: "xab", app: "com.a", type: .text, t: 200),
+        Row(number: 9, text: "xab", app: "com.a", type: .text, t: 100),
+        Row(number: 10, text: "ab x", app: "com.a", type: .text, t: 100),
+        Row(number: 11, text: "zz", note: "ab in the note", app: "com.a", type: .text, t: 50),
+    ]
+    private static let sameTimeRecentOrder = [4, 3, 2, 1, 5, 8, 6, 10, 9, 11]
+
+    // Plain texts around the 4 KB prefix that the short-query path reads first: an "ab" score is
+    // 19 minus the first match's UTF-16 offset in `plain + "\n" + note`.
+    private static let prefixRows: [Row] = [
+        Row(number: 1, text: "ab start", app: "com.a", type: .text, t: 100),
+        Row(number: 2, text: String(repeating: "x", count: 5000) + "ab", app: "com.a", type: .text, t: 200),
+        // The match spans the 4096-byte cut.
+        Row(number: 3, text: String(repeating: "x", count: 4095) + "ab", app: "com.b", type: .text, t: 300),
+        // Multibyte characters before the cut: it moves back to two ASCII bytes.
+        Row(number: 4, text: String(repeating: "x", count: 4090) + "ééé" + "ab", app: "com.a", type: .text, t: 350),
+        Row(number: 5, text: String(repeating: "x", count: 5000), note: "ab", app: "com.a", type: .text, t: 150),
+        // No two ASCII bytes in the first 4 KB to cut between.
+        Row(number: 6, text: String(repeating: "数", count: 2000) + "ab", app: "com.b", type: .text, t: 250),
+        Row(number: 7, text: String(repeating: "x", count: 6000) + "ab", app: "com.a", type: .text, t: 50, pinned: true),
+        Row(number: 8, text: "xab", app: "com.a", type: .text, t: 120),
+        Row(number: 9, text: "xxab", app: "com.b", type: .text, t: 130),
+        Row(number: 10, text: "zzz", app: "com.a", type: .text, t: 400),
+        // "é" queries: a combining mark right after the cut, a match spanning it, decomposed forms.
+        Row(number: 11, text: String(repeating: "x", count: 4094) + "é\u{323} é", app: "com.b", type: .text, t: 410),
+        Row(number: 12, text: String(repeating: "x", count: 4095) + "é", app: "com.a", type: .text, t: 420),
+        Row(number: 13, text: String(repeating: "x", count: 5000) + "e\u{301}", app: "com.a", type: .text, t: 430),
+        Row(number: 14, text: "é first", app: "com.a", type: .text, t: 440),
+        // A hit late in the prefix, and a row the prefix leaves undecided that outranks it.
+        Row(number: 15, text: String(repeating: "x", count: 3999) + "ab", app: "com.a", type: .text, t: 460),
+        Row(
+            number: 16,
+            text: String(repeating: "数", count: 1300) + "xx" + String(repeating: "数", count: 60) + "ab"
+                + String(repeating: "数", count: 10),
+            app: "com.b",
+            type: .text,
+            t: 470
+        ),
+    ]
+    private static let prefixRelevanceOrder = [7, 1, 8, 9, 16, 6, 15, 4, 3, 2, 5]
+
     private struct Filter {
         let label: String
         var app: String?
@@ -118,6 +169,153 @@ final class SearchSQLGoldenTests: XCTestCase {
         XCTAssertEqual(actual, Self.golden, "Actual:\n\(actual)")
     }
 
+    func testRecentShortQueryPagesKeepSameTimeRowsInScoreOrder() async throws {
+        let dbPath = try makeFixtureDatabase(Self.sameTimeRows)
+
+        let scanEngine = SearchEngineImpl(dbPath: dbPath)
+        try await scanEngine.open()
+        try await assertRecentWindows(scanEngine, path: "scan")
+        await scanEngine.close()
+
+        #if DEBUG
+        let shortEngine = SearchEngineImpl(dbPath: dbPath)
+        try await shortEngine.open()
+        await shortEngine.debugStartShortQueryIndexBuild(force: true)
+        await shortEngine.debugAwaitShortQueryIndexBuild()
+        let shortHealth = await shortEngine.debugShortQueryIndexHealth()
+        XCTAssertTrue(shortHealth.isBuilt)
+        try await assertRecentWindows(shortEngine, path: "short")
+        await shortEngine.close()
+        #endif
+
+        // A longer query builds the full index, which then serves the short query.
+        let fullEngine = SearchEngineImpl(dbPath: dbPath)
+        try await fullEngine.open()
+        _ = try await fullEngine.search(request: SearchRequest(query: "abc", mode: .fuzzy))
+        #if DEBUG
+        let fullHealth = await fullEngine.debugFullIndexHealth()
+        XCTAssertTrue(fullHealth.isBuilt)
+        #endif
+        try await assertRecentWindows(fullEngine, path: "full")
+        await fullEngine.close()
+    }
+
+    func testRelevanceShortQueryPagesAgreeAcrossThePrefixCut() async throws {
+        let dbPath = try makeFixtureDatabase(Self.prefixRows)
+        var engines: [(String, SearchEngineImpl)] = []
+        let scanEngine = SearchEngineImpl(dbPath: dbPath)
+        try await scanEngine.open()
+        engines.append(("scan", scanEngine))
+        #if DEBUG
+        let shortEngine = SearchEngineImpl(dbPath: dbPath)
+        try await shortEngine.open()
+        await shortEngine.debugStartShortQueryIndexBuild(force: true)
+        await shortEngine.debugAwaitShortQueryIndexBuild()
+        let shortHealth = await shortEngine.debugShortQueryIndexHealth()
+        XCTAssertTrue(shortHealth.isBuilt)
+        engines.append(("short", shortEngine))
+        #endif
+        // A full pass builds the full index, which then serves the short queries.
+        let fullEngine = SearchEngineImpl(dbPath: dbPath)
+        try await fullEngine.open()
+        _ = try await fullEngine.search(request: SearchRequest(query: "abc", mode: .fuzzy, forceFullFuzzy: true))
+        #if DEBUG
+        let fullHealth = await fullEngine.debugFullIndexHealth()
+        XCTAssertTrue(fullHealth.isBuilt)
+        #endif
+        engines.append(("full", fullEngine))
+
+        // The full index's String scorer is every path's reference, on every window and filter.
+        var reference: [String: [String]] = [:]
+        for (path, engine) in engines.reversed() {
+            for query in ["ab", "é"] {
+                var pages: [String] = []
+                for limit in 1...3 {
+                    for offset in 0...Self.prefixRows.count {
+                        let result = try await engine.search(
+                            request: SearchRequest(query: query, mode: .fuzzy, sortMode: .relevance, limit: limit, offset: offset)
+                        )
+                        let ids = result.items.map { Self.number($0.id) }.joined(separator: ",")
+                        pages.append("\(query) limit \(limit) offset \(offset): [\(ids)] more=\(result.hasMore)")
+                    }
+                }
+                for app in ["com.a", "com.b"] {
+                    let result = try await engine.search(
+                        request: SearchRequest(query: query, mode: .fuzzy, sortMode: .relevance, appFilter: app, limit: 50)
+                    )
+                    pages.append("\(query) \(app): [\(result.items.map { Self.number($0.id) }.joined(separator: ","))]")
+                }
+                if let expected = reference[query] {
+                    XCTAssertEqual(pages, expected, "\(path) \(query)")
+                } else {
+                    reference[query] = pages
+                }
+            }
+            await engine.close()
+        }
+
+        // And "ab" against the order its scores give.
+        let order = Self.prefixRelevanceOrder
+        func ids(_ numbers: some Sequence<Int>) -> String { numbers.map(String.init).joined(separator: ",") }
+        var expected: [String] = []
+        for limit in 1...3 {
+            for offset in 0...Self.prefixRows.count {
+                expected.append("ab limit \(limit) offset \(offset): [\(ids(order.dropFirst(offset).prefix(limit)))] more=\(offset + limit < order.count)")
+            }
+        }
+        for app in ["com.a", "com.b"] {
+            expected.append("ab \(app): [\(ids(order.filter { Self.prefixRows[$0 - 1].app == app }))]")
+        }
+        XCTAssertEqual(reference["ab"], expected)
+    }
+
+    func testRecentShortQueryNextPageRestartsAfterACommit() async throws {
+        let dbPath = try makeFixtureDatabase(Self.sameTimeRows)
+        let engine = SearchEngineImpl(dbPath: dbPath)
+        try await engine.open()
+        func page(offset: Int) async throws -> [String] {
+            try await engine.search(
+                request: SearchRequest(query: "ab", mode: .fuzzy, sortMode: .recent, limit: 2, offset: offset)
+            ).items.map { Self.number($0.id) }
+        }
+
+        let first = try await page(offset: 0)
+        XCTAssertEqual(first, ["4", "3"])
+        // Row 11, the oldest hit, is used again and becomes the newest unpinned row.
+        let writer = try SQLiteConnection(path: dbPath, flags: SQLITE_OPEN_READWRITE)
+        try writer.execute("UPDATE clipboard_items SET last_used_at = 1000 WHERE id = '\(Self.uuid(11).uuidString)'")
+        try writer.execute("UPDATE scopy_meta SET mutation_seq = mutation_seq + 1 WHERE id = 1")
+        writer.close()
+        let second = try await page(offset: 2)
+        XCTAssertEqual(second, ["3", "2"], "the next page must come from the committed order")
+        await engine.close()
+    }
+
+    /// Every window, in deepening order, has the reference order's rows, `hasMore`, and a total that
+    /// is exact on the last page and otherwise exact or unknown.
+    private func assertRecentWindows(_ engine: SearchEngineImpl, path: String) async throws {
+        let expected = Self.sameTimeRecentOrder
+        for limit in 1...3 {
+            for offset in 0..<expected.count {
+                let result = try await engine.search(
+                    request: SearchRequest(query: "ab", mode: .fuzzy, sortMode: .recent, limit: limit, offset: offset)
+                )
+                let window = "\(path) limit \(limit) offset \(offset)"
+                XCTAssertEqual(
+                    result.items.map { Self.number($0.id) },
+                    expected.dropFirst(offset).prefix(limit).map(String.init),
+                    window
+                )
+                XCTAssertEqual(result.hasMore, offset + limit < expected.count, window)
+                if result.hasMore {
+                    XCTAssertTrue([-1, expected.count].contains(result.total), window)
+                } else {
+                    XCTAssertEqual(result.total, expected.count, window)
+                }
+            }
+        }
+    }
+
     private func record(
         _ engine: SearchEngineImpl,
         group: String,
@@ -152,7 +350,7 @@ final class SearchSQLGoldenTests: XCTestCase {
         return lines
     }
 
-    private func makeFixtureDatabase() throws -> String {
+    private func makeFixtureDatabase(_ rows: [Row] = SearchSQLGoldenTests.rows) throws -> String {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("scopy-sql-golden-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -172,7 +370,7 @@ final class SearchSQLGoldenTests: XCTestCase {
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
                 """
             )
-            for row in Self.rows {
+            for row in rows {
                 insert.reset()
                 try insert.bindText(Self.uuid(row.number).uuidString, at: 1)
                 try insert.bindText(row.type.rawValue, at: 2)

@@ -2,8 +2,8 @@ import XCTest
 @testable import ScopyKit
 
 /// Locks the fuzzy ranking rules on an in-memory index: pinned first, the recent/relevance
-/// tie-breaks, the UUID fallback, staged-vs-complete agreement, deep-paging cache pages, and the
-/// fuzzy+ substring-versus-subsequence scoring split.
+/// tie-breaks, the UUID fallback, the recent early stop, staged-vs-complete agreement, deep-paging
+/// cache pages, and the fuzzy+ substring-versus-subsequence scoring split.
 final class FullIndexRankerGoldenTests: XCTestCase {
     private struct Row {
         let number: Int
@@ -26,6 +26,23 @@ final class FullIndexRankerGoldenTests: XCTestCase {
         Row(number: 8, text: "abc image", t: 150, type: .image),
         Row(number: 9, text: "数学题", t: 10),
     ]
+
+    // Recent-sort (pinned, last used) groups that straddle page boundaries, with different "abc"
+    // scores inside each group: the best row is scanned last at t = 300 and first at t = 200.
+    private static let sameTimeRows: [Row] = [
+        Row(number: 11, text: "a_b_c", t: 300),
+        Row(number: 12, text: "xabc", t: 300),
+        Row(number: 13, text: "abc best", t: 300),
+        Row(number: 14, text: "abc pinned", t: 10, pinned: true),
+        Row(number: 15, text: "abc best", t: 200),
+        Row(number: 16, text: "a_b_c", t: 200),
+        Row(number: 17, text: "zzz", t: 250),
+        Row(number: 18, text: "xabc", t: 200),
+        Row(number: 19, text: "xabc", t: 100),
+        Row(number: 20, text: "abc x", t: 100),
+        Row(number: 21, text: "a_b_c", t: 50),
+    ]
+    private static let sameTimeRecentOrder = [14, 13, 12, 11, 15, 18, 16, 20, 19, 21]
 
     private static func uuid(_ number: Int) -> UUID {
         UUID(uuidString: String(format: "00000000-0000-4000-8000-%012X", number))!
@@ -50,8 +67,8 @@ final class FullIndexRankerGoldenTests: XCTestCase {
 
     private let index = FullIndexRankerGoldenTests.makeIndex(FullIndexRankerGoldenTests.rows)
 
-    private func numbers(_ slots: [Int]) -> [Int] {
-        slots.map { FullIndexRankerGoldenTests.rows[$0].number }
+    private func numbers(_ slots: [Int], in rows: [Row] = FullIndexRankerGoldenTests.rows) -> [Int] {
+        slots.map { rows[$0].number }
     }
 
     private func request(
@@ -76,7 +93,12 @@ final class FullIndexRankerGoldenTests: XCTestCase {
         )
     }
 
-    private func complete(_ request: SearchRequest, cache: inout FullIndexRanker.SortedMatchesCache?) throws -> FullIndexRanker.Page {
+    private func complete(
+        _ request: SearchRequest,
+        in index: FullFuzzyIndex? = nil,
+        cache: inout FullIndexRanker.SortedMatchesCache?
+    ) throws -> FullIndexRanker.Page {
+        let index = index ?? self.index
         let queryLower = request.query.lowercased()
         return try FullIndexRanker.rankComplete(
             index: index,
@@ -162,6 +184,45 @@ final class FullIndexRankerGoldenTests: XCTestCase {
         XCTAssertEqual(numbers(cached.slots), numbers(fresh.slots))
         XCTAssertEqual(cached.total, fresh.total)
         XCTAssertEqual(cached.hasMore, fresh.hasMore)
+    }
+
+    func testRecentScoresWholeSameTimeGroupsAndStopsAtTheNext() throws {
+        let index = Self.makeIndex(Self.sameTimeRows)
+        let expected = Self.sameTimeRecentOrder
+        for limit in 1...3 {
+            for offset in 0..<expected.count {
+                var cache: FullIndexRanker.SortedMatchesCache?
+                let page = try complete(request("abc", sort: .recent, limit: limit, offset: offset), in: index, cache: &cache)
+                let window = "limit \(limit) offset \(offset)"
+                XCTAssertEqual(numbers(page.slots, in: Self.sameTimeRows), Array(expected.dropFirst(offset).prefix(limit)), window)
+                XCTAssertEqual(page.hasMore, offset + limit < expected.count, window)
+                if page.hasMore {
+                    XCTAssertTrue([-1, expected.count].contains(page.total), window)
+                } else {
+                    XCTAssertEqual(page.total, expected.count, window)
+                }
+            }
+        }
+
+        // The pinned row and the whole t = 300 group cover the page and one more hit.
+        var cache: FullIndexRanker.SortedMatchesCache?
+        let first = try complete(request("abc", sort: .recent, limit: 1, offset: 0), in: index, cache: &cache)
+        XCTAssertEqual(numbers(first.slots, in: Self.sameTimeRows), [14])
+        XCTAssertEqual(first.total, -1)
+        XCTAssertEqual(cache?.recentScan?.scanned, 4)
+    }
+
+    func testRecentDeepPagesContinueTheScanFromTheCache() throws {
+        let index = Self.makeIndex(Self.sameTimeRows)
+        var cache: FullIndexRanker.SortedMatchesCache?
+        var seen: [Int] = []
+        for offset in stride(from: 0, through: Self.sameTimeRecentOrder.count, by: 2) {
+            let page = try complete(request("abc", sort: .recent, limit: 2, offset: offset), in: index, cache: &cache)
+            seen += numbers(page.slots, in: Self.sameTimeRows)
+        }
+        XCTAssertEqual(seen, Self.sameTimeRecentOrder)
+        XCTAssertNil(cache?.recentScan)
+        XCTAssertEqual(cache?.totalMatches, Self.sameTimeRecentOrder.count)
     }
 
     func testStagedRecentAndCompleteRecentAgreeOnDistinctTimestamps() throws {

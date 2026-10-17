@@ -30,9 +30,11 @@ enum ScopyBench {
         var mode: SearchMode
         var sortMode: SearchSortMode
         var query: String
+        var resetQuery: String?
         var forceFullFuzzy: Bool
         var limit: Int
         var offset: Int
+        var pages: Int
         var iterations: Int
         var warmup: Int
         var prepareShortIndex: Bool
@@ -46,9 +48,11 @@ enum ScopyBench {
             var mode: SearchMode = .fuzzyPlus
             var sortMode: SearchSortMode = .relevance
             var query: String?
+            var resetQuery: String?
             var forceFullFuzzy: Bool = false
             var limit: Int = 50
             var offset: Int = 0
+            var pages: Int = 1
             var iterations: Int = 20
             var warmup: Int = 3
             var prepareShortIndex = false
@@ -92,6 +96,8 @@ enum ScopyBench {
                     sortMode = parsed
                 case "--query":
                     query = try requireValue("--query")
+                case "--reset-query":
+                    resetQuery = try requireValue("--reset-query")
                 case "--force-full-fuzzy":
                     forceFullFuzzy = true
                 case "--limit":
@@ -106,6 +112,12 @@ enum ScopyBench {
                         throw BenchError.invalidArgument("Invalid --offset: \(raw)")
                     }
                     offset = parsed
+                case "--pages":
+                    let raw = try requireValue("--pages")
+                    guard let parsed = Int(raw), parsed > 0 else {
+                        throw BenchError.invalidArgument("Invalid --pages: \(raw)")
+                    }
+                    pages = parsed
                 case "--iters":
                     let raw = try requireValue("--iters")
                     guard let parsed = Int(raw), parsed > 0 else {
@@ -146,9 +158,11 @@ enum ScopyBench {
                 mode: mode,
                 sortMode: sortMode,
                 query: query,
+                resetQuery: resetQuery,
                 forceFullFuzzy: forceFullFuzzy,
                 limit: limit,
                 offset: offset,
+                pages: pages,
                 iterations: iterations,
                 warmup: warmup,
                 prepareShortIndex: prepareShortIndex,
@@ -170,8 +184,12 @@ enum ScopyBench {
               --mode <exact|fuzzy|fuzzyPlus|regex>   Default: fuzzyPlus
               --sort <relevance|recent>             Default: relevance
               --force-full-fuzzy                    Force full-history fuzzy scan (skip prefilter)
+              --reset-query <text>                  (engine layer) Search <text> untimed before every run, so each
+                                                    timed search misses the per-query ranking cache as typing does
               --limit <n>                            Default: 50
               --offset <n>                           Default: 0
+              --pages <n>                            (engine layer) Time n consecutive pages from --offset, as
+                                                    scrolling loads them. Default: 1
               --iters <n>                            Default: 20
               --warmup <n>                           Default: 3
               --prepare-short-index                  Await explicit 1/2-character index readiness (engine layer)
@@ -221,18 +239,26 @@ enum ScopyBench {
                         try await engine.prepareShortQueryIndex()
                     }
 
-                    func runOnce() async throws -> (elapsedMs: Double, perf: SearchEngineImpl.SearchPerfMetrics?) {
-                        let start = CFAbsoluteTimeGetCurrent()
-                        let result = try await engine.search(
-                            request: SearchRequest(
-                                query: options.query,
-                                mode: options.mode,
-                                sortMode: options.sortMode,
-                                forceFullFuzzy: options.forceFullFuzzy,
-                                limit: options.limit,
-                                offset: options.offset
-                            )
+                    func request(_ query: String, page: Int = 0) -> SearchRequest {
+                        SearchRequest(
+                            query: query,
+                            mode: options.mode,
+                            sortMode: options.sortMode,
+                            forceFullFuzzy: options.forceFullFuzzy,
+                            limit: options.limit,
+                            offset: options.offset + page * options.limit
                         )
+                    }
+
+                    func runOnce() async throws -> (elapsedMs: Double, perf: SearchEngineImpl.SearchPerfMetrics?) {
+                        if let resetQuery = options.resetQuery {
+                            _ = try await engine.search(request: request(resetQuery))
+                        }
+                        let start = CFAbsoluteTimeGetCurrent()
+                        var result = try await engine.search(request: request(options.query))
+                        for page in 1..<options.pages {
+                            result = try await engine.search(request: request(options.query, page: page))
+                        }
                         return ((CFAbsoluteTimeGetCurrent() - start) * 1000, result.perf)
                     }
 
@@ -278,7 +304,9 @@ enum ScopyBench {
                                 "limit": options.limit,
                                 "offset": options.offset,
                                 "queryLen": options.query.count,
-                                "preparedShortIndex": options.prepareShortIndex
+                                "preparedShortIndex": options.prepareShortIndex,
+                                "resetQueryLen": options.resetQuery?.count ?? 0,
+                                "pages": options.pages
                             ],
                             "samples": times.count,
                             "min_ms": minMs,
@@ -342,6 +370,9 @@ enum ScopyBench {
             case .service:
                 guard !options.prepareShortIndex else {
                     throw BenchError.invalidArgument("--prepare-short-index requires --layer engine")
+                }
+                guard options.resetQuery == nil, options.pages == 1 else {
+                    throw BenchError.invalidArgument("--reset-query and --pages require --layer engine")
                 }
                 try await runClipboardServiceBench(options: options)
             }
