@@ -475,17 +475,10 @@ final class MockClipboardService: ClipboardServiceProtocol {
             .sorted { $0.lastUsedAt > $1.lastUsedAt }
     }
 
-    func fetchHistoryPage(limit: Int, offset: Int, expectedRevision: Int64?) async throws -> RecentHistoryPage {
-        let start = expectedRevision == 0 ? max(0, offset) : 0
-        let count = max(0, limit) + (start == 0 ? max(0, offset) : 0)
-        let pinned = start == 0 ? try await fetchPinned() : []
-        try await Task.sleep(nanoseconds: 50_000_000)
-        let sortedItems = items
-            .filter { !$0.isPinned }
-            .sorted { $0.lastUsedAt > $1.lastUsedAt }
-        let pageItems = Array(sortedItems.dropFirst(start).prefix(count))
-        return RecentHistoryPage(pinnedItems: pinned, items: pageItems, total: items.count,
-                                 offset: start, nextOffset: start + pageItems.count, revision: 0)
+    func fetchHistoryPage(limit: Int, after cursor: RecentHistoryCursor?) async throws -> RecentHistoryPage {
+        // Simulated backend latency; the first page also reads the pinned rows.
+        try await Task.sleep(nanoseconds: cursor == nil ? 100_000_000 : 50_000_000)
+        return RecentHistoryPage(slicing: items, limit: limit, after: cursor)
     }
 
     func search(query: SearchRequest) async throws -> SearchResultPage {
@@ -531,45 +524,15 @@ final class MockClipboardService: ClipboardServiceProtocol {
 
     func pin(itemID: UUID) async throws {
         if let index = items.firstIndex(where: { $0.id == itemID }) {
-            let item = items[index]
-            items[index] = ClipboardItemDTO(
-                id: item.id,
-                type: item.type,
-                contentHash: item.contentHash,
-                plainText: item.plainText,
-                note: item.note,
-                appBundleID: item.appBundleID,
-                createdAt: item.createdAt,
-                lastUsedAt: item.lastUsedAt,
-                isPinned: true,
-                sizeBytes: item.sizeBytes,
-                fileSizeBytes: item.fileSizeBytes,
-                thumbnailPath: item.thumbnailPath,
-                storageRef: item.storageRef
-            )
-            await yieldEvent(.itemPinned(itemID))
+            items[index] = items[index].withPinned(true)
+            await yieldEvent(.itemPinned(items[index]))
         }
     }
 
     func unpin(itemID: UUID) async throws {
         if let index = items.firstIndex(where: { $0.id == itemID }) {
-            let item = items[index]
-            items[index] = ClipboardItemDTO(
-                id: item.id,
-                type: item.type,
-                contentHash: item.contentHash,
-                plainText: item.plainText,
-                note: item.note,
-                appBundleID: item.appBundleID,
-                createdAt: item.createdAt,
-                lastUsedAt: item.lastUsedAt,
-                isPinned: false,
-                sizeBytes: item.sizeBytes,
-                fileSizeBytes: item.fileSizeBytes,
-                thumbnailPath: item.thumbnailPath,
-                storageRef: item.storageRef
-            )
-            await yieldEvent(.itemUnpinned(itemID))
+            items[index] = items[index].withPinned(false)
+            await yieldEvent(.itemUnpinned(items[index]))
         }
     }
 

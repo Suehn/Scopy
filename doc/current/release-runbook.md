@@ -182,3 +182,29 @@ Dated historical observations formerly embedded in this runbook are preserved in
 
 - Remaining costs: ASCII matches now rank by UTF-16 offsets, the same unit as the full index, instead of byte offsets. That adds about 1 ms to `co` and to forced `cmd` recent; most of those queries' time is match-context building, which is unchanged. The first whole-character non-ASCII needle builds a lowercase-expansion table once (about 20 ms).
 - Local raw evidence: ignored `logs/claude-*.log` (`claude-test-unit-final4.log`, `claude-snapshot-perf-final2.log`, `claude-ab-final3.log`, `claude-flake-orphan*.log`). The differential fuzzer and A/B scripts were scratch files and are not retained.
+
+### 2026-10-18 Recent History Keyset Paging
+
+- Source baseline: `209f3ca` (`codex/behavioral-reliability`); branch `codex/keyset-history-paging`. This is development evidence, not a release. Environment: Apple M3, 8 cores, 24 GB; macOS 27.2 (`26B5101f`); Xcode 27.0 (`27A5194q`); Swift 6.4. Project baselines (Swift 5.9, macOS 14) unchanged.
+- Change: the recent list continues from the key of its last row (`RecentHistoryCursor`, `last_used_at DESC, id ASC` on `idx_recent_order`) instead of an offset. The mutation-sequence rebase is gone. Before, any event between pages made the next read return `offset + limit` rows from 0 and replace the visible prefix in one step. Now a stale read is read again as one page from the same cursor.
+- Real DB snapshot: 16,709 rows (49 pinned), 340,828,160 bytes, SHA-256 `1e37e0fdc9099546d399e0999574dc389994df50da9c356ed18f37c01adbbaf0`. The original database was not mutated.
+- SQLite page read of 301 summary rows on that snapshot (Python `sqlite3`, read-only, 30 iterations, p50 / p95 ms). The keyset rows equal the offset rows at every depth. SQL time only; the old rebase also converted and replaced every prefix row in the UI.
+
+| Depth (rows) | Offset page | Old rebase prefix read | Keyset page |
+| --- | --- | --- | --- |
+| 350 | 2.11 / 3.19 | 3.77 / 5.21 | 2.41 / 2.94 |
+| 2,000 | 2.09 / 3.36 | 19.03 / 21.07 | 1.91 / 2.07 |
+| 5,000 | 0.59 / 0.70 | 28.56 / 31.44 | 0.43 / 0.50 |
+| 10,000 | 1.24 / 1.42 | 48.39 / 57.17 | 0.99 / 1.08 |
+| 16,000 | 2.83 / 3.06 | 80.08 / 93.78 | 1.95 / 2.10 |
+
+- `make test-unit`: 742 passed, 0 failed (50.8 s). `make test-tsan` (`ScopyTSanTests`): 739 passed, 0 failed, no ThreadSanitizer reports (63.8 s). The real-storage paging test `testRealHistoryPagesContinueFromTheLastRowAcrossConcurrentChangesAndQuitPersistsDeletion` and `testLoadReadsAgainUntilNoEventArrivesDuringTheRead` passed 10/10 iterations each. A temporary probe confirmed that every iteration of the former hit the between-chunks re-read.
+- `make test-snapshot-perf-release` passed in every run of an A–B–B–A against `209f3ca`; each checkout used its own APFS clone of the snapshot. Search code is unchanged, so this shows no regression, not an improvement.
+
+| Release search workload | Baseline A1 / A2 (ms) | Current B1 / B2 (ms) | Limit (ms) |
+| --- | --- | --- | --- |
+| Service `cmd`, p95 | 15.38 / 15.59 | 15.38 / 15.21 | 50 |
+| Prepared `cm`, p95 | 16.85 / 15.99 | 16.94 / 16.04 | 20 |
+| Cold `cm`, single request | 86.4 / 92.0 | 83.3 / 83.1 | observation only |
+
+- Not run: `make perf-frontend-profile`, which drives the real app with synthetic wheel input. Frontend scroll/load-more latency is therefore not measured for this change.

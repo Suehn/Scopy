@@ -105,14 +105,8 @@ final class ReusableMockClipboardService: ClipboardServiceProtocol {
         items.filter(\.isPinned).sorted { $0.lastUsedAt > $1.lastUsedAt }
     }
 
-    func fetchHistoryPage(limit: Int, offset: Int, expectedRevision: Int64?) async throws -> RecentHistoryPage {
-        let start = expectedRevision == 0 ? max(0, offset) : 0
-        let count = max(0, limit) + (start == 0 ? max(0, offset) : 0)
-        let pinned = start == 0 ? try await fetchPinned() : []
-        let sortedItems = items.filter { !$0.isPinned }.sorted { $0.lastUsedAt > $1.lastUsedAt }
-        let pageItems = Array(sortedItems.dropFirst(start).prefix(count))
-        return RecentHistoryPage(pinnedItems: pinned, items: pageItems, total: items.count,
-                                 offset: start, nextOffset: start + pageItems.count, revision: 0)
+    func fetchHistoryPage(limit: Int, after cursor: RecentHistoryCursor?) async throws -> RecentHistoryPage {
+        RecentHistoryPage(slicing: items, limit: limit, after: cursor)
     }
 
     func search(query: SearchRequest) async throws -> SearchResultPage {

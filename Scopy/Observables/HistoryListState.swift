@@ -12,6 +12,11 @@ struct HistoryListState {
     /// Bumped on every `items` mutation. Observing this instead of `items` avoids SwiftUI's
     /// element-wise array comparison (O(loaded plain-text bytes)) on the main thread.
     private(set) var projectionGeneration: UInt64 = 0
+    /// Where the recent list's next page starts: the key of the last row its pages returned, kept
+    /// while rows above it are inserted, deleted or moved. `nil` once the oldest row is loaded.
+    private(set) var recentCursor: RecentHistoryCursor?
+    /// Recent pages continue from `recentCursor`; search pages continue from `loadedCount`.
+    private var pagesByRecentKey = false
 
     private var itemIndexByID: [UUID: Int] = [:]
 
@@ -27,11 +32,23 @@ struct HistoryListState {
         total: Int,
         hasMore: Bool
     ) {
+        pagesByRecentKey = false
+        recentCursor = nil
         items = newItems
         loadedCount = newItems.count
         totalCount = total
         canLoadMore = hasMore
         rebuildDerivedState()
+    }
+
+    mutating func replaceRecentPage(
+        items newItems: [ClipboardItemDTO],
+        total: Int,
+        continuingAfter cursor: RecentHistoryCursor?
+    ) {
+        replacePage(items: newItems, total: total, hasMore: cursor != nil)
+        pagesByRecentKey = true
+        recentCursor = cursor
     }
 
     mutating func appendPage(
@@ -44,9 +61,11 @@ struct HistoryListState {
         canLoadMore = hasMore
     }
 
-    mutating func appendRecentPage(items newItems: [ClipboardItemDTO]) {
+    /// Appends rows of a recent page; `cursor` is where the rows after them start.
+    mutating func appendRecentPage(items newItems: [ClipboardItemDTO], continuingAfter cursor: RecentHistoryCursor?) {
         appendItems(newItems)
-        recomputeCanLoadMore()
+        recentCursor = cursor
+        canLoadMore = cursor != nil
     }
 
     private mutating func appendItems(_ newItems: [ClipboardItemDTO]) {
@@ -86,8 +105,9 @@ struct HistoryListState {
         recomputeCanLoadMore()
     }
 
+    /// Offset pages only: whether a recent page follows is the cursor's, not a count's.
     mutating func recomputeCanLoadMore() {
-        guard totalCount >= 0 else { return }
+        guard !pagesByRecentKey, totalCount >= 0 else { return }
         canLoadMore = loadedCount < totalCount
     }
 
@@ -162,6 +182,11 @@ struct HistoryListState {
 
     @discardableResult
     mutating func upsertRecentItem(_ item: ClipboardItemDTO) -> Bool {
+        // A row now sorting after the cursor belongs to a later page; kept here, it would sit
+        // ahead of the rows that page still brings.
+        if pagesByRecentKey, !item.isPinned, let recentCursor, recentCursor.precedes(item) {
+            return removeItem(withID: item.id)
+        }
         if let index = indexOfItem(withID: item.id) {
             guard items[index] != item else { return false }
             items.remove(at: index)

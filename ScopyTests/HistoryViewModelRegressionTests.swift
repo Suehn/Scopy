@@ -326,9 +326,9 @@ final class HistoryViewModelRegressionTests: XCTestCase {
         await viewModel.loadMore()
         XCTAssertEqual(viewModel.items.map(\.id), items.map(\.id))
         XCTAssertFalse(viewModel.canLoadMore)
-        let fetchCount = service.recentUnpinnedFetchCallCount
+        let fetchCount = service.historyPageFetchCallCount
         await viewModel.loadMore()
-        XCTAssertEqual(service.recentUnpinnedFetchCallCount, fetchCount)
+        XCTAssertEqual(service.historyPageFetchCallCount, fetchCount)
 
         let target = items[30]
         let invalidated = expectation(description: "Pin event updates the observed list groups")
@@ -338,7 +338,7 @@ final class HistoryViewModelRegressionTests: XCTestCase {
         } onChange: {
             invalidated.fulfill()
         }
-        await viewModel.handleEvent(.itemPinned(target.id))
+        await viewModel.handleEvent(.itemPinned(target.withPinned(true)))
         await fulfillment(of: [invalidated], timeout: 1)
         XCTAssertEqual(viewModel.pinnedItems.map(\.id), items.prefix(31).map(\.id))
         XCTAssertEqual(viewModel.unpinnedItems.map(\.id), items.dropFirst(31).map(\.id))
@@ -605,35 +605,7 @@ final class HistoryViewModelRegressionTests: XCTestCase {
         XCTAssertTrue(viewModel.isScrolling)
     }
 
-    func testLoadRefetchesOnceWhenAnEventChangesTheVisibleSnapshot() async {
-        let original = makeItem(text: "original", age: 1)
-        let service = HistoryViewModelRegressionService(items: [original])
-        service.suspendNextInitialFetch = true
-        let fetchStarted = expectation(description: "Initial snapshot fetch started")
-        service.onInitialFetchStarted = { fetchStarted.fulfill() }
-        let viewModel = HistoryViewModel(
-            service: service,
-            settingsViewModel: SettingsViewModel(service: service)
-        )
-        defer {
-            service.resumeInitialFetch()
-            viewModel.stop()
-        }
-
-        let loadTask = Task { await viewModel.load() }
-        await fulfillment(of: [fetchStarted], timeout: 1.0)
-
-        let inserted = makeItem(text: "inserted during load", age: 0)
-        service.items.insert(inserted, at: 0)
-        await viewModel.handleEvent(.newItem(inserted))
-        service.resumeInitialFetch()
-        await loadTask.value
-
-        XCTAssertEqual(Set(viewModel.items.map(\.id)), [original.id, inserted.id])
-        XCTAssertEqual(service.recentUnpinnedFetchCallCount, 2)
-    }
-
-    func testLoadDiscardsASecondStaleSnapshotAndTrailingLoadConverges() async {
+    func testLoadReadsAgainUntilNoEventArrivesDuringTheRead() async {
         let original = makeItem(text: "original", age: 2)
         let service = HistoryViewModelRegressionService(items: [original])
         let viewModel = HistoryViewModel(
@@ -647,47 +619,31 @@ final class HistoryViewModelRegressionTests: XCTestCase {
         }
 
         service.suspendNextInitialFetch = true
-        let firstFetchStarted = expectation(description: "First snapshot fetch started")
+        let firstFetchStarted = expectation(description: "First read started")
         service.onInitialFetchStarted = { firstFetchStarted.fulfill() }
-        let initialLoad = Task { await viewModel.load() }
+        let load = Task { await viewModel.load() }
         await fulfillment(of: [firstFetchStarted], timeout: 1.0)
-
-        let firstInserted = makeItem(text: "first concurrent insert", age: 1)
-        service.items.insert(firstInserted, at: 0)
-        await viewModel.handleEvent(.newItem(firstInserted))
+        let inserted = makeItem(text: "inserted during the first read", age: 1)
+        service.items.insert(inserted, at: 0)
+        await viewModel.handleEvent(.newItem(inserted))
 
         service.suspendNextInitialFetch = true
-        let secondFetchStarted = expectation(description: "Second snapshot fetch started")
+        let secondFetchStarted = expectation(description: "Second read started")
         service.onInitialFetchStarted = { secondFetchStarted.fulfill() }
         service.resumeInitialFetch()
         await fulfillment(of: [secondFetchStarted], timeout: 1.0)
-
-        let secondInserted = makeItem(text: "second concurrent insert", age: 0)
-        service.items.insert(secondInserted, at: 0)
-        await viewModel.handleEvent(.newItem(secondInserted))
-
-        service.suspendNextInitialFetch = true
-        let trailingFetchStarted = expectation(description: "Coalesced trailing fetch started")
-        service.onInitialFetchStarted = { trailingFetchStarted.fulfill() }
+        // The second snapshot predates these: applied, it would keep the deleted row and miss the new one.
+        service.items.removeAll { $0.id == inserted.id }
+        await viewModel.handleEvent(.itemDeleted(inserted.id))
+        let newest = makeItem(text: "inserted during the second read", age: 0)
+        service.items.insert(newest, at: 0)
+        await viewModel.handleEvent(.newItem(newest))
         service.resumeInitialFetch()
-        await initialLoad.value
-        await fulfillment(of: [trailingFetchStarted], timeout: 1.0)
+        await load.value
 
-        XCTAssertTrue(viewModel.items.contains { $0.id == secondInserted.id })
-        XCTAssertEqual(service.recentUnpinnedFetchCallCount, 3)
-
-        // Delete while the coalesced snapshot is suspended: cancellation must preserve its
-        // target and schedule a replacement, while the late cancelled result stays harmless.
-        service.onInitialFetchStarted = nil
-        service.items.removeAll { $0.id == firstInserted.id }
-        await viewModel.handleEvent(.itemDeleted(firstInserted.id))
-        await waitUntil(timeout: 2) {
-            service.recentUnpinnedFetchCallCount == 4 && !viewModel.isLoading
-                && Set(viewModel.items.map(\.id)) == Set(service.items.map(\.id))
-        }
-        XCTAssertEqual(service.recentUnpinnedFetchCallCount, 4)
-        service.resumeInitialFetch()
-        XCTAssertEqual(Set(viewModel.items.map(\.id)), Set(service.items.map(\.id)))
+        XCTAssertEqual(viewModel.items.map(\.id), [newest.id, original.id])
+        XCTAssertEqual(service.historyPageFetchCallCount, 3)
+        XCTAssertFalse(viewModel.isLoading)
     }
 
     func testConcurrentLoadMoreCallsShareTheInFlightRequest() async {
@@ -715,13 +671,13 @@ final class HistoryViewModelRegressionTests: XCTestCase {
         }
         await fulfillment(of: [secondStarted], timeout: 1.0)
         await Task.yield()
-        XCTAssertEqual(service.recentUnpinnedFetchCallCount, 2)
+        XCTAssertEqual(service.historyPageFetchCallCount, 2)
 
         service.resumePaginationFetch()
         await first.value
         await second.value
 
-        XCTAssertEqual(service.recentUnpinnedFetchCallCount, 2)
+        XCTAssertEqual(service.historyPageFetchCallCount, 2)
         XCTAssertEqual(
             viewModel.items.count,
             HistoryViewModel.initialPageSize + HistoryViewModel.loadMorePageSize
@@ -1089,7 +1045,7 @@ final class HistoryViewModelRegressionTests: XCTestCase {
         await fulfillment(of: [changed], timeout: 1.0)
     }
 
-    func testRealHistoryRebasesDuringRecopyAndQuitPersistsDeletion() async throws {
+    func testRealHistoryPagesContinueFromTheLastRowAcrossConcurrentChangesAndQuitPersistsDeletion() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("scopy-history-contract-\(UUID())")
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         let suite = "scopy-history-contract-\(UUID())"
@@ -1100,45 +1056,67 @@ final class HistoryViewModelRegressionTests: XCTestCase {
         let path = root.appendingPathComponent("clipboard.db").path
         let writer = StorageService(databasePath: path)
         try await writer.open()
-        for index in 0..<360 {
-            _ = try await writer.upsertItem(ClipboardMonitor.ClipboardContent(
+        func capture(_ index: Int) async throws -> UUID {
+            try await writer.upsertItem(ClipboardMonitor.ClipboardContent(
                 type: .text, plainText: "history contract \(index)", payload: .none,
                 appBundleID: nil, contentHash: "history-contract-\(index)", sizeBytes: 20
-            ))
+            )).id
         }
-        let original = try await writer.fetchRecent(limit: 360, offset: 0)
+        for index in 0..<700 { _ = try await capture(index) }
+        let original = try await writer.fetchRecent(limit: 700, offset: 0)
         let service = ClipboardServiceFactory.create(databasePath: path,
             settingsStore: SettingsStore(suiteName: suite),
             monitorPasteboardName: "scopy-history-contract-\(UUID())", monitorPollingInterval: 60)
         try await service.start()
+        /// The changed rows as the backend publishes them; every change in this test moves its row
+        /// to the top or into the pinned group.
+        func published(_ ids: UUID...) async throws -> [ClipboardItemDTO] {
+            let top = try await service.fetchRecent(limit: 8, offset: 0)
+            return try ids.map { id in try XCTUnwrap(top.first { $0.id == id }) }
+        }
         let viewModel = HistoryViewModel(service: service, settingsViewModel: SettingsViewModel(service: service))
         viewModel.configureTiming(.longUndoWindowRegressionTests)
         await viewModel.load()
-        XCTAssertEqual(viewModel.items.count, 50)
+        XCTAssertEqual(viewModel.items.map(\.id), original.prefix(50).map(\.id))
         let selected = original[10].id
         viewModel.selectedID = selected
-        let pagination = Task { await viewModel.loadMore() }
-        await waitUntil(timeout: 2) { viewModel.items.count >= 100 }
-        let moved = original[300].id
-        _ = try await writer.incrementUsage(id: moved, at: Date().addingTimeInterval(1))
-        try await service.pin(itemID: original[359].id)
-        let newest = try await service.fetchRecent(limit: 2, offset: 0)
-        let movedDTO = try XCTUnwrap(newest.first { $0.id == moved })
-        await viewModel.handleEvent(.itemUpdated(movedDTO))
-        await viewModel.handleEvent(.itemPinned(original[359].id))
-        // A delayed duplicate event already represented by the snapshot must not inflate total.
-        await viewModel.handleEvent(.newItem(movedDTO))
-        await viewModel.handleEvent(.newItem(movedDTO))
-        await pagination.value
-        await waitUntil(timeout: 3) { !viewModel.isLoading && viewModel.items.count == 351 }
-        let prefix = try await service.fetchRecent(limit: 351, offset: 0)
-        XCTAssertEqual(viewModel.items.map(\.id), prefix.map(\.id))
-        XCTAssertTrue(viewModel.canLoadMore)
+
+        // Committed before the next page is read and before their events arrive: an insert and an
+        // unloaded row bumped above the cursor, and a loaded row deleted above it.
+        let inserted = try await capture(700)
+        _ = try await writer.incrementUsage(id: original[200].id, at: Date().addingTimeInterval(1))
+        try await service.delete(itemID: original[3].id)
         await viewModel.loadMore()
-        let authoritative = try await service.fetchRecent(limit: 400, offset: 0)
-        XCTAssertEqual(viewModel.items.map(\.id), authoritative.map(\.id))
-        XCTAssertEqual(Set(viewModel.items.map(\.id)).count, 360)
-        XCTAssertEqual(viewModel.totalCount, 360)
+        let firstChanges = try await published(inserted, original[200].id)
+        await viewModel.handleEvent(.newItem(firstChanges[0]))
+        await viewModel.handleEvent(.newItem(firstChanges[0]))
+        await viewModel.handleEvent(.itemUpdated(firstChanges[1]))
+        await viewModel.handleEvent(.itemDeleted(original[3].id))
+        let firstPages = try await service.fetchRecent(limit: viewModel.items.count, offset: 0)
+        XCTAssertEqual(viewModel.items.map(\.id), firstPages.map(\.id), "The page continued after the last row, not at a shifted offset")
+        XCTAssertEqual(viewModel.items.count, 351)
+
+        // Committed while that page's chunks are still being applied, so the rest of its read may
+        // predate them: unloaded rows bumped to the top, pinned and deleted, and an insert.
+        let loadedBeforePage = viewModel.items.count
+        let pagination = Task { await viewModel.loadMore() }
+        await waitUntil(timeout: 2) { viewModel.items.count >= loadedBeforePage + HistoryViewModel.loadMoreApplyChunkRows }
+        _ = try await writer.incrementUsage(id: original[500].id, at: Date().addingTimeInterval(2))
+        try await service.pin(itemID: original[690].id)
+        try await service.delete(itemID: original[600].id)
+        let insertedDuringPage = try await capture(701)
+        let pageChanges = try await published(original[500].id, original[690].id, insertedDuringPage)
+        await viewModel.handleEvent(.itemUpdated(pageChanges[0]))
+        await viewModel.handleEvent(.itemPinned(pageChanges[1]))
+        await viewModel.handleEvent(.itemDeleted(original[600].id))
+        await viewModel.handleEvent(.newItem(pageChanges[2]))
+        await pagination.value
+        for _ in 0..<3 where viewModel.canLoadMore { await viewModel.loadMore() }
+
+        let authoritative = try await service.fetchRecent(limit: 1000, offset: 0)
+        XCTAssertEqual(viewModel.items.map(\.id), authoritative.map(\.id), "No duplicate, gap or misplaced row")
+        XCTAssertEqual(authoritative.count, 700)
+        XCTAssertEqual(viewModel.pinnedItems.map(\.id), [original[690].id])
         XCTAssertFalse(viewModel.canLoadMore)
         XCTAssertEqual(viewModel.selectedID, selected)
         let deleted = try XCTUnwrap(viewModel.items.first { $0.id == selected })
@@ -1150,8 +1128,8 @@ final class HistoryViewModelRegressionTests: XCTestCase {
         await writer.close()
         let reopened = StorageService(databasePath: path)
         try await reopened.open()
-        let persisted = try await reopened.fetchRecent(limit: 400, offset: 0)
-        XCTAssertEqual(persisted.count, 359)
+        let persisted = try await reopened.fetchRecent(limit: 1000, offset: 0)
+        XCTAssertEqual(persisted.count, 699)
         XCTAssertFalse(persisted.contains { $0.id == selected })
         await reopened.close()
     }
@@ -1223,7 +1201,7 @@ private final class HistoryViewModelRegressionService: ClipboardServiceProtocol 
     var onInitialFetchStarted: (() -> Void)?
     var onPaginationFetchStarted: (() -> Void)?
     private(set) var searchRequests: [SearchRequest] = []
-    private(set) var recentUnpinnedFetchCallCount = 0
+    private(set) var historyPageFetchCallCount = 0
 
     private var refineContinuation: CheckedContinuation<Void, Never>?
     private var detailedStorageStatsContinuation: CheckedContinuation<StorageStatsDTO, Never>?
@@ -1250,23 +1228,16 @@ private final class HistoryViewModelRegressionService: ClipboardServiceProtocol 
         items.filter(\.isPinned)
     }
 
-    func fetchHistoryPage(limit: Int, offset: Int, expectedRevision: Int64?) async throws -> RecentHistoryPage {
-        recentUnpinnedFetchCallCount += 1
-        let start = expectedRevision == 0 ? max(0, offset) : 0
-        let count = max(0, limit) + (start == 0 ? max(0, offset) : 0)
-        let pageItems = Array(items.filter { !$0.isPinned }.dropFirst(start).prefix(count))
-        let snapshot = RecentHistoryPage(
-            pinnedItems: start == 0 ? items.filter(\.isPinned) : [],
-            items: pageItems, total: items.count, offset: start,
-            nextOffset: start + pageItems.count, revision: 0
-        )
-        if offset == 0, suspendNextInitialFetch {
+    func fetchHistoryPage(limit: Int, after cursor: RecentHistoryCursor?) async throws -> RecentHistoryPage {
+        historyPageFetchCallCount += 1
+        let snapshot = RecentHistoryPage(slicing: items, limit: limit, after: cursor)
+        if cursor == nil, suspendNextInitialFetch {
             suspendNextInitialFetch = false
             await withCheckedContinuation { continuation in
                 initialFetchContinuation = continuation
                 onInitialFetchStarted?()
             }
-        } else if offset > 0, suspendNextPaginationFetch {
+        } else if cursor != nil, suspendNextPaginationFetch {
             suspendNextPaginationFetch = false
             await withCheckedContinuation { continuation in
                 paginationFetchContinuation = continuation

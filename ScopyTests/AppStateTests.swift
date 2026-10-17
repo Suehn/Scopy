@@ -105,7 +105,7 @@ final class AppStateTests: XCTestCase {
         await appState.start()
         await fulfillment(of: [subscribed], timeout: 1.0)
         let pinnedID = try XCTUnwrap(appState.historyViewModel.pinnedItems.first?.id)
-        let refreshCountBeforeClear = mockService.fetchRecentUnpinnedCallCount
+        let refreshCountBeforeClear = mockService.historyPageFetchCallCount
         let clearHandled = expectation(description: "Clear event handled before sentinel")
         appState.applyHotKeyHandler = { _, _ in clearHandled.fulfill() }
 
@@ -114,7 +114,7 @@ final class AppStateTests: XCTestCase {
         await fulfillment(of: [clearHandled], timeout: 1.0)
 
         XCTAssertEqual(mockService.clearAllCallCount, 1)
-        XCTAssertEqual(mockService.fetchRecentUnpinnedCallCount, refreshCountBeforeClear + 1)
+        XCTAssertEqual(mockService.historyPageFetchCallCount, refreshCountBeforeClear + 1)
         XCTAssertEqual(appState.historyViewModel.items.map(\.id), [pinnedID])
     }
 
@@ -150,7 +150,7 @@ final class TestMockClipboardService: ClipboardServiceProtocol {
     var lastCopiedItemID: UUID?
     var clearAllCallCount = 0
     var fetchRecentCallCount = 0
-    var fetchRecentUnpinnedCallCount = 0
+    var historyPageFetchCallCount = 0
     var onEventStreamSubscribed: (() -> Void)?
 
     // Artificial delays (for race-condition tests)
@@ -247,19 +247,14 @@ final class TestMockClipboardService: ClipboardServiceProtocol {
         return items.filter(\.isPinned).sorted { $0.lastUsedAt > $1.lastUsedAt }
     }
 
-    func fetchHistoryPage(limit: Int, offset: Int, expectedRevision: Int64?) async throws -> RecentHistoryPage {
-        let start = expectedRevision == 0 ? max(0, offset) : 0
-        let count = max(0, limit) + (start == 0 ? max(0, offset) : 0)
-        let pinned = start == 0 ? try await fetchPinned() : []
+    func fetchHistoryPage(limit: Int, after cursor: RecentHistoryCursor?) async throws -> RecentHistoryPage {
+        if cursor == nil { _ = try await fetchPinned() }
         fetchRecentCallCount += 1
-        fetchRecentUnpinnedCallCount += 1
+        historyPageFetchCallCount += 1
         if fetchRecentDelayNs > 0 {
             try await Task.sleep(nanoseconds: fetchRecentDelayNs)
         }
-        let sortedItems = items.filter { !$0.isPinned }.sorted { $0.lastUsedAt > $1.lastUsedAt }
-        let pageItems = Array(sortedItems.dropFirst(start).prefix(count))
-        return RecentHistoryPage(pinnedItems: pinned, items: pageItems, total: items.count,
-                                 offset: start, nextOffset: start + pageItems.count, revision: 0)
+        return RecentHistoryPage(slicing: items, limit: limit, after: cursor)
     }
 
     func search(query: SearchRequest) async throws -> SearchResultPage {
@@ -440,10 +435,8 @@ final class FailingMockService: ClipboardServiceProtocol {
 
     func fetchRecent(limit: Int, offset: Int) async throws -> [ClipboardItemDTO] { [] }
     func fetchPinned() async throws -> [ClipboardItemDTO] { [] }
-    func fetchHistoryPage(limit _: Int, offset: Int, expectedRevision: Int64?) async throws -> RecentHistoryPage {
-        let start = expectedRevision == 0 ? max(0, offset) : 0
-        return RecentHistoryPage(pinnedItems: [], items: [], total: 0,
-                                 offset: start, nextOffset: start, revision: 0)
+    func fetchHistoryPage(limit _: Int, after _: RecentHistoryCursor?) async throws -> RecentHistoryPage {
+        RecentHistoryPage(pinnedItems: [], items: [], total: 0, nextCursor: nil)
     }
     func search(query: SearchRequest) async throws -> SearchResultPage {
         SearchResultPage(hits: [], total: 0, hasMore: false, coverage: .complete)
@@ -670,7 +663,7 @@ final class AppStateFallbackTests: XCTestCase {
         )
         // A following event is the ordering sentinel: once pinning is visible, the stale thumbnail
         // event ahead of it in the stream has also been handled.
-        mockService.emitEvent(.itemPinned(target.id))
+        mockService.emitEvent(.itemPinned(target.withPinned(true)))
         await assertEventually(timeout: 1.0, pollInterval: 0.01, {
             state.historyViewModel.items.first(where: { $0.id == target.id })?.isPinned == true
         }, message: "Sentinel event should be processed")

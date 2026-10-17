@@ -73,7 +73,7 @@ final class ConcurrencyTests: XCTestCase {
 
         let loadTask = Task { await viewModel.load() }
         await assertEventually(timeout: 1.0, pollInterval: 0.01, {
-            service.fetchRecentUnpinnedCallCount == 1
+            service.historyPageFetchCallCount == 1
         }, message: "The plain load must start before the newer query")
 
         viewModel.searchQuery = "199"

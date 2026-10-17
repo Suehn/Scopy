@@ -566,17 +566,23 @@ actor SQLiteClipboardRepository {
         return items
     }
 
-    func fetchRecentUnpinned(limit: Int, offset: Int) throws -> [ClipboardStoredItem] {
+    /// Up to `limit` unpinned rows strictly after `cursor` in recent order, walked on
+    /// `idx_recent_order` from the cursor's key: a deep page costs the same as the first.
+    private func fetchUnpinned(limit: Int, after cursor: RecentHistoryCursor?) throws -> [ClipboardStoredItem] {
+        let keyset = cursor == nil ? "" : "AND last_used_at <= ?2 AND (last_used_at < ?2 OR id > ?3)"
         let sql = """
             SELECT \(ClipboardItemRow.summaryColumns)
             FROM clipboard_items
-            WHERE is_pinned = 0
+            WHERE is_pinned = 0 \(keyset)
             ORDER BY last_used_at DESC, id ASC
-            LIMIT ? OFFSET ?
+            LIMIT ?1
         """
         let stmt = try prepare(sql)
         try stmt.bindInt(limit, at: 1)
-        try stmt.bindInt(offset, at: 2)
+        if let cursor {
+            try stmt.bindDouble(cursor.lastUsedAt.timeIntervalSince1970, at: 2)
+            try stmt.bindText(cursor.id.uuidString, at: 3)
+        }
 
         var items: [ClipboardStoredItem] = []
         items.reserveCapacity(limit)
@@ -586,24 +592,23 @@ actor SQLiteClipboardRepository {
         return items
     }
 
-    func fetchHistoryPage(limit: Int, offset: Int, expectedRevision: Int64?) throws -> (
+    /// The recent page after `cursor` (the first page, with every pinned row, when `nil`) and the
+    /// total, from one read snapshot. One row past the page decides whether a next page exists.
+    func fetchHistoryPage(limit: Int, after cursor: RecentHistoryCursor?) throws -> (
         pinned: [ClipboardStoredItem], items: [ClipboardStoredItem], total: Int,
-        offset: Int, nextOffset: Int, revision: Int64
+        nextCursor: RecentHistoryCursor?
     ) {
+        let limit = max(1, limit)
         try execute("BEGIN DEFERRED TRANSACTION")
         do {
-            let metadata = try prepare("SELECT mutation_seq, item_count FROM scopy_meta WHERE id = 1")
-            guard try metadata.step() else { throw RepositoryError.queryFailed("scopy_meta row is missing") }
-            let revision = metadata.columnInt64(0)
-            let total = metadata.columnInt(1)
-            _ = try metadata.step()
-            let offset = max(0, offset)
-            let start = expectedRevision == revision ? offset : 0
-            let count = max(0, limit) + (start == 0 ? offset : 0)
-            let pinned = start == 0 ? try fetchPinned() : []
-            let items = try fetchRecentUnpinned(limit: count, offset: start)
+            let pinned = cursor == nil ? try fetchPinned() : []
+            var items = try fetchUnpinned(limit: limit + 1, after: cursor)
+            let total = try getItemCount()
             try execute("COMMIT")
-            return (pinned, items, total, start, start + items.count, revision)
+            let hasMore = items.count > limit
+            if hasMore { items.removeLast() }
+            let nextCursor = hasMore ? items.last.map { RecentHistoryCursor(lastUsedAt: $0.lastUsedAt, id: $0.id) } : nil
+            return (pinned, items, total, nextCursor)
         } catch {
             try? execute("ROLLBACK")
             throw error

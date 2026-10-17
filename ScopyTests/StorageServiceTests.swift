@@ -226,8 +226,9 @@ final class StorageServiceTests: XCTestCase {
         XCTAssertEqual(fullPinned.rawData, pinnedData)
 
         let all = try await storage.fetchRecent(limit: 10, offset: 0)
-        let pinnedSummaries = try await storage.fetchPinned()
-        let recentSummaries = try await storage.fetchRecentUnpinned(limit: 10, offset: 0)
+        let firstPage = try await storage.fetchHistoryPage(limit: 10, after: nil)
+        let pinnedSummaries = firstPage.pinned
+        let recentSummaries = firstPage.items
 
         XCTAssertEqual(all.map(\.id), [pinned.id, recent.id])
         XCTAssertEqual(pinnedSummaries.map(\.id), [pinned.id])
