@@ -351,7 +351,8 @@ final class HistoryViewModel {
     @ObservationIgnored private var isTerminating = false
     @ObservationIgnored private var deletionFailureGeneration: UInt64 = 0
     /// Changes only when the rows are replaced by another query or cleared; `searchVersion` also
-    /// advances for in-flight work invalidated by a deletion event, which keeps the same rows.
+    /// advances for in-flight work invalidated by a deletion event or a search refresh, which
+    /// keep the same rows.
     @ObservationIgnored private var projectionIdentity = UUID()
     @ObservationIgnored private var quickSlotHintsVisible = false
 
@@ -582,6 +583,9 @@ final class HistoryViewModel {
     }
 
     @ObservationIgnored private var searchTask: Task<Void, Never>?
+    /// From `search()` until its rows land: the rows on screen may still answer an older query.
+    /// Interrupted searches leave it set, so the next history change starts a search again.
+    @ObservationIgnored private var searchIsPending = false
     @ObservationIgnored private var loadMoreTask: Task<Void, Never>?
     @ObservationIgnored private var refineTask: Task<Void, Never>?
     @ObservationIgnored private var storageDetailsTask: Task<Void, Never>?
@@ -668,7 +672,7 @@ final class HistoryViewModel {
             }
 
             if hasSemanticSearchQuery {
-                search()
+                refreshSearchAfterHistoryChange()
                 return
             }
 
@@ -725,7 +729,7 @@ final class HistoryViewModel {
             mergeKnownContentRevisions([item])
             guard !contentRevisionRegistry.isDeleted(itemID: item.id) else { return }
             if hasSemanticSearchQuery {
-                search()
+                refreshSearchAfterHistoryChange()
                 return
             }
             guard let index = indexOfItem(withID: item.id) else { return }
@@ -740,7 +744,7 @@ final class HistoryViewModel {
             invalidateInFlightProjectionWorkForDeletion()
             _ = removeItem(withID: id)
             if hasActiveFilters {
-                search()
+                refreshSearchAfterHistoryChange()
             }
         case .itemsRemoved(let itemIDs):
             let deletedIDs = Set(itemIDs)
@@ -778,7 +782,7 @@ final class HistoryViewModel {
                     )
                 }
             } else {
-                search()
+                refreshSearchAfterHistoryChange()
             }
         case .itemPinned(let item), .itemUnpinned(let item):
             setKnownContentPinned(itemID: item.id, isPinned: item.isPinned)
@@ -1264,10 +1268,12 @@ final class HistoryViewModel {
 
         // Own the loading state across the debounce.
         isLoading = true
+        searchIsPending = true
         searchTask = Task {
             defer {
                 if currentVersion == searchVersion {
                     isLoading = false
+                    searchIsPending = false
                 }
             }
             let query = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1362,6 +1368,60 @@ final class HistoryViewModel {
                 searchCoverage = .incomplete
                 reportFetchFailure(String(localized: "Search failed"), error)
                 ScopyLog.app.error("Search failed: \(error.localizedDescription, privacy: .private)")
+            }
+        }
+    }
+
+    /// Re-runs the current search after a capture, content change or deletion. Within the first
+    /// page, or while a search for a new query is still running, that is a plain `search()`. Past
+    /// it, one request at offset 0 covers every loaded row, so the change lands without collapsing
+    /// the rows the user paged through back to the first page. The refresh holds the paging slot,
+    /// so a `loadMore` waits for it instead of reading an offset the change just moved.
+    private func refreshSearchAfterHistoryChange() {
+        guard loadedCount > Self.initialPageSize, !searchIsPending else {
+            search()
+            return
+        }
+        cancelTask(&loadMoreTask)
+        cancelTask(&refineTask)
+        // An interrupted page must neither land nor release the slot or the loading state.
+        searchVersion &+= 1
+        isLoading = false
+        let currentVersion = searchVersion
+        let request = SearchRequest(
+            query: searchQuery,
+            mode: searchMode,
+            sortMode: ftsSortMode,
+            appFilter: appFilter,
+            typeFilter: typeFilter,
+            typeFilters: typeFilters,
+            // The loaded rows past the first page carry the calibrated ranking.
+            forceFullFuzzy: searchMode == .fuzzy || searchMode == .fuzzyPlus,
+            limit: pagingOffset(loadedCount, countsPinned: true),
+            offset: 0
+        )
+        let debounceNs = effectiveSearchDebounceNs(for: searchQuery.trimmingCharacters(in: .whitespacesAndNewlines))
+        loadMoreTask = Task {
+            defer {
+                if currentVersion == searchVersion {
+                    loadMoreTask = nil
+                }
+            }
+            // A burst of events costs one request.
+            try? await Task.sleep(nanoseconds: debounceNs)
+            guard !Task.isCancelled, currentVersion == searchVersion else { return }
+            do {
+                let result = try await service.search(query: request)
+                guard !Task.isCancelled, currentVersion == searchVersion else { return }
+                prewarmDisplayText(for: acceptedSearchHits(result.hits).map(\.item))
+                replaceSearchPage(with: result, skippingIdenticalRefine: true)
+                searchCoverage = result.coverage
+                fetchFailureMessage = nil
+            } catch {
+                guard !Task.isCancelled, currentVersion == searchVersion else { return }
+                searchCoverage = .incomplete
+                reportFetchFailure(String(localized: "Search failed"), error)
+                ScopyLog.app.error("Search refresh failed: \(error.localizedDescription, privacy: .private)")
             }
         }
     }
