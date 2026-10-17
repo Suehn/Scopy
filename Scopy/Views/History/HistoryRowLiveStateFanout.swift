@@ -77,8 +77,16 @@ final class HistoryRowLiveStateFanout {
         }
     }
 
+    #if DEBUG
+    /// Evidence maps applied so far; each one walks every registered row.
+    private(set) var evidenceReplacementCountForTesting = 0
+    #endif
+
     /// Replaces the evidence map and notifies only registered rows whose evidence changed.
     func replaceEvidence(_ next: [UUID: SearchMatchContext]) {
+        #if DEBUG
+        evidenceReplacementCountForTesting += 1
+        #endif
         let previous = evidence
         evidence = next
         for (itemID, sink) in sinks where previous[itemID] != next[itemID] {

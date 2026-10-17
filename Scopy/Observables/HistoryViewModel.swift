@@ -753,8 +753,14 @@ final class HistoryViewModel {
             let newlyDeletedCount = invalidateKnownContentRevisions(itemIDs: deletedIDs)
             invalidateInFlightProjectionWorkForDeletion()
             mutateProjection { _ = $0.removeItems(withIDs: deletedIDs) }
+            // One write: each write to `searchMatchContexts` copies the map (the fan-out shares
+            // its storage) and walks every registered row.
+            var contexts = searchMatchContexts
             for id in deletedIDs {
-                searchMatchContexts.removeValue(forKey: id)
+                contexts.removeValue(forKey: id)
+            }
+            if contexts.count != searchMatchContexts.count {
+                searchMatchContexts = contexts
             }
 
             if isUnfilteredList {

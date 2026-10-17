@@ -646,6 +646,29 @@ final class HistoryViewModelRegressionTests: XCTestCase {
         XCTAssertFalse(viewModel.isLoading)
     }
 
+    func testBulkRemovalDuringSearchAppliesTheEvidenceMapOnce() async {
+        let results = (0..<40).map { makeItem(text: "needle \($0)", age: $0) }
+        let service = HistoryViewModelRegressionService(items: results)
+        service.includesMatchEvidence = true
+        let viewModel = HistoryViewModel(service: service, settingsViewModel: SettingsViewModel(service: service))
+        viewModel.configureTiming(.immediateRegressionTests)
+        defer { viewModel.stop() }
+        viewModel.searchMode = .exact
+        viewModel.searchQuery = "needle"
+        viewModel.search()
+        await waitForNextItemsRevision(in: viewModel)
+        await waitForSearchToFinish(in: viewModel)
+        let removed = results.prefix(10).map(\.id)
+        let applied = viewModel.rowLiveState.evidenceReplacementCountForTesting
+
+        service.items.removeAll { removed.contains($0.id) }
+        await viewModel.handleEvent(.itemsRemoved(removed))
+
+        XCTAssertEqual(viewModel.rowLiveState.evidenceReplacementCountForTesting, applied + 1)
+        XCTAssertEqual(viewModel.searchMatchContexts.count, results.count - removed.count)
+        XCTAssertTrue(removed.allSatisfy { viewModel.searchMatchContext(for: $0) == nil })
+    }
+
     func testConcurrentLoadMoreCallsShareTheInFlightRequest() async {
         let service = HistoryViewModelRegressionService(items: makeItems(count: 700))
         let viewModel = HistoryViewModel(
