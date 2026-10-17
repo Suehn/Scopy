@@ -1,11 +1,12 @@
 import CryptoKit
 import Foundation
 import os
+import zlib
 
 enum SearchIndexDiskCache {
-    private static let fullIndexDiskCacheVersion: Int = 8
+    private static let fullIndexDiskCacheVersion: Int = 9
     private static let fullIndexDiskCacheMetadataVersion: Int = 2
-    private static let shortQueryIndexDiskCacheVersion: Int = 4
+    private static let shortQueryIndexDiskCacheVersion: Int = 5
 
     struct FullPaths: Sendable {
         let cachePath: String
@@ -95,19 +96,28 @@ enum SearchIndexDiskCache {
         let cachePath = "\(dbPath).fullindex.v\(fullIndexDiskCacheVersion).bin"
         return FullPaths(
             cachePath: cachePath,
-            checksumPath: cachePath + ".sha256",
+            checksumPath: cachePath + ".crc32",
             metadataPath: cachePath + ".metadata.plist"
         )
     }
 
     static func shortPaths(dbPath: String) -> ShortPaths {
         let cachePath = "\(dbPath).shortindex.v\(shortQueryIndexDiskCacheVersion).bin"
-        return ShortPaths(cachePath: cachePath, checksumPath: cachePath + ".sha256")
+        return ShortPaths(cachePath: cachePath, checksumPath: cachePath + ".crc32")
     }
 
     static func sha256Hex(_ data: Data) -> String {
         let digest = SHA256.hash(data: data)
         return digest.map { String(format: "%02x", $0) }.joined()
+    }
+
+    /// A cache file's check against truncation and corruption, which is all it guards: zlib's
+    /// CRC-32 is hardware-accelerated and reads a 35 MB cache in about 1 ms, where SHA-256 took 11 ms.
+    static func checksumHex(_ data: Data) -> String {
+        let crc = data.withUnsafeBytes { raw in
+            crc32_z(0, raw.baseAddress?.assumingMemoryBound(to: Bytef.self), raw.count)
+        }
+        return String(format: "%08x", UInt32(crc))
     }
 
     /// Deletes cache files written by other (older) cache versions next to the database.
@@ -135,7 +145,7 @@ enum SearchIndexDiskCache {
 
         guard let checksumRaw = try? String(contentsOfFile: paths.checksumPath, encoding: .utf8) else { return nil }
         let checksum = checksumRaw.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard checksum.count == 64 else { return nil }
+        guard checksum.count == 8 else { return nil }
 
         guard let data = try? Data(contentsOf: URL(fileURLWithPath: paths.cachePath), options: [.mappedIfSafe]) else {
             return nil
@@ -148,8 +158,7 @@ enum SearchIndexDiskCache {
               header.version == shortQueryIndexDiskCacheVersion,
               header.mutationSeq == stamp.mutationSeq else { return nil }
 
-        let computedChecksum = sha256Hex(data)
-        guard computedChecksum == checksum else { return nil }
+        guard checksumHex(data) == checksum else { return nil }
 
         guard let cache = SearchIndexBinaryCodec.decodeShort(data) else { return nil }
         guard cache.version == shortQueryIndexDiskCacheVersion else { return nil }
@@ -294,7 +303,7 @@ enum SearchIndexDiskCache {
             return FullIndexDiskCacheLoadOutcome(snapshot: nil, reason: .payloadInvalid, metadata: candidate.metadata)
         }
         let checksum = checksumRaw.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard checksum.count == 64 else {
+        guard checksum.count == 8 else {
             return FullIndexDiskCacheLoadOutcome(snapshot: nil, reason: .payloadInvalid, metadata: candidate.metadata)
         }
 
@@ -302,8 +311,7 @@ enum SearchIndexDiskCache {
             return FullIndexDiskCacheLoadOutcome(snapshot: nil, reason: .payloadInvalid, metadata: candidate.metadata)
         }
 
-        let computedChecksum = sha256Hex(data)
-        guard computedChecksum == checksum else {
+        guard checksumHex(data) == checksum else {
             return FullIndexDiskCacheLoadOutcome(snapshot: nil, reason: .checksumMismatch, metadata: candidate.metadata)
         }
 
@@ -370,7 +378,7 @@ enum SearchIndexDiskCache {
     static func writeShortPersistRequest(_ request: ShortPersistRequest) throws {
         let data = SearchIndexBinaryCodec.encodeShort(request.cache)
         try data.write(to: URL(fileURLWithPath: request.cachePath), options: [.atomic])
-        let checksum = sha256Hex(data)
+        let checksum = checksumHex(data)
         try checksum.write(to: URL(fileURLWithPath: request.checksumPath), atomically: true, encoding: .utf8)
     }
 
@@ -410,7 +418,7 @@ enum SearchIndexDiskCache {
         let encoder = PropertyListEncoder()
         encoder.outputFormat = .binary
         try data.write(to: URL(fileURLWithPath: request.cachePath), options: [.atomic])
-        let checksum = sha256Hex(data)
+        let checksum = checksumHex(data)
         try checksum.write(to: URL(fileURLWithPath: request.checksumPath), atomically: true, encoding: .utf8)
         let metadataWithPayloadSize = FullIndexDiskCacheMetadataV2(
             version: request.metadata.version,
