@@ -291,6 +291,35 @@ final class SearchSQLGoldenTests: XCTestCase {
         await engine.close()
     }
 
+    func testRelevanceShortQueryScoresAreReadAgainAfterACommit() async throws {
+        let dbPath = try makeFixtureDatabase(Self.sameTimeRows)
+        let engine = SearchEngineImpl(dbPath: dbPath)
+        try await engine.open()
+        func page(offset: Int) async throws -> [String] {
+            try await engine.search(
+                request: SearchRequest(query: "ab", mode: .fuzzy, sortMode: .relevance, limit: 2, offset: offset)
+            ).items.map { Self.number($0.id) }
+        }
+
+        // Pinned 4, then score 19 newest first: 3, 5, 10; score 18: 2, 8, 9.
+        let first = try await page(offset: 0)
+        let second = try await page(offset: 2)
+        XCTAssertEqual(first, ["4", "3"])
+        XCTAssertEqual(second, ["5", "10"])
+        // Row 7 now starts with "ab" and was used last, so it ranks right after the pinned row.
+        let writer = try SQLiteConnection(path: dbPath, flags: SQLITE_OPEN_READWRITE)
+        try writer.execute(
+            "UPDATE clipboard_items SET plain_text = 'ab new', last_used_at = 400 WHERE id = '\(Self.uuid(7).uuidString)'"
+        )
+        try writer.execute("UPDATE scopy_meta SET mutation_seq = mutation_seq + 1 WHERE id = 1")
+        writer.close()
+        let firstAgain = try await page(offset: 0)
+        let secondAgain = try await page(offset: 2)
+        XCTAssertEqual(firstAgain, ["4", "7"], "the page must come from the committed scores")
+        XCTAssertEqual(secondAgain, ["3", "5"])
+        await engine.close()
+    }
+
     // ASCII words that the short index's bigrams narrow, beside what a substring of whole
     // characters must not lose to them: canonical stand-ins for ";" (U+037E), "`" (U+1FEF) and "K"
     // (the Kelvin sign), combining marks, joiners, ignorables, ligatures and CR LF. A lone ";" or
