@@ -130,6 +130,26 @@ enum FullIndexRanker {
         return candidates.map { Int($0) }
     }
 
+    /// The ASCII bigrams every fuzzy+ match holds, keyed as the short index stores them. Fuzzy+
+    /// matches an ASCII word of three or more characters as a substring of whole characters, so
+    /// each adjacent pair of its bytes is adjacent in the lowercased text. Pairs with ";" or "`"
+    /// are left out: U+037E and U+1FEF are canonically equivalent to them.
+    static func requiredASCIIBigrams(queryLower: String, mode: SearchMode) -> Set<UInt16> {
+        guard mode == .fuzzyPlus else { return [] }
+        func isFilterable(_ byte: UInt8) -> Bool {
+            (0x21...0x7E).contains(byte) && byte != 0x3B && byte != 0x60
+        }
+        var keys = Set<UInt16>()
+        for word in SearchQueryNormalization.fuzzyPlusTokens(queryLower)
+        where word.canBeConverted(to: .ascii) && word.count >= 3 {
+            let bytes = Array(word.utf8)
+            for (first, second) in zip(bytes, bytes.dropFirst()) where isFilterable(first) && isFilterable(second) {
+                keys.insert(UInt16(first) << 7 | UInt16(second))
+            }
+        }
+        return keys
+    }
+
     /// The FTS prefilter limit when a large ASCII candidate set should be narrowed by FTS
     /// before scoring (first page of an interactive fuzzy query), else nil.
     static func adaptivePrefilterLimit(

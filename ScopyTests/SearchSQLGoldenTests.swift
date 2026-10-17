@@ -291,6 +291,74 @@ final class SearchSQLGoldenTests: XCTestCase {
         await engine.close()
     }
 
+    // ASCII words that the short index's bigrams narrow, beside what a substring of whole
+    // characters must not lose to them: canonical stand-ins for ";" (U+037E), "`" (U+1FEF) and "K"
+    // (the Kelvin sign), combining marks, joiners, ignorables, ligatures and CR LF. A lone ";" or
+    // "`" lets a row with only the stand-in pass the full index's character filter.
+    private static let bigramPieces = [
+        "config", "CONFIG", "con", "fig", "Con fig", "co;nf", "co\u{37E}nf", "a`b", "a\u{1FEF}b",
+        "\u{212A}ey", "key", "KEY", "ke\u{301}y", "k\u{200D}ey", "ke\u{AD}y", "e\u{200B}y", "c\u{307}on",
+        "\u{130}on", "\u{FB01}g", "\r\n", " ", "-", "x", "ion", "数据", ";", "`",
+    ]
+
+    func testFuzzyPlusFullIndexFindsTheSameRowsThroughTheShortIndexBigrams() async throws {
+        #if DEBUG
+        var state: UInt64 = 1
+        func next(_ bound: Int) -> Int {
+            state = state &* 6_364_136_223_846_793_005 &+ 1_442_695_040_888_963_407
+            return Int((state >> 33) % UInt64(bound))
+        }
+        func piece() -> String { Self.bigramPieces[next(Self.bigramPieces.count)] }
+        let rows = (1...400).map { number in
+            Row(
+                number: number,
+                text: (0..<next(12)).map { _ in piece() }.joined(),
+                note: next(4) == 0 ? piece() + piece() : nil,
+                app: "com.a",
+                type: .text,
+                t: TimeInterval(next(40))
+            )
+        }
+        let dbPath = try makeFixtureDatabase(rows)
+
+        // Below the short index's corpus size, only a forced build creates it.
+        let plainEngine = SearchEngineImpl(dbPath: dbPath)
+        try await plainEngine.open()
+        let bigramEngine = SearchEngineImpl(dbPath: dbPath)
+        try await bigramEngine.open()
+        await bigramEngine.debugStartShortQueryIndexBuild(force: true)
+        await bigramEngine.debugAwaitShortQueryIndexBuild()
+        let plainHealth = await plainEngine.debugShortQueryIndexHealth()
+        let bigramHealth = await bigramEngine.debugShortQueryIndexHealth()
+        XCTAssertFalse(plainHealth.isBuilt)
+        XCTAssertTrue(bigramHealth.isBuilt)
+
+        let queries = [
+            "config", "con", "fig", "onf", "nfi", "co;nf", "o;n", "a`b", "key", "ion", "con fig", "fig con",
+            "a key", "co fig", "数据 config", "x con",
+        ]
+        var matchedQueries = 0
+        // Fuzzy mode and fuzzy+ words under three characters match as subsequences: no bigram applies.
+        for mode in [SearchMode.fuzzyPlus, .fuzzy] {
+            for query in queries {
+                for sortMode in [SearchSortMode.relevance, .recent] {
+                    let request = SearchRequest(query: query, mode: mode, sortMode: sortMode, limit: 500, offset: 0)
+                    let label = "\(mode) \"\(query)\" \(sortMode)"
+                    let plain = try await plainEngine.search(request: request)
+                    let narrowed = try await bigramEngine.search(request: request)
+                    XCTAssertEqual(narrowed.items.map(\.id), plain.items.map(\.id), label)
+                    XCTAssertEqual(narrowed.total, plain.total, label)
+                    XCTAssertEqual(narrowed.hasMore, plain.hasMore, label)
+                    if !plain.items.isEmpty { matchedQueries += 1 }
+                }
+            }
+        }
+        XCTAssertGreaterThan(matchedQueries, 2 * queries.count)
+        await plainEngine.close()
+        await bigramEngine.close()
+        #endif
+    }
+
     /// Every window, in deepening order, has the reference order's rows, `hasMore`, and a total that
     /// is exact on the last page and otherwise exact or unknown.
     private func assertRecentWindows(_ engine: SearchEngineImpl, path: String) async throws {
