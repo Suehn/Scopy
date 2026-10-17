@@ -13,8 +13,10 @@ public enum ClipboardEvent: Sendable {
     )
     case itemDeleted(UUID)
     case itemsRemoved([UUID])
-    case itemPinned(UUID)
-    case itemUnpinned(UUID)
+    /// The row after the change: recent pages after the first skip pinned rows, so a row pinned
+    /// before it was loaded reaches the pinned group only through this event.
+    case itemPinned(ClipboardItemDTO)
+    case itemUnpinned(ClipboardItemDTO)
     case itemsCleared(keepPinned: Bool)
     case settingsChanged
     case captureReadBlocked(Bool)

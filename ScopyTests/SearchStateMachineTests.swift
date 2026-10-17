@@ -20,10 +20,8 @@ final class SearchStateMachineTests: XCTestCase {
         func stopAndWait() async {}
         func fetchRecent(limit _: Int, offset _: Int) async throws -> [ClipboardItemDTO] { [] }
         func fetchPinned() async throws -> [ClipboardItemDTO] { [] }
-        func fetchHistoryPage(limit _: Int, offset: Int, expectedRevision: Int64?) async throws -> RecentHistoryPage {
-            let start = expectedRevision == 0 ? max(0, offset) : 0
-            return RecentHistoryPage(pinnedItems: [], items: [], total: 0,
-                                     offset: start, nextOffset: start, revision: 0)
+        func fetchHistoryPage(limit _: Int, after _: RecentHistoryCursor?) async throws -> RecentHistoryPage {
+            RecentHistoryPage(pinnedItems: [], items: [], total: 0, nextCursor: nil)
         }
 
         func search(query: SearchRequest) async throws -> SearchResultPage {
@@ -163,10 +161,8 @@ final class SearchStateMachineTests: XCTestCase {
         func stopAndWait() async {}
         func fetchRecent(limit _: Int, offset _: Int) async throws -> [ClipboardItemDTO] { [] }
         func fetchPinned() async throws -> [ClipboardItemDTO] { [] }
-        func fetchHistoryPage(limit _: Int, offset: Int, expectedRevision: Int64?) async throws -> RecentHistoryPage {
-            let start = expectedRevision == 0 ? max(0, offset) : 0
-            return RecentHistoryPage(pinnedItems: [], items: [], total: 0,
-                                     offset: start, nextOffset: start, revision: 0)
+        func fetchHistoryPage(limit _: Int, after _: RecentHistoryCursor?) async throws -> RecentHistoryPage {
+            RecentHistoryPage(pinnedItems: [], items: [], total: 0, nextCursor: nil)
         }
 
         func search(query: SearchRequest) async throws -> SearchResultPage {
@@ -252,13 +248,8 @@ final class SearchStateMachineTests: XCTestCase {
         }
 
         func fetchPinned() async throws -> [ClipboardItemDTO] { [] }
-        func fetchHistoryPage(limit: Int, offset: Int, expectedRevision: Int64?) async throws -> RecentHistoryPage {
-            let start = expectedRevision == 0 ? max(0, offset) : 0
-            let count = max(0, limit) + (start == 0 ? max(0, offset) : 0)
-            let pageItems = Array(recentItems.filter { !$0.isPinned }.dropFirst(start).prefix(count))
-            return RecentHistoryPage(pinnedItems: start == 0 ? recentItems.filter(\.isPinned) : [],
-                                     items: pageItems, total: recentItems.count, offset: start,
-                                     nextOffset: start + pageItems.count, revision: 0)
+        func fetchHistoryPage(limit: Int, after cursor: RecentHistoryCursor?) async throws -> RecentHistoryPage {
+            RecentHistoryPage(slicing: recentItems, limit: limit, after: cursor)
         }
 
         func search(query: SearchRequest) async throws -> SearchResultPage {
@@ -378,13 +369,8 @@ final class SearchStateMachineTests: XCTestCase {
         }
 
         func fetchPinned() async throws -> [ClipboardItemDTO] { [] }
-        func fetchHistoryPage(limit: Int, offset: Int, expectedRevision: Int64?) async throws -> RecentHistoryPage {
-            let start = expectedRevision == 0 ? max(0, offset) : 0
-            let count = max(0, limit) + (start == 0 ? max(0, offset) : 0)
-            let pageItems = Array(recentItems.filter { !$0.isPinned }.dropFirst(start).prefix(count))
-            return RecentHistoryPage(pinnedItems: start == 0 ? recentItems.filter(\.isPinned) : [],
-                                     items: pageItems, total: recentItems.count, offset: start,
-                                     nextOffset: start + pageItems.count, revision: 0)
+        func fetchHistoryPage(limit: Int, after cursor: RecentHistoryCursor?) async throws -> RecentHistoryPage {
+            RecentHistoryPage(slicing: recentItems, limit: limit, after: cursor)
         }
 
         func search(query: SearchRequest) async throws -> SearchResultPage {

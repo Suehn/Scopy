@@ -21,8 +21,8 @@ public protocol ClipboardServiceProtocol: AnyObject {
     /// Pinned items. The UI groups them separately, so they do not count against a recent page.
     func fetchPinned() async throws -> [ClipboardItemDTO]
 
-    /// A consistent recent page, or the expanded prefix if the continuation's revision changed.
-    func fetchHistoryPage(limit: Int, offset: Int, expectedRevision: Int64?) async throws -> RecentHistoryPage
+    /// The recent page after `cursor`, or the first page with every pinned row when it is `nil`.
+    func fetchHistoryPage(limit: Int, after cursor: RecentHistoryCursor?) async throws -> RecentHistoryPage
 
     /// Searches the clipboard history.
     func search(query: SearchRequest) async throws -> SearchResultPage

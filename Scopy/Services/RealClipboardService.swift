@@ -44,8 +44,8 @@ final class RealClipboardService: ClipboardServiceProtocol {
         try await backend.fetchPinned()
     }
 
-    func fetchHistoryPage(limit: Int, offset: Int, expectedRevision: Int64?) async throws -> RecentHistoryPage {
-        try await backend.fetchHistoryPage(limit: limit, offset: offset, expectedRevision: expectedRevision)
+    func fetchHistoryPage(limit: Int, after cursor: RecentHistoryCursor?) async throws -> RecentHistoryPage {
+        try await backend.fetchHistoryPage(limit: limit, after: cursor)
     }
 
     func search(query: SearchRequest) async throws -> SearchResultPage {

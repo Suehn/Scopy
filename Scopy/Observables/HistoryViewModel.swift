@@ -502,15 +502,9 @@ final class HistoryViewModel {
     var isScrolling: Bool = false
 
     private var searchVersion: Int = 0
+    /// Advances on every history event. A recent page read while it moved may predate the commit
+    /// the event describes, so it is read again from the same cursor.
     @ObservationIgnored private var recentMutationEpoch: UInt64 = 0
-    @ObservationIgnored private var recentRevision: Int64?
-    @ObservationIgnored private var recentPageTargetDepth: Int?
-    @ObservationIgnored private var recentSnapshotTargetDepth: Int?
-    @ObservationIgnored private var recentNextOffset = 0
-    @ObservationIgnored private var recentPinnedCount = 0
-    @ObservationIgnored private var recentRebaseToken: UUID?
-    @ObservationIgnored private var recentRebaseRequested = false
-    @ObservationIgnored private var scheduledRecentLimit = HistoryViewModel.initialPageSize
     @ObservationIgnored private var historyCountTask: Task<Void, Never>?
 
 
@@ -578,7 +572,6 @@ final class HistoryViewModel {
     @ObservationIgnored private var searchTask: Task<Void, Never>?
     @ObservationIgnored private var loadMoreTask: Task<Void, Never>?
     @ObservationIgnored private var refineTask: Task<Void, Never>?
-    @ObservationIgnored private var staleLoadRetryTask: Task<Void, Never>?
     @ObservationIgnored private var storageDetailsTask: Task<Void, Never>?
     @ObservationIgnored private var recentAppsRefreshTask: Task<Void, Never>?
     @ObservationIgnored private var persistedDefaultSearchMode: SearchMode = SettingsDTO.default.defaultSearchMode
@@ -609,7 +602,6 @@ final class HistoryViewModel {
     }
 
     func updateService(_ service: ClipboardServiceProtocol) {
-        resetRecentRebase()
         cancelTask(&storageDetailsTask)
         self.service = service
     }
@@ -635,11 +627,9 @@ final class HistoryViewModel {
         searchVersion &+= 1
         isLoading = false
         captureReadBlocked = false
-        recentPageTargetDepth = nil
         cancelTask(&searchTask)
         cancelTask(&loadMoreTask)
         cancelTask(&refineTask)
-        resetRecentRebase()
         cancelTask(&storageDetailsTask)
         cancelTask(&recentAppsRefreshTask)
         cancelTask(&historyCountTask)
@@ -651,26 +641,11 @@ final class HistoryViewModel {
         switch event {
         case .newItem, .itemUpdated, .itemContentUpdated, .itemDeleted, .itemsRemoved, .itemPinned, .itemUnpinned, .itemsCleared:
             recentMutationEpoch &+= 1
-            recentRevision = nil
             if isUnfilteredList { scheduleHistoryCountRefresh() }
         default:
             break
         }
 
-        let interruptedDepth: Int?
-        switch event {
-        case .itemDeleted, .itemsRemoved:
-            interruptedDepth = isUnfilteredList ? (recentPageTargetDepth ?? recentSnapshotTargetDepth) : nil
-        case .newItem, .itemUpdated, .itemContentUpdated, .itemPinned, .itemUnpinned:
-            interruptedDepth = isUnfilteredList ? recentPageTargetDepth : nil
-        default:
-            interruptedDepth = nil
-        }
-        defer {
-            if let interruptedDepth, isUnfilteredList {
-                scheduleLoadAfterStaleSnapshot(version: searchVersion, limit: interruptedDepth)
-            }
-        }
         await reconcilePendingDeletion(with: event)
         switch event {
         case .newItem(let item):
@@ -804,27 +779,23 @@ final class HistoryViewModel {
             } else {
                 search()
             }
-        case .itemPinned(let id):
-            setKnownContentPinned(itemID: id, isPinned: true)
-            if let index = indexOfItem(withID: id) {
-                let updated = items[index].withPinned(true)
+        case .itemPinned(let item), .itemUnpinned(let item):
+            setKnownContentPinned(itemID: item.id, isPinned: item.isPinned)
+            if let index = indexOfItem(withID: item.id) {
+                // The loaded row may carry newer fields, such as a thumbnail, than the event.
+                let updated = items[index].withPinned(item.isPinned)
                 if hasSemanticSearchQuery {
                     setItemIfChanged(at: index, to: updated)
                 } else {
                     _ = upsertRecentItem(updated)
                 }
                 mergeKnownContentRevisions([updated])
-            }
-        case .itemUnpinned(let id):
-            setKnownContentPinned(itemID: id, isPinned: false)
-            if let index = indexOfItem(withID: id) {
-                let updated = items[index].withPinned(false)
-                if hasSemanticSearchQuery {
-                    setItemIfChanged(at: index, to: updated)
-                } else {
-                    _ = upsertRecentItem(updated)
-                }
-                mergeKnownContentRevisions([updated])
+            } else if item.isPinned, !hasSemanticSearchQuery, matchesCurrentFilters(item),
+                      !contentRevisionRegistry.isDeleted(itemID: item.id) {
+                // Pages after the first hold unpinned rows only: a row pinned before it was
+                // loaded joins the pinned group here or not at all.
+                _ = upsertRecentItem(item)
+                mergeKnownContentRevisions([item])
             }
         case .itemsCleared(let keepPinned):
             let pinnedSurvivors = await resolvePinnedSurvivors(
@@ -921,50 +892,35 @@ final class HistoryViewModel {
         guard isUnfilteredList else { return }
         searchVersion &+= 1
         cancelTask(&loadMoreTask)
-        resetRecentRebase()
-        await loadRecent(recentLimit: Self.initialPageSize)
+        await loadRecent()
     }
 
-    private func loadRecent(recentLimit: Int) async {
+    private func loadRecent() async {
         cancelTask(&storageDetailsTask)
         let currentVersion = searchVersion
         guard shouldApplyLoadResult(version: currentVersion) else { return }
 
         isLoading = true
-        recentSnapshotTargetDepth = recentLimit
         fetchFailureMessage = nil
         defer {
             if currentVersion == searchVersion {
                 isLoading = false
-                recentSnapshotTargetDepth = nil
             }
         }
 
         do {
             let startTime = CFAbsoluteTimeGetCurrent()
 
-            var snapshot: RecentHistoryPage?
-            for _ in 0..<2 {
-                let epoch = recentMutationEpoch
-                let page = try await service.fetchHistoryPage(limit: recentLimit, offset: 0, expectedRevision: nil)
-                guard shouldApplyLoadResult(version: currentVersion) else { return }
-                guard recentMutationEpoch == epoch else { continue }
-                snapshot = page
-                break
-            }
-            guard shouldApplyLoadResult(version: currentVersion) else { return }
-            guard let snapshot else {
-                scheduleLoadAfterStaleSnapshot(version: currentVersion, limit: recentLimit)
-                return
-            }
+            guard let settled = try await fetchSettledRecentPage(
+                limit: Self.initialPageSize, after: nil, version: currentVersion
+            ) else { return }
+            let snapshot = settled.page
             let fetchedItems = excludingKnownDeletedItems(snapshot.pinnedItems + snapshot.items)
-            recentRevision = snapshot.revision
-            recentNextOffset = snapshot.nextOffset
-            recentPinnedCount = snapshot.pinnedItems.count
 
             searchMatchContexts.removeAll(keepingCapacity: true)
-            mutateProjection { $0.replacePage(items: fetchedItems, total: snapshot.total,
-                                               hasMore: snapshot.pinnedItems.count + snapshot.nextOffset < snapshot.total) }
+            mutateProjection {
+                $0.replaceRecentPage(items: fetchedItems, total: snapshot.total, continuingAfter: snapshot.nextCursor)
+            }
             mergeKnownContentRevisions(fetchedItems)
             prewarmDisplayText(for: fetchedItems)
             searchCoverage = .complete
@@ -990,44 +946,26 @@ final class HistoryViewModel {
         !Task.isCancelled && version == searchVersion && isUnfilteredList
     }
 
-    private func resetRecentRebase() {
-        cancelTask(&staleLoadRetryTask)
-        recentRebaseToken = nil
-        recentRebaseRequested = false
-        scheduledRecentLimit = Self.initialPageSize
-        recentPageTargetDepth = nil
-        recentSnapshotTargetDepth = nil
-    }
-
-    private func scheduleLoadAfterStaleSnapshot(version: Int, limit: Int = HistoryViewModel.initialPageSize) {
-        scheduledRecentLimit = max(scheduledRecentLimit, limit)
-        recentRebaseRequested = true
-        guard staleLoadRetryTask == nil else { return }
-        let token = UUID()
-        recentRebaseToken = token
-        staleLoadRetryTask = Task {
-            defer {
-                if recentRebaseToken == token {
-                    staleLoadRetryTask = nil
-                    recentRebaseToken = nil
-                    recentRebaseRequested = false
-                    scheduledRecentLimit = Self.initialPageSize
-                }
+    /// Reads the recent page after `cursor` until no history event arrived during the read: such
+    /// an event may describe a commit the snapshot predates, and applying the snapshot after it
+    /// would undo the event. One retry is immediate; later ones wait `staleLoadRetryDelayNs`.
+    /// `nil` when the request was superseded.
+    private func fetchSettledRecentPage(
+        limit: Int,
+        after cursor: RecentHistoryCursor?,
+        version: Int
+    ) async throws -> (page: RecentHistoryPage, epoch: UInt64)? {
+        for attempt in 0... {
+            if attempt > 1 {
+                try? await Task.sleep(nanoseconds: timing.staleLoadRetryDelayNs)
             }
-            while recentRebaseRequested {
-                do {
-                    try await Task.sleep(nanoseconds: timing.staleLoadRetryDelayNs)
-                } catch { return }
-                // The old page owns loading until its final chunk/await has exited. A rebase
-                // cannot race that page's result or its loading-state cleanup.
-                if let page = loadMoreTask { await page.value }
-                guard !Task.isCancelled, version == searchVersion, isUnfilteredList else { return }
-                let limit = scheduledRecentLimit
-                scheduledRecentLimit = Self.initialPageSize
-                recentRebaseRequested = false
-                await loadRecent(recentLimit: limit)
-            }
+            guard shouldApplyLoadResult(version: version) else { return nil }
+            let epoch = recentMutationEpoch
+            let page = try await service.fetchHistoryPage(limit: limit, after: cursor)
+            guard shouldApplyLoadResult(version: version) else { return nil }
+            if recentMutationEpoch == epoch { return (page, epoch) }
         }
+        return nil
     }
 
     private func scheduleStorageDetailsRefresh(version: Int) {
@@ -1071,7 +1009,7 @@ final class HistoryViewModel {
     static let loadMorePrefetchRows = 40
 
     func rowDidAppear(itemID: UUID) {
-        guard canLoadMore, !isLoading, loadMoreTask == nil, staleLoadRetryTask == nil else { return }
+        guard canLoadMore, !isLoading, loadMoreTask == nil else { return }
         guard let index = indexOfItem(withID: itemID), index >= loadedCount - Self.loadMorePrefetchRows else { return }
         Task { await loadMore() }
     }
@@ -1083,10 +1021,6 @@ final class HistoryViewModel {
 
     func loadMore() async {
         ScrollPerformanceProfile.shared.incrementCounter(name: "list.load_more_attempt")
-        if let rebase = staleLoadRetryTask {
-            await rebase.value
-            return
-        }
         if let inFlightTask = loadMoreTask {
             await inFlightTask.value
             return
@@ -1098,7 +1032,6 @@ final class HistoryViewModel {
             defer {
                 if currentVersion == searchVersion {
                     loadMoreTask = nil
-                    recentPageTargetDepth = nil
                 }
             }
             guard !Task.isCancelled else { return }
@@ -1165,47 +1098,36 @@ final class HistoryViewModel {
                     ScrollPerformanceProfile.shared.incrementCounter(
                         name: "list.pagination_request"
                     )
-                    let epoch = recentMutationEpoch
-                    let depth = recentNextOffset + Self.loadMorePageSize
-                    recentPageTargetDepth = depth
-                    let page = try await service.fetchHistoryPage(
-                        limit: Self.loadMorePageSize,
-                        offset: recentNextOffset,
-                        expectedRevision: recentRevision
-                    )
-                    guard !Task.isCancelled, currentVersion == searchVersion else { return }
-                    guard recentMutationEpoch == epoch else {
-                        scheduleLoadAfterStaleSnapshot(version: currentVersion, limit: depth)
-                        return
-                    }
-                    let currentItems = excludingKnownDeletedItems(page.pinnedItems + page.items)
-                    prewarmDisplayText(for: currentItems)
-                    if page.offset == 0 {
-                        recentPinnedCount = page.pinnedItems.count
-                        mutateProjection { $0.replaceItems(currentItems) }
-                        mergeKnownContentRevisions(currentItems)
-                    } else {
+                    // Each applied chunk moves the cursor to its last row. An event seen between
+                    // chunks may postdate the read, so the rest is read again from that cursor.
+                    var remaining = Self.loadMorePageSize
+                    pages: while remaining > 0, let cursor = listState.recentCursor {
+                        guard let settled = try await fetchSettledRecentPage(
+                            limit: remaining, after: cursor, version: currentVersion
+                        ) else { return }
+                        let page = settled.page
+                        prewarmDisplayText(for: excludingKnownDeletedItems(page.items))
                         var start = 0
-                        while start < currentItems.count {
-                            let end = min(currentItems.count, start + Self.loadMoreApplyChunkRows)
-                            let chunk = excludingKnownDeletedItems(Array(currentItems[start..<end]))
-                            mutateProjection { $0.appendRecentPage(items: chunk) }
-                            mergeKnownContentRevisions(chunk)
-                            start = end
-                            if start < currentItems.count {
+                        repeat {
+                            if start > 0 {
                                 try? await Task.sleep(nanoseconds: 20_000_000)
                                 guard !Task.isCancelled, currentVersion == searchVersion else { return }
-                                guard recentMutationEpoch == epoch else {
-                                    scheduleLoadAfterStaleSnapshot(version: currentVersion, limit: depth)
-                                    return
-                                }
+                                guard recentMutationEpoch == settled.epoch else { continue pages }
                             }
-                        }
+                            let end = min(page.items.count, start + Self.loadMoreApplyChunkRows)
+                            let chunk = page.items[start..<end]
+                            let continuation = end == page.items.count
+                                ? page.nextCursor
+                                : chunk.last.map(RecentHistoryCursor.init)
+                            let accepted = excludingKnownDeletedItems(Array(chunk))
+                            mutateProjection { $0.appendRecentPage(items: accepted, continuingAfter: continuation) }
+                            mergeKnownContentRevisions(accepted)
+                            remaining -= chunk.count
+                            start = end
+                        } while start < page.items.count
+                        mutateProjection { $0.updateTotalCount(page.total) }
+                        break
                     }
-                    recentRevision = page.revision
-                    recentNextOffset = page.nextOffset
-                    let hasMore = recentPinnedCount + page.nextOffset < page.total
-                    mutateProjection { $0.updatePagination(total: page.total, hasMore: hasMore) }
                     searchCoverage = .complete
                 }
             } catch {
@@ -1232,7 +1154,6 @@ final class HistoryViewModel {
     func search() {
         cancelTask(&searchTask)
         cancelTask(&refineTask)
-        resetRecentRebase()
         cancelTask(&storageDetailsTask)
         fetchFailureMessage = nil
 
@@ -1836,14 +1757,15 @@ final class HistoryViewModel {
         contentRevisionReconciliationToken &+= 1
     }
 
+    /// A search page continues from an offset, which a deletion shifts. Recent pages continue from
+    /// a key and read again after any event themselves.
     private func invalidateInFlightProjectionWorkForDeletion() {
+        guard !isUnfilteredList else { return }
         cancelTask(&searchTask)
         cancelTask(&loadMoreTask)
         cancelTask(&refineTask)
-        resetRecentRebase()
         cancelTask(&storageDetailsTask)
         searchVersion &+= 1
-        recentPageTargetDepth = nil
         isLoading = false
     }
 
@@ -1878,7 +1800,6 @@ final class HistoryViewModel {
         cancelTask(&searchTask)
         cancelTask(&loadMoreTask)
         cancelTask(&refineTask)
-        resetRecentRebase()
         cancelTask(&storageDetailsTask)
         searchVersion &+= 1
         projectionIdentity = UUID()
@@ -2054,6 +1975,10 @@ final class HistoryViewModel {
     private func upsertRecentItem(_ item: ClipboardItemDTO) -> Bool {
         var changed = false
         mutateProjection { changed = $0.upsertRecentItem(item) }
+        // A row that moved past the cursor left for a later page, and the selection with it.
+        if changed, selectedID == item.id, indexOfItem(withID: item.id) == nil {
+            reconcileSelectionAfterProjectionReplacement()
+        }
         return changed
     }
 

@@ -462,15 +462,14 @@ actor ClipboardBackend {
         return dtos
     }
 
-    func fetchHistoryPage(limit: Int, offset: Int, expectedRevision: Int64?) async throws -> RecentHistoryPage {
+    func fetchHistoryPage(limit: Int, after cursor: RecentHistoryCursor?) async throws -> RecentHistoryPage {
         let storage = try requireStorage()
-        let page = try await storage.fetchHistoryPage(limit: limit, offset: offset, expectedRevision: expectedRevision)
+        let page = try await storage.fetchHistoryPage(limit: limit, after: cursor)
         var pinned: [ClipboardItemDTO] = []
         var items: [ClipboardItemDTO] = []
         for item in page.pinned { pinned.append(await toDTO(item, storage: storage)) }
         for item in page.items { items.append(await toDTO(item, storage: storage)) }
-        return RecentHistoryPage(pinnedItems: pinned, items: items, total: page.total,
-                                 offset: page.offset, nextOffset: page.nextOffset, revision: page.revision)
+        return RecentHistoryPage(pinnedItems: pinned, items: items, total: page.total, nextCursor: page.nextCursor)
     }
 
     func search(query: SearchRequest) async throws -> SearchResultPage {
@@ -1360,31 +1359,21 @@ actor ClipboardBackend {
             return nil
         }
 
+        let dto = await toDTO(
+            current,
+            storage: storage,
+            thumbnailGenerationPriority: priority
+        )
         let event: ClipboardEvent
         switch kind {
         case .newItem:
-            let dto = await toDTO(
-                current,
-                storage: storage,
-                thumbnailGenerationPriority: priority
-            )
             event = .newItem(dto)
         case .itemUpdated:
-            let dto = await toDTO(
-                current,
-                storage: storage,
-                thumbnailGenerationPriority: priority
-            )
             event = .itemUpdated(dto)
         case .contentUpdated:
-            let dto = await toDTO(
-                current,
-                storage: storage,
-                thumbnailGenerationPriority: priority
-            )
             event = .itemContentUpdated(dto)
         case .pinState:
-            event = current.isPinned ? .itemPinned(id) : .itemUnpinned(id)
+            event = current.isPinned ? .itemPinned(dto) : .itemUnpinned(dto)
         }
         if let metadataInterlockPoint {
             await metadataPublicationInterlock?(metadataInterlockPoint, id)

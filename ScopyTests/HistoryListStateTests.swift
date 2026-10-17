@@ -37,20 +37,6 @@ final class HistoryListStateTests: XCTestCase {
         XCTAssertFalse(state.canLoadMore)
     }
 
-    func testAppendRecentPageUsesExistingTotalCount() {
-        let first = makeItem(text: "first")
-        let second = makeItem(text: "second")
-        var state = HistoryListState()
-        state.replacePage(items: [first], total: 3, hasMore: true)
-
-        state.appendRecentPage(items: [second])
-
-        XCTAssertEqual(state.items.map(\.id), [first.id, second.id])
-        XCTAssertEqual(state.loadedCount, 2)
-        XCTAssertEqual(state.totalCount, 3)
-        XCTAssertTrue(state.canLoadMore)
-    }
-
     func testAppendingSearchChunksPreservesPinnedGroupsAndUnknownTotalPaging() {
         let first = makeItem(text: "first")
         let pinned = makeItem(text: "pinned", isPinned: true)

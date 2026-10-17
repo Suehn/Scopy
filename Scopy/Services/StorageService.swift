@@ -716,15 +716,11 @@ public actor StorageService {
         try await repository.fetchPinned()
     }
 
-    public nonisolated func fetchRecentUnpinned(limit: Int, offset: Int) async throws -> [ClipboardStoredItem] {
-        try await repository.fetchRecentUnpinned(limit: limit, offset: offset)
-    }
-
-    nonisolated func fetchHistoryPage(limit: Int, offset: Int, expectedRevision: Int64?) async throws -> (
+    nonisolated func fetchHistoryPage(limit: Int, after cursor: RecentHistoryCursor?) async throws -> (
         pinned: [ClipboardStoredItem], items: [ClipboardStoredItem], total: Int,
-        offset: Int, nextOffset: Int, revision: Int64
+        nextCursor: RecentHistoryCursor?
     ) {
-        try await repository.fetchHistoryPage(limit: limit, offset: offset, expectedRevision: expectedRevision)
+        try await repository.fetchHistoryPage(limit: limit, after: cursor)
     }
 
     nonisolated func incrementUsage(id: UUID, at timestamp: Date) async throws -> ClipboardStoredItem? {

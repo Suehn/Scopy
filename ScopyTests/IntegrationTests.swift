@@ -242,10 +242,8 @@ final class SearchHintTests: XCTestCase {
         func stopAndWait() async {}
         func fetchRecent(limit: Int, offset: Int) async throws -> [ClipboardItemDTO] { [] }
         func fetchPinned() async throws -> [ClipboardItemDTO] { [] }
-        func fetchHistoryPage(limit _: Int, offset: Int, expectedRevision: Int64?) async throws -> RecentHistoryPage {
-            let start = expectedRevision == 0 ? max(0, offset) : 0
-            return RecentHistoryPage(pinnedItems: [], items: [], total: 0,
-                                     offset: start, nextOffset: start, revision: 0)
+        func fetchHistoryPage(limit _: Int, after _: RecentHistoryCursor?) async throws -> RecentHistoryPage {
+            RecentHistoryPage(pinnedItems: [], items: [], total: 0, nextCursor: nil)
         }
         func search(query: SearchRequest) async throws -> SearchResultPage {
             SearchResultPage(hits: [], total: 0, hasMore: false, coverage: .complete)
