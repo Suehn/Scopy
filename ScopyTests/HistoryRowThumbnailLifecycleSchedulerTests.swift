@@ -203,7 +203,7 @@ final class HistoryRowThumbnailLifecycleSchedulerTests: XCTestCase {
 
     private func makeScheduler(
         cachedImage: @escaping (String) -> NSImage? = { _ in nil },
-        loadImage: @escaping (String, TaskPriority) async -> NSImage? = { _, _ in nil },
+        loadImage: @escaping @MainActor (String, TaskPriority) async -> NSImage? = { _, _ in nil },
         isScrolling: @escaping () -> Bool = { false },
         sleep: @escaping (UInt64) async -> Void = { _ in },
         isCancelled: @escaping () -> Bool = { false }
