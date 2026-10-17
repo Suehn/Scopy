@@ -116,19 +116,111 @@ struct LoweredTextMatcher: Sendable {
 
     /// The UTF-16 length of `text.lowercased()`, or nil for invalid UTF-8.
     static func loweredUTF16Length(of text: UnsafeBufferPointer<UInt8>) -> Int? {
+        let table = LowercaseTable.shared
         var units = 0
         var index = 0
         while index < text.count {
+            guard let (end, skippedUnits) = skipPlainText(in: text, from: index, stop: nil, table: table) else {
+                return nil
+            }
+            units += skippedUnits
+            index = end
             if text[index] < 128 {
                 units += 1
                 index += 1
                 continue
             }
             guard let width = validatedWidth(in: text, at: index) else { return nil }
-            units += LowercaseTable.shared.special(in: text, at: index, width: width)?.count ?? (width == 4 ? 2 : 1)
+            units += table.special(in: text, at: index, width: width)?.count ?? (width == 4 ? 2 : 1)
             index += width
         }
         return units
+    }
+
+    // MARK: - Skipping
+
+    /// Skips well-formed text from the scalar boundary `start` to the first special scalar or byte
+    /// that can begin the ASCII `stop` (either case), 16 bytes per step. Outside special scalars,
+    /// lowercasing keeps every scalar's UTF-16 length and adds no ASCII unit, so the skipped units
+    /// are the non-continuation bytes plus one per four-byte lead. Returns the scalar boundary
+    /// reached, before the last 17 bytes, and the units before it; nil for malformed bytes before it.
+    private static func skipPlainText(
+        in text: UnsafeBufferPointer<UInt8>,
+        from start: Int,
+        stop: UInt8?,
+        table: LowercaseTable
+    ) -> (end: Int, units: Int)? {
+        // The three bytes before `start` belong to whole scalars, so they demand no continuation.
+        guard start >= 3, start + 17 <= text.count, let base = text.baseAddress else { return (start, 0) }
+        // Only vector-to-vector comparisons compile to single instructions; a scalar operand
+        // compares lane by lane.
+        func splat(_ byte: UInt8) -> Bytes { Bytes(repeating: byte) }
+        let raw = UnsafeRawPointer(base)
+        // 0xFF never occurs in UTF-8.
+        let stopLower = splat(stop ?? 0xFF)
+        let stopUpper = splat(stop.map { (0x61...0x7A).contains($0) ? $0 - 0x20 : $0 } ?? 0xFF)
+        let x80 = splat(0x80), x90 = splat(0x90), xA0 = splat(0xA0), xC0 = splat(0xC0), xC2 = splat(0xC2)
+        let xE0 = splat(0xE0), xED = splat(0xED), xF0 = splat(0xF0), xF4 = splat(0xF4), xF5 = splat(0xF5)
+        var block = start
+        var units = 0
+        // Per-lane units of at most seven blocks, two per lane each, so no byte lane overflows.
+        var pendingUnits = Bytes()
+        var pendingBlocks = 0
+        while block + 17 <= text.count {
+            let bytes = raw.loadUnaligned(fromByteOffset: block, as: Bytes.self)
+            let next = raw.loadUnaligned(fromByteOffset: block + 1, as: Bytes.self)
+            let previous1 = raw.loadUnaligned(fromByteOffset: block - 1, as: Bytes.self)
+            let previous2 = raw.loadUnaligned(fromByteOffset: block - 2, as: Bytes.self)
+            let previous3 = raw.loadUnaligned(fromByteOffset: block - 3, as: Bytes.self)
+
+            var stops = (bytes .== stopLower) .| (bytes .== stopUpper)
+            for prefix in table.specialPrefixes {
+                stops .|= (bytes .== prefix.lead) .& (next .== prefix.second)
+            }
+            // A byte is a continuation exactly where one of the three before it is a lead that
+            // needs one there; then the lead's own range limits apply to the byte after it.
+            let continuation = (bytes .>= x80) .& (bytes .< xC0)
+            let demanded = (previous1 .>= xC0) .| (previous2 .>= xE0) .| (previous3 .>= xF0)
+            var malformed = continuation .^ demanded
+            malformed .|= ((bytes .>= xC0) .& (bytes .< xC2)) .| (bytes .>= xF5)
+            malformed .|= ((previous1 .== xE0) .& (bytes .< xA0)) .| ((previous1 .== xED) .& (bytes .>= xA0))
+            malformed .|= ((previous1 .== xF0) .& (bytes .< x90)) .| ((previous1 .== xF4) .& (bytes .>= x90))
+            // One unit per scalar, two for a four-byte one.
+            let blockUnits = Self.ones(.!continuation) &+ Self.ones(bytes .>= xF0)
+
+            if any(stops .| malformed) {
+                guard any(stops) else { return nil }
+                let stopLane = splat(16).replacing(with: Self.lanes, where: stops).min()
+                // The stop byte itself is checked too: a lead before it may still demand a continuation.
+                guard !any(malformed .& (Self.lanes .<= splat(stopLane))) else { return nil }
+                pendingUnits &+= blockUnits.replacing(with: 0, where: Self.lanes .>= splat(stopLane))
+                return (block + Int(stopLane), units + Int(pendingUnits.wrappedSum()))
+            }
+            pendingUnits &+= blockUnits
+            pendingBlocks += 1
+            if pendingBlocks == 7 {
+                units += Int(pendingUnits.wrappedSum())
+                pendingUnits = Bytes()
+                pendingBlocks = 0
+            }
+            block += 16
+        }
+        units += Int(pendingUnits.wrappedSum())
+        guard block > start else { return (start, 0) }
+        // The last scalar may continue past the final block: leave it to the per-scalar path.
+        var lead = block - 1
+        while text[lead] & 0xC0 == 0x80 { lead -= 1 }
+        units -= text[lead] >= 0xF0 ? 2 : 1
+        return (lead, units)
+    }
+
+    private typealias Bytes = SIMD16<UInt8>
+
+    private static let lanes = Bytes(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15)
+
+    @inline(__always)
+    private static func ones(_ mask: SIMDMask<SIMD16<Int8>>) -> Bytes {
+        Bytes(repeating: 0).replacing(with: 1, where: mask)
     }
 
     // MARK: - ASCII
@@ -179,6 +271,22 @@ struct LoweredTextMatcher: Sendable {
         let first = needle[0]
         var index = 0
         while index < text.count {
+            // Nothing pending: no unit before the next possible first unit can change the outcome.
+            if matched == 0 && pendingHit == nil {
+                guard let (end, units) = skipPlainText(in: text, from: index, stop: first, table: table) else {
+                    return .undecided
+                }
+                if end > index {
+                    position += units
+                    if text[end - 1] >= 128 {
+                        var lead = end - 1
+                        while text[lead] & 0xC0 == 0x80 { lead -= 1 }
+                        lastNonASCIIUnit = position - 1
+                        lastNonASCIIByte = lead
+                    }
+                    index = end
+                }
+            }
             let byte = text[index]
             if byte < 128 {
                 let unit = byte >= 65 && byte <= 90 ? byte | 0x20 : byte
@@ -340,6 +448,8 @@ private struct LowercaseTable: Sendable {
     /// By lead byte: scalars whose lowercase has an ASCII unit or another UTF-16 length (İ, Kelvin sign).
     private let specialByLeadByte: [[(source: [UInt8], lowercase: [UInt16])]]
     private let hasSpecialLead: [Bool]
+    /// The first two bytes of every special scalar, repeated across a vector; a skip stops there.
+    let specialPrefixes: [(lead: SIMD16<UInt8>, second: SIMD16<UInt8>)]
     /// A scalar's other spellings: every scalar whose whole lowercase it is (д ← Д).
     let sources: [UInt32: [Unicode.Scalar]]
     /// Scalars produced only as part of a longer lowercase (the "i" and dot of İ).
@@ -368,6 +478,11 @@ private struct LowercaseTable: Sendable {
         }
         specialByLeadByte = special
         hasSpecialLead = special.map { !$0.isEmpty }
+        var prefixes: [(lead: UInt8, second: UInt8)] = []
+        for entry in special.joined() where !prefixes.contains(where: { $0 == (entry.source[0], entry.source[1]) }) {
+            prefixes.append((entry.source[0], entry.source[1]))
+        }
+        specialPrefixes = prefixes.map { (SIMD16(repeating: $0.lead), SIMD16(repeating: $0.second)) }
         self.sources = sources
         self.partOfLongerLowercase = partOfLongerLowercase
     }
