@@ -242,7 +242,7 @@ final class HistoryItemInteractionSessionStore {
     private let capacity: Int
     private var retainedByItemID: [UUID: Entry] = [:]
     private var lastAppliedClearGeneration: UInt64 = 0
-    private var lastAppliedDeletionEvictionGeneration: UInt64 = 0
+    private var lastAppliedStamp: UInt64 = 0
 
     init(capacity: Int = 64) {
         self.capacity = max(1, capacity)
@@ -329,21 +329,21 @@ final class HistoryItemInteractionSessionStore {
     /// entries are unknown (for example capacity eviction), never an implicit delete.
     func reconcile(snapshot: HistoryContentRevisionReconciliationSnapshot) {
         let clearGenerationChanged = lastAppliedClearGeneration != snapshot.clearGeneration
-        let deletionEvictionGenerationChanged =
-            lastAppliedDeletionEvictionGeneration != snapshot.deletionEvictionGeneration
+        let previousStamp = lastAppliedStamp
         lastAppliedClearGeneration = snapshot.clearGeneration
-        lastAppliedDeletionEvictionGeneration = snapshot.deletionEvictionGeneration
+        lastAppliedStamp = snapshot.stamp
         guard !retainedByItemID.isEmpty else { return }
         var itemIDsToRelease: [UUID] = []
 
         for (itemID, entry) in retainedByItemID {
             let state = entry.state
-            let invalidatedByClear = clearGenerationChanged &&
-                snapshot.clearSurvivorSetIsAuthoritative &&
-                !snapshot.clearSurvivingItemIDs.contains(itemID)
-            let invalidatedByDeletionOverflow = !clearGenerationChanged &&
-                deletionEvictionGenerationChanged
-            if invalidatedByClear || invalidatedByDeletionOverflow || snapshot.wasDeleted(itemID) {
+            // A newer revision is adopted below instead of tearing the session down.
+            if snapshot.invalidates(
+                itemID: itemID,
+                currentRevision: nil,
+                clearGenerationChanged: clearGenerationChanged,
+                lastAppliedStamp: previousStamp
+            ) {
                 state.tearDown()
                 itemIDsToRelease.append(itemID)
                 continue

@@ -646,6 +646,66 @@ final class HistoryViewModelRegressionTests: XCTestCase {
         XCTAssertFalse(viewModel.isLoading)
     }
 
+    func testLoadFinishesWhenEveryReadOverlapsAnEventAndKeepsWhatTheEventsDid() async {
+        let original = makeItem(text: "original", age: 100)
+        let service = HistoryViewModelRegressionService(items: [original])
+        let viewModel = HistoryViewModel(
+            service: service,
+            settingsViewModel: SettingsViewModel(service: service)
+        )
+        var timing = HistoryViewModel.Timing.immediateRegressionTests
+        timing.staleLoadRetryDelayNs = 10_000_000
+        viewModel.configureTiming(timing)
+        defer { viewModel.stop() }
+
+        // Every read returns a snapshot taken before the event committed during it, as during
+        // ingest replay. The last read also misses a content change of a row it returns.
+        var inserted: [ClipboardItemDTO] = []
+        let editedOriginal = replacingText(of: original, with: "edited during the last read")
+        service.onHistoryPageRead = {
+            let item = self.makeItem(text: "inserted during read \(inserted.count)", age: 50 - inserted.count)
+            inserted.append(item)
+            service.items.insert(item, at: 0)
+            await viewModel.handleEvent(.newItem(item))
+            if service.historyPageFetchCallCount == HistoryViewModel.settledRecentReadAttempts {
+                if let index = service.items.firstIndex(where: { $0.id == original.id }) {
+                    service.items[index] = editedOriginal
+                }
+                await viewModel.handleEvent(.itemContentUpdated(editedOriginal))
+            }
+            await Task.yield()
+        }
+        let loaded = expectation(description: "load returned")
+        Task {
+            await viewModel.load()
+            loaded.fulfill()
+        }
+        await fulfillment(of: [loaded], timeout: 2.0)
+
+        XCTAssertEqual(service.historyPageFetchCallCount, HistoryViewModel.settledRecentReadAttempts)
+        XCTAssertEqual(viewModel.items.map(\.id), inserted.reversed().map(\.id) + [original.id])
+        XCTAssertEqual(viewModel.items.last?.plainText, editedOriginal.plainText)
+        XCTAssertFalse(viewModel.isLoading)
+    }
+
+    func testSearchPageWithARepeatedHitShowsTheRowOnce() async {
+        let repeated = makeItem(text: "needle repeated", age: 1)
+        let other = makeItem(text: "needle other", age: 2)
+        let service = HistoryViewModelRegressionService(items: [repeated, repeated, other])
+        service.includesMatchEvidence = true
+        let viewModel = HistoryViewModel(service: service, settingsViewModel: SettingsViewModel(service: service))
+        viewModel.configureTiming(.immediateRegressionTests)
+        defer { viewModel.stop() }
+        viewModel.searchMode = .exact
+        viewModel.searchQuery = "needle"
+        viewModel.search()
+        await waitForNextItemsRevision(in: viewModel)
+        await waitForSearchToFinish(in: viewModel)
+
+        XCTAssertEqual(viewModel.items.map(\.id), [repeated.id, other.id])
+        XCTAssertNotNil(viewModel.searchMatchContext(for: repeated.id))
+    }
+
     func testBulkRemovalDuringSearchAppliesTheEvidenceMapOnce() async {
         let results = (0..<40).map { makeItem(text: "needle \($0)", age: $0) }
         let service = HistoryViewModelRegressionService(items: results)
@@ -1157,6 +1217,22 @@ final class HistoryViewModelRegressionTests: XCTestCase {
         (0..<count).map { makeItem(text: "item \($0)", age: $0) }
     }
 
+    private func replacingText(of item: ClipboardItemDTO, with text: String) -> ClipboardItemDTO {
+        ClipboardItemDTO(
+            id: item.id,
+            type: item.type,
+            contentHash: UUID().uuidString,
+            plainText: text,
+            appBundleID: item.appBundleID,
+            createdAt: item.createdAt,
+            lastUsedAt: item.lastUsedAt,
+            isPinned: item.isPinned,
+            sizeBytes: text.utf8.count,
+            thumbnailPath: nil,
+            storageRef: nil
+        )
+    }
+
     private func makeItem(text: String, age: Int) -> ClipboardItemDTO {
         ClipboardItemDTO(
             id: UUID(),
@@ -1219,6 +1295,8 @@ private final class HistoryViewModelRegressionService: ClipboardServiceProtocol 
     var onDetailedStorageStatsStarted: (() -> Void)?
     var onInitialFetchStarted: (() -> Void)?
     var onPaginationFetchStarted: (() -> Void)?
+    /// Runs during every history page read, after its snapshot was taken.
+    var onHistoryPageRead: (() async -> Void)?
     private(set) var searchRequests: [SearchRequest] = []
     private(set) var historyPageFetchCallCount = 0
 
@@ -1263,6 +1341,7 @@ private final class HistoryViewModelRegressionService: ClipboardServiceProtocol 
                 onPaginationFetchStarted?()
             }
         }
+        await onHistoryPageRead?()
         return snapshot
     }
 
