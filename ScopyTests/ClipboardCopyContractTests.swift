@@ -14,21 +14,16 @@ final class ClipboardCopyContractTests: XCTestCase {
     private var storage: StorageService!
     private var pasteboard: NSPasteboard!
     private var settingsStore: SettingsStore!
-    private var settingsSuiteName: String?
     private var baseURL: URL!
     private var databasePath: String!
 
     override func setUp() async throws {
-        let suiteName = "scopy-copy-contract-\(UUID().uuidString)"
-        UserDefaults.standard.removePersistentDomain(forName: suiteName)
-        settingsSuiteName = suiteName
-        settingsStore = SettingsStore(suiteName: suiteName)
-
         pasteboard = NSPasteboard.withUniqueName()
 
         baseURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("scopy-copy-contract-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: baseURL, withIntermediateDirectories: true)
+        settingsStore = SettingsStore(suiteName: baseURL.appendingPathComponent("settings").path)
         databasePath = baseURL.appendingPathComponent("clipboard.db").path
     }
 
@@ -45,10 +40,6 @@ final class ClipboardCopyContractTests: XCTestCase {
         databasePath = nil
         pasteboard = nil
         settingsStore = nil
-        if let suiteName = settingsSuiteName {
-            UserDefaults.standard.removePersistentDomain(forName: suiteName)
-        }
-        settingsSuiteName = nil
     }
 
     // MARK: - Failure reporting

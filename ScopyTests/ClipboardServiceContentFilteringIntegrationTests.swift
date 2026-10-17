@@ -9,17 +9,14 @@ final class ClipboardServiceContentFilteringIntegrationTests: XCTestCase {
     private var tempDirectory: URL!
     private var pasteboard: NSPasteboard!
     private var settingsStore: SettingsStore!
-    private var settingsSuiteName: String!
 
     override func setUp() async throws {
-        settingsSuiteName = "scopy-content-filtering-integration-\(UUID().uuidString)"
-        UserDefaults.standard.removePersistentDomain(forName: settingsSuiteName)
-        settingsStore = SettingsStore(suiteName: settingsSuiteName)
         pasteboard = NSPasteboard.withUniqueName()
 
         tempDirectory = FileManager.default.temporaryDirectory
             .appendingPathComponent("scopy-content-filtering-integration-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: tempDirectory, withIntermediateDirectories: true)
+        settingsStore = SettingsStore(suiteName: tempDirectory.appendingPathComponent("settings").path)
     }
 
     override func tearDown() async throws {
@@ -27,13 +24,11 @@ final class ClipboardServiceContentFilteringIntegrationTests: XCTestCase {
             await service.stopAndWait()
         }
         try? FileManager.default.removeItem(at: tempDirectory)
-        UserDefaults.standard.removePersistentDomain(forName: settingsSuiteName)
 
         service = nil
         tempDirectory = nil
         pasteboard = nil
         settingsStore = nil
-        settingsSuiteName = nil
     }
 
     func testSaveImagesDisabledSkipsImageHistoryAndCleansPendingIngestArtifacts() async throws {

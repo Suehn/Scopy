@@ -73,7 +73,7 @@ final class SourceIconTests: XCTestCase {
         XCTAssertEqual(IconURLProtocol.state.paths.count, count)
     }
 
-    func testSiteIconSettingPreservesSaveCancelTransactionsAndPersistence() async {
+    func testSiteIconSettingPreservesSaveCancelTransactionsAndPersistence() async throws {
         let baseline = SettingsDTO.default
         XCTAssertTrue(baseline.siteIconsEnabled)
         var draft = baseline
@@ -82,12 +82,15 @@ final class SourceIconTests: XCTestCase {
         XCTAssertFalse(patch.isEmpty)
         XCTAssertTrue(baseline.siteIconsEnabled)
         XCTAssertFalse(baseline.applying(patch).siteIconsEnabled)
-        let suite = "Scopy.SourceIconTests." + UUID().uuidString
+        let settingsDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("scopy-source-icon-settings-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: settingsDirectory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: settingsDirectory) }
+        let suite = settingsDirectory.appendingPathComponent("settings").path
         let store = SettingsStore(suiteName: suite)
         await store.save(draft)
         let saved = await SettingsStore(suiteName: suite).load()
         XCTAssertFalse(saved.siteIconsEnabled)
-        UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite)
     }
 
     private func fetcher(address: String = "93.184.216.34") -> LinkEnrichmentFetcher {

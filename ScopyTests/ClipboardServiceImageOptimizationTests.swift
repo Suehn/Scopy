@@ -55,7 +55,6 @@ final class ClipboardServiceImageOptimizationTests: XCTestCase {
 
     private var service: ClipboardBackend?
     private var tempDirectory: URL?
-    private var settingsSuiteName: String?
 
     override func tearDown() async throws {
         if let service {
@@ -64,13 +63,9 @@ final class ClipboardServiceImageOptimizationTests: XCTestCase {
         if let tempDirectory {
             try? FileManager.default.removeItem(at: tempDirectory)
         }
-        if let settingsSuiteName {
-            UserDefaults.standard.removePersistentDomain(forName: settingsSuiteName)
-        }
 
         service = nil
         tempDirectory = nil
-        settingsSuiteName = nil
     }
 
     func testSuccessfulOptimizationProofMatchesPersistedAndEmittedHash() async throws {
@@ -808,10 +803,7 @@ final class ClipboardServiceImageOptimizationTests: XCTestCase {
             ofItemAtPath: binaryURL.path
         )
 
-        let suiteName = "scopy-optimize-proof-settings-\(UUID().uuidString)"
-        settingsSuiteName = suiteName
-        UserDefaults.standard.removePersistentDomain(forName: suiteName)
-        let settingsStore = SettingsStore(suiteName: suiteName)
+        let settingsStore = SettingsStore(suiteName: directory.appendingPathComponent("settings").path)
         var settings = SettingsDTO.default
         settings.pngquantBinaryPath = binaryURL.path
         await settingsStore.save(settings)

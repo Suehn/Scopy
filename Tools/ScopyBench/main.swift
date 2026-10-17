@@ -354,8 +354,11 @@ enum ScopyBench {
 
     @MainActor
     private static func runClipboardServiceBench(options: Options) async throws {
-        let suiteName = "ScopyBench.\(UUID().uuidString)"
-        let settingsStore = SettingsStore(suiteName: suiteName)
+        let settingsDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ScopyBench-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: settingsDirectory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: settingsDirectory) }
+        let settingsStore = SettingsStore(suiteName: settingsDirectory.appendingPathComponent("settings").path)
         var settings = SettingsDTO.default
         settings.showImageThumbnails = options.showThumbnails
         await settingsStore.save(settings)

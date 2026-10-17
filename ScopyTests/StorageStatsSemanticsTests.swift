@@ -6,11 +6,6 @@ import ScopyKit
 final class StorageStatsSemanticsTests: XCTestCase {
 
     func testStorageStatsAreContentEstimateWhileDetailedStatsIncludeDiskOverhead() async {
-        let suiteName = "scopy-stats-\(UUID().uuidString)"
-        UserDefaults.standard.removePersistentDomain(forName: suiteName)
-        defer { UserDefaults.standard.removePersistentDomain(forName: suiteName) }
-
-        let settingsStore = SettingsStore(suiteName: suiteName)
         let pasteboard = NSPasteboard.withUniqueName()
 
         let baseURL = FileManager.default.temporaryDirectory.appendingPathComponent("scopy-stats-\(UUID().uuidString)")
@@ -20,6 +15,7 @@ final class StorageStatsSemanticsTests: XCTestCase {
             XCTFail("Failed to create temp directory: \(error)")
             return
         }
+        let settingsStore = SettingsStore(suiteName: baseURL.appendingPathComponent("settings").path)
 
         let dbPath = baseURL.appendingPathComponent("clipboard.db").path
         let service = ClipboardServiceFactory.create(

@@ -272,6 +272,7 @@ The paths below identify flows to trace and contracts to verify. Edit only affec
 - Trace the affected setting through `SettingsDTO`, settings pages, `SettingsView`, and runtime application; include the hotkey path when it changes.
 - Preserve Save/Cancel and `settingsChanged` behavior.
 - Verify `/tmp/scopy_hotkey.log` behavior when the hotkey path changes.
+- Tests and ScopyBench isolate settings with `SettingsStore(suiteName: <tempDir>/settings)` and delete `<tempDir>` afterwards. Never use a unique plain suite name: cfprefsd keeps an empty `~/Library/Preferences/<name>.plist` even after `removePersistentDomain(forName:)`, and deleting that file races its asynchronous write.
 
 ### Preview Or Export Changes
 

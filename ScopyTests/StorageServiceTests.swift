@@ -112,7 +112,6 @@ final class StorageServiceTests: XCTestCase {
     private var raceStorages: [StorageService] = []
     private var raceStorageDirectories: [URL] = []
     private var clipboardServices: [ClipboardBackend] = []
-    private var settingsSuiteNames: [String] = []
 
     private final class RemoveFileProbe: @unchecked Sendable {
         private let lock = NSLock()
@@ -152,10 +151,6 @@ final class StorageServiceTests: XCTestCase {
             try? FileManager.default.removeItem(at: directory)
         }
         raceStorageDirectories.removeAll()
-        for suiteName in settingsSuiteNames {
-            UserDefaults.standard.removePersistentDomain(forName: suiteName)
-        }
-        settingsSuiteNames.removeAll()
     }
 
     // MARK: - Basic CRUD Tests
