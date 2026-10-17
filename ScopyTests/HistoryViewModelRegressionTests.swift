@@ -596,7 +596,8 @@ final class HistoryViewModelRegressionTests: XCTestCase {
 
         service.refineShouldFail = false
         viewModel.search()
-        await waitForSearchToFinish(in: viewModel)
+        // Loading ends with the staged page; the refine lands after it.
+        await waitUntil(timeout: 5) { viewModel.searchCoverage == .complete }
 
         XCTAssertEqual(viewModel.searchCoverage, .complete)
         XCTAssertTrue(service.searchRequests.last?.forceFullFuzzy == true)
