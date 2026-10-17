@@ -430,8 +430,7 @@ public final class ScrollPerformanceProfile {
         let warmRoundCount: Int
         let startNotificationName: String?
 
-        static func load() -> Config {
-            let env = ProcessInfo.processInfo.environment
+        static func load(from env: [String: String] = ProcessInfo.processInfo.environment) -> Config {
             let enabled = parseBool(env["SCOPY_SCROLL_PROFILE"]) ?? false
             let durationSeconds = parseDouble(env["SCOPY_PROFILE_DURATION_SEC"]) ?? 6.0
             let minSamples = max(30, parseInt(env["SCOPY_PROFILE_MIN_SAMPLES"]) ?? 180)
@@ -805,6 +804,13 @@ public final class ScrollPerformanceProfile {
     }
 
     public static let shared = ScrollPerformanceProfile()
+
+    #if DEBUG
+    /// A profiler configured from `environment` instead of the process environment.
+    static func makeForTesting(environment: [String: String]) -> ScrollPerformanceProfile {
+        ScrollPerformanceProfile(config: .load(from: environment))
+    }
+    #endif
     public nonisolated static let isEnabled: Bool = Config.load().enabled
     private nonisolated static let measurementEpoch = ScrollProfileMeasurementEpoch()
     private nonisolated static let queuedRecords =
@@ -853,6 +859,11 @@ public final class ScrollPerformanceProfile {
     private var latestSuppressedCandidateCount = 0
     private var isStartNotificationObserverInstalled = false
     private var didReceiveStartNotification = false
+    /// A configured start barrier keeps the measurement window closed until it is released, so the
+    /// report covers the driver's workload rather than the launch.
+    private var isHoldingForStartNotification: Bool {
+        config.startNotificationName != nil && !didReceiveStartNotification
+    }
     private var mainRunLoopObserver: CFRunLoopObserver?
     private var mainRunLoopActiveStart: TimeInterval?
 
@@ -872,8 +883,7 @@ public final class ScrollPerformanceProfile {
     private var fixedWorkloadPostMeasurementSettleCallbackCount = 0
     private var fixedWorkloadFinalizationState = "not_started"
 
-    private init() {
-        let config = Config.load()
+    private init(config: Config = .load()) {
         self.config = config
         self.expectedAnimationCallbackIntervalMs = config.expectedAnimationCallbackIntervalMs
         self.animationCallbackIntervalsMs = BoundedRingBuffer(capacity: config.maxSamples)
@@ -962,6 +972,7 @@ public final class ScrollPerformanceProfile {
     public func scrollDidStart() {
         guard config.enabled else { return }
         isScrolling = true
+        guard !isHoldingForStartNotification else { return }
         startMainRunLoopObserverIfNeeded()
         if startTimestamp == nil {
             startTimestamp = Date().timeIntervalSinceReferenceDate
@@ -979,7 +990,7 @@ public final class ScrollPerformanceProfile {
 
         let now = date.timeIntervalSinceReferenceDate
         if startTimestamp == nil {
-            guard !config.autoScrollEnabled else { return }
+            guard !config.autoScrollEnabled, !isHoldingForStartNotification else { return }
             startTimestamp = now
         }
 
@@ -1872,6 +1883,8 @@ public final class ScrollPerformanceProfile {
         resetMeasurementState()
         measurementGeneration = ingressTransition.snapshot.generation
         startTimestamp = timestamp
+        // Typing, hover and capture workloads never scroll; run-loop pressure covers the window.
+        startMainRunLoopObserverIfNeeded()
     }
 
     private func resetMeasurementState() {
@@ -1943,12 +1956,12 @@ public final class ScrollPerformanceProfile {
             activities,
             true,
             0,
-            { _, activity in
+            { [weak self] _, activity in
                 guard Thread.isMainThread else { return }
                 let rawActivity = activity.rawValue
                 let timestamp = Date().timeIntervalSinceReferenceDate
                 MainActor.assumeIsolated {
-                    ScrollPerformanceProfile.shared.handleMainRunLoopActivity(
+                    self?.handleMainRunLoopActivity(
                         rawActivity: rawActivity,
                         at: timestamp
                     )
